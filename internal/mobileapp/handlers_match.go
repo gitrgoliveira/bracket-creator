@@ -3670,16 +3670,15 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 		isCorrection := writesOverFinished(result.Status) &&
 			matchStatusFromStore(store, id, mid) == state.MatchStatusCompleted
 
-		// Only the cross-comp gate below keys on this pre-tx isCorrection; the
-		// eligibility/simultaneity gate (StartMatchTx) re-derives it from the
-		// race-free in-tx status (mp-gmcg review). The mtime-keyed stale read
-		// that motivated that move is benign HERE for a different reason: this
-		// gate only ever skips for a write whose result.Status is completed, and
-		// a COMPLETING write never leaves the court running-occupied — so a
-		// misclassified first finalization skips a cross-comp court check that
-		// its own effect would have made a no-op anyway. The lasting
-		// two-running-matches-on-one-court state the gate exists to prevent needs
-		// a write that STAYS running, which is never a correction.
+		// The pre-tx isCorrection is read by the cross-comp gate only (StartMatchTx
+		// re-derives it in the transaction, mp-gmcg review). The stale read is
+		// benign because a correction, or any write over a finished match
+		// (writesOverFinished: completed, running or scheduled writes over a
+		// finished match), takes no court, so a misclassified first finalization
+		// skips a court check its own effect would have made a no-op. Separately,
+		// bc-adna skips the gate for forceCourt and, inside
+		// CheckCrossCompCourtBusyOnStart, for any write that does not move the match
+		// into running or that goes to a match already stored running.
 
 		// FR-035: WithCourtExclusivityLock serializes the cross-competition
 		// court-busy check + per-competition write under a tournament-level

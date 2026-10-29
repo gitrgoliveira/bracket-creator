@@ -898,11 +898,13 @@ export function courtBusyRefusal(e) {
 }
 
 // courtBusyForceConfirm (bc-adna): confirm dialog options for forcing a start
-// on a busy court from admin views.
-export function courtBusyForceConfirm({ court, label }) {
+// on a busy court from admin views. `started` names the bout being started:
+// the dialog can open after the editor has closed (a queued start refused on
+// replay), so it must say which match it would start.
+export function courtBusyForceConfirm({ court, label }, started) {
     return {
         title: `Shiaijo ${court} is already running a bout`,
-        message: `${label} is running on Shiaijo ${court}. If you start this bout too, two bouts will be running on Shiaijo ${court} at once. The court's score table will show both, and both can still be scored; the court's TV board shows only one of them. To get back to one bout at a time, the court's operator sends one of them back to the queue.`,
+        message: `${label} is running on Shiaijo ${court}. If you start ${started} too, two bouts will be running on Shiaijo ${court} at once. The court's score table will show both, and both can still be scored; the court's TV board shows only one of them. To get back to one bout at a time, the court's operator sends one of them back to the queue.`,
         confirmLabel: 'Start anyway',
         cancelLabel: 'Cancel',
         danger: true,
@@ -1065,12 +1067,13 @@ export async function attemptScoreWrite({
     // confirm: only the first attempt for a given patch is offered it.
     // Any other refusal goes to the caller's onRefusal (true = claimed).
     const claimOther = (e) => typeof onRefusal === 'function' && onRefusal(e) === true;
-    const confirmThenForce = async (e, refusal) => {
-        const { message, confirmLabel, danger } = downstreamKnockoutPlayedConfirm(refusal);
+    const confirmAndForce = async (e, refusal, buildConfirm, flagName, cancelMarker, isCatch = false) => {
+        const dialogOpts = buildConfirm(refusal);
         let ok = false;
-        try { ok = await confirmDialog({ message, confirmLabel, danger }); } catch { ok = false; }
+        try { ok = await confirmDialog(dialogOpts); } catch { ok = false; }
         if (!ok) {
-            e.downstreamKnockoutPlayedCancelled = true;
+            e[cancelMarker] = true;
+            if (isCatch) throw e;
             claimOther(e);
             return;
         }
@@ -1078,12 +1081,22 @@ export async function attemptScoreWrite({
         try {
             forced = await attemptScoreWrite({
                 recordScore, confirmDialog, compId, matchId,
-                result: { ...result, forceDownstreamReopen: true },
+                result: { ...result, [flagName]: true },
                 password, match, onRefusal, onDownstreamReopened, onForced, allowCourtForce,
             });
         } catch (err) {
+            if (isCatch) throw err;
             claimOther(err);
             return;
+        }
+        if (isCatch) {
+            // The caller awaits this write, so it reads the forced answer itself.
+            // Absent field means the server reopened nothing, and nothing is claimed.
+            if (forced && typeof forced === 'object' && !writeDidNotLand(forced)
+                && forced.reopenedMatches && forced.reopenedMatches.length) {
+                forced.downstreamReopened = forced.reopenedMatches;
+            }
+            return forced;
         }
         // The forced write is the one the caller's write became: its answer is
         // the caller's to read (a reopen's own-status token, review 5).
@@ -1097,44 +1110,17 @@ export async function attemptScoreWrite({
             }, () => {});
         }
     };
-    // bc-adna: court_busy arm in the claim path
-    const confirmCourtThenForce = async (e, refusal) => {
-        const { title, message, confirmLabel, cancelLabel, danger } = courtBusyForceConfirm(refusal);
-        let ok = false;
-        try { ok = await confirmDialog({ title, message, confirmLabel, cancelLabel, danger }); } catch { ok = false; }
-        if (!ok) {
-            e.courtForceCancelled = true;
-            claimOther(e);
-            return;
-        }
-        let forced;
-        try {
-            forced = await attemptScoreWrite({
-                recordScore, confirmDialog, compId, matchId,
-                result: { ...result, forceCourt: true },
-                password, match, onRefusal, onDownstreamReopened, onForced, allowCourtForce,
-            });
-        } catch (err) {
-            claimOther(err);
-            return;
-        }
-        if (typeof onForced === 'function') onForced(forced);
-        if (writePending(forced)) {
-            forced.settled.then((body) => {
-                if (body && body.reopenedMatches && body.reopenedMatches.length
-                    && typeof onDownstreamReopened === 'function') onDownstreamReopened(body.reopenedMatches);
-            }, () => {});
-        }
-    };
+    const started = matchLabel(match) || matchLabel(matchId);
+    const buildCourtConfirm = (refusal) => courtBusyForceConfirm(refusal, started);
     const claim = (e) => {
         const refusal = downstreamKnockoutPlayedRefusal(e);
         if (refusal && !result.forceDownstreamReopen) {
-            confirmThenForce(e, refusal);
+            confirmAndForce(e, refusal, downstreamKnockoutPlayedConfirm, 'forceDownstreamReopen', 'downstreamKnockoutPlayedCancelled');
             return true;
         }
         const courtRefusal = allowCourtForce && !result.forceCourt ? courtBusyRefusal(e) : null;
         if (courtRefusal) {
-            confirmCourtThenForce(e, courtRefusal);
+            confirmAndForce(e, courtRefusal, buildCourtConfirm, 'forceCourt', 'courtForceCancelled');
             return true;
         }
         return claimOther(e);
@@ -1146,40 +1132,12 @@ export async function attemptScoreWrite({
         // its refusal: the same confirm, awaited, as before the outbox.
         const refusal = downstreamKnockoutPlayedRefusal(e);
         if (refusal && !result.forceDownstreamReopen) {
-            const { message, confirmLabel, danger } = downstreamKnockoutPlayedConfirm(refusal);
-            let ok = false;
-            try { ok = await confirmDialog({ message, confirmLabel, danger }); } catch { ok = false; }
-            if (ok) {
-                const applied = await attemptScoreWrite({
-                    recordScore, confirmDialog, compId, matchId,
-                    result: { ...result, forceDownstreamReopen: true },
-                    password, match, onRefusal, onDownstreamReopened, onForced, allowCourtForce,
-                });
-                // Absent field means the server reopened nothing, and nothing is claimed.
-                if (applied && typeof applied === 'object' && !writeDidNotLand(applied)
-                    && applied.reopenedMatches && applied.reopenedMatches.length) {
-                    applied.downstreamReopened = applied.reopenedMatches;
-                }
-                return applied;
-            }
-            e.downstreamKnockoutPlayedCancelled = true;
-            throw e;
+            return await confirmAndForce(e, refusal, downstreamKnockoutPlayedConfirm, 'forceDownstreamReopen', 'downstreamKnockoutPlayedCancelled', true);
         }
         // bc-adna: court_busy arm in the catch path
         const courtRefusal = allowCourtForce && !result.forceCourt ? courtBusyRefusal(e) : null;
         if (courtRefusal) {
-            const { title, message, confirmLabel, cancelLabel, danger } = courtBusyForceConfirm(courtRefusal);
-            let ok = false;
-            try { ok = await confirmDialog({ title, message, confirmLabel, cancelLabel, danger }); } catch { ok = false; }
-            if (ok) {
-                return await attemptScoreWrite({
-                    recordScore, confirmDialog, compId, matchId,
-                    result: { ...result, forceCourt: true },
-                    password, match, onRefusal, onDownstreamReopened, onForced, allowCourtForce,
-                });
-            }
-            e.courtForceCancelled = true;
-            throw e;
+            return await confirmAndForce(e, courtRefusal, buildCourtConfirm, 'forceCourt', 'courtForceCancelled', true);
         }
         throw e;
     }

@@ -1994,54 +1994,13 @@ function useMatchReopen({ match, password, isComplete, own, unsaved = false, onD
     }
   };
 
-  // The remedy: send the blocking match back to the queue and reopen this one,
-  // in ONE server call under one court lock (mp-gmcg review A4). The blocking
-  // match keeps its score in the queue (bc-sbq), and the panel says so before
-  // this can be tapped, because it takes that match off the court.
-  const requeueBlocker = async () => {
+  const runConflictAction = async (call, ownKind, question, forceCourt = false) => {
     const c = conflict;
     if (!c || busy || landed) return;
-    if (holdsUnsaved(unsaved) && await unsavedDeclined(QUEUE_AND_REOPEN_ANYWAY)) return;
+    if (holdsUnsaved(unsaved) && await unsavedDeclined(question)) return;
     setErr("");
     setBusy(true);
-    const token = own ? own.begin(OWN_REQUEUE) : 0;
-    const refused = (e) => {
-      if (own) own.answer(token, OWN_REFUSED);
-      if (!mountedRef.current) return false;
-      setLanded(false);
-      applyFailure(e, c.reason);
-      setBusy(false);
-      return true;
-    };
-    try {
-      const res = await run(
-        (pw, opts) => window.API.requeueBlockerAndReopen(match.compId, match.id, c.compId, c.matchId, pw,
-          { ...opts, match, blockerLabel: c.label }),
-        c.reason, c.force, refused, (f) => { if (own) own.settle(token, f, { rejections: false }); },
-      );
-      if (own) own.settle(token, res, { rejections: false });
-      if (!mountedRef.current) return;
-      setConflict(null);
-      finish(res);
-    } catch (e) {
-      if (own) own.answer(token, OWN_REFUSED);
-      if (!mountedRef.current) return;
-      // One atomic call, so one failure path: a DIFFERENT match that has since
-      // taken the court is offered the remedy again; anything else is shown.
-      applyFailure(e, c.reason);
-    } finally {
-      if (mountedRef.current) setBusy(false);
-    }
-  };
-
-  // bc-adna: reopen anyway with forceCourt when court is busy on admin hosts
-  const reopenAnyway = async () => {
-    const c = conflict;
-    if (!c || busy || landed) return;
-    if (holdsUnsaved(unsaved) && await unsavedDeclined(REOPEN_ANYWAY)) return;
-    setErr("");
-    setBusy(true);
-    const token = own ? own.begin(OWN_REOPEN) : 0;
+    const token = own ? own.begin(ownKind) : 0;
     const refused = (e) => {
       if (own) own.answer(token, OWN_REFUSED);
       if (!mountedRef.current) return false;
@@ -2053,12 +2012,12 @@ function useMatchReopen({ match, password, isComplete, own, unsaved = false, onD
     try {
       const forced = (f) => { if (own) own.settle(token, f, { rejections: false }); };
       const res = await run(
-        (pw, opts) => window.API.reopenMatch(match.compId, match.id, pw, opts),
+        (pw, opts) => call(pw, opts, c),
         c.reason,
         c.force,
         refused,
         forced,
-        true,
+        forceCourt,
       );
       if (own) own.settle(token, res, { rejections: false });
       if (!mountedRef.current) return;
@@ -2068,9 +2027,30 @@ function useMatchReopen({ match, password, isComplete, own, unsaved = false, onD
       if (own) own.answer(token, OWN_REFUSED);
       if (!mountedRef.current) return;
       applyFailure(e, c.reason);
-      setBusy(false);
+    } finally {
+      if (mountedRef.current) setBusy(false);
     }
   };
+
+  // The remedy: send the blocking match back to the queue and reopen this one,
+  // in ONE server call under one court lock (mp-gmcg review A4). The blocking
+  // match keeps its score in the queue (bc-sbq), and the panel says so before
+  // this can be tapped, because it takes that match off the court.
+  const requeueBlocker = async () => runConflictAction(
+    (pw, opts, c) => window.API.requeueBlockerAndReopen(match.compId, match.id, c.compId, c.matchId, pw,
+      { ...opts, match, blockerLabel: c.label }),
+    OWN_REQUEUE,
+    QUEUE_AND_REOPEN_ANYWAY,
+    false,
+  );
+
+  // bc-adna: reopen anyway with forceCourt when court is busy on admin hosts
+  const reopenAnyway = async () => runConflictAction(
+    (pw, opts) => window.API.reopenMatch(match.compId, match.id, pw, opts),
+    OWN_REOPEN,
+    REOPEN_ANYWAY,
+    true,
+  );
 
   useEffectA(() => {
     setBlockerLabel("");

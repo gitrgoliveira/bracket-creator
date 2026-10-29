@@ -1672,7 +1672,7 @@ func TestStartMatchTx_CourtExclusivity(t *testing.T) {
 
 		var engErr error
 		txErr := store.WithTransaction(compID, func(tx state.StoreTx) error {
-			engErr = eng.StartMatchTx(tx, compID, "P-1")
+			engErr = eng.StartMatchTx(tx, compID, "P-1", false)
 			return nil
 		})
 		require.NoError(t, txErr)
@@ -1708,7 +1708,7 @@ func TestStartMatchTx_CourtExclusivity(t *testing.T) {
 		// CheckCrossCompCourtBusy, tested below).
 		var engErr error
 		txErr := store.WithTransaction("comp2", func(tx state.StoreTx) error {
-			engErr = eng.StartMatchTx(tx, "comp2", "P-0")
+			engErr = eng.StartMatchTx(tx, "comp2", "P-0", false)
 			return nil
 		})
 		require.NoError(t, txErr)

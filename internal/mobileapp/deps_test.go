@@ -66,7 +66,7 @@ func (stubScoringEngine) RecordMatchResultWithIneligibilityTx(state.StoreTx, str
 	return nil, nil
 }
 
-func (stubScoringEngine) StartMatchTx(state.StoreTx, string, string, ...bool) error {
+func (stubScoringEngine) StartMatchTx(state.StoreTx, string, string, bool) error {
 	return nil
 }
 

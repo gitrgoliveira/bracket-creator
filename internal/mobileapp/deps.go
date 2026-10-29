@@ -118,7 +118,7 @@ type ScoringEngine interface {
 	// skipCourtGate (bc-adna) leaves the in-competition court check out
 	// when true (a write that does not move the match into running, or a
 	// forceCourt start), while the sides gate still runs.
-	StartMatchTx(tx state.StoreTx, compID, matchID string, skipCourtGate ...bool) error
+	StartMatchTx(tx state.StoreTx, compID, matchID string, skipCourtGate bool) error
 	// CheckStartAfterSendBack is the start check (bc-stpf, GET
 	// .../start-check): would starting matchID be refused for its status,
 	// court or competitors once the bout running on court is sent back? It

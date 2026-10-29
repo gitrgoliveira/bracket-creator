@@ -544,9 +544,9 @@ func (e *Engine) rollbackMatchResultTx(tx state.StoreTx, compID, matchID string,
 // skipCourtGate (bc-adna) leaves the court half out and runs the sides gate
 // alone: the score handler passes true for a write that does not move the
 // match into running (the court is judged only on a start) and for an
-// organiser's forceCourt start. Omitted, the court is judged as before.
-func (e *Engine) StartMatchTx(tx state.StoreTx, compID, matchID string, skipCourtGate ...bool) error {
-	if len(skipCourtGate) == 0 || !skipCourtGate[0] {
+// organiser's forceCourt start; false judges the court as normal.
+func (e *Engine) StartMatchTx(tx state.StoreTx, compID, matchID string, skipCourtGate bool) error {
+	if !skipCourtGate {
 		if err := e.checkCourtExclusivityTx(tx, compID, matchID); err != nil {
 			return err
 		}

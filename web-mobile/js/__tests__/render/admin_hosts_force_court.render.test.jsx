@@ -78,7 +78,7 @@ beforeEach(() => {
 });
 
 const COURT_BUSY_HEADING = 'Shiaijo B is already running a bout';
-const COURT_BUSY_BODY = 'Pool A · Match 3 is running on Shiaijo B. If you start this bout too, two bouts will be running on Shiaijo B at once. The court\'s score table will show both, and both can still be scored; the court\'s TV board shows only one of them. To get back to one bout at a time, the court\'s operator sends one of them back to the queue.';
+const COURT_BUSY_BODY = 'Pool A · Match 3 is running on Shiaijo B. If you start Pool 1 · Match 1 too, two bouts will be running on Shiaijo B at once. The court\'s score table will show both, and both can still be scored; the court\'s TV board shows only one of them. To get back to one bout at a time, the court\'s operator sends one of them back to the queue.';
 
 function courtBusyError(court = 'B', label = 'Pool A · Match 3') {
   return Object.assign(new Error(`Shiaijo ${court} is running ${label}. Finish it or send it back to the queue first.`), {
@@ -105,7 +105,7 @@ describe('attemptScoreWrite: the court_busy arm (bc-adna)', () => {
     const confirmDialog = vi.fn().mockResolvedValue(true);
     const res = await attemptScoreWrite({
       recordScore, confirmDialog, compId: 'c1', matchId: 'm1', result: startPatch,
-      password: 'pw', allowCourtForce: true,
+      password: 'pw', allowCourtForce: true, match: scheduledMatch({ label: 'Pool 1 · Match 1' }),
     });
     expect(confirmDialog).toHaveBeenCalledTimes(1);
     expect(confirmDialog.mock.calls[0][0]).toEqual({
@@ -171,11 +171,14 @@ describe('attemptScoreWrite: the court_busy arm (bc-adna)', () => {
     await attemptScoreWrite({
       recordScore, confirmDialog, compId: 'c1', matchId: 'm1', result: startPatch,
       password: 'pw', allowCourtForce: true, onRefusal, onForced,
+      match: scheduledMatch({ label: 'Pool 1 · Match 1' }),
     });
     const claimed = refuse(courtBusyError());
     await vi.waitFor(() => expect(onForced).toHaveBeenCalledWith(forcedAnswer));
     expect(claimed).toBe(true);
     expect(confirmDialog).toHaveBeenCalledTimes(1);
+    // The dialog can open after the editor has closed, so it names the bout it would start.
+    expect(confirmDialog.mock.calls[0][0].message).toContain('If you start Pool 1 · Match 1 too');
     expect(recordScore.mock.calls[1][2]).toEqual({ ...startPatch, forceCourt: true });
     expect(onRefusal).not.toHaveBeenCalled();
   });

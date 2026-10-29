@@ -76,7 +76,7 @@ func TestStartMatchTx_SkipCourtGate(t *testing.T) {
 
 		var judged, skipped error
 		require.NoError(t, store.WithTransaction(compID, func(tx state.StoreTx) error {
-			judged = eng.StartMatchTx(tx, compID, "P-1")
+			judged = eng.StartMatchTx(tx, compID, "P-1", false)
 			skipped = eng.StartMatchTx(tx, compID, "P-1", true)
 			return nil
 		}))

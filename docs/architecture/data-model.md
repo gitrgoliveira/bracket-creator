@@ -524,10 +524,9 @@ writes them. The bracket `ScoreA`/`ScoreB` strings are the same kind of channel:
 that rendered each side's scoreline as one string loads through a conversion into the
 ippon arrays, and every match record holds its score the same way.
 
-A bracket match may carry a
-stored, read-only "overridden" flag from a result an earlier release recorded by hand; nothing
-writes it any more, and it is kept so that such a bracket still loads and a later correction
-cannot silently repaint a winner that had no scoreline.
+A bracket match may carry a stored "overridden" flag, which marks a winner set by hand
+without a scoreline. It is read-only: nothing writes it. It is read so that such a bracket
+loads, and so that a later correction cannot silently repaint a winner that had no scoreline.
 
 ## 4. On disk layout
 

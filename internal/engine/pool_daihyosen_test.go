@@ -803,7 +803,6 @@ func TestMaybeAutoCompletePools_TeamDHCycleWithOverridesTransitions(t *testing.T
 		PoolRanks: map[string]map[string]int{
 			"Pool A": {rankKey(sortedNames[0]): 1, rankKey(sortedNames[1]): 2, rankKey(sortedNames[2]): 3},
 		},
-		Winners: map[string]string{},
 	}))
 
 	outcome, err = eng.MaybeAutoCompletePools("autocomplete-team-dh-cycle-override")

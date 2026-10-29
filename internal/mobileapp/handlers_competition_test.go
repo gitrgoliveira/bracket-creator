@@ -5776,7 +5776,6 @@ func TestDeleteOverridesHandler_CorruptOverrides_ForceRepairs(t *testing.T) {
 	repaired, err := store.LoadOverrides(compID)
 	require.NoError(t, err, "overrides.json must parse cleanly after the repair")
 	assert.Empty(t, repaired.PoolRanks)
-	assert.Empty(t, repaired.Winners)
 }
 
 // TestChusenCandidatesHandler_CorruptOverrides_TerminalError is bc-pnum gap 3:

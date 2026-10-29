@@ -1,4 +1,5 @@
 import { isBarredMatch } from './ineligible_match.jsx';
+import { compareDmy } from './admin_helpers.jsx';
 
 // The JS mirror of internal/state/court_queue.go, pinned by internal/state/testdata/court_queue.json;
 // change the rule there and here together, never at a call site.
@@ -180,7 +181,7 @@ export function orderOnCourt(competitions, court) {
         if (da !== db) {
             if (da === "") return -1;
             if (db === "") return 1;
-            return da < db ? -1 : 1;
+            return compareDmy(da, db);
         }
         return compareCourtQueue(a, b);
     });

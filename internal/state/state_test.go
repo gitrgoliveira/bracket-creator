@@ -973,7 +973,6 @@ func TestStore_ResetOverrides(t *testing.T) {
 
 	loaded, err = store.LoadOverrides(compID)
 	require.NoError(t, err)
-	assert.Empty(t, loaded.Winners)
 	assert.Empty(t, loaded.PoolRanks)
 }
 

@@ -142,7 +142,6 @@ func TestCalculatePoolStandings_Override_LegacyBareNameKeyIsUnresolvable(t *test
 		PoolRanks: map[string]map[string]int{
 			"Pool A": {"Alice": 1},
 		},
-		Winners: map[string]string{},
 	}))
 
 	standings, err := eng.CalculatePoolStandings(compID)

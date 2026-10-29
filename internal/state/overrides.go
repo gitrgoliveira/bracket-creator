@@ -33,7 +33,6 @@ var ErrCorruptOverrides = errors.New("overrides.json is corrupt")
 // always writes the current identity-keyed form.
 type Overrides struct {
 	PoolRanks map[string]map[string]int `json:"poolRanks"`
-	Winners   map[string]string         `json:"winners"` // MatchID -> WinnerName
 }
 
 func (s *Store) LoadOverrides(compID string) (*Overrides, error) {
@@ -56,7 +55,6 @@ func (s *Store) loadOverridesLocked(compID string) (*Overrides, error) {
 		if os.IsNotExist(err) {
 			return &Overrides{
 				PoolRanks: make(map[string]map[string]int),
-				Winners:   make(map[string]string),
 			}, nil
 		}
 		return nil, err
@@ -74,9 +72,6 @@ func (s *Store) loadOverridesLocked(compID string) (*Overrides, error) {
 	if o.PoolRanks == nil {
 		o.PoolRanks = make(map[string]map[string]int)
 	}
-	if o.Winners == nil {
-		o.Winners = make(map[string]string)
-	}
 	return &o, nil
 }
 
@@ -87,8 +82,7 @@ func (s *Store) loadOverridesLocked(compID string) (*Overrides, error) {
 // DeleteCompetition rebuilt competitions/<id>/ around a lone overrides.json.
 // That orphan outlives the delete: ListCompetitions returns every directory
 // under competitions/, and because IDs are deterministic name slugs, a
-// competition recreated under the same name adopts the dead one's rank and
-// winner overrides.
+// competition recreated under the same name adopts the dead one's rank overrides.
 //
 // Locking cannot fix this, which is why the fix is here instead. The save does
 // not have to interleave with the delete to resurrect the directory, it only
@@ -217,7 +211,6 @@ func (s *Store) RestoreRankOverrides(compID, poolID string, prior map[string]Pri
 func (s *Store) ResetOverridesChanged(compID string) (bool, error) {
 	return s.modifyOverridesChanged(compID, func(o *Overrides) {
 		o.PoolRanks = make(map[string]map[string]int)
-		o.Winners = make(map[string]string)
 	})
 }
 
@@ -242,6 +235,5 @@ func (s *Store) ResetOverrides(compID string) error {
 func (s *Store) ResetOverridesForce(compID string) error {
 	return s.SaveOverrides(compID, &Overrides{
 		PoolRanks: make(map[string]map[string]int),
-		Winners:   make(map[string]string),
 	})
 }

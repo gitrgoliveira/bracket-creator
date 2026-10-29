@@ -8,6 +8,7 @@ import {
     courtQueueEntriesOf,
     withCourtQueuePositions,
     sharesCourtDay,
+    orderOnCourt,
 } from '../court_queue.jsx';
 
 describe('court queue: golden table parity with internal/state/court_queue.go', () => {
@@ -190,5 +191,73 @@ describe('court queue: golden table parity with internal/state/court_queue.go', 
             expect(sharesCourtDay(compBlank, '   ', 'A')).toBe(true);
             expect(sharesCourtDay(compBlank, '2026-11-01', 'A')).toBe(false);
         });
+    });
+});
+
+describe('orderOnCourt day order', () => {
+    it('orders 31-05-2026 before 01-06-2026 rather than lexical order', () => {
+        const compMay = {
+            id: 'comp-may',
+            date: '31-05-2026',
+            poolMatches: [
+                { id: 'm-may', court: 'A', status: 'scheduled' },
+            ],
+        };
+        const compJune = {
+            id: 'comp-june',
+            date: '01-06-2026',
+            poolMatches: [
+                { id: 'm-june', court: 'A', status: 'scheduled' },
+            ],
+        };
+
+        const entries = orderOnCourt([compJune, compMay], 'A');
+        expect(entries).toHaveLength(2);
+        expect(entries[0].matchId).toBe('m-may');
+        expect(entries[1].matchId).toBe('m-june');
+    });
+
+    it('orders across a year boundary: 31-12-2026 before 01-01-2027', () => {
+        const comp2026 = {
+            id: 'comp-2026',
+            date: '31-12-2026',
+            poolMatches: [
+                { id: 'm-2026', court: 'A', status: 'scheduled' },
+            ],
+        };
+        const comp2027 = {
+            id: 'comp-2027',
+            date: '01-01-2027',
+            poolMatches: [
+                { id: 'm-2027', court: 'A', status: 'scheduled' },
+            ],
+        };
+
+        const entries = orderOnCourt([comp2027, comp2026], 'A');
+        expect(entries).toHaveLength(2);
+        expect(entries[0].matchId).toBe('m-2026');
+        expect(entries[1].matchId).toBe('m-2027');
+    });
+
+    it('sorts an empty-date competition still first', () => {
+        const compEmpty = {
+            id: 'comp-empty',
+            date: '',
+            poolMatches: [
+                { id: 'm-empty', court: 'A', status: 'scheduled' },
+            ],
+        };
+        const compDated = {
+            id: 'comp-dated',
+            date: '31-05-2026',
+            poolMatches: [
+                { id: 'm-dated', court: 'A', status: 'scheduled' },
+            ],
+        };
+
+        const entries = orderOnCourt([compDated, compEmpty], 'A');
+        expect(entries).toHaveLength(2);
+        expect(entries[0].matchId).toBe('m-empty');
+        expect(entries[1].matchId).toBe('m-dated');
     });
 });

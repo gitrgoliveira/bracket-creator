@@ -32,7 +32,6 @@ func TestOverrides(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, overrides)
 	assert.Empty(t, overrides.PoolRanks)
-	assert.Empty(t, overrides.Winners)
 
 	// 2. Save rank override, keyed by participant id (bc-pnum: playerID is
 	// the only identity SaveRankOverridesChanged accepts); the key is
@@ -57,7 +56,6 @@ func TestOverrides(t *testing.T) {
 	overrides, err = store.LoadOverrides(compID)
 	require.NoError(t, err)
 	assert.Empty(t, overrides.PoolRanks)
-	assert.Empty(t, overrides.Winners)
 }
 
 // RestoreRankOverrides is the undo of a refused override group: it puts back
@@ -149,7 +147,6 @@ func TestSaveOverrides_InvalidDir(t *testing.T) {
 
 	o := &Overrides{
 		PoolRanks: make(map[string]map[string]int),
-		Winners:   make(map[string]string),
 	}
 
 	err = store.SaveOverrides(compID, o)
@@ -220,13 +217,11 @@ func TestResetOverridesForce_RepairsCorruptFile(t *testing.T) {
 	o, err := store.LoadOverrides(compID)
 	require.NoError(t, err, "the file must be readable again after the repair")
 	assert.Empty(t, o.PoolRanks)
-	assert.Empty(t, o.Winners)
 }
 
 // TestLoadOverridesLocked_NilFieldInit verifies that loading a valid but empty
-// JSON object ("{}") initialises PoolRanks and Winners to non-nil empty maps
-// instead of leaving them nil. This exercises the nil-init guard on lines
-// 43-48 of overrides.go.
+// JSON object ("{}") initialises PoolRanks to a non-nil empty map
+// instead of leaving it nil. This exercises the nil-init guard in overrides.go.
 func TestLoadOverridesLocked_NilFieldInit(t *testing.T) {
 	dir, err := os.MkdirTemp("", "overrides-nilinit-*")
 	require.NoError(t, err)
@@ -238,16 +233,14 @@ func TestLoadOverridesLocked_NilFieldInit(t *testing.T) {
 	compID := "nil-init-comp"
 	compDir := filepath.Join(dir, "competitions", compID)
 	require.NoError(t, os.MkdirAll(compDir, 0700))
-	// Write an empty JSON object; Unmarshal leaves both map fields nil.
+	// Write an empty JSON object; Unmarshal leaves the map field nil.
 	require.NoError(t, os.WriteFile(filepath.Join(compDir, "overrides.json"), []byte("{}"), 0600))
 
 	o, err := store.LoadOverrides(compID)
 	require.NoError(t, err)
 	require.NotNil(t, o)
 	assert.NotNil(t, o.PoolRanks, "PoolRanks must be non-nil after loading {}")
-	assert.NotNil(t, o.Winners, "Winners must be non-nil after loading {}")
 	assert.Empty(t, o.PoolRanks)
-	assert.Empty(t, o.Winners)
 }
 
 // TestModifyOverridesChanged_NoChange verifies bytes.Equal early-exit branch:

@@ -93,6 +93,9 @@ const compOfEyebrow = (eyebrow) => {
 // schedule page (/admin/schedule): both title it "SHIAIJO <court>".
 const scheduleColumn = (page, court) => page.locator('.tw-court')
   .filter({ has: page.locator('.tw-court__title', { hasText: new RegExp(`^SHIAIJO ${court}$`) }) });
+// A printed HH:MM clock time, and its minutes since midnight.
+const clock = (t) => /^\d\d:\d\d$/.test(t);
+const minutes = (t) => Number(t.slice(0, 2)) * 60 + Number(t.slice(3));
 // The labels the editors' autosave pill takes (admin_scoring_autosave.jsx).
 const SYNC_PILL = /^(Synced|Syncing…|Offline|Not saving)$/;
 
@@ -191,7 +194,6 @@ test.describe('shared-shiaijo', () => {
   // choice says that competitions on one shiaijo run one after another (read on
   // the wizard itself: the seeding fixture's hint read predates that wording).
   test('bc-seqc: a competition sharing a shiaijo with an earlier one is scheduled after it by default', async () => {
-    const clock = (t) => /^\d\d:\d\d$/.test(t);
     const siOnA = [
       ...(await readScoresTab(H, ids.SI)).filter((m) => m.court === 'A').map((m) => m.time),
       ...(await bracketSlots(H, ids.SI)).filter((m) => m.court === 'A').map((m) => m.time),
@@ -203,7 +205,6 @@ test.describe('shared-shiaijo', () => {
     expect(stOnA.length).toBeGreaterThan(0);
     // After SI's last match there ENDS, not merely starts: its slot is as long as
     // the gap SI's own slots keep (an SI match of a single slot has no gap to read).
-    const minutes = (t) => Number(t.slice(0, 2)) * 60 + Number(t.slice(3));
     const siStarts = [...new Set(siOnA.map(minutes))];
     const slot = Math.min(...siStarts.slice(1).map((m, i) => m - siStarts[i]).filter((g) => g > 0), Infinity);
     const siEnds = siStarts[siStarts.length - 1] + (Number.isFinite(slot) ? slot : 1);
@@ -332,7 +333,7 @@ test.describe('shared-shiaijo', () => {
     const onA = [
       ...draw.si.map((m) => ({ comp: SI, ...m })),
       ...draw.st.map((m) => ({ comp: ST, ...m })),
-    ].filter((m) => m.court === 'A' && m.status === 'scheduled' && known(m.shiro) && known(m.aka) && /^\d\d:\d\d$/.test(m.time));
+    ].filter((m) => m.court === 'A' && m.status === 'scheduled' && known(m.shiro) && known(m.aka) && clock(m.time));
     const order = onA.map((m, i) => ({ m, i })).sort((a, b) => a.m.time.localeCompare(b.m.time)
       || startOf(a.m.comp).localeCompare(startOf(b.m.comp)) || a.i - b.i).map((x) => x.m);
     expect(order.length, 'waiting bouts on Shiaijo A').toBeGreaterThan(1);
@@ -826,16 +827,16 @@ test.describe('shared-shiaijo', () => {
   // semi-final waiting there); it only reads, and leaves the console on ST.
   test('bc-pace: court A\'s next match shows a time projected from the court\'s pace, the plan unchanged', async () => {
     const planned = (draw.st.find((m) => same(pairOf(m), bouts.sf2)) || {}).time;
-    expect(planned, `${ST}'s second semi-final has a planned time`).toMatch(/^\d\d:\d\d$/);
+    expect(clock(planned), `${ST}'s second semi-final has a planned time (${planned})`).toBe(true);
     const stored = ((await readScoresTab(H, ids.ST)).find((m) => same(pairOf(m), bouts.sf2)) || {}).time;
     expect(stored, 'the Scores tab still shows the plan').toBe(planned);
-    const minutes = (t) => Number(t.slice(0, 2)) * 60 + Number(t.slice(3));
     // A PaceTime span (court_pace.jsx): "~HH:MM" shown, "about HH:MM" spoken.
     // Returns the projected HH:MM once it is drawn, at least 5 minutes off the plan.
     const projected = async (where, label) => {
       const pace = where.locator('.pace-projected').first();
-      await expect(pace.locator(':scope > span[aria-hidden="true"]'), `${label}: the projected time`).toHaveText(/^~\d\d:\d\d$/);
-      const hhmm = (await pace.locator(':scope > span[aria-hidden="true"]').innerText()).trim().slice(1);
+      const shown = pace.locator(':scope > span[aria-hidden="true"]');
+      await expect(shown, `${label}: the projected time`).toHaveText(/^~\d\d:\d\d$/);
+      const hhmm = (await shown.innerText()).trim().slice(1);
       await expect(pace.locator(':scope > .sr-only'), `${label}: the spoken time`).toHaveText(`about ${hhmm}`);
       expect(Math.abs(minutes(hhmm) - minutes(planned)), `${label}: ~${hhmm} is 5 minutes or more off the plan (${planned})`).toBeGreaterThanOrEqual(5);
       await expect(where, `${label}: the plan is not shown beside the projection`).not.toContainText(planned);

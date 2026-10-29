@@ -548,6 +548,30 @@ describe('sortShiaijoMatches', () => {
     const out = sortShiaijoMatches([runningLate, schedEarly]);
     expect(out.map((x) => x.id)).toEqual(['schedEarly', 'runLate']);
   });
+
+  it('orders completed rows by scheduled time', () => {
+    const out = sortShiaijoMatches([
+      m('completed', '10:00', 'late'),
+      m('completed', '09:00', 'early'),
+      m('completed', '09:30', 'mid'),
+    ]);
+    expect(out.map((x) => x.id)).toEqual(['early', 'mid', 'late']);
+  });
+
+  it('orders completed rows by date before scheduled time', () => {
+    const june = { id: 'june', status: 'completed', scheduledAt: '10:00', date: '01-06-2026' };
+    const may = { id: 'may', status: 'completed', scheduledAt: '15:00', date: '31-05-2026' };
+    const out = sortShiaijoMatches([june, may]);
+    expect(out.map((x) => x.id)).toEqual(['may', 'june']);
+  });
+
+  it('sorts untimed completed rows last', () => {
+    const out = sortShiaijoMatches([
+      m('completed', null, 'untimed'),
+      m('completed', '09:00', 'timed'),
+    ]);
+    expect(out.map((x) => x.id)).toEqual(['timed', 'untimed']);
+  });
 });
 
 describe('partitionShiaijoMatches', () => {

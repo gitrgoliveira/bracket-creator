@@ -84,11 +84,11 @@ const Icon = window.Icon;
 const QUEUE_OPEN_KEY = "bc_shiaijo_queue_open";
 const hasBothSides = window.hasBothSides;
 
-// Pure ordering/partition helpers (exported for unit tests). Running and
-// scheduled bouts sort by compareCourtDayQueue (running first is rule 1).
+// Pure ordering/partition helpers (exported for unit tests). Every group is
+// ordered by the court-day queue comparator, queue rows first, then
+// completed, then any other status.
 export function sortShiaijoMatches(matches) {
-    const isQueue = (s) => s === "running" || s === "scheduled";
-    const isCompleted = (s) => s === "completed";
+    const groupRank = (s) => (s === "running" || s === "scheduled" ? 0 : s === "completed" ? 1 : 2);
 
     const toEntry = (m) => ({
         competitionId: m.competitionId || m.compId || "",
@@ -100,20 +100,10 @@ export function sortShiaijoMatches(matches) {
     });
 
     return [...matches].sort((a, b) => {
-        const aq = isQueue(a.status);
-        const bq = isQueue(b.status);
-        if (aq && bq) {
-            return compareCourtDayQueue(toEntry(a), toEntry(b));
-        }
-        if (aq !== bq) {
-            return aq ? -1 : 1;
-        }
-        const ac = isCompleted(a.status);
-        const bc = isCompleted(b.status);
-        if (ac !== bc) {
-            return ac ? -1 : 1;
-        }
-        return 0;
+        const ra = groupRank(a.status);
+        const rb = groupRank(b.status);
+        if (ra !== rb) return ra - rb;
+        return compareCourtDayQueue(toEntry(a), toEntry(b));
     });
 }
 

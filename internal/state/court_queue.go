@@ -1,6 +1,7 @@
 package state
 
 import (
+	"math"
 	"sort"
 	"strings"
 )
@@ -16,8 +17,9 @@ import (
 //    ordered by the same keys as rule 2.
 // 2. Then every waiting (status scheduled) match, ordered by scheduledAt (HH:MM string;
 //    a match without a time sorts after the timed ones via QueueSortTime); equal times
-//    by the competition's start time (Competition.StartTime, HH:MM, blank sorts last via
-//    QueueSortTime), then competition id (string compare), then draw index (int).
+//    by the competition's start time parsed as minutes since midnight (Competition.StartTime,
+//    blank or unparseable sorts last via QueueStartRank), then competition id (string compare),
+//    then draw index (int).
 // 3. Completed matches are not in the queue.
 // 4. A waiting match with a barred side (IneligibleSides != nil, stamped at request time
 //    by mobileapp.annotateEligibility before the queue runs) stays in the ordered queue
@@ -27,7 +29,9 @@ import (
 // 6. Courts are keyed by (competition date, court): competitions on different
 //    Competition.Date values never share a queue, even with the same court letter (a
 //    multi-day tournament reuses letters). Dates are compared after strings.TrimSpace;
-//    two blank dates are the same day. The court string is used as stored.
+//    two blank dates are the same day. A queue must still order every match, so undated
+//    matches share one queue, whereas the floor and clash warning need a real day to compare.
+//    The court string is used as stored.
 
 // CourtQueueEntry is one match as the court queue reads it.
 type CourtQueueEntry struct {
@@ -44,6 +48,15 @@ type CourtQueueEntry struct {
 
 // CourtKey names one court queue.
 type CourtKey struct{ Date, Court string }
+
+// QueueStartRank returns the competition start time as minutes since midnight,
+// or math.MaxInt when blank or unparseable so untimed competitions sort last.
+func QueueStartRank(startTime string) int {
+	if mins, ok := ParseClockMinutes(startTime); ok {
+		return mins
+	}
+	return math.MaxInt
+}
 
 // CourtQueues returns each court's queue as indexes into entries, in queue order
 // (running first, then waiting; completed left out; barred kept in place).
@@ -71,7 +84,7 @@ func CourtQueues(entries []CourtQueueEntry) map[CourtKey][]int {
 			if ti != tj {
 				return ti < tj
 			}
-			ci, cj := QueueSortTime(ei.CompetitionStartTime), QueueSortTime(ej.CompetitionStartTime)
+			ci, cj := QueueStartRank(ei.CompetitionStartTime), QueueStartRank(ej.CompetitionStartTime)
 			if ci != cj {
 				return ci < cj
 			}

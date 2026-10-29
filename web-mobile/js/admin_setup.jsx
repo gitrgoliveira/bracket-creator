@@ -44,14 +44,19 @@ function deriveCompetitionName(rawName, kind) {
 // findStackCandidates returns all same-day competitions that share at least
 // one shiaijo (court) with selectedCourts (or all same-day competitions if
 // selectedCourts is omitted/null) and have a parseable startTime.
+// Following SameDate, a blank form date returns no candidates (a competition
+// not placed on a day stacks with nothing); otherwise dates are compared trimmed.
 // A competition whose `courts` is missing or empty uses every tournament court
 // (safeCourts / tournamentCourts).
 function findStackCandidates(competitions, date, selectedCourts, tournamentCourts) {
+  const trimmedDate = (date || "").trim();
+  if (!trimmedDate) return [];
   const normTournCourts = (Array.isArray(tournamentCourts) && tournamentCourts.length > 0)
     ? tournamentCourts
     : (typeof window !== "undefined" && window.normalizeCourts ? window.normalizeCourts(tournamentCourts) : ["A"]);
   return (competitions || []).filter((cc) => {
-    if (cc.date !== date || timeToMinutes(cc.startTime) === null) return false;
+    const compDate = (cc.date || "").trim();
+    if (compDate !== trimmedDate || timeToMinutes(cc.startTime) === null) return false;
     if (!selectedCourts) return true;
     const compCourts = (Array.isArray(cc.courts) && cc.courts.length > 0) ? cc.courts : normTournCourts;
     return compCourts.some((c) => selectedCourts.includes(c));

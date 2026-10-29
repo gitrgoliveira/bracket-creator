@@ -1316,7 +1316,7 @@ func (e *Engine) runDrawPipeline(id string) error {
 		// source competition at draw time, mirroring the Excel Tree sheet.
 		// League has no knockout stage, so skip it there.
 		if comp.Format == state.CompFormatMixed {
-			if err := e.generatePoolPreviewBracket(comp, poolMatches); err != nil {
+			if err := e.generatePoolPreviewBracket(comp, poolMatches, true); err != nil {
 				return err
 			}
 		}

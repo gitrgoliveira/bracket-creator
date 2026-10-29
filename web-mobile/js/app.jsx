@@ -1269,6 +1269,12 @@ function App() {
             if (viewerCompId === event.data?.competitionId) {
                 setSelectedCompData(prev => patchCompetitionData(prev, event));
                 jitteredTimeout(() => window.API.fetchCompetitionDetails(viewerCompId).then(takeCompDetail).catch(err => console.error('SSE refresh failed:', err)), detailJitter);
+            } else if (viewerCompId && event.data?.competitionId !== viewerCompId) {
+                const otherComp = (compsRef.current || []).find(c => c.id === event.data?.competitionId);
+                const otherDate = otherComp?.date || "";
+                if (sharesDay(selectedCompDataRef.current, otherDate)) {
+                    jitteredTimeout(() => window.API.fetchCompetitionDetails(viewerCompId).then(takeCompDetail).catch(err => console.error('SSE refresh failed:', err)), detailJitter);
+                }
             }
             // competitor_status_updated is a list-level event (eligibility
             // badges on the lobby): always refresh the full list.

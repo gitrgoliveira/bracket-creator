@@ -2556,6 +2556,51 @@ func TestStampCourtQueuePositions_ThirdPlaceMatch(t *testing.T) {
 	assert.Equal(t, 0, b.Rounds[0][1].QueuePosition, "completed sf2 must have position 0")
 }
 
+// TestLoadCourtQueueEntries_FiltersSameDayOtherCompetitions verifies that
+// loadCourtQueueEntries loads entries only from other non-setup competitions
+// sharing the served competition's date, skipping the served competition itself
+// and competitions on other days.
+func TestLoadCourtQueueEntries_FiltersSameDayOtherCompetitions(t *testing.T) {
+	root := t.TempDir()
+	store, err := state.NewStore(root)
+	require.NoError(t, err)
+
+	served := &state.Competition{
+		ID:     "c-served",
+		Status: state.CompStatusPools,
+		Date:   "2026-11-01",
+	}
+	require.NoError(t, store.SaveCompetition(served))
+	require.NoError(t, store.SavePoolMatches("c-served", []state.MatchResult{
+		{ID: "m-served-1", Court: "A", Status: state.MatchStatusScheduled},
+	}))
+
+	sameDay := &state.Competition{
+		ID:     "c-sameday",
+		Status: state.CompStatusPools,
+		Date:   " 2026-11-01 ",
+	}
+	require.NoError(t, store.SaveCompetition(sameDay))
+	require.NoError(t, store.SavePoolMatches("c-sameday", []state.MatchResult{
+		{ID: "m-sameday-1", Court: "A", Status: state.MatchStatusScheduled},
+	}))
+
+	otherDay := &state.Competition{
+		ID:     "c-otherday",
+		Status: state.CompStatusPools,
+		Date:   "2026-11-02",
+	}
+	require.NoError(t, store.SaveCompetition(otherDay))
+	require.NoError(t, store.SavePoolMatches("c-otherday", []state.MatchResult{
+		{ID: "m-otherday-1", Court: "A", Status: state.MatchStatusScheduled},
+	}))
+
+	entries := loadCourtQueueEntries(store, served)
+	require.Len(t, entries, 1)
+	assert.Equal(t, "c-sameday", entries[0].CompetitionID)
+	assert.Equal(t, "m-sameday-1", entries[0].MatchID)
+}
+
 // setupSelfRunScoreRouter creates a minimal gin router with just the score
 // endpoint, wired to a fresh store that has a self-run tournament and one
 // pool match pre-seeded.

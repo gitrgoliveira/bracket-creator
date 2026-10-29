@@ -492,6 +492,47 @@
         "b/m1": 1,
         "a/m1": 2
       }
+    },
+    {
+      "name": "un-padded start time 9:00 sorts before 10:00 on equal scheduledAt",
+      "entries": [
+        {
+          "competitionId": "a",
+          "competitionStartTime": "9:00",
+          "date": "2026-11-01",
+          "court": "A",
+          "matchId": "m1",
+          "status": "scheduled",
+          "scheduledAt": "10:00",
+          "drawIndex": 0,
+          "barred": false
+        },
+        {
+          "competitionId": "b",
+          "competitionStartTime": "10:00",
+          "date": "2026-11-01",
+          "court": "A",
+          "matchId": "m1",
+          "status": "scheduled",
+          "scheduledAt": "10:00",
+          "drawIndex": 0,
+          "barred": false
+        }
+      ],
+      "queues": [
+        {
+          "date": "2026-11-01",
+          "court": "A",
+          "order": [
+            "a/m1",
+            "b/m1"
+          ]
+        }
+      ],
+      "positions": {
+        "a/m1": 1,
+        "b/m1": 2
+      }
     }
   ]
 }

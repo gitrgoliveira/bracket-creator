@@ -3,9 +3,22 @@ import { compareDmy } from './date_order.jsx';
 
 // The JS mirror of internal/state/court_queue.go, pinned by internal/state/testdata/court_queue.json;
 // change the rule there and here together, never at a call site.
+// Compares running first, then scheduledAt, then competitionStartTime as minutes
+// since midnight (queueStartRank, blank/unparseable sorts last via Infinity), then
+// competitionId, then drawIndex.
 
 export function queueSortTime(s) {
     return s ? s : "99:99";
+}
+
+export function queueStartRank(s) {
+    if (!s) return Infinity;
+    const m = String(s).match(/^\s*(\d{1,2})\s*:\s*(\d{1,2})\s*$/);
+    if (!m) return Infinity;
+    const h = parseInt(m[1], 10);
+    const min = parseInt(m[2], 10);
+    if (h < 0 || h > 23 || min < 0 || min > 59) return Infinity;
+    return h * 60 + min;
 }
 
 export function compareCourtQueue(a, b) {
@@ -17,8 +30,8 @@ export function compareCourtQueue(a, b) {
     const tb = queueSortTime(b.scheduledAt);
     if (ta !== tb) return ta < tb ? -1 : 1;
 
-    const ca = queueSortTime(a.competitionStartTime);
-    const cb = queueSortTime(b.competitionStartTime);
+    const ca = queueStartRank(a.competitionStartTime);
+    const cb = queueStartRank(b.competitionStartTime);
     if (ca !== cb) return ca < cb ? -1 : 1;
 
     if (a.competitionId !== b.competitionId) {

@@ -1,6 +1,10 @@
 package state
 
 import (
+	"bytes"
+	"log"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -235,4 +239,44 @@ func TestStore_CourtFloor_Rules(t *testing.T) {
 		require.NoError(t, err)
 		assert.Empty(t, floor, "competition with empty Date should take no floor")
 	})
+}
+
+func TestStore_CourtFloor_LogsAndSkipsCorruptNeighbour(t *testing.T) {
+	dir := t.TempDir()
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+
+	target := &Competition{
+		ID:        "target-comp",
+		Date:      "2026-11-01",
+		StartTime: "09:00",
+		Courts:    []string{"A"},
+	}
+	require.NoError(t, store.SaveCompetition(target))
+
+	readable := &Competition{
+		ID:        "readable-comp",
+		Date:      "2026-11-01",
+		StartTime: "09:00",
+		Courts:    []string{"A"},
+	}
+	require.NoError(t, store.SaveCompetition(readable))
+	require.NoError(t, store.SavePoolMatches("readable-comp", []MatchResult{
+		{ID: "r1", Court: "A", ScheduledAt: "09:15", Status: MatchStatusScheduled},
+	}))
+
+	corruptDir := filepath.Join(dir, "competitions", "corrupt-comp")
+	require.NoError(t, os.MkdirAll(corruptDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(corruptDir, "config.md"), []byte("---:\n:invalid yaml\n"), 0o644))
+
+	var buf bytes.Buffer
+	origOutput := log.Writer()
+	log.SetOutput(&buf)
+	defer log.SetOutput(origOutput)
+
+	slotMin := dummySlotMinutes(15, 15)
+	floor, err := store.CourtFloor(target, []string{"A"}, slotMin)
+	require.NoError(t, err)
+	assert.Equal(t, "09:30", floor["A"])
+	assert.Contains(t, buf.String(), "corrupt-comp")
 }

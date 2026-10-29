@@ -858,7 +858,7 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 			}
 
 			// Court-wide queuePosition across every competition on that court on the same day.
-			stampCourtQueuePositions(comp, poolMatches, bracket, loadCourtQueueEntries(store))
+			stampCourtQueuePositions(comp, poolMatches, bracket, loadCourtQueueEntries(store, comp))
 
 			// mp-13y: merge assigned competitor Number from the draw onto
 			// comp.Players so the numberPrefix-derived "K1", "K2", … surface

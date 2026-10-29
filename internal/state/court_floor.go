@@ -2,6 +2,7 @@ package state
 
 import (
 	"fmt"
+	"log"
 	"strconv"
 	"strings"
 )
@@ -123,7 +124,11 @@ func (s *Store) CourtFloor(comp *Competition, courts []string, minutes SlotMinut
 			continue
 		}
 		other, err := s.LoadCompetition(id)
-		if err != nil || other == nil {
+		if err != nil {
+			log.Printf("state: court floor %s: load competition: %v", id, err)
+			continue
+		}
+		if other == nil {
 			continue
 		}
 		if !SameDate(comp.Date, other.Date) {
@@ -135,7 +140,11 @@ func (s *Store) CourtFloor(comp *Competition, courts []string, minutes SlotMinut
 		}
 
 		ends, err := s.CourtEnds(id, minutes)
-		if err != nil || len(ends) == 0 {
+		if err != nil {
+			log.Printf("state: court floor %s: court ends: %v", id, err)
+			continue
+		}
+		if len(ends) == 0 {
 			continue
 		}
 

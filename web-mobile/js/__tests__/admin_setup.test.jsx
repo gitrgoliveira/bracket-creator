@@ -1,9 +1,28 @@
 import { describe, it, expect } from 'vitest';
 import {
   deriveCompetitionName, validatePoolSettings, validateSwissSettings, pickStackPredecessor,
+  findStackCandidates,
   previewRowCourts, previewRowShiaijoError, importRowErrorText,
 } from '../admin_setup.jsx';
 import { normalizeTheme } from '../admin_branding.jsx';
+
+describe('findStackCandidates', () => {
+  it('returns no candidates when form date is blank, even when another competition has a blank date', () => {
+    const comps = [
+      { id: 'c1', date: '', startTime: '09:00', courts: ['A'] },
+      { id: 'c2', date: '   ', startTime: '10:00', courts: ['A'] },
+    ];
+    expect(findStackCandidates(comps, '', ['A'], ['A'])).toEqual([]);
+    expect(findStackCandidates(comps, '   ', ['A'], ['A'])).toEqual([]);
+  });
+
+  it('matches trimmed non-empty dates', () => {
+    const comps = [
+      { id: 'c1', date: ' 01-07-2026 ', startTime: '09:00', courts: ['A'] },
+    ];
+    expect(findStackCandidates(comps, '01-07-2026', ['A'], ['A'])).toHaveLength(1);
+  });
+});
 
 describe('pickStackPredecessor', () => {
   const day = '01-07-2026';

@@ -84,16 +84,18 @@ func clampClientModifiedAt(v int64) int64 {
 	return v
 }
 
-// loadCourtQueueEntries gathers the court queue entries of every competition
-// with a draw (setup competitions and preview brackets expose no public
-// matches), eligibility-stamped exactly as a viewer payload stamps its own,
-// so stampCourtQueuePositions can number a competition's matches court-wide.
+// loadCourtQueueEntries gathers the court queue entries of other competitions
+// on the same day as served with a draw (setup competitions and preview brackets
+// expose no public matches), eligibility-stamped exactly as a viewer payload
+// stamps its own, so stampCourtQueuePositions can number a competition's matches
+// court-wide. The served competition itself and competitions on other days are
+// skipped before loading matches.
 // A read-only pass through the public Store loads, each taking and releasing
 // its own lock: never call it from inside Store.WithTransaction, whose
 // competition lock a load of that competition would wait on. One
 // competition's read fault is logged and that competition skipped; the
 // viewer payload never fails for it.
-func loadCourtQueueEntries(store *state.Store) []state.CourtQueueEntry {
+func loadCourtQueueEntries(store *state.Store, served *state.Competition) []state.CourtQueueEntry {
 	ids, err := store.ListCompetitions()
 	if err != nil {
 		log.Printf("mobileapp: court queue: list competitions: %v", err)
@@ -102,12 +104,18 @@ func loadCourtQueueEntries(store *state.Store) []state.CourtQueueEntry {
 
 	var allEntries []state.CourtQueueEntry
 	for _, id := range ids {
+		if served != nil && id == served.ID {
+			continue
+		}
 		comp, err := store.LoadCompetition(id)
 		if err != nil {
 			log.Printf("mobileapp: court queue %s: load competition: %v", id, err)
 			continue
 		}
 		if comp == nil || comp.Status == state.CompStatusSetup {
+			continue
+		}
+		if served != nil && strings.TrimSpace(comp.Date) != strings.TrimSpace(served.Date) {
 			continue
 		}
 		poolMatches, err := store.LoadPoolMatches(id)
@@ -120,17 +128,7 @@ func loadCourtQueueEntries(store *state.Store) []state.CourtQueueEntry {
 			log.Printf("mobileapp: court queue %s: load bracket: %v", id, err)
 			continue
 		}
-		if bracket != nil && bracket.Preview {
-			bracket = nil
-		}
-		if anyMatchToAnnotate(poolMatches, bracket) {
-			statuses, err := store.LoadCompetitorStatus(id)
-			if err == nil {
-				annotateEligibility(poolMatches, bracket, statuses)
-			} else {
-				log.Printf("mobileapp: court queue %s: load competitor status: %v", id, err)
-			}
-		}
+		bracket = stampViewerEligibility(store, id, poolMatches, bracket)
 		entries := state.CourtQueueEntriesOf(comp, poolMatches, bracket)
 		allEntries = append(allEntries, entries...)
 	}

@@ -2,6 +2,7 @@ package engine
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
@@ -76,7 +77,7 @@ func (e *Engine) generateKnockout(comp *state.Competition, players []domain.Play
 	// bracket never carries it, its competitors are numbered pool by pool
 	// instead, and generatePoolPreviewBracket passes nil for exactly that
 	// reason.
-	bracket, err := e.buildBracketFromDraw(comp, draw, drawOrder, nil)
+	bracket, err := e.buildBracketFromDraw(comp, draw, drawOrder, nil, true)
 	if err != nil {
 		return err
 	}
@@ -115,7 +116,7 @@ func (e *Engine) generateKnockout(comp *state.Competition, players []domain.Play
 // poolMatches is the saved pool phase (the draw passes what generatePools
 // saved, the quarantine rebuild what is on disk): each court's knockout is
 // timed after that court's last pool bout (bc-kosc).
-func (e *Engine) generatePoolPreviewBracket(comp *state.Competition, poolMatches []state.MatchResult) error {
+func (e *Engine) generatePoolPreviewBracket(comp *state.Competition, poolMatches []state.MatchResult, applyCourtFloor bool) error {
 	pools, err := e.store.LoadPools(comp.ID)
 	if err != nil {
 		return fmt.Errorf("loading pools for preview bracket: %w", err)
@@ -158,7 +159,7 @@ func (e *Engine) generatePoolPreviewBracket(comp *state.Competition, poolMatches
 	// never resolved competitors at draw time, so there is nothing to stamp
 	// (see buildBracketFromDraw's own doc comment). ResolveQualifiedPools
 	// stamps ids as each placeholder resolves to a real pool finisher.
-	bracket, err := e.buildBracketFromDraw(comp, draw, nil, poolMatches)
+	bracket, err := e.buildBracketFromDraw(comp, draw, nil, poolMatches, applyCourtFloor)
 	if err != nil {
 		return err
 	}
@@ -200,7 +201,11 @@ func (e *Engine) generatePoolPreviewBracket(comp *state.Competition, poolMatches
 // (poolPhaseEndByCourt), the same pools-then-knockout sequencing the estimator
 // uses. generateKnockout passes nil, so a knockout-only competition keeps the
 // day start.
-func (e *Engine) buildBracketFromDraw(comp *state.Competition, draw *helper.KnockoutDraw, drawOrder []string, poolMatches []state.MatchResult) (*state.Bracket, error) {
+//
+// applyCourtFloor controls whether the bracket schedule respects floors from
+// other competitions on shared courts. It is true when drawn and false during
+// quarantine rebuilds so a repair never moves times against competitions drawn later.
+func (e *Engine) buildBracketFromDraw(comp *state.Competition, draw *helper.KnockoutDraw, drawOrder []string, poolMatches []state.MatchResult, applyCourtFloor bool) (*state.Bracket, error) {
 	if draw == nil || draw.Root == nil {
 		return nil, fmt.Errorf("buildBracketFromDraw: no draw to build from")
 	}
@@ -349,7 +354,10 @@ func (e *Engine) buildBracketFromDraw(comp *state.Competition, draw *helper.Knoc
 	if err != nil {
 		return nil, err
 	}
-	courtFloor := e.courtFloorFor(comp, tournament)
+	var courtFloor map[string]time.Time
+	if applyCourtFloor {
+		courtFloor = e.courtFloorFor(comp, tournament)
+	}
 
 	// Display metadata (mp-7f2w): label each match with its effective round and
 	// real feeders so the viewer renders the same effective-round columns as the

@@ -1056,7 +1056,7 @@ export function downstreamKnockoutReopenedNotice(matches) {
 // caller can pick DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED instead of the generic
 // error copy.
 export async function attemptScoreWrite({
-    recordScore, confirmDialog, compId, matchId, result, password, match, onRefusal, onDownstreamReopened, onForced, allowCourtForce = false,
+    recordScore, confirmDialog, compId, matchId, result, password, match, label = '', onRefusal, onDownstreamReopened, onForced, allowCourtForce = false,
 }) {
     // bc-evts: an outbox door answers pending at once and its refusal arrives
     // later, through `settled`. The downstream-knockout-played 409 is CLAIMED
@@ -1067,7 +1067,9 @@ export async function attemptScoreWrite({
     // confirm: only the first attempt for a given patch is offered it.
     // Any other refusal goes to the caller's onRefusal (true = claimed).
     const claimOther = (e) => typeof onRefusal === 'function' && onRefusal(e) === true;
-    const started = matchLabel(match) || matchLabel(matchId);
+    // `label` is the host's name for the match as its rows show it ("Pool A ·
+    // Match 3"); matchLabel alone falls back to a pool match's raw id.
+    const started = label || matchLabel(match) || matchLabel(matchId);
     // The refusal the organiser may confirm past, with how to ask and which
     // flag the resend carries; null for any other refusal.
     const forcible = (e) => {

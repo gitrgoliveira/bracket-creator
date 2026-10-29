@@ -19,7 +19,7 @@
 //      deliberate and are sized against the committed files' durations rather
 //      than trimmed to the minimum the DOM needs.
 import { authAdmin } from '../lib/ui.mjs';
-import { EDITOR, TAP_DWELL_MS, sameSideTapPacer } from '../lib/editor.mjs';
+import { EDITOR, TAP_DWELL_MS, sameSideTapPacer, startNextFromList } from '../lib/editor.mjs';
 import { SCORE_EDITOR_SOURCES, VIEWER_SOURCES } from '../lib/scope.mjs';
 
 // ---------------------------------------------------------------------------
@@ -44,10 +44,8 @@ function ipponBtn(page, side, waza) {
 
 // The individual editor's commit button (admin_scoring_individual.jsx:1171 and
 // :1179). It is a deliberate two-tap guard: the first tap arms it ("Tap again
-// to finish"), the second submits. Its LABEL differs - the host passes
-// onSubmitAndNext when another match on the same shiaijo is still active
-// (admin_schedule_score_editor.jsx:409), which makes it "Finish + Start Next"
-// - so target the button, not the words.
+// to finish"), the second submits. Its label differs by host (the court
+// console's reads "Finish + Start Next"), so target the button, not the words.
 function finishBtn(page) {
   return page.locator(EDITOR).locator('.score-nav__actions .btn--primary').first();
 }
@@ -255,9 +253,10 @@ export const families = {
       await authAdmin(context);
       const adminPage = await context.newPage();
       await openFirstMatch(adminPage, base, LIVE_COMP);
-      // Two finished results fill "Recent results"; each Finish lands on the
-      // next match and starts it, so the third is left running with its editor
-      // open - exactly the state the clip opens on.
+      // Two finished results fill "Recent results". The Scores tab's Finish
+      // closes the editor without starting anything, so the next match is
+      // opened from the list and started after each, and the third is left
+      // running with its editor open - exactly the state the clip opens on.
       // Sanbon-shobu ends at two points, and the board disables both sides'
       // ippon buttons the moment a bout is decided, so the winner's second
       // point has to be the LAST tap in each list.
@@ -265,6 +264,7 @@ export const families = {
                           [['shiro', 'M'], ['aka', 'D'], ['shiro', 'K']]]) {
         await scoreOpenMatch(adminPage, taps, 120);
         await finishMatch(adminPage, 350);
+        await startNextFromList(adminPage);
       }
       await adminPage.locator(EDITOR).locator('.sb-side--aka').first()
         .waitFor({ state: 'visible', timeout: 15000 });

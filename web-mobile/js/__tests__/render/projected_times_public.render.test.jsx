@@ -21,11 +21,13 @@ const STUBBED_GLOBALS = {
 let restoreGlobals;
 let ViewerSchedule;
 let ViewerCompetition;
+let ViewerHome;
 
 beforeAll(async () => {
   restoreGlobals = installWindowStubs(STUBBED_GLOBALS);
   ({ ViewerSchedule } = await import('../../viewer_schedule.jsx'));
   ({ ViewerCompetition } = await import('../../viewer_competition.jsx'));
+  ({ ViewerHome } = await import('../../viewer_home.jsx'));
 });
 
 afterAll(() => restoreGlobals());
@@ -168,6 +170,21 @@ describe('Projected times on public surfaces (bc-pace)', () => {
 
     expect(document.body.textContent).toContain('Sato');
     expect(document.querySelector('.pace-projected')).toBeNull();
+  });
+
+  it('case h: the Home page Up next list shows the same projected time as the schedule', () => {
+    const c1 = makeComp1(20);
+    const c2 = makeComp2();
+    const tournament = makeTournament({ ...c1, players: [] }, { ...c2, players: [] });
+    const lookup = courtPaceLookup(tournament.competitions, { now: 9 * 60 + 30, today: '29-10-2026' });
+
+    render(<ViewerHome tournament={tournament} onSelectCompetition={vi.fn()} paceLookup={lookup} />);
+
+    const title = [...document.querySelectorAll('.viewer__upnext-title')][0];
+    expect(title).toBeTruthy();
+    const projected = document.querySelector('.pace-projected');
+    expect(projected).toBeTruthy();
+    expect(projected.querySelector('[aria-hidden="true"]').textContent).toBe('~09:50');
   });
 
   it('case c1: with no paceLookup prop, plan text is shown unchanged and no .pace-projected exists', () => {

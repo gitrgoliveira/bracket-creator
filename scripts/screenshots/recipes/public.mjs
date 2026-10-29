@@ -14,7 +14,7 @@
 // mobile recipe shared one server; run.mjs now gives each FAMILY its own
 // server and data dir, so the families cannot contaminate one another.
 import { settle, withAdminPage } from '../lib/ui.mjs';
-import { EDITOR, sameSideTapPacer, finishMatch, startMatch } from '../lib/editor.mjs';
+import { EDITOR, sameSideTapPacer, finishMatch, startMatch, startNextFromList } from '../lib/editor.mjs';
 import { assertIndividualBoutPoints, assertHanteiRecorded } from '../lib/fixture.mjs';
 import { SCORE_EDITOR_SOURCES, VIEWER_SOURCES } from '../lib/scope.mjs';
 import { families as adminFamilies } from './admin.mjs';
@@ -60,8 +60,7 @@ async function armEncho(page) {
 // behind a pick and a commit (admin_scoring_individual.jsx): "Decide by
 // hantei..." arms it, a SHIRO/AKA button only PICKS the winning side, and
 // Finish commits it under the usual two-tap guard (finishMatch waits out the
-// bounce window, TAP_DWELL_MS). That commit also advances to the next match,
-// exactly as Finish does. The verdict is recorded as an "Ht" ippon in the
+// bounce window, TAP_DWELL_MS), and the editor closes as after any Finish. The verdict is recorded as an "Ht" ippon in the
 // winner's free slot, never as a centre mark.
 async function decideByHantei(page, side) {
   await page.locator('[data-testid="scoring-modal-hantei-arm"]').click();
@@ -144,14 +143,9 @@ export const families = {
       await withAdminPage(browser, null, async (page) => {
         await page.goto(base + '/admin/score-editor', { waitUntil: 'domcontentloaded' });
 
-        // Open match 1 once. Its "Finish + Start Next ->" button (the
-        // individual editor's chained-scoring CTA, admin_schedule_score_
-        // editor.jsx's onSubmitAndNext) both completes the open match AND
-        // starts the next scheduled one on the same shiaijo in a single
-        // click, re-rendering the SAME modal onto that next match already
-        // running - so matches 2-4 never need a fresh "Score" click from
-        // the (covered-by-modal-backdrop) list underneath. Only match 1
-        // needs an explicit "Start match" tap.
+        // Open match 1 and start it. The Scores tab's Finish closes the
+        // editor without starting anything, so each later match is opened
+        // from the list and started (startNextFromList).
         await openScoreEditorRow(page, firstScoreRow(page));
         await startMatch(page);
 
@@ -160,13 +154,15 @@ export const families = {
         await armEncho(page);
         await tapIppon(page, 'shiro', 'M');
         await settle(page);
-        await finishMatch(page); // -> chains into match 2, already running
+        await finishMatch(page);
+        await startNextFromList(page);
 
         // Match 2: a plain win, so "Recent results" has more than one row.
         await tapIppon(page, 'aka', 'M');
         await tapIppon(page, 'aka', 'K');
         await settle(page);
-        await finishMatch(page); // -> chains into match 3, already running
+        await finishMatch(page);
+        await startNextFromList(page);
 
         // Match 3: left level and settled by hantei. The alt text for this
         // capture promises "a hantei result with the Ht mark beside the
@@ -174,9 +170,9 @@ export const families = {
         // without the very mark it exists to show.
         await decideByHantei(page, 'shiro');
 
-        // Match 4 is now open and already running (chained by the match 3
-        // finish above) -> "ON NOW". Leave it unscored and don't finish it.
+        // Match 4 is started and left unscored -> "ON NOW".
         // Matches 5-6 are left untouched -> "Up next".
+        await startNextFromList(page);
         await settle(page);
       });
       return { compId };
@@ -222,10 +218,11 @@ export const families = {
         await tapIppon(page, 'aka', 'M');
         await tapIppon(page, 'aka', 'K');
         await settle(page);
-        await finishMatch(page); // -> chains into match 2, already running
+        await finishMatch(page);
 
         // Match 2: started and given one ippon, then left running -> the
         // live scoreboard this capture exists to show.
+        await startNextFromList(page);
         await settle(page);
         await tapIppon(page, 'shiro', 'M');
         await settle(page);

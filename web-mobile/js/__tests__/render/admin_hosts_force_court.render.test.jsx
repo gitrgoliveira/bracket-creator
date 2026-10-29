@@ -183,6 +183,19 @@ describe('attemptScoreWrite: the court_busy arm (bc-adna)', () => {
     expect(onRefusal).not.toHaveBeenCalled();
   });
 
+  it('the confirm names the bout by the host label, never by a pool match id', async () => {
+    const recordScore = vi.fn().mockRejectedValueOnce(courtBusyError('B', 'Pool A · Match 2')).mockResolvedValueOnce({ applied: true });
+    const confirmDialog = vi.fn().mockResolvedValue(true);
+    await attemptScoreWrite({
+      recordScore, confirmDialog, compId: 'c1', matchId: 'Pool A-2', result: startPatch,
+      password: 'pw', allowCourtForce: true, label: 'Pool A · Match 3',
+      match: scheduledMatch({ id: 'Pool A-2' }),
+    });
+    const { message } = confirmDialog.mock.calls[0][0];
+    expect(message).toContain('If you start Pool A · Match 3 too');
+    expect(message).not.toContain('Pool A-2');
+  });
+
   it('a later refusal the organiser cancels goes to the caller, marked', async () => {
     let refuse;
     const recordScore = vi.fn().mockImplementationOnce(async (_c, _m, _r, _pw, _match, o) => {

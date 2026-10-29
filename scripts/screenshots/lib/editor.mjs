@@ -47,9 +47,10 @@ export function sameSideTapPacer() {
 // ("Tap again to finish"), only the second submits (admin_scoring_individual.jsx
 // and admin_scoring_team.jsx, the `finishArmed` label). The engi editor's is
 // "Save result", armed as "Tap again to save" (admin_scoring_engi.jsx,
-// `saveArmed`). Its label is "Finish + Start Next →" instead whenever another
-// match waits on the same shiaijo, and that form leaves the editor open on the
-// next match; whether to dismiss it is the caller's business.
+// `saveArmed`). The overlay editors these recipes drive are the admin hosts',
+// whose Finish never starts the next match (the court console's inline editor
+// alone offers "Finish + Start Next"), so after it the editor closes; to go on,
+// see startNextFromList below.
 //
 // The arm is waited for, never probed: a probe on the same tick misses it, the
 // second tap is skipped, and the next taps score a match the caller did not
@@ -59,7 +60,7 @@ export function sameSideTapPacer() {
 // correction" does not arm).
 export async function finishMatch(page) {
   const modal = page.locator(EDITOR).first();
-  await modal.locator('button').filter({ hasText: /^(Finish( \+ Start Next|$)|Save result$)/ }).first().click();
+  await modal.locator('button').filter({ hasText: /^(Finish|Save result)$/ }).first().click();
   // The bounce window runs from the arming tap, so the wait for the arm label
   // counts towards it.
   const armedAt = Date.now();
@@ -84,6 +85,23 @@ export async function startMatch(page) {
   const landed = scoreWriteAnswered(page, 'running');
   await btn.click();
   await landed;
+}
+
+// On the Scores tab (/admin/score-editor, /admin/competition/:id/scores) Finish
+// records the result and closes the editor: it never starts the next match,
+// which is the court console's alone. A recipe playing matches in a row opens
+// the next one from the list and starts it here. The finished match is waited
+// out of the list's running rows first, so the row opened is never the one
+// just finished, shown running until the list's refresh.
+export async function startNextFromList(page) {
+  await page.locator(EDITOR).first().waitFor({ state: 'hidden', timeout: 15000 });
+  await page.waitForFunction(() => !document.querySelector('.score-edit-row.is-running'), null, { timeout: 15000 });
+  const row = page.locator('.score-edit-row:not(.score-edit-row--complete)')
+    .filter({ has: page.locator('button', { hasText: /^Score$/ }) }).first();
+  await row.waitFor({ state: 'visible', timeout: 15000 });
+  await row.locator('button').filter({ hasText: /^Score$/ }).first().click();
+  await page.locator(EDITOR).first().waitFor({ state: 'visible', timeout: 15000 });
+  await startMatch(page);
 }
 
 // scoreWriteAnswered: resolves once the server has answered a score write of

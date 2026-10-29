@@ -17,6 +17,7 @@ import { keptInHistoryNote } from './match_groups.jsx';
 import { normalizeCompetitionDetail } from './api_serializers.jsx';
 import { confirmMatchLabel, confirmRunningCourtMove } from './court_move.jsx';
 import { holdsUnsaved, discardUnsaved } from './unsaved_entries.jsx';
+import { scoreRowMatchLabel } from './pool_ids.jsx';
 
 const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
 
@@ -409,6 +410,9 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
         recordScore: window.API.recordScore,
         confirmDialog: window.confirmDialog,
         compId, matchId, result, password, match,
+        // The Start anyway confirm names the bout it would start the way the
+        // operator's rows do, never by its raw id.
+        label: match ? scoreRowMatchLabel(match) : '',
         onRefusal: opts && opts.onRefusal,
         onDownstreamReopened: toastReopened,
         // bc-adna: only an admin host's options turn the court_busy warning

@@ -98,10 +98,9 @@ async function openEditorForRow(page, row) {
   await startMatch(page);
 }
 
-// The editor offers "Finish + Start Next →" whenever another match waits on the
-// same shiaijo, so the chained form is the normal one, and it leaves the editor
-// OPEN on the next match - which would sit over the list this loop clicks.
-// Dismiss it; the loop re-reads the list and reopens.
+// The Scores list's Finish closes the editor; one a refusal keeps open would
+// sit over the list this loop clicks, so dismiss whatever is still open. The
+// loop re-reads the list and reopens.
 async function finishAndClose(page) {
   await finishMatch(page);
   await closeEditor(page);
@@ -254,8 +253,7 @@ async function scoreEngiMatch(page, i) {
     await editor.locator('[data-testid="engi-shiro-inc"]').click();
     await settle(page, 100);
   }
-  // "Save result" is the same two-tap guard as Finish, with the same
-  // "Finish + Start Next →" chaining when another match waits.
+  // "Save result" is the same two-tap guard as Finish.
   await finishMatch(page);
   await closeEditor(page);
 }

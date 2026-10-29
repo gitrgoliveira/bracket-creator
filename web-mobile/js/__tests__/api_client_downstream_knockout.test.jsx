@@ -271,6 +271,33 @@ describe('API.recordScore: court_busy (bc-rawm)', () => {
     expect(err.label).toBe('Pool A · Match 2');
   });
 
+  // bc-adna: another tab of the device can send the same queued start first
+  // and take it out of storage when it draws the refusal. The tab that made
+  // the write has its own request out, so its own answer settles it: the
+  // caller still gets the court_busy refusal (the Scores tab's Start anyway
+  // asks on it), never a quiet "sent by another tab".
+  it('a refusal reaches the tab that made the write when another tab took the entry out while its request was out', async () => {
+    originalFetch = global.fetch;
+    let answer;
+    global.fetch = vi.fn(() => new Promise((resolve) => { answer = resolve; }));
+    const res = await API.recordScore('c1', 'm1', { status: 'running' }, 'pw');
+    for (let i = 0; i < 5; i++) await Promise.resolve();
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    const oldRaw = localStorage.getItem('bc_write_queue_v2');
+    localStorage.setItem('bc_write_queue_v2', '[]');
+    window.dispatchEvent(new StorageEvent('storage', { key: 'bc_write_queue_v2', oldValue: oldRaw, newValue: '[]' }));
+    answer({
+      ok: false,
+      status: 409,
+      headers: { get: () => null },
+      json: async () => ({ error: 'court_busy', court: 'B', matchId: 'm-blk', compId: 'c2', label: 'Match 1 (Semifinals)' }),
+    });
+    const err = await res.settled.then(() => { throw new Error('expected a rejection'); }, (e) => e);
+    expect(err.code).toBe('court_busy');
+    expect(err.court).toBe('B');
+    expect(err.label).toBe('Match 1 (Semifinals)');
+  });
+
   // bc-cse: no "This shiaijo"/"another match" fallback -- respondCourtBusy
   // (handlers_match.go) always sends both `court` and a `label`
   // (matchLabelOrID falls back to the raw match id rather than omitting it),

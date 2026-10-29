@@ -3971,6 +3971,13 @@ function _onStoredQueueChanged(oldRaw, newRaw) {
             const gone = after === null
                 ? _adopted.has(d)
                 : !after.has(k) && before.get(k)?.enqueuedAt === d.enqueuedAt;
+            // An entry whose request this tab has out is settled by that
+            // request's own answer, never as sent by another tab: a refusal
+            // the other tab drew (a court_busy its host cannot ask about)
+            // still reaches the caller here, whose host may ask (Start
+            // anyway) or say it. A sign-out's wipe (after === null) still
+            // takes it at once.
+            if (gone && after !== null && _inFlight.has(d)) continue;
             if (gone && _dequeue(k, d)) changed = true;
         }
     } finally {

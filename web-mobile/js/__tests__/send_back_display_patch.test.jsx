@@ -181,7 +181,10 @@ describe('a queued send back is published on the court\'s channel (bc-stpf)', ()
   });
 
   it('another tab removing the send back does not publish running', async () => {
-    global.fetch = () => new Promise(() => {});
+    // This tab's own request is out when the other tab takes the entry out of
+    // storage, so its own answer settles it.
+    let answer;
+    global.fetch = () => new Promise((resolve) => { answer = resolve; });
     const res = await API.revertMatchToQueue('c1', 'm1', 'pw', { match: runningBout() });
     expect(patchesFor(publish, 'm1').map(([, , r]) => r.status)).toEqual(['scheduled']);
     const oldRaw = localStorage.getItem('bc_write_queue_v2');
@@ -192,7 +195,9 @@ describe('a queued send back is published on the court\'s channel (bc-stpf)', ()
       oldValue: oldRaw,
       newValue: newRaw,
     }));
-    await expect(res.settled).resolves.toEqual({ discarded: true, sentByAnotherTab: true });
+    await flush();
+    answer({ ok: true, status: 200, headers: { get: () => null }, json: () => Promise.resolve({}) });
+    await expect(res.settled).resolves.not.toHaveProperty('discarded');
     await flush();
     expect(patchesFor(publish, 'm1').map(([, , r]) => r.status)).toEqual(['scheduled']);
   });

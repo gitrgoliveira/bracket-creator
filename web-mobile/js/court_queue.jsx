@@ -175,8 +175,7 @@ export function withCourtQueuePositions(competitions) {
             const rounds = bracket.rounds ? mapKeep(bracket.rounds, round => mapKeep(round, stampPos)) : bracket.rounds;
             const bronze = bracket.thirdPlaceMatch ? stampPos(bracket.thirdPlaceMatch) : bracket.thirdPlaceMatch;
             if (rounds !== bracket.rounds || bronze !== bracket.thirdPlaceMatch) {
-                bracket = { ...bracket, rounds };
-                if (bronze !== comp.bracket.thirdPlaceMatch) bracket.thirdPlaceMatch = bronze;
+                bracket = { ...bracket, rounds, thirdPlaceMatch: bronze };
             }
         }
 

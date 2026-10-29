@@ -281,4 +281,33 @@ describe('court_pace helper small cases', () => {
         expect(byId.m3).toBe(10 * 60 + 10);
         expect(byId.m2).toBeNull();
     });
+
+    it('courtPaceEntriesOf stamps bracket entries with knockoutSlotMinutes falling back to pool slot', () => {
+        const comp = {
+            id: 'c1',
+            startTime: '09:00',
+            date: '29-10-2026',
+            slotMinutes: 10,
+            knockoutSlotMinutes: 6,
+            poolMatches: [{ id: 'p1', court: 'A', status: 'scheduled', scheduledAt: '09:00' }],
+            bracket: { rounds: [[{ id: 'b1', court: 'A', status: 'scheduled', scheduledAt: '09:10' }]] },
+        };
+        const entries = courtPaceEntriesOf([comp]);
+        const byId = Object.fromEntries(entries.map((e) => [e.matchId, e.slotMinutes]));
+        expect(byId.p1).toBe(10);
+        expect(byId.b1).toBe(6);
+
+        const compFallback = {
+            id: 'c2',
+            startTime: '09:00',
+            date: '29-10-2026',
+            slotMinutes: 10,
+            poolMatches: [{ id: 'p2', court: 'A', status: 'scheduled', scheduledAt: '09:00' }],
+            bracket: { rounds: [[{ id: 'b2', court: 'A', status: 'scheduled', scheduledAt: '09:10' }]] },
+        };
+        const entriesFallback = courtPaceEntriesOf([compFallback]);
+        const byIdFallback = Object.fromEntries(entriesFallback.map((e) => [e.matchId, e.slotMinutes]));
+        expect(byIdFallback.p2).toBe(10);
+        expect(byIdFallback.b2).toBe(10);
+    });
 });

@@ -572,6 +572,39 @@ describe('sortShiaijoMatches', () => {
     ]);
     expect(out.map((x) => x.id)).toEqual(['timed', 'untimed']);
   });
+
+  it('breaks ties on the same date and scheduled time by drawIndex (0 before 2)', () => {
+    const row2 = { id: 'r2', status: 'scheduled', scheduledAt: '10:00', date: '29-10-2026', drawIndex: 2 };
+    const row0 = { id: 'r0', status: 'scheduled', scheduledAt: '10:00', date: '29-10-2026', drawIndex: 0 };
+    const out = sortShiaijoMatches([row2, row0]);
+    expect(out.map((x) => x.id)).toEqual(['r0', 'r2']);
+  });
+
+  it('treats a row with no drawIndex as drawIndex 0, sorting before drawIndex 1', () => {
+    const row1 = { id: 'r1', status: 'scheduled', scheduledAt: '10:00', date: '29-10-2026', drawIndex: 1 };
+    const rowNone = { id: 'r0', status: 'scheduled', scheduledAt: '10:00', date: '29-10-2026' };
+    const out = sortShiaijoMatches([row1, rowNone]);
+    expect(out.map((x) => x.id)).toEqual(['r0', 'r1']);
+  });
+
+  it('breaks ties by competitionId (a first) and supports the compId alias', () => {
+    const rowB = { id: 'rowB', status: 'scheduled', scheduledAt: '10:00', date: '29-10-2026', competitionId: 'b' };
+    const rowA = { id: 'rowA', status: 'scheduled', scheduledAt: '10:00', date: '29-10-2026', competitionId: 'a' };
+    const outCompId = sortShiaijoMatches([rowB, rowA]);
+    expect(outCompId.map((x) => x.id)).toEqual(['rowA', 'rowB']);
+
+    const aliasB = { id: 'aliasB', status: 'scheduled', scheduledAt: '10:00', date: '29-10-2026', compId: 'b' };
+    const aliasA = { id: 'aliasA', status: 'scheduled', scheduledAt: '10:00', date: '29-10-2026', compId: 'a' };
+    const outAlias = sortShiaijoMatches([aliasB, aliasA]);
+    expect(outAlias.map((x) => x.id)).toEqual(['aliasA', 'aliasB']);
+  });
+
+  it('orders earlier competitionStartTime before later start even when later row has smaller competitionId', () => {
+    const lateRow = { id: 'late', status: 'scheduled', scheduledAt: '10:00', date: '29-10-2026', competitionStartTime: '14:00', competitionId: 'a' };
+    const earlyRow = { id: 'early', status: 'scheduled', scheduledAt: '10:00', date: '29-10-2026', competitionStartTime: '09:00', competitionId: 'b' };
+    const out = sortShiaijoMatches([lateRow, earlyRow]);
+    expect(out.map((x) => x.id)).toEqual(['early', 'late']);
+  });
 });
 
 describe('partitionShiaijoMatches', () => {

@@ -227,16 +227,19 @@ export function projectCourtPace(entries, { now, slotOf } = {}) {
     };
 }
 
-// courtPaceEntriesOf: maps an array of competitions to courtQueueEntriesOf entries stamped with slotMinutes.
+// courtPaceEntriesOf: maps an array of competitions to courtQueueEntriesOf entries stamped with slotMinutes (pool slot for pools, knockout slot for bracket).
 export function courtPaceEntriesOf(competitions) {
     if (!competitions || !Array.isArray(competitions)) return [];
     const all = [];
     for (const comp of competitions) {
-        const slot = comp?.slotMinutes !== undefined
+        const poolSlot = comp?.slotMinutes !== undefined
             ? comp.slotMinutes
             : comp?.config?.slotMinutes;
+        const koSlot = comp?.knockoutSlotMinutes ?? comp?.config?.knockoutSlotMinutes ?? poolSlot;
+        const poolLen = (comp?.poolMatches || []).length;
         const entries = courtQueueEntriesOf(comp);
         for (const e of entries) {
+            const slot = e.drawIndex >= poolLen ? koSlot : poolSlot;
             all.push({ ...e, slotMinutes: slot });
         }
     }

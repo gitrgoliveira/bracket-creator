@@ -576,13 +576,12 @@ type schedScenario struct{ poolPerMatch, knockoutPerMatch int }
 
 func slotMinutesFor(tournament *state.Tournament) state.SlotMinutes {
 	return func(c *state.Competition, ko bool) int {
-		if c == nil {
-			return perMatchElapsedMinutes(c, tournament, ko)
-		}
-		if c.Kind == "team" && c.TeamSize == 0 {
+		// A team competition with an omitted TeamSize uses the FIK 5-person
+		// default, as EstimateForCounts does.
+		if c != nil && c.Kind == "team" && c.TeamSize == 0 {
 			compCopy := *c
 			compCopy.TeamSize = 5
-			return perMatchElapsedMinutes(&compCopy, tournament, ko)
+			c = &compCopy
 		}
 		return perMatchElapsedMinutes(c, tournament, ko)
 	}

@@ -92,169 +92,72 @@ export function courtQueueEntriesOf(comp) {
     const poolMatches = comp.poolMatches || [];
     const bracket = comp.bracket;
 
+    // Draw order: round by round, the bronze just before the final round.
     const bracketMatches = [];
     if (bracket) {
         const rounds = bracket.rounds || [];
-        if (rounds.length === 0) {
-            if (bracket.thirdPlaceMatch) {
-                bracketMatches.push(bracket.thirdPlaceMatch);
-            }
-        } else {
-            const finalRoundIdx = rounds.length - 1;
-            for (let r = 0; r < finalRoundIdx; r++) {
-                const round = rounds[r] || [];
-                for (let i = 0; i < round.length; i++) {
-                    bracketMatches.push(round[i]);
-                }
-            }
-            if (bracket.thirdPlaceMatch) {
-                bracketMatches.push(bracket.thirdPlaceMatch);
-            }
-            const finalRound = rounds[finalRoundIdx] || [];
-            for (let i = 0; i < finalRound.length; i++) {
-                bracketMatches.push(finalRound[i]);
-            }
+        const finalRoundIdx = rounds.length - 1;
+        for (let r = 0; r < finalRoundIdx; r++) {
+            bracketMatches.push(...(rounds[r] || []));
+        }
+        if (bracket.thirdPlaceMatch) {
+            bracketMatches.push(bracket.thirdPlaceMatch);
+        }
+        if (finalRoundIdx >= 0) {
+            bracketMatches.push(...(rounds[finalRoundIdx] || []));
         }
     }
 
-    const total = poolMatches.length + bracketMatches.length;
-    if (total === 0) return [];
-
-    const entries = [];
-    let drawIndex = 0;
-
-    for (let i = 0; i < poolMatches.length; i++) {
-        const m = poolMatches[i];
-        entries.push({
-            competitionId: compId,
-            competitionStartTime: compStartTime,
-            date: compDate,
-            court: m.court || "",
-            matchId: m.id || m.ID || "",
-            status: m.status || "",
-            scheduledAt: m.scheduledAt || "",
-            drawIndex: drawIndex++,
-            barred: m.status === 'scheduled' && isBarredMatch(m),
-            match: m,
-        });
-    }
-
-    for (let i = 0; i < bracketMatches.length; i++) {
-        const bm = bracketMatches[i];
-        entries.push({
-            competitionId: compId,
-            competitionStartTime: compStartTime,
-            date: compDate,
-            court: bm.court || "",
-            matchId: bm.id || bm.ID || "",
-            status: bm.status || "",
-            scheduledAt: bm.scheduledAt || "",
-            drawIndex: drawIndex++,
-            barred: bm.status === 'scheduled' && isBarredMatch(bm),
-            match: bm,
-        });
-    }
-
-    return entries;
+    return [...poolMatches, ...bracketMatches].map((m, drawIndex) => ({
+        competitionId: compId,
+        competitionStartTime: compStartTime,
+        date: compDate,
+        court: m.court || "",
+        matchId: m.id || m.ID || "",
+        status: m.status || "",
+        scheduledAt: m.scheduledAt || "",
+        drawIndex,
+        barred: m.status === 'scheduled' && isBarredMatch(m),
+        match: m,
+    }));
 }
 
 export function withCourtQueuePositions(competitions) {
     if (!competitions || competitions.length === 0) return competitions;
 
-    const compEntries = competitions.map(c => courtQueueEntriesOf(c));
-    const allEntries = [];
-    for (let c = 0; c < compEntries.length; c++) {
-        const entries = compEntries[c];
-        for (let i = 0; i < entries.length; i++) {
-            allEntries.push(entries[i]);
-        }
-    }
-
+    const allEntries = competitions.flatMap(c => courtQueueEntriesOf(c));
     const allPositions = courtQueuePositions(allEntries);
     const posByMatch = new Map();
     for (let i = 0; i < allEntries.length; i++) {
         posByMatch.set(allEntries[i].match, allPositions[i]);
     }
 
-    let anyCompChanged = false;
-    const nextCompetitions = competitions.map(comp => {
-        let compChanged = false;
+    // Identity is kept wherever nothing changes (matters for memoised components).
+    const stampPos = (m) => {
+        const newPos = posByMatch.get(m) || 0;
+        return (m.queuePosition || 0) === newPos ? m : { ...m, queuePosition: newPos };
+    };
+    const mapKeep = (arr, fn) => {
+        const next = arr.map(fn);
+        return next.some((x, i) => x !== arr[i]) ? next : arr;
+    };
 
-        let nextPoolMatches = comp.poolMatches;
-        if (comp.poolMatches) {
-            let pmChanged = false;
-            nextPoolMatches = comp.poolMatches.map(m => {
-                const newPos = posByMatch.get(m) || 0;
-                if ((m.queuePosition || 0) !== newPos) {
-                    pmChanged = true;
-                    return { ...m, queuePosition: newPos };
-                }
-                return m;
-            });
-            if (pmChanged) {
-                compChanged = true;
-            } else {
-                nextPoolMatches = comp.poolMatches;
+    return mapKeep(competitions, comp => {
+        const poolMatches = comp.poolMatches ? mapKeep(comp.poolMatches, stampPos) : comp.poolMatches;
+
+        let bracket = comp.bracket;
+        if (bracket) {
+            const rounds = bracket.rounds ? mapKeep(bracket.rounds, round => mapKeep(round, stampPos)) : bracket.rounds;
+            const bronze = bracket.thirdPlaceMatch ? stampPos(bracket.thirdPlaceMatch) : bracket.thirdPlaceMatch;
+            if (rounds !== bracket.rounds || bronze !== bracket.thirdPlaceMatch) {
+                bracket = { ...bracket, rounds };
+                if (bronze !== comp.bracket.thirdPlaceMatch) bracket.thirdPlaceMatch = bronze;
             }
         }
 
-        let nextBracket = comp.bracket;
-        if (comp.bracket) {
-            let brChanged = false;
-            let nextRounds = comp.bracket.rounds;
-            if (comp.bracket.rounds) {
-                let roundsChanged = false;
-                nextRounds = comp.bracket.rounds.map(round => {
-                    let rChanged = false;
-                    const nextRound = round.map(m => {
-                        const newPos = posByMatch.get(m) || 0;
-                        if ((m.queuePosition || 0) !== newPos) {
-                            rChanged = true;
-                            return { ...m, queuePosition: newPos };
-                        }
-                        return m;
-                    });
-                    if (rChanged) roundsChanged = true;
-                    return rChanged ? nextRound : round;
-                });
-                if (roundsChanged) {
-                    brChanged = true;
-                } else {
-                    nextRounds = comp.bracket.rounds;
-                }
-            }
-
-            let nextBronze = comp.bracket.thirdPlaceMatch;
-            if (comp.bracket.thirdPlaceMatch) {
-                const bm = comp.bracket.thirdPlaceMatch;
-                const newPos = posByMatch.get(bm) || 0;
-                if ((bm.queuePosition || 0) !== newPos) {
-                    nextBronze = { ...bm, queuePosition: newPos };
-                    brChanged = true;
-                }
-            }
-
-            if (brChanged) {
-                compChanged = true;
-                nextBracket = { ...comp.bracket, rounds: nextRounds };
-                if (nextBronze !== comp.bracket.thirdPlaceMatch) {
-                    nextBracket.thirdPlaceMatch = nextBronze;
-                }
-            }
-        }
-
-        if (compChanged) {
-            anyCompChanged = true;
-            return {
-                ...comp,
-                poolMatches: nextPoolMatches,
-                bracket: nextBracket,
-            };
-        }
-        return comp;
+        if (poolMatches === comp.poolMatches && bracket === comp.bracket) return comp;
+        return { ...comp, poolMatches, bracket };
     });
-
-    return anyCompChanged ? nextCompetitions : competitions;
 }
 
 // orderOnCourt orders running or scheduled bouts across competitions for a court letter.
@@ -263,16 +166,10 @@ export function orderOnCourt(competitions, court) {
     if (!competitions || competitions.length === 0) return [];
     const entries = [];
 
-    for (let c = 0; c < competitions.length; c++) {
-        const comp = competitions[c];
-        const compEntries = courtQueueEntriesOf(comp);
-        for (let i = 0; i < compEntries.length; i++) {
-            const e = compEntries[i];
+    for (const comp of competitions) {
+        for (const e of courtQueueEntriesOf(comp)) {
             if (e.court === court && (e.status === 'running' || e.status === 'scheduled')) {
-                entries.push({
-                    ...e,
-                    comp,
-                });
+                entries.push({ ...e, comp });
             }
         }
     }

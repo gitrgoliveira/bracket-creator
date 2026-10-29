@@ -35,59 +35,29 @@ func (s *Store) CourtEnds(compID string, minutes SlotMinutes) (map[string]string
 	}
 
 	latestEnd := make(map[string]int)
-
-	for i := range poolMatches {
-		pm := &poolMatches[i]
-		court := strings.TrimSpace(pm.Court)
+	observe := func(court, scheduledAt string, isKnockout, isBye bool) {
+		court = strings.TrimSpace(court)
 		if court == "" {
-			continue
+			return
 		}
-		startMins, ok := parseClockHHMM(pm.ScheduledAt)
+		endMins, ok := ParseClockMinutes(scheduledAt)
 		if !ok {
-			continue
+			return
 		}
-		dur := 0
-		if minutes != nil {
-			dur = minutes(comp, false)
+		if !isBye && minutes != nil {
+			endMins += minutes(comp, isKnockout)
 		}
-		endMins := startMins + dur
 		if cur, exists := latestEnd[court]; !exists || endMins > cur {
 			latestEnd[court] = endMins
 		}
 	}
 
-	if bracket != nil {
-		observeBracketMatch := func(bm *BracketMatch) {
-			if bm == nil {
-				return
-			}
-			court := strings.TrimSpace(bm.Court)
-			if court == "" {
-				return
-			}
-			startMins, ok := parseClockHHMM(bm.ScheduledAt)
-			if !ok {
-				return
-			}
-			dur := 0
-			isBye := bm.Status == MatchStatusCompleted && (strings.TrimSpace(bm.SideA) == "" || strings.TrimSpace(bm.SideB) == "")
-			if !isBye && minutes != nil {
-				dur = minutes(comp, true)
-			}
-			endMins := startMins + dur
-			if cur, exists := latestEnd[court]; !exists || endMins > cur {
-				latestEnd[court] = endMins
-			}
-		}
-
-		for _, round := range bracket.Rounds {
-			for i := range round {
-				observeBracketMatch(&round[i])
-			}
-		}
-		if bracket.ThirdPlaceMatch != nil {
-			observeBracketMatch(bracket.ThirdPlaceMatch)
-		}
+	for i := range poolMatches {
+		observe(poolMatches[i].Court, poolMatches[i].ScheduledAt, false, false)
+	}
+	for _, bm := range BracketMatchesInDrawOrder(bracket) {
+		isBye := bm.Status == MatchStatusCompleted && (strings.TrimSpace(bm.SideA) == "" || strings.TrimSpace(bm.SideB) == "")
+		observe(bm.Court, bm.ScheduledAt, true, isBye)
 	}
 
 	if len(latestEnd) == 0 {
@@ -123,7 +93,7 @@ func (s *Store) CourtFloor(comp *Competition, courts []string, minutes SlotMinut
 	if comp == nil || len(courts) == 0 {
 		return nil, nil
 	}
-	compStartMins, ok := parseClockHHMM(comp.StartTime)
+	compStartMins, ok := ParseClockMinutes(comp.StartTime)
 	if !ok {
 		return nil, nil
 	}
@@ -156,10 +126,10 @@ func (s *Store) CourtFloor(comp *Competition, courts []string, minutes SlotMinut
 		if err != nil || other == nil {
 			continue
 		}
-		if !sameDate(comp.Date, other.Date) {
+		if !SameDate(comp.Date, other.Date) {
 			continue
 		}
-		otherStartMins, ok := parseClockHHMM(other.StartTime)
+		otherStartMins, ok := ParseClockMinutes(other.StartTime)
 		if !ok || otherStartMins > compStartMins {
 			continue
 		}
@@ -174,7 +144,7 @@ func (s *Store) CourtFloor(comp *Competition, courts []string, minutes SlotMinut
 			if !ok {
 				continue
 			}
-			endMins, ok := parseClockHHMM(endStr)
+			endMins, ok := ParseClockMinutes(endStr)
 			if !ok {
 				continue
 			}
@@ -195,7 +165,10 @@ func (s *Store) CourtFloor(comp *Competition, courts []string, minutes SlotMinut
 	return res, nil
 }
 
-func parseClockHHMM(s string) (int, bool) {
+// ParseClockMinutes parses a "HH:MM" clock string into minutes-since-midnight.
+// ok is false for empty or malformed input, so callers skip an unplaceable
+// slot rather than treating it as midnight.
+func ParseClockMinutes(s string) (int, bool) {
 	parts := strings.Split(strings.TrimSpace(s), ":")
 	if len(parts) != 2 {
 		return 0, false
@@ -218,7 +191,9 @@ func formatClockHHMM(mins int) string {
 	return fmt.Sprintf("%02d:%02d", mins/60, mins%60)
 }
 
-func sameDate(a, b string) bool {
+// SameDate is true when both dates are non-empty and equal (after trimming).
+// An empty date means the competition isn't placed on a day, so it shares none.
+func SameDate(a, b string) bool {
 	a, b = strings.TrimSpace(a), strings.TrimSpace(b)
 	return a != "" && a == b
 }

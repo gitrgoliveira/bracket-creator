@@ -62,13 +62,8 @@ function recomputeQueuePositions(matches) {
     return withCourtQueuePositions([{ poolMatches: matches }])[0].poolMatches;
 }
 
-// Recompute queuePosition after an SSE patch moved a match into or out of the
-// queue (a patch carries only the updated match, so a stale position would
-// linger otherwise). It asks the court queue (court_queue.jsx) over this one
-// list, so on a court another competition shares the positions are local to
-// this competition until the host refetches it (the payload carries the
-// court-wide ones) or recomputes over the whole list it holds
-// (withCourtQueuePositions). Identity is kept when nothing changes.
+// Bracket variant of recomputeQueuePositions (rounds and the bronze match);
+// the same court-local caveat and identity guarantee apply.
 function recomputeBracketQueuePositions(bracket) {
     if (!bracket || !bracket.rounds || bracket.rounds.length === 0) return bracket;
     return withCourtQueuePositions([{ bracket }])[0].bracket;

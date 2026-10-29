@@ -276,9 +276,5 @@ func (m *BracketMatch) hasBothCompetitors() bool {
 // Numbers ONE competition's matches only. Production viewer payloads use the
 // court-wide stamp (stampCourtQueuePositions).
 func DeriveQueuePositions(matches []MatchResult) []int {
-	if len(matches) == 0 {
-		return make([]int, 0)
-	}
-	entries := CourtQueueEntriesOf(&Competition{}, matches, nil)
-	return CourtQueuePositions(entries)
+	return CourtQueuePositions(CourtQueueEntriesOf(&Competition{}, matches, nil))
 }

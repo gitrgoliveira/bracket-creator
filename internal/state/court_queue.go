@@ -60,7 +60,7 @@ func CourtQueues(entries []CourtQueueEntry) map[CourtKey][]int {
 		byCourt[key] = append(byCourt[key], i)
 	}
 
-	for key, idxs := range byCourt {
+	for _, idxs := range byCourt {
 		sort.SliceStable(idxs, func(i, j int) bool {
 			ei, ej := entries[idxs[i]], entries[idxs[j]]
 			ri, rj := ei.Status == MatchStatusRunning, ej.Status == MatchStatusRunning
@@ -83,7 +83,6 @@ func CourtQueues(entries []CourtQueueEntry) map[CourtKey][]int {
 			}
 			return idxs[i] < idxs[j]
 		})
-		byCourt[key] = idxs
 	}
 
 	return byCourt
@@ -161,46 +160,27 @@ func CourtQueueEntriesOf(comp *Competition, poolMatches []MatchResult, bracket *
 		return nil
 	}
 
-	compID := ""
-	compStartTime := ""
-	compDate := ""
+	base := CourtQueueEntry{}
 	if comp != nil {
-		compID = comp.ID
-		compStartTime = comp.StartTime
-		compDate = comp.Date
+		base.CompetitionID = comp.ID
+		base.CompetitionStartTime = comp.StartTime
+		base.Date = comp.Date
 	}
 
 	entries := make([]CourtQueueEntry, 0, total)
-	drawIndex := 0
-
-	for _, m := range poolMatches {
-		entries = append(entries, CourtQueueEntry{
-			CompetitionID:        compID,
-			CompetitionStartTime: compStartTime,
-			Date:                 compDate,
-			Court:                m.Court,
-			MatchID:              m.ID,
-			Status:               m.Status,
-			ScheduledAt:          m.ScheduledAt,
-			DrawIndex:            drawIndex,
-			Barred:               m.Status == MatchStatusScheduled && m.IneligibleSides != nil,
-		})
-		drawIndex++
+	add := func(court, id string, status MatchStatus, scheduledAt string, barred bool) {
+		e := base
+		e.Court, e.MatchID, e.Status, e.ScheduledAt = court, id, status, scheduledAt
+		e.DrawIndex = len(entries)
+		e.Barred = status == MatchStatusScheduled && barred
+		entries = append(entries, e)
 	}
 
+	for _, m := range poolMatches {
+		add(m.Court, m.ID, m.Status, m.ScheduledAt, m.IneligibleSides != nil)
+	}
 	for _, bm := range bracketMatches {
-		entries = append(entries, CourtQueueEntry{
-			CompetitionID:        compID,
-			CompetitionStartTime: compStartTime,
-			Date:                 compDate,
-			Court:                bm.Court,
-			MatchID:              bm.ID,
-			Status:               bm.Status,
-			ScheduledAt:          bm.ScheduledAt,
-			DrawIndex:            drawIndex,
-			Barred:               bm.Status == MatchStatusScheduled && bm.IneligibleSides != nil,
-		})
-		drawIndex++
+		add(bm.Court, bm.ID, bm.Status, bm.ScheduledAt, bm.IneligibleSides != nil)
 	}
 
 	return entries

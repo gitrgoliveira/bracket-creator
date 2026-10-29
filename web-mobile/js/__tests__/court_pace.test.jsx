@@ -1,16 +1,15 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import {
-    PACE_SHOW_THRESHOLD_MINUTES,
-    paceClockMinutes,
     formatPaceClock,
-    stampMinutesOfDay,
     projectCourtPace,
     paceDisplay,
     paceKey,
+    paceClockNow,
     courtPaceEntriesOf,
     courtPaceLookup,
-    flatMatchesToPaceEntries,
 } from '../court_pace.jsx';
+import { courtQueueKey } from '../court_queue.jsx';
+import { setServerClockOffsetMs } from '../server_clock.jsx';
 
 function localStamp(h, m, s = 0) {
     return new Date(2026, 9, 29, h, m, s).getTime();
@@ -150,7 +149,7 @@ describe('court_pace projection table tests', () => {
             makeEntry({ competitionId: 'X', matchId: 'mX_wait2', status: 'scheduled', scheduledAt: '09:32', slotMinutes: 10, drawIndex: 2 }),
         ];
         // Given in reverse: the projection orders the court itself, across competitions.
-        const res = projectCourtPace([...entries].reverse(), { now: 9 * 60 });
+        const res = projectCourtPace(entries.toReversed(), { now: 9 * 60 });
         expect(res.drift).toBe(4);
         expect(res.projections.map(p => p.entry.matchId)).toEqual(['mX_wait1', 'mY_wait1', 'mX_wait2']);
         expect(res.projections).toHaveLength(3);
@@ -267,18 +266,61 @@ describe('court_pace helper small cases', () => {
         expect(lookup.driftByCourtDay.size).toBe(1);
     });
 
-    it('flatMatchesToPaceEntries keeps the input order as drawIndex', () => {
-        const raw = [
-            { compId: 'c1', id: 'm1', status: 'scheduled', scheduledAt: '10:00', court: 'A' },
-            { compId: 'c1', id: 'm2', status: 'completed', scheduledAt: '09:00', court: 'A' },
-            { compId: 'c2', id: 'm3', status: 'running', scheduledAt: '09:30', court: 'A' },
+    it('a barred waiting match takes no place: the idle drift anchors on the first playable match and the barred one is not projected', () => {
+        const entries = [
+            { ...makeEntry({ matchId: 'm1', status: 'scheduled', scheduledAt: '10:00', drawIndex: 0 }), barred: true },
+            makeEntry({ matchId: 'm2', status: 'scheduled', scheduledAt: '10:10', drawIndex: 1 }),
+            makeEntry({ matchId: 'm3', status: 'scheduled', scheduledAt: '10:20', drawIndex: 2 }),
         ];
-        const entries = flatMatchesToPaceEntries(raw);
-        expect(entries[0].drawIndex).toBe(0);
-        expect(entries[1].drawIndex).toBe(1);
-        expect(entries[2].drawIndex).toBe(2);
-        expect(entries[0].competitionId).toBe('c1');
-        expect(entries[0].matchId).toBe('m1');
+        const res = projectCourtPace(entries, { now: 10 * 60 + 30 });
+        expect(res.idleDrift).toBe(20);
+        expect(res.projections.map(p => p.entry.matchId)).toEqual(['m2', 'm3']);
+        expect(res.projections[0].projectedMinutes).toBe(10 * 60 + 30);
+        expect(res.projections[1].projectedMinutes).toBe(10 * 60 + 40);
+    });
+
+    it('courtPaceLookup leaves a barred match (ineligibleSides) out, so it shows its plan', () => {
+        const comp = {
+            id: 'comp1',
+            date: '29-10-2026',
+            slotMinutes: 10,
+            poolMatches: [
+                { id: 'p1', court: 'A', status: 'scheduled', scheduledAt: '10:00', ineligibleSides: { a: 'fusenpai' } },
+                { id: 'p2', court: 'A', status: 'scheduled', scheduledAt: '10:10' },
+            ],
+        };
+        const lookup = courtPaceLookup([comp], { now: 10 * 60 + 30, today: '29-10-2026' });
+        expect(lookup.byMatch.has(paceKey('comp1', 'p1'))).toBe(false);
+        expect(lookup.byMatch.get(paceKey('comp1', 'p2')).projectedMinutes).toBe(10 * 60 + 30);
+    });
+
+    it('courtPaceLookup names each court-day\'s next bout and gives a slotless competition the fallback slot', () => {
+        const comp = {
+            id: 'comp1',
+            date: '29-10-2026',
+            poolMatches: [
+                { id: 'p1', court: 'A', status: 'scheduled', scheduledAt: '10:00' },
+                { id: 'p2', court: 'A', status: 'scheduled', scheduledAt: '10:05' },
+            ],
+        };
+        const key = courtQueueKey('29-10-2026', 'A');
+        const noSlot = courtPaceLookup([comp], { now: 10 * 60 + 20, today: '29-10-2026' });
+        expect(noSlot.nextByCourtDay.get(key)).toBeNull();
+        const withFallback = courtPaceLookup([comp], { now: 10 * 60 + 20, today: '29-10-2026', fallbackSlot: 7 });
+        expect(withFallback.nextByCourtDay.get(key)).toEqual({ text: '~10:20', ariaLabel: 'about 10:20', projected: true });
+        expect(withFallback.byMatch.get(paceKey('comp1', 'p2')).projectedMinutes).toBe(10 * 60 + 27);
+    });
+
+    it('paceClockNow reads the server clock, not the device clock', () => {
+        vi.useFakeTimers();
+        vi.setSystemTime(new Date(2026, 9, 29, 10, 0, 0));
+        try {
+            setServerClockOffsetMs(25 * 60 * 1000);
+            expect(paceClockNow()).toEqual({ now: 10 * 60 + 25, today: '29-10-2026' });
+        } finally {
+            setServerClockOffsetMs(0);
+            vi.useRealTimers();
+        }
     });
 
     it('a waiting match with no scheduledAt gets null and does not break the chain', () => {

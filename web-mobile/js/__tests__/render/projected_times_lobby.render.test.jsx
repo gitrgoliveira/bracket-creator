@@ -188,8 +188,8 @@ describe('Projected times on standalone lobby display (route /display?court=all)
 
     const projected = container.querySelector('.pace-projected');
     expect(projected).not.toBeNull();
-    expect(projected.textContent).toBe('~10:50');
-    expect(projected.getAttribute('aria-label')).toBe('about 10:50');
+    expect(projected.querySelector('[aria-hidden="true"]').textContent).toBe('~10:50');
+    expect(projected.querySelector('.sr-only').textContent).toBe('about 10:50');
 
     const cell = projected.closest('.lobby-cell');
     expect(cell).not.toBeNull();
@@ -215,8 +215,8 @@ describe('Projected times on standalone lobby display (route /display?court=all)
 
     const projected = container.querySelector('.pace-projected');
     expect(projected).not.toBeNull();
-    expect(projected.textContent).toBe('~09:50');
-    expect(projected.getAttribute('aria-label')).toBe('about 09:50');
+    expect(projected.querySelector('[aria-hidden="true"]').textContent).toBe('~09:50');
+    expect(projected.querySelector('.sr-only').textContent).toBe('about 09:50');
 
     const cell = projected.closest('.lobby-cell');
     expect(cell).not.toBeNull();
@@ -249,7 +249,7 @@ describe('Projected times on standalone lobby display (route /display?court=all)
 
     const projBefore = container.querySelector('.pace-projected');
     expect(projBefore).not.toBeNull();
-    expect(projBefore.textContent).toBe('~10:50');
+    expect(projBefore.querySelector('[aria-hidden="true"]').textContent).toBe('~10:50');
 
     await act(async () => {
       vi.advanceTimersByTime(60000);

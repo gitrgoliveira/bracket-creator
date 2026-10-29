@@ -1,5 +1,6 @@
 // The ONE owner of the court pace projection (decision D4).
-// Pure functions, no side effects, and no imports from admin_* modules.
+// Pure functions, plus the one hook a screen reads them through
+// (useCourtPaceLookup); no imports from admin_* modules.
 
 import {
     compareCourtQueue,
@@ -7,8 +8,12 @@ import {
     courtQueueKey,
     queueStartRank,
 } from './court_queue.jsx';
+import { serverNowMs } from './server_clock.jsx';
 
 export const PACE_SHOW_THRESHOLD_MINUTES = 5;
+
+// PACE_TICK_MS: how often a screen showing projected times reads the clock again.
+export const PACE_TICK_MS = 60000;
 
 // paceClockMinutes: "HH:MM" to minutes of day, or null when invalid.
 export function paceClockMinutes(hhmm) {
@@ -70,10 +75,12 @@ export function paceKey(competitionId, matchId) {
     return `${competitionId || ""}\u0000${matchId || ""}`;
 }
 
-// paceClockNow: the ONE reading of the wall clock a pace lookup takes, as local
+// paceClockNow: the ONE reading of the clock a pace lookup takes, as local
 // minutes of day plus today's date in the canonical DD-MM-YYYY (the format a
 // competition's own `date` carries, which courtPaceLookup compares it with).
-export function paceClockNow(d = new Date()) {
+// It reads the SERVER's time, the frame the finish stamps (modifiedAt) are in,
+// so a device whose own clock is off projects the same times as every other.
+export function paceClockNow(d = new Date(serverNowMs())) {
     const dd = String(d.getDate()).padStart(2, '0');
     const mm = String(d.getMonth() + 1).padStart(2, '0');
     return { now: d.getHours() * 60 + d.getMinutes(), today: `${dd}-${mm}-${d.getFullYear()}` };
@@ -86,11 +93,32 @@ export function paceDisplayOf(lookup, competitionId, matchId) {
 }
 
 // PaceTime: the projected time as a marked span when the display is projected,
-// otherwise `fallback` (the planned time). Extra props land on the span.
+// otherwise `fallback` (the planned time). Extra props land on the span. The
+// spoken "about HH:MM" is an sr-only span beside the hidden "~HH:MM": a plain
+// span may not be named, so an aria-label on it is ignored by screen readers.
 export function PaceTime({ display, fallback = null, ...rest }) {
     return display?.projected ? (
-        <span className="pace-projected" aria-label={display.ariaLabel} {...rest}>{display.text}</span>
+        <span className="pace-projected" {...rest}>
+            <span aria-hidden="true">{display.text}</span>
+            <span className="sr-only">{display.ariaLabel}</span>
+        </span>
     ) : fallback;
+}
+
+// useCourtPaceLookup: courtPaceLookup over `competitions`, read again on the
+// pace tick so a projection moves on with the clock between pushes.
+export function useCourtPaceLookup(competitions) {
+    const [tick, setTick] = React.useState(0);
+    React.useEffect(() => {
+        const id = setInterval(() => setTick((t) => t + 1), PACE_TICK_MS);
+        return () => clearInterval(id);
+    }, []);
+    return React.useMemo(
+        () => courtPaceLookup(competitions, paceClockNow()),
+        // tick: the clock moved on.
+        // oxlint-disable-next-line react-hooks/exhaustive-deps
+        [competitions, tick]
+    );
 }
 
 // projectCourtPace: projects waiting match starts for ONE court-day.
@@ -119,7 +147,10 @@ export function projectCourtPace(entries, { now, slotOf } = {}) {
         if (e.status === 'running') {
             hasRunning = true;
         } else if (e.status === 'scheduled') {
-            waiting.push(e);
+            // A barred match is never played (the console skips it and the
+            // operator records its fusensho), so it takes no place in the
+            // pace: it keeps its plan and moves no other match.
+            if (!e.barred) waiting.push(e);
         } else {
             completed.push(e);
         }
@@ -252,9 +283,12 @@ export function courtPaceEntriesOf(competitions) {
 // returns { byMatch, driftByCourtDay }: byMatch maps paceKey(competitionId, matchId) to
 // { plannedMinutes, projectedMinutes, display } for every waiting match of a projected
 // court-day, driftByCourtDay maps courtQueueKey(date, court) to that court-day's D.
-export function courtPaceLookup(competitions, { now, today } = {}) {
+export function courtPaceLookup(competitions, { now, today, fallbackSlot } = {}) {
     const byMatch = new Map();
     const driftByCourtDay = new Map();
+    // The first waiting match's display per court-day, null when it cannot be
+    // projected (the organiser's Court pace panel reads it).
+    const nextByCourtDay = new Map();
 
     const groups = new Map();
     for (const e of courtPaceEntriesOf(competitions)) {
@@ -269,14 +303,22 @@ export function courtPaceLookup(competitions, { now, today } = {}) {
         group.push(e);
     }
 
+    // A competition with no slot of its own takes `fallbackSlot` when given.
+    const slotOf = (e) => (typeof e.slotMinutes === 'number' && e.slotMinutes > 0) ? e.slotMinutes : fallbackSlot;
+
     // Another day's schedule is not today's pace: it keeps the plan.
     const todayStr = (today || "").trim();
     for (const [key, groupEntries] of groups.entries()) {
         const dateStr = (groupEntries[0].date || "").trim();
         if (dateStr !== "" && dateStr !== todayStr) continue;
 
-        const pace = projectCourtPace(groupEntries, { now });
+        const pace = projectCourtPace(groupEntries, { now, slotOf });
         driftByCourtDay.set(key, pace.drift);
+
+        const first = pace.projections[0];
+        nextByCourtDay.set(key, first && typeof first.projectedMinutes === 'number'
+            ? paceDisplay(first.entry.scheduledAt, first.projectedMinutes)
+            : null);
 
         for (const p of pace.projections) {
             byMatch.set(paceKey(p.entry.competitionId, p.entry.matchId), {
@@ -287,21 +329,6 @@ export function courtPaceLookup(competitions, { now, today } = {}) {
         }
     }
 
-    return { byMatch, driftByCourtDay };
+    return { byMatch, driftByCourtDay, nextByCourtDay };
 }
 
-// flatMatchesToPaceEntries: adapter for flattened match records from admin schedule pacing panel.
-export function flatMatchesToPaceEntries(matches) {
-    if (!matches || !Array.isArray(matches)) return [];
-    return matches.map((m, index) => ({
-        competitionId: m.compId || "",
-        competitionStartTime: "",
-        date: "",
-        court: m.court || "",
-        matchId: m.id || "",
-        status: m.status || "",
-        scheduledAt: m.scheduledAt || "",
-        drawIndex: index,
-        match: m,
-    }));
-}

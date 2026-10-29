@@ -102,8 +102,8 @@ describe('Projected times on public surfaces (bc-pace)', () => {
 
     const projected = document.querySelector('.pace-projected');
     expect(projected).toBeTruthy();
-    expect(projected.textContent).toBe('~09:50');
-    expect(projected.getAttribute('aria-label')).toBe('about 09:50');
+    expect(projected.querySelector('[aria-hidden="true"]').textContent).toBe('~09:50');
+    expect(projected.querySelector('.sr-only').textContent).toBe('about 09:50');
 
     // The waiting match's plan text 09:30 must not be shown.
     const timeContainers = [...document.querySelectorAll('.tw-match__time')];
@@ -137,8 +137,37 @@ describe('Projected times on public surfaces (bc-pace)', () => {
 
     const projected = document.querySelector('.pace-projected');
     expect(projected).toBeTruthy();
-    expect(projected.textContent).toBe('~09:50');
-    expect(projected.getAttribute('aria-label')).toBe('about 09:50');
+    expect(projected.querySelector('[aria-hidden="true"]').textContent).toBe('~09:50');
+    expect(projected.querySelector('.sr-only').textContent).toBe('about 09:50');
+  });
+
+
+  it('case b2: a bout the live detail already shows running keeps its plan, though the list lookup still projects it', () => {
+    const c1 = makeComp1(20);
+    const c2 = makeComp2();
+    const tournament = makeTournament(c1, c2);
+    const lookup = courtPaceLookup(tournament.competitions, { now: 9 * 60 + 30, today: '29-10-2026' });
+    const live = { ...c2, poolMatches: [{ ...c2.poolMatches[0], status: 'running' }] };
+
+    render(
+      <ViewerCompetition
+        tournament={tournament}
+        competition={live}
+        pools={[]}
+        poolMatches={live.poolMatches}
+        standings={{}}
+        bracket={null}
+        onBack={vi.fn()}
+        authed={false}
+        tweaks={{ cardVariant: 1, showDojo: true }}
+        activeTab="overview"
+        onTabChange={vi.fn()}
+        paceLookup={lookup}
+      />
+    );
+
+    expect(document.body.textContent).toContain('Sato');
+    expect(document.querySelector('.pace-projected')).toBeNull();
   });
 
   it('case c1: with no paceLookup prop, plan text is shown unchanged and no .pace-projected exists', () => {

@@ -15,7 +15,7 @@ import { useOpenedTapGuard } from './tap_guard.jsx';
 import { SELF_RUN_NO_CHECK_IN } from './competition_shape.jsx';
 import { pushToast } from './toast_queue.jsx';
 import { sharesCourtDay, sharesDay } from './court_queue.jsx';
-import { courtPaceLookup, paceClockNow } from './court_pace.jsx';
+import { courtPaceLookup, paceClockNow, PACE_TICK_MS } from './court_pace.jsx';
 
 const { useState: useS, useEffect: useE, useRef: useR, useCallback: useC, useMemo: useM } = React;
 
@@ -834,17 +834,18 @@ function App() {
 
   useE(() => { load(); }, []);
 
-  // Periodic 60 s tick updates current minutes of day for pace projections.
+  // Periodic pace tick updates current minutes of day for pace projections.
   // In viewer mode when viewing a competition, it also refetches the tournament
-  // list so shared-court pace drift stays current.
+  // list so shared-court pace drift stays current; a hidden tab skips that
+  // (onVisibilityChange resyncs it when the page is shown again).
   const [nowTick, setNowTick] = useS(0);
   useE(() => {
     const timer = setInterval(() => {
       setNowTick((t) => t + 1);
-      if (mode === "viewer" && viewerCompId) {
+      if (mode === "viewer" && viewerCompId && !document.hidden) {
         load();
       }
-    }, 60000);
+    }, PACE_TICK_MS);
     return () => clearInterval(timer);
   }, [mode, viewerCompId]);
 

@@ -18,7 +18,7 @@ import { applyPatch, keepNewerCompetitions, matchInComp } from './patch.jsx';
 import { SideCell, WinnerTick } from './side_cell.jsx';
 import { useOpenedTapGuard, acceptTap } from './tap_guard.jsx';
 import { useDialogFocus } from './dialog_focus.jsx';
-import { courtPaceLookup, paceClockNow, paceDisplayOf, PaceTime } from './court_pace.jsx';
+import { useCourtPaceLookup, paceDisplayOf, PaceTime } from './court_pace.jsx';
 // Imported DIRECTLY from the leaf rather than read off `window`. Two of the
 // call sites below sit inside a `try { } catch (_e) { }` that swallows, so a
 // missing global there would degrade into exactly the silent not-saved failure
@@ -668,17 +668,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // read from this so the page operates only on THIS court's competitions.
     const courtCompetitions = courtComps || tournament.competitions || [];
 
-    const [paceTick, setPaceTick] = useStateSh(0);
-    useEffectSh(() => {
-        const id = setInterval(() => setPaceTick((t) => t + 1), 60000);
-        return () => clearInterval(id);
-    }, []);
-    const paceLookup = useMemoSh(
-        () => courtPaceLookup(courtCompetitions, paceClockNow()),
-        // paceTick: trigger 60 s pace recomputation
-        // oxlint-disable-next-line react-hooks/exhaustive-deps
-        [courtCompetitions, paceTick]
-    );
+    const paceLookup = useCourtPaceLookup(courtCompetitions);
 
     // Selected match for the inline scoring panel. `calledKey` marks the match
     // the operator has announced this session (local cue only); `callingKey`

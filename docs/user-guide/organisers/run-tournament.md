@@ -334,14 +334,15 @@ At the table, note that after a match finishes, the court console stays on the c
 
 Planned start times stored for matches are never rewritten by the app. When a shiai-jo drifts 5 or more minutes ahead of or behind its plan, public screens, the court console, and TV boards display a projected start time like "~10:52" instead. Refer to [Projected start times](../spectators/following.md#projected-start-times) for details on where these times appear.
 
-On the **Tournament schedule**, the **Court pace** panel tracks this drift for every shiai-jo across all competitions running on it. It shows whether each court is "On track" or "N m behind/ahead", along with the first waiting bout's projected start time. The schedule rows and the **Scores** tab keep showing the original planned times so you can edit the schedule accurately. To change the plan itself, use **Auto-schedule competition** or edit individual match times on the schedule.
+On the **Tournament schedule**, the **Court pace** panel tracks today's drift for every shiai-jo across all competitions running on it, the same estimate the public screens show. It shows whether each court is "On track" or "N m behind/ahead", along with the first waiting bout's projected start time. The schedule rows and the **Scores** tab keep showing the original planned times so you can edit the schedule accurately. To change the plan itself, use **Auto-schedule competition** or edit individual match times on the schedule.
 
 The projected time has a few practical limits:
 
 - It is an estimate, not a promise.
 - Correcting the shiai-jo's last finished bout re-stamps that bout and can move the estimate.
 - A bout that starts late after the shiai-jo stood idle shows the next bout at "about now" until the running bout ends.
-- It relies on the device clock and the venue time zone being set correctly.
+- A bout that cannot be fought because a competitor withdrew keeps its planned time and does not move the estimate for the bouts after it.
+- It takes the time from the tournament server, so it relies only on each device being set to the venue's time zone.
 
 ### Moving matches between shiai-jo
 

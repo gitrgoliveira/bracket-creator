@@ -3,7 +3,7 @@
 // passes onSubmitAndNext={null} with no onAfterDecision, and shows no refusal notice.
 import React from 'react';
 import { render, act, fireEvent } from '@testing-library/react';
-import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 import { installWindowStubs } from '../helpers/stub_globals.js';
 
 const side = (id, name) => ({ id, name });

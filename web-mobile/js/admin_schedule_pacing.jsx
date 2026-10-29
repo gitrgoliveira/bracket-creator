@@ -2,7 +2,8 @@
 // filterMatchesByCourt, computeCourtPaceStats, CourtPacePanel, suggestRebalances.
 
 import { timeToMinutes } from './admin_schedule_utils.jsx';
-import { projectCourtPace, flatMatchesToPaceEntries, paceDisplay, paceClockNow, PaceTime } from './court_pace.jsx';
+import { courtPaceLookup, paceClockNow, PaceTime, PACE_TICK_MS } from './court_pace.jsx';
+import { courtQueueKey } from './court_queue.jsx';
 
 const { useState: useStateA, useEffect: useEffectA } = React;
 
@@ -40,9 +41,9 @@ export function filterMatchesByCourt(matches, courtParam) {
 //                         label the panel shows is court_pace.jsx's drift, the
 //                         one owner of how late a court runs.
 //
-// nowMinutes is optional; defaults to the current wall-clock (read via
-// `new Date()`). CourtPacePanel omits it: the 60 s tick forces a re-render
-// so this helper re-reads fresh wall-clock time on each tick.
+// nowMinutes is optional; defaults to the device's wall-clock (read via
+// `new Date()`). CourtPacePanel passes paceClockNow()'s minutes, the server's
+// time the drift reads too, on each 60 s tick.
 // Tests pass nowMinutes explicitly for determinism.
 //
 // Exported for the vitest suite.
@@ -118,11 +119,12 @@ export function suggestRebalances(perCourtStats, perMatchMinutes) {
 }
 
 // CourtPacePanel: admin-only collapsible card showing per-court pace status
-// and a rebalancing suggestion. Court drift comes from court_pace.jsx, the one pace owner.
-// Each match's slot is its competition's slotMinutes, as the public screens
-// use, so the organiser and a spectator read the same projection; a
-// competition that carries none falls back to safeMatchDuration (the page's
-// "Time per match").
+// and a rebalancing suggestion. Court drift and the next bout's projected start
+// come from court_pace.jsx's courtPaceLookup over `competitions`, the same
+// lookup the public screens read: today's court-day only, each bout with its
+// competition's pool or knockout slot, so the organiser and a spectator read
+// the same projection. A competition that carries no slot falls back to
+// safeMatchDuration (the page's "Time per match").
 export function CourtPacePanel({ byCourt, safeMatchDuration, competitions }) {
   const [open, setOpen] = useStateA(false);
   // setTick forces a re-render every 60 s so computeCourtPaceStats and court pace
@@ -136,11 +138,12 @@ export function CourtPacePanel({ byCourt, safeMatchDuration, competitions }) {
     if (!hasData) return;
     const timer = setInterval(() => {
       setTick(t => t + 1);
-    }, 60000);
+    }, PACE_TICK_MS);
     return () => clearInterval(timer);
   }, [hasData]);
 
-  const stats = computeCourtPaceStats(byCourt, safeMatchDuration);
+  const clock = paceClockNow();
+  const stats = computeCourtPaceStats(byCourt, safeMatchDuration, clock.now);
 
   // Drop courts with zero matches so the cards (and the rebalance heuristic)
   // ignore empty buckets: e.g. a configured court the user hasn't placed
@@ -152,12 +155,11 @@ export function CourtPacePanel({ byCourt, safeMatchDuration, competitions }) {
 
   const suggestion = suggestRebalances(populatedStats, safeMatchDuration);
 
-  const { now } = paceClockNow();
-  const slotByComp = new Map((competitions || []).map(c => [c.id, c.slotMinutes]));
-  const slotOf = (e) => {
-    const s = slotByComp.get(e.competitionId);
-    return typeof s === 'number' && s > 0 ? s : safeMatchDuration;
-  };
+  const pace = courtPaceLookup(competitions, { ...clock, fallbackSlot: safeMatchDuration });
+  // A court's pace today: its court-day for today, else its undated one (a
+  // competition with no date set).
+  const courtDayKey = (court) => [courtQueueKey(clock.today, court), courtQueueKey("", court)]
+    .find(k => pace.driftByCourtDay.has(k));
 
   const badgeStyle = (drift) => {
     const abs = Math.abs(drift);
@@ -192,17 +194,9 @@ export function CourtPacePanel({ byCourt, safeMatchDuration, competitions }) {
         <div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: 8, marginBottom: suggestion ? 12 : 0 }}>
             {populatedStats.map(stat => {
-              const matches = byCourt[stat.court] || [];
-              const pace = projectCourtPace(flatMatchesToPaceEntries(matches), {
-                now,
-                slotOf,
-              });
-              const drift = pace.drift;
-              const firstWaiting = pace.projections[0];
-              const hasProjectableFirst = firstWaiting && typeof firstWaiting.projectedMinutes === 'number';
-              const display = hasProjectableFirst
-                ? paceDisplay(firstWaiting.entry.scheduledAt, firstWaiting.projectedMinutes)
-                : null;
+              const key = courtDayKey(stat.court);
+              const drift = key ? pace.driftByCourtDay.get(key) : 0;
+              const display = key ? pace.nextByCourtDay.get(key) : null;
 
               return (
                 <div key={stat.court} style={{ fontSize: 12, padding: "6px 10px", background: "var(--bg-2)", borderRadius: 4, border: "1px solid var(--bg-3)" }}>

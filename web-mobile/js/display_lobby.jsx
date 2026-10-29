@@ -7,7 +7,7 @@ import { NumberedName } from './numbered_name.jsx';
 import { teamIVPWScore } from './bracket.jsx';
 import { matchShowsScore } from './match_shows_score.jsx';
 import { isSupplementaryBout } from './pool_ids.jsx';
-import { courtPaceLookup, paceClockNow, paceDisplayOf, PaceTime } from './court_pace.jsx';
+import { useCourtPaceLookup, paceDisplayOf, PaceTime } from './court_pace.jsx';
 
 const { useState: useSD, useEffect: useED, useMemo: useMD } = React;
 
@@ -259,17 +259,7 @@ function LobbyDisplay({ tournament, competitions, connected = true }) {
     // cycleKey increments on every page flip so the CSS animation on the
     // progress bar restarts from zero each time.
     const [cycleKey, setCycleKey] = useSD(0);
-    const [paceTick, setPaceTick] = useSD(0);
-    useED(() => {
-        const id = setInterval(() => setPaceTick((t) => t + 1), 60000);
-        return () => clearInterval(id);
-    }, []);
-    const pace = useMD(
-        () => courtPaceLookup(competitions, paceClockNow()),
-        // paceTick: trigger 60 s pace recomputation
-        // oxlint-disable-next-line react-hooks/exhaustive-deps
-        [competitions, paceTick]
-    );
+    const pace = useCourtPaceLookup(competitions);
 
     // T065 auto-cycle. Only arm the timer when there is more than one
     // page. Reset to page 0 if the court count drops below the

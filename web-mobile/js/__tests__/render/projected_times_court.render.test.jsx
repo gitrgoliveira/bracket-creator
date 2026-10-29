@@ -170,8 +170,8 @@ describe('Court projected times on court surfaces (bc-pace)', () => {
 
     const projSpan = timeEl.querySelector('.pace-projected');
     expect(projSpan).not.toBeNull();
-    expect(projSpan.textContent).toBe('~10:45');
-    expect(projSpan.getAttribute('aria-label')).toBe('about 10:45');
+    expect(projSpan.querySelector('[aria-hidden="true"]').textContent).toBe('~10:45');
+    expect(projSpan.querySelector('.sr-only').textContent).toBe('about 10:45');
     expect(timeEl.textContent).not.toContain('10:30');
   });
 
@@ -226,7 +226,7 @@ describe('Court projected times on court surfaces (bc-pace)', () => {
     const card = utils.container.querySelector('.shiaijo-upnext__card');
     expect(card).not.toBeNull();
     const timeEl = card.querySelector('.shiaijo-upnext__time');
-    expect(timeEl.querySelector('.pace-projected').textContent).toBe('~10:45');
+    expect(timeEl.querySelector('.pace-projected').querySelector('[aria-hidden="true"]').textContent).toBe('~10:45');
 
     await act(async () => {
       vi.advanceTimersByTime(60000);
@@ -234,7 +234,7 @@ describe('Court projected times on court surfaces (bc-pace)', () => {
 
     const projSpanAfter = card.querySelector('.shiaijo-upnext__time .pace-projected');
     expect(projSpanAfter).not.toBeNull();
-    expect(projSpanAfter.textContent).toBe('~10:46');
+    expect(projSpanAfter.querySelector('[aria-hidden="true"]').textContent).toBe('~10:46');
     expect(card.querySelector('.shiaijo-upnext__time').textContent).not.toContain('~10:45');
   });
 
@@ -253,8 +253,8 @@ describe('Court projected times on court surfaces (bc-pace)', () => {
     const nextTimeEl = behindContainer.querySelector('[data-testid="tvd-next-time"]');
     expect(nextTimeEl).not.toBeNull();
     expect(nextTimeEl.className).toContain('pace-projected');
-    expect(nextTimeEl.textContent).toBe('~10:50');
-    expect(nextTimeEl.getAttribute('aria-label')).toBe('about 10:50');
+    expect(nextTimeEl.querySelector('[aria-hidden="true"]').textContent).toBe('~10:50');
+    expect(nextTimeEl.querySelector('.sr-only').textContent).toBe('about 10:50');
 
     vi.setSystemTime(new Date(2026, 9, 29, 10, 25, 0));
     const { c1: c1OnTime, c2: c2OnTime } = makeScenario({ drift: 0 });

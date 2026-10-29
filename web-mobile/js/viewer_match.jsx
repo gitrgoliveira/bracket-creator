@@ -137,7 +137,9 @@ export function MatchDetailCard({ match, onClose, escapeToClose = true, slotLabe
   const { shiro: teamShiroMark, aka: teamAkaMark } = window.teamMatchMarks ? window.teamMatchMarks(match, isTeam) : { shiro: "", aka: "" };
   const compId = match.compId || match.competitionId || "";
   const matchId = match.id || match.matchId || match.ID || "";
-  const d = paceDisplayOf(paceLookup, compId, matchId);
+  // Only a waiting match has a projected start: the lookup comes from the
+  // tournament list, which can trail this live copy by up to a pace tick.
+  const d = match.status === "scheduled" ? paceDisplayOf(paceLookup, compId, matchId) : null;
 
   return (
     <div className="match-detail-card">
@@ -247,7 +249,8 @@ export const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick, hig
     : null;
   const compId = m.compId || m.competitionId || "";
   const matchId = m.id || m.matchId || "";
-  const d = paceDisplayOf(paceLookup, compId, matchId);
+  // Only a waiting match has a projected start (see MatchDetailCard).
+  const d = m.status === "scheduled" ? paceDisplayOf(paceLookup, compId, matchId) : null;
   return (
     <button type="button" className={`vsched-item ${m.status === "running" ? "vsched-item--running" : ""} ${highlight ? "vsched-item--me" : ""}`} onClick={onClick} data-clickable={onClick ? "" : undefined}>
       <div className="vsched-item__head">

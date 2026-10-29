@@ -11,9 +11,9 @@ import { TeamScoreboard, IndividualScore, useTeamLineups, teamIVPWFrom, teamName
 import { isBarredMatch } from './ineligible_match.jsx';
 import { subBoutHasResult } from './team_default_credit.jsx';
 import { matchShowsScore } from './match_shows_score.jsx';
-import { courtPaceLookup, paceClockNow, paceDisplayOf, PaceTime } from './court_pace.jsx';
+import { useCourtPaceLookup, paceDisplayOf, PaceTime } from './court_pace.jsx';
 
-const { useMemo: useMD, useState: useStateD, useEffect: useEffectD } = React;
+const { useMemo: useMD } = React;
 
 // The Shiro-vs-Aka name pair the NEXT line and the UP NEXT bout list share:
 // Shiro dark on the left, Aka in the board's red on the right, "vs" between.
@@ -660,17 +660,7 @@ function TvDisplay({ court, tournament, competitions, withZekkenName, linkState 
     const running = useMD(() => findRunningOnCourt(competitions, court), [competitions, court]);
     const upcoming = useMD(() => findUpcomingOnCourt(competitions, court, running ? 2 : 3), [competitions, court, running]);
     const counts = useMD(() => countCourtMatches(competitions, court), [competitions, court]);
-    const [paceTick, setPaceTick] = useStateD(0);
-    useEffectD(() => {
-        const id = setInterval(() => setPaceTick((t) => t + 1), 60000);
-        return () => clearInterval(id);
-    }, []);
-    const pace = useMD(
-        () => courtPaceLookup(competitions, paceClockNow()),
-        // paceTick: trigger 60 s pace recomputation
-        // oxlint-disable-next-line react-hooks/exhaustive-deps
-        [competitions, paceTick]
-    );
+    const pace = useCourtPaceLookup(competitions);
 
     if (!competitions || competitions.length === 0) {
         return <div className="tvd tvd--empty" style={{

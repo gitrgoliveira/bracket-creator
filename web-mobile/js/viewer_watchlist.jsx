@@ -256,21 +256,21 @@ function WatchHeroCard({ nextMatch, primaryIds, entityLabel, onMatchClick, paceL
   // and without this it would print that match's scheduled time -- reading
   // exactly like a fixture still to come. The queue label is dropped with it:
   // "3 before yours" is meaningless once the bout is over, and so is this
-  // whole line, because the headline below carries the result instead. The div
-  // still renders (empty): it is the live region, and removing it is how the
-  // "your match has started" announcement was lost once already.
+  // whole line, because the headline below carries the result instead. The line
+  // still renders (empty), with its live region inside it: removing that region
+  // is how the "your match has started" announcement was lost once already.
   const finished = nextMatch.status === "completed";
   const compId = nextMatch.compId || nextMatch.competitionId || "";
   const matchId = nextMatch.id || nextMatch.matchId || "";
-  const timeNode = running ? "Now" : (
+  // The when-line is split in two. The live region announces what changes for
+  // the reader: "Now" as the match starts, and the queue label. The time sits
+  // outside it, because a projected time on a court running behind moves every
+  // minute and the region read the whole line out each time it did.
+  const waiting = !finished && !running;
+  const timeNode = waiting ? (
     <PaceTime display={paceDisplayOf(paceLookup, compId, matchId)} fallback={nextMatch.scheduledAt || "Time TBA"} />
-  );
-  const whenLine = finished ? "" : (
-    <>
-      {timeNode}
-      {queueLabel ? ` · ${queueLabel}` : ""}
-    </>
-  );
+  ) : null;
+  const liveText = finished ? "" : running ? "Now" : (queueLabel || "");
   // The score through matchScoreStr, the ONE owner every other completed row
   // in the app reads (VSchedItem, the admin schedule, the pool rows), so this
   // card cannot invent a second spelling of a result. It reads Shiro-left /
@@ -386,8 +386,10 @@ function WatchHeroCard({ nextMatch, primaryIds, entityLabel, onMatchClick, paceL
         {/* Always rendered, so the live region survives the moment the match
             starts. The old role=status sat on the Queue chip, which is removed
             when running, so "your match has started" could never be announced. */}
-        <div className="wl-hero__when" data-testid="my-match-queue" role="status" aria-live="polite" aria-atomic="true">
-          {whenLine}
+        <div className="wl-hero__when" data-testid="my-match-queue">
+          {timeNode}
+          {waiting && queueLabel ? <span aria-hidden="true"> · </span> : null}
+          <span role="status" aria-live="polite" aria-atomic="true">{liveText}</span>
         </div>
         <div className="wl-hero__round">
           {nextMatch.compName ? `${nextMatch.compName} · ` : ""}{phaseLabel}

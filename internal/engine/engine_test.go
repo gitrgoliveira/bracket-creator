@@ -2349,10 +2349,9 @@ func TestStartCompetition_LeagueMultiCourt_ThreeCourts(t *testing.T) {
 // field-mismatch validation. With these fields in the validation list,
 // a happy-path start (no drift) must succeed, these tests are the
 // "validation list doesn't reject valid starts" guard. The drift-
-// detection direction (concurrent change DOES reject) isn't pinned
-// here because reproducing the race deterministically would require
-// engine hooks that don't exist. The forward direction is sufficient
-// to catch a typo or wrong field reference in the validation block.
+// detection direction (concurrent change DOES reject) is pinned for Date
+// through the beforeStartCommit seam by
+// TestStartCompetition_DateChangedDuringStartIsRefused.
 func TestStartCompetition_PreservesNumberPrefix(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "prefix-test"
@@ -2383,4 +2382,48 @@ func TestStartCompetition_PreservesNumberPrefix(t *testing.T) {
 	assert.Equal(t, "K", stored.NumberPrefix, "NumberPrefix must survive the atomic commit")
 	assert.Equal(t, "10:30", stored.StartTime, "StartTime must survive the atomic commit")
 	assert.True(t, stored.RoundRobin, "RoundRobin must survive the atomic commit")
+}
+
+// TestStartCompetition_DateChangedDuringStartIsRefused pins the drift
+// direction for Date: the court floor reads the competition's day to find
+// the same-day competitions on shared courts, so a Date saved between the
+// draw's load and its commit would leave matches floored against the old
+// day. The commit refuses it and the competition stays in setup.
+func TestStartCompetition_DateChangedDuringStartIsRefused(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "date-drift"
+
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:           compID,
+		Name:         "Date Drift",
+		Kind:         "individual",
+		Format:       state.CompFormatLeague,
+		PoolSize:     3,
+		PoolSizeMode: "min",
+		PoolWinners:  2,
+		RoundRobin:   true,
+		Courts:       []string{"A"},
+		Date:         "01-11-2026",
+		StartTime:    "10:30",
+		Status:       state.CompStatusSetup,
+	}))
+	saveTestParticipants(t, store, compID, []string{"Alice", "Bob", "Charlie"})
+
+	eng.beforeStartCommit = func(id string) {
+		_, err := store.UpdateCompetitionChanged(id, func(c *state.Competition) (*state.Competition, error) {
+			c.Date = "02-11-2026"
+			return c, nil
+		})
+		require.NoError(t, err)
+	}
+
+	err := eng.StartCompetition(compID)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "changed during start")
+	assert.Contains(t, err.Error(), "Date")
+
+	stored, err := store.LoadCompetition(compID)
+	require.NoError(t, err)
+	assert.Equal(t, state.CompStatusSetup, stored.Status, "a refused commit leaves the competition in setup")
+	assert.Equal(t, "02-11-2026", stored.Date, "the concurrent Date save is kept")
 }

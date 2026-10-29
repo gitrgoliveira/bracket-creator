@@ -48,6 +48,10 @@ function deriveCompetitionName(rawName, kind) {
 // not placed on a day stacks with nothing); otherwise dates are compared trimmed.
 // A competition whose `courts` is missing or empty uses every tournament court
 // (safeCourts / tournamentCourts).
+//
+// Entries are filtered on PARSEABLE start times (timeToMinutes !== null), not
+// just truthy ones: the backend only length-caps StartTime (no format
+// validation), so a legacy/imported competition could carry a malformed value.
 function findStackCandidates(competitions, date, selectedCourts, tournamentCourts) {
   const trimmedDate = (date || "").trim();
   if (!trimmedDate) return [];
@@ -61,21 +65,6 @@ function findStackCandidates(competitions, date, selectedCourts, tournamentCourt
     const compCourts = (Array.isArray(cc.courts) && cc.courts.length > 0) ? cc.courts : normTournCourts;
     return compCourts.some((c) => selectedCourts.includes(c));
   });
-}
-
-// pickStackPredecessor returns the latest-STARTING candidate among same-day
-// competitions (sharing a court if selectedCourts is provided, or across all
-// same-day competitions if omitted): or null when there is no usable predecessor.
-//
-// Entries are filtered on PARSEABLE start times (timeToMinutes !== null), not
-// just truthy ones: the backend only length-caps StartTime (no format
-// validation), so a legacy/imported competition could carry a malformed value.
-// Comparison is numeric (minutes-since-midnight) so an un-zero-padded "9:00"
-// doesn't lex-sort after "10:00".
-function pickStackPredecessor(competitions, date, selectedCourts, tournamentCourts) {
-  const candidates = findStackCandidates(competitions, date, selectedCourts, tournamentCourts);
-  if (candidates.length === 0) return null;
-  return candidates.reduce((a, b) => (timeToMinutes(b.startTime) > timeToMinutes(a.startTime) ? b : a));
 }
 
 // Pure submit-time validation for AdminCreateCompetition's pool-format
@@ -1824,6 +1813,6 @@ window.AdminImportPage = AdminImportPage;
 // AnnouncementComposer component they drive (mp-djc).
 export {
   deriveCompetitionName, validatePoolSettings, validateSwissSettings,
-  findStackCandidates, pickStackPredecessor,
+  findStackCandidates,
   previewRowCourts, previewRowShiaijoError, importRowErrorText,
 };

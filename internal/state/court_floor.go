@@ -128,7 +128,9 @@ func (s *Store) CourtFloor(comp *Competition, courts []string, minutes SlotMinut
 			log.Printf("state: court floor %s: load competition: %v", id, err)
 			continue
 		}
-		if other == nil {
+		// A competition still in setup holds no draw; matches left by a failed
+		// draw attempt do not count, as the court queue leaves them out too.
+		if other == nil || other.Status == CompStatusSetup {
 			continue
 		}
 		if !SameDate(comp.Date, other.Date) {

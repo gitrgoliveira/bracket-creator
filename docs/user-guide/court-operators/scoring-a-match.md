@@ -91,7 +91,7 @@ You cannot start a match that has no confirmed competitors. The Later heading le
 
 When a shiai-jo runs 5 or more minutes ahead of or behind schedule, the court console's **Up next** card shows a projected start time such as "~10:52" instead of the planned time. The app estimates this from how far the shiai-jo has drifted from its plan, measuring every competition on the court. It compares when the last finished bout on that shiai-jo ended against its planned finish, or, when no bout is running, how long the first waiting bout has been overdue. When neither applies, or the difference is under 5 minutes, the planned time shows as usual. The planned times stored on the Tournament schedule and the **Scores** tab remain unchanged.
 
-Keep in mind that the projected time is an estimate. Correcting the last finished bout re-stamps that bout and can move the estimate, though correcting a result when needed is still completely fine. If a bout starts late after the shiai-jo stood idle, the next bout shows "about now" until the running bout finishes.
+Keep in mind that the projected time is an estimate. Correcting the last finished bout re-stamps that bout and can move the estimate, though correcting a result when needed is still completely fine. If a bout starts late after the shiai-jo stood idle, the next bout shows the current time (for example ~10:52 at 10:52) until the running bout finishes.
 
 ## Refresh the court view
 

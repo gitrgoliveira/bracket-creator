@@ -1067,37 +1067,43 @@ export async function attemptScoreWrite({
     // confirm: only the first attempt for a given patch is offered it.
     // Any other refusal goes to the caller's onRefusal (true = claimed).
     const claimOther = (e) => typeof onRefusal === 'function' && onRefusal(e) === true;
-    const confirmAndForce = async (e, refusal, buildConfirm, flagName, cancelMarker, isCatch = false) => {
-        const dialogOpts = buildConfirm(refusal);
+    const started = matchLabel(match) || matchLabel(matchId);
+    // The refusal the organiser may confirm past, with how to ask and which
+    // flag the resend carries; null for any other refusal.
+    const forcible = (e) => {
+        const refusal = downstreamKnockoutPlayedRefusal(e);
+        if (refusal && !result.forceDownstreamReopen) {
+            return { refusal, buildConfirm: downstreamKnockoutPlayedConfirm, flagName: 'forceDownstreamReopen', cancelMarker: 'downstreamKnockoutPlayedCancelled' };
+        }
+        const courtRefusal = allowCourtForce && !result.forceCourt ? courtBusyRefusal(e) : null;
+        if (courtRefusal) {
+            return { refusal: courtRefusal, buildConfirm: (r) => courtBusyForceConfirm(r, started), flagName: 'forceCourt', cancelMarker: 'courtForceCancelled' };
+        }
+        return null;
+    };
+    // Ask; on OK resend this write with the flag, on Cancel mark the refusal.
+    // Answers { cancelled: true } or { forced }; the resend's refusal throws.
+    const askAndResend = async (e, { refusal, buildConfirm, flagName, cancelMarker }) => {
         let ok = false;
-        try { ok = await confirmDialog(dialogOpts); } catch { ok = false; }
+        try { ok = await confirmDialog(buildConfirm(refusal)); } catch { ok = false; }
         if (!ok) {
             e[cancelMarker] = true;
-            if (isCatch) throw e;
-            claimOther(e);
-            return;
+            return { cancelled: true };
         }
-        let forced;
-        try {
-            forced = await attemptScoreWrite({
-                recordScore, confirmDialog, compId, matchId,
-                result: { ...result, [flagName]: true },
-                password, match, onRefusal, onDownstreamReopened, onForced, allowCourtForce,
-            });
-        } catch (err) {
-            if (isCatch) throw err;
-            claimOther(err);
-            return;
-        }
-        if (isCatch) {
-            // The caller awaits this write, so it reads the forced answer itself.
-            // Absent field means the server reopened nothing, and nothing is claimed.
-            if (forced && typeof forced === 'object' && !writeDidNotLand(forced)
-                && forced.reopenedMatches && forced.reopenedMatches.length) {
-                forced.downstreamReopened = forced.reopenedMatches;
-            }
-            return forced;
-        }
+        const forced = await attemptScoreWrite({
+            recordScore, confirmDialog, compId, matchId,
+            result: { ...result, [flagName]: true },
+            password, match, onRefusal, onDownstreamReopened, onForced, allowCourtForce,
+        });
+        return { forced };
+    };
+    // The outbox's refusal, claimed: nothing awaits it, so a Cancel or the
+    // resend's refusal goes to the caller's onRefusal.
+    const forceClaimed = async (e, force) => {
+        let outcome;
+        try { outcome = await askAndResend(e, force); } catch (err) { claimOther(err); return; }
+        if (outcome.cancelled) { claimOther(e); return; }
+        const { forced } = outcome;
         // The forced write is the one the caller's write became: its answer is
         // the caller's to read (a reopen's own-status token, review 5).
         if (typeof onForced === 'function') onForced(forced);
@@ -1110,17 +1116,23 @@ export async function attemptScoreWrite({
             }, () => {});
         }
     };
-    const started = matchLabel(match) || matchLabel(matchId);
-    const buildCourtConfirm = (refusal) => courtBusyForceConfirm(refusal, started);
-    const claim = (e) => {
-        const refusal = downstreamKnockoutPlayedRefusal(e);
-        if (refusal && !result.forceDownstreamReopen) {
-            confirmAndForce(e, refusal, downstreamKnockoutPlayedConfirm, 'forceDownstreamReopen', 'downstreamKnockoutPlayedCancelled');
-            return true;
+    // A direct write's thrown refusal: the caller awaits this write, so a
+    // Cancel throws the refusal again and the forced answer is returned.
+    const forceAwaited = async (e, force) => {
+        const outcome = await askAndResend(e, force);
+        if (outcome.cancelled) throw e;
+        const { forced } = outcome;
+        // Absent field means the server reopened nothing, and nothing is claimed.
+        if (forced && typeof forced === 'object' && !writeDidNotLand(forced)
+            && forced.reopenedMatches && forced.reopenedMatches.length) {
+            forced.downstreamReopened = forced.reopenedMatches;
         }
-        const courtRefusal = allowCourtForce && !result.forceCourt ? courtBusyRefusal(e) : null;
-        if (courtRefusal) {
-            confirmAndForce(e, courtRefusal, buildCourtConfirm, 'forceCourt', 'courtForceCancelled');
+        return forced;
+    };
+    const claim = (e) => {
+        const force = forcible(e);
+        if (force) {
+            forceClaimed(e, force);
             return true;
         }
         return claimOther(e);
@@ -1130,15 +1142,8 @@ export async function attemptScoreWrite({
     } catch (e) {
         // A write that still answers directly (a running score write) throws
         // its refusal: the same confirm, awaited, as before the outbox.
-        const refusal = downstreamKnockoutPlayedRefusal(e);
-        if (refusal && !result.forceDownstreamReopen) {
-            return await confirmAndForce(e, refusal, downstreamKnockoutPlayedConfirm, 'forceDownstreamReopen', 'downstreamKnockoutPlayedCancelled', true);
-        }
-        // bc-adna: court_busy arm in the catch path
-        const courtRefusal = allowCourtForce && !result.forceCourt ? courtBusyRefusal(e) : null;
-        if (courtRefusal) {
-            return await confirmAndForce(e, courtRefusal, buildCourtConfirm, 'forceCourt', 'courtForceCancelled', true);
-        }
+        const force = forcible(e);
+        if (force) return await forceAwaited(e, force);
         throw e;
     }
 }

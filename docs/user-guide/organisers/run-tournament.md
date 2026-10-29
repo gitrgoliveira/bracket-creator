@@ -340,7 +340,7 @@ The projected time has a few practical limits:
 
 - It is an estimate, not a promise.
 - Correcting the shiai-jo's last finished bout re-stamps that bout and can move the estimate.
-- A bout that starts late after the shiai-jo stood idle shows the next bout at "about now" until the running bout ends.
+- A bout that starts late after the shiai-jo stood idle shows the next bout at the current time (for example ~10:52 at 10:52) until the running bout ends.
 - A bout that cannot be fought because a competitor withdrew keeps its planned time and does not move the estimate for the bouts after it.
 - It takes the time from the tournament server, so it relies only on each device being set to the venue's time zone.
 

@@ -14,7 +14,7 @@ import { tapWords } from './match_history_view.jsx';
 import { useOpenedTapGuard } from './tap_guard.jsx';
 import { SELF_RUN_NO_CHECK_IN } from './competition_shape.jsx';
 import { pushToast } from './toast_queue.jsx';
-import { sharesCourtDay, sharesDay } from './court_queue.jsx';
+import { queueMoveCourts, sharesCourtDay, sharesDay } from './court_queue.jsx';
 import { courtPaceLookup, paceClockNow, PACE_TICK_MS } from './court_pace.jsx';
 
 const { useState: useS, useEffect: useE, useRef: useR, useCallback: useC, useMemo: useM } = React;
@@ -613,6 +613,9 @@ function App() {
   // ref, instead of re-registering on every tournament update (which would
   // churn the provider and open a transient unregistered window).
   const compsRef = useR(null);
+  // Each other competition's match as last pushed (status, court, time), so a
+  // score tap there does not refetch this competition's queue (queueMoveCourts).
+  const foreignQueueSeenRef = useR(new Map());
   // Per-tab client ID, generated once on mount. Used as the originator
   // identifier on password-reset POSTs so the SSE broadcast can be
   // ignored in the originating tab. Without this, the tab that just
@@ -1330,10 +1333,12 @@ function App() {
             } else if (event.type === "match_updated" && viewerCompId && event.data?.competitionId !== viewerCompId) {
                 // bc-pubq: queuePosition is court-wide, so another
                 // competition's match moving on a court and day this one
-                // shares changes this one's positions: refetch them.
+                // shares changes this one's positions: refetch them. Only a
+                // change of status, court or time moves a place; a score tap
+                // does not, so it refetches nothing.
                 const eventResults = event.data?.results || (event.data?.result ? [event.data.result] : []);
-                const courts = eventResults.map(r => r.court).filter(Boolean);
-                refetchIfSharesDay(event, courts);
+                const courts = queueMoveCourts(foreignQueueSeenRef.current, event.data?.competitionId, eventResults);
+                if (courts.length > 0) refetchIfSharesDay(event, courts);
             }
             // P1 (mp-9afd): fire a full-list refetch for list-level
             // transitions (competition_started / competition_completed change

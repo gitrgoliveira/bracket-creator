@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  deriveCompetitionName, validatePoolSettings, validateSwissSettings, pickStackPredecessor,
+  deriveCompetitionName, validatePoolSettings, validateSwissSettings,
   findStackCandidates,
   previewRowCourts, previewRowShiaijoError, importRowErrorText,
 } from '../admin_setup.jsx';
@@ -24,52 +24,52 @@ describe('findStackCandidates', () => {
   });
 });
 
-describe('pickStackPredecessor', () => {
+describe('findStackCandidates: which competitions the new one stacks after', () => {
   const day = '01-07-2026';
-  it('returns null when there are no competitions', () => {
-    expect(pickStackPredecessor([], day)).toBeNull();
-    expect(pickStackPredecessor(undefined, day)).toBeNull();
+  const ids = (list) => list.map((c) => c.id);
+
+  it('returns none when there are no competitions', () => {
+    expect(findStackCandidates([], day)).toEqual([]);
+    expect(findStackCandidates(undefined, day)).toEqual([]);
   });
 
-  it('returns null when no competition matches the date', () => {
-    expect(pickStackPredecessor([{ id: 'a', date: '02-07-2026', startTime: '09:00' }], day)).toBeNull();
+  it('leaves out competitions on another day', () => {
+    expect(findStackCandidates([{ id: 'a', date: '02-07-2026', startTime: '09:00' }], day)).toEqual([]);
   });
 
-  it('picks the latest-STARTING same-day competition', () => {
+  it('keeps every same-day competition when no courts are selected', () => {
     const comps = [
-      { id: 'a', date: day, startTime: '09:00' },
-      { id: 'c', date: day, startTime: '11:30' },
-      { id: 'b', date: day, startTime: '10:00' },
+      { id: 'a', date: day, startTime: '09:00', courts: ['A'] },
+      { id: 'b', date: day, startTime: '10:00', courts: ['B'] },
     ];
-    expect(pickStackPredecessor(comps, day).id).toBe('c');
+    expect(ids(findStackCandidates(comps, day))).toEqual(['a', 'b']);
   });
 
-  it('compares numerically, not lexicographically (un-padded "9:00" vs "10:00")', () => {
+  it('keeps only same-day competitions sharing a selected court', () => {
     const comps = [
-      { id: 'ten', date: day, startTime: '10:00' },
-      { id: 'nine', date: day, startTime: '9:00' },
+      { id: 'a', date: day, startTime: '09:00', courts: ['A'] },
+      { id: 'b', date: day, startTime: '10:00', courts: ['B'] },
+      { id: 'ab', date: day, startTime: '11:00', courts: ['A', 'B'] },
     ];
-    // Lex sort would pick "9:00" > "10:00"; numeric correctly picks 10:00.
-    expect(pickStackPredecessor(comps, day).id).toBe('ten');
+    expect(ids(findStackCandidates(comps, day, ['A'], ['A', 'B']))).toEqual(['a', 'ab']);
   });
 
-  it('Copilot finding: drops competitions with a malformed start time', () => {
+  it('reads a competition with no courts as using every tournament court', () => {
+    const comps = [{ id: 'all', date: day, startTime: '09:00', courts: [] }];
+    expect(ids(findStackCandidates(comps, day, ['B'], ['A', 'B']))).toEqual(['all']);
+    expect(findStackCandidates(comps, day, ['C'], ['A', 'B'])).toEqual([]);
+  });
+
+  it('drops competitions with a malformed or missing start time', () => {
     // A legacy/imported competition with an unparseable StartTime must not
-    // become `latest`; otherwise addMinutes() would emit "NaN:NaN".
+    // stack the new one after it; addMinutes() would emit "NaN:NaN".
     const comps = [
       { id: 'good', date: day, startTime: '09:00' },
       { id: 'bad', date: day, startTime: 'garbage' },
+      { id: 'empty', date: day, startTime: '' },
+      { id: 'none', date: day, startTime: null },
     ];
-    expect(pickStackPredecessor(comps, day).id).toBe('good');
-  });
-
-  it('returns null when ALL same-day start times are malformed', () => {
-    const comps = [
-      { id: 'x', date: day, startTime: 'garbage' },
-      { id: 'y', date: day, startTime: '' },
-      { id: 'z', date: day, startTime: null },
-    ];
-    expect(pickStackPredecessor(comps, day)).toBeNull();
+    expect(ids(findStackCandidates(comps, day))).toEqual(['good']);
   });
 });
 

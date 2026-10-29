@@ -280,3 +280,42 @@ func TestStore_CourtFloor_LogsAndSkipsCorruptNeighbour(t *testing.T) {
 	assert.Equal(t, "09:30", floor["A"])
 	assert.Contains(t, buf.String(), "corrupt-comp")
 }
+
+// A same-day neighbour still in setup holds no draw: matches a failed draw
+// attempt left behind set no floor, as the court queue leaves them out too.
+func TestStore_CourtFloor_SkipsSetupNeighbour(t *testing.T) {
+	dir := t.TempDir()
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+
+	target := &Competition{
+		ID:        "target-comp",
+		Date:      "2026-11-01",
+		StartTime: "09:00",
+		Courts:    []string{"A"},
+	}
+	require.NoError(t, store.SaveCompetition(target))
+
+	leftover := &Competition{
+		ID:        "setup-comp",
+		Date:      "2026-11-01",
+		StartTime: "09:00",
+		Courts:    []string{"A"},
+		Status:    CompStatusSetup,
+	}
+	require.NoError(t, store.SaveCompetition(leftover))
+	require.NoError(t, store.SavePoolMatches("setup-comp", []MatchResult{
+		{ID: "x1", Court: "A", ScheduledAt: "09:15", Status: MatchStatusScheduled},
+	}))
+
+	slotMin := dummySlotMinutes(15, 15)
+	floor, err := store.CourtFloor(target, []string{"A"}, slotMin)
+	require.NoError(t, err)
+	assert.Empty(t, floor, "a setup neighbour's leftover matches set no floor")
+
+	leftover.Status = CompStatusPools
+	require.NoError(t, store.SaveCompetition(leftover))
+	floor, err = store.CourtFloor(target, []string{"A"}, slotMin)
+	require.NoError(t, err)
+	assert.Equal(t, "09:30", floor["A"], "the same matches count once the neighbour is drawn")
+}

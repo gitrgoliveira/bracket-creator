@@ -109,7 +109,9 @@ export function courtQueuePositions(entries) {
 }
 
 export function courtQueueEntriesOf(comp) {
-    if (!comp) return [];
+    // A competition still in setup holds no draw: matches a failed draw
+    // attempt left behind take no place, as the server's queue leaves them out.
+    if (!comp || (comp.status || comp.config?.status) === 'setup') return [];
     const compId = comp.id || comp.config?.id || "";
     const compStartTime = comp.startTime || comp.config?.startTime || "";
     const compDate = comp.date || comp.config?.date || "";
@@ -201,6 +203,26 @@ export function orderOnCourt(competitions, court) {
     entries.sort(compareCourtDayQueue);
 
     return entries;
+}
+
+// queueMoveCourts answers the courts on which another competition's match
+// update can move a queue place: a match not seen before, or one whose status,
+// court or scheduled time changed. A score tap changes none of them, so it
+// answers none. `seen` (a Map) keeps each match's last-seen fields and is
+// updated in place; a match moved between courts names both.
+export function queueMoveCourts(seen, competitionId, results) {
+    const courts = new Set();
+    for (const r of results || []) {
+        if (!r) continue;
+        const key = `${competitionId}|${r.id || r.ID || ""}`;
+        const now = { status: r.status || "", court: r.court || "", scheduledAt: r.scheduledAt || "" };
+        const was = seen.get(key);
+        seen.set(key, now);
+        if (was && was.status === now.status && was.court === now.court && was.scheduledAt === now.scheduledAt) continue;
+        if (now.court) courts.add(now.court);
+        if (was && was.court) courts.add(was.court);
+    }
+    return [...courts];
 }
 
 export function sharesDay(comp, otherDate) {

@@ -202,9 +202,10 @@ func (e *Engine) generatePoolPreviewBracket(comp *state.Competition, poolMatches
 // uses. generateKnockout passes nil, so a knockout-only competition keeps the
 // day start.
 //
-// applyCourtFloor controls whether the bracket schedule respects floors from
-// other competitions on shared courts. It is true when drawn and false during
-// quarantine rebuilds so a repair never moves times against competitions drawn later.
+// courtFloor is the earliest start per court that the other competitions
+// sharing a court on the same day leave; nil means no floor. The quarantine
+// rebuild passes nil, so a repair never moves times against competitions
+// drawn later.
 func (e *Engine) buildBracketFromDraw(comp *state.Competition, draw *helper.KnockoutDraw, drawOrder []string, poolMatches []state.MatchResult, courtFloor map[string]time.Time) (*state.Bracket, error) {
 	if draw == nil || draw.Root == nil {
 		return nil, fmt.Errorf("buildBracketFromDraw: no draw to build from")

@@ -57,13 +57,13 @@ The app works out the drift for each shiai-jo across every competition sharing i
 
 You see the projected time wherever upcoming bouts appear: on the schedule, on match cards, on your watchlist, on the lobby screen, on the competition match list, and on court scoreboards. Every public screen shows the same time for a bout.
 
-The estimate refreshes every minute and as results arrive. It takes the time from the tournament server, not from your device's clock, and shows it in your device's time zone. A projected start is never earlier than now, never earlier than when the running bout is expected to end, and at least one match slot after the previous waiting bout. If a bout runs long, it pushes the next bout to "about now", minute by minute.
+The estimate refreshes every minute and as results arrive. It takes the time from the tournament server, not from your device's clock, and shows it in your device's time zone. A projected start is never earlier than now, never earlier than when the running bout is expected to end, and at least one match slot after the previous waiting bout. If a bout runs long, the next bout shows the current time (for example ~10:52 at 10:52), moving on minute by minute.
 
 Keep a few limits in mind:
 
 - It is an estimate, not a promise.
 - Correcting the shiai-jo's last finished bout re-stamps that bout and can move the estimate.
-- A bout that starts late after the shiai-jo stood idle shows the next bout at "about now" until the running bout ends.
+- A bout that starts late after the shiai-jo stood idle shows the next bout at the current time until the running bout ends.
 - A bout that cannot be fought because a competitor withdrew keeps its planned time and does not move the estimate for the bouts after it.
 - It relies on your device being set to the venue's time zone.
 

@@ -9,6 +9,7 @@ import {
     withCourtQueuePositions,
     sharesDay,
     sharesCourtDay,
+    queueMoveCourts,
     orderOnCourt,
     compareCourtDayQueue,
 } from '../court_queue.jsx';
@@ -108,6 +109,16 @@ describe('court queue: golden table parity with internal/state/court_queue.go', 
                 expect(entries[i].barred).toBe(expected[i].barred);
             }
         });
+
+        it('gives a competition still in setup no entries, as the server queue leaves it out', () => {
+            const leftovers = {
+                poolMatches: [{ id: 'p0', court: 'A', status: 'scheduled' }],
+                bracket: { rounds: [[{ id: 'r0m0', court: 'A', status: 'scheduled' }]] },
+            };
+            expect(courtQueueEntriesOf({ id: 'c1', status: 'setup', ...leftovers })).toEqual([]);
+            expect(courtQueueEntriesOf({ config: { id: 'c1', status: 'setup' }, ...leftovers })).toEqual([]);
+            expect(courtQueueEntriesOf({ id: 'c1', status: 'pools', ...leftovers })).toHaveLength(2);
+        });
     });
 
     describe('withCourtQueuePositions', () => {
@@ -157,6 +168,27 @@ describe('court queue: golden table parity with internal/state/court_queue.go', 
             expect(updated).toBe(originalList);
             expect(updated[0]).toBe(compA);
             expect(updated[0].poolMatches[0]).toBe(compA.poolMatches[0]);
+        });
+    });
+
+    describe('queueMoveCourts', () => {
+        it('names courts only for a new match or a change of status, court or time', () => {
+            const seen = new Map();
+            const m = { id: 'Pool A-0', court: 'A', scheduledAt: '09:00', status: 'running' };
+            expect(queueMoveCourts(seen, 'c2', [m])).toEqual(['A']);
+            expect(queueMoveCourts(seen, 'c2', [{ ...m, ipponsA: ['M'] }])).toEqual([]);
+            expect(queueMoveCourts(seen, 'c2', [{ ...m, status: 'completed' }])).toEqual(['A']);
+            expect(queueMoveCourts(seen, 'c2', [{ ...m, status: 'completed', scheduledAt: '09:10' }])).toEqual(['A']);
+            expect(queueMoveCourts(seen, 'c2', [{ ...m, status: 'completed', scheduledAt: '09:10', court: 'B' }]).sort()).toEqual(['A', 'B']);
+        });
+
+        it('keys matches by competition, since match ids repeat across competitions', () => {
+            const seen = new Map();
+            const m = { id: 'Pool A-0', court: 'A', scheduledAt: '09:00', status: 'running' };
+            expect(queueMoveCourts(seen, 'c2', [m])).toEqual(['A']);
+            expect(queueMoveCourts(seen, 'c3', [m])).toEqual(['A']);
+            expect(queueMoveCourts(seen, 'c2', [m, null])).toEqual([]);
+            expect(queueMoveCourts(seen, 'c2', undefined)).toEqual([]);
         });
     });
 

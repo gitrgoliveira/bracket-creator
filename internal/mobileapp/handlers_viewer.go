@@ -208,12 +208,21 @@ func buildViewerCompetitionPayloads(store *state.Store, courtFilter string) ([]a
 
 	// The queue is court-wide, so a competition the court feed leaves out
 	// still counts toward it; a setup competition has no matches to count.
+	// It is numbered once, and each competition takes its own slice of the
+	// positions, rather than every payload re-sorting the whole queue.
 	var queue []state.CourtQueueEntry
+	spans := make(map[*viewerCompetition][2]int, len(loaded))
 	for _, l := range loaded {
 		if l == nil || l.comp.Status == state.CompStatusSetup {
 			continue
 		}
+		start := len(queue)
 		queue = append(queue, state.CourtQueueEntriesOf(l.comp, l.poolMatches, l.bracket)...)
+		spans[l] = [2]int{start, len(queue)}
+	}
+	positions := state.CourtQueuePositions(queue)
+	for l, span := range spans {
+		l.queuePositions = positions[span[0]:span[1]]
 	}
 
 	tournament := loadTournamentForSlots(store)
@@ -221,7 +230,7 @@ func buildViewerCompetitionPayloads(store *state.Store, courtFilter string) ([]a
 	comps := make([]any, 0, len(ids))
 	for _, l := range loaded {
 		if l != nil && l.inFeed {
-			comps = append(comps, l.payload(queue, tournament))
+			comps = append(comps, l.payload(tournament))
 		}
 	}
 	return comps, nil
@@ -245,6 +254,10 @@ type viewerCompetition struct {
 	pmErr      error
 	brErr      error
 	squads     map[string][]domain.TeamMember
+	// queuePositions are this competition's slice of the one court-wide
+	// queue the aggregate numbered (pool matches first, then the bracket in
+	// draw order); nil for a setup competition, which has no matches.
+	queuePositions []int
 }
 
 // loadViewerCompetition reads the public per-competition viewer data shared by
@@ -430,9 +443,6 @@ func stampViewerEligibility(store *state.Store, compID string, poolMatches []sta
 	return bracket
 }
 
-// stampSlotMinutes sets payload["slotMinutes"] and payload["knockoutSlotMinutes"]
-// from engine.SlotMinutes. A mixed competition holds two different slots, so
-// the knockout one rides along for the JS to use on knockout matches.
 // loadTournamentForSlots reads the tournament for the slot minutes a viewer
 // payload carries; an unreadable one is logged and read as nil, which
 // engine.SlotMinutes tolerates, so the payload never fails for it.
@@ -445,6 +455,9 @@ func loadTournamentForSlots(store *state.Store) *state.Tournament {
 	return tournament
 }
 
+// stampSlotMinutes sets payload["slotMinutes"] and payload["knockoutSlotMinutes"]
+// from engine.SlotMinutes. A mixed competition holds two different slots, so
+// the knockout one rides along for the JS to use on knockout matches.
 func stampSlotMinutes(payload gin.H, comp *state.Competition, tournament *state.Tournament) {
 	if payload == nil {
 		return
@@ -461,14 +474,16 @@ func stampSlotMinutes(payload gin.H, comp *state.Competition, tournament *state.
 // payload numbers the competition's matches on the court-wide queue, redacts
 // operator-only audit fields and builds the public per-competition viewer
 // payload ({config, poolMatches, bracket}).
-func (l *viewerCompetition) payload(queue []state.CourtQueueEntry, tournament *state.Tournament) gin.H {
+func (l *viewerCompetition) payload(tournament *state.Tournament) gin.H {
 	comp, poolMatches, bracket := l.comp, l.poolMatches, l.bracket
 	isTeamComp, squads := l.isTeamComp, l.squads
 	players, plErr := l.players, l.plErr
 	pools, poolsErr, pmErr, brErr := l.pools, l.poolsErr, l.pmErr, l.brErr
 
 	// Court-wide queuePosition across every competition on that court on the same day.
-	stampCourtQueuePositions(comp, poolMatches, bracket, queue)
+	if l.queuePositions != nil {
+		applyQueuePositions(poolMatches, bracket, l.queuePositions)
+	}
 
 	// Redact operator-only audit fields before this PUBLIC payload.
 	stripMatchesAudit(poolMatches)

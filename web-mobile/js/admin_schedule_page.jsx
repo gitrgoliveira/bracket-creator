@@ -370,7 +370,7 @@ export function AdminSchedulePage({ tournament, onBack, onMoveCourt, onLogout, o
           </div>
         </div>
 
-        <CourtPacePanel byCourt={paceByCourt} safeMatchDuration={safeMatchMinutes} />
+        <CourtPacePanel byCourt={paceByCourt} safeMatchDuration={safeMatchMinutes} competitions={tournament.competitions} />
 
         <div className="tw-sched">
           <div className="tw-sched__filters" data-testid="admin-schedule-court-filter">

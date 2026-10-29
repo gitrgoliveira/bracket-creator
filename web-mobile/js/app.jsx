@@ -1321,12 +1321,6 @@ function App() {
                 // has already persisted the new status before broadcasting, so
                 // this fetch deterministically picks up the transition.
                 jitteredTimeout(() => window.API.fetchCompetitionDetails(viewerCompId).then(takeCompDetail).catch(err => console.error('SSE refresh failed:', err)), detailJitter);
-                // bc-pace: when viewing a competition, refetch the tournament list for match updates
-                // in the same competition or one sharing its court and day so pace drift stays current.
-                // Unrelated competitions skip the list refetch, preserving the scaling win.
-                if (event.type === "match_updated") {
-                    jitteredTimeout(maybeLoad, listJitter);
-                }
             } else if (event.type === "match_updated" && viewerCompId && event.data?.competitionId !== viewerCompId) {
                 // bc-pubq: queuePosition is court-wide, so another
                 // competition's match moving on a court and day this one
@@ -1337,8 +1331,6 @@ function App() {
                 const courts = eventResults.map(r => r.court).filter(Boolean);
                 if (sharesCourtDay(selectedCompDataRef.current, otherDate, courts)) {
                     jitteredTimeout(() => window.API.fetchCompetitionDetails(viewerCompId).then(takeCompDetail).catch(err => console.error('SSE refresh failed:', err)), detailJitter);
-                    // bc-pace: refetch the tournament list so pace drift updates for the shared court.
-                    jitteredTimeout(maybeLoad, listJitter);
                 }
             }
             // P1 (mp-9afd): fire a full-list refetch for list-level

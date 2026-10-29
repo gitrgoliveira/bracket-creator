@@ -199,6 +199,11 @@ function normalizeViewerCompItem(item) {
         // rosterFullyLoaded, so this never makes an existing client quieter
         // than it was.
         rosterAvailable: item.rosterAvailable,
+        // The server's per-competition slot minutes (handlers_viewer.go
+        // stampSlotMinutes), also siblings of config. court_pace.jsx reads
+        // them off the flattened competition; dropped here, no pace projects.
+        slotMinutes: item.slotMinutes,
+        knockoutSlotMinutes: item.knockoutSlotMinutes,
         // bc-pnum: the members map is ALSO a sibling of config on the wire,
         // where it is called `teamMembers` (present only for a team
         // competition, keyed by the team's participant id --

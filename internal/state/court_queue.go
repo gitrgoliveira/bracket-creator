@@ -58,6 +58,14 @@ func QueueStartRank(startTime string) int {
 	return math.MaxInt
 }
 
+// SameQueueDay reports whether two competition dates share court queues: equal
+// after trimming, two blank dates included. It is the one owner of rule 6 above;
+// state.SameDate differs (two blank dates are NOT a day there) and must not stand
+// in for it.
+func SameQueueDay(a, b string) bool {
+	return strings.TrimSpace(a) == strings.TrimSpace(b)
+}
+
 // CourtQueues returns each court's queue as indexes into entries, in queue order
 // (running first, then waiting; completed left out; barred kept in place).
 func CourtQueues(entries []CourtQueueEntry) map[CourtKey][]int {
@@ -66,6 +74,7 @@ func CourtQueues(entries []CourtQueueEntry) map[CourtKey][]int {
 		if e.Status != MatchStatusRunning && e.Status != MatchStatusScheduled {
 			continue
 		}
+		// The key's date is trimmed, which is what SameQueueDay compares.
 		key := CourtKey{
 			Date:  strings.TrimSpace(e.Date),
 			Court: e.Court,

@@ -131,17 +131,19 @@ export function projectCourtPace(entries, { now, slotOf } = {}) {
     // Completed drift:
     // The LAST completed match on the court by court-queue keys (scheduledAt, competition start time,
     // competition id, draw index; NOT newest modifiedAt): finish stamp minus planned end.
+    // A match closed before its own planned start (a fusensho or kiken recorded
+    // ahead of its slot) says nothing about the court's pace, so it is skipped.
     let completedDrift = null;
-    const validCompleted = completed.filter(e => paceClockMinutes(e.scheduledAt) !== null && validSlot(e) !== null);
+    const validCompleted = completed.filter(e => {
+        const plannedStart = paceClockMinutes(e.scheduledAt);
+        if (plannedStart === null || validSlot(e) === null) return false;
+        const finishMinutes = stampMinutesOfDay(e.match?.modifiedAt);
+        return finishMinutes !== null && finishMinutes >= plannedStart;
+    });
     if (validCompleted.length > 0) {
         const lastCompleted = validCompleted[validCompleted.length - 1];
-        const finishMinutes = stampMinutesOfDay(lastCompleted.match?.modifiedAt);
-        if (finishMinutes !== null) {
-            const plannedStart = paceClockMinutes(lastCompleted.scheduledAt);
-            const slot = validSlot(lastCompleted);
-            const plannedEnd = plannedStart + slot;
-            completedDrift = finishMinutes - plannedEnd;
-        }
+        const plannedEnd = paceClockMinutes(lastCompleted.scheduledAt) + validSlot(lastCompleted);
+        completedDrift = stampMinutesOfDay(lastCompleted.match?.modifiedAt) - plannedEnd;
     }
 
     // Idle drift:

@@ -187,3 +187,10 @@ func TestCourtQueue_PoolAndBracketShareOnePosition(t *testing.T) {
 	positions := state.CourtQueuePositions(entries)
 	require.Equal(t, []int{1, 2}, positions)
 }
+
+func TestSameQueueDay(t *testing.T) {
+	assert.True(t, state.SameQueueDay("29-10-2026", " 29-10-2026 "))
+	assert.True(t, state.SameQueueDay("", "  "), "two blank dates share one queue")
+	assert.False(t, state.SameQueueDay("29-10-2026", "30-10-2026"))
+	assert.False(t, state.SameQueueDay("29-10-2026", ""))
+}

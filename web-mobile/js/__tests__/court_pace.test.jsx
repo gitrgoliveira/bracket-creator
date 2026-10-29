@@ -218,6 +218,20 @@ describe('court_pace projection table tests', () => {
     });
 });
 
+describe('court_pace early decisions', () => {
+    it('a later bout closed by a decision long before its slot does not drag drift negative', () => {
+        const entries = [
+            makeEntry({ matchId: 'm1', status: 'running', scheduledAt: '09:00', slotMinutes: 5, drawIndex: 0 }),
+            makeEntry({ matchId: 'm2', status: 'scheduled', scheduledAt: '10:35', slotMinutes: 5, drawIndex: 1 }),
+            makeEntry({ matchId: 'm3', status: 'completed', scheduledAt: '10:30', slotMinutes: 5, modifiedAt: localStamp(9, 1), drawIndex: 2 }),
+        ];
+        const res = projectCourtPace(entries, { now: 9 * 60 + 2 });
+        expect(res.completedDrift).toBeNull();
+        expect(res.drift).toBe(0);
+        expect(res.projections[0].projectedMinutes).toBe(10 * 60 + 35);
+    });
+});
+
 describe('court_pace helper small cases', () => {
     it('paceDisplay with null projection and empty scheduledAt', () => {
         expect(paceDisplay('', null)).toEqual({ text: '', ariaLabel: '', projected: false });

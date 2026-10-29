@@ -35,7 +35,10 @@ export function filterMatchesByCourt(matches, courtParam) {
 //                           − nowMin, floored at 0). Falls back to
 //                           estimatedRemainingMin when no scheduled times exist.
 //   delta               : estimatedRemainingMin − plannedRemainingMin
-//                         positive = behind schedule, negative = ahead
+//                         the court's remaining LOAD against its plan, which
+//                         only suggestRebalances reads. The "behind"/"ahead"
+//                         label the panel shows is court_pace.jsx's drift, the
+//                         one owner of how late a court runs.
 //
 // nowMinutes is optional; defaults to the current wall-clock (read via
 // `new Date()`). CourtPacePanel omits it: the 60 s tick forces a re-render
@@ -116,9 +119,11 @@ export function suggestRebalances(perCourtStats, perMatchMinutes) {
 
 // CourtPacePanel: admin-only collapsible card showing per-court pace status
 // and a rebalancing suggestion. Court drift comes from court_pace.jsx, the one pace owner.
-// Note: the panel uses safeMatchDuration as every competition's slot because its
-// flattened records carry no per-competition slot.
-export function CourtPacePanel({ byCourt, safeMatchDuration }) {
+// Each match's slot is its competition's slotMinutes, as the public screens
+// use, so the organiser and a spectator read the same projection; a
+// competition that carries none falls back to safeMatchDuration (the page's
+// "Time per match").
+export function CourtPacePanel({ byCourt, safeMatchDuration, competitions }) {
   const [open, setOpen] = useStateA(false);
   // setTick forces a re-render every 60 s so computeCourtPaceStats and court pace
   // re-read the current wall-clock time.
@@ -148,6 +153,11 @@ export function CourtPacePanel({ byCourt, safeMatchDuration }) {
   const suggestion = suggestRebalances(populatedStats, safeMatchDuration);
 
   const { now } = paceClockNow();
+  const slotByComp = new Map((competitions || []).map(c => [c.id, c.slotMinutes]));
+  const slotOf = (e) => {
+    const s = slotByComp.get(e.competitionId);
+    return typeof s === 'number' && s > 0 ? s : safeMatchDuration;
+  };
 
   const badgeStyle = (drift) => {
     const abs = Math.abs(drift);
@@ -185,7 +195,7 @@ export function CourtPacePanel({ byCourt, safeMatchDuration }) {
               const matches = byCourt[stat.court] || [];
               const pace = projectCourtPace(flatMatchesToPaceEntries(matches), {
                 now,
-                slotOf: () => safeMatchDuration,
+                slotOf,
               });
               const drift = pace.drift;
               const firstWaiting = pace.projections[0];

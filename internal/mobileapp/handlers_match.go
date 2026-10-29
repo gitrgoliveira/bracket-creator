@@ -115,7 +115,7 @@ func loadCourtQueueEntries(store *state.Store, served *state.Competition) []stat
 		if comp == nil || comp.Status == state.CompStatusSetup {
 			continue
 		}
-		if served != nil && strings.TrimSpace(comp.Date) != strings.TrimSpace(served.Date) {
+		if served != nil && !state.SameQueueDay(comp.Date, served.Date) {
 			continue
 		}
 		poolMatches, err := store.LoadPoolMatches(id)
@@ -156,14 +156,18 @@ func stampCourtQueuePositions(comp *state.Competition, poolMatches []state.Match
 		combined = append(combined, e)
 	}
 
-	positions := state.CourtQueuePositions(combined)
+	applyQueuePositions(poolMatches, bracket, state.CourtQueuePositions(combined))
+}
+
+// applyQueuePositions stamps positions, laid out as state.CourtQueueEntriesOf
+// lays out the competition's entries (pool matches, then the bracket in draw
+// order), onto its matches.
+func applyQueuePositions(poolMatches []state.MatchResult, bracket *state.Bracket, positions []int) {
 	for i := range poolMatches {
 		poolMatches[i].QueuePosition = positions[i]
 	}
-
-	bracketMatches := state.BracketMatchesInDrawOrder(bracket)
 	offset := len(poolMatches)
-	for i, bm := range bracketMatches {
+	for i, bm := range state.BracketMatchesInDrawOrder(bracket) {
 		bm.QueuePosition = positions[offset+i]
 	}
 }

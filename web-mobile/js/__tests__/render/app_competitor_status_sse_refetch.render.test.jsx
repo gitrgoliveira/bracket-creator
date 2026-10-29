@@ -41,36 +41,36 @@ let unmount;
 
 afterAll(() => { if (unmount) unmount(); });
 
-describe('competitor_status_updated cross-competition refetch in app.jsx', () => {
-  it('refetches open competition detail on competitor_status_updated from a same-day competition, but not from another day', async () => {
+describe('cross-competition SSE refetch in app.jsx', () => {
+  it('refetches open competition detail on a same-day competition\'s event, but not from another day', async () => {
     ({ unmount } = await mountApp({ path: '/competition/c1', globals: STUBBED_GLOBALS }));
     expect(page.props).toBeTruthy();
     expect(window.API.fetchCompetitionDetails).toHaveBeenCalledTimes(1);
     expect(window.API.fetchCompetitionDetails).toHaveBeenLastCalledWith('c1');
 
-    // A competitor_status_updated event from another competition on the same day refetches the open competition.
-    const randomSameDay = vi.spyOn(Math, 'random').mockReturnValue(0);
-    try {
-      await act(async () => {
-        sse.emit({ type: 'competitor_status_updated', data: { competitionId: 'c2' } });
-      });
-      await settle();
-    } finally {
-      randomSameDay.mockRestore();
-    }
-    expect(window.API.fetchCompetitionDetails).toHaveBeenCalledTimes(2);
-    expect(window.API.fetchCompetitionDetails).toHaveBeenLastCalledWith('c1');
+    const emit = async (type, competitionId) => {
+      const random = vi.spyOn(Math, 'random').mockReturnValue(0);
+      try {
+        await act(async () => {
+          sse.emit({ type, data: { competitionId } });
+        });
+        await settle();
+      } finally {
+        random.mockRestore();
+      }
+    };
 
-    // A competitor_status_updated event from another competition on a different day does not refetch.
-    const randomOtherDay = vi.spyOn(Math, 'random').mockReturnValue(0);
-    try {
-      await act(async () => {
-        sse.emit({ type: 'competitor_status_updated', data: { competitionId: 'c3' } });
-      });
-      await settle();
-    } finally {
-      randomOtherDay.mockRestore();
+    // One shared refetch helper serves these events, so each is checked: a
+    // same-day competition refetches the open one, another day does not.
+    let calls = 1;
+    for (const type of ['competitor_status_updated', 'draw_generated', 'swiss_round_generated']) {
+      await emit(type, 'c2');
+      calls += 1;
+      expect(window.API.fetchCompetitionDetails, type).toHaveBeenCalledTimes(calls);
+      expect(window.API.fetchCompetitionDetails).toHaveBeenLastCalledWith('c1');
+
+      await emit(type, 'c3');
+      expect(window.API.fetchCompetitionDetails, type).toHaveBeenCalledTimes(calls);
     }
-    expect(window.API.fetchCompetitionDetails).toHaveBeenCalledTimes(2);
   });
 });

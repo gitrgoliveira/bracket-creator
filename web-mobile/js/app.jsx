@@ -1230,6 +1230,15 @@ function App() {
         //     walls so they don't simultaneously storm GET /api/viewer/competitions.
         const detailJitter = Math.random() * 500;
         const listJitter = Math.random() * 2000;
+        const refetchDetail = () => jitteredTimeout(() => window.API.fetchCompetitionDetails(viewerCompId).then(takeCompDetail).catch(err => console.error('SSE refresh failed:', err)), detailJitter);
+        // another competition's event: refetch the open competition only when the two share a day (and, when `courts` is given, a court on that day)
+        const refetchIfSharesDay = (event, courts) => {
+            const otherDate = (compsRef.current || []).find(c => c.id === event.data?.competitionId)?.date || "";
+            const shares = courts
+                ? sharesCourtDay(selectedCompDataRef.current, otherDate, courts)
+                : sharesDay(selectedCompDataRef.current, otherDate);
+            if (shares) refetchDetail();
+        };
         if (event.type === "tournament_updated") {
             if (!authPromptRef.current) jitteredTimeout(maybeLoad, listJitter);
         } else if (event.type === "password_reset") {
@@ -1288,13 +1297,9 @@ function App() {
             // for any view that caches its own derived state.
             if (viewerCompId === event.data?.competitionId) {
                 setSelectedCompData(prev => patchCompetitionData(prev, event));
-                jitteredTimeout(() => window.API.fetchCompetitionDetails(viewerCompId).then(takeCompDetail).catch(err => console.error('SSE refresh failed:', err)), detailJitter);
+                refetchDetail();
             } else if (viewerCompId && event.data?.competitionId !== viewerCompId) {
-                const otherComp = (compsRef.current || []).find(c => c.id === event.data?.competitionId);
-                const otherDate = otherComp?.date || "";
-                if (sharesDay(selectedCompDataRef.current, otherDate)) {
-                    jitteredTimeout(() => window.API.fetchCompetitionDetails(viewerCompId).then(takeCompDetail).catch(err => console.error('SSE refresh failed:', err)), detailJitter);
-                }
+                refetchIfSharesDay(event);
             }
             // competitor_status_updated is a list-level event (eligibility
             // badges on the lobby): always refresh the full list.
@@ -1320,18 +1325,14 @@ function App() {
                 // Refresh current competition detail (jittered): the backend
                 // has already persisted the new status before broadcasting, so
                 // this fetch deterministically picks up the transition.
-                jitteredTimeout(() => window.API.fetchCompetitionDetails(viewerCompId).then(takeCompDetail).catch(err => console.error('SSE refresh failed:', err)), detailJitter);
+                refetchDetail();
             } else if (event.type === "match_updated" && viewerCompId && event.data?.competitionId !== viewerCompId) {
                 // bc-pubq: queuePosition is court-wide, so another
                 // competition's match moving on a court and day this one
                 // shares changes this one's positions: refetch them.
-                const otherComp = (compsRef.current || []).find(c => c.id === event.data?.competitionId);
-                const otherDate = otherComp?.date || "";
                 const eventResults = event.data?.results || (event.data?.result ? [event.data.result] : []);
                 const courts = eventResults.map(r => r.court).filter(Boolean);
-                if (sharesCourtDay(selectedCompDataRef.current, otherDate, courts)) {
-                    jitteredTimeout(() => window.API.fetchCompetitionDetails(viewerCompId).then(takeCompDetail).catch(err => console.error('SSE refresh failed:', err)), detailJitter);
-                }
+                refetchIfSharesDay(event, courts);
             }
             // P1 (mp-9afd): fire a full-list refetch for list-level
             // transitions (competition_started / competition_completed change
@@ -1353,7 +1354,7 @@ function App() {
             // Court/time move: no competitionId in payload, so refresh the
             // currently selected competition (if any) and the tournament list.
             if (viewerCompId) {
-                jitteredTimeout(() => window.API.fetchCompetitionDetails(viewerCompId).then(takeCompDetail).catch(err => console.error('SSE refresh failed:', err)), detailJitter);
+                refetchDetail();
             }
             jitteredTimeout(maybeLoad, listJitter);
         } else if (event.type === "draw_generated" || event.type === "draw_discarded") {
@@ -1361,13 +1362,9 @@ function App() {
             // details (new pools/bracket data or cleared state) and the
             // tournament list so status badges update.
             if (viewerCompId === event.data?.competitionId) {
-                jitteredTimeout(() => window.API.fetchCompetitionDetails(viewerCompId).then(takeCompDetail).catch(err => console.error('SSE refresh failed:', err)), detailJitter);
+                refetchDetail();
             } else if (viewerCompId && event.data?.competitionId !== viewerCompId) {
-                const otherComp = (compsRef.current || []).find(c => c.id === event.data?.competitionId);
-                const otherDate = otherComp?.date || "";
-                if (sharesDay(selectedCompDataRef.current, otherDate)) {
-                    jitteredTimeout(() => window.API.fetchCompetitionDetails(viewerCompId).then(takeCompDetail).catch(err => console.error('SSE refresh failed:', err)), detailJitter);
-                }
+                refetchIfSharesDay(event);
             }
             jitteredTimeout(maybeLoad, listJitter);
         } else if (event.type === "swiss_round_generated") {
@@ -1379,13 +1376,9 @@ function App() {
             // / participants_updated pattern: no separate display-mode branch
             // needed because the unconditional load() at the end covers it.
             if (viewerCompId === event.data?.competitionId) {
-                jitteredTimeout(() => window.API.fetchCompetitionDetails(viewerCompId).then(takeCompDetail).catch(err => console.error('SSE refresh failed:', err)), detailJitter);
+                refetchDetail();
             } else if (viewerCompId && event.data?.competitionId !== viewerCompId) {
-                const otherComp = (compsRef.current || []).find(c => c.id === event.data?.competitionId);
-                const otherDate = otherComp?.date || "";
-                if (sharesDay(selectedCompDataRef.current, otherDate)) {
-                    jitteredTimeout(() => window.API.fetchCompetitionDetails(viewerCompId).then(takeCompDetail).catch(err => console.error('SSE refresh failed:', err)), detailJitter);
-                }
+                refetchIfSharesDay(event);
             }
             // swiss_round_generated updates the tournament list (swissCurrentRound
             // counter): always do one list refresh: covers display mode, home-
@@ -1397,7 +1390,7 @@ function App() {
             // event targets it; also refresh the tournament list so participant
             // counts stay accurate.
             if (viewerCompId === event.data?.competitionId) {
-                jitteredTimeout(() => window.API.fetchCompetitionDetails(viewerCompId).then(takeCompDetail).catch(err => console.error('SSE refresh failed:', err)), detailJitter);
+                refetchDetail();
             }
             jitteredTimeout(maybeLoad, listJitter);
         } else if (event.type === "lineup_updated") {

@@ -66,7 +66,7 @@ func (stubScoringEngine) RecordMatchResultWithIneligibilityTx(state.StoreTx, str
 	return nil, nil
 }
 
-func (stubScoringEngine) StartMatchTx(state.StoreTx, string, string) error {
+func (stubScoringEngine) StartMatchTx(state.StoreTx, string, string, ...bool) error {
 	return nil
 }
 
@@ -74,7 +74,7 @@ func (stubScoringEngine) CheckStartAfterSendBack(string, string, string) error {
 	return nil
 }
 
-func (stubScoringEngine) CheckCrossCompCourtBusy(string, string) error {
+func (stubScoringEngine) CheckCrossCompCourtBusyOnStart(string, string, state.MatchStatus) error {
 	return nil
 }
 

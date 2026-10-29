@@ -1508,6 +1508,11 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 		var body struct {
 			Reason                string `json:"reason"`
 			ForceDownstreamReopen bool   `json:"forceDownstreamReopen"`
+			// ForceCourt is the organiser's "Reopen anyway" (bc-adna): a
+			// reopen into running on a court that already runs a bout skips
+			// both court gates. The route is main-gated in self-run, so no
+			// anonymous caller reaches it.
+			ForceCourt bool `json:"forceCourt"`
 			// The optional writeId and basis (bc-evts F1).
 			writeTag
 		}
@@ -1547,8 +1552,9 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 		// has to remember to wrap the call.
 		var reopenedDownstream []engine.ReopenedMatch
 		restored, err := eng.ReopenMatch(id, mid, reason, body.tagInto(engine.ForceOptions{
-			Force:    body.ForceDownstreamReopen,
-			Reopened: &reopenedDownstream,
+			Force:      body.ForceDownstreamReopen,
+			Reopened:   &reopenedDownstream,
+			ForceCourt: body.ForceCourt,
 		}))
 		if err != nil {
 			var notFoundErr *engine.NotFoundError
@@ -1881,7 +1887,7 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 //
 // In officiated mode this is a pass-through that returns "admin", true.
 // On LoadTournament error the function fails closed (500).
-func enforceSelfRunPolicy(c *gin.Context, tl TournamentLoader, verifier PasswordVerifier, req *ScoreRequest) (string, bool) {
+func enforceSelfRunPolicy(c *gin.Context, tl TournamentLoader, verifier PasswordVerifier, req *ScoreRequest, forceCourt *bool) (string, bool) {
 	anonymous, ok := selfRunAnonymous(c, tl, verifier)
 	if !ok {
 		return "", false
@@ -1911,6 +1917,9 @@ func enforceSelfRunPolicy(c *gin.Context, tl TournamentLoader, verifier Password
 	// interfering with another session's rev ordering.
 	req.Rev = 0
 	req.RevSession = ""
+	// bc-adna: forcing a start on a busy court is the organiser's alone; a
+	// participant's forceCourt is dropped, so their start is court_busy.
+	*forceCourt = false
 	return "self-reported", true
 }
 
@@ -3347,6 +3356,11 @@ type scoreRequestBody struct {
 	// startPatch): the score the stored match holds is kept rather than
 	// replaced by the payload's empty one (engine.ForceOptions.StartOnly).
 	StartOnly bool `json:"startOnly"`
+	// ForceCourt is the organiser's "Start anyway" (bc-adna): a start on a
+	// court that already runs a bout skips both court gates and lands; the
+	// sides gate still runs. Request-only, like StartOnly, and dropped for
+	// an anonymous self-run caller (enforceSelfRunPolicy).
+	ForceCourt bool `json:"forceCourt"`
 	// ClearWithdrawal marks a completed correction that removes a withdrawal
 	// or default win recorded by mistake: the payload is the real result and
 	// replaces the ruling (state.MatchResult.ClearsWithdrawal,
@@ -3579,7 +3593,7 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 
 		// mp-ba3: self-run decision allowlist + result provenance. Runs
 		// after Validate() so the request is structurally valid.
-		resultSource, ok := enforceSelfRunPolicy(c, tl, verifier, &req)
+		resultSource, ok := enforceSelfRunPolicy(c, tl, verifier, &req, &body.ForceCourt)
 		if !ok {
 			return
 		}
@@ -3684,8 +3698,12 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 			reopenedDownstream []engine.ReopenedMatch
 		)
 		txErr := tx.WithCourtExclusivityLock(func() error {
-			if !isWithdrawal && !isCorrection {
-				if err := eng.CheckCrossCompCourtBusy(id, mid); err != nil {
+			// bc-adna: the court is judged only on a write that moves the
+			// match into running (CheckCrossCompCourtBusyOnStart reads the
+			// stored status here, pre-tx under the court lock), and not at
+			// all for the organiser's forceCourt.
+			if !isWithdrawal && !isCorrection && !body.ForceCourt {
+				if err := eng.CheckCrossCompCourtBusyOnStart(id, mid, result.Status); err != nil {
 					return err
 				}
 			}
@@ -3779,15 +3797,22 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 				isCorrectionInTx := writesOverFinished(result.Status) &&
 					existingStatus == state.MatchStatusCompleted
 				if !isWithdrawal && !isCorrectionInTx {
-					if err := eng.StartMatchTx(stx, id, mid); err != nil {
+					// bc-adna: the in-competition court gate judges the same
+					// move into running, from the snapshot; a forced start runs
+					// the sides gate alone.
+					skipCourtGate := body.ForceCourt ||
+						result.Status != state.MatchStatusRunning ||
+						existingStatus == state.MatchStatusRunning
+					if err := eng.StartMatchTx(stx, id, mid, skipCourtGate); err != nil {
 						engErr = err
 						return nil
 					}
 				}
 				engStatus, engErr = eng.RecordMatchResultWithIneligibilityTx(stx, id, mid, result, engine.ForceOptions{
-					Force:     body.ForceDownstreamReopen,
-					Reopened:  &reopenedDownstream,
-					StartOnly: body.StartOnly,
+					Force:      body.ForceDownstreamReopen,
+					Reopened:   &reopenedDownstream,
+					StartOnly:  body.StartOnly,
+					ForceCourt: body.ForceCourt,
 					// A participant's exact resend of a finish changes nothing,
 					// so it leaves no history line to loop.
 					NoReplayHistory: selfReported,

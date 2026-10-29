@@ -16,7 +16,7 @@ export { OWN_START, OWN_REOPEN, OWN_REQUEUE, OWN_REP, OWN_REFUSED };
 import {
   writeDidNotLand, writeRetryable, decisionWord,
   attemptScoreWrite, DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED, DOWNSTREAM_KNOCKOUT_REOPEN_CANCELLED, downstreamKnockoutReopenedNotice,
-  courtBusyMessage, heldWriteDiscardLabel, heldWriteDiscardConfirm, queuedNotice,
+  courtBusyMessage, courtBusyReopenWarning, heldWriteDiscardLabel, heldWriteDiscardConfirm, queuedNotice,
   tapNotAppliedText, tapOutcomeQuiet, writePending, writeWasRefused,
 } from './write_result.jsx';
 import { sameCompetitor } from './competitor_identity.jsx';
@@ -1834,7 +1834,7 @@ export function usePublishUnsaved(hostRef, unsaved, onDiscard) {
 //     aware of the consequences"). What that reopened is named in `notice`;
 //     declining leaves everything as it was and says so in `err`.
 // Every other refusal is the server's sentence, shown verbatim in `err`.
-function useMatchReopen({ match, password, isComplete, own, unsaved = false, onDiscard }) {
+function useMatchReopen({ match, password, isComplete, own, unsaved = false, onDiscard, allowCourtForce = false }) {
   const mountedRef = useRefA(true);
   // The unsaved-entries warning is open (R1): a second tap meanwhile asks
   // nothing more.
@@ -1911,10 +1911,13 @@ function useMatchReopen({ match, password, isComplete, own, unsaved = false, onD
     const n = downstreamKnockoutReopenedNotice(ids);
     if (n && mountedRef.current) setNotice(n);
   };
-  const run = (call, reason, force, onRefusal, onForced) => attemptScoreWrite({
+  const run = (call, reason, force, onRefusal, onForced, forceCourt = false) => attemptScoreWrite({
     recordScore: (_compId, _matchId, result, pw, _match, o) => call(pw, {
-      reason, force: !!result.forceDownstreamReopen,
-      seen: match.scoreVersion || 0, onRefusal: o && o.onRefusal,
+      reason,
+      force: !!result.forceDownstreamReopen,
+      forceCourt: !!result.forceCourt,
+      seen: match.scoreVersion || 0,
+      onRefusal: o && o.onRefusal,
     }),
     onRefusal,
     onForced,
@@ -1926,7 +1929,10 @@ function useMatchReopen({ match, password, isComplete, own, unsaved = false, onD
     },
     compId: match.compId,
     matchId: match.id,
-    result: force ? { forceDownstreamReopen: true } : {},
+    result: {
+      ...(force ? { forceDownstreamReopen: true } : {}),
+      ...(forceCourt ? { forceCourt: true } : {}),
+    },
     password: resolveDecisionPassword(password),
     match,
   });
@@ -2028,6 +2034,44 @@ function useMatchReopen({ match, password, isComplete, own, unsaved = false, onD
     }
   };
 
+  // bc-adna: reopen anyway with forceCourt when court is busy on admin hosts
+  const reopenAnyway = async () => {
+    const c = conflict;
+    if (!c || busy || landed) return;
+    if (holdsUnsaved(unsaved) && await unsavedDeclined(REOPEN_ANYWAY)) return;
+    setErr("");
+    setBusy(true);
+    const token = own ? own.begin(OWN_REOPEN) : 0;
+    const refused = (e) => {
+      if (own) own.answer(token, OWN_REFUSED);
+      if (!mountedRef.current) return false;
+      setLanded(false);
+      applyFailure(e, c.reason);
+      setBusy(false);
+      return true;
+    };
+    try {
+      const forced = (f) => { if (own) own.settle(token, f, { rejections: false }); };
+      const res = await run(
+        (pw, opts) => window.API.reopenMatch(match.compId, match.id, pw, opts),
+        c.reason,
+        c.force,
+        refused,
+        forced,
+        true,
+      );
+      if (own) own.settle(token, res, { rejections: false });
+      if (!mountedRef.current) return;
+      setConflict(null);
+      finish(res);
+    } catch (e) {
+      if (own) own.answer(token, OWN_REFUSED);
+      if (!mountedRef.current) return;
+      applyFailure(e, c.reason);
+      setBusy(false);
+    }
+  };
+
   useEffectA(() => {
     setBlockerLabel("");
     if (!conflict?.matchId || !conflict?.compId) return;
@@ -2066,7 +2110,7 @@ function useMatchReopen({ match, password, isComplete, own, unsaved = false, onD
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conflict?.compId, conflict?.matchId]);
 
-  return { busy, landed, err, conflict, blockerLabel, notice, reopen, requeueBlocker, dismissConflict: () => setConflict(null) };
+  return { busy, landed, err, conflict, blockerLabel, notice, reopen, reopenAnyway, requeueBlocker, dismissConflict: () => setConflict(null), allowCourtForce };
 }
 
 // useWithdrawalRemoval: Remove withdrawal (operator ruling 2026-10-03, "the
@@ -2132,6 +2176,12 @@ function useWithdrawalRemoval({ match, enabled, held = false, onRemove, onUndo, 
 // one, so the consequence is stated in full above the button.
 function ReopenFeedback({ ctl, testIdPrefix }) {
   const c = ctl.conflict;
+  // bc-adna: on the organiser's admin hosts the panel warns what a second
+  // running bout means and offers Reopen anyway; the court console keeps the
+  // panel as it was. The blocker is named as the heading names it (the
+  // fetched label first, since it names the competitors).
+  const blocker = c ? (ctl.blockerLabel || c.label || "another match") : "";
+  const forceWarn = (c && ctl.allowCourtForce) ? courtBusyReopenWarning({ court: c.court, label: blocker }) : null;
   return (
     <>
       {ctl.notice && (
@@ -2156,13 +2206,29 @@ function ReopenFeedback({ ctl, testIdPrefix }) {
               operator to "finish that match before reopening", the opposite
               of the remedy this panel's own button offers. */}
           <div className="reopen-conflict__head">
-            {courtBusyMessage({ court: c.court, label: ctl.blockerLabel || c.label || "another match" })}
+            {forceWarn ? forceWarn.heading : courtBusyMessage({ court: c.court, label: blocker })}
           </div>
+          {forceWarn && (
+            <div className="reopen-conflict__warn" data-testid={`${testIdPrefix}-conflict-force-warning`}>
+              {forceWarn.body}
+            </div>
+          )}
           <div className="reopen-conflict__warn" data-testid={`${testIdPrefix}-conflict-warning`}>
             Sending it back to the queue keeps any score already entered for it: it carries on
             from there when it is started again.
           </div>
           <div className="reopen-conflict__actions">
+            {ctl.allowCourtForce && (
+              <button
+                type="button"
+                className="btn btn--sm btn--danger"
+                data-testid={`${testIdPrefix}-reopen-anyway-button`}
+                onClick={ctl.reopenAnyway}
+                disabled={ctl.busy}
+              >
+                Reopen anyway
+              </button>
+            )}
             <button
               type="button"
               className="btn btn--sm btn--danger"

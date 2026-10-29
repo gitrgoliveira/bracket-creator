@@ -166,13 +166,14 @@ function _reopenRefusal(err) {
     return e;
 }
 
-// reopenBody is the optional half of both reopen requests: the audit reason
-// and the downstream confirmation, each sent only when set, so the one-tap
-// kachinuki Reopen still posts {} exactly as before.
-function reopenBody(reason, force) {
+// reopenBody is the optional half of both reopen requests: the audit reason,
+// the downstream confirmation, and the court-busy override, each sent only
+// when set, so the one-tap kachinuki Reopen still posts {} exactly as before.
+function reopenBody(reason, force, forceCourt) {
     const body = {};
     if (reason) body.reason = reason;
     if (force) body.forceDownstreamReopen = true;
+    if (forceCourt) body.forceCourt = true;
     return body;
 }
 
@@ -3819,10 +3820,11 @@ let _lastEnqueuePersisted = true;
 // _placeWrite: the key a new write about `base` goes under. When it coalesces
 // (_coalesceTarget), it takes the queued entry's key and carries what that
 // write said that a later write must not lose: the groups a score write
-// changed (_claimingQueuedGroups) and, for a running write, a pending
-// kachinukiBoutFinal (enqueueRunningWrite's comment says why); a lineup save
-// the positions the queued save changed (joinQueuedLineupSave). Otherwise it is
-// a new entry, after the others in replay order.
+// changed (_claimingQueuedGroups), a confirmed forceCourt if either carried it,
+// and, for a running write, a pending kachinukiBoutFinal (enqueueRunningWrite's
+// comment says why); a lineup save the positions the queued save changed
+// (joinQueuedLineupSave). Otherwise it is a new entry, after the others in
+// replay order.
 function _placeWrite(base, descriptor) {
     // A tap is never merged; its key names its event id.
     if (descriptor.kind === 'evt') return `${base}${QUEUE_ENTRY_SEP}evt:${descriptor.payload.id}`;
@@ -3840,6 +3842,9 @@ function _placeWrite(base, descriptor) {
     if (!descriptor.terminal && prev.payload && prev.payload.kachinukiBoutFinal
         && payload && !payload.kachinukiBoutFinal) {
         payload = { ...payload, kachinukiBoutFinal: true };
+    }
+    if ((prev.payload && prev.payload.forceCourt) || (descriptor.payload && descriptor.payload.forceCourt)) {
+        payload = { ...payload, forceCourt: true };
     }
     // Whatever the replaced write had to follow, this one follows too.
     for (const k of _afterKeys(prev)) _addAfter(descriptor, k);
@@ -5398,9 +5403,27 @@ const API = {
             }
         };
     },
+    /**
+     * Record a match score or status change.
+     *
+     * The patch passed as `result` may carry request-only `forceCourt: true`:
+     * an organiser's confirmed start on a busy shiaijo; sent on the payload,
+     * kept through the outbox, merged into a write that takes a queued one's
+     * place, never broadcast to a display.
+     *
+     * @param {string} compID
+     * @param {string} matchID
+     * @param {object} result
+     * @param {string} password
+     * @param {object} [match]
+     * @param {object} [opts]
+     */
     async recordScore(compID, matchID, result, password, match, opts = {}) {
         _noteShownMatch(compID, match);
         const payload = toBackendMatchResult(result, match || result);
+        if (result && result.forceCourt) {
+            payload.forceCourt = true;
+        }
         // mp-y3nk: stamp in server-relative time for last-write-wins reconciliation.
         // Stamped when it is made (a running match's scoring is taps, each
         // stamped at its own tap, so no score write carries an older edit).
@@ -5437,13 +5460,13 @@ const API = {
         // as undefined would still wipe the display's copy in the merge), and
         // states the flag counts the match it starts already holds: the
         // display reads a result naming a status that omits a count as 0
-        // (mergeMatchPatch), which turned a kept 2-1 into 0-0. `startOnly`
-        // itself is request-only and stays off the display's copy.
+        // (mergeMatchPatch), which turned a kept 2-1 into 0-0. `startOnly` and
+        // `forceCourt` are request-only and stay off the display's copy.
         const _broadcastPatch = (fields) => {
             const {
                 rev: _r, revSession: _rs, changed: _ch,
                 writeId: _w, basis: _b, session: _s, forceDownstreamReopen: _f,
-                startOnly, ...rest
+                startOnly, forceCourt: _fc, ...rest
             } = fields || {};
             if (startOnly) {
                 for (const k of START_BROADCAST_DROPS) delete rest[k];
@@ -5763,7 +5786,8 @@ const API = {
     // be reopened without any reason, and nothing is gated on that). Clear
     // withdrawal and reopen is one tap with no reason too; opts.reason stays
     // for any caller that has one to record. opts.force is the operator's confirmation after a
-    // downstream_knockout_played refusal. The body stays a JSON object (never
+    // downstream_knockout_played refusal. opts.forceCourt is sent in the body beside reason
+    // for an organiser's confirmed reopen on a busy shiaijo. The body stays a JSON object (never
     // absent) so a handler that binds JSON still parses the request.
     //
     // 400 = neither kachinuki nor withdrawal-decided; 409 = not completed / a
@@ -5783,13 +5807,26 @@ const API = {
     // conflict, and a busy court would be a dead end (kachinuki reopen is the
     // ONLY way to fix a bout log). The server broadcasts match_updated on
     // success.
-    async reopenMatch(compID, matchID, password, { reason = "", force = false, seen, onRefusal } = {}) {
+    /**
+     * Reopen a completed match.
+     *
+     * @param {string} compID
+     * @param {string} matchID
+     * @param {string} password
+     * @param {object} [opts]
+     * @param {string} [opts.reason=""]
+     * @param {boolean} [opts.force=false]
+     * @param {boolean} [opts.forceCourt=false] - sent in the body beside reason for an organiser's confirmed reopen on a busy shiaijo
+     * @param {*} [opts.seen]
+     * @param {Function} [opts.onRefusal]
+     */
+    async reopenMatch(compID, matchID, password, { reason = "", force = false, forceCourt = false, seen, onRefusal } = {}) {
         // bc-evts: the outbox's; `settled` resolves the server body or rejects
         // with reopenFailureError's error (court_busy, downstream, ...).
         return _outboxWrite({
             kind: 'reopen', compID, matchID, method: 'POST',
             url: `/api/competitions/${compID}/matches/${matchID}/reopen`,
-            payload: reopenBody(reason, force), password, seen, onRefusal,
+            payload: reopenBody(reason, force, forceCourt), password, seen, onRefusal,
         });
     },
     // mp-gmcg (review A4): atomically requeue the match holding the court AND

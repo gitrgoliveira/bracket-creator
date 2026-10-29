@@ -411,6 +411,11 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
         compId, matchId, result, password, match,
         onRefusal: opts && opts.onRefusal,
         onDownstreamReopened: toastReopened,
+        // bc-adna: only an admin host's options turn the court_busy warning
+        // on (the court console never sends it); a write resent after the
+        // outbox brought the refusal back is handed to the editor (onForced).
+        allowCourtForce: !!(opts && opts.allowCourtForce),
+        onForced: opts && opts.onForced,
       });
     } catch (e) {
       // Every error toasted here is marked, so a host that catches it to show
@@ -420,6 +425,10 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
         // Declining the override leaves everything as it was: neither this
         // match nor the later one it depends on was written.
         showToast(DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED);
+        throw markToasted(e);
+      }
+      // bc-adna: if the operator cancelled forcing court, toast nothing and mark toasted
+      if (e.courtForceCancelled) {
         throw markToasted(e);
       }
       showToast(e.message, "error");

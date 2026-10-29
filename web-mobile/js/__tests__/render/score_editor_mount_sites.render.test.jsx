@@ -4,7 +4,7 @@
 //   1. admin_shiaijo.jsx        inline; Finish + Start Next; cannot close
 //   2. admin_pools.jsx          modal; no chaining (onSubmitAndNext null)
 //   3. admin_competition_bracket.jsx  inline; no chaining; close only when complete
-//   4. admin_schedule_score_editor.jsx  modal; Prev/Next + Finish-and-next
+//   4. admin_schedule_score_editor.jsx  modal; Prev/Next only (onSubmitAndNext null, no onAfterDecision)
 //   5. viewer_match.jsx         public self-run; bare submit only
 //
 // Whether that divergence is a DEFECT is for the mp-yqxn review children to
@@ -325,7 +325,7 @@ describe('mount site: admin_competition_bracket.jsx (bracket panel)', () => {
 // ── 4. admin_schedule_score_editor.jsx: Scores tab ───────────────────────────
 
 describe('mount site: admin_schedule_score_editor.jsx (Scores tab)', () => {
-  it('wires the FULL navigation set: Prev/Next, Finish+StartNext, after-decision', async () => {
+  it('wires Prev/Next navigation with plain Finish only (onSubmitAndNext null, no onAfterDecision)', async () => {
     await mountSchedule();
     // Open the first (running) match via its row button.
     const openBtns = document.querySelectorAll('button.test-score-open');
@@ -334,8 +334,8 @@ describe('mount site: admin_schedule_score_editor.jsx (Scores tab)', () => {
     expect(screen.getByTestId('probe-score-editor')).toBeTruthy();
     expect(wiringOf(probe.props)).toEqual({
       onSubmit: 'fn',
-      onSubmitAndNext: 'fn',       // next same-court active match exists (m2)
-      onAfterDecision: 'fn',
+      onSubmitAndNext: 'null',       // plain Finish only: no Finish + Start Next on Scores tab
+      onAfterDecision: 'absent',     // no start after decision on Scores tab
       onPrev: 'fn',
       onNext: 'fn',
       prevMatch: 'null',           // m1 is the first match on this court
@@ -352,79 +352,26 @@ describe('mount site: admin_schedule_score_editor.jsx (Scores tab)', () => {
     expect(probe.props.nextMatch.id).toBe('m2');
   });
 
-  it('onSubmitAndNext is NULL when no same-court active match remains', async () => {
+  it('onSubmitAndNext is always NULL and onAfterDecision is absent on the Scores tab', async () => {
     await mountSchedule(vi.fn(), [runningMatch()]);
     await act(async () => { fireEvent.click(document.querySelector('button.test-score-open')); });
     const w = wiringOf(probe.props);
     expect(w.onSubmitAndNext).toBe('null');
-    expect(w.onAfterDecision).toBe('null');
+    expect(w.onAfterDecision).toBe('absent');
   });
 
-  // The automatic next match stays in the open match's competition (operator
-  // ruling 2026-09-26: an operator view never switches competition or court by
-  // itself). This page lists every competition, so another competition's match
-  // can come next on the same court; Prev/Next, which the operator taps, still
-  // move along the whole court.
-  describe('the automatic next match stays in the competition', () => {
-    const others = () => [
+  it('finishing on the Scores tab records the match and calls no start or advance', async () => {
+    const onEditScore = vi.fn().mockResolvedValue({ status: 'completed' });
+    const others = [
       runningMatch(),
       runningMatch({ id: 'x1', compId: 'c2', compName: 'Other', status: 'scheduled', sideA: { id: 'q1', name: 'Kudo' }, sideB: { id: 'q2', name: 'Mori' } }),
       runningMatch({ id: 'm3', status: 'scheduled', sideA: { id: 'p3', name: 'Suzuki' }, sideB: { id: 'p4', name: 'Ito' } }),
     ];
-    const openFirst = async (onEditScore) => {
-      await mountSchedule(onEditScore, others());
-      await act(async () => { fireEvent.click(document.querySelector('button.test-score-open')); });
-    };
-
-    it('Finish + Start Next starts the next match of the same competition', async () => {
-      const onEditScore = vi.fn().mockResolvedValue({ status: 'running' });
-      await openFirst(onEditScore);
-      expect(probe.props.nextMatch.id, 'Next still moves along the whole court').toBe('x1');
-      await act(async () => { await probe.props.onSubmitAndNext({ status: 'completed', winner: 'Yamada' }); });
-      expect(onEditScore.mock.calls.map((c) => c[1])).toEqual(['m1', 'm3']);
-    });
-
-    it('the start after a decision picks the next match of the same competition', async () => {
-      const onEditScore = vi.fn().mockResolvedValue({ status: 'running' });
-      await openFirst(onEditScore);
-      await act(async () => { await probe.props.onAfterDecision({ id: 'm1', status: 'completed', decision: 'hikiwake' }); });
-      expect(onEditScore.mock.calls.map((c) => c[1])).toEqual(['m3']);
-    });
-  });
-
-  // Recording a withdrawal starts the court's next match, as a no-show does
-  // (mp-nwds item 7). The list shows the withdrawn competitor's own matches
-  // barred only after it refreshes, so the advance passes over them itself.
-  describe('the advance after a withdrawal', () => {
-    const yamada = { id: 'p1', name: 'Yamada' };
-    const tanaka = { id: 'p2', name: 'Tanaka' };
-    const suzuki = { id: 'p3', name: 'Suzuki' };
-    // What /decision answers with: the stored match, sides as bare names.
-    const kikenByYamada = {
-      id: 'm1', sideA: 'Yamada', sideB: 'Tanaka', sideAId: 'p1', sideBId: 'p2', winner: 'Tanaka', winnerId: 'p2',
-      status: 'completed', decision: 'kiken-voluntary', decisionBy: 'aka',
-    };
-    const yamadaNext = runningMatch({ id: 'm2', status: 'scheduled', sideA: suzuki, sideB: yamada });
-    const openFirst = async (onEditScore, matches) => {
-      await mountSchedule(onEditScore, matches);
-      await act(async () => { fireEvent.click(document.querySelector('button.test-score-open')); });
-    };
-
-    it('starts the next match the withdrawn competitor is not in', async () => {
-      const onEditScore = vi.fn().mockResolvedValue({ status: 'running' });
-      await openFirst(onEditScore, [runningMatch(), yamadaNext, runningMatch({ id: 'm3', status: 'scheduled', sideA: suzuki, sideB: tanaka })]);
-      await act(async () => { await probe.props.onAfterDecision(kikenByYamada); });
-      expect(onEditScore).toHaveBeenCalledTimes(1);
-      expect(onEditScore.mock.calls[0][1], "Yamada's next match is passed over").toBe('m3');
-    });
-
-    it('closes the editor when only the withdrawn competitor\'s matches are left', async () => {
-      const onEditScore = vi.fn();
-      await openFirst(onEditScore, [runningMatch(), yamadaNext]);
-      await act(async () => { await probe.props.onAfterDecision(kikenByYamada); });
-      expect(onEditScore).not.toHaveBeenCalled();
-      expect(screen.queryByTestId('probe-score-editor')).toBeNull();
-    });
+    await mountSchedule(onEditScore, others);
+    await act(async () => { fireEvent.click(document.querySelector('button.test-score-open')); });
+    expect(probe.props.nextMatch.id, 'Next still moves along the whole court').toBe('x1');
+    await act(async () => { await probe.props.onSubmit({ status: 'completed', winner: 'Yamada' }); });
+    expect(onEditScore.mock.calls.map((c) => c[1])).toEqual(['m1']);
   });
 });
 

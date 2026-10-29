@@ -115,7 +115,10 @@ type ScoringEngine interface {
 	// ineligible by a *different* match. The undo path (re-scoring a
 	// match that itself created the ineligibility) is permitted.
 	// Score handler wraps fought/hikiwake submissions with this.
-	StartMatchTx(tx state.StoreTx, compID, matchID string) error
+	// skipCourtGate (bc-adna) leaves the in-competition court check out
+	// when true (a write that does not move the match into running, or a
+	// forceCourt start), while the sides gate still runs.
+	StartMatchTx(tx state.StoreTx, compID, matchID string, skipCourtGate ...bool) error
 	// CheckStartAfterSendBack is the start check (bc-stpf, GET
 	// .../start-check): would starting matchID be refused for its status,
 	// court or competitors once the bout running on court is sent back? It
@@ -131,12 +134,15 @@ type ScoringEngine interface {
 	// taps it takes, replays the match's log and writes the derived match,
 	// under the caller's transaction. Mirrors engine.Engine.RecordScoreEventsTx.
 	RecordScoreEventsTx(tx state.StoreTx, compID, matchID string, req engine.ScoreEventsRequest) (*engine.ScoreEventsResult, error)
-	// CheckCrossCompCourtBusy checks whether the court for matchID is
-	// already occupied by a running match in a different competition.
-	// Must be called before entering WithTransaction to avoid a deadlock
-	// (store.RunningMatchOnCourt acquires read locks on other competitions;
-	// calling it while holding a write lock risks a circular wait).
-	CheckCrossCompCourtBusy(compID, matchID string) error
+	// CheckCrossCompCourtBusyOnStart checks whether the court for matchID
+	// is already occupied by a running match in a different competition,
+	// for a score write that moves matchID into running (writeStatus
+	// running, stored status not running; any other write is not judged,
+	// bc-adna). Must be called before entering WithTransaction to avoid a
+	// deadlock (store.RunningMatchOnCourt acquires read locks on other
+	// competitions; calling it while holding a write lock risks a circular
+	// wait), under the court-exclusivity lock.
+	CheckCrossCompCourtBusyOnStart(compID, matchID string, writeStatus state.MatchStatus) error
 	// RecordDecision auto-fills the scoreline + winner from the
 	// decision/decisionBy/encho triple and persists the result. When the
 	// prior result on the match already carried a kiken/fusenpai decision

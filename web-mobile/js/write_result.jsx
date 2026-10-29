@@ -888,6 +888,36 @@ export function courtBusyMessage({ court, label }) {
     return `Shiaijo ${court} is running ${label}. Finish it or send it back to the queue first.`;
 }
 
+// courtBusyRefusal (bc-adna): returns { court, label } when e is a 409 court_busy
+// refusal error, else null.
+export function courtBusyRefusal(e) {
+    if (e && typeof e === 'object' && e.code === 'court_busy') {
+        return { court: e.court, label: e.label };
+    }
+    return null;
+}
+
+// courtBusyForceConfirm (bc-adna): confirm dialog options for forcing a start
+// on a busy court from admin views.
+export function courtBusyForceConfirm({ court, label }) {
+    return {
+        title: `Shiaijo ${court} is already running a bout`,
+        message: `${label} is running on Shiaijo ${court}. If you start this bout too, two bouts will be running on Shiaijo ${court} at once. The court's score table will show both, and both can still be scored; the court's TV board shows only one of them. To get back to one bout at a time, the court's operator sends one of them back to the queue.`,
+        confirmLabel: 'Start anyway',
+        cancelLabel: 'Cancel',
+        danger: true,
+    };
+}
+
+// courtBusyReopenWarning (bc-adna): heading and body for reopening a bout
+// on a busy court from admin views.
+export function courtBusyReopenWarning({ court, label }) {
+    return {
+        heading: `Shiaijo ${court} is already running a bout`,
+        body: `${label} is running on Shiaijo ${court}. If you reopen this bout, two bouts will be running on Shiaijo ${court} at once. The court's score table will show both; the court's TV board shows only one of them. Queue it and reopen sends ${label} back to the queue instead.`,
+    };
+}
+
 // The court console never holds a running match and an open correction at
 // once (operator ruling 2026-09-27, bc-crpn). Each refused tap names the other
 // one, with the label string the caller built (scoreRowMatchName), and names
@@ -1024,7 +1054,7 @@ export function downstreamKnockoutReopenedNotice(matches) {
 // caller can pick DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED instead of the generic
 // error copy.
 export async function attemptScoreWrite({
-    recordScore, confirmDialog, compId, matchId, result, password, match, onRefusal, onDownstreamReopened, onForced,
+    recordScore, confirmDialog, compId, matchId, result, password, match, onRefusal, onDownstreamReopened, onForced, allowCourtForce = false,
 }) {
     // bc-evts: an outbox door answers pending at once and its refusal arrives
     // later, through `settled`. The downstream-knockout-played 409 is CLAIMED
@@ -1049,7 +1079,7 @@ export async function attemptScoreWrite({
             forced = await attemptScoreWrite({
                 recordScore, confirmDialog, compId, matchId,
                 result: { ...result, forceDownstreamReopen: true },
-                password, match, onRefusal, onDownstreamReopened,
+                password, match, onRefusal, onDownstreamReopened, onForced, allowCourtForce,
             });
         } catch (err) {
             claimOther(err);
@@ -1067,10 +1097,44 @@ export async function attemptScoreWrite({
             }, () => {});
         }
     };
+    // bc-adna: court_busy arm in the claim path
+    const confirmCourtThenForce = async (e, refusal) => {
+        const { title, message, confirmLabel, cancelLabel, danger } = courtBusyForceConfirm(refusal);
+        let ok = false;
+        try { ok = await confirmDialog({ title, message, confirmLabel, cancelLabel, danger }); } catch { ok = false; }
+        if (!ok) {
+            e.courtForceCancelled = true;
+            claimOther(e);
+            return;
+        }
+        let forced;
+        try {
+            forced = await attemptScoreWrite({
+                recordScore, confirmDialog, compId, matchId,
+                result: { ...result, forceCourt: true },
+                password, match, onRefusal, onDownstreamReopened, onForced, allowCourtForce,
+            });
+        } catch (err) {
+            claimOther(err);
+            return;
+        }
+        if (typeof onForced === 'function') onForced(forced);
+        if (writePending(forced)) {
+            forced.settled.then((body) => {
+                if (body && body.reopenedMatches && body.reopenedMatches.length
+                    && typeof onDownstreamReopened === 'function') onDownstreamReopened(body.reopenedMatches);
+            }, () => {});
+        }
+    };
     const claim = (e) => {
         const refusal = downstreamKnockoutPlayedRefusal(e);
         if (refusal && !result.forceDownstreamReopen) {
             confirmThenForce(e, refusal);
+            return true;
+        }
+        const courtRefusal = allowCourtForce && !result.forceCourt ? courtBusyRefusal(e) : null;
+        if (courtRefusal) {
+            confirmCourtThenForce(e, courtRefusal);
             return true;
         }
         return claimOther(e);
@@ -1081,23 +1145,42 @@ export async function attemptScoreWrite({
         // A write that still answers directly (a running score write) throws
         // its refusal: the same confirm, awaited, as before the outbox.
         const refusal = downstreamKnockoutPlayedRefusal(e);
-        if (!refusal || result.forceDownstreamReopen) throw e;
-        const { message, confirmLabel, danger } = downstreamKnockoutPlayedConfirm(refusal);
-        const ok = await confirmDialog({ message, confirmLabel, danger });
-        if (ok) {
-            const applied = await attemptScoreWrite({
-                recordScore, confirmDialog, compId, matchId,
-                result: { ...result, forceDownstreamReopen: true },
-                password, match, onRefusal, onDownstreamReopened,
-            });
-            // Absent field means the server reopened nothing, and nothing is claimed.
-            if (applied && typeof applied === 'object' && !writeDidNotLand(applied)
-                && applied.reopenedMatches && applied.reopenedMatches.length) {
-                applied.downstreamReopened = applied.reopenedMatches;
+        if (refusal && !result.forceDownstreamReopen) {
+            const { message, confirmLabel, danger } = downstreamKnockoutPlayedConfirm(refusal);
+            let ok = false;
+            try { ok = await confirmDialog({ message, confirmLabel, danger }); } catch { ok = false; }
+            if (ok) {
+                const applied = await attemptScoreWrite({
+                    recordScore, confirmDialog, compId, matchId,
+                    result: { ...result, forceDownstreamReopen: true },
+                    password, match, onRefusal, onDownstreamReopened, onForced, allowCourtForce,
+                });
+                // Absent field means the server reopened nothing, and nothing is claimed.
+                if (applied && typeof applied === 'object' && !writeDidNotLand(applied)
+                    && applied.reopenedMatches && applied.reopenedMatches.length) {
+                    applied.downstreamReopened = applied.reopenedMatches;
+                }
+                return applied;
             }
-            return applied;
+            e.downstreamKnockoutPlayedCancelled = true;
+            throw e;
         }
-        e.downstreamKnockoutPlayedCancelled = true;
+        // bc-adna: court_busy arm in the catch path
+        const courtRefusal = allowCourtForce && !result.forceCourt ? courtBusyRefusal(e) : null;
+        if (courtRefusal) {
+            const { title, message, confirmLabel, cancelLabel, danger } = courtBusyForceConfirm(courtRefusal);
+            let ok = false;
+            try { ok = await confirmDialog({ title, message, confirmLabel, cancelLabel, danger }); } catch { ok = false; }
+            if (ok) {
+                return await attemptScoreWrite({
+                    recordScore, confirmDialog, compId, matchId,
+                    result: { ...result, forceCourt: true },
+                    password, match, onRefusal, onDownstreamReopened, onForced, allowCourtForce,
+                });
+            }
+            e.courtForceCancelled = true;
+            throw e;
+        }
         throw e;
     }
 }

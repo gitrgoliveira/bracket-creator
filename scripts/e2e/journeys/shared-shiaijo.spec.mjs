@@ -443,9 +443,9 @@ test.describe('shared-shiaijo', () => {
       schedule: (await P.locator('body').innerText()).replace(/\s+/g, ' ').slice(0, 900),
       tvShot: await shot(TV, 's7-tv-A-while-si-runs'), scheduleShot: await shot(P, 's7-public-schedule-while-si-runs', { fullPage: true }) });
 
-    // S9: the tournament-wide Scores page, All competitions. From the running
-    // SI bout, Finish + Start Next starts the next SI bout on A, past the
-    // barred one and past ST's rows.
+    // S9: the tournament-wide Scores page, All competitions. Finish reads
+    // plain Finish, nothing starts by itself after Finish or fusenpai, and
+    // the operator starts the next SI bouts on A by hand.
     await C.goto('/admin/score-editor');
     await expect(C.getByRole('heading', { level: 1, name: 'Score editor' })).toBeVisible();
     const listOnA = (await C.locator('.score-edit-row').evaluateAll((rows) => rows.map((x) => x.innerText.replace(/\s+/g, ' ').trim())))
@@ -455,20 +455,27 @@ test.describe('shared-shiaijo', () => {
     await ipponButton(C, winnerOf(bouts.b3), 'M', EDITOR).tap();
     await settleOn(C);
     const s9Label = (await finishButton(C, EDITOR).innerText()).trim();
+    expect(s9Label).toBe('Finish');
     await finishMatch(C, EDITOR);
-    let ov;
-    await expect.poll(async () => {
-      ov = { ...(await editorIdentity(C, EDITOR)), ...(await editorSides(C, EDITOR)) };
-      return !same(ov, bouts.b3) && (await C.locator(EDITOR).locator('.editor-head-pill').count()) === 0;
-    }, { timeout: EXPECT_TIMEOUT_MS }).toBe(true);
-    bouts.b4 = pairOf(ov);
+    const closeBtn = C.locator(EDITOR).getByRole('button', { name: /✕ Close/ });
+    if (await closeBtn.isVisible().catch(() => false)) await closeBtn.tap();
+    // Deliberate: nothing may start by itself, so the time is the evidence.
+    await C.waitForTimeout(1500);
+    const runningOnAAfterFinish = (await C.locator('.score-edit-row.score-edit-row--running').evaluateAll((rows) => rows.map((x) => x.innerText.replace(/\s+/g, ' ').trim())))
+      .filter((t) => / A ▾ /.test(` ${t} `));
+    expect(runningOnAAfterFinish).toHaveLength(0);
+    r({ step: 'S9 scores page', action: s9Label, variant: 'correct path', listOnA, runningOnA: runningOnAAfterFinish,
+      shot: await shot(C, 's9-scores-page-finish-plain') });
+    // The operator starts the next SI bout on A by hand.
     const expectedB4 = siA.find((m) => m.time > nextSiTime && ![m.shiro, m.aka].includes(withdrawn));
-    r({ step: 'S9 scores page', action: s9Label, variant: 'correct path', listOnA, next: ov, expected: expectedB4,
-      shot: await shot(C, 's9-scores-page-finish-next') });
-    expect(s9Label).toBe('Finish + Start Next →');
-    expect(compOfEyebrow(ov.eyebrow)).toBe(SI);
-    expect(ov.court).toBe('A');
-    expect(same(bouts.b4, pairOf(expectedB4))).toBe(true);
+    await C.locator('.score-edit-row').filter({ hasText: expectedB4.shiro }).filter({ hasText: expectedB4.aka }).first().getByRole('button', { name: /^Score$/ }).tap();
+    await expect(C.locator(EDITOR)).toBeVisible();
+    const startB4 = C.locator(EDITOR).getByRole('button', { name: 'Start match' });
+    await paceSettled(startB4);
+    await startB4.tap();
+    await expect(finishButton(C, EDITOR)).toBeVisible();
+    await running(C, EDITOR);
+    bouts.b4 = pairOf(expectedB4);
     // Prev / Next walk the court, both competitions (the operator taps them).
     const walked = [];
     const nav = (cls) => C.locator(EDITOR).locator(cls);
@@ -481,22 +488,30 @@ test.describe('shared-shiaijo', () => {
     }
     r({ step: 'S9 scores page', action: 'Next x2, Prev x2', variant: 'correct path (allowed to walk the court)', walked,
       comps: walked.map(compOfEyebrow), shot: await shot(C, 's9-prev-next-walked') });
-    // Back to the running SI bout, then a no-show: the next SI bout starts.
+    // Back to the running SI bout, then a no-show: no automatic advance.
     await C.locator(EDITOR).getByRole('button', { name: /✕ Close/ }).tap();
     await C.locator('.score-edit-row.score-edit-row--running').filter({ hasText: bouts.b4.shiro }).getByRole('button', { name: /^Score$/ }).tap();
     await expect(C.locator(EDITOR)).toBeVisible();
     const fus = await recordDecision(C, 'fusenpai', { side: 'aka', root: EDITOR });
-    await expect.poll(async () => {
-      ov = { ...(await editorIdentity(C, EDITOR)), ...(await editorSides(C, EDITOR)) };
-      return !same(ov, bouts.b4) && (await C.locator(EDITOR).locator('.editor-head-pill').count()) === 0;
-    }, { timeout: EXPECT_TIMEOUT_MS }).toBe(true);
-    bouts.b5 = pairOf(ov);
-    r({ step: 'S9 scores page', action: 'Fusenpai (Aka) in the overlay', variant: 'correct path (after-decision advance)', ...fus, next: ov,
-      shot: await shot(C, 's9-after-fusenpai') });
-    expect(compOfEyebrow(ov.eyebrow)).toBe(SI);
-    expect(ov.court).toBe('A');
-    // SI's last startable bout on A: no Finish + Start Next (the barred bout
-    // and ST's rows are not next).
+    const closeAfterFus = C.locator(EDITOR).getByRole('button', { name: /✕ Close/ });
+    if (await closeAfterFus.isVisible().catch(() => false)) await closeAfterFus.tap();
+    // Deliberate: no start may follow (no automatic advance), so the time is the evidence.
+    await C.waitForTimeout(2000);
+    const runningOnAAfterFus = (await C.locator('.score-edit-row.score-edit-row--running').evaluateAll((rows) => rows.map((x) => x.innerText.replace(/\s+/g, ' ').trim())))
+      .filter((t) => / A ▾ /.test(` ${t} `));
+    expect(runningOnAAfterFus).toHaveLength(0);
+    r({ step: 'S9 scores page', action: 'Fusenpai (Aka) in the overlay', variant: 'correct path (no advance)', ...fus,
+      runningOnA: runningOnAAfterFus, shot: await shot(C, 's9-after-fusenpai') });
+    // SI's last startable bout on A: started by hand, Finish reads plain Finish.
+    const expectedB5 = siA.find((m) => m.time > expectedB4.time && ![m.shiro, m.aka].includes(withdrawn));
+    await C.locator('.score-edit-row').filter({ hasText: expectedB5.shiro }).filter({ hasText: expectedB5.aka }).first().getByRole('button', { name: /^Score$/ }).tap();
+    await expect(C.locator(EDITOR)).toBeVisible();
+    const startB5 = C.locator(EDITOR).getByRole('button', { name: 'Start match' });
+    await paceSettled(startB5);
+    await startB5.tap();
+    await expect(finishButton(C, EDITOR)).toBeVisible();
+    await running(C, EDITOR);
+    bouts.b5 = pairOf(expectedB5);
     const lastLabel = (await finishButton(C, EDITOR).innerText()).trim();
     r({ step: 'S9 scores page', action: "SI's last startable bout on A", variant: 'correct path', finishLabel: lastLabel });
     expect(lastLabel).toBe('Finish');

@@ -1167,7 +1167,8 @@ func (e *Engine) reopenUnderCourtLock(compID string, comp *state.Competition, ma
 	// checkTargetReopenable, the requeue entry via requireBlockerHoldsCourt), so
 	// this gate's 404 is reachable only if the competition is deleted in the gap.
 	// Skipped for a reopen that lands scheduled: it takes no court.
-	if !landsScheduled {
+	// Skipped when fo.ForceCourt is true (bc-adna).
+	if !landsScheduled && !fo.ForceCourt {
 		if err := e.CheckCrossCompCourtBusy(compID, matchID); err != nil {
 			return nil, err
 		}
@@ -1219,7 +1220,7 @@ func (e *Engine) reopenUnderCourtLock(compID string, comp *state.Competition, ma
 			if !landsScheduled {
 				targetStatus = e.reopenTargetStatusOfHome(tx, compID, matchID, h)
 			}
-			if targetStatus == state.MatchStatusRunning {
+			if targetStatus == state.MatchStatusRunning && !fo.ForceCourt {
 				court := ""
 				if h.Pool != nil {
 					court = h.Pool.Court

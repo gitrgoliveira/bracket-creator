@@ -172,7 +172,7 @@ describe('ScoreEditorModal dirty-state and dismiss guard', () => {
 // --- Chained-nav court scoping ---
 // Mirrors the prev/next computation in AdminScoreEditor (see
 // admin_schedule.jsx near `const sameCourt = filtered.filter(...)`). Chained
-// nav (Prev/Next/Finish + Start Next/←/→) must stay on the current match's
+// nav (Prev/Next/←/→) must stay on the current match's
 // shiaijo so operators don't hop courts mid-flow.
 function pickChainedMatches(filtered, openMatch) {
   const openCourt = openMatch.court || "";

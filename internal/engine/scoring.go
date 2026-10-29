@@ -687,6 +687,16 @@ type ForceOptions struct {
 	// bytes as an operator clearing every mark on an editor board, which must
 	// still clear them.
 	StartOnly bool
+	// ForceCourt is the organiser's "Start anyway" / "Reopen anyway"
+	// (bc-adna): a start or a reopen into running on a court that already
+	// runs a bout skips both court gates (the cross-competition one and the
+	// in-competition one) and lands, so the court runs two bouts at once.
+	// The sides gate (a side fighting elsewhere, a barred side) still runs.
+	// Request-only, never stored; an anonymous self-run caller's is
+	// stripped (enforceSelfRunPolicy). Read by the reopen; the score handler
+	// judges its own gates before the write and carries it here only so a
+	// forced score write says so beside StartOnly.
+	ForceCourt bool
 	// NoReplayHistory leaves out the history line an exact resend of a
 	// recorded finish would otherwise add (answerExactScoreReplay). The score
 	// handler sets it for an anonymous self-run participant, whose resend

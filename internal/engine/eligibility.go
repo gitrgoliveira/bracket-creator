@@ -397,8 +397,41 @@ func (e *Engine) checkCourtExclusivity(compID, matchID, skipCompID string) error
 // own WithTransaction (both goroutines try to read-lock each other's mutex).
 func (e *Engine) CheckCrossCompCourtBusy(compID, matchID string) error {
 	court, err := e.lookupMatchCourt(compID, matchID)
-	if err != nil || court == "" {
+	if err != nil {
 		return err
+	}
+	return e.crossCompCourtBusy(compID, court)
+}
+
+// CheckCrossCompCourtBusyOnStart is the score write's cross-competition
+// court gate (bc-adna): it judges only a write that MOVES matchID into
+// running (writeStatus running, the stored status anything else). A write
+// to a match already running, and a finish, never ask the court, so a
+// court left running two bouts by a forced start does not refuse every
+// write to either of them. The stored status is read here, before the
+// write's transaction and under the court lock, the same way
+// CheckCrossCompCourtBusy reads the court: the snapshot inside the
+// transaction comes too late for this gate, which must not take a read
+// lock on another competition while holding compID's write lock.
+func (e *Engine) CheckCrossCompCourtBusyOnStart(compID, matchID string, writeStatus state.MatchStatus) error {
+	if writeStatus != state.MatchStatusRunning {
+		return nil
+	}
+	court, stored, err := lookupMatchCourtAndStatusTx(e.store, compID, matchID)
+	if err != nil {
+		return err
+	}
+	if stored == state.MatchStatusRunning {
+		return nil
+	}
+	return e.crossCompCourtBusy(compID, court)
+}
+
+// crossCompCourtBusy answers a *CourtBusyError naming the match another
+// competition runs on court, nil when it runs none or court is "".
+func (e *Engine) crossCompCourtBusy(compID, court string) error {
+	if court == "" {
+		return nil
 	}
 	crossOcc, err := e.store.RunningMatchOnCourt(court, compID)
 	if err != nil {
@@ -414,30 +447,7 @@ func (e *Engine) CheckCrossCompCourtBusy(compID, matchID string) error {
 // matches or bracket. Returns "" (not an error) when the match exists but
 // has no court assigned.
 func (e *Engine) lookupMatchCourt(compID, matchID string) (string, error) {
-	poolMatches, err := e.store.LoadPoolMatches(compID)
-	if err != nil {
-		return "", err
-	}
-	if m, ok := findPoolMatch(poolMatches, matchID); ok {
-		return m.Court, nil
-	}
-	bracket, err := e.store.LoadBracket(compID)
-	if err != nil {
-		return "", err
-	}
-	if bracket != nil {
-		for _, round := range bracket.Rounds {
-			for _, bm := range round {
-				if bm.ID == matchID {
-					return bm.Court, nil
-				}
-			}
-		}
-		if bracket.ThirdPlaceMatch != nil && bracket.ThirdPlaceMatch.ID == matchID {
-			return bracket.ThirdPlaceMatch.Court, nil
-		}
-	}
-	return "", notFoundErrorf("match %q not found in competition %q", matchID, compID)
+	return lookupMatchCourtTx(e.store, compID, matchID)
 }
 
 // findPoolMatch returns matchID's own row within an already-loaded

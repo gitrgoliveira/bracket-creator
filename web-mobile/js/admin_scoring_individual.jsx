@@ -155,7 +155,7 @@ function startedScore(patch) {
   };
 }
 
-export function ScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, onSubmitAndNext: onSubmitAndNextProp, onAfterDecision, started = false, prevMatch, nextMatch, onPrev, onNext, password, selfReport, teamMembers, variant = "modal", canClose = true, hostUnsavedRef = null }) {
+export function ScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, onSubmitAndNext: onSubmitAndNextProp, onAfterDecision, started = false, prevMatch, nextMatch, onPrev, onNext, password, selfReport, teamMembers, variant = "modal", canClose = true, hostUnsavedRef = null, allowCourtForce = false }) {
   // bc-strt: a match whose start has landed is RUNNING, even while the host's
   // list still says scheduled (it refetches a moment after each save). The
   // editors send a point only for a match they see as running, so a point
@@ -469,7 +469,8 @@ export function ScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, onSub
   // reopened. Called unconditionally (rules of hooks: the team and engi
   // dispatch below returns after every hook).
   const recordedWithdrawal = withdrawalInForce(m);
-  const reopenCtl = useMatchReopen({ match: m, password, isComplete, own, unsaved: unsavedRef, onDiscard: onDiscardUnsaved });
+  // bc-adna: forward allowCourtForce to useMatchReopen
+  const reopenCtl = useMatchReopen({ match: m, password, isComplete, own, unsaved: unsavedRef, onDiscard: onDiscardUnsaved, allowCourtForce });
   // While that withdrawal is in force, the WINNER's side holds the default-win
   // maru, which is the ruling itself: Save correction keeps it whatever is
   // sent (engine keptWithdrawalScoreline) and only the withdrawing side's
@@ -1251,7 +1252,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, onSub
   }
   // Team routing: forward to TeamScoreEditorModal.
   if (isTeam) {
-    return <TeamScoreEditorModal match={m} teamSize={teamSize} onClose={onClose} onSubmit={onSubmitProp} onSubmitAndNext={onSubmitAndNextProp} onAfterDecision={onAfterDecision}  prevMatch={prevMatch} nextMatch={nextMatch} onPrev={onPrev} onNext={onNext} password={password} selfReport={selfReport} teamMembers={teamMembers} variant={variant} canClose={canClose} hostUnsavedRef={hostUnsavedRef} />;
+    return <TeamScoreEditorModal match={m} teamSize={teamSize} onClose={onClose} onSubmit={onSubmitProp} onSubmitAndNext={onSubmitAndNextProp} onAfterDecision={onAfterDecision}  prevMatch={prevMatch} nextMatch={nextMatch} onPrev={onPrev} onNext={onNext} password={password} selfReport={selfReport} teamMembers={teamMembers} variant={variant} canClose={canClose} hostUnsavedRef={hostUnsavedRef} allowCourtForce={allowCourtForce} />;
   }
 
   // a11y: label the dialog with the match/court context so screen readers
@@ -1725,7 +1726,12 @@ export function ScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, onSub
                   // Its refusal is said here (StartRefusedNotice), so it is
                   // claimed from the outbox: no second alert with the same
                   // sentence.
-                  const res = await doSubmit(() => onSubmit(startPatch, { onRefusal: own.claimRefusal(token) }));
+                  // bc-adna: an admin host's Start anyway resends the start
+                  // after the outbox brought its court_busy refusal back; the
+                  // resent write is an own Start of its own, read as it comes,
+                  // so the match it starts is never read as another device's.
+                  const forcedStart = (f) => own.settle(own.begin(OWN_START, startedScore(startPatch)), f);
+                  const res = await doSubmit(() => onSubmit(startPatch, { onRefusal: own.claimRefusal(token), onForced: forcedStart }));
                   // bc-cse: a direct refusal's not-saved banner, if any (the
                   // clock-vs-supersede ordering lives in notLandedBanner).
                   const banner = res && notLandedBanner(res);

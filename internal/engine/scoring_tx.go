@@ -540,9 +540,16 @@ func (e *Engine) rollbackMatchResultTx(tx state.StoreTx, compID, matchID string,
 // before any disk write. Kiken/fusenpai decisions go through
 // RecordDecisionTx, which intentionally bypasses this gate, they ARE
 // the act of recording a new withdrawal.
-func (e *Engine) StartMatchTx(tx state.StoreTx, compID, matchID string) error {
-	if err := e.checkCourtExclusivityTx(tx, compID, matchID); err != nil {
-		return err
+//
+// skipCourtGate (bc-adna) leaves the court half out and runs the sides gate
+// alone: the score handler passes true for a write that does not move the
+// match into running (the court is judged only on a start) and for an
+// organiser's forceCourt start. Omitted, the court is judged as before.
+func (e *Engine) StartMatchTx(tx state.StoreTx, compID, matchID string, skipCourtGate ...bool) error {
+	if len(skipCourtGate) == 0 || !skipCourtGate[0] {
+		if err := e.checkCourtExclusivityTx(tx, compID, matchID); err != nil {
+			return err
+		}
 	}
 	return e.startSidesGateTx(tx, compID, matchID, "")
 }
@@ -935,31 +942,36 @@ func courtFreeInCompTxWith(tx state.StoreTx, compID, matchID, court string, pool
 	return nil
 }
 
-func lookupMatchCourtTx(tx state.StoreTx, compID, matchID string) (string, error) {
+func lookupMatchCourtAndStatusTx(tx state.StoreTx, compID, matchID string) (string, state.MatchStatus, error) {
 	poolMatches, err := tx.LoadPoolMatches(compID)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	if m, ok := findPoolMatch(poolMatches, matchID); ok {
-		return m.Court, nil
+		return m.Court, m.Status, nil
 	}
 	bracket, err := tx.LoadBracket(compID)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	if bracket != nil {
 		for _, round := range bracket.Rounds {
 			for _, bm := range round {
 				if bm.ID == matchID {
-					return bm.Court, nil
+					return bm.Court, bm.Status, nil
 				}
 			}
 		}
 		if bracket.ThirdPlaceMatch != nil && bracket.ThirdPlaceMatch.ID == matchID {
-			return bracket.ThirdPlaceMatch.Court, nil
+			return bracket.ThirdPlaceMatch.Court, bracket.ThirdPlaceMatch.Status, nil
 		}
 	}
-	return "", notFoundErrorf("match %q not found in competition %q", matchID, compID)
+	return "", "", notFoundErrorf("match %q not found in competition %q", matchID, compID)
+}
+
+func lookupMatchCourtTx(tx state.StoreTx, compID, matchID string) (string, error) {
+	court, _, err := lookupMatchCourtAndStatusTx(tx, compID, matchID)
+	return court, err
 }
 
 // courtOccupied is the PURE court-occupancy scan (mp-gmcg review E4): given

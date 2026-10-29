@@ -1,0 +1,194 @@
+import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import {
+    courtQueueKey,
+    courtQueues,
+    courtQueuePositions,
+    courtQueueEntriesOf,
+    withCourtQueuePositions,
+    sharesCourtDay,
+} from '../court_queue.jsx';
+
+describe('court queue: golden table parity with internal/state/court_queue.go', () => {
+    const table = JSON.parse(
+        readFileSync(
+            resolve(__dirname, '..', '..', '..', 'internal', 'state', 'testdata', 'court_queue.json'),
+            'utf8'
+        )
+    );
+
+    it('the shared golden table is present and non-empty', () => {
+        expect(
+            table.cases?.length,
+            'internal/state/testdata/court_queue.json parsed to zero cases'
+        ).toBeGreaterThan(0);
+    });
+
+    describe.each(table.cases)('$name', (tc) => {
+        it('queues match golden table', () => {
+            const actualQueues = courtQueues(tc.entries);
+
+            const expectedQueueMap = {};
+            for (const q of tc.queues) {
+                const key = courtQueueKey(q.date, q.court);
+                expectedQueueMap[key] = q.order;
+            }
+
+            const actualQueueMap = {};
+            for (const [key, idxs] of actualQueues.entries()) {
+                actualQueueMap[key] = idxs.map((idx) => `${tc.entries[idx].competitionId}/${tc.entries[idx].matchId}`);
+            }
+
+            expect(actualQueueMap).toEqual(expectedQueueMap);
+        });
+
+        it('positions match golden table', () => {
+            const actualPositions = courtQueuePositions(tc.entries);
+            expect(actualPositions.length).toBe(tc.entries.length);
+
+            const actualPosMap = {};
+            for (let i = 0; i < actualPositions.length; i++) {
+                const name = `${tc.entries[i].competitionId}/${tc.entries[i].matchId}`;
+                const expectedPos = tc.positions[name] || 0;
+                expect(actualPositions[i]).toBe(expectedPos);
+                if (actualPositions[i] !== 0) {
+                    actualPosMap[name] = actualPositions[i];
+                }
+            }
+            expect(actualPosMap).toEqual(tc.positions);
+        });
+    });
+
+    describe('courtQueueEntriesOf draw index and barred status', () => {
+        it('orders pool matches, then rounds except last, then bronze, then final', () => {
+            const comp = {
+                id: 'c1',
+                startTime: '09:00',
+                date: '2026-11-01',
+                poolMatches: [
+                    { id: 'p0', court: 'A', status: 'scheduled' },
+                    { id: 'p1', court: 'A', status: 'scheduled', ineligibleSides: { a: 'kiken-injury' } },
+                ],
+                bracket: {
+                    rounds: [
+                        [
+                            { id: 'r0m0', court: 'A', status: 'completed', ineligibleSides: { a: 'kiken-injury' } },
+                            { id: 'r0m1', court: 'A', status: 'scheduled' },
+                        ],
+                        [
+                            { id: 'r1m0', court: 'A', status: 'scheduled' },
+                        ],
+                    ],
+                    thirdPlaceMatch: { id: 'bronze', court: 'A', status: 'scheduled' },
+                },
+            };
+
+            const entries = courtQueueEntriesOf(comp);
+            expect(entries).toHaveLength(6);
+
+            const expected = [
+                { matchId: 'p0', drawIndex: 0, barred: false },
+                { matchId: 'p1', drawIndex: 1, barred: true },
+                { matchId: 'r0m0', drawIndex: 2, barred: false },
+                { matchId: 'r0m1', drawIndex: 3, barred: false },
+                { matchId: 'bronze', drawIndex: 4, barred: false },
+                { matchId: 'r1m0', drawIndex: 5, barred: false },
+            ];
+
+            for (let i = 0; i < expected.length; i++) {
+                expect(entries[i].competitionId).toBe('c1');
+                expect(entries[i].competitionStartTime).toBe('09:00');
+                expect(entries[i].date).toBe('2026-11-01');
+                expect(entries[i].matchId).toBe(expected[i].matchId);
+                expect(entries[i].drawIndex).toBe(expected[i].drawIndex);
+                expect(entries[i].barred).toBe(expected[i].barred);
+            }
+        });
+    });
+
+    describe('withCourtQueuePositions', () => {
+        it('interleaves positions across competitions sharing a court', () => {
+            const compA = {
+                id: 'a',
+                date: '2026-11-01',
+                startTime: '09:00',
+                poolMatches: [
+                    { id: 'm1', court: 'A', status: 'scheduled', scheduledAt: '09:20' },
+                ],
+            };
+            const compB = {
+                id: 'b',
+                date: '2026-11-01',
+                startTime: '09:00',
+                poolMatches: [
+                    { id: 'm1', court: 'A', status: 'scheduled', scheduledAt: '09:10' },
+                ],
+            };
+
+            const updated = withCourtQueuePositions([compA, compB]);
+            expect(updated[0].poolMatches[0].queuePosition).toBe(2);
+            expect(updated[1].poolMatches[0].queuePosition).toBe(1);
+        });
+
+        it('preserves identity when nothing changes', () => {
+            const compA = {
+                id: 'a',
+                date: '2026-11-01',
+                startTime: '09:00',
+                poolMatches: [
+                    { id: 'm1', court: 'A', status: 'scheduled', scheduledAt: '09:20', queuePosition: 2 },
+                ],
+            };
+            const compB = {
+                id: 'b',
+                date: '2026-11-01',
+                startTime: '09:00',
+                poolMatches: [
+                    { id: 'm1', court: 'A', status: 'scheduled', scheduledAt: '09:10', queuePosition: 1 },
+                ],
+            };
+
+            const originalList = [compA, compB];
+            const updated = withCourtQueuePositions(originalList);
+            expect(updated).toBe(originalList);
+            expect(updated[0]).toBe(compA);
+            expect(updated[0].poolMatches[0]).toBe(compA.poolMatches[0]);
+        });
+    });
+
+    describe('sharesCourtDay', () => {
+        const comp = {
+            id: 'c1',
+            date: '2026-11-01',
+            poolMatches: [{ court: 'A' }],
+            bracket: {
+                rounds: [[{ court: 'B' }]],
+            },
+        };
+
+        it('returns true when court and day match', () => {
+            expect(sharesCourtDay(comp, '2026-11-01', 'A')).toBe(true);
+            expect(sharesCourtDay(comp, '2026-11-01', ['B'])).toBe(true);
+        });
+
+        it('returns false when court does not match', () => {
+            expect(sharesCourtDay(comp, '2026-11-01', 'C')).toBe(false);
+        });
+
+        it('returns false when day does not match', () => {
+            expect(sharesCourtDay(comp, '2026-11-02', 'A')).toBe(false);
+        });
+
+        it('matches blank dates as the same day', () => {
+            const compBlank = {
+                id: 'c2',
+                date: '',
+                poolMatches: [{ court: 'A' }],
+            };
+            expect(sharesCourtDay(compBlank, '', 'A')).toBe(true);
+            expect(sharesCourtDay(compBlank, '   ', 'A')).toBe(true);
+            expect(sharesCourtDay(compBlank, '2026-11-01', 'A')).toBe(false);
+        });
+    });
+});

@@ -1182,6 +1182,12 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			respondEngineError(c, err)
 			return
 		}
+		courtEnds, err := eng.CourtEnds(id)
+		if err != nil {
+			respondEngineError(c, err)
+			return
+		}
+		estimate.CourtEnds = courtEnds
 		c.JSON(http.StatusOK, estimate)
 	})
 

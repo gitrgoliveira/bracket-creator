@@ -214,30 +214,47 @@ func parseCeremonyParams(comp *state.Competition, tournament *state.Tournament) 
 // 0 with no OpeningBlock), never a bogus year-from-zero value. A zero time.Time
 // is returned ONLY when comp is nil (dayStart cannot be derived).
 func assignPoolMatchSlots(matches []state.MatchResult, comp *state.Competition, tournament *state.Tournament) ([]state.MatchResult, time.Time) {
+	return assignPoolMatchSlotsFrom(matches, comp, tournament, nil)
+}
+
+// assignPoolMatchSlotsFrom is assignPoolMatchSlots with an explicit per-court
+// start anchor map. Each court's cursor starts at the later of dayStart + opening
+// and courtStart[court]; a court absent from the map starts at dayStart + opening.
+func assignPoolMatchSlotsFrom(matches []state.MatchResult, comp *state.Competition, tournament *state.Tournament, courtStart map[string]time.Time) ([]state.MatchResult, time.Time) {
 	if comp == nil {
 		return matches, time.Time{}
 	}
 	dayStart, openingMin, lunchMin, lunchStart := parseCeremonyParams(comp, tournament)
+	openAt := dayStart.Add(time.Duration(openingMin) * time.Minute)
 	if len(matches) == 0 {
-		return matches, dayStart.Add(time.Duration(openingMin) * time.Minute)
+		return matches, openAt
+	}
+
+	startFor := func(court string) time.Time {
+		if courtStart != nil {
+			if t, ok := courtStart[court]; ok && t.After(openAt) {
+				return t
+			}
+		}
+		return openAt
 	}
 
 	courtCursor := map[string]time.Time{}
 	perMatchMin := perMatchElapsedMinutes(comp, tournament, false /*isKnockout*/)
 
-	// Pre-anchor each known court to dayStart+OpeningBlock so a court
-	// with N>1 matches gets the opening offset applied to the first
+	// Pre-anchor each known court to startFor(court) so a court
+	// with N>1 matches gets the opening/floor offset applied to the first
 	// slot consistently. Courts not present in the comp config but
 	// present on matches (defensive) are anchored on first sight.
 	for _, court := range comp.Courts {
-		courtCursor[court] = dayStart.Add(time.Duration(openingMin) * time.Minute)
+		courtCursor[court] = startFor(court)
 	}
 
 	for i := range matches {
 		court := matches[i].Court
 		cursor, ok := courtCursor[court]
 		if !ok {
-			cursor = dayStart.Add(time.Duration(openingMin) * time.Minute)
+			cursor = startFor(court)
 		}
 		cursor = skipCeremonyBlocks(cursor, lunchStart, lunchMin)
 		matches[i].ScheduledAt = cursor.Format(scheduleClockLayout)
@@ -283,6 +300,48 @@ func poolPhaseEndByCourt(matches []state.MatchResult, comp *state.Competition, t
 		}
 	}
 	return ends
+}
+
+// knockoutCourtStart is the court-start map a knockout draw is timed from:
+// each court's last pool bout (bc-kosc), raised to the floor other
+// competitions sharing the court leave there (bc-seqc, courtFloorFor). With
+// a floor, every court of the competition gets an entry, so a floor on one
+// court never moves another: assignBracketMatchSlots sends a court with no
+// entry to the latest start in the map, which would otherwise be the floor.
+// A court without pool bouts still waits for the latest pool end anywhere,
+// as it does with no floor.
+func knockoutCourtStart(poolMatches []state.MatchResult, comp *state.Competition, tournament *state.Tournament, floor map[string]time.Time) map[string]time.Time {
+	ends := poolPhaseEndByCourt(poolMatches, comp, tournament)
+	if len(floor) == 0 || comp == nil {
+		return ends
+	}
+	dayStart, openingMin, _, _ := parseCeremonyParams(comp, tournament)
+	latest := dayStart.Add(time.Duration(openingMin) * time.Minute)
+	for _, t := range ends {
+		if t.After(latest) {
+			latest = t
+		}
+	}
+	out := make(map[string]time.Time, len(comp.Courts)+len(floor))
+	for c, t := range ends {
+		out[c] = t
+	}
+	for _, c := range comp.Courts {
+		if _, ok := out[c]; !ok {
+			out[c] = latest
+		}
+	}
+	for c, t := range floor {
+		cur, ok := out[c]
+		if !ok {
+			cur = latest
+		}
+		if t.After(cur) {
+			cur = t
+		}
+		out[c] = cur
+	}
+	return out
 }
 
 // pushKnockoutPastPools moves a court's knockout matches after that court's

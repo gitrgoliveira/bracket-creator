@@ -13,6 +13,7 @@
 // local-only UI (per the brief; backend persistence is a follow-up).
 
 import { createTimerPool } from './timer_pool.jsx';
+import { compareCourtQueue, courtQueueEntriesOf } from './court_queue.jsx';
 import { applyPatch, keepNewerCompetitions, matchInComp } from './patch.jsx';
 import { SideCell, WinnerTick } from './side_cell.jsx';
 import { useOpenedTapGuard, acceptTap } from './tap_guard.jsx';
@@ -83,21 +84,39 @@ const Icon = window.Icon;
 const QUEUE_OPEN_KEY = "bc_shiaijo_queue_open";
 const hasBothSides = window.hasBothSides;
 
-// Pure ordering/partition helpers (exported for unit tests). Matches sort
-// running → scheduled → completed, then by scheduled time, then queue
-// position within a group.
+// Pure ordering/partition helpers (exported for unit tests). Running and
+// scheduled bouts sort by compareCourtQueue (running first is rule 1).
 export function sortShiaijoMatches(matches) {
-    const order = { running: 0, scheduled: 1, completed: 2 };
+    const isQueue = (s) => s === "running" || s === "scheduled";
+    const isCompleted = (s) => s === "completed";
+
+    const toEntry = (m) => ({
+        competitionId: m.competitionId || m.compId || "",
+        competitionStartTime: m.competitionStartTime || "",
+        date: m.date || "",
+        court: m.court || "",
+        matchId: m.id || m.ID || "",
+        status: m.status || "",
+        scheduledAt: m.scheduledAt || "",
+        drawIndex: m.drawIndex ?? 0,
+        barred: false,
+    });
+
     return [...matches].sort((a, b) => {
-        const ao = order[a.status] ?? 99;
-        const bo = order[b.status] ?? 99;
-        if (ao !== bo) return ao - bo;
-        const ta = (a.scheduledAt || "99:99").localeCompare(b.scheduledAt || "99:99");
-        if (ta !== 0) return ta;
-        // Final tie-break on queuePosition so the order matches the backend
-        // court queue and stays deterministic for same- or untimed matches
-        // (e.g. the ""-scheduledAt rows that Skip produces).
-        return (Number(a.queuePosition) || 0) - (Number(b.queuePosition) || 0);
+        const aq = isQueue(a.status);
+        const bq = isQueue(b.status);
+        if (aq && bq) {
+            return compareCourtQueue(toEntry(a), toEntry(b));
+        }
+        if (aq !== bq) {
+            return aq ? -1 : 1;
+        }
+        const ac = isCompleted(a.status);
+        const bc = isCompleted(b.status);
+        if (ac !== bc) {
+            return ac ? -1 : 1;
+        }
+        return 0;
     });
 }
 
@@ -866,10 +885,34 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // so itself (withOwnStatusMove): every list below (running, Up next,
     // allDone, the advance target) agrees on it.
     const allMatches = useMemoSh(
-        () => courtMatchesRaw.filter(hasBothSides).map((m) => withOwnStatusMove(m, ownMoveOf(m))),
+        () => {
+            const entryMeta = new Map();
+            for (const comp of courtCompetitions) {
+                const entries = courtQueueEntriesOf(comp);
+                for (const e of entries) {
+                    entryMeta.set(`${e.competitionId}/${e.matchId}`, {
+                        competitionId: e.competitionId,
+                        competitionStartTime: e.competitionStartTime,
+                        date: e.date,
+                        drawIndex: e.drawIndex,
+                    });
+                }
+            }
+            return courtMatchesRaw.filter(hasBothSides).map((m) => {
+                const moved = withOwnStatusMove(m, ownMoveOf(m));
+                const meta = entryMeta.get(`${m.compId}/${m.id}`) || {};
+                return {
+                    ...moved,
+                    competitionId: meta.competitionId || m.compId || "",
+                    competitionStartTime: meta.competitionStartTime || "",
+                    date: meta.date || "",
+                    drawIndex: meta.drawIndex ?? 0,
+                };
+            });
+        },
         // ownMovesSeq: a move queued, answered, refused or discarded.
         // oxlint-disable-next-line react-hooks/exhaustive-deps
-        [courtMatchesRaw, ownMovesSeq]
+        [courtMatchesRaw, courtCompetitions, ownMovesSeq]
     );
     // A move the server answered ends once the feed shows it, or a later
     // change made elsewhere: the owner forgets it.
@@ -972,13 +1015,11 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         if (selectedCompId && courtsComps.some(c => c.id === selectedCompId)) return selectedCompId;
         // Default: running match's comp
         if (running.length > 0) return running[0].compId;
-        // Else first comp with scheduled matches
-        for (const c of courtsComps) {
-            if (allMatches.some(m => m.compId === c.id && m.status === "scheduled")) return c.id;
-        }
+        // Else first waiting match in court-queue order
+        if (scheduled.length > 0) return scheduled[0].compId;
         // Else any comp
         return courtsComps[0].id;
-    }, [selectedCompId, courtsComps, running, allMatches]);
+    }, [selectedCompId, courtsComps, running, scheduled]);
     // One operator per court (operator ruling 2026-09-26): the console never
     // switches competition by itself. The default above only CHOOSES the first
     // one shown; it is then held as if picked, so a finished bout or a match

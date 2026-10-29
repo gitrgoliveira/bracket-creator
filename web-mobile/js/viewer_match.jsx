@@ -36,6 +36,8 @@ const { useState, useMemo, useRef: useRefV, useCallback } = React;
 //                                                        no Queue chip needed)
 //   - anything else (completed/forfeit/cancelled, or no qp)  → null (hide chip)
 //
+// The server's queuePosition is court-wide across competitions, so the count
+// includes other competitions' bouts on the same court.
 // Wording mirrors the VSchedItem helper below and display.jsx::queueLabel
 // so all three viewer surfaces agree. Running matches return null because
 // WatchHeroCard already signals the running state via its navy .wl-hero__now
@@ -220,9 +222,10 @@ export const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick, hig
   // (bc-cse) so an individual match's own mark, already inline in its
   // scoreStr above, is never doubled here.
   const { shiro: teamShiroMark, aka: teamAkaMark } = window.teamMatchMarks ? window.teamMatchMarks(m) : { shiro: "", aka: "" };
-  // FR-025: queue position is 1-indexed per court for scheduled matches;
+  // FR-025: queue position is 1-indexed court-wide across competitions for scheduled matches;
   // running/completed are 0 (set server-side, omitempty in JSON → undefined
-  // on older payloads). Treat null/undefined/0 as "don't render" so the UI
+  // on older payloads). The count includes other competitions' bouts on the same court.
+  // Treat null/undefined/0 as "don't render" so the UI
   // stays gracefully empty for non-queued matches and pre-T046 responses.
   // Wording is owned by display.jsx::queueLabel (bead mp-e3k) so every
   // viewer surface stays in sync; we still gate on scheduled+qp>0 here

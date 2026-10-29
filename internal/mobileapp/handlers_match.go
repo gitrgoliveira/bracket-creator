@@ -8,7 +8,6 @@ import (
 	"log"
 	"net/http"
 	"slices"
-	"sort"
 	"strings"
 	"time"
 
@@ -86,17 +85,10 @@ func clampClientModifiedAt(v int64) int64 {
 }
 
 // annotateQueuePositions fills in MatchResult.QueuePosition for each
-// element of matches in-place, delegating to state.DeriveQueuePositions
-// for the per-court (status priority, ScheduledAt, original index) sort.
+// match in-place.
 //
-// FR-025, T036: queue positions are derived at serve time rather than
-// persisted, a stored value would go stale the instant any match
-// transitions and we'd have to recompute on every score write anyway.
-// Match-list endpoints (handlers_viewer.go: GET /competitions and
-// GET /competitions/:id) call this just before c.JSON so viewers see
-// "next up: 3" without any background recomputation job. Score-write
-// endpoints return a single MatchResult and intentionally do NOT
-// annotate (a single match has no list ordering to derive against).
+// Numbers ONE competition's matches only. Production viewer payloads use the
+// court-wide stamp (stampCourtQueuePositions).
 func annotateQueuePositions(matches []state.MatchResult) {
 	if len(matches) == 0 {
 		return
@@ -112,85 +104,103 @@ func annotateQueuePositions(matches []state.MatchResult) {
 // any stale value previously persisted in bracket.json (or written by future
 // code paths) cannot leak back out to clients via the omitempty JSON tag.
 //
-// The ordering basis matches the viewer's ScheduleViewer (web-mobile/js/
-// viewer.jsx around the byCourt sort): pointers to all bracket matches are
-// gathered, then sorted per-court by (status priority, ScheduledAt, round,
-// position) before the per-court counter is incremented. This keeps the
-// "Next up / N before yours" label consistent with the row order the viewer
-// actually renders, even when bracket matches are scheduled out of round
-// order (e.g., a finals court that started 30 minutes early).
+// Numbers ONE competition's matches only. Production viewer payloads use the
+// court-wide stamp (stampCourtQueuePositions).
 func annotateBracketQueuePositions(b *state.Bracket) {
 	if b == nil {
 		return
 	}
-
-	// Group pointers per court, preserving the round/position pair as a
-	// stable tie-break key. We can't sort b.Rounds itself, the bracket
-	// tree structure is load-bearing for the renderer.
-	type entry struct {
-		m        *state.BracketMatch
-		round    int
-		position int
+	entries := state.CourtQueueEntriesOf(&state.Competition{}, nil, b)
+	positions := state.CourtQueuePositions(entries)
+	bracketMatches := state.BracketMatchesInDrawOrder(b)
+	for i, m := range bracketMatches {
+		m.QueuePosition = positions[i]
 	}
-	byCourt := make(map[string][]entry)
-	for ri := range b.Rounds {
-		for mi := range b.Rounds[ri] {
-			m := &b.Rounds[ri][mi]
-			byCourt[m.Court] = append(byCourt[m.Court], entry{m: m, round: ri, position: mi})
+}
+
+// loadCourtQueueEntries gathers the court queue entries of every competition
+// with a draw (setup competitions and preview brackets expose no public
+// matches), eligibility-stamped exactly as a viewer payload stamps its own,
+// so stampCourtQueuePositions can number a competition's matches court-wide.
+// A read-only pass through the public Store loads, each taking and releasing
+// its own lock: never call it from inside Store.WithTransaction, whose
+// competition lock a load of that competition would wait on. One
+// competition's read fault is logged and that competition skipped; the
+// viewer payload never fails for it.
+func loadCourtQueueEntries(store *state.Store) []state.CourtQueueEntry {
+	ids, err := store.ListCompetitions()
+	if err != nil {
+		log.Printf("mobileapp: court queue: list competitions: %v", err)
+		return nil
+	}
+
+	var allEntries []state.CourtQueueEntry
+	for _, id := range ids {
+		comp, err := store.LoadCompetition(id)
+		if err != nil {
+			log.Printf("mobileapp: court queue %s: load competition: %v", id, err)
+			continue
 		}
-	}
-	// ThirdPlaceMatch (single-3rd bronze, bc-3rdp) is a sibling of Rounds. The bronze is
-	// conventionally played JUST BEFORE the final (viewer_awards.jsx: "the
-	// bronze is normally played first"), so slot it into the final's round with
-	// a position sentinel of -1: on their shared court, when scheduledAt is
-	// blank/equal, it sorts after the semifinals but before the final.
-	if b.ThirdPlaceMatch != nil {
-		finalRound := len(b.Rounds) - 1
-		byCourt[b.ThirdPlaceMatch.Court] = append(byCourt[b.ThirdPlaceMatch.Court],
-			entry{m: b.ThirdPlaceMatch, round: finalRound, position: -1})
-	}
-
-	statusOrder := func(s state.MatchStatus) int {
-		switch s {
-		case state.MatchStatusRunning:
-			return 0
-		case state.MatchStatusScheduled:
-			return 1
-		default: // completed and any future status
-			return 2
+		if comp == nil || comp.Status == state.CompStatusSetup {
+			continue
 		}
-	}
-
-	for _, entries := range byCourt {
-		sort.SliceStable(entries, func(i, j int) bool {
-			oi, oj := statusOrder(entries[i].m.Status), statusOrder(entries[j].m.Status)
-			if oi != oj {
-				return oi < oj
-			}
-			// Empty scheduledAt sinks to the end (mirrors the JS
-			// fallback to "99:99" in ScheduleViewer's sort).
-			ai, aj := state.QueueSortTime(entries[i].m.ScheduledAt), state.QueueSortTime(entries[j].m.ScheduledAt)
-			if ai != aj {
-				return ai < aj
-			}
-			if entries[i].round != entries[j].round {
-				return entries[i].round < entries[j].round
-			}
-			return entries[i].position < entries[j].position
-		})
-
-		counter := 0
-		for _, e := range entries {
-			// bc-cse: mirrors state.DeriveQueuePositions' own IneligibleSides
-			// skip -- a scheduled match with a currently barred side is not
-			// queued (position 0), so "Next up" and on-deck alerts skip it.
-			if e.m.Status == state.MatchStatusScheduled && e.m.IneligibleSides == nil {
-				counter++
-				e.m.QueuePosition = counter
+		poolMatches, err := store.LoadPoolMatches(id)
+		if err != nil {
+			log.Printf("mobileapp: court queue %s: load pool matches: %v", id, err)
+			continue
+		}
+		bracket, err := store.LoadBracket(id)
+		if err != nil {
+			log.Printf("mobileapp: court queue %s: load bracket: %v", id, err)
+			continue
+		}
+		if bracket != nil && bracket.Preview {
+			bracket = nil
+		}
+		if anyMatchToAnnotate(poolMatches, bracket) {
+			statuses, err := store.LoadCompetitorStatus(id)
+			if err == nil {
+				annotateEligibility(poolMatches, bracket, statuses)
 			} else {
-				e.m.QueuePosition = 0
+				log.Printf("mobileapp: court queue %s: load competitor status: %v", id, err)
 			}
 		}
+		entries := state.CourtQueueEntriesOf(comp, poolMatches, bracket)
+		allEntries = append(allEntries, entries...)
+	}
+	return allEntries
+}
+
+// stampCourtQueuePositions derives court-wide queue positions across every
+// competition on that court on the same day and stamps them onto poolMatches
+// and bracket in-place.
+func stampCourtQueuePositions(comp *state.Competition, poolMatches []state.MatchResult, bracket *state.Bracket, all []state.CourtQueueEntry) {
+	ownEntries := state.CourtQueueEntriesOf(comp, poolMatches, bracket)
+	if len(ownEntries) == 0 {
+		return
+	}
+	compID := ""
+	if comp != nil {
+		compID = comp.ID
+	}
+	combined := make([]state.CourtQueueEntry, 0, len(ownEntries)+len(all))
+	combined = append(combined, ownEntries...)
+	for _, e := range all {
+		if compID != "" && e.CompetitionID == compID {
+			continue
+		}
+		combined = append(combined, e)
+	}
+
+	positions := state.CourtQueuePositions(combined)
+	for i := range poolMatches {
+		poolMatches[i].QueuePosition = positions[i]
+	}
+
+	bracketMatches := state.BracketMatchesInDrawOrder(bracket)
+	offset := len(poolMatches)
+	for i, bm := range bracketMatches {
+		bm.QueuePosition = positions[offset+i]
 	}
 }
 

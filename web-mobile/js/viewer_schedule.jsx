@@ -11,6 +11,7 @@ import { competitorMatchesQuery, matchMentions } from './competitor_search.jsx';
 import { resultRecencyDesc } from './result_recency.jsx';
 import { barredNameMark } from './barred_chip.jsx';
 import { matchShowsScore } from './match_shows_score.jsx';
+import { withCourtQueuePositions } from './court_queue.jsx';
 
 const { useState, useMemo, useRef: useRefV } = React;
 const EmptyState = window.EmptyState;
@@ -396,7 +397,9 @@ export function TWMatch({ m, highlight, onClick }) {
 
 // Tournament-wide schedule (across competitions): grouped by day, then court swimlanes + filter
 export function ScheduleViewer({ tournament, tweaks }) {
-  const allMatches = useMemo(() => tournamentMatches(tournament).filter(hasBothSides), [tournament]);
+  const comps = useMemo(() => withCourtQueuePositions(tournament?.competitions || []), [tournament?.competitions]);
+  const tourneyWithQueue = useMemo(() => (tournament ? { ...tournament, competitions: comps } : tournament), [tournament, comps]);
+  const allMatches = useMemo(() => tournamentMatches(tourneyWithQueue).filter(hasBothSides), [tourneyWithQueue]);
   const courts = tournament.courts || [];
 
   // mp-xhaa: auto-populate the schedule's `picked` filter from the unified
@@ -561,6 +564,8 @@ export function ScheduleViewer({ tournament, tweaks }) {
 
 // Tournament-wide schedule wrapper for the viewer (its own screen)
 export function ViewerSchedule({ tournament, onBack, tweaks }) {
+  const comps = useMemo(() => withCourtQueuePositions(tournament?.competitions || []), [tournament?.competitions]);
+  const tourneyWithQueue = useMemo(() => (tournament ? { ...tournament, competitions: comps } : tournament), [tournament, comps]);
   // A match opens on the live row its competition holds. Only that
   // competition's list is built, and only once a match is open: the page's
   // own list is ScheduleViewer's, and nothing else here reads one.
@@ -568,12 +573,12 @@ export function ViewerSchedule({ tournament, onBack, tweaks }) {
     const byComp = new Map();
     return (id, compId) => {
       if (!byComp.has(compId)) {
-        const comp = (tournament.competitions || []).find((c) => c.id === compId);
+        const comp = (tourneyWithQueue?.competitions || []).find((c) => c.id === compId);
         byComp.set(compId, comp ? compMatches(comp) : []);
       }
       return matchInList(byComp.get(compId), id, compId);
     };
-  }, [tournament]);
+  }, [tourneyWithQueue]);
   const [selectedMatch, openMatch, closeMatch] = useLiveMatch(rowOf);
   const extendedTweaks = { ...tweaks, onMatchClick: openMatch };
   return (
@@ -588,11 +593,11 @@ export function ViewerSchedule({ tournament, onBack, tweaks }) {
           </div>
         </div>
         <div className="viewer__body">
-          <ScheduleViewer tournament={tournament} tweaks={extendedTweaks} />
+          <ScheduleViewer tournament={tourneyWithQueue} tweaks={extendedTweaks} />
           {window.VersionFooter && <window.VersionFooter />}
         </div>
       </div>
-      {selectedMatch && <MatchViewerModal match={selectedMatch} onClose={closeMatch} tournament={tournament} />}
+      {selectedMatch && <MatchViewerModal match={selectedMatch} onClose={closeMatch} tournament={tourneyWithQueue} />}
     </div>
   );
 }

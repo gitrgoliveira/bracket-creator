@@ -1,8 +1,6 @@
 package state
 
 import (
-	"sort"
-
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 )
 
@@ -272,72 +270,15 @@ func (m *BracketMatch) hasBothCompetitors() bool {
 }
 
 // DeriveQueuePositions assigns a 1-indexed queue position to each
-// scheduled match per court. Live (running) and completed matches
+// scheduled match per court. Live (running), completed, and barred matches
 // receive 0.
 //
-// Ordering: within each court, positions are assigned in
-// (status priority, scheduledAt, original index) order, the same
-// basis used by ScheduleViewer (viewer.jsx) and the client-side SSE
-// recompute (_orderByCourtKey in patch.jsx), so "Next up / N before
-// yours" labels are consistent between server responses and the
-// post-SSE client view.
-//
-// FR-025, R3: positions are recomputed at serve time and on every SSE
-// match-state change so viewers see the queue shrink as matches finish.
-// The function is pure and side-effect-free; the caller is responsible
-// for assigning the returned positions onto the MatchResult slice.
+// Numbers ONE competition's matches only. Production viewer payloads use the
+// court-wide stamp (stampCourtQueuePositions).
 func DeriveQueuePositions(matches []MatchResult) []int {
-	positions := make([]int, len(matches))
 	if len(matches) == 0 {
-		return positions
+		return make([]int, 0)
 	}
-
-	type entry struct {
-		idx int
-		m   MatchResult
-	}
-	byCourt := make(map[string][]entry)
-	for i, m := range matches {
-		byCourt[m.Court] = append(byCourt[m.Court], entry{idx: i, m: m})
-	}
-
-	statusOrder := func(s MatchStatus) int {
-		switch s {
-		case MatchStatusRunning:
-			return 0
-		case MatchStatusScheduled:
-			return 1
-		default:
-			return 2
-		}
-	}
-
-	for _, entries := range byCourt {
-		sort.SliceStable(entries, func(i, j int) bool {
-			oi, oj := statusOrder(entries[i].m.Status), statusOrder(entries[j].m.Status)
-			if oi != oj {
-				return oi < oj
-			}
-			ai, aj := QueueSortTime(entries[i].m.ScheduledAt), QueueSortTime(entries[j].m.ScheduledAt)
-			if ai != aj {
-				return ai < aj
-			}
-			return entries[i].idx < entries[j].idx
-		})
-		counter := 0
-		for _, e := range entries {
-			// bc-cse: a scheduled match whose resolved side ids are
-			// currently barred (IneligibleSides, stamped by the caller
-			// BEFORE this runs -- see mobileapp.annotateEligibility)
-			// is not queued: it cannot be started until the operator
-			// reinstates the barred side or records the default win, so
-			// "Next up" and on-deck alerts must skip it rather than
-			// present a match nobody can actually start next.
-			if e.m.Status == MatchStatusScheduled && e.m.IneligibleSides == nil {
-				counter++
-				positions[e.idx] = counter
-			}
-		}
-	}
-	return positions
+	entries := CourtQueueEntriesOf(&Competition{}, matches, nil)
+	return CourtQueuePositions(entries)
 }

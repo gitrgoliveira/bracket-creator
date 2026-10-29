@@ -1,0 +1,207 @@
+package state
+
+import (
+	"sort"
+	"strings"
+)
+
+// The COURT QUEUE (bc-pubq): the ONE owner of the order a shiaijo plays its
+// matches in and of every viewer payload's queuePosition. The JS mirror
+// (web-mobile/js/court_queue.jsx) and this file are both pinned by one golden
+// table, testdata/court_queue.json; change the rule here and in the table,
+// never at a call site.
+//
+// For every court, over every match of every competition on that court:
+// 1. Matches running on the court come first (two can be running after a forced start),
+//    ordered by the same keys as rule 2.
+// 2. Then every waiting (status scheduled) match, ordered by scheduledAt (HH:MM string;
+//    a match without a time sorts after the timed ones via QueueSortTime); equal times
+//    by the competition's start time (Competition.StartTime, HH:MM, blank sorts last via
+//    QueueSortTime), then competition id (string compare), then draw index (int).
+// 3. Completed matches are not in the queue.
+// 4. A waiting match with a barred side (IneligibleSides != nil, stamped at request time
+//    by mobileapp.annotateEligibility before the queue runs) stays in the ordered queue
+//    but takes no position (0).
+// 5. queuePosition = 1-based rank among the waiting, non-barred matches of that court
+//    queue. Running, barred and completed matches get 0 (omitted on the wire by omitempty).
+// 6. Courts are keyed by (competition date, court): competitions on different
+//    Competition.Date values never share a queue, even with the same court letter (a
+//    multi-day tournament reuses letters). Dates are compared after strings.TrimSpace;
+//    two blank dates are the same day. The court string is used as stored.
+
+// CourtQueueEntry is one match as the court queue reads it.
+type CourtQueueEntry struct {
+	CompetitionID        string      `json:"competitionId"`
+	CompetitionStartTime string      `json:"competitionStartTime"`
+	Date                 string      `json:"date"`
+	Court                string      `json:"court"`
+	MatchID              string      `json:"matchId"`
+	Status               MatchStatus `json:"status"`
+	ScheduledAt          string      `json:"scheduledAt"`
+	DrawIndex            int         `json:"drawIndex"`
+	Barred               bool        `json:"barred"`
+}
+
+// CourtKey names one court queue.
+type CourtKey struct{ Date, Court string }
+
+// CourtQueues returns each court's queue as indexes into entries, in queue order
+// (running first, then waiting; completed left out; barred kept in place).
+func CourtQueues(entries []CourtQueueEntry) map[CourtKey][]int {
+	byCourt := make(map[CourtKey][]int)
+	for i, e := range entries {
+		if e.Status != MatchStatusRunning && e.Status != MatchStatusScheduled {
+			continue
+		}
+		key := CourtKey{
+			Date:  strings.TrimSpace(e.Date),
+			Court: e.Court,
+		}
+		byCourt[key] = append(byCourt[key], i)
+	}
+
+	for key, idxs := range byCourt {
+		sort.SliceStable(idxs, func(i, j int) bool {
+			ei, ej := entries[idxs[i]], entries[idxs[j]]
+			ri, rj := ei.Status == MatchStatusRunning, ej.Status == MatchStatusRunning
+			if ri != rj {
+				return ri
+			}
+			ti, tj := QueueSortTime(ei.ScheduledAt), QueueSortTime(ej.ScheduledAt)
+			if ti != tj {
+				return ti < tj
+			}
+			ci, cj := QueueSortTime(ei.CompetitionStartTime), QueueSortTime(ej.CompetitionStartTime)
+			if ci != cj {
+				return ci < cj
+			}
+			if ei.CompetitionID != ej.CompetitionID {
+				return ei.CompetitionID < ej.CompetitionID
+			}
+			if ei.DrawIndex != ej.DrawIndex {
+				return ei.DrawIndex < ej.DrawIndex
+			}
+			return idxs[i] < idxs[j]
+		})
+		byCourt[key] = idxs
+	}
+
+	return byCourt
+}
+
+// CourtQueuePositions returns, per entry (same index), its queuePosition (0 when none).
+func CourtQueuePositions(entries []CourtQueueEntry) []int {
+	positions := make([]int, len(entries))
+	if len(entries) == 0 {
+		return positions
+	}
+	queues := CourtQueues(entries)
+	for _, queue := range queues {
+		counter := 0
+		for _, idx := range queue {
+			e := entries[idx]
+			if e.Status == MatchStatusScheduled && !e.Barred {
+				counter++
+				positions[idx] = counter
+			}
+		}
+	}
+	return positions
+}
+
+// BracketMatchesInDrawOrder returns pointers to all bracket matches in draw-index
+// order: round by round (round 0 first), position order within each round,
+// with ThirdPlaceMatch (the bronze, when present) placed immediately before the
+// final round's matches.
+func BracketMatchesInDrawOrder(bracket *Bracket) []*BracketMatch {
+	if bracket == nil {
+		return nil
+	}
+	numMatches := 0
+	for _, round := range bracket.Rounds {
+		numMatches += len(round)
+	}
+	if bracket.ThirdPlaceMatch != nil {
+		numMatches++
+	}
+	if numMatches == 0 {
+		return nil
+	}
+
+	result := make([]*BracketMatch, 0, numMatches)
+	if len(bracket.Rounds) == 0 {
+		if bracket.ThirdPlaceMatch != nil {
+			result = append(result, bracket.ThirdPlaceMatch)
+		}
+		return result
+	}
+
+	finalRound := len(bracket.Rounds) - 1
+	for r := 0; r < finalRound; r++ {
+		for i := range bracket.Rounds[r] {
+			result = append(result, &bracket.Rounds[r][i])
+		}
+	}
+	if bracket.ThirdPlaceMatch != nil {
+		result = append(result, bracket.ThirdPlaceMatch)
+	}
+	for i := range bracket.Rounds[finalRound] {
+		result = append(result, &bracket.Rounds[finalRound][i])
+	}
+	return result
+}
+
+// CourtQueueEntriesOf builds the entries of one competition from its pool
+// matches and bracket (nil allowed), with the draw index described above.
+// Barred is Status == scheduled && IneligibleSides != nil.
+func CourtQueueEntriesOf(comp *Competition, poolMatches []MatchResult, bracket *Bracket) []CourtQueueEntry {
+	bracketMatches := BracketMatchesInDrawOrder(bracket)
+	total := len(poolMatches) + len(bracketMatches)
+	if total == 0 {
+		return nil
+	}
+
+	compID := ""
+	compStartTime := ""
+	compDate := ""
+	if comp != nil {
+		compID = comp.ID
+		compStartTime = comp.StartTime
+		compDate = comp.Date
+	}
+
+	entries := make([]CourtQueueEntry, 0, total)
+	drawIndex := 0
+
+	for _, m := range poolMatches {
+		entries = append(entries, CourtQueueEntry{
+			CompetitionID:        compID,
+			CompetitionStartTime: compStartTime,
+			Date:                 compDate,
+			Court:                m.Court,
+			MatchID:              m.ID,
+			Status:               m.Status,
+			ScheduledAt:          m.ScheduledAt,
+			DrawIndex:            drawIndex,
+			Barred:               m.Status == MatchStatusScheduled && m.IneligibleSides != nil,
+		})
+		drawIndex++
+	}
+
+	for _, bm := range bracketMatches {
+		entries = append(entries, CourtQueueEntry{
+			CompetitionID:        compID,
+			CompetitionStartTime: compStartTime,
+			Date:                 compDate,
+			Court:                bm.Court,
+			MatchID:              bm.ID,
+			Status:               bm.Status,
+			ScheduledAt:          bm.ScheduledAt,
+			DrawIndex:            drawIndex,
+			Barred:               bm.Status == MatchStatusScheduled && bm.IneligibleSides != nil,
+		})
+		drawIndex++
+	}
+
+	return entries
+}

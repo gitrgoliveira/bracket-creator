@@ -188,6 +188,8 @@ func buildViewerCompetitionPayloads(store *state.Store, courtFilter string) ([]a
 		return nil, err
 	}
 
+	queue := loadCourtQueueEntries(store)
+
 	results := make([]any, len(ids))
 	var wg sync.WaitGroup
 	var panicRef atomic.Pointer[recoveredPanic]
@@ -198,7 +200,7 @@ func buildViewerCompetitionPayloads(store *state.Store, courtFilter string) ([]a
 			// results[idx] as a nil `any` so the collect loop below skips
 			// it; assigning a nil gin.H directly would box into a non-nil
 			// interface and slip past that filter.
-			if payload := buildViewerCompetitionPayload(store, compID, courtFilter); payload != nil {
+			if payload := buildViewerCompetitionPayload(store, compID, courtFilter, queue); payload != nil {
 				results[idx] = payload
 			}
 		})
@@ -229,7 +231,7 @@ func buildViewerCompetitionPayloads(store *state.Store, courtFilter string) ([]a
 // on that court (matchesPresentOnCourt). The gate runs off the same
 // poolMatches/bracket this function already loads, no second read. The
 // aggregate passes "" (no filter).
-func buildViewerCompetitionPayload(store *state.Store, compID, courtFilter string) gin.H {
+func buildViewerCompetitionPayload(store *state.Store, compID, courtFilter string, queue []state.CourtQueueEntry) gin.H {
 	// Per-comp read faults degrade to skipping (or thinning) the comp rather
 	// than failing the whole viewer payload — the availability trade for the
 	// public list surfaces — but every failed load below is logged so a
@@ -383,9 +385,8 @@ func buildViewerCompetitionPayload(store *state.Store, compID, courtFilter strin
 		}
 	}
 
-	// FR-025, T036: derive per-court queue position at serve time.
-	annotateQueuePositions(poolMatches)
-	annotateBracketQueuePositions(bracket)
+	// Court-wide queuePosition across every competition on that court on the same day.
+	stampCourtQueuePositions(comp, poolMatches, bracket, queue)
 
 	// Redact operator-only audit fields before this PUBLIC payload.
 	stripMatchesAudit(poolMatches)
@@ -804,10 +805,8 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 				}
 			}
 
-			// FR-025, T036: derive per-court queue position at serve time,
-			// see annotateQueuePositions for rationale.
-			annotateQueuePositions(poolMatches)
-			annotateBracketQueuePositions(bracket)
+			// Court-wide queuePosition across every competition on that court on the same day.
+			stampCourtQueuePositions(comp, poolMatches, bracket, loadCourtQueueEntries(store))
 
 			// mp-13y: merge assigned competitor Number from the draw onto
 			// comp.Players so the numberPrefix-derived "K1", "K2", … surface

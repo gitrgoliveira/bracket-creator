@@ -316,6 +316,20 @@ For a kachinuki (winner stays on) competition the number of bouts is not fixed, 
 
 ![The competition Overview schedule estimate for a kachinuki competition, reading Best, Average, and Worst durations followed by a per-court breakdown.](../../screenshots/kachinuki-estimate-range.png)
 
+### Sharing a shiai-jo between competitions
+
+Several competitions may be assigned the same shiai-jo. By default they run one after another, not on top of each other: when you draw a competition, its first match on a shared shiai-jo is placed no earlier than the planned end of the last match on that shiai-jo of every other competition on the same day that is already drawn there and starts at the same time or earlier. If two competitions have the same start time, the one drawn second goes after the one drawn first. Only competitions on the same day count. A tie-break or representative bout added later, and a later Swiss round, keep those staggered times; they do not pull the competition back on top of the other one.
+
+The Create competition form fills in the start time for you: it is set to the latest planned end of the other same-day competitions that share one of the shiai-jo you pick (using the plan of the ones already drawn, and an estimate for those not yet drawn). If none shares a shiai-jo, it stays at 09:00. Change the start time yourself and your value stays; changing the shiai-jo or date before you touch the start time recalculates it. The hint under the shiai-jo field says: competitions on the same shiai-jo run one after another. The competition schedule estimate on the Overview tab also gives the planned end of the last match on each of its shiai-jo once the competition is drawn, which is what the form uses.
+
+A few limits apply: a competition drawn before an earlier-starting one is not moved; a later phase (for example the knockout after the pools) is only placed after competitions that start no later than its own, so an earlier-starting competition's knockout that is drawn after a later competition has taken the shiai-jo follows its own pool phase and can overlap the later one. A start time you set by hand can still overlap another competition; the schedule warns about an overlap when you create or save settings.
+
+To re-time a competition, use **Auto-schedule competition** on the **Tournament schedule**. It is not held back by the other competitions, so use it after drawing in an unusual order, or to interleave competitions on one shiai-jo on purpose. It distributes that competition's matches across its shiai-jo by its own settings.
+
+On the spectator views, there is [one "Next up" bout per shiai-jo](../spectators/following.md#next-up-on-each-shiai-jo) across all competitions sharing that court.
+
+At the table, note that after a match finishes, the court console stays on the competition you are scoring (it never switches competition or court by itself), while the public screens may name the next match by printed time, which can belong to another competition sharing the shiai-jo. This is rare by default because shared shiai-jo are staggered; it happens when you interleave on purpose with Auto-schedule.
+
 ### Moving matches between shiai-jo
 
 A match can be moved to another shiai-jo from the schedule page (by using its court picker, or by dragging the match to another court's column), as well as from the **Scores** tab row's court picker, the **Bracket** tab's running-match panel picker, or the court console, which has no court picker for the match running there.

@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"log"
 	"math"
 	"time"
 
@@ -99,6 +100,9 @@ type ScheduleEstimate struct {
 	WorstCaseMinutes     int   `json:"worstCaseMinutes"`
 	PerCourtMinutes      []int `json:"perCourtMinutes"`
 	CeremonyMinutes      int   `json:"ceremonyMinutes"`
+	// CourtEnds maps each court to the planned end ("HH:MM") of this competition's
+	// last slot there; only set on the per-competition estimate of a drawn competition.
+	CourtEnds map[string]string `json:"courtEnds,omitempty"`
 }
 
 // EstimateInput holds the parameters EstimateSchedule consumes. All
@@ -569,3 +573,53 @@ func EstimateForCounts(poolCount, knockoutCount int, comp *state.Competition, to
 // EstimateForCounts's walk prices. Kachinuki passes three (best/avg/worst);
 // every other format passes one.
 type schedScenario struct{ poolPerMatch, knockoutPerMatch int }
+
+func slotMinutesFor(tournament *state.Tournament) state.SlotMinutes {
+	return func(c *state.Competition, ko bool) int {
+		if c == nil {
+			return perMatchElapsedMinutes(c, tournament, ko)
+		}
+		if c.Kind == "team" && c.TeamSize == 0 {
+			compCopy := *c
+			compCopy.TeamSize = 5
+			return perMatchElapsedMinutes(&compCopy, tournament, ko)
+		}
+		return perMatchElapsedMinutes(c, tournament, ko)
+	}
+}
+
+// courtFloorFor resolves the per-court earliest start times for comp based on
+// other same-day competitions sharing its courts. Returns nil on store error
+// since the floor is advisory.
+func (e *Engine) courtFloorFor(comp *state.Competition, tournament *state.Tournament) map[string]time.Time {
+	if comp == nil {
+		return nil
+	}
+	courts := InheritedDrawCourts(comp.Courts, tournament)
+	floors, err := e.store.CourtFloor(comp, courts, slotMinutesFor(tournament))
+	if err != nil {
+		log.Printf("courtFloorFor %s: %v", comp.ID, err)
+		return nil
+	}
+	if len(floors) == 0 {
+		return nil
+	}
+	out := make(map[string]time.Time, len(floors))
+	for court, floorStr := range floors {
+		t := parseClockHHMM(floorStr)
+		if !t.IsZero() {
+			out[court] = t
+		}
+	}
+	return out
+}
+
+// CourtEnds returns the planned end ("HH:MM") of compID's last slot on each court
+// it holds matches on.
+func (e *Engine) CourtEnds(compID string) (map[string]string, error) {
+	tournament, err := e.store.LoadTournament()
+	if err != nil {
+		return nil, err
+	}
+	return e.store.CourtEnds(compID, slotMinutesFor(tournament))
+}

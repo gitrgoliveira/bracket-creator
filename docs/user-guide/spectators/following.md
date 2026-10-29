@@ -30,6 +30,19 @@ Tap a competition to see its schedule, standings, and bracket. Aka (red) and Shi
   <figcaption>The Bracket tab: results fill in the tree as matches are completed. Scroll sideways for the later rounds.</figcaption>
 </figure>
 
+### Next up on each shiai-jo
+
+A shiai-jo has one queue, shared by every competition on it. The bout running now comes first, then the waiting bouts in the order of their printed start times, whichever competition they belong to. If two bouts show the same time, the competition that starts earlier goes first, then the draw order. A bout with no printed time comes after the timed ones. If a competitor withdrew or is barred from a bout, that bout takes no place in the queue.
+
+So there is exactly one "Next up" bout per shiai-jo, and the same one appears everywhere:
+
+- **The competition page**: shows the next bout on that shiai-jo.
+- **Match cards**: "N before yours" counts every bout ahead of it on that shiai-jo, including other competitions' bouts.
+- **Watchlist alerts**: trigger when your bout is on deck.
+- **Court scoreboards and lobby boards**: show this same bout.
+
+The queue updates live; if another competition on the same shiai-jo finishes or starts a bout, your position moves without you reloading.
+
 ### Searching by competitor number
 
 Once the draw for a competition has run, its competitors are numbered. The number starts with a short prefix that belongs to that competition, so "K12" and "M12" are two different people in two different draws. Swiss competitions are the exception and use no numbers at all.

@@ -318,7 +318,13 @@ func (e *Engine) GenerateSwissRound(compID string, roundNumber int) ([]state.Mat
 	if comp.Kind == "team" && comp.TeamSize == 0 {
 		comp.TeamSize = 5
 	}
-	matches, _ = assignPoolMatchSlots(matches, comp, tournament)
+	if roundNumber == 1 {
+		courtFloor := e.courtFloorFor(comp, tournament)
+		matches, _ = assignPoolMatchSlotsFrom(matches, comp, tournament, courtFloor)
+	} else {
+		combined := appendWithSlots(priorMatches, matches, comp, tournament)
+		matches = combined[len(priorMatches):]
+	}
 
 	return matches, nil
 }

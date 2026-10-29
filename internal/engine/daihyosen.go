@@ -14,6 +14,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
@@ -320,6 +321,20 @@ func (e *Engine) InjectPoolDaihyosenMatches(compID string) ([]state.MatchResult,
 // an earlier slotting) already set. Shared by the injections that append
 // tie-break and representative bouts in one read-modify-write.
 func appendWithSlots(allMatches, injected []state.MatchResult, comp *state.Competition, tournament *state.Tournament) []state.MatchResult {
+	courtStart := make(map[string]time.Time)
+	for _, m := range allMatches {
+		if m.ScheduledAt == "" || m.Court == "" {
+			continue
+		}
+		t, err := time.Parse(scheduleClockLayout, m.ScheduledAt)
+		if err != nil {
+			continue
+		}
+		if cur, ok := courtStart[m.Court]; !ok || t.Before(cur) {
+			courtStart[m.Court] = t
+		}
+	}
+
 	allMatches = append(allMatches, injected...)
 	// Snapshot operator-adjusted times first so they survive the
 	// reassignment; only newly injected matches (ScheduledAt == "") should
@@ -330,7 +345,7 @@ func appendWithSlots(allMatches, injected []state.MatchResult, comp *state.Compe
 			existingTimes[m.ID] = m.ScheduledAt
 		}
 	}
-	allMatches, _ = assignPoolMatchSlots(allMatches, comp, tournament)
+	allMatches, _ = assignPoolMatchSlotsFrom(allMatches, comp, tournament, courtStart)
 	for i := range allMatches {
 		if t, ok := existingTimes[allMatches[i].ID]; ok {
 			allMatches[i].ScheduledAt = t

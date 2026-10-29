@@ -299,8 +299,10 @@ function poolMatchIndex(id) {
 }
 
 // compareByRunOrder: canonical per-court run order: queue position, then
-// scheduled time, then the numeric match index. Mirrors findUpcomingOnCourt and
-// survives untimed schedules (blank scheduledAt) without the lexicographic-id
+// scheduled time, then the numeric match index. queuePosition is court-wide
+// across competitions (bc-pubq) and keeps the court queue's order within one
+// competition, which is all this board's pool strips show; the NEXT line asks
+// the court queue itself (findUpcomingOnCourt). Survives untimed schedules (blank scheduledAt) without the lexicographic-id
 // pitfall of comparing ids as strings.
 function compareByRunOrder(a, b) {
     const qa = Number(a.queuePosition) || 9999;

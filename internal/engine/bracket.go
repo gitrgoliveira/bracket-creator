@@ -349,6 +349,7 @@ func (e *Engine) buildBracketFromDraw(comp *state.Competition, draw *helper.Knoc
 	if err != nil {
 		return nil, err
 	}
+	courtFloor := e.courtFloorFor(comp, tournament)
 
 	// Display metadata (mp-7f2w): label each match with its effective round and
 	// real feeders so the viewer renders the same effective-round columns as the
@@ -379,8 +380,9 @@ func (e *Engine) buildBracketFromDraw(comp *state.Competition, draw *helper.Knoc
 	// for the same wiring. Scheduled in number order, so the load-time repair
 	// of the old storage-order scheduling owes it nothing (TimesSettled).
 	// A pools + knockout draw starts each court's knockout after that court's
-	// last pool bout (bc-kosc); knockout-only (nil poolMatches) keeps the day start.
-	assignBracketMatchSlots(bracket.Rounds, comp, tournament, poolPhaseEndByCourt(poolMatches, comp, tournament))
+	// last pool bout (bc-kosc) and any court floor; knockout-only (nil poolMatches)
+	// gets the floor alone.
+	assignBracketMatchSlots(bracket.Rounds, comp, tournament, knockoutCourtStart(poolMatches, comp, tournament, courtFloor))
 	bracket.TimesSettled = true
 
 	// Bronze (3rd-place) knockout: only when this competition's format

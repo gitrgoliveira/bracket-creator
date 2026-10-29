@@ -278,6 +278,7 @@ func (e *Engine) generatePools(comp *state.Competition, players []domain.Player,
 	if err != nil {
 		return nil, err
 	}
+	courtFloor := e.courtFloorFor(comp, tournament)
 
 	if comp.Format == state.CompFormatLeague {
 		// League scheduling (mp-sjaz): spread every player's matches so
@@ -290,7 +291,7 @@ func (e *Engine) generatePools(comp *state.Competition, players []domain.Player,
 		// scheduleLeagueSlots treats an empty court list as one unnamed court.
 		var slots []int
 		results, slots = scheduleLeagueSlots(results, comp.Courts)
-		results, _ = assignLeagueSlotTimes(results, slots, comp, tournament)
+		results, _ = assignLeagueSlotTimesFrom(results, slots, comp, tournament, courtFloor)
 	} else {
 		// For single-pool multi-court, distribute each round's matches across
 		// courts so that simultaneous matches never share a participant.
@@ -314,7 +315,7 @@ func (e *Engine) generatePools(comp *state.Competition, players []domain.Player,
 				roundStart++
 			}
 		}
-		results, _ = assignPoolMatchSlots(results, comp, tournament)
+		results, _ = assignPoolMatchSlotsFrom(results, comp, tournament, courtFloor)
 	}
 
 	numberPoolMatchesInPlayingOrder(results)

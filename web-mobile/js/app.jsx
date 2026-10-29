@@ -14,6 +14,7 @@ import { tapWords } from './match_history_view.jsx';
 import { useOpenedTapGuard } from './tap_guard.jsx';
 import { SELF_RUN_NO_CHECK_IN } from './competition_shape.jsx';
 import { pushToast } from './toast_queue.jsx';
+import { sharesCourtDay } from './court_queue.jsx';
 
 const { useState: useS, useEffect: useE, useRef: useR, useCallback: useC } = React;
 
@@ -480,6 +481,10 @@ export function queueAlertToastOptions(alert) {
 
 function App() {
   const [tournament, setTournament] = useS(undefined);
+  // The selected competition's latest data, for the SSE handler's
+  // cross-competition refetch (sharesCourtDay), which must not read a stale
+  // closure.
+  const selectedCompDataRef = useR(null);
   const [loading, setLoading] = useS(true);
   const [announcements, setAnnouncements] = useS([]);
   // Hydrate the route state from the URL synchronously, BEFORE the first
@@ -1290,6 +1295,17 @@ function App() {
                 // has already persisted the new status before broadcasting, so
                 // this fetch deterministically picks up the transition.
                 jitteredTimeout(() => window.API.fetchCompetitionDetails(viewerCompId).then(takeCompDetail).catch(err => console.error('SSE refresh failed:', err)), detailJitter);
+            } else if (event.type === "match_updated" && viewerCompId && event.data?.competitionId !== viewerCompId) {
+                // bc-pubq: queuePosition is court-wide, so another
+                // competition's match moving on a court and day this one
+                // shares changes this one's positions: refetch them.
+                const otherComp = (compsRef.current || []).find(c => c.id === event.data?.competitionId);
+                const otherDate = otherComp?.date || "";
+                const eventResults = event.data?.results || (event.data?.result ? [event.data.result] : []);
+                const courts = eventResults.map(r => r.court).filter(Boolean);
+                if (sharesCourtDay(selectedCompDataRef.current, otherDate, courts)) {
+                    jitteredTimeout(() => window.API.fetchCompetitionDetails(viewerCompId).then(takeCompDetail).catch(err => console.error('SSE refresh failed:', err)), detailJitter);
+                }
             }
             // P1 (mp-9afd): fire a full-list refetch for list-level
             // transitions (competition_started / competition_completed change
@@ -1415,6 +1431,7 @@ function App() {
   }, [viewerCompId, mode]);
 
   const [selectedCompData, setSelectedCompData] = useS(null);
+  useE(() => { selectedCompDataRef.current = selectedCompData; }, [selectedCompData]);
 
   useE(() => {
     if (viewerCompId && viewerScreen !== "register") {

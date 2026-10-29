@@ -153,14 +153,43 @@ func scheduleLeagueSlots(matches []state.MatchResult, courts []string) (ordered 
 // immediately after the last slot ends. Returns an unmodified slice and zero
 // time.Time when comp is nil.
 func assignLeagueSlotTimes(matches []state.MatchResult, slots []int, comp *state.Competition, tournament *state.Tournament) ([]state.MatchResult, time.Time) {
+	return assignLeagueSlotTimesFrom(matches, slots, comp, tournament, nil)
+}
+
+// assignLeagueSlotTimesFrom writes ScheduledAt on each match according to its slot,
+// anchoring the whole grid at the latest of dayStart + opening and the floor of every
+// court the league uses. It does not shift courts independently.
+func assignLeagueSlotTimesFrom(matches []state.MatchResult, slots []int, comp *state.Competition, tournament *state.Tournament, courtStart map[string]time.Time) ([]state.MatchResult, time.Time) {
 	if comp == nil {
 		return matches, time.Time{}
 	}
 
 	dayStart, openingMin, lunchMin, lunchStart := parseCeremonyParams(comp, tournament)
+	openAt := dayStart.Add(time.Duration(openingMin) * time.Minute)
 
 	if len(matches) == 0 {
-		return matches, dayStart.Add(time.Duration(openingMin) * time.Minute)
+		return matches, openAt
+	}
+
+	usedCourts := make(map[string]struct{})
+	for _, c := range comp.Courts {
+		if c != "" {
+			usedCourts[c] = struct{}{}
+		}
+	}
+	for _, m := range matches {
+		if m.Court != "" {
+			usedCourts[m.Court] = struct{}{}
+		}
+	}
+
+	anchor := openAt
+	if courtStart != nil {
+		for c := range usedCourts {
+			if t, ok := courtStart[c]; ok && t.After(anchor) {
+				anchor = t
+			}
+		}
 	}
 
 	perMatchMin := perMatchElapsedMinutes(comp, tournament, false /*isKnockout*/)
@@ -175,7 +204,7 @@ func assignLeagueSlotTimes(matches []state.MatchResult, slots []int, comp *state
 	}
 
 	slotTime := make([]time.Time, maxSlot+1)
-	cursor := dayStart.Add(time.Duration(openingMin) * time.Minute)
+	cursor := anchor
 	for k := range maxSlot + 1 {
 		cursor = skipCeremonyBlocks(cursor, lunchStart, lunchMin)
 		slotTime[k] = cursor

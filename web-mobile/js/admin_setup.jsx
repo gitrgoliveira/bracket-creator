@@ -41,20 +41,36 @@ function deriveCompetitionName(rawName, kind) {
   return "Individual";
 }
 
-// pickStackPredecessor returns the latest-STARTING same-day competition that the
-// new competition's default start time should stack after: or null when there
-// is no usable predecessor (the caller keeps the 09:00 default).
+// findStackCandidates returns all same-day competitions that share at least
+// one shiaijo (court) with selectedCourts (or all same-day competitions if
+// selectedCourts is omitted/null) and have a parseable startTime.
+// A competition whose `courts` is missing or empty uses every tournament court
+// (safeCourts / tournamentCourts).
+function findStackCandidates(competitions, date, selectedCourts, tournamentCourts) {
+  const normTournCourts = (Array.isArray(tournamentCourts) && tournamentCourts.length > 0)
+    ? tournamentCourts
+    : (typeof window !== "undefined" && window.normalizeCourts ? window.normalizeCourts(tournamentCourts) : ["A"]);
+  return (competitions || []).filter((cc) => {
+    if (cc.date !== date || timeToMinutes(cc.startTime) === null) return false;
+    if (!selectedCourts) return true;
+    const compCourts = (Array.isArray(cc.courts) && cc.courts.length > 0) ? cc.courts : normTournCourts;
+    return compCourts.some((c) => selectedCourts.includes(c));
+  });
+}
+
+// pickStackPredecessor returns the latest-STARTING candidate among same-day
+// competitions (sharing a court if selectedCourts is provided, or across all
+// same-day competitions if omitted): or null when there is no usable predecessor.
 //
 // Entries are filtered on PARSEABLE start times (timeToMinutes !== null), not
 // just truthy ones: the backend only length-caps StartTime (no format
 // validation), so a legacy/imported competition could carry a malformed value.
-// Including such an entry could make it the `latest` and make the caller's
-// addMinutes() emit "NaN:NaN". Comparison is numeric (minutes-since-midnight)
-// so an un-zero-padded "9:00" doesn't lex-sort after "10:00".
-function pickStackPredecessor(competitions, date) {
-  const sameDay = (competitions || []).filter((cc) => cc.date === date && timeToMinutes(cc.startTime) !== null);
-  if (sameDay.length === 0) return null;
-  return sameDay.reduce((a, b) => (timeToMinutes(b.startTime) > timeToMinutes(a.startTime) ? b : a));
+// Comparison is numeric (minutes-since-midnight) so an un-zero-padded "9:00"
+// doesn't lex-sort after "10:00".
+function pickStackPredecessor(competitions, date, selectedCourts, tournamentCourts) {
+  const candidates = findStackCandidates(competitions, date, selectedCourts, tournamentCourts);
+  if (candidates.length === 0) return null;
+  return candidates.reduce((a, b) => (timeToMinutes(b.startTime) > timeToMinutes(a.startTime) ? b : a));
 }
 
 // Pure submit-time validation for AdminCreateCompetition's pool-format
@@ -816,32 +832,53 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
   // dropped while the red error states it one line above.
   const courtsHint = window.shiaijoCountHintFor(format, safeCourts.length, !courtsErr);
 
-  // Auto-stack the default start time after the previous competition on the
-  // same day. We take the latest-STARTING same-day competition and add its
-  // estimated duration (≈0 until it has a roster) floored at MIN_STACK_BLOCK_MIN,
-  // so back-to-back creates lay out sequentially. Behaviour:
-  //  - Recomputes when the operator switches days BEFORE editing the start
-  //    time (each day has its own predecessor).
+  // Auto-stack the default start time after the latest planned end among same-day
+  // competitions that share any of the chosen shiaijo (courts). For drawn
+  // competitions, we take the latest planned end across the chosen courts from
+  // estimate.courtEnds. For an undrawn competition (no estimate or no courtEnds
+  // entry on a chosen court), we use its startTime plus estimated duration
+  // floored at MIN_STACK_BLOCK_MIN. Behaviour:
+  //  - Recomputes when the operator switches days or changes chosen courts
+  //    BEFORE editing the start time.
+  //  - Keeps the 09:00 default when there are no candidate competitions sharing
+  //    a chosen court.
   //  - Once the operator types a start time, startTimeEditedRef latches and
   //    this effect short-circuits: a deliberate manual choice survives
-  //    subsequent day changes rather than being silently overwritten.
+  //    subsequent changes rather than being silently overwritten.
   useEffectA(() => {
     if (startTimeEditedRef.current) return;
-    // latest.startTime is guaranteed parseable (pickStackPredecessor filters on
-    // timeToMinutes !== null), so addMinutes() below never emits "NaN:NaN".
-    const latest = pickStackPredecessor(tournament.competitions, date);
-    if (!latest) return; // no usable predecessor → keep the 09:00 default
+    const candidates = findStackCandidates(tournament.competitions, date, selectedCourts, safeCourts);
+    if (candidates.length === 0) return; // no sharing candidates: keep the 09:00 default
+
     const controller = new AbortController();
-    const applyStacked = (durMin) => {
+    const candidatePromises = candidates.map((cc) =>
+      window.API.estimateCompetitionSchedule(cc.id, password, controller.signal)
+        .catch(() => null)
+        .then((est) => {
+          if (est && est.courtEnds && typeof est.courtEnds === "object") {
+            const chosenCourtEnds = Object.entries(est.courtEnds)
+              .filter(([court, endTime]) => selectedCourts.includes(court) && typeof endTime === "string" && timeToMinutes(endTime) !== null)
+              .map(([, endTime]) => endTime);
+            if (chosenCourtEnds.length > 0) {
+              return chosenCourtEnds.reduce((a, b) => (timeToMinutes(b) > timeToMinutes(a) ? b : a));
+            }
+          }
+          const block = Math.max(Math.round(est?.totalDurationMinutes || 0), MIN_STACK_BLOCK_MIN);
+          return window.addMinutes(cc.startTime, block);
+        })
+    );
+
+    Promise.all(candidatePromises).then((ends) => {
       if (controller.signal.aborted || startTimeEditedRef.current) return;
-      const block = Math.max(Math.round(durMin || 0), MIN_STACK_BLOCK_MIN);
-      setStartTime(window.addMinutes(latest.startTime, block));
-    };
-    window.API.estimateCompetitionSchedule(latest.id, password, controller.signal)
-      .then((est) => applyStacked(est?.totalDurationMinutes))
-      .catch(() => { if (!controller.signal.aborted) applyStacked(0); });
+      const validEnds = ends.filter((t) => typeof t === "string" && timeToMinutes(t) !== null);
+      if (validEnds.length === 0) return;
+      const latestEnd = validEnds.reduce((a, b) => (timeToMinutes(b) > timeToMinutes(a) ? b : a));
+      if (controller.signal.aborted || startTimeEditedRef.current) return;
+      setStartTime(latestEnd);
+    });
+
     return () => { controller.abort(); };
-  }, [date, tournament.competitions, password]);
+  }, [date, tournament.competitions, password, selectedCourts.join(",")]);
 
   // bc-pnum G2/R6: pre-fill the prefix field with the SAME value a save
   // left blank would actually assign server-side (assignDefaultNumberPrefix),
@@ -1370,7 +1407,7 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
                 cannot drift apart: immediately under the pills, above the
                 concurrency hint. */}
             <window.ShiaijoCountNotes error={courtsErr} hint={courtsHint} />
-            <div className="field__hint">Concurrency for this competition equals the number of shiaijo (courts) assigned. Different competitions can share shiaijo (courts); the schedule prevents conflicts.</div>
+            <div className="field__hint">Concurrency for this competition equals the number of shiaijo (courts) assigned. Competitions on the same shiaijo (court) run one after another: when you draw, this one starts after the other competitions that day on the same shiaijo (court) have finished their drawn matches. The start time above is filled in that way until you change it.</div>
           </div>
 
           {/* bc-symm: per-phase match durations, brought over from Settings
@@ -1771,6 +1808,7 @@ window.AdminImportPage = AdminImportPage;
 // sendAnnouncementLabel) moved to admin_announcement.jsx alongside the
 // AnnouncementComposer component they drive (mp-djc).
 export {
-  deriveCompetitionName, validatePoolSettings, validateSwissSettings, pickStackPredecessor,
+  deriveCompetitionName, validatePoolSettings, validateSwissSettings,
+  findStackCandidates, pickStackPredecessor,
   previewRowCourts, previewRowShiaijoError, importRowErrorText,
 };

@@ -549,7 +549,7 @@ function App() {
   // ViewerCompetition (via handleTabChange's replace arg). Genuine tab
   // navigations leave it false and push normally. Consumed (reset to false)
   // by the sync effect only when it actually rewrites the URL.
-  const replaceNextUrlSync = useR(
+  const replaceNextUrlSyncRef = useR(
     typeof window !== "undefined" &&
       initialRoute.mode !== "display" &&
       window.location.pathname !==
@@ -566,7 +566,7 @@ function App() {
   // replaces rather than pushes; tab clicks pass false. Set explicitly on
   // every call so the flag never leaks across navigations.
   const handleTabChange = useC((tab, replace = false) => {
-    replaceNextUrlSync.current = replace;
+    replaceNextUrlSyncRef.current = replace;
     setViewerTab(tab);
   }, []);
   const [viewerScreen, setViewerScreen] = useS(initialRoute.viewerScreen || "home"); // home | schedule | glossary | reset | results
@@ -626,12 +626,11 @@ function App() {
   // each tab gets a fresh ID so two operators resetting from
   // different tabs both see the other's reset and log out as they
   // should.
-  const clientIdRef = useR(null);
-  if (!clientIdRef.current) {
-    clientIdRef.current = (typeof crypto !== 'undefined' && crypto.randomUUID)
-      ? crypto.randomUUID()
-      : `c${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-  }
+  const [clientId] = useS(() => ((typeof crypto !== 'undefined' && crypto.randomUUID)
+    ? crypto.randomUUID()
+    : `c${Date.now()}-${Math.random().toString(36).slice(2, 10)}`));
+  // The long-lived SSE handler reads it through this ref.
+  const clientIdRef = useR(clientId);
   // mp-cw1: Unix-ms timestamp of when this viewer session mounted. Used to
   // distinguish pre-existing announcements (sentAt ≤ mount time) from
   // announcements created after the viewer opened the tab (sentAt > mount
@@ -640,7 +639,8 @@ function App() {
   // the filter can use Date.parse() for correct cross-format comparison
   // (Go RFC3339Nano may omit fractional seconds; lexicographic string
   // comparison of "…Z" vs "….500Z" is incorrect: 'Z' > '.' in ASCII).
-  const mountTimeRef = useR(Date.now());
+  const [mountTime] = useS(Date.now);
+  const mountTimeRef = useR(mountTime);
   // Set of announcement IDs already seen by this session. Seeded by the
   // initial HTTP fetchAnnouncements response (pre-mount IDs only) so a
   // page-reload does NOT re-fire for already-active announcements, and an
@@ -683,7 +683,6 @@ function App() {
       if (message) showToast(message, queueAlertToastType(alert), queueAlertToastOptions(alert));
     });
     // Mount-only: showToast pushes into the module-level toast queue.
-    // oxlint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Route state was hydrated synchronously by the useState initializers
@@ -696,10 +695,7 @@ function App() {
     if (initialRoute.mode === "admin" && !authed) {
       setAuthPrompt(true);
     }
-    // Mount-only side effect; intentional empty deps. The project's
-    // ESLint config doesn't include react-hooks/exhaustive-deps, so
-    // no disable directive is needed (and including one errored
-    // because the rule isn't defined).
+    // Mount-only side effect; intentional empty deps.
   }, []);
 
   // Sync state to URL whenever it changes. Uses the AppRouter.route()
@@ -717,8 +713,8 @@ function App() {
     if (window.location.pathname !== url) {
       // Consume the replace flag only when we actually rewrite, so a no-op
       // pass (e.g. the mount render before a clamp resolves) doesn't drop it.
-      const replace = replaceNextUrlSync.current;
-      replaceNextUrlSync.current = false;
+      const replace = replaceNextUrlSyncRef.current;
+      replaceNextUrlSyncRef.current = false;
       if (AppRouter && AppRouter.route) {
         AppRouter.route(url, replace);
       } else if (replace) {
@@ -1102,6 +1098,9 @@ function App() {
     });
   }, []);
 
+  // The open competition's detail. Declared ahead of the SSE effect below,
+  // whose handlers write it.
+  const [selectedCompData, setSelectedCompData] = useS(null);
   useE(() => {
     // Track every pending jittered timer so the cleanup can cancel them when
     // viewerCompId / mode changes. Without this, a timer queued for
@@ -1474,7 +1473,6 @@ function App() {
     };
   }, [viewerCompId, mode]);
 
-  const [selectedCompData, setSelectedCompData] = useS(null);
   useE(() => { selectedCompDataRef.current = selectedCompData; }, [selectedCompData]);
 
   useE(() => {
@@ -1722,7 +1720,7 @@ function App() {
         window.ResetPasswordForm
           ? <window.ResetPasswordForm
               authConfig={authConfig}
-              originatorId={clientIdRef.current}
+              originatorId={clientId}
               onBack={() => setViewerScreen("home")}
               onSuccess={(pw) => {
                 setAuthed(true);

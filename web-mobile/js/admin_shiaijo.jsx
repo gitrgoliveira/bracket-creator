@@ -416,6 +416,13 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // judged again once the operator has answered the unsaved-entries
     // question (pickMatch, correctMatch).
     const latestRef = useRefSh(null);
+    // The newest court call this console made per match, keyed by matchKey, as
+    // { id, msg }: the announcement id (a promise of it, null if the send failed)
+    // and the text sent, so the call can be withdrawn once its match leaves
+    // scheduled (bc-cdbl). A reload forgets them; the 5-minute expiry is the
+    // backstop. Declared ahead of the court feed's handler, which withdraws one.
+    const callIdsRef = useRefSh(new Map());
+    const withdrawCallRef = useRefSh(null);
     useEffectSh(() => {
         if (typeof window.scrollTo === "function") window.scrollTo(0, 0);
         return () => { mountedRef.current = false; };
@@ -438,7 +445,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // The feed as of this render, for the event handler below, whose closure
     // outlives renders.
     const courtCompsRef = useRefSh(null);
-    courtCompsRef.current = courtComps;
+    React.useLayoutEffect(() => { courtCompsRef.current = courtComps; });
     // R4 (bc-evts stage 3 review 2): a court move or time change this device
     // makes shows in the court feed at once, as a push would, and a refusal
     // puts the old value back (told by the outbox, subscribeLocalMatchPatch).
@@ -696,13 +703,6 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // shows the next match, and a per-match key would let the bounce start it
     // and send the match just started back to the queue.
     const startTapRef = useRefSh(null);
-    // The newest court call this console made per match, keyed by matchKey, as
-    // { id, msg }: the announcement id (a promise of it, null if the send failed)
-    // and the text sent, so the call can be withdrawn once its match leaves
-    // scheduled (bc-cdbl). A reload forgets them; the 5-minute expiry is the
-    // backstop.
-    const callIdsRef = useRefSh(new Map());
-    const withdrawCallRef = useRefSh(null);
     const [contextOpen, setContextOpen] = useStateSh(true);
     // The whole queue column folds away so the scorer can take the full width;
     // the choice is per device, like the operator's other console preferences.
@@ -712,13 +712,13 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // Set only by an operator click in toggleQueue below, never true on mount
     // or on a server-driven rerender, so the focus effect it gates fires
     // solely for an explicit toggle.
-    const queueToggledByUser = useRefSh(false);
+    const queueToggledByUserRef = useRefSh(false);
     // The two controls that swap places across the fold: the rail button only
     // exists while collapsed, the header button only exists while expanded.
     const queueShowBtnRef = useRefSh(null);
     const queueHideBtnRef = useRefSh(null);
     const toggleQueue = () => {
-        queueToggledByUser.current = true;
+        queueToggledByUserRef.current = true;
         // Persist from INSIDE the updater, off the live value. Reading the
         // render-time `queueOpen` here while updating functionally let two taps
         // in one batch cancel each other in state while both wrote the same
@@ -741,8 +741,8 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // operator-driven toggle: this must never steal focus on mount or when
     // `queueOpen` merely reflects a rerender the operator didn't trigger.
     useEffectSh(() => {
-        if (!queueToggledByUser.current) return;
-        queueToggledByUser.current = false;
+        if (!queueToggledByUserRef.current) return;
+        queueToggledByUserRef.current = false;
         const target = queueOpen ? queueHideBtnRef.current : queueShowBtnRef.current;
         // preventScroll: the counterpart sits where the pressed control was,
         // already in view, so the focus move must not scroll the page.
@@ -901,7 +901,6 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
             });
         },
         // ownMovesSeq: a move queued, answered, refused or discarded.
-        // oxlint-disable-next-line react-hooks/exhaustive-deps
         [courtMatchesRaw, courtCompetitions, ownMovesSeq]
     );
     // A move the server answered ends once the feed shows it, or a later
@@ -921,7 +920,6 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         if (held.length > 0 && typeof window.API.forgetOwnStatusMovesNotIn === "function") {
             window.API.forgetOwnStatusMovesNotIn(held);
         }
-        // oxlint-disable-next-line react-hooks/exhaustive-deps
     }, [courtMatchesRaw, tournament.competitions, ownMovesSeq]);
     // Scheduled knockout bouts still waiting on a "Winner of rX-mY" feeder
     // (mp-y3nk). Kept SEPARATE from allMatches / filteredScheduled so they never
@@ -1105,20 +1103,17 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // open correction refuses a Start, and a start still out refuses a Start of
     // another match. ONE place builds each sentence, for the toast and the
     // notice alike.
-    // "starting" reads the refs, so a refusal made from an advance's async
-    // continuation names the start that is out NOW (the render's copy may be
-    // stale there), and a refusal made during a pick's defer names that pick. At
-    // render time the refs and the state agree.
-    const refusalBlocker = (why) => {
+    // "starting" names `startOut`, the start (or pick) record that is out: a
+    // tap's refusal reads it from the refs, so a refusal made from an advance's
+    // async continuation names the start that is out NOW (the render's copy may
+    // be stale there), and a refusal made during a pick's defer names that pick.
+    // The render reads the state, which follows the refs (syncStartingKey).
+    const refusalBlocker = (why, startOut) => {
         if (why === "running") return liveBout;
-        if (why === "starting") {
-            const s = startingRef.current || pickingRef.current;
-            return s ? s.match : null;
-        }
+        if (why === "starting") return startOut ? startOut.match : null;
         return openCorrection;
     };
-    const refusalText = (why) => {
-        const blocker = refusalBlocker(why);
+    const refusalText = (why, blocker) => {
         if (!blocker) return null;
         if (why === "running") return correctWhileRunningMessage({ court, label: scoreRowMatchName(blocker) });
         if (why === "starting") return startWhileStartingMessage({ label: scoreRowMatchName(blocker) });
@@ -1127,10 +1122,14 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // The notice for a refused tap, derived: shown only while the match that
     // refused it still does, so it goes by itself when that match is finished,
     // sent back or cancelled, and a later, unrelated one never revives it.
+    // A "starting" refusal holds the record of the start that refused it, which
+    // is still the one out while startingKey names it; another start out names
+    // a different match, so the notice goes either way.
     const refusalNotice = (key) => {
         if (!refusedTap || refusedTap.key !== key) return null;
-        const blocker = refusalBlocker(refusedTap.why);
-        return blocker && matchKey(blocker) === refusedTap.against ? refusalText(refusedTap.why) : null;
+        const startOut = refusedTap.start && refusedTap.start.key === startingKey ? refusedTap.start : null;
+        const blocker = refusalBlocker(refusedTap.why, startOut);
+        return blocker && matchKey(blocker) === refusedTap.against ? refusalText(refusedTap.why, blocker) : null;
     };
     // Refuse a tap: remember it against the match that blocks it, and toast.
     // leaveEditorConfirmed: true when the console may unmount the editor or put
@@ -1147,15 +1146,16 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     const editorUnsavedFor = (compId, matchId) => !!selectedMatch && selectedMatch.compId === compId
         && selectedMatch.id === matchId && holdsUnsaved(editorUnsavedRef);
     const refuseTap = (m, why) => {
-        const blocker = refusalBlocker(why);
+        const startOut = startingRef.current || pickingRef.current;
+        const blocker = refusalBlocker(why, startOut);
         setRefusedTap({
             key: matchKey(m), compId: m.compId, why, against: matchKey(blocker), label: scoreRowMatchName(blocker),
             // The start (or pick) record itself, which startMatch marks `landed` once the
             // start went out: the effect beside startMatch asks it before writing the
             // past-tense sentence.
-            start: why === "starting" ? (startingRef.current || pickingRef.current) : null,
+            start: why === "starting" ? startOut : null,
         });
-        if (showToast) showToast(refusalText(why), "error");
+        if (showToast) showToast(refusalText(why, blocker), "error");
     };
     // The stored refusal is read against the refused match's LIVE row in the
     // court's list (the same list the court-call withdrawal reads), never against
@@ -1197,7 +1197,6 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     const filteredScheduled = useMemoSh(
         () => scheduled.filter((m) => (!effectiveCompId || m.compId === effectiveCompId) && !isStartedSnapshot(m)),
         // isStartedSnapshot reads startedFrom alone.
-        // eslint-disable-next-line react-hooks/exhaustive-deps
         [scheduled, effectiveCompId, startedFrom]
     );
     const filteredCompleted = useMemoSh(
@@ -1367,7 +1366,6 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         entries.sort((a, b) => b.count - a.count);
         return { entries, alsoWaiting: selHasActive };
         // isStartedSnapshot reads startedFrom alone.
-        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [allMatches, effectiveCompId, running, liveBout, filteredScheduled, courtKnown, startedFrom]);
 
     // The one place the Starting… state follows the refs: the start in flight,
@@ -1754,7 +1752,19 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // End the correction of the match keyed `key` only if it is still the one
     // open: a write's answer may arrive after another correction was opened.
     const endCorrectionOf = (key) => { setCorrectingKey((k) => (k === key ? null : k)); };
-    latestRef.current = { pickMatch, correctMatch, allMatches, running };
+    React.useLayoutEffect(() => { latestRef.current = { pickMatch, correctMatch, allMatches, running }; });
+
+    // takeDown: delete the announcement whose id `pending` resolves to (none
+    // when it resolves to null). Fire and forget, shared by withdrawCall and the
+    // earlier call callToCourt replaces.
+    const takeDown = (pending) => {
+        pending
+            .then((id) => {
+                if (!id || !window.API || typeof window.API.deleteAnnouncement !== "function") return;
+                return window.API.deleteAnnouncement(id, password);
+            })
+            .catch((e) => console.warn("Could not withdraw the court call", e));
+    };
 
     // Call to court: optional. Broadcasts a tournament announcement so the
     // competitors (and anyone watching the public app) are notified they're
@@ -1824,18 +1834,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         callIdsRef.current.delete(key);
         takeDown(entry.id);
     };
-    withdrawCallRef.current = withdrawCall;
-    // takeDown: delete the announcement whose id `pending` resolves to (none
-    // when it resolves to null). Fire and forget, shared by withdrawCall and the
-    // earlier call callToCourt replaces.
-    const takeDown = (pending) => {
-        pending
-            .then((id) => {
-                if (!id || !window.API || typeof window.API.deleteAnnouncement !== "function") return;
-                return window.API.deleteAnnouncement(id, password);
-            })
-            .catch((e) => console.warn("Could not withdraw the court call", e));
-    };
+    React.useLayoutEffect(() => { withdrawCallRef.current = withdrawCall; });
 
     // A court call comes down once its match has left scheduled, however that
     // happened (started here, started elsewhere, closed by a decision), once the

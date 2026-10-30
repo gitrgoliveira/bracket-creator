@@ -307,7 +307,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, onSub
   // (subscribeSyncStatus + hasPendingTerminalWrite). pendingFn holds the last
   // terminal submit closure so "Retry now" can re-invoke it directly.
   const [pendingWrite, setPendingWrite] = useStateA(false);
-  const pendingFnRef = useRefA(null);
+  const [pendingFn, setPendingFn] = useStateA(null);
   // F5: set when a queued terminal write is PERMANENTLY rejected (non-retryable
   // 4xx on retry): the write never landed, so we must show an explicit "not
   // saved" failure state rather than let the pending banner clear to "saved".
@@ -337,15 +337,15 @@ export function ScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, onSub
   // baselines to the server's value, so a side's adopt agrees the group only when BOTH
   // sides then hold what the server holds: a pick of ours still being saved on the
   // other side must stay a change, or its save landing would make putting it back look
-  // unchanged and the server would keep the other value. `repAfter` is each side's
+  // unchanged and the server would keep the other value. `repAfterRef` is each side's
   // pick as this commit's adopts leave it: the render's own picks (refreshed by the
   // effect below, which runs before the adopts), then the served pick of each side
   // whose adopt has run, so the second adopt of one update sees the first.
-  const repAfter = useRefA({ a: "", b: "" });
-  useEffectA(() => { repAfter.current = { a: repPlayerA, b: repPlayerB }; });
+  const repAfterRef = useRefA({ a: "", b: "" });
+  useEffectA(() => { repAfterRef.current = { a: repPlayerA, b: repPlayerB }; });
   const adoptRepPick = (side, served) => {
-    repAfter.current[side] = served;
-    if (!repPickHeld(repAfter.current.a, m.repPlayerA) && !repPickHeld(repAfter.current.b, m.repPlayerB)) claimChanged.agree(GROUP_REP);
+    repAfterRef.current[side] = served;
+    if (!repPickHeld(repAfterRef.current.a, m.repPlayerA) && !repPickHeld(repAfterRef.current.b, m.repPlayerB)) claimChanged.agree(GROUP_REP);
   };
   // Follow a pick made on another device, same rule as every other channel.
   //
@@ -441,7 +441,9 @@ export function ScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, onSub
   // routes through onAfterDecision when the host page provides it (and this
   // isn't a correction) so the court advances to the next match: mirroring
   // the Finish + Start Next flow. A hantei is committed by Finish (bc-htsd).
-  const submitDecision = makeSubmitDecision({
+  // Built when a decision is submitted, from this render's values (the form
+  // that submits it is this render's), so no ref is handed out during render.
+  const submitDecision = (kind, opts) => makeSubmitDecision({
     match: m, enchoPeriodCount, password, mountedRef,
     // The server copy the board showed (m1): the score-events answer's when
     // the board took it.
@@ -450,12 +452,15 @@ export function ScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, onSub
     onClose, onAfterDecision, isComplete,
     // F5: thread pending-write handles so the factory can show the sticky banner
     // when the decision write is only queued (offline / transient failure).
-    setPendingWrite, pendingFnRef,
+    // The factory hands the retry closure over through a ref's `current`;
+    // this editor keeps it in pendingFn, which "Retry now" renders from.
+    setPendingWrite,
+    pendingFnRef: { set current(fn) { setPendingFn(() => fn); } },
     unsaved: unsavedRef,
     onDiscard: onDiscardUnsaved,
     // On a running match the overtime is a tap, already the board's.
     serverEnchoPeriodCount: tapMode ? enchoPeriodCount : initialEnchoPeriods,
-  });
+  })(kind, opts);
   // bc-tmfn: Clear withdrawal and reopen, the same door and component the team
   // editor uses (RecordedWithdrawal / useMatchReopen, admin_scoring_shared.jsx).
   // A plain correction here keeps a recorded withdrawal (it has no way to
@@ -676,6 +681,8 @@ export function ScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, onSub
     const ippons = winnerSide === "a" ? aFinal : bFinal;
     return { winner, ipponsA: aFinal, ipponsB: bFinal, hansokuA: aFouls, hansokuB: bFouls, status: "completed", score: { type: "ippon", winnerPts: ippons.length, loserPts: (winnerSide === "a" ? bFinal : aFinal).length, ippons, fouls, corrected: isComplete }, ...completedTail };
   };
+  // The Finish guard (see below), declared ahead of doSubmit, which disarms it.
+  const { armed: finishArmed, setArmed: setFinishArmed, confirm: confirmFinish } = useArmedConfirm();
   const doSubmit = async (fn) => {
     setSubmitting(true);
     // Clear any prior pending/failed state when the operator explicitly retries.
@@ -697,7 +704,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, onSub
     if (writeRetryable(res)) {
       if (mountedRef.current) {
         setPendingWrite(res);
-        pendingFnRef.current = fn;
+        setPendingFn(() => fn);
       }
     }
     return res;
@@ -724,7 +731,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, onSub
   // edge for a discard made elsewhere.
   const dropHeldWrite = () => {
     setPendingWrite(false);
-    pendingFnRef.current = null;
+    setPendingFn(null);
     setFinishArmed(false);
   };
   useClearPendingWhenNothingHeld(m.compId, m.id, pendingWrite, dropHeldWrite);
@@ -969,8 +976,8 @@ export function ScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, onSub
   // brush). The result itself is verified from the score slots above, not the
   // button; a lossy "SHIRO WIN 1–0" caption is not a check.
   // bc-dtfn: the arm-then-confirm guard with a dwell, so the bounce of the
-  // arming tap cannot commit (tap_guard.jsx).
-  const { armed: finishArmed, setArmed: setFinishArmed, confirm: confirmFinish } = useArmedConfirm();
+  // arming tap cannot commit (tap_guard.jsx). useArmedConfirm itself is
+  // called above doSubmit, which disarms it.
   useEffectA(() => { setFinishArmed(false); }, [aTotal, bTotal, isDrawToggled, hanteiPick, decidedByHantei]);
 
   // "Has the OPERATOR changed anything", which gates the discard prompt — so
@@ -992,7 +999,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, onSub
     hanteiPick !== recordedHtKey ||
     // A removed withdrawal is unsaved until Save correction sends it.
     removingWithdrawal;
-  unsavedRef.current = isDirty;
+  React.useLayoutEffect(() => { unsavedRef.current = isDirty; });
   // The host asks it before it leaves or swaps this editor (R1); the team and
   // engi editors this one hands a match to publish their own.
   usePublishUnsaved(isTeam || isEngi ? null : hostUnsavedRef, unsavedRef, onDiscardUnsaved);
@@ -1034,16 +1041,18 @@ export function ScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, onSub
   // local verdicts and a pending withdrawal removal included, and the owner
   // forgets the draft, so a write turned down later never brings it back as
   // kept or says it was dropped (stage 5 review 8).
-  discardUnsavedRef.current = () => {
-    if (withdrawalRemoval && withdrawalRemoval.removed) withdrawalRemoval.onUndo();
-    takeServerDraft();
-    setDecidedByHantei(hanteiRecorded);
-    setHanteiPick(recordedHtKey);
-    setIsDrawToggled(initialIsDrawToggled);
-    setEnchoPeriodCount(initialEnchoPeriods);
-    own.release();
-    own.discardDraft();
-  };
+  React.useLayoutEffect(() => {
+    discardUnsavedRef.current = () => {
+      if (withdrawalRemoval && withdrawalRemoval.removed) withdrawalRemoval.onUndo();
+      takeServerDraft();
+      setDecidedByHantei(hanteiRecorded);
+      setHanteiPick(recordedHtKey);
+      setIsDrawToggled(initialIsDrawToggled);
+      setEnchoPeriodCount(initialEnchoPeriods);
+      own.release();
+      own.discardDraft();
+    };
+  });
   const saveKeptDraft = () => {
     const board = tapBoardOf(m).match;
     const seen = seedBoard(board);
@@ -1067,7 +1076,6 @@ export function ScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, onSub
   // draft it carried.
   useEffectA(() => {
     if (own.resetSeq > 0) takeServerDraft();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [own.resetSeq]);
   // Operator S1 a: a display of this court on the SAME device (another tab,
   // the HDMI output) shows exactly this board, pending taps included; it is
@@ -1084,7 +1092,6 @@ export function ScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, onSub
     const api = window.API || {};
     if (typeof api.hasPendingTerminalWrite === "function" && api.hasPendingTerminalWrite(m.compId, m.id)) return;
     publishBoardOverlay({ ...tapBoard.match, ...(m.repIsTeam ? { repPlayerA: repShownA, repPlayerB: repShownB } : {}) });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [overlaySig]);
   // The local board re-seeds, unsaved edits or not, when the RULING moves
   // under it (lockedKey changes): a
@@ -1126,7 +1133,6 @@ export function ScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, onSub
       return;
     }
     applyServerScore();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [recordedLockedKey]);
   // leaveEditor: every way out of the editor that is not a write, Close and
   // Prev/Next alike (operator ruling 2026-09-27: Prev/Next ask as Close does).
@@ -1165,7 +1171,9 @@ export function ScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, onSub
   // Scoring shortcuts (Enter/M/K/D/T/H/X, plus S in Naginata) are skipped when any interactive
   // element (input, button, link, …) has focus so native activation still works.
   const kbRef = React.useRef(null);
-  kbRef.current = { delegated: isTeam || isEngi, submitting, canFinish, isDrawToggled, isKnockoutPhase, aTotal, bTotal, handleDismiss, canClose, onPrev, onNext, goPrev, goNext, prevMatch, nextMatch, onSubmit, onSubmitAndNext, buildPatch, addPt, doSubmit, isNaginata, decidedByHantei, isComplete, correctionReason, askCorrectionReason, applyDrawToggle };
+  React.useLayoutEffect(() => {
+    kbRef.current = { delegated: isTeam || isEngi, submitting, canFinish, isDrawToggled, isKnockoutPhase, aTotal, bTotal, handleDismiss, canClose, onPrev, onNext, goPrev, goNext, prevMatch, nextMatch, onSubmit, onSubmitAndNext, buildPatch, addPt, doSubmit, isNaginata, decidedByHantei, isComplete, correctionReason, askCorrectionReason, applyDrawToggle };
+  });
 
   useEffectA(() => {
     const onKeyDown = (ev) => {
@@ -1666,12 +1674,12 @@ export function ScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, onSub
               {/* Only show Retry when we hold the submit closure. On a hydrated
                   re-open it can't be restored from the serialized queue: but the
                   queue still auto-retries in the background, so no button is fine. */}
-              {pendingFnRef.current && (
+              {pendingFn && (
                 <button
                   type="button"
                   className="btn btn--sm btn--ghost"
                   disabled={submitting}
-                  onClick={() => doSubmit(pendingFnRef.current)}
+                  onClick={() => doSubmit(pendingFn)}
                 >
                   Retry now
                 </button>

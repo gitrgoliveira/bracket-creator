@@ -87,14 +87,20 @@ function mirrorWatchlistToAddressBar(watchlist, roster) {
   }
 }
 
+// The fallbacks ViewerHome reads when the tournament carries no competitions
+// or viewer_watchlist.js failed to load: one each for the module, so neither
+// is a new value on every render.
+const NO_COMPETITIONS = [];
+const NoWatchlistPanel = () => null;
+
 export function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSchedule, onRegister, onOpenResults, sseConnected = true, paceLookup }) {
   // WatchlistPanel lives in viewer_watchlist.jsx; read it at render time so the
   // viewer.jsx <-> viewer_watchlist.jsx runtime cycle is load-order independent.
   // Fall back to a no-op if viewer_watchlist.js fails to load so the rest of
   // the page still renders rather than crashing on an invalid element type.
-  const WatchlistPanel = window.WatchlistPanel ?? (() => null);
+  const WatchlistPanel = window.WatchlistPanel ?? NoWatchlistPanel;
   const t = tournament;
-  const comps = t.competitions || [];
+  const comps = t.competitions || NO_COMPETITIONS;
   const completedCount = comps.filter((c) => c.status === "completed").length;
   const compsByDate = useMemo(() => {
     const map = {};
@@ -104,9 +110,6 @@ export function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOp
       map[d].push(c);
     });
     return map;
-    // comps is derived (new array each render); this memo is a within-render
-    // grouping, so re-running when comps changes is the intended behavior.
-    // oxlint-disable-next-line react-hooks/exhaustive-deps
   }, [comps, t.date]);
   const dates = Object.keys(compsByDate).sort(compareDmy);
 
@@ -177,11 +180,11 @@ export function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOp
     window.addEventListener("popstate", onNavigate);
     return () => window.removeEventListener("popstate", onNavigate);
   }, []);
-  const sharedSettled = useRefV(false);
+  const sharedSettledRef = useRefV(false);
   React.useEffect(() => {
     if (typeof window === "undefined" || !window.location) return;
     if (roster.length === 0) return; // wait until participants are loaded
-    if (sharedSettled.current) {
+    if (sharedSettledRef.current) {
       mirrorWatchlistToAddressBar(watchlist, roster);
       return;
     }
@@ -214,7 +217,7 @@ export function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOp
     // two differ the ledger is merely incomplete and the next pass retries.
     if (pass.write) setWatchlist((prev) => mergeSharedWatchlist(prev, pass.entries));
     if (!pass.settle) return;
-    sharedSettled.current = true;
+    sharedSettledRef.current = true;
     // Settled: the inbound link is finished with, and the ledger goes with
     // it, so re-opening this same link later is a fresh open that adds again.
     clearSharedLedger(sessionStore());
@@ -229,7 +232,7 @@ export function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOp
     // to home re-runs the mirror (see mirrorWatchlistToAddressBar) by name.
     // Today it would re-run anyway, because useWatchlist hands back a new
     // setter every render, but that is an accident this must not rest on.
-  }, [roster, watchlist, rosterLoaded, setWatchlist, sharedApplied, sharedSettled, locationPath]);
+  }, [roster, watchlist, rosterLoaded, setWatchlist, sharedApplied, sharedSettledRef, locationPath]);
 
   // global "across-all-competitions" lists for the home page
   const allMatches = useMemo(() => tournamentMatches(t), [t]);

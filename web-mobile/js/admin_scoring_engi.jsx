@@ -141,7 +141,7 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, o
   // (a closure, not a bare payload, so a queued Finish+Next retries the same
   // advance path). Null after a re-open hydration (the queue still auto-retries,
   // but the closure can't be recovered from the serialized queue, so Retry hides).
-  const pendingFnRef = useRefE(null);
+  const [pendingFn, setPendingFn] = useStateE(null);
   const [writeFailed, setWriteFailed] = useStateE(null); // { reason, advice? } | null
 
   // bc-mrgc: what a write applied only in part kept in the match's history.
@@ -199,8 +199,6 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, o
   const canSubmit = isValidTotal && !submitting && !own.kept;
   // Only a draft can be unsaved: a running match's counts are taps.
   const isDirty = !tapMode && (draftA !== initialFlagsA || draftB !== initialFlagsB);
-  // The host asks it before it leaves or swaps this editor (R1).
-  usePublishUnsaved(hostUnsavedRef, isDirty, () => discardEntries());
   own.note({ a: initialFlagsA, b: initialFlagsB }, { a: draftA, b: draftB });
   // Follow a flag count recorded on another device — the same rule the kendo
   // editors follow, because this is the same rule: an engi match has ONE result
@@ -239,6 +237,8 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, o
   // server's at once and the owner forgets the draft, as the individual and
   // team editors' own Discard entries does.
   const discardEntries = () => { takeServerFlags(); own.release(); own.discardDraft(); };
+  // The host asks it before it leaves or swaps this editor (R1).
+  usePublishUnsaved(hostUnsavedRef, isDirty, () => discardEntries());
   const saveKeptDraft = () => {
     const board = tapBoardOf(m, ENGI_FOLD);
     for (const ev of engiDraftTaps(own.kept.base, { a: draftA, b: draftB })) {
@@ -252,7 +252,6 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, o
   // server's counts (own.resetSeq, the owner's one signal).
   useEffectE(() => {
     if (own.resetSeq > 0) takeServerFlags();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [own.resetSeq]);
 
   // A display of this court on the same device (another tab, the HDMI output)
@@ -269,7 +268,6 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, o
     const api = window.API || {};
     if (typeof api.hasPendingTerminalWrite === "function" && api.hasPendingTerminalWrite(m.compId, m.id)) return;
     publishBoardOverlay({ ...tapBoard.match, flagsA, flagsB });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [overlaySig]);
 
   // Every way out that is not a write, Close and Prev/Next alike (operator
@@ -311,6 +309,9 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, o
   const akaDojo   = dojoOf(m.sideA);
 
   const clamp = (n) => Math.max(0, Math.min(MAX_FLAGS, n));
+
+  // The Save guard (see below), declared ahead of doSubmit, which disarms it.
+  const { armed: saveArmed, setArmed: setSaveArmed, confirm: confirmSave } = useArmedConfirm();
 
   // doSubmit takes a submit CLOSURE (like ScoreEditorModal) so the caller picks
   // onSubmit vs onSubmitAndNext; F5 retry re-invokes the same closure.
@@ -368,7 +369,7 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, o
     if (writeRetryable(res) && mountedRef.current) {
       setSubmitting(false);
       setPendingWrite(res);
-      pendingFnRef.current = fn;
+      setPendingFn(() => fn);
     }
     return res;
   };
@@ -394,7 +395,7 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, o
   // edge for a discard made elsewhere.
   const dropHeldWrite = () => {
     setPendingWrite(false);
-    pendingFnRef.current = null;
+    setPendingFn(null);
     setSaveArmed(false);
   };
   useClearPendingWhenNothingHeld(m.compId, m.id, pendingWrite, dropHeldWrite);
@@ -405,8 +406,8 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, o
   // TAP_BOUNCE_MS saves, so the bounce of the arming tap can neither save nor
   // start the next match. Any flag change disarms it, so a stale count cannot
   // be confirmed. A correction ("Save correction") and keyboard Enter save
-  // directly, as there.
-  const { armed: saveArmed, setArmed: setSaveArmed, confirm: confirmSave } = useArmedConfirm();
+  // directly, as there. (useArmedConfirm itself is called above doSubmit,
+  // which disarms it.)
   useEffectE(() => { setSaveArmed(false); }, [flagsA, flagsB]);
 
   // F5: surface a PERMANENT terminal-write failure (non-retryable 4xx on a
@@ -470,7 +471,9 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, o
   // fresh state via kbRef. Escape stays owned by useEscapeToClose above.
   const kbRef = useRefE(null);
   const lastSideRef = useRefE(null); // "a" | "s" | null: which side Backspace undoes
-  kbRef.current = { submitting, canSubmit, showCorrectionPrompt, stepFlags, handleSubmit, onPrev, onNext, goPrev, goNext, prevMatch, nextMatch };
+  React.useLayoutEffect(() => {
+    kbRef.current = { submitting, canSubmit, showCorrectionPrompt, stepFlags, handleSubmit, onPrev, onNext, goPrev, goNext, prevMatch, nextMatch };
+  });
   useEffectE(() => {
     const onKeyDown = (ev) => {
       const s = kbRef.current;
@@ -697,8 +700,8 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, o
         {pendingWrite && !writeFailed && (
           <div className="pending-write-banner" role="status" aria-live="polite">
             <HeldWriteNotice compId={m.compId} matchId={m.id} match={m} res={pendingWrite} />
-            {pendingFnRef.current && (
-              <button type="button" className="btn btn--sm btn--ghost" disabled={submitting} onClick={() => doSubmit(pendingFnRef.current)}>Retry now</button>
+            {pendingFn && (
+              <button type="button" className="btn btn--sm btn--ghost" disabled={submitting} onClick={() => doSubmit(pendingFn)}>Retry now</button>
             )}
             <HeldWriteDiscard
               compId={m.compId}

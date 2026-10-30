@@ -352,15 +352,12 @@ function phaseProgressOnCourt(promoted, court) {
 // is unavailable. Moved here from streaming_overlay.jsx (mp-s99q) so both
 // StreamingOverlay and TvDisplay can share the same component.
 function StreamingQR({ url, label }) {
-    // Use a stable object as the ref container so the useEffect dependency
-    // doesn't change on every render. The canvas element is stored in
-    // canvasHolder.el after the JSX ref callback fires.
-    const canvasHolder = React.useMemo(() => ({ el: null }), []);
+    // The canvas element, set by React before the effect below runs.
+    const canvasRef = React.useRef(null);
 
-    // canvasHolder is a stable useMemo container (see comment); the effect is
-    // intentionally keyed on url only, reading canvasHolder.el at run time.
+    // Keyed on url only: the effect reads the canvas at run time.
     React.useEffect(() => {
-        const canvas = canvasHolder.el;
+        const canvas = canvasRef.current;
         if (!canvas || !url) return undefined;
         // renderQR may be available on window if qr.jsx has been imported
         // by another module (e.g. admin_shell.jsx exposes it). If not, skip.
@@ -368,14 +365,13 @@ function StreamingQR({ url, label }) {
         if (!fn) return undefined;
         try { fn(canvas, url, { moduleSize: 2, quietZone: 2 }); } catch (_e) { /* skip */ }
         return undefined;
-        // oxlint-disable-next-line react-hooks/exhaustive-deps
     }, [url]);
 
     return (
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.4vh' }}>
             <canvas
                 data-testid="qr-canvas"
-                ref={(el) => { canvasHolder.el = el; }}
+                ref={canvasRef}
                 style={{ display: 'block', imageRendering: 'pixelated', borderRadius: 4 }}
             />
             {label && <div style={{ fontSize: '1.2vh', opacity: 0.75, textAlign: 'center' }}>{label}</div>}

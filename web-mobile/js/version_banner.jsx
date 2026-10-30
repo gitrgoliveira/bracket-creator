@@ -32,8 +32,7 @@ export function VersionBanner({ onReload = reloadKeepingTheOutbox } = {}) {
   // says to keep it open (the one wording of that, write_result.jsx).
   const [notStored, setNotStored] = React.useState(false);
   React.useEffect(() => {
-    setState(versionState());
-    return subscribeVersionState(setState);
+    return subscribeVersionState(setState, { current: true });
   }, []);
   if (state !== 'stale') return null;
   return (

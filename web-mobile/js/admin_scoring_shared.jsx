@@ -160,11 +160,9 @@ export function useTapOutcomeNote(compId, matchId) {
       else setState((s) => ({ ...s, note: text, id }));
     });
   }, [compId, matchId]);
-  const clearRef = useRefA(null);
-  if (!clearRef.current) {
-    clearRef.current = () => setState((s) => (s.note || s.refusal ? { note: null, refusal: null, id: null } : s));
-  }
-  return { note: state.note, refusal: state.refusal, clear: clearRef.current };
+  // One `clear` for the editor's life (setState never changes).
+  const clear = React.useCallback(() => setState((s) => (s.note || s.refusal ? { note: null, refusal: null, id: null } : s)), [setState]);
+  return { note: state.note, refusal: state.refusal, clear };
 }
 
 // The scoring fields a board takes from the newest copy the outbox holds. The
@@ -301,12 +299,11 @@ export const DRAFT_DROPPED_NOTE = "This match was finished or sent back to the q
 //     refusal callback (answer);
 //   - answer(token, outcome, msg), release().
 export function useOwnStatus(feedMatch) {
-  const ref = useRefA(null);
-  if (!ref.current) ref.current = createOwnStatus(feedMatch.status, Number(feedMatch.modifiedAt) || 0);
+  // The owner, made once for the editor's life (a lazy initial state).
+  const [own] = useStateA(() => createOwnStatus(feedMatch.status, Number(feedMatch.modifiedAt) || 0));
   const mountedRef = useRefA(true);
   useEffectA(() => { mountedRef.current = true; return () => { mountedRef.current = false; }; }, []);
   const [, bump] = useStateA(0);
-  const own = ref.current;
   own.observe(feedMatch.status, Number(feedMatch.modifiedAt) || 0);
   const rerender = () => { if (mountedRef.current) bump((n) => n + 1); };
   const answer = (token, outcome, msg, at) => { own.answer(token, outcome, msg || "", at); rerender(); };
@@ -1473,22 +1470,6 @@ function LineupNameInput({ value, roster, onSelect, onListPick, disabled, ariaLa
   const canAddNew = q.length > 0 && !exact;
   const optionCount = matches.length + (canAddNew ? 1 : 0);
 
-  // On click-outside: commit a typed but un-submitted name rather than
-  // discarding it. Without this, tabbing quickly between slots loses names.
-  // Note: option onMouseDown uses preventDefault so focus stays in the input;
-  // the option itself commits on CLICK (bc-flst), so the whole tap lands on
-  // the option before the list closes. The outside mousedown only fires when
-  // clicking a genuinely external target (q is already "" after commit).
-  window.useClickOutside(ref, () => {
-    if (q) {
-      skipBlurRef.current = true;
-      commit(q);
-    } else {
-      setOpen(false);
-      setQuery("");
-    }
-  }, open);
-
   // commit's optional second argument is the matched roster entry (when the
   // commit came from picking one). It is called with ONE argument (never a
   // trailing explicit `undefined`) for the "+ Add" row, a typed-query
@@ -1502,6 +1483,24 @@ function LineupNameInput({ value, roster, onSelect, onListPick, disabled, ariaLa
     else onSelect(name);
     setOpen(false); setQuery(""); setActive(-1);
   };
+
+  // On click-outside: commit a typed but un-submitted name rather than
+  // discarding it. Without this, tabbing quickly between slots loses names.
+  // Note: option onMouseDown uses preventDefault so focus stays in the input;
+  // the option itself commits on CLICK (bc-flst), so the whole tap lands on
+  // the option before the list closes. The outside mousedown only fires when
+  // clicking a genuinely external target (q is already "" after commit).
+  // Called after `commit` is defined, which it calls.
+  window.useClickOutside(ref, () => {
+    if (q) {
+      skipBlurRef.current = true;
+      commit(q);
+    } else {
+      setOpen(false);
+      setQuery("");
+    }
+  }, open);
+
   // A string-origin entry commits exactly like a plain string always did
   // (ONE argument); an object entry threads its ORIGINAL raw value back as
   // onSelect's second argument.
@@ -1777,34 +1776,45 @@ export {
 // them at once, as the editor's own actions do (stage 5 review 9, m1;
 // unsaved_entries.jsx `discardUnsaved`).
 export function usePublishUnsaved(hostRef, unsaved, onDiscard) {
-  const probe = useRefA(null);
-  const unsavedRef = useRefA(unsaved);
-  unsavedRef.current = unsaved;
-  const discardRef = useRefA(onDiscard);
-  discardRef.current = onDiscard;
-  if (!probe.current) {
-    probe.current = () => !probe.current.cleared && holdsUnsaved(unsavedRef.current);
-    // Run only while this editor is mounted: a host holding the thunk past
-    // the editor's unmount (a question answered after it went) drops nothing.
-    probe.current.discard = () => {
-      if (probe.current.gone || typeof discardRef.current !== "function") return;
-      discardRef.current();
-      // The entries are dropped at once, but the editor's own unsaved ref is
-      // set by its next render: until then it still reports them, and an exit
-      // that re-asks the thunk after the answer (the leave's `go`) would ask a
-      // second time (stage 5 review 11, minor 1). Say clean now, in the ref
-      // the editor keeps and in the thunk; the next render states the truth.
-      const held = unsavedRef.current;
-      if (held && typeof held === "object" && "current" in held) held.current = false;
-      probe.current.cleared = true;
-    };
-  }
-  // A render states the editor's own answer again: an entry made after the
-  // discard is unsaved.
-  probe.current.cleared = false;
-  if (hostRef && hostRef.current !== probe.current) hostRef.current = probe.current;
+  // React.useRef by name (not the useRefA alias), so the linter knows these
+  // are refs, which an effect may write.
+  const probe = React.useRef(null);
+  const unsavedRef = React.useRef(unsaved);
+  const discardRef = React.useRef(onDiscard);
+  // Each commit states the editor's own answer again, before anything can
+  // ask it (a layout effect runs before the browser takes the next event):
+  // the latest unsaved state and discard, and `cleared` reset, since an entry
+  // made after the discard is unsaved. The thunk is made once, on the first.
+  useLayoutEffectA(() => {
+    unsavedRef.current = unsaved;
+    discardRef.current = onDiscard;
+    if (!probe.current) probe.current = makeUnsavedProbe(unsavedRef, discardRef);
+    probe.current.cleared = false;
+    if (hostRef && hostRef.current !== probe.current) hostRef.current = probe.current;
+  });
   useEffectA(() => () => { if (hostRef && hostRef.current === probe.current) hostRef.current = null; }, [hostRef]);
   useEffectA(() => { probe.current.gone = false; return () => { probe.current.gone = true; }; }, []);
+}
+
+// makeUnsavedProbe: usePublishUnsaved's thunk, reading the editor's latest
+// unsaved state and discard through their refs when it is asked.
+function makeUnsavedProbe(unsavedRef, discardRef) {
+  const probe = () => !probe.cleared && holdsUnsaved(unsavedRef.current);
+  // Run only while this editor is mounted: a host holding the thunk past
+  // the editor's unmount (a question answered after it went) drops nothing.
+  probe.discard = () => {
+    if (probe.gone || typeof discardRef.current !== "function") return;
+    discardRef.current();
+    // The entries are dropped at once, but the editor's own unsaved ref is
+    // set by its next render: until then it still reports them, and an exit
+    // that re-asks the thunk after the answer (the leave's `go`) would ask a
+    // second time (stage 5 review 11, minor 1). Say clean now, in the ref
+    // the editor keeps and in the thunk; the next render states the truth.
+    const held = unsavedRef.current;
+    if (held && typeof held === "object" && "current" in held) held.current = false;
+    probe.cleared = true;
+  };
+  return probe;
 }
 
 // useMatchReopen: the one client of POST .../reopen and its court-busy remedy

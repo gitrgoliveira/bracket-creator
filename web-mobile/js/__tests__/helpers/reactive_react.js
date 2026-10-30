@@ -8,7 +8,8 @@
 // makeReactive() returns a single-component reactive shim with:
 //   - useState that re-renders on setter
 //   - useEffect that runs once, with cleanup capture (fired on unmount)
-//   - useRef, useMemo (eager), useLayoutEffect (no-op), memo
+//   - useLayoutEffect, which runs exactly as useEffect does
+//   - useRef, useMemo (eager), memo
 //   - render counter and unmount() for tests that care about either
 //
 // Install per test:
@@ -131,7 +132,9 @@ export function makeReactive() {
       return hookSlots[i];
     },
     useCallback: (fn) => { hookIndex++; return fn; },
-    useLayoutEffect: () => {},
+    // A layout effect runs as useEffect does here: the code under test
+    // writes refs in layout effects that its handlers read later.
+    useLayoutEffect: (effect, deps) => reactive.useEffect(effect, deps),
     memo: (c) => c,
   };
 

@@ -782,8 +782,8 @@ function FightingSpiritAwardsEditor({ c, password, showToast }) {
   // Each row carries a stable client-only `_key` so React keys survive
   // mid-list removals (index keys cause inputs to "jump" / reuse the wrong
   // DOM node when a middle row is deleted). `_key` is stripped before save.
-  const keyCounter = useRefA(0);
-  const withKey = (a) => ({ ...a, _key: keyCounter.current++ });
+  const keyCounterRef = useRefA(0);
+  const withKey = (a) => ({ ...a, _key: keyCounterRef.current++ });
   const [awards, setAwards] = useStateA(() => (c.fightingSpiritAwards || []).map(withKey));
   const [saving, setSaving] = useStateA(false);
   // `dirty` guards the prop-sync effect: the parent refetches the competition
@@ -794,15 +794,15 @@ function FightingSpiritAwardsEditor({ c, password, showToast }) {
   const [dirty, setDirty] = useStateA(false);
   // Unsaved edits hold a new build's automatic reload (app_version.jsx).
   useUnsavedInput(dirty);
-  const lastCompId = useRefA(c.id);
+  const lastCompIdRef = useRefA(c.id);
   const mountedRef = useRefA(true);
   useEffectA(() => () => { mountedRef.current = false; }, []);
 
   // Sync from parent. Reset unconditionally when switching competitions;
   // otherwise skip while the user has unsaved edits (see `dirty` above).
   useEffectA(() => {
-    const switched = lastCompId.current !== c.id;
-    lastCompId.current = c.id;
+    const switched = lastCompIdRef.current !== c.id;
+    lastCompIdRef.current = c.id;
     if (switched || !dirty) {
       setAwards((c.fightingSpiritAwards || []).map(withKey));
       if (switched) setDirty(false);

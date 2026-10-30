@@ -1949,9 +1949,10 @@ function CreateTournament({ onCreated, authConfig }) {
   // (dmyToIso below) reads it as malformed and renders empty, AND the
   // submit body would send ISO to POST /api/tournament: which now
   // rejects non-DMY dates with 400 "date must be DD-MM-YYYY".
-  const today = new Date();
-  const todayDmy = `${String(today.getDate()).padStart(2, '0')}-${String(today.getMonth() + 1).padStart(2, '0')}-${today.getFullYear()}`;
-  const [date, setDate] = useS(todayDmy);
+  const [date, setDate] = useS(() => {
+    const today = new Date();
+    return `${String(today.getDate()).padStart(2, '0')}-${String(today.getMonth() + 1).padStart(2, '0')}-${today.getFullYear()}`;
+  });
   const [venue, setVenue] = useS("");
   const [courts, setCourts] = useS(2);
   const [pass, setPass] = useS("");
@@ -2147,23 +2148,27 @@ export function VersionFooter() {
     //   undefined: fetch not yet started/completed
     //   false     : fetch done, no data (null result or network error)
     //   object    : fetch done with version data
+    // Already fetched: the initial state read it, and this re-reads it in
+    // case it landed between that render and this effect. It is set from a
+    // callback, as the fetched value is, never synchronously in the effect.
+    let source;
     if (window.appVersionInfo !== undefined) {
-      setInfo(window.appVersionInfo || null);
-      return;
-    }
+      source = Promise.resolve(window.appVersionInfo);
+    } else {
+      if (!window.API?.fetchVersion) return;
 
-    if (!window.API?.fetchVersion) return;
-
-    if (!window.versionPromise) {
-      window.versionPromise = window.API.fetchVersion().then((res) => {
-        // `false` = fetch done, no data; distinguishes from `undefined` = not yet fetched.
-        window.appVersionInfo = res ?? false;
-        return res ?? false;
-      });
+      if (!window.versionPromise) {
+        window.versionPromise = window.API.fetchVersion().then((res) => {
+          // `false` = fetch done, no data; distinguishes from `undefined` = not yet fetched.
+          window.appVersionInfo = res ?? false;
+          return res ?? false;
+        });
+      }
+      source = window.versionPromise;
     }
 
     let cancelled = false;
-    window.versionPromise.then((res) => {
+    source.then((res) => {
       if (!cancelled) setInfo(res || null);
     });
     return () => { cancelled = true; };

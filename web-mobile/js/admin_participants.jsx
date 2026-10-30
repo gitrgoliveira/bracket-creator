@@ -11,7 +11,7 @@ import { useOpenedTapGuard } from './tap_guard.jsx';
 import { PillButton } from './competition_fields.jsx';
 import { useUnsavedInput } from './app_version.jsx';
 
-const { useState: useStateA, useMemo: useMemoA, useEffect: useEffectA, useRef: useRefA } = React;
+const { useState: useStateA, useMemo: useMemoA, useEffect: useEffectA, useRef: useRefA, useLayoutEffect: useLayoutEffectA } = React;
 
 const pluralize = window.pluralize;
 const EmptyState = window.EmptyState;
@@ -558,7 +558,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
   // on someone else; the box shows it meanwhile through the promise
   // StableInput is handed.
   const rosterRef = useRefA(c);
-  rosterRef.current = c;
+  useLayoutEffectA(() => { rosterRef.current = c; });
   const typedSeedsRef = useRefA(new Map());
   const typedSeqRef = useRefA(0);
   const rosterChainRef = useRefA(Promise.resolve());

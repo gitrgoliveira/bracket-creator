@@ -33,7 +33,8 @@ class _ReactComponent {
 }
 global.React = {
   createElement: (type, props, ...children) => ({ type, props, children }),
-  useState: (val) => [val, vi.fn()],
+  // A function initialiser is called, as React calls a lazy initialiser.
+  useState: (val) => [typeof val === 'function' ? val() : val, vi.fn()],
   useEffect: vi.fn(),
   useMemo: (fn) => fn(),
   useRef: (val) => ({ current: val }),

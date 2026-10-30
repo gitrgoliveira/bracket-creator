@@ -16,9 +16,6 @@ export function useStableId(prefix) {
     const id = React.useId();
     return `${prefix}-${id}`;
   }
-  const ref = React.useRef(null);
-  if (!ref.current) {
-    ref.current = `${prefix}-${Math.random().toString(36).slice(2, 9)}`;
-  }
-  return ref.current;
+  const [id] = React.useState(() => `${prefix}-${Math.random().toString(36).slice(2, 9)}`);
+  return id;
 }

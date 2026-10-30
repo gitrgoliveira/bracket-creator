@@ -844,8 +844,8 @@ describe('useWatchlist legacy migration', () => {
   // Mount a probe component that just runs the hook and captures its list.
   const mountHook = () => {
     let captured;
-    const Probe = () => { captured = useWatchlist()[0]; return null; };
-    runtime.mount(Probe, {});
+    const Probe = ({ onList }) => { onList(useWatchlist()[0]); return null; };
+    runtime.mount(Probe, { onList: (list) => { captured = list; } });
     return captured;
   };
 

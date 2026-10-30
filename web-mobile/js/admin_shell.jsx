@@ -922,8 +922,8 @@ function CourtPicker({ value, courts, onChange, btnClassName = "", label = "", a
   // Whether the close in flight was made inside the picker (Escape, a choice, its
   // own button). An outside tap closes it too, but by the time the close lands the
   // tapped control has taken focus, and it keeps it.
-  const closedFromInside = useRefA(false);
-  const close = (fromInside) => { closedFromInside.current = fromInside; setOpen(false); };
+  const closedFromInsideRef = useRefA(false);
+  const close = (fromInside) => { closedFromInsideRef.current = fromInside; setOpen(false); };
 
   window.useClickOutside(ref, () => close(false), open);
 
@@ -935,16 +935,16 @@ function CourtPicker({ value, courts, onChange, btnClassName = "", label = "", a
   // jumped to the last one mounted, scrolling the page to it. Never on an outside
   // tap: taking focus back from the control that was tapped blurred a name box
   // (dropping the iPad keyboard) and scrolled the Scores page back to the button.
-  const wasOpen = useRefA(false);
+  const wasOpenRef = useRefA(false);
   useEffectA(() => {
     if (open) {
       const cur = Math.max(0, courts.indexOf(value));
       setActiveIdx(cur);
-    } else if (wasOpen.current && closedFromInside.current) {
+    } else if (wasOpenRef.current && closedFromInsideRef.current) {
       triggerRef.current && triggerRef.current.focus({ preventScroll: true });
     }
-    if (!open) closedFromInside.current = false;
-    wasOpen.current = open;
+    if (!open) closedFromInsideRef.current = false;
+    wasOpenRef.current = open;
   }, [open]);
 
   // Focus the active option element whenever it changes while open.

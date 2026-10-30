@@ -537,12 +537,12 @@ export function MatchLineupPanel({ match, tournament, password, showToast, onClo
   const overlay = variant !== "inline";
   const { openedRef, onClickCapture } = useOpenedTapGuard({ backdropOnly: true });
   const boxRef = useRefA(null);
-  const writesOut = useRefA(0);
+  const writesOutRef = useRefA(0);
   const holdOpen = useCallbackA(() => {
-    writesOut.current += 1;
-    return () => { writesOut.current -= 1; };
+    writesOutRef.current += 1;
+    return () => { writesOutRef.current -= 1; };
   }, []);
-  window.useEscapeToClose(overlay ? () => { if (!writesOut.current) onClose(); } : undefined);
+  window.useEscapeToClose(overlay ? () => { if (!writesOutRef.current) onClose(); } : undefined);
   useDialogFocus(boxRef, overlay);
 
   const m = match;

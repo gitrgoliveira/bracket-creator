@@ -20,8 +20,9 @@ const COMP = (squadName) => ({
 const MATCH = { id: 'Pool A-0', compId: 'comp1', sideA: { id: 'team-a', name: 'Team A' }, sideB: { id: 'team-b', name: 'Team B' } };
 
 let latest;
-function Probe({ competition }) {
-  latest = useTeamLineups(MATCH, competition);
+const keepLatest = (result) => { latest = result; };
+function Probe({ competition, onResult }) {
+  onResult(useTeamLineups(MATCH, competition));
   return null;
 }
 
@@ -38,11 +39,11 @@ afterEach(() => { window.API = origAPI; });
 describe('useTeamLineups follows a changed squads map (bc-dnst)', () => {
   it('re-resolves squadA when the competition item arrives with a renamed member', async () => {
     let utils;
-    await act(async () => { utils = render(<Probe competition={COMP('Satoh')} />); });
+    await act(async () => { utils = render(<Probe competition={COMP('Satoh')} onResult={keepLatest} />); });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
     expect(latest.squadA.map(m => m.name)).toEqual(['Satoh']);
 
-    await act(async () => { utils.rerender(<Probe competition={COMP('Sato')} />); });
+    await act(async () => { utils.rerender(<Probe competition={COMP('Sato')} onResult={keepLatest} />); });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
     expect(latest.squadA.map(m => m.name)).toEqual(['Sato']);
   });

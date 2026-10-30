@@ -427,16 +427,16 @@ export function ScheduleViewer({ tournament, tweaks, paceLookup }) {
     : "";
   const [picked, setPicked] = useState(initialPicked);
   // If schedRoster was empty at mount (async load), seed picked once it arrives.
-  // pickedSeeded starts true when data was ready at mount (no async case to handle).
+  // pickedSeededRef starts true when data was ready at mount (no async case to handle).
   // Once seeded, user edits are never overwritten.
-  const pickedSeeded = useRefV(initialPicked.length > 0);
+  const pickedSeededRef = useRefV(initialPicked.length > 0);
   React.useEffect(() => {
-    if (pickedSeeded.current) return;
+    if (pickedSeededRef.current) return;
     if (initialPicked.length > 0) {
       setPicked(initialPicked);
-      pickedSeeded.current = true;
+      pickedSeededRef.current = true;
     }
-  }, [initialPicked, pickedSeeded]);
+  }, [initialPicked, pickedSeededRef]);
   const [dojoText, setDojoText] = useState("");
   const [courtFilter, setCourtFilter] = useState("all");
 

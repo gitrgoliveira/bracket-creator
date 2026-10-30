@@ -74,10 +74,9 @@ function Toast() {
   // remount reads the snapshot again; it never re-pushes or re-times a toast.
   const [shown, setShown] = React.useState(toastSnapshot);
   React.useEffect(() => {
-    const off = subscribeToast(setShown);
-    // A change between the first render and this effect is not missed.
-    setShown(toastSnapshot());
-    return off;
+    // Told the snapshot at once too, so a change between the first render and
+    // this effect is not missed.
+    return subscribeToast(setShown, { current: true });
   }, []);
   if (!shown) return null;
 
@@ -130,8 +129,10 @@ function StableInput({ value, onChange, type, autoSelect = true, ...props }) {
   const [focused, setFocused] = React.useState(false);
   const [saving, setSaving] = React.useState(0);
   const timer = React.useRef(null);
-  // A change typed and not yet sent (its debounce still waiting).
+  // A change typed and not yet sent (its debounce still waiting): the ref for
+  // the handlers, which read it at once, and its mirror for the render.
   const pending = React.useRef(false);
+  const [pendingShown, setPendingShown] = React.useState(false);
   const mounted = React.useRef(true);
 
   // Cancel the 200ms debounce on unmount so the timer can't fire
@@ -142,10 +143,11 @@ function StableInput({ value, onChange, type, autoSelect = true, ...props }) {
     return () => { mounted.current = false; clearTimeout(timer.current); };
   }, []);
 
-  const holds = focused || pending.current || saving > 0;
+  const holds = focused || pendingShown || saving > 0;
 
   const commit = (val) => {
     pending.current = false;
+    if (mounted.current) setPendingShown(false);
     const r = onChange(val);
     if (r && typeof r.then === 'function') {
       setSaving((n) => n + 1);
@@ -167,6 +169,7 @@ function StableInput({ value, onChange, type, autoSelect = true, ...props }) {
     // during typing if the parent re-renders the whole tree.
     clearTimeout(timer.current);
     pending.current = true;
+    setPendingShown(true);
     timer.current = setTimeout(() => commit(val), 200);
   };
 
@@ -658,9 +661,14 @@ function Modal({ title, onClose, children, footer, size, dismissable = true, cla
 
 function LoadingSpinner({ text = "Loading...", delay = 200, size = 32 }) {
   const [visible, setVisible] = React.useState(delay === 0);
+  // A new delay starts over: shown at once for 0, else hidden until its timer.
+  const [shownDelay, setShownDelay] = React.useState(delay);
+  if (shownDelay !== delay) {
+    setShownDelay(delay);
+    setVisible(delay === 0);
+  }
 
   React.useEffect(() => {
-    setVisible(delay === 0);
     if (delay === 0) return;
     const timer = setTimeout(() => setVisible(true), delay);
     return () => clearTimeout(timer);

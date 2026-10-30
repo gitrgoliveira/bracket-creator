@@ -12,7 +12,7 @@ import { PACE_TICK_MS } from '../../court_pace.jsx';
 
 const page = { props: null };
 function ProbeViewerCompetition(props) {
-  page.props = props;
+  React.useLayoutEffect(() => { page.props = props; });
   return <div data-testid="viewer-competition" />;
 }
 

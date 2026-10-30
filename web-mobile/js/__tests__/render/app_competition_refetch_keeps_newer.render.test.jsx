@@ -17,7 +17,7 @@ import { readCode } from '../helpers/source.js';
 
 const page = { props: null };
 function ProbeViewerCompetition(props) {
-  page.props = props;
+  React.useLayoutEffect(() => { page.props = props; });
   return <div data-testid="viewer-competition" />;
 }
 

@@ -102,10 +102,11 @@ export function toastSnapshot() {
   return { message, type, id, latched, seq, visible };
 }
 
-// subscribeToast: called with the snapshot on every change; returns the
-// unsubscribe.
-export function subscribeToast(fn) {
+// subscribeToast: called with the snapshot on every change, and at once as well
+// with `{ current: true }`; returns the unsubscribe.
+export function subscribeToast(fn, { current = false } = {}) {
   _listeners.add(fn);
+  if (current) fn(toastSnapshot());
   return () => { _listeners.delete(fn); };
 }
 

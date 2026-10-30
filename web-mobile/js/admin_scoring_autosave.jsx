@@ -6,7 +6,7 @@ import { toBackendMatchResult, matchWire } from './api_serializers.jsx';
 import { changedGroups, statedGroupsOf, groupMatches, keptInHistoryNote, GROUP_RESULT } from './match_groups.jsx';
 import { writeDidNotLand, writePending, writeWasRefused } from './write_result.jsx';
 
-const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
+const { useState: useStateA, useEffect: useEffectA } = React;
 
 // ---------------------------------------------------------------------------
 // useChangedGroups (bc-mrgc): every score write an editor builds names the
@@ -34,26 +34,35 @@ const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
 //     the server would keep the first.
 // ---------------------------------------------------------------------------
 export function useChangedGroups(match) {
-  const matchRef = useRefA(match);
-  matchRef.current = match;
-  const stateRef = useRefA(null);
-  const keyOf = (m) => `${(m && m.compId) || ""}\u0000${(m && m.id) || ""}`;
-  const finished = !!(match && match.status === "completed");
-  // The editor moving to another match starts over from that match.
-  if (!stateRef.current || stateRef.current.key !== keyOf(match)) {
-    stateRef.current = { key: keyOf(match), seed: matchWire(match), agreed: {}, last: {}, finished, built: new WeakMap() };
-  }
-  // A reopen is a write the server makes, not one the editor builds, so no build
-  // moves the result the editor agrees with off the finished one. Once the server
-  // no longer holds the match finished the editor agrees with the result as it now
-  // stands, so ending it again with the same verdict still says the result changed.
-  // That is the status leaving "completed", not the reopenPending stamp: a reopen
-  // without a reason carries the stamp, but one a correction's reason comes with (a
-  // downstream reopen, a requalification, a pool-rank override) leaves the match
-  // scheduled with its points and no stamp, and an editor that only watched the stamp
-  // named no result for it: the server kept the match as it was, with no error.
-  if (!finished && stateRef.current.finished) stateRef.current.agreed[GROUP_RESULT] = matchWire(match);
-  stateRef.current.finished = finished;
+  // React.useRef by name (not the useRefA alias), so the linter knows these are
+  // refs, which the layout effect below may write.
+  const matchRef = React.useRef(match);
+  const stateRef = React.useRef(null);
+  // Each commit brings the hook up to the match it rendered, in a layout effect:
+  // it runs before every passive effect (where the editors' adopts call
+  // claim.agree) and before the browser takes the next event (where they build
+  // and claim a write), so both read the match the editor shows. No editor calls
+  // claim during render.
+  React.useLayoutEffect(() => {
+    matchRef.current = match;
+    const keyOf = (m) => `${(m && m.compId) || ""}\u0000${(m && m.id) || ""}`;
+    const finished = !!(match && match.status === "completed");
+    // The editor moving to another match starts over from that match.
+    if (!stateRef.current || stateRef.current.key !== keyOf(match)) {
+      stateRef.current = { key: keyOf(match), seed: matchWire(match), agreed: {}, last: {}, finished, built: new WeakMap() };
+    }
+    // A reopen is a write the server makes, not one the editor builds, so no build
+    // moves the result the editor agrees with off the finished one. Once the server
+    // no longer holds the match finished the editor agrees with the result as it now
+    // stands, so ending it again with the same verdict still says the result changed.
+    // That is the status leaving "completed", not the reopenPending stamp: a reopen
+    // without a reason carries the stamp, but one a correction's reason comes with (a
+    // downstream reopen, a requalification, a pool-rank override) leaves the match
+    // scheduled with its points and no stamp, and an editor that only watched the stamp
+    // named no result for it: the server kept the match as it was, with no error.
+    if (!finished && stateRef.current.finished) stateRef.current.agreed[GROUP_RESULT] = matchWire(match);
+    stateRef.current.finished = finished;
+  });
   // `agreed[g]` is the server value the editor last AGREED with for g; `last[g]` is
   // the value it last built or took for g. Both are kept per group: a group a build
   // did not state says nothing about it, and a group the editor took from the server
@@ -145,30 +154,28 @@ export function useChangedGroups(match) {
 // ---------------------------------------------------------------------------
 export function useKeptInHistoryNote() {
   const [note, setNote] = useStateA(null);
-  const mountedRef = useRefA(true);
+  const mountedRef = React.useRef(true);
   useEffectA(() => () => { mountedRef.current = false; }, []);
   // The note last set, so a write that changes nothing about it (the common
   // case: every landed autosave) renders nothing.
-  const shownRef = useRefA(null);
-  const noteFromWriteRef = useRefA(null);
-  if (!noteFromWriteRef.current) {
-    noteFromWriteRef.current = (res) => {
-      if (!mountedRef.current || !res) return;
-      let next = shownRef.current;
-      // keptInHistoryNote is the one wording: groups of this write held
-      // (applied in part, or held because the finished match needs a
-      // winner, whether the rest applied or not), and later changes this
-      // write moved to the history. A landed write that kept nothing clears
-      // the note; a write that did not land leaves it.
-      const kept = keptInHistoryNote(res);
-      if (kept) next = kept;
-      else if (!writeDidNotLand(res)) next = null;
-      if (next === shownRef.current) return;
-      shownRef.current = next;
-      setNote(next);
-    };
-  }
-  return { note, noteFromWrite: noteFromWriteRef.current };
+  const shownRef = React.useRef(null);
+  // One function for the editor's life (setNote never changes).
+  const noteFromWrite = React.useCallback((res) => {
+    if (!mountedRef.current || !res) return;
+    let next = shownRef.current;
+    // keptInHistoryNote is the one wording: groups of this write held
+    // (applied in part, or held because the finished match needs a
+    // winner, whether the rest applied or not), and later changes this
+    // write moved to the history. A landed write that kept nothing clears
+    // the note; a write that did not land leaves it.
+    const kept = keptInHistoryNote(res);
+    if (kept) next = kept;
+    else if (!writeDidNotLand(res)) next = null;
+    if (next === shownRef.current) return;
+    shownRef.current = next;
+    setNote(next);
+  }, [setNote]);
+  return { note, noteFromWrite };
 }
 
 export function KeptInHistoryNote({ note }) {

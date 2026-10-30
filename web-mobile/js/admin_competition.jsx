@@ -355,8 +355,8 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
         <Breadcrumbs items={[
           { label: "Dashboard", onClick: leaving(onBack) },
           { label: c.name, onClick: section === "overview" ? null : () => toSection("overview") },
-          currentItem && section !== "overview" ? { label: currentItem.label } : null
-        ].filter(Boolean)} />
+          ...(currentItem && section !== "overview" ? [{ label: currentItem.label }] : []),
+        ]} />
         <div className="page-head">
           <div>
             <div className="page-head__eyebrow">{t.name} ›</div>
@@ -409,11 +409,11 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
                       window where generateDraw has flipped status to draw-ready
                       but its setGenerating(false) hasn't run yet: without it
                       these buttons would be momentarily clickable mid-generate. */}
-                  <button type="button" className="btn btn--ghost btn--danger" onClick={leaving(discardDraw)} disabled={navBusy}>
+                  <button type="button" className="btn btn--ghost btn--danger" onClick={(e) => leaving(discardDraw)(e)} disabled={navBusy}>
                     {discarding && <span className="spinner" />}
                     {discarding ? "Discarding…" : "Discard draw"}
                   </button>
-                  <button type="button" className="btn btn--primary" onClick={leaving(start)} disabled={navBusy}>
+                  <button type="button" className="btn btn--primary" onClick={(e) => leaving(start)(e)} disabled={navBusy}>
                     {starting && <span className="spinner" />}
                     {starting ? "Starting…" : "Start competition →"}
                   </button>

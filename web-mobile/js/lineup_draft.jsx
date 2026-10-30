@@ -133,8 +133,10 @@ export function useLineupDraft({ key, ready, baseline, current, positionKeys, on
   const readKey = useRef('');
   const baseFields = lineupFields(baseline, positionKeys);
   const nowFields = lineupFields(current, positionKeys);
-  const latest = useRef(null);
-  latest.current = { baseFields, nowFields, positionKeys, onRestore };
+  const latestNow = { baseFields, nowFields, positionKeys, onRestore };
+  const latest = useRef(latestNow);
+  // Written at commit, ahead of the layout effect below that reads it.
+  useLayoutEffect(() => { latest.current = latestNow; });
   // `current` and `baseline` are new objects every render: the effect runs on
   // what they hold.
   const signature = JSON.stringify([positionKeys, baseFields, nowFields]);
@@ -373,7 +375,7 @@ export function membersNotReadNotice(name) {
 // them.
 // The editors keep their layouts and their save bodies.
 export function useLineupForm({ compId, teamId, matchId = '', positionKeys, password, matchLabel, teamName }) {
-  const { useState, useRef, useEffect } = React;
+  const { useState, useRef, useEffect, useLayoutEffect } = React;
   const draftKey = lineupDraftKey({ compId, teamId, matchId });
   const [values, setValues] = useState(() => blankNames(positionKeys));
   const [memberIds, setMemberIds] = useState({});
@@ -385,7 +387,7 @@ export function useLineupForm({ compId, teamId, matchId = '', positionKeys, pass
   // member id and no name, which the occupancy rule reads as a real placement
   // fielding a nameless fighter.
   const memberIdsRef = useRef(memberIds);
-  memberIdsRef.current = memberIds;
+  useLayoutEffect(() => { memberIdsRef.current = memberIds; });
   const [baseline, setBaseline] = useState(EMPTY_SIDE);
   const [source, setSource] = useState(null);
   // The draft key whose lineup was read into the form: a lineup is only judged,
@@ -410,7 +412,7 @@ export function useLineupForm({ compId, teamId, matchId = '', positionKeys, pass
   // that list whenever the handler resumes, whether or not the render that shows it
   // has run.
   const squadRef = useRef(squad);
-  squadRef.current = squad;
+  useLayoutEffect(() => { squadRef.current = squad; });
   // Whether the editor is still on screen (`isMounted`): a save's refusal that
   // arrives after it closed is not claimed by the editor, so the outbox raises
   // its own alert and the refusal is never lost (bc-evts stage 3 review 2, R2).
@@ -599,14 +601,24 @@ export function useLineupForm({ compId, teamId, matchId = '', positionKeys, pass
 
   // The effects below key on the lineup alone and call these as of the render they
   // run in.
-  const live = useRef(null);
-  live.current = { load, follow, readMembersAgain, touched: dirty };
+  const liveNow = { load, follow, readMembersAgain, touched: dirty };
+  const live = useRef(liveNow);
+  // Written at commit, ahead of every effect below that reads it.
+  useLayoutEffect(() => { live.current = liveNow; });
+
+  // A form with no competition or team has no lineup to read: loading ends in the
+  // render that gives it none, even with a read (a retry) out, whose own end the
+  // cleanup below skips. Kept per (competition, team, match), the keys the read
+  // below runs on, so a retry made while the form has none reads as it did.
+  const idsKey = `${compId}|${teamId}|${matchId}`;
+  const [idsSeen, setIdsSeen] = useState(null);
+  if (idsSeen !== idsKey) {
+    setIdsSeen(idsKey);
+    if (!compId || !teamId) setLoading(false);
+  }
 
   useEffect(() => {
-    if (!compId || !teamId) {
-      setLoading(false);
-      return undefined;
-    }
+    if (!compId || !teamId) return undefined;
     live.current.load();
     return () => { attempt.current += 1; };
   }, [compId, teamId, matchId]);

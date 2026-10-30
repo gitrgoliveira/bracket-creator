@@ -1,7 +1,7 @@
 // Tournament-edit, competition-create, and bulk-import pages. See
 // web-mobile/admin_split_plan.md.
 
-const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
+const { useState: useStateA, useEffect: useEffectA, useRef: useRefA, useLayoutEffect: useLayoutEffectA } = React;
 
 const validateAndNormalizeDate = window.validateAndNormalizeDate;
 const decideNumericUpdate = window.decideNumericUpdate;
@@ -369,9 +369,11 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
   // handlers are read through refs so the once-bound listener never calls a
   // stale closure (handleSave/handleCancel close over current form state).
   const handleSaveRef = useRefA(handleSave);
-  handleSaveRef.current = handleSave;
   const handleCancelRef = useRefA(handleCancel);
-  handleCancelRef.current = handleCancel;
+  useLayoutEffectA(() => {
+    handleSaveRef.current = handleSave;
+    handleCancelRef.current = handleCancel;
+  });
   useEffectA(() => {
     const onKey = (e) => {
       // Ignore IME composition keys (CJK input, accented chars). Without this

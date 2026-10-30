@@ -15,7 +15,7 @@ import { mountApp, settle } from '../helpers/mount_app.js';
 
 const home = { props: null };
 function ProbeViewerHome(props) {
-  home.props = props;
+  React.useLayoutEffect(() => { home.props = props; });
   return <div data-testid="viewer-home">{props.tournament && props.tournament.name}</div>;
 }
 

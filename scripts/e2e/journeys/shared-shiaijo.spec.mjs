@@ -64,8 +64,23 @@ const audit = auditLog(JOURNEY);
 const SI = 'Shared Individual';
 const ST = 'Shared Team';
 const TEAMS = [['Hayabusa', 'Kita Dojo'], ['Inoshishi', 'Minami Dojo'], ['Kitsune', 'Higashi Dojo'], ['Tanuki', 'Nishi Dojo']];
-// Auto-schedule start for ST: between SI's pool A and pool B bouts on A.
-const ST_RESTART = '09:12';
+// The day's clock is relative to when the journey runs, so court A is always
+// well behind its plan by the time bc-pace reads its projected times, at any
+// hour (the projection shows only from 5 minutes off the plan, and a run in the
+// early morning against a fixed 09:00 plan finished every bout ahead of it).
+// SI starts 60 minutes before now, in the local time the browser and the
+// server share (one machine, one TZ); ST keeps the wizard's default, after SI.
+// The base stays within the day: never before 00:00 (a run just after midnight
+// starts at 00:00, less behind, and its pace check may then expect the plan,
+// which the computed check accepts), and never later than 22:00, because the
+// plan on A runs about 100 minutes past it and a court plan past midnight is
+// refused (court_past_midnight). Read once, as the file's seeding starts.
+const hhmm = (m) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+const dayBase = (d) => Math.min(Math.max(d.getHours() * 60 + d.getMinutes() - 60, 0), 22 * 60);
+let SI_START; // hhmm(base)
+// Auto-schedule start for ST: 12 minutes in, between SI's pool A and pool B
+// bouts on A.
+let ST_RESTART; // hhmm(base + 12)
 
 let C; // the court A console: the clumsy operator's iPad, kept across tests
 let H; // the head table (Scores pages, schedule): another device
@@ -104,6 +119,37 @@ const SYNC_PILL = /^(Synced|Syncing…|Offline|Not saving)$/;
 async function liveOnConsole() {
   const l = await liveBout(C);
   return l ? { comp: compOfEyebrow(l.eyebrow), ...l } : null;
+}
+
+// What the court's pace makes of `court`'s waiting matches right now, worked
+// out in `page` by the app's own rule: court_pace.jsx, imported from the
+// build's directory the page loaded (the same URL app.jsx imports it by, so the
+// same module and the same server clock), over the competitions as the server
+// holds them (fetchCompetitions, the viewer's input to courtPaceLookup) and the
+// page's clock (paceClockNow). Each waiting match gets its display at this
+// minute and the next, since a screen loaded after this read computes its own
+// at one of the two (its pace tick is 60 s). `match` is the one with
+// competition `compId` planned at `planned`.
+async function paceExpected(page, { court, compId, planned }) {
+  await expect.poll(() => page.evaluate(() => typeof window.API?.fetchCompetitions === 'function')).toBe(true);
+  return page.evaluate(async ({ court, compId, planned }) => {
+    const src = [...document.querySelectorAll('script[type="module"][src*="/dist/"]')][0].src;
+    const pace = await import(new URL('court_pace.jsx', src).href);
+    const comps = await window.API.fetchCompetitions();
+    const clock = pace.paceClockNow();
+    const waiting = pace.courtPaceEntriesOf(comps)
+      .filter((e) => (e.court || '').trim() === court && e.status === 'scheduled');
+    const at = [clock.now, clock.now + 1].map((now) => pace.courtPaceLookup(comps, { ...clock, now }));
+    const displays = (e) => at.map((l) => l.byMatch.get(pace.paceKey(e.competitionId, e.matchId))?.display || null);
+    const one = waiting.find((e) => e.competitionId === compId && e.scheduledAt === planned);
+    const drift = at.map((l) => [...l.driftByCourtDay].find(([k]) => k.endsWith(`\u0000${court}`))?.[1] ?? null);
+    return {
+      now: pace.formatPaceClock(clock.now),
+      drift,
+      match: one ? { matchId: one.matchId, displays: displays(one) } : null,
+      waiting: waiting.map((e) => ({ competitionId: e.competitionId, matchId: e.matchId, scheduledAt: e.scheduledAt, displays: displays(e) })),
+    };
+  }, { court, compId, planned });
 }
 
 // Finish the running SI bout (starting Up next when the court is idle) for the
@@ -156,14 +202,23 @@ test.describe('shared-shiaijo', () => {
     test.setTimeout(300_000);
     const server = await serverForFile(testInfo.file);
     shot = journeyShots(JOURNEY);
+    const runAt = new Date();
+    const base = dayBase(runAt);
+    SI_START = hhmm(base);
+    ST_RESTART = hhmm(base + 12);
     C = await operatorDevice(browser, server.base);
     await enterTournament(C, { name: 'Shared Court Cup', courts: 2 });
     const seeded = await seedCompetitions(C, [
-      { key: 'SI', opts: { name: SI, kind: 'individual', format: 'mixed', poolSize: 3, poolWinners: 2, courts: ['A', 'B'], numberPrefix: 'SI' }, roster: ROSTER_12 },
+      { key: 'SI', opts: { name: SI, kind: 'individual', format: 'mixed', poolSize: 3, poolWinners: 2, courts: ['A', 'B'], numberPrefix: 'SI', startTime: SI_START }, roster: ROSTER_12 },
       { key: 'ST', opts: { name: ST, kind: 'team', format: 'knockout', teamSize: 3, teamMatchType: 'fixed', courts: ['A'], numberPrefix: 'ST' }, roster: TEAMS },
     ]);
     ids = seeded.ids;
+    // What the wizard offered each competition (SI's is its placeholder, typed
+    // over with SI_START), and the start each was created with.
     draw.defaults = seeded.defaults;
+    draw.start = { SI: SI_START, ST: seeded.defaults.ST.startTime };
+    row('setup', { step: 'clock', action: 'the day is relative to the run', variant: 'record',
+      runAt: runAt.toString(), siStart: SI_START, stRestart: ST_RESTART });
     draw.si = await readScoresTab(C, ids.SI);
     draw.st = await readScoresTab(C, ids.ST);
     draw.siKnockout = await bracketSlots(C, ids.SI);
@@ -200,7 +255,7 @@ test.describe('shared-shiaijo', () => {
     ].filter(clock).sort();
     const stOnA = (await bracketSlots(H, ids.ST)).filter((m) => m.court === 'A').map((m) => m.time).filter(clock).sort();
     row('bc-seqc', { step: 'S8 slots', action: 'default slots on Shiaijo A', variant: 'asserted', siOnA, stOnA,
-      hint: draw.defaults.ST.sharedCourtHint, startTimes: { si: draw.defaults.SI.startTime, st: draw.defaults.ST.startTime } });
+      hint: draw.defaults.ST.sharedCourtHint, startTimes: { si: draw.start.SI, st: draw.start.ST } });
     expect(siOnA.length).toBeGreaterThan(0);
     expect(stOnA.length).toBeGreaterThan(0);
     // After SI's last match there ENDS, not merely starts: its slot is as long as
@@ -240,7 +295,7 @@ test.describe('shared-shiaijo', () => {
     ].sort((a, b) => a.time.localeCompare(b.time));
     const clash = onA.filter((x) => onA.some((y) => y.comp !== x.comp && y.time === x.time));
     r({ step: 'S8 slots', action: 'wizard default Start times (both created before any roster)', variant: 'P6 record',
-      si: draw.defaults.SI, st: draw.defaults.ST });
+      si: draw.defaults.SI, st: draw.defaults.ST, started: draw.start });
     r({ step: 'S8 slots', action: 'every slot on Shiaijo A after Start', variant: 'P6 record (D3)', slotsOnA: onA, sameTimeOnA: clash,
       siKnockout: draw.siKnockout, stKnockout: draw.stKnockout });
     await H.goto(`/admin/competition/${ids.SI}/scores`);
@@ -281,7 +336,7 @@ test.describe('shared-shiaijo', () => {
     await expect(competitionPicker(Bc)).toHaveCount(0);
     r({ step: 'S1 picker', action: 'open /admin/shiaijo/B (SI alone)', variant: 'correct path', officiating: await officiatingName(Bc), picker: false });
 
-    // S8: Auto-schedule competition re-times ST alone, from 09:12.
+    // S8: Auto-schedule competition re-times ST alone, from ST_RESTART (SI's start + 12).
     await H.goto('/admin/schedule');
     await H.locator('#auto-schedule-competition').selectOption({ label: ST });
     await H.locator('#auto-schedule-start').fill(ST_RESTART);
@@ -327,7 +382,7 @@ test.describe('shared-shiaijo', () => {
     // The waiting bouts on A whose sides are both known, in printed-time order:
     // SI's pool bouts and ST's semi-finals (Scores tab rows, ST's read after
     // its re-time). Equal times go to the competition that starts first, SI.
-    const startOf = (comp) => (comp === SI ? draw.defaults.SI.startTime : draw.defaults.ST.startTime) || '';
+    const startOf = (comp) => (comp === SI ? draw.start.SI : draw.start.ST) || '';
     // A side still waiting on its feeder ("Winner of M1") is not a known side.
     const known = (n) => !!n && !/^Winner of\b/i.test(n);
     const onA = [
@@ -813,52 +868,81 @@ test.describe('shared-shiaijo', () => {
   // bc-pace (operator ruling 2026-10-12, bc-shcr D2: "The schedule also needs
   // to adapt if the courts are running late or fast"; decision D4: "only the
   // projected time"). Once court A has played matches (SI's pools,
-  // quarter-finals and semi-final, all far off the plan's clock in a test run),
-  // its next match, ST's second semi-final, shows the projected time ALONE, as
-  // "~HH:MM" (spoken "about HH:MM", the plan not beside it), on the court
-  // console's Up next card and the public schedule row, while the Scores tab
-  // still shows the plan. The TV board shows a projected time only on its NEXT
-  // line; here the semi-final is the board's promoted bout (nothing runs on A
-  // and the bouts after it wait on their feeders), so the board is read for the
-  // bout and for the plan's absence, and its NEXT line's time only if one is
-  // drawn. The "~" shows only from 5 minutes off the plan, so a run whose clock
-  // happens to sit within 5 minutes of the semi-final's planned slot shows the
-  // plan instead. Relies on the state S4b-S5 leaves (nothing running on A, ST's
-  // semi-final waiting there); it only reads, and leaves the console on ST.
+  // quarter-finals and semi-final, on a day that began an hour before the run,
+  // so the court is well behind its plan), its next match, ST's second
+  // semi-final, shows the projected time ALONE, as "~HH:MM" (spoken "about
+  // HH:MM", the plan not beside it), on the court console's Up next card and the
+  // public schedule row, while the Scores tab still shows the plan. What it must
+  // show is computed from the court's state at the time, by the app's own rule
+  // (paceExpected, court_pace.jsx), before each screen is loaded: the "~" time
+  // at that minute or the next, or the plan when that is under 5 minutes off it
+  // (a run just after midnight, whose day cannot begin an hour earlier). The TV
+  // board shows a projected time only on its NEXT line; here the semi-final is
+  // the board's promoted bout (nothing runs on A and the bouts after it wait on
+  // their feeders), so the board is read for the bout and for the plan's
+  // absence, and its NEXT line's time only if one is drawn. Relies on the state
+  // S4b-S5 leaves (nothing running on A, ST's semi-final waiting there); it only
+  // reads, and leaves the console on ST.
   test('bc-pace: court A\'s next match shows a time projected from the court\'s pace, the plan unchanged', async () => {
     const planned = (draw.st.find((m) => same(pairOf(m), bouts.sf2)) || {}).time;
     expect(clock(planned), `${ST}'s second semi-final has a planned time (${planned})`).toBe(true);
     const stored = ((await readScoresTab(H, ids.ST)).find((m) => same(pairOf(m), bouts.sf2)) || {}).time;
     expect(stored, 'the Scores tab still shows the plan').toBe(planned);
-    // A PaceTime span (court_pace.jsx): "~HH:MM" shown, "about HH:MM" spoken.
-    // Returns the projected HH:MM once it is drawn, at least 5 minutes off the plan.
-    const projected = async (where, label) => {
-      const pace = where.locator('.pace-projected').first();
-      const shown = pace.locator(':scope > span[aria-hidden="true"]');
-      await expect(shown, `${label}: the projected time`).toHaveText(/^~\d\d:\d\d$/);
-      const hhmm = (await shown.innerText()).trim().slice(1);
-      await expect(pace.locator(':scope > .sr-only'), `${label}: the spoken time`).toHaveText(`about ${hhmm}`);
-      expect(Math.abs(minutes(hhmm) - minutes(planned)), `${label}: ~${hhmm} is 5 minutes or more off the plan (${planned})`).toBeGreaterThanOrEqual(5);
-      await expect(where, `${label}: the plan is not shown beside the projection`).not.toContainText(planned);
-      return hhmm;
+    // The court's pace for the semi-final, read in `page` before the screen is
+    // loaded, and what the screen may then show: "~HH:MM" when projected,
+    // otherwise the plan.
+    const expectSf = async (page) => {
+      const exp = await paceExpected(page, { court: 'A', compId: ids.ST, planned });
+      expect(exp.match, `the court pace holds ${ST}'s second semi-final (planned ${planned}) among A's waiting matches`).not.toBeNull();
+      return { ...exp, accepted: [...new Set(exp.match.displays.map((d) => (d?.projected ? d.text : planned)))] };
     };
-    if (!/\/admin\/shiaijo\/A$/.test(C.url())) await openShiaijo(C, 'A');
+    // A PaceTime span (court_pace.jsx): "~HH:MM" shown, "about HH:MM" spoken; the
+    // plan alone when the pace is not 5 minutes off it. Returns what is shown.
+    const showsPace = async (where, label, exp) => {
+      const read = async () => {
+        const pace = where.locator('.pace-projected');
+        if (await pace.count()) return (await pace.first().locator(':scope > span[aria-hidden="true"]').innerText()).trim();
+        return (await where.innerText()).includes(planned) ? planned : null;
+      };
+      await expect.poll(read, { message: `${label}: shows ${exp.accepted.join(' or ')} (the court's pace at ${exp.now}, drift ${exp.drift.join(' / ')} min; plan ${planned})` })
+        .toMatch(new RegExp(`^(?:${exp.accepted.join('|')})$`));
+      const shown = await read();
+      if (shown !== planned) {
+        await expect(where.locator('.pace-projected').first().locator(':scope > .sr-only'), `${label}: the spoken time`).toHaveText(`about ${shown.slice(1)}`);
+        await expect(where, `${label}: the plan is not shown beside the projection`).not.toContainText(planned);
+      }
+      return shown;
+    };
+    const atConsole = await expectSf(C);
+    await openShiaijo(C, 'A');
     if ((await officiatingName(C)) !== ST) await pickCompetition(C, ST);
     expect(same(await sides(upNextCard(C)), bouts.sf2)).toBe(true);
-    const onConsole = await projected(upNextCard(C), 'the console Up next card');
+    const onConsole = await showsPace(upNextCard(C), 'the console Up next card', atConsole);
+    const atSchedule = await expectSf(P);
     await P.goto('/schedule');
     const sfRow = scheduleColumn(P, 'A').locator('.tw-match').filter({ hasText: bouts.sf2.shiro }).filter({ hasText: bouts.sf2.aka }).first();
     await expect(sfRow).toBeVisible();
-    const onSchedule = await projected(sfRow, 'the public schedule row');
+    const onSchedule = await showsPace(sfRow, 'the public schedule row', atSchedule);
+    const atTv = await expectSf(P);
     await openTvBoard(TV, 'A');
     await expect(tvBoard(TV)).toContainText(bouts.sf2.shiro);
     await expect(tvBoard(TV)).toContainText(bouts.sf2.aka);
-    await expect(tvBoard(TV), 'the TV board does not show the plan').not.toContainText(planned);
+    if (atTv.match.displays.every((d) => d?.projected)) {
+      await expect(tvBoard(TV), 'the TV board does not show the plan').not.toContainText(planned);
+    }
+    // The NEXT line names another waiting match on A: its time is that match's
+    // projected time, at this minute or the next.
     const tvNext = TV.getByTestId('tvd-next-time');
     const tvNextTimes = await untilStable(() => tvNext.count());
-    if (tvNextTimes) await expect(tvNext.first().locator(':scope > span[aria-hidden="true"]')).toHaveText(/^~\d\d:\d\d$/);
-    row('bc-pace', { step: 'S5 pace', action: `${ST}'s second semi-final on Shiaijo A`, variant: 'asserted', planned, onConsole, onSchedule,
-      tvNextLine: tvNextTimes ? (await tvNext.first().innerText()).trim() : null });
+    const tvProjected = [...new Set(atTv.waiting.filter((w) => w.matchId !== atTv.match.matchId)
+      .flatMap((w) => w.displays.filter((d) => d?.projected).map((d) => d.text)))];
+    if (tvNextTimes) {
+      await expect(tvNext.first().locator(':scope > span[aria-hidden="true"]'), `the TV NEXT line shows ${tvProjected.join(' or ')}`)
+        .toHaveText(new RegExp(`^(?:${tvProjected.join('|') || '(?!)'})$`));
+    }
+    row('bc-pace', { step: 'S5 pace', action: `${ST}'s second semi-final on Shiaijo A`, variant: 'asserted', siStart: SI_START, planned,
+      paceAt: atConsole.now, drift: atConsole.drift, expected: { console: atConsole.accepted, schedule: atSchedule.accepted, tv: atTv.accepted },
+      onConsole, onSchedule, tvNextLine: tvNextTimes ? (await tvNext.first().innerText()).trim() : null });
   });
 
   // bc-sypl (operator ruling 2026-10-12: "You do not need the word/pill saying

@@ -25,9 +25,9 @@ failed: the `test.fixme` steps of open beads (see
 [When a journey finds a bug](#when-a-journey-finds-a-bug)) are reported as
 skipped.
 
-This directory pins `@playwright/test` at 1.63.0, and `scripts/screenshots`
-resolves `playwright-core` 1.63.0 from its lockfile (its `package.json` only
-asks for `^1.56.0`, so the match holds because both lockfiles are current, not
+This directory pins `@playwright/test` at 1.64.1, and `scripts/screenshots`
+resolves `playwright-core` 1.64.1 from its lockfile (its `package.json` only
+asks for `^1.64.1`, so the match holds because both lockfiles are current, not
 because anything enforces it). While the two agree they share one Chromium under
 `~/.cache/ms-playwright`; if either lockfile moves to another release, each
 downloads its own. If that cache is removed the stamp outlives it; run

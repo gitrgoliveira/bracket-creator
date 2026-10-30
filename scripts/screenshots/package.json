@@ -3,6 +3,6 @@
   "private": true,
   "description": "Docs capture harness. Deliberately separate from web-mobile/package.json so a browser download never lands in js/deps or audit-ci's scope.",
   "devDependencies": {
-    "playwright-core": "^1.56.0"
+    "playwright-core": "^1.64.1"
   }
 }

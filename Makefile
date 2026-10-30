@@ -378,8 +378,8 @@ docs/media: go/build $(SHOTS_BROWSER_STAMP) ## Regenerate every captured screens
 
 # Local e2e journeys (scripts/e2e, see its README.md). Like the capture harness
 # above, Playwright lives in its own package.json rather than web-mobile's. Both
-# lockfiles currently resolve the same Playwright release (1.63.0; the capture
-# harness's package.json only asks for ^1.56.0), so they share one downloaded
+# lockfiles currently resolve the same Playwright release (1.64.1; the capture
+# harness's package.json only asks for ^1.64.1), so they share one downloaded
 # Chromium under ~/.cache/ms-playwright. Deliberately NOT part of go/test and not run in
 # CI: a journey drives the real app through a browser, setup wizard and all.
 E2E_DIR := scripts/e2e

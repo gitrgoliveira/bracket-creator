@@ -7,7 +7,7 @@
 // surface (settings screen, awards page) already uses.
 import { effectiveTwoThirdPlaces, resolveFormat, FORMAT_KNOCKOUT, FORMAT_LEAGUE } from './competition_shape.jsx';
 
-const { useState: useStateA } = React;
+const { useState } = React;
 
 // Prepare a roster CSV field: coerce nullish to "" (String(undefined) would
 // export the literal text "undefined"), collapse embedded CR/LF runs to a
@@ -116,7 +116,7 @@ export function AdminExport({ c, t, password, showToast }) {
   const cid = c.id || cfg.id;
   const url = `${(window.linkBase || (() => window.location.origin))(t)}/viewer.html?id=${t.id}#comp-${cid}`;
 
-  const [resultsBusy, setResultsBusy] = useStateA(false);
+  const [resultsBusy, setResultsBusy] = useState(false);
 
   const notify = (msg, kind) => {
     if (showToast) showToast(msg, kind);

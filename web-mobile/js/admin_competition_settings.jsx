@@ -55,7 +55,7 @@ import { PillGroup, PillButton, CheckboxField, NumberField, TextField } from './
 import { seededRanks } from './admin_helpers.jsx';
 import { useUnsavedInput } from './app_version.jsx';
 
-const { useState: useStateA, useEffect: useEffectA, useRef: useRefA, useMemo: useMemoA } = React;
+const { useState, useEffect, useRef, useMemo } = React;
 
 const dmyToIso = window.dmyToIso;
 const isoToDmy = window.isoToDmy;
@@ -94,28 +94,28 @@ function formatClearedValue(key, value) {
 }
 
 function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, onStatusChange }) {
-  const [lastSaved, setLastSaved] = useStateA(null);
-  const [saveErr, setSaveErr] = useStateA(null);
-  const [invalidating, setInvalidating] = useStateA(false);
+  const [lastSaved, setLastSaved] = useState(null);
+  const [saveErr, setSaveErr] = useState(null);
+  const [invalidating, setInvalidating] = useState(false);
   // twoThirdPlaces (bc-3rdp) is seeded through effectiveTwoThirdPlaces, not a
   // bare `c.twoThirdPlaces` copy: a competition saved before this field
   // existed has no stored value at all (Go's omitempty drops a nil pointer
   // from the wire), and a plain copy would read that as "off" -- wrong for
   // e.g. a legacy non-naginata knockout, whose effective rule is "on". See
   // effectiveTwoThirdPlaces's own comment for the full resolution order.
-  const [local, setLocal] = useStateA({ ...c, twoThirdPlaces: effectiveTwoThirdPlaces(c) });
+  const [local, setLocal] = useState({ ...c, twoThirdPlaces: effectiveTwoThirdPlaces(c) });
   // Manual-save model (mp-3xn6): edits only persist when the operator clicks
   // "Save changes", matching the Tournament Edit-details page. isDirty drives
   // the unsaved indicator + the Save button's enabled state; saving disables
   // the button and shows "Saving…" during the in-flight PUT.
-  const [isDirty, setIsDirty] = useStateA(false);
+  const [isDirty, setIsDirty] = useState(false);
   // Unsaved edits hold a new build's automatic reload (app_version.jsx).
   useUnsavedInput(isDirty);
-  const [saving, setSaving] = useStateA(false);
+  const [saving, setSaving] = useState(false);
   // Court-clash warnings surfaced after a save (mp-4a52). Non-blocking: the
   // save already committed; when present we stay on the page to show them
   // instead of returning to the dashboard.
-  const [clashWarnings, setClashWarnings] = useStateA(null);
+  const [clashWarnings, setClashWarnings] = useState(null);
 
   // Knockout-qualifiers preview (bc-qual): computed off the EFFECTIVE draw
   // roster -- server-confirmed c.players (settings edits don't change the
@@ -131,7 +131,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
   // the seeding blocker validates with. Memoized because this walks the
   // roster and runs the full formation scan, and AdminSettings re-renders on
   // every keystroke of any settings field.
-  const qualifierPreview = useMemoA(() => {
+  const qualifierPreview = useMemo(() => {
     const drawPlayers = effectiveDrawPlayers(c.players, checkInApplies(tournament, local.checkInEnabled));
     return computeQualifierPreview(drawPlayers.length, local.poolSize, local.poolWinners, seededRanks(drawPlayers));
   }, [c.players, tournament, local.checkInEnabled, local.poolSize, local.poolWinners]);
@@ -142,10 +142,10 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
   // so the estimate reflects the latest server-persisted config. Uses an
   // AbortController so in-flight requests from a previous render are
   // cancelled before the next fetch starts (same pattern as admin_schedule.jsx).
-  const [compEstimate, setCompEstimate] = useStateA(null);
-  const [compEstimateLoading, setCompEstimateLoading] = useStateA(false);
-  const [compEstimateErr, setCompEstimateErr] = useStateA(null);
-  useEffectA(() => {
+  const [compEstimate, setCompEstimate] = useState(null);
+  const [compEstimateLoading, setCompEstimateLoading] = useState(false);
+  const [compEstimateErr, setCompEstimateErr] = useState(null);
+  useEffect(() => {
     if (!c.id) return;
     const controller = new AbortController();
     setCompEstimateLoading(true);
@@ -178,16 +178,16 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
   // saveNow's .then/.catch and the delete handler's finally fire on
   // own state: gate via mountedRef. Same teardown-race shape as
   // admin_participants.jsx apply().
-  const mountedRef = useRefA(true);
-  useEffectA(() => () => { mountedRef.current = false; }, []);
+  const mountedRef = useRef(true);
+  useEffect(() => () => { mountedRef.current = false; }, []);
 
   // Refs so saveNow reads fresh state at click time (NOT closure-captured
   // when the handler was defined). Same shape as admin.jsx's tRef/onUpdateRef
   // pattern from round-11.
-  const cRef = useRefA(c);
-  useEffectA(() => { cRef.current = c; }, [c]);
-  const localRef = useRefA(local);
-  useEffectA(() => { localRef.current = local; }, [local]);
+  const cRef = useRef(c);
+  useEffect(() => { cRef.current = c; }, [c]);
+  const localRef = useRef(local);
+  useEffect(() => { localRef.current = local; }, [local]);
 
   // Track which settings fields the user has actively edited since the
   // last successful save. Used by:
@@ -202,7 +202,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
   // between the user's edit and their Save click would be dropped by the sync
   // effect AND overwritten by saveNow: net effect: saving one field silently
   // reverts simultaneous edits to other fields. Caught by Copilot round-15.
-  const editedFieldsRef = useRefA(new Set());
+  const editedFieldsRef = useRef(new Set());
 
   // Sync server-driven changes into local state (SSE → AdminApp → c prop).
   // For each field on `c`, propagate to `local` UNLESS the user has an
@@ -214,12 +214,15 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
   // saveNow's PUT allowlist (`finalNext`). Status is listed so a
   // concurrent start/complete propagates into local for the delete-
   // confirm prompt's `local.status && local.status !== "setup"` check.
-  useEffectA(() => {
+  // The copy reads cRef (moved on by the effect above, which runs first), so
+  // the fields listed below decide when it runs, as they always have.
+  useEffect(() => {
+    const latestC = cRef.current;
     setLocal(prev => {
       const next = { ...prev };
-      Object.keys(c).forEach(k => {
+      Object.keys(latestC).forEach(k => {
         if (!editedFieldsRef.current.has(k)) {
-          next[k] = c[k];
+          next[k] = latestC[k];
         }
       });
       // twoThirdPlaces (bc-3rdp): recomputed via effectiveTwoThirdPlaces
@@ -228,12 +231,12 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
       // omitempty on a nil pointer), so it is never among Object.keys(c) and
       // the generic loop would silently never touch `next.twoThirdPlaces` --
       // it needs an explicit derive, not a copy, to ever be seeded past its
-      // useStateA initializer. And a competition whose format or naginata
+      // useState initializer. And a competition whose format or naginata
       // changed (locally or via a concurrent admin's SSE-pushed update)
       // needs its EFFECTIVE joint-3rd default re-derived from those, not
       // just whatever raw value happened to be stored.
       if (!editedFieldsRef.current.has("twoThirdPlaces")) {
-        next.twoThirdPlaces = effectiveTwoThirdPlaces(c);
+        next.twoThirdPlaces = effectiveTwoThirdPlaces(latestC);
       }
       return next;
     });
@@ -685,7 +688,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
   // value so Save can be blocked. DurationInput never emits an invalid value,
   // so without this gate a bad entry would just be silently dropped on save,
   // which is the same "looked like it worked" failure the band is meant to end.
-  const [durationErrors, setDurationErrors] = useStateA({});
+  const [durationErrors, setDurationErrors] = useState({});
   const setDurationError = (key) => (err) =>
     setDurationErrors((prev) => {
       if ((prev[key] || null) === err) return prev;

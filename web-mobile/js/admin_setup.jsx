@@ -1,7 +1,7 @@
 // Tournament-edit, competition-create, and bulk-import pages. See
 // web-mobile/admin_split_plan.md.
 
-const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
+const { useState, useEffect, useRef } = React;
 
 const validateAndNormalizeDate = window.validateAndNormalizeDate;
 const decideNumericUpdate = window.decideNumericUpdate;
@@ -171,50 +171,50 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
   // on the backend version) either see a 400 or silently believe
   // rotation succeeded. Hide it.
   const locked = authConfig === null || authConfig.mode === "locked";
-  const [name, setName] = useStateA(tournament.name);
-  const [venue, setVenue] = useStateA(tournament.venue);
-  const [date, setDate] = useStateA(tournament.date);
+  const [name, setName] = useState(tournament.name);
+  const [venue, setVenue] = useState(tournament.venue);
+  const [date, setDate] = useState(tournament.date);
   // DurationDays: default 1 for tournaments that predate this field
   // (tournament.durationDays is undefined / 0 for older records).
-  const [durationDays, setDurationDays] = useStateA(tournament.durationDays || 1);
-  const [courts, setCourts] = useStateA(window.courtCount(tournament.courts));
+  const [durationDays, setDurationDays] = useState(tournament.durationDays || 1);
+  const [courts, setCourts] = useState(window.courtCount(tournament.courts));
   // Tournament mode (mp-7h7): read-only after creation: shown for
   // information only and NEVER included in the PUT payload.
   const tournamentMode = tournament.mode || "officiated";
   // mp-zoh Phase 5: ceremony block duration strings ("30m", "1h", "1h30m").
   // Empty string means "no block configured".
-  const [openingBlock, setOpeningBlock] = useStateA(tournament.openingBlock || "");
-  const [lunchBlock, setLunchBlock] = useStateA(tournament.lunchBlock || "");
-  const [closingBlock, setClosingBlock] = useStateA(tournament.closingBlock || "");
+  const [openingBlock, setOpeningBlock] = useState(tournament.openingBlock || "");
+  const [lunchBlock, setLunchBlock] = useState(tournament.lunchBlock || "");
+  const [closingBlock, setClosingBlock] = useState(tournament.closingBlock || "");
   // mp-ef3: public tournament info fields.
   // mp-s1gl: externally-shareable base URL for QR codes / share links.
-  const [publicURL, setPublicURL] = useStateA(tournament.publicURL || "");
-  const [venueAddress, setVenueAddress] = useStateA(tournament.venueAddress || "");
-  const [venueMapURL, setVenueMapURL] = useStateA(tournament.venueMapURL || "");
-  const [openingTime, setOpeningTime] = useStateA(tournament.openingTime || "");
-  const [closingTime, setClosingTime] = useStateA(tournament.closingTime || "");
-  const [websiteURL, setWebsiteURL] = useStateA(tournament.websiteURL || "");
-  const [awardsNote, setAwardsNote] = useStateA(tournament.awardsNote || "");
-  const [infoNotes, setInfoNotes] = useStateA(tournament.infoNotes || "");
-  const [contacts, setContacts] = useStateA((tournament.contacts || []).map((ct, i) => ({ ...ct, _key: i })));
-  const nextKeyRef = useRefA((tournament.contacts || []).length);
-  const [pass, setPass] = useStateA(""); // Leave empty to keep existing, unless changed
-  const [error, setError] = useStateA("");
+  const [publicURL, setPublicURL] = useState(tournament.publicURL || "");
+  const [venueAddress, setVenueAddress] = useState(tournament.venueAddress || "");
+  const [venueMapURL, setVenueMapURL] = useState(tournament.venueMapURL || "");
+  const [openingTime, setOpeningTime] = useState(tournament.openingTime || "");
+  const [closingTime, setClosingTime] = useState(tournament.closingTime || "");
+  const [websiteURL, setWebsiteURL] = useState(tournament.websiteURL || "");
+  const [awardsNote, setAwardsNote] = useState(tournament.awardsNote || "");
+  const [infoNotes, setInfoNotes] = useState(tournament.infoNotes || "");
+  const [contacts, setContacts] = useState((tournament.contacts || []).map((ct, i) => ({ ...ct, _key: i })));
+  const nextKeyRef = useRef((tournament.contacts || []).length);
+  const [pass, setPass] = useState(""); // Leave empty to keep existing, unless changed
+  const [error, setError] = useState("");
   // mp-sspn: which field the current validation error belongs to, so the
   // message renders inline beside its cause instead of only at the page top.
   // null = no field-scoped error (general errors still use the top banner).
-  const [errorField, setErrorField] = useStateA(null);
+  const [errorField, setErrorField] = useState(null);
   // mp-scf: theme colors (updated live by BrandingManager via onThemeChange).
   // Initialise through normalizeTheme so the very first render holds the same
   // shape BrandingManager emits: when the server returns theme:{} for a
   // logo-only tournament, the raw value is a truthy empty object that would
   // otherwise reach the dirty snapshot and the save payload as `{}` (the
   // backend tolerates it but it's cleaner not to rely on that).
-  const [theme, setTheme] = useStateA(normalizeTheme(tournament.theme));
+  const [theme, setTheme] = useState(normalizeTheme(tournament.theme));
   // Follow a reload of the tournament (another organiser saved) while the form is open.
   const incomingLogoOnLobby = !!(tournament.theme && tournament.theme.logoOnLobby);
-  const [logoOnLobby, setLogoOnLobby] = useStateA(incomingLogoOnLobby);
-  useEffectA(() => {
+  const [logoOnLobby, setLogoOnLobby] = useState(incomingLogoOnLobby);
+  useEffect(() => {
     setLogoOnLobby(incomingLogoOnLobby);
   }, [incomingLogoOnLobby]);
 
@@ -223,23 +223,23 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
   // (previously it fired-and-navigated with no on-button cue). mountedRef
   // gates the post-await setSaving so a successful save (which unmounts this
   // view via navigation) doesn't setState on a torn-down component.
-  const [saving, setSaving] = useStateA(false);
+  const [saving, setSaving] = useState(false);
   // The `saving` STATE drives the button label/disabled; the savingRef LATCH
   // is the actual re-entry guard. State updates are async, so two rapid
   // Ctrl+S / clicks could both pass an `if (saving)` check before the
   // re-render flips it and fire duplicate PUTs. The ref is mutated and read
   // synchronously within the same tick, so the second call sees it.
-  const savingRef = useRefA(false);
-  const mountedRef = useRefA(true);
-  useEffectA(() => () => { mountedRef.current = false; }, []);
+  const savingRef = useRef(false);
+  const mountedRef = useRef(true);
+  useEffect(() => () => { mountedRef.current = false; }, []);
 
   // mp-sspn: refs for the four validated fields so a failed save can focus +
   // scroll the offending input into view: on a 4-card form the top banner
   // alone lands off-screen when Save is clicked from the bottom.
-  const nameRef = useRefA(null);
-  const dateRef = useRefA(null);
-  const daysRef = useRefA(null);
-  const courtsRef = useRefA(null);
+  const nameRef = useRef(null);
+  const dateRef = useRef(null);
+  const daysRef = useRef(null);
+  const courtsRef = useRef(null);
   const fieldRefs = { name: nameRef, date: dateRef, durationDays: daysRef, courts: courtsRef };
 
   // mp-sspn: progressive disclosure for the long optional public-info block.
@@ -247,7 +247,7 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
   // existing values are never hidden behind a collapsed section.
   const hasPublicInfo = !!(publicURL || venueAddress || venueMapURL || openingTime ||
     closingTime || websiteURL || awardsNote || infoNotes || (contacts && contacts.length));
-  const [publicOpen, setPublicOpen] = useStateA(hasPublicInfo);
+  const [publicOpen, setPublicOpen] = useState(hasPublicInfo);
 
   // mp-sspn: dirty tracking for the unsaved-changes cue + cancel guard.
   // Branding colours/title ride along on "Save changes" (via onThemeChange ->
@@ -257,11 +257,11 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
   // the raw tournament.theme and would false-dirty on load. normalizeTheme mirrors
   // BrandingManager's own normalization (same defaults; empty/logo-only config
   // -> null) so the pre- and post-sync snapshots compare equal.
-  const initialSnapRef = useRefA(null);
-  const [dirty, setDirty] = useStateA(false);
+  const initialSnapRef = useRef(null);
+  const [dirty, setDirty] = useState(false);
   // Unsaved edits hold a new build's automatic reload (app_version.jsx).
   useUnsavedInput(dirty);
-  useEffectA(() => {
+  useEffect(() => {
     const snap = JSON.stringify({
       name, venue, date, durationDays, courts, openingBlock, lunchBlock, closingBlock,
       publicURL, venueAddress, venueMapURL, openingTime, closingTime, websiteURL,
@@ -371,7 +371,7 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
   // stale closure (handleSave/handleCancel close over current form state).
   const handleSaveRef = useLatestRef(handleSave);
   const handleCancelRef = useLatestRef(handleCancel);
-  useEffectA(() => {
+  useEffect(() => {
     const onKey = (e) => {
       // Ignore IME composition keys (CJK input, accented chars). Without this
       // the Escape used to cancel composition would also fire the discard
@@ -395,7 +395,7 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [handleSaveRef, handleCancelRef]);
 
   return (
     <div className="app">
@@ -706,19 +706,48 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
 // stacked; once a roster exists the real estimate takes over if it is larger.
 const MIN_STACK_BLOCK_MIN = 30;
 
+// mintCompetitionId: the id a new competition named `finalName` is created
+// under. Two distinct names can normalize to the same slug (e.g. "Men's" vs
+// "Mens" both → "mens"). The name-uniqueness check is case-insensitive on the
+// *name*, so it won't catch slug collisions: guard explicitly against existing
+// ids and append a numeric suffix (or fall back to a timestamp) so create
+// never 409s server-side.
+function mintCompetitionId(finalName, competitions) {
+  const baseSlug = finalName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '').substring(0, 50);
+  const existingIds = new Set((competitions || []).map(cc => cc.id));
+  let id = baseSlug || ("c-" + Date.now().toString(36));
+  if (existingIds.has(id)) {
+    if (baseSlug) {
+      let n = 2;
+      while (existingIds.has(`${baseSlug}-${n}`)) n++;
+      id = `${baseSlug}-${n}`;
+    } else {
+      // Timestamp ID already taken (extremely unlikely: same-ms create).
+      // Re-mint with crypto entropy rather than producing a leading-dash
+      // slug. crypto.randomUUID is universal in browsers we target; fall
+      // back to Math.random for ancient environments.
+      const entropy = (typeof crypto !== "undefined" && crypto.randomUUID)
+        ? crypto.randomUUID().slice(0, 8)
+        : Math.floor(Math.random() * 1e9).toString(36);
+      id = `c-${Date.now().toString(36)}-${entropy}`;
+    }
+  }
+  return id;
+}
+
 function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onViewerMode, password }) {
-  const [name, setName] = useStateA("");
+  const [name, setName] = useState("");
   // A competition being named is unsaved input: it holds a new build's
   // automatic reload (app_version.jsx).
   useUnsavedInput(name.trim() !== "");
-  const [kind, setKind] = useStateA(COMPETITION_DEFAULTS.kind);
-  const [format, setFormat] = useStateA(COMPETITION_DEFAULTS.format);
+  const [kind, setKind] = useState(COMPETITION_DEFAULTS.kind);
+  const [format, setFormat] = useState(COMPETITION_DEFAULTS.format);
   // FR-050 / T044: per-phase round-robin shape selector. Only meaningful
   // when the format runs pool play ("mixed", "league"); default
   // "full" (every-vs-every) matches the historical behaviour. "partial"
   // (neighbour-only) is the new option for league-sized fields where a
   // full round-robin would not fit in the day's schedule.
-  const [poolFormat, setPoolFormat] = useStateA(COMPETITION_DEFAULTS.poolFormat);
+  const [poolFormat, setPoolFormat] = useState(COMPETITION_DEFAULTS.poolFormat);
   // bc-symm: settings-only until now (admin_competition_settings.jsx
   // renders this checkbox, gated on roundRobinVisible -- see that
   // predicate's comment in competition_shape.jsx for why "mixed" +
@@ -727,36 +756,36 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
   // add here; default true matches the value data.jsx hardcoded before
   // this control existed, so a create that never touches the checkbox
   // produces the same competition it always did.
-  const [roundRobin, setRoundRobin] = useStateA(COMPETITION_DEFAULTS.roundRobin);
+  const [roundRobin, setRoundRobin] = useState(COMPETITION_DEFAULTS.roundRobin);
   // Seeded to "max" and only ever written by the two pills below, so unlike
   // the settings screen's stored value this never needs resolvePoolSizeMode
   // -- it cannot hold the empty third state a record authored outside the
   // SPA has. The constants are shared so the two screens still write the
   // same strings.
-  const [poolMode, setPoolMode] = useStateA(COMPETITION_DEFAULTS.poolSizeMode);
-  const [poolSize, setPoolSize] = useStateA(COMPETITION_DEFAULTS.poolSize);
-  const [winners, setWinners] = useStateA(COMPETITION_DEFAULTS.poolWinners);
+  const [poolMode, setPoolMode] = useState(COMPETITION_DEFAULTS.poolSizeMode);
+  const [poolSize, setPoolSize] = useState(COMPETITION_DEFAULTS.poolSize);
+  const [winners, setWinners] = useState(COMPETITION_DEFAULTS.poolWinners);
   // Knockout qualifiers (bc-qual LP-5a): "" (standard, default), "larger-pools",
   // or "fill-bracket". Only meaningful under poolMode === "min"; see
   // extraQualifiersRadioVisible / resetExtraQualifiersOnPoolModeChange above.
-  const [extraQualifiers, setExtraQualifiers] = useStateA(EXTRA_QUALIFIERS_STANDARD);
+  const [extraQualifiers, setExtraQualifiers] = useState(EXTRA_QUALIFIERS_STANDARD);
   // T190 (FR-050a): Swiss round count. Default 4 is the canonical
   // Swiss tournament size for ~16 players (log2 of typical field): 
   // matches the example in spec.md US13. Only used when format=swiss.
-  const [swissRounds, setSwissRounds] = useStateA(COMPETITION_DEFAULTS.swissRounds);
+  const [swissRounds, setSwissRounds] = useState(COMPETITION_DEFAULTS.swissRounds);
   // bc-symm: per-phase match durations, settings-only until now. 0 (NaN
   // normalized to 0, see DurationInput's contract) means "unset, use the
   // scheduler default" -- state.Competition's own zero-value meaning, and
   // the correct default for a competition that hasn't run a single match
   // yet to estimate from.
-  const [poolMatchDurationSeconds, setPoolMatchDurationSeconds] = useStateA(COMPETITION_DEFAULTS.poolMatchDurationSeconds);
-  const [knockoutMatchDurationSeconds, setKnockoutMatchDurationSeconds] = useStateA(COMPETITION_DEFAULTS.knockoutMatchDurationSeconds);
-  const [startTime, setStartTime] = useStateA(COMPETITION_DEFAULTS.startTime);
+  const [poolMatchDurationSeconds, setPoolMatchDurationSeconds] = useState(COMPETITION_DEFAULTS.poolMatchDurationSeconds);
+  const [knockoutMatchDurationSeconds, setKnockoutMatchDurationSeconds] = useState(COMPETITION_DEFAULTS.knockoutMatchDurationSeconds);
+  const [startTime, setStartTime] = useState(COMPETITION_DEFAULTS.startTime);
   // Once the operator types a start time, stop auto-stacking it (see the
   // effect below) so we never clobber a deliberate choice.
-  const startTimeEditedRef = useRefA(false);
-  const [date, setDate] = useStateA(tournament.date);
-  const [teamSize, setTeamSize] = useStateA(COMPETITION_DEFAULTS.teamSize);
+  const startTimeEditedRef = useRef(false);
+  const [date, setDate] = useState(tournament.date);
+  const [teamSize, setTeamSize] = useState(COMPETITION_DEFAULTS.teamSize);
   // What teamSize this form would actually SEND, which is not the state var.
   // `teamSize` keeps its 5 while kind is individual (so switching back to
   // Team restores the operator's number instead of resetting it), but the
@@ -768,28 +797,28 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
   // (which reads a stored teamSize of 0) correctly hides -- the exact
   // create-vs-settings divergence bc-symm exists to remove.
   const effectiveTeamSize = kind === "team" ? teamSize : 0;
-  const [teamMatchType, setTeamMatchType] = useStateA(COMPETITION_DEFAULTS.teamMatchType);
-  const [numberPrefix, setNumberPrefix] = useStateA(COMPETITION_DEFAULTS.numberPrefix);
-  const [withZekken, setWithZekken] = useStateA(COMPETITION_DEFAULTS.withZekkenName);
-  const [naginata, setNaginata] = useStateA(COMPETITION_DEFAULTS.naginata);
+  const [teamMatchType, setTeamMatchType] = useState(COMPETITION_DEFAULTS.teamMatchType);
+  const [numberPrefix, setNumberPrefix] = useState(COMPETITION_DEFAULTS.numberPrefix);
+  const [withZekken, setWithZekken] = useState(COMPETITION_DEFAULTS.withZekkenName);
+  const [naginata, setNaginata] = useState(COMPETITION_DEFAULTS.naginata);
   // Joint-3rd convention (bc-3rdp), for every format that has a 3rd place to
   // award: kendo awards two joint 3rd places, naginata a single 3rd. Defaults
   // by discipline (kendo on, naginata off) and re-syncs when the naginata
   // toggle flips (twoThirdPlacesForNaginata is a default-setter only, not a
   // lock); the operator can still override it afterward.
-  const [twoThirdPlaces, setTwoThirdPlaces] = useStateA(COMPETITION_DEFAULTS.twoThirdPlaces);
+  const [twoThirdPlaces, setTwoThirdPlaces] = useState(COMPETITION_DEFAULTS.twoThirdPlaces);
   // bc-symm: league tie-break band, settings-only until now. 0 reads as
   // "Top 3" (state.Competition's own unset-means-3 default, see
   // LEAGUE_TIEBREAK_OPTIONS' comment in competition_shape.jsx); starting
   // the local state at 0 rather than 3 means an operator who never opens
   // this band still submits the same "unset" payload the field always had.
-  const [leagueTiebreakTopN, setLeagueTiebreakTopN] = useStateA(COMPETITION_DEFAULTS.leagueTiebreakTopN);
-  const [engi, setEngi] = useStateA(COMPETITION_DEFAULTS.engi);
-  const [checkInEnabled, setCheckInEnabled] = useStateA(COMPETITION_DEFAULTS.checkInEnabled);
+  const [leagueTiebreakTopN, setLeagueTiebreakTopN] = useState(COMPETITION_DEFAULTS.leagueTiebreakTopN);
+  const [engi, setEngi] = useState(COMPETITION_DEFAULTS.engi);
+  const [checkInEnabled, setCheckInEnabled] = useState(COMPETITION_DEFAULTS.checkInEnabled);
   const safeCourts = window.normalizeCourts(tournament.courts);
-  const [selectedCourts, setSelectedCourts] = useStateA(safeCourts.slice(0, Math.min(2, safeCourts.length)));
-  const prevCourtsRef = useRefA(tournament.courts);
-  useEffectA(() => {
+  const [selectedCourts, setSelectedCourts] = useState(safeCourts.slice(0, Math.min(2, safeCourts.length)));
+  const prevCourtsRef = useRef(tournament.courts);
+  useEffect(() => {
     const prev = Array.isArray(prevCourtsRef.current) ? prevCourtsRef.current : [];
     const curr = Array.isArray(tournament.courts) ? tournament.courts : [];
     if (prev.length === 0 && curr.length > 0) {
@@ -797,14 +826,14 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
     }
     prevCourtsRef.current = tournament.courts;
   }, [tournament.courts]);
-  const [error, setError] = useStateA("");
+  const [error, setError] = useState("");
   // In-flight guard for the create request. Also the reason this component
   // needs a mountedRef: a SUCCESSFUL create unmounts it (the parent switches
   // to the new competition's view), so the post-await state updates below
   // must not fire.
-  const [creating, setCreating] = useStateA(false);
-  const mountedRef = useRefA(true);
-  useEffectA(() => () => { mountedRef.current = false; }, []);
+  const [creating, setCreating] = useState(false);
+  const mountedRef = useRef(true);
+  useEffect(() => () => { mountedRef.current = false; }, []);
 
   // Shiaijo-count rule (shiaijoCountErrorFor, mirrored from
   // engine.ValidateCompetitionShiaijoCount), identical to the competition
@@ -838,8 +867,14 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
   //  - Once the operator types a start time, startTimeEditedRef latches and
   //    this effect short-circuits: a deliberate manual choice survives
   //    subsequent changes rather than being silently overwritten.
-  useEffectA(() => {
+  // The courts are keyed by their contents (a new array of the same courts is
+  // no change) and read through a ref.
+  const selectedCourtsKey = selectedCourts.join(",");
+  const safeCourtsKey = safeCourts.join(",");
+  const courtsRef = useLatestRef({ selectedCourts, safeCourts });
+  useEffect(() => {
     if (startTimeEditedRef.current) return;
+    const { selectedCourts, safeCourts } = courtsRef.current;
     const candidates = findStackCandidates(tournament.competitions, date, selectedCourts, safeCourts);
     if (candidates.length === 0) {
       if (!startTimeEditedRef.current) {
@@ -884,7 +919,7 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
     });
 
     return () => { controller.abort(); };
-  }, [date, tournament.competitions, password, selectedCourts.join(","), safeCourts.join(",")]);
+  }, [date, tournament.competitions, password, selectedCourtsKey, safeCourtsKey, courtsRef]);
 
   // bc-pnum G2/R6: pre-fill the prefix field with the SAME value a save
   // left blank would actually assign server-side (assignDefaultNumberPrefix),
@@ -898,8 +933,8 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
   // the operator types into the prefix field, numberPrefixTouchedRef
   // latches and this effect stops applying its result, so a later name edit
   // cannot silently overwrite a value the operator chose.
-  const numberPrefixTouchedRef = useRefA(false);
-  useEffectA(() => {
+  const numberPrefixTouchedRef = useRef(false);
+  useEffect(() => {
     if (numberPrefixTouchedRef.current) return;
     const controller = new AbortController();
     // Debounced (~250ms): this effect's deps include `name`, which changes on
@@ -995,30 +1030,7 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
       return;
     }
 
-    // Two distinct names can normalize to the same slug (e.g. "Men's" vs
-    // "Mens" both → "mens"). The name-uniqueness check above is case-
-    // insensitive on the *name*, so it won't catch slug collisions: 
-    // guard explicitly against existing ids and append a numeric suffix
-    // (or fall back to a timestamp) so create never 409s server-side.
-    const baseSlug = finalName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '').substring(0, 50);
-    const existingIds = new Set((tournament.competitions || []).map(cc => cc.id));
-    let id = baseSlug || ("c-" + Date.now().toString(36));
-    if (existingIds.has(id)) {
-      if (baseSlug) {
-        let n = 2;
-        while (existingIds.has(`${baseSlug}-${n}`)) n++;
-        id = `${baseSlug}-${n}`;
-      } else {
-        // Timestamp ID already taken (extremely unlikely: same-ms create).
-        // Re-mint with crypto entropy rather than producing a leading-dash
-        // slug. crypto.randomUUID is universal in browsers we target; fall
-        // back to Math.random for ancient environments.
-        const entropy = (typeof crypto !== "undefined" && crypto.randomUUID)
-          ? crypto.randomUUID().slice(0, 8)
-          : Math.floor(Math.random() * 1e9).toString(36);
-        id = `c-${Date.now().toString(36)}-${entropy}`;
-      }
-    }
+    const id = mintCompetitionId(finalName, tournament.competitions);
     const c = window.buildCompetition({
       id,
       name: finalName,
@@ -1535,28 +1547,28 @@ function importRowErrorText(error) {
 }
 
 function AdminImportPage({ tournament, onBack, onImported, onLogout, onViewerMode, password }) {
-  const [files, setFiles] = useStateA([]);
-  const [preview, setPreview] = useStateA(null);
-  const [loading, setLoading] = useStateA(false);
-  const [results, setResults] = useStateA(null);
+  const [files, setFiles] = useState([]);
+  const [preview, setPreview] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [results, setResults] = useState(null);
   // doImport's setResults/setError/setLoading and onImported timer fire
   // post-await. The page can unmount via onBack() while the upload is in
   // flight: gate via mountedRef in addition to the existing timer
   // cleanup below.
-  const mountedRef = useRefA(true);
-  useEffectA(() => () => { mountedRef.current = false; }, []);
+  const mountedRef = useRef(true);
+  useEffect(() => () => { mountedRef.current = false; }, []);
   // Tracks the success-confirmation timer so we can cancel it if the page
   // unmounts before onImported fires (avoids stray navigation after teardown).
-  const importedTimerRef = useRefA(null);
-  useEffectA(() => () => {
+  const importedTimerRef = useRef(null);
+  useEffect(() => () => {
     if (importedTimerRef.current) {
       clearTimeout(importedTimerRef.current);
       importedTimerRef.current = null;
     }
   }, []);
-  const [error, setError] = useStateA(null);
-  const folderRef = useRefA(null);
-  const filesRef = useRefA(null);
+  const [error, setError] = useState(null);
+  const folderRef = useRef(null);
+  const filesRef = useRef(null);
 
   const collectFiles = (fileList) => {
     const arr = Array.from(fileList);

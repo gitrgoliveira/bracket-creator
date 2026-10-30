@@ -38,7 +38,7 @@ import { NO_ID_HINT, NoIdHint } from './data_integrity.jsx';
 import { checkInApplies, tournamentHasCheckIn, SELF_RUN_NO_CHECK_IN } from './competition_shape.jsx';
 import { useUnsavedInput } from './app_version.jsx';
 
-const { useState: useStateRD, useEffect: useEffectRD, useRef: useRefRD, useMemo: useMemoRD, useCallback: useCallbackRD } = React;
+const { useState, useEffect, useRef, useMemo, useCallback } = React;
 
 const AdminTopbarRD = window.AdminTopbar;
 const BreadcrumbsRD = window.Breadcrumbs;
@@ -450,16 +450,16 @@ function RdRow({ mode, comp, player, zekken, entries, others, checked, presence,
 // ---------------------------------------------------------------------------
 function RdWalkUp({ comp, seedName, password, showToast, onAdded, onCancel }) {
   const isTeam = comp.kind === "team";
-  const [name, setName] = useStateRD(seedName || "");
-  const [dojo, setDojo] = useStateRD("");
-  const [zekken, setZekken] = useStateRD("");
-  const [dan, setDan] = useStateRD("");
+  const [name, setName] = useState(seedName || "");
+  const [dojo, setDojo] = useState("");
+  const [zekken, setZekken] = useState("");
+  const [dan, setDan] = useState("");
   // A walk-up being typed holds a new build's automatic reload (app_version.jsx).
   useUnsavedInput(name !== (seedName || "") || dojo !== "" || zekken !== "" || dan !== "");
-  const [busy, setBusy] = useStateRD(false);
-  const nameRef = useRefRD(null);
+  const [busy, setBusy] = useState(false);
+  const nameRef = useRef(null);
 
-  useEffectRD(() => { nameRef.current && nameRef.current.focus(); }, []);
+  useEffect(() => { nameRef.current && nameRef.current.focus(); }, []);
 
   const submit = async (e) => {
     e.preventDefault();
@@ -532,15 +532,15 @@ function RdWalkUp({ comp, seedName, password, showToast, onAdded, onCancel }) {
 function RdEditModal({ comp, player, password, showToast, onSaved, onClose }) {
   const isTeam = comp.kind === "team";
   const Modal = window.Modal;
-  const [name, setName] = useStateRD(player.name || "");
-  const [dojo, setDojo] = useStateRD(player.dojo || "");
-  const [zekken, setZekken] = useStateRD(player.displayName && player.displayName !== player.name ? player.displayName : "");
-  const [dan, setDan] = useStateRD(player.danGrade || (player.metadata && player.metadata[0]) || "");
+  const [name, setName] = useState(player.name || "");
+  const [dojo, setDojo] = useState(player.dojo || "");
+  const [zekken, setZekken] = useState(player.displayName && player.displayName !== player.name ? player.displayName : "");
+  const [dan, setDan] = useState(player.danGrade || (player.metadata && player.metadata[0]) || "");
   // An edit changed from the row it opened on holds a new build's automatic
   // reload (app_version.jsx).
-  const [opened] = useStateRD(() => ({ name, dojo, zekken, dan }));
+  const [opened] = useState(() => ({ name, dojo, zekken, dan }));
   useUnsavedInput(name !== opened.name || dojo !== opened.dojo || zekken !== opened.zekken || dan !== opened.dan);
-  const [busy, setBusy] = useStateRD(false);
+  const [busy, setBusy] = useState(false);
 
   const save = async () => {
     const n = name.trim(), d = dojo.trim();
@@ -621,34 +621,34 @@ function AdminRegistrationDeskPage({ tournament, onBack, password, showToast, on
   // desk renders works off `comps`, while `allComps.length` is what tells the
   // two empty states apart (no competitions yet vs none with check-in tracking
   // on).
-  const [allComps, setAllComps] = useStateRD(() => tournament.competitions || []);
-  const comps = useMemoRD(() => rdCheckInComps(allComps, tournament), [allComps, tournament]);
-  const tRef = useRefRD(tournament);
-  useEffectRD(() => { tRef.current = tournament; }, [tournament]);
+  const [allComps, setAllComps] = useState(() => tournament.competitions || []);
+  const comps = useMemo(() => rdCheckInComps(allComps, tournament), [allComps, tournament]);
+  const tRef = useRef(tournament);
+  useEffect(() => { tRef.current = tournament; }, [tournament]);
   // Number of check-in writes in flight. While > 0 the SSE-driven refresh
   // defers, so a concurrent reload (this desk's echo or another desk's event)
   // can't momentarily revert an optimistic check-in mid-write.
-  const inFlightRef = useRefRD(0);
+  const inFlightRef = useRef(0);
 
-  const [selected, setSelected] = useStateRD("all");
-  const [query, setQuery] = useStateRD("");
-  const [dojoFilter, setDojoFilter] = useStateRD("all");
-  const [uncheckedOnly, setUncheckedOnly] = useStateRD(false);
-  const [groupByDojo, setGroupByDojo] = useStateRD(false);
-  const [busy, setBusy] = useStateRD(false);
-  const [walkUpOpen, setWalkUpOpen] = useStateRD(false);
-  const [editTarget, setEditTarget] = useStateRD(null); // { comp, player }
-  const [handoff, setHandoff] = useStateRD(null); // { name, tags: [{compName, kind, value}] }
-  const searchRef = useRefRD(null);
-  const mountedRef = useRefRD(true);
-  useEffectRD(() => () => { mountedRef.current = false; }, []);
+  const [selected, setSelected] = useState("all");
+  const [query, setQuery] = useState("");
+  const [dojoFilter, setDojoFilter] = useState("all");
+  const [uncheckedOnly, setUncheckedOnly] = useState(false);
+  const [groupByDojo, setGroupByDojo] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [walkUpOpen, setWalkUpOpen] = useState(false);
+  const [editTarget, setEditTarget] = useState(null); // { comp, player }
+  const [handoff, setHandoff] = useState(null); // { name, tags: [{compName, kind, value}] }
+  const searchRef = useRef(null);
+  const mountedRef = useRef(true);
+  useEffect(() => () => { mountedRef.current = false; }, []);
 
   // Autofocus search on mount and whenever the selected competition changes:
   // the desk's first move is always to type a name.
-  useEffectRD(() => { searchRef.current && searchRef.current.focus(); }, [selected]);
+  useEffect(() => { searchRef.current && searchRef.current.focus(); }, [selected]);
 
   // Reset competition-scoped UI when switching rail entries.
-  useEffectRD(() => { setWalkUpOpen(false); setDojoFilter("all"); setHandoff(null); setEditTarget(null); }, [selected]);
+  useEffect(() => { setWalkUpOpen(false); setDojoFilter("all"); setHandoff(null); setEditTarget(null); }, [selected]);
 
   // A selected competition can leave `comps` underneath the operator: another
   // admin turns its "Check-in tracking" off (or deletes it) and the next
@@ -656,12 +656,12 @@ function AdminRegistrationDeskPage({ tournament, onBack, password, showToast, on
   // `selected`, and the roster, the headline and the walk-up button all read
   // an absent competition as "nothing here". Fall back to "All competitions",
   // which is the view the rail is already showing as unselected.
-  useEffectRD(() => {
+  useEffect(() => {
     if (selected !== "all" && !comps.some((c) => c.id === selected)) setSelected("all");
   }, [comps, selected]);
 
   // Refresh from the server and reconcile both local + parent state.
-  const refresh = useCallbackRD(async () => {
+  const refresh = useCallback(async () => {
     try {
       const fresh = await window.API.fetchCompetitions();
       onUpdate({ ...tRef.current, competitions: fresh });
@@ -673,7 +673,7 @@ function AdminRegistrationDeskPage({ tournament, onBack, password, showToast, on
   }, [onUpdate]);
 
   // SSE: reconcile other desks' check-ins. Debounced so a burst is one refetch.
-  useEffectRD(() => {
+  useEffect(() => {
     if (!window.API || typeof window.API.subscribeToEvents !== "function") return;
     let timer = null;
     const fire = () => {
@@ -692,11 +692,11 @@ function AdminRegistrationDeskPage({ tournament, onBack, password, showToast, on
     return () => { if (timer) clearTimeout(timer); unsub(); };
   }, [refresh]);
 
-  const peopleIndex = useMemoRD(() => rdBuildPeopleIndex(comps), [comps]);
+  const peopleIndex = useMemo(() => rdBuildPeopleIndex(comps), [comps]);
   // Tournament-wide presence, computed once and shared by the rail's "All
   // competitions" item and the "all" headline (previously each re-walked the
   // index independently).
-  const allStats = useMemoRD(() => {
+  const allStats = useMemo(() => {
     let present = 0;
     peopleIndex.forEach((rec) => { if (rdPresence(rec.entries) === "all") present += 1; });
     return { present, total: peopleIndex.size };
@@ -843,7 +843,7 @@ function AdminRegistrationDeskPage({ tournament, onBack, password, showToast, on
   // ---- Build the filtered, sorted rows for the current view ----------------
   const queryNorm = rdNorm(query);
 
-  const rows = useMemoRD(() => {
+  const rows = useMemo(() => {
     const matchesFilters = (player) => {
       if (uncheckedOnly && player.checkedIn) return false;
       if (dojoFilter !== "all" && player.dojo !== dojoFilter) return false;
@@ -893,7 +893,7 @@ function AdminRegistrationDeskPage({ tournament, onBack, password, showToast, on
   }, [selected, comps, peopleIndex, queryNorm, uncheckedOnly, dojoFilter]);
 
   // Dojo list for the filter (scoped to the selected competition / all).
-  const dojoOptions = useMemoRD(() => {
+  const dojoOptions = useMemo(() => {
     const set = new Set();
     const scope = selected === "all" ? comps : comps.filter((c) => c.id === selected);
     scope.forEach((c) => (c.players || []).forEach((p) => p.dojo && set.add(p.dojo)));
@@ -901,7 +901,7 @@ function AdminRegistrationDeskPage({ tournament, onBack, password, showToast, on
   }, [comps, selected]);
 
   // Headline metric for the current view.
-  const headline = useMemoRD(() => {
+  const headline = useMemo(() => {
     if (selected === "all") {
       return { present: allStats.present, total: allStats.total, noun: "people" };
     }

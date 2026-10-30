@@ -15,22 +15,22 @@
 
 import { useUnsavedInput } from './app_version.jsx';
 
-const { useState: useStateR, useEffect: useEffectR, useRef: useRefR } = React;
+const { useState, useEffect, useRef } = React;
 
 function ResetPasswordForm({ authConfig, onBack, onSuccess, originatorId }) {
-  const [pw, setPw] = useStateR("");
-  const [confirm, setConfirm] = useStateR("");
+  const [pw, setPw] = useState("");
+  const [confirm, setConfirm] = useState("");
   // A password being typed holds a new build's automatic reload (app_version.jsx).
   useUnsavedInput(pw !== "" || confirm !== "");
-  const [err, setErr] = useStateR("");
-  const [saving, setSaving] = useStateR(false);
+  const [err, setErr] = useState("");
+  const [saving, setSaving] = useState(false);
   // submit's catch sets setSaving(false) post-await. On success the
   // parent navigates away so the component unmounts; gate the post-await
   // setters with mountedRef for symmetry with AuthModal and
   // CreateTournament (the mountedRef pattern is the convention in
   // app.jsx for any post-await setState).
-  const mountedRef = useRefR(true);
-  useEffectR(() => () => { mountedRef.current = false; }, []);
+  const mountedRef = useRef(true);
+  useEffect(() => () => { mountedRef.current = false; }, []);
 
   // authConfig is still loading (null at App mount, undefined if a
   // direct caller omitted the prop). Don't render the active reset

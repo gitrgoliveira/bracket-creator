@@ -18,7 +18,7 @@
 import { LS_NOTIFICATIONS_ENABLED } from './notification_keys.jsx';
 import { NOTIF_SYNC_EVENT, dispatchNotif, runOnce, notifEnable, notifDisable } from './viewer_alerts.jsx';
 
-const { useState, useRef: useRefV, useEffect } = React;
+const { useState, useRef, useEffect } = React;
 
 // Module-level Permissions API singleton: dispatches NOTIF_SYNC_EVENT when the
 // browser permission changes externally (user visits browser settings mid-session).
@@ -84,7 +84,7 @@ export function AnnBellBtn() {
   // is always set by the time this component renders.
   const BellIcon = window.BellIcon;
   const supported = notificationSupported();
-  const inFlight = useRefV(false);
+  const inFlight = useRef(false);
   const [state, setState] = useState(() => {
     if (!supported) return "unsupported";
     if (Notification.permission === "denied") return "denied";
@@ -110,8 +110,7 @@ export function AnnBellBtn() {
     return () => {
       window.removeEventListener(NOTIF_SYNC_EVENT, onSync);
     };
-    // oxlint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // supported is a static boolean; the effect only wires up listeners once
+  }, [supported]); // supported never changes, so the listeners are wired up once
 
   if (state === "unsupported") return null;
   if (!BellIcon) return null; // viewer_watchlist.js failed to load

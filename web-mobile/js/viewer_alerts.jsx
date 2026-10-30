@@ -17,7 +17,7 @@
 import { LS_NOTIFICATIONS_ENABLED } from './notification_keys.jsx';
 import { isBarredMatch } from './ineligible_match.jsx';
 
-const { useState, useRef: useRefV, useEffect } = React;
+const { useState, useRef, useEffect } = React;
 
 // ---------------------------------------------------------------------------
 // mp-4fd: On-deck match alert: predicate, hook, banner, chime
@@ -192,9 +192,9 @@ export function isFollowedMatchOnDeck(m) {
 // First render primes the ref without alerting (avoids false alert on mount
 // when loading a late-open tab).
 export function useFollowedMatchAlert(myNextMatch, { chimeMuted, onAlert } = {}) {
-  const lastSigRef = useRefV(null); // null = not yet primed
-  const audioCtxRef = useRefV(null);
-  const originalTitleRef = useRefV(null);
+  const lastSigRef = useRef(null); // null = not yet primed
+  const audioCtxRef = useRef(null);
+  const originalTitleRef = useRef(null);
 
   // Unlock AudioContext on first user interaction (gesture gate).
   // Also cleans up AudioContext and restores document.title on unmount.
@@ -356,7 +356,7 @@ export function computeSecondaryAlert(prev, onDeck, now, cooldownMs) {
 // then re-evaluates on every render (dedup is by signature, mirroring
 // useFollowedMatchAlert). Cooldown defaults to 30s.
 export function useSecondaryWatchAlert(secondaryOnDeck, { onSecondaryAlert, cooldownMs = 30000 } = {}) {
-  const stateRef = useRefV(null); // null = not yet primed
+  const stateRef = useRef(null); // null = not yet primed
   useEffect(() => {
     const now = (typeof Date !== "undefined" && typeof Date.now === "function") ? Date.now() : 0;
     if (stateRef.current === null) {

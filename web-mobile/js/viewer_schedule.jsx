@@ -14,7 +14,7 @@ import { matchShowsScore } from './match_shows_score.jsx';
 import { withCourtQueuePositions } from './court_queue.jsx';
 import { paceDisplayOf, PaceTime } from './court_pace.jsx';
 
-const { useState, useMemo, useRef: useRefV } = React;
+const { useState, useMemo, useRef } = React;
 const EmptyState = window.EmptyState;
 
 // mp-xhaa: the pinned-primary entry key (string), persisted separately from the
@@ -150,7 +150,7 @@ const formatDate = window.formatDate;
 export function PlayerMultiFilter({ tournament, picked, setPicked, dojoText, setDojoText }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
-  const ref = useRefV(null);
+  const ref = useRef(null);
 
   // ONE roster builder for the whole viewer (bc-nsrc). A second, near-identical
   // dedup used to live here: the same first-competition-wins shape, but
@@ -429,7 +429,7 @@ export function ScheduleViewer({ tournament, tweaks, paceLookup }) {
   // If schedRoster was empty at mount (async load), seed picked once it arrives.
   // pickedSeededRef starts true when data was ready at mount (no async case to handle).
   // Once seeded, user edits are never overwritten.
-  const pickedSeededRef = useRefV(initialPicked.length > 0);
+  const pickedSeededRef = useRef(initialPicked.length > 0);
   React.useEffect(() => {
     if (pickedSeededRef.current) return;
     if (initialPicked.length > 0) {

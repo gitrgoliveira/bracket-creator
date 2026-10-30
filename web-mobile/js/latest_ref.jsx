@@ -17,10 +17,7 @@
 //
 // A leaf with no imports: every consumer ES-imports it directly. React is read
 // at CALL time rather than destructured at module load, so a test that installs
-// its React stub after the import still gets it. React.useRef is called by that
-// name: oxlint knows a ref by a call to `useRef` or by a name ending in `Ref`,
-// and takes anything else a hook returns (an aliased `useRefA` into `r`) for a
-// value no effect may write.
+// its React stub after the import still gets it.
 export function useLatestRef(value) {
   const r = React.useRef(value);
   React.useLayoutEffect(() => { r.current = value; });

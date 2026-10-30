@@ -25,7 +25,7 @@ export {
   isSwissCompetitionComplete,
 } from './admin_competition_swiss.jsx';
 
-const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
+const { useState, useEffect, useRef } = React;
 
 const isValidDate = window.isValidDate;
 const bracketFullyComplete = window.bracketFullyComplete;
@@ -48,25 +48,25 @@ const AdminSwissRounds = window.AdminSwissRounds;
 function AdminCompetition({ tournament, competition, pools, poolMatches, standings, bracket, section, onSection, onBack, onOpenCompetition, onCreateCompetition, onUpdate, onRefreshCompetition, onMoveCourt, onEditScore, onLogout, onViewerMode, tweaks, password, showToast }) {
   const c = competition;
   const t = tournament;
-  const [starting, setStarting] = useStateA(false);
-  const [generating, setGenerating] = useStateA(false);
-  const [discarding, setDiscarding] = useStateA(false);
-  const [completing, setCompleting] = useStateA(false);
+  const [starting, setStarting] = useState(false);
+  const [generating, setGenerating] = useState(false);
+  const [discarding, setDiscarding] = useState(false);
+  const [completing, setCompleting] = useState(false);
   // localStatus lets AdminSettings report an invalidation immediately so the
   // page-header StatusBadge flips without waiting for the SSE refresh.
   // Cleared automatically when the prop status changes (SSE arrives).
-  const [localStatus, setLocalStatus] = useStateA(null);
-  useEffectA(() => { setLocalStatus(null); }, [c.id, c.status]);
+  const [localStatus, setLocalStatus] = useState(null);
+  useEffect(() => { setLocalStatus(null); }, [c.id, c.status]);
   // start() awaits a multi-second backend call (pool generation + bracket
   // build). If the user clicks Back during that window AdminCompetition
   // unmounts and setStarting(false) in finally targets a dead component.
-  const mountedRef = useRefA(true);
-  useEffectA(() => () => { mountedRef.current = false; }, []);
+  const mountedRef = useRef(true);
+  useEffect(() => () => { mountedRef.current = false; }, []);
   // The Bracket section's inline score editor publishes its unsaved entries
   // here (AdminBracket's hostUnsavedRef): every way off the section or the
   // page asks first over them (R1, stage 5 review 9, M1), and with nothing
   // unsaved goes in the same tick.
-  const editorUnsavedRef = useRefA(null);
+  const editorUnsavedRef = useRef(null);
   const alive = () => mountedRef.current;
   const leaving = (go) => (...args) => { if (go) leaveThen(editorUnsavedRef, () => go(...args), alive); };
   // The section already shown leaves nothing: no question (review 10, minor 2).
@@ -93,8 +93,8 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
   // stale render impossible without also blanking the banner every time the
   // SAME competition's status changes, which a bare reset at the top of the
   // effect would do.
-  const [drawWarnings, setDrawWarnings] = useStateA({ id: null, list: [] });
-  useEffectA(() => {
+  const [drawWarnings, setDrawWarnings] = useState({ id: null, list: [] });
+  useEffect(() => {
     if (!c.status || c.status === "setup") { setDrawWarnings({ id: c.id, list: [] }); return undefined; }
     let live = true;
     window.API.fetchDrawWarnings(c.id, password).then((w) => { if (live) setDrawWarnings({ id: c.id, list: w || [] }); });

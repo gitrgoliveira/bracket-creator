@@ -15,9 +15,10 @@ import { useOpenedTapGuard } from './tap_guard.jsx';
 import { SELF_RUN_NO_CHECK_IN } from './competition_shape.jsx';
 import { pushToast } from './toast_queue.jsx';
 import { queueMoveCourts, sharesCourtDay, sharesDay } from './court_queue.jsx';
-import { courtPaceLookup, paceClockNow, PACE_TICK_MS } from './court_pace.jsx';
+import { useCourtPaceLookup, PACE_TICK_MS } from './court_pace.jsx';
+import { useLatestRef } from './latest_ref.jsx';
 
-const { useState: useS, useEffect: useE, useRef: useR, useCallback: useC, useMemo: useM } = React;
+const { useState, useEffect, useRef, useCallback } = React;
 
 // preact-router wrapper from router.jsx (T005). Used for URL → state
 // synchronisation. The render path itself still drives off
@@ -481,13 +482,13 @@ export function queueAlertToastOptions(alert) {
 }
 
 function App() {
-  const [tournament, setTournament] = useS(undefined);
+  const [tournament, setTournament] = useState(undefined);
   // The selected competition's latest data, for the SSE handler's
   // cross-competition refetch (sharesCourtDay), which must not read a stale
   // closure.
-  const selectedCompDataRef = useR(null);
-  const [loading, setLoading] = useS(true);
-  const [announcements, setAnnouncements] = useS([]);
+  const selectedCompDataRef = useRef(null);
+  const [loading, setLoading] = useState(true);
+  const [announcements, setAnnouncements] = useState([]);
   // Hydrate the route state from the URL synchronously, BEFORE the first
   // render. The post-mount useEffect that previously did this ran AFTER
   // the URL-sync effect, so a direct load of /reset (or any non-`/`
@@ -514,11 +515,11 @@ function App() {
   // of viewer) so App() can short-circuit the viewer/admin auth/render
   // logic entirely; the display surfaces require no auth and don't
   // touch viewerCompId / viewerScreen.
-  const [mode, setMode] = useS(initialRoute.mode || "viewer");
+  const [mode, setMode] = useState(initialRoute.mode || "viewer");
   // Wrap localStorage reads in try/catch so private-browsing / enterprise
   // policy environments that throw on getItem don't crash the app on mount.
   // The write path (persistence effect below) already has its own try/catch.
-  const [authed, setAuthed] = useS(() => {
+  const [authed, setAuthed] = useState(() => {
     try { return localStorage.getItem("bc_authed") === "true"; } catch { return false; }
   });
   // authedRef mirrors `authed` so the SSE handler: created once per
@@ -528,17 +529,18 @@ function App() {
   // admin mode would keep the pre-login `authed=false` closure and
   // ignore later password_reset events. authedRef is updated in the
   // localStorage-persist effect below.
-  const authedRef = useR(authed);
-  const [password, setPassword] = useS(() => {
+  const authedRef = useRef(authed);
+  const [password, setPassword] = useState(() => {
     try { return localStorage.getItem("bc_password") || ""; } catch { return ""; }
   });
-  const [authPrompt, setAuthPrompt] = useS(false);
-  const [reauthPrompt, setReauthPrompt] = useS(false);
-  const [viewerCompId, setViewerCompId] = useS(initialRoute.viewerCompId || null);
+  // A deep link to /admin without a sign-in opens the AuthModal at once.
+  const [authPrompt, setAuthPrompt] = useState(() => initialRoute.mode === "admin" && !authed);
+  const [reauthPrompt, setReauthPrompt] = useState(false);
+  const [viewerCompId, setViewerCompId] = useState(initialRoute.viewerCompId || null);
   // mp-tidg: tab is lifted here (not inside ViewerCompetition) so that
   // browser back/forward across tabs works: each tab push/pop is a
   // history entry owned by App, making this the single source of truth.
-  const [viewerTab, setViewerTab] = useS(initialRoute.viewerTab || null);
+  const [viewerTab, setViewerTab] = useState(initialRoute.viewerTab || null);
   // When the next state→URL sync should replaceState instead of pushState.
   // A correction (an invalid/non-canonical tab rewritten to its canonical
   // path) must REPLACE the bad entry, otherwise Back returns to the invalid
@@ -549,7 +551,7 @@ function App() {
   // ViewerCompetition (via handleTabChange's replace arg). Genuine tab
   // navigations leave it false and push normally. Consumed (reset to false)
   // by the sync effect only when it actually rewrites the URL.
-  const replaceNextUrlSyncRef = useR(
+  const replaceNextUrlSyncRef = useRef(
     typeof window !== "undefined" &&
       initialRoute.mode !== "display" &&
       window.location.pathname !==
@@ -565,34 +567,34 @@ function App() {
   // change is a correction (clamped invalid/unavailable tab) so the URL sync
   // replaces rather than pushes; tab clicks pass false. Set explicitly on
   // every call so the flag never leaks across navigations.
-  const handleTabChange = useC((tab, replace = false) => {
+  const handleTabChange = useCallback((tab, replace = false) => {
     replaceNextUrlSyncRef.current = replace;
     setViewerTab(tab);
   }, []);
-  const [viewerScreen, setViewerScreen] = useS(initialRoute.viewerScreen || "home"); // home | schedule | glossary | reset | results
-  const [adminView, setAdminView] = useS(initialRoute.admin || { kind: "dashboard" });
+  const [viewerScreen, setViewerScreen] = useState(initialRoute.viewerScreen || "home"); // home | schedule | glossary | reset | results
+  const [adminView, setAdminView] = useState(initialRoute.admin || { kind: "dashboard" });
   // Mirror adminView into a ref so the long-lived SSE handler (deps
   // [viewerCompId, mode]) can read the CURRENT admin view without being
   // recreated on every navigation. Used to skip the per-event aggregate
   // refetch while the shiaijo operator console is active (mp-9h1f).
-  const adminViewRef = useR(adminView);
-  useE(() => { adminViewRef.current = adminView; }, [adminView]);
+  const adminViewRef = useRef(adminView);
+  useEffect(() => { adminViewRef.current = adminView; }, [adminView]);
   // T063: SSE connection status, surfaced to display surfaces so the
   // TV / lobby / overlay can render a reconnect indicator during the
   // window between EventSource error and reconnect-onopen. The
   // EventSource itself lives inside subscribeToEvents; the second
   // callback hands status events up here.
-  const [sseConnected, setSseConnected] = useS(true);
+  const [sseConnected, setSseConnected] = useState(true);
   // mp-9ukk Phase 2: 3-state link indicator for the TV board.
   // 'connected' = SSE up; 'local' = operator broadcast fresh; 'stale' = no feed.
   // Derived from sseConnected + the bridge's last-broadcast recency in a tick.
   // The boolean sseConnected is kept for LobbyDisplay (unchanged scope).
-  const [linkState, setLinkState] = useS('connected');
+  const [linkState, setLinkState] = useState('connected');
   // Shared by the display-consumer effect (on mount/court-change and its 5 s
   // ticker) and the sseConnected-sync effect below, all of which re-derive
   // linkState from the same shape. Stable identity (no deps): freshnessMs is
   // a module import, getLastBroadcastAt/setLinkState never change.
-  const refreshLinkState = useC((connected) => {
+  const refreshLinkState = useCallback((connected) => {
     setLinkState(deriveLinkState({
       sseConnected: connected,
       lastBroadcastAt: getLastBroadcastAt(),
@@ -603,19 +605,19 @@ function App() {
   // mp-9ukk Phase 2: the display court parsed from ?court=. Tracked as state
   // (updated on popstate) so the display consumer effect re-runs and re-scopes
   // the bridge when the court changes without a full reload.
-  const [displayCourt, setDisplayCourtState] = useS(() => parseCourtFromSearch());
+  const [displayCourt, setDisplayCourtState] = useState(() => parseCourtFromSearch());
   // Ref kept in sync with sseConnected so the 5 s display-mode ticker can
   // read the current value without closing over a stale copy from the effect
   // that has [mode] as its only dep. See the sync effect below.
-  const sseConnectedRef = useR(sseConnected);
+  const sseConnectedRef = useRef(sseConnected);
   // mp-9ukk Phase 2: holds the latest competitions so the snapshot provider
   // can be registered ONCE (keyed on [mode]) and read current data through the
   // ref, instead of re-registering on every tournament update (which would
   // churn the provider and open a transient unregistered window).
-  const compsRef = useR(null);
+  const compsRef = useRef(null);
   // Each other competition's match as last pushed (status, court, time), so a
   // score tap there does not refetch this competition's queue (queueMoveCourts).
-  const foreignQueueSeenRef = useR(new Map());
+  const foreignQueueSeenRef = useRef(new Map());
   // Per-tab client ID, generated once on mount. Used as the originator
   // identifier on password-reset POSTs so the SSE broadcast can be
   // ignored in the originating tab. Without this, the tab that just
@@ -626,11 +628,11 @@ function App() {
   // each tab gets a fresh ID so two operators resetting from
   // different tabs both see the other's reset and log out as they
   // should.
-  const [clientId] = useS(() => ((typeof crypto !== 'undefined' && crypto.randomUUID)
+  const [clientId] = useState(() => ((typeof crypto !== 'undefined' && crypto.randomUUID)
     ? crypto.randomUUID()
     : `c${Date.now()}-${Math.random().toString(36).slice(2, 10)}`));
   // The long-lived SSE handler reads it through this ref.
-  const clientIdRef = useR(clientId);
+  const clientIdRef = useRef(clientId);
   // mp-cw1: Unix-ms timestamp of when this viewer session mounted. Used to
   // distinguish pre-existing announcements (sentAt ≤ mount time) from
   // announcements created after the viewer opened the tab (sentAt > mount
@@ -639,16 +641,16 @@ function App() {
   // the filter can use Date.parse() for correct cross-format comparison
   // (Go RFC3339Nano may omit fractional seconds; lexicographic string
   // comparison of "…Z" vs "….500Z" is incorrect: 'Z' > '.' in ASCII).
-  const [mountTime] = useS(Date.now);
-  const mountTimeRef = useR(mountTime);
+  const [mountTime] = useState(Date.now);
+  const mountTimeRef = useRef(mountTime);
   // Set of announcement IDs already seen by this session. Seeded by the
   // initial HTTP fetchAnnouncements response (pre-mount IDs only) so a
   // page-reload does NOT re-fire for already-active announcements, and an
   // announcement created in the mount→fetch race window still fires.
-  const seenAnnouncementIds = useR(null); // lazily initialised to a Set below
+  const seenAnnouncementIds = useRef(null); // lazily initialised to a Set below
   // Holds the latest SSE announcement snapshot received before the HTTP seed
   // has settled. Full snapshots are idempotent: only the latest matters.
-  const pendingSseAnnouncements = useR(null);
+  const pendingSseAnnouncements = useRef(null);
 
   // Auth-mode discovery (file vs. locked). Fetched once on App mount
   // from GET /api/auth-config. Starts as null ("loading") so that
@@ -657,7 +659,7 @@ function App() {
   // and omit X-Tournament-Password on the bootstrap POST. The
   // useEffect below always resolves the null state (success or
   // fail-open) within one HTTP round-trip.
-  const [authConfig, setAuthConfig] = useS(undefined);
+  const [authConfig, setAuthConfig] = useState(undefined);
   const authPromptRef = React.useRef(false);
 
   // The queue, the toast shown and its timers are toast_queue.jsx's, so they
@@ -676,7 +678,7 @@ function App() {
   // load-bearing here: the queue rehydrates from localStorage at module load,
   // long before App mounts, so the "results were discarded" alert is always
   // raised before this effect can run. Subscribing replays it.
-  useE(() => {
+  useEffect(() => {
     if (typeof window.subscribeQueueAlert !== "function") return;
     return window.subscribeQueueAlert((alert) => {
       const message = queueAlertMessage(alert);
@@ -685,25 +687,12 @@ function App() {
     // Mount-only: showToast pushes into the module-level toast queue.
   }, []);
 
-  // Route state was hydrated synchronously by the useState initializers
-  // above (see initialRoute). This effect now handles only the
-  // side-effects of the initial route: surfacing the AuthModal when
-  // the user deep-linked to /admin without being authenticated. State
-  // sync to/from the URL is owned by initialRoute + the URL-sync
-  // effect below.
-  useE(() => {
-    if (initialRoute.mode === "admin" && !authed) {
-      setAuthPrompt(true);
-    }
-    // Mount-only side effect; intentional empty deps.
-  }, []);
-
   // Sync state to URL whenever it changes. Uses the AppRouter.route()
   // helper (preact-router-backed) which mirrors history.pushState while
   // also notifying any mounted Routers: letting <Router>-driven
   // listeners react to programmatic navigation without a separate
   // popstate dispatch.
-  useE(() => {
+  useEffect(() => {
     // Display mode doesn't have an internal state machine: the URL is
     // already at /display?... and DisplayRoute reads the query params
     // on its own. Skip URL syncing here to avoid stripping the
@@ -731,7 +720,7 @@ function App() {
   // we keep this explicit. (The previous implementation used the same
   // pattern; we did not remove it because the App's state machine is
   // richer than what's encodable in path components.)
-  useE(() => {
+  useEffect(() => {
     const handlePop = () => {
       const route = parsePath(window.location.pathname);
       if (route.mode === "admin") {
@@ -753,7 +742,7 @@ function App() {
     return () => window.removeEventListener("popstate", handlePop);
   }, []);
 
-  useE(() => {
+  useEffect(() => {
     // Guard localStorage writes with try/catch. In private-browsing
     // and storage-denied contexts (Safari ITP, Firefox strict mode,
     // certain enterprise policies) localStorage.setItem throws a
@@ -780,7 +769,7 @@ function App() {
     authedRef.current = authed;
   }, [authed, password]);
 
-  useE(() => { document.documentElement.style.setProperty("--accent", THEME.accentColor); }, []);
+  useEffect(() => { document.documentElement.style.setProperty("--accent", THEME.accentColor); }, []);
 
   // bc-qttl: the write queue can park on a 401 while `authed` is still true (the
   // credential changed server-side without this tab seeing a password_reset
@@ -788,7 +777,7 @@ function App() {
   // exists, because AuthModal is gated on !authed. This handle is what the admin
   // chrome and the sync pill call to reach it, so re-authenticating never has to
   // go through sign-out, which would discard the very writes being rescued.
-  useE(() => {
+  useEffect(() => {
     window.requestReauth = () => setReauthPrompt(true);
     return () => { delete window.requestReauth; };
   }, []);
@@ -797,7 +786,7 @@ function App() {
   // under a score editor (keepNewerTournament, patch.jsx): the admin's
   // refreshes and this load both feed the Scores tab, and two of them can be
   // in flight at once.
-  const updateTournament = useC((next) => setTournament((prev) => keepNewerTournament(prev, next)), []);
+  const updateTournament = useCallback((next) => setTournament((prev) => keepNewerTournament(prev, next)), []);
 
   const load = async () => {
     try {
@@ -831,22 +820,15 @@ function App() {
     }
   };
 
-  useE(() => { load(); }, []);
+  // The effects below run load() as it is now, never re-running for it.
+  const loadRef = useLatestRef(load);
+  useEffect(() => { loadRef.current(); }, [loadRef]);
 
-  // Periodic pace tick updates current minutes of day for pace projections,
-  // on every tick. The tournament refetch that keeps shared-court pace drift
-  // current runs on the same period from the SSE effect below, through its
-  // gates and jitter.
-  const [nowTick, setNowTick] = useS(0);
-  useE(() => {
-    const timer = setInterval(() => setNowTick((t) => t + 1), PACE_TICK_MS);
-    return () => clearInterval(timer);
-  }, []);
-
-  const paceLookup = useM(() => {
-    if (mode !== "viewer") return null;
-    return courtPaceLookup(tournament?.competitions, paceClockNow());
-  }, [tournament, nowTick, mode]);
+  // Pace projections move on with the clock on the pace tick. The tournament
+  // refetch that keeps shared-court pace drift current runs on the same period
+  // from the SSE effect below, through its gates and jitter.
+  const viewerPaceLookup = useCourtPaceLookup(mode === "viewer" ? tournament?.competitions : null);
+  const paceLookup = mode === "viewer" ? viewerPaceLookup : null;
 
   // mp-9ukk Phase 2: display-mode BroadcastChannel consumer.
   //
@@ -872,7 +854,7 @@ function App() {
   // bootstraps from the operator tab's reply instead, using the court
   // slice of competitions. We set a synthetic tournament so the display
   // can render.
-  useE(() => {
+  useEffect(() => {
     if (mode !== 'display') return;
 
     // The display court is tracked as state (parseCourtFromSearch, updated on
@@ -948,7 +930,7 @@ function App() {
     // the user leaves display mode or switches ?court= in place. sseConnected
     // is NOT in deps deliberately: re-opening the bridge on every SSE flip
     // would drop all in-flight snapshot replies.
-  }, [mode, displayCourt]);
+  }, [mode, displayCourt, refreshLinkState]);
 
   // mp-9ukk Phase 2: ref sync + linkState re-derivation on every sseConnected
   // or mode change. sseConnectedRef is updated first (before the mode guard)
@@ -956,15 +938,15 @@ function App() {
   // linkState derivation then fires only in display mode: this catches the
   // moment SSE reconnects (sseConnected flips true) so the dot goes green
   // immediately without waiting for the 5 s ticker.
-  useE(() => {
+  useEffect(() => {
     sseConnectedRef.current = sseConnected;
     if (mode !== 'display') return;
     refreshLinkState(sseConnected);
-  }, [sseConnected, mode]);
+  }, [sseConnected, mode, refreshLinkState]);
 
   // Keep compsRef in sync with the latest competitions so the snapshot
   // provider (registered once below) always answers with current data.
-  useE(() => { compsRef.current = (tournament && tournament.competitions) || null; }, [tournament]);
+  useEffect(() => { compsRef.current = (tournament && tournament.competitions) || null; }, [tournament]);
 
   // mp-9ukk Phase 2: operator-tab snapshot provider.
   //
@@ -978,7 +960,7 @@ function App() {
   // payload is bounded (one court's slice rather than all courts). When there
   // is no data yet, or no court match, it returns null and the bridge stays
   // silent.
-  useE(() => {
+  useEffect(() => {
     if (mode === 'display') {
       // Display tabs do not answer snapshot requests.
       setSnapshotProvider(null);
@@ -1016,15 +998,15 @@ function App() {
   // depending on both `mode` and `adminView.kind` closes the mode-change gap. It
   // does not fire on mount (was===is on the first run): the unconditional
   // load() above covers initial load.
-  const wasAdminShiaijoRef = useR(mode === "admin" && adminView.kind === "shiaijo");
-  useE(() => {
+  const wasAdminShiaijoRef = useRef(mode === "admin" && adminView.kind === "shiaijo");
+  useEffect(() => {
     const isAdminShiaijo = mode === "admin" && adminView.kind === "shiaijo";
     const leftConsole = wasAdminShiaijoRef.current && !isAdminShiaijo;
     wasAdminShiaijoRef.current = isAdminShiaijo;
-    if (leftConsole) load();
-  }, [adminView.kind, mode]);
+    if (leftConsole) loadRef.current();
+  }, [adminView.kind, mode, loadRef]);
 
-  useE(() => {
+  useEffect(() => {
     window.API.fetchAnnouncements()
       .then(list => {
         const active = filterActiveAnnouncements(list || []);
@@ -1087,7 +1069,7 @@ function App() {
   // (5xx/timeout/parse-error) falls back to file mode so the
   // historical UX is preserved for local deployments where /api/auth-config
   // may be unreachable for a brief moment at startup.
-  useE(() => {
+  useEffect(() => {
     const fileDefault = { mode: 'file', resetEnabled: true };
     window.API.fetchAuthConfig().then((cfg) => {
       setAuthConfig((cfg && typeof cfg === 'object') ? cfg : fileDefault);
@@ -1100,8 +1082,8 @@ function App() {
 
   // The open competition's detail. Declared ahead of the SSE effect below,
   // whose handlers write it.
-  const [selectedCompData, setSelectedCompData] = useS(null);
-  useE(() => {
+  const [selectedCompData, setSelectedCompData] = useState(null);
+  useEffect(() => {
     // Track every pending jittered timer so the cleanup can cancel them when
     // viewerCompId / mode changes. Without this, a timer queued for
     // viewerCompId="A" fires after the user switches to comp "B",
@@ -1128,7 +1110,7 @@ function App() {
     // navigation. Every other mode/view loads exactly as before.
     const maybeLoad = () => {
         if (mode === "admin" && adminViewRef.current && adminViewRef.current.kind === "shiaijo") return;
-        load();
+        loadRef.current();
     };
 
     // The pace tick's refetch: on a competition page the tournament list is
@@ -1471,11 +1453,11 @@ function App() {
         document.removeEventListener('visibilitychange', onVisibilityChange);
         window.removeEventListener('online', onOnline);
     };
-  }, [viewerCompId, mode]);
+  }, [viewerCompId, mode, loadRef]);
 
-  useE(() => { selectedCompDataRef.current = selectedCompData; }, [selectedCompData]);
+  useEffect(() => { selectedCompDataRef.current = selectedCompData; }, [selectedCompData]);
 
-  useE(() => {
+  useEffect(() => {
     if (viewerCompId && viewerScreen !== "register") {
       let cancelled = false;
       setLoading(true);
@@ -1559,7 +1541,7 @@ function App() {
   // inline arrow function would reset the interval on every re-render).
   // Must be declared before any conditional returns to satisfy Rules of Hooks.
   // Viewer-side dismiss: hides announcement locally without calling server.
-  const handleDismissAnnouncement = useC((id) => {
+  const handleDismissAnnouncement = useCallback((id) => {
     try {
       sessionStorage.setItem(`bc_dismissed_announcement_${id}`, "true");
     } catch (_e) {
@@ -1810,17 +1792,17 @@ function App() {
 }
 
 function AuthModal({ onClose, onSuccess, onForgotPassword, resetEnabled, reauth }) {
-  const [pw, setPw] = useS("");
-  const [err, setErr] = useS("");
-  const [checking, setChecking] = useS(false);
+  const [pw, setPw] = useState("");
+  const [err, setErr] = useState("");
+  const [checking, setChecking] = useState(false);
   window.useEscapeToClose(onClose);
   // AuthModal can be dismissed by backdrop click / Escape during the
   // in-flight fetch (the input/submit are disabled while checking but
   // the dismissal paths aren't). Without this guard the post-await
   // setErr / setChecking would fire on a torn-down modal. Same shape
   // as the admin-side mountedRef pattern.
-  const mountedRef = useR(true);
-  useE(() => () => { mountedRef.current = false; }, []);
+  const mountedRef = useRef(true);
+  useEffect(() => () => { mountedRef.current = false; }, []);
   // bc-cfbd: the bounce of the tap that opened the modal must not reach its
   // backdrop or its buttons.
   const { openedRef, onClickCapture } = useOpenedTapGuard();
@@ -1941,35 +1923,35 @@ function CreateTournament({ onCreated, authConfig }) {
   // rendering): the submit button is disabled until null resolves so
   // the operator can't accidentally omit X-Tournament-Password.
   const locked = authConfig?.mode === "locked";
-  const [name, setName] = useS("");
+  const [name, setName] = useState("");
   // Initialize date in canonical DD-MM-YYYY format, not ISO YYYY-MM-DD.
   // toISOString() emits ISO; without this conversion the picker boundary
   // (dmyToIso below) reads it as malformed and renders empty, AND the
   // submit body would send ISO to POST /api/tournament: which now
   // rejects non-DMY dates with 400 "date must be DD-MM-YYYY".
-  const [date, setDate] = useS(() => {
+  const [date, setDate] = useState(() => {
     const today = new Date();
     return `${String(today.getDate()).padStart(2, '0')}-${String(today.getMonth() + 1).padStart(2, '0')}-${today.getFullYear()}`;
   });
-  const [venue, setVenue] = useS("");
-  const [courts, setCourts] = useS(2);
-  const [pass, setPass] = useS("");
+  const [venue, setVenue] = useState("");
+  const [courts, setCourts] = useState(2);
+  const [pass, setPass] = useState("");
   // Tournament mode (mp-7h7): "officiated" (default) or "self-run".
   // Chosen once at creation; read-only after that. Default officiated
   // means existing deployments are unaffected.
-  const [mode, setMode] = useS("officiated");
+  const [mode, setMode] = useState("officiated");
   // A tournament being created is unsaved input: it holds a new build's
   // automatic reload (app_version.jsx).
   useUnsavedInput(name.trim() !== "" || venue.trim() !== "" || pass !== "");
-  const [saving, setSaving] = useS(false);
-  const [error, setError] = useS("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
   // submit's catch sets setSaving(false) post-await; on success the
   // parent calls onCreated which unmounts CreateTournament. The catch
   // branch only fires on error, so the unmount race is narrow but real
   // (parent navigates away on a different signal during the in-flight
   // fetch). Gate via mountedRef for symmetry with the admin sweep.
-  const mountedRef = useR(true);
-  useE(() => () => { mountedRef.current = false; }, []);
+  const mountedRef = useRef(true);
+  useEffect(() => () => { mountedRef.current = false; }, []);
 
   const isSelfRun = mode === "self-run";
 

@@ -21,7 +21,7 @@ import {
   bracketResetToast,
 } from './data_integrity.jsx';
 
-const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
+const { useState, useEffect, useRef } = React;
 
 const compMatchStats = window.compMatchStats;
 
@@ -239,7 +239,7 @@ function AdminCompOverview({ c, tournament, pools, poolMatches, bracket, onSecti
   // in the banner because the banner owns the WORDING (shared with the other
   // data-integrity surfaces) and this page owns the network call and the
   // refresh, exactly like discardDraw in admin_competition.jsx.
-  const [quarantining, setQuarantining] = useStateA(false);
+  const [quarantining, setQuarantining] = useState(false);
   const quarantineBracket = async () => {
     // The words come from data_integrity.jsx, which owns every one the operator
     // reads about unreadable data. A league has no knockout stage, so it must
@@ -306,11 +306,18 @@ function AdminCompOverview({ c, tournament, pools, poolMatches, bracket, onSecti
   // Schedule estimate fetch: same AbortController pattern as AdminSettings.
   // Never blocks render: estimate starts as null and fills in asynchronously.
   // ---------------------------------------------------------------------------
-  const [estimate, setEstimate] = useStateA(null);
-  const [estimateLoading, setEstimateLoading] = useStateA(false);
-  const [estimateErr, setEstimateErr] = useStateA(null);
+  const [estimate, setEstimate] = useState(null);
+  const [estimateLoading, setEstimateLoading] = useState(false);
+  const [estimateErr, setEstimateErr] = useState(null);
 
-  useEffectA(() => {
+  // Re-fetch when config, participant count, or tournament-level timing changes.
+  // When check-in is enabled the backend counts only checked-in participants, so
+  // toggling check-in changes the effective count even if roster size stays fixed.
+  // Tournament ceremony/timing fields mirror AdminSettings' estimate effect deps.
+  const estimateCheckIn = checkInApplies(tournament, c.checkInEnabled);
+  const estimatePlayerCount = (c.players || []).length;
+  const estimateCheckedInCount = estimateCheckIn ? (c.players || []).filter(p => p && p.checkedIn).length : 0;
+  useEffect(() => {
     if (!c.id) return;
     const controller = new AbortController();
     setEstimateLoading(true);
@@ -327,15 +334,9 @@ function AdminCompOverview({ c, tournament, pools, poolMatches, bracket, onSecti
         }
       });
     return () => controller.abort();
-    // Re-fetch when config, participant count, or tournament-level timing changes.
-    // When check-in is enabled the backend counts only checked-in participants, so
-    // toggling check-in changes the effective count even if roster size stays fixed.
-    // Tournament ceremony/timing fields mirror AdminSettings' estimate effect deps.
   }, [c.id, c.format, c.kind, c.poolMatchDurationSeconds, c.knockoutMatchDurationSeconds, c.courts,
     c.teamSize, c.poolSize, c.poolSizeMode, c.poolWinners, c.roundRobin, c.poolFormat,
-    c.swissRounds, checkInApplies(tournament, c.checkInEnabled), password,
-    (c.players || []).length,
-    checkInApplies(tournament, c.checkInEnabled) ? (c.players || []).filter(p => p && p.checkedIn).length : 0,
+    c.swissRounds, estimateCheckIn, password, estimatePlayerCount, estimateCheckedInCount,
     tournament?.openingBlock, tournament?.lunchBlock, tournament?.closingBlock,
     tournament?.clockToElapsedMultiplier, tournament?.slowestCourtBufferPct]);
 
@@ -782,25 +783,25 @@ function FightingSpiritAwardsEditor({ c, password, showToast }) {
   // Each row carries a stable client-only `_key` so React keys survive
   // mid-list removals (index keys cause inputs to "jump" / reuse the wrong
   // DOM node when a middle row is deleted). `_key` is stripped before save.
-  const keyCounterRef = useRefA(0);
+  const keyCounterRef = useRef(0);
   const withKey = (a) => ({ ...a, _key: keyCounterRef.current++ });
-  const [awards, setAwards] = useStateA(() => (c.fightingSpiritAwards || []).map(withKey));
-  const [saving, setSaving] = useStateA(false);
+  const [awards, setAwards] = useState(() => (c.fightingSpiritAwards || []).map(withKey));
+  const [saving, setSaving] = useState(false);
   // `dirty` guards the prop-sync effect: the parent refetches the competition
   // on unrelated SSE events (match updates, status changes), which would
   // otherwise clobber the operator's typed-but-unsaved edits. We only re-sync
   // from props when there are no pending edits (except on a competition
   // SWITCH, where we always reset to the new comp's list.
-  const [dirty, setDirty] = useStateA(false);
+  const [dirty, setDirty] = useState(false);
   // Unsaved edits hold a new build's automatic reload (app_version.jsx).
   useUnsavedInput(dirty);
-  const lastCompIdRef = useRefA(c.id);
-  const mountedRef = useRefA(true);
-  useEffectA(() => () => { mountedRef.current = false; }, []);
+  const lastCompIdRef = useRef(c.id);
+  const mountedRef = useRef(true);
+  useEffect(() => () => { mountedRef.current = false; }, []);
 
   // Sync from parent. Reset unconditionally when switching competitions;
   // otherwise skip while the user has unsaved edits (see `dirty` above).
-  useEffectA(() => {
+  useEffect(() => {
     const switched = lastCompIdRef.current !== c.id;
     lastCompIdRef.current = c.id;
     if (switched || !dirty) {

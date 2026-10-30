@@ -13,7 +13,7 @@ import { useOpenedTapGuard } from './tap_guard.jsx';
 import { useDialogFocus } from './dialog_focus.jsx';
 import { useUnsavedInput } from './app_version.jsx';
 
-const { useState: useStateA, useMemo: useMemoA, useEffect: useEffectA, useRef: useRefA, useCallback: useCallbackA } = React;
+const { useState, useMemo, useEffect, useRef, useCallback } = React;
 
 // What an editor standing alone holds open: nothing.
 const holdsNothing = () => undefined;
@@ -32,15 +32,17 @@ const holdsNothing = () => undefined;
 export function MatchLineupSideEditor({ comp, team, match, allMatches, password, showToast, holdOpen = holdsNothing }) {
   const teamSize = comp?.teamSize || 5;
   const { positionsForSize: lineupPositionsForSize, rosterFor: lineupRosterFor, teamIdOf: lineupTeamIdOf } = window.AdminLineupHelpers || {};
-  const positions = (typeof lineupPositionsForSize === "function")
+  // Memoised, like the lists built from them below, so they keep their
+  // identity between renders.
+  const positions = useMemo(() => ((typeof lineupPositionsForSize === "function")
     ? lineupPositionsForSize(teamSize)
-    : [];
+    : []), [lineupPositionsForSize, teamSize]);
   // The team's members as the PRE-SQUAD model stored them, in the roster
   // row's untyped metadata array. Kept only as a fallback tail: see
   // `suggestions` below, which leads with the squad.
-  const legacyRoster = (typeof lineupRosterFor === "function")
+  const legacyRoster = useMemo(() => ((typeof lineupRosterFor === "function")
     ? lineupRosterFor(team)
-    : [];
+    : []), [lineupRosterFor, team]);
   const teamId = (typeof lineupTeamIdOf === "function")
     ? lineupTeamIdOf(team)
     : (team?.id || team?.name || "");
@@ -80,15 +82,15 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
   // the row swaps its picker for a plain input while it is set. Typing into the
   // picker itself stays a SUBSTITUTION over a named member (a different person),
   // so a correction needs this explicit door.
-  const [renamingKey, setRenamingKey] = useStateA(null);
-  const [renamingName, setRenamingName] = useStateA("");
+  const [renamingKey, setRenamingKey] = useState(null);
+  const [renamingName, setRenamingName] = useState("");
   // The name the rename box opened with: an open box holds nothing until
   // its name differs from it.
-  const [renamingFrom, setRenamingFrom] = useStateA("");
+  const [renamingFrom, setRenamingFrom] = useState("");
   // A member name being typed is not kept across a reload (the lineup draft
   // is), so it holds a new build's automatic reload (app_version.jsx).
   useUnsavedInput(renamingKey != null && renamingName.trim() !== renamingFrom.trim());
-  const [saving, setSaving] = useStateA(false);
+  const [saving, setSaving] = useState(false);
 
   // bc-pnum: the suggestion list reads the SQUAD, because that is where a
   // team's members now live. rosterFor reads the roster row's metadata array,
@@ -122,11 +124,11 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
   // state), which used to re-derive this list -- and the per-position roster
   // below -- on every one of those renders even though neither the squad nor
   // the lineup positions had changed.
-  const suggestions = useMemoA(
+  const suggestions = useMemo(
     () => squadRosterEntries({ teamNumber, squad, legacyNames: legacyRoster, lineup: { positions: values } }),
     [teamNumber, squad, legacyRoster, values]
   );
-  const squadEntries = useMemoA(() => suggestions.filter(e => typeof e !== "string"), [suggestions]);
+  const squadEntries = useMemo(() => suggestions.filter(e => typeof e !== "string"), [suggestions]);
   const pickedLabelFor = (posKey) => {
     const id = memberIds[posKey];
     return id ? (squadEntries.find(e => e.id === id)?.label || "") : "";
@@ -136,7 +138,7 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
   // `values` + `memberIds` state, keyed like a lineup's own maps. Precomputed
   // for every position at once, rather than once per call inside the JSX map
   // below, for the same reason `suggestions` above is memoised.
-  const rostersByPosition = useMemoA(() => {
+  const rostersByPosition = useMemo(() => {
     const byKey = {};
     positions.forEach(p => { byKey[p.key] = rosterWithoutPlacedElsewhere(suggestions, { positions: values, memberIds }, p.key); });
     return byKey;
@@ -402,7 +404,7 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
   const locked = busy || !form.read;
   // A write of this editor's own that is out keeps Escape from closing the panel.
   const writing = busy;
-  useEffectA(() => (writing ? holdOpen() : undefined), [writing]);
+  useEffect(() => (writing ? holdOpen() : undefined), [writing, holdOpen]);
 
   if (form.loading) return <div style={{ fontSize: 12, color: "var(--ink-3)" }}>Loading lineup…</div>;
 
@@ -536,9 +538,9 @@ export function MatchLineupPanel({ match, tournament, password, showToast, onClo
   // control that opened it. The inline variant sits in the page, and is none of it.
   const overlay = variant !== "inline";
   const { openedRef, onClickCapture } = useOpenedTapGuard({ backdropOnly: true });
-  const boxRef = useRefA(null);
-  const writesOutRef = useRefA(0);
-  const holdOpen = useCallbackA(() => {
+  const boxRef = useRef(null);
+  const writesOutRef = useRef(0);
+  const holdOpen = useCallback(() => {
     writesOutRef.current += 1;
     return () => { writesOutRef.current -= 1; };
   }, []);

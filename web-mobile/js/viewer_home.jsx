@@ -10,7 +10,7 @@ import { buildWatchlistUpcoming, usePrimaryWatch, WATCHED_UPCOMING_LIST_MAX } fr
 import { mirrorWatchlistParam } from './watchlist_link.jsx';
 import { isBarredMatch } from './ineligible_match.jsx';
 
-const { useState, useMemo, useRef: useRefV, useEffect } = React;
+const { useState, useMemo, useRef, useEffect } = React;
 const StatusBadge = window.StatusBadge;
 const formatDate = window.formatDate;
 const formatLabel = window.formatLabel;
@@ -180,7 +180,7 @@ export function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOp
     window.addEventListener("popstate", onNavigate);
     return () => window.removeEventListener("popstate", onNavigate);
   }, []);
-  const sharedSettledRef = useRefV(false);
+  const sharedSettledRef = useRef(false);
   React.useEffect(() => {
     if (typeof window === "undefined" || !window.location) return;
     if (roster.length === 0) return; // wait until participants are loaded
@@ -337,7 +337,7 @@ export function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOp
   // mp-xhaa: primary loud alert (chime + title flash + banner) + secondary
   // quiet, rate-limited banner.
   const [chimeMuted, toggleChimeMuted, setChimeMuted] = useChimeMuted();
-  const bellToggleInFlight = useRefV(false);
+  const bellToggleInFlight = useRef(false);
   // Bell button: toggle chime and keep browser-notification opt-in in sync.
   const handleBellToggle = () => runOnce(bellToggleInFlight, async () => {
     const willEnable = chimeMuted; // currently muted → about to enable

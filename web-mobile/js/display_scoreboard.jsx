@@ -13,7 +13,11 @@ import { subBoutHasResult } from './team_default_credit.jsx';
 import { matchShowsScore } from './match_shows_score.jsx';
 import { useCourtPaceLookup, paceDisplayOf, PaceTime } from './court_pace.jsx';
 
-const { useMemo: useMD } = React;
+const { useMemo } = React;
+
+// One empty bout list, so a match with none keeps the same value between
+// renders and the memos that read it are not worked out again for nothing.
+const NO_SUB_RESULTS = [];
 
 // The Shiro-vs-Aka name pair the NEXT line and the UP NEXT bout list share:
 // Shiro dark on the left, Aka in the board's red on the right, "vs" between.
@@ -657,9 +661,9 @@ function TvIndividualBoard({ tournament, court, linkState = 'connected', promote
 // operator broadcast is fresh), and red when stale. The rest of the layout
 // stays put so a state change doesn't reflow the board.
 function TvDisplay({ court, tournament, competitions, withZekkenName, linkState = 'connected' }) {
-    const running = useMD(() => findRunningOnCourt(competitions, court), [competitions, court]);
-    const upcoming = useMD(() => findUpcomingOnCourt(competitions, court, running ? 2 : 3), [competitions, court, running]);
-    const counts = useMD(() => countCourtMatches(competitions, court), [competitions, court]);
+    const running = useMemo(() => findRunningOnCourt(competitions, court), [competitions, court]);
+    const upcoming = useMemo(() => findUpcomingOnCourt(competitions, court, running ? 2 : 3), [competitions, court, running]);
+    const counts = useMemo(() => countCourtMatches(competitions, court), [competitions, court]);
     const pace = useCourtPaceLookup(competitions);
 
     if (!competitions || competitions.length === 0) {
@@ -737,10 +741,10 @@ function TvDisplay({ court, tournament, competitions, withZekkenName, linkState 
     //      TeamScoreboard checks itself (see the end of the memo below).
     // The DH sub-result (position === DAIHYOSEN_POSITION) may or may not exist
     // yet; when absent, TeamScoreboard renders a "Daihyosen pending" placeholder.
-    const subResults = (promoted && promoted.match && promoted.match.subResults) || [];
+    const subResults = (promoted && promoted.match && promoted.match.subResults) || NO_SUB_RESULTS;
     const isKnockoutPhase = !!(promoted && promoted.isBracket) ||
         !!(promoted && promoted.match && promoted.match.phase === "bracket");
-    const showDH = useMD(() => {
+    const showDH = useMemo(() => {
         if (!isTeamMatch || !isKnockoutPhase) return false;
         const regularSubs = subResults.filter(s => s.position > DAIHYOSEN_POSITION);
         if (regularSubs.length === 0) return false;
@@ -809,7 +813,7 @@ function TvDisplay({ court, tournament, competitions, withZekkenName, linkState 
     // scheduled matches so operators can redirect spectators.
     // ─────────────────────────────────────────────────────────────────────────
     const qrUrl = typeof window !== 'undefined' ? window.location.origin + '/viewer' : '';
-    const otherCourts = useMD(
+    const otherCourts = useMemo(
         () => (tournament?.courts || []).filter(c => {
             if (c === court) return false;
             const cts = countCourtMatches(competitions, c);

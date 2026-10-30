@@ -6,7 +6,7 @@
 import { realIppons } from './result_slot.jsx';
 import { writeKeepsEditorOpen } from './write_result.jsx';
 import { holdsUnsaved, confirmDiscardUnsaved, LEAVE_MATCH_ANYWAY } from './unsaved_entries.jsx';
-const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
+const { useState, useEffect, useRef } = React;
 
 const hasBothSides = window.hasBothSides;
 const hasPoolOriginPlaceholder = window.hasPoolOriginPlaceholder;
@@ -113,8 +113,8 @@ const RunningMatchPanel = React.memo(({ match, compId, courts, matchNum, onMoveC
   // editor to change a recorded result is gated behind a confirmation so it's
   // not changed by accident. An un-played match goes straight to the editor
   // (nothing to overwrite). Reset when switching matches.
-  const [editing, setEditing] = useStateA(false);
-  useEffectA(() => { setEditing(false); }, [match.id]);
+  const [editing, setEditing] = useState(false);
+  useEffect(() => { setEditing(false); }, [match.id]);
   const showEditor = !isComplete || editing;
 
   return (
@@ -202,23 +202,23 @@ const RunningMatchPanel = React.memo(({ match, compId, courts, matchNum, onMoveC
 });
 RunningMatchPanel.displayName = "RunningMatchPanel";
 function AdminBracket({ c, t, bracket, onMoveCourt, onEditScore, tweaks, password, hostUnsavedRef = null }) {
-  const [selected, setSelected] = useStateA(null);
+  const [selected, setSelected] = useState(null);
   // The panel's editor publishes its unsaved entries here: choosing another
   // match puts it in the editor's place (keyed by match id), so over unsaved
   // entries that asks first (R1, stage 5 review 8). The competition page
   // hands its own ref down (`hostUnsavedRef`), so its tabs and exits ask on
   // the same entries (stage 5 review 9, M1).
-  const ownUnsavedRef = useRefA(null);
+  const ownUnsavedRef = useRef(null);
   const editorUnsavedRef = hostUnsavedRef || ownUnsavedRef;
-  const scrollRef = useRefA(null);
-  const panelRef = useRefA(null);
-  const [autoScrollId, setAutoScrollId] = useStateA(null);
+  const scrollRef = useRef(null);
+  const panelRef = useRef(null);
+  const [autoScrollId, setAutoScrollId] = useState(null);
 
   // The scoring panel sits BELOW the bracket (operator decision), so picking a
   // match brings it into view. Keyed on the picked match's id, so a re-render
   // of the same pick (an SSE update) does not scroll the page back to it.
   const selectedId = selected?.matchId;
-  useEffectA(() => {
+  useEffect(() => {
     if (!selectedId || !panelRef.current) return;
     const reduce = typeof window.matchMedia === "function" &&
       window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -236,7 +236,7 @@ function AdminBracket({ c, t, bracket, onMoveCourt, onEditScore, tweaks, passwor
     if (bronze && bronze.status === "running") return bronze.id;
     return null;
   })();
-  useEffectA(() => {
+  useEffect(() => {
     if (runningMatchId) setAutoScrollId(runningMatchId + "::" + Date.now());
   }, [runningMatchId]);
 

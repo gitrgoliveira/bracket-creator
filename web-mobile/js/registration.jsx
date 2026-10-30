@@ -9,31 +9,31 @@
 
 import { useUnsavedInput } from './app_version.jsx';
 
-const { useState: useStateReg, useEffect: useEffectReg, useRef: useRefReg } = React;
+const { useState, useEffect, useRef } = React;
 
 function RegistrationForm({ compId, onBack }) {
-  const [meta, setMeta] = useStateReg(null);       // { id, name, withZekkenName, status }
-  const [loading, setLoading] = useStateReg(true);
-  const [metaErr, setMetaErr] = useStateReg(null);
+  const [meta, setMeta] = useState(null);       // { id, name, withZekkenName, status }
+  const [loading, setLoading] = useState(true);
+  const [metaErr, setMetaErr] = useState(null);
 
-  const [name, setName] = useStateReg("");
-  const [dojo, setDojo] = useStateReg("");
-  const [danGrade, setDanGrade] = useStateReg("");
-  const [displayName, setDisplayName] = useStateReg("");
+  const [name, setName] = useState("");
+  const [dojo, setDojo] = useState("");
+  const [danGrade, setDanGrade] = useState("");
+  const [displayName, setDisplayName] = useState("");
   // A registration being typed holds a new build's automatic reload (app_version.jsx).
   useUnsavedInput([name, dojo, danGrade, displayName].some((s) => s.trim() !== ""));
 
-  const [saving, setSaving] = useStateReg(false);
-  const [success, setSuccess] = useStateReg(false);
-  const [err, setErr] = useStateReg("");
+  const [saving, setSaving] = useState(false);
+  const [success, setSuccess] = useState(false);
+  const [err, setErr] = useState("");
 
   // Guard post-await setState against unmounted component.
-  const mountedRef = useRefReg(true);
-  useEffectReg(() => () => { mountedRef.current = false; }, []);
+  const mountedRef = useRef(true);
+  useEffect(() => () => { mountedRef.current = false; }, []);
 
   // Fetch competition metadata on mount to know the comp name,
   // withZekkenName flag, and whether registration is still open.
-  useEffectReg(() => {
+  useEffect(() => {
     setMeta(null);
     setMetaErr(null);
     setLoading(true);

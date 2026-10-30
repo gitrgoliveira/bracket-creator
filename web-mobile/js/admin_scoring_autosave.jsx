@@ -7,9 +7,7 @@ import { changedGroups, statedGroupsOf, groupMatches, keptInHistoryNote, GROUP_R
 import { writeDidNotLand, writePending, writeWasRefused } from './write_result.jsx';
 import { useLatestRef } from './latest_ref.jsx';
 
-// Refs are made with React.useRef by that name: exhaustive-deps takes a ref for a
-// stable value only from a call named `useRef`, never from the useRefA alias.
-const { useState: useStateA, useEffect: useEffectA, useLayoutEffect: useLayoutEffectA } = React;
+const { useState, useEffect, useLayoutEffect } = React;
 
 // ---------------------------------------------------------------------------
 // useChangedGroups (bc-mrgc): every score write an editor builds names the
@@ -45,7 +43,7 @@ export function useChangedGroups(match) {
   // before the browser takes the next event (where they build and claim a write),
   // so both read the match the editor shows. No editor calls claim during render; one that did would find
   // the state made for the match it last committed (ensureState).
-  useLayoutEffectA(() => {
+  useLayoutEffect(() => {
     const st = ensureState(stateRef, match);
     const finished = !!(match && match.status === "completed");
     // A reopen is a write the server makes, not one the editor builds, so no build
@@ -162,9 +160,9 @@ function ensureState(stateRef, m) {
 // autosave can hold it.
 // ---------------------------------------------------------------------------
 export function useKeptInHistoryNote() {
-  const [note, setNote] = useStateA(null);
+  const [note, setNote] = useState(null);
   const mountedRef = React.useRef(true);
-  useEffectA(() => () => { mountedRef.current = false; }, []);
+  useEffect(() => () => { mountedRef.current = false; }, []);
   // The note last set, so a write that changes nothing about it (the common
   // case: every landed autosave) renders nothing.
   const shownRef = React.useRef(null);

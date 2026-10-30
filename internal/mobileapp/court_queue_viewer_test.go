@@ -253,3 +253,154 @@ func TestViewerDetail_PreviewBracketTakesNoCourtQueuePosition(t *testing.T) {
 	require.Len(t, detail.Bracket.Rounds, 1)
 	assert.Zero(t, detail.Bracket.Rounds[0][0].QueuePosition)
 }
+
+// viewerQueueComp is the slice of a viewer competition payload the queue
+// tests read: its id and its pool matches with their queuePosition.
+type viewerQueueComp struct {
+	Config      state.Competition   `json:"config"`
+	PoolMatches []state.MatchResult `json:"poolMatches"`
+}
+
+func getViewerDetail(t *testing.T, r http.Handler, id string) viewerQueueComp {
+	t.Helper()
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/viewer/competitions/"+id, nil)
+	r.ServeHTTP(w, req)
+	require.Equalf(t, http.StatusOK, w.Code, "viewer detail %s: %s", id, w.Body.String())
+	var detail viewerQueueComp
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &detail))
+	return detail
+}
+
+func getViewerAggregate(t *testing.T, r http.Handler) map[string]viewerQueueComp {
+	t.Helper()
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/viewer/competitions", nil)
+	r.ServeHTTP(w, req)
+	require.Equalf(t, http.StatusOK, w.Code, "viewer competitions: %s", w.Body.String())
+	var comps []viewerQueueComp
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &comps))
+	byID := make(map[string]viewerQueueComp, len(comps))
+	for _, c := range comps {
+		byID[c.Config.ID] = c
+	}
+	return byID
+}
+
+func saveQueueComp(t *testing.T, store *state.Store, id string, status state.CompetitionStatus, matches []state.MatchResult) {
+	t.Helper()
+	comp := state.Competition{
+		ID:        id,
+		Name:      "Competition " + id,
+		Format:    state.CompFormatMixed,
+		Status:    status,
+		StartTime: "09:00",
+		Date:      "2026-11-01",
+		Courts:    []string{"A"},
+	}
+	require.NoError(t, store.SaveCompetition(&comp))
+	require.NoError(t, store.SaveParticipants(id, nil))
+	require.NoError(t, store.SavePoolMatches(id, matches))
+}
+
+// TestViewerDetail_SetupCompetitionTakesNoCourtQueuePosition: a competition
+// still in setup that holds matches a failed draw attempt left behind gets no
+// queuePosition on either viewer endpoint, and those matches take no place
+// from another competition's on the same court.
+func TestViewerDetail_SetupCompetitionTakesNoCourtQueuePosition(t *testing.T) {
+	r, store, _, _, _ := setupTestRouter(t)
+	require.NoError(t, store.SaveTournament(&state.Tournament{Name: "T", Password: "p"}))
+
+	saveQueueComp(t, store, "su", state.CompStatusSetup, []state.MatchResult{
+		{ID: "Pool A-0", Court: "A", SideA: "Aiko", SideB: "Bea", Status: state.MatchStatusScheduled, ScheduledAt: "09:00"},
+		{ID: "Pool A-1", Court: "A", SideA: "Aiko", SideB: "Cleo", Status: state.MatchStatusScheduled, ScheduledAt: "09:05"},
+	})
+	saveQueueComp(t, store, "po", state.CompStatusPools, []state.MatchResult{
+		{ID: "Pool A-0", Court: "A", SideA: "Dai", SideB: "Eri", Status: state.MatchStatusScheduled, ScheduledAt: "09:10"},
+	})
+
+	detail := getViewerDetail(t, r, "su")
+	require.Len(t, detail.PoolMatches, 2)
+	for _, m := range detail.PoolMatches {
+		assert.Zerof(t, m.QueuePosition, "detail: setup match %s", m.ID)
+	}
+	assert.Equal(t, 1, getViewerDetail(t, r, "po").PoolMatches[0].QueuePosition,
+		"the setup competition's leftover matches take no place ahead of it")
+
+	aggregate := getViewerAggregate(t, r)
+	if su, ok := aggregate["su"]; ok {
+		for _, m := range su.PoolMatches {
+			assert.Zerof(t, m.QueuePosition, "aggregate: setup match %s", m.ID)
+		}
+	}
+	require.Contains(t, aggregate, "po")
+	assert.Equal(t, 1, aggregate["po"].PoolMatches[0].QueuePosition)
+}
+
+// TestViewerDetail_CourtQueueMatchesAggregate: the detail view, which loads
+// the other competitions on its own, serves every match the same
+// queuePosition the aggregate endpoint numbers it with.
+func TestViewerDetail_CourtQueueMatchesAggregate(t *testing.T) {
+	r, store, _, _, _ := setupTestRouter(t)
+	require.NoError(t, store.SaveTournament(&state.Tournament{Name: "T", Password: "p"}))
+
+	saveQueueComp(t, store, "a", state.CompStatusPools, []state.MatchResult{
+		{ID: "Pool A-0", Court: "A", SideA: "Aiko", SideB: "Bea", Status: state.MatchStatusScheduled, ScheduledAt: "09:10"},
+		{ID: "Pool A-1", Court: "A", SideA: "Aiko", SideB: "Cleo", Status: state.MatchStatusScheduled, ScheduledAt: "09:40"},
+		{ID: "Pool A-2", Court: "A", SideA: "Bea", SideB: "Cleo", Status: state.MatchStatusCompleted, ScheduledAt: "09:00"},
+	})
+	saveQueueComp(t, store, "b", state.CompStatusPools, []state.MatchResult{
+		{ID: "Pool A-0", Court: "A", SideA: "Dai", SideB: "Eri", Status: state.MatchStatusRunning, ScheduledAt: "09:05"},
+		{ID: "Pool A-1", Court: "A", SideA: "Dai", SideB: "Fumi", Status: state.MatchStatusScheduled, ScheduledAt: "09:20"},
+	})
+	saveQueueComp(t, store, "c", state.CompStatusPools, []state.MatchResult{
+		{ID: "Pool A-0", Court: "A", SideA: "Gen", SideB: "Hana", Status: state.MatchStatusScheduled, ScheduledAt: "09:15"},
+		{ID: "Pool A-1", Court: "A", SideA: "Gen", SideB: "Ichi", Status: state.MatchStatusScheduled, ScheduledAt: "09:30"},
+	})
+
+	aggregate := getViewerAggregate(t, r)
+	positions := 0
+	for _, id := range []string{"a", "b", "c"} {
+		want, ok := aggregate[id]
+		require.Truef(t, ok, "aggregate holds %s", id)
+		got := getViewerDetail(t, r, id)
+		require.Len(t, got.PoolMatches, len(want.PoolMatches))
+		for i, m := range got.PoolMatches {
+			assert.Equalf(t, want.PoolMatches[i].ID, m.ID, "%s match order", id)
+			assert.Equalf(t, want.PoolMatches[i].QueuePosition, m.QueuePosition, "%s %s", id, m.ID)
+			if m.QueuePosition > 0 {
+				positions++
+			}
+		}
+	}
+	assert.Equal(t, 5, positions, "every scheduled match on court A is queued, so the comparison is not vacuous")
+}
+
+// TestViewerDetail_PanicInCourtQueueLoadReturnsHTTP500: a panic while the
+// detail view loads another competition for the court queue is answered as
+// an internal error, never crashing the process and never swallowed.
+func TestViewerDetail_PanicInCourtQueueLoadReturnsHTTP500(t *testing.T) {
+	r, store, _, _, _ := setupTestRouter(t)
+	require.NoError(t, store.SaveTournament(&state.Tournament{Name: "T", Password: "p"}))
+
+	// The served competition holds a queued match, so the other
+	// competitions are loaded at all.
+	saveQueueComp(t, store, "served", state.CompStatusPools, []state.MatchResult{
+		{ID: "Pool A-0", Court: "A", SideA: "Aiko", SideB: "Bea", Status: state.MatchStatusScheduled, ScheduledAt: "09:10"},
+	})
+	saveQueueComp(t, store, "other", state.CompStatusPools, []state.MatchResult{
+		{ID: "Pool A-0", Court: "A", SideA: "Dai", SideB: "Eri", Status: state.MatchStatusScheduled, ScheduledAt: "09:20"},
+	})
+
+	swapViewerLoadCompetition(t, func(s *state.Store, compID string) (*state.Competition, error) {
+		if compID == "other" {
+			panic("simulated panic loading another competition")
+		}
+		return s.LoadCompetition(compID)
+	})
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/viewer/competitions/served", nil)
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusInternalServerError, w.Code, w.Body.String())
+}

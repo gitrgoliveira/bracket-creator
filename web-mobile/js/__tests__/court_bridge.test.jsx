@@ -76,8 +76,8 @@ describe('applyPatchToTree', () => {
                     id: 'comp-A',
                     config: { id: 'comp-A' },
                     poolMatches: [
-                        { id: 'p1', status: 'scheduled', court: 'A' },
-                        { id: 'p2', status: 'scheduled', court: 'A' },
+                        { id: 'p1', status: 'scheduled', court: 'A', queuePosition: 1 },
+                        { id: 'p2', status: 'scheduled', court: 'A', queuePosition: 2 },
                     ],
                     bracket: { rounds: [] },
                 },
@@ -85,7 +85,10 @@ describe('applyPatchToTree', () => {
                     id: 'comp-B',
                     config: { id: 'comp-B' },
                     poolMatches: [
-                        { id: 'b1', status: 'scheduled', court: 'B' },
+                        // The server's court-wide numbers: a patch that moves a
+                        // match out of court A's queue re-stamps them, and court
+                        // B's stand as they are.
+                        { id: 'b1', status: 'scheduled', court: 'B', queuePosition: 1 },
                     ],
                     bracket: { rounds: [] },
                 },

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  applyPatch, dropLeftQueuePositions, dropLeftBracketQueuePositions,
+  applyPatch,
   keepNewerMatches, keepNewerDetail, keepNewerCompetitions, keepNewerTournament,
 } from '../patch.jsx';
 
@@ -145,10 +145,9 @@ describe('applyPatch', () => {
     expect(applyPatch(null, { data: { result: { id: "x" } } })).toBe(null);
   });
 
-  // A patch keeps server queuePosition values; completing a match zeroes its
-  // position (it left the queue) while same-court scheduled siblings keep
-  // their server values.
-  it('zeroes queuePosition on completion while same-court scheduled siblings keep their server queuePosition', () => {
+  // Completing a match zeroes its position (it left the queue) and moves the
+  // same-court siblings behind it down one; another court's numbers stand.
+  it('zeroes queuePosition on completion and moves the same-court siblings behind it down one', () => {
     const prev = {
       poolMatches: [
         { id: "p1", court: "A", scheduledAt: "09:00", status: "scheduled", queuePosition: 1 },
@@ -162,13 +161,13 @@ describe('applyPatch', () => {
     });
     expect(next.poolMatches[0].status).toBe("completed");
     expect(next.poolMatches[0].queuePosition).toBe(0);
-    expect(next.poolMatches[1].queuePosition).toBe(2);
-    expect(next.poolMatches[2].queuePosition).toBe(3);
+    expect(next.poolMatches[1].queuePosition).toBe(1);
+    expect(next.poolMatches[2].queuePosition).toBe(2);
     // Court B is untouched
     expect(next.poolMatches[3].queuePosition).toBe(1);
   });
 
-  it('zeroes queue position when a scheduled match transitions to running while siblings keep server position', () => {
+  it('zeroes queue position when a scheduled match transitions to running and the sibling behind it reads 1', () => {
     const prev = {
       poolMatches: [
         { id: "p1", court: "A", scheduledAt: "09:00", status: "scheduled", queuePosition: 1 },
@@ -179,12 +178,12 @@ describe('applyPatch', () => {
       data: { result: { id: "p1", status: "running" } },
     });
     expect(next.poolMatches[0].status).toBe("running");
-    // p1 dropped out of the queue (running ⇒ 0); p2 keeps its server number (2).
+    // p1 dropped out of the queue (running ⇒ 0); p2 is next up (1).
     expect(next.poolMatches[0].queuePosition).toBe(0);
-    expect(next.poolMatches[1].queuePosition).toBe(2);
+    expect(next.poolMatches[1].queuePosition).toBe(1);
   });
 
-  it('keeps queue positions when a completed match transitions back to scheduled', () => {
+  it('places a completed match reopened to scheduled in its turn and moves the later siblings up', () => {
     const prev = {
       poolMatches: [
         { id: "p1", court: "A", scheduledAt: "09:00", status: "completed", queuePosition: 0 },
@@ -196,10 +195,10 @@ describe('applyPatch', () => {
       data: { result: { id: "p1", status: "scheduled", winner: null } },
     });
     expect(next.poolMatches[0].status).toBe("scheduled");
-    // p1 keeps its old value (0); siblings keep their server queuePosition values.
-    expect(next.poolMatches[0].queuePosition).toBe(0);
-    expect(next.poolMatches[1].queuePosition).toBe(1);
-    expect(next.poolMatches[2].queuePosition).toBe(2);
+    // p1 sorts first (09:00), so it takes 1 and the siblings move up one.
+    expect(next.poolMatches[0].queuePosition).toBe(1);
+    expect(next.poolMatches[1].queuePosition).toBe(2);
+    expect(next.poolMatches[2].queuePosition).toBe(3);
   });
 
   it('does not recompute queue positions when patch does not change scheduled status', () => {
@@ -261,7 +260,7 @@ describe('applyPatch', () => {
     expect(next.poolMatches[1]).toBe(prev.poolMatches[1]);
   });
 
-  it('keeps server pool queue positions when a scheduled match moves to a different court', () => {
+  it('renumbers both courts when a scheduled match moves to a different court', () => {
     const prev = {
       poolMatches: [
         { id: "p1", court: "A", scheduledAt: "09:00", status: "scheduled", queuePosition: 1 },
@@ -274,10 +273,9 @@ describe('applyPatch', () => {
     });
     const byId = Object.fromEntries(next.poolMatches.map(m => [m.id, m]));
     expect(byId.p1.court).toBe("B");
-    expect(byId.p1.queuePosition).toBe(1); // keeps server number
-    expect(byId.p2.queuePosition).toBe(2); // sibling keeps server number
-    expect(byId.b1.queuePosition).toBe(1); // keeps server number
-    expect(next.poolMatches[1]).toBe(prev.poolMatches[1]);
+    expect(byId.p1.queuePosition).toBe(2); // after b1 (08:30) on court B
+    expect(byId.p2.queuePosition).toBe(1); // court A moves down one
+    expect(byId.b1.queuePosition).toBe(1); // sorts before p1: unchanged
     expect(next.poolMatches[2]).toBe(prev.poolMatches[2]);
   });
 
@@ -316,7 +314,7 @@ describe('applyPatch', () => {
   });
 
   // bc-tmfn: a patch that flips whether a still-scheduled match is barred
-  // zeroes its position, while siblings keep their server queue positions.
+  // zeroes its position, and the sibling behind it moves down one.
   it('zeroes queue position when a patch flips a still-scheduled match to barred', () => {
     const prev = {
       poolMatches: [
@@ -330,217 +328,12 @@ describe('applyPatch', () => {
     });
     const byId = Object.fromEntries(next.poolMatches.map(m => [m.id, m]));
     expect(byId.p1.queuePosition).toBe(0);
-    expect(byId.p1b.queuePosition).toBe(2);
+    expect(byId.p1b.queuePosition).toBe(1);
   });
 });
 
-describe('dropLeftQueuePositions', () => {
-  it('keeps server queue positions for scheduled matches', () => {
-    const matches = [
-      { id: "a1", court: "A", status: "scheduled", queuePosition: 99 },
-      { id: "a2", court: "A", status: "scheduled", queuePosition: 2 },
-      { id: "b1", court: "B", status: "scheduled", queuePosition: 1 },
-      { id: "a3", court: "A", status: "scheduled" },
-    ];
-    const out = dropLeftQueuePositions(matches);
-    expect(out[0].queuePosition).toBe(99);
-    expect(out[1].queuePosition).toBe(2);
-    expect(out[2].queuePosition).toBe(1);
-    expect(out[3].queuePosition).toBeUndefined();
-  });
-
-  it('assigns 0 to running/completed matches', () => {
-    const matches = [
-      { id: "a1", court: "A", status: "running", queuePosition: 99 },
-      { id: "a2", court: "A", status: "scheduled", queuePosition: 1 },
-      { id: "a3", court: "A", status: "completed", queuePosition: 77 },
-      { id: "a4", court: "A", status: "scheduled", queuePosition: 2 },
-    ];
-    const out = dropLeftQueuePositions(matches);
-    expect(out[0].queuePosition).toBe(0);
-    expect(out[1].queuePosition).toBe(1);
-    expect(out[2].queuePosition).toBe(0);
-    expect(out[3].queuePosition).toBe(2);
-  });
-
-  it('preserves identity when nothing needs to change', () => {
-    const matches = [
-      { id: "a1", court: "A", status: "scheduled", queuePosition: 1 },
-      { id: "a2", court: "A", status: "scheduled", queuePosition: 2 },
-    ];
-    expect(dropLeftQueuePositions(matches)).toBe(matches);
-  });
-
-  it('does not invent positions when matches have no queuePosition', () => {
-    const matches = [
-      { id: "a1", court: "A", status: "scheduled" },
-      { id: "a2", court: "A", status: "scheduled" },
-    ];
-    expect(dropLeftQueuePositions(matches)).toBe(matches);
-  });
-
-  it('no-ops when no matches are scheduled and no stale qps to clear', () => {
-    const matches = [
-      { id: "a1", court: "A", status: "running" },
-      { id: "a2", court: "A", status: "completed" },
-    ];
-    expect(dropLeftQueuePositions(matches)).toBe(matches);
-  });
-
-  it('clears stale non-zero queuePosition when the last scheduled match transitions off', () => {
-    const matches = [
-      { id: "a1", court: "A", status: "running", queuePosition: 1 },
-      { id: "a2", court: "A", status: "completed", queuePosition: 0 },
-    ];
-    const out = dropLeftQueuePositions(matches);
-    expect(out).not.toBe(matches);
-    expect(out[0].queuePosition).toBe(0);
-    expect(out[1].queuePosition).toBe(0);
-  });
-
-  it('gives a barred scheduled match position 0 and leaves siblings with their server positions', () => {
-    const matches = [
-      { id: "a1", court: "A", status: "scheduled", queuePosition: 5, ineligibleSides: { a: "kiken-voluntary" } },
-      { id: "a2", court: "A", status: "scheduled", queuePosition: 2 },
-      { id: "a3", court: "A", status: "scheduled", queuePosition: 3 },
-    ];
-    const out = dropLeftQueuePositions(matches);
-    expect(out[0].queuePosition).toBe(0);
-    expect(out[1].queuePosition).toBe(2);
-    expect(out[2].queuePosition).toBe(3);
-  });
-
-  it('clears stale queuePosition on a non-scheduled match with ineligibleSides', () => {
-    const matches = [
-      { id: "a1", court: "A", status: "running", queuePosition: 3, ineligibleSides: { a: "kiken-voluntary" } },
-      { id: "a2", court: "A", status: "scheduled", queuePosition: 1 },
-    ];
-    const out = dropLeftQueuePositions(matches);
-    expect(out[0].queuePosition).toBe(0);
-    expect(out[1].queuePosition).toBe(1);
-  });
-});
-
-// FR-025: bracket-side queue position dropping on completion/transition.
-describe('dropLeftBracketQueuePositions', () => {
-  it('keeps server queue positions for scheduled bracket matches across rounds', () => {
-    const bracket = {
-      rounds: [
-        [
-          { id: "r1m1", court: "A", status: "scheduled", queuePosition: 99 },
-          { id: "r1m2", court: "B", status: "scheduled", queuePosition: 1 },
-        ],
-        [
-          { id: "r2m1", court: "A", status: "scheduled", queuePosition: 2 },
-        ],
-      ],
-    };
-    const out = dropLeftBracketQueuePositions(bracket);
-    expect(out.rounds[0][0].queuePosition).toBe(99);
-    expect(out.rounds[0][1].queuePosition).toBe(1);
-    expect(out.rounds[1][0].queuePosition).toBe(2);
-  });
-
-  it('assigns 0 to running/completed bracket matches while scheduled matches keep their server positions', () => {
-    const bracket = {
-      rounds: [
-        [
-          { id: "r1m1", court: "A", status: "running", queuePosition: 99 },
-          { id: "r1m2", court: "A", status: "scheduled", queuePosition: 1 },
-          { id: "r1m3", court: "A", status: "completed", queuePosition: 77 },
-          { id: "r1m4", court: "A", status: "scheduled", queuePosition: 2 },
-        ],
-      ],
-    };
-    const out = dropLeftBracketQueuePositions(bracket);
-    expect(out.rounds[0][0].queuePosition).toBe(0);
-    expect(out.rounds[0][1].queuePosition).toBe(1);
-    expect(out.rounds[0][2].queuePosition).toBe(0);
-    expect(out.rounds[0][3].queuePosition).toBe(2);
-  });
-
-  it('preserves identity when nothing needs to change', () => {
-    const bracket = {
-      rounds: [
-        [
-          { id: "r1m1", court: "A", status: "scheduled", queuePosition: 1 },
-          { id: "r1m2", court: "A", status: "scheduled", queuePosition: 2 },
-        ],
-      ],
-    };
-    expect(dropLeftBracketQueuePositions(bracket)).toBe(bracket);
-  });
-
-  it('does not invent positions when bracket matches have no queuePosition', () => {
-    const bracket = {
-      rounds: [
-        [
-          { id: "r1m1", court: "A", status: "scheduled" },
-          { id: "r1m2", court: "A", status: "scheduled" },
-        ],
-      ],
-    };
-    expect(dropLeftBracketQueuePositions(bracket)).toBe(bracket);
-  });
-
-  it('no-ops when no bracket match is scheduled and no stale qps to clear', () => {
-    const bracket = {
-      rounds: [
-        [
-          { id: "r1m1", court: "A", status: "running" },
-          { id: "r1m2", court: "A", status: "completed" },
-        ],
-      ],
-    };
-    expect(dropLeftBracketQueuePositions(bracket)).toBe(bracket);
-  });
-
-  it('clears stale non-zero queuePosition on bracket matches that transitioned off scheduled', () => {
-    // Mirror of the pool case: when the last scheduled bracket match
-    // completes, the recompute must still zero out the stale qp left
-    // behind by _mergeMatchPatch.
-    const bracket = {
-      rounds: [
-        [
-          { id: "r1m1", court: "A", status: "running", queuePosition: 1 },
-          { id: "r1m2", court: "A", status: "completed", queuePosition: 0 },
-        ],
-      ],
-    };
-    const out = dropLeftBracketQueuePositions(bracket);
-    expect(out).not.toBe(bracket);
-    expect(out.rounds[0][0].queuePosition).toBe(0);
-    expect(out.rounds[0][1].queuePosition).toBe(0);
-  });
-
-  // bc-tmfn: mirrors the pool helper's barred-skip test above.
-  it('gives a barred scheduled bracket match position 0 and leaves siblings with their server positions', () => {
-    const bracket = {
-      rounds: [
-        [
-          { id: "r1m1", court: "A", status: "scheduled", queuePosition: 5, ineligibleSides: { b: "fusenpai" } },
-          { id: "r1m2", court: "A", status: "scheduled", queuePosition: 1 },
-        ],
-        [
-          { id: "r2m1", court: "A", status: "scheduled", queuePosition: 2 },
-        ],
-      ],
-    };
-    const out = dropLeftBracketQueuePositions(bracket);
-    expect(out.rounds[0][0].queuePosition).toBe(0);
-    expect(out.rounds[0][1].queuePosition).toBe(1);
-    expect(out.rounds[1][0].queuePosition).toBe(2);
-  });
-
-  it('handles nil / empty / malformed bracket gracefully', () => {
-    expect(dropLeftBracketQueuePositions(null)).toBeNull();
-    expect(dropLeftBracketQueuePositions(undefined)).toBeUndefined();
-    expect(dropLeftBracketQueuePositions({})).toEqual({});
-    const emptyRounds = { rounds: [] };
-    expect(dropLeftBracketQueuePositions(emptyRounds)).toBe(emptyRounds);
-  });
-
-  it('applyPatch zeroes bracket queuePositions on completion and leaves siblings with server numbers', () => {
+describe('applyPatch: bracket queue positions', () => {
+  it('applyPatch zeroes bracket queuePositions on completion and moves the same-court siblings down one', () => {
     const prev = {
       bracket: {
         rounds: [
@@ -557,7 +350,7 @@ describe('dropLeftBracketQueuePositions', () => {
     });
     expect(next.bracket.rounds[0][0].status).toBe("completed");
     expect(next.bracket.rounds[0][0].queuePosition).toBe(0);
-    expect(next.bracket.rounds[0][1].queuePosition).toBe(2);
+    expect(next.bracket.rounds[0][1].queuePosition).toBe(1);
     // Court B is untouched
     expect(next.bracket.rounds[0][2].queuePosition).toBe(1);
   });
@@ -577,9 +370,9 @@ describe('dropLeftBracketQueuePositions', () => {
       data: { result: { id: "b1", status: "running" } },
     });
     expect(next.bracket.rounds[0][0].status).toBe("running");
-    // b1 dropped to 0 (running); b2 keeps its server number (2).
+    // b1 dropped to 0 (running); b2 is next up (1).
     expect(next.bracket.rounds[0][0].queuePosition).toBe(0);
-    expect(next.bracket.rounds[0][1].queuePosition).toBe(2);
+    expect(next.bracket.rounds[0][1].queuePosition).toBe(1);
   });
 
   it('applyPatch does not recompute bracket queue positions when patch does not change scheduled status', () => {
@@ -601,7 +394,7 @@ describe('dropLeftBracketQueuePositions', () => {
     expect(next.bracket.rounds[0][1]).toBe(prev.bracket.rounds[0][1]);
   });
 
-  it('keeps server bracket queue positions when a scheduled match moves to a different court', () => {
+  it('renumbers both courts when a scheduled bracket match moves to a different court', () => {
     const prev = {
       bracket: {
         rounds: [
@@ -619,14 +412,14 @@ describe('dropLeftBracketQueuePositions', () => {
     const flat = next.bracket.rounds[0];
     const byId = Object.fromEntries(flat.map(m => [m.id, m]));
     expect(byId.b1.court).toBe("B");
-    expect(byId.b1.queuePosition).toBe(1); // keeps server number
-    expect(byId.b2.queuePosition).toBe(2); // sibling keeps server number
-    expect(byId.c1.queuePosition).toBe(1); // sibling keeps server number
+    expect(byId.b1.queuePosition).toBe(2); // after c1 (10:30) on court B
+    expect(byId.b2.queuePosition).toBe(1); // court A moves down one
+    expect(byId.c1.queuePosition).toBe(1); // sorts before b1: unchanged
   });
 });
 
 // Tri-review: the naginata bronze match (thirdPlaceMatch) is a SIBLING of
-// bracket.rounds, so applyPatch's rounds loop and dropLeftBracketQueuePositions
+// bracket.rounds, so applyPatch's rounds loop and the queue-position pass
 // both used to skip it — an SSE bronze score stayed stale until the background
 // refetch, and the bronze never got a queue position on its court.
 describe('applyPatch: naginata bronze (thirdPlaceMatch)', () => {
@@ -657,25 +450,29 @@ describe('applyPatch: naginata bronze (thirdPlaceMatch)', () => {
   });
 });
 
-describe('dropLeftBracketQueuePositions: bronze participates in its court queue', () => {
-  it('keeps server queue positions for bronze alongside the rounds on the same court', () => {
-    const bracket = {
-      rounds: [[{ id: "final", court: "A", status: "scheduled", scheduledAt: "12:00", queuePosition: 1 }]],
-      thirdPlaceMatch: { id: "m-bronze", court: "A", status: "scheduled", scheduledAt: "12:05", queuePosition: 2 },
+describe('applyPatch: bronze participates in its court queue', () => {
+  it('moves the bronze down one when the final ahead of it on the same court starts', () => {
+    const prev = {
+      bracket: {
+        rounds: [[{ id: "final", court: "A", status: "scheduled", scheduledAt: "12:00", queuePosition: 1 }]],
+        thirdPlaceMatch: { id: "m-bronze", court: "A", status: "scheduled", scheduledAt: "12:05", queuePosition: 2 },
+      },
     };
-    const out = dropLeftBracketQueuePositions(bracket);
-    expect(out.rounds[0][0].queuePosition).toBe(1);
-    expect(out.thirdPlaceMatch.queuePosition).toBe(2);
+    const next = applyPatch(prev, { data: { result: { id: "final", status: "running" } } });
+    expect(next.bracket.rounds[0][0].queuePosition).toBe(0);
+    expect(next.bracket.thirdPlaceMatch.queuePosition).toBe(1);
   });
 
   it('drops the bronze queue position to 0 once it is no longer scheduled', () => {
-    const bracket = {
-      rounds: [[{ id: "final", court: "A", status: "scheduled", scheduledAt: "12:00", queuePosition: 1 }]],
-      thirdPlaceMatch: { id: "m-bronze", court: "A", status: "completed", scheduledAt: "12:05", queuePosition: 2 },
+    const prev = {
+      bracket: {
+        rounds: [[{ id: "final", court: "A", status: "scheduled", scheduledAt: "12:10", queuePosition: 2 }]],
+        thirdPlaceMatch: { id: "m-bronze", court: "A", status: "scheduled", scheduledAt: "12:05", queuePosition: 1 },
+      },
     };
-    const out = dropLeftBracketQueuePositions(bracket);
-    expect(out.thirdPlaceMatch.queuePosition).toBe(0);
-    expect(out.rounds[0][0].queuePosition).toBe(1);
+    const next = applyPatch(prev, { data: { result: { id: "m-bronze", status: "completed" } } });
+    expect(next.bracket.thirdPlaceMatch.queuePosition).toBe(0);
+    expect(next.bracket.rounds[0][0].queuePosition).toBe(1);
   });
 });
 

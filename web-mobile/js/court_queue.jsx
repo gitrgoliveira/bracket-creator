@@ -13,7 +13,9 @@ export function queueSortTime(s) {
 
 export function queueStartRank(s) {
     if (!s) return Infinity;
-    const m = String(s).match(/^\s*(\d{1,2})\s*:\s*(\d{1,2})\s*$/);
+    // One shape with Go's ParseClockMinutes: digits only, a 1 or 2 digit
+    // hour, a colon and 2 minute digits, outer whitespace trimmed.
+    const m = String(s).match(/^\s*(\d{1,2}):(\d{2})\s*$/);
     if (!m) return Infinity;
     const h = parseInt(m[1], 10);
     const min = parseInt(m[2], 10);

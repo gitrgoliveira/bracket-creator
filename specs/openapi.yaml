@@ -1574,6 +1574,24 @@ paths:
                 $ref: '#/components/schemas/Error'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          description: |
+            `code: court_past_midnight`: a shiaijo this competition shares is
+            planned until midnight or later by another competition of the same
+            day that starts no later, so no slot of that day is left on it
+            (`scheduledAt` is a bare "HH:MM"). Nothing is written. `error` is
+            the operator's sentence (move this competition to another shiaijo
+            or day, or re-time the other with Auto-schedule); `court` and
+            `competitionId` name the court and the competition holding it.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error: { type: string }
+                  code: { type: string, enum: [court_past_midnight] }
+                  court: { type: string }
+                  competitionId: { type: string }
         '500':
           description: |
             Internal error, including the pre-flight's own partial-success
@@ -1714,6 +1732,20 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+        '409':
+          description: |
+            `code: court_past_midnight`, as on `POST .../generate-draw` (a
+            start that generates the draw refuses it the same way). Nothing is
+            written.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error: { type: string }
+                  code: { type: string, enum: [court_past_midnight] }
+                  court: { type: string }
+                  competitionId: { type: string }
 
   /api/competitions/{id}/complete:
     post:
@@ -5376,22 +5408,32 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: Current Swiss round has incomplete matches.
+          description: |
+            `round_incomplete`: the current Swiss round has incomplete matches
+            (`round` names it). `court_past_midnight`: a shiaijo the round would
+            use is planned until midnight or later by another competition of the
+            same day, as on `POST .../generate-draw`; nothing is written.
           content:
             application/json:
               schema:
                 type: object
-                required: [error, code, round]
+                required: [error, code]
                 properties:
                   error:
                     type: string
                   code:
                     type: string
-                    enum: [round_incomplete]
+                    enum: [round_incomplete, court_past_midnight]
                     description: Machine-readable conflict code.
                   round:
                     type: integer
-                    description: The incomplete round number.
+                    description: The incomplete round number (round_incomplete).
+                  court:
+                    type: string
+                    description: The shiaijo planned past midnight (court_past_midnight).
+                  competitionId:
+                    type: string
+                    description: The competition holding it (court_past_midnight).
         '500':
           $ref: '#/components/responses/InternalError'
 
@@ -8472,10 +8514,11 @@ components:
             Map from court (shiaijo) label to the planned end ("HH:MM") of this
             competition's last slot there. Carried on the per-competition estimate
             for a drawn competition; the stateless `/api/schedule/estimate` never
-            sets it.
+            sets it. An end past midnight is not wrapped: it reads 24:00 or later
+            (e.g. "24:05"), which is no clock time.
           additionalProperties:
             type: string
-            pattern: '^([01][0-9]|2[0-3]):[0-5][0-9]$'
+            pattern: '^[0-9]{2,}:[0-5][0-9]$'
 
     ChusenCandidateGroup:
       type: object

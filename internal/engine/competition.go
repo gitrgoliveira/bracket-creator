@@ -1170,7 +1170,7 @@ func (e *Engine) runDrawPipeline(id string) error {
 	// omission.
 	loadedParticipantsMtime, loadedSeedsMtime := e.store.ParticipantsFingerprint(id)
 
-	if comp.Kind == "team" && comp.TeamSize == 0 {
+	if comp.IsTeam() && comp.TeamSize == 0 {
 		comp.TeamSize = 5 // Default for Kendo
 	}
 
@@ -1306,12 +1306,16 @@ func (e *Engine) runDrawPipeline(id string) error {
 	}
 	switch comp.Format {
 	case state.CompFormatMixed, state.CompFormatLeague:
+		// One scan of the other same-day competitions serves the pools and
+		// the preview bracket alike. Read before the first write: a court
+		// planned past midnight refuses the draw and leaves the files alone.
+		courtFloor, err := e.courtFloorFor(comp, tourn)
+		if err != nil {
+			return err
+		}
 		if err := clearEarlierDraw(); err != nil {
 			return err
 		}
-		// One scan of the other same-day competitions serves the pools and
-		// the preview bracket alike.
-		courtFloor := e.courtFloorFor(comp, tourn)
 		poolMatches, err := e.generatePools(comp, players, seeds, courtFloor)
 		if err != nil {
 			return err
@@ -1366,10 +1370,14 @@ func (e *Engine) runDrawPipeline(id string) error {
 		// A standalone knockout competition (the only remaining knockout case
 		// after the derived-knockout path was removed in mp-turx) uses standalone
 		// seeding, there is no pool-preview topology to mirror.
+		courtFloor, err := e.courtFloorFor(comp, tourn)
+		if err != nil {
+			return err
+		}
 		if err := clearEarlierDraw(); err != nil {
 			return err
 		}
-		if err := e.generateKnockout(comp, players, seeds, e.courtFloorFor(comp, tourn)); err != nil {
+		if err := e.generateKnockout(comp, players, seeds, courtFloor); err != nil {
 			return err
 		}
 		comp.Status = state.CompStatusDrawReady

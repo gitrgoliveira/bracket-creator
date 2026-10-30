@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"errors"
 	"log"
 	"math"
 	"time"
@@ -422,7 +423,7 @@ func EstimateForCounts(poolCount, knockoutCount int, comp *state.Competition, to
 	// 5-person default. Without this, perMatchElapsedMinutes would see
 	// TeamSize==0 and fall through to the individual-match formula,
 	// under-estimating a team competition's duration.
-	if comp.Kind == "team" && comp.TeamSize == 0 {
+	if comp.IsTeam() && comp.TeamSize == 0 {
 		comp.TeamSize = 5
 	}
 
@@ -578,7 +579,7 @@ func slotMinutesFor(tournament *state.Tournament) state.SlotMinutes {
 	return func(c *state.Competition, ko bool) int {
 		// A team competition with an omitted TeamSize uses the FIK 5-person
 		// default, as EstimateForCounts does.
-		if c != nil && c.Kind == "team" && c.TeamSize == 0 {
+		if c != nil && c.IsTeam() && c.TeamSize == 0 {
 			compCopy := *c
 			compCopy.TeamSize = 5
 			c = &compCopy
@@ -588,20 +589,25 @@ func slotMinutesFor(tournament *state.Tournament) state.SlotMinutes {
 }
 
 // courtFloorFor resolves the per-court earliest start times for comp based on
-// other same-day competitions sharing its courts. Returns nil on store error
-// since the floor is advisory.
-func (e *Engine) courtFloorFor(comp *state.Competition, tournament *state.Tournament) map[string]time.Time {
+// other same-day competitions sharing its courts. A store read error is logged
+// and floors nothing, since the floor is advisory; a court another competition
+// holds until midnight or later is returned as state.ErrCourtFloorPastMidnight,
+// which refuses the draw (no "HH:MM" slot is left on that court that day).
+func (e *Engine) courtFloorFor(comp *state.Competition, tournament *state.Tournament) (map[string]time.Time, error) {
 	if comp == nil {
-		return nil
+		return nil, nil
 	}
 	courts := InheritedDrawCourts(comp.Courts, tournament)
 	floors, err := e.store.CourtFloor(comp, courts, slotMinutesFor(tournament))
+	if errors.Is(err, state.ErrCourtFloorPastMidnight) {
+		return nil, err
+	}
 	if err != nil {
 		log.Printf("courtFloorFor %s: %v", comp.ID, err)
-		return nil
+		return nil, nil
 	}
 	if len(floors) == 0 {
-		return nil
+		return nil, nil
 	}
 	out := make(map[string]time.Time, len(floors))
 	for court, floorStr := range floors {
@@ -610,7 +616,7 @@ func (e *Engine) courtFloorFor(comp *state.Competition, tournament *state.Tourna
 			out[court] = t
 		}
 	}
-	return out
+	return out, nil
 }
 
 // CourtEnds returns the planned end ("HH:MM") of compID's last slot on each court

@@ -856,7 +856,10 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
         .then((est) => {
           if (est && est.courtEnds && typeof est.courtEnds === "object") {
             const chosenCourtEnds = Object.entries(est.courtEnds)
-              .filter(([court, endTime]) => selectedCourts.includes(court) && typeof endTime === "string" && timeToMinutes(endTime) !== null)
+              // An end past midnight reads "24:05" (the server never wraps it):
+              // it is no start time, so it counts as no end here, and the draw
+              // itself refuses a court planned past midnight.
+              .filter(([court, endTime]) => selectedCourts.includes(court) && typeof endTime === "string" && timeToMinutes(endTime) !== null && timeToMinutes(endTime) < 24 * 60)
               .map(([, endTime]) => endTime);
             if (chosenCourtEnds.length > 0) {
               return chosenCourtEnds.reduce((a, b) => (timeToMinutes(b) > timeToMinutes(a) ? b : a));

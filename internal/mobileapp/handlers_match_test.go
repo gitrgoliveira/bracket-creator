@@ -2595,7 +2595,8 @@ func TestLoadCourtQueueEntries_FiltersSameDayOtherCompetitions(t *testing.T) {
 		{ID: "m-otherday-1", Court: "A", Status: state.MatchStatusScheduled},
 	}))
 
-	entries := loadCourtQueueEntries(store, served)
+	entries, err := loadCourtQueueEntries(store, served)
+	require.NoError(t, err)
 	require.Len(t, entries, 1)
 	assert.Equal(t, "c-sameday", entries[0].CompetitionID)
 	assert.Equal(t, "m-sameday-1", entries[0].MatchID)

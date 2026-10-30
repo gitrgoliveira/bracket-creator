@@ -163,7 +163,8 @@ func numbersFromDrawWithBracket(store *state.Store, comp *state.Competition, pla
 }
 
 // viewerLoadCompetition is the store.LoadCompetition call used by the
-// public viewer goroutines. It is a package-level variable so tests can
+// public viewer goroutines, the detail view's court queue load
+// (loadCourtQueueEntries) included. It is a package-level variable so tests can
 // swap it without corrupting on-disk state: panic-recovery tests substitute
 // a panicking load (exercising the safeGo wiring end-to-end), and the
 // court-feed singleflight test substitutes a slow load to hold a build
@@ -207,17 +208,25 @@ func buildViewerCompetitionPayloads(store *state.Store, courtFilter string) ([]a
 	}
 
 	// The queue is court-wide, so a competition the court feed leaves out
-	// still counts toward it; a setup competition has no matches to count.
-	// It is numbered once, and each competition takes its own slice of the
-	// positions, rather than every payload re-sorting the whole queue.
+	// still counts toward it; state.CourtQueueEntriesOf gives a setup
+	// competition none. It is numbered once, and each competition takes its
+	// own slice of the positions, rather than every payload re-sorting the
+	// whole queue.
 	var queue []state.CourtQueueEntry
 	spans := make(map[*viewerCompetition][2]int, len(loaded))
 	for _, l := range loaded {
-		if l == nil || l.comp.Status == state.CompStatusSetup {
+		if l == nil {
+			continue
+		}
+		entries := state.CourtQueueEntriesOf(l.comp, l.poolMatches, l.bracket)
+		if len(entries) == 0 {
+			// No span, so payload stamps nothing: applyQueuePositions needs
+			// one position per match, and a setup competition's leftover
+			// matches have none.
 			continue
 		}
 		start := len(queue)
-		queue = append(queue, state.CourtQueueEntriesOf(l.comp, l.poolMatches, l.bracket)...)
+		queue = append(queue, entries...)
 		spans[l] = [2]int{start, len(queue)}
 	}
 	positions := state.CourtQueuePositions(queue)
@@ -910,7 +919,16 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 			if queueBracket != nil && queueBracket.Preview {
 				queueBracket = nil
 			}
-			stampCourtQueuePositions(comp, poolMatches, queueBracket, loadCourtQueueEntries(store, comp))
+			// The other competitions are read only when this one holds an
+			// entry of its own, since stampCourtQueuePositions numbers
+			// nothing otherwise.
+			if len(state.CourtQueueEntriesOf(comp, poolMatches, queueBracket)) > 0 {
+				others, qErr := loadCourtQueueEntries(store, comp)
+				if qErr != nil {
+					return nil, qErr
+				}
+				stampCourtQueuePositions(comp, poolMatches, queueBracket, others)
+			}
 
 			// mp-13y: merge assigned competitor Number from the draw onto
 			// comp.Players so the numberPrefix-derived "K1", "K2", … surface

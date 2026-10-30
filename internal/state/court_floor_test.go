@@ -319,3 +319,54 @@ func TestStore_CourtFloor_SkipsSetupNeighbour(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "09:30", floor["A"], "the same matches count once the neighbour is drawn")
 }
+
+// A neighbour planned past midnight: its end reads "24:xx" (never a clamped
+// 23:59), and the floor it would give is refused, naming the court and the
+// competition, since no "HH:MM" slot is left on that court that day.
+func TestStore_CourtFloor_PastMidnightIsRefused(t *testing.T) {
+	store, err := NewStore(t.TempDir())
+	require.NoError(t, err)
+
+	late := &Competition{ID: "late", Date: "2026-11-01", StartTime: "21:00", Courts: []string{"A", "B"}, Status: CompStatusDrawReady}
+	require.NoError(t, store.SaveCompetition(late))
+	require.NoError(t, store.SavePoolMatches("late", []MatchResult{
+		{ID: "p1", Court: "A", ScheduledAt: "23:55", Status: MatchStatusScheduled},
+		{ID: "p2", Court: "B", ScheduledAt: "22:00", Status: MatchStatusScheduled},
+	}))
+
+	ends, err := store.CourtEnds("late", dummySlotMinutes(10, 15))
+	require.NoError(t, err)
+	assert.Equal(t, "24:05", ends["A"], "an end past midnight is not clamped to 23:59")
+	assert.Equal(t, "22:10", ends["B"])
+
+	next := &Competition{ID: "next", Date: "2026-11-01", StartTime: "22:00", Courts: []string{"A"}}
+	require.NoError(t, store.SaveCompetition(next))
+
+	_, err = store.CourtFloor(next, []string{"B"}, dummySlotMinutes(10, 15))
+	require.NoError(t, err, "a court the late competition leaves before midnight floors as usual")
+
+	floor, err := store.CourtFloor(next, []string{"A", "B"}, dummySlotMinutes(10, 15))
+	assert.Nil(t, floor)
+	require.ErrorIs(t, err, ErrCourtFloorPastMidnight)
+	var pm *CourtFloorPastMidnightError
+	require.ErrorAs(t, err, &pm)
+	assert.Equal(t, "A", pm.Court)
+	assert.Equal(t, "late", pm.CompetitionID)
+}
+
+// ParseClockMinutes takes one shape, the one queueStartRank (court_queue.jsx)
+// takes: digits only, a 1 or 2 digit hour, a colon, 2 minute digits.
+func TestParseClockMinutes_OneShape(t *testing.T) {
+	accepted := map[string]int{
+		"9:30": 570, "09:30": 570, " 09:30 ": 570, "23:59": 1439, "0:00": 0, "00:00": 0,
+	}
+	for in, want := range accepted {
+		got, ok := ParseClockMinutes(in)
+		assert.True(t, ok, "%q should parse", in)
+		assert.Equal(t, want, got, "%q", in)
+	}
+	for _, in := range []string{"+9:30", "9:005", "9:5", "9 : 30", "9: 30", "24:00", "-1:00", "", "930", "9:60", "123:00", "a9:30"} {
+		_, ok := ParseClockMinutes(in)
+		assert.False(t, ok, "%q should not parse", in)
+	}
+}

@@ -84,11 +84,22 @@ type txResponse struct {
 func respondEngineError(c *gin.Context, err error) {
 	var notFound *engine.NotFoundError
 	var validation *engine.ValidationError
+	var pastMidnight *state.CourtFloorPastMidnightError
 	switch {
 	case errors.As(err, &notFound):
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 	case errors.As(err, &validation):
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	case errors.As(err, &pastMidnight):
+		// A draw on a shared court another competition holds past midnight:
+		// no "HH:MM" slot is left there that day, so the draw is refused with
+		// what to do, never a 500 or a wrapped time.
+		c.JSON(http.StatusConflict, gin.H{
+			"error":         pastMidnight.Error(),
+			"code":          "court_past_midnight",
+			"court":         pastMidnight.Court,
+			"competitionId": pastMidnight.CompetitionID,
+		})
 	default:
 		internalError(c, err)
 	}

@@ -533,6 +533,86 @@
         "a/m1": 1,
         "b/m1": 2
       }
+    },
+    {
+      "name": "a malformed start time (a sign, a 3 digit or 1 digit minute, inner spaces) sorts after a well-formed one on equal scheduledAt",
+      "entries": [
+        {
+          "competitionId": "p",
+          "competitionStartTime": "+8:30",
+          "date": "2026-11-01",
+          "court": "A",
+          "matchId": "m1",
+          "status": "scheduled",
+          "scheduledAt": "10:00",
+          "drawIndex": 0,
+          "barred": false
+        },
+        {
+          "competitionId": "q",
+          "competitionStartTime": "8:005",
+          "date": "2026-11-01",
+          "court": "A",
+          "matchId": "m1",
+          "status": "scheduled",
+          "scheduledAt": "10:00",
+          "drawIndex": 0,
+          "barred": false
+        },
+        {
+          "competitionId": "r",
+          "competitionStartTime": "8:5",
+          "date": "2026-11-01",
+          "court": "A",
+          "matchId": "m1",
+          "status": "scheduled",
+          "scheduledAt": "10:00",
+          "drawIndex": 0,
+          "barred": false
+        },
+        {
+          "competitionId": "s",
+          "competitionStartTime": " 8 : 30",
+          "date": "2026-11-01",
+          "court": "A",
+          "matchId": "m1",
+          "status": "scheduled",
+          "scheduledAt": "10:00",
+          "drawIndex": 0,
+          "barred": false
+        },
+        {
+          "competitionId": "z",
+          "competitionStartTime": "09:00",
+          "date": "2026-11-01",
+          "court": "A",
+          "matchId": "m1",
+          "status": "scheduled",
+          "scheduledAt": "10:00",
+          "drawIndex": 0,
+          "barred": false
+        }
+      ],
+      "queues": [
+        {
+          "date": "2026-11-01",
+          "court": "A",
+          "order": [
+            "z/m1",
+            "p/m1",
+            "q/m1",
+            "r/m1",
+            "s/m1"
+          ]
+        }
+      ],
+      "positions": {
+        "z/m1": 1,
+        "p/m1": 2,
+        "q/m1": 3,
+        "r/m1": 4,
+        "s/m1": 5
+      }
     }
   ]
 }

@@ -285,7 +285,7 @@ func (e *Engine) GenerateLeagueTiebreakMatches(compID string, tiedTeamIDs []stri
 		}
 		// Reassign schedule slots for the new DH matches, keeping every time
 		// already set.
-		return tx.SavePoolMatches(compID, appendWithSlots(allMatches, injected, comp, tournament))
+		return tx.SavePoolMatches(compID, appendWithSlots(allMatches, injected, comp, tournament, nil))
 	})
 	if err != nil {
 		return nil, err

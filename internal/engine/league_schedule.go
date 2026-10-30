@@ -166,12 +166,9 @@ func assignLeagueSlotTimesFrom(matches []state.MatchResult, slots []int, comp *s
 		return matches, openAt
 	}
 
+	// Only a court a league match lands on may raise the shared anchor: a
+	// configured court the league never plays on holds none of its slots.
 	usedCourts := make(map[string]struct{})
-	for _, c := range comp.Courts {
-		if c != "" {
-			usedCourts[c] = struct{}{}
-		}
-	}
 	for _, m := range matches {
 		if m.Court != "" {
 			usedCourts[m.Court] = struct{}{}

@@ -176,6 +176,11 @@ func BracketMatchesInDrawOrder(bracket *Bracket) []*BracketMatch {
 // matches and bracket (nil allowed), with the draw index described above.
 // Barred is Status == scheduled && IneligibleSides != nil.
 func CourtQueueEntriesOf(comp *Competition, poolMatches []MatchResult, bracket *Bracket) []CourtQueueEntry {
+	// A competition still in setup holds no draw: matches a failed draw
+	// attempt left behind take no place, as the JS courtQueueEntriesOf says.
+	if comp != nil && comp.Status == CompStatusSetup {
+		return nil
+	}
 	bracketMatches := BracketMatchesInDrawOrder(bracket)
 	total := len(poolMatches) + len(bracketMatches)
 	if total == 0 {

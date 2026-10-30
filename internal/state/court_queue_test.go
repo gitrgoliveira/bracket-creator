@@ -188,6 +188,26 @@ func TestCourtQueue_PoolAndBracketShareOnePosition(t *testing.T) {
 	require.Equal(t, []int{1, 2}, positions)
 }
 
+// TestCourtQueueEntriesOf_SetupCompetitionHasNone pins the setup rule's one
+// owner: matches a failed draw attempt left behind on a competition still in
+// setup take no place on the court's queue.
+func TestCourtQueueEntriesOf_SetupCompetitionHasNone(t *testing.T) {
+	comp := &state.Competition{ID: "c1", Status: state.CompStatusSetup, Date: "2026-11-01"}
+	poolMatches := []state.MatchResult{
+		{ID: "Pool A-0", Court: "A", Status: state.MatchStatusScheduled, ScheduledAt: "09:10"},
+		{ID: "Pool A-1", Court: "A", Status: state.MatchStatusScheduled, ScheduledAt: "09:20"},
+	}
+	bracket := &state.Bracket{Rounds: [][]state.BracketMatch{{
+		{ID: "b0", Court: "A", Status: state.MatchStatusScheduled},
+	}}}
+
+	assert.Empty(t, state.CourtQueueEntriesOf(comp, poolMatches, bracket))
+
+	comp.Status = state.CompStatusPools
+	assert.Len(t, state.CourtQueueEntriesOf(comp, poolMatches, bracket), 3,
+		"the same matches are queued once the competition has left setup")
+}
+
 func TestSameQueueDay(t *testing.T) {
 	assert.True(t, state.SameQueueDay("29-10-2026", " 29-10-2026 "))
 	assert.True(t, state.SameQueueDay("", "  "), "two blank dates share one queue")

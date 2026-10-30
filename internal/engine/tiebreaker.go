@@ -641,7 +641,7 @@ func (e *Engine) InjectTiebreakerMatches(compID string) ([]state.MatchResult, er
 		}
 		// Reassign slots so the new TB matches get ScheduledAt values,
 		// keeping operator-adjusted times, and move the knockout past them.
-		return savePoolMatchesAndKnockoutTimes(tx, compID, appendWithSlots(allMatches, injected, comp, tournament), comp, tournament)
+		return savePoolMatchesAndKnockoutTimes(tx, compID, appendWithSlots(allMatches, injected, comp, tournament, nil), comp, tournament)
 	})
 	if err != nil {
 		return nil, err

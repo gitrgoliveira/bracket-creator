@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"slices"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -85,54 +87,78 @@ func clampClientModifiedAt(v int64) int64 {
 }
 
 // loadCourtQueueEntries gathers the court queue entries of other competitions
-// on the same day as served with a draw (setup competitions and preview brackets
-// expose no public matches), eligibility-stamped exactly as a viewer payload
-// stamps its own, so stampCourtQueuePositions can number a competition's matches
-// court-wide. The served competition itself and competitions on other days are
-// skipped before loading matches.
+// on the same day as served with a draw (preview brackets expose no public
+// matches), eligibility-stamped exactly as a viewer payload stamps its own, so
+// stampCourtQueuePositions can number a competition's matches court-wide. The
+// served competition itself and competitions on other days are skipped before
+// loading matches. Each competition is loaded on its own goroutine (safeGo),
+// and the entries keep the order of ListCompetitions.
 // A read-only pass through the public Store loads, each taking and releasing
 // its own lock: never call it from inside Store.WithTransaction, whose
 // competition lock a load of that competition would wait on. One
 // competition's read fault is logged and that competition skipped; the
-// viewer payload never fails for it.
-func loadCourtQueueEntries(store *state.Store, served *state.Competition) []state.CourtQueueEntry {
+// viewer payload never fails for it. A panic in a load is returned as the
+// error, for the caller to answer as an internal error.
+func loadCourtQueueEntries(store *state.Store, served *state.Competition) ([]state.CourtQueueEntry, error) {
 	ids, err := store.ListCompetitions()
 	if err != nil {
 		log.Printf("mobileapp: court queue: list competitions: %v", err)
-		return nil
+		return nil, nil
 	}
 
-	var allEntries []state.CourtQueueEntry
-	for _, id := range ids {
+	loaded := make([][]state.CourtQueueEntry, len(ids))
+	var wg sync.WaitGroup
+	var panicRef atomic.Pointer[recoveredPanic]
+	for i, id := range ids {
 		if served != nil && id == served.ID {
 			continue
 		}
-		comp, err := store.LoadCompetition(id)
-		if err != nil {
-			log.Printf("mobileapp: court queue %s: load competition: %v", id, err)
-			continue
-		}
-		if comp == nil || comp.Status == state.CompStatusSetup {
-			continue
-		}
-		if served != nil && !state.SameQueueDay(comp.Date, served.Date) {
-			continue
-		}
-		poolMatches, err := store.LoadPoolMatches(id)
-		if err != nil {
-			log.Printf("mobileapp: court queue %s: load pool matches: %v", id, err)
-			continue
-		}
-		bracket, err := store.LoadBracket(id)
-		if err != nil {
-			log.Printf("mobileapp: court queue %s: load bracket: %v", id, err)
-			continue
-		}
-		bracket = stampViewerEligibility(store, id, poolMatches, bracket)
-		entries := state.CourtQueueEntriesOf(comp, poolMatches, bracket)
+		idx, compID := i, id
+		safeGo(&wg, &panicRef, func() {
+			loaded[idx] = otherCompetitionQueueEntries(store, compID, served)
+		})
+	}
+	wg.Wait()
+	if p := panicRef.Load(); p != nil {
+		return nil, p
+	}
+
+	var allEntries []state.CourtQueueEntry
+	for _, entries := range loaded {
 		allEntries = append(allEntries, entries...)
 	}
-	return allEntries
+	return allEntries, nil
+}
+
+// otherCompetitionQueueEntries is loadCourtQueueEntries' read of one
+// competition: nil when it fails to load, is on another day than served, or
+// holds no entries.
+func otherCompetitionQueueEntries(store *state.Store, id string, served *state.Competition) []state.CourtQueueEntry {
+	comp, err := viewerLoadCompetition(store, id)
+	if err != nil {
+		log.Printf("mobileapp: court queue %s: load competition: %v", id, err)
+		return nil
+	}
+	// state.CourtQueueEntriesOf owns the setup rule (no entries); this
+	// early exit only spares reading the matches it would ignore.
+	if comp == nil || comp.Status == state.CompStatusSetup {
+		return nil
+	}
+	if served != nil && !state.SameQueueDay(comp.Date, served.Date) {
+		return nil
+	}
+	poolMatches, err := store.LoadPoolMatches(id)
+	if err != nil {
+		log.Printf("mobileapp: court queue %s: load pool matches: %v", id, err)
+		return nil
+	}
+	bracket, err := store.LoadBracket(id)
+	if err != nil {
+		log.Printf("mobileapp: court queue %s: load bracket: %v", id, err)
+		return nil
+	}
+	bracket = stampViewerEligibility(store, id, poolMatches, bracket)
+	return state.CourtQueueEntriesOf(comp, poolMatches, bracket)
 }
 
 // stampCourtQueuePositions derives court-wide queue positions across every

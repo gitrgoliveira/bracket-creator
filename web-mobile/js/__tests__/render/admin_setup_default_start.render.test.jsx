@@ -142,6 +142,25 @@ describe('AdminCreateCompetition default start time stacking (bc-seqc)', () => {
     });
   });
 
+  it('(c2) an end past midnight ("24:05") is no start time: it counts as no end', async () => {
+    window.API.estimateCompetitionSchedule = vi.fn((id) => {
+      if (id === 'comp-a') return Promise.resolve({ courtEnds: { A: '10:30' } });
+      if (id === 'comp-b') return Promise.resolve({ totalDurationMinutes: 30, courtEnds: { B: '24:05' } });
+      return Promise.resolve(null);
+    });
+    const tournament = makeTournament({
+      courts: ['A', 'B', 'C'],
+      competitions: [
+        { id: 'comp-a', name: 'Competition A', date: '10-08-2026', startTime: '09:00', courts: ['A'] },
+        { id: 'comp-b', name: 'Competition B', date: '10-08-2026', startTime: '09:00', courts: ['B'] },
+      ],
+    });
+    const { container } = await mountForm({ tournament });
+    await waitFor(() => {
+      expect(container.querySelector('#create-start-time').value).toBe('10:30');
+    });
+  });
+
   it('(d) uses 30-minute floor for an undrawn sharing competition without courtEnds', async () => {
     window.API.estimateCompetitionSchedule = vi.fn().mockResolvedValue({
       totalDurationMinutes: 0,

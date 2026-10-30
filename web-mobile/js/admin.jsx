@@ -1,7 +1,7 @@
 // Admin side: single tournament. Tournament has multiple Competitions.
 // Top-level: Tournament dashboard (all competitions), per-competition pages.
 
-import { applyPatch as patchCompetitionData, checkSeqGap, keepNewerDetail, matchInComp } from './patch.jsx';
+import { applyPatch as patchCompetitionData, applyPatchToCompetitions, checkSeqGap, keepNewerDetail, matchInComp } from './patch.jsx';
 import { createTimerPool } from './timer_pool.jsx';
 // Imported from the leaf, not read off `window`: write_result.jsx is
 // import-only (see its header) and every consumer ES-imports it directly.
@@ -193,8 +193,10 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
       if (!cid) return;
       setAdminCompData((prev) => (prev && prev.config && prev.config.id === cid ? patchCompetitionData(prev, event) : prev));
       if (!tRef.current) return;
+      // The tournament holds every competition, so a court move re-stamps the
+      // court-wide queue numbers rather than shifting one competition's own.
       const next = mergeCompetitionsIntoTournament(tRef.current,
-        (comps) => comps.map((c) => (c.id === cid ? patchCompetitionData(c, event) : c)));
+        (comps) => applyPatchToCompetitions(comps, cid, event));
       tRef.current = next;
       onUpdateRef.current(next);
     });

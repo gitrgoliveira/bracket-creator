@@ -2,6 +2,7 @@ package engine
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -349,9 +350,125 @@ func TestSharedCourt_AppendWithSlotsPlacesInjectedRowAfterOwnLastRow(t *testing.
 		},
 	}
 
-	result := appendWithSlots(prior, injected, comp, tourn)
+	result := appendWithSlots(prior, injected, comp, tourn, nil)
 	require.Len(t, result, 3)
 	assert.Equal(t, "10:10", result[2].ScheduledAt, "injected match must be placed after the competition's own last row on court A")
+}
+
+// A row the organiser re-timed later keeps its court busy until it ends: an
+// injected row goes after the real end of the court's last row (10:35 + 5),
+// never at "earliest + N slots" (10:15), which would overlap it.
+func TestSharedCourt_AppendWithSlotsFollowsARetimedLastRow(t *testing.T) {
+	tourn := &state.Tournament{Date: "2026-11-01"}
+	comp := &state.Competition{
+		ID:                       "comp-inj",
+		Date:                     "2026-11-01",
+		Courts:                   []string{"A"},
+		StartTime:                "09:00",
+		PoolMatchDurationSeconds: 180, // 5 min per match
+	}
+	prior := []state.MatchResult{
+		{ID: "m1", Court: "A", ScheduledAt: "10:00", Status: state.MatchStatusCompleted},
+		{ID: "m2", Court: "A", ScheduledAt: "10:05", Status: state.MatchStatusCompleted},
+		{ID: "m3", Court: "A", ScheduledAt: "10:35", Status: state.MatchStatusScheduled},
+	}
+	injected := []state.MatchResult{{ID: "m-tb", Court: "A"}, {ID: "m-tb2", Court: "A"}}
+
+	result := appendWithSlots(prior, injected, comp, tourn, nil)
+	require.Len(t, result, 5)
+	assert.Equal(t, []string{"10:00", "10:05", "10:35"}, []string{result[0].ScheduledAt, result[1].ScheduledAt, result[2].ScheduledAt}, "stored rows keep their times")
+	assert.Equal(t, "10:40", result[3].ScheduledAt)
+	assert.Equal(t, "10:45", result[4].ScheduledAt)
+}
+
+// The floor a later Swiss round reads (another competition on the court) can
+// only raise the anchor: later than the court's own last row, it wins.
+func TestSharedCourt_AppendWithSlotsFloorRaisesTheAnchor(t *testing.T) {
+	tourn := &state.Tournament{Date: "2026-11-01"}
+	comp := &state.Competition{
+		ID:                       "comp-inj",
+		Date:                     "2026-11-01",
+		Courts:                   []string{"A", "B"},
+		StartTime:                "09:00",
+		PoolMatchDurationSeconds: 180,
+	}
+	prior := []state.MatchResult{
+		{ID: "m1", Court: "A", ScheduledAt: "10:00"},
+		{ID: "m2", Court: "B", ScheduledAt: "10:00"},
+	}
+	injected := []state.MatchResult{{ID: "r2-a", Court: "A"}, {ID: "r2-b", Court: "B"}}
+	floor := map[string]time.Time{
+		"A": parseClockHHMM("11:00"),
+		"B": parseClockHHMM("09:30"), // earlier than B's own end: ignored
+	}
+
+	result := appendWithSlots(prior, injected, comp, tourn, floor)
+	require.Len(t, result, 4)
+	assert.Equal(t, "11:00", result[2].ScheduledAt, "court A follows the later floor")
+	assert.Equal(t, "10:05", result[3].ScheduledAt, "court B follows its own last row")
+}
+
+// Only a court a league match lands on may raise the league's anchor.
+func TestSharedCourt_LeagueAnchorIgnoresAConfiguredCourtItDoesNotUse(t *testing.T) {
+	tourn := &state.Tournament{Date: "2026-11-01"}
+	comp := &state.Competition{
+		ID:                       "comp-league",
+		Date:                     "2026-11-01",
+		Courts:                   []string{"A", "B"},
+		StartTime:                "09:00",
+		PoolMatchDurationSeconds: 180,
+	}
+	matches := []state.MatchResult{{ID: "l1", Court: "A"}, {ID: "l2", Court: "A"}}
+	floor := map[string]time.Time{
+		"A": parseClockHHMM("09:30"),
+		"B": parseClockHHMM("12:00"), // no league match plays on B
+	}
+
+	out, _ := assignLeagueSlotTimesFrom(matches, []int{0, 1}, comp, tourn, floor)
+	assert.Equal(t, "09:30", out[0].ScheduledAt)
+	assert.Equal(t, "09:35", out[1].ScheduledAt)
+}
+
+// A shared court another competition of the day holds past midnight leaves no
+// "HH:MM" slot for the next one: the draw is refused and writes nothing, never
+// a clamped 23:59 that overlaps the other competition.
+func TestSharedCourt_DrawRefusedWhenTheCourtIsPlannedPastMidnight(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	require.NoError(t, store.SaveTournament(&state.Tournament{Date: "2026-11-01"}))
+
+	createTestCompetition(t, store, "comp-late", state.CompFormatLeague, 3, func(c *state.Competition) {
+		c.Date = "2026-11-01"
+		c.Courts = []string{"A"}
+		c.StartTime = "21:00"
+		c.PoolMatchDurationSeconds = 180
+		c.Status = state.CompStatusDrawReady
+	})
+	require.NoError(t, store.SavePoolMatches("comp-late", []state.MatchResult{
+		{ID: "Pool A-0", Court: "A", ScheduledAt: "23:50", Status: state.MatchStatusScheduled},
+		{ID: "Pool A-1", Court: "A", ScheduledAt: "23:58", Status: state.MatchStatusScheduled},
+	}))
+
+	createTestCompetition(t, store, "comp-next", state.CompFormatMixed, 3, func(c *state.Competition) {
+		c.Date = "2026-11-01"
+		c.Courts = []string{"A"}
+		c.StartTime = "22:00"
+		c.PoolMatchDurationSeconds = 180
+	})
+	saveTestParticipants(t, store, "comp-next", []string{"Dave", "Eve", "Frank", "Grace", "Heidi", "Ivan"})
+
+	err := eng.GenerateDraw("comp-next")
+	require.ErrorIs(t, err, state.ErrCourtFloorPastMidnight)
+	var pm *state.CourtFloorPastMidnightError
+	require.ErrorAs(t, err, &pm)
+	assert.Equal(t, "A", pm.Court)
+	assert.Equal(t, "comp-late", pm.CompetitionID)
+
+	stored, lerr := store.LoadPoolMatches("comp-next")
+	require.NoError(t, lerr)
+	assert.Empty(t, stored, "a refused draw writes no matches")
+	comp, lerr := store.LoadCompetition("comp-next")
+	require.NoError(t, lerr)
+	assert.Equal(t, state.CompStatusSetup, comp.Status, "a refused draw leaves the competition in setup")
 }
 
 func TestSharedCourt_SwissRoundTwoLandsAfterRoundOne(t *testing.T) {

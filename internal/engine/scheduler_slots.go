@@ -53,6 +53,8 @@ func perMatchElapsedMinutes(comp *state.Competition, tournament *state.Tournamen
 	// Team match branch. comp.TeamSize == 0 means individual; >0
 	// means a per-bout calculation (see function doc for kachinuki).
 	bouts := 0.0
+	// Narrower than IsTeam() on purpose: a hand-edited TeamSize on a
+	// competition whose Kind is not "team" keeps the individual timing.
 	if comp != nil && comp.Kind == "team" && comp.TeamSize > 0 {
 		bouts = float64(comp.TeamSize)
 	}

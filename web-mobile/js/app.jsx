@@ -837,20 +837,15 @@ function App() {
 
   useE(() => { load(); }, []);
 
-  // Periodic pace tick updates current minutes of day for pace projections.
-  // In viewer mode when viewing a competition, it also refetches the tournament
-  // list so shared-court pace drift stays current; a hidden tab skips that
-  // (onVisibilityChange resyncs it when the page is shown again).
+  // Periodic pace tick updates current minutes of day for pace projections,
+  // on every tick. The tournament refetch that keeps shared-court pace drift
+  // current runs on the same period from the SSE effect below, through its
+  // gates and jitter.
   const [nowTick, setNowTick] = useS(0);
   useE(() => {
-    const timer = setInterval(() => {
-      setNowTick((t) => t + 1);
-      if (mode === "viewer" && viewerCompId && !document.hidden) {
-        load();
-      }
-    }, PACE_TICK_MS);
+    const timer = setInterval(() => setNowTick((t) => t + 1), PACE_TICK_MS);
     return () => clearInterval(timer);
-  }, [mode, viewerCompId]);
+  }, []);
 
   const paceLookup = useM(() => {
     if (mode !== "viewer") return null;
@@ -1136,6 +1131,17 @@ function App() {
         if (mode === "admin" && adminViewRef.current && adminViewRef.current.kind === "shiaijo") return;
         load();
     };
+
+    // The pace tick's refetch: on a competition page the tournament list is
+    // refetched every PACE_TICK_MS so shared-court pace drift stays current.
+    // It goes through maybeLoad like every other refetch here, waits while the
+    // sign-in prompt is open, skips a hidden tab (onVisibilityChange resyncs
+    // it when the page is shown again), and lands after a random delay so the
+    // open tabs do not all ask at the same moment.
+    const paceRefetch = setInterval(() => {
+        if (mode !== "viewer" || !viewerCompId || document.hidden || authPromptRef.current) return;
+        jitteredTimeout(maybeLoad, Math.random() * 2000);
+    }, PACE_TICK_MS);
 
     // F6b: per-subscription seq tracker. Allocated once per effect run so
     // it resets on viewerCompId/mode changes alongside the SSE reconnect.
@@ -1461,6 +1467,7 @@ function App() {
     });
     return () => {
         unsub();
+        clearInterval(paceRefetch);
         timerPool.clearAll();
         document.removeEventListener('visibilitychange', onVisibilityChange);
         window.removeEventListener('online', onOnline);

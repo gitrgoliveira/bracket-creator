@@ -34,7 +34,7 @@
 // returns a no-op handle. Behavior degrades to today's SSE-only flow with
 // no regression.
 
-import { applyPatch as _applyPatch, matchInComp as _matchInComp } from './patch.jsx';
+import { applyPatchToCompetitions as _applyPatchToCompetitions, matchInComp as _matchInComp } from './patch.jsx';
 
 // freshnessMs: the amber->red dot threshold.
 // 20 s sits below the 35 s SSE silence watchdog and above the 15 s SSE
@@ -114,7 +114,7 @@ export function staleRunningOverlay(existing, result) {
 
 export function applyPatchToTree(tournament, msg) {
     // A patch with no payload is a no-op: bail before the findIndex scan and
-    // before _applyPatch can dereference a missing payload.
+    // before the patch can dereference a missing payload.
     if (!tournament || !msg || msg.type !== 'patch' || !msg.payload) return tournament;
     const competitions = tournament.competitions;
     if (!competitions || competitions.length === 0) return tournament;
@@ -155,19 +155,19 @@ export function applyPatchToTree(tournament, msg) {
     // throws. This try/catch is kept as defense-in-depth: it runs inside a
     // React state updater (deferred, outside any handler try/catch) fed by
     // arbitrary same-origin BroadcastChannel messages, so any future throw
-    // path in _applyPatch is still absorbed rather than crashing the display
+    // path in the patch is still absorbed rather than crashing the display
     // board into the error boundary.
-    let nextComp;
+    // The tree holds every competition the court's queue counts, so a patch
+    // that moves a match into or out of the queue re-stamps the court-wide
+    // numbers (applyPatchToCompetitions).
+    let nextCompetitions;
     try {
-        nextComp = _applyPatch(prevComp, syntheticEvent);
+        nextCompetitions = _applyPatchToCompetitions(competitions, compId, syntheticEvent, resolveCompId);
     } catch (err) {
         console.error('court_bridge: applyPatch failed for a malformed payload:', err);
         return tournament;
     }
-    if (nextComp === prevComp) return tournament;
-
-    const nextCompetitions = competitions.slice();
-    nextCompetitions[idx] = nextComp;
+    if (nextCompetitions === competitions) return tournament;
     return { ...tournament, competitions: nextCompetitions };
 }
 

@@ -315,14 +315,20 @@ func (e *Engine) GenerateSwissRound(compID string, roundNumber int) ([]state.Mat
 	// GenerateSwissRound reloads comp from disk; if TeamSize was 0 in the stored
 	// config, the default must be applied here so assignPoolMatchSlotsFrom uses the
 	// correct per-match duration for team competitions.
-	if comp.Kind == "team" && comp.TeamSize == 0 {
+	if comp.IsTeam() && comp.TeamSize == 0 {
 		comp.TeamSize = 5
 	}
+	// Read outside any transaction (AdvanceSwissRound opens its own after
+	// this returns), so a later round is floored by the other competitions
+	// on its courts as round 1 is.
+	courtFloor, err := e.courtFloorFor(comp, tournament)
+	if err != nil {
+		return nil, err
+	}
 	if roundNumber == 1 {
-		courtFloor := e.courtFloorFor(comp, tournament)
 		matches, _ = assignPoolMatchSlotsFrom(matches, comp, tournament, courtFloor)
 	} else {
-		combined := appendWithSlots(priorMatches, matches, comp, tournament)
+		combined := appendWithSlots(priorMatches, matches, comp, tournament, courtFloor)
 		matches = combined[len(priorMatches):]
 	}
 

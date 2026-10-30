@@ -8,14 +8,9 @@
 // useId is React 18+; preact/compat aliases it to a deterministic-per-mount
 // counter, so the wiring stays valid across re-renders. React is read at CALL
 // time rather than destructured at module load, so a test that installs its
-// React stub after the import still gets the right branch. The fallback (a
-// random suffix fixed on the first render) covers the unit suite's React stub,
-// which has no useId.
+// React stub after the import still reaches that stub's useId (the unit suite's
+// stubs, vitest.setup.js and reactive_react.js, each carry a counter).
 export function useStableId(prefix) {
-  if (typeof React.useId === 'function') {
-    const id = React.useId();
-    return `${prefix}-${id}`;
-  }
-  const [id] = React.useState(() => `${prefix}-${Math.random().toString(36).slice(2, 9)}`);
-  return id;
+  const id = React.useId();
+  return `${prefix}-${id}`;
 }

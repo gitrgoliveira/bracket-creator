@@ -1,18 +1,14 @@
 import React from 'react';
 import { act } from '@testing-library/react';
 import { describe, it, expect, vi, afterAll } from 'vitest';
-import { mountApp, settle } from '../helpers/mount_app.js';
+import { mountApp, settle, propsProbe } from '../helpers/mount_app.js';
 
 // Another competition's match_updated refetches the open competition's detail
 // only when it can move a queue place on a court and day the two share: a
 // match not seen before, or a change of its status, court or time. A score
 // tap on a running match changes none of them, so it refetches nothing.
 
-const page = { props: null };
-function ProbeViewerCompetition(props) {
-  React.useLayoutEffect(() => { page.props = props; });
-  return <div data-testid="viewer-competition" />;
-}
+const page = propsProbe(() => <div data-testid="viewer-competition" />);
 
 const detail = (id) => ({
   config: { id, name: 'Open', kind: 'individual', format: 'mixed', status: 'pools', courts: ['A'], date: '2026-11-01' },
@@ -25,7 +21,7 @@ const detail = (id) => ({
 const sse = { emit: null };
 
 const STUBBED_GLOBALS = {
-  ViewerCompetition: ProbeViewerCompetition,
+  ViewerCompetition: page.Component,
   API: {
     fetchTournament: vi.fn(async () => ({ name: 'T', mode: 'self-run', courts: ['A', 'B'] })),
     fetchCompetitions: vi.fn(async () => [

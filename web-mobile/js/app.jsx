@@ -2140,6 +2140,19 @@ function CreateTournament({ onCreated, authConfig }) {
 }
 
 
+// fetchVersionOnce: the one fetch of the build's version for the page, shared by
+// every VersionFooter mounted while it is out.
+function fetchVersionOnce() {
+  if (!window.versionPromise) {
+    window.versionPromise = window.API.fetchVersion().then((res) => {
+      // `false` = fetch done, no data; distinguishes from `undefined` = not yet fetched.
+      window.appVersionInfo = res ?? false;
+      return res ?? false;
+    });
+  }
+  return window.versionPromise;
+}
+
 export function VersionFooter() {
   const [info, setInfo] = React.useState(window.appVersionInfo || null);
 
@@ -2151,21 +2164,10 @@ export function VersionFooter() {
     // Already fetched: the initial state read it, and this re-reads it in
     // case it landed between that render and this effect. It is set from a
     // callback, as the fetched value is, never synchronously in the effect.
-    let source;
-    if (window.appVersionInfo !== undefined) {
-      source = Promise.resolve(window.appVersionInfo);
-    } else {
-      if (!window.API?.fetchVersion) return;
-
-      if (!window.versionPromise) {
-        window.versionPromise = window.API.fetchVersion().then((res) => {
-          // `false` = fetch done, no data; distinguishes from `undefined` = not yet fetched.
-          window.appVersionInfo = res ?? false;
-          return res ?? false;
-        });
-      }
-      source = window.versionPromise;
-    }
+    if (window.appVersionInfo === undefined && !window.API?.fetchVersion) return;
+    const source = window.appVersionInfo !== undefined
+      ? Promise.resolve(window.appVersionInfo)
+      : fetchVersionOnce();
 
     let cancelled = false;
     source.then((res) => {

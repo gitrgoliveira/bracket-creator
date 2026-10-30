@@ -1,7 +1,7 @@
 // Tournament-edit, competition-create, and bulk-import pages. See
 // web-mobile/admin_split_plan.md.
 
-const { useState: useStateA, useEffect: useEffectA, useRef: useRefA, useLayoutEffect: useLayoutEffectA } = React;
+const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
 
 const validateAndNormalizeDate = window.validateAndNormalizeDate;
 const decideNumericUpdate = window.decideNumericUpdate;
@@ -161,6 +161,7 @@ import {
 import { PillGroup, PillButton, CheckboxField, NumberField, TextField } from './competition_fields.jsx';
 import { DurationInput } from './duration.jsx';
 import { useUnsavedInput } from './app_version.jsx';
+import { useLatestRef } from './latest_ref.jsx';
 
 function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerMode, authConfig, password, showToast }) {
   // In locked mode the on-disk Password is irrelevant: auth comes
@@ -368,12 +369,8 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
   // mp-sspn: keyboard accelerators: Cmd/Ctrl+S saves, Esc cancels. Latest
   // handlers are read through refs so the once-bound listener never calls a
   // stale closure (handleSave/handleCancel close over current form state).
-  const handleSaveRef = useRefA(handleSave);
-  const handleCancelRef = useRefA(handleCancel);
-  useLayoutEffectA(() => {
-    handleSaveRef.current = handleSave;
-    handleCancelRef.current = handleCancel;
-  });
+  const handleSaveRef = useLatestRef(handleSave);
+  const handleCancelRef = useLatestRef(handleCancel);
   useEffectA(() => {
     const onKey = (e) => {
       // Ignore IME composition keys (CJK input, accented chars). Without this

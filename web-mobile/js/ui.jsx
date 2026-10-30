@@ -72,12 +72,9 @@ function Toast() {
   // its visibility and its timers are toast_queue.jsx's, which survive this
   // component remounting (the admin and viewer branches each render one). A
   // remount reads the snapshot again; it never re-pushes or re-times a toast.
-  const [shown, setShown] = React.useState(toastSnapshot);
-  React.useEffect(() => {
-    // Told the snapshot at once too, so a change between the first render and
-    // this effect is not missed.
-    return subscribeToast(setShown, { current: true });
-  }, []);
+  // useSyncExternalStore checks the snapshot again once it has subscribed, so a
+  // change between the first render and the subscription is not missed.
+  const shown = React.useSyncExternalStore(subscribeToast, toastSnapshot);
   if (!shown) return null;
 
   const shownIsError = shown.type === 'error';

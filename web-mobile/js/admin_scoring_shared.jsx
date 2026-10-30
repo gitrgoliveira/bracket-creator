@@ -27,6 +27,7 @@ import { withdrawnSideKey } from './ineligible_match.jsx';
 import { isTeamDefaultWinDecision } from './team_default_credit.jsx';
 import { struckIppons, realIppons } from './result_slot.jsx';
 import { acceptTap, useArmedConfirm } from './tap_guard.jsx';
+import { useLatestRef } from './latest_ref.jsx';
 // bc-evts: the board of a running match (tapBoardOf) is the server's copy with
 // this device's pending taps folded on, by the JS replay port.
 import { applyPending, assignMarks, APPLIED, BOUT_REMOVED, BOUT_REMOVED_MESSAGE } from './score_events.jsx';
@@ -108,7 +109,6 @@ export function useMatchHeldWrite(compId, matchId, match = null) {
     if (typeof window.subscribeSyncStatus === 'function') offs.push(window.subscribeSyncStatus(refresh));
     if (typeof window.subscribeUnsentWrites === 'function') offs.push(window.subscribeUnsentWrites(refresh));
     return () => offs.forEach((off) => { if (typeof off === 'function') off(); });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [compId, matchId]);
   return state;
 }
@@ -123,7 +123,6 @@ export function useClearPendingWhenNothingHeld(compId, matchId, pendingWrite, on
   const { held } = useMatchHeldWrite(compId, matchId);
   useEffectA(() => {
     if (pendingWrite && held === false) onClear();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingWrite, held]);
 }
 
@@ -1776,18 +1775,18 @@ export {
 // them at once, as the editor's own actions do (stage 5 review 9, m1;
 // unsaved_entries.jsx `discardUnsaved`).
 export function usePublishUnsaved(hostRef, unsaved, onDiscard) {
-  // React.useRef by name (not the useRefA alias), so the linter knows these
-  // are refs, which an effect may write.
+  // React.useRef by name: oxlint knows a ref by a call to `useRef` or by a
+  // name ending in `Ref`, and `probe` has no such name, so an aliased
+  // useRefA would read to it as a hook's value no effect may write.
   const probe = React.useRef(null);
-  const unsavedRef = React.useRef(unsaved);
-  const discardRef = React.useRef(onDiscard);
+  const unsavedRef = useLatestRef(unsaved);
+  const discardRef = useLatestRef(onDiscard);
   // Each commit states the editor's own answer again, before anything can
-  // ask it (a layout effect runs before the browser takes the next event):
-  // the latest unsaved state and discard, and `cleared` reset, since an entry
-  // made after the discard is unsaved. The thunk is made once, on the first.
+  // ask it (a layout effect runs before the browser takes the next event,
+  // and after the two above, which bring the latest unsaved state and discard):
+  // `cleared` reset, since an entry made after the discard is unsaved. The
+  // thunk is made once, on the first.
   useLayoutEffectA(() => {
-    unsavedRef.current = unsaved;
-    discardRef.current = onDiscard;
     if (!probe.current) probe.current = makeUnsavedProbe(unsavedRef, discardRef);
     probe.current.cleared = false;
     if (hostRef && hostRef.current !== probe.current) hostRef.current = probe.current;
@@ -2097,7 +2096,6 @@ function useMatchReopen({ match, password, isComplete, own, unsaved = false, onD
       } catch { /* best effort: the panel falls back to the server's own label, or "another match" */ }
     })();
     return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conflict?.compId, conflict?.matchId]);
 
   return { busy, landed, err, conflict, blockerLabel, notice, reopen, reopenAnyway, requeueBlocker, dismissConflict: () => setConflict(null), allowCourtForce };
@@ -2143,7 +2141,6 @@ function useWithdrawalRemoval({ match, enabled, held = false, onRemove, onUndo, 
     if (!removed) return;
     setRemoved(false);
     if (onReset) onReset();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [match.id, match.decision, match.decisionBy]);
   const removal = enabled ? {
     removed: removing,
@@ -2391,7 +2388,6 @@ function RecordedWithdrawal({ match, ctl, disabled = false, singleBout = false, 
       }
     })();
     return () => { cancelled = true; clearTimeout(cap); };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [match.compId, match.id, withdrawn?.id, withdrawn?.name]);
   // The barred competitor's record names a DIFFERENT match (see above).
   const barredElsewhere = !!(withdrawnStatus && withdrawnStatus.eligible === false &&
@@ -2739,7 +2735,6 @@ function useAdoptFromServer({ signature, apply, keepLocalEdits = false, isDirty 
   useEffectA(() => {
     if (keepLocalEdits && wasDirtyRef.current) return;
     applyRef.current();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [signature]);
   // Only the keepLocalEdits policy reads this, but the hook call itself must be
   // unconditional (rules of hooks), so the CHEAP part is the branch inside.

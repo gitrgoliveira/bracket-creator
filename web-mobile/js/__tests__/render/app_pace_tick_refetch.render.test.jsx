@@ -1,7 +1,7 @@
 import React from 'react';
 import { act } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
-import { mountApp, settle } from '../helpers/mount_app.js';
+import { mountApp, settle, propsProbe } from '../helpers/mount_app.js';
 import { PACE_TICK_MS } from '../../court_pace.jsx';
 
 // On a competition page the pace tick refetches the tournament every
@@ -10,14 +10,10 @@ import { PACE_TICK_MS } from '../../court_pace.jsx';
 // tab) and lands after a random delay, so the open tabs do not all ask at the
 // same moment.
 
-const page = { props: null };
-function ProbeViewerCompetition(props) {
-  React.useLayoutEffect(() => { page.props = props; });
-  return <div data-testid="viewer-competition" />;
-}
+const page = propsProbe(() => <div data-testid="viewer-competition" />);
 
 const STUBBED_GLOBALS = {
-  ViewerCompetition: ProbeViewerCompetition,
+  ViewerCompetition: page.Component,
   API: {
     fetchTournament: vi.fn(async () => ({ name: 'T', courts: ['A'] })),
     fetchCompetitions: vi.fn(async () => [{ id: 'c1', name: 'Open', date: '2026-11-01' }]),

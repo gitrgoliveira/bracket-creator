@@ -21,14 +21,16 @@
 //
 // Its imports are lineup_resolver.jsx, the owner of the lineup read and of which
 // positions differ, and write_result.jsx, the leaf that owns the deadline a bounded
-// wait is given. What a Save carries is lineup_save.jsx's. The hooks read the React
-// global at call time, as tap_guard.jsx does.
+// wait is given. What a Save carries is lineup_save.jsx's, and memberIdsRef is
+// latest_ref.jsx's useLatestRef (the refs effects read are spelt out). The hooks read the React global at call
+// time, as tap_guard.jsx does.
 import {
   changedLineupPositions, lineupFields, lineupSourceOf, lineupSourceLabel, isOwnLineup, resolveMatchLineup,
   previousLineupConfirm, PREVIOUS_LINEUP_LABEL, REMOVED_UNREAD_NOTICE, STARTING_ROUND,
   lineupReadFailure,
 } from './lineup_resolver.jsx';
 import { FETCH_TIMEOUT_MS, TIMED_OUT, withinDeadline, writePending } from './write_result.jsx';
+import { useLatestRef } from './latest_ref.jsx';
 
 const STORAGE_PREFIX = 'bc.lineupDraft.v1:';
 // A draft older than this is never offered: the operator has moved on.
@@ -134,8 +136,10 @@ export function useLineupDraft({ key, ready, baseline, current, positionKeys, on
   const baseFields = lineupFields(baseline, positionKeys);
   const nowFields = lineupFields(current, positionKeys);
   const latestNow = { baseFields, nowFields, positionKeys, onRestore };
+  // Written at commit, ahead of the layout effect below that reads it. Spelt out
+  // rather than useLatestRef: exhaustive-deps and the compiler rules know a ref read
+  // in an effect only by its useRef call.
   const latest = useRef(latestNow);
-  // Written at commit, ahead of the layout effect below that reads it.
   useLayoutEffect(() => { latest.current = latestNow; });
   // `current` and `baseline` are new objects every render: the effect runs on
   // what they hold.
@@ -386,14 +390,14 @@ export function useLineupForm({ compId, teamId, matchId = '', positionKeys, pass
   // have it blanked by the resolving clear, and Save would then write it with a
   // member id and no name, which the occupancy rule reads as a real placement
   // fielding a nameless fighter.
-  const memberIdsRef = useRef(memberIds);
-  useLayoutEffect(() => { memberIdsRef.current = memberIds; });
+  const memberIdsRef = useLatestRef(memberIds);
   const [baseline, setBaseline] = useState(EMPTY_SIDE);
   const [source, setSource] = useState(null);
   // The draft key whose lineup was read into the form: a lineup is only judged,
   // restored over or saved once it was read, never the empty form of a failed read.
   const [loadedKey, setLoadedKey] = useState('');
-  const [loading, setLoading] = useState(true);
+  // A form with no competition or team has no lineup to read, so it never loads.
+  const [loading, setLoading] = useState(!!(compId && teamId));
   const [loadError, setLoadError] = useState('');
   const [error, setError] = useState('');
   const [warning, setWarning] = useState('');
@@ -411,6 +415,9 @@ export function useLineupForm({ compId, teamId, matchId = '', positionKeys, pass
   // A list that arrives (setSquad, below) is put on it as it is shown, so it holds
   // that list whenever the handler resumes, whether or not the render that shows it
   // has run.
+  // Spelt out rather than useLatestRef: exhaustive-deps knows a stable ref only by its
+  // useRef call, and showMembers, which writes this one, would otherwise become a
+  // dependency of the members read below and rerun it on every render.
   const squadRef = useRef(squad);
   useLayoutEffect(() => { squadRef.current = squad; });
   // Whether the editor is still on screen (`isMounted`): a save's refusal that
@@ -602,16 +609,18 @@ export function useLineupForm({ compId, teamId, matchId = '', positionKeys, pass
   // The effects below key on the lineup alone and call these as of the render they
   // run in.
   const liveNow = { load, follow, readMembersAgain, touched: dirty };
+  // Written at commit, ahead of every effect below that reads it, and spelt out for
+  // the same reason as `latest` in useLineupDraft.
   const live = useRef(liveNow);
-  // Written at commit, ahead of every effect below that reads it.
   useLayoutEffect(() => { live.current = liveNow; });
 
-  // A form with no competition or team has no lineup to read: loading ends in the
-  // render that gives it none, even with a read (a retry) out, whose own end the
-  // cleanup below skips. Kept per (competition, team, match), the keys the read
-  // below runs on, so a retry made while the form has none reads as it did.
+  // A form later given no competition or team has no lineup to read: loading ends
+  // in the render that takes them away, even with a read (a retry) out, whose own
+  // end the cleanup below skips. Kept per (competition, team, match), the keys the
+  // read below runs on, so a retry made while the form has none reads as it did.
+  // The first render starts from its own keys (`loading` starts from them too).
   const idsKey = `${compId}|${teamId}|${matchId}`;
-  const [idsSeen, setIdsSeen] = useState(null);
+  const [idsSeen, setIdsSeen] = useState(idsKey);
   if (idsSeen !== idsKey) {
     setIdsSeen(idsKey);
     if (!compId || !teamId) setLoading(false);

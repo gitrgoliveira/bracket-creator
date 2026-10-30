@@ -33,6 +33,7 @@ function Host({ initial, saves, told, onSetter }) {
   if (onSetter) onSetter(setStored);
   return <StableInput aria-label="Seed" type="number" value={stored} onChange={onChange} autoSelect={false} />;
 }
+const keepSetter = (set) => { Host.setStored = set; };
 
 async function flush() {
   await act(async () => { await Promise.resolve(); await Promise.resolve(); });
@@ -87,7 +88,7 @@ describe('StableInput follows its save', () => {
 
   it('keeps showing a queued change over a change made elsewhere until it settles', async () => {
     const saves = [];
-    const { getByLabelText } = render(<Host initial={2} saves={saves} told={() => {}} onSetter={(set) => { Host.setStored = set; }} />);
+    const { getByLabelText } = render(<Host initial={2} saves={saves} told={() => {}} onSetter={keepSetter} />);
     const box = getByLabelText('Seed');
     fireEvent.focus(box);
     fireEvent.change(box, { target: { value: '4' } });
@@ -118,7 +119,7 @@ describe('StableInput follows its save', () => {
 
   it('shows a change made elsewhere at once when nothing is waiting, and on blur when the box has the focus', async () => {
     const saves = [];
-    const { getByLabelText } = render(<Host initial={2} saves={saves} told={() => {}} onSetter={(set) => { Host.setStored = set; }} />);
+    const { getByLabelText } = render(<Host initial={2} saves={saves} told={() => {}} onSetter={keepSetter} />);
     const box = getByLabelText('Seed');
     await act(async () => { Host.setStored(6); });
     expect(box.value).toBe('6');

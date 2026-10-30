@@ -22,6 +22,19 @@ import { installWindowStubs } from './stub_globals.js';
 // Lets every pending fetch and zero-delay timer run inside act().
 export const settle = () => act(async () => { await new Promise((r) => setTimeout(r, 20)); });
 
+// propsProbe(render): a stand-in for one of App's pages, handed to mountApp's
+// globals as `probe.Component`. It renders render(props) and keeps the props it
+// was last committed with on `probe.props` (written in a layout effect, never
+// during render), so a test reads what App handed the page.
+export function propsProbe(render) {
+  const probe = { props: null };
+  probe.Component = function PropsProbe(props) {
+    React.useLayoutEffect(() => { probe.props = props; });
+    return render(props);
+  };
+  return probe;
+}
+
 export async function mountApp({ path, globals }) {
   const restoreGlobals = installWindowStubs(globals);
   const root = document.createElement('div');

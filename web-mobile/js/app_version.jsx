@@ -250,11 +250,10 @@ export function versionState() {
     return _state;
 }
 
-// subscribeVersionState(fn) calls fn(state) on each change, and at once as well
-// with `{ current: true }`; returns the unsubscribe.
-export function subscribeVersionState(fn, { current = false } = {}) {
+// subscribeVersionState(fn) calls fn(state) on each change; returns the
+// unsubscribe.
+export function subscribeVersionState(fn) {
     _subscribers.add(fn);
-    if (current) fn(_state);
     return () => { _subscribers.delete(fn); };
 }
 

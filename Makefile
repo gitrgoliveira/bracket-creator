@@ -152,6 +152,10 @@ js/lint: js/deps ## Run Javascript linters
 	@# comment syntax, hence the rationale living here (bc-appx item 9) rather
 	@# than beside the override itself.
 	@npx --prefix web-mobile oxlint --deny-warnings -c web-mobile/.oxlintrc.json docs/assets/javascripts/
+	@# web/ (the CLI's web UI) was linted by nothing either. It is plain browser
+	@# JS with Bootstrap loaded as a global, so it has its own config with no
+	@# React plugin, run with web-mobile's binary for the same reasons as above.
+	@npx --prefix web-mobile oxlint --deny-warnings -c web/.oxlintrc.json web/js/ web/tests/
 
 js/sec: js/deps ## Run Javascript security scans (audit-ci)
 	@echo "Running Javascript security scans..."

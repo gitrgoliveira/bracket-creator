@@ -10,8 +10,9 @@ import { NumberedName } from './numbered_name.jsx';
 import { useOpenedTapGuard } from './tap_guard.jsx';
 import { PillButton } from './competition_fields.jsx';
 import { useUnsavedInput } from './app_version.jsx';
+import { useLatestRef } from './latest_ref.jsx';
 
-const { useState: useStateA, useMemo: useMemoA, useEffect: useEffectA, useRef: useRefA, useLayoutEffect: useLayoutEffectA } = React;
+const { useState: useStateA, useMemo: useMemoA, useEffect: useEffectA, useRef: useRefA } = React;
 
 const pluralize = window.pluralize;
 const EmptyState = window.EmptyState;
@@ -557,8 +558,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
   // m11), never by its row, so a reorder while its save is out cannot lay it
   // on someone else; the box shows it meanwhile through the promise
   // StableInput is handed.
-  const rosterRef = useRefA(c);
-  useLayoutEffectA(() => { rosterRef.current = c; });
+  const rosterRef = useLatestRef(c);
   const typedSeedsRef = useRefA(new Map());
   const typedSeqRef = useRefA(0);
   const rosterChainRef = useRefA(Promise.resolve());

@@ -232,7 +232,6 @@ export function AwardsView({ c, bracket, standings, pools, players }) {
       .then((data) => { if (!cancelled) setSwissStandings(Array.isArray(data) ? data : []); })
       .catch(() => { if (!cancelled) setSwissStandings([]); });
     return () => { cancelled = true; };
-    // oxlint-disable-next-line react-hooks/exhaustive-deps
   }, [c?.id, c?.format, c?.swissCurrentRound]);
 
   // For mixed (pools+knockout) comps, delegate to resolveCompetitionAwards so

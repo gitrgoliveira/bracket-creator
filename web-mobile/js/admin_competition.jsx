@@ -355,6 +355,7 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
         <Breadcrumbs items={[
           { label: "Dashboard", onClick: leaving(onBack) },
           { label: c.name, onClick: section === "overview" ? null : () => toSection("overview") },
+          // A spread, not .filter(Boolean), which oxlint's react/refs flags here.
           ...(currentItem && section !== "overview" ? [{ label: currentItem.label }] : []),
         ]} />
         <div className="page-head">
@@ -408,7 +409,9 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
                   {/* navBusy (generating||starting||discarding) covers the brief
                       window where generateDraw has flipped status to draw-ready
                       but its setGenerating(false) hasn't run yet: without it
-                      these buttons would be momentarily clickable mid-generate. */}
+                      these buttons would be momentarily clickable mid-generate.
+                      onClick wraps leaving() in an arrow: passed bare, oxlint's
+                      react/refs flags it. */}
                   <button type="button" className="btn btn--ghost btn--danger" onClick={(e) => leaving(discardDraw)(e)} disabled={navBusy}>
                     {discarding && <span className="spinner" />}
                     {discarding ? "Discarding…" : "Discard draw"}

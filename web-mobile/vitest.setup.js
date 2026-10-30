@@ -27,6 +27,7 @@ afterEach(() => {
 });
 
 // Mock React since it's used as a global in the browser
+let _idSeq = 0;
 class _ReactComponent {
   constructor(props) { this.props = props; this.state = {}; }
   setState() {}
@@ -38,6 +39,8 @@ global.React = {
   useEffect: vi.fn(),
   useMemo: (fn) => fn(),
   useRef: (val) => ({ current: val }),
+  // A fresh id per call: like useState here, this stub keeps nothing across renders.
+  useId: () => `:r${(_idSeq += 1)}:`,
   useLayoutEffect: vi.fn(),
   useCallback: (fn) => fn,
   memo: (c) => c,

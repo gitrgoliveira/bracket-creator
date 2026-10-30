@@ -5,8 +5,11 @@
 import { toBackendMatchResult, matchWire } from './api_serializers.jsx';
 import { changedGroups, statedGroupsOf, groupMatches, keptInHistoryNote, GROUP_RESULT } from './match_groups.jsx';
 import { writeDidNotLand, writePending, writeWasRefused } from './write_result.jsx';
+import { useLatestRef } from './latest_ref.jsx';
 
-const { useState: useStateA, useEffect: useEffectA } = React;
+// Refs are made with React.useRef by that name: exhaustive-deps takes a ref for a
+// stable value only from a call named `useRef`, never from the useRefA alias.
+const { useState: useStateA, useEffect: useEffectA, useLayoutEffect: useLayoutEffectA } = React;
 
 // ---------------------------------------------------------------------------
 // useChangedGroups (bc-mrgc): every score write an editor builds names the
@@ -34,23 +37,17 @@ const { useState: useStateA, useEffect: useEffectA } = React;
 //     the server would keep the first.
 // ---------------------------------------------------------------------------
 export function useChangedGroups(match) {
-  // React.useRef by name (not the useRefA alias), so the linter knows these are
-  // refs, which the layout effect below may write.
-  const matchRef = React.useRef(match);
+  const matchRef = useLatestRef(match);
   const stateRef = React.useRef(null);
-  // Each commit brings the hook up to the match it rendered, in a layout effect:
-  // it runs before every passive effect (where the editors' adopts call
-  // claim.agree) and before the browser takes the next event (where they build
-  // and claim a write), so both read the match the editor shows. No editor calls
-  // claim during render.
-  React.useLayoutEffect(() => {
-    matchRef.current = match;
-    const keyOf = (m) => `${(m && m.compId) || ""}\u0000${(m && m.id) || ""}`;
+  // Each commit that renders a new copy of the match, or another match, brings the
+  // hook up to it, in a layout effect: it runs after matchRef's (declared first),
+  // before every passive effect (where the editors' adopts call claim.agree) and
+  // before the browser takes the next event (where they build and claim a write),
+  // so both read the match the editor shows. No editor calls claim during render; one that did would find
+  // the state made for the match it last committed (ensureState).
+  useLayoutEffectA(() => {
+    const st = ensureState(stateRef, match);
     const finished = !!(match && match.status === "completed");
-    // The editor moving to another match starts over from that match.
-    if (!stateRef.current || stateRef.current.key !== keyOf(match)) {
-      stateRef.current = { key: keyOf(match), seed: matchWire(match), agreed: {}, last: {}, finished, built: new WeakMap() };
-    }
     // A reopen is a write the server makes, not one the editor builds, so no build
     // moves the result the editor agrees with off the finished one. Once the server
     // no longer holds the match finished the editor agrees with the result as it now
@@ -60,9 +57,9 @@ export function useChangedGroups(match) {
     // downstream reopen, a requalification, a pool-rank override) leaves the match
     // scheduled with its points and no stamp, and an editor that only watched the stamp
     // named no result for it: the server kept the match as it was, with no error.
-    if (!finished && stateRef.current.finished) stateRef.current.agreed[GROUP_RESULT] = matchWire(match);
-    stateRef.current.finished = finished;
-  });
+    if (!finished && st.finished) st.agreed[GROUP_RESULT] = matchWire(match);
+    st.finished = finished;
+  }, [match]);
   // `agreed[g]` is the server value the editor last AGREED with for g; `last[g]` is
   // the value it last built or took for g. Both are kept per group: a group a build
   // did not state says nothing about it, and a group the editor took from the server
@@ -70,7 +67,7 @@ export function useChangedGroups(match) {
   const claim = (patch) => {
     if (!patch) return patch;
     const m = matchRef.current;
-    const st = stateRef.current;
+    const st = ensureState(stateRef, m);
     const next = toBackendMatchResult(patch, m);
     const current = matchWire(m);
     const stated = statedGroupsOf(next);
@@ -91,7 +88,7 @@ export function useChangedGroups(match) {
   // retried Start named only `result`, and the server started the match
   // without the draft's points). A patch claim did not build is ignored.
   claim.forget = (patch) => {
-    const st = stateRef.current;
+    const st = ensureState(stateRef, matchRef.current);
     const rec = patch && st.built.get(patch);
     if (!rec) return;
     st.built.delete(patch);
@@ -132,12 +129,24 @@ export function useChangedGroups(match) {
   // the editor holds over a newer prop must stay a change). The property rides on the
   // function so the editors that only claim are unchanged.
   claim.agree = (group) => {
-    const st = stateRef.current;
+    const st = ensureState(stateRef, matchRef.current);
     const adopted = matchWire(matchRef.current);
     st.agreed[group] = adopted;
     st.last[group] = adopted;
   };
   return claim;
+}
+
+// ensureState: useChangedGroups' state for the match `m`, made on first use and
+// made again when the editor has moved to another match (it starts over from that
+// match). Idempotent: asked again for the same match it answers the state as it is.
+function ensureState(stateRef, m) {
+  const key = `${(m && m.compId) || ""}\u0000${(m && m.id) || ""}`;
+  if (!stateRef.current || stateRef.current.key !== key) {
+    const finished = !!(m && m.status === "completed");
+    stateRef.current = { key, seed: matchWire(m), agreed: {}, last: {}, finished, built: new WeakMap() };
+  }
+  return stateRef.current;
 }
 
 // ---------------------------------------------------------------------------

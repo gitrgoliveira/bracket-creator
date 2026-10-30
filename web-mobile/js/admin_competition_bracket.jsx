@@ -380,7 +380,6 @@ function AdminBracket({ c, t, bracket, onMoveCourt, onEditScore, tweaks, passwor
                 <div className="bracket-bronze-row" data-testid="bracket-bronze-match">
                   {Array.from({ length: Math.max(0, slots - 1) }, (_, i) => (
                     // Empty column slots, never reordered: the index is the key.
-                    // oxlint-disable-next-line react/no-array-index-key
                     <div key={i} className="bracket-bronze-row__slot" aria-hidden="true" />
                   ))}
                   <div className="bracket-bronze-row__slot bracket-bronze-section">

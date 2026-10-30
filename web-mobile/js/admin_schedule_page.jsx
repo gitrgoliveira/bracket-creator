@@ -109,10 +109,7 @@ export const AdminTWMatch = React.memo(({ m, highlight, courts, onMove, onTimeCh
           for non-fought decisions and overtime. The match-level decision
           covers kiken / fusenpai / daihyosen here; per-bout fusensho is a
           SubMatchResult and is rendered inside the score modal: the row
-          here doesn't expose individual bout cells.
-          TODO(T096): once per-bout fusensho is wired through the team-score
-          serializer and the schedule row exposes bout details, append an
-          "FS" badge to each affected bout cell. */}
+          here doesn't expose individual bout cells. */}
       {/* bc-cse: running admits the FULL score string here (any match kind),
           like TWMatch (viewer_schedule.jsx) -- deliberately, not team-only.
           matchStateCell (bracket.jsx) is scoped to the team aggregate instead

@@ -17,55 +17,6 @@ import (
 	bctest "github.com/gitrgoliveira/bracket-creator/internal/test/idstamp"
 )
 
-func TestScoring_OverrideBracketWinner(t *testing.T) {
-	dir, err := os.MkdirTemp("", "engine-override-test-*")
-	require.NoError(t, err)
-	defer os.RemoveAll(dir)
-
-	store, err := state.NewStore(dir)
-	require.NoError(t, err)
-	eng := New(store)
-
-	compID := "test-override"
-	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID, Name: "Test"}))
-
-	bracket := &state.Bracket{
-		Rounds: [][]state.BracketMatch{
-			{
-				{ID: "M1", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusScheduled},
-				{ID: "M2", SideA: "Charlie", SideB: "Dave", Status: state.MatchStatusScheduled},
-			},
-			{
-				{ID: "M3", SideA: "", SideB: "", Status: state.MatchStatusScheduled},
-			},
-		},
-	}
-	require.NoError(t, store.SaveBracket(compID, bracket))
-
-	// Override M1 winner to Alice
-	_, err = eng.OverrideBracketWinner(compID, "M1", "Alice", 0)
-	require.NoError(t, err)
-
-	// Verify bracket updated and propagated
-	updated, err := store.LoadBracket(compID)
-	require.NoError(t, err)
-	assert.Equal(t, "Alice", updated.Rounds[0][0].Winner)
-	assert.True(t, updated.Rounds[0][0].IsOverridden)
-	assert.Equal(t, "Alice", updated.Rounds[1][0].SideA)
-
-	// Override M2 winner to Charlie
-	_, err = eng.OverrideBracketWinner(compID, "M2", "Charlie", 0)
-	require.NoError(t, err)
-
-	updated, err = store.LoadBracket(compID)
-	require.NoError(t, err)
-	assert.Equal(t, "Charlie", updated.Rounds[1][0].SideB)
-
-	// Test non-existent match
-	_, err = eng.OverrideBracketWinner(compID, "M99", "Nobody", 0)
-	assert.Error(t, err)
-}
-
 func TestUpdateMatchCourt(t *testing.T) {
 	dir, err := os.MkdirTemp("", "engine-court-test-*")
 	require.NoError(t, err)
@@ -1793,12 +1744,6 @@ func TestUnresolvedKnockoutMatch_ScoringGated(t *testing.T) {
 		_, err := eng.RecordMatchResultWithIneligibility(compID, "m-r1-0", result)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "not ready to score")
-	})
-
-	t.Run("OverrideBracketWinner rejected (not ready)", func(t *testing.T) {
-		_, err := eng.OverrideBracketWinner(compID, "m-r1-0", "Pool A-1st", 0)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "not ready to override")
 	})
 
 	// Scheduling a not-yet-resolved match IS allowed, operators may pre-assign

@@ -3,8 +3,9 @@ package engine
 import (
 	"fmt"
 	"sort"
-	"strconv"
 	"strings"
+
+	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
 // MinClashFootprintMinutes is the minimum time footprint assigned to a
@@ -48,7 +49,7 @@ func (e *Engine) DetectClashesForCompetition(compID string) ([]ClashWarning, err
 
 	out := []ClashWarning{}
 
-	tStart, ok := parseHHMM(target.StartTime)
+	tStart, ok := state.ParseClockMinutes(target.StartTime)
 	if !ok || strings.TrimSpace(target.Date) == "" {
 		// Target can't be placed on a timeline → nothing to compare against.
 		return out, nil
@@ -78,14 +79,14 @@ func (e *Engine) DetectClashesForCompetition(compID string) ([]ClashWarning, err
 			// check, a single bad file shouldn't hide every other clash.
 			continue
 		}
-		if !sameDate(target.Date, other.Date) {
+		if !state.SameDate(target.Date, other.Date) {
 			continue
 		}
 		shared := sharedCourts(targetCourts, InheritedDrawCourts(other.Courts, tourn))
 		if len(shared) == 0 {
 			continue
 		}
-		oStart, ok := parseHHMM(other.StartTime)
+		oStart, ok := state.ParseClockMinutes(other.StartTime)
 		if !ok {
 			continue
 		}
@@ -118,22 +119,6 @@ func (e *Engine) clashFootprintMinutes(compID string) int {
 	return est.TotalDurationMinutes
 }
 
-// parseHHMM parses a "HH:MM" clock string into minutes-since-midnight. Returns
-// ok=false for empty or malformed input (so callers can skip unplaceable
-// competitions rather than treating them as midnight).
-func parseHHMM(s string) (int, bool) {
-	parts := strings.SplitN(strings.TrimSpace(s), ":", 2)
-	if len(parts) != 2 {
-		return 0, false
-	}
-	h, err1 := strconv.Atoi(strings.TrimSpace(parts[0]))
-	m, err2 := strconv.Atoi(strings.TrimSpace(parts[1]))
-	if err1 != nil || err2 != nil || h < 0 || h > 23 || m < 0 || m > 59 {
-		return 0, false
-	}
-	return h*60 + m, true
-}
-
 // fmtHHMM renders minutes-since-midnight as "HH:MM". It does NOT wrap at 24h:
 // a footprint that pushes the overlap end past midnight renders as "24:15"
 // rather than a misleading "00:15", so an operator reading the warning sees
@@ -143,13 +128,6 @@ func fmtHHMM(mins int) string {
 		mins = 0
 	}
 	return fmt.Sprintf("%02d:%02d", mins/60, mins%60)
-}
-
-// sameDate is true when both dates are non-empty and equal (after trimming).
-// An empty date means the competition isn't placed on a day, so it can't clash.
-func sameDate(a, b string) bool {
-	a, b = strings.TrimSpace(a), strings.TrimSpace(b)
-	return a != "" && a == b
 }
 
 // sharedCourts returns the sorted intersection of two court-label lists.

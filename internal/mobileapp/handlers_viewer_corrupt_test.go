@@ -524,7 +524,7 @@ func TestViewerAggregateAndDetail_HikiwakeWithoutWinnerIDRaisesNoIssue(t *testin
 // TestViewerAggregateAndDetail_StraySetupPoolsCSVAgree pins bc-pnum review
 // finding 4: the aggregate gates its pools.csv read on
 // state.CanGenerateDraw(comp.Status), via engine.DrawSourceFor
-// (buildViewerCompetitionPayload), and
+// (loadViewerCompetition), and
 // the detail endpoint must apply the SAME gate before feeding pools into
 // viewerDataIssues, or a setup-status competition with leftover pools.csv
 // bytes (a discarded draw, a hand-placed file) shows the missing-ids notice

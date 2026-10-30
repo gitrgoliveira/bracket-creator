@@ -1,7 +1,7 @@
 // Admin side: single tournament. Tournament has multiple Competitions.
 // Top-level: Tournament dashboard (all competitions), per-competition pages.
 
-import { applyPatch as patchCompetitionData, checkSeqGap, keepNewerDetail, matchInComp } from './patch.jsx';
+import { applyPatch as patchCompetitionData, applyPatchToCompetitions, checkSeqGap, keepNewerDetail, matchInComp } from './patch.jsx';
 import { createTimerPool } from './timer_pool.jsx';
 // Imported from the leaf, not read off `window`: write_result.jsx is
 // import-only (see its header) and every consumer ES-imports it directly.
@@ -17,6 +17,7 @@ import { keptInHistoryNote } from './match_groups.jsx';
 import { normalizeCompetitionDetail } from './api_serializers.jsx';
 import { confirmMatchLabel, confirmRunningCourtMove } from './court_move.jsx';
 import { holdsUnsaved, discardUnsaved } from './unsaved_entries.jsx';
+import { scoreRowMatchLabel } from './pool_ids.jsx';
 
 const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
 
@@ -99,10 +100,9 @@ function mergeCompetitionsIntoTournament(currentT, mutator) {
 // bc-kcdg: attemptScoreWrite (imported from write_result.jsx, the shared
 // confirm+retry loop for a 409 downstream_knockout_played refusal) is the
 // single place editMatchScore below -- and therefore every score-editor host
-// and both editor bodies -- gets this behaviour. It is ALSO used by
-// admin_shiaijo.jsx's ResolveFeedersModal for the override-winner "Run now"
-// recovery; see write_result.jsx's doc comment for why the shared loop lives
-// there rather than being defined once per script-tagged host.
+// and both editor bodies -- gets this behaviour; see write_result.jsx's doc
+// comment for why the shared loop lives there rather than being defined
+// once per script-tagged host.
 
 // Pure helper for the "merge a tournament-level patch onto the latest
 // tournament state" pattern used by AdminApp.updateTournament. Same
@@ -193,8 +193,10 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
       if (!cid) return;
       setAdminCompData((prev) => (prev && prev.config && prev.config.id === cid ? patchCompetitionData(prev, event) : prev));
       if (!tRef.current) return;
+      // The tournament holds every competition, so a court move re-stamps the
+      // court-wide queue numbers rather than shifting one competition's own.
       const next = mergeCompetitionsIntoTournament(tRef.current,
-        (comps) => comps.map((c) => (c.id === cid ? patchCompetitionData(c, event) : c)));
+        (comps) => applyPatchToCompetitions(comps, cid, event));
       tRef.current = next;
       onUpdateRef.current(next);
     });
@@ -410,8 +412,16 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
         recordScore: window.API.recordScore,
         confirmDialog: window.confirmDialog,
         compId, matchId, result, password, match,
+        // The Start anyway confirm names the bout it would start the way the
+        // operator's rows do, never by its raw id.
+        label: match ? scoreRowMatchLabel(match) : '',
         onRefusal: opts && opts.onRefusal,
         onDownstreamReopened: toastReopened,
+        // bc-adna: only an admin host's options turn the court_busy warning
+        // on (the court console never sends it); a write resent after the
+        // outbox brought the refusal back is handed to the editor (onForced).
+        allowCourtForce: !!(opts && opts.allowCourtForce),
+        onForced: opts && opts.onForced,
       });
     } catch (e) {
       // Every error toasted here is marked, so a host that catches it to show
@@ -421,6 +431,10 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
         // Declining the override leaves everything as it was: neither this
         // match nor the later one it depends on was written.
         showToast(DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED);
+        throw markToasted(e);
+      }
+      // bc-adna: if the operator cancelled forcing court, toast nothing and mark toasted
+      if (e.courtForceCancelled) {
         throw markToasted(e);
       }
       showToast(e.message, "error");

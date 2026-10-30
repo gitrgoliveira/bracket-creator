@@ -1237,7 +1237,7 @@ func TestCourtDisplay_StoreErrorReturns500(t *testing.T) {
 // contract at the mechanism level).
 //
 // Synchronisation is deterministic, not wall-clock: the swapped
-// viewerLoadCompetition hook (the load buildViewerCompetitionPayload makes
+// viewerLoadCompetition hook (the load loadViewerCompetition makes
 // for every competition) blocks the elected build on a gate channel, and
 // the sfTestWaiterAttached hook closes the gate only once every other
 // request has provably attached to the in-flight build — so no request can

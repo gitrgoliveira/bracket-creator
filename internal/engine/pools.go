@@ -4,13 +4,17 @@ import (
 	"fmt"
 	"sort"
 	"strconv"
+	"time"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
-func (e *Engine) generatePools(comp *state.Competition, players []domain.Player, seeds []domain.SeedAssignment) ([]state.MatchResult, error) {
+// generatePools lays out the pool phase. courtFloor is the earliest start per
+// court that the neighbouring same-day competitions leave (nil for none); the
+// caller scans for it once and hands the same floor to the preview bracket.
+func (e *Engine) generatePools(comp *state.Competition, players []domain.Player, seeds []domain.SeedAssignment, courtFloor map[string]time.Time) ([]state.MatchResult, error) {
 	// PoolSize is the divisor in CreatePools (and is fed to PoolSeeding); a
 	// zero/negative value would otherwise reach helper.CreatePools and the
 	// guard there returns a plain error mapped to HTTP 500. Validate up front
@@ -263,7 +267,7 @@ func (e *Engine) generatePools(comp *state.Competition, players []domain.Player,
 				Court:   poolCourts[i%len(poolCourts)],
 				Round:   round,
 				// ScheduledAt is populated below by
-				// assignPoolMatchSlots, uniform start times were
+				// assignPoolMatchSlotsFrom, uniform start times were
 				// retired in T150.
 			})
 		}
@@ -290,7 +294,7 @@ func (e *Engine) generatePools(comp *state.Competition, players []domain.Player,
 		// scheduleLeagueSlots treats an empty court list as one unnamed court.
 		var slots []int
 		results, slots = scheduleLeagueSlots(results, comp.Courts)
-		results, _ = assignLeagueSlotTimes(results, slots, comp, tournament)
+		results, _ = assignLeagueSlotTimesFrom(results, slots, comp, tournament, courtFloor)
 	} else {
 		// For single-pool multi-court, distribute each round's matches across
 		// courts so that simultaneous matches never share a participant.
@@ -314,7 +318,7 @@ func (e *Engine) generatePools(comp *state.Competition, players []domain.Player,
 				roundStart++
 			}
 		}
-		results, _ = assignPoolMatchSlots(results, comp, tournament)
+		results, _ = assignPoolMatchSlotsFrom(results, comp, tournament, courtFloor)
 	}
 
 	numberPoolMatchesInPlayingOrder(results)

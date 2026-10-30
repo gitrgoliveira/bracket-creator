@@ -8,8 +8,9 @@ import (
 	"log"
 	"net/http"
 	"slices"
-	"sort"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -85,112 +86,115 @@ func clampClientModifiedAt(v int64) int64 {
 	return v
 }
 
-// annotateQueuePositions fills in MatchResult.QueuePosition for each
-// element of matches in-place, delegating to state.DeriveQueuePositions
-// for the per-court (status priority, ScheduledAt, original index) sort.
-//
-// FR-025, T036: queue positions are derived at serve time rather than
-// persisted, a stored value would go stale the instant any match
-// transitions and we'd have to recompute on every score write anyway.
-// Match-list endpoints (handlers_viewer.go: GET /competitions and
-// GET /competitions/:id) call this just before c.JSON so viewers see
-// "next up: 3" without any background recomputation job. Score-write
-// endpoints return a single MatchResult and intentionally do NOT
-// annotate (a single match has no list ordering to derive against).
-func annotateQueuePositions(matches []state.MatchResult) {
-	if len(matches) == 0 {
-		return
+// loadCourtQueueEntries gathers the court queue entries of other competitions
+// on the same day as served with a draw (preview brackets expose no public
+// matches), eligibility-stamped exactly as a viewer payload stamps its own, so
+// stampCourtQueuePositions can number a competition's matches court-wide. The
+// served competition itself and competitions on other days are skipped before
+// loading matches. Each competition is loaded on its own goroutine (safeGo),
+// and the entries keep the order of ListCompetitions.
+// A read-only pass through the public Store loads, each taking and releasing
+// its own lock: never call it from inside Store.WithTransaction, whose
+// competition lock a load of that competition would wait on. One
+// competition's read fault is logged and that competition skipped; the
+// viewer payload never fails for it. A panic in a load is returned as the
+// error, for the caller to answer as an internal error.
+func loadCourtQueueEntries(store *state.Store, served *state.Competition) ([]state.CourtQueueEntry, error) {
+	ids, err := store.ListCompetitions()
+	if err != nil {
+		log.Printf("mobileapp: court queue: list competitions: %v", err)
+		return nil, nil
 	}
-	positions := state.DeriveQueuePositions(matches)
-	for i := range matches {
-		matches[i].QueuePosition = positions[i]
+
+	loaded := make([][]state.CourtQueueEntry, len(ids))
+	var wg sync.WaitGroup
+	var panicRef atomic.Pointer[recoveredPanic]
+	for i, id := range ids {
+		if served != nil && id == served.ID {
+			continue
+		}
+		idx, compID := i, id
+		safeGo(&wg, &panicRef, func() {
+			loaded[idx] = otherCompetitionQueueEntries(store, compID, served)
+		})
 	}
+	wg.Wait()
+	if p := panicRef.Load(); p != nil {
+		return nil, p
+	}
+
+	var allEntries []state.CourtQueueEntry
+	for _, entries := range loaded {
+		allEntries = append(allEntries, entries...)
+	}
+	return allEntries, nil
 }
 
-// annotateBracketQueuePositions fills in BracketMatch.QueuePosition for each
-// bracket match in-place. Non-scheduled matches are explicitly reset to 0 so
-// any stale value previously persisted in bracket.json (or written by future
-// code paths) cannot leak back out to clients via the omitempty JSON tag.
-//
-// The ordering basis matches the viewer's ScheduleViewer (web-mobile/js/
-// viewer.jsx around the byCourt sort): pointers to all bracket matches are
-// gathered, then sorted per-court by (status priority, ScheduledAt, round,
-// position) before the per-court counter is incremented. This keeps the
-// "Next up / N before yours" label consistent with the row order the viewer
-// actually renders, even when bracket matches are scheduled out of round
-// order (e.g., a finals court that started 30 minutes early).
-func annotateBracketQueuePositions(b *state.Bracket) {
-	if b == nil {
+// otherCompetitionQueueEntries is loadCourtQueueEntries' read of one
+// competition: nil when it fails to load, is on another day than served, or
+// holds no entries.
+func otherCompetitionQueueEntries(store *state.Store, id string, served *state.Competition) []state.CourtQueueEntry {
+	comp, err := viewerLoadCompetition(store, id)
+	if err != nil {
+		log.Printf("mobileapp: court queue %s: load competition: %v", id, err)
+		return nil
+	}
+	// state.CourtQueueEntriesOf owns the setup rule (no entries); this
+	// early exit only spares reading the matches it would ignore.
+	if comp == nil || comp.Status == state.CompStatusSetup {
+		return nil
+	}
+	if served != nil && !state.SameQueueDay(comp.Date, served.Date) {
+		return nil
+	}
+	poolMatches, err := store.LoadPoolMatches(id)
+	if err != nil {
+		log.Printf("mobileapp: court queue %s: load pool matches: %v", id, err)
+		return nil
+	}
+	bracket, err := store.LoadBracket(id)
+	if err != nil {
+		log.Printf("mobileapp: court queue %s: load bracket: %v", id, err)
+		return nil
+	}
+	bracket = stampViewerEligibility(store, id, poolMatches, bracket)
+	return state.CourtQueueEntriesOf(comp, poolMatches, bracket)
+}
+
+// stampCourtQueuePositions derives court-wide queue positions across every
+// competition on that court on the same day and stamps them onto poolMatches
+// and bracket in-place.
+func stampCourtQueuePositions(comp *state.Competition, poolMatches []state.MatchResult, bracket *state.Bracket, all []state.CourtQueueEntry) {
+	ownEntries := state.CourtQueueEntriesOf(comp, poolMatches, bracket)
+	if len(ownEntries) == 0 {
 		return
 	}
-
-	// Group pointers per court, preserving the round/position pair as a
-	// stable tie-break key. We can't sort b.Rounds itself, the bracket
-	// tree structure is load-bearing for the renderer.
-	type entry struct {
-		m        *state.BracketMatch
-		round    int
-		position int
+	compID := ""
+	if comp != nil {
+		compID = comp.ID
 	}
-	byCourt := make(map[string][]entry)
-	for ri := range b.Rounds {
-		for mi := range b.Rounds[ri] {
-			m := &b.Rounds[ri][mi]
-			byCourt[m.Court] = append(byCourt[m.Court], entry{m: m, round: ri, position: mi})
+	combined := make([]state.CourtQueueEntry, 0, len(ownEntries)+len(all))
+	combined = append(combined, ownEntries...)
+	for _, e := range all {
+		if compID != "" && e.CompetitionID == compID {
+			continue
 		}
-	}
-	// ThirdPlaceMatch (single-3rd bronze, bc-3rdp) is a sibling of Rounds. The bronze is
-	// conventionally played JUST BEFORE the final (viewer_awards.jsx: "the
-	// bronze is normally played first"), so slot it into the final's round with
-	// a position sentinel of -1: on their shared court, when scheduledAt is
-	// blank/equal, it sorts after the semifinals but before the final.
-	if b.ThirdPlaceMatch != nil {
-		finalRound := len(b.Rounds) - 1
-		byCourt[b.ThirdPlaceMatch.Court] = append(byCourt[b.ThirdPlaceMatch.Court],
-			entry{m: b.ThirdPlaceMatch, round: finalRound, position: -1})
+		combined = append(combined, e)
 	}
 
-	statusOrder := func(s state.MatchStatus) int {
-		switch s {
-		case state.MatchStatusRunning:
-			return 0
-		case state.MatchStatusScheduled:
-			return 1
-		default: // completed and any future status
-			return 2
-		}
+	applyQueuePositions(poolMatches, bracket, state.CourtQueuePositions(combined))
+}
+
+// applyQueuePositions stamps positions, laid out as state.CourtQueueEntriesOf
+// lays out the competition's entries (pool matches, then the bracket in draw
+// order), onto its matches.
+func applyQueuePositions(poolMatches []state.MatchResult, bracket *state.Bracket, positions []int) {
+	for i := range poolMatches {
+		poolMatches[i].QueuePosition = positions[i]
 	}
-
-	for _, entries := range byCourt {
-		sort.SliceStable(entries, func(i, j int) bool {
-			oi, oj := statusOrder(entries[i].m.Status), statusOrder(entries[j].m.Status)
-			if oi != oj {
-				return oi < oj
-			}
-			// Empty scheduledAt sinks to the end (mirrors the JS
-			// fallback to "99:99" in ScheduleViewer's sort).
-			ai, aj := state.QueueSortTime(entries[i].m.ScheduledAt), state.QueueSortTime(entries[j].m.ScheduledAt)
-			if ai != aj {
-				return ai < aj
-			}
-			if entries[i].round != entries[j].round {
-				return entries[i].round < entries[j].round
-			}
-			return entries[i].position < entries[j].position
-		})
-
-		counter := 0
-		for _, e := range entries {
-			// bc-cse: mirrors state.DeriveQueuePositions' own IneligibleSides
-			// skip -- a scheduled match with a currently barred side is not
-			// queued (position 0), so "Next up" and on-deck alerts skip it.
-			if e.m.Status == state.MatchStatusScheduled && e.m.IneligibleSides == nil {
-				counter++
-				e.m.QueuePosition = counter
-			} else {
-				e.m.QueuePosition = 0
-			}
-		}
+	offset := len(poolMatches)
+	for i, bm := range state.BracketMatchesInDrawOrder(bracket) {
+		bm.QueuePosition = positions[offset+i]
 	}
 }
 
@@ -245,13 +249,12 @@ func anyMatchToAnnotate(poolMatches []state.MatchResult, bracket *state.Bracket)
 // competitor status stands now, which the editor's clear control words its
 // consequence from.
 //
-// Read-only, request-time only, exactly like annotateQueuePositions: called
+// Read-only, request-time only, exactly like stampCourtQueuePositions: called
 // on the copy a viewer endpoint is about to serve, NEVER on a slice/bracket
 // destined for a save, which is what keeps the annotation off
 // pool-matches.csv and bracket.json (see the field's own doc comment,
-// models.go). MUST run BEFORE annotateQueuePositions/
-// annotateBracketQueuePositions, which read the stamp back to decide
-// whether a barred match counts toward the queue (position 0 for one).
+// models.go). MUST run BEFORE stampCourtQueuePositions, which reads the stamp
+// back to decide whether a barred match counts toward the queue (position 0 for one).
 func annotateEligibility(poolMatches []state.MatchResult, bracket *state.Bracket, statuses map[string]domain.CompetitorStatus) {
 	if len(statuses) == 0 {
 		return
@@ -661,7 +664,7 @@ func answerAutoComplete(c *gin.Context, hub Broadcaster, compID string, outcome 
 const bulkScorePushEachMax = 50
 
 // RegisterMatchHandlers wires up the score / quick-score / bulk-score /
-// court / override-winner / time endpoints under the admin group.
+// court / time endpoints under the admin group.
 //
 // The score endpoint is the Slice 0 / NFR-002 demonstration of the
 // interface-based dependency injection pattern (T017): it consumes
@@ -1023,8 +1026,7 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			}
 			// bc-kcdg: each reopened match is distinct from the entry just
 			// corrected; broadcast it too so a client watching only that
-			// court/match learns its verdict was cleared (mirrors /score and
-			// /override-winner).
+			// court/match learns its verdict was cleared (mirrors /score).
 			broadcastReopenedDownstream(hub, store, id, reopenedThisItem)
 		}
 
@@ -1297,7 +1299,7 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 		broadcastMatchNow(hub, store, id, mid, gin.H{"competitionId": id, "matchId": mid})
 		// bc-kcdg: each reopened match is distinct from the one just corrected;
 		// broadcast it too so a client watching only that court/match learns
-		// its verdict was cleared (mirrors /score and /override-winner).
+		// its verdict was cleared (mirrors /score).
 		broadcastReopenedDownstream(hub, store, id, reopenedDownstream)
 		if engStatus != nil {
 			hub.Broadcast(EventCompetitorStatusUpdated, gin.H{
@@ -1509,6 +1511,11 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 		var body struct {
 			Reason                string `json:"reason"`
 			ForceDownstreamReopen bool   `json:"forceDownstreamReopen"`
+			// ForceCourt is the organiser's "Reopen anyway" (bc-adna): a
+			// reopen into running on a court that already runs a bout skips
+			// both court gates. The route is main-gated in self-run, so no
+			// anonymous caller reaches it.
+			ForceCourt bool `json:"forceCourt"`
 			// The optional writeId and basis (bc-evts F1).
 			writeTag
 		}
@@ -1537,8 +1544,7 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 		// (anonymous participants are blocked from overwriting finalized
 		// results on the score path via holdSelfReportedWriteUnderTx; an ungated
 		// reopen would be a trivial bypass). The gate lives in the CENTRAL
-		// allowlist, isSelfRunMainGatedConfigRoute (middleware.go), same as
-		// its sibling override-winner — NOT hand-rolled here, so it shares
+		// allowlist, isSelfRunMainGatedConfigRoute (middleware.go) - NOT hand-rolled here, so it shares
 		// AuthMiddleware's verification mechanics including the F4
 		// empty-stored-password fail-closed branch. Pinned by
 		// TestSelfRun_ReopenRequiresMainPassword.
@@ -1549,8 +1555,9 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 		// has to remember to wrap the call.
 		var reopenedDownstream []engine.ReopenedMatch
 		restored, err := eng.ReopenMatch(id, mid, reason, body.tagInto(engine.ForceOptions{
-			Force:    body.ForceDownstreamReopen,
-			Reopened: &reopenedDownstream,
+			Force:      body.ForceDownstreamReopen,
+			Reopened:   &reopenedDownstream,
+			ForceCourt: body.ForceCourt,
 		}))
 		if err != nil {
 			var notFoundErr *engine.NotFoundError
@@ -1622,7 +1629,7 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 	// sibling match can hold this one's court) or in a different one — the body
 	// carries whichever competition owns it. It reopens a recorded result (the
 	// blocker keeps its score), so it is main-password-gated in self-run mode via the
-	// central allowlist, the same class as reopen/override-winner.
+	// central allowlist, the same class as reopen.
 	// Body: {blockerCompId, blockerMatchId, reason?, forceDownstreamReopen?} —
 	// reason and forceDownstreamReopen optional, exactly like reopen (an
 	// absent reason leaves the target ReopenPending). The target may be any
@@ -1764,7 +1771,7 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 	//
 	// Not court-gated (a running match stays running). It IS self-run
 	// main-gated (isSelfRunMainGatedConfigRoute, middleware.go): removing a
-	// bout is an organiser correction, the same class as reopen/override-winner,
+	// bout is an organiser correction, the same class as reopen,
 	// NOT the participant score path — which self-gates via enforceSelfRunPolicy
 	// (this handler has no such in-handler check), so without the allowlist
 	// entry a self-run pass-through would let an anonymous spectator delete a
@@ -1818,127 +1825,6 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 		// audit free-text (correctionReason/decisionReason) or another client's
 		// revSession (mp-gmcg review F2).
 		c.JSON(http.StatusOK, gin.H{"result": matchPtrForBroadcast(updated)})
-	})
-
-	r.PUT("/competitions/:id/matches/:mid/override-winner", func(c *gin.Context) {
-		id, ok := requireValidCompID(c)
-		if !ok {
-			return
-		}
-		mid := c.Param("mid")
-		var req struct {
-			WinnerName string `json:"winnerName"`
-			// ModifiedAt is the client's server-relative timestamp for
-			// last-write-wins reconciliation (mp-y3nk); 0 when unstamped.
-			ModifiedAt int64 `json:"modifiedAt"`
-			// ForceDownstreamReopen bypasses bc-kcdg's downstream-knockout-
-			// correction guard, same field name and contract as the score-write
-			// endpoint's (see scoreRequestBody.ForceDownstreamReopen).
-			ForceDownstreamReopen bool `json:"forceDownstreamReopen"`
-			// The optional writeId and basis (bc-evts F1).
-			writeTag
-		}
-		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-		if err := req.validateTag(); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-		// Trim whitespace from the winner name. Downstream comparisons
-		// (m.Winner == m.SideA / m.SideB in engine/scoring.go and
-		// engine/ranking.go) are exact-string equality, so a padded
-		// "  Foo  " won't match the canonical "Foo" from the roster,
-		// bracket math silently breaks. The JS prompt site at
-		// admin_competition.jsx now trims client-side, but a
-		// hand-crafted API call could still hit this. Mirrors the
-		// override-rank handler's TrimSpace pattern.
-		winnerName := strings.TrimSpace(req.WinnerName)
-		if winnerName == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "winnerName is required"})
-			return
-		}
-		if err := validateMaxLen("winnerName", winnerName, MaxLenMatchSide); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-
-		// Engi competitions decide bouts by referee flag counts. A manual
-		// winner override sets Winner without FlagsA/FlagsB, leaving a
-		// completed engi match with a 0-0 flag total that violates the
-		// {1,3,5} invariant. Reject it (mirrors the quick-score / decision
-		// guards) so flag scoring stays the only engi result path. Fail
-		// CLOSED on a load error, like those siblings: a transient fault must
-		// not let an engi override slip through into inconsistent state.
-		comp, loadErr := store.LoadCompetition(id)
-		if loadErr != nil {
-			internalError(c, loadErr)
-			return
-		}
-		if comp != nil && comp.Engi {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "override-winner is not supported for engi competitions; use flag scoring instead"})
-			return
-		}
-
-		// A stamp implausibly far in the future is refused before the engine is
-		// called at all (see modifiedAtRefuseSkewMs): honouring it would freeze
-		// the match and zeroing it would apply the override unconditionally over
-		// a newer stored result.
-		if serverNowMs, aheadMs, refuse := clientClockSkew(req.ModifiedAt); refuse {
-			respondClockSkew(c, serverNowMs, aheadMs)
-			return
-		}
-
-		// bc-kcdg: reopenedDownstream collects the IDs of any downstream
-		// bracket match reopened by a forced override, populated only when
-		// req.ForceDownstreamReopen actually unblocked one.
-		var reopenedDownstream []engine.ReopenedMatch
-		applied, err := eng.OverrideBracketWinner(id, mid, winnerName, clampClientModifiedAt(req.ModifiedAt), req.tagInto(engine.ForceOptions{
-			Force:    req.ForceDownstreamReopen,
-			Reopened: &reopenedDownstream,
-		}))
-		if err != nil {
-			// Map engine client-errors to their proper status so the offline
-			// terminal-write replay never treats a permanent 4xx (unknown match,
-			// or a feeder not yet finished) as a retryable failure and wedge sync
-			// (mp-y3nk). Mirrors the RevertMatchToQueue mapping above.
-			var notFoundErr *engine.NotFoundError
-			var validationErr *engine.ValidationError
-			switch {
-			case respondIfDownstreamKnockoutRunning(c, err):
-				// bc-rfsw: the override would change a side of a later match
-				// being fought now; terminal, not confirmable, and checked
-				// first like every other door.
-			case respondIfDownstreamKnockoutPlayed(c, err):
-				// Same fixed wire contract as the score-write endpoint's 409;
-				// respondIfDownstreamKnockoutPlayed already wrote the response.
-			case errors.As(err, &notFoundErr):
-				c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
-			case errors.As(err, &validationErr):
-				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			default:
-				internalError(c, err)
-			}
-			return
-		}
-
-		if applied {
-			hub.Broadcast(EventTournamentUpdated, nil)
-			broadcastMatchNow(hub, store, id, mid, gin.H{"competitionId": id, "matchId": mid})
-			// bc-kcdg: each reopened match is distinct from the one the
-			// operator just overrode; broadcast it too so a client watching
-			// only that court/match learns its verdict was cleared.
-			broadcastReopenedDownstream(hub, store, id, reopenedDownstream)
-			c.JSON(http.StatusOK, gin.H{"applied": true})
-			return
-		}
-		// A newer result for this match is stored: the override is not
-		// applied and is kept in the match's history with the winner it
-		// named (the engine's recordOverrideHistory). Answered exactly like
-		// any other write whose every change was held (bc-mrgc phase 3): the
-		// result group it held, and the superseded reason the client keys on.
-		respondSuperseded(c, []string{state.GroupResult}, "")
 	})
 
 	r.PUT("/competitions/:id/matches/:mid/time", func(c *gin.Context) {
@@ -2004,7 +1890,7 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 //
 // In officiated mode this is a pass-through that returns "admin", true.
 // On LoadTournament error the function fails closed (500).
-func enforceSelfRunPolicy(c *gin.Context, tl TournamentLoader, verifier PasswordVerifier, req *ScoreRequest) (string, bool) {
+func enforceSelfRunPolicy(c *gin.Context, tl TournamentLoader, verifier PasswordVerifier, req *ScoreRequest, forceCourt *bool) (string, bool) {
 	anonymous, ok := selfRunAnonymous(c, tl, verifier)
 	if !ok {
 		return "", false
@@ -2034,6 +1920,9 @@ func enforceSelfRunPolicy(c *gin.Context, tl TournamentLoader, verifier Password
 	// interfering with another session's rev ordering.
 	req.Rev = 0
 	req.RevSession = ""
+	// bc-adna: forcing a start on a busy court is the organiser's alone; a
+	// participant's forceCourt is dropped, so their start is court_busy.
+	*forceCourt = false
 	return "self-reported", true
 }
 
@@ -3470,6 +3359,11 @@ type scoreRequestBody struct {
 	// startPatch): the score the stored match holds is kept rather than
 	// replaced by the payload's empty one (engine.ForceOptions.StartOnly).
 	StartOnly bool `json:"startOnly"`
+	// ForceCourt is the organiser's "Start anyway" (bc-adna): a start on a
+	// court that already runs a bout skips both court gates and lands; the
+	// sides gate still runs. Request-only, like StartOnly, and dropped for
+	// an anonymous self-run caller (enforceSelfRunPolicy).
+	ForceCourt bool `json:"forceCourt"`
 	// ClearWithdrawal marks a completed correction that removes a withdrawal
 	// or default win recorded by mistake: the payload is the real result and
 	// replaces the ruling (state.MatchResult.ClearsWithdrawal,
@@ -3702,7 +3596,7 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 
 		// mp-ba3: self-run decision allowlist + result provenance. Runs
 		// after Validate() so the request is structurally valid.
-		resultSource, ok := enforceSelfRunPolicy(c, tl, verifier, &req)
+		resultSource, ok := enforceSelfRunPolicy(c, tl, verifier, &req, &body.ForceCourt)
 		if !ok {
 			return
 		}
@@ -3779,16 +3673,15 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 		isCorrection := writesOverFinished(result.Status) &&
 			matchStatusFromStore(store, id, mid) == state.MatchStatusCompleted
 
-		// Only the cross-comp gate below keys on this pre-tx isCorrection; the
-		// eligibility/simultaneity gate (StartMatchTx) re-derives it from the
-		// race-free in-tx status (mp-gmcg review). The mtime-keyed stale read
-		// that motivated that move is benign HERE for a different reason: this
-		// gate only ever skips for a write whose result.Status is completed, and
-		// a COMPLETING write never leaves the court running-occupied — so a
-		// misclassified first finalization skips a cross-comp court check that
-		// its own effect would have made a no-op anyway. The lasting
-		// two-running-matches-on-one-court state the gate exists to prevent needs
-		// a write that STAYS running, which is never a correction.
+		// The pre-tx isCorrection is read by the cross-comp gate only (StartMatchTx
+		// re-derives it in the transaction, mp-gmcg review). The stale read is
+		// benign because a correction, or any write over a finished match
+		// (writesOverFinished: completed, running or scheduled writes over a
+		// finished match), takes no court, so a misclassified first finalization
+		// skips a court check its own effect would have made a no-op. Separately,
+		// bc-adna skips the gate for forceCourt and, inside
+		// CheckCrossCompCourtBusyOnStart, for any write that does not move the match
+		// into running or that goes to a match already stored running.
 
 		// FR-035: WithCourtExclusivityLock serializes the cross-competition
 		// court-busy check + per-competition write under a tournament-level
@@ -3807,8 +3700,12 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 			reopenedDownstream []engine.ReopenedMatch
 		)
 		txErr := tx.WithCourtExclusivityLock(func() error {
-			if !isWithdrawal && !isCorrection {
-				if err := eng.CheckCrossCompCourtBusy(id, mid); err != nil {
+			// bc-adna: the court is judged only on a write that moves the
+			// match into running (CheckCrossCompCourtBusyOnStart reads the
+			// stored status here, pre-tx under the court lock), and not at
+			// all for the organiser's forceCourt.
+			if !isWithdrawal && !isCorrection && !body.ForceCourt {
+				if err := eng.CheckCrossCompCourtBusyOnStart(id, mid, result.Status); err != nil {
 					return err
 				}
 			}
@@ -3902,15 +3799,22 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 				isCorrectionInTx := writesOverFinished(result.Status) &&
 					existingStatus == state.MatchStatusCompleted
 				if !isWithdrawal && !isCorrectionInTx {
-					if err := eng.StartMatchTx(stx, id, mid); err != nil {
+					// bc-adna: the in-competition court gate judges the same
+					// move into running, from the snapshot; a forced start runs
+					// the sides gate alone.
+					skipCourtGate := body.ForceCourt ||
+						result.Status != state.MatchStatusRunning ||
+						existingStatus == state.MatchStatusRunning
+					if err := eng.StartMatchTx(stx, id, mid, skipCourtGate); err != nil {
 						engErr = err
 						return nil
 					}
 				}
 				engStatus, engErr = eng.RecordMatchResultWithIneligibilityTx(stx, id, mid, result, engine.ForceOptions{
-					Force:     body.ForceDownstreamReopen,
-					Reopened:  &reopenedDownstream,
-					StartOnly: body.StartOnly,
+					Force:      body.ForceDownstreamReopen,
+					Reopened:   &reopenedDownstream,
+					StartOnly:  body.StartOnly,
+					ForceCourt: body.ForceCourt,
 					// A participant's exact resend of a finish changes nothing,
 					// so it leaves no history line to loop.
 					NoReplayHistory: selfReported,

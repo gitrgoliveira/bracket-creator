@@ -11,6 +11,7 @@ import { poolNameOf, isPoolDaihyosenBout, teamMatchTypeFor } from './pool_ids.js
 import { NumberedName } from './numbered_name.jsx';
 import { resultRecencyDesc } from './result_recency.jsx';
 import { isBarredMatch } from './ineligible_match.jsx';
+import { paceDisplayOf, PaceTime } from './court_pace.jsx';
 
 const { useState, useMemo, useRef: useRefV } = React;
 const StatusBadge = window.StatusBadge;
@@ -36,7 +37,7 @@ const bracketRoundsContain = (bracket, id) =>
 // mp-tidg: activeTab + onTabChange are controlled props: app.jsx owns the
 // tab state so browser back/forward across tabs works (each tab switch is a
 // history push in the URL-sync effect). Do not add internal tab state here.
-export function ViewerCompetition({ tournament, competition, pools, poolMatches, standings, bracket, onBack, authed, onEditCompetition, tweaks, activeTab, onTabChange }) {
+export function ViewerCompetition({ tournament, competition, pools, poolMatches, standings, bracket, onBack, authed, onEditCompetition, tweaks, activeTab, onTabChange, paceLookup }) {
   const c = competition;
   const isEngi = !!(c && c.engi);
 
@@ -406,6 +407,7 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
               hasActiveFilter={hasActiveFilter}
               filterLabel={filterLabel}
               highlightPlayers={highlightPlayers}
+              paceLookup={paceLookup}
             />
           )}
           {effectiveTab === "bracket" && derivedBracket && (
@@ -483,12 +485,12 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
           {window.VersionFooter && <window.VersionFooter />}
         </div>
       </div>
-      {selectedMatch && <MatchViewerModal match={selectedMatch} onClose={closeMatch} tournament={tournament} compId={c.id} slotLabel={bracketSlotLabel} />}
+      {selectedMatch && <MatchViewerModal match={selectedMatch} onClose={closeMatch} tournament={tournament} compId={c.id} slotLabel={bracketSlotLabel} paceLookup={paceLookup} />}
     </div>
   );
 }
 
-export function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, runningMatches, upcomingMatches, recentMatches, allMatches, tweaks, tournament, compId, standings, pools, poolMatches, onSwitchTab, hasActiveFilter, filterLabel, highlightPlayers }) {
+export function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, runningMatches, upcomingMatches, recentMatches, allMatches, tweaks, tournament, compId, standings, pools, poolMatches, onSwitchTab, hasActiveFilter, filterLabel, highlightPlayers, paceLookup }) {
   const [expandedMatchId, setExpandedMatchId] = useState(null);
   // Every match this tab shows is a row of allMatches (ViewerCompetition
   // derives the other lists from it), which also keeps a match that has
@@ -576,7 +578,12 @@ export function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, runningM
             </div>
             <div className="my-match__chip">
               <span className="l">Time</span>
-              <span className="v">{myUpcoming.scheduledAt || "TBA"}</span>
+              <span className="v">
+                <PaceTime
+                  display={paceDisplayOf(paceLookup, myUpcoming.compId || myUpcoming.competitionId || c.id || "", myUpcoming.id || myUpcoming.matchId || "")}
+                  fallback={myUpcoming.scheduledAt || "TBA"}
+                />
+              </span>
             </div>
           </div>
           {(() => {
@@ -696,7 +703,7 @@ export function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, runningM
           <div className="section-title section-title--running">
             <span className="dot dot--running"></span> ON NOW
           </div>
-          <MatchDetailCard match={currentMatch} />
+          <MatchDetailCard match={currentMatch} paceLookup={paceLookup} />
         </div>
       )}
 
@@ -709,8 +716,8 @@ export function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, runningM
           <div className="vsched">
             {runningMatches.filter(m => !currentMatch || m.id !== currentMatch.id).map((m) => (
               <React.Fragment key={m.id}>
-                <VSchedItem m={m} tweaks={tweaks} onClick={() => handleMatchClick(m)} highlight={isPlayerWatched(m.sideA, highlightPlayers) || isPlayerWatched(m.sideB, highlightPlayers)} />
-                {!isSelfRun && expandedMatchId === m.id && <MatchDetailCard match={m} onClose={() => setExpandedMatchId(null)} />}
+                <VSchedItem m={m} tweaks={tweaks} onClick={() => handleMatchClick(m)} highlight={isPlayerWatched(m.sideA, highlightPlayers) || isPlayerWatched(m.sideB, highlightPlayers)} paceLookup={paceLookup} />
+                {!isSelfRun && expandedMatchId === m.id && <MatchDetailCard match={m} onClose={() => setExpandedMatchId(null)} paceLookup={paceLookup} />}
               </React.Fragment>
             ))}
           </div>
@@ -724,8 +731,8 @@ export function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, runningM
           <div className="vsched">
             {upcomingMatches.map((m) => (
               <React.Fragment key={m.id}>
-                <VSchedItem m={m} tweaks={tweaks} onClick={() => handleMatchClick(m)} highlight={isPlayerWatched(m.sideA, highlightPlayers) || isPlayerWatched(m.sideB, highlightPlayers)} />
-                {!isSelfRun && expandedMatchId === m.id && <MatchDetailCard match={m} onClose={() => setExpandedMatchId(null)} />}
+                <VSchedItem m={m} tweaks={tweaks} onClick={() => handleMatchClick(m)} highlight={isPlayerWatched(m.sideA, highlightPlayers) || isPlayerWatched(m.sideB, highlightPlayers)} paceLookup={paceLookup} />
+                {!isSelfRun && expandedMatchId === m.id && <MatchDetailCard match={m} onClose={() => setExpandedMatchId(null)} paceLookup={paceLookup} />}
               </React.Fragment>
             ))}
           </div>
@@ -743,14 +750,14 @@ export function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, runningM
           <div className="vsched">
             {recentMatches.map((m) => (
               <React.Fragment key={m.id}>
-                <VSchedItem m={m} tweaks={tweaks} onClick={() => handleMatchClick(m)} highlight={isPlayerWatched(m.sideA, highlightPlayers) || isPlayerWatched(m.sideB, highlightPlayers)} winnerTick={true} />
-                {!isSelfRun && expandedMatchId === m.id && <MatchDetailCard match={m} onClose={() => setExpandedMatchId(null)} />}
+                <VSchedItem m={m} tweaks={tweaks} onClick={() => handleMatchClick(m)} highlight={isPlayerWatched(m.sideA, highlightPlayers) || isPlayerWatched(m.sideB, highlightPlayers)} winnerTick={true} paceLookup={paceLookup} />
+                {!isSelfRun && expandedMatchId === m.id && <MatchDetailCard match={m} onClose={() => setExpandedMatchId(null)} paceLookup={paceLookup} />}
               </React.Fragment>
             ))}
           </div>
         </>
       )}
-      {isSelfRun && selectedMatch && <MatchViewerModal match={selectedMatch} onClose={closeMatch} tournament={tournament} compId={compId} />}
+      {isSelfRun && selectedMatch && <MatchViewerModal match={selectedMatch} onClose={closeMatch} tournament={tournament} compId={compId} paceLookup={paceLookup} />}
     </div>
   );
 }

@@ -5,6 +5,7 @@
 import { withNumber, numberedParts } from './match_scoreboard.jsx';
 import { poolNameOf, isSupplementaryBout, swissRoundLabel } from './pool_ids.jsx';
 import { isBarredMatch } from './ineligible_match.jsx';
+import { orderOnCourt } from './court_queue.jsx';
 
 // NOTE: this module is the shared *leaf* in the display graph: presentation
 // modules (scoreboard, lobby, streaming) import from here, not vice versa.
@@ -86,65 +87,49 @@ function bracketSidesReady(m) {
     return true;
 }
 
-// Find the running match on a court from a tournament + competitions blob.
+// Find the running match on a court in court-queue order from a tournament + competitions blob.
 // Returns null when no running match. Used by TvDisplay and StreamingOverlay.
 function findRunningOnCourt(competitions, court) {
     if (!competitions || !court) return null;
-    for (const c of competitions) {
-        if (!c) continue;
-        const poolMatches = c.poolMatches || [];
-        for (const m of poolMatches) {
-            if ((m.court || "") !== court) continue;
-            if (m.status === "running" && bracketSidesReady(m)) {
-                return { match: m, competition: c };
-            }
-        }
-        // Bracket matches stored in c.bracket?.rounds may also be running.
-        const rounds = (c.bracket && c.bracket.rounds) || [];
-        for (let ri = 0; ri < rounds.length; ri++) {
-            for (const m of rounds[ri]) {
-                if ((m.court || "") !== court) continue;
-                if (m.status === "running" && bracketSidesReady(m)) {
-                    return { match: m, competition: c, isBracket: true, roundIndex: ri, totalRounds: rounds.length };
-                }
-            }
-        }
+    for (const e of orderOnCourt(competitions, court)) {
+        if (e.status !== "running" || !bracketSidesReady(e.match)) continue;
+        const where = boardPlaceOf(e);
+        if (!where) continue;
+        if (!where.isBracket) return { match: e.match, competition: e.comp };
+        return { match: e.match, competition: e.comp, isBracket: true, roundIndex: where.roundIndex, totalRounds: where.totalRounds };
     }
     return null;
 }
 
-// Collect upcoming (scheduled) matches on a court, sorted by queue position
-// (asc), then scheduledAt. Caps at `limit`. Used by T068 to render
-// "2 before yours" labels under the running match in TvDisplay.
+// Where a court-queue entry sits for the board: a pool row, or a knockout
+// round. The bronze (bracket.thirdPlaceMatch) has no round, and the board has
+// never shown it, so it answers null and is skipped.
+function boardPlaceOf(e) {
+    const c = e.comp;
+    if ((c.poolMatches || []).includes(e.match)) return { isBracket: false };
+    const rounds = (c.bracket && c.bracket.rounds) || [];
+    const ri = rounds.findIndex((round) => (round || []).includes(e.match));
+    if (ri < 0) return null;
+    return { isBracket: true, roundIndex: ri, totalRounds: rounds.length };
+}
+
+// Collect upcoming (scheduled) matches on a court, in court-queue order across
+// competitions via orderOnCourt. Caps at `limit`. Used by TvDisplay and LobbyDisplay.
 function findUpcomingOnCourt(competitions, court, limit = 2) {
     const out = [];
     if (!competitions || !court) return out;
-    for (const c of competitions) {
-        if (!c) continue;
-        const poolMatches = c.poolMatches || [];
-        for (const m of poolMatches) {
-            if ((m.court || "") !== court) continue;
-            if (m.status !== "scheduled") continue;
-            if (!bracketSidesReady(m)) continue;
-            if (isBarredMatch(m)) continue; // cannot be fought as scheduled
-            out.push({ ...m, _comp: c });
-        }
-        const rounds = (c.bracket && c.bracket.rounds) || [];
-        rounds.forEach((round, ri) => round.forEach((m) => {
-            if ((m.court || "") !== court) return;
-            if (m.status !== "scheduled") return;
-            if (!bracketSidesReady(m)) return; // skip "Pool X-Nth" / "Winner of …" placeholders
-            if (isBarredMatch(m)) return; // cannot be fought as scheduled
-            out.push({ ...m, _comp: c, _isBracket: true, _roundIndex: ri, _totalRounds: rounds.length });
-        }));
+    for (const e of orderOnCourt(competitions, court)) {
+        if (out.length >= limit) break;
+        const m = e.match;
+        if (e.status !== "scheduled") continue;
+        if (!bracketSidesReady(m)) continue; // skip "Pool X-Nth" / "Winner of …" placeholders
+        if (isBarredMatch(m)) continue; // cannot be fought as scheduled
+        const where = boardPlaceOf(e);
+        if (!where) continue;
+        if (!where.isBracket) out.push({ ...m, _comp: e.comp });
+        else out.push({ ...m, _comp: e.comp, _isBracket: true, _roundIndex: where.roundIndex, _totalRounds: where.totalRounds });
     }
-    out.sort((a, b) => {
-        const qa = Number(a.queuePosition) || 9999;
-        const qb = Number(b.queuePosition) || 9999;
-        if (qa !== qb) return qa - qb;
-        return (a.scheduledAt || "99:99").localeCompare(b.scheduledAt || "99:99");
-    });
-    return out.slice(0, limit);
+    return out;
 }
 
 // Counts of matches on a court grouped by status. Drives T062/T063 empty

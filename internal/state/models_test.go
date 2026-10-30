@@ -369,6 +369,68 @@ courts: [A]
 		require.NoError(t, yaml.Unmarshal([]byte(raw), &got))
 		assert.Nil(t, got.Theme)
 	})
+	t.Run("logoOnLobby JSON round-trip: present when true, absent when false", func(t *testing.T) {
+		withFlag := &Tournament{
+			Name:  "Test",
+			Theme: &Theme{LogoOnLobby: true},
+		}
+		b, err := json.Marshal(withFlag)
+		require.NoError(t, err)
+		assert.Contains(t, string(b), `"logoOnLobby":true`)
+		var gotTrue Tournament
+		require.NoError(t, json.Unmarshal(b, &gotTrue))
+		require.NotNil(t, gotTrue.Theme)
+		assert.True(t, gotTrue.Theme.LogoOnLobby)
+
+		withoutFlag := &Tournament{
+			Name:  "Test",
+			Theme: &Theme{PrimaryColor: "#1d3557", LogoOnLobby: false},
+		}
+		bFalse, err := json.Marshal(withoutFlag)
+		require.NoError(t, err)
+		assert.NotContains(t, string(bFalse), "logoOnLobby")
+		var gotFalse Tournament
+		require.NoError(t, json.Unmarshal(bFalse, &gotFalse))
+		require.NotNil(t, gotFalse.Theme)
+		assert.False(t, gotFalse.Theme.LogoOnLobby)
+	})
+	t.Run("logo_on_lobby YAML front-matter round-trip on tournament.md", func(t *testing.T) {
+		dir := t.TempDir()
+		store, err := NewStore(dir)
+		require.NoError(t, err)
+
+		tour := &Tournament{
+			Name:     "Lobby Logo Cup",
+			Date:     "01-06-2026",
+			Venue:    "Dojo",
+			Courts:   []string{"A"},
+			Password: "secret",
+			Theme:    &Theme{LogoOnLobby: true},
+		}
+		require.NoError(t, store.SaveTournament(tour))
+
+		raw, err := os.ReadFile(filepath.Join(dir, "tournament.md"))
+		require.NoError(t, err)
+		assert.Contains(t, string(raw), "logo_on_lobby: true")
+
+		got, err := store.LoadTournament()
+		require.NoError(t, err)
+		require.NotNil(t, got)
+		require.NotNil(t, got.Theme)
+		assert.True(t, got.Theme.LogoOnLobby)
+
+		// When false, logo_on_lobby is omitted from tournament.md front matter.
+		tour.Theme = &Theme{PrimaryColor: "#1d3557", LogoOnLobby: false}
+		require.NoError(t, store.SaveTournament(tour))
+		rawFalse, err := os.ReadFile(filepath.Join(dir, "tournament.md"))
+		require.NoError(t, err)
+		assert.NotContains(t, string(rawFalse), "logo_on_lobby")
+
+		gotFalse, err := store.LoadTournament()
+		require.NoError(t, err)
+		require.NotNil(t, gotFalse.Theme)
+		assert.False(t, gotFalse.Theme.LogoOnLobby)
+	})
 }
 
 // TestValidateTheme covers the hex-color acceptance criteria (mp-scf).
@@ -380,6 +442,7 @@ func TestValidateTheme(t *testing.T) {
 	}{
 		{"nil is valid", nil, false},
 		{"empty struct is valid", &Theme{}, false},
+		{"logoOnLobby only is valid", &Theme{LogoOnLobby: true}, false},
 		{"valid colors", &Theme{PrimaryColor: "#1d3557", AccentSoftColor: "#e7eaf3"}, false},
 		{"uppercase hex valid", &Theme{PrimaryColor: "#1D3557"}, false},
 		{"bad primary", &Theme{PrimaryColor: "red"}, true},

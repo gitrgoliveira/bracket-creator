@@ -7,6 +7,7 @@ import { NumberedName } from './numbered_name.jsx';
 import { teamIVPWScore } from './bracket.jsx';
 import { matchShowsScore } from './match_shows_score.jsx';
 import { isSupplementaryBout } from './pool_ids.jsx';
+import { useCourtPaceLookup, paceDisplayOf, PaceTime } from './court_pace.jsx';
 
 const { useState: useSD, useEffect: useED, useMemo: useMD } = React;
 
@@ -154,7 +155,7 @@ function teamScoreCell(match, withZekkenName) {
 // Render one match cell (td > .match-cell div) for the cross-court table.
 // rowKind: 'now' | 'next' | 'queue': determines the background/border.
 // slot: the buildCourtSlots entry for this cell (null → empty cell).
-function LobbyMatchCell({ slot, rowKind }) {
+function LobbyMatchCell({ slot, rowKind, paceLookup }) {
     if (!slot) {
         return (
             <td style={{ padding: '4px 8px', verticalAlign: 'top' }}>
@@ -192,7 +193,11 @@ function LobbyMatchCell({ slot, rowKind }) {
     }
 
     const phase = phaseLabel(match, isBracket, roundIndex, totalRounds, competition?.format);
-    const compMeta = [competition?.name, phase, match.scheduledAt].filter(Boolean).join(' · ');
+    const compId = competition?.id || competition?.config?.id || "";
+    const matchId = match?.id || match?.ID || "";
+    const prefix = [competition?.name, phase].filter(Boolean).join(' · ');
+    const hasTime = Boolean(match.scheduledAt);
+    const timeNode = <PaceTime display={paceDisplayOf(paceLookup, compId, matchId)} fallback={match.scheduledAt || ""} />;
     // NO middle-mark chip in the meta strip (operator ruling): the
     // IndividualScore row below carries X/(E)/(DH) in its own FIK centre,
     // the mark's ONE home; a second copy in the corner was an error.
@@ -205,14 +210,16 @@ function LobbyMatchCell({ slot, rowKind }) {
                 minHeight: 54,
                 border: `1px solid ${cellBorder}`,
             }}>
-                {compMeta && (
+                {(prefix || hasTime) && (
                     // One child, so no flex row: the chip that used to sit
                     // beside this text is gone (see the ruling above) and the
                     // truncation moved onto the element that owns the text.
                     // vh, not a fixed 10px: the names beside it are vh-scaled
                     // (.lobby-cell in styles.css), so a pinned size shrinks
                     // away to nothing beside them on a large venue screen.
-                    <div style={{ fontSize: '1.2vh', color: LOBBY_COLORS.inkMuted, marginBottom: 4, letterSpacing: '0.02em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{compMeta}</div>
+                    <div style={{ fontSize: '1.2vh', color: LOBBY_COLORS.inkMuted, marginBottom: 4, letterSpacing: '0.02em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {prefix && hasTime ? <>{prefix} · {timeNode}</> : (prefix || timeNode)}
+                    </div>
                 )}
                 {/* One matchup = one IndividualScore row (same component the
                     per-court board and viewer card use). Owns names, ippon
@@ -252,6 +259,7 @@ function LobbyDisplay({ tournament, competitions, connected = true }) {
     // cycleKey increments on every page flip so the CSS animation on the
     // progress bar restarts from zero each time.
     const [cycleKey, setCycleKey] = useSD(0);
+    const pace = useCourtPaceLookup(competitions);
 
     // T065 auto-cycle. Only arm the timer when there is more than one
     // page. Reset to page 0 if the court count drops below the
@@ -316,7 +324,10 @@ function LobbyDisplay({ tournament, competitions, connected = true }) {
                 letterSpacing: '0.08em', textTransform: 'uppercase',
                 borderBottom: `1px solid ${LOBBY_COLORS.line}`,
             }}>
-                <div style={{ fontWeight: 700, fontSize: '2.4vh', letterSpacing: '0.1em' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12, fontWeight: 700, fontSize: '2.4vh', letterSpacing: '0.1em' }}>
+                    {Boolean(tournament?.theme?.logoOnLobby && tournament?.theme?.hasLogo) && (
+                        <img src="/api/branding/logo" alt="Tournament logo" className="lobby__logo" />
+                    )}
                     {tournament?.name || ''}
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
@@ -456,6 +467,7 @@ function LobbyDisplay({ tournament, competitions, connected = true }) {
                                                 <LobbyMatchCell
                                                     slot={courtSlots[ci][row.slot]}
                                                     rowKind={rowKind}
+                                                    paceLookup={pace}
                                                 />
                                                 {/* Thin vertical separator between courts: decorative, hidden from AT */}
                                                 {ci < visible.length - 1 && (

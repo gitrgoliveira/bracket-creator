@@ -45,7 +45,7 @@ func TestAssignSlotsSequentialPerCourt(t *testing.T) {
 		{ID: "p1-4", Court: "A"},
 		{ID: "p1-5", Court: "A"},
 	}
-	matches, _ = assignPoolMatchSlots(matches, comp, tournament)
+	matches, _ = assignPoolMatchSlotsFrom(matches, comp, tournament, nil)
 
 	// 3 minutes * 1.5 multiplier = 4.5 → rounds to 5. Each slot
 	// should be 5 minutes after the previous.
@@ -83,7 +83,7 @@ func TestAssignSlotsParallelAcrossCourts(t *testing.T) {
 		{ID: "p2-1", Court: "B"},
 		{ID: "p2-2", Court: "B"},
 	}
-	matches, _ = assignPoolMatchSlots(matches, comp, tournament)
+	matches, _ = assignPoolMatchSlotsFrom(matches, comp, tournament, nil)
 
 	// Both courts start at 09:00.
 	assert.Equal(t, "09:00", matches[0].ScheduledAt, "court A first match")
@@ -139,7 +139,7 @@ func TestAssignSlotsSkipsOpeningBlock(t *testing.T) {
 		{ID: "p1-0", Court: "A"},
 		{ID: "p1-1", Court: "A"},
 	}
-	matches, _ = assignPoolMatchSlots(matches, comp, tournament)
+	matches, _ = assignPoolMatchSlotsFrom(matches, comp, tournament, nil)
 
 	assert.Equal(t, "09:30", matches[0].ScheduledAt,
 		"opening 30m should push first slot to 09:30")
@@ -169,7 +169,7 @@ func TestAssignSlotsSkipsLunchBlock(t *testing.T) {
 		{ID: "p1-3", Court: "A"}, // 11:57 → inside lunch (12:00–13:00) → 13:00
 		{ID: "p1-4", Court: "A"}, // 13:09
 	}
-	matches, _ = assignPoolMatchSlots(matches, comp, tournament)
+	matches, _ = assignPoolMatchSlotsFrom(matches, comp, tournament, nil)
 
 	assert.Equal(t, "11:30", matches[0].ScheduledAt)
 	assert.Equal(t, "11:39", matches[1].ScheduledAt)
@@ -213,7 +213,7 @@ func TestAssignSlotsNoMatchInsideCeremony(t *testing.T) {
 		}
 		matches = append(matches, state.MatchResult{ID: "m", Court: court})
 	}
-	matches, _ = assignPoolMatchSlots(matches, comp, tournament)
+	matches, _ = assignPoolMatchSlotsFrom(matches, comp, tournament, nil)
 
 	lunchStart := parseClockHHMM("12:00")
 	lunchEnd := parseClockHHMM("13:00")
@@ -249,8 +249,8 @@ func TestAssignSlotsRespectsClockToElapsedMultiplier(t *testing.T) {
 	matchesB := []state.MatchResult{
 		{Court: "A"}, {Court: "A"}, {Court: "A"},
 	}
-	matchesA, _ = assignPoolMatchSlots(matchesA, comp, mult1)
-	matchesB, _ = assignPoolMatchSlots(matchesB, comp, mult2)
+	matchesA, _ = assignPoolMatchSlotsFrom(matchesA, comp, mult1, nil)
+	matchesB, _ = assignPoolMatchSlotsFrom(matchesB, comp, mult2, nil)
 
 	gapA := minutesBetween(t, matchesA[0].ScheduledAt, matchesA[1].ScheduledAt)
 	gapB := minutesBetween(t, matchesB[0].ScheduledAt, matchesB[1].ScheduledAt)
@@ -274,7 +274,7 @@ func TestAssignSlotsZeroDurationFallback(t *testing.T) {
 	matches := []state.MatchResult{
 		{Court: "A"}, {Court: "A"},
 	}
-	matches, _ = assignPoolMatchSlots(matches, comp, tournament)
+	matches, _ = assignPoolMatchSlotsFrom(matches, comp, tournament, nil)
 
 	// Default 3 clock min * 1.5 multiplier = 4.5 → 5.
 	per := perMatchElapsedMinutes(comp, tournament, false)
@@ -526,7 +526,7 @@ func TestAssignSlots_EmptyReturnsStartAnchorNotZero(t *testing.T) {
 	dayStart := parseClockHHMM(comp.StartTime)
 
 	// No opening block (nil tournament) → anchor == dayStart, duration 0.
-	_, poolCur := assignPoolMatchSlots(nil, comp, nil)
+	_, poolCur := assignPoolMatchSlotsFrom(nil, comp, nil, nil)
 	assert.True(t, poolCur.Equal(dayStart), "empty pool slots (no opening) should return dayStart")
 	assert.Equal(t, 0.0, poolCur.Sub(dayStart).Minutes(), "empty pool duration must be 0")
 
@@ -536,13 +536,13 @@ func TestAssignSlots_EmptyReturnsStartAnchorNotZero(t *testing.T) {
 	// With a 30m opening block → anchor == dayStart + 30m (consistent with the
 	// non-empty path, where the first match starts at dayStart+OpeningBlock).
 	tourn := &state.Tournament{OpeningBlock: "30m"}
-	_, poolCurOpen := assignPoolMatchSlots(nil, comp, tourn)
+	_, poolCurOpen := assignPoolMatchSlotsFrom(nil, comp, tourn, nil)
 	assert.Equal(t, 30.0, poolCurOpen.Sub(dayStart).Minutes(), "empty pool with 30m opening must anchor at +30m")
 	brkCurOpen := assignBracketMatchSlots(nil, comp, tourn, nil)
 	assert.Equal(t, 30.0, brkCurOpen.Sub(dayStart).Minutes(), "empty bracket with 30m opening must anchor at +30m")
 
 	// nil comp → zero time.Time (dayStart cannot be derived).
-	_, nilCur := assignPoolMatchSlots(nil, nil, nil)
+	_, nilCur := assignPoolMatchSlotsFrom(nil, nil, nil, nil)
 	assert.True(t, nilCur.IsZero(), "nil comp should return zero time.Time")
 }
 

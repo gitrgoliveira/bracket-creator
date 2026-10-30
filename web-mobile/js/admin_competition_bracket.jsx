@@ -166,10 +166,11 @@ const RunningMatchPanel = React.memo(({ match, compId, courts, matchNum, onMoveC
             // (editing a completed match); an un-played match has nowhere to go.
             canClose={isComplete}
             onClose={() => setEditing(false)}
+            allowCourtForce
             onSubmit={async (patch, opts) => {
               try {
                 // opts: the editor's own claim on a refusal (onRefusal).
-                const res = await onEditScore(compId, match.id, patch, match, opts);
+                const res = await onEditScore(compId, match.id, patch, match, { ...opts, allowCourtForce: true });
                 // Recorded → fall back to the result card, unless the editor's
                 // job is not done (writeKeepsEditorOpen).
                 if (!writeKeepsEditorOpen(patch, res)) setEditing(false);
@@ -302,7 +303,7 @@ function AdminBracket({ c, t, bracket, onMoveCourt, onEditScore, tweaks, passwor
   };
   // All bracket scoring now flows through the shared inline ScoreEditorModal →
   // onEditScore (the same path pools / scores / shiaijo use), so the bespoke
-  // recordScore / overrideBracketWinner entry points are gone from this panel.
+  // score entry points are gone from this panel.
   const selectedMatch = findSelectedMatch();
   // Compute the match's number/round ONCE (one scan of the display model).
   const selectedMeta = selectedMatch ? matchMeta(selectedMatch.id) : { matchNum: null, roundName: null };

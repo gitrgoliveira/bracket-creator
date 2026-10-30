@@ -53,6 +53,12 @@ type Engine struct {
 	// and pin that nothing it wrote is lost (bc-mrgc phase 3). Production
 	// never sets it.
 	afterMatchRead func(compID string)
+
+	// beforeStartCommit, when set (tests only), runs in StartCompetition
+	// after the draw is generated and before the atomic commit re-checks
+	// the settings it was generated from, so a test can land a concurrent
+	// settings save in that window. Production never sets it.
+	beforeStartCommit func(compID string)
 }
 
 // noteMatchRead runs the test seam above, when one is set.

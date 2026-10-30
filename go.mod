@@ -7,7 +7,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/muesli/mango-cobra v1.3.0
 	github.com/muesli/roff v0.1.0
-	github.com/pdfcpu/pdfcpu v0.16.3
+	github.com/pdfcpu/pdfcpu v0.16.4
 	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e
 	github.com/spf13/cobra v1.10.2
 	github.com/stretchr/testify v1.12.1
@@ -20,7 +20,7 @@ require (
 
 require (
 	github.com/bytedance/gopkg v0.1.4 // indirect
-	github.com/bytedance/sonic v1.15.4 // indirect
+	github.com/bytedance/sonic v1.15.5 // indirect
 	github.com/bytedance/sonic/loader v0.5.3 // indirect
 	github.com/clipperhouse/uax29/v2 v2.7.0 // indirect
 	github.com/cloudwego/base64x v0.1.7 // indirect
@@ -29,7 +29,7 @@ require (
 	github.com/go-playground/locales v0.14.2 // indirect
 	github.com/go-playground/universal-translator v0.18.2 // indirect
 	github.com/go-playground/validator/v10 v10.30.5 // indirect
-	github.com/goccy/go-json v0.11.2 // indirect
+	github.com/goccy/go-json v0.12.0 // indirect
 	github.com/goccy/go-yaml v1.19.2 // indirect
 	github.com/hhrutter/tiff v1.0.7 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
@@ -58,7 +58,7 @@ require (
 	go.yaml.in/yaml/v3 v3.0.5 // indirect
 	golang.org/x/arch v0.32.0 // indirect
 	golang.org/x/image v0.47.0 // indirect
-	golang.org/x/net v0.61.0 // indirect
+	golang.org/x/net v0.62.0 // indirect
 	golang.org/x/sys v0.49.0 // indirect
 	google.golang.org/protobuf v1.36.12 // indirect
 )

@@ -26,7 +26,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { settle, withAdminPage } from '../lib/ui.mjs';
-import { EDITOR, TAP_DWELL_MS, finishMatch, startMatch } from '../lib/editor.mjs';
+import { EDITOR, TAP_DWELL_MS, finishMatch, startMatch, startNextFromList } from '../lib/editor.mjs';
 import { SCORE_EDITOR_SOURCES, VIEWER_SOURCES } from '../lib/scope.mjs';
 
 // Competition ids at module level so each recipe's `route` can name them
@@ -77,11 +77,10 @@ async function scoreBout(editor, page, i) {
   await settle(page, 100);
 }
 
-// Open the competition's first scorable match and play `count` of them through
-// ONE editor: every "Finish + Start Next" completes the open match and starts
-// the next one on the same shiaijo, so the editor never has to be reopened from
-// the list beneath its backdrop. The last Finish starts the next match too,
-// which leaves it running: the capture shows a bracket mid-play.
+// Open the competition's first scorable match and play `count` of them. The
+// Scores tab's Finish closes the editor without starting anything, so after
+// each the next match is opened from the list and started; the one started
+// after the last Finish is left running: the capture shows a bracket mid-play.
 async function playInOrder(page, base, compId, count) {
   await page.goto(`${base}/admin/competition/${compId}/scores`, { waitUntil: 'domcontentloaded' });
   const row = page.locator('.score-edit-row')
@@ -94,6 +93,7 @@ async function playInOrder(page, base, compId, count) {
   for (let i = 0; i < count; i += 1) {
     await scoreBout(editor, page, i);
     await finishMatch(page);
+    await startNextFromList(page);
   }
 }
 

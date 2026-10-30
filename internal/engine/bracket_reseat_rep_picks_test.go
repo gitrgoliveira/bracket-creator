@@ -5,7 +5,7 @@ package engine
 // and the picker offers only the seated team's members (GroupRepPickA and
 // GroupRepPickB, state/match_groups.go). seatBracketSide is the one owner; these tests drive
 // it through the doors that re-seat a side with no store handle of their own
-// (a forced score correction, override-winner) and pin what must NOT change: a
+// (a forced score correction, or an unforced correction over a scheduled match) and pin what must NOT change: a
 // correction that stores the same winner, and the side nobody re-seated.
 
 import (
@@ -208,13 +208,14 @@ func TestReseat_PlayedDownstreamReopenLineNamesNoPicksWhenNoneWentWithIt(t *test
 	}
 }
 
-func TestReseat_OverrideWinnerLosesTheReseatedSidesPick(t *testing.T) {
+func TestReseat_ScoreCorrectionLosesTheReseatedSidesPick(t *testing.T) {
 	eng, store, compID := rpSetup(t, false)
 	prior := rpNext(t, store, compID)
 
-	applied, err := eng.OverrideBracketWinner(compID, "m-r1-0", wrTeamB, 0)
-	require.NoError(t, err)
-	require.True(t, applied)
+	require.NoError(t, inTx(t, store, compID, func(tx state.StoreTx) error {
+		_, err := eng.RecordMatchResultWithIneligibilityTx(tx, compID, "m-r1-0", rpCorrect(wrTeamB), ForceOptions{})
+		return err
+	}))
 	assertSideAPickGone(t, rpNext(t, store, compID), prior.ModifiedAt)
 }
 

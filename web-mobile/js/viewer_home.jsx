@@ -87,7 +87,7 @@ function mirrorWatchlistToAddressBar(watchlist, roster) {
   }
 }
 
-export function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSchedule, onRegister, onOpenResults, sseConnected = true }) {
+export function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSchedule, onRegister, onOpenResults, sseConnected = true, paceLookup }) {
   // WatchlistPanel lives in viewer_watchlist.jsx; read it at render time so the
   // viewer.jsx <-> viewer_watchlist.jsx runtime cycle is load-order independent.
   // Fall back to a no-op if viewer_watchlist.js fails to load so the rest of
@@ -562,7 +562,7 @@ export function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOp
             <>
               <div className="section-title viewer__upnext-title">Up next · {upNext.length}</div>
               <div className="vsched">
-                {upNext.map((m) => <VSchedItem key={`${m.compId}:${m.id}`} m={m} tweaks={{ showDojo: true }} showCompetition onClick={() => openMatch(m)} />)}
+                {upNext.map((m) => <VSchedItem key={`${m.compId}:${m.id}`} m={m} tweaks={{ showDojo: true }} showCompetition onClick={() => openMatch(m)} paceLookup={paceLookup} />)}
               </div>
             </>
           )}
@@ -603,7 +603,7 @@ export function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOp
           {window.VersionFooter && <window.VersionFooter />}
         </div>
       </div>
-      {selectedMatch && <MatchViewerModal match={selectedMatch} onClose={closeMatch} tournament={t} />}
+      {selectedMatch && <MatchViewerModal match={selectedMatch} onClose={closeMatch} tournament={t} paceLookup={paceLookup} />}
     </div>
   );
 }

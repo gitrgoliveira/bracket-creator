@@ -243,6 +243,51 @@ func TestDeleteBrandingLogo_PreservesWindowTitle(t *testing.T) {
 	assert.Equal(t, "My Cup 2026", theme["windowTitle"], "windowTitle must be preserved after logo delete")
 }
 
+// TestDeleteBrandingLogo_PreservesLogoOnLobby verifies that deleting the logo
+// does not nil-out the Theme when logoOnLobby is true and no colours are set.
+func TestDeleteBrandingLogo_PreservesLogoOnLobby(t *testing.T) {
+	h, _, cleanup := brandingTestSetup(t)
+	defer cleanup()
+
+	// Enable logoOnLobby with no colours via PUT /tournament.
+	body := `{"name":"Test Cup","password":"secret","courts":["A"],"theme":{"logoOnLobby":true}}`
+	req := httptest.NewRequest(http.MethodPut, "/api/tournament", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Tournament-Password", "secret")
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	// Upload a logo.
+	logoBody, ct := buildBrandingUpload(t, "logo.png", tinyPNG)
+	req = httptest.NewRequest(http.MethodPost, "/api/branding/logo", logoBody)
+	req.Header.Set("Content-Type", ct)
+	req.Header.Set("X-Tournament-Password", "secret")
+	w = httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	// Delete the logo.
+	req = httptest.NewRequest(http.MethodDelete, "/api/branding/logo", nil)
+	req.Header.Set("X-Tournament-Password", "secret")
+	w = httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	// Theme must survive with logoOnLobby true and hasLogo absent.
+	req = httptest.NewRequest(http.MethodGet, "/api/tournament", nil)
+	req.Header.Set("X-Tournament-Password", "secret")
+	w = httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+	var got map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
+	theme, _ := got["theme"].(map[string]any)
+	require.NotNil(t, theme, "theme must not be nil after logo delete when logoOnLobby is true")
+	assert.Equal(t, true, theme["logoOnLobby"], "logoOnLobby must be preserved after logo delete")
+	assert.NotContains(t, theme, "hasLogo", "hasLogo must be absent after logo delete")
+}
+
 func TestDeleteBrandingLogo_NoLogoReturns404(t *testing.T) {
 	h, _, cleanup := brandingTestSetup(t)
 	defer cleanup()

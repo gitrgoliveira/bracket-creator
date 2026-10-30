@@ -4,6 +4,7 @@
 // write_result.jsx is a leaf with no imports, so this cannot form a cycle.
 import { BRONZE_MATCH_ID } from './write_result.jsx';
 import { bronzeFeederSemis } from './bronze_feeders.jsx';
+import { compareDmy } from './date_order.jsx';
 
 // sideA/sideB can be a string (raw backend shape), an object with .name
 // (normalizeMatch output, which substitutes {id:"",name:""} for missing sides),
@@ -338,22 +339,6 @@ function isoToDmy(iso) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) return "";
   const [yyyy, mm, dd] = iso.split('-');
   return `${dd}-${mm}-${yyyy}`;
-}
-
-// Chronological comparator for DD-MM-YYYY date strings. JS's default
-// `Array.sort()` does lexical compare, which works for ISO YYYY-MM-DD
-// (lex == chronological) but produces wrong order for DMY: "01-06-2026"
-// (June 1) sorts before "12-05-2026" (May 12) lexically. This helper
-// converts each value to an ISO sort key so lex compare matches
-// chronological order. Non-DMY inputs (e.g. "") fall back to string
-// compare so a mix of valid + empty dates still sorts deterministically.
-function compareDmy(a, b) {
-  const toKey = (d) => {
-    if (!d) return "";
-    const m = /^(\d{2})-(\d{2})-(\d{4})$/.exec(d);
-    return m ? `${m[3]}-${m[2]}-${m[1]}` : d;
-  };
-  return toKey(a).localeCompare(toKey(b));
 }
 
 function getScoreBtnClass(status) {

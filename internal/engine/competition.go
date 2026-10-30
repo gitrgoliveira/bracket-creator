@@ -1130,6 +1130,7 @@ func (e *Engine) runDrawPipeline(id string) error {
 	loadedPoolSizeMode := comp.PoolSizeMode
 	loadedNumberPrefix := comp.NumberPrefix
 	loadedStartTime := comp.StartTime
+	loadedDate := comp.Date
 	loadedRoundRobin := comp.RoundRobin
 	loadedKind := comp.Kind
 	loadedWithZekken := comp.WithZekkenName
@@ -1142,8 +1143,10 @@ func (e *Engine) runDrawPipeline(id string) error {
 	// per pool). It is therefore snapshotted and validated in the atomic commit
 	// below, but ONLY for mixed format, for other formats it still doesn't
 	// drive generation, so admin's concurrent change is preserved by leaving
-	// current.PoolWinners alone. Name, Date, Venue are still NOT
-	// snapshotted (UI-only, never read during generation).
+	// current.PoolWinners alone. Date is snapshotted because the court
+	// floor (courtFloorFor) reads it to find the same-day competitions on
+	// shared courts. Name and Venue are still NOT snapshotted (UI-only,
+	// never read during generation).
 	//
 	// Roster/seed mtimes. Settings drift is detected via the field-by-
 	// field snapshot above; participants and seeds live in separate
@@ -1167,7 +1170,7 @@ func (e *Engine) runDrawPipeline(id string) error {
 	// omission.
 	loadedParticipantsMtime, loadedSeedsMtime := e.store.ParticipantsFingerprint(id)
 
-	if comp.Kind == "team" && comp.TeamSize == 0 {
+	if comp.IsTeam() && comp.TeamSize == 0 {
 		comp.TeamSize = 5 // Default for Kendo
 	}
 
@@ -1303,10 +1306,17 @@ func (e *Engine) runDrawPipeline(id string) error {
 	}
 	switch comp.Format {
 	case state.CompFormatMixed, state.CompFormatLeague:
+		// One scan of the other same-day competitions serves the pools and
+		// the preview bracket alike. Read before the first write: a court
+		// planned past midnight refuses the draw and leaves the files alone.
+		courtFloor, err := e.courtFloorFor(comp, tourn)
+		if err != nil {
+			return err
+		}
 		if err := clearEarlierDraw(); err != nil {
 			return err
 		}
-		poolMatches, err := e.generatePools(comp, players, seeds)
+		poolMatches, err := e.generatePools(comp, players, seeds, courtFloor)
 		if err != nil {
 			return err
 		}
@@ -1316,7 +1326,7 @@ func (e *Engine) runDrawPipeline(id string) error {
 		// source competition at draw time, mirroring the Excel Tree sheet.
 		// League has no knockout stage, so skip it there.
 		if comp.Format == state.CompFormatMixed {
-			if err := e.generatePoolPreviewBracket(comp, poolMatches); err != nil {
+			if err := e.generatePoolPreviewBracket(comp, poolMatches, courtFloor); err != nil {
 				return err
 			}
 		}
@@ -1360,10 +1370,14 @@ func (e *Engine) runDrawPipeline(id string) error {
 		// A standalone knockout competition (the only remaining knockout case
 		// after the derived-knockout path was removed in mp-turx) uses standalone
 		// seeding, there is no pool-preview topology to mirror.
+		courtFloor, err := e.courtFloorFor(comp, tourn)
+		if err != nil {
+			return err
+		}
 		if err := clearEarlierDraw(); err != nil {
 			return err
 		}
-		if err := e.generateKnockout(comp, players, seeds); err != nil {
+		if err := e.generateKnockout(comp, players, seeds, courtFloor); err != nil {
 			return err
 		}
 		comp.Status = state.CompStatusDrawReady
@@ -1376,7 +1390,7 @@ func (e *Engine) runDrawPipeline(id string) error {
 	// than clobbering their result with ours.
 	//
 	// The transform ALSO re-validates the generation-relevant fields
-	// (Format, PoolSize, PoolSizeMode, NumberPrefix, StartTime,
+	// (Format, PoolSize, PoolSizeMode, NumberPrefix, StartTime, Date,
 	// RoundRobin, Kind, WithZekkenName, Courts, the exact set
 	// listed in the validation block below). If a concurrent settings
 	// save changed any of those between our outer Load (the basis
@@ -1398,6 +1412,9 @@ func (e *Engine) runDrawPipeline(id string) error {
 	// generates (clearEarlierDraw above). Pre-existing partial-
 	// atomicity issue; the fix here only guarantees comp-config
 	// consistency.
+	if e.beforeStartCommit != nil {
+		e.beforeStartCommit(id)
+	}
 	_, err = e.store.UpdateCompetitionChanged(id, func(current *state.Competition) (*state.Competition, error) {
 		if current == nil {
 			return nil, notFoundErrorf("competition %s not found (deleted during start)", id)
@@ -1414,10 +1431,11 @@ func (e *Engine) runDrawPipeline(id string) error {
 		//   - NumberPrefix (player numbering in generatePools; generateKnockout
 		//     composes none, its tree is built from names alone)
 		//   - StartTime (initial ScheduledAt for generated matches)
+		//   - Date (the same-day competitions whose courts set the floor)
 		//   - Courts (court labels assigned to generated matches)
 		//   - Kind / WithZekkenName (participants loading)
 		//   - CheckInEnabled (decides which participants are included)
-		// Other config fields (TeamSize, Name, Date, Venue) are NOT
+		// Other config fields (TeamSize, Name, Venue) are NOT
 		// validated, they don't drive generation, so admin's concurrent
 		// change to them doesn't invalidate the pools.csv / bracket.json we
 		// just wrote. Their values are preserved by leaving `current.X` alone
@@ -1433,12 +1451,13 @@ func (e *Engine) runDrawPipeline(id string) error {
 			current.PoolSizeMode != loadedPoolSizeMode ||
 			current.NumberPrefix != loadedNumberPrefix ||
 			current.StartTime != loadedStartTime ||
+			current.Date != loadedDate ||
 			current.RoundRobin != loadedRoundRobin ||
 			current.Kind != loadedKind ||
 			current.WithZekkenName != loadedWithZekken ||
 			current.CheckInEnabled != loadedCheckInEnabled ||
 			!courtsEqual(current.Courts, loadedCourts) {
-			return nil, validationErrorf("competition %s configuration changed during start (Format/PoolSize/PoolSizeMode/NumberPrefix/StartTime/RoundRobin/Kind/WithZekkenName/CheckInEnabled/Courts); regenerate by retrying", id)
+			return nil, validationErrorf("competition %s configuration changed during start (Format/PoolSize/PoolSizeMode/NumberPrefix/StartTime/Date/RoundRobin/Kind/WithZekkenName/CheckInEnabled/Courts); regenerate by retrying", id)
 		}
 		if loadedFormat == state.CompFormatMixed && current.PoolWinners != loadedPoolWinners {
 			return nil, validationErrorf("competition %s PoolWinners changed during start; regenerate by retrying", id)

@@ -9,8 +9,7 @@
 // the flag the confirmed retry depends on (api_serializers.jsx).
 //
 // The second describe block below pins the SAME contract for
-// API.overrideBracketWinner (the manual winner pick used by the admin bracket
-// panel and ResolveFeedersModal's "Run now" recovery), which shares the parser
+// API.recordDecision (kiken / fusenpai / daihyosen), which shares the parser
 // (_downstreamKnockoutPlayedError) rather than re-deriving it.
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
@@ -112,100 +111,9 @@ describe('API.recordScore: downstream_knockout_played (bc-kcdg)', () => {
   });
 });
 
-// bc-kcdg: overrideBracketWinner (the admin bracket panel's / ResolveFeedersModal's
-// manual winner pick) shares the SAME parser (_downstreamKnockoutPlayedError in
-// api_client.jsx) and the SAME force-flag field name as recordScore above, so a
-// caller can offer the identical confirm+retry loop rather than surfacing the
-// raw 409 token with no explanation.
-describe('API.overrideBracketWinner: downstream_knockout_played (bc-kcdg)', () => {
-  let originalFetch;
-  afterEach(() => { if (originalFetch) global.fetch = originalFetch; });
-
-  it('throws an Error decorated with the structured refusal fields', async () => {
-    originalFetch = global.fetch;
-    global.fetch = vi.fn().mockResolvedValue({
-      ok: false,
-      status: 409,
-      json: async () => ({
-        error: 'downstream_knockout_played',
-        matchId: 'm-r2-0',
-        blockingMatchId: 'm-r1-0',
-        displaced: 'Bob',
-        message: 'Bob already played match m-r1-0, asserting this winner would displace them.',
-      }),
-    });
-
-    const err = await (await API.overrideBracketWinner('c1', 'm-r2-0', 'Alice', 'pw')).settled.then(
-      () => { throw new Error('expected a rejection'); },
-      (e) => e,
-    );
-
-    // The operator-facing message is the server's sentence, not the bare code
-    // -- this is exactly the "raw token with no explanation" gap being closed.
-    expect(err.message).toBe('Bob already played match m-r1-0, asserting this winner would displace them.');
-    expect(downstreamKnockoutPlayedRefusal(err)).toEqual({
-      matchId: 'm-r2-0',
-      blockingMatchId: 'm-r1-0',
-      // Singleton list: the only multi-entry case is a semifinal that fed
-      // both the final and the bronze match. Shape is {id, number}.
-      blockingMatches: [{ id: 'm-r1-0' }],
-      displaced: 'Bob',
-      // A knockout correction moves no pool place.
-      qualifierChange: [],
-    });
-  });
-
-  it('does not decorate an unrelated 4xx failure', async () => {
-    originalFetch = global.fetch;
-    global.fetch = vi.fn().mockResolvedValue({
-      ok: false,
-      status: 400,
-      json: async () => ({ error: 'match not found' }),
-    });
-
-    const err = await (await API.overrideBracketWinner('c1', 'm1', 'Alice', 'pw')).settled.then(
-      () => { throw new Error('expected a rejection'); },
-      (e) => e,
-    );
-    expect(err.message).toBe('match not found');
-    expect(downstreamKnockoutPlayedRefusal(err)).toBeNull();
-  });
-
-  it('forwards forceDownstreamReopen:true on the confirmed retry onto the wire payload', async () => {
-    originalFetch = global.fetch;
-    global.fetch = vi.fn().mockResolvedValue({
-      ok: true,
-      status: 200,
-      json: async () => ({ applied: true }),
-    });
-
-    await (await API.overrideBracketWinner('c1', 'm-r2-0', 'Alice', 'pw', true)).settled;
-
-    const [url, opts] = global.fetch.mock.calls[0];
-    expect(url).toBe('/api/competitions/c1/matches/m-r2-0/override-winner');
-    const sentBody = JSON.parse(opts.body);
-    expect(sentBody.forceDownstreamReopen).toBe(true);
-  });
-
-  it('omits forceDownstreamReopen from the wire payload when not passed', async () => {
-    originalFetch = global.fetch;
-    global.fetch = vi.fn().mockResolvedValue({
-      ok: true,
-      status: 200,
-      json: async () => ({ applied: true }),
-    });
-
-    await (await API.overrideBracketWinner('c1', 'm-r2-0', 'Alice', 'pw')).settled;
-
-    const [, opts] = global.fetch.mock.calls[0];
-    const sentBody = JSON.parse(opts.body);
-    expect(sentBody.forceDownstreamReopen).toBeUndefined();
-  });
-});
-
 // bc-cse: API.recordDecision (kiken / fusenpai / daihyosen) shares the SAME
 // parser (_downstreamKnockoutPlayedError) and the SAME force-flag field name
-// as recordScore/overrideBracketWinner above. Before this fix the /decision
+// as recordScore above. Before this fix the /decision
 // 4xx branch threw a plain `new Error(err.error || ...)`, so a
 // downstream_knockout_played refusal surfaced as the literal string
 // "downstream_knockout_played" with the server's actual message discarded and
@@ -363,6 +271,33 @@ describe('API.recordScore: court_busy (bc-rawm)', () => {
     expect(err.label).toBe('Pool A · Match 2');
   });
 
+  // bc-adna: another tab of the device can send the same queued start first
+  // and take it out of storage when it draws the refusal. The tab that made
+  // the write has its own request out, so its own answer settles it: the
+  // caller still gets the court_busy refusal (the Scores tab's Start anyway
+  // asks on it), never a quiet "sent by another tab".
+  it('a refusal reaches the tab that made the write when another tab took the entry out while its request was out', async () => {
+    originalFetch = global.fetch;
+    let answer;
+    global.fetch = vi.fn(() => new Promise((resolve) => { answer = resolve; }));
+    const res = await API.recordScore('c1', 'm1', { status: 'running' }, 'pw');
+    for (let i = 0; i < 5; i++) await Promise.resolve();
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    const oldRaw = localStorage.getItem('bc_write_queue_v2');
+    localStorage.setItem('bc_write_queue_v2', '[]');
+    window.dispatchEvent(new StorageEvent('storage', { key: 'bc_write_queue_v2', oldValue: oldRaw, newValue: '[]' }));
+    answer({
+      ok: false,
+      status: 409,
+      headers: { get: () => null },
+      json: async () => ({ error: 'court_busy', court: 'B', matchId: 'm-blk', compId: 'c2', label: 'Match 1 (Semifinals)' }),
+    });
+    const err = await res.settled.then(() => { throw new Error('expected a rejection'); }, (e) => e);
+    expect(err.code).toBe('court_busy');
+    expect(err.court).toBe('B');
+    expect(err.label).toBe('Match 1 (Semifinals)');
+  });
+
   // bc-cse: no "This shiaijo"/"another match" fallback -- respondCourtBusy
   // (handlers_match.go) always sends both `court` and a `label`
   // (matchLabelOrID falls back to the raw match id rather than omitting it),
@@ -402,9 +337,6 @@ describe('pool corrections that move a qualifier', () => {
   it.each([
     ['recordScore', async () => (await API.recordScore('c1', 'Pool A-0', { status: 'completed' }, 'pw')).settled],
     ['recordDecision', async () => (await API.recordDecision('c1', 'Pool A-0', { decision: 'kiken-voluntary', decisionBy: 'aka' }, 'pw')).settled],
-    // bc-rfsw: an override (ResolveFeedersModal) whose winner would change a
-    // side of a later match being fought now gets the same sentence.
-    ['overrideBracketWinner', async () => (await API.overrideBracketWinner('c1', 'Pool A-0', 'Alice', 'pw')).settled],
   ])('%s throws the running refusal as the operator copy, never confirmable', async (_door, send) => {
     originalFetch = global.fetch;
     global.fetch = vi.fn().mockResolvedValue({

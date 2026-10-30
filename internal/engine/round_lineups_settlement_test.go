@@ -77,14 +77,31 @@ func TestRoundLineups_GivenWhenTheEngineAdvancesAWinner(t *testing.T) {
 	winnerA, loserA := semi0.SideA, semi0.SideB
 	winnerB, loserB := semi1.SideA, semi1.SideB
 
-	_, err = eng.OverrideBracketWinner(compID, semi0.ID, winnerA, 0)
-	require.NoError(t, err)
+	scoreWinner := func(mID, winner string) {
+		b, err := store.LoadBracket(compID)
+		require.NoError(t, err)
+		m := b.MatchByID(mID)
+		require.NotNil(t, m)
+		var ipponsA, ipponsB []string
+		if winner == m.SideA {
+			ipponsA = []string{"M"}
+		} else {
+			ipponsB = []string{"M"}
+		}
+		_, err = eng.RecordMatchResultWithIneligibility(compID, mID, &state.MatchResult{
+			ID: mID, Status: state.MatchStatusCompleted, SideA: m.SideA, SideB: m.SideB,
+			SideAID: m.SideAID, SideBID: m.SideBID, Winner: winner,
+			IpponsA: ipponsA, IpponsB: ipponsB,
+		}, ForceOptions{Force: true})
+		require.NoError(t, err)
+	}
+
+	scoreWinner(semi0.ID, winnerA)
 	assert.Equal(t, winnerA+"-second", inForce(winnerA, final.ID), "the winner of the first semifinal has its second round lineup in the final")
 	assert.Equal(t, winnerA+"-start", inForce(winnerA, semi0.ID), "and the starting lineup before it")
 	assert.False(t, marker(), "the other semifinal is still to be played")
 
-	_, err = eng.OverrideBracketWinner(compID, semi1.ID, winnerB, 0)
-	require.NoError(t, err)
+	scoreWinner(semi1.ID, winnerB)
 	assert.Equal(t, winnerB+"-second", inForce(winnerB, final.ID))
 	assert.False(t, marker(), "the final's sides are decided, but the competition is not completed: a correction can still seat another team")
 	roundLineups := func(st *state.Store) (held int) {
@@ -105,8 +122,7 @@ func TestRoundLineups_GivenWhenTheEngineAdvancesAWinner(t *testing.T) {
 	// The second semifinal's result was recorded the wrong way round, and is
 	// corrected before the final is played: the other team is seated in the final,
 	// with the lineup v2.1.1 showed there.
-	_, err = eng.OverrideBracketWinner(compID, semi1.ID, loserB, 0)
-	require.NoError(t, err)
+	scoreWinner(semi1.ID, loserB)
 	assert.Equal(t, loserB+"-second", inForce(loserB, final.ID), "the team the correction seats has its second round lineup in the final")
 	assert.Equal(t, loserB+"-start", inForce(loserB, semi1.ID))
 
@@ -478,17 +494,33 @@ func TestRoundLineups_ASemiFinalOnlyLineupDoesNotHideTheRoundLineupAtTheFinal(t 
 	bracket, err := seed.LoadBracket(compID)
 	require.NoError(t, err)
 	require.Len(t, bracket.Rounds, 3)
-	for _, m := range bracket.Rounds[0] {
-		_, err := eng.OverrideBracketWinner(compID, m.ID, m.SideA, 0)
+	scoreSeedWinner := func(mID, winner string) {
+		b, err := seed.LoadBracket(compID)
 		require.NoError(t, err)
+		m := b.MatchByID(mID)
+		require.NotNil(t, m)
+		var ipponsA, ipponsB []string
+		if winner == m.SideA {
+			ipponsA = []string{"M"}
+		} else {
+			ipponsB = []string{"M"}
+		}
+		_, err = eng.RecordMatchResultWithIneligibility(compID, mID, &state.MatchResult{
+			ID: mID, Status: state.MatchStatusCompleted, SideA: m.SideA, SideB: m.SideB,
+			SideAID: m.SideAID, SideBID: m.SideBID, Winner: winner,
+			IpponsA: ipponsA, IpponsB: ipponsB,
+		}, ForceOptions{Force: true})
+		require.NoError(t, err)
+	}
+	for _, m := range bracket.Rounds[0] {
+		scoreSeedWinner(m.ID, m.SideA)
 	}
 	bracket, err = seed.LoadBracket(compID)
 	require.NoError(t, err)
 	semi, otherSemi := bracket.Rounds[1][0], bracket.Rounds[1][1]
 	team := semi.SideAID
 	require.NotEmpty(t, team)
-	_, err = eng.OverrideBracketWinner(compID, semi.ID, semi.SideA, 0)
-	require.NoError(t, err)
+	scoreSeedWinner(semi.ID, semi.SideA)
 	bracket, err = seed.LoadBracket(compID)
 	require.NoError(t, err)
 	final := bracket.Rounds[2][0]
@@ -532,8 +564,7 @@ func TestRoundLineups_ASemiFinalOnlyLineupDoesNotHideTheRoundLineupAtTheFinal(t 
 	assert.Equal(t, "round2-onwards", inForce(final.ID), "v2.1.1 showed the round lineup again at the final")
 	assert.True(t, roundLineupKept(), "the competition is on, so the round lineup is kept")
 
-	_, err = eng.OverrideBracketWinner(compID, otherSemi.ID, otherSemi.SideA, 0)
-	require.NoError(t, err)
+	scoreSeedWinner(otherSemi.ID, otherSemi.SideA)
 
 	assert.Equal(t, "round2-onwards", inForce(final.ID))
 	assert.Equal(t, "semi-final-only", inForce(semi.ID))

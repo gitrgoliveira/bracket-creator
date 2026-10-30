@@ -125,7 +125,7 @@ func (e *Engine) QuarantineCorruptBracket(id string) (*QuarantineResult, error) 
 	if err != nil {
 		return nil, fmt.Errorf("loading the pool matches for %s: %w", id, err)
 	}
-	if err := e.generatePoolPreviewBracket(comp, poolMatches); err != nil {
+	if err := e.generatePoolPreviewBracket(comp, poolMatches, nil); err != nil {
 		return nil, fmt.Errorf("rebuilding the bracket for %s: %w", id, err)
 	}
 	result.Rebuilt = true

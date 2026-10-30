@@ -2,6 +2,7 @@ package engine
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
@@ -31,7 +32,7 @@ func winnerOfPlaceholder(depth, matchIdx int) string {
 // array. (A mixed competition's pool-fed knockout is NOT built here, it is the
 // preview bracket from generatePoolPreviewBracket, filled in by
 // ResolveQualifiedPools as each pool finishes.)
-func (e *Engine) generateKnockout(comp *state.Competition, players []domain.Player, seeds []domain.SeedAssignment) error {
+func (e *Engine) generateKnockout(comp *state.Competition, players []domain.Player, seeds []domain.SeedAssignment, courtFloor map[string]time.Time) error {
 	// helper.Player is a type alias for domain.Player (NFR-007); the
 	// Excel-coupled helpers accept domain values directly.
 	if len(seeds) > 0 {
@@ -76,7 +77,7 @@ func (e *Engine) generateKnockout(comp *state.Competition, players []domain.Play
 	// bracket never carries it, its competitors are numbered pool by pool
 	// instead, and generatePoolPreviewBracket passes nil for exactly that
 	// reason.
-	bracket, err := e.buildBracketFromDraw(comp, draw, drawOrder, nil)
+	bracket, err := e.buildBracketFromDraw(comp, draw, drawOrder, nil, courtFloor)
 	if err != nil {
 		return err
 	}
@@ -115,7 +116,7 @@ func (e *Engine) generateKnockout(comp *state.Competition, players []domain.Play
 // poolMatches is the saved pool phase (the draw passes what generatePools
 // saved, the quarantine rebuild what is on disk): each court's knockout is
 // timed after that court's last pool bout (bc-kosc).
-func (e *Engine) generatePoolPreviewBracket(comp *state.Competition, poolMatches []state.MatchResult) error {
+func (e *Engine) generatePoolPreviewBracket(comp *state.Competition, poolMatches []state.MatchResult, courtFloor map[string]time.Time) error {
 	pools, err := e.store.LoadPools(comp.ID)
 	if err != nil {
 		return fmt.Errorf("loading pools for preview bracket: %w", err)
@@ -158,7 +159,7 @@ func (e *Engine) generatePoolPreviewBracket(comp *state.Competition, poolMatches
 	// never resolved competitors at draw time, so there is nothing to stamp
 	// (see buildBracketFromDraw's own doc comment). ResolveQualifiedPools
 	// stamps ids as each placeholder resolves to a real pool finisher.
-	bracket, err := e.buildBracketFromDraw(comp, draw, nil, poolMatches)
+	bracket, err := e.buildBracketFromDraw(comp, draw, nil, poolMatches, courtFloor)
 	if err != nil {
 		return err
 	}
@@ -200,7 +201,12 @@ func (e *Engine) generatePoolPreviewBracket(comp *state.Competition, poolMatches
 // (poolPhaseEndByCourt), the same pools-then-knockout sequencing the estimator
 // uses. generateKnockout passes nil, so a knockout-only competition keeps the
 // day start.
-func (e *Engine) buildBracketFromDraw(comp *state.Competition, draw *helper.KnockoutDraw, drawOrder []string, poolMatches []state.MatchResult) (*state.Bracket, error) {
+//
+// courtFloor is the earliest start per court that the other competitions
+// sharing a court on the same day leave; nil means no floor. The quarantine
+// rebuild passes nil, so a repair never moves times against competitions
+// drawn later.
+func (e *Engine) buildBracketFromDraw(comp *state.Competition, draw *helper.KnockoutDraw, drawOrder []string, poolMatches []state.MatchResult, courtFloor map[string]time.Time) (*state.Bracket, error) {
 	if draw == nil || draw.Root == nil {
 		return nil, fmt.Errorf("buildBracketFromDraw: no draw to build from")
 	}
@@ -379,8 +385,9 @@ func (e *Engine) buildBracketFromDraw(comp *state.Competition, draw *helper.Knoc
 	// for the same wiring. Scheduled in number order, so the load-time repair
 	// of the old storage-order scheduling owes it nothing (TimesSettled).
 	// A pools + knockout draw starts each court's knockout after that court's
-	// last pool bout (bc-kosc); knockout-only (nil poolMatches) keeps the day start.
-	assignBracketMatchSlots(bracket.Rounds, comp, tournament, poolPhaseEndByCourt(poolMatches, comp, tournament))
+	// last pool bout (bc-kosc) and any court floor; knockout-only (nil poolMatches)
+	// gets the floor alone.
+	assignBracketMatchSlots(bracket.Rounds, comp, tournament, knockoutCourtStart(poolMatches, comp, tournament, courtFloor))
 	bracket.TimesSettled = true
 
 	// Bronze (3rd-place) knockout: only when this competition's format

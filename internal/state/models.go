@@ -169,13 +169,21 @@ func ValidateSponsor(s Sponsor) error {
 // browser tab/window title; it defaults to "Bracket Creator Mobile" when
 // empty. LogoPath stores the uploaded logo filename under
 // tournament-data/branding/; it is NOT exposed in JSON responses (the logo
-// is served via GET /api/branding/logo instead).
+// is served via GET /api/branding/logo instead). LogoOnLobby opts in to
+// showing the uploaded logo on the lobby TV display.
 // All fields are optional; omit the whole block for the default styling.
 type Theme struct {
 	PrimaryColor    string `yaml:"primary_color,omitempty"    json:"primaryColor,omitempty"`
 	AccentSoftColor string `yaml:"accent_soft_color,omitempty" json:"accentSoftColor,omitempty"`
 	WindowTitle     string `yaml:"window_title,omitempty"      json:"windowTitle,omitempty"`
 	LogoPath        string `yaml:"logo_path,omitempty"         json:"-"` // disk filename; served via /api/branding/logo
+	LogoOnLobby     bool   `yaml:"logo_on_lobby,omitempty"     json:"logoOnLobby,omitempty"`
+}
+
+// IsEmpty reports whether no field of the theme is set, so a handler drops the
+// block instead of persisting a bare "theme: {}" to tournament.md.
+func (t Theme) IsEmpty() bool {
+	return t == Theme{}
 }
 
 // MarshalJSON adds hasLogo (true when a custom logo is uploaded) to the wire

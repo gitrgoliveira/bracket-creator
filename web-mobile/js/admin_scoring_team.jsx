@@ -71,7 +71,7 @@ import { publishBoardOverlay } from './court_bridge.jsx';
 import { isBarredMatch } from './ineligible_match.jsx';
 import { isOlderRunningCopy } from './patch.jsx';
 
-import { SyncStatusPill, useChangedGroups, useKeptInHistoryNote, KeptInHistoryNote } from './admin_scoring_autosave.jsx';
+import { useChangedGroups, useKeptInHistoryNote, KeptInHistoryNote } from './admin_scoring_autosave.jsx';
 import { MatchHistoryDisclosure } from './match_history_view.jsx';
 import { GROUP_ENCHO, GROUP_RESULT, GROUP_REP_PICK_A, GROUP_REP_PICK_B, boutGroup } from './match_groups.jsx';
 import { publishHeight } from './published_height.jsx';
@@ -1190,7 +1190,7 @@ function useMatchLineups(compId, matchId) {
   };
 }
 
-export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSubmitProp, onSubmitAndNext: onSubmitAndNextProp, onAfterDecision, prevMatch, nextMatch, onPrev, onNext, password, selfReport, teamMembers, variant = "modal", canClose = true, hostUnsavedRef = null }) {
+export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSubmitProp, onSubmitAndNext: onSubmitAndNextProp, onAfterDecision, prevMatch, nextMatch, onPrev, onNext, password, selfReport, teamMembers, variant = "modal", canClose = true, hostUnsavedRef = null, allowCourtForce = false }) {
   // mp-gmcg: a successful [× Remove this bout] shrinks the SERVER bout log, and
   // the parent may not have caught up when this render runs. matchOverride
   // shadows the prop so the removed bout disappears at once, and is cleared
@@ -1445,9 +1445,8 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
   // instead of a button that silently re-enables having saved nothing.
   const [writeFailed, setWriteFailed] = useStateA(null); // { reason, advice? } | null
   // An explicit tap (Start match, Record bout, Finish/End) whose write was
-  // only queued rather than confirmed; autosaves are left to SyncStatusPill,
-  // which renders nothing once a match is finished, so without this a team
-  // result entered on a flaky connection
+  // only queued rather than confirmed. Without this a team result entered
+  // on a flaky connection
   // sat on screen looking saved with no indication it had not reached the
   // server -- the one moment the operator is most likely to walk away from
   // the court. Mirrors ScoreEditorModal's pendingWrite, minus its Retry
@@ -3368,7 +3367,8 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
   // remedy mandatory: a plain correction bypasses the court gate entirely, so
   // kachinuki operators, for whom reopen is the ONLY way to fix a bout log,
   // would otherwise be the one group with no way out of a busy court.
-  const reopenCtl = useMatchReopen({ match: m, password, isComplete, own, unsaved: unsavedRef, onDiscard: onDiscardUnsaved });
+  // bc-adna: forward allowCourtForce to useMatchReopen
+  const reopenCtl = useMatchReopen({ match: m, password, isComplete, own, unsaved: unsavedRef, onDiscard: onDiscardUnsaved, allowCourtForce });
 
   // mp-4pc: when a daihyosen exists the encho counter belongs to that
   // sub-bout (attached per-sub in buildPatch), so suppress the top-level
@@ -4223,7 +4223,9 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
     // running it makes is never read as another device's, whatever the add
     // after it is answered.
     const ownStart = own.begin(OWN_START, { subResults: startPatch.subResults || [], encho: startPatch.encho || null });
-    const sent = doSubmit(() => onSubmit(startPatch, { onRefusal: own.claimRefusal(ownStart) }));
+    // bc-adna: an admin host's Start anyway is an own Start of its own.
+    const forcedStart = (f) => own.settle(own.begin(OWN_START, { subResults: startPatch.subResults || [], encho: startPatch.encho || null }), f);
+    const sent = doSubmit(() => onSubmit(startPatch, { onRefusal: own.claimRefusal(ownStart), onForced: forcedStart }));
     Promise.resolve(sent).then((res) => own.settle(ownStart, res), () => own.answer(ownStart, OWN_REFUSED));
     // A save the server turns away says so beside the change, when its answer
     // comes (a callback, never a wait).
@@ -4670,9 +4672,6 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
             </div>
             <div className="editor-modal__title" style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
               <span><TermAS name="shiaijo">Shiaijo</TermAS> {m.court} · {m.scheduledAt || "Now"}</span>
-              {/* C2: sync status indicator: inline on the title line (no dedicated
-                  row); SyncStatusPill renders nothing unless the match is running. */}
-              <SyncStatusPill isRunning={m.status === "running"} />
             </div>
           </div>
           <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
@@ -5880,7 +5879,11 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
                   // Its refusal is said here (StartRefusedNotice), so it is
                   // claimed from the outbox: no second alert with the same
                   // sentence.
-                  const res = await doSubmit(() => onSubmit(startPatch, { onRefusal: own.claimRefusal(token) }));
+                  // bc-adna: an admin host's Start anyway (resent after the
+                  // outbox brought its court_busy refusal back) is an own
+                  // Start of its own, read as it comes.
+                  const forcedStart = (f) => own.settle(own.begin(OWN_START, { subResults: startPatch.subResults || [], encho: startPatch.encho || null }), f);
+                  const res = await doSubmit(() => onSubmit(startPatch, { onRefusal: own.claimRefusal(token), onForced: forcedStart }));
                   // bc-cse: a direct refusal's not-saved banner, if any.
                   const banner = res && notLandedBanner(res);
                   if (banner) setWriteFailed(banner);
@@ -5935,7 +5938,10 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
                   // running match the owner records nothing for it.
                   const ownStart = own.begin(OWN_START, { subResults: recordPatch.subResults || [], encho: recordPatch.encho || null });
                   doSubmit(async () => {
-                    const sent = await onSubmit(recordPatch, { onRefusal: own.claimRefusal(ownStart) });
+                    // bc-adna: Start anyway on a queued encounter's Record bout
+                    // is an own Start of its own.
+                    const forcedStart = (f) => own.settle(own.begin(OWN_START, { subResults: recordPatch.subResults || [], encho: recordPatch.encho || null }), f);
+                    const sent = await onSubmit(recordPatch, { onRefusal: own.claimRefusal(ownStart), onForced: forcedStart });
                     own.settle(ownStart, sent);
                     // bc-evts: the outbox has the write; what follows reads the
                     // server's answer when it comes (a callback, never a wait).

@@ -29,7 +29,7 @@ import { journeyShots } from '../fixtures/shots.mjs';
 import { auditLog } from '../fixtures/audit.mjs';
 import { enterTournament, login } from '../fixtures/setup.mjs';
 import { openShiaijo, upNextCard, sides, startUpNext } from '../fixtures/shiaijo.mjs';
-import { EDITOR, awardIppon, finishButton, finishMatch } from '../fixtures/scoring.mjs';
+import { EDITOR, awardIppon, finishButton, finishMatch, running } from '../fixtures/scoring.mjs';
 import { hastyShiaijoConfirm } from '../fixtures/clumsy.mjs';
 import { rendered, settled, untilStable } from '../fixtures/pace.mjs';
 import { EXPECT_TIMEOUT_MS } from '../fixtures/devices.mjs';
@@ -166,7 +166,7 @@ test.describe('moved-match', () => {
     row({ step: '5 pick Individual', action: 'competition picker -> Individual', variant: 'correct path',
       upNext: await sides(upNextCard(B)), editorStill: (await courtState(B)).editor, shot: await shot(B, 'court-B-individual-picked') });
 
-    // 5a. The server's refusal: the same device's other tab, the competition's
+    // 5a. The court busy warning: the same device's other tab, the competition's
     // Scores tab, starts the moved match while the Teams bout is fought.
     const tab = await B.context().newPage();
     await tab.goto(`/admin/competition/${ids.IND}/scores`);
@@ -175,46 +175,70 @@ test.describe('moved-match', () => {
     await expect(tab.locator(EDITOR)).toBeVisible();
     await settled(tab.locator(EDITOR).getByRole('button', { name: 'Start match' }));
     await tab.locator(EDITOR).getByRole('button', { name: 'Start match' }).tap();
-    const refusal = tab.locator('.toast, .alert--error, [data-testid="start-refusal-notice"]').filter({ hasText: /Shiaijo B is running/ }).first();
-    await expect(refusal).toBeVisible({ timeout: 10_000 });
-    const refusalText = (await refusal.innerText()).replace(/\s+/g, ' ').trim();
-    // The running bout as its own editor names it ("Teams · Semifinals ·
-    // Match 1"); the refusal names it inside its competition ("Match 1
-    // (Semifinals)", engine.OperatorMatchLabel), without the competition or the
-    // teams: recorded for the copy review (bc-shcr P2), not asserted.
+    const warnDialog = tab.locator('.modal[role="dialog"]').filter({ hasText: /is already running a bout/ });
+    await expect(warnDialog).toBeVisible({ timeout: 10_000 });
+    const dialogTitle = (await warnDialog.locator('.modal__title').first().innerText()).trim();
+    expect(dialogTitle).toBe('Shiaijo B is already running a bout');
+    const dialogMsg = (await warnDialog.locator('.dialog-msg').first().innerText()).replace(/\s+/g, ' ').trim();
+    expect(dialogMsg).toContain('is running on Shiaijo B');
+    expect(dialogMsg).toContain('two bouts will be running on Shiaijo B at once');
     const liveEyebrow = (await courtState(B)).editor.eyebrow;
     const [, round, num] = liveEyebrow.match(/· (\w+) · Match (\d+)$/) || [];
-    row({ step: '5a start refused', action: 'Start match on the moved match from the Scores tab while Teams runs on B', variant: 'correct path (court gate)',
-      refusal: refusalText, runningBout: liveEyebrow, namesCompetition: refusalText.includes('Teams'),
-      namesTeams: refusalText.includes(teamsSf1.shiro) && refusalText.includes(teamsSf1.aka),
-      shot: await shot(tab, 'scores-tab-start-refused') });
-    expect(refusalText).toContain(`Shiaijo B is running Match ${num} (${round}). Finish it or send it back to the queue first.`);
-    const runningAfterRefusal = await runningOnCourt(H, 'B');
-    expect(runningAfterRefusal.map((r) => r.comp)).toEqual(['Teams']);
+    expect(dialogMsg).toContain(`Match ${num} (${round})`);
+    row({ step: '5a start warned', action: 'Start match on the moved match from the Scores tab while Teams runs on B',
+      variant: 'correct path (court busy warning)', title: dialogTitle, message: dialogMsg, runningBout: liveEyebrow,
+      shot: await shot(tab, 'scores-tab-start-warned') });
+    const runningBeforeStartAnyway = await runningOnCourt(H, 'B');
+    expect(runningBeforeStartAnyway.map((r) => r.comp)).toEqual(['Teams']);
+    await warnDialog.getByRole('button', { name: 'Start anyway' }).tap();
+    await expect.poll(async () => runningOnCourt(H, 'B'), { timeout: EXPECT_TIMEOUT_MS }).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ comp: 'Teams' }),
+        expect.objectContaining({ comp: 'Individual', shiro: moved.shiro, aka: moved.aka }),
+      ])
+    );
+    const twoRunning = await runningOnCourt(H, 'B');
+    expect(twoRunning).toHaveLength(2);
+    row({ step: '5a start anyway', action: 'tap Start anyway', variant: 'correct path (running beside Teams)', runningOnB: twoRunning });
     await tab.close();
 
-    // 5b. The console's own Start match: the Teams bout goes back to the queue
-    // with its score (bc-sbq) and the moved match starts. One bout runs on B.
-    await upNextCard(B).getByRole('button', { name: 'Start match' }).tap();
-    await expect.poll(async () => ((await courtState(B)).editor || {}).names, { timeout: EXPECT_TIMEOUT_MS }).toEqual([moved.shiro, moved.aka]);
-    const oneRunning = await runningOnCourt(H, 'B');
+    // 5b. On court B console, both running bouts are visible. The console
+    // sends the moved Individual match back to the queue, and Teams stays
+    // running with its point kept.
+    await expect.poll(async () => (await courtState(B)).alsoRunning, { timeout: EXPECT_TIMEOUT_MS }).toBeTruthy();
     const bLive = await courtState(B);
-    row({ step: '5b console start', action: 'Start match (Up next) while the Teams bout is fought', variant: 'correct path (bc-sbq: the running bout is sent back)',
-      runningOnB: oneRunning, alsoRunning: bLive.alsoRunning, nudges: bLive.nudges, shot: await shot(B, 'court-B-moved-match-started') });
-    expect(oneRunning).toHaveLength(1);
-    expect(oneRunning[0]).toMatchObject({ comp: 'Individual', shiro: moved.shiro, aka: moved.aka });
-    expect(bLive.alsoRunning).toBeNull();
+    const showsMoved = bLive.editor && samePair({ shiro: bLive.editor.names[0], aka: bLive.editor.names[1] }, moved);
+    row({ step: '5b both running', action: 'court B shows both running bouts', variant: 'correct path',
+      runningOnB: await runningOnCourt(H, 'B'), alsoRunning: bLive.alsoRunning, nudges: bLive.nudges, editor: bLive.editor,
+      showsMoved, shot: await shot(B, 'court-B-both-running') });
+    expect(bLive.alsoRunning).toContain('Another bout is running on Shiaijo B');
     await bStillOpen();
-    // Back as it was: the moved match goes back to the queue, Teams is picked
-    // and its semi-final starts again with the point it had.
-    await B.getByRole('button', { name: 'Send back to queue' }).tap();
-    await hastyShiaijoConfirm(B);
-    await pickCompetition(B, 'Teams');
-    expect(await sides(upNextCard(B))).toEqual(teamsSf1);
-    await T.startUpNextTeam(B);
-    await expect(T.rowSlots(T.boutRow(edB, 1), 'shiro')).toHaveText(['M']);
-    row({ step: '5b console start', action: 'Teams semi-final started again', variant: 'recovery', pointKept: true,
-      shot: await shot(B, 'court-B-teams-restarted-with-point') });
+
+    if (showsMoved) {
+      await B.getByRole('button', { name: 'Send back to queue' }).tap();
+      await hastyShiaijoConfirm(B);
+      await pickCompetition(B, 'Teams');
+      const bTeams = await courtState(B);
+      if (!bTeams.editor || !samePair({ shiro: bTeams.editor.names[0], aka: bTeams.editor.names[1] }, teamsSf1)) {
+        expect(await sides(upNextCard(B))).toEqual(teamsSf1);
+        await T.startUpNextTeam(B);
+      }
+      await expect(T.rowSlots(T.boutRow(edB, 1), 'shiro')).toHaveText(['M']);
+      row({ step: '5b console start', action: 'Teams semi-final running with point', variant: 'recovery', pointKept: true,
+        shot: await shot(B, 'court-B-teams-restarted-with-point') });
+    } else {
+      await B.getByRole('button', { name: 'Send back to queue' }).tap();
+      await hastyShiaijoConfirm(B);
+      await expect.poll(async () => ((await courtState(B)).editor || {}).names, { timeout: EXPECT_TIMEOUT_MS }).toEqual([moved.shiro, moved.aka]);
+      await B.getByRole('button', { name: 'Send back to queue' }).tap();
+      await hastyShiaijoConfirm(B);
+      await pickCompetition(B, 'Teams');
+      expect(await sides(upNextCard(B))).toEqual(teamsSf1);
+      await T.startUpNextTeam(B);
+      await expect(T.rowSlots(T.boutRow(edB, 1), 'shiro')).toHaveText(['M']);
+      row({ step: '5b console start', action: 'Teams semi-final started again', variant: 'recovery', pointKept: true,
+        shot: await shot(B, 'court-B-teams-restarted-with-point') });
+    }
 
     // 6. Teams' own bout finishes on ANOTHER device (the head table): court B
     // stays on Teams, which still has work here.
@@ -260,7 +284,7 @@ test.describe('moved-match', () => {
       await settled(startFinal);
       await startFinal.tap();
     }
-    await expect(T.syncPill(hed)).toBeVisible();
+    await running(H, hed);
     for (const n of [1, 2, 3]) await T.boutIppon(hed, n, 'shiro', 'M');
     await T.finishTeam(hed);
 
@@ -421,11 +445,11 @@ test.describe('moved-match', () => {
   // sends no startOnly (it writes the editor's own board), so it never counts
   // as a start by itself. The same fix retires shared-shiaijo's
   // S9 assertions ("Finish + Start Next →" and the start after a fusenpai on
-  // the Scores page) and the Scores tab refusal in step 5a above. Runs after
+  // the Scores page) and step 5a above now asserts the warning. Runs after
   // bc-stpf, but takes court A as it finds it: the running Individual bout
   // there, or else one it starts from the Scores tab whose competitors are not
   // fighting on B.
-  test.fixme('bc-adna: the Scores tab never starts a match by itself', async () => {
+  test('bc-adna: the Scores tab never starts a match by itself', async () => {
     const scoreWrites = [];
     const pending = [];
     const onResponse = async (res) => {

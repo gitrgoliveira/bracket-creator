@@ -653,7 +653,7 @@ func poolHasPlayerID(players []domain.Player, playerID string) error {
 // config, skipping (not failing on) an id whose own load errors -- one
 // unreadable competition record must not blank the whole list, matching
 // the viewer aggregate's own per-competition degrade-and-log policy
-// (buildViewerCompetitionPayload, handlers_viewer.go). Shared by the admin
+// (loadViewerCompetition, handlers_viewer.go). Shared by the admin
 // GET /competitions listing below and the tournament response builder
 // (buildTournamentResponse, handlers_tournament.go) so both surfaces list
 // competitions the same way rather than reimplementing the id-then-load
@@ -1181,6 +1181,12 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		if err != nil {
 			respondEngineError(c, err)
 			return
+		}
+		courtEnds, err := eng.CourtEnds(id)
+		if err != nil {
+			log.Printf("mobileapp: competition %s: court ends: %v", id, err)
+		} else {
+			estimate.CourtEnds = courtEnds
 		}
 		c.JSON(http.StatusOK, estimate)
 	})

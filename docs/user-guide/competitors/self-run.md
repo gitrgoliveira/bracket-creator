@@ -32,6 +32,10 @@ When a knockout team match finishes level, you can add the representative bout (
 
 In a team match you can also name each bout's fighters on the score sheet: pick a team member from the list, or type their name. The names are saved with the match. Once the match has finished, ask the organiser to correct a name. The score sheet can bring a team up to twice its team size plus two members; to add more, or to name anyone once the competition has finished, ask the organiser.
 
+## If your result cannot be sent
+
+If your device cannot send a result you entered, because there is no connection or the server keeps refusing it, the app keeps it on the device and sends it when it can. While that is so, a count of unsent results appears in the bottom-left corner of the public page, but nothing is shown while a result is simply being sent. Tap the count to see what is held and whether each item is waiting for the connection or being refused. An item the server keeps refusing has a Discard button: after you confirm, that item alone is discarded, so you can check the match and enter the result again if it is still needed. An item that is only waiting for the connection cannot be discarded; it is sent automatically when the connection returns.
+
 ## Follow your matches and standings
 
 To track your progress, view the draw, and see standings, refer to [Following a tournament](../spectators/following.md).

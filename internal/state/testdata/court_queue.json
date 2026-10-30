@@ -1,0 +1,618 @@
+{
+  "cases": [
+    {
+      "name": "two competitions on court A, timed matches interleaved by time",
+      "entries": [
+        {
+          "competitionId": "a",
+          "competitionStartTime": "09:00",
+          "date": "2026-11-01",
+          "court": "A",
+          "matchId": "m1",
+          "status": "scheduled",
+          "scheduledAt": "09:20",
+          "drawIndex": 0,
+          "barred": false
+        },
+        {
+          "competitionId": "b",
+          "competitionStartTime": "09:00",
+          "date": "2026-11-01",
+          "court": "A",
+          "matchId": "m1",
+          "status": "scheduled",
+          "scheduledAt": "09:10",
+          "drawIndex": 0,
+          "barred": false
+        }
+      ],
+      "queues": [
+        {
+          "date": "2026-11-01",
+          "court": "A",
+          "order": [
+            "b/m1",
+            "a/m1"
+          ]
+        }
+      ],
+      "positions": {
+        "b/m1": 1,
+        "a/m1": 2
+      }
+    },
+    {
+      "name": "equal times decided by competition start time, then competition id, then draw index",
+      "entries": [
+        {
+          "competitionId": "a",
+          "competitionStartTime": "09:00",
+          "date": "2026-11-01",
+          "court": "A",
+          "matchId": "m1",
+          "status": "scheduled",
+          "scheduledAt": "10:00",
+          "drawIndex": 0,
+          "barred": false
+        },
+        {
+          "competitionId": "b",
+          "competitionStartTime": "09:30",
+          "date": "2026-11-01",
+          "court": "A",
+          "matchId": "m1",
+          "status": "scheduled",
+          "scheduledAt": "10:00",
+          "drawIndex": 0,
+          "barred": false
+        },
+        {
+          "competitionId": "c2",
+          "competitionStartTime": "10:00",
+          "date": "2026-11-01",
+          "court": "A",
+          "matchId": "m1",
+          "status": "scheduled",
+          "scheduledAt": "10:00",
+          "drawIndex": 0,
+          "barred": false
+        },
+        {
+          "competitionId": "c1",
+          "competitionStartTime": "10:00",
+          "date": "2026-11-01",
+          "court": "A",
+          "matchId": "m2",
+          "status": "scheduled",
+          "scheduledAt": "10:00",
+          "drawIndex": 1,
+          "barred": false
+        },
+        {
+          "competitionId": "c1",
+          "competitionStartTime": "10:00",
+          "date": "2026-11-01",
+          "court": "A",
+          "matchId": "m1",
+          "status": "scheduled",
+          "scheduledAt": "10:00",
+          "drawIndex": 0,
+          "barred": false
+        }
+      ],
+      "queues": [
+        {
+          "date": "2026-11-01",
+          "court": "A",
+          "order": [
+            "a/m1",
+            "b/m1",
+            "c1/m1",
+            "c1/m2",
+            "c2/m1"
+          ]
+        }
+      ],
+      "positions": {
+        "a/m1": 1,
+        "b/m1": 2,
+        "c1/m1": 3,
+        "c1/m2": 4,
+        "c2/m1": 5
+      }
+    },
+    {
+      "name": "untimed matches of two competitions after the timed ones, ordered by competition start time, id, draw index",
+      "entries": [
+        {
+          "competitionId": "a",
+          "competitionStartTime": "09:00",
+          "date": "2026-11-01",
+          "court": "A",
+          "matchId": "timed",
+          "status": "scheduled",
+          "scheduledAt": "09:30",
+          "drawIndex": 0,
+          "barred": false
+        },
+        {
+          "competitionId": "a",
+          "competitionStartTime": "09:00",
+          "date": "2026-11-01",
+          "court": "A",
+          "matchId": "untimed",
+          "status": "scheduled",
+          "scheduledAt": "",
+          "drawIndex": 1,
+          "barred": false
+        },
+        {
+          "competitionId": "b",
+          "competitionStartTime": "08:30",
+          "date": "2026-11-01",
+          "court": "A",
+          "matchId": "untimed",
+          "status": "scheduled",
+          "scheduledAt": "",
+          "drawIndex": 0,
+          "barred": false
+        },
+        {
+          "competitionId": "b",
+          "competitionStartTime": "08:30",
+          "date": "2026-11-01",
+          "court": "A",
+          "matchId": "timed",
+          "status": "scheduled",
+          "scheduledAt": "10:00",
+          "drawIndex": 1,
+          "barred": false
+        }
+      ],
+      "queues": [
+        {
+          "date": "2026-11-01",
+          "court": "A",
+          "order": [
+            "a/timed",
+            "b/timed",
+            "b/untimed",
+            "a/untimed"
+          ]
+        }
+      ],
+      "positions": {
+        "a/timed": 1,
+        "b/timed": 2,
+        "b/untimed": 3,
+        "a/untimed": 4
+      }
+    },
+    {
+      "name": "two running bouts on one court (a forced start)",
+      "entries": [
+        {
+          "competitionId": "a",
+          "competitionStartTime": "09:00",
+          "date": "2026-11-01",
+          "court": "A",
+          "matchId": "r1",
+          "status": "running",
+          "scheduledAt": "09:10",
+          "drawIndex": 0,
+          "barred": false
+        },
+        {
+          "competitionId": "b",
+          "competitionStartTime": "09:00",
+          "date": "2026-11-01",
+          "court": "A",
+          "matchId": "r2",
+          "status": "running",
+          "scheduledAt": "09:05",
+          "drawIndex": 0,
+          "barred": false
+        },
+        {
+          "competitionId": "a",
+          "competitionStartTime": "09:00",
+          "date": "2026-11-01",
+          "court": "A",
+          "matchId": "w1",
+          "status": "scheduled",
+          "scheduledAt": "09:00",
+          "drawIndex": 1,
+          "barred": false
+        }
+      ],
+      "queues": [
+        {
+          "date": "2026-11-01",
+          "court": "A",
+          "order": [
+            "b/r2",
+            "a/r1",
+            "a/w1"
+          ]
+        }
+      ],
+      "positions": {
+        "a/w1": 1
+      }
+    },
+    {
+      "name": "a barred waiting match kept in order with no position",
+      "entries": [
+        {
+          "competitionId": "a",
+          "competitionStartTime": "09:00",
+          "date": "2026-11-01",
+          "court": "A",
+          "matchId": "m1",
+          "status": "scheduled",
+          "scheduledAt": "09:10",
+          "drawIndex": 0,
+          "barred": false
+        },
+        {
+          "competitionId": "a",
+          "competitionStartTime": "09:00",
+          "date": "2026-11-01",
+          "court": "A",
+          "matchId": "m2",
+          "status": "scheduled",
+          "scheduledAt": "09:20",
+          "drawIndex": 1,
+          "barred": true
+        },
+        {
+          "competitionId": "a",
+          "competitionStartTime": "09:00",
+          "date": "2026-11-01",
+          "court": "A",
+          "matchId": "m3",
+          "status": "scheduled",
+          "scheduledAt": "09:30",
+          "drawIndex": 2,
+          "barred": false
+        }
+      ],
+      "queues": [
+        {
+          "date": "2026-11-01",
+          "court": "A",
+          "order": [
+            "a/m1",
+            "a/m2",
+            "a/m3"
+          ]
+        }
+      ],
+      "positions": {
+        "a/m1": 1,
+        "a/m3": 2
+      }
+    },
+    {
+      "name": "completed matches left out",
+      "entries": [
+        {
+          "competitionId": "a",
+          "competitionStartTime": "09:00",
+          "date": "2026-11-01",
+          "court": "A",
+          "matchId": "done",
+          "status": "completed",
+          "scheduledAt": "09:00",
+          "drawIndex": 0,
+          "barred": false
+        },
+        {
+          "competitionId": "a",
+          "competitionStartTime": "09:00",
+          "date": "2026-11-01",
+          "court": "A",
+          "matchId": "wait",
+          "status": "scheduled",
+          "scheduledAt": "09:30",
+          "drawIndex": 1,
+          "barred": false
+        }
+      ],
+      "queues": [
+        {
+          "date": "2026-11-01",
+          "court": "A",
+          "order": [
+            "a/wait"
+          ]
+        }
+      ],
+      "positions": {
+        "a/wait": 1
+      }
+    },
+    {
+      "name": "two courts numbered independently",
+      "entries": [
+        {
+          "competitionId": "a",
+          "competitionStartTime": "09:00",
+          "date": "2026-11-01",
+          "court": "A",
+          "matchId": "a1",
+          "status": "scheduled",
+          "scheduledAt": "09:10",
+          "drawIndex": 0,
+          "barred": false
+        },
+        {
+          "competitionId": "a",
+          "competitionStartTime": "09:00",
+          "date": "2026-11-01",
+          "court": "A",
+          "matchId": "a2",
+          "status": "scheduled",
+          "scheduledAt": "09:20",
+          "drawIndex": 1,
+          "barred": false
+        },
+        {
+          "competitionId": "a",
+          "competitionStartTime": "09:00",
+          "date": "2026-11-01",
+          "court": "B",
+          "matchId": "b1",
+          "status": "scheduled",
+          "scheduledAt": "09:05",
+          "drawIndex": 2,
+          "barred": false
+        },
+        {
+          "competitionId": "a",
+          "competitionStartTime": "09:00",
+          "date": "2026-11-01",
+          "court": "B",
+          "matchId": "b2",
+          "status": "scheduled",
+          "scheduledAt": "09:15",
+          "drawIndex": 3,
+          "barred": false
+        }
+      ],
+      "queues": [
+        {
+          "date": "2026-11-01",
+          "court": "A",
+          "order": [
+            "a/a1",
+            "a/a2"
+          ]
+        },
+        {
+          "date": "2026-11-01",
+          "court": "B",
+          "order": [
+            "a/b1",
+            "a/b2"
+          ]
+        }
+      ],
+      "positions": {
+        "a/a1": 1,
+        "a/a2": 2,
+        "a/b1": 1,
+        "a/b2": 2
+      }
+    },
+    {
+      "name": "same court letter on two different dates",
+      "entries": [
+        {
+          "competitionId": "a",
+          "competitionStartTime": "09:00",
+          "date": "2026-11-01",
+          "court": "A",
+          "matchId": "d1",
+          "status": "scheduled",
+          "scheduledAt": "09:10",
+          "drawIndex": 0,
+          "barred": false
+        },
+        {
+          "competitionId": "b",
+          "competitionStartTime": "09:00",
+          "date": "2026-11-02",
+          "court": "A",
+          "matchId": "d2",
+          "status": "scheduled",
+          "scheduledAt": "09:05",
+          "drawIndex": 0,
+          "barred": false
+        }
+      ],
+      "queues": [
+        {
+          "date": "2026-11-01",
+          "court": "A",
+          "order": [
+            "a/d1"
+          ]
+        },
+        {
+          "date": "2026-11-02",
+          "court": "A",
+          "order": [
+            "b/d2"
+          ]
+        }
+      ],
+      "positions": {
+        "a/d1": 1,
+        "b/d2": 1
+      }
+    },
+    {
+      "name": "a competition with blank start time sorts after one with a start time on equal scheduledAt",
+      "entries": [
+        {
+          "competitionId": "a",
+          "competitionStartTime": "",
+          "date": "2026-11-01",
+          "court": "A",
+          "matchId": "m1",
+          "status": "scheduled",
+          "scheduledAt": "10:00",
+          "drawIndex": 0,
+          "barred": false
+        },
+        {
+          "competitionId": "b",
+          "competitionStartTime": "09:00",
+          "date": "2026-11-01",
+          "court": "A",
+          "matchId": "m1",
+          "status": "scheduled",
+          "scheduledAt": "10:00",
+          "drawIndex": 0,
+          "barred": false
+        }
+      ],
+      "queues": [
+        {
+          "date": "2026-11-01",
+          "court": "A",
+          "order": [
+            "b/m1",
+            "a/m1"
+          ]
+        }
+      ],
+      "positions": {
+        "b/m1": 1,
+        "a/m1": 2
+      }
+    },
+    {
+      "name": "un-padded start time 9:00 sorts before 10:00 on equal scheduledAt",
+      "entries": [
+        {
+          "competitionId": "a",
+          "competitionStartTime": "9:00",
+          "date": "2026-11-01",
+          "court": "A",
+          "matchId": "m1",
+          "status": "scheduled",
+          "scheduledAt": "10:00",
+          "drawIndex": 0,
+          "barred": false
+        },
+        {
+          "competitionId": "b",
+          "competitionStartTime": "10:00",
+          "date": "2026-11-01",
+          "court": "A",
+          "matchId": "m1",
+          "status": "scheduled",
+          "scheduledAt": "10:00",
+          "drawIndex": 0,
+          "barred": false
+        }
+      ],
+      "queues": [
+        {
+          "date": "2026-11-01",
+          "court": "A",
+          "order": [
+            "a/m1",
+            "b/m1"
+          ]
+        }
+      ],
+      "positions": {
+        "a/m1": 1,
+        "b/m1": 2
+      }
+    },
+    {
+      "name": "a malformed start time (a sign, a 3 digit or 1 digit minute, inner spaces) sorts after a well-formed one on equal scheduledAt",
+      "entries": [
+        {
+          "competitionId": "p",
+          "competitionStartTime": "+8:30",
+          "date": "2026-11-01",
+          "court": "A",
+          "matchId": "m1",
+          "status": "scheduled",
+          "scheduledAt": "10:00",
+          "drawIndex": 0,
+          "barred": false
+        },
+        {
+          "competitionId": "q",
+          "competitionStartTime": "8:005",
+          "date": "2026-11-01",
+          "court": "A",
+          "matchId": "m1",
+          "status": "scheduled",
+          "scheduledAt": "10:00",
+          "drawIndex": 0,
+          "barred": false
+        },
+        {
+          "competitionId": "r",
+          "competitionStartTime": "8:5",
+          "date": "2026-11-01",
+          "court": "A",
+          "matchId": "m1",
+          "status": "scheduled",
+          "scheduledAt": "10:00",
+          "drawIndex": 0,
+          "barred": false
+        },
+        {
+          "competitionId": "s",
+          "competitionStartTime": " 8 : 30",
+          "date": "2026-11-01",
+          "court": "A",
+          "matchId": "m1",
+          "status": "scheduled",
+          "scheduledAt": "10:00",
+          "drawIndex": 0,
+          "barred": false
+        },
+        {
+          "competitionId": "z",
+          "competitionStartTime": "09:00",
+          "date": "2026-11-01",
+          "court": "A",
+          "matchId": "m1",
+          "status": "scheduled",
+          "scheduledAt": "10:00",
+          "drawIndex": 0,
+          "barred": false
+        }
+      ],
+      "queues": [
+        {
+          "date": "2026-11-01",
+          "court": "A",
+          "order": [
+            "z/m1",
+            "p/m1",
+            "q/m1",
+            "r/m1",
+            "s/m1"
+          ]
+        }
+      ],
+      "positions": {
+        "z/m1": 1,
+        "p/m1": 2,
+        "q/m1": 3,
+        "r/m1": 4,
+        "s/m1": 5
+      }
+    }
+  ]
+}

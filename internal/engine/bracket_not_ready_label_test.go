@@ -1,6 +1,6 @@
 package engine
 
-// bc-cse item 14: "knockout match %s is not ready to score/override..."
+// bc-cse item 14: "knockout match %s is not ready to score..."
 // used to interpolate the raw match id, which IS sent to the operator (both
 // via respondEngineError's 400 body and RecordMatchResultWithIneligibility's
 // caller in mobileapp). It must name the match the way the operator sees it
@@ -39,26 +39,6 @@ func TestScoring_BracketMatchNotReadyToScore_MessageNamesOperatorLabelNotRawID(t
 	assert.NotContains(t, txErr.Error(), "m-r1-0", "the raw match id must not reach the operator")
 	assert.Contains(t, txErr.Error(), "Match 1 (Final)", "named by its operator label instead")
 	assert.Contains(t, txErr.Error(), "is not ready to score")
-}
-
-func TestOverrideBracketWinner_NotReadyToOverride_MessageNamesOperatorLabelNotRawID(t *testing.T) {
-	eng, store, _ := setupTestEngine(t)
-	compID := "not-ready-override-label"
-	require.NoError(t, store.SaveCompetition(&state.Competition{
-		ID: compID, Name: compID, Status: state.CompStatusKnockout,
-	}))
-	require.NoError(t, store.SaveBracket(compID, &state.Bracket{
-		Rounds: [][]state.BracketMatch{
-			{{ID: "m-r1-0", SideA: "Alice", SideB: "Winner of r0-m0",
-				Status: state.MatchStatusScheduled, MatchNumber: 3, DisplayRound: 1}},
-		},
-	}))
-
-	_, err := eng.OverrideBracketWinner(compID, "m-r1-0", "Alice", 0)
-	require.Error(t, err)
-	assert.NotContains(t, err.Error(), "m-r1-0", "the raw match id must not reach the operator")
-	assert.Contains(t, err.Error(), "Match 3 (Final)", "named by its operator label instead")
-	assert.Contains(t, err.Error(), "is not ready to override")
 }
 
 func TestScoring_BracketCompletedWithNoWinner_MessageNamesOperatorLabelNotRawID(t *testing.T) {

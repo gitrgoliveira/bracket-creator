@@ -42,14 +42,15 @@ export const markPage = (page, mark) => page.evaluate((m) => { window.__e2eMark 
 export const pageMark = (page) => page.evaluate(() => window.__e2eMark || null);
 
 // What the create wizard offers before a competition is created: its default
-// Start time (stacked after the latest same-day competition, admin_setup.jsx)
-// and the hint under the shiaijo choice. Read on the wizard page itself, the
-// one createCompetition then fills.
+// Start time (stacked after the latest planned end among the same-day
+// competitions sharing a chosen shiaijo, admin_setup.jsx) and the hint under
+// the shiaijo choice. Read on the wizard page itself, the one
+// createCompetition then fills.
 //
-// The stacked default comes from ONE request, GET /api/competitions/<id>/
-// schedule/estimate, which the wizard sends exactly when the tournament already
-// holds a same-day competition with a start time (pickStackPredecessor); with
-// none it keeps the 09:00 default and sends nothing. The caller knows which
+// The stacked default comes from GET /api/competitions/<id>/schedule/estimate,
+// which the wizard sends for each same-day competition with a start time that
+// shares a chosen shiaijo (findStackCandidates); with none it keeps the 09:00
+// default and sends nothing. The caller knows which
 // case it is in (`expectEstimate`: a competition was created before this one,
 // all on the tournament's date), so the read does not guess from timing:
 //   - expected: the response is awaited (registered before the page loads, so

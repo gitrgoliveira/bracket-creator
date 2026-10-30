@@ -169,6 +169,8 @@ function matchSideName(side, fallbackName) {
 
 // Predicate: is the followed player's match on-deck (up-next or running)?
 // Exported for unit testing and mp-5px (service worker path must reuse this).
+// The server's queuePosition is court-wide across competitions, so queuePosition === 1
+// is the single on-deck match for the court, including across other competitions.
 export function isFollowedMatchOnDeck(m) {
   if (!m) return false;
   // A barred match (ineligible_match.jsx) cannot be fought as scheduled, so

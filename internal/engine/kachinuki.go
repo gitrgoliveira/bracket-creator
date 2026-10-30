@@ -1167,7 +1167,8 @@ func (e *Engine) reopenUnderCourtLock(compID string, comp *state.Competition, ma
 	// checkTargetReopenable, the requeue entry via requireBlockerHoldsCourt), so
 	// this gate's 404 is reachable only if the competition is deleted in the gap.
 	// Skipped for a reopen that lands scheduled: it takes no court.
-	if !landsScheduled {
+	// Skipped when fo.ForceCourt is true (bc-adna).
+	if !landsScheduled && !fo.ForceCourt {
 		if err := e.CheckCrossCompCourtBusy(compID, matchID); err != nil {
 			return nil, err
 		}
@@ -1181,7 +1182,10 @@ func (e *Engine) reopenUnderCourtLock(compID string, comp *state.Competition, ma
 		// running on a court that already has a running match would leave it
 		// with two, wedging the exclusivity check for BOTH. DO NOT remove it as
 		// a redundant-looking check. It runs only for a reopen that lands
-		// RUNNING: one that lands scheduled takes no court. It reuses the pool
+		// RUNNING: one that lands scheduled takes no court. A forced reopen
+		// (fo.ForceCourt, the organiser's "Reopen anyway", bc-adna) skips it
+		// on purpose: the court then holds two running bouts, its score table
+		// shows both, and the operator sends one back to the queue. It reuses the pool
 		// matches + bracket findMatchHome already loaded under this tx for the
 		// same-comp scan, instead of the re-load a nil/nil call would do
 		// (mp-gmcg review E4); a nil one (the bracket on a pool home) reloads.
@@ -1219,7 +1223,7 @@ func (e *Engine) reopenUnderCourtLock(compID string, comp *state.Competition, ma
 			if !landsScheduled {
 				targetStatus = e.reopenTargetStatusOfHome(tx, compID, matchID, h)
 			}
-			if targetStatus == state.MatchStatusRunning {
+			if targetStatus == state.MatchStatusRunning && !fo.ForceCourt {
 				court := ""
 				if h.Pool != nil {
 					court = h.Pool.Court
@@ -1567,14 +1571,14 @@ func (e *Engine) checkTargetReopenable(compID string, comp *state.Competition, m
 // claim they aren't made. The caller holds only the court lock, not a per-comp
 // write lock, so these reads match CheckCrossCompCourtBusy's pre-tx discipline.
 func (e *Engine) requireBlockerHoldsCourt(targetComp, targetMatch, blockerComp, blockerMatch string) error {
-	targetCourt, err := e.lookupMatchCourt(targetComp, targetMatch)
+	targetCourt, err := lookupMatchCourtTx(e.store, targetComp, targetMatch)
 	if err != nil {
 		return err
 	}
 	if targetCourt == "" {
 		return validationErrorf("%s has no court assigned, so no match can be blocking it.", SentenceCase(e.operatorMatchLabel(targetComp, targetMatch)))
 	}
-	blockerCourt, err := e.lookupMatchCourt(blockerComp, blockerMatch)
+	blockerCourt, err := lookupMatchCourtTx(e.store, blockerComp, blockerMatch)
 	if err != nil {
 		return err
 	}
@@ -2022,7 +2026,7 @@ var (
 // the bout in progress when the operator ended it, and the provenance stamps
 // for a result that no longer exists (IsOverridden, ResultSource). Leaving
 // those behind produced a match that was running yet still advertised a
-// winner, a scoreline, and a manual-override badge inherited from the result
+// winner, a scoreline, and an overridden badge inherited from the result
 // the reopen threw away.
 //
 // This clears the verdict fields RevertMatchToQueue clears (engine/scoring.go)
@@ -2192,7 +2196,7 @@ func resolvedByByeFrom(bm *state.BracketMatch, feedM int) bool {
 // feeder's placeholder: still completed, with no winner. Completed is
 // deliberate, not an oversight. It is what the latent-bye pass writes so the
 // match is never counted as one to play, and a SCHEDULED one would be: the
-// queue numbers every scheduled match on a court (annotateBracketQueuePositions),
+// queue numbers every scheduled match on a court (stampCourtQueuePositions),
 // so a hidden bye would push "N before yours" up by one. The feeder's next
 // winner re-resolves it through propagateBracketWinner exactly as the first
 // one did.
@@ -2252,7 +2256,7 @@ func propagatedDownstreamOf(bracket *state.Bracket, rIdx, mIdx int) propagatedDo
 // and for a semifinal the bronze it also feeds, bronze first. Nil when
 // neither is closed. Every door that would displace someone from a played
 // match names these (reopenBracketDownstreamCheck,
-// guardDownstreamKnockoutCorrection, guardOverrideDownstreamKnockoutCorrection)
+// guardDownstreamKnockoutCorrection, guardBareNameDownstreamKnockoutCorrection)
 // and forceReopenDownstreamChain reopens exactly these, so the refusal and the
 // confirmation cannot disagree. Its sibling running() names the same two
 // matches when they are being FOUGHT, which every one of those doors refuses
@@ -2284,7 +2288,7 @@ func (d propagatedDownstream) played() []*state.BracketMatch {
 // them) that are being fought right now: the bronze first, then next. It is
 // the one "running downstream" predicate for the reopen door
 // (reopenBracketDownstreamCheck) and the knockout-correction doors
-// (guardDownstreamKnockoutCorrection, guardOverrideDownstreamKnockoutCorrection,
+// (guardDownstreamKnockoutCorrection, guardBareNameDownstreamKnockoutCorrection,
 // and the decision path's pre-lock check), so their refusals cannot disagree
 // (operator decision 2026-09-27: a running later match is refused, never
 // repainted or cleared).

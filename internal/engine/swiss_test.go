@@ -724,7 +724,7 @@ func TestSwissStandings_Draw(t *testing.T) {
 // TestGenerateSwissRound_TeamSizeDefaultApplied verifies that
 // GenerateSwissRound applies the TeamSize=5 default for team
 // competitions whose stored config has TeamSize=0. Without the fix,
-// assignPoolMatchSlots falls through to the individual-match duration
+// assignPoolMatchSlotsFrom falls through to the individual-match duration
 // (~5 min/slot) instead of the team-match duration (~27 min/slot with
 // 5 bouts × 3 min × 1.5 + inter-bout gaps). With the fix, sequential
 // matches on the same court must be spaced at least 10 minutes apart

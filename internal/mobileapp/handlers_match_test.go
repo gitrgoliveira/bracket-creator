@@ -3,7 +3,6 @@ package mobileapp
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -1961,64 +1960,6 @@ func TestScoreHandlers_RejectSideMismatch(t *testing.T) {
 	})
 }
 
-// TestOverrideWinner_EngiGuard verifies the override-winner endpoint rejects
-// engi competitions with 400: a manual winner override sets Winner without
-// FlagsA/FlagsB, which would leave a completed engi match with a 0-0 flag
-// total that violates the {1,3,5} invariant. Flag scoring is the only engi
-// result path. Mirrors TestDecisionHandler_EngiGuard.
-func TestOverrideWinner_EngiGuard(t *testing.T) {
-	r, store, _, _, tempDir := setupTestRouter(t)
-	defer os.RemoveAll(tempDir)
-
-	cid := "engi-override"
-	require.NoError(t, store.SaveCompetition(&state.Competition{ID: cid, Engi: true}))
-	require.NoError(t, store.SaveBracket(cid, &state.Bracket{
-		Rounds: [][]state.BracketMatch{{{ID: "b1", SideA: "P1", SideB: "P2"}}},
-	}))
-
-	body, _ := json.Marshal(map[string]string{"winnerName": "P1"})
-	req, _ := http.NewRequest("PUT", "/api/competitions/"+cid+"/matches/b1/override-winner", bytes.NewBuffer(body))
-	req.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusBadRequest, w.Code, "override-winner on engi comp must return 400; body: %s", w.Body.String())
-	assert.Contains(t, w.Body.String(), "engi")
-
-	// The bracket winner must remain unset (the guard returns before the engine).
-	stored, err := store.LoadBracket(cid)
-	require.NoError(t, err)
-	assert.Empty(t, stored.Rounds[0][0].Winner, "engi override must not set a winner")
-}
-
-// TestOverrideWinner_FailsClosedOnLoadError verifies the engi guard on the
-// override-winner endpoint fails CLOSED: when LoadCompetition faults we can't
-// tell whether the comp is engi, so the override is rejected with 500 rather
-// than slipping through into the inconsistent flag-less state the guard exists
-// to prevent. Mirrors the quick-score / daihyosen / decision guards.
-func TestOverrideWinner_FailsClosedOnLoadError(t *testing.T) {
-	tempDir, err := os.MkdirTemp("", "override-fail-*")
-	require.NoError(t, err)
-	defer os.RemoveAll(tempDir)
-	realStore, err := state.NewStore(tempDir)
-	require.NoError(t, err)
-	eng := engine.New(realStore)
-	hub := NewHub()
-
-	gin.SetMode(gin.TestMode)
-	r := gin.New()
-	admin := r.Group("/api")
-	RegisterMatchHandlers(admin, eng, failingCompetitionStore{err: errors.New("disk on fire")}, realStore, hub, NewFileVerifier(realStore), realStore)
-
-	body, _ := json.Marshal(map[string]string{"winnerName": "P1"})
-	req, _ := http.NewRequest("PUT", "/api/competitions/c1/matches/b1/override-winner", bytes.NewBuffer(body))
-	req.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
-
-	require.Equalf(t, http.StatusInternalServerError, w.Code, "body=%s", w.Body.String())
-}
-
 func TestMatchHandlers_Extended(t *testing.T) {
 	r, store, _, _, tempDir := setupTestRouter(t)
 	defer os.RemoveAll(tempDir)
@@ -2035,68 +1976,6 @@ func TestMatchHandlers_Extended(t *testing.T) {
 		req.Header.Set("Content-Type", "application/json")
 		r.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusOK, w.Code)
-	})
-
-	t.Run("Override Bracket Winner", func(t *testing.T) {
-		bracket := &state.Bracket{
-			Rounds: [][]state.BracketMatch{
-				{{ID: "b1", SideA: "P1", SideB: "P2"}},
-			},
-		}
-		store.SaveBracket("c1", bracket)
-
-		reqBody, _ := json.Marshal(map[string]string{"winnerName": "P1"})
-		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("PUT", "/api/competitions/c1/matches/b1/override-winner", bytes.NewBuffer(reqBody))
-		req.Header.Set("Content-Type", "application/json")
-		r.ServeHTTP(w, req)
-		assert.Equal(t, http.StatusOK, w.Code)
-	})
-
-	// Sibling of the rank-override TrimSpace test in
-	// handlers_competition_test.go. Downstream bracket math compares
-	// m.Winner to roster names by exact string equality, so padded
-	// "  Foo  " won't match canonical "Foo", pin the trim contract.
-	t.Run("Override Bracket Winner Trims Whitespace", func(t *testing.T) {
-		bracket := &state.Bracket{
-			Rounds: [][]state.BracketMatch{
-				{{ID: "b-trim", SideA: "P1", SideB: "P2"}},
-			},
-		}
-		store.SaveBracket("c1", bracket)
-
-		reqBody, _ := json.Marshal(map[string]string{"winnerName": "  P1  "})
-		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("PUT", "/api/competitions/c1/matches/b-trim/override-winner", bytes.NewBuffer(reqBody))
-		req.Header.Set("Content-Type", "application/json")
-		r.ServeHTTP(w, req)
-		require.Equal(t, http.StatusOK, w.Code)
-
-		stored, err := store.LoadBracket("c1")
-		require.NoError(t, err)
-		require.NotNil(t, stored)
-		var found *state.BracketMatch
-		for i := range stored.Rounds {
-			for j := range stored.Rounds[i] {
-				if stored.Rounds[i][j].ID == "b-trim" {
-					found = &stored.Rounds[i][j]
-				}
-			}
-		}
-		require.NotNil(t, found, "bracket match b-trim not found")
-		assert.Equal(t, "P1", found.Winner, "winner should be trimmed before propagation")
-	})
-
-	t.Run("Override Bracket Winner Rejects Whitespace-Only", func(t *testing.T) {
-		// Whitespace-only winnerName trims to empty, same shape as the
-		// rank-override empty-after-trim rejection.
-		reqBody, _ := json.Marshal(map[string]string{"winnerName": "   "})
-		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("PUT", "/api/competitions/c1/matches/b1/override-winner", bytes.NewBuffer(reqBody))
-		req.Header.Set("Content-Type", "application/json")
-		r.ServeHTTP(w, req)
-		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assert.Contains(t, w.Body.String(), "winnerName is required")
 	})
 
 	t.Run("Update Match Time", func(t *testing.T) {
@@ -2119,14 +1998,6 @@ func TestMatchHandlers_Extended(t *testing.T) {
 	t.Run("Match Score - Invalid JSON", func(t *testing.T) {
 		w := httptest.NewRecorder()
 		req, _ := http.NewRequest("PUT", "/api/competitions/c1/matches/PoolA-1/score", bytes.NewBufferString("{invalid"))
-		req.Header.Set("Content-Type", "application/json")
-		r.ServeHTTP(w, req)
-		assert.Equal(t, http.StatusBadRequest, w.Code)
-	})
-
-	t.Run("Override Winner - Invalid JSON", func(t *testing.T) {
-		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("PUT", "/api/competitions/c1/matches/b1/override-winner", bytes.NewBufferString("{invalid"))
 		req.Header.Set("Content-Type", "application/json")
 		r.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
@@ -2172,45 +2043,6 @@ func TestCourtAndTime_UnknownMatchIsNotFound(t *testing.T) {
 		r.ServeHTTP(w, req)
 		assert.Equalf(t, http.StatusNotFound, w.Code, "%s body=%s", tc.path, w.Body.String())
 	}
-}
-
-// TestOverrideWinner_ErrorStatusMapping pins that the override-winner handler
-// maps engine CLIENT errors to their proper status instead of a blanket 500
-// (Copilot mp-y3nk): an unknown match id -> 404 (engine.NotFoundError) and a
-// not-yet-ready match (unresolved feeder side) -> 400 (engine.ValidationError).
-// Before the mapping both returned 500, which made the offline terminal-write
-// replay treat a permanent client error as retryable and wedge sync status.
-func TestOverrideWinner_ErrorStatusMapping(t *testing.T) {
-	r, store, _, _, tempDir := setupTestRouter(t)
-	defer os.RemoveAll(tempDir)
-
-	comp := state.Competition{ID: "ovm", Status: "setup", Courts: []string{"A"}}
-	require.NoError(t, store.SaveCompetition(&comp))
-	// b-ready is playable; b-notready has an unresolved (empty) side so
-	// bracketMatchPlayable is false and the engine returns a ValidationError.
-	require.NoError(t, store.SaveBracket("ovm", &state.Bracket{
-		Rounds: [][]state.BracketMatch{
-			{{ID: "b-notready", SideA: "P1", SideB: ""}},
-		},
-	}))
-
-	t.Run("unknown match returns 404", func(t *testing.T) {
-		body, _ := json.Marshal(map[string]string{"winnerName": "P1"})
-		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("PUT", "/api/competitions/ovm/matches/does-not-exist/override-winner", bytes.NewBuffer(body))
-		req.Header.Set("Content-Type", "application/json")
-		r.ServeHTTP(w, req)
-		assert.Equal(t, http.StatusNotFound, w.Code, "unknown match must be 404, not 500; body: %s", w.Body.String())
-	})
-
-	t.Run("not-ready match returns 400", func(t *testing.T) {
-		body, _ := json.Marshal(map[string]string{"winnerName": "P1"})
-		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("PUT", "/api/competitions/ovm/matches/b-notready/override-winner", bytes.NewBuffer(body))
-		req.Header.Set("Content-Type", "application/json")
-		r.ServeHTTP(w, req)
-		assert.Equal(t, http.StatusBadRequest, w.Code, "not-ready match must be 400, not 500; body: %s", w.Body.String())
-	})
 }
 
 func TestRevertMatchToQueueHandler(t *testing.T) {
@@ -2645,125 +2477,37 @@ func TestPostScoreKikenInvalidScoreline(t *testing.T) {
 	assert.Contains(t, w.Body.String(), "scoreline")
 }
 
-// failingCompetitionStore returns the configured error from
-// LoadCompetition. Used to drive the fail-closed path in the
-// override-winner handler when config.md can't be loaded.
-type failingCompetitionStore struct{ err error }
-
-func (f failingCompetitionStore) LoadCompetition(string) (*state.Competition, error) {
-	return nil, f.err
-}
-
-func (f failingCompetitionStore) LoadPoolMatches(string) ([]state.MatchResult, error) {
-	return nil, f.err
-}
-
-func (f failingCompetitionStore) LoadBracket(string) (*state.Bracket, error) {
-	return nil, f.err
-}
-
-func (f failingCompetitionStore) MatchStatusByID(string, string) (state.MatchStatus, bool, error) {
-	return "", false, f.err
-}
-
-func (f failingCompetitionStore) MatchSidesByID(string, string) (string, string, string, string, bool, error) {
-	return "", "", "", "", false, f.err
-}
-
-func (f failingCompetitionStore) LoadCompetitorStatus(string) (map[string]domain.CompetitorStatus, error) {
-	return nil, f.err
-}
-
-// TestAnnotateQueuePositions_NonEmpty verifies that annotateQueuePositions
-// fills in per-court queue positions for a non-empty match list.
-func TestAnnotateQueuePositions_NonEmpty(t *testing.T) {
-	matches := []state.MatchResult{
-		{ID: "m1", Court: "A", Status: state.MatchStatusScheduled},
-		{ID: "m2", Court: "A", Status: state.MatchStatusScheduled},
-		{ID: "m3", Court: "B", Status: state.MatchStatusScheduled},
-	}
-	annotateQueuePositions(matches)
-	// Positions within a court should be monotonically increasing from 1.
-	assert.Equal(t, 1, matches[0].QueuePosition)
-	assert.Equal(t, 2, matches[1].QueuePosition)
-	assert.Equal(t, 1, matches[2].QueuePosition)
-}
-
-// TestAnnotateQueuePositions_Empty verifies that annotateQueuePositions is
-// a no-op for an empty slice.
-func TestAnnotateQueuePositions_Empty(t *testing.T) {
-	annotateQueuePositions(nil)
-	annotateQueuePositions([]state.MatchResult{})
-}
-
-// TestAnnotateQueuePositions_ScheduledAtOrder verifies that the annotator
-// sorts per-court by ScheduledAt rather than relying on slice order.
-// UpdateMatchTime / UpdateMatchCourt mutate the underlying CSV in place
-// without reordering rows, so the server-side annotation must derive
-// ordering from the data, not the storage order, to agree with the
-// viewer's render order and the client-side SSE recompute. Copilot
-// flagged this on PR #124 (web-mobile/js/patch.jsx:110).
-func TestAnnotateQueuePositions_ScheduledAtOrder(t *testing.T) {
-	matches := []state.MatchResult{
-		// Storage order is out of schedule order: the 09:30 row sits
-		// before the 09:00 row on the same court.
-		{ID: "m1", Court: "A", ScheduledAt: "09:30", Status: state.MatchStatusScheduled},
-		{ID: "m2", Court: "A", ScheduledAt: "09:00", Status: state.MatchStatusScheduled},
-		{ID: "m3", Court: "B", ScheduledAt: "09:15", Status: state.MatchStatusScheduled},
-	}
-	annotateQueuePositions(matches)
-	// m2 (09:00) is up-next on court A, m1 (09:30) is queue-position 2.
-	assert.Equal(t, 2, matches[0].QueuePosition) // m1 at 09:30
-	assert.Equal(t, 1, matches[1].QueuePosition) // m2 at 09:00
-	assert.Equal(t, 1, matches[2].QueuePosition) // m3 on court B
-}
-
-// TestAnnotateQueuePositions_StaleReset verifies that non-scheduled rows
-// have their QueuePosition forced to 0 even if a stale persisted value
-// were present, mirroring the bracket-variant guard so omitempty drops
-// the field cleanly on the wire.
-func TestAnnotateQueuePositions_StaleReset(t *testing.T) {
+// TestStampCourtQueuePositions_PoolMatches verifies that stampCourtQueuePositions
+// fills in per-court queue positions for pool matches, giving running matches 0
+// and resetting stale persisted values.
+func TestStampCourtQueuePositions_PoolMatches(t *testing.T) {
+	comp := &state.Competition{ID: "c1"}
 	matches := []state.MatchResult{
 		{ID: "m1", Court: "A", Status: state.MatchStatusRunning, QueuePosition: 99},
 		{ID: "m2", Court: "A", Status: state.MatchStatusScheduled, QueuePosition: 77},
+		{ID: "m3", Court: "A", Status: state.MatchStatusScheduled},
+		{ID: "m4", Court: "B", Status: state.MatchStatusScheduled},
 	}
-	annotateQueuePositions(matches)
-	assert.Equal(t, 0, matches[0].QueuePosition)
-	assert.Equal(t, 1, matches[1].QueuePosition)
+	all := state.CourtQueueEntriesOf(comp, matches, nil)
+	stampCourtQueuePositions(comp, matches, nil, all)
+	assert.Equal(t, 0, matches[0].QueuePosition, "running gets 0")
+	assert.Equal(t, 1, matches[1].QueuePosition, "first scheduled on court A")
+	assert.Equal(t, 2, matches[2].QueuePosition, "second scheduled on court A")
+	assert.Equal(t, 1, matches[3].QueuePosition, "first scheduled on court B")
 }
 
-// TestAnnotateBracketQueuePositions_* mirrors the annotateQueuePositions tests
-// for the bracket variant (BracketMatch), covering multiple courts, mixed
-// statuses, nil/empty inputs, and stale-value reset.
-func TestAnnotateBracketQueuePositions_Nil(t *testing.T) {
-	annotateBracketQueuePositions(nil) // must not panic
+// TestStampCourtQueuePositions_Empty verifies that stampCourtQueuePositions is
+// a no-op for empty or nil inputs.
+func TestStampCourtQueuePositions_Empty(t *testing.T) {
+	stampCourtQueuePositions(nil, nil, nil, nil)
+	stampCourtQueuePositions(&state.Competition{}, []state.MatchResult{}, &state.Bracket{}, nil)
 }
 
-func TestAnnotateBracketQueuePositions_Empty(t *testing.T) {
-	annotateBracketQueuePositions(&state.Bracket{})
-	annotateBracketQueuePositions(&state.Bracket{Rounds: [][]state.BracketMatch{}})
-}
-
-func TestAnnotateBracketQueuePositions_MultipleCourts(t *testing.T) {
-	b := &state.Bracket{
-		Rounds: [][]state.BracketMatch{
-			{
-				{ID: "r1m1", Court: "A", Status: state.MatchStatusScheduled},
-				{ID: "r1m2", Court: "B", Status: state.MatchStatusScheduled},
-			},
-			{
-				{ID: "r2m1", Court: "A", Status: state.MatchStatusScheduled},
-			},
-		},
-	}
-	annotateBracketQueuePositions(b)
-
-	assert.Equal(t, 1, b.Rounds[0][0].QueuePosition, "r1m1: first on court A")
-	assert.Equal(t, 1, b.Rounds[0][1].QueuePosition, "r1m2: first on court B")
-	assert.Equal(t, 2, b.Rounds[1][0].QueuePosition, "r2m1: second on court A")
-}
-
-func TestAnnotateBracketQueuePositions_MixedStatuses(t *testing.T) {
+// TestStampCourtQueuePositions_Bracket verifies that stampCourtQueuePositions
+// fills in per-court queue positions for bracket matches, resetting stale values
+// on non-scheduled matches.
+func TestStampCourtQueuePositions_Bracket(t *testing.T) {
+	comp := &state.Competition{ID: "c1"}
 	b := &state.Bracket{
 		Rounds: [][]state.BracketMatch{
 			{
@@ -2774,7 +2518,8 @@ func TestAnnotateBracketQueuePositions_MixedStatuses(t *testing.T) {
 			},
 		},
 	}
-	annotateBracketQueuePositions(b)
+	all := state.CourtQueueEntriesOf(comp, nil, b)
+	stampCourtQueuePositions(comp, nil, b, all)
 
 	assert.Equal(t, 0, b.Rounds[0][0].QueuePosition, "running: stale value reset to 0")
 	assert.Equal(t, 1, b.Rounds[0][1].QueuePosition, "first scheduled on court A")
@@ -2782,80 +2527,10 @@ func TestAnnotateBracketQueuePositions_MixedStatuses(t *testing.T) {
 	assert.Equal(t, 2, b.Rounds[0][3].QueuePosition, "second scheduled on court A")
 }
 
-// TestAnnotateBracketQueuePositions_ScheduledAtOrdering verifies that queue
-// positions follow per-court ScheduledAt ordering, not storage order.
-// Mirrors the viewer's ScheduleViewer per-court sort so the "N before yours"
-// label is consistent with the row order the user actually sees.
-func TestAnnotateBracketQueuePositions_ScheduledAtOrdering(t *testing.T) {
-	// Round 0 holds an early match scheduled at 11:00 on court A; round 1
-	// holds an earlier-scheduled match (10:30) on the same court. The
-	// later round should rank first because its scheduledAt is earlier.
-	b := &state.Bracket{
-		Rounds: [][]state.BracketMatch{
-			{
-				{ID: "r0m0", Court: "A", ScheduledAt: "11:00", Status: state.MatchStatusScheduled},
-				{ID: "r0m1", Court: "A", ScheduledAt: "11:30", Status: state.MatchStatusScheduled},
-			},
-			{
-				{ID: "r1m0", Court: "A", ScheduledAt: "10:30", Status: state.MatchStatusScheduled},
-			},
-		},
-	}
-	annotateBracketQueuePositions(b)
-
-	assert.Equal(t, 2, b.Rounds[0][0].QueuePosition, "r0m0 @ 11:00 = 2nd on court A")
-	assert.Equal(t, 3, b.Rounds[0][1].QueuePosition, "r0m1 @ 11:30 = 3rd on court A")
-	assert.Equal(t, 1, b.Rounds[1][0].QueuePosition, "r1m0 @ 10:30 = 1st on court A despite later round")
-}
-
-// TestAnnotateBracketQueuePositions_RunningRanksFirst verifies that a
-// running match counts ahead of scheduled siblings in the per-court sort
-// (status priority dominates ScheduledAt), matching the viewer.
-func TestAnnotateBracketQueuePositions_RunningRanksFirst(t *testing.T) {
-	b := &state.Bracket{
-		Rounds: [][]state.BracketMatch{
-			{
-				// Scheduled match at 10:00, but a running match at 11:00
-				// should be ordered first because status=running has the
-				// highest priority in the viewer's sort.
-				{ID: "sched", Court: "A", ScheduledAt: "10:00", Status: state.MatchStatusScheduled},
-				{ID: "live", Court: "A", ScheduledAt: "11:00", Status: state.MatchStatusRunning},
-			},
-		},
-	}
-	annotateBracketQueuePositions(b)
-
-	// Only the scheduled match gets a 1-indexed position; the running
-	// match keeps QueuePosition=0 (it isn't "in queue"). But because the
-	// running match ranks ahead in the sort, the counter doesn't
-	// increment past it before reaching the scheduled match, so the
-	// scheduled match's position is still 1, not 2.
-	assert.Equal(t, 0, b.Rounds[0][1].QueuePosition, "running has no queue position")
-	assert.Equal(t, 1, b.Rounds[0][0].QueuePosition, "lone scheduled = position 1")
-}
-
-// TestAnnotateBracketQueuePositions_EmptyScheduledAt verifies that matches
-// without a ScheduledAt fall to the end of their per-court bucket (matches
-// the JS fallback to "99:99" in ScheduleViewer's sort).
-func TestAnnotateBracketQueuePositions_EmptyScheduledAt(t *testing.T) {
-	b := &state.Bracket{
-		Rounds: [][]state.BracketMatch{
-			{
-				{ID: "no-time", Court: "A", ScheduledAt: "", Status: state.MatchStatusScheduled},
-				{ID: "has-time", Court: "A", ScheduledAt: "10:00", Status: state.MatchStatusScheduled},
-			},
-		},
-	}
-	annotateBracketQueuePositions(b)
-
-	assert.Equal(t, 1, b.Rounds[0][1].QueuePosition, "has-time = 1st")
-	assert.Equal(t, 2, b.Rounds[0][0].QueuePosition, "no-time = 2nd (sinks to end)")
-}
-
-// TestAnnotateBracketQueuePositions_ThirdPlaceMatch is a Finding 7 regression
-// test: the bronze Naginata match is a sibling of Rounds (bracket.ThirdPlaceMatch)
-// and must receive a queue position so operators see it in the schedule feed.
-func TestAnnotateBracketQueuePositions_ThirdPlaceMatch(t *testing.T) {
+// TestStampCourtQueuePositions_ThirdPlaceMatch verifies that the bronze match
+// receives queue position 1 ahead of the final.
+func TestStampCourtQueuePositions_ThirdPlaceMatch(t *testing.T) {
+	comp := &state.Competition{ID: "c1"}
 	b := &state.Bracket{
 		Rounds: [][]state.BracketMatch{
 			{
@@ -2872,17 +2547,59 @@ func TestAnnotateBracketQueuePositions_ThirdPlaceMatch(t *testing.T) {
 			Status: state.MatchStatusScheduled,
 		},
 	}
-	annotateBracketQueuePositions(b)
+	all := state.CourtQueueEntriesOf(comp, nil, b)
+	stampCourtQueuePositions(comp, nil, b, all)
 
-	// Final and bronze are both scheduled on court A with blank scheduledAt. The
-	// bronze is conventionally played JUST BEFORE the final (viewer_awards: "the
-	// bronze is normally played first"), so it sorts first (round=finalRound,
-	// position -1), then the final.
 	assert.Equal(t, 1, b.ThirdPlaceMatch.QueuePosition, "bronze must be 1st scheduled (plays before the final)")
 	assert.Equal(t, 2, b.Rounds[1][0].QueuePosition, "final must be 2nd scheduled")
-	// Completed semis get no queue position.
 	assert.Equal(t, 0, b.Rounds[0][0].QueuePosition, "completed sf1 must have position 0")
 	assert.Equal(t, 0, b.Rounds[0][1].QueuePosition, "completed sf2 must have position 0")
+}
+
+// TestLoadCourtQueueEntries_FiltersSameDayOtherCompetitions verifies that
+// loadCourtQueueEntries loads entries only from other non-setup competitions
+// sharing the served competition's date, skipping the served competition itself
+// and competitions on other days.
+func TestLoadCourtQueueEntries_FiltersSameDayOtherCompetitions(t *testing.T) {
+	root := t.TempDir()
+	store, err := state.NewStore(root)
+	require.NoError(t, err)
+
+	served := &state.Competition{
+		ID:     "c-served",
+		Status: state.CompStatusPools,
+		Date:   "2026-11-01",
+	}
+	require.NoError(t, store.SaveCompetition(served))
+	require.NoError(t, store.SavePoolMatches("c-served", []state.MatchResult{
+		{ID: "m-served-1", Court: "A", Status: state.MatchStatusScheduled},
+	}))
+
+	sameDay := &state.Competition{
+		ID:     "c-sameday",
+		Status: state.CompStatusPools,
+		Date:   " 2026-11-01 ",
+	}
+	require.NoError(t, store.SaveCompetition(sameDay))
+	require.NoError(t, store.SavePoolMatches("c-sameday", []state.MatchResult{
+		{ID: "m-sameday-1", Court: "A", Status: state.MatchStatusScheduled},
+	}))
+
+	otherDay := &state.Competition{
+		ID:     "c-otherday",
+		Status: state.CompStatusPools,
+		Date:   "2026-11-02",
+	}
+	require.NoError(t, store.SaveCompetition(otherDay))
+	require.NoError(t, store.SavePoolMatches("c-otherday", []state.MatchResult{
+		{ID: "m-otherday-1", Court: "A", Status: state.MatchStatusScheduled},
+	}))
+
+	entries, err := loadCourtQueueEntries(store, served)
+	require.NoError(t, err)
+	require.Len(t, entries, 1)
+	assert.Equal(t, "c-sameday", entries[0].CompetitionID)
+	assert.Equal(t, "m-sameday-1", entries[0].MatchID)
 }
 
 // setupSelfRunScoreRouter creates a minimal gin router with just the score

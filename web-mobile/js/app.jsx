@@ -8,13 +8,16 @@ import { bridge, setSnapshotProvider, setDisplayCourt, getLastBroadcastAt, apply
 import { BRANDING_DEFAULTS } from './admin_branding.jsx';
 import { queuedWritesNoun, supersededAlertText, displacedAlertText, tapNotAppliedAlertText, tapNotAppliedText } from './write_result.jsx';
 import { VersionBanner } from './version_banner.jsx';
+import { PublicHeldWrites } from './held_writes_panel.jsx';
 import { useUnsavedInput } from './app_version.jsx';
 import { tapWords } from './match_history_view.jsx';
 import { useOpenedTapGuard } from './tap_guard.jsx';
 import { SELF_RUN_NO_CHECK_IN } from './competition_shape.jsx';
 import { pushToast } from './toast_queue.jsx';
+import { queueMoveCourts, sharesCourtDay, sharesDay } from './court_queue.jsx';
+import { courtPaceLookup, paceClockNow, PACE_TICK_MS } from './court_pace.jsx';
 
-const { useState: useS, useEffect: useE, useRef: useR, useCallback: useC } = React;
+const { useState: useS, useEffect: useE, useRef: useR, useCallback: useC, useMemo: useM } = React;
 
 // preact-router wrapper from router.jsx (T005). Used for URL → state
 // synchronisation. The render path itself still drives off
@@ -479,6 +482,10 @@ export function queueAlertToastOptions(alert) {
 
 function App() {
   const [tournament, setTournament] = useS(undefined);
+  // The selected competition's latest data, for the SSE handler's
+  // cross-competition refetch (sharesCourtDay), which must not read a stale
+  // closure.
+  const selectedCompDataRef = useR(null);
   const [loading, setLoading] = useS(true);
   const [announcements, setAnnouncements] = useS([]);
   // Hydrate the route state from the URL synchronously, BEFORE the first
@@ -606,6 +613,9 @@ function App() {
   // ref, instead of re-registering on every tournament update (which would
   // churn the provider and open a transient unregistered window).
   const compsRef = useR(null);
+  // Each other competition's match as last pushed (status, court, time), so a
+  // score tap there does not refetch this competition's queue (queueMoveCourts).
+  const foreignQueueSeenRef = useR(new Map());
   // Per-tab client ID, generated once on mount. Used as the originator
   // identifier on password-reset POSTs so the SSE broadcast can be
   // ignored in the originating tab. Without this, the tab that just
@@ -826,6 +836,21 @@ function App() {
   };
 
   useE(() => { load(); }, []);
+
+  // Periodic pace tick updates current minutes of day for pace projections,
+  // on every tick. The tournament refetch that keeps shared-court pace drift
+  // current runs on the same period from the SSE effect below, through its
+  // gates and jitter.
+  const [nowTick, setNowTick] = useS(0);
+  useE(() => {
+    const timer = setInterval(() => setNowTick((t) => t + 1), PACE_TICK_MS);
+    return () => clearInterval(timer);
+  }, []);
+
+  const paceLookup = useM(() => {
+    if (mode !== "viewer") return null;
+    return courtPaceLookup(tournament?.competitions, paceClockNow());
+  }, [tournament, nowTick, mode]);
 
   // mp-9ukk Phase 2: display-mode BroadcastChannel consumer.
   //
@@ -1107,6 +1132,17 @@ function App() {
         load();
     };
 
+    // The pace tick's refetch: on a competition page the tournament list is
+    // refetched every PACE_TICK_MS so shared-court pace drift stays current.
+    // It goes through maybeLoad like every other refetch here, waits while the
+    // sign-in prompt is open, skips a hidden tab (onVisibilityChange resyncs
+    // it when the page is shown again), and lands after a random delay so the
+    // open tabs do not all ask at the same moment.
+    const paceRefetch = setInterval(() => {
+        if (mode !== "viewer" || !viewerCompId || document.hidden || authPromptRef.current) return;
+        jitteredTimeout(maybeLoad, Math.random() * 2000);
+    }, PACE_TICK_MS);
+
     // F6b: per-subscription seq tracker. Allocated once per effect run so
     // it resets on viewerCompId/mode changes alongside the SSE reconnect.
     const sseSeq = { lastSeq: 0 };
@@ -1204,6 +1240,15 @@ function App() {
         //     walls so they don't simultaneously storm GET /api/viewer/competitions.
         const detailJitter = Math.random() * 500;
         const listJitter = Math.random() * 2000;
+        const refetchDetail = () => jitteredTimeout(() => window.API.fetchCompetitionDetails(viewerCompId).then(takeCompDetail).catch(err => console.error('SSE refresh failed:', err)), detailJitter);
+        // another competition's event: refetch the open competition only when the two share a day (and, when `courts` is given, a court on that day)
+        const refetchIfSharesDay = (event, courts) => {
+            const otherDate = (compsRef.current || []).find(c => c.id === event.data?.competitionId)?.date || "";
+            const shares = courts
+                ? sharesCourtDay(selectedCompDataRef.current, otherDate, courts)
+                : sharesDay(selectedCompDataRef.current, otherDate);
+            if (shares) refetchDetail();
+        };
         if (event.type === "tournament_updated") {
             if (!authPromptRef.current) jitteredTimeout(maybeLoad, listJitter);
         } else if (event.type === "password_reset") {
@@ -1262,7 +1307,9 @@ function App() {
             // for any view that caches its own derived state.
             if (viewerCompId === event.data?.competitionId) {
                 setSelectedCompData(prev => patchCompetitionData(prev, event));
-                jitteredTimeout(() => window.API.fetchCompetitionDetails(viewerCompId).then(takeCompDetail).catch(err => console.error('SSE refresh failed:', err)), detailJitter);
+                refetchDetail();
+            } else if (viewerCompId && event.data?.competitionId !== viewerCompId) {
+                refetchIfSharesDay(event);
             }
             // competitor_status_updated is a list-level event (eligibility
             // badges on the lobby): always refresh the full list.
@@ -1288,7 +1335,16 @@ function App() {
                 // Refresh current competition detail (jittered): the backend
                 // has already persisted the new status before broadcasting, so
                 // this fetch deterministically picks up the transition.
-                jitteredTimeout(() => window.API.fetchCompetitionDetails(viewerCompId).then(takeCompDetail).catch(err => console.error('SSE refresh failed:', err)), detailJitter);
+                refetchDetail();
+            } else if (event.type === "match_updated" && viewerCompId && event.data?.competitionId !== viewerCompId) {
+                // bc-pubq: queuePosition is court-wide, so another
+                // competition's match moving on a court and day this one
+                // shares changes this one's positions: refetch them. Only a
+                // change of status, court or time moves a place; a score tap
+                // does not, so it refetches nothing.
+                const eventResults = event.data?.results || (event.data?.result ? [event.data.result] : []);
+                const courts = queueMoveCourts(foreignQueueSeenRef.current, event.data?.competitionId, eventResults);
+                if (courts.length > 0) refetchIfSharesDay(event, courts);
             }
             // P1 (mp-9afd): fire a full-list refetch for list-level
             // transitions (competition_started / competition_completed change
@@ -1310,7 +1366,7 @@ function App() {
             // Court/time move: no competitionId in payload, so refresh the
             // currently selected competition (if any) and the tournament list.
             if (viewerCompId) {
-                jitteredTimeout(() => window.API.fetchCompetitionDetails(viewerCompId).then(takeCompDetail).catch(err => console.error('SSE refresh failed:', err)), detailJitter);
+                refetchDetail();
             }
             jitteredTimeout(maybeLoad, listJitter);
         } else if (event.type === "draw_generated" || event.type === "draw_discarded") {
@@ -1318,7 +1374,9 @@ function App() {
             // details (new pools/bracket data or cleared state) and the
             // tournament list so status badges update.
             if (viewerCompId === event.data?.competitionId) {
-                jitteredTimeout(() => window.API.fetchCompetitionDetails(viewerCompId).then(takeCompDetail).catch(err => console.error('SSE refresh failed:', err)), detailJitter);
+                refetchDetail();
+            } else if (viewerCompId && event.data?.competitionId !== viewerCompId) {
+                refetchIfSharesDay(event);
             }
             jitteredTimeout(maybeLoad, listJitter);
         } else if (event.type === "swiss_round_generated") {
@@ -1330,7 +1388,9 @@ function App() {
             // / participants_updated pattern: no separate display-mode branch
             // needed because the unconditional load() at the end covers it.
             if (viewerCompId === event.data?.competitionId) {
-                jitteredTimeout(() => window.API.fetchCompetitionDetails(viewerCompId).then(takeCompDetail).catch(err => console.error('SSE refresh failed:', err)), detailJitter);
+                refetchDetail();
+            } else if (viewerCompId && event.data?.competitionId !== viewerCompId) {
+                refetchIfSharesDay(event);
             }
             // swiss_round_generated updates the tournament list (swissCurrentRound
             // counter): always do one list refresh: covers display mode, home-
@@ -1342,7 +1402,7 @@ function App() {
             // event targets it; also refresh the tournament list so participant
             // counts stay accurate.
             if (viewerCompId === event.data?.competitionId) {
-                jitteredTimeout(() => window.API.fetchCompetitionDetails(viewerCompId).then(takeCompDetail).catch(err => console.error('SSE refresh failed:', err)), detailJitter);
+                refetchDetail();
             }
             jitteredTimeout(maybeLoad, listJitter);
         } else if (event.type === "lineup_updated") {
@@ -1407,6 +1467,7 @@ function App() {
     });
     return () => {
         unsub();
+        clearInterval(paceRefetch);
         timerPool.clearAll();
         document.removeEventListener('visibilitychange', onVisibilityChange);
         window.removeEventListener('online', onOnline);
@@ -1414,6 +1475,7 @@ function App() {
   }, [viewerCompId, mode]);
 
   const [selectedCompData, setSelectedCompData] = useS(null);
+  useE(() => { selectedCompDataRef.current = selectedCompData; }, [selectedCompData]);
 
   useE(() => {
     if (viewerCompId && viewerScreen !== "register") {
@@ -1607,6 +1669,7 @@ function App() {
   // viewer mode
   return (
     <>
+      <PublicHeldWrites competitions={tournament && tournament.competitions} />
       {announcements.length > 0 && window.AnnouncementBanner && (
         <window.AnnouncementBanner
           announcements={announcements}
@@ -1634,12 +1697,14 @@ function App() {
           tweaks={THEME}
           activeTab={viewerTab || "overview"}
           onTabChange={handleTabChange}
+          paceLookup={paceLookup}
         />
       ) : viewerScreen === "schedule" ? (
         <window.ViewerSchedule
           tournament={tournament}
           onBack={() => setViewerScreen("home")}
           tweaks={THEME}
+          paceLookup={paceLookup}
         />
       ) : viewerScreen === "glossary" ? (
         // U1 /glossary: the kendo-term reference page. Lives in
@@ -1700,6 +1765,7 @@ function App() {
           }}
           onOpenResults={() => setViewerScreen("results")}
           sseConnected={sseConnected}
+          paceLookup={paceLookup}
         />
       )}
       {authPrompt && (

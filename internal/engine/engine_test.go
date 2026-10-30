@@ -1638,84 +1638,6 @@ func TestUpdateMatchCourt_NotFound(t *testing.T) {
 	assert.Error(t, err)
 }
 
-// --- Bracket Winner Override Tests ---
-
-func TestOverrideBracketWinner(t *testing.T) {
-	eng, store, _ := setupTestEngine(t)
-	compID := "override-bracket"
-
-	createTestCompetition(t, store, compID, "knockout", 3)
-	saveTestParticipants(t, store, compID, []string{"Alice", "Bob", "Charlie", "Dave"})
-	require.NoError(t, eng.StartCompetition(compID))
-
-	bracket, err := store.LoadBracket(compID)
-	require.NoError(t, err)
-	matchID := bracket.Rounds[0][0].ID // Alice vs Bob
-
-	_, err = eng.OverrideBracketWinner(compID, matchID, "Bob", 0)
-	require.NoError(t, err)
-
-	// Verify propagation
-	reloaded, err := store.LoadBracket(compID)
-	require.NoError(t, err)
-	assert.Equal(t, "Bob", reloaded.Rounds[0][0].Winner)
-	assert.True(t, reloaded.Rounds[0][0].IsOverridden)
-	assert.Equal(t, "Bob", reloaded.Rounds[1][0].SideA)
-
-	// Verify override persistence
-	overrides, err := store.LoadOverrides(compID)
-	require.NoError(t, err)
-	assert.Equal(t, "Bob", overrides.Winners[matchID])
-}
-
-// mp-y3nk: an override carrying a server-relative ModifiedAt older than the
-// stored result must be dropped (a reconnecting offline court's stale feeder
-// assertion never clobbers a newer outcome), while a newer one applies. This is
-// the timestamp last-write-wins core on the force-start path.
-func TestOverrideBracketWinner_TimestampLWW(t *testing.T) {
-	eng, store, _ := setupTestEngine(t)
-	compID := "override-ts"
-
-	createTestCompetition(t, store, compID, "knockout", 3)
-	saveTestParticipants(t, store, compID, []string{"Alice", "Bob", "Charlie", "Dave"})
-	require.NoError(t, eng.StartCompetition(compID))
-
-	bracket, err := store.LoadBracket(compID)
-	require.NoError(t, err)
-	matchID := bracket.Rounds[0][0].ID // Alice vs Bob
-
-	// First assertion at t=200 records Bob and stamps ModifiedAt=200.
-	_, err = eng.OverrideBracketWinner(compID, matchID, "Bob", 200)
-	require.NoError(t, err)
-	reloaded, err := store.LoadBracket(compID)
-	require.NoError(t, err)
-	assert.Equal(t, "Bob", reloaded.Rounds[0][0].Winner)
-	assert.Equal(t, int64(200), reloaded.Rounds[0][0].ModifiedAt)
-
-	// A STALE assertion at t=100 (older) must be dropped: winner and timestamp
-	// stay put, and propagation is not re-run with a wrong side.
-	_, err = eng.OverrideBracketWinner(compID, matchID, "Alice", 100)
-	require.NoError(t, err)
-	reloaded, err = store.LoadBracket(compID)
-	require.NoError(t, err)
-	assert.Equal(t, "Bob", reloaded.Rounds[0][0].Winner, "older override must not overwrite")
-	assert.Equal(t, int64(200), reloaded.Rounds[0][0].ModifiedAt)
-	assert.Equal(t, "Bob", reloaded.Rounds[1][0].SideA, "final side must still reflect the newer winner")
-	// tri-review finding 2: a dropped override must NOT write a phantom audit
-	// record; the audit still reflects the winner that actually landed.
-	overrides, err := store.LoadOverrides(compID)
-	require.NoError(t, err)
-	assert.Equal(t, "Bob", overrides.Winners[matchID], "stale override must not overwrite the audit record")
-
-	// A NEWER assertion at t=300 applies and re-stamps.
-	_, err = eng.OverrideBracketWinner(compID, matchID, "Alice", 300)
-	require.NoError(t, err)
-	reloaded, err = store.LoadBracket(compID)
-	require.NoError(t, err)
-	assert.Equal(t, "Alice", reloaded.Rounds[0][0].Winner, "newer override must apply")
-	assert.Equal(t, int64(300), reloaded.Rounds[0][0].ModifiedAt)
-}
-
 // REVERSED by bc-lww1, and the original reason is why.
 //
 // This test was added by a tri-review whose stated justification was that
@@ -1776,9 +1698,9 @@ func TestRecordBracketResult_StaleCorrectionIsDroppedAndReported(t *testing.T) {
 		"a correction made against the current result must still apply")
 }
 
-func TestOverrideBracketWinner_AutoPropagation(t *testing.T) {
+func TestBracketWinner_AutoPropagation(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
-	compID := "override-auto"
+	compID := "bracket-auto"
 
 	createTestCompetition(t, store, compID, "knockout", 3)
 	// 4 players, Alice vs Bob (M1), Charlie vs Dave (M2). Winner M1 vs Winner M2 (Final).
@@ -1788,32 +1710,24 @@ func TestOverrideBracketWinner_AutoPropagation(t *testing.T) {
 	bracket, err := store.LoadBracket(compID)
 	require.NoError(t, err)
 
-	// Mark second semifinal as Dave winning by bye (if possible) - or just score it normally
+	// Mark second semifinal as Dave winning
 	err = eng.RecordMatchResult(compID, bracket.Rounds[0][1].ID, &state.MatchResult{
 		Winner: "Dave",
 		Status: state.MatchStatusCompleted,
 	})
 	require.NoError(t, err)
 
-	// Now override first semifinal to Bob
-	_, err = eng.OverrideBracketWinner(compID, bracket.Rounds[0][0].ID, "Bob", 0)
+	// Now score first semifinal to Bob
+	err = eng.RecordMatchResult(compID, bracket.Rounds[0][0].ID, &state.MatchResult{
+		Winner: "Bob",
+		Status: state.MatchStatusCompleted,
+	})
 	require.NoError(t, err)
 
 	reloaded, err := store.LoadBracket(compID)
 	require.NoError(t, err)
 	assert.Equal(t, "Bob", reloaded.Rounds[1][0].SideA)
 	assert.Equal(t, "Dave", reloaded.Rounds[1][0].SideB)
-}
-
-func TestOverrideBracketWinner_NotFound(t *testing.T) {
-	eng, store, _ := setupTestEngine(t)
-	compID := "override-not-found"
-	createTestCompetition(t, store, compID, "knockout", 3)
-	saveTestParticipants(t, store, compID, []string{"A", "B"})
-	require.NoError(t, eng.StartCompetition(compID))
-
-	_, err := eng.OverrideBracketWinner(compID, "m-999", "A", 0)
-	assert.Error(t, err)
 }
 
 // --- Scoring and Standing Logic Tests ---
@@ -1863,9 +1777,9 @@ func TestCalculatePoolStandings_WithManualOverrides(t *testing.T) {
 	assert.True(t, poolStandings[1].IsOverridden)
 }
 
-func TestOverrideBracketWinner_SideB(t *testing.T) {
+func TestBracketWinner_SideB(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
-	compID := "override-sideb"
+	compID := "bracket-sideb"
 
 	createTestCompetition(t, store, compID, "knockout", 3)
 	saveTestParticipants(t, store, compID, []string{"A", "B", "C", "D"})
@@ -1873,29 +1787,23 @@ func TestOverrideBracketWinner_SideB(t *testing.T) {
 
 	bracket, _ := store.LoadBracket(compID)
 	// Match 1 is index 0, Match 2 is index 1.
-	// Override Match 2 winner to "D"
-	_, err := eng.OverrideBracketWinner(compID, bracket.Rounds[0][1].ID, "D", 0)
+	// Record Match 2 winner to "D"
+	err := eng.RecordMatchResult(compID, bracket.Rounds[0][1].ID, &state.MatchResult{Winner: "D", Status: state.MatchStatusCompleted})
 	require.NoError(t, err)
 
 	reloaded, _ := store.LoadBracket(compID)
 	assert.Equal(t, "D", reloaded.Rounds[1][0].SideB)
 }
 
-func TestOverrideBracketWinner_DeepPropagation(t *testing.T) {
+func TestBracketWinner_DeepPropagation(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
-	compID := "override-deep"
+	compID := "bracket-deep"
 
 	createTestCompetition(t, store, compID, "knockout", 3)
-	// 8 players → a full 3-round bracket with no byes, so every first-round match
-	// has two real players. (With non-power-of-2 rosters the byes are distributed
-	// to the top seeds, mp-sess, and those top seeds play no first-round match.)
 	saveTestParticipants(t, store, compID, []string{"Alice", "Bob", "P3", "P4", "P5", "P6", "P7", "P8"})
 	require.NoError(t, eng.StartCompetition(compID))
 
 	bracket, _ := store.LoadBracket(compID)
-	// Pick any first-round match with two real players and override its winner to
-	// the LOWER side (SideB), this exercises the branch where the overridden
-	// winner is NOT the left-hand/default side, a stronger regression than SideA.
 	var matchID, winner string
 	for _, m := range bracket.Rounds[0] {
 		if m.SideA != "" && m.SideB != "" {
@@ -1906,11 +1814,10 @@ func TestOverrideBracketWinner_DeepPropagation(t *testing.T) {
 	}
 	require.NotEmpty(t, matchID)
 
-	_, err := eng.OverrideBracketWinner(compID, matchID, winner, 0)
+	err := eng.RecordMatchResult(compID, matchID, &state.MatchResult{Winner: winner, Status: state.MatchStatusCompleted})
 	require.NoError(t, err)
 
 	reloaded, _ := store.LoadBracket(compID)
-	// Verify the overridden winner propagated to Round 2.
 	found := false
 	for _, m := range reloaded.Rounds[1] {
 		if m.SideA == winner || m.SideB == winner {
@@ -1918,45 +1825,7 @@ func TestOverrideBracketWinner_DeepPropagation(t *testing.T) {
 			break
 		}
 	}
-	assert.Truef(t, found, "overridden winner %q should have propagated to Round 2", winner)
-}
-
-// TestOverrideBracketWinner_LWWAppliedBool confirms that OverrideBracketWinner
-// returns (applied bool, err error): a fresh write returns (true, nil) and a
-// stale write (older timestamp) returns (false, nil) without touching the
-// stored winner. This exercises both findings 7 and 8: the false return lets
-// the handler skip the broadcast (7) and errLWWDropped prevents a spurious
-// disk save (8).
-func TestOverrideBracketWinner_LWWAppliedBool(t *testing.T) {
-	eng, store, _ := setupTestEngine(t)
-	compID := "override-lww-bool"
-
-	createTestCompetition(t, store, compID, "knockout", 3)
-	saveTestParticipants(t, store, compID, []string{"Alice", "Bob", "Charlie", "Dave"})
-	require.NoError(t, eng.StartCompetition(compID))
-
-	bracket, err := store.LoadBracket(compID)
-	require.NoError(t, err)
-	matchID := bracket.Rounds[0][0].ID
-
-	// First override: fresh timestamp, should apply.
-	applied, err := eng.OverrideBracketWinner(compID, matchID, "Bob", 200)
-	require.NoError(t, err)
-	assert.True(t, applied, "first override must apply (applied=true)")
-
-	b, err := store.LoadBracket(compID)
-	require.NoError(t, err)
-	assert.Equal(t, "Bob", b.Rounds[0][0].Winner, "Bob must be stored as winner")
-
-	// Second override: STALE timestamp (100 < 200), should be dropped.
-	applied, err = eng.OverrideBracketWinner(compID, matchID, "Alice", 100)
-	require.NoError(t, err)
-	assert.False(t, applied, "stale override must be dropped (applied=false)")
-
-	// Stored winner must be unchanged after the stale override.
-	b, err = store.LoadBracket(compID)
-	require.NoError(t, err)
-	assert.Equal(t, "Bob", b.Rounds[0][0].Winner, "stale override must not overwrite Bob")
+	assert.Truef(t, found, "winner %q should have propagated to Round 2", winner)
 }
 
 func TestCalculatePoolStandings_EdgeCases(t *testing.T) {
@@ -2480,10 +2349,9 @@ func TestStartCompetition_LeagueMultiCourt_ThreeCourts(t *testing.T) {
 // field-mismatch validation. With these fields in the validation list,
 // a happy-path start (no drift) must succeed, these tests are the
 // "validation list doesn't reject valid starts" guard. The drift-
-// detection direction (concurrent change DOES reject) isn't pinned
-// here because reproducing the race deterministically would require
-// engine hooks that don't exist. The forward direction is sufficient
-// to catch a typo or wrong field reference in the validation block.
+// detection direction (concurrent change DOES reject) is pinned for Date
+// through the beforeStartCommit seam by
+// TestStartCompetition_DateChangedDuringStartIsRefused.
 func TestStartCompetition_PreservesNumberPrefix(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "prefix-test"
@@ -2514,4 +2382,48 @@ func TestStartCompetition_PreservesNumberPrefix(t *testing.T) {
 	assert.Equal(t, "K", stored.NumberPrefix, "NumberPrefix must survive the atomic commit")
 	assert.Equal(t, "10:30", stored.StartTime, "StartTime must survive the atomic commit")
 	assert.True(t, stored.RoundRobin, "RoundRobin must survive the atomic commit")
+}
+
+// TestStartCompetition_DateChangedDuringStartIsRefused pins the drift
+// direction for Date: the court floor reads the competition's day to find
+// the same-day competitions on shared courts, so a Date saved between the
+// draw's load and its commit would leave matches floored against the old
+// day. The commit refuses it and the competition stays in setup.
+func TestStartCompetition_DateChangedDuringStartIsRefused(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "date-drift"
+
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:           compID,
+		Name:         "Date Drift",
+		Kind:         "individual",
+		Format:       state.CompFormatLeague,
+		PoolSize:     3,
+		PoolSizeMode: "min",
+		PoolWinners:  2,
+		RoundRobin:   true,
+		Courts:       []string{"A"},
+		Date:         "01-11-2026",
+		StartTime:    "10:30",
+		Status:       state.CompStatusSetup,
+	}))
+	saveTestParticipants(t, store, compID, []string{"Alice", "Bob", "Charlie"})
+
+	eng.beforeStartCommit = func(id string) {
+		_, err := store.UpdateCompetitionChanged(id, func(c *state.Competition) (*state.Competition, error) {
+			c.Date = "02-11-2026"
+			return c, nil
+		})
+		require.NoError(t, err)
+	}
+
+	err := eng.StartCompetition(compID)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "changed during start")
+	assert.Contains(t, err.Error(), "Date")
+
+	stored, err := store.LoadCompetition(compID)
+	require.NoError(t, err)
+	assert.Equal(t, state.CompStatusSetup, stored.Status, "a refused commit leaves the competition in setup")
+	assert.Equal(t, "02-11-2026", stored.Date, "the concurrent Date save is kept")
 }

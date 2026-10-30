@@ -1,7 +1,6 @@
 package engine
 
 import (
-	"encoding/json"
 	"errors"
 	"log"
 	"maps"
@@ -35,7 +34,6 @@ const (
 
 	doorReopen           = "reopen"
 	doorRequeue          = "requeue"
-	doorOverride         = "override-winner"
 	doorEngi             = "engi"
 	doorKachinukiAdvance = "kachinuki-advance"
 	// doorKachinukiRecord names Record bout when it appends no next pairing
@@ -253,36 +251,6 @@ func noteServerBoutChanges(result *state.MatchResult, before, stored []state.Sub
 // server's own clock, the frame every client stamp is relative to.
 func serverNowMs() int64 {
 	return time.Now().UnixMilli()
-}
-
-// recordOverrideHistory records an override-winner write in the match's
-// history: applied, or held with the winner it named. An APPLIED override
-// appends through the same transaction handle the bracket write just used
-// (OverrideBracketWinner), so the write and its history line commit or fail
-// together. A HELD override makes no write at all, so there is nothing to
-// share a transaction with: it is appended on its own, directly through the
-// store.
-func (e *Engine) recordOverrideHistory(h state.StoreTx, compID, matchID, winnerName string, stamp int64, applied bool, tag ForceOptions) {
-	if applied {
-		e.recordDirectHistoryTagged(h, compID, matchID, doorOverride, stamp, tag, state.GroupResult)
-		return
-	}
-	held, err := json.Marshal(map[string]string{"winner": winnerName})
-	if err != nil {
-		held = json.RawMessage("null")
-	}
-	entry := state.MatchHistoryEntry{
-		MatchID:    matchID,
-		Door:       doorOverride,
-		Stamp:      stamp,
-		ReceivedAt: time.Now().UnixMilli(),
-		Changed:    []string{state.GroupResult},
-		Outcomes:   map[string]string{state.GroupResult: state.HistoryOutcomeHeld},
-		Held:       map[string]json.RawMessage{state.GroupResult: held},
-	}
-	if err := h.AppendMatchHistory(compID, entry); err != nil {
-		log.Printf("engine: match %s/%s: history entry not recorded: %v", compID, matchID, err)
-	}
 }
 
 // SupersededError is ErrMatchSuperseded carrying the groups the write

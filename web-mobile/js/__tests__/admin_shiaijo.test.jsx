@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { makeReactive } from './helpers/reactive_react.js';
 import { parsePath, pathFromState } from '../app.jsx';
-import { sortShiaijoMatches, partitionShiaijoMatches, shiaijoScoreCell, isTeamMatch, groupQueueMatches, shiaijoStandingsKind, makeReconnectRefetcher, pendingFeederSlots, propagateBracketWinnerLocal, applyBronzeLoserLocal } from '../admin_shiaijo.jsx';
+import { sortShiaijoMatches, partitionShiaijoMatches, shiaijoScoreCell, isTeamMatch, groupQueueMatches, shiaijoStandingsKind, makeReconnectRefetcher, propagateBracketWinnerLocal, applyBronzeLoserLocal } from '../admin_shiaijo.jsx';
 import { swissRoundLabel } from '../pool_ids.jsx';
 
 // A team encounter's score must never be shown as a bare number; it always
@@ -527,6 +527,84 @@ describe('sortShiaijoMatches', () => {
     ]);
     expect(out.map((x) => x.id)).toEqual(['r', 'x']);
   });
+
+  it('orders scheduled rows by date before scheduled time (31-05-2026 before 01-06-2026)', () => {
+    const june = { id: 'june', status: 'scheduled', scheduledAt: '10:00', date: '01-06-2026' };
+    const may = { id: 'may', status: 'scheduled', scheduledAt: '15:00', date: '31-05-2026' };
+    const out = sortShiaijoMatches([june, may]);
+    expect(out.map((x) => x.id)).toEqual(['may', 'june']);
+  });
+
+  it('sorts a running row first on the same date regardless of scheduled time', () => {
+    const running = { id: 'run', status: 'running', scheduledAt: '16:00', date: '31-05-2026' };
+    const scheduled = { id: 'sched', status: 'scheduled', scheduledAt: '09:00', date: '31-05-2026' };
+    const out = sortShiaijoMatches([scheduled, running]);
+    expect(out.map((x) => x.id)).toEqual(['run', 'sched']);
+  });
+
+  it('orders by date before running status (earlier date scheduled row precedes later date running row)', () => {
+    const runningLate = { id: 'runLate', status: 'running', scheduledAt: '09:00', date: '02-06-2026' };
+    const schedEarly = { id: 'schedEarly', status: 'scheduled', scheduledAt: '15:00', date: '31-05-2026' };
+    const out = sortShiaijoMatches([runningLate, schedEarly]);
+    expect(out.map((x) => x.id)).toEqual(['schedEarly', 'runLate']);
+  });
+
+  it('orders completed rows by scheduled time', () => {
+    const out = sortShiaijoMatches([
+      m('completed', '10:00', 'late'),
+      m('completed', '09:00', 'early'),
+      m('completed', '09:30', 'mid'),
+    ]);
+    expect(out.map((x) => x.id)).toEqual(['early', 'mid', 'late']);
+  });
+
+  it('orders completed rows by date before scheduled time', () => {
+    const june = { id: 'june', status: 'completed', scheduledAt: '10:00', date: '01-06-2026' };
+    const may = { id: 'may', status: 'completed', scheduledAt: '15:00', date: '31-05-2026' };
+    const out = sortShiaijoMatches([june, may]);
+    expect(out.map((x) => x.id)).toEqual(['may', 'june']);
+  });
+
+  it('sorts untimed completed rows last', () => {
+    const out = sortShiaijoMatches([
+      m('completed', null, 'untimed'),
+      m('completed', '09:00', 'timed'),
+    ]);
+    expect(out.map((x) => x.id)).toEqual(['timed', 'untimed']);
+  });
+
+  it('breaks ties on the same date and scheduled time by drawIndex (0 before 2)', () => {
+    const row2 = { id: 'r2', status: 'scheduled', scheduledAt: '10:00', date: '29-10-2026', drawIndex: 2 };
+    const row0 = { id: 'r0', status: 'scheduled', scheduledAt: '10:00', date: '29-10-2026', drawIndex: 0 };
+    const out = sortShiaijoMatches([row2, row0]);
+    expect(out.map((x) => x.id)).toEqual(['r0', 'r2']);
+  });
+
+  it('treats a row with no drawIndex as drawIndex 0, sorting before drawIndex 1', () => {
+    const row1 = { id: 'r1', status: 'scheduled', scheduledAt: '10:00', date: '29-10-2026', drawIndex: 1 };
+    const rowNone = { id: 'r0', status: 'scheduled', scheduledAt: '10:00', date: '29-10-2026' };
+    const out = sortShiaijoMatches([row1, rowNone]);
+    expect(out.map((x) => x.id)).toEqual(['r0', 'r1']);
+  });
+
+  it('breaks ties by competitionId (a first) and supports the compId alias', () => {
+    const rowB = { id: 'rowB', status: 'scheduled', scheduledAt: '10:00', date: '29-10-2026', competitionId: 'b' };
+    const rowA = { id: 'rowA', status: 'scheduled', scheduledAt: '10:00', date: '29-10-2026', competitionId: 'a' };
+    const outCompId = sortShiaijoMatches([rowB, rowA]);
+    expect(outCompId.map((x) => x.id)).toEqual(['rowA', 'rowB']);
+
+    const aliasB = { id: 'aliasB', status: 'scheduled', scheduledAt: '10:00', date: '29-10-2026', compId: 'b' };
+    const aliasA = { id: 'aliasA', status: 'scheduled', scheduledAt: '10:00', date: '29-10-2026', compId: 'a' };
+    const outAlias = sortShiaijoMatches([aliasB, aliasA]);
+    expect(outAlias.map((x) => x.id)).toEqual(['aliasA', 'aliasB']);
+  });
+
+  it('orders earlier competitionStartTime before later start even when later row has smaller competitionId', () => {
+    const lateRow = { id: 'late', status: 'scheduled', scheduledAt: '10:00', date: '29-10-2026', competitionStartTime: '14:00', competitionId: 'a' };
+    const earlyRow = { id: 'early', status: 'scheduled', scheduledAt: '10:00', date: '29-10-2026', competitionStartTime: '09:00', competitionId: 'b' };
+    const out = sortShiaijoMatches([lateRow, earlyRow]);
+    expect(out.map((x) => x.id)).toEqual(['early', 'late']);
+  });
 });
 
 describe('partitionShiaijoMatches', () => {
@@ -642,69 +720,6 @@ describe('makeReconnectRefetcher; refetch only on reconnect (open-after-error)',
   });
 });
 
-// pendingFeederSlots maps a pending placeholder final to the feeder matches whose
-// winners the operator can assert to make it runnable during an update outage
-// (mp-y3nk Phase 3). "Winner of rX-mY" resolves POSITIONALLY, mirroring the Go
-// parseWinnerOf: round index = rounds.length - X, match index = Y. Only sides
-// that are still placeholders yield a slot; a feeder whose own sides are not yet
-// resolved is returned as non-resolvable so the UI can disable it.
-describe('pendingFeederSlots; feeders an operator can assert to resolve a final', () => {
-  // 4-player bracket: rounds[0] = 2 semifinals, rounds[1] = the final. With
-  // rounds.length === 2, the final's feeders are "Winner of r2-m0/m1".
-  const makeRounds = () => ([
-    [
-      { id: 'm-r2-0', status: 'scheduled', sideA: { id: 'a', name: 'Alice' }, sideB: { id: 'b', name: 'Bob' } },
-      { id: 'm-r2-1', status: 'scheduled', sideA: { id: 'c', name: 'Carol' }, sideB: { id: 'd', name: 'Dan' } },
-    ],
-    [
-      { id: 'm-r1-0', status: 'scheduled', sideA: { id: '', name: 'Winner of r2-m0' }, sideB: { id: '', name: 'Winner of r2-m1' } },
-    ],
-  ]);
-
-  it('returns a resolvable slot per placeholder side with the feeder competitors as options', () => {
-    const rounds = makeRounds();
-    const slots = pendingFeederSlots(rounds[1][0], rounds);
-    expect(slots.length).toBe(2);
-    expect(slots[0]).toMatchObject({ side: 'A', placeholder: 'Winner of r2-m0', resolvable: true });
-    expect(slots[0].feeder.id).toBe('m-r2-0');
-    expect(slots[0].options.map(o => o.name)).toEqual(['Alice', 'Bob']);
-    expect(slots[1]).toMatchObject({ side: 'B', placeholder: 'Winner of r2-m1', resolvable: true });
-    expect(slots[1].feeder.id).toBe('m-r2-1');
-    expect(slots[1].options.map(o => o.name)).toEqual(['Carol', 'Dan']);
-  });
-
-  it('omits a side that is already resolved to a real competitor', () => {
-    const rounds = makeRounds();
-    rounds[1][0].sideA = { id: 'a', name: 'Alice' }; // r2-m0 already resolved
-    const slots = pendingFeederSlots(rounds[1][0], rounds);
-    expect(slots.length).toBe(1);
-    expect(slots[0].placeholder).toBe('Winner of r2-m1');
-  });
-
-  it('marks a feeder whose own sides are still placeholders as non-resolvable (no options)', () => {
-    const rounds = makeRounds();
-    rounds[0][0].sideA = { id: '', name: 'Winner of r3-m0' }; // feeder itself unresolved
-    const slots = pendingFeederSlots(rounds[1][0], rounds);
-    expect(slots[0]).toMatchObject({ placeholder: 'Winner of r2-m0', resolvable: false });
-    expect(slots[0].options).toEqual([]);
-  });
-
-  it('marks an out-of-range placeholder as non-resolvable with a null feeder', () => {
-    const rounds = makeRounds();
-    rounds[1][0].sideA = { id: '', name: 'Winner of r2-m9' }; // no such match index
-    const slots = pendingFeederSlots(rounds[1][0], rounds);
-    expect(slots[0]).toMatchObject({ placeholder: 'Winner of r2-m9', resolvable: false, feeder: null });
-  });
-
-  it('returns [] for a fully-resolved match and tolerates a missing bracket', () => {
-    const rounds = makeRounds();
-    rounds[1][0].sideA = { id: 'a', name: 'Alice' };
-    rounds[1][0].sideB = { id: 'c', name: 'Carol' };
-    expect(pendingFeederSlots(rounds[1][0], rounds)).toEqual([]);
-    expect(pendingFeederSlots(rounds[1][0], null)).toEqual([]);
-    expect(pendingFeederSlots(null, rounds)).toEqual([]);
-  });
-});
 
 // propagateBracketWinnerLocal advances a winner into the next round's placeholder
 // side ON THE CLIENT, so a court running fully offline (mp-y3nk offline console)

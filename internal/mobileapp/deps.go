@@ -115,7 +115,10 @@ type ScoringEngine interface {
 	// ineligible by a *different* match. The undo path (re-scoring a
 	// match that itself created the ineligibility) is permitted.
 	// Score handler wraps fought/hikiwake submissions with this.
-	StartMatchTx(tx state.StoreTx, compID, matchID string) error
+	// skipCourtGate (bc-adna) leaves the in-competition court check out
+	// when true (a write that does not move the match into running, or a
+	// forceCourt start), while the sides gate still runs.
+	StartMatchTx(tx state.StoreTx, compID, matchID string, skipCourtGate bool) error
 	// CheckStartAfterSendBack is the start check (bc-stpf, GET
 	// .../start-check): would starting matchID be refused for its status,
 	// court or competitors once the bout running on court is sent back? It
@@ -131,12 +134,15 @@ type ScoringEngine interface {
 	// taps it takes, replays the match's log and writes the derived match,
 	// under the caller's transaction. Mirrors engine.Engine.RecordScoreEventsTx.
 	RecordScoreEventsTx(tx state.StoreTx, compID, matchID string, req engine.ScoreEventsRequest) (*engine.ScoreEventsResult, error)
-	// CheckCrossCompCourtBusy checks whether the court for matchID is
-	// already occupied by a running match in a different competition.
-	// Must be called before entering WithTransaction to avoid a deadlock
-	// (store.RunningMatchOnCourt acquires read locks on other competitions;
-	// calling it while holding a write lock risks a circular wait).
-	CheckCrossCompCourtBusy(compID, matchID string) error
+	// CheckCrossCompCourtBusyOnStart checks whether the court for matchID
+	// is already occupied by a running match in a different competition,
+	// for a score write that moves matchID into running (writeStatus
+	// running, stored status not running; any other write is not judged,
+	// bc-adna). Must be called before entering WithTransaction to avoid a
+	// deadlock (store.RunningMatchOnCourt acquires read locks on other
+	// competitions; calling it while holding a write lock risks a circular
+	// wait), under the court-exclusivity lock.
+	CheckCrossCompCourtBusyOnStart(compID, matchID string, writeStatus state.MatchStatus) error
 	// RecordDecision auto-fills the scoreline + winner from the
 	// decision/decisionBy/encho triple and persists the result. When the
 	// prior result on the match already carried a kiken/fusenpai decision
@@ -160,7 +166,7 @@ type ScoringEngine interface {
 	// forceDownstreamReopen field maps to kcdgOpts.Force.
 	// kcdgOpts.Reopened, when non-nil, is populated with the ids of every
 	// bracket match the write forced open, mirroring
-	// RecordMatchResultWithIneligibility(Tx) and OverrideBracketWinner.
+	// RecordMatchResultWithIneligibility(Tx).
 	RecordDecisionTxWithOptions(tx state.StoreTx, compID, matchID, decision, decisionBy, decisionReason string, encho *state.EnchoMetadata, kcdgOpts engine.ForceOptions, modifiedAt ...int64) (*state.MatchResult, *domain.CompetitorStatus, error)
 	// MaybeAutoCompletePools transitions the competition's status to
 	// "complete" when every pool match is done, or injects supplementary
@@ -179,13 +185,6 @@ type ScoringEngine interface {
 	// UpdateMatchCourt reassigns a match to a different court. Mirrors
 	// engine.Engine.UpdateMatchCourt.
 	UpdateMatchCourt(compID string, matchID string, newCourt string, mv engine.CourtMove) error
-	// OverrideBracketWinner sets the winner of a bracket match by
-	// participant name (used by the admin "manual winner" flow and the
-	// offline force-start feeder assertion). modifiedAt is the
-	// server-relative timestamp for last-write-wins reconciliation (0 =
-	// unstamped). opts: see RecordMatchResultWithIneligibility above. Mirrors
-	// engine.Engine.OverrideBracketWinner.
-	OverrideBracketWinner(compID string, matchID string, winnerName string, modifiedAt int64, opts ...engine.ForceOptions) (bool, error)
 	// UpdateMatchTime updates a match's scheduledAt. Mirrors
 	// engine.Engine.UpdateMatchTime.
 	UpdateMatchTime(compID string, matchID string, scheduledAt string) error

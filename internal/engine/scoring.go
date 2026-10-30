@@ -68,19 +68,7 @@ var ErrMatchAlreadyCompleted = errors.New("match already completed: use the scor
 // instead folds it into its per-entry errors[] inside an overall 200, which
 // satisfies the 2xx rule but means a supersede is not machine-distinguishable
 // from a genuine rejection there (its `reason` and `heldGroups` say it is).
-//
-// The OverrideBracketWinner path reports the same condition through its own
-// (applied bool, error) return and the package-internal errLWWDropped below;
-// that one predates this and already reaches the client as {"applied": false}.
 var ErrMatchSuperseded = errors.New("match write superseded: a newer result is already recorded")
-
-// errLWWDropped is a package-internal sentinel returned by the mutate callback
-// inside OverrideBracketWinner when a timestamp last-write-wins check drops a
-// stale incoming write. Returning this error (rather than nil) causes
-// UpdateBracket to skip the disk save, avoiding a spurious write of an
-// unchanged bracket (finding 8). The caller converts it to (false, nil) so
-// the handler can respond 200 with applied=false without broadcasting (finding 7).
-var errLWWDropped = errors.New("lww_dropped")
 
 // storedSides is the identity half of a stored match: who the two competitors
 // are, by name and by participant id. Passed as a struct rather than as four
@@ -221,7 +209,7 @@ func (e *Engine) withPoolMatch(h state.StoreTx, compId, matchId string, mutate f
 // (UpdateMatchCourt / UpdateMatchTime) and RevertMatchToQueue, which must work
 // on not-yet-resolved (placeholder) knockout matches so operators can pre-arrange
 // courts/times. The per-match playability gate lives only in the SCORING paths
-// (recordBracketMatchResult / OverrideBracketWinner),
+// (recordBracketMatchResult),
 // which mutate via UpdateBracket directly.
 func (e *Engine) withBracketMatch(h state.StoreTx, compId, matchId string, mutate func(*state.BracketMatch)) error {
 	found, err := h.UpdateBracketMatchByID(compId, matchId, mutate)
@@ -603,14 +591,14 @@ const (
 )
 
 // ForceOptions is the optional trailing argument accepted by
-// RecordMatchResultWithIneligibility(Tx) and OverrideBracketWinner (bc-kcdg).
+// RecordMatchResultWithIneligibility(Tx) and other forced-write paths (bc-kcdg).
 // It is variadic (`opts ...ForceOptions`) rather than a plain parameter
 // SPECIFICALLY so the dozens of existing call sites across this codebase
 // (and its tests) that predate the downstream-knockout-correction guard keep
 // compiling unchanged: omitting it is exactly the pre-bc-kcdg behaviour
-// (force=false, no reopen list wanted). Only the two callers that need to
-// offer an operator override (the score-write and override-winner HTTP
-// handlers) pass one.
+// (force=false, no reopen list wanted). Only callers that need to
+// offer an operator confirmation (such as the score-write HTTP
+// handler) pass one.
 // ReopenedMatch identifies a match a forced correction reopened: its id, for
 // broadcasts and for anything addressing the match, and its MATCH NUMBER, which
 // is what the operator is shown.
@@ -699,6 +687,16 @@ type ForceOptions struct {
 	// bytes as an operator clearing every mark on an editor board, which must
 	// still clear them.
 	StartOnly bool
+	// ForceCourt is the organiser's "Start anyway" / "Reopen anyway"
+	// (bc-adna): a start or a reopen into running on a court that already
+	// runs a bout skips both court gates (the cross-competition one and the
+	// in-competition one) and lands, so the court runs two bouts at once.
+	// The sides gate (a side fighting elsewhere, a barred side) still runs.
+	// Request-only, never stored; an anonymous self-run caller's is
+	// stripped (enforceSelfRunPolicy). Read by the reopen; the score handler
+	// judges its own gates before the write and carries it here only so a
+	// forced score write says so beside StartOnly.
+	ForceCourt bool
 	// NoReplayHistory leaves out the history line an exact resend of a
 	// recorded finish would otherwise add (answerExactScoreReplay). The score
 	// handler sets it for an anonymous self-run participant, whose resend
@@ -2962,12 +2960,11 @@ func bracketMatchCarriesOwnResult(bm *state.BracketMatch) bool {
 		bm.FlagsA > 0 ||
 		bm.FlagsB > 0 ||
 		bm.ResultSource != "" ||
-		// IsOverridden is the ONE result shape carrying no scoreline at all:
-		// OverrideBracketWinner (the admin panel's manual winner pick) sets
+		// IsOverridden is the stored result shape carrying no scoreline at all:
+		// an overridden match (from earlier releases) holds
 		// Winner/WinnerID/Status=Completed and this flag, and nothing else. A
 		// scoreline-only predicate reads that as an untouched slot and lets the
-		// correction repaint it silently, which is this very defect arriving
-		// through the manual-override door. It is also precisely what separates
+		// correction repaint it silently. It is also precisely what separates
 		// an overridden match from a bye pass-through, which sets the same
 		// Winner/Status pair and must NOT block.
 		bm.IsOverridden
@@ -3777,230 +3774,26 @@ func matchNotFoundAsNotFound(compId, matchId string, err error) error {
 	return err
 }
 
-// setBracketOverrideWinner sets m's Winner name AND (bc-pnum review finding
-// F1) its matching WinnerID together, for OverrideBracketWinner's two
-// branches (a round match and the bronze/3rd-place match). The override API
-// only ever supplies a NAME, so the id half has to be derived from m's OWN
-// SideA/SideB -- leaving it untouched (the pre-fix behaviour) let a stale id
-// from whatever the row held before survive the rename and propagate to a
-// competitor who did not win.
-//
-// Neither of this package's existing "which side" helpers fits directly:
-// bracketLoserIdentity answers a different question (the LOSER, given an
-// already-attributed winner), and domain.AttributeWinnerSide's ambiguous-name
-// tie-break (sideA wins ties, the same convention every other name-only
-// attribution in this codebase follows) is a deliberate GUESS -- exactly what
-// this call site must not make. A winnerName matching BOTH sides identically
-// (a same-name pairing, legal per CheckDuplicateEntriesByNameDojo) cannot be
-// told apart by name alone, so it resolves to an empty id, never a guessed
-// side.
-func setBracketOverrideWinner(m *state.BracketMatch, winnerName string) {
-	m.Winner = winnerName
-	m.WinnerID = deriveOverrideWinnerID(m, winnerName)
-}
-
-// deriveOverrideWinnerID mirrors setBracketOverrideWinner's id derivation
-// WITHOUT mutating m, so the bc-kcdg downstream-correction guard can compare
-// the WOULD-BE winner id against the currently stored one before deciding
-// whether to allow the override.
-func deriveOverrideWinnerID(m *state.BracketMatch, winnerName string) string {
+// guardBareNameDownstreamKnockoutCorrection applies the bc-kcdg refusal
+// rule adapted to a bare-name input (e.g. engi.go's dispatch seam, which
+// decides its winner from flag counts rather than a submitted result struct).
+// Like its twin it refuses a running later match first, whatever force says,
+// and force skips only the played refusal.
+func guardBareNameDownstreamKnockoutCorrection(bracket *state.Bracket, rIdx, mIdx int, m *state.BracketMatch, winnerName string, force bool) error {
+	var newWinnerID string
 	aMatches := winnerName != "" && winnerName == m.SideA
 	bMatches := winnerName != "" && winnerName == m.SideB
 	switch {
 	case aMatches && !bMatches:
-		return m.SideAID
+		newWinnerID = m.SideAID
 	case bMatches && !aMatches:
-		return m.SideBID
-	default:
-		return ""
+		newWinnerID = m.SideBID
 	}
-}
-
-// guardOverrideDownstreamKnockoutCorrection is OverrideBracketWinner's
-// version of guardDownstreamKnockoutCorrection: the same bc-kcdg refusal
-// rule, adapted to the override API's bare-name input (it has no
-// state.MatchResult to resolve a winner id through, so it derives the
-// would-be id itself via deriveOverrideWinnerID rather than calling
-// bracketWinnerChanged/resolveWinnerIDFromSides). Like its twin it refuses
-// a running later match first, whatever force says, and force skips only the
-// played refusal.
-func guardOverrideDownstreamKnockoutCorrection(bracket *state.Bracket, rIdx, mIdx int, m *state.BracketMatch, winnerName string, force bool) error {
-	newWinnerID := deriveOverrideWinnerID(m, winnerName)
 	priorName, priorID := propagatedWinnerOf(bracket, rIdx, mIdx, m)
 	if !winnerDiffers(winnerName, newWinnerID, priorName, priorID) {
 		return nil
 	}
 	return downstreamCorrectionRefusal(bracket, rIdx, mIdx, m, force)
-}
-
-// OverrideBracketWinner atomically loads the bracket, locates the
-// target match, sets the winner + IsOverridden + Status, propagates
-// the winner to subsequent rounds, and saves. Same UpdateBracket
-// primitive as recordBracketMatchResult and withBracketMatch, the
-// entire find + mutate + propagate + save sequence runs under the
-// per-competition lock, so a concurrent bracket score / court / time
-// update (also under the same lock via the atomic primitives) can't
-// land between our load and save and have its mutation clobbered.
-//
-// Uses the same UpdateBracket atomic primitive as the rest of the
-// scoring path to avoid the LoadBracket + mutate + Save TOCTOU window.
-// Returns (applied bool, err error). applied is true when the write landed;
-// false when it was dropped by the timestamp LWW guard (stale reconnect
-// replay). A false return still carries nil err so the caller can respond
-// 200 with {"applied":false} without broadcasting (finding 7).
-// Returning errLWWDropped from the mutate callback causes UpdateBracket to
-// skip the disk save, avoiding a spurious write of an unchanged bracket (finding 8).
-//
-// bc-kcdg: the round branch (bronze has no downstream, so it is exempt) runs
-// guardOverrideDownstreamKnockoutCorrection before mutating; Force gets past
-// its played refusal, never its running one. A forced override that changes an already-propagated
-// winner requeues the one downstream match that carries its own
-// result (forceReopenDownstreamChain), same as the score-write path; opts'
-// Reopened field, when non-nil, is populated with their IDs.
-func (e *Engine) OverrideBracketWinner(compId string, matchId string, winnerName string, modifiedAt int64, opts ...ForceOptions) (bool, error) {
-	fo := firstForceOptions(opts)
-	var reopened []ReopenedMatch
-	// The picks the override's propagation takes from matches it re-seats
-	// without reopening, for their own history lines (bracket_seat_audit.go).
-	var clears []repPickClear
-	// The write and its history entry are one transaction (bc-mrgc): a held
-	// (errLWWDropped) assertion makes no write at all, so it is recorded
-	// outside the transaction below, but an APPLIED override must not land
-	// with no history line explaining it if the process dies right after.
-	var held, recorded bool
-	err := e.store.WithTransaction(compId, func(tx state.StoreTx) error {
-		// A resend of an override already logged (its write id) is answered
-		// as recorded: nothing written, no history line (bc-evts F1, Q6).
-		if e.loggedWriteID(tx, compId, matchId, fo.WriteID) {
-			recorded = true
-			return nil
-		}
-		uerr := tx.UpdateBracket(compId, func(bracket *state.Bracket) error {
-			if bracket == nil {
-				return notFoundErrorf("bracket not found for competition %s", compId)
-			}
-			for rIdx := range bracket.Rounds {
-				for mIdx := range bracket.Rounds[rIdx] {
-					m := &bracket.Rounds[rIdx][mIdx]
-					if m.ID == matchId {
-						if !bracketMatchPlayable(m) {
-							// PURE (m already carries Number/DisplayRound): safe
-							// inside UpdateBracket's mutate callback (bc-cse item
-							// 14), which holds the per-comp lock.
-							return validationErrorf("%s is not ready to override: a feeder pool or match has not finished", SentenceCase(MatchLabel(bracketMatchRef(m))))
-						}
-						// Timestamp ordering (mp-y3nk), on the one group an override
-						// changes (bc-mrgc): a reconnecting offline feeder assertion
-						// older than a newer stored verdict is not applied; it is
-						// kept in the match's history below. Return errLWWDropped
-						// (not nil) so UpdateBracket skips the save.
-						if !domain.ApplyByTimestamp(modifiedAt, m.GroupStamp(state.GroupResult)) {
-							return errLWWDropped
-						}
-						if err := guardOverrideDownstreamKnockoutCorrection(bracket, rIdx, mIdx, m, winnerName, fo.Force); err != nil {
-							return err
-						}
-						// Captured before the override rewrites it, for the same
-						// reason the score door captures its own: a forced override
-						// that names the winner already recorded must not requeue
-						// the next round.
-						priorWinner, priorWinnerID := propagatedWinnerOf(bracket, rIdx, mIdx, m)
-						before := repPickSnapshot(bracket, matchId)
-						setBracketOverrideWinner(m, winnerName)
-						m.IsOverridden = true
-						m.Status = state.MatchStatusCompleted
-						// An override ends the match, so a reopened match closed out
-						// this way must not keep ReopenPending set: it bypasses
-						// applyCorrectionReason/dischargeReopenPendingUnderTx,
-						// which clear it on every other way of ending a match.
-						m.ReopenPending = false
-						m.StampGroups(modifiedAt, state.GroupResult)
-						e.propagateBracketWinner(bracket, rIdx, mIdx)
-						// Same gate as the score door: a forced override that names
-						// the winner already recorded displaces nobody, so there is
-						// nothing downstream to unwind. displacedWinner is this
-						// match's winner as it stood before setBracketOverrideWinner.
-						if fo.Force && winnerActuallyChanged(priorWinner, priorWinnerID, m) {
-							reopened = forceReopenDownstreamChain(bracket, rIdx, mIdx, m.ID)
-						}
-						clears = repPickClears(before, bracket)
-						markRepPicksCleared(reopened, clears)
-						return nil
-					}
-				}
-			}
-			// The bronze (3rd-place) knockout lives outside Rounds; handle it
-			// here. Bronze has no downstream match, so no propagation is needed
-			// and no other match can lose a pick to this write: no snapshot.
-			if bracket.ThirdPlaceMatch != nil && bracket.ThirdPlaceMatch.ID == matchId {
-				bm := bracket.ThirdPlaceMatch
-				if !bracketMatchPlayable(bm) {
-					// PURE, same reasoning as the round branch above.
-					return validationErrorf("%s is not ready to override: a feeder pool or match has not finished", SentenceCase(MatchLabel(bracketMatchRef(bm))))
-				}
-				// Same errLWWDropped mechanism as above.
-				if !domain.ApplyByTimestamp(modifiedAt, bm.GroupStamp(state.GroupResult)) {
-					return errLWWDropped
-				}
-				setBracketOverrideWinner(bm, winnerName)
-				bm.IsOverridden = true
-				bm.Status = state.MatchStatusCompleted
-				// Mirror of the round branch: an override discharges the reopen debt.
-				bm.ReopenPending = false
-				bm.StampGroups(modifiedAt, state.GroupResult)
-				return nil
-			}
-			return notFoundErrorf("bracket match %s not found", matchId)
-		})
-		if errors.Is(uerr, errLWWDropped) {
-			held = true
-			return nil
-		}
-		if uerr != nil {
-			return uerr
-		}
-		e.recordOverrideHistory(tx, compId, matchId, winnerName, modifiedAt, true, fo)
-		// restoreForceReopened must run with the SAME handle the bracket write
-		// just used (its own doc comment says so): it both restores eligibility
-		// for a competitor the reopen un-bars and appends that reopen's history
-		// line, and doing either outside this transaction would leave a window
-		// where the bracket already shows the reopened match but neither of
-		// those followed (a crash there, or a decision landing in the gap,
-		// would see a reopened match with no history line, or a bar the
-		// restore had not yet lifted/could wrongly lift).
-		e.restoreForceReopened(tx, compId, reopened)
-		// And a line for each downstream match the propagation re-seated
-		// without reopening, in the same transaction and beside the reopen
-		// lines (a reopened match's own line names its pick instead).
-		e.recordRepPickClears(tx, compId, clears, reopened)
-		return nil
-	})
-	if held {
-		// Not applied, and kept: the override is recorded in the match's
-		// history as held, with the winner it named (bc-mrgc). No write
-		// landed, so this is appended on its own, outside the transaction
-		// above (which, for this case, staged nothing).
-		e.recordOverrideHistory(e.store, compId, matchId, winnerName, modifiedAt, false, fo)
-		return false, nil
-	}
-	if err != nil {
-		return false, err
-	}
-	if recorded {
-		return true, nil
-	}
-	if fo.Reopened != nil {
-		*fo.Reopened = reopened
-	}
-
-	// Record the override for auditing. A failure here leaves the bracket
-	// display correct (it was already saved atomically above); log but
-	// don't surface as an error.
-	if err := e.store.SaveWinnerOverride(compId, matchId, winnerName); err != nil {
-		fmt.Printf("warning: failed to persist winner override audit record for %s: %v\n", matchId, err)
-	}
-
-	return true, nil
 }
 
 // UpdateMatchTime sets a match's time and moves nothing else: a time set by

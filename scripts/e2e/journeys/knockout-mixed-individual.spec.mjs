@@ -33,8 +33,8 @@ import {
   editorIdentity, UP_NEXT,
 } from '../fixtures/shiaijo.mjs';
 import {
-  INLINE_EDITOR, EDITOR, clearMarks, ipponButton, syncState, filledSlots, finishButton, armedFinishButton, armFinish, finishMatch,
-  startMatch, awardIppon, nextTapWrite, writeLanded,
+  INLINE_EDITOR, EDITOR, clearMarks, ipponButton, notHeld, filledSlots, finishButton, armedFinishButton, armFinish, finishMatch,
+  startMatch, awardIppon, nextTapWrite, writeLanded, settled, unsentCount,
 } from '../fixtures/scoring.mjs';
 import { dwell, rendered, untilStable } from '../fixtures/pace.mjs';
 import {
@@ -66,12 +66,9 @@ test.beforeAll(async ({ browser, serverForFile }, testInfo) => {
 // written as well.
 test.afterAll(() => audit.flush());
 
-// Let the running bout's taps land. The pill reads "Syncing…" from the tap
-// until it has landed (each tap is an outbox entry in the tick it is made, and
-// the pill has re-rendered by the time tap() returns), so "Synced" after a tap
-// means the write went out and came back.
+// Return once the running bout's taps have landed (the outbox is empty).
 async function settle(page, root = INLINE_EDITOR) {
-  await expect(syncState(page, root)).toHaveText('Synced');
+  await settled(page);
 }
 
 // Which side's cell of a score string carries the Ht mark: 'shiro', 'aka' or
@@ -147,7 +144,7 @@ test.describe('knockout-mixed-individual', () => {
     const ippon = ipponButton(page, w1, 'M');
     row({ step: 'award ippon', action: 'ippon button', variant: 'size', ...(await tapSize(ippon)) });
     const nb = await tapNeighbour(ippon, 'right');
-    await expect(syncState(page)).toHaveText('Synced');
+    await settled(page);
     const afterNb = { [w1]: await slotMarks(page, w1), [other]: await slotMarks(page, other) };
     row({ step: 'award ippon', action: `${w1} M`, variant: 'V1 tapNeighbour right', hit: nb.hit.label, marks: afterNb,
       shot: await shot(page, 'ippon-neighbour-tapped') });
@@ -161,7 +158,7 @@ test.describe('knockout-mixed-individual', () => {
     await settle(page); // the removal lands before the next strike (see the reset below)
 
     const dblIppon = await doubleTap(ipponButton(page, w1, 'M'));
-    await expect(syncState(page)).toHaveText('Synced');
+    await settled(page);
     const afterDbl = await slotMarks(page, w1);
     row({ step: 'award ippon', action: `${w1} M`, variant: 'V2 doubleTap', ...dblIppon, marks: afterDbl,
       shot: await shot(page, 'ippon-double-tapped') });
@@ -172,7 +169,7 @@ test.describe('knockout-mixed-individual', () => {
     // V2 on the undo: a double tap on the outer mark.
     const outer = inlineEditor(page).locator(`[aria-label^="${w1 === 'shiro' ? 'Shiro' : 'Aka'} slot "][aria-label*=": remove "]`).first();
     const dblClear = await doubleTap(outer);
-    await expect(syncState(page)).toHaveText('Synced');
+    await settled(page);
     const afterDblClear = await slotMarks(page, w1);
     row({ step: 'clear mark', action: 'tap a scored mark', variant: 'V2 doubleTap', ...dblClear,
       marksBefore: afterDbl, marksAfter: afterDblClear, shot: await shot(page, 'mark-double-tapped') });
@@ -186,16 +183,16 @@ test.describe('knockout-mixed-individual', () => {
     await settle(page);
 
     // V3 edge: a reload INSIDE the 300ms autosave debounce, right after a tap.
-    // The pill reads "Syncing…" from the tap (pillAtTap records what it shows),
+    // The point is unsent from the tap (unsentAtTap records the count),
     // and the page-hide flush writes the pending edit before the page goes.
     await ipponButton(page, other, 'K').tap();
-    const pillAtTap = (await syncState(page).innerText()).trim();
+    const unsentAtTap = await unsentCount(page);
     await interrupt(page, 'reload');
     await expect.poll(() => inlineRunning(page), { timeout: EXPECT_TIMEOUT_MS }).toBe(true);
-    await expect(syncState(page)).toHaveText('Synced');
+    await settled(page);
     const otherAfterFastReload = await slotMarks(page, other);
     row({ step: 'running bout', action: `${other} K then reload within 300ms`, variant: 'V3 interrupt reload (inside autosave debounce)',
-      pillAtTap, marksAfterReload: otherAfterFastReload, shot: await shot(page, 'fast-reload-after-tap') });
+      unsentAtTap, marksAfterReload: otherAfterFastReload, shot: await shot(page, 'fast-reload-after-tap') });
     // Whatever survived, go back to one men for the winner and nothing else.
     for (const sd of [other, w1]) await clearMarks(filledSlots(page, sd), { from: 'first', pauseMs: 150 });
     // Let the removals land before the M. A fresh-clone run lost this tap to
@@ -248,7 +245,7 @@ test.describe('knockout-mixed-individual', () => {
 
     // Bout 2: V1 on the armed Finish, then a re-tap while it is saving.
     await ipponButton(page, winnerOf(running2), 'M').tap();
-    await expect(syncState(page)).toHaveText('Synced');
+    await settled(page);
     const armed = await armFinish(page);
     let nbFinish;
     try {
@@ -367,7 +364,7 @@ test.describe('knockout-mixed-individual', () => {
     expect(await editorSides(page)).toEqual(lastPoolA);
     const labelAtBoundary = (await finishButton(page).innerText()).trim();
     await ipponButton(page, winnerOf(lastPoolA), 'M').tap();
-    await expect(syncState(page)).toHaveText('Synced');
+    await settled(page);
     await finishMatch(page, INLINE_EDITOR);
     await expect(completedRowFor(page, lastPoolA)).toBeVisible();
     // Deliberate: a settle before an audit row only; nothing is asserted on it.
@@ -882,12 +879,12 @@ test.describe('knockout-mixed-individual', () => {
     const bannerText = (await banner.allInnerTexts()).join(' | ');
     const editorStill = await inlineEditor(page).isVisible().catch(() => false);
     const editorId = editorStill ? await editorIdentity(page) : null;
-    const pill = editorStill ? ((await syncState(page).allInnerTexts())[0] || '').trim() : null;
+    const unsent = editorStill ? await unsentCount(page).catch(() => null) : null;
     const finalRow = page.locator('.shiaijo__queue').getByText(/Veterans Knockout · Match 3\b/).locator(`xpath=ancestor::*[contains(@class,"shiaijo-qrow") or contains(@class,"${UP_NEXT.slice(1)}")][1]`);
     const finalText = (await finalRow.allInnerTexts()).join(' ').replace(/\s+/g, ' ');
     const queueText = (await page.locator('.shiaijo__queue').innerText()).replace(/\s+/g, ' ');
     row({ step: 'finish offline', action: 'Finish (two taps) with the network down', variant: 'V3 interrupt offline',
-      banner: bannerText, editorStillOnBout: editorId && editorId.eyebrow, syncPill: pill,
+      banner: bannerText, editorStillOnBout: editorId && editorId.eyebrow, unsent,
       finalShowsWinnerLocally: finalText.includes(winnerName), finalRow: finalText.slice(0, 160),
       bronzeMentionsLoser: /3rd|Bronze/i.test(queueText) && queueText.includes(loserName),
       shot: await shot(page, 'offline-finished') });
@@ -940,7 +937,7 @@ test.describe('knockout-mixed-individual', () => {
 
     // The first device's held write has gone out: its topbar shows no held-writes
     // count once the queue is empty.
-    await expect(page.getByTestId('topbar-held')).toHaveCount(0, { timeout: 20_000 });
+    await notHeld(page);
 
     // A second device (its own browser context, so its own storage and no
     // outbox shared with the first) reads the server's bracket.

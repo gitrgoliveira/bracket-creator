@@ -11,6 +11,7 @@ import { TeamScoreboard, IndividualScore, useTeamLineups, teamIVPWFrom, teamName
 import { isBarredMatch } from './ineligible_match.jsx';
 import { subBoutHasResult } from './team_default_credit.jsx';
 import { matchShowsScore } from './match_shows_score.jsx';
+import { useCourtPaceLookup, paceDisplayOf, PaceTime } from './court_pace.jsx';
 
 const { useMemo: useMD } = React;
 
@@ -79,7 +80,7 @@ function LinkDot({ linkState }) {
     );
 }
 
-function TvWhiteBoard({ tournament, court, linkState = 'connected', promoted, isTeamMatch, subResults, lineupA, lineupB, squadA, squadB, teamSize, showDH, queueMatches, zekken }) {
+function TvWhiteBoard({ tournament, court, linkState = 'connected', promoted, isTeamMatch, subResults, lineupA, lineupB, squadA, squadB, teamSize, showDH, queueMatches, zekken, pace }) {
     // Every cell on this board that shows a team name ELLIPSISES -- the two
     // headline cells, their rep sub-lines, and the summary row inside
     // TeamScoreboard. sideLabel's string form puts Aka's number LAST, and an
@@ -279,6 +280,7 @@ function TvWhiteBoard({ tournament, court, linkState = 'connected', promoted, is
             {next && (
                 <div style={{ display: "flex", alignItems: "center", gap: "1.5vw", borderTop: "1px dashed #d1d5db", paddingTop: "1.6vh", marginTop: "1.6vh" }}>
                     <span style={{ fontSize: "1.8vh", letterSpacing: "0.12em", color: "var(--ink-3)", fontWeight: 700 }}>NEXT</span>
+                    <PaceTime display={paceDisplayOf(pace, next._comp?.id, next.id)} data-testid="tvd-next-time" style={{ fontSize: "2.6vh" }} />
                     <NextPair
                         shiro={<NumberedName side="shiro" {...sideLabelParts(next.sideB, next._comp?.withZekkenName)} />}
                         aka={<NumberedName side="aka" {...sideLabelParts(next.sideA, next._comp?.withZekkenName)} />}
@@ -299,8 +301,10 @@ function poolMatchIndex(id) {
 }
 
 // compareByRunOrder: canonical per-court run order: queue position, then
-// scheduled time, then the numeric match index. Mirrors findUpcomingOnCourt and
-// survives untimed schedules (blank scheduledAt) without the lexicographic-id
+// scheduled time, then the numeric match index. queuePosition is court-wide
+// across competitions (bc-pubq) and keeps the court queue's order within one
+// competition, which is all this board's pool strips show; the NEXT line asks
+// the court queue itself (findUpcomingOnCourt). Survives untimed schedules (blank scheduledAt) without the lexicographic-id
 // pitfall of comparing ids as strings.
 function compareByRunOrder(a, b) {
     const qa = Number(a.queuePosition) || 9999;
@@ -459,7 +463,7 @@ function windowAroundCurrent(all, currentIdx, max) {
 // pool phase as completed → current → scheduled, so the current match sits
 // among its upcoming matches; windowAroundCurrent keeps it on screen when the
 // group overflows the visible cap (no animation). FIK §263.
-function TvIndividualBoard({ tournament, court, linkState = 'connected', promoted, queueMatches, zekken }) {
+function TvIndividualBoard({ tournament, court, linkState = 'connected', promoted, queueMatches, zekken, pace }) {
     const all = gatherIndividualGroup(promoted, court);
     const currentIdx = all.findIndex(m => m.id === promoted.match.id || m.status === "running");
     // A league is one big round-robin table: showing its whole match list would
@@ -613,6 +617,7 @@ function TvIndividualBoard({ tournament, court, linkState = 'connected', promote
             {next && !nextPool && (
                 <div style={{ display: "flex", alignItems: "center", gap: "1.5vw", borderTop: "1px dashed #d1d5db", paddingTop: "1.6vh", marginTop: "1.6vh" }}>
                     <span style={{ fontSize: "1.8vh", letterSpacing: "0.12em", color: "var(--ink-3)", fontWeight: 700 }}>NEXT</span>
+                    <PaceTime display={paceDisplayOf(pace, next._comp?.id, next.id)} data-testid="tvd-next-time" style={{ fontSize: "2.6vh" }} />
                     <NextPair
                         shiro={<NumberedName side="shiro" {...sideLabelParts(next.sideB, next._comp?.withZekkenName ?? zekken)} />}
                         aka={<NumberedName side="aka" {...sideLabelParts(next.sideA, next._comp?.withZekkenName ?? zekken)} />}
@@ -655,6 +660,7 @@ function TvDisplay({ court, tournament, competitions, withZekkenName, linkState 
     const running = useMD(() => findRunningOnCourt(competitions, court), [competitions, court]);
     const upcoming = useMD(() => findUpcomingOnCourt(competitions, court, running ? 2 : 3), [competitions, court, running]);
     const counts = useMD(() => countCourtMatches(competitions, court), [competitions, court]);
+    const pace = useCourtPaceLookup(competitions);
 
     if (!competitions || competitions.length === 0) {
         return <div className="tvd tvd--empty" style={{
@@ -769,7 +775,7 @@ function TvDisplay({ court, tournament, competitions, withZekkenName, linkState 
                 tournament={tournament} court={court} linkState={linkState}
                 promoted={promoted} isTeamMatch={isTeamMatch}
                 subResults={subResults} lineupA={lineupA} lineupB={lineupB} squadA={squadA} squadB={squadB} teamSize={teamSize}
-                showDH={showDH} queueMatches={queueMatches} zekken={zekken}
+                showDH={showDH} queueMatches={queueMatches} zekken={zekken} pace={pace}
             />;
         }
         // A pool DH/TB rep bout in a TEAM competition is individual, but it must
@@ -782,12 +788,12 @@ function TvDisplay({ court, tournament, competitions, withZekkenName, linkState 
                 tournament={tournament} court={court} linkState={linkState}
                 promoted={promoted} isTeamMatch={false}
                 subResults={subResults} lineupA={lineupA} lineupB={lineupB} teamSize={teamSize}
-                showDH={false} queueMatches={queueMatches} zekken={zekken}
+                showDH={false} queueMatches={queueMatches} zekken={zekken} pace={pace}
             />;
         }
         return <TvIndividualBoard
             tournament={tournament} court={court} linkState={linkState}
-            promoted={promoted} queueMatches={queueMatches} zekken={zekken}
+            promoted={promoted} queueMatches={queueMatches} zekken={zekken} pace={pace}
         />;
     }
 

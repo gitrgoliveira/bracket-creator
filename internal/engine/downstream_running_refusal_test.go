@@ -174,27 +174,6 @@ func TestDownstreamKnockoutCorrection_StaleWriteOverRunningNextIsSuperseded(t *t
 	assert.NotErrorAs(t, err, &runErr)
 }
 
-func TestOverrideBracketWinner_RunningDownstreamRefuses(t *testing.T) {
-	for _, force := range []bool{false, true} {
-		eng, store, _ := setupTestEngine(t)
-		compID := "kcdg-override-running"
-		seedRunningNextRound(t, store, compID)
-
-		var reopened []ReopenedMatch
-		applied, err := eng.OverrideBracketWinner(compID, "m-r1-0", "Bob", 0, ForceOptions{Force: force, Reopened: &reopened})
-		var runErr *DownstreamKnockoutRunningError
-		require.ErrorAs(t, err, &runErr, "force=%v", force)
-		assert.False(t, applied)
-		assert.Equal(t, []string{"m-r2-0"}, reopenedIDs(runErr.Running))
-		assert.Empty(t, reopened)
-
-		b, lerr := store.LoadBracket(compID)
-		require.NoError(t, lerr)
-		assert.Equal(t, "Alice", b.Rounds[0][0].Winner)
-		assert.Equal(t, "Alice", b.Rounds[1][0].SideA)
-	}
-}
-
 func TestEngiCorrection_RunningDownstreamRefuses(t *testing.T) {
 	for _, force := range []bool{false, true} {
 		const compID = "engi-running-downstream"
@@ -236,25 +215,18 @@ func TestFeederAssertion_RealResultMustAgreeWhileTheFinalRuns(t *testing.T) {
 			Rounds: [][]state.BracketMatch{
 				{
 					{ID: "m-r1-0", SideA: "Alice", SideB: "Bob", SideAID: "alice", SideBID: "bob",
-						Status: state.MatchStatusScheduled, MatchNumber: 1, DisplayRound: 2, Court: "B"},
+						Winner: "Alice", WinnerID: "alice", Status: state.MatchStatusCompleted,
+						IsOverridden: true, ModifiedAt: 1_000, MatchNumber: 1, DisplayRound: 2, Court: "B"},
 					{ID: "m-r1-1", SideA: "Carol", SideB: "Dave", SideAID: "carol", SideBID: "dave",
 						Winner: "Carol", WinnerID: "carol", Status: state.MatchStatusCompleted,
 						IpponsA: []string{"M"}, MatchNumber: 2, DisplayRound: 2, Court: "A"},
 				},
 				{
-					{ID: "m-r2-0", SideA: "Winner of r0-m0", SideB: "Carol", SideBID: "carol",
-						Status: state.MatchStatusScheduled, MatchNumber: 3, DisplayRound: 1, Court: "A"},
+					{ID: "m-r2-0", SideA: "Alice", SideAID: "alice", SideB: "Carol", SideBID: "carol",
+						Status: state.MatchStatusRunning, MatchNumber: 3, DisplayRound: 1, Court: "A"},
 				},
 			},
 		}))
-		applied, err := eng.OverrideBracketWinner(compID, "m-r1-0", "Alice", 1_000)
-		require.NoError(t, err)
-		require.True(t, applied)
-		b, err := store.LoadBracket(compID)
-		require.NoError(t, err)
-		require.Equal(t, "Alice", b.Rounds[1][0].SideA)
-		b.Rounds[1][0].Status = state.MatchStatusRunning
-		require.NoError(t, store.SaveBracket(compID, b))
 		return eng, store, compID
 	}
 	feederResult := func(winner string) *state.MatchResult {

@@ -254,8 +254,8 @@ func RegisterDecisionHandlers(r *gin.RouterGroup, eng ScoringEngine, store Compe
 		})
 		// bc-kcdg: each reopened match is distinct from the one the decision
 		// just corrected; broadcast it too so a client watching only that
-		// court/match learns its verdict was cleared (mirrors /score,
-		// /override-winner, and /quick-score).
+		// court/match learns its verdict was cleared (mirrors /score
+		// and /quick-score).
 		broadcastReopenedDownstream(hub, store, id, reopenedDownstream)
 		if status != nil {
 			hub.Broadcast(EventCompetitorStatusUpdated, gin.H{

@@ -54,6 +54,14 @@ classDiagram
         +TournamentContact[] Contacts
     }
 
+    class Theme {
+        +string PrimaryColor
+        +string AccentSoftColor
+        +string WindowTitle
+        +string LogoPath
+        +bool LogoOnLobby
+    }
+
     class Competition {
         +string ID
         +string Name
@@ -516,6 +524,10 @@ writes them. The bracket `ScoreA`/`ScoreB` strings are the same kind of channel:
 that rendered each side's scoreline as one string loads through a conversion into the
 ippon arrays, and every match record holds its score the same way.
 
+A bracket match may carry a stored "overridden" flag, which marks a winner set by hand
+without a scoreline. It is read-only: nothing writes it. It is read so that such a bracket
+loads, and so that a later correction cannot silently repaint a winner that had no scoreline.
+
 ## 4. On disk layout
 
 Each competition is a folder. The tournament root holds the shared settings and the uploaded
@@ -590,7 +602,7 @@ classDiagram
     }
     class branding_dir["branding/"] {
         <<uploaded images>>
-        tournament logo
+        tournament logo (shown on the lobby when theme.logo_on_lobby is true)
     }
     class sponsors_dir["sponsors/"] {
         <<uploaded images>>
@@ -623,6 +635,8 @@ Markdown, CSV, and JSON or YAML each earn their place:
 | CSV | participants, seeds, pools, pool and league matches | Opens in a spreadsheet; one row per record diffs cleanly |
 | JSON and YAML | bracket, eligibility, lineups, overrides | Tree shaped data that does not fit a row |
 | JSON lines (JSONL) | match history and per-match score event logs | Append-only audit trail and event sourcing stream; one line per write or event |
+
+In `tournament.md`, the optional `theme` block holds the accent colours, the window title, `logo_path`, and `logo_on_lobby` (a bool; absent reads false). When `logo_on_lobby` is true and a logo is uploaded in `branding/`, the lobby display shows the logo.
 
 A competitor list must exist before a seed can be set: a seed ranks a participant, so a rank
 with nobody to attach it to is refused, not stored. Clearing a seeding is exempt, since that
@@ -723,8 +737,8 @@ and a team match closed by a finish, stay closed whole.
 changes were made, a later finish or decision from a device that did not see the result in
 force is a rival and is not applied, in the same way as a tap: it is kept in the history with
 the match closed reason, whichever of the two arrived first. A result is no rival when its
-writer saw the one in force, as a correction does (it names a reason). A reopen, a send back
-to the queue and an organiser's override of a winner are never rivals. The same applies to a
+writer saw the one in force, as a correction does (it names a reason). A reopen and a send back
+to the queue are never rivals. The same applies to a
 knockout match whose next match has been played or has started: a rival that would replace
 the stored result is not applied, and the history says that the next round was already
 fought, or has already started.

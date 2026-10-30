@@ -18,8 +18,8 @@
 // checks the write landed (fixtures/scoring.mjs finishLanded).
 import { expect } from '@playwright/test';
 import { EXPECT_TIMEOUT_MS } from './devices.mjs';
-import { dwell, settled, tapOnSide } from './pace.mjs';
-import { finishMatch } from './scoring.mjs';
+import { dwell, settled as paceSettled, tapOnSide } from './pace.mjs';
+import { finishMatch, running, settled } from './scoring.mjs';
 import { inlineEditor, upNextCard } from './shiaijo.mjs';
 
 // FIK position names for a five-person team, in order; any other size uses
@@ -96,7 +96,7 @@ export async function lineupsStartAdd(page, label, name) {
 async function answerDialog(page, label) {
   const dialog = page.locator('.modal[role="dialog"]').filter({ has: page.locator('.modal__foot') }).last();
   // A confirm ignores a tap inside the bounce window of its opening.
-  await settled(dialog);
+  await paceSettled(dialog);
   const handle = await dialog.elementHandle();
   try {
     await dialog.getByRole('button', { name: label }).tap();
@@ -306,14 +306,14 @@ export const rowMemberLabel = (row, side) => row.getByTestId(`team-sub-match-mem
 // Leave bout `n` a drawn bout (X in its centre). The Tie control is a toggle
 // (a bout.decision tap, hikiwake or clear), so it is only tapped when the row
 // does not already read X; the result is waited for, and the tap's answer
-// with it (the sync pill reads the outbox).
+// with it (the outbox is empty).
 export async function ensureTie(root, n) {
   const row = boutRow(root, n);
   await row.scrollIntoViewIfNeeded();
-  await expect(syncPill(root)).toHaveText('Synced');
+  await settled(root.page());
   if ((await rowMiddle(row).innerText()).trim() !== 'X') await rowTie(row).tap();
   await expect(rowMiddle(row)).toHaveText('X');
-  await expect(syncPill(root)).toHaveText('Synced');
+  await settled(root.page());
 }
 
 // The IV/PW band: { shiro: "IV: 1 · PW: 2", aka: ..., verdict }.
@@ -325,11 +325,6 @@ export async function teamTotals(root) {
     verdict: (await root.locator('.team-summary__verdict').first().innerText()).trim(),
   };
 }
-
-// The sheet's sync pill. Every strike, Tie and fusensho on a running sheet is a
-// tap queued in the device's outbox (bc-evts stage 5); "Synced" means the
-// outbox is empty, so every tap this device made has been answered.
-export const syncPill = (root) => root.locator('.sync-pill__label').first();
 
 // The whole sheet as one line per bout, "shiro marks | middle | aka marks",
 // e.g. { 1: 'M|vs|', 2: '|vs|M', 3: '|X|' }, for the audit record.
@@ -344,14 +339,13 @@ export async function sheetState(root, bouts = 5) {
 }
 
 // Start the Up next team match and return once the court has it running:
-// the sheet shows its sync pill only once it holds the match running (before
-// that it reads PRE-MATCH, and a strike tapped then is a draft, sent only by
-// Start).
+// the sheet is running once it holds the match without a PRE-MATCH pill (a
+// strike tapped during PRE-MATCH is a draft, sent only by Start).
 export async function startUpNextTeam(page) {
   await upNextCard(page).getByRole('button', { name: 'Start match' }).tap();
   const ed = inlineEditor(page);
   await expect(boutRow(ed, 1)).toBeVisible();
-  await expect(syncPill(ed)).toBeVisible();
+  await running(page, ed);
   return ed;
 }
 
@@ -366,7 +360,7 @@ export async function ipponOnRow(root, getRow, key, side, waza = 'M') {
   const before = await rowSlots(getRow(), side).count();
   await tapOnSide(root.page(), `${key} ${side}`, rowIppon(getRow(), side, waza));
   await expect(rowSlots(getRow(), side)).toHaveCount(before + 1);
-  await expect(syncPill(root)).toHaveText('Synced');
+  await settled(root.page());
 }
 
 // One strike on bout `n` of the team sheet.

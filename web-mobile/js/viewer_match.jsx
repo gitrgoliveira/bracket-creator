@@ -22,6 +22,7 @@ import { sameCompetitor } from './competitor_identity.jsx';
 import { barredNameMark } from './barred_chip.jsx';
 import { matchShowsScore } from './match_shows_score.jsx';
 import { useOpenedTapGuard } from './tap_guard.jsx';
+import { paceDisplayOf, PaceTime } from './court_pace.jsx';
 
 const { useState, useMemo, useRef: useRefV, useCallback } = React;
 
@@ -36,6 +37,8 @@ const { useState, useMemo, useRef: useRefV, useCallback } = React;
 //                                                        no Queue chip needed)
 //   - anything else (completed/forfeit/cancelled, or no qp)  → null (hide chip)
 //
+// The server's queuePosition is court-wide across competitions, so the count
+// includes other competitions' bouts on the same court.
 // Wording mirrors the VSchedItem helper below and display.jsx::queueLabel
 // so all three viewer surfaces agree. Running matches return null because
 // WatchHeroCard already signals the running state via its navy .wl-hero__now
@@ -87,7 +90,7 @@ export function localQueueLabelCompact(m) {
 // MatchDetailCard
 // ---------------------------------------------------------------------------
 
-export function MatchDetailCard({ match, onClose, escapeToClose = true, slotLabel }) {
+export function MatchDetailCard({ match, onClose, escapeToClose = true, slotLabel, paceLookup }) {
   window.useEscapeToClose(escapeToClose ? onClose : undefined);
   if (!match) return null;
   const isTeam = match.compKind === "team" || match.teamSize > 0;
@@ -132,6 +135,11 @@ export function MatchDetailCard({ match, onClose, escapeToClose = true, slotLabe
   // it only renders the strings handed to it (team_default_credit.jsx's
   // header states why).
   const { shiro: teamShiroMark, aka: teamAkaMark } = window.teamMatchMarks ? window.teamMatchMarks(match, isTeam) : { shiro: "", aka: "" };
+  const compId = match.compId || match.competitionId || "";
+  const matchId = match.id || match.matchId || match.ID || "";
+  // Only a waiting match has a projected start: the lookup comes from the
+  // tournament list, which can trail this live copy by up to a pace tick.
+  const d = match.status === "scheduled" ? paceDisplayOf(paceLookup, compId, matchId) : null;
 
   return (
     <div className="match-detail-card">
@@ -141,7 +149,7 @@ export function MatchDetailCard({ match, onClose, escapeToClose = true, slotLabe
           <span><TermV name="shiaijo">Shiaijo</TermV> {match.court}</span>
           <span>·</span>
           <span>{match.phase === "pool" ? poolLabel(match) : (match.round || "")}</span>
-          {match.scheduledAt && <><span>·</span><span>{match.scheduledAt}</span></>}
+          {match.scheduledAt && <><span>·</span><span><PaceTime display={d} fallback={match.scheduledAt} /></span></>}
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           {isRunning && <span className="bc-running">● NOW</span>}
@@ -195,7 +203,7 @@ export function MatchDetailCard({ match, onClose, escapeToClose = true, slotLabe
 // VSchedItem
 // ---------------------------------------------------------------------------
 
-export const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick, highlight, winnerTick }) => {
+export const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick, highlight, winnerTick, paceLookup }) => {
   // bc-pnum: sameCompetitor, never a bare `winner.id === side.id` (see
   // bracket.jsx's MatchCard for why the naked equality lights both sides
   // once both are id-less). No presence guard: sameCompetitor(null, x) is
@@ -220,9 +228,10 @@ export const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick, hig
   // (bc-cse) so an individual match's own mark, already inline in its
   // scoreStr above, is never doubled here.
   const { shiro: teamShiroMark, aka: teamAkaMark } = window.teamMatchMarks ? window.teamMatchMarks(m) : { shiro: "", aka: "" };
-  // FR-025: queue position is 1-indexed per court for scheduled matches;
+  // FR-025: queue position is 1-indexed court-wide across competitions for scheduled matches;
   // running/completed are 0 (set server-side, omitempty in JSON → undefined
-  // on older payloads). Treat null/undefined/0 as "don't render" so the UI
+  // on older payloads). The count includes other competitions' bouts on the same court.
+  // Treat null/undefined/0 as "don't render" so the UI
   // stays gracefully empty for non-queued matches and pre-T046 responses.
   // Wording is owned by display.jsx::queueLabel (bead mp-e3k) so every
   // viewer surface stays in sync; we still gate on scheduled+qp>0 here
@@ -238,10 +247,16 @@ export const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick, hig
   const queueLabel = (m.status === "scheduled" && Number.isFinite(qp) && qp > 0)
     ? (window.queueLabelCompact ? window.queueLabelCompact(m) : localQueueLabelCompact(m))
     : null;
+  const compId = m.compId || m.competitionId || "";
+  const matchId = m.id || m.matchId || "";
+  // Only a waiting match has a projected start (see MatchDetailCard).
+  const d = m.status === "scheduled" ? paceDisplayOf(paceLookup, compId, matchId) : null;
   return (
     <button type="button" className={`vsched-item ${m.status === "running" ? "vsched-item--running" : ""} ${highlight ? "vsched-item--me" : ""}`} onClick={onClick} data-clickable={onClick ? "" : undefined}>
       <div className="vsched-item__head">
-        <span className="vsched-item__time">{m.scheduledAt || "-"}</span>
+        <span className="vsched-item__time">
+          <PaceTime display={d} fallback={m.scheduledAt || "-"} />
+        </span>
         <span className="vsched-item__court">SHIAIJO {m.court}</span>
         {queueLabel && (
           <span className={`vsched-item__queue${qp === 1 ? " vsched-item__queue--next" : ""}`}>
@@ -382,7 +397,7 @@ export function bracketMatchIn(bracket, id) {
 // MatchViewerModal
 // ---------------------------------------------------------------------------
 
-export function MatchViewerModal({ match, onClose, tournament, compId: defaultCompId, slotLabel }) {
+export function MatchViewerModal({ match, onClose, tournament, compId: defaultCompId, slotLabel, paceLookup }) {
   window.useEscapeToClose(onClose);
   // bc-cfbd: the bounce of the tap that opened the modal must not reach its
   // backdrop or its buttons. The node mounts again when the score editor
@@ -489,7 +504,7 @@ export function MatchViewerModal({ match, onClose, tournament, compId: defaultCo
         {/* Reuse the canonical MatchDetailCard so the modal and the inline
             card render identically (DRY): same header, colour badges and
             BoutSubRow team grid. The modal adds only the self-run scoring. */}
-        <MatchDetailCard match={match} onClose={onClose} escapeToClose={false} slotLabel={slotLabel} />
+        <MatchDetailCard match={match} onClose={onClose} escapeToClose={false} slotLabel={slotLabel} paceLookup={paceLookup} />
         {isSelfRun && bothSidesReady && (
           <div className="card" style={{ marginTop: 12, padding: 16 }}>
             {isFinalized ? (

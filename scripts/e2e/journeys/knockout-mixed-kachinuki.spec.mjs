@@ -41,9 +41,9 @@ import { completedRowFor, openShiaijo, sides, upNextCard } from '../fixtures/shi
 import { PUBLIC_DEVICE, EXPECT_TIMEOUT_MS } from '../fixtures/devices.mjs';
 import { openViewer, recentResult } from '../fixtures/public.mjs';
 import { scoreRows } from '../fixtures/scores.mjs';
-import { nextMatchWrite, writeLanded } from '../fixtures/scoring.mjs';
+import { nextMatchWrite, settled, unsentCount, writeLanded } from '../fixtures/scoring.mjs';
 import { EDITOR } from '../../screenshots/lib/editor.mjs';
-import { dwell, dwellOnSide, rendered, settled, tapOnSide, untilStable } from '../fixtures/pace.mjs';
+import { dwell, dwellOnSide, rendered, settled as paceSettled, tapOnSide, untilStable } from '../fixtures/pace.mjs';
 import { ensureCoarse } from '../fixtures/pointer.mjs';
 // clumsy.hastyConfirm answers confirmDialog (ui.jsx) and hastyShiaijoConfirm
 // the shiaijo page's own `.shiaijo-move-confirm`. The inline reason prompt and
@@ -56,7 +56,7 @@ import { closeNameList } from '../fixtures/team.mjs';
 import {
   BOUT_CHANGE, awardBoutIppon, boutFilled, clearBoutMarks, boutIpponButton, boutMiddle, boutNames, closeLineupPanel, correctingBout,
   currentBout, doneRowWinner, doneRows, editor, enchoButton, enchoUndoButton, endMatch, endMatchButton, lineupSide, lineupSource,
-  openLineupFromUpNext, recordBout, recordBoutButton, removeBoutButton, reopenButton, syncPill, tieButton,
+  openLineupFromUpNext, recordBout, recordBoutButton, removeBoutButton, reopenButton, tieButton,
   typeLineup, winBout,
 } from '../fixtures/kachinuki.mjs';
 
@@ -196,13 +196,11 @@ test.describe('J5 kachinuki from the court console', () => {
     await expect(editor(page).locator('.editor-modal__eyebrow').first()).not.toContainText(/overtime/i);
   }
 
-  // bc-sync (fixed): the sync pill used to read "Synced" through the
-  // autosave's debounce window after a tap, although nothing had been sent,
-  // so a reload there lost the point with no warning (audit row "final bout
-  // 4"). No editor autosaves now: a tap is an outbox entry from the moment it
-  // is made and goes to the score-events door (bc-evts), and the pill reads
-  // "Syncing…" from the tap until the server has answered it; this guards it.
-  // The tap's batch is held, so the pill is read while the point is provably
+  // bc-sync (fixed): a tapped point still unsent survives a reload.
+  // No editor autosaves now: a tap is an outbox entry from the moment it
+  // is made and goes to the score-events door (bc-evts), and stays unsent
+  // until the server has answered it; this guards it.
+  // The tap's batch is held, so the outbox is checked while the point is provably
   // still unsaved, whatever this machine's timing.
   async function guardSync(page) {
     const live = currentBout(page);
@@ -221,15 +219,15 @@ test.describe('J5 kachinuki from the court console', () => {
       sent.catch(() => {});
       await boutIpponButton(live, 'aka', 'D').tap();
       // From the tap: the point is in the outbox...
-      await expect(syncPill(page)).toHaveText('Syncing…');
+      await expect.poll(() => unsentCount(page)).toBeGreaterThan(0);
       // ...then its batch is out, and held: still unsaved.
       await sent;
-      await expect(syncPill(page)).toHaveText('Syncing…');
+      await expect.poll(() => unsentCount(page)).toBeGreaterThan(0);
     } finally {
       release();
       await page.unroute(isTapBatch, hold);
     }
-    await expect(syncPill(page)).toHaveText('Synced');
+    await settled(page);
     // Leave the bout as it was: take the point back.
     await boutFilled(currentBout(page), 'aka').last().tap();
     await expect(boutFilled(currentBout(page), 'aka')).toHaveCount(0);
@@ -353,11 +351,11 @@ test.describe('J5 kachinuki from the court console', () => {
       if ((await boutFilled(currentBout(page), 'shiro').count()) === 0) await awardBoutIppon(page, 'shiro', 'M');
       await awardBoutIppon(page, 'shiro', 'K');
       // V3: the iPad reloads the tab before Record bout was tapped. The wait
-      // only gives the autosave its moment and is not asserted: whether the
+      // only lets writes land and is not asserted: whether the
       // marks survive the reload is the variant under audit (marksKept), and a
       // lost mark fails the asserts after Record bout below (expectPairing,
       // doneRowWinner).
-      await expect(syncPill(page)).toHaveText('Synced').catch(() => {});
+      await settled(page).catch(() => {});
       const reload = await interruptC(page, 'reload');
       await expect(editor(page)).toBeVisible();
       const kept = await boutFilled(currentBout(page), 'shiro').allInnerTexts();
@@ -487,16 +485,16 @@ test.describe('J5 kachinuki from the court console', () => {
     });
 
     await test.step('bout 6: a point tapped offline, and the Back button mid-bout', async () => {
-      let whileOffline;
+      let unsentWhileOffline;
       const offline = await interruptC(page, 'offline', {
         during: async (p) => {
           await boutIpponButton(currentBout(p), 'shiro', 'M').tap();
-          await expect(syncPill(p)).not.toHaveText('Synced');
-          whileOffline = (await syncPill(p).innerText().catch(() => '?')).trim();
+          await expect.poll(() => unsentCount(p)).toBeGreaterThan(0);
+          unsentWhileOffline = await unsentCount(p);
         },
       });
-      const resynced = await expect(syncPill(page)).toHaveText('Synced', { timeout: 10_000 }).then(() => true, () => false);
-      record({ step: 'M1 bout 6', action: 'Shiro M', variant: 'V3 interrupt offline', ...offline, whileOffline, resynced,
+      const resynced = await settled(page).then(() => true, () => false);
+      record({ step: 'M1 bout 6', action: 'Shiro M', variant: 'V3 interrupt offline', ...offline, unsent: unsentWhileOffline, resynced,
         marks: await boutFilled(currentBout(page), 'shiro').allInnerTexts(), screenshot: await shot(page, 'v3-offline-bout-6') });
       const back = await interruptC(page, 'back');
       await expect(editor(page)).toBeVisible();
@@ -618,7 +616,7 @@ test.describe('J5 kachinuki from the court console', () => {
         editableRows: await editor(page).locator('.team-sub-match:not(.team-sub-match--readonly)').count(),
         screenshot: await shot(page, 'bout-5-and-live-bout-both-editable', { fullPage: true }) });
       // V3: the Back button while bout 5 is open for correction.
-      await expect(syncPill(page)).toHaveText('Synced');
+      await settled(page);
       // The sheet as the correction leaves it: whether the correction is open,
       // the bouts fought and bout 5's marks. A Back that reloads the court's
       // data changes one of them unless the correction survives it.
@@ -649,7 +647,7 @@ test.describe('J5 kachinuki from the court console', () => {
       // landed on another bout's row once the first had collapsed bout 5.
       if (reopened) await editor(page).locator('[data-testid^="kachinuki-done-collapse-"]').first().tap();
       await expect(correctingBout(page)).toHaveCount(0);
-      await expect(syncPill(page)).toHaveText('Synced');
+      await settled(page);
       expect(await boutFilled(doneRows(page).nth(4), 'shiro').allInnerTexts()).toEqual(['M', 'K']);
       // The live bout is untouched by the correction.
       await expectPairing(7, S[3], A[4]);
@@ -675,7 +673,7 @@ test.describe('J5 kachinuki from the court console', () => {
       await tapOnSide(page, 'correction bout 1 shiro', boutIpponButton(corr, 'shiro', 'M'));
       await tapOnSide(page, 'correction bout 1 shiro', boutIpponButton(corr, 'shiro', 'K'));
       await editor(page).getByTestId('kachinuki-done-collapse-0').tap();
-      await expect(syncPill(page)).toHaveText('Synced');
+      await settled(page);
       record({ step: 'M1 correction', action: 'flip bout 1 winner by correction, then restore', variant: 'correct path',
         warned, warningText, liveBoutAfterFlip: laterUnchanged,
         screenshot: flipShot });
@@ -836,10 +834,10 @@ test.describe('J5 kachinuki from the court console', () => {
       // Bout 8 is the last bout; while reopened it is the live row.
       expect(await boutNames(currentBout(page))).toEqual({ shiro: MEMBERS[m1.shiro][4], aka: MEMBERS[m1.aka][4] });
       const wasFusensho = await fixBout8();
-      await expect(syncPill(page)).toHaveText('Synced');
+      await settled(page);
       record({ step: 'M1 reopen', action: 'undo fusensho, award M on bout 8', variant: 'correct path', wasFusensho,
-        pill: (await syncPill(page).innerText()).trim(), screenshot: await shot(page, 'm1-bout-8-rescored') });
-      // V3: the edit has landed (Synced above), then the tab reloads.
+        unsent: await unsentCount(page), screenshot: await shot(page, 'm1-bout-8-rescored') });
+      // V3: the edit has landed (settled above), then the tab reloads.
       const reload = await interruptC(page, 'reload');
       await expect(recordBoutButton(page)).toBeVisible();
       const kept = await bout8Marks();
@@ -928,7 +926,7 @@ test.describe('J5 kachinuki from the court console', () => {
       await upNextCard(page).getByRole('button', { name: 'Start match' }).tap();
       await expect(recordBoutButton(page)).toBeVisible();
       await awardBoutIppon(page, 'aka', 'M');
-      await expect(syncPill(page)).toHaveText('Synced');
+      await settled(page);
     });
 
     await test.step('Correct on M1 at the court console is refused while M2 runs', async () => {
@@ -1099,7 +1097,7 @@ test.describe('J5 kachinuki from the court console', () => {
           record({ step: 'M2 bout 2', action: 'Esc to close the fighter list', variant: 'V4 hastyConfirm', dialogShown, ...hasty,
             editorStill: await recordBoutButton(page).isVisible(), pairing: await boutNames(currentBout(page)).catch(() => null),
             listStillOpen: await currentBout(page).locator('.team-sub-match__side--shiro .pmf__dropdown').isVisible(),
-            pill: (await syncPill(page).innerText()).trim(),
+            unsent: await unsentCount(page),
             doneRows: await doneRows(page).count(), screenshot: escShot, after: await shot(page, 'm2-after-esc-discard') });
           // V1: the option below is hit instead.
           await openList();
@@ -1178,7 +1176,7 @@ test.describe('J5 kachinuki from the court console', () => {
       record({ step: 'M2 end', action: 'End match (first tap arms)', variant: 'correct path', armed,
         endBox: b && `${Math.round(b.width)}x${Math.round(b.height)}`, screenshot: await shot(page, 'm2-end-armed') });
       // The second tap counts once the arming tap's bounce window has passed.
-      await settled(endMatchButton(page));
+      await paceSettled(endMatchButton(page));
       await endMatchButton(page).tap();
       await expect(completedRowFor(page, m2)).toBeVisible();
       await shot(page, 'm2-completed');
@@ -1231,7 +1229,7 @@ test.describe('J5 kachinuki from the court console', () => {
         await hastyReasonPrompt(page);
       } else {
         // The second tap counts once the arming tap's bounce window has passed.
-        await settled(endMatchButton(page));
+        await paceSettled(endMatchButton(page));
         await endMatchButton(page).tap();
       }
       await expect(completedRowFor(page, m2)).toBeVisible();
@@ -1274,7 +1272,7 @@ test.describe('J5 kachinuki from the court console', () => {
       await expect(recordBoutButton(page)).toBeVisible();
       expect(await boutNames(currentBout(page))).toEqual({ shiro: MEMBERS[final.shiro][0], aka: MEMBERS[final.aka][0] });
       await awardBoutIppon(page, 'shiro', 'M');
-      await expect(syncPill(page)).toHaveText('Synced');
+      await settled(page);
       await shot(page, 'final-running-one-point');
     });
 
@@ -1306,7 +1304,7 @@ test.describe('J5 kachinuki from the court console', () => {
     await expect(recordBoutButton(page)).toBeVisible();
     await guarded(page, 'bc-emsl: tapping an empty mark slot leaves the bout\'s Tie on', guardEmsl);
     await guarded(page, 'bc-kheb: after one bout goes to encho, the next bout\'s header does not claim overtime', guardKheb);
-    await guarded(page, 'bc-sync: the sync pill reads "Syncing…" while a tapped point is still unsaved', guardSync);
+    await guarded(page, 'bc-sync: a tapped point still unsent survives a reload', guardSync);
     const S = MEMBERS[finalPair.shiro];
     // Shiro keeps winning with whoever is on until End match; the operator
     // ends it when Aka is out of fighters. The Aka fighter changes each bout.
@@ -1314,16 +1312,15 @@ test.describe('J5 kachinuki from the court console', () => {
     for (let i = await doneRows(page).count(); i < 5; i += 1) {
       const live = currentBout(page);
       if (i === 3) {
-        // V3: the tab reloads a moment after a point is tapped. What does the
-        // sync pill say in that moment, and does the point survive?
+        // V3: the tab reloads a moment after a point is tapped. Does the point survive?
         await boutIpponButton(live, 'shiro', 'M').tap();
         await page.waitForTimeout(150);
-        const pillAtTap = (await syncPill(page).innerText()).trim();
+        const unsentAt150ms = await unsentCount(page);
         const reload = await interruptC(page, 'reload');
         await expect(recordBoutButton(page)).toBeVisible();
         const kept = await boutFilled(currentBout(page), 'shiro').allInnerTexts();
         record({ step: 'final bout 4', action: 'Shiro M, then the tab reloads 150ms later', variant: 'V3 interrupt reload', ...reload,
-          pillAt150ms: pillAtTap, marksAfterReload: kept, screenshot: await shot(page, 'final-v3-reload-150ms-after-tap') });
+          unsentAt150ms, marksAfterReload: kept, screenshot: await shot(page, 'final-v3-reload-150ms-after-tap') });
       }
       if ((await boutFilled(currentBout(page), 'shiro').count()) === 0) await awardBoutIppon(page, 'shiro', 'M');
       await awardBoutIppon(page, 'shiro', 'K');

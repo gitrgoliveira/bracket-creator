@@ -1,12 +1,9 @@
-// bc-cse: a scheduled match a competitor is barred from (withdrew earlier)
-// cannot be fought. The Scores tab's own auto-advance (Finish + Start Next's
-// nextActiveMatch) must skip it exactly as the court console's does, and its
-// row shows the note plus the one-tap default-win action instead of relying
-// on the operator to open the editor to discover why Start would fail.
+// A scheduled match a competitor is barred from (withdrew earlier)
+// cannot be fought. Its row shows the note plus the one-tap fusensho action.
 //
 // Prev/Next (chained navigation) still REACHES a barred match on purpose:
 // opening one directly is how the operator resolves it (ineligible_match.jsx
-// header). Only the AUTO-PICK is scoped here.
+// header).
 import React from 'react';
 import { render, act, fireEvent } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
@@ -82,7 +79,7 @@ describe('the Scores tab and a barred match (bc-cse)', () => {
     }, 'pw', expect.objectContaining({ onRefusal: expect.any(Function) }));
   });
 
-  it('nextActiveMatch (Finish + Start Next) skips the barred match and advances to the next fightable one', async () => {
+  it('finishing on the Scores tab records the match only, calling no start or advance, and onSubmitAndNext is null', async () => {
     const onEditScore = vi.fn().mockResolvedValue({ status: 'ok' });
     let utils;
     await act(async () => { utils = mount(onEditScore); });
@@ -91,12 +88,13 @@ describe('the Scores tab and a barred match (bc-cse)', () => {
     const scoreBtns = [...utils.container.querySelectorAll('button.test-score-open')];
     await act(async () => { fireEvent.click(scoreBtns[0]); });
     expect(probe.props.match.id).toBe('m-run');
+    expect(probe.props.onSubmitAndNext).toBeNull();
+    // Prev/Next navigation still points to the next match:
+    expect(probe.props.nextMatch.id).toBe('m-barred');
 
-    await act(async () => { await probe.props.onSubmitAndNext({ status: 'completed' }); });
-    expect(onEditScore).toHaveBeenCalledTimes(2);
+    await act(async () => { await probe.props.onSubmit({ status: 'completed' }); });
+    expect(onEditScore).toHaveBeenCalledTimes(1);
     expect(onEditScore.mock.calls[0][1]).toBe('m-run');
-    // m-barred is skipped; m-open is started instead.
-    expect(onEditScore.mock.calls[1][1]).toBe('m-open');
   });
 
   // bc-cse: notLandedBanner, not writeWasSuperseded alone -- a clock_skew

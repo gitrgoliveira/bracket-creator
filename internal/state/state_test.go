@@ -961,19 +961,18 @@ func TestStore_ResetOverrides(t *testing.T) {
 	compID := "reset"
 	require.NoError(t, store.SaveCompetition(&Competition{ID: compID}))
 
-	err = store.SaveWinnerOverride(compID, "m1", "Winner")
+	err = store.SaveRankOverride(compID, "Pool A", "p1", 1)
 	require.NoError(t, err)
 
 	loaded, err := store.LoadOverrides(compID)
 	require.NoError(t, err)
-	assert.NotEmpty(t, loaded.Winners)
+	assert.NotEmpty(t, loaded.PoolRanks)
 
 	err = store.ResetOverrides(compID)
 	require.NoError(t, err)
 
 	loaded, err = store.LoadOverrides(compID)
 	require.NoError(t, err)
-	assert.Empty(t, loaded.Winners)
 	assert.Empty(t, loaded.PoolRanks)
 }
 

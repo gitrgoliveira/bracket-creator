@@ -36,7 +36,7 @@ var notPersistedInPoolCSV = map[string]string{
 		"result has landed, and meaningless to a different session.",
 	"RevSession": "identifies the client session Rev counts within; same reason.",
 	"QueuePosition": "derived on read from court and scheduled time " +
-		"(DeriveQueuePositions), never authored, so persisting it would create a " +
+		"(CourtQueuePositions), never authored, so persisting it would create a " +
 		"second source of truth that could disagree with the schedule.",
 	"IneligibleSides": "request-time-only annotation (bc-cse), stamped by " +
 		"mobileapp.annotateEligibility on the served copy from the " +

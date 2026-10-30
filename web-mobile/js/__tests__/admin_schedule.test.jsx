@@ -219,7 +219,7 @@ describe('filterMatchesByCourt', () => {
 describe('AdminScoreEditor chained navigation stays on the same shiaijo (T043 regression)', () => {
   // T043 (US1, FR-001, SC-001) regression anchor for the CLAUDE.md
   // invariant: "Chained match navigation in the admin score editor
-  // (Prev/Next buttons, Finish + Start Next, ←/→ keys) must stay on the
+  // (Prev/Next buttons, ←/→ keys) must stay on the
   // current match's shiaijo." The AdminScoreEditor component in
   // admin_schedule.jsx implements this with
   //   filtered.filter(m => (m.court || "") === openCourt)
@@ -549,38 +549,19 @@ describe('allMatchesCompleted', () => {
     expect(nextMatch).toBeNull();
   });
 
-  it('regression: Finish+Start Next does not loop when last scheduled match has completed matches sorted after it', () => {
-    // Real-world scenario: the operator has scored 6 of 7 pool matches. The
-    // sort order is scheduled first, completed last. The one remaining
-    // scheduled match sits at index 0; the 6 completed matches follow at
-    // indices 1-6. Clicking "Finish + Start Next" from the scheduled match
-    // used to open the first completed match (index 1) as a CORRECTION:
-    // the modal looped back to match 1. The fix is to compute
-    // nextActiveMatch = first non-completed match after openIdx, which is
-    // null when the remaining scheduled match IS the open one.
+  it('prevMatch and nextMatch navigation scope along sameCourt', () => {
     const sorted = [
-      { id: 'm7', court: 'A', status: 'scheduled',  compId: 'c1' }, // last unscored
+      { id: 'm7', court: 'A', status: 'scheduled',  compId: 'c1' },
       { id: 'm1', court: 'A', status: 'completed',  compId: 'c1' },
       { id: 'm2', court: 'A', status: 'completed',  compId: 'c1' },
-      { id: 'm3', court: 'A', status: 'completed',  compId: 'c1' },
-      { id: 'm4', court: 'A', status: 'completed',  compId: 'c1' },
-      { id: 'm5', court: 'A', status: 'completed',  compId: 'c1' },
-      { id: 'm6', court: 'A', status: 'completed',  compId: 'c1' },
     ];
-    const openMatch = sorted[0]; // the last scheduled match
+    const openMatch = sorted[0];
     const sameCourt = filterMatchesByCourt(sorted, openMatch.court);
     const openIdx = sameCourt.findIndex(m => m.id === openMatch.id);
-
-    // nextMatch (list position) is non-null: this is the source of the bug
-    // without the nextActiveMatch guard.
     const nextMatch = openIdx >= 0 && openIdx < sameCourt.length - 1 ? sameCourt[openIdx + 1] : null;
-    expect(nextMatch).not.toBeNull(); // m1 (completed): confirms the bug path
-    expect(nextMatch.id).toBe('m1');
-
-    // nextActiveMatch (first non-completed after openIdx) must be null:
-    // this is what Finish+Start Next should use so the modal does not loop.
-    const nextActiveMatch = sameCourt.slice(openIdx + 1).find(m => m.status !== 'completed') || null;
-    expect(nextActiveMatch).toBeNull();
+    const prevMatch = openIdx > 0 ? sameCourt[openIdx - 1] : null;
+    expect(nextMatch?.id).toBe('m1');
+    expect(prevMatch).toBeNull();
   });
 
   // Deep-review (2026-05-22): the AdminScoreEditor banner render is guarded
@@ -612,21 +593,16 @@ describe('allMatchesCompleted', () => {
     expect(shouldShowBannerAll).toBe(true);
   });
 
-  it('regression: nextActiveMatch is null when openMatch is not found in sameCourt (openIdx === -1)', () => {
-    // Copilot round-11: when openIdx is -1, slice(-1 + 1) = slice(0)
-    // scans the entire array and can return a spurious non-completed match.
-    // The fix guards the slice on openIdx >= 0.
+  it('regression: nextMatch and prevMatch are null when openMatch is not found in sameCourt (openIdx === -1)', () => {
     const court = [
       { id: 'm1', court: 'A', status: 'scheduled', compId: 'c1' },
       { id: 'm2', court: 'A', status: 'scheduled', compId: 'c1' },
     ];
     const openIdx = -1; // openMatch not found in sameCourt
-    // Without the guard: slice(0) returns whole array, find returns m1 (scheduled).
-    // With the guard: null immediately, no scan.
-    const nextActiveMatch = openIdx >= 0
-      ? court.slice(openIdx + 1).find(m => m.status !== 'completed') || null
-      : null;
-    expect(nextActiveMatch).toBeNull();
+    const nextMatch = openIdx >= 0 && openIdx < court.length - 1 ? court[openIdx + 1] : null;
+    const prevMatch = openIdx > 0 ? court[openIdx - 1] : null;
+    expect(nextMatch).toBeNull();
+    expect(prevMatch).toBeNull();
   });
 });
 

@@ -31,7 +31,7 @@ func startMatchTxErr(t *testing.T, eng *Engine, store *state.Store, compID, matc
 	t.Helper()
 	var engErr error
 	require.NoError(t, store.WithTransaction(compID, func(tx state.StoreTx) error {
-		engErr = eng.StartMatchTx(tx, compID, matchID)
+		engErr = eng.StartMatchTx(tx, compID, matchID, false)
 		return nil
 	}))
 	return engErr

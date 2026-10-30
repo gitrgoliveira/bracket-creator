@@ -417,13 +417,12 @@ func TestForceReopenedDownstreamWithdrawalRestoresEligibility(t *testing.T) {
 			},
 		},
 		{
-			name:  "forced winner override",
+			name:  "forced decision correction",
 			first: fought,
 			reopen: func(t *testing.T, eng *Engine, compID string) []ReopenedMatch {
 				var reopened []ReopenedMatch
-				applied, err := eng.OverrideBracketWinner(compID, "m-r1-0", wrTeamA, 0, ForceOptions{Force: true, Reopened: &reopened})
+				_, _, err := eng.RecordDecisionWithOptions(compID, "m-r1-0", "kiken-voluntary", "shiro", "kiken", nil, ForceOptions{Force: true, Reopened: &reopened})
 				require.NoError(t, err)
-				require.True(t, applied)
 				return reopened
 			},
 		},

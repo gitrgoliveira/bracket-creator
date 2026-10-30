@@ -546,7 +546,7 @@ func TestStartMatchTx_MatchNotFound(t *testing.T) {
 
 	var txErr error
 	_ = store.WithTransaction(compID, func(tx state.StoreTx) error {
-		txErr = eng.StartMatchTx(tx, compID, "GHOST")
+		txErr = eng.StartMatchTx(tx, compID, "GHOST", false)
 		return nil
 	})
 	require.Error(t, txErr)

@@ -11,8 +11,8 @@
 //   B. A 200 {"applied": false} RELEARNS the offset (throttled), so the
 //      superseded banner's advice ("check the recorded result before
 //      re-entering") becomes actionable: the re-entry carries a corrected stamp.
-//      There are THREE sites that can see that response - a direct recordScore,
-//      the reconnect flush of a queued write, and overrideBracketWinner - and
+//      There are three sites that can see that response - a direct recordScore,
+//      the reconnect flush of a queued write, and recordDecision - and
 //      each is pinned separately, because deleting any one of them leaves the
 //      other two covering for it.
 //   C. The relearn's in-flight guard. The 5s throttle is measured from
@@ -36,8 +36,7 @@
 //      from enqueuedAt + the freshly learned offset (so the write keeps its
 //      real age) and retried once; a second refusal drops it with both
 //      channels told.
-//   I. The same recovery on overrideBracketWinner, plus the bracket-resync a
-//      permanently-dropped assertion owes any optimistic local advance.
+//   I. The same recovery on recordDecision.
 //   H. The counter-case. A plain supersede takes NONE of those paths: no
 //      re-stamp, no resend, and the pre-existing supersede notification.
 //      Pinned because every recovery above hangs off one `reason` comparison,
@@ -49,12 +48,12 @@
 //      refetch read before the add from replacing the copy it pushed.
 //
 // bc-evts (stage 3, the outbox): every rule-bound door (a finished or
-// scheduled recordScore, recordDecision, overrideBracketWinner, the
+// scheduled recordScore, recordDecision, the
 // representative bout's add and remove, ...) now enqueues at once and answers
 // `{ applied: true, pending: true, key, settled }`; `settled` is the server's
 // eventual answer in the shape the direct call used to return, and a 4xx
 // refusal rejects it with the Error the direct call used to throw. So the
-// "direct" recordScore and override sites above are the QUEUE's flush now
+// "direct" recordScore and decision sites above are the QUEUE's flush now
 // (only a RUNNING recordScore still goes direct), a clock_skew resend is the
 // queue's re-stamp (_restampQueuedEntryForSkew), and a request given up at the
 // 12 s deadline keeps its entry queued and replays it with the same stamp.
@@ -381,15 +380,15 @@ describe('server-clock offset: a superseded QUEUED write relearns on the flush p
     });
 });
 
-describe('server-clock offset: a superseded override assertion relearns', () => {
-    it('relearns when overrideBracketWinner is answered applied:false', async () => {
+describe('server-clock offset: a superseded decision relearns', () => {
+    it('relearns when recordDecision is answered applied:false', async () => {
         const server = makeServer({ timeOk: true });
         const API = await loadWith(server);
         expect(server.timeCalls).toBe(1);
 
         server.writeReply = () => ({ applied: false });
-        // bc-evts: the assertion is the outbox's; its answer arrives on `settled`.
-        const r = await API.overrideBracketWinner('c1', 'm-r2-0', 'Alice', 'pw');
+        // bc-evts: the decision is the outbox's; its answer arrives on `settled`.
+        const r = await API.recordDecision('c1', 'm-r2-0', { decision: 'fusensho', decisionBy: 'A' }, 'pw');
         expect(r).toMatchObject({ applied: true, pending: true });
         expect(await r.settled).toEqual({ applied: false });
         await flushMicrotasks();
@@ -397,13 +396,13 @@ describe('server-clock offset: a superseded override assertion relearns', () => 
         expect(server.timeCalls).toBe(2);
     });
 
-    it('does NOT relearn when the server applies the assertion', async () => {
+    it('does NOT relearn when the server applies the decision', async () => {
         const server = makeServer({ timeOk: true });
         const API = await loadWith(server);
         expect(server.timeCalls).toBe(1);
 
         server.writeReply = () => ({ applied: true });
-        const r = await API.overrideBracketWinner('c1', 'm-r2-0', 'Alice', 'pw');
+        const r = await API.recordDecision('c1', 'm-r2-0', { decision: 'fusensho', decisionBy: 'A' }, 'pw');
         expect(await r.settled).toEqual({ applied: true });
 
         // Ride past the throttle window, so a wrongly-fired relearn cannot be
@@ -815,13 +814,13 @@ describe('a superseded write is untouched by the clock_skew recovery', () => {
 });
 
 // ---------------------------------------------------------------------------
-// I. The clock_skew recovery loop: overrideBracketWinner
+// I. The clock_skew recovery loop: recordDecision
 // ---------------------------------------------------------------------------
 // The third site that can see the refusal. Pinned separately for the same
 // reason the supersede relearn is: these are independent call sites, not one
 // shared chokepoint, so the other two cover for a deletion here.
 
-describe('clock_skew recovery: an override assertion', () => {
+describe('clock_skew recovery: a decision write', () => {
     // bc-evts: the resend is the queue's re-stamp; `settled` reports applied.
     it('relearns, is re-stamped by the queue and resent once, then settles applied', async () => {
         const server = makeServer({ timeOk: true });
@@ -831,7 +830,7 @@ describe('clock_skew recovery: an override assertion', () => {
         server.skew = SKEW_MS + 20000;
         server.writeReply = replies(skewRefusal(), { applied: true });
 
-        const r = await API.overrideBracketWinner('c1', 'm-r2-0', 'Alice', 'pw');
+        const r = await API.recordDecision('c1', 'm-r2-0', { decision: 'fusensho', decisionBy: 'A' }, 'pw');
         await tick(50);
 
         expect(await r.settled).toEqual({ applied: true });
@@ -847,7 +846,7 @@ describe('clock_skew recovery: an override assertion', () => {
         const API = await loadWith(server);
 
         server.writeReply = () => skewRefusal();
-        const r = await API.overrideBracketWinner('c1', 'm-r2-0', 'Alice', 'pw');
+        const r = await API.recordDecision('c1', 'm-r2-0', { decision: 'fusensho', decisionBy: 'A' }, 'pw');
         let settled = null;
         r.settled.then((v) => { settled = v; });
         await tick(0);
@@ -860,42 +859,6 @@ describe('clock_skew recovery: an override assertion', () => {
         await tick(600);
         expect(await r.settled).toEqual({ applied: true });
         expect(server.payloads.length).toBe(3);
-    });
-});
-
-describe('clock_skew recovery: a queued override assertion', () => {
-    it('held for the clock, it asks for no resync and tells no failure', async () => {
-        // Held, never dropped: the assertion stays queued and the local
-        // advance stands on a write that will still land, so no resync is
-        // asked for and no failure is told; the held write is told once.
-        const server = makeServer({ timeOk: true });
-        const mod = await loadModWith(server);
-        const API = mod.API;
-
-        const resyncs = [];
-        const failures = [];
-        const alerts = [];
-        const unsubResync = mod.subscribeBracketResync((info) => resyncs.push(info));
-        const unsubFail = mod.subscribeTerminalWriteFailed((info) => failures.push(info));
-        const unsubAlert = mod.subscribeQueueAlert((a) => alerts.push(a));
-
-        server.online = false;
-        expect(await API.overrideBracketWinner('c1', 'm-r2-0', 'Alice', 'pw')).toMatchObject({ pending: true });
-        await flushMicrotasks();
-
-        server.online = true;
-        server.writeReply = () => skewRefusal(); // refuses until the clock is fixed
-        window.dispatchEvent(new Event('online'));
-        await tick(0);
-
-        expect(server.payloads.length).toBe(2);
-        expect(resyncs).toEqual([]);
-        expect(failures).toEqual([]);
-        expect(alerts.filter((a) => a.kind === 'server_error')).toHaveLength(1);
-        expect(JSON.parse(_lsStore.bc_write_queue_v2)).toHaveLength(1);
-        unsubResync();
-        unsubFail();
-        unsubAlert();
     });
 });
 
@@ -1543,14 +1506,15 @@ describe('a score write whose answer never completes is queued, not held', () =>
     const stalledBody = () => Promise.resolve({ ok: true, status: 200, json: () => new Promise(() => {}) });
     const answered = () => Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({}) });
 
-    // bc-evts: a finished score, a decision and an override are the outbox's:
+    // bc-evts: a finished score, a decision and a representative bout's add
+    // (each a finished result) are the outbox's:
     // the door answers pending at once, and the 12 s deadline (_fetchJson,
     // inside the flush) gives the request up while the entry stays queued and
     // `settled` waits; the backoff replays it with the same stamp.
     it.each([
         ['a finished score', '/score', (API) => API.recordScore('c1', 'm1', { status: 'completed' }, 'pw', null)],
         ['a decision', '/decision', (API) => API.recordDecision('c1', 'm1', { decision: 'kiken-voluntary', decisionBy: 'shiro' }, 'pw')],
-        ['a winner override', '/override-winner', (API) => API.overrideBracketWinner('c1', 'm1', 'Alice', 'pw')],
+        ['a representative bout added', '/daihyosen', (API) => API.recordDaihyosen('c1', 'm1', 'pw', 0)],
     ])('%s is given up at 12 s, stays queued, and is replayed with the same stamp', async (_name, path, send) => {
         const server = makeServer({ timeOk: true });
         const API = await loadWith(server);

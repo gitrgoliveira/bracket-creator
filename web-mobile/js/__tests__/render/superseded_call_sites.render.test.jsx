@@ -11,8 +11,8 @@
 // actually happens when the wired handler runs and the awaited write result
 // says "did not land". Three call sites had no direct-invocation test:
 //
-//   A. admin_schedule_score_editor.jsx:309 onSubmit          -- must NOT close
-//   B. admin_schedule_score_editor.jsx:361 onSubmitAndNext   -- must NOT advance
+//   A. admin_schedule_score_editor.jsx onSubmit          -- must NOT close
+//   B. admin_schedule_score_editor.jsx plain Finish      -- onSubmitAndNext null, never advances
 //   C. viewer_match.jsx:319 onSubmit (public self-run)       -- must NOT close
 //
 // Mechanism (same probe technique as the sibling file): window.ScoreEditorModal
@@ -155,11 +155,10 @@ describe('call site A: admin_schedule_score_editor.jsx onSubmit', () => {
   });
 });
 
-// ── B. admin_schedule_score_editor.jsx onSubmitAndNext (Finish + Start Next) ─
+// ── B. admin_schedule_score_editor.jsx (plain Finish only, onSubmitAndNext null) ─
 
-describe('call site B: admin_schedule_score_editor.jsx onSubmitAndNext', () => {
-  // Two same-court matches so a next active match exists and onSubmitAndNext
-  // is wired (see score_editor_mount_sites.render.test.jsx scenario 4a).
+describe('call site B: admin_schedule_score_editor.jsx plain Finish (onSubmitAndNext null)', () => {
+  // Two same-court matches so a next match exists.
   async function openEditorWithNext(onEditScore) {
     const m1 = runningMatch();
     const m2 = runningMatch({ id: 'm2', status: 'scheduled' });
@@ -177,41 +176,35 @@ describe('call site B: admin_schedule_score_editor.jsx onSubmitAndNext', () => {
     });
     // m1 (running) sorts before m2 (scheduled); open it.
     await act(async () => { fireEvent.click(document.querySelector('button.test-score-open')); });
-    expect(typeof probe.props.onSubmitAndNext).toBe('function');
+    expect(probe.props.onSubmitAndNext).toBeNull();
     expect(probe.props.match.id).toBe('m1');
   }
 
-  it('superseded: stays on the current match, does not advance', async () => {
+  it('onSubmitAndNext is null and finishing does not advance', async () => {
+    const onEditScore = vi.fn().mockResolvedValue(LANDED);
+    await openEditorWithNext(onEditScore);
+    await act(async () => { await probe.props.onSubmit(FINISH_PATCH); });
+    expect(screen.queryByTestId('probe-score-editor')).toBeFalsy();
+    expect(onEditScore).toHaveBeenCalledTimes(1);
+    expect(onEditScore.mock.calls[0][1]).toBe('m1');
+  });
+
+  it('superseded: stays on the current match, does not close or advance', async () => {
     const onEditScore = vi.fn().mockResolvedValue(SUPERSEDED);
     await openEditorWithNext(onEditScore);
-    await act(async () => { await probe.props.onSubmitAndNext(FINISH_PATCH); });
-    // Operator terms: without this guard, "Finish + Start Next" would open
-    // AND START m2 on court A while m1's real (server-held) result is some
-    // OTHER device's write -- two matches now claiming the same shiaijo, and
-    // the operator has no idea m1's finish never actually saved.
+    await act(async () => { await probe.props.onSubmit(FINISH_PATCH); });
     expect(probe.props.match.id).toBe('m1');
-    // Only the finish write should have gone out. A second call means the
-    // code tried to start m2 anyway, silently, despite the guard.
+    expect(screen.getByTestId('probe-score-editor')).toBeTruthy();
     expect(onEditScore).toHaveBeenCalledTimes(1);
   });
 
   it('queued: stays on the current match too, same as superseded here', async () => {
     const onEditScore = vi.fn().mockResolvedValue(QUEUED);
     await openEditorWithNext(onEditScore);
-    await act(async () => { await probe.props.onSubmitAndNext(FINISH_PATCH); });
+    await act(async () => { await probe.props.onSubmit(FINISH_PATCH); });
     expect(probe.props.match.id).toBe('m1');
+    expect(screen.getByTestId('probe-score-editor')).toBeTruthy();
     expect(onEditScore).toHaveBeenCalledTimes(1);
-  });
-
-  it('landed: advances to the next same-court match and starts it (counter-case -- a test that only checks "does not advance" would pass even if it NEVER advanced)', async () => {
-    const onEditScore = vi.fn().mockResolvedValue(LANDED);
-    await openEditorWithNext(onEditScore);
-    await act(async () => { await probe.props.onSubmitAndNext(FINISH_PATCH); });
-    // The finish write landed, so the operator is now looking at m2 --
-    // and a second write went out to start it (mirrors "Finish + Start Next"
-    // actually starting the next match, not just opening it).
-    expect(probe.props.match.id).toBe('m2');
-    expect(onEditScore).toHaveBeenCalledTimes(2);
   });
 });
 

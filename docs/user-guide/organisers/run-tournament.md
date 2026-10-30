@@ -69,7 +69,7 @@ Set the **Public URL** field to the externally reachable address of your app (fo
 
 The same **Edit details** page also has branding and sponsor fields, below tournament details. All fields are optional; the default kendo theme applies when nothing is configured.
 
-- **Logo**: upload an image file shown on the viewer, the lobby displays, and the admin screens.
+- **Logo**: upload an image file shown on the viewer and the admin screens, and on the lobby display when **Show the logo on the lobby display** is ticked on this page. Removing the logo keeps that setting, so the logo returns to the lobby once you upload another.
 - **Accent colours**: set a primary accent colour and, if you want one, a soft background tint; the viewer and display screens adopt them across the whole site. Leave the tint alone and it is derived from the primary, so one colour choice re-tints every surface, including the running-match rings and focus halos.
 - **Sponsors**: upload full-width images that appear on the public viewer page only. Sponsor images do not appear on the TV lobby boards or scoring displays.
 
@@ -315,6 +315,36 @@ Changing a match duration never invalidates a generated draw. Pools, brackets an
 For a kachinuki (winner stays on) competition the number of bouts is not fixed, so the estimate is a range rather than a single figure. The competition Overview shows **Best**, **Average**, and **Worst**: best is a clean sweep where one fighter wins every bout, worst is the longest run where each bout retires one fighter, and average sits between them. Use the worst figure for planning the day and the average for a realistic finish time.
 
 ![The competition Overview schedule estimate for a kachinuki competition, reading Best, Average, and Worst durations followed by a per-court breakdown.](../../screenshots/kachinuki-estimate-range.png)
+
+### Sharing a shiai-jo between competitions
+
+Several competitions may be assigned the same shiai-jo. By default they run one after another, not on top of each other: when you draw a competition, its first match on a shared shiai-jo is placed no earlier than the planned end of the last match on that shiai-jo of every other competition on the same day that is already drawn there and starts at the same time or earlier. If two competitions have the same start time, the one drawn second goes after the one drawn first. Only competitions on the same day count. A tie-break or representative bout added later, and a later Swiss round, are placed after the planned end of the last match the competition already has on that shiai-jo (a match you moved to a later time included), so they do not land on top of it or of the other competition.
+
+Scheduled times are clock times within one day. If another competition on a shared shiai-jo is planned to run until midnight or later, the draw is refused with a message naming the shiai-jo and that competition: move this competition to another shiai-jo or day, or re-time the other one with **Auto-schedule competition**.
+
+The Create competition form fills in the start time for you: it is set to the latest planned end of the other same-day competitions that share one of the shiai-jo you pick (using the plan of the ones already drawn, and an estimate for those not yet drawn). If none shares a shiai-jo, it stays at 09:00. Change the start time yourself and your value stays; changing the shiai-jo or date before you touch the start time recalculates it. The hint under the shiai-jo field repeats this: competitions on the same shiai-jo run one after another, and the start time is filled in that way until you change it.
+
+A few limits apply: a competition drawn before an earlier-starting one is not moved; a later phase (for example the knockout after the pools) is only placed after competitions that start no later than its own, so an earlier-starting competition's knockout that is drawn after a later competition has taken the shiai-jo follows its own pool phase and can overlap the later one. A start time you set by hand can still overlap another competition; the schedule warns about an overlap when you create or save settings.
+
+To re-time a competition, use **Auto-schedule competition** on the **Tournament schedule**. It is not held back by the other competitions, so use it after drawing in an unusual order, or to interleave competitions on one shiai-jo on purpose. It distributes that competition's matches across its shiai-jo by its own settings.
+
+On the spectator views, there is [one "Next up" bout per shiai-jo](../spectators/following.md#next-up-on-each-shiai-jo) across all competitions sharing that court.
+
+At the table, note that after a match finishes, the court console stays on the competition you are scoring (it never switches competition or court by itself), while the public screens may name the next match by printed time, which can belong to another competition sharing the shiai-jo. This is rare by default because shared shiai-jo are staggered; it happens when you interleave on purpose with Auto-schedule.
+
+### When a shiai-jo runs ahead or behind
+
+Planned start times stored for matches are never rewritten by the app. When a shiai-jo drifts 5 or more minutes ahead of or behind its plan, public screens, the court console, and TV boards display a projected start time like "~10:52" instead. Refer to [Projected start times](../spectators/following.md#projected-start-times) for details on where these times appear.
+
+On the **Tournament schedule**, the **Court pace** panel tracks today's drift for every shiai-jo across all competitions running on it, the same estimate the public screens show. It shows whether each court is "On track" or "N m behind/ahead", along with the first waiting bout's projected start time. The schedule rows and the **Scores** tab keep showing the original planned times so you can edit the schedule accurately. To change the plan itself, use **Auto-schedule competition** or edit individual match times on the schedule.
+
+The projected time has a few practical limits:
+
+- It is an estimate, not a promise.
+- Correcting the shiai-jo's last finished bout re-stamps that bout and can move the estimate.
+- A bout that starts late after the shiai-jo stood idle shows the next bout at the current time (for example ~10:52 at 10:52) until the running bout ends.
+- A bout that cannot be fought because a competitor withdrew keeps its planned time and does not move the estimate for the bouts after it.
+- It takes the time from the tournament server, so it relies only on each device being set to the venue's time zone.
 
 ### Moving matches between shiai-jo
 

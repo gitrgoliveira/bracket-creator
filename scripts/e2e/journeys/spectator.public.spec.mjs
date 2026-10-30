@@ -26,8 +26,11 @@ import { dwell } from '../fixtures/pace.mjs';
 import { createTournament } from '../fixtures/setup.mjs';
 import { createCompetition } from '../fixtures/wizard.mjs';
 import { generateDraw, pasteRoster, startCompetition } from '../fixtures/competition.mjs';
-import { openShiaijo, sides, startUpNext, upNextCard, waitingRows } from '../fixtures/shiaijo.mjs';
-import { awardIppon, clearMarks, filledSlots, finishMatch, syncState } from '../fixtures/scoring.mjs';
+import { inlineEditor, openShiaijo, sides, startUpNext, upNextCard, waitingRows } from '../fixtures/shiaijo.mjs';
+import {
+  awardIppon, clearMarks, filledSlots, finishMatch, settled,
+  ipponButton, held, notHeld, running,
+} from '../fixtures/scoring.mjs';
 import { editorSides } from '../fixtures/individual.mjs';
 import {
   NATURAL, applyScheduleText, cardMarks, cardSlots, clearScheduleText, competitionTab, homeNowRow, expandedCard, matchCard, nowCard, numbersOf, pickerEntries,
@@ -404,7 +407,7 @@ test.describe('spectator on a phone', () => {
         .toEqual({ shiro: 'DM', aka: 'K' });
       // The operator takes Aka's mark back (Shiro's two ippon already decide the bout).
       await clearMarks(filledSlots(op, 'aka'));
-      await expect(syncState(op)).toHaveText('Synced');
+      await settled(op);
       await expect.poll(() => cardMarks(nowCard(page)), { message: 'Overview: the ON NOW card follows the operator' })
         .toEqual({ shiro: 'DM', aka: '' });
       await shot(page, 'door-overview-now');
@@ -421,5 +424,58 @@ test.describe('spectator on a phone', () => {
       await shot(page, 'door-overview-next-bout');
       record({ journey: 'spectator', door: 'Overview: Up next row, ON NOW card', after: await cardMarks(nowCard(page)) });
     });
+  });
+
+  test('a change this device cannot send shows on its public page, and goes once it is sent (bc-sypl)', async () => {
+    // A held write on the operator device surfaces on its own public page.
+    await openShiaijo(op, 'A');
+    // The console's queue loads after its heading: wait for a running bout or
+    // an Up next card before reading which one it shows.
+    await expect(inlineEditor(op).or(upNextCard(op)).first()).toBeVisible();
+    if (!(await inlineEditor(op).isVisible())) {
+      await startUpNext(op);
+    }
+    await running(op);
+    await settled(op);
+
+    const pub = await opCtx.newPage();
+    try {
+      await pub.goto('/');
+      await expect(pub.locator('.viewer__body')).toBeVisible();
+      await expect(pub.getByTestId('public-held')).toHaveCount(0);
+
+      const side = 'aka';
+      const before = await filledSlots(op, side).count();
+
+      await opCtx.setOffline(true);
+      try {
+        await ipponButton(op, side, 'M').tap();
+        await expect(filledSlots(op, side)).toHaveCount(before + 1);
+
+        const count = await held(pub, { count: 1 });
+        await expect(count).toHaveText(/1 change not sent/);
+        const opened = Date.now();
+        await count.tap();
+
+        const dialog = pub.getByRole('dialog', { name: 'Held on this device' });
+        await expect(dialog).toBeVisible();
+        await expect(dialog.getByTestId('held-write')).toHaveCount(1);
+        await expect(dialog.getByText('Nothing is held on this device: everything has been sent.')).toHaveCount(0);
+
+        await shot(pub, 'public-held-list');
+        await dwell(pub, opened);
+        await dialog.getByRole('button', { name: 'Close' }).tap();
+        await expect(dialog).toHaveCount(0);
+      } finally {
+        await opCtx.setOffline(false);
+      }
+
+      await notHeld(pub);
+      await settled(op);
+      await expect(filledSlots(op, side)).toHaveCount(before + 1);
+      record({ journey: 'spectator', step: 'held writes on public page', count: '1 change not sent' });
+    } finally {
+      await pub.close();
+    }
   });
 });

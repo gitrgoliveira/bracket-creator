@@ -130,7 +130,7 @@ func TestStartMatch_SameNameEligibilityUsesTheRowIDs(t *testing.T) {
 		f := poolFixture(t, "samename-pool-tx")
 		withdraw(t, f, f.samNorth)
 		err := f.store.WithTransaction(f.compID, func(tx state.StoreTx) error {
-			return f.eng.StartMatchTx(tx, f.compID, "Pool A-0")
+			return f.eng.StartMatchTx(tx, f.compID, "Pool A-0", false)
 		})
 		require.Error(t, err, "the Sam this row names withdrew; the transactional start must refuse too")
 		assert.ErrorIs(t, err, ErrIneligibleCompetitor)

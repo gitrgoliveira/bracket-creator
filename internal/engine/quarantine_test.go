@@ -166,3 +166,42 @@ func TestQuarantineCorruptBracket_OutcomeFollowsTheFormatTable(t *testing.T) {
 		})
 	}
 }
+
+func TestQuarantineCorruptBracket_RebuildDoesNotReFloorAgainstLaterDrawnCompetition(t *testing.T) {
+	eng, store, dir := setupTestEngine(t)
+
+	compA := &state.Competition{
+		ID: "mixed-a", Name: "Mixed A", Kind: "individual", Format: state.CompFormatMixed,
+		PoolSize: 3, PoolSizeMode: "min", PoolWinners: 2,
+		Courts: []string{"A"}, Date: "2026-11-01", StartTime: "09:00", Status: "setup",
+	}
+	require.NoError(t, store.SaveCompetition(compA))
+	saveTestParticipants(t, store, "mixed-a", []string{
+		"Alice", "Bob", "Charlie", "Dave", "Erin", "Frank", "Grace", "Heidi",
+	})
+	require.NoError(t, eng.StartCompetition("mixed-a"))
+
+	pathA := filepath.Join(dir, "competitions", "mixed-a", "bracket.json")
+	origBracket, err := store.LoadBracket("mixed-a")
+	require.NoError(t, err)
+	origScheduledAt := origBracket.Rounds[0][0].ScheduledAt
+
+	compB := &state.Competition{
+		ID: "comp-b", Name: "Comp B", Kind: "individual", Format: state.CompFormatLeague,
+		Courts: []string{"A"}, Date: "2026-11-01", StartTime: "09:00", Status: state.CompStatusPools,
+	}
+	require.NoError(t, store.SaveCompetition(compB))
+	require.NoError(t, store.SavePoolMatches("comp-b", []state.MatchResult{
+		{ID: "b-m1", Court: "A", ScheduledAt: "14:00", Status: state.MatchStatusScheduled},
+	}))
+
+	breakBracket(t, pathA)
+
+	res, err := eng.QuarantineCorruptBracket("mixed-a")
+	require.NoError(t, err)
+	assert.True(t, res.Rebuilt)
+
+	rebuiltBracket, err := store.LoadBracket("mixed-a")
+	require.NoError(t, err)
+	assert.Equal(t, origScheduledAt, rebuiltBracket.Rounds[0][0].ScheduledAt, "rebuilt bracket times must not move against later-drawn neighbour")
+}

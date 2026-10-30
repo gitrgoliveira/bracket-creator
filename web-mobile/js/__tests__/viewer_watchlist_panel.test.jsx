@@ -10,6 +10,7 @@ import { makeReactive } from './helpers/reactive_react.js';
 import { collectText, expandNamed } from './helpers/vdom.js';
 import { cssBlock, readStylesheet } from './helpers/source.js';
 import { buildRoster } from '../viewer_watchlist_core.jsx';
+import { paceKey } from '../court_pace.jsx';
 
 const realReact = global.React;
 
@@ -185,6 +186,18 @@ describe('WatchHeroCard', () => {
     expect(live, 'the live region survives the start of the match').toBeTruthy();
     // While running the line reads "Now", not the scheduled time.
     expect(collectText(live, expandNamed('NumberedName'))).toContain('Now');
+  });
+
+
+  it('keeps a projected time out of the live region, so a court running behind is not read out every minute', () => {
+    const paceLookup = { byMatch: new Map([[paceKey('c1', 'm1'), { display: { text: '~09:20', ariaLabel: 'about 09:20', projected: true } }]]) };
+    const waiting = { ...MATCH, compId: 'c1', status: 'scheduled' };
+    const tree = runtime.mount(WatchHeroCard, { nextMatch: waiting, primaryIds: new Set(['p1']), entityLabel: 'Robert Young', onMatchClick: vi.fn(), paceLookup });
+    const when = byClass(tree, 'wl-hero__when')[0];
+    expect(collectText(when, expandNamed('PaceTime')), 'the time is still on the card').toContain('~09:20');
+    const live = findAll(tree, (n) => n.props?.['aria-live'] === 'polite');
+    expect(live).toHaveLength(1);
+    expect(collectText(live[0], expandNamed('PaceTime')), 'the live region holds no time').not.toMatch(/\d\d:\d\d/);
   });
 
   // The band used to read "On court now · Shiaijo A" while the 34px hero

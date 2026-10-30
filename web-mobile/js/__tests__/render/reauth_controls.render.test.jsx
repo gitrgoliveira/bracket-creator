@@ -1,19 +1,15 @@
 // bc-qttl: the queued-write "auth-required" state used to be a dead end (see
-// the note in app.jsx above window.requestReauth). These tests cover the two
-// pieces of chrome that became actionable: SyncStatusPill (the element that
-// says "Sign in to save" is now the thing you click) and AdminTopbar's
-// always-visible "Sign in to save" button (SyncStatusPill only renders inside
-// a running match's score editor, so the topbar is the persistent home for
-// the parked-queue state once that editor is closed).
+// the note in app.jsx above window.requestReauth). These tests cover the
+// piece of chrome that became actionable: AdminTopbar's always-visible
+// "Sign in to save" button, the persistent home for the parked-queue state.
 //
-// Real React 19 + RTL, because these are subscribe-then-rerender components:
+// Real React 19 + RTL, because this is a subscribe-then-rerender component:
 // the unit suite's fake React stub never invokes useEffect, so the
 // subscription (and the state change it drives) would never fire there.
 
 import React from 'react';
 import { render, screen, fireEvent, act } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vitest';
-import { SyncStatusPill } from '../../admin_scoring_autosave.jsx';
 
 // A minimal stand-in for api_client.jsx's subscribeSyncStatus: same contract
 // (replay the current value immediately on subscribe; return an unsub fn) but
@@ -54,54 +50,6 @@ afterAll(() => {
   else delete window.subscribeSyncStatus;
   if (originalRequestReauth.had) window.requestReauth = originalRequestReauth.value;
   else delete window.requestReauth;
-});
-
-describe('SyncStatusPill: auth-required becomes a clickable control', () => {
-  let bus;
-
-  beforeEach(() => {
-    bus = makeFakeSyncBus('synced');
-    window.subscribeSyncStatus = bus.subscribe;
-  });
-
-  it('renders a <button> for auth-required when window.requestReauth exists, and clicking it calls window.requestReauth', async () => {
-    const requestReauth = vi.fn();
-    window.requestReauth = requestReauth;
-
-    render(<SyncStatusPill isRunning={true} />);
-    await act(async () => { bus.set('auth-required'); });
-
-    const pill = screen.getByTestId('sync-status-pill');
-    expect(pill.tagName).toBe('BUTTON');
-    expect(pill).toHaveTextContent('Sign in to save');
-
-    fireEvent.click(pill);
-    expect(requestReauth).toHaveBeenCalledTimes(1);
-  });
-
-  it('falls back to a non-interactive span for auth-required when window.requestReauth is not installed', async () => {
-    delete window.requestReauth;
-
-    render(<SyncStatusPill isRunning={true} />);
-    await act(async () => { bus.set('auth-required'); });
-
-    const pill = screen.getByTestId('sync-status-pill');
-    expect(pill.tagName).toBe('SPAN');
-    expect(pill).toHaveTextContent('Sign in to save');
-  });
-
-  it.each(['synced', 'syncing', 'offline'])(
-    'still renders a non-interactive span for status %s',
-    async (status) => {
-      window.requestReauth = vi.fn();
-
-      render(<SyncStatusPill isRunning={true} />);
-      await act(async () => { bus.set(status); });
-
-      const pill = screen.getByTestId('sync-status-pill');
-      expect(pill.tagName).toBe('SPAN');
-    }
-  );
 });
 
 describe('AdminTopbar: persistent "Sign in to save" control', () => {
@@ -268,7 +216,7 @@ describe('AdminTopbar: held results', () => {
 
 // The held-writes indicator opens the list of what is held (HeldWritesPanel),
 // where a write the server keeps refusing is discarded on its own, whatever it
-// is: a running write, a lineup save and a hand-set winner have no editor of
+// is: a running write and a lineup save have no editor of
 // their own to offer it. A write only waiting is listed with no Discard.
 describe('AdminTopbar: the held-writes list', () => {
   let bus, unsentBus, saved;

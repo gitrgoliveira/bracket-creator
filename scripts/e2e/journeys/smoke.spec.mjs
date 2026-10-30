@@ -21,7 +21,7 @@ import {
   editorIdentity, inlineEditor, lastCompleted, openShiaijo, sides, startUpNext, upNextCard,
 } from '../fixtures/shiaijo.mjs';
 import {
-  EDITOR, INLINE_EDITOR, armFinish, awardIppon, finishMatch, ipponButton, startMatch, syncState,
+  EDITOR, INLINE_EDITOR, armFinish, awardIppon, finishMatch, ipponButton, startMatch, settled, unsentCount,
 } from '../fixtures/scoring.mjs';
 import { openScoreEditor } from '../fixtures/scores.mjs';
 import { openTvBoard, openViewer, recentResult, tvBoard } from '../fixtures/public.mjs';
@@ -135,21 +135,20 @@ test.describe('smoke', () => {
       const pair = await sides(editor);
 
       const neighbour = await tapNeighbour(ipponButton(page, 'shiro', 'M'), 'right');
-      await expect(syncState(page)).toHaveText('Synced');
+      await settled(page);
       record({ variant: 'V1 tapNeighbour', action: 'Shiro M', ...neighbour });
 
-      let offlineState;
+      let unsentOffline;
       const offline = await interrupt(page, 'offline', {
         during: async (p) => {
           await ipponButton(p, 'aka', 'M').tap();
-          // The pill must stop claiming "Synced" while the point cannot be
-          // saved; what it settles on instead is recorded, not asserted.
-          await expect(syncState(p)).not.toHaveText('Synced');
-          offlineState = (await syncState(p).innerText()).trim();
+          // The outbox still holds the point while it cannot be saved.
+          await expect.poll(() => unsentCount(p)).toBeGreaterThan(0);
+          unsentOffline = await unsentCount(p);
         },
       });
-      const resynced = await expect(syncState(page)).toHaveText('Synced').then(() => true, () => false);
-      record({ variant: 'V3 interrupt', action: 'Aka M tapped offline', ...offline, stateWhileOffline: offlineState, resynced });
+      const resynced = await settled(page).then(() => true, () => false);
+      record({ variant: 'V3 interrupt', action: 'Aka M tapped offline', ...offline, unsent: unsentOffline, resynced });
       await shot(page, 'bout-2-after-offline');
 
       const armed = await armFinish(page);

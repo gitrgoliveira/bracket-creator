@@ -44,16 +44,15 @@ async function flushMicrotasks() { for (let i = 0; i < 30; i++) await Promise.re
 async function tick(ms = 0) { await vi.advanceTimersByTimeAsync(ms); await flushMicrotasks(); }
 
 describe('isFinishedResultWrite (R5)', () => {
-    it('names a finished score, a decision, an override and a representative bout change', () => {
+    it('names a finished score, a decision and a representative bout change', () => {
         expect(isFinishedResultWrite({ kind: 'score', terminal: true })).toBe(true);
         expect(isFinishedResultWrite({ kind: 'decision', terminal: true })).toBe(true);
-        expect(isFinishedResultWrite({ kind: 'override', terminal: true })).toBe(true);
         expect(isFinishedResultWrite({ kind: 'daihyosen', terminal: true })).toBe(true);
     });
     it('does not name a running score write, a tap or any other change', () => {
         expect(isFinishedResultWrite({ kind: 'score', terminal: false })).toBe(false);
         expect(isFinishedResultWrite({ kind: 'evt', terminal: false })).toBe(false);
-        for (const kind of ['court', 'time', 'lineup', 'reopen', 'requeue', 'revert', 'kachinuki', 'member', 'reinstate']) {
+        for (const kind of ['override', 'court', 'time', 'lineup', 'reopen', 'requeue', 'revert', 'kachinuki', 'member', 'reinstate']) {
             expect(isFinishedResultWrite({ kind, terminal: true })).toBe(false);
         }
     });

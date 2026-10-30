@@ -15,10 +15,6 @@
 // where `msg` is the server-reported `error` field if present, else a
 // per-method default string. Callers decide whether to .catch and toast.
 //
-// overrideBracketWinner is the exception: it returns { applied } parsed from
-// the 200 body (mp-y3nk), so the caller can tell a landed write from a stale
-// reconnect replay the server dropped.
-//
 // Empty-body methods (overridePoolRanks,
 // updateMatchTime, moveMatchCourt,
 // deleteCompetition) deliberately return `true`
@@ -170,13 +166,14 @@ function _reopenRefusal(err) {
     return e;
 }
 
-// reopenBody is the optional half of both reopen requests: the audit reason
-// and the downstream confirmation, each sent only when set, so the one-tap
-// kachinuki Reopen still posts {} exactly as before.
-function reopenBody(reason, force) {
+// reopenBody is the optional half of both reopen requests: the audit reason,
+// the downstream confirmation, and the court-busy override, each sent only
+// when set, so the one-tap kachinuki Reopen still posts {} exactly as before.
+function reopenBody(reason, force, forceCourt) {
     const body = {};
     if (reason) body.reason = reason;
     if (force) body.forceDownstreamReopen = true;
+    if (forceCourt) body.forceCourt = true;
     return body;
 }
 
@@ -202,6 +199,11 @@ function normalizeViewerCompItem(item) {
         // rosterFullyLoaded, so this never makes an existing client quieter
         // than it was.
         rosterAvailable: item.rosterAvailable,
+        // The server's per-competition slot minutes (handlers_viewer.go
+        // stampSlotMinutes), also siblings of config. court_pace.jsx reads
+        // them off the flattened competition; dropped here, no pace projects.
+        slotMinutes: item.slotMinutes,
+        knockoutSlotMinutes: item.knockoutSlotMinutes,
         // bc-pnum: the members map is ALSO a sibling of config on the wire,
         // where it is called `teamMembers` (present only for a team
         // competition, keyed by the team's participant id --
@@ -358,7 +360,7 @@ function _replayRefusal(body, fallback) {
 // ---------------------------------------------------------------------------
 // mp-y3nk: server-clock offset for timestamp reconciliation.
 //
-// Writes (score / override-winner) are stamped in SERVER-RELATIVE time so an
+// Writes (score / decisions) are stamped in SERVER-RELATIVE time so an
 // offline court's changes reconcile against other courts by ONE clock, not each
 // tablet's local clock. The offset is learned from GET /api/time and refreshed
 // on reconnect. Until the first successful learn, the offset is 0 (writes carry
@@ -477,7 +479,7 @@ function _perfNow() {
 //
 // What "as seen" is belongs to the caller: the match the operator acted on
 // (`match.modifiedAt` for a tap, `seenModifiedAt` in a decision's body or
-// a representative bout's or a hand-set winner's argument, or on a score
+// a representative bout's argument or a score
 // write's patch), never the match at the send: a tap made before another
 // device finished the match stays older than that finish (operator ruling
 // 2026-09-27). 0 or absent: no floor.
@@ -658,13 +660,13 @@ const START_CHECK_NOT_FOUND_MESSAGE = "This match is no longer in the draw. Chec
 
 // bc-stpf: the outbox writes that can change what a start check judges: a
 // match's status (a score write, which a finish or a start is, a decision, a
-// representative bout, a kachinuki bout, a reopen, a send back, a requeue, an
-// override of a winner), its court, its sides (a pool-rank override seats
-// other competitors in the knockout), or a competitor's bar (a decision, a
-// reinstatement). API.startCheckUntrusted counts only these.
+// representative bout, a kachinuki bout, a reopen, a send back, a requeue),
+// its court, its sides (a pool-rank override seats other competitors in the
+// knockout), or a competitor's bar (a decision, a reinstatement).
+// API.startCheckUntrusted counts only these.
 const START_CHECK_WRITE_KINDS = new Set([
     'score', 'decision', 'daihyosen', 'kachinuki', 'reopen',
-    'revert', 'requeue', 'court', 'override', 'reinstate', 'pool-ranks',
+    'revert', 'requeue', 'court', 'reinstate', 'pool-ranks',
 ]);
 
 const _matchRevCounters = new Map(); // compID:matchID → int
@@ -693,7 +695,7 @@ const _revSession = (typeof crypto !== 'undefined' && crypto.randomUUID)
 //
 // One entry per write, each under its own key: `${base}${QUEUE_ENTRY_SEP}${id}`,
 // where the BASE is the match the write is about (`compID:matchID` for a score
-// or a decision, `override:…`, `lineup:…`). Each flush pass sends the entries
+// or a decision, `lineup:…`). Each flush pass sends the entries
 // in the order of the stamp they carry (_entryStamp), and each entry on its
 // own: one that does not land (offline, a 5xx that keeps coming back) holds
 // back nothing after it, and a new write goes straight to the server whatever
@@ -725,8 +727,8 @@ const _revSession = (typeof crypto !== 'undefined' && crypto.randomUUID)
 // with additional descriptor fields: kind, terminal, method, url.
 //
 // Sync-status state is published via _syncStatus / _syncListeners so the UI
-// (SyncStatusPill) can render synced / syncing / offline without coupling to
-// any Preact component tree.
+// (the topbar's held-writes count, the editors' pending banners) can follow
+// synced / syncing / offline without coupling to any Preact component tree.
 // ---------------------------------------------------------------------------
 
 /**
@@ -734,7 +736,7 @@ const _revSession = (typeof crypto !== 'undefined' && crypto.randomUUID)
  */
 
 /**
- * @typedef {'score'|'decision'|'lineup'|'override'} WriteKind
+ * @typedef {'score'|'decision'|'lineup'} WriteKind
  */
 
 /**
@@ -807,7 +809,7 @@ const QUEUE_STORAGE_KEY = 'bc_write_queue_v2';
 const LEGACY_QUEUE_STORAGE_KEY = 'bc_write_queue';
 
 // Defense-in-depth allowlist for outbox replay. Every entry the queue holds (a
-// score write, a decision, a tap, a reopen, a send back, an override, a court
+// score write, a decision, a tap, a reopen, a send back, a court
 // move, a time change, a lineup save or removal, a member add, rename or
 // cleared name, a reinstatement, a chusen's order, a representative bout's add
 // or remove, a kachinuki bout's removal) is a PUT, POST or DELETE to
@@ -859,8 +861,7 @@ function _isAllowedTerminalRequest(method, url) {
 // is addressed to one open editor (its subscribers filter on compID/matchID)
 // and is therefore useless for the two cases that matter here: a drop detected
 // during rehydration, when no editor has mounted yet, and a drop on a match the
-// operator is not currently looking at. Same reasoning that split
-// _notifyBracketResync out rather than overloading the terminal-fail channel.
+// operator is not currently looking at.
 //
 // Alerts raised before any listener exists are BUFFERED and replayed to the
 // first subscriber. This is load-bearing, not a nicety: the rehydrate IIFE runs
@@ -1283,7 +1284,7 @@ function _enqueuedAfter(d, at) {
 const QUEUE_ENTRY_SEP = '\u001f';
 let _entrySeq = 0;
 
-// _baseOf: the match (or lineup, or override target) a queue key is about.
+// _baseOf: the match (or lineup) a queue key is about.
 function _baseOf(key) {
     const i = typeof key === 'string' ? key.indexOf(QUEUE_ENTRY_SEP) : -1;
     return i < 0 ? key : key.slice(0, i);
@@ -1526,7 +1527,7 @@ function _overlayPendingFields(comp, compID) {
 
 // ---------------------------------------------------------------------------
 // bc-evts stage 3: the outbox. EVERY rule-bound write (a tap, a Finish, a
-// decision, a reopen, a send back, override-winner, the representative bout's
+// decision, a reopen, a send back, the representative bout's
 // add and remove, a kachinuki bout removal) is put in the persisted queue in
 // the SAME TICK it is made and the caller carries on at once: nothing in front
 // of an editor waits on the network (operator rule, 2026-10-16). Each match's
@@ -2081,7 +2082,7 @@ function _isFollowed(key) {
 // (a later Finish, or the editor's Retry re-sending the queued one, is the
 // same result restated, not a second one). A LINEUP save joins the queued save
 // of the same lineup (the base names the lineup): _placeWrite makes the one
-// entry say what both changed. A decision or an override is never replaced,
+// entry say what both changed. A decision is never replaced,
 // and nothing coalesces across one, nor into an entry already being sent.
 function _coalesceTarget(base, descriptor) {
     if (!descriptor) return null;
@@ -2296,9 +2297,7 @@ function _tellRefusal(info, alert) {
 // both: _terminalFailListeners reaches the editor open on this match (so its
 // pending banner resolves to "not saved" instead of clearing to look saved),
 // while _notifyQueueAlert reaches an operator who has already moved to the next
-// court. NOT _notifyBracketResync, whose whole point is that an override
-// supersede is BENIGN: an override is an assertion about a feeder the server may
-// safely ignore, whereas this is the operator's own entered result being dropped.
+// court.
 //
 // The `advice` is the load-bearing part and is why this is not just another
 // terminal failure. Every other write failure ends in "re-enter the result", and
@@ -2347,23 +2346,6 @@ function _heldForClosedMatch(body) {
 function _notifyScoreSuperseded(compID, matchID, body) {
     if (_notifyScoreSupersededEditor(compID, matchID, body)) return;
     _notifyScoreSupersededAlert(1, compID, matchID, _heldForClosedMatch(body));
-}
-
-// Bracket-resync channel. When a queued override-winner assertion the server
-// LWW-dropped returns 200 {"applied": false} and emits NO SSE broadcast, any
-// optimistic local bracket advance from it is stale. This channel asks listeners
-// (e.g. AdminShiaijo) to refetch. This is a BENIGN supersede: do NOT reuse
-// _terminalFailListeners, which surfaces a "not saved" ERROR state. Payload:
-// {compID, matchID, reason}.
-const _bracketResyncListeners = new Set();
-function subscribeBracketResync(fn) {
-    _bracketResyncListeners.add(fn);
-    return () => _bracketResyncListeners.delete(fn);
-}
-function _notifyBracketResync(info) {
-    for (const fn of _bracketResyncListeners) {
-        try { fn(info); } catch (_e) { /* swallow */ }
-    }
 }
 
 // Both derived from the queue itself rather than kept as separate flags: a
@@ -3208,11 +3190,6 @@ function _markWaitersHeld() {
 // to return.
 function _doorValue(d, body) {
     switch (d && d.kind) {
-        case 'override':
-            return {
-                applied: !!body && body.applied !== false, reason: body && body.reason, message: body && body.message,
-                ...(body && Array.isArray(body.heldGroups) ? { heldGroups: body.heldGroups } : {}),
-            };
         case 'revert': return true;
         case 'lineup-remove': return true;
         case 'kachinuki': return (body && body.result) ?? body;
@@ -3240,8 +3217,6 @@ function _doorRefusal(d, status, body) {
         case 'decision':
             if (ineligible) return _reasonHumanError(b, 'Failed to record decision');
             return _downstreamRefusalError(b) || new Error(b.error || 'Failed to record decision');
-        case 'override':
-            return _downstreamRefusalError(b) || new Error(b.error || 'Failed to override winner');
         case 'reopen':
         case 'requeue':
             return _reopenRefusal(b);
@@ -3410,17 +3385,9 @@ async function _sendEntry(key, descriptor, pass) {
                     // bc-lww1: the operator's own entry, kept in the match's
                     // history, not applied. Said by the editor open on the
                     // match, else counted into the pass's one superseded alert.
-                    let shown = false;
-                    if (kind === 'override') {
-                        // A feeder-winner ASSERTION the server held: any optimistic
-                        // local advance from it is stale, so ask listeners to
-                        // refetch; told in the pass's one superseded alert.
-                        _notifyBracketResync({ compID, matchID, reason: 'lww_dropped' });
-                    } else {
-                        shown = _notifyScoreSupersededEditor(compID, matchID, body);
-                    }
+                    const shown = _notifyScoreSupersededEditor(compID, matchID, body);
                     if (!shown) {
-                        if (kind !== 'override' && _heldForClosedMatch(body)) pass.matchClosed = true;
+                        if (_heldForClosedMatch(body)) pass.matchClosed = true;
                         pass.superseded++;
                         pass.lastSuperseded = { compID, matchID };
                     }
@@ -3858,10 +3825,11 @@ let _lastEnqueuePersisted = true;
 // _placeWrite: the key a new write about `base` goes under. When it coalesces
 // (_coalesceTarget), it takes the queued entry's key and carries what that
 // write said that a later write must not lose: the groups a score write
-// changed (_claimingQueuedGroups) and, for a running write, a pending
-// kachinukiBoutFinal (enqueueRunningWrite's comment says why); a lineup save
-// the positions the queued save changed (joinQueuedLineupSave). Otherwise it is
-// a new entry, after the others in replay order.
+// changed (_claimingQueuedGroups), a confirmed forceCourt if either carried it,
+// and, for a running write, a pending kachinukiBoutFinal (enqueueRunningWrite's
+// comment says why); a lineup save the positions the queued save changed
+// (joinQueuedLineupSave). Otherwise it is a new entry, after the others in
+// replay order.
 function _placeWrite(base, descriptor) {
     // A tap is never merged; its key names its event id.
     if (descriptor.kind === 'evt') return `${base}${QUEUE_ENTRY_SEP}evt:${descriptor.payload.id}`;
@@ -3879,6 +3847,9 @@ function _placeWrite(base, descriptor) {
     if (!descriptor.terminal && prev.payload && prev.payload.kachinukiBoutFinal
         && payload && !payload.kachinukiBoutFinal) {
         payload = { ...payload, kachinukiBoutFinal: true };
+    }
+    if ((prev.payload && prev.payload.forceCourt) || (descriptor.payload && descriptor.payload.forceCourt)) {
+        payload = { ...payload, forceCourt: true };
     }
     // Whatever the replaced write had to follow, this one follows too.
     for (const k of _afterKeys(prev)) _addAfter(descriptor, k);
@@ -3959,10 +3930,10 @@ function _withoutDownstreamConfirmation(payload) {
  * match's last queued write when that is a score write (running, or a Finish
  * the editor's Retry is re-sending), claiming its groups (_coalesceTarget,
  * _placeWrite); a lineup save joins the queued save of its lineup; every
- * other terminal write (a decision, an override) is queued after what is there
+ * other terminal write (a decision) is queued after what is there
  * and replays in order. Nothing queued is ever replaced by it otherwise.
  * @param {string} key        - Queue BASE: the match the write is about (use
- *                              _revKey, or the lineup / override base)
+ *                              _revKey, or the lineup base)
  * @param {WriteKind} kind    - 'score' | 'decision' | 'lineup'
  * @param {string} method     - HTTP method ('PUT' | 'POST')
  * @param {string} url        - Same-origin request path (e.g. /api/competitions/…)
@@ -4000,6 +3971,13 @@ function _onStoredQueueChanged(oldRaw, newRaw) {
             const gone = after === null
                 ? _adopted.has(d)
                 : !after.has(k) && before.get(k)?.enqueuedAt === d.enqueuedAt;
+            // An entry whose request this tab has out is settled by that
+            // request's own answer, never as sent by another tab: a refusal
+            // the other tab drew (a court_busy its host cannot ask about)
+            // still reaches the caller here, whose host may ask (Start
+            // anyway) or say it. A sign-out's wipe (after === null) still
+            // takes it at once.
+            if (gone && after !== null && _inFlight.has(d)) continue;
             if (gone && _dequeue(k, d)) changed = true;
         }
     } finally {
@@ -5437,9 +5415,27 @@ const API = {
             }
         };
     },
+    /**
+     * Record a match score or status change.
+     *
+     * The patch passed as `result` may carry request-only `forceCourt: true`:
+     * an organiser's confirmed start on a busy shiaijo; sent on the payload,
+     * kept through the outbox, merged into a write that takes a queued one's
+     * place, never broadcast to a display.
+     *
+     * @param {string} compID
+     * @param {string} matchID
+     * @param {object} result
+     * @param {string} password
+     * @param {object} [match]
+     * @param {object} [opts]
+     */
     async recordScore(compID, matchID, result, password, match, opts = {}) {
         _noteShownMatch(compID, match);
         const payload = toBackendMatchResult(result, match || result);
+        if (result && result.forceCourt) {
+            payload.forceCourt = true;
+        }
         // mp-y3nk: stamp in server-relative time for last-write-wins reconciliation.
         // Stamped when it is made (a running match's scoring is taps, each
         // stamped at its own tap, so no score write carries an older edit).
@@ -5476,13 +5472,13 @@ const API = {
         // as undefined would still wipe the display's copy in the merge), and
         // states the flag counts the match it starts already holds: the
         // display reads a result naming a status that omits a count as 0
-        // (mergeMatchPatch), which turned a kept 2-1 into 0-0. `startOnly`
-        // itself is request-only and stays off the display's copy.
+        // (mergeMatchPatch), which turned a kept 2-1 into 0-0. `startOnly` and
+        // `forceCourt` are request-only and stay off the display's copy.
         const _broadcastPatch = (fields) => {
             const {
                 rev: _r, revSession: _rs, changed: _ch,
                 writeId: _w, basis: _b, session: _s, forceDownstreamReopen: _f,
-                startOnly, ...rest
+                startOnly, forceCourt: _fc, ...rest
             } = fields || {};
             if (startOnly) {
                 for (const k of START_BROADCAST_DROPS) delete rest[k];
@@ -5616,30 +5612,6 @@ const API = {
             url: `/api/competitions/${compID}/pools/${encodeURIComponent(poolID)}/override-rank`,
             payload, password, onRefusal: opts && opts.onRefusal,
             base: _poolRanksBase(compID),
-        });
-    },
-    // bc-kcdg: forceDownstreamReopen is the operator's confirmed override of a
-    // 409 downstream_knockout_played refusal (this match's later round already
-    // played on the current winner), threaded through exactly as recordScore's
-    // payload carries it, so a confirmed retry here also reopens the blocking
-    // match(es) for re-entry rather than silently repainting them.
-    // seenModifiedAt (optional): the match's stamp as this device last had
-    // it, which the stamp is never older than (bc-hlck).
-    async overrideBracketWinner(compID, matchID, winnerName, password, forceDownstreamReopen, seenModifiedAt, opts = {}) {
-        const url = `/api/competitions/${compID}/matches/${matchID}/override-winner`;
-        // mp-y3nk: stamp in server-relative time, never older than the feeder
-        // it names (bc-hlck).
-        const payload = _stampPayload({ winnerName }, _serverNowMs(), seenModifiedAt);
-        if (forceDownstreamReopen) payload.forceDownstreamReopen = true;
-        // bc-evts: an operator's feeder-winner assertion (the "Run now"
-        // recovery) is the outbox's like every rule-bound write, on its MATCH's
-        // base (it was `override:…`; an entry an older build queued there
-        // replays unchanged, F3). `settled` resolves `{ applied, reason,
-        // message, heldGroups? }`; a held assertion asks the bracket to resync
-        // (_sendEntry), so a caller may advance its local bracket at once.
-        return _outboxWrite({
-            kind: 'override', compID, matchID, method: 'PUT', url, payload, password,
-            seen: opts && opts.seen, onRefusal: opts && opts.onRefusal,
         });
     },
     async updateMatchTime(compID, matchID, scheduledAt, password, opts = {}) {
@@ -5826,7 +5798,8 @@ const API = {
     // be reopened without any reason, and nothing is gated on that). Clear
     // withdrawal and reopen is one tap with no reason too; opts.reason stays
     // for any caller that has one to record. opts.force is the operator's confirmation after a
-    // downstream_knockout_played refusal. The body stays a JSON object (never
+    // downstream_knockout_played refusal. opts.forceCourt is sent in the body beside reason
+    // for an organiser's confirmed reopen on a busy shiaijo. The body stays a JSON object (never
     // absent) so a handler that binds JSON still parses the request.
     //
     // 400 = neither kachinuki nor withdrawal-decided; 409 = not completed / a
@@ -5846,13 +5819,26 @@ const API = {
     // conflict, and a busy court would be a dead end (kachinuki reopen is the
     // ONLY way to fix a bout log). The server broadcasts match_updated on
     // success.
-    async reopenMatch(compID, matchID, password, { reason = "", force = false, seen, onRefusal } = {}) {
+    /**
+     * Reopen a completed match.
+     *
+     * @param {string} compID
+     * @param {string} matchID
+     * @param {string} password
+     * @param {object} [opts]
+     * @param {string} [opts.reason=""]
+     * @param {boolean} [opts.force=false]
+     * @param {boolean} [opts.forceCourt=false] - sent in the body beside reason for an organiser's confirmed reopen on a busy shiaijo
+     * @param {*} [opts.seen]
+     * @param {Function} [opts.onRefusal]
+     */
+    async reopenMatch(compID, matchID, password, { reason = "", force = false, forceCourt = false, seen, onRefusal } = {}) {
         // bc-evts: the outbox's; `settled` resolves the server body or rejects
         // with reopenFailureError's error (court_busy, downstream, ...).
         return _outboxWrite({
             kind: 'reopen', compID, matchID, method: 'POST',
             url: `/api/competitions/${compID}/matches/${matchID}/reopen`,
-            payload: reopenBody(reason, force), password, seen, onRefusal,
+            payload: reopenBody(reason, force, forceCourt), password, seen, onRefusal,
         });
     },
     // mp-gmcg (review A4): atomically requeue the match holding the court AND
@@ -6672,9 +6658,9 @@ const API = {
     },
 
     // Every write held on this device, in the order it replays, for the admin
-    // topbar's held-writes list (HeldWritesPanel, admin_shell.jsx). It is where
+    // topbar's held-writes list (HeldWritesPanel, held_writes_panel.jsx). It is where
     // a held write with no editor to discard it from is reached: a running
-    // autosave, a lineup save or a hand-set winner the server keeps refusing.
+    // autosave or a lineup save the server keeps refusing.
     // Each item names what it is (kind, terminal; for a lineup its team and
     // round), whether it keeps failing, and the key discardHeldWrite takes. A
     // write still sending, or only waiting for the connection, is listed
@@ -6923,7 +6909,7 @@ const API = {
 };
 
 export {
-    API, START_CHECK_TIMEOUT_MS, subscribeSyncStatus, subscribeTerminalWriteFailed, subscribeBracketResync, subscribeQueueAlert,
+    API, START_CHECK_TIMEOUT_MS, subscribeSyncStatus, subscribeTerminalWriteFailed, subscribeQueueAlert,
     subscribeUnsentWrites,
     enqueueRunningWrite,
     writeDidNotLand, writeWasSuperseded, writeWasRefusedForClock,
@@ -6960,9 +6946,6 @@ if (typeof window !== 'undefined') {
     // import-only (never script-tagged), so even a script-tagged surface can
     // import it without the double-module-eval hazard the mirrors existed to
     // dodge.
-    // mp-y3nk: bracket-resync pub/sub: signals AdminShiaijo to refetch when a
-    // queued override the server LWW-dropped leaves stale optimistic bracket state.
-    window.subscribeBracketResync = subscribeBracketResync;
     // mp-gpra: reconnectEvents and hasPendingTerminalWrite are on window.API
     // (via the API object above): no separate window assignments needed.
 }

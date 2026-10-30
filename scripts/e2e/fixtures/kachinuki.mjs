@@ -81,7 +81,6 @@ export const enchoButton = (page) => editor(page).getByTestId('kachinuki-encho-b
 export const enchoUndoButton = (page) => editor(page).getByTestId('kachinuki-encho-undo-button');
 export const removeBoutButton = (page) => editor(page).getByTestId('kachinuki-remove-bout-button');
 export const reopenButton = (page) => page.getByTestId('kachinuki-reopen-button');
-export const syncPill = (page) => T.syncPill(editor(page));
 
 // The two fighters on a bout row. The live row carries a name box per side;
 // a fought row carries static text. The box shows the name as its value

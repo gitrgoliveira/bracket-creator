@@ -65,7 +65,7 @@ func RegisterDisplayHandlers(r *gin.RouterGroup, store *state.Store) {
 		// overlay must be able to distinguish "nothing running" from "backend
 		// broken" (same contract as the sibling /matches feed). Per-competition
 		// read faults below follow the same soft-degrade contract as
-		// buildViewerCompetitionPayload (skip the broken comp, log the cause)
+		// loadViewerCompetition (skip the broken comp, log the cause)
 		// and use the same log.Printf mechanism so the operator greps one
 		// format for every soft-degrade breadcrumb.
 		ids, err := store.ListCompetitions()
@@ -283,7 +283,7 @@ func resolveCourt(c *gin.Context, store *state.Store) (string, bool) {
 // see courtMatchSidesReal) physically placed on the court. A preview bracket
 // (mixed-comp placeholder structure) is skipped, it is read-only and never
 // played, mirroring the aggregate viewer's preview strip. Pure (no store reads)
-// so buildViewerCompetitionPayload can gate the court feed off the same
+// so loadViewerCompetition can gate the court feed off the same
 // poolMatches/bracket it already loaded, without a second read.
 func matchesPresentOnCourt(poolMatches []state.MatchResult, bracket *state.Bracket, court string) bool {
 	for _, m := range poolMatches {

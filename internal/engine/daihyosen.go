@@ -14,6 +14,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
@@ -300,7 +301,7 @@ func (e *Engine) InjectPoolDaihyosenMatches(compID string) ([]state.MatchResult,
 		if tournErr != nil {
 			return tournErr
 		}
-		return savePoolMatchesAndKnockoutTimes(tx, compID, appendWithSlots(allMatches, injected, comp, tournament), comp, tournament)
+		return savePoolMatchesAndKnockoutTimes(tx, compID, appendWithSlots(allMatches, injected, comp, tournament, nil), comp, tournament)
 	})
 	if err != nil {
 		return nil, err
@@ -319,24 +320,51 @@ func (e *Engine) InjectPoolDaihyosenMatches(compID string) ([]state.MatchResult,
 // and gives the new ones schedule slots, keeping every time an operator (or
 // an earlier slotting) already set. Shared by the injections that append
 // tie-break and representative bouts in one read-modify-write.
-func appendWithSlots(allMatches, injected []state.MatchResult, comp *state.Competition, tournament *state.Tournament) []state.MatchResult {
-	allMatches = append(allMatches, injected...)
-	// Snapshot operator-adjusted times first so they survive the
-	// reassignment; only newly injected matches (ScheduledAt == "") should
-	// receive new slots.
-	existingTimes := make(map[string]string, len(allMatches))
+func appendWithSlots(allMatches, injected []state.MatchResult, comp *state.Competition, tournament *state.Tournament, floor map[string]time.Time) []state.MatchResult {
+	// Each court resumes at the planned END of its last stored row, not at a
+	// re-packed layout from its earliest one: a row the organiser re-timed
+	// later keeps the court busy until it ends, so an injected row placed
+	// "earliest + N slots" would sit on top of it. The earliest stored row
+	// already carries the cross-competition floor the draw applied, and the
+	// last row's end is never before it; floor (nil inside a transaction,
+	// which must not read other competitions) can only raise the anchor.
+	perMatch := time.Duration(perMatchElapsedMinutes(comp, tournament, false /*isKnockout*/)) * time.Minute
+	courtStart := make(map[string]time.Time)
 	for _, m := range allMatches {
+		if m.ScheduledAt == "" || m.Court == "" {
+			continue
+		}
+		t, err := time.Parse(scheduleClockLayout, m.ScheduledAt)
+		if err != nil {
+			continue
+		}
+		end := t.Add(perMatch)
+		if cur, ok := courtStart[m.Court]; !ok || end.After(cur) {
+			courtStart[m.Court] = end
+		}
+	}
+	for court, t := range floor {
+		if cur, ok := courtStart[court]; !ok || t.After(cur) {
+			courtStart[court] = t
+		}
+	}
+
+	// Only the injected rows take new slots; one that already carries a time
+	// keeps it.
+	existingTimes := make(map[string]string, len(injected))
+	for _, m := range injected {
 		if m.ScheduledAt != "" {
 			existingTimes[m.ID] = m.ScheduledAt
 		}
 	}
-	allMatches, _ = assignPoolMatchSlots(allMatches, comp, tournament)
-	for i := range allMatches {
-		if t, ok := existingTimes[allMatches[i].ID]; ok {
-			allMatches[i].ScheduledAt = t
+	slotted := append([]state.MatchResult(nil), injected...)
+	slotted, _ = assignPoolMatchSlotsFrom(slotted, comp, tournament, courtStart)
+	for i := range slotted {
+		if t, ok := existingTimes[slotted[i].ID]; ok {
+			slotted[i].ScheduledAt = t
 		}
 	}
-	return allMatches
+	return append(allMatches, slotted...)
 }
 
 // ComputeTeamSummary aggregates SubMatchResult entries into TeamSummary

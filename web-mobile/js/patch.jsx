@@ -24,11 +24,9 @@
 // a sibling competition's match (the caller is expected to pre-filter
 // by competitionId, but defensive identity-preservation here is cheap).
 //
-// FR-025 hook (queue-position recompute): listeners that need to react
-// to status transitions (running/scheduled → completed) can compose with
-// applyPatch by reading the merged result and recomputing derived
-// fields. Slice 1's T049 will add a queue-position invalidator that
-// runs on the same event before applyPatch returns.
+// Queue positions (FR-025): a patch that moves a match into or out of a
+// court queue renumbers the competition's own matches on that court before
+// applyPatch returns (shiftQueuePositions, below).
 
 // Direct ESM import of the real merge helper instead of the previous
 // window.mergeMatchPatch / spread-fallback dance. The spread fallback
@@ -40,6 +38,7 @@
 import { mergeMatchPatch as _mergeMatchPatch, olderByScoreVersion } from './data.jsx';
 import { normalizeMatch, buildPlayerMap } from './api_serializers.jsx';
 import { isBarredMatch } from './ineligible_match.jsx';
+import { compareCourtQueue, courtQueueEntriesOf, withCourtQueuePositions } from './court_queue.jsx';
 
 // bc-cse: _mergeMatchPatchKeepIneligible, which used to live here, is gone.
 // It defended `ineligibleSides` against an explicit `null` in the patch, but
@@ -49,206 +48,93 @@ import { isBarredMatch } from './ineligible_match.jsx';
 // `{...existing, ...patch}` spread `_mergeMatchPatch` performs unchanged, so
 // the wrapper was defending against a payload the server can never send.
 
-// statusSortOrder mirrors annotateBracketQueuePositions in
-// internal/mobileapp/handlers_match.go and the per-court sort in
-// ScheduleViewer (viewer.jsx). Running ranks ahead of scheduled, which
-// ranks ahead of completed/everything-else.
-const statusSortOrder = (s) => (s === "running" ? 0 : s === "scheduled" ? 1 : 2);
+// Positions are the server's court-wide numbers (court_queue.jsx), counted
+// across every competition on the court. A patch holds ONE competition, so it
+// keeps the server's numbers and moves only this competition's own matches on
+// the court the patched match leaves or enters, never giving two of them the
+// same number:
+//   - a match that LEAVES the queue (no longer scheduled, or now barred) reads
+//     0, and each of its siblings on that court numbered after it moves down one;
+//   - a match that ENTERS it (now scheduled and unbarred) takes the place after
+//     the last sibling on its court that sorts before it by the court-queue
+//     order (compareCourtQueue), else the place of the first sibling that sorts
+//     after it, and the siblings from that place move up one; with no numbered
+//     sibling on the court it takes 1 unless a queued sibling sorts before it
+//     (only scheduled, unbarred matches count, as on the server), else it stays
+//     0 for the refetch;
+//   - a court or time move of a match still queued is a leave, then an enter.
+// Another competition's matches on the court keep their numbers, so the host's
+// refetch stays the source of truth; a holder of every competition re-stamps
+// the court-wide numbers instead (applyPatchToCompetitions).
+const isQueued = (m) => !!m && m.status === 'scheduled' && !isBarredMatch(m);
 
-// Stable per-court ordering: gather pointers to the original entries,
-// sort them by (status priority, scheduledAt, original index) without
-// mutating the input array. Returns a Map of court → sorted entry
-// arrays; caller iterates per-court and increments a counter to derive
-// queue positions.
-function _orderByCourtKey(entries) {
-    // `entries` is [{ idx, m, court }]; we sort within each court so
-    // the per-court counter increments in viewer-visible order.
-    const byCourt = new Map();
-    for (const e of entries) {
-        const arr = byCourt.get(e.court) || [];
-        arr.push(e);
-        byCourt.set(e.court, arr);
+function shiftQueuePositions(comp, changes) {
+    const entries = courtQueueEntriesOf(comp);
+    if (entries.length === 0) return comp;
+    const entryOf = new Map(entries.map((e) => [e.match, e]));
+    const pos = new Map(entries.map((e) => [e, e.match.queuePosition || 0]));
+    // The court each number is held on: a changed match holds its old one on
+    // its old court until it leaves.
+    const heldOn = new Map(entries.map((e) => [e, e.court]));
+    const changed = [];
+    for (const { before, after } of changes) {
+        const e = entryOf.get(after);
+        if (!e) continue;
+        pos.set(e, isQueued(before) ? (before.queuePosition || 0) : 0);
+        heldOn.set(e, before.court || "");
+        changed.push(e);
     }
-    for (const arr of byCourt.values()) {
-        arr.sort((a, b) => {
-            const oa = statusSortOrder(a.m.status);
-            const ob = statusSortOrder(b.m.status);
-            if (oa !== ob) return oa - ob;
-            const sa = a.m.scheduledAt || "99:99";
-            const sb = b.m.scheduledAt || "99:99";
-            if (sa !== sb) return sa < sb ? -1 : 1;
-            return a.idx - b.idx;
-        });
-    }
-    return byCourt;
-}
-
-// Recompute queuePosition on poolMatches per court after any SSE patch
-// that could invalidate the queue. The backend recomputes server-side
-// on the next GET (see internal/state/match.go), but SSE patches only
-// carry the single updated match: without this client-side step the
-// UI would show stale "N before yours" labels until the next viewer
-// refresh. FR-025, R3.
-//
-// Triggered by applyPatch's `isScheduleAffecting` on any change that
-// affects the per-court queue:
-//   - status transition into or out of `scheduled` (completed, running,
-//     forfeit, kiken, and the admin-correction reverse direction)
-//   - court move while still scheduled
-//   - scheduledAt move while still scheduled
-//
-// Algorithm mirrors annotateQueuePositions in handlers_match.go (which
-// delegates to state.DeriveQueuePositions): gather per-court entries,
-// sort by (status priority, scheduledAt, original index) so the counter
-// increments in viewer-display order, assign 1, 2, 3, … to scheduled
-// matches and 0 to everything else.
-//
-// Touches only matches whose existing queuePosition differs from the
-// recomputed value, preserving object identity for unaffected matches
-// (matters for React.memo on VSchedItem / TWMatch).
-function recomputeQueuePositions(matches) {
-    if (!matches || matches.length === 0) return matches;
-
-    // Build per-court ordered buckets and derive positions unconditionally:
-    // even when no matches are scheduled: because we also need to
-    // clear stale non-zero queuePosition values on matches that just
-    // transitioned off `scheduled` (the last scheduled match becoming
-    // running/completed must drop its "Next up" label to 0).
-    // _mergeMatchPatch preserves fields not in the patch, so a stale
-    // qp would linger on the transitioned match until the next GET
-    // refresh otherwise. The touched-tracking below still preserves
-    // identity when nothing actually changes (e.g. all qps already 0).
-    const entries = matches.map((m, idx) => ({ idx, m, court: m.court || "" }));
-    const byCourt = _orderByCourtKey(entries);
-    const newPositions = Array.from({ length: matches.length }, () => 0);
-    for (const bucket of byCourt.values()) {
-        let counter = 0;
-        for (const e of bucket) {
-            // A barred match (ineligible_match.jsx) cannot be fought as
-            // scheduled: it holds position 0 and is skipped by the counter,
-            // so later matches move up to take the slot it would have held.
-            if (e.m.status === "scheduled" && !isBarredMatch(e.m)) {
-                counter++;
-                newPositions[e.idx] = counter;
-            }
+    // Every change leaves first, so none still to enter holds a stale number.
+    for (const e of changed) {
+        const p = pos.get(e);
+        const court = heldOn.get(e);
+        pos.set(e, 0);
+        heldOn.set(e, e.court);
+        if (p === 0) continue;
+        for (const [o, q] of pos) {
+            if (heldOn.get(o) === court && q > p) pos.set(o, q - 1);
         }
     }
-
-    let touched = false;
-    const next = matches.map((m, idx) => {
-        const pos = newPositions[idx];
-        if ((m.queuePosition || 0) !== pos) {
-            touched = true;
-            return { ...m, queuePosition: pos };
+    const entering = changed.filter((e) => isQueued(e.match)).sort(compareCourtQueue);
+    for (const e of entering) {
+        const placed = entries.filter((o) => o !== e && pos.get(o) > 0 && heldOn.get(o) === e.court);
+        const earlier = placed.filter((o) => compareCourtQueue(o, e) < 0);
+        let p = 0;
+        if (earlier.length > 0) {
+            p = Math.max(...earlier.map((o) => pos.get(o))) + 1;
+        } else if (placed.length > 0) {
+            p = Math.min(...placed.map((o) => pos.get(o)));
+        } else if (!entries.some((o) => o !== e && o.court === e.court && isQueued(o.match) && compareCourtQueue(o, e) < 0)) {
+            p = 1;
         }
-        return m;
-    });
-    return touched ? next : matches;
-}
-
-// Bracket-variant of recomputeQueuePositions. Mirrors the Go-side
-// annotateBracketQueuePositions in internal/mobileapp/handlers_match.go:
-// per-court entries are sorted by (status priority, scheduledAt) before
-// the counter is incremented, so positions match the order the viewer's
-// ScheduleViewer actually renders rows in: including when a match's
-// scheduledAt or court changed under SSE and storage order no longer
-// reflects display order.
-//
-// FR-025: without this, an SSE patch transitioning a bracket match to
-// completed would leave sibling bracket matches showing stale "N before
-// yours" labels until the jittered fetchCompetitionDetails refresh lands
-// (~500-1000ms later).
-//
-// Returns the original `bracket` reference when nothing needed to change,
-// preserving React identity for memoised bracket components.
-function recomputeBracketQueuePositions(bracket) {
-    if (!bracket || !bracket.rounds || bracket.rounds.length === 0) return bracket;
-    // Run unconditionally: even when no bracket match is currently
-    // scheduled: because we also need to clear stale non-zero
-    // queuePosition values on matches that just transitioned off
-    // `scheduled` (last scheduled bracket match completing must drop
-    // its qp to 0). _mergeMatchPatch preserves fields not in the patch,
-    // so a stale qp would linger otherwise. The per-round touched-
-    // tracking below still preserves identity when nothing changes.
-
-    // Flatten round/position pairs into entries the per-court sorter
-    // can consume. `idx` is a monotonic push-order counter so the
-    // (round, position) traversal order doubles as a stable tie-break
-    // for _orderByCourtKey when status + scheduledAt are equal. No
-    // magic number, no upper-bound assumption on round size.
-    const entries = [];
-    bracket.rounds.forEach((round, ri) => {
-        round.forEach((m, mi) => {
-            entries.push({
-                idx: entries.length,
-                m,
-                court: m.court || "",
-                ri,
-                mi,
-            });
-        });
-    });
-    // The single-3rd bronze match (thirdPlaceMatch) is a SIBLING of bracket.rounds,
-    // not a row in it, but it shares a court with the final and must take part in
-    // that court's queue ordering. The bronze is conventionally played JUST
-    // BEFORE the final (viewer_awards.jsx: "the bronze is normally played
-    // first"). _orderByCourtKey tie-breaks on idx when status+scheduledAt are
-    // equal, and the final is the last-pushed entry (last round's sole match),
-    // so give the bronze idx = finalIdx - 0.5 to slot it immediately before the
-    // final and after the semifinals. Key it "bronze:0" so it can't collide with
-    // any real "ri:mi".
-    if (bracket.thirdPlaceMatch) {
-        const finalIdx = entries.length - 1;
-        entries.push({
-            idx: finalIdx - 0.5,
-            m: bracket.thirdPlaceMatch,
-            court: bracket.thirdPlaceMatch.court || "",
-            ri: "bronze",
-            mi: 0,
-        });
-    }
-    const byCourt = _orderByCourtKey(entries);
-    const positionsByKey = new Map();
-    for (const bucket of byCourt.values()) {
-        let counter = 0;
-        for (const e of bucket) {
-            let pos = 0;
-            // Same barred-skip rule as recomputeQueuePositions above.
-            if (e.m.status === "scheduled" && !isBarredMatch(e.m)) {
-                counter++;
-                pos = counter;
-            }
-            positionsByKey.set(`${e.ri}:${e.mi}`, pos);
+        if (p === 0) continue;
+        for (const o of placed) {
+            if (pos.get(o) >= p) pos.set(o, pos.get(o) + 1);
         }
+        pos.set(e, p);
     }
 
-    let touched = false;
-    const nextRounds = bracket.rounds.map((round, ri) => {
-        let roundTouched = false;
-        const nextRound = round.map((m, mi) => {
-            const pos = positionsByKey.get(`${ri}:${mi}`) || 0;
-            if ((m.queuePosition || 0) !== pos) {
-                roundTouched = true;
-                touched = true;
-                return { ...m, queuePosition: pos };
-            }
-            return m;
-        });
-        return roundTouched ? nextRound : round;
-    });
-    // Write the bronze's recomputed queue position back (keyed "bronze:0").
-    let nextBronze = bracket.thirdPlaceMatch;
-    if (bracket.thirdPlaceMatch) {
-        const pos = positionsByKey.get("bronze:0") || 0;
-        if ((bracket.thirdPlaceMatch.queuePosition || 0) !== pos) {
-            nextBronze = { ...bracket.thirdPlaceMatch, queuePosition: pos };
-            touched = true;
+    // Identity is kept wherever a number does not change (memoised children).
+    const stamp = (m) => {
+        const e = entryOf.get(m);
+        const p = e ? pos.get(e) : (m.queuePosition || 0);
+        return (m.queuePosition || 0) === p ? m : { ...m, queuePosition: p };
+    };
+    const mapKeep = (arr, fn) => {
+        const next = arr.map(fn);
+        return next.some((x, i) => x !== arr[i]) ? next : arr;
+    };
+    const poolMatches = comp.poolMatches ? mapKeep(comp.poolMatches, stamp) : comp.poolMatches;
+    let bracket = comp.bracket;
+    if (bracket) {
+        const rounds = bracket.rounds ? mapKeep(bracket.rounds, (round) => mapKeep(round, stamp)) : bracket.rounds;
+        const bronze = bracket.thirdPlaceMatch ? stamp(bracket.thirdPlaceMatch) : bracket.thirdPlaceMatch;
+        if (rounds !== bracket.rounds || bronze !== bracket.thirdPlaceMatch) {
+            bracket = { ...bracket, rounds, thirdPlaceMatch: bronze };
         }
     }
-    if (!touched) return bracket;
-    const result = { ...bracket, rounds: nextRounds };
-    if (nextBronze !== bracket.thirdPlaceMatch) result.thirdPlaceMatch = nextBronze;
-    return result;
+    if (poolMatches === comp.poolMatches && bracket === comp.bracket) return comp;
+    return { ...comp, poolMatches, bracket };
 }
 
 // T099: re-broadcast competitor_status_updated SSE events as a window-level
@@ -363,6 +249,32 @@ function applyPatchOrdered(prev, event, state, onGap) {
 }
 
 function applyPatch(prev, event) {
+    return patchCompetition(prev, event).next;
+}
+
+// applyPatchToCompetitions patches one competition of a list that holds EVERY
+// competition the court-wide numbers count (the tournament's, a display's
+// tree), and re-stamps those numbers through withCourtQueuePositions when the
+// patch moved a match into or out of a queue. Returns the list unchanged when
+// nothing in it changed.
+function applyPatchToCompetitions(competitions, compId, event, idOf = (c) => c && c.id) {
+    if (!Array.isArray(competitions)) return competitions;
+    let changed = false;
+    let queueMoved = false;
+    const next = competitions.map((c) => {
+        if (idOf(c) !== compId) return c;
+        const res = patchCompetition(c, event);
+        if (res.next !== c) changed = true;
+        if (res.queueMoved) queueMoved = true;
+        return res.next;
+    });
+    if (!changed) return competitions;
+    return queueMoved ? withCourtQueuePositions(next) : next;
+}
+
+// patchCompetition is applyPatch's body: the patched competition, and whether
+// the patch moved a match into or out of a court queue.
+function patchCompetition(prev, event) {
     if (event && event.type === "competitor_status_updated" && event.data) {
         // Fire-and-forget; bail out early so the result/results plumbing
         // below doesn't reject the event for missing `result`.
@@ -375,12 +287,13 @@ function applyPatch(prev, event) {
         // same event via a window listener (see admin_schedule.jsx /
         // app.jsx subscribeToEvents). Return prev unchanged so memoised
         // children don't re-render gratuitously.
-        return prev;
+        return { next: prev, queueMoved: false };
     }
-    if (!prev || !event || !event.data) return prev;
+    const unchanged = { next: prev, queueMoved: false };
+    if (!prev || !event || !event.data) return unchanged;
     const { result, results } = event.data;
     const resultsToApply = results || (result ? [result] : []);
-    if (resultsToApply.length === 0) return prev;
+    if (resultsToApply.length === 0) return unchanged;
 
     // Skip null/primitive/id-less entries before building the lookup: a
     // malformed event (e.g. results:[null], whether from a rogue same-origin
@@ -390,11 +303,11 @@ function applyPatch(prev, event) {
     const resultMap = new Map(
         resultsToApply.filter(r => r && r.id != null).map(r => [r.id, r]),
     );
-    const next = { ...prev };
+    let next = { ...prev };
     let changed = false;
-    // Track whether any pool patch changed a match's scheduled state;
-    // only then is a queue-position recompute meaningful.
-    let needsQueueRecompute = false;
+    // The patched matches that joined or left a court queue, or moved within
+    // one, as {before, after}: shiftQueuePositions renumbers their siblings.
+    const queueChanges = [];
 
     // Built lazily: most events won't hit any of our match IDs (e.g.
     // sibling-competition updates) so we skip the O(participants) scan
@@ -402,98 +315,63 @@ function applyPatch(prev, event) {
     let playerMap;
     const getPlayerMap = () => playerMap ?? (playerMap = buildPlayerMap(prev));
 
-    // Queue positions count *scheduled* matches only, so a recompute
-    // is needed whenever a match's "scheduled-ness" changes: leaving
-    // (→ running / completed / cancelled / forfeit / kiken / …) OR
-    // entering (admin correction reverts a completed match back to
-    // scheduled): and whenever a still-scheduled match's
-    // court/scheduledAt moves so siblings on either side re-rank.
-    const isScheduleAffecting = (prevStatus, nextStatus, prevMatch, nextMatch) => {
-        // Any change in scheduled-ness flips the per-court queue's
-        // membership: either releasing a slot (leaving scheduled) or
-        // claiming one (entering scheduled). Both directions matter.
-        if ((prevStatus === "scheduled") !== (nextStatus === "scheduled")) return true;
-        // Court or scheduledAt move while still scheduled: the
-        // per-court bucket itself changes (or the within-court sort
-        // order does), so siblings on either side need to re-rank.
-        if (prevStatus === "scheduled" && nextStatus === "scheduled") {
+    // A match is in a court queue while it is scheduled and unbarred, so its
+    // place changes when it joins or leaves (a start, a finish, a send back
+    // to the queue, a reopen, a bar recorded or lifted: a patch that carries
+    // ineligibleSides can flip it), and when a queued match moves court or
+    // time, which re-ranks it among its siblings.
+    const isScheduleAffecting = (prevMatch, nextMatch) => {
+        if (isQueued(prevMatch) !== isQueued(nextMatch)) return true;
+        if (isQueued(prevMatch)) {
             if ((prevMatch.court || "") !== (nextMatch.court || "")) return true;
             if ((prevMatch.scheduledAt || "") !== (nextMatch.scheduledAt || "")) return true;
-            // A patch that DOES carry ineligibleSides (the contract only says
-            // one "may" arrive without it) can flip whether this still-
-            // scheduled match is barred. recomputeQueuePositions gives a
-            // barred match position 0 and skips it in the per-court count, so
-            // that flip changes queue membership exactly like leaving/entering
-            // `scheduled` does: siblings on either side must re-rank.
-            if (isBarredMatch(prevMatch) !== isBarredMatch(nextMatch)) return true;
         }
         return false;
     };
+    const patchMatch = (m) => {
+        const update = resultMap.get(m.id);
+        if (!update) return m;
+        changed = true;
+        const merged = normalizeMatch(_mergeMatchPatch(m, update), getPlayerMap());
+        if (isScheduleAffecting(m, merged)) queueChanges.push({ before: m, after: merged });
+        return merged;
+    };
 
     if (next.poolMatches) {
-        next.poolMatches = next.poolMatches.map(m => {
-            const update = resultMap.get(m.id);
-            if (update) {
-                changed = true;
-                const merged = normalizeMatch(_mergeMatchPatch(m, update), getPlayerMap());
-                if (isScheduleAffecting(m.status, merged.status, m, merged)) {
-                    needsQueueRecompute = true;
-                }
-                return merged;
-            }
-            return m;
-        });
-        if (needsQueueRecompute) {
-            next.poolMatches = recomputeQueuePositions(next.poolMatches);
-        }
+        const pool = next.poolMatches.map(patchMatch);
+        if (pool.some((x, i) => x !== next.poolMatches[i])) next.poolMatches = pool;
     }
 
     if (next.bracket && next.bracket.rounds) {
         let bChanged = false;
-        // Track whether any bracket patch was a schedule-affecting
-        // transition; same trigger semantics as the pool branch above.
-        let bracketNeedsQueueRecompute = false;
         const rounds = next.bracket.rounds.map(round =>
             round.map(m => {
-                const update = resultMap.get(m.id);
-                if (update) {
-                    bChanged = true; changed = true;
-                    const merged = normalizeMatch(_mergeMatchPatch(m, update), getPlayerMap());
-                    if (isScheduleAffecting(m.status, merged.status, m, merged)) {
-                        bracketNeedsQueueRecompute = true;
-                    }
-                    return merged;
-                }
-                return m;
+                const merged = patchMatch(m);
+                if (merged !== m) bChanged = true;
+                return merged;
             })
         );
         if (bChanged) {
             next.bracket = { ...next.bracket, rounds };
-            if (bracketNeedsQueueRecompute) {
-                next.bracket = recomputeBracketQueuePositions(next.bracket);
-            }
         }
 
         // The single-3rd bronze match (thirdPlaceMatch) is a SIBLING of
         // bracket.rounds, not a row inside it, so the loop above never sees it.
         // Apply an SSE match_updated for the bronze here (same field-mapping as
         // a round match), else its score stays stale until the background
-        // refetch. Recompute queue positions when its status transitions.
-        if (next.bracket.thirdPlaceMatch) {
-            const bm = next.bracket.thirdPlaceMatch;
-            const update = resultMap.get(bm.id);
-            if (update) {
-                changed = true;
-                const merged = normalizeMatch(_mergeMatchPatch(bm, update), getPlayerMap());
-                next.bracket = { ...next.bracket, thirdPlaceMatch: merged };
-                if (isScheduleAffecting(bm.status, merged.status, bm, merged)) {
-                    next.bracket = recomputeBracketQueuePositions(next.bracket);
-                }
-            }
+        // refetch.
+        const bm = next.bracket.thirdPlaceMatch;
+        if (bm) {
+            const merged = patchMatch(bm);
+            if (merged !== bm) next.bracket = { ...next.bracket, thirdPlaceMatch: merged };
         }
     }
 
-    return changed ? next : prev;
+    if (!changed) return unchanged;
+    // Pool and knockout matches share a court's queue, so they are renumbered
+    // together.
+    if (queueChanges.length > 0) next = shiftQueuePositions(next, queueChanges);
+    return { next, queueMoved: queueChanges.length > 0 };
 }
 
 // isOlderRunningCopy: whether `fetched` is a running match older than a
@@ -594,7 +472,7 @@ function matchInComp(comp, id) {
 }
 
 export {
-    applyPatch, applyPatchOrdered, checkSeqGap, recomputeQueuePositions, recomputeBracketQueuePositions,
+    applyPatch, applyPatchToCompetitions, applyPatchOrdered, checkSeqGap,
     keepNewerMatches, keepNewerDetail, keepNewerCompetitions, keepNewerTournament, isOlderRunningCopy,
     matchInComp,
 };

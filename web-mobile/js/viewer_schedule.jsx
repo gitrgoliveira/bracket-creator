@@ -11,6 +11,8 @@ import { competitorMatchesQuery, matchMentions } from './competitor_search.jsx';
 import { resultRecencyDesc } from './result_recency.jsx';
 import { barredNameMark } from './barred_chip.jsx';
 import { matchShowsScore } from './match_shows_score.jsx';
+import { withCourtQueuePositions } from './court_queue.jsx';
+import { paceDisplayOf, PaceTime } from './court_pace.jsx';
 
 const { useState, useMemo, useRef: useRefV } = React;
 const EmptyState = window.EmptyState;
@@ -304,7 +306,7 @@ export function matchHighlightedBy(m, picked, dojoText) {
   return false;
 }
 
-export function TWMatch({ m, highlight, onClick }) {
+export function TWMatch({ m, highlight, onClick, paceLookup }) {
   // bc-pnum: sameCompetitor, never a bare `winner.id === side.id` (see
   // bracket.jsx's MatchCard for why the naked equality lights both sides
   // once both are id-less). No presence guard: sameCompetitor(null, x) is
@@ -343,6 +345,9 @@ export function TWMatch({ m, highlight, onClick }) {
   // separately because the accent-color styling below keys off qp===1.
   const qp = Number(m.queuePosition);
   const queuePill = (window.queueLabelCompact || localQueueLabelCompact)(m);
+  const compId = m.compId || m.competitionId || "";
+  const matchId = m.id || m.matchId || "";
+  const d = paceDisplayOf(paceLookup, compId, matchId);
   // Render an interactive <button> only when there is a real click handler;
   // otherwise a plain <div> so the row is not focusable and not announced as a
   // button to keyboard / screen-reader users (a no-op button is confusing).
@@ -350,7 +355,9 @@ export function TWMatch({ m, highlight, onClick }) {
   return (
     <Tag className={`tw-match ${m.status === "running" ? "tw-match--running" : ""} ${m.status === "completed" ? "tw-match--done" : ""} ${highlight ? "tw-match--highlight" : ""}`} {...(onClick ? { type: "button", onClick } : {})} style={{ textAlign: "left", border: "none", background: "none", cursor: onClick ? "pointer" : "default" }}>
       <div className="tw-match__meta">
-        <div className="tw-match__time">{m.scheduledAt || "-"}</div>
+        <div className="tw-match__time">
+          <PaceTime display={d} fallback={m.scheduledAt || "-"} />
+        </div>
         <div className="tw-match__phase">{m.phase === "pool" ? poolLabel(m) : m.round}</div>
         {queuePill && (
           <div className="tw-match__queue" style={{ fontSize: 10, fontWeight: 700, color: qp === 1 ? "var(--accent)" : "var(--ink-3)", marginTop: 2 }}>
@@ -395,8 +402,10 @@ export function TWMatch({ m, highlight, onClick }) {
 }
 
 // Tournament-wide schedule (across competitions): grouped by day, then court swimlanes + filter
-export function ScheduleViewer({ tournament, tweaks }) {
-  const allMatches = useMemo(() => tournamentMatches(tournament).filter(hasBothSides), [tournament]);
+export function ScheduleViewer({ tournament, tweaks, paceLookup }) {
+  const comps = useMemo(() => withCourtQueuePositions(tournament?.competitions || []), [tournament?.competitions]);
+  const tourneyWithQueue = useMemo(() => (tournament ? { ...tournament, competitions: comps } : tournament), [tournament, comps]);
+  const allMatches = useMemo(() => tournamentMatches(tourneyWithQueue).filter(hasBothSides), [tourneyWithQueue]);
   const courts = tournament.courts || [];
 
   // mp-xhaa: auto-populate the schedule's `picked` filter from the unified
@@ -548,7 +557,7 @@ export function ScheduleViewer({ tournament, tweaks }) {
                 {list.length === 0 ? (
                   <div style={{ fontSize: 12, color: "var(--ink-3)", padding: "20px 8px", textAlign: "center" }}>No matches</div>
                 ) : list.map((m) => (
-                  <TWMatch key={`${m.compId}:${m.id}`} m={m} highlight={matchHasFilter(m)} onClick={tweaks.onMatchClick ? () => tweaks.onMatchClick(m) : undefined} />
+                  <TWMatch key={`${m.compId}:${m.id}`} m={m} highlight={matchHasFilter(m)} onClick={tweaks.onMatchClick ? () => tweaks.onMatchClick(m) : undefined} paceLookup={paceLookup} />
                 ))}
               </div>
             </div>
@@ -560,7 +569,9 @@ export function ScheduleViewer({ tournament, tweaks }) {
 }
 
 // Tournament-wide schedule wrapper for the viewer (its own screen)
-export function ViewerSchedule({ tournament, onBack, tweaks }) {
+export function ViewerSchedule({ tournament, onBack, tweaks, paceLookup }) {
+  const comps = useMemo(() => withCourtQueuePositions(tournament?.competitions || []), [tournament?.competitions]);
+  const tourneyWithQueue = useMemo(() => (tournament ? { ...tournament, competitions: comps } : tournament), [tournament, comps]);
   // A match opens on the live row its competition holds. Only that
   // competition's list is built, and only once a match is open: the page's
   // own list is ScheduleViewer's, and nothing else here reads one.
@@ -568,12 +579,12 @@ export function ViewerSchedule({ tournament, onBack, tweaks }) {
     const byComp = new Map();
     return (id, compId) => {
       if (!byComp.has(compId)) {
-        const comp = (tournament.competitions || []).find((c) => c.id === compId);
+        const comp = (tourneyWithQueue?.competitions || []).find((c) => c.id === compId);
         byComp.set(compId, comp ? compMatches(comp) : []);
       }
       return matchInList(byComp.get(compId), id, compId);
     };
-  }, [tournament]);
+  }, [tourneyWithQueue]);
   const [selectedMatch, openMatch, closeMatch] = useLiveMatch(rowOf);
   const extendedTweaks = { ...tweaks, onMatchClick: openMatch };
   return (
@@ -588,11 +599,11 @@ export function ViewerSchedule({ tournament, onBack, tweaks }) {
           </div>
         </div>
         <div className="viewer__body">
-          <ScheduleViewer tournament={tournament} tweaks={extendedTweaks} />
+          <ScheduleViewer tournament={tourneyWithQueue} tweaks={extendedTweaks} paceLookup={paceLookup} />
           {window.VersionFooter && <window.VersionFooter />}
         </div>
       </div>
-      {selectedMatch && <MatchViewerModal match={selectedMatch} onClose={closeMatch} tournament={tournament} />}
+      {selectedMatch && <MatchViewerModal match={selectedMatch} onClose={closeMatch} tournament={tourneyWithQueue} paceLookup={paceLookup} />}
     </div>
   );
 }

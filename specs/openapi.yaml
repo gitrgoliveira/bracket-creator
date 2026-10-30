@@ -1574,6 +1574,24 @@ paths:
                 $ref: '#/components/schemas/Error'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          description: |
+            `code: court_past_midnight`: a shiaijo this competition shares is
+            planned until midnight or later by another competition of the same
+            day that starts no later, so no slot of that day is left on it
+            (`scheduledAt` is a bare "HH:MM"). Nothing is written. `error` is
+            the operator's sentence (move this competition to another shiaijo
+            or day, or re-time the other with Auto-schedule); `court` and
+            `competitionId` name the court and the competition holding it.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error: { type: string }
+                  code: { type: string, enum: [court_past_midnight] }
+                  court: { type: string }
+                  competitionId: { type: string }
         '500':
           description: |
             Internal error, including the pre-flight's own partial-success
@@ -1714,6 +1732,20 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+        '409':
+          description: |
+            `code: court_past_midnight`, as on `POST .../generate-draw` (a
+            start that generates the draw refuses it the same way). Nothing is
+            written.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error: { type: string }
+                  code: { type: string, enum: [court_past_midnight] }
+                  court: { type: string }
+                  competitionId: { type: string }
 
   /api/competitions/{id}/complete:
     post:
@@ -1765,6 +1797,31 @@ paths:
               schema:
                 type: string
                 format: binary
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/competitions/{id}/schedule/estimate:
+    get:
+      tags: [competitions]
+      summary: Estimate competition schedule duration
+      description: >
+        Pre-draw schedule duration estimate for a specific competition.
+        Carries `courtEnds` for a drawn competition.
+      security:
+        - TournamentPassword: []
+      parameters:
+        - $ref: '#/components/parameters/CompetitionId'
+      responses:
+        '200':
+          description: Schedule estimate for the competition.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScheduleEstimate'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
         '500':
           $ref: '#/components/responses/InternalError'
 
@@ -2559,6 +2616,21 @@ paths:
           Without it, an empty scoreline clears the stored one. `startOnly`
           with any status other than `running` is a 400.
 
+          `forceCourt: true` (also request-only, never stored) is the
+          organiser's "Start anyway": a write that moves the match into
+          running on a shiaijo that already runs a bout skips both court
+          checks (this competition's and every other competition's) and
+          lands, so the shiaijo runs two bouts at once. The competitor checks
+          still run: a side fighting in another match, or barred by a
+          withdrawal, is still refused. Without it the answer is
+          `court_busy` as before. An anonymous self-run participant's
+          `forceCourt` is ignored, so their start is still `court_busy`.
+          The court is judged only on a write that MOVES the match into
+          running (the stored match not running, the write `running`): a
+          write to a match already running, and a finish, are never refused
+          for the court, so a shiaijo running two bouts keeps taking writes
+          to both.
+
           `clearWithdrawal: true` (also request-only) marks a completed
           correction that removes a kiken, fusenpai, or fusensho recorded by
           mistake: the payload is the real result (a win, or a draw) and
@@ -2817,6 +2889,8 @@ paths:
           description: |
             Conflict; one of eleven codes returned in the `error` field:
             - `court_busy`: court already has a running match in this or another competition.
+              Judged only on a write that moves the match into running, and
+              never when the organiser sends `forceCourt: true`.
               Extra fields: `court`, `matchId`, `compId`, `label`, `message`.
             - `ineligible_competitor`: a participant is ineligible (kiken/fusenpai in a prior match, or barred by
               a decision recorded on a different match). `reasonHuman` is a full operator sentence naming the
@@ -3181,7 +3255,7 @@ paths:
         completed write with a `correctionReason`) remains the sole sanctioned
         edit of a finished result. Reopening a finalized result is an
         organiser action: the route stays main-password-gated even in self-run
-        mode (same class as override-winner), so a request without a valid
+        mode (an organiser correction), so a request without a valid
         `X-Tournament-Password` gets 401. Broadcasts a `match_updated` event.
 
         Reopening a match a withdrawal (kiken, fusenpai) ended REMOVES the
@@ -3251,6 +3325,15 @@ paths:
                     Optional. The operator's confirmation after a 409
                     `downstream_knockout_played`: also reopen the later
                     knockout match(es) the refusal named.
+                forceCourt:
+                  type: boolean
+                  description: >
+                    Optional, request-only, never stored. The organiser's
+                    "Reopen anyway" after a 409 `court_busy`: a reopen into
+                    running on a shiaijo that already runs a bout skips both
+                    court checks (this competition's and every other
+                    competition's) and lands, so the shiaijo runs two bouts
+                    at once. The route is organiser-only in self-run mode.
                 writeId:
                   $ref: '#/components/schemas/WriteId'
                 basis:
@@ -3328,8 +3411,9 @@ paths:
             - `error: court_busy` (machine code, sentence in `message`):
               another match is already running on this match's court, in this
               or another competition. Reopening would put a second match in
-              progress on that court, so the operator must finish or requeue the
-              running one first. Extra fields: `court`, `matchId`, `compId`,
+              progress on that court, so the operator finishes or requeues the
+              running one first, or the organiser resends with
+              `forceCourt: true`. Extra fields: `court`, `matchId`, `compId`,
               `label`, `message`. Same shape as the score endpoint's
               `court_busy`, so clients keep one branch for it.
           content:
@@ -3417,7 +3501,7 @@ paths:
 
         Destructive (it discards the target's finalized result; the blocker
         keeps its score), so it is main-password-gated in self-run mode
-        via the central allowlist, the same class as reopen and override-winner.
+        via the central allowlist, the same class as reopen.
       security:
         - TournamentPassword: []
       parameters:
@@ -3565,8 +3649,8 @@ paths:
         identical. A scored bout is never removed. The match stays `running`.
         Broadcasts a `match_updated` event.
 
-        Removing a bout is an organiser correction, the same class as reopen
-        and override-winner: the route stays main-password-gated even in
+        Removing a bout is an organiser correction, the same class as reopen:
+        the route stays main-password-gated even in
         self-run mode, so a request without a valid `X-Tournament-Password`
         gets 401.
       security:
@@ -3834,89 +3918,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
-
-  /api/competitions/{id}/matches/{mid}/override-winner:
-    put:
-      tags: [matches]
-      summary: Override bracket winner
-      description: Manually set the winner of a bracket match, bypassing score calculation.
-      security:
-        - TournamentPassword: []
-      parameters:
-        - $ref: '#/components/parameters/CompetitionId'
-        - $ref: '#/components/parameters/MatchId'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [winnerName]
-              properties:
-                winnerName:
-                  type: string
-                  maxLength: 100
-                modifiedAt:
-                  type: integer
-                  format: int64
-                  description: >
-                    Client's server-relative timestamp for last-write-wins
-                    reconciliation, unix milliseconds; omit (or 0) when
-                    unstamped. A value implausibly far in the future is refused
-                    with the RefusedWrite shape, see the 200 response.
-                writeId:
-                  $ref: '#/components/schemas/WriteId'
-                basis:
-                  $ref: '#/components/schemas/ScoreBasis'
-                session:
-                  $ref: '#/components/schemas/WriteSession'
-      responses:
-        '200':
-          description: >
-            The body is `{"applied": <bool>}` (mp-y3nk). `applied: true` means
-            the winner was set; `applied: false` means the assertion was not
-            applied — nothing changed and no SSE broadcast is emitted, so a
-            client that advanced its local bracket optimistically should
-            refetch. 200 either way: neither case is a fault and neither can win
-            a retry as-is.
-
-            Two ways it can be false, both the RefusedWrite shape. A newer
-            stored result already decides this match: the assertion is not
-            applied, it is kept in the match's history with the winner it
-            named, and the body is `reason: superseded` with `heldGroups:
-            ["result"]`, exactly like a score write whose every change was held.
-            Or the request's `modifiedAt` was implausibly far in the future:
-            `reason: clock_skew` with a `serverNowMs`, and the client should
-            resync its clock offset from GET /api/time before re-submitting.
-          content:
-            application/json:
-              schema:
-                anyOf:
-                  - type: object
-                    additionalProperties: false
-                    required: [applied]
-                    properties:
-                      applied:
-                        type: boolean
-                        enum: [true]
-                  - $ref: '#/components/schemas/RefusedWrite'
-        '409':
-          description: >
-            The same knockout refusals as PUT .../score, with the same bodies:
-            `downstream_knockout_played` when the new winner would change who
-            a later knockout match with its own result was fought by (retry
-            with `forceDownstreamReopen: true`), and
-            `downstream_knockout_running` when it would change a side of a
-            later knockout match being fought now (`runningMatches`, each with
-            its `court`; not confirmable, `forceDownstreamReopen` does not get
-            past it). Nothing is written.
-          content:
-            application/json:
-              schema:
-                oneOf:
-                  - $ref: '#/components/schemas/Error'
-                  - $ref: '#/components/schemas/DownstreamKnockoutPlayedError'
-                  - $ref: '#/components/schemas/DownstreamKnockoutRunningError'
 
   /api/competitions/{id}/matches/{mid}/time:
     put:
@@ -5407,22 +5408,32 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: Current Swiss round has incomplete matches.
+          description: |
+            `round_incomplete`: the current Swiss round has incomplete matches
+            (`round` names it). `court_past_midnight`: a shiaijo the round would
+            use is planned until midnight or later by another competition of the
+            same day, as on `POST .../generate-draw`; nothing is written.
           content:
             application/json:
               schema:
                 type: object
-                required: [error, code, round]
+                required: [error, code]
                 properties:
                   error:
                     type: string
                   code:
                     type: string
-                    enum: [round_incomplete]
+                    enum: [round_incomplete, court_past_midnight]
                     description: Machine-readable conflict code.
                   round:
                     type: integer
-                    description: The incomplete round number.
+                    description: The incomplete round number (round_incomplete).
+                  court:
+                    type: string
+                    description: The shiaijo planned past midnight (court_past_midnight).
+                  competitionId:
+                    type: string
+                    description: The competition holding it (court_past_midnight).
         '500':
           $ref: '#/components/responses/InternalError'
 
@@ -5714,7 +5725,10 @@ paths:
     get:
       tags: [viewer]
       summary: List competitions with players
-      description: Returns all competitions, each with their player list populated.
+      description: >
+        Returns all competitions, each with their player list populated. Every
+        per-competition entry also carries the request-time `slotMinutes` and
+        `knockoutSlotMinutes` described on CompetitionDetail.
       responses:
         '200':
           description: List of competitions.
@@ -5825,7 +5839,9 @@ paths:
         an operator moves a match to another shiaijo. Per-competition match data
         is full (not court-filtered) so client-side derivations like pool
         "Match N of M" counts stay correct; the right-sizing is by competition
-        count (only comps on this court). Public, no auth.
+        count (only comps on this court). Every per-competition entry also
+        carries the request-time `slotMinutes` and `knockoutSlotMinutes`
+        described on CompetitionDetail. Public, no auth.
       parameters:
         - in: path
           name: court
@@ -6044,7 +6060,7 @@ components:
         applied to the match and no SSE broadcast is emitted in either case; a
         superseded write leaves its match history entry and nothing else.
 
-        PUT /score, POST /decision, PUT /override-winner and both /daihyosen
+        PUT /score, POST /decision and both /daihyosen
         paths each carry a client-supplied modifiedAt, so the guard compares
         rather than bypassing and any of them can produce either condition.
         The remaining match-write endpoint, /quick-score, builds its result
@@ -6145,7 +6161,7 @@ components:
             `reseat`: a side of the match was given another team by a
             correction to an earlier match, and the side's representative pick
             went with it): score, bulk-score, quick-score, decision,
-            daihyosen-add, daihyosen-remove, reopen, requeue, override-winner,
+            daihyosen-add, daihyosen-remove, reopen, requeue,
             engi, kachinuki-advance (Record bout appending the next pairing),
             kachinuki-record (Record bout appending none, only marking the bout
             it closes recorded), kachinuki-remove-bout, downstream-reopen,
@@ -6625,7 +6641,7 @@ components:
     DownstreamKnockoutRunningError:
       type: object
       description: >
-        409 body when a write, reopen, override-winner or decision would move
+        409 body when a write, reopen or decision would move
         a qualifier out of, or change a side of, a knockout match being
         fought now: a pool correction in a mixed competition moving the
         qualifier, or a knockout correction whose new winner changes a later
@@ -6862,6 +6878,11 @@ components:
                 Derived by the server, so a value sent on PUT is ignored. A
                 client reads it instead of probing `HEAD /api/branding/logo`,
                 which answers 404 while no logo is set.
+            logoOnLobby:
+              type: boolean
+              description: >
+                When true and a logo is uploaded, the lobby display shows the
+                tournament logo; absent reads false.
     TournamentWithCompetitions:
       description: >
         The response shape for POST and PUT /api/tournament: every Tournament
@@ -7602,10 +7623,11 @@ components:
           type: integer
           readOnly: true
           description: >
-            1-based position in this court's scheduled queue; 0/absent when
-            not queued (not scheduled, or `ineligibleSides` is set: a barred
-            match is skipped exactly like an unqueued one, so it never
-            occupies a queue slot).
+            1-based place of this waiting match in its court's queue across
+            EVERY competition on that court on the same day (running bouts
+            first, then waiting matches by scheduled time, then competition
+            start time, competition id, draw order); omitted for a running,
+            completed or barred match.
         ineligibleSides:
           readOnly: true
           allOf:
@@ -7878,10 +7900,11 @@ components:
           type: integer
           readOnly: true
           description: >
-            1-based position in this court's scheduled queue; 0/absent when
-            not queued (not scheduled, or `ineligibleSides` is set: a barred
-            match is skipped exactly like an unqueued one, so it never
-            occupies a queue slot).
+            1-based place of this waiting match in its court's queue across
+            EVERY competition on that court on the same day (running bouts
+            first, then waiting matches by scheduled time, then competition
+            start time, competition id, draw order); omitted for a running,
+            completed or barred match.
         matchNumber:
           type: integer
           readOnly: true
@@ -8197,6 +8220,20 @@ components:
             place counts only the places the draw seats. A tie over any of these places is
             owed a tie-break bout (a daihyosen for a team pool), and the
             standings mark exactly these places as advancing.
+        slotMinutes:
+          type: integer
+          minimum: 1
+          description: >
+            planned minutes one match of this competition occupies on a court,
+            computed at request time from the competition clock settings and the
+            tournament clock-to-elapsed multiplier, never stored; the pool-phase
+            slot, or the knockout slot for a knockout-only competition
+        knockoutSlotMinutes:
+          type: integer
+          minimum: 1
+          description: >
+            the same for a knockout-stage match; equals slotMinutes for a
+            knockout-only competition
         bracket:
           $ref: '#/components/schemas/Bracket'
 
@@ -8471,6 +8508,17 @@ components:
           description: Per-court breakdown; reflects the average scenario.
         ceremonyMinutes:
           type: integer
+        courtEnds:
+          type: object
+          description: >
+            Map from court (shiaijo) label to the planned end ("HH:MM") of this
+            competition's last slot there. Carried on the per-competition estimate
+            for a drawn competition; the stateless `/api/schedule/estimate` never
+            sets it. An end past midnight is not wrapped: it reads 24:00 or later
+            (e.g. "24:05"), which is no clock time.
+          additionalProperties:
+            type: string
+            pattern: '^[0-9]{2,}:[0-5][0-9]$'
 
     ChusenCandidateGroup:
       type: object

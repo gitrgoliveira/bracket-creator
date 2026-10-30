@@ -2,6 +2,8 @@
 // filterMatchesByCourt, computeCourtPaceStats, CourtPacePanel, suggestRebalances.
 
 import { timeToMinutes } from './admin_schedule_utils.jsx';
+import { courtPaceLookup, paceClockNow, PaceTime, PACE_TICK_MS } from './court_pace.jsx';
+import { courtQueueKey } from './court_queue.jsx';
 
 const { useState: useStateA, useEffect: useEffectA } = React;
 
@@ -34,11 +36,14 @@ export function filterMatchesByCourt(matches, courtParam) {
 //                           − nowMin, floored at 0). Falls back to
 //                           estimatedRemainingMin when no scheduled times exist.
 //   delta               : estimatedRemainingMin − plannedRemainingMin
-//                         positive = behind schedule, negative = ahead
+//                         the court's remaining LOAD against its plan, which
+//                         only suggestRebalances reads. The "behind"/"ahead"
+//                         label the panel shows is court_pace.jsx's drift, the
+//                         one owner of how late a court runs.
 //
-// nowMinutes is optional; defaults to the current wall-clock (read via
-// `new Date()`). CourtPacePanel omits it: the 60 s tick forces a re-render
-// so this helper re-reads fresh wall-clock time on each tick.
+// nowMinutes is optional; defaults to the device's wall-clock (read via
+// `new Date()`). CourtPacePanel passes paceClockNow()'s minutes, the server's
+// time the drift reads too, on each 60 s tick.
 // Tests pass nowMinutes explicitly for determinism.
 //
 // Exported for the vitest suite.
@@ -114,12 +119,16 @@ export function suggestRebalances(perCourtStats, perMatchMinutes) {
 }
 
 // CourtPacePanel: admin-only collapsible card showing per-court pace status
-// and a rebalancing suggestion. Never rendered in viewer or display views.
-export function CourtPacePanel({ byCourt, safeMatchDuration }) {
+// and a rebalancing suggestion. Court drift and the next bout's projected start
+// come from court_pace.jsx's courtPaceLookup over `competitions`, the same
+// lookup the public screens read: today's court-day only, each bout with its
+// competition's pool or knockout slot, so the organiser and a spectator read
+// the same projection. A competition that carries no slot falls back to
+// safeMatchDuration (the page's "Time per match").
+export function CourtPacePanel({ byCourt, safeMatchDuration, competitions }) {
   const [open, setOpen] = useStateA(false);
-  // setTick forces a re-render every 60 s so computeCourtPaceStats re-reads
-  // the current wall-clock time. paceByCourt is rebuilt on every parent render
-  // so useMemo would never skip the call anyway: compute stats directly.
+  // setTick forces a re-render every 60 s so computeCourtPaceStats and court pace
+  // re-read the current wall-clock time.
   const [, setTick] = useStateA(0);
 
   // hasData is checked inside the effect so the interval only runs (and causes
@@ -129,11 +138,12 @@ export function CourtPacePanel({ byCourt, safeMatchDuration }) {
     if (!hasData) return;
     const timer = setInterval(() => {
       setTick(t => t + 1);
-    }, 60000);
+    }, PACE_TICK_MS);
     return () => clearInterval(timer);
   }, [hasData]);
 
-  const stats = computeCourtPaceStats(byCourt, safeMatchDuration);
+  const clock = paceClockNow();
+  const stats = computeCourtPaceStats(byCourt, safeMatchDuration, clock.now);
 
   // Drop courts with zero matches so the cards (and the rebalance heuristic)
   // ignore empty buckets: e.g. a configured court the user hasn't placed
@@ -145,19 +155,25 @@ export function CourtPacePanel({ byCourt, safeMatchDuration }) {
 
   const suggestion = suggestRebalances(populatedStats, safeMatchDuration);
 
-  const badgeStyle = (delta) => {
-    const abs = Math.abs(delta);
-    if (abs <= 5) return { color: "var(--ok)", fontWeight: 600 };
+  const pace = courtPaceLookup(competitions, { ...clock, fallbackSlot: safeMatchDuration });
+  // A court's pace today: its court-day for today, else its undated one (a
+  // competition with no date set).
+  const courtDayKey = (court) => [courtQueueKey(clock.today, court), courtQueueKey("", court)]
+    .find(k => pace.driftByCourtDay.has(k));
+
+  const badgeStyle = (drift) => {
+    const abs = Math.abs(drift);
+    if (abs < 5) return { color: "var(--ok)", fontWeight: 600 };
     if (abs <= 20) return { color: "var(--warn)", fontWeight: 600 };
     return { color: "var(--danger)", fontWeight: 700 };
   };
 
-  const statusLabel = (stat) => {
+  const statusLabel = (stat, drift) => {
     if (stat.remainingCount === 0) return <span style={{ color: "var(--ink-3)", fontWeight: 500 }}>Done</span>;
-    const abs = Math.abs(stat.delta);
-    if (abs <= 5) return <span style={badgeStyle(stat.delta)}>On track</span>;
-    const dir = stat.delta > 0 ? "behind" : "ahead";
-    return <span style={badgeStyle(stat.delta)}>{Math.round(abs)}m {dir}</span>;
+    const abs = Math.abs(drift);
+    if (abs < 5) return <span style={badgeStyle(drift)}>On track</span>;
+    const dir = drift > 0 ? "behind" : "ahead";
+    return <span style={badgeStyle(drift)}>{Math.round(abs)}m {dir}</span>;
   };
 
   return (
@@ -177,15 +193,26 @@ export function CourtPacePanel({ byCourt, safeMatchDuration }) {
       {open && (
         <div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: 8, marginBottom: suggestion ? 12 : 0 }}>
-            {populatedStats.map(stat => (
-              <div key={stat.court} style={{ fontSize: 12, padding: "6px 10px", background: "var(--bg-2)", borderRadius: 4, border: "1px solid var(--bg-3)" }}>
-                <div style={{ fontWeight: 600, marginBottom: 2 }}>Shiaijo {stat.court}</div>
-                <div style={{ color: "var(--ink-3)" }}>
-                  {stat.completedCount}/{stat.completedCount + stat.remainingCount} done
+            {populatedStats.map(stat => {
+              const key = courtDayKey(stat.court);
+              const drift = key ? pace.driftByCourtDay.get(key) : 0;
+              const display = key ? pace.nextByCourtDay.get(key) : null;
+
+              return (
+                <div key={stat.court} style={{ fontSize: 12, padding: "6px 10px", background: "var(--bg-2)", borderRadius: 4, border: "1px solid var(--bg-3)" }}>
+                  <div style={{ fontWeight: 600, marginBottom: 2 }}>Shiaijo {stat.court}</div>
+                  <div style={{ color: "var(--ink-3)" }}>
+                    {stat.completedCount}/{stat.completedCount + stat.remainingCount} done
+                  </div>
+                  <div style={{ marginTop: 2 }}>{statusLabel(stat, drift)}</div>
+                  {display && (
+                    <div style={{ marginTop: 2, color: "var(--ink-2)" }}>
+                      Next <PaceTime display={display} fallback={display.text} />
+                    </div>
+                  )}
                 </div>
-                <div style={{ marginTop: 2 }}>{statusLabel(stat)}</div>
-              </div>
-            ))}
+              );
+            })}
           </div>
           {suggestion && (
             <div style={{ marginTop: 8, padding: "8px 12px", background: "var(--warn-soft)", border: "1px solid var(--warn-border)", borderRadius: 6, fontSize: 13 }}>

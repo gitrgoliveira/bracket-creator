@@ -106,7 +106,7 @@ func TestGeneratePools_LeagueIgnoresFillBracketFormation(t *testing.T) {
 
 	comp, err := store.LoadCompetition(compID)
 	require.NoError(t, err)
-	_, err = eng.generatePools(comp, players, nil)
+	_, err = eng.generatePools(comp, players, nil, nil)
 	require.NoError(t, err)
 
 	pools, err := store.LoadPools(compID)

@@ -5,8 +5,8 @@
 
 // The held-writes copy (bc-offl). write_result.jsx is an import-only leaf, so
 // this script-tagged module can import it without a double evaluation.
-import { heldWritesText, heldWriteLine, heldWriteDiscardConfirm, matchLabel, heldLineupLabel, HELD_WRITES_TITLE, HELD_WRITES_EMPTY, HELD_WRITE_DISCARD_ONE_LABEL } from './write_result.jsx';
-import { scoreRowMatchLabel } from './pool_ids.jsx';
+import { heldWritesText } from './write_result.jsx';
+import { HeldWritesPanel } from './held_writes_panel.jsx';
 import { publishHeight } from './published_height.jsx';
 import { tournamentHasCheckIn } from './competition_shape.jsx';
 import { whenConfirmed } from './unsaved_entries.jsx';
@@ -28,94 +28,6 @@ const Modal = window.Modal;
 // a second copy of a QR-plus-copy modal is the drift this repo keeps paying
 // for. qr.js is no longer imported here because ShareLinkModal owns the QR.
 const ShareLinkModal = window.ShareLinkModal;
-
-// heldWriteWhere: which match (or team) one held write is about, named the
-// way the score list names it (scoreRowMatchLabel) when the competition's
-// matches are loaded, else by the match's number or id (matchLabel). The
-// competition is named too: the list spans every competition on the device.
-export function heldWriteWhere(held, competitions) {
-  const comp = (competitions || []).find((c) => c && c.id === held.compID) || null;
-  const compName = (comp && comp.name) || held.compID || '';
-  let what;
-  if (held.kind === 'lineup') {
-    // A competition's roster is `players` (normalizeViewerCompItem); a team
-    // is one entry in it, found by its participant id.
-    const team = comp && Array.isArray(comp.players)
-      ? comp.players.find((p) => p && p.id === held.teamId) : null;
-    what = heldLineupLabel(team && team.name);
-  } else {
-    const m = comp && typeof window.compMatches === 'function'
-      ? (window.compMatches(comp) || []).find((x) => x && x.id === held.matchID) : null;
-    what = (m && scoreRowMatchLabel(m)) || matchLabel(m ? { number: m.matchNumber, id: m.id } : { id: held.matchID });
-  }
-  return compName && what ? `${compName} · ${what}` : (compName || what);
-}
-
-// HeldWritesPanel: every write held on this device, opened from the topbar's
-// held-writes indicator. A write the server keeps refusing can be discarded
-// here, one at a time and after a confirm, whatever it is: a running
-// autosave, a lineup save or a hand-set winner has no editor of its own to
-// offer it (the score editors' banner offers it for a result). A write that is
-// only waiting for the connection, or for a sign-in, is listed without one: it
-// lands on its own. Re-read whenever the sync status or the held count moves.
-export function HeldWritesPanel({ competitions, onClose }) {
-  const api = window.API;
-  const read = () => (api && typeof api.heldWrites === 'function' ? api.heldWrites() : []);
-  const [items, setItems] = useStateA(read);
-  const [busyKey, setBusyKey] = useStateA(null);
-  const mountedRef = useRefA(true);
-  useEffectA(() => () => { mountedRef.current = false; }, []);
-  useEffectA(() => {
-    const refresh = () => { if (mountedRef.current) setItems(read()); };
-    const offs = [];
-    if (typeof window.subscribeSyncStatus === 'function') offs.push(window.subscribeSyncStatus(refresh));
-    if (typeof window.subscribeUnsentWrites === 'function') offs.push(window.subscribeUnsentWrites(refresh));
-    return () => offs.forEach((off) => { if (typeof off === 'function') off(); });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-  const discard = async (held) => {
-    setBusyKey(held.key);
-    try {
-      const ok = typeof window.confirmDialog === 'function'
-        ? await window.confirmDialog(heldWriteDiscardConfirm(held))
-        : false;
-      if (!ok || !mountedRef.current) return;
-      api.discardHeldWrite(held.key);
-      setItems(read());
-    } finally {
-      if (mountedRef.current) setBusyKey(null);
-    }
-  };
-  return (
-    <Modal title={HELD_WRITES_TITLE} onClose={onClose}>
-      {items.length === 0 ? (
-        <p className="held-writes__empty">{HELD_WRITES_EMPTY}</p>
-      ) : (
-        <ul className="held-writes" data-testid="held-writes">
-          {items.map((held) => (
-            <li key={held.key} className="held-writes__item" data-testid="held-write">
-              <div className="held-writes__text">
-                <div className="held-writes__where">{heldWriteWhere(held, competitions)}</div>
-                <div className={`held-writes__state${held.keepsFailing ? ' held-writes__state--error' : ''}`}>
-                  {heldWriteLine(held)}
-                </div>
-              </div>
-              {held.keepsFailing && (
-                <button
-                  type="button"
-                  className="btn btn--sm btn--ghost"
-                  data-testid="held-write-discard-one"
-                  disabled={busyKey !== null}
-                  onClick={() => discard(held)}
-                >{HELD_WRITE_DISCARD_ONE_LABEL}</button>
-              )}
-            </li>
-          ))}
-        </ul>
-      )}
-    </Modal>
-  );
-}
 
 // Maximum running-match chips rendered in the topbar status strip before the
 // "+N more" overflow indicator kicks in.
@@ -245,12 +157,11 @@ function AdminTopbar({ onLogout, onViewerMode, tournament, hideRunningStrip, bef
     whenConfirmed(typeof beforeLeave === "function" ? beforeLeave() : true, go);
   };
 
-  // bc-qttl: SyncStatusPill (admin_scoring_autosave.jsx) only renders while a
-  // match's score editor is open, so a parked write becomes invisible the
-  // moment the operator closes it. AdminTopbar is the chrome shared by every
-  // admin page, so it's the always-visible home for the "queue is parked on a
-  // 401" state. Subscribe the same way SyncStatusPill does: subscribeSyncStatus
-  // replays the current value immediately on subscribe.
+  // bc-qttl: The score editors show no sync indicator of their own, so a
+  // parked write would be invisible without a persistent indicator. AdminTopbar
+  // is the chrome shared by every admin page, so it is the always-visible home
+  // for the "queue is parked on a 401" state. subscribeSyncStatus replays the
+  // current value on subscribe.
   const [syncStatus, setSyncStatus] = useStateA('synced');
   useEffectA(() => {
     const subscribe = typeof window !== 'undefined' && window.subscribeSyncStatus;

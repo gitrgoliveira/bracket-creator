@@ -1,6 +1,8 @@
 package engine
 
 import (
+	"errors"
+	"log"
 	"math"
 	"time"
 
@@ -99,6 +101,9 @@ type ScheduleEstimate struct {
 	WorstCaseMinutes     int   `json:"worstCaseMinutes"`
 	PerCourtMinutes      []int `json:"perCourtMinutes"`
 	CeremonyMinutes      int   `json:"ceremonyMinutes"`
+	// CourtEnds maps each court to the planned end ("HH:MM") of this competition's
+	// last slot there; only set on the per-competition estimate of a drawn competition.
+	CourtEnds map[string]string `json:"courtEnds,omitempty"`
 }
 
 // EstimateInput holds the parameters EstimateSchedule consumes. All
@@ -334,7 +339,7 @@ func EstimateSchedule(in EstimateInput) ScheduleEstimate {
 // the slowest court will likely run over the mean. The buffer is applied to
 // MATCH time only (matchMin), not to the fixed OpeningBlock offset or LunchBlock
 // dead-time, which have no runtime variance to pad, matching EstimateSchedule's
-// semantics. The post-draw slot assigners (assignPoolMatchSlots /
+// semantics. The post-draw slot assigners (assignPoolMatchSlotsFrom /
 // assignBracketMatchSlots) do NOT apply the buffer at all because a real,
 // assigned schedule needs no extra padding. So do NOT assert RAW cross-regime
 // equality, but the buffered relationship (EstimateForCounts ≈ slot duration ×
@@ -418,7 +423,7 @@ func EstimateForCounts(poolCount, knockoutCount int, comp *state.Competition, to
 	// 5-person default. Without this, perMatchElapsedMinutes would see
 	// TeamSize==0 and fall through to the individual-match formula,
 	// under-estimating a team competition's duration.
-	if comp.Kind == "team" && comp.TeamSize == 0 {
+	if comp.IsTeam() && comp.TeamSize == 0 {
 		comp.TeamSize = 5
 	}
 
@@ -569,3 +574,57 @@ func EstimateForCounts(poolCount, knockoutCount int, comp *state.Competition, to
 // EstimateForCounts's walk prices. Kachinuki passes three (best/avg/worst);
 // every other format passes one.
 type schedScenario struct{ poolPerMatch, knockoutPerMatch int }
+
+func slotMinutesFor(tournament *state.Tournament) state.SlotMinutes {
+	return func(c *state.Competition, ko bool) int {
+		// A team competition with an omitted TeamSize uses the FIK 5-person
+		// default, as EstimateForCounts does.
+		if c != nil && c.IsTeam() && c.TeamSize == 0 {
+			compCopy := *c
+			compCopy.TeamSize = 5
+			c = &compCopy
+		}
+		return perMatchElapsedMinutes(c, tournament, ko)
+	}
+}
+
+// courtFloorFor resolves the per-court earliest start times for comp based on
+// other same-day competitions sharing its courts. A store read error is logged
+// and floors nothing, since the floor is advisory; a court another competition
+// holds until midnight or later is returned as state.ErrCourtFloorPastMidnight,
+// which refuses the draw (no "HH:MM" slot is left on that court that day).
+func (e *Engine) courtFloorFor(comp *state.Competition, tournament *state.Tournament) (map[string]time.Time, error) {
+	if comp == nil {
+		return nil, nil
+	}
+	courts := InheritedDrawCourts(comp.Courts, tournament)
+	floors, err := e.store.CourtFloor(comp, courts, slotMinutesFor(tournament))
+	if errors.Is(err, state.ErrCourtFloorPastMidnight) {
+		return nil, err
+	}
+	if err != nil {
+		log.Printf("courtFloorFor %s: %v", comp.ID, err)
+		return nil, nil
+	}
+	if len(floors) == 0 {
+		return nil, nil
+	}
+	out := make(map[string]time.Time, len(floors))
+	for court, floorStr := range floors {
+		t := parseClockHHMM(floorStr)
+		if !t.IsZero() {
+			out[court] = t
+		}
+	}
+	return out, nil
+}
+
+// CourtEnds returns the planned end ("HH:MM") of compID's last slot on each court
+// it holds matches on.
+func (e *Engine) CourtEnds(compID string) (map[string]string, error) {
+	tournament, err := e.store.LoadTournament()
+	if err != nil {
+		return nil, err
+	}
+	return e.store.CourtEnds(compID, slotMinutesFor(tournament))
+}

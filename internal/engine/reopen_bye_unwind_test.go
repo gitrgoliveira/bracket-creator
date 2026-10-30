@@ -235,15 +235,14 @@ func TestCorrectionThroughAByeWarnsForAPlayedFinalThenReopensIt(t *testing.T) {
 	assert.Equal(t, []string{"M"}, final.IpponsA, "its points are kept (operator ruling 2026-09-26)")
 }
 
-// The manual winner override is the same correction through another door.
-func TestOverrideThroughAByeWarnsForAPlayedFinal(t *testing.T) {
-	compID := "bye-override"
+// A decision is another correction through the same path.
+func TestDecisionThroughAByeWarnsForAPlayedFinal(t *testing.T) {
+	compID := "bye-decision"
 	eng, store := playedFinalThroughByeFixture(t, compID)
 
-	applied, err := eng.OverrideBracketWinner(compID, "m-r1-0", "P01", 0)
+	_, _, err := eng.RecordDecisionWithOptions(compID, "m-r1-0", "kiken-voluntary", "aka", "kiken", nil, ForceOptions{})
 	var played *DownstreamKnockoutPlayedError
 	require.ErrorAs(t, err, &played)
-	assert.False(t, applied)
 	assert.Equal(t, "m-r3-0", played.BlockingMatchID)
 	assert.Equal(t, "P00", played.Displaced)
 	assert.Equal(t, "P00", loadBracket(t, store, compID).Rounds[2][0].SideA, "refused until confirmed")

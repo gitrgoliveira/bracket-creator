@@ -1229,8 +1229,8 @@ func TestSelfRun_BrandingLogo_RequiresMainPassword(t *testing.T) {
 // ---------------------------------------------------------------------------
 //
 // POST .../matches/:mid/reopen mutates a FINALIZED result (clears
-// winner/decision, retracts propagated bracket winners), the same organiser
-// correction class as PUT .../override-winner. It is listed in
+// winner/decision, retracts propagated bracket winners), an organiser
+// correction. It is listed in
 // isSelfRunMainGatedConfigRoute so the CENTRAL AuthMiddleware gate (including
 // the F4 empty-stored-password fail-closed branch) applies; the handler
 // deliberately carries no hand-rolled self-run check.
@@ -1265,7 +1265,7 @@ func TestSelfRun_ReopenRequiresMainPassword(t *testing.T) {
 }
 
 // mp-gmcg review F2: DELETE kachinuki-bout removes a live pairing, an organiser
-// correction like reopen/override-winner — it must NOT be anonymously callable
+// correction like reopen - it must NOT be anonymously callable
 // in self-run mode. The participant score path self-gates via
 // enforceSelfRunPolicy; this route relies on the central allowlist instead, so
 // a missing allowlist entry would let the self-run pass-through expose it.

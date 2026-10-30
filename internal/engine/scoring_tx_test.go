@@ -655,7 +655,7 @@ func TestStartMatchTx_BlocksIneligibleParticipant(t *testing.T) {
 	// participant) → ineligible error.
 	var startErr error
 	_ = store.WithTransaction(compID, func(tx state.StoreTx) error {
-		startErr = eng.StartMatchTx(tx, compID, "Pool A-1")
+		startErr = eng.StartMatchTx(tx, compID, "Pool A-1", false)
 		return nil
 	})
 	require.Error(t, startErr)
@@ -668,7 +668,7 @@ func TestStartMatchTx_BlocksIneligibleParticipant(t *testing.T) {
 	// so the undo path works.
 	var srcErr error
 	_ = store.WithTransaction(compID, func(tx state.StoreTx) error {
-		srcErr = eng.StartMatchTx(tx, compID, "Pool A-0")
+		srcErr = eng.StartMatchTx(tx, compID, "Pool A-0", false)
 		return nil
 	})
 	assert.NoError(t, srcErr, "the match that recorded the ineligibility must be re-scoreable")
@@ -789,7 +789,7 @@ func saveMixedCompForGuardTest(t *testing.T, teamSize int) (*Engine, *state.Stor
 	draw := helper.BuildKnockoutDraw(pools, 1, 1)
 	comp, err := store.LoadCompetition(compID)
 	require.NoError(t, err)
-	bracket, err := eng.buildBracketFromDraw(comp, draw, nil, nil)
+	bracket, err := eng.buildBracketFromDraw(comp, draw, nil, nil, nil)
 	require.NoError(t, err)
 	bracket.Preview = true
 	require.NoError(t, store.SaveBracket(compID, bracket))
@@ -1317,7 +1317,7 @@ func TestPoolRescore_CorruptBracket_FailsClosed(t *testing.T) {
 	draw := helper.BuildKnockoutDraw(pools, 1, 1)
 	comp, err := store.LoadCompetition(compID)
 	require.NoError(t, err)
-	bracket, err := eng.buildBracketFromDraw(comp, draw, nil, nil)
+	bracket, err := eng.buildBracketFromDraw(comp, draw, nil, nil, nil)
 	require.NoError(t, err)
 	require.NoError(t, store.SaveBracket(compID, bracket))
 	bracketPath := filepath.Join(dir, "competitions", compID, "bracket.json")

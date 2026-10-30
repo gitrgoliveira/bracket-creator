@@ -106,8 +106,8 @@ func TestScoreEvents_KachinukiAdvanceAndRemoveAreBaselines(t *testing.T) {
 	assertLogIsTheMatchIn(t, eng, store, compID, "P1-0")
 }
 
-// The knockout override-winner door leaves its baseline.
-func TestScoreEvents_OverrideWinnerIsABaseline(t *testing.T) {
+// A decision on a knockout match leaves its baseline.
+func TestScoreEvents_DecisionIsABaseline(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	const compID = "slw-ko"
 	createTestCompetition(t, store, compID, "knockout", 3)
@@ -125,8 +125,7 @@ func TestScoreEvents_OverrideWinnerIsABaseline(t *testing.T) {
 	assert.Equal(t, domain.ScoreOutcomeApplied, res.Answers[0].Outcome)
 	assertLogIsTheMatchIn(t, eng, store, compID, bm.ID)
 
-	applied, err := eng.OverrideBracketWinner(compID, bm.ID, bm.SideB, 0)
+	_, _, err = eng.RecordDecision(compID, bm.ID, "fusensho", "aka", "fusensho", nil)
 	require.NoError(t, err)
-	require.True(t, applied)
 	assertLogIsTheMatchIn(t, eng, store, compID, bm.ID)
 }

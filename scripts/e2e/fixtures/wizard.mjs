@@ -64,10 +64,13 @@ async function setNumber(page, label, value) {
 //   twoThirdPlaces boolean: "Award two joint 3rd places" (on by default;
 //                  untick it for a bronze match)
 //   checkIn        boolean: "Check-in tracking" (officiated tournaments only)
+//   startTime      "HH:MM": the competition's start time, typed over the
+//                  wizard's default (which then no longer follows the
+//                  estimate of an earlier competition on the same shiaijo)
 export async function createCompetition(page, opts = {}) {
   const {
     name, kind, format, teamSize, teamMatchType, poolSizeMode, poolSize, poolWinners, extraQualifiers,
-    courts, numberPrefix, twoThirdPlaces, engi, checkIn,
+    courts, numberPrefix, twoThirdPlaces, engi, checkIn, startTime,
   } = opts;
   await page.goto('/admin/create-competition');
   await expect(page.getByRole('heading', { level: 1, name: 'Add competition' })).toBeVisible();
@@ -112,6 +115,11 @@ export async function createCompetition(page, opts = {}) {
   }
   if (numberPrefix !== undefined) {
     await input(page, 'Player number prefix').fill(numberPrefix);
+  }
+  if (startTime !== undefined) {
+    const box = page.locator('#create-start-time');
+    await box.fill(startTime);
+    await expect(box).toHaveValue(startTime);
   }
 
   await page.getByRole('button', { name: /^Create & continue/ }).tap();

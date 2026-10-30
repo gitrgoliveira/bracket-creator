@@ -215,7 +215,7 @@ export function AdminExport({ c, t, password, showToast }) {
       </div>
       <div className="card">
         <div className="card__title" style={{ marginBottom: 8 }}>Public viewer link</div>
-        <div className="card__sub" style={{ marginBottom: 14 }}>Players & spectators see this competition's bracket, schedule and results.</div>
+        <div className="card__sub" style={{ marginBottom: 14 }}>Players & spectators see this competition&apos;s bracket, schedule and results.</div>
         <div style={{ display: "flex", gap: 8 }}>
           <input className="input" value={url} readOnly style={{ flex: 1 }} />
           <button type="button" className="btn" onClick={copyUrl}>Copy</button>

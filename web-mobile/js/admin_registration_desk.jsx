@@ -598,7 +598,7 @@ function RdEditModal({ comp, player, password, showToast, onSaved, onClose }) {
           </label>
         )}
       </div>
-      <p className="rd-edit__note">Edits apply to this competition's record only.</p>
+      <p className="rd-edit__note">Edits apply to this competition&apos;s record only.</p>
     </Modal>
   );
 }
@@ -1168,7 +1168,7 @@ function RdRoster({ mode, rows, groupByDojo, query, busy, allChecked, canWalkUp,
       return (
         <div className="empty rd-empty">
           <h3>No one matches “{query.trim()}”</h3>
-          <div className="rd-empty__sub">Check the spelling, or clear filters. If they're not registered yet:</div>
+          <div className="rd-empty__sub">Check the spelling, or clear filters. If they&apos;re not registered yet:</div>
           {canWalkUp && <button type="button" className="btn btn--primary" onClick={onOpenWalkUp}>+ Add “{query.trim()}” as walk-up</button>}
         </div>
       );
@@ -1177,7 +1177,7 @@ function RdRoster({ mode, rows, groupByDojo, query, busy, allChecked, canWalkUp,
       return (
         <div className="empty rd-empty rd-empty--done">
           <div className="icon" aria-hidden="true">✓</div>
-          <h3>Everyone's here</h3>
+          <h3>Everyone&apos;s here</h3>
           <div className="rd-empty__sub">All checked in. Search above to undo or re-check anyone.</div>
         </div>
       );

@@ -170,7 +170,7 @@ function RegistrationForm({ compId, onBack }) {
     return (
       <div className="page" style={{ maxWidth: 600, marginTop: 40 }}>
         <div className="card card--pad-lg">
-          <h2 style={{ marginBottom: 8 }}>You're registered!</h2>
+          <h2 style={{ marginBottom: 8 }}>You&apos;re registered!</h2>
           <p style={{ color: "var(--ink-3)", marginBottom: 24 }}>
             You have been registered for{meta ? ` ${meta.name}` : " this competition"}.
             Results and match schedules will be available on the day of the tournament.

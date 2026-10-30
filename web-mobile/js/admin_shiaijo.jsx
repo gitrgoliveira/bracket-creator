@@ -2156,9 +2156,9 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
 
                 {!courtKnown && (
                     <div className="empty">
-                        <h3>Unknown shiaijo "{court}"</h3>
+                        <h3>Unknown shiaijo &quot;{court}&quot;</h3>
                         <p style={{ fontSize: 13, color: "var(--ink-3)" }}>
-                            This court isn't part of the tournament: it may have been renamed or removed.{" "}
+                            This court isn&apos;t part of the tournament: it may have been renamed or removed.{" "}
                             <button type="button" onClick={leaving(onBack)} className="linklike">Back to dashboard</button>.
                         </p>
                         {/* The title-overlay court switcher is gated on courtKnown, so an

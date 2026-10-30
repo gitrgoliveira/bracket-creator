@@ -1015,7 +1015,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
               and an INHERITED allocation, whose own list is empty, is not
               announced as "assigned 0 shiaijo". */}
           <div style={{ fontWeight: 600, marginBottom: 6 }}>
-            ⚠ This competition's shiaijo allocation blocks the draw.
+            ⚠ This competition&apos;s shiaijo allocation blocks the draw.
           </div>
           <div>
             {savedCourtsErr} Change the assignment below and save; the draw cannot be generated until you do.
@@ -1035,7 +1035,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
             ))}
           </ul>
           <div style={{ fontSize: 12, color: "var(--ink-3)", marginBottom: 8 }}>
-            The change was saved. Two competitions can't run on the same court at the same time. Adjust the start time or assigned courts here or on the other competition.
+            The change was saved. Two competitions can&apos;t run on the same court at the same time. Adjust the start time or assigned courts here or on the other competition.
           </div>
           <button type="button" className="btn btn--sm" onClick={() => { setClashWarnings(null); if (onBack) onBack(); }}>Dismiss & return to dashboard</button>
         </div>

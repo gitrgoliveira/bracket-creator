@@ -145,7 +145,7 @@ function BrandingManager({ tournament, password, showToast, onThemeChange }) {
           <input id="branding-window-title" type="text" value={windowTitle} maxLength={100} placeholder="Bracket Creator Mobile"
             onChange={(e) => handleWindowTitleChange(e.target.value)}
             style={{ width: "100%", boxSizing: "border-box" }} />
-          <div className="field__hint">Shown in the browser tab and title bar on all pages. Defaults to "Bracket Creator Mobile" when blank.</div>
+          <div className="field__hint">Shown in the browser tab and title bar on all pages. Defaults to &quot;Bracket Creator Mobile&quot; when blank.</div>
         </div>
         <div className="branding__colors">
           <div className="field">

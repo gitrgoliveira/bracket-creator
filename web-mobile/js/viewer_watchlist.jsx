@@ -468,7 +468,7 @@ function WatchlistShareModal({ base, watchlist, roster, onClose }) {
         </p>
       )}
       <p className="share-link__note">
-        Opening this link ADDS these competitors to someone's watchlist. It does not replace what they already watch.
+        Opening this link ADDS these competitors to someone&apos;s watchlist. It does not replace what they already watch.
       </p>
       {/* Stated because it is the cost of the short, scannable form the
           operator chose (bc-wlpl): a competitor is identified by their number
@@ -705,7 +705,7 @@ function WatchlistPanel({ tournament, roster, rosterLoaded = true, watchlist, se
 
       {count === 0 ? (
         <div className="hint">
-          Track yourself, a few competitors, or a whole dojo: we'll surface their next matches and alert you when they're on deck. Add up to {WATCHLIST_MAX}.
+          Track yourself, a few competitors, or a whole dojo: we&apos;ll surface their next matches and alert you when they&apos;re on deck. Add up to {WATCHLIST_MAX}.
         </div>
       ) : (
         <div className="pmf__bar pmf__bar--standalone watchlist-chips">

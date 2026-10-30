@@ -5705,7 +5705,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
                   <GlossaryHintAS name="fusenpai" />
                 </div>
                 <span style={{ color: "var(--ink-3)", fontSize: 12, marginLeft: 4 }}>
-                  (<TermAS name="fusensho">Fusensho</TermAS> is per-bout: use the "Fusensho" button on each row above.)
+                  (<TermAS name="fusensho">Fusensho</TermAS> is per-bout: use the &quot;Fusensho&quot; button on each row above.)
                 </span>
               </div>
             </details>

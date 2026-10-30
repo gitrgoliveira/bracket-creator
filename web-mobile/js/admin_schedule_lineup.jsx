@@ -507,7 +507,7 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
         ); })}
         {suggestions.length === 0 && (
           <div style={{ fontSize: 12, color: "var(--ink-3)", fontStyle: "italic" }}>
-            This team has no registered members: type each competitor's name directly.
+            This team has no registered members: type each competitor&apos;s name directly.
           </div>
         )}
       </div>

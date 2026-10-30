@@ -200,7 +200,7 @@ export function PlayerMultiFilter({ tournament, picked, setPicked, dojoText, set
         ))}
         {dojoText ? (
           <span className="pmf__chip pmf__chip--text">
-            "{dojoText}"
+            &quot;{dojoText}&quot;
             <button type="button" onClick={(e) => { e.stopPropagation(); setDojoText(""); }} aria-label="Remove">×</button>
           </span>
         ) : null}
@@ -231,7 +231,7 @@ export function PlayerMultiFilter({ tournament, picked, setPicked, dojoText, set
           </div>
           {q && (
             <button type="button" className="pmf__option pmf__option--text" onClick={() => { setDojoText(query.trim()); setQuery(""); }}>
-              <span>Match "<b>{query}</b>" in any name, dojo or number</span>
+              <span>Match &quot;<b>{query}</b>&quot; in any name, dojo or number</span>
             </button>
           )}
           {matches.map((p) => {

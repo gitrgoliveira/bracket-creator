@@ -562,7 +562,7 @@ function AdminDashboard({ tournament, password, onOpenCompetition, onCreateCompe
             <div className="icon" aria-hidden="true">🥋</div>
             <h3>Add your first competition</h3>
             <div style={{ fontSize: 13, color: "var(--ink-2)", maxWidth: 460, margin: "0 auto", lineHeight: 1.5 }}>
-              A competition is one event within {t.name}, like Men's Individual or Women's Teams. Add one to enter participants, build the draw, and run matches.
+              A competition is one event within {t.name}, like Men&apos;s Individual or Women&apos;s Teams. Add one to enter participants, build the draw, and run matches.
             </div>
             <div className="empty__cta" style={{ display: "flex", gap: 8, justifyContent: "center", flexWrap: "wrap" }}>
               <button type="button" className="btn btn--primary" onClick={onCreateCompetition}>+ Add competition</button>

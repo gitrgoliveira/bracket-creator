@@ -104,7 +104,7 @@ export function UnreadableBoutsNote() {
     <div className="alert alert--warn data-issue data-issue--inline">
       <span aria-hidden="true">⚠</span>
       <span>
-        This encounter's individual bouts could not be read from the results file, so
+        This encounter&apos;s individual bouts could not be read from the results file, so
         it counts zero individual victories and zero points. Repair the cell, or
         re-enter the bouts here.
       </span>

@@ -1494,7 +1494,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, onSub
               {(aTotal === bTotal || decidedByHantei) && (
                 <div className="hantei-row" data-testid="scoring-modal-hantei-row" style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center", padding: "6px 8px", background: "var(--card-2, #fafafa)", borderRadius: 6 }}>
                   <span style={{ fontWeight: 600, color: "var(--ink-2)" }}>Hantei</span>
-                  <span style={{ color: "var(--ink-3)" }}>(judges' decision)</span>
+                  <span style={{ color: "var(--ink-3)" }}>(judges&apos; decision)</span>
                   {!decidedByHantei && (
                     <button
                       type="button"

@@ -388,7 +388,7 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
                 </div>
                 {!isDateValid(c.date) && (
                   <div style={{ color: "var(--red)", fontSize: 11, fontWeight: 600 }}>
-                    ⚠ Cannot start: invalid date in Settings tab (e.g. "{c.date}")
+                    ⚠ Cannot start: invalid date in Settings tab (e.g. &quot;{c.date}&quot;)
                   </div>
                 )}
                 {drawBlocker && (

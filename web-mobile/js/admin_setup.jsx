@@ -508,12 +508,12 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
             <div className="field" style={{ marginBottom: 0 }}>
               <label className="field__label" htmlFor="edit-opening-block">Opening ceremony <span style={{ fontWeight: 400, color: "var(--ink-3)" }}>(duration)</span></label>
               <input id="edit-opening-block" className="input" value={openingBlock} onChange={(e) => setOpeningBlock(e.target.value)} placeholder="e.g. 30m" />
-              <div className="field__hint">Duration of the opening ceremony block (e.g. "30m", "1h").</div>
+              <div className="field__hint">Duration of the opening ceremony block (e.g. &quot;30m&quot;, &quot;1h&quot;).</div>
             </div>
             <div className="field" style={{ marginBottom: 0 }}>
               <label className="field__label" htmlFor="edit-lunch-block">Lunch break <span style={{ fontWeight: 400, color: "var(--ink-3)" }}>(duration)</span></label>
               <input id="edit-lunch-block" className="input" value={lunchBlock} onChange={(e) => setLunchBlock(e.target.value)} placeholder="e.g. 1h" />
-              <div className="field__hint">Duration of the lunch break block (e.g. "1h", "45m").</div>
+              <div className="field__hint">Duration of the lunch break block (e.g. &quot;1h&quot;, &quot;45m&quot;).</div>
             </div>
             <div className="field" style={{ marginBottom: 0 }}>
               <label className="field__label" htmlFor="edit-closing-block">Closing ceremony <span style={{ fontWeight: 400, color: "var(--ink-3)" }}>(duration)</span></label>
@@ -1197,7 +1197,7 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
         <div className="page-head">
           <div>
             <h1 className="page-head__title">Add competition</h1>
-            <div className="page-head__sub">A competition is one event within the tournament: e.g. Men's Individual, Women's Teams.</div>
+            <div className="page-head__sub">A competition is one event within the tournament: e.g. Men&apos;s Individual, Women&apos;s Teams.</div>
           </div>
         </div>
 
@@ -1228,7 +1228,7 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
                   never typed, with the field still visibly empty. The naming
                   example moved to the hint below so this slot can tell the truth. */}
               <input id="create-display-name" className="input" placeholder={deriveCompetitionName("", kind)} value={name} onChange={(e) => { setName(e.target.value); setError(""); }} />
-              <div className="field__hint">Example: Men's Individual</div>
+              <div className="field__hint">Example: Men&apos;s Individual</div>
             </div>
             <div className="field">
               <label className="field__label" htmlFor="create-day">Day</label>
@@ -1736,7 +1736,7 @@ function AdminImportPage({ tournament, onBack, onImported, onLogout, onViewerMod
                 <div className="alert alert--warn" style={{ marginTop: 10 }} data-testid="preview-shiaijo-warning">
                   ⚠ {pluralize(previewShiaijoProblems, "competition")} would be refused, shown in red.{" "}
                   {window.shiaijoCountHint(venueCourts.length)}{" "}
-                  A row with no shiaijo of its own inherits the venue's list and is checked the same way.
+                  A row with no shiaijo of its own inherits the venue&apos;s list and is checked the same way.
                 </div>
               )}
             </div>

@@ -931,7 +931,7 @@ function AdminLineup({ comp, team, matchId = "", matchLabel = "", notInMatch = f
           )}
           {squadSorted.length === 0 && !squadUnavailable && (
             <div style={{ fontSize: 12, color: "var(--ink-3)", fontStyle: "italic" }}>
-              This team has no members yet: choose "+ Add new member…" in a position above to add the first one.
+              This team has no members yet: choose &quot;+ Add new member…&quot; in a position above to add the first one.
             </div>
           )}
         </div>

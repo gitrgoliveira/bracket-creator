@@ -90,10 +90,10 @@ func TestExcelTimeEstimatorParity(t *testing.T) {
 }
 
 // TestEstimateScheduleCeremonyAddsToTotal verifies CeremonyMinutes is
-// passed through verbatim onto TotalDurationMinutes (the auto-scheduler
-// integration in T150/T151 will eventually skip these slots; today the
-// calculator just adds them to the total so callers can render the
-// "all-in" estimate).
+// passed through verbatim onto TotalDurationMinutes. The estimator just
+// adds the ceremony block to the total so callers can render the "all-in"
+// estimate; the auto-scheduler skips its own ceremony windows when it
+// places matches (skipCeremonyBlocks in scheduler_slots.go).
 func TestEstimateScheduleCeremonyAddsToTotal(t *testing.T) {
 	base := EstimateInput{
 		MatchDurationClockMinutes: 3,

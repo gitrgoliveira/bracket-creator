@@ -16,9 +16,8 @@ import (
 // match was completed) -> DecisionFought. A new-format string value must
 // also round-trip unchanged.
 //
-// This is a Red test that build-fails until T074 (domain.Decision type +
-// constants), T075 (legacy bool migration on UnmarshalYAML), and T076
-// (MatchResult.Decision field) all land.
+// It exercises the domain.Decision type and constants, the legacy bool
+// migration on UnmarshalYAML, and the MatchResult.Decision field together.
 func TestLegacyBoolMigrates(t *testing.T) {
 	tests := []struct {
 		name     string

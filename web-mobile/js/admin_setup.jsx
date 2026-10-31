@@ -1083,8 +1083,8 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
       roundRobin,
     });
     // FR-050 / T044: persist poolFormat alongside the rest of the
-    // create payload. buildCompetition (data.jsx) doesn't know about
-    // this field yet; setting it after construction keeps the helper's
+    // create payload. buildCompetition (data.jsx) takes no poolFormat
+    // argument; setting it after construction leaves the helper's
     // signature unchanged and lets the backend's JSON binding pick up
     // the camelCase key directly. Only emit for formats that run pool
     // play: knockout-only competitions have no pool phase.

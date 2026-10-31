@@ -13,9 +13,8 @@ import (
 // Eligible == false must carry a non-empty Reason, and PlayerID must always
 // be set.
 //
-// This is a Red test, domain.CompetitorStatus and its Validate() method do
-// not yet exist. The build must fail until the Green implementation (T078)
-// lands in internal/domain/competitor_status.go.
+// It pins domain.CompetitorStatus and its Validate() method
+// (internal/domain/competitor_status.go) to this rule.
 func TestCompetitorStatusValidation(t *testing.T) {
 	tests := []struct {
 		name    string

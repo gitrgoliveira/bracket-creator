@@ -1910,9 +1910,9 @@ func (m *MatchResult) Attribution() domain.WinnerAttribution {
 }
 
 // EnchoMetadata records overtime / sudden-death periods played in a
-// match. Read/persisted only in Slice 1; the score endpoint accepts it
-// but does not yet act on it. Slice 3 (T076) will wire it into the
-// decision logic.
+// match. It is persisted with the match result; the score endpoint accepts
+// it (validation bounds PeriodCount) and engine.RecordDecision takes it
+// for a decision write.
 //
 // FR-032
 type EnchoMetadata struct {

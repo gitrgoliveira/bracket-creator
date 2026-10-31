@@ -371,10 +371,10 @@ func findRoundLineup(lineups map[string]domain.TeamLineup, teamID string, round 
 // the admin (auth-protected) group. The corresponding GET is public
 // and registered via RegisterPublicLineupHandlers.
 //
-// DELETE is manager-only per the spec; for now we rely on the
-// existing AuthMiddleware (mounted on the admin router group in
-// server.go) as the auth boundary. A richer role check lands when
-// per-role auth is implemented.
+// DELETE is manager-only per the spec; the auth boundary is the
+// AuthMiddleware mounted on the admin router group in server.go, so a
+// caller holding the tournament password may use it. There is no
+// separate per-role check.
 //
 // The `tx CompetitionTransactor` parameter is the T156 hook.
 // The PUT body wraps its three store calls; load comp (for teamSize),

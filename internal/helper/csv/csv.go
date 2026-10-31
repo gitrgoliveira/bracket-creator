@@ -1,3 +1,2 @@
-// Package csv will hold CSV parsing extracted from internal/helper.
-// Stub created to satisfy NFR-001 sub-package extraction.
+// Package csv is empty; CSV parsing lives in internal/helper (csv.go).
 package csv

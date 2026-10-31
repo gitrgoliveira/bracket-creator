@@ -5,9 +5,11 @@
 // The ref is written in a layout effect, never during render (the React
 // Compiler's refs rule): every commit brings it up to the value that render
 // had, before any passive effect runs and before the browser takes the next
-// event, so every reader outside render sees it. A layout effect declared
-// AFTER the call in the same component also sees it, since layout effects run
-// in declaration order. A render reads the value itself, never the ref.
+// event, so a handler, an async continuation and a passive effect all see it.
+// A layout effect declared AFTER the call in the same component also sees it,
+// since layout effects run in declaration order. A CHILD's layout effect or ref
+// callback does not: it runs before this one and still reads the previous
+// commit's value. A render reads the value itself, never the ref.
 //
 // For handlers and async continuations: oxlint's exhaustive-deps takes only a
 // `useRef` call's result for a stable value, so an effect with a dependency list

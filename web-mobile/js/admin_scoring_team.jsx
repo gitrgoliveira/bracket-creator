@@ -239,7 +239,7 @@ function recordedDaihyosenSideOf(existingDaihyosen, m) {
   return "";
 }
 
-// T131 helper: human-friendly position label for the team-match scoring
+// Human-friendly position label for the team-match scoring
 // modal. 5-person teams use the canonical FIK names (POS_LABELS_5 from
 // lineup_resolver.jsx, the single source of truth); non-5 sizes use the
 // position number.
@@ -368,7 +368,7 @@ export function isKachinukiBoutRemovable({ boutMode, currentBoutPlayed, lastScor
 // so they can never disagree about who won a bout.
 //
 // Order matters. An operator-marked hikiwake has no winner at all. A
-// FUSENSHO is a DEFAULT WIN (FIK Art. 32): the decision names the winner,
+// FUSENSHO (FIK Art. 32) is decided by the decision alone: it names the winner,
 // the maru cells (○○, or a single ○ in encho) are merely the score board's
 // marking of it, and the loser's already-struck ippons are PRESERVED
 // (preserveLoserScore, engine/scoring.go). So a walkover whose loser kept
@@ -1284,12 +1284,12 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
   // value names its groups again (stage 5 review 5).
   const onSubmit = onSubmitProp && ((patch, opts) => claimChanged.watch(onSubmitProp(patch, opts), patch));
   const onSubmitAndNext = onSubmitAndNextProp && ((patch) => claimChanged.watch(onSubmitAndNextProp(patch), patch));
-  // T136 / T141: competition lookup so we can branch on teamMatchType
+  // Competition lookup so we can branch on teamMatchType
   // ("kachinuki" vs "fixed") and gate the daihyosen affordance on the
   // knockout-format precondition. Falls back to compKind/teamSize when
   // the fetch fails so the existing fixed-grid flow still works.
   const [compMeta, setCompMeta] = useState(null);
-  // T136: kachinuki branch. Match-level teamMatchType (added by
+  // Kachinuki branch. Match-level teamMatchType (added by
   // viewer.compMatches in a sibling slice) is preferred; competition
   // fetch is the fallback. Default "fixed" preserves the legacy N×1
   // grid behaviour.
@@ -1393,7 +1393,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
   const hasDaihyosen = !!existingDaihyosen;
   const positions = hasDaihyosen ? [...numberedPositions, REPRESENTATIVE_KEY] : numberedPositions;
   const daihyosenIdx = hasDaihyosen ? numberedPositions.length : -1;
-  // FR-033: encho counter for team matches (overtime period count rides
+  // Encho counter for team matches (overtime period count rides
   // alongside the score on the wire: same shape as ScoreEditorModal).
   // mp-4pc: derive from the daihyosen sub when present: see
   // initialEnchoPeriodsForMatch for why. Captured in a const so isDirty
@@ -1450,8 +1450,8 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
   // affordance: that replays a stored submit closure this editor does not keep.
   // Holds the queued answer (queuedNotice words the banner from it).
   const [pendingWrite, setPendingWrite] = useState(false);
-  // T093–T098: decision state: same shape as the individual editor. See the
-  // ScoreEditorModal copy for the contract.
+  // State of the match-level decision prompt (kiken, fusenpai, fusensho): the
+  // same shape as the individual editor's; see ScoreEditorModal for the contract.
   const [decisionPromptKind, setDecisionPromptKind] = useState("");
   const [decisionSubmitting, setDecisionSubmitting] = useState(false);
   const [decisionErr, setDecisionErr] = useState("");
@@ -1501,7 +1501,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
   // across that reload instead of collapsing it after every ippon change.
   // Declared after the state and ref it resets, which no hook above reaches.
   useEffect(() => { setEditingDoneBoutIdx(-1); setEditingDoneOriginal(null); }, [match?.id]);
-  // T131: lineup data so each bout cell can show the assigned player
+  // Lineup data so each bout cell can show the assigned player
   // name + canonical position label. Falls back gracefully when the
   // lineup hasn't been submitted yet (saved: false -> null, bc-k404).
   const { lineupA, lineupB, lineupsSettled, servedLineupsKey, startLineupReads, beginLineupWrite, watchLineupSide, dropLineup } = useMatchLineups(m.compId, m.id);
@@ -1594,7 +1594,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
   const wroteSideMembers = (side, written) => {
     showMembers(side, mergeMembers(membersShownRef.current[side], written));
   };
-  // T141: error banner mapping for the daihyosen POST. Server returns
+  // Error banner mapping for the daihyosen POST. Server returns
   // 400 not_tied / 400 pool_match / 409 insufficient_eligibility: see
   // handlers_daihyosen.go for the canonical strings.
   const [editorErr, setEditorErr] = useState(""); // inline error surface: daihyosen add/remove
@@ -1750,7 +1750,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
 
   // bc-mrgc: what a write applied only in part kept in the match's history.
   const keptInHistory = useKeptInHistoryNote();
-  // T141: remove an unscored daihyosen placeholder. Defined at component
+  // Remove an unscored daihyosen placeholder. Defined at component
   // level so both the hantei row and any other affordance can call it.
   const onRemoveDaihyosen = () => {
     return runRepBoutChange({
@@ -1995,7 +1995,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
   // (admin_competition_bracket.jsx), same as the overlay, so a team never
   // changes layout by which one it is opened in.
   const useCompact = teamSize <= 5 || isKachinuki;
-  // T141: daihyosen is knockout-only: pool matches resolve ties via
+  // Daihyosen is knockout-only: pool matches resolve ties via
   // the standings tiebreak, not a representative bout. Format comes
   // from match-level compFormat (when set by compMatches) or the comp
   // fetch fallback. Phase === "bracket" is the in-modal signal.
@@ -2418,10 +2418,9 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
   })(kind, fields);
 
   const existingSub = m.subResults || [];
-  // T096/FR-031: round-trip per-bout fusensho. SubMatchResult.decision is
-  // the canonical signal: when "fusensho", figure out which side it
-  // belongs to via the recorded winner so the UI re-opens with the
-  // affordance shown as active.
+  // Reopening a saved bout: SubMatchResult.decision "fusensho" marks a
+  // per-bout fusensho, and fusenshoSideFromSub works out which side was
+  // awarded it, so the Fusensho button shows as pressed.
   const sideAName = nameOf(m.sideA);
   const sideBName = nameOf(m.sideB);
   // seedSubAt builds the local sub state for one position index from the
@@ -2622,8 +2621,8 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
     };
   });
 
-  // T096/FR-031: per-bout Fusensho: award a default win to the present
-  // side; the other side keeps what it had struck (applyFusenshoToggle).
+  // Per-bout Fusensho: the present side is awarded the bout 2-0 as maru
+  // marks; the other side keeps what it had struck (applyFusenshoToggle).
   // Re-clicking the active side undoes the fusensho and restores the score
   // that existed before fusensho was applied (the operator's intent on the
   // active button is "undo this"). Clicking the OTHER side while fusensho
@@ -2824,7 +2823,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
   //
   // bc-tmfn: IV/PW no longer "stay the bout-derived figures" while a
   // withdrawal is in force -- every bout the withdrawal left with no result
-  // of its own IS a default win for the OTHER side, exactly as the header's
+  // of its own is credited to the OTHER side (a fusensho bout's score), as the header's
   // Kiken/Fus. mark and every other surface (the viewer card's summary row,
   // the TV headline, the list rows) already read it. The band below reads
   // the SAME credited totals: `unscoredBouts`, computed once here, is fed
@@ -2923,7 +2922,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
   // bc-tmfn: the band's IV/PW (ts.iv/ts.pw below, via teamSides) include the
   // credited bouts while keepsWithdrawal holds. bc-cse: withdrawalInForce
   // now DELEGATES to isTeamDefaultWinDecision (team_default_credit.jsx), so
-  // this is no longer narrower than the full default-win class -- it covers
+  // this is no longer narrower than all of kiken, fusenpai and fusensho -- it covers
   // fusensho too, which the team editor CAN reach: BarredMatchNotice
   // (mounted below) records a match-level fusensho for the opponent of a
   // competitor already barred elsewhere. keepsWithdrawal stays !isKachinuki
@@ -3874,8 +3873,8 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
       // (boutWinnerSide's hanteiSide input), so no per-row overlay is needed.
       const wKey = t.winner;
       const w = wKey === "a" ? m.sideA : wKey === "b" ? m.sideB : null;
-      // T096/FR-031: per-bout fusensho overrides the default hikiwake/fought
-      // mapping. The daihyosen always carries decision="daihyosen".
+      // A per-bout fusensho is written as decision "fusensho", ahead of the
+      // hikiwake/fought mapping. The daihyosen always carries decision="daihyosen".
       // A bout nobody has fought yet stays decision "": it is not a hikiwake,
       // and writing one made an untouched row indistinguishable from an
       // operator-marked Tie on the server and on the next open, which is
@@ -4852,7 +4851,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
             Tap a scored mark to clear it
           </div>
 
-          {/* Individual match rows. T136: in kachinuki mode only the
+          {/* Individual match rows. In kachinuki mode only the
               current bout is rendered (see visiblePositions /
               kachinukiVisiblePositions above). The server appends new bouts
               via engine.MaybeAdvanceKachinuki after each score record, so
@@ -4907,7 +4906,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
             const idx = positions.indexOf(pos);
             const s = subs[idx];
             const t = subTotals[idx];
-            // T131: pull the per-side player + position label. existingSub
+            // Pull the per-side player + position label. existingSub
             // (from the match) and lineup data are both consulted so the
             // bout cell shows e.g. "Match 1 (Senpo): A. Tanaka vs B. Sato".
             const isDaihyoRow = idx === daihyosenIdx;
@@ -5035,7 +5034,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
             // fighting (taisho rule / a fighter the app has never seen)
             // instead of taking the walkover fusensho. Scoped tightly: for
             // positions 1..teamSize with a roster present, name picks keep
-            // routing through the INLINE LINEUP submit (existing T131 flow);
+            // routing through the INLINE LINEUP submit (the existing flow);
             // the free path applies only where that route cannot work —
             // position beyond teamSize (not a valid lineup key, the PUT
             // would 4xx) or no roster to pick from.
@@ -5112,8 +5111,8 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
             // its representative. Display only: buildPatch sends what it always has.
             const repTeamWhenUnpicked = (memberId, teamName) => (isDaihyoRow && !repPickable && !memberId ? teamName : "");
             // Each row: [left side, center score, right side]: left=SHIRO, right=AKA
-            // T096/FR-031: manual pts/fouls edits end the per-bout fusensho
-            // (updateSubScore: the default-win circles go, struck points stay,
+            // A manual points or fouls edit ends the per-bout fusensho
+            // (updateSubScore: the maru marks go, struck points stay,
             // the _preFusensho snapshot is discarded) so the bout becomes a
             // regular fought score once the operator intervenes. Taking a mark
             // off the side the fusensho went against is a correction and keeps
@@ -5203,7 +5202,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
               // applies, so the editor and the board can never disagree about
               // which cell is a side's outer (name-side) one.
               const order = sideSlotOrder(rs.color);
-              // A default win's circles are not the operator's to remove one by
+              // A fusensho's maru circles are not the operator's to remove one by
               // one: the pressed Fusensho button is their undo (bc-emsl).
               const defaultWin = s.fusensho === rs.key;
               return order.map(i => {
@@ -5222,8 +5221,8 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
                     disabled={rowLocked || (isHt && (selfReport || submitting || decisionSubmitting))}
                     onClick={() => {
                       if (isHt) { clearHantei(); return; }
-                      // bc-emsl: a tap on an EMPTY slot, or on a default-win
-                      // circle, clears nothing, so it must write nothing. setPts
+                      // bc-emsl: a tap on an EMPTY slot, or on a fusensho's
+                      // maru circle, clears nothing, so it must write nothing. setPts
                       // ends a Tie or a Fusensho and autosaves, which silently
                       // un-tied a bout. Same rule as the individual editor's
                       // removePt; the slot stays enabled, the tap is inert.
@@ -5338,8 +5337,8 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
                         {renderLineupNotice(rs.noticeKey)}
                         {/* Row 1: the ippon mark buttons and the per-bout
                             Fusensho button (layout: the .tsm-row-1 compact rules
-                            in styles.css). T096/FR-031: Fusensho awards the bout
-                            to this side by default; the other side keeps what it
+                            in styles.css). Fusensho awards the bout 2-0
+                            to this side as maru; the other side keeps what it
                             struck. Re-clicking the active side undoes it; manual
                             pts/fouls edits while active end it, except taking a
                             mark off the other side (updateSubScore). */}
@@ -5661,9 +5660,9 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
               editor; the per-bout buttons use the same M/K/D/T/H letters. */}
           <IpponLegend isNaginata={isNaginataTeam} />
 
-          {/* T093–T098: decision (kiken/fusenpai) controls for the overall
-              team match. Per-bout Fusensho lives on each sub-match row
-              (see the row-level "Fusensho" button per side, T096). */}
+          {/* Decision (kiken/fusenpai) controls for the overall team match.
+              Per-bout Fusensho lives on each sub-match row (the Fusensho
+              button per side). */}
           {/* mp-gmcg (critique P3): kiken/fusenpai are withdrawal/no-show
               decisions, rare relative to scoring, so they collapse into a
               disclosure by default instead of standing always-open beside the
@@ -5722,7 +5721,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
               (the radio labels "Which side withdrew?"). Silent when nothing
               is left to credit (every bout already has a result), and on a
               KACHINUKI encounter (bc-cse): team_default_credit.jsx excludes
-              kachinuki from the default-win credit on purpose (bouts are
+              kachinuki from the credit a kiken, fusenpai or fusensho gives on purpose (bouts are
               appended one at a time and the encounter ends on an explicit
               End match, never a match-level decision standing in for
               unplayed slots), so this note would promise a credit the
@@ -5743,7 +5742,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
               onSubmit={({ decisionBy, decisionReason }) => submitDecision(decisionPromptKind, { decisionBy, decisionReason })}
             />
           )}
-          {/* FR-033 encho toggle. Placed at the BOTTOM, beside the End/Reopen
+          {/* Encho toggle. Placed at the BOTTOM, beside the End/Reopen
               controls (operator feedback: controls belong at the bottom, not the
               top). EnchoControl collapses to a pill when no overtime is active.
               mp-gmcg (critique + operator ruling): suppressed in kachinuki bout
@@ -5909,7 +5908,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
           <MatchHistoryDisclosure match={m} password={password} hidden={!!selfReport} members={historyMemberLabel} />
           {/* bc-cse: a barred match cannot be started as scheduled -- the
               server would just refuse it -- so the ONE component that shows
-              why and offers the default-win/reinstate resolution
+              why and offers the fusensho/reinstate resolution
               (BarredMatchNotice, admin_scoring_shared.jsx) stands where Start
               would be. Lifted ABOVE .score-nav__actions (a centred wrapping
               flex row of small buttons): the notice's own note text plus its

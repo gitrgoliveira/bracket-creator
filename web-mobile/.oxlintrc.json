@@ -23,6 +23,10 @@
       }
     ],
     "no-undef": "error",
+    "no-warning-comments": [
+      "error",
+      { "terms": ["todo", "fixme", "hack", "xxx"], "location": "anywhere" }
+    ],
     "no-unused-expressions": [
       "error",
       { "allowShortCircuit": true, "allowTernary": true }

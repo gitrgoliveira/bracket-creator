@@ -34,7 +34,7 @@ const compMatchStats = window.compMatchStats;
 //
 // Shape:
 //   { id: string, label: string, detail: string, cta: string|null,
-//     state: 'done'|'active'|'todo', section: string|null,
+//     state: 'done'|'active'|'pending', section: string|null,
 //     blocking?: boolean }
 //
 // Rules:
@@ -43,7 +43,7 @@ const compMatchStats = window.compMatchStats;
 //   - "Review seeds & settings" is always emitted as a non-done step: there is
 //     no reliable "seeds reviewed" signal, so it never auto-completes (its
 //     detail line reflects the current seed count, but its state stays
-//     todo/active and is resolved by the active-step pass below). Its CTA
+//     pending/active and is resolved by the active-step pass below). Its CTA
 //     navigates to the "settings" section (format, courts, duration); seeds
 //     are accessible from the seeding card on the "participants" page.
 //   - Team comps get an extra "Set team lineups" step (→ "lineups") inserted
@@ -56,7 +56,7 @@ const compMatchStats = window.compMatchStats;
 //     telling an operator to press a greyed-out button is worse than saying
 //     nothing. `tournamentCourts` is optional and only feeds that check (the
 //     orphaned-shiaijo half of it); omit it and only the count rule applies.
-//   - The FIRST non-done step is promoted to "active"; the rest stay "todo".
+//   - The FIRST non-done step is promoted to "active"; the rest stay "pending".
 //     EXCEPT when a step is `blocking` (today only "Generate the draw", when a
 //     court rule has disabled it): that one is promoted instead, because
 //     nothing further in the checklist can happen until it is fixed, and
@@ -106,7 +106,7 @@ function competitionNextSteps(c, tournamentCourts) {
     detail: seededCount > 0
       ? `${seededCount} seed${seededCount !== 1 ? "s" : ""} assigned`
       : "Optionally assign seeds and adjust format",
-    state: "todo",
+    state: "pending",
     section: "settings",
     cta: "Review settings →",
   });
@@ -117,7 +117,7 @@ function competitionNextSteps(c, tournamentCourts) {
       id: "lineups",
       label: "Set team lineups",
       detail: "Assign positions (Senpo, Jiho, …) before the draw",
-      state: "todo",
+      state: "pending",
       section: "lineups",
       cta: "Set lineups →",
     });
@@ -142,7 +142,7 @@ function competitionNextSteps(c, tournamentCourts) {
     id: "generate",
     label: "Generate the draw",
     detail: generateDetail,
-    state: "todo",
+    state: "pending",
     section: drawIsBlocked ? drawBlocker.section : null,
     cta: drawIsBlocked ? drawBlocker.cta : null,
     // `blocking` means "nothing further in this checklist can happen until
@@ -155,7 +155,7 @@ function competitionNextSteps(c, tournamentCourts) {
   // The default rule (first non-done becomes active) can never reach the
   // generate step: "Review seeds & settings" is deliberately emitted non-done
   // forever, because there is no "seeds reviewed" signal, so it takes `active`
-  // on every render and everything after it stays `todo`. Only an active step
+  // on every render and everything after it stays `pending`. Only an active step
   // renders its CTA, so the "Reassign shiaijo →" button authored above was
   // unreachable in every state the checklist can be in.
   //
@@ -165,7 +165,7 @@ function competitionNextSteps(c, tournamentCourts) {
   // whose draw is refused has exactly one next action.
   // One pass, one rule: a blocking step takes `active` if there is one,
   // otherwise the first non-done step does, and every other non-done step is
-  // `todo`. Writing the two cases as separate passes meant the blocker branch
+  // `pending`. Writing the two cases as separate passes meant the blocker branch
   // also had to re-clear the states the default branch would have set, which
   // was a no-op for every step this checklist actually emits and would have
   // silently stopped being one the moment a later step was pushed as "active".
@@ -173,7 +173,7 @@ function competitionNextSteps(c, tournamentCourts) {
     || steps.find((s) => s.state !== "done");
   steps.forEach((s) => {
     if (s.state === "done") return;
-    s.state = s === active ? "active" : "todo";
+    s.state = s === active ? "active" : "pending";
   });
 
   return steps;

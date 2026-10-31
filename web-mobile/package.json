@@ -6,7 +6,7 @@
   "scripts": {
     "test": "vitest run",
     "test:render": "vitest run --config vitest.config.render.js",
-    "lint": "oxlint --deny-warnings",
+    "lint": "oxlint --deny-warnings --report-unused-disable-directives",
     "audit": "audit-ci --config audit-ci.jsonc"
   },
   "devDependencies": {

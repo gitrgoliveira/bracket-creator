@@ -143,11 +143,11 @@ js/lint: js/deps ## Run Javascript linters
 	@# with no -c, oxlint does not discover .oxlintrc.json upward from
 	@# web-mobile/, so the react/unicorn/oxc plugins and project rules it
 	@# configures never applied and this line silently exited 0 (bc-appx item 4).
-	@npx --prefix web-mobile oxlint --deny-warnings -c web-mobile/.oxlintrc.json docs/assets/javascripts/
+	@npx --prefix web-mobile oxlint --deny-warnings --report-unused-disable-directives -c web-mobile/.oxlintrc.json docs/assets/javascripts/
 	@# web/ (the CLI's web UI) was linted by nothing either. It is plain browser
 	@# JS with Bootstrap loaded as a global, so it has its own config with no
 	@# React plugin, run with web-mobile's binary for the same reasons as above.
-	@npx --prefix web-mobile oxlint --deny-warnings -c web/.oxlintrc.json web/js/ web/tests/
+	@npx --prefix web-mobile oxlint --deny-warnings --report-unused-disable-directives -c web/.oxlintrc.json web/js/ web/tests/
 
 js/sec: js/deps ## Run Javascript security scans (audit-ci)
 	@echo "Running Javascript security scans..."
@@ -179,6 +179,8 @@ js/check-imports: ## Check cross-module named imports resolve (mp-zac3 split mod
 	@node web-mobile/check-write-result.mjs
 	@echo "Checking the competitor-number match rule is asked, not re-derived..."
 	@node web-mobile/check-competitor-search.mjs
+	@echo "Checking no lint-disable comments exist in tracked Go or JS sources..."
+	@node web-mobile/check-no-disable-comments.mjs
 
 js/validate: js/lint js/check-imports js/test js/security ## Run all Javascript checks
 

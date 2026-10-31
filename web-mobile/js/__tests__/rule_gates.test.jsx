@@ -144,11 +144,31 @@ describe('the lint-disable gate refuses every disable directive', () => {
   const NO_LINT = 'no' + 'lint';
   const OX = 'ox' + 'lint-disable';
   const ES = 'es' + 'lint-disable';
+  const NOSEC = '#' + 'nosec';
+  const GOSEC_OFF = 'gosec:' + 'disable';
 
   it('a Go no-lint directive trips, with or without a space and a linter name', () => {
     expect(scanText(`x := f() //${NO_LINT}:errcheck`, GO_RULES)).toHaveLength(1);
     expect(scanText(`x := f() // ${NO_LINT}`, GO_RULES)).toHaveLength(1);
     expect(scanText(`//${NO_LINT}\nfunc f() {}`, GO_RULES)).toHaveLength(1);
+  });
+
+  it('a gosec suppression comment trips, with or without a rule id and a space', () => {
+    expect(scanText(`f, err := os.Open(p) // ${NOSEC} G304`, GO_RULES)).toHaveLength(1);
+    expect(scanText(`// ${NOSEC} G304 -- a reason\nf, err := os.Open(p)`, GO_RULES)).toHaveLength(1);
+    expect(scanText(`x := f() // #  ${NOSEC.slice(1)}`, GO_RULES)).toHaveLength(1);
+    expect(scanText(`f, err := os.Open(p) // ${NOSEC}G304`, GO_RULES)).toHaveLength(1);
+    const [hit] = scanText(`x := f() // ${NOSEC}`, GO_RULES);
+    expect(hit.why).toMatch(/gosec suppression comment/);
+    expect(hit.why).toMatch(/Makefile/);
+  });
+
+  it('the gosec directive comment trips, alone, with rule ids, or after a space', () => {
+    expect(scanText(`//${GOSEC_OFF}\nf, err := os.Open(p)`, GO_RULES)).toHaveLength(1);
+    expect(scanText(`f, err := os.Open(p) //${GOSEC_OFF} G304 -- a reason`, GO_RULES)).toHaveLength(1);
+    expect(scanText(`// ${GOSEC_OFF} G304`, GO_RULES)).toHaveLength(1);
+    const [hit] = scanText(`//${GOSEC_OFF}`, GO_RULES);
+    expect(hit.why).toMatch(/gosec suppression directive/);
   });
 
   it('a JS oxlint next-line directive trips, and so does the line form', () => {
@@ -167,6 +187,8 @@ describe('the lint-disable gate refuses every disable directive', () => {
 
   it('clean text passes, and so does prose that only mentions linting', () => {
     expect(scanText('x := f() // handled: the error is logged\n', GO_RULES)).toEqual([]);
+    expect(scanText('// gosec flags this; the Makefile excludes the rule for this file\n', GO_RULES)).toEqual([]);
+    expect(scanText('// gosec: a disable comment is not allowed here\n', GO_RULES)).toEqual([]);
     expect(scanText('// the linter reports this; change the rule instead\nfoo();', JS_RULES)).toEqual([]);
     expect(scanText('const lint = 1; const disable = 2;', JS_RULES)).toEqual([]);
   });

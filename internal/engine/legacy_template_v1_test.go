@@ -12,6 +12,7 @@ import (
 
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
+	bctest "github.com/gitrgoliveira/bracket-creator/internal/test"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -158,7 +159,7 @@ func TestLegacyPlaceholderTemplateV1_IsFrozen(t *testing.T) {
 		return
 	}
 
-	raw, err := os.ReadFile(path) // #nosec G304 -- fixed testdata path
+	raw, err := bctest.ReadFile(path)
 	require.NoError(t, err, "golden missing; regenerate with UPDATE_GOLDEN=1 go test ./internal/engine/ -run TestLegacyPlaceholderTemplateV1_IsFrozen")
 	assert.Equal(t, string(raw), string(encoded),
 		"the frozen v1 draw MUST NOT change: it is the only way a bracket drawn before bc-draw Phase 4 can be read back")

@@ -3,6 +3,9 @@ package test
 import (
 	"bytes"
 	"fmt"
+	"io/fs"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -10,6 +13,19 @@ import (
 	"github.com/stretchr/testify/require"
 	excelize "github.com/xuri/excelize/v2"
 )
+
+func TestReadFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "fixture.txt")
+	require.NoError(t, os.WriteFile(path, []byte("kept"), 0o600))
+
+	got, err := ReadFile(path)
+	require.NoError(t, err)
+	assert.Equal(t, "kept", string(got))
+
+	_, err = ReadFile(filepath.Join(dir, "missing.txt"))
+	assert.ErrorIs(t, err, fs.ErrNotExist)
+}
 
 func TestCreateTestPlayers(t *testing.T) {
 	players := CreateTestPlayers()

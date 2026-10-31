@@ -85,9 +85,17 @@ go/lint: go/fmt go/generate ## Run linters
 	@echo "Running linters..."
 	golangci-lint run ./cmd/... ./internal/... ./tests/... .
 
+# G204 (a subprocess launched with a non-constant argument) is excluded for
+# internal/pdf/soffice.go alone: it is the tree's one subprocess, LibreOffice
+# at the path LocateSoffice resolves ($LIBREOFFICE_PATH, PATH, or a fixed
+# install location) converting a workbook this process wrote to its own temp
+# folder. gosec flags every non-constant argument, so no rewrite of that call
+# satisfies it. .golangci.yml carries the same exclusion, path-scoped alike.
+GOSEC_EXCLUDE_RULES := internal/pdf/soffice\.go:G204
+
 go/sec: go/generate ## Run security scans (gosec)
 	@echo "Running security scans..."
-	gosec ./cmd/... ./internal/... ./tests/... .
+	gosec -exclude-rules='$(GOSEC_EXCLUDE_RULES)' ./cmd/... ./internal/... ./tests/... .
 
 go/sec-tests: go/generate ## Run gosec over test files too (audit, not a gate)
 	@# gosec skips _test.go by default and golangci-lint excludes gosec from
@@ -100,7 +108,7 @@ go/sec-tests: go/generate ## Run gosec over test files too (audit, not a gate)
 	@# finding outside a _test.go file, and every HIGH was scaffolding (two
 	@# were table cases asserting that a URL carrying credentials is REJECTED).
 	@echo "Auditing test files with gosec (not part of the gate)..."
-	gosec -tests ./cmd/... ./internal/... ./tests/... .
+	gosec -tests -exclude-rules='$(GOSEC_EXCLUDE_RULES)' ./cmd/... ./internal/... ./tests/... .
 
 go/vuln: ## Run vulnerability check (govulncheck)
 	@echo "Running vulnerability check..."

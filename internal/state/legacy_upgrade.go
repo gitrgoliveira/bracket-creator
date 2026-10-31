@@ -470,7 +470,7 @@ func (s *Store) EnsureLegacyUpgraded(compID string) {
 // the files that do.
 func (s *Store) upgradeCompetitionFormatLocked(compID string) error {
 	path := s.compPath(compID, "config.md")
-	raw, err := os.ReadFile(path) // #nosec G304; path built by compPath, which enforces containment under the competitions dir
+	raw, err := s.root.readFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil // no config.md on disk for this id; nothing to converge
@@ -859,7 +859,7 @@ func poolsNeedIDRepair(pools []helper.Pool) bool {
 // overhead nobody ever reads.
 func (s *Store) upgradePoolParticipantIDsLocked(compID string, roster *legacyUpgradeRoster) error {
 	path := s.compPath(compID, "pools.csv")
-	parsed, err := parsePoolsFile(path)
+	parsed, err := s.parsePoolsFile(path)
 	if err != nil {
 		return nil // missing/unreadable pools are the consumers' error to report
 	}
@@ -935,7 +935,7 @@ func (s *Store) upgradePoolParticipantIDsLocked(compID string, roster *legacyUpg
 // it straight to savePoolMatchesLocked.
 func (s *Store) upgradePoolMatchSideIDsLocked(compID string, roster *legacyUpgradeRoster) error {
 	path := s.compPath(compID, "pool-matches.csv")
-	parsed, err := parsePoolMatchesFile(path)
+	parsed, err := s.parsePoolMatchesFile(path)
 	if err != nil {
 		return nil // missing/unreadable pool matches are the consumers' error to report
 	}
@@ -1138,7 +1138,7 @@ func bracketNeedsIDRepair(b *Bracket) bool {
 // saved along with the rounds rather than thrown away.
 func (s *Store) upgradeBracketLocked(compID string, roster *legacyUpgradeRoster) error {
 	path := s.compPath(compID, "bracket.json")
-	parsed, err := parseBracketFile(path)
+	parsed, err := s.parseBracketFile(path)
 	if err != nil {
 		return nil // missing/unreadable bracket is the consumers' error to report
 	}
@@ -1350,7 +1350,7 @@ func (s *Store) upgradeTeamDefaultWinBoutPaddingLocked(compID string, roster *le
 // holds the per-comp lock.
 func (s *Store) padTeamDefaultWinBoutsInPoolMatchesLocked(compID string, teamSize int) error {
 	path := s.compPath(compID, "pool-matches.csv")
-	parsed, err := parsePoolMatchesFile(path)
+	parsed, err := s.parsePoolMatchesFile(path)
 	if err != nil {
 		return nil // missing/unreadable pool matches are the consumers' error to report
 	}
@@ -1381,7 +1381,7 @@ func (s *Store) padTeamDefaultWinBoutsInPoolMatchesLocked(compID string, teamSiz
 // predicate serves both halves rather than one gated copy and one ungated.
 func (s *Store) padTeamDefaultWinBoutsInBracketLocked(compID string, teamSize int) error {
 	path := s.compPath(compID, "bracket.json")
-	parsed, err := parseBracketFile(path)
+	parsed, err := s.parseBracketFile(path)
 	if err != nil {
 		return nil // missing/unreadable bracket is the consumers' error to report
 	}
@@ -1471,7 +1471,7 @@ func (s *Store) upgradeKachinukiEncounterEnchoLocked(compID string, roster *lega
 func (s *Store) clearKachinukiEncounterEnchoInPoolMatchesLocked(compID string, comp *Competition) error {
 	// A missing file parses as empty; any error here is a real read or parse
 	// failure, returned so the marker stays unset and the next start retries.
-	parsed, err := parsePoolMatchesFile(s.compPath(compID, "pool-matches.csv"))
+	parsed, err := s.parsePoolMatchesFile(s.compPath(compID, "pool-matches.csv"))
 	if err != nil {
 		return fmt.Errorf("read pool matches: %w", err)
 	}
@@ -1493,7 +1493,7 @@ func (s *Store) clearKachinukiEncounterEnchoInPoolMatchesLocked(compID string, c
 // per-comp lock.
 func (s *Store) clearKachinukiEncounterEnchoInBracketLocked(compID string, comp *Competition) error {
 	// As the pool half: a missing file parses as empty, so an error is real.
-	parsed, err := parseBracketFile(s.compPath(compID, "bracket.json"))
+	parsed, err := s.parseBracketFile(s.compPath(compID, "bracket.json"))
 	if err != nil {
 		return fmt.Errorf("read bracket: %w", err)
 	}
@@ -2299,13 +2299,13 @@ func (s *Store) upgradeRoundLineupsLocked(compID string, roster *legacyUpgradeRo
 // and the next load simply retries.
 func (s *Store) upgradeTeamMembersFilenameLocked(compID string, write writeFn) error {
 	newPath := s.compPath(compID, teamMembersFilename)
-	if _, err := os.Stat(newPath); err == nil {
+	if _, err := s.root.stat(newPath); err == nil {
 		return nil // already on the current name
 	} else if !os.IsNotExist(err) {
 		return err
 	}
 	oldPath := s.compPath(compID, legacySquadsFilename)
-	data, err := os.ReadFile(oldPath) // #nosec G304, compPath enforces containment under the competitions dir.
+	data, err := s.root.readFile(oldPath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil // nothing recorded by an older release either
@@ -2334,7 +2334,7 @@ func (s *Store) upgradeTeamMembersFilenameLocked(compID string, write writeFn) e
 	if err := s.saveSquadsLocked(compID, members, write); err != nil {
 		return err
 	}
-	if err := os.Remove(oldPath); err != nil && !os.IsNotExist(err) {
+	if err := s.root.remove(oldPath); err != nil && !os.IsNotExist(err) {
 		// The members are safe on the new name; a leftover old file is
 		// cosmetic and must not fail the load.
 		log.Printf("state: team-members migration for %s left %s in place: %v", compID, legacySquadsFilename, err)

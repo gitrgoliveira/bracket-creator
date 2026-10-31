@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/gitrgoliveira/bracket-creator/internal/pdf"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
@@ -171,12 +172,7 @@ func handleSponsorUpload(store *state.Store, hub *Hub) gin.HandlerFunc {
 			return
 		}
 		fullPath := filepath.Join(sponsorsDir, fileName)
-		// fileName is server-generated (16 random hex chars + sniffed
-		// image extension); fullPath joins under sponsorsDir which is
-		// itself derived from store.GetFolder. No user-controlled input
-		// reaches the OS call.
-		// #nosec G304 -- filename is server-generated, not from user input
-		dst, err := os.OpenFile(fullPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+		dst, err := pdf.OpenInFolder(sponsorsDir, fileName, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 		if err != nil {
 			internalError(c, err)
 			return

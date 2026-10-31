@@ -216,7 +216,7 @@ func (g *Generator) buildGroup(ctx context.Context, grp Group, conv []converted,
 // streamed (io.Copy) to avoid buffering whole PDFs in memory, and the temp file
 // is created with os.CreateTemp so concurrent publishes can't collide.
 func publishAtomic(src, dst string) error {
-	in, err := os.Open(src) // #nosec G304 -- src is an internally-generated PDF in a temp work dir.
+	in, err := OpenInFolder(filepath.Dir(src), filepath.Base(src), os.O_RDONLY, 0)
 	if err != nil {
 		return fmt.Errorf("open generated pdf: %w", err)
 	}
@@ -228,7 +228,6 @@ func publishAtomic(src, dst string) error {
 	}()
 
 	dir, base := filepath.Dir(dst), filepath.Base(dst)
-	// #nosec G304 -- dir is the caller's output dir; base is a fixed group filename constant.
 	tmp, err := os.CreateTemp(dir, base+".*.tmp")
 	if err != nil {
 		return fmt.Errorf("create temp output: %w", err)

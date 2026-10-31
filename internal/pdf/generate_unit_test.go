@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	bctest "github.com/gitrgoliveira/bracket-creator/internal/test"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -53,7 +54,7 @@ func TestPublishAtomic(t *testing.T) {
 
 		require.NoError(t, publishAtomic(src, dst))
 
-		got, err := os.ReadFile(dst) // #nosec G304, test-only temp path
+		got, err := bctest.ReadFile(dst)
 		require.NoError(t, err)
 		assert.Equal(t, "pdf-content", string(got))
 
@@ -75,7 +76,7 @@ func TestPublishAtomic(t *testing.T) {
 
 		require.NoError(t, publishAtomic(src, dst))
 
-		got, err := os.ReadFile(dst) // #nosec G304, test-only temp path
+		got, err := bctest.ReadFile(dst)
 		require.NoError(t, err)
 		assert.Equal(t, "new-content", string(got))
 	})

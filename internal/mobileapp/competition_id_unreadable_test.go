@@ -12,6 +12,7 @@ import (
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
+	bctest "github.com/gitrgoliveira/bracket-creator/internal/test"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -35,7 +36,7 @@ func plantUnreadableConfig(t *testing.T, dataDir, id string) string {
 
 func assertConfigUntouched(t *testing.T, path string) {
 	t.Helper()
-	after, err := os.ReadFile(path) // #nosec G304 -- the test's own temp file
+	after, err := bctest.ReadFile(path)
 	require.NoError(t, err)
 	assert.Equal(t, unreadableConfig, string(after), "the unreadable competition's settings are kept as they were")
 }

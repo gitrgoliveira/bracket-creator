@@ -37,7 +37,23 @@ import (
 	"time"
 )
 
-// atomicWriteFile writes data to path atomically and durably.
+// atomicWrite is the Store-bound write gate. It validates that path is
+// within the store's data folder before delegating to atomicWriteFile;
+// giving CodeQL a verifiable sanitisation boundary for the path value
+// (which ultimately originates from HTTP-supplied competition IDs). The
+// check also names a WAL intent replayed from a data folder that has
+// since moved, which the root would refuse with a less telling error.
+func (s *Store) atomicWrite(path string, data []byte, perm fs.FileMode) error {
+	cleanPath := filepath.Clean(path)
+	cleanBase := filepath.Clean(s.folder) + string(filepath.Separator)
+	if !strings.HasPrefix(cleanPath, cleanBase) {
+		return fmt.Errorf("write to %q is outside data directory %q", cleanPath, s.folder)
+	}
+	return atomicWriteFile(s.root, cleanPath, data, perm)
+}
+
+// atomicWriteFile writes data to path, under root's data folder,
+// atomically and durably.
 //
 // On success the file at path contains exactly the supplied bytes with
 // the supplied mode bits. On failure the file at path is left unchanged
@@ -59,32 +75,12 @@ import (
 // right content; only the directory-entry durability across power loss
 // is at risk, which is the same risk every fsync-less write already
 // has.
-// atomicWrite is the Store-bound write gate. It validates that path is
-// within the store's data folder before delegating to atomicWriteFile;
-// giving CodeQL a verifiable sanitisation boundary for the path value
-// (which ultimately originates from HTTP-supplied competition IDs).
-func (s *Store) atomicWrite(path string, data []byte, perm fs.FileMode) error {
-	cleanPath := filepath.Clean(path)
-	cleanBase := filepath.Clean(s.folder) + string(filepath.Separator)
-	if !strings.HasPrefix(cleanPath, cleanBase) {
-		return fmt.Errorf("write to %q is outside data directory %q", cleanPath, s.folder)
-	}
-	return atomicWriteFile(cleanPath, data, perm)
-}
-
-func atomicWriteFile(path string, data []byte, perm fs.FileMode) error {
-	// In-function sanitiser. Both callers (Store.atomicWrite and
-	// Store.directWriteWAL via Store.atomicWrite) already validate
-	// that path lives inside the data folder; running filepath.Clean
-	// here ensures the value is normalised at the file-syscall
-	// boundary too; so CodeQL's go/path-injection analysis sees an
-	// in-function sanitiser and stops flagging the os.OpenFile /
-	// os.Rename / os.Remove sites below as tainted.
+func atomicWriteFile(root *dataRoot, path string, data []byte, perm fs.FileMode) error {
+	// Every open, rename and removal below goes through root, so the
+	// operating system keeps them inside the data folder. Cleaning the
+	// path keeps the temp file a sibling of the target.
 	path = filepath.Clean(path)
 	dir, base := filepath.Split(path)
-	if dir == "" {
-		dir = "."
-	}
 
 	// Unique suffix: pid + monotonic-ish nanos. The rename clears it
 	// immediately; so a collision is extremely unlikely even without
@@ -97,7 +93,7 @@ func atomicWriteFile(path string, data []byte, perm fs.FileMode) error {
 	// because the unique suffix already guarantees absence; using O_EXCL
 	// would only add a race window between the time.Now() and the open
 	// for nothing.
-	tmp, err := os.OpenFile(tmpPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, perm) // #nosec G304, tmpPath is constructed from a caller-supplied target plus a deterministic suffix.
+	tmp, err := root.openFile(tmpPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, perm)
 	if err != nil {
 		return err
 	}
@@ -107,7 +103,7 @@ func atomicWriteFile(path string, data []byte, perm fs.FileMode) error {
 	// returned as it is unless the removal itself fails, which is joined
 	// to it (an orphan the operator may have to remove by hand).
 	cleanup := func(cause error) error {
-		if err := os.Remove(tmpPath); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		if err := root.remove(tmpPath); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return errors.Join(cause, err)
 		}
 		return cause
@@ -133,7 +129,7 @@ func atomicWriteFile(path string, data []byte, perm fs.FileMode) error {
 		return cleanup(err)
 	}
 
-	if err := os.Rename(tmpPath, path); err != nil {
+	if err := root.rename(tmpPath, path); err != nil {
 		return cleanup(err)
 	}
 
@@ -142,7 +138,7 @@ func atomicWriteFile(path string, data []byte, perm fs.FileMode) error {
 	// after rename() returns can revert the rename even though the
 	// data file itself was fsync'd. On Windows this returns
 	// "operation not supported", swallow that specific error.
-	if err := syncDir(dir); err != nil {
+	if err := syncDir(root, dir); err != nil {
 		return err
 	}
 
@@ -185,20 +181,14 @@ func (s *Store) directWrite(path string, data []byte, perm fs.FileMode) error {
 // Any other error (e.g. permission denied on POSIX) is returned to
 // the caller, those represent real problems we shouldn't silently
 // ignore.
-func syncDir(dirPath string) (err error) {
+func syncDir(root *dataRoot, dirPath string) (err error) {
 	// On Windows, opening a directory for writing isn't a thing, and
 	// even reading it doesn't give a syncable handle. Skip outright.
 	if runtime.GOOS == "windows" {
 		return nil
 	}
 
-	// In-function sanitiser, atomicWriteFile (our only caller) has
-	// already cleaned the target path before we received `dirPath` as
-	// its filepath.Split-derived directory component, but cleaning
-	// here too keeps the path-injection sanitiser visible to CodeQL
-	// at the os.Open boundary.
-	dirPath = filepath.Clean(dirPath)
-	d, err := os.Open(dirPath) // #nosec G304, dirPath is derived from the caller's target path.
+	d, err := root.open(dirPath)
 	if err != nil {
 		return err
 	}

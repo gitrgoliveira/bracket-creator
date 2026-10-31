@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	bctest "github.com/gitrgoliveira/bracket-creator/internal/test"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -99,7 +100,7 @@ func TestRenameWorksWhileSeedingIsIncomplete(t *testing.T) {
 	})
 	require.NoError(t, err, "a rename must not be blocked by an unfinished seeding")
 
-	got, err := os.ReadFile(filepath.Join(dir, "competitions", "c1", "seeds.csv"))
+	got, err := bctest.ReadFile(filepath.Join(dir, "competitions", "c1", "seeds.csv"))
 	require.NoError(t, err)
 	assert.Contains(t, string(got), "David",
 		"the rename must reach seeds.csv, or it names a competitor who no longer exists")

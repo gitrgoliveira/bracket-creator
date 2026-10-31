@@ -32,6 +32,7 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
+	bctest "github.com/gitrgoliveira/bracket-creator/internal/test"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"
@@ -117,7 +118,7 @@ func rlWriteLineups(t *testing.T, dir, compID string, lineups ...domain.TeamLine
 
 func rlRaw(t *testing.T, dir, file string) string {
 	t.Helper()
-	raw, err := os.ReadFile(filepath.Join(dir, "competitions", rlComp, file)) // #nosec G304 -- a path under t.TempDir
+	raw, err := bctest.ReadFile(filepath.Join(dir, "competitions", rlComp, file))
 	require.NoError(t, err)
 	return string(raw)
 }
@@ -1253,7 +1254,7 @@ func TestRoundLineups_ARecordWhoseIdIsNotItsDirectoryIsLeftAlone(t *testing.T) {
 	teams := newRLTeams()
 	dir := rlSeed(t, rlTeamComp(state.CompFormatKnockout), teams, nil, rlKnockout(teams), rlLineup(teams.tora, "", 1, "tora-round1"))
 	cfg := filepath.Join(dir, "competitions", rlComp, "config.md")
-	raw, err := os.ReadFile(cfg) // #nosec G304 -- a path under t.TempDir
+	raw, err := bctest.ReadFile(cfg)
 	require.NoError(t, err)
 	require.Contains(t, string(raw), "id: rl\n")
 	require.NoError(t, os.WriteFile(cfg, []byte(strings.Replace(string(raw), "id: rl\n", "id: elsewhere\n", 1)), 0o600))
@@ -2110,7 +2111,7 @@ func TestRoundLineups_AHandWrittenRecordIsHonoured(t *testing.T) {
 	teams := newRLTeams()
 	dir := rlSeed(t, rlTeamComp(state.CompFormatKnockout), teams, nil, rlKnockout(teams), rlLineup(teams.tora, "", 1, "tora-round1"))
 	cfg := filepath.Join(dir, "competitions", rlComp, "config.md")
-	raw, err := os.ReadFile(cfg) // #nosec G304 -- a path under t.TempDir
+	raw, err := bctest.ReadFile(cfg)
 	require.NoError(t, err)
 	handWritten := strings.TrimSuffix(string(raw), "---\n") + "round_lineups_given:\n  " + teams.tora + ":\n    - r0-m0\n---\n"
 	require.NoError(t, os.WriteFile(cfg, []byte(handWritten), 0o600))
@@ -2210,7 +2211,7 @@ func TestRoundLineups_TheLoadStepsAfterTheSettlementDoNotWriteItAway(t *testing.
 			}
 			dir := rlSeed(t, comp, teams, nil, rlKnockout(teams), rlLineup(teams.tora, "", 1, "tora-round1"))
 			cfg := filepath.Join(dir, "competitions", rlComp, "config.md")
-			raw, err := os.ReadFile(cfg) // #nosec G304 -- a path under t.TempDir
+			raw, err := bctest.ReadFile(cfg)
 			require.NoError(t, err)
 			// Whatever the seeding wrote, the repair is still pending: the record
 			// is as a release that never ran it left it.

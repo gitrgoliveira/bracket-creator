@@ -12,6 +12,7 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/engine"
 	"github.com/gitrgoliveira/bracket-creator/internal/pdf"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
+	bctest "github.com/gitrgoliveira/bracket-creator/internal/test"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -577,7 +578,7 @@ func TestPrintInputDirSingleType(t *testing.T) {
 	dir := t.TempDir()
 	// Copy the example xlsx into a temp dir so collectWorkbooks finds it.
 	xlsxDst := filepath.Join(dir, "example.xlsx")
-	data, err := os.ReadFile(xlsx) // #nosec G304, test-only read of a repo asset
+	data, err := bctest.ReadFile(xlsx)
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(xlsxDst, data, 0o644))
 
@@ -600,7 +601,7 @@ func TestPrintInputDirSingleTypeWithOutput(t *testing.T) {
 	xlsx := findExampleXLSXForCmd(t)
 	dir := t.TempDir()
 	xlsxDst := filepath.Join(dir, "example.xlsx")
-	data, err := os.ReadFile(xlsx) // #nosec G304, test-only read of a repo asset
+	data, err := bctest.ReadFile(xlsx)
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(xlsxDst, data, 0o644))
 

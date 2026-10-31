@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
+	bctest "github.com/gitrgoliveira/bracket-creator/internal/test"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"
@@ -186,7 +187,7 @@ func TestTeamMemberStamp_ALegacyFileRoundTripsByteForByte(t *testing.T) {
 
 	require.NoError(t, s.saveSquadsLocked(id, squads, s.directWrite))
 
-	raw, err := os.ReadFile(path) // #nosec G304 -- a path under the test store
+	raw, err := bctest.ReadFile(path)
 	require.NoError(t, err)
 	assert.Equal(t, legacy, string(raw))
 	for _, m := range squads[teamA] {
@@ -204,7 +205,7 @@ func TestTeamMemberStamp_AWriteLeavesTheOthersOfALegacyFileAsTheyWere(t *testing
 	_, err := s.NameUnnamedTeamMember(id, teamA, "22222222-2222-4222-8222-222222222222", "Ueno")
 	require.NoError(t, err)
 
-	raw, err := os.ReadFile(path) // #nosec G304 -- a path under the test store
+	raw, err := bctest.ReadFile(path)
 	require.NoError(t, err)
 	assert.Equal(t, "members:\n    "+teamA+":\n        - id: 11111111-1111-4111-8111-111111111111\n          index: 1\n          name: Ito\n        - id: 22222222-2222-4222-8222-222222222222\n          index: 2\n          name: Ueno\n          modifiedAt: 1760000000000\n", string(raw))
 }

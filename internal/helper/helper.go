@@ -213,7 +213,6 @@ func ReadEntriesFromFile(filePath string) ([]string, error) {
 		return nil, fmt.Errorf("invalid file path: %s", filePath)
 	}
 
-	// #nosec G304 - file path is validated above
 	file, err := os.Open(cleanPath)
 	if err != nil {
 		return nil, err
@@ -257,7 +256,6 @@ func ReadCSVFile(filePath string) ([][]string, error) {
 		return nil, fmt.Errorf("invalid file path: %s", filePath)
 	}
 
-	// #nosec G304 - file path is validated above
 	file, err := os.Open(cleanPath)
 	if err != nil {
 		return nil, err

@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	bctest "github.com/gitrgoliveira/bracket-creator/internal/test"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -14,7 +15,7 @@ import (
 // for tests where we don't need the full atomic-rename ceremony the
 // production wiring uses.
 func directWrite(path string, data []byte, perm os.FileMode) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 		return err
 	}
 	return os.WriteFile(path, data, perm)
@@ -61,10 +62,10 @@ func TestWALCommitApplyDone(t *testing.T) {
 	require.NoError(t, w.Apply())
 
 	// Both targets exist with the staged content.
-	gotA, err := os.ReadFile(targetA) // #nosec G304, test path
+	gotA, err := bctest.ReadFile(targetA)
 	require.NoError(t, err)
 	assert.Equal(t, "AAA", string(gotA))
-	gotB, err := os.ReadFile(targetB) // #nosec G304, test path
+	gotB, err := bctest.ReadFile(targetB)
 	require.NoError(t, err)
 	assert.Equal(t, "BBB", string(gotB))
 
@@ -100,7 +101,7 @@ func TestWALScanReplaysCommittedWAL(t *testing.T) {
 
 	// Replay: Apply + Done.
 	require.NoError(t, pending[0].Apply())
-	got, err := os.ReadFile(target) // #nosec G304, test path
+	got, err := bctest.ReadFile(target)
 	require.NoError(t, err)
 	assert.Equal(t, "HELLO", string(got))
 
@@ -160,7 +161,7 @@ func TestWALAppendCoalesces(t *testing.T) {
 
 	require.NoError(t, w.Commit())
 	require.NoError(t, w.Apply())
-	got, err := os.ReadFile(target) // #nosec G304, test path
+	got, err := bctest.ReadFile(target)
 	require.NoError(t, err)
 	assert.Equal(t, "third", string(got),
 		"target file must contain only the last-written content")
@@ -187,7 +188,7 @@ func TestWALApplyIsIdempotent(t *testing.T) {
 	require.NoError(t, w.Apply())
 	require.NoError(t, w.Apply())
 
-	got, err := os.ReadFile(target) // #nosec G304, test path
+	got, err := bctest.ReadFile(target)
 	require.NoError(t, err)
 	assert.Equal(t, "FINAL", string(got))
 

@@ -266,8 +266,8 @@ func TestStore_CourtFloor_LogsAndSkipsCorruptNeighbour(t *testing.T) {
 	}))
 
 	corruptDir := filepath.Join(dir, "competitions", "corrupt-comp")
-	require.NoError(t, os.MkdirAll(corruptDir, 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(corruptDir, "config.md"), []byte("---:\n:invalid yaml\n"), 0o644))
+	require.NoError(t, os.MkdirAll(corruptDir, 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(corruptDir, "config.md"), []byte("---:\n:invalid yaml\n"), 0o600))
 
 	var buf bytes.Buffer
 	origOutput := log.Writer()

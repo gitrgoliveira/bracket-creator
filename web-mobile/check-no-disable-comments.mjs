@@ -1,6 +1,7 @@
 #!/usr/bin/env node
-// Forbids lint-disable comments: the Go linter's no-lint directive, and the
-// JS linters' disable directives (line, next-line and block forms).
+// Forbids lint-disable comments: the Go linter's no-lint directive, gosec's
+// suppression comment, and the JS linters' disable directives (line,
+// next-line and block forms).
 //
 // A disable comment silences one finding where it is written and says nothing
 // to a reviewer reading the lint config. The operator's rule is that a rule is
@@ -52,6 +53,19 @@ export const GO_RULES = [
   {
     re: /\/\/\s*no[l]int\b|\bno[l]int:/,
     why: `Go lint-disable directive: ${FIX} (.golangci.yml)`,
+  },
+  // gosec's two suppression spellings (analyzer.go, findNoSecDirective): its
+  // tag, a hash and the directive word, matched anywhere with a rule id run
+  // on or not; and its directive comment, "gosec:" and "disable" after the
+  // slashes. A third spelling exists only when a -nosec-tag flag or config
+  // sets one, which a reviewer sees where it is set.
+  {
+    re: /#\s*nos[e]c/,
+    why: `gosec suppression comment: ${FIX} (.golangci.yml's gosec rules, and the gosec flags of the Makefile's go/sec and go/sec-tests)`,
+  },
+  {
+    re: /\/\/\s*gosec:disab[l]e/,
+    why: `gosec suppression directive: ${FIX} (.golangci.yml's gosec rules, and the gosec flags of the Makefile's go/sec and go/sec-tests)`,
   },
 ];
 

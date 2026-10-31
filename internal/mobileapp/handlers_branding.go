@@ -148,7 +148,7 @@ func handleBrandingLogoUpload(store *state.Store, hub *Hub) gin.HandlerFunc {
 		// Use os.CreateTemp for a unique temp file so concurrent uploads
 		// don't share the same ".tmp" path and corrupt each other's write.
 		// Temp file is in brandingDir so the final Rename stays on the
-		// same filesystem and remains atomic. // #nosec G304
+		// same filesystem and remains atomic.
 		dst, err := os.CreateTemp(brandingDir, "logo-*.tmp")
 		if err != nil {
 			internalError(c, err)

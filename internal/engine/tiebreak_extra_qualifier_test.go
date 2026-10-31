@@ -150,17 +150,32 @@ func TestInjectTiebreaker_CutIsThePoolsOwnQualifierCount(t *testing.T) {
 
 			injected, err := eng.InjectTiebreakerMatches("xqtb")
 			require.NoError(t, err)
+			// Which of a pair is SideA follows the id tiebreak between players
+			// equal on points (computeStandings), so it is not asserted: each
+			// pair is compared with its two names in name order.
 			got := make([][2]string, len(injected))
 			for i, m := range injected {
-				got[i] = [2]string{m.SideA, m.SideB}
+				got[i] = namePair(m.SideA, m.SideB)
 			}
 			if len(tc.want) == 0 {
 				assert.Empty(t, got)
 				return
 			}
-			assert.Equal(t, tc.want, got)
+			want := make([][2]string, len(tc.want))
+			for i, p := range tc.want {
+				want[i] = namePair(p[0], p[1])
+			}
+			assert.Equal(t, want, got)
 		})
 	}
+}
+
+// namePair returns the two names of a bout in name order.
+func namePair(a, b string) [2]string {
+	if b < a {
+		return [2]string{b, a}
+	}
+	return [2]string{a, b}
 }
 
 func TestInjectPoolDaihyosen_CutIsThePoolsOwnQualifierCount(t *testing.T) {

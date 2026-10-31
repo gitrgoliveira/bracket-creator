@@ -26,16 +26,15 @@ func (s *Store) LoadPools(compID string) ([]helper.Pool, error) {
 	// per-comp lock (e.g. storeTx.LoadPools, WithTransaction bodies).
 	s.EnsureLegacyUpgraded(compID)
 
-	data, err := s.loadCached(compID, "pools.csv", parsePoolsFile)
+	data, err := s.loadCached(compID, "pools.csv", s.parsePoolsFile)
 	if err != nil {
 		return nil, err
 	}
 	return s.copyPools(data.([]helper.Pool)), nil
 }
 
-func parsePoolsFile(path string) (any, error) {
-	// #nosec G304
-	f, err := os.Open(path)
+func (s *Store) parsePoolsFile(path string) (any, error) {
+	f, err := s.root.open(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return []helper.Pool{}, nil
@@ -208,7 +207,7 @@ func (s *Store) SavePools(compID string, pools []helper.Pool) error {
 // typically from inside a WithTransaction closure.
 func (s *Store) loadPoolsLocked(compID string) ([]helper.Pool, error) {
 	path := s.compPath(compID, "pools.csv")
-	parsed, err := parsePoolsFile(path)
+	parsed, err := s.parsePoolsFile(path)
 	if err != nil {
 		return nil, err
 	}
@@ -307,7 +306,7 @@ func (s *Store) LoadPoolMatchesLocked(compID string) ([]MatchResult, error) {
 		return nil, err
 	}
 	path := s.compPath(compID, "pool-matches.csv")
-	parsed, err := parsePoolMatchesFile(path)
+	parsed, err := s.parsePoolMatchesFile(path)
 	if err != nil {
 		return nil, err
 	}
@@ -315,9 +314,8 @@ func (s *Store) LoadPoolMatchesLocked(compID string) ([]MatchResult, error) {
 	return s.copyMatchResults(results), nil
 }
 
-func parsePoolMatchesFile(path string) (any, error) {
-	// #nosec G304
-	f, err := os.Open(path)
+func (s *Store) parsePoolMatchesFile(path string) (any, error) {
+	f, err := s.root.open(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return []MatchResult{}, nil
@@ -971,7 +969,7 @@ func (s *Store) updatePoolMatchByIDLocked(compID, matchID string, mutate func(*M
 	// reading a stale snapshot if another writer released the lock
 	// between cache populate and our acquire.
 	path := s.compPath(compID, "pool-matches.csv")
-	parsed, err := parsePoolMatchesFile(path)
+	parsed, err := s.parsePoolMatchesFile(path)
 	if err != nil {
 		return false, err
 	}

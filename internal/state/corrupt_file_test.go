@@ -5,6 +5,7 @@ import (
 	"os"
 	"testing"
 
+	bctest "github.com/gitrgoliveira/bracket-creator/internal/test"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -85,7 +86,7 @@ func TestLoadBracketLeavesTheBrokenFileAlone(t *testing.T) {
 	assert.True(t, IsCorruptFile(err), "IsCorruptFile answers what AsCorruptFile does")
 	assert.False(t, IsCorruptFile(os.ErrPermission), "an I/O failure is not a corrupt file")
 
-	after, err := os.ReadFile(path) // #nosec G304
+	after, err := bctest.ReadFile(path)
 	require.NoError(t, err)
 	assert.Equal(t, broken, string(after), "the operator's bytes are untouched")
 }

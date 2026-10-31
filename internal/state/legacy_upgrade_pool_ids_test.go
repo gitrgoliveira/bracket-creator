@@ -17,6 +17,7 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/engine"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
+	bctest "github.com/gitrgoliveira/bracket-creator/internal/test"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -106,7 +107,7 @@ func TestLegacyPoolParticipantIDUpgradeOnRead(t *testing.T) {
 	assert.Equal(t, yukiID, byName["Yuki Tanaka"])
 	assert.Empty(t, helper.PoolsMissingParticipantIDsMessage(pools), "a fully-repaired draw raises no notice")
 
-	raw, err := os.ReadFile(poolsPath)
+	raw, err := bctest.ReadFile(poolsPath)
 	require.NoError(t, err)
 	assert.Contains(t, string(raw), rinID, "the repair lands on disk, not just in the returned copy")
 	assert.Contains(t, string(raw), yukiID)
@@ -145,7 +146,7 @@ func TestLegacyPoolMatchSideIDUpgradeOnRead(t *testing.T) {
 	assert.Equal(t, rinID, m.WinnerID, "WinnerID is derived from the row's own SideA match, not a fresh roster lookup")
 	assert.Empty(t, engine.PoolMatchesMissingSideIDsMessage(matches), "a fully-repaired row raises no notice")
 
-	raw, err := os.ReadFile(matchesPath)
+	raw, err := bctest.ReadFile(matchesPath)
 	require.NoError(t, err)
 	assert.Contains(t, string(raw), rinID, "the repair lands on disk, not just in the returned copy")
 	assert.Contains(t, string(raw), yukiID)
@@ -221,7 +222,7 @@ func TestLegacyPoolMatchSideIDUpgrade_RunsOnceThenSkips(t *testing.T) {
 	_, err = fresh.LoadPoolMatches("c1")
 	require.NoError(t, err)
 
-	bytesAfterSecondLoad, err := os.ReadFile(matchesPath)
+	bytesAfterSecondLoad, err := bctest.ReadFile(matchesPath)
 	require.NoError(t, err)
 	assert.Equal(t, legacy, string(bytesAfterSecondLoad),
 		"a second load on the same Store must not re-inspect, let alone rewrite, a file it already upgraded once")
@@ -258,9 +259,9 @@ func TestLegacyPoolUpgrade_AlreadyStampedNotRewritten(t *testing.T) {
 
 	poolsPath := filepath.Join(dir, "competitions", "c1", "pools.csv")
 	matchesPath := filepath.Join(dir, "competitions", "c1", "pool-matches.csv")
-	poolsBefore, err := os.ReadFile(poolsPath)
+	poolsBefore, err := bctest.ReadFile(poolsPath)
 	require.NoError(t, err)
-	matchesBefore, err := os.ReadFile(matchesPath)
+	matchesBefore, err := bctest.ReadFile(matchesPath)
 	require.NoError(t, err)
 
 	fresh := freshLegacyUpgradeStore(t, dir)
@@ -272,9 +273,9 @@ func TestLegacyPoolUpgrade_AlreadyStampedNotRewritten(t *testing.T) {
 	_, err = fresh.LoadPoolMatches("c1")
 	require.NoError(t, err)
 
-	poolsAfter, err := os.ReadFile(poolsPath)
+	poolsAfter, err := bctest.ReadFile(poolsPath)
 	require.NoError(t, err)
-	matchesAfter, err := os.ReadFile(matchesPath)
+	matchesAfter, err := bctest.ReadFile(matchesPath)
 	require.NoError(t, err)
 	assert.Equal(t, string(poolsBefore), string(poolsAfter), "a fully-stamped pools.csv must not be rewritten")
 	assert.Equal(t, string(matchesBefore), string(matchesAfter), "a fully-stamped pool-matches.csv must not be rewritten")

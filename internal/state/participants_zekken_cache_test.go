@@ -27,7 +27,7 @@ func TestParticipantsCacheKeepsZekkenParsesApart(t *testing.T) {
 	}))
 	row := "11111111-1111-4111-8111-111111111111,Alice Smith,ZEK1,Dojo One\n"
 	require.NoError(t, os.WriteFile(
-		filepath.Join(dir, "competitions", "c1", "participants.csv"), []byte(row), 0o644))
+		filepath.Join(dir, "competitions", "c1", "participants.csv"), []byte(row), 0o600))
 
 	// The wrong-flag read first, which is the order the bug needed.
 	off, err := s.LoadParticipants("c1", false)
@@ -48,7 +48,7 @@ func TestParticipantsCacheKeepsZekkenParsesApart(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, s2.SaveCompetition(&Competition{ID: "c2", Name: "C2", Date: "11-06-2026"}))
 	require.NoError(t, os.WriteFile(
-		filepath.Join(dir2, "competitions", "c2", "participants.csv"), []byte(row), 0o644))
+		filepath.Join(dir2, "competitions", "c2", "participants.csv"), []byte(row), 0o600))
 	_, err = s2.LoadParticipants("c2", true)
 	require.NoError(t, err)
 	plain, err := s2.LoadParticipants("c2", false)

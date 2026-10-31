@@ -9,6 +9,7 @@ import (
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
+	bctest "github.com/gitrgoliveira/bracket-creator/internal/test"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -77,7 +78,7 @@ func TestStore_TournamentYAML(t *testing.T) {
 	require.NoError(t, err)
 
 	path := filepath.Join(dir, "tournament.md")
-	data, err := os.ReadFile(path)
+	data, err := bctest.ReadFile(path)
 	require.NoError(t, err)
 	assert.Contains(t, string(data), "name: Test Tournament")
 	assert.Contains(t, string(data), "---")
@@ -288,7 +289,7 @@ func TestStore_ParticipantsCSV(t *testing.T) {
 	require.NoError(t, store.SaveParticipants(compID, players))
 
 	path := filepath.Join(dir, "competitions", compID, "participants.csv")
-	data, err := os.ReadFile(path)
+	data, err := bctest.ReadFile(path)
 	require.NoError(t, err)
 	assert.Contains(t, string(data), "Akira Tanaka,Gyokusen")
 

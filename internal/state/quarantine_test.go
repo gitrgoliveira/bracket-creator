@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	bctest "github.com/gitrgoliveira/bracket-creator/internal/test"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -30,7 +31,7 @@ func TestQuarantineCompetitionFile(t *testing.T) {
 		_, statErr := os.Stat(s.compPath("c", "bracket.json"))
 		assert.True(t, os.IsNotExist(statErr), "the original name is free again")
 
-		kept, err := os.ReadFile(filepath.Join(dir, "competitions", "c", name)) // #nosec G304
+		kept, err := bctest.ReadFile(filepath.Join(dir, "competitions", "c", name))
 		require.NoError(t, err)
 		assert.Equal(t, "broken{", string(kept))
 	})
@@ -47,9 +48,9 @@ func TestQuarantineCompetitionFile(t *testing.T) {
 		require.NoError(t, err)
 		require.NotEqual(t, first, second)
 
-		a, err := os.ReadFile(filepath.Join(dir, "competitions", "c", first)) // #nosec G304
+		a, err := bctest.ReadFile(filepath.Join(dir, "competitions", "c", first))
 		require.NoError(t, err)
-		b, err := os.ReadFile(filepath.Join(dir, "competitions", "c", second)) // #nosec G304
+		b, err := bctest.ReadFile(filepath.Join(dir, "competitions", "c", second))
 		require.NoError(t, err)
 		assert.Equal(t, "broken{", string(a), "the first copy is still intact")
 		assert.Equal(t, "broken again{", string(b))

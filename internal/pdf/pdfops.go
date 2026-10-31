@@ -2,9 +2,11 @@ package pdf
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/pdfcpu/pdfcpu/pkg/api"
@@ -16,6 +18,25 @@ import (
 // we always pass an explicit one rather than relying on nil-defaulting.
 func conf() *model.Configuration {
 	return model.NewDefaultConfiguration()
+}
+
+// OpenInFolder opens name in dir, a folder this process owns (a PDF work or
+// output folder, a data folder), with os.OpenFile's flag and perm, through an
+// os.Root on dir, so the open cannot reach outside it. The root is closed
+// before returning; the file stays open on its own descriptor.
+func OpenInFolder(dir, name string, flag int, perm os.FileMode) (*os.File, error) {
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return nil, err
+	}
+	f, err := root.OpenFile(name, flag, perm)
+	if closeErr := root.Close(); closeErr != nil {
+		if f != nil {
+			closeErr = errors.Join(closeErr, f.Close())
+		}
+		return nil, errors.Join(err, closeErr)
+	}
+	return f, err
 }
 
 // SheetRange is a sheet's inclusive 1-indexed page span within a full PDF.
@@ -32,7 +53,7 @@ type SheetRange struct {
 // to bound it; we patch any bookmark whose PageThru < PageFrom to end at the
 // last page of the document. Without this the final sheet's pages are dropped.
 func SheetRanges(ctx context.Context, pdfPath string) ([]SheetRange, error) {
-	f, err := os.Open(pdfPath) // #nosec G304 -- pdfPath is an internally-generated soffice output path, not user input.
+	f, err := OpenInFolder(filepath.Dir(pdfPath), filepath.Base(pdfPath), os.O_RDONLY, 0)
 	if err != nil {
 		return nil, fmt.Errorf("open pdf: %w", err)
 	}
@@ -71,7 +92,7 @@ func SheetRanges(ctx context.Context, pdfPath string) ([]SheetRange, error) {
 
 // PageCount returns the number of pages in a PDF.
 func PageCount(ctx context.Context, pdfPath string) (int, error) {
-	f, err := os.Open(pdfPath) // #nosec G304 -- pdfPath is an internally-generated PDF path, not user input.
+	f, err := OpenInFolder(filepath.Dir(pdfPath), filepath.Base(pdfPath), os.O_RDONLY, 0)
 	if err != nil {
 		return 0, fmt.Errorf("open pdf: %w", err)
 	}

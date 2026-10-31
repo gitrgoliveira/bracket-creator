@@ -166,7 +166,7 @@ func RegisterPrintHandlers(r *gin.RouterGroup, eng *engine.Engine) {
 			}
 		}
 		for _, pdfPath := range ordered {
-			if err := streamPDFIntoZip(zw, pdfPath); err != nil {
+			if err := streamPDFIntoZip(zw, workDir, pdfPath); err != nil {
 				// The 200 status + headers are already committed, so we cannot
 				// switch to an error response. Log the error (and any failure
 				// closing the archive) and abort; the truncated ZIP signals
@@ -183,10 +183,10 @@ func RegisterPrintHandlers(r *gin.RouterGroup, eng *engine.Engine) {
 	})
 }
 
-// streamPDFIntoZip adds one PDF to the ZIP, copying it with io.Copy so a large
-// PDF is never fully buffered in memory.
-func streamPDFIntoZip(zw *zip.Writer, pdfPath string) error {
-	f, err := os.Open(pdfPath) // #nosec G304 -- pdfPath is an internally-generated PDF in a temp dir.
+// streamPDFIntoZip adds one PDF the generator published in workDir to the ZIP,
+// copying it with io.Copy so a large PDF is never fully buffered in memory.
+func streamPDFIntoZip(zw *zip.Writer, workDir, pdfPath string) error {
+	f, err := pdf.OpenInFolder(workDir, filepath.Base(pdfPath), os.O_RDONLY, 0)
 	if err != nil {
 		return fmt.Errorf("open generated pdf %s: %w", pdfPath, err)
 	}

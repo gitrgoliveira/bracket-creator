@@ -18,13 +18,14 @@ import (
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
+	bctest "github.com/gitrgoliveira/bracket-creator/internal/test"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 func TestLegacyBracketRoundsUpgrade_V21BracketIsCorrectedOnLoadOnce(t *testing.T) {
 	dir, _ := newLegacyUpgradeFixture(t)
-	v21, err := os.ReadFile(filepath.FromSlash(v21FiveEntrantFixture))
+	v21, err := bctest.ReadFile(filepath.FromSlash(v21FiveEntrantFixture))
 	require.NoError(t, err)
 	path := filepath.Join(dir, "competitions", "c1", "bracket.json")
 	require.NoError(t, os.WriteFile(path, v21, 0o600))
@@ -33,7 +34,7 @@ func TestLegacyBracketRoundsUpgrade_V21BracketIsCorrectedOnLoadOnce(t *testing.T
 	served, err := first.LoadBracket("c1")
 	require.NoError(t, err)
 
-	upgraded, err := os.ReadFile(path)
+	upgraded, err := bctest.ReadFile(path)
 	require.NoError(t, err)
 	require.NotEqual(t, string(v21), string(upgraded), "the v2.1 rounds must be rewritten on disk")
 	assert.NotZero(t, first.FileVersion("c1", "bracket.json"),
@@ -66,7 +67,7 @@ func TestLegacyBracketRoundsUpgrade_V21BracketIsCorrectedOnLoadOnce(t *testing.T
 	second := freshLegacyUpgradeStore(t, dir)
 	_, err = second.LoadBracket("c1")
 	require.NoError(t, err)
-	again, err := os.ReadFile(path)
+	again, err := bctest.ReadFile(path)
 	require.NoError(t, err)
 	assert.Equal(t, string(upgraded), string(again), "an already-corrected bracket must not be rewritten")
 	assert.Zero(t, second.FileVersion("c1", "bracket.json"), "no write, so no version bump")
@@ -77,7 +78,7 @@ func TestLegacyBracketRoundsUpgrade_V21BracketIsCorrectedOnLoadOnce(t *testing.T
 func TestLegacyBracketRoundsUpgrade_UnwalkableBracketIsLeftAsStored(t *testing.T) {
 	dir, _ := newLegacyUpgradeFixture(t)
 	var b state.Bracket
-	v21, err := os.ReadFile(filepath.FromSlash(v21FiveEntrantFixture))
+	v21, err := bctest.ReadFile(filepath.FromSlash(v21FiveEntrantFixture))
 	require.NoError(t, err)
 	require.NoError(t, json.Unmarshal(v21, &b))
 	m := matchByID(t, &b, "m-r1-1") // a real bout no match names as a feeder
@@ -93,7 +94,7 @@ func TestLegacyBracketRoundsUpgrade_UnwalkableBracketIsLeftAsStored(t *testing.T
 	fresh := freshLegacyUpgradeStore(t, dir)
 	_, err = fresh.LoadBracket("c1")
 	require.NoError(t, err)
-	after, err := os.ReadFile(path)
+	after, err := bctest.ReadFile(path)
 	require.NoError(t, err)
 	assert.Equal(t, string(raw), string(after))
 	assert.Zero(t, fresh.FileVersion("c1", "bracket.json"))
@@ -105,7 +106,7 @@ func TestLegacyBracketRoundsUpgrade_UnwalkableBracketIsLeftAsStored(t *testing.T
 func TestLegacyBracketRoundsUpgrade_UnwalkableBracketIsLoggedOnce(t *testing.T) {
 	dir, _ := newLegacyUpgradeFixture(t)
 	var b state.Bracket
-	v21, err := os.ReadFile(filepath.FromSlash(v21FiveEntrantFixture))
+	v21, err := bctest.ReadFile(filepath.FromSlash(v21FiveEntrantFixture))
 	require.NoError(t, err)
 	require.NoError(t, json.Unmarshal(v21, &b))
 	m := matchByID(t, &b, "m-r1-1") // a real bout no match names as a feeder
@@ -139,7 +140,7 @@ func TestLegacyBracketRoundsUpgrade_UnwalkableBracketIsLoggedOnce(t *testing.T) 
 // so its times are kept as they are.
 func TestLegacyBracketRoundsUpgrade_OnlyTheMarkerIsSavedOnce(t *testing.T) {
 	dir, _ := newLegacyUpgradeFixture(t)
-	v21, err := os.ReadFile(filepath.FromSlash(v21FiveEntrantFixture))
+	v21, err := bctest.ReadFile(filepath.FromSlash(v21FiveEntrantFixture))
 	require.NoError(t, err)
 	var stored state.Bracket
 	require.NoError(t, json.Unmarshal(v21, &stored))
@@ -162,7 +163,7 @@ func TestLegacyBracketRoundsUpgrade_OnlyTheMarkerIsSavedOnce(t *testing.T) {
 	_, err = first.LoadBracket("c1")
 	require.NoError(t, err)
 	assert.Equal(t, uint64(1), first.FileVersion("c1", "bracket.json"), "the marker alone is a change worth saving")
-	upgraded, err := os.ReadFile(path)
+	upgraded, err := bctest.ReadFile(path)
 	require.NoError(t, err)
 	var onDisk state.Bracket
 	require.NoError(t, json.Unmarshal(upgraded, &onDisk))

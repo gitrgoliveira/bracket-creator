@@ -6,12 +6,21 @@ import (
 	"encoding/xml"
 	"errors"
 	"fmt"
+	"io/fs"
+	"os"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 )
+
+// ReadFile reads the file at path, a fixture or a file the test wrote, through
+// an fs.FS on its own folder (os.DirFS), so the read stays inside that folder.
+func ReadFile(path string) ([]byte, error) {
+	return fs.ReadFile(os.DirFS(filepath.Dir(path)), filepath.Base(path))
+}
 
 // ParsePrintAreaLastRow extracts the last-row number from a Print_Area RefersTo
 // string such as "'Elimination Matches'!$A$1:$H$35". Returns -1 on any parse error.

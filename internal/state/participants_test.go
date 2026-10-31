@@ -7,6 +7,7 @@ import (
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
+	bctest "github.com/gitrgoliveira/bracket-creator/internal/test"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -239,7 +240,7 @@ func TestParticipantsNonZekkenImportRoundTrip(t *testing.T) {
 	require.NoError(t, store.SaveParticipants(compID, parsed))
 
 	// The 2-column form must land on disk so the loader doesn't shift columns.
-	raw, err := os.ReadFile(filepath.Join(dir, "competitions", compID, "participants.csv"))
+	raw, err := bctest.ReadFile(filepath.Join(dir, "competitions", compID, "participants.csv"))
 	require.NoError(t, err)
 	assert.NotContains(t, string(raw), "J. DOE",
 		"auto-derived DisplayName must not be written to disk; got %q", string(raw))
@@ -275,7 +276,7 @@ func TestParticipantsDistinctDisplayNameRoundTrip(t *testing.T) {
 	}
 	require.NoError(t, store.SaveParticipants(compID, players))
 
-	raw, err := os.ReadFile(filepath.Join(dir, "competitions", compID, "participants.csv"))
+	raw, err := bctest.ReadFile(filepath.Join(dir, "competitions", compID, "participants.csv"))
 	require.NoError(t, err)
 	assert.Contains(t, string(raw), "C. CAROL", "distinct DisplayName must be preserved on disk")
 
@@ -350,7 +351,7 @@ func TestMetadataRoundTrip(t *testing.T) {
 	}
 	require.NoError(t, store.SaveParticipants(compID, players))
 
-	raw, err := os.ReadFile(filepath.Join(dir, "competitions", compID, "participants.csv"))
+	raw, err := bctest.ReadFile(filepath.Join(dir, "competitions", compID, "participants.csv"))
 	require.NoError(t, err)
 	rawStr := string(raw)
 	assert.Contains(t, rawStr, "2d", "danGrade must be written to CSV")
@@ -378,7 +379,7 @@ func TestCheckedInRoundTrip(t *testing.T) {
 	}
 	require.NoError(t, store.SaveParticipants(compID, players))
 
-	raw, err := os.ReadFile(filepath.Join(dir, "competitions", compID, "participants.csv"))
+	raw, err := bctest.ReadFile(filepath.Join(dir, "competitions", compID, "participants.csv"))
 	require.NoError(t, err)
 	rawStr := string(raw)
 	assert.Contains(t, rawStr, "checked_in", "checked-in flag must be written to CSV")

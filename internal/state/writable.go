@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // BrandingDirName and SponsorsDirName are the folders, under the tournament
@@ -32,15 +33,13 @@ const writeProbePrefix = ".write-check-"
 // folder, its match history and its score event logs, and the branding and sponsors folders when
 // they exist. A file's own mode does not matter: a save replaces it by
 // renaming, which needs only its folder. Every folder that fails is named,
-// once (its first failure).
-func checkDataWritable(folder string) error {
+// once (its first failure). The probe goes through root, as every save does,
+// so a folder that is a link out of the data folder fails here rather than
+// at the first save.
+func checkDataWritable(root *dataRoot) error {
+	folder := root.folder
 	compsDir := filepath.Join(folder, "competitions")
 	dirs := []string{folder, compsDir, filepath.Join(folder, ".wal")}
-	for _, name := range []string{BrandingDirName, SponsorsDirName} {
-		if isDir(filepath.Join(folder, name)) {
-			dirs = append(dirs, filepath.Join(folder, name))
-		}
-	}
 	var failed []string
 	named := make(map[string]bool)
 	fail := func(dir string, err error) {
@@ -49,24 +48,42 @@ func checkDataWritable(folder string) error {
 			failed = append(failed, fmt.Sprintf("  %s: %v", dir, err))
 		}
 	}
-	entries, err := os.ReadDir(compsDir)
+	// whenFolder adds dir to the folders to probe when the root opens it as
+	// a folder. An entry the root refuses (a link out of the data folder,
+	// which every later read and write would refuse too) is named now; a
+	// missing entry, or a file, is not a folder the server saves into.
+	whenFolder := func(dir string) bool {
+		info, err := root.stat(dir)
+		switch {
+		case err == nil && info.IsDir():
+			dirs = append(dirs, dir)
+			return true
+		case err != nil && !errors.Is(err, fs.ErrNotExist):
+			fail(dir, pathErrCause(err))
+		}
+		return false
+	}
+	for _, name := range []string{BrandingDirName, SponsorsDirName} {
+		whenFolder(filepath.Join(folder, name))
+	}
+	entries, err := root.readDir(compsDir)
 	if err != nil {
 		fail(compsDir, pathErrCause(err))
 	}
 	for _, e := range entries {
-		if !e.IsDir() {
+		if !e.IsDir() && e.Type()&fs.ModeSymlink == 0 {
 			continue
 		}
 		compDir := filepath.Join(compsDir, e.Name())
-		dirs = append(dirs, compDir)
+		if !whenFolder(compDir) {
+			continue
+		}
 		for _, sub := range []string{matchHistoryDir, scoreLogDir} {
-			if d := filepath.Join(compDir, sub); isDir(d) {
-				dirs = append(dirs, d)
-			}
+			whenFolder(filepath.Join(compDir, sub))
 		}
 	}
 	for _, d := range dirs {
-		if err := probeWrite(d); err != nil {
+		if err := probeWrite(root, d); err != nil {
 			fail(d, err)
 		}
 	}
@@ -78,21 +95,16 @@ func checkDataWritable(folder string) error {
 }
 
 // probeWrite creates a scratch file in dir and removes it.
-func probeWrite(dir string) error {
-	f, err := os.CreateTemp(dir, writeProbePrefix+"*")
+func probeWrite(root *dataRoot, dir string) error {
+	name := filepath.Join(dir, fmt.Sprintf("%s%d-%d", writeProbePrefix, os.Getpid(), time.Now().UnixNano()))
+	f, err := root.openFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
 		return pathErrCause(err)
 	}
-	name := f.Name()
 	if err := f.Close(); err != nil {
-		return errors.Join(err, pathErrCause(os.Remove(name)))
+		return errors.Join(err, pathErrCause(root.remove(name)))
 	}
-	return pathErrCause(os.Remove(name))
-}
-
-func isDir(path string) bool {
-	info, err := os.Stat(path)
-	return err == nil && info.IsDir()
+	return pathErrCause(root.remove(name))
 }
 
 // pathErrCause drops the path an fs.PathError repeats, since the message

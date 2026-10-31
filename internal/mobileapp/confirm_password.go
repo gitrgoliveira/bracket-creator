@@ -6,12 +6,6 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// ConfirmPasswordHeader carries the password typed in the moment a competition
-// is deleted. Deleting a competition is the one action that asks for the
-// password again (operator ruling 2026-10-12); every other organiser write is
-// authorised by the sign-in alone.
-const ConfirmPasswordHeader = "X-Confirm-Password" // #nosec G101 -- a header name, not a credential
-
 // Codes of the two refusals; both carry confirmPasswordSentence.
 const (
 	confirmPasswordRequiredCode = "confirm_password_required"
@@ -26,8 +20,11 @@ func isCompetitionDelete(method, fullPath string) bool {
 	return method == http.MethodDelete && fullPath == "/api/competitions/:id"
 }
 
-// RequireConfirmPasswordForDelete refuses a competition delete unless
-// X-Confirm-Password matches the admin password, judged by the same
+// RequireConfirmPasswordForDelete refuses a competition delete unless the
+// X-Confirm-Password header, the password typed in that moment, matches the
+// admin password. Deleting a competition is the one action that asks for the
+// password again (operator ruling 2026-10-12); every other organiser write is
+// authorised by the sign-in alone. The password is judged by the same
 // PasswordVerifier as the sign-in. It runs after AuthMiddleware, so the
 // sign-in applies first in both modes, and before the handler deletes anything.
 // The refusal is a 401 the SPA reads as a wrong typed password, not as a lost
@@ -38,7 +35,7 @@ func RequireConfirmPasswordForDelete(verifier PasswordVerifier) gin.HandlerFunc 
 			c.Next()
 			return
 		}
-		confirm := c.GetHeader(ConfirmPasswordHeader)
+		confirm := c.GetHeader("X-Confirm-Password")
 		if confirm == "" {
 			respondConfirmPassword(c, confirmPasswordRequiredCode)
 			return

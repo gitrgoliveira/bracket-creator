@@ -1,11 +1,10 @@
 package state
 
 import (
-	"os"
-
 	"testing"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
+	bctest "github.com/gitrgoliveira/bracket-creator/internal/test"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -78,7 +77,7 @@ func TestPoolMatchesGoldenBytes(t *testing.T) {
 	require.NoError(t, s.SaveCompetition(&Competition{ID: "c", Name: "C"}))
 
 	require.NoError(t, s.SavePoolMatches("c", poolMatchesGoldenInput()))
-	b, err := os.ReadFile(s.compPath("c", "pool-matches.csv"))
+	b, err := bctest.ReadFile(s.compPath("c", "pool-matches.csv"))
 	require.NoError(t, err)
 	assert.Equal(t, poolMatchesGolden, string(b),
 		"pool-matches.csv bytes changed; column position is the on-disk "+

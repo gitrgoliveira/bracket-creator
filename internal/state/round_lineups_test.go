@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
+	bctest "github.com/gitrgoliveira/bracket-creator/internal/test"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -556,7 +557,7 @@ func TestSettleRoundLineupsAfterWrite_AHandEditedMarkerIsNotAnsweredFromTheCache
 	defer mu.Unlock()
 	store.settleRoundLineupsAfterWrite(compID) // the record is cached, marked
 	path := store.compPath(compID, "config.md")
-	raw, err := os.ReadFile(path) // #nosec G304 -- a path under the test store
+	raw, err := bctest.ReadFile(path)
 	require.NoError(t, err)
 	edited := strings.ReplaceAll(string(raw), "round_lineups_converted: true\n", "")
 	require.NotEqual(t, string(raw), edited, "precondition: the marker was in config.md")

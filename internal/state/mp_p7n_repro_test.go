@@ -1,11 +1,11 @@
 package state
 
 import (
-	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
+	bctest "github.com/gitrgoliveira/bracket-creator/internal/test"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -63,7 +63,7 @@ func TestMpP7nRepro_NonUUIDIDCausesColumnShift(t *testing.T) {
 	require.NoError(t, store.SaveParticipants(compID, players))
 
 	// Confirm what the CSV writer actually persisted.
-	raw, err := os.ReadFile(filepath.Join(dir, "competitions", compID, "participants.csv"))
+	raw, err := bctest.ReadFile(filepath.Join(dir, "competitions", compID, "participants.csv"))
 	require.NoError(t, err)
 	t.Logf("participants.csv =\n%s", string(raw))
 

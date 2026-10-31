@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	bctest "github.com/gitrgoliveira/bracket-creator/internal/test"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -31,7 +32,7 @@ func TestOpenOutputFile_TruncatesExisting(t *testing.T) {
 	require.NoError(t, w.Flush())
 	require.NoError(t, f.Close())
 
-	got, err := os.ReadFile(path) // #nosec G304, temp-dir path
+	got, err := bctest.ReadFile(path)
 	require.NoError(t, err)
 	assert.Equal(t, "new", string(got), "existing file must be truncated, not appended to")
 }

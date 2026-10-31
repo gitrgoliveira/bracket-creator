@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	bctest "github.com/gitrgoliveira/bracket-creator/internal/test"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -49,7 +50,7 @@ func TestQuarantineCorruptBracket_KeepsTheBrokenFile(t *testing.T) {
 	assert.True(t, res.Rebuilt, "a pool-fed knockout keeps its draw in pools.csv, so it rebuilds")
 	assert.Contains(t, res.QuarantinedAs, "bracket.json.corrupt-")
 
-	kept, err := os.ReadFile(filepath.Join(filepath.Dir(path), res.QuarantinedAs)) // #nosec G304
+	kept, err := bctest.ReadFile(filepath.Join(filepath.Dir(path), res.QuarantinedAs))
 	require.NoError(t, err)
 	assert.Equal(t, brokenBracket, string(kept),
 		"the operator's bytes survive verbatim, for a later repair by hand")
@@ -65,14 +66,14 @@ func TestQuarantineCorruptBracket_RefusesAReadableBracket(t *testing.T) {
 	eng, store, dir := setupTestEngine(t)
 	path := quarantineComp(t, store, eng, dir, "mixed-ok", state.CompFormatMixed)
 
-	before, err := os.ReadFile(path) // #nosec G304
+	before, err := bctest.ReadFile(path)
 	require.NoError(t, err)
 
 	_, err = eng.QuarantineCorruptBracket("mixed-ok")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "readable bracket")
 
-	after, err := os.ReadFile(path) // #nosec G304
+	after, err := bctest.ReadFile(path)
 	require.NoError(t, err)
 	assert.Equal(t, before, after, "a healthy bracket is untouched")
 }
@@ -90,7 +91,7 @@ func TestQuarantineCorruptBracket_RefusesKnockoutRatherThanInventingADraw(t *tes
 	assert.Contains(t, err.Error(), "only record of its draw")
 	assert.Contains(t, err.Error(), "Repair the file")
 
-	after, err := os.ReadFile(path) // #nosec G304
+	after, err := bctest.ReadFile(path)
 	require.NoError(t, err)
 	assert.Equal(t, brokenBracket, string(after),
 		"and it refuses BEFORE moving anything, so the file is exactly where the operator left it")

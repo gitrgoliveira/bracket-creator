@@ -15,7 +15,7 @@ func (s *Store) ListCompetitions() ([]string, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	entries, err := os.ReadDir(filepath.Join(s.folder, "competitions"))
+	entries, err := s.root.readDir(filepath.Join(s.folder, "competitions"))
 	if err != nil {
 		return nil, err
 	}
@@ -34,7 +34,7 @@ func (s *Store) LoadCompetition(id string) (*Competition, error) {
 		return nil, fmt.Errorf("invalid competition ID: %w", err)
 	}
 
-	data, err := s.loadCached(id, "config.md", parseCompetitionFile)
+	data, err := s.loadCached(id, "config.md", s.parseCompetitionFile)
 	if err != nil {
 		return nil, err
 	}
@@ -66,8 +66,8 @@ func adoptDirectoryID(c *Competition, compID string) *Competition {
 	return c
 }
 
-func parseCompetitionFile(path string) (any, error) {
-	raw, err := os.ReadFile(path) // #nosec G304; path built by compPath, which enforces containment under the competitions dir
+func (s *Store) parseCompetitionFile(path string) (any, error) {
+	raw, err := s.root.readFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil
@@ -171,7 +171,7 @@ func (s *Store) loadCompetitionLocked(compID string) (*Competition, error) {
 		return nil, fmt.Errorf("invalid competition ID: %w", err)
 	}
 	path := s.compPath(compID, "config.md")
-	parsed, err := parseCompetitionFile(path)
+	parsed, err := s.parseCompetitionFile(path)
 	if err != nil {
 		return nil, err
 	}
@@ -209,7 +209,7 @@ func (s *Store) saveCompetitionLocked(c *Competition, write writeFn) error {
 // saveBracketLocked for the cache-refresh rationale that applies
 // equally here (T211/T212).
 func (s *Store) saveCompetitionChangedLocked(c *Competition, write writeFn) (bool, error) {
-	if err := os.MkdirAll(s.compPath(c.ID), 0700); err != nil {
+	if err := s.root.mkdirAll(s.compPath(c.ID), 0700); err != nil {
 		return false, err
 	}
 
@@ -229,7 +229,7 @@ func (s *Store) saveCompetitionChangedLocked(c *Competition, write writeFn) (boo
 		return false, err
 	}
 
-	if existing, rerr := os.ReadFile(path); rerr == nil && bytes.Equal(existing, newData) { // #nosec G304
+	if existing, rerr := s.root.readFile(path); rerr == nil && bytes.Equal(existing, newData) {
 		return false, nil
 	}
 
@@ -311,7 +311,7 @@ func (s *Store) UpdateCompetitionChanged(id string, transform func(current *Comp
 	// Load directly under the lock (bypass the cached path; the
 	// per-comp lock is what coordinates with the save below).
 	path := s.compPath(id, "config.md")
-	parsed, err := parseCompetitionFile(path)
+	parsed, err := s.parseCompetitionFile(path)
 	if err != nil {
 		return false, err
 	}
@@ -364,7 +364,7 @@ func (s *Store) DeleteCompetitionFile(id, filename string) error {
 	mu.Lock()
 	defer mu.Unlock()
 	path := s.compPath(id, filename)
-	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+	if err := s.root.remove(path); err != nil && !os.IsNotExist(err) {
 		return err
 	}
 	// Discarding a draw artifact (pool-matches.csv among them) changes derived
@@ -409,7 +409,7 @@ func (s *Store) QuarantineCompetitionFile(id, filename string) (string, error) {
 	defer mu.Unlock()
 
 	path := s.compPath(id, filename)
-	if _, err := os.Stat(path); err != nil {
+	if _, err := s.root.stat(path); err != nil {
 		return "", err
 	}
 	// Second granularity is enough to name a file an operator will read, but
@@ -419,12 +419,12 @@ func (s *Store) QuarantineCompetitionFile(id, filename string) (string, error) {
 	stamp := time.Now().UTC().Format("20060102-150405")
 	target := filename + ".corrupt-" + stamp
 	for i := 2; ; i++ {
-		if _, err := os.Stat(s.compPath(id, target)); os.IsNotExist(err) {
+		if _, err := s.root.stat(s.compPath(id, target)); os.IsNotExist(err) {
 			break
 		}
 		target = fmt.Sprintf("%s.corrupt-%s-%d", filename, stamp, i)
 	}
-	if err := os.Rename(path, s.compPath(id, target)); err != nil {
+	if err := s.root.rename(path, s.compPath(id, target)); err != nil {
 		return "", err
 	}
 	// The artifact is gone from its name, which changes derived state exactly
@@ -468,7 +468,7 @@ func (s *Store) DeleteCompetition(id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if err := os.RemoveAll(s.compPath(id)); err != nil {
+	if err := s.root.removeAll(s.compPath(id)); err != nil {
 		return err
 	}
 	// Deliberately NOT compCache.Delete(id): that would reset this competition's

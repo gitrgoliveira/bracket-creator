@@ -398,7 +398,7 @@ func TestParsePoolMatchesBytes_WithData(t *testing.T) {
 	}
 	require.NoError(t, store.SavePoolMatches(compID, matches))
 
-	raw, err := os.ReadFile(store.compPath(compID, "pool-matches.csv"))
+	raw, err := bctest.ReadFile(store.compPath(compID, "pool-matches.csv"))
 	require.NoError(t, err)
 
 	results, err := parsePoolMatchesBytes(raw)
@@ -710,7 +710,9 @@ func TestParsePoolsFile_UnreadableSeedIsUnseededAndWarned(t *testing.T) {
 	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
 	t.Cleanup(func() { slog.SetDefault(prev) })
 
-	parsed, err := parsePoolsFile(compDir + "/pools.csv")
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+	parsed, err := store.parsePoolsFile(compDir + "/pools.csv")
 	require.NoError(t, err)
 	pools, ok := parsed.([]helper.Pool)
 	require.True(t, ok)

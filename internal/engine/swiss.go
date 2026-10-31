@@ -1,11 +1,11 @@
 package engine
 
 import (
+	"bytes"
 	"crypto/sha256"
-	"encoding/binary"
 	"fmt"
-	"math/rand"
 	"sort"
+	"strconv"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
@@ -413,10 +413,10 @@ func (e *Engine) computeSwissPairings(
 //
 // Operates on competitor identity keys (CompetitorKey), not display names,
 // throughout (bc-cse): the deterministic shuffle's OUTPUT ORDER depends only
-// on the RNG sequence and slice length, not on the string values being
-// permuted, so switching from names to keys does not change the pairing
-// produced for any roster that has no same-name collisions -- the ordering
-// keys sort identically either way, only the map's value type differs.
+// on the competition id and slice length (roundOneOrder), not on the string
+// values being permuted, so switching from names to keys does not change the
+// pairing produced for any roster that has no same-name collisions -- the
+// ordering keys sort identically either way, only the map's value type differs.
 func (e *Engine) firstRoundPairings(
 	active []domain.Player,
 	hadBye map[string]bool,
@@ -454,12 +454,7 @@ func (e *Engine) firstRoundPairings(
 		return pairs, bye, nil
 	}
 
-	// Deterministic random.
-	rng := rand.New(rand.NewSource(seedFromString(compID + ":round1"))) // #nosec G404, non-crypto deterministic shuffle
-	shuffled := append([]string(nil), keys...)
-	rng.Shuffle(len(shuffled), func(i, j int) {
-		shuffled[i], shuffled[j] = shuffled[j], shuffled[i]
-	})
+	shuffled := roundOneOrder(keys, compID)
 	pairs := make([][2]string, 0, len(shuffled)/2)
 	for i := 0; i+1 < len(shuffled); i += 2 {
 		pairs = append(pairs, [2]string{shuffled[i], shuffled[i+1]})
@@ -682,13 +677,28 @@ func buildSwissMatches(pairings [][2]string, byeKey string, round int, courts []
 	return matches
 }
 
-// seedFromString derives a stable 64-bit seed from s, used to drive
-// the deterministic round-1 random pairing. SHA-256 is overkill but
-// already imported elsewhere; the first 8 bytes give us a uniform
-// distribution suitable for math/rand.NewSource.
-func seedFromString(s string) int64 {
-	sum := sha256.Sum256([]byte(s))
-	return int64(binary.BigEndian.Uint64(sum[:8])) // #nosec G115, deterministic test seed, sign doesn't matter
+// roundOneOrder returns keys in the deterministic random order of an
+// unseeded round 1: the key at rank position i is placed by the SHA-256 of
+// compID, ":round1:" and i, so the order depends only on the competition id
+// and the number of keys, never on the keys themselves. Retries for the same
+// competition therefore pair alike (SSE replay, a handler retry).
+func roundOneOrder(keys []string, compID string) []string {
+	type slot struct {
+		digest [sha256.Size]byte
+		key    string
+	}
+	slots := make([]slot, len(keys))
+	for i, k := range keys {
+		slots[i] = slot{digest: sha256.Sum256([]byte(compID + ":round1:" + strconv.Itoa(i))), key: k}
+	}
+	sort.Slice(slots, func(a, b int) bool {
+		return bytes.Compare(slots[a].digest[:], slots[b].digest[:]) < 0
+	})
+	out := make([]string, len(slots))
+	for i, s := range slots {
+		out[i] = s.key
+	}
+	return out
 }
 
 // SwissStandings computes the cumulative standings for the Swiss

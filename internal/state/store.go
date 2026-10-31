@@ -1,7 +1,9 @@
 package state
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -19,6 +21,10 @@ var validIDPattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]*$`)
 type Store struct {
 	folder string
 	mu     sync.RWMutex
+
+	// root opens every file the store reads or writes, through an os.Root on
+	// folder (data_root.go). Opened by init.
+	root *dataRoot
 
 	// walDir is "<folder>/.wal", where WithTransaction parks its
 	// intent log files (T210/T211/T212). A committed-but-not-applied
@@ -120,6 +126,9 @@ func NewStore(folder string) (*Store, error) {
 	}
 
 	if err := s.init(); err != nil {
+		if s.root != nil {
+			err = errors.Join(err, s.root.close())
+		}
 		return nil, err
 	}
 
@@ -141,26 +150,41 @@ func (s *Store) init() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// Ensure folder exists
+	// Ensure folder exists. The one folder made by path: the root that
+	// keeps every later open inside it is opened on it.
 	if err := os.MkdirAll(s.folder, 0700); err != nil {
 		return err
 	}
-
-	// Ensure competitions folder exists
-	if err := os.MkdirAll(filepath.Join(s.folder, "competitions"), 0700); err != nil {
+	root, err := openDataRoot(s.folder)
+	if err != nil {
 		return err
 	}
+	s.root = root
 
-	// Ensure WAL directory exists. WithTransaction stages its intent
-	// log files under here; creating the dir up-front means the
-	// first transaction doesn't have to worry about it.
-	if err := os.MkdirAll(s.walDir, 0o750); err != nil {
-		return err
+	// Ensure the competitions folder and the WAL directory exist.
+	// WithTransaction stages its intent log files under .wal; creating it
+	// up-front means the first transaction doesn't have to worry about it.
+	// Only a missing one is made: an entry already there that the root
+	// cannot use as a folder (a file, or a link out of the data folder) is
+	// named by checkDataWritable below, with the operator's remedy.
+	for _, dir := range []struct {
+		path string
+		perm fs.FileMode
+	}{
+		{filepath.Join(s.folder, "competitions"), 0o700},
+		{s.walDir, 0o750},
+	} {
+		if _, err := s.root.stat(dir.path); !errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
+		if err := s.root.mkdirAll(dir.path, dir.perm); err != nil {
+			return err
+		}
 	}
 
 	// Refuse to start on data the server cannot write (operator decision
 	// 2026-10-04): before the WAL replay, which writes too.
-	if err := checkDataWritable(s.folder); err != nil {
+	if err := checkDataWritable(s.root); err != nil {
 		return err
 	}
 
@@ -323,7 +347,7 @@ func (s *Store) loadCached(compID, filename string, parse func(path string) (any
 // asserts the type, so no caller hand-rolls that pairing (mp-gmcg review).
 // LoadPoolMatches deep-copies this for callers that need an owned slice.
 func (s *Store) cachedPoolMatches(compID string) ([]MatchResult, error) {
-	data, err := s.loadCached(compID, "pool-matches.csv", parsePoolMatchesFile)
+	data, err := s.loadCached(compID, "pool-matches.csv", s.parsePoolMatchesFile)
 	if err != nil {
 		return nil, err
 	}
@@ -337,7 +361,7 @@ func (s *Store) cachedPoolMatches(compID string) ([]MatchResult, error) {
 // &Bracket{}), so a nil result means a load/parse error surfaced via err.
 // LoadBracket deep-copies this for callers that need an owned tree.
 func (s *Store) cachedBracket(compID string) (*Bracket, error) {
-	data, err := s.loadCached(compID, "bracket.json", parseBracketFile)
+	data, err := s.loadCached(compID, "bracket.json", s.parseBracketFile)
 	if err != nil {
 		return nil, err
 	}
@@ -360,7 +384,7 @@ func (s *Store) now() time.Time {
 // it: writers replace the cached record and never change it in place, and
 // LoadCompetition copies it for a caller that needs an owned one.
 func (s *Store) cachedCompetition(compID string) (*Competition, error) {
-	data, err := s.loadCached(compID, "config.md", parseCompetitionFile)
+	data, err := s.loadCached(compID, "config.md", s.parseCompetitionFile)
 	if err != nil {
 		return nil, err
 	}
@@ -405,7 +429,7 @@ func (s *Store) compPath(compID string, parts ...string) string {
 // FileMtime returns the UnixNano mtime of a file inside a competition directory.
 // Returns 0 if the file does not exist or stat fails.
 func (s *Store) FileMtime(compID, filename string) int64 {
-	info, err := os.Stat(s.compPath(compID, filename))
+	info, err := s.root.stat(s.compPath(compID, filename))
 	if err != nil {
 		return 0
 	}

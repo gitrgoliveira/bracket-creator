@@ -6,7 +6,9 @@
 //   DELETE /api/branding/logo
 // Theme colors are saved via the parent's tournament PUT call, not here.
 
-const { useState: useStateBr, useRef: useRefBr, useEffect: useEffectBr } = React;
+import { useLatestRef } from './latest_ref.jsx';
+
+const { useState, useRef, useEffect } = React;
 
 // Canonical defaults for the branding theme (mp-scf). Single source of truth so
 // admin_setup.jsx's dirty-tracking snapshot stays in lockstep with the values
@@ -36,26 +38,29 @@ function normalizeTheme(t) {
 function BrandingManager({ tournament, password, showToast, onThemeChange }) {
   const theme = (tournament && tournament.theme) || {};
 
-  const [primaryColor, setPrimaryColor] = useStateBr(theme.primaryColor || "#1d3557");
-  const [accentSoftColor, setAccentSoftColor] = useStateBr(theme.accentSoftColor || "#e7eaf3");
-  const [windowTitle, setWindowTitle] = useStateBr(theme.windowTitle || "");
+  const [primaryColor, setPrimaryColor] = useState(theme.primaryColor || "#1d3557");
+  const [accentSoftColor, setAccentSoftColor] = useState(theme.accentSoftColor || "#e7eaf3");
+  const [windowTitle, setWindowTitle] = useState(theme.windowTitle || "");
   // Whether a custom logo is set comes with the tournament (theme.hasLogo), so
   // the page never probes /api/branding/logo and meets a 404 while none is set
   // (bc-lgnf). Upload and Remove below set it at once; the effect follows the
   // tournament when it changes (an SSE reload, another organiser's upload).
   const tournamentHasLogo = !!theme.hasLogo;
-  const [hasLogo, setHasLogo] = useStateBr(tournamentHasLogo);
-  const [logoKey, setLogoKey] = useStateBr(0); // bump to force img reload
-  const [busy, setBusy] = useStateBr(false);
-  const fileRef = useRefBr(null);
+  const [hasLogo, setHasLogo] = useState(tournamentHasLogo);
+  const [logoKey, setLogoKey] = useState(0); // bump to force img reload
+  const [busy, setBusy] = useState(false);
+  const fileRef = useRef(null);
 
-  useEffectBr(() => { setHasLogo(tournamentHasLogo); }, [tournamentHasLogo]);
+  useEffect(() => { setHasLogo(tournamentHasLogo); }, [tournamentHasLogo]);
 
   // Sync incoming theme changes (e.g. after a tournament SSE reload).
   // Always update pickers/inputs, but only propagate to the parent when
   // tournament.theme is explicitly set: passing null when absent keeps
   // the parent PUT payload clean (theme block omitted unless configured).
-  useEffectBr(() => {
+  // The parent's callback is read when the tournament changes, never a reason
+  // to sync: a new callback each parent render would put the pickers back.
+  const onThemeChangeRef = useLatestRef(onThemeChange);
+  useEffect(() => {
     const norm = normalizeTheme(tournament && tournament.theme);
     // Update the pickers with effective values even when no theme is set, so
     // they show defaults rather than empty; only propagate to the parent when
@@ -63,8 +68,8 @@ function BrandingManager({ tournament, password, showToast, onThemeChange }) {
     setPrimaryColor((norm && norm.primaryColor) || BRANDING_DEFAULTS.primaryColor);
     setAccentSoftColor((norm && norm.accentSoftColor) || BRANDING_DEFAULTS.accentSoftColor);
     setWindowTitle((norm && norm.windowTitle) || BRANDING_DEFAULTS.windowTitle);
-    if (onThemeChange) onThemeChange(norm);
-  }, [tournament]);
+    if (onThemeChangeRef.current) onThemeChangeRef.current(norm);
+  }, [tournament, onThemeChangeRef]);
 
   const handleColorChange = (field, value) => {
     const next = {
@@ -140,7 +145,7 @@ function BrandingManager({ tournament, password, showToast, onThemeChange }) {
           <input id="branding-window-title" type="text" value={windowTitle} maxLength={100} placeholder="Bracket Creator Mobile"
             onChange={(e) => handleWindowTitleChange(e.target.value)}
             style={{ width: "100%", boxSizing: "border-box" }} />
-          <div className="field__hint">Shown in the browser tab and title bar on all pages. Defaults to "Bracket Creator Mobile" when blank.</div>
+          <div className="field__hint">Shown in the browser tab and title bar on all pages. Defaults to &quot;Bracket Creator Mobile&quot; when blank.</div>
         </div>
         <div className="branding__colors">
           <div className="field">

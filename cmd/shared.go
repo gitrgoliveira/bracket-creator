@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math/big"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
@@ -104,7 +105,7 @@ func openOutputFile(outputPath string) (*os.File, *bufio.Writer, error) {
 	// O_TRUNC, not O_APPEND: each generator writes one complete workbook, and
 	// appending to an existing .xlsx silently doubles the file on every re-run
 	// with the same -o path (zip readers only see the trailing copy).
-	f, err := os.OpenFile(outputPath, os.O_TRUNC|os.O_CREATE|os.O_WRONLY, 0600) // #nosec G304, path is user-supplied CLI argument
+	f, err := os.OpenFile(filepath.Clean(outputPath), os.O_TRUNC|os.O_CREATE|os.O_WRONLY, 0600)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to open output file: %w", err)
 	}

@@ -7,8 +7,11 @@
 //
 // makeReactive() returns a single-component reactive shim with:
 //   - useState that re-renders on setter
-//   - useEffect that runs once, with cleanup capture (fired on unmount)
-//   - useRef, useMemo (eager), useLayoutEffect (no-op), memo
+//   - useEffect that runs inline as the hook is called: on the first render,
+//     then again whenever its deps change (every render when it has none),
+//     the previous cleanup first, with cleanup capture (fired on unmount)
+//   - useLayoutEffect, which runs exactly as useEffect does
+//   - useRef, useId (kept across re-renders), useMemo (eager), memo
 //   - render counter and unmount() for tests that care about either
 //
 // Install per test:
@@ -31,6 +34,7 @@ export function makeReactive() {
   let rootFactory = null;
   let effectCleanups = [];
   let renderCount = 0;
+  let idSeq = 0;
   let isRendering = false;
   let pendingRerender = false;
 
@@ -130,8 +134,18 @@ export function makeReactive() {
       }
       return hookSlots[i];
     },
+    // An id per hook call, kept across re-renders as React's is.
+    useId: () => {
+      const i = hookIndex++;
+      if (hookSlots.length <= i) {
+        hookSlots[i] = `:r${(idSeq += 1)}:`;
+      }
+      return hookSlots[i];
+    },
     useCallback: (fn) => { hookIndex++; return fn; },
-    useLayoutEffect: () => {},
+    // A layout effect runs as useEffect does here: the code under test
+    // writes refs in layout effects that its handlers read later.
+    useLayoutEffect: (effect, deps) => reactive.useEffect(effect, deps),
     memo: (c) => c,
   };
 

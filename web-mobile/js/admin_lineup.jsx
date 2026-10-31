@@ -57,7 +57,7 @@ import { queuedNotice, writePending, writeHeldOnDeviceOnly } from './write_resul
 import { useLineupForm, LineupSourceLine, LineupProblem, LineupDraftNotice, membersNotReadNotice } from './lineup_draft.jsx';
 import { useUnsavedInput } from './app_version.jsx';
 
-const { useState: useStateA, useMemo: useMemoA } = React;
+const { useState, useMemo } = React;
 
 
 // Term: kendo-glossary tooltip wrapper. Lazy lookup so the script
@@ -412,7 +412,7 @@ function memberIdentityWarning(failures, squadUnavailable) {
 // is named, and allMatches names the earlier match a carried lineup comes from.
 function AdminLineup({ comp, team, matchId = "", matchLabel = "", notInMatch = false, allMatches, password, showToast, onClose }) {
   const teamSize = comp?.teamSize || 5;
-  const positions = useMemoA(() => positionsForSize(teamSize), [teamSize]);
+  const positions = useMemo(() => positionsForSize(teamSize), [teamSize]);
   const positionKeys = positions.map(p => p.key);
   const teamId = teamServerIdOf(team);
   const compId = comp?.id || "";
@@ -454,7 +454,7 @@ function AdminLineup({ comp, team, matchId = "", matchLabel = "", notInMatch = f
     error, setError, warning: saveWarning, setWarning: setSaveWarning,
     squad, changeMembers, squadUnavailable,
   } = form;
-  const [saving, setSaving] = useStateA(false);
+  const [saving, setSaving] = useState(false);
   // A removal of the match's own lineup is in flight.
   const busy = saving;
   // The pickers are for a lineup that was read: until then Save is off too, and
@@ -466,16 +466,16 @@ function AdminLineup({ comp, team, matchId = "", matchLabel = "", notInMatch = f
   // Operation 2 (ADD): which position is mid-add, and the name typed so
   // far. Only one position can be mid-add at a time, an operator works one
   // slot at a time, so a single pair of fields is enough.
-  const [addingPos, setAddingPos] = useStateA(null);
-  const [addingName, setAddingName] = useStateA("");
-  const [addBusy, setAddBusy] = useStateA(false);
+  const [addingPos, setAddingPos] = useState(null);
+  const [addingName, setAddingName] = useState("");
+  const [addBusy, setAddBusy] = useState(false);
 
   // Operation 3 (RENAME): which squad member (by id) is being renamed.
-  const [renamingId, setRenamingId] = useStateA(null);
-  const [renamingName, setRenamingName] = useStateA("");
+  const [renamingId, setRenamingId] = useState(null);
+  const [renamingName, setRenamingName] = useState("");
   // The name the rename box opened with: an open box holds nothing until
   // its name differs from it.
-  const [renamingFrom, setRenamingFrom] = useStateA("");
+  const [renamingFrom, setRenamingFrom] = useState("");
   // The lineup draft survives a reload (lineup_draft.jsx); a member name
   // being typed does not, so it holds a new build's automatic reload.
   useUnsavedInput((addingPos != null && addingName.trim() !== "")
@@ -492,7 +492,7 @@ function AdminLineup({ comp, team, matchId = "", matchLabel = "", notInMatch = f
   // for it, since an add finished after a save would not be placed.
   const memberBusy = addBusy;
 
-  const squadSorted = useMemoA(() => squadMemberOptions(squad), [squad]);
+  const squadSorted = useMemo(() => squadMemberOptions(squad), [squad]);
 
   // rostersByPosition (bc-rvfx): the per-position "who's left to pick" list,
   // precomputed once per render of the dependencies it actually reads rather
@@ -500,7 +500,7 @@ function AdminLineup({ comp, team, matchId = "", matchLabel = "", notInMatch = f
   // legitimately excludes a different slot (itself), so the per-position work
   // is real, but re-deriving all of them on a render that touched neither the
   // squad nor the lineup (e.g. typing into the Rename box) was pure waste.
-  const rostersByPosition = useMemoA(() => {
+  const rostersByPosition = useMemo(() => {
     const byKey = {};
     positions.forEach(p => {
       const offered = rosterWithoutPlacedElsewhere(squadSorted, { positions: values, memberIds }, p.key);
@@ -931,7 +931,7 @@ function AdminLineup({ comp, team, matchId = "", matchLabel = "", notInMatch = f
           )}
           {squadSorted.length === 0 && !squadUnavailable && (
             <div style={{ fontSize: 12, color: "var(--ink-3)", fontStyle: "italic" }}>
-              This team has no members yet: choose "+ Add new member…" in a position above to add the first one.
+              This team has no members yet: choose &quot;+ Add new member…&quot; in a position above to add the first one.
             </div>
           )}
         </div>
@@ -1041,21 +1041,21 @@ const STARTING_TARGET = { id: "", label: "" };
 // "Lineups" sidebar entry in admin_competition.jsx (T136 nav hook).
 function AdminTeamLineupsList({ comp, pools, poolMatches, bracket, password, showToast }) {
   const teams = (comp?.players || []);
-  const [teamId, setTeamId] = useStateA(teams[0] ? teamIdOf(teams[0]) : "");
+  const [teamId, setTeamId] = useState(teams[0] ? teamIdOf(teams[0]) : "");
   // The starting lineup has no id; otherwise one of the team's matches, with the
   // label it was offered under, which the page keeps for a match that stops being
   // offered.
-  const [chosen, setChosen] = useStateA(STARTING_TARGET);
+  const [chosen, setChosen] = useState(STARTING_TARGET);
   const selectedTeam = teams.find(t => teamIdOf(t) === teamId) || teams[0];
   // The competition page holds the match data beside the competition's config
   // (pools, poolMatches and bracket are its own props), so the matches are read
   // from both. A competition that carries the data itself is read as it stands.
-  const allMatches = useMemoA(() => {
+  const allMatches = useMemo(() => {
     if (typeof window.compMatchesForCompetition !== "function") return [];
     const data = (pools || poolMatches || bracket) ? { pools, poolMatches, bracket } : undefined;
     return window.compMatchesForCompetition(comp, data);
   }, [comp, pools, poolMatches, bracket]);
-  const matchOptions = useMemoA(
+  const matchOptions = useMemo(
     () => teamMatchOptions(allMatches, teamServerIdOf(selectedTeam)),
     [allMatches, selectedTeam]
   );

@@ -25,6 +25,7 @@ import { NumberedName, numberFollowsName } from './numbered_name.jsx';
 import { creditedBoutSide, subBoutHasResult } from './team_default_credit.jsx';
 import { barredNameMark } from './barred_chip.jsx';
 import { matchShowsScore } from './match_shows_score.jsx';
+import { useLatestRef } from './latest_ref.jsx';
 
 // bc-pnum: inline style for the squad member label riding beside a bout
 // row's fighter name (BoutSubRow below), the public twin of
@@ -44,7 +45,7 @@ import { matchShowsScore } from './match_shows_score.jsx';
 const SQUAD_MEMBER_LABEL_STYLE = { fontSize: "0.7em", fontWeight: 600, opacity: 0.75 };
 const SQUAD_MEMBER_LABEL_STYLE_AFTER = { ...SQUAD_MEMBER_LABEL_STYLE };
 
-const { useState: useSB, useEffect: useEB } = React;
+const { useState, useEffect } = React;
 
 // boutHansokuMark: red ▲ for ONE outstanding hansoku (fouls % 2 === 1). On the
 // second hansoku the ▲ is deleted and 1 ippon (H) goes to the opponent, so a
@@ -79,11 +80,11 @@ export function boutHansokuMark(foulCount) {
 // match; resolveMatchLineup reads it from the server, which owns the rule), so
 // no round has to be derived here.
 export function useTeamLineups(match, competition) {
-  const [lineupA, setLineupA] = useSB(null);
-  const [lineupB, setLineupB] = useSB(null);
-  const [squadA, setSquadA] = useSB([]);
-  const [squadB, setSquadB] = useSB([]);
-  const [lineupVersion, setLineupVersion] = useSB(0);
+  const [lineupA, setLineupA] = useState(null);
+  const [lineupB, setLineupB] = useState(null);
+  const [squadA, setSquadA] = useState([]);
+  const [squadB, setSquadB] = useState([]);
+  const [lineupVersion, setLineupVersion] = useState(0);
 
   const compId = (competition && competition.id) || match?.compId;
   const matchId = match?.id;
@@ -104,7 +105,7 @@ export function useTeamLineups(match, competition) {
   // the backend emits an SSE lineup_updated for this competition). Incrementing
   // lineupVersion causes the fetch effect below to re-run and pick up the new
   // lineup without a full page reload.
-  useEB(() => {
+  useEffect(() => {
     if (!compId) return;
     const handler = (e) => {
       if (!e.detail || e.detail.competitionId === compId) {
@@ -122,7 +123,10 @@ export function useTeamLineups(match, competition) {
   // the spelling the first run captured. The map is a handful of members
   // per team, so serialising it per render is cheap.
   const squadsSig = competition && competition.squads ? JSON.stringify(competition.squads) : "";
-  useEB(() => {
+  // The competition is read through a ref: a fresher item with the same
+  // squads is no reason to read the lineups again.
+  const competitionRef = useLatestRef(competition);
+  useEffect(() => {
     // Clear stale lineups immediately so the previous match's names never leak
     // into the next render (Copilot review: stale lineup state).
     setLineupA(null);
@@ -130,6 +134,7 @@ export function useTeamLineups(match, competition) {
     setSquadA([]);
     setSquadB([]);
     if (!compId || !matchId || !window.API) return undefined;
+    const competition = competitionRef.current;
     let cancelled = false;
     (async () => {
       // Prefer the players already on the passed competition (TvDisplay /
@@ -176,7 +181,7 @@ export function useTeamLineups(match, competition) {
       if (teamBId) setSquadB(squads[teamBId] || []);
     })();
     return () => { cancelled = true; };
-  }, [compId, matchId, sideAId, sideBId, lineupVersion, squadsSig]);
+  }, [compId, matchId, sideAId, sideBId, lineupVersion, squadsSig, competitionRef]);
 
   return { lineupA, lineupB, squadA, squadB };
 }

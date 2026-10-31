@@ -18,9 +18,8 @@ import (
 func boolPtr(b bool) *bool { return &b }
 
 // TestScoreRequestValidate covers the request-shape rules in
-// ScoreRequest.Validate (Slice 0 / T015 / NFR-004). Slice 3 (T077)
-// extends this with decision-type validation; rules here are the
-// minimal Slice-0 set and must remain stable as later slices add to it.
+// ScoreRequest.Validate (T015 / NFR-004): the status and winner rules.
+// The decision-type rules (T077) are covered by the tests further down.
 func TestScoreRequestValidate(t *testing.T) {
 	tests := []struct {
 		name      string

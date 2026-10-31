@@ -275,7 +275,7 @@ func PoolsByCourt(pools []Pool, courts []string, courtOfPool map[string]string) 
 	// Where each pool is actually fought, in pool order. AssignPoolsToCourts
 	// never returns an index >= numCourts, so courtNameAt reads the same name
 	// off the full list that it would off a numCourts-long prefix of it.
-	assignments, _ := AssignPoolsToCourts(len(pools), numCourts)
+	assignments := AssignPoolsToCourts(len(pools), numCourts)
 	courtOf := make([]string, len(pools))
 	for i := range pools {
 		courtOf[i] = courtNameAt(courts, assignments[i])
@@ -309,7 +309,8 @@ func PoolsByCourt(pools []Pool, courts []string, courtOfPool map[string]string) 
 
 func writeCourtHeaders(f *excelize.File, sheetName string, courts []string, headerStyle int) {
 	numCourts := clampCourts(len(courts))
-	mergedCells, _ := f.GetMergeCells(sheetName)
+	mergedCells, err := f.GetMergeCells(sheetName)
+	handleExcelError("GetMergeCells", err)
 	for _, mc := range mergedCells {
 		if strings.HasSuffix(mc.GetStartAxis(), "1") || strings.HasSuffix(mc.GetEndAxis(), "1") {
 			handleExcelError("UnmergeCell", f.UnmergeCell(sheetName, mc.GetStartAxis(), mc.GetEndAxis()))
@@ -1169,7 +1170,11 @@ func matchHeaderWithStyles(f *excelize.File, sheetName string, startColName stri
 	handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, fmt.Sprintf("%s%d", endColName, poolRow), fmt.Sprintf("%s%d", endColName, poolRow), rightStyle))
 
 	if engi {
-		startNum, _ := excelize.ColumnNameToNumber(startColName)
+		startNum, err := excelize.ColumnNameToNumber(startColName)
+		if err != nil {
+			handleExcelError("ColumnNameToNumber", err)
+			return
+		}
 		lVColName := mustColumnName(startNum + 1)
 		rVColName := mustColumnName(startNum + 5)
 		handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s%d", lVColName, poolRow), "Fl"))

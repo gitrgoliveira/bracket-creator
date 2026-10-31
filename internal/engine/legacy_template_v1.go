@@ -282,7 +282,11 @@ func v1PoolRank(val string) int64 {
 	if len(s) > 2 {
 		s = s[:len(s)-2]
 	}
-	pos, _ := strconv.ParseInt(s, 10, 64)
+	pos, err := strconv.ParseInt(s, 10, 64)
+	if err != nil {
+		// Not an ordinal: the label carries no rank.
+		return 0
+	}
 	return pos
 }
 

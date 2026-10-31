@@ -128,7 +128,7 @@ describe('competitionNextSteps: basic shape', () => {
       expect(typeof step.id).toBe('string');
       expect(typeof step.label).toBe('string');
       expect(typeof step.detail).toBe('string');
-      expect(['done', 'active', 'todo']).toContain(step.state);
+      expect(['done', 'active', 'pending']).toContain(step.state);
       // section is string or null
       expect(step.section === null || typeof step.section === 'string').toBe(true);
       // cta (active-step button label) is string or null
@@ -157,7 +157,7 @@ describe('competitionNextSteps: basic shape', () => {
     expect(steps[0].state).toBe('done');
   });
 
-  it('last step (generate) is always todo or active, never done', () => {
+  it('last step (generate) is always pending or active, never done', () => {
     const steps = competitionNextSteps(makeComp());
     const last = steps[steps.length - 1];
     expect(last.id).toBe('generate');
@@ -174,7 +174,7 @@ describe('competitionNextSteps: basic shape', () => {
     const steps = competitionNextSteps(makeComp());
     const activeIdx = steps.findIndex(s => s.state === 'active');
     for (let i = activeIdx + 1; i < steps.length; i++) {
-      expect(steps[i].state).toBe('todo');
+      expect(steps[i].state).toBe('pending');
     }
   });
 });
@@ -220,10 +220,10 @@ describe('competitionNextSteps: individual, 0 players', () => {
     expect(s.detail).toMatch(/2 seed/i);
   });
 
-  it('generate step is todo when players < 2', () => {
+  it('generate step is pending when players < 2', () => {
     const steps = competitionNextSteps(makeComp({ players: [] }));
     const g = steps.find(s => s.id === 'generate');
-    expect(g.state).toBe('todo');
+    expect(g.state).toBe('pending');
   });
 
   it('generate step detail mentions add participants when < 2 players', () => {
@@ -389,7 +389,7 @@ describe('competitionNextSteps: generate step under a court block', () => {
   // The CTA authored on this step could never render: only an `active` step
   // draws its button, and "Review seeds & settings" is emitted non-done
   // forever (there is no "seeds reviewed" signal), so it took `active` on
-  // every render and the generate step was always `todo`.
+  // every render and the generate step was always `pending`.
   it('is the ACTIVE step while it is blocked, so its CTA can render', () => {
     const step = generateStep(makeComp({ players: twoPlayers(), courts: ['A', 'B', 'C'] }), ['A', 'B', 'C']);
     expect(step.cta).toBe('Reassign shiaijo →');
@@ -400,14 +400,14 @@ describe('competitionNextSteps: generate step under a court block', () => {
   it('demotes the never-completing settings step while the draw is blocked', () => {
     // Otherwise two buttons on the same card both navigate to Settings.
     const steps = competitionNextSteps(makeComp({ players: twoPlayers(), courts: ['A', 'B', 'C'] }), ['A', 'B', 'C']);
-    expect(steps.find(s => s.id === 'settings').state).toBe('todo');
+    expect(steps.find(s => s.id === 'settings').state).toBe('pending');
     expect(steps.filter(s => s.state === 'active').map(s => s.id)).toEqual(['generate']);
   });
 
   it('leaves the ordinary checklist alone when nothing blocks the draw', () => {
     const steps = competitionNextSteps(makeComp({ players: twoPlayers(), courts: ['A', 'B'] }), ['A', 'B', 'C']);
     expect(steps.filter(s => s.state === 'active').map(s => s.id)).toEqual(['settings']);
-    expect(steps.find(s => s.id === 'generate').state).toBe('todo');
+    expect(steps.find(s => s.id === 'generate').state).toBe('pending');
   });
 
   it('does not jump the queue while participants are still missing', () => {

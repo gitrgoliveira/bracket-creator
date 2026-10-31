@@ -7,7 +7,7 @@
 import { useStableId } from './stable_id.jsx';
 import { useUnsavedInput } from './app_version.jsx';
 
-const { useState: useStateAn, useEffect: useEffectAn, useCallback: useCallbackAn } = React;
+const { useState, useEffect, useCallback } = React;
 
 // Pure helpers for the announcement-broadcast controls.
 // isSendDisabled drives the button's `disabled` attribute.
@@ -25,18 +25,18 @@ function sendAnnouncementLabel(inFlight) {
 // handlers. `password` is forwarded to the mutating API calls; `showToast`
 // surfaces success/error feedback. Both are optional: guarded at call sites.
 function AnnouncementComposer({ password, showToast }) {
-  const [announcementMessage, setAnnouncementMessage] = useStateAn("");
+  const [announcementMessage, setAnnouncementMessage] = useState("");
   // A message being written holds a new build's automatic reload (app_version.jsx).
   useUnsavedInput(announcementMessage.trim() !== "");
-  const [announcementDuration, setAnnouncementDuration] = useStateAn(5);
-  const [announcementInFlight, setAnnouncementInFlight] = useStateAn(false);
-  const [activeAnnouncements, setActiveAnnouncements] = useStateAn([]);
+  const [announcementDuration, setAnnouncementDuration] = useState(5);
+  const [announcementInFlight, setAnnouncementInFlight] = useState(false);
+  const [activeAnnouncements, setActiveAnnouncements] = useState([]);
   // The composer is reachable from two places (Edit details and the
   // dashboard's Announce modal), so its label ids are minted, not fixed.
   const messageId = useStableId('announce-message');
   const durationLabelId = useStableId('announce-duration');
 
-  const refreshAnnouncements = useCallbackAn(async () => {
+  const refreshAnnouncements = useCallback(async () => {
     try {
       const list = await window.API.fetchAnnouncements();
       setActiveAnnouncements(list || []);
@@ -45,7 +45,7 @@ function AnnouncementComposer({ password, showToast }) {
     }
   }, []);
 
-  useEffectAn(() => { refreshAnnouncements(); }, [refreshAnnouncements]);
+  useEffect(() => { refreshAnnouncements(); }, [refreshAnnouncements]);
 
   const handleSendAnnouncement = async () => {
     const trimmed = announcementMessage.trim();

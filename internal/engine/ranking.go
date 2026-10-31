@@ -87,9 +87,15 @@ func (e *Engine) GetBracketRanking(compID string, rank int) (*domain.Player, err
 	// competitor actually holding this rank. Falls back to name when
 	// winnerID is empty (an unstamped bracket row -- a bye, an unresolved
 	// feeder, or an unrepaired legacy row).
-	srcComp, _ := e.store.LoadCompetition(compID)
+	srcComp, err := e.store.LoadCompetition(compID)
+	if err != nil {
+		return nil, fmt.Errorf("load competition %q: %w", compID, err)
+	}
 	withZekken := srcComp != nil && srcComp.EffectiveWithZekkenName()
-	srcPlayers, _ := e.store.LoadParticipants(compID, withZekken)
+	srcPlayers, err := e.store.LoadParticipants(compID, withZekken)
+	if err != nil {
+		return nil, fmt.Errorf("load participants of %q: %w", compID, err)
+	}
 	if winnerID != "" {
 		for i := range srcPlayers {
 			if srcPlayers[i].ID == winnerID {

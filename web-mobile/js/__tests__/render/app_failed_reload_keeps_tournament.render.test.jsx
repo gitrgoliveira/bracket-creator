@@ -11,18 +11,14 @@
 import React from 'react';
 import { act, screen } from '@testing-library/react';
 import { describe, it, expect, vi, afterAll } from 'vitest';
-import { mountApp, settle } from '../helpers/mount_app.js';
+import { mountApp, settle, propsProbe } from '../helpers/mount_app.js';
 
-const home = { props: null };
-function ProbeViewerHome(props) {
-  home.props = props;
-  return <div data-testid="viewer-home">{props.tournament && props.tournament.name}</div>;
-}
+const home = propsProbe((props) => <div data-testid="viewer-home">{props.tournament && props.tournament.name}</div>);
 
 const sse = { emit: null };
 
 const STUBBED_GLOBALS = {
-  ViewerHome: ProbeViewerHome,
+  ViewerHome: home.Component,
   API: {
     fetchTournament: vi.fn(async () => ({ name: 'London Cup', courts: ['A'] })),
     fetchCompetitions: vi.fn(async () => []),

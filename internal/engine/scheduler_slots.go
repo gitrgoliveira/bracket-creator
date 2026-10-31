@@ -143,16 +143,18 @@ func parseDurationMinutes(s string) int {
 // fixture defaults and keeps slot assignment from collapsing.
 func parseClockHHMM(s string) time.Time {
 	if s == "" {
-		t, _ := time.Parse(scheduleClockLayout, "09:00")
-		return t
+		return defaultClockStart
 	}
 	t, err := time.Parse(scheduleClockLayout, s)
 	if err != nil {
-		t, _ = time.Parse(scheduleClockLayout, "09:00")
-		return t
+		return defaultClockStart
 	}
 	return t
 }
+
+// defaultClockStart is 09:00 as time.Parse(scheduleClockLayout, "09:00")
+// answers it: a time of day on the zero date, in UTC.
+var defaultClockStart = time.Date(0, time.January, 1, 9, 0, 0, 0, time.UTC)
 
 // skipCeremonyBlocks pushes t past any ceremony window it falls
 // inside. Currently models LunchBlock as the only mid-day block,

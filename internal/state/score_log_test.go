@@ -9,6 +9,7 @@ import (
 	"slices"
 	"testing"
 
+	bctest "github.com/gitrgoliveira/bracket-creator/internal/test"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -53,7 +54,7 @@ func TestScoreLog_AppendAndLoad(t *testing.T) {
 	}
 	assert.Equal(t, "m0", got[0].ID())
 	assert.Equal(t, int64(10), got[1].Stamp())
-	raw, err := os.ReadFile(filepath.Join(dir, "competitions", "c", scoreLogDir, "Pool%20A%2F1.jsonl"))
+	raw, err := bctest.ReadFile(filepath.Join(dir, "competitions", "c", scoreLogDir, "Pool%20A%2F1.jsonl"))
 	require.NoError(t, err)
 	assert.Contains(t, string(raw), `"v":1`)
 	assert.NoError(t, s.AppendScoreLog("c", mid), "no lines writes nothing")
@@ -76,7 +77,7 @@ func TestScoreLog_UnreadableLineIsAnError(t *testing.T) {
 			s, dir := scoreLogStore(t)
 			require.NoError(t, s.AppendScoreLog("c", "m", tapLine("e1")))
 			path := filepath.Join(dir, "competitions", "c", scoreLogDir, "m.jsonl")
-			f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o600)
+			f, err := s.root.openFile(path, os.O_APPEND|os.O_WRONLY, 0o600)
 			require.NoError(t, err)
 			_, err = f.WriteString(c.line + "\n")
 			require.NoError(t, err)
@@ -118,7 +119,7 @@ func TestScoreLog_CrashAfterCommitReplaysTheLine(t *testing.T) {
 	// The bytes a real append writes, taken from a scratch store.
 	scratch, _ := scoreLogStore(t)
 	require.NoError(t, scratch.AppendScoreLog("c", mid, tapLine("e1")))
-	want, err := os.ReadFile(scratch.scoreLogPath("c", mid))
+	want, err := bctest.ReadFile(scratch.scoreLogPath("c", mid))
 	require.NoError(t, err)
 
 	s, dir := scoreLogStore(t)

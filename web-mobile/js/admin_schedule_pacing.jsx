@@ -5,7 +5,7 @@ import { timeToMinutes } from './admin_schedule_utils.jsx';
 import { courtPaceLookup, paceClockNow, PaceTime, PACE_TICK_MS } from './court_pace.jsx';
 import { courtQueueKey } from './court_queue.jsx';
 
-const { useState: useStateA, useEffect: useEffectA } = React;
+const { useState, useEffect } = React;
 
 // filterMatchesByCourt(matches, courtParam): pure list filter.
 //
@@ -126,15 +126,15 @@ export function suggestRebalances(perCourtStats, perMatchMinutes) {
 // the same projection. A competition that carries no slot falls back to
 // safeMatchDuration (the page's "Time per match").
 export function CourtPacePanel({ byCourt, safeMatchDuration, competitions }) {
-  const [open, setOpen] = useStateA(false);
+  const [open, setOpen] = useState(false);
   // setTick forces a re-render every 60 s so computeCourtPaceStats and court pace
   // re-read the current wall-clock time.
-  const [, setTick] = useStateA(0);
+  const [, setTick] = useState(0);
 
   // hasData is checked inside the effect so the interval only runs (and causes
   // re-renders) when there are matches to display, not when the panel renders null.
   const hasData = Object.values(byCourt).some(arr => arr.length > 0);
-  useEffectA(() => {
+  useEffect(() => {
     if (!hasData) return;
     const timer = setInterval(() => {
       setTick(t => t + 1);

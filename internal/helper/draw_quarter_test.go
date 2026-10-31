@@ -228,16 +228,14 @@ func TestBlockCountIsCappedByTheOccupantCount(t *testing.T) {
 // halves ARE the 2-way split's, so the block tree nests and the shiaijo count
 // selects a level of one tree instead of drawing a different bracket.
 func TestBlocksHalveThePoolListRatherThanDividingIt(t *testing.T) {
-	direct, err := AssignPoolsToCourts(10, 4)
-	require.NoError(t, err)
+	direct := AssignPoolsToCourts(10, 4)
 	assert.Equal(t, []int{0, 0, 0, 1, 1, 1, 2, 2, 3, 3}, direct, "the allocator front-loads: 3/3/2/2")
 
 	halved := subdivideCourts(make([]int, 10), 1, 4)
 	assert.Equal(t, []int{0, 0, 0, 1, 1, 2, 2, 2, 3, 3}, halved, "halving gives 3/2/3/2")
 
 	// The halves agree with the two-shiaijo allocation; the direct split's do not.
-	twoWay, err := AssignPoolsToCourts(10, 2)
-	require.NoError(t, err)
+	twoWay := AssignPoolsToCourts(10, 2)
 	for pi := range halved {
 		assert.Equalf(t, twoWay[pi], halved[pi]/2, "pool %d must stay in the same half", pi)
 	}

@@ -8,9 +8,9 @@
 //
 // The interface methods are deliberately the SMALLEST set each handler
 // family needs; adding a method here is a deliberate "I want this
-// callable from an unrelated handler" signal, not a default. As more
-// handlers migrate to interface-based DI in later slices, methods get
-// added narrowly. Concrete types in `internal/state` and
+// callable from an unrelated handler" signal, not a default. Handler
+// families that take these interfaces get methods added narrowly; the
+// others take the concrete `*state.Store` directly. Concrete types in `internal/state` and
 // `internal/engine` already satisfy these interfaces by structural
 // match, so wiring stays drop-in (see server.go for the constructor).
 package mobileapp
@@ -35,11 +35,10 @@ type TournamentLoader interface {
 // real handler call sites need them; see server.go for the constructor
 // that wires `*state.Store` through this interface.
 //
-// Consumers (current): handlers_match.go (the score endpoint, after T017
-// migration). Other handler families continue to hold the concrete
-// `*state.Store` until later slices migrate them; the concrete type
-// remains a valid implementation of this interface so the migration is
-// drop-in.
+// Consumers: handlers_match.go (the score endpoint), handlers_decision.go,
+// handlers_lineup.go, handlers_squad.go and handlers_score_events.go. The
+// other handler families take the concrete `*state.Store` directly;
+// `*state.Store` also implements this interface, so either can be passed.
 type CompetitionStore interface {
 	// LoadCompetition returns the competition record, or (nil, nil) when
 	// no record exists for this ID. Mirrors state.Store.LoadCompetition.
@@ -270,9 +269,9 @@ type SquadStore interface {
 // so handler tests can supply a recording stub instead of running a
 // real SSE hub with subscriber goroutines.
 //
-// Consumers (current): handlers_match.go. Other handler families will
-// migrate as later slices touch them; *Hub satisfies this interface by
-// structural match.
+// Consumers: the decision, daihyosen, eligibility, league tie-break,
+// lineup, match, participants, registration, score-events and squad
+// handler files. *Hub satisfies this interface by structural match.
 type Broadcaster interface {
 	// Broadcast publishes the given event payload to every active SSE
 	// subscriber. Mirrors Hub.Broadcast.
@@ -287,9 +286,9 @@ type Broadcaster interface {
 // CompetitionStore / TeamLineupStore / etc. interfaces at the
 // registration site, same pattern the other handler families use.
 //
-// Consumers (current): handlers_lineup.go (the PUT, T156);
-// handlers_match.go (score, mp-95mg, wraps WithCourtExclusivityLock +
-// WithTransaction); handlers_decision.go (decision, T156).
+// Consumers: handlers_lineup.go (the PUT, T156); handlers_match.go
+// (score, mp-95mg, wraps WithCourtExclusivityLock + WithTransaction);
+// handlers_decision.go (decision, T156); handlers_score_events.go.
 type CompetitionTransactor interface {
 	// WithTransaction runs fn under the per-competition write lock for
 	// compID. fn receives a state.StoreTx handle whose methods skip

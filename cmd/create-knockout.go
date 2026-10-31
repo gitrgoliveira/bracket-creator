@@ -81,7 +81,7 @@ func (o *knockoutOptions) run(cmd *cobra.Command, args []string) error {
 	}
 
 	// The page-count clamp further down is safe by construction: it clamps to
-	// helper.RoundToPowerOf2, which is already a power of two.
+	// helper.NextPow2, which is already a power of two.
 	if err := helper.ValidateDrawCourtCount(o.courts); err != nil {
 		return err
 	}
@@ -189,9 +189,14 @@ func (o *knockoutOptions) createKnockout(entries []string) error {
 	if o.courts < 1 {
 		o.courts = 2
 	}
-	// Clamp courts to avoid creating unnecessary tree pages (pre-compute rough page count).
-	if roughPages, _ := helper.RoundToPowerOf2(float64(len(names)), float64(helper.MaxPlayersPerTree)); o.courts > roughPages && roughPages > 0 {
-		o.courts = roughPages
+	// Clamp courts to avoid creating unnecessary tree pages: the rough page
+	// count is one page per MaxPlayersPerTree entrants, rounded up to a power of
+	// two. A draw of half a page or less is never clamped.
+	if n := len(names); n > helper.MaxPlayersPerTree/2 {
+		roughPages := helper.NextPow2((n + helper.MaxPlayersPerTree - 1) / helper.MaxPlayersPerTree)
+		if o.courts > roughPages {
+			o.courts = roughPages
+		}
 	}
 	// The CLI has no NAMED shiaijo: --courts says how many the draw runs on, so
 	// the sheets are titled A, B, C by position. The live app passes the

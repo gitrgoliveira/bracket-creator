@@ -100,10 +100,10 @@ async function mount(match, props = {}) {
 // for the SSE refetch), and onClose really unmounts it. A vi.fn onClose over
 // a frozen match cannot show what the operator sees after the reopen.
 let flip;
-function LiveHost({ initial, onClose }) {
+function LiveHost({ initial, onClose, onFlip }) {
   const [match, setMatch] = React.useState(initial);
   const [open, setOpen] = React.useState(true);
-  flip = (patch) => setMatch((m) => ({ ...m, ...patch }));
+  onFlip((patch) => setMatch((m) => ({ ...m, ...patch })));
   if (!open) return <div data-testid="host-closed" />;
   return (
     <ScoreEditorModal
@@ -116,7 +116,7 @@ function LiveHost({ initial, onClose }) {
 }
 
 async function mountLive(match, onClose) {
-  await act(async () => { render(<LiveHost initial={match} onClose={onClose} />); });
+  await act(async () => { render(<LiveHost initial={match} onClose={onClose} onFlip={(f) => { flip = f; }} />); });
 }
 
 // What the server leaves after Clear withdrawal and reopen on these fixtures:

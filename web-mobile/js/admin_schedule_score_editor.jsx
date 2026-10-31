@@ -24,7 +24,7 @@ import { isBarredMatch } from './ineligible_match.jsx';
 import { BarredMatchNotice } from './barred_match_notice.jsx';
 import { matchShowsScore } from './match_shows_score.jsx';
 
-const { useState: useStateA, useMemo: useMemoA, useEffect: useEffectA, useRef: useRefA } = React;
+const { useState, useMemo, useEffect, useRef } = React;
 
 const pluralize = window.pluralize;
 const EmptyState = window.EmptyState;
@@ -85,9 +85,9 @@ function ScoreEditCourtBtn({ m, courts, onMoveCourt }) {
 }
 
 export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCompId, password, showToast }) {
-  const [filter, setFilter] = useStateA("");
-  const [compFilter, setCompFilter] = useStateA(restrictToCompId || "all");
-  const [statusFilter, setStatusFilter] = useStateA("all");
+  const [filter, setFilter] = useState("");
+  const [compFilter, setCompFilter] = useState(restrictToCompId || "all");
+  const [statusFilter, setStatusFilter] = useState("all");
   // The open match is held as a KEY and re-resolved from live data on every
   // render, never captured as an object. A match has ONE result and every
   // surface asking for it shows the same one (operator ruling) — an editor
@@ -105,23 +105,25 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
   // panel resolves `selected.matchId` out of `bracket.rounds`, the shiaijo
   // panel resolves `pickedKey`/`correctingKey` out of `sorted` — so it is a
   // third site joining them rather than a new idea.
-  const [openKey, setOpenKey] = useStateA(null);
+  const [openKey, setOpenKey] = useState(null);
   // mp-bkg: per-match lineup panel state. lineupKey is the match open in the
   // lineup panel (null = panel closed). Held as a key and resolved below, like
   // openKey: a snapshot would keep the panel's editors on the teams the match
   // had when it was opened, when a feeding match decided on another device has
   // since seated another team on a side.
-  const [lineupKey, setLineupKey] = useStateA(null);
+  const [lineupKey, setLineupKey] = useState(null);
   // ScoreEditorModal's onSubmit / onSubmitAndNext callbacks await
   // onEditScore (which routes through AdminApp.editMatchScore: a
   // server PUT). If AdminScoreEditor unmounts during the in-flight
   // save (parent navigates away), the post-await setOpenKey fires
   // on a torn-down component. Gate via mountedRef.
-  const mountedRef = useRefA(true);
-  useEffectA(() => () => { mountedRef.current = false; }, []);
+  const mountedRef = useRef(true);
+  useEffect(() => () => { mountedRef.current = false; }, []);
 
-  const tournament = t || (c ? { competitions: [c] } : { competitions: [] });
-  const allMatches = useMemoA(
+  // Memoised, so the stand-in for a missing tournament keeps its identity
+  // between renders and the match list below is not worked out again for it.
+  const tournament = useMemo(() => t || (c ? { competitions: [c] } : { competitions: [] }), [t, c]);
+  const allMatches = useMemo(
     () => (tournament.competitions || []).flatMap((cc) => window.compMatches(cc)).filter(hasBothSides),
     [tournament]
   );

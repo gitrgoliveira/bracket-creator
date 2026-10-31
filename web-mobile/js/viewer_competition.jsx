@@ -13,7 +13,7 @@ import { resultRecencyDesc } from './result_recency.jsx';
 import { isBarredMatch } from './ineligible_match.jsx';
 import { paceDisplayOf, PaceTime } from './court_pace.jsx';
 
-const { useState, useMemo, useRef: useRefV } = React;
+const { useState, useMemo, useRef } = React;
 const StatusBadge = window.StatusBadge;
 const formatDate = window.formatDate;
 const EmptyState = window.EmptyState;
@@ -65,14 +65,19 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
   // a side effect: the page was dropping a real bout. It does have one
   // consequence -- the bronze can now be currentMatch, and it renders outside
   // BracketTree -- which the bracket auto-scroll effect below handles.
+  // The fields of `c` that compMatches reads, kept as one object that changes
+  // only when one of them does, never on a refetch that rebuilds `c` the same.
+  // c.status matters too: compMatches early-returns [] for "setup" (no draw yet).
+  const matchConfig = useMemo(
+    () => ({
+      id: c.id, name: c.name, kind: c.kind, teamSize: c.teamSize, format: c.format, engi: isEngi,
+      teamMatchType: c.teamMatchType, config: { teamMatchType: c.config?.teamMatchType }, status: c.status,
+    }),
+    [c.id, c.name, c.kind, c.teamSize, c.format, isEngi, c.teamMatchType, c.config?.teamMatchType, c.status]
+  );
   const allMatches = useMemo(
-    () => compMatchesForCompetition(c, { pools, poolMatches, bracket }),
-    // isEngi (not c.engi) because that is the binding this component closes
-    // over elsewhere; it is a derived primitive, so it changes exactly when
-    // c.engi does. c.status is a new input: compMatches early-returns [] for
-    // "setup" (no draw yet), a no-op in practice.
-    // oxlint-disable-next-line react-hooks/exhaustive-deps
-    [pools, poolMatches, bracket, c.id, c.name, c.kind, c.teamSize, c.format, isEngi, c.teamMatchType, c.config?.teamMatchType, c.status]
+    () => compMatchesForCompetition(matchConfig, { pools, poolMatches, bracket }),
+    [matchConfig, pools, poolMatches, bracket]
   );
 
   // mp-xhaa: the schedule filter and bracket/pool highlight are driven by the
@@ -236,7 +241,10 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
   // not "overview", for the default), and tolerates a missing handler via
   // optional chaining: some unit tests mount ViewerCompetition without an
   // onTabChange just to assert tab presence. (mp-tidg / PR #307 review)
-  const selectTab = (id, replace = false) => onTabChange?.(id === "overview" ? null : id, replace);
+  const selectTab = React.useCallback(
+    (id, replace = false) => onTabChange?.(id === "overview" ? null : id, replace),
+    [onTabChange]
+  );
 
   // mp-tidg: when the requested tab isn't available (deep-link to /bracket
   // before a draw, or a draw_discarded SSE while sitting on it) effectiveTab
@@ -246,14 +254,11 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
   // Guard on a truthy activeTab: when no specific tab was requested (the
   // default/nullish state) there is nothing to correct: the URL is already
   // canonical.
-  // selectTab is intentionally omitted: this fires only on a tab-value change,
-  // not on selectTab's per-render identity.
   React.useEffect(() => {
     // replace=true: this is a correction, not a navigation: rewrite the
     // invalid tab URL in place so Back doesn't return to it (PR #307 review).
     if (activeTab && effectiveTab !== activeTab) selectTab(effectiveTab, true);
-    // oxlint-disable-next-line react-hooks/exhaustive-deps
-  }, [effectiveTab, activeTab, onTabChange]);
+  }, [effectiveTab, activeTab, selectTab]);
 
   const currentMatch = useMemo(() => {
     if (runningMatches.length > 0) return runningMatches[0];
@@ -261,7 +266,7 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
   }, [runningMatches, upcomingMatches]);
 
   const [bracketScrollTarget, setBracketScrollTarget] = useState(null);
-  const bracketScrollRef = useRefV(null);
+  const bracketScrollRef = useRef(null);
   // The live row is allMatches', which carries the competition's fields the
   // score editor routes on, so only the Bracket tab declares anything (its
   // round label). A preview bracket is not in allMatches, so its raw row is

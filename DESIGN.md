@@ -252,7 +252,7 @@ Quick lookup: scan, then `Ctrl+F` the class name to jump to its subsection.
 | Toasts | `.toast` | Auto-dismissing notifications (single-slot, no stacking) |
 | Mode tabs | `.mode-tabs` | Pill-group tab switcher |
 | Viewer head & tabs | `.viewer__head`, `.viewer__tabs` | Sticky viewer chrome |
-| Score input | `.score-card`, `.score-pt` | Operator ippon entry widget |
+| Score input | `.sb-match`, `.sb-side`, `.ipt-btn` | Operator ippon entry widget |
 | Running strip chip | `.running-strip__chip` | Court chips in the running banner |
 | Tournament-card add | `.tcard--add` | Dashed "create tournament" tile |
 | Schedule rows | `.sched-row` (admin), `.vsched-item` (viewer) | Schedule list items |
@@ -374,9 +374,16 @@ Mount via the `<Toast>` primitive. Self-dismiss at 2.7s. The host component (see
 
 [styles.css#L1601](web-mobile/css/styles.css#L1601), [#L1654](web-mobile/css/styles.css#L1654). Two distinct sticky elements: `.viewer__head` is the title/breadcrumb row (z-10), `.viewer__tabs` is the secondary nav below it (z-9). `.viewer__head--hero` swaps to `--accent` background for the player's "My Match" landing.
 
-### Score input: `.score-card`
+### Score input: `.sb-match`, `.ipt-btn`
 
-[styles.css#L1439](web-mobile/css/styles.css#L1439). Operator-critical widget for entering ippon. Layout: `.score-card` wraps two `.score-side` columns (`--white` / `--red`) split by a vs-cell. Each side carries `.score-side__lbl`, `.score-side__name`, `.score-side__dojo`, `.score-side__points`. Individual ippon buttons are `.score-pt` with `--filled` / `--empty` and `--aka` / `--shiro` modifiers ([#L3671](web-mobile/css/styles.css#L3671)). Match the `.score-pt--aka` color hooks if you add new score-entry surfaces.
+[styles.css#L5373](web-mobile/css/styles.css#L5373) (`.scoring-board`), [#L2476](web-mobile/css/styles.css#L2476) (`.ipt-btn`). Operator-critical widget for entering ippon, rendered by the individual score editor ([admin_scoring_individual.jsx](web-mobile/js/admin_scoring_individual.jsx)). Layout: `.scoring-board` wraps `.sb-match`, three columns: `.sb-side` (Shiro), `.sb-center`, `.sb-side` (Aka). Each side is `.sb-side--shiro` or `.sb-side--aka`, which carries the side's tint (see Aka/Shiro side treatment), plus `.sb-name` and the button grid `.sb-points-grid`. There is no visible side badge: the side is named by an `sr-only` `SideLabel` ([side_cell.jsx](web-mobile/js/side_cell.jsx)).
+
+- **Ippon buttons** are `.ipt-btn`, one per letter from `getIpponButtons` ([admin_scoring_shared.jsx](web-mobile/js/admin_scoring_shared.jsx)): M, K, D, T and H, plus S for naginata. H is the hansoku point, so it adds `.ipt-btn--h` (red ink and border, tinted only on hover: a resting red fill read as an alert). A button has no filled or active state; what has been scored shows in the centre.
+- **The centre** (`.sb-center > .sb-center__marks`) shows the scored marks as `.sb-slot` buttons in `.sb-slots--shiro` and `.sb-slots--aka`, either side of `.sb-vs`. A scored mark is `.sb-slot--filled`, and tapping it removes it. `.sb-draw-toggle` sits below; while it is on, `.sb-vs--quiet` hides the "VS". Fouls show in `.sb-fouls`.
+- **The team editor** ([admin_scoring_team.jsx](web-mobile/js/admin_scoring_team.jsx)) reuses `.sb-match`, `.sb-side--{shiro,aka}`, `.sb-name` and `.sb-center`/`.sb-vs` as its header only. Its ippon buttons are `.ipt-btn.ipt-btn--sm` on each bout row.
+- **The engi editor** has its own `.engi-side` cards and `.engi-counter__btn` flag counters, since it counts flags rather than ippon.
+
+Reuse `.ipt-btn` and the `.sb-side--{shiro,aka}` tints if you add a new score-entry surface, rather than inventing a parallel button or side style.
 
 ### Running strip chip: `.running-strip__chip`
 

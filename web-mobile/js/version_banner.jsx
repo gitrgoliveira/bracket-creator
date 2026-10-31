@@ -27,14 +27,12 @@ function reloadKeepingTheOutbox() {
 }
 
 export function VersionBanner({ onReload = reloadKeepingTheOutbox } = {}) {
-  const [state, setState] = React.useState(versionState);
+  // useSyncExternalStore checks the state again once it has subscribed, so a
+  // change between the first render and the subscription is not missed.
+  const state = React.useSyncExternalStore(subscribeVersionState, versionState);
   // The last Reload found the outbox could not be stored: the page stays, and
   // says to keep it open (the one wording of that, write_result.jsx).
   const [notStored, setNotStored] = React.useState(false);
-  React.useEffect(() => {
-    setState(versionState());
-    return subscribeVersionState(setState);
-  }, []);
   if (state !== 'stale') return null;
   return (
     <div className="version-banner" role="status" data-testid="version-banner">

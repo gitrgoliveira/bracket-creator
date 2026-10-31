@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"sync"
 	"testing"
 
@@ -215,7 +216,7 @@ func TestSquad_AddTeamMemberUpToHoldsTheCapUnderRacingAdds(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			_, err := s.AddTeamMemberUpTo(id, teamA, string(rune('A'+i))+"-racer", limit)
+			_, err := s.AddTeamMemberUpTo(id, teamA, "racer-"+strconv.Itoa(i), limit)
 			results <- err
 		}(i)
 	}

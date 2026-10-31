@@ -828,8 +828,8 @@ func (e *ValidationError) Error() string {
 // named type lets us hang Validate() off it without polluting state
 // (which is a pure-data package).
 //
-// As later slices add decision-type / encho fields (see Slice 3 FR-031,
-// T077), the matching Validate() rules land here.
+// The decision-type and encho rules (FR-031, T077) are enforced in
+// Validate() below.
 type ScoreRequest state.MatchResult
 
 // Validate enforces request-shape invariants on a score payload before

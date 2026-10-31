@@ -44,8 +44,7 @@ import { paceDisplayOf, PaceTime } from './court_pace.jsx';
 export const ROSTER_NOT_LOADED =
   "Some competitor lists could not be loaded, so not everyone can be found here yet.";
 
-const { useState, useMemo, useCallback } = React;
-const useRefV = React.useRef;
+const { useState, useMemo, useCallback, useRef } = React;
 const pluralize = window.pluralize;
 
 // Bell icon for the watchlist alert toggle (muted = diagonal slash).
@@ -69,7 +68,7 @@ window.BellIcon = BellIcon;
 function WatchPicker({ roster, rosterLoaded = true, dojos, watchedPlayerIds, watchedDojos, onPickPlayer, onPickDojo, placeholder }) {
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
-  const ref = useRefV(null);
+  const ref = useRef(null);
   const excludedPlayers = useMemo(() => new Set(watchedPlayerIds || []), [watchedPlayerIds]);
   const excludedDojos = useMemo(() => new Set(watchedDojos || []), [watchedDojos]);
   const q = query.trim().toLowerCase();
@@ -469,7 +468,7 @@ function WatchlistShareModal({ base, watchlist, roster, onClose }) {
         </p>
       )}
       <p className="share-link__note">
-        Opening this link ADDS these competitors to someone's watchlist. It does not replace what they already watch.
+        Opening this link ADDS these competitors to someone&apos;s watchlist. It does not replace what they already watch.
       </p>
       {/* Stated because it is the cost of the short, scannable form the
           operator chose (bc-wlpl): a competitor is identified by their number
@@ -514,7 +513,7 @@ function WatchlistPanel({ tournament, roster, rosterLoaded = true, watchlist, se
   const multi = count >= 2;
   const effectiveKey = effectivePrimaryKey(watchlist, primaryKey);
 
-  const firstAddFiredRef = useRefV(false);
+  const firstAddFiredRef = useRef(false);
   React.useLayoutEffect(() => {
     if (watchlist.length === 0) firstAddFiredRef.current = false;
   }, [watchlist.length, firstAddFiredRef]);
@@ -706,7 +705,7 @@ function WatchlistPanel({ tournament, roster, rosterLoaded = true, watchlist, se
 
       {count === 0 ? (
         <div className="hint">
-          Track yourself, a few competitors, or a whole dojo: we'll surface their next matches and alert you when they're on deck. Add up to {WATCHLIST_MAX}.
+          Track yourself, a few competitors, or a whole dojo: we&apos;ll surface their next matches and alert you when they&apos;re on deck. Add up to {WATCHLIST_MAX}.
         </div>
       ) : (
         <div className="pmf__bar pmf__bar--standalone watchlist-chips">

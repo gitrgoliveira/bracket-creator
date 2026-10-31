@@ -2,10 +2,10 @@ package state
 
 import (
 	"encoding/json"
-	"os"
 	"path/filepath"
 	"testing"
 
+	bctest "github.com/gitrgoliveira/bracket-creator/internal/test"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -20,7 +20,7 @@ import (
 func TestMatchGroups_SharedTable(t *testing.T) {
 	t.Parallel()
 
-	raw, err := os.ReadFile(filepath.Join("testdata", "match_groups.json"))
+	raw, err := bctest.ReadFile(filepath.Join("testdata", "match_groups.json"))
 	require.NoError(t, err, "shared Go/JS group table is missing")
 
 	var table struct {

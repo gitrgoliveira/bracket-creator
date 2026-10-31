@@ -2,6 +2,7 @@ package mobileapp
 
 import (
 	"html"
+	"log"
 	"net/http"
 	"strings"
 
@@ -64,7 +65,10 @@ func injectPreviewMeta(pageHTML string, store *state.Store, base string) string 
 		// A load error is non-fatal: fall back to defaults so the page always
 		// serves. The preview is cosmetic; a broken tournament read must not
 		// take down the SPA shell.
-		t, _ = store.LoadTournament()
+		var err error
+		if t, err = store.LoadTournament(); err != nil {
+			log.Printf("mobileapp: page preview: tournament unreadable, the default title is used: %v", err)
+		}
 	}
 	if t != nil {
 		switch {

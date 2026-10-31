@@ -145,8 +145,7 @@ func TestTreePageCourtLabel_WorkedExample(t *testing.T) {
 		numCourts   = 2
 	)
 
-	assignments, err := AssignPoolsToCourts(nPools, numCourts)
-	require.NoError(t, err)
+	assignments := AssignPoolsToCourts(nPools, numCourts)
 	require.Equal(t, []int{0, 0, 1, 1}, assignments,
 		"pools A,B belong to shiaijo A and C,D to shiaijo B")
 
@@ -226,8 +225,7 @@ func TestTreePageHomePoolsAlwaysPresent(t *testing.T) {
 					// EffectiveDrawCourts clamps a request bigger than the pool
 					// count (8 shiaijo over 7 pools draws on 4).
 					drawCourts := EffectiveDrawCourts(nPools, numCourts)
-					assignment, err := AssignPoolsToCourts(nPools, drawCourts)
-					require.NoError(t, err)
+					assignment := AssignPoolsToCourts(nPools, drawCourts)
 					wantByCourt := map[string][]string{}
 					for pi, court := range assignment {
 						label := CourtLabel(court)
@@ -258,8 +256,7 @@ func TestHomeWinnersStayOnTheirOwnShiaijoPage(t *testing.T) {
 					pools, poolNames := makePools(nPools)
 					draw := BuildKnockoutDraw(pools, poolWinners, numCourts)
 					require.NotNil(t, draw)
-					assignment, err := AssignPoolsToCourts(nPools, draw.NumCourts())
-					require.NoError(t, err)
+					assignment := AssignPoolsToCourts(nPools, draw.NumCourts())
 
 					for pi, name := range poolNames {
 						want := assignment[pi]

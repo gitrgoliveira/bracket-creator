@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
+	bctest "github.com/gitrgoliveira/bracket-creator/internal/test"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -178,7 +179,7 @@ func TestClearDrawLineups(t *testing.T) {
 		assert.Empty(t, comp.RoundLineupsGiven)
 		assert.Equal(t, "Kept", comp.Name)
 		assert.Equal(t, 5, comp.TeamSize)
-		raw, err := os.ReadFile(filepath.Join(store.GetFolder(), "competitions", settled, "config.md")) // #nosec G304 -- a path under the test store
+		raw, err := bctest.ReadFile(filepath.Join(store.GetFolder(), "competitions", settled, "config.md"))
 		require.NoError(t, err)
 		assert.NotContains(t, string(raw), "round_lineups_given")
 		got, err := store.LoadTeamLineups(settled)
@@ -191,12 +192,12 @@ func TestClearDrawLineups(t *testing.T) {
 		const plain = "team-match-delete-plain"
 		require.NoError(t, store.SaveCompetition(&Competition{ID: plain, Name: "Plain", RoundLineupsConverted: true}))
 		path := filepath.Join(store.GetFolder(), "competitions", plain, "config.md")
-		before, err := os.ReadFile(path) // #nosec G304 -- a path under the test store
+		before, err := bctest.ReadFile(path)
 		require.NoError(t, err)
 
 		require.NoError(t, store.ClearDrawLineups(plain))
 
-		after, err := os.ReadFile(path) // #nosec G304 -- a path under the test store
+		after, err := bctest.ReadFile(path)
 		require.NoError(t, err)
 		assert.Equal(t, string(before), string(after), "the marker and every other field stay as they were")
 	})

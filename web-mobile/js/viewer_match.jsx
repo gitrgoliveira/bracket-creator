@@ -24,7 +24,7 @@ import { matchShowsScore } from './match_shows_score.jsx';
 import { useOpenedTapGuard } from './tap_guard.jsx';
 import { paceDisplayOf, PaceTime } from './court_pace.jsx';
 
-const { useState, useMemo, useRef: useRefV, useCallback } = React;
+const { useState, useMemo, useRef, useCallback } = React;
 
 // ---------------------------------------------------------------------------
 // mymatchQueueLabel: FR-025 label for the "Your next match" Queue chip.
@@ -406,8 +406,8 @@ export function MatchViewerModal({ match, onClose, tournament, compId: defaultCo
   // Whether the editor is open, not a copy of the match: the editor reads the
   // live `match` prop, so it follows a result corrected on another device.
   const [isScoring, setIsScoring] = useState(false);
-  const triggerRef = useRefV(null);
-  const trapRef = useRefV(null);
+  const triggerRef = useRef(null);
+  const trapRef = useRef(null);
   const modalRefCb = useCallback((node) => {
     if (node) {
       triggerRef.current = document.activeElement;

@@ -40,8 +40,7 @@ import (
 func TestEKCLadiesTeam(t *testing.T) {
 	pools := ekcPools(8, 1, 3, 5, 7)
 
-	assignment, err := AssignPoolsToCourts(8, 4)
-	require.NoError(t, err)
+	assignment := AssignPoolsToCourts(8, 4)
 	assert.Equal(t, []int{0, 0, 1, 1, 2, 2, 3, 3}, assignment,
 		"the sheet's court blocks A(1,2) B(3,4) C(5,6) D(7,8)")
 
@@ -86,8 +85,7 @@ func TestEKCLadiesTeam(t *testing.T) {
 // block structure or the court derivation, and pinning this half separately
 // stopped the R6(c) fix from being able to regress it unnoticed.
 func TestEKCMenTeamShiaijoAssignment(t *testing.T) {
-	assignment, err := AssignPoolsToCourts(12, 4)
-	require.NoError(t, err)
+	assignment := AssignPoolsToCourts(12, 4)
 	assert.Equal(t, []int{0, 0, 0, 1, 1, 1, 2, 2, 2, 3, 3, 3}, assignment,
 		"the sheet's court blocks A(1-3) B(4-6) C(7-9) D(10-12)")
 
@@ -280,8 +278,7 @@ func roundSideLabel(n *Node) string {
 // observation: court D's remaining pair fills weakest-first (P5#2 taking aka
 // over P4#2); if a future sheet contradicts it, re-read spec R6(c) first.
 func TestEKC2025MenTeamByes(t *testing.T) {
-	assignment, err := AssignPoolsToCourts(11, 4)
-	require.NoError(t, err)
+	assignment := AssignPoolsToCourts(11, 4)
 	assert.Equal(t, []int{0, 0, 0, 1, 1, 1, 2, 2, 2, 3, 3}, assignment,
 		"the sheet's court blocks A(1-3) B(4-6) C(7-9) D(10,11)")
 

@@ -52,7 +52,7 @@ func TestLoadTournament_MigratesRulesURLToWebsiteURL(t *testing.T) {
 
 	// Persisting the migrated record drops the legacy key on disk.
 	require.NoError(t, store.SaveTournament(got))
-	raw, err := os.ReadFile(filepath.Join(dir, "tournament.md"))
+	raw, err := bctest.ReadFile(filepath.Join(dir, "tournament.md"))
 	require.NoError(t, err)
 	assert.Contains(t, string(raw), "website_url:")
 	assert.Contains(t, string(raw), "old.example/rules.pdf")
@@ -409,7 +409,7 @@ courts: [A]
 		}
 		require.NoError(t, store.SaveTournament(tour))
 
-		raw, err := os.ReadFile(filepath.Join(dir, "tournament.md"))
+		raw, err := bctest.ReadFile(filepath.Join(dir, "tournament.md"))
 		require.NoError(t, err)
 		assert.Contains(t, string(raw), "logo_on_lobby: true")
 
@@ -422,7 +422,7 @@ courts: [A]
 		// When false, logo_on_lobby is omitted from tournament.md front matter.
 		tour.Theme = &Theme{PrimaryColor: "#1d3557", LogoOnLobby: false}
 		require.NoError(t, store.SaveTournament(tour))
-		rawFalse, err := os.ReadFile(filepath.Join(dir, "tournament.md"))
+		rawFalse, err := bctest.ReadFile(filepath.Join(dir, "tournament.md"))
 		require.NoError(t, err)
 		assert.NotContains(t, string(rawFalse), "logo_on_lobby")
 

@@ -232,7 +232,7 @@ func importCompetition(store *state.Store, eng *engine.Engine, entry ImportManif
 	// patterns.
 	importTourn, importTournErr := store.LoadTournament()
 	if importTournErr != nil {
-		res.Error = "load tournament: " + importTournErr.Error()
+		res.Error = importRowFailure(entry.ID, "the tournament could not be read", importTournErr)
 		return res
 	}
 
@@ -491,7 +491,18 @@ func importCompetition(store *state.Store, eng *engine.Engine, entry ImportManif
 		// pre-save, a parse failure aborts the row before this guard
 		// runs, so the disk stays clean and the retry's collision
 		// check passes on a never-saved ID.
-		if existing, _ := store.LoadCompetition(comp.ID); existing != nil {
+		existing, loadErr := store.LoadCompetition(comp.ID)
+		if loadErr != nil {
+			what := "the competition ID could not be checked"
+			if settingsUnparseable(loadErr) {
+				// An unreadable config.md under this id is not a free id:
+				// saving over it would destroy whatever it holds.
+				what = competitionIDUnreadableMessage(comp.ID)
+			}
+			res.Error = importRowFailure(comp.ID, what, loadErr)
+			return nil
+		}
+		if existing != nil {
 			res.Error = fmt.Sprintf("competition ID %q already exists", comp.ID)
 			return nil
 		}
@@ -586,7 +597,7 @@ func importCompetition(store *state.Store, eng *engine.Engine, entry ImportManif
 		}
 		return store.SaveCompetition(comp)
 	}); err != nil {
-		res.Error = "save competition: " + err.Error()
+		res.Error = importRowFailure(entry.ID, "the competition could not be saved", err)
 		return res
 	}
 	// If the uniqueness check failed, res.Error was set inside the
@@ -633,8 +644,7 @@ func importCompetition(store *state.Store, eng *engine.Engine, entry ImportManif
 		// helper.Player is a type alias for domain.Player (NFR-007); the
 		// parser output flows straight into SaveParticipants.
 		if err := store.SaveParticipantsRestored(entry.ID, parsedPlayers); err != nil {
-			_ = store.DeleteCompetition(entry.ID) // best-effort rollback
-			res.Error = "save participants: " + err.Error()
+			res.Error = importSaveFailure(store, entry.ID, "the participants could not be saved", err)
 			return res
 		}
 		res.ParticipantCount = len(parsedPlayers)
@@ -650,8 +660,7 @@ func importCompetition(store *state.Store, eng *engine.Engine, entry ImportManif
 	// retry isn't blocked by the ID-collision check.
 	if len(parsedSeeds) > 0 {
 		if err := store.SaveSeeds(entry.ID, parsedSeeds); err != nil {
-			_ = store.DeleteCompetition(entry.ID) // best-effort rollback
-			res.Error = "save seeds: " + err.Error()
+			res.Error = importSaveFailure(store, entry.ID, "the seeds could not be saved", err)
 			return res
 		}
 		res.SeedCount = len(parsedSeeds)
@@ -660,12 +669,47 @@ func importCompetition(store *state.Store, eng *engine.Engine, entry ImportManif
 	return res
 }
 
+// importRowFailure words an import row's failure that the row itself cannot
+// explain (a read or a write on the server's disk). err can name server paths,
+// so it goes to the log, and the row says only what failed.
+func importRowFailure(id, what string, err error) string {
+	log.Printf("mobileapp: import %q: %s: %v", id, what, err)
+	return what
+}
+
+// importSaveFailure rolls back a competition the import created when a later
+// save of it failed, and words the row's error. A roster rule the file broke
+// (a blank dojo, a duplicate team member) names the row and is the operator's
+// to fix, so it is shown as it is; any other failure is worded by
+// importRowFailure. When the rollback fails too, the row adds that the folder
+// is still there and must be removed, since it blocks a retry under this id.
+func importSaveFailure(store *state.Store, id, what string, err error) string {
+	rbErr := rollBackCreatedCompetition(store, id, err)
+	rollbackFailed := errors.Is(rbErr, errRollbackFailed)
+	msg := what
+	if _, ok := classifyRosterWriteError(err); ok {
+		msg = err.Error()
+	} else if !rollbackFailed {
+		// A failed rollback has already logged this error with its own.
+		msg = importRowFailure(id, what, err)
+	}
+	if rollbackFailed {
+		msg += "; " + errRollbackFailed.Error() + rollbackRemedy(id)
+	}
+	return msg
+}
+
 func readFormFile(fh *multipart.FileHeader) ([]byte, error) {
 	f, err := fh.Open()
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = f.Close() }()
+	defer func() {
+		// Read-only: a close failure loses nothing, so it is logged.
+		if err := f.Close(); err != nil {
+			log.Printf("mobileapp: closing uploaded file %q failed: %v", fh.Filename, err)
+		}
+	}()
 	return io.ReadAll(f)
 }
 

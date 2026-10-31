@@ -26,16 +26,15 @@ func (s *Store) LoadPools(compID string) ([]helper.Pool, error) {
 	// per-comp lock (e.g. storeTx.LoadPools, WithTransaction bodies).
 	s.EnsureLegacyUpgraded(compID)
 
-	data, err := s.loadCached(compID, "pools.csv", parsePoolsFile)
+	data, err := s.loadCached(compID, "pools.csv", s.parsePoolsFile)
 	if err != nil {
 		return nil, err
 	}
 	return s.copyPools(data.([]helper.Pool)), nil
 }
 
-func parsePoolsFile(path string) (any, error) {
-	// #nosec G304
-	f, err := os.Open(path)
+func (s *Store) parsePoolsFile(path string) (any, error) {
+	f, err := s.root.open(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return []helper.Pool{}, nil
@@ -43,7 +42,11 @@ func parsePoolsFile(path string) (any, error) {
 		return nil, err
 	}
 	defer func() {
-		_ = f.Close()
+		// Read-only: the records are already read, so a close failure loses
+		// nothing; it is logged rather than failing the load.
+		if err := f.Close(); err != nil {
+			slog.Warn("state: closing a read file failed", "path", path, "error", err)
+		}
 	}()
 
 	records, err := csv.NewReader(f).ReadAll()
@@ -95,8 +98,14 @@ func parsePoolsFile(path string) (any, error) {
 			player.Dojo = rec[4]
 		}
 		if len(rec) > 5 && rec[5] != "" {
-			seed, _ := strconv.Atoi(rec[5])
-			player.Seed = seed
+			// A seed cell that is not a number leaves the player unseeded,
+			// as it always did, and says so: it can only be a hand edit.
+			if seed, err := strconv.Atoi(rec[5]); err == nil {
+				player.Seed = seed
+			} else {
+				slog.Warn("state: pools.csv seed cell is not a number; the player is read as unseeded",
+					"path", path, "player", playerName, "value", rec[5])
+			}
 		}
 		if len(rec) > 6 {
 			player.Number = rec[6]
@@ -198,7 +207,7 @@ func (s *Store) SavePools(compID string, pools []helper.Pool) error {
 // typically from inside a WithTransaction closure.
 func (s *Store) loadPoolsLocked(compID string) ([]helper.Pool, error) {
 	path := s.compPath(compID, "pools.csv")
-	parsed, err := parsePoolsFile(path)
+	parsed, err := s.parsePoolsFile(path)
 	if err != nil {
 		return nil, err
 	}
@@ -297,7 +306,7 @@ func (s *Store) LoadPoolMatchesLocked(compID string) ([]MatchResult, error) {
 		return nil, err
 	}
 	path := s.compPath(compID, "pool-matches.csv")
-	parsed, err := parsePoolMatchesFile(path)
+	parsed, err := s.parsePoolMatchesFile(path)
 	if err != nil {
 		return nil, err
 	}
@@ -305,9 +314,8 @@ func (s *Store) LoadPoolMatchesLocked(compID string) ([]MatchResult, error) {
 	return s.copyMatchResults(results), nil
 }
 
-func parsePoolMatchesFile(path string) (any, error) {
-	// #nosec G304
-	f, err := os.Open(path)
+func (s *Store) parsePoolMatchesFile(path string) (any, error) {
+	f, err := s.root.open(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return []MatchResult{}, nil
@@ -315,7 +323,11 @@ func parsePoolMatchesFile(path string) (any, error) {
 		return nil, err
 	}
 	defer func() {
-		_ = f.Close()
+		// Read-only: the records are already read, so a close failure loses
+		// nothing; it is logged rather than failing the load.
+		if err := f.Close(); err != nil {
+			slog.Warn("state: closing a read file failed", "path", path, "error", err)
+		}
 	}()
 
 	records, err := csv.NewReader(f).ReadAll()
@@ -957,7 +969,7 @@ func (s *Store) updatePoolMatchByIDLocked(compID, matchID string, mutate func(*M
 	// reading a stale snapshot if another writer released the lock
 	// between cache populate and our acquire.
 	path := s.compPath(compID, "pool-matches.csv")
-	parsed, err := parsePoolMatchesFile(path)
+	parsed, err := s.parsePoolMatchesFile(path)
 	if err != nil {
 		return false, err
 	}

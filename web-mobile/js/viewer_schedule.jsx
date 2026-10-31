@@ -14,7 +14,7 @@ import { matchShowsScore } from './match_shows_score.jsx';
 import { withCourtQueuePositions } from './court_queue.jsx';
 import { paceDisplayOf, PaceTime } from './court_pace.jsx';
 
-const { useState, useMemo, useRef: useRefV } = React;
+const { useState, useMemo, useRef } = React;
 const EmptyState = window.EmptyState;
 
 // mp-xhaa: the pinned-primary entry key (string), persisted separately from the
@@ -150,7 +150,7 @@ const formatDate = window.formatDate;
 export function PlayerMultiFilter({ tournament, picked, setPicked, dojoText, setDojoText }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
-  const ref = useRefV(null);
+  const ref = useRef(null);
 
   // ONE roster builder for the whole viewer (bc-nsrc). A second, near-identical
   // dedup used to live here: the same first-competition-wins shape, but
@@ -200,7 +200,7 @@ export function PlayerMultiFilter({ tournament, picked, setPicked, dojoText, set
         ))}
         {dojoText ? (
           <span className="pmf__chip pmf__chip--text">
-            "{dojoText}"
+            &quot;{dojoText}&quot;
             <button type="button" onClick={(e) => { e.stopPropagation(); setDojoText(""); }} aria-label="Remove">×</button>
           </span>
         ) : null}
@@ -231,7 +231,7 @@ export function PlayerMultiFilter({ tournament, picked, setPicked, dojoText, set
           </div>
           {q && (
             <button type="button" className="pmf__option pmf__option--text" onClick={() => { setDojoText(query.trim()); setQuery(""); }}>
-              <span>Match "<b>{query}</b>" in any name, dojo or number</span>
+              <span>Match &quot;<b>{query}</b>&quot; in any name, dojo or number</span>
             </button>
           )}
           {matches.map((p) => {
@@ -427,16 +427,16 @@ export function ScheduleViewer({ tournament, tweaks, paceLookup }) {
     : "";
   const [picked, setPicked] = useState(initialPicked);
   // If schedRoster was empty at mount (async load), seed picked once it arrives.
-  // pickedSeeded starts true when data was ready at mount (no async case to handle).
+  // pickedSeededRef starts true when data was ready at mount (no async case to handle).
   // Once seeded, user edits are never overwritten.
-  const pickedSeeded = useRefV(initialPicked.length > 0);
+  const pickedSeededRef = useRef(initialPicked.length > 0);
   React.useEffect(() => {
-    if (pickedSeeded.current) return;
+    if (pickedSeededRef.current) return;
     if (initialPicked.length > 0) {
       setPicked(initialPicked);
-      pickedSeeded.current = true;
+      pickedSeededRef.current = true;
     }
-  }, [initialPicked, pickedSeeded]);
+  }, [initialPicked, pickedSeededRef]);
   const [dojoText, setDojoText] = useState("");
   const [courtFilter, setCourtFilter] = useState("all");
 

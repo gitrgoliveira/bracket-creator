@@ -85,9 +85,17 @@ go/lint: go/fmt go/generate ## Run linters
 	@echo "Running linters..."
 	golangci-lint run ./cmd/... ./internal/... ./tests/... .
 
+# G204 (a subprocess launched with a non-constant argument) is excluded for
+# internal/pdf/soffice.go alone: it is the tree's one subprocess, LibreOffice
+# at the path LocateSoffice resolves ($LIBREOFFICE_PATH, PATH, or a fixed
+# install location) converting a workbook this process wrote to its own temp
+# folder. gosec flags every non-constant argument, so no rewrite of that call
+# satisfies it. .golangci.yml carries the same exclusion, path-scoped alike.
+GOSEC_EXCLUDE_RULES := internal/pdf/soffice\.go:G204
+
 go/sec: go/generate ## Run security scans (gosec)
 	@echo "Running security scans..."
-	gosec ./cmd/... ./internal/... ./tests/... .
+	gosec -exclude-rules='$(GOSEC_EXCLUDE_RULES)' ./cmd/... ./internal/... ./tests/... .
 
 go/sec-tests: go/generate ## Run gosec over test files too (audit, not a gate)
 	@# gosec skips _test.go by default and golangci-lint excludes gosec from
@@ -100,7 +108,7 @@ go/sec-tests: go/generate ## Run gosec over test files too (audit, not a gate)
 	@# finding outside a _test.go file, and every HIGH was scaffolding (two
 	@# were table cases asserting that a URL carrying credentials is REJECTED).
 	@echo "Auditing test files with gosec (not part of the gate)..."
-	gosec -tests ./cmd/... ./internal/... ./tests/... .
+	gosec -tests -exclude-rules='$(GOSEC_EXCLUDE_RULES)' ./cmd/... ./internal/... ./tests/... .
 
 go/vuln: ## Run vulnerability check (govulncheck)
 	@echo "Running vulnerability check..."
@@ -143,15 +151,11 @@ js/lint: js/deps ## Run Javascript linters
 	@# with no -c, oxlint does not discover .oxlintrc.json upward from
 	@# web-mobile/, so the react/unicorn/oxc plugins and project rules it
 	@# configures never applied and this line silently exited 0 (bc-appx item 4).
-	@# web-mobile/.oxlintrc.json's `overrides` entry for docs/assets/javascripts/**
-	@# turns off react/no-this-in-sfc there ONLY: that directory is plain
-	@# ES5-constructor JS with no React/Preact runtime in scope (see
-	@# pool-draw-animation.js's own header), so `this` inside a PascalCase-named
-	@# constructor function is a false positive for the rule's real target
-	@# (an actual React/Preact stateless functional component). JSON has no
-	@# comment syntax, hence the rationale living here (bc-appx item 9) rather
-	@# than beside the override itself.
-	@npx --prefix web-mobile oxlint --deny-warnings -c web-mobile/.oxlintrc.json docs/assets/javascripts/
+	@npx --prefix web-mobile oxlint --deny-warnings --report-unused-disable-directives -c web-mobile/.oxlintrc.json docs/assets/javascripts/
+	@# web/ (the CLI's web UI) was linted by nothing either. It is plain browser
+	@# JS with Bootstrap loaded as a global, so it has its own config with no
+	@# React plugin, run with web-mobile's binary for the same reasons as above.
+	@npx --prefix web-mobile oxlint --deny-warnings --report-unused-disable-directives -c web/.oxlintrc.json web/js/ web/tests/
 
 js/sec: js/deps ## Run Javascript security scans (audit-ci)
 	@echo "Running Javascript security scans..."
@@ -183,6 +187,8 @@ js/check-imports: ## Check cross-module named imports resolve (mp-zac3 split mod
 	@node web-mobile/check-write-result.mjs
 	@echo "Checking the competitor-number match rule is asked, not re-derived..."
 	@node web-mobile/check-competitor-search.mjs
+	@echo "Checking no lint-disable comments exist in tracked Go or JS sources..."
+	@node web-mobile/check-no-disable-comments.mjs
 
 js/validate: js/lint js/check-imports js/test js/security ## Run all Javascript checks
 

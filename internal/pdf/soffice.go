@@ -14,6 +14,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -86,8 +87,10 @@ func sofficeCandidates() []string {
 // It returns ErrSofficeNotFound (wrapped) when none resolve.
 func LocateSoffice() (string, error) {
 	if p := os.Getenv("LIBREOFFICE_PATH"); p != "" {
-		if isExecutableFile(p) {
-			return p, nil
+		// exec.LookPath takes a path with a separator as it is (a regular
+		// file the OS can execute) and searches $PATH for a bare name.
+		if found, err := exec.LookPath(p); err == nil {
+			return found, nil
 		}
 	}
 	if p, err := exec.LookPath("soffice"); err == nil {
@@ -106,7 +109,7 @@ func LocateSoffice() (string, error) {
 // Windows, os.Stat does not set +x, so any regular file is considered
 // executable, the OS itself decides based on the .exe/.bat extension and ACLs.
 func isExecutableFile(path string) bool {
-	info, err := os.Stat(path) // #nosec G304 G703 -- path is from a fixed candidate list or $LIBREOFFICE_PATH/$PATH lookup, not request data.
+	info, err := os.Stat(path)
 	if err != nil || info.IsDir() {
 		return false
 	}
@@ -134,9 +137,12 @@ func (c *Converter) ConvertToPDF(ctx context.Context, srcPath, outDir string) (s
 	if err != nil {
 		return "", fmt.Errorf("create soffice profile dir: %w", err)
 	}
-	defer func() { _ = os.RemoveAll(profileDir) }()
+	defer func() {
+		if err := os.RemoveAll(profileDir); err != nil {
+			log.Printf("pdf: could not remove soffice profile dir %s: %v", profileDir, err)
+		}
+	}()
 
-	// #nosec G204 -- c.sofficePath is resolved by LocateSoffice (fixed candidates / env), and srcPath/outDir are internally-generated temp paths, not request data.
 	cmd := exec.CommandContext(ctx, c.sofficePath,
 		"--headless",
 		"--nologo",

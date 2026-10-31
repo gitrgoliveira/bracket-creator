@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
+	bctest "github.com/gitrgoliveira/bracket-creator/internal/test"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -55,7 +56,7 @@ func TestLegacyUpgrade_AdoptsV200SquadsFile(t *testing.T) {
 	assert.Equal(t, 2, members["c1-p1"][1].Index, "a blank-named slot keeps its number")
 
 	// Converged, not dual-read: exactly one shape is live afterwards.
-	data, err := os.ReadFile(filepath.Join(dir, teamMembersFilename))
+	data, err := bctest.ReadFile(filepath.Join(dir, teamMembersFilename))
 	require.NoError(t, err)
 	assert.Contains(t, string(data), "members:", "the new file carries the new root key")
 	_, statErr = os.Stat(filepath.Join(dir, legacySquadsFilename))
@@ -95,7 +96,7 @@ func TestLegacyUpgrade_AdoptsEvenWithNoParticipantsYet(t *testing.T) {
 	// Read the filesystem directly -- see the doc comment above for why a
 	// LoadSquads/mutator call here would not distinguish this call site from
 	// its own masking second adopter.
-	data, err := os.ReadFile(filepath.Join(dir, teamMembersFilename))
+	data, err := bctest.ReadFile(filepath.Join(dir, teamMembersFilename))
 	require.NoError(t, err, "an empty-roster team competition must still have its legacy file adopted on load")
 	assert.Contains(t, string(data), "members:", "the new file carries the new root key")
 	assert.Contains(t, string(data), "Haruki Tanaka", "the v2.0.0 member data must survive the rename")
@@ -156,14 +157,14 @@ func TestLegacyUpgrade_FailedWriteLeavesTheLegacyFileIntact(t *testing.T) {
 	dir := filepath.Join(s.GetFolder(), "competitions", id)
 	legacy := filepath.Join(dir, legacySquadsFilename)
 	require.NoError(t, os.WriteFile(legacy, []byte(v200SquadsYAML), 0o600))
-	kept, err := os.ReadFile(legacy) // #nosec G304, test-owned temp path.
+	kept, err := bctest.ReadFile(legacy)
 	require.NoError(t, err)
 
 	failing := func(string, []byte, fs.FileMode) error { return errors.New("disk full") }
 	err = s.upgradeTeamMembersFilenameLocked(id, failing)
 	require.Error(t, err, "a migration that cannot write must report it, not swallow it")
 
-	survived, readErr := os.ReadFile(legacy) // #nosec G304, test-owned temp path.
+	survived, readErr := bctest.ReadFile(legacy)
 	require.NoError(t, readErr, "the legacy file must still be there for the next load to retry")
 	assert.Equal(t, kept, survived, "and must be byte-identical: nothing was consumed")
 

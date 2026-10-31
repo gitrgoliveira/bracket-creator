@@ -54,6 +54,8 @@ package wal
 import (
 	"encoding/json"
 	"fmt"
+	"io/fs"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
@@ -282,11 +284,24 @@ func Scan(walDir string, write WriteFn) ([]*WAL, error) {
 	if write == nil {
 		return nil, fmt.Errorf("wal.Scan: write function is nil")
 	}
-	entries, err := os.ReadDir(walDir)
+	// The listed files are read through a root on walDir, so the OS keeps
+	// each read inside it.
+	root, err := os.OpenRoot(walDir)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil
 		}
+		return nil, fmt.Errorf("wal.Scan %q: %w", walDir, err)
+	}
+	defer func() {
+		// Read-only: every file is already read, so a close failure loses
+		// nothing the replay needs; it is logged rather than failing it.
+		if cerr := root.Close(); cerr != nil {
+			slog.Warn("wal: closing the transaction log folder failed", "dir", walDir, "err", cerr)
+		}
+	}()
+	entries, err := fs.ReadDir(root.FS(), ".")
+	if err != nil {
 		return nil, fmt.Errorf("wal.Scan %q: %w", walDir, err)
 	}
 	// Collect names first so we can sort for deterministic replay
@@ -309,7 +324,7 @@ func Scan(walDir string, write WriteFn) ([]*WAL, error) {
 	out := make([]*WAL, 0, len(names))
 	for _, n := range names {
 		path := filepath.Join(walDir, n)
-		raw, rerr := os.ReadFile(path) // #nosec G304, path is the dir+file we just listed
+		raw, rerr := root.ReadFile(n)
 		if rerr != nil {
 			// Best-effort: skip unreadable files. A future enhancement
 			// could surface these via a slog warning, but breaking the

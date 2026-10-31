@@ -1,6 +1,8 @@
 package state
 
 import (
+	"bytes"
+	"log/slog"
 	"os"
 	"testing"
 
@@ -396,7 +398,7 @@ func TestParsePoolMatchesBytes_WithData(t *testing.T) {
 	}
 	require.NoError(t, store.SavePoolMatches(compID, matches))
 
-	raw, err := os.ReadFile(store.compPath(compID, "pool-matches.csv"))
+	raw, err := bctest.ReadFile(store.compPath(compID, "pool-matches.csv"))
 	require.NoError(t, err)
 
 	results, err := parsePoolMatchesBytes(raw)
@@ -691,6 +693,37 @@ func TestParsePoolsFile_DrawOrderSort(t *testing.T) {
 	assert.Equal(t, "P2", loaded[0].Players[1].Name, "P2 should be second (draw pos 1)")
 	assert.Equal(t, int64(1), loaded[0].Players[0].PoolPosition)
 	assert.Equal(t, int64(2), loaded[0].Players[1].PoolPosition)
+}
+
+// TestParsePoolsFile_UnreadableSeedIsUnseededAndWarned pins the seed cell
+// (col 5): a value that is not a number reads the player as unseeded, and the
+// warning names the player and the value.
+func TestParsePoolsFile_UnreadableSeedIsUnseededAndWarned(t *testing.T) {
+	dir := t.TempDir()
+	compDir := dir + "/competitions/seed-test"
+	require.NoError(t, os.MkdirAll(compDir, 0700))
+	csv := "Pool A,P1,0,,,x,\nPool A,P2,1,,,2,\n"
+	require.NoError(t, os.WriteFile(compDir+"/pools.csv", []byte(csv), 0600))
+
+	var logs bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+	parsed, err := store.parsePoolsFile(compDir + "/pools.csv")
+	require.NoError(t, err)
+	pools, ok := parsed.([]helper.Pool)
+	require.True(t, ok)
+	require.Len(t, pools, 1)
+	require.Len(t, pools[0].Players, 2)
+	assert.Equal(t, 0, pools[0].Players[0].Seed, "an unreadable seed reads as unseeded")
+	assert.Equal(t, 2, pools[0].Players[1].Seed)
+	assert.Contains(t, logs.String(), "pools.csv seed cell is not a number")
+	assert.Contains(t, logs.String(), "player=P1")
+	assert.Contains(t, logs.String(), "value=x")
+	assert.NotContains(t, logs.String(), "player=P2", "a readable seed warns nothing")
 }
 
 // TestParsePoolsFile_InvalidPosition verifies that negative or non-integer

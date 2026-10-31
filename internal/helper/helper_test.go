@@ -460,7 +460,6 @@ func TestAssignPoolsToCourts(t *testing.T) {
 		numPools  int
 		numCourts int
 		expected  []int
-		wantErr   bool
 	}{
 		{
 			name:      "even split 4 pools 2 courts",
@@ -503,26 +502,18 @@ func TestAssignPoolsToCourts(t *testing.T) {
 			numPools:  2,
 			numCourts: 3,
 			expected:  []int{0, 1},
-			wantErr:   false,
 		},
 		{
 			name:      "zero courts defaults to one",
 			numPools:  4,
 			numCourts: 0,
 			expected:  []int{0, 0, 0, 0},
-			wantErr:   false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := AssignPoolsToCourts(tt.numPools, tt.numCourts)
-			if tt.wantErr {
-				assert.Error(t, err)
-				return
-			}
-			require.NoError(t, err)
-			assert.Equal(t, tt.expected, result)
+			assert.Equal(t, tt.expected, AssignPoolsToCourts(tt.numPools, tt.numCourts))
 		})
 	}
 }

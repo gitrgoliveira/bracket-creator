@@ -19,7 +19,7 @@ import { confirmMatchLabel, confirmRunningCourtMove } from './court_move.jsx';
 import { holdsUnsaved, discardUnsaved } from './unsaved_entries.jsx';
 import { scoreRowMatchLabel } from './pool_ids.jsx';
 
-const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
+const { useState, useEffect, useRef } = React;
 
 // closingHistoryToast (bc-mrgc): the toast editMatchScore shows for a write
 // that landed but kept something in the match's history (part of it held, or
@@ -136,18 +136,18 @@ function mergeTournamentPatch(currentT, patch, sessionPassword, locked) {
 }
 
 function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChange, tweaks, password, view: propView, setView: propSetView, showToast, authConfig }) {
-  const [internalView, setInternalView] = useStateA({ kind: "dashboard" });
+  const [internalView, setInternalView] = useState({ kind: "dashboard" });
   const view = propView || internalView;
   const setView = propSetView || setInternalView;
   // Hooks must be declared unconditionally before any conditional returns.
-  const [adminCompData, setAdminCompData] = useStateA(null);
-  const [adminLoading, setAdminLoading] = useStateA(false);
+  const [adminCompData, setAdminCompData] = useState(null);
+  const [adminLoading, setAdminLoading] = useState(false);
   // mp-djc: dashboard "📣 Announce" button opens the broadcast composer
   // in a modal. State lives here (alongside other AdminApp UI state); the
   // modal is rendered only in the dashboard branch below, since that's the
   // sole screen exposing the Announce button. (Other screens reach the
   // composer via the Edit-details page.)
-  const [announceOpen, setAnnounceOpen] = useStateA(false);
+  const [announceOpen, setAnnounceOpen] = useState(false);
   // mp: "Start all" is a high-blast-radius action (it starts every eligible
   // setup competition at once), so it runs through an explicit modal instead
   // of a one-click red button + transient toast. State machine:
@@ -157,11 +157,11 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
   // `comps` is the working set for the current phase (the comps we will/did
   // start); `failed` is the subset whose start rejected (kept so "Retry
   // failed" can re-run only those). Closed by setting startAll to null.
-  const [startAll, setStartAll] = useStateA(null);
+  const [startAll, setStartAll] = useState(null);
 
   // Expose a navigation helper used by AdminTopbar's running-strip chips,
   // avoiding prop-drilling through every screen. Set once per mount.
-  useEffectA(() => {
+  useEffect(() => {
     window.__adminNavigateToScore = (compId) => setView({ kind: "competition", id: compId, section: "scores" });
     return () => { delete window.__adminNavigateToScore; };
   }, [setView]);
@@ -169,24 +169,24 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
   const t = tournament;
   // Refs so the SSE subscription can read the latest tournament/onUpdate
   // without being torn down every time the tournament object is replaced.
-  const tRef = useRefA(t);
-  const onUpdateRef = useRefA(onUpdate);
+  const tRef = useRef(t);
+  const onUpdateRef = useRef(onUpdate);
   // Refs are read by the SSE subscription (which has narrower deps to avoid
   // teardown); refresh them only when the underlying props change.
-  useEffectA(() => { tRef.current = t; onUpdateRef.current = onUpdate; }, [t, onUpdate]);
+  useEffect(() => { tRef.current = t; onUpdateRef.current = onUpdate; }, [t, onUpdate]);
   // AdminApp unmounts on logout / viewer-mode switch. Several async
   // handlers below (updateCompetition's fetchCompetitionDetails,
   // startAllCompetitions) setAdminCompData / setAdminLoading
   // / setView post-await. Narrow window but real. Gate via mountedRef.
-  const mountedRef = useRefA(true);
-  useEffectA(() => () => { mountedRef.current = false; }, []);
+  const mountedRef = useRef(true);
+  useEffect(() => () => { mountedRef.current = false; }, []);
 
   // R4 (bc-evts stage 3 review 2): a court move or time change this device
   // makes shows at once, as a push would, and a refusal puts the old value back
   // (both told by the outbox, subscribeLocalMatchPatch). Applied to the
   // competition the admin shows and to the tournament every admin page reads.
   // tRef moves with each patch, so two in one tick (a swap) both stand.
-  useEffectA(() => {
+  useEffect(() => {
     if (!window.API || typeof window.API.subscribeLocalMatchPatch !== "function") return undefined;
     return window.API.subscribeLocalMatchPatch((event) => {
       const cid = event && event.data && event.data.competitionId;
@@ -603,7 +603,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
     }
   };
 
-  useEffectA(() => {
+  useEffect(() => {
     if (view.kind !== "competition") {
       setAdminCompData(null);
       return;
@@ -623,7 +623,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
     return () => { cancelled = true; };
   }, [view.id, view.kind]);
 
-  useEffectA(() => {
+  useEffect(() => {
     if (view.kind === "competition") {
       // `cancelled` is the master gate: cleanup flips it true, and every
       // async resolution paths through it before calling state setters.

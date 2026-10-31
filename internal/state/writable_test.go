@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -79,4 +80,27 @@ func TestNewStoreNamesAnUnreadableFolderOnce(t *testing.T) {
 	_, err = NewStore(root)
 	require.ErrorIs(t, err, ErrDataNotWritable)
 	assert.Equal(t, 1, strings.Count(err.Error(), comps+":"), err.Error())
+}
+
+// A folder the server saves into that is a link out of the data folder is
+// refused at startup with the write check's own message, because every read
+// and write through it would be refused ("path escapes from parent").
+func TestNewStoreRefusesAFolderLinkedOutOfTheDataFolder(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlinks need privileges on Windows")
+	}
+	for _, name := range []string{".wal", filepath.Join("competitions", "c1"), BrandingDirName} {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			_, err := NewStore(dir)
+			require.NoError(t, err)
+			link := filepath.Join(dir, name)
+			require.NoError(t, os.RemoveAll(link))
+			require.NoError(t, os.Symlink(t.TempDir(), link))
+
+			_, err = NewStore(dir)
+			require.ErrorIs(t, err, ErrDataNotWritable)
+			assert.Contains(t, err.Error(), "  "+link+": path escapes from parent", err.Error())
+		})
+	}
 }

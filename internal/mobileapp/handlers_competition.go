@@ -3,6 +3,7 @@ package mobileapp
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"log"
 	"net/http"
 	"strings"
@@ -92,8 +93,7 @@ func saveCompetitionWithPlayers(comp *state.Competition, store *state.Store) (bo
 		// caller's ID-collision check on retry would 400 "ID already
 		// exists" even though the prior attempt failed. Mirror the
 		// import handler's rollback pattern (handlers_import.go).
-		_ = store.DeleteCompetition(comp.ID) // best-effort rollback
-		return false, fmt.Errorf("%w: %w", errSaveParticipants, err)
+		return false, fmt.Errorf("%w: %w", errSaveParticipants, rollBackCreatedCompetition(store, comp.ID, err))
 	}
 	assignments := extractSeeds(comp.Players)
 	if err := store.SaveSeeds(comp.ID, assignments); err != nil {
@@ -106,6 +106,54 @@ func saveCompetitionWithPlayers(comp *state.Competition, store *state.Store) (bo
 		fmt.Printf("Warning: failed to save seeds: %v\n", err)
 	}
 	return changed, nil
+}
+
+// errRollbackFailed marks a create whose rollback could not remove the
+// competition it had half written (rollBackCreatedCompetition).
+var errRollbackFailed = errors.New("rollback failed")
+
+// rollBackCreatedCompetition removes the competition a create path wrote
+// before a later save of it failed, and answers cause, the error to report.
+// When the removal fails as well, the competition's folder is left on disk and
+// blocks a retry under the same id ("ID already exists"), so the failure is
+// logged and joined to cause (wrapping errRollbackFailed): the operator must be
+// told to remove the folder before trying again.
+func rollBackCreatedCompetition(store *state.Store, id string, cause error) error {
+	if err := store.DeleteCompetition(id); err != nil {
+		// The one log line for the failure, cause included. The removal's
+		// own error names filesystem paths, so it stays here and is left out
+		// of the returned error, which reaches the client.
+		log.Printf("mobileapp: rolling back competition %q failed, its folder is left on disk and blocks a retry under this id: %v (after: %v)", id, err, cause)
+		return fmt.Errorf("%w; %w%s", cause, errRollbackFailed, rollbackRemedy(id))
+	}
+	return cause
+}
+
+// rollbackRemedy is what follows "rollback failed" when a create could not
+// remove the competition it half wrote: which folder is left, and what the
+// operator does about it. It names no path.
+func rollbackRemedy(id string) string {
+	return fmt.Sprintf(": competition %q could not be removed, delete its folder before trying again", id)
+}
+
+// codeCompetitionIDUnreadable is the code of a create (POST /competitions, or
+// an import row) refused because a competition whose settings cannot be read
+// already holds the id: saving over it would destroy what it holds.
+const codeCompetitionIDUnreadable = "competition_id_unreadable"
+
+// competitionIDUnreadableMessage is that refusal's sentence. It names no path;
+// the read error itself goes to the server log.
+func competitionIDUnreadableMessage(id string) string {
+	return fmt.Sprintf("competition ID %q is held by a competition whose settings cannot be read; repair or remove it", id)
+}
+
+// settingsUnparseable reports whether a LoadCompetition error is the settings
+// file itself (read, but not parseable), as opposed to a fault reading it
+// (an *fs.PathError: a folder in the way, a permission), which is the
+// server's and answered as one.
+func settingsUnparseable(err error) bool {
+	var pathErr *fs.PathError
+	return !errors.As(err, &pathErr)
 }
 
 func extractSeeds(players []domain.Player) []domain.SeedAssignment {
@@ -1061,9 +1109,20 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		// Likewise it has no lineup for a round to give to its matches, and no
 		// writer left that creates one.
 		comp.RoundLineupsConverted = true
-		var validationErr, idErr error
+		var validationErr, idErr, unreadableErr error
 		lockErr := store.WithCompetitionRenameLock(func() error {
-			if existing, _ := store.LoadCompetition(comp.ID); existing != nil {
+			existing, loadErr := store.LoadCompetition(comp.ID)
+			if loadErr != nil {
+				loadErr = fmt.Errorf("check competition ID %q: %w", comp.ID, loadErr)
+				if !settingsUnparseable(loadErr) {
+					return loadErr // a read fault, not the competition's own settings
+				}
+				// An unreadable config.md under this id is not a free id:
+				// saving over it would destroy whatever it holds.
+				unreadableErr = loadErr
+				return nil
+			}
+			if existing != nil {
 				idErr = fmt.Errorf("competition ID %q already exists", comp.ID)
 				return nil
 			}
@@ -1082,6 +1141,14 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			return saveErr
 		})
 		err = lockErr
+		if unreadableErr != nil {
+			logRequestError(c, unreadableErr)
+			c.JSON(http.StatusConflict, gin.H{
+				"error": competitionIDUnreadableMessage(comp.ID),
+				"code":  codeCompetitionIDUnreadable,
+			})
+			return
+		}
 		if idErr != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": idErr.Error()})
 			return
@@ -1102,6 +1169,18 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			// classifier for these sentinels; err.Error() is safe to return
 			// verbatim for all of them (see its doc for why ErrDuplicateName
 			// specifically must not go through errors.Unwrap instead).
+			if errors.Is(err, errRollbackFailed) {
+				// Ahead of the roster classifier too: whatever failed the
+				// save, the operator must hear that the half-saved
+				// competition is still on disk, since it blocks the retry.
+				// rollBackCreatedCompetition has already logged both
+				// failures, so this answers without logging them again; the
+				// causes (filesystem paths) stay in that log line.
+				c.JSON(http.StatusInternalServerError, gin.H{
+					"error": fmt.Sprintf("failed to save participants, and competition %q could not be removed: delete its folder before trying again", comp.ID),
+				})
+				return
+			}
 			if respondRosterWriteError(c, err) {
 				return
 			}
@@ -2329,7 +2408,12 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		// `updated.players: null` (Go nil slice → JSON null), wiping the
 		// frontend's local roster and crashing render paths that read
 		// `c.players.length`.
-		updated, _ := store.LoadCompetition(id)
+		updated, reloadErr := store.LoadCompetition(id)
+		if reloadErr != nil {
+			// The save has landed; answer with what was sent rather than
+			// report a failure the client would retry.
+			logRequestError(c, fmt.Errorf("re-read competition %q after its settings save: %w", id, reloadErr))
+		}
 		if updated == nil {
 			c.JSON(http.StatusOK, comp)
 			return

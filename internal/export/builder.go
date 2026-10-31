@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"log"
 	"sort"
 	"strings"
 
@@ -148,7 +149,11 @@ func BuildResultsWorkbook(store *state.Store, eng *engine.Engine, compID string)
 		return nil, fmt.Errorf("export: create workbook: %w", err)
 	}
 	defer func() {
-		_ = f.Close()
+		// The workbook's bytes are already taken by then, so a close failure
+		// (a temp file excelize could not remove) is logged, not returned.
+		if err := f.Close(); err != nil {
+			log.Printf("export: %q: closing the results workbook failed: %v", compID, err)
+		}
 	}()
 
 	// The shared sheet pipeline (mp-yuy8): Data, Pool Draw, Pool Matches,

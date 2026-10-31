@@ -95,9 +95,9 @@ export const swallowBounce = (ref, key = KEYLESS) => (ev) => {
 export function useOpenedTapGuard({ backdropOnly = false } = {}) {
   const stampRef = React.useRef(null);
   const openedRef = React.useCallback((node) => { if (node) stampTap(stampRef); }, []);
-  const onClickCapture = React.useMemo(() => {
-    const swallow = swallowBounce(stampRef);
-    return backdropOnly ? (ev) => { if (ev.target === ev.currentTarget) swallow(ev); } : swallow;
+  const onClickCapture = React.useCallback((ev) => {
+    if (backdropOnly && ev.target !== ev.currentTarget) return;
+    swallowBounce(stampRef)(ev);
   }, [backdropOnly]);
   return { openedRef, onClickCapture };
 }

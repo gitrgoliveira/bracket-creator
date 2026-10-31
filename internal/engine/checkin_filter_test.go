@@ -664,8 +664,7 @@ func TestGenerateDraw_SeedGapFromCheckInKeepsD6Placement(t *testing.T) {
 	require.Len(t, pools, 4, "the fixture needs one pool per shiaijo for D6 to be determined")
 
 	// The same allocation generatePools uses to give each pool its shiaijo.
-	assignment, err := helper.AssignPoolsToCourts(len(pools), len(courts))
-	require.NoError(t, err)
+	assignment := helper.AssignPoolsToCourts(len(pools), len(courts))
 
 	seedCourt := map[int]string{}
 	for pi, p := range pools {

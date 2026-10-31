@@ -19,7 +19,6 @@ import (
 	"fmt"
 	"io/fs"
 	"net/url"
-	"os"
 	"path/filepath"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
@@ -160,18 +159,18 @@ func (s *Store) scoreLogPath(compID, matchID string) string {
 // ensureMatchHistoryDirLocked follows).
 func (s *Store) ensureScoreLogDirLocked(compID string) error {
 	compDir := s.compPath(compID)
-	info, err := os.Stat(compDir)
+	info, err := s.root.stat(compDir)
 	if err != nil {
 		return fmt.Errorf("score log: competition %s: %w", compID, err)
 	}
 	if !info.IsDir() {
 		return fmt.Errorf("score log: competition %s is not a directory", compID)
 	}
-	return os.Mkdir(s.compPath(compID, scoreLogDir), 0o700)
+	return s.root.mkdir(s.compPath(compID, scoreLogDir), 0o700)
 }
 
 func (s *Store) readScoreLogBytesLocked(compID, matchID string) ([]byte, error) {
-	b, err := os.ReadFile(s.scoreLogPath(compID, matchID))
+	b, err := s.root.readFile(s.scoreLogPath(compID, matchID))
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, nil
 	}
@@ -302,7 +301,7 @@ func (s *Store) DeleteScoreLog(compID string) error {
 	if filepath.Dir(dir) != s.compPath(compID) {
 		return fmt.Errorf("score log: refusing to remove %q", dir)
 	}
-	return os.RemoveAll(dir)
+	return s.root.removeAll(dir)
 }
 
 // AppendScoreLog stages lines onto a match's event log in this transaction.

@@ -47,9 +47,8 @@ func ParseSeedsFile(filePath string) ([]domain.SeedAssignment, error) {
 // to say "seed gap detected: rank 1, 2, 3 are missing"), while every path that
 // CONSUMES seeds keeps using ParseSeedsFile and refuses.
 func ReadSeedsFileRaw(filePath string) ([]domain.SeedAssignment, error) {
-	// cleanse the file path to mitigate G304
 	cleanPath := filepath.Clean(filePath)
-	file, err := os.Open(cleanPath) // #nosec G304
+	file, err := os.Open(cleanPath)
 	if err != nil {
 		return nil, err
 	}

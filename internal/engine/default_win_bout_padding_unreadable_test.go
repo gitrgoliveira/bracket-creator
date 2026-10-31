@@ -16,6 +16,7 @@ import (
 	"testing"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
+	bctest "github.com/gitrgoliveira/bracket-creator/internal/test"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -24,11 +25,11 @@ import (
 // state's own (unexported, package-scoped) mangleCell test helper.
 func mangleCellForTest(t *testing.T, path, from, to string) {
 	t.Helper()
-	raw, err := os.ReadFile(path) // #nosec G304
+	raw, err := bctest.ReadFile(path)
 	require.NoError(t, err)
 	mangled := strings.Replace(string(raw), from, to, 1)
 	require.NotEqual(t, string(raw), mangled, "the mangle pattern must actually match")
-	require.NoError(t, os.WriteFile(path, []byte(mangled), 0600)) // #nosec G306
+	require.NoError(t, os.WriteFile(path, []byte(mangled), 0600))
 }
 
 // TestWriteTimeDefaultWinPaddingNeverOverwritesAnUnreadableCell guards the
@@ -76,7 +77,7 @@ func TestWriteTimeDefaultWinPaddingNeverOverwritesAnUnreadableCell(t *testing.T)
 		"an unreadable cell must not be padded by the write-time gate")
 	assert.True(t, loaded[0].SubResultsUnreadable, "and must still say so")
 
-	raw, err := os.ReadFile(path) // #nosec G304
+	raw, err := bctest.ReadFile(path)
 	require.NoError(t, err)
 	assert.Contains(t, string(raw), "Tanaka",
 		"the malformed cell's bytes must survive the kiken write")

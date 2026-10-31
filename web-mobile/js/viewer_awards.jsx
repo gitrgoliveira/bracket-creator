@@ -3,8 +3,9 @@
 
 import { WinnerBadge } from './viewer_standings.jsx';
 import { competitionKindLabel } from './viewer_utils.jsx';
+import { useLatestRef } from './latest_ref.jsx';
 
-const { useState, useMemo, useRef: useRefV, useEffect } = React;
+const { useState, useMemo, useRef, useEffect } = React;
 const EmptyState = window.EmptyState;
 
 // deriveAwards returns the closing-ceremony placements.
@@ -206,7 +207,7 @@ const PLACE_STYLE = {
 };
 
 export function AwardsView({ c, bracket, standings, pools, players }) {
-  const containerRef = useRefV(null);
+  const containerRef = useRef(null);
   const [isFs, setIsFs] = useState(false);
   const isLeague = c?.format === "league";
   const isMixed = c?.format === "mixed";
@@ -232,13 +233,16 @@ export function AwardsView({ c, bracket, standings, pools, players }) {
       .then((data) => { if (!cancelled) setSwissStandings(Array.isArray(data) ? data : []); })
       .catch(() => { if (!cancelled) setSwissStandings([]); });
     return () => { cancelled = true; };
-    // oxlint-disable-next-line react-hooks/exhaustive-deps
   }, [c?.id, c?.format, c?.swissCurrentRound]);
 
   // For mixed (pools+knockout) comps, delegate to resolveCompetitionAwards so
   // this view and the All Winners modal share the same resolver (no drift).
+  // c is read as it is now, tracked through its id and format rather than
+  // the object, which every refetch makes again.
+  const cRef = useLatestRef(c);
   React.useEffect(() => {
     if (!isMixed) return;
+    const c = cRef.current;
     setKoAwards(undefined);
     if (!window.API?.fetchCompetitionDetails) {
       setKoAwards({ state: "in-progress", awards: [] });
@@ -254,11 +258,7 @@ export function AwardsView({ c, bracket, standings, pools, players }) {
         if (!cancelled) setKoAwards({ state: "in-progress", awards: [] });
       });
     return () => { cancelled = true; };
-    // isMixed is `c?.format === "mixed"` (already covered by c?.format); c is
-    // read by resolveCompetitionAwards but tracked via its primitive c.* fields,
-    // not the churning object identity.
-    // oxlint-disable-next-line react-hooks/exhaustive-deps
-  }, [c?.id, c?.format]);
+  }, [c?.id, isMixed, cRef]);
 
   const nameToPlayer = useMemo(() => {
     const m = new Map();
@@ -555,11 +555,12 @@ export function AllWinnersView({ tournament, onBack, tweaks }) {
 
   // Refetch is keyed on compsSig (a stable id:status signature), not the comps
   // array identity: see the comment above. Depending on comps would refetch on
-  // every render.
+  // every render, so the effect reads them through a ref.
+  const compsRef = useLatestRef(comps);
   useEffect(() => {
     let cancelled = false;
     setViewState((s) => ({ ...s, loading: true }));
-    buildAllWinnersPublic(comps, {
+    buildAllWinnersPublic(compsRef.current, {
       fetchCompetitionDetails: window.API.fetchCompetitionDetails.bind(window.API),
       swissStandings: window.API.swissStandings ? window.API.swissStandings.bind(window.API) : null,
     }).then((results) => {
@@ -568,8 +569,7 @@ export function AllWinnersView({ tournament, onBack, tweaks }) {
       if (!cancelled) setViewState({ loading: false, results: [], error: err?.message || String(err) });
     });
     return () => { cancelled = true; };
-    // oxlint-disable-next-line react-hooks/exhaustive-deps
-  }, [compsSig]);
+  }, [compsSig, compsRef]);
 
   return (
     <div className="viewer">

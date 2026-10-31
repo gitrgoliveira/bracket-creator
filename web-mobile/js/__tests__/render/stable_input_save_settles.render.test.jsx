@@ -18,7 +18,9 @@ function deferred() {
 // A parent that stores the value only once its save is taken, as admin.jsx's
 // updateCompetition does (no optimistic copy): a refused save leaves the
 // stored value as it was and tells the operator.
-function Host({ initial, saves, told }) {
+// `onSetter` hands the test the stored value's setter, for a store that moves
+// on its own (Host.setStored).
+function Host({ initial, saves, told, onSetter }) {
   const [stored, setStored] = React.useState(initial);
   const onChange = (val) => {
     const d = deferred();
@@ -28,9 +30,10 @@ function Host({ initial, saves, told }) {
       (err) => { told(err.message); },
     );
   };
-  Host.setStored = setStored;
+  if (onSetter) onSetter(setStored);
   return <StableInput aria-label="Seed" type="number" value={stored} onChange={onChange} autoSelect={false} />;
 }
+const keepSetter = (set) => { Host.setStored = set; };
 
 async function flush() {
   await act(async () => { await Promise.resolve(); await Promise.resolve(); });
@@ -85,7 +88,7 @@ describe('StableInput follows its save', () => {
 
   it('keeps showing a queued change over a change made elsewhere until it settles', async () => {
     const saves = [];
-    const { getByLabelText } = render(<Host initial={2} saves={saves} told={() => {}} />);
+    const { getByLabelText } = render(<Host initial={2} saves={saves} told={() => {}} onSetter={keepSetter} />);
     const box = getByLabelText('Seed');
     fireEvent.focus(box);
     fireEvent.change(box, { target: { value: '4' } });
@@ -116,7 +119,7 @@ describe('StableInput follows its save', () => {
 
   it('shows a change made elsewhere at once when nothing is waiting, and on blur when the box has the focus', async () => {
     const saves = [];
-    const { getByLabelText } = render(<Host initial={2} saves={saves} told={() => {}} />);
+    const { getByLabelText } = render(<Host initial={2} saves={saves} told={() => {}} onSetter={keepSetter} />);
     const box = getByLabelText('Seed');
     await act(async () => { Host.setStored(6); });
     expect(box.value).toBe('6');

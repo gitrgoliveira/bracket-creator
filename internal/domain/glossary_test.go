@@ -21,7 +21,7 @@ import (
 // component at runtime with no compile-time signal.
 func TestGlossaryAllSpecTermsRepresented(t *testing.T) {
 	specPath := findGlossarySpec(t)
-	body, err := os.ReadFile(specPath) //nolint:gosec // test reads a checked-in spec file
+	body, err := os.ReadFile(filepath.Clean(specPath))
 	require.NoError(t, err, "read glossary.md")
 
 	// Match `### TermName` headings (skip the `## Tier` h2s and other

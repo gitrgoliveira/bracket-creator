@@ -25,7 +25,7 @@ export {
   isSwissCompetitionComplete,
 } from './admin_competition_swiss.jsx';
 
-const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
+const { useState, useEffect, useRef } = React;
 
 const isValidDate = window.isValidDate;
 const bracketFullyComplete = window.bracketFullyComplete;
@@ -48,25 +48,25 @@ const AdminSwissRounds = window.AdminSwissRounds;
 function AdminCompetition({ tournament, competition, pools, poolMatches, standings, bracket, section, onSection, onBack, onOpenCompetition, onCreateCompetition, onUpdate, onRefreshCompetition, onMoveCourt, onEditScore, onLogout, onViewerMode, tweaks, password, showToast }) {
   const c = competition;
   const t = tournament;
-  const [starting, setStarting] = useStateA(false);
-  const [generating, setGenerating] = useStateA(false);
-  const [discarding, setDiscarding] = useStateA(false);
-  const [completing, setCompleting] = useStateA(false);
+  const [starting, setStarting] = useState(false);
+  const [generating, setGenerating] = useState(false);
+  const [discarding, setDiscarding] = useState(false);
+  const [completing, setCompleting] = useState(false);
   // localStatus lets AdminSettings report an invalidation immediately so the
   // page-header StatusBadge flips without waiting for the SSE refresh.
   // Cleared automatically when the prop status changes (SSE arrives).
-  const [localStatus, setLocalStatus] = useStateA(null);
-  useEffectA(() => { setLocalStatus(null); }, [c.id, c.status]);
+  const [localStatus, setLocalStatus] = useState(null);
+  useEffect(() => { setLocalStatus(null); }, [c.id, c.status]);
   // start() awaits a multi-second backend call (pool generation + bracket
   // build). If the user clicks Back during that window AdminCompetition
   // unmounts and setStarting(false) in finally targets a dead component.
-  const mountedRef = useRefA(true);
-  useEffectA(() => () => { mountedRef.current = false; }, []);
+  const mountedRef = useRef(true);
+  useEffect(() => () => { mountedRef.current = false; }, []);
   // The Bracket section's inline score editor publishes its unsaved entries
   // here (AdminBracket's hostUnsavedRef): every way off the section or the
   // page asks first over them (R1, stage 5 review 9, M1), and with nothing
   // unsaved goes in the same tick.
-  const editorUnsavedRef = useRefA(null);
+  const editorUnsavedRef = useRef(null);
   const alive = () => mountedRef.current;
   const leaving = (go) => (...args) => { if (go) leaveThen(editorUnsavedRef, () => go(...args), alive); };
   // The section already shown leaves nothing: no question (review 10, minor 2).
@@ -93,8 +93,8 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
   // stale render impossible without also blanking the banner every time the
   // SAME competition's status changes, which a bare reset at the top of the
   // effect would do.
-  const [drawWarnings, setDrawWarnings] = useStateA({ id: null, list: [] });
-  useEffectA(() => {
+  const [drawWarnings, setDrawWarnings] = useState({ id: null, list: [] });
+  useEffect(() => {
     if (!c.status || c.status === "setup") { setDrawWarnings({ id: c.id, list: [] }); return undefined; }
     let live = true;
     window.API.fetchDrawWarnings(c.id, password).then((w) => { if (live) setDrawWarnings({ id: c.id, list: w || [] }); });
@@ -355,8 +355,9 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
         <Breadcrumbs items={[
           { label: "Dashboard", onClick: leaving(onBack) },
           { label: c.name, onClick: section === "overview" ? null : () => toSection("overview") },
-          currentItem && section !== "overview" ? { label: currentItem.label } : null
-        ].filter(Boolean)} />
+          // A spread, not .filter(Boolean), which oxlint's react/refs flags here.
+          ...(currentItem && section !== "overview" ? [{ label: currentItem.label }] : []),
+        ]} />
         <div className="page-head">
           <div>
             <div className="page-head__eyebrow">{t.name} ›</div>
@@ -387,7 +388,7 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
                 </div>
                 {!isDateValid(c.date) && (
                   <div style={{ color: "var(--red)", fontSize: 11, fontWeight: 600 }}>
-                    ⚠ Cannot start: invalid date in Settings tab (e.g. "{c.date}")
+                    ⚠ Cannot start: invalid date in Settings tab (e.g. &quot;{c.date}&quot;)
                   </div>
                 )}
                 {drawBlocker && (
@@ -408,12 +409,14 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
                   {/* navBusy (generating||starting||discarding) covers the brief
                       window where generateDraw has flipped status to draw-ready
                       but its setGenerating(false) hasn't run yet: without it
-                      these buttons would be momentarily clickable mid-generate. */}
-                  <button type="button" className="btn btn--ghost btn--danger" onClick={leaving(discardDraw)} disabled={navBusy}>
+                      these buttons would be momentarily clickable mid-generate.
+                      onClick wraps leaving() in an arrow: passed bare, oxlint's
+                      react/refs flags it. */}
+                  <button type="button" className="btn btn--ghost btn--danger" onClick={(e) => leaving(discardDraw)(e)} disabled={navBusy}>
                     {discarding && <span className="spinner" />}
                     {discarding ? "Discarding…" : "Discard draw"}
                   </button>
-                  <button type="button" className="btn btn--primary" onClick={leaving(start)} disabled={navBusy}>
+                  <button type="button" className="btn btn--primary" onClick={(e) => leaving(start)(e)} disabled={navBusy}>
                     {starting && <span className="spinner" />}
                     {starting ? "Starting…" : "Start competition →"}
                   </button>

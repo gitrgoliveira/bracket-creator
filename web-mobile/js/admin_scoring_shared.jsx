@@ -3,7 +3,7 @@
 // out so the foundation can be reused and the modal file stays focused on the
 // two stateful editors. See web-mobile/admin_split_plan.md.
 
-const { useState: useStateA, useEffect: useEffectA, useRef: useRefA, useMemo: useMemoA, useLayoutEffect: useLayoutEffectA } = React;
+const { useState, useEffect, useRef, useMemo, useLayoutEffect, useCallback } = React;
 const Icon = window.Icon;
 
 import { DAIHYOSEN_POSITION, scoreRowMatchName, scoreRowMatchLabel } from './pool_ids.jsx';
@@ -27,6 +27,7 @@ import { withdrawnSideKey } from './ineligible_match.jsx';
 import { isTeamDefaultWinDecision } from './team_default_credit.jsx';
 import { struckIppons, realIppons } from './result_slot.jsx';
 import { acceptTap, useArmedConfirm } from './tap_guard.jsx';
+import { useLatestRef } from './latest_ref.jsx';
 // bc-evts: the board of a running match (tapBoardOf) is the server's copy with
 // this device's pending taps folded on, by the JS replay port.
 import { applyPending, assignMarks, APPLIED, BOUT_REMOVED, BOUT_REMOVED_MESSAGE } from './score_events.jsx';
@@ -82,7 +83,7 @@ export function useMatchHeldWrite(compId, matchId, match = null) {
   // `stuck` and `blocker` come from ONE read of the queue (heldWriteState,
   // stage 3 review 5, H2); a page whose API has only the two older questions
   // asks them.
-  const read = () => {
+  const read = useCallback(() => {
     const asks = !!(api && compId && matchId);
     const state = asks && typeof api.heldWriteState === 'function' ? api.heldWriteState(compId, matchId) : null;
     return {
@@ -92,11 +93,11 @@ export function useMatchHeldWrite(compId, matchId, match = null) {
       blocker: (state ? state.blocker
         : (asks && typeof api.heldWriteBlocker === 'function' && api.heldWriteBlocker(compId, matchId))) || null,
     };
-  };
-  const [state, setState] = useStateA(read);
-  const mountedRef = useRefA(true);
-  useEffectA(() => () => { mountedRef.current = false; }, []);
-  useEffectA(() => {
+  }, [api, compId, matchId]);
+  const [state, setState] = useState(read);
+  const mountedRef = useRef(true);
+  useEffect(() => () => { mountedRef.current = false; }, []);
+  useEffect(() => {
     const refresh = () => {
       if (!mountedRef.current) return;
       const next = read();
@@ -108,8 +109,7 @@ export function useMatchHeldWrite(compId, matchId, match = null) {
     if (typeof window.subscribeSyncStatus === 'function') offs.push(window.subscribeSyncStatus(refresh));
     if (typeof window.subscribeUnsentWrites === 'function') offs.push(window.subscribeUnsentWrites(refresh));
     return () => offs.forEach((off) => { if (typeof off === 'function') off(); });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [compId, matchId]);
+  }, [read]);
   return state;
 }
 
@@ -121,10 +121,11 @@ export function useMatchHeldWrite(compId, matchId, match = null) {
 // state (and its kept submit closure).
 export function useClearPendingWhenNothingHeld(compId, matchId, pendingWrite, onClear) {
   const { held } = useMatchHeldWrite(compId, matchId);
-  useEffectA(() => {
-    if (pendingWrite && held === false) onClear();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pendingWrite, held]);
+  // The editor's reset is read when the write clears, never a reason to look.
+  const onClearRef = useLatestRef(onClear);
+  useEffect(() => {
+    if (pendingWrite && held === false) onClearRef.current();
+  }, [pendingWrite, held, onClearRef]);
 }
 
 // The refusals a tap gets while the server holds the match as not running
@@ -137,8 +138,8 @@ const TAP_NOT_RUNNING_REASONS = new Set(['match_not_started', 'match_sent_back']
 // for a tap refused because the match is not running. `clear()` drops both,
 // called as the operator taps again.
 export function useTapOutcomeNote(compId, matchId) {
-  const [state, setState] = useStateA({ note: null, refusal: null, id: null });
-  useEffectA(() => {
+  const [state, setState] = useState({ note: null, refusal: null, id: null });
+  useEffect(() => {
     setState({ note: null, refusal: null, id: null });
     const api = window.API;
     if (!api || typeof api.subscribeTapOutcome !== 'function') return undefined;
@@ -160,11 +161,9 @@ export function useTapOutcomeNote(compId, matchId) {
       else setState((s) => ({ ...s, note: text, id }));
     });
   }, [compId, matchId]);
-  const clearRef = useRefA(null);
-  if (!clearRef.current) {
-    clearRef.current = () => setState((s) => (s.note || s.refusal ? { note: null, refusal: null, id: null } : s));
-  }
-  return { note: state.note, refusal: state.refusal, clear: clearRef.current };
+  // One `clear` for the editor's life (setState never changes).
+  const clear = React.useCallback(() => setState((s) => (s.note || s.refusal ? { note: null, refusal: null, id: null } : s)), [setState]);
+  return { note: state.note, refusal: state.refusal, clear };
 }
 
 // The scoring fields a board takes from the newest copy the outbox holds. The
@@ -301,12 +300,11 @@ export const DRAFT_DROPPED_NOTE = "This match was finished or sent back to the q
 //     refusal callback (answer);
 //   - answer(token, outcome, msg), release().
 export function useOwnStatus(feedMatch) {
-  const ref = useRefA(null);
-  if (!ref.current) ref.current = createOwnStatus(feedMatch.status, Number(feedMatch.modifiedAt) || 0);
-  const mountedRef = useRefA(true);
-  useEffectA(() => { mountedRef.current = true; return () => { mountedRef.current = false; }; }, []);
-  const [, bump] = useStateA(0);
-  const own = ref.current;
+  // The owner, made once for the editor's life (a lazy initial state).
+  const [own] = useState(() => createOwnStatus(feedMatch.status, Number(feedMatch.modifiedAt) || 0));
+  const mountedRef = useRef(true);
+  useEffect(() => { mountedRef.current = true; return () => { mountedRef.current = false; }; }, []);
+  const [, bump] = useState(0);
   own.observe(feedMatch.status, Number(feedMatch.modifiedAt) || 0);
   const rerender = () => { if (mountedRef.current) bump((n) => n + 1); };
   const answer = (token, outcome, msg, at) => { own.answer(token, outcome, msg || "", at); rerender(); };
@@ -393,8 +391,8 @@ export function DraftDroppedNotice() {
 }
 
 export function useTapBoard(m, on, opts) {
-  const [, setTick] = useStateA(0);
-  useEffectA(() => {
+  const [, setTick] = useState(0);
+  useEffect(() => {
     const api = window.API || {};
     if (!on) return undefined;
     const bump = () => setTick((t) => t + 1);
@@ -417,9 +415,9 @@ export function HeldWriteNotice({ compId, matchId, res, match = null }) {
 export function HeldWriteDiscard({ compId, matchId, onDiscarded, disabled = false, match = null }) {
   const api = window.API;
   const { stuck, blocker } = useMatchHeldWrite(compId, matchId, match);
-  const [busy, setBusy] = useStateA(false);
-  const mountedRef = useRefA(true);
-  useEffectA(() => () => { mountedRef.current = false; }, []);
+  const [busy, setBusy] = useState(false);
+  const mountedRef = useRef(true);
+  useEffect(() => () => { mountedRef.current = false; }, []);
   if (!stuck) return null;
   const discard = async () => {
     setBusy(true);
@@ -1091,7 +1089,7 @@ function shouldBlockScoringKeys({ decidedByHantei }) {
 // counter is the −/×N/+ stepper, unbounded above (see nextEnchoPeriod).
 // Used by both ScoreEditorModal and TeamScoreEditorModal.
 function EnchoControl({ enchoPeriodCount, setEnchoPeriodCount }) {
-  const [showCounter, setShowCounter] = useStateA(enchoPeriodCount > 0);
+  const [showCounter, setShowCounter] = useState(enchoPeriodCount > 0);
   const expanded = showCounter || enchoPeriodCount > 0;
   if (!expanded) {
     return (
@@ -1159,8 +1157,8 @@ function DecisionPrompt({ kind, sideA, sideB, askReason, onCancel, onSubmit, sub
   // No side is preselected (operator decision 2026-10-07, bc-dsid): a
   // withdrawal or no-show recorded against the wrong side inverts the result,
   // so the operator must pick, and Record stays off until they do.
-  const [side, setSide] = useStateA("");
-  const [reason, setReason] = useStateA("");
+  const [side, setSide] = useState("");
+  const [reason, setReason] = useState("");
   const showReason = askReason;
   // Display rule (locked, glossary.md §Display rule): render the
   // romaji term ALONE: the popover (via <Term>) carries the gloss.
@@ -1271,7 +1269,7 @@ function FoulCounter({ fouls, setFouls, onIncrement, color, disabled }) {
   // an H to the opponent. A repeat pointer tap within TAP_BOUNCE_MS is the
   // bounce, not a second foul. `−` is not guarded: one foul too few is visible
   // and one tap to undo, and nobody gains a point from it.
-  const incTapRef = useRefA(null);
+  const incTapRef = useRef(null);
   const onIncrementTap = (ev) => {
     if (acceptTap(incTapRef, ev)) onIncrement();
   };
@@ -1387,17 +1385,17 @@ function lineupListPlacement({ pin, foot, clip }, bar) {
 }
 
 function LineupNameInput({ value, roster, onSelect, onListPick, disabled, ariaLabel, color, clearable, inputId, placeholder = "Add player…" }) {
-  const [query, setQuery] = useStateA("");
-  const [open, setOpen] = useStateA(false);
-  const [active, setActive] = useStateA(-1); // -1 = no explicit selection yet
-  const ref = useRefA(null);
-  const barRef = useRefA(null);
-  const listRef = useRefA(null);
-  const [placement, setPlacement] = useStateA({ up: false, maxHeight: undefined });
+  const [query, setQuery] = useState("");
+  const [open, setOpen] = useState(false);
+  const [active, setActive] = useState(-1); // -1 = no explicit selection yet
+  const ref = useRef(null);
+  const barRef = useRef(null);
+  const listRef = useRef(null);
+  const [placement, setPlacement] = useState({ up: false, maxHeight: undefined });
   // Measured on open, then again whenever the page scrolls or the viewport
   // changes (the keyboard rising), one frame at a time. What bounds the room (the
   // pinned bars, the clipping ancestor) is found once, on open.
-  useLayoutEffectA(() => {
+  useLayoutEffect(() => {
     if (!open || !ref.current) return;
     const edges = lineupListEdges(ref.current);
     let frame = 0;
@@ -1427,7 +1425,7 @@ function LineupNameInput({ value, roster, onSelect, onListPick, disabled, ariaLa
   }, [open]);
   // Guards against double-commit when click-outside fires first and the blur
   // event arrives immediately after (mousedown precedes blur in browser order).
-  const skipBlurRef = useRefA(false);
+  const skipBlurRef = useRef(false);
   const q = query.trim();
   const ql = q.toLowerCase();
   // `raw` keeps the ORIGINAL roster item (unmodified: no isObject marker,
@@ -1437,7 +1435,7 @@ function LineupNameInput({ value, roster, onSelect, onListPick, disabled, ariaLa
   // row and its own `query` state changes on every keystroke, which used to
   // re-map the whole roster on every one of those renders even though
   // `roster` itself had not changed.
-  const entries = useMemoA(() => (roster || []).map(r =>
+  const entries = useMemo(() => (roster || []).map(r =>
     typeof r === "string"
       ? { name: r, label: "", isObject: false, raw: r }
       : { name: r?.name || "", label: r?.label || "", isObject: true, raw: r }
@@ -1447,7 +1445,7 @@ function LineupNameInput({ value, roster, onSelect, onListPick, disabled, ariaLa
   // itself where neither `entries` nor `ql` changed -- arrow-key navigation
   // (`active`) and open/close (`open`) are the common case, and previously
   // re-filtered and re-capped the whole roster on each of those too.
-  const { matches, exact } = useMemoA(() => {
+  const { matches, exact } = useMemo(() => {
     const matches = entries.filter(e => {
       if (!ql) return true;
       const nameHit = (e.name || "").toLowerCase().includes(ql);
@@ -1473,22 +1471,6 @@ function LineupNameInput({ value, roster, onSelect, onListPick, disabled, ariaLa
   const canAddNew = q.length > 0 && !exact;
   const optionCount = matches.length + (canAddNew ? 1 : 0);
 
-  // On click-outside: commit a typed but un-submitted name rather than
-  // discarding it. Without this, tabbing quickly between slots loses names.
-  // Note: option onMouseDown uses preventDefault so focus stays in the input;
-  // the option itself commits on CLICK (bc-flst), so the whole tap lands on
-  // the option before the list closes. The outside mousedown only fires when
-  // clicking a genuinely external target (q is already "" after commit).
-  window.useClickOutside(ref, () => {
-    if (q) {
-      skipBlurRef.current = true;
-      commit(q);
-    } else {
-      setOpen(false);
-      setQuery("");
-    }
-  }, open);
-
   // commit's optional second argument is the matched roster entry (when the
   // commit came from picking one). It is called with ONE argument (never a
   // trailing explicit `undefined`) for the "+ Add" row, a typed-query
@@ -1502,6 +1484,24 @@ function LineupNameInput({ value, roster, onSelect, onListPick, disabled, ariaLa
     else onSelect(name);
     setOpen(false); setQuery(""); setActive(-1);
   };
+
+  // On click-outside: commit a typed but un-submitted name rather than
+  // discarding it. Without this, tabbing quickly between slots loses names.
+  // Note: option onMouseDown uses preventDefault so focus stays in the input;
+  // the option itself commits on CLICK (bc-flst), so the whole tap lands on
+  // the option before the list closes. The outside mousedown only fires when
+  // clicking a genuinely external target (q is already "" after commit).
+  // Called after `commit` is defined, which it calls.
+  window.useClickOutside(ref, () => {
+    if (q) {
+      skipBlurRef.current = true;
+      commit(q);
+    } else {
+      setOpen(false);
+      setQuery("");
+    }
+  }, open);
+
   // A string-origin entry commits exactly like a plain string always did
   // (ONE argument); an object entry threads its ORIGINAL raw value back as
   // onSelect's second argument.
@@ -1630,8 +1630,8 @@ function LineupNameInput({ value, roster, onSelect, onListPick, disabled, ariaLa
 // (a `= []` inline default allocates a fresh array every call).
 const REASON_PROMPT_NO_PRESETS = [];
 function ReasonPrompt({ label = "Reason for change", presets = REASON_PROMPT_NO_PRESETS, onConfirm, onCancel, submitting = false }) {
-  const [category, setCategory] = useStateA(presets[0] || "");
-  const [note, setNote] = useStateA("");
+  const [category, setCategory] = useState(presets[0] || "");
+  const [note, setNote] = useState("");
   const built = note.trim() ? `${category}: ${note.trim()}` : category;
   const canConfirm = !!category && !submitting;
   const submit = (e) => {
@@ -1777,34 +1777,42 @@ export {
 // them at once, as the editor's own actions do (stage 5 review 9, m1;
 // unsaved_entries.jsx `discardUnsaved`).
 export function usePublishUnsaved(hostRef, unsaved, onDiscard) {
-  const probe = useRefA(null);
-  const unsavedRef = useRefA(unsaved);
-  unsavedRef.current = unsaved;
-  const discardRef = useRefA(onDiscard);
-  discardRef.current = onDiscard;
-  if (!probe.current) {
-    probe.current = () => !probe.current.cleared && holdsUnsaved(unsavedRef.current);
-    // Run only while this editor is mounted: a host holding the thunk past
-    // the editor's unmount (a question answered after it went) drops nothing.
-    probe.current.discard = () => {
-      if (probe.current.gone || typeof discardRef.current !== "function") return;
-      discardRef.current();
-      // The entries are dropped at once, but the editor's own unsaved ref is
-      // set by its next render: until then it still reports them, and an exit
-      // that re-asks the thunk after the answer (the leave's `go`) would ask a
-      // second time (stage 5 review 11, minor 1). Say clean now, in the ref
-      // the editor keeps and in the thunk; the next render states the truth.
-      const held = unsavedRef.current;
-      if (held && typeof held === "object" && "current" in held) held.current = false;
-      probe.current.cleared = true;
-    };
-  }
-  // A render states the editor's own answer again: an entry made after the
-  // discard is unsaved.
-  probe.current.cleared = false;
-  if (hostRef && hostRef.current !== probe.current) hostRef.current = probe.current;
-  useEffectA(() => () => { if (hostRef && hostRef.current === probe.current) hostRef.current = null; }, [hostRef]);
-  useEffectA(() => { probe.current.gone = false; return () => { probe.current.gone = true; }; }, []);
+  const probeRef = useRef(null);
+  const unsavedRef = useLatestRef(unsaved);
+  const discardRef = useLatestRef(onDiscard);
+  // Each commit states the editor's own answer again, before anything can
+  // ask it (a layout effect runs before the browser takes the next event,
+  // and after the two above, which bring the latest unsaved state and discard):
+  // `cleared` reset, since an entry made after the discard is unsaved. The
+  // thunk is made once, on the first.
+  useLayoutEffect(() => {
+    if (!probeRef.current) probeRef.current = makeUnsavedProbe(unsavedRef, discardRef);
+    probeRef.current.cleared = false;
+    if (hostRef && hostRef.current !== probeRef.current) hostRef.current = probeRef.current;
+  });
+  useEffect(() => () => { if (hostRef && hostRef.current === probeRef.current) hostRef.current = null; }, [hostRef]);
+  useEffect(() => { probeRef.current.gone = false; return () => { probeRef.current.gone = true; }; }, []);
+}
+
+// makeUnsavedProbe: usePublishUnsaved's thunk, reading the editor's latest
+// unsaved state and discard through their refs when it is asked.
+function makeUnsavedProbe(unsavedRef, discardRef) {
+  const probe = () => !probe.cleared && holdsUnsaved(unsavedRef.current);
+  // Run only while this editor is mounted: a host holding the thunk past
+  // the editor's unmount (a question answered after it went) drops nothing.
+  probe.discard = () => {
+    if (probe.gone || typeof discardRef.current !== "function") return;
+    discardRef.current();
+    // The entries are dropped at once, but the editor's own unsaved ref is
+    // set by its next render: until then it still reports them, and an exit
+    // that re-asks the thunk after the answer (the leave's `go`) would ask a
+    // second time (stage 5 review 11, minor 1). Say clean now, in the ref
+    // the editor keeps and in the thunk; the next render states the truth.
+    const held = unsavedRef.current;
+    if (held && typeof held === "object" && "current" in held) held.current = false;
+    probe.cleared = true;
+  };
+  return probe;
 }
 
 // useMatchReopen: the one client of POST .../reopen and its court-busy remedy
@@ -1835,15 +1843,15 @@ export function usePublishUnsaved(hostRef, unsaved, onDiscard) {
 //     declining leaves everything as it was and says so in `err`.
 // Every other refusal is the server's sentence, shown verbatim in `err`.
 function useMatchReopen({ match, password, isComplete, own, unsaved = false, onDiscard, allowCourtForce = false }) {
-  const mountedRef = useRefA(true);
+  const mountedRef = useRef(true);
   // The unsaved-entries warning is open (R1): a second tap meanwhile asks
   // nothing more.
-  const askingRef = useRefA(false);
-  useEffectA(() => () => { mountedRef.current = false; }, []);
-  const [busy, setBusy] = useStateA(false);
+  const askingRef = useRef(false);
+  useEffect(() => () => { mountedRef.current = false; }, []);
+  const [busy, setBusy] = useState(false);
   // The server answered success; the match prop may not have flipped yet.
-  const [landed, setLanded] = useStateA(false);
-  const [err, setErr] = useStateA("");
+  const [landed, setLanded] = useState(false);
+  const [err, setErr] = useState("");
   // { court, matchId, compId, message, label, reason, force }: the match
   // ALREADY running on this court, plus what the refused reopen carried.
   // `label` is the server's operator-facing name for it, when sent -- it
@@ -1852,22 +1860,22 @@ function useMatchReopen({ match, password, isComplete, own, unsaved = false, onD
   // sentence, kept on the object but no longer rendered (see ReopenFeedback:
   // it named an internal id and told the operator to finish that match,
   // contradicting this panel's own button).
-  const [conflict, setConflict] = useStateA(null);
+  const [conflict, setConflict] = useState(null);
   // Best-effort "Match 2 · Shiro vs Aka" for the blocking match. The operator
   // is about to wipe that match's score, so naming its competitors (not just
   // the server's opaque id) is a safety property, not decoration.
-  const [blockerLabel, setBlockerLabel] = useStateA("");
-  const [notice, setNotice] = useStateA("");
+  const [blockerLabel, setBlockerLabel] = useState("");
+  const [notice, setNotice] = useState("");
   // Set once the operator has confirmed the downstream reopen, so the
   // court-busy remedy that may follow does not ask them a second time.
-  const confirmedRef = useRefA(false);
+  const confirmedRef = useRef(false);
 
   // Once the match reopens (status flips to running), a stale error or
   // conflict describes a completed-state action that no longer applies. When it
   // completes AGAIN (a new result or decision), the reopen notice is history:
   // it described that reopen, not the match now on screen. Keyed on the value,
   // so the notice set while the match is still completed survives the flip.
-  useEffectA(() => {
+  useEffect(() => {
     if (!isComplete) { setErr(""); setConflict(null); setBusy(false); setLanded(false); }
     else setNotice("");
   }, [isComplete]);
@@ -2052,7 +2060,7 @@ function useMatchReopen({ match, password, isComplete, own, unsaved = false, onD
     true,
   );
 
-  useEffectA(() => {
+  useEffect(() => {
     setBlockerLabel("");
     if (!conflict?.matchId || !conflict?.compId) return;
     if (typeof window.compMatchesForCompetition !== "function" || typeof window.API?.fetchCompetitionDetails !== "function") return;
@@ -2087,7 +2095,6 @@ function useMatchReopen({ match, password, isComplete, own, unsaved = false, onD
       } catch { /* best effort: the panel falls back to the server's own label, or "another match" */ }
     })();
     return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conflict?.compId, conflict?.matchId]);
 
   return { busy, landed, err, conflict, blockerLabel, notice, reopen, reopenAnyway, requeueBlocker, dismissConflict: () => setConflict(null), allowCourtForce };
@@ -2125,16 +2132,19 @@ function useMatchReopen({ match, password, isComplete, own, unsaved = false, onD
 // was saved on this device and is waiting to be sent. Undo cannot recall
 // it, so the removal then reads as sent and offers no Undo.
 function useWithdrawalRemoval({ match, enabled, held = false, onRemove, onUndo, onReset = onUndo }) {
-  const [removed, setRemoved] = useStateA(false);
+  const [removed, setRemoved] = useState(false);
   const inForce = withdrawalInForce(match);
   const removing = !!enabled && inForce && removed;
   const rulingShown = inForce && !removing;
-  useEffectA(() => {
-    if (!removed) return;
+  // Read through refs: only the three ruling values end a removal, never the
+  // removal itself or a new reset callback.
+  const removedRef = useLatestRef(removed);
+  const onResetRef = useLatestRef(onReset);
+  useEffect(() => {
+    if (!removedRef.current) return;
     setRemoved(false);
-    if (onReset) onReset();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [match.id, match.decision, match.decisionBy]);
+    if (onResetRef.current) onResetRef.current();
+  }, [match.id, match.decision, match.decisionBy, removedRef, onResetRef]);
   const removal = enabled ? {
     removed: removing,
     held: removing && !!held,
@@ -2344,9 +2354,13 @@ function RecordedWithdrawal({ match, ctl, disabled = false, singleBout = false, 
   // The later list decides the copy beside the one-tap clear too (a chained
   // fusenpai in it moves the bar, see barMovesOn), so `settled` holds the
   // clear until it is in and the copy is never the wrong one.
-  const [laterDefaultWins, setLaterDefaultWins] = useStateA(null);
-  const [settled, setSettled] = useStateA(false);
-  useEffectA(() => {
+  const [laterDefaultWins, setLaterDefaultWins] = useState(null);
+  const [settled, setSettled] = useState(false);
+  // The side is read through a ref: a fresh copy of it, with the same id and
+  // name, is no reason to fetch the later matches again.
+  const withdrawnRef = useLatestRef(withdrawn);
+  useEffect(() => {
+    const withdrawn = withdrawnRef.current;
     setLaterDefaultWins(null);
     if (!withdrawn || !match.compId) { setSettled(true); return; }
     let cancelled = false;
@@ -2381,8 +2395,7 @@ function RecordedWithdrawal({ match, ctl, disabled = false, singleBout = false, 
       }
     })();
     return () => { cancelled = true; clearTimeout(cap); };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [match.compId, match.id, withdrawn?.id, withdrawn?.name]);
+  }, [match.compId, match.id, withdrawn?.id, withdrawn?.name, withdrawnRef]);
   // The barred competitor's record names a DIFFERENT match (see above).
   const barredElsewhere = !!(withdrawnStatus && withdrawnStatus.eligible === false &&
     withdrawnStatus.matchId && withdrawnStatus.matchId !== match.id);
@@ -2723,17 +2736,18 @@ function useAdoptFromServer({ signature, apply, keepLocalEdits = false, isDirty 
   // would then seed from a board nobody was shown. Effects run in declaration
   // order after commit, so this one always refreshes the ref BEFORE the adopt
   // below reads it, and both see the committed render.
-  const applyRef = useRefA(apply);
-  useEffectA(() => { applyRef.current = apply; });
-  const wasDirtyRef = useRefA(false);
-  useEffectA(() => {
-    if (keepLocalEdits && wasDirtyRef.current) return;
+  const applyRef = useRef(apply);
+  useEffect(() => { applyRef.current = apply; });
+  const wasDirtyRef = useRef(false);
+  // The policy is read when the signature moves, never a reason to adopt.
+  const keepLocalEditsRef = useLatestRef(keepLocalEdits);
+  useEffect(() => {
+    if (keepLocalEditsRef.current && wasDirtyRef.current) return;
     applyRef.current();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [signature]);
+  }, [signature, keepLocalEditsRef]);
   // Only the keepLocalEdits policy reads this, but the hook call itself must be
   // unconditional (rules of hooks), so the CHEAP part is the branch inside.
-  useEffectA(() => { if (keepLocalEdits) wasDirtyRef.current = !!isDirty; });
+  useEffect(() => { if (keepLocalEdits) wasDirtyRef.current = !!isDirty; });
 }
 
 // ES exports: the modal file imports these and re-exports the test-facing

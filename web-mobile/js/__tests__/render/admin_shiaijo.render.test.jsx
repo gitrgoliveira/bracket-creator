@@ -998,12 +998,11 @@ describe('AdminShiaijoPage render-smoke', () => {
   // requestMoveCourt was used in ShiaijoQueueGroup but not passed as a prop,
   // causing a ReferenceError that the fake-React stub suite never caught.
   it('GUARD: a component referencing an undefined prop throws a ReferenceError', () => {
-    // A minimal component that references an undefined variable. Simulates
-    // the requestMoveCourt bug class. Real React invokes the function body;
-    // the stub suite's createElement never does.
+    // A minimal component whose body throws the ReferenceError an undefined
+    // name throws. Simulates the requestMoveCourt bug class. Real React
+    // invokes the function body; the stub suite's createElement never does.
     const BrokenComponent = () => {
-      // eslint-disable-next-line no-undef
-      return <div>{undefinedVariable}</div>;
+      throw new ReferenceError("requestMoveCourt is not defined");
     };
     // React 18 calls console.error internally when a component throws (before
     // re-throwing the error). Suppress those expected calls with a local spy so

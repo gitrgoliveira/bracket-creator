@@ -63,8 +63,7 @@ func TestTopSeedsFightWhereTheClosingBoutsRun(t *testing.T) {
 	const numPools, numCourts, numSeeds = 12, 4, 4
 
 	pools := seededDrawPoolsN(t, numPools, numCourts, numSeeds)
-	assignment, err := AssignPoolsToCourts(numPools, numCourts)
-	require.NoError(t, err)
+	assignment := AssignPoolsToCourts(numPools, numCourts)
 
 	courtOfSeed := map[int]string{}
 	for i, p := range pools {

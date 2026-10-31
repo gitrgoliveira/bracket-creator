@@ -5,7 +5,6 @@
 import {
     escapeHtml,
     getIssueLineNumber,
-    sanitizeNameForValidation,
     getParticipantValidationState,
     validateCourtsValue,
     validatePoolSettings
@@ -184,8 +183,8 @@ document.getElementById('pools').addEventListener('change', function () {
 
 // Initialize tooltips
 var tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'))
-var tooltipList = tooltipTriggerList.map(function (tooltipTriggerEl) {
-    return new bootstrap.Tooltip(tooltipTriggerEl)
+tooltipTriggerList.forEach(function (tooltipTriggerEl) {
+    new bootstrap.Tooltip(tooltipTriggerEl)
 })
 
 const playerListTextarea = document.getElementById('playerList');
@@ -858,7 +857,7 @@ document.getElementById('manageSeeds').addEventListener('click', async function 
                 seedMap[a.Name + '|' + (a.Dojo || '')] = a.SeedRank;
             });
 
-            data.participants.forEach((p, index) => {
+            data.participants.forEach((p) => {
                 const tr = document.createElement('tr');
                 const seedValue = seedMap[p.name + '|' + (p.dojo || '')] || '';
                 const displayNameCell = withZekkenName

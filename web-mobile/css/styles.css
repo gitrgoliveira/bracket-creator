@@ -3877,7 +3877,7 @@ button.vsched-item:not([data-clickable]) {
   color: var(--accent);
 }
 
-.comp-step--todo .comp-step__icon {
+.comp-step--pending .comp-step__icon {
   color: var(--ink-3);
 }
 
@@ -3900,7 +3900,7 @@ button.vsched-item:not([data-clickable]) {
   color: var(--ink);
 }
 
-.comp-step--todo .comp-step__label {
+.comp-step--pending .comp-step__label {
   color: var(--ink-3);
 }
 

@@ -173,9 +173,7 @@ func OrderStringsAlphabetically(strings []*Node) []*Node {
 		}
 
 		// Compare the suffixes as numbers
-		numA, _ := strconv.Atoi(suffixA)
-		numB, _ := strconv.Atoi(suffixB)
-		return numA < numB
+		return suffixNumber(suffixA) < suffixNumber(suffixB)
 	})
 
 	return strings
@@ -192,6 +190,17 @@ func extractPrefixAndSuffix(str string) (string, string) {
 	return "", str
 }
 
+// suffixNumber is the value of a digit suffix from extractPrefixAndSuffix. A
+// label with no trailing digits has the empty suffix, which counts as 0, and
+// so does a run of digits too long for an int.
+func suffixNumber(suffix string) int {
+	n, err := strconv.Atoi(suffix)
+	if err != nil {
+		return 0
+	}
+	return n
+}
+
 // Helper function to check if a character is a digit
 func isDigit(ch byte) bool {
 	return '0' <= ch && ch <= '9'
@@ -204,7 +213,6 @@ func ReadEntriesFromFile(filePath string) ([]string, error) {
 		return nil, fmt.Errorf("invalid file path: %s", filePath)
 	}
 
-	// #nosec G304 - file path is validated above
 	file, err := os.Open(cleanPath)
 	if err != nil {
 		return nil, err
@@ -248,7 +256,6 @@ func ReadCSVFile(filePath string) ([][]string, error) {
 		return nil, fmt.Errorf("invalid file path: %s", filePath)
 	}
 
-	// #nosec G304 - file path is validated above
 	file, err := os.Open(cleanPath)
 	if err != nil {
 		return nil, err
@@ -288,15 +295,14 @@ func ReadCSVFile(filePath string) ([][]string, error) {
 // Every court gets at least one pool WHEN numCourts <= numPools, which is what
 // makes a draw's blocks all non-empty (EffectiveDrawCourts is the clamp that
 // guarantees the precondition, and every draw goes through it). Asked for more
-// courts than pools it does not error, it leaves the trailing courts empty; the
-// error return is kept for callers that already handle one and for future
-// validation.
-func AssignPoolsToCourts(numPools, numCourts int) ([]int, error) {
+// courts than pools it does not refuse, it leaves the trailing courts empty, and
+// the court count is clamped (clampCourts), so there is nothing to refuse.
+func AssignPoolsToCourts(numPools, numCourts int) []int {
 	// Both ends, through the one owner: this loops numCourts times, so an
 	// unvalidated count is a no-op loop rather than a bound the caller checked.
 	numCourts = clampCourts(numCourts)
 	if numPools == 0 {
-		return []int{}, nil
+		return []int{}
 	}
 	base := numPools / numCourts
 	extra := numPools % numCourts
@@ -312,7 +318,7 @@ func AssignPoolsToCourts(numPools, numCourts int) ([]int, error) {
 			pool++
 		}
 	}
-	return result, nil
+	return result
 }
 
 // SubtreeCourtIndex returns the zero-based court index for tree subtree idx

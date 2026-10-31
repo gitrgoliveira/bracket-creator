@@ -16,7 +16,7 @@ import { SideCell } from './side_cell.jsx';
 import { NumberedName } from './numbered_name.jsx';
 import { matchShowsScore } from './match_shows_score.jsx';
 
-const { useState: useStateA, useMemo: useMemoA } = React;
+const { useState, useMemo } = React;
 
 const AdminTopbar = window.AdminTopbar;
 const Breadcrumbs = window.Breadcrumbs;
@@ -24,8 +24,8 @@ const CourtPicker = window.CourtPicker;
 const hasBothSides = window.hasBothSides;
 
 export const AdminTWMatch = React.memo(({ m, highlight, courts, onMove, onTimeChange }) => {
-  const [editingTime, setEditingTime] = useStateA(false);
-  const [timeVal, setTimeVal] = useStateA(m.scheduledAt || "");
+  const [editingTime, setEditingTime] = useState(false);
+  const [timeVal, setTimeVal] = useState(m.scheduledAt || "");
   // bc-pnum: sameCompetitor, never a bare `winner.id === side.id` (see
   // bracket.jsx's MatchCard for why the naked equality lights both sides
   // once both are id-less).
@@ -109,10 +109,7 @@ export const AdminTWMatch = React.memo(({ m, highlight, courts, onMove, onTimeCh
           for non-fought decisions and overtime. The match-level decision
           covers kiken / fusenpai / daihyosen here; per-bout fusensho is a
           SubMatchResult and is rendered inside the score modal: the row
-          here doesn't expose individual bout cells.
-          TODO(T096): once per-bout fusensho is wired through the team-score
-          serializer and the schedule row exposes bout details, append an
-          "FS" badge to each affected bout cell. */}
+          here doesn't expose individual bout cells. */}
       {/* bc-cse: running admits the FULL score string here (any match kind),
           like TWMatch (viewer_schedule.jsx) -- deliberately, not team-only.
           matchStateCell (bracket.jsx) is scoped to the team aggregate instead
@@ -147,22 +144,22 @@ export const AdminTWMatch = React.memo(({ m, highlight, courts, onMove, onTimeCh
 AdminTWMatch.displayName = "AdminTWMatch";
 
 export function AdminSchedulePage({ tournament, onBack, onMoveCourt, onLogout, onViewerMode, password }) {
-  const [picked, setPicked] = useStateA([]);
-  const [dojoText, setDojoText] = useStateA("");
-  const [compFilter, setCompFilter] = useStateA("all");
-  const [matchDurationSeconds, setMatchDurationSeconds] = useStateA(180); // seconds per match estimate (m:ss)
+  const [picked, setPicked] = useState([]);
+  const [dojoText, setDojoText] = useState("");
+  const [compFilter, setCompFilter] = useState("all");
+  const [matchDurationSeconds, setMatchDurationSeconds] = useState(180); // seconds per match estimate (m:ss)
   // Per-competition auto-schedule: startTime + duration
   // Guarded with `|| []`, matching every other tournament.competitions read
   // in this file: state.Tournament has no Competitions field, so a
   // wizard-fresh tournament (POST /api/tournament's raw response, before
   // app.jsx's onCreated normalises it) can reach here with the key absent.
-  const [autoComp, setAutoComp] = useStateA((tournament.competitions || [])[0]?.id || "");
-  const [autoStart, setAutoStart] = useStateA((tournament.competitions || [])[0]?.startTime || "09:00");
-  const [autoSaving, setAutoSaving] = useStateA(false);
+  const [autoComp, setAutoComp] = useState((tournament.competitions || [])[0]?.id || "");
+  const [autoStart, setAutoStart] = useState((tournament.competitions || [])[0]?.startTime || "09:00");
+  const [autoSaving, setAutoSaving] = useState(false);
   // Blocks Auto-schedule while the duration field holds an out-of-band value.
   // DurationInput never emits an invalid duration, so without this the button
   // would silently schedule the whole competition at the last good value.
-  const [autoDurationError, setAutoDurationError] = useStateA(null);
+  const [autoDurationError, setAutoDurationError] = useState(null);
 
   // T040/T041: read ?court= from the URL; useQuery re-renders on history
   // changes so navigating between /admin/schedule and /admin/schedule?court=A
@@ -186,7 +183,7 @@ export function AdminSchedulePage({ tournament, onBack, onMoveCourt, onLogout, o
     try { return window.localStorage.getItem(COURT_STORAGE_KEY) || ""; } catch (_) { return ""; }
   })();
 
-  const allMatches = useMemoA(
+  const allMatches = useMemo(
     () => window.tournamentMatches(tournament).filter(hasBothSides),
     [tournament]
   );

@@ -94,8 +94,7 @@ func TestByeGoesToTheHighestPrecedenceOccupantSweep(t *testing.T) {
 						require.NotNil(t, draw)
 
 						courts := EffectiveDrawCourts(len(pools), numCourts)
-						assignment, err := AssignPoolsToCourts(len(pools), courts)
-						require.NoError(t, err)
+						assignment := AssignPoolsToCourts(len(pools), courts)
 						plan := newDrawPlan(pools, assignment, poolWinners, courts)
 						occupants := plan.route(pools, poolWinners)
 						require.Len(t, draw.blocks, len(occupants))
@@ -186,8 +185,7 @@ func TestSubdivisionNeverStrandsALoneOccupant(t *testing.T) {
 				t.Run(name, func(t *testing.T) {
 					pools, _ := makePools(numPools)
 					courts := EffectiveDrawCourts(numPools, numCourts)
-					assignment, err := AssignPoolsToCourts(numPools, courts)
-					require.NoError(t, err)
+					assignment := AssignPoolsToCourts(numPools, courts)
 					plan := newDrawPlan(pools, assignment, poolWinners, courts)
 					if plan.numBlocks <= courts {
 						return // not subdivided: the allocation is the operator's

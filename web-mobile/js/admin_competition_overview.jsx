@@ -21,7 +21,7 @@ import {
   bracketResetToast,
 } from './data_integrity.jsx';
 
-const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
+const { useState, useEffect, useRef } = React;
 
 const compMatchStats = window.compMatchStats;
 
@@ -34,7 +34,7 @@ const compMatchStats = window.compMatchStats;
 //
 // Shape:
 //   { id: string, label: string, detail: string, cta: string|null,
-//     state: 'done'|'active'|'todo', section: string|null,
+//     state: 'done'|'active'|'pending', section: string|null,
 //     blocking?: boolean }
 //
 // Rules:
@@ -43,7 +43,7 @@ const compMatchStats = window.compMatchStats;
 //   - "Review seeds & settings" is always emitted as a non-done step: there is
 //     no reliable "seeds reviewed" signal, so it never auto-completes (its
 //     detail line reflects the current seed count, but its state stays
-//     todo/active and is resolved by the active-step pass below). Its CTA
+//     pending/active and is resolved by the active-step pass below). Its CTA
 //     navigates to the "settings" section (format, courts, duration); seeds
 //     are accessible from the seeding card on the "participants" page.
 //   - Team comps get an extra "Set team lineups" step (→ "lineups") inserted
@@ -56,7 +56,7 @@ const compMatchStats = window.compMatchStats;
 //     telling an operator to press a greyed-out button is worse than saying
 //     nothing. `tournamentCourts` is optional and only feeds that check (the
 //     orphaned-shiaijo half of it); omit it and only the count rule applies.
-//   - The FIRST non-done step is promoted to "active"; the rest stay "todo".
+//   - The FIRST non-done step is promoted to "active"; the rest stay "pending".
 //     EXCEPT when a step is `blocking` (today only "Generate the draw", when a
 //     court rule has disabled it): that one is promoted instead, because
 //     nothing further in the checklist can happen until it is fixed, and
@@ -106,7 +106,7 @@ function competitionNextSteps(c, tournamentCourts) {
     detail: seededCount > 0
       ? `${seededCount} seed${seededCount !== 1 ? "s" : ""} assigned`
       : "Optionally assign seeds and adjust format",
-    state: "todo",
+    state: "pending",
     section: "settings",
     cta: "Review settings →",
   });
@@ -117,7 +117,7 @@ function competitionNextSteps(c, tournamentCourts) {
       id: "lineups",
       label: "Set team lineups",
       detail: "Assign positions (Senpo, Jiho, …) before the draw",
-      state: "todo",
+      state: "pending",
       section: "lineups",
       cta: "Set lineups →",
     });
@@ -142,7 +142,7 @@ function competitionNextSteps(c, tournamentCourts) {
     id: "generate",
     label: "Generate the draw",
     detail: generateDetail,
-    state: "todo",
+    state: "pending",
     section: drawIsBlocked ? drawBlocker.section : null,
     cta: drawIsBlocked ? drawBlocker.cta : null,
     // `blocking` means "nothing further in this checklist can happen until
@@ -155,7 +155,7 @@ function competitionNextSteps(c, tournamentCourts) {
   // The default rule (first non-done becomes active) can never reach the
   // generate step: "Review seeds & settings" is deliberately emitted non-done
   // forever, because there is no "seeds reviewed" signal, so it takes `active`
-  // on every render and everything after it stays `todo`. Only an active step
+  // on every render and everything after it stays `pending`. Only an active step
   // renders its CTA, so the "Reassign shiaijo →" button authored above was
   // unreachable in every state the checklist can be in.
   //
@@ -165,7 +165,7 @@ function competitionNextSteps(c, tournamentCourts) {
   // whose draw is refused has exactly one next action.
   // One pass, one rule: a blocking step takes `active` if there is one,
   // otherwise the first non-done step does, and every other non-done step is
-  // `todo`. Writing the two cases as separate passes meant the blocker branch
+  // `pending`. Writing the two cases as separate passes meant the blocker branch
   // also had to re-clear the states the default branch would have set, which
   // was a no-op for every step this checklist actually emits and would have
   // silently stopped being one the moment a later step was pushed as "active".
@@ -173,7 +173,7 @@ function competitionNextSteps(c, tournamentCourts) {
     || steps.find((s) => s.state !== "done");
   steps.forEach((s) => {
     if (s.state === "done") return;
-    s.state = s === active ? "active" : "todo";
+    s.state = s === active ? "active" : "pending";
   });
 
   return steps;
@@ -239,7 +239,7 @@ function AdminCompOverview({ c, tournament, pools, poolMatches, bracket, onSecti
   // in the banner because the banner owns the WORDING (shared with the other
   // data-integrity surfaces) and this page owns the network call and the
   // refresh, exactly like discardDraw in admin_competition.jsx.
-  const [quarantining, setQuarantining] = useStateA(false);
+  const [quarantining, setQuarantining] = useState(false);
   const quarantineBracket = async () => {
     // The words come from data_integrity.jsx, which owns every one the operator
     // reads about unreadable data. A league has no knockout stage, so it must
@@ -306,11 +306,18 @@ function AdminCompOverview({ c, tournament, pools, poolMatches, bracket, onSecti
   // Schedule estimate fetch: same AbortController pattern as AdminSettings.
   // Never blocks render: estimate starts as null and fills in asynchronously.
   // ---------------------------------------------------------------------------
-  const [estimate, setEstimate] = useStateA(null);
-  const [estimateLoading, setEstimateLoading] = useStateA(false);
-  const [estimateErr, setEstimateErr] = useStateA(null);
+  const [estimate, setEstimate] = useState(null);
+  const [estimateLoading, setEstimateLoading] = useState(false);
+  const [estimateErr, setEstimateErr] = useState(null);
 
-  useEffectA(() => {
+  // Re-fetch when config, participant count, or tournament-level timing changes.
+  // When check-in is enabled the backend counts only checked-in participants, so
+  // toggling check-in changes the effective count even if roster size stays fixed.
+  // Tournament ceremony/timing fields mirror AdminSettings' estimate effect deps.
+  const estimateCheckIn = checkInApplies(tournament, c.checkInEnabled);
+  const estimatePlayerCount = (c.players || []).length;
+  const estimateCheckedInCount = estimateCheckIn ? (c.players || []).filter(p => p && p.checkedIn).length : 0;
+  useEffect(() => {
     if (!c.id) return;
     const controller = new AbortController();
     setEstimateLoading(true);
@@ -327,15 +334,9 @@ function AdminCompOverview({ c, tournament, pools, poolMatches, bracket, onSecti
         }
       });
     return () => controller.abort();
-    // Re-fetch when config, participant count, or tournament-level timing changes.
-    // When check-in is enabled the backend counts only checked-in participants, so
-    // toggling check-in changes the effective count even if roster size stays fixed.
-    // Tournament ceremony/timing fields mirror AdminSettings' estimate effect deps.
   }, [c.id, c.format, c.kind, c.poolMatchDurationSeconds, c.knockoutMatchDurationSeconds, c.courts,
     c.teamSize, c.poolSize, c.poolSizeMode, c.poolWinners, c.roundRobin, c.poolFormat,
-    c.swissRounds, checkInApplies(tournament, c.checkInEnabled), password,
-    (c.players || []).length,
-    checkInApplies(tournament, c.checkInEnabled) ? (c.players || []).filter(p => p && p.checkedIn).length : 0,
+    c.swissRounds, estimateCheckIn, password, estimatePlayerCount, estimateCheckedInCount,
     tournament?.openingBlock, tournament?.lunchBlock, tournament?.closingBlock,
     tournament?.clockToElapsedMultiplier, tournament?.slowestCourtBufferPct]);
 
@@ -782,27 +783,27 @@ function FightingSpiritAwardsEditor({ c, password, showToast }) {
   // Each row carries a stable client-only `_key` so React keys survive
   // mid-list removals (index keys cause inputs to "jump" / reuse the wrong
   // DOM node when a middle row is deleted). `_key` is stripped before save.
-  const keyCounter = useRefA(0);
-  const withKey = (a) => ({ ...a, _key: keyCounter.current++ });
-  const [awards, setAwards] = useStateA(() => (c.fightingSpiritAwards || []).map(withKey));
-  const [saving, setSaving] = useStateA(false);
+  const keyCounterRef = useRef(0);
+  const withKey = (a) => ({ ...a, _key: keyCounterRef.current++ });
+  const [awards, setAwards] = useState(() => (c.fightingSpiritAwards || []).map(withKey));
+  const [saving, setSaving] = useState(false);
   // `dirty` guards the prop-sync effect: the parent refetches the competition
   // on unrelated SSE events (match updates, status changes), which would
   // otherwise clobber the operator's typed-but-unsaved edits. We only re-sync
   // from props when there are no pending edits (except on a competition
   // SWITCH, where we always reset to the new comp's list.
-  const [dirty, setDirty] = useStateA(false);
+  const [dirty, setDirty] = useState(false);
   // Unsaved edits hold a new build's automatic reload (app_version.jsx).
   useUnsavedInput(dirty);
-  const lastCompId = useRefA(c.id);
-  const mountedRef = useRefA(true);
-  useEffectA(() => () => { mountedRef.current = false; }, []);
+  const lastCompIdRef = useRef(c.id);
+  const mountedRef = useRef(true);
+  useEffect(() => () => { mountedRef.current = false; }, []);
 
   // Sync from parent. Reset unconditionally when switching competitions;
   // otherwise skip while the user has unsaved edits (see `dirty` above).
-  useEffectA(() => {
-    const switched = lastCompId.current !== c.id;
-    lastCompId.current = c.id;
+  useEffect(() => {
+    const switched = lastCompIdRef.current !== c.id;
+    lastCompIdRef.current = c.id;
     if (switched || !dirty) {
       setAwards((c.fightingSpiritAwards || []).map(withKey));
       if (switched) setDirty(false);

@@ -169,6 +169,12 @@ jobs:
       - name: Run web tests
         run: cd web && npm test
 
+      # The same lint and import checks `make go/test` runs locally. Before
+      # this step CI ran none of them, so a PR pushed without the local gate
+      # merged green with lint errors.
+      - name: Lint JS and check cross-module imports
+        run: make js/lint js/check-imports
+
   #   ____  ____  _____   _____         _
   #  |  _ \|  _ \|  ___| |_   _|__  ___| |_
   #  | |_) | | | | |_      | |/ _ \/ __| __|

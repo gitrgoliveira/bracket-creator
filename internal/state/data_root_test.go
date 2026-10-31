@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -41,6 +42,7 @@ func TestDataRoot_RefusesASymlinkOutOfTheDataFolder(t *testing.T) {
 	var pe *fs.PathError
 	require.True(t, errors.As(err, &pe), "a refused read is a PathError: %v", err)
 	assert.Equal(t, path, pe.Path, "the error names the path the store built")
+	assert.True(t, isPathEscape(err), "the root's refusal reads %q, which the write check's remedy matches: %v", pathEscapesText, err)
 
 	_, err = s.root.openFile(path, os.O_WRONLY|os.O_CREATE, 0o600)
 	require.Error(t, err, "a write through the link is refused too")
@@ -121,6 +123,28 @@ func TestDataRoot_ErrorsNameTheOperationAsByPath(t *testing.T) {
 	require.True(t, errors.As(err, &le), "%v", err)
 	assert.Equal(t, "rename", le.Op)
 	assert.Equal(t, "rename "+missing+" "+filepath.Join(dir, "other")+": "+le.Err.Error(), err.Error())
+}
+
+// An error raised on a file the root has already opened (reading a folder,
+// listing a file) names the path the store built once, never with the data
+// folder in front of it a second time.
+func TestDataRoot_AnErrorOnAnOpenedFileNamesItsPathOnce(t *testing.T) {
+	dir := t.TempDir()
+	root := openTestRoot(t, dir)
+	aDir := filepath.Join(dir, "competitions")
+	require.NoError(t, os.Mkdir(aDir, 0o700))
+	aFile := filepath.Join(dir, "tournament.md")
+	require.NoError(t, os.WriteFile(aFile, []byte("---\n---\n"), 0o600))
+
+	_, err := root.readFile(aDir)
+	require.Error(t, err)
+	assert.Equal(t, 1, strings.Count(err.Error(), dir), err.Error())
+	assert.Contains(t, err.Error(), aDir+":", err.Error())
+
+	_, err = root.readDir(aFile)
+	require.Error(t, err)
+	assert.Equal(t, 1, strings.Count(err.Error(), dir), err.Error())
+	assert.Contains(t, err.Error(), aFile+":", err.Error())
 }
 
 // A path that cannot be put relative to the data folder (a relative path

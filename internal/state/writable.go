@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -45,41 +46,41 @@ func checkDataWritable(root *dataRoot) error {
 	fail := func(dir string, err error) {
 		if !named[dir] {
 			named[dir] = true
-			failed = append(failed, fmt.Sprintf("  %s: %v", dir, err))
+			failed = append(failed, fmt.Sprintf("  %s: %v; %s", dir, err, writeRemedy(err)))
 		}
 	}
-	// whenFolder adds dir to the folders to probe when the root opens it as
-	// a folder. An entry the root refuses (a link out of the data folder,
-	// which every later read and write would refuse too) is named now; a
-	// missing entry, or a file, is not a folder the server saves into.
-	whenFolder := func(dir string) bool {
-		info, err := root.stat(dir)
-		switch {
-		case err == nil && info.IsDir():
-			dirs = append(dirs, dir)
-			return true
-		case err != nil && !errors.Is(err, fs.ErrNotExist):
-			fail(dir, pathErrCause(err))
-		}
-		return false
-	}
+	// The upload handlers write branding/ and sponsors/ by path, not through
+	// the root, so each is probed only when the root opens it as a folder.
 	for _, name := range []string{BrandingDirName, SponsorsDirName} {
-		whenFolder(filepath.Join(folder, name))
+		d := filepath.Join(folder, name)
+		if info, err := root.stat(d); err == nil && info.IsDir() {
+			dirs = append(dirs, d)
+		}
 	}
 	entries, err := root.readDir(compsDir)
 	if err != nil {
 		fail(compsDir, pathErrCause(err))
 	}
 	for _, e := range entries {
-		if !e.IsDir() && e.Type()&fs.ModeSymlink == 0 {
+		// The same competition folders ListCompetitions lists: a link under
+		// competitions/ is not one.
+		if !e.IsDir() {
 			continue
 		}
 		compDir := filepath.Join(compsDir, e.Name())
-		if !whenFolder(compDir) {
-			continue
-		}
+		dirs = append(dirs, compDir)
 		for _, sub := range []string{matchHistoryDir, scoreLogDir} {
-			whenFolder(filepath.Join(compDir, sub))
+			// Saved through the root: an entry it refuses (a link out of
+			// the data folder) would refuse every save, so it is named; a
+			// missing one, or a file, is not a folder the server saves into.
+			d := filepath.Join(compDir, sub)
+			info, err := root.stat(d)
+			switch {
+			case err == nil && info.IsDir():
+				dirs = append(dirs, d)
+			case err != nil && !errors.Is(err, fs.ErrNotExist):
+				fail(d, pathErrCause(err))
+			}
 		}
 	}
 	for _, d := range dirs {
@@ -90,7 +91,7 @@ func checkDataWritable(root *dataRoot) error {
 	if len(failed) == 0 {
 		return nil
 	}
-	return fmt.Errorf("%w:\n%s\nResults could not be saved there. Give the user running the server write access to these folders (for example chmod u+w <folder>) and start again",
+	return fmt.Errorf("%w:\n%s\nResults could not be saved there. Fix each folder as its line says and start again",
 		ErrDataNotWritable, strings.Join(failed, "\n"))
 }
 
@@ -105,6 +106,39 @@ func probeWrite(root *dataRoot, dir string) error {
 		return errors.Join(err, pathErrCause(root.remove(name)))
 	}
 	return pathErrCause(root.remove(name))
+}
+
+// writeRemedy is what the operator does about a folder the check could not
+// write, judged from the error alone: replace a link out of the data folder
+// with the folder itself (the store saves only inside the data folder), move
+// away a file that sits where the folder should be, or, for every other
+// failure, give the server write access to it.
+func writeRemedy(err error) string {
+	switch {
+	case isPathEscape(err):
+		return "it links out of the data folder (a link by an absolute path counts, wherever it points), which the server never saves through: put the folder itself there instead of the link"
+	case errors.Is(err, syscall.ENOTDIR):
+		return "a file is where this folder should be: move the file away, and the server makes the folder when it starts"
+	}
+	return "give the user running the server write access to it (for example chmod u+w <folder>)"
+}
+
+// pathEscapesText is the text of the error an os.Root gives for a name that
+// leaves it, a link out of the data folder included. The os package keeps
+// that error unexported and exports nothing errors.Is could match, so the
+// text is the one test left; TestDataRoot_RefusesASymlinkOutOfTheDataFolder
+// pins it against what the root really answers.
+const pathEscapesText = "path escapes from parent"
+
+// isPathEscape reports whether err, or an error it wraps, is the root's
+// refusal of a name that leaves the data folder.
+func isPathEscape(err error) bool {
+	for e := err; e != nil; e = errors.Unwrap(e) {
+		if e.Error() == pathEscapesText {
+			return true
+		}
+	}
+	return false
 }
 
 // pathErrCause drops the path an fs.PathError repeats, since the message

@@ -52,40 +52,41 @@ func (d *dataRoot) name(op, path string) (string, error) {
 	return rel, nil
 }
 
-// rootOps maps the operation an os.Root error names to the one the same call
-// by path names, so a message reads as it did before the store had a root
-// ("open /data/competitions/c1/config.md: ...", never "openat ..."). RemoveAll
-// says "unlinkat" by path too, so it needs no entry.
+// rootOps names the operations an os.Root call reports with the
+// folder-relative name it was given, each mapped to the operation the same
+// call by path reports, so a message reads as it did before the store had a
+// root ("open /data/competitions/c1/config.md: ...", never "openat ...").
+// RemoveAll's error is the one a removal by path usually stops on, the
+// unlink. Any other error (a read or a directory listing failing on a file
+// the root already opened) names the file root.Name() joined to the name,
+// which is already the path the store built, and is left as it is.
 var rootOps = map[string]string{
-	"openat":   "open",
-	"statat":   "stat",
-	"mkdirat":  "mkdir",
-	"removeat": "remove",
-	"renameat": "rename",
+	"openat":    "open",
+	"statat":    "stat",
+	"mkdirat":   "mkdir",
+	"removeat":  "remove",
+	"renameat":  "rename",
+	"RemoveAll": "unlinkat",
 }
 
-// rootOp is the by-path name of an os.Root error's operation.
-func rootOp(op string) string {
-	if byPath, ok := rootOps[op]; ok {
-		return byPath
-	}
-	return op
-}
-
-// abs puts the data folder back in front of the folder-relative names an
-// os.Root error carries, and the by-path operation name in place of the
+// abs puts the data folder back in front of the folder-relative names the
+// root's own errors carry, and the by-path operation name in place of the
 // root's, on every such error in the chain (MkdirAll wraps the one that
 // stopped it).
 func (d *dataRoot) abs(err error) error {
 	for e := err; e != nil; e = errors.Unwrap(e) {
 		switch x := e.(type) {
 		case *fs.PathError:
-			x.Op = rootOp(x.Op)
-			x.Path = filepath.Join(d.folder, x.Path)
+			if byPath, ok := rootOps[x.Op]; ok {
+				x.Op = byPath
+				x.Path = filepath.Join(d.folder, x.Path)
+			}
 		case *os.LinkError:
-			x.Op = rootOp(x.Op)
-			x.Old = filepath.Join(d.folder, x.Old)
-			x.New = filepath.Join(d.folder, x.New)
+			if byPath, ok := rootOps[x.Op]; ok {
+				x.Op = byPath
+				x.Old = filepath.Join(d.folder, x.Old)
+				x.New = filepath.Join(d.folder, x.New)
+			}
 		}
 	}
 	return err

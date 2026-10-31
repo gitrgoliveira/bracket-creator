@@ -166,7 +166,7 @@ func (s *Store) init() error {
 	// up-front means the first transaction doesn't have to worry about it.
 	// Only a missing one is made: an entry already there that the root
 	// cannot use as a folder (a file, or a link out of the data folder) is
-	// named by checkDataWritable below, with the operator's remedy.
+	// named by checkDataWritable below, with the remedy that fits it.
 	for _, dir := range []struct {
 		path string
 		perm fs.FileMode

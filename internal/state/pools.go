@@ -43,7 +43,11 @@ func parsePoolsFile(path string) (any, error) {
 		return nil, err
 	}
 	defer func() {
-		_ = f.Close()
+		// Read-only: the records are already read, so a close failure loses
+		// nothing; it is logged rather than failing the load.
+		if err := f.Close(); err != nil {
+			slog.Warn("state: closing a read file failed", "path", path, "error", err)
+		}
 	}()
 
 	records, err := csv.NewReader(f).ReadAll()
@@ -315,7 +319,11 @@ func parsePoolMatchesFile(path string) (any, error) {
 		return nil, err
 	}
 	defer func() {
-		_ = f.Close()
+		// Read-only: the records are already read, so a close failure loses
+		// nothing; it is logged rather than failing the load.
+		if err := f.Close(); err != nil {
+			slog.Warn("state: closing a read file failed", "path", path, "error", err)
+		}
 	}()
 
 	records, err := csv.NewReader(f).ReadAll()

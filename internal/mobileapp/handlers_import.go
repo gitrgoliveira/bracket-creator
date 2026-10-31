@@ -633,8 +633,7 @@ func importCompetition(store *state.Store, eng *engine.Engine, entry ImportManif
 		// helper.Player is a type alias for domain.Player (NFR-007); the
 		// parser output flows straight into SaveParticipants.
 		if err := store.SaveParticipantsRestored(entry.ID, parsedPlayers); err != nil {
-			_ = store.DeleteCompetition(entry.ID) // best-effort rollback
-			res.Error = "save participants: " + err.Error()
+			res.Error = "save participants: " + rollBackCreatedCompetition(store, entry.ID, err).Error()
 			return res
 		}
 		res.ParticipantCount = len(parsedPlayers)
@@ -650,8 +649,7 @@ func importCompetition(store *state.Store, eng *engine.Engine, entry ImportManif
 	// retry isn't blocked by the ID-collision check.
 	if len(parsedSeeds) > 0 {
 		if err := store.SaveSeeds(entry.ID, parsedSeeds); err != nil {
-			_ = store.DeleteCompetition(entry.ID) // best-effort rollback
-			res.Error = "save seeds: " + err.Error()
+			res.Error = "save seeds: " + rollBackCreatedCompetition(store, entry.ID, err).Error()
 			return res
 		}
 		res.SeedCount = len(parsedSeeds)
@@ -665,7 +663,12 @@ func readFormFile(fh *multipart.FileHeader) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = f.Close() }()
+	defer func() {
+		// Read-only: a close failure loses nothing, so it is logged.
+		if err := f.Close(); err != nil {
+			log.Printf("mobileapp: closing uploaded file %q failed: %v", fh.Filename, err)
+		}
+	}()
 	return io.ReadAll(f)
 }
 

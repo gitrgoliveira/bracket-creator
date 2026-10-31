@@ -92,8 +92,7 @@ func saveCompetitionWithPlayers(comp *state.Competition, store *state.Store) (bo
 		// caller's ID-collision check on retry would 400 "ID already
 		// exists" even though the prior attempt failed. Mirror the
 		// import handler's rollback pattern (handlers_import.go).
-		_ = store.DeleteCompetition(comp.ID) // best-effort rollback
-		return false, fmt.Errorf("%w: %w", errSaveParticipants, err)
+		return false, fmt.Errorf("%w: %w", errSaveParticipants, rollBackCreatedCompetition(store, comp.ID, err))
 	}
 	assignments := extractSeeds(comp.Players)
 	if err := store.SaveSeeds(comp.ID, assignments); err != nil {
@@ -106,6 +105,27 @@ func saveCompetitionWithPlayers(comp *state.Competition, store *state.Store) (bo
 		fmt.Printf("Warning: failed to save seeds: %v\n", err)
 	}
 	return changed, nil
+}
+
+// errRollbackFailed marks a create whose rollback could not remove the
+// competition it had half written (rollBackCreatedCompetition).
+var errRollbackFailed = errors.New("rollback failed")
+
+// rollBackCreatedCompetition removes the competition a create path wrote
+// before a later save of it failed, and answers cause, the error to report.
+// When the removal fails as well, the competition's folder is left on disk and
+// blocks a retry under the same id ("ID already exists"), so the failure is
+// logged and joined to cause (wrapping errRollbackFailed): the operator must be
+// told to remove the folder before trying again.
+func rollBackCreatedCompetition(store *state.Store, id string, cause error) error {
+	if err := store.DeleteCompetition(id); err != nil {
+		// The one log line for the failure, cause included. The removal's
+		// own error names filesystem paths, so it stays here and is left out
+		// of the returned error, which reaches the client.
+		log.Printf("mobileapp: rolling back competition %q failed, its folder is left on disk and blocks a retry under this id: %v (after: %v)", id, err, cause)
+		return fmt.Errorf("%w; %w: competition %q could not be removed, delete its folder before trying again", cause, errRollbackFailed, id)
+	}
+	return cause
 }
 
 func extractSeeds(players []domain.Player) []domain.SeedAssignment {
@@ -1102,6 +1122,18 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			// classifier for these sentinels; err.Error() is safe to return
 			// verbatim for all of them (see its doc for why ErrDuplicateName
 			// specifically must not go through errors.Unwrap instead).
+			if errors.Is(err, errRollbackFailed) {
+				// Ahead of the roster classifier too: whatever failed the
+				// save, the operator must hear that the half-saved
+				// competition is still on disk, since it blocks the retry.
+				// rollBackCreatedCompetition has already logged both
+				// failures, so this answers without logging them again; the
+				// causes (filesystem paths) stay in that log line.
+				c.JSON(http.StatusInternalServerError, gin.H{
+					"error": fmt.Sprintf("failed to save participants, and competition %q could not be removed: delete its folder before trying again", comp.ID),
+				})
+				return
+			}
 			if respondRosterWriteError(c, err) {
 				return
 			}

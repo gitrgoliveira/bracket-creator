@@ -2,6 +2,7 @@ package mobileapp
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -115,7 +116,11 @@ func handleBrandingLogoUpload(store *state.Store, hub *Hub) gin.HandlerFunc {
 			internalError(c, err)
 			return
 		}
-		defer func() { _ = src.Close() }()
+		defer func() {
+			if err := src.Close(); err != nil {
+				logRequestError(c, fmt.Errorf("close uploaded logo: %w", err))
+			}
+		}()
 
 		sniffBuf := make([]byte, 512)
 		nRead, rerr := io.ReadFull(src, sniffBuf)
@@ -153,12 +158,11 @@ func handleBrandingLogoUpload(store *state.Store, hub *Hub) gin.HandlerFunc {
 		written, copyErr := io.Copy(dst, io.LimitReader(src, BrandingMaxFileBytes+1))
 		cerr := dst.Close()
 		if copyErr != nil || cerr != nil {
-			_ = os.Remove(tmpPath)
-			internalError(c, errors.Join(copyErr, cerr))
+			internalError(c, errors.Join(copyErr, cerr, removeFile(tmpPath)))
 			return
 		}
 		if written > BrandingMaxFileBytes {
-			_ = os.Remove(tmpPath)
+			removeFileOrLog(tmpPath)
 			c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "logo must be ≤1 MB"})
 			return
 		}
@@ -170,8 +174,7 @@ func handleBrandingLogoUpload(store *state.Store, hub *Hub) gin.HandlerFunc {
 				err = os.Rename(tmpPath, fullPath)
 			}
 			if err != nil {
-				_ = os.Remove(tmpPath)
-				internalError(c, err)
+				internalError(c, errors.Join(err, removeFile(tmpPath)))
 				return
 			}
 		}
@@ -197,7 +200,7 @@ func handleBrandingLogoUpload(store *state.Store, hub *Hub) gin.HandlerFunc {
 		})
 		if err != nil {
 			if errors.Is(err, errNotInit) {
-				_ = os.Remove(fullPath)
+				err = errors.Join(err, removeFile(fullPath))
 			}
 			internalError(c, err)
 			return
@@ -208,7 +211,8 @@ func handleBrandingLogoUpload(store *state.Store, hub *Hub) gin.HandlerFunc {
 		if fileName == "logo.png" {
 			other = "logo.jpg"
 		}
-		_ = os.Remove(filepath.Join(brandingDir, other))
+		// Usually absent (only one extension is ever stored).
+		removeFileOrLog(filepath.Join(brandingDir, other))
 
 		if hub != nil {
 			hub.Broadcast(EventTournamentUpdated, nil)
@@ -242,7 +246,7 @@ func handleBrandingLogoDelete(store *state.Store, hub *Hub) gin.HandlerFunc {
 			return
 		}
 		if removed == "logo.png" || removed == "logo.jpg" {
-			_ = os.Remove(filepath.Join(store.GetFolder(), brandingDirName, removed))
+			removeFileOrLog(filepath.Join(store.GetFolder(), brandingDirName, removed))
 		}
 		if hub != nil {
 			hub.Broadcast(EventTournamentUpdated, nil)

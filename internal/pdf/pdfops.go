@@ -3,6 +3,7 @@ package pdf
 import (
 	"context"
 	"fmt"
+	"log"
 	"os"
 	"strings"
 
@@ -35,7 +36,12 @@ func SheetRanges(ctx context.Context, pdfPath string) ([]SheetRange, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open pdf: %w", err)
 	}
-	defer func() { _ = f.Close() }()
+	defer func() {
+		// Read-only: a close failure loses nothing, so it is logged.
+		if err := f.Close(); err != nil {
+			log.Printf("pdf: closing %s failed: %v", pdfPath, err)
+		}
+	}()
 
 	bms, err := api.Bookmarks(ctx, f, conf())
 	if err != nil {
@@ -69,7 +75,12 @@ func PageCount(ctx context.Context, pdfPath string) (int, error) {
 	if err != nil {
 		return 0, fmt.Errorf("open pdf: %w", err)
 	}
-	defer func() { _ = f.Close() }()
+	defer func() {
+		// Read-only: a close failure loses nothing, so it is logged.
+		if err := f.Close(); err != nil {
+			log.Printf("pdf: closing %s failed: %v", pdfPath, err)
+		}
+	}()
 
 	n, err := api.PageCount(ctx, f, conf())
 	if err != nil {

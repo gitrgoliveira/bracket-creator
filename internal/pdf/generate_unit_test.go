@@ -92,6 +92,39 @@ func TestPublishAtomic(t *testing.T) {
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "create temp output")
 	})
+
+	// noTempLeft asserts a failed publish took its temp file away.
+	noTempLeft := func(t *testing.T, dir string) {
+		t.Helper()
+		entries, err := os.ReadDir(dir)
+		require.NoError(t, err)
+		for _, e := range entries {
+			assert.NotContains(t, e.Name(), ".tmp")
+		}
+	}
+
+	t.Run("a failed copy removes the temp file", func(t *testing.T) {
+		// A directory opens but cannot be read as a file.
+		src := t.TempDir()
+		outDir := t.TempDir()
+		err := publishAtomic(src, filepath.Join(outDir, "output.pdf"))
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "copy generated pdf")
+		noTempLeft(t, outDir)
+	})
+
+	t.Run("a failed publish removes the temp file", func(t *testing.T) {
+		src := filepath.Join(t.TempDir(), "src.pdf")
+		require.NoError(t, os.WriteFile(src, []byte("pdf-content"), 0o600))
+		outDir := t.TempDir()
+		// A non-empty directory at dst can be neither renamed onto nor removed.
+		dst := filepath.Join(outDir, "output.pdf")
+		require.NoError(t, os.MkdirAll(filepath.Join(dst, "child"), 0o700))
+		err := publishAtomic(src, dst)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "publish output")
+		noTempLeft(t, outDir)
+	})
 }
 
 func TestMergePDFs_EmptyList(t *testing.T) {

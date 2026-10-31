@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -245,6 +246,69 @@ func TestPrintAllSkippedFlagNotSet(t *testing.T) {
 	require.NoError(t, err, "flag not set: all-skipped must still exit cleanly; stderr=%s", stderr.String())
 	assert.Contains(t, stderr.String(), "no exportable competitions found")
 	assert.Contains(t, stderr.String(), "swiss-only")
+}
+
+// failAfterWriter accepts ok writes, then refuses every write after them.
+type failAfterWriter struct{ ok int }
+
+var errOutputClosed = errors.New("output closed")
+
+func (w *failAfterWriter) Write(p []byte) (int, error) {
+	if w.ok == 0 {
+		return 0, errOutputClosed
+	}
+	w.ok--
+	return len(p), nil
+}
+
+// A write to the command's output that fails is the command's error, never
+// dropped: the operator would otherwise take a missing warning or "wrote" line
+// for a run that had nothing to report.
+func TestPrintReturnsAFailedOutputWrite(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		okFirst int
+		want    string
+	}{
+		{"the skipped-competition warning", 0, "report skipped competitions"},
+		{"the nothing-to-print note", 1, "report nothing to print"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			store, err := state.NewStore(dir)
+			require.NoError(t, err)
+			require.NoError(t, store.SaveCompetition(&state.Competition{
+				ID:          "swiss-only",
+				Name:        "Swiss Only",
+				Format:      state.CompFormatSwiss,
+				SwissRounds: 2,
+				Status:      "setup",
+			}))
+
+			cmd := newPrintCmd()
+			cmd.SetErr(&failAfterWriter{ok: tc.okFirst})
+			cmd.SetOut(&bytes.Buffer{})
+			cmd.SilenceErrors = true
+			cmd.SilenceUsage = true
+			cmd.SetArgs([]string{
+				"--type=all",
+				"--tournament-data=" + dir,
+				"--output-dir=" + t.TempDir(),
+			})
+
+			err = cmd.Execute()
+			require.ErrorIs(t, err, errOutputClosed)
+			assert.Contains(t, err.Error(), tc.want)
+		})
+	}
+
+	t.Run("the wrote line", func(t *testing.T) {
+		cmd := newPrintCmd()
+		cmd.SetOut(&failAfterWriter{})
+		err := reportOutputs(cmd, map[string]string{"tags": "/out/tags.pdf"})
+		require.ErrorIs(t, err, errOutputClosed)
+		assert.Contains(t, err.Error(), "report outputs")
+	})
 }
 
 // TestPrintAllSkippedWithFailOnSkipAll covers the opt-in: with

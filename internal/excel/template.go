@@ -2,6 +2,7 @@
 package excel
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
@@ -17,8 +18,7 @@ func NewFileFromScratch() (*excelize.File, error) {
 
 	// excelize.NewFile always creates "Sheet1"; rename it to "data".
 	if err := f.SetSheetName("Sheet1", helper.SheetData); err != nil {
-		_ = f.Close()
-		return nil, fmt.Errorf("renaming Sheet1 to data: %w", err)
+		return nil, errors.Join(fmt.Errorf("renaming Sheet1 to data: %w", err), f.Close())
 	}
 
 	for _, name := range []string{
@@ -26,8 +26,7 @@ func NewFileFromScratch() (*excelize.File, error) {
 		helper.SheetEliminationMatches, helper.SheetNamesToPrint, helper.SheetTree,
 	} {
 		if _, err := f.NewSheet(name); err != nil {
-			_ = f.Close()
-			return nil, fmt.Errorf("creating sheet %q: %w", name, err)
+			return nil, errors.Join(fmt.Errorf("creating sheet %q: %w", name, err), f.Close())
 		}
 	}
 

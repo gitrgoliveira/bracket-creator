@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -80,7 +81,11 @@ func RegisterPrintHandlers(r *gin.RouterGroup, eng *engine.Engine) {
 			internalError(c, err, "create work dir")
 			return
 		}
-		defer func() { _ = os.RemoveAll(workDir) }()
+		defer func() {
+			if err := os.RemoveAll(workDir); err != nil {
+				logRequestError(c, fmt.Errorf("remove work dir: %w", err))
+			}
+		}()
 
 		// Export all competitions to XLSX workbooks. A Swiss competition (no
 		// static bracket; Swiss export is not yet implemented -- mp-4n9n) or
@@ -156,25 +161,23 @@ func RegisterPrintHandlers(r *gin.RouterGroup, eng *engine.Engine) {
 		zw := zip.NewWriter(c.Writer)
 		if len(skipped) > 0 {
 			if err := writeSkippedCompetitionsEntry(zw, skipped); err != nil {
-				_ = c.Error(err)
-				_ = zw.Close()
+				logRequestError(c, errors.Join(err, zw.Close()))
 				return
 			}
 		}
 		for _, pdfPath := range ordered {
 			if err := streamPDFIntoZip(zw, pdfPath); err != nil {
 				// The 200 status + headers are already committed, so we cannot
-				// switch to an error response. Record the error on the context
-				// for server logs and abort; the truncated ZIP signals failure
-				// to the client.
-				_ = c.Error(err)
-				_ = zw.Close()
+				// switch to an error response. Log the error (and any failure
+				// closing the archive) and abort; the truncated ZIP signals
+				// failure to the client.
+				logRequestError(c, errors.Join(err, zw.Close()))
 				return
 			}
 		}
 		if closeErr := zw.Close(); closeErr != nil {
 			// Archive already partially delivered; record for server logs.
-			_ = c.Error(fmt.Errorf("close zip writer: %w", closeErr))
+			logRequestError(c, fmt.Errorf("close zip writer: %w", closeErr))
 			return
 		}
 	})
@@ -187,7 +190,12 @@ func streamPDFIntoZip(zw *zip.Writer, pdfPath string) error {
 	if err != nil {
 		return fmt.Errorf("open generated pdf %s: %w", pdfPath, err)
 	}
-	defer func() { _ = f.Close() }()
+	defer func() {
+		// Read-only: a close failure loses nothing, so it is logged.
+		if err := f.Close(); err != nil {
+			log.Printf("mobileapp: closing %s failed: %v", pdfPath, err)
+		}
+	}()
 
 	entry, err := zw.Create(filepath.Base(pdfPath))
 	if err != nil {

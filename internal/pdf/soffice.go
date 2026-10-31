@@ -14,6 +14,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -134,7 +135,11 @@ func (c *Converter) ConvertToPDF(ctx context.Context, srcPath, outDir string) (s
 	if err != nil {
 		return "", fmt.Errorf("create soffice profile dir: %w", err)
 	}
-	defer func() { _ = os.RemoveAll(profileDir) }()
+	defer func() {
+		if err := os.RemoveAll(profileDir); err != nil {
+			log.Printf("pdf: could not remove soffice profile dir %s: %v", profileDir, err)
+		}
+	}()
 
 	// #nosec G204 -- c.sofficePath is resolved by LocateSoffice (fixed candidates / env), and srcPath/outDir are internally-generated temp paths, not request data.
 	cmd := exec.CommandContext(ctx, c.sofficePath,

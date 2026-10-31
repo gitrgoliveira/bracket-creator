@@ -103,32 +103,38 @@ func atomicWriteFile(path string, data []byte, perm fs.FileMode) error {
 	}
 
 	// Cleanup helper: removes tmpPath on any error path so we never
-	// leave .tmp orphans. Best-effort: a removal failure is ignored
-	// because the original error is more interesting.
-	cleanup := func() {
-		_ = os.Remove(tmpPath)
+	// leave .tmp orphans, and answers the error to return. The cause is
+	// returned as it is unless the removal itself fails, which is joined
+	// to it (an orphan the operator may have to remove by hand).
+	cleanup := func(cause error) error {
+		if err := os.Remove(tmpPath); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return errors.Join(cause, err)
+		}
+		return cause
+	}
+	// closeAndCleanup also closes the temp file, for the paths that fail
+	// while it is still open; a close failure is joined to the cause.
+	closeAndCleanup := func(cause error) error {
+		if err := tmp.Close(); err != nil {
+			cause = errors.Join(cause, err)
+		}
+		return cleanup(cause)
 	}
 
 	if _, err := tmp.Write(data); err != nil {
-		_ = tmp.Close()
-		cleanup()
-		return err
+		return closeAndCleanup(err)
 	}
 
 	if err := tmp.Sync(); err != nil {
-		_ = tmp.Close()
-		cleanup()
-		return err
+		return closeAndCleanup(err)
 	}
 
 	if err := tmp.Close(); err != nil {
-		cleanup()
-		return err
+		return cleanup(err)
 	}
 
 	if err := os.Rename(tmpPath, path); err != nil {
-		cleanup()
-		return err
+		return cleanup(err)
 	}
 
 	// Sync the parent directory so the rename's metadata update lands
@@ -179,7 +185,7 @@ func (s *Store) directWrite(path string, data []byte, perm fs.FileMode) error {
 // Any other error (e.g. permission denied on POSIX) is returned to
 // the caller, those represent real problems we shouldn't silently
 // ignore.
-func syncDir(dirPath string) error {
+func syncDir(dirPath string) (err error) {
 	// On Windows, opening a directory for writing isn't a thing, and
 	// even reading it doesn't give a syncable handle. Skip outright.
 	if runtime.GOOS == "windows" {
@@ -197,7 +203,10 @@ func syncDir(dirPath string) error {
 		return err
 	}
 	defer func() {
-		_ = d.Close()
+		// A close failure is joined to what syncDir answers.
+		if closeErr := d.Close(); closeErr != nil {
+			err = errors.Join(err, closeErr)
+		}
 	}()
 
 	if err := d.Sync(); err != nil {

@@ -2,8 +2,11 @@ package pdf
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
+	"log"
 	"os"
 	"path/filepath"
 )
@@ -103,7 +106,11 @@ func (g *Generator) generate(ctx context.Context, groups []Group, sources []Sour
 	if err != nil {
 		return nil, fmt.Errorf("create work dir: %w", err)
 	}
-	defer func() { _ = os.RemoveAll(work) }()
+	defer func() {
+		if err := os.RemoveAll(work); err != nil {
+			log.Printf("pdf: could not remove work dir %s: %v", work, err)
+		}
+	}()
 
 	// Convert each workbook once.
 	conv := make([]converted, 0, len(sources))
@@ -213,7 +220,12 @@ func publishAtomic(src, dst string) error {
 	if err != nil {
 		return fmt.Errorf("open generated pdf: %w", err)
 	}
-	defer func() { _ = in.Close() }()
+	defer func() {
+		// Read-only: a close failure loses nothing, so it is logged.
+		if err := in.Close(); err != nil {
+			log.Printf("pdf: closing %s failed: %v", src, err)
+		}
+	}()
 
 	dir, base := filepath.Dir(dst), filepath.Base(dst)
 	// #nosec G304 -- dir is the caller's output dir; base is a fixed group filename constant.
@@ -222,18 +234,22 @@ func publishAtomic(src, dst string) error {
 		return fmt.Errorf("create temp output: %w", err)
 	}
 	tmpName := tmp.Name()
+	// removeTmp takes the temp file away on a failure, joining a removal
+	// failure (an orphan left in the output directory) to the cause.
+	removeTmp := func(cause error) error {
+		if err := os.Remove(tmpName); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return errors.Join(cause, fmt.Errorf("remove temp output: %w", err))
+		}
+		return cause
+	}
 	if _, err := io.Copy(tmp, in); err != nil {
-		_ = tmp.Close()
-		_ = os.Remove(tmpName)
-		return fmt.Errorf("copy generated pdf: %w", err)
+		return removeTmp(errors.Join(fmt.Errorf("copy generated pdf: %w", err), tmp.Close()))
 	}
 	if err := tmp.Close(); err != nil {
-		_ = os.Remove(tmpName)
-		return fmt.Errorf("close temp output: %w", err)
+		return removeTmp(fmt.Errorf("close temp output: %w", err))
 	}
 	if err := os.Chmod(tmpName, 0o600); err != nil {
-		_ = os.Remove(tmpName)
-		return fmt.Errorf("chmod temp output: %w", err)
+		return removeTmp(fmt.Errorf("chmod temp output: %w", err))
 	}
 	// os.Rename is atomic on POSIX but fails on Windows when dst already
 	// exists (e.g. re-running print into an existing output directory).
@@ -243,8 +259,7 @@ func publishAtomic(src, dst string) error {
 			err = os.Rename(tmpName, dst)
 		}
 		if err != nil {
-			_ = os.Remove(tmpName)
-			return fmt.Errorf("publish output: %w", err)
+			return removeTmp(fmt.Errorf("publish output: %w", err))
 		}
 	}
 	return nil

@@ -893,7 +893,7 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 				if dr.err == nil {
 					continue
 				}
-				if _, ok := state.AsCorruptFile(dr.err); ok {
+				if state.IsCorruptFile(dr.err) {
 					log.Printf("mobileapp: viewer payload %s: load %s: %v", id, dr.name, dr.err)
 					continue
 				}

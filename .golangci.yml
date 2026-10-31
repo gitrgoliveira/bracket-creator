@@ -14,7 +14,20 @@ linters:
     - revive
     - gosec
     - unconvert
+    - godox
+    - nolintlint
   settings:
+    errcheck:
+      check-blank: true
+    godox:
+      keywords:
+        - TODO
+        - FIXME
+        - HACK
+        - XXX
+    nolintlint:
+      require-explanation: true
+      require-specific: true
     revive:
       rules:
         - name: unused-parameter

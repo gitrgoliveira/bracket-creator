@@ -99,8 +99,14 @@ func parsePoolsFile(path string) (any, error) {
 			player.Dojo = rec[4]
 		}
 		if len(rec) > 5 && rec[5] != "" {
-			seed, _ := strconv.Atoi(rec[5])
-			player.Seed = seed
+			// A seed cell that is not a number leaves the player unseeded,
+			// as it always did, and says so: it can only be a hand edit.
+			if seed, err := strconv.Atoi(rec[5]); err == nil {
+				player.Seed = seed
+			} else {
+				slog.Warn("state: pools.csv seed cell is not a number; the player is read as unseeded",
+					"path", path, "player", playerName, "value", rec[5])
+			}
 		}
 		if len(rec) > 6 {
 			player.Number = rec[6]

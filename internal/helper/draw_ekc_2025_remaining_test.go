@@ -67,8 +67,7 @@ func occupantsOf(region *Node) []string {
 func TestEKC2025JuniorTeam(t *testing.T) {
 	t.Parallel()
 
-	assignment, err := AssignPoolsToCourts(6, 4)
-	require.NoError(t, err)
+	assignment := AssignPoolsToCourts(6, 4)
 	assert.Equal(t, []int{0, 0, 1, 1, 2, 3}, assignment,
 		"the sheet's shiaijo blocks A(1,2) B(3,4) C(5) D(6)")
 
@@ -131,8 +130,7 @@ func TestEKC2025LadiesTeamAllocationAndCrossing(t *testing.T) {
 	// printed beside each pool winner: P1,P2 on A; P3,P4 on B; P5,P6 on C;
 	// P7,P8,P9 on D.
 	sheetAssignment := []int{0, 0, 1, 1, 2, 2, 3, 3, 3}
-	frontLoaded, err := AssignPoolsToCourts(9, 4)
-	require.NoError(t, err)
+	frontLoaded := AssignPoolsToCourts(9, 4)
 	require.NotEqual(t, sheetAssignment, frontLoaded,
 		"this sheet is back-loaded; if AssignPoolsToCourts ever matches it, replay it directly instead")
 
@@ -300,8 +298,7 @@ func TestEKC2025LadiesTeamFiveOccupantBlocksDiverge(t *testing.T) {
 func TestEKC2025JuniorIndividualFemaleCrossesToTheFarShiaijo(t *testing.T) {
 	t.Parallel()
 
-	assignment, err := AssignPoolsToCourts(5, 4)
-	require.NoError(t, err)
+	assignment := AssignPoolsToCourts(5, 4)
 	assert.Equal(t, []int{0, 0, 1, 2, 3}, assignment,
 		"the sheet's shiaijo blocks A(1,2) B(3) C(4) D(5)")
 

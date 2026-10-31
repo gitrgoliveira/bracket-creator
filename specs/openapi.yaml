@@ -1139,6 +1139,25 @@ paths:
                 $ref: '#/components/schemas/Competition'
         '400':
           $ref: '#/components/responses/BadRequest'
+        '409':
+          description: |
+            Two cases. With no `code`: the roster in `players` breaks a roster
+            rule (two participants with the same name and dojo, or a team
+            member's name colliding with another's); `error` names the
+            participant. With `code: competition_id_unreadable`: a competition
+            whose settings (`config.md`) cannot be parsed already holds this
+            `id`. Nothing is written, so its files are kept as they are; repair
+            or remove that competition first. `error` names the id, never a
+            path. An import row (`POST /api/tournament/import`) is refused with
+            the same sentence in its `error`. A fault READING the file (not
+            parsing it) is a 500.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error: { type: string }
+                  code: { type: string, enum: [competition_id_unreadable] }
 
   /api/number-prefix-default:
     get:

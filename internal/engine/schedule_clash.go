@@ -2,6 +2,7 @@ package engine
 
 import (
 	"fmt"
+	"log"
 	"sort"
 	"strings"
 
@@ -62,8 +63,23 @@ func (e *Engine) DetectClashesForCompetition(compID string) ([]ClashWarning, err
 	// would silently never clash even though at draw time it occupies a real
 	// court. A LoadTournament failure leaves tourn nil; InheritedDrawCourts
 	// then falls back to ["A"], matching resolveCompetitionCourts.
-	tourn, _ := e.store.LoadTournament()
-	targetCourts := InheritedDrawCourts(target.Courts, tourn)
+	tourn, tournErr := e.store.LoadTournament()
+	// Only a competition with no courts of its own inherits the tournament's,
+	// so the unreadable tournament matters only when the target or a
+	// competition compared with it has none. Said once for the check.
+	inheritedFromUnreadable := false
+	courtsOf := func(own []string) []string {
+		if tournErr != nil && len(own) == 0 {
+			inheritedFromUnreadable = true
+		}
+		return InheritedDrawCourts(own, tourn)
+	}
+	defer func() {
+		if inheritedFromUnreadable {
+			log.Printf("engine: clash check for %q: tournament unreadable, inherited courts are taken as [\"A\"]: %v", compID, tournErr)
+		}
+	}()
+	targetCourts := courtsOf(target.Courts)
 
 	ids, err := e.store.ListCompetitions()
 	if err != nil {
@@ -82,7 +98,7 @@ func (e *Engine) DetectClashesForCompetition(compID string) ([]ClashWarning, err
 		if !state.SameDate(target.Date, other.Date) {
 			continue
 		}
-		shared := sharedCourts(targetCourts, InheritedDrawCourts(other.Courts, tourn))
+		shared := sharedCourts(targetCourts, courtsOf(other.Courts))
 		if len(shared) == 0 {
 			continue
 		}

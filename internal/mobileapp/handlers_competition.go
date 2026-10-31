@@ -3,6 +3,7 @@ package mobileapp
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"log"
 	"net/http"
 	"strings"
@@ -123,9 +124,36 @@ func rollBackCreatedCompetition(store *state.Store, id string, cause error) erro
 		// own error names filesystem paths, so it stays here and is left out
 		// of the returned error, which reaches the client.
 		log.Printf("mobileapp: rolling back competition %q failed, its folder is left on disk and blocks a retry under this id: %v (after: %v)", id, err, cause)
-		return fmt.Errorf("%w; %w: competition %q could not be removed, delete its folder before trying again", cause, errRollbackFailed, id)
+		return fmt.Errorf("%w; %w%s", cause, errRollbackFailed, rollbackRemedy(id))
 	}
 	return cause
+}
+
+// rollbackRemedy is what follows "rollback failed" when a create could not
+// remove the competition it half wrote: which folder is left, and what the
+// operator does about it. It names no path.
+func rollbackRemedy(id string) string {
+	return fmt.Sprintf(": competition %q could not be removed, delete its folder before trying again", id)
+}
+
+// codeCompetitionIDUnreadable is the code of a create (POST /competitions, or
+// an import row) refused because a competition whose settings cannot be read
+// already holds the id: saving over it would destroy what it holds.
+const codeCompetitionIDUnreadable = "competition_id_unreadable"
+
+// competitionIDUnreadableMessage is that refusal's sentence. It names no path;
+// the read error itself goes to the server log.
+func competitionIDUnreadableMessage(id string) string {
+	return fmt.Sprintf("competition ID %q is held by a competition whose settings cannot be read; repair or remove it", id)
+}
+
+// settingsUnparseable reports whether a LoadCompetition error is the settings
+// file itself (read, but not parseable), as opposed to a fault reading it
+// (an *fs.PathError: a folder in the way, a permission), which is the
+// server's and answered as one.
+func settingsUnparseable(err error) bool {
+	var pathErr *fs.PathError
+	return !errors.As(err, &pathErr)
 }
 
 func extractSeeds(players []domain.Player) []domain.SeedAssignment {
@@ -1081,9 +1109,20 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		// Likewise it has no lineup for a round to give to its matches, and no
 		// writer left that creates one.
 		comp.RoundLineupsConverted = true
-		var validationErr, idErr error
+		var validationErr, idErr, unreadableErr error
 		lockErr := store.WithCompetitionRenameLock(func() error {
-			if existing, _ := store.LoadCompetition(comp.ID); existing != nil {
+			existing, loadErr := store.LoadCompetition(comp.ID)
+			if loadErr != nil {
+				loadErr = fmt.Errorf("check competition ID %q: %w", comp.ID, loadErr)
+				if !settingsUnparseable(loadErr) {
+					return loadErr // a read fault, not the competition's own settings
+				}
+				// An unreadable config.md under this id is not a free id:
+				// saving over it would destroy whatever it holds.
+				unreadableErr = loadErr
+				return nil
+			}
+			if existing != nil {
 				idErr = fmt.Errorf("competition ID %q already exists", comp.ID)
 				return nil
 			}
@@ -1102,6 +1141,14 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			return saveErr
 		})
 		err = lockErr
+		if unreadableErr != nil {
+			logRequestError(c, unreadableErr)
+			c.JSON(http.StatusConflict, gin.H{
+				"error": competitionIDUnreadableMessage(comp.ID),
+				"code":  codeCompetitionIDUnreadable,
+			})
+			return
+		}
 		if idErr != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": idErr.Error()})
 			return
@@ -2361,7 +2408,12 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		// `updated.players: null` (Go nil slice → JSON null), wiping the
 		// frontend's local roster and crashing render paths that read
 		// `c.players.length`.
-		updated, _ := store.LoadCompetition(id)
+		updated, reloadErr := store.LoadCompetition(id)
+		if reloadErr != nil {
+			// The save has landed; answer with what was sent rather than
+			// report a failure the client would retry.
+			logRequestError(c, fmt.Errorf("re-read competition %q after its settings save: %w", id, reloadErr))
+		}
 		if updated == nil {
 			c.JSON(http.StatusOK, comp)
 			return

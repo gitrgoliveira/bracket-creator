@@ -102,6 +102,9 @@ func (o *printOptions) run(cmd *cobra.Command, args []string) error {
 	var sources []pdf.SourceWorkbook
 	var sourcesLabel string // used in error messages
 	var tempDir string
+	// reportErr holds a warning or notice that could not be written. The
+	// command goes on, and returns it joined with its outcome.
+	var reportErr error
 
 	if o.inputDir != "" {
 		var err error
@@ -136,9 +139,9 @@ func (o *printOptions) run(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return fmt.Errorf("export tournament workbooks: %w", err)
 		}
-		if err := reportSkippedCompetitions(cmd, skipped); err != nil {
-			return err
-		}
+		// A warning that cannot be written does not stop the PDFs: they are
+		// made, and the failed write is returned with the outcome at the end.
+		reportErr = reportSkippedCompetitions(cmd, skipped)
 		sourcesLabel = o.tournamentData
 
 		// Every competition was skipped (e.g. an all-Swiss tournament): there
@@ -150,24 +153,24 @@ func (o *printOptions) run(cmd *cobra.Command, args []string) error {
 		// Exit cleanly with an informative note instead.
 		if len(sources) == 0 {
 			if _, err := fmt.Fprintln(cmd.ErrOrStderr(), "no exportable competitions found; nothing to print"); err != nil {
-				return fmt.Errorf("report nothing to print: %w", err)
+				reportErr = errors.Join(reportErr, fmt.Errorf("report nothing to print: %w", err))
 			}
 			if o.failOnSkipAll {
-				return fmt.Errorf("all %d competition(s) were skipped; nothing to print (--fail-on-skip-all)", len(skipped))
+				return errors.Join(reportErr, fmt.Errorf("all %d competition(s) were skipped; nothing to print (--fail-on-skip-all)", len(skipped)))
 			}
-			return nil
+			return reportErr
 		}
 	}
 
 	gen, err := pdf.NewGenerator()
 	if err != nil {
 		if errors.Is(err, pdf.ErrSofficeNotFound) {
-			return fmt.Errorf("PDF generation requires LibreOffice.\n  Install it via your platform's package manager and ensure 'soffice' is on PATH,\n  or set $LIBREOFFICE_PATH to the soffice binary.\n(%w)", err)
+			return errors.Join(reportErr, fmt.Errorf("PDF generation requires LibreOffice.\n  Install it via your platform's package manager and ensure 'soffice' is on PATH,\n  or set $LIBREOFFICE_PATH to the soffice binary.\n(%w)", err))
 		}
-		return err
+		return errors.Join(reportErr, err)
 	}
 
-	return o.generatePDFs(cmd, gen, sources, sourcesLabel)
+	return errors.Join(reportErr, o.generatePDFs(cmd, gen, sources, sourcesLabel))
 }
 
 // generatePDFs is the shared tail: given a generator and sources, run the

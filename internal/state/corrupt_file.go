@@ -45,6 +45,13 @@ func (e *CorruptFileError) Error() string {
 
 func (e *CorruptFileError) Unwrap() error { return e.Err }
 
+// IsCorruptFile reports whether err is (or wraps) a CorruptFileError, for a
+// caller that needs only the answer and not the file's details.
+func IsCorruptFile(err error) bool {
+	var c *CorruptFileError
+	return errors.As(err, &c)
+}
+
 // AsCorruptFile reports whether err is (or wraps) a CorruptFileError.
 func AsCorruptFile(err error) (*CorruptFileError, bool) {
 	var c *CorruptFileError

@@ -49,8 +49,7 @@ import (
 // pairs) plus one 5-occupant sub-block, again matching the same one-round-1
 // -match template.
 func TestEKC2025LadiesIndividual(t *testing.T) {
-	assignment, err := AssignPoolsToCourts(38, 4)
-	require.NoError(t, err)
+	assignment := AssignPoolsToCourts(38, 4)
 	assert.Equal(t, []int{
 		0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 		1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
@@ -116,8 +115,7 @@ func TestEKC2025LadiesIndividual(t *testing.T) {
 // four, so its round-2 layer picks up one leaf-leaf pair (the two pools that
 // never got a round-1 opponent) alongside three mixed pairs.
 func TestEKC2025MenIndividual(t *testing.T) {
-	assignment, err := AssignPoolsToCourts(47, 4)
-	require.NoError(t, err)
+	assignment := AssignPoolsToCourts(47, 4)
 	assert.Equal(t, []int{
 		0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 		1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,

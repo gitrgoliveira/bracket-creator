@@ -120,7 +120,7 @@ func setupTimeEstimatorSheet(f *excelize.File) {
 		"Time per match", "Total time for matches",
 		"Padding time for rotation", "Time for breaks", "Total Time",
 	} {
-		col, _ := excelize.ColumnNumberToName(i + 1)
+		col := "ABCDEFGH"[i : i+1] // eight headers: columns A to H
 		logSetupErr("hdr val", f.SetCellValue(s, col+"1", h))
 		logSetupErr("hdr sty", f.SetCellStyle(s, col+"1", col+"1", hdr))
 	}
@@ -160,7 +160,7 @@ func setupTimeEstimatorSheet(f *excelize.File) {
 		"Time per match", "Total time for matches",
 		"Padding time for rotation", "Time for breaks", "Total Time",
 	} {
-		col, _ := excelize.ColumnNumberToName(i + 1)
+		col := "ABCDEFGH"[i : i+1] // eight headers: columns A to H
 		if h != "" {
 			logSetupErr("elim hdr val", f.SetCellValue(s, col+"7", h))
 		}
@@ -209,28 +209,28 @@ func setupPoolDrawSheet(f *excelize.File) {
 	logSetupErr("MergeCell B2:F2", f.MergeCell(s, "B2", "F2"))
 
 	// B2 title style: bold 16 pt, underlined, centred.
-	titleStyle, _ := f.NewStyle(&excelize.Style{
+	titleStyle := mustStyle(f, &excelize.Style{
 		Font:      &excelize.Font{Family: "Calibri", Bold: true, Size: 16, Underline: "single"},
 		Alignment: &excelize.Alignment{Horizontal: "center"},
 	})
 	logSetupErr("B2 style", f.SetCellStyle(s, "B2", "B2", titleStyle))
 
 	// A2, G2: same bold/underline chrome without centre-align.
-	sideStyle, _ := f.NewStyle(&excelize.Style{
+	sideStyle := mustStyle(f, &excelize.Style{
 		Font: &excelize.Font{Family: "Calibri", Bold: true, Size: 16, Underline: "single"},
 	})
 	logSetupErr("A2 style", f.SetCellStyle(s, "A2", "A2", sideStyle))
 	logSetupErr("G2 style", f.SetCellStyle(s, "G2", "G2", sideStyle))
 
 	// Row 3: bold, underlined, centred (visual separator row).
-	row3Style, _ := f.NewStyle(&excelize.Style{
+	row3Style := mustStyle(f, &excelize.Style{
 		Font:      &excelize.Font{Family: "Calibri", Bold: true, Size: 12, Underline: "single"},
 		Alignment: &excelize.Alignment{Horizontal: "center"},
 	})
 	logSetupErr("row3 style", f.SetCellStyle(s, "A3", "H3", row3Style))
 
 	// Row 4: plain 12 pt spacer before pool content starts at row 5.
-	row4Style, _ := f.NewStyle(&excelize.Style{
+	row4Style := mustStyle(f, &excelize.Style{
 		Font: &excelize.Font{Family: "Calibri", Size: 12},
 	})
 	logSetupErr("row4 style", f.SetCellStyle(s, "A4", "H4", row4Style))
@@ -287,11 +287,11 @@ func setupNamesToPrintSheet(f *excelize.File) {
 
 	// Apply column-level default styles so any cell the code doesn't
 	// explicitly restyle still renders at the correct font size.
-	sideStyle, _ := f.NewStyle(&excelize.Style{
+	sideStyle := mustStyle(f, &excelize.Style{
 		Font:      &excelize.Font{Family: "Calibri", Bold: true, Size: 28, Color: "000000"},
 		Alignment: &excelize.Alignment{Horizontal: "center", Vertical: "center"},
 	})
-	nameStyle, _ := f.NewStyle(&excelize.Style{
+	nameStyle := mustStyle(f, &excelize.Style{
 		Font:      &excelize.Font{Family: "Calibri", Bold: true, Size: 72, Color: "000000"},
 		Alignment: &excelize.Alignment{Horizontal: "center", Vertical: "center"},
 	})

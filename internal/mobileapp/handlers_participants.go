@@ -143,7 +143,11 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 					// under TOCTOU: status could have flipped between our check above
 					// and AddParticipant acquiring the per-comp lock.
 					msg := "cannot modify participants after competition has started"
-					if reloaded, _ := store.LoadCompetition(id); reloaded != nil && reloaded.Status == state.CompStatusDrawReady {
+					reloaded, reloadErr := store.LoadCompetition(id)
+					if reloadErr != nil {
+						logRequestError(c, fmt.Errorf("re-read competition %q to word a refused participant add: %w", id, reloadErr))
+					}
+					if reloaded != nil && reloaded.Status == state.CompStatusDrawReady {
 						msg = "cannot modify participants while a draw is pending; discard the draw first"
 					}
 					c.JSON(http.StatusConflict, gin.H{"error": msg})

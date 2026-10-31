@@ -233,10 +233,7 @@ func (e *Engine) generatePools(comp *state.Competition, players []domain.Player,
 	// drawCourts, derived above, is reused rather than recomputed: this
 	// allocation, the seed spread and the deinterleave are one layout and a
 	// second derivation is a second thing to keep in step.
-	courtAssign, err := helper.AssignPoolsToCourts(len(pools), drawCourts)
-	if err != nil {
-		return nil, fmt.Errorf("assigning pools to courts: %w", err)
-	}
+	courtAssign := helper.AssignPoolsToCourts(len(pools), drawCourts)
 
 	var results []state.MatchResult
 	for pi, p := range pools {

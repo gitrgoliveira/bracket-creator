@@ -302,6 +302,52 @@ func TestPrintReturnsAFailedOutputWrite(t *testing.T) {
 		})
 	}
 
+	// A warning that cannot be written does not stop the PDFs: the command
+	// goes on to make them, and returns the failed write at the end.
+	t.Run("the skipped-competition warning, with something to print", func(t *testing.T) {
+		dir := t.TempDir()
+		store, err := state.NewStore(dir)
+		require.NoError(t, err)
+		require.NoError(t, store.SaveCompetition(&state.Competition{
+			ID: "swiss-only", Name: "Swiss Only", Format: state.CompFormatSwiss, SwissRounds: 2, Status: "setup",
+		}))
+		require.NoError(t, store.SaveCompetition(&state.Competition{
+			ID: "league-comp", Name: "League Competition", Kind: "individual", Format: state.CompFormatLeague,
+			PoolSize: 3, PoolSizeMode: "min", PoolWinners: 2, RoundRobin: true, Courts: []string{"A"},
+			StartTime: "09:00", Status: "setup",
+		}))
+		require.NoError(t, store.SaveParticipants("league-comp", []domain.Player{
+			{Name: "Alice", Dojo: "DojoA"}, {Name: "Bob", Dojo: "DojoB"},
+			{Name: "Carol", Dojo: "DojoC"}, {Name: "Dave", Dojo: "DojoD"},
+		}))
+		require.NoError(t, engine.New(store).StartCompetition("league-comp"))
+
+		outDir := t.TempDir()
+		stdout := &bytes.Buffer{}
+		cmd := newPrintCmd()
+		cmd.SetErr(&failAfterWriter{})
+		cmd.SetOut(stdout)
+		cmd.SilenceErrors = true
+		cmd.SilenceUsage = true
+		cmd.SetArgs([]string{"--type=all", "--tournament-data=" + dir, "--output-dir=" + outDir})
+
+		err = cmd.Execute()
+		require.ErrorIs(t, err, errOutputClosed)
+		assert.Contains(t, err.Error(), "report skipped competitions")
+
+		// The PDF step ran after the failed warning. Without LibreOffice the
+		// step is the generator's refusal, joined to the failed write; with
+		// it, the PDFs are on disk and reported.
+		if _, genErr := pdf.NewGenerator(); genErr != nil {
+			require.ErrorIs(t, err, pdf.ErrSofficeNotFound)
+			return
+		}
+		pdfs, globErr := filepath.Glob(filepath.Join(outDir, "*.pdf"))
+		require.NoError(t, globErr)
+		assert.NotEmpty(t, pdfs, "the PDFs are made although the warning could not be written")
+		assert.Contains(t, stdout.String(), "wrote ")
+	})
+
 	t.Run("the wrote line", func(t *testing.T) {
 		cmd := newPrintCmd()
 		cmd.SetOut(&failAfterWriter{})

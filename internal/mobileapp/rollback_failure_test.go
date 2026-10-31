@@ -84,8 +84,8 @@ func TestImportCompetition_RollbackFailureIsReported(t *testing.T) {
 	for _, tc := range []struct {
 		name, cid, obstacle, prefix string
 	}{
-		{"participants", "rollback-stuck-players", "participants.csv", "save participants: "},
-		{"seeds", "rollback-stuck-seeds", "seeds.csv", "save seeds: "},
+		{"participants", "rollback-stuck-players", "participants.csv", "the participants could not be saved"},
+		{"seeds", "rollback-stuck-seeds", "seeds.csv", "the seeds could not be saved"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			r, store, _, _, tempDir := setupTestRouter(t)
@@ -129,11 +129,10 @@ competitions:
 			assert.Contains(t, rowErr, tc.prefix)
 			assert.Contains(t, rowErr, `rollback failed: competition "`+tc.cid+`" could not be removed, delete its folder before trying again`,
 				"the row must say the half-written competition is still on disk")
-			// The save's own error (before "; rollback failed") already named
-			// its paths before this change; what the rollback adds names none.
-			_, rollbackPart, found := strings.Cut(rowErr, "; rollback failed")
-			require.True(t, found)
-			assert.NotContains(t, rollbackPart, tempDir, "filesystem paths of the failed removal stay in the log")
+			// No part of the row names a server path: neither the failed save
+			// nor the failed removal. Both stay in the log.
+			assert.NotContains(t, rowErr, tempDir, "filesystem paths stay in the log")
+			assert.NotContains(t, rowErr, compDir, "filesystem paths stay in the log")
 			assert.Contains(t, logs.String(), `rolling back competition "`+tc.cid+`" failed`)
 			assert.DirExists(t, compDir, "the message must be true: the folder is still there")
 		})

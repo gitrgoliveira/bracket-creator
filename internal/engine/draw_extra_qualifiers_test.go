@@ -272,8 +272,7 @@ func TestStartCompetition_LargerPools_CrossesOversizedPoolToNeighbourCourt(t *te
 	require.NotEqual(t, -1, oversizedIdx, "expected exactly one oversized (4-player) pool")
 	require.Len(t, pools[oversizedIdx].Players, 4)
 
-	poolCourt, err := helper.AssignPoolsToCourts(len(pools), len(courts))
-	require.NoError(t, err)
+	poolCourt := helper.AssignPoolsToCourts(len(pools), len(courts))
 	homeCourtIdx := poolCourt[oversizedIdx]
 	destCourtIdx := homeCourtIdx ^ 1 // crossNeighbourCourt's rule: same-half neighbour (B<->A, C<->D)
 

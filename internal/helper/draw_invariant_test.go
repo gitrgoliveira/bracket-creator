@@ -81,10 +81,7 @@ func TestDrawShapeIsIndependentOfShiaijoCount(t *testing.T) {
 func blockPoolCounts(nPools, poolWinners, numCourts int) []int {
 	pools, _ := makePools(nPools)
 	courts := EffectiveDrawCourts(nPools, numCourts)
-	assignment, err := AssignPoolsToCourts(nPools, courts)
-	if err != nil {
-		return nil
-	}
+	assignment := AssignPoolsToCourts(nPools, courts)
 	plan := newDrawPlan(pools, assignment, poolWinners, courts)
 	counts := make([]int, plan.numBlocks)
 	for _, b := range plan.poolBlock {

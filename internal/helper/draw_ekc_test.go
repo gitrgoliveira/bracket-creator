@@ -149,8 +149,7 @@ func TestEKCJuniorIndividualMale(t *testing.T) {
 
 	// AssignPoolsToCourts(18, 4) already yields 5/5/4/4, so this case runs on
 	// our own allocation rather than a hand-fed one.
-	assignment, err := AssignPoolsToCourts(18, 4)
-	require.NoError(t, err)
+	assignment := AssignPoolsToCourts(18, 4)
 	assert.Equal(t, []int{0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3}, assignment,
 		"the sheet's court blocks A(1-5) B(6-10) C(11-14) D(15-18)")
 
@@ -261,8 +260,7 @@ func TestEKCJuniorTeam(t *testing.T) {
 	// The sheet's byes went to P3#1 and P7#1, "both seeded pools' winners".
 	pools := ekcPools(7, 3, 7)
 
-	assignment, err := AssignPoolsToCourts(7, 4)
-	require.NoError(t, err)
+	assignment := AssignPoolsToCourts(7, 4)
 	assert.Equal(t, []int{0, 0, 1, 1, 2, 2, 3}, assignment,
 		"the sheet's court blocks A(1,2) B(3,4) C(5,6) D(7)")
 

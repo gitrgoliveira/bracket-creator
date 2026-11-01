@@ -15,6 +15,7 @@ import './admin_competition_overview.jsx';
 import { effectiveDrawPlayers } from './qualifier_preview.jsx';
 import { checkInApplies } from './competition_shape.jsx';
 import { leaveThen, confirmLeave } from './unsaved_entries.jsx';
+import { rosterUnreadableIssues, ROSTER_FILE } from './data_integrity.jsx';
 export { formatCompMinutes } from './admin_competition_settings.jsx';
 export { buildRunningIpponResult, loadScoreboardPoints } from './admin_competition_bracket.jsx';
 export {
@@ -366,7 +367,7 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
               <StatusBadge status={localStatus ?? c.status} format={c.format} />
             </div>
             <div className="page-head__sub">
-              {window.competitionKindLabel(c)} · {(c.players || []).length} {c.kind === "team" ? "teams" : "players"} ·{" "}
+              {window.competitionKindLabel(c)} · {rosterUnreadableIssues(c).length > 0 ? `${ROSTER_FILE} unreadable` : `${(c.players || []).length} ${c.kind === "team" ? "teams" : "players"}`} ·{" "}
               {/* "at" only between a date AND a time, and the separator only
                   after one of them, or a missing time reads "<date> at ·". */}
               {[c.date && formatDate(c.date), c.startTime].filter(Boolean).join(" at ")}

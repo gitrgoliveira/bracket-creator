@@ -5,7 +5,7 @@
 // (integer > 0), shared with the overview stat, the seeding blocker and the
 // settings preview so this card's count cannot disagree with them.
 import { seededRanks } from './admin_helpers.jsx';
-import { NO_ID_HINT } from './data_integrity.jsx';
+import { NO_ID_HINT, DataIssueBanner, rosterUnreadableIssues } from './data_integrity.jsx';
 import { NumberedName } from './numbered_name.jsx';
 import { useOpenedTapGuard } from './tap_guard.jsx';
 import { PillButton } from './competition_fields.jsx';
@@ -1040,6 +1040,15 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
   const unappliedNote = rosterDirty && !isDrawReady
     ? <span className="unapplied-note">● Not applied yet</span>
     : null;
+
+  // A roster the server could not read arrives as an empty one. Shown as
+  // such, the page invited a paste over it; every roster write is
+  // refused until the file is repaired, so the file's own notice replaces
+  // the whole page.
+  const rosterIssues = rosterUnreadableIssues(c);
+  if (rosterIssues.length > 0) {
+    return <DataIssueBanner issues={rosterIssues} competition={c} />;
+  }
 
   return (
     <>

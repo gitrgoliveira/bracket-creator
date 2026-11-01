@@ -18,6 +18,7 @@
 // lazy reads: those assignments still live in viewer.jsx.
 
 import { competitorKey } from './competitor_identity.jsx';
+import { normalizeParticipantName } from './data.jsx';
 import { resultRecencyDesc } from './result_recency.jsx';
 import { parseWatchlistTokens, resolveFreshTokens, WATCHLIST_PARAM } from './watchlist_link.jsx';
 import { isBarredMatch } from './ineligible_match.jsx';
@@ -148,12 +149,35 @@ export const WATCHLIST_MAX = 50;
 // is no hero and no chime (critique decision: avoid the alert storm). The pin
 // is stored as an `entryKey` string, decoupled from list order.
 
+// dojoKey: the ONE comparison of a watched dojo against a roster dojo, ignoring
+// case (operator decision D19): the server stores a dojo title-cased, and a
+// watch saved or shared before that holds the dojo as it was typed then
+// ("kenshinkan" for the roster's "Kenshinkan"). Every place a dojo entry is
+// matched or deduplicated asks it.
+export function dojoKey(dojo) {
+  return normalizeParticipantName(dojo == null ? "" : String(dojo));
+}
+
+// sameDojo: whether two dojo names are the same dojo, by dojoKey.
+export function sameDojo(a, b) {
+  return dojoKey(a) === dojoKey(b);
+}
+
+// normalizeEntryKey: an entryKey stored before dojo keys ignored case (the
+// pinned entry) in the form entryKey gives now, so the pin still finds its
+// entry.
+export function normalizeEntryKey(key) {
+  const k = key == null ? "" : String(key);
+  return k.startsWith("dojo:") ? "dojo:" + dojoKey(k.slice(5)) : k;
+}
+
 // entryKey: stable identity for an entry, used for the pin pointer, React
-// keys, and dedup. Player keys are id-based, dojo keys are name-based. Returns
-// "" for anything unrecognisable so callers can filter it out.
+// keys, and dedup. Player keys are id-based, dojo keys are dojoKey-based, so
+// an old link's "kenshinkan" and a fresh pick of "Kenshinkan" are one entry.
+// Returns "" for anything unrecognisable so callers can filter it out.
 export function entryKey(entry) {
   if (!entry || typeof entry !== "object") return "";
-  if (entry.type === "dojo") return entry.dojo ? "dojo:" + entry.dojo : "";
+  if (entry.type === "dojo") return entry.dojo ? "dojo:" + dojoKey(entry.dojo) : "";
   const id = entry.id != null ? String(entry.id) : "";
   return id ? "player:" + id : "";
 }
@@ -382,7 +406,7 @@ export function resolveEntryPlayerIds(entry, roster) {
   if (!entry) return [];
   if (entry.type === "dojo") {
     return (Array.isArray(roster) ? roster : [])
-      .filter((p) => p && p.id && p.dojo === entry.dojo)
+      .filter((p) => p && p.id && sameDojo(p.dojo, entry.dojo))
       .map((p) => String(p.id));
   }
   return entry.id ? [String(entry.id)] : [];

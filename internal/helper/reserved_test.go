@@ -67,9 +67,9 @@ func TestPlaceholderPredicatesMatchTheirShapeOnly(t *testing.T) {
 }
 
 // The roster rule refuses a placeholder shape in any case, so the spelling a
-// person types, the one TitleCaseName stores ("1St", "Of R1-M2") and an
-// all-caps paste are one name; anything only starting like a placeholder is a
-// person.
+// person types, the one TitleCaseName stores ("Of R1-M2"), the one an earlier
+// release stored ("1St") and an all-caps paste are one name; anything only
+// starting like a placeholder is a person.
 func TestIsReservedRosterName(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
@@ -98,9 +98,9 @@ func TestIsReservedRosterName(t *testing.T) {
 	}
 }
 
-// The bracket rule stays case-sensitive: a competitor stored as "Pool A-1St"
-// (title-cased before the roster rule refused it) is a competitor to the
-// bracket, never an unresolved slot.
+// The bracket rule stays case-sensitive: a competitor an earlier release
+// stored in a bracket slot as "Pool A-1St" (title-cased before the roster rule
+// refused it) is a competitor to the bracket, never an unresolved slot.
 func TestBracketRuleDoesNotReadATitleCasedNameAsAPlaceholder(t *testing.T) {
 	for _, s := range []string{"Pool A-1St", "pool a-1st", "Winner Of R1-M2"} {
 		if IsReservedParticipantName(s) || IsPoolFinalistPlaceholder(s) || IsWinnerOfPlaceholder(s) {

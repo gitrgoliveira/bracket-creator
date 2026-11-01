@@ -421,7 +421,7 @@ func TestCheckedInColumnBasedDetection(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, loaded2, 1)
 	assert.False(t, loaded2[0].CheckedIn, "2-column row must never trigger checked_in detection")
-	assert.Equal(t, "checked_in", loaded2[0].Dojo, "dojo named checked_in must be preserved")
+	assert.Equal(t, "Checked_in", loaded2[0].Dojo, "dojo named checked_in must be preserved (title-cased like every dojo)")
 }
 
 func TestUpdateParticipant(t *testing.T) {
@@ -486,7 +486,7 @@ func TestCheckedInColumnBasedDetectionUUIDRows(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, loaded, 1)
 	assert.False(t, loaded[0].CheckedIn, "3-part UUID row must NOT be misclassified as checked-in")
-	assert.Equal(t, "checked_in", loaded[0].Dojo, "dojo value must be preserved for 3-part UUID row")
+	assert.Equal(t, "Checked_in", loaded[0].Dojo, "dojo value must be preserved for 3-part UUID row (title-cased like every dojo)")
 	assert.Equal(t, "550e8400-e29b-41d4-a716-446655440000", loaded[0].ID)
 
 	// 4-col UUID row: uuid, Name, Dojo, checked_in, trailing checked_in IS a valid marker.

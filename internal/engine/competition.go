@@ -1273,6 +1273,19 @@ func (e *Engine) runDrawPipeline(id string) error {
 		return validationErrorf("competition %s cannot generate a draw: %s", id, err.Error())
 	}
 
+	// Reserved-name pre-flight (operator decision D22, 2026-11-01). The roster
+	// save refuses a name that reads as a bracket placeholder in any case
+	// (state.RefuseReservedNames), but a roster written before that rule, or by
+	// hand, reaches here without a save: a legacy "pool a-1st" now reads
+	// "Pool A-1st", the exact shape the bracket rule
+	// (helper.IsReservedParticipantName) takes for an unresolved slot, so the
+	// draw would seat a competitor that scoring and advancement read as a
+	// placeholder. Like the blank-dojo pre-flight above, it is refused here,
+	// naming the competitor, while the roster can still be edited.
+	if err := state.RefuseReservedNames(players); err != nil {
+		return wrapValidationErrorf(err, "competition %s cannot generate a draw: %s; rename this competitor on the Participants page", id, err.Error())
+	}
+
 	// League format: enforce the single-pool invariant so that
 	// generatePools always produces exactly one pool containing all
 	// participants, and round-robin is guaranteed. The viewer surface

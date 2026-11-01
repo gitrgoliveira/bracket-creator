@@ -553,7 +553,10 @@ func (s *Store) addTeamMember(compID, teamID, memberID, name string, limit int, 
 	if err := ValidateCompetitionID(compID); err != nil {
 		return domain.TeamMember{}, false, err
 	}
-	name = strings.TrimSpace(name)
+	// A member's name is stored title-cased (operator decision D14), as a
+	// competitor's is, so the answer and every lineup that names the member
+	// read the stored spelling.
+	name = helper.TitleCaseName(name)
 	if memberID != "" && !IsClientMemberID(memberID) {
 		return domain.TeamMember{}, false, ErrInvalidMemberID
 	}
@@ -672,7 +675,9 @@ func (s *Store) nameTeamMember(compID, teamID, memberID, newName string, onlyUnn
 	if err := ValidateCompetitionID(compID); err != nil {
 		return domain.TeamMember{}, err
 	}
-	newName = strings.TrimSpace(newName)
+	// Title-cased like an added member's name (addTeamMember), before the
+	// rename reaches the lineups that hold the member by id.
+	newName = helper.TitleCaseName(newName)
 	var member domain.TeamMember
 	err := s.WithTransaction(compID, func(tx StoreTx) error {
 		var err error

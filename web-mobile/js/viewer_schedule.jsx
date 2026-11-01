@@ -2,7 +2,7 @@
 // Pure file split. no behaviour change.
 
 import { poolLabel, tournamentMatches, compMatches, compareDmy } from './viewer_utils.jsx';
-import { matchParticipantIds, matchParticipantNames, useWatchlist, resolveEntryPlayerIds, resolveWatchedPlayers, findPrimaryEntry, buildRoster, buildWatchedSets, matchInvolvesWatchedSet } from './viewer_watchlist_core.jsx';
+import { matchParticipantIds, matchParticipantNames, useWatchlist, resolveEntryPlayerIds, resolveWatchedPlayers, findPrimaryEntry, buildRoster, buildWatchedSets, matchInvolvesWatchedSet, normalizeEntryKey } from './viewer_watchlist_core.jsx';
 import { withNumber, teamNameMark } from './match_scoreboard.jsx';
 import { SideCell } from './side_cell.jsx';
 import { MatchViewerModal, localQueueLabelCompact, useLiveMatch, matchInList } from './viewer_match.jsx';
@@ -35,7 +35,8 @@ export function usePrimaryWatch() {
   const [key, setKey] = useState(() => {
     if (typeof window === "undefined") return "";
     try {
-      return window.localStorage.getItem(LS_WATCH_PRIMARY) || "";
+      // A dojo pin saved before dojo keys ignored case reads in today's form.
+      return normalizeEntryKey(window.localStorage.getItem(LS_WATCH_PRIMARY) || "");
     } catch (_e) {
       return "";
     }

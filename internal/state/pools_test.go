@@ -539,7 +539,7 @@ func TestLoadPools_FreshStore(t *testing.T) {
 		{
 			PoolName: "Pool X",
 			Players: []helper.Player{
-				{Name: "Alice", Dojo: "DojoA", Seed: 2, Number: "1", DisplayName: "A. Smith"},
+				{Name: "Alice", Dojo: "DojoA", Seed: 2, Number: "1", DisplayName: "A. SMITH"},
 				{Name: "Bob", Dojo: "DojoB"},
 			},
 		},
@@ -558,7 +558,7 @@ func TestLoadPools_FreshStore(t *testing.T) {
 	assert.Equal(t, "Alice", loaded[0].Players[0].Name)
 	assert.Equal(t, 2, loaded[0].Players[0].Seed)
 	assert.Equal(t, "1", loaded[0].Players[0].Number)
-	assert.Equal(t, "A. Smith", loaded[0].Players[0].DisplayName)
+	assert.Equal(t, "A. SMITH", loaded[0].Players[0].DisplayName)
 }
 
 func TestLoadPoolMatches_FreshStore(t *testing.T) {

@@ -214,9 +214,9 @@ func TestChangedLineup_LandsOnTheLineupInForce(t *testing.T) {
 // arrives. Each sends its whole form, as the client does, with the position it
 // did not touch as it last read it.
 func TestChangedLineup_TwoDevicesChangingDifferentPositionsBothKeepTheirs(t *testing.T) {
-	deviceA := saveBody(posMap("senpo", "Ito-new", "jiho", "Ueno-old"), nil, pSenpo)
-	deviceB := saveBody(posMap("senpo", "Ito-old", "jiho", "Ueno-new"), nil, pJiho)
-	want := posMap("senpo", "Ito-new", "jiho", "Ueno-new")
+	deviceA := saveBody(posMap("senpo", "Ito-New", "jiho", "Ueno-old"), nil, pSenpo)
+	deviceB := saveBody(posMap("senpo", "Ito-old", "jiho", "Ueno-New"), nil, pJiho)
+	want := posMap("senpo", "Ito-New", "jiho", "Ueno-New")
 
 	for name, order := range map[string][]map[string]any{"A then B": {deviceA, deviceB}, "B then A": {deviceB, deviceA}} {
 		t.Run(name, func(t *testing.T) {
@@ -251,10 +251,10 @@ func TestChangedLineup_TheSamePositionTheLaterArrivalWins(t *testing.T) {
 	f := newChangedLineupFixture(t)
 	require.Equal(t, http.StatusOK, f.put(f.matchPath("PoolA-0"), organiserPassword, saveBody(posMap("senpo", "Ito"), nil)).Code)
 
-	require.Equal(t, http.StatusOK, f.put(f.matchPath("PoolA-0"), organiserPassword, saveBody(posMap("senpo", "first"), nil, pSenpo)).Code)
-	w := f.put(f.matchPath("PoolA-0"), organiserPassword, saveBody(posMap("senpo", "second"), nil, pSenpo))
+	require.Equal(t, http.StatusOK, f.put(f.matchPath("PoolA-0"), organiserPassword, saveBody(posMap("senpo", "First"), nil, pSenpo)).Code)
+	w := f.put(f.matchPath("PoolA-0"), organiserPassword, saveBody(posMap("senpo", "Second"), nil, pSenpo))
 
-	assert.Equal(t, posMap("senpo", "second"), lineupFrom(t, w).Positions)
+	assert.Equal(t, posMap("senpo", "Second"), lineupFrom(t, w).Positions)
 }
 
 func TestChangedLineup_Refusals(t *testing.T) {
@@ -310,15 +310,34 @@ func TestChangedLineup_IgnoresWhatIsNotChanged(t *testing.T) {
 	f := newChangedLineupFixture(t)
 	require.Equal(t, http.StatusOK, f.put(f.matchPath("PoolA-0"), organiserPassword,
 		saveBody(posMap("senpo", "Ito", "jiho", "Ueno"), map[domain.Position]string{pSenpo: idIto})).Code)
-	form := posMap("senpo", "Ito-stale", "jiho", "Ueno-new", "taisho", "Kato", "nonsense", "x", "fukusho", strings.Repeat("x", MaxLenPlayerName+1))
+	// pJiho names member Ueno by id, typed in another case: it stores the
+	// member's own name.
+	form := posMap("senpo", "Ito-stale", "jiho", "ueno", "taisho", "Kato", "nonsense", "x", "fukusho", strings.Repeat("x", MaxLenPlayerName+1))
 	ids := map[domain.Position]string{pSenpo: "m-stale", pJiho: idUeno, "nonsense": "m-x"}
 
 	w := f.put(f.matchPath("PoolA-0"), organiserPassword, saveBody(form, ids, pJiho))
 
 	got := lineupFrom(t, w)
-	assert.Equal(t, posMap("senpo", "Ito", "jiho", "Ueno-new"), got.Positions,
+	assert.Equal(t, posMap("senpo", "Ito", "jiho", "Ueno"), got.Positions,
 		"only pJiho changed: another position's stale value, a position the lineup never held, an invalid key and an overlong name are all ignored")
 	assert.Equal(t, map[domain.Position]string{pSenpo: idIto, pJiho: idUeno}, got.MemberIDs)
+}
+
+// A save stores each position's name once, as it enters (operator decisions
+// D14 and D16): a position naming a member by id stores the member's own name
+// whatever spelling was typed, one with no member id is title-cased, and one
+// placing a member with no name yet keeps its typed name, title-cased.
+func TestChangedLineup_StoresTheMembersNameOrTheTypedOneTitleCased(t *testing.T) {
+	f := newChangedLineupFixture(t)
+	form := posMap("senpo", "ITO", "jiho", "kato ken", "chuken", "sato jun")
+	ids := map[domain.Position]string{pSenpo: idIto, pChuken: idBlank}
+
+	w := f.put(f.matchPath("PoolA-0"), organiserPassword, saveBody(form, ids, pSenpo, pJiho, pChuken))
+
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	assert.Equal(t, posMap("senpo", "Ito", "jiho", "Kato Ken", "chuken", "Sato Jun"), lineupFrom(t, w).Positions)
+	stored, _ := f.storedMatch(t, "PoolA-0")
+	assert.Equal(t, "Ito", stored.Positions[pSenpo], "the member's name, not the typed spelling")
 }
 
 func TestChangedLineup_ClearsAndPlacesUnnamedMembers(t *testing.T) {
@@ -352,10 +371,10 @@ func TestChangedLineup_ClearsAndPlacesUnnamedMembers(t *testing.T) {
 		require.Equal(t, http.StatusOK, f.put(f.matchPath("PoolA-0"), organiserPassword,
 			saveBody(posMap("senpo", "Ito"), map[domain.Position]string{pSenpo: idIto})).Code)
 
-		w := f.put(f.matchPath("PoolA-0"), organiserPassword, saveBody(posMap("senpo", "Someone new"), nil, pSenpo))
+		w := f.put(f.matchPath("PoolA-0"), organiserPassword, saveBody(posMap("senpo", "Someone New"), nil, pSenpo))
 
 		got := lineupFrom(t, w)
-		assert.Equal(t, posMap("senpo", "Someone new"), got.Positions)
+		assert.Equal(t, posMap("senpo", "Someone New"), got.Positions)
 		assert.NotContains(t, got.MemberIDs, pSenpo, "the old member's id does not stay beside a new name")
 	})
 

@@ -770,11 +770,12 @@ func TestCourtCurrentRespectsZekkenName(t *testing.T) {
 	require.NotNil(t, resp.SideA, "sideA must be present on current payload")
 	require.NotNil(t, resp.SideB, "sideB must be present on current payload")
 	assert.Equal(t, "Takeshi Yamada", resp.SideA.Name)
-	assert.Equal(t, "Yamada", resp.SideA.DisplayName,
+	// The zekken is saved in capitals, whatever case it was given in.
+	assert.Equal(t, "YAMADA", resp.SideA.DisplayName,
 		"displayName must equal the zekken when withZekkenName=true")
 	assert.NotEqual(t, resp.SideA.Name, resp.SideA.DisplayName,
 		"displayName must differ from name when withZekkenName=true")
-	assert.Equal(t, "Tanaka", resp.SideB.DisplayName,
+	assert.Equal(t, "TANAKA", resp.SideB.DisplayName,
 		"sideB.displayName must equal the zekken when withZekkenName=true")
 }
 

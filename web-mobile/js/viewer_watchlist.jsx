@@ -34,6 +34,7 @@ import { sideWord, sideFillClass } from './side_cell.jsx';
 import { competitorMatchesQuery } from './competitor_search.jsx';
 import { buildWatchlistLink } from './watchlist_link.jsx';
 import { paceDisplayOf, PaceTime } from './court_pace.jsx';
+import { dojoKey, sameDojo } from './viewer_watchlist_core.jsx';
 
 // The one line the picker and the hero-empty state show while a competition's
 // participants failed to load (rosterAvailable:false on the aggregate, see
@@ -70,7 +71,7 @@ function WatchPicker({ roster, rosterLoaded = true, dojos, watchedPlayerIds, wat
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
   const excludedPlayers = useMemo(() => new Set(watchedPlayerIds || []), [watchedPlayerIds]);
-  const excludedDojos = useMemo(() => new Set(watchedDojos || []), [watchedDojos]);
+  const excludedDojos = useMemo(() => new Set((watchedDojos || []).map(dojoKey)), [watchedDojos]);
   const q = query.trim().toLowerCase();
 
   // What "matches the query" means, stated ONCE per entity type. The dropdown's
@@ -97,7 +98,7 @@ function WatchPicker({ roster, rosterLoaded = true, dojos, watchedPlayerIds, wat
   // count shows how many roster members it currently covers.
   const dojoMatches = useMemo(() => {
     return (dojos || [])
-      .filter((d) => !excludedDojos.has(d.name))
+      .filter((d) => !excludedDojos.has(dojoKey(d.name)))
       .filter(dojoMatchesQuery)
       .slice(0, 6);
   }, [dojos, dojoMatchesQuery, excludedDojos]);
@@ -533,7 +534,7 @@ function WatchlistPanel({ tournament, roster, rosterLoaded = true, watchlist, se
     if (!d || !d.name) return;
     maybeFirstAdd();
     setWatchlist(prev => {
-      if (prev.some((e) => e.type === "dojo" && e.dojo === d.name)) return prev;
+      if (prev.some((e) => e.type === "dojo" && sameDojo(e.dojo, d.name))) return prev;
       return [...prev, { type: "dojo", dojo: d.name }];
     });
   };
@@ -576,7 +577,7 @@ function WatchlistPanel({ tournament, roster, rosterLoaded = true, watchlist, se
     // the whole roster and allocate an id array per dojo chip per render, only
     // to ask if it was empty -- ~50 chips x a few thousand participants at the
     // documented ceiling, on every aggregate refetch.
-    if (entry.type === "dojo") return !dojos.some((d) => d.name === entry.dojo);
+    if (entry.type === "dojo") return !dojos.some((d) => sameDojo(d.name, entry.dojo));
     return !!entry.id && !rosterById.get(entry.id);
   };
 
@@ -589,7 +590,7 @@ function WatchlistPanel({ tournament, roster, rosterLoaded = true, watchlist, se
     // the navy hero directly below it.
     const isPrimary = multi && effectiveKey === k;
     if (entry.type === "dojo") {
-      const total = dojos.find((d) => d.name === entry.dojo)?.total ?? 0;
+      const total = dojos.find((d) => sameDojo(d.name, entry.dojo))?.total ?? 0;
       const unresolved = entryUnresolved(entry);
       return (
         <span key={k} className={`pmf__chip pmf__chip--dojo ${isPrimary ? "is-primary" : ""} ${unresolved ? "pmf__chip--unresolved" : ""}`}

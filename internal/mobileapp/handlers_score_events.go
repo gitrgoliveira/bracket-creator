@@ -22,6 +22,7 @@ import (
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/engine"
+	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
@@ -73,6 +74,13 @@ func validScoreEventsBody(body *scoreEventsBody) error {
 		}
 		if err := ev.Validate(); err != nil {
 			return fmt.Errorf("events[%d]: %w", i, err)
+		}
+		// A fighter typed on a bout row is a team member's name, stored once
+		// in the form a member's is (helper.TitleCaseName, operator decision
+		// D14) as the tap enters, before it is logged. Each tap is its own
+		// line of the log, so no bout already fought is rewritten (D18).
+		if ev.Kind == domain.ScoreBoutFighter {
+			ev.Name = helper.TitleCaseName(ev.Name)
 		}
 	}
 	return nil

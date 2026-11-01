@@ -31,12 +31,15 @@ var (
 
 // IsReservedRosterName is the roster rule: whether a person may NOT be called
 // name, because the name as the roster stores it (TitleCaseName, which turns
-// "Pool A-1st" into "Pool A-1St") reads as a bracket placeholder in any case.
-// "Pool A-1st", "pool a-1st", "Pool A-1St" and "POOL A-1ST" are one name here.
-// It differs from IsReservedParticipantName on purpose: that one is the
-// bracket rule, asked of a slot that is already stored, and must stay
-// case-sensitive so a competitor stored as "Pool A-1St" before this rule
-// existed is never reread as a placeholder.
+// "pool a-1st" into "Pool A-1st", the placeholder's exact shape) reads as a
+// bracket placeholder in any case. "Pool A-1st", "pool a-1st", "Pool A-1St"
+// and "POOL A-1ST" are one name here. Every roster save asks it, and so does
+// the draw (engine runDrawPipeline), for a roster written before this rule or
+// by hand. It differs from IsReservedParticipantName on purpose: that one is
+// the bracket rule, asked of a slot that is already stored, and must stay
+// case-sensitive so a slot an earlier release stored a competitor in as
+// "Pool A-1St" (bout records are never rewritten) is never reread as a
+// placeholder.
 func IsReservedRosterName(name string) bool {
 	n := TitleCaseName(name)
 	return rosterPoolFinalistRE.MatchString(n) || rosterWinnerOfRE.MatchString(n)

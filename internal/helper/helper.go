@@ -266,26 +266,36 @@ func ReadCSVFile(filePath string) ([][]string, error) {
 		}
 	}()
 
-	reader := csv.NewReader(file)
+	records, _, err := ReadCSVRecords(file)
+	return records, err
+}
+
+// ReadCSVRecords reads CSV the way ReadCSVFile does (any field count, lazy
+// quotes, leading spaces trimmed, blank rows dropped) and gives, beside each
+// record, the 1-based line of the file it starts on, so a reader that refuses
+// a record can name where it is.
+func ReadCSVRecords(r io.Reader) (records [][]string, lines []int, err error) {
+	reader := csv.NewReader(r)
 	reader.FieldsPerRecord = -1
 	reader.LazyQuotes = true
 	reader.TrimLeadingSpace = true
 
-	var records [][]string
 	for {
 		record, err := reader.Read()
 		if err == io.EOF {
 			break
 		}
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if !IsBlankRecord(record) {
+			line, _ := reader.FieldPos(0)
 			records = append(records, record)
+			lines = append(lines, line)
 		}
 	}
 
-	return records, nil
+	return records, lines, nil
 }
 
 // AssignPoolsToCourts distributes numPools pools across numCourts courts using

@@ -35,6 +35,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/engine"
+	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
@@ -134,6 +135,53 @@ func (r LineupRequest) memberIDsRead() map[domain.Position]string {
 		}
 	}
 	return read
+}
+
+// storeNames puts the name of every position the save stores (every one of a
+// whole lineup, the changed ones of a partial save) in the form it is stored
+// in, once, as the save enters (operator decisions D14 and D16). A position
+// that names a member of the team by id stores that member's own name, so a
+// name the client matched to the member ignoring case or accents ("mcdonald"
+// for McDonald) never respells the member. A position with no member id is
+// title-cased (helper.TitleCaseName) as a member's name is, and so is one whose
+// member has no name yet (a blank slot), whose typed name is kept rather than
+// dropped. Run after the save's member ids were judged (memberIDsTheTeamHolds),
+// so every id left names a member of the team and the members file is already
+// read (memberJudge): a save naming no member id reads nothing.
+func (r LineupRequest) storeNames(judge *memberJudge, teamID string) *txResponse {
+	stored := func(pos domain.Position) *txResponse {
+		name, ok := r.Positions[pos]
+		if !ok {
+			return nil
+		}
+		if id := r.MemberIDs[pos]; id != "" {
+			member, err := judge.name(teamID, id)
+			if err != nil {
+				return errTeamMembersUnreadable.response()
+			}
+			if member != "" {
+				r.Positions[pos] = member
+				return nil
+			}
+		}
+		r.Positions[pos] = helper.TitleCaseName(name)
+		return nil
+	}
+	changed, partial := r.changedPositions()
+	if !partial {
+		for pos := range r.Positions {
+			if resp := stored(pos); resp != nil {
+				return resp
+			}
+		}
+		return nil
+	}
+	for _, pos := range changed {
+		if resp := stored(pos); resp != nil {
+			return resp
+		}
+	}
+	return nil
 }
 
 // validLineupRequest answers 400, and reports false, for a save no write could
@@ -963,6 +1011,9 @@ func saveLineup(c *gin.Context, tx CompetitionTransactor, announce func(compID, 
 			if kept[pos] != id {
 				delete(save.req.MemberIDs, pos)
 			}
+		}
+		if respErr = save.req.storeNames(judge, save.teamID); respErr != nil {
+			return nil
 		}
 		var landed engine.LandedLineup
 		var changed []domain.Position

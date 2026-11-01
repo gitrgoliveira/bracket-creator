@@ -500,7 +500,7 @@ describe('WatchlistPanel', () => {
       { type: 'dojo', dojo: 'Hagane Dojo' },
     ];
     const tree = runtime.mount(WatchlistPanel, baseProps({
-      watchlist: wl, primaryKey: 'dojo:Hagane Dojo', primaryEntry: wl[1], heroEntry: wl[1], heroNextMatch: MATCH, upcoming: [MATCH],
+      watchlist: wl, primaryKey: 'dojo:hagane dojo', primaryEntry: wl[1], heroEntry: wl[1], heroNextMatch: MATCH, upcoming: [MATCH],
     }));
     expect(heroNodes(tree)).toHaveLength(1);
     expect(byClass(tree, 'watchlist-pin-hint')).toHaveLength(0);

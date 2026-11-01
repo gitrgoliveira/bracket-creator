@@ -4,6 +4,7 @@ import (
 	"encoding/csv"
 	"fmt"
 	"strings"
+	"unicode"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"golang.org/x/text/cases"
@@ -142,8 +143,8 @@ func rowError(i int, line []string, field string) string {
 func createPlayersFromRecords(records [][]string, withZekkenName, requireDojo, requireName bool) ([]Player, error) {
 	players := make([]Player, 0, len(records))
 	var errors []string
+	var duplicates []DuplicateEntry
 	seenNames := make(map[string]int)
-	c := cases.Title(language.Und, cases.NoLower)
 
 	for i, line := range records {
 		if IsBlankRecord(line) {
@@ -166,7 +167,7 @@ func createPlayersFromRecords(records [][]string, withZekkenName, requireDojo, r
 				errors = append(errors, fmt.Sprintf("entry %d: invalid format: expected 'Name, Dojo' or 'Name, DisplayName, Dojo'", i+1))
 				continue
 			}
-			player.Name = c.String(line[0])
+			player.Name = line[0]
 			if len(line) == 2 {
 				player.DisplayName = SanitizeName(line[0])
 				player.Dojo = line[1]
@@ -200,7 +201,7 @@ func createPlayersFromRecords(records [][]string, withZekkenName, requireDojo, r
 				}
 			}
 		} else {
-			player.Name = c.String(line[0])
+			player.Name = line[0]
 			player.DisplayName = SanitizeName(line[0])
 			// bc-drwx item 10, gated on requireDojo (see this function's own
 			// doc comment for the full rationale and the two callers'
@@ -256,9 +257,14 @@ func createPlayersFromRecords(records [][]string, withZekkenName, requireDojo, r
 				}
 			}
 		}
+		// Every branch above takes the text as typed; this is the one place
+		// the CSV reader puts it in the form the roster stores, so the CLI,
+		// an import and a roster read back from disk agree.
+		CanonicalizePlayerText(&player)
 		key := fmt.Sprintf("%s|%s|%s", player.Name, player.DisplayName, player.Dojo)
 		if lineNo, seen := seenNames[key]; seen {
 			errors = append(errors, fmt.Sprintf("entry %d: duplicate participant '%s' from '%s' (display name: '%s', originally at entry %d)", i+1, player.Name, player.Dojo, player.DisplayName, lineNo))
+			duplicates = append(duplicates, DuplicateEntry{Entry: i + 1, FirstEntry: lineNo})
 			continue
 		}
 		seenNames[key] = i + 1
@@ -266,10 +272,29 @@ func createPlayersFromRecords(records [][]string, withZekkenName, requireDojo, r
 	}
 
 	if len(errors) > 0 {
-		return nil, fmt.Errorf("participant validation failed:\n%s", strings.Join(errors, "\n"))
+		return nil, &ParticipantValidationError{Problems: errors, Duplicates: duplicates}
 	}
 
 	return players, nil
+}
+
+// DuplicateEntry names a record that is the same competitor as an earlier one
+// once both are in the stored form (CanonicalizePlayerText), e.g. "John,
+// kenshinkan" and "John, Kenshinkan". Entry and FirstEntry are 1-based
+// positions in the records the reader was given.
+type DuplicateEntry struct{ Entry, FirstEntry int }
+
+// ParticipantValidationError is the CSV reader's refusal of a list of records:
+// every problem it found, worded for the operator, and which of them are
+// duplicates, so a caller that knows where each record came from (the store,
+// reading participants.csv) can name the file's lines.
+type ParticipantValidationError struct {
+	Problems   []string
+	Duplicates []DuplicateEntry
+}
+
+func (e *ParticipantValidationError) Error() string {
+	return "participant validation failed:\n" + strings.Join(e.Problems, "\n")
 }
 
 // IsRegistrationSource reports whether s is a recognised participant
@@ -299,12 +324,74 @@ func CanonicalRegistrationSource(s string) string {
 	return c
 }
 
-// TitleCaseName applies the same Unicode Title-casing that CreatePlayers uses
-// so names stored to participants.csv (and seeds.csv) match what is read back
-// on the next load, avoiding seed-merge mismatches. TrimSpace is applied first
-// to match CreatePlayers' per-column trim before title-casing.
+// TitleCaseName is the one form a person's name, a team member's name and a
+// dojo are stored in (operator decisions D13, D14 and D22, 2026-11-01):
+// trimmed, then each word's first letter upper-cased, never lowering the rest
+// of a word, so "kenshinkan" is stored "Kenshinkan", "BKA" stays "BKA" and
+// "o'neill" reads "O'neill". A word that begins with a digit is left exactly
+// as typed, so "2nd dojo" reads "2nd Dojo", "pool a-1st" reads "Pool A-1st"
+// and "3RD" stays "3RD". The text is put in this form where it enters the
+// system (a roster write, the CSV reader, a team member write, a lineup save,
+// an award), so every later comparison reads one spelling. A Caser is built
+// per call: cases.Caser keeps state and is not safe for concurrent use.
 func TitleCaseName(name string) string {
-	return cases.Title(language.Und, cases.NoLower).String(strings.TrimSpace(name))
+	caser := cases.Title(language.Und, cases.NoLower)
+	return mapOutsideDigitLedWords(strings.TrimSpace(name), caser.String)
+}
+
+// mapOutsideDigitLedWords rewrites text word by word: each word that begins
+// with a digit is kept as it is, and the text between such words goes through
+// rest. A word is a run of letters, digits, marks and the characters that join
+// a word without ending it (an apostrophe, a full stop, a colon, a middle dot,
+// a connector such as "_"), the runes cases.Title reads as one word; anything
+// else (a space, a hyphen, a slash) ends it, so "a-1st" holds the word "1st".
+// rest sees whole runs of the remaining text, so a caser applied there cases
+// those words as it would in place.
+func mapOutsideDigitLedWords(text string, rest func(string) string) string {
+	var out strings.Builder
+	start, word := 0, -1 // the text not yet written; the digit-led word in progress
+	inWord := false
+	for i, r := range text {
+		wordRune := isWordRune(r)
+		switch {
+		case word >= 0 && !wordRune:
+			out.WriteString(text[word:i])
+			start, word = i, -1
+		case word < 0 && wordRune && !inWord && unicode.IsDigit(r):
+			out.WriteString(rest(text[start:i]))
+			word = i
+		}
+		inWord = wordRune
+	}
+	if word >= 0 {
+		out.WriteString(text[word:])
+	} else {
+		out.WriteString(rest(text[start:]))
+	}
+	return out.String()
+}
+
+// isWordRune reports whether r continues a word for mapOutsideDigitLedWords.
+func isWordRune(r rune) bool {
+	return unicode.In(r, unicode.L, unicode.N, unicode.M, unicode.Pc, unicode.Cf) || strings.ContainsRune("'.:·‘’", r)
+}
+
+// CapitalizeZekken is the one form a zekken (a competitor's display name) is
+// stored in: trimmed and in capitals (operator decision D20, 2026-11-01), the
+// form SanitizeName already gives a zekken it derives. A zekken is never
+// title-cased.
+func CapitalizeZekken(zekken string) string {
+	return strings.ToUpper(strings.TrimSpace(zekken))
+}
+
+// CanonicalizePlayerText puts a competitor's typed text into the form the
+// roster stores: the name and the dojo through TitleCaseName, the zekken
+// through CapitalizeZekken. Every roster door asks it (the CSV reader, an add,
+// an edit, the roster save), so the roster holds one spelling of each.
+func CanonicalizePlayerText(p *Player) {
+	p.Name = TitleCaseName(p.Name)
+	p.Dojo = TitleCaseName(p.Dojo)
+	p.DisplayName = CapitalizeZekken(p.DisplayName)
 }
 
 // SanitizeName returns the canonical display form derived from a participant

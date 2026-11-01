@@ -1,6 +1,7 @@
 package state
 
 import (
+	"bytes"
 	"encoding/csv"
 	"errors"
 	"fmt"
@@ -334,14 +335,17 @@ func (s *Store) loadParticipantsNoLock(compID string, withZekkenName bool, opts 
 		return res, nil
 	}
 
-	path := s.compPath(compID, "participants.csv")
-	records, err := helper.ReadCSVFile(path)
+	raw, err := s.root.readFile(s.compPath(compID, "participants.csv"))
 	if err != nil {
 		if os.IsNotExist(err) {
 			cache.data = []domain.Player{}
 			cache.mtime = mtime
 			return []domain.Player{}, nil
 		}
+		return nil, err
+	}
+	records, recordLines, err := helper.ReadCSVRecords(bytes.NewReader(raw))
+	if err != nil {
 		return nil, err
 	}
 
@@ -388,8 +392,9 @@ func (s *Store) loadParticipantsNoLock(compID string, withZekkenName bool, opts 
 	var ids []string
 	var checkedInFlags []bool
 	var playerRecords [][]string
+	var playerLines []int // the file line of each playerRecords row
 
-	for _, record := range records {
+	for ri, record := range records {
 		isCheckedIn := false
 
 		// Determine data fields (everything after the id if present).
@@ -454,6 +459,7 @@ func (s *Store) loadParticipantsNoLock(compID string, withZekkenName bool, opts 
 			ids = append(ids, id)
 		}
 		playerRecords = append(playerRecords, dataFields)
+		playerLines = append(playerLines, recordLines[ri])
 		checkedInFlags = append(checkedInFlags, isCheckedIn)
 	}
 
@@ -466,7 +472,7 @@ func (s *Store) loadParticipantsNoLock(compID string, withZekkenName bool, opts 
 	// builds a roster FRESH from raw text, requires one.
 	players, err := helper.CreatePlayersFromRecords(playerRecords, withZekkenName, false)
 	if err != nil {
-		return nil, err
+		return nil, duplicateRowsError(err, playerLines)
 	}
 
 	for i := range players {
@@ -760,11 +766,12 @@ func (s *Store) updateParticipantNoLock(compID string, pid string, withZekkenNam
 		return nil, err
 	}
 
-	// Canonicalize to match what CreatePlayers produces on load (Title-case),
-	// so participants.csv and seeds.csv store the same form that will be read
-	// back; otherwise a rename to "alice cooper" would be read as "Alice Cooper"
-	// while seeds.csv still holds "alice cooper", breaking seed merging.
-	players[foundIdx].Name = helper.TitleCaseName(players[foundIdx].Name)
+	// Canonicalize to the form every roster write stores (name and dojo
+	// title-cased, zekken in capitals), BEFORE the identity comparison below:
+	// participants.csv and seeds.csv then store the same form that will be
+	// read back, the answer names it, and an edit that only changes the case
+	// of a name or a dojo is no identity change at all.
+	helper.CanonicalizePlayerText(&players[foundIdx])
 
 	// The roster rule saveParticipantsNoLock asks, asked here first because
 	// the seeds.csv rewrite below lands before that save: a rename the save
@@ -1015,7 +1022,7 @@ func (s *Store) AddParticipant(compID string, p domain.Player, withZekkenName bo
 		}
 	}
 
-	p.Name = helper.TitleCaseName(p.Name)
+	helper.CanonicalizePlayerText(&p)
 	p.ID = newParticipantID()
 	p.PoolPosition = int64(len(players))
 	if p.DisplayName == "" {
@@ -1198,8 +1205,8 @@ func nonBlankMetadata(metadata []string) []string {
 // renamed team's stored bucket goes unconsulted, so an existing duplicate
 // is re-reported as fresh and an unrelated rename is refused), would miss
 // a case/whitespace drift between the persisted and freshly-parsed name
-// (the bulk save persists the raw request name while the CSV parse
-// Title-cases on every read), and -- worst -- would silently MERGE two
+// (the paste box sends the name as typed, and this check runs before the
+// save title-cases it), and -- worst -- would silently MERGE two
 // teams that legitimately share a name (the sibling rule grandfathers
 // exactly that case) into one bucket, combining their member counts and
 // failing OPEN. Keying on the bare participant id instead would be worse,
@@ -1425,11 +1432,15 @@ func (s *Store) saveParticipantsNoLock(compID string, players []domain.Player, w
 	// exists to rescue. marshalParticipantsCSV keeps its own mint for its
 	// other caller; for this path it is now a no-op.
 	//
-	// A copy, because the caller's slice is the caller's.
+	// A copy, because the caller's slice is the caller's. Its text is put in
+	// the form the roster stores (helper.CanonicalizePlayerText) here, the
+	// chokepoint every roster write funnels through, so the paste box's raw
+	// rows land on disk as an add or an edit would store them.
 	stamped := make([]domain.Player, len(players))
 	copy(stamped, players)
 	mintedByCompetitor := make(map[string]string)
 	for i := range stamped {
+		helper.CanonicalizePlayerText(&stamped[i])
 		if !helper.ParticipantIDMissing(stamped[i].ID) {
 			continue
 		}

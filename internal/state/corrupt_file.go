@@ -5,6 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
+
+	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 )
 
 // CorruptFileError says that a competition file on disk could not be parsed,
@@ -110,6 +113,32 @@ func corruptCSV(file string, err error) error {
 		c.Detail = pe.Err.Error()
 	}
 	return c
+}
+
+// duplicateRowsError turns the CSV reader's refusal of two participants.csv
+// rows that are one competitor in the stored form ("John, kenshinkan" and
+// "John, Kenshinkan", which only a hand edit can write; operator decision D21,
+// 2026-11-01) into a located CorruptFileError naming both lines, so the
+// Participants page and every other reader say which rows to repair. lines[i]
+// is the file line of the i-th record the reader was given. The detail names
+// lines only, never the competitor, like every CorruptFileError detail. Any
+// other refusal is returned untouched.
+func duplicateRowsError(err error, lines []int) error {
+	var ve *helper.ParticipantValidationError
+	if !errors.As(err, &ve) || len(ve.Duplicates) == 0 {
+		return err
+	}
+	pairs := make([]string, 0, len(ve.Duplicates))
+	for _, d := range ve.Duplicates {
+		pairs = append(pairs, fmt.Sprintf("lines %d and %d", lines[d.FirstEntry-1], lines[d.Entry-1]))
+	}
+	return &CorruptFileError{
+		File:   "participants.csv",
+		Line:   lines[ve.Duplicates[0].Entry-1],
+		Column: 1,
+		Detail: strings.Join(pairs, ", ") + " hold the same competitor once names and dojos are title-cased and zekken are in capitals; remove one row of each pair or tell them apart",
+		Err:    err,
+	}
 }
 
 // corruptJSONWithSentinel is corruptJSON plus a caller-specific sentinel: some

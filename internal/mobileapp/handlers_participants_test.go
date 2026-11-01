@@ -64,7 +64,8 @@ func TestSingleParticipantAddAndReplace(t *testing.T) {
 	assert.True(t, helper.IsUUIDv4(addedPlayer.ID),
 		"AddParticipant must mint UUIDv4 IDs, got %q", addedPlayer.ID)
 	assert.Equal(t, "Test Player", addedPlayer.Name)
-	assert.Equal(t, "T. Player", addedPlayer.DisplayName)
+	// The zekken is saved in capitals, whatever case it was given in.
+	assert.Equal(t, "T. PLAYER", addedPlayer.DisplayName)
 	assert.Equal(t, "Test Dojo", addedPlayer.Dojo)
 	assert.Equal(t, []string{"3 Dan"}, addedPlayer.Metadata)
 
@@ -97,7 +98,7 @@ func TestSingleParticipantAddAndReplace(t *testing.T) {
 
 	assert.Equal(t, addedPlayer.ID, updatedPlayer.ID)
 	assert.Equal(t, "Updated Player Name", updatedPlayer.Name)
-	assert.Equal(t, "U. Player", updatedPlayer.DisplayName)
+	assert.Equal(t, "U. PLAYER", updatedPlayer.DisplayName)
 	assert.Equal(t, "Updated Dojo", updatedPlayer.Dojo)
 	assert.Equal(t, []string{"4 Dan"}, updatedPlayer.Metadata)
 

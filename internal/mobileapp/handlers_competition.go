@@ -167,18 +167,17 @@ func extractSeeds(players []domain.Player) []domain.SeedAssignment {
 			//
 			// BOTH halves are written in the CANONICAL form the roster will
 			// read back as, because seeds.csv is resolved against the roster by
-			// exact key and is NOT itself canonicalized on load. participants
-			// .csv keeps the raw request name, but CreatePlayersFromRecords
-			// Title-cases the name and TrimSpaces every field on every parse,
-			// so writing the raw name here produces a seed row that no longer
-			// resolves against its own participant: an operator who retypes a
-			// seeded competitor's name in different casing in the roster box
-			// gets a 200 and silently loses the seed, with only "0 seeded" in
-			// the panel to show for it. Canonicalizing at this write boundary
-			// keeps seeds.csv in the one form every reader resolves against.
+			// exact key. These players are the request's, as typed, and the
+			// roster save stores them title-cased (helper.TitleCaseName, for
+			// the name and the dojo alike), so writing the raw text here
+			// produces a seed row that no longer resolves against its own
+			// participant: an operator who retypes a seeded competitor's name
+			// or dojo in different casing in the roster box gets a 200 and
+			// silently loses the seed, with only "0 seeded" in the panel to
+			// show for it.
 			out = append(out, domain.SeedAssignment{
 				Name:     helper.TitleCaseName(p.Name),
-				Dojo:     strings.TrimSpace(p.Dojo),
+				Dojo:     helper.TitleCaseName(p.Dojo),
 				SeedRank: p.Seed,
 			})
 		}
@@ -3116,12 +3115,14 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			return
 		}
 
-		// Validate and trim each award before persisting.
+		// Validate and trim each award before persisting. The recipient's name
+		// and dojo are free text, stored title-cased like a competitor's
+		// (operator decision D15).
 		trimmed := make([]state.FightingSpiritAward, 0, len(awards))
 		for i, a := range awards {
 			title := strings.TrimSpace(a.Title)
-			recipientName := strings.TrimSpace(a.RecipientName)
-			recipientDojo := strings.TrimSpace(a.RecipientDojo)
+			recipientName := helper.TitleCaseName(a.RecipientName)
+			recipientDojo := helper.TitleCaseName(a.RecipientDojo)
 
 			if title == "" {
 				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("fightingSpiritAwards[%d]: title is required", i)})

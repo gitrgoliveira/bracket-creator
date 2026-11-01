@@ -2295,15 +2295,15 @@ paths:
                 name:
                   type: string
                   maxLength: 100
-                  description: Participant's full name (trimmed; must not be blank).
+                  description: Participant's full name (trimmed; must not be blank). Stored title-cased (the first letter of each word upper-cased, nothing lower-cased; a word starting with a digit is kept as typed, so "2nd dojo" is stored as "2nd Dojo").
                 dojo:
                   type: string
                   maxLength: 100
-                  description: Participant's dojo (trimmed; must not be blank).
+                  description: Participant's dojo (trimmed; must not be blank). Stored title-cased, like the name.
                 displayName:
                   type: string
                   maxLength: 50
-                  description: Bib/zekken display name (only persisted for zekken-enabled competitions).
+                  description: Bib/zekken display name (only persisted for zekken-enabled competitions). Stored in capitals.
                 danGrade:
                   type: string
                   maxLength: 200
@@ -7176,11 +7176,11 @@ components:
         recipientName:
           type: string
           maxLength: 100
-          description: Plain name of the honouree.
+          description: Plain name of the honouree, stored title-cased.
         recipientDojo:
           type: string
           maxLength: 100
-          description: Dojo affiliation of the honouree (optional, for disambiguation).
+          description: Dojo affiliation of the honouree (optional, for disambiguation), stored title-cased.
 
     Player:
       type: object
@@ -8295,7 +8295,11 @@ components:
       properties:
         name:
           type: string
-          description: The member's name; must not be empty.
+          description: >
+            The member's name; must not be empty. Stored title-cased (the first
+            letter of each word upper-cased, nothing lower-cased, a word
+            starting with a digit kept as typed), and the
+            answer carries it so.
         writeId:
           allOf:
             - $ref: '#/components/schemas/ArrivalWriteId'
@@ -8354,7 +8358,11 @@ components:
             type: string
           description: >
             Map of position label to the fighter's display NAME (not an id).
-            The member id for each position goes in `memberIds`.
+            The member id for each position goes in `memberIds`. A position
+            whose member id names a member of the team stores that member's
+            own name, whatever spelling was sent; a position with no member id,
+            or whose member has no name yet, stores its name title-cased, like
+            a member's name.
         memberIds:
           type: object
           additionalProperties:

@@ -9,8 +9,6 @@ import (
 	"strconv"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
-	"golang.org/x/text/cases"
-	"golang.org/x/text/language"
 )
 
 // generateBracketOrder returns the slot indices for a standard tournament
@@ -967,13 +965,12 @@ func seedPoolRank(i, numPools, numCourts int) int {
 // ApplySeeds assigns seeds to the helper players, handling swaps if needed
 // Returns an error if an assigned name could not be matched
 func ApplySeeds(players []Player, assignments []domain.SeedAssignment) error {
-	c := cases.Title(language.Und, cases.NoLower)
-
 	// NewRosterIndex is the ONE shared implementation of the exact-key /
 	// unique-bare-name fallback (see domain.SeedKey and domain.RosterIndex);
-	// ApplySeeds title-cases the assignment's name before querying it so a
-	// hand-typed "alice cooper" still matches the roster's canonical
-	// "Alice Cooper", but the index itself is queried the same way every
+	// ApplySeeds title-cases the assignment's name and dojo before querying it
+	// (TitleCaseName, the form the roster stores both in) so a hand-typed
+	// "alice cooper, kenshinkan" in a --seeds file still matches the roster's
+	// "Alice Cooper, Kenshinkan", but the index itself is queried the same way every
 	// other matcher in the codebase does. An id, when the row carries one,
 	// is tried first via LookupByID (the same id-first-then-pair order
 	// domain.RosterIndex.LookupSeed implements; spelled out by hand below,
@@ -1010,7 +1007,8 @@ func ApplySeeds(players []Player, assignments []domain.SeedAssignment) error {
 		// stays for the (name, dojo) fallback, which still needs it.
 		lookup := a
 		if a.ID == "" {
-			lookup.Name = c.String(a.Name)
+			lookup.Name = TitleCaseName(a.Name)
+			lookup.Dojo = TitleCaseName(a.Dojo)
 		}
 		p, ok := roster.LookupSeed(lookup)
 		if !ok {

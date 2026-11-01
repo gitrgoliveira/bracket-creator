@@ -2,7 +2,7 @@
 // Extracted from viewer.jsx (mp-pxxc step 9). Pure split, no behavior change.
 
 import { TermV, competitionKindLabel, poolLabel, compMatchesForCompetition } from './viewer_utils.jsx';
-import { isFollowedPlayer, isPlayerWatched, entryKey, resolveWatchedPlayers, findPrimaryEntry, buildPrimaryNextMatch, buildRoster, useWatchlist, buildWatchedSets, matchInvolvesWatchedSet } from './viewer_watchlist_core.jsx';
+import { isFollowedPlayer, isPlayerWatched, entryKey, dojoKey, resolveWatchedPlayers, findPrimaryEntry, buildPrimaryNextMatch, buildRoster, useWatchlist, buildWatchedSets, matchInvolvesWatchedSet } from './viewer_watchlist_core.jsx';
 import { MatchDetailCard, VSchedItem, MatchViewerModal, useLiveMatch, bracketMatchIn } from './viewer_match.jsx';
 import { WinnerBadge, SwissStandingsViewer, PoolsViewer, LeagueStandingsViewer, DHBadge, matchWinnerName } from './viewer_standings.jsx';
 import { AwardsView } from './viewer_awards.jsx';
@@ -92,9 +92,9 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
   // Restrict the filter bar chips to entries that are relevant to THIS competition:
   // player entries only shown when the player is in compRoster; dojo entries only
   // when at least one roster player belongs to that dojo.
-  const compDojos = useMemo(() => new Set(compRoster.map((p) => p.dojo).filter(Boolean)), [compRoster]);
+  const compDojos = useMemo(() => new Set(compRoster.map((p) => p.dojo).filter(Boolean).map(dojoKey)), [compRoster]);
   const compWatchlist = useMemo(
-    () => watchlist.filter((e) => e.type === "dojo" ? compDojos.has(e.dojo) : rosterById.has(e.id)),
+    () => watchlist.filter((e) => e.type === "dojo" ? compDojos.has(dojoKey(e.dojo)) : rosterById.has(e.id)),
     [watchlist, compDojos, rosterById],
   );
   const resolvedWatched = useMemo(() => resolveWatchedPlayers(compWatchlist, compRoster), [compWatchlist, compRoster]);

@@ -17,7 +17,8 @@ import (
 )
 
 // ReadFile reads the file at path, a fixture or a file the test wrote, through
-// an fs.FS on its own folder (os.DirFS), so the read stays inside that folder.
+// an fs.FS on its own folder (os.DirFS). It is a convenience for test reads, not
+// a confinement: os.DirFS follows a symlink out of that folder.
 func ReadFile(path string) ([]byte, error) {
 	return fs.ReadFile(os.DirFS(filepath.Dir(path)), filepath.Base(path))
 }

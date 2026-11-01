@@ -206,8 +206,8 @@ var ErrReservedName = errors.New("participant name collides with a reserved brac
 // so a roster already holding such a name is refused on its next save until
 // that name is changed; the CLI asks it of the roster it reads.
 func RefuseReservedNames(players []domain.Player) error {
-	if refused := helper.ReservedRosterNames(players); len(refused) > 0 {
-		return fmt.Errorf("%w: %q", ErrReservedName, refused[0])
+	if refused, ok := helper.FirstReservedRosterName(players); ok {
+		return fmt.Errorf("%w: %q", ErrReservedName, refused)
 	}
 	return nil
 }
@@ -288,6 +288,23 @@ func (s *Store) loadParticipants(compID string, withZekkenName bool, opts LoadPa
 }
 
 func (s *Store) loadParticipantsNoLock(compID string, withZekkenName bool, opts LoadParticipantsOpts) ([]domain.Player, error) {
+	players, _, err := s.readParticipantsNoLock(compID, withZekkenName, opts)
+	return players, err
+}
+
+// participantsRead is what a participants cache entry holds: the roster and
+// whether participants.csv holds text not yet in the stored form
+// (helper.CreatePlayersFromRecords' textChanged), cached together so a cache
+// hit answers both.
+type participantsRead struct {
+	players     []domain.Player
+	textChanged bool
+}
+
+// readParticipantsNoLock is loadParticipantsNoLock that also reports whether
+// the file holds a name, dojo or zekken not yet in the form the roster stores,
+// for the legacy upgrade's roster-text step (upgradeRosterTextLocked).
+func (s *Store) readParticipantsNoLock(compID string, withZekkenName bool, opts LoadParticipantsOpts) ([]domain.Player, bool, error) {
 	// Use a virtual filename for cache to distinguish between with/without
 	// seeds AND between the three possible parse modes
 	// (HasIDs=&true / HasIDs=&false / nil → auto-detect).
@@ -317,11 +334,11 @@ func (s *Store) loadParticipantsNoLock(compID string, withZekkenName bool, opts 
 	mtime += s.FileMtime(compID, "config.md")
 
 	if cache.data != nil && cache.mtime == mtime {
-		p := cache.data.([]domain.Player)
-		res := make([]domain.Player, len(p))
-		copy(res, p)
+		read := cache.data.(participantsRead)
+		res := make([]domain.Player, len(read.players))
+		copy(res, read.players)
 		cache.mu.RUnlock()
-		return res, nil
+		return res, read.textChanged, nil
 	}
 	cache.mu.RUnlock()
 
@@ -329,24 +346,24 @@ func (s *Store) loadParticipantsNoLock(compID string, withZekkenName bool, opts 
 	defer cache.mu.Unlock()
 	// Re-check after acquiring write lock
 	if cache.data != nil && cache.mtime == mtime {
-		p := cache.data.([]domain.Player)
-		res := make([]domain.Player, len(p))
-		copy(res, p)
-		return res, nil
+		read := cache.data.(participantsRead)
+		res := make([]domain.Player, len(read.players))
+		copy(res, read.players)
+		return res, read.textChanged, nil
 	}
 
 	raw, err := s.root.readFile(s.compPath(compID, "participants.csv"))
 	if err != nil {
 		if os.IsNotExist(err) {
-			cache.data = []domain.Player{}
+			cache.data = participantsRead{players: []domain.Player{}}
 			cache.mtime = mtime
-			return []domain.Player{}, nil
+			return []domain.Player{}, false, nil
 		}
-		return nil, err
+		return nil, false, err
 	}
 	records, recordLines, err := helper.ReadCSVRecords(bytes.NewReader(raw))
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 
 	// Detect ID column: when callers pass an explicit HasIDs hint we
@@ -470,9 +487,9 @@ func (s *Store) loadParticipantsNoLock(compID string, withZekkenName bool, opts 
 	// see it and repair the dojo through the edit UI. Only CreatePlayers
 	// (helper/tournament.go), the CLI/web-preview/import entry point that
 	// builds a roster FRESH from raw text, requires one.
-	players, err := helper.CreatePlayersFromRecords(playerRecords, withZekkenName, false)
+	players, textChanged, err := helper.CreatePlayersFromRecords(playerRecords, withZekkenName, false)
 	if err != nil {
-		return nil, duplicateRowsError(err, playerLines)
+		return nil, false, duplicateRowsError(err, playerLines)
 	}
 
 	for i := range players {
@@ -523,12 +540,12 @@ func (s *Store) loadParticipantsNoLock(compID string, withZekkenName bool, opts 
 	}
 	// helper.Player is a type alias for domain.Player (NFR-007); the
 	// parser output can flow straight into the cache without conversion.
-	cache.data = players
+	cache.data = participantsRead{players: players, textChanged: textChanged}
 	cache.mtime = mtime
 
 	res := make([]domain.Player, len(players))
 	copy(res, players)
-	return res, nil
+	return res, textChanged, nil
 }
 
 // SaveParticipants persists the roster. It loads the competition under the

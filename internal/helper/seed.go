@@ -968,7 +968,7 @@ func ApplySeeds(players []Player, assignments []domain.SeedAssignment) error {
 	// NewRosterIndex is the ONE shared implementation of the exact-key /
 	// unique-bare-name fallback (see domain.SeedKey and domain.RosterIndex);
 	// ApplySeeds title-cases the assignment's name and dojo before querying it
-	// (TitleCaseName, the form the roster stores both in) so a hand-typed
+	// (CanonicalizeSeedText, the form the roster stores both in) so a hand-typed
 	// "alice cooper, kenshinkan" in a --seeds file still matches the roster's
 	// "Alice Cooper, Kenshinkan", but the index itself is queried the same way every
 	// other matcher in the codebase does. An id, when the row carries one,
@@ -1007,8 +1007,7 @@ func ApplySeeds(players []Player, assignments []domain.SeedAssignment) error {
 		// stays for the (name, dojo) fallback, which still needs it.
 		lookup := a
 		if a.ID == "" {
-			lookup.Name = TitleCaseName(a.Name)
-			lookup.Dojo = TitleCaseName(a.Dojo)
+			CanonicalizeSeedText(&lookup)
 		}
 		p, ok := roster.LookupSeed(lookup)
 		if !ok {

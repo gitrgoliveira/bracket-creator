@@ -653,6 +653,15 @@ func TestViewerAggregateSaysWhenARosterCouldNotLoad(t *testing.T) {
 	require.Len(t, payload, 1)
 	assert.Equal(t, false, payload[0]["rosterAvailable"],
 		"the payload must say the roster did not load; nil Players alone cannot")
+	// The server names the file too, with no position, so a page that would
+	// read the empty roster as "no roster yet" finds it in dataIssues.
+	issues, _ := payload[0]["dataIssues"].([]any)
+	issue := dataIssueByFile(t, issues, "participants.csv")
+	require.NotNil(t, issue, "an unreadable roster is named in dataIssues")
+	assert.Equal(t, "corrupt-file", issue["kind"])
+	assert.EqualValues(t, 0, issue["line"])
+	assert.EqualValues(t, 0, issue["column"])
+	assert.Equal(t, rosterUnreadableDetail, issue["detail"])
 }
 
 // The other half: a competition whose roster is simply EMPTY (no file yet) is
@@ -675,4 +684,7 @@ func TestViewerAggregateReportsAnEmptyRosterAsAvailable(t *testing.T) {
 	require.Len(t, payload, 1)
 	assert.Equal(t, true, payload[0]["rosterAvailable"],
 		"no participants.csv yet is not a load failure")
+	issues, _ := payload[0]["dataIssues"].([]any)
+	assert.Nil(t, dataIssueByFile(t, issues, "participants.csv"),
+		"a roster that loaded raises no participants.csv entry")
 }

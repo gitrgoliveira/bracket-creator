@@ -168,18 +168,17 @@ func extractSeeds(players []domain.Player) []domain.SeedAssignment {
 			// BOTH halves are written in the CANONICAL form the roster will
 			// read back as, because seeds.csv is resolved against the roster by
 			// exact key. These players are the request's, as typed, and the
-			// roster save stores them title-cased (helper.TitleCaseName, for
+			// roster save stores them title-cased (helper.CanonicalizePlayerText;
+			// helper.CanonicalizeSeedText gives a seed row the same form, for
 			// the name and the dojo alike), so writing the raw text here
 			// produces a seed row that no longer resolves against its own
 			// participant: an operator who retypes a seeded competitor's name
 			// or dojo in different casing in the roster box gets a 200 and
 			// silently loses the seed, with only "0 seeded" in the panel to
 			// show for it.
-			out = append(out, domain.SeedAssignment{
-				Name:     helper.TitleCaseName(p.Name),
-				Dojo:     helper.TitleCaseName(p.Dojo),
-				SeedRank: p.Seed,
-			})
+			seed := domain.SeedAssignment{Name: p.Name, Dojo: p.Dojo, SeedRank: p.Seed}
+			helper.CanonicalizeSeedText(&seed)
+			out = append(out, seed)
 		}
 	}
 	return out

@@ -149,10 +149,14 @@ func (r LineupRequest) memberIDsRead() map[domain.Position]string {
 // so every id left names a member of the team and the members file is already
 // read (memberJudge): a save naming no member id reads nothing.
 func (r LineupRequest) storeNames(judge *memberJudge, teamID string) *txResponse {
-	stored := func(pos domain.Position) *txResponse {
+	stores, partial := r.changedPositions()
+	if !partial {
+		stores = slices.Collect(maps.Keys(r.Positions))
+	}
+	for _, pos := range stores {
 		name, ok := r.Positions[pos]
 		if !ok {
-			return nil
+			continue
 		}
 		if id := r.MemberIDs[pos]; id != "" {
 			member, err := judge.name(teamID, id)
@@ -161,25 +165,10 @@ func (r LineupRequest) storeNames(judge *memberJudge, teamID string) *txResponse
 			}
 			if member != "" {
 				r.Positions[pos] = member
-				return nil
+				continue
 			}
 		}
 		r.Positions[pos] = helper.TitleCaseName(name)
-		return nil
-	}
-	changed, partial := r.changedPositions()
-	if !partial {
-		for pos := range r.Positions {
-			if resp := stored(pos); resp != nil {
-				return resp
-			}
-		}
-		return nil
-	}
-	for _, pos := range changed {
-		if resp := stored(pos); resp != nil {
-			return resp
-		}
 	}
 	return nil
 }

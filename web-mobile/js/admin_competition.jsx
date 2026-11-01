@@ -344,6 +344,9 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
   ];
 
   const currentItem = sections.flatMap(m => m.items).find(i => i.id === section);
+  const rosterCount = rosterUnreadableIssues(c).length > 0
+    ? `${ROSTER_FILE} unreadable`
+    : `${(c.players || []).length} ${c.kind === "team" ? "teams" : "players"}`;
 
   return (
     <div className="app">
@@ -367,7 +370,7 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
               <StatusBadge status={localStatus ?? c.status} format={c.format} />
             </div>
             <div className="page-head__sub">
-              {window.competitionKindLabel(c)} · {rosterUnreadableIssues(c).length > 0 ? `${ROSTER_FILE} unreadable` : `${(c.players || []).length} ${c.kind === "team" ? "teams" : "players"}`} ·{" "}
+              {window.competitionKindLabel(c)} · {rosterCount} ·{" "}
               {/* "at" only between a date AND a time, and the separator only
                   after one of them, or a missing time reads "<date> at ·". */}
               {[c.date && formatDate(c.date), c.startTime].filter(Boolean).join(" at ")}

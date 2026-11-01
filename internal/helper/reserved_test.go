@@ -109,17 +109,16 @@ func TestBracketRuleDoesNotReadATitleCasedNameAsAPlaceholder(t *testing.T) {
 	}
 }
 
-func TestReservedRosterNames(t *testing.T) {
-	got := ReservedRosterNames([]Player{
+func TestFirstReservedRosterName(t *testing.T) {
+	got, ok := FirstReservedRosterName([]Player{
 		{Name: "Tanaka Yuki"},
 		{Name: " pool a-1st "},
 		{Name: "Winner Of R1-M2"},
 	})
-	want := []string{"pool a-1st", "Winner Of R1-M2"}
-	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
-		t.Errorf("ReservedRosterNames = %q, want %q", got, want)
+	if !ok || got != "pool a-1st" {
+		t.Errorf("FirstReservedRosterName = %q, %v, want %q, true", got, ok, "pool a-1st")
 	}
-	if got := ReservedRosterNames([]Player{{Name: "Tanaka Yuki"}}); len(got) != 0 {
-		t.Errorf("ReservedRosterNames = %q, want none", got)
+	if got, ok := FirstReservedRosterName([]Player{{Name: "Tanaka Yuki"}}); ok {
+		t.Errorf("FirstReservedRosterName = %q, want none", got)
 	}
 }

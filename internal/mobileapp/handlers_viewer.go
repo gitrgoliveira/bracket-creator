@@ -549,8 +549,8 @@ func (l *viewerCompetition) payload(tournament *state.Tournament) gin.H {
 	// a malformed file: LazyQuotes plus FieldsPerRecord = -1 mean bad bytes
 	// parse into garbage rows rather than failing, so what this actually
 	// reports is an OS-level read failure, or two rows that are one
-	// competitor (D21, which dataIssues names by line) -- narrow, but
-	// previously invisible.
+	// competitor (D21, which dataIssues names by line; any other failure
+	// it names with no position) -- narrow, but previously invisible.
 	payload["rosterAvailable"] = plErr == nil
 	issues := viewerDataIssues(comp, players, pools, poolMatches, plErr, pmErr, brErr, poolsErr)
 	if len(issues) > 0 {
@@ -584,6 +584,34 @@ func dataIssuesFrom(errs ...error) []gin.H {
 		})
 	}
 	return issues
+}
+
+// rosterUnreadableDetail is the detail of the participants.csv entry for a
+// roster that did not load for a reason with no position in the file (a row
+// the parser refuses, an I/O fault); the read logs the error itself.
+const rosterUnreadableDetail = "it could not be read, and the server's log says why"
+
+// rosterUnreadableIssue is the corrupt-file entry naming participants.csv
+// with no position (line and column 0) for a roster read that failed for any
+// reason but a located one, which dataIssuesFrom already names; nil when the
+// roster loaded or its failure is located. The server owns "the roster did
+// not load": every page that would read an empty roster as "no roster yet"
+// asks dataIssues for it (data_integrity.jsx rosterUnreadableIssues), since
+// every roster save reads the stored file first and is refused alike.
+func rosterUnreadableIssue(plErr error) *gin.H {
+	if plErr == nil {
+		return nil
+	}
+	if cf, _ := state.AsCorruptFile(plErr); cf != nil {
+		return nil // located: dataIssuesFrom names it
+	}
+	return &gin.H{
+		"kind":   "corrupt-file",
+		"file":   "participants.csv",
+		"line":   0,
+		"column": 0,
+		"detail": rosterUnreadableDetail,
+	}
 }
 
 // missingIDsIssue builds a "missing-ids" dataIssues entry naming file, or
@@ -646,7 +674,8 @@ func missingIDsIssue(file, detail string) *gin.H {
 // record. Deliberately takes only plErr/pmErr/brErr/poolsErr for the
 // corrupt-file half (plErr: participants.csv holding two rows that are one
 // competitor once canonicalised, operator decision D21, named by its lines
-// like any other damaged file): the detail endpoint's own standingsErr is not
+// like any other damaged file; any other roster read failure is named with no
+// position, rosterUnreadableIssue): the detail endpoint's own standingsErr is not
 // passed in, even though it can carry the identical underlying
 // fault as poolsErr (engine.CalculatePoolStandings's own internal LoadPools
 // reads the same pools.csv) -- reporting both would either double the entry
@@ -656,6 +685,9 @@ func viewerDataIssues(comp *state.Competition, players []domain.Player, pools []
 		pools, poolsErr = nil, nil
 	}
 	issues := dataIssuesFrom(plErr, pmErr, brErr, poolsErr)
+	if ri := rosterUnreadableIssue(plErr); ri != nil {
+		issues = append(issues, *ri)
+	}
 	if mi := missingIDsIssue("participants.csv", helper.MissingParticipantIDsMessage(players)); mi != nil {
 		issues = append(issues, *mi)
 	}
@@ -856,7 +888,8 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 			// (rosterAvailable false) and dataIssues names the lines. Every
 			// other participants.csv refusal (a bad-format row from
 			// helper.CreatePlayersFromRecords, a read error) is not one and
-			// still aborts the request below, unchanged. Any OTHER error (a
+			// still aborts the request below, unchanged (the aggregate names
+			// it in dataIssues with no position, rosterUnreadableIssue). Any OTHER error (a
 			// genuine I/O fault the operator cannot fix by editing a file)
 			// still aborts, unchanged from before.
 			//

@@ -81,7 +81,8 @@ func CreatePlayers(entries []string, withZekkenName bool) ([]Player, error) {
 	// archive import build a roster fresh from raw text and reject a blank
 	// dojo or a blank name; see createPlayersFromRecords for why the roster
 	// loader does not.
-	return createPlayersFromRecords(records, withZekkenName, true, true)
+	players, _, err := createPlayersFromRecords(records, withZekkenName, true, true)
+	return players, err
 }
 
 // CreatePlayersFromRecords builds players from pre-parsed CSV records
@@ -118,7 +119,14 @@ func CreatePlayers(entries []string, withZekkenName bool) ([]Player, error) {
 //     (which specifically depends on a blank-dojo roster still LOADING so
 //     the draw-time refusal, not a load-time one, is what fires) and
 //     TestCheckIn_BlankDojoElsewhereInRoster_Returns400.
-func CreatePlayersFromRecords(records [][]string, withZekkenName bool, requireDojo bool) ([]Player, error) {
+//
+// textChanged reports whether any text the records hold (a name, a dojo, a
+// zekken given in its own column) was not yet in the form the roster stores
+// (CanonicalizePlayerText), each field compared trimmed, so spacing alone is
+// not a change. A zekken derived from the name is no text of the records'.
+// The legacy upgrade asks it to know whether participants.csv needs
+// rewriting.
+func CreatePlayersFromRecords(records [][]string, withZekkenName bool, requireDojo bool) (players []Player, textChanged bool, err error) {
 	// Never requires a name: the roster loader in internal/state calls this
 	// directly and stays tolerant of a blank name on purpose, so a
 	// hand-edited participants.csv can still be loaded and repaired (the same
@@ -140,8 +148,9 @@ func rowError(i int, line []string, field string) string {
 // is refused the same way a blank dojo is: a competitor is identified by
 // (name, dojo), so a nameless row is unidentifiable to every consumer that
 // has no participant id to fall back on.
-func createPlayersFromRecords(records [][]string, withZekkenName, requireDojo, requireName bool) ([]Player, error) {
+func createPlayersFromRecords(records [][]string, withZekkenName, requireDojo, requireName bool) ([]Player, bool, error) {
 	players := make([]Player, 0, len(records))
+	textChanged := false
 	var errors []string
 	var duplicates []DuplicateEntry
 	seenNames := make(map[string]int)
@@ -161,6 +170,7 @@ func createPlayersFromRecords(records [][]string, withZekkenName, requireDojo, r
 		player := Player{
 			PoolPosition: int64(len(players)),
 		}
+		zekkenTyped := false // the zekken is the record's own column, not derived
 
 		if withZekkenName {
 			if len(line) < 2 {
@@ -181,7 +191,8 @@ func createPlayersFromRecords(records [][]string, withZekkenName, requireDojo, r
 					continue
 				}
 				player.DisplayName = line[1]
-				if player.DisplayName == "" {
+				zekkenTyped = player.DisplayName != ""
+				if !zekkenTyped {
 					player.DisplayName = SanitizeName(line[0])
 				}
 				player.Dojo = line[2]
@@ -260,7 +271,11 @@ func createPlayersFromRecords(records [][]string, withZekkenName, requireDojo, r
 		// Every branch above takes the text as typed; this is the one place
 		// the CSV reader puts it in the form the roster stores, so the CLI,
 		// an import and a roster read back from disk agree.
+		typed := player
 		CanonicalizePlayerText(&player)
+		if player.Name != typed.Name || player.Dojo != typed.Dojo || (zekkenTyped && player.DisplayName != typed.DisplayName) {
+			textChanged = true
+		}
 		key := fmt.Sprintf("%s|%s|%s", player.Name, player.DisplayName, player.Dojo)
 		if lineNo, seen := seenNames[key]; seen {
 			errors = append(errors, fmt.Sprintf("entry %d: duplicate participant '%s' from '%s' (display name: '%s', originally at entry %d)", i+1, player.Name, player.Dojo, player.DisplayName, lineNo))
@@ -272,10 +287,10 @@ func createPlayersFromRecords(records [][]string, withZekkenName, requireDojo, r
 	}
 
 	if len(errors) > 0 {
-		return nil, &ParticipantValidationError{Problems: errors, Duplicates: duplicates}
+		return nil, false, &ParticipantValidationError{Problems: errors, Duplicates: duplicates}
 	}
 
-	return players, nil
+	return players, textChanged, nil
 }
 
 // DuplicateEntry names a record that is the same competitor as an earlier one
@@ -387,11 +402,24 @@ func CapitalizeZekken(zekken string) string {
 // CanonicalizePlayerText puts a competitor's typed text into the form the
 // roster stores: the name and the dojo through TitleCaseName, the zekken
 // through CapitalizeZekken. Every roster door asks it (the CSV reader, an add,
-// an edit, the roster save), so the roster holds one spelling of each.
-func CanonicalizePlayerText(p *Player) {
-	p.Name = TitleCaseName(p.Name)
-	p.Dojo = TitleCaseName(p.Dojo)
-	p.DisplayName = CapitalizeZekken(p.DisplayName)
+// an edit, the roster save), so the roster holds one spelling of each. It
+// reports whether any of the three changed.
+func CanonicalizePlayerText(p *Player) bool {
+	name, dojo, zekken := TitleCaseName(p.Name), TitleCaseName(p.Dojo), CapitalizeZekken(p.DisplayName)
+	changed := name != p.Name || dojo != p.Dojo || zekken != p.DisplayName
+	p.Name, p.Dojo, p.DisplayName = name, dojo, zekken
+	return changed
+}
+
+// CanonicalizeSeedText puts a seed row's name and dojo in the form the roster
+// stores them (TitleCaseName, operator decision D14), so the row resolves by
+// its exact (name, dojo) against the roster, and reports whether either
+// changed. Every door that takes a seed row by name asks it.
+func CanonicalizeSeedText(a *domain.SeedAssignment) bool {
+	name, dojo := TitleCaseName(a.Name), TitleCaseName(a.Dojo)
+	changed := name != a.Name || dojo != a.Dojo
+	a.Name, a.Dojo = name, dojo
+	return changed
 }
 
 // SanitizeName returns the canonical display form derived from a participant

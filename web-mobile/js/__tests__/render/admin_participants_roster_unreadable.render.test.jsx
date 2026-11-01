@@ -1,9 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import { installParticipantsHarness, makeParticipantsCompetition, mountParticipants } from './admin_participants_mount_harness.jsx';
-import { rosterUnreadableIssues, ROSTER_UNREADABLE_DETAIL } from '../../data_integrity.jsx';
+import { rosterUnreadableIssues } from '../../data_integrity.jsx';
 
 // D21: a participants.csv the server cannot read arrives as an EMPTY roster
-// (players [], rosterAvailable false, the located entry on dataIssues). The
+// (players [], rosterAvailable false, a participants.csv entry on dataIssues). The
 // Participants page read only `players` and showed "Add your roster to begin"
 // with an empty paste box over it. It now shows the file's notice instead,
 // with the server's sentence naming the lines, and nothing to paste into.
@@ -16,6 +16,16 @@ const DUPLICATE = {
   line: 4,
   column: 1,
   detail: 'lines 1 and 4 hold the same competitor once names and dojos are title-cased and zekken are in capitals; remove one row of each pair or tell them apart',
+};
+
+// The entry the server sends for a roster that failed with no position in the
+// file (handlers_viewer.go rosterUnreadableIssue).
+const UNREADABLE = {
+  kind: 'corrupt-file',
+  file: 'participants.csv',
+  line: 0,
+  column: 0,
+  detail: "it could not be read, and the server's log says why",
 };
 
 describe('AdminParticipants over an unreadable participants.csv (D21)', () => {
@@ -36,15 +46,16 @@ describe('AdminParticipants over an unreadable participants.csv (D21)', () => {
     expect(container.textContent).not.toContain('Participant list');
   });
 
-  it('names the file when the roster failed to load with no located entry', async () => {
+  it('names the file when the server reports the roster with no position', async () => {
     const { container } = await mountParticipants(makeParticipantsCompetition({
       players: [],
       rosterAvailable: false,
+      dataIssues: [UNREADABLE],
     }));
 
     const banner = container.querySelector('.data-issue--banner');
     expect(banner).toBeTruthy();
-    expect(banner.textContent).toContain(`participants.csv: ${ROSTER_UNREADABLE_DETAIL}`);
+    expect(banner.textContent).toContain(`participants.csv: ${UNREADABLE.detail}`);
     expect(container.querySelector('textarea')).toBeNull();
   });
 
@@ -69,8 +80,10 @@ describe('rosterUnreadableIssues', () => {
     })).toEqual([]);
   });
 
-  it('reads a payload with no rosterAvailable as loaded', () => {
+  it('reads a payload with no participants.csv entry as loaded', () => {
     expect(rosterUnreadableIssues({ players: [] })).toEqual([]);
     expect(rosterUnreadableIssues(null)).toEqual([]);
+    // The server owns "the roster did not load": the flag alone synthesises nothing.
+    expect(rosterUnreadableIssues({ players: [], rosterAvailable: false })).toEqual([]);
   });
 });

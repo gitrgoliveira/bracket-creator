@@ -45,17 +45,16 @@ func IsReservedRosterName(name string) bool {
 	return rosterPoolFinalistRE.MatchString(n) || rosterWinnerOfRE.MatchString(n)
 }
 
-// ReservedRosterNames returns, in roster order, the name of each player the
-// roster rule (IsReservedRosterName) refuses, trimmed as it was given. Empty
-// when none is refused.
-func ReservedRosterNames(players []Player) []string {
-	var refused []string
+// FirstReservedRosterName returns, in roster order, the name of the first
+// player the roster rule (IsReservedRosterName) refuses, trimmed as it was
+// given, and false when none is refused.
+func FirstReservedRosterName(players []Player) (string, bool) {
 	for _, p := range players {
 		if IsReservedRosterName(p.Name) {
-			refused = append(refused, strings.TrimSpace(p.Name))
+			return strings.TrimSpace(p.Name), true
 		}
 	}
-	return refused
+	return "", false
 }
 
 // IsReservedParticipantName is the bracket rule: whether a stored side is a

@@ -609,8 +609,7 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		// resolved by its exact (name, dojo) below and lands in seeds.csv as
 		// it is.
 		for i := range assignments {
-			assignments[i].Name = helper.TitleCaseName(assignments[i].Name)
-			assignments[i].Dojo = helper.TitleCaseName(assignments[i].Dojo)
+			helper.CanonicalizeSeedText(&assignments[i])
 		}
 		// Cross-file guard symmetry with handlers_import.go's seed
 		// validation: reject oversized names so seeds.csv can't grow

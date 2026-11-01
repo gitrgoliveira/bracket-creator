@@ -506,6 +506,13 @@ function WatchlistPanel({ tournament, roster, rosterLoaded = true, watchlist, se
     roster.forEach((p) => { if (p.dojo) counts.set(p.dojo, (counts.get(p.dojo) || 0) + 1); });
     return Array.from(counts.entries()).map(([name, total]) => ({ name, total })).sort((a, b) => a.name.localeCompare(b.name));
   }, [roster]);
+  // The same list by dojoKey, so a dojo chip finds its dojo without a scan per
+  // chip. Of two names that read as one dojo the first in the list is kept.
+  const dojoByKey = useMemo(() => {
+    const byKey = new Map();
+    dojos.forEach((d) => { const k = dojoKey(d.name); if (!byKey.has(k)) byKey.set(k, d); });
+    return byKey;
+  }, [dojos]);
 
   const watchedPlayerIds = useMemo(() => watchlist.filter((e) => e.type === "player").map((e) => e.id), [watchlist]);
   const watchedDojos = useMemo(() => watchlist.filter((e) => e.type === "dojo").map((e) => e.dojo), [watchlist]);
@@ -577,7 +584,7 @@ function WatchlistPanel({ tournament, roster, rosterLoaded = true, watchlist, se
     // the whole roster and allocate an id array per dojo chip per render, only
     // to ask if it was empty -- ~50 chips x a few thousand participants at the
     // documented ceiling, on every aggregate refetch.
-    if (entry.type === "dojo") return !dojos.some((d) => sameDojo(d.name, entry.dojo));
+    if (entry.type === "dojo") return !dojoByKey.has(dojoKey(entry.dojo));
     return !!entry.id && !rosterById.get(entry.id);
   };
 
@@ -590,7 +597,7 @@ function WatchlistPanel({ tournament, roster, rosterLoaded = true, watchlist, se
     // the navy hero directly below it.
     const isPrimary = multi && effectiveKey === k;
     if (entry.type === "dojo") {
-      const total = dojos.find((d) => sameDojo(d.name, entry.dojo))?.total ?? 0;
+      const total = dojoByKey.get(dojoKey(entry.dojo))?.total ?? 0;
       const unresolved = entryUnresolved(entry);
       return (
         <span key={k} className={`pmf__chip pmf__chip--dojo ${isPrimary ? "is-primary" : ""} ${unresolved ? "pmf__chip--unresolved" : ""}`}

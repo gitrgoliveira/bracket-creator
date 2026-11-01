@@ -793,7 +793,7 @@ func parseSeedsBytes(data []byte) ([]domain.SeedAssignment, error) {
 		// canonicalized the roster this seeding will be checked against, merged
 		// onto and drawn from. Both files in a manifest are hand-written, and
 		// CreatePlayers title-cases every participant name and dojo it parses
-		// (helper.TitleCaseName), so a seeds row typed
+		// (helper.CanonicalizeSeedText gives a seed row that form), so a seeds row typed
 		// "alice cooper" against a roster row typed "alice cooper" arrives here
 		// naming a competitor the roster now calls "Alice Cooper" -- and the
 		// three consumers then disagreed: seedsOffRoster below REJECTED the
@@ -806,7 +806,9 @@ func parseSeedsBytes(data []byte) ([]domain.SeedAssignment, error) {
 		// makes all three agree: title-casing only the gate would have let a row
 		// through that the merge still cannot attach, which is precisely the
 		// split-views failure seedsOffRoster exists to catch at write time.
-		assignments = append(assignments, domain.SeedAssignment{Name: helper.TitleCaseName(name), SeedRank: rank, Dojo: helper.TitleCaseName(dojo)})
+		seed := domain.SeedAssignment{Name: name, SeedRank: rank, Dojo: dojo}
+		helper.CanonicalizeSeedText(&seed)
+		assignments = append(assignments, seed)
 	}
 	return assignments, nil
 }

@@ -290,25 +290,21 @@ export function MissingParticipantIDsNotice({ issues }) {
   );
 }
 
+export const ROSTER_FILE = "participants.csv";
+
 // rosterUnreadableIssues: the LOUD entries saying this competition's roster
 // file did not load, for the pages that would otherwise read its empty
 // `players` as "no roster yet" (the Participants page offered its paste box
 // over a roster the server could not read). The server sends an empty
-// roster in both cases and tells them apart only by `rosterAvailable` and
-// by the located entry on `dataIssues` (a participants.csv that will not
-// parse, two rows that are one competitor included). A roster that did not
-// load for any other reason (a row the parser refuses, an I/O fault) has no
-// located entry, so it gets one naming the file with no position: the
-// aggregate is all the page has then, since the detail endpoint refuses it.
-// Every roster save reads the stored file first, so both are refused alike.
-export const ROSTER_FILE = "participants.csv";
-export const ROSTER_UNREADABLE_DETAIL = "it could not be read, and the server's log says why";
+// roster in both cases and owns telling them apart: every roster that did
+// not load has a participants.csv entry on `dataIssues`, located for a file
+// that will not parse (two rows that are one competitor included), with no
+// position for any other failure (a row the parser refuses, an I/O fault;
+// handlers_viewer.go rosterUnreadableIssue). Every roster save reads the
+// stored file first, so both are refused alike.
 export function rosterUnreadableIssues(c) {
   if (!c) return [];
-  const located = (c.dataIssues || []).filter((i) => isLoudIssue(i) && i.file === ROSTER_FILE);
-  if (located.length > 0) return located;
-  if (c.rosterAvailable !== false) return [];
-  return [{ kind: "corrupt-file", file: ROSTER_FILE, line: 0, column: 0, detail: ROSTER_UNREADABLE_DETAIL }];
+  return (c.dataIssues || []).filter((i) => isLoudIssue(i) && i.file === ROSTER_FILE);
 }
 
 // DataIssueBanner: the competition-level notice for the LOUD class, where a

@@ -513,11 +513,12 @@ func validateSubBout(prefix string, sr *state.SubMatchResult, allowNumberedEncho
 // name with a member id is title-cased like one without, and every display
 // shows the member's current name by id.
 func titleCaseTypedFighters(rows []state.SubMatchResult, stored *state.MatchResult) {
-	var storedRows map[int]state.SubMatchResult
+	// The stored rows by position, as an index into stored.SubResults.
+	var storedAt map[int]int
 	if stored != nil {
-		storedRows = make(map[int]state.SubMatchResult, len(stored.SubResults))
-		for _, r := range stored.SubResults {
-			storedRows[r.Position] = r
+		storedAt = make(map[int]int, len(stored.SubResults))
+		for i := range stored.SubResults {
+			storedAt[stored.SubResults[i].Position] = i
 		}
 	}
 	for i := range rows {
@@ -525,7 +526,11 @@ func titleCaseTypedFighters(rows []state.SubMatchResult, stored *state.MatchResu
 		if row.Position == state.DaihyosenSubPosition {
 			continue
 		}
-		prior, held := storedRows[row.Position]
+		at, held := storedAt[row.Position]
+		var prior *state.SubMatchResult
+		if held {
+			prior = &stored.SubResults[at]
+		}
 		winsA := row.Winner != "" && row.Winner == row.SideA
 		winsB := row.Winner != "" && row.Winner == row.SideB
 		if !held || row.SideA != prior.SideA {

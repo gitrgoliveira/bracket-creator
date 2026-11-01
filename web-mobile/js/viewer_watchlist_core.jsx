@@ -163,12 +163,15 @@ export function sameDojo(a, b) {
   return dojoKey(a) === dojoKey(b);
 }
 
+// DOJO_ENTRY_PREFIX: what every dojo entry's key begins with (entryKey).
+const DOJO_ENTRY_PREFIX = "dojo:";
+
 // normalizeEntryKey: an entryKey stored before dojo keys ignored case (the
 // pinned entry) in the form entryKey gives now, so the pin still finds its
 // entry.
 export function normalizeEntryKey(key) {
   const k = key == null ? "" : String(key);
-  return k.startsWith("dojo:") ? "dojo:" + dojoKey(k.slice(5)) : k;
+  return k.startsWith(DOJO_ENTRY_PREFIX) ? DOJO_ENTRY_PREFIX + dojoKey(k.slice(DOJO_ENTRY_PREFIX.length)) : k;
 }
 
 // entryKey: stable identity for an entry, used for the pin pointer, React
@@ -177,7 +180,7 @@ export function normalizeEntryKey(key) {
 // Returns "" for anything unrecognisable so callers can filter it out.
 export function entryKey(entry) {
   if (!entry || typeof entry !== "object") return "";
-  if (entry.type === "dojo") return entry.dojo ? "dojo:" + dojoKey(entry.dojo) : "";
+  if (entry.type === "dojo") return entry.dojo ? DOJO_ENTRY_PREFIX + dojoKey(entry.dojo) : "";
   const id = entry.id != null ? String(entry.id) : "";
   return id ? "player:" + id : "";
 }
@@ -405,8 +408,9 @@ export function addPlayerToWatchlist(watchlist, p) {
 export function resolveEntryPlayerIds(entry, roster) {
   if (!entry) return [];
   if (entry.type === "dojo") {
+    const want = dojoKey(entry.dojo);
     return (Array.isArray(roster) ? roster : [])
-      .filter((p) => p && p.id && sameDojo(p.dojo, entry.dojo))
+      .filter((p) => p && p.id && dojoKey(p.dojo) === want)
       .map((p) => String(p.id));
   }
   return entry.id ? [String(entry.id)] : [];

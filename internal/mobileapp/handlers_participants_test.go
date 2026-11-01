@@ -434,6 +434,31 @@ func TestBatchPostBlankDojo_400(t *testing.T) {
 	assert.Empty(t, players, "no participants should be saved when a batch is rejected")
 }
 
+// A name that reads as a bracket placeholder in any case is refused with 400
+// and the roster rule's sentence naming it, on the single add and the batch
+// POST alike: both reach the one roster-save check.
+func TestPostParticipant_ReservedNameInAnyCase_400(t *testing.T) {
+	r, store, _, _, _ := setupTestRouter(t)
+	const compID = "comp-reserved-any-case"
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID, Name: "Reserved Any Case", Status: state.CompStatusSetup}))
+
+	for _, body := range []any{
+		map[string]string{"name": "pool a-1st", "dojo": "Wakaba"},
+		map[string]any{"players": []map[string]string{{"name": "Alice Smith", "dojo": "Wakaba"}, {"name": "winner of r1-m2", "dojo": "Tora"}}},
+	} {
+		raw, _ := json.Marshal(body)
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/api/competitions/"+compID+"/participants", bytes.NewBuffer(raw))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+		assert.Contains(t, w.Body.String(), state.ErrReservedName.Error())
+	}
+	stored, err := store.LoadParticipants(compID, false)
+	require.NoError(t, err)
+	assert.Empty(t, stored, "nothing is written")
+}
+
 // TestBatchPostOrphaningSeedRejected is the regression guard for the bc-389
 // review finding: the bulk roster-replace endpoint (POST
 // /competitions/:id/participants with a players[] body) carries no seed data

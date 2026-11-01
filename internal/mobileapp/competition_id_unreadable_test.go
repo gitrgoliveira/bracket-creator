@@ -166,6 +166,30 @@ func TestImportSaveFailure_RosterRuleNamesTheParticipant(t *testing.T) {
 	assert.Nil(t, stored, "the half-imported competition is rolled back")
 }
 
+// An imported roster is title-cased before the save ("Pool A-1st" arrives as
+// "Pool A-1St"), and the save's roster rule ignores case, so a placeholder
+// name in an import is refused with the app's own sentence naming it, and the
+// half-imported competition is rolled back.
+func TestImportCompetition_RefusesAReservedNameInTheRoster(t *testing.T) {
+	r, store, _, _, _ := setupTestRouter(t)
+	seedImportTournamentDate(t, store)
+	const cid = "reserved-import"
+
+	res := postImportManifest(t, r, `
+competitions:
+  - id: "`+cid+`"
+    name: "Reserved Import"
+    courts: ["A"]
+    participants: "players.csv"
+`, map[string]string{"players.csv": "Alice, Dojo A\nPool A-1st, Dojo B\n"})
+
+	assert.Contains(t, res.Error, state.ErrReservedName.Error())
+	assert.Contains(t, res.Error, `"Pool A-1St"`, "the row error names the participant as the roster stores it")
+	stored, err := store.LoadCompetition(cid)
+	require.NoError(t, err)
+	assert.Nil(t, stored, "the half-imported competition is rolled back")
+}
+
 // postImportManifest imports one manifest with its named files and answers
 // the one row the import reports.
 func postImportManifest(t *testing.T, r http.Handler, manifest string, files map[string]string) ImportResult {

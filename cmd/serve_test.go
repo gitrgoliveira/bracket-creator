@@ -277,6 +277,16 @@ func TestRouterParseParticipants(t *testing.T) {
 			expectedError:  "participant validation failed",
 		},
 		{
+			name: "a name that reads as a bracket placeholder, in any case",
+			payload: map[string]interface{}{
+				"playerList":     "John Doe, Dojo A\npool a-1st, Dojo B",
+				"withZekkenName": false,
+			},
+			expectedStatus: http.StatusBadRequest,
+			expectError:    true,
+			expectedError:  `participant name collides with a reserved bracket-placeholder pattern: "Pool A-1St"`,
+		},
+		{
 			name: "empty player list",
 			payload: map[string]interface{}{
 				"playerList":     "",

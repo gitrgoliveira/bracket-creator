@@ -193,10 +193,23 @@ func (e *duplicateTeamMemberError) Is(target error) bool { return target == ErrD
 var ErrCompetitionNotInSetup = errors.New("competition has already started")
 
 // ErrReservedName is returned by the participant write paths when a name
-// matches an internal bracket-placeholder pattern (e.g. "Pool A-1st",
-// "Winner of r1-m3").  Such names would be silently misclassified as
-// unresolved bracket slots, making knockout matches permanently unscoreable.
+// matches an internal bracket-placeholder pattern in any case (e.g. "Pool
+// A-1st", "pool a-1st", "Winner of r1-m3").  Such names would be silently
+// misclassified as unresolved bracket slots, making knockout matches
+// permanently unscoreable.
 var ErrReservedName = errors.New("participant name collides with a reserved bracket-placeholder pattern")
+
+// RefuseReservedNames is the one reserved-name refusal: ErrReservedName naming
+// the first player helper.IsReservedRosterName (the roster rule, which ignores
+// case) refuses, or nil. saveParticipantsNoLock asks it of every roster write,
+// so a roster already holding such a name is refused on its next save until
+// that name is changed; the CLI asks it of the roster it reads.
+func RefuseReservedNames(players []domain.Player) error {
+	if refused := helper.ReservedRosterNames(players); len(refused) > 0 {
+		return fmt.Errorf("%w: %q", ErrReservedName, refused[0])
+	}
+	return nil
+}
 
 // LoadParticipantsOpts controls optional behavior in LoadParticipants.
 type LoadParticipantsOpts struct {
@@ -747,29 +760,18 @@ func (s *Store) updateParticipantNoLock(compID string, pid string, withZekkenNam
 		return nil, err
 	}
 
-	// Reserved-name check before TitleCase, but ONLY when the name actually
-	// changed.  Check-in transforms leave the name untouched; running the
-	// guard unconditionally would break check-in for any participant whose
-	// stored name happens to match the reserved pattern (however unlikely).
-	// When the name DID change, check the raw pre-TitleCase value: TitleCase
-	// alters ordinal suffixes ("3rd"→"3Rd") so the post-TitleCase form would
-	// never match the reserved regex.
-	// Detect rename by comparing raw values (before TrimSpace) so that a
-	// stored name like "Alice" is never spuriously considered changed by a
-	// check-in transform that doesn't touch Name at all.  TrimSpace is only
-	// for the regex match, not for change detection.
-	if players[foundIdx].Name != oldName {
-		trimmedName := strings.TrimSpace(players[foundIdx].Name)
-		if helper.IsReservedParticipantName(trimmedName) {
-			return nil, fmt.Errorf("%w: %q", ErrReservedName, trimmedName)
-		}
-	}
-
 	// Canonicalize to match what CreatePlayers produces on load (Title-case),
 	// so participants.csv and seeds.csv store the same form that will be read
 	// back; otherwise a rename to "alice cooper" would be read as "Alice Cooper"
 	// while seeds.csv still holds "alice cooper", breaking seed merging.
 	players[foundIdx].Name = helper.TitleCaseName(players[foundIdx].Name)
+
+	// The roster rule saveParticipantsNoLock asks, asked here first because
+	// the seeds.csv rewrite below lands before that save: a rename the save
+	// would refuse must not have renamed the seed already.
+	if err := RefuseReservedNames(players); err != nil {
+		return nil, err
+	}
 
 	// Duplicate guard: reject if any OTHER participant already has the same
 	// (normalizedName, normalizedDojo) pair. This runs unconditionally; even
@@ -1011,15 +1013,6 @@ func (s *Store) AddParticipant(compID string, p domain.Player, withZekkenName bo
 			helper.NormalizeParticipantName(existing.Dojo) == helper.NormalizeParticipantName(strings.TrimSpace(p.Dojo)) {
 			return nil, ErrDuplicateName
 		}
-	}
-
-	// Reserved-name check before TitleCase so the error fires on the raw input
-	// ("Pool B-3rd") even though TitleCase would transform the ordinal suffix to
-	// a non-matching form ("Pool B-3Rd"). The bulk SaveParticipants path skips
-	// TitleCase, so saveParticipantsNoLock also carries this guard for that path.
-	trimmedName := strings.TrimSpace(p.Name)
-	if helper.IsReservedParticipantName(trimmedName) {
-		return nil, fmt.Errorf("%w: %q", ErrReservedName, trimmedName)
 	}
 
 	p.Name = helper.TitleCaseName(p.Name)
@@ -1395,15 +1388,13 @@ func (s *Store) saveParticipantsNoLock(compID string, players []domain.Player, w
 		}
 	}
 
-	// Reserved-name guard: names arriving via the bulk SaveParticipants path
-	// may be raw (neither TitleCased nor trimmed), so trim before matching to
-	// catch inputs like " Pool A-1st " that would otherwise slip through.
-	// AddParticipant and updateParticipantNoLock apply their own pre-TitleCase
-	// checks before reaching here; for those paths the guard is defence-in-depth.
-	for _, p := range players {
-		if trimmed := strings.TrimSpace(p.Name); helper.IsReservedParticipantName(trimmed) {
-			return fmt.Errorf("%w: %q", ErrReservedName, trimmed)
-		}
+	// Reserved-name guard, the one place the roster rule is asked of a write
+	// (updateParticipantNoLock asks it early too, only because its seeds.csv
+	// rewrite lands before this call). Names arrive raw from the paste box
+	// and title-cased from an add, an edit or an import; the rule ignores
+	// case, so every spelling is refused alike.
+	if err := RefuseReservedNames(players); err != nil {
+		return err
 	}
 
 	// bc-tmid: migrate a team's squad OUT of Metadata BEFORE this write can

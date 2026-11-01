@@ -112,9 +112,9 @@ func openOutputFile(outputPath string) (*os.File, *bufio.Writer, error) {
 	return f, bufio.NewWriter(f), nil
 }
 
-// processEntries validates the entry list (rejecting duplicates), optionally
-// shuffles, and converts raw CSV entry strings into Player objects. Duplicate
-// entries are returned as a hard error so the caller (CLI or web handler)
+// processEntries validates the entry list (rejecting duplicates and reserved
+// names), optionally shuffles, and converts raw CSV entry strings into Player
+// objects. Duplicate entries are returned as a hard error so the caller (CLI or web handler)
 // can surface them to the user instead of silently dropping rows.
 func processEntries(entries []string, determined bool, withZekkenName bool) ([]helper.Player, error) {
 	if dups := helper.CheckDuplicateEntries(entries); len(dups) > 0 {
@@ -128,8 +128,19 @@ func processEntries(entries []string, determined bool, withZekkenName bool) ([]h
 			return nil, fmt.Errorf("shuffling entries: %w", err)
 		}
 	}
+	return createRoster(entries, withZekkenName)
+}
+
+// createRoster parses entry lines into players and refuses a name the
+// tournament app's roster rule refuses (state.RefuseReservedNames: a name that
+// reads as a bracket placeholder such as "Pool A-1st", in any case), so the
+// CLI, its web server and the app take the same names.
+func createRoster(entries []string, withZekkenName bool) ([]helper.Player, error) {
 	players, err := helper.CreatePlayers(entries, withZekkenName)
 	if err != nil {
+		return nil, err
+	}
+	if err := state.RefuseReservedNames(players); err != nil {
 		return nil, err
 	}
 	return players, nil

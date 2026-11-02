@@ -482,6 +482,42 @@ func TestRegistration_POST_ReservedNameElsewhereInRoster_Returns500NotLeakingNam
 	assert.Len(t, players, 2, "a refused write must not have landed")
 }
 
+// A stored row with a blank name is the same kind of damage: the roster check
+// names that row's dojo, which a walk-up is never shown. They get the generic
+// answer and the log names the row, while their own reserved name is still
+// refused first, naming that name alone.
+func TestRegistration_POST_BlankNameElsewhereInRoster_Returns500NotLeakingDojo(t *testing.T) {
+	r, store, _, tempDir := setupRegistrationRouter(t, selfRunTournament())
+
+	const compID = "comp-blank-name-reg"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:     compID,
+		Name:   "Blank Name Elsewhere",
+		Status: state.CompStatusSetup,
+	}))
+	writeLegacyRosterCSV(t, tempDir, compID, ",Kenshinkan\nBob Smith,Mumeishi\n")
+
+	var logBuf bytes.Buffer
+	prevOut, prevFlags := log.Writer(), log.Flags()
+	log.SetOutput(&logBuf)
+	log.SetFlags(0)
+	defer func() { log.SetOutput(prevOut); log.SetFlags(prevFlags) }()
+
+	w := doRegister(r, compID, map[string]any{"name": "Carol Jones", "dojo": "Bka"})
+	assert.Equal(t, http.StatusInternalServerError, w.Code,
+		"a blank name on ANOTHER row is server-side data damage, not this registrant's error")
+	assert.NotContains(t, w.Body.String(), "Kenshinkan",
+		"the public registration response must never name another row's data")
+	assert.Contains(t, w.Body.String(), "Registration is temporarily unavailable")
+	assert.Contains(t, logBuf.String(), "Kenshinkan", "the offending row must reach the server log")
+
+	w = doRegister(r, compID, map[string]any{"name": "pool c-3rd", "dojo": "Bka"})
+	assert.Equal(t, http.StatusBadRequest, w.Code, "the registrant's own reserved name is theirs to change")
+	assert.Contains(t, strings.ToLower(w.Body.String()), "pool c-3rd")
+	assert.NotContains(t, w.Body.String(), "Kenshinkan",
+		"the refusal names the registrant's own name alone")
+}
+
 // On a clean roster the walk-up's own reserved name is still refused with
 // the roster rule's 400 naming it.
 func TestRegistration_POST_OwnReservedName_Returns400(t *testing.T) {

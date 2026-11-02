@@ -1,13 +1,10 @@
 package mobileapp
 
 import (
-	"encoding/csv"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"log"
 	"net/http"
-	"strings"
 	"sync"
 	"sync/atomic"
 
@@ -597,23 +594,15 @@ func dataIssuesFrom(errs ...error) []gin.H {
 // server's log names the reason (data_integrity.jsx DataIssueBanner, D27).
 const rosterUnreadableDetail = "could not be opened"
 
-// The "cause" of a participants.csv entry with no position, which the banner
-// words its advice by (D27): the file could not be opened, or it was read and
-// the parser refused a row the store could not place on a line.
-const (
-	rosterCauseUnopened = "unopened"
-	rosterCauseRefused  = "refused"
-)
-
 // rosterUnreadableIssue is the corrupt-file entry naming participants.csv for
 // a roster read that failed for any reason but a located one, which
-// dataIssuesFrom already names; nil when the roster loaded or its failure is
-// located. A CSV syntax fault is located from its own position; a parser
-// refusal and an open failure carry no position and say which they are in
-// "cause". The server owns "the roster did not load": every page that would
-// read an empty roster as "no roster yet" asks dataIssues for it
-// (data_integrity.jsx rosterUnreadableIssues), since every roster save reads
-// the stored file first and is refused alike.
+// dataIssuesFrom already names (two rows that are one competitor, a row the
+// parser refuses and a CSV syntax fault are all located by the store); nil when
+// the roster loaded or its failure is located. What is left is a file the
+// server could not open, which carries no position. The server owns "the
+// roster did not load": every page that would read an empty roster as "no
+// roster yet" asks dataIssues for it (data_integrity.jsx rosterUnreadableIssues),
+// since every roster save reads the stored file first and is refused alike.
 func rosterUnreadableIssue(plErr error) *gin.H {
 	if plErr == nil {
 		return nil
@@ -621,54 +610,13 @@ func rosterUnreadableIssue(plErr error) *gin.H {
 	if cf, _ := state.AsCorruptFile(plErr); cf != nil {
 		return nil // located: dataIssuesFrom names it
 	}
-	// A CSV syntax fault carries its own position: locate it like any damaged
-	// file, so the banner gives the bad-line repair advice.
-	var pe *csv.ParseError
-	if errors.As(plErr, &pe) && pe.Line > 0 {
-		return &gin.H{
-			"kind":   "corrupt-file",
-			"file":   "participants.csv",
-			"line":   pe.Line,
-			"column": pe.Column,
-			"detail": pe.Err.Error(),
-		}
-	}
-	issue := gin.H{
+	return &gin.H{
 		"kind":   "corrupt-file",
 		"file":   "participants.csv",
 		"line":   0,
 		"column": 0,
 		"detail": rosterUnreadableDetail,
-		"cause":  rosterCauseUnopened,
 	}
-	// The file opened and was read, but the parser refused a row in it (a
-	// one-field row in a zekken roster). Editing the file IS the fix, so the
-	// entry says what was refused and the banner gives the repair advice, not
-	// "the server could not open this file". The refusal names the row by its
-	// place among the competitor rows; only the store knows the file line, so
-	// no line is claimed here.
-	var ve *helper.ParticipantValidationError
-	if errors.As(plErr, &ve) && len(ve.Problems) > 0 {
-		issue["detail"] = rosterRefusedDetail(ve.Problems)
-		issue["cause"] = rosterCauseRefused
-	}
-	return &issue
-}
-
-// rosterRefusedDetail words a parser refusal for the banner: the first few
-// problems the parser listed, each naming its row as "competitor row N" (the
-// parser's "entry N" counts competitor rows, not file lines).
-func rosterRefusedDetail(problems []string) string {
-	const shown = 3
-	parts := make([]string, 0, shown+1)
-	for i, p := range problems {
-		if i == shown {
-			parts = append(parts, fmt.Sprintf("and %d more", len(problems)-shown))
-			break
-		}
-		parts = append(parts, strings.Replace(strings.TrimSpace(p), "entry ", "competitor row ", 1))
-	}
-	return "a row was refused: " + strings.Join(parts, "; ")
 }
 
 // missingIDsIssue builds a "missing-ids" dataIssues entry naming file, or
@@ -730,10 +678,9 @@ func missingIDsIssue(file, detail string) *gin.H {
 // rows for a missing id; a nil or empty slice reports no issue from that
 // record. Deliberately takes only plErr/pmErr/brErr/poolsErr for the
 // corrupt-file half (plErr: participants.csv holding two rows that are one
-// competitor once canonicalised, operator decision D21, named by its lines
-// like any other damaged file; any other roster read failure is named by
-// rosterUnreadableIssue, located for a CSV syntax fault and with no position
-// otherwise): the detail endpoint's own standingsErr is not
+// competitor once canonicalised, operator decision D21, or a row the parser
+// refuses, named by their lines like any other damaged file; a roster the
+// server could not open is named by rosterUnreadableIssue, with no position): the detail endpoint's own standingsErr is not
 // passed in, even though it can carry the identical underlying
 // fault as poolsErr (engine.CalculatePoolStandings's own internal LoadPools
 // reads the same pools.csv) -- reporting both would either double the entry
@@ -1083,11 +1030,11 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 			if isTeamComp {
 				payload["teamMembers"] = squads
 			}
-			// Always true when reached: a participants read failure is never a
-			// *state.CorruptFileError (see the degradedReads note above), so the
-			// loop returns before here. Emitted anyway so this payload and the
-			// aggregate's carry the same keys; the SPA reads the flag from the
-			// aggregate (api_client.jsx normalizeViewerCompItem), never from here.
+			// False whenever the roster read failed (a located fault or a file the
+			// server could not open; the degradedReads loop above lets every
+			// participants failure through) and dataIssues says why. The SPA
+			// reads the flag from the aggregate (api_client.jsx
+			// normalizeViewerCompItem) as well.
 			payload["rosterAvailable"] = playersErr == nil
 			if issues := viewerDataIssues(comp, comp.Players, pools, poolMatches, playersErr, poolMatchesErr, bracketErr, poolsErr); len(issues) > 0 {
 				payload["dataIssues"] = issues

@@ -1357,7 +1357,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
                     a new list and mounts empty, so a count here would read
                     "0" over a competition that has a full saved roster. The
                     roster's own size is on the Ordering & seeding card. */}
-                {lines.length === 0 ? "Empty" : pluralize(lines.length, "line")} · One per line · <span className="participants-example">Example: {c.kind === "team" ? "Tora A, Tora Dojo London" : c.engi ? (c.withZekkenName ? "Emi Sasaki - Ren Fujita, SASAKI - FUJITA, Getsurin, 3" : "Emi Sasaki - Ren Fujita, Getsurin, 3") : c.withZekkenName ? "Alice Smith, SMITH, Gyokusen, 3" : "Alice Smith, Gyokusen, 3"}</span>
+                {lines.length === 0 ? "Empty" : pluralize(lines.length, "line")} · One per line <span className="participants-example">Example: {c.kind === "team" ? "Tora A, Tora Dojo London" : c.engi ? (c.withZekkenName ? "Emi Sasaki - Ren Fujita, SASAKI - FUJITA, Getsurin, 3" : "Emi Sasaki - Ren Fujita, Getsurin, 3") : c.withZekkenName ? "Alice Smith, SMITH, Gyokusen, 3" : "Alice Smith, Gyokusen, 3"}</span>
               </div>
               <div className="field__hint" style={{ marginTop: 2, fontSize: 11 }}>
                 Format: &ldquo;{rosterFormat}&rdquo;

@@ -4733,6 +4733,10 @@ button.vsched-item:not([data-clickable]) {
 
 /* A <button> (keyboard-reachable), so the UA button styles are reset here. */
 .dropzone {
+  /* Positioned, so it paints over the invisible 44px tap band of the
+     "Download CSV template" link above it (.btn--link::before) and a tap on
+     the zone's top row opens the file picker. */
+  position: relative;
   flex: 1;
   min-height: 64px;
   border: 2px dashed var(--line-2);
@@ -4774,10 +4778,10 @@ button.vsched-item:not([data-clickable]) {
   color: var(--ink-3);
 }
 
-/* The participant list card's example line: one unit that wraps as a whole,
-   so a narrow line never strands its last field ("3") alone. */
+/* The participant list card's example line: a line of its own, so it never
+   strands its last field ("3") or a separator at a line's end. */
 .participants-example {
-  display: inline-block;
+  display: block;
   color: var(--ink-2);
   font-weight: 600;
 }

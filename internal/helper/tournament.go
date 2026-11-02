@@ -134,12 +134,12 @@ func CreatePlayersFromRecords(records [][]string, withZekkenName bool, requireDo
 	return createPlayersFromRecords(records, withZekkenName, requireDojo, false)
 }
 
-// rowError formats a validation error for row i (0-based) of a CSV import as
-// "entry N: missing <field> in <row>". The row is quoted because callers may
-// have shuffled or dropped blank lines before this runs, so the entry number
-// alone does not identify a line in the file.
-func rowError(i int, line []string, field string) string {
-	return fmt.Sprintf("entry %d: missing %s in %q", i+1, field, strings.Join(line, ","))
+// rowError words the reason a row of a CSV import is refused, "missing <field>
+// in <row>". The row is quoted because callers may have shuffled or dropped
+// blank lines before this runs, so the entry number alone does not identify a
+// line in the file.
+func rowError(line []string, field string) string {
+	return fmt.Sprintf("missing %s in %q", field, strings.Join(line, ","))
 }
 
 // createPlayersFromRecords is the shared body behind CreatePlayers (strict:
@@ -152,8 +152,16 @@ func createPlayersFromRecords(records [][]string, withZekkenName, requireDojo, r
 	players := make([]Player, 0, len(records))
 	textChanged := false
 	var errors []string
+	var refused []RefusedRow
 	var duplicates []DuplicateEntry
 	seenNames := make(map[string]int)
+	// refuse records that row i (0-based) cannot be a competitor: the reader
+	// reports it with its entry number, and a caller that knows each entry's
+	// file line (state) can place it.
+	refuse := func(i int, reason string) {
+		errors = append(errors, fmt.Sprintf("entry %d: %s", i+1, reason))
+		refused = append(refused, RefusedRow{Entry: i + 1, Reason: reason})
+	}
 
 	for i, line := range records {
 		if IsBlankRecord(line) {
@@ -163,7 +171,7 @@ func createPlayersFromRecords(records [][]string, withZekkenName, requireDojo, r
 			line[j] = strings.TrimSpace(line[j])
 		}
 		if requireName && line[0] == "" {
-			errors = append(errors, rowError(i, line, "name"))
+			refuse(i, rowError(line, "name"))
 			continue
 		}
 
@@ -174,7 +182,7 @@ func createPlayersFromRecords(records [][]string, withZekkenName, requireDojo, r
 
 		if withZekkenName {
 			if len(line) < 2 {
-				errors = append(errors, fmt.Sprintf("entry %d: invalid format: expected 'Name, Dojo' or 'Name, DisplayName, Dojo'", i+1))
+				refuse(i, "invalid format: expected 'Name, Dojo' or 'Name, DisplayName, Dojo'")
 				continue
 			}
 			player.Name = line[0]
@@ -182,12 +190,12 @@ func createPlayersFromRecords(records [][]string, withZekkenName, requireDojo, r
 				player.DisplayName = SanitizeName(line[0])
 				player.Dojo = line[1]
 				if requireDojo && player.Dojo == "" {
-					errors = append(errors, rowError(i, line, "dojo"))
+					refuse(i, rowError(line, "dojo"))
 					continue
 				}
 			} else {
 				if requireDojo && line[2] == "" {
-					errors = append(errors, rowError(i, line, "dojo"))
+					refuse(i, rowError(line, "dojo"))
 					continue
 				}
 				player.DisplayName = line[1]
@@ -243,13 +251,13 @@ func createPlayersFromRecords(records [][]string, withZekkenName, requireDojo, r
 			// identically instead of only one of them.
 			if len(line) < 2 {
 				if requireDojo {
-					errors = append(errors, rowError(i, line, "dojo"))
+					refuse(i, rowError(line, "dojo"))
 					continue
 				}
 			} else {
 				player.Dojo = line[1]
 				if requireDojo && player.Dojo == "" {
-					errors = append(errors, rowError(i, line, "dojo"))
+					refuse(i, rowError(line, "dojo"))
 					continue
 				}
 			}
@@ -287,7 +295,7 @@ func createPlayersFromRecords(records [][]string, withZekkenName, requireDojo, r
 	}
 
 	if len(errors) > 0 {
-		return nil, false, &ParticipantValidationError{Problems: errors, Duplicates: duplicates}
+		return nil, false, &ParticipantValidationError{Problems: errors, Refused: refused, Duplicates: duplicates}
 	}
 
 	return players, textChanged, nil
@@ -305,7 +313,16 @@ type DuplicateEntry struct{ Entry, FirstEntry int }
 // reading participants.csv) can name the file's lines.
 type ParticipantValidationError struct {
 	Problems   []string
+	Refused    []RefusedRow
 	Duplicates []DuplicateEntry
+}
+
+// RefusedRow is a row that cannot be a competitor (a field it needs is
+// missing). Entry is its 1-based place among the rows given to the reader, the
+// "entry N" of Problems, and Reason is the sentence without that prefix.
+type RefusedRow struct {
+	Entry  int
+	Reason string
 }
 
 func (e *ParticipantValidationError) Error() string {

@@ -161,17 +161,18 @@ describe('DataIssueBanner advice per case', () => {
     expect(text).not.toMatch(/will not parse/);
   });
 
-  // Round 2 (V1/J1): a file the server read whose parser refused a row is
-  // fixed by editing that row, never told it could not be opened.
-  it('gives the repair advice for a refused row the server could not place on a line', () => {
-    const refused = { kind: 'corrupt-file', file: 'participants.csv', line: 0, column: 0, cause: 'refused',
-      detail: "a row was refused: competitor row 2: invalid format: expected 'Name, Dojo' or 'Name, DisplayName, Dojo'" };
+  // A row the parser refuses is located on its FILE line, so it takes the
+  // bad-line advice and the banner never claims a way of counting rows.
+  it('gives the repair advice for a refused row, located on its file line', () => {
+    const refused = { kind: 'corrupt-file', file: 'participants.csv', line: 8, column: 1,
+      detail: "invalid format: expected 'Name, Dojo' or 'Name, DisplayName, Dojo'" };
     render(<DataIssueBanner issues={[refused]} competition={comp} onReload={vi.fn()} />);
     const text = screen.getByRole('alert').textContent.replace(/\s+/g, ' ');
-    expect(text).toContain('Open the file, fix the row named above, then press Reload.');
-    expect(text).toContain('competitor row 2');
+    expect(text).toContain('competitions/kendo/participants.csv, line 8, column 1');
+    expect(text).toContain('Repair the file. Open it, fix the position above and save it, then press Reload.');
+    expect(text).not.toMatch(/Rows are counted/);
+    expect(text).not.toMatch(/clears on its own/);
     expect(text).not.toMatch(/could not (be )?open/);
-    expect(text).not.toMatch(/permission/);
   });
 
   // participants.csv holds no results and blocks the roster and the draw, not
@@ -179,8 +180,8 @@ describe('DataIssueBanner advice per case', () => {
   it('words the roster banner for the roster, and names the Reload button', () => {
     render(<DataIssueBanner issues={[located]} competition={comp} onReload={vi.fn()} />);
     const text = screen.getByRole('alert').textContent.replace(/\s+/g, ' ');
-    expect(text).toContain('The roster and the draw are blocked until it loads.');
-    expect(text).toContain('fix the position above, then press Reload.');
+    expect(text).toContain('The roster and the draw are blocked until this file loads.');
+    expect(text).toContain('fix the position above and save it, then press Reload.');
     expect(text).not.toMatch(/Scoring is blocked/);
     expect(text).not.toMatch(/results included/);
   });
@@ -231,18 +232,24 @@ describe('DataIssueBanner advice per case', () => {
     const onReload = vi.fn(() => new Promise((resolve) => { finish = resolve; }));
     render(<DataIssueBanner issues={[unopened]} competition={comp} onReload={onReload} />);
     await act(async () => { screen.getByRole('button', { name: /Reload/ }).click(); });
-    const busy = screen.getByRole('button', { name: /Reloading/ });
+    // The label does not change while busy (the spinner takes the icon's
+    // place), so the button keeps its width under the finger.
+    const busy = screen.getByRole('button', { name: /^Reload$/ });
     expect(busy.disabled).toBe(true);
+    expect(busy.getAttribute('aria-busy')).toBe('true');
     await act(async () => { finish({ ok: true }); });
     expect(screen.getByRole('button', { name: /^Reload$/ }).disabled).toBe(false);
     expect(screen.getByTestId('data-issue-reload-note').textContent).toBe('Reloaded: the file still could not be read.');
   });
 
-  it('says a failed reload, with its reason', async () => {
-    const onReload = vi.fn().mockResolvedValue({ ok: false, message: 'Network down' });
+  it('says a failed reload in plain words, and keeps the raw text for the console', async () => {
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const onReload = vi.fn().mockResolvedValue({ ok: false, message: 'Failed to fetch' });
     render(<DataIssueBanner issues={[unopened]} competition={comp} onReload={onReload} />);
     await act(async () => { screen.getByRole('button', { name: /Reload/ }).click(); });
-    expect(screen.getByTestId('data-issue-reload-note').textContent).toBe('Could not reload: Network down. Try again in a moment.');
+    expect(screen.getByTestId('data-issue-reload-note').textContent).toBe('Could not reach the server. Check the connection and press Reload again.');
+    expect(logged).toHaveBeenCalledWith('Reload failed:', 'Failed to fetch');
+    logged.mockRestore();
   });
 });
 

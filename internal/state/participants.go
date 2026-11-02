@@ -489,7 +489,7 @@ func (s *Store) readParticipantsNoLock(compID string, withZekkenName bool, opts 
 	// builds a roster FRESH from raw text, requires one.
 	players, textChanged, err := helper.CreatePlayersFromRecords(playerRecords, withZekkenName, false)
 	if err != nil {
-		return nil, false, duplicateRowsError(err, playerLines)
+		return nil, false, locatedRowsError(err, playerLines)
 	}
 
 	for i := range players {

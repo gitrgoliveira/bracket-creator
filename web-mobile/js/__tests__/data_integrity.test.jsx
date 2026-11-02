@@ -4,7 +4,6 @@ import {
   unreadableMatches,
   dataIssueLocator,
   issueIsLocated,
-  issueRowRefused,
   issueUnopened,
   bracketIssue,
   bracketRecoveryKind,
@@ -73,21 +72,11 @@ describe('issueIsLocated: a fault on a line, or a file never opened', () => {
     expect(issueIsLocated(null)).toBe(false);
   });
 
-  // An entry with no position says which it is (handlers_viewer.go
-  // rosterUnreadableIssue); one with no cause, an older payload's, reads as a
-  // file that could not be opened, as it did before the cause existed.
-  it('tells a refused row from a file that could not be opened', () => {
-    const refused = { file: 'participants.csv', line: 0, cause: 'refused' };
-    const unopened = { file: 'participants.csv', line: 0, cause: 'unopened' };
-    const older = { file: 'participants.csv', line: 0 };
-    const located = { file: 'participants.csv', line: 4, cause: 'refused' };
-    expect(issueRowRefused(refused)).toBe(true);
-    expect(issueUnopened(refused)).toBe(false);
-    expect(issueUnopened(unopened)).toBe(true);
-    expect(issueUnopened(older)).toBe(true);
-    expect(issueRowRefused(located)).toBe(false);
-    expect(issueUnopened(located)).toBe(false);
-    expect(issueRowRefused(null)).toBe(false);
+  // An entry with no position is a file the server could not open; a row the
+  // parser refuses is located on its file line like any other fault.
+  it('reads an entry with no position as a file that could not be opened', () => {
+    expect(issueUnopened({ file: 'participants.csv', line: 0 })).toBe(true);
+    expect(issueUnopened({ file: 'participants.csv', line: 4 })).toBe(false);
     expect(issueUnopened(null)).toBe(false);
   });
 });

@@ -375,6 +375,75 @@ func TestLegacyTextCaseUpgrade_DrawConvergesOnARosterAlreadyRewritten(t *testing
 	assert.Equal(t, "Rin 2nd", seeds[0].Name)
 }
 
+// A match sent back to the queue is scheduled but keeps what was fought
+// (bc-sbq), and its bout rows copy the match's names: a team-named bout
+// Winner and the representative-bout row's sides. Renaming the match under
+// them would credit the bout to nobody, so such a match keeps its names (D18,
+// D24 (b) "every match not yet fought"). A scheduled match holding only a
+// bout row with fighters seated and no result was never fought and converges.
+func TestLegacyTextCaseUpgrade_AMatchSentBackToTheQueueKeepsItsNames(t *testing.T) {
+	dir, s := newLegacyUpgradeFixture(t)
+	rin, ken, yuki, _ := drawSpellingFixture(t, s, dir, true)
+	require.NoError(t, s.SavePoolMatches("c1", []state.MatchResult{
+		{ID: "Pool A-1", SideA: "Rin 2Nd", SideAID: rin, SideB: "Ken 2Nd", SideBID: ken, Status: state.MatchStatusScheduled,
+			SubResults: []state.SubMatchResult{{Position: 1, SideA: "Aiko", SideB: "Haru"}}},
+		{ID: "Pool A-2", SideA: "Ken 2Nd", SideAID: ken, SideB: "Yuki Tanaka", SideBID: yuki, IpponsA: []string{"K"}, Status: state.MatchStatusScheduled},
+	}))
+	require.NoError(t, s.SaveBracket("c1", &state.Bracket{Rounds: [][]state.BracketMatch{{
+		{ID: "m-r1-0", SideA: "Rin 2Nd", SideAID: rin, SideB: "Yuki Tanaka", SideBID: yuki, Status: state.MatchStatusScheduled,
+			SubResults: []state.SubMatchResult{
+				{Position: 1, IpponsA: []string{"M"}, Winner: "Rin 2Nd"},
+				{Position: -1, SideA: "Rin 2Nd", SideB: "Yuki Tanaka", Decision: string(domain.DecisionDaihyosen)},
+			}},
+		{ID: "m-r1-1", SideA: "Ken 2Nd", SideAID: ken, SideB: "Yuki Tanaka", SideBID: yuki, Status: state.MatchStatusScheduled},
+	}}}))
+
+	fresh := freshLegacyUpgradeStore(t, dir)
+	fresh.EnsureLegacyUpgraded("c1")
+
+	matches, err := fresh.LoadPoolMatches("c1")
+	require.NoError(t, err)
+	sides := map[string]string{}
+	for _, m := range matches {
+		sides[m.ID] = m.SideA
+	}
+	assert.Equal(t, "Rin 2nd", sides["Pool A-1"], "a bout row with fighters seated and no result is not fought")
+	assert.Equal(t, "Ken 2Nd", sides["Pool A-2"], "a match sent back with its points keeps its names")
+
+	bracket, err := fresh.LoadBracket("c1")
+	require.NoError(t, err)
+	sentBack := bracketMatchByID(t, bracket, "m-r1-0")
+	assert.Equal(t, "Rin 2Nd", sentBack.SideA, "a match sent back with its bouts keeps its names")
+	assert.Equal(t, sentBack.SideA, sentBack.SubResults[1].SideA, "the representative-bout row still names the match's side")
+	assert.Equal(t, domain.MatchSideA, state.SubBoutWinnerSide(sentBack.SubResults[0], sentBack.SideA, sentBack.SideB),
+		"the team-named bout is still credited to its side")
+	assert.Equal(t, "Ken 2nd", bracketMatchByID(t, bracket, "m-r1-1").SideA, "a match not yet fought takes the roster's spelling")
+}
+
+// A seeds.csv row with no dojo (the two-column Rank,Name layout) that an
+// earlier release wrote as "Ken 2Nd" finds the roster's "Ken 2nd" ignoring
+// case, takes its dojo and id once, and so keeps its seed.
+func TestLegacyTextCaseUpgrade_ADojolessSeedRowFindsTheRosterIgnoringCase(t *testing.T) {
+	dir, s := newLegacyUpgradeFixture(t)
+	_, ken, _, _ := drawSpellingFixture(t, s, dir, true)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "competitions", "c1", "seeds.csv"),
+		[]byte("Rank,Name\n1,Ken 2Nd\n"), 0o600))
+
+	fresh := freshLegacyUpgradeStore(t, dir)
+	fresh.EnsureLegacyUpgraded("c1")
+
+	seeds, err := fresh.LoadSeedsRaw("c1")
+	require.NoError(t, err)
+	assert.Equal(t, []domain.SeedAssignment{{SeedRank: 1, Name: "Ken 2nd", Dojo: "Seibukan", ID: ken}}, seeds)
+	players, err := fresh.LoadParticipants("c1", false)
+	require.NoError(t, err)
+	for _, p := range players {
+		if p.ID == ken {
+			assert.Equal(t, 1, p.Seed, "the seed merges onto the roster")
+		}
+	}
+}
+
 // Two participants.csv rows that are one competitor once their text is in the
 // stored form ("John Smith, kenshinkan" beside "John Smith, Kenshinkan", which
 // only a hand edit writes) are still refused, as a CorruptFileError naming the

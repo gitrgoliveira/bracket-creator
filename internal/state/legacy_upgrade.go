@@ -866,10 +866,20 @@ func backfillSeedRow(idx *domain.RosterIndex, players []domain.Player, row *doma
 		// pools.csv/pool-matches.csv/bracket.json upgrades below guard
 		// against). A row that fails this check is left alone entirely --
 		// dojo AND id both stay as read.
-		if idx.NameCount(row.Name) != 1 {
-			return false
+		var p *domain.Player
+		ok := false
+		switch idx.NameCount(row.Name) {
+		case 0:
+			// No roster row holds the name exactly: an earlier release wrote
+			// "Rin 2Nd" and the roster now reads "Rin 2nd" (D22). As on the
+			// dojo branch below, the one roster row whose name equals it
+			// ignoring case gives the row its dojo and id, once.
+			p, ok = caseFoldRosterMatch(players, func(c *domain.Player) bool {
+				return strings.EqualFold(c.Name, row.Name)
+			})
+		case 1:
+			p, ok = idx.Lookup(row.Name, "")
 		}
-		p, ok := idx.Lookup(row.Name, "")
 		if !ok {
 			return false
 		}
@@ -897,7 +907,9 @@ func backfillSeedRow(idx *domain.RosterIndex, players []domain.Player, row *doma
 			// row matches ignoring case: the roster save refuses two that
 			// differ only by case, but a roster read accepts a hand-edited pair
 			// such as "Rin SATO" and "Rin Sato", which leave the row as it is.
-			p, ok = caseFoldRosterMatch(players, row.Name, row.Dojo)
+			p, ok = caseFoldRosterMatch(players, func(c *domain.Player) bool {
+				return strings.EqualFold(c.Name, row.Name) && strings.EqualFold(c.Dojo, row.Dojo)
+			})
 		}
 		if ok && p.ID != "" {
 			row.ID = p.ID
@@ -907,13 +919,14 @@ func backfillSeedRow(idx *domain.RosterIndex, players []domain.Player, row *doma
 	return changed
 }
 
-// caseFoldRosterMatch returns the one roster row whose name and dojo equal
-// name and dojo ignoring letter case, or false when none or more than one
-// does. backfillSeedRow's alone; see it for why.
-func caseFoldRosterMatch(players []domain.Player, name, dojo string) (*domain.Player, bool) {
+// caseFoldRosterMatch returns the one roster row equalIgnoringCase accepts
+// (its name, and its dojo when the seed row names one, equal ignoring letter
+// case), or false when none or more than one does. backfillSeedRow's alone;
+// see it for why.
+func caseFoldRosterMatch(players []domain.Player, equalIgnoringCase func(*domain.Player) bool) (*domain.Player, bool) {
 	var hit *domain.Player
 	for i := range players {
-		if strings.EqualFold(players[i].Name, name) && strings.EqualFold(players[i].Dojo, dojo) {
+		if equalIgnoringCase(&players[i]) {
 			if hit != nil {
 				return nil, false
 			}
@@ -2444,10 +2457,11 @@ func (s *Store) upgradeRosterTextLocked(compID string, roster *legacyUpgradeRost
 // 2nd" (D22) and upgradeRosterTextLocked stores that. This moves the copies to
 // the roster's spelling: pools.csv members (name, dojo, zekken), seeds.csv rows
 // (name, dojo), and the sides and winner of every pool-matches.csv and
-// bracket.json match that has not been fought (MatchResult.ResultRecorded,
-// BracketMatch.ResultRecorded). A fought match keeps the names it was fought
-// under, and so do its bout rows and the match history, which nothing here
-// reads (D18). A name the roster itself still holds as "2Nd" (saved that way,
+// bracket.json match that has not been fought: not under way or finished
+// (ResultRecorded) and holding no score (HoldsScore, so a match sent back to
+// the queue with its bouts is fought). A fought match keeps the names it was
+// fought under, and so do its bout rows, which copy them, and the match
+// history, which nothing here reads (D18). A name the roster itself still holds as "2Nd" (saved that way,
 // D23) leaves its copies equal to it, so nothing changes for it.
 //
 // A copy is matched to its participant by its id alone (RosterIndex.LookupByID;
@@ -2547,7 +2561,7 @@ func (s *Store) takeRosterSpellingInPoolMatchesLocked(compID string, idx *domain
 	changed := false
 	for i := range matches {
 		m := &matches[i]
-		if m.ResultRecorded() {
+		if m.ResultRecorded() || m.HoldsScore() {
 			continue
 		}
 		changed = takeRosterNameByID(idx, &m.SideA, m.SideAID) || changed
@@ -2571,7 +2585,7 @@ func (s *Store) takeRosterSpellingInBracketLocked(compID string, idx *domain.Ros
 	}
 	changed := false
 	take := func(m *BracketMatch) {
-		if m.ResultRecorded() {
+		if m.ResultRecorded() || m.HoldsScore() {
 			return
 		}
 		changed = takeRosterNameByID(idx, &m.SideA, m.SideAID) || changed

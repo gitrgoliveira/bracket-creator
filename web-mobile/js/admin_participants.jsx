@@ -1301,7 +1301,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
                     {/* The lock wording comes from seedsLockedTitle, the same
                         owner as the card-level seed buttons, so the handle
                         cannot describe the lock in words of its own. */}
-                    <span className="seed-row__handle" aria-hidden="true" title={seedsLocked ? seedsLockedTitle("reorder") : reorderDisabled ? "Clear filters/search to reorder" : "Drag to reorder"}>⠿</span>
+                    <span className="seed-row__handle" aria-hidden="true" title={seedsLocked ? seedsLockedTitle("reorder") : reorderDisabled ? "Clear filters/search to reorder" : "Drag to reorder"}><Icon name="grip-vertical" /></span>
                     <div className="seed-row__line">
                       <div className="seed-row__who">
                         <div className="seed-row__name" title={p.name}>
@@ -1318,8 +1318,8 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
                     </div>
                     <div className="seed-row__actions">
                       <div className="seed-row__move">
-                        <button type="button" className="btn btn--sm btn--icon-sm" onClick={() => moveSeedRow(i, i - 1)} disabled={i === 0 || reorderDisabled} aria-label="Move up">↑</button>
-                        <button type="button" className="btn btn--sm btn--icon-sm" onClick={() => moveSeedRow(i, i + 1)} disabled={i === players.length - 1 || reorderDisabled} aria-label="Move down">↓</button>
+                        <button type="button" className="btn btn--sm btn--icon-sm" onClick={() => moveSeedRow(i, i - 1)} disabled={i === 0 || reorderDisabled} aria-label="Move up"><Icon name="arrow-up" size={14} /></button>
+                        <button type="button" className="btn btn--sm btn--icon-sm" onClick={() => moveSeedRow(i, i + 1)} disabled={i === players.length - 1 || reorderDisabled} aria-label="Move down"><Icon name="arrow-down" size={14} /></button>
                       </div>
                       {/* Editable in setup AND draw-ready: the single-competitor PUT
                           accepts both and cascades a draw-ready rename into the
@@ -1327,7 +1327,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
                           once the competition has started, so the pencil goes then.
                           Operator ruling bc-prow, reversing the 26dcd631 hide. */}
                       {(isSetup || isDrawReady) && (
-                        <button type="button" className="btn btn--sm btn--icon-sm" title={`Edit ${p.name}`} onClick={() => { setReplaceTarget(p); setReplaceName(p.name); setReplaceDojo(p.dojo); setReplaceDanGrade(p.danGrade || ""); setReplaceZekken(withZekken ? (p.displayName || "") : ""); }} aria-label={`Edit ${p.name}`}>✎</button>
+                        <button type="button" className="btn btn--sm btn--icon-sm" title={`Edit ${p.name}`} onClick={() => { setReplaceTarget(p); setReplaceName(p.name); setReplaceDojo(p.dojo); setReplaceDanGrade(p.danGrade || ""); setReplaceZekken(withZekken ? (p.displayName || "") : ""); }} aria-label={`Edit ${p.name}`}><Icon name="pencil" size={14} /></button>
                       )}
                     </div>
                      <window.StableInput
@@ -1357,7 +1357,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
                     a new list and mounts empty, so a count here would read
                     "0" over a competition that has a full saved roster. The
                     roster's own size is on the Ordering & seeding card. */}
-                {lines.length === 0 ? "Empty" : pluralize(lines.length, "line")} · One per line <span className="participants-example">Example: {c.kind === "team" ? "Tora A, Tora Dojo London" : c.engi ? (c.withZekkenName ? "Emi Sasaki - Ren Fujita, SASAKI - FUJITA, Getsurin, 3" : "Emi Sasaki - Ren Fujita, Getsurin, 3") : c.withZekkenName ? "Alice Smith, SMITH, Gyokusen, 3" : "Alice Smith, Gyokusen, 3"}</span>
+                {lines.length === 0 ? "Empty" : pluralize(lines.length, "line")} · One per line <span className="participants-example">Example: {c.kind === "team" ? "Tora A, Tora Dojo London" : c.engi ? (c.withZekkenName ? "Emi Sasaki - Ren Fujita, SASAKI - FUJITA, Getsurin, 3" : "Emi Sasaki - Ren Fujita, Getsurin, 3") : c.withZekkenName ? "Akira Tanaka, TANAKA, Gyokusen, 3" : "Akira Tanaka, Gyokusen, 3"}</span>
               </div>
               <div className="field__hint" style={{ marginTop: 2, fontSize: 11 }}>
                 Format: &ldquo;{rosterFormat}&rdquo;

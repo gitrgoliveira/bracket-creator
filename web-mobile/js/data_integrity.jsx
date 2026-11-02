@@ -381,15 +381,21 @@ export function DataIssueBanner({ issues, competition, onReset, resetting, onRel
     // The raw text of a failed request (a browser's "Failed to fetch", the
     // server's "internal error") means nothing to an organiser: it goes to the
     // console and the note says what happened.
-    if (res && res.ok === false) console.error("Reload failed:", res.message);
+    // A request the server answered (it has a status) is not a connection
+    // problem, so the note does not send the organiser to check one.
+    const failed = !!(res && res.ok === false);
+    if (failed) console.error("Reload failed:", res.message);
     setReloadNote({
       sig: issuesSig,
-      text: res && res.ok === false
-        ? "Could not reach the server. Check the connection and press Reload again."
-        : "Reloaded: the file still could not be read.",
+      failed,
+      text: !failed
+        ? "Reloaded: the file still could not be read."
+        : res.status
+          ? "The server could not load the competition. Press Reload again; if it keeps failing, the server's log names the reason."
+          : "Could not reach the server. Check the connection and press Reload again.",
     });
   };
-  const shownReloadNote = reloadNote && (reloadNote.text.startsWith("Could not") || reloadNote.sig === issuesSig) ? reloadNote.text : null;
+  const shownReloadNote = reloadNote && (reloadNote.failed || reloadNote.sig === issuesSig) ? reloadNote.text : null;
 
   return (
     <>

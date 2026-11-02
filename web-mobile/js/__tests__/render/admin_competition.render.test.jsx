@@ -184,6 +184,19 @@ describe('AdminCompetition section render-smoke (mp-hpe3 split characterization)
     const { container } = await mountSection('overview', { comp });
     expect(container.querySelector('[data-stub="AdminTopbar"]')).not.toBeNull();
   });
+
+  // The server's own text ("internal error") goes to the console; the panel
+  // says what happened in the organiser's words.
+  it('says a failed schedule estimate in plain words, and logs the server text', async () => {
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+    window.API.estimateCompetitionSchedule.mockRejectedValueOnce(new Error('internal error'));
+    const { getByTestId } = await mountSection('overview');
+    const panel = getByTestId('overview-estimate');
+    expect(panel.textContent).toContain('Could not estimate the schedule. Reload the page to try again.');
+    expect(panel.textContent).not.toContain('internal error');
+    expect(logged).toHaveBeenCalledWith('Schedule estimate failed:', 'internal error');
+    logged.mockRestore();
+  });
 });
 
 // The page keeps its 1400px width everywhere except the Bracket section, which

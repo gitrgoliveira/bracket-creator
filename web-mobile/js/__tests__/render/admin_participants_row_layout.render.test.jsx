@@ -118,6 +118,13 @@ describe('AdminParticipants ordering card (bc-prow)', () => {
     // the seed input is the only carrier of the rank so it needs a name.
     expect(row.querySelector('.seed-row__handle').getAttribute('aria-hidden')).toBe('true');
     expect(row.querySelector('input.seed-row__input').getAttribute('aria-label')).toBe('Seed rank for Alice');
+    // The handle, the moves and the pencil are the line icons the card's
+    // alerts use, not font glyphs that render differently by platform.
+    for (const sel of ['.seed-row__handle', 'button[aria-label="Move up"]', 'button[aria-label="Move down"]', 'button[aria-label="Edit Alice"]']) {
+      const el = row.querySelector(sel);
+      expect(el.querySelector('svg'), sel).toBeTruthy();
+      expect(el.textContent, sel).toBe('');
+    }
 
     const who = line.querySelector('.seed-row__who');
     expect(who.querySelector('.seed-row__name .num-prefix').textContent).toBe('K1');

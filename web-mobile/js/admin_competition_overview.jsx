@@ -345,7 +345,10 @@ function AdminCompOverview({ c, tournament, pools, poolMatches, bracket, onSecti
       })
       .catch(e => {
         if (!controller.signal.aborted) {
-          setEstimateErr(e.message || "Failed to estimate");
+          // The server's text ("internal error") means nothing to an
+          // organiser: it goes to the console and the panel says what happened.
+          console.error("Schedule estimate failed:", e && e.message);
+          setEstimateErr(true);
           setEstimateLoading(false);
         }
       });
@@ -744,7 +747,7 @@ function AdminCompOverview({ c, tournament, pools, poolMatches, bracket, onSecti
           {estimateLoading && <span className="spinner schedule-estimate__spinner" />}
         </div>
         {estimateErr && (
-          <div className="schedule-estimate__error">Could not estimate the schedule: {estimateErr}</div>
+          <div className="schedule-estimate__error">Could not estimate the schedule. Reload the page to try again.</div>
         )}
         {estimate && !estimateErr && (() => {
           if (!total) {

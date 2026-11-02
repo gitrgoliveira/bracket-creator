@@ -251,6 +251,18 @@ describe('DataIssueBanner advice per case', () => {
     expect(logged).toHaveBeenCalledWith('Reload failed:', 'Failed to fetch');
     logged.mockRestore();
   });
+
+  // A request the server answered with an error reached it, so the note does
+  // not send the organiser to check a connection that works.
+  it('says a server failure as one, not as a connection problem', async () => {
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const onReload = vi.fn().mockResolvedValue({ ok: false, message: 'internal error', status: 500 });
+    render(<DataIssueBanner issues={[unopened]} competition={comp} onReload={onReload} />);
+    await act(async () => { screen.getByRole('button', { name: /Reload/ }).click(); });
+    expect(screen.getByTestId('data-issue-reload-note').textContent).toBe("The server could not load the competition. Press Reload again; if it keeps failing, the server's log names the reason.");
+    expect(logged).toHaveBeenCalledWith('Reload failed:', 'internal error');
+    logged.mockRestore();
+  });
 });
 
 describe('MissingParticipantIDsNotice', () => {

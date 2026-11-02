@@ -910,6 +910,39 @@ describe('AdminCompetition survives a null courts list (U1)', () => {
   });
 });
 
+// D26 and D29: participants.csv unreadable. The roster arrives empty, so the
+// Overview must not report 0 participants or offer to add them, and the
+// header names the failure in the danger colour.
+describe('AdminCompOverview with participants.csv unreadable (D26)', () => {
+  const unreadable = { kind: 'corrupt-file', file: 'participants.csv', line: 0, column: 0, detail: 'could not be opened' };
+
+  it('shows a dash and "unreadable" in the participants tile, and no Add participants step', async () => {
+    const comp = makeCompetition({ players: [], rosterAvailable: false, dataIssues: [unreadable] });
+    const { container } = await mountSection('overview', { comp });
+    const tile = container.querySelector('[data-testid="stat-participants"]');
+    expect(tile.querySelector('.v').textContent).toBe('–');
+    expect(tile.querySelector('.l').textContent).toBe('Participants unreadable');
+    expect(container.querySelector('[data-testid="step-participants"]')).toBeNull();
+    expect(container.querySelector('[data-testid="participants-hint"]')).toBeNull();
+    expect(container.textContent).not.toMatch(/Add participants/);
+    const err = container.querySelector('.page-head__sub .page-head__error');
+    expect(err.textContent).toBe('participants.csv unreadable');
+    // The banner names the file by its place and offers the reload.
+    const banner = container.querySelector('.data-issue--banner');
+    expect(banner.textContent).toContain('competitions/c1/participants.csv');
+    expect(Array.from(banner.querySelectorAll('button')).map((b) => b.textContent.trim())).toContain('Reload');
+  });
+
+  it('keeps the count and the step for a roster that loaded', async () => {
+    const { container } = await mountSection('overview');
+    const tile = container.querySelector('[data-testid="stat-participants"]');
+    expect(tile.querySelector('.v').textContent).toBe('2');
+    expect(tile.querySelector('.l').textContent).toBe('Participants');
+    expect(container.querySelector('[data-testid="step-participants"]')).not.toBeNull();
+    expect(container.querySelector('.page-head__error')).toBeNull();
+  });
+});
+
 // The header block, the checklist row and their siblings all render the rule
 // with nothing beneath them to correct it, so the counts they name have to be
 // counts the venue can actually supply.

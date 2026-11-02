@@ -18,7 +18,6 @@
 // lazy reads: those assignments still live in viewer.jsx.
 
 import { competitorKey } from './competitor_identity.jsx';
-import { normalizeParticipantName } from './data.jsx';
 import { resultRecencyDesc } from './result_recency.jsx';
 import { parseWatchlistTokens, resolveFreshTokens, WATCHLIST_PARAM } from './watchlist_link.jsx';
 import { isBarredMatch } from './ineligible_match.jsx';
@@ -150,12 +149,14 @@ export const WATCHLIST_MAX = 50;
 // is stored as an `entryKey` string, decoupled from list order.
 
 // dojoKey: the ONE comparison of a watched dojo against a roster dojo, ignoring
-// case (operator decision D19): the server stores a dojo title-cased, and a
-// watch saved or shared before that holds the dojo as it was typed then
-// ("kenshinkan" for the roster's "Kenshinkan"). Every place a dojo entry is
-// matched or deduplicated asks it.
+// letter case and nothing else (operator decisions D19 and D25): the server
+// stores a dojo title-cased, and a watch saved or shared before that holds the
+// dojo as it was typed then ("kenshinkan" for the roster's "Kenshinkan"). An
+// accent or an inner space is NOT folded: the server keeps "Kenshinkan" and
+// "Kenshinkán" as two dojos, so they are two watches with two counts. Every
+// place a dojo entry is matched or deduplicated asks it.
 export function dojoKey(dojo) {
-  return normalizeParticipantName(dojo == null ? "" : String(dojo));
+  return (dojo == null ? "" : String(dojo)).trim().toLowerCase();
 }
 
 // sameDojo: whether two dojo names are the same dojo, by dojoKey.

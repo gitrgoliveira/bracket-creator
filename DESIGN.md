@@ -91,7 +91,7 @@ All tokens are defined in the `:root` block in [styles.css](web-mobile/css/style
 | `--line` | `#e4e6eb` | Default borders, dividers |
 | `--line-2` | `#eef0f4` | Subtle dividers, alt rows, hover backgrounds |
 | `--line-strong` | `#c7cdd9` | Divider that must read as structure rather than decoration: the bracket's SVG connector strokes, the dashed bye slot, and the quiet-state frame of `.daihyosen-controls`, a control group that has to read as a group on its own `--bg-2` fill. Darker than `--line`; don't reach for it for ordinary borders. |
-| `--text-link` | `#2563eb` | Standalone text links outside body copy (`.viewer-display-modes__link`). Body links inherit `--accent` instead, so this is only for a link that must read as a link rather than as brand. |
+| `--text-link` | `#2563eb` | Standalone text links outside body copy (`.viewer-display-modes__link`, `.btn--link`). Body links inherit `--accent` instead, so this is only for a link that must read as a link rather than as brand. |
 | `--bg` | `#f7f8fa` | Page background |
 | `--surface` | `#ffffff` | Cards, modals, inputs |
 
@@ -272,6 +272,7 @@ Quick lookup: scan, then `Ctrl+F` the class name to jump to its subsection.
 | `.btn--primary` | Confirm, save, start match |
 | `.btn--danger` | Destructive (reset, kiken, archive) |
 | `.btn--ghost` | Tertiary, inline cancels |
+| `.btn--link` | An action inside running text or a hint ("Download CSV template", the viewer's "View full standings →"): `--text-link` ink, no box, underline on hover, takes the surrounding text size and is exempt from the coarse-pointer 44px floor |
 | `.btn--sm` / `.btn--lg` | Compact rows / hero CTAs |
 | `.btn--full` | Full-width (forms, modal footers) |
 

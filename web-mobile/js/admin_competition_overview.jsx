@@ -19,6 +19,8 @@ import {
   bracketRecoveryKind,
   bracketResetPrompt,
   bracketResetToast,
+  rosterUnreadableIssues,
+  ROSTER_FILE,
 } from './data_integrity.jsx';
 
 const { useState, useEffect, useRef } = React;
@@ -83,11 +85,15 @@ function competitionNextSteps(c, tournamentCourts) {
     cta: null,
   });
 
-  // Step 2: participants.
+  // Step 2: participants. Left out when participants.csv could not be read
+  // (operator decision D26): the roster then arrives empty, and "0 added, add
+  // participants" would send the operator to a page that shows only the file's
+  // notice. The banner above the checklist carries the repair.
+  const rosterUnreadable = rosterUnreadableIssues(c).length > 0;
   const participantDetail = hasEnoughPlayers
     ? `${numPlayers} ${isTeam ? "teams" : "participants"} added${seededCount > 0 ? `, ${seededCount} seeded` : ""}`
     : `${numPlayers} ${isTeam ? "team" : "participant"}${numPlayers !== 1 ? "s" : ""} added. Need at least 2`;
-  steps.push({
+  if (!rosterUnreadable) steps.push({
     id: "participants",
     label: `Add ${isTeam ? "teams" : "participants"}`,
     detail: participantDetail,
@@ -135,7 +141,8 @@ function competitionNextSteps(c, tournamentCourts) {
     ? window.competitionDrawBlocker(c, tournamentCourts)
     : null;
   let generateDetail = "Use the \"Generate draw\" button in the header above";
-  if (!hasEnoughPlayers) generateDetail = "Add at least 2 participants first";
+  if (rosterUnreadable) generateDetail = `Repair ${ROSTER_FILE} first: see the notice above`;
+  else if (!hasEnoughPlayers) generateDetail = "Add at least 2 participants first";
   else if (drawBlocker) generateDetail = `${drawBlocker.reason} ${drawBlocker.fix} The "Generate draw" button stays disabled until you do.`;
   const drawIsBlocked = !!drawBlocker && hasEnoughPlayers;
   steps.push({
@@ -384,15 +391,35 @@ function AdminCompOverview({ c, tournament, pools, poolMatches, bracket, onSecti
   // Render helpers
   // ---------------------------------------------------------------------------
 
+  // The participants box, the same in every state. With participants.csv
+  // unreadable the roster arrives empty, so a 0 here would contradict the
+  // banner above it: the box shows a dash and says the file is unreadable
+  // instead (operator decision D26).
+  const rosterUnreadable = rosterUnreadableIssues(c).length > 0;
+  function participantsTile() {
+    return (
+      <div className="stat-box" data-testid="stat-participants">
+        {rosterUnreadable ? (
+          <>
+            <div className="v" aria-hidden="true">–</div>
+            <div className="l">{participantLabel} <span className="stat-box__flag">unreadable</span></div>
+          </>
+        ) : (
+          <>
+            <div className="v">{numPlayers}</div>
+            <div className="l">{participantLabel}</div>
+          </>
+        )}
+      </div>
+    );
+  }
+
   // Stats strip: 4 boxes, varies by state.
   function renderStatsStrip() {
     if (isSetup) {
       return (
         <div className="stats-strip">
-          <div className="stat-box">
-            <div className="v">{numPlayers}</div>
-            <div className="l">{participantLabel}</div>
-          </div>
+          {participantsTile()}
           <div className="stat-box">
             <div className="v">{seededCount}</div>
             <div className="l">Seeded</div>
@@ -428,10 +455,7 @@ function AdminCompOverview({ c, tournament, pools, poolMatches, bracket, onSecti
         : "Pools";
       return (
         <div className="stats-strip">
-          <div className="stat-box">
-            <div className="v">{numPlayers}</div>
-            <div className="l">{participantLabel}</div>
-          </div>
+          {participantsTile()}
           <div className="stat-box">
             <div className="v">{seededCount}</div>
             <div className="l">Seeded</div>
@@ -451,10 +475,7 @@ function AdminCompOverview({ c, tournament, pools, poolMatches, bracket, onSecti
     if (isRunning) {
       return (
         <div className="stats-strip">
-          <div className="stat-box">
-            <div className="v">{numPlayers}</div>
-            <div className="l">{participantLabel}</div>
-          </div>
+          {participantsTile()}
           <div className="stat-box">
             <div className="v">{done}/{total}</div>
             <div className="l">Matches done</div>
@@ -477,10 +498,7 @@ function AdminCompOverview({ c, tournament, pools, poolMatches, bracket, onSecti
     const totalDuration = formatCompMinutes(estimate && estimate.totalDurationMinutes) || "n/a";
     return (
       <div className="stats-strip">
-        <div className="stat-box">
-          <div className="v">{numPlayers}</div>
-          <div className="l">{participantLabel}</div>
-        </div>
+        {participantsTile()}
         <div className="stat-box">
           <div className="v">{done}</div>
           <div className="l">Matches played</div>
@@ -540,7 +558,7 @@ function AdminCompOverview({ c, tournament, pools, poolMatches, bracket, onSecti
               </div>
             ))}
           </div>
-          {numPlayers < 2 && (
+          {numPlayers < 2 && !rosterUnreadable && (
             <div className="comp-steps__hint" data-testid="participants-hint">
               Need at least 2 {c.kind === "team" ? "teams" : "participants"} to generate a draw.
             </div>
@@ -766,6 +784,7 @@ function AdminCompOverview({ c, tournament, pools, poolMatches, bracket, onSecti
         competition={c}
         onReset={quarantineBracket}
         resetting={quarantining}
+        onReload={onRefreshCompetition}
       />
       {renderStatsStrip()}
       {renderPrimaryContent()}

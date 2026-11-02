@@ -16,6 +16,7 @@ import { effectiveDrawPlayers } from './qualifier_preview.jsx';
 import { checkInApplies } from './competition_shape.jsx';
 import { leaveThen, confirmLeave } from './unsaved_entries.jsx';
 import { rosterUnreadableIssues, ROSTER_FILE } from './data_integrity.jsx';
+import { Icon } from './icon.jsx';
 export { formatCompMinutes } from './admin_competition_settings.jsx';
 export { buildRunningIpponResult, loadScoreboardPoints } from './admin_competition_bracket.jsx';
 export {
@@ -344,8 +345,10 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
   ];
 
   const currentItem = sections.flatMap(m => m.items).find(i => i.id === section);
+  // An unreadable roster is an error, so it reads in the danger colour rather
+  // than the line's muted meta ink.
   const rosterCount = rosterUnreadableIssues(c).length > 0
-    ? `${ROSTER_FILE} unreadable`
+    ? <span className="page-head__error">{ROSTER_FILE} unreadable</span>
     : `${(c.players || []).length} ${c.kind === "team" ? "teams" : "players"}`;
 
   return (
@@ -391,13 +394,15 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
                   </button>
                 </div>
                 {!isDateValid(c.date) && (
-                  <div style={{ color: "var(--red)", fontSize: 11, fontWeight: 600 }}>
-                    ⚠ Cannot start: invalid date in Settings tab (e.g. &quot;{c.date}&quot;)
+                  <div className="page-head__blocker">
+                    <Icon name="alert-circle" size={14} />
+                    <span>Cannot start: invalid date in Settings tab (e.g. &ldquo;{c.date}&rdquo;)</span>
                   </div>
                 )}
                 {drawBlocker && (
-                  <div style={{ color: "var(--red)", fontSize: 11, fontWeight: 600, maxWidth: 380, textAlign: "right" }} data-testid="draw-block">
-                    ⚠ Cannot start: {drawBlocker.reason} {drawBlocker.fix}
+                  <div className="page-head__blocker" data-testid="draw-block">
+                    <Icon name="alert-circle" size={14} />
+                    <span>Cannot start: {drawBlocker.reason} {drawBlocker.fix}</span>
                   </div>
                 )}
                 {excludedFromDraw > 0 && (
@@ -497,7 +502,7 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
           </div>
           <div>
             {section === "overview" && <AdminCompOverview c={c} tournament={t} pools={pools} poolMatches={poolMatches} bracket={bracket} onSection={onSection} password={password} showToast={showToast} onRefreshCompetition={onRefreshCompetition} />}
-            {section === "participants" && <AdminParticipants c={c} tournament={t} onUpdate={onUpdate} password={password} showToast={showToast} onSection={onSection} />}
+            {section === "participants" && <AdminParticipants c={c} tournament={t} onUpdate={onUpdate} password={password} showToast={showToast} onSection={onSection} onRefreshCompetition={onRefreshCompetition} />}
             {section === "lineups" && window.AdminTeamLineupsList && <window.AdminTeamLineupsList comp={c} pools={pools} poolMatches={poolMatches} bracket={bracket} password={password} showToast={showToast} />}
             {section === "settings" && <AdminSettings c={c} tournament={t} onUpdate={onUpdate} onBack={onBack} password={password} showToast={showToast} onStatusChange={setLocalStatus} />}
             {section === "awards" && <FightingSpiritAwardsEditor c={c} password={password} showToast={showToast} />}

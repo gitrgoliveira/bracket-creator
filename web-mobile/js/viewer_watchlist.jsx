@@ -507,10 +507,16 @@ function WatchlistPanel({ tournament, roster, rosterLoaded = true, watchlist, se
     return Array.from(counts.entries()).map(([name, total]) => ({ name, total })).sort((a, b) => a.name.localeCompare(b.name));
   }, [roster]);
   // The same list by dojoKey, so a dojo chip finds its dojo without a scan per
-  // chip. Of two names that read as one dojo the first in the list is kept.
+  // chip. Two names that differ only in case (a roster not saved since dojos
+  // were title-cased) are one dojo: the first name is kept and the totals add,
+  // so the chip counts every competitor the watch follows.
   const dojoByKey = useMemo(() => {
     const byKey = new Map();
-    dojos.forEach((d) => { const k = dojoKey(d.name); if (!byKey.has(k)) byKey.set(k, d); });
+    dojos.forEach((d) => {
+      const k = dojoKey(d.name);
+      const seen = byKey.get(k);
+      byKey.set(k, seen ? { ...seen, total: seen.total + d.total } : d);
+    });
     return byKey;
   }, [dojos]);
 

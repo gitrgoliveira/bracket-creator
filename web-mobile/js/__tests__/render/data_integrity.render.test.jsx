@@ -137,6 +137,61 @@ describe('DataIssueBanner', () => {
   });
 });
 
+// D27/D28/D29: the advice follows each case, the file is named by its place
+// in the data folder, and only the locator is set in monospace.
+describe('DataIssueBanner advice per case', () => {
+  const located = { kind: 'corrupt-file', file: 'participants.csv', line: 4, column: 1, detail: 'lines 1 and 4 hold the same competitor' };
+  const unopened = { kind: 'corrupt-file', file: 'participants.csv', line: 0, column: 0, detail: 'could not be opened' };
+  const comp = { id: 'kendo', format: 'mixed' };
+
+  it('keeps the repair paragraph for a located bad line', () => {
+    render(<DataIssueBanner issues={[located]} competition={comp} />);
+    const text = screen.getByRole('alert').textContent;
+    expect(text).toMatch(/fix the\s+position above/);
+    expect(text).not.toMatch(/could not open this file/);
+  });
+
+  it('tells the operator to fix the cause outside the file when it could not be opened', () => {
+    render(<DataIssueBanner issues={[unopened]} competition={comp} />);
+    const text = screen.getByRole('alert').textContent.replace(/\s+/g, ' ');
+    expect(text).toContain('The server could not open this file. Its log names the reason, for example a permission problem. Fix that, then reload this page. Nothing in the file has been changed.');
+    expect(text).not.toMatch(/position above/);
+    expect(text).not.toMatch(/will not parse/);
+  });
+
+  it('says the repair loses nothing only when a reset is also offered', () => {
+    const { unmount } = render(<DataIssueBanner issues={[located]} competition={comp} />);
+    expect(screen.getByRole('alert').textContent).not.toMatch(/loses nothing/);
+    unmount();
+    render(<DataIssueBanner issues={[{ file: 'bracket.json', line: 2, column: 1, detail: 'x' }]} competition={comp} onReset={vi.fn()} />);
+    expect(screen.getByRole('alert').textContent).toMatch(/This is the option that loses nothing\./);
+  });
+
+  it('names the file by its place in the data folder, and only that is code', () => {
+    const { container } = render(<DataIssueBanner issues={[located]} competition={comp} />);
+    const code = container.querySelector('.data-issue__list code');
+    expect(code.textContent).toBe('competitions/kendo/participants.csv, line 4, column 1');
+    expect(code.closest('li').textContent).toBe(`competitions/kendo/participants.csv, line 4, column 1: ${located.detail}`);
+    expect(container.querySelectorAll('.data-issue__list code')).toHaveLength(1);
+  });
+
+  it('draws the SVG warning icon, never the emoji-prone glyph', () => {
+    const { container } = render(<DataIssueBanner issues={[unopened]} competition={comp} />);
+    expect(container.querySelector('.data-issue__icon')?.tagName.toLowerCase()).toBe('svg');
+    expect(container.textContent).not.toContain('⚠');
+  });
+
+  it('offers Reload only when the host can reload', () => {
+    const { unmount } = render(<DataIssueBanner issues={[unopened]} competition={comp} />);
+    expect(screen.queryByRole('button', { name: /Reload/ })).toBeNull();
+    unmount();
+    const onReload = vi.fn();
+    render(<DataIssueBanner issues={[unopened]} competition={comp} onReload={onReload} />);
+    screen.getByRole('button', { name: /Reload/ }).click();
+    expect(onReload).toHaveBeenCalled();
+  });
+});
+
 describe('MissingParticipantIDsNotice', () => {
   it('renders the server-supplied sentence verbatim', () => {
     render(<MissingParticipantIDsNotice issues={[{ file: 'participants.csv', detail: 'Alice (Dojo A): no id on file. Save the roster once and the ids are assigned.' }]} />);

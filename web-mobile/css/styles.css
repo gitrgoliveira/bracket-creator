@@ -610,6 +610,27 @@ a:hover {
   margin-top: 2px;
 }
 
+/* An error named inside the page-head's meta line (participants.csv
+   unreadable): danger ink, not the line's muted grey. */
+.page-head__error {
+  color: var(--danger);
+  font-weight: 600;
+}
+
+/* Why the header's draw/start buttons are disabled: danger text at the hint
+   size, right-aligned under the buttons it explains. */
+.page-head__blocker {
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-end;
+  gap: 4px;
+  max-width: 380px;
+  color: var(--danger);
+  font-size: 12px;
+  font-weight: 600;
+  text-align: right;
+}
+
 .page-head__actions {
   display: flex;
   flex-wrap: wrap;
@@ -720,6 +741,29 @@ a:hover {
 .btn--ghost:hover {
   background: var(--line-2);
   border-color: transparent;
+}
+
+/* Link button: an action that sits inside running text or a hint ("Download
+   CSV template") and reads as a link rather than a box. Takes the surrounding
+   text size; --text-link ink, the token for a standalone link that must read
+   as a link (DESIGN.md §3); underline on hover; the shared 2px
+   accent focus ring from .btn:focus-visible. The coarse-pointer 44px floor on
+   .btn does not apply: a link sized like a box would push its text apart. */
+.btn--link,
+.btn.btn--link {
+  display: inline-block;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text-link);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.btn--link:hover {
+  text-decoration: underline;
 }
 
 .btn--ghost.btn--danger {
@@ -850,6 +894,31 @@ a:hover {
   align-items: center;
   justify-content: space-between;
   margin-bottom: 14px;
+}
+
+/* A card head whose text block runs long (the participant list's format
+   hint): the action buttons keep their labels on one line and, where the row
+   is too narrow for both, wrap under the text instead of squeezing it. */
+.card__head--wrap {
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 8px 12px;
+}
+
+.card__head-main {
+  flex: 1 1 260px;
+  min-width: 0;
+}
+
+.card__head-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.card__head-actions .btn {
+  white-space: nowrap;
 }
 
 .card__title {
@@ -3774,6 +3843,13 @@ button.vsched-item:not([data-clickable]) {
   text-transform: uppercase;
   letter-spacing: 0.04em;
   margin-top: 6px;
+}
+
+/* A stat the box cannot give ("Participants unreadable"): the reason in
+   danger ink beside the label. */
+.stat-box__flag {
+  color: var(--danger);
+  font-weight: 600;
 }
 
 /* stat-box link variant, a button-reset that keeps the stat-box layout
@@ -6884,16 +6960,31 @@ button.vsched-item:not([data-clickable]) {
 }
 
 /* Data-integrity notices (data_integrity.jsx). They ride on the shared .alert
-   --warn family rather than inventing a colour: this is a caution an operator
-   must act on, which is exactly what that family already means, and amber stays
-   clear of red (Aka/danger) per DESIGN.md Principle 3.
-   The two additions are layout only: the leading glyph sits beside the text
-   rather than wrapping under it. */
+   families rather than inventing a colour. The competition banner is
+   .alert--error (--danger): a file that will not load has every write to it
+   refused, which is work at risk (DESIGN.md §3, --danger). The per-match,
+   editor, pool and missing-ids notes are .alert--warn (amber): the competition
+   keeps running and the operator has something to do.
+   The additions are layout only: the leading icon sits beside the text rather
+   than wrapping under it. */
 .data-issue {
   display: flex;
   align-items: flex-start;
   gap: 8px;
   line-height: 1.4;
+}
+
+/* The leading alert-circle icon (ui.jsx Icon), nudged onto the first line. */
+.data-issue__icon {
+  margin-top: 1px;
+}
+
+/* Reload and the reset sit in one row under the banner's paragraphs. */
+.data-issue__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 4px;
 }
 
 /* The per-match variant sits directly beneath the match row it describes, so it

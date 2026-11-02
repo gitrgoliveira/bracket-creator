@@ -588,8 +588,10 @@ func dataIssuesFrom(errs ...error) []gin.H {
 
 // rosterUnreadableDetail is the detail of the participants.csv entry for a
 // roster that did not load for a reason with no position in the file (a row
-// the parser refuses, an I/O fault); the read logs the error itself.
-const rosterUnreadableDetail = "it could not be read, and the server's log says why"
+// the parser refuses, an I/O fault); the read logs the error itself. Short on
+// purpose: the banner's own paragraph for a file with no position says the
+// server's log names the reason (data_integrity.jsx DataIssueBanner, D27).
+const rosterUnreadableDetail = "could not be opened"
 
 // rosterUnreadableIssue is the corrupt-file entry naming participants.csv
 // with no position (line and column 0) for a roster read that failed for any

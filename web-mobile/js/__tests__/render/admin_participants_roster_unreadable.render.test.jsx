@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { installParticipantsHarness, makeParticipantsCompetition, mountParticipants } from './admin_participants_mount_harness.jsx';
 import { rosterUnreadableIssues } from '../../data_integrity.jsx';
 
@@ -15,7 +15,7 @@ const DUPLICATE = {
   file: 'participants.csv',
   line: 4,
   column: 1,
-  detail: 'lines 1 and 4 hold the same competitor once names and dojos are title-cased and zekken are in capitals; remove one row of each pair or tell them apart',
+  detail: 'lines 1 and 4 hold the same competitor (name, zekken and dojo, ignoring case); remove one row of each pair or tell them apart',
 };
 
 // The entry the server sends for a roster that failed with no position in the
@@ -25,7 +25,7 @@ const UNREADABLE = {
   file: 'participants.csv',
   line: 0,
   column: 0,
-  detail: "it could not be read, and the server's log says why",
+  detail: 'could not be opened',
 };
 
 describe('AdminParticipants over an unreadable participants.csv (D21)', () => {
@@ -40,7 +40,8 @@ describe('AdminParticipants over an unreadable participants.csv (D21)', () => {
     expect(banner).toBeTruthy();
     expect(banner.getAttribute('role')).toBe('alert');
     expect(banner.textContent).toContain('A file for this competition could not be read.');
-    expect(banner.textContent).toContain(`participants.csv, line 4, column 1: ${DUPLICATE.detail}`);
+    expect(banner.textContent).toContain(`competitions/c1/participants.csv, line 4, column 1: ${DUPLICATE.detail}`);
+    expect(banner.textContent).toMatch(/fix the\s+position above/);
     expect(container.querySelector('textarea')).toBeNull();
     expect(container.textContent).not.toContain('Add your roster to begin');
     expect(container.textContent).not.toContain('Participant list');
@@ -55,8 +56,27 @@ describe('AdminParticipants over an unreadable participants.csv (D21)', () => {
 
     const banner = container.querySelector('.data-issue--banner');
     expect(banner).toBeTruthy();
-    expect(banner.textContent).toContain(`participants.csv: ${UNREADABLE.detail}`);
+    // D28: named by its place inside the tournament data folder.
+    expect(banner.textContent).toContain(`competitions/c1/participants.csv: ${UNREADABLE.detail}`);
+    // D27: the advice for a file the server could not open, not the repair one.
+    expect(banner.textContent).toMatch(/The server could not open this file/);
+    expect(banner.textContent).not.toMatch(/position above/);
     expect(container.querySelector('textarea')).toBeNull();
+  });
+
+  it('offers a Reload that re-fetches the competition (D28)', async () => {
+    const onRefreshCompetition = vi.fn();
+    const { container } = await mountParticipants(makeParticipantsCompetition({
+      players: [],
+      rosterAvailable: false,
+      dataIssues: [UNREADABLE],
+    }), { onRefreshCompetition });
+
+    const reload = Array.from(container.querySelectorAll('.data-issue--banner button'))
+      .find((b) => b.textContent.trim() === 'Reload');
+    expect(reload).toBeTruthy();
+    reload.click();
+    expect(onRefreshCompetition).toHaveBeenCalledTimes(1);
   });
 
   it('keeps the page for an empty roster that loaded, and for another file\'s issue', async () => {
@@ -69,6 +89,30 @@ describe('AdminParticipants over an unreadable participants.csv (D21)', () => {
     expect(container.querySelector('.data-issue--banner')).toBeNull();
     expect(container.querySelector('textarea')).toBeTruthy();
     expect(container.textContent).toContain('Add your roster to begin');
+  });
+});
+
+// D29: the page's normal state, around the same paste card. jsdom does not lay
+// out, so the one-line rule is pinned by its classes (styles.css keeps
+// .card__head-actions buttons on one line and lets the row wrap) and the
+// screenshots at 1180 and 390 wide show it.
+describe('the Participant list card head (D29)', () => {
+  it('holds Paste clipboard and Apply changes in the wrapping actions row', async () => {
+    const { container } = await mountParticipants(makeParticipantsCompetition());
+    const head = container.querySelector('.card__head--wrap');
+    expect(head).toBeTruthy();
+    const labels = Array.from(head.querySelectorAll('.card__head-actions .btn')).map((b) => b.textContent);
+    expect(labels).toEqual(['Paste clipboard', 'Apply changes']);
+  });
+
+  it('styles Download CSV template as a link button and quotes the format with curly quotes', async () => {
+    const { container } = await mountParticipants(makeParticipantsCompetition());
+    const link = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === 'Download CSV template');
+    expect(link.className).toBe('btn btn--link');
+    expect(link.getAttribute('style')).toBeNull();
+    const hint = link.closest('.field__hint').textContent;
+    expect(hint).toMatch(/Format: “[^”]+”/);
+    expect(hint).not.toContain('"');
   });
 });
 

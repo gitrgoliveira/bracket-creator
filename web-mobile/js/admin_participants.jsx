@@ -280,7 +280,7 @@ export const ROSTER_KEPT_CHANGING = "Not saved: the competitor list kept changin
 // are told (stage 6 review 12, C1).
 export const ROSTER_CHANGED_BEFORE_APPLY = "Not saved: the competitor list was changed on another device. The list now shown is the current one; your pasted list is still in the box, so tap Apply changes to replace it.";
 
-function AdminParticipants({ c, tournament: _tournament, onUpdate, password, showToast, onSection }) {
+function AdminParticipants({ c, tournament: _tournament, onUpdate, password, showToast, onSection, onRefreshCompetition }) {
   // Zekken-column flag. Engi pairs store both member names combined in the
   // name field ("Name 1 - Name 2"), so engi does not alter the roster layout.
   const withZekken = !!c.withZekkenName;
@@ -1044,10 +1044,13 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
   // A roster the server could not read arrives as an empty one. Shown as
   // such, the page invited a paste over it; every roster write is
   // refused until the file is repaired, so the file's own notice replaces
-  // the whole page.
+  // the whole page. Its Reload re-fetches the competition, so a repaired
+  // file shows without leaving the page (operator decision D28); a host that
+  // passes no refresh gets the page reloaded instead.
   const rosterIssues = rosterUnreadableIssues(c);
   if (rosterIssues.length > 0) {
-    return <DataIssueBanner issues={rosterIssues} competition={c} />;
+    const reload = onRefreshCompetition || (() => window.location.reload());
+    return <DataIssueBanner issues={rosterIssues} competition={c} onReload={reload} />;
   }
 
   return (
@@ -1345,8 +1348,8 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
         </div>
         )}
         <div className="card">
-          <div className="card__head">
-            <div>
+          <div className="card__head card__head--wrap">
+            <div className="card__head-main">
               <div className="card__title">{c.kind === "team" ? "Team list" : "Participant list"}</div>
               <div className="card__sub">
                 {/* Describes the BOX, not the roster: the box is an input for
@@ -1356,13 +1359,13 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
                 {lines.length === 0 ? "Empty" : pluralize(lines.length, "line")} · One per line · <span style={{ color: "var(--ink-2)", fontWeight: 600 }}>Example: {c.kind === "team" ? "Tora A, Tora Dojo London" : c.engi ? (c.withZekkenName ? "Emi Sasaki - Ren Fujita, SASAKI - FUJITA, Getsurin, 3" : "Emi Sasaki - Ren Fujita, Getsurin, 3") : c.withZekkenName ? "Alice Smith, SMITH, Gyokusen, 3" : "Alice Smith, Gyokusen, 3"}</span>
               </div>
               <div className="field__hint" style={{ marginTop: 2, fontSize: 11 }}>
-                Format: &quot;{rosterFormat}&quot;
+                Format: &ldquo;{rosterFormat}&rdquo;
                 <br />* Dan = kendo grade (optional)
-                <br /><button type="button" className="btn--link" style={{ padding: 0, fontSize: 11, fontWeight: 600 }} onClick={downloadTemplate}>Download CSV template</button>
+                <br /><button type="button" className="btn btn--link" onClick={downloadTemplate}>Download CSV template</button>
               </div>
             </div>
             {/* draw-ready lock: roster mutations (paste, apply, CSV import) disabled until the draw is discarded */}
-            <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+            <div className="card__head-actions">
               {unappliedNote}
               <button className="btn btn--sm" type="button" onClick={pasteFromExcel} disabled={isDrawReady} title={isDrawReady ? "Discard the draw to edit participants" : "Reads clipboard and converts tab-separated values (e.g. from Excel) to CSV"}>Paste clipboard</button>
               <button className="btn btn--sm btn--primary" type="button" onClick={apply} disabled={applyDisabled} title={applyTitle}>Apply changes</button>

@@ -182,6 +182,32 @@ describe('competitionNextSteps: basic shape', () => {
 // ---------------------------------------------------------------------------
 // Individual competition: setup states
 // ---------------------------------------------------------------------------
+// D26: participants.csv unreadable. The roster arrives empty, so a step that
+// says "0 added, add participants" would point at a page that shows only the
+// file's notice.
+describe('competitionNextSteps: participants.csv unreadable', () => {
+  const unreadable = { kind: 'corrupt-file', file: 'participants.csv', line: 0, column: 0, detail: 'could not be opened' };
+
+  it('leaves out the Add participants step', () => {
+    const steps = competitionNextSteps(makeComp({ players: [], dataIssues: [unreadable] }));
+    expect(steps.find(s => s.id === 'participants')).toBeUndefined();
+    expect(steps.some(s => /Add participants/.test(s.cta || ''))).toBe(false);
+  });
+
+  it('does not ask for participants on the generate step either', () => {
+    const steps = competitionNextSteps(makeComp({ players: [], dataIssues: [unreadable] }));
+    const gen = steps.find(s => s.id === 'generate');
+    expect(gen.detail).not.toMatch(/Add at least 2/);
+    expect(gen.detail).toMatch(/participants\.csv/);
+  });
+
+  it('keeps the step for a located fault on another file, and for an advisory note', () => {
+    const other = { kind: 'corrupt-file', file: 'bracket.json', line: 2, column: 1, detail: 'x' };
+    const advisory = { kind: 'missing-ids', file: 'participants.csv', detail: 'No id on file.' };
+    expect(competitionNextSteps(makeComp({ dataIssues: [other, advisory] })).find(s => s.id === 'participants')).toBeTruthy();
+  });
+});
+
 describe('competitionNextSteps: individual, 0 players', () => {
   it('participants step is active when 0 players', () => {
     const steps = competitionNextSteps(makeComp({ players: [] }));

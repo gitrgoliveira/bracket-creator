@@ -136,7 +136,7 @@ func duplicateRowsError(err error, lines []int) error {
 		File:   "participants.csv",
 		Line:   lines[ve.Duplicates[0].Entry-1],
 		Column: 1,
-		Detail: strings.Join(pairs, ", ") + " hold the same competitor once names and dojos are title-cased and zekken are in capitals; remove one row of each pair or tell them apart",
+		Detail: strings.Join(pairs, ", ") + " hold the same competitor (name, zekken and dojo, ignoring case); remove one row of each pair or tell them apart",
 		Err:    err,
 	}
 }

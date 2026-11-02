@@ -3,8 +3,10 @@ package state_test
 // legacy_upgrade_text_case_test.go pins the load repair that rewrites text
 // saved before every door canonicalised it (operator decisions D14, D15 and
 // D20, 2026-11-01): dojos, team member names and award recipients
-// title-cased, zekken in capitals. Bouts already fought keep their names as
-// recorded (D18), so nothing here touches a result.
+// title-cased, zekken in capitals. It also pins D24 (b), 2026-11-02: the draw
+// and the seeds take the roster's spelling where they differ from it only by
+// letter case. Bouts already fought keep their names as recorded (D18), so
+// nothing here touches a result.
 
 import (
 	"fmt"
@@ -207,6 +209,170 @@ func TestLegacyTextCaseUpgrade_SeedsConvergeAfterACrashBetweenFiles(t *testing.T
 	assert.Equal(t, "Rin Sato", seeds[0].Name)
 	assert.Equal(t, "Seibukan", seeds[0].Dojo)
 	assert.Equal(t, rinID, seeds[0].ID)
+}
+
+// drawSpellingFixture is an earlier release's tournament (operator decision
+// D24 (b)): the paste box stored "rin 2nd" as typed, and the draw and seeds
+// took the old reader's "Rin 2Nd". Sho 3Rd was saved that way (D23), so the
+// roster and every copy agree on it. It returns the ids of Rin, Ken, Yuki and
+// Sho, in that order.
+func drawSpellingFixture(t *testing.T, s *state.Store, dir string, rawRoster bool) (rin, ken, yuki, sho string) {
+	t.Helper()
+	rin, ken, yuki, sho = helper.NewUUID4(), helper.NewUUID4(), helper.NewUUID4(), helper.NewUUID4()
+	require.NoError(t, s.SaveParticipants("c1", []domain.Player{
+		{ID: rin, Name: "Rin 2nd", Dojo: "Kenshinkan 2nd"},
+		{ID: ken, Name: "Ken 2nd", Dojo: "Seibukan"},
+		{ID: yuki, Name: "Yuki Tanaka", Dojo: "Tobukan"},
+		{ID: sho, Name: "Sho 3Rd", Dojo: "Tobukan"},
+	}))
+	require.NoError(t, s.SavePools("c1", []helper.Pool{{PoolName: "Pool A", Players: []helper.Player{
+		{ID: rin, Name: "Rin 2Nd", Dojo: "Kenshinkan 2Nd", PoolPosition: 0},
+		{ID: ken, Name: "Ken 2Nd", Dojo: "Seibukan", PoolPosition: 1},
+		{ID: yuki, Name: "Yuki Tanaka", Dojo: "Tobukan", PoolPosition: 2},
+		{ID: sho, Name: "Sho 3Rd", Dojo: "Tobukan", PoolPosition: 3},
+	}}}))
+	require.NoError(t, s.SavePoolMatches("c1", []state.MatchResult{
+		{ID: "Pool A-0", SideA: "Rin 2Nd", SideAID: rin, SideB: "Yuki Tanaka", SideBID: yuki,
+			Winner: "Rin 2Nd", WinnerID: rin, IpponsA: []string{"M", "M"}, Status: state.MatchStatusCompleted},
+		{ID: "Pool A-1", SideA: "Rin 2Nd", SideAID: rin, SideB: "Ken 2Nd", SideBID: ken, Status: state.MatchStatusScheduled},
+		{ID: "Pool A-2", SideA: "Ken 2Nd", SideAID: ken, SideB: "Yuki Tanaka", SideBID: yuki, IpponsA: []string{"K"}, Status: state.MatchStatusRunning},
+		{ID: "Pool A-3", SideA: "Sho 3Rd", SideAID: sho, SideB: "Yuki Tanaka", SideBID: yuki, Status: state.MatchStatusScheduled},
+	}))
+	require.NoError(t, s.SaveBracket("c1", &state.Bracket{Rounds: [][]state.BracketMatch{
+		{
+			{ID: "m-r1-0", SideA: "Rin 2Nd", SideAID: rin, SideB: "Yuki Tanaka", SideBID: yuki,
+				Winner: "Rin 2Nd", WinnerID: rin, Status: state.MatchStatusCompleted},
+			// A bye the draw completed: never fought.
+			{ID: "m-r1-1", SideA: "Ken 2Nd", SideAID: ken, Winner: "Ken 2Nd", WinnerID: ken, Status: state.MatchStatusCompleted},
+		},
+		{
+			{ID: "m-r2-0", SideA: "Rin 2Nd", SideAID: rin, SideB: "Ken 2Nd", SideBID: ken, Status: state.MatchStatusScheduled},
+		},
+	}}))
+	compDir := filepath.Join(dir, "competitions", "c1")
+	require.NoError(t, os.WriteFile(filepath.Join(compDir, "seeds.csv"),
+		[]byte("Rank,Name,Dojo,ID\n1,Rin 2Nd,Kenshinkan 2Nd,"+rin+"\n2,Ken 2Nd,Seibukan,\n"), 0o600))
+	for _, f := range []string{"pools.csv", "pool-matches.csv", "bracket.json"} {
+		raw, err := bctest.ReadFile(filepath.Join(compDir, f))
+		require.NoError(t, err)
+		require.Contains(t, string(raw), "Rin 2Nd", "the fixture's %s holds the earlier release's spelling", f)
+	}
+	if rawRoster {
+		rewriteFile(t, filepath.Join(compDir, "participants.csv"), "Rin 2nd", "rin 2nd")
+		rewriteFile(t, filepath.Join(compDir, "participants.csv"), "Kenshinkan 2nd", "kenshinkan 2nd")
+		rewriteFile(t, filepath.Join(compDir, "participants.csv"), "Ken 2nd", "ken 2nd")
+	}
+	return rin, ken, yuki, sho
+}
+
+func bracketMatchByID(t *testing.T, b *state.Bracket, id string) state.BracketMatch {
+	t.Helper()
+	for _, round := range b.Rounds {
+		for _, m := range round {
+			if m.ID == id {
+				return m
+			}
+		}
+	}
+	require.FailNow(t, "no bracket match "+id)
+	return state.BracketMatch{}
+}
+
+// TestLegacyTextCaseUpgrade_DrawAndSeedsTakeTheRostersSpelling pins D24 (b):
+// the roster an earlier release stored raw is rewritten to "Rin 2nd", and
+// every copy the draw and the seeds hold of it by id takes that spelling,
+// except a match already fought (D18). An id-less seed row is given its id
+// once by a case-insensitive match and merges onto the roster.
+func TestLegacyTextCaseUpgrade_DrawAndSeedsTakeTheRostersSpelling(t *testing.T) {
+	dir, s := newLegacyUpgradeFixture(t)
+	rin, ken, _, _ := drawSpellingFixture(t, s, dir, true)
+
+	fresh := freshLegacyUpgradeStore(t, dir)
+	fresh.EnsureLegacyUpgraded("c1")
+
+	players, err := fresh.LoadParticipants("c1", false)
+	require.NoError(t, err)
+	byID := map[string]domain.Player{}
+	for _, p := range players {
+		byID[p.ID] = p
+	}
+	assert.Equal(t, "Rin 2nd", byID[rin].Name)
+	assert.Equal(t, "Kenshinkan 2nd", byID[rin].Dojo)
+	assert.Equal(t, 1, byID[rin].Seed)
+	assert.Equal(t, 2, byID[ken].Seed, "the id-less seed row resolves on the roster and merges")
+
+	seeds, err := fresh.LoadSeedsRaw("c1")
+	require.NoError(t, err)
+	require.Len(t, seeds, 2)
+	assert.Equal(t, domain.SeedAssignment{SeedRank: 1, Name: "Rin 2nd", Dojo: "Kenshinkan 2nd", ID: rin}, seeds[0])
+	assert.Equal(t, domain.SeedAssignment{SeedRank: 2, Name: "Ken 2nd", Dojo: "Seibukan", ID: ken}, seeds[1])
+
+	pools, err := fresh.LoadPools("c1")
+	require.NoError(t, err)
+	require.Len(t, pools, 1)
+	names := make([]string, 0, len(pools[0].Players))
+	for _, p := range pools[0].Players {
+		names = append(names, p.Name+" / "+p.Dojo)
+	}
+	assert.Equal(t, []string{"Rin 2nd / Kenshinkan 2nd", "Ken 2nd / Seibukan", "Yuki Tanaka / Tobukan", "Sho 3Rd / Tobukan"}, names,
+		"every pool member takes the roster's spelling; Sho 3Rd, saved that way, keeps it")
+
+	matches, err := fresh.LoadPoolMatches("c1")
+	require.NoError(t, err)
+	sides := map[string][3]string{}
+	for _, m := range matches {
+		sides[m.ID] = [3]string{m.SideA, m.SideB, m.Winner}
+	}
+	assert.Equal(t, [3]string{"Rin 2Nd", "Yuki Tanaka", "Rin 2Nd"}, sides["Pool A-0"], "a finished match keeps its names (D18)")
+	assert.Equal(t, [3]string{"Rin 2nd", "Ken 2nd", ""}, sides["Pool A-1"], "a match not yet fought takes the roster's spelling")
+	assert.Equal(t, [3]string{"Ken 2Nd", "Yuki Tanaka", ""}, sides["Pool A-2"], "a running match keeps its names (D18)")
+	assert.Equal(t, [3]string{"Sho 3Rd", "Yuki Tanaka", ""}, sides["Pool A-3"])
+
+	bracket, err := fresh.LoadBracket("c1")
+	require.NoError(t, err)
+	fought := bracketMatchByID(t, bracket, "m-r1-0")
+	assert.Equal(t, [2]string{"Rin 2Nd", "Rin 2Nd"}, [2]string{fought.SideA, fought.Winner}, "a fought knockout match keeps its names (D18)")
+	bye := bracketMatchByID(t, bracket, "m-r1-1")
+	assert.Equal(t, [2]string{"Ken 2nd", "Ken 2nd"}, [2]string{bye.SideA, bye.Winner}, "a bye was never fought: its side and winner converge together")
+	next := bracketMatchByID(t, bracket, "m-r2-0")
+	assert.Equal(t, [2]string{"Rin 2nd", "Ken 2nd"}, [2]string{next.SideA, next.SideB})
+
+	files := []string{"participants.csv", "seeds.csv", "pools.csv", "pool-matches.csv", "bracket.json"}
+	before := stampFiles(t, dir, files...)
+	again := freshLegacyUpgradeStore(t, dir)
+	again.EnsureLegacyUpgraded("c1")
+	assert.Equal(t, before, stampFiles(t, dir, files...), "a second load writes nothing")
+}
+
+// TestLegacyTextCaseUpgrade_DrawConvergesOnARosterAlreadyRewritten: a crash
+// after the roster's rewrite and before the copies' leaves a roster that reads
+// as stored, and the next load still gives the copies its spelling.
+func TestLegacyTextCaseUpgrade_DrawConvergesOnARosterAlreadyRewritten(t *testing.T) {
+	dir, s := newLegacyUpgradeFixture(t)
+	drawSpellingFixture(t, s, dir, false)
+	rosterBefore := stampFiles(t, dir, "participants.csv")
+
+	fresh := freshLegacyUpgradeStore(t, dir)
+	fresh.EnsureLegacyUpgraded("c1")
+
+	assert.Equal(t, rosterBefore, stampFiles(t, dir, "participants.csv"), "the roster is already in its stored form")
+	pools, err := fresh.LoadPools("c1")
+	require.NoError(t, err)
+	assert.Equal(t, "Rin 2nd", pools[0].Players[0].Name)
+	assert.Equal(t, "Kenshinkan 2nd", pools[0].Players[0].Dojo)
+	matches, err := fresh.LoadPoolMatches("c1")
+	require.NoError(t, err)
+	for _, m := range matches {
+		if m.ID == "Pool A-1" {
+			assert.Equal(t, "Rin 2nd", m.SideA)
+		}
+	}
+	bracket, err := fresh.LoadBracket("c1")
+	require.NoError(t, err)
+	assert.Equal(t, "Rin 2nd", bracketMatchByID(t, bracket, "m-r2-0").SideA)
+	seeds, err := fresh.LoadSeedsRaw("c1")
+	require.NoError(t, err)
+	assert.Equal(t, "Rin 2nd", seeds[0].Name)
 }
 
 // Two participants.csv rows that are one competitor once their text is in the

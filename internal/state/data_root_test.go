@@ -178,3 +178,24 @@ func TestDataRoot_RefusesAPathOutsideTheFolder(t *testing.T) {
 	err = root.rename(filepath.Join(dir, "..", "escape"), filepath.Join(dir, "x"))
 	assert.Error(t, err, "a name that climbs out of the folder is refused by the root")
 }
+
+// seeds.csv is read through the root like every other store file: a link in
+// the competition folder that points at a seeds file outside the data folder
+// is refused, not followed (it used to be read by path).
+func TestDataRoot_RefusesASeedsFileThatLinksOutOfTheDataFolder(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlinks need privileges on Windows")
+	}
+	s, err := NewStore(t.TempDir())
+	require.NoError(t, err)
+	require.NoError(t, s.SaveCompetition(&Competition{ID: "c1", Name: "C1", Date: "01-01-2026"}))
+
+	outside := filepath.Join(t.TempDir(), "seeds.csv")
+	require.NoError(t, os.WriteFile(outside, []byte("Rank,Name,Dojo\n1,Outside Name,Somewhere\n"), 0o600))
+	require.NoError(t, os.Symlink(outside, s.compPath("c1", "seeds.csv")))
+
+	seeds, err := s.LoadSeedsRaw("c1")
+	require.Error(t, err)
+	assert.True(t, isPathEscape(err), "the root refuses the link: %v", err)
+	assert.Empty(t, seeds, "nothing from the file outside the data folder is read")
+}

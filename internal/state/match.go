@@ -268,3 +268,21 @@ func (m *BracketMatch) hasBothCompetitors() bool {
 	}
 	return resolved(m.SideA, m.SideAID) && resolved(m.SideB, m.SideBID)
 }
+
+// ResultRecorded reports whether the match has a result recorded or is under
+// way (running or completed). It is the one owner of "this match was fought":
+// the engine's result gate (engine.hasRecordedResult), which starts a
+// draw-ready competition, asks it, and so does the load-time spelling step,
+// which never rewrites a fought match's names (D18).
+func (m *MatchResult) ResultRecorded() bool { return statusRecorded(m.Status) }
+
+// ResultRecorded is MatchResult.ResultRecorded for a knockout match, which
+// also needs both sides: a bye the draw resolves when it is generated is
+// completed with one side and was never fought.
+func (m *BracketMatch) ResultRecorded() bool {
+	return statusRecorded(m.Status) && m.SideA != "" && m.SideB != ""
+}
+
+func statusRecorded(s MatchStatus) bool {
+	return s == MatchStatusRunning || s == MatchStatusCompleted
+}

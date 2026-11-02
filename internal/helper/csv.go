@@ -58,7 +58,14 @@ func ReadSeedsFileRaw(filePath string) ([]domain.SeedAssignment, error) {
 		}
 	}()
 
-	reader := csv.NewReader(file)
+	return ReadSeedsRaw(file)
+}
+
+// ReadSeedsRaw is ReadSeedsFileRaw over bytes already in hand, for a reader that
+// opens the file itself (the tournament store reads every file through the
+// os.Root on its data folder, so it never hands this package a path).
+func ReadSeedsRaw(r io.Reader) ([]domain.SeedAssignment, error) {
+	reader := csv.NewReader(r)
 	header, err := reader.Read()
 	if err != nil {
 		if err == io.EOF {

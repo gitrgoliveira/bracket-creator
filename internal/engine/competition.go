@@ -246,16 +246,12 @@ func (e *Engine) autoStartOnFirstResult(compID string) (bool, *state.Competition
 // has fought), so counting them would let an undo start a competition whose
 // draw happens to contain a bye. A fought match always names both sides.
 func (e *Engine) hasRecordedResult(compID string) (bool, error) {
-	recorded := func(s state.MatchStatus) bool {
-		return s == state.MatchStatusRunning || s == state.MatchStatusCompleted
-	}
-
 	matches, err := e.store.LoadPoolMatches(compID)
 	if err != nil {
 		return false, err
 	}
-	for _, m := range matches {
-		if recorded(m.Status) {
+	for i := range matches {
+		if matches[i].ResultRecorded() {
 			return true, nil
 		}
 	}
@@ -267,17 +263,14 @@ func (e *Engine) hasRecordedResult(compID string) (bool, error) {
 	if bracket == nil {
 		return false, nil
 	}
-	bracketResult := func(m state.BracketMatch) bool {
-		return recorded(m.Status) && m.SideA != "" && m.SideB != ""
-	}
 	for _, round := range bracket.Rounds {
-		for _, m := range round {
-			if bracketResult(m) {
+		for i := range round {
+			if round[i].ResultRecorded() {
 				return true, nil
 			}
 		}
 	}
-	if bracket.ThirdPlaceMatch != nil && bracketResult(*bracket.ThirdPlaceMatch) {
+	if bracket.ThirdPlaceMatch != nil && bracket.ThirdPlaceMatch.ResultRecorded() {
 		return true, nil
 	}
 	return false, nil

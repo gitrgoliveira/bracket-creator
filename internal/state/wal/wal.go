@@ -261,8 +261,22 @@ func (w *WAL) Apply() error {
 // Safe to call when the WAL file doesn't exist (returns nil), that
 // branch covers the "uncommitted WAL" cleanup case in the abort
 // path of state.WithTransaction.
-func (w *WAL) Done() error {
-	if err := os.Remove(w.path); err != nil && !os.IsNotExist(err) {
+func (w *WAL) Done() (err error) {
+	// Removed through a root on walDir, as Scan reads: the OS keeps the
+	// removal inside the folder.
+	root, err := os.OpenRoot(w.walDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("wal.Done %q: %w", w.id, err)
+	}
+	defer func() {
+		if cerr := root.Close(); cerr != nil && err == nil {
+			err = fmt.Errorf("wal.Done %q: close: %w", w.id, cerr)
+		}
+	}()
+	if err := root.Remove(filepath.Base(w.path)); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("wal.Done %q: %w", w.id, err)
 	}
 	return nil

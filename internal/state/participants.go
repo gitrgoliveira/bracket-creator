@@ -515,7 +515,7 @@ func (s *Store) readParticipantsNoLock(compID string, withZekkenName bool, opts 
 		// seeds to see it. Refusal belongs at the point seeds are USED (the draw
 		// pipeline, which returns a 400 naming the problem), not at the point
 		// they are shown.
-		seeds, seedsErr := helper.ReadSeedsFileRaw(s.compPath(compID, "seeds.csv"))
+		seeds, seedsErr := s.readSeedsRaw(compID)
 		if seedsErr != nil && !errors.Is(seedsErr, fs.ErrNotExist) {
 			// The roster is still shown, unseeded: a seeds file that cannot be
 			// read must not hide the participants.
@@ -835,7 +835,7 @@ func (s *Store) updateParticipantNoLock(compID string, pid string, withZekkenNam
 		// the rename and leave seeds.csv naming a competitor who no longer
 		// exists under that name, which is a worse state than the incomplete
 		// seeding the operator is in the middle of fixing.
-		seeds, loadErr = helper.ReadSeedsFileRaw(seedsPath)
+		seeds, loadErr = s.readSeedsRaw(compID)
 		switch {
 		case loadErr == nil:
 			// seeds loaded; will rename below.

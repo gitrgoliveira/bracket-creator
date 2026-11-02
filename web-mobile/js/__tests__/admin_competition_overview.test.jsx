@@ -198,7 +198,26 @@ describe('competitionNextSteps: participants.csv unreadable', () => {
     const steps = competitionNextSteps(makeComp({ players: [], dataIssues: [unreadable] }));
     const gen = steps.find(s => s.id === 'generate');
     expect(gen.detail).not.toMatch(/Add at least 2/);
-    expect(gen.detail).toMatch(/participants\.csv/);
+    expect(gen.detail).toBe('Repair the roster first: see the notice above');
+  });
+
+  // No seeding CTA leads the page while there is no roster: the generate step
+  // takes `active` with no button (the repair is the banner's Reload), and the
+  // settings step drops the seeds.
+  it('leads with the repair, not a seeding call to action', () => {
+    const steps = competitionNextSteps(makeComp({ players: [], dataIssues: [unreadable] }));
+    const gen = steps.find(s => s.id === 'generate');
+    const settings = steps.find(s => s.id === 'settings');
+    expect(gen.state).toBe('active');
+    expect(gen.cta).toBeNull();
+    expect(settings.state).toBe('pending');
+    expect(settings.label).toBe('Review settings');
+    expect(settings.detail).not.toMatch(/seed/i);
+  });
+
+  it('quotes with curly marks in the create step', () => {
+    const steps = competitionNextSteps(makeComp({ name: 'Open', players: [], dataIssues: [unreadable] }));
+    expect(steps.find(s => s.id === 'create').detail).toBe('“Open” created');
   });
 
   it('keeps the step for a located fault on another file, and for an advisory note', () => {
@@ -370,14 +389,14 @@ describe('competitionNextSteps: generate step under a court block', () => {
 
   it('points at the header button when nothing blocks the draw', () => {
     const step = generateStep(makeComp({ players: twoPlayers(), courts: ['A', 'B'] }), ['A', 'B', 'C']);
-    expect(step.detail).toBe('Use the "Generate draw" button in the header above');
+    expect(step.detail).toBe('Use the “Generate draw” button in the header above');
     expect(step.section).toBeNull();
     expect(step.cta).toBeNull();
   });
 
   it('names the blocker and routes to Settings instead', () => {
     const step = generateStep(makeComp({ players: twoPlayers(), courts: ['A', 'B', 'C'] }), ['A', 'B', 'C']);
-    expect(step.detail).not.toContain('Use the "Generate draw" button');
+    expect(step.detail).not.toContain('Use the “Generate draw” button');
     expect(step.detail).toContain('3 shiaijo cannot be paired down to a single bracket');
     expect(step.detail).toContain('Reassign shiaijo in Settings.');
     expect(step.section).toBe('settings');
@@ -394,7 +413,7 @@ describe('competitionNextSteps: generate step under a court block', () => {
 
   it('leaves league alone: the count rule does not govern its courts', () => {
     const step = generateStep(makeComp({ format: 'league', players: twoPlayers(), courts: ['A', 'B', 'C'] }), ['A', 'B', 'C']);
-    expect(step.detail).toBe('Use the "Generate draw" button in the header above');
+    expect(step.detail).toBe('Use the “Generate draw” button in the header above');
   });
 
   it('applies the count rule without a tournament court list', () => {

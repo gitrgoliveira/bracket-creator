@@ -7,6 +7,7 @@
 import { seededRanks } from './admin_helpers.jsx';
 import { NO_ID_HINT, DataIssueBanner, rosterUnreadableIssues } from './data_integrity.jsx';
 import { NumberedName } from './numbered_name.jsx';
+import { Icon } from './icon.jsx';
 import { useOpenedTapGuard } from './tap_guard.jsx';
 import { PillButton } from './competition_fields.jsx';
 import { useUnsavedInput } from './app_version.jsx';
@@ -284,8 +285,8 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
   // Zekken-column flag. Engi pairs store both member names combined in the
   // name field ("Name 1 - Name 2"), so engi does not alter the roster layout.
   const withZekken = !!c.withZekkenName;
-  // Roster line format for this competition, shared by the format hint and
-  // the CSV import dropzone so the two can't drift.
+  // Roster line format for this competition, shown once, in the participant
+  // list card's head (the CSV drop zone under it says only what it does).
   const rosterFormat = c.kind === "team" ? "Team name, Dojo"
     : c.engi ? (withZekken ? "Name 1 - Name 2, Zekken 1 - Zekken 2, Dojo[, Dan]" : "Name 1 - Name 2, Dojo[, Dan]")
       : withZekken ? "Name, Zekken, Dojo[, Dan]" : "Name, Dojo[, Dan grade]";
@@ -1146,17 +1147,17 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
           </div>
           {!!seedProblem && (
             <div className="alert alert--error" style={{ margin: "0 16px 16px" }} data-testid="seed-gap-banner">
-              ❌ {seedProblem} The draw cannot run until the seeding is fixed.
+              <Icon name="alert-circle" /> {seedProblem} The draw cannot run until the seeding is fixed.
             </div>
           )}
           {seedImportResult && (
             <div style={{ margin: "0 16px 12px" }}>
               <div className="alert alert--success" style={{ marginBottom: 6 }}>
-                ✔ Matched {seedImportResult.updatedCount} of {seedImportResult.totalRows} seeded players.
+                <Icon name="check" /> Matched {seedImportResult.updatedCount} of {seedImportResult.totalRows} seeded players.
               </div>
               {seedImportResult.unmatched.length > 0 && (
                 <div className="alert alert--warn">
-                  ⚠ {seedImportResult.unmatched.length} row{seedImportResult.unmatched.length !== 1 ? "s" : ""} not matched:
+                  <Icon name="alert-circle" /> {seedImportResult.unmatched.length} row{seedImportResult.unmatched.length !== 1 ? "s" : ""} not matched:
                   <ul style={{ margin: "4px 0 0 16px", padding: 0 }}>
                     {seedImportResult.unmatched.map(({ name, suggestion }) => (
                       <li key={name}>{name}{suggestion ? <span style={{ color: "var(--ink-3)" }}>, did you mean <em>{suggestion}</em>?</span> : ""}</li>
@@ -1356,7 +1357,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
                     a new list and mounts empty, so a count here would read
                     "0" over a competition that has a full saved roster. The
                     roster's own size is on the Ordering & seeding card. */}
-                {lines.length === 0 ? "Empty" : pluralize(lines.length, "line")} · One per line · <span style={{ color: "var(--ink-2)", fontWeight: 600 }}>Example: {c.kind === "team" ? "Tora A, Tora Dojo London" : c.engi ? (c.withZekkenName ? "Emi Sasaki - Ren Fujita, SASAKI - FUJITA, Getsurin, 3" : "Emi Sasaki - Ren Fujita, Getsurin, 3") : c.withZekkenName ? "Alice Smith, SMITH, Gyokusen, 3" : "Alice Smith, Gyokusen, 3"}</span>
+                {lines.length === 0 ? "Empty" : pluralize(lines.length, "line")} · One per line · <span className="participants-example">Example: {c.kind === "team" ? "Tora A, Tora Dojo London" : c.engi ? (c.withZekkenName ? "Emi Sasaki - Ren Fujita, SASAKI - FUJITA, Getsurin, 3" : "Emi Sasaki - Ren Fujita, Getsurin, 3") : c.withZekkenName ? "Alice Smith, SMITH, Gyokusen, 3" : "Alice Smith, Gyokusen, 3"}</span>
               </div>
               <div className="field__hint" style={{ marginTop: 2, fontSize: 11 }}>
                 Format: &ldquo;{rosterFormat}&rdquo;
@@ -1372,24 +1373,25 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
             </div>
           </div>
 
-          <div style={{ display: "flex", gap: 10, marginBottom: 12 }}>
-            <div
-              className={`dropzone ${dragOver ? "dropzone--active" : ""} ${isDrawReady ? "dropzone--disabled" : ""}`}
+          {/* A real button, so the import is reachable and operable by keyboard
+              (Tab, then Enter or Space) and takes the shared focus ring. The
+              file input sits outside it: a button holds no interactive content.
+              The format and example live in the card head alone. */}
+          <div className="dropzone-row">
+            <button
+              type="button"
+              className={`dropzone ${dragOver ? "dropzone--active" : ""}`}
+              disabled={isDrawReady}
+              title={isDrawReady ? "Discard the draw to edit participants" : undefined}
               onClick={() => { if (!isDrawReady) fileRef.current?.click(); }}
               onDragOver={(e) => { if (isDrawReady) return; e.preventDefault(); setDragOver(true); }}
               onDragLeave={() => setDragOver(false)}
               onDrop={(e) => { if (isDrawReady) { e.preventDefault(); setDragOver(false); return; } onDrop(e); }}
-              style={{ flex: 1, height: 80, minHeight: 80, cursor: isDrawReady ? "not-allowed" : undefined, opacity: isDrawReady ? 0.5 : undefined }}
             >
-              <div className="dropzone__icon">📥</div>
-              <div>
-                <div className="dropzone__title">{dragOver ? "Drop CSV to import" : "Click or drop CSV to import participants"}</div>
-                <div className="dropzone__sub">
-                  {rosterFormat}{!c.engi && !withZekken && c.kind !== "team" ? " (e.g. Alice Smith, Gyokusen, 3)" : ""}
-                </div>
-              </div>
-              <input ref={fileRef} type="file" accept=".csv,.txt,text/csv,text/plain" style={{ display: "none" }} onChange={(e) => handleFile(e.target.files[0])} />
-            </div>
+              <Icon name="upload" size={28} className="dropzone__icon" />
+              <span className="dropzone__title">{dragOver ? "Drop the CSV file to import" : "Choose or drop a CSV file to import"}</span>
+            </button>
+            <input ref={fileRef} type="file" accept=".csv,.txt,text/csv,text/plain" hidden onChange={(e) => handleFile(e.target.files[0])} />
           </div>
 
           {/* Sample roster: only offered while there is no roster and the box

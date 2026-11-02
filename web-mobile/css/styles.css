@@ -610,13 +610,6 @@ a:hover {
   margin-top: 2px;
 }
 
-/* An error named inside the page-head's meta line (participants.csv
-   unreadable): danger ink, not the line's muted grey. */
-.page-head__error {
-  color: var(--danger);
-  font-weight: 600;
-}
-
 /* Why the header's draw/start buttons are disabled: danger text at the hint
    size, right-aligned under the buttons it explains. */
 .page-head__blocker {
@@ -747,10 +740,11 @@ a:hover {
    CSV template") and reads as a link rather than a box. Takes the surrounding
    text size; --text-link ink, the token for a standalone link that must read
    as a link (DESIGN.md §3); underline on hover; the shared 2px
-   accent focus ring from .btn:focus-visible. The coarse-pointer 44px floor on
-   .btn does not apply: a link sized like a box would push its text apart. */
-.btn--link,
-.btn.btn--link {
+   accent focus ring from .btn:focus-visible. One class (0,1,0), so a sibling
+   class sets its own size (.pool__view-all-btn's 13px). Under a coarse pointer
+   it keeps the 44px touch floor as an invisible hit area rather than height
+   (the coarse-pointer block below), so the text around it is not pushed apart. */
+.btn--link {
   display: inline-block;
   min-height: 0;
   padding: 0;
@@ -3845,11 +3839,48 @@ button.vsched-item:not([data-clickable]) {
   margin-top: 6px;
 }
 
-/* A stat the box cannot give ("Participants unreadable"): the reason in
-   danger ink beside the label. */
+/* A stat the box cannot give ("Participants unreadable"): the reason beside
+   the label, in the label's muted ink at full weight. Not danger ink: the page's
+   banner is the one danger-coloured statement of the failure. */
 .stat-box__flag {
-  color: var(--danger);
+  color: var(--ink-2);
   font-weight: 600;
+}
+
+/* The Overview's schedule estimate footer (admin_competition_overview.jsx). */
+.schedule-estimate {
+  margin-top: 16px;
+  padding: 10px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--accent);
+  background: var(--accent-soft);
+  font-size: 12.5px;
+  color: var(--ink);
+}
+
+.schedule-estimate__title {
+  margin-bottom: 4px;
+  font-weight: 600;
+  color: var(--ink-2);
+}
+
+.schedule-estimate__spinner {
+  margin-left: 6px;
+  vertical-align: middle;
+}
+
+.schedule-estimate__error {
+  font-size: 12px;
+  color: var(--danger);
+}
+
+.schedule-estimate__empty {
+  font-size: 12px;
+  color: var(--ink-3);
+}
+
+.schedule-estimate__row {
+  margin-top: 2px;
 }
 
 /* stat-box link variant, a button-reset that keeps the stat-box layout
@@ -4470,6 +4501,34 @@ button.vsched-item:not([data-clickable]) {
     min-height: 44px;
     font-size: 16px;
   }
+  /* A link button keeps its text height (a box would push the running text
+     around it apart) and gets the 44px target as a hit area: the pseudo-
+     element is part of the button for hit testing, centred on the text and
+     wider than it by a few pixels each side. */
+  .btn--link {
+    position: relative;
+    min-height: 0;
+  }
+  .btn--link::before {
+    content: "";
+    position: absolute;
+    left: -6px;
+    right: -6px;
+    top: 50%;
+    height: 44px;
+    transform: translateY(-50%);
+  }
+  /* The band reaches about 14px past a one-line link's text. A wrapped card
+     head puts a link (Download CSV template) just above its button row, so the
+     rows sit far enough apart for the band to end before the buttons, and the
+     buttons are positioned so they paint, and take the tap, over any band that
+     still reaches them. */
+  .card__head--wrap {
+    row-gap: 14px;
+  }
+  .card__head-actions .btn {
+    position: relative;
+  }
 }
 
 .seed-row__input:focus {
@@ -4667,7 +4726,15 @@ button.vsched-item:not([data-clickable]) {
   text-align: center;
 }
 
+.dropzone-row {
+  display: flex;
+  margin-bottom: 12px;
+}
+
+/* A <button> (keyboard-reachable), so the UA button styles are reset here. */
 .dropzone {
+  flex: 1;
+  min-height: 64px;
   border: 2px dashed var(--line-2);
   border-radius: 12px;
   padding: 16px;
@@ -4678,11 +4745,23 @@ button.vsched-item:not([data-clickable]) {
   transition: background-color 200ms var(--ease-out), border-color 200ms var(--ease-out), color 200ms var(--ease-out);
   background: var(--surface);
   color: var(--ink-2);
+  font: inherit;
+  text-align: left;
 }
 
-.dropzone:hover {
+.dropzone:hover:not(:disabled) {
   border-color: var(--accent);
   background: var(--surface-2);
+}
+
+.dropzone:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.dropzone:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
 }
 
 .dropzone--active {
@@ -4692,20 +4771,21 @@ button.vsched-item:not([data-clickable]) {
 }
 
 .dropzone__icon {
-  font-size: 32px;
-  line-height: 1;
+  color: var(--ink-3);
+}
+
+/* The participant list card's example line: one unit that wraps as a whole,
+   so a narrow line never strands its last field ("3") alone. */
+.participants-example {
+  display: inline-block;
+  color: var(--ink-2);
+  font-weight: 600;
 }
 
 .dropzone__title {
   font-weight: 700;
   font-size: 15px;
   color: var(--ink);
-}
-
-.dropzone__sub {
-  font-size: 12px;
-  color: var(--ink-3);
-  margin-top: 2px;
 }
 
 /* ---------- Tournament-wide schedule (court swimlanes) ---------- */
@@ -7012,9 +7092,22 @@ button.vsched-item:not([data-clickable]) {
   margin-bottom: 12px;
 }
 
+/* Cap the measure (DESIGN.md: about 65 to 75 characters), or the banner's
+   paragraphs ran about 130 characters a line at 1180. */
+.data-issue--banner p,
+.data-issue__list {
+  max-width: 72ch;
+}
+
 .data-issue__list {
   margin: 6px 0;
   padding-left: 20px;
+}
+
+/* What the banner's Reload found, under its buttons. */
+.data-issue__note {
+  margin: 8px 0 0;
+  font-weight: 600;
 }
 
 .data-issue__list code {

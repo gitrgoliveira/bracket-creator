@@ -91,10 +91,24 @@ export function unreadableMatches(matches) {
 }
 
 // issueIsLocated: whether the server placed the fault on a line of the file.
-// An entry with no position names a file the server could not open at all
-// (handlers_viewer.go rosterUnreadableIssue), which is fixed outside the file.
+// An entry with no position is one of two things, which its `cause` names
+// (handlers_viewer.go rosterUnreadableIssue): a file the server could not open
+// at all, fixed outside the file, or one it read whose parser refused a row it
+// could not place on a line, fixed by editing that row.
 export function issueIsLocated(issue) {
   return !!issue && issue.line > 0;
+}
+
+// issueRowRefused: an entry with no position for a file the server read but
+// whose parser refused a row (its detail names the row). Every other entry with
+// no position, an older payload's included, is a file that could not be opened.
+export function issueRowRefused(issue) {
+  return !!issue && !issueIsLocated(issue) && issue.cause === "refused";
+}
+
+// issueUnopened: an entry naming a file the server could not open at all.
+export function issueUnopened(issue) {
+  return !!issue && !issueIsLocated(issue) && !issueRowRefused(issue);
 }
 
 // dataIssueLocator: the file's place inside the tournament data folder, and the
@@ -339,11 +353,47 @@ export function DataIssueBanner({ issues, competition, onReset, resetting, onRel
   // pool-matches.csv has no reset, whatever the format.
   const kind = bracket ? bracketRecoveryKind(competition) : BRACKET_RECOVERY_NONE;
   // The advice follows what went wrong with each file (operator decision D27):
-  // a file with a located bad line is repaired in an editor; a file with no
-  // position is one the server could not open at all, and editing its text is
-  // not the fix. A list can hold both, so each paragraph asks for itself.
+  // a file with a located bad line, or a refused row the server named, is
+  // repaired in an editor; a file the server could not open is fixed outside
+  // it, and editing its text is not the fix. A list can hold more than one, so
+  // each paragraph asks for itself. The roster holds no results, so its banner
+  // says what it does block (the roster and the draw) instead.
   const located = list.some(issueIsLocated);
-  const unopened = list.some((i) => !issueIsLocated(i));
+  const refused = list.some(issueRowRefused);
+  const unopened = list.some(issueUnopened);
+  const rosterOnly = list.length > 0 && list.every((i) => i.file === ROSTER_FILE);
+  const reloadWords = onReload ? "press Reload" : "reload this page";
+  const fixWhat = located && refused ? "each position or row named above" : located ? "the position above" : "the row named above";
+
+  // Reload says what it is doing and what it found (it used to change nothing
+  // visible when the file was still broken, and log a failure to the console
+  // alone). onReload answers { ok: false, message } when the request failed.
+  const [reloading, setReloading] = React.useState(false);
+  // The note belongs to the issues it was found over: it shows only while the
+  // banner still lists the same ones, so a later, different fault never wears it.
+  const [reloadNote, setReloadNote] = React.useState(null);
+  const issuesSig = list.map((i) => `${i.file}:${i.line}:${i.detail}`).join("|");
+  const mountedRef = React.useRef(true);
+  React.useEffect(() => () => { mountedRef.current = false; }, []);
+  const reload = async () => {
+    setReloading(true);
+    setReloadNote(null);
+    let res;
+    try {
+      res = await onReload();
+    } catch (e) {
+      res = { ok: false, message: e && e.message };
+    }
+    if (!mountedRef.current) return;
+    setReloading(false);
+    setReloadNote({
+      sig: issuesSig,
+      text: res && res.ok === false
+        ? `Could not reload: ${res.message || "the server did not answer"}. Try again in a moment.`
+        : "Reloaded: the file still could not be read.",
+    });
+  };
+  const shownReloadNote = reloadNote && (reloadNote.text.startsWith("Could not") || reloadNote.sig === issuesSig) ? reloadNote.text : null;
 
   return (
     <>
@@ -360,23 +410,25 @@ export function DataIssueBanner({ issues, competition, onReset, resetting, onRel
                 </li>
               ))}
             </ul>
-            {located ? (
-              <>
-                <p>
-                  Scoring is blocked for whatever that file holds. Nothing has been
-                  overwritten: every write to a file that will not parse is refused, so
-                  it is still exactly as it was last saved.
-                </p>
-                <p><strong>Repair it, and this clears on its own.</strong> Open the file, fix the
-                  position above, and reload this page. Everything recorded in it comes back,
-                  results included.{kind !== BRACKET_RECOVERY_NONE ? " This is the option that loses nothing." : null}</p>
-              </>
+            <p>
+              {rosterOnly
+                ? "The roster and the draw are blocked until it loads."
+                : "Scoring is blocked for whatever that file holds."}{" "}
+              Nothing has been overwritten: every save to a file that will not load is
+              refused, so it is still exactly as it was last saved.
+            </p>
+            {located || refused ? (
+              <p><strong>Repair it, and this clears on its own.</strong> Open the file, fix
+                {" "}{fixWhat}, then {reloadWords}.
+                {refused ? " Rows are counted from the top of the file, leaving out blank lines." : null}
+                {located && !rosterOnly ? " Everything recorded in it comes back, results included." : null}
+                {kind !== BRACKET_RECOVERY_NONE ? " This is the option that loses nothing." : null}</p>
             ) : null}
             {unopened ? (
               <p>
-                The server could not open this file. Its log names the reason, for
-                example a permission problem. Fix that, then reload this page. Nothing
-                in the file has been changed.
+                {located || refused ? "For the file that could not be opened, the" : "The"} server’s
+                log names the reason, for example a permission problem. Fix that,
+                then {reloadWords}.
               </p>
             ) : null}
             {bracket && kind === BRACKET_RECOVERY_NONE ? (
@@ -419,9 +471,9 @@ export function DataIssueBanner({ issues, competition, onReset, resetting, onRel
             {onReload || kind !== BRACKET_RECOVERY_NONE ? (
               <div className="data-issue__actions">
                 {onReload ? (
-                  <button type="button" className="btn" onClick={onReload}>
-                    <Icon name="refresh" size={14} />
-                    Reload
+                  <button type="button" className="btn" onClick={reload} disabled={reloading} aria-busy={reloading || undefined}>
+                    {reloading ? <span className="spinner" aria-hidden="true" /> : <Icon name="refresh" size={14} />}
+                    {reloading ? "Reloading…" : "Reload"}
                   </button>
                 ) : null}
                 {/* One button for both recoverable kinds: they run the same endpoint and
@@ -438,6 +490,9 @@ export function DataIssueBanner({ issues, competition, onReset, resetting, onRel
                   </button>
                 ) : null}
               </div>
+            ) : null}
+            {shownReloadNote ? (
+              <p className="data-issue__note" role="status" data-testid="data-issue-reload-note">{shownReloadNote}</p>
             ) : null}
           </div>
         </div>

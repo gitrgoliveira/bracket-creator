@@ -159,6 +159,23 @@ export function dojoKey(dojo) {
   return (dojo == null ? "" : String(dojo)).trim().toLowerCase();
 }
 
+// rosterDojos: the dojos a roster holds, with their member counts, one entry
+// per dojoKey (D25): two names that differ only in case (a roster not saved
+// since dojos were title-cased) are one dojo, listed once under the first name
+// met with the totals added. Sorted by name. The watch picker, its "N dojos"
+// line and the dojo chips all read this one list, so the count offered before
+// a tap is the count watched after it.
+export function rosterDojos(roster) {
+  const byKey = new Map();
+  (roster || []).forEach((p) => {
+    if (!p || !p.dojo) return;
+    const k = dojoKey(p.dojo);
+    const seen = byKey.get(k);
+    byKey.set(k, seen ? { ...seen, total: seen.total + 1 } : { name: p.dojo, total: 1 });
+  });
+  return Array.from(byKey.values()).sort((a, b) => a.name.localeCompare(b.name));
+}
+
 // sameDojo: whether two dojo names are the same dojo, by dojoKey.
 export function sameDojo(a, b) {
   return dojoKey(a) === dojoKey(b);

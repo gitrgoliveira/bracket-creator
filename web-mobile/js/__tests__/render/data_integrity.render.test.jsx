@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen } from '@testing-library/react';
+import { render, screen, act } from '@testing-library/react';
 import { describe, it, expect, vi } from 'vitest';
 import { DataIssueBanner, MissingParticipantIDsNotice } from '../../data_integrity.jsx';
 
@@ -154,9 +154,42 @@ describe('DataIssueBanner advice per case', () => {
   it('tells the operator to fix the cause outside the file when it could not be opened', () => {
     render(<DataIssueBanner issues={[unopened]} competition={comp} />);
     const text = screen.getByRole('alert').textContent.replace(/\s+/g, ' ');
-    expect(text).toContain('The server could not open this file. Its log names the reason, for example a permission problem. Fix that, then reload this page. Nothing in the file has been changed.');
+    expect(text).toContain('The server’s log names the reason, for example a permission problem. Fix that, then reload this page.');
+    // The list item says "could not be opened"; the paragraph does not say it again.
+    expect(text.match(/could not (be )?open/g)).toHaveLength(1);
     expect(text).not.toMatch(/position above/);
     expect(text).not.toMatch(/will not parse/);
+  });
+
+  // Round 2 (V1/J1): a file the server read whose parser refused a row is
+  // fixed by editing that row, never told it could not be opened.
+  it('gives the repair advice for a refused row the server could not place on a line', () => {
+    const refused = { kind: 'corrupt-file', file: 'participants.csv', line: 0, column: 0, cause: 'refused',
+      detail: "a row was refused: competitor row 2: invalid format: expected 'Name, Dojo' or 'Name, DisplayName, Dojo'" };
+    render(<DataIssueBanner issues={[refused]} competition={comp} onReload={vi.fn()} />);
+    const text = screen.getByRole('alert').textContent.replace(/\s+/g, ' ');
+    expect(text).toContain('Open the file, fix the row named above, then press Reload.');
+    expect(text).toContain('competitor row 2');
+    expect(text).not.toMatch(/could not (be )?open/);
+    expect(text).not.toMatch(/permission/);
+  });
+
+  // participants.csv holds no results and blocks the roster and the draw, not
+  // scoring; the advice names the Reload button when there is one.
+  it('words the roster banner for the roster, and names the Reload button', () => {
+    render(<DataIssueBanner issues={[located]} competition={comp} onReload={vi.fn()} />);
+    const text = screen.getByRole('alert').textContent.replace(/\s+/g, ' ');
+    expect(text).toContain('The roster and the draw are blocked until it loads.');
+    expect(text).toContain('fix the position above, then press Reload.');
+    expect(text).not.toMatch(/Scoring is blocked/);
+    expect(text).not.toMatch(/results included/);
+  });
+
+  it('keeps the scoring and results wording for a draw file', () => {
+    render(<DataIssueBanner issues={[{ kind: 'corrupt-file', file: 'pool-matches.csv', line: 3, column: 2, detail: 'x' }]} competition={comp} />);
+    const text = screen.getByRole('alert').textContent.replace(/\s+/g, ' ');
+    expect(text).toContain('Scoring is blocked for whatever that file holds.');
+    expect(text).toContain('results included');
   });
 
   it('says the repair loses nothing only when a reset is also offered', () => {
@@ -181,14 +214,35 @@ describe('DataIssueBanner advice per case', () => {
     expect(container.textContent).not.toContain('⚠');
   });
 
-  it('offers Reload only when the host can reload', () => {
+  it('offers Reload only when the host can reload', async () => {
     const { unmount } = render(<DataIssueBanner issues={[unopened]} competition={comp} />);
     expect(screen.queryByRole('button', { name: /Reload/ })).toBeNull();
     unmount();
-    const onReload = vi.fn();
+    const onReload = vi.fn().mockResolvedValue({ ok: true });
     render(<DataIssueBanner issues={[unopened]} competition={comp} onReload={onReload} />);
-    screen.getByRole('button', { name: /Reload/ }).click();
+    await act(async () => { screen.getByRole('button', { name: /Reload/ }).click(); });
     expect(onReload).toHaveBeenCalled();
+  });
+
+  // Reload shows it is working, then what it found: still unreadable, or a
+  // request that failed (which used to reach the console alone).
+  it('shows a busy Reload, then says the file is still unreadable', async () => {
+    let finish;
+    const onReload = vi.fn(() => new Promise((resolve) => { finish = resolve; }));
+    render(<DataIssueBanner issues={[unopened]} competition={comp} onReload={onReload} />);
+    await act(async () => { screen.getByRole('button', { name: /Reload/ }).click(); });
+    const busy = screen.getByRole('button', { name: /Reloading/ });
+    expect(busy.disabled).toBe(true);
+    await act(async () => { finish({ ok: true }); });
+    expect(screen.getByRole('button', { name: /^Reload$/ }).disabled).toBe(false);
+    expect(screen.getByTestId('data-issue-reload-note').textContent).toBe('Reloaded: the file still could not be read.');
+  });
+
+  it('says a failed reload, with its reason', async () => {
+    const onReload = vi.fn().mockResolvedValue({ ok: false, message: 'Network down' });
+    render(<DataIssueBanner issues={[unopened]} competition={comp} onReload={onReload} />);
+    await act(async () => { screen.getByRole('button', { name: /Reload/ }).click(); });
+    expect(screen.getByTestId('data-issue-reload-note').textContent).toBe('Could not reload: Network down. Try again in a moment.');
   });
 });
 

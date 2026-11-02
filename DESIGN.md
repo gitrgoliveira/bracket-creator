@@ -47,7 +47,7 @@ When extending the design system, **mobile-app is the canonical surface**. The b
    Hue inside a pulse follows the token table (§3), not a fixed two-value vocabulary: `--danger`/red for a warning that risks data (the dropped-connection dot), `--accent`/navy for an expected action rooted in the running/court language (`.daihyosen-controls--tied`, waiting on a rep bout). A pulse may also depart from its token's usual hue where the surface's own contrast demands it (the sustained-outage strip is solid red, so its dot pulses white/`--accent-fg` rather than red-on-red): that's a contrast accommodation, not a new hue rule, and doesn't license inventing others.
 
    Progress indicators (the loading spinner's rotation, the "Syncing…" dot's opacity fade) sit outside this principle entirely: they mean "work is under way," not "look here," so they may animate without being either a warning or an action. What keeps them distinct from a pulse is that they run only while the work does, and stop when it finishes.
-4. **Touch-friendly dense surfaces.** Operators score on tablets; players check brackets on phones. The existing pattern bumps tap targets under `@media (pointer: coarse)`, see `.btn--icon-sm` at 44px in [styles.css#L2356](web-mobile/css/styles.css#L2356). Aim for ≥ 36px in shared surfaces, ≥ 44px under coarse pointers.
+4. **Touch-friendly dense surfaces.** Operators score on tablets; players check brackets on phones. The existing pattern bumps tap targets under `@media (pointer: coarse)`, see `.btn--icon-sm` at 44px in [styles.css#L4476](web-mobile/css/styles.css#L4476). Aim for ≥ 36px in shared surfaces, ≥ 44px under coarse pointers.
 5. **Status drives color, color doesn't drive meaning.** The pipeline `setup → pools → knockout → completed` has its own palette; reuse the existing `.badge--*` rather than inventing local hues.
 6. **Domain coupling is allowed.** Class names like `.bc-tree`, `.pool__table`, `.podium-step` exist because they map 1:1 to bracket concepts. Don't generalize a `.match-card` into a `.list-row`: readability wins.
 
@@ -272,7 +272,7 @@ Quick lookup: scan, then `Ctrl+F` the class name to jump to its subsection.
 | `.btn--primary` | Confirm, save, start match |
 | `.btn--danger` | Destructive (reset, kiken, archive) |
 | `.btn--ghost` | Tertiary, inline cancels |
-| `.btn--link` | An action inside running text or a hint ("Download CSV template", the viewer's "View full standings →"): `--text-link` ink, no box, underline on hover, takes the surrounding text size and is exempt from the coarse-pointer 44px floor |
+| `.btn--link` | An action inside running text or a hint ("Download CSV template", the viewer's "View full standings →"): `--text-link` ink, no box, underline on hover, takes the surrounding text size (a sibling class may set its own). Under a coarse pointer it keeps the 44px floor as an invisible hit area (`::before`) rather than height, so running text around it is not pushed apart |
 | `.btn--sm` / `.btn--lg` | Compact rows / hero CTAs |
 | `.btn--full` | Full-width (forms, modal footers) |
 
@@ -377,7 +377,7 @@ Mount via the `<Toast>` primitive. Self-dismiss at 2.7s. The host component (see
 
 ### Score input: `.sb-match`, `.ipt-btn`
 
-[styles.css#L5373](web-mobile/css/styles.css#L5373) (`.scoring-board`), [#L2476](web-mobile/css/styles.css#L2476) (`.ipt-btn`). Operator-critical widget for entering ippon, rendered by the individual score editor ([admin_scoring_individual.jsx](web-mobile/js/admin_scoring_individual.jsx)). Layout: `.scoring-board` wraps `.sb-match`, three columns: `.sb-side` (Shiro), `.sb-center`, `.sb-side` (Aka). Each side is `.sb-side--shiro` or `.sb-side--aka`, which carries the side's tint (see Aka/Shiro side treatment), plus `.sb-name` and the button grid `.sb-points-grid`. There is no visible side badge: the side is named by an `sr-only` `SideLabel` ([side_cell.jsx](web-mobile/js/side_cell.jsx)).
+[styles.css#L5529](web-mobile/css/styles.css#L5529) (`.scoring-board`), [#L2539](web-mobile/css/styles.css#L2539) (`.ipt-btn`). Operator-critical widget for entering ippon, rendered by the individual score editor ([admin_scoring_individual.jsx](web-mobile/js/admin_scoring_individual.jsx)). Layout: `.scoring-board` wraps `.sb-match`, three columns: `.sb-side` (Shiro), `.sb-center`, `.sb-side` (Aka). Each side is `.sb-side--shiro` or `.sb-side--aka`, which carries the side's tint (see Aka/Shiro side treatment), plus `.sb-name` and the button grid `.sb-points-grid`. There is no visible side badge: the side is named by an `sr-only` `SideLabel` ([side_cell.jsx](web-mobile/js/side_cell.jsx)).
 
 - **Ippon buttons** are `.ipt-btn`, one per letter from `getIpponButtons` ([admin_scoring_shared.jsx](web-mobile/js/admin_scoring_shared.jsx)): M, K, D, T and H, plus S for naginata. H is the hansoku point, so it adds `.ipt-btn--h` (red ink and border, tinted only on hover: a resting red fill read as an alert). A button has no filled or active state; what has been scored shows in the centre.
 - **The centre** (`.sb-center > .sb-center__marks`) shows the scored marks as `.sb-slot` buttons in `.sb-slots--shiro` and `.sb-slots--aka`, either side of `.sb-vs`. A scored mark is `.sb-slot--filled`, and tapping it removes it. `.sb-draw-toggle` sits below; while it is on, `.sb-vs--quiet` hides the "VS". Fouls show in `.sb-fouls`.

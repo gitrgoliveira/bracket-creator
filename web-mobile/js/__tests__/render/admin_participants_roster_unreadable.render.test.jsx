@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
+import { act } from '@testing-library/react';
 import { installParticipantsHarness, makeParticipantsCompetition, mountParticipants } from './admin_participants_mount_harness.jsx';
 import { rosterUnreadableIssues } from '../../data_integrity.jsx';
 
@@ -59,13 +60,13 @@ describe('AdminParticipants over an unreadable participants.csv (D21)', () => {
     // D28: named by its place inside the tournament data folder.
     expect(banner.textContent).toContain(`competitions/c1/participants.csv: ${UNREADABLE.detail}`);
     // D27: the advice for a file the server could not open, not the repair one.
-    expect(banner.textContent).toMatch(/The server could not open this file/);
+    expect(banner.textContent).toMatch(/server’s\s+log names the reason, for example a permission problem/);
     expect(banner.textContent).not.toMatch(/position above/);
     expect(container.querySelector('textarea')).toBeNull();
   });
 
   it('offers a Reload that re-fetches the competition (D28)', async () => {
-    const onRefreshCompetition = vi.fn();
+    const onRefreshCompetition = vi.fn().mockResolvedValue({ ok: true });
     const { container } = await mountParticipants(makeParticipantsCompetition({
       players: [],
       rosterAvailable: false,
@@ -75,7 +76,7 @@ describe('AdminParticipants over an unreadable participants.csv (D21)', () => {
     const reload = Array.from(container.querySelectorAll('.data-issue--banner button'))
       .find((b) => b.textContent.trim() === 'Reload');
     expect(reload).toBeTruthy();
-    reload.click();
+    await act(async () => { reload.click(); });
     expect(onRefreshCompetition).toHaveBeenCalledTimes(1);
   });
 
@@ -113,6 +114,30 @@ describe('the Participant list card head (D29)', () => {
     const hint = link.closest('.field__hint').textContent;
     expect(hint).toMatch(/Format: “[^”]+”/);
     expect(hint).not.toContain('"');
+  });
+
+  // The CSV drop zone is a real button: reachable by Tab, operated by Enter or
+  // Space (a native button), worded for touch as well as a mouse, drawn with
+  // the SVG icon set, and it no longer repeats the head's format and example.
+  it('makes the CSV drop zone a keyboard-operable button', async () => {
+    const { container } = await mountParticipants(makeParticipantsCompetition());
+    const zone = container.querySelector('.dropzone');
+    expect(zone.tagName).toBe('BUTTON');
+    expect(zone.getAttribute('type')).toBe('button');
+    expect(zone.disabled).toBe(false);
+    expect(zone.textContent).toBe('Choose or drop a CSV file to import');
+    expect(zone.querySelector('svg.dropzone__icon')).toBeTruthy();
+    expect(container.textContent).not.toContain('📥');
+    expect(zone.querySelector('input')).toBeNull();
+    const input = zone.parentElement.querySelector(':scope > input[type="file"]');
+    const pick = vi.spyOn(input, 'click').mockImplementation(() => {});
+    zone.click();
+    expect(pick).toHaveBeenCalledTimes(1);
+  });
+
+  it('disables the drop zone while a draw is ready', async () => {
+    const { container } = await mountParticipants(makeParticipantsCompetition({ status: 'draw-ready' }));
+    expect(container.querySelector('.dropzone').disabled).toBe(true);
   });
 });
 

@@ -15,7 +15,7 @@ import './admin_competition_overview.jsx';
 import { effectiveDrawPlayers } from './qualifier_preview.jsx';
 import { checkInApplies } from './competition_shape.jsx';
 import { leaveThen, confirmLeave } from './unsaved_entries.jsx';
-import { rosterUnreadableIssues, ROSTER_FILE } from './data_integrity.jsx';
+import { rosterUnreadableIssues } from './data_integrity.jsx';
 import { Icon } from './icon.jsx';
 export { formatCompMinutes } from './admin_competition_settings.jsx';
 export { buildRunningIpponResult, loadScoreboardPoints } from './admin_competition_bracket.jsx';
@@ -345,10 +345,11 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
   ];
 
   const currentItem = sections.flatMap(m => m.items).find(i => i.id === section);
-  // An unreadable roster is an error, so it reads in the danger colour rather
-  // than the line's muted meta ink.
+  // With the roster unreadable there is no count to give. The meta line says
+  // so in its own muted ink: the banner below is the one full statement of the
+  // failure, so the header does not repeat it in red or name the file.
   const rosterCount = rosterUnreadableIssues(c).length > 0
-    ? <span className="page-head__error">{ROSTER_FILE} unreadable</span>
+    ? "roster unreadable"
     : `${(c.players || []).length} ${c.kind === "team" ? "teams" : "players"}`;
 
   return (

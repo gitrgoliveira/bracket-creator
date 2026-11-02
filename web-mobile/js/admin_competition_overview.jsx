@@ -20,7 +20,6 @@ import {
   bracketResetPrompt,
   bracketResetToast,
   rosterUnreadableIssues,
-  ROSTER_FILE,
 } from './data_integrity.jsx';
 
 const { useState, useEffect, useRef } = React;
@@ -79,7 +78,7 @@ function competitionNextSteps(c, tournamentCourts) {
   steps.push({
     id: "create",
     label: "Create competition",
-    detail: `${c && c.name ? `"${c.name}" created` : "Competition created"}`,
+    detail: `${c && c.name ? `“${c.name}” created` : "Competition created"}`,
     state: "done",
     section: null,
     cta: null,
@@ -105,13 +104,17 @@ function competitionNextSteps(c, tournamentCourts) {
     cta: `Add ${isTeam ? "teams" : "participants"} →`,
   });
 
-  // Step 3: seeds & settings (becomes active once participants done).
+  // Step 3: seeds & settings (becomes active once participants done). With the
+  // roster unreadable there is nobody to seed, so the step speaks of settings
+  // alone.
   steps.push({
     id: "settings",
-    label: "Review seeds & settings",
-    detail: seededCount > 0
-      ? `${seededCount} seed${seededCount !== 1 ? "s" : ""} assigned`
-      : "Optionally assign seeds and adjust format",
+    label: rosterUnreadable ? "Review settings" : "Review seeds & settings",
+    detail: rosterUnreadable
+      ? "Adjust format and settings"
+      : seededCount > 0
+        ? `${seededCount} seed${seededCount !== 1 ? "s" : ""} assigned`
+        : "Optionally assign seeds and adjust format",
     state: "pending",
     section: "settings",
     cta: "Review settings →",
@@ -140,11 +143,11 @@ function competitionNextSteps(c, tournamentCourts) {
   const drawBlocker = typeof window !== "undefined" && window.competitionDrawBlocker
     ? window.competitionDrawBlocker(c, tournamentCourts)
     : null;
-  let generateDetail = "Use the \"Generate draw\" button in the header above";
-  if (rosterUnreadable) generateDetail = `Repair ${ROSTER_FILE} first: see the notice above`;
+  let generateDetail = "Use the “Generate draw” button in the header above";
+  if (rosterUnreadable) generateDetail = "Repair the roster first: see the notice above";
   else if (!hasEnoughPlayers) generateDetail = "Add at least 2 participants first";
-  else if (drawBlocker) generateDetail = `${drawBlocker.reason} ${drawBlocker.fix} The "Generate draw" button stays disabled until you do.`;
-  const drawIsBlocked = !!drawBlocker && hasEnoughPlayers;
+  else if (drawBlocker) generateDetail = `${drawBlocker.reason} ${drawBlocker.fix} The “Generate draw” button stays disabled until you do.`;
+  const drawIsBlocked = !!drawBlocker && hasEnoughPlayers && !rosterUnreadable;
   steps.push({
     id: "generate",
     label: "Generate the draw",
@@ -154,7 +157,9 @@ function competitionNextSteps(c, tournamentCourts) {
     cta: drawIsBlocked ? drawBlocker.cta : null,
     // `blocking` means "nothing further in this checklist can happen until
     // this is fixed", which is what promotes it past the ordering rule below.
-    blocking: drawIsBlocked,
+    // An unreadable roster blocks it too, with no button: the repair is the
+    // banner's Reload, so no settings CTA leads the page meanwhile.
+    blocking: drawIsBlocked || rosterUnreadable,
   });
 
   // A blocking step JUMPS THE QUEUE.
@@ -324,8 +329,12 @@ function AdminCompOverview({ c, tournament, pools, poolMatches, bracket, onSecti
   const estimateCheckIn = checkInApplies(tournament, c.checkInEnabled);
   const estimatePlayerCount = (c.players || []).length;
   const estimateCheckedInCount = estimateCheckIn ? (c.players || []).filter(p => p && p.checkedIn).length : 0;
+  // With participants.csv unreadable there is no roster to estimate from: the
+  // request would only answer the server's opaque failure. The page says so
+  // through the tiles and the footer below instead (D26).
+  const rosterUnreadable = rosterUnreadableIssues(c).length > 0;
   useEffect(() => {
-    if (!c.id) return;
+    if (!c.id || rosterUnreadable) return;
     const controller = new AbortController();
     setEstimateLoading(true);
     setEstimateErr(null);
@@ -343,7 +352,7 @@ function AdminCompOverview({ c, tournament, pools, poolMatches, bracket, onSecti
     return () => controller.abort();
   }, [c.id, c.format, c.kind, c.poolMatchDurationSeconds, c.knockoutMatchDurationSeconds, c.courts,
     c.teamSize, c.poolSize, c.poolSizeMode, c.poolWinners, c.roundRobin, c.poolFormat,
-    c.swissRounds, estimateCheckIn, password, estimatePlayerCount, estimateCheckedInCount,
+    c.swissRounds, estimateCheckIn, password, estimatePlayerCount, estimateCheckedInCount, rosterUnreadable,
     tournament?.openingBlock, tournament?.lunchBlock, tournament?.closingBlock,
     tournament?.clockToElapsedMultiplier, tournament?.slowestCourtBufferPct]);
 
@@ -371,7 +380,7 @@ function AdminCompOverview({ c, tournament, pools, poolMatches, bracket, onSecti
     ? window.formatCompMinutes
     : (m) => (Number.isFinite(m) && m > 0 ? `${m}m` : null);
 
-  const estDuration = formatCompMinutes(estimate && estimate.totalDurationMinutes) || "n/a";
+  const estDuration = (!rosterUnreadable && formatCompMinutes(estimate && estimate.totalDurationMinutes)) || "n/a";
 
   // draw-ready: pool count vs bracket size
   const poolCount = (Array.isArray(pools) && pools.length > 0) ? pools.length : (c.pools ? c.pools.length : null);
@@ -393,15 +402,15 @@ function AdminCompOverview({ c, tournament, pools, poolMatches, bracket, onSecti
 
   // The participants box, the same in every state. With participants.csv
   // unreadable the roster arrives empty, so a 0 here would contradict the
-  // banner above it: the box shows a dash and says the file is unreadable
-  // instead (operator decision D26).
-  const rosterUnreadable = rosterUnreadableIssues(c).length > 0;
+  // banner above it: the box shows the strip's one placeholder, "n/a", and says
+  // why in muted ink (operator decision D26); the banner is the one full,
+  // danger-coloured statement of the failure. The Seeded box follows it.
   function participantsTile() {
     return (
       <div className="stat-box" data-testid="stat-participants">
         {rosterUnreadable ? (
           <>
-            <div className="v" aria-hidden="true">–</div>
+            <div className="v">n/a</div>
             <div className="l">{participantLabel} <span className="stat-box__flag">unreadable</span></div>
           </>
         ) : (
@@ -413,6 +422,14 @@ function AdminCompOverview({ c, tournament, pools, poolMatches, bracket, onSecti
       </div>
     );
   }
+  function seededTile() {
+    return (
+      <div className="stat-box" data-testid="stat-seeded">
+        <div className="v">{rosterUnreadable ? "n/a" : seededCount}</div>
+        <div className="l">Seeded</div>
+      </div>
+    );
+  }
 
   // Stats strip: 4 boxes, varies by state.
   function renderStatsStrip() {
@@ -420,17 +437,14 @@ function AdminCompOverview({ c, tournament, pools, poolMatches, bracket, onSecti
       return (
         <div className="stats-strip">
           {participantsTile()}
-          <div className="stat-box">
-            <div className="v">{seededCount}</div>
-            <div className="l">Seeded</div>
-          </div>
+          {seededTile()}
           <div className="stat-box">
             <div className="v">{numCourts}</div>
             <div className="l">{numCourts === 1 ? "Court" : "Courts"}</div>
           </div>
           <div className="stat-box">
             <div className={vClass(estDuration)}>{estDuration}</div>
-            <div className="l">Est. duration{estimateLoading ? " …" : ""}</div>
+            <div className="l">Est. duration{estimateLoading && !rosterUnreadable ? " …" : ""}</div>
           </div>
         </div>
       );
@@ -456,17 +470,14 @@ function AdminCompOverview({ c, tournament, pools, poolMatches, bracket, onSecti
       return (
         <div className="stats-strip">
           {participantsTile()}
-          <div className="stat-box">
-            <div className="v">{seededCount}</div>
-            <div className="l">Seeded</div>
-          </div>
+          {seededTile()}
           <div className="stat-box">
             <div className="v v--sm">{drawSizeVal}</div>
             <div className="l">{drawSizeLabel}</div>
           </div>
           <div className="stat-box">
             <div className={vClass(estDuration)}>{estDuration}</div>
-            <div className="l">Est. duration{estimateLoading ? " …" : ""}</div>
+            <div className="l">Est. duration{estimateLoading && !rosterUnreadable ? " …" : ""}</div>
           </div>
         </div>
       );
@@ -488,14 +499,14 @@ function AdminCompOverview({ c, tournament, pools, poolMatches, bracket, onSecti
           </div>
           <div className="stat-box">
             <div className={vClass(estDuration)}>{estDuration}</div>
-            <div className="l">Est. duration{estimateLoading ? " …" : ""}</div>
+            <div className="l">Est. duration{estimateLoading && !rosterUnreadable ? " …" : ""}</div>
           </div>
         </div>
       );
     }
 
     // completed
-    const totalDuration = formatCompMinutes(estimate && estimate.totalDurationMinutes) || "n/a";
+    const totalDuration = estDuration;
     return (
       <div className="stats-strip">
         {participantsTile()}
@@ -706,6 +717,16 @@ function AdminCompOverview({ c, tournament, pools, poolMatches, bracket, onSecti
 
   // Footer: schedule estimate strip. Shown whenever estimate resolves.
   function renderEstimateFooter() {
+    // No roster, no estimate: say that rather than show whatever the request
+    // last answered (it was the server's bare "internal error").
+    if (rosterUnreadable) {
+      return (
+        <div className="schedule-estimate" data-testid="overview-estimate">
+          <div className="schedule-estimate__title">Schedule estimate</div>
+          <div className="schedule-estimate__empty">No estimate until the roster can be read.</div>
+        </div>
+      );
+    }
     if (!estimate && !estimateLoading && !estimateErr) return null;
     const total = formatCompMinutes(estimate && estimate.totalDurationMinutes);
     const perCourt = estimate ? (estimate.perCourtMinutes || []).map(m => formatCompMinutes(m) || "0m") : [];
@@ -717,44 +738,38 @@ function AdminCompOverview({ c, tournament, pools, poolMatches, bracket, onSecti
     // EstimateHeadline (admin_schedule_utils.jsx) owns that decision for
     // both this footer and the Settings panel.
     return (
-      <div style={{
-        padding: "10px 12px",
-        borderRadius: 6,
-        background: "var(--accent-soft)",
-        border: "1px solid var(--accent)",
-        marginTop: 16,
-      }}>
-        <div style={{ fontSize: 12.5, fontWeight: 600, color: "var(--ink-2)", marginBottom: 4 }}>
+      <div className="schedule-estimate" data-testid="overview-estimate">
+        <div className="schedule-estimate__title">
           Schedule estimate
-          {estimateLoading && <span className="spinner" style={{ marginLeft: 6, verticalAlign: "middle" }} />}
+          {estimateLoading && <span className="spinner schedule-estimate__spinner" />}
         </div>
         {estimateErr && (
-          <div style={{ fontSize: 12, color: "var(--red)" }}>{estimateErr}</div>
+          <div className="schedule-estimate__error">Could not estimate the schedule: {estimateErr}</div>
         )}
         {estimate && !estimateErr && (() => {
           if (!total) {
             return (
-              <div style={{ fontSize: 12, color: "var(--ink-3)" }}>
+              <div className="schedule-estimate__empty">
                 No estimate yet. Add participants and configure duration to see a projection.
               </div>
             );
           }
           return (
-            <div style={{ fontSize: 12.5, color: "var(--ink)" }}>
+            <div className="schedule-estimate__body">
               <EstimateHeadline estimate={estimate} total={total} format={formatCompMinutes} testId="overview-est-range" />
               {perCourt.length > 1 && (
-                <div style={{ marginTop: 2 }}>
+                <div className="schedule-estimate__row">
                   <strong>Per court:</strong>{" "}
                   {perCourt.map((t, i) => `Court ${(c.courts && c.courts[i]) || String.fromCharCode(65 + i)}: ${t}`).join(" · ")}
                 </div>
               )}
               {perCourt.length === 1 && (
-                <div style={{ marginTop: 2 }}>
+                <div className="schedule-estimate__row">
                   <strong>Per court:</strong> {perCourt[0]}
                 </div>
               )}
               {ceremony && (
-                <div style={{ marginTop: 2 }}>
+                <div className="schedule-estimate__row">
                   <strong>Ceremony blocks:</strong> {ceremony}
                 </div>
               )}

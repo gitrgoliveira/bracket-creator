@@ -34,7 +34,7 @@ import { sideWord, sideFillClass } from './side_cell.jsx';
 import { competitorMatchesQuery } from './competitor_search.jsx';
 import { buildWatchlistLink } from './watchlist_link.jsx';
 import { paceDisplayOf, PaceTime } from './court_pace.jsx';
-import { dojoKey, sameDojo } from './viewer_watchlist_core.jsx';
+import { dojoKey, rosterDojos, sameDojo } from './viewer_watchlist_core.jsx';
 
 // The one line the picker and the hero-empty state show while a competition's
 // participants failed to load (rosterAvailable:false on the aggregate, see
@@ -500,25 +500,11 @@ function WatchlistPanel({ tournament, roster, rosterLoaded = true, watchlist, se
   const { effectivePrimaryKey, addPlayerToWatchlist, entryKey, resolveEntryPlayerIds, VSchedItem, WATCHLIST_MAX } = window;
   const rosterById = useMemo(() => new Map(roster.map((p) => [p.id, p])), [roster]);
 
-  // Dojos present in the roster, with current member counts.
-  const dojos = useMemo(() => {
-    const counts = new Map();
-    roster.forEach((p) => { if (p.dojo) counts.set(p.dojo, (counts.get(p.dojo) || 0) + 1); });
-    return Array.from(counts.entries()).map(([name, total]) => ({ name, total })).sort((a, b) => a.name.localeCompare(b.name));
-  }, [roster]);
-  // The same list by dojoKey, so a dojo chip finds its dojo without a scan per
-  // chip. Two names that differ only in case (a roster not saved since dojos
-  // were title-cased) are one dojo: the first name is kept and the totals add,
-  // so the chip counts every competitor the watch follows.
-  const dojoByKey = useMemo(() => {
-    const byKey = new Map();
-    dojos.forEach((d) => {
-      const k = dojoKey(d.name);
-      const seen = byKey.get(k);
-      byKey.set(k, seen ? { ...seen, total: seen.total + d.total } : d);
-    });
-    return byKey;
-  }, [dojos]);
+  // Dojos present in the roster, with current member counts, one entry per
+  // dojoKey (rosterDojos, D25).
+  const dojos = useMemo(() => rosterDojos(roster), [roster]);
+  // The same list by dojoKey, so a dojo chip finds its dojo without a scan.
+  const dojoByKey = useMemo(() => new Map(dojos.map((d) => [dojoKey(d.name), d])), [dojos]);
 
   const watchedPlayerIds = useMemo(() => watchlist.filter((e) => e.type === "player").map((e) => e.id), [watchlist]);
   const watchedDojos = useMemo(() => watchlist.filter((e) => e.type === "dojo").map((e) => e.dojo), [watchlist]);

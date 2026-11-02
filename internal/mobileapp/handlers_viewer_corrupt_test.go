@@ -1,6 +1,7 @@
 package mobileapp
 
 import (
+	"encoding/csv"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -662,6 +663,82 @@ func TestViewerAggregateSaysWhenARosterCouldNotLoad(t *testing.T) {
 	assert.EqualValues(t, 0, issue["line"])
 	assert.EqualValues(t, 0, issue["column"])
 	assert.Equal(t, rosterUnreadableDetail, issue["detail"])
+}
+
+// A roster the server opened and read but whose parser refused a row (a
+// one-field row in a zekken roster) is NOT one the server could not open: the
+// fix is to edit that row (D27). The entry names the refusal and says so in
+// "cause", on the aggregate and on the detail endpoint alike, and the detail
+// endpoint degrades rather than answering 500, so the admin's Reload reads the
+// same entry back.
+func TestViewerRosterRefusedRowIsNotReportedAsUnopened(t *testing.T) {
+	r, store, _, _, dir := setupTestRouter(t)
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: "kendo", Name: "Kendo", Status: state.CompStatusSetup, Format: state.CompFormatMixed,
+		WithZekkenName: true,
+	}))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(dir, "competitions", "kendo", "participants.csv"),
+		[]byte("Alice Smith,SMITH,Kenshinkan\nBob Jones\n"), 0600))
+
+	for _, tc := range []struct {
+		name        string
+		url         string
+		isAggregate bool
+	}{
+		{"aggregate", "/api/viewer/competitions", true},
+		{"detail", "/api/viewer/competitions/kendo", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			req, _ := http.NewRequest(http.MethodGet, tc.url, nil)
+			r.ServeHTTP(w, req)
+			require.Equal(t, http.StatusOK, w.Code, "a refused roster row must not fail the whole view: %s", w.Body.String())
+			issue := dataIssueByFile(t, dataIssuesFromResponse(t, w.Body.Bytes(), tc.isAggregate, "kendo"), "participants.csv")
+			require.NotNil(t, issue, "the refused roster is named in dataIssues")
+			assert.Equal(t, "corrupt-file", issue["kind"])
+			assert.Equal(t, rosterCauseRefused, issue["cause"])
+			assert.NotEqual(t, rosterUnreadableDetail, issue["detail"], "a file that opened is never told it could not be opened")
+			detail, _ := issue["detail"].(string)
+			assert.Contains(t, detail, "competitor row 2")
+			assert.Contains(t, detail, "invalid format")
+		})
+	}
+}
+
+// The other half of the split: a file the server cannot open at all keeps
+// "could not be opened" and says so in "cause", and the detail endpoint
+// degrades for it too rather than answering 500.
+func TestViewerRosterUnopenedIsNamedOnTheDetailEndpoint(t *testing.T) {
+	r, store, _, _, dir := setupTestRouter(t)
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: "kendo", Name: "Kendo", Status: state.CompStatusSetup, Format: state.CompFormatMixed,
+	}))
+	require.NoError(t, os.Mkdir(
+		filepath.Join(dir, "competitions", "kendo", "participants.csv"), 0750))
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodGet, "/api/viewer/competitions/kendo", nil)
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	issue := dataIssueByFile(t, dataIssuesFromResponse(t, w.Body.Bytes(), false, "kendo"), "participants.csv")
+	require.NotNil(t, issue)
+	assert.Equal(t, rosterUnreadableDetail, issue["detail"])
+	assert.Equal(t, rosterCauseUnopened, issue["cause"])
+	assert.EqualValues(t, 0, issue["line"])
+}
+
+func TestRosterUnreadableIssueLocatesACSVParseError(t *testing.T) {
+	issue := rosterUnreadableIssue(&csv.ParseError{StartLine: 3, Line: 3, Column: 7, Err: csv.ErrQuote})
+	require.NotNil(t, issue)
+	assert.Equal(t, 3, (*issue)["line"])
+	assert.Equal(t, 7, (*issue)["column"])
+	assert.NotContains(t, *issue, "cause", "a located fault takes the bad-line advice, which needs no cause")
+}
+
+func TestRosterRefusedDetailCapsTheList(t *testing.T) {
+	got := rosterRefusedDetail([]string{"entry 1: a", "entry 2: b", "entry 3: c", "entry 4: d", "entry 5: e"})
+	assert.Equal(t, "a row was refused: competitor row 1: a; competitor row 2: b; competitor row 3: c; and 2 more", got)
 }
 
 // The other half: a competition whose roster is simply EMPTY (no file yet) is

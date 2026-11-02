@@ -984,7 +984,11 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
       onOpenCompetition={(id, section) => setView({ kind: "competition", id, section: section || "overview" })}
       onCreateCompetition={() => setView({ kind: "createComp" })}
       onUpdate={(next) => updateCompetition(c.id, next)}
-      onRefreshCompetition={() => window.API.fetchCompetitionDetails(c.id).then((data) => setAdminCompData((prev) => keepNewerDetail(prev, data))).catch(err => console.error("refresh failed:", err))}
+      // Answers { ok } so a caller that shows the outcome (the data-issue
+      // banner's Reload) can say a failed request, never only the console.
+      onRefreshCompetition={() => window.API.fetchCompetitionDetails(c.id)
+        .then((data) => { setAdminCompData((prev) => keepNewerDetail(prev, data)); return { ok: true }; })
+        .catch((err) => { console.error("refresh failed:", err); return { ok: false, message: err && err.message }; })}
       onMoveCourt={moveMatchCourt}
       onEditScore={editMatchScore}
       onLogout={onLogout}

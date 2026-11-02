@@ -1389,7 +1389,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
               onDrop={(e) => { if (isDrawReady) { e.preventDefault(); setDragOver(false); return; } onDrop(e); }}
             >
               <Icon name="upload" size={28} className="dropzone__icon" />
-              <span className="dropzone__title">{dragOver ? "Drop the CSV file to import" : "Choose or drop a CSV file to import"}</span>
+              <span className="dropzone__title">{dragOver ? "Drop the CSV file" : "Choose or drop a CSV file"}</span>
             </button>
             <input ref={fileRef} type="file" accept=".csv,.txt,text/csv,text/plain" hidden onChange={(e) => handleFile(e.target.files[0])} />
           </div>

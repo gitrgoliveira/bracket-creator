@@ -125,7 +125,7 @@ describe('the Participant list card head (D29)', () => {
     expect(zone.tagName).toBe('BUTTON');
     expect(zone.getAttribute('type')).toBe('button');
     expect(zone.disabled).toBe(false);
-    expect(zone.textContent).toBe('Choose or drop a CSV file to import');
+    expect(zone.textContent).toBe('Choose or drop a CSV file');
     expect(zone.querySelector('svg.dropzone__icon')).toBeTruthy();
     expect(container.textContent).not.toContain('📥');
     expect(zone.querySelector('input')).toBeNull();

@@ -4322,12 +4322,31 @@ button.vsched-item:not([data-clickable]) {
   }
 }
 
+/* Phone width: the controls take a second line under the name. Beside it
+   they left ~45px of a touch screen's row for the name ("Ren ..."). The
+   handle spans both lines, and a name too long for the line wraps rather
+   than ellipsising, since a touch screen never shows its title tooltip. */
+@media (max-width: 480px) {
+  .seed-row {
+    grid-template-columns: 20px minmax(0, 1fr) 64px;
+  }
+  .seed-row__handle {
+    grid-row: span 2;
+  }
+  .seed-row__line {
+    grid-column: 2 / -1;
+  }
+  .seed-row__name {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+}
+
 /* The one visual for NoIdHint (data_integrity.jsx): an id-less row's
    disabled-control reason, surfaced inline rather than only as a hover
    title (unreachable on a tablet or by keyboard). Prose, not an id, so no
-   font-mono. No font-size here: each host (admin_participants.jsx's seed
-   row, admin_registration_desk.jsx's rd row, admin_pools.jsx's pool draw)
-   sets its own, matching its surrounding text; only the warn colour/weight
+   font-mono. No font-size here: each host (admin_registration_desk.jsx's rd
+   row, admin_pools.jsx's pool draw) sets its own, matching its surrounding text; only the warn colour/weight
    is the shared part of this look. */
 .noid-hint {
   color: var(--warn-ink);
@@ -4786,9 +4805,11 @@ button.vsched-item:not([data-clickable]) {
   font-weight: 600;
 }
 
+/* At the card title's size and weight, never louder than the card's own
+   title above it. */
 .dropzone__title {
-  font-weight: 700;
-  font-size: 15px;
+  font-weight: 600;
+  font-size: var(--fs-title-card);
   color: var(--ink);
 }
 

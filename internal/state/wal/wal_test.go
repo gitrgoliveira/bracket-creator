@@ -320,6 +320,45 @@ func TestDone_NoFileIsNoop(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+// TestDone_WALFolderGoneIsNoop verifies that Done returns nil when the
+// WAL folder itself has gone: nothing is left to remove.
+func TestDone_WALFolderGoneIsNoop(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), ".wal")
+	w, err := BeginTx(dir, "tx-folder-gone", directWrite)
+	require.NoError(t, err)
+	require.NoError(t, os.RemoveAll(dir))
+
+	assert.NoError(t, w.Done())
+}
+
+// TestDone_WALFolderNotAFolderErrors verifies that Done reports a WAL
+// folder it cannot open (here a file stands in its place), naming the
+// transaction.
+func TestDone_WALFolderNotAFolderErrors(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), ".wal")
+	w, err := BeginTx(dir, "tx-folder-file", directWrite)
+	require.NoError(t, err)
+	require.NoError(t, os.RemoveAll(dir))
+	require.NoError(t, os.WriteFile(dir, []byte("x"), 0o600))
+
+	err = w.Done()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `wal.Done "tx-folder-file"`)
+}
+
+// TestDone_RemoveErrorIsReported verifies that Done reports a WAL entry
+// it cannot remove (here a non-empty folder stands at its path).
+func TestDone_RemoveErrorIsReported(t *testing.T) {
+	dir := t.TempDir()
+	w, err := BeginTx(dir, "tx-remove-err", directWrite)
+	require.NoError(t, err)
+	require.NoError(t, os.MkdirAll(filepath.Join(w.path, "child"), 0o750))
+
+	err = w.Done()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `wal.Done "tx-remove-err"`)
+}
+
 // TestCommit_WriteFnError verifies that Commit surfaces the write-fn
 // error (the "write the WAL file itself" step) and the WAL remains
 // uncommitted.

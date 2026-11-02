@@ -15,7 +15,7 @@ The first column is the participant name. The second column is the dojo or team 
 
 ## Zekken display name
 
-When using `--with-zekken-name` (`-z`), the second column provides the name printed on the zekken (name tag), and the third column provides the dojo/team affiliation. If the second column is empty the participant name is used instead.
+When using `--with-zekken-name` (`-z`), the second column provides the name printed on the zekken (name tag), and the third column provides the dojo/team affiliation. If the second column is empty the participant name is used instead. A zekken name is stored in capitals, so `stark` is stored as `STARK`.
 
 ```csv
 Cersei Lannister, LANNISTER, Team Gamma
@@ -27,14 +27,21 @@ Eddard Stark, STARK, Team Epsilon
 
 For team tournaments (`--team-matches N`), each row is one team: the name column holds the team's name and the dojo column its affiliation. `N` is the number of fighters per team. It sets how many bout rows print under each team encounter in the spreadsheet, so you can fill in the fighters' names by hand. The dojo column keeps teams from the same dojo apart across pools, the same rule individual mode uses.
 
+## How names are stored
+
+Names and dojos are stored title-cased: the first letter of each word is upper-cased and nothing is lower-cased, so `kenshinkan` is stored as `Kenshinkan` and `BKA` stays `BKA`. A word that starts with a digit is kept exactly as typed, so `2nd dojo` is stored as `2nd Dojo` and `3RD` stays `3RD`. The rule applies on the command line, in the generated spreadsheet and in the tournament app, where it also covers team members' names, a fighter typed into a lineup, and the fighting-spirit award's recipient.
+
+Names saved by an earlier release are title-cased the same way when they are loaded. Since nothing is lower-cased, a dojo saved as `2Nd Dojo` keeps that spelling. A name an earlier release kept as pasted, such as `kenshinkan 2nd` (shown then as `Kenshinkan 2Nd`), is spelled `Kenshinkan 2nd` in the participant list, the pools, the seeds and every match not yet fought.
+
+A match keeps the names it was recorded with once it has been fought, is under way, or was sent back to the queue with points, fouls, flags or overtime already recorded.
+
 ## Constraints
 
-- Two people who share a name are accepted as long as their dojos differ, which is common with widespread surnames. The same name at the same dojo is one person entered twice and is rejected before any bracket is generated.
+- Two people who share a name are accepted as long as their dojos differ, which is common with widespread surnames. The same name at the same dojo is one person entered twice and is rejected before any bracket is generated. The tournament app compares names and dojos ignoring case and accents, so `José Ruiz` and `jose ruiz` at the same dojo are one person.
 - The dojo must not be blank. A roster stored before this rule existed, or edited by hand, still loads so it can be repaired. Until you fix the blank dojo, the app refuses every change to that roster (check-ins included) and refuses to generate a draw from it. Each refusal names the participant to fix. Importing a saved tournament is refused the same way: correct the dojo in the archive's participant file and import again.
 - The name must not be blank either. The command line, the legacy web UI, and archive import refuse a row with no name and quote it. The tournament app refuses it when you save the roster, and a roster with a blank name cannot be drawn.
 - **Team names are the exception**: two teams may not share a name even at different dojos, because a team's name is what identifies it in results.
-- Names and dojos are stored title-cased: the first letter of each word is upper-cased and nothing is lower-cased, so `kenshinkan` is stored as `Kenshinkan` and `BKA` stays `BKA`. A word that starts with a digit is kept exactly as typed, so `2nd dojo` is stored as `2nd Dojo` and `3RD` stays `3RD`. A zekken name is stored in capitals, so `stark` is stored as `STARK`. The same rule applies on the command line, in the generated spreadsheet, and in the tournament app, where it also covers team members' names, a fighter typed into a lineup, and the fighting-spirit award's recipient. Bouts already fought keep the names they were recorded with. Names saved by an earlier release are title-cased the same way when they are loaded, and since nothing is lower-cased, a dojo saved as `2Nd Dojo` keeps that spelling. An earlier release could also keep a name exactly as it was pasted, such as `kenshinkan 2nd`, and showed it as `Kenshinkan 2Nd`. Such a name is now spelled `Kenshinkan 2nd` in the participant list, the pools, the seeds and every match not yet fought. Matches already fought or under way keep `Kenshinkan 2Nd`, as they were recorded.
-- Names in a [seeds file](../commands/create-pools.md#seeding) must match the participant name exactly, accents included. The seeds file is title-cased the same way, so `alice adams` matches `Alice Adams` but `ALICE ADAMS` does not. The same applies to the dojo column of a seeds file.
+- Names in a [seeds file](../commands/create-pools.md#seeding) must match the participant name exactly, accents included. The seeds file is title-cased the same way (refer to [How names are stored](#how-names-are-stored)), so `alice adams` matches `Alice Adams` but `ALICE ADAMS` does not. The same applies to the dojo column of a seeds file.
 
 ## Seeds file
 

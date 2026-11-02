@@ -139,7 +139,7 @@ following criteria, in order:
 Both the winning and the losing side's flags count toward that side's own tally.
 A pair that loses by three flags to two still keeps its two flags.
 
-![Engi Swiss standings: a winner banner above a final standings table with rank, pair, victories (V), and total flags columns, and a caption reading "Ranked by: wins, total flags, head-to-head".](../../screenshots/swiss-standings-engi.png)
+![Engi Swiss standings: a winner banner above a final standings table with rank, pair, victories (V), and flags columns, with a caption ranking by wins, then total flags, then head-to-head.](../../screenshots/swiss-standings-engi.png)
 
 Engi never holds a supplementary tie-break bout: no ippon-shobu, no daihyosen.
 A ranking still tied after wins and flags is settled by the head-to-head

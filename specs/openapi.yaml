@@ -1142,8 +1142,9 @@ paths:
         '409':
           description: |
             Two cases. With no `code`: the roster in `players` breaks a roster
-            rule (two participants with the same name and dojo, or a team
-            member's name colliding with another's); `error` names the
+            rule (two participants with the same name and dojo, two teams
+            with the same name at any dojo, or a team member's name colliding
+            with another's); `error` names the
             participant. With `code: competition_id_unreadable`: a competition
             whose settings (`config.md`) cannot be parsed already holds this
             `id`. Nothing is written, so its files are kept as they are; repair
@@ -8298,8 +8299,8 @@ components:
           description: >
             The member's name; must not be empty. Stored title-cased (the first
             letter of each word upper-cased, nothing lower-cased, a word
-            starting with a digit kept as typed), and the
-            answer carries it so.
+            starting with a digit kept as typed), and the response returns
+            the stored form.
         writeId:
           allOf:
             - $ref: '#/components/schemas/ArrivalWriteId'

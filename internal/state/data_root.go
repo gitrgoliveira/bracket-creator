@@ -181,3 +181,71 @@ func (d *dataRoot) rename(oldPath, newPath string) error {
 	}
 	return d.abs(d.root.Rename(oldName, newName))
 }
+
+// walkDir walks the file tree rooted at path through the os.Root, calling fn
+// for each file or directory in lexical order. Every path handed to fn has the
+// data folder in front of it, matching filepath.WalkDir.
+func (d *dataRoot) walkDir(path string, fn fs.WalkDirFunc) error {
+	name, err := d.name("open", path)
+	if err != nil {
+		return err
+	}
+	err = fs.WalkDir(d.root.FS(), filepath.ToSlash(name), func(p string, entry fs.DirEntry, walkErr error) error {
+		full := d.folder
+		if p != "." {
+			full = filepath.Join(d.folder, filepath.FromSlash(p))
+		}
+		return fn(full, entry, d.abs(walkErr))
+	})
+	return d.abs(err)
+}
+
+// writeFile creates or truncates path with perm, writes data, syncs the file
+// to disk, and closes it.
+func (d *dataRoot) writeFile(path string, data []byte, perm fs.FileMode) error {
+	f, err := d.openFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, perm)
+	if err != nil {
+		return err
+	}
+	if _, err := f.Write(data); err != nil {
+		return errors.Join(err, f.Close())
+	}
+	if err := f.Sync(); err != nil {
+		return errors.Join(err, f.Close())
+	}
+	return f.Close()
+}
+
+// stageFile creates any missing parent directories under the root and writes
+// and fsyncs data at path.
+func (d *dataRoot) stageFile(path string, data []byte, perm fs.FileMode) error {
+	dir := filepath.Dir(filepath.Clean(path))
+	if err := d.mkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	return d.writeFile(path, data, perm)
+}
+
+// atomicWrite writes data to path through atomicWriteFile on this root.
+func (d *dataRoot) atomicWrite(path string, data []byte, perm fs.FileMode) error {
+	return atomicWriteFile(d, path, data, perm)
+}
+
+// syncFile opens path through the root and flushes its contents to disk.
+func (d *dataRoot) syncFile(path string) (err error) {
+	f, err := d.open(path)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if cerr := f.Close(); cerr != nil {
+			err = errors.Join(err, cerr)
+		}
+	}()
+	return f.Sync()
+}
+
+// syncDir flushes the directory entry metadata of path to disk.
+func (d *dataRoot) syncDir(path string) error {
+	return syncDir(d, path)
+}

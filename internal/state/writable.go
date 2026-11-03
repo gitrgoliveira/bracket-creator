@@ -11,12 +11,14 @@ import (
 	"time"
 )
 
-// BrandingDirName and SponsorsDirName are the folders, under the tournament
-// data folder, that hold the uploaded logo and sponsor images. Named here so
-// the startup write check and the upload handlers agree on them.
+// BrandingDirName, SponsorsDirName, BackupsDirName and RestoreDirName are the
+// top-level folders under the tournament data folder for uploaded images, kept
+// backup archives and restore staging.
 const (
 	BrandingDirName = "branding"
 	SponsorsDirName = "sponsors"
+	BackupsDirName  = "backups"
+	RestoreDirName  = ".restore"
 )
 
 // ErrDataNotWritable: the server cannot write to a folder of its tournament
@@ -54,6 +56,16 @@ func checkDataWritable(root *dataRoot) error {
 	for _, name := range []string{BrandingDirName, SponsorsDirName} {
 		d := filepath.Join(folder, name)
 		if info, err := root.stat(d); err == nil && info.IsDir() {
+			dirs = append(dirs, d)
+		}
+	}
+	// Backups and restore staging are written through the root: when an entry
+	// already sits at backups/ or .restore/ (a folder, a file blocking its
+	// creation, or a link out of the data folder), probe it so startup refuses
+	// before a scheduled backup or restore fails.
+	for _, name := range []string{BackupsDirName, RestoreDirName} {
+		d := filepath.Join(folder, name)
+		if _, err := root.stat(d); !errors.Is(err, fs.ErrNotExist) {
 			dirs = append(dirs, d)
 		}
 	}

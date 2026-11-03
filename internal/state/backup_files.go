@@ -44,14 +44,17 @@ type BackupFile struct {
 	Suffix int
 }
 
-// ValidBackupName reports whether name matches the exact accepted backup filename pattern.
+// ValidBackupName reports whether name is an accepted backup filename: the
+// exact pattern, with a real UTC timestamp. It is the one gate list, open and
+// delete share, so a name that is hidden from the list cannot be opened either.
 func ValidBackupName(name string) bool {
-	return backupNamePattern.MatchString(name)
+	_, err := ParseBackupName(name)
+	return err == nil
 }
 
 // ParseBackupName validates name and extracts its kind, scope, UTC timestamp, and numeric suffix.
 func ParseBackupName(name string) (BackupFile, error) {
-	if !ValidBackupName(name) {
+	if !backupNamePattern.MatchString(name) {
 		return BackupFile{}, fmt.Errorf("%w: %q", ErrInvalidBackupName, name)
 	}
 	sub := backupNamePattern.FindStringSubmatch(name)

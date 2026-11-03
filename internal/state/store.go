@@ -13,6 +13,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/gitrgoliveira/bracket-creator/internal/backup"
 	"github.com/gitrgoliveira/bracket-creator/internal/state/wal"
 )
 
@@ -124,7 +125,7 @@ func (f *fileCache) invalidate() {
 func NewStore(folder string) (*Store, error) {
 	s := &Store{
 		folder:            folder,
-		walDir:            filepath.Join(folder, ".wal"),
+		walDir:            filepath.Join(folder, backup.WALDirName),
 		announcementStore: NewAnnouncementStore(),
 	}
 

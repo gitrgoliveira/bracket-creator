@@ -212,6 +212,31 @@ func TestSnapshot_ExcludesWALBackupsRestoreAndTempFiles(t *testing.T) {
 	}
 }
 
+// A competition whose id is a working-folder name ("backups") is captured like
+// any other: the exclusion applies to the data folder's and a competition's own
+// working folders, never to a competition id.
+func TestSnapshot_CompetitionNamedLikeAWorkingFolderIsCaptured(t *testing.T) {
+	dir := t.TempDir()
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+
+	require.NoError(t, store.SaveTournament(&Tournament{
+		Name:   "Odd Ids",
+		Date:   "03-11-2026",
+		Venue:  "Hall",
+		Courts: []string{"A"},
+	}))
+	require.NoError(t, store.SaveCompetition(&Competition{ID: "backups", Name: "Backups"}))
+	require.NoError(t, store.root.stageFile(store.compPath("backups", BackupsDirName, "nested.zip"), []byte("zip"), 0o600))
+
+	for _, scope := range []SnapshotScope{ScopeTournament, ScopeCompetition} {
+		snap, serr := store.Snapshot(scope, "backups")
+		require.NoError(t, serr)
+		assert.Contains(t, snap.Files, "competitions/backups/config.md", "scope %s", scope)
+		assert.NotContains(t, snap.Files, "competitions/backups/backups/nested.zip", "scope %s", scope)
+	}
+}
+
 func TestSnapshot_StripsPasswordFromTournamentFrontMatter(t *testing.T) {
 	dir := t.TempDir()
 	store, err := NewStore(dir)

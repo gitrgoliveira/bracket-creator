@@ -424,8 +424,13 @@ func (s *Store) collectTreeFilesLocked(rootDir string, dst map[string][]byte) er
 			return walkErr
 		}
 		name := entry.Name()
+		rel, err := filepath.Rel(s.folder, path)
+		if err != nil {
+			return err
+		}
+		rel = filepath.ToSlash(rel)
 		if entry.IsDir() {
-			if path != cleanRoot && isExcludedSnapshotDir(name) {
+			if path != cleanRoot && backup.IsExcludedPath(rel) {
 				return fs.SkipDir
 			}
 			return nil
@@ -433,29 +438,16 @@ func (s *Store) collectTreeFilesLocked(rootDir string, dst map[string][]byte) er
 		if !entry.Type().IsRegular() {
 			return nil
 		}
-		if isExcludedSnapshotDir(name) || isSkippedTempName(name) {
+		if backup.IsExcludedPath(rel) || isSkippedTempName(name) {
 			return nil
-		}
-		rel, err := filepath.Rel(s.folder, path)
-		if err != nil {
-			return err
 		}
 		data, err := s.root.readFile(path)
 		if err != nil {
 			return err
 		}
-		dst[filepath.ToSlash(rel)] = data
+		dst[rel] = data
 		return nil
 	})
-}
-
-func isExcludedSnapshotDir(name string) bool {
-	switch name {
-	case ".wal", BackupsDirName, RestoreDirName:
-		return true
-	default:
-		return false
-	}
 }
 
 func isSkippedTempName(name string) bool {

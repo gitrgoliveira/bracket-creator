@@ -238,6 +238,8 @@ func TestBackupFiles_NameValidationAndRefusal(t *testing.T) {
 		{"trailing newline", "20261103T120000Z-scheduled.zip\n"},
 		{"leading newline", "\n20261103T120000Z-scheduled.zip"},
 		{"empty", ""},
+		{"impossible month and hour", "20251345T250000Z-scheduled.zip"},
+		{"impossible day", "20260231T120000Z-scheduled.zip"},
 	}
 
 	for _, tc := range invalidNames {

@@ -17,6 +17,17 @@ const (
 	MaxRatio      = 200       // uncompressed:compressed, per entry
 )
 
+// The data folder's reserved directories. Branding and sponsors hold uploaded
+// images and travel in a tournament archive; the rest are the store's own
+// working folders and never do. The tournament store aliases these names.
+const (
+	BrandingDirName = "branding"
+	SponsorsDirName = "sponsors"
+	BackupsDirName  = "backups"
+	RestoreDirName  = ".restore"
+	WALDirName      = ".wal"
+)
+
 const (
 	CodeNotAZip                  = "not_a_zip"
 	CodeManifestMissing          = "manifest_missing"
@@ -111,13 +122,28 @@ func IsTempFileName(name string) bool {
 	return strings.HasSuffix(name, ".tmp") || strings.Contains(name, ".tmp-") || strings.HasPrefix(name, ".write-check-")
 }
 
-func validateNotExcluded(p string) error {
+func isWorkingDirName(name string) bool {
+	return name == WALDirName || name == BackupsDirName || name == RestoreDirName
+}
+
+// IsExcludedPath reports whether p, a slash path relative to the data folder,
+// is a working folder of the store or lies inside one. The working folders sit
+// at the top of the data folder and directly inside a competition folder
+// (competitions/<id>/), never elsewhere: the id itself is not judged, so a
+// competition named "backups" is an ordinary competition.
+func IsExcludedPath(p string) bool {
 	segments := strings.Split(p, "/")
-	for _, seg := range segments {
-		if seg == ".wal" || seg == "backups" || seg == ".restore" {
-			return &Error{Code: CodeOutsideLayout, Path: p, Detail: "entry is in an excluded directory"}
-		}
+	if isWorkingDirName(segments[0]) {
+		return true
 	}
+	return segments[0] == "competitions" && len(segments) >= 3 && isWorkingDirName(segments[2])
+}
+
+func validateNotExcluded(p string) error {
+	if IsExcludedPath(p) {
+		return &Error{Code: CodeOutsideLayout, Path: p, Detail: "entry is in an excluded directory"}
+	}
+	segments := strings.Split(p, "/")
 	last := segments[len(segments)-1]
 	if IsTempFileName(last) {
 		return &Error{Code: CodeOutsideLayout, Path: p, Detail: "temporary file is not allowed in archive"}
@@ -132,7 +158,7 @@ func validatePathForScope(p string, scope Scope) (string, error) {
 		if p == "tournament.md" {
 			return "", nil
 		}
-		if (segments[0] == "branding" || segments[0] == "sponsors") && len(segments) >= 2 {
+		if (segments[0] == BrandingDirName || segments[0] == SponsorsDirName) && len(segments) >= 2 {
 			return "", nil
 		}
 		if segments[0] == "competitions" && len(segments) >= 3 {

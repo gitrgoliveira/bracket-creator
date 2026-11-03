@@ -491,6 +491,39 @@ func TestReadPathAndModeRefusals(t *testing.T) {
 	}
 }
 
+func TestIsExcludedPath(t *testing.T) {
+	cases := map[string]bool{
+		".wal/x":                                 true,
+		"backups/20261103T120000Z-scheduled.zip": true,
+		".restore/tok/journal.json":              true,
+		"competitions/c1/backups/x":              true,
+		"competitions/c1/.restore/x":             true,
+		"competitions/c1/.wal/x":                 true,
+		"competitions/backups/config.md":         false,
+		"competitions/backups/history/x.jsonl":   false,
+		"competitions/.wal/config.md":            false,
+		"competitions/c1/history/x.jsonl":        false,
+		"branding/logo.png":                      false,
+		"tournament.md":                          false,
+	}
+	for p, want := range cases {
+		assert.Equal(t, want, IsExcludedPath(p), p)
+	}
+}
+
+// A competition whose id is a working-folder name ("backups") is an ordinary
+// competition: its files are archive content, not an excluded directory.
+func TestReadCompetitionIDNamedLikeAWorkingFolder(t *testing.T) {
+	files := map[string][]byte{
+		"tournament.md":                  []byte("---\nname: T\n---\n"),
+		"competitions/backups/config.md": []byte("---\nid: backups\n---\n"),
+	}
+	manifest := validManifest(ScopeTournament, KindManual, []CompetitionRef{{ID: "backups", Name: "Backups"}}, files)
+	z := buildZip(t, entriesFromFilesAndManifest(t, files, manifest)...)
+	_, err := Read(bytes.NewReader(z), int64(len(z)), goodChecks())
+	require.NoError(t, err)
+}
+
 func TestReadDuplicateAndCaseClash(t *testing.T) {
 	baseFiles := map[string][]byte{
 		"tournament.md":             []byte("---\nname: T\n---\n"),

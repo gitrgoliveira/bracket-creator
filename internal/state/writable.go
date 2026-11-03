@@ -9,16 +9,18 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/gitrgoliveira/bracket-creator/internal/backup"
 )
 
 // BrandingDirName, SponsorsDirName, BackupsDirName and RestoreDirName are the
 // top-level folders under the tournament data folder for uploaded images, kept
 // backup archives and restore staging.
 const (
-	BrandingDirName = "branding"
-	SponsorsDirName = "sponsors"
-	BackupsDirName  = "backups"
-	RestoreDirName  = ".restore"
+	BrandingDirName = backup.BrandingDirName
+	SponsorsDirName = backup.SponsorsDirName
+	BackupsDirName  = backup.BackupsDirName
+	RestoreDirName  = backup.RestoreDirName
 )
 
 // ErrDataNotWritable: the server cannot write to a folder of its tournament

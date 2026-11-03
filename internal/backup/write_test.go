@@ -425,10 +425,117 @@ func TestWriteRefusals(t *testing.T) {
 			name: "case clash",
 			meta: validMeta,
 			files: map[string][]byte{
+				"tournament.md":             []byte("---\nname: Cup\n---\n"),
 				"competitions/c1/config.md": []byte("a"),
 				"competitions/c1/Config.md": []byte("b"),
 			},
 			code: CodeCaseClash,
+		},
+		{
+			name: "tournament archive without tournament.md",
+			meta: validMeta,
+			files: map[string][]byte{
+				"competitions/c1/config.md": []byte("---\nid: c1\n---\n"),
+			},
+			code: CodeTournamentMissing,
+		},
+		{
+			name: "competition folder not in meta.Competitions",
+			meta: validMeta,
+			files: map[string][]byte{
+				"tournament.md":             []byte("---\nname: Cup\n---\n"),
+				"competitions/c1/config.md": []byte("---\nid: c1\n---\n"),
+				"competitions/c2/config.md": []byte("---\nid: c2\n---\n"),
+			},
+			code: CodeCompetitionMismatch,
+		},
+		{
+			name: "meta.Competitions entry with no folder in files",
+			meta: Meta{
+				CreatedAt:  validMeta.CreatedAt,
+				Scope:      ScopeTournament,
+				Kind:       KindManual,
+				Tournament: TournamentRef{Name: "Cup"},
+				Competitions: []CompetitionRef{
+					{ID: "c1", Name: "C1"},
+					{ID: "c2", Name: "C2"},
+				},
+			},
+			files: map[string][]byte{
+				"tournament.md":             []byte("---\nname: Cup\n---\n"),
+				"competitions/c1/config.md": []byte("---\nid: c1\n---\n"),
+			},
+			code: CodeCompetitionMismatch,
+		},
+		{
+			name: "competition folder without config.md",
+			meta: validMeta,
+			files: map[string][]byte{
+				"tournament.md":                    []byte("---\nname: Cup\n---\n"),
+				"competitions/c1/participants.csv": []byte("ID,Name,Dojo\n"),
+			},
+			code: CodeConfigMissing,
+		},
+		{
+			name: "competition archive with zero competitions when manual",
+			meta: Meta{
+				CreatedAt:  validMeta.CreatedAt,
+				Scope:      ScopeCompetition,
+				Kind:       KindManual,
+				Tournament: TournamentRef{Name: "Cup"},
+			},
+			files: nil,
+			code:  CodeCompetitionCount,
+		},
+		{
+			name: "competition archive with two competitions",
+			meta: Meta{
+				CreatedAt:  validMeta.CreatedAt,
+				Scope:      ScopeCompetition,
+				Kind:       KindManual,
+				Tournament: TournamentRef{Name: "Cup"},
+				Competitions: []CompetitionRef{
+					{ID: "c1", Name: "C1"},
+					{ID: "c2", Name: "C2"},
+				},
+			},
+			files: map[string][]byte{
+				"competitions/c1/config.md": []byte("---\nid: c1\n---\n"),
+				"competitions/c2/config.md": []byte("---\nid: c2\n---\n"),
+			},
+			code: CodeCompetitionCount,
+		},
+		{
+			name: "duplicate competition id in meta.Competitions",
+			meta: Meta{
+				CreatedAt:  validMeta.CreatedAt,
+				Scope:      ScopeTournament,
+				Kind:       KindManual,
+				Tournament: TournamentRef{Name: "Cup"},
+				Competitions: []CompetitionRef{
+					{ID: "c1", Name: "C1"},
+					{ID: "c1", Name: "C1 dup"},
+				},
+			},
+			files: map[string][]byte{
+				"tournament.md":             []byte("---\nname: Cup\n---\n"),
+				"competitions/c1/config.md": []byte("---\nid: c1\n---\n"),
+			},
+			code: CodeManifestInvalid,
+		},
+		{
+			name: "duplicate id in meta.RestoreCreated",
+			meta: Meta{
+				CreatedAt:      validMeta.CreatedAt,
+				Scope:          ScopeTournament,
+				Kind:           KindBeforeRestore,
+				Tournament:     TournamentRef{Name: "Cup"},
+				RestoreCreated: []string{"c2", "c2"},
+			},
+			files: map[string][]byte{
+				"tournament.md": []byte("---\nname: Cup\n---\n"),
+			},
+			code: CodeManifestInvalid,
 		},
 	}
 
@@ -445,9 +552,66 @@ func TestWriteRefusals(t *testing.T) {
 		var buf bytes.Buffer
 		oversized := make([]byte, MaxFileBytes+1)
 		err := Write(&buf, validMeta, map[string][]byte{
-			"branding/huge.bin": oversized,
+			"tournament.md":             []byte("---\nname: Cup\n---\n"),
+			"competitions/c1/config.md": []byte("---\nid: c1\n---\n"),
+			"branding/huge.bin":         oversized,
 		})
 		assertBackupErrorCode(t, err, CodeFileTooLarge)
+		assert.Zero(t, buf.Len())
+	})
+}
+
+func TestWriteLayoutAndCompetitionRefusals(t *testing.T) {
+	created := time.Date(2026, 8, 1, 12, 0, 0, 0, time.UTC)
+
+	t.Run("tournament archive without tournament.md is tournament_missing", func(t *testing.T) {
+		var buf bytes.Buffer
+		err := Write(&buf, Meta{
+			CreatedAt:    created,
+			Scope:        ScopeTournament,
+			Kind:         KindManual,
+			Tournament:   TournamentRef{Name: "Cup"},
+			Competitions: []CompetitionRef{{ID: "c1", Name: "C1"}},
+		}, map[string][]byte{
+			"competitions/c1/config.md": []byte("---\nid: c1\n---\n"),
+		})
+		be := assertBackupErrorCode(t, err, CodeTournamentMissing)
+		assert.Equal(t, "tournament.md", be.Path)
+		assert.Zero(t, buf.Len())
+	})
+
+	t.Run("meta.Competitions mismatch with competition folders is competition_mismatch", func(t *testing.T) {
+		var buf bytes.Buffer
+		err := Write(&buf, Meta{
+			CreatedAt:    created,
+			Scope:        ScopeTournament,
+			Kind:         KindManual,
+			Tournament:   TournamentRef{Name: "Cup"},
+			Competitions: []CompetitionRef{{ID: "c1", Name: "C1"}},
+		}, map[string][]byte{
+			"tournament.md":             []byte("---\nname: Cup\n---\n"),
+			"competitions/c1/config.md": []byte("---\nid: c1\n---\n"),
+			"competitions/c2/config.md": []byte("---\nid: c2\n---\n"),
+		})
+		be := assertBackupErrorCode(t, err, CodeCompetitionMismatch)
+		assert.Equal(t, "c2", be.Path)
+		assert.Zero(t, buf.Len())
+	})
+
+	t.Run("competition without config.md is config_missing", func(t *testing.T) {
+		var buf bytes.Buffer
+		err := Write(&buf, Meta{
+			CreatedAt:    created,
+			Scope:        ScopeTournament,
+			Kind:         KindManual,
+			Tournament:   TournamentRef{Name: "Cup"},
+			Competitions: []CompetitionRef{{ID: "c1", Name: "C1"}},
+		}, map[string][]byte{
+			"tournament.md":                    []byte("---\nname: Cup\n---\n"),
+			"competitions/c1/participants.csv": []byte("ID,Name,Dojo\n"),
+		})
+		be := assertBackupErrorCode(t, err, CodeConfigMissing)
+		assert.Equal(t, "competitions/c1/config.md", be.Path)
 		assert.Zero(t, buf.Len())
 	})
 }

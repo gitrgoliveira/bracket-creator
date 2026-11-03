@@ -69,8 +69,12 @@ func CheckFrontMatter(b []byte) error {
 	return nil
 }
 
-// Snapshot reads a consistent in-memory copy of either the whole tournament
-// (ScopeTournament) or a single competition (ScopeCompetition).
+// Snapshot reads an in-memory copy of either the whole tournament
+// (ScopeTournament) or a single competition (ScopeCompetition). Tournament-level
+// files are read together under their locks, and each competition is read under
+// its own lock one at a time, so a ScopeTournament archive is not a single
+// point-in-time snapshot across competitions and a competition created during
+// the pass may be missed.
 //
 // For each competition, one at a time, it acquires that competition's read
 // lock (re-checking getCompLock in case DeleteCompetition removed the mutex
@@ -385,6 +389,16 @@ func (s *Store) snapshotCompetitionLocked(id string, snap *Snapshot) (bool, erro
 		return false, err
 	}
 	if !info.IsDir() {
+		return false, nil
+	}
+	cfgInfo, err := s.root.stat(s.compPath(id, "config.md"))
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return false, nil
+		}
+		return false, err
+	}
+	if !cfgInfo.Mode().IsRegular() {
 		return false, nil
 	}
 	if err := s.collectTreeFilesLocked(compDir, snap.Files); err != nil {

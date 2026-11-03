@@ -73,6 +73,9 @@ type Store struct {
 	// Lock ordering: courtCheckMu is always acquired BEFORE any per-comp lock.
 	courtCheckMu sync.Mutex
 
+	// backupSaveMu serializes SaveBackupFile's check-then-write so concurrent saves cannot both pass the limit or name check.
+	backupSaveMu sync.Mutex
+
 	// cache for tournament configuration to avoid redundant disk I/O.
 	tournamentMu sync.RWMutex
 	cachedTourn  *Tournament

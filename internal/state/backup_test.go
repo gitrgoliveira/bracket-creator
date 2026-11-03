@@ -1,12 +1,15 @@
 package state
 
 import (
+	"bytes"
 	"errors"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
+	"github.com/gitrgoliveira/bracket-creator/internal/backup"
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/stretchr/testify/assert"
@@ -266,6 +269,80 @@ func TestSnapshot_UnknownCompetitionReturnsNotFound(t *testing.T) {
 
 	_, err = store.Snapshot("bogus-scope", "")
 	require.Error(t, err)
+}
+
+func TestSnapshot_SkipsStrayCompetitionDirsWithoutConfigMD(t *testing.T) {
+	dir := t.TempDir()
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+
+	require.NoError(t, store.SaveTournament(&Tournament{
+		Name:   "Stray Folder Taikai",
+		Date:   "03-11-2026",
+		Venue:  "Budokan",
+		Courts: []string{"A"},
+	}))
+
+	const realID = "real-comp"
+	const emptyID = "stray-empty"
+	const orphanID = "stray-orphan"
+
+	require.NoError(t, store.SaveCompetition(&Competition{
+		ID:     realID,
+		Name:   "Real Competition",
+		Date:   "03-11-2026",
+		Status: CompStatusSetup,
+	}))
+	require.NoError(t, store.SaveParticipants(realID, []domain.Player{
+		{ID: "p1", Name: "Alice", Dojo: "DojoA"},
+	}))
+
+	// Create a stray valid-named empty directory under competitions/ and a
+	// second stray directory holding files but no config.md.
+	require.NoError(t, store.root.mkdirAll(store.compPath(emptyID), 0o700))
+	require.NoError(t, store.root.stageFile(store.compPath(orphanID, "overrides.json"), []byte("{}"), 0o600))
+	require.NoError(t, store.root.stageFile(store.compPath(orphanID, "participants.csv"), []byte("ID,Name,Dojo\n"), 0o600))
+
+	// Competition-scoped snapshots for either stray directory report not found.
+	for _, strayID := range []string{emptyID, orphanID} {
+		_, serr := store.Snapshot(ScopeCompetition, strayID)
+		require.Error(t, serr)
+		assert.ErrorIs(t, serr, ErrCompetitionNotFound)
+		assert.ErrorIs(t, serr, os.ErrNotExist)
+	}
+
+	// Tournament-scoped snapshot captures only the real competition and its files.
+	snap, err := store.Snapshot(ScopeTournament, "")
+	require.NoError(t, err)
+	assert.Equal(t, map[string]string{realID: "Real Competition"}, snap.Competitions)
+	assert.Contains(t, snap.Files, "competitions/"+realID+"/config.md")
+	assert.Contains(t, snap.Files, "competitions/"+realID+"/participants.csv")
+	for path := range snap.Files {
+		assert.NotContains(t, path, "competitions/"+emptyID+"/")
+		assert.NotContains(t, path, "competitions/"+orphanID+"/")
+	}
+
+	// Writing and reading the resulting archive through internal/backup succeeds.
+	comps := make([]backup.CompetitionRef, 0, len(snap.Competitions))
+	for id, name := range snap.Competitions {
+		comps = append(comps, backup.CompetitionRef{ID: id, Name: name})
+	}
+	var buf bytes.Buffer
+	require.NoError(t, backup.Write(&buf, backup.Meta{
+		CreatedAt:    time.Date(2026, 11, 3, 12, 0, 0, 0, time.UTC),
+		Scope:        backup.ScopeTournament,
+		Kind:         backup.KindManual,
+		Tournament:   backup.TournamentRef{Name: snap.TournamentName},
+		Competitions: comps,
+	}, snap.Files))
+
+	arch, err := backup.Read(bytes.NewReader(buf.Bytes()), int64(buf.Len()), backup.Checks{
+		ValidID:     ValidateCompetitionID,
+		FrontMatter: CheckFrontMatter,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, []backup.CompetitionRef{{ID: realID, Name: "Real Competition"}}, arch.Manifest.Competitions)
+	assert.Equal(t, snap.Files, arch.Files)
 }
 
 func TestCheckFrontMatter(t *testing.T) {

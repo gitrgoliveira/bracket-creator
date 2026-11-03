@@ -10,7 +10,6 @@ import (
 	"regexp"
 	"slices"
 	"strconv"
-	"sync"
 	"time"
 )
 
@@ -34,12 +33,6 @@ var ErrInvalidBackupName = errors.New("invalid backup file name")
 var ErrBackupNotFound = errors.New("backup file not found")
 
 var backupNamePattern = regexp.MustCompile(`^\d{8}T\d{6}Z-(scheduled|before-restore-(tournament|competition))(-[2-9]|-[1-9]\d{1,3})?\.zip$`)
-
-// backupSaveMu serialises the name pick and atomic write in SaveBackupFile so
-// concurrent saves in the same second receive distinct suffixed names. It is
-// package-level because store.go is not in this task's file list and one
-// process owns a data folder.
-var backupSaveMu sync.Mutex
 
 // BackupFile describes a backup zip file stored in the backups directory.
 type BackupFile struct {
@@ -136,8 +129,8 @@ func (s *Store) SaveBackupFile(kind BackupKind, scope SnapshotScope, at time.Tim
 		return "", err
 	}
 
-	backupSaveMu.Lock()
-	defer backupSaveMu.Unlock()
+	s.backupSaveMu.Lock()
+	defer s.backupSaveMu.Unlock()
 
 	backupsDir := filepath.Join(s.folder, BackupsDirName)
 	if err := s.root.mkdirAll(backupsDir, 0o700); err != nil {

@@ -31,6 +31,9 @@ func Write(w io.Writer, meta Meta, files map[string][]byte) error {
 	if meta.Kind != KindBeforeRestore && len(meta.RestoreCreated) > 0 {
 		return &Error{Code: CodeRestoreCreatedNotAllowed, Detail: "restoreCreated is only allowed for before-restore archives"}
 	}
+	if err := validateUniqueManifestIDs(meta.Competitions, meta.RestoreCreated); err != nil {
+		return err
+	}
 	if len(files)+1 > MaxEntries {
 		return &Error{Code: CodeTooManyEntries, Detail: "archive exceeds maximum entry count"}
 	}
@@ -82,6 +85,10 @@ func Write(w io.Writer, meta Meta, files map[string][]byte) error {
 			Size:   size,
 			SHA256: hex.EncodeToString(sum[:]),
 		})
+	}
+
+	if err := validateLayoutAndCompetitions(meta.Scope, meta.Kind, meta.Competitions, paths); err != nil {
+		return err
 	}
 
 	comps := make([]CompetitionRef, len(meta.Competitions))

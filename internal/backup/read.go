@@ -78,7 +78,13 @@ func Read(r io.ReaderAt, size int64, checks Checks) (*Archive, error) {
 		return nil, err
 	}
 
-	if err := validateLayoutAndCompetitions(manifest, files); err != nil {
+	paths := make([]string, 0, len(files))
+	for p := range files {
+		paths = append(paths, p)
+	}
+	sort.Strings(paths)
+
+	if err := validateLayoutAndCompetitions(manifest.Scope, manifest.Kind, manifest.Competitions, paths); err != nil {
 		return nil, err
 	}
 
@@ -246,22 +252,12 @@ func decodeAndValidateManifest(manifestBytes []byte, checks Checks) (Manifest, e
 		}
 	}
 
-	seenComps := make(map[string]bool, len(manifest.Competitions))
-	for _, c := range manifest.Competitions {
-		if seenComps[c.ID] {
-			return Manifest{}, &Error{Code: CodeManifestInvalid, Path: c.ID, Detail: "duplicate competition id in manifest"}
-		}
-		seenComps[c.ID] = true
-	}
-
+	var restoreCreated []string
 	if manifest.RestoreCreated != nil {
-		seenRestore := make(map[string]bool, len(*manifest.RestoreCreated))
-		for _, id := range *manifest.RestoreCreated {
-			if seenRestore[id] {
-				return Manifest{}, &Error{Code: CodeManifestInvalid, Path: id, Detail: "duplicate id in restoreCreated"}
-			}
-			seenRestore[id] = true
-		}
+		restoreCreated = *manifest.RestoreCreated
+	}
+	if err := validateUniqueManifestIDs(manifest.Competitions, restoreCreated); err != nil {
+		return Manifest{}, err
 	}
 
 	for _, c := range manifest.Competitions {
@@ -340,19 +336,31 @@ func reconcileManifestAndFiles(entries []*zip.File, manifestFiles []FileEntry, f
 	return nil
 }
 
-func validateLayoutAndCompetitions(manifest Manifest, files map[string][]byte) error {
-	paths := make([]string, 0, len(files))
-	for p := range files {
-		paths = append(paths, p)
+func validateUniqueManifestIDs(comps []CompetitionRef, restoreCreated []string) error {
+	seenComps := make(map[string]bool, len(comps))
+	for _, c := range comps {
+		if seenComps[c.ID] {
+			return &Error{Code: CodeManifestInvalid, Path: c.ID, Detail: "duplicate competition id in manifest"}
+		}
+		seenComps[c.ID] = true
 	}
-	sort.Strings(paths)
+	seenRestore := make(map[string]bool, len(restoreCreated))
+	for _, id := range restoreCreated {
+		if seenRestore[id] {
+			return &Error{Code: CodeManifestInvalid, Path: id, Detail: "duplicate id in restoreCreated"}
+		}
+		seenRestore[id] = true
+	}
+	return nil
+}
 
+func validateLayoutAndCompetitions(scope Scope, kind Kind, comps []CompetitionRef, paths []string) error {
 	folderIDs := make(map[string]bool)
 	hasConfigMD := make(map[string]bool)
 	hasTournamentMD := false
 
 	for _, p := range paths {
-		compID, err := validatePathForScope(p, manifest.Scope)
+		compID, err := validatePathForScope(p, scope)
 		if err != nil {
 			return err
 		}
@@ -367,12 +375,12 @@ func validateLayoutAndCompetitions(manifest Manifest, files map[string][]byte) e
 		}
 	}
 
-	if manifest.Scope == ScopeTournament && !hasTournamentMD {
+	if scope == ScopeTournament && !hasTournamentMD {
 		return &Error{Code: CodeTournamentMissing, Path: "tournament.md", Detail: "tournament.md is required for tournament scope"}
 	}
 
-	manifestCompIDs := make(map[string]bool, len(manifest.Competitions))
-	for _, c := range manifest.Competitions {
+	manifestCompIDs := make(map[string]bool, len(comps))
+	for _, c := range comps {
 		manifestCompIDs[c.ID] = true
 	}
 
@@ -412,12 +420,12 @@ func validateLayoutAndCompetitions(manifest Manifest, files map[string][]byte) e
 		}
 	}
 
-	if manifest.Scope == ScopeCompetition {
-		if manifest.Kind == KindBeforeRestore {
-			if len(manifest.Competitions) > 1 {
+	if scope == ScopeCompetition {
+		if kind == KindBeforeRestore {
+			if len(comps) > 1 {
 				return &Error{Code: CodeCompetitionCount, Detail: "before-restore competition archive may hold at most one competition"}
 			}
-		} else if len(manifest.Competitions) != 1 {
+		} else if len(comps) != 1 {
 			return &Error{Code: CodeCompetitionCount, Detail: "competition archive must hold exactly one competition"}
 		}
 	}

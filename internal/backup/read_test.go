@@ -429,6 +429,8 @@ func TestReadPathAndModeRefusals(t *testing.T) {
 		"./a",
 		"C:/x",
 		"branding/a\x00b.png",
+		"branding/a\x1fb.png",
+		"branding/a\x7fb.png",
 	}
 
 	for _, p := range unsafePaths {
@@ -471,6 +473,8 @@ func TestReadPathAndModeRefusals(t *testing.T) {
 		"competitions/c1/backups/x",
 		"competitions/c1/.restore/x",
 		"competitions/c1/pools.csv.tmp",
+		"competitions/c1/pools.csv.tmp-123-456",
+		"competitions/c1/.write-check-1",
 	}
 	for _, p := range excludedPaths {
 		t.Run("excluded_"+p, func(t *testing.T) {
@@ -981,4 +985,62 @@ func TestReadCallerChecks(t *testing.T) {
 		}(), CodeFrontMatterInvalid)
 		assert.Equal(t, "tournament.md", be.Path)
 	})
+}
+
+func TestReadRejectTempAndWriteCheckPaths(t *testing.T) {
+	baseFiles := map[string][]byte{
+		"tournament.md":             []byte("---\nname: T\n---\n"),
+		"competitions/c1/config.md": []byte("---\nid: c1\n---\n"),
+	}
+	m := validManifest(ScopeTournament, KindManual, []CompetitionRef{{ID: "c1", Name: "C1"}}, baseFiles)
+
+	for _, p := range []string{
+		"competitions/c1/pools.csv.tmp-123-456",
+		"competitions/c1/.write-check-1",
+	} {
+		t.Run("reject_"+p, func(t *testing.T) {
+			entries := entriesFromFilesAndManifest(t, baseFiles, m)
+			entries = append([]rawEntry{{name: p, body: []byte("temp")}}, entries...)
+			z := buildZip(t, entries...)
+			_, err := Read(bytes.NewReader(z), int64(len(z)), goodChecks())
+			be := assertBackupErrorCode(t, err, CodeOutsideLayout)
+			assert.Equal(t, p, be.Path)
+		})
+	}
+}
+
+func TestReadRejectControlCharacterPaths(t *testing.T) {
+	baseFiles := map[string][]byte{
+		"tournament.md": []byte("---\nname: T\n---\n"),
+	}
+	m := validManifest(ScopeTournament, KindManual, nil, baseFiles)
+
+	for _, p := range []string{
+		"branding/a\x00b.png",
+		"branding/a\x1fb.png",
+		"branding/a\x7fb.png",
+	} {
+		t.Run("reject_control_"+p, func(t *testing.T) {
+			entries := entriesFromFilesAndManifest(t, baseFiles, m)
+			entries = append([]rawEntry{{name: p, body: []byte("x")}}, entries...)
+			z := buildZip(t, entries...)
+			_, err := Read(bytes.NewReader(z), int64(len(z)), goodChecks())
+			be := assertBackupErrorCode(t, err, CodeUnsafePath)
+			assert.Equal(t, p, be.Path)
+		})
+	}
+}
+
+func TestReadManifestOverlapValidation(t *testing.T) {
+	files := map[string][]byte{
+		"tournament.md":             []byte("---\nname: T\n---\n"),
+		"competitions/c1/config.md": []byte("---\nid: c1\n---\n"),
+	}
+	m := validManifest(ScopeTournament, KindBeforeRestore, []CompetitionRef{{ID: "c1", Name: "C1"}}, files)
+	rc := []string{"c1"}
+	m.RestoreCreated = &rc
+	z := buildZip(t, entriesFromFilesAndManifest(t, files, m)...)
+	_, err := Read(bytes.NewReader(z), int64(len(z)), goodChecks())
+	be := assertBackupErrorCode(t, err, CodeManifestInvalid)
+	assert.Equal(t, "c1", be.Path)
 }

@@ -26,6 +26,7 @@ type StampedFile struct {
 	Fields []string
 
 	parse  func(compID string, raw []byte) (any, error)
+	trim   func(v any) (keep bool)
 	encode func(v any) ([]byte, error)
 }
 
@@ -82,12 +83,24 @@ var FingerprintStampedFiles = []StampedFile{
 	{
 		// A lineup saved unchanged restamps every position and adds a History
 		// entry per position holding the value it already had. A real change
-		// always changes a position too, so History is left out whole.
+		// always changes a position too, so History is left out whole. A
+		// removal with no live record appends a removal marker (IsRemovalMarker)
+		// whose only payload is its arrival stamp; dropping removal markers
+		// keeps no-op removals from moving the fingerprint.
 		Name:   teamLineupFilename,
 		Fields: []string{"Stamps", "History"},
-		parse: func(compID string, raw []byte) (any, error) {
-			lineups, err := parseTeamLineupsBytes(compID, raw)
+		parse: func(_ string, raw []byte) (any, error) {
+			lineups, err := decodeTeamLineupsBytes(raw)
 			return &lineups, err
+		},
+		trim: func(v any) bool {
+			lineups := *v.(*map[string]domain.TeamLineup)
+			for k, l := range lineups {
+				if l.IsRemovalMarker() {
+					delete(lineups, k)
+				}
+			}
+			return len(lineups) > 0
 		},
 		encode: func(v any) ([]byte, error) {
 			lineups := *v.(*map[string]domain.TeamLineup)
@@ -127,7 +140,11 @@ func Fingerprint(files map[string][]byte) string {
 				continue
 			}
 			if sf := stampedFileNamed(rest); sf != nil {
-				body = sf.normalise(compID, body)
+				var keep bool
+				body, keep = sf.normalise(compID, body)
+				if !keep {
+					continue
+				}
 			}
 		}
 		frame([]byte(p))
@@ -136,16 +153,19 @@ func Fingerprint(files map[string][]byte) string {
 	return hex.EncodeToString(h.Sum(nil))
 }
 
-func (sf *StampedFile) normalise(compID string, raw []byte) []byte {
+func (sf *StampedFile) normalise(compID string, raw []byte) ([]byte, bool) {
 	v, err := sf.parse(compID, raw)
 	if err != nil {
-		return raw
+		return raw, true
 	}
 	// Only a file the store's own format writes back byte for byte is
 	// normalised, so a lenient parse (a row skipped, a legacy column) never
 	// hides a difference beyond the stamp fields.
 	if same, err := sf.encode(v); err != nil || !bytes.Equal(same, raw) {
-		return raw
+		return raw, true
+	}
+	if sf.trim != nil && !sf.trim(v) {
+		return nil, false
 	}
 	names := make(map[string]bool, len(sf.Fields))
 	for _, f := range sf.Fields {
@@ -154,9 +174,9 @@ func (sf *StampedFile) normalise(compID string, raw []byte) []byte {
 	zeroNamedFields(reflect.ValueOf(v), names)
 	out, err := sf.encode(v)
 	if err != nil {
-		return raw
+		return raw, true
 	}
-	return out
+	return out, true
 }
 
 // competitionFilePath splits "competitions/<id>/<rest>".

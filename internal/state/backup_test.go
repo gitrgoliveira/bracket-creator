@@ -414,3 +414,38 @@ func TestDataRootBackupHelpers(t *testing.T) {
 	assert.NotContains(t, seen, stagedPath)
 	assert.Equal(t, []byte("overwritten-bytes"), seen[renamedPath])
 }
+
+func TestSnapshot_SkipsSymlinksAndDoesNotLeakPassword(t *testing.T) {
+	dir := t.TempDir()
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+
+	const secret = "s3cr3t-symlink-password!"
+	require.NoError(t, store.SaveTournament(&Tournament{
+		Name:     "Symlink Safety Taikai",
+		Date:     "03-11-2026",
+		Venue:    "Hall",
+		Courts:   []string{"A"},
+		Password: secret,
+	}))
+	const compID = "kendo-open"
+	require.NoError(t, store.SaveCompetition(&Competition{ID: compID, Name: "Kendo Open"}))
+
+	brandingDir := filepath.Join(dir, BrandingDirName)
+	require.NoError(t, store.root.stageFile(filepath.Join(brandingDir, "keep.png"), []byte("png"), 0o600))
+	if err := os.Symlink("../tournament.md", filepath.Join(brandingDir, "leak.md")); err != nil {
+		t.Skipf("symlinks not supported: %v", err)
+	}
+	require.NoError(t, os.Symlink("does-not-exist", filepath.Join(brandingDir, "broken.png")))
+	require.NoError(t, os.Symlink("../../tournament.md", store.compPath(compID, "comp-leak.md")))
+
+	snap, err := store.Snapshot(ScopeTournament, "")
+	require.NoError(t, err)
+	assert.Contains(t, snap.Files, "branding/keep.png")
+	assert.NotContains(t, snap.Files, "branding/leak.md")
+	assert.NotContains(t, snap.Files, "branding/broken.png")
+	assert.NotContains(t, snap.Files, "competitions/"+compID+"/comp-leak.md")
+	for path, data := range snap.Files {
+		assert.NotContainsf(t, string(data), secret, "snapshot file %s leaked the tournament password", path)
+	}
+}

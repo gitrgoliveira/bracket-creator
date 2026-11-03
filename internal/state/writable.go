@@ -51,19 +51,12 @@ func checkDataWritable(root *dataRoot) error {
 			failed = append(failed, fmt.Sprintf("  %s: %v; %s", dir, err, writeRemedy(err)))
 		}
 	}
-	// The upload handlers write branding/ and sponsors/ by path, not through
-	// the root, so each is probed only when the root opens it as a folder.
-	for _, name := range []string{BrandingDirName, SponsorsDirName} {
-		d := filepath.Join(folder, name)
-		if info, err := root.stat(d); err == nil && info.IsDir() {
-			dirs = append(dirs, d)
-		}
-	}
-	// Backups and restore staging are written through the root: when an entry
-	// already sits at backups/ or .restore/ (a folder, a file blocking its
-	// creation, or a link out of the data folder), probe it so startup refuses
-	// before a scheduled backup or restore fails.
-	for _, name := range []string{BackupsDirName, RestoreDirName} {
+	// Optional top-level folders (branding/, sponsors/, backups/, .restore/)
+	// are read and written through the root by snapshots, backups, and
+	// restores: when an entry already sits there (a folder, a file blocking
+	// its creation, or a link out of the data folder), probe it so startup
+	// refuses before a later backup, restore, or upload fails.
+	for _, name := range []string{BrandingDirName, SponsorsDirName, BackupsDirName, RestoreDirName} {
 		d := filepath.Join(folder, name)
 		if _, err := root.stat(d); !errors.Is(err, fs.ErrNotExist) {
 			dirs = append(dirs, d)

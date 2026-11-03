@@ -304,6 +304,8 @@ func TestFingerprintDoors(t *testing.T) {
 			saved.Positions["1"], saved.Positions["3"] = saved.Positions["3"], saved.Positions["1"]
 			saved.MemberIDs["1"], saved.MemberIDs["3"] = saved.MemberIDs["3"], saved.MemberIDs["1"]
 			h.real(http.MethodPut, path, map[string]any{"positions": saved.Positions, "memberIds": saved.MemberIDs})
+			h.real(http.MethodDelete, path, nil)
+			h.noOp(http.MethodDelete, path, nil, "lineups.yaml")
 		}
 	})
 

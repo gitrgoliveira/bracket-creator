@@ -31,7 +31,7 @@ func Write(w io.Writer, meta Meta, files map[string][]byte) error {
 	if meta.Kind != KindBeforeRestore && len(meta.RestoreCreated) > 0 {
 		return &Error{Code: CodeRestoreCreatedNotAllowed, Detail: "restoreCreated is only allowed for before-restore archives"}
 	}
-	if err := validateUniqueManifestIDs(meta.Competitions, meta.RestoreCreated); err != nil {
+	if err := validateManifestIDs(meta.Competitions, meta.RestoreCreated, safeSegmentID); err != nil {
 		return err
 	}
 	if len(files)+1 > MaxEntries {
@@ -155,6 +155,12 @@ func Write(w io.Writer, meta Meta, files map[string][]byte) error {
 	return zw.Close()
 }
 
+// chooseCompressionMethod deflates data only to learn whether deflate pays off,
+// and writeZipEntry then compresses it again. Writing the first pass out
+// through zip.Writer.CreateRaw would save that CPU, but CreateRaw takes the
+// DOS timestamp, the extended timestamp field and the CRC from the caller, so
+// it would reimplement what CreateHeader does for a saving no backup of this
+// size needs.
 func chooseCompressionMethod(data []byte) (uint16, error) {
 	var buf bytes.Buffer
 	fw, err := flate.NewWriter(&buf, flate.DefaultCompression)

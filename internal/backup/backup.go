@@ -79,11 +79,6 @@ func validatePathSafety(p string) error {
 	if p == "" {
 		return &Error{Code: CodeUnsafePath, Path: p, Detail: "entry path is empty"}
 	}
-	for i := 0; i < len(p); i++ {
-		if p[i] < 0x20 || p[i] == 0x7f {
-			return &Error{Code: CodeUnsafePath, Path: p, Detail: "entry path contains control character"}
-		}
-	}
 	for _, r := range p {
 		if unicode.IsControl(r) {
 			return &Error{Code: CodeUnsafePath, Path: p, Detail: "entry path contains control character"}
@@ -110,6 +105,12 @@ func validatePathSafety(p string) error {
 	return nil
 }
 
+// IsTempFileName reports whether a base filename is a temporary or write-probe
+// file excluded from snapshots and backup archives.
+func IsTempFileName(name string) bool {
+	return strings.HasSuffix(name, ".tmp") || strings.Contains(name, ".tmp-") || strings.HasPrefix(name, ".write-check-")
+}
+
 func validateNotExcluded(p string) error {
 	segments := strings.Split(p, "/")
 	for _, seg := range segments {
@@ -118,7 +119,7 @@ func validateNotExcluded(p string) error {
 		}
 	}
 	last := segments[len(segments)-1]
-	if strings.HasSuffix(last, ".tmp") {
+	if IsTempFileName(last) {
 		return &Error{Code: CodeOutsideLayout, Path: p, Detail: "temporary file is not allowed in archive"}
 	}
 	return nil

@@ -158,6 +158,12 @@ func TestNewStoreGivesTheRemedyThatFitsTheCause(t *testing.T) {
 		{".restore linked out of the data folder", RestoreDirName, func(t *testing.T, path string) {
 			require.NoError(t, os.Symlink(t.TempDir(), path))
 		}, "path escapes from parent", link},
+		{"branding linked out of the data folder", BrandingDirName, func(t *testing.T, path string) {
+			require.NoError(t, os.Symlink(t.TempDir(), path))
+		}, "path escapes from parent", link},
+		{"sponsors linked out of the data folder", SponsorsDirName, func(t *testing.T, path string) {
+			require.NoError(t, os.Symlink(t.TempDir(), path))
+		}, "path escapes from parent", link},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			dir := t.TempDir()
@@ -191,4 +197,23 @@ func TestNewStoreStartsBesideALinkUnderCompetitions(t *testing.T) {
 	ids, err := s.ListCompetitions()
 	require.NoError(t, err)
 	assert.NotContains(t, ids, "elsewhere")
+}
+
+func TestCheckDataWritable_BrandingSymlinkOutOfDataFolder(t *testing.T) {
+	dir := t.TempDir()
+	_, err := NewStore(dir)
+	require.NoError(t, err)
+
+	brandingPath := filepath.Join(dir, BrandingDirName)
+	if err := os.Symlink(t.TempDir(), brandingPath); err != nil {
+		t.Skipf("symlinks not supported: %v", err)
+	}
+
+	root, err := openDataRoot(dir)
+	require.NoError(t, err)
+	defer func() { _ = root.close() }()
+
+	err = checkDataWritable(root)
+	require.ErrorIs(t, err, ErrDataNotWritable)
+	assert.Contains(t, err.Error(), brandingPath)
 }

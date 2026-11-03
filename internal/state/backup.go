@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/gitrgoliveira/bracket-creator/internal/backup"
 	"github.com/gitrgoliveira/bracket-creator/internal/state/wal"
 	"gopkg.in/yaml.v3"
 )
@@ -429,6 +430,9 @@ func (s *Store) collectTreeFilesLocked(rootDir string, dst map[string][]byte) er
 			}
 			return nil
 		}
+		if !entry.Type().IsRegular() {
+			return nil
+		}
 		if isExcludedSnapshotDir(name) || isSkippedTempName(name) {
 			return nil
 		}
@@ -455,11 +459,5 @@ func isExcludedSnapshotDir(name string) bool {
 }
 
 func isSkippedTempName(name string) bool {
-	if strings.HasSuffix(name, ".tmp") || strings.Contains(name, ".tmp-") {
-		return true
-	}
-	if strings.HasPrefix(name, writeProbePrefix) {
-		return true
-	}
-	return false
+	return backup.IsTempFileName(name)
 }

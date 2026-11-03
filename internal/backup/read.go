@@ -256,21 +256,8 @@ func decodeAndValidateManifest(manifestBytes []byte, checks Checks) (Manifest, e
 	if manifest.RestoreCreated != nil {
 		restoreCreated = *manifest.RestoreCreated
 	}
-	if err := validateUniqueManifestIDs(manifest.Competitions, restoreCreated); err != nil {
+	if err := validateManifestIDs(manifest.Competitions, restoreCreated, checks.ValidID); err != nil {
 		return Manifest{}, err
-	}
-
-	for _, c := range manifest.Competitions {
-		if err := checks.ValidID(c.ID); err != nil {
-			return Manifest{}, &Error{Code: CodeBadCompetitionID, Path: c.ID, Detail: err.Error()}
-		}
-	}
-	if manifest.RestoreCreated != nil {
-		for _, id := range *manifest.RestoreCreated {
-			if err := checks.ValidID(id); err != nil {
-				return Manifest{}, &Error{Code: CodeBadCompetitionID, Path: id, Detail: err.Error()}
-			}
-		}
 	}
 
 	return manifest, nil
@@ -336,13 +323,27 @@ func reconcileManifestAndFiles(entries []*zip.File, manifestFiles []FileEntry, f
 	return nil
 }
 
-func validateUniqueManifestIDs(comps []CompetitionRef, restoreCreated []string) error {
+// safeSegmentID is the check Write holds an id to, since it has no caller
+// supplied Checks: an id becomes a path segment, so it must be non-empty and
+// free of separators and dot segments. Read applies the caller's stricter
+// ValidID on top.
+func safeSegmentID(id string) error {
+	if id == "" || id == "." || id == ".." || strings.ContainsAny(id, "/\\") {
+		return errors.New("competition id must be a single path segment")
+	}
+	return nil
+}
+
+func validateManifestIDs(comps []CompetitionRef, restoreCreated []string, validID func(string) error) error {
 	seenComps := make(map[string]bool, len(comps))
 	for _, c := range comps {
 		if seenComps[c.ID] {
 			return &Error{Code: CodeManifestInvalid, Path: c.ID, Detail: "duplicate competition id in manifest"}
 		}
 		seenComps[c.ID] = true
+		if err := validID(c.ID); err != nil {
+			return &Error{Code: CodeBadCompetitionID, Path: c.ID, Detail: err.Error()}
+		}
 	}
 	seenRestore := make(map[string]bool, len(restoreCreated))
 	for _, id := range restoreCreated {
@@ -350,6 +351,12 @@ func validateUniqueManifestIDs(comps []CompetitionRef, restoreCreated []string) 
 			return &Error{Code: CodeManifestInvalid, Path: id, Detail: "duplicate id in restoreCreated"}
 		}
 		seenRestore[id] = true
+		if seenComps[id] {
+			return &Error{Code: CodeManifestInvalid, Path: id, Detail: "competition id appears in both competitions and restoreCreated"}
+		}
+		if err := validID(id); err != nil {
+			return &Error{Code: CodeBadCompetitionID, Path: id, Detail: err.Error()}
+		}
 	}
 	return nil
 }

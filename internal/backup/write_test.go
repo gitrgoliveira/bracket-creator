@@ -353,6 +353,18 @@ func TestWriteRefusals(t *testing.T) {
 			code:  CodeUnsafePath,
 		},
 		{
+			name:  "control char 0x1f in path",
+			meta:  validMeta,
+			files: map[string][]byte{"branding/a\x1fb.png": []byte("x")},
+			code:  CodeUnsafePath,
+		},
+		{
+			name:  "control char 0x7f in path",
+			meta:  validMeta,
+			files: map[string][]byte{"branding/a\x7fb.png": []byte("x")},
+			code:  CodeUnsafePath,
+		},
+		{
 			name:  "excluded wal path",
 			meta:  validMeta,
 			files: map[string][]byte{".wal/x": []byte("x")},
@@ -368,6 +380,18 @@ func TestWriteRefusals(t *testing.T) {
 			name:  "excluded competition tmp suffix",
 			meta:  validMeta,
 			files: map[string][]byte{"competitions/c1/pools.csv.tmp": []byte("x")},
+			code:  CodeOutsideLayout,
+		},
+		{
+			name:  "excluded competition tmp infix",
+			meta:  validMeta,
+			files: map[string][]byte{"competitions/c1/pools.csv.tmp-123-456": []byte("x")},
+			code:  CodeOutsideLayout,
+		},
+		{
+			name:  "excluded competition write check prefix",
+			meta:  validMeta,
+			files: map[string][]byte{"competitions/c1/.write-check-1": []byte("x")},
 			code:  CodeOutsideLayout,
 		},
 		{
@@ -534,6 +558,50 @@ func TestWriteRefusals(t *testing.T) {
 			},
 			files: map[string][]byte{
 				"tournament.md": []byte("---\nname: Cup\n---\n"),
+			},
+			code: CodeManifestInvalid,
+		},
+		{
+			name: "empty id in meta.RestoreCreated",
+			meta: Meta{
+				CreatedAt:      validMeta.CreatedAt,
+				Scope:          ScopeTournament,
+				Kind:           KindBeforeRestore,
+				Tournament:     TournamentRef{Name: "Cup"},
+				RestoreCreated: []string{""},
+			},
+			files: map[string][]byte{
+				"tournament.md": []byte("---\nname: Cup\n---\n"),
+			},
+			code: CodeBadCompetitionID,
+		},
+		{
+			name: "path traversal in meta.RestoreCreated",
+			meta: Meta{
+				CreatedAt:      validMeta.CreatedAt,
+				Scope:          ScopeTournament,
+				Kind:           KindBeforeRestore,
+				Tournament:     TournamentRef{Name: "Cup"},
+				RestoreCreated: []string{"../x"},
+			},
+			files: map[string][]byte{
+				"tournament.md": []byte("---\nname: Cup\n---\n"),
+			},
+			code: CodeBadCompetitionID,
+		},
+		{
+			name: "id in both meta.Competitions and meta.RestoreCreated",
+			meta: Meta{
+				CreatedAt:      validMeta.CreatedAt,
+				Scope:          ScopeTournament,
+				Kind:           KindBeforeRestore,
+				Tournament:     TournamentRef{Name: "Cup"},
+				Competitions:   []CompetitionRef{{ID: "c1", Name: "C1"}},
+				RestoreCreated: []string{"c1"},
+			},
+			files: map[string][]byte{
+				"tournament.md":             []byte("---\nname: Cup\n---\n"),
+				"competitions/c1/config.md": []byte("---\nid: c1\n---\n"),
 			},
 			code: CodeManifestInvalid,
 		},
@@ -718,4 +786,115 @@ func readRawManifestFromZip(t *testing.T, zipBytes []byte) []byte {
 	}
 	t.Fatalf("manifest.json not found in zip")
 	return nil
+}
+
+func TestWriteRejectTempAndWriteCheckPaths(t *testing.T) {
+	validMeta := Meta{
+		CreatedAt:    time.Date(2026, 8, 1, 12, 0, 0, 0, time.UTC),
+		Scope:        ScopeTournament,
+		Kind:         KindManual,
+		Tournament:   TournamentRef{Name: "Cup"},
+		Competitions: []CompetitionRef{{ID: "c1", Name: "C1"}},
+	}
+	baseFiles := func(extraPath string) map[string][]byte {
+		return map[string][]byte{
+			"tournament.md":             []byte("---\nname: Cup\n---\n"),
+			"competitions/c1/config.md": []byte("---\nid: c1\n---\n"),
+			extraPath:                   []byte("data"),
+		}
+	}
+
+	for _, p := range []string{
+		"competitions/c1/pools.csv.tmp-123-456",
+		"competitions/c1/.write-check-1",
+	} {
+		t.Run("reject_"+p, func(t *testing.T) {
+			var buf bytes.Buffer
+			err := Write(&buf, validMeta, baseFiles(p))
+			be := assertBackupErrorCode(t, err, CodeOutsideLayout)
+			assert.Equal(t, p, be.Path)
+		})
+	}
+}
+
+func TestWriteRejectControlCharacterPaths(t *testing.T) {
+	validMeta := Meta{
+		CreatedAt:    time.Date(2026, 8, 1, 12, 0, 0, 0, time.UTC),
+		Scope:        ScopeTournament,
+		Kind:         KindManual,
+		Tournament:   TournamentRef{Name: "Cup"},
+		Competitions: []CompetitionRef{{ID: "c1", Name: "C1"}},
+	}
+	baseFiles := func(extraPath string) map[string][]byte {
+		return map[string][]byte{
+			"tournament.md":             []byte("---\nname: Cup\n---\n"),
+			"competitions/c1/config.md": []byte("---\nid: c1\n---\n"),
+			extraPath:                   []byte("data"),
+		}
+	}
+
+	for _, p := range []string{
+		"branding/a\x00b.png",
+		"branding/a\x1fb.png",
+		"branding/a\x7fb.png",
+	} {
+		t.Run("reject_control_"+p, func(t *testing.T) {
+			var buf bytes.Buffer
+			err := Write(&buf, validMeta, baseFiles(p))
+			be := assertBackupErrorCode(t, err, CodeUnsafePath)
+			assert.Equal(t, p, be.Path)
+		})
+	}
+}
+
+func TestValidatePathSafetyControlCharacters(t *testing.T) {
+	for _, p := range []string{
+		"branding/a\x00b.png",
+		"branding/a\x1fb.png",
+		"branding/a\x7fb.png",
+	} {
+		err := validatePathSafety(p)
+		be := assertBackupErrorCode(t, err, CodeUnsafePath)
+		assert.Equal(t, p, be.Path)
+	}
+}
+
+func TestWriteRestoreCreatedValidation(t *testing.T) {
+	baseMeta := Meta{
+		CreatedAt:    time.Date(2026, 8, 1, 12, 0, 0, 0, time.UTC),
+		Scope:        ScopeTournament,
+		Kind:         KindBeforeRestore,
+		Tournament:   TournamentRef{Name: "Cup"},
+		Competitions: []CompetitionRef{{ID: "c1", Name: "C1"}},
+	}
+	baseFiles := map[string][]byte{
+		"tournament.md":             []byte("---\nname: Cup\n---\n"),
+		"competitions/c1/config.md": []byte("---\nid: c1\n---\n"),
+	}
+
+	t.Run("empty string in restoreCreated is bad_competition_id", func(t *testing.T) {
+		meta := baseMeta
+		meta.RestoreCreated = []string{""}
+		var buf bytes.Buffer
+		err := Write(&buf, meta, baseFiles)
+		assertBackupErrorCode(t, err, CodeBadCompetitionID)
+	})
+
+	t.Run("path traversal in restoreCreated is bad_competition_id", func(t *testing.T) {
+		meta := baseMeta
+		meta.RestoreCreated = []string{"../x"}
+		var buf bytes.Buffer
+		err := Write(&buf, meta, baseFiles)
+		be := assertBackupErrorCode(t, err, CodeBadCompetitionID)
+		assert.Equal(t, "../x", be.Path)
+	})
+
+	t.Run("id in both competitions and restoreCreated is manifest_invalid", func(t *testing.T) {
+		meta := baseMeta
+		meta.RestoreCreated = []string{"c1"}
+		var buf bytes.Buffer
+		err := Write(&buf, meta, baseFiles)
+		be := assertBackupErrorCode(t, err, CodeManifestInvalid)
+		assert.Equal(t, "c1", be.Path)
+	})
 }

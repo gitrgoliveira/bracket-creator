@@ -220,3 +220,66 @@ func TestFingerprint_ZeroNamedFieldsReachesNestedValues(t *testing.T) {
 		List: []inner{{Keep: "a"}}, ByKey: map[string]inner{"k": {Keep: "b"}}, Ptr: &inner{Keep: "c"}, at: 5,
 	}, v)
 }
+
+func TestFingerprint_LineupParseHasNoSideEffects(t *testing.T) {
+	s := fingerprintTestStore(t)
+	const comp = "fp-pure-lineup"
+	var raw []byte
+	highStamp := time.Now().Add(24 * time.Hour).UnixMilli()
+	require.NoError(t, s.saveTeamLineupsLocked("fp-pure-builder", map[string]domain.TeamLineup{
+		"team-1\x00": {
+			TeamID: "team-1", CompetitionID: comp,
+			Positions: map[domain.Position]string{"1": "Aoi Senpo"},
+			Stamps:    map[domain.Position]int64{"1": highStamp},
+		},
+	}, captureWrite(&raw)))
+
+	beforeParses := lineupParses.Load()
+	beforeStamp := lineupArrival(comp).Load()
+
+	fp := Fingerprint(map[string][]byte{"competitions/" + comp + "/" + teamLineupFilename: raw})
+	require.NotEmpty(t, fp)
+
+	assert.Equal(t, beforeParses, lineupParses.Load(), "fingerprinting must not increment lineupParses")
+	assert.Equal(t, beforeStamp, lineupArrival(comp).Load(), "fingerprinting must not advance the lineup arrival stamp")
+}
+
+func TestFingerprint_NoOpLineupRemovalLeavesFingerprintUnchanged(t *testing.T) {
+	s := fingerprintTestStore(t)
+	const comp = "fp-noop-remove"
+	require.NoError(t, s.SaveCompetition(&Competition{ID: comp, Name: "C", Kind: "team", TeamSize: 3}))
+	require.NoError(t, s.SetTeamLineups(comp, []domain.TeamLineup{{
+		TeamID: "team-1", CompetitionID: comp,
+		Positions: map[domain.Position]string{"1": "Aoi Senpo", "2": "Aoi Chuken", "3": "Aoi Taisho"},
+	}}, 3))
+
+	snap0, err := s.Snapshot(ScopeCompetition, comp)
+	require.NoError(t, err)
+	fp0 := Fingerprint(snap0.Files)
+
+	removed, err := s.RemoveTeamLineupAt(comp, "team-2", "", 0, 0)
+	require.NoError(t, err)
+	assert.False(t, removed)
+
+	snap1, err := s.Snapshot(ScopeCompetition, comp)
+	require.NoError(t, err)
+	require.NotEqual(t, snap0.Files["competitions/"+comp+"/"+teamLineupFilename], snap1.Files["competitions/"+comp+"/"+teamLineupFilename])
+	assert.Equal(t, fp0, Fingerprint(snap1.Files))
+
+	removed, err = s.RemoveTeamLineupAt(comp, "team-1", "", 0, 0)
+	require.NoError(t, err)
+	assert.True(t, removed)
+
+	snap2, err := s.Snapshot(ScopeCompetition, comp)
+	require.NoError(t, err)
+	fp2 := Fingerprint(snap2.Files)
+	assert.NotEqual(t, fp0, fp2)
+
+	removed, err = s.RemoveTeamLineupAt(comp, "team-1", "", 0, 0)
+	require.NoError(t, err)
+	assert.False(t, removed)
+
+	snap3, err := s.Snapshot(ScopeCompetition, comp)
+	require.NoError(t, err)
+	assert.Equal(t, fp2, Fingerprint(snap3.Files))
+}

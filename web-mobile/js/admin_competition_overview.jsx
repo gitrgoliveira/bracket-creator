@@ -19,9 +19,10 @@ import {
   bracketRecoveryKind,
   bracketResetPrompt,
   bracketResetToast,
+  rosterUnreadableIssues,
 } from './data_integrity.jsx';
 
-const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
+const { useState, useEffect, useRef } = React;
 
 const compMatchStats = window.compMatchStats;
 
@@ -34,7 +35,7 @@ const compMatchStats = window.compMatchStats;
 //
 // Shape:
 //   { id: string, label: string, detail: string, cta: string|null,
-//     state: 'done'|'active'|'todo', section: string|null,
+//     state: 'done'|'active'|'pending', section: string|null,
 //     blocking?: boolean }
 //
 // Rules:
@@ -43,7 +44,7 @@ const compMatchStats = window.compMatchStats;
 //   - "Review seeds & settings" is always emitted as a non-done step: there is
 //     no reliable "seeds reviewed" signal, so it never auto-completes (its
 //     detail line reflects the current seed count, but its state stays
-//     todo/active and is resolved by the active-step pass below). Its CTA
+//     pending/active and is resolved by the active-step pass below). Its CTA
 //     navigates to the "settings" section (format, courts, duration); seeds
 //     are accessible from the seeding card on the "participants" page.
 //   - Team comps get an extra "Set team lineups" step (→ "lineups") inserted
@@ -56,7 +57,7 @@ const compMatchStats = window.compMatchStats;
 //     telling an operator to press a greyed-out button is worse than saying
 //     nothing. `tournamentCourts` is optional and only feeds that check (the
 //     orphaned-shiaijo half of it); omit it and only the count rule applies.
-//   - The FIRST non-done step is promoted to "active"; the rest stay "todo".
+//   - The FIRST non-done step is promoted to "active"; the rest stay "pending".
 //     EXCEPT when a step is `blocking` (today only "Generate the draw", when a
 //     court rule has disabled it): that one is promoted instead, because
 //     nothing further in the checklist can happen until it is fixed, and
@@ -77,17 +78,21 @@ function competitionNextSteps(c, tournamentCourts) {
   steps.push({
     id: "create",
     label: "Create competition",
-    detail: `${c && c.name ? `"${c.name}" created` : "Competition created"}`,
+    detail: `${c && c.name ? `“${c.name}” created` : "Competition created"}`,
     state: "done",
     section: null,
     cta: null,
   });
 
-  // Step 2: participants.
+  // Step 2: participants. Left out when participants.csv could not be read
+  // (operator decision D26): the roster then arrives empty, and "0 added, add
+  // participants" would send the operator to a page that shows only the file's
+  // notice. The banner above the checklist carries the repair.
+  const rosterUnreadable = rosterUnreadableIssues(c).length > 0;
   const participantDetail = hasEnoughPlayers
     ? `${numPlayers} ${isTeam ? "teams" : "participants"} added${seededCount > 0 ? `, ${seededCount} seeded` : ""}`
     : `${numPlayers} ${isTeam ? "team" : "participant"}${numPlayers !== 1 ? "s" : ""} added. Need at least 2`;
-  steps.push({
+  if (!rosterUnreadable) steps.push({
     id: "participants",
     label: `Add ${isTeam ? "teams" : "participants"}`,
     detail: participantDetail,
@@ -99,14 +104,18 @@ function competitionNextSteps(c, tournamentCourts) {
     cta: `Add ${isTeam ? "teams" : "participants"} →`,
   });
 
-  // Step 3: seeds & settings (becomes active once participants done).
+  // Step 3: seeds & settings (becomes active once participants done). With the
+  // roster unreadable there is nobody to seed, so the step speaks of settings
+  // alone.
   steps.push({
     id: "settings",
-    label: "Review seeds & settings",
-    detail: seededCount > 0
-      ? `${seededCount} seed${seededCount !== 1 ? "s" : ""} assigned`
-      : "Optionally assign seeds and adjust format",
-    state: "todo",
+    label: rosterUnreadable ? "Review settings" : "Review seeds & settings",
+    detail: rosterUnreadable
+      ? "Adjust format and settings"
+      : seededCount > 0
+        ? `${seededCount} seed${seededCount !== 1 ? "s" : ""} assigned`
+        : "Optionally assign seeds and adjust format",
+    state: "pending",
     section: "settings",
     cta: "Review settings →",
   });
@@ -117,7 +126,7 @@ function competitionNextSteps(c, tournamentCourts) {
       id: "lineups",
       label: "Set team lineups",
       detail: "Assign positions (Senpo, Jiho, …) before the draw",
-      state: "todo",
+      state: "pending",
       section: "lineups",
       cta: "Set lineups →",
     });
@@ -134,20 +143,23 @@ function competitionNextSteps(c, tournamentCourts) {
   const drawBlocker = typeof window !== "undefined" && window.competitionDrawBlocker
     ? window.competitionDrawBlocker(c, tournamentCourts)
     : null;
-  let generateDetail = "Use the \"Generate draw\" button in the header above";
-  if (!hasEnoughPlayers) generateDetail = "Add at least 2 participants first";
-  else if (drawBlocker) generateDetail = `${drawBlocker.reason} ${drawBlocker.fix} The "Generate draw" button stays disabled until you do.`;
-  const drawIsBlocked = !!drawBlocker && hasEnoughPlayers;
+  let generateDetail = "Use the “Generate draw” button in the header above";
+  if (rosterUnreadable) generateDetail = "Repair the roster first: see the notice above";
+  else if (!hasEnoughPlayers) generateDetail = "Add at least 2 participants first";
+  else if (drawBlocker) generateDetail = `${drawBlocker.reason} ${drawBlocker.fix} The “Generate draw” button stays disabled until you do.`;
+  const drawIsBlocked = !!drawBlocker && hasEnoughPlayers && !rosterUnreadable;
   steps.push({
     id: "generate",
     label: "Generate the draw",
     detail: generateDetail,
-    state: "todo",
+    state: "pending",
     section: drawIsBlocked ? drawBlocker.section : null,
     cta: drawIsBlocked ? drawBlocker.cta : null,
     // `blocking` means "nothing further in this checklist can happen until
     // this is fixed", which is what promotes it past the ordering rule below.
-    blocking: drawIsBlocked,
+    // An unreadable roster blocks it too, with no button: the repair is the
+    // banner's Reload, so no settings CTA leads the page meanwhile.
+    blocking: drawIsBlocked || rosterUnreadable,
   });
 
   // A blocking step JUMPS THE QUEUE.
@@ -155,7 +167,7 @@ function competitionNextSteps(c, tournamentCourts) {
   // The default rule (first non-done becomes active) can never reach the
   // generate step: "Review seeds & settings" is deliberately emitted non-done
   // forever, because there is no "seeds reviewed" signal, so it takes `active`
-  // on every render and everything after it stays `todo`. Only an active step
+  // on every render and everything after it stays `pending`. Only an active step
   // renders its CTA, so the "Reassign shiaijo →" button authored above was
   // unreachable in every state the checklist can be in.
   //
@@ -165,7 +177,7 @@ function competitionNextSteps(c, tournamentCourts) {
   // whose draw is refused has exactly one next action.
   // One pass, one rule: a blocking step takes `active` if there is one,
   // otherwise the first non-done step does, and every other non-done step is
-  // `todo`. Writing the two cases as separate passes meant the blocker branch
+  // `pending`. Writing the two cases as separate passes meant the blocker branch
   // also had to re-clear the states the default branch would have set, which
   // was a no-op for every step this checklist actually emits and would have
   // silently stopped being one the moment a later step was pushed as "active".
@@ -173,7 +185,7 @@ function competitionNextSteps(c, tournamentCourts) {
     || steps.find((s) => s.state !== "done");
   steps.forEach((s) => {
     if (s.state === "done") return;
-    s.state = s === active ? "active" : "todo";
+    s.state = s === active ? "active" : "pending";
   });
 
   return steps;
@@ -239,7 +251,7 @@ function AdminCompOverview({ c, tournament, pools, poolMatches, bracket, onSecti
   // in the banner because the banner owns the WORDING (shared with the other
   // data-integrity surfaces) and this page owns the network call and the
   // refresh, exactly like discardDraw in admin_competition.jsx.
-  const [quarantining, setQuarantining] = useStateA(false);
+  const [quarantining, setQuarantining] = useState(false);
   const quarantineBracket = async () => {
     // The words come from data_integrity.jsx, which owns every one the operator
     // reads about unreadable data. A league has no knockout stage, so it must
@@ -306,12 +318,23 @@ function AdminCompOverview({ c, tournament, pools, poolMatches, bracket, onSecti
   // Schedule estimate fetch: same AbortController pattern as AdminSettings.
   // Never blocks render: estimate starts as null and fills in asynchronously.
   // ---------------------------------------------------------------------------
-  const [estimate, setEstimate] = useStateA(null);
-  const [estimateLoading, setEstimateLoading] = useStateA(false);
-  const [estimateErr, setEstimateErr] = useStateA(null);
+  const [estimate, setEstimate] = useState(null);
+  const [estimateLoading, setEstimateLoading] = useState(false);
+  const [estimateErr, setEstimateErr] = useState(null);
 
-  useEffectA(() => {
-    if (!c.id) return;
+  // Re-fetch when config, participant count, or tournament-level timing changes.
+  // When check-in is enabled the backend counts only checked-in participants, so
+  // toggling check-in changes the effective count even if roster size stays fixed.
+  // Tournament ceremony/timing fields mirror AdminSettings' estimate effect deps.
+  const estimateCheckIn = checkInApplies(tournament, c.checkInEnabled);
+  const estimatePlayerCount = (c.players || []).length;
+  const estimateCheckedInCount = estimateCheckIn ? (c.players || []).filter(p => p && p.checkedIn).length : 0;
+  // With participants.csv unreadable there is no roster to estimate from: the
+  // request would only answer the server's opaque failure. The page says so
+  // through the tiles and the footer below instead (D26).
+  const rosterUnreadable = rosterUnreadableIssues(c).length > 0;
+  useEffect(() => {
+    if (!c.id || rosterUnreadable) return;
     const controller = new AbortController();
     setEstimateLoading(true);
     setEstimateErr(null);
@@ -322,20 +345,17 @@ function AdminCompOverview({ c, tournament, pools, poolMatches, bracket, onSecti
       })
       .catch(e => {
         if (!controller.signal.aborted) {
-          setEstimateErr(e.message || "Failed to estimate");
+          // The server's text ("internal error") means nothing to an
+          // organiser: it goes to the console and the panel says what happened.
+          console.error("Schedule estimate failed:", e && e.message);
+          setEstimateErr(true);
           setEstimateLoading(false);
         }
       });
     return () => controller.abort();
-    // Re-fetch when config, participant count, or tournament-level timing changes.
-    // When check-in is enabled the backend counts only checked-in participants, so
-    // toggling check-in changes the effective count even if roster size stays fixed.
-    // Tournament ceremony/timing fields mirror AdminSettings' estimate effect deps.
   }, [c.id, c.format, c.kind, c.poolMatchDurationSeconds, c.knockoutMatchDurationSeconds, c.courts,
     c.teamSize, c.poolSize, c.poolSizeMode, c.poolWinners, c.roundRobin, c.poolFormat,
-    c.swissRounds, checkInApplies(tournament, c.checkInEnabled), password,
-    (c.players || []).length,
-    checkInApplies(tournament, c.checkInEnabled) ? (c.players || []).filter(p => p && p.checkedIn).length : 0,
+    c.swissRounds, estimateCheckIn, password, estimatePlayerCount, estimateCheckedInCount, rosterUnreadable,
     tournament?.openingBlock, tournament?.lunchBlock, tournament?.closingBlock,
     tournament?.clockToElapsedMultiplier, tournament?.slowestCourtBufferPct]);
 
@@ -363,7 +383,7 @@ function AdminCompOverview({ c, tournament, pools, poolMatches, bracket, onSecti
     ? window.formatCompMinutes
     : (m) => (Number.isFinite(m) && m > 0 ? `${m}m` : null);
 
-  const estDuration = formatCompMinutes(estimate && estimate.totalDurationMinutes) || "n/a";
+  const estDuration = (!rosterUnreadable && formatCompMinutes(estimate && estimate.totalDurationMinutes)) || "n/a";
 
   // draw-ready: pool count vs bracket size
   const poolCount = (Array.isArray(pools) && pools.length > 0) ? pools.length : (c.pools ? c.pools.length : null);
@@ -383,26 +403,51 @@ function AdminCompOverview({ c, tournament, pools, poolMatches, bracket, onSecti
   // Render helpers
   // ---------------------------------------------------------------------------
 
+  // The participants box, the same in every state. With participants.csv
+  // unreadable the roster arrives empty, so a 0 here would contradict the
+  // banner above it: the box shows the strip's one placeholder, "n/a", and says
+  // why in muted ink (operator decision D26); the banner is the one full,
+  // danger-coloured statement of the failure. The Seeded box follows it.
+  function participantsTile() {
+    return (
+      <div className="stat-box" data-testid="stat-participants">
+        {rosterUnreadable ? (
+          <>
+            <div className="v">n/a</div>
+            <div className="l">{participantLabel} <span className="stat-box__flag">unreadable</span></div>
+          </>
+        ) : (
+          <>
+            <div className="v">{numPlayers}</div>
+            <div className="l">{participantLabel}</div>
+          </>
+        )}
+      </div>
+    );
+  }
+  function seededTile() {
+    return (
+      <div className="stat-box" data-testid="stat-seeded">
+        <div className="v">{rosterUnreadable ? "n/a" : seededCount}</div>
+        <div className="l">Seeded</div>
+      </div>
+    );
+  }
+
   // Stats strip: 4 boxes, varies by state.
   function renderStatsStrip() {
     if (isSetup) {
       return (
         <div className="stats-strip">
-          <div className="stat-box">
-            <div className="v">{numPlayers}</div>
-            <div className="l">{participantLabel}</div>
-          </div>
-          <div className="stat-box">
-            <div className="v">{seededCount}</div>
-            <div className="l">Seeded</div>
-          </div>
+          {participantsTile()}
+          {seededTile()}
           <div className="stat-box">
             <div className="v">{numCourts}</div>
             <div className="l">{numCourts === 1 ? "Court" : "Courts"}</div>
           </div>
           <div className="stat-box">
             <div className={vClass(estDuration)}>{estDuration}</div>
-            <div className="l">Est. duration{estimateLoading ? " …" : ""}</div>
+            <div className="l">Est. duration{estimateLoading && !rosterUnreadable ? " …" : ""}</div>
           </div>
         </div>
       );
@@ -427,21 +472,15 @@ function AdminCompOverview({ c, tournament, pools, poolMatches, bracket, onSecti
         : "Pools";
       return (
         <div className="stats-strip">
-          <div className="stat-box">
-            <div className="v">{numPlayers}</div>
-            <div className="l">{participantLabel}</div>
-          </div>
-          <div className="stat-box">
-            <div className="v">{seededCount}</div>
-            <div className="l">Seeded</div>
-          </div>
+          {participantsTile()}
+          {seededTile()}
           <div className="stat-box">
             <div className="v v--sm">{drawSizeVal}</div>
             <div className="l">{drawSizeLabel}</div>
           </div>
           <div className="stat-box">
             <div className={vClass(estDuration)}>{estDuration}</div>
-            <div className="l">Est. duration{estimateLoading ? " …" : ""}</div>
+            <div className="l">Est. duration{estimateLoading && !rosterUnreadable ? " …" : ""}</div>
           </div>
         </div>
       );
@@ -450,10 +489,7 @@ function AdminCompOverview({ c, tournament, pools, poolMatches, bracket, onSecti
     if (isRunning) {
       return (
         <div className="stats-strip">
-          <div className="stat-box">
-            <div className="v">{numPlayers}</div>
-            <div className="l">{participantLabel}</div>
-          </div>
+          {participantsTile()}
           <div className="stat-box">
             <div className="v">{done}/{total}</div>
             <div className="l">Matches done</div>
@@ -466,20 +502,17 @@ function AdminCompOverview({ c, tournament, pools, poolMatches, bracket, onSecti
           </div>
           <div className="stat-box">
             <div className={vClass(estDuration)}>{estDuration}</div>
-            <div className="l">Est. duration{estimateLoading ? " …" : ""}</div>
+            <div className="l">Est. duration{estimateLoading && !rosterUnreadable ? " …" : ""}</div>
           </div>
         </div>
       );
     }
 
     // completed
-    const totalDuration = formatCompMinutes(estimate && estimate.totalDurationMinutes) || "n/a";
+    const totalDuration = estDuration;
     return (
       <div className="stats-strip">
-        <div className="stat-box">
-          <div className="v">{numPlayers}</div>
-          <div className="l">{participantLabel}</div>
-        </div>
+        {participantsTile()}
         <div className="stat-box">
           <div className="v">{done}</div>
           <div className="l">Matches played</div>
@@ -539,7 +572,7 @@ function AdminCompOverview({ c, tournament, pools, poolMatches, bracket, onSecti
               </div>
             ))}
           </div>
-          {numPlayers < 2 && (
+          {numPlayers < 2 && !rosterUnreadable && (
             <div className="comp-steps__hint" data-testid="participants-hint">
               Need at least 2 {c.kind === "team" ? "teams" : "participants"} to generate a draw.
             </div>
@@ -687,6 +720,16 @@ function AdminCompOverview({ c, tournament, pools, poolMatches, bracket, onSecti
 
   // Footer: schedule estimate strip. Shown whenever estimate resolves.
   function renderEstimateFooter() {
+    // No roster, no estimate: say that rather than show whatever the request
+    // last answered (it was the server's bare "internal error").
+    if (rosterUnreadable) {
+      return (
+        <div className="schedule-estimate" data-testid="overview-estimate">
+          <div className="schedule-estimate__title">Schedule estimate</div>
+          <div className="schedule-estimate__empty">No estimate until the roster can be read.</div>
+        </div>
+      );
+    }
     if (!estimate && !estimateLoading && !estimateErr) return null;
     const total = formatCompMinutes(estimate && estimate.totalDurationMinutes);
     const perCourt = estimate ? (estimate.perCourtMinutes || []).map(m => formatCompMinutes(m) || "0m") : [];
@@ -698,44 +741,38 @@ function AdminCompOverview({ c, tournament, pools, poolMatches, bracket, onSecti
     // EstimateHeadline (admin_schedule_utils.jsx) owns that decision for
     // both this footer and the Settings panel.
     return (
-      <div style={{
-        padding: "10px 12px",
-        borderRadius: 6,
-        background: "var(--accent-soft)",
-        border: "1px solid var(--accent)",
-        marginTop: 16,
-      }}>
-        <div style={{ fontSize: 12.5, fontWeight: 600, color: "var(--ink-2)", marginBottom: 4 }}>
+      <div className="schedule-estimate" data-testid="overview-estimate">
+        <div className="schedule-estimate__title">
           Schedule estimate
-          {estimateLoading && <span className="spinner" style={{ marginLeft: 6, verticalAlign: "middle" }} />}
+          {estimateLoading && <span className="spinner schedule-estimate__spinner" />}
         </div>
         {estimateErr && (
-          <div style={{ fontSize: 12, color: "var(--red)" }}>{estimateErr}</div>
+          <div className="schedule-estimate__error">Could not estimate the schedule. Reload the page to try again.</div>
         )}
         {estimate && !estimateErr && (() => {
           if (!total) {
             return (
-              <div style={{ fontSize: 12, color: "var(--ink-3)" }}>
+              <div className="schedule-estimate__empty">
                 No estimate yet. Add participants and configure duration to see a projection.
               </div>
             );
           }
           return (
-            <div style={{ fontSize: 12.5, color: "var(--ink)" }}>
+            <div className="schedule-estimate__body">
               <EstimateHeadline estimate={estimate} total={total} format={formatCompMinutes} testId="overview-est-range" />
               {perCourt.length > 1 && (
-                <div style={{ marginTop: 2 }}>
+                <div className="schedule-estimate__row">
                   <strong>Per court:</strong>{" "}
                   {perCourt.map((t, i) => `Court ${(c.courts && c.courts[i]) || String.fromCharCode(65 + i)}: ${t}`).join(" · ")}
                 </div>
               )}
               {perCourt.length === 1 && (
-                <div style={{ marginTop: 2 }}>
+                <div className="schedule-estimate__row">
                   <strong>Per court:</strong> {perCourt[0]}
                 </div>
               )}
               {ceremony && (
-                <div style={{ marginTop: 2 }}>
+                <div className="schedule-estimate__row">
                   <strong>Ceremony blocks:</strong> {ceremony}
                 </div>
               )}
@@ -765,6 +802,7 @@ function AdminCompOverview({ c, tournament, pools, poolMatches, bracket, onSecti
         competition={c}
         onReset={quarantineBracket}
         resetting={quarantining}
+        onReload={onRefreshCompetition}
       />
       {renderStatsStrip()}
       {renderPrimaryContent()}
@@ -782,27 +820,27 @@ function FightingSpiritAwardsEditor({ c, password, showToast }) {
   // Each row carries a stable client-only `_key` so React keys survive
   // mid-list removals (index keys cause inputs to "jump" / reuse the wrong
   // DOM node when a middle row is deleted). `_key` is stripped before save.
-  const keyCounter = useRefA(0);
-  const withKey = (a) => ({ ...a, _key: keyCounter.current++ });
-  const [awards, setAwards] = useStateA(() => (c.fightingSpiritAwards || []).map(withKey));
-  const [saving, setSaving] = useStateA(false);
+  const keyCounterRef = useRef(0);
+  const withKey = (a) => ({ ...a, _key: keyCounterRef.current++ });
+  const [awards, setAwards] = useState(() => (c.fightingSpiritAwards || []).map(withKey));
+  const [saving, setSaving] = useState(false);
   // `dirty` guards the prop-sync effect: the parent refetches the competition
   // on unrelated SSE events (match updates, status changes), which would
   // otherwise clobber the operator's typed-but-unsaved edits. We only re-sync
   // from props when there are no pending edits (except on a competition
   // SWITCH, where we always reset to the new comp's list.
-  const [dirty, setDirty] = useStateA(false);
+  const [dirty, setDirty] = useState(false);
   // Unsaved edits hold a new build's automatic reload (app_version.jsx).
   useUnsavedInput(dirty);
-  const lastCompId = useRefA(c.id);
-  const mountedRef = useRefA(true);
-  useEffectA(() => () => { mountedRef.current = false; }, []);
+  const lastCompIdRef = useRef(c.id);
+  const mountedRef = useRef(true);
+  useEffect(() => () => { mountedRef.current = false; }, []);
 
   // Sync from parent. Reset unconditionally when switching competitions;
   // otherwise skip while the user has unsaved edits (see `dirty` above).
-  useEffectA(() => {
-    const switched = lastCompId.current !== c.id;
-    lastCompId.current = c.id;
+  useEffect(() => {
+    const switched = lastCompIdRef.current !== c.id;
+    lastCompIdRef.current = c.id;
     if (switched || !dirty) {
       setAwards((c.fightingSpiritAwards || []).map(withKey));
       if (switched) setDirty(false);

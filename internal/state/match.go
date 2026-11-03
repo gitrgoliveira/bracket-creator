@@ -1,6 +1,9 @@
 package state
 
 import (
+	"slices"
+
+	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 )
 
@@ -267,4 +270,44 @@ func (m *BracketMatch) hasBothCompetitors() bool {
 		return id != "" || (name != "" && !helper.IsWinnerOfPlaceholder(name) && !helper.IsPoolFinalistPlaceholder(name))
 	}
 	return resolved(m.SideA, m.SideAID) && resolved(m.SideB, m.SideBID)
+}
+
+// ResultRecorded reports whether the match has a result recorded or is under
+// way (running or completed), judged on its status alone. The engine's result
+// gate (engine.hasRecordedResult), which starts a draw-ready competition, asks
+// it. A match sent back to the queue is scheduled and reads false here though
+// it keeps what was fought (bc-sbq); HoldsScore answers that.
+func (m *MatchResult) ResultRecorded() bool { return statusRecorded(m.Status) }
+
+// ResultRecorded is MatchResult.ResultRecorded for a knockout match, which
+// also needs both sides: a bye the draw resolves when it is generated is
+// completed with one side and was never fought.
+func (m *BracketMatch) ResultRecorded() bool {
+	return statusRecorded(m.Status) && m.SideA != "" && m.SideB != ""
+}
+
+// HoldsScore reports whether the match holds something fought whatever its
+// status: a point, a foul, engi flags or an overtime on the match, or a bout
+// row with a result (SubMatchResult.HasResult). A match sent back to the queue
+// keeps all of these (bc-sbq). A bout row with fighters seated and no result
+// (a kachinuki first bout the server seats from the lineup) is not fought.
+// The load-time spelling step asks it beside ResultRecorded, so a fought
+// match's names, which its bout rows copy, are never rewritten (D18).
+func (m *MatchResult) HoldsScore() bool {
+	return scoreHeld(m.IpponsA, m.IpponsB, m.HansokuA+m.HansokuB+m.FlagsA+m.FlagsB, m.Encho, m.SubResults)
+}
+
+// HoldsScore is MatchResult.HoldsScore for a knockout match.
+func (m *BracketMatch) HoldsScore() bool {
+	return scoreHeld(m.IpponsA, m.IpponsB, m.HansokuA+m.HansokuB+m.FlagsA+m.FlagsB, m.Encho, m.SubResults)
+}
+
+func scoreHeld(ipponsA, ipponsB []string, counts int, encho *EnchoMetadata, subs []SubMatchResult) bool {
+	return domain.CountScoringIppons(ipponsA) > 0 || domain.CountScoringIppons(ipponsB) > 0 ||
+		counts > 0 || encho.On() ||
+		slices.ContainsFunc(subs, func(r SubMatchResult) bool { return r.HasResult() })
+}
+
+func statusRecorded(s MatchStatus) bool {
+	return s == MatchStatusRunning || s == MatchStatusCompleted
 }

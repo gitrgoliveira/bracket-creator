@@ -75,7 +75,9 @@ func diagnoseFolderErrorForProcess(folder string, uid, gid int) string {
 
 	hint += fmt.Sprintf("  %s exists, mode=%04o, owner=%d:%d", target, mode, ownerUID, ownerGID)
 
-	if uint32(uid) != ownerUID { // #nosec G115, POSIX Geteuid() is always >= 0 and fits in uint32
+	// Compared as int64, which holds every int uid and every uint32 owner, so
+	// no value is narrowed on the way.
+	if int64(uid) != int64(ownerUID) {
 		hint += fmt.Sprintf("\n  → %s is owned by uid %d but the container runs as uid %d", target, ownerUID, uid)
 		hint += fmt.Sprintf("\n  → docker-compose: add `user: \"%d:%d\"` to the mobile-app service,", ownerUID, ownerGID)
 		hint += "\n    OR chown the host folder to match the container's USER"

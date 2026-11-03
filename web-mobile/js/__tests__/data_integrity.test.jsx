@@ -2,7 +2,9 @@ import { describe, it, expect } from 'vitest';
 import {
   matchDataUnreadable,
   unreadableMatches,
-  dataIssueText,
+  dataIssueLocator,
+  issueIsLocated,
+  issueUnopened,
   bracketIssue,
   bracketRecoveryKind,
   bracketResetPrompt,
@@ -41,21 +43,41 @@ describe('matchDataUnreadable: the one test for a lost encounter', () => {
   });
 });
 
-describe('dataIssueText: a line an operator can act on', () => {
-  it('names the file, the position and the parser reason', () => {
-    expect(dataIssueText({ file: 'bracket.json', line: 47, column: 12, detail: "invalid character 'x'" }))
-      .toBe("bracket.json, line 47, column 12: invalid character 'x'");
+describe('dataIssueLocator: where an operator finds the fault', () => {
+  it('names the file by its place in the data folder, and the position', () => {
+    expect(dataIssueLocator({ file: 'bracket.json', line: 47, column: 12, detail: "invalid character 'x'" }, { id: 'kendo' }))
+      .toBe('competitions/kendo/bracket.json, line 47, column 12');
   });
 
-  it('omits the position when the parser could not place the fault', () => {
+  it('omits the position when the server could not place the fault', () => {
     // Rather than printing "line 0", which reads as a real location.
-    expect(dataIssueText({ file: 'pools.csv', line: 0, column: 0, detail: 'unexpected end of file' }))
-      .toBe('pools.csv: unexpected end of file');
+    expect(dataIssueLocator({ file: 'participants.csv', line: 0, column: 0, detail: 'could not be opened' }, { id: 'kendo' }))
+      .toBe('competitions/kendo/participants.csv');
+  });
+
+  it('falls back to the file alone with no competition id', () => {
+    expect(dataIssueLocator({ file: 'pools.csv', line: 3, column: 1 }, null)).toBe('pools.csv, line 3, column 1');
   });
 
   it('is empty for nothing', () => {
-    expect(dataIssueText(null)).toBe('');
-    expect(dataIssueText({})).toBe('');
+    expect(dataIssueLocator(null)).toBe('');
+    expect(dataIssueLocator({})).toBe('');
+  });
+});
+
+describe('issueIsLocated: a fault on a line, or a file never opened', () => {
+  it('is true only for a positive line', () => {
+    expect(issueIsLocated({ file: 'participants.csv', line: 4 })).toBe(true);
+    expect(issueIsLocated({ file: 'participants.csv', line: 0 })).toBe(false);
+    expect(issueIsLocated(null)).toBe(false);
+  });
+
+  // An entry with no position is a file the server could not open; a row the
+  // parser refuses is located on its file line like any other fault.
+  it('reads an entry with no position as a file that could not be opened', () => {
+    expect(issueUnopened({ file: 'participants.csv', line: 0 })).toBe(true);
+    expect(issueUnopened({ file: 'participants.csv', line: 4 })).toBe(false);
+    expect(issueUnopened(null)).toBe(false);
   });
 });
 

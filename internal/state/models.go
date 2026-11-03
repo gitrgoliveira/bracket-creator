@@ -1910,9 +1910,9 @@ func (m *MatchResult) Attribution() domain.WinnerAttribution {
 }
 
 // EnchoMetadata records overtime / sudden-death periods played in a
-// match. Read/persisted only in Slice 1; the score endpoint accepts it
-// but does not yet act on it. Slice 3 (T076) will wire it into the
-// decision logic.
+// match. It is persisted with the match result; the score endpoint accepts
+// it (validation bounds PeriodCount) and engine.RecordDecision takes it
+// for a decision write.
 //
 // FR-032
 type EnchoMetadata struct {
@@ -2023,8 +2023,8 @@ type BracketMatch struct {
 	// applyBracketMatchResult's winner-id resolution) IFF the side is a
 	// resolved competitor: a bye (empty), a "Winner of ..." feeder, and an
 	// unresolved "Pool A-1st" placeholder carry none
-	// (helper.IsReservedParticipantName already stops a real person taking
-	// those strings as a display name). omitempty keeps a bracket.json
+	// (the roster rule, helper.IsReservedRosterName, already stops a real
+	// person taking those strings, in any case, as a name). omitempty keeps a bracket.json
 	// written before this field existed, and every reader of one, fully
 	// compatible: state.EnsureLegacyUpgraded repairs a legacy row's ids on
 	// load (DrawOrder positionally for a standalone knockout, else a unique

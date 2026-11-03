@@ -51,7 +51,7 @@ Decision: prefer reusing `--red`/`--red-soft` over aliasing, to avoid token spra
    - Misleading red dot removed. `.ipt-btn` gets 44px min under coarse pointers (DESIGN.md §6).
    - Shiro frame uses `--accent` navy (not the dropped `--shiro-edge`).
    - LESSON: headless `--screenshot` crops narrower than true render width → false "clipping". Trust getBoundingClientRect / matchMedia over screenshots for layout.
-   - TODO: tap mode + card mode in the same component still use the old `.score-card`; left as-is (different interactions). Scoring MODAL (`admin_scoring_modal.jsx`) still pending; user asked to apply C there too.
+   - Since done: `.score-card` has been removed from the code, and the scoring modal (now split across the `admin_scoring_*.jsx` modules) uses the Proposal C `.sb-side` card.
 3. **Bracket card** (`bracket.jsx` / `.bc-side`, `.bc-color-badge`); ✅ DONE.
    - Universal leading colour bar via `.bc-side--a/--b::before` (red / navy); winner = thicker bar (5px) + bold name (no accent-soft flood that fought the red side).
    - v1 side tints scoped `.bc-match--v1 .bc-side--a/--b` (red-soft / hatched white) so v2 (full-flood "now playing") and v3 (compact, transparent) keep their own backgrounds. Verified via computed-style probe.

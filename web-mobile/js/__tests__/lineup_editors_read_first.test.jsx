@@ -77,6 +77,8 @@ function install(api) {
 
 function restore() {
   runtime.unmount();
+  // A pick a test made is kept as a draft, which the next test would restore.
+  sessionStorage.clear();
   global.React = realReact;
   window.API = saved.API;
   window.AdminLineupHelpers = saved.helpers;

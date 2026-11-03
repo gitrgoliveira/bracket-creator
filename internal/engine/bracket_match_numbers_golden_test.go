@@ -9,6 +9,7 @@ import (
 	"sort"
 	"testing"
 
+	bctest "github.com/gitrgoliveira/bracket-creator/internal/test"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -292,7 +293,7 @@ func TestBracketMatchNumbersGolden(t *testing.T) {
 		return
 	}
 
-	want, err := os.ReadFile(path) // #nosec G304 -- fixed test-local path
+	want, err := bctest.ReadFile(path)
 	require.NoError(t, err,
 		"golden file missing; regenerate with: UPDATE_GOLDEN=1 go test ./internal/engine/ -run TestBracketMatchNumbersGolden")
 

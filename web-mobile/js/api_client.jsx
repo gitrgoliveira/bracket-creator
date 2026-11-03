@@ -5113,7 +5113,11 @@ const API = {
         const res = await fetch(`/api/viewer/competitions/${id}`);
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
-            throw new Error(err.error || `Failed to fetch competition details (Status ${res.status})`);
+            const e = new Error(err.error || `Failed to fetch competition details (Status ${res.status})`);
+            // The server answered: a caller can tell that from a request
+            // that never reached it (the data-issue banner's Reload).
+            e.status = res.status;
+            throw e;
         }
         const data = await res.json();
         return _overlayPendingFields(normalizeCompetitionDetail(data), id);

@@ -147,7 +147,7 @@ func NewRouter() *gin.Engine {
 			})
 			return
 		}
-		players, err := helper.CreatePlayers(rawEntries, req.WithZekkenName)
+		players, err := createRoster(rawEntries, req.WithZekkenName)
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return

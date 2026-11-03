@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/state/wal"
+	bctest "github.com/gitrgoliveira/bracket-creator/internal/test"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -88,9 +89,9 @@ func realMatchWriteAndHistoryBytes(t *testing.T, compID, matchID string) (poolMa
 	})
 	require.NoError(t, txErr, "source transaction must land for real so we can read back real bytes")
 
-	poolMatchesCSV, err = os.ReadFile(src.compPath(compID, "pool-matches.csv")) // #nosec G304, test-controlled path
+	poolMatchesCSV, err = bctest.ReadFile(src.compPath(compID, "pool-matches.csv"))
 	require.NoError(t, err)
-	historyJSONL, err = os.ReadFile(src.matchHistoryPath(compID, matchID)) // #nosec G304, test-controlled path
+	historyJSONL, err = bctest.ReadFile(src.matchHistoryPath(compID, matchID))
 	require.NoError(t, err)
 	return poolMatchesCSV, historyJSONL
 }
@@ -327,7 +328,7 @@ func TestWithTransaction_MatchHistoryCrashAtomicity_ApplyFailsOnSecondIntent(t *
 
 	// The match write (first intent) landed for real before Apply hit the
 	// second intent's permission error.
-	onDisk, err := os.ReadFile(store.compPath(compID, "pool-matches.csv")) // #nosec G304, test-controlled path
+	onDisk, err := bctest.ReadFile(store.compPath(compID, "pool-matches.csv"))
 	require.NoError(t, err, "the first intent must have landed on disk before Apply failed")
 	assert.Contains(t, string(onDisk), "Alice")
 

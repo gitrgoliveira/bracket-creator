@@ -95,11 +95,18 @@ export function dismissToast() {
   _advance();
 }
 
-// toastSnapshot: the toast shown, or null. A fresh object each call.
+// toastSnapshot: the toast shown, or null. The same object while none of its
+// fields has changed, a new one once one has, as useSyncExternalStore (the
+// Toast's read of it) requires of a snapshot.
+let _snapshot = null;
 export function toastSnapshot() {
   if (!_current) return null;
   const { message, type, id, latched, seq, visible } = _current;
-  return { message, type, id, latched, seq, visible };
+  const s = _snapshot;
+  if (s && s.message === message && s.type === type && s.id === id
+    && s.latched === latched && s.seq === seq && s.visible === visible) return s;
+  _snapshot = { message, type, id, latched, seq, visible };
+  return _snapshot;
 }
 
 // subscribeToast: called with the snapshot on every change; returns the

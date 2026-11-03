@@ -70,7 +70,7 @@ func (s *Store) LoadSeedsRaw(compID string) ([]domain.SeedAssignment, error) {
 	mu.RLock()
 	defer mu.RUnlock()
 
-	result, err := helper.ReadSeedsFileRaw(s.compPath(compID, "seeds.csv"))
+	result, err := s.readSeedsRaw(compID)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return []domain.SeedAssignment{}, nil
@@ -78,6 +78,18 @@ func (s *Store) LoadSeedsRaw(compID string) ([]domain.SeedAssignment, error) {
 		return nil, err
 	}
 	return result, nil
+}
+
+// readSeedsRaw reads a competition's seeds.csv through the store's os.Root and
+// returns what it holds, unjudged (helper.ReadSeedsRaw). A missing file is an
+// error satisfying os.IsNotExist, which each caller reads as "no seeds". The
+// caller holds the competition's lock.
+func (s *Store) readSeedsRaw(compID string) ([]domain.SeedAssignment, error) {
+	raw, err := s.root.readFile(s.compPath(compID, "seeds.csv"))
+	if err != nil {
+		return nil, err
+	}
+	return helper.ReadSeedsRaw(bytes.NewReader(raw))
 }
 
 func (s *Store) SaveSeeds(compID string, assignments []domain.SeedAssignment) error {

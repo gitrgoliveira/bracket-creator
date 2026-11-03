@@ -24,6 +24,7 @@ import (
 	"testing"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
+	bctest "github.com/gitrgoliveira/bracket-creator/internal/test"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -53,7 +54,7 @@ func TestLegacyRosterFlagRepairedRatherThanMintedOver(t *testing.T) {
 	assert.Equal(t, "Aaron Adams", players[0].Name, "and the shifted parse is gone")
 	assert.Equal(t, "Team Alpha", players[0].Dojo)
 
-	raw, err := os.ReadFile(rosterPath)
+	raw, err := bctest.ReadFile(rosterPath)
 	require.NoError(t, err)
 	assert.Equal(t, legacy, string(raw), "the roster bytes were never wrong, so they are not rewritten")
 
@@ -78,7 +79,7 @@ func TestLegacyRosterLeftAloneWhenNothingCanProveTheColumn(t *testing.T) {
 	_, err := fresh.LoadParticipants("c1", false)
 	require.NoError(t, err)
 
-	raw, err := os.ReadFile(rosterPath)
+	raw, err := bctest.ReadFile(rosterPath)
 	require.NoError(t, err)
 	assert.Equal(t, legacy, string(raw),
 		"an unprovable roster is never rewritten: minting here would bake in the shifted parse")
@@ -110,7 +111,7 @@ func TestLegacyRosterMintedWhenTheDrawNamesTheCompetitors(t *testing.T) {
 	assert.Equal(t, "Rin Sato", players[0].Name, "with no column shift")
 	assert.Equal(t, "Seibukan", players[0].Dojo)
 
-	raw, err := os.ReadFile(rosterPath)
+	raw, err := bctest.ReadFile(rosterPath)
 	require.NoError(t, err)
 	assert.Contains(t, string(raw), players[0].ID, "and the ids are persisted")
 }
@@ -179,7 +180,7 @@ func TestLegacyRosterLeftAloneWhenTheRowShapeIsNotCorroborated(t *testing.T) {
 	_, err := fresh.LoadParticipants("c1", false)
 	require.NoError(t, err)
 
-	raw, err := os.ReadFile(rosterPath)
+	raw, err := bctest.ReadFile(rosterPath)
 	require.NoError(t, err)
 	assert.Equal(t, legacy, string(raw),
 		"rewriting this row would persist the display name as the dojo, so the file is left alone")

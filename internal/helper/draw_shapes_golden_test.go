@@ -8,6 +8,7 @@ import (
 	"slices"
 	"testing"
 
+	bctest "github.com/gitrgoliveira/bracket-creator/internal/test"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -433,11 +434,7 @@ func buildDrawShapeCaseFromPools(pools []Pool, rosterSize, poolWinners, courts i
 	// making an arbitrary pool order contiguous per court. Either way it is
 	// read back with the draw's OWN court count, which is what the draw
 	// allocated against.
-	assignments, err := AssignPoolsToCourts(numPools, c.DrawCourts)
-	if err != nil {
-		return drawShapeCase{Error: "AssignPoolsToCourts: " + err.Error()}
-	}
-	c.PoolToCourt = assignments
+	c.PoolToCourt = AssignPoolsToCourts(numPools, c.DrawCourts)
 
 	c.Round1 = []string{}
 	c.Byes = []string{}
@@ -503,7 +500,7 @@ func buildDrawShapeCaseFromPools(pools []Pool, rosterSize, poolWinners, courts i
 				continue
 			}
 			pi := slices.Index(c.PoolNames, leafPool(l))
-			if pi >= 0 && assignments[pi] != SubtreeCourtIndex(len(subtrees), c.DrawCourts, i) {
+			if pi >= 0 && c.PoolToCourt[pi] != SubtreeCourtIndex(len(subtrees), c.DrawCourts, i) {
 				foreign = append(foreign, l)
 			}
 		}
@@ -646,7 +643,7 @@ func TestDrawShapesGolden(t *testing.T) {
 		return
 	}
 
-	raw, err := os.ReadFile(path) // #nosec G304 -- fixed testdata path
+	raw, err := bctest.ReadFile(path)
 	require.NoError(t, err, "golden file missing; regenerate with: UPDATE_GOLDEN=1 go test ./internal/helper/ -run TestDrawShapesGolden")
 	if string(raw) == string(encoded) {
 		return

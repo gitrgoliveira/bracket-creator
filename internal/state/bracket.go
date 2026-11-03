@@ -111,8 +111,8 @@ func (b *Bracket) StampRoundZeroSideIDsFromDrawOrder() bool {
 	return changed
 }
 
-func parseBracketFile(path string) (any, error) {
-	raw, err := os.ReadFile(path) // #nosec G304, path built by compPath, which enforces containment under the competitions dir
+func (s *Store) parseBracketFile(path string) (any, error) {
+	raw, err := s.root.readFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return &Bracket{Rounds: [][]BracketMatch{}}, nil
@@ -284,7 +284,7 @@ func (s *Store) loadBracketLocked(compID string) (*Bracket, error) {
 		return nil, err
 	}
 	path := s.compPath(compID, "bracket.json")
-	parsed, err := parseBracketFile(path)
+	parsed, err := s.parseBracketFile(path)
 	if err != nil {
 		return nil, err
 	}
@@ -391,7 +391,7 @@ func (s *Store) updateBracketLocked(compID string, mutate func(*Bracket) error, 
 	// Load directly under the lock (see UpdatePoolMatchByID for why
 	// we bypass the cached path here).
 	path := s.compPath(compID, "bracket.json")
-	parsed, err := parseBracketFile(path)
+	parsed, err := s.parseBracketFile(path)
 	if err != nil {
 		return err
 	}
@@ -560,7 +560,7 @@ func (s *Store) updateBracketMatchByIDLocked(compID, matchID string, mutate func
 	// Load directly under the lock (see UpdatePoolMatchByID for why we bypass
 	// the cached path here).
 	path := s.compPath(compID, "bracket.json")
-	parsed, err := parseBracketFile(path)
+	parsed, err := s.parseBracketFile(path)
 	if err != nil {
 		return false, err
 	}

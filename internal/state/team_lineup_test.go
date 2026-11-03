@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
+	bctest "github.com/gitrgoliveira/bracket-creator/internal/test"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -117,7 +118,7 @@ func TestLineupMemberIDsRoundTrip(t *testing.T) {
 	betaKey := teamLineupKey("team-beta", 0)
 	assert.Empty(t, got2[betaKey].MemberIDs, "a lineup that never had ids must not gain an invented map")
 
-	raw, err := os.ReadFile(store.compPath(compID, teamLineupFilename))
+	raw, err := bctest.ReadFile(store.compPath(compID, teamLineupFilename))
 	require.NoError(t, err)
 	assert.NotContains(t, string(raw), "memberIds: {}",
 		"omitempty must keep the legacy-shaped entry free of an empty map on disk")

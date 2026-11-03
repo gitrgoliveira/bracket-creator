@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/gitrgoliveira/bracket-creator/internal/state"
+	bctest "github.com/gitrgoliveira/bracket-creator/internal/test"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -31,7 +33,7 @@ func TestOpenOutputFile_TruncatesExisting(t *testing.T) {
 	require.NoError(t, w.Flush())
 	require.NoError(t, f.Close())
 
-	got, err := os.ReadFile(path) // #nosec G304, temp-dir path
+	got, err := bctest.ReadFile(path)
 	require.NoError(t, err)
 	assert.Equal(t, "new", string(got), "existing file must be truncated, not appended to")
 }
@@ -58,6 +60,16 @@ func TestProcessEntries_DuplicateError(t *testing.T) {
 	assert.Error(t, err)
 	assert.Nil(t, players)
 	assert.Contains(t, err.Error(), "duplicate participant entries found")
+}
+
+// create-pools, create-knockout and /create refuse a name that reads as a
+// bracket placeholder in any case, with the app's own refusal.
+func TestProcessEntries_ReservedName(t *testing.T) {
+	for _, name := range []string{"Pool A-1st", "pool a-1st", "Pool A-1St", "Winner of r1-m2"} {
+		players, err := processEntries([]string{"John Doe,Dojo1", name + ",Dojo2"}, true, false)
+		assert.ErrorIs(t, err, state.ErrReservedName, name)
+		assert.Nil(t, players)
+	}
 }
 
 func TestProcessEntries_BlankName(t *testing.T) {

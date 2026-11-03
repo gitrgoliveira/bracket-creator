@@ -148,12 +148,57 @@ export const WATCHLIST_MAX = 50;
 // is no hero and no chime (critique decision: avoid the alert storm). The pin
 // is stored as an `entryKey` string, decoupled from list order.
 
+// dojoKey: the ONE comparison of a watched dojo against a roster dojo, ignoring
+// letter case and nothing else (operator decisions D19 and D25): the server
+// stores a dojo title-cased, and a watch saved or shared before that holds the
+// dojo as it was typed then ("kenshinkan" for the roster's "Kenshinkan"). An
+// accent or an inner space is NOT folded: the server keeps "Kenshinkan" and
+// "Kenshinkán" as two dojos, so they are two watches with two counts. Every
+// place a dojo entry is matched or deduplicated asks it.
+export function dojoKey(dojo) {
+  return (dojo == null ? "" : String(dojo)).trim().toLowerCase();
+}
+
+// rosterDojos: the dojos a roster holds, with their member counts, one entry
+// per dojoKey (D25): two names that differ only in case (a roster not saved
+// since dojos were title-cased) are one dojo, listed once under the first name
+// met with the totals added. Sorted by name. The watch picker, its "N dojos"
+// line and the dojo chips all read this one list, so the count offered before
+// a tap is the count watched after it.
+export function rosterDojos(roster) {
+  const byKey = new Map();
+  (roster || []).forEach((p) => {
+    if (!p || !p.dojo) return;
+    const k = dojoKey(p.dojo);
+    const seen = byKey.get(k);
+    byKey.set(k, seen ? { ...seen, total: seen.total + 1 } : { name: p.dojo, total: 1 });
+  });
+  return Array.from(byKey.values()).sort((a, b) => a.name.localeCompare(b.name));
+}
+
+// sameDojo: whether two dojo names are the same dojo, by dojoKey.
+export function sameDojo(a, b) {
+  return dojoKey(a) === dojoKey(b);
+}
+
+// DOJO_ENTRY_PREFIX: what every dojo entry's key begins with (entryKey).
+const DOJO_ENTRY_PREFIX = "dojo:";
+
+// normalizeEntryKey: an entryKey stored before dojo keys ignored case (the
+// pinned entry) in the form entryKey gives now, so the pin still finds its
+// entry.
+export function normalizeEntryKey(key) {
+  const k = key == null ? "" : String(key);
+  return k.startsWith(DOJO_ENTRY_PREFIX) ? DOJO_ENTRY_PREFIX + dojoKey(k.slice(DOJO_ENTRY_PREFIX.length)) : k;
+}
+
 // entryKey: stable identity for an entry, used for the pin pointer, React
-// keys, and dedup. Player keys are id-based, dojo keys are name-based. Returns
-// "" for anything unrecognisable so callers can filter it out.
+// keys, and dedup. Player keys are id-based, dojo keys are dojoKey-based, so
+// an old link's "kenshinkan" and a fresh pick of "Kenshinkan" are one entry.
+// Returns "" for anything unrecognisable so callers can filter it out.
 export function entryKey(entry) {
   if (!entry || typeof entry !== "object") return "";
-  if (entry.type === "dojo") return entry.dojo ? "dojo:" + entry.dojo : "";
+  if (entry.type === "dojo") return entry.dojo ? DOJO_ENTRY_PREFIX + dojoKey(entry.dojo) : "";
   const id = entry.id != null ? String(entry.id) : "";
   return id ? "player:" + id : "";
 }
@@ -381,8 +426,9 @@ export function addPlayerToWatchlist(watchlist, p) {
 export function resolveEntryPlayerIds(entry, roster) {
   if (!entry) return [];
   if (entry.type === "dojo") {
+    const want = dojoKey(entry.dojo);
     return (Array.isArray(roster) ? roster : [])
-      .filter((p) => p && p.id && p.dojo === entry.dojo)
+      .filter((p) => p && p.id && dojoKey(p.dojo) === want)
       .map((p) => String(p.id));
   }
   return entry.id ? [String(entry.id)] : [];

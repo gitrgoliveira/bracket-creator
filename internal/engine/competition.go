@@ -246,16 +246,12 @@ func (e *Engine) autoStartOnFirstResult(compID string) (bool, *state.Competition
 // has fought), so counting them would let an undo start a competition whose
 // draw happens to contain a bye. A fought match always names both sides.
 func (e *Engine) hasRecordedResult(compID string) (bool, error) {
-	recorded := func(s state.MatchStatus) bool {
-		return s == state.MatchStatusRunning || s == state.MatchStatusCompleted
-	}
-
 	matches, err := e.store.LoadPoolMatches(compID)
 	if err != nil {
 		return false, err
 	}
-	for _, m := range matches {
-		if recorded(m.Status) {
+	for i := range matches {
+		if matches[i].ResultRecorded() {
 			return true, nil
 		}
 	}
@@ -267,17 +263,14 @@ func (e *Engine) hasRecordedResult(compID string) (bool, error) {
 	if bracket == nil {
 		return false, nil
 	}
-	bracketResult := func(m state.BracketMatch) bool {
-		return recorded(m.Status) && m.SideA != "" && m.SideB != ""
-	}
 	for _, round := range bracket.Rounds {
-		for _, m := range round {
-			if bracketResult(m) {
+		for i := range round {
+			if round[i].ResultRecorded() {
 				return true, nil
 			}
 		}
 	}
-	if bracket.ThirdPlaceMatch != nil && bracketResult(*bracket.ThirdPlaceMatch) {
+	if bracket.ThirdPlaceMatch != nil && bracket.ThirdPlaceMatch.ResultRecorded() {
 		return true, nil
 	}
 	return false, nil
@@ -1271,6 +1264,19 @@ func (e *Engine) runDrawPipeline(id string) error {
 	// comment); the remedy is exactly that re-save, named in the message.
 	if err := helper.ValidateNoMissingParticipantIDs(players); err != nil {
 		return validationErrorf("competition %s cannot generate a draw: %s", id, err.Error())
+	}
+
+	// Reserved-name pre-flight (operator decision D22, 2026-11-01). The roster
+	// save refuses a name that reads as a bracket placeholder in any case
+	// (state.RefuseReservedNames), but a roster written before that rule, or by
+	// hand, reaches here without a save: a legacy "pool a-1st" now reads
+	// "Pool A-1st", the exact shape the bracket rule
+	// (helper.IsReservedParticipantName) takes for an unresolved slot, so the
+	// draw would seat a competitor that scoring and advancement read as a
+	// placeholder. Like the blank-dojo pre-flight above, it is refused here,
+	// naming the competitor, while the roster can still be edited.
+	if err := state.RefuseReservedNames(players); err != nil {
+		return wrapValidationErrorf(err, "competition %s cannot generate a draw: %s; rename this competitor on the Participants page", id, err.Error())
 	}
 
 	// League format: enforce the single-pool invariant so that

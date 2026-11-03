@@ -21,6 +21,7 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
+	bctest "github.com/gitrgoliveira/bracket-creator/internal/test"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -79,7 +80,7 @@ func TestLegacyBracketSideIDUpgrade_DrawOrderResolvesDuplicatedName(t *testing.T
 	assert.Equal(t, op2ID, m1.WinnerID)
 
 	// The repair lands on disk, not just in the returned copy.
-	raw, err := os.ReadFile(filepath.Join(dir, "competitions", "c1", "bracket.json"))
+	raw, err := bctest.ReadFile(filepath.Join(dir, "competitions", "c1", "bracket.json"))
 	require.NoError(t, err)
 	assert.Contains(t, string(raw), samSouthID)
 	assert.Contains(t, string(raw), samNorthID)
@@ -223,7 +224,7 @@ func TestLegacyBracketUpgrade_AlreadyStampedNotRewritten(t *testing.T) {
 	}))
 
 	bracketPath := filepath.Join(dir, "competitions", "c1", "bracket.json")
-	before, err := os.ReadFile(bracketPath)
+	before, err := bctest.ReadFile(bracketPath)
 	require.NoError(t, err)
 
 	fresh := freshLegacyUpgradeStore(t, dir)
@@ -232,7 +233,7 @@ func TestLegacyBracketUpgrade_AlreadyStampedNotRewritten(t *testing.T) {
 	_, err = fresh.LoadBracket("c1")
 	require.NoError(t, err)
 
-	after, err := os.ReadFile(bracketPath)
+	after, err := bctest.ReadFile(bracketPath)
 	require.NoError(t, err)
 	assert.Equal(t, string(before), string(after), "a fully-stamped bracket.json must not be rewritten")
 	assert.Equal(t, verBefore, fresh.FileVersion("c1", "bracket.json"), "no version bump for an untouched file")

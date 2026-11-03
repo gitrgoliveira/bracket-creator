@@ -439,6 +439,103 @@ func TestRegistration_POST_BlankDojoElsewhereInRoster_Returns500NotLeakingName(t
 	}
 }
 
+// The roster rule refuses a name that reads as a bracket placeholder on every
+// save, across the whole stored roster (D12). A stored row holding one (a hand
+// edit, an earlier release) is the organiser's to fix, as a blank dojo is: a
+// walk-up gets the generic answer and is never told another competitor's row,
+// and the log names it. The walk-up's OWN reserved name is theirs, a 400
+// naming that name alone, even beside such a row.
+func TestRegistration_POST_ReservedNameElsewhereInRoster_Returns500NotLeakingName(t *testing.T) {
+	r, store, _, tempDir := setupRegistrationRouter(t, selfRunTournament())
+
+	const compID = "comp-reserved-reg"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:     compID,
+		Name:   "Reserved Elsewhere",
+		Status: state.CompStatusSetup,
+	}))
+	writeLegacyRosterCSV(t, tempDir, compID, "pool a-1st,Kenshinkan\nBob Smith,Mumeishi\n")
+
+	var logBuf bytes.Buffer
+	prevOut, prevFlags := log.Writer(), log.Flags()
+	log.SetOutput(&logBuf)
+	log.SetFlags(0)
+	defer func() { log.SetOutput(prevOut); log.SetFlags(prevFlags) }()
+
+	w := doRegister(r, compID, map[string]any{"name": "Carol Jones", "dojo": "Bka"})
+	assert.Equal(t, http.StatusInternalServerError, w.Code,
+		"a reserved name on ANOTHER competitor's row is server-side data damage, not this registrant's error")
+	assert.NotContains(t, strings.ToLower(w.Body.String()), "pool a-1st",
+		"the public registration response must never name another competitor's row")
+	assert.Contains(t, w.Body.String(), "Registration is temporarily unavailable")
+	assert.Contains(t, strings.ToLower(logBuf.String()), "pool a-1st",
+		"the offending row's name must reach the server log")
+
+	w = doRegister(r, compID, map[string]any{"name": "Winner of r1-m2", "dojo": "Bka"})
+	assert.Equal(t, http.StatusBadRequest, w.Code, "the registrant's own reserved name is theirs to change")
+	assert.Contains(t, w.Body.String(), "Winner of r1-m2")
+	assert.NotContains(t, strings.ToLower(w.Body.String()), "pool a-1st",
+		"the refusal names the registrant's own name alone")
+
+	players, err := store.LoadParticipants(compID, false)
+	require.NoError(t, err)
+	assert.Len(t, players, 2, "a refused write must not have landed")
+}
+
+// A stored row with a blank name is the same kind of damage: the roster check
+// names that row's dojo, which a walk-up is never shown. They get the generic
+// answer and the log names the row, while their own reserved name is still
+// refused first, naming that name alone.
+func TestRegistration_POST_BlankNameElsewhereInRoster_Returns500NotLeakingDojo(t *testing.T) {
+	r, store, _, tempDir := setupRegistrationRouter(t, selfRunTournament())
+
+	const compID = "comp-blank-name-reg"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:     compID,
+		Name:   "Blank Name Elsewhere",
+		Status: state.CompStatusSetup,
+	}))
+	writeLegacyRosterCSV(t, tempDir, compID, ",Kenshinkan\nBob Smith,Mumeishi\n")
+
+	var logBuf bytes.Buffer
+	prevOut, prevFlags := log.Writer(), log.Flags()
+	log.SetOutput(&logBuf)
+	log.SetFlags(0)
+	defer func() { log.SetOutput(prevOut); log.SetFlags(prevFlags) }()
+
+	w := doRegister(r, compID, map[string]any{"name": "Carol Jones", "dojo": "Bka"})
+	assert.Equal(t, http.StatusInternalServerError, w.Code,
+		"a blank name on ANOTHER row is server-side data damage, not this registrant's error")
+	assert.NotContains(t, w.Body.String(), "Kenshinkan",
+		"the public registration response must never name another row's data")
+	assert.Contains(t, w.Body.String(), "Registration is temporarily unavailable")
+	assert.Contains(t, logBuf.String(), "Kenshinkan", "the offending row must reach the server log")
+
+	w = doRegister(r, compID, map[string]any{"name": "pool c-3rd", "dojo": "Bka"})
+	assert.Equal(t, http.StatusBadRequest, w.Code, "the registrant's own reserved name is theirs to change")
+	assert.Contains(t, strings.ToLower(w.Body.String()), "pool c-3rd")
+	assert.NotContains(t, w.Body.String(), "Kenshinkan",
+		"the refusal names the registrant's own name alone")
+}
+
+// On a clean roster the walk-up's own reserved name is still refused with
+// the roster rule's 400 naming it.
+func TestRegistration_POST_OwnReservedName_Returns400(t *testing.T) {
+	r, store, _, _ := setupRegistrationRouter(t, selfRunTournament())
+
+	const compID = "comp-own-reserved-reg"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:     compID,
+		Name:   "Own Reserved",
+		Status: state.CompStatusSetup,
+	}))
+
+	w := doRegister(r, compID, map[string]any{"name": "pool b-2nd", "dojo": "Bka"})
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "reserved bracket-placeholder pattern")
+	assert.Contains(t, strings.ToLower(w.Body.String()), "pool b-2nd")
+}
+
 // ---------------------------------------------------------------------------
 // POST, missing required fields → 400
 // ---------------------------------------------------------------------------

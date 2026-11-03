@@ -241,11 +241,7 @@ func computeFillBracketCourtLayout(pools []Pool, drafts, numCourts int) (*fillBr
 		}
 		effCourts = 2
 	} else {
-		var err error
-		poolCourt, err = AssignPoolsToCourts(len(pools), courts)
-		if err != nil {
-			return nil, false
-		}
+		poolCourt = AssignPoolsToCourts(len(pools), courts)
 	}
 
 	// plan supplies the block/half bookkeeping only (LP-3a precedent): at
@@ -558,10 +554,7 @@ func BuildKnockoutDrawFillBracket(pools []Pool, draftPoolIdx []int, numCourts in
 	if courts == 1 {
 		return buildFillBracketSingleCourtDraw(pools, draftPoolIdx)
 	}
-	poolCourt, err := AssignPoolsToCourts(len(pools), courts)
-	if err != nil {
-		return nil
-	}
+	poolCourt := AssignPoolsToCourts(len(pools), courts)
 	return buildFillBracketDraw(pools, draftPoolIdx, poolCourt, courts)
 }
 

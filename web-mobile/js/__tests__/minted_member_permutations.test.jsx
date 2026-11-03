@@ -419,7 +419,6 @@ describe('a member id this device minted, in every state its add can reach, name
         const bySc = {};
         for (const r of wrongRows) bySc[r.sc] = (bySc[r.sc] || 0) + 1;
         const accepted = rows.filter((r) => r.rule && !wrongOf(r) && !r.outcome.startsWith('OK'));
-        // eslint-disable-next-line no-console
         console.info(`minted member permutations: ${rows.length} runs, ${wrongRows.length} wrong, ${accepted.length} rule-accepted`,
             JSON.stringify(counts), JSON.stringify(bySc));
         const dead = rows.filter((r) => r.outcome === 'DEAD_ID' || r.outcome === 'DEAD_MEMBER_WRITE');

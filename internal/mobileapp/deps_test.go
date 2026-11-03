@@ -188,10 +188,9 @@ func TestDepsInterfacesCompile(t *testing.T) {
 		_ TournamentLoader      = stubTournamentLoader{}
 	)
 
-	// Concrete types, proves the production types remain drop-in
-	// implementations after the interface lands. (NFR-002: existing
-	// concrete types must still satisfy the interfaces so wiring stays
-	// drop-in across the migration.)
+	// Concrete types, proves the production types are drop-in
+	// implementations of the interfaces. (NFR-002: the concrete types
+	// satisfy the interfaces, so wiring passes them straight in.)
 	var (
 		_ CompetitionStore      = (*state.Store)(nil)
 		_ ScoringEngine         = (*engine.Engine)(nil)

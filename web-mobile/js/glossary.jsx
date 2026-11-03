@@ -14,7 +14,7 @@ import { GLOSSARY, lookupTerm } from './glossary_data.js';
 // Stable per-component ID for aria-describedby: stable_id.jsx owns it.
 import { useStableId } from './stable_id.jsx';
 
-const { useState: useStateT, useEffect: useEffectT, useRef: useRefT } = React;
+const { useState, useEffect, useRef } = React;
 
 // Parse a tooltip string into [text|term-ref] tokens, then render each
 // term reference as a nested <Term>. We use the term's SeeAlso list to
@@ -92,9 +92,9 @@ function Term({ name, children, nested }) {
   }
 
   const tooltipId = useStableId('tw-tip');
-  const [open, setOpen] = useStateT(false);
-  const wrapperRef = useRefT(null);
-  const tooltipRef = useRefT(null);
+  const [open, setOpen] = useState(false);
+  const wrapperRef = useRef(null);
+  const tooltipRef = useRef(null);
   // flip / up: does the tooltip's default box (left-anchored, opening
   // downwards) run past the right or the bottom edge of its nearest
   // scrolling ancestor. Measured cheaply on demand (pointer-enter, focus, or
@@ -115,8 +115,8 @@ function Term({ name, children, nested }) {
   // worse. So a box taller than its own scroll container stays DOWNWARD and
   // the loop above remains reachable for it: a deliberate floor, whose fix
   // is a shorter hint rather than a flip with nowhere to go.
-  const [flip, setFlip] = useStateT(false);
-  const [up, setUp] = useStateT(false);
+  const [flip, setFlip] = useState(false);
+  const [up, setUp] = useState(false);
   const measureFlip = () => {
     const tooltipEl = tooltipRef.current;
     const wrap = wrapperRef.current;
@@ -149,7 +149,7 @@ function Term({ name, children, nested }) {
   };
 
   // Tap-outside / Escape dismiss. Mount once per Term lifecycle.
-  useEffectT(() => {
+  useEffect(() => {
     if (!open) return undefined;
     const onKey = (e) => { if (e.key === 'Escape') setOpen(false); };
     const onDocPointer = (e) => {

@@ -143,7 +143,11 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 					// under TOCTOU: status could have flipped between our check above
 					// and AddParticipant acquiring the per-comp lock.
 					msg := "cannot modify participants after competition has started"
-					if reloaded, _ := store.LoadCompetition(id); reloaded != nil && reloaded.Status == state.CompStatusDrawReady {
+					reloaded, reloadErr := store.LoadCompetition(id)
+					if reloadErr != nil {
+						logRequestError(c, fmt.Errorf("re-read competition %q to word a refused participant add: %w", id, reloadErr))
+					}
+					if reloaded != nil && reloaded.Status == state.CompStatusDrawReady {
 						msg = "cannot modify participants while a draw is pending; discard the draw first"
 					}
 					c.JSON(http.StatusConflict, gin.H{"error": msg})
@@ -287,35 +291,18 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			internalError(c, serr, "failed to load seeds")
 			return
 		}
-		// Canonicalize a COPY of the new roster's names before checking for
-		// orphaned seeds, to match what LoadParticipants will read back after
-		// this save. CreatePlayersFromRecords Title-cases Name on every parse,
-		// but saveParticipantsNoLock deliberately writes the raw request name
-		// (see its comment: "names arriving via the bulk SaveParticipants path
-		// may be raw"), so seeds.csv (which holds the canonical form written by
-		// the seeding panel / PUT /participants/:pid, both of which
-		// TitleCaseName before saving) and this raw newPlayers slice could
-		// disagree on casing alone -- e.g. a stored seed for "Van Der Berg"
-		// against a re-submitted "van der berg" -- even though the two names
-		// resolve to the very same participant on the next load. Without this,
-		// RosterIndex.Lookup's exact-key match missed on casing and refused a
-		// same-identity resubmission as a spurious 409 orphan.
-		//
-		// Only this orphan-check roster is canonicalized; the raw `players`
-		// slice saved below is untouched, so today's bulk-save behavior
-		// (skip TitleCase, let the next load canonicalize) is unchanged.
-		// Dojo is canonicalized too, and by TrimSpace alone: the loader
-		// Title-cases only the name (CreatePlayersFromRecords assigns
-		// player.Name = c.String(line[0])) but TrimSpaces EVERY field, so the
-		// canonical dojo is the trimmed one. Normalizing only the name would
-		// leave the other half of the (name, dojo) seed key raw and let a
-		// stray space around the dojo produce exactly the same spurious 409
-		// this guard is being fixed for.
+		// Canonicalize a COPY of the new roster before checking for orphaned
+		// seeds, to the form this save stores and LoadParticipants reads back
+		// (helper.CanonicalizePlayerText, which saveParticipantsNoLock applies
+		// to every row it writes). seeds.csv holds that form too, so a raw
+		// re-submitted row -- "van der berg, kenshinkan" against a stored seed
+		// for "Van Der Berg, Kenshinkan" -- names the very same participant;
+		// without this, RosterIndex.Lookup's exact-key match missed on casing
+		// and refused a same-identity resubmission as a spurious 409 orphan.
 		canonicalPlayers := make([]domain.Player, len(players))
 		copy(canonicalPlayers, players)
 		for i := range canonicalPlayers {
-			canonicalPlayers[i].Name = helper.TitleCaseName(canonicalPlayers[i].Name)
-			canonicalPlayers[i].Dojo = strings.TrimSpace(canonicalPlayers[i].Dojo)
+			helper.CanonicalizePlayerText(&canonicalPlayers[i])
 		}
 		orphaned, _ := seedsOrphanedByRosterReplace(existing, canonicalPlayers, seeds)
 		if len(orphaned) > 0 && rosterReplaceAddsIdentities(existing, canonicalPlayers) {
@@ -616,6 +603,13 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		if err := c.ShouldBindJSON(&assignments); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
+		}
+		// In the form the roster stores a name and a dojo (D14), as the seeds
+		// written from the roster box are (extractSeeds): an id-less row is
+		// resolved by its exact (name, dojo) below and lands in seeds.csv as
+		// it is.
+		for i := range assignments {
+			helper.CanonicalizeSeedText(&assignments[i])
 		}
 		// Cross-file guard symmetry with handlers_import.go's seed
 		// validation: reject oversized names so seeds.csv can't grow

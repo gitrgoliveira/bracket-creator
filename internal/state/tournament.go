@@ -14,7 +14,7 @@ import (
 func (s *Store) LoadTournament() (*Tournament, error) {
 	s.tournamentMu.RLock()
 	path := filepath.Clean(filepath.Join(s.folder, "tournament.md"))
-	info, err := os.Stat(path)
+	info, err := s.root.stat(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			s.tournamentMu.RUnlock()
@@ -40,7 +40,7 @@ func (s *Store) LoadTournament() (*Tournament, error) {
 	defer s.tournamentMu.Unlock()
 
 	// Re-check after acquiring write lock
-	info, err = os.Stat(path)
+	info, err = s.root.stat(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			s.cachedTourn = nil
@@ -54,7 +54,7 @@ func (s *Store) LoadTournament() (*Tournament, error) {
 		return s.copyTournament(s.cachedTourn), nil
 	}
 
-	data, err := os.ReadFile(path)
+	data, err := s.root.readFile(path)
 	if err != nil {
 		return nil, err
 	}
@@ -135,7 +135,7 @@ func (s *Store) seedTournamentCache(t *Tournament, path string) {
 	cp := s.copyTournament(t)
 	ApplyTournamentDefaults(cp)
 	s.cachedTourn = cp
-	if info, err := os.Stat(path); err == nil && info != nil {
+	if info, err := s.root.stat(path); err == nil && info != nil {
 		s.tournMtime = info.ModTime().UnixNano()
 	}
 }
@@ -156,7 +156,7 @@ func (s *Store) SaveTournamentChanged(t *Tournament) (bool, error) {
 		return false, err
 	}
 
-	if existing, rerr := os.ReadFile(path); rerr == nil && bytes.Equal(existing, newData) { // #nosec G304
+	if existing, rerr := s.root.readFile(path); rerr == nil && bytes.Equal(existing, newData) {
 		return false, nil
 	}
 
@@ -231,7 +231,7 @@ func (s *Store) UpdateTournamentChanged(desired *Tournament, transform func(curr
 	// file doesn't exist (so callers can distinguish "first save" from
 	// "subsequent save"; LoadTournament also returns nil in that case).
 	var current *Tournament
-	if data, rerr := os.ReadFile(path); rerr == nil { // #nosec G304
+	if data, rerr := s.root.readFile(path); rerr == nil {
 		var t Tournament
 		if perr := parseFrontMatter(data, &t); perr == nil {
 			if t.DurationDays == 0 {
@@ -271,7 +271,7 @@ func (s *Store) UpdateTournamentChanged(desired *Tournament, transform func(curr
 		return false, err
 	}
 
-	if existing, rerr := os.ReadFile(path); rerr == nil && bytes.Equal(existing, newData) { // #nosec G304
+	if existing, rerr := s.root.readFile(path); rerr == nil && bytes.Equal(existing, newData) {
 		return false, nil
 	}
 

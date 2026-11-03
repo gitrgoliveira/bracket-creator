@@ -500,6 +500,54 @@ func validateSubBout(prefix string, sr *state.SubMatchResult, allowNumberedEncho
 	return nil
 }
 
+// titleCaseTypedFighters stores a fighter name a score write types on a
+// numbered team bout row in the form a team member's name is stored in
+// (helper.TitleCaseName, operator decision D14), once, as the write enters:
+// only a name the row INTRODUCES, one that differs from the stored row's at
+// the same position (or a row the match does not hold yet). A name equal to
+// the stored one is an echo and is left as it is, so a bout already fought
+// keeps the name it was recorded with (D18) and its echo still reads as one
+// to the merge. A Winner naming the side carries the new spelling with it, so
+// the row's attribution is unchanged. The representative bout (position -1)
+// names the match's teams and is not touched. Members are not read here: a
+// name with a member id is title-cased like one without, and every display
+// shows the member's current name by id.
+func titleCaseTypedFighters(rows []state.SubMatchResult, stored *state.MatchResult) {
+	// The stored rows by position, as an index into stored.SubResults.
+	var storedAt map[int]int
+	if stored != nil {
+		storedAt = make(map[int]int, len(stored.SubResults))
+		for i := range stored.SubResults {
+			storedAt[stored.SubResults[i].Position] = i
+		}
+	}
+	for i := range rows {
+		row := &rows[i]
+		if row.Position == state.DaihyosenSubPosition {
+			continue
+		}
+		at, held := storedAt[row.Position]
+		var prior *state.SubMatchResult
+		if held {
+			prior = &stored.SubResults[at]
+		}
+		winsA := row.Winner != "" && row.Winner == row.SideA
+		winsB := row.Winner != "" && row.Winner == row.SideB
+		if !held || row.SideA != prior.SideA {
+			row.SideA = helper.TitleCaseName(row.SideA)
+		}
+		if !held || row.SideB != prior.SideB {
+			row.SideB = helper.TitleCaseName(row.SideB)
+		}
+		switch {
+		case winsA:
+			row.Winner = row.SideA
+		case winsB:
+			row.Winner = row.SideB
+		}
+	}
+}
+
 // countHantei counts how many entries of a single ippon slice carry the
 // judges'-decision mark. Kept local (not domain.CountHantei) rather than
 // widening the domain package for this PR; validateHanteiMarkPlacement sums
@@ -828,8 +876,8 @@ func (e *ValidationError) Error() string {
 // named type lets us hang Validate() off it without polluting state
 // (which is a pure-data package).
 //
-// As later slices add decision-type / encho fields (see Slice 3 FR-031,
-// T077), the matching Validate() rules land here.
+// The decision-type and encho rules (FR-031, T077) are enforced in
+// Validate() below.
 type ScoreRequest state.MatchResult
 
 // Validate enforces request-shape invariants on a score payload before

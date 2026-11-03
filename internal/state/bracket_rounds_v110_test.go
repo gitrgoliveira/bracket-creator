@@ -15,6 +15,7 @@ import (
 	"testing"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
+	bctest "github.com/gitrgoliveira/bracket-creator/internal/test"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -34,7 +35,7 @@ const (
 
 func loadV110NineEntrant(t *testing.T) *state.Bracket {
 	t.Helper()
-	raw, err := os.ReadFile(filepath.FromSlash(v110NineEntrantFixture))
+	raw, err := bctest.ReadFile(filepath.FromSlash(v110NineEntrantFixture))
 	require.NoError(t, err)
 	var b state.Bracket
 	require.NoError(t, json.Unmarshal(raw, &b))
@@ -94,9 +95,9 @@ func TestRestampRoundsFromFeeders_RenumbersTheV110NineEntrantBracket(t *testing.
 // nothing.
 func TestLegacyBracketUpgrade_V110BracketTakesIdsAndNumbersInOneWrite(t *testing.T) {
 	dir, _ := newLegacyUpgradeFixture(t)
-	v110, err := os.ReadFile(filepath.FromSlash(v110NineEntrantFixture))
+	v110, err := bctest.ReadFile(filepath.FromSlash(v110NineEntrantFixture))
 	require.NoError(t, err)
-	roster, err := os.ReadFile(filepath.FromSlash(v110NineEntrantRoster))
+	roster, err := bctest.ReadFile(filepath.FromSlash(v110NineEntrantRoster))
 	require.NoError(t, err)
 	compDir := filepath.Join(dir, "competitions", "c1")
 	require.NoError(t, os.WriteFile(filepath.Join(compDir, "participants.csv"), roster, 0o600))
@@ -125,7 +126,7 @@ func TestLegacyBracketUpgrade_V110BracketTakesIdsAndNumbersInOneWrite(t *testing
 		}
 	}
 
-	upgraded, err := os.ReadFile(path)
+	upgraded, err := bctest.ReadFile(path)
 	require.NoError(t, err)
 	var onDisk state.Bracket
 	require.NoError(t, json.Unmarshal(upgraded, &onDisk))
@@ -134,7 +135,7 @@ func TestLegacyBracketUpgrade_V110BracketTakesIdsAndNumbersInOneWrite(t *testing
 	second := freshLegacyUpgradeStore(t, dir)
 	_, err = second.LoadBracket("c1")
 	require.NoError(t, err)
-	again, err := os.ReadFile(path)
+	again, err := bctest.ReadFile(path)
 	require.NoError(t, err)
 	assert.Equal(t, string(upgraded), string(again), "an upgraded bracket must not be rewritten")
 	assert.Zero(t, second.FileVersion("c1", "bracket.json"), "no write, so no version bump")

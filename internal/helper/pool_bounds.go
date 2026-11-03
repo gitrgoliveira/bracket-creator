@@ -35,7 +35,7 @@ func PoolBoundsForSubtree(numPools, numCourts, numSubtrees, subtreeIdx int) (sta
 	courtIdx := SubtreeCourtIndex(numSubtrees, numCourts, subtreeIdx)
 
 	// Derive court block boundaries from the same assignment used by Pool Matches.
-	assignments, _ := AssignPoolsToCourts(numPools, numCourts)
+	assignments := AssignPoolsToCourts(numPools, numCourts)
 	courtStart, courtEnd := -1, 0
 	for i, c := range assignments {
 		if c == courtIdx {

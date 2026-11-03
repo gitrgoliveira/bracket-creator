@@ -145,8 +145,8 @@ func parseLegacySquadsBytes(data []byte) (map[string][]domain.TeamMember, error)
 // parseSquadsFile reads and parses team-members.yaml at path. A missing file is
 // "no squad recorded yet" and returns an empty map, matching
 // parseTeamLineupsFile's contract for the identical situation.
-func parseSquadsFile(path string) (map[string][]domain.TeamMember, error) {
-	data, err := os.ReadFile(path) // #nosec G304, compPath enforces containment under the competitions dir.
+func (s *Store) parseSquadsFile(path string) (map[string][]domain.TeamMember, error) {
+	data, err := s.root.readFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return map[string][]domain.TeamMember{}, nil
@@ -206,7 +206,7 @@ func (s *Store) stampMember(m *domain.TeamMember) {
 func (s *Store) LoadSquads(compID string) (map[string][]domain.TeamMember, error) {
 	read := func() (map[string][]domain.TeamMember, error) {
 		data, err := s.loadCached(compID, teamMembersFilename, func(path string) (any, error) {
-			return parseSquadsFile(path)
+			return s.parseSquadsFile(path)
 		})
 		if err != nil {
 			return nil, err
@@ -229,10 +229,10 @@ func (s *Store) LoadSquads(compID string) (map[string][]domain.TeamMember, error
 	// operator's symptom is the worst kind: "this team has no members yet"
 	// printed under a full roster.
 	//
-	// Bounded on purpose. The probe is a single os.Stat, taken only when the
+	// Bounded on purpose. The probe is a single stat, taken only when the
 	// map came back empty, and the lock is taken only when the legacy file is
 	// really there. A competition with no team members at all pays one stat.
-	if _, statErr := os.Stat(s.compPath(compID, legacySquadsFilename)); statErr != nil {
+	if _, statErr := s.root.stat(s.compPath(compID, legacySquadsFilename)); statErr != nil {
 		return out, nil
 	}
 	mu := s.getCompLock(compID)
@@ -281,7 +281,7 @@ func (s *Store) loadSquadsLocked(compID string) (map[string][]domain.TeamMember,
 	if err := s.upgradeTeamMembersFilenameLocked(compID, s.directWrite); err != nil {
 		return nil, err
 	}
-	return parseSquadsFile(s.compPath(compID, teamMembersFilename))
+	return s.parseSquadsFile(s.compPath(compID, teamMembersFilename))
 }
 
 // saveSquadsLocked persists the squads map. Caller MUST hold the per-comp
@@ -553,7 +553,10 @@ func (s *Store) addTeamMember(compID, teamID, memberID, name string, limit int, 
 	if err := ValidateCompetitionID(compID); err != nil {
 		return domain.TeamMember{}, false, err
 	}
-	name = strings.TrimSpace(name)
+	// A member's name is stored title-cased (operator decision D14), as a
+	// competitor's is, so the answer and every lineup that names the member
+	// read the stored spelling.
+	name = helper.TitleCaseName(name)
 	if memberID != "" && !IsClientMemberID(memberID) {
 		return domain.TeamMember{}, false, ErrInvalidMemberID
 	}
@@ -672,7 +675,9 @@ func (s *Store) nameTeamMember(compID, teamID, memberID, newName string, onlyUnn
 	if err := ValidateCompetitionID(compID); err != nil {
 		return domain.TeamMember{}, err
 	}
-	newName = strings.TrimSpace(newName)
+	// Title-cased like an added member's name (addTeamMember), before the
+	// rename reaches the lineups that hold the member by id.
+	newName = helper.TitleCaseName(newName)
 	var member domain.TeamMember
 	err := s.WithTransaction(compID, func(tx StoreTx) error {
 		var err error

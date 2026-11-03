@@ -2,7 +2,7 @@
 // and its pure round predicates. Split out of admin_competition.jsx (mp-hpe3).
 // The predicates are ES-exported and re-exported by the entry for the vitest suite.
 
-const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
+const { useState, useEffect, useRef } = React;
 
 // T191 (US13, FR-050d): pure helpers for the Swiss-round admin
 // section. Extracted so the conditional logic ("which round, are
@@ -65,15 +65,16 @@ function isSwissCompetitionComplete(comp, currentRoundMatches) {
 }
 
 function AdminSwissRounds({ c, poolMatches, password, onViewStandings, showToast }) {
-  const [generating, setGenerating] = useStateA(false);
-  const [genError, setGenError] = useStateA(null);
-  const mountedRef = useRefA(true);
-  useEffectA(() => () => { mountedRef.current = false; }, []);
+  const [generating, setGenerating] = useState(false);
+  const [genError, setGenError] = useState(null);
+  const mountedRef = useRef(true);
+  useEffect(() => () => { mountedRef.current = false; }, []);
 
   // Reset the inline error whenever the round changes or new matches
   // land via SSE (the prior "current round incomplete" message is
   // not meaningful once the operator has moved on.
-  useEffectA(() => { setGenError(null); }, [c.swissCurrentRound, (poolMatches || []).length]);
+  const poolMatchCount = (poolMatches || []).length;
+  useEffect(() => { setGenError(null); }, [c.swissCurrentRound, poolMatchCount]);
 
   const currentRound = c.swissCurrentRound || 0;
   const totalRounds = c.swissRounds || 0;

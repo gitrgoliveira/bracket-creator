@@ -165,7 +165,23 @@ func RegisterPublicRegistrationHandlers(r *gin.RouterGroup, store *state.Store, 
 			// no signal that repair is needed. Answer 500-class with a generic
 			// public message instead, and log the offending row so the
 			// operator can find and fix it.
-			if errors.Is(err, state.ErrBlankDojo) {
+			// ErrReservedName (D12), ErrBlankName and ErrBlankDojo are the same
+			// whole-roster checks: the registrant's own name and dojo were validated above,
+			// so when either fires here it describes a row already stored (a
+			// hand edit, an earlier release), damage for the organiser like the
+			// blank dojo above, whose Participants page and draw still name it.
+			// The one thing the walk-up is told is their own: a name that reads
+			// as a bracket placeholder is theirs to change, so that refusal is
+			// asked of their own entry FIRST, whichever stored row the roster
+			// check met before it, and names that name alone.
+			damagedElsewhere := errors.Is(err, state.ErrBlankDojo) || errors.Is(err, state.ErrBlankName) || errors.Is(err, state.ErrReservedName)
+			if damagedElsewhere {
+				if own := state.RefuseReservedNames([]domain.Player{player}); own != nil {
+					respondRosterWriteError(c, own)
+					return
+				}
+			}
+			if damagedElsewhere {
 				// Sentence case with a full stop: registration.jsx renders this
 				// string verbatim (data.error, no added punctuation/casing) in
 				// the public registration form's error banner.

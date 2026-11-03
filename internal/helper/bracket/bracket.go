@@ -1,3 +1,3 @@
-// Package bracket will hold bracket/tree algorithms extracted from internal/helper.
-// Stub created to satisfy NFR-001 sub-package extraction.
+// Package bracket is empty; the bracket and tree algorithms live in
+// internal/helper (tree.go, draw.go, fill_bracket.go).
 package bracket

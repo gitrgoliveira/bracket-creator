@@ -1,7 +1,6 @@
 package helper
 
 import (
-	"fmt"
 	"math"
 	"strconv"
 	"strings"
@@ -391,27 +390,6 @@ func TreeToLeafArray(node *Node) []string {
 // here rather than once per reader.
 func leafPadTarget(leftWidth, rightWidth int) int {
 	return NextPow2(max(leftWidth, rightWidth))
-}
-
-func RoundToPowerOf2(x, y float64) (int, error) {
-	if y == 0 {
-		return 0, fmt.Errorf("divisor cannot be zero")
-	}
-
-	quotient := x / y
-
-	if math.IsInf(quotient, 0) {
-		return 0, fmt.Errorf("quotient is infinite")
-	}
-	if math.IsNaN(quotient) {
-		return 0, fmt.Errorf("quotient is NaN")
-	}
-
-	absQuotient := math.Abs(quotient)
-	roundedLog2 := math.Ceil(math.Log2(absQuotient))
-	powerOf2 := math.Pow(2, roundedLog2)
-	roundedQuotient := int(powerOf2)
-	return roundedQuotient, nil
 }
 
 // NextPow2 returns the smallest power of 2 that is >= n. Returns 1 for n <= 1.

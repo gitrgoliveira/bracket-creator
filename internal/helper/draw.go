@@ -165,10 +165,7 @@ func BuildKnockoutDraw(pools []Pool, poolWinners, numCourts int) *KnockoutDraw {
 		return nil
 	}
 	courts := EffectiveDrawCourts(len(pools), numCourts)
-	assignment, err := AssignPoolsToCourts(len(pools), courts)
-	if err != nil {
-		return nil
-	}
+	assignment := AssignPoolsToCourts(len(pools), courts)
 	return BuildKnockoutDrawFromAssignment(pools, poolWinners, assignment, courts)
 }
 

@@ -512,6 +512,11 @@ func TestParseClockHHMM_FallbackTo0900(t *testing.T) {
 	assert.Equal(t, "09:00", fallback(""), "empty string must fall back to 09:00")
 	assert.Equal(t, "09:00", fallback("not-a-time"), "malformed must fall back to 09:00")
 	assert.Equal(t, "09:00", fallback("9:00"), "missing leading zero must fall back to 09:00")
+
+	parsed, err := time.Parse(scheduleClockLayout, "09:00")
+	require.NoError(t, err)
+	assert.True(t, parsed.Equal(defaultClockStart), "the fallback is exactly what a parsed 09:00 is")
+	assert.Equal(t, parsed, defaultClockStart)
 }
 
 // TestAssignSlots_EmptyReturnsStartAnchorNotZero pins the hardened contract:

@@ -10,7 +10,7 @@
 // keeps the plain feeder/parent midpoint: its columns pair by fixed (2i,
 // 2i+1) position and are always adjacent, so for it the two rules agree.
 
-const { useRef, useLayoutEffect: useLayoutEffectBC, useState: useStateBC, useEffect: useEffectBC } = React;
+const { useRef, useLayoutEffect, useState, useEffect } = React;
 
 import { DAIHYOSEN_POSITION } from './pool_ids.jsx';
 import { barredSides } from './ineligible_match.jsx';
@@ -605,10 +605,10 @@ function anchorY(el, rect, treeTop) {
 // Computes connector lines from the DOM positions of each match card,
 // then draws them in an absolutely positioned SVG.
 function BracketConnectors({ rounds, treeRef, refMap, version }) {
-  const [paths, setPaths] = useStateBC([]);
-  const [size, setSize] = useStateBC({ w: 0, h: 0 });
+  const [paths, setPaths] = useState([]);
+  const [size, setSize] = useState({ w: 0, h: 0 });
 
-  useLayoutEffectBC(() => {
+  useLayoutEffect(() => {
     const compute = () => {
       const tree = treeRef.current;
       if (!tree || !rounds) return;
@@ -643,7 +643,7 @@ function BracketConnectors({ rounds, treeRef, refMap, version }) {
     if (treeRef.current) ro.observe(treeRef.current);
     window.addEventListener("resize", compute);
     return () => { ro.disconnect(); window.removeEventListener("resize", compute); };
-  }, [rounds, version]);
+  }, [rounds, version, treeRef, refMap]);
 
   return (
     <svg className="bc-connectors" width={size.w} height={size.h} style={{ position: "absolute", left: 0, top: 0, pointerEvents: "none" }}>
@@ -665,7 +665,7 @@ function BracketConnectors({ rounds, treeRef, refMap, version }) {
 // in the scroll container. Shared by both the effective-round (BracketTreeMeta)
 // and legacy (BracketTreeLegacy) renderers so the centring math lives in one place.
 function useAutoScrollToMatch(autoScrollMatchId, refMap, scrollContainerRef, version) {
-  useLayoutEffectBC(() => {
+  useLayoutEffect(() => {
     if (!autoScrollMatchId) return;
     const realId = String(autoScrollMatchId).split("::")[0];
     let frame1 = 0, frame2 = 0;
@@ -681,7 +681,7 @@ function useAutoScrollToMatch(autoScrollMatchId, refMap, scrollContainerRef, ver
     };
     frame1 = requestAnimationFrame(() => { frame2 = requestAnimationFrame(run); });
     return () => { cancelAnimationFrame(frame1); cancelAnimationFrame(frame2); };
-  }, [autoScrollMatchId, version]);
+  }, [autoScrollMatchId, version, refMap, scrollContainerRef]);
 }
 
 function buildDisplayModel(rounds) {
@@ -960,10 +960,10 @@ function columnRightEdge(col, refMap, treeRect) {
 // note on BracketTreeMeta), so this is always defined whenever there's a
 // feeder to connect.
 function BracketConnectorsMeta({ columns, feedersById, treeRef, refMap, version, showDojo, variant }) {
-  const [paths, setPaths] = useStateBC([]);
-  const [size, setSize] = useStateBC({ w: 0, h: 0 });
+  const [paths, setPaths] = useState([]);
+  const [size, setSize] = useState({ w: 0, h: 0 });
 
-  useLayoutEffectBC(() => {
+  useLayoutEffect(() => {
     const compute = () => {
       const tree = treeRef.current;
       if (!tree) return;
@@ -1033,7 +1033,7 @@ function BracketConnectorsMeta({ columns, feedersById, treeRef, refMap, version,
     window.addEventListener("resize", compute);
     return () => { ro.disconnect(); window.removeEventListener("resize", compute); };
     // showDojo/variant change card heights → feeder anchors move, so recompute.
-  }, [columns, feedersById, version, showDojo, variant]);
+  }, [columns, feedersById, version, showDojo, variant, treeRef, refMap]);
 
   return (
     <svg className="bc-connectors" width={size.w} height={size.h} style={{ position: "absolute", left: 0, top: 0, pointerEvents: "none" }}>
@@ -1053,8 +1053,8 @@ function BracketConnectorsMeta({ columns, feedersById, treeRef, refMap, version,
 function BracketTreeMeta({ columns, feedersById, matchNumById, slotLabel, variant = 1, showDojo = true, onMatchClick, highlightedMatchId, autoScrollMatchId, scrollContainerRef, highlightPlayers, isEngi }) {
   const treeRef = useRef(null);
   const refMap = useRef({});
-  const [version, setVersion] = useStateBC(0);
-  const [cardTops, setCardTops] = useStateBC(null);
+  const [version, setVersion] = useState(0);
+  const [cardTops, setCardTops] = useState(null);
 
   // Reset the measured layout only when the TOPOLOGY changes, not on every new
   // `columns` reference. Match ids and the feeder graph are frozen at generation
@@ -1066,9 +1066,9 @@ function BracketTreeMeta({ columns, feedersById, matchNumById, slotLabel, varian
     () => columns.map((c) => c.map((m) => m.id).join(",")).join("|"),
     [columns]
   );
-  useEffectBC(() => { setCardTops(null); setVersion((v) => v + 1); }, [topoSig]);
+  useEffect(() => { setCardTops(null); setVersion((v) => v + 1); }, [topoSig]);
 
-  useLayoutEffectBC(() => {
+  useLayoutEffect(() => {
     const measure = () => {
       const tree = treeRef.current;
       if (!tree || !columns || columns.length === 0) return;
@@ -1150,9 +1150,8 @@ function BracketTreeMeta({ columns, feedersById, matchNumById, slotLabel, varian
     <div className={`bc-tree bc-tree--v${variant}`} ref={treeRef}>
       <BracketConnectorsMeta columns={columns} feedersById={feedersById} treeRef={treeRef} refMap={refMap} version={version} showDojo={showDojo} variant={variant} />
       {columns.map((col, ci) => (
-        // Column index is a stable key: bracket rounds never reorder.
-        // oxlint-disable-next-line react/no-array-index-key
-        <div key={ci} className="bc-round" style={{ "--round": ci }}>
+        // A column is keyed by the matches it holds, which no other column holds.
+        <div key={col.map((m) => m.id).join("|")} className="bc-round" style={{ "--round": ci }}>
           {/* Label the column from a match IN it, through the shared primitive,
               so a column header and the row/eyebrow labels for the same match can
               never diverge. Provably the same string as roundLabel(ci, length):
@@ -1211,22 +1210,22 @@ function BracketTree(props) {
 function BracketTreeLegacy({ rounds, slotLabel, variant = 1, showDojo = true, onMatchClick, highlightedMatchId, autoScrollMatchId, scrollContainerRef, highlightPlayers, isEngi }) {
   const treeRef = useRef(null);
   const refMap = useRef({});
-  const [version, setVersion] = useStateBC(0);
+  const [version, setVersion] = useState(0);
   // Measured absolute top (px) for each round≥1 card, keyed by match id. Round 0
   // flows naturally; every later card is then positioned at the exact midpoint of
   // its two real feeder centres. This is measured rather than derived from a fixed
   // slot pitch because card heights are not uniform within a bracket: a filled
   // name+dojo card (~118px) is taller than a TBD/placeholder card (~104px), so no
   // single pitch can centre every parent on its children.
-  const [cardTops, setCardTops] = useStateBC(null);
+  const [cardTops, setCardTops] = useState(null);
 
   // On a bracket change, clear measured positions so the new rounds render in
   // natural flow for one frame (their match ids differ, so stale tops wouldn't
   // apply anyway) until the layout effect re-measures: avoids any stale-position
   // flash. The version bump re-runs the measure effect.
-  useEffectBC(() => { setCardTops(null); setVersion((v) => v + 1); }, [rounds]);
+  useEffect(() => { setCardTops(null); setVersion((v) => v + 1); }, [rounds]);
 
-  useLayoutEffectBC(() => {
+  useLayoutEffect(() => {
     const measure = () => {
       const tree = treeRef.current;
       if (!tree || !rounds || rounds.length === 0) return;
@@ -1299,9 +1298,8 @@ function BracketTreeLegacy({ rounds, slotLabel, variant = 1, showDojo = true, on
       {rounds.map((round, ri) => {
         const positioned = ri > 0 && cardTops;
         return (
-          // Round index is a stable key: bracket rounds never reorder.
-          // oxlint-disable-next-line react/no-array-index-key
-          <div key={ri} className="bc-round" style={{ "--round": ri }}>
+          // A round is keyed by the matches it holds, which no other round holds.
+          <div key={round.map((m) => m.id).join("|")} className="bc-round" style={{ "--round": ri }}>
             {/* Legacy (pre-mp-7f2w) brackets only: this renderer runs when no
                 match carries displayRound AND none is hidden (see hasMeta), so
                 bracketRoundLabel would degrade to this same call. Raw index is

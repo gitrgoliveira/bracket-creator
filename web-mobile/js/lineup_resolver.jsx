@@ -18,6 +18,7 @@
 import { squadMemberLabel, squadSlotLabel } from './squad_member_label.jsx';
 import { scoreRowMatchLabel } from './pool_ids.jsx';
 import { noAnswerSentence } from './write_result.jsx';
+import { normalizeParticipantName } from './data.jsx';
 
 // squadRosterEntries: the ONE builder of a lineup picker's list for a team
 // (bc-dnst), shared by the score sheet's per-row picker (admin_scoring_team
@@ -636,10 +637,18 @@ export function resolveBoutSideMemberId({ isKachinuki, isDaihyosen, existingMemb
 // wrong for anything WRITTEN, where the id becomes the record of who fought.
 // Members of one team may share a display name in rosters that predate the
 // uniqueness rule, so the gate is not theoretical.
+//
+// The typed name is compared by normalizeParticipantName, the key the server's
+// one-name-per-team rule uses (ignoring case and accents): the server stores
+// a member's name title-cased (operator decision D14), so a name typed "yuki
+// tanaka" is the member "Yuki Tanaka", and two members whose names differ only
+// in case still resolve to nobody. resolveSquadMember below stays
+// exact: it labels bouts already fought, whose names are kept as recorded
+// (operator decision D18).
 export function squadMemberIdForUniqueName(squad, name) {
-  const wanted = (name || "").trim();
+  const wanted = normalizeParticipantName((name || "").trim());
   if (!wanted) return "";
-  const hits = (Array.isArray(squad) ? squad : []).filter(mem => mem && mem.name === wanted);
+  const hits = (Array.isArray(squad) ? squad : []).filter(mem => mem && normalizeParticipantName(mem.name || "") === wanted);
   return hits.length === 1 ? (hits[0].id || "") : "";
 }
 

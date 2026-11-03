@@ -5,6 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
+	"strings"
+
+	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 )
 
 // CorruptFileError says that a competition file on disk could not be parsed,
@@ -44,6 +48,13 @@ func (e *CorruptFileError) Error() string {
 }
 
 func (e *CorruptFileError) Unwrap() error { return e.Err }
+
+// IsCorruptFile reports whether err is (or wraps) a CorruptFileError, for a
+// caller that needs only the answer and not the file's details.
+func IsCorruptFile(err error) bool {
+	var c *CorruptFileError
+	return errors.As(err, &c)
+}
 
 // AsCorruptFile reports whether err is (or wraps) a CorruptFileError.
 func AsCorruptFile(err error) (*CorruptFileError, bool) {
@@ -103,6 +114,59 @@ func corruptCSV(file string, err error) error {
 		c.Detail = pe.Err.Error()
 	}
 	return c
+}
+
+// locatedRowsError turns the CSV reader's refusals of participants.csv rows
+// into a located CorruptFileError, so the Participants page and every other
+// reader say which rows to repair. lines[i] is the file line of the i-th
+// record the reader was given, so a row is reported by its place in the file
+// (the line an editor shows), not by its count among the competitor rows.
+//
+//   - Two rows that are one competitor in the stored form ("John, kenshinkan"
+//     and "John, Kenshinkan", which only a hand edit can write; operator
+//     decision D21, 2026-11-01) name both lines.
+//   - A row the reader refuses (a one-field row in a zekken roster) names its
+//     line and the reader's reason, with the lines of any further such rows.
+//
+// The detail names lines and the reader's own reason, never the competitor.
+// Duplicates are reported first; any other refusal is returned untouched.
+func locatedRowsError(err error, lines []int) error {
+	var ve *helper.ParticipantValidationError
+	if !errors.As(err, &ve) {
+		return err
+	}
+	if len(ve.Duplicates) > 0 {
+		pairs := make([]string, 0, len(ve.Duplicates))
+		for _, d := range ve.Duplicates {
+			pairs = append(pairs, fmt.Sprintf("lines %d and %d", lines[d.FirstEntry-1], lines[d.Entry-1]))
+		}
+		return &CorruptFileError{
+			File:   "participants.csv",
+			Line:   lines[ve.Duplicates[0].Entry-1],
+			Column: 1,
+			Detail: strings.Join(pairs, ", ") + " hold the same competitor (name, zekken and dojo, ignoring case); remove one row of each pair or tell them apart",
+			Err:    err,
+		}
+	}
+	if len(ve.Refused) == 0 {
+		return err
+	}
+	first := ve.Refused[0]
+	detail := first.Reason
+	if len(ve.Refused) > 1 {
+		also := make([]string, 0, len(ve.Refused)-1)
+		for _, r := range ve.Refused[1:] {
+			also = append(also, strconv.Itoa(lines[r.Entry-1]))
+		}
+		detail += "; also on lines " + strings.Join(also, ", ")
+	}
+	return &CorruptFileError{
+		File:   "participants.csv",
+		Line:   lines[first.Entry-1],
+		Column: 1,
+		Detail: detail,
+		Err:    err,
+	}
 }
 
 // corruptJSONWithSentinel is corruptJSON plus a caller-specific sentinel: some

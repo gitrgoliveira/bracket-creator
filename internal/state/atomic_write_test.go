@@ -9,6 +9,7 @@ import (
 	"sync"
 	"testing"
 
+	bctest "github.com/gitrgoliveira/bracket-creator/internal/test"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -34,9 +35,9 @@ func TestAtomicWriteFile_HappyPath(t *testing.T) {
 	target := filepath.Join(dir, "config.md")
 	data := []byte("---\nname: test\n---\n")
 
-	require.NoError(t, atomicWriteFile(target, data, 0600))
+	require.NoError(t, atomicWriteFile(openTestRoot(t, dir), target, data, 0600))
 
-	got, err := os.ReadFile(target) // #nosec G304, test path.
+	got, err := bctest.ReadFile(target)
 	require.NoError(t, err)
 	assert.Equal(t, data, got, "file content should equal what was written")
 
@@ -53,9 +54,9 @@ func TestAtomicWriteFile_OverwritesExisting(t *testing.T) {
 	target := filepath.Join(dir, "data.csv")
 
 	require.NoError(t, os.WriteFile(target, []byte("OLD\n"), 0600))
-	require.NoError(t, atomicWriteFile(target, []byte("NEW\n"), 0600))
+	require.NoError(t, atomicWriteFile(openTestRoot(t, dir), target, []byte("NEW\n"), 0600))
 
-	got, err := os.ReadFile(target) // #nosec G304, test path.
+	got, err := bctest.ReadFile(target)
 	require.NoError(t, err)
 	assert.Equal(t, []byte("NEW\n"), got, "file should be replaced with the new content")
 
@@ -71,7 +72,7 @@ func TestAtomicWriteFile_NoPartialOnTmpFailure(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "missing-subdir", "x.json")
 
-	err := atomicWriteFile(target, []byte("payload"), 0600)
+	err := atomicWriteFile(openTestRoot(t, dir), target, []byte("payload"), 0600)
 	require.Error(t, err, "writing into a non-existent directory should error")
 
 	// Original target was absent and remains absent.
@@ -102,11 +103,11 @@ func TestAtomicWriteFile_PreservesExistingOnFailure(t *testing.T) {
 	require.NoError(t, os.WriteFile(fileAsParent, []byte("not a dir"), 0600))
 	badTarget := filepath.Join(fileAsParent, "child.json")
 
-	err := atomicWriteFile(badTarget, []byte("NEW"), 0600)
+	err := atomicWriteFile(openTestRoot(t, dir), badTarget, []byte("NEW"), 0600)
 	require.Error(t, err, "writing under a non-directory should error")
 
 	// Pre-existing real.json should be untouched.
-	got, err := os.ReadFile(target) // #nosec G304, test path.
+	got, err := bctest.ReadFile(target)
 	require.NoError(t, err)
 	assert.Equal(t, []byte("KEEP_ME"), got, "pre-existing target must be intact on unrelated failure")
 }
@@ -135,7 +136,7 @@ func TestAtomicWriteFile_CleansTmpOnError(t *testing.T) {
 	defer func() { _ = os.Chmod(dir, 0700) }()
 
 	target := filepath.Join(dir, "out.bin")
-	err := atomicWriteFile(target, []byte("data"), 0600)
+	err := atomicWriteFile(openTestRoot(t, dir), target, []byte("data"), 0600)
 	require.Error(t, err, "write into read-only directory should error")
 
 	// Re-permission so we can list contents for the assertion.
@@ -157,6 +158,7 @@ func TestAtomicWriteFile_UniqueSuffixAvoidsCollision(t *testing.T) {
 	// would have one call clobber the other's in-flight temp.
 	dir := t.TempDir()
 	target := filepath.Join(dir, "config.md")
+	root := openTestRoot(t, dir)
 
 	var wg sync.WaitGroup
 	results := make([]error, 2)
@@ -166,7 +168,7 @@ func TestAtomicWriteFile_UniqueSuffixAvoidsCollision(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			results[i] = atomicWriteFile(target, payloads[i], 0600)
+			results[i] = atomicWriteFile(root, target, payloads[i], 0600)
 		}(i)
 	}
 	wg.Wait()
@@ -175,7 +177,7 @@ func TestAtomicWriteFile_UniqueSuffixAvoidsCollision(t *testing.T) {
 		assert.NoErrorf(t, err, "concurrent atomicWriteFile call %d should succeed", i)
 	}
 
-	got, err := os.ReadFile(target) // #nosec G304, test path.
+	got, err := bctest.ReadFile(target)
 	require.NoError(t, err)
 	assert.True(t, string(got) == "CONTENT_A" || string(got) == "CONTENT_B",
 		"final content must be one of the two inputs, got %q", string(got))
@@ -189,7 +191,8 @@ func TestSyncDir_NonExistentPath(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("syncDir is a no-op on Windows")
 	}
-	err := syncDir(filepath.Join(t.TempDir(), "nonexistent-subdir"))
+	dir := t.TempDir()
+	err := syncDir(openTestRoot(t, dir), filepath.Join(dir, "nonexistent-subdir"))
 	assert.Error(t, err, "syncDir on missing path must return error")
 }
 
@@ -205,31 +208,27 @@ func TestAtomicWriteFile_RenameTargetIsDir(t *testing.T) {
 	targetDir := filepath.Join(dir, "target")
 	require.NoError(t, os.Mkdir(targetDir, 0700))
 
-	err := atomicWriteFile(targetDir, []byte("data"), 0600)
+	err := atomicWriteFile(openTestRoot(t, dir), targetDir, []byte("data"), 0600)
 	require.Error(t, err, "atomicWriteFile must fail when target is an existing directory")
 
 	// No orphan .tmp file should remain after the Rename failure.
 	assert.Empty(t, listTmpOrphans(t, dir), "no .tmp orphan should remain after Rename failure")
 }
 
-// TestAtomicWriteFile_NoDirComponent covers the `if dir == "" { dir = "." }`
-// branch (line 77-79). filepath.Split returns an empty dir for a bare filename
-// with no path separator, so we chdir to a temp dir and call with a plain name.
-func TestAtomicWriteFile_NoDirComponent(t *testing.T) {
-	if os.Getuid() == 0 {
-		t.Skip("root may bypass expected behaviour in temp dir")
-	}
-	tmpDir := t.TempDir()
-	t.Chdir(tmpDir)
+// TestAtomicWriteFile_AtTheTopOfTheDataFolder covers a file whose folder is
+// the data folder itself, as tournament.md's is: the root is given "." for
+// the directory sync.
+func TestAtomicWriteFile_AtTheTopOfTheDataFolder(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "tournament.md")
 
 	data := []byte("hello")
-	require.NoError(t, atomicWriteFile("bare-name.txt", data, 0600),
-		"atomicWriteFile with no dir component must succeed (falls back to '.')")
+	require.NoError(t, atomicWriteFile(openTestRoot(t, dir), target, data, 0600))
 
-	got, err := os.ReadFile(filepath.Join(tmpDir, "bare-name.txt")) // #nosec G304
+	got, err := bctest.ReadFile(target)
 	require.NoError(t, err)
 	assert.Equal(t, data, got)
-	assert.Empty(t, listTmpOrphans(t, tmpDir))
+	assert.Empty(t, listTmpOrphans(t, dir))
 }
 
 func TestSaveCompetition_NoPartialOnSuccess(t *testing.T) {

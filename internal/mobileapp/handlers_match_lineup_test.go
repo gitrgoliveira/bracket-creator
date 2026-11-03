@@ -60,7 +60,8 @@ func TestMatchLineupPUTGET_RoundTrip(t *testing.T) {
 	var got domain.TeamLineup
 	require.NoError(t, json.Unmarshal(gw.Body.Bytes(), &got))
 	assert.Equal(t, "PoolA-0", got.MatchID)
-	assert.Equal(t, "p1", got.Positions[domain.PosSenpo])
+	// A fighter typed with no member id is title-cased like a member name.
+	assert.Equal(t, "P1", got.Positions[domain.PosSenpo])
 }
 
 // TestMatchLineupGET_EmptyWhenNothingSaved: GET answers 200 with an empty
@@ -175,7 +176,7 @@ func TestMatchLineupPUT_AlwaysEditable(t *testing.T) {
 	require.NoError(t, err)
 	saved, found := findMatchLineup(lineups, "teamA", "PoolA-0")
 	require.True(t, found)
-	assert.Equal(t, "p1-substitute", saved.Positions[domain.PosSenpo])
+	assert.Equal(t, "P1-Substitute", saved.Positions[domain.PosSenpo])
 }
 
 // TestMatchLineupPUT_EmptyNameWithMemberIDIsAccepted pins bc-dnst: picking

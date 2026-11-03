@@ -9,9 +9,14 @@ import { heldWritesText } from './write_result.jsx';
 import { HeldWritesPanel } from './held_writes_panel.jsx';
 import { publishHeight } from './published_height.jsx';
 import { tournamentHasCheckIn } from './competition_shape.jsx';
+import { useLatestRef } from './latest_ref.jsx';
 import { whenConfirmed } from './unsaved_entries.jsx';
 
-const { useState: useStateA, useMemo: useMemoA, useEffect: useEffectA, useRef: useRefA, useLayoutEffect: useLayoutEffectA } = React;
+const { useState, useMemo, useEffect, useRef, useLayoutEffect } = React;
+
+// One empty competition list, so a tournament with none keeps the same value
+// between renders and the dashboard's counts are not worked out again for it.
+const NO_COMPETITIONS = [];
 
 // Producers (loaded earlier).
 const sideName = window.sideName;
@@ -107,7 +112,7 @@ function AdminTopbar({ onLogout, onViewerMode, tournament, hideRunningStrip, bef
   // navigator helper set up by AdminApp. sideName (hoisted to module
   // scope) handles the three possible side shapes; chips with no real
   // name on either side are filtered out.
-  const runningMatches = useMemoA(() => {
+  const runningMatches = useMemo(() => {
     if (!tournament || !window.compMatches) return [];
     return (tournament.competitions || [])
       .flatMap(cc => window.compMatches(cc))
@@ -129,9 +134,9 @@ function AdminTopbar({ onLogout, onViewerMode, tournament, hideRunningStrip, bef
   // filters reconnect noise so the banner never cries wolf. The timer
   // orchestration lives in watchSustainedDisconnect (below) so it can be
   // unit-tested with fake timers, independent of the component.
-  const [connected, setConnected] = useStateA(true);
-  const [sustainedDown, setSustainedDown] = useStateA(false);
-  useEffectA(() => {
+  const [connected, setConnected] = useState(true);
+  const [sustainedDown, setSustainedDown] = useState(false);
+  useEffect(() => {
     if (!window.API || typeof window.API.subscribeToEvents !== "function") return;
     const monitor = watchSustainedDisconnect(SUSTAINED_DOWN_MS, setSustainedDown);
     const unsub = window.API.subscribeToEvents(
@@ -162,8 +167,8 @@ function AdminTopbar({ onLogout, onViewerMode, tournament, hideRunningStrip, bef
   // is the chrome shared by every admin page, so it is the always-visible home
   // for the "queue is parked on a 401" state. subscribeSyncStatus replays the
   // current value on subscribe.
-  const [syncStatus, setSyncStatus] = useStateA('synced');
-  useEffectA(() => {
+  const [syncStatus, setSyncStatus] = useState('synced');
+  useEffect(() => {
     const subscribe = typeof window !== 'undefined' && window.subscribeSyncStatus;
     if (!subscribe) return;
     const unsub = subscribe((s) => setSyncStatus(s));
@@ -175,15 +180,15 @@ function AdminTopbar({ onLogout, onViewerMode, tournament, hideRunningStrip, bef
   // unmounts the editor whose banner said so; this indicator is the always-
   // mounted home for it (operator decision 2026-09-27: a separate item after the
   // connection pill, the danger colour, no pulse).
-  const [unsent, setUnsent] = useStateA(null);
-  useEffectA(() => {
+  const [unsent, setUnsent] = useState(null);
+  useEffect(() => {
     const subscribe = typeof window !== 'undefined' && window.subscribeUnsentWrites;
     if (!subscribe) return;
     const unsub = subscribe((c) => setUnsent(c));
     return () => unsub();
   }, []);
   const heldText = heldWritesText(syncStatus, unsent);
-  const [heldOpen, setHeldOpen] = useStateA(false);
+  const [heldOpen, setHeldOpen] = useState(false);
   // While queued writes fail for network reasons the event stream may still
   // read open; the pill says what the writes found (operator decision 2026-09-27).
   const linkUp = connected && syncStatus !== 'offline';
@@ -192,8 +197,8 @@ function AdminTopbar({ onLogout, onViewerMode, tournament, hideRunningStrip, bef
   // running strip, so the pinned team header (styles.css .team-sheet-pin) and
   // the inline team sheet's scroll margin read its height from this property
   // instead of a constant.
-  const stackRef = useRefA(null);
-  useLayoutEffectA(() => {
+  const stackRef = useRef(null);
+  useLayoutEffect(() => {
     const el = stackRef.current;
     if (!el) return;
     return publishHeight(el, document.documentElement, '--topbar-stack-h');
@@ -333,7 +338,7 @@ async function buildAllWinners(completedComps, fetchers) {
 // podium placings, computed via window.resolveCompetitionAwards.
 function AllWinnersModal({ comps, onClose }) {
   const completed = (comps || []).filter((c) => c.status === "completed");
-  const [state, setState] = useStateA({ loading: true, results: [], error: null });
+  const [state, setState] = useState({ loading: true, results: [], error: null });
 
   // Stable signature of every comp's id:status. A pools+knockout podium can
   // change without the *completed* set changing; e.g. a mixed comp is already
@@ -342,11 +347,13 @@ function AllWinnersModal({ comps, onClose }) {
   // any competition completes or its knockout resolves, rather than showing
   // stale results.
   const compsSig = (comps || []).map((c) => `${c.id}:${c.status}`).join("|");
+  // Read through a ref: the signature above decides when to fetch.
+  const completedRef = useLatestRef(completed);
 
-  useEffectA(() => {
+  useEffect(() => {
     let cancelled = false;
     setState((s) => ({ ...s, loading: true }));
-    buildAllWinners(completed, {
+    buildAllWinners(completedRef.current, {
       fetchCompetitionDetails: window.API.fetchCompetitionDetails.bind(window.API),
       swissStandings: window.API.swissStandings ? window.API.swissStandings.bind(window.API) : null,
     }).then((results) => {
@@ -355,7 +362,7 @@ function AllWinnersModal({ comps, onClose }) {
       if (!cancelled) setState({ loading: false, results: [], error: err?.message || String(err) });
     });
     return () => { cancelled = true; };
-  }, [compsSig]);
+  }, [compsSig, completedRef]);
 
   return (
     <Modal
@@ -416,7 +423,7 @@ function AllWinnersModal({ comps, onClose }) {
 
 function AdminDashboard({ tournament, password, onOpenCompetition, onCreateCompetition, onEditTournament, onAnnounce, onOpenSchedule, onOpenScoreEditor, onOpenImport, onOpenShiaijo, onOpenRegistration, onStartAll, onStartCompetition, onLogout, onViewerMode, onUpdate, showToast, authConfig }) {
   const t = tournament;
-  const comps = t.competitions || [];
+  const comps = t.competitions || NO_COMPETITIONS;
   // Whether "Start all" has anything to offer, answered by the same helper the
   // click handler uses (startAllCompetitions, admin.jsx) rather than a second
   // copy of the eligibility test, which agreed with it only while the two
@@ -425,11 +432,16 @@ function AdminDashboard({ tournament, password, onOpenCompetition, onCreateCompe
   // blocked would leave the operator with no way to find out why.
   const { startable, blocked } = window.partitionStartableCompetitions(comps, t.courts);
   const hasStartableWork = startable.length + blocked.length > 0;
-  const [exportPdfOpen, setExportPdfOpen] = useStateA(false);
-  const [allWinnersOpen, setAllWinnersOpen] = useStateA(false);
+  const [exportPdfOpen, setExportPdfOpen] = useState(false);
+  const [allWinnersOpen, setAllWinnersOpen] = useState(false);
   const scheduleEnabled = !!(authConfig?.scheduleEnabled);
 
-  useEffectA(() => {
+  // The subscription below is made once, so it reads the tournament and the
+  // parent's callback as they are when a refresh lands, not as they were when
+  // it subscribed.
+  const tRef = useLatestRef(t);
+  const onUpdateRef = useLatestRef(onUpdate);
+  useEffect(() => {
     // Coalesce bursts of events into a single dashboard refresh. On a busy
     // event the SSE stream can fire dozens of match_updated per minute, and
     // each one previously triggered a full tournament+competitions fetch.
@@ -456,7 +468,7 @@ function AdminDashboard({ tournament, password, onOpenCompetition, onCreateCompe
           // (e.g. it was reset while the dashboard is open). Fall back to the
           // current tournament (as admin.jsx's refresh does) rather than
           // spreading null into a malformed { competitions } object.
-          onUpdate({ ...(tourney || t), competitions });
+          onUpdateRef.current({ ...(tourney || tRef.current), competitions });
         }).catch(err => console.error("Dashboard refresh failed", err))
           .finally(() => {
             fetching = false;
@@ -476,9 +488,9 @@ function AdminDashboard({ tournament, password, onOpenCompetition, onCreateCompe
       if (pending) clearTimeout(pending);
       unsub();
     };
-  }, []);
+  }, [tRef, onUpdateRef]);
 
-  const { totalMatches, doneMatches, runningMatches, totalParticipants } = useMemoA(() => {
+  const { totalMatches, doneMatches, runningMatches, totalParticipants } = useMemo(() => {
     let totalMatches = 0, doneMatches = 0, runningMatches = 0, totalParticipants = 0;
     comps.forEach((c) => {
       totalParticipants += (c.players || []).length;
@@ -550,7 +562,7 @@ function AdminDashboard({ tournament, password, onOpenCompetition, onCreateCompe
             <div className="icon" aria-hidden="true">🥋</div>
             <h3>Add your first competition</h3>
             <div style={{ fontSize: 13, color: "var(--ink-2)", maxWidth: 460, margin: "0 auto", lineHeight: 1.5 }}>
-              A competition is one event within {t.name}, like Men's Individual or Women's Teams. Add one to enter participants, build the draw, and run matches.
+              A competition is one event within {t.name}, like Men&apos;s Individual or Women&apos;s Teams. Add one to enter participants, build the draw, and run matches.
             </div>
             <div className="empty__cta" style={{ display: "flex", gap: 8, justifyContent: "center", flexWrap: "wrap" }}>
               <button type="button" className="btn btn--primary" onClick={onCreateCompetition}>+ Add competition</button>
@@ -714,12 +726,12 @@ function skippedCompetitionNames(skipped, comps) {
 // (not just a toast, which disappears before the operator can read a list of
 // competition names) naming each skipped competition and why.
 function ExportPdfModal({ tournament, password, comps, onClose, showToast }) {
-  const [busyType, setBusyType] = useStateA("");
+  const [busyType, setBusyType] = useState("");
   // The most recent export attempt's skipped list, [] when nothing was
   // skipped (or before any attempt). Replaced wholesale on every new
   // download so the banner always reflects the LAST attempt, never a stale
   // one from an earlier row.
-  const [skipped, setSkipped] = useStateA([]);
+  const [skipped, setSkipped] = useState([]);
 
   const download = async (type) => {
     if (busyType) return;
@@ -802,7 +814,7 @@ function CompCard({ c, onOpen, onStart, tournament, showToast }) {
   const { running: runningCount } = compMatchStats(c);
   const playerCount = (c.players || []).length;
   const courts = c.courts || [];
-  const [shareOpen, setShareOpen] = useStateA(false);
+  const [shareOpen, setShareOpen] = useState(false);
 
   // Starting from SETUP generates the draw, so the same court rules that gate
   // the competition header's Generate/Start buttons gate this one: one derived
@@ -913,17 +925,17 @@ function CompCard({ c, onOpen, onStart, tournament, showToast }) {
 }
 
 function CourtPicker({ value, courts, onChange, btnClassName = "", label = "", align = "left" }) {
-  const [open, setOpen] = useStateA(false);
+  const [open, setOpen] = useState(false);
   // Active option index for arrow-key navigation inside the open popover.
-  const [activeIdx, setActiveIdx] = useStateA(0);
-  const ref = useRefA(null);
-  const triggerRef = useRefA(null);
-  const optionRefs = useRefA([]);
+  const [activeIdx, setActiveIdx] = useState(0);
+  const ref = useRef(null);
+  const triggerRef = useRef(null);
+  const optionRefs = useRef([]);
   // Whether the close in flight was made inside the picker (Escape, a choice, its
   // own button). An outside tap closes it too, but by the time the close lands the
   // tapped control has taken focus, and it keeps it.
-  const closedFromInside = useRefA(false);
-  const close = (fromInside) => { closedFromInside.current = fromInside; setOpen(false); };
+  const closedFromInsideRef = useRef(false);
+  const close = (fromInside) => { closedFromInsideRef.current = fromInside; setOpen(false); };
 
   window.useClickOutside(ref, () => close(false), open);
 
@@ -935,20 +947,24 @@ function CourtPicker({ value, courts, onChange, btnClassName = "", label = "", a
   // jumped to the last one mounted, scrolling the page to it. Never on an outside
   // tap: taking focus back from the control that was tapped blurred a name box
   // (dropping the iPad keyboard) and scrolled the Scores page back to the button.
-  const wasOpen = useRefA(false);
-  useEffectA(() => {
+  const wasOpenRef = useRef(false);
+  // The courts and the current one are read as the picker opens, never a
+  // reason to seed again while it is open.
+  const seedRef = useLatestRef({ courts, value });
+  useEffect(() => {
     if (open) {
+      const { courts, value } = seedRef.current;
       const cur = Math.max(0, courts.indexOf(value));
       setActiveIdx(cur);
-    } else if (wasOpen.current && closedFromInside.current) {
+    } else if (wasOpenRef.current && closedFromInsideRef.current) {
       triggerRef.current && triggerRef.current.focus({ preventScroll: true });
     }
-    if (!open) closedFromInside.current = false;
-    wasOpen.current = open;
-  }, [open]);
+    if (!open) closedFromInsideRef.current = false;
+    wasOpenRef.current = open;
+  }, [open, seedRef]);
 
   // Focus the active option element whenever it changes while open.
-  useEffectA(() => {
+  useEffect(() => {
     if (open && optionRefs.current[activeIdx]) {
       optionRefs.current[activeIdx].focus();
     }

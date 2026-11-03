@@ -13,6 +13,7 @@ import (
 
 	excelize "github.com/xuri/excelize/v2"
 
+	bctest "github.com/gitrgoliveira/bracket-creator/internal/test"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -349,7 +350,7 @@ func TestExcelPagesGolden(t *testing.T) {
 		return
 	}
 
-	raw, err := os.ReadFile(path) // #nosec G304 -- fixed testdata path
+	raw, err := bctest.ReadFile(path)
 	require.NoError(t, err, "golden file missing; regenerate with: UPDATE_GOLDEN=1 go test ./internal/helper/ -run TestExcelPagesGolden")
 	if string(raw) == string(encoded) {
 		return

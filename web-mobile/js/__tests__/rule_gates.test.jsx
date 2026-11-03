@@ -17,6 +17,7 @@ import { resolve } from 'node:path';
 import { stripComments, scanSource, scanWholeFile } from '../../check-helpers.mjs';
 import { FORBIDDEN as NUMBER_RULES } from '../../check-competitor-search.mjs';
 import { FORBIDDEN as WRITE_RULES } from '../../check-write-result.mjs';
+import { GO_RULES, JS_RULES, rulesFor, isSkipped, scanText } from '../../check-no-disable-comments.mjs';
 
 // The three default-win rules (WRITE_RULES[2], [3] and [4]) are the ones
 // findViolations scans WHOLE-FILE (scanWholeFile), not line by line: see
@@ -132,6 +133,84 @@ describe('the write-result rule is importable without running the gate', () => {
     expect(trips('window.tapNotAppliedText(o)')).toBe(true);
     expect(trips('<span>{QUEUED_NOTICE}</span>')).toBe(false);
     expect(trips('if (writeDidNotLand(res)) return;')).toBe(false);
+  });
+});
+
+// The no-disable-comments gate (check-no-disable-comments.mjs). The directive
+// names are assembled from parts here for the same reason the gate's patterns
+// hold a character class: this file is a tracked JS source, so a literal
+// directive in a fixture would fail the gate on its own test.
+describe('the lint-disable gate refuses every disable directive', () => {
+  const NO_LINT = 'no' + 'lint';
+  const OX = 'ox' + 'lint-disable';
+  const ES = 'es' + 'lint-disable';
+  const NOSEC = '#' + 'nosec';
+  const GOSEC_OFF = 'gosec:' + 'disable';
+
+  it('a Go no-lint directive trips, with or without a space and a linter name', () => {
+    expect(scanText(`x := f() //${NO_LINT}:errcheck`, GO_RULES)).toHaveLength(1);
+    expect(scanText(`x := f() // ${NO_LINT}`, GO_RULES)).toHaveLength(1);
+    expect(scanText(`//${NO_LINT}\nfunc f() {}`, GO_RULES)).toHaveLength(1);
+  });
+
+  it('a gosec suppression comment trips, with or without a rule id and a space', () => {
+    expect(scanText(`f, err := os.Open(p) // ${NOSEC} G304`, GO_RULES)).toHaveLength(1);
+    expect(scanText(`// ${NOSEC} G304 -- a reason\nf, err := os.Open(p)`, GO_RULES)).toHaveLength(1);
+    expect(scanText(`x := f() // #  ${NOSEC.slice(1)}`, GO_RULES)).toHaveLength(1);
+    expect(scanText(`f, err := os.Open(p) // ${NOSEC}G304`, GO_RULES)).toHaveLength(1);
+    const [hit] = scanText(`x := f() // ${NOSEC}`, GO_RULES);
+    expect(hit.why).toMatch(/gosec suppression comment/);
+    expect(hit.why).toMatch(/Makefile/);
+  });
+
+  it('the gosec directive comment trips, alone, with rule ids, or after a space', () => {
+    expect(scanText(`//${GOSEC_OFF}\nf, err := os.Open(p)`, GO_RULES)).toHaveLength(1);
+    expect(scanText(`f, err := os.Open(p) //${GOSEC_OFF} G304 -- a reason`, GO_RULES)).toHaveLength(1);
+    expect(scanText(`// ${GOSEC_OFF} G304`, GO_RULES)).toHaveLength(1);
+    const [hit] = scanText(`//${GOSEC_OFF}`, GO_RULES);
+    expect(hit.why).toMatch(/gosec suppression directive/);
+  });
+
+  it('a JS oxlint next-line directive trips, and so does the line form', () => {
+    const next = scanText(`// ${OX}-next-line no-undef\nfoo();`, JS_RULES);
+    expect(next).toHaveLength(1);
+    expect(next[0].line).toBe(1);
+    expect(scanText(`foo(); // ${OX}-line no-undef`, JS_RULES)).toHaveLength(1);
+  });
+
+  it('a block comment trips, named by the real line', () => {
+    const hits = scanText(`const a = 1;\n/* ${ES} */\nfoo();`, JS_RULES);
+    expect(hits).toHaveLength(1);
+    expect(hits[0].line).toBe(2);
+    expect(scanText(`/* ${ES}-next-line */`, JS_RULES)).toHaveLength(1);
+  });
+
+  it('clean text passes, and so does prose that only mentions linting', () => {
+    expect(scanText('x := f() // handled: the error is logged\n', GO_RULES)).toEqual([]);
+    expect(scanText('// gosec flags this; the Makefile excludes the rule for this file\n', GO_RULES)).toEqual([]);
+    expect(scanText('// gosec: a disable comment is not allowed here\n', GO_RULES)).toEqual([]);
+    expect(scanText('// the linter reports this; change the rule instead\nfoo();', JS_RULES)).toEqual([]);
+    expect(scanText('const lint = 1; const disable = 2;', JS_RULES)).toEqual([]);
+  });
+
+  it('the failure message points at the fix: the code, or the lint config', () => {
+    const [hit] = scanText(`// ${OX}`, JS_RULES);
+    expect(hit.why).toMatch(/change the code, or change the rule in the lint config/);
+  });
+
+  it('each language gets its own rule, and other files get none', () => {
+    expect(rulesFor('internal/x/y.go')).toBe(GO_RULES);
+    expect(rulesFor('web-mobile/js/a.jsx')).toBe(JS_RULES);
+    expect(rulesFor('web-mobile/check-x.mjs')).toBe(JS_RULES);
+    expect(rulesFor('CLAUDE.md')).toEqual([]);
+    expect(rulesFor('docs/index.md')).toEqual([]);
+  });
+
+  it('third-party and generated trees are skipped', () => {
+    expect(isSkipped('web-mobile/node_modules/x/index.js')).toBe(true);
+    expect(isSkipped('web-mobile/dist/app.js')).toBe(true);
+    expect(isSkipped('web-mobile/vendor/preact.js')).toBe(true);
+    expect(isSkipped('web-mobile/js/app.jsx')).toBe(false);
   });
 });
 

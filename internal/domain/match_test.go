@@ -49,9 +49,8 @@ func TestMatch(t *testing.T) {
 // TestEnchoMetadataPersists verifies FR-032: encho (overtime / sudden-death)
 // metadata round-trips through YAML on a domain.MatchResult.
 //
-// This is a Red test, domain.MatchResult and domain.EnchoMetadata do
-// not yet exist. The build must fail until the Green implementation
-// (T034 family) lands.
+// It pins domain.MatchResult and domain.EnchoMetadata (internal/domain/match.go)
+// to that round trip.
 func TestEnchoMetadataPersists(t *testing.T) {
 	r := domain.MatchResult{
 		Encho: &domain.EnchoMetadata{PeriodCount: 1},

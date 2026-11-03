@@ -244,7 +244,8 @@ func TestRouterParseParticipants(t *testing.T) {
 				require.True(t, ok)
 				assert.Equal(t, "John Doe", first["name"])
 				assert.Equal(t, "Dojo1", first["dojo"])
-				assert.Equal(t, "Johnny", first["displayName"])
+				// A typed zekken is stored in capitals (operator decision D20).
+				assert.Equal(t, "JOHNNY", first["displayName"])
 			},
 		},
 		{
@@ -275,6 +276,16 @@ func TestRouterParseParticipants(t *testing.T) {
 			expectedStatus: http.StatusBadRequest,
 			expectError:    true,
 			expectedError:  "participant validation failed",
+		},
+		{
+			name: "a name that reads as a bracket placeholder, in any case",
+			payload: map[string]interface{}{
+				"playerList":     "John Doe, Dojo A\npool a-1st, Dojo B",
+				"withZekkenName": false,
+			},
+			expectedStatus: http.StatusBadRequest,
+			expectError:    true,
+			expectedError:  `participant name collides with a reserved bracket-placeholder pattern: "Pool A-1st"`,
 		},
 		{
 			name: "empty player list",

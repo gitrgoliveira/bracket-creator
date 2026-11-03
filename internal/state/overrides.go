@@ -50,7 +50,7 @@ func (s *Store) SaveOverrides(compID string, o *Overrides) error {
 // loadOverridesLocked reads overrides without acquiring the mutex.
 // Caller must hold at least s.mu.RLock.
 func (s *Store) loadOverridesLocked(compID string) (*Overrides, error) {
-	data, err := os.ReadFile(s.compPath(compID, "overrides.json"))
+	data, err := s.root.readFile(s.compPath(compID, "overrides.json"))
 	if err != nil {
 		if os.IsNotExist(err) {
 			return &Overrides{

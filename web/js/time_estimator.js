@@ -154,7 +154,7 @@ export async function fetchScheduleEstimate(params, fetchImpl = (typeof fetch !=
         const resp = await fetchImpl(`/api/schedule/estimate?${qs.toString()}`);
         if (!resp.ok) return null;
         return await resp.json();
-    } catch (err) {
+    } catch {
         return null;
     }
 }

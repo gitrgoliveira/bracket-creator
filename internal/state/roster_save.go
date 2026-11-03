@@ -188,7 +188,7 @@ func (s *Store) ReplaceRosterKeepingCheckIns(compID string, players []domain.Pla
 	)
 	if prune != nil {
 		var rerr error
-		seeds, rerr = helper.ReadSeedsFileRaw(s.compPath(compID, "seeds.csv"))
+		seeds, rerr = s.readSeedsRaw(compID)
 		switch {
 		case rerr == nil:
 			if kept, err = prune(stored, seeds); err != nil {

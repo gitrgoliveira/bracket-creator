@@ -15,6 +15,7 @@ import (
 	"testing"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
+	bctest "github.com/gitrgoliveira/bracket-creator/internal/test"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"
@@ -74,7 +75,7 @@ func TestLegacyLineupMemberIDUpgradeOnRead(t *testing.T) {
 	assert.Empty(t, noSquad.MemberIDs, "a team with no squad recorded at all is left alone entirely")
 
 	// Repairing lands on disk, not just in the returned copy.
-	raw, err := os.ReadFile(filepath.Join(dir, "competitions", "c1", "lineups.yaml"))
+	raw, err := bctest.ReadFile(filepath.Join(dir, "competitions", "c1", "lineups.yaml"))
 	require.NoError(t, err)
 	assert.Contains(t, string(raw), sato.ID, "the repair lands on disk, not just in the returned copy")
 }

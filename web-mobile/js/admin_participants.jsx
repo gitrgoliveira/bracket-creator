@@ -5,13 +5,15 @@
 // (integer > 0), shared with the overview stat, the seeding blocker and the
 // settings preview so this card's count cannot disagree with them.
 import { seededRanks } from './admin_helpers.jsx';
-import { NO_ID_HINT } from './data_integrity.jsx';
+import { NO_ID_HINT, DataIssueBanner, rosterUnreadableIssues } from './data_integrity.jsx';
 import { NumberedName } from './numbered_name.jsx';
+import { Icon } from './icon.jsx';
 import { useOpenedTapGuard } from './tap_guard.jsx';
 import { PillButton } from './competition_fields.jsx';
 import { useUnsavedInput } from './app_version.jsx';
+import { useLatestRef } from './latest_ref.jsx';
 
-const { useState: useStateA, useMemo: useMemoA, useEffect: useEffectA, useRef: useRefA } = React;
+const { useState, useMemo, useEffect, useRef } = React;
 
 const pluralize = window.pluralize;
 const EmptyState = window.EmptyState;
@@ -70,8 +72,8 @@ function parsePastedRows(text, transform) {
 }
 
 function LinedTextarea({ value, onChange, onFocus, onBlur, rows, placeholder }) {
-  const textareaRef = useRefA(null);
-  const numsRef = useRefA(null);
+  const textareaRef = useRef(null);
+  const numsRef = useRef(null);
   const lineCount = Math.max(1, (value || '').split('\n').length);
   const nums = Array.from({ length: lineCount }, (_, i) => i + 1).join('\n');
 
@@ -279,12 +281,12 @@ export const ROSTER_KEPT_CHANGING = "Not saved: the competitor list kept changin
 // are told (stage 6 review 12, C1).
 export const ROSTER_CHANGED_BEFORE_APPLY = "Not saved: the competitor list was changed on another device. The list now shown is the current one; your pasted list is still in the box, so tap Apply changes to replace it.";
 
-function AdminParticipants({ c, tournament: _tournament, onUpdate, password, showToast, onSection }) {
+function AdminParticipants({ c, tournament: _tournament, onUpdate, password, showToast, onSection, onRefreshCompetition }) {
   // Zekken-column flag. Engi pairs store both member names combined in the
   // name field ("Name 1 - Name 2"), so engi does not alter the roster layout.
   const withZekken = !!c.withZekkenName;
-  // Roster line format for this competition, shared by the format hint and
-  // the CSV import dropzone so the two can't drift.
+  // Roster line format for this competition, shown once, in the participant
+  // list card's head (the CSV drop zone under it says only what it does).
   const rosterFormat = c.kind === "team" ? "Team name, Dojo"
     : c.engi ? (withZekken ? "Name 1 - Name 2, Zekken 1 - Zekken 2, Dojo[, Dan]" : "Name 1 - Name 2, Dojo[, Dan]")
       : withZekken ? "Name, Zekken, Dojo[, Dan]" : "Name, Dojo[, Dan grade]";
@@ -292,44 +294,44 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
   // competition's roster rows are teams, not people). One owner so the roster
   // readout, the replace dialog and the save toast cannot disagree.
   const kindLabel = c.kind === "team" ? "team" : "participant";
-  const [replaceTarget, setReplaceTarget] = useStateA(null);
-  const [showAddForm, setShowAddForm] = useStateA(false);
-  const [addName, setAddName] = useStateA("");
-  const [addDojo, setAddDojo] = useStateA("");
-  const [addDanGrade, setAddDanGrade] = useStateA("");
-  const [addZekken, setAddZekken] = useStateA("");
-  const [addLoading, setAddLoading] = useStateA(false);
-  const [replaceLoading, setReplaceLoading] = useStateA(false);
-  const [replaceName, setReplaceName] = useStateA("");
-  const [replaceDojo, setReplaceDojo] = useStateA("");
-  const [replaceDanGrade, setReplaceDanGrade] = useStateA("");
-  const [replaceZekken, setReplaceZekken] = useStateA("");
+  const [replaceTarget, setReplaceTarget] = useState(null);
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [addName, setAddName] = useState("");
+  const [addDojo, setAddDojo] = useState("");
+  const [addDanGrade, setAddDanGrade] = useState("");
+  const [addZekken, setAddZekken] = useState("");
+  const [addLoading, setAddLoading] = useState(false);
+  const [replaceLoading, setReplaceLoading] = useState(false);
+  const [replaceName, setReplaceName] = useState("");
+  const [replaceDojo, setReplaceDojo] = useState("");
+  const [replaceDanGrade, setReplaceDanGrade] = useState("");
+  const [replaceZekken, setReplaceZekken] = useState("");
   // The Edit dialog opens under the finger that tapped a row's pencil, so the
   // bounce of that tap must not reach its backdrop, which dismisses it (bc-cfbd).
   const { openedRef: editOpenedRef, onClickCapture: editOnClickCapture } = useOpenedTapGuard();
   // nearDupPending holds {pairs} when the server returned Tier-2 near-dup
   // warnings on the roster save. The save has already committed (warnings are
   // non-blocking); this drives a post-save informational banner.
-  const [nearDupPending, setNearDupPending] = useStateA(null);
-  const [showAllPreview, setShowAllPreview] = useStateA(false);
-  const [seedImportResult, setSeedImportResult] = useStateA(null);
-  const [importSummary, setImportSummary] = useStateA(null);
+  const [nearDupPending, setNearDupPending] = useState(null);
+  const [showAllPreview, setShowAllPreview] = useState(false);
+  const [seedImportResult, setSeedImportResult] = useState(null);
+  const [importSummary, setImportSummary] = useState(null);
   // The paste box is an INPUT for a new or replacement list, not a mirror of
   // the saved roster (operator ruling, bc-prow): it starts empty, clears
   // after a successful Apply, and Apply over an existing roster asks before
   // replacing it. The saved roster is shown by the Ordering & seeding card.
-  const [text, setText] = useStateA("");
-  const [dragOver, setDragOver] = useStateA(false);
-  const fileRef = useRefA(null);
-  const seedFileRef = useRefA(null);
+  const [text, setText] = useState("");
+  const [dragOver, setDragOver] = useState(false);
+  const fileRef = useRef(null);
+  const seedFileRef = useRef(null);
   // apply() is async (awaits onUpdate which now re-throws on PUT failure).
   // If the user navigates away (or AdminCompetition unmounts AdminParticipants)
   // while the PUT is in flight, the post-await setImportSummary(null) would
   // setState on a torn-down component. Track mount state via ref and
   // gate post-await setState behind it. Pre-fix this was silent under
   // React 18 but still a real teardown-race signal.
-  const mountedRef = useRefA(true);
-  useEffectA(() => () => { mountedRef.current = false; }, []);
+  const mountedRef = useRef(true);
+  useEffect(() => () => { mountedRef.current = false; }, []);
   const generateText = (playersList) => generateRosterText(playersList, withZekken);
 
   // Fill the roster textarea with a generated sample roster of `count`
@@ -456,10 +458,10 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
     reader.readAsText(file);
   };
 
-  const [sourceFilter, setSourceFilter] = useStateA(null);
-  const [searchQuery, setSearchQuery] = useStateA("");
-  const trimmedSearch = useMemoA(() => searchQuery.trim(), [searchQuery]);
-  const lines = useMemoA(() => text.split("\n").filter((l) => l.trim()), [text]);
+  const [sourceFilter, setSourceFilter] = useState(null);
+  const [searchQuery, setSearchQuery] = useState("");
+  const trimmedSearch = useMemo(() => searchQuery.trim(), [searchQuery]);
+  const lines = useMemo(() => text.split("\n").filter((l) => l.trim()), [text]);
   // Anything in the box is a list not yet applied (the box never mirrors the
   // saved roster), so the unsaved indicator is simply "the box has lines".
   const rosterDirty = lines.length > 0;
@@ -470,19 +472,19 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
     || replaceDojo !== (replaceTarget.dojo || "") || replaceDanGrade !== (replaceTarget.danGrade || "")
     || (withZekken && replaceZekken !== (replaceTarget.displayName || "")));
   useUnsavedInput(rosterDirty || addTyped || editChanged);
-  const players = useMemoA(() => c.players || [], [c.players]);
+  const players = useMemo(() => c.players || [], [c.players]);
   // First-run: with no participants yet there is nothing to seed or check in,
   // so the seeding panel is premature. Collapse it and let the roster-input
   // panel fill the width: adding names is the only task at this point.
   const emptyRoster = players.length === 0;
 
-  const allSources = useMemoA(() => [...new Set(players.map(p => p.source).filter(Boolean))], [players]);
-  const playerSearchTargets = useMemoA(() => {
+  const allSources = useMemo(() => [...new Set(players.map(p => p.source).filter(Boolean))], [players]);
+  const playerSearchTargets = useMemo(() => {
     const map = new Map();
     players.forEach(p => { map.set(window.checkinPid(p), participantSearchTarget(p)); });
     return map;
   }, [players]);
-  const visiblePlayers = useMemoA(() => {
+  const visiblePlayers = useMemo(() => {
     const q = trimmedSearch.toLowerCase();
     let out = players;
     if (sourceFilter) out = out.filter(p => p.source === sourceFilter);
@@ -557,12 +559,11 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
   // m11), never by its row, so a reorder while its save is out cannot lay it
   // on someone else; the box shows it meanwhile through the promise
   // StableInput is handed.
-  const rosterRef = useRefA(c);
-  rosterRef.current = c;
-  const typedSeedsRef = useRefA(new Map());
-  const typedSeqRef = useRefA(0);
-  const rosterChainRef = useRefA(Promise.resolve());
-  const landedRosterRef = useRefA(null);
+  const rosterRef = useLatestRef(c);
+  const typedSeedsRef = useRef(new Map());
+  const typedSeqRef = useRef(0);
+  const rosterChainRef = useRef(Promise.resolve());
+  const landedRosterRef = useRef(null);
   const seedKey = (p) => {
     if (p.id) return p.id;
     const norm = (s) => (s || "").toLowerCase().trim().replace(/\s+/g, " ");
@@ -657,8 +658,8 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
     });
   };
 
-  const dragIdxRef = useRefA(null);
-  const [dragOverIdx, setDragOverIdx] = useStateA(null);
+  const dragIdxRef = useRef(null);
+  const [dragOverIdx, setDragOverIdx] = useState(null);
   // Same async + await + log pattern as updateSeed. The drop completes
   // visually before the PUT; await is for error surfacing, not for
   // gating the UI.
@@ -1041,6 +1042,18 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
     ? <span className="unapplied-note">● Not applied yet</span>
     : null;
 
+  // A roster the server could not read arrives as an empty one. Shown as
+  // such, the page invited a paste over it; every roster write is
+  // refused until the file is repaired, so the file's own notice replaces
+  // the whole page. Its Reload re-fetches the competition, so a repaired
+  // file shows without leaving the page (operator decision D28); a host that
+  // passes no refresh gets the page reloaded instead.
+  const rosterIssues = rosterUnreadableIssues(c);
+  if (rosterIssues.length > 0) {
+    const reload = onRefreshCompetition || (() => window.location.reload());
+    return <DataIssueBanner issues={rosterIssues} competition={c} onReload={reload} />;
+  }
+
   return (
     <>
       {isDrawReady && (
@@ -1134,17 +1147,17 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
           </div>
           {!!seedProblem && (
             <div className="alert alert--error" style={{ margin: "0 16px 16px" }} data-testid="seed-gap-banner">
-              ❌ {seedProblem} The draw cannot run until the seeding is fixed.
+              <Icon name="alert-circle" /> {seedProblem} The draw cannot run until the seeding is fixed.
             </div>
           )}
           {seedImportResult && (
             <div style={{ margin: "0 16px 12px" }}>
               <div className="alert alert--success" style={{ marginBottom: 6 }}>
-                ✔ Matched {seedImportResult.updatedCount} of {seedImportResult.totalRows} seeded players.
+                <Icon name="check" /> Matched {seedImportResult.updatedCount} of {seedImportResult.totalRows} seeded players.
               </div>
               {seedImportResult.unmatched.length > 0 && (
                 <div className="alert alert--warn">
-                  ⚠ {seedImportResult.unmatched.length} row{seedImportResult.unmatched.length !== 1 ? "s" : ""} not matched:
+                  <Icon name="alert-circle" /> {seedImportResult.unmatched.length} row{seedImportResult.unmatched.length !== 1 ? "s" : ""} not matched:
                   <ul style={{ margin: "4px 0 0 16px", padding: 0 }}>
                     {seedImportResult.unmatched.map(({ name, suggestion }) => (
                       <li key={name}>{name}{suggestion ? <span style={{ color: "var(--ink-3)" }}>, did you mean <em>{suggestion}</em>?</span> : ""}</li>
@@ -1288,7 +1301,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
                     {/* The lock wording comes from seedsLockedTitle, the same
                         owner as the card-level seed buttons, so the handle
                         cannot describe the lock in words of its own. */}
-                    <span className="seed-row__handle" aria-hidden="true" title={seedsLocked ? seedsLockedTitle("reorder") : reorderDisabled ? "Clear filters/search to reorder" : "Drag to reorder"}>⠿</span>
+                    <span className="seed-row__handle" aria-hidden="true" title={seedsLocked ? seedsLockedTitle("reorder") : reorderDisabled ? "Clear filters/search to reorder" : "Drag to reorder"}><Icon name="grip-vertical" /></span>
                     <div className="seed-row__line">
                       <div className="seed-row__who">
                         <div className="seed-row__name" title={p.name}>
@@ -1305,8 +1318,8 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
                     </div>
                     <div className="seed-row__actions">
                       <div className="seed-row__move">
-                        <button type="button" className="btn btn--sm btn--icon-sm" onClick={() => moveSeedRow(i, i - 1)} disabled={i === 0 || reorderDisabled} aria-label="Move up">↑</button>
-                        <button type="button" className="btn btn--sm btn--icon-sm" onClick={() => moveSeedRow(i, i + 1)} disabled={i === players.length - 1 || reorderDisabled} aria-label="Move down">↓</button>
+                        <button type="button" className="btn btn--sm btn--icon-sm" onClick={() => moveSeedRow(i, i - 1)} disabled={i === 0 || reorderDisabled} aria-label="Move up"><Icon name="arrow-up" size={14} /></button>
+                        <button type="button" className="btn btn--sm btn--icon-sm" onClick={() => moveSeedRow(i, i + 1)} disabled={i === players.length - 1 || reorderDisabled} aria-label="Move down"><Icon name="arrow-down" size={14} /></button>
                       </div>
                       {/* Editable in setup AND draw-ready: the single-competitor PUT
                           accepts both and cascades a draw-ready rename into the
@@ -1314,7 +1327,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
                           once the competition has started, so the pencil goes then.
                           Operator ruling bc-prow, reversing the 26dcd631 hide. */}
                       {(isSetup || isDrawReady) && (
-                        <button type="button" className="btn btn--sm btn--icon-sm" title={`Edit ${p.name}`} onClick={() => { setReplaceTarget(p); setReplaceName(p.name); setReplaceDojo(p.dojo); setReplaceDanGrade(p.danGrade || ""); setReplaceZekken(withZekken ? (p.displayName || "") : ""); }} aria-label={`Edit ${p.name}`}>✎</button>
+                        <button type="button" className="btn btn--sm btn--icon-sm" title={`Edit ${p.name}`} onClick={() => { setReplaceTarget(p); setReplaceName(p.name); setReplaceDojo(p.dojo); setReplaceDanGrade(p.danGrade || ""); setReplaceZekken(withZekken ? (p.displayName || "") : ""); }} aria-label={`Edit ${p.name}`}><Icon name="pencil" size={14} /></button>
                       )}
                     </div>
                      <window.StableInput
@@ -1336,48 +1349,49 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
         </div>
         )}
         <div className="card">
-          <div className="card__head">
-            <div>
+          <div className="card__head card__head--wrap">
+            <div className="card__head-main">
               <div className="card__title">{c.kind === "team" ? "Team list" : "Participant list"}</div>
               <div className="card__sub">
                 {/* Describes the BOX, not the roster: the box is an input for
                     a new list and mounts empty, so a count here would read
                     "0" over a competition that has a full saved roster. The
                     roster's own size is on the Ordering & seeding card. */}
-                {lines.length === 0 ? "Empty" : pluralize(lines.length, "line")} · One per line · <span style={{ color: "var(--ink-2)", fontWeight: 600 }}>Example: {c.kind === "team" ? "Tora A, Tora Dojo London" : c.engi ? (c.withZekkenName ? "Emi Sasaki - Ren Fujita, SASAKI - FUJITA, Getsurin, 3" : "Emi Sasaki - Ren Fujita, Getsurin, 3") : c.withZekkenName ? "Alice Smith, SMITH, Gyokusen, 3" : "Alice Smith, Gyokusen, 3"}</span>
+                {lines.length === 0 ? "Empty" : pluralize(lines.length, "line")} · One per line <span className="participants-example">Example: {c.kind === "team" ? "Tora A, Tora Dojo London" : c.engi ? (c.withZekkenName ? "Emi Sasaki - Ren Fujita, SASAKI - FUJITA, Getsurin, 3" : "Emi Sasaki - Ren Fujita, Getsurin, 3") : c.withZekkenName ? "Akira Tanaka, TANAKA, Gyokusen, 3" : "Akira Tanaka, Gyokusen, 3"}</span>
               </div>
               <div className="field__hint" style={{ marginTop: 2, fontSize: 11 }}>
-                Format: "{rosterFormat}"
+                Format: &ldquo;{rosterFormat}&rdquo;
                 <br />* Dan = kendo grade (optional)
-                <br /><button type="button" className="btn--link" style={{ padding: 0, fontSize: 11, fontWeight: 600 }} onClick={downloadTemplate}>Download CSV template</button>
+                <br /><button type="button" className="btn btn--link" onClick={downloadTemplate}>Download CSV template</button>
               </div>
             </div>
             {/* draw-ready lock: roster mutations (paste, apply, CSV import) disabled until the draw is discarded */}
-            <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+            <div className="card__head-actions">
               {unappliedNote}
               <button className="btn btn--sm" type="button" onClick={pasteFromExcel} disabled={isDrawReady} title={isDrawReady ? "Discard the draw to edit participants" : "Reads clipboard and converts tab-separated values (e.g. from Excel) to CSV"}>Paste clipboard</button>
               <button className="btn btn--sm btn--primary" type="button" onClick={apply} disabled={applyDisabled} title={applyTitle}>Apply changes</button>
             </div>
           </div>
 
-          <div style={{ display: "flex", gap: 10, marginBottom: 12 }}>
-            <div
-              className={`dropzone ${dragOver ? "dropzone--active" : ""} ${isDrawReady ? "dropzone--disabled" : ""}`}
+          {/* A real button, so the import is reachable and operable by keyboard
+              (Tab, then Enter or Space) and takes the shared focus ring. The
+              file input sits outside it: a button holds no interactive content.
+              The format and example live in the card head alone. */}
+          <div className="dropzone-row">
+            <button
+              type="button"
+              className={`dropzone ${dragOver ? "dropzone--active" : ""}`}
+              disabled={isDrawReady}
+              title={isDrawReady ? "Discard the draw to edit participants" : undefined}
               onClick={() => { if (!isDrawReady) fileRef.current?.click(); }}
               onDragOver={(e) => { if (isDrawReady) return; e.preventDefault(); setDragOver(true); }}
               onDragLeave={() => setDragOver(false)}
               onDrop={(e) => { if (isDrawReady) { e.preventDefault(); setDragOver(false); return; } onDrop(e); }}
-              style={{ flex: 1, height: 80, minHeight: 80, cursor: isDrawReady ? "not-allowed" : undefined, opacity: isDrawReady ? 0.5 : undefined }}
             >
-              <div className="dropzone__icon">📥</div>
-              <div>
-                <div className="dropzone__title">{dragOver ? "Drop CSV to import" : "Click or drop CSV to import participants"}</div>
-                <div className="dropzone__sub">
-                  {rosterFormat}{!c.engi && !withZekken && c.kind !== "team" ? " (e.g. Alice Smith, Gyokusen, 3)" : ""}
-                </div>
-              </div>
-              <input ref={fileRef} type="file" accept=".csv,.txt,text/csv,text/plain" style={{ display: "none" }} onChange={(e) => handleFile(e.target.files[0])} />
-            </div>
+              <Icon name="upload" size={28} className="dropzone__icon" />
+              <span className="dropzone__title">{dragOver ? "Drop the CSV file" : "Choose or drop a CSV file"}</span>
+            </button>
+            <input ref={fileRef} type="file" accept=".csv,.txt,text/csv,text/plain" hidden onChange={(e) => handleFile(e.target.files[0])} />
           </div>
 
           {/* Sample roster: only offered while there is no roster and the box
@@ -1433,16 +1447,22 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
             const preview = window.parseParticipantLines(lines.slice(0, previewLimit), withZekken);
             const nameCol = c.engi ? "Name 1 - Name 2" : "Name";
             const cols = withZekken ? [nameCol, "Zekken", "Dojo", "Dan"] : [nameCol, "Dojo", "Dan"];
+            // Raw parsed paste lines may be blank or repeated before validation,
+            // so a row is keyed by what it shows and how many rows above show
+            // the same.
+            const seen = new Map();
+            const rows = preview.map((p) => {
+              const shown = [p.name, p.displayName, p.dojo, p.danGrade].join("\u0000");
+              const n = (seen.get(shown) || 0) + 1;
+              seen.set(shown, n);
+              return { p, key: `${shown}\u0000${n}` };
+            });
             return (
               <div style={{ marginTop: 8, overflowX: "auto" }}>
                 <table className="parse-preview">
                   <thead><tr>{cols.map(h => <th key={h}>{h}</th>)}</tr></thead>
-                  <tbody>{preview.map((p, i) => (
-                    // Transient preview of raw parsed paste lines (names may be
-                    // blank or duplicated pre-validation); row order is the line
-                    // order, so the line index is the only stable identity.
-                    // oxlint-disable-next-line react/no-array-index-key
-                    <tr key={i}>
+                  <tbody>{rows.map(({ p, key }) => (
+                    <tr key={key}>
                       <td className={!p.name ? "cell--missing" : ""}>{p.name || "-"}</td>
                       {withZekken && <td className={!p.displayName ? "cell--missing" : ""}>{p.displayName || "-"}</td>}
                       <td className={!p.dojo ? "cell--missing" : ""}>{p.dojo || "-"}</td>

@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/engine"
 	"github.com/gitrgoliveira/bracket-creator/internal/pdf"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
+	bctest "github.com/gitrgoliveira/bracket-creator/internal/test"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -247,6 +249,115 @@ func TestPrintAllSkippedFlagNotSet(t *testing.T) {
 	assert.Contains(t, stderr.String(), "swiss-only")
 }
 
+// failAfterWriter accepts ok writes, then refuses every write after them.
+type failAfterWriter struct{ ok int }
+
+var errOutputClosed = errors.New("output closed")
+
+func (w *failAfterWriter) Write(p []byte) (int, error) {
+	if w.ok == 0 {
+		return 0, errOutputClosed
+	}
+	w.ok--
+	return len(p), nil
+}
+
+// A write to the command's output that fails is the command's error, never
+// dropped: the operator would otherwise take a missing warning or "wrote" line
+// for a run that had nothing to report.
+func TestPrintReturnsAFailedOutputWrite(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		okFirst int
+		want    string
+	}{
+		{"the skipped-competition warning", 0, "report skipped competitions"},
+		{"the nothing-to-print note", 1, "report nothing to print"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			store, err := state.NewStore(dir)
+			require.NoError(t, err)
+			require.NoError(t, store.SaveCompetition(&state.Competition{
+				ID:          "swiss-only",
+				Name:        "Swiss Only",
+				Format:      state.CompFormatSwiss,
+				SwissRounds: 2,
+				Status:      "setup",
+			}))
+
+			cmd := newPrintCmd()
+			cmd.SetErr(&failAfterWriter{ok: tc.okFirst})
+			cmd.SetOut(&bytes.Buffer{})
+			cmd.SilenceErrors = true
+			cmd.SilenceUsage = true
+			cmd.SetArgs([]string{
+				"--type=all",
+				"--tournament-data=" + dir,
+				"--output-dir=" + t.TempDir(),
+			})
+
+			err = cmd.Execute()
+			require.ErrorIs(t, err, errOutputClosed)
+			assert.Contains(t, err.Error(), tc.want)
+		})
+	}
+
+	// A warning that cannot be written does not stop the PDFs: the command
+	// goes on to make them, and returns the failed write at the end.
+	t.Run("the skipped-competition warning, with something to print", func(t *testing.T) {
+		dir := t.TempDir()
+		store, err := state.NewStore(dir)
+		require.NoError(t, err)
+		require.NoError(t, store.SaveCompetition(&state.Competition{
+			ID: "swiss-only", Name: "Swiss Only", Format: state.CompFormatSwiss, SwissRounds: 2, Status: "setup",
+		}))
+		require.NoError(t, store.SaveCompetition(&state.Competition{
+			ID: "league-comp", Name: "League Competition", Kind: "individual", Format: state.CompFormatLeague,
+			PoolSize: 3, PoolSizeMode: "min", PoolWinners: 2, RoundRobin: true, Courts: []string{"A"},
+			StartTime: "09:00", Status: "setup",
+		}))
+		require.NoError(t, store.SaveParticipants("league-comp", []domain.Player{
+			{Name: "Alice", Dojo: "DojoA"}, {Name: "Bob", Dojo: "DojoB"},
+			{Name: "Carol", Dojo: "DojoC"}, {Name: "Dave", Dojo: "DojoD"},
+		}))
+		require.NoError(t, engine.New(store).StartCompetition("league-comp"))
+
+		outDir := t.TempDir()
+		stdout := &bytes.Buffer{}
+		cmd := newPrintCmd()
+		cmd.SetErr(&failAfterWriter{})
+		cmd.SetOut(stdout)
+		cmd.SilenceErrors = true
+		cmd.SilenceUsage = true
+		cmd.SetArgs([]string{"--type=all", "--tournament-data=" + dir, "--output-dir=" + outDir})
+
+		err = cmd.Execute()
+		require.ErrorIs(t, err, errOutputClosed)
+		assert.Contains(t, err.Error(), "report skipped competitions")
+
+		// The PDF step ran after the failed warning. Without LibreOffice the
+		// step is the generator's refusal, joined to the failed write; with
+		// it, the PDFs are on disk and reported.
+		if _, genErr := pdf.NewGenerator(); genErr != nil {
+			require.ErrorIs(t, err, pdf.ErrSofficeNotFound)
+			return
+		}
+		pdfs, globErr := filepath.Glob(filepath.Join(outDir, "*.pdf"))
+		require.NoError(t, globErr)
+		assert.NotEmpty(t, pdfs, "the PDFs are made although the warning could not be written")
+		assert.Contains(t, stdout.String(), "wrote ")
+	})
+
+	t.Run("the wrote line", func(t *testing.T) {
+		cmd := newPrintCmd()
+		cmd.SetOut(&failAfterWriter{})
+		err := reportOutputs(cmd, map[string]string{"tags": "/out/tags.pdf"})
+		require.ErrorIs(t, err, errOutputClosed)
+		assert.Contains(t, err.Error(), "report outputs")
+	})
+}
+
 // TestPrintAllSkippedWithFailOnSkipAll covers the opt-in: with
 // --fail-on-skip-all set, an all-skipped tournament-data directory must
 // return a non-nil error naming the skip count, while still printing the
@@ -467,7 +578,7 @@ func TestPrintInputDirSingleType(t *testing.T) {
 	dir := t.TempDir()
 	// Copy the example xlsx into a temp dir so collectWorkbooks finds it.
 	xlsxDst := filepath.Join(dir, "example.xlsx")
-	data, err := os.ReadFile(xlsx) // #nosec G304, test-only read of a repo asset
+	data, err := bctest.ReadFile(xlsx)
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(xlsxDst, data, 0o644))
 
@@ -490,7 +601,7 @@ func TestPrintInputDirSingleTypeWithOutput(t *testing.T) {
 	xlsx := findExampleXLSXForCmd(t)
 	dir := t.TempDir()
 	xlsxDst := filepath.Join(dir, "example.xlsx")
-	data, err := os.ReadFile(xlsx) // #nosec G304, test-only read of a repo asset
+	data, err := bctest.ReadFile(xlsx)
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(xlsxDst, data, 0o644))
 

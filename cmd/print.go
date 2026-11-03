@@ -102,6 +102,9 @@ func (o *printOptions) run(cmd *cobra.Command, args []string) error {
 	var sources []pdf.SourceWorkbook
 	var sourcesLabel string // used in error messages
 	var tempDir string
+	// reportErr holds a warning or notice that could not be written. The
+	// command goes on, and returns it joined with its outcome.
+	var reportErr error
 
 	if o.inputDir != "" {
 		var err error
@@ -125,14 +128,20 @@ func (o *printOptions) run(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return fmt.Errorf("create temp dir: %w", err)
 		}
-		defer func() { _ = os.RemoveAll(tempDir) }()
+		defer func() {
+			if err := os.RemoveAll(tempDir); err != nil {
+				cmd.PrintErrf("warning: could not remove temp dir %s: %v\n", tempDir, err)
+			}
+		}()
 
 		var skipped []engine.SkippedCompetition
 		sources, skipped, err = eng.ExportTournamentWorkbooks(tempDir)
 		if err != nil {
 			return fmt.Errorf("export tournament workbooks: %w", err)
 		}
-		reportSkippedCompetitions(cmd, skipped)
+		// A warning that cannot be written does not stop the PDFs: they are
+		// made, and the failed write is returned with the outcome at the end.
+		reportErr = reportSkippedCompetitions(cmd, skipped)
 		sourcesLabel = o.tournamentData
 
 		// Every competition was skipped (e.g. an all-Swiss tournament): there
@@ -143,23 +152,25 @@ func (o *printOptions) run(cmd *cobra.Command, args []string) error {
 		// was already named in a warning above via reportSkippedCompetitions.
 		// Exit cleanly with an informative note instead.
 		if len(sources) == 0 {
-			_, _ = fmt.Fprintln(cmd.ErrOrStderr(), "no exportable competitions found; nothing to print")
-			if o.failOnSkipAll {
-				return fmt.Errorf("all %d competition(s) were skipped; nothing to print (--fail-on-skip-all)", len(skipped))
+			if _, err := fmt.Fprintln(cmd.ErrOrStderr(), "no exportable competitions found; nothing to print"); err != nil {
+				reportErr = errors.Join(reportErr, fmt.Errorf("report nothing to print: %w", err))
 			}
-			return nil
+			if o.failOnSkipAll {
+				return errors.Join(reportErr, fmt.Errorf("all %d competition(s) were skipped; nothing to print (--fail-on-skip-all)", len(skipped)))
+			}
+			return reportErr
 		}
 	}
 
 	gen, err := pdf.NewGenerator()
 	if err != nil {
 		if errors.Is(err, pdf.ErrSofficeNotFound) {
-			return fmt.Errorf("PDF generation requires LibreOffice.\n  Install it via your platform's package manager and ensure 'soffice' is on PATH,\n  or set $LIBREOFFICE_PATH to the soffice binary.\n(%w)", err)
+			return errors.Join(reportErr, fmt.Errorf("PDF generation requires LibreOffice.\n  Install it via your platform's package manager and ensure 'soffice' is on PATH,\n  or set $LIBREOFFICE_PATH to the soffice binary.\n(%w)", err))
 		}
-		return err
+		return errors.Join(reportErr, err)
 	}
 
-	return o.generatePDFs(cmd, gen, sources, sourcesLabel)
+	return errors.Join(reportErr, o.generatePDFs(cmd, gen, sources, sourcesLabel))
 }
 
 // generatePDFs is the shared tail: given a generator and sources, run the
@@ -179,8 +190,7 @@ func (o *printOptions) generatePDFs(cmd *cobra.Command, gen *pdf.Generator, sour
 		if err != nil {
 			return err
 		}
-		reportOutputs(cmd, out)
-		return nil
+		return reportOutputs(cmd, out)
 	}
 
 	// Single type. Exactly one of --output / --output-dir must be given;
@@ -220,8 +230,7 @@ func (o *printOptions) generatePDFs(cmd *cobra.Command, gen *pdf.Generator, sour
 		}
 		produced = o.output
 	}
-	reportOutputs(cmd, map[string]string{o.pdfType: produced})
-	return nil
+	return reportOutputs(cmd, map[string]string{o.pdfType: produced})
 }
 
 // collectWorkbooks enumerates *.xlsx in dir (sorted), marking team workbooks
@@ -266,22 +275,28 @@ func collectWorkbooks(dir string, teamFiles []string) ([]pdf.SourceWorkbook, err
 // since it is a warning about an incomplete result rather than the command's
 // normal output. A silent omission would leave the operator believing the
 // printed booklet covers every competition when it does not.
-func reportSkippedCompetitions(cmd *cobra.Command, skipped []engine.SkippedCompetition) {
+func reportSkippedCompetitions(cmd *cobra.Command, skipped []engine.SkippedCompetition) error {
 	for _, s := range skipped {
-		_, _ = fmt.Fprintf(cmd.ErrOrStderr(),
-			"warning: skipped competition %q (%s): %s\n", s.Name, s.ID, s.Reason)
+		if _, err := fmt.Fprintf(cmd.ErrOrStderr(),
+			"warning: skipped competition %q (%s): %s\n", s.Name, s.ID, s.Reason); err != nil {
+			return fmt.Errorf("report skipped competitions: %w", err)
+		}
 	}
+	return nil
 }
 
-func reportOutputs(cmd *cobra.Command, out map[string]string) {
+func reportOutputs(cmd *cobra.Command, out map[string]string) error {
 	types := make([]string, 0, len(out))
 	for t := range out {
 		types = append(types, t)
 	}
 	sort.Strings(types)
 	for _, t := range types {
-		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "wrote %s → %s\n", t, out[t])
+		if _, err := fmt.Fprintf(cmd.OutOrStdout(), "wrote %s → %s\n", t, out[t]); err != nil {
+			return fmt.Errorf("report outputs: %w", err)
+		}
 	}
+	return nil
 }
 
 func init() {

@@ -1,9 +1,11 @@
 package state
 
 import (
+	"bytes"
 	"encoding/csv"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log"
 	"os"
 	"strings"
@@ -192,10 +194,23 @@ func (e *duplicateTeamMemberError) Is(target error) bool { return target == ErrD
 var ErrCompetitionNotInSetup = errors.New("competition has already started")
 
 // ErrReservedName is returned by the participant write paths when a name
-// matches an internal bracket-placeholder pattern (e.g. "Pool A-1st",
-// "Winner of r1-m3").  Such names would be silently misclassified as
-// unresolved bracket slots, making knockout matches permanently unscoreable.
+// matches an internal bracket-placeholder pattern in any case (e.g. "Pool
+// A-1st", "pool a-1st", "Winner of r1-m3").  Such names would be silently
+// misclassified as unresolved bracket slots, making knockout matches
+// permanently unscoreable.
 var ErrReservedName = errors.New("participant name collides with a reserved bracket-placeholder pattern")
+
+// RefuseReservedNames is the one reserved-name refusal: ErrReservedName naming
+// the first player helper.IsReservedRosterName (the roster rule, which ignores
+// case) refuses, or nil. saveParticipantsNoLock asks it of every roster write,
+// so a roster already holding such a name is refused on its next save until
+// that name is changed; the CLI asks it of the roster it reads.
+func RefuseReservedNames(players []domain.Player) error {
+	if refused, ok := helper.FirstReservedRosterName(players); ok {
+		return fmt.Errorf("%w: %q", ErrReservedName, refused)
+	}
+	return nil
+}
 
 // LoadParticipantsOpts controls optional behavior in LoadParticipants.
 type LoadParticipantsOpts struct {
@@ -273,6 +288,23 @@ func (s *Store) loadParticipants(compID string, withZekkenName bool, opts LoadPa
 }
 
 func (s *Store) loadParticipantsNoLock(compID string, withZekkenName bool, opts LoadParticipantsOpts) ([]domain.Player, error) {
+	players, _, err := s.readParticipantsNoLock(compID, withZekkenName, opts)
+	return players, err
+}
+
+// participantsRead is what a participants cache entry holds: the roster and
+// whether participants.csv holds text not yet in the stored form
+// (helper.CreatePlayersFromRecords' textChanged), cached together so a cache
+// hit answers both.
+type participantsRead struct {
+	players     []domain.Player
+	textChanged bool
+}
+
+// readParticipantsNoLock is loadParticipantsNoLock that also reports whether
+// the file holds a name, dojo or zekken not yet in the form the roster stores,
+// for the legacy upgrade's roster-text step (upgradeRosterTextLocked).
+func (s *Store) readParticipantsNoLock(compID string, withZekkenName bool, opts LoadParticipantsOpts) ([]domain.Player, bool, error) {
 	// Use a virtual filename for cache to distinguish between with/without
 	// seeds AND between the three possible parse modes
 	// (HasIDs=&true / HasIDs=&false / nil → auto-detect).
@@ -302,11 +334,11 @@ func (s *Store) loadParticipantsNoLock(compID string, withZekkenName bool, opts 
 	mtime += s.FileMtime(compID, "config.md")
 
 	if cache.data != nil && cache.mtime == mtime {
-		p := cache.data.([]domain.Player)
-		res := make([]domain.Player, len(p))
-		copy(res, p)
+		read := cache.data.(participantsRead)
+		res := make([]domain.Player, len(read.players))
+		copy(res, read.players)
 		cache.mu.RUnlock()
-		return res, nil
+		return res, read.textChanged, nil
 	}
 	cache.mu.RUnlock()
 
@@ -314,21 +346,24 @@ func (s *Store) loadParticipantsNoLock(compID string, withZekkenName bool, opts 
 	defer cache.mu.Unlock()
 	// Re-check after acquiring write lock
 	if cache.data != nil && cache.mtime == mtime {
-		p := cache.data.([]domain.Player)
-		res := make([]domain.Player, len(p))
-		copy(res, p)
-		return res, nil
+		read := cache.data.(participantsRead)
+		res := make([]domain.Player, len(read.players))
+		copy(res, read.players)
+		return res, read.textChanged, nil
 	}
 
-	path := s.compPath(compID, "participants.csv")
-	records, err := helper.ReadCSVFile(path)
+	raw, err := s.root.readFile(s.compPath(compID, "participants.csv"))
 	if err != nil {
 		if os.IsNotExist(err) {
-			cache.data = []domain.Player{}
+			cache.data = participantsRead{players: []domain.Player{}}
 			cache.mtime = mtime
-			return []domain.Player{}, nil
+			return []domain.Player{}, false, nil
 		}
-		return nil, err
+		return nil, false, err
+	}
+	records, recordLines, err := helper.ReadCSVRecords(bytes.NewReader(raw))
+	if err != nil {
+		return nil, false, err
 	}
 
 	// Detect ID column: when callers pass an explicit HasIDs hint we
@@ -358,7 +393,11 @@ func (s *Store) loadParticipantsNoLock(compID string, withZekkenName bool, opts 
 		hasIDs = *opts.HasIDs
 		trustHint = *opts.HasIDs
 	default:
-		if comp, _ := s.loadCompetitionLocked(compID); comp != nil && comp.HasParticipantIDs {
+		comp, compErr := s.loadCompetitionLocked(compID)
+		if compErr != nil {
+			log.Printf("state: loadParticipants %s: competition config unreadable, the id column is detected from the rows: %v", compID, compErr)
+		}
+		if comp != nil && comp.HasParticipantIDs {
 			hasIDs = true
 			trustHint = true
 		} else {
@@ -370,8 +409,9 @@ func (s *Store) loadParticipantsNoLock(compID string, withZekkenName bool, opts 
 	var ids []string
 	var checkedInFlags []bool
 	var playerRecords [][]string
+	var playerLines []int // the file line of each playerRecords row
 
-	for _, record := range records {
+	for ri, record := range records {
 		isCheckedIn := false
 
 		// Determine data fields (everything after the id if present).
@@ -436,6 +476,7 @@ func (s *Store) loadParticipantsNoLock(compID string, withZekkenName bool, opts 
 			ids = append(ids, id)
 		}
 		playerRecords = append(playerRecords, dataFields)
+		playerLines = append(playerLines, recordLines[ri])
 		checkedInFlags = append(checkedInFlags, isCheckedIn)
 	}
 
@@ -446,9 +487,9 @@ func (s *Store) loadParticipantsNoLock(compID string, withZekkenName bool, opts 
 	// see it and repair the dojo through the edit UI. Only CreatePlayers
 	// (helper/tournament.go), the CLI/web-preview/import entry point that
 	// builds a roster FRESH from raw text, requires one.
-	players, err := helper.CreatePlayersFromRecords(playerRecords, withZekkenName, false)
+	players, textChanged, err := helper.CreatePlayersFromRecords(playerRecords, withZekkenName, false)
 	if err != nil {
-		return nil, err
+		return nil, false, locatedRowsError(err, playerLines)
 	}
 
 	for i := range players {
@@ -466,15 +507,20 @@ func (s *Store) loadParticipantsNoLock(compID string, withZekkenName bool, opts 
 		// This is a display read, so it must show what is actually stored. It
 		// used to validate, and a set the operator had not finished entering
 		// (seed 4 typed before 1 to 3, which the seeding panel persists as it
-		// goes) came back as an error, was discarded by the blank identifier
-		// below, and rendered as "0 seeded" with no warning anywhere. The
+		// goes) came back as an error, was discarded,
+		// and rendered as "0 seeded" with no warning anywhere. The
 		// operator was never told, and their next edit wrote that empty view
 		// back over the file. The admin console already knows how to say "seed
 		// gap detected: rank 1, 2, 3 are missing" -- it just has to be given the
 		// seeds to see it. Refusal belongs at the point seeds are USED (the draw
 		// pipeline, which returns a 400 naming the problem), not at the point
 		// they are shown.
-		seeds, _ := helper.ReadSeedsFileRaw(s.compPath(compID, "seeds.csv"))
+		seeds, seedsErr := s.readSeedsRaw(compID)
+		if seedsErr != nil && !errors.Is(seedsErr, fs.ErrNotExist) {
+			// The roster is still shown, unseeded: a seeds file that cannot be
+			// read must not hide the participants.
+			log.Printf("state: loadParticipants %s: seeds unreadable, the roster is shown without them: %v", compID, seedsErr)
+		}
 		if len(seeds) > 0 {
 			// Merge via the ONE shared resolver every seed matcher in the
 			// codebase now uses (domain.RosterIndex.LookupSeed): a row's
@@ -494,12 +540,12 @@ func (s *Store) loadParticipantsNoLock(compID string, withZekkenName bool, opts 
 	}
 	// helper.Player is a type alias for domain.Player (NFR-007); the
 	// parser output can flow straight into the cache without conversion.
-	cache.data = players
+	cache.data = participantsRead{players: players, textChanged: textChanged}
 	cache.mtime = mtime
 
 	res := make([]domain.Player, len(players))
 	copy(res, players)
-	return res, nil
+	return res, textChanged, nil
 }
 
 // SaveParticipants persists the roster. It loads the competition under the
@@ -737,29 +783,19 @@ func (s *Store) updateParticipantNoLock(compID string, pid string, withZekkenNam
 		return nil, err
 	}
 
-	// Reserved-name check before TitleCase, but ONLY when the name actually
-	// changed.  Check-in transforms leave the name untouched; running the
-	// guard unconditionally would break check-in for any participant whose
-	// stored name happens to match the reserved pattern (however unlikely).
-	// When the name DID change, check the raw pre-TitleCase value: TitleCase
-	// alters ordinal suffixes ("3rd"→"3Rd") so the post-TitleCase form would
-	// never match the reserved regex.
-	// Detect rename by comparing raw values (before TrimSpace) so that a
-	// stored name like "Alice" is never spuriously considered changed by a
-	// check-in transform that doesn't touch Name at all.  TrimSpace is only
-	// for the regex match, not for change detection.
-	if players[foundIdx].Name != oldName {
-		trimmedName := strings.TrimSpace(players[foundIdx].Name)
-		if helper.IsReservedParticipantName(trimmedName) {
-			return nil, fmt.Errorf("%w: %q", ErrReservedName, trimmedName)
-		}
-	}
+	// Canonicalize to the form every roster write stores (name and dojo
+	// title-cased, zekken in capitals), BEFORE the identity comparison below:
+	// participants.csv and seeds.csv then store the same form that will be
+	// read back, the answer names it, and an edit that only changes the case
+	// of a name or a dojo is no identity change at all.
+	helper.CanonicalizePlayerText(&players[foundIdx])
 
-	// Canonicalize to match what CreatePlayers produces on load (Title-case),
-	// so participants.csv and seeds.csv store the same form that will be read
-	// back; otherwise a rename to "alice cooper" would be read as "Alice Cooper"
-	// while seeds.csv still holds "alice cooper", breaking seed merging.
-	players[foundIdx].Name = helper.TitleCaseName(players[foundIdx].Name)
+	// The roster rule saveParticipantsNoLock asks, asked here first because
+	// the seeds.csv rewrite below lands before that save: a rename the save
+	// would refuse must not have renamed the seed already.
+	if err := RefuseReservedNames(players); err != nil {
+		return nil, err
+	}
 
 	// Duplicate guard: reject if any OTHER participant already has the same
 	// (normalizedName, normalizedDojo) pair. This runs unconditionally; even
@@ -799,7 +835,7 @@ func (s *Store) updateParticipantNoLock(compID string, pid string, withZekkenNam
 		// the rename and leave seeds.csv naming a competitor who no longer
 		// exists under that name, which is a worse state than the incomplete
 		// seeding the operator is in the middle of fixing.
-		seeds, loadErr = helper.ReadSeedsFileRaw(seedsPath)
+		seeds, loadErr = s.readSeedsRaw(compID)
 		switch {
 		case loadErr == nil:
 			// seeds loaded; will rename below.
@@ -1003,16 +1039,7 @@ func (s *Store) AddParticipant(compID string, p domain.Player, withZekkenName bo
 		}
 	}
 
-	// Reserved-name check before TitleCase so the error fires on the raw input
-	// ("Pool B-3rd") even though TitleCase would transform the ordinal suffix to
-	// a non-matching form ("Pool B-3Rd"). The bulk SaveParticipants path skips
-	// TitleCase, so saveParticipantsNoLock also carries this guard for that path.
-	trimmedName := strings.TrimSpace(p.Name)
-	if helper.IsReservedParticipantName(trimmedName) {
-		return nil, fmt.Errorf("%w: %q", ErrReservedName, trimmedName)
-	}
-
-	p.Name = helper.TitleCaseName(p.Name)
+	helper.CanonicalizePlayerText(&p)
 	p.ID = newParticipantID()
 	p.PoolPosition = int64(len(players))
 	if p.DisplayName == "" {
@@ -1195,8 +1222,8 @@ func nonBlankMetadata(metadata []string) []string {
 // renamed team's stored bucket goes unconsulted, so an existing duplicate
 // is re-reported as fresh and an unrelated rename is refused), would miss
 // a case/whitespace drift between the persisted and freshly-parsed name
-// (the bulk save persists the raw request name while the CSV parse
-// Title-cases on every read), and -- worst -- would silently MERGE two
+// (the paste box sends the name as typed, and this check runs before the
+// save title-cases it), and -- worst -- would silently MERGE two
 // teams that legitimately share a name (the sibling rule grandfathers
 // exactly that case) into one bucket, combining their member counts and
 // failing OPEN. Keying on the bare participant id instead would be worse,
@@ -1385,15 +1412,13 @@ func (s *Store) saveParticipantsNoLock(compID string, players []domain.Player, w
 		}
 	}
 
-	// Reserved-name guard: names arriving via the bulk SaveParticipants path
-	// may be raw (neither TitleCased nor trimmed), so trim before matching to
-	// catch inputs like " Pool A-1st " that would otherwise slip through.
-	// AddParticipant and updateParticipantNoLock apply their own pre-TitleCase
-	// checks before reaching here; for those paths the guard is defence-in-depth.
-	for _, p := range players {
-		if trimmed := strings.TrimSpace(p.Name); helper.IsReservedParticipantName(trimmed) {
-			return fmt.Errorf("%w: %q", ErrReservedName, trimmed)
-		}
+	// Reserved-name guard, the one place the roster rule is asked of a write
+	// (updateParticipantNoLock asks it early too, only because its seeds.csv
+	// rewrite lands before this call). Names arrive raw from the paste box
+	// and title-cased from an add, an edit or an import; the rule ignores
+	// case, so every spelling is refused alike.
+	if err := RefuseReservedNames(players); err != nil {
+		return err
 	}
 
 	// bc-tmid: migrate a team's squad OUT of Metadata BEFORE this write can
@@ -1424,11 +1449,15 @@ func (s *Store) saveParticipantsNoLock(compID string, players []domain.Player, w
 	// exists to rescue. marshalParticipantsCSV keeps its own mint for its
 	// other caller; for this path it is now a no-op.
 	//
-	// A copy, because the caller's slice is the caller's.
+	// A copy, because the caller's slice is the caller's. Its text is put in
+	// the form the roster stores (helper.CanonicalizePlayerText) here, the
+	// chokepoint every roster write funnels through, so the paste box's raw
+	// rows land on disk as an add or an edit would store them.
 	stamped := make([]domain.Player, len(players))
 	copy(stamped, players)
 	mintedByCompetitor := make(map[string]string)
 	for i := range stamped {
+		helper.CanonicalizePlayerText(&stamped[i])
 		if !helper.ParticipantIDMissing(stamped[i].ID) {
 			continue
 		}

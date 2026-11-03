@@ -168,4 +168,16 @@ describe('squadMemberIdForUniqueName (the id a typed name may be written under)'
   it('never matches the blank name of an unfilled position', () => {
     expect(squadMemberIdForUniqueName(SQUAD, '')).toBe('');
   });
+
+  it('finds a member whatever case the name is typed in', () => {
+    // The server title-cases a member's name, so "ito" typed at the court is
+    // the member stored as "Ito", never a new one.
+    expect(squadMemberIdForUniqueName(SQUAD, 'ito')).toBe('m2');
+    expect(squadMemberIdForUniqueName(SQUAD, 'SATO')).toBe('m1');
+  });
+
+  it('resolves nothing for two teammates whose names differ only in case', () => {
+    const twins = [{ id: 'm1', index: 1, name: 'Sato' }, { id: 'm2', index: 2, name: 'sato' }];
+    expect(squadMemberIdForUniqueName(twins, 'Sato')).toBe('');
+  });
 });

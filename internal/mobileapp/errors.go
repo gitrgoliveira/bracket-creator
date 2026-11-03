@@ -3,8 +3,10 @@ package mobileapp
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"log"
 	"net/http"
+	"os"
 
 	"github.com/gin-gonic/gin"
 
@@ -26,7 +28,7 @@ import (
 // Use this for the catch-all/unexpected 500 path. Specific, user-actionable
 // failures should still return an explicit 4xx with their own message.
 func internalError(c *gin.Context, err error, publicMsg ...string) {
-	log.Printf("mobileapp: %s %s: %v", c.Request.Method, c.Request.URL.Path, err)
+	logRequestError(c, err)
 	// A transaction whose log committed and whose file write then failed
 	// (state.ErrTxCommitted) is a disk fault, not a refused write: the change
 	// is kept and lands on restart, or with the next write the disk accepts.
@@ -64,6 +66,31 @@ func internalError(c *gin.Context, err error, publicMsg ...string) {
 		msg = publicMsg[0]
 	}
 	c.JSON(http.StatusInternalServerError, gin.H{"error": msg})
+}
+
+// logRequestError writes err to the server log with the request's method and
+// path, for a failure the response cannot carry (its status is already sent,
+// or the body is deliberately opaque).
+func logRequestError(c *gin.Context, err error) {
+	// %q: the path is the client's, and quoting keeps a decoded newline in
+	// it from forging a log line.
+	log.Printf("mobileapp: %s %q: %v", c.Request.Method, c.Request.URL.Path, err)
+}
+
+// removeFile removes path, treating a file that is already gone as removed.
+func removeFile(path string) error {
+	if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	return nil
+}
+
+// removeFileOrLog removes path for a handler that has nothing to answer the
+// failure with, and logs a removal that failed: the file is left on disk.
+func removeFileOrLog(path string) {
+	if err := removeFile(path); err != nil {
+		log.Printf("mobileapp: could not remove %s, it is left on disk: %v", path, err)
+	}
 }
 
 // txResponse is an answer a handler decides inside a transaction and writes

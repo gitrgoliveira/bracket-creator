@@ -128,7 +128,7 @@ describe('competitionNextSteps: basic shape', () => {
       expect(typeof step.id).toBe('string');
       expect(typeof step.label).toBe('string');
       expect(typeof step.detail).toBe('string');
-      expect(['done', 'active', 'todo']).toContain(step.state);
+      expect(['done', 'active', 'pending']).toContain(step.state);
       // section is string or null
       expect(step.section === null || typeof step.section === 'string').toBe(true);
       // cta (active-step button label) is string or null
@@ -157,7 +157,7 @@ describe('competitionNextSteps: basic shape', () => {
     expect(steps[0].state).toBe('done');
   });
 
-  it('last step (generate) is always todo or active, never done', () => {
+  it('last step (generate) is always pending or active, never done', () => {
     const steps = competitionNextSteps(makeComp());
     const last = steps[steps.length - 1];
     expect(last.id).toBe('generate');
@@ -174,7 +174,7 @@ describe('competitionNextSteps: basic shape', () => {
     const steps = competitionNextSteps(makeComp());
     const activeIdx = steps.findIndex(s => s.state === 'active');
     for (let i = activeIdx + 1; i < steps.length; i++) {
-      expect(steps[i].state).toBe('todo');
+      expect(steps[i].state).toBe('pending');
     }
   });
 });
@@ -182,6 +182,51 @@ describe('competitionNextSteps: basic shape', () => {
 // ---------------------------------------------------------------------------
 // Individual competition: setup states
 // ---------------------------------------------------------------------------
+// D26: participants.csv unreadable. The roster arrives empty, so a step that
+// says "0 added, add participants" would point at a page that shows only the
+// file's notice.
+describe('competitionNextSteps: participants.csv unreadable', () => {
+  const unreadable = { kind: 'corrupt-file', file: 'participants.csv', line: 0, column: 0, detail: 'could not be opened' };
+
+  it('leaves out the Add participants step', () => {
+    const steps = competitionNextSteps(makeComp({ players: [], dataIssues: [unreadable] }));
+    expect(steps.find(s => s.id === 'participants')).toBeUndefined();
+    expect(steps.some(s => /Add participants/.test(s.cta || ''))).toBe(false);
+  });
+
+  it('does not ask for participants on the generate step either', () => {
+    const steps = competitionNextSteps(makeComp({ players: [], dataIssues: [unreadable] }));
+    const gen = steps.find(s => s.id === 'generate');
+    expect(gen.detail).not.toMatch(/Add at least 2/);
+    expect(gen.detail).toBe('Repair the roster first: see the notice above');
+  });
+
+  // No seeding CTA leads the page while there is no roster: the generate step
+  // takes `active` with no button (the repair is the banner's Reload), and the
+  // settings step drops the seeds.
+  it('leads with the repair, not a seeding call to action', () => {
+    const steps = competitionNextSteps(makeComp({ players: [], dataIssues: [unreadable] }));
+    const gen = steps.find(s => s.id === 'generate');
+    const settings = steps.find(s => s.id === 'settings');
+    expect(gen.state).toBe('active');
+    expect(gen.cta).toBeNull();
+    expect(settings.state).toBe('pending');
+    expect(settings.label).toBe('Review settings');
+    expect(settings.detail).not.toMatch(/seed/i);
+  });
+
+  it('quotes with curly marks in the create step', () => {
+    const steps = competitionNextSteps(makeComp({ name: 'Open', players: [], dataIssues: [unreadable] }));
+    expect(steps.find(s => s.id === 'create').detail).toBe('“Open” created');
+  });
+
+  it('keeps the step for a located fault on another file, and for an advisory note', () => {
+    const other = { kind: 'corrupt-file', file: 'bracket.json', line: 2, column: 1, detail: 'x' };
+    const advisory = { kind: 'missing-ids', file: 'participants.csv', detail: 'No id on file.' };
+    expect(competitionNextSteps(makeComp({ dataIssues: [other, advisory] })).find(s => s.id === 'participants')).toBeTruthy();
+  });
+});
+
 describe('competitionNextSteps: individual, 0 players', () => {
   it('participants step is active when 0 players', () => {
     const steps = competitionNextSteps(makeComp({ players: [] }));
@@ -220,10 +265,10 @@ describe('competitionNextSteps: individual, 0 players', () => {
     expect(s.detail).toMatch(/2 seed/i);
   });
 
-  it('generate step is todo when players < 2', () => {
+  it('generate step is pending when players < 2', () => {
     const steps = competitionNextSteps(makeComp({ players: [] }));
     const g = steps.find(s => s.id === 'generate');
-    expect(g.state).toBe('todo');
+    expect(g.state).toBe('pending');
   });
 
   it('generate step detail mentions add participants when < 2 players', () => {
@@ -344,14 +389,14 @@ describe('competitionNextSteps: generate step under a court block', () => {
 
   it('points at the header button when nothing blocks the draw', () => {
     const step = generateStep(makeComp({ players: twoPlayers(), courts: ['A', 'B'] }), ['A', 'B', 'C']);
-    expect(step.detail).toBe('Use the "Generate draw" button in the header above');
+    expect(step.detail).toBe('Use the “Generate draw” button in the header above');
     expect(step.section).toBeNull();
     expect(step.cta).toBeNull();
   });
 
   it('names the blocker and routes to Settings instead', () => {
     const step = generateStep(makeComp({ players: twoPlayers(), courts: ['A', 'B', 'C'] }), ['A', 'B', 'C']);
-    expect(step.detail).not.toContain('Use the "Generate draw" button');
+    expect(step.detail).not.toContain('Use the “Generate draw” button');
     expect(step.detail).toContain('3 shiaijo cannot be paired down to a single bracket');
     expect(step.detail).toContain('Reassign shiaijo in Settings.');
     expect(step.section).toBe('settings');
@@ -368,7 +413,7 @@ describe('competitionNextSteps: generate step under a court block', () => {
 
   it('leaves league alone: the count rule does not govern its courts', () => {
     const step = generateStep(makeComp({ format: 'league', players: twoPlayers(), courts: ['A', 'B', 'C'] }), ['A', 'B', 'C']);
-    expect(step.detail).toBe('Use the "Generate draw" button in the header above');
+    expect(step.detail).toBe('Use the “Generate draw” button in the header above');
   });
 
   it('applies the count rule without a tournament court list', () => {
@@ -389,7 +434,7 @@ describe('competitionNextSteps: generate step under a court block', () => {
   // The CTA authored on this step could never render: only an `active` step
   // draws its button, and "Review seeds & settings" is emitted non-done
   // forever (there is no "seeds reviewed" signal), so it took `active` on
-  // every render and the generate step was always `todo`.
+  // every render and the generate step was always `pending`.
   it('is the ACTIVE step while it is blocked, so its CTA can render', () => {
     const step = generateStep(makeComp({ players: twoPlayers(), courts: ['A', 'B', 'C'] }), ['A', 'B', 'C']);
     expect(step.cta).toBe('Reassign shiaijo →');
@@ -400,14 +445,14 @@ describe('competitionNextSteps: generate step under a court block', () => {
   it('demotes the never-completing settings step while the draw is blocked', () => {
     // Otherwise two buttons on the same card both navigate to Settings.
     const steps = competitionNextSteps(makeComp({ players: twoPlayers(), courts: ['A', 'B', 'C'] }), ['A', 'B', 'C']);
-    expect(steps.find(s => s.id === 'settings').state).toBe('todo');
+    expect(steps.find(s => s.id === 'settings').state).toBe('pending');
     expect(steps.filter(s => s.state === 'active').map(s => s.id)).toEqual(['generate']);
   });
 
   it('leaves the ordinary checklist alone when nothing blocks the draw', () => {
     const steps = competitionNextSteps(makeComp({ players: twoPlayers(), courts: ['A', 'B'] }), ['A', 'B', 'C']);
     expect(steps.filter(s => s.state === 'active').map(s => s.id)).toEqual(['settings']);
-    expect(steps.find(s => s.id === 'generate').state).toBe('todo');
+    expect(steps.find(s => s.id === 'generate').state).toBe('pending');
   });
 
   it('does not jump the queue while participants are still missing', () => {

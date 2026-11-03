@@ -9,6 +9,7 @@ import (
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
+	bctest "github.com/gitrgoliveira/bracket-creator/internal/test"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -36,7 +37,7 @@ func TestLegacyParticipantsNotRewrittenOnRead(t *testing.T) {
 	require.Len(t, players, 2)
 	assert.Equal(t, "Aiko Sato", players[0].Name)
 
-	b, err := os.ReadFile(filepath.Join(dir, "competitions", "c1", "participants.csv"))
+	b, err := bctest.ReadFile(filepath.Join(dir, "competitions", "c1", "participants.csv"))
 	require.NoError(t, err)
 	assert.Equal(t, legacy, string(b), "reads must not rewrite the roster file")
 }
@@ -95,7 +96,7 @@ func TestLoadCompetitionFoldsLegacyPlayoffsFormat(t *testing.T) {
 	compDir := filepath.Join(dir, "competitions", "bracket-court-d")
 	require.NoError(t, os.MkdirAll(compDir, 0o700))
 
-	fixture, err := os.ReadFile(filepath.Join("testdata", "legacy_playoffs_config.md"))
+	fixture, err := bctest.ReadFile(filepath.Join("testdata", "legacy_playoffs_config.md"))
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(filepath.Join(compDir, "config.md"), fixture, 0o600))
 
@@ -136,17 +137,17 @@ func TestLoadCompetitionDoesNotRewriteConfigOnDisk(t *testing.T) {
 
 	compDir := filepath.Join(dir, "competitions", "bracket-court-d")
 	require.NoError(t, os.MkdirAll(compDir, 0o700))
-	fixture, err := os.ReadFile(filepath.Join("testdata", "legacy_playoffs_config.md"))
+	fixture, err := bctest.ReadFile(filepath.Join("testdata", "legacy_playoffs_config.md"))
 	require.NoError(t, err)
 	configPath := filepath.Join(compDir, "config.md")
 	require.NoError(t, os.WriteFile(configPath, fixture, 0o600))
-	before, err := os.ReadFile(configPath)
+	before, err := bctest.ReadFile(configPath)
 	require.NoError(t, err)
 
 	_, err = s.LoadCompetition("bracket-court-d")
 	require.NoError(t, err)
 
-	after, err := os.ReadFile(configPath)
+	after, err := bctest.ReadFile(configPath)
 	require.NoError(t, err)
 	assert.Equal(t, before, after, "LoadCompetition itself must never rewrite config.md")
 }
@@ -182,7 +183,7 @@ func TestSaveConvergesLegacyConfigOnDisk(t *testing.T) {
 
 	compDir := filepath.Join(dir, "competitions", "bracket-court-d")
 	require.NoError(t, os.MkdirAll(compDir, 0o700))
-	fixture, err := os.ReadFile(filepath.Join("testdata", "legacy_playoffs_config.md"))
+	fixture, err := bctest.ReadFile(filepath.Join("testdata", "legacy_playoffs_config.md"))
 	require.NoError(t, err)
 	require.Contains(t, string(fixture), "mirror: false", "fixture must still exercise the stale mirror key")
 	require.NoError(t, os.WriteFile(filepath.Join(compDir, "config.md"), fixture, 0o600))
@@ -191,7 +192,7 @@ func TestSaveConvergesLegacyConfigOnDisk(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, s.SaveCompetition(comp))
 
-	raw, err := os.ReadFile(filepath.Join(compDir, "config.md"))
+	raw, err := bctest.ReadFile(filepath.Join(compDir, "config.md"))
 	require.NoError(t, err)
 	assert.Contains(t, string(raw), "format: knockout")
 	assert.Contains(t, string(raw), "status: knockout")
@@ -233,7 +234,7 @@ func TestSaveConvergesLegacyMirrorKeyOnDisk(t *testing.T) {
 	require.NoError(t, err, "a stale mirror key must not stop the file loading")
 	require.NoError(t, s.SaveCompetition(comp))
 
-	raw, err := os.ReadFile(filepath.Join(compDir, "config.md"))
+	raw, err := bctest.ReadFile(filepath.Join(compDir, "config.md"))
 	require.NoError(t, err)
 	assertNoMirrorLine(t, raw)
 }
@@ -266,7 +267,7 @@ func TestLoadCompetitionWithMismatchedIDDoesNotCorruptAnotherCompetition(t *test
 		"---\n"
 	victimPath := filepath.Join(victimDir, "config.md")
 	require.NoError(t, os.WriteFile(victimPath, []byte(victimConfig), 0o600))
-	victimBefore, err := os.ReadFile(victimPath)
+	victimBefore, err := bctest.ReadFile(victimPath)
 	require.NoError(t, err)
 
 	// The "mismatched" competition: it lives in its own directory, but its
@@ -290,7 +291,7 @@ func TestLoadCompetitionWithMismatchedIDDoesNotCorruptAnotherCompetition(t *test
 	require.NotNil(t, comp)
 	assert.Equal(t, state.CompFormatKnockout, comp.Format, "the retired value still folds in memory")
 
-	victimAfter, err := os.ReadFile(victimPath)
+	victimAfter, err := bctest.ReadFile(victimPath)
 	require.NoError(t, err)
 	assert.Equal(t, victimBefore, victimAfter, "the victim competition's file must be byte-unchanged")
 
@@ -411,7 +412,7 @@ func TestLegacyPlayoffMatchDurationSecondsFoldsOntoKnockoutKey(t *testing.T) {
 	// (see TestLegacyUpgradeSweepConvergesConfigOnDisk). Either way the
 	// assertions below hold.
 	require.NoError(t, s.SaveCompetition(comp))
-	raw, err := os.ReadFile(filepath.Join(compDir, "config.md"))
+	raw, err := bctest.ReadFile(filepath.Join(compDir, "config.md"))
 	require.NoError(t, err)
 	assert.Contains(t, string(raw), "knockout_match_duration_seconds: 180")
 	assert.NotContains(t, string(raw), "playoff_match_duration_seconds")
@@ -427,14 +428,14 @@ func TestLegacyUpgradeSweepConvergesConfigOnDisk(t *testing.T) {
 	dir := t.TempDir()
 	compDir := filepath.Join(dir, "competitions", "bracket-court-d")
 	require.NoError(t, os.MkdirAll(compDir, 0o700))
-	fixture, err := os.ReadFile(filepath.Join("testdata", "legacy_playoffs_config.md"))
+	fixture, err := bctest.ReadFile(filepath.Join("testdata", "legacy_playoffs_config.md"))
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(filepath.Join(compDir, "config.md"), fixture, 0o600))
 
 	_, err = state.NewStore(dir) // the startup sweep runs synchronously, inside this call
 	require.NoError(t, err)
 
-	raw, err := os.ReadFile(filepath.Join(compDir, "config.md"))
+	raw, err := bctest.ReadFile(filepath.Join(compDir, "config.md"))
 	require.NoError(t, err)
 	assert.Contains(t, string(raw), "format: knockout")
 	assert.Contains(t, string(raw), "status: knockout")
@@ -471,7 +472,7 @@ func TestLegacyUpgradeSweepSkipsMismatchedCompetitionID(t *testing.T) {
 		"---\n"
 	victimPath := filepath.Join(victimDir, "config.md")
 	require.NoError(t, os.WriteFile(victimPath, []byte(victimConfig), 0o600))
-	victimBefore, err := os.ReadFile(victimPath)
+	victimBefore, err := bctest.ReadFile(victimPath)
 	require.NoError(t, err)
 
 	// The "mismatched" competition: it lives in its own directory, carries
@@ -488,17 +489,17 @@ func TestLegacyUpgradeSweepSkipsMismatchedCompetitionID(t *testing.T) {
 		"---\n"
 	mismatchedPath := filepath.Join(mismatchedDir, "config.md")
 	require.NoError(t, os.WriteFile(mismatchedPath, []byte(mismatchedConfig), 0o600))
-	mismatchedBefore, err := os.ReadFile(mismatchedPath)
+	mismatchedBefore, err := bctest.ReadFile(mismatchedPath)
 	require.NoError(t, err)
 
 	_, err = state.NewStore(dir) // runs the startup sweep over both directories
 	require.NoError(t, err)
 
-	victimAfter, err := os.ReadFile(victimPath)
+	victimAfter, err := bctest.ReadFile(victimPath)
 	require.NoError(t, err)
 	assert.Equal(t, victimBefore, victimAfter, "the victim competition's file must be byte-unchanged")
 
-	mismatchedAfter, err := os.ReadFile(mismatchedPath)
+	mismatchedAfter, err := bctest.ReadFile(mismatchedPath)
 	require.NoError(t, err)
 	assert.Equal(t, mismatchedBefore, mismatchedAfter,
 		"the mismatched file itself is also left unconverted: the guard skips the save entirely rather than writing it back under its own directory")
@@ -546,7 +547,7 @@ func TestLegacyUpgradeSweepConvergesBlankCompetitionID(t *testing.T) {
 	assert.Equal(t, "no-id-comp", comp.ID, "the ID is adopted from the directory")
 
 	// And the file itself converges, id included, instead of being skipped.
-	raw, err := os.ReadFile(filepath.Join(compDir, "config.md"))
+	raw, err := bctest.ReadFile(filepath.Join(compDir, "config.md"))
 	require.NoError(t, err)
 	assert.Contains(t, string(raw), "id: no-id-comp", "the missing id: is written back")
 	assert.Contains(t, string(raw), "format: knockout")
@@ -590,7 +591,7 @@ func TestLegacyUpgradeSweepKnockoutSecondsWinOverGlobalMinutes(t *testing.T) {
 	assert.Equal(t, 150, comp.KnockoutMatchDurationSeconds,
 		"the retired per-phase seconds key must win over the global whole-minute fallback, which would round up to 180")
 
-	raw, err := os.ReadFile(filepath.Join(compDir, "config.md"))
+	raw, err := bctest.ReadFile(filepath.Join(compDir, "config.md"))
 	require.NoError(t, err)
 	assert.Contains(t, string(raw), "knockout_match_duration_seconds: 150")
 	assert.NotContains(t, string(raw), "playoff_match_duration_seconds")
@@ -620,7 +621,7 @@ func TestLegacyUpgradeSweepFailureIsolatedPerCompetition(t *testing.T) {
 	compDir := filepath.Join(dir, "competitions", "locked-comp")
 	require.NoError(t, os.MkdirAll(compDir, 0o700))
 
-	fixture, err := os.ReadFile(filepath.Join("testdata", "legacy_playoffs_config.md"))
+	fixture, err := bctest.ReadFile(filepath.Join("testdata", "legacy_playoffs_config.md"))
 	require.NoError(t, err)
 	// The fixture's own id: is "bracket-court-d"; give this copy an id:
 	// matching ITS OWN directory instead, so bug 1's guard cannot be what

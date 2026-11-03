@@ -1,13 +1,9 @@
 import React from 'react';
 import { act } from '@testing-library/react';
 import { describe, it, expect, vi, afterAll } from 'vitest';
-import { mountApp, settle } from '../helpers/mount_app.js';
+import { mountApp, settle, propsProbe } from '../helpers/mount_app.js';
 
-const page = { props: null };
-function ProbeViewerCompetition(props) {
-  page.props = props;
-  return <div data-testid="viewer-competition" />;
-}
+const page = propsProbe(() => <div data-testid="viewer-competition" />);
 
 const detail = (id) => ({
   config: { id, name: 'Open', kind: 'individual', format: 'mixed', status: 'pools', courts: ['A'], date: '2026-11-01' },
@@ -20,7 +16,7 @@ const detail = (id) => ({
 const sse = { emit: null };
 
 const STUBBED_GLOBALS = {
-  ViewerCompetition: ProbeViewerCompetition,
+  ViewerCompetition: page.Component,
   API: {
     fetchTournament: vi.fn(async () => ({ name: 'T', mode: 'self-run', courts: ['A'] })),
     fetchCompetitions: vi.fn(async () => [

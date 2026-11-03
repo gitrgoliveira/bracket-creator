@@ -1,6 +1,7 @@
 package state
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"log"
@@ -308,9 +309,10 @@ func (s *Store) EnsureLegacyUpgraded(compID string) {
 		log.Printf("state: legacy competition-format upgrade for %s: %v", compID, err)
 	}
 	// One roster load shared by every step below: built
-	// LAZILY on first actual use, so a competition needing no repair at all
-	// never parses participants.csv, and loaded/indexed at most ONCE rather
-	// than once per step. Safe to share across steps despite the seeds step's
+	// LAZILY on first actual use, and loaded/indexed at most ONCE rather
+	// than once per step. The roster-text step loads it for every competition
+	// whose roster carries ids (has_participant_ids), into the store's
+	// participant cache for that parse mode (participantsCacheKey). Safe to share across steps despite the seeds step's
 	// own invalidateParticipantCaches call: that invalidates the STORE's
 	// file cache (so the NEXT independent Store.LoadParticipants call
 	// re-parses), but the seed-row backfill never touches participants.csv
@@ -321,6 +323,13 @@ func (s *Store) EnsureLegacyUpgraded(compID string) {
 	// so a roster that has none makes all of them no-ops.
 	if err := s.upgradeParticipantIDsLocked(compID, roster); err != nil {
 		log.Printf("state: legacy participant-id upgrade for %s: %v", compID, err)
+	}
+	// After the id repair, which this rewrite must never pre-empt by minting.
+	if err := s.upgradeRosterTextLocked(compID, roster); err != nil {
+		log.Printf("state: legacy roster-text upgrade for %s: %v", compID, err)
+	}
+	if err := s.upgradeAwardRecipientTextLocked(compID, roster); err != nil {
+		log.Printf("state: legacy award-recipient upgrade for %s: %v", compID, err)
 	}
 	if err := s.upgradeSeedRowsLocked(compID, roster); err != nil {
 		log.Printf("state: legacy seed-row upgrade for %s: %v", compID, err)
@@ -369,6 +378,11 @@ func (s *Store) EnsureLegacyUpgraded(compID string) {
 	if err := s.upgradeBracketLocked(compID, roster); err != nil {
 		log.Printf("state: legacy bracket upgrade for %s: %v", compID, err)
 	}
+	// After every id repair above, so a copy stamped in this pass takes the
+	// roster's spelling too.
+	if err := s.upgradeDrawSpellingLocked(compID, roster); err != nil {
+		log.Printf("state: legacy draw-spelling upgrade for %s: %v", compID, err)
+	}
 	// After the three id repairs above: a round lineup moves only onto a match
 	// its team is seated in by id.
 	if err := s.upgradeRoundLineupsLocked(compID, roster); err != nil {
@@ -381,6 +395,12 @@ func (s *Store) EnsureLegacyUpgraded(compID string) {
 	// it gives each match, so none of them is left without its member ids.
 	if err := s.upgradeLineupMemberIDsLocked(compID, roster); err != nil {
 		log.Printf("state: legacy lineup-member-id upgrade for %s: %v", compID, err)
+	}
+	// After every repair that resolves an id-less row by a member's exact
+	// name (the bout id repairs above, the lineup one just before), so each
+	// matched the names as they were stored.
+	if err := s.upgradeTeamMemberNamesLocked(compID, roster); err != nil {
+		log.Printf("state: legacy team-member-name upgrade for %s: %v", compID, err)
 	}
 	if err := s.upgradeTeamDefaultWinBoutPaddingLocked(compID, roster); err != nil {
 		log.Printf("state: legacy team-decision-bout-padding upgrade for %s: %v", compID, err)
@@ -470,7 +490,7 @@ func (s *Store) EnsureLegacyUpgraded(compID string) {
 // the files that do.
 func (s *Store) upgradeCompetitionFormatLocked(compID string) error {
 	path := s.compPath(compID, "config.md")
-	raw, err := os.ReadFile(path) // #nosec G304; path built by compPath, which enforces containment under the competitions dir
+	raw, err := s.root.readFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil // no config.md on disk for this id; nothing to converge
@@ -533,16 +553,19 @@ func (s *Store) sweepLegacyUpgrades() {
 // adds no locking of its own because it is never shared beyond a single
 // EnsureLegacyUpgraded call.
 type legacyUpgradeRoster struct {
-	store      *Store
-	compID     string
-	loaded     bool
-	index      *domain.RosterIndex
-	players    []domain.Player
-	comp       *Competition
-	compLoaded bool
-	compErr    error
-	withZekken bool
-	loadErr    error
+	store   *Store
+	compID  string
+	loaded  bool
+	index   *domain.RosterIndex
+	players []domain.Player
+	// textChanged: participants.csv holds a name, dojo or zekken not yet in
+	// the stored form (readParticipantsNoLock), read with players.
+	textChanged bool
+	comp        *Competition
+	compLoaded  bool
+	compErr     error
+	withZekken  bool
+	loadErr     error
 
 	// squadsLoaded / squadsData / squadsErr back the squads() accessor
 	// below (bc-tmid pass 2): the sub-bout and lineup member-id repairs
@@ -552,6 +575,12 @@ type legacyUpgradeRoster struct {
 	squadsLoaded bool
 	squadsData   map[string][]domain.TeamMember
 	squadsErr    error
+
+	// lineupsLoaded / lineupsData / lineupsErr back the lineups() accessor,
+	// lineups.yaml's sibling of the squads fields above.
+	lineupsLoaded bool
+	lineupsData   map[string]domain.TeamLineup
+	lineupsErr    error
 }
 
 // get returns the roster index, loading it on the first call and caching
@@ -572,12 +601,13 @@ func (r *legacyUpgradeRoster) get() (*domain.RosterIndex, error) {
 	if r.comp == nil {
 		return nil, nil
 	}
-	players, err := r.store.loadParticipantsNoLock(r.compID, r.withZekken, LoadParticipantsOpts{HasIDs: r.comp.ParticipantIDsHint()})
+	players, textChanged, err := r.store.readParticipantsNoLock(r.compID, r.withZekken, LoadParticipantsOpts{HasIDs: r.comp.ParticipantIDsHint()})
 	if err != nil {
 		r.loadErr = err
 		return nil, r.loadErr
 	}
 	r.players = players
+	r.textChanged = textChanged
 	if len(players) > 0 {
 		r.index = domain.NewRosterIndex(players)
 	}
@@ -654,6 +684,7 @@ func (r *legacyUpgradeRoster) reset() {
 	r.loadErr = nil
 	r.index = nil
 	r.players = nil
+	r.textChanged = false
 	r.compLoaded = false
 	r.comp = nil
 	r.compErr = nil
@@ -666,6 +697,29 @@ func (r *legacyUpgradeRoster) squads() (map[string][]domain.TeamMember, error) {
 	r.squadsLoaded = true
 	r.squadsData, r.squadsErr = r.store.loadSquadsLocked(r.compID)
 	return r.squadsData, r.squadsErr
+}
+
+// lineups returns compID's lineups.yaml contents, parsed on the first call and
+// cached (a load failure included) for the rest of this EnsureLegacyUpgraded
+// call, as squads() caches team-members.yaml. A step that changes the map
+// saves that same map, so the cache holds what the file holds; one whose save
+// fails ahead of a later reader calls forgetLineups. Only the steps from upgradeLineupMemberIDsLocked
+// on read it: the round-lineup step before them writes the file itself.
+func (r *legacyUpgradeRoster) lineups() (map[string]domain.TeamLineup, error) {
+	if r.lineupsLoaded {
+		return r.lineupsData, r.lineupsErr
+	}
+	r.lineupsLoaded = true
+	r.lineupsData, r.lineupsErr = r.store.loadTeamLineupsLocked(r.compID)
+	return r.lineupsData, r.lineupsErr
+}
+
+// forgetLineups drops the cached lineups, so a change a failed save did not
+// store is never read as stored.
+func (r *legacyUpgradeRoster) forgetLineups() {
+	r.lineupsLoaded = false
+	r.lineupsData = nil
+	r.lineupsErr = nil
 }
 
 // squadMemberIDByName looks up teamID's squad in squads for a member named
@@ -740,66 +794,42 @@ func (s *Store) ParticipantsFingerprint(compID string) (participantsMtime, seeds
 // per-comp lock. See the header comment above for the full rationale.
 func (s *Store) upgradeSeedRowsLocked(compID string, roster *legacyUpgradeRoster) error {
 	path := s.compPath(compID, "seeds.csv")
-	seeds, err := helper.ReadSeedsFileRaw(path)
+	seeds, err := s.readSeedsRaw(compID)
 	if err != nil || len(seeds) == 0 {
 		return nil // missing/unreadable seeds are the consumers' error to report
 	}
+	// A row's name and dojo are stored in the form the roster reads them
+	// (helper.TitleCaseName; operator decision D14): a row written before the
+	// dojo was title-cased is rewritten here, BEFORE the id backfill below,
+	// which resolves the row by its exact (name, dojo) against the roster in
+	// that same form (and, for a row that misses only by letter case, once by
+	// a case-insensitive match; see backfillSeedRow).
+	changed := false
 	needs := false
 	for i := range seeds {
+		if helper.CanonicalizeSeedText(&seeds[i]) {
+			changed = true
+		}
 		if seeds[i].Dojo == "" || helper.ParticipantIDMissing(seeds[i].ID) {
 			needs = true
-			break
 		}
 	}
-	if !needs {
-		return nil
-	}
-	// Loaded under the SAME layout flags a real load uses: with withZekkenName
-	// hardcoded false, a zekken competition's rows shift one column and the
-	// zekken string reads as the dojo, which this pass would then write into
-	// seeds.csv as fact.
-	idx, err := roster.get()
-	if err != nil || idx == nil {
-		return err
-	}
-	changed := false
-	for i := range seeds {
-		row := &seeds[i]
-		if row.Dojo == "" {
-			// NameCount(name) == 1 is checked EXPLICITLY before Lookup ever
-			// runs, rather than relying on Lookup's own dojo=="" fallback
-			// gate: a roster entry whose OWN dojo genuinely IS blank would
-			// otherwise score an exact hit on Lookup's first branch
-			// (SeedKey(name, "") == "name|") and resolve BEFORE the
-			// uniqueness check runs, silently attributing this row's id to
-			// that specific blank-dojo competitor by coincidence even when a
-			// second, non-blank-dojo namesake also exists (the same trap the
-			// pools.csv/pool-matches.csv/bracket.json upgrades below guard
-			// against). A row that fails this check is left alone entirely --
-			// dojo AND id both stay as read.
-			if idx.NameCount(row.Name) != 1 {
-				continue
-			}
-			p, ok := idx.Lookup(row.Name, "")
-			if !ok {
-				continue
-			}
-			if p.Dojo != "" {
-				row.Dojo = p.Dojo
-				changed = true
-			}
-			if helper.ParticipantIDMissing(row.ID) && p.ID != "" {
-				row.ID = p.ID
-				changed = true
-			}
-			continue
+	if needs {
+		// Loaded under the SAME layout flags a real load uses: with
+		// withZekkenName hardcoded false, a zekken competition's rows shift one
+		// column and the zekken string reads as the dojo, which this pass would
+		// then write into seeds.csv as fact.
+		idx, err := roster.get()
+		if err != nil {
+			return err
 		}
-		// The row's own dojo is non-empty: an exact (name, dojo) pair, which
-		// the roster refuses to save twice, so this can never be ambiguous.
-		if helper.ParticipantIDMissing(row.ID) {
-			if p, ok := idx.Lookup(row.Name, row.Dojo); ok && p.ID != "" {
-				row.ID = p.ID
-				changed = true
+		// nil when there is no roster to resolve against: only the text is
+		// saved then.
+		if idx != nil {
+			for i := range seeds {
+				if backfillSeedRow(idx, roster.players, &seeds[i]) {
+					changed = true
+				}
 			}
 		}
 	}
@@ -817,6 +847,93 @@ func (s *Store) upgradeSeedRowsLocked(compID string, roster *legacyUpgradeRoster
 	// outright so a same-millisecond write cannot serve the pre-upgrade merge.
 	s.invalidateParticipantCaches(compID)
 	return nil
+}
+
+// backfillSeedRow completes one seeds.csv row from the roster, the dojo of a
+// row that has none and the id of a row that lacks one, and reports whether
+// it changed the row. players is the roster idx was built over.
+func backfillSeedRow(idx *domain.RosterIndex, players []domain.Player, row *domain.SeedAssignment) bool {
+	changed := false
+	if row.Dojo == "" {
+		// NameCount(name) == 1 is checked EXPLICITLY before Lookup ever
+		// runs, rather than relying on Lookup's own dojo=="" fallback
+		// gate: a roster entry whose OWN dojo genuinely IS blank would
+		// otherwise score an exact hit on Lookup's first branch
+		// (SeedKey(name, "") == "name|") and resolve BEFORE the
+		// uniqueness check runs, silently attributing this row's id to
+		// that specific blank-dojo competitor by coincidence even when a
+		// second, non-blank-dojo namesake also exists (the same trap the
+		// pools.csv/pool-matches.csv/bracket.json upgrades below guard
+		// against). A row that fails this check is left alone entirely --
+		// dojo AND id both stay as read.
+		var p *domain.Player
+		ok := false
+		switch idx.NameCount(row.Name) {
+		case 0:
+			// No roster row holds the name exactly: an earlier release wrote
+			// "Rin 2Nd" and the roster now reads "Rin 2nd" (D22). As on the
+			// dojo branch below, the one roster row whose name equals it
+			// ignoring case gives the row its dojo and id, once.
+			p, ok = caseFoldRosterMatch(players, func(c *domain.Player) bool {
+				return strings.EqualFold(c.Name, row.Name)
+			})
+		case 1:
+			p, ok = idx.Lookup(row.Name, "")
+		}
+		if !ok {
+			return false
+		}
+		if p.Dojo != "" {
+			row.Dojo = p.Dojo
+			changed = true
+		}
+		if helper.ParticipantIDMissing(row.ID) && p.ID != "" {
+			row.ID = p.ID
+			changed = true
+		}
+		return changed
+	}
+	// The row's own dojo is non-empty: an exact (name, dojo) pair, which
+	// the roster refuses to save twice, so this can never be ambiguous.
+	if helper.ParticipantIDMissing(row.ID) {
+		p, ok := idx.Lookup(row.Name, row.Dojo)
+		if !ok {
+			// An earlier release wrote this row as "Rin 2Nd" and the roster
+			// now reads "Rin 2nd" (D22), so the exact match above misses it.
+			// This is not a case-blind fallback: it runs once, in this id
+			// backfill, and the row carries the participant's id from then on
+			// and is resolved by it alone (upgradeDrawSpellingLocked then gives
+			// it the roster's spelling). It takes only a row that one roster
+			// row matches ignoring case: the roster save refuses two that
+			// differ only by case, but a roster read accepts a hand-edited pair
+			// such as "Rin SATO" and "Rin Sato", which leave the row as it is.
+			p, ok = caseFoldRosterMatch(players, func(c *domain.Player) bool {
+				return strings.EqualFold(c.Name, row.Name) && strings.EqualFold(c.Dojo, row.Dojo)
+			})
+		}
+		if ok && p.ID != "" {
+			row.ID = p.ID
+			changed = true
+		}
+	}
+	return changed
+}
+
+// caseFoldRosterMatch returns the one roster row equalIgnoringCase accepts
+// (its name, and its dojo when the seed row names one, equal ignoring letter
+// case), or false when none or more than one does. backfillSeedRow's alone;
+// see it for why.
+func caseFoldRosterMatch(players []domain.Player, equalIgnoringCase func(*domain.Player) bool) (*domain.Player, bool) {
+	var hit *domain.Player
+	for i := range players {
+		if equalIgnoringCase(&players[i]) {
+			if hit != nil {
+				return nil, false
+			}
+			hit = &players[i]
+		}
+	}
+	return hit, hit != nil
 }
 
 // poolMemberMissingID reports whether a pools.csv row still needs an id: a
@@ -844,6 +961,25 @@ func poolsNeedIDRepair(pools []helper.Pool) bool {
 	return false
 }
 
+// canonicalizePoolMemberText puts every pool member's name, dojo and zekken in
+// the form the roster stores them (helper.TitleCaseName for the name and the
+// dojo, helper.CapitalizeZekken for the zekken; operator decisions D14 and D20)
+// and reports whether any changed. pools.csv holds a copy of each
+// competitor's text taken when the draw was made, which every pool surface
+// shows, and the legacy id repair matches an id-less member by its exact
+// (name, dojo).
+func canonicalizePoolMemberText(pools []helper.Pool) bool {
+	changed := false
+	for i := range pools {
+		for j := range pools[i].Players {
+			if helper.CanonicalizePlayerText(&pools[i].Players[j]) {
+				changed = true
+			}
+		}
+	}
+	return changed
+}
+
 // upgradePoolParticipantIDsLocked completes legacy (no-id) pools.csv rows by
 // resolving each member against the roster on an exact (name, dojo) match,
 // or the unique-bare-name fallback when the row's own dojo is blank -- see
@@ -859,7 +995,7 @@ func poolsNeedIDRepair(pools []helper.Pool) bool {
 // overhead nobody ever reads.
 func (s *Store) upgradePoolParticipantIDsLocked(compID string, roster *legacyUpgradeRoster) error {
 	path := s.compPath(compID, "pools.csv")
-	parsed, err := parsePoolsFile(path)
+	parsed, err := s.parsePoolsFile(path)
 	if err != nil {
 		return nil // missing/unreadable pools are the consumers' error to report
 	}
@@ -867,13 +1003,29 @@ func (s *Store) upgradePoolParticipantIDsLocked(compID string, roster *legacyUpg
 	if len(pools) == 0 {
 		return nil
 	}
-	if !poolsNeedIDRepair(pools) {
+	// The text first, so the id backfill below matches a member's dojo in
+	// the form the roster now reads it.
+	changed := canonicalizePoolMemberText(pools)
+	if poolsNeedIDRepair(pools) {
+		idx, err := roster.get()
+		if err != nil {
+			return err
+		}
+		// nil when there is no roster to resolve against: only the text is
+		// saved then.
+		if idx != nil && backfillPoolMemberIDs(idx, pools) {
+			changed = true
+		}
+	}
+	if !changed {
 		return nil
 	}
-	idx, err := roster.get()
-	if err != nil || idx == nil {
-		return err
-	}
+	return s.savePoolsLocked(compID, pools)
+}
+
+// backfillPoolMemberIDs gives every id-less pools.csv member the id of the
+// roster competitor it resolves to, and reports whether it gave any.
+func backfillPoolMemberIDs(idx *domain.RosterIndex, pools []helper.Pool) bool {
 	changed := false
 	for i := range pools {
 		for j := range pools[i].Players {
@@ -913,10 +1065,7 @@ func (s *Store) upgradePoolParticipantIDsLocked(compID string, roster *legacyUpg
 			}
 		}
 	}
-	if !changed {
-		return nil
-	}
-	return s.savePoolsLocked(compID, pools)
+	return changed
 }
 
 // upgradePoolMatchSideIDsLocked completes legacy (no-id) pool-matches.csv
@@ -935,7 +1084,7 @@ func (s *Store) upgradePoolParticipantIDsLocked(compID string, roster *legacyUpg
 // it straight to savePoolMatchesLocked.
 func (s *Store) upgradePoolMatchSideIDsLocked(compID string, roster *legacyUpgradeRoster) error {
 	path := s.compPath(compID, "pool-matches.csv")
-	parsed, err := parsePoolMatchesFile(path)
+	parsed, err := s.parsePoolMatchesFile(path)
 	if err != nil {
 		return nil // missing/unreadable pool matches are the consumers' error to report
 	}
@@ -1138,7 +1287,7 @@ func bracketNeedsIDRepair(b *Bracket) bool {
 // saved along with the rounds rather than thrown away.
 func (s *Store) upgradeBracketLocked(compID string, roster *legacyUpgradeRoster) error {
 	path := s.compPath(compID, "bracket.json")
-	parsed, err := parseBracketFile(path)
+	parsed, err := s.parseBracketFile(path)
 	if err != nil {
 		return nil // missing/unreadable bracket is the consumers' error to report
 	}
@@ -1350,7 +1499,7 @@ func (s *Store) upgradeTeamDefaultWinBoutPaddingLocked(compID string, roster *le
 // holds the per-comp lock.
 func (s *Store) padTeamDefaultWinBoutsInPoolMatchesLocked(compID string, teamSize int) error {
 	path := s.compPath(compID, "pool-matches.csv")
-	parsed, err := parsePoolMatchesFile(path)
+	parsed, err := s.parsePoolMatchesFile(path)
 	if err != nil {
 		return nil // missing/unreadable pool matches are the consumers' error to report
 	}
@@ -1381,7 +1530,7 @@ func (s *Store) padTeamDefaultWinBoutsInPoolMatchesLocked(compID string, teamSiz
 // predicate serves both halves rather than one gated copy and one ungated.
 func (s *Store) padTeamDefaultWinBoutsInBracketLocked(compID string, teamSize int) error {
 	path := s.compPath(compID, "bracket.json")
-	parsed, err := parseBracketFile(path)
+	parsed, err := s.parseBracketFile(path)
 	if err != nil {
 		return nil // missing/unreadable bracket is the consumers' error to report
 	}
@@ -1471,7 +1620,7 @@ func (s *Store) upgradeKachinukiEncounterEnchoLocked(compID string, roster *lega
 func (s *Store) clearKachinukiEncounterEnchoInPoolMatchesLocked(compID string, comp *Competition) error {
 	// A missing file parses as empty; any error here is a real read or parse
 	// failure, returned so the marker stays unset and the next start retries.
-	parsed, err := parsePoolMatchesFile(s.compPath(compID, "pool-matches.csv"))
+	parsed, err := s.parsePoolMatchesFile(s.compPath(compID, "pool-matches.csv"))
 	if err != nil {
 		return fmt.Errorf("read pool matches: %w", err)
 	}
@@ -1493,7 +1642,7 @@ func (s *Store) clearKachinukiEncounterEnchoInPoolMatchesLocked(compID string, c
 // per-comp lock.
 func (s *Store) clearKachinukiEncounterEnchoInBracketLocked(compID string, comp *Competition) error {
 	// As the pool half: a missing file parses as empty, so an error is real.
-	parsed, err := parseBracketFile(s.compPath(compID, "bracket.json"))
+	parsed, err := s.parseBracketFile(s.compPath(compID, "bracket.json"))
 	if err != nil {
 		return fmt.Errorf("read bracket: %w", err)
 	}
@@ -1813,11 +1962,15 @@ func (s *Store) upgradeParticipantIDsLocked(compID string, roster *legacyUpgrade
 	if comp.HasParticipantIDs {
 		return nil // the flag is already authoritative; the loader strips column 0
 	}
-	rows, err := helper.ReadCSVFile(s.compPath(compID, "participants.csv"))
+	raw, err := s.root.readFile(s.compPath(compID, "participants.csv"))
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil
 		}
+		return err
+	}
+	rows, _, err := helper.ReadCSVRecords(bytes.NewReader(raw))
+	if err != nil {
 		return err
 	}
 	if len(rows) == 0 {
@@ -1989,7 +2142,7 @@ func (s *Store) upgradeSquadsFromMetadataLocked(compID string, roster *legacyUpg
 				members = append(members, domain.TeamMember{
 					ID:    newParticipantID(),
 					Index: i + 1,
-					Name:  name,
+					Name:  helper.TitleCaseName(name),
 				})
 			}
 			for i := len(members); i < floor; i++ {
@@ -2061,7 +2214,7 @@ func (s *Store) upgradeSquadsFromMetadataLocked(compID string, roster *legacyUpg
 // no-cache loader), so this repair owns the parsed map exclusively like
 // its siblings above. Caller holds the per-comp lock.
 func (s *Store) upgradeLineupMemberIDsLocked(compID string, roster *legacyUpgradeRoster) error {
-	lineups, err := s.loadTeamLineupsLocked(compID)
+	lineups, err := roster.lineups()
 	if err != nil {
 		// Propagate rather than swallow, like every sibling step: a missing
 		// lineups.yaml already reads as an empty map (parseTeamLineupsFile),
@@ -2242,7 +2395,357 @@ func (s *Store) upgradeLineupMemberIDsLocked(compID string, roster *legacyUpgrad
 	if !changed {
 		return nil
 	}
+	if err := s.saveTeamLineupsLocked(compID, lineups, s.directWrite); err != nil {
+		roster.forgetLineups()
+		return err
+	}
+	return nil
+}
+
+// upgradeRosterTextLocked rewrites participants.csv in the form every roster
+// write now stores (operator decisions D14 and D20, 2026-11-01: names and
+// dojos title-cased, every zekken in capitals). The reader gives the roster
+// write's form (helper.CreatePlayersFromRecords, the CSV reader the CLI
+// shares), and this puts the file in it rather than only the view: the roster
+// is marshalled from that read with the one roster writer, and written only
+// when a typed text field the file holds (a name, a dojo, a zekken) is not yet
+// in that form (the read's textChanged, which the roster read reports beside
+// the players, legacyUpgradeRoster.textChanged). Title-casing never lowers a
+// letter, so a name saved earlier keeps its spelling ("2Nd Dojo" stays as
+// saved; operator decision D23). A file whose text is already canonical is
+// left as it is whatever its layout (an older column order, a zekken column it
+// lacks, spacing), so a first load does not rewrite a hand-edited file for its
+// layout alone, and a second pass writes nothing.
+//
+// Only a roster whose id column is settled (has_participant_ids, and every
+// row read back with an id) is rewritten: marshalParticipantsCSV mints an id
+// for a row without one, and minting belongs to upgradeParticipantIDsLocked,
+// which declines a roster whose first column it cannot read for sure.
+func (s *Store) upgradeRosterTextLocked(compID string, roster *legacyUpgradeRoster) error {
+	comp, err := roster.competition()
+	if err != nil || comp == nil || !comp.HasParticipantIDs {
+		return err
+	}
+	players, err := roster.rosterPlayers()
+	if err != nil || !roster.textChanged {
+		return err
+	}
+	for i := range players {
+		if helper.ParticipantIDMissing(players[i].ID) {
+			return nil
+		}
+	}
+	// The read already holds the stored form, so the roster this pass works
+	// from is unchanged by the write.
+	data, err := marshalParticipantsCSV(players, roster.withZekken)
+	if err != nil {
+		return err
+	}
+	if err := s.atomicWrite(s.compPath(compID, "participants.csv"), data, 0600); err != nil {
+		return err
+	}
+	s.invalidateParticipantCaches(compID)
+	return nil
+}
+
+// upgradeDrawSpellingLocked gives every copy the draw and the seeds hold of a
+// roster participant the roster row's own text when the two differ only by
+// letter case (operator decision D24 (b), 2026-11-02). An earlier release
+// stored a pasted name as typed ("kenshinkan 2nd") and title-cased it on every
+// read with a rule that capitalised a letter after a digit, so the draw and
+// seeds.csv took "Kenshinkan 2Nd" while the roster read now gives "Kenshinkan
+// 2nd" (D22) and upgradeRosterTextLocked stores that. This moves the copies to
+// the roster's spelling: pools.csv members (name, dojo, zekken), seeds.csv rows
+// (name, dojo), and the sides and winner of every pool-matches.csv and
+// bracket.json match that has not been fought: not under way or finished
+// (ResultRecorded) and holding no score (HoldsScore, so a match sent back to
+// the queue with its bouts is fought). A fought match keeps the names it was
+// fought under, and so do its bout rows, which copy them, and the match
+// history, which nothing here reads (D18). A name the roster itself still holds as "2Nd" (saved that way,
+// D23) leaves its copies equal to it, so nothing changes for it.
+//
+// A copy is matched to its participant by its id alone (RosterIndex.LookupByID;
+// a copy without one is left as it is), and only a case-only difference is
+// taken (takeRosterSpelling), so no other text changes. Run after every id
+// repair above, so a copy stamped in this pass converges too. Each file is
+// written only when its text changes, through its own writer, so a crash
+// between two files converges on the next load and a second pass writes
+// nothing. The roster this compares against is the one the read gives, which
+// is the stored form whether or not upgradeRosterTextLocked's write landed.
+// Fighting spirit awards carry no participant id and are not moved.
+func (s *Store) upgradeDrawSpellingLocked(compID string, roster *legacyUpgradeRoster) error {
+	idx, err := roster.get()
+	if err != nil || idx == nil {
+		return err
+	}
+	return errors.Join(
+		s.takeRosterSpellingInSeedsLocked(compID, idx),
+		s.takeRosterSpellingInPoolsLocked(compID, idx),
+		s.takeRosterSpellingInPoolMatchesLocked(compID, idx),
+		s.takeRosterSpellingInBracketLocked(compID, idx),
+	)
+}
+
+// takeRosterSpelling sets *text to rosterText when the two differ only by
+// letter case, and reports whether it did.
+func takeRosterSpelling(text *string, rosterText string) bool {
+	if *text == rosterText || !strings.EqualFold(*text, rosterText) {
+		return false
+	}
+	*text = rosterText
+	return true
+}
+
+// takeRosterNameByID is takeRosterSpelling for a name stored beside the id of
+// the participant it names (a match side, a winner).
+func takeRosterNameByID(idx *domain.RosterIndex, name *string, id string) bool {
+	p, ok := idx.LookupByID(id)
+	return ok && takeRosterSpelling(name, p.Name)
+}
+
+func (s *Store) takeRosterSpellingInSeedsLocked(compID string, idx *domain.RosterIndex) error {
+	seeds, err := s.readSeedsRaw(compID)
+	if err != nil || len(seeds) == 0 {
+		return nil // as upgradeSeedRowsLocked: the consumers report a missing or unreadable file
+	}
+	changed := false
+	for i := range seeds {
+		if p, ok := idx.LookupByID(seeds[i].ID); ok {
+			changed = takeRosterSpelling(&seeds[i].Name, p.Name) || changed
+			changed = takeRosterSpelling(&seeds[i].Dojo, p.Dojo) || changed
+		}
+	}
+	if !changed {
+		return nil
+	}
+	data, err := marshalSeedsCSV(seeds)
+	if err != nil {
+		return err
+	}
+	if err := s.atomicWrite(s.compPath(compID, "seeds.csv"), data, 0600); err != nil {
+		return err
+	}
+	s.invalidateParticipantCaches(compID)
+	return nil
+}
+
+func (s *Store) takeRosterSpellingInPoolsLocked(compID string, idx *domain.RosterIndex) error {
+	parsed, err := s.parsePoolsFile(s.compPath(compID, "pools.csv"))
+	if err != nil {
+		return nil // as upgradePoolParticipantIDsLocked: the consumers report it
+	}
+	pools, _ := parsed.([]helper.Pool)
+	changed := false
+	for i := range pools {
+		for j := range pools[i].Players {
+			m := &pools[i].Players[j]
+			if p, ok := idx.LookupByID(m.ID); ok {
+				changed = takeRosterSpelling(&m.Name, p.Name) || changed
+				changed = takeRosterSpelling(&m.Dojo, p.Dojo) || changed
+				changed = takeRosterSpelling(&m.DisplayName, p.DisplayName) || changed
+			}
+		}
+	}
+	if !changed {
+		return nil
+	}
+	return s.savePoolsLocked(compID, pools)
+}
+
+func (s *Store) takeRosterSpellingInPoolMatchesLocked(compID string, idx *domain.RosterIndex) error {
+	parsed, err := s.parsePoolMatchesFile(s.compPath(compID, "pool-matches.csv"))
+	if err != nil {
+		return nil // as upgradePoolMatchSideIDsLocked: the consumers report it
+	}
+	matches, _ := parsed.([]MatchResult)
+	changed := false
+	for i := range matches {
+		m := &matches[i]
+		if m.ResultRecorded() || m.HoldsScore() {
+			continue
+		}
+		changed = takeRosterNameByID(idx, &m.SideA, m.SideAID) || changed
+		changed = takeRosterNameByID(idx, &m.SideB, m.SideBID) || changed
+		changed = takeRosterNameByID(idx, &m.Winner, m.WinnerID) || changed
+	}
+	if !changed {
+		return nil
+	}
+	return s.savePoolMatchesLocked(compID, matches, s.directWrite)
+}
+
+func (s *Store) takeRosterSpellingInBracketLocked(compID string, idx *domain.RosterIndex) error {
+	parsed, err := s.parseBracketFile(s.compPath(compID, "bracket.json"))
+	if err != nil {
+		return nil // as upgradeBracketLocked: the consumers report it
+	}
+	bracket, _ := parsed.(*Bracket)
+	if bracket == nil {
+		return nil
+	}
+	changed := false
+	take := func(m *BracketMatch) {
+		if m.ResultRecorded() || m.HoldsScore() {
+			return
+		}
+		changed = takeRosterNameByID(idx, &m.SideA, m.SideAID) || changed
+		changed = takeRosterNameByID(idx, &m.SideB, m.SideBID) || changed
+		changed = takeRosterNameByID(idx, &m.Winner, m.WinnerID) || changed
+	}
+	for i := range bracket.Rounds {
+		for j := range bracket.Rounds[i] {
+			take(&bracket.Rounds[i][j])
+		}
+	}
+	if bracket.ThirdPlaceMatch != nil {
+		take(bracket.ThirdPlaceMatch)
+	}
+	if !changed {
+		return nil
+	}
+	return s.saveBracketLocked(compID, bracket, s.directWrite)
+}
+
+// upgradeTeamMemberNamesLocked puts every team member's name in the stored
+// form (helper.TitleCaseName; operator decision D14, as addTeamMember and a
+// rename now store it) and
+// then gives every lineup position, and every value a position held before
+// (History), that names a member by id the member's stored spelling.
+//
+// The lineup half works from the difference, not from the members renamed in
+// this pass, so a crash between the two files converges on the next load. A
+// position (or History value) whose member id names a member of the lineup's
+// team with a name takes that name whatever it held, as a rename writes it
+// (renameMemberInLineupsLocked) and a lineup save now stores it: the client
+// matches a typed name to a member ignoring case and accents, so a release
+// that stored the typed text ("mcdonald", "Jose") left a position naming the
+// member in another spelling. A member with no name yet leaves the position's
+// name as it is. Only a lineup that changed is written. A position with no
+// member id, and every bout already fought (its
+// SubMatchResult names, the match history and the score logs), keep their
+// text as recorded (operator decision D18): nothing here, or anywhere,
+// matches an old bout row's name ignoring case. It runs after
+// upgradeLineupMemberIDsLocked and the bout id repairs, which resolve
+// id-less rows by the exact names these members carried until now.
+//
+// Two members of one team whose names differ only in case (only a hand-edited
+// file can hold them: every member write refuses the second) both keep their
+// ids and end with the same spelling; the pass logs the team so the operator
+// can rename one of them.
+func (s *Store) upgradeTeamMemberNamesLocked(compID string, roster *legacyUpgradeRoster) error {
+	squads, err := roster.squads()
+	if err != nil {
+		return err
+	}
+	if len(squads) == 0 {
+		return nil
+	}
+	membersChanged := false
+	// names is each team's member names by member id.
+	names := make(map[string]map[string]string, len(squads))
+	for _, teamID := range slices.Sorted(maps.Keys(squads)) {
+		members := squads[teamID]
+		names[teamID] = make(map[string]string, len(members))
+		seen := make(map[string]bool, len(members))
+		for i := range members {
+			if name := helper.TitleCaseName(members[i].Name); name != members[i].Name {
+				members[i].Name = name
+				s.stampMember(&members[i])
+				membersChanged = true
+			}
+			if members[i].Name != "" {
+				if seen[members[i].Name] {
+					log.Printf("state: team member names for %s: team %s holds %q twice; both members are kept, rename one of them", compID, teamID, members[i].Name)
+				}
+				seen[members[i].Name] = true
+			}
+			names[teamID][members[i].ID] = members[i].Name
+		}
+	}
+	if membersChanged {
+		if err := s.saveSquadsLocked(compID, squads, s.directWrite); err != nil {
+			return err
+		}
+	}
+
+	lineups, err := roster.lineups()
+	if err != nil || len(lineups) == 0 {
+		return err
+	}
+	lineupsChanged := false
+	for key, l := range lineups {
+		// spelling answers the stored name of the lineup's team's member when
+		// it differs from the name a position holds for it.
+		spelling := func(memberID, name string) (string, bool) {
+			stored := names[l.TeamID][memberID]
+			if memberID == "" || stored == "" || stored == name {
+				return "", false
+			}
+			return stored, true
+		}
+		changed := false
+		for pos, id := range l.MemberIDs {
+			name, held := l.Positions[pos]
+			if !held {
+				continue
+			}
+			if stored, ok := spelling(id, name); ok {
+				l.Positions[pos] = stored
+				changed = true
+			}
+		}
+		// Each History value is changed in place in its slice.
+		for _, cs := range l.History {
+			for i := range cs {
+				if stored, ok := spelling(cs[i].MemberID, cs[i].Name); ok {
+					cs[i].Name = stored
+					changed = true
+				}
+			}
+		}
+		if changed {
+			lineups[key] = l
+			lineupsChanged = true
+		}
+	}
+	if !lineupsChanged {
+		return nil
+	}
 	return s.saveTeamLineupsLocked(compID, lineups, s.directWrite)
+}
+
+// upgradeAwardRecipientTextLocked puts the free-text recipient name and dojo
+// of every fighting-spirit award in config.md in the stored form
+// (helper.TitleCaseName; operator decision D15),
+// as PUT .../fighting-spirit-awards now stores them. It writes only when one
+// changed, so a second pass writes nothing.
+func (s *Store) upgradeAwardRecipientTextLocked(compID string, roster *legacyUpgradeRoster) error {
+	comp, err := roster.competition()
+	if err != nil || comp == nil || len(comp.FightingSpiritAwards) == 0 {
+		return err
+	}
+	if comp.ID != compID {
+		return nil // upgradeCompetitionFormatLocked's guard: never write another directory's config
+	}
+	awards := slices.Clone(comp.FightingSpiritAwards)
+	changed := false
+	for i := range awards {
+		name, dojo := helper.TitleCaseName(awards[i].RecipientName), helper.TitleCaseName(awards[i].RecipientDojo)
+		if name != awards[i].RecipientName || dojo != awards[i].RecipientDojo {
+			awards[i].RecipientName, awards[i].RecipientDojo = name, dojo
+			changed = true
+		}
+	}
+	if !changed {
+		return nil
+	}
+	updated := *comp
+	updated.FightingSpiritAwards = awards
+	if _, err := s.saveCompetitionChangedLocked(&updated, s.directWrite); err != nil {
+		return err
+	}
+	comp.FightingSpiritAwards = awards
+	return nil
 }
 
 // upgradeRoundLineupsLocked is the load repair for the round lineups releases up
@@ -2299,13 +2802,13 @@ func (s *Store) upgradeRoundLineupsLocked(compID string, roster *legacyUpgradeRo
 // and the next load simply retries.
 func (s *Store) upgradeTeamMembersFilenameLocked(compID string, write writeFn) error {
 	newPath := s.compPath(compID, teamMembersFilename)
-	if _, err := os.Stat(newPath); err == nil {
+	if _, err := s.root.stat(newPath); err == nil {
 		return nil // already on the current name
 	} else if !os.IsNotExist(err) {
 		return err
 	}
 	oldPath := s.compPath(compID, legacySquadsFilename)
-	data, err := os.ReadFile(oldPath) // #nosec G304, compPath enforces containment under the competitions dir.
+	data, err := s.root.readFile(oldPath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil // nothing recorded by an older release either
@@ -2334,7 +2837,7 @@ func (s *Store) upgradeTeamMembersFilenameLocked(compID string, write writeFn) e
 	if err := s.saveSquadsLocked(compID, members, write); err != nil {
 		return err
 	}
-	if err := os.Remove(oldPath); err != nil && !os.IsNotExist(err) {
+	if err := s.root.remove(oldPath); err != nil && !os.IsNotExist(err) {
 		// The members are safe on the new name; a leftover old file is
 		// cosmetic and must not fail the load.
 		log.Printf("state: team-members migration for %s left %s in place: %v", compID, legacySquadsFilename, err)

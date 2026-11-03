@@ -755,8 +755,7 @@ func fillBracketTargetAlwaysAchievable(t *testing.T, pools []Pool, drafts, court
 		}
 		divisor = 2
 	} else {
-		poolCourt, err := AssignPoolsToCourts(len(pools), courts)
-		require.NoError(t, err)
+		poolCourt := AssignPoolsToCourts(len(pools), courts)
 		homeCount = make([]int, courts)
 		for _, c := range poolCourt {
 			homeCount[c]++

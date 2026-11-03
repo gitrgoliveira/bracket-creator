@@ -13,6 +13,7 @@ import (
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
+	bctest "github.com/gitrgoliveira/bracket-creator/internal/test"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -46,7 +47,7 @@ func TestLegacySeedIDUpgrade_DojoPresentIDMissing(t *testing.T) {
 	require.Len(t, seeds, 1)
 	assert.Equal(t, rinID, seeds[0].ID, "the id is stamped from an exact (name, dojo) match")
 
-	raw, err := os.ReadFile(seedsPath)
+	raw, err := bctest.ReadFile(seedsPath)
 	require.NoError(t, err)
 	assert.Contains(t, string(raw), rinID, "the repair lands on disk, not just in the returned copy")
 }
@@ -111,7 +112,7 @@ func TestLegacySeedIDUpgrade_AmbiguousNameLeftAlone(t *testing.T) {
 	assert.Empty(t, seeds[0].Dojo, "an ambiguous name must never be guessed at")
 	assert.Empty(t, seeds[0].ID, "nor stamped with either namesake's id")
 
-	raw, err := os.ReadFile(seedsPath)
+	raw, err := bctest.ReadFile(seedsPath)
 	require.NoError(t, err)
 	assert.Equal(t, "Rank,Name\n1,Yuki Tanaka\n", string(raw), "an unresolvable row is left byte-for-byte alone")
 }
@@ -167,7 +168,7 @@ func TestLegacySeedRowUpgrade_NoOpWhenNothingToRepair(t *testing.T) {
 	}))
 
 	seedsPath := filepath.Join(dir, "competitions", "c1", "seeds.csv")
-	before, err := os.ReadFile(seedsPath)
+	before, err := bctest.ReadFile(seedsPath)
 	require.NoError(t, err)
 
 	fresh := freshLegacyUpgradeStore(t, dir)
@@ -184,7 +185,7 @@ func TestLegacySeedRowUpgrade_NoOpWhenNothingToRepair(t *testing.T) {
 	require.Len(t, seeds, 1)
 	require.NotEmpty(t, seeds[0].ID, "SaveSeeds must have stamped the id already")
 
-	after, err := os.ReadFile(seedsPath)
+	after, err := bctest.ReadFile(seedsPath)
 	require.NoError(t, err)
 	assert.Equal(t, string(before), string(after), "an already-repaired seeds.csv must not be rewritten")
 	assert.Equal(t, verBefore, fresh.FileVersion("c1", "seeds.csv"), "no version bump for an untouched file")

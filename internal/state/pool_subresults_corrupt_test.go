@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	bctest "github.com/gitrgoliveira/bracket-creator/internal/test"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -37,7 +38,7 @@ func corruptCompetition(t *testing.T) (*Store, string, string) {
 // CSV quoting untouched, which is what a hand edit inside the cell looks like.
 func mangleCell(t *testing.T, path, from, to string) {
 	t.Helper()
-	raw, err := os.ReadFile(path) // #nosec G304
+	raw, err := bctest.ReadFile(path)
 	require.NoError(t, err)
 	mangled := strings.Replace(string(raw), from, to, 1)
 	require.NotEqual(t, string(raw), mangled, "the mangle pattern must actually match")
@@ -70,7 +71,7 @@ func TestCorruptSubResultsSurvivesAWriteToAnotherMatch(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, found)
 
-	after, err := os.ReadFile(path) // #nosec G304
+	after, err := bctest.ReadFile(path)
 	require.NoError(t, err)
 	assert.Contains(t, string(after), "Tanaka",
 		"the malformed cell must survive a write to another match, or the organiser "+
@@ -115,7 +116,7 @@ func TestCorruptSubResultsTypeErrorDoesNotNormaliseDamageOntoDisk(t *testing.T) 
 	require.NoError(t, err)
 	require.True(t, found)
 
-	after, err := os.ReadFile(path) // #nosec G304
+	after, err := bctest.ReadFile(path)
 	require.NoError(t, err)
 	assert.Contains(t, string(after), `""position"":""two""`,
 		"the operator's bytes stay as they are")
@@ -145,7 +146,7 @@ func TestRepairingTheCellClearsTheWarning(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, found)
 
-	after, err := os.ReadFile(path) // #nosec G304
+	after, err := bctest.ReadFile(path)
 	require.NoError(t, err)
 	assert.NotContains(t, string(after), "2x", "the malformed bytes are gone once repaired")
 

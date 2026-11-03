@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
+	"time"
 )
 
 // BrandingDirName and SponsorsDirName are the folders, under the tournament
@@ -32,67 +34,111 @@ const writeProbePrefix = ".write-check-"
 // folder, its match history and its score event logs, and the branding and sponsors folders when
 // they exist. A file's own mode does not matter: a save replaces it by
 // renaming, which needs only its folder. Every folder that fails is named,
-// once (its first failure).
-func checkDataWritable(folder string) error {
+// once (its first failure). The probe goes through root, as every save does,
+// so a folder that is a link out of the data folder fails here rather than
+// at the first save.
+func checkDataWritable(root *dataRoot) error {
+	folder := root.folder
 	compsDir := filepath.Join(folder, "competitions")
 	dirs := []string{folder, compsDir, filepath.Join(folder, ".wal")}
-	for _, name := range []string{BrandingDirName, SponsorsDirName} {
-		if isDir(filepath.Join(folder, name)) {
-			dirs = append(dirs, filepath.Join(folder, name))
-		}
-	}
 	var failed []string
 	named := make(map[string]bool)
 	fail := func(dir string, err error) {
 		if !named[dir] {
 			named[dir] = true
-			failed = append(failed, fmt.Sprintf("  %s: %v", dir, err))
+			failed = append(failed, fmt.Sprintf("  %s: %v; %s", dir, err, writeRemedy(err)))
 		}
 	}
-	entries, err := os.ReadDir(compsDir)
+	// The upload handlers write branding/ and sponsors/ by path, not through
+	// the root, so each is probed only when the root opens it as a folder.
+	for _, name := range []string{BrandingDirName, SponsorsDirName} {
+		d := filepath.Join(folder, name)
+		if info, err := root.stat(d); err == nil && info.IsDir() {
+			dirs = append(dirs, d)
+		}
+	}
+	entries, err := root.readDir(compsDir)
 	if err != nil {
 		fail(compsDir, pathErrCause(err))
 	}
 	for _, e := range entries {
+		// The same competition folders ListCompetitions lists: a link under
+		// competitions/ is not one.
 		if !e.IsDir() {
 			continue
 		}
 		compDir := filepath.Join(compsDir, e.Name())
 		dirs = append(dirs, compDir)
 		for _, sub := range []string{matchHistoryDir, scoreLogDir} {
-			if d := filepath.Join(compDir, sub); isDir(d) {
+			// Saved through the root: an entry it refuses (a link out of
+			// the data folder) would refuse every save, so it is named; a
+			// missing one, or a file, is not a folder the server saves into.
+			d := filepath.Join(compDir, sub)
+			info, err := root.stat(d)
+			switch {
+			case err == nil && info.IsDir():
 				dirs = append(dirs, d)
+			case err != nil && !errors.Is(err, fs.ErrNotExist):
+				fail(d, pathErrCause(err))
 			}
 		}
 	}
 	for _, d := range dirs {
-		if err := probeWrite(d); err != nil {
+		if err := probeWrite(root, d); err != nil {
 			fail(d, err)
 		}
 	}
 	if len(failed) == 0 {
 		return nil
 	}
-	return fmt.Errorf("%w:\n%s\nResults could not be saved there. Give the user running the server write access to these folders (for example chmod u+w <folder>) and start again",
+	return fmt.Errorf("%w:\n%s\nResults could not be saved there. Fix each folder as its line says and start again",
 		ErrDataNotWritable, strings.Join(failed, "\n"))
 }
 
 // probeWrite creates a scratch file in dir and removes it.
-func probeWrite(dir string) error {
-	f, err := os.CreateTemp(dir, writeProbePrefix+"*")
+func probeWrite(root *dataRoot, dir string) error {
+	name := filepath.Join(dir, fmt.Sprintf("%s%d-%d", writeProbePrefix, os.Getpid(), time.Now().UnixNano()))
+	f, err := root.openFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
 		return pathErrCause(err)
 	}
-	name := f.Name()
 	if err := f.Close(); err != nil {
-		return errors.Join(err, pathErrCause(os.Remove(name)))
+		return errors.Join(err, pathErrCause(root.remove(name)))
 	}
-	return pathErrCause(os.Remove(name))
+	return pathErrCause(root.remove(name))
 }
 
-func isDir(path string) bool {
-	info, err := os.Stat(path)
-	return err == nil && info.IsDir()
+// writeRemedy is what the operator does about a folder the check could not
+// write, judged from the error alone: replace a link out of the data folder
+// with the folder itself (the store saves only inside the data folder), move
+// away a file that sits where the folder should be, or, for every other
+// failure, give the server write access to it.
+func writeRemedy(err error) string {
+	switch {
+	case isPathEscape(err):
+		return "it links out of the data folder (a link by an absolute path counts, wherever it points), which the server never saves through: put the folder itself there instead of the link"
+	case errors.Is(err, syscall.ENOTDIR):
+		return "a file is where this folder should be: move the file away, and the server makes the folder when it starts"
+	}
+	return "give the user running the server write access to it (for example chmod u+w <folder>)"
+}
+
+// pathEscapesText is the text of the error an os.Root gives for a name that
+// leaves it, a link out of the data folder included. The os package keeps
+// that error unexported and exports nothing errors.Is could match, so the
+// text is the one test left; TestDataRoot_RefusesASymlinkOutOfTheDataFolder
+// pins it against what the root really answers.
+const pathEscapesText = "path escapes from parent"
+
+// isPathEscape reports whether err, or an error it wraps, is the root's
+// refusal of a name that leaves the data folder.
+func isPathEscape(err error) bool {
+	for e := err; e != nil; e = errors.Unwrap(e) {
+		if e.Error() == pathEscapesText {
+			return true
+		}
+	}
+	return false
 }
 
 // pathErrCause drops the path an fs.PathError repeats, since the message

@@ -1,6 +1,11 @@
 package engine
 
 import (
+	"bytes"
+	"log"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
@@ -48,6 +53,39 @@ func TestDetectClashes_OverlapSameCourt(t *testing.T) {
 	// Overlap window = [max(09:00,09:15), min(09:30,09:45)] = 09:15–09:30.
 	assert.Equal(t, "09:15", clashes[0].OverlapStart)
 	assert.Equal(t, "09:30", clashes[0].OverlapEnd)
+}
+
+// An unreadable tournament matters to every competition that inherits its
+// courts, the target's own or another's: said once for the check, and not at
+// all when no competition compared inherits.
+func TestDetectClashes_UnreadableTournamentIsLoggedOnceWhenACompetitionInherits(t *testing.T) {
+	eng, store, dir := setupTestEngine(t)
+	emptyComp(t, store, "a", "Alpha", "01-07-2026", "09:00", []string{"A"})
+	emptyComp(t, store, "b", "Bravo", "01-07-2026", "09:15", []string{"B"})
+	// A directory where tournament.md belongs: the read fails.
+	path := filepath.Join(dir, "tournament.md")
+	require.NoError(t, os.RemoveAll(path))
+	require.NoError(t, os.Mkdir(path, 0o755))
+
+	var logs bytes.Buffer
+	prev := log.Writer()
+	log.SetOutput(&logs)
+	t.Cleanup(func() { log.SetOutput(prev) })
+
+	_, err := eng.DetectClashesForCompetition("a")
+	require.NoError(t, err)
+	assert.Empty(t, logs.String(), "no competition compared inherits the tournament's courts")
+
+	emptyComp(t, store, "c", "Charlie", "01-07-2026", "09:00", nil)
+	emptyComp(t, store, "d", "Delta", "01-07-2026", "09:00", nil)
+	clashes, err := eng.DetectClashesForCompetition("a")
+	require.NoError(t, err)
+	assert.Equal(t, 1, strings.Count(logs.String(), "tournament unreadable"), "said once, though two competitions inherit: "+logs.String())
+	ids := make([]string, 0, len(clashes))
+	for _, c := range clashes {
+		ids = append(ids, c.OtherCompID)
+	}
+	assert.ElementsMatch(t, []string{"c", "d"}, ids, "the inheriting competitions are taken as on [\"A\"]")
 }
 
 func TestDetectClashes_NoOverlapWhenSequential(t *testing.T) {

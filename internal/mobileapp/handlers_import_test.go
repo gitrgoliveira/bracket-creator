@@ -426,8 +426,9 @@ competitions:
 		var resp map[string][]ImportResult
 		json.Unmarshal(w.Body.Bytes(), &resp)
 		require.Len(t, resp["results"], 1)
-		assert.Contains(t, resp["results"][0].Error, "save seeds:",
+		assert.Equal(t, "the seeds could not be saved", resp["results"][0].Error,
 			"SaveSeeds I/O failure must surface a per-row error")
+		assert.NotContains(t, resp["results"][0].Error, tempDir, "the server's paths stay in the log")
 
 		// Rollback assertion: the entire comp directory must be gone,
 		// so a retry of the same manifest (after the operator removes

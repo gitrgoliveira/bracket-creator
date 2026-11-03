@@ -51,6 +51,10 @@
 // competition banner below is the one exception and keeps `role="alert"`: it
 // appears to say scoring is blocked, which is worth interrupting for.
 
+// The console's own warning icon (an inline SVG), not the U+26A0 glyph, which
+// iPadOS can draw as a colour emoji.
+import { Icon } from './icon.jsx';
+
 // NO_ID_HINT: the one operator-facing sentence for "this row has no id" (the
 // ADVISORY class described above). Exact remedy sentence
 // internal/helper/participant_ids.go MissingParticipantIDsMessage uses (and
@@ -86,14 +90,30 @@ export function unreadableMatches(matches) {
   return (matches || []).filter(matchDataUnreadable);
 }
 
-// dataIssueText renders one located file failure as a single line an operator
-// can act on: which file, which line, and the parser's own description of what
-// it found. Position is omitted when the parser could not place the fault
-// rather than being printed as "line 0".
-export function dataIssueText(issue) {
+// issueIsLocated: whether the server placed the fault on a line of the file,
+// fixed by editing that line (a row the parser refuses is located on its file
+// line like any other). An entry with no position is a file the server could
+// not open at all (handlers_viewer.go rosterUnreadableIssue), fixed outside
+// the file.
+export function issueIsLocated(issue) {
+  return !!issue && issue.line > 0;
+}
+
+// issueUnopened: an entry naming a file the server could not open at all.
+export function issueUnopened(issue) {
+  return !!issue && !issueIsLocated(issue);
+}
+
+// dataIssueLocator: the file's place inside the tournament data folder, and the
+// position when there is one ("competitions/kendo/participants.csv, line 4,
+// column 1"). Every file a dataIssues entry names lives in its competition's
+// folder (state.CorruptFileError.File is competition-relative), so every entry
+// gets the same place; never a full server path, which the browser has no
+// business knowing. With no competition id it falls back to the file alone.
+export function dataIssueLocator(issue, competition) {
   if (!issue || !issue.file) return "";
-  const where = issue.line > 0 ? `line ${issue.line}, column ${issue.column}` : "";
-  return [issue.file, where].filter(Boolean).join(", ") + (issue.detail ? `: ${issue.detail}` : "");
+  const place = competition && competition.id ? `competitions/${competition.id}/${issue.file}` : issue.file;
+  return issueIsLocated(issue) ? `${place}, line ${issue.line}, column ${issue.column}` : place;
 }
 
 // UnreadableBoutsNote: the per-match line. Deliberately says what was lost and
@@ -102,9 +122,9 @@ export function dataIssueText(issue) {
 export function UnreadableBoutsNote() {
   return (
     <div className="alert alert--warn data-issue data-issue--inline">
-      <span aria-hidden="true">⚠</span>
+      <Icon name="alert-circle" className="data-issue__icon" />
       <span>
-        This encounter's individual bouts could not be read from the results file, so
+        This encounter&apos;s individual bouts could not be read from the results file, so
         it counts zero individual victories and zero points. Repair the cell, or
         re-enter the bouts here.
       </span>
@@ -124,7 +144,7 @@ export function UnreadableBoutsNote() {
 export function UnreadableEditorNote() {
   return (
     <div className="alert alert--warn data-issue data-issue--editor">
-      <span aria-hidden="true">⚠</span>
+      <Icon name="alert-circle" className="data-issue__icon" />
       <span>
         The bouts recorded for this encounter could not be read from the results
         file, so the rows below start empty. They are not lost: the unreadable
@@ -142,7 +162,7 @@ export function UnreadableEditorNote() {
 export function UnreadablePoolNote({ count }) {
   return (
     <div className="alert alert--warn data-issue">
-      <span aria-hidden="true">⚠</span>
+      <Icon name="alert-circle" className="data-issue__icon" />
       <span>
         {count === 1
           ? "One encounter in this pool is missing its individual bouts"
@@ -282,12 +302,29 @@ export function MissingParticipantIDsNotice({ issues }) {
     <>
       {list.map((issue) => (
         <div key={issue.file} className="alert alert--warn data-issue data-issue--missing-ids" role="status">
-          <span aria-hidden="true">⚠</span>
+          <Icon name="alert-circle" className="data-issue__icon" />
           <span>{issue.detail}</span>
         </div>
       ))}
     </>
   );
+}
+
+export const ROSTER_FILE = "participants.csv";
+
+// rosterUnreadableIssues: the LOUD entries saying this competition's roster
+// file did not load, for the pages that would otherwise read its empty
+// `players` as "no roster yet" (the Participants page offered its paste box
+// over a roster the server could not read). The server sends an empty
+// roster in both cases and owns telling them apart: every roster that did
+// not load has a participants.csv entry on `dataIssues`, located for a file
+// that will not parse (a row the parser refuses and two rows that are one
+// competitor included), with no position for a file it could not open
+// (handlers_viewer.go rosterUnreadableIssue). Every roster save reads the
+// stored file first, so both are refused alike.
+export function rosterUnreadableIssues(c) {
+  if (!c) return [];
+  return (c.dataIssues || []).filter((i) => isLoudIssue(i) && i.file === ROSTER_FILE);
 }
 
 // DataIssueBanner: the competition-level notice for the LOUD class, where a
@@ -300,7 +337,7 @@ export function MissingParticipantIDsNotice({ issues }) {
 // It states the consequences in the banner rather than hiding them behind the
 // confirm dialog, because they are what the operator is choosing between and
 // the dialog is a last gate, not a briefing.
-export function DataIssueBanner({ issues, competition, onReset, resetting }) {
+export function DataIssueBanner({ issues, competition, onReset, resetting, onReload }) {
   const all = issues || [];
   const missingIDs = missingIDsIssues(all);
   const list = all.filter(isLoudIssue);
@@ -308,27 +345,93 @@ export function DataIssueBanner({ issues, competition, onReset, resetting }) {
   // Only ask the format question when the bracket is the broken file: a corrupt
   // pool-matches.csv has no reset, whatever the format.
   const kind = bracket ? bracketRecoveryKind(competition) : BRACKET_RECOVERY_NONE;
+  // The advice follows what went wrong with each file (operator decision D27):
+  // a file with a located bad line is repaired in an editor; a file the
+  // server could not open is fixed outside it, and editing its text is not
+  // the fix. A list can hold more than one, so
+  // each paragraph asks for itself. The roster holds no results, so its banner
+  // says what it does block (the roster and the draw) instead.
+  const located = list.some(issueIsLocated);
+  const unopened = list.some(issueUnopened);
+  const rosterOnly = list.length > 0 && list.every((i) => i.file === ROSTER_FILE);
+  const reloadWords = onReload ? "press Reload" : "reload this page";
+  const fixWhat = list.filter(issueIsLocated).length > 1 ? "each position above" : "the position above";
+
+  // Reload says what it is doing and what it found (it used to change nothing
+  // visible when the file was still broken, and log a failure to the console
+  // alone). onReload answers { ok: false, message } when the request failed.
+  const [reloading, setReloading] = React.useState(false);
+  // The note belongs to the issues it was found over: it shows only while the
+  // banner still lists the same ones, so a later, different fault never wears it.
+  const [reloadNote, setReloadNote] = React.useState(null);
+  const issuesSig = list.map((i) => `${i.file}:${i.line}:${i.detail}`).join("|");
+  const mountedRef = React.useRef(true);
+  React.useEffect(() => () => { mountedRef.current = false; }, []);
+  const reload = async () => {
+    setReloading(true);
+    setReloadNote(null);
+    let res;
+    try {
+      res = await onReload();
+    } catch (e) {
+      res = { ok: false, message: e && e.message };
+    }
+    if (!mountedRef.current) return;
+    setReloading(false);
+    // The raw text of a failed request (a browser's "Failed to fetch", the
+    // server's "internal error") means nothing to an organiser: it goes to the
+    // console and the note says what happened.
+    // A request the server answered (it has a status) is not a connection
+    // problem, so the note does not send the organiser to check one.
+    const failed = !!(res && res.ok === false);
+    if (failed) console.error("Reload failed:", res.message);
+    setReloadNote({
+      sig: issuesSig,
+      failed,
+      text: !failed
+        ? "Reloaded: the file still could not be read."
+        : res.status
+          ? "The server could not load the competition. Press Reload again; if it keeps failing, the server's log names the reason."
+          : "Could not reach the server. Check the connection and press Reload again.",
+    });
+  };
+  const shownReloadNote = reloadNote && (reloadNote.failed || reloadNote.sig === issuesSig) ? reloadNote.text : null;
 
   return (
     <>
       {list.length > 0 ? (
         <div className="alert alert--error data-issue data-issue--banner" role="alert">
-          <span aria-hidden="true">⚠</span>
+          <Icon name="alert-circle" className="data-issue__icon" />
           <div>
             <strong>A file for this competition could not be read.</strong>
             <ul className="data-issue__list">
               {list.map((i) => (
-                <li key={i.file}><code>{dataIssueText(i)}</code></li>
+                <li key={i.file}>
+                  <code>{dataIssueLocator(i, competition)}</code>
+                  {i.detail ? `: ${i.detail}` : null}
+                </li>
               ))}
             </ul>
             <p>
-              Scoring is blocked for whatever that file holds. Nothing has been
-              overwritten: every write to a file that will not parse is refused, so
-              it is still exactly as it was last saved.
+              {rosterOnly
+                ? "The roster and the draw are blocked until this file loads."
+                : "Scoring is blocked for whatever that file holds."}{" "}
+              Nothing has been overwritten: every save to a file that will not load is
+              refused, so it is still exactly as it was last saved.
             </p>
-            <p><strong>Repair it, and this clears on its own.</strong> Open the file, fix the
-              position above, and reload this page. Everything recorded in it comes back,
-              results included. This is the option that loses nothing.</p>
+            {located ? (
+              <p><strong>Repair the file.</strong> Open it, fix
+                {" "}{fixWhat} and save it, then {reloadWords}.
+                {located && !rosterOnly ? " Everything recorded in it comes back, results included." : null}
+                {kind !== BRACKET_RECOVERY_NONE ? " This is the option that loses nothing." : null}</p>
+            ) : null}
+            {unopened ? (
+              <p>
+                {located ? "For the file that could not be opened, the" : "The"} server’s
+                log names the reason, for example a permission problem. Fix that,
+                then {reloadWords}.
+              </p>
+            ) : null}
             {bracket && kind === BRACKET_RECOVERY_NONE ? (
               <p>
                 There is no reset for this competition: its bracket was drawn
@@ -366,18 +469,31 @@ export function DataIssueBanner({ issues, competition, onReset, resetting }) {
                 </ul>
               </>
             ) : null}
-            {/* One button for both recoverable kinds: they run the same endpoint and
-                differ only in what it will find to do, so the label follows the kind
-                rather than each branch growing its own copy of the control. */}
-            {kind !== BRACKET_RECOVERY_NONE ? (
-              <button
-                type="button"
-                className="btn btn--danger"
-                onClick={onReset}
-                disabled={!!resetting}
-              >
-                {resetting ? bracketResetPrompt(kind).busyLabel : bracketResetPrompt(kind).buttonLabel}
-              </button>
+            {onReload || kind !== BRACKET_RECOVERY_NONE ? (
+              <div className="data-issue__actions">
+                {onReload ? (
+                  <button type="button" className="btn" onClick={reload} disabled={reloading} aria-busy={reloading || undefined}>
+                    {reloading ? <span className="spinner" aria-hidden="true" /> : <Icon name="refresh" size={14} />}
+                    Reload
+                  </button>
+                ) : null}
+                {/* One button for both recoverable kinds: they run the same endpoint and
+                    differ only in what it will find to do, so the label follows the kind
+                    rather than each branch growing its own copy of the control. */}
+                {kind !== BRACKET_RECOVERY_NONE ? (
+                  <button
+                    type="button"
+                    className="btn btn--danger"
+                    onClick={onReset}
+                    disabled={!!resetting}
+                  >
+                    {resetting ? bracketResetPrompt(kind).busyLabel : bracketResetPrompt(kind).buttonLabel}
+                  </button>
+                ) : null}
+              </div>
+            ) : null}
+            {shownReloadNote ? (
+              <p className="data-issue__note" role="status" data-testid="data-issue-reload-note">{shownReloadNote}</p>
             ) : null}
           </div>
         </div>

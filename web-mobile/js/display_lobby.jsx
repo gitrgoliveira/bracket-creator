@@ -9,7 +9,7 @@ import { matchShowsScore } from './match_shows_score.jsx';
 import { isSupplementaryBout } from './pool_ids.jsx';
 import { useCourtPaceLookup, paceDisplayOf, PaceTime } from './court_pace.jsx';
 
-const { useState: useSD, useEffect: useED, useMemo: useMD } = React;
+const { useState, useEffect, useMemo } = React;
 
 // LobbyDisplay pagination tunables. PAGE_SIZE = 2 courts per page so
 // the table layout (2 court columns) fills a single screen; CYCLE_MS =
@@ -253,12 +253,12 @@ function LobbyMatchCell({ slot, rowKind, paceLookup }) {
 //
 // Reconnect indicator (T063) is preserved in the top bar.
 function LobbyDisplay({ tournament, competitions, connected = true }) {
-    const courts = useMD(() => findActiveCourts(tournament, competitions), [tournament, competitions]);
+    const courts = useMemo(() => findActiveCourts(tournament, competitions), [tournament, competitions]);
     const totalPages = Math.max(1, Math.ceil(courts.length / LOBBY_PAGE_SIZE));
-    const [page, setPage] = useSD(0);
+    const [page, setPage] = useState(0);
     // cycleKey increments on every page flip so the CSS animation on the
     // progress bar restarts from zero each time.
-    const [cycleKey, setCycleKey] = useSD(0);
+    const [cycleKey, setCycleKey] = useState(0);
     const pace = useCourtPaceLookup(competitions);
 
     // T065 auto-cycle. Only arm the timer when there is more than one
@@ -268,7 +268,7 @@ function LobbyDisplay({ tournament, competitions, connected = true }) {
     // All branches that change the page must also bump cycleKey so the
     // progress bar animation restarts: including guard resets, not
     // only the regular auto-cycle tick.
-    useED(() => {
+    useEffect(() => {
         if (totalPages <= 1) {
             if (page !== 0) { setPage(0); setCycleKey(k => k + 1); }
             return undefined;

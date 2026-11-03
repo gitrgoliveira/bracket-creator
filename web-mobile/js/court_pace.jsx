@@ -108,16 +108,17 @@ export function PaceTime({ display, fallback = null, ...rest }) {
 // useCourtPaceLookup: courtPaceLookup over `competitions`, read again on the
 // pace tick so a projection moves on with the clock between pushes.
 export function useCourtPaceLookup(competitions) {
-    const [tick, setTick] = React.useState(0);
+    // The tick only renders again: the clock is read on every render, and the
+    // lookup is worked out again when its minute or day moves on.
+    const [, setTick] = React.useState(0);
     React.useEffect(() => {
         const id = setInterval(() => setTick((t) => t + 1), PACE_TICK_MS);
         return () => clearInterval(id);
     }, []);
+    const { now, today } = paceClockNow();
     return React.useMemo(
-        () => courtPaceLookup(competitions, paceClockNow()),
-        // tick: the clock moved on.
-        // oxlint-disable-next-line react-hooks/exhaustive-deps
-        [competitions, tick]
+        () => courtPaceLookup(competitions, { now, today }),
+        [competitions, now, today]
     );
 }
 

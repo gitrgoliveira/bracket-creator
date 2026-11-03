@@ -9,6 +9,7 @@ import (
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
+	bctest "github.com/gitrgoliveira/bracket-creator/internal/test"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -77,7 +78,7 @@ func TestStore_TournamentYAML(t *testing.T) {
 	require.NoError(t, err)
 
 	path := filepath.Join(dir, "tournament.md")
-	data, err := os.ReadFile(path)
+	data, err := bctest.ReadFile(path)
 	require.NoError(t, err)
 	assert.Contains(t, string(data), "name: Test Tournament")
 	assert.Contains(t, string(data), "---")
@@ -288,7 +289,7 @@ func TestStore_ParticipantsCSV(t *testing.T) {
 	require.NoError(t, store.SaveParticipants(compID, players))
 
 	path := filepath.Join(dir, "competitions", compID, "participants.csv")
-	data, err := os.ReadFile(path)
+	data, err := bctest.ReadFile(path)
 	require.NoError(t, err)
 	assert.Contains(t, string(data), "Akira Tanaka,Gyokusen")
 
@@ -339,7 +340,7 @@ func TestStore_ParticipantsCSV_WithZekkenName(t *testing.T) {
 	require.NoError(t, store.SaveCompetition(&Competition{ID: compID, WithZekkenName: true}))
 
 	players := []domain.Player{
-		{Name: "Akira Tanaka", DisplayName: "A. Tanaka", Dojo: "Gyokusen"},
+		{Name: "Akira Tanaka", DisplayName: "A. TANAKA", Dojo: "Gyokusen"},
 	}
 	require.NoError(t, store.SaveParticipants(compID, players))
 
@@ -347,7 +348,7 @@ func TestStore_ParticipantsCSV_WithZekkenName(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, loaded, 1)
 	assert.Equal(t, "Akira Tanaka", loaded[0].Name)
-	assert.Equal(t, "A. Tanaka", loaded[0].DisplayName)
+	assert.Equal(t, "A. TANAKA", loaded[0].DisplayName)
 	assert.Equal(t, "Gyokusen", loaded[0].Dojo)
 }
 
@@ -459,8 +460,8 @@ func TestStore_PoolsCSV(t *testing.T) {
 		{
 			PoolName: "Pool A",
 			Players: []helper.Player{
-				{Name: "Player 1", Dojo: "DojoA", DisplayName: "P. One"},
-				{Name: "Player 2", Dojo: "DojoB", DisplayName: "P. Two"},
+				{Name: "Player 1", Dojo: "DojoA", DisplayName: "P. ONE"},
+				{Name: "Player 2", Dojo: "DojoB", DisplayName: "P. TWO"},
 			},
 		},
 	}
@@ -475,10 +476,10 @@ func TestStore_PoolsCSV(t *testing.T) {
 	assert.Equal(t, "Pool A", loaded[0].PoolName)
 	require.Len(t, loaded[0].Players, 2)
 	assert.Equal(t, "Player 1", loaded[0].Players[0].Name)
-	assert.Equal(t, "P. One", loaded[0].Players[0].DisplayName)
+	assert.Equal(t, "P. ONE", loaded[0].Players[0].DisplayName)
 	assert.Equal(t, "DojoA", loaded[0].Players[0].Dojo)
 	assert.Equal(t, "Player 2", loaded[0].Players[1].Name)
-	assert.Equal(t, "P. Two", loaded[0].Players[1].DisplayName)
+	assert.Equal(t, "P. TWO", loaded[0].Players[1].DisplayName)
 	assert.Equal(t, "DojoB", loaded[0].Players[1].Dojo)
 }
 

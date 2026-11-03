@@ -47,9 +47,8 @@ func ParseSeedsFile(filePath string) ([]domain.SeedAssignment, error) {
 // to say "seed gap detected: rank 1, 2, 3 are missing"), while every path that
 // CONSUMES seeds keeps using ParseSeedsFile and refuses.
 func ReadSeedsFileRaw(filePath string) ([]domain.SeedAssignment, error) {
-	// cleanse the file path to mitigate G304
 	cleanPath := filepath.Clean(filePath)
-	file, err := os.Open(cleanPath) // #nosec G304
+	file, err := os.Open(cleanPath)
 	if err != nil {
 		return nil, err
 	}
@@ -59,7 +58,14 @@ func ReadSeedsFileRaw(filePath string) ([]domain.SeedAssignment, error) {
 		}
 	}()
 
-	reader := csv.NewReader(file)
+	return ReadSeedsRaw(file)
+}
+
+// ReadSeedsRaw is ReadSeedsFileRaw over bytes already in hand, for a reader that
+// opens the file itself (the tournament store reads every file through the
+// os.Root on its data folder, so it never hands this package a path).
+func ReadSeedsRaw(r io.Reader) ([]domain.SeedAssignment, error) {
+	reader := csv.NewReader(r)
 	header, err := reader.Read()
 	if err != nil {
 		if err == io.EOF {

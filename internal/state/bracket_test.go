@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
+	bctest "github.com/gitrgoliveira/bracket-creator/internal/test"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -105,7 +106,7 @@ func TestLegacyBracketRoundTripSave(t *testing.T) {
 
 	compID := "legacy-comp"
 	compDir := filepath.Join(dir, "competitions", compID)
-	require.NoError(t, os.MkdirAll(compDir, 0755))
+	require.NoError(t, os.MkdirAll(compDir, 0o700))
 
 	raw := []byte(`{"rounds":[[{"id":"m1","sideA":"Alice","sideB":"Bob","winner":"Alice","scoreA":"MHt","scoreB":"K(H1)"}]]}`)
 	require.NoError(t, os.WriteFile(filepath.Join(compDir, "bracket.json"), raw, 0600))
@@ -118,7 +119,7 @@ func TestLegacyBracketRoundTripSave(t *testing.T) {
 
 	require.NoError(t, store.SaveBracket(compID, b))
 
-	saved, err := os.ReadFile(filepath.Join(compDir, "bracket.json"))
+	saved, err := bctest.ReadFile(filepath.Join(compDir, "bracket.json"))
 	require.NoError(t, err)
 	assert.Contains(t, string(saved), `"ipponsA"`)
 	assert.Contains(t, string(saved), `"hansokuB"`)
@@ -239,9 +240,7 @@ func TestUpdateBracket_MissingFile_EmptyBracket(t *testing.T) {
 func TestUpdateBracketMatchByID(t *testing.T) {
 	newStore := func(t *testing.T) (*Store, string) {
 		t.Helper()
-		dir, err := os.MkdirTemp("", "state-bracket-updbyid-*")
-		require.NoError(t, err)
-		t.Cleanup(func() { os.RemoveAll(dir) })
+		dir := t.TempDir()
 		store, err := NewStore(dir)
 		require.NoError(t, err)
 		compID := "test-comp"
@@ -325,9 +324,7 @@ func TestUpdateBracketMatchByID(t *testing.T) {
 func TestMatchStatusByID(t *testing.T) {
 	newStore := func(t *testing.T) (*Store, string) {
 		t.Helper()
-		dir, err := os.MkdirTemp("", "state-match-status-*")
-		require.NoError(t, err)
-		t.Cleanup(func() { os.RemoveAll(dir) })
+		dir := t.TempDir()
 		store, err := NewStore(dir)
 		require.NoError(t, err)
 		compID := "test-comp"
@@ -434,9 +431,7 @@ func TestMatchStatusByID(t *testing.T) {
 // pre-existing legacy-hantei name backfill caller's fallback behaviour for
 // that residue is unchanged.
 func TestMatchSidesByID_ReturnsIDs(t *testing.T) {
-	dir, err := os.MkdirTemp("", "state-match-sides-*")
-	require.NoError(t, err)
-	t.Cleanup(func() { os.RemoveAll(dir) })
+	dir := t.TempDir()
 	store, err := NewStore(dir)
 	require.NoError(t, err)
 	compID := "test-comp"
@@ -553,7 +548,10 @@ func TestParseBracketFile_MissingFile(t *testing.T) {
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 
-	result, err := parseBracketFile(filepath.Join(dir, "nonexistent.json"))
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+
+	result, err := store.parseBracketFile(filepath.Join(dir, "nonexistent.json"))
 	require.NoError(t, err)
 	b := result.(*Bracket)
 	require.NotNil(t, b)
@@ -689,7 +687,9 @@ func TestParseBracketFile_MalformedJSON(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "bracket.json")
 	require.NoError(t, os.WriteFile(path, []byte(`{not valid json`), 0o600))
-	_, err := parseBracketFile(path)
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+	_, err = store.parseBracketFile(path)
 	assert.Error(t, err)
 }
 
@@ -737,7 +737,7 @@ func TestBracketMatchPlaceholders_RoundTrip(t *testing.T) {
 		require.NotNil(t, loaded.ThirdPlaceMatch)
 		assert.Equal(t, "Pool C-1st", loaded.ThirdPlaceMatch.PlaceholderA)
 
-		raw, err := os.ReadFile(filepath.Join(dir, "competitions", compID, "bracket.json"))
+		raw, err := bctest.ReadFile(filepath.Join(dir, "competitions", compID, "bracket.json"))
 		require.NoError(t, err)
 		assert.Contains(t, string(raw), `"placeholderA": "Pool A-1st"`)
 	})
@@ -752,7 +752,7 @@ func TestBracketMatchPlaceholders_RoundTrip(t *testing.T) {
 			Rounds: [][]BracketMatch{{{ID: "m-r1-0", SideA: "Alice", SideB: "Bob"}}},
 		}))
 
-		raw, err := os.ReadFile(filepath.Join(dir, "competitions", compID, "bracket.json"))
+		raw, err := bctest.ReadFile(filepath.Join(dir, "competitions", compID, "bracket.json"))
 		require.NoError(t, err)
 		assert.NotContains(t, string(raw), "placeholder",
 			"omitempty must keep a non-pool bracket byte-identical to before the fields existed")

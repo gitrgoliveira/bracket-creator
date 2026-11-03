@@ -349,7 +349,7 @@ type matchState struct {
 
 func (f *repBoutFixture) storedState(t *testing.T) matchState {
 	t.Helper()
-	bracket, err := os.ReadFile(filepath.Join(f.store.GetFolder(), "competitions", "c1", "bracket.json")) // #nosec G304 -- a test fixture path
+	bracket, err := os.ReadFile(filepath.Join(f.store.GetFolder(), "competitions", "c1", "bracket.json"))
 	require.NoError(t, err)
 	history, err := f.store.LoadMatchHistory("c1", "B1")
 	require.NoError(t, err)

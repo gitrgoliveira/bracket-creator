@@ -24,7 +24,6 @@ const stubs = () => ({
   API,
   AdminLineupHelpers: { rosterFor: vi.fn().mockReturnValue([]) },
   compMatches: () => [],
-  // eslint-disable-next-line react/prop-types
   Term: ({ children }) => children,
   GlossaryHint: () => null,
 });

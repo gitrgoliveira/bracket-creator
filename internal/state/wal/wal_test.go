@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	bctest "github.com/gitrgoliveira/bracket-creator/internal/test"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -14,7 +15,7 @@ import (
 // for tests where we don't need the full atomic-rename ceremony the
 // production wiring uses.
 func directWrite(path string, data []byte, perm os.FileMode) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 		return err
 	}
 	return os.WriteFile(path, data, perm)
@@ -61,10 +62,10 @@ func TestWALCommitApplyDone(t *testing.T) {
 	require.NoError(t, w.Apply())
 
 	// Both targets exist with the staged content.
-	gotA, err := os.ReadFile(targetA) // #nosec G304, test path
+	gotA, err := bctest.ReadFile(targetA)
 	require.NoError(t, err)
 	assert.Equal(t, "AAA", string(gotA))
-	gotB, err := os.ReadFile(targetB) // #nosec G304, test path
+	gotB, err := bctest.ReadFile(targetB)
 	require.NoError(t, err)
 	assert.Equal(t, "BBB", string(gotB))
 
@@ -100,7 +101,7 @@ func TestWALScanReplaysCommittedWAL(t *testing.T) {
 
 	// Replay: Apply + Done.
 	require.NoError(t, pending[0].Apply())
-	got, err := os.ReadFile(target) // #nosec G304, test path
+	got, err := bctest.ReadFile(target)
 	require.NoError(t, err)
 	assert.Equal(t, "HELLO", string(got))
 
@@ -160,7 +161,7 @@ func TestWALAppendCoalesces(t *testing.T) {
 
 	require.NoError(t, w.Commit())
 	require.NoError(t, w.Apply())
-	got, err := os.ReadFile(target) // #nosec G304, test path
+	got, err := bctest.ReadFile(target)
 	require.NoError(t, err)
 	assert.Equal(t, "third", string(got),
 		"target file must contain only the last-written content")
@@ -187,7 +188,7 @@ func TestWALApplyIsIdempotent(t *testing.T) {
 	require.NoError(t, w.Apply())
 	require.NoError(t, w.Apply())
 
-	got, err := os.ReadFile(target) // #nosec G304, test path
+	got, err := bctest.ReadFile(target)
 	require.NoError(t, err)
 	assert.Equal(t, "FINAL", string(got))
 
@@ -317,6 +318,45 @@ func TestDone_NoFileIsNoop(t *testing.T) {
 	// Second Done is also a no-op.
 	err = w.Done()
 	assert.NoError(t, err)
+}
+
+// TestDone_WALFolderGoneIsNoop verifies that Done returns nil when the
+// WAL folder itself has gone: nothing is left to remove.
+func TestDone_WALFolderGoneIsNoop(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), ".wal")
+	w, err := BeginTx(dir, "tx-folder-gone", directWrite)
+	require.NoError(t, err)
+	require.NoError(t, os.RemoveAll(dir))
+
+	assert.NoError(t, w.Done())
+}
+
+// TestDone_WALFolderNotAFolderErrors verifies that Done reports a WAL
+// folder it cannot open (here a file stands in its place), naming the
+// transaction.
+func TestDone_WALFolderNotAFolderErrors(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), ".wal")
+	w, err := BeginTx(dir, "tx-folder-file", directWrite)
+	require.NoError(t, err)
+	require.NoError(t, os.RemoveAll(dir))
+	require.NoError(t, os.WriteFile(dir, []byte("x"), 0o600))
+
+	err = w.Done()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `wal.Done "tx-folder-file"`)
+}
+
+// TestDone_RemoveErrorIsReported verifies that Done reports a WAL entry
+// it cannot remove (here a non-empty folder stands at its path).
+func TestDone_RemoveErrorIsReported(t *testing.T) {
+	dir := t.TempDir()
+	w, err := BeginTx(dir, "tx-remove-err", directWrite)
+	require.NoError(t, err)
+	require.NoError(t, os.MkdirAll(filepath.Join(w.path, "child"), 0o750))
+
+	err = w.Done()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `wal.Done "tx-remove-err"`)
 }
 
 // TestCommit_WriteFnError verifies that Commit surfaces the write-fn

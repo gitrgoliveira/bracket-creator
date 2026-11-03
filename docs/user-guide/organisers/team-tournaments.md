@@ -41,7 +41,11 @@ Every position a team has is offered, including the ones still waiting for a
 name, so you can field a fighter by number first and fill the name in later. A
 fighter picked that way counts in every format, winner-stays-on included.
 Typing a name that already belongs to a member simply picks that member, with
-nothing created and nothing to confirm. A new name instead names the position's
+nothing created and nothing to confirm, whatever case or accents you type it with. Member
+names are stored title-cased, by the same rule as competitor names (refer to
+[How names are stored](input-format.md#how-names-are-stored)), so `sato ken` is saved as `Sato Ken` and
+`ken 2nd` as `Ken 2nd`, and a fighter typed into a lineup without picking a
+member is saved the same way. A new name instead names the position's
 blank slot when one is free, and when none is left the app adds a new position
 to the team in the same step. On the Lineups page it confirms both of those
 first, so a mistyped name cannot quietly create a person nobody expected. The

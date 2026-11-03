@@ -68,10 +68,7 @@ func BuildKnockoutDrawPerPool(pools []Pool, defaultWinners int, overrides map[in
 		return nil
 	}
 	courts := EffectiveDrawCourts(len(pools), numCourts)
-	poolCourt, err := AssignPoolsToCourts(len(pools), courts)
-	if err != nil {
-		return nil
-	}
+	poolCourt := AssignPoolsToCourts(len(pools), courts)
 	return buildPerPoolDraw(pools, defaultWinners, overrides, poolCourt, courts)
 }
 

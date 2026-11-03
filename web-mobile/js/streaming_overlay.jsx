@@ -8,7 +8,11 @@ import { pickFromLineup, pickMemberIdFromLineup, boutSideView, POS_LABELS_5, kac
 import { isPoolDaihyosenBout, teamMatchTypeFor, DAIHYOSEN_POSITION } from './pool_ids.jsx';
 import { realIppons, nameOf } from './result_slot.jsx';
 
-const { useEffect: useED, useMemo: useMD } = React;
+const { useEffect, useMemo } = React;
+
+// One empty bout list, so a match with none keeps the same value between
+// renders and the bout memo below is not worked out again for nothing.
+const NO_SUB_RESULTS = [];
 
 // overlayPositionLabel: FIK position label for the current bout, used as the
 // fallback when no per-match lineup pins a player name. Uses POS_LABELS_5
@@ -74,7 +78,7 @@ function StreamingOverlay({ court, position, competitions }) {
     // T066: set page background to transparent so the OBS browser source
     // renders the overlay over the broadcast video without a backdrop.
     // Restore the original on unmount.
-    useED(() => {
+    useEffect(() => {
         const prev = document.body.style.background;
         document.body.style.background = 'transparent';
         const prevHtml = document.documentElement.style.background;
@@ -85,7 +89,7 @@ function StreamingOverlay({ court, position, competitions }) {
         };
     }, []);
 
-    const running = useMD(() => findRunningOnCourt(competitions, court), [competitions, court]);
+    const running = useMemo(() => findRunningOnCourt(competitions, court), [competitions, court]);
     const hasRunning = !!running;
     const comp = running?.competition;
     const zekken = !!(comp && comp.withZekkenName);
@@ -112,10 +116,10 @@ function StreamingOverlay({ court, position, competitions }) {
     // When every numbered bout is scored (idx === regular length) the
     // current bout is the daihyosen row when one exists, else null (the
     // dhPending banner below covers the tied-no-DH-yet case).
-    const ovlSubResults = (hasRunning && running.match.subResults) || [];
+    const ovlSubResults = (hasRunning && running.match.subResults) || NO_SUB_RESULTS;
     const regularSubsOvl = ovlSubResults.filter(s => s.position > DAIHYOSEN_POSITION);
     const dhSubOvl = ovlSubResults.find(s => s.position === DAIHYOSEN_POSITION) || null;
-    const currentBoutIdx = useMD(() => findCurrentBoutIndex(ovlSubResults), [ovlSubResults]);
+    const currentBoutIdx = useMemo(() => findCurrentBoutIndex(ovlSubResults), [ovlSubResults]);
     const currentSub = currentBoutIdx < regularSubsOvl.length ? regularSubsOvl[currentBoutIdx] : dhSubOvl;
 
     // mp-13y #10: running IV/PW aggregate per side. teamIVPW counts only

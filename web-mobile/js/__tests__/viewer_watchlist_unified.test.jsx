@@ -35,7 +35,8 @@ const roster = [
 describe('entryKey', () => {
   it('keys players by id and dojos by name', () => {
     expect(entryKey({ type: 'player', id: 'a1' })).toBe('player:a1');
-    expect(entryKey({ type: 'dojo', dojo: 'Hagane Dojo' })).toBe('dojo:Hagane Dojo');
+    // A dojo key ignores case, so an old link's spelling is the same entry.
+    expect(entryKey({ type: 'dojo', dojo: 'Hagane Dojo' })).toBe('dojo:hagane dojo');
   });
   it('keys legacy (typeless) player entries by id', () => {
     expect(entryKey({ id: 'a1', name: 'Akira' })).toBe('player:a1');
@@ -154,7 +155,7 @@ describe('effectivePrimaryKey', () => {
     expect(effectivePrimaryKey([], '')).toBeNull();
   });
   it('is the sole entry implicitly when there is exactly one (ignores pin)', () => {
-    expect(effectivePrimaryKey(oneDojo, '')).toBe('dojo:Hagane Dojo');
+    expect(effectivePrimaryKey(oneDojo, '')).toBe('dojo:hagane dojo');
     expect(effectivePrimaryKey([{ id: 'a1' }], 'player:zzz')).toBe('player:a1');
   });
   it('is null with ≥2 entries and no pin (no hero, no chime)', () => {

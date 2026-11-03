@@ -263,7 +263,7 @@ function buildEmptyCompetition(args) {
   const count = sampleRoster ? ({ small: 8, medium: 16, large: 32 }[sampleRoster] || 16) : 0;
   const players = count > 0 ? makeCompetitors(count, kind, id, seedCount) : [];
   // Every default below READS COMPETITION_DEFAULTS rather than restating a
-  // literal. This function and the create form's ~20 useStateA seeds were two
+  // literal. This function and the create form's ~20 useState seeds were two
   // copies of the same answer, agreeing by inspection: both said poolSize 3,
   // both said poolWinners 2, both said "max". Two copies that agree today are
   // still two copies, and the joint-3rd-places divergence this branch fixed

@@ -5,6 +5,7 @@ import (
 	"os"
 	"testing"
 
+	bctest "github.com/gitrgoliveira/bracket-creator/internal/test"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -82,8 +83,10 @@ func TestLoadBracketLeavesTheBrokenFileAlone(t *testing.T) {
 	require.Error(t, err)
 	_, ok := AsCorruptFile(err)
 	assert.True(t, ok, "the write refuses with the same located reason")
+	assert.True(t, IsCorruptFile(err), "IsCorruptFile answers what AsCorruptFile does")
+	assert.False(t, IsCorruptFile(os.ErrPermission), "an I/O failure is not a corrupt file")
 
-	after, err := os.ReadFile(path) // #nosec G304
+	after, err := bctest.ReadFile(path)
 	require.NoError(t, err)
 	assert.Equal(t, broken, string(after), "the operator's bytes are untouched")
 }
@@ -135,4 +138,33 @@ func TestCorruptJSONWithSentinel_UnlocatableFaultStillCarriesTheSentinel(t *test
 	assert.ErrorIs(t, err, raw, "the underlying parse error must stay reachable for errors.As")
 	_, located := AsCorruptFile(err)
 	assert.False(t, located, "an unlocatable fault must NOT claim to be a located CorruptFileError")
+}
+
+// A row the reader refuses is reported on its FILE line, the line an editor
+// shows. A line holding only an id is left out of the competitor rows, so
+// counting rows would put the second refused row on line 5 instead of 6.
+func TestLoadParticipantsLocatesARefusedRowOnItsFileLine(t *testing.T) {
+	dir := t.TempDir()
+	s, err := NewStore(dir)
+	require.NoError(t, err)
+	require.NoError(t, s.SaveCompetition(&Competition{ID: "c", Name: "C", WithZekkenName: true}))
+
+	file := "11111111-2222-4333-8444-555555555555,Alice Smith,SMITH,Kenshinkan\n" +
+		"22222222-2222-4333-8444-555555555555\n" +
+		"33333333-2222-4333-8444-555555555555,Bob Jones\n" +
+		"\n" +
+		"44444444-2222-4333-8444-555555555555,Carol Lee,LEE,Kenshinkan\n" +
+		"55555555-2222-4333-8444-555555555555,Dan Poe\n"
+	require.NoError(t, s.atomicWrite(s.compPath("c", "participants.csv"), []byte(file), 0600))
+
+	fresh, err := NewStore(dir)
+	require.NoError(t, err)
+	_, err = fresh.LoadParticipants("c", true)
+	cf, ok := AsCorruptFile(err)
+	require.True(t, ok, "a refused row arrives as a located CorruptFileError, got %T", err)
+	assert.Equal(t, "participants.csv", cf.File)
+	assert.Equal(t, 3, cf.Line)
+	assert.Contains(t, cf.Detail, "invalid format")
+	assert.Contains(t, cf.Detail, "also on lines 6")
+	assert.NotContains(t, cf.Detail, "Bob", "the detail names lines, never a competitor")
 }

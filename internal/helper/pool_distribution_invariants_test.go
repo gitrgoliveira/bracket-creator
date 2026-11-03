@@ -1,13 +1,14 @@
 package helper
 
 import (
+	"bytes"
 	"encoding/csv"
 	"fmt"
 	"math"
-	"os"
 	"strings"
 	"testing"
 
+	bctest "github.com/gitrgoliveira/bracket-creator/internal/test"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -393,10 +394,9 @@ func TestPoolDistribution_RealRosters_MultiDojo(t *testing.T) {
 // (Name, Dojo) or 3-column zekken (Name, Zekken, Dojo).
 func loadDistributionRoster(t *testing.T, path string) []Player {
 	t.Helper()
-	fh, err := os.Open(path) // #nosec G304 -- test-only, fixed test-data path
+	raw, err := bctest.ReadFile(path)
 	require.NoError(t, err)
-	defer func() { _ = fh.Close() }()
-	rd := csv.NewReader(fh)
+	rd := csv.NewReader(bytes.NewReader(raw))
 	rd.FieldsPerRecord = -1
 	recs, err := rd.ReadAll()
 	require.NoError(t, err)

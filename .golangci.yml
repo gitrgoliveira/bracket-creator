@@ -14,7 +14,20 @@ linters:
     - revive
     - gosec
     - unconvert
+    - godox
+    - nolintlint
   settings:
+    errcheck:
+      check-blank: true
+    godox:
+      keywords:
+        - TODO
+        - FIXME
+        - HACK
+        - XXX
+    nolintlint:
+      require-explanation: true
+      require-specific: true
     revive:
       rules:
         - name: unused-parameter
@@ -30,6 +43,15 @@ linters:
         linters:
           - gosec
           - errcheck
+      # G204 flags a subprocess launched with any non-constant argument.
+      # soffice.go holds the tree's one subprocess: LibreOffice at the path
+      # LocateSoffice resolves, converting a workbook this process wrote to
+      # its own temp folder. No rewrite of that call satisfies the rule. The
+      # Makefile's gosec targets exclude it for this file alone too.
+      - path: internal/pdf/soffice\.go
+        linters:
+          - gosec
+        text: G204
 
 formatters:
   enable:

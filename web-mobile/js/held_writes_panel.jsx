@@ -3,6 +3,7 @@
 
 import { heldWriteLine, heldWriteDiscardConfirm, matchLabel, heldLineupLabel, HELD_WRITES_TITLE, HELD_WRITES_EMPTY, HELD_WRITE_DISCARD_ONE_LABEL, queuedWritesNoun, isFinishedResultWrite } from './write_result.jsx';
 import { scoreRowMatchLabel } from './pool_ids.jsx';
+import { useLatestRef } from './latest_ref.jsx';
 
 const { useState, useEffect, useRef } = React;
 
@@ -11,15 +12,15 @@ const { useState, useEffect, useRef } = React;
 // mounted flag for a caller whose own async work must check it too.
 function useHeldWritesRefresh(refresh) {
   const mountedRef = useRef(true);
+  const refreshRef = useLatestRef(refresh);
   useEffect(() => () => { mountedRef.current = false; }, []);
   useEffect(() => {
-    const onChange = () => { if (mountedRef.current) refresh(); };
+    const onChange = () => { if (mountedRef.current) refreshRef.current(); };
     const offs = [window.subscribeSyncStatus, window.subscribeUnsentWrites]
       .filter((subscribe) => typeof subscribe === 'function')
       .map((subscribe) => subscribe(onChange));
     return () => offs.forEach((off) => { if (typeof off === 'function') off(); });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [refreshRef]);
   return mountedRef;
 }
 

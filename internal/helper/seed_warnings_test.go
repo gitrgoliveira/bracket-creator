@@ -335,8 +335,7 @@ func TestSeedPlacementWarningsUsesTheDrawsOwnAllocation(t *testing.T) {
 		}
 	}
 
-	derived, err := AssignPoolsToCourts(len(pools), 2)
-	require.NoError(t, err)
+	derived := AssignPoolsToCourts(len(pools), 2)
 	require.Equal(t, []int{0, 0, 1, 1}, derived,
 		"fixture assumes the derived allocation separates pools A and C")
 

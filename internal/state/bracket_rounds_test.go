@@ -11,11 +11,11 @@ package state_test
 
 import (
 	"encoding/json"
-	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
+	bctest "github.com/gitrgoliveira/bracket-creator/internal/test"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -29,7 +29,7 @@ const v21FiveEntrantFixture = "testdata/bracket_v2.1.0_knockout5.json"
 
 func loadV21FiveEntrant(t *testing.T) *state.Bracket {
 	t.Helper()
-	raw, err := os.ReadFile(filepath.FromSlash(v21FiveEntrantFixture))
+	raw, err := bctest.ReadFile(filepath.FromSlash(v21FiveEntrantFixture))
 	require.NoError(t, err)
 	var b state.Bracket
 	require.NoError(t, json.Unmarshal(raw, &b))

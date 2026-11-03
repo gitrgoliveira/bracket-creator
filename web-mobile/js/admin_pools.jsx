@@ -22,7 +22,7 @@ import { attemptScoreWrite, DOWNSTREAM_KNOCKOUT_RANKING_CANCELLED, writeKeepsEdi
 import { rankOrdinal } from './viewer_standings.jsx';
 import { useUnsavedInput } from './app_version.jsx';
 
-const { useState: useStateA, useEffect: useEffectA, useRef: useRefA, useMemo: useMemoA } = React;
+const { useState, useEffect, useRef, useMemo } = React;
 const EmptyState = window.EmptyState;
 const ScoreEditorModal = window.ScoreEditorModal;
 
@@ -168,22 +168,22 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
   // for as long as it stays open, so a result recorded on another device
   // updated the pool grid behind this modal but not the modal itself. Same
   // pattern as AdminScoreEditor, the bracket panel and the shiaijo panel.
-  const [scoreOpenId, setScoreOpenId] = useStateA(null);
-  const mountedRef = useRefA(true);
-  useEffectA(() => () => { mountedRef.current = false; }, []);
+  const [scoreOpenId, setScoreOpenId] = useState(null);
+  const mountedRef = useRef(true);
+  useEffect(() => () => { mountedRef.current = false; }, []);
 
   // Phase 3b (mp-8rc9): league tie-breaker candidate state.
   // Only fetched for team leagues in the "pools" phase.
   const isTeamLeague = isLeague && (c.teamSize > 0 || c.kind === "team");
-  const [tiebreakCandidates, setTiebreakCandidates] = useStateA(null);
-  const [tiebreakFinalized, setTiebreakFinalized] = useStateA(false);
-  const [tiebreakActionBusy, setTiebreakActionBusy] = useStateA(false);
+  const [tiebreakCandidates, setTiebreakCandidates] = useState(null);
+  const [tiebreakFinalized, setTiebreakFinalized] = useState(false);
+  const [tiebreakActionBusy, setTiebreakActionBusy] = useState(false);
   // Per-button busy key: "<teamNamesKey>:<action>" or "finalize". Keeps the
   // spinner scoped to exactly the clicked button while all others stay
   // disabled (tiebreakActionBusy is still set on all). null = no action in
   // flight.
-  const [tiebreakBusyAction, setTiebreakBusyAction] = useStateA(null);
-  const [tiebreakErr, setTiebreakErr] = useStateA(null);
+  const [tiebreakBusyAction, setTiebreakBusyAction] = useState(null);
+  const [tiebreakErr, setTiebreakErr] = useState(null);
 
   // Chusen (drawing lots) candidate state: team-pool ties the daihyosen
   // could not settle (a cycle / all-drawn). Only fetched for team comps in
@@ -193,25 +193,25 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
   // stay fixable. The server's AcceptsPoolRankOverride is the same rule.
   const isTeamComp = c && (c.kind === "team" || c.teamSize > 0);
   const chusenOpen = !!c && (c.status === "pools" || (c.format === "mixed" && c.status === "knockout"));
-  const [chusenCandidates, setChusenCandidates] = useStateA(null);
+  const [chusenCandidates, setChusenCandidates] = useState(null);
   // Per-member input values: keys are "${groupKey}::${identity}" -> string,
   // where groupKey is "${poolName}::${minPosition}" and identity is
   // checkinPid(member) (id when non-empty, else "name|dojo") -- never
   // the member's index in the group, whose order is the server's standings
   // order and can change between fetches (bc-appx item 2), and never the bare display name, which two members
   // can share.
-  const [chusenInputs, setChusenInputs] = useStateA({});
+  const [chusenInputs, setChusenInputs] = useState({});
   // Per-group busy flag: keyed by groupKey "${poolName}::${minPosition}" -> bool
   // (a pool can hold more than one unresolved tied group).
-  const [chusenBusy, setChusenBusy] = useStateA({});
+  const [chusenBusy, setChusenBusy] = useState({});
   // Per-group error: keyed by the same "${poolName}::${minPosition}" -> string.
-  const [chusenGroupErr, setChusenGroupErr] = useStateA({});
+  const [chusenGroupErr, setChusenGroupErr] = useState({});
   // Ties a chusen already settled, each carrying its recorded `ranks`
   // (parallel to `teams`), so one recorded in the wrong order can be changed.
   // Fetched with chusenCandidates, so it shows exactly where they would.
-  const [chusenRecorded, setChusenRecorded] = useStateA(null);
+  const [chusenRecorded, setChusenRecorded] = useState(null);
   // groupKey -> true while the operator is changing that recorded chusen.
-  const [chusenChanging, setChusenChanging] = useStateA({});
+  const [chusenChanging, setChusenChanging] = useState({});
   // A chusen order being typed holds a new build's automatic reload
   // (app_version.jsx), but only while it holds a change: a rank in a group
   // still shown (an unresolved tie, or a recorded one being changed) that is
@@ -234,7 +234,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
   // Lightweight signature so the effect re-runs when match results change.
   // Memoized so typing into a chusen position input (local state) does not
   // re-scan every pool match on each render.
-  const poolMatchesSig = useMemoA(
+  const poolMatchesSig = useMemo(
     () => (poolMatches || []).map(m => `${m.id}:${m.status}:${typeof m.winner === "string" ? m.winner : (m.winner && m.winner.name) || ""}`).join("|"),
     [poolMatches]
   );
@@ -242,28 +242,30 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
   // backend broadcasts as EventTournamentUpdated WITHOUT changing pool matches.
   // Capturing rank + isOverridden lets the fetch effect refresh candidates after
   // an override recorded elsewhere (another operator tab), not only after a bout.
-  const standingsSig = useMemoA(
+  const standingsSig = useMemo(
     () => Object.keys(standings || {}).sort().map(pn =>
       (standings[pn] || []).map(s => `${(s.player && s.player.name) || ""}:${s.rank}:${s.isOverridden ? 1 : 0}`).join(",")
     ).join("|"),
     [standings]
   );
 
-  useEffectA(() => {
+  const chusenCompId = c && c.id;
+  const chusenCompStatus = c && c.status;
+  useEffect(() => {
     if (!isTeamComp || !chusenOpen || !window.API || typeof window.API.chusenCandidates !== "function") {
       applyChusen(null);
       return;
     }
     let cancelled = false;
-    window.API.chusenCandidates(c.id, password)
+    window.API.chusenCandidates(chusenCompId, password)
       .then(res => { if (!cancelled) applyChusen(res); })
       .catch(() => { if (!cancelled) applyChusen(null); });
     return () => { cancelled = true; };
-  }, [c && c.id, c && c.status, chusenOpen, isTeamComp, poolMatchesSig, standingsSig, password]);
+  }, [chusenCompId, chusenCompStatus, chusenOpen, isTeamComp, poolMatchesSig, standingsSig, password]);
 
   // Fetch candidates whenever poolMatches changes (triggered by match_updated
   // SSE events, which the Go handler now broadcasts for AwaitingLeagueTiebreak).
-  useEffectA(() => {
+  useEffect(() => {
     if (!isTeamLeague || c.status !== "pools") return;
     let cancelled = false;
     window.API.leagueTiebreakCandidates(c.id)
@@ -743,7 +745,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
   // broadcast for ANY match in the tournament, and throws the map away each
   // time. Nothing downstream depends on the object identity changing per render.
   const scoreOpenRaw = scoreOpenId ? (poolMatches || []).find((m) => m.id === scoreOpenId) || null : null;
-  const scoreOpenMatch = useMemoA(
+  const scoreOpenMatch = useMemo(
     () => (scoreOpenRaw ? enrichPoolMatchWithComp(scoreOpenRaw, c) : null),
     [scoreOpenRaw, c]
   );

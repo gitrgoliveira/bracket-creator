@@ -383,7 +383,9 @@ func TestParseCompetitionFile_MalformedYAML(t *testing.T) {
 	dir := t.TempDir()
 	path := dir + "/config.md"
 	require.NoError(t, os.WriteFile(path, []byte("---\n: : :\n---\n"), 0o600))
-	_, err := parseCompetitionFile(path)
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+	_, err = store.parseCompetitionFile(path)
 	assert.Error(t, err)
 }
 

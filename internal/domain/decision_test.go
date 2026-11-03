@@ -11,8 +11,8 @@ import (
 // wire values exist and Decision.Valid() accepts each (including the empty
 // "none" sentinel) while rejecting unknown values.
 //
-// This is a Red test, domain.Decision and Decision.Valid() do not yet exist.
-// The build must fail until the Green implementation (T074) lands.
+// It pins domain.Decision and Decision.Valid() (internal/domain/decision.go)
+// to those wire values.
 func TestDecisionConstants(t *testing.T) {
 	cases := []struct {
 		name string

@@ -81,7 +81,7 @@ describe('mp-p7n: Apply with clean 2-col paste does not introduce a phantom lead
     expect(np[0].dojo).toBe('Team Alpha');
     expect(np[0].danGrade).toBeFalsy();
     // Now serialise np back through the textarea generator (what
-    // useEffectA(c.players) produces after the apply response lands).
+    // useEffect(c.players) produces after the apply response lands).
     const afterText = generateText(np, false);
     const afterLines = afterText.split('\n');
     expect(afterLines[0]).toBe('Aaron Adams, Team Alpha');

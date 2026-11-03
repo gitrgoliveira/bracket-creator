@@ -610,6 +610,20 @@ a:hover {
   margin-top: 2px;
 }
 
+/* Why the header's draw/start buttons are disabled: danger text at the hint
+   size, right-aligned under the buttons it explains. */
+.page-head__blocker {
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-end;
+  gap: 4px;
+  max-width: 380px;
+  color: var(--danger);
+  font-size: 12px;
+  font-weight: 600;
+  text-align: right;
+}
+
 .page-head__actions {
   display: flex;
   flex-wrap: wrap;
@@ -720,6 +734,30 @@ a:hover {
 .btn--ghost:hover {
   background: var(--line-2);
   border-color: transparent;
+}
+
+/* Link button: an action that sits inside running text or a hint ("Download
+   CSV template") and reads as a link rather than a box. Takes the surrounding
+   text size; --text-link ink, the token for a standalone link that must read
+   as a link (DESIGN.md §3); underline on hover; the shared 2px
+   accent focus ring from .btn:focus-visible. One class (0,1,0), so a sibling
+   class sets its own size (.pool__view-all-btn's 13px). Under a coarse pointer
+   it keeps the 44px touch floor as an invisible hit area rather than height
+   (the coarse-pointer block below), so the text around it is not pushed apart. */
+.btn--link {
+  display: inline-block;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text-link);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.btn--link:hover {
+  text-decoration: underline;
 }
 
 .btn--ghost.btn--danger {
@@ -850,6 +888,31 @@ a:hover {
   align-items: center;
   justify-content: space-between;
   margin-bottom: 14px;
+}
+
+/* A card head whose text block runs long (the participant list's format
+   hint): the action buttons keep their labels on one line and, where the row
+   is too narrow for both, wrap under the text instead of squeezing it. */
+.card__head--wrap {
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 8px 12px;
+}
+
+.card__head-main {
+  flex: 1 1 260px;
+  min-width: 0;
+}
+
+.card__head-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.card__head-actions .btn {
+  white-space: nowrap;
 }
 
 .card__title {
@@ -3776,6 +3839,50 @@ button.vsched-item:not([data-clickable]) {
   margin-top: 6px;
 }
 
+/* A stat the box cannot give ("Participants unreadable"): the reason beside
+   the label, in the label's muted ink at full weight. Not danger ink: the page's
+   banner is the one danger-coloured statement of the failure. */
+.stat-box__flag {
+  color: var(--ink-2);
+  font-weight: 600;
+}
+
+/* The Overview's schedule estimate footer (admin_competition_overview.jsx). */
+.schedule-estimate {
+  margin-top: 16px;
+  padding: 10px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  font-size: 12.5px;
+  color: var(--ink);
+}
+
+.schedule-estimate__title {
+  margin-bottom: 4px;
+  font-weight: 600;
+  color: var(--ink-2);
+}
+
+.schedule-estimate__spinner {
+  margin-left: 6px;
+  vertical-align: middle;
+}
+
+.schedule-estimate__error {
+  font-size: 12px;
+  color: var(--danger);
+}
+
+.schedule-estimate__empty {
+  font-size: 12px;
+  color: var(--ink-3);
+}
+
+.schedule-estimate__row {
+  margin-top: 2px;
+}
+
 /* stat-box link variant, a button-reset that keeps the stat-box layout
    but is clickable (e.g. "View podium →" in the completed stats strip). */
 .stat-box__link {
@@ -3877,7 +3984,7 @@ button.vsched-item:not([data-clickable]) {
   color: var(--accent);
 }
 
-.comp-step--todo .comp-step__icon {
+.comp-step--pending .comp-step__icon {
   color: var(--ink-3);
 }
 
@@ -3900,7 +4007,7 @@ button.vsched-item:not([data-clickable]) {
   color: var(--ink);
 }
 
-.comp-step--todo .comp-step__label {
+.comp-step--pending .comp-step__label {
   color: var(--ink-3);
 }
 
@@ -4129,13 +4236,13 @@ button.vsched-item:not([data-clickable]) {
   margin-left: -8px;
 }
 
+/* A long name wraps rather than ellipsising: the full name is only in a
+   title, which a touch screen never shows. */
 .seed-row__name {
   font-size: 13.5px;
   font-weight: 500;
   line-height: 1.2;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  overflow-wrap: anywhere;
 }
 
 /* The row's text is two UNITS, name (with number badge and source tag) and
@@ -4215,12 +4322,27 @@ button.vsched-item:not([data-clickable]) {
   }
 }
 
+/* Phone width: the controls take a second line under the name. Beside it
+   they left ~45px of a touch screen's row for the name ("Ren ..."). The
+   handle spans both lines, and a name too long for the line wraps rather
+   than ellipsising, since a touch screen never shows its title tooltip. */
+@media (max-width: 480px) {
+  .seed-row {
+    grid-template-columns: 20px minmax(0, 1fr) 64px;
+  }
+  .seed-row__handle {
+    grid-row: span 2;
+  }
+  .seed-row__line {
+    grid-column: 2 / -1;
+  }
+}
+
 /* The one visual for NoIdHint (data_integrity.jsx): an id-less row's
    disabled-control reason, surfaced inline rather than only as a hover
    title (unreachable on a tablet or by keyboard). Prose, not an id, so no
-   font-mono. No font-size here: each host (admin_participants.jsx's seed
-   row, admin_registration_desk.jsx's rd row, admin_pools.jsx's pool draw)
-   sets its own, matching its surrounding text; only the warn colour/weight
+   font-mono. No font-size here: each host (admin_registration_desk.jsx's rd
+   row, admin_pools.jsx's pool draw) sets its own, matching its surrounding text; only the warn colour/weight
    is the shared part of this look. */
 .noid-hint {
   color: var(--warn-ink);
@@ -4393,6 +4515,34 @@ button.vsched-item:not([data-clickable]) {
   .duration-input__field {
     min-height: 44px;
     font-size: 16px;
+  }
+  /* A link button keeps its text height (a box would push the running text
+     around it apart) and gets the 44px target as a hit area: the pseudo-
+     element is part of the button for hit testing, centred on the text and
+     wider than it by a few pixels each side. */
+  .btn--link {
+    position: relative;
+    min-height: 0;
+  }
+  .btn--link::before {
+    content: "";
+    position: absolute;
+    left: -6px;
+    right: -6px;
+    top: 50%;
+    height: 44px;
+    transform: translateY(-50%);
+  }
+  /* The band reaches about 14px past a one-line link's text. A wrapped card
+     head puts a link (Download CSV template) just above its button row, so the
+     rows sit far enough apart for the band to end before the buttons, and the
+     buttons are positioned so they paint, and take the tap, over any band that
+     still reaches them. */
+  .card__head--wrap {
+    row-gap: 14px;
+  }
+  .card__head-actions .btn {
+    position: relative;
   }
 }
 
@@ -4591,7 +4741,19 @@ button.vsched-item:not([data-clickable]) {
   text-align: center;
 }
 
+.dropzone-row {
+  display: flex;
+  margin-bottom: 12px;
+}
+
+/* A <button> (keyboard-reachable), so the UA button styles are reset here. */
 .dropzone {
+  /* Positioned, so it paints over the invisible 44px tap band of the
+     "Download CSV template" link above it (.btn--link::before) and a tap on
+     the zone's top row opens the file picker. */
+  position: relative;
+  flex: 1;
+  min-height: 64px;
   border: 2px dashed var(--line-2);
   border-radius: 12px;
   padding: 16px;
@@ -4602,11 +4764,23 @@ button.vsched-item:not([data-clickable]) {
   transition: background-color 200ms var(--ease-out), border-color 200ms var(--ease-out), color 200ms var(--ease-out);
   background: var(--surface);
   color: var(--ink-2);
+  font: inherit;
+  text-align: left;
 }
 
-.dropzone:hover {
+.dropzone:hover:not(:disabled) {
   border-color: var(--accent);
   background: var(--surface-2);
+}
+
+.dropzone:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.dropzone:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
 }
 
 .dropzone--active {
@@ -4616,20 +4790,23 @@ button.vsched-item:not([data-clickable]) {
 }
 
 .dropzone__icon {
-  font-size: 32px;
-  line-height: 1;
-}
-
-.dropzone__title {
-  font-weight: 700;
-  font-size: 15px;
-  color: var(--ink);
-}
-
-.dropzone__sub {
-  font-size: 12px;
   color: var(--ink-3);
-  margin-top: 2px;
+}
+
+/* The participant list card's example line: a line of its own, so it never
+   strands its last field ("3") or a separator at a line's end. */
+.participants-example {
+  display: block;
+  color: var(--ink-2);
+  font-weight: 600;
+}
+
+/* At the card title's size and weight, never louder than the card's own
+   title above it. */
+.dropzone__title {
+  font-weight: 600;
+  font-size: var(--fs-title-card);
+  color: var(--ink);
 }
 
 /* ---------- Tournament-wide schedule (court swimlanes) ---------- */
@@ -6884,16 +7061,31 @@ button.vsched-item:not([data-clickable]) {
 }
 
 /* Data-integrity notices (data_integrity.jsx). They ride on the shared .alert
-   --warn family rather than inventing a colour: this is a caution an operator
-   must act on, which is exactly what that family already means, and amber stays
-   clear of red (Aka/danger) per DESIGN.md Principle 3.
-   The two additions are layout only: the leading glyph sits beside the text
-   rather than wrapping under it. */
+   families rather than inventing a colour. The competition banner is
+   .alert--error (--danger): a file that will not load has every write to it
+   refused, which is work at risk (DESIGN.md §3, --danger). The per-match,
+   editor, pool and missing-ids notes are .alert--warn (amber): the competition
+   keeps running and the operator has something to do.
+   The additions are layout only: the leading icon sits beside the text rather
+   than wrapping under it. */
 .data-issue {
   display: flex;
   align-items: flex-start;
   gap: 8px;
   line-height: 1.4;
+}
+
+/* The leading alert-circle icon (ui.jsx Icon), nudged onto the first line. */
+.data-issue__icon {
+  margin-top: 1px;
+}
+
+/* Reload and the reset sit in one row under the banner's paragraphs. */
+.data-issue__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 4px;
 }
 
 /* The per-match variant sits directly beneath the match row it describes, so it
@@ -6921,9 +7113,22 @@ button.vsched-item:not([data-clickable]) {
   margin-bottom: 12px;
 }
 
+/* Cap the measure (DESIGN.md: about 65 to 75 characters), or the banner's
+   paragraphs ran about 130 characters a line at 1180. */
+.data-issue--banner p,
+.data-issue__list {
+  max-width: 72ch;
+}
+
 .data-issue__list {
   margin: 6px 0;
   padding-left: 20px;
+}
+
+/* What the banner's Reload found, under its buttons. */
+.data-issue__note {
+  margin: 8px 0 0;
+  font-weight: 600;
 }
 
 .data-issue__list code {
@@ -7090,10 +7295,6 @@ button.vsched-item:not([data-clickable]) {
 
 @keyframes spin {
   to { transform: rotate(360deg); }
-}
-
-.btn .spinner {
-  margin-right: 6px;
 }
 
 .btn:disabled,

@@ -11,7 +11,7 @@
 
 import { useUnsavedInput } from './app_version.jsx';
 
-const { useState: useStateSp, useRef: useRefSp } = React;
+const { useState, useRef } = React;
 
 function SponsorsManager({ tournament, password, showToast, maxSponsors }) {
   const cap = maxSponsors || 6;
@@ -22,15 +22,15 @@ function SponsorsManager({ tournament, password, showToast, maxSponsors }) {
   // first render and update locally from the API response shape:
   //   POST /api/sponsors → returns the created Sponsor
   //   DELETE /api/sponsors/:index → returns {removed}
-  const [sponsors, setSponsors] = useStateSp(
+  const [sponsors, setSponsors] = useState(
     (tournament && tournament.sponsors) || [],
   );
-  const [name, setName] = useStateSp("");
-  const [link, setLink] = useStateSp("");
+  const [name, setName] = useState("");
+  const [link, setLink] = useState("");
   // A sponsor being typed holds a new build's automatic reload (app_version.jsx).
   useUnsavedInput(name.trim() !== "" || link.trim() !== "");
-  const [busy, setBusy] = useStateSp(false);
-  const fileRef = useRefSp(null);
+  const [busy, setBusy] = useState(false);
+  const fileRef = useRef(null);
 
   const reachedCap = sponsors.length >= cap;
 

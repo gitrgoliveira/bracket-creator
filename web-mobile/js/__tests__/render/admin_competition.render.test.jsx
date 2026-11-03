@@ -184,6 +184,19 @@ describe('AdminCompetition section render-smoke (mp-hpe3 split characterization)
     const { container } = await mountSection('overview', { comp });
     expect(container.querySelector('[data-stub="AdminTopbar"]')).not.toBeNull();
   });
+
+  // The server's own text ("internal error") goes to the console; the panel
+  // says what happened in the organiser's words.
+  it('says a failed schedule estimate in plain words, and logs the server text', async () => {
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+    window.API.estimateCompetitionSchedule.mockRejectedValueOnce(new Error('internal error'));
+    const { getByTestId } = await mountSection('overview');
+    const panel = getByTestId('overview-estimate');
+    expect(panel.textContent).toContain('Could not estimate the schedule. Reload the page to try again.');
+    expect(panel.textContent).not.toContain('internal error');
+    expect(logged).toHaveBeenCalledWith('Schedule estimate failed:', 'internal error');
+    logged.mockRestore();
+  });
 });
 
 // The page keeps its 1400px width everywhere except the Bracket section, which
@@ -732,14 +745,14 @@ describe('AdminCompOverview next steps under a court block (spec 007 R9)', () =>
   it('points at the Generate draw button when nothing blocks it', async () => {
     const comp = makeCompetition({ courts: ['A', 'B'], format: 'knockout' });
     const { container } = await mountSection('overview', { comp, tournament: { courts: ['A', 'B', 'C'] } });
-    expect(stepText(container, 'generate')).toContain('Use the "Generate draw" button in the header above');
+    expect(stepText(container, 'generate')).toContain('Use the “Generate draw” button in the header above');
   });
 
   it('points at Settings instead when the shiaijo count blocks the draw', async () => {
     const comp = makeCompetition({ courts: ['A', 'B', 'C'], format: 'knockout' });
     const { container } = await mountSection('overview', { comp, tournament: { courts: ['A', 'B', 'C'] } });
     const text = stepText(container, 'generate');
-    expect(text).not.toContain('Use the "Generate draw" button in the header above');
+    expect(text).not.toContain('Use the “Generate draw” button in the header above');
     expect(text).toContain('3 shiaijo cannot be paired down to a single bracket');
     expect(text).toContain('Reassign shiaijo in Settings.');
   });
@@ -907,6 +920,60 @@ describe('AdminCompetition survives a null courts list (U1)', () => {
     const comp = makeCompetition({ courts: null, players: null });
     const { container } = await mountSection('overview', { comp });
     expect(container.querySelector('[data-stub="AdminTopbar"]')).not.toBeNull();
+  });
+});
+
+// D26 and D29: participants.csv unreadable. The roster arrives empty, so the
+// Overview must not report 0 participants or offer to add them. The banner is
+// the one full statement of the failure: the header says "roster unreadable"
+// in its own muted ink, and no other place on the page repeats it in red.
+describe('AdminCompOverview with participants.csv unreadable (D26)', () => {
+  const unreadable = { kind: 'corrupt-file', file: 'participants.csv', line: 0, column: 0, detail: 'could not be opened', cause: 'unopened' };
+
+  it('shows n/a in the participants and seeded tiles, and no Add participants step', async () => {
+    const comp = makeCompetition({ players: [], rosterAvailable: false, dataIssues: [unreadable] });
+    const { container } = await mountSection('overview', { comp });
+    const tile = container.querySelector('[data-testid="stat-participants"]');
+    expect(tile.querySelector('.v').textContent).toBe('n/a');
+    expect(tile.querySelector('.l').textContent).toBe('Participants unreadable');
+    expect(container.querySelector('[data-testid="stat-seeded"] .v').textContent).toBe('n/a');
+    expect(container.querySelector('[data-testid="step-participants"]')).toBeNull();
+    expect(container.querySelector('[data-testid="participants-hint"]')).toBeNull();
+    expect(container.textContent).not.toMatch(/Add participants/);
+    const sub = container.querySelector('.page-head__sub');
+    expect(sub.textContent).toContain('roster unreadable');
+    expect(sub.textContent).not.toContain('participants.csv');
+    // No primary call to action leads the page: the repair is the banner's.
+    expect(container.querySelector('.comp-step__cta')).toBeNull();
+    // The banner names the file by its place and offers the reload.
+    const banner = container.querySelector('.data-issue--banner');
+    expect(banner.textContent).toContain('competitions/c1/participants.csv');
+    expect(Array.from(banner.querySelectorAll('button')).map((b) => b.textContent.trim())).toContain('Reload');
+  });
+
+  it('asks for no estimate and says why, never the server error', async () => {
+    const comp = makeCompetition({ players: [], rosterAvailable: false, dataIssues: [unreadable] });
+    const original = window.API.estimateCompetitionSchedule;
+    const estimate = vi.fn(() => Promise.reject(new Error('internal error')));
+    window.API.estimateCompetitionSchedule = estimate;
+    try {
+      const { container } = await mountSection('overview', { comp });
+      expect(estimate).not.toHaveBeenCalled();
+      const footer = container.querySelector('[data-testid="overview-estimate"]');
+      expect(footer.textContent).toContain('No estimate until the roster can be read.');
+      expect(container.textContent).not.toContain('internal error');
+    } finally {
+      window.API.estimateCompetitionSchedule = original;
+    }
+  });
+
+  it('keeps the count and the step for a roster that loaded', async () => {
+    const { container } = await mountSection('overview');
+    const tile = container.querySelector('[data-testid="stat-participants"]');
+    expect(tile.querySelector('.v').textContent).toBe('2');
+    expect(tile.querySelector('.l').textContent).toBe('Participants');
+    expect(container.querySelector('[data-testid="step-participants"]')).not.toBeNull();
+    expect(container.querySelector('.page-head__sub').textContent).not.toContain('unreadable');
   });
 });
 

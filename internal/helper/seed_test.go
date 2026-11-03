@@ -1486,8 +1486,7 @@ func seededPoolCourts(t *testing.T, ranks []int, numPools, poolSize, numCourts i
 	require.Len(t, pools, numPools)
 	pools = ReorderPoolsForCourts(pools, numCourts)
 
-	assignment, err := AssignPoolsToCourts(numPools, numCourts)
-	require.NoError(t, err)
+	assignment := AssignPoolsToCourts(numPools, numCourts)
 
 	courts := map[int]int{}
 	for pi, p := range pools {

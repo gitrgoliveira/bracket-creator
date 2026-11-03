@@ -83,7 +83,7 @@ func (e *Engine) QuarantineCorruptBracket(id string) (*QuarantineResult, error) 
 	if loadErr == nil {
 		return nil, validationErrorf("competition %s has a readable bracket; nothing to quarantine", id)
 	}
-	if _, ok := state.AsCorruptFile(loadErr); !ok {
+	if !state.IsCorruptFile(loadErr) {
 		// Anything else (a permissions problem, an I/O failure) is not repaired
 		// by renaming the file, and pretending otherwise would hide it.
 		return nil, loadErr

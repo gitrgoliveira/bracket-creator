@@ -500,7 +500,7 @@ describe('WatchlistPanel', () => {
       { type: 'dojo', dojo: 'Hagane Dojo' },
     ];
     const tree = runtime.mount(WatchlistPanel, baseProps({
-      watchlist: wl, primaryKey: 'dojo:Hagane Dojo', primaryEntry: wl[1], heroEntry: wl[1], heroNextMatch: MATCH, upcoming: [MATCH],
+      watchlist: wl, primaryKey: 'dojo:hagane dojo', primaryEntry: wl[1], heroEntry: wl[1], heroNextMatch: MATCH, upcoming: [MATCH],
     }));
     expect(heroNodes(tree)).toHaveLength(1);
     expect(byClass(tree, 'watchlist-pin-hint')).toHaveLength(0);
@@ -844,8 +844,8 @@ describe('useWatchlist legacy migration', () => {
   // Mount a probe component that just runs the hook and captures its list.
   const mountHook = () => {
     let captured;
-    const Probe = () => { captured = useWatchlist()[0]; return null; };
-    runtime.mount(Probe, {});
+    const Probe = ({ onList }) => { onList(useWatchlist()[0]); return null; };
+    runtime.mount(Probe, { onList: (list) => { captured = list; } });
     return captured;
   };
 

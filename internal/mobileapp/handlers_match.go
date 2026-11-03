@@ -2391,6 +2391,22 @@ func (j *memberJudge) holds(teamID, memberID string) (bool, error) {
 	return held[memberID], nil
 }
 
+// name is the stored name of a member the team holds, "" when it holds no
+// member of that id or the member has no name yet. It reads the members file
+// the way holds does, so a write that asks both reads it once.
+func (j *memberJudge) name(teamID, memberID string) (string, error) {
+	held, err := j.holds(teamID, memberID)
+	if err != nil || !held {
+		return "", err
+	}
+	for _, m := range j.squads[teamID] {
+		if m.ID == memberID {
+			return m.Name, nil
+		}
+	}
+	return "", nil
+}
+
 // introducesMember reports whether a write puts a member id on a side that the
 // stored row does not already hold, on a side whose team is known. A write
 // answers for what it introduces, not for what it inherited (the write guard's
@@ -3223,6 +3239,11 @@ func applyCorrectionReasonUnderTx(stx state.StoreTx, compID, matchID string, r *
 	if err != nil {
 		return correctionCheck{}, matchSnapshot{}, err
 	}
+	// A fighter name the entry types on a bout row is stored title-cased, as
+	// /score stores it, judged against the stored rows so an echo of a bout
+	// already fought is left as recorded, before the reason and exact-replay
+	// checks below compare the rows with the stored ones.
+	titleCaseTypedFighters(r.SubResults, snap.Stored)
 	probe := &seenResultCheck{stx: stx, compID: compID, matchID: matchID, probeOnly: true}
 	return applyCorrectionReason(snap, r, comp, probe), snap, nil
 }
@@ -3729,6 +3750,11 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 				if snapErr != nil {
 					return snapErr
 				}
+				// A fighter name the write types on a bout row is stored
+				// title-cased, judged against the stored rows so an echo of
+				// a bout already fought is left as recorded, before any judge
+				// below reads the rows.
+				titleCaseTypedFighters(result.SubResults, snap.Stored)
 				// The competition tells the exact-replay probe (the self-run
 				// judge's and applyCorrectionReason's) a kachinuki or engi
 				// write (bc-xrpl).

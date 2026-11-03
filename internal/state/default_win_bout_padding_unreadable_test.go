@@ -1,9 +1,9 @@
 package state
 
 import (
-	"os"
 	"testing"
 
+	bctest "github.com/gitrgoliveira/bracket-creator/internal/test"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -46,7 +46,7 @@ func TestLegacyDefaultWinPaddingNeverOverwritesAnUnreadableCell(t *testing.T) {
 	assert.Empty(t, loaded[0].SubResults, "an unreadable cell must not be padded")
 	assert.True(t, loaded[0].SubResultsUnreadable, "and must still say so")
 
-	raw, err := os.ReadFile(path) // #nosec G304
+	raw, err := bctest.ReadFile(path)
 	require.NoError(t, err)
 	assert.Contains(t, string(raw), "Tanaka",
 		"the malformed cell's bytes must survive the legacy default-win padding pass")

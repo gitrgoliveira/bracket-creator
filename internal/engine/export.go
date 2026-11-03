@@ -94,7 +94,11 @@ func (e *Engine) ExportCompetitionXlsx(id string) ([]byte, error) {
 		return nil, err
 	}
 	defer func() {
-		_ = f.Close()
+		// The workbook's bytes are already taken by then, so a close failure
+		// (a temp file excelize could not remove) is logged, not returned.
+		if err := f.Close(); err != nil {
+			log.Printf("engine: export %q: closing the workbook failed: %v", id, err)
+		}
 	}()
 
 	// Load the stored bracket ONCE, unconditionally, strictly (mp-yuy8 criterion

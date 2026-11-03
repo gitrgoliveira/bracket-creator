@@ -26,7 +26,7 @@ import { withdrawalLabel } from './admin_scoring_shared.jsx';
 import { sideWord } from './side_cell.jsx';
 import { groupLabel, parseBoutGroup, GROUP_POINTS, GROUP_RESULT, GROUP_ENCHO, GROUP_FLAGS, GROUP_REP, GROUP_REP_PICK_A, GROUP_REP_PICK_B } from './match_groups.jsx';
 
-const { useState: useStateH, useEffect: useEffectH, useRef: useRefH } = React;
+const { useState, useEffect, useRef } = React;
 
 // What made each kind of write, in the operator's words. The keys are the
 // server's door names (engine/match_history.go).
@@ -252,15 +252,15 @@ export function historyEntryView(entry, resolve) {
 // name (see pickText). Only the team editor holds the members, so the others pass none
 // and a pick reads as it always did.
 export function MatchHistoryDisclosure({ match, password, hidden = false, members }) {
-    const [open, setOpen] = useStateH(false);
-    const [state, setState] = useStateH({ key: '', loading: false, error: '', entries: null });
-    const mountedRef = useRefH(true);
-    useEffectH(() => () => { mountedRef.current = false; }, []);
+    const [open, setOpen] = useState(false);
+    const [state, setState] = useState({ key: '', loading: false, error: '', entries: null });
+    const mountedRef = useRef(true);
+    useEffect(() => () => { mountedRef.current = false; }, []);
     const compId = match && match.compId;
     const matchId = match && match.id;
     const modifiedAt = match && match.modifiedAt;
     // Fetched when opened, and again when the match changes while it is open.
-    useEffectH(() => {
+    useEffect(() => {
         if (!open || !compId || !matchId || hidden) return undefined;
         const api = window.API;
         if (!api || typeof api.fetchMatchHistory !== 'function') return undefined;

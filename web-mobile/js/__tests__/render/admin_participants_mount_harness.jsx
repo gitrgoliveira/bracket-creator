@@ -70,6 +70,7 @@ export async function mountParticipants(c, overrides = {}) {
         password=""
         showToast={overrides.showToast || noop}
         onSection={overrides.onSection || noop}
+        onRefreshCompetition={overrides.onRefreshCompetition}
       />
     );
   });

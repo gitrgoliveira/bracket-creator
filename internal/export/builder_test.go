@@ -2594,8 +2594,8 @@ func TestBuildResultsWorkbook_NonEngiWithZekkenStillWorks(t *testing.T) {
 	zekkenPool := helper.Pool{
 		PoolName: "Pool A",
 		Players: []helper.Player{
-			{ID: "p1", Name: "Name One", DisplayName: "Zekken One", Dojo: "DojoX"},
-			{ID: "p2", Name: "Name Two", DisplayName: "Zekken Two", Dojo: "DojoY"},
+			{ID: "p1", Name: "Name One", DisplayName: "ZEKKEN ONE", Dojo: "DojoX"},
+			{ID: "p2", Name: "Name Two", DisplayName: "ZEKKEN TWO", Dojo: "DojoY"},
 		},
 	}
 	zekkenPool.Matches = []helper.Match{{SideA: &zekkenPool.Players[0], SideB: &zekkenPool.Players[1]}}
@@ -2613,8 +2613,8 @@ func TestBuildResultsWorkbook_NonEngiWithZekkenStillWorks(t *testing.T) {
 	rows, err := f.GetRows(helper.SheetData)
 	require.NoError(t, err)
 
-	assert.True(t, columnContains(rows, 3, "Zekken One"),
-		"Data sheet col D must contain 'Zekken One' for WithZekkenName=true competition")
+	assert.True(t, columnContains(rows, 3, "ZEKKEN ONE"),
+		"Data sheet col D must contain 'ZEKKEN ONE' for WithZekkenName=true competition")
 }
 
 // ------------------------------------------------------------

@@ -20,7 +20,6 @@ import (
 	"io/fs"
 	"log"
 	"net/url"
-	"os"
 	"path/filepath"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
@@ -97,18 +96,18 @@ func (s *Store) matchHistoryPath(compID, matchID string) string {
 // a write landing after DeleteCompetition must fail rather than resurrect it.
 func (s *Store) ensureMatchHistoryDirLocked(compID string) error {
 	compDir := s.compPath(compID)
-	info, err := os.Stat(compDir)
+	info, err := s.root.stat(compDir)
 	if err != nil {
 		return fmt.Errorf("match history: competition %s: %w", compID, err)
 	}
 	if !info.IsDir() {
 		return fmt.Errorf("match history: competition %s is not a directory", compID)
 	}
-	return os.Mkdir(s.compPath(compID, matchHistoryDir), 0o700)
+	return s.root.mkdir(s.compPath(compID, matchHistoryDir), 0o700)
 }
 
 func (s *Store) readMatchHistoryBytesLocked(compID, matchID string) ([]byte, error) {
-	b, err := os.ReadFile(s.matchHistoryPath(compID, matchID))
+	b, err := s.root.readFile(s.matchHistoryPath(compID, matchID))
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, nil
 	}
@@ -220,7 +219,7 @@ func (s *Store) DeleteMatchHistory(compID string) error {
 	if filepath.Dir(dir) != s.compPath(compID) {
 		return fmt.Errorf("match history: refusing to remove %q", dir)
 	}
-	return os.RemoveAll(dir)
+	return s.root.removeAll(dir)
 }
 
 func (t *storeTx) AppendMatchHistory(compID string, entry MatchHistoryEntry) error {

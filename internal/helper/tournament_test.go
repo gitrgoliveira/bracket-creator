@@ -96,12 +96,12 @@ func TestCreatePlayersFromRecords_ZekkenBranchHonoursRequireDojo(t *testing.T) {
 	t.Run("three-column (Name, DisplayName, Dojo) row", func(t *testing.T) {
 		records := [][]string{{"Alice", "A1", ""}}
 
-		players, err := CreatePlayersFromRecords(records, true, false)
+		players, _, err := CreatePlayersFromRecords(records, true, false)
 		require.NoError(t, err)
 		require.Len(t, players, 1)
 		assert.Equal(t, "", players[0].Dojo)
 
-		_, err = CreatePlayersFromRecords(records, true, true)
+		_, _, err = CreatePlayersFromRecords(records, true, true)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "entry 1: missing dojo")
 	})
@@ -109,15 +109,38 @@ func TestCreatePlayersFromRecords_ZekkenBranchHonoursRequireDojo(t *testing.T) {
 	t.Run("two-column (Name, Dojo) row", func(t *testing.T) {
 		records := [][]string{{"Alice", ""}}
 
-		players, err := CreatePlayersFromRecords(records, true, false)
+		players, _, err := CreatePlayersFromRecords(records, true, false)
 		require.NoError(t, err)
 		require.Len(t, players, 1)
 		assert.Equal(t, "", players[0].Dojo)
 
-		_, err = CreatePlayersFromRecords(records, true, true)
+		_, _, err = CreatePlayersFromRecords(records, true, true)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "entry 1: missing dojo")
 	})
+}
+
+// textChanged reports text the records hold in another form than the stored
+// one (a name, a dojo, a zekken given in its own column), never spacing alone
+// or a zekken derived from the name.
+func TestCreatePlayersFromRecords_ReportsTextNotInStoredForm(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		records [][]string
+		zekken  bool
+		want    bool
+	}{
+		{"canonical", [][]string{{"Rin Sato", "Seibukan"}}, false, false},
+		{"spacing only", [][]string{{"  Rin Sato ", " Seibukan "}}, false, false},
+		{"name", [][]string{{"rin sato", "Seibukan"}}, false, true},
+		{"dojo", [][]string{{"Rin Sato", "seibukan"}}, false, true},
+		{"typed zekken", [][]string{{"Rin Sato", "rin", "Seibukan"}}, true, true},
+		{"derived zekken", [][]string{{"Émile Zola", "Seibukan"}}, true, false},
+	} {
+		_, got, err := CreatePlayersFromRecords(tc.records, tc.zekken, false)
+		require.NoError(t, err, tc.name)
+		assert.Equal(t, tc.want, got, tc.name)
+	}
 }
 
 func TestCreatePlayersZekkenTwoColumnFallback(t *testing.T) {

@@ -35,6 +35,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/engine"
+	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
@@ -134,6 +135,42 @@ func (r LineupRequest) memberIDsRead() map[domain.Position]string {
 		}
 	}
 	return read
+}
+
+// storeNames puts the name of every position the save stores (every one of a
+// whole lineup, the changed ones of a partial save) in the form it is stored
+// in, once, as the save enters (operator decisions D14 and D16). A position
+// that names a member of the team by id stores that member's own name, so a
+// name the client matched to the member ignoring case or accents ("mcdonald"
+// for McDonald) never respells the member. A position with no member id is
+// title-cased (helper.TitleCaseName) as a member's name is, and so is one whose
+// member has no name yet (a blank slot), whose typed name is kept rather than
+// dropped. Run after the save's member ids were judged (memberIDsTheTeamHolds),
+// so every id left names a member of the team and the members file is already
+// read (memberJudge): a save naming no member id reads nothing.
+func (r LineupRequest) storeNames(judge *memberJudge, teamID string) *txResponse {
+	stores, partial := r.changedPositions()
+	if !partial {
+		stores = slices.Collect(maps.Keys(r.Positions))
+	}
+	for _, pos := range stores {
+		name, ok := r.Positions[pos]
+		if !ok {
+			continue
+		}
+		if id := r.MemberIDs[pos]; id != "" {
+			member, err := judge.name(teamID, id)
+			if err != nil {
+				return errTeamMembersUnreadable.response()
+			}
+			if member != "" {
+				r.Positions[pos] = member
+				continue
+			}
+		}
+		r.Positions[pos] = helper.TitleCaseName(name)
+	}
+	return nil
 }
 
 // validLineupRequest answers 400, and reports false, for a save no write could
@@ -371,10 +408,10 @@ func findRoundLineup(lineups map[string]domain.TeamLineup, teamID string, round 
 // the admin (auth-protected) group. The corresponding GET is public
 // and registered via RegisterPublicLineupHandlers.
 //
-// DELETE is manager-only per the spec; for now we rely on the
-// existing AuthMiddleware (mounted on the admin router group in
-// server.go) as the auth boundary. A richer role check lands when
-// per-role auth is implemented.
+// DELETE is manager-only per the spec; the auth boundary is the
+// AuthMiddleware mounted on the admin router group in server.go, so a
+// caller holding the tournament password may use it. There is no
+// separate per-role check.
 //
 // The `tx CompetitionTransactor` parameter is the T156 hook.
 // The PUT body wraps its three store calls; load comp (for teamSize),
@@ -963,6 +1000,9 @@ func saveLineup(c *gin.Context, tx CompetitionTransactor, announce func(compID, 
 			if kept[pos] != id {
 				delete(save.req.MemberIDs, pos)
 			}
+		}
+		if respErr = save.req.storeNames(judge, save.teamID); respErr != nil {
+			return nil
 		}
 		var landed engine.LandedLineup
 		var changed []domain.Position

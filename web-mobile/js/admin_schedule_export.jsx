@@ -7,7 +7,7 @@
 // surface (settings screen, awards page) already uses.
 import { effectiveTwoThirdPlaces, resolveFormat, FORMAT_KNOCKOUT, FORMAT_LEAGUE } from './competition_shape.jsx';
 
-const { useState: useStateA } = React;
+const { useState } = React;
 
 // Prepare a roster CSV field: coerce nullish to "" (String(undefined) would
 // export the literal text "undefined"), collapse embedded CR/LF runs to a
@@ -116,7 +116,7 @@ export function AdminExport({ c, t, password, showToast }) {
   const cid = c.id || cfg.id;
   const url = `${(window.linkBase || (() => window.location.origin))(t)}/viewer.html?id=${t.id}#comp-${cid}`;
 
-  const [resultsBusy, setResultsBusy] = useStateA(false);
+  const [resultsBusy, setResultsBusy] = useState(false);
 
   const notify = (msg, kind) => {
     if (showToast) showToast(msg, kind);
@@ -215,7 +215,7 @@ export function AdminExport({ c, t, password, showToast }) {
       </div>
       <div className="card">
         <div className="card__title" style={{ marginBottom: 8 }}>Public viewer link</div>
-        <div className="card__sub" style={{ marginBottom: 14 }}>Players & spectators see this competition's bracket, schedule and results.</div>
+        <div className="card__sub" style={{ marginBottom: 14 }}>Players & spectators see this competition&apos;s bracket, schedule and results.</div>
         <div style={{ display: "flex", gap: 8 }}>
           <input className="input" value={url} readOnly style={{ flex: 1 }} />
           <button type="button" className="btn" onClick={copyUrl}>Copy</button>

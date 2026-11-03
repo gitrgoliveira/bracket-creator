@@ -695,7 +695,7 @@ describe('team editor: the effect that notices a side given another team is decl
   it('has the side identity effect ahead of the lineup reads in the source', () => {
     const code = readCode('admin_scoring_team.jsx');
     const noticesSide = code.indexOf('sideSeen.current = {');
-    const readsLineups = code.indexOf('startLineupReads({');
+    const readsLineups = code.indexOf('startLineupReadsRef.current({');
 
     expect(noticesSide, 'the effect that notices a side given another team is in the source').toBeGreaterThan(-1);
     expect(readsLineups, 'and so is the call that starts the lineup reads').toBeGreaterThan(-1);

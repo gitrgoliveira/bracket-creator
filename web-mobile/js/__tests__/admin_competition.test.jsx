@@ -1100,10 +1100,10 @@ describe('ScoreEditorModal isEngi derived synchronously (finding 10)', () => {
   );
 
   it('isEngi is a const derived from m.compEngi, not useState', () => {
-    // Must be a synchronous const, not useStateA.
+    // Must be a synchronous const, not useState.
     expect(src).toMatch(/const isEngi\s*=\s*!!m\.compEngi/);
     // There must be no useState for isEngi.
-    expect(src).not.toMatch(/useStateA\(false\)[^;]*isEngi/);
+    expect(src).not.toMatch(/useState\(false\)[^;]*isEngi/);
     expect(src).not.toContain('setIsEngi');
   });
 

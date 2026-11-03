@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	bctest "github.com/gitrgoliveira/bracket-creator/internal/test"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -82,7 +83,7 @@ func TestLegacyKachinukiEncounterEnchoIsCleared(t *testing.T) {
 	comp, err := fresh.LoadCompetition("k")
 	require.NoError(t, err)
 	assert.True(t, comp.KachinukiEncounterEnchoCleared, "the marker is recorded once both files are saved")
-	raw, err := os.ReadFile(fresh.compPath("k", "config.md")) // #nosec G304
+	raw, err := bctest.ReadFile(fresh.compPath("k", "config.md"))
 	require.NoError(t, err)
 	assert.Contains(t, string(raw), "kachinuki_encounter_encho_cleared: true", "and persisted")
 }
@@ -109,7 +110,7 @@ func TestLegacyKachinukiEncounterEnchoUnreadableFileLeavesTheMarkerUnset(t *test
 	seed, err := NewStore(dir)
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(seed.compPath("k", "bracket.json"), []byte("{not json"), 0o600))
-	raw, err := os.ReadFile(seed.compPath("k", "config.md")) // #nosec G304
+	raw, err := bctest.ReadFile(seed.compPath("k", "config.md"))
 	require.NoError(t, err)
 	// The seeding store's own startup sweep already ran the repair: put the
 	// older release's marker-less config back.
@@ -118,7 +119,7 @@ func TestLegacyKachinukiEncounterEnchoUnreadableFileLeavesTheMarkerUnset(t *test
 
 	fresh, err := NewStore(dir)
 	require.NoError(t, err)
-	raw, err = os.ReadFile(fresh.compPath("k", "config.md")) // #nosec G304
+	raw, err = bctest.ReadFile(fresh.compPath("k", "config.md"))
 	require.NoError(t, err)
 	assert.NotContains(t, string(raw), "kachinuki_encounter_encho_cleared", "an unreadable bracket leaves the marker unset")
 }
@@ -137,9 +138,9 @@ func TestLegacyKachinukiEncounterEnchoLeavesOtherCompetitions(t *testing.T) {
 			require.NoError(t, err)
 			poolPath := s.compPath(comp.ID, "pool-matches.csv")
 			bracketPath := s.compPath(comp.ID, "bracket.json")
-			poolBefore, err := os.ReadFile(poolPath) // #nosec G304
+			poolBefore, err := bctest.ReadFile(poolPath)
 			require.NoError(t, err)
-			bracketBefore, err := os.ReadFile(bracketPath) // #nosec G304
+			bracketBefore, err := bctest.ReadFile(bracketPath)
 			require.NoError(t, err)
 
 			fresh, err := NewStore(dir)
@@ -153,9 +154,9 @@ func TestLegacyKachinukiEncounterEnchoLeavesOtherCompetitions(t *testing.T) {
 			assert.Equal(t, encounterEncho(), b.Rounds[0][0].Encho)
 			assert.Equal(t, encounterEncho(), b.ThirdPlaceMatch.Encho)
 
-			poolAfter, err := os.ReadFile(poolPath) // #nosec G304
+			poolAfter, err := bctest.ReadFile(poolPath)
 			require.NoError(t, err)
-			bracketAfter, err := os.ReadFile(bracketPath) // #nosec G304
+			bracketAfter, err := bctest.ReadFile(bracketPath)
 			require.NoError(t, err)
 			assert.Equal(t, poolBefore, poolAfter)
 			assert.Equal(t, bracketBefore, bracketAfter)

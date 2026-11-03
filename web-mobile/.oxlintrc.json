@@ -10,7 +10,8 @@
     "React": "readonly",
     "ReactDOM": "readonly",
     "preact": "readonly",
-    "vi": "readonly"
+    "vi": "readonly",
+    "window": "readonly"
   },
   "rules": {
     "no-unused-vars": [
@@ -22,14 +23,18 @@
       }
     ],
     "no-undef": "error",
+    "no-warning-comments": [
+      "error",
+      { "terms": ["todo", "fixme", "hack", "xxx"], "location": "anywhere" }
+    ],
     "no-unused-expressions": [
       "error",
       { "allowShortCircuit": true, "allowTernary": true }
     ],
     "react/jsx-key": "error",
     "react/no-object-type-as-default-prop": "error",
-    "react/no-unescaped-entities": "off",
-    "react/jsx-no-undef": "off",
+    "react/no-unescaped-entities": "error",
+    "react/jsx-no-undef": "error",
     "react-hooks/exhaustive-deps": "error",
     "react/no-array-index-key": "error",
     "unicorn/no-useless-fallback-in-spread": "error",
@@ -37,11 +42,5 @@
     "unicorn/prefer-string-starts-ends-with": "error",
     "unicorn/no-array-reverse": "error"
   },
-  "ignorePatterns": ["node_modules/**", "dist/**", "vendor/**"],
-  "overrides": [
-    {
-      "files": ["**/docs/assets/javascripts/**"],
-      "rules": { "react/no-this-in-sfc": "off" }
-    }
-  ]
+  "ignorePatterns": ["node_modules/**", "dist/**", "vendor/**"]
 }

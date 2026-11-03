@@ -73,7 +73,7 @@ import { winnerSideLR, teamMatchMarks } from './side_marks.jsx';
 // side's name via teamNameMark.
 import { teamNameMark } from './match_scoreboard.jsx';
 
-const { useState: useStateSh, useMemo: useMemoSh, useEffect: useEffectSh, useRef: useRefSh, useCallback: useCallbackSh } = React;
+const { useState, useMemo, useEffect, useRef, useCallback } = React;
 
 const AdminTopbar = window.AdminTopbar;
 const Breadcrumbs = window.Breadcrumbs;
@@ -131,6 +131,9 @@ export function partitionShiaijoMatches(matches) {
 }
 
 const matchKey = (m) => `${m.compId}:${m.id}`;
+const NO_COMPETITIONS = [];
+const readOwnMove = (m) => (window.API && typeof window.API.ownStatusMove === "function"
+    ? window.API.ownStatusMove(m.compId, m.id) : null);
 
 // The match id and the court a match event names, read off either the event's
 // own fields or its `result` row; court is null when it names none.
@@ -406,17 +409,24 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // with stray whitespace must use the trimmed value everywhere.
     const court = (routeCourt || "").trim();
 
-    const mountedRef = useRefSh(true);
+    const mountedRef = useRef(true);
     // The mounted score editor's unsaved entries (R1, stage 5 review 8): every
     // console action that unmounts the editor or puts another match in it asks
     // first (leaveEditorConfirmed), and Send back to queue says so in its own
     // confirm.
-    const editorUnsavedRef = useRefSh(null);
+    const editorUnsavedRef = useRef(null);
     // The latest render's pick and correct and the court's matches, for a tap
     // judged again once the operator has answered the unsaved-entries
     // question (pickMatch, correctMatch).
-    const latestRef = useRefSh(null);
-    useEffectSh(() => {
+    const latestRef = useRef(null);
+    // The newest court call this console made per match, keyed by matchKey, as
+    // { id, msg }: the announcement id (a promise of it, null if the send failed)
+    // and the text sent, so the call can be withdrawn once its match leaves
+    // scheduled (bc-cdbl). A reload forgets them; the 5-minute expiry is the
+    // backstop. Declared ahead of the court feed's handler, which withdraws one.
+    const callIdsRef = useRef(new Map());
+    const withdrawCallRef = useRef(null);
+    useEffect(() => {
         if (typeof window.scrollTo === "function") window.scrollTo(0, 0);
         return () => { mountedRef.current = false; };
     }, []);
@@ -434,15 +444,15 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // court feed on those: the scoping to one court happens server-side in the
     // feed, not in the subscription. Until the first fetch resolves it falls back
     // to the prop aggregate so the queue is never momentarily blank.
-    const [courtComps, setCourtComps] = useStateSh(null);
+    const [courtComps, setCourtComps] = useState(null);
     // The feed as of this render, for the event handler below, whose closure
     // outlives renders.
-    const courtCompsRef = useRefSh(null);
-    courtCompsRef.current = courtComps;
+    const courtCompsRef = useRef(null);
+    React.useLayoutEffect(() => { courtCompsRef.current = courtComps; });
     // R4 (bc-evts stage 3 review 2): a court move or time change this device
     // makes shows in the court feed at once, as a push would, and a refusal
     // puts the old value back (told by the outbox, subscribeLocalMatchPatch).
-    useEffectSh(() => {
+    useEffect(() => {
         if (!window.API || typeof window.API.subscribeLocalMatchPatch !== "function") return undefined;
         return window.API.subscribeLocalMatchPatch((event) => {
             const cid = event && event.data && event.data.competitionId;
@@ -451,12 +461,12 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         });
     }, []);
     // True while a manual "Refresh" is in flight (button feedback only).
-    const [refreshing, setRefreshing] = useStateSh(false);
+    const [refreshing, setRefreshing] = useState(false);
     // Refetch this court's live feed. Hoisted (not an effect-local closure) so
     // the SSE effect, the reconnect handler, AND the manual Refresh button all
     // drive the same fetch. Guarded by mountedRef so a late resolve after
     // unmount is dropped. Returns the promise so callers can await completion.
-    const refreshCourt = useCallbackSh(() => {
+    const refreshCourt = useCallback(() => {
         if (!court || !window.API || typeof window.API.fetchCourtMatches !== "function") return Promise.resolve();
         return window.API.fetchCourtMatches(court)
             // A refetch never puts a row back to an older state
@@ -469,7 +479,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // has fallen behind (dropped SSE, flaky venue WiFi) and the queue looks
     // stale: e.g. a downstream final still shows placeholder feeders that have
     // in fact resolved on the server. One tap re-pulls the authoritative feed.
-    const manualRefresh = useCallbackSh(() => {
+    const manualRefresh = useCallback(() => {
         setRefreshing(true);
         Promise.resolve(refreshCourt()).finally(() => { if (mountedRef.current) setRefreshing(false); });
     }, [refreshCourt]);
@@ -480,7 +490,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // with the real one.
     // `onApplied(before, after)`, when given, is told the competition's bracket
     // before and after the advance, so a caller can take it back.
-    const applyLocalBracketWin = useCallbackSh((compId, feederId, winnerName, onApplied) => {
+    const applyLocalBracketWin = useCallback((compId, feederId, winnerName, onApplied) => {
         setCourtComps((prev) => {
             // Seed from the prop aggregate when the live feed hasn't materialised
             // (e.g. offline before the first fetch resolved), so the optimistic
@@ -515,7 +525,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // back: the competition's bracket is put back as it was when nothing has
     // changed it since, and the court's feed is read again either way (stage 6
     // review 1).
-    const advanceLocalUntilRefused = useCallbackSh((match, winnerName, res) => {
+    const advanceLocalUntilRefused = useCallback((match, winnerName, res) => {
         if (!match || match.phase !== "bracket" || !winnerName) return;
         let made = null;
         applyLocalBracketWin(match.compId, match.id, winnerName, (before, after) => { made = { before, after }; });
@@ -548,7 +558,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // reflects the server's propagation); the ONLY path that resolves it offline.
     // Draws/no-winner (patch.winner null) never apply: knockout bouts always
     // resolve to a winner before completing.
-    const maybeAdvanceLocal = useCallbackSh((match, patch, res) => {
+    const maybeAdvanceLocal = useCallback((match, patch, res) => {
         if (!match || match.phase !== "bracket" || !patch || patch.status !== "completed") return;
         const w = finishWinnerOf(match, patch);
         advanceLocalUntilRefused(match, _bracketSideName(w), res);
@@ -567,8 +577,8 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // bare string nothing cleared, so "kiken-voluntary at Pool A-2" outlived
     // the restore and then sat under the NEXT match (UAT, bc-tmfn). Declared
     // above the feed effect that clears it.
-    const [startError, setStartError] = useStateSh(null);
-    useEffectSh(() => {
+    const [startError, setStartError] = useState(null);
+    useEffect(() => {
         if (!court || !window.API || typeof window.API.fetchCourtMatches !== "function") return;
         let cancelled = false;
         const timerPool = createTimerPool();
@@ -666,7 +676,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // Court-scoped competitions: the live feed once loaded, else the prop
     // aggregate as a transient fallback. All competition/match derivations below
     // read from this so the page operates only on THIS court's competitions.
-    const courtCompetitions = courtComps || tournament.competitions || [];
+    const courtCompetitions = courtComps || tournament.competitions || NO_COMPETITIONS;
 
     const paceLookup = useCourtPaceLookup(courtCompetitions);
 
@@ -674,51 +684,44 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // the operator has announced this session (local cue only); `callingKey`
     // guards the in-flight announce request. `callTapRef` guards against double
     // taps on Call to court (bc-cdbl).
-    const [calledKey, setCalledKey] = useStateSh(null);
-    const [callingKey, setCallingKey] = useStateSh(null);
-    const [startingKey, setStartingKey] = useStateSh(null);
+    const [calledKey, setCalledKey] = useState(null);
+    const [callingKey, setCallingKey] = useState(null);
+    const [startingKey, setStartingKey] = useState(null);
     // The start in flight, as { key, match } (null = none). The guards READ this
     // ref, never startingKey: an advance awaits its finish write and then starts
     // the next match from the render that began the await, so a closure's state
     // is stale by then (a start begun meanwhile was not seen; one that has
     // landed still was). The state above only drives the rendering.
-    const startingRef = useRefSh(null);
+    const startingRef = useRef(null);
     // The scheduled match a pick (pickMatch) is starting, from the moment its
     // guards pass until the pick settles: { key, match } or null. It is a start in
     // flight for the one-start guard, because the pick awaits the defer of the
     // running bout before it reaches startMatch (and so before startingRef is
     // set). startMatch is handed its own pick, which is exempt from the guard.
-    const pickingRef = useRefSh(null);
-    const callTapRef = useRefSh(null);
+    const pickingRef = useRef(null);
+    const callTapRef = useRef(null);
     // bc-sdtp: one bounce guard for every Start match on this console (Up next
     // and the queue rows), keyless, because the bounce lands on a DIFFERENT
     // button: the first start can land inside the bounce window, the card then
     // shows the next match, and a per-match key would let the bounce start it
     // and send the match just started back to the queue.
-    const startTapRef = useRefSh(null);
-    // The newest court call this console made per match, keyed by matchKey, as
-    // { id, msg }: the announcement id (a promise of it, null if the send failed)
-    // and the text sent, so the call can be withdrawn once its match leaves
-    // scheduled (bc-cdbl). A reload forgets them; the 5-minute expiry is the
-    // backstop.
-    const callIdsRef = useRefSh(new Map());
-    const withdrawCallRef = useRefSh(null);
-    const [contextOpen, setContextOpen] = useStateSh(true);
+    const startTapRef = useRef(null);
+    const [contextOpen, setContextOpen] = useState(true);
     // The whole queue column folds away so the scorer can take the full width;
     // the choice is per device, like the operator's other console preferences.
-    const [queueOpen, setQueueOpen] = useStateSh(() => {
+    const [queueOpen, setQueueOpen] = useState(() => {
         try { return localStorage.getItem(QUEUE_OPEN_KEY) !== "0"; } catch (_) { return true; }
     });
     // Set only by an operator click in toggleQueue below, never true on mount
     // or on a server-driven rerender, so the focus effect it gates fires
     // solely for an explicit toggle.
-    const queueToggledByUser = useRefSh(false);
+    const queueToggledByUserRef = useRef(false);
     // The two controls that swap places across the fold: the rail button only
     // exists while collapsed, the header button only exists while expanded.
-    const queueShowBtnRef = useRefSh(null);
-    const queueHideBtnRef = useRefSh(null);
+    const queueShowBtnRef = useRef(null);
+    const queueHideBtnRef = useRef(null);
     const toggleQueue = () => {
-        queueToggledByUser.current = true;
+        queueToggledByUserRef.current = true;
         // Persist from INSIDE the updater, off the live value. Reading the
         // render-time `queueOpen` here while updating functionally let two taps
         // in one batch cancel each other in state while both wrote the same
@@ -740,9 +743,9 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // counterpart control once the DOM has settled, but only for an
     // operator-driven toggle: this must never steal focus on mount or when
     // `queueOpen` merely reflects a rerender the operator didn't trigger.
-    useEffectSh(() => {
-        if (!queueToggledByUser.current) return;
-        queueToggledByUser.current = false;
+    useEffect(() => {
+        if (!queueToggledByUserRef.current) return;
+        queueToggledByUserRef.current = false;
         const target = queueOpen ? queueHideBtnRef.current : queueShowBtnRef.current;
         // preventScroll: the counterpart sits where the pressed control was,
         // already in view, so the focus move must not scroll the page.
@@ -752,15 +755,15 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // full-day court accumulates many bouts that would bury the live queue on
     // mobile. Show the most recent COMPLETED_PREVIEW by default; the rest fold
     // behind an inline "Show all N" toggle. The recent ones are never hidden.
-    const [showAllCompleted, setShowAllCompleted] = useStateSh(false);
+    const [showAllCompleted, setShowAllCompleted] = useState(false);
     // The match the operator has explicitly picked to score from the queue.
     // null = follow the running bout (running[0]). A picked match drives the
     // scoring panel instead; the find() in pickedMatch guards staleness, so a
     // pick that completes or vanishes falls back to running[0] automatically.
-    const [pickedKey, setPickedKey] = useStateSh(null);
+    const [pickedKey, setPickedKey] = useState(null);
     // The match pickMatch started, and the scheduled snapshot it started
     // from: see ScoreEditorModal's `started` (bc-strt).
-    const [startedFrom, setStartedFrom] = useStateSh(null);
+    const [startedFrom, setStartedFrom] = useState(null);
     // The status moves this device made (a send back, a finish, a decision)
     // show at once over the court's feed, offline included, until the feed
     // shows them (withOwnStatusMove): the panel moves on, a bout sent back
@@ -769,14 +772,13 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // in this page's state, so a reload or the console mounted again shows
     // what the operator did; a refused or discarded move leaves the outbox,
     // and the match shows as the server holds it. Re-read whenever a move
-    // changes.
-    const [ownMovesSeq, setOwnMovesSeq] = useStateSh(0);
-    useEffectSh(() => {
+    // changes: each change gives a new reader, so what reads it is worked out
+    // again.
+    const [ownMoveOf, setOwnMoveOf] = useState(() => readOwnMove);
+    useEffect(() => {
         if (!window.API || typeof window.API.subscribeOwnStatusMoves !== "function") return undefined;
-        return window.API.subscribeOwnStatusMoves(() => setOwnMovesSeq((n) => n + 1));
+        return window.API.subscribeOwnStatusMoves(() => setOwnMoveOf(() => (m) => readOwnMove(m)));
     }, []);
-    const ownMoveOf = (m) => (window.API && typeof window.API.ownStatusMove === "function"
-        ? window.API.ownStatusMove(m.compId, m.id) : null);
     // The COMPLETED match the operator has opened to correct in place (parity
     // with the Scores page's "Correct" button). Kept separate from pickedKey so
     // it takes priority over the running bout WITHOUT disturbing it, and so it
@@ -784,7 +786,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // Cleared by "Back to court", and handed over to pickedKey once the match
     // is reopened (see the effect beside correctingMatch below): a running
     // match is the live bout, not a correction. null = not correcting anything.
-    const [correctingKey, setCorrectingKey] = useStateSh(null);
+    const [correctingKey, setCorrectingKey] = useState(null);
     // The last tap the console refused because a match is live (a Correct), a
     // correction is open (a Start) or another start is still out (a Start):
     // { key, compId, why: "running" | "correcting" | "starting", against, label, start }
@@ -795,12 +797,12 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // that outlives its condition is "starting": when the start it named lands,
     // the effect beside startMatch turns it into a stored startError for the
     // refused match, in the past tense.
-    const [refusedTap, setRefusedTap] = useStateSh(null);
+    const [refusedTap, setRefusedTap] = useState(null);
     // Pending court reassignment, awaiting operator confirmation. Moving a match
     // off this shiaijo is disruptive (it leaves the court and joins another's
     // queue), so it's gated behind a confirm step. {compId, matchId, to, label, from}.
-    const [pendingMove, setPendingMove] = useStateSh(null);
-    const [movingCourt, setMovingCourt] = useStateSh(false);
+    const [pendingMove, setPendingMove] = useState(null);
+    const [movingCourt, setMovingCourt] = useState(false);
     // A scheduled team match whose lineup the operator is entering before start.
     // Opens the team scoresheet as a modal; positions persist via putMatchLineup
     // independent of scoring, so the operator can set the lineup and close
@@ -809,11 +811,11 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // keep the panel's editors on the teams the match had when it was opened,
     // when a feeding match decided on another device has since seated another
     // team on a side.
-    const [lineupKey, setLineupKey] = useStateSh(null);
+    const [lineupKey, setLineupKey] = useState(null);
     // Pending revert-to-queue confirmation. Set when the operator clicks
     // "Send back to queue" on a running bout. Cleared on confirm or cancel.
     // Shape: {compId, matchId, label}.
-    const [pendingRevert, setPendingRevert] = useStateSh(null);
+    const [pendingRevert, setPendingRevert] = useState(null);
     // bc-stpf (operator ruling 2026-10-27, Q1): the question a pick of another
     // bout asks when the app cannot check that the picked match can start (no
     // answer in time, offline, or writes of its competition not sent yet):
@@ -821,8 +823,8 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // local and never waits on the network, so the court keeps working without
     // the server. Shape: {curLabel, pickLabel}; the answer goes to the promise
     // askStartWithoutCheck handed out (startAskResolveRef).
-    const [pendingStartAsk, setPendingStartAsk] = useStateSh(null);
-    const startAskResolveRef = useRefSh(null);
+    const [pendingStartAsk, setPendingStartAsk] = useState(null);
+    const startAskResolveRef = useRef(null);
     const answerStartAsk = (sendBack) => {
         const resolve = startAskResolveRef.current;
         startAskResolveRef.current = null;
@@ -835,21 +837,21 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     });
     // A console that goes away with the question open answers it "keep it
     // running": nothing is sent, and the pick's finally runs.
-    useEffectSh(() => () => answerStartAsk(false), []);
+    useEffect(() => () => answerStartAsk(false), []);
     // bc-cfbd: the two confirms below open from a tap; the bounce of that tap
     // must not land on the fresh backdrop or its buttons. One ref serves both
     // (only one is ever open).
     const { openedRef: confirmOpenedRef, onClickCapture: confirmOnClickCapture } = useOpenedTapGuard();
     // The Confirm button of either confirm: its bounce is not a second confirm
     // (acceptTap in both handlers below). One ref serves both, as above.
-    const confirmTapRef = useRefSh(null);
-    const [reverting, setReverting] = useStateSh(false);
+    const confirmTapRef = useRef(null);
+    const [reverting, setReverting] = useState(false);
     // The two confirms are this page's own dialogs, so they do what DialogHost does
     // for confirmDialog: focus moves into the open one (its first button, Cancel),
     // Escape cancels it while its request is not out, and focus goes back to the
     // control that opened it once it closes, without scrolling the page.
     const confirmOpen = Boolean(pendingMove || pendingRevert || pendingStartAsk);
-    const confirmBoxRef = useRefSh(null);
+    const confirmBoxRef = useRef(null);
     // Escape on the pick's question (bc-stpf) is "keep it running".
     window.useEscapeToClose(confirmOpen && !movingCourt && !reverting
         ? () => { setPendingMove(null); setPendingRevert(null); if (pendingStartAsk) answerStartAsk(false); }
@@ -857,7 +859,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     useDialogFocus(confirmBoxRef, confirmOpen);
     // Selected competition for filtering the queue. Default: running match's comp,
     // else first comp with scheduled matches here, else any comp with matches here.
-    const [selectedCompId, setSelectedCompId] = useStateSh(null);
+    const [selectedCompId, setSelectedCompId] = useState(null);
 
     // Short-circuit to [] for a blank/unknown court so an accidental landing
     // (e.g. /admin/shiaijo/%20) never sorts/partitions the whole tournament.
@@ -865,7 +867,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // The court's full match set BEFORE the hasBothSides split. Actionable rows
     // (allMatches) and pending placeholder finals (pendingPlaceholder) are both
     // derived from this so the two are computed from one filtered pass.
-    const courtMatchesRaw = useMemoSh(
+    const courtMatchesRaw = useMemo(
         () => (tournament.courts || []).includes(court)
             ? window.filterMatchesByCourt(window.tournamentMatches({ competitions: courtCompetitions }), court)
             : [],
@@ -874,7 +876,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // A match this device finished or sent back reads so, until the feed says
     // so itself (withOwnStatusMove): every list below (running, Up next,
     // allDone, the advance target) agrees on it.
-    const allMatches = useMemoSh(
+    const allMatches = useMemo(
         () => {
             const entryMeta = new Map();
             for (const comp of courtCompetitions) {
@@ -900,13 +902,12 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                 };
             });
         },
-        // ownMovesSeq: a move queued, answered, refused or discarded.
-        // oxlint-disable-next-line react-hooks/exhaustive-deps
-        [courtMatchesRaw, courtCompetitions, ownMovesSeq]
+        // ownMoveOf: a move queued, answered, refused or discarded.
+        [courtMatchesRaw, courtCompetitions, ownMoveOf]
     );
     // A move the server answered ends once the feed shows it, or a later
     // change made elsewhere: the owner forgets it.
-    useEffectSh(() => {
+    useEffect(() => {
         if (!window.API || typeof window.API.forgetOwnStatusMove !== "function") return;
         for (const m of courtMatchesRaw) {
             const mv = ownMoveOf(m);
@@ -921,8 +922,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         if (held.length > 0 && typeof window.API.forgetOwnStatusMovesNotIn === "function") {
             window.API.forgetOwnStatusMovesNotIn(held);
         }
-        // oxlint-disable-next-line react-hooks/exhaustive-deps
-    }, [courtMatchesRaw, tournament.competitions, ownMovesSeq]);
+    }, [courtMatchesRaw, tournament.competitions, ownMoveOf]);
     // Scheduled knockout bouts still waiting on a "Winner of rX-mY" feeder
     // (mp-y3nk). Kept SEPARATE from allMatches / filteredScheduled so they never
     // become upNext, never enter moveMatch reordering, and never carry a Start
@@ -932,12 +932,12 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // Each competition's bracket rounds, by id: the 3rd-place match is pending
     // only while a semi-final that feeds an empty side is unplayed, so the
     // pending split and the slot labels below both read them.
-    const roundsFor = useMemoSh(() => {
+    const roundsFor = useMemo(() => {
         const byComp = new Map();
         for (const c of courtCompetitions) byComp.set(c.id, (c.bracket && c.bracket.rounds) || []);
         return (compId) => byComp.get(compId) || [];
     }, [courtCompetitions]);
-    const pendingPlaceholder = useMemoSh(
+    const pendingPlaceholder = useMemo(
         () => courtMatchesRaw.filter((m) => window.isPendingBracketMatch(m, roundsFor(m.compId))),
         [courtMatchesRaw, roundsFor]
     );
@@ -954,7 +954,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // ("Loser of M1"), through the same slot-text owner (bracket.jsx). Both
     // labellers read the numbers of ONE display model per competition, built
     // here, so a slot and a bronze side can never name different numbers.
-    const bracketLabelsFor = useMemoSh(() => {
+    const bracketLabelsFor = useMemo(() => {
         const cache = new Map();
         return (compId) => {
             if (!cache.has(compId)) {
@@ -968,9 +968,9 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
             return cache.get(compId);
         };
     }, [roundsFor]);
-    const slotLabelFor = useCallbackSh((compId) => bracketLabelsFor(compId).slot, [bracketLabelsFor]);
-    const bronzeLabelsFor = useCallbackSh((compId) => bracketLabelsFor(compId).bronze, [bracketLabelsFor]);
-    const { sorted, running, scheduled, completed } = useMemoSh(
+    const slotLabelFor = useCallback((compId) => bracketLabelsFor(compId).slot, [bracketLabelsFor]);
+    const bronzeLabelsFor = useCallback((compId) => bracketLabelsFor(compId).bronze, [bracketLabelsFor]);
+    const { sorted, running, scheduled, completed } = useMemo(
         () => partitionShiaijoMatches(allMatches),
         [allMatches]
     );
@@ -982,7 +982,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // Pending placeholder finals count too, so a court whose only remaining bout
     // is a downstream final still surfaces its competition in the selector and
     // is not treated as empty.
-    const courtsComps = useMemoSh(() => {
+    const courtsComps = useMemo(() => {
         const seen = new Set();
         const out = [];
         for (const m of [...allMatches, ...pendingPlaceholder]) {
@@ -999,7 +999,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // null or no longer present (e.g. a comp was removed). Priority: running
     // match's comp; else first comp with scheduled matches here; else first comp
     // with any matches. AC3/AC7.
-    const effectiveCompId = useMemoSh(() => {
+    const effectiveCompId = useMemo(() => {
         if (!courtsComps.length) return null;
         // If explicitly selected and still valid, keep it
         if (selectedCompId && courtsComps.some(c => c.id === selectedCompId)) return selectedCompId;
@@ -1016,7 +1016,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // moved onto this court cannot swap the competition under the operator.
     // From then on only the picker and the banner below change it (and a
     // competition that leaves this court falls back to the default again).
-    useEffectSh(() => {
+    useEffect(() => {
         if (effectiveCompId && effectiveCompId !== selectedCompId) setSelectedCompId(effectiveCompId);
     }, [effectiveCompId, selectedCompId]);
 
@@ -1031,7 +1031,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // (a just-scored pick hands off to the next bout, not to itself). Correcting
     // a completed match is a DELIBERATE, separate action via correctingKey /
     // correctMatch below — not a pickedMatch, so it never disturbs this fallback.
-    const pickedMatch = useMemoSh(
+    const pickedMatch = useMemo(
         () => pickedKey ? sorted.find((x) => matchKey(x) === pickedKey && x.status !== "completed") || null : null,
         [pickedKey, sorted]
     );
@@ -1041,11 +1041,11 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // No status filter here, on purpose: a filter would leave the key set, and
     // the key would re-pin the match the moment it completed again. The
     // effect below ends the correction instead.
-    const correctingMatch = useMemoSh(
+    const correctingMatch = useMemo(
         () => correctingKey ? sorted.find((x) => matchKey(x) === correctingKey) || null : null,
         [correctingKey, sorted]
     );
-    const lineupMatch = useMemoSh(
+    const lineupMatch = useMemo(
         () => lineupKey ? sorted.find((x) => matchKey(x) === lineupKey) || null : null,
         [lineupKey, sorted]
     );
@@ -1064,7 +1064,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // no bout to pick, but the correction still ends, so the panel returns
     // to the court's ordinary view rather than staying pinned to it.
     const correctingStatus = correctingMatch ? correctingMatch.status : null;
-    useEffectSh(() => {
+    useEffect(() => {
         if (!correctingKey) return;
         if (correctingStatus === "running") {
             setPickedKey(correctingKey);
@@ -1075,7 +1075,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     }, [correctingKey, correctingStatus]);
     // A match the operator deliberately holds open: a correction. It outranks
     // the pick and the live bout, so while one is set it IS selectedMatch.
-    const selectedMatch = useMemoSh(
+    const selectedMatch = useMemo(
         () => correctingMatch || pickedMatch || running[0] || null,
         [correctingMatch, pickedMatch, running]
     );
@@ -1083,7 +1083,10 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // bc-strt: the match pickMatch started, until the refetch shows it
     // running. ONE predicate for the editor's `started` prop and for liveBout
     // below, so the two cannot drift.
-    const isStartedSnapshot = (m) => !!m && !!startedFrom && startedFrom.key === matchKey(m) && startedFrom.at === m.modifiedAt;
+    const isStartedSnapshot = useCallback(
+        (m) => !!m && !!startedFrom && startedFrom.key === matchKey(m) && startedFrom.at === m.modifiedAt,
+        [startedFrom]
+    );
     // The match whose start request is still in flight (startingKey), found on
     // the court, for the render (liveBout below). The guards read startingRef.
     const startingBlocker = startingKey ? sorted.find((x) => matchKey(x) === startingKey) || null : null;
@@ -1105,20 +1108,17 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // open correction refuses a Start, and a start still out refuses a Start of
     // another match. ONE place builds each sentence, for the toast and the
     // notice alike.
-    // "starting" reads the refs, so a refusal made from an advance's async
-    // continuation names the start that is out NOW (the render's copy may be
-    // stale there), and a refusal made during a pick's defer names that pick. At
-    // render time the refs and the state agree.
-    const refusalBlocker = (why) => {
+    // "starting" names `startOut`, the start (or pick) record that is out: a
+    // tap's refusal reads it from the refs, so a refusal made from an advance's
+    // async continuation names the start that is out NOW (the render's copy may
+    // be stale there), and a refusal made during a pick's defer names that pick.
+    // The render reads the state, which follows the refs (syncStartingKey).
+    const refusalBlocker = (why, startOut) => {
         if (why === "running") return liveBout;
-        if (why === "starting") {
-            const s = startingRef.current || pickingRef.current;
-            return s ? s.match : null;
-        }
+        if (why === "starting") return startOut ? startOut.match : null;
         return openCorrection;
     };
-    const refusalText = (why) => {
-        const blocker = refusalBlocker(why);
+    const refusalText = (why, blocker) => {
         if (!blocker) return null;
         if (why === "running") return correctWhileRunningMessage({ court, label: scoreRowMatchName(blocker) });
         if (why === "starting") return startWhileStartingMessage({ label: scoreRowMatchName(blocker) });
@@ -1127,10 +1127,14 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // The notice for a refused tap, derived: shown only while the match that
     // refused it still does, so it goes by itself when that match is finished,
     // sent back or cancelled, and a later, unrelated one never revives it.
+    // A "starting" refusal holds the record of the start that refused it, which
+    // is still the one out while startingKey names it; another start out names
+    // a different match, so the notice goes either way.
     const refusalNotice = (key) => {
         if (!refusedTap || refusedTap.key !== key) return null;
-        const blocker = refusalBlocker(refusedTap.why);
-        return blocker && matchKey(blocker) === refusedTap.against ? refusalText(refusedTap.why) : null;
+        const startOut = refusedTap.start && refusedTap.start.key === startingKey ? refusedTap.start : null;
+        const blocker = refusalBlocker(refusedTap.why, startOut);
+        return blocker && matchKey(blocker) === refusedTap.against ? refusalText(refusedTap.why, blocker) : null;
     };
     // Refuse a tap: remember it against the match that blocks it, and toast.
     // leaveEditorConfirmed: true when the console may unmount the editor or put
@@ -1147,15 +1151,16 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     const editorUnsavedFor = (compId, matchId) => !!selectedMatch && selectedMatch.compId === compId
         && selectedMatch.id === matchId && holdsUnsaved(editorUnsavedRef);
     const refuseTap = (m, why) => {
-        const blocker = refusalBlocker(why);
+        const startOut = startingRef.current || pickingRef.current;
+        const blocker = refusalBlocker(why, startOut);
         setRefusedTap({
             key: matchKey(m), compId: m.compId, why, against: matchKey(blocker), label: scoreRowMatchName(blocker),
             // The start (or pick) record itself, which startMatch marks `landed` once the
             // start went out: the effect beside startMatch asks it before writing the
             // past-tense sentence.
-            start: why === "starting" ? (startingRef.current || pickingRef.current) : null,
+            start: why === "starting" ? startOut : null,
         });
-        if (showToast) showToast(refusalText(why), "error");
+        if (showToast) showToast(refusalText(why, blocker), "error");
     };
     // The stored refusal is read against the refused match's LIVE row in the
     // court's list (the same list the court-call withdrawal reads), never against
@@ -1177,7 +1182,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // These globals are assigned at module evaluation time, so they are always
     // present when admin_shiaijo.jsx executes (admin_pools.js loads first per
     // the <script> order in index.html).
-    const editorMatch = useMemoSh(() => {
+    const editorMatch = useMemo(() => {
         if (!selectedMatch) return selectedMatch;
         if (window.isSupplementaryBout && window.isSupplementaryBout(selectedMatch.id) && window.enrichPoolMatchWithComp) {
             const comp = courtCompetitions.find(c => c.id === selectedMatch.compId);
@@ -1194,20 +1199,18 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // editor runs it, so it leaves Upcoming and Up next as a running match does.
     // A start refused or discarded takes startedFrom back (startMatch's unpin),
     // and the match is in the list again.
-    const filteredScheduled = useMemoSh(
+    const filteredScheduled = useMemo(
         () => scheduled.filter((m) => (!effectiveCompId || m.compId === effectiveCompId) && !isStartedSnapshot(m)),
-        // isStartedSnapshot reads startedFrom alone.
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-        [scheduled, effectiveCompId, startedFrom]
+        [scheduled, effectiveCompId, isStartedSnapshot]
     );
-    const filteredCompleted = useMemoSh(
+    const filteredCompleted = useMemo(
         () => effectiveCompId ? completed.filter(m => m.compId === effectiveCompId) : completed,
         [completed, effectiveCompId]
     );
     // Pending placeholder finals for the selected competition, rendered as
     // non-actionable "later" rows below Upcoming. Sorted by scheduled time so a
     // multi-round pending tail reads in play order.
-    const filteredPending = useMemoSh(
+    const filteredPending = useMemo(
         () => {
             const list = effectiveCompId ? pendingPlaceholder.filter(m => m.compId === effectiveCompId) : pendingPlaceholder;
             return sortShiaijoMatches(list);
@@ -1222,7 +1225,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // partitionShiaijoMatches orders completed by play time, so the operator
     // sees their result land in the standings; else the next scheduled bout
     // (before the court's first match).
-    const contextMatch = useMemoSh(
+    const contextMatch = useMemo(
         () => selectedMatch || filteredCompleted[filteredCompleted.length - 1] || filteredScheduled[0] || null,
         [selectedMatch, filteredCompleted, filteredScheduled]
     );
@@ -1236,7 +1239,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // bout it is the last result; and the operator can open a finished bout
     // deliberately to correct it, which is a different fact from falling back
     // to it.
-    const contextLead = useMemoSh(() => {
+    const contextLead = useMemo(() => {
         if (contextMatch?.status === "scheduled") return "Up next";
         if (contextMatch?.status !== "completed") return "";
         return contextMatch === correctingMatch ? "Correcting" : (selectedMatch ? "" : "Just played");
@@ -1246,7 +1249,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // expands it, else the most recently played preview. Memoised because this
     // console re-renders on every SSE broadcast and a full-day court can hold
     // a hundred completed bouts.
-    const completedShown = useMemoSh(
+    const completedShown = useMemo(
         () => (showAllCompleted ? filteredCompleted : filteredCompleted.slice(-COMPLETED_PREVIEW)),
         [showAllCompleted, filteredCompleted]
     );
@@ -1285,7 +1288,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // is then (the court-call withdrawal below leaves an absent key alone for the
     // same reason). Only a list that holds matches yet lacks this one counts.
     const startErrorStands = startRefusalStands({ row: startErrorRow, listHoldsMatches: courtMatchesRaw.length > 0 });
-    useEffectSh(() => {
+    useEffect(() => {
         if (!startErrorKey) return;
         if (!startErrorStands) setStartError(null);
     }, [startErrorKey, startErrorStands]);
@@ -1293,7 +1296,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // "Which pool is next" for the context panel: the first upcoming pool on
     // this court (within the selected comp) whose pool differs from the one
     // currently in focus.
-    const nextPoolName = useMemoSh(() => {
+    const nextPoolName = useMemo(() => {
         const cur = (contextMatch && contextMatch.phase === "pool") ? (contextMatch.poolName || "") : "";
         for (const m of filteredScheduled) {
             const pn = m.poolName || "";
@@ -1333,7 +1336,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // switch and never a switch by itself (operator request 2026-10-03, after
     // a match moved here from another court was visible only through the
     // picker). Never red/navy: the amber case uses --warn-* tokens only.
-    const nudgeBanner = useMemoSh(() => {
+    const nudgeBanner = useMemo(() => {
         if (!effectiveCompId || !courtKnown) return null;
 
         // Selected comp still has a running or scheduled match here: no
@@ -1366,9 +1369,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         const entries = Object.values(byComp);
         entries.sort((a, b) => b.count - a.count);
         return { entries, alsoWaiting: selHasActive };
-        // isStartedSnapshot reads startedFrom alone.
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [allMatches, effectiveCompId, running, liveBout, filteredScheduled, courtKnown, startedFrom]);
+    }, [allMatches, effectiveCompId, running, liveBout, filteredScheduled, courtKnown, isStartedSnapshot]);
 
     // The one place the Starting… state follows the refs: the start in flight,
     // else the pick still deferring the running bout (so a start settling inside
@@ -1407,7 +1408,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // list: the list is refreshed a moment after the write and may still show the match
     // scheduled, and a start queued offline stays scheduled until the connection
     // returns, yet both were sent. Otherwise the refused tap is dropped, with no sentence.
-    useEffectSh(() => {
+    useEffect(() => {
         if (!refusedTap || refusedTap.why !== "starting") return;
         if (startingRef.current || pickingRef.current) return;
         if (refusedTap.start && refusedTap.start.landed) {
@@ -1754,7 +1755,19 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // End the correction of the match keyed `key` only if it is still the one
     // open: a write's answer may arrive after another correction was opened.
     const endCorrectionOf = (key) => { setCorrectingKey((k) => (k === key ? null : k)); };
-    latestRef.current = { pickMatch, correctMatch, allMatches, running };
+    React.useLayoutEffect(() => { latestRef.current = { pickMatch, correctMatch, allMatches, running }; });
+
+    // takeDown: delete the announcement whose id `pending` resolves to (none
+    // when it resolves to null). Fire and forget, shared by withdrawCall and the
+    // earlier call callToCourt replaces.
+    const takeDown = (pending) => {
+        pending
+            .then((id) => {
+                if (!id || !window.API || typeof window.API.deleteAnnouncement !== "function") return;
+                return window.API.deleteAnnouncement(id, password);
+            })
+            .catch((e) => console.warn("Could not withdraw the court call", e));
+    };
 
     // Call to court: optional. Broadcasts a tournament announcement so the
     // competitors (and anyone watching the public app) are notified they're
@@ -1824,31 +1837,20 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         callIdsRef.current.delete(key);
         takeDown(entry.id);
     };
-    withdrawCallRef.current = withdrawCall;
-    // takeDown: delete the announcement whose id `pending` resolves to (none
-    // when it resolves to null). Fire and forget, shared by withdrawCall and the
-    // earlier call callToCourt replaces.
-    const takeDown = (pending) => {
-        pending
-            .then((id) => {
-                if (!id || !window.API || typeof window.API.deleteAnnouncement !== "function") return;
-                return window.API.deleteAnnouncement(id, password);
-            })
-            .catch((e) => console.warn("Could not withdraw the court call", e));
-    };
+    React.useLayoutEffect(() => { withdrawCallRef.current = withdrawCall; });
 
     // A court call comes down once its match has left scheduled, however that
     // happened (started here, started elsewhere, closed by a decision), once the
     // match shows on another court, whatever its status, or once the loaded
     // court feed no longer holds the match (its competition dropped from this
     // court); a key no list holds is left alone until the court feed has loaded.
-    useEffectSh(() => {
+    useEffect(() => {
         if (callIdsRef.current.size === 0) return;
         const feedMatches = window.tournamentMatches({ competitions: courtCompetitions }) || [];
         for (const [key, entry] of callIdsRef.current.entries()) {
             const m = courtMatchesRaw.find((x) => matchKey(x) === key);
             if (m && m.status !== "scheduled") {
-                withdrawCall(key);
+                withdrawCallRef.current(key);
                 continue;
             }
             const moved = feedMatches.find((x) => matchKey(x) === key);
@@ -1857,16 +1859,16 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
             // overlaid with the queue): only the server's court may.
             if (moved && (moved.court || "") !== (court || "")
                 && !(window.API && window.API.courtMoveQueued(moved.compId, moved.id))) {
-                withdrawCall(key);
+                withdrawCallRef.current(key);
                 continue;
             }
             if (!m && !moved && courtComps !== null) {
                 if (!(window.API && window.API.courtMoveQueued(entry.compId, entry.matchId))) {
-                    withdrawCall(key);
+                    withdrawCallRef.current(key);
                 }
             }
         }
-    }, [courtMatchesRaw, courtCompetitions, courtComps]);
+    }, [courtMatchesRaw, courtCompetitions, courtComps, court]);
 
     // moveMatch: reorder by swapping scheduledAt with the adjacent row.
     // direction: "up" (earlier) or "down" (later). Only scheduled matches
@@ -2154,9 +2156,9 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
 
                 {!courtKnown && (
                     <div className="empty">
-                        <h3>Unknown shiaijo "{court}"</h3>
+                        <h3>Unknown shiaijo &quot;{court}&quot;</h3>
                         <p style={{ fontSize: 13, color: "var(--ink-3)" }}>
-                            This court isn't part of the tournament: it may have been renamed or removed.{" "}
+                            This court isn&apos;t part of the tournament: it may have been renamed or removed.{" "}
                             <button type="button" onClick={leaving(onBack)} className="linklike">Back to dashboard</button>.
                         </p>
                         {/* The title-overlay court switcher is gated on courtKnown, so an
@@ -3018,13 +3020,13 @@ function ShiaijoContext({ match, competitions, court, nextPoolName, tweaks, lead
     // fetchCompetitionDetails here would be an unneeded dependency that could
     // stall or blank the league panel if that endpoint (unlike the dedicated
     // league-standings one) has a transient failure.
-    const poolSig = useMemoSh(() => {
+    const poolSig = useMemo(() => {
         const pms = (comp && comp.poolMatches) || [];
         return pms.map((m) => `${m.id}:${m.status}:${(m.ipponsA || []).join("")}:${(m.ipponsB || []).join("")}`).join("|");
     }, [comp]);
-    const [detail, setDetail] = useStateSh(null);
-    const [detailErr, setDetailErr] = useStateSh(false);
-    useEffectSh(() => {
+    const [detail, setDetail] = useState(null);
+    const [detailErr, setDetailErr] = useState(false);
+    useEffect(() => {
         // Swiss and league both render self-fetching viewers off `comp` alone
         // (dedicated standings endpoints), so the competition-detail fetch is
         // only needed for the pool path.

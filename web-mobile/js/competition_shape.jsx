@@ -1205,7 +1205,7 @@ export const CLEARED_FIELD_LABELS = {
 //
 // Every value a competition starts life with, in ONE object.
 //
-// They were in three places: the create form's ~20 `useStateA(...)` seeds,
+// They were in three places: the create form's ~20 `useState(...)` seeds,
 // data.jsx's buildEmptyCompetition fallbacks (`poolMode || "max"`,
 // `roundRobin ?? true`, `teamSize || (kind === "team" ? 5 : 0)`, ...), and
 // Go's zero values for anything the client never sent. Three copies of one

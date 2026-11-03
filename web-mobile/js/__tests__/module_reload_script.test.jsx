@@ -35,7 +35,6 @@ function page({ onLine = true, storage } = {}) {
         setItem: (k, v) => { store.set(k, String(v)); },
     };
     const win = { sessionStorage, location: { reload: vi.fn() } };
-    // eslint-disable-next-line no-new-func
     new Function('window', 'navigator', inlineScript())(win, { onLine });
     expect(typeof win.bcModuleFailed).toBe('function');
     return { win, store };
@@ -85,7 +84,6 @@ describe('bcModuleFailed (index.html)', () => {
     it('does not reload when the window has no sessionStorage at all', () => {
         const win = { location: { reload: vi.fn() } };
         Object.defineProperty(win, 'sessionStorage', { get: () => { throw new Error('SecurityError'); } });
-        // eslint-disable-next-line no-new-func
         new Function('window', 'navigator', inlineScript())(win, { onLine: true });
         expect(() => win.bcModuleFailed(module('abc123'))).not.toThrow();
         expect(win.location.reload).not.toHaveBeenCalled();

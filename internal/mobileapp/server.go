@@ -371,8 +371,9 @@ func buildAssetETag(subFS fs.FS) string {
 		if rerr != nil {
 			return rerr
 		}
-		_, _ = h.Write([]byte(path))
-		_, _ = h.Write(b)
+		// hash.Hash.Write never returns an error (its documented contract).
+		h.Write([]byte(path))
+		h.Write(b)
 		return nil
 	})
 	if err != nil {

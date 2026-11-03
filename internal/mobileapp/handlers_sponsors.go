@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -13,6 +14,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/gitrgoliveira/bracket-creator/internal/pdf"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
@@ -125,7 +127,11 @@ func handleSponsorUpload(store *state.Store, hub *Hub) gin.HandlerFunc {
 			internalError(c, err)
 			return
 		}
-		defer func() { _ = src.Close() }()
+		defer func() {
+			if err := src.Close(); err != nil {
+				logRequestError(c, fmt.Errorf("close uploaded sponsor logo: %w", err))
+			}
+		}()
 
 		// Sniff first 512 bytes per http.DetectContentType contract.
 		// Don't trust the Content-Type header. fileHeader.Open() returns
@@ -166,12 +172,7 @@ func handleSponsorUpload(store *state.Store, hub *Hub) gin.HandlerFunc {
 			return
 		}
 		fullPath := filepath.Join(sponsorsDir, fileName)
-		// fileName is server-generated (16 random hex chars + sniffed
-		// image extension); fullPath joins under sponsorsDir which is
-		// itself derived from store.GetFolder. No user-controlled input
-		// reaches the OS call.
-		// #nosec G304 -- filename is server-generated, not from user input
-		dst, err := os.OpenFile(fullPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+		dst, err := pdf.OpenInFolder(sponsorsDir, fileName, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 		if err != nil {
 			internalError(c, err)
 			return
@@ -180,12 +181,11 @@ func handleSponsorUpload(store *state.Store, hub *Hub) gin.HandlerFunc {
 		written, copyErr := io.Copy(dst, io.LimitReader(src, SponsorMaxFileBytes+1))
 		cerr := dst.Close()
 		if copyErr != nil || cerr != nil {
-			_ = os.Remove(fullPath)
-			internalError(c, errors.Join(copyErr, cerr))
+			internalError(c, errors.Join(copyErr, cerr, removeFile(fullPath)))
 			return
 		}
 		if written > SponsorMaxFileBytes {
-			_ = os.Remove(fullPath)
+			removeFileOrLog(fullPath)
 			c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "logo must be ≤1 MB"})
 			return
 		}
@@ -212,7 +212,7 @@ func handleSponsorUpload(store *state.Store, hub *Hub) gin.HandlerFunc {
 			return nil
 		})
 		if err != nil {
-			_ = os.Remove(fullPath)
+			removeFileOrLog(fullPath)
 			switch {
 			case errors.Is(err, errSponsorTournamentNotInit):
 				c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
@@ -274,7 +274,7 @@ func handleSponsorDelete(store *state.Store, hub *Hub) gin.HandlerFunc {
 		// store root. Invalid → skip the unlink; the YAML entry is
 		// already removed.
 		if sponsorFilePattern.MatchString(removed.File) {
-			_ = os.Remove(filepath.Join(store.GetFolder(), sponsorsDirName, removed.File))
+			removeFileOrLog(filepath.Join(store.GetFolder(), sponsorsDirName, removed.File))
 		}
 		if hub != nil {
 			hub.Broadcast(EventTournamentUpdated, nil)

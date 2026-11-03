@@ -53,11 +53,9 @@ func main() {
 	// byte-identical; the duplication is harmless and avoids a
 	// browser/server import-rewrite hack.
 	for _, dest := range destPaths() {
-		// #nosec G301 -- build-time generator, host filesystem perms apply
 		if err := os.MkdirAll(filepath.Dir(dest), 0o750); err != nil {
 			log.Fatalf("glossarygen: mkdir %s: %v", dest, err)
 		}
-		// #nosec G306 -- generated source file, world-readable by convention
 		if err := os.WriteFile(dest, out, 0o600); err != nil {
 			log.Fatalf("glossarygen: write %s: %v", dest, err)
 		}

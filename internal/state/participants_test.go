@@ -1,12 +1,15 @@
 package state
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
+	bctest "github.com/gitrgoliveira/bracket-creator/internal/test"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -239,7 +242,7 @@ func TestParticipantsNonZekkenImportRoundTrip(t *testing.T) {
 	require.NoError(t, store.SaveParticipants(compID, parsed))
 
 	// The 2-column form must land on disk so the loader doesn't shift columns.
-	raw, err := os.ReadFile(filepath.Join(dir, "competitions", compID, "participants.csv"))
+	raw, err := bctest.ReadFile(filepath.Join(dir, "competitions", compID, "participants.csv"))
 	require.NoError(t, err)
 	assert.NotContains(t, string(raw), "J. DOE",
 		"auto-derived DisplayName must not be written to disk; got %q", string(raw))
@@ -275,7 +278,7 @@ func TestParticipantsDistinctDisplayNameRoundTrip(t *testing.T) {
 	}
 	require.NoError(t, store.SaveParticipants(compID, players))
 
-	raw, err := os.ReadFile(filepath.Join(dir, "competitions", compID, "participants.csv"))
+	raw, err := bctest.ReadFile(filepath.Join(dir, "competitions", compID, "participants.csv"))
 	require.NoError(t, err)
 	assert.Contains(t, string(raw), "C. CAROL", "distinct DisplayName must be preserved on disk")
 
@@ -350,7 +353,7 @@ func TestMetadataRoundTrip(t *testing.T) {
 	}
 	require.NoError(t, store.SaveParticipants(compID, players))
 
-	raw, err := os.ReadFile(filepath.Join(dir, "competitions", compID, "participants.csv"))
+	raw, err := bctest.ReadFile(filepath.Join(dir, "competitions", compID, "participants.csv"))
 	require.NoError(t, err)
 	rawStr := string(raw)
 	assert.Contains(t, rawStr, "2d", "danGrade must be written to CSV")
@@ -378,7 +381,7 @@ func TestCheckedInRoundTrip(t *testing.T) {
 	}
 	require.NoError(t, store.SaveParticipants(compID, players))
 
-	raw, err := os.ReadFile(filepath.Join(dir, "competitions", compID, "participants.csv"))
+	raw, err := bctest.ReadFile(filepath.Join(dir, "competitions", compID, "participants.csv"))
 	require.NoError(t, err)
 	rawStr := string(raw)
 	assert.Contains(t, rawStr, "checked_in", "checked-in flag must be written to CSV")
@@ -418,7 +421,7 @@ func TestCheckedInColumnBasedDetection(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, loaded2, 1)
 	assert.False(t, loaded2[0].CheckedIn, "2-column row must never trigger checked_in detection")
-	assert.Equal(t, "checked_in", loaded2[0].Dojo, "dojo named checked_in must be preserved")
+	assert.Equal(t, "Checked_in", loaded2[0].Dojo, "dojo named checked_in must be preserved (title-cased like every dojo)")
 }
 
 func TestUpdateParticipant(t *testing.T) {
@@ -483,7 +486,7 @@ func TestCheckedInColumnBasedDetectionUUIDRows(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, loaded, 1)
 	assert.False(t, loaded[0].CheckedIn, "3-part UUID row must NOT be misclassified as checked-in")
-	assert.Equal(t, "checked_in", loaded[0].Dojo, "dojo value must be preserved for 3-part UUID row")
+	assert.Equal(t, "Checked_in", loaded[0].Dojo, "dojo value must be preserved for 3-part UUID row (title-cased like every dojo)")
 	assert.Equal(t, "550e8400-e29b-41d4-a716-446655440000", loaded[0].ID)
 
 	// 4-col UUID row: uuid, Name, Dojo, checked_in, trailing checked_in IS a valid marker.
@@ -605,10 +608,19 @@ func TestSaveParticipants_RejectsReservedNames(t *testing.T) {
 		{"Pool Z-2nd", "Tora"},
 		{"Winner of r1-m0", "Kenshinkan"}, // dojo must be non-blank; the reserved-NAME rule is what is under test here
 		{"Winner of r3-m10", "Dojo"},
+		// The roster rule ignores case: the paste box's raw spelling, the
+		// title-cased one an import or a stored row carries, and all caps.
+		{"pool a-1st", "Wakaba"},
+		{"Pool A-1St", "Wakaba"},
+		{"POOL A-1ST", "Wakaba"},
+		{"Winner Of R1-M2", "Dojo"},
 	}
 	for _, tc := range cases {
 		err := store.SaveParticipants(compID, []domain.Player{{Name: tc.name, Dojo: tc.dojo}})
 		assert.ErrorIs(t, err, ErrReservedName, "reserved name %q must be rejected by SaveParticipants", tc.name)
+		assert.ErrorContains(t, err, fmt.Sprintf("%q", tc.name), "the refusal names the participant as given")
+		err = store.SaveParticipantsRestored(compID, []domain.Player{{Name: tc.name, Dojo: tc.dojo}})
+		assert.ErrorIs(t, err, ErrReservedName, "reserved name %q must be rejected by SaveParticipantsRestored (the import)", tc.name)
 	}
 
 	// Non-reserved names must be allowed regardless of superficial similarity.
@@ -630,6 +642,68 @@ func TestAddParticipant_RejectsReservedName(t *testing.T) {
 
 	_, err = store.AddParticipant(compID, domain.Player{Name: "Winner of r2-m5", Dojo: "Dojo A"}, false)
 	assert.ErrorIs(t, err, ErrReservedName, "reserved winner-of name must be rejected by AddParticipant")
+
+	_, err = store.AddParticipant(compID, domain.Player{Name: "pool b-3rd", Dojo: "Dojo A"}, false)
+	assert.ErrorIs(t, err, ErrReservedName, "a reserved name typed in lowercase must be rejected by AddParticipant")
+
+	stored, err := store.LoadParticipants(compID, false)
+	require.NoError(t, err)
+	assert.Empty(t, stored, "nothing is written")
+}
+
+// A rename the roster rule refuses is refused before the edit's seeds.csv
+// rewrite, so the seed keeps naming the competitor the roster still holds.
+func TestReplaceParticipant_ReservedRenameLeavesTheSeedAlone(t *testing.T) {
+	store, err := NewStore(t.TempDir())
+	require.NoError(t, err)
+	const compID = "reserved-rename-seed"
+	require.NoError(t, store.SaveCompetition(&Competition{ID: compID, Name: "Reserved Rename Seed"}))
+	added, err := store.AddParticipant(compID, domain.Player{Name: "Alice", Dojo: "Dojo A"}, false)
+	require.NoError(t, err)
+	require.NoError(t, store.SaveSeeds(compID, []domain.SeedAssignment{{Name: "Alice", Dojo: "Dojo A", SeedRank: 1}}))
+
+	_, err = store.ReplaceParticipant(compID, added.ID, false, func(p *domain.Player) error {
+		p.Name = "pool a-1st"
+		return nil
+	})
+	require.ErrorIs(t, err, ErrReservedName)
+
+	seeds, err := store.LoadSeedsRaw(compID)
+	require.NoError(t, err)
+	require.Len(t, seeds, 1)
+	assert.Equal(t, "Alice", seeds[0].Name, "the seed is not renamed by a refused rename")
+}
+
+// A roster that already holds a reserved name (written before the rule ignored
+// case) is refused on its next save, a check-in included, until it is renamed.
+func TestSaveParticipants_StoredReservedNameRefusesTheNextSave(t *testing.T) {
+	dir := t.TempDir()
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+	const compID = "reserved-stored"
+	require.NoError(t, store.SaveCompetition(&Competition{ID: compID, Name: "Reserved Stored"}))
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{{Name: "Alice", Dojo: "Dojo A"}, {Name: "Bob", Dojo: "Dojo B"}}))
+	players, err := store.LoadParticipants(compID, false)
+	require.NoError(t, err)
+	require.Len(t, players, 2)
+	// Plant the title-cased spelling an earlier import let in.
+	path := filepath.Join(dir, "competitions", compID, "participants.csv")
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(path, []byte(strings.Replace(string(data), "Bob", "Pool A-1St", 1)), 0o600))
+	store, err = NewStore(dir) // a restart: nothing cached from before the edit
+	require.NoError(t, err)
+
+	_, err = store.BulkCheckIn(compID, []string{players[0].ID})
+	assert.ErrorIs(t, err, ErrReservedName, "a check-in is a roster save too")
+
+	_, err = store.UpdateParticipant(compID, players[1].ID, false, func(p *domain.Player) error {
+		p.Name = "Bob"
+		return nil
+	})
+	require.NoError(t, err, "renaming the reserved name is the way out")
+	_, err = store.BulkCheckIn(compID, []string{players[0].ID})
+	assert.NoError(t, err)
 }
 
 func TestReplaceParticipant_RejectsReservedName(t *testing.T) {

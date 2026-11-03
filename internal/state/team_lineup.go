@@ -232,8 +232,8 @@ func arrivalOrStamp(compID string, at int64) int64 {
 
 // parseTeamLineupsFile reads and parses lineups.yaml at path. A missing
 // file is "no lineups yet" and returns an empty map.
-func parseTeamLineupsFile(compID, path string) (map[string]domain.TeamLineup, error) {
-	data, err := os.ReadFile(path) // #nosec G304, compPath enforces containment under the competitions dir.
+func (s *Store) parseTeamLineupsFile(compID, path string) (map[string]domain.TeamLineup, error) {
+	data, err := s.root.readFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return map[string]domain.TeamLineup{}, nil
@@ -255,7 +255,7 @@ func parseTeamLineupsFile(compID, path string) (map[string]domain.TeamLineup, er
 // Returns a deep copy so callers can mutate the map freely.
 func (s *Store) LoadTeamLineups(compID string) (map[string]domain.TeamLineup, error) {
 	data, err := s.loadCached(compID, teamLineupFilename, func(path string) (any, error) {
-		return parseTeamLineupsFile(compID, path)
+		return s.parseTeamLineupsFile(compID, path)
 	})
 	if err != nil {
 		return nil, err
@@ -268,7 +268,7 @@ func (s *Store) LoadTeamLineups(compID string) (map[string]domain.TeamLineup, er
 // (engine/lineup_carry.go), the one reader of them.
 func (s *Store) LoadTeamLineupsWithRemoved(compID string) (map[string]domain.TeamLineup, error) {
 	data, err := s.loadCached(compID, teamLineupFilename, func(path string) (any, error) {
-		return parseTeamLineupsFile(compID, path)
+		return s.parseTeamLineupsFile(compID, path)
 	})
 	if err != nil {
 		return nil, err
@@ -285,7 +285,7 @@ func (s *Store) LoadTeamLineupsWithRemoved(compID string) (map[string]domain.Tea
 // it by then. A missing file is no lineups yet, an empty map.
 func (s *Store) ReadTeamLineups(compID string, read func(lineups map[string]domain.TeamLineup)) error {
 	data, err := s.loadCached(compID, teamLineupFilename, func(path string) (any, error) {
-		return parseTeamLineupsFile(compID, path)
+		return s.parseTeamLineupsFile(compID, path)
 	})
 	if err != nil {
 		return err
@@ -300,7 +300,7 @@ func (s *Store) ReadTeamLineups(compID string, read func(lineups map[string]doma
 // locked callers are usually about to mutate and need a fresh private map,
 // mirroring the same pattern in loadBracketLocked.
 func (s *Store) loadTeamLineupsLocked(compID string) (map[string]domain.TeamLineup, error) {
-	return parseTeamLineupsFile(compID, s.compPath(compID, teamLineupFilename))
+	return s.parseTeamLineupsFile(compID, s.compPath(compID, teamLineupFilename))
 }
 
 // copyTeamLineups deep-copies a lineups map so cached data is never

@@ -231,20 +231,6 @@ func (d *dataRoot) atomicWrite(path string, data []byte, perm fs.FileMode) error
 	return atomicWriteFile(d, path, data, perm)
 }
 
-// syncFile opens path through the root and flushes its contents to disk.
-func (d *dataRoot) syncFile(path string) (err error) {
-	f, err := d.open(path)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		if cerr := f.Close(); cerr != nil {
-			err = errors.Join(err, cerr)
-		}
-	}()
-	return f.Sync()
-}
-
 // syncDir flushes the directory entry metadata of path to disk.
 func (d *dataRoot) syncDir(path string) error {
 	return syncDir(d, path)

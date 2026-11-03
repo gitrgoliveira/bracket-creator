@@ -315,7 +315,6 @@ func TestDataRootBackupHelpers(t *testing.T) {
 
 	require.NoError(t, store.root.stageFile(stagedPath, []byte("initial-bytes"), 0o600))
 	require.NoError(t, store.root.atomicWrite(stagedPath, []byte("overwritten-bytes"), 0o600))
-	require.NoError(t, store.root.syncFile(stagedPath))
 	require.NoError(t, store.root.syncDir(backupsDir))
 	require.NoError(t, store.root.rename(stagedPath, renamedPath))
 

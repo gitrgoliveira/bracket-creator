@@ -413,6 +413,15 @@ func TestWriteRefusals(t *testing.T) {
 			code:  CodeManifestInvalid,
 		},
 		{
+			name: "zero creation time",
+			meta: Meta{
+				Scope: ScopeTournament,
+				Kind:  KindManual,
+			},
+			files: map[string][]byte{"tournament.md": []byte("---\n---\n")},
+			code:  CodeManifestInvalid,
+		},
+		{
 			name: "case clash",
 			meta: validMeta,
 			files: map[string][]byte{

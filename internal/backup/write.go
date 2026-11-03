@@ -25,6 +25,9 @@ func Write(w io.Writer, meta Meta, files map[string][]byte) error {
 	if !validKind(meta.Kind) {
 		return &Error{Code: CodeManifestInvalid, Detail: "invalid backup kind"}
 	}
+	if meta.CreatedAt.IsZero() {
+		return &Error{Code: CodeManifestInvalid, Detail: "backup creation time is missing"}
+	}
 	if meta.Kind != KindBeforeRestore && len(meta.RestoreCreated) > 0 {
 		return &Error{Code: CodeRestoreCreatedNotAllowed, Detail: "restoreCreated is only allowed for before-restore archives"}
 	}

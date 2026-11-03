@@ -155,6 +155,10 @@ func Write(w io.Writer, meta Meta, files map[string][]byte) error {
 	return zw.Close()
 }
 
+// zipDeflateLevel matches archive/zip's built-in Deflate compressor, which uses level 5;
+// the prediction must match the bytes written.
+const zipDeflateLevel = 5
+
 // chooseCompressionMethod deflates data only to learn whether deflate pays off,
 // and writeZipEntry then compresses it again. Writing the first pass out
 // through zip.Writer.CreateRaw would save that CPU, but CreateRaw takes the
@@ -163,7 +167,7 @@ func Write(w io.Writer, meta Meta, files map[string][]byte) error {
 // size needs.
 func chooseCompressionMethod(data []byte) (uint16, error) {
 	var buf bytes.Buffer
-	fw, err := flate.NewWriter(&buf, flate.DefaultCompression)
+	fw, err := flate.NewWriter(&buf, zipDeflateLevel)
 	if err != nil {
 		return 0, err
 	}

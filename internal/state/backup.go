@@ -319,9 +319,11 @@ func (s *Store) snapshotTournamentFilesLocked(snap *Snapshot) error {
 		}
 		snap.Files["tournament.md"] = stripped
 	case errors.Is(err, fs.ErrNotExist):
+		// When tournament.md has never been written, archive a placeholder
+		// tournament without a date so the captured bytes and archive
+		// fingerprint do not change across days while the file is absent.
 		t := Tournament{
 			Name:  "New Tournament",
-			Date:  s.now().Format("02-01-2006"),
 			Venue: "Venue TBA",
 		}
 		ApplyTournamentDefaults(&t)
@@ -409,7 +411,10 @@ func (s *Store) snapshotCompetitionLocked(id string, snap *Snapshot) (bool, erro
 	cfgKey := filepath.ToSlash(filepath.Join("competitions", id, "config.md"))
 	if cfgBytes, ok := snap.Files[cfgKey]; ok {
 		var c Competition
-		if err := parseFrontMatter(cfgBytes, &c); err == nil && c.Name != "" {
+		if err := parseFrontMatter(cfgBytes, &c); err != nil {
+			return false, fmt.Errorf("competition %q: config.md is not valid front matter: %w", id, err)
+		}
+		if c.Name != "" {
 			compName = c.Name
 		}
 	}
@@ -443,6 +448,10 @@ func (s *Store) collectTreeFilesLocked(rootDir string, dst map[string][]byte) er
 		}
 		data, err := s.root.readFile(path)
 		if err != nil {
+			if errors.Is(err, fs.ErrNotExist) {
+				// The file may have vanished concurrently (e.g. uncoordinated branding/sponsors upload or delete).
+				return nil
+			}
 			return err
 		}
 		dst[rel] = data

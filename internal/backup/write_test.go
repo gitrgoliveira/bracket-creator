@@ -898,3 +898,37 @@ func TestWriteRestoreCreatedValidation(t *testing.T) {
 		assert.Equal(t, "c1", be.Path)
 	})
 }
+
+func TestChooseCompressionMethod_MatchesActualDeflateOutput(t *testing.T) {
+	inputs := [][]byte{
+		nil,
+		{},
+		[]byte("plain text sample"),
+		bytes.Repeat([]byte("0123456789abcdef"), 100),
+		bytes.Repeat([]byte("A"), MaxRatio*500),
+	}
+
+	for _, data := range inputs {
+		method, err := chooseCompressionMethod(data)
+		require.NoError(t, err)
+
+		var buf bytes.Buffer
+		zw := zip.NewWriter(&buf)
+		require.NoError(t, writeZipEntry(zw, "test.dat", data, zip.Deflate))
+		require.NoError(t, zw.Close())
+
+		zr, err := zip.NewReader(bytes.NewReader(buf.Bytes()), int64(buf.Len()))
+		require.NoError(t, err)
+		require.Len(t, zr.File, 1)
+
+		entry := zr.File[0]
+		compressed := int64(entry.CompressedSize64)
+		uncompressed := int64(len(data))
+
+		wantMethod := uint16(zip.Deflate)
+		if (compressed == 0 && uncompressed > 0) || (uncompressed > int64(MaxRatio)*compressed) {
+			wantMethod = zip.Store
+		}
+		assert.Equal(t, wantMethod, method)
+	}
+}

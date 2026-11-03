@@ -474,3 +474,61 @@ func TestSnapshot_SkipsSymlinksAndDoesNotLeakPassword(t *testing.T) {
 		assert.NotContainsf(t, string(data), secret, "snapshot file %s leaked the tournament password", path)
 	}
 }
+
+func TestSnapshot_FailsWhenCompetitionConfigMDIsNotValidFrontMatter(t *testing.T) {
+	dir := t.TempDir()
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+
+	const compID = "bad-config-comp"
+	require.NoError(t, store.SaveCompetition(&Competition{
+		ID:   compID,
+		Name: "Bad Config Competition",
+	}))
+
+	// Overwrite config.md with bytes that do not parse as front matter.
+	invalidBytes := []byte("not valid front matter\n")
+	require.NoError(t, store.root.writeFile(store.compPath(compID, "config.md"), invalidBytes, 0o600))
+
+	// Competition scope returns an error mentioning the competition id.
+	_, compErr := store.Snapshot(ScopeCompetition, compID)
+	require.Error(t, compErr)
+	assert.Contains(t, compErr.Error(), compID)
+
+	// Tournament scope also returns an error mentioning the competition id.
+	_, tournErr := store.Snapshot(ScopeTournament, "")
+	require.Error(t, tournErr)
+	assert.Contains(t, tournErr.Error(), compID)
+}
+
+func TestSnapshot_MissingTournamentMDProducesDeterministicFrontMatter(t *testing.T) {
+	dir := t.TempDir()
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+
+	// tournament.md was never written. Take snapshots at two different store clocks.
+	store.clock = func() time.Time {
+		return time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	}
+	snap1, err := store.Snapshot(ScopeTournament, "")
+	require.NoError(t, err)
+	tourn1, ok1 := snap1.Files["tournament.md"]
+	require.True(t, ok1, "snapshot 1 must capture tournament.md")
+
+	store.clock = func() time.Time {
+		return time.Date(2027, 12, 31, 23, 59, 59, 0, time.UTC)
+	}
+	snap2, err := store.Snapshot(ScopeTournament, "")
+	require.NoError(t, err)
+	tourn2, ok2 := snap2.Files["tournament.md"]
+	require.True(t, ok2, "snapshot 2 must capture tournament.md")
+
+	assert.Equal(t, tourn1, tourn2, "captured tournament.md must be byte-identical regardless of store clock")
+	require.NoError(t, CheckFrontMatter(tourn1), "captured placeholder tournament.md must pass CheckFrontMatter")
+
+	var parsed Tournament
+	require.NoError(t, parseFrontMatter(tourn1, &parsed))
+	assert.Equal(t, "New Tournament", parsed.Name)
+	assert.Empty(t, parsed.Date)
+	assert.Equal(t, "Venue TBA", parsed.Venue)
+}

@@ -132,6 +132,31 @@ func TestBackupFiles_SameSecondClashAndConcurrentSaves(t *testing.T) {
 	assert.Len(t, seen, workers)
 }
 
+func TestBackupFiles_SuffixExhaustionRefused(t *testing.T) {
+	// The loop is bounded by the suffix limit.
+	dir := t.TempDir()
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+
+	backupsDir := filepath.Join(dir, BackupsDirName)
+	require.NoError(t, os.MkdirAll(backupsDir, 0o700))
+
+	at := time.Date(2026, 11, 3, 12, 0, 0, 0, time.UTC)
+	for n := 1; n <= 9999; n++ {
+		name, err := BackupFileName(BackupKindScheduled, ScopeTournament, at, n)
+		require.NoError(t, err)
+		require.NoError(t, os.WriteFile(filepath.Join(backupsDir, name), nil, 0o600))
+	}
+
+	name, err := store.SaveBackupFile(BackupKindScheduled, ScopeTournament, at, []byte("payload"))
+	assert.Empty(t, name)
+	require.ErrorIs(t, err, ErrInvalidBackupName)
+
+	entries, err := os.ReadDir(backupsDir)
+	require.NoError(t, err)
+	assert.Len(t, entries, 9999)
+}
+
 func TestBackupFiles_ListOrder(t *testing.T) {
 	dir := t.TempDir()
 	store, err := NewStore(dir)

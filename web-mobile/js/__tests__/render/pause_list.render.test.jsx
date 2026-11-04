@@ -122,7 +122,7 @@ describe('PauseList component', () => {
     expect(onChange).not.toHaveBeenCalled();
   });
 
-  it('displays warning when drawn competitions exist and list is changed/dirty', () => {
+  it('displays warning when drawn competitions exist and list is changed', () => {
     const pauses = [{ name: 'Lunch', start: '12:00', length: '1h', day: 0 }];
     render(
       <PauseList
@@ -130,10 +130,25 @@ describe('PauseList component', () => {
         onChange={vi.fn()}
         durationDays={1}
         drawnCompetitions={["Men's Individual", 'Women Cup']}
-        dirty={true}
+        changed={true}
       />
     );
 
     expect(screen.getByText(/Already drawn, keeps its times: Men's Individual, Women Cup\./)).toBeInTheDocument();
+  });
+
+  it('does not display warning when drawn competitions exist but list is unchanged', () => {
+    const pauses = [{ name: 'Lunch', start: '12:00', length: '1h', day: 0 }];
+    render(
+      <PauseList
+        pauses={pauses}
+        onChange={vi.fn()}
+        durationDays={1}
+        drawnCompetitions={["Men's Individual", 'Women Cup']}
+        changed={false}
+      />
+    );
+
+    expect(screen.queryByText(/Already drawn, keeps its times/)).not.toBeInTheDocument();
   });
 });

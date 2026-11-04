@@ -798,6 +798,20 @@ func TestEstimateForCounts_NoCourts(t *testing.T) {
 	assert.Len(t, estEmpty.PerCourtMinutes, 1, "empty courts must yield exactly one per-court entry")
 }
 
+func TestEstimateForCountsInheritsTournamentCourts(t *testing.T) {
+	compEmpty := newIndivComp([]string{}, 3, 3, "09:00")
+	compOne := newIndivComp([]string{"A"}, 3, 3, "09:00")
+	tourn := newTournament(1.0, 10, "", "", "")
+	tourn.Courts = []string{"A", "B"}
+
+	estTwoCourts := EstimateForCounts(10, 0, compEmpty, tourn)
+	estOneCourt := EstimateForCounts(10, 0, compOne, tourn)
+
+	assert.Less(t, estTwoCourts.TotalDurationMinutes, estOneCourt.TotalDurationMinutes,
+		"two courts sharing bouts must reduce total duration vs single court")
+	assert.Len(t, estTwoCourts.PerCourtMinutes, 2, "must have per-court minutes for both inherited courts")
+}
+
 // TestEstimateForCounts_NegativeCountsClamped verifies negative match counts are
 // clamped to 0 rather than producing negative/nonsensical durations
 // (Copilot review #3326935837). Co-located with the other EstimateForCounts

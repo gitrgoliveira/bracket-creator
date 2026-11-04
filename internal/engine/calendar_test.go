@@ -319,6 +319,39 @@ func TestCalendar_ExpectedParticipantsCountWithNoRoster(t *testing.T) {
 	assert.Greater(t, place.Windows["A"].End-place.Windows["A"].Start, MinClashFootprintMinutes)
 }
 
+func TestPlaceCompetitionInheritsTournamentCourts(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	tourn := &state.Tournament{
+		Name:         "Tourn",
+		Date:         "01-07-2026",
+		DurationDays: 1,
+		Courts:       []string{"A", "B"},
+	}
+	require.NoError(t, store.SaveTournament(tourn))
+
+	comp := &state.Competition{
+		ID:                           "setup-comp",
+		Date:                         "01-07-2026",
+		StartTime:                    "09:00",
+		Format:                       state.CompFormatKnockout,
+		Courts:                       []string{},
+		ExpectedParticipants:         24,
+		PoolMatchDurationSeconds:     180,
+		KnockoutMatchDurationSeconds: 180,
+		Status:                       state.CompStatusSetup,
+	}
+	require.NoError(t, store.SaveCompetition(comp))
+
+	place := eng.PlaceCompetition(comp, tourn)
+	require.True(t, place.Placed)
+	assert.Equal(t, []string{"A", "B"}, place.Courts)
+	assert.Len(t, place.Windows, 2)
+	assert.Contains(t, place.Windows, "A")
+	assert.Contains(t, place.Windows, "B")
+	assert.NotEmpty(t, place.ReplayRecipes["A"].Runs)
+	assert.NotEmpty(t, place.ReplayRecipes["B"].Runs)
+}
+
 func TestCalendar_BreaksAndUnusedPauses(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	tourn := &state.Tournament{

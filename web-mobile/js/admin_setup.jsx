@@ -512,7 +512,6 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
             tournamentDays={deriveTournamentDays ? deriveTournamentDays(date, durationDays) : []}
             drawnCompetitions={(tournament.competitions || []).filter(c => c.status && c.status !== "setup").map(c => c.name)}
             changed={JSON.stringify(normalizePauses(pauses)) !== JSON.stringify(normalizePauses(tournament.pauses))}
-            dirty={dirty}
           />
         </div>
         {/* mp-ef3: Tournament Information (Public) */}

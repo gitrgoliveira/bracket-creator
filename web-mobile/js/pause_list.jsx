@@ -196,7 +196,6 @@ export function PauseList({
   tournamentDays = NO_DAYS,
   drawnCompetitions = NO_DRAWN,
   changed = false,
-  dirty = false,
 }) {
   const keysRef = React.useRef([]);
   while (keysRef.current.length < pauses.length) {
@@ -208,7 +207,6 @@ export function PauseList({
 
   const daysCount = Number.isInteger(durationDays) && durationDays > 0 ? durationDays : 1;
   const isMultiDay = daysCount > 1;
-  const isDirty = changed || dirty;
   const isMaxReached = pauses.length >= MAX_PAUSES;
 
   const handleUpdate = (index, field, value) => {
@@ -243,7 +241,7 @@ export function PauseList({
         Add a pause for lunch, an opening or closing ceremony, or anything else. A pause has a start time, so for a closing ceremony give the time you expect the last match to end.
       </div>
 
-      {isDirty && drawnCompetitions && drawnCompetitions.length > 0 && (
+      {changed && drawnCompetitions && drawnCompetitions.length > 0 && (
         <div className="pause-warning alert alert--warn" style={{ marginBottom: 16 }}>
           Already drawn, keeps its times: {drawnCompetitions.join(', ')}.
         </div>

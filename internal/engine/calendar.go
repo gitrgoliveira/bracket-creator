@@ -203,7 +203,7 @@ func (e *Engine) PlaceCompetition(comp *state.Competition, tournament *state.Tou
 	// Before the draw:
 	normComp, normTourn := normalizedEstimateInputs(comp, tournament)
 	scenarios := estimateScenarios(normComp, normTourn)
-	n := estimateCourtCount(comp)
+	n := estimateCourtCount(comp, tournament)
 
 	playerCount, source, seedRanks, countErr := e.estimateParticipantCount(comp, tournament)
 	if countErr != nil || (playerCount == 0 && comp.ExpectedParticipants == 0) {

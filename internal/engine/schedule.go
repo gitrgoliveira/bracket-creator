@@ -307,20 +307,13 @@ func EstimateSchedule(in EstimateInput) ScheduleEstimate {
 	}
 }
 
-// estimateCourtCount returns the effective court count for comp: len(comp.Courts),
-// defaulting to 1 when empty, clamped to MaxCourts.
-func estimateCourtCount(comp *state.Competition) int {
+// estimateCourtCount returns the effective court count for comp:
+// len(InheritedDrawCourts(comp.Courts, tournament)), clamped to MaxCourts.
+func estimateCourtCount(comp *state.Competition, tournament *state.Tournament) int {
 	if comp == nil {
 		return 1
 	}
-	numCourts := len(comp.Courts)
-	if numCourts == 0 {
-		// Empty courts list defaults to a single court, consistent with the
-		// assigners (pools.go / bracket.go) and EstimateSchedule's NumCourts
-		// clamp. Returning zero here would under-estimate a competition that
-		// relies on that 1-court default.
-		numCourts = 1
-	}
+	numCourts := len(InheritedDrawCourts(comp.Courts, tournament))
 	if numCourts > MaxCourts {
 		// Clamp to the court cap, the same defensive bound EstimateSchedule
 		// applies. A malformed/hostile Competition with an oversized Courts
@@ -450,7 +443,8 @@ func estimateScenarios(comp *state.Competition, tournament *state.Tournament) []
 // matchMin negative and yield a nonsensical (even negative) duration.
 //
 // Returns a zero ScheduleEstimate only when comp is nil; an empty courts list
-// defaults to a single court (matching the assigners and EstimateSchedule).
+// inherits the tournament's courts, and a single court "A" only when the
+// tournament has none.
 func EstimateForCounts(poolCount, knockoutCount int, comp *state.Competition, tournament *state.Tournament) ScheduleEstimate {
 	if comp == nil {
 		return ScheduleEstimate{}
@@ -462,7 +456,7 @@ func EstimateForCounts(poolCount, knockoutCount int, comp *state.Competition, to
 		knockoutCount = 0
 	}
 
-	numCourts := estimateCourtCount(comp)
+	numCourts := estimateCourtCount(comp, tournament)
 	comp, tournament = normalizedEstimateInputs(comp, tournament)
 
 	// Common pause parameters (same as the slot assigners).

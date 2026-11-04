@@ -83,7 +83,14 @@ export function expectedParticipantsHint(expectedOrOpts, maybeOpts) {
     return `${c} registered, fewer than the ${n} you expected. Estimates still use ${n}; lower this number to use the registrations.`;
   }
 
-  // c >= n
+  if (c === n) {
+    if (checkIn) {
+      return `Check-ins match the ${n} you expected.`;
+    }
+    return `Registrations match the ${n} you expected.`;
+  }
+
+  // c > n
   if (checkIn) {
     return `Estimates use the ${c} checked in, more than the ${n} you expected.`;
   }

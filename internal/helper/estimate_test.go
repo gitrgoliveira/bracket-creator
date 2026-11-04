@@ -822,3 +822,27 @@ func TestEstimateMatchCounts_TypedError(t *testing.T) {
 		assert.Equal(t, "unknown competition format \"invalid-format\": choose knockout, mixed, league or swiss", countErr.Error())
 	})
 }
+
+func TestKnockoutRounds(t *testing.T) {
+	tests := []struct {
+		players int
+		want    int
+	}{
+		{0, 0},
+		{1, 0},
+		{2, 1},
+		{3, 2},
+		{4, 2},
+		{5, 3},
+		{8, 3},
+		{9, 4},
+		{16, 4},
+		{17, 5},
+		{1024, 10},
+	}
+	for _, tc := range tests {
+		t.Run(fmt.Sprintf("%d players", tc.players), func(t *testing.T) {
+			assert.Equal(t, tc.want, knockoutRounds(tc.players))
+		})
+	}
+}

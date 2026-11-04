@@ -225,7 +225,7 @@ func TestEstimateDraft_Timing(t *testing.T) {
 	draft2, err := eng2.EstimateDraft(comp, 8)
 	require.NoError(t, err)
 	assert.Equal(t, 1.5, draft2.Timing.Multiplier)
-	assert.Equal(t, 0, draft2.Timing.AllowancePct)
+	assert.Equal(t, 10, draft2.Timing.AllowancePct)
 
 	// Tournament saved with zero values
 	eng3, store3, _ := setupTestEngine(t)
@@ -238,6 +238,7 @@ func TestEstimateDraft_Timing(t *testing.T) {
 	draft3, err := eng3.EstimateDraft(comp, 8)
 	require.NoError(t, err)
 	assert.Equal(t, 1.5, draft3.Timing.Multiplier)
+	assert.Equal(t, 10, draft3.Timing.AllowancePct)
 }
 
 // TestEstimateDraft_Breaks verifies break filtering and sorting across days.

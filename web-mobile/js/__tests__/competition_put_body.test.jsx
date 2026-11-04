@@ -205,14 +205,19 @@ describe('expectedParticipantsHint', () => {
       .toBe('12 checked in, fewer than the 40 you expected. Estimates still use 40; lower this number to use the check-ins.');
   });
 
-  it('returns more-than-expected message when C >= N', () => {
+  it('returns matches-expected message when C === N', () => {
     expect(expectedParticipantsHint(40, { status: 'setup', rosterCount: 40 }))
-      .toBe('Estimates use the 40 registered, more than the 40 you expected.');
+      .toBe('Registrations match the 40 you expected.');
+    expect(expectedParticipantsHint(40, { status: 'setup', rosterCount: 45, checkedInCount: 40, checkInApplies: true }))
+      .toBe('Check-ins match the 40 you expected.');
+  });
+
+  it('returns more-than-expected message when C > N', () => {
     expect(expectedParticipantsHint(40, { status: 'setup', rosterCount: 45 }))
       .toBe('Estimates use the 45 registered, more than the 40 you expected.');
   });
 
-  it('returns check-in variant when C >= N with check-in applying', () => {
+  it('returns check-in variant when C > N with check-in applying', () => {
     expect(expectedParticipantsHint(40, { status: 'setup', rosterCount: 45, checkedInCount: 42, checkInApplies: true }))
       .toBe('Estimates use the 42 checked in, more than the 40 you expected.');
   });

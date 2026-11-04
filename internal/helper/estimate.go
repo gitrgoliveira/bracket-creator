@@ -2,6 +2,7 @@ package helper
 
 import (
 	"fmt"
+	"math/bits"
 )
 
 // EstimateCountError is a shape the draw would refuse (a pool size, an entrant
@@ -225,18 +226,12 @@ func estimateMixed(in EstimateMatchCountsInput) (poolMatchCount, knockoutMatchCo
 }
 
 // knockoutRounds returns the number of rounds for an elimination bracket
-// of the given player/finalist count.
+// of the given player/finalist count, which is ceil(log2(players)).
 func knockoutRounds(players int) int {
 	if players <= 1 {
 		return 0
 	}
-	pow2 := NextPow2(players)
-	tree := CreateBalancedTree(make([]string, pow2))
-	depth := CalculateDepth(tree)
-	if depth <= 1 {
-		return 0
-	}
-	return depth - 1
+	return bits.Len(uint(players - 1))
 }
 
 // poolMatchesPerPool returns the number of matches generated for a single

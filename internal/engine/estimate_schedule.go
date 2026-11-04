@@ -104,18 +104,13 @@ func (e *Engine) EstimateDraft(comp *state.Competition, participants int) (Draft
 		return DraftEstimate{}, err
 	}
 
-	allowancePct := 0
-	if tournament != nil {
-		allowancePct = tournament.SlowestCourtBufferPct
-	}
-
 	return DraftEstimate{
 		ScheduleEstimate: est,
 		PoolMatches:      poolMatches,
 		KnockoutMatches:  knockoutMatches,
 		Timing: DraftTiming{
 			Multiplier:   tournamentMultiplier(tournament),
-			AllowancePct: allowancePct,
+			AllowancePct: tournamentAllowancePct(tournament),
 			Breaks:       draftBreaks(tournament, comp.Date),
 		},
 	}, nil
@@ -163,6 +158,16 @@ func tournamentMultiplier(tournament *state.Tournament) float64 {
 		return tournament.ClockToElapsedMultiplier
 	}
 	return 1.5
+}
+
+// tournamentAllowancePct mirrors tournamentMultiplier for the slowest-court allowance: with no tournament configured the estimate still applies the default buffer.
+func tournamentAllowancePct(tournament *state.Tournament) int {
+	var t state.Tournament
+	if tournament != nil {
+		t = *tournament
+	}
+	state.ApplyTournamentDefaults(&t)
+	return t.SlowestCourtBufferPct
 }
 
 // draftBreaks returns the list of draft breaks for the given date, preserving

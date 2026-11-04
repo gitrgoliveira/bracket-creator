@@ -14,6 +14,7 @@ import (
 	"sync"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/backup"
+	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"gopkg.in/yaml.v3"
 )
 
@@ -636,8 +637,8 @@ func planRestore(req RestoreRequest, ai *restoreArchiveInfo, live *restoreLiveSt
 			Err: errors.New("no question about these competitions")}
 	}
 
-	// A copy's id must differ from every competition in the folder, every
-	// create and every other copy of this restore.
+	// A copy's id and name must differ from every competition in the folder,
+	// every create and every other copy of this restore.
 	taken := map[string]bool{}
 	for _, id := range live.ids {
 		taken[id] = true
@@ -647,6 +648,28 @@ func planRestore(req RestoreRequest, ai *restoreArchiveInfo, live *restoreLiveSt
 			taken[e.ID] = true
 		}
 	}
+	var takenNames []string
+	for _, id := range live.ids {
+		if name := competitionName(live, id); name != "" {
+			takenNames = append(takenNames, name)
+		}
+	}
+	for _, e := range entries {
+		if e.Action == RestoreCreate {
+			if name := ai.names[e.ID]; name != "" {
+				takenNames = append(takenNames, name)
+			}
+		}
+	}
+	nameTaken := func(candidate string) bool {
+		candidate = strings.TrimSpace(candidate)
+		for _, ex := range takenNames {
+			if strings.EqualFold(strings.TrimSpace(ex), candidate) {
+				return true
+			}
+		}
+		return false
+	}
 	for i := range entries {
 		e := &entries[i]
 		if e.Action != RestoreCopy {
@@ -654,13 +677,14 @@ func planRestore(req RestoreRequest, ai *restoreArchiveInfo, live *restoreLiveSt
 		}
 		name := copyNames[e.ID]
 		newID := SlugifyID(name)
-		if name == "" || ValidateCompetitionID(newID) != nil || taken[newID] {
+		if name == "" || ValidateCompetitionID(newID) != nil || taken[newID] || nameTaken(name) {
 			e.CopyNameTaken = true
 			w.copyTaken = append(w.copyTaken, e.ID)
 			continue
 		}
 		e.NewID = newID
 		taken[newID] = true
+		takenNames = append(takenNames, name)
 	}
 
 	for _, e := range entries {
@@ -779,10 +803,10 @@ func planRestore(req RestoreRequest, ai *restoreArchiveInfo, live *restoreLiveSt
 
 	// Number prefixes: a restored competition whose prefix a competition left
 	// in place (or an earlier restored one) already uses gets a new one.
-	usedPrefix := map[string]bool{}
+	var usedPrefixes []string
 	for _, id := range inPlace {
 		if c := live.comps[id]; c != nil && c.EffectiveNumberPrefix() != "" {
-			usedPrefix[strings.ToUpper(c.EffectiveNumberPrefix())] = true
+			usedPrefixes = append(usedPrefixes, c.EffectiveNumberPrefix())
 		}
 	}
 	collides := map[string]bool{}
@@ -791,12 +815,19 @@ func planRestore(req RestoreRequest, ai *restoreArchiveInfo, live *restoreLiveSt
 		if c == nil || c.EffectiveNumberPrefix() == "" {
 			continue
 		}
-		key := strings.ToUpper(c.EffectiveNumberPrefix())
-		if usedPrefix[key] {
+		prefix := c.EffectiveNumberPrefix()
+		hit := false
+		for _, u := range usedPrefixes {
+			if strings.EqualFold(u, prefix) || helper.NumberPrefixesAmbiguous(u, prefix) {
+				hit = true
+				break
+			}
+		}
+		if hit {
 			collides[t.srcID] = true
 			w.plan.PrefixesPending = append(w.plan.PrefixesPending, t.dstID)
 		}
-		usedPrefix[key] = true
+		usedPrefixes = append(usedPrefixes, prefix)
 	}
 	slices.Sort(w.plan.PrefixesPending)
 	for i := range entries {
@@ -1023,7 +1054,7 @@ func (s *Store) Restore(req RestoreRequest) (plan RestorePlan, err error) {
 		if w2.tournament {
 			scope = ScopeTournament
 		}
-		snap, err := s.snapshotLocked(scope, slices.Concat(w2.replaced, w2.removed))
+		snap, err := s.snapshotLocked(scope, slices.Concat(w2.replaced, w2.removed), true)
 		if err != nil {
 			return w2.plan, err
 		}
@@ -1032,17 +1063,19 @@ func (s *Store) Restore(req RestoreRequest) (plan RestorePlan, err error) {
 		}
 	}
 
-	// Step 6: the journal, durable before the first live rename, and
-	// prefixes-pending.json with it, so a crash anywhere in the swap still
-	// leaves the prefixes to resolve.
-	j := restoreJournalFor(w2, live2, ai)
-	if err := s.writeRestoreJournal(tokenDir, j); err != nil {
-		return w2.plan, err
-	}
+	// Step 6: prefixes-pending.json made durable before the journal, so a
+	// crash anywhere in the swap still leaves the prefixes to resolve. A
+	// restore that never completes its journal write leaves a harmless
+	// pending entry whose prefix does not collide. Then the journal, durable
+	// before the first live rename.
 	if len(w2.plan.PrefixesPending) > 0 {
 		if err := s.writePrefixesPending(w2.plan.PrefixesPending); err != nil {
 			return w2.plan, err
 		}
+	}
+	j := restoreJournalFor(w2, live2, ai)
+	if err := s.writeRestoreJournal(tokenDir, j); err != nil {
+		return w2.plan, err
 	}
 	journaled = true
 	runErr := s.runRestoreJournal(tokenDir, j)

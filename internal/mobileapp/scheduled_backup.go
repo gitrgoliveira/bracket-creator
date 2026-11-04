@@ -1,16 +1,23 @@
 package mobileapp
 
 import (
-	"bytes"
 	"context"
 	"log/slog"
 	"runtime/debug"
-	"sort"
+	"slices"
+	"sync"
 	"time"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/backup"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
+
+// cachedFingerprint is the fingerprint read from one backup file, kept with
+// the file's size so a rewritten file is read again.
+type cachedFingerprint struct {
+	size int64
+	fp   string
+}
 
 // ScheduledBackups runs a periodic backup job that creates a tournament
 // backup archive if at least 24 hours have passed since the newest
@@ -24,6 +31,12 @@ type ScheduledBackups struct {
 	tick func(time.Duration) (<-chan time.Time, func())
 	// save provides an injectable SaveBackupFile seam for testing. If nil, Store.SaveBackupFile is used.
 	save func(kind state.BackupKind, scope state.SnapshotScope, at time.Time, data []byte) (string, error)
+
+	// cache remembers the fingerprint of each backup file already read, by file
+	// name, so an hourly tick over unchanged data does not inflate and hash the
+	// newest archive again.
+	mu    sync.Mutex
+	cache map[string]cachedFingerprint
 }
 
 func (s *ScheduledBackups) now() time.Time {
@@ -106,6 +119,30 @@ func (s *ScheduledBackups) readArchiveFingerprint(name string, checks backup.Che
 	return arc.Manifest.Fingerprint, true
 }
 
+// getOrReadArchiveFingerprint is readArchiveFingerprint through the cache.
+func (s *ScheduledBackups) getOrReadArchiveFingerprint(bf state.BackupFile, checks backup.Checks) (string, bool) {
+	s.mu.Lock()
+	if c, ok := s.cache[bf.Name]; ok && c.size == bf.Size {
+		s.mu.Unlock()
+		return c.fp, true
+	}
+	s.mu.Unlock()
+
+	fp, ok := s.readArchiveFingerprint(bf.Name, checks)
+	if !ok {
+		return "", false
+	}
+
+	s.mu.Lock()
+	if s.cache == nil {
+		s.cache = make(map[string]cachedFingerprint)
+	}
+	s.cache[bf.Name] = cachedFingerprint{size: bf.Size, fp: fp}
+	s.mu.Unlock()
+
+	return fp, true
+}
+
 // runOnce performs one scheduled backup check.
 func (s *ScheduledBackups) runOnce(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
@@ -118,6 +155,14 @@ func (s *ScheduledBackups) runOnce(ctx context.Context) error {
 		slog.Warn("scheduled backup: list backup files failed", "err", err)
 		return err
 	}
+
+	s.mu.Lock()
+	for name := range s.cache {
+		if !slices.ContainsFunc(files, func(f state.BackupFile) bool { return f.Name == name }) {
+			delete(s.cache, name)
+		}
+	}
+	s.mu.Unlock()
 
 	var newestNonFuture *state.BackupFile
 	var futureScheduled []state.BackupFile
@@ -163,40 +208,17 @@ func (s *ScheduledBackups) runOnce(ctx context.Context) error {
 	}
 	copiesToCheck = append(copiesToCheck, futureScheduled...)
 
-	checks := backup.Checks{
-		ValidID:     state.ValidateCompetitionID,
-		FrontMatter: state.CheckFrontMatter,
-	}
+	checks := BackupChecks()
 
 	for _, copyFile := range copiesToCheck {
-		existingFP, ok := s.readArchiveFingerprint(copyFile.Name, checks)
+		existingFP, ok := s.getOrReadArchiveFingerprint(copyFile, checks)
 		if ok && existingFP == fp {
 			return nil
 		}
 	}
 
-	comps := make([]backup.CompetitionRef, 0, len(snap.Competitions))
-	for id, name := range snap.Competitions {
-		comps = append(comps, backup.CompetitionRef{
-			ID:   id,
-			Name: name,
-		})
-	}
-	sort.Slice(comps, func(i, j int) bool {
-		return comps[i].ID < comps[j].ID
-	})
-
-	meta := backup.Meta{
-		CreatedAt:    now.UTC(),
-		Scope:        backup.ScopeTournament,
-		Kind:         backup.KindScheduled,
-		Tournament:   backup.TournamentRef{Name: snap.TournamentName},
-		Competitions: comps,
-		Fingerprint:  fp,
-	}
-
-	var buf bytes.Buffer
-	if err := backup.Write(&buf, meta, snap.Files); err != nil {
+	data, err := SnapshotArchive(snap, backup.KindScheduled, now, nil)
+	if err != nil {
 		slog.Warn("scheduled backup: write backup archive failed", "err", err)
 		return err
 	}
@@ -206,7 +228,7 @@ func (s *ScheduledBackups) runOnce(ctx context.Context) error {
 		saveFn = s.Store.SaveBackupFile
 	}
 
-	if _, err := saveFn(state.BackupKindScheduled, state.ScopeTournament, now, buf.Bytes()); err != nil {
+	if _, err := saveFn(state.BackupKindScheduled, state.ScopeTournament, now, data); err != nil {
 		slog.Warn("scheduled backup: save backup file failed", "err", err)
 		return err
 	}

@@ -45,11 +45,16 @@ const (
 	backupCodeBadRequest     = "bad_restore_request"
 )
 
-// backupReadChecks are the store's own validators the archive reader runs.
-var backupReadChecks = backup.Checks{
-	ValidID:     state.ValidateCompetitionID,
-	FrontMatter: state.CheckFrontMatter,
+// BackupChecks returns the store's validators for backup archives.
+func BackupChecks() backup.Checks {
+	return backup.Checks{
+		ValidID:     state.ValidateCompetitionID,
+		FrontMatter: state.CheckFrontMatter,
+	}
 }
+
+// backupReadChecks are the store's own validators the archive reader runs.
+var backupReadChecks = BackupChecks()
 
 // restoreRefusalStatus is the HTTP status of each restore refusal. Every one
 // of them leaves the data folder as it was.
@@ -84,6 +89,12 @@ var restoreRefusalSentence = map[string]string{
 	state.RestoreCodeNotInArchive:          "That competition is not in this backup.",
 }
 
+// RestoreRefusalSentence returns the operator sentence for a restore refusal code.
+func RestoreRefusalSentence(code string) (string, bool) {
+	s, ok := restoreRefusalSentence[code]
+	return s, ok
+}
+
 // respondBackupRefusal answers a refusal with the body the package's other
 // coded refusals use: the sentence in error and message, plus the code.
 func respondBackupRefusal(c *gin.Context, status int, code, sentence string, extra gin.H) {
@@ -94,8 +105,8 @@ func respondBackupRefusal(c *gin.Context, status int, code, sentence string, ext
 	c.AbortWithStatusJSON(status, body)
 }
 
-// snapshotArchive turns a snapshot into the bytes of a backup archive.
-func snapshotArchive(snap state.Snapshot, kind backup.Kind, at time.Time, restoreCreated []string) ([]byte, error) {
+// SnapshotArchive turns a snapshot into the bytes of a backup archive.
+func SnapshotArchive(snap state.Snapshot, kind backup.Kind, at time.Time, restoreCreated []string) ([]byte, error) {
 	comps := make([]backup.CompetitionRef, 0, len(snap.Competitions))
 	for id, name := range snap.Competitions {
 		comps = append(comps, backup.CompetitionRef{ID: id, Name: name})
@@ -115,6 +126,30 @@ func snapshotArchive(snap state.Snapshot, kind backup.Kind, at time.Time, restor
 		return nil, err
 	}
 	return buf.Bytes(), nil
+}
+
+// SafetyCopySaver is what RestoreBeforeSwap needs to save a backup file.
+type SafetyCopySaver interface {
+	SaveBackupFile(kind state.BackupKind, scope state.SnapshotScope, at time.Time, data []byte) (string, error)
+}
+
+// RestoreBeforeSwap creates a BeforeSwap hook that saves a before-restore safety copy
+// and records its saved file name into *savedName (if savedName is non-nil).
+func RestoreBeforeSwap(saver SafetyCopySaver, at time.Time, savedName *string) func(state.RestoreSafetyCopy) error {
+	return func(sc state.RestoreSafetyCopy) error {
+		data, err := SnapshotArchive(sc.Snapshot, sc.Kind, at, sc.RestoreCreated)
+		if err != nil {
+			return err
+		}
+		name, err := saver.SaveBackupFile(state.BackupKindBeforeRestore, sc.Snapshot.Scope, at, data)
+		if err != nil {
+			return err
+		}
+		if savedName != nil {
+			*savedName = name
+		}
+		return nil
+	}
 }
 
 // backupDownloadName is `<tournament slug>[-<competition id>]-<UTC stamp>.zip`.
@@ -158,7 +193,7 @@ func RegisterBackupHandlers(r *gin.RouterGroup, store BackupStore) {
 			return
 		}
 		now := time.Now().UTC()
-		data, err := snapshotArchive(snap, backup.KindManual, now, nil)
+		data, err := SnapshotArchive(snap, backup.KindManual, now, nil)
 		if err != nil {
 			respondSnapshotError(c, err)
 			return
@@ -177,7 +212,7 @@ func RegisterBackupHandlers(r *gin.RouterGroup, store BackupStore) {
 			return
 		}
 		now := time.Now().UTC()
-		data, err := snapshotArchive(snap, backup.KindManual, now, nil)
+		data, err := SnapshotArchive(snap, backup.KindManual, now, nil)
 		if err != nil {
 			respondSnapshotError(c, err)
 			return
@@ -317,18 +352,7 @@ func RegisterRestoreHandlers(r *gin.RouterGroup, store BackupStore, eng PrefixEn
 		var safetyCopy string
 		// Runs under the restore's locks: SaveBackupFile takes only its own
 		// backups mutex, never a store lock.
-		req.BeforeSwap = func(sc state.RestoreSafetyCopy) error {
-			data, err := snapshotArchive(sc.Snapshot, sc.Kind, now, sc.RestoreCreated)
-			if err != nil {
-				return err
-			}
-			name, err := store.SaveBackupFile(state.BackupKindBeforeRestore, sc.Snapshot.Scope, now, data)
-			if err != nil {
-				return err
-			}
-			safetyCopy = name
-			return nil
-		}
+		req.BeforeSwap = RestoreBeforeSwap(store, now, &safetyCopy)
 
 		plan, err := store.Restore(req)
 		if err != nil {
@@ -538,7 +562,7 @@ func ResolveRestoredPrefixes(store PendingPrefixStore, eng PrefixEngine) ([]Pref
 	if err != nil {
 		return warnings, err
 	}
-	if err := store.RemovePrefixesPending(); err != nil {
+	if err := store.RemovePrefixesPending(ids); err != nil {
 		return warnings, err
 	}
 	return warnings, nil

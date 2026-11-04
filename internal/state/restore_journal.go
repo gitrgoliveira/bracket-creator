@@ -260,17 +260,10 @@ func (s *Store) readPrefixesPending() ([]string, error) {
 	return f.IDs, nil
 }
 
-// writePrefixesPending adds ids to prefixes-pending.json (atomically, then the
-// folder fsynced), keeping any ids an earlier restore left there unresolved.
-func (s *Store) writePrefixesPending(ids []string) error {
-	have, err := s.readPrefixesPending()
-	if err != nil {
-		return err
-	}
-	all := append(slices.Clone(have), ids...)
-	slices.Sort(all)
-	all = slices.Compact(all)
-	data, err := json.Marshal(prefixesPendingFile{IDs: all})
+// savePrefixesPending replaces prefixes-pending.json with ids (atomically,
+// then the folder fsynced). The caller holds s.mu.
+func (s *Store) savePrefixesPending(ids []string) error {
+	data, err := json.Marshal(prefixesPendingFile{IDs: ids})
 	if err != nil {
 		return err
 	}
@@ -283,6 +276,19 @@ func (s *Store) writePrefixesPending(ids []string) error {
 	return syncDir(s.root, s.restoreRootDir())
 }
 
+// writePrefixesPending adds ids to prefixes-pending.json (atomically, then the
+// folder fsynced), keeping any ids an earlier restore left there unresolved.
+func (s *Store) writePrefixesPending(ids []string) error {
+	have, err := s.readPrefixesPending()
+	if err != nil {
+		return err
+	}
+	all := append(slices.Clone(have), ids...)
+	slices.Sort(all)
+	all = slices.Compact(all)
+	return s.savePrefixesPending(all)
+}
+
 // PrefixesPending lists the competitions a restore put in place whose number
 // prefix collides with one the restore left in place, and that still wait for
 // a new prefix (the caller's step 9). Empty when there are none.
@@ -292,14 +298,34 @@ func (s *Store) PrefixesPending() ([]string, error) {
 	return s.readPrefixesPending()
 }
 
-// RemovePrefixesPending removes prefixes-pending.json once the caller has
-// given every listed competition a new prefix. A missing file is not an
-// error.
-func (s *Store) RemovePrefixesPending() error {
+// RemovePrefixesPending drops the given ids from prefixes-pending.json once the
+// caller has resolved them. If no ids remain, the file is removed; otherwise it
+// is rewritten atomically. A missing file is not an error.
+func (s *Store) RemovePrefixesPending(ids []string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if err := s.root.remove(s.prefixesPendingPath()); err != nil && !errors.Is(err, fs.ErrNotExist) {
+	have, err := s.readPrefixesPending()
+	if err != nil {
 		return err
 	}
-	return nil
+	if len(have) == 0 {
+		return nil
+	}
+	toDrop := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		toDrop[id] = true
+	}
+	var keep []string
+	for _, id := range have {
+		if !toDrop[id] {
+			keep = append(keep, id)
+		}
+	}
+	if len(keep) == 0 {
+		if err := s.root.remove(s.prefixesPendingPath()); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return err
+		}
+		return syncDir(s.root, s.restoreRootDir())
+	}
+	return s.savePrefixesPending(keep)
 }

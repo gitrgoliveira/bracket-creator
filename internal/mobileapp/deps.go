@@ -352,7 +352,7 @@ type PrefixEngine interface {
 type PendingPrefixStore interface {
 	PrefixStore
 	PrefixesPending() ([]string, error)
-	RemovePrefixesPending() error
+	RemovePrefixesPending(ids []string) error
 }
 
 // BackupStore is what handlers_backup.go reaches in the store: snapshots,

@@ -1,7 +1,6 @@
 package mobileapp
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"net/http"
@@ -9,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"sort"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -25,32 +23,15 @@ func writeFixtureBackup(t *testing.T, s *state.Store, kind state.BackupKind, at 
 	snap, err := s.Snapshot(state.ScopeTournament, "")
 	require.NoError(t, err)
 
-	comps := make([]backup.CompetitionRef, 0, len(snap.Competitions))
-	for id, name := range snap.Competitions {
-		comps = append(comps, backup.CompetitionRef{ID: id, Name: name})
-	}
-	sort.Slice(comps, func(i, j int) bool {
-		return comps[i].ID < comps[j].ID
-	})
-
 	bkind := backup.KindScheduled
 	if kind == state.BackupKindBeforeRestore {
 		bkind = backup.KindBeforeRestore
 	}
 
-	meta := backup.Meta{
-		CreatedAt:    at.UTC(),
-		Scope:        backup.ScopeTournament,
-		Kind:         bkind,
-		Tournament:   backup.TournamentRef{Name: snap.TournamentName},
-		Competitions: comps,
-		Fingerprint:  state.Fingerprint(snap.Files),
-	}
+	data, err := SnapshotArchive(snap, bkind, at, nil)
+	require.NoError(t, err)
 
-	var buf bytes.Buffer
-	require.NoError(t, backup.Write(&buf, meta, snap.Files))
-
-	name, err := s.SaveBackupFile(kind, state.ScopeTournament, at, buf.Bytes())
+	name, err := s.SaveBackupFile(kind, state.ScopeTournament, at, data)
 	require.NoError(t, err)
 	return name
 }
@@ -94,10 +75,7 @@ func TestScheduledBackups_EmptyBackupsWithCompetition(t *testing.T) {
 	info, err := f.Stat()
 	require.NoError(t, err)
 
-	checks := backup.Checks{
-		ValidID:     state.ValidateCompetitionID,
-		FrontMatter: state.CheckFrontMatter,
-	}
+	checks := BackupChecks()
 	arc, err := backup.Read(f, info.Size(), checks)
 	require.NoError(t, err)
 	require.Equal(t, backup.KindScheduled, arc.Manifest.Kind)
@@ -473,7 +451,7 @@ func TestScheduledBackups_UnreadableNewestCopyIsSkipped(t *testing.T) {
 			require.NoError(t, os.Chmod(path, 0))
 		}},
 	}
-	checks := backup.Checks{ValidID: state.ValidateCompetitionID, FrontMatter: state.CheckFrontMatter}
+	checks := BackupChecks()
 	start := time.Date(2026, 6, 1, 10, 0, 0, 0, time.UTC)
 
 	newStore := func(t *testing.T) (*state.Store, string) {
@@ -531,4 +509,87 @@ func TestScheduledBackups_UnreadableNewestCopyIsSkipped(t *testing.T) {
 			})
 		})
 	}
+}
+
+func TestScheduledBackups_ArchiveFingerprintCacheAndInvalidation(t *testing.T) {
+	pt := buildPopulatedTournament(t)
+	clockTime := time.Date(2026, 6, 1, 10, 0, 0, 0, time.UTC)
+
+	job := &ScheduledBackups{
+		Store: pt.Store,
+		Clock: func() time.Time { return clockTime },
+	}
+
+	ctx := context.Background()
+
+	// Initial scheduled backup at T0.
+	require.NoError(t, job.runOnce(ctx))
+	files, err := pt.Store.ListBackupFiles()
+	require.NoError(t, err)
+	require.Len(t, files, 1)
+	firstBackup := files[0]
+
+	// Advance 25 hours: isDue is true. Tournament data unchanged.
+	clockTime = clockTime.Add(25 * time.Hour)
+	require.NoError(t, job.runOnce(ctx))
+
+	// Verify the archive fingerprint is cached in memory on the scheduler.
+	job.mu.Lock()
+	cached, ok := job.cache[firstBackup.Name]
+	job.mu.Unlock()
+	require.True(t, ok, "archive fingerprint must be cached after first due tick")
+	assert.Equal(t, firstBackup.Size, cached.size)
+	assert.NotEmpty(t, cached.fp)
+
+	// Second tick over unchanged data: no duplicate backup written, cached fingerprint reused.
+	clockTime = clockTime.Add(time.Hour)
+	require.NoError(t, job.runOnce(ctx))
+	files, err = pt.Store.ListBackupFiles()
+	require.NoError(t, err)
+	require.Len(t, files, 1, "no duplicate backup written on second tick")
+
+	// Verify cache still holds firstBackup.
+	job.mu.Lock()
+	cached2, ok2 := job.cache[firstBackup.Name]
+	job.mu.Unlock()
+	require.True(t, ok2)
+	assert.Equal(t, cached.fp, cached2.fp)
+
+	// Cache invalidation: make a real tournament change.
+	comp, err := pt.Store.LoadCompetition(pt.MixedCompID)
+	require.NoError(t, err)
+	comp.Name = "Changed Championship Title"
+	_, err = pt.Store.SaveCompetitionChanged(comp)
+	require.NoError(t, err)
+
+	// Advance 25 hours: isDue is true. Tournament has changed.
+	clockTime = clockTime.Add(25 * time.Hour)
+	require.NoError(t, job.runOnce(ctx))
+
+	files, err = pt.Store.ListBackupFiles()
+	require.NoError(t, err)
+	require.Len(t, files, 2, "new backup written after tournament change")
+	newestBackup := files[0]
+	assert.NotEqual(t, firstBackup.Name, newestBackup.Name)
+
+	// Advance 25 hours from newest backup: isDue is true.
+	// This forces a read of the new newest archive, caching it.
+	clockTime = clockTime.Add(25 * time.Hour)
+	require.NoError(t, job.runOnce(ctx))
+
+	job.mu.Lock()
+	cachedNew, okNew := job.cache[newestBackup.Name]
+	job.mu.Unlock()
+	require.True(t, okNew, "new newest archive must be cached")
+	assert.Equal(t, newestBackup.Size, cachedNew.size)
+
+	// Cache invalidation on deletion: delete the newest backup from disk.
+	require.NoError(t, pt.Store.DeleteBackupFile(newestBackup.Name))
+
+	// Next tick sees the deleted file is gone; cache must prune the deleted archive.
+	require.NoError(t, job.runOnce(ctx))
+	job.mu.Lock()
+	_, deletedStillCached := job.cache[newestBackup.Name]
+	job.mu.Unlock()
+	assert.False(t, deletedStillCached, "deleted archive must be pruned from cache")
 }

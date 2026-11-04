@@ -702,7 +702,7 @@ func ReassignRestoredPrefixes(store PrefixStore, eng PrefixEngine, ids []string)
 	var out []PrefixWarning
 	for _, id := range ids {
 		var w *PrefixWarning
-		changed := false
+		renumber := false
 		err := store.WithCompetitionRenameLock(func() error {
 			comp, err := store.LoadCompetition(id)
 			if err != nil || comp == nil {
@@ -719,15 +719,17 @@ func ReassignRestoredPrefixes(store PrefixStore, eng PrefixEngine, ids []string)
 				if err := store.SaveCompetition(comp); err != nil {
 					return err
 				}
-				changed = true
+				renumber = true
 				w = &PrefixWarning{CompetitionID: id, OldPrefix: oldPrefix, NewPrefix: comp.NumberPrefix, Message: warning}
+			default:
+				renumber = true
 			}
 			return nil
 		})
 		if err != nil {
 			return out, fmt.Errorf("competition %s: %w", id, err)
 		}
-		if changed {
+		if renumber {
 			if _, err := eng.RenumberCompetitors(id); err != nil {
 				return out, fmt.Errorf("renumber competition %s: %w", id, err)
 			}

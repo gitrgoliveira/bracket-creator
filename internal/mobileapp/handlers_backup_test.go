@@ -392,7 +392,7 @@ func TestBackups_ListDownloadAndDelete(t *testing.T) {
 	snap, err := rig.store.Snapshot(state.ScopeTournament, "")
 	require.NoError(t, err)
 	at := time.Date(2026, 6, 1, 9, 0, 0, 0, time.UTC)
-	data, err := snapshotArchive(snap, backup.KindScheduled, at, nil)
+	data, err := SnapshotArchive(snap, backup.KindScheduled, at, nil)
 	require.NoError(t, err)
 	name, err := rig.store.SaveBackupFile(state.BackupKindScheduled, state.ScopeTournament, at, data)
 	require.NoError(t, err)
@@ -491,4 +491,25 @@ func TestReassignRestoredPrefixes_LeavesAFreePrefixAlone(t *testing.T) {
 	alpha, err := rig.store.LoadCompetition("alpha")
 	require.NoError(t, err)
 	assert.Equal(t, "A", alpha.NumberPrefix)
+}
+
+type spyPrefixEngine struct {
+	PrefixEngine
+	renumbered []string
+}
+
+func (s *spyPrefixEngine) RenumberCompetitors(compID string) (bool, error) {
+	s.renumbered = append(s.renumbered, compID)
+	return s.PrefixEngine.RenumberCompetitors(compID)
+}
+
+func TestReassignRestoredPrefixes_RenumbersEvenWhenPrefixNoLongerCollides(t *testing.T) {
+	rig := newBackupRig(t)
+	spy := &spyPrefixEngine{PrefixEngine: engine.New(rig.store)}
+	// "alpha" exists and prefix "A" does not collide with anyone else ("beta" has "B").
+	// "gone" does not exist in the folder.
+	warnings, err := ReassignRestoredPrefixes(rig.store, spy, []string{"alpha", "gone"})
+	require.NoError(t, err)
+	assert.Empty(t, warnings)
+	assert.Equal(t, []string{"alpha"}, spy.renumbered)
 }

@@ -1,12 +1,10 @@
 package cmd
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 
@@ -149,7 +147,7 @@ func (o *mobileAppBackupOptions) run(cmd *cobra.Command) (err error) {
 		}
 	}
 
-	data, err := snapshotArchive(snap, backup.KindManual, time.Now().UTC(), nil)
+	data, err := mobileapp.SnapshotArchive(snap, backup.KindManual, time.Now().UTC(), nil)
 	if err != nil {
 		return fmt.Errorf("create backup archive: %w", err)
 	}
@@ -280,10 +278,7 @@ func (o *mobileAppRestoreOptions) run(cmd *cobra.Command, archivePath string) (e
 		return fmt.Errorf("stat backup file %q: %w", archivePath, err)
 	}
 
-	archive, err := backup.Read(f, info.Size(), backup.Checks{
-		ValidID:     state.ValidateCompetitionID,
-		FrontMatter: state.CheckFrontMatter,
-	})
+	archive, err := backup.Read(f, info.Size(), mobileapp.BackupChecks())
 	if err != nil {
 		var be *backup.Error
 		if errors.As(err, &be) {
@@ -323,7 +318,7 @@ func (o *mobileAppRestoreOptions) run(cmd *cobra.Command, archivePath string) (e
 	if plan.NothingToRestore {
 		msg := plan.Message
 		if msg == "" {
-			msg = "This copy holds nothing to restore."
+			msg, _ = mobileapp.RestoreRefusalSentence(state.RestoreCodeNothingToRestore)
 		}
 		return operatorSentence(msg)
 	}
@@ -418,18 +413,7 @@ func (o *mobileAppRestoreOptions) run(cmd *cobra.Command, archivePath string) (e
 
 	now := time.Now().UTC()
 	var safetyCopyName string
-	req.BeforeSwap = func(sc state.RestoreSafetyCopy) error {
-		data, err := snapshotArchive(sc.Snapshot, sc.Kind, now, sc.RestoreCreated)
-		if err != nil {
-			return err
-		}
-		name, err := store.SaveBackupFile(state.BackupKindBeforeRestore, sc.Snapshot.Scope, now, data)
-		if err != nil {
-			return err
-		}
-		safetyCopyName = name
-		return nil
-	}
+	req.BeforeSwap = mobileapp.RestoreBeforeSwap(store, now, &safetyCopyName)
 
 	_, err = store.Restore(req)
 	if err != nil {
@@ -459,28 +443,6 @@ func (o *mobileAppRestoreOptions) run(cmd *cobra.Command, archivePath string) (e
 	return nil
 }
 
-func snapshotArchive(snap state.Snapshot, kind backup.Kind, at time.Time, restoreCreated []string) ([]byte, error) {
-	comps := make([]backup.CompetitionRef, 0, len(snap.Competitions))
-	for id, name := range snap.Competitions {
-		comps = append(comps, backup.CompetitionRef{ID: id, Name: name})
-	}
-	sort.Slice(comps, func(i, j int) bool { return comps[i].ID < comps[j].ID })
-	meta := backup.Meta{
-		CreatedAt:      at.UTC(),
-		Scope:          backup.Scope(snap.Scope),
-		Kind:           kind,
-		Tournament:     backup.TournamentRef{Name: snap.TournamentName},
-		Competitions:   comps,
-		Fingerprint:    state.Fingerprint(snap.Files),
-		RestoreCreated: restoreCreated,
-	}
-	var buf bytes.Buffer
-	if err := backup.Write(&buf, meta, snap.Files); err != nil {
-		return nil, err
-	}
-	return buf.Bytes(), nil
-}
-
 func formatRestoreError(err error) error {
 	if err == nil {
 		return nil
@@ -488,27 +450,16 @@ func formatRestoreError(err error) error {
 	var re *state.RestoreError
 	if errors.As(err, &re) {
 		switch re.Code {
-		case state.RestoreCodeNotASafetyCopy:
-			return operatorSentence("Only a copy taken before a restore can undo it. Restore this file without Undo.")
 		case state.RestoreCodePendingWriteUnsettled:
 			return operatorSentence("A competition has a write that could not be finished. Start the app once so it replays its pending writes, stop it, then retry.")
 		case state.RestoreCodeMatchesRunning:
 			return operatorSentence("Matches are running in a competition this restore replaces or removes. Finish them, or pass --allow-running to restore anyway.")
 		case state.RestoreCodePasswordRequired:
 			return operatorSentence("Set an admin password for the restored tournament first (use --password).")
-		case state.RestoreCodeNothingToRestore:
-			return operatorSentence("This copy holds nothing to restore.")
-		case state.RestoreCodeCopyNameTaken:
-			return operatorSentence("That name is already used. Pick another name for the copy.")
-		case state.RestoreCodePlanChanged:
-			return operatorSentence("The competitions changed since the restore was checked. Check it again, then restore.")
-		case state.RestoreCodeBadDecision:
-			return operatorSentence("One of the choices is not allowed for that competition. Check the choices again.")
-		case state.RestoreCodeFileUnreadable:
-			return operatorSentence("A file in the backup cannot be read, so nothing was restored.")
-		case state.RestoreCodeNotInArchive:
-			return operatorSentence("That competition is not in this backup.")
 		default:
+			if sentence, ok := mobileapp.RestoreRefusalSentence(re.Code); ok {
+				return operatorSentence(sentence)
+			}
 			return fmt.Errorf("restore refused (%s): %s", re.Code, re.Error())
 		}
 	}

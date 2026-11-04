@@ -97,7 +97,7 @@ func (s *Store) Snapshot(scope SnapshotScope, compID string) (Snapshot, error) {
 	case ScopeTournament:
 		s.mu.RLock()
 		s.tournamentMu.RLock()
-		snap, err := s.snapshotLocked(ScopeTournament, nil)
+		snap, err := s.snapshotLocked(ScopeTournament, nil, false)
 		var ids []string
 		if err == nil {
 			ids, err = s.listCompetitionsLocked()
@@ -146,7 +146,7 @@ func (s *Store) snapshotOneCompetition(compID string) (Snapshot, error) {
 		return Snapshot{}, err
 	}
 	if !hasPending {
-		snap, serr := s.snapshotLocked(ScopeCompetition, []string{compID})
+		snap, serr := s.snapshotLocked(ScopeCompetition, []string{compID}, false)
 		s.mu.RUnlock()
 		mu.RUnlock()
 		return snap, serr
@@ -163,7 +163,7 @@ func (s *Store) snapshotOneCompetition(compID string) (Snapshot, error) {
 	if err := s.settleCompWALsLocked(compID); err != nil {
 		return Snapshot{}, err
 	}
-	return s.snapshotLocked(ScopeCompetition, []string{compID})
+	return s.snapshotLocked(ScopeCompetition, []string{compID}, false)
 }
 
 // rlockComp acquires the read lock for id and verifies that getCompLock(id)
@@ -277,7 +277,11 @@ func (s *Store) settleCompWALsLocked(compID string) error {
 // without acquiring any lock. Caller MUST hold the required locks:
 //   - for ScopeTournament: s.mu and s.tournamentMu (at least read locks)
 //   - for each id in ids: that competition's lock and s.mu (at least read locks)
-func (s *Store) snapshotLocked(scope SnapshotScope, ids []string) (Snapshot, error) {
+//
+// When tolerateCorruptConfig is true, a competition whose config.md fails to
+// parse as front matter is retained in snap.Competitions under its ID with its
+// raw files captured, rather than aborting the snapshot.
+func (s *Store) snapshotLocked(scope SnapshotScope, ids []string, tolerateCorruptConfig bool) (Snapshot, error) {
 	if scope != ScopeTournament && scope != ScopeCompetition {
 		return Snapshot{}, fmt.Errorf("invalid snapshot scope %q", scope)
 	}
@@ -292,7 +296,7 @@ func (s *Store) snapshotLocked(scope SnapshotScope, ids []string) (Snapshot, err
 		}
 	}
 	for _, id := range ids {
-		exists, err := s.snapshotCompetitionLocked(id, &snap)
+		exists, err := s.snapshotCompetitionLocked(id, &snap, tolerateCorruptConfig)
 		if err != nil {
 			return Snapshot{}, err
 		}
@@ -382,7 +386,7 @@ func serializeTournamentWithoutPassword(t *Tournament) ([]byte, error) {
 	return writeFrontMatter(&n)
 }
 
-func (s *Store) snapshotCompetitionLocked(id string, snap *Snapshot) (bool, error) {
+func (s *Store) snapshotCompetitionLocked(id string, snap *Snapshot, tolerateCorruptConfig bool) (bool, error) {
 	compDir := s.compPath(id)
 	info, err := s.root.stat(compDir)
 	if err != nil {
@@ -412,9 +416,10 @@ func (s *Store) snapshotCompetitionLocked(id string, snap *Snapshot) (bool, erro
 	if cfgBytes, ok := snap.Files[cfgKey]; ok {
 		var c Competition
 		if err := parseFrontMatter(cfgBytes, &c); err != nil {
-			return false, fmt.Errorf("competition %q: config.md is not valid front matter: %w", id, err)
-		}
-		if c.Name != "" {
+			if !tolerateCorruptConfig {
+				return false, fmt.Errorf("competition %q: config.md is not valid front matter: %w", id, err)
+			}
+		} else if c.Name != "" {
 			compName = c.Name
 		}
 	}

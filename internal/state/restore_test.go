@@ -1,8 +1,10 @@
 package state
 
 import (
+	"archive/zip"
 	"bytes"
 	"errors"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -307,10 +309,57 @@ func TestRestore_CopyTakesANewIDAndWarnsAboutThePrefix(t *testing.T) {
 	pending, err := s.PrefixesPending()
 	require.NoError(t, err)
 	assert.Equal(t, []string{"men-copy"}, pending)
-	require.NoError(t, s.RemovePrefixesPending())
+	require.NoError(t, s.RemovePrefixesPending([]string{"men-copy"}))
 	pending, err = s.PrefixesPending()
 	require.NoError(t, err)
 	assert.Empty(t, pending)
+}
+
+func TestRestore_PrefixAmbiguityCollision(t *testing.T) {
+	src, _ := newRestoreTestStore(t)
+	addRestoreComp(t, src, "k2", "K2 Comp", "K2", MatchStatusScheduled, "A")
+	addRestoreComp(t, src, "k02", "K02 Comp", "K02", MatchStatusScheduled, "A")
+	a := archiveOf(t, src, ScopeTournament, "")
+
+	s, _ := newRestoreTestStore(t)
+	addRestoreComp(t, s, "live", "Live", "K", MatchStatusScheduled, "A")
+
+	plan, err := s.PlanRestore(RestoreRequest{Archive: a})
+	require.NoError(t, err)
+
+	eK2 := planEntry(t, plan, "k2")
+	assert.True(t, eK2.PrefixCollides, "K2 is ambiguous with live K and must collide")
+	assert.Contains(t, plan.PrefixesPending, "k2")
+
+	eK02 := planEntry(t, plan, "k02")
+	assert.False(t, eK02.PrefixCollides, "K02 has a leading zero, is not ambiguous with K, and must not collide")
+	assert.NotContains(t, plan.PrefixesPending, "k02")
+}
+
+func TestRestore_CopyNameMatchesLiveCompetitionName(t *testing.T) {
+	s, _ := newRestoreTestStore(t)
+	restoreTestTournament(t, s, "pw")
+	addRestoreComp(t, s, "men-old", "Men", "M", MatchStatusScheduled, "A")
+	a := archiveOf(t, s, ScopeCompetition, "men-old")
+
+	// Copy named "men": slug "men" is free, but name "men" matches live competition's Name "Men" case-insensitively -> CopyNameTaken true.
+	planTaken, err := s.PlanRestore(RestoreRequest{
+		Archive:   a,
+		Decisions: map[string]RestoreDecision{"men-old": {Action: RestoreCopy, CopyName: "men"}},
+	})
+	require.NoError(t, err)
+	eTaken := planEntry(t, planTaken, "men-old")
+	assert.True(t, eTaken.CopyNameTaken)
+
+	// Copy named "Men Two": unique name and slug -> accepted.
+	planAccepted, err := s.PlanRestore(RestoreRequest{
+		Archive:   a,
+		Decisions: map[string]RestoreDecision{"men-old": {Action: RestoreCopy, CopyName: "Men Two"}},
+	})
+	require.NoError(t, err)
+	eAccepted := planEntry(t, planAccepted, "men-old")
+	assert.False(t, eAccepted.CopyNameTaken)
+	assert.Equal(t, "men-two", eAccepted.NewID)
 }
 
 func TestRestore_CopyNameRules(t *testing.T) {
@@ -778,4 +827,83 @@ func TestRestore_ADecisionForNoQuestionIsRefused(t *testing.T) {
 	assert.Equal(t, RestoreCodeBadDecision, restoreCode(t, err))
 	_, err = s.PlanRestore(RestoreRequest{Archive: a, Decisions: map[string]RestoreDecision{"men": {Action: RestoreRemove}}})
 	assert.Equal(t, RestoreCodeBadDecision, restoreCode(t, err))
+}
+
+func TestRestore_ReplacesCompetitionWithCorruptConfigMD(t *testing.T) {
+	s, dir := newRestoreTestStore(t)
+	restoreTestTournament(t, s, "pw")
+
+	// Create a valid competition first so we can take an archive to restore later.
+	addRestoreComp(t, s, "men", "Men", "M", MatchStatusScheduled, "A")
+	archive := archiveOf(t, s, ScopeCompetition, "men")
+
+	// Overwrite config.md with garbage that fails front matter parsing.
+	corruptBytes := []byte("garbage not valid front matter\n")
+	require.NoError(t, s.root.writeFile(s.compPath("men", "config.md"), corruptBytes, 0o600))
+
+	// Plain Snapshot of that competition must still fail.
+	_, compErr := s.Snapshot(ScopeCompetition, "men")
+	require.Error(t, compErr)
+	assert.Contains(t, compErr.Error(), "men")
+
+	_, tournErr := s.Snapshot(ScopeTournament, "")
+	require.Error(t, tournErr)
+	assert.Contains(t, tournErr.Error(), "men")
+
+	// Restore replacing the corrupt competition succeeds and writes the safety copy.
+	var safetyArchiveBytes []byte
+	var savedName string
+	beforeSwap := func(sc RestoreSafetyCopy) error {
+		assert.Equal(t, backup.KindBeforeRestore, sc.Kind)
+		cfgKey := "competitions/men/config.md"
+		assert.Equal(t, corruptBytes, sc.Snapshot.Files[cfgKey])
+		assert.Equal(t, "men", sc.Snapshot.Competitions["men"])
+
+		data := archiveBytes(t, backup.Scope(sc.Snapshot.Scope), sc.Kind, sc.Snapshot, sc.RestoreCreated)
+		safetyArchiveBytes = data
+
+		name, err := s.SaveBackupFile(BackupKindBeforeRestore, sc.Snapshot.Scope, time.Now().UTC(), data)
+		if err != nil {
+			return err
+		}
+		savedName = name
+		return nil
+	}
+
+	_, err := s.Restore(RestoreRequest{
+		Archive:    archive,
+		Decisions:  map[string]RestoreDecision{"men": {Action: RestoreReplace}},
+		BeforeSwap: beforeSwap,
+	})
+	require.NoError(t, err)
+
+	// Live competition is now restored and valid.
+	comp, err := s.LoadCompetition("men")
+	require.NoError(t, err)
+	assert.Equal(t, "Men", comp.Name)
+
+	// Safety copy archive exists on disk and contains the corrupt bytes.
+	require.NotEmpty(t, savedName)
+	backups, err := s.ListBackupFiles()
+	require.NoError(t, err)
+	require.NotEmpty(t, backups)
+	assert.Equal(t, savedName, backups[0].Name)
+
+	zr, err := zip.NewReader(bytes.NewReader(safetyArchiveBytes), int64(len(safetyArchiveBytes)))
+	require.NoError(t, err)
+	var foundCorrupt bool
+	for _, f := range zr.File {
+		if f.Name == "competitions/men/config.md" {
+			rc, err := f.Open()
+			require.NoError(t, err)
+			data, err := io.ReadAll(rc)
+			require.NoError(t, err)
+			require.NoError(t, rc.Close())
+			assert.Equal(t, corruptBytes, data)
+			foundCorrupt = true
+			break
+		}
+	}
+	assert.True(t, foundCorrupt, "safety copy archive must contain the corrupt config.md bytes")
+	assertNoStaging(t, dir)
 }

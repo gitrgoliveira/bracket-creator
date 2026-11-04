@@ -136,3 +136,32 @@ func TestRestoreJournal_AJournalNamingAPathNoRestoreSwapsStopsStartup(t *testing
 	_, statErr := os.Stat(filepath.Join(dir, ".wal"))
 	assert.NoError(t, statErr, "nothing was renamed")
 }
+
+func TestRemovePrefixesPending(t *testing.T) {
+	s, dir := newRestoreTestStore(t)
+	// Missing file: removing anything is fine.
+	require.NoError(t, s.RemovePrefixesPending([]string{"a"}))
+
+	// Write pending ids {a, b}
+	require.NoError(t, s.writePrefixesPending([]string{"a", "b"}))
+	pending, err := s.PrefixesPending()
+	require.NoError(t, err)
+	assert.Equal(t, []string{"a", "b"}, pending)
+
+	// Remove {a}, {b} remains
+	require.NoError(t, s.RemovePrefixesPending([]string{"a"}))
+	pending, err = s.PrefixesPending()
+	require.NoError(t, err)
+	assert.Equal(t, []string{"b"}, pending)
+
+	// Remove {b} -> file gone
+	require.NoError(t, s.RemovePrefixesPending([]string{"b"}))
+	pending, err = s.PrefixesPending()
+	require.NoError(t, err)
+	assert.Empty(t, pending)
+	_, err = os.Stat(filepath.Join(dir, backup.RestoreDirName, "prefixes-pending.json"))
+	assert.True(t, os.IsNotExist(err))
+
+	// Remove on missing file is fine.
+	require.NoError(t, s.RemovePrefixesPending([]string{"b"}))
+}

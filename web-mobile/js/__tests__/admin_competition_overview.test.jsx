@@ -2,7 +2,7 @@
 // The function is unit-testable without mounting any component: it takes
 // a plain competition object and returns a step array.
 import { describe, it, expect } from 'vitest';
-import { competitionNextSteps, overviewViewMode, overviewResultsSection, hasBracketRounds } from '../admin_competition_overview.jsx';
+import { competitionNextSteps, overviewViewMode, overviewResultsSection, hasBracketRounds, latestCourtFinish, formatPausesRow, formatPerShiaijoRow } from '../admin_competition_overview.jsx';
 
 // ---------------------------------------------------------------------------
 // hasBracketRounds: never-nil LoadBracket contract
@@ -485,5 +485,48 @@ describe('competitionNextSteps: non-setup statuses', () => {
 
   it('does not throw for completed status', () => {
     expect(() => competitionNextSteps(makeComp({ status: 'completed', players: [makePlayer(), makePlayer()] }))).not.toThrow();
+  });
+});
+
+describe('Overview estimate helpers (p2-overview)', () => {
+  it('latestCourtFinish picks the latest court end and flags a finish past midnight', () => {
+    expect(latestCourtFinish({ A: '13:10', B: '13:38' }, '09:00')).toEqual({ clock: '13:38', nextDay: false });
+    // A court end later than StartTime + total estimate still wins.
+    expect(latestCourtFinish({ A: '11:00', B: '16:45' }, '09:00')).toEqual({ clock: '16:45', nextDay: false });
+    // An end earlier than the start crossed midnight.
+    expect(latestCourtFinish({ A: '23:30', B: '00:40' }, '20:00')).toEqual({ clock: '00:40', nextDay: true });
+    // The server may report a clock past 24:00.
+    expect(latestCourtFinish({ A: '24:40' }, '20:00')).toEqual({ clock: '00:40', nextDay: true });
+    expect(latestCourtFinish({}, '09:00')).toBeNull();
+    expect(latestCourtFinish(undefined, '09:00')).toBeNull();
+  });
+
+  it('formatPerShiaijoRow labels by the competition shiaijo, says about, and names an idle one', () => {
+    const est = { perCourtMinutes: [229, 221] };
+    expect(formatPerShiaijoRow(est, ['A', 'B'])).toBe('A about 3h 49m · B about 3h 41m');
+    expect(formatPerShiaijoRow({ perCourtMinutes: [55, 0] }, ['C', 'D'])).toBe('C about 55m · D not used');
+    expect(formatPerShiaijoRow({ perCourtMinutes: [] }, ['A'])).toBeNull();
+    expect(formatPerShiaijoRow(null, ['A'])).toBeNull();
+  });
+
+  it('formatPausesRow names the day pauses, says none, and lists an unused pause', () => {
+    const c = { date: '05-06-2026' };
+    const t = {
+      date: '05-06-2026',
+      durationDays: 1,
+      pauses: [
+        { name: 'Opening ceremony', start: '09:30', length: '30m', day: 0 },
+        { name: 'Lunch', start: '12:30', length: '1h', day: 0 },
+        { name: 'Closing ceremony', start: '', length: '30m', day: 0 },
+      ],
+    };
+    expect(formatPausesRow(t, c)).toBe(
+      'Opening ceremony 09:30 to 10:00, Lunch 12:30 to 13:30 · Closing ceremony: not used, no start time',
+    );
+    expect(formatPausesRow({ ...t, pauses: [] }, c)).toBe('No pauses that day');
+    // A pause on another day is not that day's pause.
+    const twoDay = { date: '05-06-2026', durationDays: 2, pauses: [{ name: 'Lunch', start: '12:30', length: '1h', day: 2 }] };
+    expect(formatPausesRow(twoDay, c)).toBe('No pauses that day');
+    expect(formatPausesRow(twoDay, { date: '06-06-2026' })).toBe('Lunch 12:30 to 13:30');
   });
 });

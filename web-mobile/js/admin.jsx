@@ -289,6 +289,13 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
         if (mountedRef.current) setAdminCompData((prev) => storedCompetitionInDetail(prev, cid, current));
         throw e;
       }
+      if (e && e.code === "config_changed") {
+        const current = (e.competition && typeof e.competition === "object") ? e.competition : {};
+        onUpdateRef.current(mergeCompetitionsIntoTournament(tRef.current,
+          comps => comps.map(c => c.id === cid ? { ...c, ...current } : c)));
+        if (mountedRef.current) setAdminCompData((prev) => storedCompetitionInDetail(prev, cid, current));
+        throw e;
+      }
       showToast(e.message, "error");
       throw e;
     }
@@ -328,6 +335,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
     // write made before the page shows this one is built on it.
     const answer = nearDupWarnings || [];
     Object.defineProperty(answer, "rosterVersion", { value: updatedComp.rosterVersion || "", enumerable: false });
+    Object.defineProperty(answer, "configVersion", { value: updatedComp.configVersion || "", enumerable: false });
     // The roster that version names: what the server read back after the
     // write, which can hold another desk's later change, so a roster write
     // made before the page shows this one is built on these players and never

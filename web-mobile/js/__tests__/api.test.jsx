@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { toBackendMatchResult, normalizeMatch, buildPlayerMap, normalizePlayer, isHikiwake, buildPlayerMetadata, normalizeCompetitionDetail } from '../api_serializers.jsx';
-import { API } from '../api_client.jsx';
+import { API, normalizeViewerCompItem } from '../api_client.jsx';
 
 describe('API Utils', () => {
   describe('toBackendMatchResult', () => {
@@ -1642,50 +1642,123 @@ describe('API Utils', () => {
       });
     });
 
-    describe('estimateSchedule', () => {
-      it('GETs /api/schedule/estimate with required params in query string', async () => {
+    describe('estimateDraft', () => {
+      it('GETs /api/schedule/draft-estimate with shape params as strings and returns the payload', async () => {
+        const payload = { totalDurationMinutes: 120, perCourtMinutes: [120], ceremonyMinutes: 0 };
         global.fetch = vi.fn().mockResolvedValue({
           ok: true,
-          json: async () => ({ totalDurationMinutes: 120, perCourtMinutes: [120], ceremonyMinutes: 0 }),
+          json: async () => payload,
         });
-        await API.estimateSchedule({ matchDuration: 3, multiplier: 1.5, courts: 2, numMatches: 10 }, 'pw');
+        const shape = {
+          format: 'pools',
+          participants: 16,
+          kind: 'individual',
+          teamSize: 5,
+          teamMatchType: 'points',
+          poolSize: 3,
+          poolSizeMode: 'exact',
+          poolWinners: 2,
+          poolFormat: 'round-robin',
+          roundRobin: false,
+          extraQualifiers: 4,
+          twoThirdPlaces: true,
+          naginata: true,
+          swissRounds: 3,
+          poolMatchDurationSeconds: 180,
+          knockoutMatchDurationSeconds: 240,
+          startTime: '09:00',
+          date: '2026-11-04',
+        };
+        const result = await API.estimateDraft(shape, 'pw');
+        expect(result).toEqual(payload);
         const [url] = global.fetch.mock.calls[0];
-        expect(url).toMatch(/^\/api\/schedule\/estimate\?/);
+        expect(url).toMatch(/^\/api\/schedule\/draft-estimate\?/);
         const params = new URLSearchParams(url.split('?')[1]);
-        expect(params.get('matchDuration')).toBe('3');
-        expect(params.get('multiplier')).toBe('1.5');
-        expect(params.get('courts')).toBe('2');
-        expect(params.get('numMatches')).toBe('10');
+        expect(params.get('format')).toBe('pools');
+        expect(params.get('participants')).toBe('16');
+        expect(params.get('kind')).toBe('individual');
+        expect(params.get('teamSize')).toBe('5');
+        expect(params.get('teamMatchType')).toBe('points');
+        expect(params.get('poolSize')).toBe('3');
+        expect(params.get('poolSizeMode')).toBe('exact');
+        expect(params.get('poolWinners')).toBe('2');
+        expect(params.get('poolFormat')).toBe('round-robin');
+        expect(params.get('roundRobin')).toBe('false');
+        expect(params.get('extraQualifiers')).toBe('4');
+        expect(params.get('twoThirdPlaces')).toBe('true');
+        expect(params.get('naginata')).toBe('true');
+        expect(params.get('swissRounds')).toBe('3');
+        expect(params.get('poolMatchDurationSeconds')).toBe('180');
+        expect(params.get('knockoutMatchDurationSeconds')).toBe('240');
+        expect(params.get('startTime')).toBe('09:00');
+        expect(params.get('date')).toBe('2026-11-04');
       });
 
-      it('filters out undefined, null, empty-string, and NaN arg values', async () => {
+      it('skips undefined, null, empty string, and NaN values but keeps 0', async () => {
         global.fetch = vi.fn().mockResolvedValue({
           ok: true,
-          json: async () => ({ totalDurationMinutes: 60, perCourtMinutes: [60], ceremonyMinutes: 0 }),
+          json: async () => ({ totalDurationMinutes: 60 }),
         });
-        await API.estimateSchedule({
-          matchDuration: 3,
-          multiplier: 1.5,
-          courts: 1,
-          teamSize: undefined,
-          boutsPerTeamMatch: null,
-          buffer: '',
-          ceremonyMinutes: NaN,
+        await API.estimateDraft({
+          format: undefined,
+          kind: null,
+          startTime: '',
+          participants: NaN,
+          extraQualifiers: 0,
         }, 'pw');
         const [url] = global.fetch.mock.calls[0];
         const params = new URLSearchParams(url.split('?')[1]);
-        expect(params.has('teamSize')).toBe(false);
-        expect(params.has('boutsPerTeamMatch')).toBe(false);
-        expect(params.has('buffer')).toBe(false);
-        expect(params.has('ceremonyMinutes')).toBe(false);
+        expect(params.has('format')).toBe(false);
+        expect(params.has('kind')).toBe(false);
+        expect(params.has('startTime')).toBe(false);
+        expect(params.has('participants')).toBe(false);
+        expect(params.has('extraQualifiers')).toBe(true);
+        expect(params.get('extraQualifiers')).toBe('0');
       });
 
-      it('sends X-Tournament-Password header', async () => {
+      it('handles courts array, number, and empty or zero values while omitting courtLabels', async () => {
         global.fetch = vi.fn().mockResolvedValue({
           ok: true,
-          json: async () => ({ totalDurationMinutes: 90, perCourtMinutes: [90], ceremonyMinutes: 0 }),
+          json: async () => ({ totalDurationMinutes: 60 }),
         });
-        await API.estimateSchedule({ matchDuration: 5, multiplier: 1, courts: 1 }, 'secret-pw');
+
+        await API.estimateDraft({ courts: ['A', 'B', 'C'], courtLabels: ['A', 'B', 'C'] }, 'pw');
+        const [url1] = global.fetch.mock.calls[0];
+        const params1 = new URLSearchParams(url1.split('?')[1]);
+        expect(params1.get('courts')).toBe('3');
+        expect(params1.has('courtLabels')).toBe(false);
+        expect(url1).not.toContain('courtLabels');
+        expect(url1).not.toContain('A');
+        expect(url1).not.toContain('B');
+        expect(url1).not.toContain('C');
+
+        await API.estimateDraft({ courts: 2 }, 'pw');
+        const [url2] = global.fetch.mock.calls[1];
+        const params2 = new URLSearchParams(url2.split('?')[1]);
+        expect(params2.get('courts')).toBe('2');
+
+        await API.estimateDraft({ courts: 0 }, 'pw');
+        const [url3] = global.fetch.mock.calls[2];
+        const params3 = new URLSearchParams(url3.includes('?') ? url3.split('?')[1] : '');
+        expect(params3.has('courts')).toBe(false);
+
+        await API.estimateDraft({ courts: [] }, 'pw');
+        const [url4] = global.fetch.mock.calls[3];
+        const params4 = new URLSearchParams(url4.includes('?') ? url4.split('?')[1] : '');
+        expect(params4.has('courts')).toBe(false);
+
+        await API.estimateDraft({ courts: undefined }, 'pw');
+        const [url5] = global.fetch.mock.calls[4];
+        const params5 = new URLSearchParams(url5.includes('?') ? url5.split('?')[1] : '');
+        expect(params5.has('courts')).toBe(false);
+      });
+
+      it('sends the X-Tournament-Password header', async () => {
+        global.fetch = vi.fn().mockResolvedValue({
+          ok: true,
+          json: async () => ({ totalDurationMinutes: 90 }),
+        });
+        await API.estimateDraft({ format: 'pools' }, 'secret-pw');
         const [, opts] = global.fetch.mock.calls[0];
         expect(opts.headers['X-Tournament-Password']).toBe('secret-pw');
       });
@@ -1693,39 +1766,30 @@ describe('API Utils', () => {
       it('forwards the AbortSignal to fetch', async () => {
         global.fetch = vi.fn().mockResolvedValue({
           ok: true,
-          json: async () => ({ totalDurationMinutes: 45, perCourtMinutes: [45], ceremonyMinutes: 0 }),
+          json: async () => ({ totalDurationMinutes: 45 }),
         });
         const controller = new AbortController();
-        await API.estimateSchedule({ matchDuration: 3, multiplier: 1.5, courts: 1 }, 'pw', controller.signal);
+        await API.estimateDraft({ format: 'pools' }, 'pw', controller.signal);
         const [, opts] = global.fetch.mock.calls[0];
         expect(opts.signal).toBe(controller.signal);
       });
 
-      it('returns parsed JSON on success', async () => {
-        const payload = { totalDurationMinutes: 180, perCourtMinutes: [90, 90], ceremonyMinutes: 30 };
-        global.fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => payload });
-        const result = await API.estimateSchedule({ matchDuration: 3, multiplier: 1.5, courts: 2 }, 'pw');
-        expect(result).toEqual(payload);
-      });
-
-      it('throws with server error message on non-ok response', async () => {
+      it('rejects with the server error sentence on a non-ok response', async () => {
         global.fetch = vi.fn().mockResolvedValue({
           ok: false,
-          json: async () => ({ error: 'matchDuration must be a positive finite number' }),
+          json: async () => ({ error: 'Add a start time' }),
         });
-        await expect(
-          API.estimateSchedule({ matchDuration: -1, multiplier: 1.5, courts: 1 }, 'pw')
-        ).rejects.toThrow('matchDuration must be a positive finite number');
+        await expect(API.estimateDraft({}, 'pw'))
+          .rejects.toThrow('Add a start time');
       });
 
-      it('throws default message if json parse fails on error response', async () => {
+      it('rejects with Failed to estimate schedule when the error body is not JSON', async () => {
         global.fetch = vi.fn().mockResolvedValue({
           ok: false,
           json: async () => { throw new Error('parse error'); },
         });
-        await expect(
-          API.estimateSchedule({ matchDuration: 3, multiplier: 1.5, courts: 1 }, 'pw')
-        ).rejects.toThrow('Failed to estimate schedule');
+        await expect(API.estimateDraft({}, 'pw'))
+          .rejects.toThrow('Failed to estimate schedule');
       });
     });
 
@@ -1825,6 +1889,43 @@ describe('API Utils', () => {
         // Eve has no danGrade key; metadata must be passed through unchanged
         expect(capturedBody.players[4].metadata).toEqual(['1 Dan']);
         expect(capturedBody.players[4].danGrade).toBeUndefined();
+      });
+
+      it('rejects with e.code, e.configVersion, e.competition and server message on 409 config_changed', async () => {
+        const conflictComp = { id: 'c1', name: 'Fresh Name', startTime: '15:00', configVersion: 'v-server-curr' };
+        global.fetch = vi.fn().mockResolvedValue({
+          ok: false,
+          status: 409,
+          json: async () => ({
+            code: 'config_changed',
+            error: 'This competition changed, reload it.',
+            configVersion: 'v-server-curr',
+            competition: conflictComp,
+          }),
+        });
+        let caught;
+        try {
+          await API.updateCompetition('c1', { name: 'My Name' }, 'pw');
+        } catch (e) {
+          caught = e;
+        }
+        expect(caught).toBeDefined();
+        expect(caught.message).toBe('This competition changed, reload it.');
+        expect(caught.code).toBe('config_changed');
+        expect(caught.configVersion).toBe('v-server-curr');
+        expect(caught.competition).toEqual(conflictComp);
+      });
+    });
+
+    describe('normalizeViewerCompItem', () => {
+      it('preserves configVersion from item.config', () => {
+        const itemWithConfig = {
+          config: { id: 'c1', name: 'Comp 1', configVersion: 'v-cfg-123' },
+          poolMatches: [],
+          bracket: null,
+        };
+        const norm = normalizeViewerCompItem(itemWithConfig);
+        expect(norm.configVersion).toBe('v-cfg-123');
       });
     });
   });

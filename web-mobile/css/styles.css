@@ -3985,6 +3985,107 @@ button.vsched-item:not([data-clickable]) {
   margin-top: 2px;
 }
 
+/* Duration estimate stat-box lines (overview tile) */
+.stat-box__range {
+  margin-top: 4px;
+  font-size: 11.5px;
+  color: var(--ink-2);
+}
+
+.stat-box__finish {
+  margin-top: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-1);
+}
+
+.stat-box__finish--warn {
+  color: var(--warn-ink, var(--warn));
+  font-weight: 600;
+}
+
+.stat-box__count {
+  margin-top: 4px;
+  font-size: 11.5px;
+  color: var(--ink-2);
+}
+
+.stat-box__hint {
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--ink-3);
+  line-height: 1.35;
+}
+
+/* Draft competition schedule estimate panel (draft_estimate.jsx). */
+.draft-estimate {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--r, 8px);
+  background: var(--surface-2);
+  font-size: 13px;
+  color: var(--ink);
+  transition: opacity 120ms var(--ease-out, ease-out);
+}
+
+.draft-estimate--loading {
+  opacity: 0.6;
+}
+
+.draft-estimate__finish {
+  font-weight: 700;
+  font-size: 15px;
+  color: var(--ink);
+}
+
+.draft-estimate__finish--warn {
+  font-weight: 600;
+  font-size: 13px;
+  margin: 0;
+}
+
+.draft-estimate__duration {
+  font-weight: 600;
+  color: var(--ink-1);
+}
+
+.draft-estimate__matches,
+.draft-estimate__per-shiaijo,
+.draft-estimate__range,
+.draft-estimate__kachinuki {
+  font-size: 12.5px;
+  color: var(--ink-2);
+}
+
+.draft-estimate__timing {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--ink-3);
+  padding-top: 6px;
+  border-top: 1px solid var(--line-2);
+}
+
+.draft-estimate__warning {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0;
+  font-size: 12.5px;
+}
+
+.draft-estimate__note {
+  font-size: 12.5px;
+  color: var(--ink-3);
+  font-style: italic;
+}
+
 /* stat-box link variant, a button-reset that keeps the stat-box layout
    but is clickable (e.g. "View podium →" in the completed stats strip). */
 .stat-box__link {

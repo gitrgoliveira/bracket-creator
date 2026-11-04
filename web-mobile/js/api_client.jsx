@@ -5203,6 +5203,11 @@ const API = {
                 e.players = normalizeCompetitionDetail({ config: { players: err.players || [] } }).config.players;
                 e.rosterVersion = err.rosterVersion || '';
             }
+            if (res.status === 409 && err.code === 'config_changed') {
+                e.code = 'config_changed';
+                e.configVersion = err.configVersion || '';
+                e.competition = err.competition || null;
+            }
             throw e;
         }
         return res.json();
@@ -5630,21 +5635,35 @@ const API = {
         _emitLocalMatchPatch(compID, matchID, { scheduledAt });
         return answer;
     },
-    // Stateless hypothetical estimate against GET /api/schedule/estimate. The
-    // free-form estimator PANEL was removed (per-competition estimates on
-    // Overview/Settings go through estimateCompetitionSchedule instead), so this
-    // method currently has no production caller. It is RETAINED DELIBERATELY -
-    // not dead - for the planned standalone hypothetical estimator page
-    // (mp-lw5p), which reuses this endpoint and the `teamMatchType` query param.
-    // Exercised by api.test.jsx. Do not delete without closing mp-lw5p first.
-    async estimateSchedule(args, password, signal) {
+    // Stateless estimate for a competition not yet saved, GET /api/schedule/draft-estimate.
+    async estimateDraft(shape, password, signal) {
         const params = new URLSearchParams();
-        Object.entries(args).forEach(([k, v]) => {
+        const src = shape || {};
+        const keys = [
+            'format', 'participants', 'kind', 'teamSize', 'teamMatchType',
+            'poolSize', 'poolSizeMode', 'poolWinners', 'poolFormat', 'roundRobin',
+            'extraQualifiers', 'twoThirdPlaces', 'naginata', 'swissRounds',
+            'poolMatchDurationSeconds', 'knockoutMatchDurationSeconds',
+            'startTime', 'date',
+        ];
+        keys.forEach((k) => {
+            const v = src[k];
             if (v !== undefined && v !== null && v !== "" && !Number.isNaN(v)) {
                 params.append(k, v);
             }
         });
-        const res = await fetch(`/api/schedule/estimate?${params.toString()}`, {
+        let courtsNum;
+        if (Array.isArray(src.courts)) {
+            courtsNum = src.courts.length;
+        } else if (src.courts !== undefined && src.courts !== null) {
+            courtsNum = Number(src.courts);
+        }
+        if (Number.isFinite(courtsNum) && courtsNum > 0) {
+            params.append('courts', courtsNum);
+        }
+        const qs = params.toString();
+        const url = qs ? `/api/schedule/draft-estimate?${qs}` : '/api/schedule/draft-estimate';
+        const res = await fetch(url, {
             headers: { 'X-Tournament-Password': password },
             signal,
         });
@@ -6926,6 +6945,7 @@ export {
     // Exported for tests only: whether a tap makes the status-move index again
     // shows only in its identity (stage 6 review 10, m5).
     _statusEntriesByBase,
+    normalizeViewerCompItem,
 };
 
 // S2: a new build reloads the page only once the outbox is idle, and the

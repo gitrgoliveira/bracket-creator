@@ -54,6 +54,45 @@ export function timeToMinutes(t) {
   return h * 60 + m;
 }
 
+// finishClock derives an estimated end time from a "HH:MM" start time and
+// total duration in minutes. Returns { clock: "HH:MM", nextDay: boolean }.
+// nextDay is true when the finish time reaches or crosses 24:00 (midnight).
+// For invalid start strings or non-finite minutes, returns { clock: "", nextDay: false }.
+export function finishClock(start, minutes) {
+  if (typeof start !== "string" || !Number.isFinite(minutes)) {
+    return { clock: "", nextDay: false };
+  }
+  const parts = start.split(":");
+  if (parts.length !== 2) {
+    return { clock: "", nextDay: false };
+  }
+  const [h, m] = parts.map(Number);
+  if (!Number.isInteger(h) || !Number.isInteger(m) || h < 0 || h > 23 || m < 0 || m > 59) {
+    return { clock: "", nextDay: false };
+  }
+  const startM = timeToMinutes(start);
+  if (startM === null) {
+    return { clock: "", nextDay: false };
+  }
+  const total = startM + Math.round(minutes);
+  const nextDay = total >= 1440;
+  const wrapped = ((total % 1440) + 1440) % 1440;
+  const outH = Math.floor(wrapped / 60);
+  const outM = wrapped % 60;
+  const clock = `${String(outH).padStart(2, "0")}:${String(outM).padStart(2, "0")}`;
+  return { clock, nextDay };
+}
+
+// Format duration minutes with zero-padded minutes (e.g. "4h 08m", "55m").
+export function formatEstimateMinutes(m) {
+  if (!Number.isFinite(m) || m <= 0) return "0m";
+  const mins = Math.round(m);
+  const h = Math.floor(mins / 60);
+  const rem = mins % 60;
+  if (h === 0) return `${rem}m`;
+  return `${h}h ${String(rem).padStart(2, "0")}m`;
+}
+
 // True when the user's time edit (newVal, a "HH:MM" string from the
 // time input) is a real change relative to the stored scheduledAt
 // (which is null for untimed matches, "HH:MM" string otherwise). The

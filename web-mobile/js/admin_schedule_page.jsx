@@ -5,8 +5,8 @@
 // here was removed (mp-gmcg): it re-asked the operator for values the app
 // already knows per competition (and made them hand-enter a match count),
 // duplicating the per-competition estimate already shown on the competition
-// Overview and Settings. A dedicated hypothetical estimator page is tracked
-// separately.
+// Overview and Settings, and now carried by the Add competition form.
+// A dedicated hypothetical estimator page is tracked separately.
 
 import { filterMatchesByCourt, CourtPacePanel } from './admin_schedule_pacing.jsx';
 import { formatMinutes, timeToMinutes, timeEdited, clampDurationSeconds, COURT_STORAGE_KEY } from './admin_schedule_utils.jsx';

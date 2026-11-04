@@ -163,6 +163,7 @@ import { DurationInput } from './duration.jsx';
 import { useUnsavedInput } from './app_version.jsx';
 import { useLatestRef } from './latest_ref.jsx';
 import { PauseList } from './pause_list.jsx';
+import { useDraftEstimate, DraftEstimatePanel } from './draft_estimate.jsx';
 
 function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerMode, authConfig, password, showToast }) {
   // In locked mode the on-disk Password is irrelevant: auth comes
@@ -846,6 +847,24 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
   // dropped while the red error states it one line above.
   const courtsHint = window.shiaijoCountHintFor(format, safeCourts.length, !courtsErr);
 
+  const courtsGroupRef = useRef(null);
+  const handleFocusShiaijo = () => {
+    if (courtsGroupRef.current) {
+      courtsGroupRef.current.focus();
+      if (typeof courtsGroupRef.current.scrollIntoView === "function") {
+        courtsGroupRef.current.scrollIntoView({ block: "center" });
+      }
+    }
+  };
+
+  const [expectedParticipants, setExpectedParticipants] = useState(NaN);
+  const isTeam = kind === "team" || effectiveTeamSize > 0;
+
+  // Stacking pending flag (task p2-create item 4): true from the moment
+  // candidate estimation begins until the stacked start (or default) lands;
+  // false on error/cancelled/latch/no-candidates.
+  const [stackPending, setStackPending] = useState(false);
+
   // Auto-stack the default start time after the latest planned end among same-day
   // competitions that share any of the chosen shiaijo (courts). For drawn
   // competitions, we take the latest planned end across the chosen courts from
@@ -865,16 +884,21 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
   const safeCourtsKey = safeCourts.join(",");
   const courtsRef = useLatestRef({ selectedCourts, safeCourts });
   useEffect(() => {
-    if (startTimeEditedRef.current) return;
+    if (startTimeEditedRef.current) {
+      setStackPending(false);
+      return;
+    }
     const { selectedCourts, safeCourts } = courtsRef.current;
     const candidates = findStackCandidates(tournament.competitions, date, selectedCourts, safeCourts);
     if (candidates.length === 0) {
+      setStackPending(false);
       if (!startTimeEditedRef.current) {
         setStartTime(COMPETITION_DEFAULTS.startTime);
       }
       return; // no sharing candidates: keep the 09:00 default
     }
 
+    setStackPending(true);
     const controller = new AbortController();
     const candidatePromises = candidates.map((cc) =>
       window.API.estimateCompetitionSchedule(cc.id, password, controller.signal)
@@ -896,22 +920,58 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
         })
     );
 
-    Promise.all(candidatePromises).then((ends) => {
-      if (controller.signal.aborted || startTimeEditedRef.current) return;
-      const validEnds = ends.filter((t) => typeof t === "string" && timeToMinutes(t) !== null);
-      if (validEnds.length === 0) {
-        if (!startTimeEditedRef.current) {
-          setStartTime(COMPETITION_DEFAULTS.startTime);
+    Promise.all(candidatePromises)
+      .then((ends) => {
+        if (controller.signal.aborted || startTimeEditedRef.current) return;
+        const validEnds = ends.filter((t) => typeof t === "string" && timeToMinutes(t) !== null);
+        if (validEnds.length === 0) {
+          if (!startTimeEditedRef.current) {
+            setStartTime(COMPETITION_DEFAULTS.startTime);
+          }
+          return;
         }
-        return;
-      }
-      const latestEnd = validEnds.reduce((a, b) => (timeToMinutes(b) > timeToMinutes(a) ? b : a));
-      if (controller.signal.aborted || startTimeEditedRef.current) return;
-      setStartTime(latestEnd);
-    });
+        const latestEnd = validEnds.reduce((a, b) => (timeToMinutes(b) > timeToMinutes(a) ? b : a));
+        if (controller.signal.aborted || startTimeEditedRef.current) return;
+        setStartTime(latestEnd);
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (mountedRef.current && !controller.signal.aborted) {
+          setStackPending(false);
+        }
+      });
 
-    return () => { controller.abort(); };
+    return () => {
+      controller.abort();
+      setStackPending(false);
+    };
   }, [date, tournament.competitions, password, selectedCourtsKey, safeCourtsKey, courtsRef]);
+
+  // Draft estimate shape & hook (task p2-create item 2). Sends nothing while
+  // stackPending (startTime: ""), and uses Expected participants value.
+  const draftShape = {
+    participants: Number.isFinite(expectedParticipants) ? expectedParticipants : "",
+    format,
+    kind,
+    poolSizeMode: poolMode,
+    poolWinners: winners,
+    poolSize,
+    poolFormat,
+    roundRobin,
+    swissRounds,
+    courts: selectedCourts.length > 0 ? selectedCourts.length : undefined,
+    courtLabels: selectedCourts,
+    teamSize: effectiveTeamSize,
+    teamMatchType: teamFieldsVisible(kind) ? teamMatchType : undefined,
+    extraQualifiers: format === FORMAT_MIXED ? extraQualifiers : undefined,
+    twoThirdPlaces,
+    naginata,
+    date,
+    startTime: stackPending ? "" : startTime,
+    poolMatchDurationSeconds: poolDurationVisible(format) ? poolMatchDurationSeconds : undefined,
+    knockoutMatchDurationSeconds: knockoutDurationVisible(format) ? knockoutMatchDurationSeconds : undefined,
+  };
+  const { estimate, loading: estimateLoading, error: estimateError } = useDraftEstimate(draftShape, password);
 
   // bc-pnum G2/R6: pre-fill the prefix field with the SAME value a save
   // left blank would actually assign server-side (assignDefaultNumberPrefix),
@@ -1020,6 +1080,13 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
     if (teamSizeErr) {
       setError(teamSizeErr);
       return;
+    }
+
+    if (Number.isFinite(expectedParticipants)) {
+      if (!Number.isInteger(expectedParticipants) || expectedParticipants < 0 || expectedParticipants > 1024) {
+        setError(`${isTeam ? "Expected teams" : "Expected participants"} must be a whole number from 0 to 1024.`);
+        return;
+      }
     }
 
     const id = mintCompetitionId(finalName, tournament.competitions);
@@ -1156,6 +1223,9 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
     // it for individual comps is harmless but omitting it keeps the payload clean.
     if (teamFieldsVisible(kind)) {
       c.teamMatchType = teamMatchType;
+    }
+    if (Number.isFinite(expectedParticipants)) {
+      c.expectedParticipants = expectedParticipants;
     }
     // Surface a SERVER rejection in this form's own error banner, the same
     // channel every client-side guard above uses. Previously onCreate's
@@ -1407,7 +1477,13 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
 
           <div className="field">
             <label className="field__label" id="create-courts-label">{LABEL_COURTS}</label>
-            <div className="radio-group" role="group" aria-labelledby="create-courts-label">
+            <div
+              ref={courtsGroupRef}
+              tabIndex={-1}
+              className="radio-group"
+              role="group"
+              aria-labelledby="create-courts-label"
+            >
               {safeCourts.map((cc) => (
                 <PillButton key={cc} active={selectedCourts.includes(cc)} onClick={() => toggleCourt(cc)}>Shiaijo (court) {cc}</PillButton>
               ))}
@@ -1482,6 +1558,27 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
           <CheckboxField label={LABEL_NAGINATA} checked={naginata} onChange={(on) => { setNaginata(on); setTwoThirdPlaces(twoThirdPlacesForNaginata(on)); }} hint={HINT_NAGINATA} />
 
           {tournamentHasCheckIn(tournament) && <CheckboxField label={LABEL_CHECK_IN} checked={checkInEnabled} onChange={setCheckInEnabled} hint={HINT_CHECK_IN} />}
+
+          <NumberField
+            label={isTeam ? "Expected teams" : "Expected participants"}
+            min={0}
+            max={1024}
+            value={expectedParticipants}
+            onChange={(raw) => {
+              setError("");
+              setExpectedParticipants(decideNumericUpdate(raw, 0).value);
+            }}
+            hint="How many you expect. Estimates use this number until more register. Kept with the competition; change it in Settings."
+          />
+
+          <DraftEstimatePanel
+            estimate={estimate}
+            loading={estimateLoading}
+            error={estimateError}
+            shape={draftShape}
+            tournamentCourts={safeCourts}
+            onChangeShiaijo={handleFocusShiaijo}
+          />
 
           <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
             <button type="button" className="btn" onClick={onCancel}>Cancel</button>

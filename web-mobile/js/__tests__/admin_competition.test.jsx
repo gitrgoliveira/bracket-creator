@@ -470,6 +470,11 @@ describe('AdminSettings.saveNow payload whitelist', () => {
     // value to "" (Go's zero value) on every unrelated settings save, same
     // hazard class as teamMatchType/naginata above.
     'extraQualifiers',
+    // CC1: the settings version the save was built on; the server refuses a
+    // stale one with 409 config_changed instead of writing over a newer change.
+    'configVersion',
+    // Expected participants is a saved, optional count the Settings form edits; the draw-time estimate reads it.
+    'expectedParticipants',
   ]);
   // Fields that MUST NOT appear in the PUT body: pinning the
   // negative invariant explicitly so a careless re-add is caught.
@@ -487,7 +492,7 @@ describe('AdminSettings.saveNow payload whitelist', () => {
 
   it('finalNext contains only allowlisted settings keys', () => {
     const src = readFileSync(
-      resolve(__dirname, '..', 'admin_competition_settings.jsx'),
+      resolve(__dirname, '..', 'competition_put_body.jsx'),
       'utf8'
     );
 
@@ -551,7 +556,7 @@ describe('AdminSettings.saveNow payload whitelist', () => {
     const jsonName = (s) => s.charAt(0).toLowerCase() + s.slice(1);
 
     const jsSrc = readFileSync(
-      resolve(__dirname, '..', 'admin_competition_settings.jsx'),
+      resolve(__dirname, '..', 'competition_put_body.jsx'),
       'utf8'
     );
     const fnMatch = jsSrc.match(/const finalNext = \{([\s\S]*?)\n\s*\};/);
@@ -583,7 +588,7 @@ describe('AdminSettings.saveNow payload whitelist', () => {
   // usable positive integer.
   it('finalNext numeric fields are wrapped in the right NaN-guarding fallback', () => {
     const src = readFileSync(
-      resolve(__dirname, '..', 'admin_competition_settings.jsx'),
+      resolve(__dirname, '..', 'competition_put_body.jsx'),
       'utf8'
     );
     const fnMatch = src.match(/const finalNext = \{([\s\S]*?)\n\s*\};/);
@@ -639,10 +644,10 @@ describe('AdminSettings.saveNow payload whitelist', () => {
     const shapedMatch = src.match(/const shaped = shapeConfigForSave\(([\s\S]*?)\n\s*\}\);/);
     expect(
       shapedMatch,
-      'saveNow must shape the payload through shapeConfigForSave(latestC, ...), which is what scopes the two normalizers to a staged format/kind change'
+      'settingsPutBody must shape the payload through shapeConfigForSave(base, ...), which is what scopes the two normalizers to a staged format/kind change'
     ).not.toBeNull();
     expect(
-      /teamSize:\s*resolveTeamSize\(effective\.teamSize,\s*latestC\.teamSize\)/.test(shapedMatch[1]),
+      /teamSize:\s*resolveTeamSize\(effective\.teamSize,\s*base\.teamSize\)/.test(shapedMatch[1]),
       'the staged teamSize must be resolved against the stored value BEFORE shapeConfigForSave: normalizeConfigForKind rewrites teamSize on both branches, so a guard on its output is dead code'
     ).toBe(true);
     expect(
@@ -659,7 +664,7 @@ describe('AdminSettings.saveNow payload whitelist', () => {
   // fractional-clobber dimension.
   it('safeInt helper guards isFinite + isInteger + >= 1', () => {
     const src = readFileSync(
-      resolve(__dirname, '..', 'admin_competition_settings.jsx'),
+      resolve(__dirname, '..', 'competition_put_body.jsx'),
       'utf8'
     );
     const safeIntMatch = src.match(/const safeInt = \(v, fallback\) =>\s*([^;]+);/);
@@ -764,8 +769,8 @@ describe('AdminSettings saveNow stale-snapshot fix (Copilot round-15)', () => {
       expect(m, `expected \`const ${handler} = (...) => { ... };\` declaration`).not.toBeNull();
       expect(
         m[2],
-        `${handler} must call editedFieldsRef.current.add(...) so the sync effect preserves the user's edit during the debounce window`
-      ).toContain('editedFieldsRef.current.add');
+        `${handler} must mark the field through markEdited(...) (which pins the config version, then adds it to editedFieldsRef) so the sync effect preserves the user's edit during the debounce window`
+      ).toContain('markEdited(');
       // Copilot finding (PR #320 round 4): saveNow reads localRef.current at
       // click time. The useEffect that syncs localRef from `local` is async,
       // so a rapid edit-then-Save click can land before the effect runs and

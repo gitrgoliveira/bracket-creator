@@ -22,7 +22,7 @@ docker run -p 8080:8080 -v "$PWD/tournament-data:/tournament-data" \
 
 The app is available at `http://localhost:8080`.
 
-The container runs as a non-root user (UID 65534). On Linux hosts, create the folder and make it writable by that UID before the first run: `mkdir -p tournament-data && sudo chown 65534 tournament-data`. Without the `chown`, the container cannot write to the folder, and the app does not start: it checks at startup that it can write to the data folder and to every competition folder inside it, and names each folder it cannot write to. A file where one of those folders should be also stops it, and so does a link inside the data folder that points out of it (a link written as an absolute path counts, wherever it points). The message says what to do: move the file away, or put the folder itself inside the data folder in place of the link. The data folder itself may be a link. The same check applies outside Docker, for example after copying a tournament folder from another machine or a read-only backup. If the folder does not exist, Docker creates it owned by root. If you created it with `mkdir`, it is owned by your login user, which is a different UID. Docker Desktop on macOS and Windows handles the permissions automatically.
+The container runs as a non-root user (UID 65534). On Linux hosts, create the folder and make it writable by that UID before the first run: `mkdir -p tournament-data && sudo chown 65534 tournament-data`. Without the `chown`, the container cannot write to the folder, and the app does not start: it checks at startup that it can write to the data folder and to every competition folder inside it, and names each folder it cannot write to. A file where one of those folders should be also stops it, and so does a link inside the data folder that points out of it (a link written as an absolute path counts, wherever it points). The message says what to do: move the file away, or put the folder itself inside the data folder in place of the link. The data folder itself may be a link. The same check applies outside Docker, for example after copying a tournament folder from another machine or a read-only backup. To move a tournament to another machine, restoring a backup archive there is the supported route: refer to [Backup and restore](../organisers/backup-and-restore.md#using-the-command-line-when-the-server-is-stopped). If the folder does not exist, Docker creates it owned by root. If you created it with `mkdir`, it is owned by your login user, which is a different UID. Docker Desktop on macOS and Windows handles the permissions automatically.
 
 Refer to the [hosting guide](hosting.md) for production deployments, and [operating modes](../organisers/operating-modes.md) for access control.
 
@@ -128,6 +128,8 @@ make go/build
 The binary is at `./bin/bracket-creator`.
 
 ## Upgrading
+
+Take a backup of the whole tournament before you upgrade (refer to [Backup and restore](../organisers/backup-and-restore.md)), then:
 
 * **Docker**: `docker pull ghcr.io/gitrgoliveira/bracket-creator-mobile:latest` to fetch the newer image, then stop the running container and start it again with the same `docker run` command.
 * **Homebrew**: `brew upgrade bracket-creator`.

@@ -17,7 +17,9 @@ Inspectability, repairability and diffability matter more here than normalisatio
 * **Inspectable.** An organiser can open the results in Excel or a text editor mid event.
 * **Repairable.** An organiser can correct a wrong cell by hand, and the app picks it up on reload.
 * **Diffable.** The whole tournament state can be committed to version control or copied to
-  a USB stick as a backup. Two copies can then be compared line by line.
+  a USB stick as a backup. Two copies can then be compared line by line. The app's own
+  backup archive (refer to [Backup archives and the backups/ folder](#backup-archives-and-the-backups-folder))
+  is the consistent way to take one while the server runs, and it leaves the password out.
   One exception: `tournament.md` holds the admin password in plain text, so strip or
   change it before sharing a copy. A `tournament.md` that carries an `admin_password` field
   may hold another password in plain text there. The app ignores that field and drops it the
@@ -665,7 +667,7 @@ a file without the dojo or the id column is completed from the roster on first l
 
 The app stores the backup archives it takes itself in `backups/` directly under the data root; a backup the organiser downloads is not kept there. The store recognises two backup kinds:
 
-1. **Scheduled backups (`scheduled`)**: full-tournament copies the server takes on its own. It checks once an hour and takes one when the newest scheduled copy is at least 24 hours old and the fingerprint differs from that copy's. A copy is also taken when the app is closed normally, if something changed since the newest daily copy. A crash or a pulled plug takes none. They use the filename pattern `<stamp>-scheduled.zip` (with an optional collision suffix such as `-2` or `-3`).
+1. **Scheduled backups (`scheduled`)**: full-tournament copies the server takes on its own. It checks once an hour and takes one when the newest scheduled copy is at least 24 hours old, the tournament has at least one competition, and the fingerprint differs from that copy's (and from any copy stamped later than now, as after a clock change). A copy is also taken when the app is closed normally, if something changed since the newest daily copy. A crash or a pulled plug takes none. They use the filename pattern `<stamp>-scheduled.zip` (with an optional collision suffix such as `-2` or `-3`).
 2. **Safety copies (`before-restore`)**: copies taken immediately before a restore replaces or removes data. They use the filename pattern `<stamp>-before-restore-<scope>.zip`, where scope is `tournament` or `competition` (also with an optional collision suffix).
 
 The timestamp `<stamp>` is formatted in UTC as `20060102T150405Z`. Valid backup filenames match the regular expression:
@@ -682,7 +684,7 @@ The `.restore/` folder under the data root holds temporary staging directories a
 
 - **Staging (`.restore/<token>/`)**: each restore operation generates a unique random token and stages files under `.restore/<token>/new/`. If a tournament restore is performed, `new/tournament.md` is staged with the preserved or updated admin password. Any files about to be replaced are moved to `.restore/<token>/old/`. All staged files and directories are synced to disk before renaming begins.
 - **Restore journal (`.restore/<token>/journal.json`)**: format version 1. The journal lists every rename step in order. Each step specifies a kind (`out` to move an existing path into `old/`, or `in` to move a staged path from `new/` into the live location) and the relative live path (`competitions/<id>`, `tournament.md`, `branding`, `sponsors`). The journal file is written atomically and its directory is synced to disk before any live path is moved.
-- **Pending number prefixes (`.restore/prefixes-pending.json`)**: if any restored competition's number prefix collides with one already in use by a competition left in place or by another competition in the same restore, its ID is written to `prefixes-pending.json` before the journal is written. Once the store releases its locks, the server reassigns non-colliding prefixes and removes this file.
+- **Pending number prefixes (`.restore/prefixes-pending.json`)**: if any restored competition's number prefix collides with one already in use by a competition left in place or by another competition in the same restore, its ID is written to `prefixes-pending.json` before the journal is written. Once the store releases its locks, the server (or the `mobile-app restore` command, straight after the swap) reassigns non-colliding prefixes and removes this file.
 - **Crash recovery**: when the store initializes (`Store.init`), it inspects `.restore/`. If a staging directory contains a complete journal, the store rolls forward all steps in order, skips steps already done, syncs the directories, and removes the journal and token folder. A staging folder left without a journal (meaning the process died before the live rename phase) is deleted. If `prefixes-pending.json` remains after a crash, the server reassigns the prefixes at startup.
 
 ### Archive format and manifest
@@ -723,10 +725,12 @@ The archive reader enforces these limits before extracting or staging any files:
 - Maximum 32 MB uncompressed per file entry.
 - Maximum 512 MB total uncompressed size across all entries.
 - Maximum 200:1 compression ratio per entry to protect against zip decompression bombs.
-- Maximum 64 MB for archive upload request bodies over HTTP.
-- Path safety: entry paths must be relative, forward-slash separated, clean, and contain no `..`, backslashes, control characters, or Windows drive prefixes. Symlinks and non-regular entries are rejected.
-- Layout validation: paths must fit within the allowed scope structure. A single-competition archive may only contain entries inside `competitions/<id>/`.
+- Path safety: entry paths must be relative, forward-slash separated, clean, and contain no `..`, backslashes, control characters, or Windows drive prefixes. Symlinks, directory entries, and other non-regular entries are rejected. Two entries with the same path, or paths that differ only in letter case, are rejected.
+- Layout validation: paths must fit within the allowed scope structure. A single-competition archive may only contain entries inside `competitions/<id>/` and holds exactly one competition (a `before-restore` competition copy holds at most one). Every competition folder must contain `config.md`.
 - Checksums and manifest consistency: every file in the archive must appear in `manifest.json`, every manifest entry must exist in the zip, and its uncompressed size and SHA-256 checksum must match.
+- Format version: an archive whose `format` is newer than 1 is refused.
+
+The HTTP restore routes also cap the upload body at 64 MB (`MaxImportBodyBytes`), before the archive reader sees it.
 
 ## 5. Write guarantees
 

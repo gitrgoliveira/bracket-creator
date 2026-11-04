@@ -122,7 +122,9 @@ bracket-creator mobile-app restore FILE [flags]
 | `--lock-password` | (none) | `false` (or `$LOCK_PASSWORD=true`) | Handle the restored password as in locked mode: password comes from `TOURNAMENT_PASSWORD_HASH`, so `--password` is not needed |
 | `--allow-running` | (none) | `false` | Allow restore even if matches are currently marked as running |
 
-When restoring into an empty folder or a folder with no existing `tournament.md` in file mode, `--password` is required so you can sign in to the restored tournament. In locked mode, `--lock-password` uses the hash from `TOURNAMENT_PASSWORD_HASH`. Such a folder accepts only a whole-tournament archive: a competition archive, or `--only`, is refused until a tournament exists.
+In file mode, `--password` is required when the folder has no `tournament.md` yet, or its `tournament.md` has no admin password, so you can sign in to the restored tournament. `--lock-password` waives that requirement: the server you then start with `--lock-password` takes its password from `TOURNAMENT_PASSWORD_HASH`, which the restore command itself never reads. Such a folder accepts only a whole-tournament archive: a competition archive, or `--only`, is refused until a tournament exists.
+
+Each competition ID may appear in only one of `--replace`, `--copy`, `--keep`, and `--remove`. `--undo` cannot be combined with `--only` or with any of those four flags, and it refuses an archive that is not a `before-restore` safety copy.
 
 Before applying changes, the command evaluates a dry run plan. If any competition requires a decision (such as replacing or copying an existing competition, or keeping or removing a competition missing from the backup), the command refuses and prints the required flags.
 

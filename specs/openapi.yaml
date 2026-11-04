@@ -40,7 +40,7 @@ info:
     answer 409 `check_in_not_in_self_run` for every caller, and the draw includes every
     participant whatever a competition's `checkInEnabled` says. Destructive routes (delete competition, invalidate, discard
     draw, result overrides, import, tournament restore, delete kept backup) and organiser-owned setup
-    (tournament/competition config, taking or listing backups, restore dry run) stay gated. Adding and editing participants
+    (tournament/competition config, taking, listing or downloading backups, restore dry run) stay gated. Adding and editing participants
     (`POST .../participants`, `PUT .../participants/{pid}`) is open to anyone. In the default `officiated` mode every
     `/api/` route keeps requiring `X-Tournament-Password` as described above.
     The team writes the public score sheet makes when a competitor names a bout's
@@ -893,7 +893,9 @@ paths:
 
         Requires only the sign-in `X-Tournament-Password` (no `X-Confirm-Password`).
 
-        Accepts multipart/form-data capped at 64 MB (`MaxImportBodyBytes`). In a
+        Accepts multipart/form-data capped at 64 MB (`MaxImportBodyBytes`). A body whose
+        `Content-Length` is over the cap is refused with 413; a larger body sent without
+        an honest `Content-Length` fails the multipart parse instead (400 `bad_restore_request`). In a
         full restore flow, the archive is uploaded twice: first to `/restore/plan`
         to inspect choices and warnings, then to `/restore` with operator decisions.
 
@@ -908,10 +910,13 @@ paths:
         | 400 | `archive_invalid` | Archive validation failed; carries reader reason code in `reason` and details in `detail` |
         | 400 | `not_a_safety_copy` | `undo=true` on an archive whose kind is not `before-restore` |
         | 400 | `competition_not_in_archive` | `only` names a competition not present in the archive |
+        | 400 | `bad_decision` | `undo=true` combined with `only` (an undo puts back the whole safety copy) |
         | 400 | `file_unreadable` | A file in the backup cannot be read |
         | 404 | `backup_not_found` | Kept backup file specified in `from` does not exist |
-        | 409 | `pending_write_unsettled` | A competition has a pending write (WAL) that could not be finished; restart the app |
-        | 409 | `nothing_to_restore` | Archive holds nothing to restore (or undo) |
+
+        An archive that holds nothing to restore is not a refusal here: the plan
+        answers 200 with `nothingToRestore: true` and a `message`, and only
+        `POST /api/tournament/restore` refuses it (409 `nothing_to_restore`).
       security:
         - TournamentPassword: []
       requestBody:
@@ -945,7 +950,7 @@ paths:
           description: >
             Invalid request or unreadable backup archive. Refusals change nothing.
             Codes: `bad_restore_request`, `bad_backup_name`, `archive_invalid`,
-            `not_a_safety_copy`, `competition_not_in_archive`, `file_unreadable`.
+            `not_a_safety_copy`, `competition_not_in_archive`, `bad_decision`, `file_unreadable`.
           content:
             application/json:
               schema:
@@ -958,14 +963,6 @@ paths:
                 $ref: '#/components/schemas/Error'
         '404':
           description: "Kept backup file specified in `from` not found (`code: backup_not_found`)."
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/RestoreRefusalError'
-        '409':
-          description: >
-            Conflict prevents restore planning. Refusals change nothing.
-            Codes: `pending_write_unsettled`, `nothing_to_restore`.
           content:
             application/json:
               schema:
@@ -994,7 +991,8 @@ paths:
         Accepts no `newPassword`: requests reaching this endpoint have passed sign-in,
         so the existing admin password is kept (the plan reports `kept`).
 
-        Multipart form data is capped at 64 MB (`MaxImportBodyBytes`). In a full restore flow,
+        Multipart form data is capped at 64 MB (`MaxImportBodyBytes`), refused as on
+        `/restore/plan` (413, or 400 `bad_restore_request` without an honest `Content-Length`). In a full restore flow,
         the archive is uploaded twice (plan, then restore).
 
         In self-run mode this is an organiser action: it requires `X-Tournament-Password`.
@@ -1079,7 +1077,9 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ConfirmPasswordError'
+                oneOf:
+                  - $ref: '#/components/schemas/ConfirmPasswordError'
+                  - $ref: '#/components/schemas/Error'
         '404':
           description: "Kept backup file specified in `from` not found (`code: backup_not_found`)."
           content:
@@ -1239,7 +1239,9 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ConfirmPasswordError'
+                oneOf:
+                  - $ref: '#/components/schemas/ConfirmPasswordError'
+                  - $ref: '#/components/schemas/Error'
         '404':
           description: "Backup file not found (`code: backup_not_found`)."
           content:

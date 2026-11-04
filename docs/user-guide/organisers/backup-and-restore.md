@@ -1,6 +1,6 @@
 # Backup and restore
 
-A backup is a zip archive of the whole tournament or of one competition. Restoring one puts that data back, after a mistake, a failed computer or an accidental change, and a restore can itself be undone. Taking a backup does not interrupt running matches.
+A backup is a zip archive of the whole tournament or of one competition. Restoring one puts that data back, after a mistake, a failed computer, or an accidental change, and a restore can itself be undone. Taking a backup does not interrupt running matches.
 
 ## The backup routine
 
@@ -14,17 +14,17 @@ You can back up the entire tournament at once, or back up any single competition
 
 ## Automatic daily copies
 
-While it runs, the server checks once an hour and takes a backup of the entire tournament when the newest daily copy is at least 24 hours old (or there is none yet):
+While it runs, the server checks when it starts and then once an hour, and takes a backup of the entire tournament when the newest daily copy is at least 24 hours old (or there is none yet):
 
 - A daily copy is created only if something has changed since the newest daily copy. Backups you download and safety copies do not count. Repeated identical saves, date-only refreshes, or actions that change no data do not trigger a backup.
-- A copy is also taken when the app is closed normally, if something changed since the newest daily copy. A crash or a pulled plug takes none.
+- A copy is also taken when the app is closed normally, if something changed since the newest daily copy. A crash, a pulled plug, or a shutdown that runs past its time limit takes none.
 - No daily copy is taken while the tournament has no competitions.
 - Daily copies are saved inside the `backups/` folder within your tournament data directory.
 - The app never deletes backup files automatically. Every copy remains on disk until you choose to delete it.
 
 ## Privacy of backup files
 
-A backup archive does not contain the admin password, so a tournament restore keeps the admin password you already have. In file mode, a restore into a data folder that has no tournament or no admin password yet needs one: on the command line you pass `--password`.
+A backup archive does not contain the admin password, so a tournament restore keeps the admin password you already have. In file mode, a whole-tournament restore into a data folder that has no tournament or no admin password yet needs one: on the command line you pass `--password`.
 
 A backup file does contain every competitor's full name, dojo, match record, and tournament results. Keep your backup files private and do not share them on public channels.
 
@@ -33,6 +33,8 @@ A backup file does contain every competitor's full name, dojo, match record, and
 1. In the admin console, click **Backup and restore** on the dashboard.
 2. To save the entire event, click **Back up the whole tournament**. Your browser downloads a zip file containing all competitions, participants, matches, tournament settings, logos, and sponsor images.
 3. To save a single competition, scroll to **Back up individual competitions** and click **Back up** next to that competition. Your browser downloads a zip file containing only that competition.
+
+The file is named after the tournament, then the competition ID for a single competition, then the time in UTC, for example `london-cup-mens-individual-20261104T031552Z.zip`. Downloading needs no second password. In self-run mode, every action on this page is for organisers only and needs the admin password.
 
 ## Restoring from a file
 
@@ -43,6 +45,8 @@ You can restore data from a file on your computer, or from one of the copies kep
 3. Review the plan warnings, including how many recorded results each competition will lose or change, and make your choices for each competition.
 4. Click **Restore**.
 5. Enter the admin password in the confirmation dialog to proceed.
+
+An uploaded file can be at most 64 MB. A larger backup restores from **Copies kept on this computer** or from the command line.
 
 ![Previewing a tournament restore plan with choices for existing and missing competitions](../../screenshots/backup-restore-plan.png)
 
@@ -58,25 +62,25 @@ When restoring, the plan presents you with decisions depending on what is curren
 
 - **For a competition that already exists in the folder**:
     - **Replace "<name>"**: overwrites the current competition with the one from the backup.
-    - **Restore as a copy named [ ]**: keeps your current competition intact and restores the backup copy under a new name. You must enter a name for the new copy.
+    - **Restore as a copy named:** keeps your current competition intact and restores the backup copy under a new name. You must type a name for the new copy in the box.
 - **For a competition that exists in the folder but is missing from the backup file** (when restoring a whole tournament):
     - **Keep "<name>"**: leaves the competition in your tournament folder as it is.
     - **Remove "<name>"**: deletes the competition from your tournament folder.
 
-Nothing is preselected. The **Restore** button remains disabled until you make a choice for every competition that requires one.
+Nothing is preselected. Until you make a choice for every competition that requires one, the button stays disabled and names the next open choice, for example `Choose what to do with "Mens Individual"` or `Enter name for copy of "Mens Individual"`.
 
 ### What is restored and what is not
 
 When you restore a backup:
 
-- **What comes back**: Competitor lists, pools, brackets, recorded scores, decisions, match histories, lineups, team members, overrides, and tournament settings.
+- **What comes back**: Competitor lists, pools, brackets, recorded scores, decisions, match histories, lineups, team members, and overrides. A whole-tournament restore also brings back the tournament settings, logos, and sponsor images. A competition backup, or **Restore only this one**, leaves the tournament settings as they are.
 - **Announcements are not restored**: Announcements live only in temporary server memory and expire on their own. They are never saved in backup files.
 - **Offline court devices**: Let every court device sync before you restore. If a court table device recorded scores while offline and reconnects after a restore:
     - If the device's recorded change is newer than the restored match record, the server applies the change. An older change is kept in the match's history instead.
     - If the restored record already has that match marked as finished, the late change is preserved in the match's audit history instead of altering the result.
     - If the restored tournament no longer holds that match (for example, if the competition was removed or was not yet drawn in the backup), the late change is refused.
-- **Tournament mode change warning**: If a tournament restore changes the operating mode (for example, from officiated mode to self-run mode), the plan displays a warning because the mode affects who is allowed to enter scores.
-- **Missing shiaijo warning**: If a restored competition uses a shiaijo that the restored tournament settings do not have, the plan warns you. Its matches there cannot be called until you add the shiaijo back in the tournament settings or move those matches to another shiaijo.
+- **Tournament mode change warning**: If a tournament restore changes the operating mode (for example, from officiated mode to self-run mode), the plan displays a warning because the mode changes what the public page can do, such as whether anyone can enter scores.
+- **Missing shiaijo warning**: If a competition, restored or staying in place, uses a shiaijo that the restored tournament settings do not have, the plan warns you. Its matches there cannot be called until you add the shiaijo back in the tournament settings or move those matches to another shiaijo.
 - **Busy shiaijo warning**: If a restored competition comes back with a match running on a shiaijo where another competition is running a match now, the plan warns you. Send one of the two matches back to the queue.
 - **Number prefix collisions**: If a restored competition uses a competitor number prefix that a competition staying in place, or another competition in the same restore, already uses, the app assigns a new prefix automatically. A warning tells you to reprint tags for that competition.
 - **Running matches**: If a competition being replaced or removed has matches in progress on court, the plan warns you. The page lets the restore go ahead, and those matches return to the state stored in the backup. On the command line, the same restore is refused unless you pass `--allow-running`.
@@ -88,9 +92,14 @@ A refused restore changes nothing. The page tells you why, and the common reason
 
 - **That name is already used**: the name you typed for a copy is taken. Pick another name.
 - **Another competition already has that name**: a competition from the backup has the same name as one that stays in place. Rename one of them, or restore it as a copy with a new name.
-- **The competitions changed since the restore was checked**: someone added, removed or renamed a competition after the plan was made. Check the plan again, then restore.
+- **The competitions changed since the restore was checked**: someone added or removed a competition after the plan was made. Check the plan again, then restore.
 - **A competition folder in the app has no settings file**: that competition cannot be copied before the restore replaces or removes it. Keep it, or restore the backup's competition as a copy.
 - **A competition has a write that could not be finished**: restart the app, then try again.
+- **The backup file could not be read from the upload**: the upload failed. Choose the file again.
+- **request body too large**: the file is over 64 MB. Restore it from **Copies kept on this computer** or from the command line.
+- **A file in the backup cannot be read**: the backup is damaged. Try another copy.
+- **That backup is not there any more**: the kept copy was deleted, for example from another browser tab. Reload the list.
+- **Wrong password. Nothing was restored.**: the password typed in the confirmation dialog was wrong. Type it again.
 - **The file is not a backup this app can restore**: the file is damaged, was changed after it was made, or is not a backup archive.
 
 ## Safety copies and undoing a restore
@@ -107,18 +116,22 @@ Clicking **Undo this restore** prompts for the admin password and immediately pu
 - Competitions that were removed are brought back.
 - Competitions that were created or restored as copies are removed.
 - Competitions that were kept remain untouched.
-- After a tournament restore, the tournament settings, logos and sponsor images return as well.
+- After a tournament restore, the tournament settings, logos, and sponsor images return as well.
 
-An undo is itself a restore, so the app takes a new safety copy before undoing, and you can undo the undo.
+The card, and its button, last until you leave or reload the page. After that, click **Restore** on the `before-restore` copy in the list instead, which asks the usual choices.
+
+An undo is itself a restore, so the app takes a new safety copy before undoing. To reverse an undo, restore that new safety copy from **Copies kept on this computer**.
 
 If you later want to restore an older `before-restore` file from the **Copies kept on this computer** list, clicking **Restore** on that row opens the regular restore planner and asks all the normal choices. Only the immediate **Undo this restore** button shown right after a restore executes the automatic undo workflow.
 
 ## Copies kept on this computer
 
-The **Copies kept on this computer** section lists all backup archives saved inside the data directory's `backups/` folder:
+The **Copies kept on this computer** section lists the backup archives the app saved inside the data directory's `backups/` folder:
 
-- **Daily**: automatic copies, at most one a day, taken when the data changed.
+- **Daily**: automatic copies, taken once a day when the data changed, and when the app is closed normally after a change.
 - **Before restore**: safety copies taken immediately before a restore operation.
+
+A file you copy into `backups/` yourself, such as a downloaded backup, is not listed: the list shows only files with the app's own names. Restore such a file with **Restore from a file**.
 
 Each copy displays its creation timestamp and file size, and provides three actions:
 
@@ -160,6 +173,6 @@ bracket-creator mobile-app restore ./backup-2026.zip \
 
 Add `--only ID` to restore one competition from a tournament archive, `--remove ID` to remove a competition that the backup does not hold, and `--undo` with a `before-restore` file to undo a restore. The [mobile-app command reference](../commands/mobile-app.md#mobile-app-restore) lists every flag.
 
-Into a folder with no tournament yet, only a whole-tournament archive can be restored, and in file mode you must pass `--password` to set the admin password.
+Into a folder with no tournament yet, only a whole-tournament archive can be restored, and you must pass `--password` to set the admin password, unless the server runs in locked mode and you pass `--lock-password`.
 
 If you run `mobile-app restore` without specifying decisions for competitions that require them, the command does not make any changes. Instead, it prints the required choices so you can re-run with the appropriate `--replace`, `--copy`, `--keep`, or `--remove` flags.

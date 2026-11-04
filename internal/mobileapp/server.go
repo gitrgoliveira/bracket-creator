@@ -194,6 +194,7 @@ func NewRouterWithHub(store *state.Store, eng *engine.Engine, res *resources.Res
 	adminSmallBody.Use(RequireConfirmPasswordForDelete(verifier))
 	RegisterCompetitionHandlers(adminSmallBody, store, eng, hub)
 	RegisterDraftEstimateHandlers(adminSmallBody, store, eng)
+	RegisterCalendarHandlers(adminSmallBody, store, eng)
 	RegisterParticipantHandlers(adminSmallBody, store, eng, hub)
 	RegisterMatchHandlers(adminSmallBody, eng, store, store, hub, verifier, store)
 	RegisterMatchHistoryHandler(adminSmallBody, store)

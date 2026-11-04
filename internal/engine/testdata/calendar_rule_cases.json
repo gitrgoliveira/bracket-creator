@@ -1,0 +1,272 @@
+{
+  "about": "Language-neutral case table shared between Go and browser calendar rules.",
+  "dayBreaks": [
+    {
+      "name": "day 0 pause applies to any day",
+      "days": ["01-07-2026", "02-07-2026"],
+      "date": "01-07-2026",
+      "pauses": [
+        {"name": "Lunch", "start": "12:00", "length": "1h", "day": 0}
+      ],
+      "expected": [
+        {"name": "Lunch", "start": "12:00", "end": "13:00"}
+      ]
+    },
+    {
+      "name": "day specific pauses filter correctly",
+      "days": ["01-07-2026", "02-07-2026"],
+      "date": "01-07-2026",
+      "pauses": [
+        {"name": "Day 1 Only", "start": "10:00", "length": "30m", "day": 1},
+        {"name": "Day 2 Only", "start": "11:00", "length": "30m", "day": 2}
+      ],
+      "expected": [
+        {"name": "Day 1 Only", "start": "10:00", "end": "10:30"}
+      ]
+    },
+    {
+      "name": "pause past tournament day count is ignored",
+      "days": ["01-07-2026", "02-07-2026"],
+      "date": "01-07-2026",
+      "pauses": [
+        {"name": "Day 3 Out", "start": "10:00", "length": "30m", "day": 3}
+      ],
+      "expected": []
+    },
+    {
+      "name": "invalid start or zero length ignored",
+      "days": ["01-07-2026"],
+      "date": "01-07-2026",
+      "pauses": [
+        {"name": "Bad Start", "start": "invalid", "length": "30m", "day": 0},
+        {"name": "Zero Length", "start": "10:00", "length": "0m", "day": 0}
+      ],
+      "expected": []
+    },
+    {
+      "name": "a pause written 9:30 one-digit hour is used",
+      "days": ["01-07-2026"],
+      "date": "01-07-2026",
+      "pauses": [
+        {"name": "Morning", "start": "9:30", "length": "30m", "day": 0}
+      ],
+      "expected": [
+        {"name": "Morning", "start": "09:30", "end": "10:00"}
+      ]
+    },
+    {
+      "name": "a Day 2 pause on day 2",
+      "days": ["01-07-2026", "02-07-2026"],
+      "date": "02-07-2026",
+      "pauses": [
+        {"name": "Day 1 Only", "start": "10:00", "length": "30m", "day": 1},
+        {"name": "Day 2 Only", "start": "11:00", "length": "30m", "day": 2}
+      ],
+      "expected": [
+        {"name": "Day 2 Only", "start": "11:00", "end": "11:30"}
+      ]
+    },
+    {
+      "name": "a date not in days gets only the Day 0 pauses",
+      "days": ["01-07-2026", "02-07-2026"],
+      "date": "05-07-2026",
+      "pauses": [
+        {"name": "Day 0", "start": "12:00", "length": "1h", "day": 0},
+        {"name": "Day 1", "start": "10:00", "length": "30m", "day": 1}
+      ],
+      "expected": [
+        {"name": "Day 0", "start": "12:00", "end": "13:00"}
+      ]
+    },
+    {
+      "name": "two pauses come back sorted by start",
+      "days": ["01-07-2026"],
+      "date": "01-07-2026",
+      "pauses": [
+        {"name": "Afternoon", "start": "15:00", "length": "30m", "day": 0},
+        {"name": "Lunch", "start": "12:00", "length": "1h", "day": 0}
+      ],
+      "expected": [
+        {"name": "Lunch", "start": "12:00", "end": "13:00"},
+        {"name": "Afternoon", "start": "15:00", "end": "15:30"}
+      ]
+    }
+  ],
+  "replayCourt": [
+    {
+      "name": "simple matches with buffer",
+      "start": "09:00",
+      "runs": [
+        {"count": 2, "minutes": 15}
+      ],
+      "breaks": [],
+      "bufferPct": 10,
+      "expectedDurationMinutes": 33,
+      "expectedEnd": "09:33"
+    },
+    {
+      "name": "slot starting inside a pause pushes to end of pause",
+      "start": "12:15",
+      "runs": [
+        {"count": 1, "minutes": 15}
+      ],
+      "breaks": [
+        {"start": "12:00", "end": "13:00"}
+      ],
+      "bufferPct": 0,
+      "expectedDurationMinutes": 60,
+      "expectedEnd": "13:15"
+    },
+    {
+      "name": "overlapping pauses merge as one fixed-point skip",
+      "start": "12:10",
+      "runs": [
+        {"count": 1, "minutes": 10}
+      ],
+      "breaks": [
+        {"start": "12:00", "end": "12:45"},
+        {"start": "12:30", "end": "13:15"}
+      ],
+      "bufferPct": 0,
+      "expectedDurationMinutes": 75,
+      "expectedEnd": "13:25"
+    },
+    {
+      "name": "past midnight unwrapped",
+      "start": "23:00",
+      "runs": [
+        {"count": 2, "minutes": 45}
+      ],
+      "breaks": [],
+      "bufferPct": 0,
+      "expectedDurationMinutes": 90,
+      "expectedEnd": "24:30"
+    },
+    {
+      "name": "kachinuki best scenario with pause",
+      "start": "11:30",
+      "runs": [
+        {"count": 3, "minutes": 10}
+      ],
+      "breaks": [
+        {"start": "12:00", "end": "13:00"}
+      ],
+      "bufferPct": 0,
+      "expectedDurationMinutes": 30,
+      "expectedEnd": "12:00"
+    },
+    {
+      "name": "kachinuki avg scenario with pause",
+      "start": "11:30",
+      "runs": [
+        {"count": 3, "minutes": 14}
+      ],
+      "breaks": [
+        {"start": "12:00", "end": "13:00"}
+      ],
+      "bufferPct": 0,
+      "expectedDurationMinutes": 42,
+      "expectedEnd": "12:12"
+    },
+    {
+      "name": "kachinuki worst scenario with pause",
+      "start": "11:30",
+      "runs": [
+        {"count": 3, "minutes": 18}
+      ],
+      "breaks": [
+        {"start": "12:00", "end": "13:00"}
+      ],
+      "bufferPct": 0,
+      "expectedDurationMinutes": 108,
+      "expectedEnd": "13:18"
+    },
+    {
+      "name": "two runs on one court with buffer and pause",
+      "start": "11:00",
+      "runs": [
+        {"count": 2, "minutes": 20},
+        {"count": 2, "minutes": 30}
+      ],
+      "breaks": [
+        {"start": "12:00", "end": "13:00"}
+      ],
+      "bufferPct": 10,
+      "expectedDurationMinutes": 160,
+      "expectedEnd": "13:40"
+    },
+    {
+      "name": "past midnight through a pause",
+      "start": "23:00",
+      "runs": [
+        {"count": 2, "minutes": 40}
+      ],
+      "breaks": [
+        {"start": "23:20", "end": "23:50"}
+      ],
+      "bufferPct": 0,
+      "expectedDurationMinutes": 90,
+      "expectedEnd": "24:30"
+    }
+  ],
+  "pastMidnight": [
+    {
+      "name": "1439 false",
+      "endMins": 1439,
+      "expected": false
+    },
+    {
+      "name": "1440 false",
+      "endMins": 1440,
+      "expected": false
+    },
+    {
+      "name": "1441 true",
+      "endMins": 1441,
+      "expected": true
+    },
+    {
+      "name": "1500 true",
+      "endMins": 1500,
+      "expected": true
+    }
+  ],
+  "overlaps": [
+    {
+      "name": "overlapping windows",
+      "a": {"start": 540, "end": 600},
+      "b": {"start": 570, "end": 630},
+      "expected": true
+    },
+    {
+      "name": "touching windows do not overlap",
+      "a": {"start": 540, "end": 600},
+      "b": {"start": 600, "end": 660},
+      "expected": false
+    },
+    {
+      "name": "touching windows reversed do not overlap",
+      "a": {"start": 600, "end": 660},
+      "b": {"start": 540, "end": 600},
+      "expected": false
+    },
+    {
+      "name": "disjoint windows do not overlap",
+      "a": {"start": 540, "end": 600},
+      "b": {"start": 700, "end": 760},
+      "expected": false
+    },
+    {
+      "name": "enclosed window overlaps",
+      "a": {"start": 500, "end": 700},
+      "b": {"start": 550, "end": 650},
+      "expected": true
+    },
+    {
+      "name": "empty window does not overlap",
+      "a": {"start": 540, "end": 540},
+      "b": {"start": 500, "end": 600},
+      "expected": false
+    }
+  ]
+}

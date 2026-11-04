@@ -5877,6 +5877,83 @@ paths:
         '401':
           description: Missing or incorrect admin password.
 
+  /api/schedule/calendar:
+    get:
+      tags: [competitions]
+      summary: Get the tournament schedule calendar
+      description: >
+        Produces the complete schedule calendar for the active tournament: days,
+        breaks, shiaijo lanes, unused pauses, and placed competitions with their
+        time windows and clash partners.
+      security:
+        - TournamentPassword: []
+      responses:
+        '200':
+          description: The tournament schedule calendar result.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TournamentCalendarResult'
+        '401':
+          description: Missing or incorrect admin password.
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/schedule/calendar/preview:
+    get:
+      tags: [competitions]
+      summary: Preview schedule placement and court overlaps for a competition
+      description: >
+        Calculates the schedule placement of an existing competition on a specified
+        day, start time, and court allocation, and detects overlaps with other placed
+        competitions on that day.
+      security:
+        - TournamentPassword: []
+      parameters:
+        - in: query
+          name: competitionId
+          required: true
+          schema:
+            type: string
+          description: Competition ID to preview.
+        - in: query
+          name: date
+          required: true
+          schema:
+            type: string
+            pattern: '^[0-9]{2}-[0-9]{2}-[0-9]{4}$'
+          example: "01-06-2026"
+          description: Competition day in DD-MM-YYYY format, the spelling the calendar uses for its days. Must be one of the tournament days.
+        - in: query
+          name: startTime
+          required: true
+          schema:
+            type: string
+            pattern: '^[0-9]{2}:[0-9]{2}$'
+          description: Start time, 24-hour HH:MM.
+        - in: query
+          name: courts
+          required: true
+          schema:
+            type: string
+          example: "B,C"
+          description: Comma-separated shiaijo labels (e.g. B,C).
+      responses:
+        '200':
+          description: The preview placement and overlaps.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CalendarPreviewResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          description: Missing or incorrect admin password.
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
   # ── Viewer (Public, no auth) ───────────────────────────────────────────────
 
   /api/viewer/tournament:
@@ -8860,6 +8937,217 @@ components:
                   chosen:
                     type: integer
                     description: The shiaijo count asked for.
+
+    TournamentCalendarResult:
+      type: object
+      required: [days, courts, unusedPauses, competitions]
+      properties:
+        days:
+          type: array
+          items:
+            $ref: '#/components/schemas/CalendarDay'
+        courts:
+          type: array
+          items:
+            type: string
+          description: Shiaijo labels configured for the tournament and competitions.
+        unusedPauses:
+          type: array
+          items:
+            $ref: '#/components/schemas/UnusedPause'
+        competitions:
+          type: array
+          items:
+            $ref: '#/components/schemas/CalendarCompetition'
+
+    CalendarDay:
+      type: object
+      required: [day, date, breaks]
+      properties:
+        day:
+          type: integer
+          description: 1-based day index.
+        date:
+          type: string
+          description: Date string for the day (DD-MM-YYYY).
+        breaks:
+          type: array
+          items:
+            $ref: '#/components/schemas/CalendarBreak'
+
+    CalendarBreak:
+      type: object
+      required: [name, start, end, startMins, endMins]
+      properties:
+        name:
+          type: string
+        start:
+          type: string
+          description: Clock start time, HH:MM.
+        end:
+          type: string
+          description: Clock end time, HH:MM.
+        startMins:
+          type: integer
+          description: Start time in minutes from midnight.
+        endMins:
+          type: integer
+          description: End time in minutes from midnight.
+
+    UnusedPause:
+      type: object
+      required: [name, reason]
+      properties:
+        name:
+          type: string
+        reason:
+          type: string
+          description: Reason why the pause was not applied to the schedule.
+
+    CalendarCompetition:
+      type: object
+      required: [id, name, kind, status, placement, clashPartners]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        kind:
+          type: string
+        status:
+          type: string
+          enum: [setup, draw-ready, pools, knockout, completed, invalid]
+        configVersion:
+          type: string
+          pattern: '^[0-9a-f]{16}$'
+          description: 16-character hex config version hash.
+        placement:
+          $ref: '#/components/schemas/CompetitionPlacement'
+        clashPartners:
+          type: array
+          items:
+            type: string
+          description: IDs of other competitions with overlapping schedule windows.
+
+    CompetitionPlacement:
+      type: object
+      required: [placed]
+      properties:
+        placed:
+          type: boolean
+        notPlacedReason:
+          type: string
+        day:
+          type: integer
+          description: 1-based day index in the tournament days.
+        courts:
+          type: array
+          items:
+            type: string
+          description: Shiaijo labels allocated to this competition.
+        windows:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/CourtWindow'
+          description: Schedule windows per shiaijo label.
+        lengthSource:
+          type: string
+          enum: [estimate, expected, draw, minimum]
+        lengthReason:
+          type: string
+        bestEnd:
+          type: string
+          description: Best-case end time (HH:MM) for kachinuki competitions.
+        worstEnd:
+          type: string
+          description: Worst-case end time (HH:MM) for kachinuki competitions.
+        replayRecipes:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/ReplayRecipe'
+        pastMidnight:
+          type: boolean
+        minutes:
+          type: integer
+          description: Total duration in minutes.
+
+    CourtWindow:
+      type: object
+      required: [start, end]
+      properties:
+        start:
+          type: integer
+          description: Start time in minutes from midnight.
+        end:
+          type: integer
+          description: End time in minutes from midnight.
+
+    ReplayRecipe:
+      type: object
+      properties:
+        runs:
+          type: array
+          items:
+            $ref: '#/components/schemas/ReplayRun'
+        bestRuns:
+          type: array
+          items:
+            $ref: '#/components/schemas/ReplayRun'
+        worstRuns:
+          type: array
+          items:
+            $ref: '#/components/schemas/ReplayRun'
+        bufferPct:
+          type: integer
+        floorMinutes:
+          type: integer
+        slotLengths:
+          type: array
+          items:
+            type: integer
+
+    ReplayRun:
+      type: object
+      required: [count, minutes]
+      properties:
+        count:
+          type: integer
+        minutes:
+          type: integer
+
+    CalendarPreviewResponse:
+      type: object
+      required: [competitionId, status, placement, overlaps]
+      properties:
+        competitionId:
+          type: string
+        status:
+          type: string
+          enum: [setup, draw-ready, pools, knockout, completed, invalid]
+        placement:
+          $ref: '#/components/schemas/CompetitionPlacement'
+        overlaps:
+          type: array
+          items:
+            $ref: '#/components/schemas/CalendarOverlap'
+
+    CalendarOverlap:
+      type: object
+      required: [competitionId, name, court, start, end]
+      properties:
+        competitionId:
+          type: string
+        name:
+          type: string
+        court:
+          type: string
+          description: Shiaijo label where the overlap occurs.
+        start:
+          type: integer
+          description: Start time in minutes from midnight of the other competition's window.
+        end:
+          type: integer
+          description: End time in minutes from midnight of the other competition's window.
 
     ChusenCandidateGroup:
       type: object

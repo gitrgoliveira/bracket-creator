@@ -307,6 +307,104 @@ func EstimateSchedule(in EstimateInput) ScheduleEstimate {
 	}
 }
 
+// estimateCourtCount returns the effective court count for comp: len(comp.Courts),
+// defaulting to 1 when empty, clamped to MaxCourts.
+func estimateCourtCount(comp *state.Competition) int {
+	if comp == nil {
+		return 1
+	}
+	numCourts := len(comp.Courts)
+	if numCourts == 0 {
+		// Empty courts list defaults to a single court, consistent with the
+		// assigners (pools.go / bracket.go) and EstimateSchedule's NumCourts
+		// clamp. Returning zero here would under-estimate a competition that
+		// relies on that 1-court default.
+		numCourts = 1
+	}
+	if numCourts > MaxCourts {
+		// Clamp to the court cap, the same defensive bound EstimateSchedule
+		// applies. A malformed/hostile Competition with an oversized Courts
+		// slice would otherwise drive large per-court allocations
+		// (courtCursor/matchMin/perCourtList), CodeQL go/uncontrolled-allocation-size.
+		numCourts = MaxCourts
+	}
+	return numCourts
+}
+
+// courtShare returns court ci's share of count matches across numCourts.
+// It is the estimate's intentional even spread, remainder to the first courts,
+// and the post-draw assigners do no spread of their own because their matches
+// already carry a court.
+func courtShare(count, numCourts, ci int) int {
+	if numCourts <= 0 || count <= 0 || ci < 0 || ci >= numCourts {
+		return 0
+	}
+	share := count / numCourts
+	if ci < count%numCourts {
+		share++
+	}
+	return share
+}
+
+// normalizedEstimateInputs returns defensive shallow copies of comp and tournament
+// with tournament defaults, competition defaults, and the team-size default applied.
+func normalizedEstimateInputs(comp *state.Competition, tournament *state.Tournament) (*state.Competition, *state.Tournament) {
+	// EstimateForCounts is the one engine entry point that normalizes its own
+	// inputs, and deliberately so: it is exported and takes raw structs rather
+	// than loading them, so it has no store guarantee to lean on. A caller
+	// handing it a Tournament with SlowestCourtBufferPct unset genuinely needs
+	// the 10% default filled in (0 means "unset" for that field, not "no
+	// buffer"). Everywhere else in this package the values came from
+	// Store.LoadCompetition / LoadTournament, both of which normalize on the way
+	// out, so re-applying defaults there was dead weight and has been removed.
+	//
+	// Shallow-copy first so normalizing does not mutate the caller's structs.
+	var compCopy state.Competition
+	if comp != nil {
+		compCopy = *comp
+	}
+	normComp := &compCopy
+	var tournCopy state.Tournament
+	if tournament != nil {
+		tournCopy = *tournament
+	}
+	normTourn := &tournCopy
+	state.ApplyTournamentDefaults(normTourn)
+	state.ApplyCompetitionDefaults(normComp)
+	// Team-size default, same guard as competition.go (StartCompetition) and
+	// swiss.go: a team competition with an omitted TeamSize uses the FIK
+	// 5-person default. Without this, perMatchElapsedMinutes would see
+	// TeamSize==0 and fall through to the individual-match formula,
+	// under-estimating a team competition's duration.
+	if normComp.IsTeam() && normComp.TeamSize == 0 {
+		normComp.TeamSize = 5
+	}
+	return normComp, normTourn
+}
+
+// estimateScenarios returns best, avg, worst for kachinuki with the avg the headline,
+// else the one nominal scenario. Inputs must already be normalized.
+func estimateScenarios(comp *state.Competition, tournament *state.Tournament) []schedScenario {
+	if comp.IsKachinuki() {
+		bestBouts, avgBouts, worstBouts := kachinukiBoutRange(comp.TeamSize)
+		// Order: best, avg, worst. Each scenario's per-match minutes come from
+		// kachinukiBoutRange's own bout counts, NOT from the nominal walk: the
+		// two are equal today only because perMatchElapsedMinutes uses
+		// bouts = TeamSize, and leaning on that coincidence meant retuning the
+		// nominal rule could silently stop BestCaseMinutes being the best case
+		// (or render Best > Average) while avg and worst stayed right.
+		return []schedScenario{
+			{perMatchElapsedMinutesBouts(comp, tournament, false, bestBouts), perMatchElapsedMinutesBouts(comp, tournament, true, bestBouts)},
+			{perMatchElapsedMinutesBouts(comp, tournament, false, avgBouts), perMatchElapsedMinutesBouts(comp, tournament, true, avgBouts)},
+			{perMatchElapsedMinutesBouts(comp, tournament, false, worstBouts), perMatchElapsedMinutesBouts(comp, tournament, true, worstBouts)},
+		}
+	}
+	return []schedScenario{{
+		perMatchElapsedMinutes(comp, tournament, false /*isKnockout*/),
+		perMatchElapsedMinutes(comp, tournament, true /*isKnockout*/),
+	}}
+}
+
 // EstimateForCounts returns a ScheduleEstimate for a pre-draw competition
 // (no generated matches yet) given the expected number of pool matches and
 // knockout matches. It reuses the slot-model primitives (perMatchElapsedMinutes,
@@ -364,50 +462,8 @@ func EstimateForCounts(poolCount, knockoutCount int, comp *state.Competition, to
 		knockoutCount = 0
 	}
 
-	courts := comp.Courts
-	numCourts := len(courts)
-	if numCourts == 0 {
-		// Empty courts list defaults to a single court, consistent with the
-		// assigners (pools.go / bracket.go) and EstimateSchedule's NumCourts
-		// clamp. Returning zero here would under-estimate a competition that
-		// relies on that 1-court default.
-		numCourts = 1
-	}
-	if numCourts > MaxCourts {
-		// Clamp to the court cap, the same defensive bound EstimateSchedule
-		// applies. A malformed/hostile Competition with an oversized Courts
-		// slice would otherwise drive large per-court allocations
-		// (courtCursor/matchMin/perCourtList), CodeQL go/uncontrolled-allocation-size.
-		numCourts = MaxCourts
-	}
-
-	// EstimateForCounts is the one engine entry point that normalizes its own
-	// inputs, and deliberately so: it is exported and takes raw structs rather
-	// than loading them, so it has no store guarantee to lean on. A caller
-	// handing it a Tournament with SlowestCourtBufferPct unset genuinely needs
-	// the 10% default filled in (0 means "unset" for that field, not "no
-	// buffer"). Everywhere else in this package the values came from
-	// Store.LoadCompetition / LoadTournament, both of which normalize on the way
-	// out, so re-applying defaults there was dead weight and has been removed.
-	//
-	// Shallow-copy first so normalizing does not mutate the caller's structs.
-	compCopy := *comp
-	comp = &compCopy
-	var tournCopy state.Tournament
-	if tournament != nil {
-		tournCopy = *tournament
-	}
-	tournament = &tournCopy
-	state.ApplyTournamentDefaults(tournament)
-	state.ApplyCompetitionDefaults(comp)
-	// Team-size default, same guard as competition.go (StartCompetition) and
-	// swiss.go: a team competition with an omitted TeamSize uses the FIK
-	// 5-person default. Without this, perMatchElapsedMinutes would see
-	// TeamSize==0 and fall through to the individual-match formula,
-	// under-estimating a team competition's duration.
-	if comp.IsTeam() && comp.TeamSize == 0 {
-		comp.TeamSize = 5
-	}
+	numCourts := estimateCourtCount(comp)
+	comp, tournament = normalizedEstimateInputs(comp, tournament)
 
 	// Common pause parameters (same as the slot assigners).
 	// tournament is always non-nil here (copies from caller or zero-value tournCopy).
@@ -415,80 +471,31 @@ func EstimateForCounts(poolCount, knockoutCount int, comp *state.Competition, to
 
 	// Convert clock times back to durations from dayStart.
 	// tournament is always non-nil here (see copy above).
-	bufferMultiplier := 1.0
+	bufferPct := 0
 	if tournament.SlowestCourtBufferPct > 0 {
-		bufferMultiplier = 1.0 + float64(tournament.SlowestCourtBufferPct)/100.0
+		bufferPct = tournament.SlowestCourtBufferPct
 	}
 
 	// walk runs the per-court cursor simulation for one or more per-match
-	// scenarios in a SINGLE pass over the match distribution, returning each
-	// scenario's (perCourtList, slowest-court buffered duration), positionally.
-	// The distribution (base/rem per court) is identical across scenarios —
-	// pool matches spread evenly across courts, remainder matches to the first
-	// courts, an intentional even-distribution heuristic for this pre-draw
-	// estimate (the post-draw assigner does NO distribution of its own: it
-	// schedules matches that already carry a Court assignment) — only the
-	// per-match minutes, and thus how each cursor lands relative to pauses,
-	// differ, so a cursor per scenario advances together court-by-court
-	// (mp-gmcg review F7). This shares the distribution derivation across
-	// scenarios; the kachinuki caller below still discards two of the three
-	// perCourtList builds (it only surfaces the average one) — negligible on
-	// this admin page-load endpoint, so left as is (review E7), but the
-	// sharing is scoped to the distribution, not a claim that nothing is
-	// discarded.
-	//
-	// Pure match minutes per court are tracked separately from the cursor so
-	// the slowest-court buffer applies to match time ONLY, never to pause
-	// dead-time (those have no runtime variance to pad). Mirrors EstimateSchedule,
-	// which buffers match time alone.
+	// scenarios via replayCourt, returning each scenario's (perCourtList,
+	// slowest-court buffered duration), positionally.
 	walk := func(scenarios []schedScenario) ([][]int, []float64) {
 		ns := len(scenarios)
-		courtCursor := make([][]time.Time, ns)
-		matchMin := make([][]float64, ns)
-		for s := range scenarios {
-			courtCursor[s] = make([]time.Time, numCourts)
-			for i := range courtCursor[s] {
-				courtCursor[s][i] = dayStart
-			}
-			matchMin[s] = make([]float64, numCourts)
-		}
-
-		for _, spec := range []struct {
-			count    int
-			perMatch func(schedScenario) int
-		}{
-			{poolCount, func(sc schedScenario) int { return sc.poolPerMatch }},
-			{knockoutCount, func(sc schedScenario) int { return sc.knockoutPerMatch }},
-		} {
-			base := spec.count / numCourts
-			rem := spec.count % numCourts
-			for ci := 0; ci < numCourts; ci++ {
-				n := base
-				if ci < rem {
-					n++
-				}
-				for s := range scenarios {
-					pm := spec.perMatch(scenarios[s])
-					for range n {
-						courtCursor[s][ci] = skipBreaks(courtCursor[s][ci], breaks)
-						courtCursor[s][ci] = courtCursor[s][ci].Add(time.Duration(pm) * time.Minute)
-					}
-					matchMin[s][ci] += float64(n * pm)
-				}
-			}
-		}
-
 		perCourtLists := make([][]int, ns)
 		maxDurations := make([]float64, ns)
 		for s := range scenarios {
 			perCourtLists[s] = make([]int, numCourts)
-			for ci, cur := range courtCursor[s] {
-				raw := cur.Sub(dayStart).Minutes()
-				// fixedOverhead = pause dead-time
-				// (raw minus pure match time). Buffer the match time only; add the
-				// fixed overhead back unbuffered.
-				fixedOverhead := raw - matchMin[s][ci]
-				buffered := fixedOverhead + matchMin[s][ci]*bufferMultiplier
+		}
+
+		for ci := 0; ci < numCourts; ci++ {
+			nPool := courtShare(poolCount, numCourts, ci)
+			nKO := courtShare(knockoutCount, numCourts, ci)
+			for s := range scenarios {
+				runs := []ReplayRun{
+					{Count: nPool, Minutes: scenarios[s].poolPerMatch},
+					{Count: nKO, Minutes: scenarios[s].knockoutPerMatch},
+				}
+				_, buffered := replayCourt(dayStart, runs, breaks, bufferPct)
 				perCourtLists[s][ci] = int(math.Round(buffered))
 				if buffered > maxDurations[s] {
 					maxDurations[s] = buffered
@@ -498,27 +505,18 @@ func EstimateForCounts(poolCount, knockoutCount int, comp *state.Competition, to
 		return perCourtLists, maxDurations
 	}
 
+	scenarios := estimateScenarios(comp, tournament)
+	perCourts, maxes := walk(scenarios)
+
 	// Kachinuki (mp-gmcg): the bout count is variable, so price three
-	// scenarios. The headline TotalDurationMinutes / PerCourtMinutes is
-	// the AVERAGE; best (= the nominal walk) and worst bracket it.
+	// scenarios from estimateScenarios. The headline TotalDurationMinutes / PerCourtMinutes is
+	// the AVERAGE; best and worst bracket it.
 	// IsKachinuki requires TeamSize >= 2 (review: this used to accept
 	// TeamSize > 0, so a TeamSize == 1 competition priced a fake best/avg/worst
 	// range here while every engine kachinuki function refused it as
 	// non-kachinuki — a single fighter per side has no "winner stays on" to
 	// range-price).
 	if comp.IsKachinuki() {
-		bestBouts, avgBouts, worstBouts := kachinukiBoutRange(comp.TeamSize)
-		// Order: best, avg, worst. Each scenario's per-match minutes come from
-		// kachinukiBoutRange's own bout counts, NOT from the nominal walk: the
-		// two are equal today only because perMatchElapsedMinutes uses
-		// bouts = TeamSize, and leaning on that coincidence meant retuning the
-		// nominal rule could silently stop BestCaseMinutes being the best case
-		// (or render Best > Average) while avg and worst stayed right.
-		perCourts, maxes := walk([]schedScenario{
-			{perMatchElapsedMinutesBouts(comp, tournament, false, bestBouts), perMatchElapsedMinutesBouts(comp, tournament, true, bestBouts)},
-			{perMatchElapsedMinutesBouts(comp, tournament, false, avgBouts), perMatchElapsedMinutesBouts(comp, tournament, true, avgBouts)},
-			{perMatchElapsedMinutesBouts(comp, tournament, false, worstBouts), perMatchElapsedMinutesBouts(comp, tournament, true, worstBouts)},
-		})
 		return ScheduleEstimate{
 			BestCaseMinutes:      int(math.Round(maxes[0])),
 			TotalDurationMinutes: int(math.Round(maxes[1])), // the AVERAGE is the headline
@@ -528,13 +526,6 @@ func EstimateForCounts(poolCount, knockoutCount int, comp *state.Competition, to
 		}
 	}
 
-	// Nominal per-match minutes via the shared slot-model helper (bouts =
-	// TeamSize). Computed after the kachinuki early-return above, which prices
-	// its own three scenarios and never reads these.
-	perCourts, maxes := walk([]schedScenario{{
-		perMatchElapsedMinutes(comp, tournament, false /*isKnockout*/),
-		perMatchElapsedMinutes(comp, tournament, true /*isKnockout*/),
-	}})
 	total := int(math.Round(maxes[0]))
 	return ScheduleEstimate{
 		TotalDurationMinutes: total,
@@ -543,6 +534,41 @@ func EstimateForCounts(poolCount, knockoutCount int, comp *state.Competition, to
 		PerCourtMinutes:      perCourts[0],
 		CeremonyMinutes:      0,
 	}
+}
+
+// ReplayRun describes a run of count matches of duration minutes each.
+type ReplayRun struct {
+	Count   int `json:"count"`
+	Minutes int `json:"minutes"`
+}
+
+// replayCourt simulates a single court's match execution starting at start,
+// advancing past any breakWindow in breaks via skipBreaks at the start of each slot,
+// and buffering the match time only by bufferPct (slowest court buffer).
+// An unbuffered fixed overhead (pause dead-time) is added back without multiplier.
+// Returns the final time and the total duration in buffered minutes.
+func replayCourt(start time.Time, runs []ReplayRun, breaks []breakWindow, bufferPct int) (time.Time, float64) {
+	cur := start
+	var matchMin float64
+	for _, r := range runs {
+		if r.Count <= 0 {
+			continue
+		}
+		for i := 0; i < r.Count; i++ {
+			cur = skipBreaks(cur, breaks)
+			cur = cur.Add(time.Duration(r.Minutes) * time.Minute)
+		}
+		matchMin += float64(r.Count * r.Minutes)
+	}
+	raw := cur.Sub(start).Minutes()
+	fixedOverhead := raw - matchMin
+	multiplier := 1.0
+	if bufferPct > 0 {
+		multiplier += float64(bufferPct) / 100.0
+	}
+	buffered := fixedOverhead + matchMin*multiplier
+	end := start.Add(time.Duration(math.Round(buffered)) * time.Minute)
+	return end, buffered
 }
 
 // schedScenario is one per-match timing (pool + knockout minutes) that

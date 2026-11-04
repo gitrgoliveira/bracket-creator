@@ -278,9 +278,16 @@ func TestSelfRun_SelfRunMode_CompetitionConfigRoutes_RequireMainPassword(t *test
 		{http.MethodPost, "/api/competitions/some-id/league-tiebreak/finalize"},
 		// The caller picks N, so an anonymous caller could make the server build large synthetic draws on demand.
 		{http.MethodGet, "/api/schedule/draft-estimate"},
+		// The calendar is the organiser planning view, and each call places every competition once (one estimate per competition).
+		{http.MethodGet, "/api/schedule/calendar"},
+		{http.MethodGet, "/api/schedule/calendar/preview"},
 	}
 	assert.True(t, isSelfRunMainGatedConfigRoute(http.MethodGet, "/api/schedule/draft-estimate"),
 		"GET /api/schedule/draft-estimate must be organiser-only in self-run")
+	assert.True(t, isSelfRunMainGatedConfigRoute(http.MethodGet, "/api/schedule/calendar"),
+		"GET /api/schedule/calendar must be organiser-only in self-run")
+	assert.True(t, isSelfRunMainGatedConfigRoute(http.MethodGet, "/api/schedule/calendar/preview"),
+		"GET /api/schedule/calendar/preview must be organiser-only in self-run")
 	for _, fullPath := range []string{"/api/competitions/:id/league-tiebreak", "/api/competitions/:id/league-tiebreak/finalize"} {
 		assert.True(t, isSelfRunMainGatedConfigRoute(http.MethodPost, fullPath), "POST %s must be organiser-only in self-run", fullPath)
 	}

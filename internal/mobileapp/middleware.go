@@ -278,7 +278,9 @@ func isSelfRunMainGatedConfigRoute(method, fullPath string) bool {
 		http.MethodDelete + " /api/branding/logo",                                      // mp-scf: tournament logo removal, organiser setup, not operational play
 		// The caller picks N, so an anonymous caller could make the server build large synthetic draws on demand.
 		http.MethodGet + " /api/schedule/draft-estimate",
-		http.MethodPost + " /api/print/:type": // mp-w87e: PDF export, admin/CPU-heavy, not operational play
+		http.MethodGet + " /api/schedule/calendar",         // the calendar is the organiser planning view, and each call places every competition once (one estimate per competition), so an anonymous self-run caller must not be able to trigger it
+		http.MethodGet + " /api/schedule/calendar/preview", // the calendar is the organiser planning view, and each call places every competition once (one estimate per competition), so an anonymous self-run caller must not be able to trigger it
+		http.MethodPost + " /api/print/:type":              // mp-w87e: PDF export, admin/CPU-heavy, not operational play
 		return true
 	default:
 		return false

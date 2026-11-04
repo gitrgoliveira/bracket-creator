@@ -7197,7 +7197,11 @@ components:
             after the restore, keeping its score, and at the next start if a crash stopped it first.
         warnings:
           type: array
-          description: Non-fatal warnings about the restore.
+          description: |
+            Non-fatal warnings about the restore. A competition still waiting for a decision
+            already gets the `matches_running` and `matches_requeued` warnings its choices could
+            lead to, so they show before the choice; only a decided plan fills `requeuePending`
+            and refuses running matches without `allowRunning=true`.
           items:
             type: object
             required: [code, message]

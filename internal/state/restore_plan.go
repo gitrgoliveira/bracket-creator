@@ -265,8 +265,10 @@ func populateRestoreTargets(
 	return inPlace
 }
 
-// checkRestoreRunningMatches checks for running matches in live competitions being replaced/removed
-// and collects archive matches that were running to return them to the queue.
+// checkRestoreRunningMatches warns about live matches running in a competition the restore
+// replaces or removes, and collects the archive's running matches, which come back in the
+// queue. An entry still waiting for the operator's choice gets the warning its choices could
+// lead to, so the page shows it before the choice; it requeues and refuses nothing yet.
 func checkRestoreRunningMatches(
 	entries []RestoreCompetitionPlan,
 	inPlace []string,
@@ -274,31 +276,51 @@ func checkRestoreRunningMatches(
 	live *restoreLiveState,
 	w *restoreWork,
 ) {
+	warn := func(code, compID string, n int, one, many string) {
+		if n == 0 {
+			return
+		}
+		msg := fmt.Sprintf(many, n)
+		if n == 1 {
+			msg = one
+		}
+		w.plan.Warnings = append(w.plan.Warnings, RestoreWarning{Code: code, CompetitionID: compID, Message: msg})
+	}
+	warnRequeued := func(e *RestoreCompetitionPlan, compID string) {
+		warn(RestoreWarnMatchesRequeued, compID, len(e.RunningInArchive),
+			e.Name+" comes back with 1 match that was running in the backup; it returns to the queue with its score.",
+			e.Name+" comes back with %d matches that were running in the backup; they return to the queue with their score.")
+	}
 	for i := range entries {
 		e := &entries[i]
-		switch e.Action {
-		case RestoreReplace, RestoreRemove:
+		undecided := e.Asked && e.Action == ""
+		switch {
+		case e.Action == RestoreReplace || e.Action == RestoreRemove:
 			e.RunningNow = runningMatchIDs(live.matches[e.ID])
 			if len(e.RunningNow) > 0 {
 				w.runningComp = append(w.runningComp, e.ID)
-				n := len(e.RunningNow)
-				msg := fmt.Sprintf("%s has %d matches running now; the restore replaces them with the backup's version.", e.Name, n)
-				if n == 1 {
-					msg = fmt.Sprintf("%s has 1 match running now; the restore replaces it with the backup's version.", e.Name)
-				}
-				w.plan.Warnings = append(w.plan.Warnings, RestoreWarning{
-					Code:          RestoreWarnMatchesRunning,
-					CompetitionID: e.ID,
-					Message:       msg,
-				})
+				warn(RestoreWarnMatchesRunning, e.ID, len(e.RunningNow),
+					e.Name+" has 1 match running now; the restore replaces it with the backup's version.",
+					e.Name+" has %d matches running now; the restore replaces them with the backup's version.")
 			}
 			var archived map[string]restoreMatch
 			if e.Action == RestoreReplace {
 				archived = ai.matches[e.ID]
 			}
 			e.ResultsChanged = resultsChanged(live.matches[e.ID], archived)
+		case undecided && slices.Contains(e.Choices, RestoreReplace):
+			e.RunningNow = runningMatchIDs(live.matches[e.ID])
+			warn(RestoreWarnMatchesRunning, e.ID, len(e.RunningNow),
+				e.Name+" has 1 match running now; if you replace it, the restore replaces that match with the backup's version.",
+				e.Name+" has %d matches running now; if you replace it, the restore replaces those matches with the backup's version.")
+		case undecided && slices.Contains(e.Choices, RestoreRemove):
+			e.RunningNow = runningMatchIDs(live.matches[e.ID])
+			warn(RestoreWarnMatchesRunning, e.ID, len(e.RunningNow),
+				e.Name+" has 1 match running now; if you remove it, that match is removed with it.",
+				e.Name+" has %d matches running now; if you remove it, those matches are removed with it.")
 		}
-		if e.Action == RestoreReplace || e.Action == RestoreCreate || (e.Action == RestoreCopy && e.NewID != "") {
+		switch {
+		case e.Action == RestoreReplace || e.Action == RestoreCreate || (e.Action == RestoreCopy && e.NewID != ""):
 			e.RunningInArchive = runningMatchIDs(ai.matches[e.ID])
 			if len(e.RunningInArchive) > 0 {
 				dstID := targetID(*e)
@@ -306,17 +328,11 @@ func checkRestoreRunningMatches(
 					w.plan.RequeuePending = make(map[string][]string)
 				}
 				w.plan.RequeuePending[dstID] = slices.Clone(e.RunningInArchive)
-				n := len(e.RunningInArchive)
-				msg := fmt.Sprintf("%s comes back with %d matches that were running in the backup; they return to the queue with their score.", e.Name, n)
-				if n == 1 {
-					msg = fmt.Sprintf("%s comes back with 1 match that was running in the backup; it returns to the queue with its score.", e.Name)
-				}
-				w.plan.Warnings = append(w.plan.Warnings, RestoreWarning{
-					Code:          RestoreWarnMatchesRequeued,
-					CompetitionID: dstID,
-					Message:       msg,
-				})
+				warnRequeued(e, dstID)
 			}
+		case undecided && slices.Contains(e.Choices, RestoreReplace):
+			e.RunningInArchive = runningMatchIDs(ai.matches[e.ID])
+			warnRequeued(e, e.ID)
 		}
 	}
 }

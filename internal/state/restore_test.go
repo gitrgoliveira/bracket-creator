@@ -777,6 +777,172 @@ func TestRestore_TournamentRestoreRequeuesRunningPoolAndBracketMatches(t *testin
 	assert.Equal(t, "open", undoWarnings[0].CompetitionID)
 }
 
+// warningsWithCode returns the plan's warnings that carry code, in order.
+func warningsWithCode(ws []RestoreWarning, code string) []RestoreWarning {
+	var out []RestoreWarning
+	for _, w := range ws {
+		if w.Code == code {
+			out = append(out, w)
+		}
+	}
+	return out
+}
+
+func TestRestore_PlanWithoutDecisionsWarnsForMatchesRunningAndRequeued(t *testing.T) {
+	src, srcDir := newRestoreTestStore(t)
+	require.NotEmpty(t, srcDir)
+	restoreTestTournament(t, src, "pw", "A", "B")
+	addRestoreComp(t, src, "open", "Open Championship", "O", MatchStatusRunning, "A")
+	bracket := &Bracket{
+		Rounds: [][]BracketMatch{
+			{
+				{
+					ID: "r1-m1", Status: MatchStatusRunning, Court: "B",
+					SideA: "Alice", SideB: "Bob", SideAID: "p1", SideBID: "p2",
+				},
+			},
+		},
+	}
+	require.NoError(t, src.SaveBracket("open", bracket))
+	a := archiveOf(t, src, ScopeTournament, "")
+
+	dst, dstDir := newRestoreTestStore(t)
+	require.NotEmpty(t, dstDir)
+	restoreTestTournament(t, dst, "pw", "A", "B")
+	addRestoreComp(t, dst, "open", "Open Championship", "O", MatchStatusRunning, "A")
+	addRestoreComp(t, dst, "extra", "Extra Division", "E", MatchStatusRunning, "B")
+
+	// 1. Plan with no decisions
+	plan, err := dst.PlanRestore(RestoreRequest{Archive: a})
+	require.NoError(t, err)
+	assert.Empty(t, plan.RequeuePending, "undecided asked entries must not populate RequeuePending")
+
+	openEntry := planEntry(t, plan, "open")
+	assert.True(t, openEntry.Asked)
+	assert.Empty(t, openEntry.Action)
+	assert.Equal(t, []string{"Pool A-0"}, openEntry.RunningNow)
+	assert.Equal(t, []string{"Pool A-0", "r1-m1"}, openEntry.RunningInArchive)
+
+	extraEntry := planEntry(t, plan, "extra")
+	assert.True(t, extraEntry.Asked)
+	assert.Empty(t, extraEntry.Action)
+	assert.Equal(t, []string{"Pool A-0"}, extraEntry.RunningNow)
+	assert.Empty(t, extraEntry.RunningInArchive)
+
+	requeuedWarnings := warningsWithCode(plan.Warnings, RestoreWarnMatchesRequeued)
+	runningWarnings := warningsWithCode(plan.Warnings, RestoreWarnMatchesRunning)
+
+	require.Len(t, requeuedWarnings, 1)
+	assert.Equal(t, "open", requeuedWarnings[0].CompetitionID)
+	assert.Equal(t, "Open Championship comes back with 2 matches that were running in the backup; they return to the queue with their score.", requeuedWarnings[0].Message)
+
+	require.Len(t, runningWarnings, 2)
+	runningByComp := map[string]string{}
+	for i := range runningWarnings {
+		w := runningWarnings[i]
+		runningByComp[w.CompetitionID] = w.Message
+	}
+	assert.Equal(t, "Open Championship has 1 match running now; if you replace it, the restore replaces that match with the backup's version.", runningByComp["open"])
+	assert.Equal(t, "Extra Division has 1 match running now; if you remove it, that match is removed with it.", runningByComp["extra"])
+
+	// 2. Plan with decisions given produces today's messages and RequeuePending
+	decidedPlan, err := dst.PlanRestore(RestoreRequest{
+		Archive: a,
+		Decisions: map[string]RestoreDecision{
+			"open":  {Action: RestoreReplace},
+			"extra": {Action: RestoreRemove},
+		},
+	})
+	require.NoError(t, err)
+	require.NotNil(t, decidedPlan.RequeuePending)
+	assert.Equal(t, []string{"Pool A-0", "r1-m1"}, decidedPlan.RequeuePending["open"])
+
+	decidedRequeued := warningsWithCode(decidedPlan.Warnings, RestoreWarnMatchesRequeued)
+	decidedRunning := warningsWithCode(decidedPlan.Warnings, RestoreWarnMatchesRunning)
+
+	require.Len(t, decidedRequeued, 1)
+	assert.Equal(t, "open", decidedRequeued[0].CompetitionID)
+	assert.Equal(t, "Open Championship comes back with 2 matches that were running in the backup; they return to the queue with their score.", decidedRequeued[0].Message)
+
+	require.Len(t, decidedRunning, 2)
+	decidedRunningByComp := map[string]string{}
+	for i := range decidedRunning {
+		w := decidedRunning[i]
+		decidedRunningByComp[w.CompetitionID] = w.Message
+	}
+	assert.Equal(t, "Open Championship has 1 match running now; the restore replaces it with the backup's version.", decidedRunningByComp["open"])
+	assert.Equal(t, "Extra Division has 1 match running now; the restore replaces it with the backup's version.", decidedRunningByComp["extra"])
+}
+
+func TestRestore_PlanWithoutDecisionsWarnsForPluralRunningMatches(t *testing.T) {
+	src, srcDir := newRestoreTestStore(t)
+	require.NotEmpty(t, srcDir)
+	restoreTestTournament(t, src, "pw", "A", "B")
+	addRestoreComp(t, src, "open", "Open Championship", "O", MatchStatusRunning, "A")
+	a := archiveOf(t, src, ScopeTournament, "")
+
+	dst, dstDir := newRestoreTestStore(t)
+	require.NotEmpty(t, dstDir)
+	restoreTestTournament(t, dst, "pw", "A", "B")
+	addRestoreComp(t, dst, "open", "Open Championship", "O", MatchStatusRunning, "A")
+	bracket := &Bracket{
+		Rounds: [][]BracketMatch{
+			{
+				{
+					ID: "r1-m1", Status: MatchStatusRunning, Court: "B",
+					SideA: "Alice", SideB: "Bob", SideAID: "p1", SideBID: "p2",
+				},
+			},
+		},
+	}
+	require.NoError(t, dst.SaveBracket("open", bracket))
+	addRestoreComp(t, dst, "extra", "Extra Division", "E", MatchStatusRunning, "A")
+	require.NoError(t, dst.SaveBracket("extra", bracket))
+
+	plan, err := dst.PlanRestore(RestoreRequest{Archive: a})
+	require.NoError(t, err)
+
+	requeuedWarnings := warningsWithCode(plan.Warnings, RestoreWarnMatchesRequeued)
+	runningWarnings := warningsWithCode(plan.Warnings, RestoreWarnMatchesRunning)
+	require.Len(t, requeuedWarnings, 1)
+	assert.Equal(t, "open", requeuedWarnings[0].CompetitionID)
+	assert.Equal(t, "Open Championship comes back with 1 match that was running in the backup; it returns to the queue with its score.", requeuedWarnings[0].Message)
+
+	require.Len(t, runningWarnings, 2)
+	byComp := map[string]string{}
+	for i := range runningWarnings {
+		w := runningWarnings[i]
+		byComp[w.CompetitionID] = w.Message
+	}
+	assert.Equal(t, "Open Championship has 2 matches running now; if you replace it, the restore replaces those matches with the backup's version.", byComp["open"])
+	assert.Equal(t, "Extra Division has 2 matches running now; if you remove it, those matches are removed with it.", byComp["extra"])
+
+	// With decisions given:
+	decidedPlan, err := dst.PlanRestore(RestoreRequest{
+		Archive: a,
+		Decisions: map[string]RestoreDecision{
+			"open":  {Action: RestoreReplace},
+			"extra": {Action: RestoreRemove},
+		},
+	})
+	require.NoError(t, err)
+	var decidedRunning []RestoreWarning
+	for i := range decidedPlan.Warnings {
+		w := decidedPlan.Warnings[i]
+		if w.Code == RestoreWarnMatchesRunning {
+			decidedRunning = append(decidedRunning, w)
+		}
+	}
+	require.Len(t, decidedRunning, 2)
+	decidedByComp := map[string]string{}
+	for i := range decidedRunning {
+		w := decidedRunning[i]
+		decidedByComp[w.CompetitionID] = w.Message
+	}
+	assert.Equal(t, "Open Championship has 2 matches running now; the restore replaces them with the backup's version.", decidedByComp["open"])
+	assert.Equal(t, "Extra Division has 2 matches running now; the restore replaces them with the backup's version.", decidedByComp["extra"])
+}
+
 func TestRestore_AnUnreadableArchiveFileIsRefusedBeforeStaging(t *testing.T) {
 	src, srcDir := newRestoreTestStore(t)
 	addRestoreComp(t, src, "men", "Men", "M", MatchStatusScheduled, "A")

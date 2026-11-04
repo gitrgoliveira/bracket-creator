@@ -558,3 +558,48 @@ func TestMobileAppRestore_LockedMode(t *testing.T) {
 		})
 	}
 }
+
+// A restore refused by the store (e.g. copy_name_taken) prints none of the outcome lines.
+// A successful restore prints them before "Restore completed successfully.".
+func TestMobileAppRestore_RefusalPrintsNoOutcomeLines(t *testing.T) {
+	srcDir, _ := buildTestPopulatedFolder(t)
+	zipPath := filepath.Join(t.TempDir(), "backup.zip")
+	_, err := executeMobileApp("backup", "--folder", srcDir, "--out", zipPath)
+	require.NoError(t, err)
+
+	targetDir := t.TempDir()
+	targetStore, err := state.NewStore(targetDir)
+	require.NoError(t, err)
+	require.NoError(t, targetStore.SaveTournament(&state.Tournament{
+		Name:     "Existing Taikai",
+		Password: "pass",
+		Courts:   []string{"A"},
+	}))
+	require.NoError(t, targetStore.SaveCompetition(&state.Competition{
+		ID:           "open-comp",
+		Name:         "Existing Open",
+		Courts:       []string{"A"},
+		NumberPrefix: "E",
+	}))
+
+	outcomePrefixes := []string{"Created:", "Replaced:", "Copied:", "Kept:", "Removed:", "Warning:"}
+
+	// Refused by the store with copy_name_taken because "Existing Open" is already taken.
+	out, err := executeMobileApp("restore", "--folder", targetDir, "--copy", "open-comp=Existing Open", zipPath)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "That name is already used")
+	for _, prefix := range outcomePrefixes {
+		assert.NotContains(t, out, prefix, "refused restore must not print %s", prefix)
+	}
+	assert.NotContains(t, out, "Restore completed successfully.")
+
+	// Successful restore prints outcome lines before "Restore completed successfully.".
+	out, err = executeMobileApp("restore", "--folder", targetDir, "--copy", "open-comp=Valid New Copy", zipPath)
+	require.NoError(t, err, "output: %s", out)
+	assert.Contains(t, out, "Copied:")
+	assert.Contains(t, out, "Restore completed successfully.")
+	copiedIdx := strings.Index(out, "Copied:")
+	successIdx := strings.Index(out, "Restore completed successfully.")
+	assert.True(t, copiedIdx >= 0 && successIdx >= 0 && copiedIdx < successIdx,
+		"outcome lines must appear before success line")
+}

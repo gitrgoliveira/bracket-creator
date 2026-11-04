@@ -3,6 +3,7 @@ package cmd
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -347,24 +348,44 @@ func (o *mobileAppRestoreOptions) run(cmd *cobra.Command, archivePath string) (e
 		return operatorSentence(strings.Join(lines, "\n"))
 	}
 
-	if plan.Password == state.RestorePasswordNeedsOne && o.password == "" {
-		return errors.New("admin password is required for the restored tournament: specify --password")
-	}
+	now := time.Now().UTC()
+	var safetyCopyName string
+	req.BeforeSwap = mobileapp.RestoreBeforeSwap(store, now, &safetyCopyName)
 
-	if !o.allowRunning {
-		hasRunning := false
-		for _, comp := range plan.Competitions {
-			if len(comp.RunningNow) > 0 && (comp.Action == state.RestoreReplace || comp.Action == state.RestoreRemove) {
-				hasRunning = true
-				break
-			}
-		}
-		if hasRunning {
-			return operatorSentence("Matches are running in a competition this restore replaces or removes. Finish them, or pass --allow-running to restore anyway.")
-		}
+	_, err = store.Restore(req)
+	if err != nil {
+		return formatRestoreError(err)
 	}
 
 	out := cmd.OutOrStdout()
+	if safetyCopyName != "" {
+		if _, err := fmt.Fprintf(out, "Safety copy saved: %s\n", safetyCopyName); err != nil {
+			return err
+		}
+	}
+
+	if err := printRestoreOutcome(out, plan); err != nil {
+		return err
+	}
+
+	eng := engine.New(store)
+	prefixWarnings, err := mobileapp.ResolveRestoredPrefixes(store, eng)
+	if err != nil {
+		return fmt.Errorf("reassign competitor number prefixes: %w", err)
+	}
+	for _, pw := range prefixWarnings {
+		if _, err := fmt.Fprintf(out, "Warning: %s\n", pw.Message); err != nil {
+			return err
+		}
+	}
+
+	if _, err := fmt.Fprintln(out, "Restore completed successfully."); err != nil {
+		return err
+	}
+	return nil
+}
+
+func printRestoreOutcome(out io.Writer, plan state.RestorePlan) error {
 	var created, replaced, copied, kept, removed []string
 	for _, comp := range plan.Competitions {
 		switch comp.Action {
@@ -409,36 +430,6 @@ func (o *mobileAppRestoreOptions) run(cmd *cobra.Command, archivePath string) (e
 		if _, err := fmt.Fprintf(out, "Warning: %s\n", w.Message); err != nil {
 			return err
 		}
-	}
-
-	now := time.Now().UTC()
-	var safetyCopyName string
-	req.BeforeSwap = mobileapp.RestoreBeforeSwap(store, now, &safetyCopyName)
-
-	_, err = store.Restore(req)
-	if err != nil {
-		return formatRestoreError(err)
-	}
-
-	if safetyCopyName != "" {
-		if _, err := fmt.Fprintf(out, "Safety copy saved: %s\n", safetyCopyName); err != nil {
-			return err
-		}
-	}
-
-	eng := engine.New(store)
-	prefixWarnings, err := mobileapp.ResolveRestoredPrefixes(store, eng)
-	if err != nil {
-		return fmt.Errorf("reassign competitor number prefixes: %w", err)
-	}
-	for _, pw := range prefixWarnings {
-		if _, err := fmt.Fprintf(out, "Warning: %s\n", pw.Message); err != nil {
-			return err
-		}
-	}
-
-	if _, err := fmt.Fprintln(out, "Restore completed successfully."); err != nil {
-		return err
 	}
 	return nil
 }

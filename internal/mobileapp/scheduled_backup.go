@@ -2,6 +2,7 @@ package mobileapp
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"runtime/debug"
 	"slices"
@@ -152,8 +153,7 @@ func (s *ScheduledBackups) runOnce(ctx context.Context) error {
 	now := s.now()
 	files, err := s.Store.ListBackupFiles()
 	if err != nil {
-		slog.Warn("scheduled backup: list backup files failed", "err", err)
-		return err
+		return fmt.Errorf("list backup files: %w", err)
 	}
 
 	s.mu.Lock()
@@ -192,8 +192,7 @@ func (s *ScheduledBackups) runOnce(ctx context.Context) error {
 
 	snap, err := s.Store.Snapshot(state.ScopeTournament, "")
 	if err != nil {
-		slog.Warn("scheduled backup: tournament snapshot failed", "err", err)
-		return err
+		return fmt.Errorf("tournament snapshot: %w", err)
 	}
 
 	if len(snap.Competitions) == 0 {
@@ -219,8 +218,7 @@ func (s *ScheduledBackups) runOnce(ctx context.Context) error {
 
 	data, err := SnapshotArchive(snap, backup.KindScheduled, now, nil)
 	if err != nil {
-		slog.Warn("scheduled backup: write backup archive failed", "err", err)
-		return err
+		return fmt.Errorf("write backup archive: %w", err)
 	}
 
 	saveFn := s.save
@@ -229,8 +227,7 @@ func (s *ScheduledBackups) runOnce(ctx context.Context) error {
 	}
 
 	if _, err := saveFn(state.BackupKindScheduled, state.ScopeTournament, now, data); err != nil {
-		slog.Warn("scheduled backup: save backup file failed", "err", err)
-		return err
+		return fmt.Errorf("save backup file: %w", err)
 	}
 
 	return nil

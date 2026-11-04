@@ -1,13 +1,16 @@
 package mobileapp
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -336,6 +339,38 @@ func TestScheduledBackups_WriteFailureRetriedAtNextTick(t *testing.T) {
 	files, err = pt.Store.ListBackupFiles()
 	require.NoError(t, err)
 	require.Len(t, files, 1)
+}
+
+func TestScheduledBackups_FailureLoggedOnceAtTick(t *testing.T) {
+	pt := buildPopulatedTournament(t)
+
+	var buf bytes.Buffer
+	prevLogger := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
+	t.Cleanup(func() {
+		slog.SetDefault(prevLogger)
+	})
+
+	clockTime := time.Date(2026, 6, 1, 10, 0, 0, 0, time.UTC)
+
+	job := &ScheduledBackups{
+		Store: pt.Store,
+		Clock: func() time.Time { return clockTime },
+		save: func(kind state.BackupKind, scope state.SnapshotScope, at time.Time, data []byte) (string, error) {
+			return "", errors.New("simulated save failure")
+		},
+	}
+
+	ctx := context.Background()
+	job.tickOnceSafe(ctx)
+
+	logOutput := buf.String()
+	assert.Equal(t, 1, strings.Count(logOutput, "check failed"), "failure should appear in exactly one log line")
+	assert.Contains(t, logOutput, "simulated save failure")
+
+	assert.Equal(t, 1, strings.Count(logOutput, "scheduled backup:"), "exactly one scheduled backup log line should be emitted")
+	assert.NotContains(t, logOutput, "save backup file failed")
+	assert.NotContains(t, logOutput, "write backup archive failed")
 }
 
 func TestScheduledBackups_CancelContextStopsRun(t *testing.T) {

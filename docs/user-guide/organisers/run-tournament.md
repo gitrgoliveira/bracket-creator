@@ -316,6 +316,25 @@ For a kachinuki (winner stays on) competition the number of bouts is not fixed, 
 
 ![The competition Overview schedule estimate for a kachinuki competition, reading Best, Average, and Worst durations followed by a per-court breakdown.](../../screenshots/kachinuki-estimate-range.png)
 
+### Pauses
+
+The **Schedule blocks** card on the tournament setup page lists the times when no matches are fought, such as lunch or an opening or closing ceremony. Click **+ Add a pause** to add one. Each pause has:
+
+- **Pause name**, for example `Lunch` or `Closing ceremony`.
+- **Starts at**, a clock time such as `12:00`. A closing ceremony is a pause too, so give it the time you expect the last match to end.
+- **Length**, how long the pause lasts.
+- **On**, which day it applies to, or **Every day**. This choice appears only for a tournament that lasts more than one day.
+
+Every estimate and every new schedule works around the pauses. A match that would run into a pause waits until the pause ends. Pauses that overlap count as one longer pause, and the row says so. A pause that ends after midnight is marked as such, and a pause that does not change any schedule (for example one that starts after the last match) is marked as not used. A competition that is already drawn keeps its match times when you add or change a pause, and the card names the competitions affected. To re-time one of them, use **Auto-schedule competition**.
+
+A tournament saved by an earlier version shows its lunch break as a **Lunch** pause at 12:00, and its opening and closing ceremony lengths as pauses of their own.
+
+### Expected participants and the estimate on a new competition
+
+The **Add competition** form has an **Expected participants** field (**Expected teams** for a team competition). Enter how many you expect to register. Until more people are registered than that, every estimate uses your number, so you can plan the day before the entries are in. The number is kept with the competition and you can change it in the competition's **Settings**. It accepts a whole number from 0 to 1024.
+
+While you fill in the form, a live estimate below the fields shows about how long the competition will take and when it finishes, using the format, the number of shiai-jo, the match durations and the tournament's pauses. It updates as you change the fields. If the finish falls after midnight, the estimate says so and suggests an earlier start or more shiai-jo. Once the draw is made, the finish comes from the draw itself and no longer from the estimate.
+
 ### Sharing a shiai-jo between competitions
 
 Several competitions may be assigned the same shiai-jo. By default they run one after another, not on top of each other: when you draw a competition, its first match on a shared shiai-jo is placed no earlier than the planned end of the last match on that shiai-jo of every other competition on the same day that is already drawn there and starts at the same time or earlier. If two competitions have the same start time, the one drawn second goes after the one drawn first. Only competitions on the same day count. A tie-break or representative bout added later, and a later Swiss round, are placed after the planned end of the last match the competition already has on that shiai-jo (a match you moved to a later time included), so they do not land on top of it or of the other competition.

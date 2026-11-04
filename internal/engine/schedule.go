@@ -77,8 +77,8 @@ const maxEstimateMinutes = min(1e15, float64(math.MaxInt/2))
 //
 // NOTE the "excluding ceremonies" wording above describes the EstimateSchedule
 // producer (raw scalars, no break model). The other producer, EstimateForCounts,
-// fills PerCourtMinutes from a per-court clock cursor that INCLUDES the
-// OpeningBlock offset and any LunchBlock dead-time, see its doc comment.
+// fills PerCourtMinutes from a per-court clock cursor that INCLUDES any
+// pause dead-time from the day's pauses, see its doc comment.
 //
 // Best/worst/average (mp-gmcg): kachinuki team matches have a variable
 // bout count, so the estimate is a RANGE. With nominal team size N
@@ -104,6 +104,12 @@ type ScheduleEstimate struct {
 	// CourtEnds maps each court to the planned end ("HH:MM") of this competition's
 	// last slot there; only set on the per-competition estimate of a drawn competition.
 	CourtEnds map[string]string `json:"courtEnds,omitempty"`
+	// Participants is the entry count the per-competition estimate used and
+	// ParticipantsSource where it came from (ParticipantsSourceRoster or
+	// ParticipantsSourceExpected); both are left empty by EstimateForCounts and
+	// when the count is 0.
+	Participants       int    `json:"participants,omitempty"`
+	ParticipantsSource string `json:"participantsSource,omitempty"`
 }
 
 // EstimateInput holds the parameters EstimateSchedule consumes. All
@@ -210,10 +216,10 @@ func clampNonNeg(v, max int) int {
 //
 // FR-055, FR-057, FR-058, FR-059, data-model §5.
 //
-// Breaks (OpeningBlock, LunchBlock, ClosingBlock) are NOT modelled
+// Pauses (pauses configured on the tournament) are NOT modelled
 // here because EstimateInput carries only raw scalars, the stateless
 // handler has no competition/tournament context. Use EstimateForCounts
-// when per-comp, break-aware estimation is needed.
+// when per-comp, pause-aware estimation is needed.
 func EstimateSchedule(in EstimateInput) ScheduleEstimate {
 	// Per-match elapsed minutes via the shared pure core. Kachinuki
 	// (mp-gmcg) widens the constant bout count into a best/avg/worst
@@ -316,41 +322,33 @@ func EstimateSchedule(in EstimateInput) ScheduleEstimate {
 // EstimateForCounts returns a ScheduleEstimate for a pre-draw competition
 // (no generated matches yet) given the expected number of pool matches and
 // knockout matches. It reuses the slot-model primitives (perMatchElapsedMinutes,
-// skipCeremonyBlocks) so per-match and in-day break (OpeningBlock/LunchBlock)
-// math match the post-draw path, but the aggregate intentionally diverges in
-// two documented ways (the buffer and phase-sequencing notes below), so it is
-// NOT a byte-for-byte equal. (ClosingBlock is handled differently, surfaced as
-// CeremonyMinutes here, ignored by the assigners; see below.)
+// skipBreaks) so per-match and in-day pause math match the post-draw path, but the
+// aggregate intentionally diverges in two documented ways (the buffer and
+// phase-sequencing notes below), so it is NOT a byte-for-byte equal.
 //
 // Unit reconciliation: the slot model advances clock times (time.Time), while
 // ScheduleEstimate.TotalDurationMinutes is a duration in minutes. This function
 // defines TotalDurationMinutes = round(maxCourtCursor - dayStart), where dayStart
 // is comp.StartTime (the same anchor the slot assigners use). Each court's cursor
-// is initialised to dayStart+OpeningBlock, so the returned duration INCLUDES the
-// opening-block offset. PerCourtMinutes entries are each court's individual
+// is initialised to dayStart. PerCourtMinutes entries are each court's individual
 // elapsed duration, and, NOTE, unlike the ScheduleEstimate struct docstring
 // ("match play (excluding ceremonies)", which describes the EstimateSchedule
-// producer), these entries INCLUDE the OpeningBlock offset and any LunchBlock
-// dead-time. They are NOT match-time-only. (Only the slowest-court buffer is
-// applied to match time alone; see below.)
+// producer), these entries INCLUDE any pause dead-time. They are NOT match-time-only.
+// (Only the slowest-court buffer is applied to match time alone; see below.)
 //
 // Buffer divergence (intentional): EstimateForCounts applies
 // tournament.SlowestCourtBufferPct because it is a predictive, pre-draw estimate,
 // the slowest court will likely run over the mean. The buffer is applied to
-// MATCH time only (matchMin), not to the fixed OpeningBlock offset or LunchBlock
-// dead-time, which have no runtime variance to pad, matching EstimateSchedule's
-// semantics. The post-draw slot assigners (assignPoolMatchSlotsFrom /
-// assignBracketMatchSlots) do NOT apply the buffer at all because a real,
-// assigned schedule needs no extra padding. So do NOT assert RAW cross-regime
-// equality, but the buffered relationship (EstimateForCounts ≈ slot duration ×
-// (1 + buffer/100)) IS valid, and is exactly what
+// MATCH time only (matchMin), not to pause dead-time, which has no runtime
+// variance to pad, matching EstimateSchedule's semantics. The post-draw slot
+// assigners (assignPoolMatchSlotsFrom / assignBracketMatchSlots) do NOT apply
+// the buffer at all because a real, assigned schedule needs no extra padding.
+// So do NOT assert RAW cross-regime equality, but the buffered relationship
+// (EstimateForCounts ≈ slot duration × (1 + buffer/100)) IS valid, and is exactly what
 // TestEstimateForCountsVsSlotAssigner_Balanced checks.
 //
-// CeremonyMinutes is populated from tournament.ClosingBlock. The OpeningBlock is
-// applied as a pre-loop per-court start offset (cursor initialised to
-// dayStart+OpeningBlock); the LunchBlock is applied per match via the shared
-// skipCeremonyBlocks helper. ClosingBlock is not entered by the cursor, it is
-// surfaced only as CeremonyMinutes.
+// CeremonyMinutes is 0 on this path; pauses are applied per match via the shared
+// skipBreaks helper.
 //
 // Phase sequencing: each court runs its pool matches and THEN its knockout
 // matches on the same advancing cursor, pools-then-knockout, which is the
@@ -359,11 +357,7 @@ func EstimateSchedule(in EstimateInput) ScheduleEstimate {
 // (assignBracketMatchSlots) starts each court's cursor at the end of that
 // court's stored pool schedule (poolPhaseEndByCourt, bc-kosc), while a
 // knockout-only competition keeps the day start. A post-draw estimate must
-// therefore SEQUENCE the two phases rather than max() them, and it must add
-// the OpeningBlock offset ONCE, not once per phase. Summing the raw cursor
-// durations would double-count OpeningBlock (each cursor = dayStart +
-// OpeningBlock + match-time); instead sum the per-phase match durations and
-// add OpeningBlock a single time. See mp-zoh.
+// therefore SEQUENCE the two phases rather than max() them.
 //
 // Negative counts are clamped to 0, the helper is exported and likely fed
 // derived/user inputs (mp-zoh), and a negative count would otherwise make
@@ -427,12 +421,9 @@ func EstimateForCounts(poolCount, knockoutCount int, comp *state.Competition, to
 		comp.TeamSize = 5
 	}
 
-	// Common ceremony parameters (same as the slot assigners).
+	// Common pause parameters (same as the slot assigners).
 	// tournament is always non-nil here (copies from caller or zero-value tournCopy).
-	dayStart := parseClockHHMM(comp.StartTime)
-	openingMin := parseDurationMinutes(tournament.OpeningBlock)
-	lunchMin := parseDurationMinutes(tournament.LunchBlock)
-	lunchStart := parseClockHHMM(defaultLunchStartClock)
+	dayStart, breaks := parseCeremonyParams(comp, tournament)
 
 	// Convert clock times back to durations from dayStart.
 	// tournament is always non-nil here (see copy above).
@@ -449,8 +440,8 @@ func EstimateForCounts(poolCount, knockoutCount int, comp *state.Competition, to
 	// courts, an intentional even-distribution heuristic for this pre-draw
 	// estimate (the post-draw assigner does NO distribution of its own: it
 	// schedules matches that already carry a Court assignment) — only the
-	// per-match minutes, and thus how each cursor lands relative to the lunch
-	// block, differ, so a cursor per scenario advances together court-by-court
+	// per-match minutes, and thus how each cursor lands relative to pauses,
+	// differ, so a cursor per scenario advances together court-by-court
 	// (mp-gmcg review F7). This shares the distribution derivation across
 	// scenarios; the kachinuki caller below still discards two of the three
 	// perCourtList builds (it only surfaces the average one) — negligible on
@@ -459,19 +450,17 @@ func EstimateForCounts(poolCount, knockoutCount int, comp *state.Competition, to
 	// discarded.
 	//
 	// Pure match minutes per court are tracked separately from the cursor so
-	// the slowest-court buffer applies to match time ONLY, never to the fixed
-	// OpeningBlock offset or LunchBlock dead-time (those have no runtime
-	// variance to pad). Mirrors EstimateSchedule, which buffers match time
-	// alone.
+	// the slowest-court buffer applies to match time ONLY, never to pause
+	// dead-time (those have no runtime variance to pad). Mirrors EstimateSchedule,
+	// which buffers match time alone.
 	walk := func(scenarios []schedScenario) ([][]int, []float64) {
 		ns := len(scenarios)
 		courtCursor := make([][]time.Time, ns)
 		matchMin := make([][]float64, ns)
-		start := dayStart.Add(time.Duration(openingMin) * time.Minute)
 		for s := range scenarios {
 			courtCursor[s] = make([]time.Time, numCourts)
 			for i := range courtCursor[s] {
-				courtCursor[s][i] = start
+				courtCursor[s][i] = dayStart
 			}
 			matchMin[s] = make([]float64, numCourts)
 		}
@@ -493,7 +482,7 @@ func EstimateForCounts(poolCount, knockoutCount int, comp *state.Competition, to
 				for s := range scenarios {
 					pm := spec.perMatch(scenarios[s])
 					for range n {
-						courtCursor[s][ci] = skipCeremonyBlocks(courtCursor[s][ci], lunchStart, lunchMin)
+						courtCursor[s][ci] = skipBreaks(courtCursor[s][ci], breaks)
 						courtCursor[s][ci] = courtCursor[s][ci].Add(time.Duration(pm) * time.Minute)
 					}
 					matchMin[s][ci] += float64(n * pm)
@@ -507,7 +496,7 @@ func EstimateForCounts(poolCount, knockoutCount int, comp *state.Competition, to
 			perCourtLists[s] = make([]int, numCourts)
 			for ci, cur := range courtCursor[s] {
 				raw := cur.Sub(dayStart).Minutes()
-				// fixedOverhead = OpeningBlock offset + any LunchBlock dead-time
+				// fixedOverhead = pause dead-time
 				// (raw minus pure match time). Buffer the match time only; add the
 				// fixed overhead back unbuffered.
 				fixedOverhead := raw - matchMin[s][ci]
@@ -520,8 +509,6 @@ func EstimateForCounts(poolCount, knockoutCount int, comp *state.Competition, to
 		}
 		return perCourtLists, maxDurations
 	}
-
-	ceremonyMin := parseDurationMinutes(tournament.ClosingBlock)
 
 	// Kachinuki (mp-gmcg): the bout count is variable, so price three
 	// scenarios. The headline TotalDurationMinutes / PerCourtMinutes is
@@ -545,11 +532,11 @@ func EstimateForCounts(poolCount, knockoutCount int, comp *state.Competition, to
 			{perMatchElapsedMinutesBouts(comp, tournament, false, worstBouts), perMatchElapsedMinutesBouts(comp, tournament, true, worstBouts)},
 		})
 		return ScheduleEstimate{
-			BestCaseMinutes:      int(math.Round(maxes[0])) + ceremonyMin,
-			TotalDurationMinutes: int(math.Round(maxes[1])) + ceremonyMin, // the AVERAGE is the headline
-			WorstCaseMinutes:     int(math.Round(maxes[2])) + ceremonyMin,
+			BestCaseMinutes:      int(math.Round(maxes[0])),
+			TotalDurationMinutes: int(math.Round(maxes[1])), // the AVERAGE is the headline
+			WorstCaseMinutes:     int(math.Round(maxes[2])),
 			PerCourtMinutes:      perCourts[1], // avg
-			CeremonyMinutes:      ceremonyMin,
+			CeremonyMinutes:      0,
 		}
 	}
 
@@ -560,13 +547,13 @@ func EstimateForCounts(poolCount, knockoutCount int, comp *state.Competition, to
 		perMatchElapsedMinutes(comp, tournament, false /*isKnockout*/),
 		perMatchElapsedMinutes(comp, tournament, true /*isKnockout*/),
 	}})
-	total := int(math.Round(maxes[0])) + ceremonyMin
+	total := int(math.Round(maxes[0]))
 	return ScheduleEstimate{
 		TotalDurationMinutes: total,
 		BestCaseMinutes:      total,
 		WorstCaseMinutes:     total,
 		PerCourtMinutes:      perCourts[0],
-		CeremonyMinutes:      ceremonyMin,
+		CeremonyMinutes:      0,
 	}
 }
 

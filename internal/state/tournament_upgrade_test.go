@@ -1,0 +1,263 @@
+package state
+
+import (
+	"os"
+	"path/filepath"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+func TestTournamentUpgrade_TwoDayTournamentWithCeremonies(t *testing.T) {
+	dir := t.TempDir()
+	tournPath := filepath.Join(dir, "tournament.md")
+	tournContent := `---
+name: National Championship
+date: 01-08-2026
+duration_days: 2
+opening_block: 30m
+closing_block: 30m
+---
+`
+	require.NoError(t, os.WriteFile(tournPath, []byte(tournContent), 0o600))
+
+	writeComp := func(id, date, startTime string) {
+		compDir := filepath.Join(dir, "competitions", id)
+		require.NoError(t, os.MkdirAll(compDir, 0o700))
+		compContent := "---\nid: " + id + "\nname: " + id + "\ndate: " + date + "\nstart_time: \"" + startTime + "\"\n---\n"
+		require.NoError(t, os.WriteFile(filepath.Join(compDir, "config.md"), []byte(compContent), 0o600))
+	}
+
+	writeComp("comp-day1-early", "01-08-2026", "09:30")
+	writeComp("comp-day1-late", "01-08-2026", "14:15")
+	writeComp("comp-day2", "02-08-2026", "09:30")
+
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+
+	tourn, err := store.LoadTournament()
+	require.NoError(t, err)
+	require.NotNil(t, tourn)
+
+	expectedPauses := []Pause{
+		{
+			Name:   "Opening ceremony",
+			Start:  "09:30",
+			Length: "30m",
+			Day:    1,
+		},
+		{
+			Name:   "Opening ceremony",
+			Start:  "09:30",
+			Length: "30m",
+			Day:    2,
+		},
+		{
+			Name:   "Closing ceremony",
+			Start:  "",
+			Length: "30m",
+			Day:    0,
+		},
+	}
+	assert.Equal(t, expectedPauses, tourn.Pauses)
+	assert.Empty(t, tourn.OpeningBlockLegacy)
+	assert.Empty(t, tourn.ClosingBlockLegacy)
+
+	raw, err := os.ReadFile(tournPath)
+	require.NoError(t, err)
+	text := string(raw)
+	assert.NotContains(t, text, "opening_block")
+	assert.NotContains(t, text, "closing_block")
+
+	// Calling upgradeLegacyCeremonies again writes nothing (file bytes and mtime unchanged)
+	statBefore, err := os.Stat(tournPath)
+	require.NoError(t, err)
+	bytesBefore, err := os.ReadFile(tournPath)
+	require.NoError(t, err)
+
+	require.NoError(t, store.upgradeLegacyCeremonies())
+
+	statAfter, err := os.Stat(tournPath)
+	require.NoError(t, err)
+	bytesAfter, err := os.ReadFile(tournPath)
+	require.NoError(t, err)
+
+	assert.Equal(t, bytesBefore, bytesAfter)
+	assert.Equal(t, statBefore.ModTime(), statAfter.ModTime())
+}
+
+func TestTournamentUpgrade_OneDayTournamentGetsDayZero(t *testing.T) {
+	dir := t.TempDir()
+	tournPath := filepath.Join(dir, "tournament.md")
+	tournContent := `---
+name: Regional Open
+date: 01-08-2026
+duration_days: 1
+opening_block: 30m
+---
+`
+	require.NoError(t, os.WriteFile(tournPath, []byte(tournContent), 0o600))
+
+	compDir := filepath.Join(dir, "competitions", "c1")
+	require.NoError(t, os.MkdirAll(compDir, 0o700))
+	compContent := `---
+id: c1
+name: Comp 1
+date: 01-08-2026
+start_time: "09:30"
+---
+`
+	require.NoError(t, os.WriteFile(filepath.Join(compDir, "config.md"), []byte(compContent), 0o600))
+
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+
+	tourn, err := store.LoadTournament()
+	require.NoError(t, err)
+	require.NotNil(t, tourn)
+
+	expected := []Pause{
+		{
+			Name:   "Opening ceremony",
+			Start:  "09:30",
+			Length: "30m",
+			Day:    0,
+		},
+	}
+	assert.Equal(t, expected, tourn.Pauses)
+}
+
+func TestTournamentUpgrade_CompetitionsWithNoDateCountAsDayOne(t *testing.T) {
+	dir := t.TempDir()
+	tournPath := filepath.Join(dir, "tournament.md")
+	tournContent := `---
+name: Multi-day Open
+date: 01-08-2026
+duration_days: 2
+opening_block: 30m
+---
+`
+	require.NoError(t, os.WriteFile(tournPath, []byte(tournContent), 0o600))
+
+	compDir := filepath.Join(dir, "competitions", "c1")
+	require.NoError(t, os.MkdirAll(compDir, 0o700))
+	compContent := `---
+id: c1
+name: Comp 1
+start_time: "09:30"
+---
+`
+	require.NoError(t, os.WriteFile(filepath.Join(compDir, "config.md"), []byte(compContent), 0o600))
+
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+
+	tourn, err := store.LoadTournament()
+	require.NoError(t, err)
+	require.NotNil(t, tourn)
+
+	expected := []Pause{
+		{
+			Name:   "Opening ceremony",
+			Start:  "09:30",
+			Length: "30m",
+			Day:    1,
+		},
+	}
+	assert.Equal(t, expected, tourn.Pauses)
+}
+
+func TestTournamentUpgrade_NoCompetitionsGivesOpeningWithNoStart(t *testing.T) {
+	dir := t.TempDir()
+	tournPath := filepath.Join(dir, "tournament.md")
+	tournContent := `---
+name: Open Tournament
+date: 01-08-2026
+duration_days: 1
+opening_block: 30m
+---
+`
+	require.NoError(t, os.WriteFile(tournPath, []byte(tournContent), 0o600))
+
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+
+	tourn, err := store.LoadTournament()
+	require.NoError(t, err)
+	require.NotNil(t, tourn)
+
+	expected := []Pause{
+		{
+			Name:   "Opening ceremony",
+			Start:  "",
+			Length: "30m",
+			Day:    0,
+		},
+	}
+	assert.Equal(t, expected, tourn.Pauses)
+}
+
+func TestTournamentUpgrade_NoCeremonyKeysNotRewritten(t *testing.T) {
+	dir := t.TempDir()
+	tournPath := filepath.Join(dir, "tournament.md")
+	rawBefore := []byte(`---
+name: Clean Tournament
+date: 01-08-2026
+venue: Tokyo Budokan
+duration_days: 1
+courts:
+  - A
+  - B
+---
+`)
+	require.NoError(t, os.WriteFile(tournPath, rawBefore, 0o600))
+
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+
+	rawAfter, err := os.ReadFile(tournPath)
+	require.NoError(t, err)
+
+	assert.Equal(t, string(rawBefore), string(rawAfter), "tournament with no ceremony keys must not be rewritten")
+	_ = store
+}
+
+func TestTournamentUpgrade_FailedWriteReturnsErrorAndLeavesKeysOnDisk(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("skipping test as root; read-only permissions are ignored")
+	}
+
+	dir := t.TempDir()
+	// Start store in empty folder first
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+
+	tournPath := filepath.Join(dir, "tournament.md")
+	tournContent := `---
+name: Permissions Test
+date: 01-08-2026
+opening_block: 30m
+closing_block: 30m
+---
+`
+	require.NoError(t, os.WriteFile(tournPath, []byte(tournContent), 0o600))
+
+	// Make data folder read-only
+	require.NoError(t, os.Chmod(dir, 0o500))
+	t.Cleanup(func() {
+		_ = os.Chmod(dir, 0o700)
+	})
+
+	err = store.upgradeLegacyCeremonies()
+	require.Error(t, err, "upgradeLegacyCeremonies must return an error when file write fails")
+
+	// Restore permissions before reading to verify contents
+	require.NoError(t, os.Chmod(dir, 0o700))
+
+	content, err := os.ReadFile(tournPath)
+	require.NoError(t, err)
+	text := string(content)
+	assert.Contains(t, text, "opening_block: 30m")
+	assert.Contains(t, text, "closing_block: 30m")
+}

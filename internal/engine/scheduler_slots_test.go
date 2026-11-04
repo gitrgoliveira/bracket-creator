@@ -1,6 +1,9 @@
 package engine
 
 import (
+	"encoding/json"
+	"fmt"
+	"os"
 	"testing"
 	"time"
 
@@ -121,10 +124,10 @@ func TestAssignSlotsTeamMatchScalesByBouts(t *testing.T) {
 		"team match should be at least ~5x individual (allowing rounding)")
 }
 
-// TestAssignSlotsSkipsOpeningBlock verifies that the first match on
-// each court is offset by the configured OpeningBlock duration.
+// TestAssignSlotsSkipsOpeningPause verifies that the first match on
+// each court is offset by the configured opening pause.
 // T151, FR-056.
-func TestAssignSlotsSkipsOpeningBlock(t *testing.T) {
+func TestAssignSlotsSkipsOpeningPause(t *testing.T) {
 	comp := &state.Competition{
 		StartTime:                "09:00",
 		PoolMatchDurationSeconds: 180,
@@ -132,7 +135,9 @@ func TestAssignSlotsSkipsOpeningBlock(t *testing.T) {
 	}
 	tournament := &state.Tournament{
 		ClockToElapsedMultiplier: 1.5,
-		OpeningBlock:             "30m",
+		Pauses: []state.Pause{
+			{Name: "Opening ceremony", Start: "09:00", Length: "30m"},
+		},
 	}
 
 	matches := []state.MatchResult{
@@ -147,11 +152,11 @@ func TestAssignSlotsSkipsOpeningBlock(t *testing.T) {
 		"second slot is opening-offset + 5m")
 }
 
-// TestAssignSlotsSkipsLunchBlock verifies that a slot computed to
-// fall inside the lunch window is pushed to the end of the block.
-// Default lunch starts at 12:00; with a 30m block the next available
-// slot is 12:30. T151, FR-056.
-func TestAssignSlotsSkipsLunchBlock(t *testing.T) {
+// TestAssignSlotsSkipsLunchPause verifies that a slot computed to
+// fall inside the lunch window is pushed to the end of the pause.
+// Default lunch starts at 12:00; with a 1h pause the next available
+// slot is 13:00. T151, FR-056.
+func TestAssignSlotsSkipsLunchPause(t *testing.T) {
 	comp := &state.Competition{
 		StartTime:                "11:30",
 		PoolMatchDurationSeconds: 360, // 6 * 1.5 = 9 minutes per match
@@ -159,7 +164,9 @@ func TestAssignSlotsSkipsLunchBlock(t *testing.T) {
 	}
 	tournament := &state.Tournament{
 		ClockToElapsedMultiplier: 1.5,
-		LunchBlock:               "1h",
+		Pauses: []state.Pause{
+			{Name: "Lunch", Start: "12:00", Length: "1h"},
+		},
 	}
 
 	matches := []state.MatchResult{
@@ -179,7 +186,7 @@ func TestAssignSlotsSkipsLunchBlock(t *testing.T) {
 	// (11:57+9=12:06) crosses into lunch. We expect the SLOT START
 	// at 11:57 to NOT be skipped (it's pre-lunch). Verify the test
 	// reflects the actual contract: skip only when the START falls
-	// inside the block.
+	// inside the pause.
 	assert.Equal(t, "11:57", matches[3].ScheduledAt,
 		"match starting at 11:57 is pre-lunch even if it overruns")
 
@@ -200,8 +207,10 @@ func TestAssignSlotsNoMatchInsideCeremony(t *testing.T) {
 	}
 	tournament := &state.Tournament{
 		ClockToElapsedMultiplier: 1.5,
-		OpeningBlock:             "30m",
-		LunchBlock:               "1h",
+		Pauses: []state.Pause{
+			{Name: "Opening ceremony", Start: "08:30", Length: "30m"},
+			{Name: "Lunch", Start: "12:00", Length: "1h"},
+		},
 	}
 
 	// Generate enough matches to span lunch on both courts.
@@ -477,7 +486,7 @@ func TestParseDurationMinutes_Valid(t *testing.T) {
 }
 
 // TestParseDurationMinutes_FallbackToZero verifies that empty or
-// unparseable inputs return 0 (treated as "no block configured").
+// unparseable inputs return 0 (treated as "no pause configured").
 func TestParseDurationMinutes_FallbackToZero(t *testing.T) {
 	assert.Equal(t, 0, parseDurationMinutes(""))
 	assert.Equal(t, 0, parseDurationMinutes("not-a-duration"))
@@ -521,16 +530,15 @@ func TestParseClockHHMM_FallbackTo0900(t *testing.T) {
 
 // TestAssignSlots_EmptyReturnsStartAnchorNotZero pins the hardened contract:
 // with a valid comp but no matches/rounds, the returned end-cursor is the
-// per-court start anchor (dayStart + OpeningBlock), matching where the first
-// match would have started and EstimateForCounts(0,…), so a post-draw
-// consumer's cursor.Sub(dayStart) yields the opening offset (0 with no opening),
-// never a bogus ~1-year duration. A zero time.Time is returned only when comp
-// is nil.
+// per-court start anchor (dayStart), even when an opening pause exists (a pause
+// moves matches, not the empty anchor). Matching EstimateForCounts(0,…), so a post-draw
+// consumer's cursor.Sub(dayStart) yields 0, never a bogus ~1-year duration.
+// A zero time.Time is returned only when comp is nil.
 func TestAssignSlots_EmptyReturnsStartAnchorNotZero(t *testing.T) {
 	comp := &state.Competition{Courts: []string{"A"}, StartTime: "09:00"}
 	dayStart := parseClockHHMM(comp.StartTime)
 
-	// No opening block (nil tournament) → anchor == dayStart, duration 0.
+	// No opening pause (nil tournament) → anchor == dayStart, duration 0.
 	_, poolCur := assignPoolMatchSlotsFrom(nil, comp, nil, nil)
 	assert.True(t, poolCur.Equal(dayStart), "empty pool slots (no opening) should return dayStart")
 	assert.Equal(t, 0.0, poolCur.Sub(dayStart).Minutes(), "empty pool duration must be 0")
@@ -538,13 +546,19 @@ func TestAssignSlots_EmptyReturnsStartAnchorNotZero(t *testing.T) {
 	brkCur := assignBracketMatchSlots(nil, comp, nil, nil)
 	assert.True(t, brkCur.Equal(dayStart), "empty bracket slots (no opening) should return dayStart")
 
-	// With a 30m opening block → anchor == dayStart + 30m (consistent with the
-	// non-empty path, where the first match starts at dayStart+OpeningBlock).
-	tourn := &state.Tournament{OpeningBlock: "30m"}
+	// With an opening pause → anchor is still dayStart (a pause moves matches,
+	// not the empty anchor).
+	tourn := &state.Tournament{
+		Pauses: []state.Pause{
+			{Name: "Opening ceremony", Start: "09:00", Length: "30m"},
+		},
+	}
 	_, poolCurOpen := assignPoolMatchSlotsFrom(nil, comp, tourn, nil)
-	assert.Equal(t, 30.0, poolCurOpen.Sub(dayStart).Minutes(), "empty pool with 30m opening must anchor at +30m")
+	assert.True(t, poolCurOpen.Equal(dayStart), "empty pool with opening pause still anchors at dayStart")
+	assert.Equal(t, 0.0, poolCurOpen.Sub(dayStart).Minutes(), "empty pool duration must be 0")
 	brkCurOpen := assignBracketMatchSlots(nil, comp, tourn, nil)
-	assert.Equal(t, 30.0, brkCurOpen.Sub(dayStart).Minutes(), "empty bracket with 30m opening must anchor at +30m")
+	assert.True(t, brkCurOpen.Equal(dayStart), "empty bracket with opening pause still anchors at dayStart")
+	assert.Equal(t, 0.0, brkCurOpen.Sub(dayStart).Minutes(), "empty bracket duration must be 0")
 
 	// nil comp → zero time.Time (dayStart cannot be derived).
 	_, nilCur := assignPoolMatchSlotsFrom(nil, nil, nil, nil)
@@ -670,4 +684,183 @@ func TestPoolPhaseEndByCourt(t *testing.T) {
 		ends := poolPhaseEndByCourt([]state.MatchResult{{Court: "A", ScheduledAt: "09:00"}}, comp, tournament)
 		assert.Equal(t, parseClockHHMM("09:00").Add(time.Duration(per)*time.Minute), ends["A"])
 	})
+}
+
+func TestParseDurationMinutes_SharedCases(t *testing.T) {
+	data, err := os.ReadFile("testdata/block_duration_cases.json")
+	require.NoError(t, err)
+
+	var fixture struct {
+		About string `json:"about"`
+		Cases []struct {
+			Input   string `json:"input"`
+			Minutes int    `json:"minutes"`
+		} `json:"cases"`
+	}
+	require.NoError(t, json.Unmarshal(data, &fixture))
+	require.NotEmpty(t, fixture.Cases)
+
+	for _, tc := range fixture.Cases {
+		t.Run(fmt.Sprintf("%q", tc.Input), func(t *testing.T) {
+			assert.Equal(t, tc.Minutes, parseDurationMinutes(tc.Input))
+		})
+	}
+}
+
+func TestSkipBreaks_NoPausesSkipsNothing(t *testing.T) {
+	at := parseClockHHMM("12:00")
+	assert.Equal(t, at, skipBreaks(at, nil))
+	assert.Equal(t, at, skipBreaks(at, []breakWindow{}))
+}
+
+func TestSkipBreaks_OverlappingPausesSkipAsOne(t *testing.T) {
+	breaks := []breakWindow{
+		{start: parseClockHHMM("12:00"), end: parseClockHHMM("13:00")},
+		{start: parseClockHHMM("12:30"), end: parseClockHHMM("13:45")},
+	}
+	assert.Equal(t, parseClockHHMM("13:45"), skipBreaks(parseClockHHMM("12:10"), breaks))
+	assert.Equal(t, parseClockHHMM("11:59"), skipBreaks(parseClockHHMM("11:59"), breaks))
+}
+
+func TestSkipBreaks_TouchingPauses(t *testing.T) {
+	breaks := []breakWindow{
+		{start: parseClockHHMM("12:00"), end: parseClockHHMM("12:30")},
+		{start: parseClockHHMM("12:30"), end: parseClockHHMM("13:00")},
+	}
+	assert.Equal(t, parseClockHHMM("13:00"), skipBreaks(parseClockHHMM("12:00"), breaks))
+	assert.Equal(t, parseClockHHMM("13:00"), skipBreaks(parseClockHHMM("13:00"), breaks))
+}
+
+func TestDayBreaks_Day2PauseLeavesDay1Alone(t *testing.T) {
+	tourn := &state.Tournament{
+		Date:         "01-05-2026",
+		DurationDays: 2,
+		Pauses: []state.Pause{
+			{Name: "Grading", Start: "10:00", Length: "30m", Day: 2},
+		},
+	}
+	assert.Empty(t, dayBreaks(tourn, "01-05-2026"))
+	b2 := dayBreaks(tourn, "02-05-2026")
+	require.Len(t, b2, 1)
+	assert.Equal(t, parseClockHHMM("10:00"), b2[0].start)
+	assert.Equal(t, parseClockHHMM("10:30"), b2[0].end)
+}
+
+func TestDayBreaks_PauseOnMissingDayIgnored(t *testing.T) {
+	tourn := &state.Tournament{
+		Date:         "01-05-2026",
+		DurationDays: 2,
+		Pauses: []state.Pause{
+			{Name: "Closing", Start: "16:00", Length: "30m", Day: 5},
+		},
+	}
+	assert.Empty(t, dayBreaks(tourn, "01-05-2026"))
+	assert.Empty(t, dayBreaks(tourn, "02-05-2026"))
+}
+
+func TestDayBreaks_IncompleteRowsDropped(t *testing.T) {
+	tourn := &state.Tournament{
+		Date:         "01-05-2026",
+		DurationDays: 1,
+		Pauses: []state.Pause{
+			{Name: "No start", Start: "", Length: "30m"},
+			{Name: "Bad start", Start: "noon", Length: "30m"},
+			{Name: "No length", Start: "12:00", Length: ""},
+			{Name: "Bad length", Start: "12:00", Length: "abc"},
+			{Name: "Valid", Start: "12:00", Length: "1h"},
+		},
+	}
+	breaks := dayBreaks(tourn, "01-05-2026")
+	require.Len(t, breaks, 1)
+	assert.Equal(t, parseClockHHMM("12:00"), breaks[0].start)
+	assert.Equal(t, parseClockHHMM("13:00"), breaks[0].end)
+}
+
+func TestDayBreaks_EmptyDateIsDay1(t *testing.T) {
+	tourn := &state.Tournament{
+		Date:         "01-05-2026",
+		DurationDays: 2,
+		Pauses: []state.Pause{
+			{Name: "Day 1 pause", Start: "10:00", Length: "30m", Day: 1},
+			{Name: "Day 2 pause", Start: "11:00", Length: "30m", Day: 2},
+		},
+	}
+	breaks := dayBreaks(tourn, "")
+	require.Len(t, breaks, 1)
+	assert.Equal(t, parseClockHHMM("10:00"), breaks[0].start)
+}
+
+func TestDayBreaks_SortedByStart(t *testing.T) {
+	tourn := &state.Tournament{
+		Date:         "01-05-2026",
+		DurationDays: 1,
+		Pauses: []state.Pause{
+			{Name: "Second", Start: "14:00", Length: "30m"},
+			{Name: "First", Start: "09:30", Length: "30m"},
+		},
+	}
+	breaks := dayBreaks(tourn, "01-05-2026")
+	require.Len(t, breaks, 2)
+	assert.Equal(t, parseClockHHMM("09:30"), breaks[0].start)
+	assert.Equal(t, parseClockHHMM("14:00"), breaks[1].start)
+}
+
+func TestAssignSlots_OverlappingPausesSkipAsOne(t *testing.T) {
+	comp := &state.Competition{
+		StartTime:                "11:50",
+		PoolMatchDurationSeconds: 600,
+		Courts:                   []string{"A"},
+	}
+	tournament := &state.Tournament{
+		ClockToElapsedMultiplier: 1.0,
+		Pauses: []state.Pause{
+			{Name: "Lunch", Start: "12:00", Length: "1h"},
+			{Name: "Grading", Start: "12:30", Length: "1h15m"},
+		},
+	}
+	matches := []state.MatchResult{
+		{ID: "m1", Court: "A"},
+		{ID: "m2", Court: "A"},
+		{ID: "m3", Court: "A"},
+	}
+	matches, _ = assignPoolMatchSlotsFrom(matches, comp, tournament, nil)
+	require.Len(t, matches, 3)
+	assert.Equal(t, "11:50", matches[0].ScheduledAt)
+	assert.Equal(t, "13:45", matches[1].ScheduledAt, "first match after 11:50 starts at 13:45")
+	assert.Equal(t, "13:55", matches[2].ScheduledAt)
+
+	pauseStart := parseClockHHMM("12:00")
+	pauseEnd := parseClockHHMM("13:45")
+	for i, m := range matches {
+		at := parseClockHHMM(m.ScheduledAt)
+		assert.Falsef(t, !at.Before(pauseStart) && at.Before(pauseEnd),
+			"match %d (%s) must not start inside 12:00-13:45", i, m.ScheduledAt)
+	}
+}
+
+func TestAssignSlots_Day2PauseLeavesDay1Alone(t *testing.T) {
+	comp := &state.Competition{
+		Date:                     "01-05-2026",
+		StartTime:                "11:50",
+		PoolMatchDurationSeconds: 600,
+		Courts:                   []string{"A"},
+	}
+	tournament := &state.Tournament{
+		Date:                     "01-05-2026",
+		DurationDays:             2,
+		ClockToElapsedMultiplier: 1.0,
+		Pauses: []state.Pause{
+			{Name: "Lunch", Start: "12:00", Length: "1h", Day: 2},
+		},
+	}
+	matches := []state.MatchResult{
+		{ID: "m1", Court: "A"},
+		{ID: "m2", Court: "A"},
+		{ID: "m3", Court: "A"},
+	}
+	matches, _ = assignPoolMatchSlotsFrom(matches, comp, tournament, nil)
+	require.Len(t, matches, 3)
+	assert.Equal(t, "11:50", matches[0].ScheduledAt)
+	assert.Equal(t, "12:00", matches[1].ScheduledAt, "runs straight through noon on Day 1")
+	assert.Equal(t, "12:10", matches[2].ScheduledAt)
 }

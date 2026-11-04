@@ -1105,12 +1105,14 @@ func TestTournamentHandlers_MaxLengthCaps(t *testing.T) {
 			},
 		},
 		{
-			field: "openingBlock",
+			field: "A pause name can be at most 60 characters.",
 			body: state.Tournament{
-				Name:         "OK",
-				Password:     "secret",
-				Courts:       []string{"A"},
-				OpeningBlock: strings.Repeat("o", 17),
+				Name:     "OK",
+				Password: "secret",
+				Courts:   []string{"A"},
+				Pauses: []state.Pause{
+					{Name: strings.Repeat("p", MaxLenPauseName+1)},
+				},
 			},
 		},
 	}
@@ -2590,4 +2592,239 @@ func TestCompleteHandler_BracketLoadErrorFailsClosed(t *testing.T) {
 	req, _ := http.NewRequest("POST", "/api/competitions/"+compID+"/complete", nil)
 	r.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusInternalServerError, w.Code, w.Body.String())
+}
+
+func TestTournamentPUT_PausesRoundTrip(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	require.NoError(t, store.SaveTournament(&state.Tournament{
+		Name:     "Initial",
+		Password: "secret",
+		Courts:   []string{"A"},
+	}))
+
+	tour := state.Tournament{
+		Name:     "Initial",
+		Password: "secret",
+		Courts:   []string{"A"},
+		Pauses: []state.Pause{
+			{Name: "Opening ceremony", Start: "09:30", Length: "30m", Day: 1},
+			{Name: "Lunch", Start: "12:00", Length: "1h", Day: 0},
+			{Name: "Closing ceremony", Length: "30m"},
+		},
+	}
+
+	body, _ := json.Marshal(tour)
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	// GET returns the same three rows in order
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("GET", "/api/tournament", nil)
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var gotTour state.Tournament
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &gotTour))
+	require.Len(t, gotTour.Pauses, 3)
+	assert.Equal(t, tour.Pauses, gotTour.Pauses)
+
+	// the store's tournament.md holds pauses: and no lunch_block/opening_block/closing_block key
+	raw, err := os.ReadFile(filepath.Join(tempDir, "tournament.md"))
+	require.NoError(t, err)
+	content := string(raw)
+	assert.Contains(t, content, "pauses:")
+	assert.NotContains(t, content, "lunch_block")
+	assert.NotContains(t, content, "opening_block")
+	assert.NotContains(t, content, "closing_block")
+}
+
+func TestTournamentPUT_PauseValidation400(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	require.NoError(t, store.SaveTournament(&state.Tournament{
+		Name:     "Initial",
+		Password: "secret",
+		Courts:   []string{"A"},
+	}))
+
+	// 21 pauses -> 400 whose error text is "A tournament can have at most 20 pauses."
+	pauses21 := make([]state.Pause, 21)
+	for i := range pauses21 {
+		pauses21[i] = state.Pause{Name: "P", Start: "10:00", Length: "10m"}
+	}
+	body, _ := json.Marshal(state.Tournament{
+		Name:     "Initial",
+		Password: "secret",
+		Courts:   []string{"A"},
+		Pauses:   pauses21,
+	})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	var errResp map[string]string
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &errResp))
+	assert.Equal(t, "A tournament can have at most 20 pauses.", errResp["error"])
+
+	// Day 31 -> 400 with its sentence
+	body, _ = json.Marshal(state.Tournament{
+		Name:     "Initial",
+		Password: "secret",
+		Courts:   []string{"A"},
+		Pauses: []state.Pause{
+			{Name: "Break", Day: 31},
+		},
+	})
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &errResp))
+	assert.Equal(t, fmt.Sprintf("A pause day must be from 0 (every day) to %d.", MaxTournamentDurationDays), errResp["error"])
+}
+
+func TestTournamentPUT_KeepsLegacyCeremonyLengths(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "legacy-ceremony-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+
+	// Store created BEFORE the file is written so startup upgrade has not converted it
+	store, err := state.NewStore(tempDir)
+	require.NoError(t, err)
+
+	fileContent := `---
+name: Legacy Tourn
+venue: Initial Venue
+date: 01-01-2026
+password: secret
+courts:
+  - A
+opening_block: 30m
+closing_block: 30m
+---
+`
+	require.NoError(t, os.WriteFile(filepath.Join(tempDir, "tournament.md"), []byte(fileContent), 0600))
+
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	hub := NewHub()
+	defer hub.Close()
+	admin := r.Group("/api")
+	RegisterTournamentHandlers(admin, store, hub, NewFileVerifier(store))
+
+	// GET tournament JSON
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/tournament", nil)
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var tour state.Tournament
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &tour))
+
+	// Send an Edit tournament PUT built from GET's JSON (any field changed, for example the venue)
+	tour.Venue = "Changed Venue"
+	putBody, _ := json.Marshal(tour)
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(putBody))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	// the file on disk still has both keys
+	raw, err := os.ReadFile(filepath.Join(tempDir, "tournament.md"))
+	require.NoError(t, err)
+	content := string(raw)
+	assert.Contains(t, content, "opening_block: 30m")
+	assert.Contains(t, content, "closing_block: 30m")
+
+	// then state.NewStore on the same folder converts them into an "Opening ceremony" pause
+	// (no start: there is no competition) and a "Closing ceremony" pause and drops both keys.
+	store2, err := state.NewStore(tempDir)
+	require.NoError(t, err)
+
+	t2, err := store2.LoadTournament()
+	require.NoError(t, err)
+	require.NotNil(t, t2)
+	assert.Equal(t, "", t2.OpeningBlockLegacy)
+	assert.Equal(t, "", t2.ClosingBlockLegacy)
+	require.Len(t, t2.Pauses, 2)
+	assert.Equal(t, "Opening ceremony", t2.Pauses[0].Name)
+	assert.Equal(t, "", t2.Pauses[0].Start)
+	assert.Equal(t, "30m", t2.Pauses[0].Length)
+	assert.Equal(t, "Closing ceremony", t2.Pauses[1].Name)
+	assert.Equal(t, "", t2.Pauses[1].Start)
+	assert.Equal(t, "30m", t2.Pauses[1].Length)
+
+	raw2, err := os.ReadFile(filepath.Join(tempDir, "tournament.md"))
+	require.NoError(t, err)
+	content2 := string(raw2)
+	assert.NotContains(t, content2, "opening_block")
+	assert.NotContains(t, content2, "closing_block")
+}
+
+func TestTournamentPUT_KeepsMigratedLunchPause(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "migrated-lunch-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+
+	fileContent := `---
+name: Lunch Tourn
+venue: Initial Venue
+date: 01-01-2026
+password: secret
+courts:
+  - A
+lunch_block: 1h
+---
+`
+	require.NoError(t, os.WriteFile(filepath.Join(tempDir, "tournament.md"), []byte(fileContent), 0600))
+
+	store, err := state.NewStore(tempDir)
+	require.NoError(t, err)
+
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	hub := NewHub()
+	defer hub.Close()
+	admin := r.Group("/api")
+	RegisterTournamentHandlers(admin, store, hub, NewFileVerifier(store))
+
+	// GET the tournament (it shows the Lunch 12:00 pause)
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/tournament", nil)
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var tour state.Tournament
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &tour))
+	require.Len(t, tour.Pauses, 1)
+	assert.Equal(t, "Lunch", tour.Pauses[0].Name)
+	assert.Equal(t, "12:00", tour.Pauses[0].Start)
+	assert.Equal(t, "1h", tour.Pauses[0].Length)
+	assert.Equal(t, 0, tour.Pauses[0].Day)
+
+	// PUT that JSON back unchanged except the venue
+	tour.Venue = "New Venue"
+	body, _ := json.Marshal(tour)
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	// the file holds the Lunch pause and no lunch_block key
+	raw, err := os.ReadFile(filepath.Join(tempDir, "tournament.md"))
+	require.NoError(t, err)
+	content := string(raw)
+	assert.Contains(t, content, "pauses:")
+	assert.Contains(t, content, "Lunch")
+	assert.NotContains(t, content, "lunch_block")
 }

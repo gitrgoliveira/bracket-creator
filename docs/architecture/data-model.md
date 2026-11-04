@@ -49,9 +49,19 @@ classDiagram
         +string[] Courts
         +string Mode
         +int DurationDays
+        +Pause[] Pauses
+        +float ClockToElapsedMultiplier
+        +int SlowestCourtBufferPct
         +Sponsor[] Sponsors
         +Theme Theme
         +TournamentContact[] Contacts
+    }
+
+    class Pause {
+        +string Name
+        +string Start
+        +string Length
+        +int Day
     }
 
     class Theme {
@@ -77,6 +87,7 @@ classDiagram
         +bool Naginata
         +bool Engi
         +bool WithZekkenName
+        +int ExpectedParticipants
     }
 
     class Player {
@@ -139,6 +150,7 @@ classDiagram
     }
 
     Tournament "1" o-- "0..*" Competition
+    Tournament "1" o-- "0..*" Pause
     Competition "1" o-- "0..*" Player
     Competition "1" o-- "0..*" Pool
     Competition "1" o-- "0..*" CompetitorStatus
@@ -293,6 +305,41 @@ highest round's. The round lineups stay, never read, until the competition is co
 the next write of the draw, or the next start of the app, removes them and `config.md` records
 `round_lineups_converted`, which is set as soon as no legacy team waits. A new competition
 starts with it set.
+
+### Tournament timing and pauses
+
+A tournament records shared timing parameters and pauses that apply across its competitions.
+
+The timing fields tune the schedule duration estimator:
+
+* `clock_to_elapsed_multiplier`: Scales on-clock match minutes to wall-clock elapsed minutes, accounting for scoring transitions, salutes, crossings and bout preparation. Defaults to 1.5 when unset.
+* `slowest_court_buffer_pct`: A percentage buffer added when distributing elapsed minutes across parallel courts, because the slowest court typically runs longer than the average. Defaults to 10 when unset.
+
+A tournament holds a list of scheduled stops in `pauses` (at most 20 pauses). Each pause record defines:
+
+* `name`: The label for the pause (such as Lunch, Opening ceremony, or Grading).
+* `start`: The scheduled clock time in "HH:MM" format (for example 12:00).
+* `length`: The duration text string (such as "1h", "45m", or "1h30m").
+* `day`: The 1-based tournament day index (1 for Day 1, 2 for Day 2). A day index of 0 means the pause applies on every day of the tournament.
+
+The schedule estimator evaluates pauses under four rules:
+
+* **Incomplete rows are ignored.** An incomplete row with no start time or an unparseable duration is saved and preserved on disk, but the schedule ignores it.
+* **Overlapping pauses count as one.** When two pauses overlap in time, the schedule treats them as one longer pause: a match that would start inside either of them starts when the later one ends.
+* **Pauses on missing days are ignored.** A pause whose day index falls outside the tournament duration or on a day with no scheduled competition is ignored by the schedule.
+* **Drawn competitions keep their times.** Once a competition is drawn, its stored match times stay as they are when pauses are edited later. A draw made after the edit uses the new pauses.
+
+The earlier `lunch_block`, `opening_block` and `closing_block` keys are no longer part of the model: `pauses` replaces them (see the upgrade below).
+
+### Upgrading legacy ceremony blocks
+
+Releases v2.2.0 and v2.3.0 stored ceremonies and lunch as duration strings without clock times (`lunch_block`, `opening_block` and `closing_block`). A one-time startup upgrade migrates these legacy keys into `pauses`:
+
+* `lunch_block`: Converted to a "Lunch" pause starting at 12:00 on every day (Day 0) when the tournament has no existing pauses.
+* `opening_block`: Converted into one "Opening ceremony" pause per tournament day that has a competition, starting at that day's earliest competition start time (an empty start time defaults to 09:00). On a single-day tournament the pause uses Day 0; on a multi-day tournament it uses the specific day index. If no competition has a day within the tournament, a single start-less "Opening ceremony" row is created so the organiser can provide a time.
+* `closing_block`: Converted into one "Closing ceremony" pause with no start time on Day 0.
+* **Removal of legacy keys:** Once converted, the legacy keys are removed from `tournament.md` on the next file write.
+* **Failure handling:** The ceremony migration runs once at server startup. If the conversion fails, the error is logged, the legacy keys stay on disk, and the migration is retried at the next startup.
 
 ## 3. The match and result model
 
@@ -636,7 +683,9 @@ Markdown, CSV, and JSON or YAML each earn their place:
 | JSON and YAML | bracket, eligibility, lineups, overrides | Tree shaped data that does not fit a row |
 | JSON lines (JSONL) | match history and per-match score event logs | Append-only audit trail and event sourcing stream; one line per write or event |
 
-In `tournament.md`, the optional `theme` block holds the accent colours, the window title, `logo_path`, and `logo_on_lobby` (a bool; absent reads false). When `logo_on_lobby` is true and a logo is uploaded in `branding/`, the lobby display shows the logo.
+In `tournament.md`, YAML front matter stores tournament settings: `name`, `date`, `venue`, `courts`, `mode`, `duration_days`, `pauses`, `clock_to_elapsed_multiplier`, `slowest_court_buffer_pct`, `sponsors`, and `theme`. A file that still carries `lunch_block`, `opening_block` or `closing_block` is converted to `pauses` at startup. The optional `theme` block holds the accent colours, the window title, `logo_path`, and `logo_on_lobby` (a bool; absent reads false). When `logo_on_lobby` is true and a logo is uploaded in `branding/`, the lobby display shows the logo.
+
+In `competitions/<id>/config.md`, YAML front matter stores competition configuration: `name`, `date`, `start_time`, `courts`, `kind`, `format`, `status`, rules and match durations, `expected_participants`, and format-specific options. The `expected_participants` field is an optional integer (0 to 1024, absent means 0) representing the organiser's expected entry count (expected teams in team competitions) for setup schedule estimation. It needs no migration because no earlier release wrote the key.
 
 A competitor list must exist before a seed can be set: a seed ranks a participant, so a rank
 with nobody to attach it to is refused, not stored. Clearing a seeding is exempt, since that

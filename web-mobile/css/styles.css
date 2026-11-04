@@ -1247,6 +1247,108 @@ a:hover {
   box-shadow: var(--shadow-sm);
 }
 
+/* ---------- Schedule Pauses Editor (pause_list.jsx) ---------- */
+.pause-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.pause-intro {
+  font-size: 13.5px;
+  color: var(--ink-2);
+  line-height: 1.45;
+  margin-bottom: 16px;
+}
+
+.pause-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.pause-row-card {
+  border: 1px solid var(--line);
+  border-radius: var(--r, 8px);
+  padding: 14px;
+  background: var(--surface);
+  box-sizing: border-box;
+}
+
+.pause-fields-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.pause-fields-grid:not(.pause-fields-grid--multiday) .pause-field:first-child {
+  grid-column: 1 / -1;
+}
+
+@media (max-width: 600px) {
+  .pause-fields-grid {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  .pause-fields-grid:not(.pause-fields-grid--multiday) .pause-field:first-child {
+    grid-column: auto;
+  }
+}
+
+.pause-field {
+  margin-bottom: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.pause-field .input,
+.pause-field .select {
+  width: 100%;
+}
+
+.pause-row-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+  flex-wrap: wrap;
+}
+
+.pause-row-status {
+  font-size: 12.5px;
+  color: var(--ink-2);
+  line-height: 1.35;
+  flex: 1;
+}
+
+.pause-row-status--warn {
+  color: var(--danger);
+  font-weight: 500;
+}
+
+.pause-remove-btn {
+  flex-shrink: 0;
+}
+
+@media (pointer: coarse) {
+  .pause-remove-btn {
+    min-height: 44px;
+    min-width: 44px;
+  }
+}
+
+.pause-impact-notice {
+  padding: 12px 14px;
+  border-radius: var(--r-sm, 6px);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  margin-top: 4px;
+}
+
 /* ---------- Tables ---------- */
 .table {
   width: 100%;

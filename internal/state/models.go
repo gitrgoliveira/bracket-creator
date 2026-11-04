@@ -13,6 +13,18 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 )
 
+// Pause is a named stop in the day (an opening ceremony, lunch, a grading,
+// a closing ceremony); Start is a clock "HH:MM"; Length uses the duration text
+// format ("1h", "45m", "1h30m"); Day is the 1-based tournament day index, 0
+// meaning every day; a row with no start or an unreadable length is kept but
+// not used by the schedule.
+type Pause struct {
+	Name   string `yaml:"name" json:"name"`
+	Start  string `yaml:"start,omitempty" json:"start"`
+	Length string `yaml:"length,omitempty" json:"length"`
+	Day    int    `yaml:"day,omitempty" json:"day"`
+}
+
 type Tournament struct {
 	Name     string   `yaml:"name" json:"name"`
 	Date     string   `yaml:"date" json:"date"`
@@ -38,14 +50,17 @@ type Tournament struct {
 	// still carry admin_password; front-matter decoding ignores unknown keys,
 	// so it loads, and the next save drops it.
 
-	// Ceremony blocks expressed as human duration strings (e.g. "30m",
-	// "1h"). When set, the auto-scheduler reserves a contiguous range
-	// at the appropriate point in the day and skips match slots that
-	// would land inside it. Optional; zero/empty means no block.
-	// FR-056, R9, data-model §6.
-	OpeningBlock string `yaml:"opening_block,omitempty" json:"openingBlock,omitempty"`
-	LunchBlock   string `yaml:"lunch_block,omitempty" json:"lunchBlock,omitempty"`
-	ClosingBlock string `yaml:"closing_block,omitempty" json:"closingBlock,omitempty"`
+	Pauses []Pause `yaml:"pauses,omitempty" json:"pauses,omitempty"`
+
+	// LunchBlockLegacy, OpeningBlockLegacy, and ClosingBlockLegacy capture the
+	// pre-rename/pre-pauses `lunch_block`, `opening_block`, and `closing_block`
+	// YAML keys from tournament.md files written before pauses were introduced.
+	// They are migrated into Pauses and are never emitted on the wire (json:"-")
+	// nor re-persisted (the migrations clear them, so omitempty drops the old
+	// keys on the next save).
+	LunchBlockLegacy   string `yaml:"lunch_block,omitempty" json:"-"`
+	OpeningBlockLegacy string `yaml:"opening_block,omitempty" json:"-"`
+	ClosingBlockLegacy string `yaml:"closing_block,omitempty" json:"-"`
 
 	// ClockToElapsedMultiplier scales the on-clock match duration to
 	// "real elapsed minutes"; coin tosses, scoring transitions, salutes
@@ -241,10 +256,41 @@ func ValidateTournamentMode(mode string) error {
 	}
 }
 
+// migrateLegacyTournament holds the load-time migrations from older tournament
+// schema versions and applies no defaults:
+//   - DurationDays == 0 becomes 1
+//   - RulesURLLegacy is migrated to WebsiteURL and cleared
+//   - When len(Pauses) == 0 and LunchBlockLegacy parses with time.ParseDuration
+//     to > 0, appends a Pause{Name: "Lunch", Start: "12:00", Length: LunchBlockLegacy, Day: 0}
+//   - LunchBlockLegacy is always cleared
+func migrateLegacyTournament(t *Tournament) {
+	if t == nil {
+		return
+	}
+	if t.DurationDays == 0 {
+		t.DurationDays = 1
+	}
+	if t.WebsiteURL == "" && t.RulesURLLegacy != "" {
+		t.WebsiteURL = t.RulesURLLegacy
+	}
+	t.RulesURLLegacy = ""
+	if len(t.Pauses) == 0 && t.LunchBlockLegacy != "" {
+		if d, err := time.ParseDuration(t.LunchBlockLegacy); err == nil && d > 0 {
+			t.Pauses = append(t.Pauses, Pause{
+				Name:   "Lunch",
+				Start:  "12:00",
+				Length: t.LunchBlockLegacy,
+				Day:    0,
+			})
+		}
+	}
+	t.LunchBlockLegacy = ""
+}
+
 // ApplyTournamentDefaults fills zero-valued schedule-estimator tuning
 // fields on t with their canonical defaults: ClockToElapsedMultiplier=1.5,
-// SlowestCourtBufferPct=10, and DurationDays=1. Idempotent; safe to call
-// repeatedly.
+// SlowestCourtBufferPct=10, and DurationDays=1 (via migrateLegacyTournament).
+// Idempotent; safe to call repeatedly.
 // Also normalizes empty Mode to TournamentModeOfficiated so that
 // tournament.md files predating mp-7h7 behave as officiated tournaments.
 // FR-055, FR-057, R9.
@@ -252,14 +298,12 @@ func ApplyTournamentDefaults(t *Tournament) {
 	if t == nil {
 		return
 	}
+	migrateLegacyTournament(t)
 	if t.ClockToElapsedMultiplier == 0 {
 		t.ClockToElapsedMultiplier = 1.5
 	}
 	if t.SlowestCourtBufferPct == 0 {
 		t.SlowestCourtBufferPct = 10
-	}
-	if t.DurationDays == 0 {
-		t.DurationDays = 1
 	}
 	if t.Mode == "" {
 		t.Mode = TournamentModeOfficiated
@@ -268,14 +312,6 @@ func ApplyTournamentDefaults(t *Tournament) {
 		// Default to at least one court ("A") for legacy or malformed configs
 		t.Courts = []string{"A"}
 	}
-	// Migrate the pre-rename rules_url key into website_url. Only fill when
-	// website_url is absent so a file carrying both keys prefers the new one.
-	// Clearing the legacy field means the next save writes only website_url,
-	// completing the migration on disk. Idempotent: a no-op once migrated.
-	if t.WebsiteURL == "" && t.RulesURLLegacy != "" {
-		t.WebsiteURL = t.RulesURLLegacy
-	}
-	t.RulesURLLegacy = ""
 }
 
 // Days returns the ordered list of DD-MM-YYYY calendar day strings
@@ -513,6 +549,15 @@ type Competition struct {
 	// (false, i.e. "unset" would misread as "off") must never be the value a
 	// fresh competition is judged by.
 	TwoThirdPlaces *bool `yaml:"two_third_places,omitempty" json:"twoThirdPlaces,omitempty"`
+
+	// ExpectedParticipants is the organiser's expected entry count, used by the
+	// schedule estimate while the competition is in setup (engine
+	// countForEstimate). For a team competition it counts teams, since a team
+	// is one entry in the estimate. 0 or absent means not set. The draw never
+	// reads it, so it is editable in every status. It needs no load-time
+	// migration: no earlier release writes the key, so an older config.md
+	// loads as "not set" and estimates exactly as before.
+	ExpectedParticipants int `yaml:"expected_participants,omitempty" json:"expectedParticipants,omitempty"`
 
 	// LeagueTiebreakFinalized is set to true by the operator via
 	// POST /api/competitions/:id/league-tiebreak/finalize to accept the

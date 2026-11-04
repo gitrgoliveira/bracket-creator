@@ -1,6 +1,8 @@
 package engine
 
 import (
+	"encoding/json"
+	"fmt"
 	"testing"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
@@ -570,4 +572,153 @@ func TestEstimateForCounts_KachinukiRange_Golden(t *testing.T) {
 	assert.Equal(t, 404, got.TotalDurationMinutes)
 	assert.Equal(t, 520, got.WorstCaseMinutes)
 	assert.Equal(t, []int{404, 297}, got.PerCourtMinutes)
+}
+
+// TestCountForEstimate pins the one count rule: the larger of the expected
+// count and the counted roster, "expected" only while the expected count is
+// the larger (an equal count is the roster's).
+func TestCountForEstimate(t *testing.T) {
+	cases := []struct {
+		expected, counted int
+		wantN             int
+		wantSource        string
+	}{
+		{0, 0, 0, ParticipantsSourceRoster},
+		{40, 0, 40, ParticipantsSourceExpected},
+		{40, 12, 40, ParticipantsSourceExpected},
+		{40, 50, 50, ParticipantsSourceRoster},
+		{40, 40, 40, ParticipantsSourceRoster},
+		{0, 9, 9, ParticipantsSourceRoster},
+	}
+	for _, tc := range cases {
+		n, source := countForEstimate(tc.expected, tc.counted)
+		assert.Equal(t, tc.wantN, n, "expected=%d counted=%d", tc.expected, tc.counted)
+		assert.Equal(t, tc.wantSource, source, "expected=%d counted=%d", tc.expected, tc.counted)
+	}
+}
+
+// estimateForPlayerCount is the estimate EstimateScheduleForCompetition must
+// give for n entries: the match counts for n, then EstimateForCounts.
+func estimateForPlayerCount(t *testing.T, comp *state.Competition, tourn *state.Tournament, n int) ScheduleEstimate {
+	t.Helper()
+	poolCount, knockoutCount, err := helper.EstimateMatchCounts(helper.EstimateMatchCountsInput{
+		Format:       comp.Format,
+		PlayerCount:  n,
+		PoolSize:     comp.PoolSize,
+		PoolSizeMode: comp.PoolSizeMode,
+		PoolWinners:  comp.EffectivePoolWinners(),
+		RoundRobin:   comp.RoundRobin,
+		PoolFormat:   comp.PoolFormat,
+		SwissRounds:  comp.SwissRounds,
+	})
+	require.NoError(t, err)
+	return EstimateForCounts(poolCount, knockoutCount, comp, tourn)
+}
+
+// TestEstimateScheduleForCompetition_ExpectedParticipants drives the stored
+// expected count through the per-competition estimate: it is weighed against
+// the counted roster (checked in, when check-in applies) only in setup, and the
+// answer says which count it used.
+func TestEstimateScheduleForCompetition_ExpectedParticipants(t *testing.T) {
+	cases := []struct {
+		name       string
+		status     state.CompetitionStatus
+		kind       string
+		teamSize   int
+		checkIn    bool
+		expected   int
+		registered int
+		checkedIn  int
+		wantN      int
+		wantSource string
+	}{
+		{name: "expected 40, nobody registered", status: state.CompStatusSetup, expected: 40, wantN: 40, wantSource: "expected"},
+		{name: "12 registered of 40 expected", status: state.CompStatusSetup, expected: 40, registered: 12, wantN: 40, wantSource: "expected"},
+		{name: "50 registered past 40 expected", status: state.CompStatusSetup, expected: 40, registered: 50, wantN: 50, wantSource: "roster"},
+		{name: "check-in on, nobody checked in, 40 expected", status: state.CompStatusSetup, checkIn: true, expected: 40, registered: 12, wantN: 40, wantSource: "expected"},
+		{name: "check-in on, 5 of 50 checked in, 40 expected", status: state.CompStatusSetup, checkIn: true, expected: 40, registered: 50, checkedIn: 5, wantN: 40, wantSource: "expected"},
+		{name: "draw ready: 30 drawn, 40 expected", status: state.CompStatusDrawReady, expected: 40, registered: 30, wantN: 30, wantSource: "roster"},
+		{name: "no expected count, 10 registered", status: state.CompStatusSetup, registered: 10, wantN: 10, wantSource: "roster"},
+		{name: "team competition: 6 teams expected, 2 entered", status: state.CompStatusSetup, kind: "team", teamSize: 3, expected: 6, registered: 2, wantN: 6, wantSource: "expected"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			eng, store, _ := setupTestEngine(t)
+			const compID = "est-expected"
+			kind := tc.kind
+			if kind == "" {
+				kind = "individual"
+			}
+			require.NoError(t, store.SaveCompetition(&state.Competition{
+				ID:                           compID,
+				Format:                       state.CompFormatKnockout,
+				Kind:                         kind,
+				TeamSize:                     tc.teamSize,
+				Courts:                       []string{"A"},
+				StartTime:                    "09:00",
+				KnockoutMatchDurationSeconds: 300,
+				Status:                       tc.status,
+				CheckInEnabled:               tc.checkIn,
+				ExpectedParticipants:         tc.expected,
+			}))
+			names := make([]string, tc.registered)
+			checked := map[string]bool{}
+			for i := range names {
+				names[i] = fmt.Sprintf("P%02d", i+1)
+				if i < tc.checkedIn {
+					checked[names[i]] = true
+				}
+			}
+			if tc.registered > 0 {
+				saveParticipantsWithCheckIn(t, store, compID, names, checked)
+			}
+
+			est, err := eng.EstimateScheduleForCompetition(compID)
+			require.NoError(t, err)
+			assert.Equal(t, tc.wantN, est.Participants)
+			assert.Equal(t, tc.wantSource, est.ParticipantsSource)
+
+			comp, err := store.LoadCompetition(compID)
+			require.NoError(t, err)
+			tourn, err := store.LoadTournament()
+			require.NoError(t, err)
+			want := estimateForPlayerCount(t, comp, tourn, tc.wantN)
+			want.Participants = tc.wantN
+			want.ParticipantsSource = tc.wantSource
+			assert.Equal(t, want, est, "the estimate must be the one for %d entries", tc.wantN)
+		})
+	}
+}
+
+// TestEstimateScheduleForCompetition_NoCountNoParticipantsKeys pins that a
+// competition with no roster and no expected count answers the zero estimate
+// with neither participants key on the wire, and that EstimateForCounts never
+// carries them, so the golden record (schedule_golden.json) is unchanged.
+func TestEstimateScheduleForCompetition_NoCountNoParticipantsKeys(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	const compID = "est-no-count"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:                           compID,
+		Format:                       state.CompFormatKnockout,
+		Kind:                         "individual",
+		Courts:                       []string{"A"},
+		StartTime:                    "09:00",
+		KnockoutMatchDurationSeconds: 300,
+		Status:                       state.CompStatusSetup,
+	}))
+	est, err := eng.EstimateScheduleForCompetition(compID)
+	require.NoError(t, err)
+	assert.Zero(t, est.Participants)
+	assert.Empty(t, est.ParticipantsSource)
+
+	comp, err := store.LoadCompetition(compID)
+	require.NoError(t, err)
+	tourn, err := store.LoadTournament()
+	require.NoError(t, err)
+	for _, e := range []ScheduleEstimate{est, EstimateForCounts(0, 7, comp, tourn)} {
+		raw, err := json.Marshal(e)
+		require.NoError(t, err)
+		assert.NotContains(t, string(raw), `"participants"`)
+		assert.NotContains(t, string(raw), `"participantsSource"`)
+	}
 }

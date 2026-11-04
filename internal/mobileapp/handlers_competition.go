@@ -359,6 +359,12 @@ const defaultPoolSize = 4
 type competitionUpdateRequest struct {
 	state.Competition
 	ExtraQualifiers *string `json:"extraQualifiers"`
+	// ExpectedParticipants carries the key's presence the same way: a PUT that
+	// omits it (a page that predates the field, or any partial body) keeps the
+	// stored count, and an explicit 0 clears it. Without this a settings save
+	// that never mentions the field would silently drop the organiser's
+	// expected count and shrink every estimate built on it.
+	ExpectedParticipants *int `json:"expectedParticipants"`
 
 	// RetiredKnockoutMatchDurationSeconds exists ONLY to detect a client still
 	// sending the pre-rename key and refuse it. It is never read as a value.
@@ -462,6 +468,18 @@ func validateCompetitionLengths(comp *state.Competition) error {
 	}
 	if err := validateMaxLen("date", comp.Date, MaxLenCompetitionDate); err != nil {
 		return err
+	}
+	return nil
+}
+
+// validateExpectedParticipants refuses an expected entry count outside 0 to
+// engine.MaxEstimateParticipants (0 clears it). The answer is the sentence
+// alone, not "field: message", because the operator reads it as it stands.
+func validateExpectedParticipants(comp *state.Competition) error {
+	if comp.ExpectedParticipants < 0 || comp.ExpectedParticipants > engine.MaxEstimateParticipants {
+		return &ValidationError{
+			Message: fmt.Sprintf("Expected participants must be a whole number from 0 to %d.", engine.MaxEstimateParticipants),
+		}
 	}
 	return nil
 }
@@ -879,6 +897,10 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		}
 
 		if err := validateCompetitionLengths(&comp); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		if err := validateExpectedParticipants(&comp); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
@@ -1301,6 +1323,9 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		if req.ExtraQualifiers != nil {
 			comp.ExtraQualifiers = *req.ExtraQualifiers
 		}
+		if req.ExpectedParticipants != nil {
+			comp.ExpectedParticipants = *req.ExpectedParticipants
+		}
 		// Refuse the pre-rename duration key rather than letting the decoder
 		// drop it and the transform zero the stored value. See the field's
 		// comment on competitionUpdateRequest.
@@ -1400,6 +1425,10 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			}
 
 			if err := validateCompetitionLengths(&comp); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				return
+			}
+			if err := validateExpectedParticipants(&comp); err != nil {
 				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 				return
 			}
@@ -1849,6 +1878,9 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 					// deliberately absent from the comparison set below: they do
 					// not reach the draw, so editing them while draw-ready is
 					// allowed and must not force a regenerate.
+					// ExpectedParticipants is absent for the same reason: only
+					// the estimate reads it, so it is editable in every status
+					// and a draw-ready save of it alone is a 200.
 					outputAffectingChanged :=
 						comp.PoolSize != current.PoolSize ||
 							comp.PoolWinners != current.PoolWinners ||
@@ -2205,6 +2237,9 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 					return nil, nil
 				}
 				current.TwoThirdPlaces = comp.TwoThirdPlaces
+				if req.ExpectedParticipants != nil {
+					current.ExpectedParticipants = comp.ExpectedParticipants
+				}
 				return current, nil
 			})
 			return updateErr

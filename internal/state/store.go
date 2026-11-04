@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"log"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -138,6 +139,10 @@ func NewStore(folder string) (*Store, error) {
 	// own doc comment (legacy_upgrade.go) for why a failure here never
 	// prevents NewStore from succeeding.
 	s.sweepLegacyUpgrades()
+
+	if err := s.upgradeLegacyCeremonies(); err != nil {
+		log.Printf("state: startup ceremony upgrade: %v", err)
+	}
 
 	return s, nil
 }

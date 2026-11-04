@@ -1,0 +1,22 @@
+{
+  "about": "Shared with the browser's pause length parse, which must agree.",
+  "cases": [
+    {"input": "", "minutes": 0},
+    {"input": "1h", "minutes": 60},
+    {"input": "45m", "minutes": 45},
+    {"input": "1h30m", "minutes": 90},
+    {"input": "90m", "minutes": 90},
+    {"input": "2h15m", "minutes": 135},
+    {"input": "1.5h", "minutes": 90},
+    {"input": "0", "minutes": 0},
+    {"input": "0m", "minutes": 0},
+    {"input": "-30m", "minutes": 0},
+    {"input": "abc", "minutes": 0},
+    {"input": "30", "minutes": 0},
+    {"input": " 30m", "minutes": 0},
+    {"input": "30M", "minutes": 0},
+    {"input": "90s", "minutes": 2},
+    {"input": "29s", "minutes": 0},
+    {"input": "45m30s", "minutes": 46}
+  ]
+}

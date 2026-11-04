@@ -145,6 +145,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
   const [compEstimate, setCompEstimate] = useState(null);
   const [compEstimateLoading, setCompEstimateLoading] = useState(false);
   const [compEstimateErr, setCompEstimateErr] = useState(null);
+  const pausesKey = JSON.stringify(tournament?.pauses || []);
   useEffect(() => {
     if (!c.id) return;
     const controller = new AbortController();
@@ -165,13 +166,12 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
   // in `c`, not on every unsaved edit. This also fires on mount and on any
   // SSE-driven competition_updated / schedule_updated refresh.
   //
-  // Tournament ceremony/timing fields are included so the estimate refreshes
-  // when the operator changes openingBlock, lunchBlock, closingBlock,
-  // clockToElapsedMultiplier, or slowestCourtBufferPct on the tournament
-  // settings screen and then returns here: otherwise the display would be
-  // stale until a competition field changed (Finding 5 fix).
+  // Tournament timing fields and pauses are included so the estimate refreshes
+  // when the operator changes pauses, clockToElapsedMultiplier, or
+  // slowestCourtBufferPct on the tournament settings screen and then returns here:
+  // otherwise the display would be stale until a competition field changed.
   }, [c.id, c.format, c.kind, c.poolMatchDurationSeconds, c.knockoutMatchDurationSeconds, c.courts, c.teamSize, c.poolSize, c.poolSizeMode, c.poolWinners, c.roundRobin, c.poolFormat, c.swissRounds, c.checkInEnabled, password,
-    tournament?.openingBlock, tournament?.lunchBlock, tournament?.closingBlock,
+    pausesKey,
     tournament?.clockToElapsedMultiplier, tournament?.slowestCourtBufferPct]);
   // AdminSettings unmounts when the user navigates to a different section
   // via onSection() (AdminCompetition rerenders with a different child).
@@ -1476,7 +1476,6 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
           {compEstimate && !compEstimateErr && (() => {
             const total = formatCompMinutes(compEstimate.totalDurationMinutes);
             const perCourt = (compEstimate.perCourtMinutes || []).map(m => formatCompMinutes(m) || "0m");
-            const ceremony = formatCompMinutes(compEstimate.ceremonyMinutes);
             // mp-gmcg: kachinuki has a variable bout count, so the server
             // returns a best/average/worst range (it knows the competition's
             // teamMatchType; no extra param needed here). The headline
@@ -1499,11 +1498,6 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
                 {perCourt.length === 1 && (
                   <div style={{ marginTop: 2 }}>
                     <strong>Per court:</strong> {perCourt[0]}
-                  </div>
-                )}
-                {ceremony && (
-                  <div style={{ marginTop: 2 }}>
-                    <strong>Ceremony blocks:</strong> {ceremony}
                   </div>
                 )}
               </div>

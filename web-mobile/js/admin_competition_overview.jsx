@@ -333,6 +333,7 @@ function AdminCompOverview({ c, tournament, pools, poolMatches, bracket, onSecti
   // request would only answer the server's opaque failure. The page says so
   // through the tiles and the footer below instead (D26).
   const rosterUnreadable = rosterUnreadableIssues(c).length > 0;
+  const pausesKey = JSON.stringify(tournament?.pauses || []);
   useEffect(() => {
     if (!c.id || rosterUnreadable) return;
     const controller = new AbortController();
@@ -356,7 +357,7 @@ function AdminCompOverview({ c, tournament, pools, poolMatches, bracket, onSecti
   }, [c.id, c.format, c.kind, c.poolMatchDurationSeconds, c.knockoutMatchDurationSeconds, c.courts,
     c.teamSize, c.poolSize, c.poolSizeMode, c.poolWinners, c.roundRobin, c.poolFormat,
     c.swissRounds, estimateCheckIn, password, estimatePlayerCount, estimateCheckedInCount, rosterUnreadable,
-    tournament?.openingBlock, tournament?.lunchBlock, tournament?.closingBlock,
+    pausesKey,
     tournament?.clockToElapsedMultiplier, tournament?.slowestCourtBufferPct]);
 
   // ---------------------------------------------------------------------------
@@ -733,7 +734,6 @@ function AdminCompOverview({ c, tournament, pools, poolMatches, bracket, onSecti
     if (!estimate && !estimateLoading && !estimateErr) return null;
     const total = formatCompMinutes(estimate && estimate.totalDurationMinutes);
     const perCourt = estimate ? (estimate.perCourtMinutes || []).map(m => formatCompMinutes(m) || "0m") : [];
-    const ceremony = formatCompMinutes(estimate && estimate.ceremonyMinutes);
     // mp-gmcg: kachinuki has a variable bout count, so the server returns a
     // best/average/worst range (it knows the competition's teamMatchType).
     // The headline totalDurationMinutes is the AVERAGE; when the range
@@ -769,11 +769,6 @@ function AdminCompOverview({ c, tournament, pools, poolMatches, bracket, onSecti
               {perCourt.length === 1 && (
                 <div className="schedule-estimate__row">
                   <strong>Per court:</strong> {perCourt[0]}
-                </div>
-              )}
-              {ceremony && (
-                <div className="schedule-estimate__row">
-                  <strong>Ceremony blocks:</strong> {ceremony}
                 </div>
               )}
             </div>

@@ -162,6 +162,7 @@ import { PillGroup, PillButton, CheckboxField, NumberField, TextField } from './
 import { DurationInput } from './duration.jsx';
 import { useUnsavedInput } from './app_version.jsx';
 import { useLatestRef } from './latest_ref.jsx';
+import { PauseList } from './pause_list.jsx';
 
 function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerMode, authConfig, password, showToast }) {
   // In locked mode the on-disk Password is irrelevant: auth comes
@@ -181,11 +182,14 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
   // Tournament mode (mp-7h7): read-only after creation: shown for
   // information only and NEVER included in the PUT payload.
   const tournamentMode = tournament.mode || "officiated";
-  // mp-zoh Phase 5: ceremony block duration strings ("30m", "1h", "1h30m").
-  // Empty string means "no block configured".
-  const [openingBlock, setOpeningBlock] = useState(tournament.openingBlock || "");
-  const [lunchBlock, setLunchBlock] = useState(tournament.lunchBlock || "");
-  const [closingBlock, setClosingBlock] = useState(tournament.closingBlock || "");
+  // Schedule pauses: list of pause objects {name, start, length, day}.
+  const normalizePauses = (list) => (Array.isArray(list) ? list : []).map(p => ({
+    name: (p.name || "").trim(),
+    start: (p.start || "").trim(),
+    length: (p.length || "").trim(),
+    day: Number.isInteger(p.day) ? p.day : 0,
+  }));
+  const [pauses, setPauses] = useState(normalizePauses(tournament.pauses));
   // mp-ef3: public tournament info fields.
   // mp-s1gl: externally-shareable base URL for QR codes / share links.
   const [publicURL, setPublicURL] = useState(tournament.publicURL || "");
@@ -263,7 +267,7 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
   useUnsavedInput(dirty);
   useEffect(() => {
     const snap = JSON.stringify({
-      name, venue, date, durationDays, courts, openingBlock, lunchBlock, closingBlock,
+      name, venue, date, durationDays, courts, pauses: normalizePauses(pauses),
       publicURL, venueAddress, venueMapURL, openingTime, closingTime, websiteURL,
       awardsNote, infoNotes, pass,
       contacts: contacts.map(c => ({ label: c.label || "", value: c.value || "" })),
@@ -272,7 +276,7 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
     });
     if (initialSnapRef.current === null) { initialSnapRef.current = snap; return; }
     setDirty(snap !== initialSnapRef.current);
-  }, [name, venue, date, durationDays, courts, openingBlock, lunchBlock, closingBlock,
+  }, [name, venue, date, durationDays, courts, pauses,
     publicURL, venueAddress, venueMapURL, openingTime, closingTime, websiteURL,
     awardsNote, infoNotes, pass, contacts, theme, logoOnLobby]);
 
@@ -323,9 +327,7 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
         durationDays,
         password: pass || undefined,
         courts: Array.from({ length: courts }, (_, i) => String.fromCharCode(65 + i)),
-        openingBlock: openingBlock.trim() || undefined,
-        lunchBlock: lunchBlock.trim() || undefined,
-        closingBlock: closingBlock.trim() || undefined,
+        pauses: normalizePauses(pauses),
         publicURL: publicURL.trim() || undefined,
         venueAddress: venueAddress.trim() || undefined,
         venueMapURL: venueMapURL.trim() || undefined,
@@ -494,33 +496,23 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
             </div>
           </div>
         </div>
-        {/* mp-zoh Phase 5: ceremony block duration inputs. These feed the */}
-        {/* schedule estimator (backend Tournament.OpeningBlock etc.). */}
-        {/* Duration strings like "30m", "1h", "1h30m". Leave blank to omit. */}
+        {/* Schedule pauses editor: feed the schedule estimator */}
         <div className="card card--pad-lg">
           <div className="card__head">
             <div>
               <div className="card__title">Schedule blocks</div>
-              <div className="card__sub">Durations feed the schedule estimator. Leave blank to omit a block.</div>
+              <div className="card__sub">Times when no matches are fought. All are optional.</div>
             </div>
           </div>
-          <div className="row-3" style={{ marginBottom: 0 }}>
-            <div className="field" style={{ marginBottom: 0 }}>
-              <label className="field__label" htmlFor="edit-opening-block">Opening ceremony <span style={{ fontWeight: 400, color: "var(--ink-3)" }}>(duration)</span></label>
-              <input id="edit-opening-block" className="input" value={openingBlock} onChange={(e) => setOpeningBlock(e.target.value)} placeholder="e.g. 30m" />
-              <div className="field__hint">Duration of the opening ceremony block (e.g. &quot;30m&quot;, &quot;1h&quot;).</div>
-            </div>
-            <div className="field" style={{ marginBottom: 0 }}>
-              <label className="field__label" htmlFor="edit-lunch-block">Lunch break <span style={{ fontWeight: 400, color: "var(--ink-3)" }}>(duration)</span></label>
-              <input id="edit-lunch-block" className="input" value={lunchBlock} onChange={(e) => setLunchBlock(e.target.value)} placeholder="e.g. 1h" />
-              <div className="field__hint">Duration of the lunch break block (e.g. &quot;1h&quot;, &quot;45m&quot;).</div>
-            </div>
-            <div className="field" style={{ marginBottom: 0 }}>
-              <label className="field__label" htmlFor="edit-closing-block">Closing ceremony <span style={{ fontWeight: 400, color: "var(--ink-3)" }}>(duration)</span></label>
-              <input id="edit-closing-block" className="input" value={closingBlock} onChange={(e) => setClosingBlock(e.target.value)} placeholder="e.g. 30m" />
-              <div className="field__hint">Duration of the closing ceremony block.</div>
-            </div>
-          </div>
+          <PauseList
+            pauses={pauses}
+            onChange={setPauses}
+            durationDays={durationDays}
+            tournamentDays={deriveTournamentDays ? deriveTournamentDays(date, durationDays) : []}
+            drawnCompetitions={(tournament.competitions || []).filter(c => c.status && c.status !== "setup").map(c => c.name)}
+            changed={JSON.stringify(normalizePauses(pauses)) !== JSON.stringify(normalizePauses(tournament.pauses))}
+            dirty={dirty}
+          />
         </div>
         {/* mp-ef3: Tournament Information (Public) */}
         {/* mp-sspn: collapsible: all fields here are optional, so the section */}

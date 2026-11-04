@@ -50,6 +50,12 @@ The dashboard lists all competitions for the tournament. Each card shows the com
 
 ![Admin dashboard](../../screenshots/mobile-dashboard.png)
 
+## Backup and restore
+
+Click **Backup and restore** on the dashboard to save or restore tournament data. We recommend taking a backup before the event starts, after each round finishes, and before making risky corrections. You can download an archive of the entire tournament or an individual competition, review restore plans before applying changes, and undo a restore if needed. The server also takes daily backup copies automatically when data changes.
+
+Refer to [Backup and restore](backup-and-restore.md) for the complete guide on taking archives, making restore choices, and managing safety copies.
+
 ## Tournament details and the public info page
 
 Open **Edit details** from the dashboard to fill in the public information your attendees see:

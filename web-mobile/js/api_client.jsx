@@ -5918,6 +5918,105 @@ const API = {
         _forgetShownMatches(id);
         return true;
     },
+    async backupTournament(password) {
+        const res = await fetch('/api/tournament/backup', {
+            method: 'GET',
+            headers: password ? { 'X-Tournament-Password': password } : {}
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw Object.assign(new Error(err.error || 'Failed to download tournament backup'), { code: err.code });
+        }
+        return res.blob();
+    },
+    async backupCompetition(id, password) {
+        const res = await fetch(`/api/competitions/${encodeURIComponent(id)}/backup`, {
+            method: 'GET',
+            headers: password ? { 'X-Tournament-Password': password } : {}
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw Object.assign(new Error(err.error || 'Failed to download competition backup'), { code: err.code });
+        }
+        return res.blob();
+    },
+    async planRestore({ file, from, only, undo } = {}, password) {
+        const fd = new FormData();
+        if (file) fd.append('archive', file);
+        if (from) fd.append('from', from);
+        if (only) fd.append('only', only);
+        if (undo === true) fd.append('undo', 'true');
+        const res = await fetch('/api/tournament/restore/plan', {
+            method: 'POST',
+            headers: password ? { 'X-Tournament-Password': password } : {},
+            body: fd
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw Object.assign(new Error(err.error || 'Failed to plan restore'), { code: err.code });
+        }
+        return res.json();
+    },
+    async restore({ file, from, only, undo, decisions, allowRunning } = {}, password, confirmPassword) {
+        const fd = new FormData();
+        if (file) fd.append('archive', file);
+        if (from) fd.append('from', from);
+        if (only) fd.append('only', only);
+        if (undo === true) fd.append('undo', 'true');
+        if (decisions) fd.append('decisions', typeof decisions === 'string' ? decisions : JSON.stringify(decisions));
+        if (allowRunning === true) fd.append('allowRunning', 'true');
+        const res = await fetch('/api/tournament/restore', {
+            method: 'POST',
+            headers: {
+                ...(password ? { 'X-Tournament-Password': password } : {}),
+                'X-Confirm-Password': confirmPassword ?? ''
+            },
+            body: fd
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw Object.assign(new Error(err.error || 'Failed to restore'), { code: err.code });
+        }
+        _forgetAllShownMatches();
+        return res.json();
+    },
+    async listBackups(password) {
+        const res = await fetch('/api/tournament/backups', {
+            method: 'GET',
+            headers: password ? { 'X-Tournament-Password': password } : {}
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw Object.assign(new Error(err.error || 'Failed to list backups'), { code: err.code });
+        }
+        const data = await res.json();
+        return data.backups || [];
+    },
+    async downloadBackup(name, password) {
+        const res = await fetch(`/api/tournament/backups/${encodeURIComponent(name)}`, {
+            method: 'GET',
+            headers: password ? { 'X-Tournament-Password': password } : {}
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw Object.assign(new Error(err.error || 'Failed to download backup'), { code: err.code });
+        }
+        return res.blob();
+    },
+    async deleteBackup(name, password, confirmPassword) {
+        const res = await fetch(`/api/tournament/backups/${encodeURIComponent(name)}`, {
+            method: 'DELETE',
+            headers: {
+                ...(password ? { 'X-Tournament-Password': password } : {}),
+                'X-Confirm-Password': confirmPassword ?? ''
+            }
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw Object.assign(new Error(err.error || 'Failed to delete backup'), { code: err.code });
+        }
+        return res.json();
+    },
     // Returns the updated competition JSON (including the new `status`) so
     // callers can apply it to local state immediately instead of waiting for
     // the SSE refresh / tournament refetch to land.

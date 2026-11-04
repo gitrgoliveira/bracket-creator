@@ -600,6 +600,14 @@ classDiagram
         <<pending transactions>>
         replayed on startup
     }
+    class backups_dir["backups/"] {
+        <<zip archives>>
+        scheduled backups and safety copies
+    }
+    class restore_dir[".restore/"] {
+        <<staging and journal>>
+        restore staging, journal.json, prefixes-pending.json
+    }
     class branding_dir["branding/"] {
         <<uploaded images>>
         tournament logo (shown on the lobby when theme.logo_on_lobby is true)
@@ -613,6 +621,8 @@ classDiagram
     tournament_md --> branding_dir : owns
     tournament_md --> sponsors_dir : owns
     tournament_md --> wal : stages transactions in
+    tournament_md --> backups_dir : stores archives in
+    tournament_md --> restore_dir : stages restore in
     config_md --> participants_csv
     config_md --> seeds_csv
     config_md --> pools_csv
@@ -650,6 +660,73 @@ yet, matched by name and dojo together, because two competitors may share a name
 dojos and a file that stored only the name could not say which of them the rank belonged to.
 A row without a dojo still matches by name alone when that name is unique in the roster, and
 a file without the dojo or the id column is completed from the roster on first load.
+
+### Backup archives and the backups/ folder
+
+Backup zip archives created by the app or the organiser are stored in `backups/` directly under the data root. The store recognises two backup kinds:
+
+1. **Scheduled backups (`scheduled`)**: periodic full-tournament copies taken automatically once every 24 hours when changes occur. They use the filename pattern `<stamp>-scheduled.zip` (with an optional collision suffix such as `-2` or `-3`).
+2. **Safety copies (`before-restore`)**: copies taken immediately before a restore replaces or removes data. They use the filename pattern `<stamp>-before-restore-<scope>.zip`, where scope is `tournament` or `competition` (also with an optional collision suffix).
+
+The timestamp `<stamp>` is formatted in UTC as `20060102T150405Z`. Valid backup filenames conform strictly to the regular expression:
+
+```
+^\d{8}T\d{6}Z-(scheduled|before-restore-(tournament|competition))(-[2-9]|-[1-9]\d{1,3})?\.zip$
+```
+
+When listing backup files, the store sorts by timestamp followed by numeric suffix (unsuffixed counts as 1), newest and highest first. Unknown files in `backups/` are ignored.
+
+### The .restore/ staging folder and recovery journal
+
+The `.restore/` folder under the data root holds temporary staging directories and recovery state during a restore operation:
+
+- **Staging (`.restore/<token>/`)**: each restore operation generates a unique random token and stages files under `.restore/<token>/new/`. If a tournament restore is performed, `new/tournament.md` is staged with the preserved or updated admin password. Any files about to be replaced are moved to `.restore/<token>/old/`. All staged files and directories are synced to disk before renaming begins.
+- **Restore journal (`.restore/<token>/journal.json`)**: format version 1. The journal lists every rename step in order. Each step specifies a kind (`out` to move an existing path into `old/`, or `in` to move a staged path from `new/` into the live location) and the relative live path (`competitions/<id>`, `tournament.md`, `branding`, `sponsors`). The journal file is written atomically and its directory is synced to disk before any live path is moved.
+- **Pending number prefixes (`.restore/prefixes-pending.json`)**: if any restored competition's number prefix collides with one already in use by a competition left in place, its ID is written to `prefixes-pending.json` before the journal is removed. Once the store releases its locks, the server reassigns non-colliding prefixes and removes this file.
+- **Crash recovery**: when the store initializes (`Store.init`), it inspects `.restore/`. If a staging directory contains a complete journal, the store rolls forward all steps in order, skips steps already done, syncs the directories, and removes the journal and token folder. A staging folder left without a journal (meaning the process died before the live rename phase) is deleted. If `prefixes-pending.json` remains after a crash, the server reassigns the prefixes at startup.
+
+### Archive format and manifest
+
+Backup archives are standard zip files whose internal layout mirrors the data folder:
+
+```
+manifest.json
+tournament.md                       (tournament scope only, password stripped)
+branding/<files>                    (tournament scope only)
+sponsors/<files>                    (tournament scope only)
+competitions/<id>/<files>           (config.md, participants.csv, seeds.csv, pools.csv,
+                                     pool-matches.csv, bracket.json, competitor-status.yaml,
+                                     lineups.yaml, team-members.yaml, overrides.json,
+                                     history/*.jsonl, events/*.jsonl, and *.corrupt-* files)
+```
+
+Working directories (`.wal/`, `backups/`, `.restore/`) and temporary files (`*.tmp`) are strictly excluded from archives.
+
+The `manifest.json` file contains:
+
+- `format`: integer format version (currently `1`).
+- `appVersion`: version string of the application that created the archive.
+- `createdAt`: UTC timestamp in ISO 8601 format.
+- `scope`: `"tournament"` or `"competition"`.
+- `kind`: `"manual"`, `"scheduled"`, or `"before-restore"`.
+- `tournament`: object holding `{ "name": string }`.
+- `competitions`: array of `{ "id": string, "name": string }` entries.
+- `files`: array of `{ "path": string, "size": int64, "sha256": string }`, where `sha256` is a lowercase hexadecimal checksum.
+- `fingerprint`: SHA-256 hash calculated over normalized competition files and paths, used by scheduled backups to detect genuine changes.
+- `restoreCreated`: optional array of competition IDs created during a restore. Present only when `kind` is `"before-restore"`.
+
+### Validation caps and integrity checks
+
+The archive reader enforces strict limits before extracting or staging any files:
+
+- Maximum 20,000 entries per zip archive (including manifest).
+- Maximum 32 MB uncompressed per file entry.
+- Maximum 512 MB total uncompressed size across all entries.
+- Maximum 200:1 compression ratio per entry to protect against zip decompression bombs.
+- Maximum 64 MB for archive upload request bodies over HTTP.
+- Path safety: entry paths must be relative, forward-slash separated, clean, and contain no `..`, backslashes, control characters, or Windows drive prefixes. Symlinks and non-regular entries are rejected.
+- Layout validation: paths must fit within the allowed scope structure. A single-competition archive may only contain entries inside `competitions/<id>/`.
+- Checksums and manifest consistency: every file in the archive must appear in `manifest.json`, every manifest entry must exist in the zip, and its uncompressed size and SHA-256 checksum must match.
 
 ## 5. Write guarantees
 

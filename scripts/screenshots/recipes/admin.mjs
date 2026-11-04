@@ -1,6 +1,116 @@
-// Admin console captures riding the seeded demo tournament.
+// Admin console captures riding the seeded demo tournament, and backup/restore captures.
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import { demoTournament } from '../lib/seed.mjs';
 import { VIEWER_SOURCES } from '../lib/scope.mjs';
+import { settle, withAdminPage } from '../lib/ui.mjs';
+import { PASSWORD } from '../lib/api.mjs';
+import { EDITOR, TAP_DWELL_MS, finishMatch, startMatch } from '../lib/editor.mjs';
+
+// Competitions and participant rosters used for backup and restore captures.
+// Names and dojos follow the style in adminsetup.mjs with non-blank dojos.
+const MEN_ID = 'men-individual';
+const WOMEN_ID = 'women-individual';
+const JUNIORS_ID = 'juniors-individual';
+
+const ROSTER_MEN = [
+  ['Daniel Brooks', 'Eikoku Kendo Club'],
+  ['William Hill', 'Thames Kendo Kai'],
+  ['Felix Bauer', 'Berlin Kenyu'],
+  ['Sota Yamamoto', 'Seishinkan'],
+  ['Riku Nakamura', 'Musashi Dojo'],
+  ['Erik Lund', 'Nordic Kendo'],
+  ['Haruki Tanaka', 'Kenshinkan'],
+  ['Pierre Dubois', 'Paris Kendo Club'],
+].map(([name, dojo]) => ({ name, dojo }));
+
+const ROSTER_WOMEN = [
+  ['Aiko Sato', 'Tokyo Kenyu'],
+  ['Elena Rossi', 'Milano Kendo'],
+  ['Hana Ito', 'Kyoto Budokan'],
+  ['Sophie Martin', 'Paris Kendo Club'],
+  ['Mio Abe', 'Seishinkan'],
+  ['Karin Lind', 'Nordic Kendo'],
+  ['Yui Endo', 'Kenshinkan'],
+  ['Chloe Dupont', 'Lyon Kendo'],
+].map(([name, dojo]) => ({ name, dojo }));
+
+const ROSTER_JUNIORS = [
+  ['Kenji Mori', 'Osaka Kenyu'],
+  ['Ren Kato', 'Tokyo Budokan'],
+  ['Sora Kimura', 'Seishinkan'],
+  ['Taro Ono', 'Kyoto Budokan'],
+  ['Sho Fujii', 'Musashi Dojo'],
+  ['Daiki Takahashi', 'Kenshinkan'],
+  ['Kaito Hayashi', 'Nenriki'],
+  ['Ryota Saito', 'Berlin Kenyu'],
+].map(([name, dojo]) => ({ name, dojo }));
+
+// A fixed stamp for the stand-in daily copy, so the copy list reads the same on
+// every run (the before-restore copy's stamp is the real clock, which no recipe
+// can pin).
+const DAILY_COPY_STAMP = '20260514T070000Z';
+
+// Local helpers for driving the backup and restore interface.
+
+// Upload an archive to the file input and wait for the dry-run plan to render.
+async function uploadArchive(page, archivePath) {
+  const fileInput = page.locator('input[type="file"]');
+  await fileInput.waitFor({ state: 'visible', timeout: 10000 });
+  await fileInput.setInputFiles(archivePath);
+  await page.locator('text=Restore Plan').first().waitFor({ state: 'visible', timeout: 15000 });
+}
+
+// Select "Replace" for an existing competition by its accessible label.
+async function chooseReplace(page, compName) {
+  const radio = page.getByLabel(`Replace "${compName}"`);
+  await radio.click();
+}
+
+// Select "Restore as a copy" and fill the new copy name.
+// The copy option wraps both the radio and text input inside a single label
+// with no unique accessible name, so we target the radio input directly by name
+// and the text input by placeholder.
+async function chooseCopy(page, compId, compName, copyName) {
+  const radio = page.locator(`input[name="decision-${compId}"][value="copy"]`);
+  await radio.click();
+  const input = page.getByPlaceholder(`${compName} (Copy)`);
+  await input.fill(copyName);
+}
+
+// Select "Keep" for a competition missing from the backup archive.
+async function chooseKeep(page, compName) {
+  const radio = page.getByLabel(`Keep "${compName}"`);
+  await radio.click();
+}
+
+// Answer the choices for the two competitions present in the backup archive.
+// Used by both recipes to show Replace for Mens Individual and Copy for Womens Individual.
+async function answerExistingChoices(page) {
+  await chooseReplace(page, 'Mens Individual');
+  await chooseCopy(page, WOMEN_ID, 'Womens Individual', 'Womens Individual (Copy)');
+}
+
+// A full-page capture taken while the page is scrolled draws the sticky top bar
+// part way down the image, so every drive ends at the top.
+async function scrollToTop(page) {
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await page.waitForTimeout(150);
+}
+
+// Dismiss the scoring editor overlay if still visible.
+async function dismissEditor(page) {
+  const modal = page.locator(EDITOR).first();
+  if (!(await modal.count())) return;
+  const cancel = modal.locator('button').filter({ hasText: /^Cancel$/ }).first();
+  if (await cancel.count()) {
+    await cancel.click().catch(() => {});
+  } else {
+    await page.keyboard.press('Escape');
+  }
+  await modal.waitFor({ state: 'hidden', timeout: 5000 }).catch(() => {});
+}
 
 export const families = {
   // The tournament the committed captures were taken against: "London Cup
@@ -22,6 +132,93 @@ export const families = {
       return {};
     },
   },
+
+  backup: {
+    server: 'mobile',
+    sources: ['web-mobile/js/admin_backup.jsx'],
+    seed: async ({ api, base, browser, dataDir }) => {
+      // 1. Scaffolding via API: tournament and two initial competitions.
+      // Separate courts avoid cross-competition court locks when running matches.
+      await api.tournament({
+        name: 'Spring Kendo Taikai 2026',
+        courts: ['A', 'B', 'C'],
+      });
+
+      await api.competition(MEN_ID, 'Mens Individual', { courts: ['A'] });
+      await api.participants(MEN_ID, ROSTER_MEN);
+      await api.generateDraw(MEN_ID);
+      await api.start(MEN_ID);
+
+      await api.competition(WOMEN_ID, 'Womens Individual', { courts: ['B'] });
+      await api.participants(WOMEN_ID, ROSTER_WOMEN);
+      await api.generateDraw(WOMEN_ID);
+      await api.start(WOMEN_ID);
+
+      // 2. Take the backup snapshot while only the two initial competitions exist.
+      const res = await fetch(`${base}/api/tournament/backup`, {
+        headers: { 'X-Tournament-Password': PASSWORD },
+      });
+      if (!res.ok) {
+        throw new Error(`failed to download backup: ${res.status} ${await res.text()}`);
+      }
+      const buffer = Buffer.from(await res.arrayBuffer());
+
+      // Write archive to a temporary directory outside dataDir.
+      const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'bracket-backup-'));
+      const archive = path.join(tmpDir, 'backup.zip');
+      await fs.writeFile(archive, buffer);
+
+      // Stand-in for the daily copy the app takes by itself, which the short
+      // capture run cannot wait for. Scaffolding only: the page lists it by
+      // name, kind and time.
+      const backupsDir = path.join(dataDir, 'backups');
+      await fs.mkdir(backupsDir, { recursive: true });
+      await fs.writeFile(path.join(backupsDir, `${DAILY_COPY_STAMP}-scheduled.zip`), buffer);
+
+      // 3. Mutate live state after backup: add Juniors Individual and start matches.
+      await api.competition(JUNIORS_ID, 'Juniors Individual', { courts: ['C'] });
+      await api.participants(JUNIORS_ID, ROSTER_JUNIORS);
+      await api.generateDraw(JUNIORS_ID);
+      await api.start(JUNIORS_ID);
+
+      // Through the real interface, complete one match and start a second in Mens Individual,
+      // and start one match in Juniors Individual.
+      await withAdminPage(browser, { width: 1180, height: 820 }, async (page) => {
+        // Complete match 1 in Mens Individual so the restore plan counts lost results.
+        await page.goto(`${base}/admin/competition/${MEN_ID}/scores`, { waitUntil: 'domcontentloaded' });
+        await page.locator('.score-edit-row').first().waitFor({ state: 'visible', timeout: 15000 });
+        const firstScore = page.locator('.score-edit-row button').filter({ hasText: /^Score$/ }).first();
+        await firstScore.click();
+        await page.locator(EDITOR).first().waitFor({ state: 'visible', timeout: 15000 });
+        await startMatch(page);
+        for (let i = 0; i < 2; i += 1) {
+          if (i > 0) await page.waitForTimeout(TAP_DWELL_MS);
+          await page.locator('.sb-side--shiro .ipt-btn').filter({ hasText: /^M$/ }).first().click();
+        }
+        await page.waitForTimeout(250);
+        await finishMatch(page);
+
+        // Start match 1 in Juniors Individual and leave it running. Only the
+        // Juniors competition runs a match: a restore that replaces or removes
+        // a competition with a running match is refused until it is finished,
+        // and the capture keeps Juniors, so its match is the one that may run.
+        await page.goto(`${base}/admin/competition/${JUNIORS_ID}/scores`, { waitUntil: 'domcontentloaded' });
+        await page.locator('.score-edit-row').first().waitFor({ state: 'visible', timeout: 15000 });
+        const juniorScore = page.locator('.score-edit-row button').filter({ hasText: /^Score$/ }).first();
+        await juniorScore.click();
+        await page.locator(EDITOR).first().waitFor({ state: 'visible', timeout: 15000 });
+        await startMatch(page);
+        await dismissEditor(page);
+      });
+
+      return { archive, tmpDir };
+    },
+    teardown: async (fixture) => {
+      if (fixture?.tmpDir) {
+        await fs.rm(fixture.tmpDir, { recursive: true, force: true }).catch(() => {});
+      }
+    },
+  },
 };
 
 export const recipes = [
@@ -34,5 +231,86 @@ export const recipes = [
     capture: 'viewport',
     auth: 'admin',
     waitFor: 'text=Admin console',
+  },
+  {
+    name: 'backup-restore-plan',
+    family: 'backup',
+    route: '/admin/backup',
+    viewport: { width: 1280, height: 900 },
+    dpr: 1,
+    capture: 'fullPage',
+    auth: 'admin',
+    waitFor: 'text=Back up tournament',
+    drive: async ({ page, fixture }) => {
+      await uploadArchive(page, fixture.archive);
+      await answerExistingChoices(page);
+      // Leave Juniors Individual unanswered so the open choice prompt and disabled button show.
+      await settle(page);
+      await scrollToTop(page);
+    },
+    assert: async ({ page }) => {
+      // Both kinds of choice are on the page: replace-or-copy and keep-or-remove.
+      await page.getByLabel('Remove "Juniors Individual"').waitFor({ state: 'visible', timeout: 5000 });
+      await page.getByLabel('Replace "Mens Individual"').waitFor({ state: 'visible', timeout: 5000 });
+      const openBtn = page.getByRole('button', { name: 'Choose what to do with "Juniors Individual"' });
+      await openBtn.waitFor({ state: 'visible', timeout: 5000 });
+      if (!(await openBtn.isDisabled())) {
+        throw new Error('expected Restore button to be disabled while a choice is open');
+      }
+    },
+  },
+  {
+    name: 'backup-restore-done',
+    family: 'backup',
+    route: '/admin/backup',
+    viewport: { width: 1280, height: 900 },
+    dpr: 1,
+    capture: 'fullPage',
+    auth: 'admin',
+    waitFor: 'text=Back up tournament',
+    drive: async ({ page, fixture }) => {
+      await uploadArchive(page, fixture.archive);
+      await answerExistingChoices(page);
+      await chooseKeep(page, 'Juniors Individual');
+
+      const restoreBtn = page.getByRole('button', { name: 'Restore', exact: true });
+      await restoreBtn.click();
+
+      // Enter password in confirmation prompt dialog.
+      const dialog = page.locator('.modal-backdrop--dialog');
+      await dialog.waitFor({ state: 'visible', timeout: 5000 });
+      const passwordInput = dialog.locator('input[type="password"]');
+      await passwordInput.fill(PASSWORD);
+      // A layer a tap opens ignores the bounce of that tap (useOpenedTapGuard),
+      // so a click made at once does nothing; wait the guard out.
+      await page.waitForTimeout(TAP_DWELL_MS + 400);
+      await dialog.getByRole('button', { name: 'Restore', exact: true }).click();
+
+      // Wait for restore confirmation and safety copy banner.
+      await page.locator('text=Restore completed').first().waitFor({ state: 'visible', timeout: 20000 });
+      await page.locator('text=Safety copy created:').first().waitFor({ state: 'visible', timeout: 5000 });
+      await page.getByRole('button', { name: 'Undo this restore' }).waitFor({ state: 'visible', timeout: 5000 });
+
+      // Wait for kept copies list to show both Daily and Before restore rows.
+      const keptList = page.locator('.card', { has: page.locator('text=Copies kept on this computer') });
+      await keptList.locator('.badge', { hasText: /^Daily$/ }).first().waitFor({ state: 'visible', timeout: 10000 });
+      await keptList.locator('.badge', { hasText: /^Before restore$/ }).first().waitFor({ state: 'visible', timeout: 10000 });
+
+      await settle(page);
+      await scrollToTop(page);
+    },
+    assert: async ({ page }) => {
+      // 1. Restore completed card with safety copy name.
+      const restoreCard = page.locator('.card', { has: page.locator('text=Restore completed') });
+      await restoreCard.locator('text=Safety copy created:').first().waitFor({ state: 'visible', timeout: 5000 });
+
+      // 2. Undo this restore button.
+      await page.getByRole('button', { name: 'Undo this restore' }).waitFor({ state: 'visible', timeout: 5000 });
+
+      // 3. Kept copies list showing both Daily and Before restore rows.
+      const keptList = page.locator('.card', { has: page.locator('text=Copies kept on this computer') });
+      await keptList.locator('.badge', { hasText: /^Daily$/ }).first().waitFor({ state: 'visible', timeout: 5000 });
+      await keptList.locator('.badge', { hasText: /^Before restore$/ }).first().waitFor({ state: 'visible', timeout: 5000 });
+    },
   },
 ];

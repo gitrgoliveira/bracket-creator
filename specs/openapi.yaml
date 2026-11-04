@@ -39,8 +39,8 @@ info:
     an organiser at a table. Self-run mode has no check-in: the three check-in operations
     answer 409 `check_in_not_in_self_run` for every caller, and the draw includes every
     participant whatever a competition's `checkInEnabled` says. Destructive routes (delete competition, invalidate, discard
-    draw, result overrides, import) and organiser-owned setup
-    (tournament/competition config) stay gated. Adding and editing participants
+    draw, result overrides, import, tournament restore, delete kept backup) and organiser-owned setup
+    (tournament/competition config, taking or listing backups, restore dry run) stay gated. Adding and editing participants
     (`POST .../participants`, `PUT .../participants/{pid}`) is open to anyone. In the default `officiated` mode every
     `/api/` route keeps requiring `X-Tournament-Password` as described above.
     The team writes the public score sheet makes when a competitor names a bout's
@@ -113,8 +113,10 @@ info:
     returns `413` when the body exceeds it: admin JSON bodies are capped at 1 MB by
     default; `POST /api/tournament/announce` and `POST /api/tournament/reset` are
     capped tighter, at 4 KB, since their payloads are small fixed-shape JSON; and
-    `POST /api/tournament/import` is capped at 64 MB to admit a full-roster
-    multipart upload.
+    `POST /api/tournament/import`, `POST /api/tournament/restore/plan`, and
+    `POST /api/tournament/restore` are capped at 64 MB (MaxImportBodyBytes) to admit
+    multipart uploads (note that a restore uploads the archive twice: once for plan,
+    then again for restore).
   version: 2.1.0
 
 servers:
@@ -772,6 +774,477 @@ paths:
                             imported without a caveat.
         '413':
           $ref: '#/components/responses/PayloadTooLarge'
+
+  # ── Backup and Restore (Admin, requires auth) ──────────────────────────────
+
+  /api/tournament/backup:
+    get:
+      tags: [tournament]
+      summary: Download full tournament backup archive
+      description: |
+        Creates a snapshot of the entire tournament (tournament settings, branding,
+        sponsors, and all competitions with their configurations, rosters, seeds,
+        brackets, pools, and score history) and returns it as a zip archive.
+
+        The `Content-Disposition` header names the file as `<tournament slug>-<UTC stamp>.zip`
+        where the timestamp format is `YYYYMMDDTHHMMSSZ`.
+
+        In self-run mode this is an organiser action: it requires `X-Tournament-Password`.
+      security:
+        - TournamentPassword: []
+      responses:
+        '200':
+          description: Full tournament backup zip archive.
+          headers:
+            Content-Disposition:
+              schema:
+                type: string
+              description: 'attachment; filename="<tournament slug>-<timestamp>.zip"'
+          content:
+            application/zip:
+              schema:
+                type: string
+                format: binary
+        '401':
+          description: Missing or invalid X-Tournament-Password.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: >
+            A competition has an unsettled pending write (WAL). The backup cannot
+            be taken until the app is restarted (`code: pending_write_unsettled`).
+            Refusals change nothing.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RestoreRefusalError'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/competitions/{id}/backup:
+    parameters:
+      - $ref: '#/components/parameters/CompetitionId'
+    get:
+      tags: [competitions]
+      summary: Download single competition backup archive
+      description: |
+        Creates a backup snapshot of a single competition (configuration,
+        participants roster, seeds, bracket, pools, and score history) and
+        returns it as a zip archive.
+
+        The `Content-Disposition` header names the file as
+        `<tournament slug>-<competition id>-<UTC stamp>.zip`.
+
+        The competition id parameter is validated before opening any path; an
+        invalid id returns 400 and a missing competition returns 404.
+
+        In self-run mode this is an organiser action: it requires `X-Tournament-Password`.
+      security:
+        - TournamentPassword: []
+      responses:
+        '200':
+          description: Competition backup zip archive.
+          headers:
+            Content-Disposition:
+              schema:
+                type: string
+              description: 'attachment; filename="<tournament slug>-<competition id>-<timestamp>.zip"'
+          content:
+            application/zip:
+              schema:
+                type: string
+                format: binary
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          description: Missing or invalid X-Tournament-Password.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Competition not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: >
+            A competition has an unsettled pending write (WAL). The backup cannot
+            be taken until the app is restarted (`code: pending_write_unsettled`).
+            Refusals change nothing.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RestoreRefusalError'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/tournament/restore/plan:
+    post:
+      tags: [tournament]
+      summary: Plan tournament restore (dry run)
+      description: |
+        The dry run for tournament or competition restore. Inspects the provided
+        archive and evaluates what changes would occur without altering any files
+        on disk. Refusals and dry runs change nothing.
+
+        Requires only the sign-in `X-Tournament-Password` (no `X-Confirm-Password`).
+
+        Accepts multipart/form-data capped at 64 MB (`MaxImportBodyBytes`). In a
+        full restore flow, the archive is uploaded twice: first to `/restore/plan`
+        to inspect choices and warnings, then to `/restore` with operator decisions.
+
+        In self-run mode this is an organiser action: it requires `X-Tournament-Password`.
+
+        ### Refusals (refusals change nothing)
+
+        | Status | Code | Meaning |
+        | --- | --- | --- |
+        | 400 | `bad_restore_request` | Multipart parse failure, both `archive` and `from` supplied or neither supplied, invalid ID in `only`, or invalid boolean in `undo` |
+        | 400 | `bad_backup_name` | `from` does not match the valid backup filename pattern |
+        | 400 | `archive_invalid` | Archive validation failed; carries reader reason code in `reason` and details in `detail` |
+        | 400 | `not_a_safety_copy` | `undo=true` on an archive whose kind is not `before-restore` |
+        | 400 | `competition_not_in_archive` | `only` names a competition not present in the archive |
+        | 400 | `file_unreadable` | A file in the backup cannot be read |
+        | 404 | `backup_not_found` | Kept backup file specified in `from` does not exist |
+        | 409 | `pending_write_unsettled` | A competition has an uncommitted write (WAL); restart the app |
+        | 409 | `nothing_to_restore` | Archive holds nothing to restore (or undo) |
+      security:
+        - TournamentPassword: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                archive:
+                  type: string
+                  format: binary
+                  description: Uploaded backup zip file. Mutually exclusive with `from`.
+                from:
+                  type: string
+                  description: Name of a kept backup file in `backups/`. Mutually exclusive with `archive`.
+                only:
+                  type: string
+                  description: Optional competition ID to restore a single competition out of a tournament archive.
+                undo:
+                  type: boolean
+                  description: When true, plans an undo of a previous restore using a safety copy.
+      responses:
+        '200':
+          description: Restore plan computed successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RestorePlan'
+        '400':
+          description: >
+            Invalid request or unreadable backup archive. Refusals change nothing.
+            Codes: `bad_restore_request`, `bad_backup_name`, `archive_invalid`,
+            `not_a_safety_copy`, `competition_not_in_archive`, `file_unreadable`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RestoreRefusalError'
+        '401':
+          description: Missing or invalid X-Tournament-Password.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: "Kept backup file specified in `from` not found (`code: backup_not_found`)."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RestoreRefusalError'
+        '409':
+          description: >
+            Conflict prevents restore planning. Refusals change nothing.
+            Codes: `pending_write_unsettled`, `nothing_to_restore`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RestoreRefusalError'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/tournament/restore:
+    post:
+      tags: [tournament]
+      summary: Execute tournament restore
+      description: |
+        Restores a tournament or single competition from a backup archive.
+
+        Saves an automatic safety backup into `backups/` (named `<timestamp>-before-restore-<scope>.zip`)
+        before any live directory is replaced or removed. Restores are journaled and atomic.
+        Colliding competition number prefixes are reassigned after the restore completes,
+        and the server broadcasts a `tournament_updated` event once over SSE.
+
+        Refusals change nothing on disk.
+
+        ALWAYS requires `X-Confirm-Password` in addition to `X-Tournament-Password`.
+        Accepts no `newPassword`: requests reaching this endpoint have passed sign-in,
+        so the existing admin password is kept (the plan reports `kept`).
+
+        Multipart form data is capped at 64 MB (`MaxImportBodyBytes`). In a full restore flow,
+        the archive is uploaded twice (plan, then restore).
+
+        In self-run mode this is an organiser action: it requires `X-Tournament-Password`.
+
+        ### Refusals (refusals change nothing)
+
+        | Status | Code | Meaning |
+        | --- | --- | --- |
+        | 400 | `bad_restore_request` | Multipart parse failure, missing/conflicting fields, invalid boolean, or malformed JSON |
+        | 400 | `bad_backup_name` | `from` does not match the valid backup filename pattern |
+        | 400 | `archive_invalid` | Archive validation failed; carries reader reason code in `reason` and details in `detail` |
+        | 400 | `not_a_safety_copy` | `undo=true` on an archive whose kind is not `before-restore` |
+        | 400 | `competition_not_in_archive` | `only` names a competition not present in the archive |
+        | 400 | `bad_decision` | Action chosen is not permitted for this competition |
+        | 400 | `file_unreadable` | A file in the backup cannot be read |
+        | 401 | `confirm_password_required` | `X-Confirm-Password` header missing |
+        | 401 | `confirm_password_wrong` | `X-Confirm-Password` header incorrect |
+        | 404 | `backup_not_found` | Kept backup file specified in `from` does not exist |
+        | 409 | `decision_missing` | An asked competition has no decision in `decisions`; lists them |
+        | 409 | `copy_name_taken` | New name chosen for copy action is already taken |
+        | 409 | `matches_running` | Matches running in replaced/removed competition without `allowRunning=true`; lists them |
+        | 409 | `plan_changed` | Folder competitions changed between plan and restore |
+        | 409 | `pending_write_unsettled` | A competition has an uncommitted write (WAL); restart the app |
+        | 409 | `password_required` | Admin password required for restored tournament |
+        | 409 | `nothing_to_restore` | Archive holds nothing to restore (or undo) |
+      security:
+        - TournamentPassword: []
+      parameters:
+        - $ref: '#/components/parameters/ConfirmPassword'
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                archive:
+                  type: string
+                  format: binary
+                  description: Uploaded backup zip file. Mutually exclusive with `from`.
+                from:
+                  type: string
+                  description: Name of a kept backup file in `backups/`. Mutually exclusive with `archive`.
+                only:
+                  type: string
+                  description: Optional competition ID to restore a single competition out of a tournament archive.
+                undo:
+                  type: boolean
+                  description: When true, executes an undo of a previous restore using a safety copy.
+                decisions:
+                  type: string
+                  description: >
+                    JSON string mapping competition ID to decision `{action, copyName}`.
+                    Action enum: `create`, `replace`, `copy`, `keep`, `remove`.
+                    `copyName` is required when action is `copy`.
+                allowRunning:
+                  type: boolean
+                  description: When true, permits replacing or removing competitions that have matches currently running.
+      responses:
+        '200':
+          description: Restore completed successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RestoreResult'
+        '400':
+          description: >
+            Invalid request or unreadable backup archive. Refusals change nothing.
+            Codes: `bad_restore_request`, `bad_backup_name`, `archive_invalid`,
+            `not_a_safety_copy`, `competition_not_in_archive`, `bad_decision`, `file_unreadable`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RestoreRefusalError'
+        '401':
+          description: >
+            `X-Confirm-Password` missing or wrong
+            (`code: confirm_password_required` or `confirm_password_wrong`),
+            or the sign-in `X-Tournament-Password` refused (no `code`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConfirmPasswordError'
+        '404':
+          description: "Kept backup file specified in `from` not found (`code: backup_not_found`)."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RestoreRefusalError'
+        '409':
+          description: >
+            Conflict prevents restore. Refusals change nothing.
+            Codes: `decision_missing`, `copy_name_taken`, `matches_running`,
+            `plan_changed`, `pending_write_unsettled`, `password_required`, `nothing_to_restore`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RestoreRefusalError'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/tournament/backups:
+    get:
+      tags: [tournament]
+      summary: List kept backup files
+      description: |
+        Lists all backup archive files stored in the `backups/` directory, newest first.
+
+        Each entry includes `name`, `kind` (`scheduled` or `before-restore`),
+        `scope` (`tournament` or `competition`), `time` (RFC 3339 UTC), and `size` in bytes.
+
+        Accepted filename pattern:
+        `^\d{8}T\d{6}Z-(scheduled|before-restore-(tournament|competition))(-[2-9]|-[1-9]\d{1,3})?\.zip$`
+
+        Entries are ordered by timestamp, then descending numeric collision suffix.
+
+        In self-run mode this is an organiser action: it requires `X-Tournament-Password`.
+      security:
+        - TournamentPassword: []
+      responses:
+        '200':
+          description: List of kept backup archives.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [backups]
+                properties:
+                  backups:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/BackupFileEntry'
+        '401':
+          description: Missing or invalid X-Tournament-Password.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/tournament/backups/{name}:
+    parameters:
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          pattern: '^\d{8}T\d{6}Z-(scheduled|before-restore-(tournament|competition))(-[2-9]|-[1-9]\d{1,3})?\.zip$'
+        description: Name of the kept backup archive file.
+    get:
+      tags: [tournament]
+      summary: Download a kept backup file
+      description: |
+        Downloads a specific backup archive from the `backups/` directory.
+
+        The `name` parameter must conform to the accepted backup filename pattern
+        `^\d{8}T\d{6}Z-(scheduled|before-restore-(tournament|competition))(-[2-9]|-[1-9]\d{1,3})?\.zip$`.
+        If the filename does not match, returns 400 (`code: bad_backup_name`).
+        If the file does not exist, returns 404 (`code: backup_not_found`).
+
+        In self-run mode this is an organiser action: it requires `X-Tournament-Password`.
+      security:
+        - TournamentPassword: []
+      responses:
+        '200':
+          description: Backup zip archive.
+          headers:
+            Content-Disposition:
+              schema:
+                type: string
+              description: 'attachment; filename="<name>"'
+          content:
+            application/zip:
+              schema:
+                type: string
+                format: binary
+        '400':
+          description: "Invalid backup filename (`code: bad_backup_name`)."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RestoreRefusalError'
+        '401':
+          description: Missing or invalid X-Tournament-Password.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: "Backup file not found (`code: backup_not_found`)."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RestoreRefusalError'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    delete:
+      tags: [tournament]
+      summary: Delete a kept backup file
+      description: |
+        Deletes one backup archive from the `backups/` directory.
+
+        The `name` parameter must conform to the accepted backup filename pattern.
+        If the filename does not match, returns 400 (`code: bad_backup_name`).
+        If the file does not exist, returns 404 (`code: backup_not_found`).
+
+        ALWAYS requires `X-Confirm-Password` in addition to `X-Tournament-Password`.
+
+        In self-run mode this is an organiser action: it requires `X-Tournament-Password`.
+      security:
+        - TournamentPassword: []
+      parameters:
+        - $ref: '#/components/parameters/ConfirmPassword'
+      responses:
+        '200':
+          description: Backup file deleted.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [deleted]
+                properties:
+                  deleted:
+                    type: string
+                    description: Name of the deleted backup file.
+        '400':
+          description: "Invalid backup filename (`code: bad_backup_name`)."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RestoreRefusalError'
+        '401':
+          description: >
+            `X-Confirm-Password` missing or wrong
+            (`code: confirm_password_required` or `confirm_password_wrong`),
+            or the sign-in `X-Tournament-Password` refused (no `code`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConfirmPasswordError'
+        '404':
+          description: "Backup file not found (`code: backup_not_found`)."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RestoreRefusalError'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   # ── Sponsors ───────────────────────────────────────────────────────────────
 
@@ -5984,6 +6457,17 @@ components:
         defense: without it, an `id` like `../../../etc/passwd` would resolve
         through `filepath.Clean(filepath.Join(...))` and escape the data
         directory.
+    ConfirmPassword:
+      name: X-Confirm-Password
+      in: header
+      required: true
+      schema:
+        type: string
+      description: >
+        The admin password, typed again for a confirmed operation (competition
+        deletion, tournament restore, or backup deletion). Verified by the
+        same verifier as the sign-in (plaintext in file mode, bcrypt in
+        locked mode).
     MatchId:
       in: path
       name: mid
@@ -6526,6 +7010,223 @@ components:
       properties:
         error:
           type: string
+
+    BackupFileEntry:
+      type: object
+      required: [name, kind, scope, time, size]
+      properties:
+        name:
+          type: string
+          pattern: '^\d{8}T\d{6}Z-(scheduled|before-restore-(tournament|competition))(-[2-9]|-[1-9]\d{1,3})?\.zip$'
+          description: Backup filename.
+        kind:
+          type: string
+          enum: [scheduled, before-restore]
+          description: Reason the backup archive was written.
+        scope:
+          type: string
+          enum: [tournament, competition]
+          description: Scope of tournament data included in the backup.
+        time:
+          type: string
+          format: date-time
+          description: UTC creation timestamp in RFC 3339 format.
+        size:
+          type: integer
+          format: int64
+          description: File size in bytes.
+
+    ConfirmPasswordError:
+      type: object
+      required: [error, message, code]
+      properties:
+        error:
+          type: string
+          description: Operator-facing refusal sentence.
+        message:
+          type: string
+          description: Operator-facing refusal sentence (identical to error).
+        code:
+          type: string
+          enum: [confirm_password_required, confirm_password_wrong]
+          description: Machine-readable confirmation refusal code.
+
+    RestoreRefusalError:
+      type: object
+      required: [error, message, code]
+      properties:
+        error:
+          type: string
+          description: Operator-facing sentence explaining the refusal.
+        message:
+          type: string
+          description: Operator-facing sentence explaining the refusal (identical to error).
+        code:
+          type: string
+          description: Machine-readable refusal code.
+        reason:
+          type: string
+          description: >
+            For archive_invalid, the reader reason code: not_a_zip, manifest_missing,
+            manifest_invalid, format_too_new, unsafe_path, not_regular_file,
+            outside_layout, duplicate_path, case_clash, too_many_entries,
+            file_too_large, total_too_large, ratio_too_high, entry_unreadable,
+            file_not_in_manifest, file_missing, size_mismatch, checksum_mismatch,
+            bad_competition_id, competition_mismatch, competition_count,
+            config_missing, tournament_missing, restore_created_not_allowed,
+            or front_matter_invalid.
+        detail:
+          type: string
+          description: For archive_invalid, technical error details.
+        path:
+          type: string
+          description: Archive entry path or competition ID concerned.
+        competitionIds:
+          type: array
+          items:
+            type: string
+          description: List of competition IDs concerned (e.g. on decision_missing, matches_running, or plan_changed).
+
+    RestorePlan:
+      type: object
+      required: [scope, kind, undo, tournamentReplaced, password, competitions]
+      properties:
+        scope:
+          type: string
+          enum: [tournament, competition]
+          description: Scope of the backup archive.
+        kind:
+          type: string
+          enum: [manual, scheduled, before-restore]
+          description: Origin kind of the backup archive.
+        undo:
+          type: boolean
+          description: Whether this plan is for an undo operation.
+        nothingToRestore:
+          type: boolean
+          description: True when the archive holds nothing to restore.
+        message:
+          type: string
+          description: Plain-text explanation when nothingToRestore is true.
+        tournamentReplaced:
+          type: boolean
+          description: True when tournament settings, branding, and sponsors will be replaced.
+        password:
+          type: string
+          enum: [kept, "needs one"]
+          description: What happens to the admin password (kept in file or locked mode, or needs one when bootstrapping).
+        competitions:
+          type: array
+          description: Per-competition plan details.
+          items:
+            type: object
+            required: [id, name, asked]
+            properties:
+              id:
+                type: string
+                description: Competition ID in archive (or in folder for keep or remove).
+              name:
+                type: string
+                description: Competition display name.
+              action:
+                type: string
+                enum: [create, replace, copy, keep, remove]
+                description: Planned or chosen action for this competition.
+              asked:
+                type: boolean
+                description: True when the operator must choose what action to take.
+              choices:
+                type: array
+                items:
+                  type: string
+                  enum: [create, replace, copy, keep, remove]
+                description: Valid actions available for the operator to choose from.
+              newId:
+                type: string
+                description: Derived competition ID when action is copy.
+              copyNameTaken:
+                type: boolean
+                description: True when the suggested or chosen copy name is invalid or already taken.
+              runningNow:
+                type: array
+                items:
+                  type: string
+                description: Matches currently running in the existing competition that will be replaced or removed.
+              runningInArchive:
+                type: array
+                items:
+                  type: string
+                description: Matches in the archive that will be restored in running state.
+              resultsChanged:
+                type: array
+                items:
+                  type: string
+                description: Finished or running matches whose stored results will be lost or altered.
+              prefixCollides:
+                type: boolean
+                description: True when the restored number prefix is already in use by another competition.
+        missing:
+          type: array
+          items:
+            type: string
+          description: Competition IDs requiring operator decision that have not been answered yet.
+        prefixesPending:
+          type: array
+          items:
+            type: string
+          description: Restored competition IDs whose number prefix collides with another competition.
+        warnings:
+          type: array
+          description: Non-fatal warnings about the restore.
+          items:
+            type: object
+            required: [code, message]
+            properties:
+              code:
+                type: string
+                enum: [matches_running, court_busy, court_missing, mode_changes, prefix_reassigned]
+                description: Warning code.
+              competitionId:
+                type: string
+                description: Competition ID concerned, if applicable.
+              court:
+                type: string
+                description: Shiaijo or court concerned, if applicable.
+              message:
+                type: string
+                description: Operator-facing warning sentence.
+
+    RestoreResult:
+      type: object
+      required: [plan, safetyCopy, prefixWarnings]
+      properties:
+        plan:
+          $ref: '#/components/schemas/RestorePlan'
+        safetyCopy:
+          type: string
+          description: Filename of the safety backup archive created before swapping live directories.
+        prefixWarnings:
+          type: array
+          description: Warnings for restored competitions whose number prefixes collided and were reassigned.
+          items:
+            type: object
+            required: [competitionId, oldPrefix, message]
+            properties:
+              competitionId:
+                type: string
+                description: ID of the competition whose number prefix collided.
+              oldPrefix:
+                type: string
+                description: The colliding number prefix.
+              newPrefix:
+                type: string
+                description: The freshly assigned non-colliding prefix, or empty if none could be derived.
+              message:
+                type: string
+                description: "Operator advice (e.g. reprint tags or assign prefix)."
+        prefixError:
+          type: string
+          description: Present only if prefix reassignment failed; advises restarting the app.
 
     KachinukiRosterSide:
       type: object

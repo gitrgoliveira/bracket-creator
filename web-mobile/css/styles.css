@@ -11293,3 +11293,17 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   .team-summary__side--right { text-align: center; }
   .team-summary__fact { white-space: normal; }
 }
+
+/* Backup and restore page (bc-bkrs) */
+.backup-choice-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+@media (max-width: 600px) {
+  .backup-choice-row {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}

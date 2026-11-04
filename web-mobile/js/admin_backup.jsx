@@ -76,9 +76,8 @@ function AdminBackupPage({ tournament, onBack, onLogout, onViewerMode, password,
 
   const handleBackupTournament = async () => {
     try {
-      const blob = await window.API.backupTournament(password);
-      const name = `${(tournament?.name || "tournament").toLowerCase().replace(/[^a-z0-9]+/g, "-")}-backup.zip`;
-      triggerBlobDownload(blob, name);
+      const { blob, filename } = await window.API.backupTournament(password);
+      triggerBlobDownload(blob, filename);
       showToast?.("Tournament backup downloaded");
     } catch (e) {
       showToast?.(e.message || "Backup failed", "error");
@@ -87,9 +86,8 @@ function AdminBackupPage({ tournament, onBack, onLogout, onViewerMode, password,
 
   const handleBackupCompetition = async (comp) => {
     try {
-      const blob = await window.API.backupCompetition(comp.id, password);
-      const name = `${(comp.name || comp.id).toLowerCase().replace(/[^a-z0-9]+/g, "-")}-backup.zip`;
-      triggerBlobDownload(blob, name);
+      const { blob, filename } = await window.API.backupCompetition(comp.id, password);
+      triggerBlobDownload(blob, filename);
       showToast?.(`Backup for "${comp.name}" downloaded`);
     } catch (e) {
       showToast?.(e.message || "Backup failed", "error");

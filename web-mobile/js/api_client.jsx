@@ -4993,6 +4993,10 @@ async function _backupRequest(url, failure, { method = 'GET', password, confirmP
     }
     return res;
 }
+function _backupFilename(res) {
+    // The server always names the archive: `attachment; filename="<name>.zip"`.
+    return /filename="([^"]+)"/.exec(res.headers.get('Content-Disposition'))[1];
+}
 function _restoreForm({ file, from, only, undo }) {
     const fd = new FormData();
     if (file) fd.append('archive', file);
@@ -5939,11 +5943,17 @@ const API = {
         _forgetShownMatches(id);
         return true;
     },
-    backupTournament(password) {
-        return _backupRequest('/api/tournament/backup', 'Failed to download tournament backup', { password }).then(r => r.blob());
+    async backupTournament(password) {
+        const res = await _backupRequest('/api/tournament/backup', 'Failed to download tournament backup', { password });
+        const filename = _backupFilename(res);
+        const blob = await res.blob();
+        return { blob, filename };
     },
-    backupCompetition(id, password) {
-        return _backupRequest(`/api/competitions/${encodeURIComponent(id)}/backup`, 'Failed to download competition backup', { password }).then(r => r.blob());
+    async backupCompetition(id, password) {
+        const res = await _backupRequest(`/api/competitions/${encodeURIComponent(id)}/backup`, 'Failed to download competition backup', { password });
+        const filename = _backupFilename(res);
+        const blob = await res.blob();
+        return { blob, filename };
     },
     planRestore({ file, from, only, undo } = {}, password) {
         return _backupRequest('/api/tournament/restore/plan', 'Failed to plan restore', {

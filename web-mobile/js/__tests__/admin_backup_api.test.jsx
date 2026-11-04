@@ -39,12 +39,15 @@ describe('admin_backup_api', () => {
   });
 
   describe('backupTournament', () => {
-    it('GETs /api/tournament/backup with X-Tournament-Password and returns a Blob', async () => {
+    it('GETs /api/tournament/backup with X-Tournament-Password and returns { blob, filename }', async () => {
       const blob = new Blob(['tournament-backup']);
-      global.fetch = mockFetchBlob(200, { blob });
+      global.fetch = mockFetchBlob(200, {
+        blob,
+        headers: { 'Content-Disposition': 'attachment; filename="tournament-20261103T100000Z.zip"' },
+      });
 
       const result = await API.backupTournament('secret-pw');
-      expect(result).toBe(blob);
+      expect(result).toEqual({ blob, filename: 'tournament-20261103T100000Z.zip' });
 
       expect(global.fetch).toHaveBeenCalledTimes(1);
       const [url, opts] = global.fetch.mock.calls[0];
@@ -60,12 +63,15 @@ describe('admin_backup_api', () => {
   });
 
   describe('backupCompetition', () => {
-    it('GETs /api/competitions/:id/backup with X-Tournament-Password and returns a Blob', async () => {
+    it('GETs /api/competitions/:id/backup with X-Tournament-Password and returns { blob, filename }', async () => {
       const blob = new Blob(['comp-backup']);
-      global.fetch = mockFetchBlob(200, { blob });
+      global.fetch = mockFetchBlob(200, {
+        blob,
+        headers: { 'Content-Disposition': 'attachment; filename="tournament-comp-1-20261103T100000Z.zip"' },
+      });
 
       const result = await API.backupCompetition('comp-1', 'secret-pw');
-      expect(result).toBe(blob);
+      expect(result).toEqual({ blob, filename: 'tournament-comp-1-20261103T100000Z.zip' });
 
       expect(global.fetch).toHaveBeenCalledTimes(1);
       const [url, opts] = global.fetch.mock.calls[0];

@@ -312,24 +312,24 @@ func (o *mobileAppRestoreOptions) run(cmd *cobra.Command, archivePath string) (e
 		NewPassword:  o.password,
 	}
 
-	plan, err := store.PlanRestore(req)
+	dryRunPlan, err := store.PlanRestore(req)
 	if err != nil {
 		return formatRestoreError(err)
 	}
-	if plan.NothingToRestore {
-		msg := plan.Message
+	if dryRunPlan.NothingToRestore {
+		msg := dryRunPlan.Message
 		if msg == "" {
 			msg, _ = mobileapp.RestoreRefusalSentence(state.RestoreCodeNothingToRestore)
 		}
 		return operatorSentence(msg)
 	}
 
-	if len(plan.Missing) > 0 {
+	if len(dryRunPlan.Missing) > 0 {
 		var lines []string
 		lines = append(lines, "restore requires a decision for the following competitions:")
-		for _, missingID := range plan.Missing {
+		for _, missingID := range dryRunPlan.Missing {
 			found := false
-			for _, comp := range plan.Competitions {
+			for _, comp := range dryRunPlan.Competitions {
 				if comp.ID == missingID {
 					choiceStrs := make([]string, len(comp.Choices))
 					for i, c := range comp.Choices {
@@ -352,7 +352,7 @@ func (o *mobileAppRestoreOptions) run(cmd *cobra.Command, archivePath string) (e
 	var safetyCopyName string
 	req.BeforeSwap = mobileapp.RestoreBeforeSwap(store, now, &safetyCopyName)
 
-	_, err = store.Restore(req)
+	restoredPlan, err := store.Restore(req)
 	if err != nil {
 		return formatRestoreError(err)
 	}
@@ -364,7 +364,7 @@ func (o *mobileAppRestoreOptions) run(cmd *cobra.Command, archivePath string) (e
 		}
 	}
 
-	if err := printRestoreOutcome(out, plan); err != nil {
+	if err := printRestoreOutcome(out, restoredPlan); err != nil {
 		return err
 	}
 

@@ -165,3 +165,42 @@ func TestRemovePrefixesPending(t *testing.T) {
 	// Remove on missing file is fine.
 	require.NoError(t, s.RemovePrefixesPending([]string{"b"}))
 }
+
+func TestRestore_RetriesTheJournalOnce(t *testing.T) {
+	a := journalScenarioArchive(t)
+	ref, refDir := journalScenarioFolder(t)
+	_, err := ref.Restore(RestoreRequest{Archive: a, Decisions: journalScenarioDecisions})
+	require.NoError(t, err)
+	want := folderFiles(t, refDir)
+
+	s, dir := journalScenarioFolder(t)
+	var calls int
+	afterRestoreStep = func(i int, _ restoreStep) error {
+		calls++
+		if calls == 1 {
+			return errors.New("transient rename failure")
+		}
+		return nil
+	}
+	defer func() { afterRestoreStep = nil }()
+
+	_, err = s.Restore(RestoreRequest{Archive: a, Decisions: journalScenarioDecisions})
+	require.NoError(t, err)
+	assert.Equal(t, want, folderFiles(t, dir))
+	assertNoStaging(t, dir)
+	assert.GreaterOrEqual(t, calls, 2)
+}
+
+func TestRestore_FailsWhenTheRetryFailsToo(t *testing.T) {
+	a := journalScenarioArchive(t)
+	s, _ := journalScenarioFolder(t)
+
+	afterRestoreStep = func(i int, _ restoreStep) error {
+		return errors.New("persistent rename failure")
+	}
+	defer func() { afterRestoreStep = nil }()
+
+	_, err := s.Restore(RestoreRequest{Archive: a, Decisions: journalScenarioDecisions})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "restore stopped part way")
+}

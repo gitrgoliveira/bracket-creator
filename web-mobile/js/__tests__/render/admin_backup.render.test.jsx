@@ -60,8 +60,8 @@ describe('AdminBackupPage render tests', () => {
     mockApi.backupCompetition.mockReset();
     mockApi.downloadBackup.mockReset();
     mockApi.deleteBackup.mockReset();
-    mockApi.backupTournament.mockResolvedValue(new Blob(['tournament-zip']));
-    mockApi.backupCompetition.mockResolvedValue(new Blob(['competition-zip']));
+    mockApi.backupTournament.mockResolvedValue({ blob: new Blob(['tournament-zip']), filename: 'spring-taikai-20261104T120000Z.zip' });
+    mockApi.backupCompetition.mockResolvedValue({ blob: new Blob(['competition-zip']), filename: 'spring-taikai-c1-20261104T120000Z.zip' });
     mockApi.downloadBackup.mockResolvedValue(new Blob(['backup-zip']));
     mockApi.listBackups.mockResolvedValue([
       { name: '20261104T120000Z-scheduled.zip', kind: 'scheduled', time: '2026-11-04T12:00:00Z', size: 1024 },
@@ -1005,5 +1005,32 @@ describe('AdminBackupPage render tests', () => {
     });
     expect(screen.getByRole('button', { name: 'Restore only "Open Individual"' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Restore only "Women Individual"' })).toBeInTheDocument();
+  });
+
+  it.each([
+    ['tournament', { name: 'Back up the whole tournament' }, 'backupTournament', ['test-pw'], 'spring-taikai-20261104T120000Z.zip', 'Tournament backup downloaded'],
+    ['competition', { name: 'Back up' }, 'backupCompetition', ['c1', 'test-pw'], 'spring-taikai-c1-20261104T120000Z.zip', 'Backup for "Open Individual" downloaded'],
+  ])('downloads the %s backup under the name the server sent', async (_scope, buttonQuery, apiName, apiArgs, serverName, toast) => {
+    const showToast = vi.fn();
+    vi.spyOn(window.URL, 'createObjectURL').mockReturnValue('blob:test');
+    vi.spyOn(window.URL, 'revokeObjectURL').mockImplementation(() => {});
+    const downloaded = [];
+    const origCreateElement = document.createElement.bind(document);
+    const createSpy = vi.spyOn(document, 'createElement').mockImplementation((tag) => {
+      const el = origCreateElement(tag);
+      if (tag === 'a') el.click = () => { downloaded.push(el.download); };
+      return el;
+    });
+    try {
+      render(<AdminBackupPage tournament={defaultTournament} password="test-pw" showToast={showToast} />);
+      await act(async () => {
+        fireEvent.click(screen.getAllByRole('button', buttonQuery)[0]);
+      });
+    } finally {
+      createSpy.mockRestore();
+    }
+    expect(mockApi[apiName]).toHaveBeenCalledWith(...apiArgs);
+    expect(downloaded).toEqual([serverName]);
+    expect(showToast).toHaveBeenCalledWith(toast);
   });
 });

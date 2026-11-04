@@ -354,7 +354,7 @@ function AdminBackupPage({ tournament, onBack, onLogout, onViewerMode, password,
           <div className="card" style={{ marginBottom: 20, border: "1px solid var(--accent, #1d3557)" }}>
             <div className="card__title">Restore completed</div>
             <div className="card__body">
-              <p>The tournament restore finished successfully.</p>
+              <p>The restore finished successfully.</p>
               {restoreResult.safetyCopy && (
                 <p>
                   Safety copy created: <strong>{restoreResult.safetyCopy}</strong>
@@ -732,7 +732,7 @@ function AdminBackupPage({ tournament, onBack, onLogout, onViewerMode, password,
                         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                           <span
                             className={`badge ${isScheduled ? "badge--pools" : "badge--setup"}`}
-                            style={{ fontSize: 11 }}
+                            style={{ fontSize: 11, whiteSpace: "nowrap", flexShrink: 0 }}
                           >
                             {kindLabel}
                           </span>

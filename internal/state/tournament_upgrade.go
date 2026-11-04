@@ -9,16 +9,6 @@ import (
 
 var errNoTournament = errors.New("state: no tournament")
 
-// parseClockMinutes converts "HH:MM" or "H:MM" to minutes since midnight.
-// If unparseable, it returns 24*60 (end of day).
-func parseClockMinutes(s string) int {
-	t, err := time.Parse("15:04", s)
-	if err != nil {
-		return 24 * 60
-	}
-	return t.Hour()*60 + t.Minute()
-}
-
 // upgradeLegacyCeremonies migrates legacy ceremony blocks to pauses.
 // It runs once at startup from NewStore, after sweepLegacyUpgrades, and a
 // failure is logged and leaves the file as it was.
@@ -52,7 +42,7 @@ func (s *Store) upgradeLegacyCeremonies() error {
 		return 0, false
 	}
 
-	dayEarliest := make(map[int]string)
+	dayEarliest := make(map[int]int)
 	for _, id := range compIDs {
 		comp, err := s.LoadCompetition(id)
 		if err != nil {
@@ -69,9 +59,13 @@ func (s *Store) upgradeLegacyCeremonies() error {
 		if startTime == "" {
 			startTime = "09:00"
 		}
+		startMins, ok := ParseClockMinutes(startTime)
+		if !ok {
+			continue
+		}
 		prev, exists := dayEarliest[day]
-		if !exists || parseClockMinutes(startTime) < parseClockMinutes(prev) {
-			dayEarliest[day] = startTime
+		if !exists || startMins < prev {
+			dayEarliest[day] = startMins
 		}
 	}
 
@@ -100,9 +94,10 @@ func (s *Store) upgradeLegacyCeremonies() error {
 					if desired.DurationDays <= 1 {
 						dayVal = 0
 					}
+					m := dayEarliest[n]
 					openingPauses = append(openingPauses, Pause{
 						Name:   "Opening ceremony",
-						Start:  dayEarliest[n],
+						Start:  fmt.Sprintf("%02d:%02d", m/60, m%60),
 						Length: desired.OpeningBlockLegacy,
 						Day:    dayVal,
 					})

@@ -261,3 +261,53 @@ closing_block: 30m
 	assert.Contains(t, text, "opening_block: 30m")
 	assert.Contains(t, text, "closing_block: 30m")
 }
+
+func TestUpgradeLegacyCeremonies_ClockParsing(t *testing.T) {
+	dir := t.TempDir()
+	tournPath := filepath.Join(dir, "tournament.md")
+	tournContent := `---
+name: Clock Parsing Championship
+date: 01-08-2026
+duration_days: 2
+opening_block: 30m
+---
+`
+	require.NoError(t, os.WriteFile(tournPath, []byte(tournContent), 0o600))
+
+	writeComp := func(id, date, startTime string) {
+		compDir := filepath.Join(dir, "competitions", id)
+		require.NoError(t, os.MkdirAll(compDir, 0o700))
+		compContent := "---\nid: " + id + "\nname: " + id + "\ndate: " + date + "\nstart_time: \"" + startTime + "\"\n---\n"
+		require.NoError(t, os.WriteFile(filepath.Join(compDir, "config.md"), []byte(compContent), 0o600))
+	}
+
+	// Day 1: single-digit hour "9:30" must format to zero-padded "09:30".
+	writeComp("comp-day1", "01-08-2026", "9:30")
+	// Day 2: unparseable "9am" must be skipped and not become the day's earliest
+	// nor leak into Pause.Start, leaving "10:00" as the earliest.
+	writeComp("comp-day2-invalid", "02-08-2026", "9am")
+	writeComp("comp-day2-valid", "02-08-2026", "10:00")
+
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+
+	tourn, err := store.LoadTournament()
+	require.NoError(t, err)
+	require.NotNil(t, tourn)
+
+	expectedPauses := []Pause{
+		{
+			Name:   "Opening ceremony",
+			Start:  "09:30",
+			Length: "30m",
+			Day:    1,
+		},
+		{
+			Name:   "Opening ceremony",
+			Start:  "10:00",
+			Length: "30m",
+			Day:    2,
+		},
+	}
+	assert.Equal(t, expectedPauses, tourn.Pauses)
+}

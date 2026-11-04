@@ -1147,6 +1147,52 @@ func TestTournamentHandlers_MaxLengthCaps(t *testing.T) {
 		"PUT /api/tournament with exactly-200-char Name/Venue must be accepted")
 }
 
+func TestPauseNameCapCountsCharacters(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	require.NoError(t, store.SaveTournament(&state.Tournament{
+		Name:     "Seed",
+		Password: "secret",
+		Courts:   []string{"A"},
+	}))
+
+	// 60 kanji characters (180 bytes) is within the 60-character cap and must be accepted.
+	atCap := state.Tournament{
+		Name:     "OK",
+		Password: "secret",
+		Courts:   []string{"A"},
+		Pauses: []state.Pause{
+			{Name: strings.Repeat("道", MaxLenPauseName)},
+		},
+	}
+	body, _ := json.Marshal(atCap)
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code,
+		"PUT /api/tournament with 60 kanji characters in pause name must be accepted")
+
+	// 61 kanji characters exceeds the 60-character cap and must be refused with 400.
+	overCap := state.Tournament{
+		Name:     "OK",
+		Password: "secret",
+		Courts:   []string{"A"},
+		Pauses: []state.Pause{
+			{Name: strings.Repeat("道", MaxLenPauseName+1)},
+		},
+	}
+	bodyOver, _ := json.Marshal(overCap)
+	wOver := httptest.NewRecorder()
+	reqOver, _ := http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(bodyOver))
+	reqOver.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(wOver, reqOver)
+	assert.Equal(t, http.StatusBadRequest, wOver.Code,
+		"PUT /api/tournament with 61 kanji characters in pause name must return 400")
+	assert.Contains(t, wOver.Body.String(), "A pause name can be at most 60 characters.")
+}
+
 // TestTournamentHandlers_ConcurrentPUT_PasswordChangeNotLost pins the
 // TOCTOU fix in store.UpdateTournamentChanged. Pre-atomic-primitive,
 // the PUT handler called LoadTournament + SaveTournamentChanged

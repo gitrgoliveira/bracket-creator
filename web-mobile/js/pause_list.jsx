@@ -355,7 +355,7 @@ export function PauseList({
         </button>
         {isMaxReached && (
           <span className="pause-max-hint" style={{ marginLeft: 12, fontSize: 13, color: 'var(--ink-3)' }}>
-            Maximum of 20 pauses reached.
+            {`Maximum of ${MAX_PAUSES} pauses reached.`}
           </span>
         )}
       </div>

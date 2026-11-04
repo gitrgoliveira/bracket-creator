@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gin-gonic/gin/binding"
@@ -528,7 +529,7 @@ func validateTournamentPauses(pauses []state.Pause) *ValidationError {
 		}
 	}
 	for _, p := range pauses {
-		if len(p.Name) > MaxLenPauseName {
+		if utf8.RuneCountInString(p.Name) > MaxLenPauseName {
 			return &ValidationError{
 				Message: fmt.Sprintf("A pause name can be at most %d characters.", MaxLenPauseName),
 			}

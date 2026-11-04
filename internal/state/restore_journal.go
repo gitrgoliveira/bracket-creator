@@ -273,7 +273,10 @@ func (s *Store) savePrefixesPending(ids []string) error {
 	if err := s.root.atomicWrite(s.prefixesPendingPath(), data, 0o600); err != nil {
 		return err
 	}
-	return syncDir(s.root, s.restoreRootDir())
+	if err := syncDir(s.root, s.restoreRootDir()); err != nil {
+		return err
+	}
+	return syncDir(s.root, s.folder)
 }
 
 // writePrefixesPending adds ids to prefixes-pending.json (atomically, then the

@@ -1014,6 +1014,8 @@ paths:
         | 404 | `backup_not_found` | Kept backup file specified in `from` does not exist |
         | 409 | `decision_missing` | An asked competition has no decision in `decisions`; lists them |
         | 409 | `copy_name_taken` | New name chosen for copy action is already taken |
+        | 409 | `name_taken` | A created or replaced competition has the name of one that stays in place; lists them |
+        | 409 | `folder_incomplete` | A competition folder to replace or remove has no `config.md`, so it cannot be copied first; lists them |
         | 409 | `matches_running` | Matches running in replaced/removed competition without `allowRunning=true`; lists them |
         | 409 | `plan_changed` | Folder competitions changed between plan and restore |
         | 409 | `pending_write_unsettled` | A competition has an uncommitted write (WAL); restart the app |
@@ -1086,8 +1088,8 @@ paths:
         '409':
           description: >
             Conflict prevents restore. Refusals change nothing.
-            Codes: `decision_missing`, `copy_name_taken`, `matches_running`,
-            `plan_changed`, `pending_write_unsettled`, `password_required`, `nothing_to_restore`.
+            Codes: `decision_missing`, `copy_name_taken`, `name_taken`, `folder_incomplete`,
+            `matches_running`, `plan_changed`, `pending_write_unsettled`, `password_required`, `nothing_to_restore`.
           content:
             application/json:
               schema:
@@ -7147,6 +7149,9 @@ components:
               copyNameTaken:
                 type: boolean
                 description: True when the suggested or chosen copy name is invalid or already taken.
+              nameTaken:
+                type: boolean
+                description: True when a create or replace would leave two competitions with the same name.
               runningNow:
                 type: array
                 items:

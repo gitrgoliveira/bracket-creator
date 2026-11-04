@@ -448,6 +448,66 @@ func TestRestore_CopyNameRules(t *testing.T) {
 	}
 }
 
+func TestRestore_NameClashWithInPlaceCompetitionIsRefused(t *testing.T) {
+	// Example: live competition id "a" is named "Open", and the backup holds id "open" named "Open".
+	// Restoring "open" as a create leaves two competitions named "Open", which must be refused.
+	src, _ := newRestoreTestStore(t)
+	restoreTestTournament(t, src, "pw")
+	addRestoreComp(t, src, "open", "Open", "O", MatchStatusScheduled, "A")
+	a := archiveOf(t, src, ScopeCompetition, "open")
+
+	s, dir := newRestoreTestStore(t)
+	restoreTestTournament(t, s, "pw")
+	addRestoreComp(t, s, "a", "Open", "A", MatchStatusScheduled, "A")
+
+	before := folderFiles(t, dir)
+	req := RestoreRequest{Archive: a}
+	plan, err := s.PlanRestore(req)
+	require.NoError(t, err)
+	e := planEntry(t, plan, "open")
+	assert.Equal(t, RestoreCreate, e.Action)
+	assert.True(t, e.NameTaken, "Create with name matching live competition must mark NameTaken")
+
+	_, err = s.Restore(req)
+	require.Error(t, err)
+	assert.Equal(t, RestoreCodeNameTaken, restoreCode(t, err))
+	var re *RestoreError
+	require.ErrorAs(t, err, &re)
+	assert.Equal(t, []string{"open"}, re.CompetitionIDs)
+	assert.Equal(t, before, folderFiles(t, dir), "a refusal changes nothing")
+	assertNoStaging(t, dir)
+}
+
+func TestRestore_LegitimateReplaceSameIDAndNameNotRefused(t *testing.T) {
+	// A legitimate replace of the same competition (same id "open", same name "Open") is NOT refused.
+	src, _ := newRestoreTestStore(t)
+	restoreTestTournament(t, src, "pw")
+	addRestoreComp(t, src, "open", "Open", "O", MatchStatusScheduled, "A")
+	a := archiveOf(t, src, ScopeCompetition, "open")
+
+	s, dir := newRestoreTestStore(t)
+	restoreTestTournament(t, s, "pw")
+	addRestoreComp(t, s, "open", "Open", "O", MatchStatusCompleted, "A")
+	setRestoreMatch(t, s, "open", MatchStatusCompleted, "A", "Alice")
+
+	req := RestoreRequest{
+		Archive:   a,
+		Decisions: map[string]RestoreDecision{"open": {Action: RestoreReplace}},
+	}
+	plan, err := s.PlanRestore(req)
+	require.NoError(t, err)
+	e := planEntry(t, plan, "open")
+	assert.Equal(t, RestoreReplace, e.Action)
+	assert.False(t, e.NameTaken, "Legitimate replace of same competition must not be marked NameTaken")
+
+	_, err = s.Restore(req)
+	require.NoError(t, err)
+	c, err := s.LoadCompetition("open")
+	require.NoError(t, err)
+	assert.Equal(t, "Open", c.Name)
+	assertNoStaging(t, dir)
+}
+
 func TestRestore_TournamentScopeKeepsOrRemovesWhatTheArchiveLacks(t *testing.T) {
 	for _, action := range []RestoreAction{RestoreKeep, RestoreRemove} {
 		t.Run(string(action), func(t *testing.T) {
@@ -960,4 +1020,50 @@ func TestRestore_ReplacesCompetitionWithCorruptConfigMD(t *testing.T) {
 	}
 	assert.True(t, foundCorrupt, "safety copy archive must contain the corrupt config.md bytes")
 	assertNoStaging(t, dir)
+}
+
+// A folder with no config.md cannot go into the safety copy, so a restore that
+// would replace or remove it is refused before anything changes, in either scope.
+func TestRestore_ConfigLessCompetitionFolderIsRefused(t *testing.T) {
+	addBroken := func(t *testing.T, s *Store) {
+		require.NoError(t, s.root.mkdirAll(s.compPath("broken"), 0o700))
+		require.NoError(t, s.root.writeFile(s.compPath("broken", "participants.csv"), []byte("ID,Name,Dojo\n"), 0o600))
+	}
+	for _, tc := range []struct {
+		name  string
+		scope SnapshotScope
+		id    string
+	}{
+		{"replaced in a competition restore", ScopeCompetition, "broken"},
+		{"removed in a tournament restore", ScopeTournament, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			src, _ := newRestoreTestStore(t)
+			restoreTestTournament(t, src, "pw")
+			addRestoreComp(t, src, "men", "Men", "M", MatchStatusScheduled, "A")
+			if tc.scope == ScopeCompetition {
+				addRestoreComp(t, src, "broken", "Broken", "B", MatchStatusScheduled, "A")
+			}
+			a := archiveOf(t, src, tc.scope, tc.id)
+
+			s, dir := newRestoreTestStore(t)
+			restoreTestTournament(t, s, "pw")
+			addRestoreComp(t, s, "men", "Men", "M", MatchStatusScheduled, "A")
+			addBroken(t, s)
+
+			decisions := map[string]RestoreDecision{"broken": {Action: RestoreReplace}}
+			if tc.scope == ScopeTournament {
+				decisions = map[string]RestoreDecision{"men": {Action: RestoreReplace}, "broken": {Action: RestoreRemove}}
+			}
+			before := folderFiles(t, dir)
+			_, err := s.Restore(RestoreRequest{Archive: a, Decisions: decisions})
+			require.Error(t, err)
+			assert.Equal(t, RestoreCodeFolderIncomplete, restoreCode(t, err))
+			var re *RestoreError
+			require.ErrorAs(t, err, &re)
+			assert.Equal(t, []string{"broken"}, re.CompetitionIDs)
+			assert.Equal(t, before, folderFiles(t, dir), "a refusal changes nothing")
+			assertNoStaging(t, dir)
+		})
+	}
 }

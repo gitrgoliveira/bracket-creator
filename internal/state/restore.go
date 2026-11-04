@@ -86,10 +86,12 @@ const (
 	RestoreCodeDecisionMissing       = "decision_missing"
 	RestoreCodeBadDecision           = "bad_decision"
 	RestoreCodeCopyNameTaken         = "copy_name_taken"
+	RestoreCodeNameTaken             = "name_taken"
 	RestoreCodePlanChanged           = "plan_changed"
 	RestoreCodeMatchesRunning        = "matches_running"
 	RestoreCodePasswordRequired      = "password_required"
 	RestoreCodeFileUnreadable        = "file_unreadable"
+	RestoreCodeFolderIncomplete      = "folder_incomplete"
 	RestoreCodeNotASafetyCopy        = "not_a_safety_copy"
 	RestoreCodePendingWriteUnsettled = "pending_write_unsettled"
 	RestoreCodeNotInArchive          = "competition_not_in_archive"
@@ -159,6 +161,7 @@ type RestoreCompetitionPlan struct {
 	// not make an id, or makes one already used.
 	NewID         string `json:"newId,omitempty"`
 	CopyNameTaken bool   `json:"copyNameTaken,omitempty"`
+	NameTaken     bool   `json:"nameTaken,omitempty"`
 	// RunningNow lists the folder's matches running now (replace, remove);
 	// RunningInArchive the archive's matches that come back running.
 	RunningNow       []string `json:"runningNow,omitempty"`
@@ -507,6 +510,7 @@ type restoreWork struct {
 	removed     []string
 	created     []string // the ids a create or a copy brings in
 	copyTaken   []string
+	nameClash   []string
 	runningComp []string
 }
 
@@ -652,20 +656,56 @@ func planRestore(req RestoreRequest, ai *restoreArchiveInfo, live *restoreLiveSt
 	for _, e := range entries {
 		actions[e.ID] = e.Action
 	}
-	var takenNames []string
+
+	// Names of live competitions that stay in place (not replaced and not removed).
+	// A competition replaced in this restore no longer holds its old live name (it
+	// takes the archive name), and a removed one frees its name.
+	var inPlaceNames []string
 	for _, id := range live.ids {
-		if actions[id] == RestoreReplace {
-			if name := ai.names[id]; name != "" {
-				takenNames = append(takenNames, name)
-			}
+		if actions[id] == RestoreReplace || actions[id] == RestoreRemove {
 			continue
 		}
 		if name := competitionName(live, id); name != "" {
-			takenNames = append(takenNames, name)
+			inPlaceNames = append(inPlaceNames, name)
 		}
 	}
+
+	// Check Create and Replace (and undo) entries for name clashes against competitions
+	// that stay in place, or other competitions restored in the same plan.
+	restoredNames := make(map[string]string) // normalized name -> first comp ID
+	for i := range entries {
+		e := &entries[i]
+		if e.Action != RestoreCreate && e.Action != RestoreReplace {
+			continue
+		}
+		rawName := ai.names[e.ID]
+		name := strings.TrimSpace(rawName)
+		if name == "" {
+			continue
+		}
+		clash := false
+		for _, ex := range inPlaceNames {
+			if strings.EqualFold(strings.TrimSpace(ex), name) {
+				clash = true
+				break
+			}
+		}
+		norm := strings.ToLower(name)
+		if otherID, ok := restoredNames[norm]; ok && otherID != e.ID {
+			clash = true
+		}
+		if clash {
+			e.NameTaken = true
+			w.nameClash = append(w.nameClash, e.ID)
+		} else {
+			restoredNames[norm] = e.ID
+		}
+	}
+
+	var takenNames []string
+	takenNames = append(takenNames, inPlaceNames...)
 	for _, e := range entries {
-		if e.Action == RestoreCreate {
+		if (e.Action == RestoreCreate || e.Action == RestoreReplace) && !e.NameTaken {
 			if name := ai.names[e.ID]; name != "" {
 				takenNames = append(takenNames, name)
 			}
@@ -885,6 +925,10 @@ func (w *restoreWork) refusal(req RestoreRequest) error {
 		return &RestoreError{Code: RestoreCodeDecisionMissing, CompetitionIDs: slices.Clone(w.plan.Missing)}
 	case len(w.copyTaken) > 0:
 		return &RestoreError{Code: RestoreCodeCopyNameTaken, CompetitionIDs: slices.Clone(w.copyTaken)}
+	case len(w.nameClash) > 0:
+		slices.Sort(w.nameClash)
+		return &RestoreError{Code: RestoreCodeNameTaken, CompetitionIDs: slices.Clone(w.nameClash),
+			Err: errors.New("competition name already used")}
 	case len(w.runningComp) > 0 && !req.AllowRunning:
 		return &RestoreError{Code: RestoreCodeMatchesRunning, CompetitionIDs: slices.Clone(w.runningComp)}
 	case w.plan.Password == RestorePasswordNeedsOne && req.NewPassword == "":
@@ -1055,6 +1099,18 @@ func (s *Store) Restore(req RestoreRequest) (plan RestorePlan, err error) {
 		}
 	}
 
+	// A folder with no config.md cannot be copied (the safety copy holds only
+	// competitions), so replacing or removing it would lose it silently.
+	var incomplete []string
+	for _, id := range slices.Concat(w2.replaced, w2.removed) {
+		if _, err := s.root.stat(s.compPath(id, "config.md")); errors.Is(err, fs.ErrNotExist) {
+			incomplete = append(incomplete, id)
+		}
+	}
+	if len(incomplete) > 0 {
+		return w2.plan, &RestoreError{Code: RestoreCodeFolderIncomplete, CompetitionIDs: incomplete}
+	}
+
 	// Step 5: the safety copy. snapshotLocked, never Snapshot, which would
 	// take the locks this restore already holds. The hook writes the copy
 	// through SaveBackupFile, which reaches atomicWriteFile and takes no
@@ -1181,6 +1237,7 @@ func restoreJournalFor(w *restoreWork, live *restoreLiveState, ai *restoreArchiv
 func (s *Store) stageRestore(tokenDir string, a *backup.Archive, ai *restoreArchiveInfo, w *restoreWork, password string) error {
 	newRoot := filepath.Join(tokenDir, restoreNewDir)
 	dirs := map[string]struct{}{
+		s.folder:                               {},
 		s.restoreRootDir():                     {},
 		tokenDir:                               {},
 		newRoot:                                {},

@@ -840,4 +840,56 @@ describe('AdminBackupPage render tests', () => {
       'correct-pw'
     );
   });
+
+  it('renders prefix warnings showing reassignment or refusal message when newPrefix is empty', async () => {
+    const plan = {
+      scope: 'competition',
+      competitions: [
+        { id: 'c1', name: 'Open Individual', asked: false },
+        { id: 'c2', name: 'Women Individual', asked: false },
+      ],
+    };
+    mockApi.planRestore.mockResolvedValueOnce(plan);
+
+    const restoreResponse = {
+      plan,
+      safetyCopy: '20261104T150000Z-before-restore-competition.zip',
+      prefixWarnings: [
+        { competitionId: 'c1', oldPrefix: 'K', newPrefix: 'L', message: 'number prefix "K" was already in use: assigned "L"; reprint this competition\'s tags' },
+        { competitionId: 'c2', oldPrefix: 'M', newPrefix: '', message: 'number prefix "M" collided on restore and no replacement prefix could be derived: prefix collision' },
+      ],
+    };
+
+    let dialogSubmitCb = null;
+    window.promptDialog = vi.fn().mockImplementation((opts) => {
+      dialogSubmitCb = opts.submit;
+      return Promise.resolve(null);
+    });
+
+    const { container } = render(
+      <AdminBackupPage
+        tournament={defaultTournament}
+        password="session-pw"
+      />
+    );
+
+    const fileInput = container.querySelector('input[type="file"]');
+    await act(async () => {
+      fireEvent.change(fileInput, { target: { files: [new File(['dummy'], 'backup.zip')] } });
+    });
+
+    const restoreBtn = await screen.findByRole('button', { name: /^Restore$/i });
+    await act(async () => {
+      fireEvent.click(restoreBtn);
+    });
+
+    mockApi.restore.mockResolvedValueOnce(restoreResponse);
+    await act(async () => {
+      await dialogSubmitCb('correct-pw');
+    });
+
+    expect(await screen.findByText(/Restore completed/i)).toBeInTheDocument();
+    expect(screen.getByText(/Open Individual: number prefix changed from K to L\. Reprint its competitors' tags\./i)).toBeInTheDocument();
+    expect(screen.getByText('number prefix "M" collided on restore and no replacement prefix could be derived: prefix collision')).toBeInTheDocument();
+  });
 });

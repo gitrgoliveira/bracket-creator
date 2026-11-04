@@ -61,6 +61,7 @@ var backupReadChecks = BackupChecks()
 var restoreRefusalStatus = map[string]int{
 	state.RestoreCodeDecisionMissing:       http.StatusConflict,
 	state.RestoreCodeCopyNameTaken:         http.StatusConflict,
+	state.RestoreCodeNameTaken:             http.StatusConflict,
 	state.RestoreCodePlanChanged:           http.StatusConflict,
 	state.RestoreCodeMatchesRunning:        http.StatusConflict,
 	state.RestoreCodePendingWriteUnsettled: http.StatusConflict,
@@ -69,6 +70,7 @@ var restoreRefusalStatus = map[string]int{
 	state.RestoreCodeNotASafetyCopy:        http.StatusBadRequest,
 	state.RestoreCodeBadDecision:           http.StatusBadRequest,
 	state.RestoreCodeFileUnreadable:        http.StatusBadRequest,
+	state.RestoreCodeFolderIncomplete:      http.StatusConflict,
 	// `only` names a competition the archive does not hold: the request is
 	// wrong, not the folder's state.
 	state.RestoreCodeNotInArchive: http.StatusBadRequest,
@@ -78,6 +80,7 @@ var restoreRefusalStatus = map[string]int{
 var restoreRefusalSentence = map[string]string{
 	state.RestoreCodeDecisionMissing:       "Choose what to do with each competition listed, then restore again.",
 	state.RestoreCodeCopyNameTaken:         "That name is already used. Pick another name for the copy.",
+	state.RestoreCodeNameTaken:             "Another competition already has that name. Rename one of them, or choose a copy with a new name.",
 	state.RestoreCodePlanChanged:           "The competitions changed since the restore was checked. Check it again, then restore.",
 	state.RestoreCodeMatchesRunning:        "Matches are running in a competition this restore replaces or removes. Finish them, or choose to restore anyway.",
 	state.RestoreCodePendingWriteUnsettled: "A competition has a write that could not be finished. Restart the app, then try again.",
@@ -86,6 +89,7 @@ var restoreRefusalSentence = map[string]string{
 	state.RestoreCodeNotASafetyCopy:        "Only a copy taken before a restore can undo it. Restore this file without Undo.",
 	state.RestoreCodeBadDecision:           "One of the choices is not allowed for that competition. Check the choices again.",
 	state.RestoreCodeFileUnreadable:        "A file in the backup cannot be read, so nothing was restored.",
+	state.RestoreCodeFolderIncomplete:      "A competition folder in the app has no settings file, so it cannot be copied before the restore replaces or removes it. Keep it, or restore it as a copy.",
 	state.RestoreCodeNotInArchive:          "That competition is not in this backup.",
 }
 

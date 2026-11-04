@@ -359,7 +359,11 @@ function AdminBackupPage({ tournament, onBack, onLogout, onViewerMode, password,
                     const compName = lookupCompetitionName(restoreResult.plan?.competitions, w.competitionId);
                     return (
                       <div key={w.competitionId}>
-                        {compName}: number prefix changed from {w.oldPrefix} to {w.newPrefix}. Reprint its competitors&apos; tags.
+                        {w.newPrefix ? (
+                          <>{compName}: number prefix changed from {w.oldPrefix} to {w.newPrefix}. Reprint its competitors&apos; tags.</>
+                        ) : (
+                          w.message
+                        )}
                       </div>
                     );
                   })}

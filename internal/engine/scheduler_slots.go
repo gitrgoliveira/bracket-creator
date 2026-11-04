@@ -200,6 +200,17 @@ func dayBreaks(tournament *state.Tournament, date string) []breakWindow {
 	return breaks
 }
 
+// dayBreaksFor returns the break windows for a single pause of tournament on date.
+// It delegates to dayBreaks without mutating the caller's tournament.
+func dayBreaksFor(tournament *state.Tournament, pause state.Pause, date string) []breakWindow {
+	if tournament == nil {
+		return nil
+	}
+	tCopy := *tournament
+	tCopy.Pauses = []state.Pause{pause}
+	return dayBreaks(&tCopy, date)
+}
+
 // skipBreaks pushes t past any pause window it falls inside: while t lies
 // inside some break (!t.Before(b.start) && t.Before(b.end)), move t to that
 // break's end; repeat until no break holds t (a fixed point), so overlapping

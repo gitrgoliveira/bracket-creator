@@ -18,14 +18,16 @@ const MinClashFootprintMinutes = 30
 
 // ClashWarning describes a court (shiaijo) scheduling conflict between the
 // queried competition and another competition: they run on the same date,
-// share at least one court, and their time windows overlap.
+// share at least one court, and their time windows overlap. OverlapStart and
+// OverlapEnd report the span of the earliest clash (the clashing court whose
+// overlap starts first; ties go to the court earliest in the sorted order).
 type ClashWarning struct {
 	OtherCompID   string   `json:"otherCompId"`
 	OtherCompName string   `json:"otherCompName"`
 	Date          string   `json:"date"`
 	SharedCourts  []string `json:"sharedCourts"`
-	OverlapStart  string   `json:"overlapStart"` // HH:MM
-	OverlapEnd    string   `json:"overlapEnd"`   // HH:MM
+	OverlapStart  string   `json:"overlapStart"` // HH:MM, earliest clash
+	OverlapEnd    string   `json:"overlapEnd"`   // HH:MM, earliest clash
 }
 
 // DetectClashesForCompetition returns the court-scheduling clashes between the
@@ -111,8 +113,6 @@ func (e *Engine) DetectClashesForCompetition(compID string) ([]ClashWarning, err
 				oE := min(wT.End, wO.End)
 				if overlapStart == -1 || oS < overlapStart {
 					overlapStart = oS
-				}
-				if overlapEnd == -1 || oE > overlapEnd {
 					overlapEnd = oE
 				}
 			}

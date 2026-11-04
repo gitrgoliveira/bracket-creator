@@ -311,3 +311,162 @@ opening_block: 30m
 	}
 	assert.Equal(t, expectedPauses, tourn.Pauses)
 }
+
+func TestTournamentUpgrade_CompetitionConfigFailsToLoad(t *testing.T) {
+	dir := t.TempDir()
+	tournPath := filepath.Join(dir, "tournament.md")
+	tournContent := `---
+name: Corrupt Comp Tournament
+date: 01-08-2026
+duration_days: 1
+opening_block: 30m
+closing_block: 30m
+---
+`
+	require.NoError(t, os.WriteFile(tournPath, []byte(tournContent), 0o600))
+
+	// comp-corrupt: config.md contains unparseable front-matter (invalid YAML)
+	compDir := filepath.Join(dir, "competitions", "comp-corrupt")
+	require.NoError(t, os.MkdirAll(compDir, 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(compDir, "config.md"), []byte(":\n: invalid\n"), 0o600))
+
+	// Startup from NewStore logs the error and continues without failing NewStore.
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+
+	// Since upgradeLegacyCeremonies errored on comp-corrupt, tournament.md was left
+	// as it was: opening_block and closing_block remain on disk, and Pauses is nil/empty.
+	tourn, err := store.LoadTournament()
+	require.NoError(t, err)
+	require.NotNil(t, tourn)
+	assert.Equal(t, "30m", tourn.OpeningBlockLegacy)
+	assert.Equal(t, "30m", tourn.ClosingBlockLegacy)
+	assert.Empty(t, tourn.Pauses)
+
+	// Direct call to upgradeLegacyCeremonies returns the error mentioning the competition ID.
+	err = store.upgradeLegacyCeremonies()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "reading competition comp-corrupt")
+
+	// Now verify that a competition directory without a config.md (comp == nil)
+	// does not fail: the upgrade carries on and skips it.
+	require.NoError(t, os.RemoveAll(compDir))
+	emptyCompDir := filepath.Join(dir, "competitions", "comp-missing-config")
+	require.NoError(t, os.MkdirAll(emptyCompDir, 0o700))
+
+	require.NoError(t, store.upgradeLegacyCeremonies())
+	tournAfter, err := store.LoadTournament()
+	require.NoError(t, err)
+	assert.Empty(t, tournAfter.OpeningBlockLegacy)
+	assert.Empty(t, tournAfter.ClosingBlockLegacy)
+	require.Len(t, tournAfter.Pauses, 2)
+}
+
+func TestTournamentUpgrade_CompetitionDatedOutsideTournamentDays(t *testing.T) {
+	dir := t.TempDir()
+	tournPath := filepath.Join(dir, "tournament.md")
+	tournContent := `---
+name: Outside Date Championship
+date: 01-08-2026
+duration_days: 1
+opening_block: 30m
+---
+`
+	require.NoError(t, os.WriteFile(tournPath, []byte(tournContent), 0o600))
+
+	writeComp := func(id, date, startTime string) {
+		compDir := filepath.Join(dir, "competitions", id)
+		require.NoError(t, os.MkdirAll(compDir, 0o700))
+		compContent := "---\nid: " + id + "\nname: " + id + "\ndate: " + date + "\nstart_time: \"" + startTime + "\"\n---\n"
+		require.NoError(t, os.WriteFile(filepath.Join(compDir, "config.md"), []byte(compContent), 0o600))
+	}
+
+	// comp-outside has an earlier start time (08:00) but its date is outside the tournament's 1-day range.
+	// It must be skipped and not set the day's earliest start time.
+	writeComp("comp-outside", "05-08-2026", "08:00")
+	// comp-valid is on the tournament's date (01-08-2026) starting at 10:00.
+	writeComp("comp-valid", "01-08-2026", "10:00")
+
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+
+	tourn, err := store.LoadTournament()
+	require.NoError(t, err)
+	require.NotNil(t, tourn)
+
+	// Since comp-outside is skipped, the opening ceremony starts at 10:00, not 08:00.
+	expectedPauses := []Pause{
+		{
+			Name:   "Opening ceremony",
+			Start:  "10:00",
+			Length: "30m",
+			Day:    0,
+		},
+	}
+	assert.Equal(t, expectedPauses, tourn.Pauses)
+}
+
+func TestTournamentUpgrade_ExistingPausesMergedBetweenOpeningAndClosing(t *testing.T) {
+	dir := t.TempDir()
+	tournPath := filepath.Join(dir, "tournament.md")
+	tournContent := `---
+name: Ceremony with Existing Pauses
+date: 01-08-2026
+duration_days: 1
+opening_block: 30m
+closing_block: 45m
+pauses:
+  - name: Lunch Break
+    start: "12:00"
+    length: 1h
+    day: 0
+---
+`
+	require.NoError(t, os.WriteFile(tournPath, []byte(tournContent), 0o600))
+
+	compDir := filepath.Join(dir, "competitions", "c1")
+	require.NoError(t, os.MkdirAll(compDir, 0o700))
+	compContent := `---
+id: c1
+name: Comp 1
+date: 01-08-2026
+start_time: "09:30"
+---
+`
+	require.NoError(t, os.WriteFile(filepath.Join(compDir, "config.md"), []byte(compContent), 0o600))
+
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+
+	tourn, err := store.LoadTournament()
+	require.NoError(t, err)
+	require.NotNil(t, tourn)
+
+	// The existing pauses in desired.Pauses must be sandwiched between openingPauses and closingPauses:
+	// [0]: Opening ceremony
+	// [1]: Lunch Break (existing pause)
+	// [2]: Closing ceremony
+	expectedPauses := []Pause{
+		{
+			Name:   "Opening ceremony",
+			Start:  "09:30",
+			Length: "30m",
+			Day:    0,
+		},
+		{
+			Name:   "Lunch Break",
+			Start:  "12:00",
+			Length: "1h",
+			Day:    0,
+		},
+		{
+			Name:   "Closing ceremony",
+			Start:  "",
+			Length: "45m",
+			Day:    0,
+		},
+	}
+	assert.Equal(t, expectedPauses, tourn.Pauses)
+	assert.Empty(t, tourn.OpeningBlockLegacy)
+	assert.Empty(t, tourn.ClosingBlockLegacy)
+}

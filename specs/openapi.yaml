@@ -9117,13 +9117,20 @@ components:
 
     CalendarPreviewResponse:
       type: object
-      required: [competitionId, status, placement, overlaps]
+      required: [competitionId, status, previewed, placement, overlaps]
       properties:
         competitionId:
           type: string
         status:
           type: string
           enum: [setup, draw-ready, pools, knockout, completed, invalid]
+        previewed:
+          type: boolean
+          description: >
+            True when the placement was computed from the requested day, start time,
+            and courts (competition status is setup). False when the competition
+            is already drawn so the windows returned are the stored ones; the re-time
+            dry run is separate work.
         placement:
           $ref: '#/components/schemas/CompetitionPlacement'
         overlaps:

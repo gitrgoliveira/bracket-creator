@@ -277,3 +277,56 @@ func TestCalendarPreview_OverlapsAndTouching(t *testing.T) {
 		assert.Empty(t, resp.Overlaps)
 	})
 }
+
+func TestCalendarPreview_PreviewedStatus(t *testing.T) {
+	store, r := setupCalendarTestEnv(t)
+
+	// Setup competition: preview computes placement from requested parameters.
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:                   "c_setup",
+		Name:                 "Setup Comp",
+		Date:                 "01-06-2026",
+		StartTime:            "09:00",
+		Courts:               []string{"A"},
+		Format:               state.CompFormatKnockout,
+		ExpectedParticipants: 8,
+		Status:               state.CompStatusSetup,
+	}))
+
+	// Drawn competition: already has stored draw windows.
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:                       "c_drawn",
+		Name:                     "Drawn Comp",
+		Date:                     "01-06-2026",
+		StartTime:                "09:00",
+		Courts:                   []string{"A"},
+		Format:                   state.CompFormatKnockout,
+		PoolMatchDurationSeconds: 180,
+		Status:                   state.CompStatusDrawReady,
+	}))
+	require.NoError(t, store.SavePoolMatches("c_drawn", []state.MatchResult{
+		{ID: "m1", Court: "A", ScheduledAt: "09:00", Status: state.MatchStatusScheduled},
+	}))
+
+	t.Run("setup competition reports previewed true and reflects requested startTime", func(t *testing.T) {
+		w := getCalendarPreview(t, r, "competitionId=c_setup&date=01-06-2026&startTime=14:00&courts=A", "main-pw")
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+		var resp calendarPreviewResponse
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.True(t, resp.Previewed, "setup competition must have previewed=true")
+		assert.True(t, resp.Placement.Placed)
+		assert.Equal(t, 14*60, resp.Placement.Windows["A"].Start, "requested 14:00 start must be used")
+	})
+
+	t.Run("drawn competition reports previewed false and returns stored draw windows", func(t *testing.T) {
+		w := getCalendarPreview(t, r, "competitionId=c_drawn&date=01-06-2026&startTime=14:00&courts=A", "main-pw")
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+		var resp calendarPreviewResponse
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.False(t, resp.Previewed, "drawn competition must have previewed=false")
+		assert.True(t, resp.Placement.Placed)
+		assert.Equal(t, 9*60, resp.Placement.Windows["A"].Start, "stored draw start (09:00) must be returned, not requested 14:00")
+	})
+}

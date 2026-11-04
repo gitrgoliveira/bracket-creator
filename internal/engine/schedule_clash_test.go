@@ -219,3 +219,34 @@ func TestDetectClashes_RosteredFootprintExtendsWindow(t *testing.T) {
 	require.Len(t, clashes, 1, "Alpha's rostered window must reach Bravo at 09:40")
 	assert.Equal(t, "b", clashes[0].OtherCompID)
 }
+
+func TestDetectClashes_DisjointCourtsReportsEarliestSpanOnly(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	// Alpha and Bravo share courts A and B, but clash at disjoint times: on court B
+	// both start in the morning, on court A both start in the afternoon. The warning
+	// must report court B's own (earliest) span, never one continuous span that runs
+	// from the morning clash to the afternoon one. SharedCourts still lists both.
+	for _, c := range []struct {
+		id, name, aAt, bAt string
+	}{
+		{"a", "Alpha", "14:00", "09:00"},
+		{"b", "Bravo", "14:30", "09:15"},
+	} {
+		require.NoError(t, store.SaveCompetition(&state.Competition{
+			ID: c.id, Name: c.name, Date: "01-07-2026", StartTime: "09:00",
+			Courts: []string{"A", "B"}, PoolMatchDurationSeconds: 3600,
+			Status: state.CompStatusDrawReady,
+		}))
+		require.NoError(t, store.SavePoolMatches(c.id, []state.MatchResult{
+			{ID: c.id + "-a", Court: "A", ScheduledAt: c.aAt, Status: state.MatchStatusScheduled},
+			{ID: c.id + "-b", Court: "B", ScheduledAt: c.bAt, Status: state.MatchStatusScheduled},
+		}))
+	}
+
+	clashes, err := eng.DetectClashesForCompetition("a")
+	require.NoError(t, err)
+	require.Len(t, clashes, 1)
+	assert.Equal(t, []string{"A", "B"}, clashes[0].SharedCourts)
+	assert.Equal(t, "09:15", clashes[0].OverlapStart)
+	assert.Less(t, clashes[0].OverlapEnd, "14:00", "the span must not reach the afternoon clash on court A")
+}

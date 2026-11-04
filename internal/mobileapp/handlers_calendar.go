@@ -30,10 +30,15 @@ type CalendarOverlap struct {
 }
 
 type calendarPreviewResponse struct {
-	CompetitionID string                      `json:"competitionId"`
-	Status        state.CompetitionStatus     `json:"status"`
-	Placement     engine.CompetitionPlacement `json:"placement"`
-	Overlaps      []CalendarOverlap           `json:"overlaps"`
+	CompetitionID string                  `json:"competitionId"`
+	Status        state.CompetitionStatus `json:"status"`
+	// Previewed is true when the placement was computed from the requested
+	// day/startTime/courts (competition status is setup), and false when the
+	// competition is already drawn so the windows returned are the stored ones
+	// (re-time dry run is separate work).
+	Previewed bool                        `json:"previewed"`
+	Placement engine.CompetitionPlacement `json:"placement"`
+	Overlaps  []CalendarOverlap           `json:"overlaps"`
 }
 
 // RegisterCalendarHandlers registers the tournament schedule calendar endpoints.
@@ -218,11 +223,12 @@ func RegisterCalendarHandlers(r gin.IRoutes, store CalendarStore, eng CalendarPl
 			return overlapsList[i].Court < overlapsList[j].Court
 		})
 
-		// The response gains a "retime" object when the engine owns the dry run (task c-retime).
+		// A drawn competition's windows come from the stored draw; the re-time dry run is separate work.
 
 		c.JSON(http.StatusOK, calendarPreviewResponse{
 			CompetitionID: comp.ID,
 			Status:        comp.Status,
+			Previewed:     comp.Status == state.CompStatusSetup,
 			Placement:     placement,
 			Overlaps:      overlapsList,
 		})

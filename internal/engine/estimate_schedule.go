@@ -173,9 +173,7 @@ func draftBreaks(tournament *state.Tournament, date string) []DraftBreak {
 	}
 	out := make([]DraftBreak, 0, len(tournament.Pauses))
 	for _, p := range tournament.Pauses {
-		tCopy := *tournament
-		tCopy.Pauses = []state.Pause{p}
-		windows := dayBreaks(&tCopy, date)
+		windows := dayBreaksFor(tournament, p, date)
 		if len(windows) == 1 {
 			w := windows[0]
 			out = append(out, DraftBreak{

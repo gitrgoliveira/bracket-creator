@@ -805,6 +805,40 @@ func TestDayBreaks_SortedByStart(t *testing.T) {
 	assert.Equal(t, parseClockHHMM("14:00"), breaks[1].start)
 }
 
+func TestDayBreaksFor(t *testing.T) {
+	tourn := &state.Tournament{
+		Date:         "01-05-2026",
+		DurationDays: 2,
+		Pauses: []state.Pause{
+			{Name: "Lunch", Start: "12:00", Length: "1h", Day: 1},
+			{Name: "Ceremony", Start: "17:00", Length: "30m", Day: 2},
+		},
+	}
+
+	t.Run("nil tournament returns nil", func(t *testing.T) {
+		assert.Nil(t, dayBreaksFor(nil, tourn.Pauses[0], "01-05-2026"))
+	})
+
+	t.Run("single pause matches day 1", func(t *testing.T) {
+		breaks := dayBreaksFor(tourn, tourn.Pauses[0], "01-05-2026")
+		require.Len(t, breaks, 1)
+		assert.Equal(t, parseClockHHMM("12:00"), breaks[0].start)
+		assert.Equal(t, parseClockHHMM("13:00"), breaks[0].end)
+	})
+
+	t.Run("day 2 pause does not match day 1", func(t *testing.T) {
+		breaks := dayBreaksFor(tourn, tourn.Pauses[1], "01-05-2026")
+		assert.Empty(t, breaks)
+	})
+
+	t.Run("day 2 pause matches day 2", func(t *testing.T) {
+		breaks := dayBreaksFor(tourn, tourn.Pauses[1], "02-05-2026")
+		require.Len(t, breaks, 1)
+		assert.Equal(t, parseClockHHMM("17:00"), breaks[0].start)
+		assert.Equal(t, parseClockHHMM("17:30"), breaks[0].end)
+	})
+}
+
 func TestAssignSlots_OverlappingPausesSkipAsOne(t *testing.T) {
 	comp := &state.Competition{
 		StartTime:                "11:50",

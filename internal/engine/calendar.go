@@ -317,11 +317,9 @@ func calendarDays(t *state.Tournament) ([]CalendarDay, []UnusedPause) {
 
 	for _, p := range t.Pauses {
 		pUsed := false
-		tCopy := *t
-		tCopy.Pauses = []state.Pause{p}
 
 		for di, d := range dates {
-			windows := dayBreaks(&tCopy, d)
+			windows := dayBreaksFor(t, p, d)
 			for _, w := range windows {
 				pUsed = true
 				startMins := int(w.start.Sub(refMidnight).Minutes())

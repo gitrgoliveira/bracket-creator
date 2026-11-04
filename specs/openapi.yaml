@@ -910,7 +910,7 @@ paths:
         | 400 | `competition_not_in_archive` | `only` names a competition not present in the archive |
         | 400 | `file_unreadable` | A file in the backup cannot be read |
         | 404 | `backup_not_found` | Kept backup file specified in `from` does not exist |
-        | 409 | `pending_write_unsettled` | A competition has an uncommitted write (WAL); restart the app |
+        | 409 | `pending_write_unsettled` | A competition has a pending write (WAL) that could not be finished; restart the app |
         | 409 | `nothing_to_restore` | Archive holds nothing to restore (or undo) |
       security:
         - TournamentPassword: []
@@ -983,7 +983,8 @@ paths:
         Restores a tournament or single competition from a backup archive.
 
         Saves an automatic safety backup into `backups/` (named `<timestamp>-before-restore-<scope>.zip`)
-        before any live directory is replaced or removed. Restores are journaled and atomic.
+        before any live directory is replaced or removed. Every rename is journaled, so a
+        restore that a crash interrupts is rolled forward on the next start.
         Colliding competition number prefixes are reassigned after the restore completes,
         and the server broadcasts a `tournament_updated` event once over SSE.
 
@@ -1018,7 +1019,7 @@ paths:
         | 409 | `folder_incomplete` | A competition folder to replace or remove has no `config.md`, so it cannot be copied first; lists them |
         | 409 | `matches_running` | Matches running in replaced/removed competition without `allowRunning=true`; lists them |
         | 409 | `plan_changed` | Folder competitions changed between plan and restore |
-        | 409 | `pending_write_unsettled` | A competition has an uncommitted write (WAL); restart the app |
+        | 409 | `pending_write_unsettled` | A competition has a pending write (WAL) that could not be finished; restart the app |
         | 409 | `password_required` | Admin password required for restored tournament |
         | 409 | `nothing_to_restore` | Archive holds nothing to restore (or undo) |
       security:

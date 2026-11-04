@@ -665,10 +665,10 @@ a file without the dojo or the id column is completed from the roster on first l
 
 The app stores the backup archives it takes itself in `backups/` directly under the data root; a backup the organiser downloads is not kept there. The store recognises two backup kinds:
 
-1. **Scheduled backups (`scheduled`)**: periodic full-tournament copies taken automatically once every 24 hours when changes occur. They use the filename pattern `<stamp>-scheduled.zip` (with an optional collision suffix such as `-2` or `-3`).
+1. **Scheduled backups (`scheduled`)**: full-tournament copies the server takes on its own. It checks once an hour and takes one when the newest scheduled copy is at least 24 hours old and the fingerprint differs from that copy's. They use the filename pattern `<stamp>-scheduled.zip` (with an optional collision suffix such as `-2` or `-3`).
 2. **Safety copies (`before-restore`)**: copies taken immediately before a restore replaces or removes data. They use the filename pattern `<stamp>-before-restore-<scope>.zip`, where scope is `tournament` or `competition` (also with an optional collision suffix).
 
-The timestamp `<stamp>` is formatted in UTC as `20060102T150405Z`. Valid backup filenames conform strictly to the regular expression:
+The timestamp `<stamp>` is formatted in UTC as `20060102T150405Z`. Valid backup filenames match the regular expression:
 
 ```
 ^\d{8}T\d{6}Z-(scheduled|before-restore-(tournament|competition))(-[2-9]|-[1-9]\d{1,3})?\.zip$
@@ -682,7 +682,7 @@ The `.restore/` folder under the data root holds temporary staging directories a
 
 - **Staging (`.restore/<token>/`)**: each restore operation generates a unique random token and stages files under `.restore/<token>/new/`. If a tournament restore is performed, `new/tournament.md` is staged with the preserved or updated admin password. Any files about to be replaced are moved to `.restore/<token>/old/`. All staged files and directories are synced to disk before renaming begins.
 - **Restore journal (`.restore/<token>/journal.json`)**: format version 1. The journal lists every rename step in order. Each step specifies a kind (`out` to move an existing path into `old/`, or `in` to move a staged path from `new/` into the live location) and the relative live path (`competitions/<id>`, `tournament.md`, `branding`, `sponsors`). The journal file is written atomically and its directory is synced to disk before any live path is moved.
-- **Pending number prefixes (`.restore/prefixes-pending.json`)**: if any restored competition's number prefix collides with one already in use by a competition left in place, its ID is written to `prefixes-pending.json` before the journal is removed. Once the store releases its locks, the server reassigns non-colliding prefixes and removes this file.
+- **Pending number prefixes (`.restore/prefixes-pending.json`)**: if any restored competition's number prefix collides with one already in use by a competition left in place or by another competition in the same restore, its ID is written to `prefixes-pending.json` before the journal is written. Once the store releases its locks, the server reassigns non-colliding prefixes and removes this file.
 - **Crash recovery**: when the store initializes (`Store.init`), it inspects `.restore/`. If a staging directory contains a complete journal, the store rolls forward all steps in order, skips steps already done, syncs the directories, and removes the journal and token folder. A staging folder left without a journal (meaning the process died before the live rename phase) is deleted. If `prefixes-pending.json` remains after a crash, the server reassigns the prefixes at startup.
 
 ### Archive format and manifest
@@ -700,7 +700,7 @@ competitions/<id>/<files>           (config.md, participants.csv, seeds.csv, poo
                                      history/*.jsonl, events/*.jsonl, and *.corrupt-* files)
 ```
 
-Working directories (`.wal/`, `backups/`, `.restore/`) and temporary files (`*.tmp`) are strictly excluded from archives.
+Working directories (`.wal/`, `backups/`, `.restore/`) and temporary and write-check files (`*.tmp`, `*.tmp-*`, `.write-check-*`) are never written into an archive.
 
 The `manifest.json` file contains:
 
@@ -712,12 +712,12 @@ The `manifest.json` file contains:
 - `tournament`: object holding `{ "name": string }`.
 - `competitions`: array of `{ "id": string, "name": string }` entries.
 - `files`: array of `{ "path": string, "size": int64, "sha256": string }`, where `sha256` is a lowercase hexadecimal checksum.
-- `fingerprint`: SHA-256 hash calculated over normalized competition files and paths, used by scheduled backups to detect genuine changes.
+- `fingerprint`: SHA-256 hash over every archived path and its contents, with volatile stamp fields zeroed and the `history/` and `events/` logs left out, used by scheduled backups to detect genuine changes.
 - `restoreCreated`: optional array of competition IDs created during a restore. Present only when `kind` is `"before-restore"`.
 
 ### Validation caps and integrity checks
 
-The archive reader enforces strict limits before extracting or staging any files:
+The archive reader enforces these limits before extracting or staging any files:
 
 - Maximum 20,000 entries per zip archive (including manifest).
 - Maximum 32 MB uncompressed per file entry.

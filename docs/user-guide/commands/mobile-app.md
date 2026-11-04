@@ -83,7 +83,7 @@ A competition's pool and knockout settings are stored in its `competitions/<id>/
 The `mobile-app` command provides subcommands for offline maintenance and disaster recovery when the web server is stopped.
 
 !!! warning "Stop the server first"
-    Always stop the running `mobile-app` server before invoking `backup` or `restore`. The command-line tool operates directly on tournament files on disk and cannot detect or coordinate with a live server process. If an interrupted transaction log (`.wal/`) cannot be settled, the CLI refuses to run.
+    Always stop the running `mobile-app` server before invoking `backup` or `restore`. The command-line tool operates directly on tournament files on disk and cannot detect or coordinate with a live server process. If a competition has a pending write in the transaction log (`.wal/`) that cannot be finished, the command refuses: start the app once so it replays its pending writes, stop it, then run the command again.
 
 ### mobile-app backup
 
@@ -97,9 +97,9 @@ bracket-creator mobile-app backup [flags]
 |---|---|---|---|
 | `--folder` | `-f` | `.` (or `$TOURNAMENT_DATA_DIR`) | Folder storing tournament data |
 | `--out` | (none) | (required) | Output backup zip file path |
-| `--competition` | (none) | `""` | Optional competition ID to backup (omitting backs up the whole tournament) |
+| `--competition` | (none) | `""` | Competition ID to back up (leave it out to back up the whole tournament) |
 
-The backup command reads all competition files and tournament settings, strips the admin password from `tournament.md`, and writes a deterministic zip archive.
+The backup command reads all competition files and tournament settings, strips the admin password from `tournament.md`, and writes the zip archive to `--out`.
 
 ### mobile-app restore
 
@@ -122,7 +122,7 @@ bracket-creator mobile-app restore FILE [flags]
 | `--lock-password` | (none) | `false` (or `$LOCK_PASSWORD=true`) | Handle the restored password as in locked mode: password comes from `TOURNAMENT_PASSWORD_HASH`, so `--password` is not needed |
 | `--allow-running` | (none) | `false` | Allow restore even if matches are currently marked as running |
 
-When restoring into an empty folder or a folder with no existing `tournament.md` in file mode, `--password` is required so you can log into the restored tournament. In locked mode, `--lock-password` uses the hash from `TOURNAMENT_PASSWORD_HASH`.
+When restoring into an empty folder or a folder with no existing `tournament.md` in file mode, `--password` is required so you can sign in to the restored tournament. In locked mode, `--lock-password` uses the hash from `TOURNAMENT_PASSWORD_HASH`. Such a folder accepts only a whole-tournament archive: a competition archive, or `--only`, is refused until a tournament exists.
 
 Before applying changes, the command evaluates a dry run plan. If any competition requires a decision (such as replacing or copying an existing competition, or keeping or removing a competition missing from the backup), the command refuses and prints the required flags.
 

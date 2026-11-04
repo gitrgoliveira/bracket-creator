@@ -204,3 +204,38 @@ func (d *dataRoot) walkDir(path string, fn fs.WalkDirFunc) error {
 func (d *dataRoot) atomicWrite(path string, data []byte, perm fs.FileMode) error {
 	return atomicWriteFile(d, path, data, perm)
 }
+
+// writeSynced makes path's missing parent folders, then creates (or
+// truncates) path, writes data, fsyncs it and closes it. The restore stages
+// its files with it (restore.go): a staging folder is private to one restore,
+// so nothing needs atomicWrite's temp-and-rename, only the fsync that makes
+// the staged bytes durable before the journal names them.
+func (d *dataRoot) writeSynced(path string, data []byte, perm fs.FileMode) error {
+	if err := d.mkdirAll(filepath.Dir(filepath.Clean(path)), 0o700); err != nil {
+		return err
+	}
+	f, err := d.openFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, perm)
+	if err != nil {
+		return err
+	}
+	if _, err := f.Write(data); err != nil {
+		return errors.Join(err, f.Close())
+	}
+	if err := f.Sync(); err != nil {
+		return errors.Join(err, f.Close())
+	}
+	return f.Close()
+}
+
+// exists reports whether path is present (as anything); an error other than
+// "not there" is returned as it is.
+func (d *dataRoot) exists(path string) (bool, error) {
+	_, err := d.stat(path)
+	if err == nil {
+		return true, nil
+	}
+	if errors.Is(err, fs.ErrNotExist) {
+		return false, nil
+	}
+	return false, err
+}

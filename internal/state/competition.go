@@ -74,6 +74,17 @@ func (s *Store) parseCompetitionFile(path string) (any, error) {
 		}
 		return nil, err
 	}
+	c, err := parseCompetitionBytes(raw)
+	if err != nil {
+		return nil, err
+	}
+	return c, nil
+}
+
+// parseCompetitionBytes is config.md's parse from bytes, the one the disk
+// loader above calls once it has read the file. The restore's archive check
+// (restore.go) calls it on an archive's bytes before anything is staged.
+func parseCompetitionBytes(raw []byte) (*Competition, error) {
 	var c Competition
 	if err := parseFrontMatter(raw, &c); err != nil {
 		return nil, err

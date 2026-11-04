@@ -1,0 +1,520 @@
+package cmd
+
+import (
+	"bytes"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"sort"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/gitrgoliveira/bracket-creator/internal/backup"
+	"github.com/gitrgoliveira/bracket-creator/internal/engine"
+	"github.com/gitrgoliveira/bracket-creator/internal/mobileapp"
+	"github.com/gitrgoliveira/bracket-creator/internal/state"
+	"github.com/spf13/cobra"
+)
+
+type operatorSentence string
+
+func (s operatorSentence) Error() string {
+	return string(s)
+}
+
+type mobileAppBackupOptions struct {
+	folder      string
+	out         string
+	competition string
+}
+
+type mobileAppRestoreOptions struct {
+	folder       string
+	only         string
+	replace      []string
+	copy         []string
+	keep         []string
+	remove       []string
+	undo         bool
+	password     string
+	allowRunning bool
+}
+
+func newMobileAppBackupCmd() *cobra.Command {
+	o := &mobileAppBackupOptions{}
+
+	defaultFolder := os.Getenv("TOURNAMENT_DATA_DIR")
+	if defaultFolder == "" {
+		defaultFolder = "."
+	}
+
+	cmd := &cobra.Command{
+		Use:          "backup",
+		Short:        "create a backup archive of the tournament or a single competition",
+		Long:         "Create a backup archive of the tournament data or a single competition.\nStop the server (the running mobile-app) before running this command, because the CLI works on the tournament data folder directly and cannot see a running server.",
+		SilenceUsage: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return o.run(cmd)
+		},
+	}
+
+	cmd.Flags().StringVarP(&o.folder, "folder", "f", defaultFolder, "folder storing tournament data (env: TOURNAMENT_DATA_DIR)")
+	cmd.Flags().StringVar(&o.out, "out", "", "output backup zip file path (required)")
+	cmd.Flags().StringVar(&o.competition, "competition", "", "optional competition ID to backup (omitting backups whole tournament)")
+	if err := cmd.MarkFlagRequired("out"); err != nil {
+		panic(err)
+	}
+
+	return cmd
+}
+
+func newMobileAppRestoreCmd() *cobra.Command {
+	o := &mobileAppRestoreOptions{}
+
+	defaultFolder := os.Getenv("TOURNAMENT_DATA_DIR")
+	if defaultFolder == "" {
+		defaultFolder = "."
+	}
+
+	cmd := &cobra.Command{
+		Use:          "restore FILE",
+		Short:        "restore tournament data from a backup archive",
+		Long:         "Restore tournament data from a backup archive.\nStop the server (the running mobile-app) before running this command, because the CLI works on the tournament data folder directly and cannot see a running server. The --password flag only signs in under file mode (in locked mode the password comes from TOURNAMENT_PASSWORD_HASH).",
+		Args:         cobra.ExactArgs(1),
+		SilenceUsage: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return o.run(cmd, args[0])
+		},
+	}
+
+	cmd.Flags().StringVarP(&o.folder, "folder", "f", defaultFolder, "folder storing tournament data (env: TOURNAMENT_DATA_DIR)")
+	cmd.Flags().StringVar(&o.only, "only", "", "restore only this competition ID")
+	cmd.Flags().StringArrayVar(&o.replace, "replace", nil, "competition ID to replace")
+	cmd.Flags().StringArrayVar(&o.copy, "copy", nil, "competition ID and new name to copy (ID=NAME)")
+	cmd.Flags().StringArrayVar(&o.keep, "keep", nil, "competition ID to keep")
+	cmd.Flags().StringArrayVar(&o.remove, "remove", nil, "competition ID to remove")
+	cmd.Flags().BoolVar(&o.undo, "undo", false, "undo a previous restore using its safety copy")
+	cmd.Flags().StringVar(&o.password, "password", "", "admin password for the restored tournament (file mode only)")
+	cmd.Flags().BoolVar(&o.allowRunning, "allow-running", false, "allow restore even if matches are currently running")
+
+	return cmd
+}
+
+func (o *mobileAppBackupOptions) run(cmd *cobra.Command) (err error) {
+	if o.out == "" {
+		return errors.New("--out is required")
+	}
+
+	tournPath := filepath.Join(o.folder, "tournament.md")
+	if _, err := os.Stat(tournPath); errors.Is(err, os.ErrNotExist) {
+		return errors.New("no tournament in this folder")
+	} else if err != nil {
+		return fmt.Errorf("check tournament file: %w", err)
+	}
+
+	store, err := state.NewStore(o.folder)
+	if err != nil {
+		return fmt.Errorf("failed to initialize state store at %q: %w", o.folder, err)
+	}
+
+	var snap state.Snapshot
+	if o.competition != "" {
+		snap, err = store.Snapshot(state.ScopeCompetition, o.competition)
+		if err != nil {
+			if errors.Is(err, state.ErrCompetitionNotFound) {
+				return fmt.Errorf("competition %q not found", o.competition)
+			}
+			if errors.Is(err, state.ErrPendingWALUnsettled) {
+				return operatorSentence("A competition has a write that could not be finished. Start the app once so it replays its pending writes, stop it, then retry.")
+			}
+			return fmt.Errorf("snapshot competition %q: %w", o.competition, err)
+		}
+		if snap.TournamentName == "" {
+			if t, lerr := store.LoadTournament(); lerr == nil && t != nil {
+				snap.TournamentName = t.Name
+			}
+		}
+	} else {
+		snap, err = store.Snapshot(state.ScopeTournament, "")
+		if err != nil {
+			if errors.Is(err, state.ErrPendingWALUnsettled) {
+				return operatorSentence("A competition has a write that could not be finished. Start the app once so it replays its pending writes, stop it, then retry.")
+			}
+			return fmt.Errorf("snapshot tournament: %w", err)
+		}
+	}
+
+	data, err := snapshotArchive(snap, backup.KindManual, time.Now().UTC(), nil)
+	if err != nil {
+		return fmt.Errorf("create backup archive: %w", err)
+	}
+
+	outDir := filepath.Dir(o.out)
+	if outDir != "" && outDir != "." {
+		if err := os.MkdirAll(outDir, 0o750); err != nil {
+			return fmt.Errorf("create output directory %q: %w", outDir, err)
+		}
+	}
+
+	tmpFile, err := os.CreateTemp(outDir, ".backup-*.tmp")
+	if err != nil {
+		return fmt.Errorf("create temporary backup file: %w", err)
+	}
+	tmpName := tmpFile.Name()
+	cleanup := true
+	defer func() {
+		if cleanup {
+			if cerr := tmpFile.Close(); cerr != nil {
+				err = errors.Join(err, cerr)
+			}
+			if rerr := os.Remove(tmpName); rerr != nil && !errors.Is(rerr, os.ErrNotExist) {
+				err = errors.Join(err, rerr)
+			}
+		}
+	}()
+
+	if _, err := tmpFile.Write(data); err != nil {
+		return fmt.Errorf("write backup file: %w", err)
+	}
+	if err := tmpFile.Sync(); err != nil {
+		return fmt.Errorf("sync backup file: %w", err)
+	}
+	if err := tmpFile.Close(); err != nil {
+		return fmt.Errorf("close backup file: %w", err)
+	}
+	if err := os.Rename(tmpName, o.out); err != nil {
+		return fmt.Errorf("finalize backup file %q: %w", o.out, err)
+	}
+	cleanup = false
+
+	if _, err := fmt.Fprintf(cmd.OutOrStdout(), "Backup written to %s\n", o.out); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (o *mobileAppRestoreOptions) run(cmd *cobra.Command, archivePath string) (err error) {
+	seen := make(map[string]string)
+	for _, id := range o.replace {
+		if prev, ok := seen[id]; ok {
+			return fmt.Errorf("competition %q is specified multiple times (--%s and --replace)", id, prev)
+		}
+		seen[id] = "replace"
+	}
+
+	type copyPair struct {
+		id   string
+		name string
+	}
+	var copies []copyPair
+	for _, item := range o.copy {
+		id, name, found := strings.Cut(item, "=")
+		if !found || id == "" || name == "" {
+			return fmt.Errorf("invalid --copy flag value %q: expected ID=NAME with non-empty id and name", item)
+		}
+		if prev, ok := seen[id]; ok {
+			return fmt.Errorf("competition %q is specified multiple times (--%s and --copy)", id, prev)
+		}
+		seen[id] = "copy"
+		copies = append(copies, copyPair{id: id, name: name})
+	}
+	for _, id := range o.keep {
+		if prev, ok := seen[id]; ok {
+			return fmt.Errorf("competition %q is specified multiple times (--%s and --keep)", id, prev)
+		}
+		seen[id] = "keep"
+	}
+	for _, id := range o.remove {
+		if prev, ok := seen[id]; ok {
+			return fmt.Errorf("competition %q is specified multiple times (--%s and --remove)", id, prev)
+		}
+		seen[id] = "remove"
+	}
+
+	if o.only != "" {
+		if err := state.ValidateCompetitionID(o.only); err != nil {
+			return fmt.Errorf("invalid --only competition id %q: %w", o.only, err)
+		}
+	}
+
+	decisions := make(map[string]state.RestoreDecision)
+	for _, id := range o.replace {
+		decisions[id] = state.RestoreDecision{Action: state.RestoreReplace}
+	}
+	for _, cp := range copies {
+		decisions[cp.id] = state.RestoreDecision{Action: state.RestoreCopy, CopyName: cp.name}
+	}
+	for _, id := range o.keep {
+		decisions[id] = state.RestoreDecision{Action: state.RestoreKeep}
+	}
+	for _, id := range o.remove {
+		decisions[id] = state.RestoreDecision{Action: state.RestoreRemove}
+	}
+
+	tournPath := filepath.Join(o.folder, "tournament.md")
+	_, statErr := os.Stat(tournPath)
+	tournExists := statErr == nil
+
+	var lockedMode bool
+	if raw := os.Getenv("LOCK_PASSWORD"); raw != "" {
+		v, perr := strconv.ParseBool(raw)
+		if perr != nil {
+			return fmt.Errorf("LOCK_PASSWORD=%q: unrecognised boolean value (accepted: 1/t/T/TRUE/true/True or 0/f/F/FALSE/false/False)", raw)
+		}
+		lockedMode = v
+	}
+
+	f, err := os.Open(archivePath) //nolint:gosec // operator chose the backup file path on the command line
+	if err != nil {
+		return fmt.Errorf("open backup file %q: %w", archivePath, err)
+	}
+	defer func() {
+		if cerr := f.Close(); cerr != nil {
+			err = errors.Join(err, cerr)
+		}
+	}()
+
+	info, err := f.Stat()
+	if err != nil {
+		return fmt.Errorf("stat backup file %q: %w", archivePath, err)
+	}
+
+	archive, err := backup.Read(f, info.Size(), backup.Checks{
+		ValidID:     state.ValidateCompetitionID,
+		FrontMatter: state.CheckFrontMatter,
+	})
+	if err != nil {
+		var be *backup.Error
+		if errors.As(err, &be) {
+			return fmt.Errorf("this file is not a backup this app can restore (%s): %s", be.Code, be.Detail)
+		}
+		return fmt.Errorf("this file is not a backup this app can restore: %w", err)
+	}
+
+	if !tournExists {
+		if archive.Manifest.Scope != backup.ScopeTournament || o.only != "" {
+			return errors.New("cannot restore a competition backup into a folder with no tournament")
+		}
+		if o.password == "" && !lockedMode {
+			return errors.New("admin password is required for a new tournament: specify --password")
+		}
+	}
+
+	store, err := state.NewStore(o.folder)
+	if err != nil {
+		return fmt.Errorf("failed to initialize state store at %q: %w", o.folder, err)
+	}
+
+	req := state.RestoreRequest{
+		Archive:      archive,
+		Only:         o.only,
+		Decisions:    decisions,
+		Undo:         o.undo,
+		AllowRunning: o.allowRunning,
+		LockedMode:   lockedMode,
+		NewPassword:  o.password,
+	}
+
+	plan, err := store.PlanRestore(req)
+	if err != nil {
+		return formatRestoreError(err)
+	}
+	if plan.NothingToRestore {
+		msg := plan.Message
+		if msg == "" {
+			msg = "This copy holds nothing to restore."
+		}
+		return operatorSentence(msg)
+	}
+
+	if len(plan.Missing) > 0 {
+		var lines []string
+		lines = append(lines, "restore requires a decision for the following competitions:")
+		for _, missingID := range plan.Missing {
+			found := false
+			for _, comp := range plan.Competitions {
+				if comp.ID == missingID {
+					choiceStrs := make([]string, len(comp.Choices))
+					for i, c := range comp.Choices {
+						choiceStrs[i] = string(c)
+					}
+					lines = append(lines, fmt.Sprintf("  - %s (%q): choose %s", comp.ID, comp.Name, strings.Join(choiceStrs, " or ")))
+					found = true
+					break
+				}
+			}
+			if !found {
+				lines = append(lines, fmt.Sprintf("  - %s", missingID))
+			}
+		}
+		lines = append(lines, "Rerun the command specifying --replace, --copy ID=NAME, --keep, or --remove for each competition.")
+		return operatorSentence(strings.Join(lines, "\n"))
+	}
+
+	if plan.Password == state.RestorePasswordNeedsOne && o.password == "" {
+		return errors.New("admin password is required for the restored tournament: specify --password")
+	}
+
+	if !o.allowRunning {
+		hasRunning := false
+		for _, comp := range plan.Competitions {
+			if len(comp.RunningNow) > 0 && (comp.Action == state.RestoreReplace || comp.Action == state.RestoreRemove) {
+				hasRunning = true
+				break
+			}
+		}
+		if hasRunning {
+			return operatorSentence("Matches are running in a competition this restore replaces or removes. Finish them, or pass --allow-running to restore anyway.")
+		}
+	}
+
+	out := cmd.OutOrStdout()
+	var created, replaced, copied, kept, removed []string
+	for _, comp := range plan.Competitions {
+		switch comp.Action {
+		case state.RestoreCreate:
+			created = append(created, fmt.Sprintf("%s (%q)", comp.ID, comp.Name))
+		case state.RestoreReplace:
+			replaced = append(replaced, fmt.Sprintf("%s (%q)", comp.ID, comp.Name))
+		case state.RestoreCopy:
+			copied = append(copied, fmt.Sprintf("%s (%q) -> %s", comp.ID, comp.Name, comp.NewID))
+		case state.RestoreKeep:
+			kept = append(kept, fmt.Sprintf("%s (%q)", comp.ID, comp.Name))
+		case state.RestoreRemove:
+			removed = append(removed, fmt.Sprintf("%s (%q)", comp.ID, comp.Name))
+		}
+	}
+	if len(created) > 0 {
+		if _, err := fmt.Fprintf(out, "Created: %s\n", strings.Join(created, ", ")); err != nil {
+			return err
+		}
+	}
+	if len(replaced) > 0 {
+		if _, err := fmt.Fprintf(out, "Replaced: %s\n", strings.Join(replaced, ", ")); err != nil {
+			return err
+		}
+	}
+	if len(copied) > 0 {
+		if _, err := fmt.Fprintf(out, "Copied: %s\n", strings.Join(copied, ", ")); err != nil {
+			return err
+		}
+	}
+	if len(kept) > 0 {
+		if _, err := fmt.Fprintf(out, "Kept: %s\n", strings.Join(kept, ", ")); err != nil {
+			return err
+		}
+	}
+	if len(removed) > 0 {
+		if _, err := fmt.Fprintf(out, "Removed: %s\n", strings.Join(removed, ", ")); err != nil {
+			return err
+		}
+	}
+	for _, w := range plan.Warnings {
+		if _, err := fmt.Fprintf(out, "Warning: %s\n", w.Message); err != nil {
+			return err
+		}
+	}
+
+	now := time.Now().UTC()
+	var safetyCopyName string
+	req.BeforeSwap = func(sc state.RestoreSafetyCopy) error {
+		data, err := snapshotArchive(sc.Snapshot, sc.Kind, now, sc.RestoreCreated)
+		if err != nil {
+			return err
+		}
+		name, err := store.SaveBackupFile(state.BackupKindBeforeRestore, sc.Snapshot.Scope, now, data)
+		if err != nil {
+			return err
+		}
+		safetyCopyName = name
+		return nil
+	}
+
+	_, err = store.Restore(req)
+	if err != nil {
+		return formatRestoreError(err)
+	}
+
+	if safetyCopyName != "" {
+		if _, err := fmt.Fprintf(out, "Safety copy saved: %s\n", safetyCopyName); err != nil {
+			return err
+		}
+	}
+
+	eng := engine.New(store)
+	prefixWarnings, err := mobileapp.ResolveRestoredPrefixes(store, eng)
+	if err != nil {
+		return fmt.Errorf("reassign competitor number prefixes: %w", err)
+	}
+	for _, pw := range prefixWarnings {
+		if _, err := fmt.Fprintf(out, "Warning: %s\n", pw.Message); err != nil {
+			return err
+		}
+	}
+
+	if _, err := fmt.Fprintln(out, "Restore completed successfully."); err != nil {
+		return err
+	}
+	return nil
+}
+
+func snapshotArchive(snap state.Snapshot, kind backup.Kind, at time.Time, restoreCreated []string) ([]byte, error) {
+	comps := make([]backup.CompetitionRef, 0, len(snap.Competitions))
+	for id, name := range snap.Competitions {
+		comps = append(comps, backup.CompetitionRef{ID: id, Name: name})
+	}
+	sort.Slice(comps, func(i, j int) bool { return comps[i].ID < comps[j].ID })
+	meta := backup.Meta{
+		CreatedAt:      at.UTC(),
+		Scope:          backup.Scope(snap.Scope),
+		Kind:           kind,
+		Tournament:     backup.TournamentRef{Name: snap.TournamentName},
+		Competitions:   comps,
+		Fingerprint:    state.Fingerprint(snap.Files),
+		RestoreCreated: restoreCreated,
+	}
+	var buf bytes.Buffer
+	if err := backup.Write(&buf, meta, snap.Files); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
+func formatRestoreError(err error) error {
+	if err == nil {
+		return nil
+	}
+	var re *state.RestoreError
+	if errors.As(err, &re) {
+		switch re.Code {
+		case state.RestoreCodeNotASafetyCopy:
+			return operatorSentence("Only a copy taken before a restore can undo it. Restore this file without Undo.")
+		case state.RestoreCodePendingWriteUnsettled:
+			return operatorSentence("A competition has a write that could not be finished. Start the app once so it replays its pending writes, stop it, then retry.")
+		case state.RestoreCodeMatchesRunning:
+			return operatorSentence("Matches are running in a competition this restore replaces or removes. Finish them, or pass --allow-running to restore anyway.")
+		case state.RestoreCodePasswordRequired:
+			return operatorSentence("Set an admin password for the restored tournament first (use --password).")
+		case state.RestoreCodeNothingToRestore:
+			return operatorSentence("This copy holds nothing to restore.")
+		case state.RestoreCodeCopyNameTaken:
+			return operatorSentence("That name is already used. Pick another name for the copy.")
+		case state.RestoreCodePlanChanged:
+			return operatorSentence("The competitions changed since the restore was checked. Check it again, then restore.")
+		case state.RestoreCodeBadDecision:
+			return operatorSentence("One of the choices is not allowed for that competition. Check the choices again.")
+		case state.RestoreCodeFileUnreadable:
+			return operatorSentence("A file in the backup cannot be read, so nothing was restored.")
+		case state.RestoreCodeNotInArchive:
+			return operatorSentence("That competition is not in this backup.")
+		default:
+			return fmt.Errorf("restore refused (%s): %s", re.Code, re.Error())
+		}
+	}
+	if errors.Is(err, state.ErrPendingWALUnsettled) {
+		return operatorSentence("A competition has a write that could not be finished. Start the app once so it replays its pending writes, stop it, then retry.")
+	}
+	return err
+}

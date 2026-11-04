@@ -246,6 +246,13 @@ func isSelfRunMainGatedConfigRoute(method, fullPath string) bool {
 		http.MethodDelete + " /api/competitions/:id/league-tiebreak",                       // removing them, organiser decision
 		http.MethodPost + " /api/competitions/:id/league-tiebreak/finalize",                // accepting a league's shared ranks, organiser decision
 		http.MethodGet + " /api/competitions/:id/export",                                   // Fix 3332740291: xlsx export, admin/CPU-heavy, not operational play
+		http.MethodGet + " /api/tournament/backup",                                         // bc-bkrs: a backup holds every competition's data, organiser only
+		http.MethodGet + " /api/competitions/:id/backup",                                   // bc-bkrs: same, one competition
+		http.MethodPost + " /api/tournament/restore/plan",                                  // bc-bkrs: the restore's dry run, organiser only
+		http.MethodPost + " /api/tournament/restore",                                       // bc-bkrs: a restore replaces the tournament's data, organiser, destructive
+		http.MethodGet + " /api/tournament/backups",                                        // bc-bkrs: the kept copies, organiser only
+		http.MethodGet + " /api/tournament/backups/:name",                                  // bc-bkrs: downloading a kept copy, organiser only
+		http.MethodDelete + " /api/tournament/backups/:name",                               // bc-bkrs: removing a kept copy, organiser, destructive
 		http.MethodGet + " /api/competitions/:id/export-results",                           // mp-i96p: results xlsx export, admin/CPU-heavy, keep gated like /export
 		http.MethodPut + " /api/competitions/:id/matches/:mid/court",                       // court assignment, organiser coordination
 		http.MethodGet + " /api/competitions/:id/matches/:mid/history",                     // bc-mrgc: a match's write history, held values included; the score editors' organiser view

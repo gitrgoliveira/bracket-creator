@@ -545,50 +545,20 @@ func importCompetition(store *state.Store, eng *engine.Engine, entry ImportManif
 		// manifest format has no pools file to restore, but the pairing
 		// keeps import consistent with every other place a prefix is
 		// (re)assigned, and covers a manifest extended with pools later).
-		var prefixErr *engine.ValidationError
-		if err := eng.CheckUniqueCompFields("", comp.NumberPrefix, comp.ID); err != nil && !errors.As(err, &prefixErr) {
+		warning, refusal, err := reassignCollidingPrefix(eng, comp, "import")
+		if err != nil {
 			return err
-		} else if prefixErr != nil {
-			oldPrefix := comp.NumberPrefix
-			newPrefix, deriveErr := eng.DefaultNumberPrefixFor(comp.Name, comp.ID)
-			if deriveErr != nil {
-				return deriveErr
-			}
-			// DefaultNumberPrefixFor's own contract
-			// (helper/numbers.go) is an explicit best-effort SUGGESTION, not a
-			// uniqueness guarantee -- once every candidate up to the length
-			// cap is exhausted it returns the LAST one tried, unmodified,
-			// which can itself already be taken (e.g. ~100 siblings holding
-			// "K" and every "K02".."K99" exhausts the derivation onto "K99",
-			// colliding with the sibling that already holds it). Every OTHER
-			// caller of this function (create, settings, the
-			// start/generate-draw pre-flight) re-validates the suggestion
-			// before trusting it; this reassign branch must too. At genuine
-			// exhaustion the collision cannot be resolved by re-deriving
-			// again (the taken set has not changed), so a refusal here is
-			// the honest outcome -- exactly like the name-collision branch
-			// above, which also refuses rather than silently landing bad
-			// data.
-			var reErr *engine.ValidationError
-			if err := eng.CheckUniqueCompFields("", newPrefix, comp.ID); err != nil && !errors.As(err, &reErr) {
-				return err
-			} else if reErr != nil {
-				res.Error = fmt.Sprintf("number prefix %q collided on restore and no replacement prefix could be derived: %v", oldPrefix, reErr)
-				return nil
-			}
-			log.Printf("mobileapp: import %s: number prefix %q collided on restore (%v); reassigned %q",
-				comp.ID, oldPrefix, prefixErr, newPrefix)
-			comp.NumberPrefix = newPrefix
-			// The reassignment PRESERVES mp-yin4's
-			// global prefix+number uniqueness invariant, but every tag this
-			// competition already had printed under oldPrefix now names a
-			// number it no longer has. ImportResult.Error would make the SPA
-			// treat this row as a hard failure (it is not: the row landed);
-			// Warning surfaces the caveat without that, so the operator
-			// restoring the archive is told to reprint rather than finding
-			// out from a competitor holding a stale tag.
-			res.Warning = fmt.Sprintf("number prefix %q was already in use: assigned %q; reprint this competition's tags", oldPrefix, newPrefix)
 		}
+		if refusal != "" {
+			res.Error = refusal
+			return nil
+		}
+		// ImportResult.Error would make the SPA treat this row as a hard
+		// failure (it is not: the row landed); Warning surfaces the reprint
+		// caveat without that, so the operator restoring the archive is told
+		// to reprint rather than finding out from a competitor holding a
+		// stale tag.
+		res.Warning = warning
 		if len(parsedPlayers) > 0 {
 			// Mirror saveCompetitionWithPlayers semantics: when
 			// participants land, the config records that fact so
@@ -667,6 +637,106 @@ func importCompetition(store *state.Store, eng *engine.Engine, entry ImportManif
 	}
 
 	return res
+}
+
+// PrefixWarning tells the operator that a restored competition's number
+// prefix was already used by another competition: it was given a new one
+// (NewPrefix), so its printed tags must be reprinted, or no free prefix could
+// be derived (NewPrefix empty), so the organiser must set one in its settings.
+type PrefixWarning struct {
+	CompetitionID string `json:"competitionId"`
+	OldPrefix     string `json:"oldPrefix"`
+	NewPrefix     string `json:"newPrefix,omitempty"`
+	Message       string `json:"message"`
+}
+
+// reassignCollidingPrefix gives comp a fresh number prefix when its own
+// collides, exactly or ambiguously, with another competition's (bc-pnum A1:
+// a restored archive can legally carry a prefix pair that predates the
+// ambiguity rule, e.g. "K" and "K2"; on legacy data we ASSIGN, never reject).
+// The new prefix comes from the same DefaultNumberPrefixFor every other
+// assignment path uses, never a bespoke suffix scheme. The caller holds
+// WithCompetitionRenameLock, saves comp, then renumbers its competitors.
+//
+// It returns the reprint warning when it reassigned the prefix, and the
+// refusal sentence when no free prefix exists: DefaultNumberPrefixFor is a
+// best-effort SUGGESTION, not a uniqueness guarantee (once every candidate up
+// to the length cap is taken it returns the last one tried, which can itself
+// be taken), so the suggestion is validated again before it is trusted, as
+// every other caller does. door names the caller in the log line.
+func reassignCollidingPrefix(eng PrefixEngine, comp *state.Competition, door string) (warning, refusal string, err error) {
+	var prefixErr *engine.ValidationError
+	if err := eng.CheckUniqueCompFields("", comp.NumberPrefix, comp.ID); err != nil && !errors.As(err, &prefixErr) {
+		return "", "", err
+	}
+	if prefixErr == nil {
+		return "", "", nil
+	}
+	oldPrefix := comp.NumberPrefix
+	newPrefix, err := eng.DefaultNumberPrefixFor(comp.Name, comp.ID)
+	if err != nil {
+		return "", "", err
+	}
+	var reErr *engine.ValidationError
+	if err := eng.CheckUniqueCompFields("", newPrefix, comp.ID); err != nil && !errors.As(err, &reErr) {
+		return "", "", err
+	}
+	if reErr != nil {
+		return "", fmt.Sprintf("number prefix %q collided on restore and no replacement prefix could be derived: %v", oldPrefix, reErr), nil
+	}
+	log.Printf("mobileapp: %s %s: number prefix %q collided on restore (%v); reassigned %q",
+		door, comp.ID, oldPrefix, prefixErr, newPrefix)
+	comp.NumberPrefix = newPrefix
+	// The reassignment preserves mp-yin4's global prefix+number uniqueness
+	// invariant, but every tag this competition already had printed under
+	// oldPrefix now names a number it no longer has.
+	return fmt.Sprintf("number prefix %q was already in use: assigned %q; reprint this competition's tags", oldPrefix, newPrefix), "", nil
+}
+
+// ReassignRestoredPrefixes gives each listed competition (a restore's
+// prefixes-pending.json) a free number prefix when its own collides with
+// another competition's, saves it and renumbers its competitors, and returns
+// one warning per competition whose tags must be reprinted or whose prefix
+// could not be replaced. A competition no longer in the folder is skipped.
+func ReassignRestoredPrefixes(store PrefixStore, eng PrefixEngine, ids []string) ([]PrefixWarning, error) {
+	var out []PrefixWarning
+	for _, id := range ids {
+		var w *PrefixWarning
+		changed := false
+		err := store.WithCompetitionRenameLock(func() error {
+			comp, err := store.LoadCompetition(id)
+			if err != nil || comp == nil {
+				return err
+			}
+			oldPrefix := comp.NumberPrefix
+			warning, refusal, err := reassignCollidingPrefix(eng, comp, "restore")
+			switch {
+			case err != nil:
+				return err
+			case refusal != "":
+				w = &PrefixWarning{CompetitionID: id, OldPrefix: oldPrefix, Message: refusal}
+			case warning != "":
+				if err := store.SaveCompetition(comp); err != nil {
+					return err
+				}
+				changed = true
+				w = &PrefixWarning{CompetitionID: id, OldPrefix: oldPrefix, NewPrefix: comp.NumberPrefix, Message: warning}
+			}
+			return nil
+		})
+		if err != nil {
+			return out, fmt.Errorf("competition %s: %w", id, err)
+		}
+		if changed {
+			if _, err := eng.RenumberCompetitors(id); err != nil {
+				return out, fmt.Errorf("renumber competition %s: %w", id, err)
+			}
+		}
+		if w != nil {
+			out = append(out, *w)
+		}
+	}
+	return out, nil
 }
 
 // importRowFailure words an import row's failure that the row itself cannot

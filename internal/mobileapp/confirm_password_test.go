@@ -136,3 +136,66 @@ func TestCORSAllowsTheConfirmPasswordHeader(t *testing.T) {
 	r.ServeHTTP(w, req)
 	assert.Contains(t, w.Header().Get("Access-Control-Allow-Headers"), "X-Confirm-Password")
 }
+
+// The table of routes that ask for the password again: the competition
+// delete, the restore and the delete of a kept backup, and nothing else.
+func TestConfirmPassword_ConfirmedRoutesTable(t *testing.T) {
+	for _, rt := range []struct{ method, fullPath string }{
+		{http.MethodDelete, "/api/competitions/:id"},
+		{http.MethodPost, "/api/tournament/restore"},
+		{http.MethodDelete, "/api/tournament/backups/:name"},
+	} {
+		_, ok := confirmedRouteSentence(rt.method, rt.fullPath)
+		assert.True(t, ok, "%s %s must ask for the password again", rt.method, rt.fullPath)
+	}
+	for _, rt := range []struct{ method, fullPath string }{
+		{http.MethodPost, "/api/tournament/restore/plan"},
+		{http.MethodGet, "/api/tournament/backup"},
+		{http.MethodGet, "/api/competitions/:id/backup"},
+		{http.MethodGet, "/api/tournament/backups"},
+		{http.MethodGet, "/api/tournament/backups/:name"},
+		{http.MethodPost, "/api/tournament/import"},
+		{http.MethodDelete, "/api/competitions/:id/draw"},
+	} {
+		_, ok := confirmedRouteSentence(rt.method, rt.fullPath)
+		assert.False(t, ok, "%s %s must not ask for the password again", rt.method, rt.fullPath)
+	}
+	assert.Len(t, confirmedRoutes, 3)
+}
+
+// A valid sign-in alone does not restore or delete a kept backup: each asks
+// for the password again, with its own sentence, in both auth modes.
+func TestConfirmPassword_RestoreAndBackupDeleteAsk(t *testing.T) {
+	for _, locked := range []bool{false, true} {
+		r, _ := confirmDeleteRig(t, state.TournamentModeOfficiated, locked)
+		for _, rt := range []struct{ method, path, sentence string }{
+			{http.MethodPost, "/api/tournament/restore", "Wrong password. Nothing was restored."},
+			{http.MethodDelete, "/api/tournament/backups/20260601T090000Z-scheduled.zip", "Wrong password. The backup was not deleted."},
+		} {
+			for _, confirm := range []string{"", "not-it"} {
+				req := httptest.NewRequest(rt.method, rt.path, nil)
+				req.Header.Set("X-Tournament-Password", "main-pw")
+				if confirm != "" {
+					req.Header.Set("X-Confirm-Password", confirm)
+				}
+				w := httptest.NewRecorder()
+				r.ServeHTTP(w, req)
+				require.Equal(t, http.StatusUnauthorized, w.Code, "%s %s locked=%v confirm=%q", rt.method, rt.path, locked, confirm)
+				var body map[string]string
+				require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+				want := confirmPasswordRequiredCode
+				if confirm != "" {
+					want = confirmPasswordWrongCode
+				}
+				assert.Equal(t, want, body["code"])
+				assert.Equal(t, rt.sentence, body["message"])
+			}
+		}
+		// The plan needs only the sign-in.
+		req := httptest.NewRequest(http.MethodPost, "/api/tournament/restore/plan", nil)
+		req.Header.Set("X-Tournament-Password", "main-pw")
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		assert.NotEqual(t, http.StatusUnauthorized, w.Code, w.Body.String())
+	}
+}

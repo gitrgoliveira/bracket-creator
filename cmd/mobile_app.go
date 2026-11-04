@@ -110,6 +110,9 @@ func newMobileAppCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&o.lockedMode, "lock-password", false,
 		"disable POST /api/tournament/reset (SPA /reset page still shows a disabled message) and authenticate via bcrypt hash from TOURNAMENT_PASSWORD_HASH")
 
+	cmd.AddCommand(newMobileAppBackupCmd())
+	cmd.AddCommand(newMobileAppRestoreCmd())
+
 	return cmd
 }
 
@@ -247,6 +250,10 @@ func (o *mobileAppOptions) run(cmd *cobra.Command, args []string) error {
 	srv.RegisterOnShutdown(hub.Close)
 	// Stop the per-IP rate limiter cleanup goroutine.
 	srv.RegisterOnShutdown(apiLimiter.Close)
+
+	backupCtx, cancelBackups := context.WithCancel(context.Background())
+	srv.RegisterOnShutdown(cancelBackups)
+	go (&mobileapp.ScheduledBackups{Store: store}).Run(backupCtx)
 
 	serveErr := make(chan error, 1)
 	go func() {

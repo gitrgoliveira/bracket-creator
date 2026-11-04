@@ -210,7 +210,7 @@ func (s *Store) init() error {
 		// replay" but log so the operator notices.
 		slog.Warn("state: WAL scan failed at startup; skipping replay",
 			"dir", s.walDir, "err", err)
-		return nil
+		pending = nil
 	}
 	for _, w := range pending {
 		slog.Info("state: replaying WAL transaction",
@@ -226,7 +226,11 @@ func (s *Store) init() error {
 		}
 	}
 
-	return nil
+	// Roll forward a restore a crash interrupted (restore_journal.go). Last in
+	// init, after the WAL replay and before NewStore lists competitions/ in
+	// sweepLegacyUpgrades or anything fills a cache, so the first reader sees
+	// the restored folder. init holds s.mu, so this uses s.root only.
+	return s.recoverRestoresLocked()
 }
 
 func (s *Store) getCompLock(id string) *sync.RWMutex {

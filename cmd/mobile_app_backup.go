@@ -42,13 +42,18 @@ type mobileAppRestoreOptions struct {
 	allowRunning bool
 }
 
+// defaultTournamentFolder is the --folder default: TOURNAMENT_DATA_DIR, else the current folder.
+func defaultTournamentFolder() string {
+	if f := os.Getenv("TOURNAMENT_DATA_DIR"); f != "" {
+		return f
+	}
+	return "."
+}
+
 func newMobileAppBackupCmd() *cobra.Command {
 	o := &mobileAppBackupOptions{}
 
-	defaultFolder := os.Getenv("TOURNAMENT_DATA_DIR")
-	if defaultFolder == "" {
-		defaultFolder = "."
-	}
+	defaultFolder := defaultTournamentFolder()
 
 	cmd := &cobra.Command{
 		Use:          "backup",
@@ -73,10 +78,7 @@ func newMobileAppBackupCmd() *cobra.Command {
 func newMobileAppRestoreCmd() *cobra.Command {
 	o := &mobileAppRestoreOptions{}
 
-	defaultFolder := os.Getenv("TOURNAMENT_DATA_DIR")
-	if defaultFolder == "" {
-		defaultFolder = "."
-	}
+	defaultFolder := defaultTournamentFolder()
 
 	cmd := &cobra.Command{
 		Use:          "restore FILE",

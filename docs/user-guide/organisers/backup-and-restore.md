@@ -1,12 +1,10 @@
 # Backup and restore
 
-This guide explains how to back up your tournament data, restore from a backup file, and undo a restore if needed.
-
-The backup and restore system protects your tournament against mistakes, failed hardware, or accidental changes during the event. Creating a backup takes only a moment and does not interrupt running matches.
+A backup is a zip archive of the whole tournament or of one competition. Restoring one puts that data back, after a mistake, a failed computer or an accidental change, and a restore can itself be undone. Taking a backup does not interrupt running matches.
 
 ## The backup routine
 
-Even though the app saves changes to disk continuously, taking regular backup archives is the best insurance on tournament day. We recommend three habits:
+The app saves every change to disk as it happens, but a backup archive is a copy you can carry to another computer or return to after a wrong correction. Take one at these points:
 
 1. **Before the event begins**: take a full backup once your rosters, pools, and brackets are set up.
 2. **After each round completes**: take a backup when pool play finishes, and after major knockout rounds.
@@ -16,7 +14,7 @@ You can back up the entire tournament at once, or back up any single competition
 
 ## Automatic daily copies
 
-The app also protects you automatically. Once every 24 hours, the server takes a backup of the entire tournament on its own:
+While it runs, the server takes a backup of the entire tournament on its own once every 24 hours:
 
 - A daily copy is created only if something has actually changed since the previous backup. Repeated identical saves, date-only refreshes, or actions that change no data do not trigger a backup.
 - Daily copies are saved inside the `backups/` folder within your tournament data directory.
@@ -52,7 +50,7 @@ You can restore data from a file on your computer, or from one of the copies kep
 
 If you have a whole-tournament backup file but only want to restore one competition from it, you do not need to restore everything else.
 
-In the restore plan, each competition listed under the backup archive includes a **Restore only this one** button. Clicking this button runs the preview again for that single competition. The other competitions in your data folder and your tournament-wide settings will be left completely untouched.
+In the restore plan, each competition listed under the backup archive includes a **Restore only this one** button. Clicking this button runs the preview again for that single competition. The other competitions in your data folder and your tournament-wide settings are left as they are.
 
 ### The choices you must make
 
@@ -80,7 +78,7 @@ When you restore a backup:
 - **Tournament mode change warning**: If a tournament restore changes the operating mode (for example, from officiated mode to self-run mode), the plan displays a warning because the mode affects who is allowed to enter scores.
 - **Missing shiaijo warning**: If a restored competition uses a shiaijo or court that does not exist in the restored tournament settings, the plan warns you that the court is missing, so add it back in the tournament settings or move those matches to another court.
 - **Number prefix collisions**: If a restored competition uses a competitor number prefix that is already taken by a competition you kept, the app assigns a new prefix automatically. A warning will tell you to reprint tags for that competition.
-- **Running matches**: If a competition being replaced or removed has matches in progress on court, the plan warns you. Running matches are warned about, not refused. They will return to the state stored in the backup.
+- **Running matches**: If a competition being replaced or removed has matches in progress on court, the plan warns you. The page lets the restore go ahead, and those matches return to the state stored in the backup. On the command line, the same restore is refused unless you pass `--allow-running`.
 - **Do not upload images during a restore**: Do not upload tournament logos or sponsor images while a restore is running. Branding and sponsor folders are swapped as part of the restore process, so an upload in progress could fail or be overwritten.
 
 ## Safety copies and undoing a restore

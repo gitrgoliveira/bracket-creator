@@ -6,6 +6,9 @@ import (
 	"errors"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
+	"runtime"
 	"sort"
 	"sync/atomic"
 	"testing"
@@ -439,5 +442,93 @@ func TestScheduledBackups_PanicRecoveryInRun(t *testing.T) {
 	case <-runReturned:
 	case <-time.After(time.Second):
 		t.Fatal("Run did not exit after cancel")
+	}
+}
+
+// A scheduled backup the check cannot read (not a zip, cut short, empty, or
+// not openable) is skipped: the tick neither panics nor fails, and it writes
+// a fresh readable copy, which the next due check compares as usual. A
+// readable copy the check also looks at (a future-dated one) is still
+// compared past the unreadable one, so unchanged content writes nothing.
+func TestScheduledBackups_UnreadableNewestCopyIsSkipped(t *testing.T) {
+	cases := []struct {
+		name    string
+		corrupt func(t *testing.T, path string)
+	}{
+		{"not a zip", func(t *testing.T, path string) {
+			require.NoError(t, os.WriteFile(path, []byte("this is not a zip archive"), 0o600))
+		}},
+		{"truncated", func(t *testing.T, path string) {
+			data, err := os.ReadFile(path)
+			require.NoError(t, err)
+			require.NoError(t, os.WriteFile(path, data[:len(data)/2], 0o600))
+		}},
+		{"zero bytes", func(t *testing.T, path string) {
+			require.NoError(t, os.WriteFile(path, nil, 0o600))
+		}},
+		{"cannot be opened", func(t *testing.T, path string) {
+			if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+				t.Skip("file permissions do not stop this user from reading")
+			}
+			require.NoError(t, os.Chmod(path, 0))
+		}},
+	}
+	checks := backup.Checks{ValidID: state.ValidateCompetitionID, FrontMatter: state.CheckFrontMatter}
+	start := time.Date(2026, 6, 1, 10, 0, 0, 0, time.UTC)
+
+	newStore := func(t *testing.T) (*state.Store, string) {
+		t.Helper()
+		dir := t.TempDir()
+		s, err := state.NewStore(dir)
+		require.NoError(t, err)
+		require.NoError(t, s.SaveTournament(&state.Tournament{Name: "Kendo Taikai", Password: "pw", Courts: []string{"A"}}))
+		require.NoError(t, s.SaveCompetition(&state.Competition{ID: "open-comp", Name: "Open", Courts: []string{"A"}, NumberPrefix: "O"}))
+		return s, dir
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+
+			t.Run("a fresh copy is written", func(t *testing.T) {
+				s, dir := newStore(t)
+				bad := writeFixtureBackup(t, s, state.BackupKindScheduled, start)
+				tc.corrupt(t, filepath.Join(dir, state.BackupsDirName, bad))
+
+				clock := start.Add(25 * time.Hour)
+				job := &ScheduledBackups{Store: s, Clock: func() time.Time { return clock }}
+				require.NotPanics(t, func() { require.NoError(t, job.runOnce(ctx)) })
+
+				files, err := s.ListBackupFiles()
+				require.NoError(t, err)
+				require.Len(t, files, 2)
+				require.NotEqual(t, bad, files[0].Name)
+				snap, err := s.Snapshot(state.ScopeTournament, "")
+				require.NoError(t, err)
+				fp, ok := job.readArchiveFingerprint(files[0].Name, checks)
+				require.True(t, ok, "the fresh copy must be readable")
+				assert.Equal(t, state.Fingerprint(snap.Files), fp)
+
+				// Due again, content unchanged: the fresh copy is compared, so nothing is written.
+				clock = clock.Add(25 * time.Hour)
+				require.NoError(t, job.runOnce(ctx))
+				files, err = s.ListBackupFiles()
+				require.NoError(t, err)
+				assert.Len(t, files, 2)
+			})
+
+			t.Run("a readable copy with the same content is still compared", func(t *testing.T) {
+				s, dir := newStore(t)
+				writeFixtureBackup(t, s, state.BackupKindScheduled, start.Add(72*time.Hour))
+				bad := writeFixtureBackup(t, s, state.BackupKindScheduled, start)
+				tc.corrupt(t, filepath.Join(dir, state.BackupsDirName, bad))
+
+				job := &ScheduledBackups{Store: s, Clock: func() time.Time { return start.Add(25 * time.Hour) }}
+				require.NoError(t, job.runOnce(ctx))
+				files, err := s.ListBackupFiles()
+				require.NoError(t, err)
+				assert.Len(t, files, 2, "unchanged content matching a readable copy writes nothing")
+			})
+		})
 	}
 }

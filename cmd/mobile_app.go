@@ -116,22 +116,35 @@ func newMobileAppCmd() *cobra.Command {
 	return cmd
 }
 
-func (o *mobileAppOptions) run(cmd *cobra.Command, args []string) error {
-	// Resolve LOCK_PASSWORD env var when the flag was not explicitly set
-	// on the command line. strconv.ParseBool accepts the same set of values
-	// as Go's strconv package (1/t/T/TRUE/true/True/0/f/F/FALSE/false/False)
-	// and returns an error for anything else, so LOCK_PASSWORD=True or
-	// LOCK_PASSWORD=1 work, while LOCK_PASSWORD=yes or LOCK_PASSWORD=enabled
-	// are rejected with a clear message rather than silently ignored.
-	if cmd != nil && !cmd.Flags().Changed("lock-password") {
-		if raw := os.Getenv("LOCK_PASSWORD"); raw != "" {
-			v, err := strconv.ParseBool(raw)
-			if err != nil {
-				return fmt.Errorf("LOCK_PASSWORD=%q: unrecognised boolean value (accepted: 1/t/T/TRUE/true/True or 0/f/F/FALSE/false/False)", raw)
-			}
-			o.lockedMode = v
-		}
+// resolveLockedMode answers whether locked mode is on: the --lock-password
+// flag when it was set on the command line (or cmd is nil), else the
+// LOCK_PASSWORD env var when it is non-empty, else the flag's value.
+// strconv.ParseBool accepts the same set of values as Go's strconv package
+// (1/t/T/TRUE/true/True/0/f/F/FALSE/false/False) and returns an error for
+// anything else, so LOCK_PASSWORD=True or LOCK_PASSWORD=1 work, while
+// LOCK_PASSWORD=yes or LOCK_PASSWORD=enabled are rejected with a clear
+// message rather than silently ignored.
+func resolveLockedMode(cmd *cobra.Command, flagValue bool) (bool, error) {
+	if cmd == nil || cmd.Flags().Changed("lock-password") {
+		return flagValue, nil
 	}
+	raw := os.Getenv("LOCK_PASSWORD")
+	if raw == "" {
+		return flagValue, nil
+	}
+	v, err := strconv.ParseBool(raw)
+	if err != nil {
+		return false, fmt.Errorf("LOCK_PASSWORD=%q: unrecognised boolean value (accepted: 1/t/T/TRUE/true/True or 0/f/F/FALSE/false/False)", raw)
+	}
+	return v, nil
+}
+
+func (o *mobileAppOptions) run(cmd *cobra.Command, args []string) error {
+	lockedMode, err := resolveLockedMode(cmd, o.lockedMode)
+	if err != nil {
+		return err
+	}
+	o.lockedMode = lockedMode
 
 	slog.Info("mobile-app: initializing",
 		"tournamentDataDir", o.folder,

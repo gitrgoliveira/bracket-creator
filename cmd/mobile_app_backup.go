@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
@@ -40,6 +39,7 @@ type mobileAppRestoreOptions struct {
 	undo         bool
 	password     string
 	allowRunning bool
+	lockedMode   bool
 }
 
 // defaultTournamentFolder is the --folder default: TOURNAMENT_DATA_DIR, else the current folder.
@@ -83,7 +83,7 @@ func newMobileAppRestoreCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:          "restore FILE",
 		Short:        "restore tournament data from a backup archive",
-		Long:         "Restore tournament data from a backup archive.\nStop the server (the running mobile-app) before running this command, because the CLI works on the tournament data folder directly and cannot see a running server. The --password flag only signs in under file mode (in locked mode the password comes from TOURNAMENT_PASSWORD_HASH).",
+		Long:         "Restore tournament data from a backup archive.\nStop the server (the running mobile-app) before running this command, because the CLI works on the tournament data folder directly and cannot see a running server. The --password flag sets the password written into tournament.md, which only signs in under file mode. With --lock-password (env: LOCK_PASSWORD) the restore is handled as in locked mode: the password comes from TOURNAMENT_PASSWORD_HASH, so a restore that would otherwise need --password does not.",
 		Args:         cobra.ExactArgs(1),
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -100,6 +100,7 @@ func newMobileAppRestoreCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&o.undo, "undo", false, "undo a previous restore using its safety copy")
 	cmd.Flags().StringVar(&o.password, "password", "", "admin password for the restored tournament (file mode only)")
 	cmd.Flags().BoolVar(&o.allowRunning, "allow-running", false, "allow restore even if matches are currently running")
+	cmd.Flags().BoolVar(&o.lockedMode, "lock-password", false, "handle the restored password as in locked mode: it comes from TOURNAMENT_PASSWORD_HASH, so --password is not needed (env: LOCK_PASSWORD)")
 
 	return cmd
 }
@@ -259,13 +260,9 @@ func (o *mobileAppRestoreOptions) run(cmd *cobra.Command, archivePath string) (e
 	_, statErr := os.Stat(tournPath)
 	tournExists := statErr == nil
 
-	var lockedMode bool
-	if raw := os.Getenv("LOCK_PASSWORD"); raw != "" {
-		v, perr := strconv.ParseBool(raw)
-		if perr != nil {
-			return fmt.Errorf("LOCK_PASSWORD=%q: unrecognised boolean value (accepted: 1/t/T/TRUE/true/True or 0/f/F/FALSE/false/False)", raw)
-		}
-		lockedMode = v
+	lockedMode, err := resolveLockedMode(cmd, o.lockedMode)
+	if err != nil {
+		return err
 	}
 
 	f, err := os.Open(archivePath) //nolint:gosec // operator chose the backup file path on the command line

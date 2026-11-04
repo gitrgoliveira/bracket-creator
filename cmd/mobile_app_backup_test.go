@@ -484,3 +484,56 @@ func TestMobileAppRestore_DefaultTournamentFolderNeedsPassword(t *testing.T) {
 	_, err = executeMobileApp("restore", "--folder", targetDir, "--password", "pw", zipPath)
 	require.NoError(t, err)
 }
+
+// Locked mode (the --lock-password flag, else the LOCK_PASSWORD env var, the
+// same resolution as the mobile-app command) lets a restore into a fresh
+// folder go ahead without --password. A flag set on the command line wins over
+// the env var, which is then not read at all, and a --password given anyway is
+// still written into the restored tournament.md.
+func TestMobileAppRestore_LockedMode(t *testing.T) {
+	srcDir, _ := buildTestPopulatedFolder(t)
+	zipPath := filepath.Join(t.TempDir(), "backup.zip")
+	_, err := executeMobileApp("backup", "--folder", srcDir, "--out", zipPath)
+	require.NoError(t, err)
+
+	tests := []struct {
+		name         string
+		env          string
+		args         []string
+		wantErr      string // substring of the refusal; empty when the restore succeeds
+		wantPassword string // the restored tournament.md password on success
+	}{
+		{name: "env var true needs no password", env: "true"},
+		{name: "flag needs no password", args: []string{"--lock-password"}},
+		{name: "flag wins over env var false", env: "false", args: []string{"--lock-password"}},
+		{name: "flag false wins over env var true", env: "true", args: []string{"--lock-password=false"}, wantErr: "specify --password"},
+		{name: "flag set means an invalid env var is not read", env: "yes", args: []string{"--lock-password"}},
+		{name: "invalid env var is refused", env: "yes", wantErr: "unrecognised boolean value"},
+		{name: "given password is still written", env: "true", args: []string{"--password", "pw"}, wantPassword: "pw"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("LOCK_PASSWORD", tt.env)
+			targetDir := t.TempDir()
+			args := append([]string{"restore", "--folder", targetDir}, tt.args...)
+			out, err := executeMobileApp(append(args, zipPath)...)
+			if tt.wantErr != "" {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tt.wantErr)
+				assert.NoFileExists(t, filepath.Join(targetDir, "tournament.md"), "a refusal must change nothing")
+				return
+			}
+			require.NoError(t, err, "output: %s", out)
+
+			store, err := state.NewStore(targetDir)
+			require.NoError(t, err)
+			tourn, err := store.LoadTournament()
+			require.NoError(t, err)
+			require.NotNil(t, tourn)
+			assert.Equal(t, tt.wantPassword, tourn.Password)
+			comps, err := store.ListCompetitions()
+			require.NoError(t, err)
+			assert.Contains(t, comps, "open-comp")
+		})
+	}
+}

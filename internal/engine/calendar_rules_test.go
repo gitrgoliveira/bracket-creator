@@ -141,7 +141,7 @@ func TestCalendarRules_Overlaps(t *testing.T) {
 	cf := loadCalendarRuleCases(t)
 	for _, tc := range cf.Overlaps {
 		t.Run(tc.Name, func(t *testing.T) {
-			actual := overlaps(tc.A, tc.B)
+			actual := Overlaps(tc.A, tc.B)
 			assert.Equal(t, tc.Expected, actual)
 		})
 	}

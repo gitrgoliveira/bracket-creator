@@ -85,9 +85,9 @@ func pastMidnight(endMins int) bool {
 	return endMins > 24*60
 }
 
-// overlaps reports whether two half-open windows [Start, End) overlap.
+// Overlaps reports whether two half-open windows [Start, End) overlap.
 // Touching windows (e.g. a.End == b.Start) do not overlap.
-func overlaps(a, b state.CourtWindow) bool {
+func Overlaps(a, b state.CourtWindow) bool {
 	if a.Start >= a.End || b.Start >= b.End {
 		return false
 	}
@@ -448,7 +448,7 @@ func (e *Engine) TournamentCalendar() (*TournamentCalendarResult, error) {
 			hasClash := false
 			for court, wI := range pI.Windows {
 				if wJ, ok := pJ.Windows[court]; ok {
-					if overlaps(wI, wJ) {
+					if Overlaps(wI, wJ) {
 						hasClash = true
 						break
 					}

@@ -105,7 +105,7 @@ func (e *Engine) DetectClashesForCompetition(compID string) ([]ClashWarning, err
 				continue
 			}
 			wT := targetPlace.Windows[c]
-			if overlaps(wT, wO) {
+			if Overlaps(wT, wO) {
 				clashingCourts = append(clashingCourts, c)
 				oS := max(wT.Start, wO.Start)
 				oE := min(wT.End, wO.End)

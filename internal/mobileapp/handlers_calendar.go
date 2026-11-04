@@ -36,16 +36,6 @@ type calendarPreviewResponse struct {
 	Overlaps      []CalendarOverlap           `json:"overlaps"`
 }
 
-// overlaps reports whether two half-open windows [Start, End) overlap.
-// The Go owner is engine.overlaps (internal/engine/calendar.go) and the
-// table internal/engine/testdata/calendar_rule_cases.json pins the rule.
-func overlaps(a, b state.CourtWindow) bool {
-	if a.Start >= a.End || b.Start >= b.End {
-		return false
-	}
-	return a.Start < b.End && b.Start < a.End
-}
-
 // RegisterCalendarHandlers registers the tournament schedule calendar endpoints.
 func RegisterCalendarHandlers(r gin.IRoutes, store CalendarStore, eng CalendarPlanner) {
 	r.GET("/schedule/calendar", func(c *gin.Context) {
@@ -204,7 +194,7 @@ func RegisterCalendarHandlers(r gin.IRoutes, store CalendarStore, eng CalendarPl
 				}
 				for court, previewWin := range placement.Windows {
 					if otherWin, ok := other.Placement.Windows[court]; ok {
-						if overlaps(previewWin, otherWin) {
+						if engine.Overlaps(previewWin, otherWin) {
 							overlapsList = append(overlapsList, CalendarOverlap{
 								CompetitionID: other.ID,
 								Name:          other.Name,

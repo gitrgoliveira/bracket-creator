@@ -2,7 +2,9 @@ package cmd
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -602,4 +604,166 @@ func TestMobileAppRestore_RefusalPrintsNoOutcomeLines(t *testing.T) {
 	successIdx := strings.Index(out, "Restore completed successfully.")
 	assert.True(t, copiedIdx >= 0 && successIdx >= 0 && copiedIdx < successIdx,
 		"outcome lines must appear before success line")
+}
+
+// (10) Backup with --competition naming an unknown competition fails with the CLI's message
+// naming the missing competition, and leaves no archive file behind.
+func TestMobileAppBackup_UnknownCompetitionRefused(t *testing.T) {
+	srcDir, _ := buildTestPopulatedFolder(t)
+	outZip := filepath.Join(t.TempDir(), "out.zip")
+
+	const unknownID = "unknown-comp"
+	out, err := executeMobileApp("backup", "--folder", srcDir, "--competition", unknownID, "--out", outZip)
+	require.Error(t, err)
+	assert.Contains(t, out+err.Error(), fmt.Sprintf("competition %q not found", unknownID))
+	assert.NoFileExists(t, outZip, "output archive must not be left behind on failure")
+}
+
+// (11) Restore with --only flag handling:
+// - restores only that competition (leaving tournament-level data such as the password untouched)
+// - --only with an id not in the archive is refused with the CLI wording
+// - --only with an invalid id is refused with the CLI wording
+func TestMobileAppRestore_OnlyFlag(t *testing.T) {
+	srcDir, _ := buildTestPopulatedFolder(t)
+	// Add a second competition to srcDir so the backup archive holds two competitions
+	store, err := state.NewStore(srcDir)
+	require.NoError(t, err)
+	const secondCompID = "second-comp"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:           secondCompID,
+		Name:         "Second Competition",
+		Kind:         "individual",
+		Format:       "knockout",
+		Courts:       []string{"A"},
+		NumberPrefix: "S",
+	}))
+
+	zipPath := filepath.Join(t.TempDir(), "two-comps.zip")
+	_, err = executeMobileApp("backup", "--folder", srcDir, "--out", zipPath)
+	require.NoError(t, err)
+
+	t.Run("invalid id syntax refused", func(t *testing.T) {
+		targetDir := t.TempDir()
+		out, err := executeMobileApp("restore", "--folder", targetDir, "--only", "invalid/id", zipPath)
+		require.Error(t, err)
+		assert.Contains(t, out+err.Error(), `invalid --only competition id "invalid/id"`)
+	})
+
+	t.Run("id not in archive refused", func(t *testing.T) {
+		targetDir := t.TempDir()
+		targetStore, err := state.NewStore(targetDir)
+		require.NoError(t, err)
+		require.NoError(t, targetStore.SaveTournament(&state.Tournament{
+			Name:     "Target Taikai",
+			Password: "target-pass",
+			Courts:   []string{"A"},
+		}))
+
+		out, err := executeMobileApp("restore", "--folder", targetDir, "--only", "not-in-archive", zipPath)
+		require.Error(t, err)
+		assert.Contains(t, out+err.Error(), "That competition is not in this backup.")
+	})
+
+	t.Run("valid only competition restores only that competition leaving tournament data untouched", func(t *testing.T) {
+		targetDir := t.TempDir()
+		targetStore, err := state.NewStore(targetDir)
+		require.NoError(t, err)
+
+		const initialTargetPassword = "target-pass-untouched"
+		require.NoError(t, targetStore.SaveTournament(&state.Tournament{
+			Name:     "Untouched Target Taikai",
+			Password: initialTargetPassword,
+			Courts:   []string{"A"},
+		}))
+
+		out, err := executeMobileApp("restore", "--folder", targetDir, "--only", secondCompID, zipPath)
+		require.NoError(t, err, "output: %s", out)
+
+		reopenedStore, err := state.NewStore(targetDir)
+		require.NoError(t, err)
+
+		// Tournament-level data such as password and name must stay untouched
+		tourn, err := reopenedStore.LoadTournament()
+		require.NoError(t, err)
+		require.NotNil(t, tourn)
+		assert.Equal(t, initialTargetPassword, tourn.Password)
+		assert.Equal(t, "Untouched Target Taikai", tourn.Name)
+
+		// Only secondCompID was restored, not open-comp
+		comps, err := reopenedStore.ListCompetitions()
+		require.NoError(t, err)
+		assert.Contains(t, comps, secondCompID)
+		assert.NotContains(t, comps, "open-comp")
+	})
+}
+
+// stageUnsettleableWAL writes a committed WAL file targeting compID that cannot be applied
+// because it targets a subpath of a regular file (causing ENOTDIR on Apply).
+func stageUnsettleableWAL(t *testing.T, dir, compID string) {
+	t.Helper()
+	walDir := filepath.Join(dir, ".wal")
+	require.NoError(t, os.MkdirAll(walDir, 0o750))
+	walPayload, err := json.Marshal(map[string]any{
+		"id": "unsettleable-tx",
+		"intents": []map[string]any{
+			{
+				"path": filepath.Join(dir, "competitions", compID, "config.md", "subfile"),
+				"data": []byte("test-data"),
+				"mode": 0o600,
+			},
+		},
+	})
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(walDir, "unsettleable-tx.json"), walPayload, 0o600))
+}
+
+// (12) Unsettled-WAL branches on backup and restore print the CLI's friendly wording.
+func TestMobileAppBackupRestore_UnsettledWAL(t *testing.T) {
+	const wantSentence = "A competition has a write that could not be finished. Start the app once so it replays its pending writes, stop it, then retry."
+
+	t.Run("backup with unsettled WAL", func(t *testing.T) {
+		srcDir, _ := buildTestPopulatedFolder(t)
+		stageUnsettleableWAL(t, srcDir, "open-comp")
+		outZip := filepath.Join(t.TempDir(), "out.zip")
+
+		// Tournament-scoped backup
+		out, err := executeMobileApp("backup", "--folder", srcDir, "--out", outZip)
+		require.Error(t, err)
+		assert.Contains(t, out+err.Error(), wantSentence)
+		assert.NoFileExists(t, outZip)
+
+		// Competition-scoped backup
+		out2, err2 := executeMobileApp("backup", "--folder", srcDir, "--competition", "open-comp", "--out", outZip)
+		require.Error(t, err2)
+		assert.Contains(t, out2+err2.Error(), wantSentence)
+		assert.NoFileExists(t, outZip)
+	})
+
+	t.Run("restore with unsettled WAL", func(t *testing.T) {
+		srcDir, _ := buildTestPopulatedFolder(t)
+		zipPath := filepath.Join(t.TempDir(), "backup.zip")
+		_, err := executeMobileApp("backup", "--folder", srcDir, "--out", zipPath)
+		require.NoError(t, err)
+
+		targetDir := t.TempDir()
+		targetStore, err := state.NewStore(targetDir)
+		require.NoError(t, err)
+		require.NoError(t, targetStore.SaveTournament(&state.Tournament{
+			Name:     "Target Taikai",
+			Password: "pass",
+			Courts:   []string{"A"},
+		}))
+		require.NoError(t, targetStore.SaveCompetition(&state.Competition{
+			ID:           "open-comp",
+			Name:         "Existing Open",
+			Courts:       []string{"A"},
+			NumberPrefix: "E",
+		}))
+
+		stageUnsettleableWAL(t, targetDir, "open-comp")
+
+		out, err := executeMobileApp("restore", "--folder", targetDir, "--replace", "open-comp", zipPath)
+		require.Error(t, err)
+		assert.Contains(t, out+err.Error(), wantSentence)
+	})
 }

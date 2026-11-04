@@ -738,4 +738,106 @@ describe('AdminBackupPage render tests', () => {
     expect(await screen.findByText('The backup archive has no files to restore.')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /^Restore$/i })).toBeNull();
   });
+
+  it('submits restore with undo: true when plan is an undo plan, and undo: false for normal plan', async () => {
+    let dialogSubmitCb = null;
+    window.promptDialog = vi.fn().mockImplementation((opts) => {
+      dialogSubmitCb = opts.submit;
+      return Promise.resolve(null);
+    });
+
+    // 1. Normal plan sends undo: false
+    mockApi.planRestore.mockResolvedValueOnce({
+      scope: 'competition',
+      undo: false,
+      competitions: [{ id: 'c1', name: 'Open Individual', asked: false }],
+    });
+    mockApi.restore.mockResolvedValueOnce({
+      safetyCopy: '20261104T150000Z-before-restore-competition.zip',
+    });
+
+    const { container } = render(
+      <AdminBackupPage
+        tournament={defaultTournament}
+        password="session-pw"
+      />
+    );
+
+    const fileInput = container.querySelector('input[type="file"]');
+    await act(async () => {
+      fireEvent.change(fileInput, { target: { files: [new File(['dummy'], 'backup.zip')] } });
+    });
+
+    const restoreBtn = await screen.findByRole('button', { name: /^Restore$/i });
+    expect(restoreBtn).toBeEnabled();
+
+    await act(async () => {
+      fireEvent.click(restoreBtn);
+    });
+    expect(window.promptDialog).toHaveBeenLastCalledWith(
+      expect.objectContaining({ title: 'Confirm restore' })
+    );
+
+    await act(async () => {
+      await dialogSubmitCb('correct-pw');
+    });
+
+    expect(mockApi.restore).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        undo: false,
+      }),
+      'session-pw',
+      'correct-pw'
+    );
+
+    // 2. Undo plan sends undo: true from the primary Restore button
+    const undoBtn = await screen.findByRole('button', { name: /Undo this restore/i });
+    expect(undoBtn).toBeInTheDocument();
+
+    const undoPlan = {
+      scope: 'competition',
+      undo: true,
+      competitions: [{ id: 'c1', name: 'Open Individual', asked: false }],
+    };
+    mockApi.planRestore.mockResolvedValueOnce(undoPlan);
+    mockApi.restore.mockResolvedValueOnce({ success: true });
+
+    // Click "Undo this restore" to run planRestore with undo: true
+    await act(async () => {
+      fireEvent.click(undoBtn);
+    });
+
+    await waitFor(() => {
+      expect(mockApi.planRestore).toHaveBeenCalledWith(
+        expect.objectContaining({
+          from: '20261104T150000Z-before-restore-competition.zip',
+          undo: true,
+        }),
+        'session-pw'
+      );
+    });
+
+    // Click primary Restore button on the undo plan view
+    const planRestoreBtn = await screen.findByRole('button', { name: /^Restore$/i });
+    await act(async () => {
+      fireEvent.click(planRestoreBtn);
+    });
+
+    expect(window.promptDialog).toHaveBeenLastCalledWith(
+      expect.objectContaining({ title: 'Confirm restore' })
+    );
+
+    await act(async () => {
+      await dialogSubmitCb('correct-pw');
+    });
+
+    expect(mockApi.restore).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        from: '20261104T150000Z-before-restore-competition.zip',
+        undo: true,
+      }),
+      'session-pw',
+      'correct-pw'
+    );
+  });
 });

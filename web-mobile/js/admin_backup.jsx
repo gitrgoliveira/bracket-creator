@@ -179,7 +179,7 @@ function AdminBackupPage({ tournament, onBack, onLogout, onViewerMode, password,
               file: selectedFile,
               from: selectedFromName,
               only: onlyCompId,
-              undo: false,
+              undo: Boolean(plan?.undo),
               decisions,
               ...(hasRunning ? { allowRunning: true } : {}),
             },
@@ -205,7 +205,7 @@ function AdminBackupPage({ tournament, onBack, onLogout, onViewerMode, password,
               file: selectedFile,
               from: selectedFromName,
               only: onlyCompId,
-              undo: false,
+              undo: Boolean(plan?.undo),
             });
           }
           return null;

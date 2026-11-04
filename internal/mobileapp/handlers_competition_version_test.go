@@ -227,6 +227,7 @@ func TestConfigVersion_FieldCoverage(t *testing.T) {
 		{"leagueTiebreakTopN", func(c *state.Competition) { c.Format = state.CompFormatLeague }, map[string]any{"leagueTiebreakTopN": 3}},
 		{"twoThirdPlaces", nil, map[string]any{"twoThirdPlaces": &no}},
 		{"expectedParticipants", nil, map[string]any{"expectedParticipants": 24}},
+		{"checkInEnabled", nil, map[string]any{"checkInEnabled": true}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -249,22 +250,6 @@ func TestConfigVersion_FieldCoverage(t *testing.T) {
 	}
 }
 
-// TestConfigVersion_CheckInIsNotASetting pins the one field the settings
-// merge copies that the version leaves out on purpose: check-in is toggled
-// at the registration desk, and that toggle must not make an open Settings
-// page stale.
-func TestConfigVersion_CheckInIsNotASetting(t *testing.T) {
-	r, store, _, _, dir := setupTestRouter(t)
-	cid := "cov-checkin"
-	stored, before := cvSeed(t, r, store, cid, nil)
-	diskBefore := cvConfigBytes(t, dir, cid)
-
-	w := cvPut(t, r, cid, cvSettingsBody(t, stored, before, map[string]any{"checkInEnabled": !stored.CheckInEnabled}))
-	require.Equalf(t, http.StatusOK, w.Code, "PUT: %s", w.Body.String())
-	require.NotEqual(t, string(diskBefore), string(cvConfigBytes(t, dir, cid)))
-	assert.Equal(t, before, cvAnswerVersion(t, w))
-}
-
 func TestConfigVersion_RuntimeWritesDoNotRefuseASettingsEdit(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -273,7 +258,6 @@ func TestConfigVersion_RuntimeWritesDoNotRefuseASettingsEdit(t *testing.T) {
 	}{
 		{"swiss round", func(c *state.Competition) { c.Format = state.CompFormatSwiss; c.SwissRounds = 3 },
 			func(c *state.Competition) { c.SwissCurrentRound = 1 }},
-		{"check-in toggle", nil, func(c *state.Competition) { c.CheckInEnabled = !c.CheckInEnabled }},
 		{"status flip", nil, func(c *state.Competition) { c.Status = state.CompStatusDrawReady }},
 	}
 	for _, tc := range cases {
@@ -294,6 +278,33 @@ func TestConfigVersion_RuntimeWritesDoNotRefuseASettingsEdit(t *testing.T) {
 			assert.Equal(t, 240, reloaded.KnockoutMatchDurationSeconds)
 		})
 	}
+}
+
+func TestConfigVersion_StaleSettingsSaveAfterCheckInToggleIsRefused(t *testing.T) {
+	r, store, _, _, _ := setupTestRouter(t)
+	cid := "stale-checkin"
+	page, v1 := cvSeed(t, r, store, cid, nil)
+
+	w := cvPut(t, r, cid, cvSettingsBody(t, page, v1, map[string]any{"checkInEnabled": true}))
+	require.Equalf(t, http.StatusOK, w.Code, "the check-in toggle saves: %s", w.Body.String())
+	v2 := cvAnswerVersion(t, w)
+	require.NotEqual(t, v1, v2)
+
+	w = cvPut(t, r, cid, cvSettingsBody(t, page, v1, map[string]any{"checkInEnabled": false, "poolMatchDurationSeconds": 240}))
+	require.Equalf(t, http.StatusConflict, w.Code, "stale save after check-in toggle is refused: %s", w.Body.String())
+	var refusal struct {
+		Code          string `json:"code"`
+		Error         string `json:"error"`
+		ConfigVersion string `json:"configVersion"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &refusal))
+	assert.Equal(t, "config_changed", refusal.Code)
+	assert.Equal(t, "This competition changed, reload it.", refusal.Error)
+	assert.Equal(t, v2, refusal.ConfigVersion)
+
+	stored, err := store.LoadCompetition(cid)
+	require.NoError(t, err)
+	assert.True(t, stored.CheckInEnabled, "CheckInEnabled remains true")
 }
 
 func TestConfigVersion_StaleVersionRefused(t *testing.T) {

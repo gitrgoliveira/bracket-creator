@@ -1220,7 +1220,8 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		if loaded, lerr := store.LoadCompetition(comp.ID); lerr == nil && loaded != nil {
 			comp.ConfigVersion = state.ConfigVersion(loaded)
 		} else {
-			comp.ConfigVersion = state.ConfigVersion(&comp)
+			// Reload failed; clear version so the next save is unchecked and gets a fresh version on next load.
+			comp.ConfigVersion = ""
 		}
 		if comp.Players != nil {
 			comp.RosterVersion = state.RosterVersion(comp.Players)
@@ -2472,7 +2473,8 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			logRequestError(c, fmt.Errorf("re-read competition %q after its settings save: %w", id, reloadErr))
 		}
 		if updated == nil {
-			comp.ConfigVersion = state.ConfigVersion(&comp)
+			// Reload failed; clear version so the next save is unchecked and gets a fresh version on next load.
+			comp.ConfigVersion = ""
 			c.JSON(http.StatusOK, comp)
 			return
 		}

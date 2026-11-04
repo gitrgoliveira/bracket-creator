@@ -3,6 +3,8 @@ package engine
 import (
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -990,4 +992,59 @@ func TestEstimateDraft_MaxParticipantsCost(t *testing.T) {
 		assert.Greater(t, est.KnockoutMatches, 0)
 		assert.Less(t, elapsed, 2*time.Second, "one call must take less than 2 seconds, took %s", elapsed)
 	}
+}
+
+func TestEstimateScheduleForCompetition_SeedsOnlyReadForMixed(t *testing.T) {
+	t.Run("knockout competition ignores invalid seeds", func(t *testing.T) {
+		eng, store, dir := setupTestEngine(t)
+		compID := "est-ko-invalid-seeds"
+
+		require.NoError(t, store.SaveCompetition(&state.Competition{
+			ID:                           compID,
+			Format:                       state.CompFormatKnockout,
+			Kind:                         "individual",
+			Courts:                       []string{"A"},
+			StartTime:                    "09:00",
+			KnockoutMatchDurationSeconds: 300,
+			Status:                       state.CompStatusSetup,
+		}))
+		saveTestParticipants(t, store, compID, []string{"P1", "P2", "P3", "P4"})
+
+		seedsPath := filepath.Join(dir, "competitions", compID, "seeds.csv")
+		require.NoError(t, os.WriteFile(seedsPath, []byte("Rank,Name,Dojo,ID\n1,P1,Wakaba,\n1,P2,Wakaba,\n"), 0600))
+
+		est, err := eng.EstimateScheduleForCompetition(compID)
+		require.NoError(t, err)
+		assert.Greater(t, est.TotalDurationMinutes, 0)
+	})
+
+	t.Run("mixed competition fails on invalid seeds", func(t *testing.T) {
+		eng, store, dir := setupTestEngine(t)
+		compID := "est-mixed-invalid-seeds"
+
+		require.NoError(t, store.SaveCompetition(&state.Competition{
+			ID:                           compID,
+			Format:                       state.CompFormatMixed,
+			Kind:                         "individual",
+			PoolSize:                     3,
+			PoolSizeMode:                 "min",
+			PoolWinners:                  2,
+			RoundRobin:                   true,
+			Courts:                       []string{"A"},
+			StartTime:                    "09:00",
+			PoolMatchDurationSeconds:     180,
+			KnockoutMatchDurationSeconds: 300,
+			Status:                       state.CompStatusSetup,
+		}))
+		saveTestParticipants(t, store, compID, []string{"P1", "P2", "P3", "P4", "P5", "P6"})
+
+		seedsPath := filepath.Join(dir, "competitions", compID, "seeds.csv")
+		require.NoError(t, os.WriteFile(seedsPath, []byte("Rank,Name,Dojo,ID\n1,P1,Wakaba,\n1,P2,Wakaba,\n"), 0600))
+
+		_, err := eng.EstimateScheduleForCompetition(compID)
+		require.Error(t, err)
+		var valErr *ValidationError
+		require.ErrorAs(t, err, &valErr, "must return ValidationError for HTTP 400")
+		assert.ErrorIs(t, err, domain.ErrInvalidSeedAssignments)
+	})
 }

@@ -159,6 +159,7 @@ func TestConfigVersion_ChangesWhenAllowlistedFieldChanges(t *testing.T) {
 		{"LeagueTiebreakTopN", func(c *Competition) { c.LeagueTiebreakTopN = 4 }},
 		{"TwoThirdPlaces", func(c *Competition) { c.TwoThirdPlaces = &twoThirdsFalse }},
 		{"ExpectedParticipants", func(c *Competition) { c.ExpectedParticipants = 24 }},
+		{"CheckInEnabled", func(c *Competition) { c.CheckInEnabled = true }},
 	}
 
 	for _, tc := range tests {
@@ -212,7 +213,6 @@ func TestConfigVersion_DoesNotChangeForRuntimeFields(t *testing.T) {
 		{"Status", func(c *Competition) { c.Status = CompStatusPools }},
 		{"HasParticipantIDs", func(c *Competition) { c.HasParticipantIDs = true }},
 		{"SwissCurrentRound", func(c *Competition) { c.SwissCurrentRound = 2 }},
-		{"CheckInEnabled", func(c *Competition) { c.CheckInEnabled = true }},
 		{"FightingSpiritAwards", func(c *Competition) {
 			c.FightingSpiritAwards = []FightingSpiritAward{{Title: "Award", RecipientName: "Fighter"}}
 		}},

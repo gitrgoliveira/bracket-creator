@@ -356,7 +356,8 @@ function AdminCompOverview({ c, tournament, pools, poolMatches, bracket, onSecti
     return () => controller.abort();
   }, [c.id, c.format, c.kind, c.poolMatchDurationSeconds, c.knockoutMatchDurationSeconds, c.courts,
     c.teamSize, c.poolSize, c.poolSizeMode, c.poolWinners, c.roundRobin, c.poolFormat,
-    c.swissRounds, estimateCheckIn, password, estimatePlayerCount, estimateCheckedInCount, rosterUnreadable,
+    c.swissRounds, c.extraQualifiers, c.twoThirdPlaces, c.expectedParticipants, c.status, c.date, c.startTime,
+    estimateCheckIn, password, estimatePlayerCount, estimateCheckedInCount, rosterUnreadable,
     pausesKey,
     tournament?.clockToElapsedMultiplier, tournament?.slowestCourtBufferPct]);
 

@@ -12,7 +12,7 @@ import (
 // branch in RegisterCompetitionHandlers).
 //
 // Runtime fields written outside Settings are NEVER included: Status,
-// HasParticipantIDs, SwissCurrentRound, CheckInEnabled, FightingSpiritAwards,
+// HasParticipantIDs, SwissCurrentRound, FightingSpiritAwards,
 // LeagueTiebreakFinalized, KachinukiEncounterEnchoCleared, RoundLineupsConverted,
 // RoundLineupsGiven, RoundLineupsLegacy, Players, RosterVersion, ConfigVersion.
 type configVersionPayload struct {
@@ -40,6 +40,7 @@ type configVersionPayload struct {
 	LeagueTiebreakTopN           int           `json:"leagueTiebreakTopN"`
 	TwoThirdPlaces               *bool         `json:"twoThirdPlaces"`
 	ExpectedParticipants         int           `json:"expectedParticipants"`
+	CheckInEnabled               bool          `json:"checkInEnabled"`
 }
 
 // ConfigVersion computes a content-hash config version for a competition's
@@ -77,6 +78,7 @@ func ConfigVersion(c *Competition) string {
 		LeagueTiebreakTopN:           c.LeagueTiebreakTopN,
 		TwoThirdPlaces:               c.TwoThirdPlaces,
 		ExpectedParticipants:         c.ExpectedParticipants,
+		CheckInEnabled:               c.CheckInEnabled,
 	}
 	data, err := json.Marshal(p)
 	if err != nil {

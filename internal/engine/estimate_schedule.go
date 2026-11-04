@@ -194,14 +194,39 @@ func draftBreaks(tournament *state.Tournament, date string) []DraftBreak {
 	return out
 }
 
+// estimateSeedRanks returns the seed ranks of the counted roster for a mixed
+// competition. Other formats do not use seed ranks for match count estimation,
+// so seeds are not loaded for them.
+func (e *Engine) estimateSeedRanks(comp *state.Competition, players []domain.Player) ([]int, error) {
+	if comp.EffectiveFormat() != state.CompFormatMixed {
+		return nil, nil
+	}
+	seeds, err := e.store.LoadSeeds(comp.ID)
+	if err != nil {
+		if errors.Is(err, domain.ErrInvalidSeedAssignments) {
+			return nil, wrapValidationErrorf(err, "%s", e.seedingProblem(comp.ID, err))
+		}
+		return nil, err
+	}
+
+	idx := domain.NewRosterIndex(players)
+	var seedRanks []int
+	for _, s := range seeds {
+		if p, ok := idx.LookupSeed(s); ok && p != nil {
+			seedRanks = append(seedRanks, s.SeedRank)
+		}
+	}
+	return seedRanks, nil
+}
+
 // estimateParticipantCount returns the entry count a competition's estimate
-// uses, where it came from, and the seed ranks of the counted roster. The counted
-// roster is the participants file, filtered to those checked in when check-in
-// applies (mirroring runDrawPipeline's filterCheckedIn opt-in semantics). While
-// the competition is in setup, countForEstimate weighs the organiser's expected
-// count against it; from draw ready on the draw's entrants are the count and the
-// source is the roster, whatever the expected number. A team competition's rows
-// are teams, so the same rule counts teams.
+// uses, where it came from, and the seed ranks of the counted roster (for a mixed
+// competition only). The counted roster is the participants file, filtered to those
+// checked in when check-in applies (mirroring runDrawPipeline's filterCheckedIn
+// opt-in semantics). While the competition is in setup, countForEstimate weighs the
+// organiser's expected count against it; from draw ready on the draw's entrants are
+// the count and the source is the roster, whatever the expected number. A team
+// competition's rows are teams, so the same rule counts teams.
 func (e *Engine) estimateParticipantCount(comp *state.Competition, tournament *state.Tournament) (int, string, []int, error) {
 	players, err := e.store.LoadParticipants(comp.ID, comp.EffectiveWithZekkenName())
 	if err != nil {
@@ -212,20 +237,9 @@ func (e *Engine) estimateParticipantCount(comp *state.Competition, tournament *s
 	}
 	counted := len(players)
 
-	seeds, err := e.store.LoadSeeds(comp.ID)
+	seedRanks, err := e.estimateSeedRanks(comp, players)
 	if err != nil {
-		if errors.Is(err, domain.ErrInvalidSeedAssignments) {
-			return 0, "", nil, wrapValidationErrorf(err, "%s", e.seedingProblem(comp.ID, err))
-		}
 		return 0, "", nil, err
-	}
-
-	idx := domain.NewRosterIndex(players)
-	var seedRanks []int
-	for _, s := range seeds {
-		if p, ok := idx.LookupSeed(s); ok && p != nil {
-			seedRanks = append(seedRanks, s.SeedRank)
-		}
 	}
 
 	if comp.Status != state.CompStatusSetup && comp.Status != "" {

@@ -170,7 +170,8 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
   // when the operator changes pauses, clockToElapsedMultiplier, or
   // slowestCourtBufferPct on the tournament settings screen and then returns here:
   // otherwise the display would be stale until a competition field changed.
-  }, [c.id, c.format, c.kind, c.poolMatchDurationSeconds, c.knockoutMatchDurationSeconds, c.courts, c.teamSize, c.poolSize, c.poolSizeMode, c.poolWinners, c.roundRobin, c.poolFormat, c.swissRounds, c.checkInEnabled, password,
+  }, [c.id, c.format, c.kind, c.poolMatchDurationSeconds, c.knockoutMatchDurationSeconds, c.courts, c.teamSize, c.poolSize, c.poolSizeMode, c.poolWinners, c.roundRobin, c.poolFormat, c.swissRounds, c.checkInEnabled,
+    c.extraQualifiers, c.twoThirdPlaces, c.expectedParticipants, c.status, c.date, c.startTime, password,
     pausesKey,
     tournament?.clockToElapsedMultiplier, tournament?.slowestCourtBufferPct]);
   // AdminSettings unmounts when the user navigates to a different section

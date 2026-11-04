@@ -925,7 +925,7 @@ func TestChooseCompressionMethod_MatchesActualDeflateOutput(t *testing.T) {
 		compressed := int64(entry.CompressedSize64)
 		uncompressed := int64(len(data))
 
-		wantMethod := uint16(zip.Deflate)
+		wantMethod := zip.Deflate
 		if (compressed == 0 && uncompressed > 0) || (uncompressed > int64(MaxRatio)*compressed) {
 			wantMethod = zip.Store
 		}

@@ -264,7 +264,7 @@ func (o *mobileAppRestoreOptions) run(cmd *cobra.Command, archivePath string) (e
 		return err
 	}
 
-	f, err := os.Open(archivePath) //nolint:gosec // operator chose the backup file path on the command line
+	f, err := os.Open(filepath.Clean(archivePath))
 	if err != nil {
 		return fmt.Errorf("open backup file %q: %w", archivePath, err)
 	}

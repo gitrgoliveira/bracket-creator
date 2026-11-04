@@ -563,7 +563,7 @@ function AdminBackupPage({ tournament, onBack, onLogout, onViewerMode, password,
                               ({c.id})
                             </span>
                           </div>
-                          {plan.scope === "tournament" && !plan.undo && !onlyCompId && (
+                          {plan.scope === "tournament" && !plan.undo && !onlyCompId && !isMissingFromArchive && (
                             <button
                               type="button"
                               className="btn btn--sm"

@@ -266,7 +266,8 @@ func (o *mobileAppOptions) run(cmd *cobra.Command, args []string) error {
 
 	backupCtx, cancelBackups := context.WithCancel(context.Background())
 	srv.RegisterOnShutdown(cancelBackups)
-	go (&mobileapp.ScheduledBackups{Store: store}).Run(backupCtx)
+	scheduledBackups := &mobileapp.ScheduledBackups{Store: store}
+	go scheduledBackups.Run(backupCtx)
 
 	serveErr := make(chan error, 1)
 	go func() {
@@ -303,6 +304,7 @@ func (o *mobileAppOptions) run(cmd *cobra.Command, args []string) error {
 			slog.Error("mobile-app: listener error during shutdown", "err", err)
 			return err
 		}
+		scheduledBackups.ShutdownCopy(ctx)
 		slog.Info("mobile-app: shutdown complete")
 		return nil
 	case err := <-serveErr:

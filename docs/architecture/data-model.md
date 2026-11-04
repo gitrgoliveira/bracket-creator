@@ -665,7 +665,7 @@ a file without the dojo or the id column is completed from the roster on first l
 
 The app stores the backup archives it takes itself in `backups/` directly under the data root; a backup the organiser downloads is not kept there. The store recognises two backup kinds:
 
-1. **Scheduled backups (`scheduled`)**: full-tournament copies the server takes on its own. It checks once an hour and takes one when the newest scheduled copy is at least 24 hours old and the fingerprint differs from that copy's. They use the filename pattern `<stamp>-scheduled.zip` (with an optional collision suffix such as `-2` or `-3`).
+1. **Scheduled backups (`scheduled`)**: full-tournament copies the server takes on its own. It checks once an hour and takes one when the newest scheduled copy is at least 24 hours old and the fingerprint differs from that copy's. A copy is also taken when the app is closed normally, if something changed since the newest daily copy. A crash or a pulled plug takes none. They use the filename pattern `<stamp>-scheduled.zip` (with an optional collision suffix such as `-2` or `-3`).
 2. **Safety copies (`before-restore`)**: copies taken immediately before a restore replaces or removes data. They use the filename pattern `<stamp>-before-restore-<scope>.zip`, where scope is `tournament` or `competition` (also with an optional collision suffix).
 
 The timestamp `<stamp>` is formatted in UTC as `20060102T150405Z`. Valid backup filenames match the regular expression:

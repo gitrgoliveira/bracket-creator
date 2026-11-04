@@ -17,6 +17,7 @@ You can back up the entire tournament at once, or back up any single competition
 While it runs, the server checks once an hour and takes a backup of the entire tournament when the newest daily copy is at least 24 hours old (or there is none yet):
 
 - A daily copy is created only if something has changed since the newest daily copy. Backups you download and safety copies do not count. Repeated identical saves, date-only refreshes, or actions that change no data do not trigger a backup.
+- A copy is also taken when the app is closed normally, if something changed since the newest daily copy. A crash or a pulled plug takes none.
 - No daily copy is taken while the tournament has no competitions.
 - Daily copies are saved inside the `backups/` folder within your tournament data directory.
 - The app never deletes backup files automatically. Every copy remains on disk until you choose to delete it.

@@ -379,6 +379,37 @@ describe('AdminBackupPage render tests', () => {
     });
   });
 
+  it('shows "Restore only this one" for a competition in the backup but not for a missing competition', async () => {
+    const plan = {
+      scope: 'tournament',
+      competitions: [
+        { id: 'c1', name: 'Open Individual', asked: true, choices: ['replace', 'copy'] },
+        { id: 'c2_missing', name: 'Legacy Division', asked: true, choices: ['keep', 'remove'] },
+      ],
+    };
+    mockApi.planRestore.mockResolvedValueOnce(plan);
+
+    const { container } = render(
+      <AdminBackupPage
+        tournament={defaultTournament}
+        password={SESSION_KEY}
+      />
+    );
+
+    const fileInput = container.querySelector('input[type="file"]');
+    const fakeFile = new File(['fake-zip'], 'backup.zip', { type: 'application/zip' });
+    await act(async () => {
+      fireEvent.change(fileInput, { target: { files: [fakeFile] } });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText(/Restore Plan \(tournament archive\)/i)).toBeInTheDocument();
+    });
+
+    expect(screen.getByRole('button', { name: 'Restore only "Open Individual"' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Restore only "Legacy Division"' })).not.toBeInTheDocument();
+  });
+
   it('loads plan for a listed copy, with no Undo button on the row, and asking choices even for before-restore', async () => {
     const beforeRestorePlan = {
       scope: 'tournament',

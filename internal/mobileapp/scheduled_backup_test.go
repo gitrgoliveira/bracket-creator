@@ -628,3 +628,141 @@ func TestScheduledBackups_ArchiveFingerprintCacheAndInvalidation(t *testing.T) {
 	job.mu.Unlock()
 	assert.False(t, deletedStillCached, "deleted archive must be pruned from cache")
 }
+
+func TestScheduledBackups_ShutdownCopyWithYoungerThan24hChange(t *testing.T) {
+	pt := buildPopulatedTournament(t)
+	clockTime := time.Date(2026, 6, 1, 10, 0, 0, 0, time.UTC)
+
+	job := &ScheduledBackups{
+		Store: pt.Store,
+		Clock: func() time.Time { return clockTime },
+	}
+
+	ctx := context.Background()
+	// Initial scheduled copy at T0.
+	require.NoError(t, job.runOnce(ctx))
+	files, err := pt.Store.ListBackupFiles()
+	require.NoError(t, err)
+	require.Len(t, files, 1)
+
+	// Advance clock by 2 hours (newest copy is younger than 24h).
+	clockTime = clockTime.Add(2 * time.Hour)
+
+	// Make a real change to tournament data.
+	comp, err := pt.Store.LoadCompetition(pt.MixedCompID)
+	require.NoError(t, err)
+	comp.Name = "Updated Competition Title"
+	_, err = pt.Store.SaveCompetitionChanged(comp)
+	require.NoError(t, err)
+
+	// runOnce at this time would write nothing because it's not 24h old yet:
+	require.NoError(t, job.runOnce(ctx))
+	files, err = pt.Store.ListBackupFiles()
+	require.NoError(t, err)
+	require.Len(t, files, 1)
+
+	// ShutdownCopy writes one new daily copy because tournament data changed.
+	job.ShutdownCopy(ctx)
+	files, err = pt.Store.ListBackupFiles()
+	require.NoError(t, err)
+	require.Len(t, files, 2)
+	assert.Equal(t, state.BackupKindScheduled, files[0].Kind)
+}
+
+func TestScheduledBackups_ShutdownCopyNoChange(t *testing.T) {
+	pt := buildPopulatedTournament(t)
+	clockTime := time.Date(2026, 6, 1, 10, 0, 0, 0, time.UTC)
+
+	job := &ScheduledBackups{
+		Store: pt.Store,
+		Clock: func() time.Time { return clockTime },
+	}
+
+	ctx := context.Background()
+	// Initial scheduled copy at T0.
+	require.NoError(t, job.runOnce(ctx))
+	files, err := pt.Store.ListBackupFiles()
+	require.NoError(t, err)
+	require.Len(t, files, 1)
+
+	// Advance clock by 2 hours, no change made.
+	clockTime = clockTime.Add(2 * time.Hour)
+
+	job.ShutdownCopy(ctx)
+	files, err = pt.Store.ListBackupFiles()
+	require.NoError(t, err)
+	require.Len(t, files, 1, "ShutdownCopy writes none when data has not changed")
+}
+
+func TestScheduledBackups_ShutdownCopyMatchesRunOnceNoCopyCases(t *testing.T) {
+	t.Run("no daily copy yet and tournament has competitions", func(t *testing.T) {
+		pt := buildPopulatedTournament(t)
+		now := time.Date(2026, 6, 1, 10, 0, 0, 0, time.UTC)
+
+		job := &ScheduledBackups{
+			Store: pt.Store,
+			Clock: func() time.Time { return now },
+		}
+
+		ctx := context.Background()
+		files, err := pt.Store.ListBackupFiles()
+		require.NoError(t, err)
+		require.Empty(t, files)
+
+		job.ShutdownCopy(ctx)
+
+		files, err = pt.Store.ListBackupFiles()
+		require.NoError(t, err)
+		require.Len(t, files, 1)
+		require.Equal(t, state.BackupKindScheduled, files[0].Kind)
+	})
+
+	t.Run("fresh folder with no competitions writes none matching runOnce", func(t *testing.T) {
+		freshDir := t.TempDir()
+		freshStore, err := state.NewStore(freshDir)
+		require.NoError(t, err)
+
+		job := &ScheduledBackups{
+			Store: freshStore,
+			Clock: func() time.Time { return time.Date(2026, 6, 1, 10, 0, 0, 0, time.UTC) },
+		}
+
+		ctx := context.Background()
+		job.ShutdownCopy(ctx)
+
+		files, err := freshStore.ListBackupFiles()
+		require.NoError(t, err)
+		require.Empty(t, files, "ShutdownCopy writes none when tournament has no competitions, matching runOnce")
+	})
+}
+
+func TestScheduledBackups_ShutdownCopyPanicRecovery(t *testing.T) {
+	pt := buildPopulatedTournament(t)
+	job := &ScheduledBackups{
+		Store: pt.Store,
+		Clock: func() time.Time {
+			panic("simulated panic in shutdown copy")
+		},
+	}
+
+	require.NotPanics(t, func() {
+		job.ShutdownCopy(context.Background())
+	})
+}
+
+func TestScheduledBackups_ShutdownCopyRespectsContext(t *testing.T) {
+	pt := buildPopulatedTournament(t)
+	job := &ScheduledBackups{
+		Store: pt.Store,
+		Clock: func() time.Time { return time.Date(2026, 6, 1, 10, 0, 0, 0, time.UTC) },
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	job.ShutdownCopy(ctx)
+
+	files, err := pt.Store.ListBackupFiles()
+	require.NoError(t, err)
+	require.Empty(t, files, "ShutdownCopy stops immediately if context is done")
+}

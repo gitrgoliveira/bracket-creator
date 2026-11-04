@@ -144,8 +144,27 @@ func (s *ScheduledBackups) getOrReadArchiveFingerprint(bf state.BackupFile, chec
 	return fp, true
 }
 
+// ShutdownCopy takes one daily copy at a clean shutdown if the data changed since the newest daily copy, without the 24-hour age rule. Like tickOnceSafe it recovers a panic and logs a failure, so it never holds up shutdown.
+func (s *ScheduledBackups) ShutdownCopy(ctx context.Context) {
+	defer func() {
+		if r := recover(); r != nil {
+			stack := debug.Stack()
+			slog.Error("scheduled backup: panic recovered", "panic", r, "stack", string(stack))
+		}
+	}()
+
+	if err := s.copyOnce(ctx, false); err != nil {
+		slog.Warn("scheduled backup: shutdown copy failed", "err", err)
+	}
+}
+
 // runOnce performs one scheduled backup check.
 func (s *ScheduledBackups) runOnce(ctx context.Context) error {
+	return s.copyOnce(ctx, true)
+}
+
+// copyOnce takes a daily copy if the fingerprint differs from the newest daily copy; checkAge adds the 24-hour rule the hourly check uses.
+func (s *ScheduledBackups) copyOnce(ctx context.Context, checkAge bool) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -179,15 +198,17 @@ func (s *ScheduledBackups) runOnce(ctx context.Context) error {
 		}
 	}
 
-	isDue := false
-	if newestNonFuture == nil {
-		isDue = true
-	} else if now.Sub(newestNonFuture.Time) >= 24*time.Hour {
-		isDue = true
-	}
+	if checkAge {
+		isDue := false
+		if newestNonFuture == nil {
+			isDue = true
+		} else if now.Sub(newestNonFuture.Time) >= 24*time.Hour {
+			isDue = true
+		}
 
-	if !isDue {
-		return nil
+		if !isDue {
+			return nil
+		}
 	}
 
 	snap, err := s.Store.Snapshot(state.ScopeTournament, "")

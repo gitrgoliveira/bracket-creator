@@ -16,7 +16,7 @@ You can back up the entire tournament at once, or back up any single competition
 
 While it runs, the server takes a backup of the entire tournament on its own once every 24 hours:
 
-- A daily copy is created only if something has actually changed since the previous backup. Repeated identical saves, date-only refreshes, or actions that change no data do not trigger a backup.
+- A daily copy is created only if something has changed since the newest daily copy. Backups you download and safety copies do not count. Repeated identical saves, date-only refreshes, or actions that change no data do not trigger a backup.
 - Daily copies are saved inside the `backups/` folder within your tournament data directory.
 - The app never deletes backup files automatically. Every copy remains on disk until you choose to delete it.
 
@@ -38,7 +38,7 @@ A backup file does contain every competitor's full name, dojo, match record, and
 
 You can restore data from a file on your computer, or from one of the copies kept on the server machine:
 
-1. Under **Restore from a file**, click **Choose File** and select your backup zip file. Alternatively, scroll down to **Copies kept on this computer** and click **Restore** next to any saved copy.
+1. Under **Restore from a file**, pick your backup zip file with the file chooser. Alternatively, scroll down to **Copies kept on this computer** and click **Restore** next to any saved copy.
 2. The app inspects the archive and calculates a **Restore Plan**. This is a dry run: nothing on disk changes yet.
 3. Review the plan warnings and make your choices for each competition.
 4. Click **Restore**.

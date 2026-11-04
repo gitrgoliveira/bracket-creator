@@ -892,4 +892,118 @@ describe('AdminBackupPage render tests', () => {
     expect(screen.getByText(/Open Individual: number prefix changed from K to L\. Reprint its competitors' tags\./i)).toBeInTheDocument();
     expect(screen.getByText('number prefix "M" collided on restore and no replacement prefix could be derived: prefix collision')).toBeInTheDocument();
   });
+
+  it('clears file input value after picking an archive so the same file can be reselected', async () => {
+    mockApi.planRestore.mockResolvedValueOnce({
+      scope: 'tournament',
+      competitions: [],
+    });
+
+    const { container } = render(
+      <AdminBackupPage
+        tournament={defaultTournament}
+        password="test-pw"
+      />
+    );
+
+    const fileInput = container.querySelector('input[type="file"]');
+    let currentValue = 'C:\\fakepath\\backup.zip';
+    const valueSetter = vi.fn((val) => {
+      currentValue = val;
+    });
+    Object.defineProperty(fileInput, 'value', {
+      get: () => currentValue,
+      set: valueSetter,
+      configurable: true,
+    });
+
+    const fakeFile = new File(['fake-zip'], 'backup.zip', { type: 'application/zip' });
+    await act(async () => {
+      fireEvent.change(fileInput, { target: { files: [fakeFile] } });
+    });
+
+    await waitFor(() => {
+      expect(mockApi.planRestore).toHaveBeenCalled();
+    });
+
+    expect(valueSetter).toHaveBeenCalledWith('');
+    expect(fileInput.value).toBe('');
+  });
+
+  it('shows "Show all competitions" button after filtering to one competition, and clicking it restores full plan without only key', async () => {
+    const multiPlan = {
+      scope: 'tournament',
+      competitions: [
+        { id: 'c1', name: 'Open Individual', asked: true, choices: ['replace', 'copy'] },
+        { id: 'c2', name: 'Women Individual', asked: true, choices: ['replace', 'copy'] },
+      ],
+    };
+    const singlePlan = {
+      scope: 'tournament',
+      competitions: [
+        { id: 'c1', name: 'Open Individual', asked: true, choices: ['replace', 'copy'] },
+      ],
+    };
+
+    mockApi.planRestore.mockResolvedValueOnce(multiPlan);
+    mockApi.planRestore.mockResolvedValueOnce(singlePlan);
+    mockApi.planRestore.mockResolvedValueOnce(multiPlan);
+
+    const { container } = render(
+      <AdminBackupPage
+        tournament={defaultTournament}
+        password="session-pw"
+      />
+    );
+
+    const fileInput = container.querySelector('input[type="file"]');
+    const fakeFile = new File(['fake-zip'], 'backup.zip', { type: 'application/zip' });
+    await act(async () => {
+      fireEvent.change(fileInput, { target: { files: [fakeFile] } });
+    });
+
+    const onlyBtn = await screen.findByRole('button', { name: 'Restore only "Open Individual"' });
+    expect(onlyBtn).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Show all competitions' })).toBeNull();
+
+    // Click "Restore only this one"
+    await act(async () => {
+      fireEvent.click(onlyBtn);
+    });
+
+    await waitFor(() => {
+      expect(mockApi.planRestore).toHaveBeenCalledWith(
+        expect.objectContaining({
+          file: fakeFile,
+          only: 'c1',
+        }),
+        'session-pw'
+      );
+    });
+
+    // "Show all competitions" button appears
+    const showAllBtn = await screen.findByRole('button', { name: 'Show all competitions' });
+    expect(showAllBtn).toBeInTheDocument();
+
+    // Click "Show all competitions"
+    await act(async () => {
+      fireEvent.click(showAllBtn);
+    });
+
+    await waitFor(() => {
+      expect(mockApi.planRestore).toHaveBeenCalledTimes(3);
+    });
+
+    const lastCallArg = mockApi.planRestore.mock.calls[2][0];
+    expect(lastCallArg.file).toBe(fakeFile);
+    expect(lastCallArg.only).toBeUndefined();
+    expect(mockApi.planRestore.mock.calls[2][1]).toBe('session-pw');
+
+    // Button is gone once full plan is back
+    await waitFor(() => {
+      expect(screen.queryByRole('button', { name: 'Show all competitions' })).toBeNull();
+    });
+    expect(screen.getByRole('button', { name: 'Restore only "Open Individual"' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Restore only "Women Individual"' })).toBeInTheDocument();
+  });
 });

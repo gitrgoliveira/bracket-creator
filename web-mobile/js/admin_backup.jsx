@@ -119,6 +119,8 @@ function AdminBackupPage({ tournament, onBack, onLogout, onViewerMode, password,
   const handleFileChange = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    // Clear input so picking the same file again fires change
+    e.target.value = "";
     runPlan({ file });
   };
 
@@ -127,6 +129,13 @@ function AdminBackupPage({ tournament, onBack, onLogout, onViewerMode, password,
       file: selectedFile,
       from: selectedFromName,
       only: compId,
+    });
+  };
+
+  const handleShowAll = () => {
+    runPlan({
+      file: selectedFile,
+      from: selectedFromName,
     });
   };
 
@@ -561,9 +570,20 @@ function AdminBackupPage({ tournament, onBack, onLogout, onViewerMode, password,
                               type="button"
                               className="btn btn--sm"
                               aria-label={`Restore only "${c.name}"`}
+                              disabled={planning}
                               onClick={() => handleRestoreOnly(c.id)}
                             >
                               Restore only this one
+                            </button>
+                          )}
+                          {plan.scope === "tournament" && !plan.undo && onlyCompId && (
+                            <button
+                              type="button"
+                              className="btn btn--sm"
+                              disabled={planning}
+                              onClick={handleShowAll}
+                            >
+                              Show all competitions
                             </button>
                           )}
                         </div>

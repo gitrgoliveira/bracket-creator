@@ -648,8 +648,18 @@ func planRestore(req RestoreRequest, ai *restoreArchiveInfo, live *restoreLiveSt
 			taken[e.ID] = true
 		}
 	}
+	actions := make(map[string]RestoreAction, len(entries))
+	for _, e := range entries {
+		actions[e.ID] = e.Action
+	}
 	var takenNames []string
 	for _, id := range live.ids {
+		if actions[id] == RestoreReplace {
+			if name := ai.names[id]; name != "" {
+				takenNames = append(takenNames, name)
+			}
+			continue
+		}
 		if name := competitionName(live, id); name != "" {
 			takenNames = append(takenNames, name)
 		}

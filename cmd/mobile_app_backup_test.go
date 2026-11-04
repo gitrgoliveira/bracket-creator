@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"errors"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -296,6 +297,26 @@ func TestMobileAppBackup_EmptyFolderRefused(t *testing.T) {
 	require.NoError(t, rerr)
 	assert.Empty(t, entries, "folder must remain completely empty")
 	assert.NoFileExists(t, outZip, "output zip must not be created")
+}
+
+func TestMobileAppBackup_FinalizeRenameFailureCleansUpWithoutErrClosed(t *testing.T) {
+	srcDir, _ := buildTestPopulatedFolder(t)
+	outDir := t.TempDir()
+	existingDir := filepath.Join(outDir, "cannot-rename-over-dir")
+	require.NoError(t, os.Mkdir(existingDir, 0o750))
+	require.NoError(t, os.WriteFile(filepath.Join(existingDir, "dummy"), []byte("data"), 0o600))
+
+	out, err := executeMobileApp("backup", "--folder", srcDir, "--out", existingDir)
+	require.Error(t, err)
+	assert.Contains(t, out+err.Error(), "finalize backup file")
+	assert.False(t, errors.Is(err, os.ErrClosed), "returned error must not satisfy errors.Is(err, os.ErrClosed)")
+
+	entries, rerr := os.ReadDir(outDir)
+	require.NoError(t, rerr)
+	for _, entry := range entries {
+		assert.False(t, strings.HasPrefix(entry.Name(), ".backup-") && strings.HasSuffix(entry.Name(), ".tmp"),
+			"temporary backup file left behind: %s", entry.Name())
+	}
 }
 
 // (6) A bad --copy (no "=", empty id, empty name) is refused.

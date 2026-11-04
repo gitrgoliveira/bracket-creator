@@ -362,6 +362,60 @@ func TestRestore_CopyNameMatchesLiveCompetitionName(t *testing.T) {
 	assert.Equal(t, "men-two", eAccepted.NewID)
 }
 
+func TestRestore_CopyNameTakesReplacedArchiveName(t *testing.T) {
+	// Replaced archive competition name is taken:
+	// Live competition id "open-championship" with Name "Open Championship";
+	// archive holding "open-championship" under Name "Spring Open" and another archive competition "spring-old".
+	src, _ := newRestoreTestStore(t)
+	restoreTestTournament(t, src, "pw")
+	addRestoreComp(t, src, "open-championship", "Spring Open", "O", MatchStatusScheduled, "A")
+	addRestoreComp(t, src, "spring-old", "Spring Old", "S", MatchStatusScheduled, "B")
+	a := archiveOf(t, src, ScopeTournament, "")
+
+	s, _ := newRestoreTestStore(t)
+	restoreTestTournament(t, s, "pw")
+	addRestoreComp(t, s, "open-championship", "Open Championship", "O", MatchStatusScheduled, "A")
+	addRestoreComp(t, s, "spring-old", "Spring Old", "S", MatchStatusScheduled, "B")
+
+	// Decisions: open-championship Replace, spring-old Copy named "Spring Open".
+	// Slug "spring-open" is free, so only the archive name check catches it -> CopyNameTaken true.
+	planTaken, err := s.PlanRestore(RestoreRequest{
+		Archive: a,
+		Decisions: map[string]RestoreDecision{
+			"open-championship": {Action: RestoreReplace},
+			"spring-old":        {Action: RestoreCopy, CopyName: "Spring Open"},
+		},
+	})
+	require.NoError(t, err)
+	eTaken := planEntry(t, planTaken, "spring-old")
+	assert.True(t, eTaken.CopyNameTaken)
+
+	// A copy named after the replaced competition's old live name is accepted:
+	// Using comp id "open-champ" so the slug "open-championship" is free.
+	src2, _ := newRestoreTestStore(t)
+	restoreTestTournament(t, src2, "pw")
+	addRestoreComp(t, src2, "open-champ", "Spring Open", "O", MatchStatusScheduled, "A")
+	addRestoreComp(t, src2, "spring-old", "Spring Old", "S", MatchStatusScheduled, "B")
+	a2 := archiveOf(t, src2, ScopeTournament, "")
+
+	s2, _ := newRestoreTestStore(t)
+	restoreTestTournament(t, s2, "pw")
+	addRestoreComp(t, s2, "open-champ", "Open Championship", "O", MatchStatusScheduled, "A")
+	addRestoreComp(t, s2, "spring-old", "Spring Old", "S", MatchStatusScheduled, "B")
+
+	planAccepted, err := s2.PlanRestore(RestoreRequest{
+		Archive: a2,
+		Decisions: map[string]RestoreDecision{
+			"open-champ": {Action: RestoreReplace},
+			"spring-old": {Action: RestoreCopy, CopyName: "Open Championship"},
+		},
+	})
+	require.NoError(t, err)
+	eAccepted := planEntry(t, planAccepted, "spring-old")
+	assert.False(t, eAccepted.CopyNameTaken)
+	assert.Equal(t, "open-championship", eAccepted.NewID)
+}
+
 func TestRestore_CopyNameRules(t *testing.T) {
 	s, dir := newRestoreTestStore(t)
 	restoreTestTournament(t, s, "pw")

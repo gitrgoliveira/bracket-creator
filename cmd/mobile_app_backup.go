@@ -167,7 +167,7 @@ func (o *mobileAppBackupOptions) run(cmd *cobra.Command) (err error) {
 	cleanup := true
 	defer func() {
 		if cleanup {
-			if cerr := tmpFile.Close(); cerr != nil {
+			if cerr := tmpFile.Close(); cerr != nil && !errors.Is(cerr, os.ErrClosed) {
 				err = errors.Join(err, cerr)
 			}
 			if rerr := os.Remove(tmpName); rerr != nil && !errors.Is(rerr, os.ErrNotExist) {

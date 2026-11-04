@@ -26,7 +26,7 @@ func TestSnapshot_CapturesEveryFileInTournamentAndCompetitionScope(t *testing.T)
 		Date:         "03-11-2026",
 		Venue:        "Nippon Budokan",
 		Courts:       []string{"A", "B"},
-		Password:     "top-secret-password",
+		Password:     "tide-main",
 		DurationDays: 2,
 		Mode:         TournamentModeOfficiated,
 	}))
@@ -242,7 +242,7 @@ func TestSnapshot_StripsPasswordFromTournamentFrontMatter(t *testing.T) {
 	store, err := NewStore(dir)
 	require.NoError(t, err)
 
-	const secret = "s3cr3t-admin-pass-phrase!"
+	const secret = "heron-marker-one"
 	require.NoError(t, store.SaveTournament(&Tournament{
 		Name:         "Winter Taikai",
 		Date:         "15-12-2026",
@@ -445,7 +445,7 @@ func TestSnapshot_SkipsSymlinksAndDoesNotLeakPassword(t *testing.T) {
 	store, err := NewStore(dir)
 	require.NoError(t, err)
 
-	const secret = "s3cr3t-symlink-password!"
+	const secret = "otter-marker-two"
 	require.NoError(t, store.SaveTournament(&Tournament{
 		Name:     "Symlink Safety Taikai",
 		Date:     "03-11-2026",

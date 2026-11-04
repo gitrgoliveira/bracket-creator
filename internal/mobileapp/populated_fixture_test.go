@@ -76,7 +76,7 @@ func buildPopulatedTournament(t *testing.T) *populatedTournament {
 	gin.SetMode(gin.TestMode)
 
 	dir := t.TempDir()
-	password := "secret"
+	password := "tide-main"
 
 	store, err := state.NewStore(dir)
 	require.NoError(t, err)

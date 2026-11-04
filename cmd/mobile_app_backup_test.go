@@ -78,7 +78,7 @@ func buildTestPopulatedFolder(t *testing.T) (string, string) {
 	store, err := state.NewStore(dir)
 	require.NoError(t, err)
 
-	const originalPassword = "initial-pass"
+	const originalPassword = "tide-one"
 	require.NoError(t, store.SaveTournament(&state.Tournament{
 		Name:         "Kendo Taikai",
 		Date:         "04-11-2026",
@@ -145,7 +145,7 @@ func TestMobileAppBackupRestore_RoundTrip(t *testing.T) {
 	require.FileExists(t, zipPath)
 
 	targetDir := t.TempDir()
-	const newPassword = "restored-pass"
+	const newPassword = "tide-two"
 	out, err := executeMobileApp("restore", "--folder", targetDir, "--password", newPassword, zipPath)
 	require.NoError(t, err, "output: %s", out)
 
@@ -358,7 +358,7 @@ func TestMobileAppBackupRestore_CompetitionScopeKeepsPassword(t *testing.T) {
 	targetDir := t.TempDir()
 	targetStore, err := state.NewStore(targetDir)
 	require.NoError(t, err)
-	const targetPassword = "keep-this-password"
+	const targetPassword = "tide-keep"
 	require.NoError(t, targetStore.SaveTournament(&state.Tournament{
 		Name:     "Target Taikai",
 		Password: targetPassword,
@@ -655,7 +655,7 @@ func TestMobileAppRestore_OnlyFlag(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, targetStore.SaveTournament(&state.Tournament{
 			Name:     "Target Taikai",
-			Password: "target-pass",
+			Password: "tide-target",
 			Courts:   []string{"A"},
 		}))
 
@@ -669,7 +669,7 @@ func TestMobileAppRestore_OnlyFlag(t *testing.T) {
 		targetStore, err := state.NewStore(targetDir)
 		require.NoError(t, err)
 
-		const initialTargetPassword = "target-pass-untouched"
+		const initialTargetPassword = "tide-target-untouched"
 		require.NoError(t, targetStore.SaveTournament(&state.Tournament{
 			Name:     "Untouched Target Taikai",
 			Password: initialTargetPassword,

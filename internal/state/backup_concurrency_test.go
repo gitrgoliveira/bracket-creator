@@ -25,7 +25,7 @@ func TestSnapshot_ConcurrentScoringAndOverridesWritesProduceConsistentSnapshots(
 		Date:     "03-11-2026",
 		Venue:    "Arena",
 		Courts:   []string{"A"},
-		Password: "initial-secret-password",
+		Password: "tide-start",
 	}))
 
 	const compID = "live-comp"
@@ -150,7 +150,7 @@ func TestSnapshot_ConcurrentScoringAndOverridesWritesProduceConsistentSnapshots(
 				Date:     "03-11-2026",
 				Venue:    "Arena",
 				Courts:   []string{"A"},
-				Password: fmt.Sprintf("rotating-secret-%d", i),
+				Password: fmt.Sprintf("tide-rotating-%d", i),
 			})
 			assert.NoError(t, terr)
 		}
@@ -165,8 +165,8 @@ func TestSnapshot_ConcurrentScoringAndOverridesWritesProduceConsistentSnapshots(
 			if !assert.NoError(t, CheckFrontMatter(tBytes)) {
 				return
 			}
-			assert.NotContains(t, string(tBytes), "rotating-secret-")
-			assert.NotContains(t, string(tBytes), "initial-secret-password")
+			assert.NotContains(t, string(tBytes), "tide-rotating-")
+			assert.NotContains(t, string(tBytes), "tide-start")
 			assert.NotContains(t, string(tBytes), "password")
 		}
 

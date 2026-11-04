@@ -556,7 +556,7 @@ func TestRestore_TournamentScopeKeepsOrRemovesWhatTheArchiveLacks(t *testing.T) 
 
 func TestRestore_PasswordRule(t *testing.T) {
 	src, _ := newRestoreTestStore(t)
-	restoreTestTournament(t, src, "old-secret")
+	restoreTestTournament(t, src, "tide-old")
 	addRestoreComp(t, src, "men", "Men", "M", MatchStatusScheduled, "A")
 	a := archiveOf(t, src, ScopeTournament, "")
 
@@ -568,11 +568,11 @@ func TestRestore_PasswordRule(t *testing.T) {
 		_, err = dst.Restore(RestoreRequest{Archive: a})
 		assert.Equal(t, RestoreCodePasswordRequired, restoreCode(t, err))
 		assertNoStaging(t, dir)
-		_, err = dst.Restore(RestoreRequest{Archive: a, NewPassword: "new-secret"})
+		_, err = dst.Restore(RestoreRequest{Archive: a, NewPassword: "tide-new"})
 		require.NoError(t, err)
 		tourn, err := dst.LoadTournament()
 		require.NoError(t, err)
-		assert.Equal(t, "new-secret", tourn.Password)
+		assert.Equal(t, "tide-new", tourn.Password)
 		assert.Equal(t, "Restore Taikai", tourn.Name)
 	})
 	t.Run("locked mode keeps it", func(t *testing.T) {

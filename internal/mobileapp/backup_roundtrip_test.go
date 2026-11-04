@@ -71,7 +71,7 @@ func TestBackup_RoundTripIntoAFreshFolder(t *testing.T) {
 	freshStore, err := state.NewStore(freshDir)
 	require.NoError(t, err)
 	freshRouter, _ := newBackupRouter(t, freshStore)
-	const freshPassword = "fresh-pw"
+	const freshPassword = "tide-fresh"
 	w := populatedServeJSON(t, freshRouter, "", http.MethodPost, "/api/tournament", map[string]any{
 		"name": "Fresh Taikai", "date": "10-05-2026", "venue": "Hall", "courts": []string{"A"}, "password": freshPassword,
 	})

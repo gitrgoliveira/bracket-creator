@@ -663,7 +663,7 @@ a file without the dojo or the id column is completed from the roster on first l
 
 ### Backup archives and the backups/ folder
 
-Backup zip archives created by the app or the organiser are stored in `backups/` directly under the data root. The store recognises two backup kinds:
+The app stores the backup archives it takes itself in `backups/` directly under the data root; a backup the organiser downloads is not kept there. The store recognises two backup kinds:
 
 1. **Scheduled backups (`scheduled`)**: periodic full-tournament copies taken automatically once every 24 hours when changes occur. They use the filename pattern `<stamp>-scheduled.zip` (with an optional collision suffix such as `-2` or `-3`).
 2. **Safety copies (`before-restore`)**: copies taken immediately before a restore replaces or removes data. They use the filename pattern `<stamp>-before-restore-<scope>.zip`, where scope is `tournament` or `competition` (also with an optional collision suffix).

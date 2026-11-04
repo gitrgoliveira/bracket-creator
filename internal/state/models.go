@@ -639,6 +639,13 @@ type Competition struct {
 	// with 409 roster_changed when the stored roster is no longer that one
 	// (SaveRoster). Never stored: it is worked out from the roster.
 	RosterVersion string `yaml:"-" json:"rosterVersion,omitempty"`
+
+	// ConfigVersion names the version of this competition's settings (ConfigVersion,
+	// the function), on every answer that carries one. A settings PUT sends back
+	// the version it was built from; the server refuses it with 409 config_changed
+	// when the stored settings are no longer that one. Never stored: it is worked
+	// out from the allowlisted settings fields.
+	ConfigVersion string `yaml:"-" json:"configVersion,omitempty"`
 }
 
 // ParticipantIDsHint returns the LoadParticipantsOpts.HasIDs hint for this

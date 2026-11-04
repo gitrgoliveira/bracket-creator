@@ -137,12 +137,6 @@ type EstimateInput struct {
 	BoutsPerTeamMatch     int
 	SlowestCourtBufferPct int
 	CeremonyMinutes       int
-	// Kachinuki widens the estimate into a best/average/worst range
-	// (mp-gmcg): the resolved bout count is the nominal team size N,
-	// best = N bouts, worst = 2N-1, average = midpoint. False (fixed
-	// format or individual) keeps a constant bout count, so the three
-	// range fields collapse to one value.
-	Kachinuki bool
 }
 
 // perMatchElapsedBouts returns the un-rounded elapsed minutes for a single
@@ -221,9 +215,9 @@ func clampNonNeg(v, max int) int {
 // handler has no competition/tournament context. Use EstimateForCounts
 // when per-comp, pause-aware estimation is needed.
 func EstimateSchedule(in EstimateInput) ScheduleEstimate {
-	// Per-match elapsed minutes via the shared pure core. Kachinuki
-	// (mp-gmcg) widens the constant bout count into a best/avg/worst
-	// range; fixed/individual keeps one value for all three scenarios.
+	// Per-match elapsed minutes via the shared pure core. The stateless
+	// estimator keeps a constant bout count for all scenarios (the three
+	// range fields collapse to one value).
 	//
 	// A team match is worth TeamSize bouts unless the caller overrides it.
 	// That default lives HERE rather than in each caller because it is the
@@ -250,9 +244,6 @@ func EstimateSchedule(in EstimateInput) ScheduleEstimate {
 		}
 	}
 	bestBouts, avgBouts, worstBouts := float64(bouts), float64(bouts), float64(bouts)
-	if in.Kachinuki && bouts > 0 {
-		bestBouts, avgBouts, worstBouts = kachinukiBoutRange(bouts)
-	}
 
 	// Courts is clamped to [1, MaxCourts] so a malformed or hostile
 	// input cannot trigger a giant slice allocation downstream (CodeQL
@@ -302,12 +293,9 @@ func EstimateSchedule(in EstimateInput) ScheduleEstimate {
 		perCourtList[i] = avgPerCourt
 	}
 
-	// perCourtFor is a pure closure over `in` and `courts`, so for a
-	// non-kachinuki request (bestBouts == avgBouts == worstBouts) it returns
-	// bit-identically avgPerCourt — no guard needed to "avoid recomputation",
-	// and an unconditional call is structurally unable to disagree about which
-	// requests have a range (mp-gmcg review: R10 replaced one restated condition
-	// with two derived ones; zero is available and carries no drift hazard).
+	// perCourtFor is a pure closure over `in` and `courts`. In this stateless
+	// path (bestBouts == avgBouts == worstBouts) it returns bit-identically
+	// avgPerCourt for all scenarios.
 	bestPerCourt, worstPerCourt := perCourtFor(bestBouts), perCourtFor(worstBouts)
 
 	return ScheduleEstimate{

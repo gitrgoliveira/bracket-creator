@@ -151,10 +151,11 @@ Operators need best / average / worst.
   the headline (`engine/schedule.go`).
 - [x] `kachinukiBoutRange`, `perMatchElapsedBouts` (float bouts),
   `perMatchElapsedMinutesBouts` (`engine/scheduler_slots.go`).
-- [x] Both producers price 3 scenarios; `GET /api/schedule/estimate` takes
-  `teamMatchType=kachinuki`.
-- [x] Tests: range math in both producers (exact hand-derived values),
-  handler param, non-kachinuki collapse, fractional-bout helpers.
+- [x] The stored per-competition estimate prices 3 scenarios; the stateless
+  `GET /api/schedule/estimate` no longer takes `teamMatchType` and always
+  returns a single collapsed value.
+- [x] Tests: range math pinned on the stored path only (exact hand-derived
+  values), non-kachinuki collapse, fractional-bout helpers (no handler param test).
 
 ### Phase C — frontend (`web-mobile/js/`)
 
@@ -178,7 +179,7 @@ Operators need best / average / worst.
 
 ### Phase D — docs, spec, verification
 
-- [x] `specs/openapi.yaml`: estimate fields + `teamMatchType` param,
+- [x] `specs/openapi.yaml`: estimate fields (without stateless `teamMatchType` param),
   daihyosen kachinuki 400, reopen endpoint, kachinuki numbered-bout encho,
   operator-led completion semantics note (also fixed stale `ceremony` →
   `ceremonyMinutes` and `matchDuration` integer → number).

@@ -193,6 +193,7 @@ func NewRouterWithHub(store *state.Store, eng *engine.Engine, res *resources.Res
 	// this middleware judges only that one route, after the sign-in.
 	adminSmallBody.Use(RequireConfirmPasswordForDelete(verifier))
 	RegisterCompetitionHandlers(adminSmallBody, store, eng, hub)
+	RegisterDraftEstimateHandlers(adminSmallBody, store, eng)
 	RegisterParticipantHandlers(adminSmallBody, store, eng, hub)
 	RegisterMatchHandlers(adminSmallBody, eng, store, store, hub, verifier, store)
 	RegisterMatchHistoryHandler(adminSmallBody, store)

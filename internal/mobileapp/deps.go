@@ -29,6 +29,12 @@ type TournamentLoader interface {
 	LoadTournament() (*state.Tournament, error)
 }
 
+// DraftEstimator is the consumer-boundary view of engine.Engine used by the
+// draft schedule estimator handler. *engine.Engine satisfies this interface.
+type DraftEstimator interface {
+	EstimateDraft(comp *state.Competition, participants int) (engine.DraftEstimate, error)
+}
+
 // CompetitionStore is the consumer-boundary view of state.Store used by
 // handler families that need to read/write competition-level data
 // (config.md, pools, brackets, schedule). Methods are added here only as

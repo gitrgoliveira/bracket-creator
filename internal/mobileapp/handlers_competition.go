@@ -269,6 +269,23 @@ func validateCompetitionFormat(format, poolFormat string) (int, error) {
 	return 0, nil
 }
 
+// validateCompetitionShape groups the four shape checks that both the POST
+// (create) and PUT (update) competition handlers run: duration bounds,
+// format validation, pool-config normalization, and swiss config validation.
+func validateCompetitionShape(comp *state.Competition) error {
+	if err := validateCompetitionDurations(comp); err != nil {
+		return err
+	}
+	if _, err := validateCompetitionFormat(comp.Format, comp.PoolFormat); err != nil {
+		return err
+	}
+	normalizePoolConfig(comp)
+	if err := validateSwissConfig(comp); err != nil {
+		return err
+	}
+	return nil
+}
+
 // normalizePoolConfig silently zeroes PoolSize and PoolWinners for formats
 // that have no pool phase. League has a single implicit pool containing all
 // participants (engine overrides PoolSize at start time); knockout is a direct
@@ -813,7 +830,13 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			internalError(c, err)
 			return
 		}
-		c.JSON(http.StatusOK, migrateMissingNumberPrefixes(store, eng, comps))
+		migrated := migrateMissingNumberPrefixes(store, eng, comps)
+		for _, comp := range migrated {
+			if comp != nil {
+				comp.ConfigVersion = state.ConfigVersion(comp)
+			}
+		}
+		c.JSON(http.StatusOK, migrated)
 	})
 
 	// GET /number-prefix-default?name=, previews the number prefix
@@ -990,25 +1013,12 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			return
 		}
 
-		// Reject per-phase durations outside the shiai band.
-		if err := validateCompetitionDurations(&comp); err != nil {
+		// Reject invalid competition shape (durations, format, swiss config)
+		// and normalize pool config for formats with no pool phase.
+		if err := validateCompetitionShape(&comp); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
-
-		// Format / PoolFormat enum-style validation. Empty values are
-		// accepted; unknown values 400. FR-050a: swiss is accepted but
-		// validateSwissConfig must additionally enforce swissRounds >= 1.
-		if code, err := validateCompetitionFormat(comp.Format, comp.PoolFormat); err != nil {
-			c.JSON(code, gin.H{"error": err.Error()})
-			return
-		}
-
-		// Zero out pool-config fields that have no meaning for the chosen
-		// format (league / knockout). The engine already ignores them at
-		// start time; this keeps the persisted config consistent with what
-		// the engine actually uses. See normalizePoolConfig for full rationale.
-		normalizePoolConfig(&comp)
 
 		// bc-symm: an omitted pool size is DEFAULTED, not refused, and it is
 		// defaulted to the same number /api/tournament/import has always
@@ -1029,12 +1039,6 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		// record: nothing here is inherited, so there is no stored value to
 		// protect and no lockout risk in checking unconditionally.
 		if err := validateMixedPoolSize(&comp); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-
-		// FR-050a: swiss-specific config validation.
-		if err := validateSwissConfig(&comp); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
@@ -1213,6 +1217,15 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			return
 		}
 
+		if loaded, lerr := store.LoadCompetition(comp.ID); lerr == nil && loaded != nil {
+			comp.ConfigVersion = state.ConfigVersion(loaded)
+		} else {
+			comp.ConfigVersion = state.ConfigVersion(&comp)
+		}
+		if comp.Players != nil {
+			comp.RosterVersion = state.RosterVersion(comp.Players)
+		}
+
 		hub.Broadcast(EventTournamentUpdated, nil)
 		c.JSON(http.StatusCreated, comp)
 	})
@@ -1231,6 +1244,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			c.JSON(http.StatusNotFound, gin.H{"error": "competition not found"})
 			return
 		}
+		comp.ConfigVersion = state.ConfigVersion(comp)
 		c.JSON(http.StatusOK, comp)
 	})
 
@@ -1515,26 +1529,9 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				}
 			}
 
-			// Reject negative per-phase or legacy durations.
-			if err := validateCompetitionDurations(&comp); err != nil {
-				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-				return
-			}
-
-			// Format / PoolFormat enum-style validation. Empty values are
-			// accepted; unknown values 400. FR-050a: swiss requires the
-			// additional swissRounds >= 1 check below.
-			if code, err := validateCompetitionFormat(comp.Format, comp.PoolFormat); err != nil {
-				c.JSON(code, gin.H{"error": err.Error()})
-				return
-			}
-
-			// Zero out pool-config fields that have no meaning for the
-			// chosen format. Mirrors the same call in the POST handler.
-			normalizePoolConfig(&comp)
-
-			// FR-050a: swiss-specific config validation.
-			if err := validateSwissConfig(&comp); err != nil {
+			// Reject invalid competition shape (durations, format, swiss config)
+			// and normalize pool config for formats with no pool phase.
+			if err := validateCompetitionShape(&comp); err != nil {
 				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 				return
 			}
@@ -1613,6 +1610,8 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		// set HasParticipantIDs=true (saveParticipants writes UUID rows).
 		var validationErr error
 		var notFoundFlag bool
+		var configChangedFlag bool
+		var staleCurrent *state.Competition
 		var drawReadyFlag bool
 		var teamMatchTypeStartedFlag bool
 		// bc-symm: format and kind repoint pool-vs-bracket generation and
@@ -1718,6 +1717,13 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 					// succeeds; see the participants/seeds save block
 					// below for the deferred flip.
 					return current, nil
+				}
+
+				if comp.ConfigVersion != "" && comp.ConfigVersion != state.ConfigVersion(current) {
+					configChangedFlag = true
+					cp := *current
+					staleCurrent = &cp
+					return nil, nil
 				}
 
 				// formatChanged / kindChanged: the same "is this PUT actually
@@ -2252,6 +2258,24 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			c.JSON(http.StatusNotFound, gin.H{"error": "competition not found"})
 			return
 		}
+		if configChangedFlag {
+			loadOpts := state.LoadParticipantsOpts{WithSeeds: true, HasIDs: staleCurrent.ParticipantIDsHint()}
+			if players, lerr := store.LoadParticipantsOpt(id, staleCurrent.EffectiveWithZekkenName(), loadOpts); lerr == nil {
+				staleCurrent.Players = players
+				staleCurrent.RosterVersion = state.RosterVersion(players)
+			} else {
+				staleCurrent.Players = []domain.Player{}
+				staleCurrent.RosterVersion = state.RosterVersion(staleCurrent.Players)
+			}
+			staleCurrent.ConfigVersion = state.ConfigVersion(staleCurrent)
+			c.JSON(http.StatusConflict, gin.H{
+				"code":          "config_changed",
+				"error":         "This competition changed, reload it.",
+				"configVersion": staleCurrent.ConfigVersion,
+				"competition":   staleCurrent,
+			})
+			return
+		}
 		if drawReadyFlag {
 			c.JSON(http.StatusConflict, gin.H{"error": "cannot modify output-affecting settings (format, courts, pool size/winners/mode, extra qualifiers, pool format, round-robin, team size, kind, team match type, zekken display) while a draw is pending; discard the draw first"})
 			return
@@ -2448,6 +2472,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			logRequestError(c, fmt.Errorf("re-read competition %q after its settings save: %w", id, reloadErr))
 		}
 		if updated == nil {
+			comp.ConfigVersion = state.ConfigVersion(&comp)
 			c.JSON(http.StatusOK, comp)
 			return
 		}
@@ -2510,6 +2535,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				updated.RosterVersion = state.RosterVersion(updated.Players)
 			}
 		}
+		updated.ConfigVersion = state.ConfigVersion(updated)
 		// Embed the competition fields inline and add the near-duplicate
 		// warnings (empty array on the settings-only path). The embedded
 		// pointer promotes the competition's JSON fields to the top level,

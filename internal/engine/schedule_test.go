@@ -239,39 +239,6 @@ func TestPerMatchElapsedBouts_Fractional(t *testing.T) {
 	}
 }
 
-// TestEstimateSchedule_KachinukiRange pins the exact best/average/worst
-// arithmetic for a kachinuki estimate (mp-gmcg). Fixture: clock=3min,
-// multiplier=1.5, 2 matches on 1 court, team size 5, no buffer/ceremony.
-//
-// kachinukiBoutRange(5) = (5, 7, 9) bouts. Per match
-// (perMatchElapsedBouts, includes the (bouts-1)*1min changeover):
-//
-//	best:  5*3*1.5 + 4 = 26.5 min → ×2 matches = 53
-//	avg:   7*3*1.5 + 6 = 37.5 min → ×2 matches = 75
-//	worst: 9*3*1.5 + 8 = 48.5 min → ×2 matches = 97
-//
-// TotalDurationMinutes carries the AVERAGE scenario; PerCourtMinutes
-// reflects the average too.
-func TestEstimateSchedule_KachinukiRange(t *testing.T) {
-	result := EstimateSchedule(EstimateInput{
-		MatchDurationClockMinutes: 3,
-		Multiplier:                1.5,
-		NumMatches:                2,
-		NumCourts:                 1,
-		TeamSize:                  5,
-		BoutsPerTeamMatch:         5,
-		Kachinuki:                 true,
-	})
-
-	assert.Equal(t, 53, result.BestCaseMinutes, "best: 2 × (5*3*1.5 + 4) = 53")
-	assert.Equal(t, 75, result.TotalDurationMinutes, "avg headline: 2 × (7*3*1.5 + 6) = 75")
-	assert.Equal(t, 97, result.WorstCaseMinutes, "worst: 2 × (9*3*1.5 + 8) = 97")
-	assert.Less(t, result.BestCaseMinutes, result.TotalDurationMinutes)
-	assert.Less(t, result.TotalDurationMinutes, result.WorstCaseMinutes)
-	require.Len(t, result.PerCourtMinutes, 1)
-	assert.Equal(t, 75, result.PerCourtMinutes[0], "PerCourtMinutes reflects the average scenario")
-}
-
 // TestEstimateSchedule_ClampsHostileBoutDrivers pins mp-gmcg review R5: a
 // pathologically large TeamSize / BoutsPerTeamMatch must not overflow the
 // duration math. Before the clamp, `worst = 2n-1` and `bouts*clock*mult`
@@ -285,7 +252,7 @@ func TestEstimateSchedule_ClampsHostileBoutDrivers(t *testing.T) {
 	}{
 		// math.MaxInt (not a fixed 1<<62) so the test compiles on 32-bit
 		// GOARCHs where int is 32-bit (mp-gmcg review).
-		{"huge teamSize", EstimateInput{MatchDurationClockMinutes: 3, Multiplier: 1.5, NumMatches: 1, NumCourts: 1, TeamSize: math.MaxInt, Kachinuki: true}},
+		{"huge teamSize", EstimateInput{MatchDurationClockMinutes: 3, Multiplier: 1.5, NumMatches: 1, NumCourts: 1, TeamSize: math.MaxInt}},
 		{"huge boutsPerTeamMatch", EstimateInput{MatchDurationClockMinutes: 3, Multiplier: 1.5, NumMatches: 1, NumCourts: 1, TeamSize: 5, BoutsPerTeamMatch: math.MaxInt}},
 		{"negative teamSize", EstimateInput{MatchDurationClockMinutes: 3, Multiplier: 1.5, NumMatches: 1, NumCourts: 1, TeamSize: -5}},
 	} {
@@ -379,17 +346,6 @@ func TestEstimateSchedule_BoutsDefaultToTeamSize(t *testing.T) {
 		assert.Equal(t, 53, EstimateSchedule(base).TotalDurationMinutes)
 	})
 
-	t.Run("kachinuki derives its range from TeamSize when bouts are omitted", func(t *testing.T) {
-		k := base
-		k.Kachinuki = true
-		got := EstimateSchedule(k)
-		// Identical to TestEstimateSchedule_KachinukiRange, which passes
-		// BoutsPerTeamMatch: 5 explicitly. The range must not collapse.
-		assert.Equal(t, 53, got.BestCaseMinutes)
-		assert.Equal(t, 75, got.TotalDurationMinutes)
-		assert.Equal(t, 97, got.WorstCaseMinutes)
-	})
-
 	t.Run("an explicit override still wins", func(t *testing.T) {
 		override := base
 		override.BoutsPerTeamMatch = 3
@@ -404,83 +360,6 @@ func TestEstimateSchedule_BoutsDefaultToTeamSize(t *testing.T) {
 		assert.Equal(t, 9, EstimateSchedule(orphan).TotalDurationMinutes,
 			"TeamSize is the team/individual gate: 2 × 3*1.5 = 9")
 	})
-}
-
-// TestEstimateSchedule_KachinukiCeremonyAdditive verifies CeremonyMinutes
-// is added verbatim to ALL THREE scenario fields, not just the headline.
-func TestEstimateSchedule_KachinukiCeremonyAdditive(t *testing.T) {
-	base := EstimateInput{
-		MatchDurationClockMinutes: 3,
-		Multiplier:                1.5,
-		NumMatches:                2,
-		NumCourts:                 1,
-		TeamSize:                  5,
-		BoutsPerTeamMatch:         5,
-		Kachinuki:                 true,
-	}
-	plain := EstimateSchedule(base)
-
-	withCeremony := base
-	withCeremony.CeremonyMinutes = 10
-	cer := EstimateSchedule(withCeremony)
-
-	assert.Equal(t, plain.BestCaseMinutes+10, cer.BestCaseMinutes)
-	assert.Equal(t, plain.TotalDurationMinutes+10, cer.TotalDurationMinutes)
-	assert.Equal(t, plain.WorstCaseMinutes+10, cer.WorstCaseMinutes)
-}
-
-// TestEstimateSchedule_NonKachinukiCollapses pins the collapse contract:
-// when Kachinuki is false (fixed-format team or individual), or when
-// Kachinuki is set but there is no bout count to widen (individual), the
-// bout count is constant, so BestCaseMinutes == TotalDurationMinutes ==
-// WorstCaseMinutes.
-func TestEstimateSchedule_NonKachinukiCollapses(t *testing.T) {
-	tests := []struct {
-		name string
-		in   EstimateInput
-	}{
-		{
-			name: "fixed-format team match",
-			in: EstimateInput{
-				MatchDurationClockMinutes: 3,
-				Multiplier:                1.5,
-				NumMatches:                2,
-				NumCourts:                 1,
-				TeamSize:                  5,
-				BoutsPerTeamMatch:         5,
-				Kachinuki:                 false,
-			},
-		},
-		{
-			name: "individual match",
-			in: EstimateInput{
-				MatchDurationClockMinutes: 3,
-				Multiplier:                1.5,
-				NumMatches:                4,
-				NumCourts:                 1,
-			},
-		},
-		{
-			name: "kachinuki flag without team bouts is inert",
-			in: EstimateInput{
-				MatchDurationClockMinutes: 3,
-				Multiplier:                1.5,
-				NumMatches:                4,
-				NumCourts:                 1,
-				Kachinuki:                 true, // TeamSize=0 → no bout count to widen
-			},
-		},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			result := EstimateSchedule(tc.in)
-			assert.Equal(t, result.TotalDurationMinutes, result.BestCaseMinutes,
-				"best must equal total when the bout count is constant")
-			assert.Equal(t, result.TotalDurationMinutes, result.WorstCaseMinutes,
-				"worst must equal total when the bout count is constant")
-			assert.Greater(t, result.TotalDurationMinutes, 0)
-		})
-	}
 }
 
 // ---------------------------------------------------------------------------

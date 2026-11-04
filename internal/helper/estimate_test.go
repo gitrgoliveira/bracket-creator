@@ -528,3 +528,297 @@ func TestEstimateMatchCounts_CrossCheck_MatchesCreatePools(t *testing.T) {
 		})
 	}
 }
+
+// TestEstimateMatchCounts_ParityWithRealBuilders tests parity against the real
+// builders (BuildPoolPhaseTreeAwareWithMode and BuildPoolPhaseFillBracket).
+func TestEstimateMatchCounts_ParityWithRealBuilders(t *testing.T) {
+	// 18, 20 and 34 are shapes where fill-bracket drafts 2nd places, and 17
+	// one it refuses (asserted as a refusal below).
+	nValues := []int{3, 5, 8, 9, 12, 17, 18, 20, 31, 33, 34, 64}
+	poolSizes := []int{3, 4, 5}
+	poolWinnersList := []int{1, 2}
+	modes := []string{"min", "max"}
+	extraQualifiersList := []string{"", QualifierModeLargerPools, QualifierModeFillBracket}
+	seedOptions := [][]int{nil, {1, 2}}
+	thirdPlaceOptions := []bool{false, true}
+
+	for _, n := range nValues {
+		for _, poolSize := range poolSizes {
+			for _, poolWinners := range poolWinnersList {
+				for _, mode := range modes {
+					for _, eq := range extraQualifiersList {
+						for _, seeds := range seedOptions {
+							for _, thirdPlace := range thirdPlaceOptions {
+								// Both extra-qualifier modes require min mode and 1 pool
+								// winner (state.ValidateExtraQualifiers refuses the rest).
+								if eq != "" && (mode != "min" || poolWinners != 1) {
+									continue
+								}
+								name := fmt.Sprintf("N=%d/size=%d/pw=%d/mode=%s/eq=%s/seeds=%v/3rd=%v",
+									n, poolSize, poolWinners, mode, eq, seeds != nil, thirdPlace)
+
+								t.Run(name, func(t *testing.T) {
+									synth := make([]Player, n)
+									for i := range synth {
+										synth[i] = Player{
+											Name: fmt.Sprintf("p%d", i),
+											Dojo: fmt.Sprintf("d%d", i),
+										}
+									}
+									for i, r := range seeds {
+										if i < len(synth) {
+											synth[i].Seed = r
+										}
+									}
+
+									var realPools []Pool
+									var numFinalists int
+									var realErr error
+
+									if eq == QualifierModeFillBracket {
+										realPools, _, realErr = BuildPoolPhaseFillBracket(synth, poolSize, 1)
+										if realErr == nil {
+											draftIdx, derr := SelectFillBracketDraftIndices(realPools, poolSize, 1)
+											if derr != nil {
+												realErr = derr
+											} else {
+												numFinalists = len(realPools) + len(draftIdx)
+											}
+										}
+									} else {
+										isMax := mode == "max"
+										realPools, _, realErr = BuildPoolPhaseTreeAwareWithMode(synth, poolSize, isMax, 1, poolWinners, eq)
+										if realErr == nil {
+											if eq == QualifierModeLargerPools {
+												numFinalists = 0
+												for _, p := range realPools {
+													numFinalists += QualifiersForOversizedPool(len(p.Players), poolSize, poolWinners)
+												}
+											} else {
+												numFinalists = len(realPools) * poolWinners
+											}
+										}
+									}
+
+									in := EstimateMatchCountsInput{
+										Format:           "mixed",
+										PlayerCount:      n,
+										PoolSize:         poolSize,
+										PoolSizeMode:     mode,
+										PoolWinners:      poolWinners,
+										RoundRobin:       true,
+										ExtraQualifiers:  eq,
+										SeedRanks:        seeds,
+										SingleThirdPlace: thirdPlace,
+									}
+									estPools, estKnockout, estErr := EstimateMatchCounts(in)
+
+									if realErr != nil {
+										require.Error(t, estErr, "expected EstimateMatchCounts to refuse when real builder refuses")
+										var countErr *EstimateCountError
+										assert.ErrorAs(t, estErr, &countErr)
+										return
+									}
+
+									require.NoError(t, estErr)
+
+									realPoolMatches := 0
+									for _, p := range realPools {
+										realPoolMatches += poolMatchesPerPool(len(p.Players), true, "")
+									}
+
+									realKnockoutMatches := bracketMatchCount(numFinalists)
+									if thirdPlace {
+										rounds := knockoutRounds(numFinalists)
+										if NeedsBronzeBlock(true, rounds) {
+											realKnockoutMatches++
+										}
+									}
+
+									assert.Equal(t, realPoolMatches, estPools, "pool matches must match real builder")
+									assert.Equal(t, realKnockoutMatches, estKnockout, "knockout matches must match real builder")
+								})
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+}
+
+// TestEstimateMatchCounts_CourtCountDoesNotChangeCounts asserts that court
+// allocation (1 vs 4 shiaijo) does not change pool or knockout match counts.
+func TestEstimateMatchCounts_CourtCountDoesNotChangeCounts(t *testing.T) {
+	testCases := []struct {
+		name            string
+		n               int
+		poolSize        int
+		poolSizeMode    string
+		poolWinners     int
+		extraQualifiers string
+		seeds           []int
+		single3rd       bool
+	}{
+		{"standard 17p", 17, 4, "min", 2, "", nil, false},
+		{"larger-pools 17p", 17, 4, "min", 1, QualifierModeLargerPools, nil, true},
+		{"fill-bracket 20p", 20, 3, "min", 1, QualifierModeFillBracket, []int{1, 2}, true},
+		{"standard 33p", 33, 4, "max", 2, "", nil, true},
+		{"fill-bracket 31p", 31, 3, "min", 1, QualifierModeFillBracket, []int{1, 2, 3}, false},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			in := EstimateMatchCountsInput{
+				Format:           "mixed",
+				PlayerCount:      tc.n,
+				PoolSize:         tc.poolSize,
+				PoolSizeMode:     tc.poolSizeMode,
+				PoolWinners:      tc.poolWinners,
+				RoundRobin:       true,
+				ExtraQualifiers:  tc.extraQualifiers,
+				SeedRanks:        tc.seeds,
+				SingleThirdPlace: tc.single3rd,
+			}
+			estPools, estKnockout, err := EstimateMatchCounts(in)
+			require.NoError(t, err)
+
+			for _, courts := range []int{1, 4} {
+				synth := make([]Player, tc.n)
+				for i := range synth {
+					synth[i] = Player{
+						Name: fmt.Sprintf("p%d", i),
+						Dojo: fmt.Sprintf("d%d", i),
+					}
+				}
+				for i, r := range tc.seeds {
+					if i < len(synth) {
+						synth[i].Seed = r
+					}
+				}
+
+				var realPools []Pool
+				var numFinalists int
+				var realErr error
+
+				if tc.extraQualifiers == QualifierModeFillBracket {
+					realPools, _, realErr = BuildPoolPhaseFillBracket(synth, tc.poolSize, courts)
+					require.NoError(t, realErr)
+					draftIdx, derr := SelectFillBracketDraftIndices(realPools, tc.poolSize, courts)
+					require.NoError(t, derr)
+					numFinalists = len(realPools) + len(draftIdx)
+				} else {
+					isMax := tc.poolSizeMode == "max"
+					realPools, _, realErr = BuildPoolPhaseTreeAwareWithMode(synth, tc.poolSize, isMax, courts, tc.poolWinners, tc.extraQualifiers)
+					require.NoError(t, realErr)
+					if tc.extraQualifiers == QualifierModeLargerPools {
+						numFinalists = 0
+						for _, p := range realPools {
+							numFinalists += QualifiersForOversizedPool(len(p.Players), tc.poolSize, tc.poolWinners)
+						}
+					} else {
+						numFinalists = len(realPools) * tc.poolWinners
+					}
+				}
+
+				realPoolMatches := 0
+				for _, p := range realPools {
+					realPoolMatches += poolMatchesPerPool(len(p.Players), true, "")
+				}
+				realKnockoutMatches := bracketMatchCount(numFinalists)
+				if tc.single3rd {
+					rounds := knockoutRounds(numFinalists)
+					if NeedsBronzeBlock(true, rounds) {
+						realKnockoutMatches++
+					}
+				}
+
+				assert.Equal(t, estPools, realPoolMatches, "court %d pool matches must match estimate", courts)
+				assert.Equal(t, estKnockout, realKnockoutMatches, "court %d knockout matches must match estimate", courts)
+			}
+		})
+	}
+}
+
+// TestEstimateMatchCounts_BronzeBout verifies bronze match behavior for knockout:
+// 4 players with third place adds 1 match; 2 players does not.
+func TestEstimateMatchCounts_BronzeBout(t *testing.T) {
+	// Knockout 4 players without 3rd place: 3 matches.
+	_, k3, err := EstimateMatchCounts(EstimateMatchCountsInput{
+		Format:           "knockout",
+		PlayerCount:      4,
+		SingleThirdPlace: false,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, 3, k3)
+
+	// Knockout 4 players with 3rd place: 3 + 1 = 4 matches.
+	_, k4, err := EstimateMatchCounts(EstimateMatchCountsInput{
+		Format:           "knockout",
+		PlayerCount:      4,
+		SingleThirdPlace: true,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, 4, k4)
+
+	// Knockout 2 players without 3rd place: 1 match.
+	_, k1, err := EstimateMatchCounts(EstimateMatchCountsInput{
+		Format:           "knockout",
+		PlayerCount:      2,
+		SingleThirdPlace: false,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, 1, k1)
+
+	// Knockout 2 players with 3rd place: 1 match (NeedsBronzeBlock is false for 1 round).
+	_, k1With3rd, err := EstimateMatchCounts(EstimateMatchCountsInput{
+		Format:           "knockout",
+		PlayerCount:      2,
+		SingleThirdPlace: true,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, 1, k1With3rd)
+}
+
+// TestEstimateMatchCounts_TypedError verifies that count errors are typed errors
+// carrying human-readable sentences.
+func TestEstimateMatchCounts_TypedError(t *testing.T) {
+	t.Run("player count less than pool size", func(t *testing.T) {
+		in := EstimateMatchCountsInput{
+			Format:       "mixed",
+			PlayerCount:  2,
+			PoolSize:     3,
+			PoolSizeMode: "min",
+		}
+		_, _, err := EstimateMatchCounts(in)
+		require.Error(t, err)
+		var countErr *EstimateCountError
+		require.ErrorAs(t, err, &countErr)
+		assert.Equal(t, "cannot create pools: player count (2) is less than pool size (3)", countErr.Error())
+	})
+
+	t.Run("pool size zero", func(t *testing.T) {
+		in := EstimateMatchCountsInput{
+			Format:      "mixed",
+			PlayerCount: 8,
+			PoolSize:    0,
+		}
+		_, _, err := EstimateMatchCounts(in)
+		require.Error(t, err)
+		var countErr *EstimateCountError
+		require.ErrorAs(t, err, &countErr)
+		assert.Equal(t, "cannot create pools: pool size must be at least 1, got 0", countErr.Error())
+	})
+
+	t.Run("unknown format", func(t *testing.T) {
+		in := EstimateMatchCountsInput{
+			Format:      "invalid-format",
+			PlayerCount: 8,
+		}
+		_, _, err := EstimateMatchCounts(in)
+		require.Error(t, err)
+		var countErr *EstimateCountError
+		require.ErrorAs(t, err, &countErr)
+		assert.Equal(t, "unknown competition format \"invalid-format\": choose knockout, mixed, league or swiss", countErr.Error())
+	})
+}

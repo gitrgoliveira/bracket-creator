@@ -238,6 +238,9 @@ func TestMarshalledStructsStayFullyMarshalled(t *testing.T) {
 			"RosterVersion": "worked out from the roster (RosterVersion) on every " +
 				"answer that carries Players, for the roster PUT to send back; a " +
 				"stored copy would be outdated by the next roster write.",
+			"ConfigVersion": "worked out from the settings (ConfigVersion) on every " +
+				"competition answer, for the settings PUT to send back; a stored copy " +
+				"would be outdated by the next settings write.",
 		}},
 	}
 

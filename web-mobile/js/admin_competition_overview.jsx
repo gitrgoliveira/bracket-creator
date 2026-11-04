@@ -296,8 +296,9 @@ export function latestCourtFinish(courtEnds, startTime) {
 export function formatPausesRow(tournament, c) {
   const pauses = Array.isArray(tournament?.pauses) ? tournament.pauses : [];
   const days = deriveTournamentDays(tournament?.date, Number(tournament?.durationDays) || 1);
-  const dayIdx = (c?.date && days.length > 0) ? days.indexOf(c.date) : -1;
-  const compDay = dayIdx !== -1 ? dayIdx + 1 : 1;
+  // The server's dayBreaks rule: no date is day 1, and a date that is not one
+  // of the tournament's days (0 here) gets only the every-day pauses.
+  const compDay = c?.date ? days.indexOf(c.date) + 1 : 1;
 
   const relevant = pauses.filter(p => (p && (p.day === 0 || p.day === compDay)));
 
@@ -312,7 +313,7 @@ export function formatPausesRow(tournament, c) {
       const endClock = formatClock(startMin + durMin);
       usable.push(`${name} ${p.start} to ${endClock}`);
     } else {
-      unused.push(`${name}: not used, no start time`);
+      unused.push(`${name}: not used, ${startMin === null ? "no start time" : "no length"}`);
     }
   }
 

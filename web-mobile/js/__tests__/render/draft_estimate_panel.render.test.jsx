@@ -168,4 +168,54 @@ describe('DraftEstimatePanel render tests', () => {
     const perShiaijo = getByTestId('draft-estimate-per-shiaijo');
     expect(perShiaijo.textContent).toBe('Per shiaijo: A about 55m · B not used');
   });
+
+  it('renders no timing line when estimate has no timing', () => {
+    const estimate = makeSampleEstimate({ timing: null });
+    const { queryByTestId } = render(
+      <DraftEstimatePanel
+        estimate={estimate}
+        loading={false}
+        error={null}
+        shape={{ startTime: '09:30' }}
+      />
+    );
+    expect(queryByTestId('draft-estimate-timing')).toBeNull();
+  });
+
+  it('renders sent multiplier and allowance when timing is present', () => {
+    const estimate = makeSampleEstimate({
+      timing: { multiplier: 2.2, allowancePct: 15, breaks: [] },
+    });
+    const { getByTestId } = render(
+      <DraftEstimatePanel
+        estimate={estimate}
+        loading={false}
+        error={null}
+        shape={{ startTime: '09:30' }}
+      />
+    );
+    const timing = getByTestId('draft-estimate-timing');
+    expect(timing.textContent).toContain(
+      "Uses this tournament's timing: each match counts as 2.2 times its clock time, plus 15% for the slowest shiaijo. No pauses that day."
+    );
+  });
+
+  it('renders kachinuki range line without (average)', () => {
+    const estimate = makeSampleEstimate({
+      totalDurationMinutes: 120,
+      bestCaseMinutes: 90,
+      worstCaseMinutes: 150,
+    });
+    const { getByTestId } = render(
+      <DraftEstimatePanel
+        estimate={estimate}
+        loading={false}
+        error={null}
+        shape={{ startTime: '09:00', teamMatchType: 'kachinuki' }}
+      />
+    );
+    const kachinuki = getByTestId('draft-estimate-kachinuki');
+    expect(kachinuki.textContent).toBe('Could end 10:30 to 11:30');
+    expect(kachinuki.textContent).not.toContain('(average)');
+  });
 });

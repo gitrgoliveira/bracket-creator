@@ -220,7 +220,7 @@ func RegisterDraftEstimateHandlers(r gin.IRoutes, store TournamentLoader, eng Dr
 			return
 		}
 
-		estimate, err := eng.EstimateDraft(&comp, participants)
+		estimate, err := eng.EstimateDraft(&comp, tournament, participants)
 		if err != nil {
 			var valErr *engine.ValidationError
 			if errors.As(err, &valErr) {

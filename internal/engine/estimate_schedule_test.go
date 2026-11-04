@@ -765,7 +765,7 @@ func storedCounts(t *testing.T, eng *Engine, store *state.Store, compID string) 
 	require.NoError(t, err)
 	n, _, seedRanks, err := eng.estimateParticipantCount(comp, tourn)
 	require.NoError(t, err)
-	_, pool, knockout, err = estimateForPlayers(comp, tourn, n, seedRanks)
+	_, pool, knockout, err = estimateForPlayers(comp, tourn, n, seedRanks, false)
 	require.NoError(t, err)
 	return pool, knockout, seedRanks
 }
@@ -946,7 +946,7 @@ func TestEstimateForPlayers_TypedError(t *testing.T) {
 		PoolSizeMode: "min",
 	}
 	// 3 players < poolSize 5 in min mode
-	_, _, _, err := estimateForPlayers(comp, nil, 3, nil)
+	_, _, _, err := estimateForPlayers(comp, nil, 3, nil, false)
 	require.Error(t, err)
 
 	var valErr *ValidationError
@@ -983,7 +983,7 @@ func TestEstimateDraft_MaxParticipantsCost(t *testing.T) {
 		}
 
 		start := time.Now()
-		est, err := eng.EstimateDraft(comp, MaxEstimateParticipants)
+		est, err := eng.EstimateDraft(comp, nil, MaxEstimateParticipants)
 		elapsed := time.Since(start)
 		t.Logf("extra qualifiers %q: %s", extra, elapsed)
 

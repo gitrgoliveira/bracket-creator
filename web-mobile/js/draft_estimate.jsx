@@ -17,6 +17,14 @@ function isShapeIdle(shape) {
   return false;
 }
 
+// idleShiaijoText words the shiaijo a too_many_shiaijo warning leaves idle:
+// the chosen count less the usable one, both sent with the warning.
+export function idleShiaijoText(usable, chosen) {
+  const idle = chosen - usable;
+  if (idle === 1) return usable === 1 ? "a second shiaijo" : "one shiaijo";
+  return `${idle} shiaijo`;
+}
+
 // useDraftEstimate debounces shape changes by 250 ms, manages an AbortController
 // per request, and queries the draft estimate endpoint. Returns { estimate, loading, error }.
 export function useDraftEstimate(shape, password) {
@@ -211,31 +219,34 @@ export function DraftEstimatePanel({
   ) : null;
 
   // 5. Timing line
-  const timing = estimate.timing || {};
-  const multiplier = timing.multiplier !== undefined && timing.multiplier !== null ? timing.multiplier : 1.5;
-  const allowancePct = timing.allowancePct !== undefined && timing.allowancePct !== null ? timing.allowancePct : 10;
-  const breaks = Array.isArray(timing.breaks) ? timing.breaks : [];
-  let pausesText = "No pauses that day.";
-  if (breaks.length > 0) {
-    const breakItems = breaks.map(b => `${b.name} ${b.start} to ${b.end}`);
-    pausesText = `Pauses that day: ${breakItems.join(", ")}.`;
+  let timingElement = null;
+  if (estimate.timing) {
+    const timing = estimate.timing;
+    const multiplier = timing.multiplier;
+    const allowancePct = timing.allowancePct;
+    const breaks = Array.isArray(timing.breaks) ? timing.breaks : [];
+    let pausesText = "No pauses that day.";
+    if (breaks.length > 0) {
+      const breakItems = breaks.map(b => `${b.name} ${b.start} to ${b.end}`);
+      pausesText = `Pauses that day: ${breakItems.join(", ")}.`;
+    }
+    timingElement = (
+      <div className="draft-estimate__timing" data-testid="draft-estimate-timing">
+        <span>
+          Uses this tournament's timing: each match counts as {multiplier} times its clock time, plus {allowancePct}% for the slowest shiaijo. {pausesText}
+        </span>
+        {onEditTournament && (
+          <button
+            type="button"
+            className="btn btn--sm btn--ghost"
+            onClick={onEditTournament}
+          >
+            Edit tournament
+          </button>
+        )}
+      </div>
+    );
   }
-  const timingElement = (
-    <div className="draft-estimate__timing" data-testid="draft-estimate-timing">
-      <span>
-        Uses this tournament's timing: each match counts as {multiplier} times its clock time, plus {allowancePct}% for the slowest shiaijo. {pausesText}
-      </span>
-      {onEditTournament && (
-        <button
-          type="button"
-          className="btn btn--sm btn--ghost"
-          onClick={onEditTournament}
-        >
-          Edit tournament
-        </button>
-      )}
-    </div>
-  );
 
   // 6. Kachinuki range
   let kachinukiElement = null;
@@ -247,7 +258,7 @@ export function DraftEstimatePanel({
       if (bestFinish.clock && worstFinish.clock) {
         kachinukiElement = (
           <div className="draft-estimate__kachinuki" data-testid="draft-estimate-kachinuki">
-            Could end {bestFinish.clock} to {worstFinish.clock} (average)
+            Could end {bestFinish.clock} to {worstFinish.clock}
           </div>
         );
       }
@@ -258,14 +269,14 @@ export function DraftEstimatePanel({
   const warnings = Array.isArray(estimate.warnings) ? estimate.warnings : [];
   const warningItems = warnings.map((w, idx) => {
     if (w.code === "too_many_shiaijo") {
-      const count = w.participants ?? shape?.participants ?? 0;
+      const count = w.participants;
       const pLabel = isTeam ? (count === 1 ? "team" : "teams") : (count === 1 ? "participant" : "participants");
-      const usable = w.usable ?? 1;
+      const usable = w.usable;
       const mLabel = usable === 1 ? "match" : "matches";
       return (
         <div key={idx} className="draft-estimate__warning alert alert--warn" role="alert" data-testid="draft-estimate-warning">
           <span>
-            With {count} {pLabel} only {usable} {mLabel} can run at a time, so a second shiaijo would stand empty. Use {usable} shiaijo.
+            With {count} {pLabel} only {usable} {mLabel} can run at a time, so {idleShiaijoText(usable, w.chosen)} would stand empty. Use {usable} shiaijo.
           </span>
           {onChangeShiaijo && (
             <button

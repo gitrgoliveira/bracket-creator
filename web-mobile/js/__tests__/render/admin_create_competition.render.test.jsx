@@ -675,7 +675,7 @@ describe('AdminCreateCompetition expected participants and draft estimate (p2-cr
 
   it('(e) too_many_shiaijo warning renders "Change shiaijo" and clicking it focuses Shiaijo field', async () => {
     window.API.estimateDraft = vi.fn().mockResolvedValue(makeSampleDraftEstimate({
-      warnings: [{ code: 'too_many_shiaijo', participants: 4, usable: 1 }],
+      warnings: [{ code: 'too_many_shiaijo', participants: 4, usable: 1, chosen: 2 }],
     }));
     const { container } = await mountForm();
 

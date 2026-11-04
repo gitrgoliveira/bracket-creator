@@ -529,4 +529,45 @@ describe('Overview estimate helpers (p2-overview)', () => {
     expect(formatPausesRow(twoDay, c)).toBe('No pauses that day');
     expect(formatPausesRow(twoDay, { date: '06-06-2026' })).toBe('Lunch 12:30 to 13:30');
   });
+
+  it('formatPausesRow lists only day-0 pauses when competition date is not a tournament day', () => {
+    const t = {
+      date: '05-06-2026',
+      durationDays: 2,
+      pauses: [
+        { name: 'Everyday break', start: '10:00', length: '15m', day: 0 },
+        { name: 'Day 1 break', start: '11:00', length: '30m', day: 1 },
+      ],
+    };
+    expect(formatPausesRow(t, { date: '07-06-2026' })).toBe('Everyday break 10:00 to 10:15');
+  });
+
+  it('formatPausesRow gives day 0 and day 1 pauses to competition with no date', () => {
+    const t = {
+      date: '05-06-2026',
+      durationDays: 2,
+      pauses: [
+        { name: 'Everyday break', start: '10:00', length: '15m', day: 0 },
+        { name: 'Day 1 break', start: '11:00', length: '30m', day: 1 },
+        { name: 'Day 2 break', start: '12:00', length: '45m', day: 2 },
+      ],
+    };
+    expect(formatPausesRow(t, {})).toBe('Everyday break 10:00 to 10:15, Day 1 break 11:00 to 11:30');
+    expect(formatPausesRow(t, null)).toBe('Everyday break 10:00 to 10:15, Day 1 break 11:00 to 11:30');
+  });
+
+  it('formatPausesRow distinguishes pauses with no length from pauses with no start time', () => {
+    const t = {
+      date: '05-06-2026',
+      durationDays: 1,
+      pauses: [
+        { name: 'Zero length break', start: '14:00', length: '0m', day: 0 },
+        { name: 'Unreadable length break', start: '15:00', length: 'bad', day: 0 },
+        { name: 'No start break', start: '', length: '30m', day: 0 },
+      ],
+    };
+    expect(formatPausesRow(t, { date: '05-06-2026' })).toBe(
+      'No pauses that day · Zero length break: not used, no length · Unreadable length break: not used, no length · No start break: not used, no start time',
+    );
+  });
 });

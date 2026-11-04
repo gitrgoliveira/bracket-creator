@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { finishClock } from '../admin_schedule_utils.jsx';
-import { DraftEstimatePanel, useDraftEstimate } from '../draft_estimate.jsx';
+import { DraftEstimatePanel, useDraftEstimate, idleShiaijoText } from '../draft_estimate.jsx';
 import { makeReactive } from './helpers/reactive_react.js';
 
 // Helper to extract plain text content from a JSX element tree.
@@ -56,6 +56,14 @@ describe('finishClock', () => {
     expect(finishClock('09:65', 60)).toEqual({ clock: '', nextDay: false });
     expect(finishClock('09:00', NaN)).toEqual({ clock: '', nextDay: false });
     expect(finishClock('09:00', Infinity)).toEqual({ clock: '', nextDay: false });
+  });
+});
+
+describe('idleShiaijoText', () => {
+  it('words the idle shiaijo count for various usable and chosen counts', () => {
+    expect(idleShiaijoText(1, 2)).toBe('a second shiaijo');
+    expect(idleShiaijoText(2, 3)).toBe('one shiaijo');
+    expect(idleShiaijoText(1, 4)).toBe('3 shiaijo');
   });
 });
 
@@ -149,6 +157,47 @@ describe('DraftEstimatePanel Part D copy mapping', () => {
     expect(getNodeText(el)).toBe(
       'Finishes about 00:40, after midnight. Start it earlier or give it more shiaijo.'
     );
+  });
+
+  it('renders no timing line when the estimate has no timing', () => {
+    const tree = DraftEstimatePanel({
+      estimate: { totalDurationMinutes: 248 },
+      shape: { startTime: '09:30' },
+    });
+    const el = findTestId(tree, 'draft-estimate-timing');
+    expect(el).toBeNull();
+  });
+
+  it('renders sent multiplier and allowance when estimate has timing', () => {
+    const tree = DraftEstimatePanel({
+      estimate: {
+        totalDurationMinutes: 248,
+        timing: {
+          multiplier: 1.8,
+          allowancePct: 12,
+          breaks: [],
+        },
+      },
+      shape: { startTime: '09:30' },
+    });
+    const el = findTestId(tree, 'draft-estimate-timing');
+    expect(getNodeText(el)).toContain(
+      "Uses this tournament's timing: each match counts as 1.8 times its clock time, plus 12% for the slowest shiaijo. No pauses that day."
+    );
+  });
+
+  it('renders kachinuki range line without (average)', () => {
+    const tree = DraftEstimatePanel({
+      estimate: {
+        totalDurationMinutes: 120,
+        bestCaseMinutes: 90,
+        worstCaseMinutes: 150,
+      },
+      shape: { startTime: '09:00', teamMatchType: 'kachinuki' },
+    });
+    const el = findTestId(tree, 'draft-estimate-kachinuki');
+    expect(getNodeText(el)).toBe('Could end 10:30 to 11:30');
+    expect(getNodeText(el)).not.toContain('(average)');
   });
 });
 

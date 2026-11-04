@@ -846,3 +846,28 @@ func TestKnockoutRounds(t *testing.T) {
 		})
 	}
 }
+
+// TestEstimateMixed_DraftFillBracketNoSeeds pins the draft estimate for a
+// fill-bracket shape that an unseeded roster cannot draw: 17 entrants in pools
+// of at least 3 need seeded pools to supply the drafted 2nd places. The stored
+// competition's estimate refuses it (the organiser can seed); the draft, which
+// has nothing to seed yet, estimates the seeded draw: 5 pools, an 8-place
+// bracket, 7 knockout matches.
+func TestEstimateMixed_DraftFillBracketNoSeeds(t *testing.T) {
+	in := EstimateMatchCountsInput{
+		Format:          "mixed",
+		PlayerCount:     17,
+		PoolSize:        3,
+		PoolWinners:     1,
+		ExtraQualifiers: QualifierModeFillBracket,
+	}
+	_, _, err := EstimateMatchCounts(in)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "seed more pools")
+
+	in.Draft = true
+	poolMatches, knockoutMatches, err := EstimateMatchCounts(in)
+	require.NoError(t, err)
+	assert.Positive(t, poolMatches)
+	assert.Equal(t, 7, knockoutMatches)
+}

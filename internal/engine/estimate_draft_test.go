@@ -121,7 +121,7 @@ func TestEstimateDraft_ParityWithStoredPath(t *testing.T) {
 
 						storedEst, storedErr := eng.EstimateScheduleForCompetition(compID)
 						compCopy := *comp
-						draftEst, draftErr := eng.EstimateDraft(&compCopy, n)
+						draftEst, draftErr := eng.EstimateDraft(&compCopy, tourn, n)
 
 						if storedErr != nil {
 							var ve *ValidationError
@@ -156,7 +156,7 @@ func TestEstimateDraft_PoolAndKnockoutMatches(t *testing.T) {
 		Courts:    []string{"A"},
 		StartTime: "09:00",
 	}
-	draftKO, err := eng.EstimateDraft(compKO, 8)
+	draftKO, err := eng.EstimateDraft(compKO, nil, 8)
 	require.NoError(t, err)
 
 	expectedPoolKO, expectedKnockoutKO, err := helper.EstimateMatchCounts(helper.EstimateMatchCountsInput{
@@ -180,7 +180,7 @@ func TestEstimateDraft_PoolAndKnockoutMatches(t *testing.T) {
 		Courts:       []string{"A"},
 		StartTime:    "09:00",
 	}
-	draftMixed, err := eng.EstimateDraft(compMixed, 9)
+	draftMixed, err := eng.EstimateDraft(compMixed, nil, 9)
 	require.NoError(t, err)
 
 	expectedPoolMixed, expectedKnockoutMixed, err := helper.EstimateMatchCounts(helper.EstimateMatchCountsInput{
@@ -207,35 +207,37 @@ func TestEstimateDraft_Timing(t *testing.T) {
 
 	// Tournament with ClockToElapsedMultiplier 2 and SlowestCourtBufferPct 20
 	eng1, store1, _ := setupTestEngine(t)
-	require.NoError(t, store1.SaveTournament(&state.Tournament{
+	t1 := &state.Tournament{
 		Name:                     "T-CustomTiming",
 		Date:                     "01-05-2026",
 		DurationDays:             1,
 		Courts:                   []string{"A"},
 		ClockToElapsedMultiplier: 2.0,
 		SlowestCourtBufferPct:    20,
-	}))
-	draft1, err := eng1.EstimateDraft(comp, 8)
+	}
+	require.NoError(t, store1.SaveTournament(t1))
+	draft1, err := eng1.EstimateDraft(comp, t1, 8)
 	require.NoError(t, err)
 	assert.Equal(t, 2.0, draft1.Timing.Multiplier)
 	assert.Equal(t, 20, draft1.Timing.AllowancePct)
 
 	// Tournament with neither set (nil tournament in store)
 	eng2, _, _ := setupTestEngine(t)
-	draft2, err := eng2.EstimateDraft(comp, 8)
+	draft2, err := eng2.EstimateDraft(comp, nil, 8)
 	require.NoError(t, err)
 	assert.Equal(t, 1.5, draft2.Timing.Multiplier)
 	assert.Equal(t, 10, draft2.Timing.AllowancePct)
 
 	// Tournament saved with zero values
 	eng3, store3, _ := setupTestEngine(t)
-	require.NoError(t, store3.SaveTournament(&state.Tournament{
+	t3 := &state.Tournament{
 		Name:         "T-DefaultTiming",
 		Date:         "01-05-2026",
 		DurationDays: 1,
 		Courts:       []string{"A"},
-	}))
-	draft3, err := eng3.EstimateDraft(comp, 8)
+	}
+	require.NoError(t, store3.SaveTournament(t3))
+	draft3, err := eng3.EstimateDraft(comp, t3, 8)
 	require.NoError(t, err)
 	assert.Equal(t, 1.5, draft3.Timing.Multiplier)
 	assert.Equal(t, 10, draft3.Timing.AllowancePct)
@@ -269,7 +271,7 @@ func TestEstimateDraft_Breaks(t *testing.T) {
 		StartTime: "09:00",
 		Date:      "01-05-2026",
 	}
-	draft1, err := eng.EstimateDraft(compDay1, 8)
+	draft1, err := eng.EstimateDraft(compDay1, tourn, 8)
 	require.NoError(t, err)
 	require.Len(t, draft1.Timing.Breaks, 2)
 	assert.Equal(t, "Opening Ceremony", draft1.Timing.Breaks[0].Name)
@@ -287,7 +289,7 @@ func TestEstimateDraft_Breaks(t *testing.T) {
 		StartTime: "09:00",
 		Date:      "02-05-2026",
 	}
-	draft2, err := eng.EstimateDraft(compDay2, 8)
+	draft2, err := eng.EstimateDraft(compDay2, tourn, 8)
 	require.NoError(t, err)
 	require.Len(t, draft2.Timing.Breaks, 2)
 	assert.Equal(t, "Grading", draft2.Timing.Breaks[0].Name)
@@ -299,13 +301,14 @@ func TestEstimateDraft_Breaks(t *testing.T) {
 
 	// With no pauses
 	engNoPauses, storeNoPauses, _ := setupTestEngine(t)
-	require.NoError(t, storeNoPauses.SaveTournament(&state.Tournament{
+	tNoPauses := &state.Tournament{
 		Name:         "TournNoPauses",
 		Date:         "01-05-2026",
 		DurationDays: 1,
 		Courts:       []string{"A"},
-	}))
-	draftNoPauses, err := engNoPauses.EstimateDraft(compDay1, 8)
+	}
+	require.NoError(t, storeNoPauses.SaveTournament(tNoPauses))
+	draftNoPauses, err := engNoPauses.EstimateDraft(compDay1, tNoPauses, 8)
 	require.NoError(t, err)
 	assert.NotNil(t, draftNoPauses.Timing.Breaks)
 	assert.Empty(t, draftNoPauses.Timing.Breaks)
@@ -333,28 +336,28 @@ func TestEstimateDraft_Bounds(t *testing.T) {
 	var ve *ValidationError
 
 	// participants 0
-	_, err := eng.EstimateDraft(comp, 0)
+	_, err := eng.EstimateDraft(comp, nil, 0)
 	require.Error(t, err)
 	assert.ErrorAs(t, err, &ve, "participants 0 must return ValidationError")
 
 	// participants -1
-	_, err = eng.EstimateDraft(comp, -1)
+	_, err = eng.EstimateDraft(comp, nil, -1)
 	require.Error(t, err)
 	assert.ErrorAs(t, err, &ve, "participants -1 must return ValidationError")
 
 	// participants MaxEstimateParticipants + 1
-	_, err = eng.EstimateDraft(comp, MaxEstimateParticipants+1)
+	_, err = eng.EstimateDraft(comp, nil, MaxEstimateParticipants+1)
 	require.Error(t, err)
 	assert.ErrorAs(t, err, &ve, "participants > MaxEstimateParticipants must return ValidationError")
 	assert.Contains(t, err.Error(), "1024")
 
 	// MaxEstimateParticipants succeeds
-	draftMax, err := eng.EstimateDraft(comp, MaxEstimateParticipants)
+	draftMax, err := eng.EstimateDraft(comp, nil, MaxEstimateParticipants)
 	require.NoError(t, err)
 	assert.Equal(t, MaxEstimateParticipants, draftMax.Participants)
 
 	// comp nil is an error
-	_, err = eng.EstimateDraft(nil, 8)
+	_, err = eng.EstimateDraft(nil, nil, 8)
 	require.Error(t, err)
 	assert.ErrorAs(t, err, &ve, "nil comp must return ValidationError")
 }
@@ -371,10 +374,48 @@ func TestEstimateDraft_DoesNotTouchTheStore(t *testing.T) {
 		StartTime: "09:00",
 	}
 
-	_, err := eng.EstimateDraft(comp, 8)
+	_, err := eng.EstimateDraft(comp, nil, 8)
 	require.NoError(t, err)
 
 	loaded, err := store.LoadCompetition("draft-unstored-comp")
 	require.NoError(t, err)
 	assert.Nil(t, loaded, "competition must not be persisted by EstimateDraft")
+}
+
+// TestEstimateDraft_UsesPassedTournamentNotStore verifies that EstimateDraft
+// uses the tournament passed to it rather than loading from the store, so that
+// an unstored or in-memory tournament is honoured and no double-read can occur.
+func TestEstimateDraft_UsesPassedTournamentNotStore(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	// Save a tournament in the store with multiplier 1.5 and 0 pauses
+	require.NoError(t, store.SaveTournament(&state.Tournament{
+		Name:                     "StoredTournament",
+		Date:                     "01-05-2026",
+		DurationDays:             1,
+		Courts:                   []string{"A"},
+		ClockToElapsedMultiplier: 1.5,
+		SlowestCourtBufferPct:    10,
+	}))
+
+	// Create an in-memory tournament with different parameters (multiplier 2.5)
+	inMemoryTourn := &state.Tournament{
+		Name:                     "InMemoryTournament",
+		Date:                     "01-05-2026",
+		DurationDays:             1,
+		Courts:                   []string{"A"},
+		ClockToElapsedMultiplier: 2.5,
+		SlowestCourtBufferPct:    30,
+	}
+
+	comp := &state.Competition{
+		Format:    state.CompFormatKnockout,
+		Kind:      "individual",
+		Courts:    []string{"A"},
+		StartTime: "09:00",
+	}
+
+	draft, err := eng.EstimateDraft(comp, inMemoryTourn, 8)
+	require.NoError(t, err)
+	assert.Equal(t, 2.5, draft.Timing.Multiplier, "must use passed tournament's multiplier, not stored")
+	assert.Equal(t, 30, draft.Timing.AllowancePct, "must use passed tournament's allowance, not stored")
 }

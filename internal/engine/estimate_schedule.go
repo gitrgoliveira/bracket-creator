@@ -74,7 +74,7 @@ func (e *Engine) EstimateScheduleForCompetition(compID string) (ScheduleEstimate
 		return ScheduleEstimate{}, err
 	}
 
-	est, _, _, err := estimateForPlayers(comp, tournament, playerCount, seedRanks)
+	est, _, _, err := estimateForPlayers(comp, tournament, playerCount, seedRanks, false)
 	if err != nil {
 		return ScheduleEstimate{}, err
 	}
@@ -85,8 +85,8 @@ func (e *Engine) EstimateScheduleForCompetition(compID string) (ScheduleEstimate
 }
 
 // EstimateDraft computes a schedule estimate for an unstored draft competition
-// with the given participant count.
-func (e *Engine) EstimateDraft(comp *state.Competition, participants int) (DraftEstimate, error) {
+// with the given participant count and tournament configuration.
+func (e *Engine) EstimateDraft(comp *state.Competition, tournament *state.Tournament, participants int) (DraftEstimate, error) {
 	if comp == nil {
 		return DraftEstimate{}, validationErrorf("competition is required")
 	}
@@ -94,12 +94,7 @@ func (e *Engine) EstimateDraft(comp *state.Competition, participants int) (Draft
 		return DraftEstimate{}, validationErrorf("Participants must be a whole number from 1 to %d.", MaxEstimateParticipants)
 	}
 
-	tournament, err := e.store.LoadTournament()
-	if err != nil {
-		return DraftEstimate{}, err
-	}
-
-	est, poolMatches, knockoutMatches, err := estimateForPlayers(comp, tournament, participants, nil)
+	est, poolMatches, knockoutMatches, err := estimateForPlayers(comp, tournament, participants, nil, true)
 	if err != nil {
 		return DraftEstimate{}, err
 	}
@@ -117,7 +112,7 @@ func (e *Engine) EstimateDraft(comp *state.Competition, participants int) (Draft
 }
 
 // estimateForPlayers derives match counts and a ScheduleEstimate for n players.
-func estimateForPlayers(comp *state.Competition, tournament *state.Tournament, n int, seedRanks []int) (est ScheduleEstimate, poolMatches, knockoutMatches int, err error) {
+func estimateForPlayers(comp *state.Competition, tournament *state.Tournament, n int, seedRanks []int, draft bool) (est ScheduleEstimate, poolMatches, knockoutMatches int, err error) {
 	if n == 0 {
 		return EstimateForCounts(0, 0, comp, tournament), 0, 0, nil
 	}
@@ -135,6 +130,7 @@ func estimateForPlayers(comp *state.Competition, tournament *state.Tournament, n
 		ExtraQualifiers:  comp.ExtraQualifiers,
 		SeedRanks:        seedRanks,
 		SingleThirdPlace: comp.RequiresSingleThirdPlace(),
+		Draft:            draft,
 	}
 	poolCount, knockoutCount, err := helper.EstimateMatchCounts(in)
 	if err != nil {
@@ -151,8 +147,7 @@ func estimateForPlayers(comp *state.Competition, tournament *state.Tournament, n
 }
 
 // tournamentMultiplier returns tournament.ClockToElapsedMultiplier when set
-// and positive, or 1.5 (the default). scheduler_slots.go still holds its own
-// copy of the 1.5 default.
+// and positive, or 1.5 (the default).
 func tournamentMultiplier(tournament *state.Tournament) float64 {
 	if tournament != nil && tournament.ClockToElapsedMultiplier > 0 {
 		return tournament.ClockToElapsedMultiplier

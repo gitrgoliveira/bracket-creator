@@ -78,10 +78,7 @@ func perMatchElapsedMinutesBouts(comp *state.Competition, tournament *state.Tour
 	// slot times are minute-granular (HH:MM).
 	clockMin := float64(clockSec) / 60.0
 
-	multiplier := 1.5
-	if tournament != nil && tournament.ClockToElapsedMultiplier > 0 {
-		multiplier = tournament.ClockToElapsedMultiplier
-	}
+	multiplier := tournamentMultiplier(tournament)
 
 	// Delegate to the shared pure core so this function and
 	// EstimateSchedule stay in exact agreement (FR-059).

@@ -46,6 +46,14 @@ func (stubTournamentLoader) LoadTournament() (*state.Tournament, error) {
 	return nil, nil
 }
 
+// stubDraftEstimator is a no-op implementation of DraftEstimator. Same
+// rationale as stubCompetitionStore.
+type stubDraftEstimator struct{}
+
+func (stubDraftEstimator) EstimateDraft(*state.Competition, *state.Tournament, int) (engine.DraftEstimate, error) {
+	return engine.DraftEstimate{}, nil
+}
+
 // stubScoringEngine is a no-op implementation of ScoringEngine. Same
 // rationale as stubCompetitionStore.
 type stubScoringEngine struct{}
@@ -186,6 +194,7 @@ func TestDepsInterfacesCompile(t *testing.T) {
 		_ TeamLineupStore       = stubTeamLineupStore{}
 		_ CompetitionTransactor = stubCompetitionTransactor{}
 		_ TournamentLoader      = stubTournamentLoader{}
+		_ DraftEstimator        = stubDraftEstimator{}
 	)
 
 	// Concrete types, proves the production types are drop-in
@@ -203,5 +212,6 @@ func TestDepsInterfacesCompile(t *testing.T) {
 		// the Slice 6 / T155 method.
 		_ CompetitionTransactor = (*state.Store)(nil)
 		_ TournamentLoader      = (*state.Store)(nil)
+		_ DraftEstimator        = (*engine.Engine)(nil)
 	)
 }

@@ -379,6 +379,10 @@ func (o *mobileAppRestoreOptions) run(cmd *cobra.Command, archivePath string) (e
 		}
 	}
 
+	if err := mobileapp.ResolveRestoredRequeues(store, eng); err != nil {
+		return fmt.Errorf("return restored running matches to queue: %w", err)
+	}
+
 	if _, err := fmt.Fprintln(out, "Restore completed successfully."); err != nil {
 		return err
 	}

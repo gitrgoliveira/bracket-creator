@@ -6,8 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log/slog"
 	"net/http"
+	"slices"
 	"sort"
 	"strconv"
 	"time"
@@ -32,8 +34,9 @@ import (
 //	DELETE /api/tournament/backups/:name   remove one of them
 
 var (
-	_ BackupStore  = (*state.Store)(nil)
-	_ PrefixEngine = (*engine.Engine)(nil)
+	_ BackupStore   = (*state.Store)(nil)
+	_ PrefixEngine  = (*engine.Engine)(nil)
+	_ RestoreEngine = (*engine.Engine)(nil)
 )
 
 // Codes of the refusals this file makes itself; the restore's own come from
@@ -322,7 +325,7 @@ func respondBackupFileError(c *gin.Context, err error) {
 // RegisterRestoreHandlers wires the restore's plan and the restore on the
 // 64 MB admin group, after the confirm middleware (which asks only the
 // restore for the password again; the plan needs the sign-in alone).
-func RegisterRestoreHandlers(r *gin.RouterGroup, store BackupStore, eng PrefixEngine, hub Broadcaster, verifier PasswordVerifier) {
+func RegisterRestoreHandlers(r *gin.RouterGroup, store BackupStore, eng RestoreEngine, hub Broadcaster, verifier PasswordVerifier) {
 	r.POST("/tournament/restore/plan", func(c *gin.Context) {
 		req, ok := readRestoreRequest(c, store, verifier)
 		if !ok {
@@ -375,6 +378,12 @@ func RegisterRestoreHandlers(r *gin.RouterGroup, store BackupStore, eng PrefixEn
 			warnings = []PrefixWarning{}
 		}
 		resp["prefixWarnings"] = warnings
+
+		if rerr := ResolveRestoredRequeues(store, eng); rerr != nil {
+			slog.Error("mobile-app: restored running matches not returned to queue; retried at the next start", "err", rerr)
+			resp["requeueError"] = "The restore is done, but running matches could not be returned to the queue. Restart the app to finish it."
+		}
+
 		hub.Broadcast(EventTournamentUpdated, nil)
 		c.JSON(http.StatusOK, resp)
 	})
@@ -570,4 +579,54 @@ func ResolveRestoredPrefixes(store PendingPrefixStore, eng PrefixEngine) ([]Pref
 		return warnings, err
 	}
 	return warnings, nil
+}
+
+// ResolveRestoredRequeues sends every match a restore brought back running
+// back to the queue with its score kept, then removes the entry or file. The server
+// runs it after every restore and once before it serves, so a restore a crash
+// stopped before this step is finished at the next start.
+func ResolveRestoredRequeues(store PendingRequeueStore, eng RequeueEngine) error {
+	pending, err := store.RequeuePending()
+	if err != nil {
+		return err
+	}
+	if len(pending) == 0 {
+		return nil
+	}
+	compIDs := make([]string, 0, len(pending))
+	for compID := range pending {
+		compIDs = append(compIDs, compID)
+	}
+	slices.Sort(compIDs)
+
+	for _, compID := range compIDs {
+		matchIDs := pending[compID]
+		var handled []string
+		for _, matchID := range matchIDs {
+			err := eng.RevertMatchToQueue(compID, matchID)
+			if err != nil {
+				var nfe *engine.NotFoundError
+				if errors.Is(err, engine.ErrMatchAlreadyCompleted) ||
+					errors.As(err, &nfe) ||
+					errors.Is(err, state.ErrCompetitionNotFound) ||
+					errors.Is(err, fs.ErrNotExist) {
+					handled = append(handled, matchID)
+					continue
+				}
+				if len(handled) > 0 {
+					if rerr := store.RemoveRequeuePending(compID, handled); rerr != nil {
+						slog.Warn("mobile-app: could not remove handled requeue entries", "competition", compID, "err", rerr)
+					}
+				}
+				return err
+			}
+			handled = append(handled, matchID)
+		}
+		if len(handled) > 0 {
+			if err := store.RemoveRequeuePending(compID, handled); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }

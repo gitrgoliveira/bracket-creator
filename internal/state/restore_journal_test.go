@@ -166,6 +166,67 @@ func TestRemovePrefixesPending(t *testing.T) {
 	require.NoError(t, s.RemovePrefixesPending([]string{"b"}))
 }
 
+func TestRemoveRequeuePending(t *testing.T) {
+	s, dir := newRestoreTestStore(t)
+	// Missing file: removing anything is fine.
+	require.NoError(t, s.RemoveRequeuePending("c1", []string{"m1"}))
+
+	// Write pending matches for c1 and c2
+	require.NoError(t, s.writeRequeuePending(map[string][]string{
+		"c1": {"m1", "m2"},
+		"c2": {"m3"},
+	}))
+	pending, err := s.RequeuePending()
+	require.NoError(t, err)
+	assert.Equal(t, []string{"m1", "m2"}, pending["c1"])
+	assert.Equal(t, []string{"m3"}, pending["c2"])
+
+	// Remove {m1} from c1, {m2} remains
+	require.NoError(t, s.RemoveRequeuePending("c1", []string{"m1"}))
+	pending, err = s.RequeuePending()
+	require.NoError(t, err)
+	assert.Equal(t, []string{"m2"}, pending["c1"])
+	assert.Equal(t, []string{"m3"}, pending["c2"])
+
+	// Remove {m2} from c1: c1 is dropped from map
+	require.NoError(t, s.RemoveRequeuePending("c1", []string{"m2"}))
+	pending, err = s.RequeuePending()
+	require.NoError(t, err)
+	assert.NotContains(t, pending, "c1")
+	assert.Equal(t, []string{"m3"}, pending["c2"])
+
+	// Remove {m3} from c2: file is removed
+	require.NoError(t, s.RemoveRequeuePending("c2", []string{"m3"}))
+	pending, err = s.RequeuePending()
+	require.NoError(t, err)
+	assert.Empty(t, pending)
+	_, err = os.Stat(filepath.Join(dir, backup.RestoreDirName, "requeue-pending.json"))
+	assert.True(t, os.IsNotExist(err))
+
+	// Remove on missing file is fine.
+	require.NoError(t, s.RemoveRequeuePending("c2", []string{"m3"}))
+}
+
+func TestRestoreJournal_RequeuePendingSurvivesRecovery(t *testing.T) {
+	s, dir := newRestoreTestStore(t)
+	addRestoreComp(t, s, "men", "Men", "M", MatchStatusRunning, "A")
+	a := archiveOf(t, s, ScopeCompetition, "men")
+	afterRestoreStep = func(int, restoreStep) error { return errInjectedCrash }
+	_, err := s.Restore(RestoreRequest{
+		Archive:   a,
+		Decisions: map[string]RestoreDecision{"men": {Action: RestoreCopy, CopyName: "Men B"}},
+	})
+	afterRestoreStep = nil
+	require.ErrorIs(t, err, errInjectedCrash)
+
+	reopened, err := NewStore(dir)
+	require.NoError(t, err)
+	pending, err := reopened.RequeuePending()
+	require.NoError(t, err)
+	assert.Equal(t, []string{"Pool A-0"}, pending["men-b"])
+	assertNoStaging(t, dir)
+}
+
 func TestRestore_RetriesTheJournalOnce(t *testing.T) {
 	a := journalScenarioArchive(t)
 	ref, refDir := journalScenarioFolder(t)

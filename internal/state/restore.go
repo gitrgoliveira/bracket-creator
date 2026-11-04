@@ -130,7 +130,7 @@ const (
 // Warning codes a plan carries; none of them refuses the restore.
 const (
 	RestoreWarnMatchesRunning   = "matches_running"
-	RestoreWarnCourtBusy        = "court_busy"
+	RestoreWarnMatchesRequeued  = "matches_requeued"
 	RestoreWarnCourtMissing     = "court_missing"
 	RestoreWarnModeChanges      = "mode_changes"
 	RestoreWarnPrefixReassigned = "prefix_reassigned"
@@ -192,8 +192,10 @@ type RestorePlan struct {
 	// Missing lists the asked competitions with no answer yet.
 	Missing []string `json:"missing,omitempty"`
 	// PrefixesPending lists the ids (as restored) whose prefix collides.
-	PrefixesPending []string         `json:"prefixesPending,omitempty"`
-	Warnings        []RestoreWarning `json:"warnings,omitempty"`
+	PrefixesPending []string `json:"prefixesPending,omitempty"`
+	// RequeuePending lists matches running in the backup that must be requeued.
+	RequeuePending map[string][]string `json:"requeuePending,omitempty"`
+	Warnings       []RestoreWarning    `json:"warnings,omitempty"`
 }
 
 const nothingToRestoreMessage = "This copy was taken before a restore that only added a competition. " +
@@ -735,13 +737,18 @@ func (s *Store) Restore(req RestoreRequest) (plan RestorePlan, err error) {
 		}
 	}
 
-	// Step 6: prefixes-pending.json made durable before the journal, so a
-	// crash anywhere in the swap still leaves the prefixes to resolve. A
-	// restore that never completes its journal write leaves a harmless
-	// pending entry whose prefix does not collide. Then the journal, durable
-	// before the first live rename.
+	// Step 6: prefixes-pending.json and requeue-pending.json made durable
+	// before the journal, so a crash anywhere in the swap still leaves the
+	// prefixes and running matches to resolve. A restore that never completes
+	// its journal write leaves harmless pending entries. Then the journal,
+	// durable before the first live rename.
 	if len(w2.plan.PrefixesPending) > 0 {
 		if err := s.writePrefixesPending(w2.plan.PrefixesPending); err != nil {
+			return w2.plan, err
+		}
+	}
+	if len(w2.plan.RequeuePending) > 0 {
+		if err := s.writeRequeuePending(w2.plan.RequeuePending); err != nil {
 			return w2.plan, err
 		}
 	}

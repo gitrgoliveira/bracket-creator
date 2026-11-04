@@ -81,9 +81,9 @@ When you restore a backup:
     - If the restored tournament no longer holds that match (for example, if the competition was removed or was not yet drawn in the backup), the late change is refused.
 - **Tournament mode change warning**: If a tournament restore changes the operating mode (for example, from officiated mode to self-run mode), the plan displays a warning because the mode changes what the public page can do, such as whether anyone can enter scores.
 - **Missing shiaijo warning**: If a competition, restored or staying in place, uses a shiaijo that the restored tournament settings do not have, the plan warns you. Its matches there cannot be called until you add the shiaijo back in the tournament settings or move those matches to another shiaijo.
-- **Busy shiaijo warning**: If a restored competition comes back with a match running on a shiaijo where another competition is running a match now, the plan warns you. Send one of the two matches back to the queue.
+- **Matches that were running in the backup**: No match comes back running. A match the backup holds as running comes back in the queue with its score, as if you had sent it back to the queue, and the plan lists how many for each competition. Start it again from the court when its shiaijo is free. If the app cannot finish this step, or the number prefix check below, the restore card says so: restart the app and it finishes them as it starts.
 - **Number prefix collisions**: If a restored competition uses a competitor number prefix that a competition staying in place, or another competition in the same restore, already uses, the app assigns a new prefix automatically. A warning tells you to reprint tags for that competition.
-- **Running matches**: If a competition being replaced or removed has matches in progress on court, the plan warns you. The page lets the restore go ahead, and those matches return to the state stored in the backup. On the command line, the same restore is refused unless you pass `--allow-running`.
+- **Running matches**: If a competition being replaced or removed has matches in progress on court, the plan warns you. The page lets the restore go ahead, and the restore replaces those matches with the backup's version. On the command line, the same restore is refused unless you pass `--allow-running`.
 - **Do not upload images during a restore**: Do not upload tournament logos or sponsor images while a restore is running. Branding and sponsor folders are swapped as part of the restore process, so an upload in progress could fail or be overwritten.
 
 ### When a restore is refused
@@ -96,7 +96,7 @@ A refused restore changes nothing. The page tells you why, and the common reason
 - **A competition folder in the app has no settings file**: that competition cannot be copied before the restore replaces or removes it. Keep it, or restore the backup's competition as a copy.
 - **A competition has a write that could not be finished**: restart the app, then try again.
 - **The backup file could not be read from the upload**: the upload failed. Choose the file again.
-- **request body too large**: the file is over 64 MB. Restore it from **Copies kept on this computer** or from the command line.
+- **The backup file is over 64 MB**: the page cannot take an upload that large. Restore it from **Copies kept on this computer** or from the command line.
 - **A file in the backup cannot be read**: the backup is damaged. Try another copy.
 - **That backup is not there any more**: the kept copy was deleted, for example from another browser tab. Reload the list.
 - **Wrong password. Nothing was restored.**: the password typed in the confirmation dialog was wrong. Type it again.
@@ -116,6 +116,7 @@ Clicking **Undo this restore** prompts for the admin password and immediately pu
 - Competitions that were removed are brought back.
 - Competitions that were created or restored as copies are removed.
 - Competitions that were kept remain untouched.
+- Matches that were running when the safety copy was taken come back in the queue with their score, as after any restore.
 - After a tournament restore, the tournament settings, logos, and sponsor images return as well.
 
 The card, and its button, last until you leave or reload the page. After that, click **Restore** on the `before-restore` copy in the list instead, which asks the usual choices.

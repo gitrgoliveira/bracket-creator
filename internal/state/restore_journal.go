@@ -38,6 +38,7 @@ const (
 	restoreNewDir       = "new"
 	restoreOldDir       = "old"
 	prefixesPendingName = "prefixes-pending.json"
+	requeuePendingName  = "requeue-pending.json"
 	restoreJournalV1    = 1
 )
 
@@ -260,23 +261,30 @@ func (s *Store) readPrefixesPending() ([]string, error) {
 	return f.IDs, nil
 }
 
-// savePrefixesPending replaces prefixes-pending.json with ids (atomically,
-// then the folder fsynced). The caller holds s.mu.
-func (s *Store) savePrefixesPending(ids []string) error {
-	data, err := json.Marshal(prefixesPendingFile{IDs: ids})
+// saveRestoreJSON atomically writes val as JSON into relPath under .restore
+// and fsyncs the restore root folder and data folder. The caller holds s.mu.
+func (s *Store) saveRestoreJSON(relPath string, val any) error {
+	data, err := json.Marshal(val)
 	if err != nil {
 		return err
 	}
+	target := filepath.Join(s.restoreRootDir(), relPath)
 	if err := s.root.mkdirAll(s.restoreRootDir(), 0o700); err != nil {
 		return err
 	}
-	if err := s.root.atomicWrite(s.prefixesPendingPath(), data, 0o600); err != nil {
+	if err := s.root.atomicWrite(target, data, 0o600); err != nil {
 		return err
 	}
 	if err := syncDir(s.root, s.restoreRootDir()); err != nil {
 		return err
 	}
 	return syncDir(s.root, s.folder)
+}
+
+// savePrefixesPending replaces prefixes-pending.json with ids (atomically,
+// then the folder fsynced). The caller holds s.mu.
+func (s *Store) savePrefixesPending(ids []string) error {
+	return s.saveRestoreJSON(prefixesPendingName, prefixesPendingFile{IDs: ids})
 }
 
 // writePrefixesPending adds ids to prefixes-pending.json (atomically, then the
@@ -331,4 +339,94 @@ func (s *Store) RemovePrefixesPending(ids []string) error {
 		return syncDir(s.root, s.restoreRootDir())
 	}
 	return s.savePrefixesPending(keep)
+}
+
+func (s *Store) requeuePendingPath() string {
+	return filepath.Join(s.restoreRootDir(), requeuePendingName)
+}
+
+func (s *Store) readRequeuePending() (map[string][]string, error) {
+	raw, err := s.root.readFile(s.requeuePendingPath())
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var out map[string][]string
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil, fmt.Errorf("%s: %w", s.requeuePendingPath(), err)
+	}
+	return out, nil
+}
+
+func (s *Store) saveRequeuePending(pending map[string][]string) error {
+	return s.saveRestoreJSON(requeuePendingName, pending)
+}
+
+// writeRequeuePending adds entries to requeue-pending.json (atomically, then the
+// folder fsynced), keeping any entries an earlier restore left there unresolved.
+func (s *Store) writeRequeuePending(pending map[string][]string) error {
+	have, err := s.readRequeuePending()
+	if err != nil {
+		return err
+	}
+	if have == nil {
+		have = make(map[string][]string)
+	}
+	for compID, matchIDs := range pending {
+		all := append(slices.Clone(have[compID]), matchIDs...)
+		slices.Sort(all)
+		have[compID] = slices.Compact(all)
+	}
+	return s.saveRequeuePending(have)
+}
+
+// RequeuePending lists the matches a restore put in place that were running in
+// the backup and still wait to be returned to the queue. Empty when there are none.
+func (s *Store) RequeuePending() (map[string][]string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.readRequeuePending()
+}
+
+// RemoveRequeuePending drops the given match ids of compID from requeue-pending.json
+// once the caller has resolved them. If no competitions remain, the file is removed;
+// otherwise it is rewritten atomically. A missing file is not an error.
+func (s *Store) RemoveRequeuePending(compID string, matchIDs []string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	have, err := s.readRequeuePending()
+	if err != nil {
+		return err
+	}
+	if len(have) == 0 {
+		return nil
+	}
+	current, ok := have[compID]
+	if !ok || len(current) == 0 {
+		return nil
+	}
+	toDrop := make(map[string]bool, len(matchIDs))
+	for _, id := range matchIDs {
+		toDrop[id] = true
+	}
+	var keep []string
+	for _, id := range current {
+		if !toDrop[id] {
+			keep = append(keep, id)
+		}
+	}
+	if len(keep) == 0 {
+		delete(have, compID)
+	} else {
+		have[compID] = keep
+	}
+	if len(have) == 0 {
+		if err := s.root.remove(s.requeuePendingPath()); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return err
+		}
+		return syncDir(s.root, s.restoreRootDir())
+	}
+	return s.saveRequeuePending(have)
 }

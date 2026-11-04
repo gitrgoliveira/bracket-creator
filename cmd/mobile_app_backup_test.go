@@ -767,3 +767,89 @@ func TestMobileAppBackupRestore_UnsettledWAL(t *testing.T) {
 		assert.Contains(t, out+err.Error(), wantSentence)
 	})
 }
+
+// (13) CLI restore of an archive holding a running match returns it to the queue with its score.
+func TestMobileAppBackupRestore_RequeuesRunningMatches(t *testing.T) {
+	srcDir := t.TempDir()
+	store, err := state.NewStore(srcDir)
+	require.NoError(t, err)
+
+	require.NoError(t, store.SaveTournament(&state.Tournament{
+		Name:     "Kendo Taikai",
+		Date:     "04-11-2026",
+		Courts:   []string{"A"},
+		Password: "source-password",
+	}))
+
+	compID := "open-comp"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:           compID,
+		Name:         "Open Championship",
+		Kind:         "individual",
+		Format:       "league",
+		PoolSize:     4,
+		PoolSizeMode: "min",
+		PoolWinners:  2,
+		RoundRobin:   true,
+		Courts:       []string{"A"},
+		StartTime:    "09:00",
+		Status:       "setup",
+		NumberPrefix: "O",
+	}))
+
+	players := []domain.Player{
+		{ID: "11111111-1111-4111-8111-111111111111", Name: "Alice Smith", Dojo: "North Dojo"},
+		{ID: "22222222-2222-4222-8222-222222222222", Name: "Bob Jones", Dojo: "South Dojo"},
+		{ID: "33333333-3333-4333-8333-333333333333", Name: "Charlie Brown", Dojo: "East Dojo"},
+		{ID: "44444444-4444-4444-8444-444444444444", Name: "David White", Dojo: "West Dojo"},
+	}
+	require.NoError(t, store.SaveParticipants(compID, players))
+
+	eng := engine.New(store)
+	require.NoError(t, eng.StartCompetition(compID))
+
+	matches, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	require.NotEmpty(t, matches)
+
+	runningMatch := matches[0]
+	require.NoError(t, eng.RecordMatchResult(compID, runningMatch.ID, &state.MatchResult{
+		ID:      runningMatch.ID,
+		SideA:   runningMatch.SideA,
+		SideB:   runningMatch.SideB,
+		Status:  state.MatchStatusRunning,
+		Court:   "A",
+		IpponsA: []string{"M"},
+	}))
+
+	zipPath := filepath.Join(t.TempDir(), "backup.zip")
+	_, err = executeMobileApp("backup", "--folder", srcDir, "--out", zipPath)
+	require.NoError(t, err)
+
+	targetDir := t.TempDir()
+	out, err := executeMobileApp("restore", "--folder", targetDir, "--password", "restored-password", zipPath)
+	require.NoError(t, err, "output: %s", out)
+	assert.Contains(t, out, "Restore completed successfully.")
+
+	targetStore, err := state.NewStore(targetDir)
+	require.NoError(t, err)
+
+	restoredMatches, err := targetStore.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	require.NotEmpty(t, restoredMatches)
+
+	var found *state.MatchResult
+	for i := range restoredMatches {
+		if restoredMatches[i].ID == runningMatch.ID {
+			found = &restoredMatches[i]
+			break
+		}
+	}
+	require.NotNil(t, found, "expected running match to be restored")
+	assert.Equal(t, state.MatchStatusScheduled, found.Status)
+	assert.Equal(t, []string{"M"}, found.IpponsA)
+
+	pending, err := targetStore.RequeuePending()
+	require.NoError(t, err)
+	assert.Empty(t, pending, "requeue-pending.json should be removed once resolved")
+}

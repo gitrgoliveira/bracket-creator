@@ -347,6 +347,21 @@ type PrefixEngine interface {
 	RenumberCompetitors(compID string) (bool, error)
 }
 
+// RequeueEngine is what ResolveRestoredRequeues calls on the engine to send
+// a restored running match back to the queue.
+// *engine.Engine satisfies it.
+type RequeueEngine interface {
+	RevertMatchToQueue(compID, matchID string, opts ...engine.ForceOptions) error
+}
+
+// RestoreEngine combines what restore needs from the engine: number prefix
+// reassignment and returning restored running matches to the queue.
+// *engine.Engine satisfies it.
+type RestoreEngine interface {
+	PrefixEngine
+	RequeueEngine
+}
+
 // PendingPrefixStore adds prefixes-pending.json, the list a restore leaves of
 // the competitions still waiting for a new prefix (ResolveRestoredPrefixes).
 type PendingPrefixStore interface {
@@ -355,11 +370,20 @@ type PendingPrefixStore interface {
 	RemovePrefixesPending(ids []string) error
 }
 
+// PendingRequeueStore adds requeue-pending.json, the list a restore leaves of
+// matches that were running in the backup and must be returned to the queue.
+// *state.Store satisfies it.
+type PendingRequeueStore interface {
+	RequeuePending() (map[string][]string, error)
+	RemoveRequeuePending(compID string, matchIDs []string) error
+}
+
 // BackupStore is what handlers_backup.go reaches in the store: snapshots,
 // the restore and its plan, and the copies kept in backups/.
 // *state.Store satisfies it.
 type BackupStore interface {
 	PendingPrefixStore
+	PendingRequeueStore
 	Snapshot(scope state.SnapshotScope, compID string) (state.Snapshot, error)
 	PlanRestore(req state.RestoreRequest) (state.RestorePlan, error)
 	Restore(req state.RestoreRequest) (state.RestorePlan, error)

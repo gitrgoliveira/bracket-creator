@@ -4989,7 +4989,7 @@ async function _backupRequest(url, failure, { method = 'GET', password, confirmP
     const res = await fetch(url, { method, headers, ...(body ? { body } : {}) });
     if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        throw Object.assign(new Error(err.error || failure), { code: err.code });
+        throw Object.assign(new Error(err.error || failure), { code: err.code, status: res.status });
     }
     return res;
 }

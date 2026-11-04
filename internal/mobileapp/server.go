@@ -79,6 +79,9 @@ func NewRouterWithHub(store *state.Store, eng *engine.Engine, res *resources.Res
 			slog.Warn("mobile-app: restored competition: "+w.Message, "competition", w.CompetitionID)
 		}
 	}
+	if err := ResolveRestoredRequeues(store, eng); err != nil {
+		slog.Warn("mobile-app: restored running matches not returned to queue; retried at the next start", "err", err)
+	}
 
 	// Enable CORS
 	r.Use(func(c *gin.Context) {

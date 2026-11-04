@@ -982,8 +982,10 @@ paths:
         Saves an automatic safety backup into `backups/` (named `<timestamp>-before-restore-<scope>.zip`)
         before any live directory is replaced or removed. Every rename is journaled, so a
         restore that a crash interrupts is rolled forward on the next start.
-        Colliding competition number prefixes are reassigned after the restore completes,
-        and the server broadcasts a `tournament_updated` event once over SSE.
+        Colliding competition number prefixes are reassigned after the restore completes.
+        No match comes back running: each match the archive holds as running is sent back
+        to the queue (`scheduled`) with its score, as `POST /api/competitions/{id}/matches/{mid}/revert-to-queue` does, and the
+        operator starts it again. Then the server broadcasts a `tournament_updated` event once over SSE.
 
         Refusals change nothing on disk.
 
@@ -7164,7 +7166,7 @@ components:
                 type: array
                 items:
                   type: string
-                description: Matches in the archive that will be restored in running state.
+                description: Matches the archive holds as running. They are restored to the queue (`scheduled`) with their score, as a send back to the queue does, and listed in `requeuePending`.
               resultsChanged:
                 type: array
                 items:
@@ -7183,6 +7185,16 @@ components:
           items:
             type: string
           description: Restored competition IDs whose number prefix collides with another competition.
+        requeuePending:
+          type: object
+          additionalProperties:
+            type: array
+            items:
+              type: string
+          description: >
+            Running matches the restore puts back in the queue, keyed by the competition ID
+            as restored (a copy's new ID). The server sends each one back to the queue right
+            after the restore, keeping its score, and at the next start if a crash stopped it first.
         warnings:
           type: array
           description: Non-fatal warnings about the restore.
@@ -7192,7 +7204,7 @@ components:
             properties:
               code:
                 type: string
-                enum: [matches_running, court_busy, court_missing, mode_changes, prefix_reassigned]
+                enum: [matches_running, matches_requeued, court_missing, mode_changes, prefix_reassigned]
                 description: Warning code.
               competitionId:
                 type: string
@@ -7235,6 +7247,9 @@ components:
         prefixError:
           type: string
           description: Present only if prefix reassignment failed; advises restarting the app.
+        requeueError:
+          type: string
+          description: Present when the restore finished but its running matches could not be returned to the queue; the app retries at its next start.
 
     KachinukiRosterSide:
       type: object

@@ -6,6 +6,8 @@ const { useState, useEffect, useRef, useCallback } = React;
 const AdminTopbar = window.AdminTopbar;
 const Breadcrumbs = window.Breadcrumbs;
 
+const RESTORE_TOO_LARGE_MESSAGE = "The backup file is over 64 MB. Restore it from Copies kept on this computer or the command line.";
+
 function formatFileSize(bytes) {
   if (typeof bytes !== "number" || isNaN(bytes)) return "";
   if (bytes < 1024) return `${bytes} B`;
@@ -108,7 +110,11 @@ function AdminBackupPage({ tournament, onBack, onLogout, onViewerMode, password,
       setOnlyCompId(only || null);
     } catch (e) {
       if (!mountedRef.current) return;
-      setPlanError(e.message || "Failed to check restore plan");
+      if (e?.status === 413) {
+        setPlanError(RESTORE_TOO_LARGE_MESSAGE);
+      } else {
+        setPlanError(e.message || "Failed to check restore plan");
+      }
     } finally {
       if (mountedRef.current) setPlanning(false);
     }
@@ -206,7 +212,11 @@ function AdminBackupPage({ tournament, onBack, onLogout, onViewerMode, password,
           if (typeof e.code === "string" && e.code.startsWith("confirm_password_")) {
             return e.message;
           }
-          setPlanError(e.message || "Failed to restore");
+          if (e?.status === 413) {
+            setPlanError(RESTORE_TOO_LARGE_MESSAGE);
+          } else {
+            setPlanError(e.message || "Failed to restore");
+          }
           if (e.code === "matches_running") {
             runPlan({
               file: selectedFile,
@@ -379,6 +389,11 @@ function AdminBackupPage({ tournament, onBack, onLogout, onViewerMode, password,
               {restoreResult.prefixError && (
                 <div className="alert alert--error" style={{ marginTop: 8, marginBottom: 8 }}>
                   {restoreResult.prefixError}
+                </div>
+              )}
+              {restoreResult.requeueError && (
+                <div className="alert alert--error" style={{ marginTop: 8, marginBottom: 8 }}>
+                  {restoreResult.requeueError}
                 </div>
               )}
               {restoreResult.safetyCopy && !restoreResult.isUndoResult && (

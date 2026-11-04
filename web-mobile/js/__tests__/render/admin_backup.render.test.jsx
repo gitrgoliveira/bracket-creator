@@ -1067,4 +1067,75 @@ describe('AdminBackupPage render tests', () => {
     expect(downloaded).toEqual([serverName]);
     expect(showToast).toHaveBeenCalledWith(toast);
   });
+
+  it('shows the plain sentence when an uploaded backup is over 64 MB (HTTP 413)', async () => {
+    const err = new Error('request body too large');
+    err.status = 413;
+    mockApi.planRestore.mockRejectedValue(err);
+
+    const { container } = render(
+      <AdminBackupPage
+        tournament={defaultTournament}
+        password={TEST_KEY}
+      />
+    );
+
+    const fileInput = container.querySelector('input[type="file"]');
+    const fakeFile = new File(['dummy'], 'large.zip', { type: 'application/zip' });
+    await act(async () => {
+      fireEvent.change(fileInput, { target: { files: [fakeFile] } });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('The backup file is over 64 MB. Restore it from Copies kept on this computer or the command line.')).toBeInTheDocument();
+    });
+  });
+
+  it('shows requeueError in the restore-done card when present on the restore result', async () => {
+    const plan = {
+      scope: 'competition',
+      competitions: [{ id: 'c1', name: 'Open Individual', asked: false }],
+    };
+    mockApi.planRestore.mockResolvedValueOnce(plan);
+
+    const requeueSentence = 'Could not return 1 running match to the queue; the app retries at its next start.';
+    const restoreResponse = {
+      plan,
+      safetyCopy: '20261104T150000Z-before-restore-competition.zip',
+      requeueError: requeueSentence,
+    };
+
+    let dialogSubmitCb = null;
+    window.promptDialog = vi.fn().mockImplementation((opts) => {
+      dialogSubmitCb = opts.submit;
+      return Promise.resolve(null);
+    });
+
+    const { container } = render(
+      <AdminBackupPage
+        tournament={defaultTournament}
+        password={SESSION_KEY}
+      />
+    );
+
+    const fileInput = container.querySelector('input[type="file"]');
+    await act(async () => {
+      fireEvent.change(fileInput, { target: { files: [new File(['dummy'], 'backup.zip')] } });
+    });
+
+    const restoreBtn = await screen.findByRole('button', { name: /^Restore$/i });
+    expect(restoreBtn).toBeEnabled();
+
+    await act(async () => {
+      fireEvent.click(restoreBtn);
+    });
+
+    mockApi.restore.mockResolvedValueOnce(restoreResponse);
+    await act(async () => {
+      await dialogSubmitCb('correct-pw');
+    });
+
+    expect(await screen.findByText(/Restore completed/i)).toBeInTheDocument();
+    expect(screen.getByText(requeueSentence)).toBeInTheDocument();
+  });
 });

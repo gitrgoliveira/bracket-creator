@@ -119,6 +119,15 @@ describe('admin_backup_api', () => {
       expect(opts.body.get('from')).toBe('20260101T000000Z-scheduled.zip');
       expect(opts.body.get('undo')).toBe('true');
     });
+
+    it('attaches HTTP status to thrown error when request fails', async () => {
+      global.fetch = mockFetch(413, { error: 'request body too large' });
+      const fakeFile = new File(['dummy'], 'large.zip', { type: 'application/zip' });
+      const err = await API.planRestore({ file: fakeFile }, ORGANISER_KEY).catch((e) => e);
+      expect(err).toBeInstanceOf(Error);
+      expect(err.status).toBe(413);
+      expect(err.message).toBe('request body too large');
+    });
   });
 
   describe('restore', () => {

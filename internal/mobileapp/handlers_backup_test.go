@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"io/fs"
 	"mime/multipart"
 	"net/http"
@@ -512,4 +513,153 @@ func TestReassignRestoredPrefixes_RenumbersEvenWhenPrefixNoLongerCollides(t *tes
 	require.NoError(t, err)
 	assert.Empty(t, warnings)
 	assert.Equal(t, []string{"alpha"}, spy.renumbered)
+}
+
+func TestResolveRestoredRequeues_RequeuesPendingMatches(t *testing.T) {
+	rig := newBackupRig(t)
+	m := state.MatchResult{
+		ID: "Pool A-1", SideA: "Alice", SideB: "Bob", SideAID: "p1", SideBID: "p2",
+		Status: state.MatchStatusRunning, Court: "A", IpponsA: []string{"M"},
+	}
+	require.NoError(t, rig.store.SavePoolMatches("alpha", []state.MatchResult{m}))
+	bm := state.BracketMatch{
+		ID: "r1-m1", SideA: "Alice", SideB: "Bob", SideAID: "p1", SideBID: "p2",
+		Status: state.MatchStatusRunning, Court: "A",
+	}
+	b := &state.Bracket{Rounds: [][]state.BracketMatch{{bm}}}
+	require.NoError(t, rig.store.SaveBracket("alpha", b))
+
+	require.NoError(t, os.MkdirAll(filepath.Join(rig.dir, backup.RestoreDirName), 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(rig.dir, backup.RestoreDirName, "requeue-pending.json"),
+		[]byte(`{"alpha":["Pool A-1","r1-m1"]}`), 0o600))
+
+	err := ResolveRestoredRequeues(rig.store, engine.New(rig.store))
+	require.NoError(t, err)
+
+	pm, err := rig.store.LoadPoolMatches("alpha")
+	require.NoError(t, err)
+	require.Len(t, pm, 1)
+	assert.Equal(t, state.MatchStatusScheduled, pm[0].Status)
+	assert.Equal(t, []string{"M"}, pm[0].IpponsA)
+
+	loadedBracket, err := rig.store.LoadBracket("alpha")
+	require.NoError(t, err)
+	assert.Equal(t, state.MatchStatusScheduled, loadedBracket.Rounds[0][0].Status)
+
+	hist, err := rig.store.LoadMatchHistory("alpha", "Pool A-1")
+	require.NoError(t, err)
+	require.Len(t, hist, 1)
+	assert.Equal(t, "requeue", hist[0].Door)
+
+	pending, err := rig.store.RequeuePending()
+	require.NoError(t, err)
+	assert.Empty(t, pending)
+	_, err = os.Stat(filepath.Join(rig.dir, backup.RestoreDirName, "requeue-pending.json"))
+	assert.True(t, os.IsNotExist(err))
+}
+
+func TestResolveRestoredRequeues_DropsCompletedAndMissingMatchesWithoutError(t *testing.T) {
+	rig := newBackupRig(t)
+	m := state.MatchResult{
+		ID: "Pool A-1", SideA: "Alice", SideB: "Bob", SideAID: "p1", SideBID: "p2",
+		Status: state.MatchStatusCompleted, Court: "A", Winner: "Alice", WinnerID: "p1",
+	}
+	require.NoError(t, rig.store.SavePoolMatches("alpha", []state.MatchResult{m}))
+	require.NoError(t, os.MkdirAll(filepath.Join(rig.dir, backup.RestoreDirName), 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(rig.dir, backup.RestoreDirName, "requeue-pending.json"),
+		[]byte(`{"alpha":["Pool A-1","ghost-match"],"ghost-comp":["m1"]}`), 0o600))
+
+	err := ResolveRestoredRequeues(rig.store, engine.New(rig.store))
+	require.NoError(t, err)
+
+	pending, err := rig.store.RequeuePending()
+	require.NoError(t, err)
+	assert.Empty(t, pending)
+	_, err = os.Stat(filepath.Join(rig.dir, backup.RestoreDirName, "requeue-pending.json"))
+	assert.True(t, os.IsNotExist(err))
+}
+
+type failingRequeueEngine struct {
+	err error
+}
+
+func (f *failingRequeueEngine) RevertMatchToQueue(compID, matchID string, opts ...engine.ForceOptions) error {
+	return f.err
+}
+
+func TestResolveRestoredRequeues_ErrorLeavesEntryPending(t *testing.T) {
+	rig := newBackupRig(t)
+	require.NoError(t, os.MkdirAll(filepath.Join(rig.dir, backup.RestoreDirName), 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(rig.dir, backup.RestoreDirName, "requeue-pending.json"),
+		[]byte(`{"alpha":["Pool A-1"]}`), 0o600))
+
+	boom := errors.New("boom")
+	err := ResolveRestoredRequeues(rig.store, &failingRequeueEngine{err: boom})
+	require.ErrorIs(t, err, boom)
+
+	pending, err := rig.store.RequeuePending()
+	require.NoError(t, err)
+	assert.Equal(t, []string{"Pool A-1"}, pending["alpha"])
+}
+
+func TestRestoreHandler_EndToEndRequeuesRunningMatchWithScore(t *testing.T) {
+	srcRig := newBackupRig(t)
+	m := state.MatchResult{
+		ID: "Pool A-1", SideA: "Alice", SideB: "Bob", SideAID: "p1", SideBID: "p2",
+		Status: state.MatchStatusRunning, Court: "A", IpponsA: []string{"M"},
+	}
+	require.NoError(t, srcRig.store.SavePoolMatches("alpha", []state.MatchResult{m}))
+	archiveData := takeBackup(t, srcRig.r, "/api/tournament/backup")
+
+	dstRig := newBackupRig(t)
+	w := restorePost(t, dstRig.r, "/api/tournament/restore", archiveData, map[string]string{
+		"decisions":    `{"alpha":{"action":"replace"},"beta":{"action":"replace"}}`,
+		"allowRunning": "true",
+	}, backupTestPassword, backupTestPassword)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	matches, err := dstRig.store.LoadPoolMatches("alpha")
+	require.NoError(t, err)
+	require.Len(t, matches, 1)
+	assert.Equal(t, state.MatchStatusScheduled, matches[0].Status, "match should be requeued to scheduled")
+	assert.Equal(t, []string{"M"}, matches[0].IpponsA, "score points must be intact")
+
+	pending, err := dstRig.store.RequeuePending()
+	require.NoError(t, err)
+	assert.Empty(t, pending)
+}
+
+func TestServerStart_ResolvesRequeuesARestoreLeftPending(t *testing.T) {
+	dir := t.TempDir()
+	store, err := state.NewStore(dir)
+	require.NoError(t, err)
+	require.NoError(t, store.SaveTournament(&state.Tournament{
+		Name: "Backup Taikai", Date: "01-06-2026", Venue: "Dojo", Courts: []string{"A"},
+		Password: backupTestPassword, Mode: state.TournamentModeOfficiated,
+	}))
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: "alpha", Name: "Alpha", NumberPrefix: "A", Date: "01-06-2026", Courts: []string{"A"}}))
+	m := state.MatchResult{
+		ID: "Pool A-1", SideA: "Alice", SideB: "Bob", SideAID: "p1", SideBID: "p2",
+		Status: state.MatchStatusRunning, Court: "A", IpponsA: []string{"K"},
+	}
+	require.NoError(t, store.SavePoolMatches("alpha", []state.MatchResult{m}))
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, backup.RestoreDirName), 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, backup.RestoreDirName, "requeue-pending.json"),
+		[]byte(`{"alpha":["Pool A-1"]}`), 0o600))
+
+	pending, err := store.RequeuePending()
+	require.NoError(t, err)
+	require.Equal(t, []string{"Pool A-1"}, pending["alpha"])
+
+	newBackupRouter(t, store)
+
+	ms, err := store.LoadPoolMatches("alpha")
+	require.NoError(t, err)
+	require.Len(t, ms, 1)
+	assert.Equal(t, state.MatchStatusScheduled, ms[0].Status)
+	assert.Equal(t, []string{"K"}, ms[0].IpponsA)
+
+	pending, err = store.RequeuePending()
+	require.NoError(t, err)
+	assert.Empty(t, pending)
 }

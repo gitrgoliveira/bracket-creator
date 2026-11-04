@@ -3,6 +3,7 @@ package state
 import (
 	"archive/zip"
 	"bytes"
+	"encoding/json"
 	"errors"
 	"io"
 	"io/fs"
@@ -649,21 +650,131 @@ func TestRestore_RunningMatchesRefuseUnlessAllowed(t *testing.T) {
 	require.NoError(t, err)
 }
 
-func TestRestore_ACopyWarnsAboutABusyShiaijo(t *testing.T) {
+func TestRestore_ACopyWarnsAboutMatchesRequeued(t *testing.T) {
 	s, _ := newRestoreTestStore(t)
 	addRestoreComp(t, s, "men", "Men", "M", MatchStatusRunning, "A")
 	a := archiveOf(t, s, ScopeCompetition, "men")
 	plan, err := s.PlanRestore(RestoreRequest{Archive: a, Decisions: map[string]RestoreDecision{"men": {Action: RestoreCopy, CopyName: "Men again"}}})
 	require.NoError(t, err)
-	var busy []RestoreWarning
+	require.NotNil(t, plan.RequeuePending)
+	assert.Equal(t, []string{"Pool A-0"}, plan.RequeuePending["men-again"])
+
+	var requeued []RestoreWarning
 	for _, w := range plan.Warnings {
-		if w.Code == RestoreWarnCourtBusy {
-			busy = append(busy, w)
+		assert.NotEqual(t, "court_busy", w.Code)
+		if w.Code == RestoreWarnMatchesRequeued {
+			requeued = append(requeued, w)
 		}
 	}
-	require.Len(t, busy, 1)
-	assert.Equal(t, "A", busy[0].Court)
-	assert.Equal(t, "men-again", busy[0].CompetitionID)
+	require.Len(t, requeued, 1)
+	assert.Equal(t, "men-again", requeued[0].CompetitionID)
+	assert.Equal(t, "Men comes back with 1 match that was running in the backup; it returns to the queue with its score.", requeued[0].Message)
+}
+
+func TestRestore_TournamentRestoreRequeuesRunningPoolAndBracketMatches(t *testing.T) {
+	src, _ := newRestoreTestStore(t)
+	restoreTestTournament(t, src, "pw", "A", "B")
+	addRestoreComp(t, src, "open", "Open Championship", "O", MatchStatusRunning, "A")
+	bracket := &Bracket{
+		Rounds: [][]BracketMatch{
+			{
+				{
+					ID: "r1-m1", Status: MatchStatusRunning, Court: "B",
+					SideA: "Alice", SideB: "Bob", SideAID: "p1", SideBID: "p2",
+				},
+			},
+		},
+	}
+	require.NoError(t, src.SaveBracket("open", bracket))
+	a := archiveOf(t, src, ScopeTournament, "")
+
+	dst, dir := newRestoreTestStore(t)
+	restoreTestTournament(t, dst, "pw", "A", "B")
+	// Save initial destination competition with running matches so safety copy captures them
+	addRestoreComp(t, dst, "open", "Open Championship", "O", MatchStatusRunning, "A")
+	require.NoError(t, dst.SaveBracket("open", bracket))
+
+	// 1. Plan check
+	plan, err := dst.PlanRestore(RestoreRequest{
+		Archive:   a,
+		Decisions: map[string]RestoreDecision{"open": {Action: RestoreReplace}},
+	})
+	require.NoError(t, err)
+	require.NotNil(t, plan.RequeuePending)
+	assert.Equal(t, []string{"Pool A-0", "r1-m1"}, plan.RequeuePending["open"])
+
+	for _, w := range plan.Warnings {
+		assert.NotEqual(t, "court_busy", w.Code, "court_busy warning must not be raised")
+	}
+	var requeuedWarnings []RestoreWarning
+	for _, w := range plan.Warnings {
+		if w.Code == RestoreWarnMatchesRequeued {
+			requeuedWarnings = append(requeuedWarnings, w)
+		}
+	}
+	require.Len(t, requeuedWarnings, 1)
+	assert.Equal(t, "open", requeuedWarnings[0].CompetitionID)
+	assert.Equal(t, "Open Championship comes back with 2 matches that were running in the backup; they return to the queue with their score.", requeuedWarnings[0].Message)
+
+	// 2. Copy uses copy's new id
+	copyPlan, err := dst.PlanRestore(RestoreRequest{
+		Archive:   a,
+		Decisions: map[string]RestoreDecision{"open": {Action: RestoreCopy, CopyName: "Open Two"}},
+	})
+	require.NoError(t, err)
+	require.NotNil(t, copyPlan.RequeuePending)
+	assert.Equal(t, []string{"Pool A-0", "r1-m1"}, copyPlan.RequeuePending["open-two"])
+	var copyWarnings []RestoreWarning
+	for _, w := range copyPlan.Warnings {
+		if w.Code == RestoreWarnMatchesRequeued {
+			copyWarnings = append(copyWarnings, w)
+		}
+	}
+	require.Len(t, copyWarnings, 1)
+	assert.Equal(t, "open-two", copyWarnings[0].CompetitionID)
+
+	// 3. Restore writes requeue-pending.json before the swap
+	var fileCheckedBeforeSwap bool
+	afterRestoreStep = func(i int, _ restoreStep) error {
+		if !fileCheckedBeforeSwap {
+			raw, rerr := os.ReadFile(filepath.Join(dir, backup.RestoreDirName, "requeue-pending.json"))
+			require.NoError(t, rerr)
+			var m map[string][]string
+			require.NoError(t, json.Unmarshal(raw, &m))
+			assert.Equal(t, []string{"Pool A-0", "r1-m1"}, m["open"])
+			fileCheckedBeforeSwap = true
+		}
+		return nil
+	}
+	defer func() { afterRestoreStep = nil }()
+
+	var sc safetyCopy
+	_, err = dst.Restore(RestoreRequest{
+		Archive:      a,
+		AllowRunning: true,
+		BeforeSwap:   sc.hook(t),
+		Decisions:    map[string]RestoreDecision{"open": {Action: RestoreReplace}},
+	})
+	require.NoError(t, err)
+	assert.True(t, fileCheckedBeforeSwap, "requeue-pending.json must be written before journal swap steps")
+
+	pending, err := dst.RequeuePending()
+	require.NoError(t, err)
+	assert.Equal(t, []string{"Pool A-0", "r1-m1"}, pending["open"])
+
+	// 4. Undo collects them too
+	undoPlan, err := dst.PlanRestore(RestoreRequest{Archive: sc.archive, Undo: true})
+	require.NoError(t, err)
+	require.NotNil(t, undoPlan.RequeuePending)
+	assert.Equal(t, []string{"Pool A-0", "r1-m1"}, undoPlan.RequeuePending["open"])
+	var undoWarnings []RestoreWarning
+	for _, w := range undoPlan.Warnings {
+		if w.Code == RestoreWarnMatchesRequeued {
+			undoWarnings = append(undoWarnings, w)
+		}
+	}
+	require.Len(t, undoWarnings, 1)
+	assert.Equal(t, "open", undoWarnings[0].CompetitionID)
 }
 
 func TestRestore_AnUnreadableArchiveFileIsRefusedBeforeStaging(t *testing.T) {

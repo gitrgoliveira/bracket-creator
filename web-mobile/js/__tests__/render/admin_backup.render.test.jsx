@@ -3,6 +3,9 @@ import { render, act, fireEvent, waitFor, screen } from '@testing-library/react'
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vitest';
 import { installWindowStubs } from '../helpers/stub_globals.js';
 
+const TEST_KEY = 'test-key';
+const SESSION_KEY = 'session-key';
+
 const Stub = (name) => {
   const C = ({ children }) => <div data-stub={name}>{children}</div>;
   C.displayName = `Stub(${name})`;
@@ -73,7 +76,7 @@ describe('AdminBackupPage render tests', () => {
     render(
       <AdminBackupPage
         tournament={defaultTournament}
-        password="test-pw"
+        password={TEST_KEY}
       />
     );
 
@@ -121,7 +124,7 @@ describe('AdminBackupPage render tests', () => {
     const { container } = render(
       <AdminBackupPage
         tournament={defaultTournament}
-        password="test-pw"
+        password={TEST_KEY}
       />
     );
 
@@ -195,7 +198,7 @@ describe('AdminBackupPage render tests', () => {
     const { container, rerender } = render(
       <AdminBackupPage
         tournament={defaultTournament}
-        password="session-pw"
+        password={SESSION_KEY}
       />
     );
 
@@ -248,7 +251,7 @@ describe('AdminBackupPage render tests', () => {
     rerender(
       <AdminBackupPage
         tournament={{ ...defaultTournament, name: 'Updated Spring Taikai' }}
-        password="session-pw"
+        password={SESSION_KEY}
       />
     );
 
@@ -275,7 +278,7 @@ describe('AdminBackupPage render tests', () => {
     const { container } = render(
       <AdminBackupPage
         tournament={defaultTournament}
-        password="session-pw"
+        password={SESSION_KEY}
       />
     );
 
@@ -317,7 +320,7 @@ describe('AdminBackupPage render tests', () => {
           from: '20261104T150000Z-before-restore-competition.zip',
           undo: true,
         }),
-        'session-pw'
+        SESSION_KEY
       );
     });
 
@@ -342,7 +345,7 @@ describe('AdminBackupPage render tests', () => {
     const { container } = render(
       <AdminBackupPage
         tournament={defaultTournament}
-        password="session-pw"
+        password={SESSION_KEY}
       />
     );
 
@@ -371,7 +374,7 @@ describe('AdminBackupPage render tests', () => {
           file: fakeFile,
           only: 'c1',
         }),
-        'session-pw'
+        SESSION_KEY
       );
     });
   });
@@ -389,7 +392,7 @@ describe('AdminBackupPage render tests', () => {
     render(
       <AdminBackupPage
         tournament={defaultTournament}
-        password="session-pw"
+        password={SESSION_KEY}
       />
     );
 
@@ -414,7 +417,7 @@ describe('AdminBackupPage render tests', () => {
         from: '20261104T100000Z-before-restore-tournament.zip',
         undo: false,
       }),
-      'session-pw'
+      SESSION_KEY
     );
 
     // Expect choices to be asked
@@ -445,7 +448,7 @@ describe('AdminBackupPage render tests', () => {
     mockApi.planRestore.mockResolvedValueOnce(plan);
 
     const { container } = render(
-      <AdminBackupPage tournament={defaultTournament} password="test-pw" />
+      <AdminBackupPage tournament={defaultTournament} password={TEST_KEY} />
     );
 
     const fileInput = container.querySelector('input[type="file"]');
@@ -476,7 +479,7 @@ describe('AdminBackupPage render tests', () => {
     mockApi.restore.mockResolvedValueOnce({ plan: planWithRunning });
 
     const { container, unmount } = render(
-      <AdminBackupPage tournament={defaultTournament} password="test-pw" />
+      <AdminBackupPage tournament={defaultTournament} password={TEST_KEY} />
     );
 
     let fileInput = container.querySelector('input[type="file"]');
@@ -496,7 +499,7 @@ describe('AdminBackupPage render tests', () => {
 
     expect(mockApi.restore).toHaveBeenLastCalledWith(
       expect.objectContaining({ allowRunning: true }),
-      'test-pw',
+      TEST_KEY,
       'confirm-pw'
     );
 
@@ -512,7 +515,7 @@ describe('AdminBackupPage render tests', () => {
     mockApi.restore.mockResolvedValueOnce({ plan: planWithoutRunning });
 
     const rendered2 = render(
-      <AdminBackupPage tournament={defaultTournament} password="test-pw" />
+      <AdminBackupPage tournament={defaultTournament} password={TEST_KEY} />
     );
 
     fileInput = rendered2.container.querySelector('input[type="file"]');
@@ -532,7 +535,7 @@ describe('AdminBackupPage render tests', () => {
 
     expect(mockApi.restore).toHaveBeenLastCalledWith(
       expect.not.objectContaining({ allowRunning: true }),
-      'test-pw',
+      TEST_KEY,
       'confirm-pw'
     );
   });
@@ -554,7 +557,7 @@ describe('AdminBackupPage render tests', () => {
     );
 
     const { container } = render(
-      <AdminBackupPage tournament={defaultTournament} password="test-pw" onLogout={onLogout} />
+      <AdminBackupPage tournament={defaultTournament} password={TEST_KEY} onLogout={onLogout} />
     );
 
     const fileInput = container.querySelector('input[type="file"]');
@@ -595,7 +598,7 @@ describe('AdminBackupPage render tests', () => {
     });
 
     const { container, rerender } = render(
-      <AdminBackupPage tournament={defaultTournament} password="test-pw" />
+      <AdminBackupPage tournament={defaultTournament} password={TEST_KEY} />
     );
 
     const fileInput = container.querySelector('input[type="file"]');
@@ -620,7 +623,7 @@ describe('AdminBackupPage render tests', () => {
     rerender(
       <AdminBackupPage
         tournament={{ ...defaultTournament, name: 'Brand New Tournament Name' }}
-        password="test-pw"
+        password={TEST_KEY}
       />
     );
 
@@ -648,7 +651,7 @@ describe('AdminBackupPage render tests', () => {
     });
 
     const { container } = render(
-      <AdminBackupPage tournament={defaultTournament} password="test-pw" />
+      <AdminBackupPage tournament={defaultTournament} password={TEST_KEY} />
     );
 
     const fileInput = container.querySelector('input[type="file"]');
@@ -680,7 +683,7 @@ describe('AdminBackupPage render tests', () => {
     mockApi.planRestore.mockResolvedValueOnce(beforeRestorePlan);
 
     render(
-      <AdminBackupPage tournament={defaultTournament} password="session-pw" />
+      <AdminBackupPage tournament={defaultTournament} password={SESSION_KEY} />
     );
 
     const rowRestoreBtn = await screen.findByRole('button', { name: 'Restore 20261104T100000Z-before-restore-tournament.zip' });
@@ -700,7 +703,7 @@ describe('AdminBackupPage render tests', () => {
           from: '20261104T100000Z-before-restore-tournament.zip',
           undo: false,
         }),
-        'session-pw'
+        SESSION_KEY
       );
     });
     expect(mockApi.planRestore.mock.calls[0][0].undo).not.toBe(true);
@@ -727,7 +730,7 @@ describe('AdminBackupPage render tests', () => {
     });
 
     const { container } = render(
-      <AdminBackupPage tournament={defaultTournament} password="test-pw" />
+      <AdminBackupPage tournament={defaultTournament} password={TEST_KEY} />
     );
 
     const fileInput = container.querySelector('input[type="file"]');
@@ -759,7 +762,7 @@ describe('AdminBackupPage render tests', () => {
     const { container } = render(
       <AdminBackupPage
         tournament={defaultTournament}
-        password="session-pw"
+        password={SESSION_KEY}
       />
     );
 
@@ -786,7 +789,7 @@ describe('AdminBackupPage render tests', () => {
       expect.objectContaining({
         undo: false,
       }),
-      'session-pw',
+      SESSION_KEY,
       'correct-pw'
     );
 
@@ -813,7 +816,7 @@ describe('AdminBackupPage render tests', () => {
           from: '20261104T150000Z-before-restore-competition.zip',
           undo: true,
         }),
-        'session-pw'
+        SESSION_KEY
       );
     });
 
@@ -836,7 +839,7 @@ describe('AdminBackupPage render tests', () => {
         from: '20261104T150000Z-before-restore-competition.zip',
         undo: true,
       }),
-      'session-pw',
+      SESSION_KEY,
       'correct-pw'
     );
   });
@@ -869,7 +872,7 @@ describe('AdminBackupPage render tests', () => {
     const { container } = render(
       <AdminBackupPage
         tournament={defaultTournament}
-        password="session-pw"
+        password={SESSION_KEY}
       />
     );
 
@@ -902,7 +905,7 @@ describe('AdminBackupPage render tests', () => {
     const { container } = render(
       <AdminBackupPage
         tournament={defaultTournament}
-        password="test-pw"
+        password={TEST_KEY}
       />
     );
 
@@ -952,7 +955,7 @@ describe('AdminBackupPage render tests', () => {
     const { container } = render(
       <AdminBackupPage
         tournament={defaultTournament}
-        password="session-pw"
+        password={SESSION_KEY}
       />
     );
 
@@ -977,7 +980,7 @@ describe('AdminBackupPage render tests', () => {
           file: fakeFile,
           only: 'c1',
         }),
-        'session-pw'
+        SESSION_KEY
       );
     });
 
@@ -997,7 +1000,7 @@ describe('AdminBackupPage render tests', () => {
     const lastCallArg = mockApi.planRestore.mock.calls[2][0];
     expect(lastCallArg.file).toBe(fakeFile);
     expect(lastCallArg.only).toBeUndefined();
-    expect(mockApi.planRestore.mock.calls[2][1]).toBe('session-pw');
+    expect(mockApi.planRestore.mock.calls[2][1]).toBe(SESSION_KEY);
 
     // Button is gone once full plan is back
     await waitFor(() => {
@@ -1008,8 +1011,8 @@ describe('AdminBackupPage render tests', () => {
   });
 
   it.each([
-    ['tournament', { name: 'Back up the whole tournament' }, 'backupTournament', ['test-pw'], 'spring-taikai-20261104T120000Z.zip', 'Tournament backup downloaded'],
-    ['competition', { name: 'Back up' }, 'backupCompetition', ['c1', 'test-pw'], 'spring-taikai-c1-20261104T120000Z.zip', 'Backup for "Open Individual" downloaded'],
+    ['tournament', { name: 'Back up the whole tournament' }, 'backupTournament', [TEST_KEY], 'spring-taikai-20261104T120000Z.zip', 'Tournament backup downloaded'],
+    ['competition', { name: 'Back up' }, 'backupCompetition', ['c1', TEST_KEY], 'spring-taikai-c1-20261104T120000Z.zip', 'Backup for "Open Individual" downloaded'],
   ])('downloads the %s backup under the name the server sent', async (_scope, buttonQuery, apiName, apiArgs, serverName, toast) => {
     const showToast = vi.fn();
     vi.spyOn(window.URL, 'createObjectURL').mockReturnValue('blob:test');
@@ -1022,7 +1025,7 @@ describe('AdminBackupPage render tests', () => {
       return el;
     });
     try {
-      render(<AdminBackupPage tournament={defaultTournament} password="test-pw" showToast={showToast} />);
+      render(<AdminBackupPage tournament={defaultTournament} password={TEST_KEY} showToast={showToast} />);
       await act(async () => {
         fireEvent.click(screen.getAllByRole('button', buttonQuery)[0]);
       });

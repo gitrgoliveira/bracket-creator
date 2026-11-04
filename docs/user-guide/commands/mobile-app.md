@@ -181,7 +181,7 @@ Restore into a fresh directory in file mode, setting the admin password:
 ```bash
 bracket-creator mobile-app restore ./backups/event-round1.zip \
   -f ./tournament-data \
-  --password "secret123"
+  --password "<admin-password>"
 ```
 
 Undo a previous restore using its safety copy:

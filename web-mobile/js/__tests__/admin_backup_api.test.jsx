@@ -1,6 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { API } from '../api_client.jsx';
 
+const ORGANISER_KEY = 'organiser-key';
+const SESSION_KEY = 'session-key';
+
 function mockFetch(status, body, { headers = {} } = {}) {
   return vi.fn(() =>
     Promise.resolve({
@@ -46,19 +49,19 @@ describe('admin_backup_api', () => {
         headers: { 'Content-Disposition': 'attachment; filename="tournament-20261103T100000Z.zip"' },
       });
 
-      const result = await API.backupTournament('secret-pw');
+      const result = await API.backupTournament(ORGANISER_KEY);
       expect(result).toEqual({ blob, filename: 'tournament-20261103T100000Z.zip' });
 
       expect(global.fetch).toHaveBeenCalledTimes(1);
       const [url, opts] = global.fetch.mock.calls[0];
       expect(url).toBe('/api/tournament/backup');
       expect(opts.method).toBe('GET');
-      expect(opts.headers['X-Tournament-Password']).toBe('secret-pw');
+      expect(opts.headers['X-Tournament-Password']).toBe(ORGANISER_KEY);
     });
 
     it('throws server error message on failure', async () => {
       global.fetch = mockFetch(500, { error: 'Backup failed' });
-      await expect(API.backupTournament('secret-pw')).rejects.toThrow('Backup failed');
+      await expect(API.backupTournament(ORGANISER_KEY)).rejects.toThrow('Backup failed');
     });
   });
 
@@ -70,14 +73,14 @@ describe('admin_backup_api', () => {
         headers: { 'Content-Disposition': 'attachment; filename="tournament-comp-1-20261103T100000Z.zip"' },
       });
 
-      const result = await API.backupCompetition('comp-1', 'secret-pw');
+      const result = await API.backupCompetition('comp-1', ORGANISER_KEY);
       expect(result).toEqual({ blob, filename: 'tournament-comp-1-20261103T100000Z.zip' });
 
       expect(global.fetch).toHaveBeenCalledTimes(1);
       const [url, opts] = global.fetch.mock.calls[0];
       expect(url).toBe('/api/competitions/comp-1/backup');
       expect(opts.method).toBe('GET');
-      expect(opts.headers['X-Tournament-Password']).toBe('secret-pw');
+      expect(opts.headers['X-Tournament-Password']).toBe(ORGANISER_KEY);
     });
   });
 
@@ -90,14 +93,14 @@ describe('admin_backup_api', () => {
       global.fetch = mockFetch(200, planResponse);
 
       const fakeFile = new File(['dummy'], 'backup.zip', { type: 'application/zip' });
-      const res = await API.planRestore({ file: fakeFile, only: 'c1', undo: false }, 'secret-pw');
+      const res = await API.planRestore({ file: fakeFile, only: 'c1', undo: false }, ORGANISER_KEY);
 
       expect(res).toEqual(planResponse);
       expect(global.fetch).toHaveBeenCalledTimes(1);
       const [url, opts] = global.fetch.mock.calls[0];
       expect(url).toBe('/api/tournament/restore/plan');
       expect(opts.method).toBe('POST');
-      expect(opts.headers['X-Tournament-Password']).toBe('secret-pw');
+      expect(opts.headers['X-Tournament-Password']).toBe(ORGANISER_KEY);
       expect(opts.body).toBeInstanceOf(FormData);
       expect(opts.body.get('archive')).toBe(fakeFile);
       expect(opts.body.get('only')).toBe('c1');
@@ -108,7 +111,7 @@ describe('admin_backup_api', () => {
       const planResponse = { scope: 'tournament', competitions: [] };
       global.fetch = mockFetch(200, planResponse);
 
-      const res = await API.planRestore({ from: '20260101T000000Z-scheduled.zip', undo: true }, 'secret-pw');
+      const res = await API.planRestore({ from: '20260101T000000Z-scheduled.zip', undo: true }, ORGANISER_KEY);
 
       expect(res).toEqual(planResponse);
       const [url, opts] = global.fetch.mock.calls[0];
@@ -133,7 +136,7 @@ describe('admin_backup_api', () => {
       const decisions = { c1: { action: 'replace' } };
       const res = await API.restore(
         { from: '20260101T000000Z-scheduled.zip', decisions, allowRunning: true },
-        'session-pw',
+        SESSION_KEY,
         'confirm-pw'
       );
 
@@ -142,7 +145,7 @@ describe('admin_backup_api', () => {
       const [url, opts] = global.fetch.mock.calls[0];
       expect(url).toBe('/api/tournament/restore');
       expect(opts.method).toBe('POST');
-      expect(opts.headers['X-Tournament-Password']).toBe('session-pw');
+      expect(opts.headers['X-Tournament-Password']).toBe(SESSION_KEY);
       expect(opts.headers['X-Confirm-Password']).toBe('confirm-pw');
       expect(opts.body.get('from')).toBe('20260101T000000Z-scheduled.zip');
       expect(opts.body.get('decisions')).toBe(JSON.stringify(decisions));
@@ -157,7 +160,7 @@ describe('admin_backup_api', () => {
 
       const err = await API.restore(
         { from: 'copy.zip' },
-        'session-pw',
+        SESSION_KEY,
         'wrong-confirm-pw'
       ).catch((e) => e);
 
@@ -169,11 +172,11 @@ describe('admin_backup_api', () => {
     it('sends empty string for X-Confirm-Password when confirmPassword is not passed, and no undo field when undo is false', async () => {
       global.fetch = mockFetch(200, { plan: { scope: 'tournament' } });
 
-      await API.restore({ from: 'copy.zip', undo: false, allowRunning: false }, 'session-pw');
+      await API.restore({ from: 'copy.zip', undo: false, allowRunning: false }, SESSION_KEY);
 
       expect(global.fetch).toHaveBeenCalledTimes(1);
       const [, opts] = global.fetch.mock.calls[0];
-      expect(opts.headers['X-Tournament-Password']).toBe('session-pw');
+      expect(opts.headers['X-Tournament-Password']).toBe(SESSION_KEY);
       expect(opts.headers['X-Confirm-Password']).toBe('');
       expect(opts.body.get('undo')).toBeNull();
       expect(opts.body.get('allowRunning')).toBeNull();
@@ -188,14 +191,14 @@ describe('admin_backup_api', () => {
       ];
       global.fetch = mockFetch(200, { backups });
 
-      const res = await API.listBackups('secret-pw');
+      const res = await API.listBackups(ORGANISER_KEY);
       expect(res).toEqual(backups);
 
       expect(global.fetch).toHaveBeenCalledTimes(1);
       const [url, opts] = global.fetch.mock.calls[0];
       expect(url).toBe('/api/tournament/backups');
       expect(opts.method).toBe('GET');
-      expect(opts.headers['X-Tournament-Password']).toBe('secret-pw');
+      expect(opts.headers['X-Tournament-Password']).toBe(ORGANISER_KEY);
     });
   });
 
@@ -204,14 +207,14 @@ describe('admin_backup_api', () => {
       const blob = new Blob(['backup-file-bytes']);
       global.fetch = mockFetchBlob(200, { blob });
 
-      const res = await API.downloadBackup('20261104T000000Z-scheduled.zip', 'secret-pw');
+      const res = await API.downloadBackup('20261104T000000Z-scheduled.zip', ORGANISER_KEY);
       expect(res).toBe(blob);
 
       expect(global.fetch).toHaveBeenCalledTimes(1);
       const [url, opts] = global.fetch.mock.calls[0];
       expect(url).toBe('/api/tournament/backups/20261104T000000Z-scheduled.zip');
       expect(opts.method).toBe('GET');
-      expect(opts.headers['X-Tournament-Password']).toBe('secret-pw');
+      expect(opts.headers['X-Tournament-Password']).toBe(ORGANISER_KEY);
     });
   });
 
@@ -219,25 +222,25 @@ describe('admin_backup_api', () => {
     it('DELETEs /api/tournament/backups/:name with headers', async () => {
       global.fetch = mockFetch(200, { deleted: '20261104T000000Z-scheduled.zip' });
 
-      const res = await API.deleteBackup('20261104T000000Z-scheduled.zip', 'session-pw', 'confirm-pw');
+      const res = await API.deleteBackup('20261104T000000Z-scheduled.zip', SESSION_KEY, 'confirm-pw');
       expect(res).toEqual({ deleted: '20261104T000000Z-scheduled.zip' });
 
       expect(global.fetch).toHaveBeenCalledTimes(1);
       const [url, opts] = global.fetch.mock.calls[0];
       expect(url).toBe('/api/tournament/backups/20261104T000000Z-scheduled.zip');
       expect(opts.method).toBe('DELETE');
-      expect(opts.headers['X-Tournament-Password']).toBe('session-pw');
+      expect(opts.headers['X-Tournament-Password']).toBe(SESSION_KEY);
       expect(opts.headers['X-Confirm-Password']).toBe('confirm-pw');
     });
 
     it('sends empty string for X-Confirm-Password on deleteBackup when confirmPassword is not passed', async () => {
       global.fetch = mockFetch(200, { deleted: '20261104T000000Z-scheduled.zip' });
 
-      await API.deleteBackup('20261104T000000Z-scheduled.zip', 'session-pw');
+      await API.deleteBackup('20261104T000000Z-scheduled.zip', SESSION_KEY);
 
       expect(global.fetch).toHaveBeenCalledTimes(1);
       const [, opts] = global.fetch.mock.calls[0];
-      expect(opts.headers['X-Tournament-Password']).toBe('session-pw');
+      expect(opts.headers['X-Tournament-Password']).toBe(SESSION_KEY);
       expect(opts.headers['X-Confirm-Password']).toBe('');
     });
 
@@ -249,7 +252,7 @@ describe('admin_backup_api', () => {
 
       const err = await API.deleteBackup(
         '20261104T000000Z-scheduled.zip',
-        'session-pw',
+        SESSION_KEY,
         'bad-pw'
       ).catch((e) => e);
 

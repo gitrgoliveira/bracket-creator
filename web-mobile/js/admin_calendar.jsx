@@ -18,6 +18,9 @@ export const CLOCK_COL_PX = 52;
 export const PHONE_MAX_PX = 720;
 export const PHONE_LANE_PX = 76;
 export const PLACEHOLDER_MIN_PX = 52;
+// How far a block that overlaps an earlier one on its lane is inset from the
+// left (a quarter of the lane at most, so a phone's narrow lane keeps room).
+export const CASCADE_PX = 24;
 export const REFRESH_DEBOUNCE_MS = 1000;
 export { PX_PER_MINUTE, shiftLanes };
 
@@ -279,7 +282,7 @@ export function detectOffScreenOverlaps({ calendar, currentPageDays }) {
       offScreen.push({
         day,
         courts: courtList,
-        label: `Overlap on ${dated ? `${dated} (day ${day})` : `day ${day}`}, Shiaijo ${joinCourts(courtList)}`,
+        label: `Overlap on ${dated ? `${dated} (Day ${day})` : `Day ${day}`}, Shiaijo ${joinCourts(courtList)}`,
       });
     }
   }
@@ -381,10 +384,38 @@ export function computeBlocksLayout({ calendar, visibleDays, courts, laneWidth, 
       pastMidnight,
       hasOverlap,
       overlapDetail,
+      cascadeDepth: 0,
     });
   }
 
-  return placedBlocks;
+  return cascadeBlocks(placedBlocks, laneWidth);
+}
+
+/**
+ * Cascades blocks that overlap on a lane, as the approved calendar draws a
+ * clash: the later block sits over the earlier one, inset from the left, so
+ * the earlier one's name and time stay readable beside it. Blocks come back in
+ * start order within each day, so a later start is drawn on top.
+ */
+export function cascadeBlocks(blocks, laneWidth) {
+  const ordered = [...blocks].sort((a, b) => (a.day - b.day)
+    || (a.startMins - b.startMins)
+    || String(a.comp?.name || '').localeCompare(String(b.comp?.name || '')));
+  const step = Math.max(8, Math.min(CASCADE_PX, Math.floor((laneWidth || 0) / 4)));
+  const placed = [];
+  for (const b of ordered) {
+    let depth = 0;
+    for (const p of placed) {
+      if (p.day !== b.day) continue;
+      const sharesLane = p.minCourtIdx <= b.maxCourtIdx && b.minCourtIdx <= p.maxCourtIdx;
+      const sharesTime = p.top < b.top + b.height && b.top < p.top + p.height;
+      if (sharesLane && sharesTime) depth = Math.max(depth, p.cascadeDepth + 1);
+    }
+    // At least half of the block keeps its width, however deep the clash.
+    const inset = Math.min(depth * step, Math.floor(b.width / 2));
+    placed.push({ ...b, cascadeDepth: depth, left: b.left + inset, width: b.width - inset });
+  }
+  return placed;
 }
 
 /**
@@ -645,7 +676,7 @@ export function AdminCalendarPage({
 
   const handleBlockKeyDown = (e, comp) => {
     if (e.target !== e.currentTarget) return;
-    if (e.key === 'Enter') {
+    if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault();
       onOpenCompetition?.(comp.id, 'overview');
     } else if ((e.key === 'm' || e.key === 'M') && isMovable(comp)) {
@@ -656,7 +687,7 @@ export function AdminCalendarPage({
 
   const dayLabelFor = (date) => {
     const info = (calendar?.days || []).find((d) => d.date === date);
-    return info ? `${formatDayDate(date)} (day ${info.day})` : date;
+    return info ? `${formatDayDate(date)} (Day ${info.day})` : date;
   };
 
   // Saves a move, tells the operator, and keeps what Undo needs. Throws when
@@ -1024,7 +1055,12 @@ export function AdminCalendarPage({
                   onClick={() => setPhoneDay(d.day)}
                 >
                   Day {d.day}
-                  {hasWarnDot && <span className="cal-warn-dot" aria-label="Has overlap" />}
+                  {hasWarnDot && (
+                    <>
+                      <span className="cal-warn-dot" aria-hidden="true" />
+                      <span className="sr-only">, has an overlap</span>
+                    </>
+                  )}
                 </button>
               );
             })}
@@ -1070,7 +1106,7 @@ export function AdminCalendarPage({
           {/* Clock column (sticky) */}
           <div className="cal-clock-col">
             <div className="cal-clock-header" />
-            <div className="cal-lanes-header-spacer" style={{ height: 26 }} />
+            <div className="cal-lanes-header-spacer" />
             {layout.hourRange.hours.map(h => (
               <div key={h} className="cal-clock-cell">
                 {String(h).padStart(2, '0')}:00
@@ -1171,6 +1207,7 @@ export function AdminCalendarPage({
                         else blockClass += ' cal-block--estimate';
 
                         if (block.short && !isPlaceholder) blockClass += ' cal-block--short';
+                        if (isMovable(comp)) blockClass += ' cal-block--movable';
                         if (block.hasOverlap || block.pastMidnight) {
                           blockClass += ' cal-block--warn';
                         }
@@ -1185,12 +1222,28 @@ export function AdminCalendarPage({
                           } else {
                             timeSpan = `${startStr} to about ${endStr}`;
                           }
-                          if (comp.placement?.bestEnd && comp.placement?.worstEnd) {
-                            timeSpan += ` · Could end ${comp.placement.bestEnd} to ${comp.placement.worstEnd}`;
-                          }
                         }
+                        // A kachinuki competition's range, on its own line so the
+                        // time line never cuts it off.
+                        const rangeLine = !isPlaceholder && comp.placement?.bestEnd && comp.placement?.worstEnd
+                          ? `Could end ${comp.placement.bestEnd} to ${comp.placement.worstEnd}`
+                          : '';
+                        const placeholderLine = isPlaceholder
+                          ? (comp.placement?.lengthReason === 'estimate_failed'
+                            ? 'Could not estimate: length unknown'
+                            : 'No participants yet: length unknown')
+                          : '';
+                        const expectedLine = isExpected ? `Estimate for ${comp.expectedParticipants} expected` : '';
+                        const statusLine = isRunning ? 'Running: cannot be moved' : isCompleted ? 'Completed: cannot be moved' : '';
+                        const overlapLine = block.overlapDetail
+                          ? `Overlaps ${block.overlapDetail.partnerName} on Shiaijo ${block.overlapDetail.courtsStr}, ${block.overlapDetail.durationStr}`
+                          : '';
+                        const midnightLine = block.pastMidnight
+                          ? `Ends after midnight, at ${isDraw ? '' : 'about '}${formatClockHHMM(block.endMins % 1440)} on ${getNextDayFormatted(day.date)}. Start it earlier or give it more shiaijo.`
+                          : '';
 
-                        // Screen reader description
+                        // Screen reader description: every line the block shows,
+                        // and the pauses it holds.
                         const pausesInBlock = (day.breaks || []).filter(b => {
                           const bs = b.startMins ?? b.StartMins;
                           const be = b.endMins ?? b.EndMins;
@@ -1199,24 +1252,27 @@ export function AdminCalendarPage({
                         const pauseSummary = pausesInBlock.length > 0
                           ? ` Pauses: ${pausesInBlock.map(p => `${p.name} ${p.start} to ${p.end}`).join(', ')}.`
                           : '';
-                        const ariaLabel = `${comp.name}, ${timeSpan || 'length unknown'}.${pauseSummary}`;
+                        const spokenLines = [rangeLine, expectedLine, statusLine, overlapLine, midnightLine]
+                          .filter(Boolean)
+                          .map((l) => (/[.]$/.test(l) ? ` ${l}` : ` ${l}.`))
+                          .join('');
+                        const ariaLabel = `${comp.name}, ${timeSpan || placeholderLine || 'length unknown'}.${spokenLines}${pauseSummary}`;
 
+                        // The block is a frame: the part that opens the
+                        // competition and its Move button sit side by side in
+                        // it, so neither control is inside the other.
                         return (
                           <div
                             key={comp.id}
-                            role="button"
-                            tabIndex={0}
                             className={blockClass}
+                            data-testid="cal-block"
                             style={{
                               left: `${block.left}px`,
                               width: `${block.width}px`,
                               top: `${block.top}px`,
                               height: `${block.height}px`,
                             }}
-                            aria-label={ariaLabel}
                             onPointerDown={(e) => handleBlockPointerDown(e, comp, block)}
-                            onClick={(e) => handleBlockClick(e, comp.id)}
-                            onKeyDown={(e) => handleBlockKeyDown(e, comp)}
                           >
                             {/* In-block pause strips */}
                             {withContentKeys(pausesInBlock, (x) => `${x.name}|${x.startMins ?? x.StartMins}-${x.endMins ?? x.EndMins}`).map(({ key: stripKey, item: p }) => {
@@ -1243,50 +1299,34 @@ export function AdminCalendarPage({
                               );
                             })}
 
-                            <div className="cal-block__content">
-                              <div className="cal-block__name" title={comp.name}>
-                                {isPlaceholder && <span className="cal-block__chip">?</span>}
-                                {comp.name}
+                            <div
+                              role="button"
+                              tabIndex={0}
+                              className="cal-block__open"
+                              aria-label={ariaLabel}
+                              onClick={(e) => handleBlockClick(e, comp.id)}
+                              onKeyDown={(e) => handleBlockKeyDown(e, comp)}
+                            >
+                              <div className="cal-block__content">
+                                <div className="cal-block__name" title={comp.name}>
+                                  {isPlaceholder && <span className="cal-block__chip">?</span>}
+                                  {comp.name}
+                                </div>
+
+                                {isPlaceholder ? (
+                                  <div className="cal-block__meta">{placeholderLine}</div>
+                                ) : (
+                                  <div className="cal-block__time">{timeSpan}</div>
+                                )}
+
+                                {rangeLine && <div className="cal-block__meta">{rangeLine}</div>}
+                                {expectedLine && <div className="cal-block__meta">{expectedLine}</div>}
+                                {statusLine && <div className="cal-block__meta">{statusLine}</div>}
+                                {overlapLine && <div className="cal-block__warn-line">{overlapLine}</div>}
+                                {midnightLine && <div className="cal-block__warn-line">{midnightLine}</div>}
                               </div>
-
-                              {isPlaceholder ? (
-                                <div className="cal-block__meta">
-                                  {comp.placement?.lengthReason === 'estimate_failed'
-                                    ? 'Could not estimate: length unknown'
-                                    : 'No participants yet: length unknown'}
-                                </div>
-                              ) : (
-                                <div className="cal-block__time">{timeSpan}</div>
-                              )}
-
-                              {isExpected && (
-                                <div className="cal-block__meta">
-                                  Estimate for {comp.expectedParticipants} expected
-                                </div>
-                              )}
-
-                              {isRunning && (
-                                <div className="cal-block__meta">Running: cannot be moved</div>
-                              )}
-
-                              {isCompleted && (
-                                <div className="cal-block__meta">Completed: cannot be moved</div>
-                              )}
-
-                              {block.overlapDetail && (
-                                <div className="cal-block__warn-line">
-                                  Overlaps {block.overlapDetail.partnerName} on Shiaijo {block.overlapDetail.courtsStr}, {block.overlapDetail.durationStr}
-                                </div>
-                              )}
-
-                              {block.pastMidnight && (
-                                <div className="cal-block__warn-line">
-                                  Ends after midnight, at {isDraw ? '' : 'about '}{formatClockHHMM(block.endMins % 1440)} on {getNextDayFormatted(day.date)}. Start it earlier or give it more shiaijo.
-                                </div>
-                              )}
                             </div>
 
-                            {/* Slot for Move button (rendered by c-move) */}
                             <div className="cal-block__move-slot">
                               {isMovable(comp) && (
                                 <button
@@ -1353,7 +1393,7 @@ export function AdminCalendarPage({
           comp={moveDialog.comp}
           initial={moveDialog.initial}
           allCourts={calendar.courts || []}
-          dayOptions={(calendar.days || []).map((d) => ({ date: d.date, label: `${formatDayDate(d.date)} (day ${d.day})` }))}
+          dayOptions={(calendar.days || []).map((d) => ({ date: d.date, label: `${formatDayDate(d.date)} (Day ${d.day})` }))}
           password={password}
           onSave={(fields) => commitMove({ competitionId: moveDialog.comp.id, ...fields })}
           onClose={() => setMoveDialog(null)}

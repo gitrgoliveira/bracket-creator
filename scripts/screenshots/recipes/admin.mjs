@@ -139,7 +139,8 @@ export const recipes = [
 
   {
     // The calendar straight after a move is confirmed: the block in its new
-    // place, and the "Moved just now" line with its Undo button above it.
+    // place, and the "Moved <name> just now. Undo puts it back where it was."
+    // line with its Undo button above it.
     name: 'mobile-calendar-moved',
     family: 'calendar_moved',
     route: '/admin/calendar',

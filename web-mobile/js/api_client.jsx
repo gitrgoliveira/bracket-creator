@@ -5672,7 +5672,7 @@ const API = {
         });
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
-            throw new Error(err.error || "Could not estimate the schedule. Reload the page to try again.");
+            throw new Error(err.error || "Could not work out an estimate right now.");
         }
         return res.json();
     },

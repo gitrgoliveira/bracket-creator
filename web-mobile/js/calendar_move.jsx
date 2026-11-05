@@ -11,6 +11,7 @@ import { readRetimePreview, RetimeWarning } from './retime_warning.jsx';
 import { PillButton } from './competition_fields.jsx';
 import { useDialogFocus } from './dialog_focus.jsx';
 import { useOpenedTapGuard } from './tap_guard.jsx';
+import { useEscapeToClose } from './ui.jsx';
 
 const { useState, useEffect, useRef } = React;
 
@@ -195,6 +196,9 @@ export function MoveDialog({ comp, dayOptions, allCourts, password, initial, onS
   const boxRef = useRef(null);
   const { openedRef, onClickCapture } = useOpenedTapGuard();
   useDialogFocus(boxRef, true);
+  // Escape closes it, as every dialog does, except while the move is being
+  // saved: the answer still has to land in this dialog.
+  useEscapeToClose(saving ? undefined : onClose);
 
   useEffect(() => {
     let cancelled = false;
@@ -274,7 +278,7 @@ export function MoveDialog({ comp, dayOptions, allCourts, password, initial, onS
                 {allCourts.map((court) => {
                   const on = shownCourts.includes(court);
                   return (
-                    <PillButton key={court} active={on} disabled={drawn || saving} onClick={() => toggleCourt(court)}>{court}</PillButton>
+                    <PillButton key={court} active={on} disabled={drawn || saving} onClick={() => toggleCourt(court)}>Shiaijo (court) {court}</PillButton>
                   );
                 })}
               </div>

@@ -28,7 +28,8 @@ export function estimateRangeParts(est) {
 // to the stats strip's Est. duration tile alone.) ONE home for the
 // range-vs-total decision: when estimateRangeParts says the estimate genuinely spans a range
 // (kachinuki's variable bout count) it reads "Best · Average · Worst",
-// otherwise the single "Total:" line exactly as before.
+// otherwise the single "Est. duration: about ..." line, worded as the Add
+// competition form words it.
 //
 // `total` is the ALREADY-FORMATTED total string (the caller formats it anyway
 // for its own empty-estimate guard) and `format` is the caller's minute
@@ -36,7 +37,7 @@ export function estimateRangeParts(est) {
 // window dependencies. `testId` is the caller's data-testid for the range row.
 export function EstimateHeadline({ estimate, total, format, testId }) {
   const range = estimateRangeParts(estimate);
-  if (!range) return <div><strong>Total:</strong> {total}</div>;
+  if (!range) return <div><strong>Est. duration:</strong> about {total}</div>;
   return (
     <div data-testid={testId}>
       <strong>Best</strong> {format(range.best) || "0m"} · <strong>Average</strong> {format(range.average) || "0m"} · <strong>Worst</strong> {format(range.worst) || "0m"}

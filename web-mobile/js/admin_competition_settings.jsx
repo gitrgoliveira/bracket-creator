@@ -879,8 +879,8 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
         </div>
       </div>
       {conflict && (
-        <div className="alert alert--warn" role="alert" style={{ marginBottom: 12 }} data-testid="settings-conflict-alert">
-          <div style={{ marginBottom: 8 }}>
+        <div className="alert alert--error settings-conflict-alert" role="alert" data-testid="settings-conflict-alert">
+          <div className="settings-conflict-alert__text">
             Not saved: this competition changed somewhere else after you opened it (another screen, another device, or the calendar). Reload it to see the current settings, then make your change again. You had changed: {describeSettingsEdits(conflict.changes)}
           </div>
           <button type="button" className="btn btn--primary" onClick={reloadConflict}>
@@ -1290,7 +1290,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
         </div>
         {/* draw-ready lock: courts is output-affecting. Discard the draw to reassign. */}
         {lockedAfterDraw && (
-          <div className="field__hint" style={{ marginTop: 4, color: "var(--ink-2)", fontWeight: 500 }}>
+          <div className="field__hint field__hint--locked">
             Set by the draw. Discard the draw to change shiaijo.
           </div>
         )}
@@ -1387,9 +1387,8 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
             // returns a best/average/worst range (it knows the competition's
             // teamMatchType; no extra param needed here). The headline
             // totalDurationMinutes is the AVERAGE scenario; when the range
-            // collapses (fixed/individual) the single total renders as before.
-            // EstimateHeadline (admin_schedule_utils.jsx) owns that decision
-            // for both this panel and the Overview footer.
+            // collapses (fixed/individual) the single total renders instead.
+            // EstimateHeadline (admin_schedule_utils.jsx) owns that decision.
             if (!total) {
               return <div style={{ fontSize: 12, color: "var(--ink-3)" }}>No estimate yet. Add participants and configure duration to see a projection.</div>;
             }

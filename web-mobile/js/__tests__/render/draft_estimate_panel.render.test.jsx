@@ -42,6 +42,18 @@ function makeSampleEstimate(overrides = {}) {
 }
 
 describe('DraftEstimatePanel render tests', () => {
+  it('says the competition can still be created when no estimate came back, and offers Try again', () => {
+    const onRetry = vi.fn();
+    const { getByTestId, getByRole } = render(
+      <DraftEstimatePanel estimate={null} loading={false} error="Could not work out an estimate right now." onRetry={onRetry} shape={{ startTime: '09:30' }} />
+    );
+    const alert = getByTestId('draft-estimate-error');
+    expect(alert.textContent).toContain('Could not work out an estimate right now. You can still create the competition.');
+    expect(alert.textContent).not.toMatch(/Reload/);
+    fireEvent.click(getByRole('button', { name: 'Try again' }));
+    expect(onRetry).toHaveBeenCalledTimes(1);
+  });
+
   it('renders headline duration for a sample estimate', () => {
     const estimate = makeSampleEstimate();
     const { getByTestId } = render(

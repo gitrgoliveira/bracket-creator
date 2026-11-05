@@ -18,6 +18,7 @@ import {
   computePaging,
   detectOffScreenOverlaps,
   computeBlocksLayout,
+  CASCADE_PX,
   calendarLayout,
   withContentKeys,
 } from '../admin_calendar.jsx';
@@ -271,7 +272,7 @@ describe('admin_calendar pure layout helper', () => {
       const offScreen = detectOffScreenOverlaps({ calendar, currentPageDays });
       expect(offScreen).toHaveLength(1);
       expect(offScreen[0].day).toBe(6);
-      expect(offScreen[0].label).toBe('Overlap on day 6, Shiaijo B');
+      expect(offScreen[0].label).toBe('Overlap on Day 6, Shiaijo B');
 
       // With the tournament's dates the label names the day the way the rest
       // of the page does.
@@ -279,7 +280,7 @@ describe('admin_calendar pure layout helper', () => {
         calendar: { ...calendar, days: [{ day: 6, date: '21-05-2026' }] },
         currentPageDays,
       });
-      expect(dated[0].label).toBe('Overlap on Thu 21 May (day 6), Shiaijo B');
+      expect(dated[0].label).toBe('Overlap on Thu 21 May (Day 6), Shiaijo B');
     });
   });
 
@@ -348,6 +349,42 @@ describe('admin_calendar pure layout helper', () => {
       expect(blocks[0].pastMidnight).toBe(true);
       expect(blocks[0].effectiveEnd).toBe(1440);
       expect(blocks[0].height).toBe((1440 - 1320) * PX_PER_MINUTE); // 120 px
+    });
+  });
+
+  describe('overlapping blocks cascade', () => {
+    const comp = (id, name, courts, start, end) => ({
+      id, name,
+      placement: { placed: true, day: 1, courts, lengthSource: 'estimate', windows: Object.fromEntries(courts.map((c) => [c, { start, end }])) },
+    });
+    const layout = (competitions) => computeBlocksLayout({
+      calendar: { competitions }, visibleDays: [{ day: 1 }], courts: ['A', 'B', 'C'], laneWidth: 200, startHour: 8, endHour: 18,
+    });
+
+    it('draws the later block after the earlier one, inset from the left, on a shared lane', () => {
+      const blocks = layout([comp('late', 'Later', ['A'], 630, 700), comp('early', 'Earlier', ['A', 'B'], 600, 720)]);
+      expect(blocks.map((b) => b.comp.id)).toEqual(['early', 'late']);
+      expect(blocks[0].left).toBe(0);
+      expect(blocks[0].width).toBe(400);
+      expect(blocks[1].left).toBe(CASCADE_PX);
+      expect(blocks[1].width).toBe(200 - CASCADE_PX);
+    });
+
+    it('leaves blocks on other lanes, or at other times, where they are', () => {
+      const blocks = layout([comp('a', 'On A', ['A'], 600, 700), comp('b', 'On B', ['B'], 630, 700), comp('a2', 'On A later', ['A'], 700, 760)]);
+      expect(blocks.map((b) => b.left)).toEqual([0, 200, 0]);
+    });
+
+    it('steps a third clash further in, and keeps at least half the width', () => {
+      const blocks = layout([comp('1', 'One', ['A'], 600, 800), comp('2', 'Two', ['A'], 620, 800), comp('3', 'Three', ['A'], 640, 800)]);
+      expect(blocks.map((b) => b.left)).toEqual([0, CASCADE_PX, 2 * CASCADE_PX]);
+      const deep = computeBlocksLayout({
+        calendar: { competitions: Array.from({ length: 8 }, (_, i) => comp(String(i), `C${i}`, ['A'], 600 + i, 800)) },
+        visibleDays: [{ day: 1 }], courts: ['A'], laneWidth: 76, startHour: 8, endHour: 18,
+      });
+      for (const b of deep) expect(b.width).toBeGreaterThanOrEqual(38);
+      // A phone's narrow lane insets by a quarter of the lane, not the full step.
+      expect(deep[1].left).toBe(19);
     });
   });
 

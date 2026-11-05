@@ -116,7 +116,7 @@ describe('moving a competition on the calendar', () => {
     expect(warning).toHaveTextContent('Moving it moves its 7 matches');
     expect(warning).toHaveTextContent('Shiaijo A: 10:30 to 11:30 (was 09:00 to 10:00)');
     expect(warning).toHaveTextContent('2 of its matches no longer have the times a fresh draw would give them now');
-    expect(within(dialog).getByRole('button', { name: 'A' })).toBeDisabled();
+    expect(within(dialog).getByRole('button', { name: 'Shiaijo (court) A' })).toBeDisabled();
     expect(within(dialog).getByText('Its shiaijo stay as drawn. To use other shiaijo, discard the draw first.')).toBeInTheDocument();
 
     fireEvent.click(within(dialog).getByRole('button', { name: 'Move' }));
@@ -144,6 +144,33 @@ describe('moving a competition on the calendar', () => {
     expect(await within(dialog).findByRole('alert')).toHaveTextContent('Nothing was moved; try again.');
     expect(start.value).toBe('10:30');
     expect(screen.queryByTestId('cal-moved-line')).toBeNull();
+  });
+
+  it('closes the Move dialog on Escape, writing nothing', async () => {
+    await open();
+    fireEvent.click(screen.getByRole('button', { name: 'Move Open' }));
+    await screen.findByTestId('cal-move-dialog');
+    fireEvent.keyDown(window, { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByTestId('cal-move-dialog')).toBeNull());
+    expect(window.API.updateCompetition).not.toHaveBeenCalled();
+  });
+
+  it('keeps the Move dialog open on Escape while the move is being saved', async () => {
+    let resolveSave;
+    window.API.updateCompetition.mockReturnValue(new Promise((r) => { resolveSave = r; }));
+    await open();
+    fireEvent.click(screen.getByRole('button', { name: 'Move Open' }));
+    const dialog = await screen.findByTestId('cal-move-dialog');
+    const start = within(dialog).getByLabelText('Start time');
+    await waitFor(() => expect(start.value).toBe('09:00'));
+    fireEvent.change(start, { target: { value: '10:30' } });
+    await waitFor(() => expect(window.API.previewMove).toHaveBeenCalled());
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Move' }));
+    await waitFor(() => expect(window.API.updateCompetition).toHaveBeenCalledTimes(1));
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(screen.getByTestId('cal-move-dialog')).toBeInTheDocument();
+    resolveSave({ ...CONFIG, id: 'c1', configVersion: 'v2', startTime: '10:30' });
+    await waitFor(() => expect(screen.queryByTestId('cal-move-dialog')).toBeNull());
   });
 
   it('says so and drops the Undo line when something changed since the move', async () => {

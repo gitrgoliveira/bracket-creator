@@ -278,7 +278,7 @@ describe('useDraftEstimate hook behaviour with fake timers', () => {
     runtime.mount(TestHook, { shape: { participants: '', startTime: '09:00' }, password: 'pw' });
     vi.advanceTimersByTime(500);
     expect(mockEstimate).not.toHaveBeenCalled();
-    expect(latestResult).toEqual({ estimate: null, loading: false, error: null });
+    expect(latestResult).toMatchObject({ estimate: null, loading: false, error: null });
 
     runtime.updateProps({ shape: { participants: 0, startTime: '09:00' }, password: 'pw' });
     vi.advanceTimersByTime(500);
@@ -300,6 +300,27 @@ describe('useDraftEstimate hook behaviour with fake timers', () => {
     expect(latestResult.error).toBe('Format requires at least 4 participants');
     expect(latestResult.estimate).toBeNull();
     expect(latestResult.loading).toBe(false);
+  });
+
+  it('says the form can carry on when the server cannot be reached, and asks again on retry', async () => {
+    const mockEstimate = vi.fn()
+      .mockRejectedValueOnce(new TypeError('Failed to fetch'))
+      .mockResolvedValueOnce({ totalDurationMinutes: 120 });
+    window.API = { estimateDraft: mockEstimate };
+
+    runtime.mount(TestHook, { shape: { participants: 10, startTime: '09:00' }, password: 'pw' });
+    vi.advanceTimersByTime(250);
+    await Promise.resolve();
+    expect(latestResult.error).toBe('Could not work out an estimate right now.');
+
+    latestResult.retry();
+    await Promise.resolve();
+    vi.advanceTimersByTime(250);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(mockEstimate).toHaveBeenCalledTimes(2);
+    expect(latestResult.error).toBeNull();
+    expect(latestResult.estimate).toEqual({ totalDurationMinutes: 120 });
   });
 
   it('cancels the timer and aborts the request on unmount', async () => {

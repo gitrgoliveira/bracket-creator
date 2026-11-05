@@ -974,7 +974,7 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
     poolMatchDurationSeconds: poolDurationVisible(format) ? poolMatchDurationSeconds : undefined,
     knockoutMatchDurationSeconds: knockoutDurationVisible(format) ? knockoutMatchDurationSeconds : undefined,
   };
-  const { estimate, loading: estimateLoading, error: estimateError } = useDraftEstimate(draftShape, password);
+  const { estimate, loading: estimateLoading, error: estimateError, retry: retryEstimate } = useDraftEstimate(draftShape, password);
 
   // bc-pnum G2/R6: pre-fill the prefix field with the SAME value a save
   // left blank would actually assign server-side (assignDefaultNumberPrefix),
@@ -1578,12 +1578,13 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
             estimate={estimate}
             loading={estimateLoading}
             error={estimateError}
+            onRetry={retryEstimate}
             shape={draftShape}
             tournamentCourts={safeCourts}
             onChangeShiaijo={handleFocusShiaijo}
           />
 
-          <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
+          <div className="create-comp-actions">
             <button type="button" className="btn" onClick={onCancel}>Cancel</button>
             {/* Disabled on the same condition that drives the red hint under
                 the shiaijo pills, so the button never invites a request the

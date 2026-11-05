@@ -317,7 +317,7 @@ describe('AdminCalendarPage render tests', () => {
 
     // Off-screen overlap on Day 6, Shiaijo B
     await waitFor(() => {
-      expect(screen.getByText('Overlap on day 6, Shiaijo B')).toBeInTheDocument();
+      expect(screen.getByText('Overlap on Day 6, Shiaijo B')).toBeInTheDocument();
     });
     const showDayBtn = screen.getByRole('button', { name: 'Show Day 6' });
     expect(showDayBtn).toBeInTheDocument();
@@ -327,6 +327,46 @@ describe('AdminCalendarPage render tests', () => {
     await waitFor(() => {
       expect(screen.getByText('Senior Individual')).toBeInTheDocument();
     });
+  });
+
+  it('names every line of a block for a screen reader, keeps the kachinuki range off the time line, and nests no control in another', async () => {
+    window.API.fetchCalendar.mockResolvedValue({
+      days: [{ day: 1, date: '16-05-2026', breaks: [] }],
+      courts: ['A', 'B'],
+      competitions: [
+        {
+          id: 'k1', name: 'Kachinuki Teams', status: 'setup',
+          placement: { placed: true, day: 1, courts: ['A'], lengthSource: 'estimate', bestEnd: '11:39', worstEnd: '13:58', windows: { A: { start: 570, end: 800 } } },
+          clashPartners: ['k2'],
+        },
+        {
+          id: 'k2', name: 'Open', status: 'pools',
+          placement: { placed: true, day: 1, courts: ['A'], lengthSource: 'draw', windows: { A: { start: 660, end: 720 } } },
+          clashPartners: ['k1'],
+        },
+        {
+          id: 'k3', name: 'Late', status: 'setup',
+          placement: { placed: true, day: 1, courts: ['B'], pastMidnight: true, lengthSource: 'estimate', windows: { B: { start: 1320, end: 1480 } } },
+        },
+      ],
+    });
+    const { container } = render(<AdminCalendarPage tournament={TOURNAMENT} password="pass" onBack={() => {}} />);
+    await waitFor(() => expect(screen.getByText('Kachinuki Teams')).toBeInTheDocument());
+
+    expect(screen.getByText('09:30 to about 13:20').className).toBe('cal-block__time');
+    expect(screen.getByText('Could end 11:39 to 13:58').className).toBe('cal-block__meta');
+
+    const kachinuki = screen.getByRole('button', { name: /^Kachinuki Teams, / });
+    expect(kachinuki.getAttribute('aria-label')).toContain('Could end 11:39 to 13:58.');
+    expect(kachinuki.getAttribute('aria-label')).toContain('Overlaps Open on Shiaijo A, 1h.');
+    const running = screen.getByRole('button', { name: /^Open, / });
+    expect(running.getAttribute('aria-label')).toContain('Running: cannot be moved.');
+    const late = screen.getByRole('button', { name: /^Late, / });
+    expect(late.getAttribute('aria-label')).toContain('Ends after midnight, at about 00:40 on Sun 17 May.');
+
+    // The Move button sits beside the part that opens the competition.
+    expect(screen.getByRole('button', { name: 'Move Kachinuki Teams' }).closest('[role="button"]')).toBeNull();
+    expect(container.querySelector('[role="button"] button, button button, [role="button"] [role="button"]')).toBeNull();
   });
 
   it('calls onOpenCompetition on click under MOUSE_SLOP_PX and on Enter key', async () => {

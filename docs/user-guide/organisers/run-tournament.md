@@ -351,7 +351,7 @@ While you fill in the form, a live estimate below the fields shows about how lon
 
 Open **Competition calendar** from the dashboard to see every competition on its day and shiai-jo, from its start time to its expected finish. A competition that is already drawn takes its times from the draw; one that is not drawn yet uses the estimate. When two competitions on the same shiai-jo overlap, both are marked, and an overlap on a day that is not on screen is listed above the calendar with a button to show that day. Click a competition to open it.
 
-![The competition calendar of a two-day tournament with shiai-jo A and B: the opening ceremony and lunch drawn as bands across each day, a drawn competition with its times from the draw, and two dotted estimate blocks that say how many entries they expect.](../../screenshots/mobile-calendar.png)
+![The competition calendar of a two-day tournament with shiai-jo A and B: the opening ceremony and lunch drawn as bands across each day, a drawn competition with its times from the draw, and two dashed estimate blocks that say how many entries they expect.](../../screenshots/mobile-calendar.png)
 
 A few notices can appear above the calendar:
 

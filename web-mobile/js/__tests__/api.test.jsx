@@ -1892,13 +1892,13 @@ describe('API Utils', () => {
           .rejects.toThrow('Add a start time');
       });
 
-      it('rejects with the Overview\'s sentence when the error body is not JSON', async () => {
+      it('rejects with the Add competition form\'s sentence when the error body is not JSON', async () => {
         global.fetch = vi.fn().mockResolvedValue({
           ok: false,
           json: async () => { throw new Error('parse error'); },
         });
         await expect(API.estimateDraft({}, 'pw'))
-          .rejects.toThrow('Could not estimate the schedule. Reload the page to try again.');
+          .rejects.toThrow('Could not work out an estimate right now.');
       });
     });
 

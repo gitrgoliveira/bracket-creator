@@ -1328,8 +1328,33 @@ a:hover {
 }
 
 .pause-row-status--warn {
-  color: var(--danger);
+  color: var(--warn-ink);
   font-weight: 500;
+}
+
+/* A competition save refused because it changed elsewhere (Settings). */
+.settings-conflict-alert {
+  margin-bottom: 12px;
+}
+
+.settings-conflict-alert__text {
+  margin-bottom: 8px;
+}
+
+/* A field the draw has fixed: says why it cannot be changed. */
+.field__hint--locked {
+  margin-top: 4px;
+  color: var(--ink-2);
+  font-weight: 500;
+}
+
+/* The Add competition form's Cancel and Create row. */
+.create-comp-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
 }
 
 .pause-remove-btn {
@@ -11576,6 +11601,9 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 /* ---------- Competition Calendar (AdminCalendarPage) ---------- */
 .cal-page {
   max-width: 1400px;
+  /* The shiaijo header row's height, shared with the clock column's spacer
+     so the 08:00 label sits level with its hour line. */
+  --cal-lanes-header-h: 26px;
 }
 
 .cal-key-line {
@@ -11641,12 +11669,18 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 
 .cal-warn-dot {
   display: inline-block;
-  width: 6px;
-  height: 6px;
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
-  background: var(--warn);
+  background: var(--warn); /* 5:1 on the white tab */
   margin-left: 6px;
   vertical-align: middle;
+}
+
+/* On the active navy tab amber-700 reads only about 2.4:1; amber-500 holds
+   over 5:1 there. */
+.day-tab.is-active .cal-warn-dot {
+  background: var(--warn-strong);
 }
 
 .cal-paging-bar {
@@ -11734,8 +11768,14 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 
 .cal-lanes-header {
   display: flex;
+  height: var(--cal-lanes-header-h);
+  box-sizing: border-box;
   border-bottom: 1px solid var(--line);
   background: var(--surface);
+}
+
+.cal-lanes-header-spacer {
+  height: var(--cal-lanes-header-h);
 }
 
 .cal-lane-header {
@@ -11804,7 +11844,6 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   position: absolute;
   pointer-events: auto;
   box-sizing: border-box;
-  padding: 6px 8px;
   background: var(--surface);
   border-radius: var(--r-sm);
   cursor: pointer;
@@ -11818,7 +11857,21 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   -webkit-touch-callout: none;
 }
 
-.cal-block:focus-visible {
+/* The part of a block that opens the competition fills the block; the Move
+   button sits beside it in the same frame, never inside it. The focus ring
+   is drawn on the frame, which clips what is inside it. */
+.cal-block__open {
+  position: absolute;
+  inset: 0;
+  box-sizing: border-box;
+  padding: 6px 8px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  outline: none;
+}
+
+.cal-block:has(> .cal-block__open:focus-visible) {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
   z-index: 5;
@@ -11839,7 +11892,7 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   z-index: 4;
 }
 
-.cal-block--short {
+.cal-block--short .cal-block__open {
   padding: 2px 6px;
 }
 
@@ -11934,11 +11987,18 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   position: absolute;
   top: 0;
   right: 0;
+  z-index: 1;
 }
 
 @media (pointer: coarse) {
-  .cal-block__content {
-    padding-right: 48px;
+  /* The name and time lines beside the 44 px Move button keep clear of it;
+     the lines below it use the block's full width, which a phone's narrow
+     lane needs. A block with no Move button keeps all of its width. */
+  .cal-block--movable .cal-block__content::before {
+    content: '';
+    float: right;
+    width: 40px;
+    height: 38px;
   }
   .cal-block__move-slot {
     min-width: 44px;
@@ -12083,6 +12143,12 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   border: 1px solid transparent;
   font: inherit;
   text-align: left;
+}
+
+@media (pointer: coarse) {
+  .cal-tray__item {
+    min-height: 44px;
+  }
 }
 
 .cal-tray__item:hover {

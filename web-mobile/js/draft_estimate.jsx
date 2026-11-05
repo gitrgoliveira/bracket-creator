@@ -25,11 +25,14 @@ export function idleShiaijoText(usable, chosen) {
 }
 
 // useDraftEstimate debounces shape changes by 250 ms, manages an AbortController
-// per request, and queries the draft estimate endpoint. Returns { estimate, loading, error }.
+// per request, and queries the draft estimate endpoint. Returns
+// { estimate, loading, error, retry }: retry asks again for the same shape.
 export function useDraftEstimate(shape, password) {
   const [estimate, setEstimate] = React.useState(null);
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState(null);
+  const [attempt, setAttempt] = React.useState(0);
+  const retry = React.useCallback(() => setAttempt((n) => n + 1), []);
 
   const timerRef = React.useRef(null);
   const controllerRef = React.useRef(null);
@@ -89,7 +92,9 @@ export function useDraftEstimate(shape, password) {
         }
       } catch (err) {
         if (!controller.signal.aborted && err.name !== "AbortError") {
-          setError(err.message || "Could not estimate the schedule. Reload the page to try again.");
+          // A fetch that never reached the server throws a TypeError whose
+          // browser wording means nothing to an organiser.
+          setError(err instanceof TypeError || !err.message ? DRAFT_ESTIMATE_FAILED : err.message);
           setEstimate(null);
           setLoading(false);
         }
@@ -106,7 +111,7 @@ export function useDraftEstimate(shape, password) {
         controllerRef.current = null;
       }
     };
-  }, [shapeKey, password]);
+  }, [shapeKey, password, attempt]);
 
   // Unmount cleanup: cancel any pending timer and abort in-flight controller.
   React.useEffect(() => {
@@ -122,8 +127,13 @@ export function useDraftEstimate(shape, password) {
     };
   }, []);
 
-  return { estimate, loading, error };
+  return { estimate, loading, error, retry };
 }
+
+// What the Add competition form says when no estimate came back. The form
+// itself is unaffected, so it says the competition can still be created.
+export const DRAFT_ESTIMATE_FAILED = "Could not work out an estimate right now.";
+export const DRAFT_ESTIMATE_STILL_CREATE = "You can still create the competition.";
 
 // DraftEstimatePanel renders a draft competition schedule estimate.
 export function DraftEstimatePanel({
@@ -134,11 +144,20 @@ export function DraftEstimatePanel({
   tournamentCourts,
   onChangeShiaijo,
   onEditTournament,
+  onRetry,
 }) {
   if (error) {
     return (
-      <div className="alert alert--error" role="alert">
-        {error}
+      <div className="alert alert--warn draft-estimate__error" role="alert" data-testid="draft-estimate-error">
+        {error} {DRAFT_ESTIMATE_STILL_CREATE}
+        {onRetry && (
+          <>
+            {' '}
+            <button type="button" className="btn btn--link" onClick={onRetry} disabled={loading}>
+              {loading ? "Trying again…" : "Try again"}
+            </button>
+          </>
+        )}
       </div>
     );
   }

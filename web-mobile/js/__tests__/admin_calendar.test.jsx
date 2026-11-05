@@ -1,4 +1,7 @@
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'fs';
+import { dirname, resolve } from 'path';
+import { fileURLToPath } from 'url';
 import {
   MOUSE_SLOP_PX,
   TOUCH_SLOP_PX,
@@ -21,6 +24,9 @@ import {
   CASCADE_PX,
   SAME_START_DROP_PX,
   NARROW_HEAD_PX,
+  ONE_LINE_BLOCK_PX,
+  headLinesPx,
+  cascadeBlocks,
   pauseLabelLane,
   fitBlockLines,
   calendarLayout,
@@ -396,6 +402,31 @@ describe('admin_calendar pure layout helper', () => {
       expect(three.map((b) => b.top)).toEqual([top, top + SAME_START_DROP_PX, top + 2 * SAME_START_DROP_PX]);
     });
 
+    it('draws a block that starts with an earlier one below all of the earlier one\'s head: name, warning and time', () => {
+      const blocks = layout([comp('k', 'Kids Individual', ['A'], 600, 683), comp('l', 'Ladies Kata', ['A'], 600, 650)]);
+      // No overlap detail here (no partner windows): the head is the name and the time.
+      expect(blocks[1].top - blocks[0].top).toBe(SAME_START_DROP_PX);
+      const first = { comp: { name: 'Kids Individual' }, width: 200, height: 83,
+        overlapDetail: { partnerName: 'Ladies Kata', courtsStr: 'C', durationStr: '50 min' } };
+      const second = { comp: { name: 'Ladies Kata' }, width: 200, height: 50, short: true };
+      const head = headLinesPx(first);
+      // Name, a two-line overlap warning and the time line.
+      expect(head).toBe(Math.ceil(6 + 15 + 2 + 2 * 14.3 + 2 + 14.3));
+      const cascaded = cascadeBlocks([
+        { ...first, day: 1, startMins: 600, top: 120, left: 0, minCourtIdx: 0, maxCourtIdx: 0 },
+        { ...second, day: 1, startMins: 600, top: 120, left: 0, minCourtIdx: 0, maxCourtIdx: 0 },
+      ], 200);
+      expect(cascaded[1].top).toBe(120 + head);
+      // Too short for its line below the head, it keeps one line, past its real end.
+      expect(cascaded[1].height).toBe(ONE_LINE_BLOCK_PX);
+      expect(cascaded[1].short).toBe(true);
+      // Dropped past a near start, it is inset like a later start, over the first's right part.
+      expect(cascaded[1].left).toBe(CASCADE_PX);
+      expect(cascaded[0].coveredTop).toBe(head);
+      // The head never counts more than the block shows.
+      expect(headLinesPx({ ...first, height: 30 })).toBe(30);
+    });
+
     it('draws a block that starts with a touch screen\'s narrow block below the whole of it, Move row included', () => {
       const blocks = computeBlocksLayout({
         calendar: { competitions: [comp('a', 'First', ['A'], 600, 683), comp('b', 'Second', ['A'], 600, 650)] },
@@ -450,6 +481,18 @@ describe('admin_calendar pure layout helper', () => {
       expect(layoutAt375.lanesScrollSideways).toBe(false);
       // The page's width still decides the phone layout.
       expect(calendarLayout({ calendar, width: 1280, frameWidth: 1214 }).isPhone).toBe(false);
+    });
+  });
+
+  describe('a raised block', () => {
+    it('takes its full width back on hover or focus, over the block that covers it', () => {
+      const css = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', 'css', 'styles.css'), 'utf8');
+      const rule = css.match(/\.cal-block:hover,\s*\.cal-block:focus-within\s*\{([^}]*)\}/g) || [];
+      const body = rule.join('\n');
+      expect(body).toMatch(/--cal-covered:\s*0px\s*!important/);
+      expect(body).toMatch(/--cal-move-right:\s*0px\s*!important/);
+      // The short block still lifts.
+      expect(body).toMatch(/min-height:\s*52px/);
     });
   });
 

@@ -25,9 +25,13 @@ export const CASCADE_PX = 24;
 // the earlier one's name and time, so it is inset to half the earlier block.
 export const NEAR_START_PX = 60;
 // A block that starts at the same time as an earlier one on its lane is drawn
-// this far down, below the earlier one's head (its name and first line, and
-// a touch screen's 44 px Move button), and then cascades like a later start.
+// below the earlier one's head (its name, warnings and time: headLinesPx),
+// never less than this (a touch screen's 44 px Move button), and then
+// cascades like a later start.
 export const SAME_START_DROP_PX = 44;
+// The height of one line of a short block (its name and start), which a block
+// drawn below an earlier one keeps even past its real end.
+export const ONE_LINE_BLOCK_PX = 22;
 // A touch screen's narrow block has its Move button on a row of its own under
 // the name, and is drawn this tall at least (styles.css, .cal-block--narrow):
 // a block starting with it is drawn below all of it.
@@ -466,6 +470,24 @@ export function pauseLabelLane(blocks, laneCount, start, end) {
  * the earlier one's name and time stay readable beside it. Blocks come back in
  * start order within each day, so a later start is drawn on top.
  */
+/**
+ * How tall a block's head is drawn: its name (up to two lines), its warning
+ * lines and its time line, estimated from their text and the block's width
+ * (12 px and 11 px type, styles.css .cal-block__*). On a touch screen the
+ * lines beside its Move button keep clear of it. Capped at the block's own
+ * height, which is all of it that shows.
+ */
+export function headLinesPx(block, { coarse = false } = {}) {
+  const inner = Math.max(20, (block.width || 0) - 16 - (coarse ? 44 : 0));
+  const lines = (text, charPx) => Math.max(1, Math.ceil((String(text).length * charPx) / inner));
+  let px = 6 + 15 * Math.min(2, lines(block.comp?.name || '', 6.8));
+  const d = block.overlapDetail;
+  if (d) px += 2 + 14.3 * lines(`Overlaps ${d.partnerName} on Shiaijo ${d.courtsStr}, ${d.durationStr}`, 6);
+  if (block.pastMidnight) px += 2 + 14.3 * lines('x'.repeat(100), 6);
+  px += 2 + 14.3;
+  return Math.min(Math.ceil(px), block.height || 0);
+}
+
 export function cascadeBlocks(blocks, laneWidth, { coarse = false } = {}) {
   const ordered = [...blocks].sort((a, b) => (a.day - b.day)
     || (a.startMins - b.startMins)
@@ -483,8 +505,11 @@ export function cascadeBlocks(blocks, laneWidth, { coarse = false } = {}) {
     for (let guard = 0, p = sameStart(); guard < 8 && p; guard++, p = sameStart()) {
       // A touch screen's narrow block keeps its Move button under its name,
       // so the one starting with it goes below the whole of it.
-      const drop = coarse && p.width < NARROW_BLOCK_PX ? NARROW_HEAD_PX : SAME_START_DROP_PX;
-      b = { ...b, top: b.top + drop, height: Math.max(b.height - drop, 20) };
+      const drop = coarse && p.width < NARROW_BLOCK_PX
+        ? NARROW_HEAD_PX
+        : Math.max(SAME_START_DROP_PX, headLinesPx(p, { coarse }));
+      const height = Math.max(b.height - drop, ONE_LINE_BLOCK_PX);
+      b = { ...b, top: b.top + drop, height, short: b.short || (!b.isPlaceholder && height < PLACEHOLDER_MIN_PX) };
     }
     let depth = 0;
     let minLeft = b.left;

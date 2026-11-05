@@ -11936,6 +11936,21 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   height: 2000px;
 }
 
+/* A block raised by hover or focus is drawn over the one that covers it, so
+   it takes its full width back: its lines and its Move button. */
+.cal-block:hover,
+.cal-block:focus-within {
+  --cal-covered: 0px !important;
+  --cal-move-right: 0px !important;
+}
+
+.cal-block:hover .cal-block__cover,
+.cal-block:hover .cal-block__cover-gap,
+.cal-block:focus-within .cal-block__cover,
+.cal-block:focus-within .cal-block__cover-gap {
+  display: none;
+}
+
 .cal-block--estimate {
   border: 1.5px dashed var(--ink-3);
 }

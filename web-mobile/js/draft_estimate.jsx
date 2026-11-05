@@ -1,7 +1,6 @@
 // draft_estimate.jsx: Schedule estimate hook and panel for unsaved competition shapes.
 // Consumed by the Add competition form (admin_setup.jsx).
 
-import { API } from './api_client.jsx';
 import { finishClock, formatEstimateMinutes, estimateRangeParts } from './admin_schedule_utils.jsx';
 
 // isShapeIdle reports true when required fields (participants count and start time)
@@ -77,7 +76,7 @@ export function useDraftEstimate(shape, password) {
 
       setLoading(true);
 
-      const api = (typeof window !== "undefined" && window.API) || API;
+      const api = window.API;
       const curShape = shapeRef.current;
       const curPw = passwordRef.current;
 

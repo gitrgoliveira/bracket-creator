@@ -383,6 +383,13 @@ type competitionUpdateRequest struct {
 	// expected count and shrink every estimate built on it.
 	ExpectedParticipants *int `json:"expectedParticipants"`
 
+	// RestoreMatchTimes is the exact Undo of a re-time (DR3): the previousTimes
+	// the move answered with, sent back with the configVersion that answer
+	// carried. A PRESENT list, even an empty one, means "write these times and
+	// run no re-time"; an absent one means re-time as the date change asks, so
+	// the field is a pointer.
+	RestoreMatchTimes *[]engine.MatchTimeChange `json:"restoreMatchTimes"`
+
 	// RetiredKnockoutMatchDurationSeconds exists ONLY to detect a client still
 	// sending the pre-rename key and refuse it. It is never read as a value.
 	//
@@ -1355,6 +1362,12 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			return
 		}
 		comp.ID = id // ensure ID matches URL (also for empty-body case)
+		// An Undo restores times under the version of the answer it undoes, so
+		// a restore without one could overwrite a later change.
+		if req.RestoreMatchTimes != nil && comp.ConfigVersion == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "restoreMatchTimes needs the configVersion of the save it undoes"})
+			return
+		}
 
 		// This handler doubles as a roster writer (a non-nil Players field
 		// below triggers SaveParticipants/SaveSeeds). It needs no second
@@ -1639,9 +1652,39 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		// is as much "this write moved it" as a settings PUT that retypes the
 		// field.
 		var numberPrefixMoved bool
+		// Moving a drawn competition's date or start moves its matches with it
+		// (DR1), saved in the same transaction as the settings. What the re-time
+		// reads from the store (the tournament and the court floors) is read
+		// here, before the lock, because the transaction may not call a public
+		// Store method; the key records what it was read for, so a change that
+		// landed in between is a retry and never a guess.
+		type retimeKey struct{ oldDate, oldStart, newDate, newStart string }
+		var retimeIn *engine.RetimeInputs
+		var retimeFor retimeKey
+		if comp.Players == nil && req.RestoreMatchTimes == nil {
+			if pre, perr := store.LoadCompetition(id); perr == nil && pre != nil &&
+				pre.Status == state.CompStatusDrawReady && (pre.Date != comp.Date || pre.StartTime != comp.StartTime) {
+				moved := *pre
+				moved.Date, moved.StartTime = comp.Date, comp.StartTime
+				in, rerr := eng.ReadRetimeInputs(pre, &moved)
+				if rerr != nil {
+					if errors.Is(rerr, state.ErrCourtFloorPastMidnight) {
+						c.JSON(http.StatusConflict, gin.H{"error": rerr.Error()})
+						return
+					}
+					c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to read the schedule for the new time"})
+					return
+				}
+				retimeIn = &in
+				retimeFor = retimeKey{pre.Date, pre.StartTime, comp.Date, comp.StartTime}
+			}
+		}
+		var undoStaleFlag, retimeRetryFlag, retimeUnavailableFlag bool
+		var retimeOut *engine.RetimeOutcome
+		timesRestored := false
 		err := store.WithCompetitionRenameLock(func() error {
 			var updateErr error
-			changed, updateErr = store.UpdateCompetitionChanged(id, func(current *state.Competition) (*state.Competition, error) {
+			changed, updateErr = store.UpdateCompetitionChangedTx(id, func(tx state.StoreTx, current *state.Competition) (*state.Competition, error) {
 				if current == nil {
 					notFoundFlag = true
 					return nil, nil
@@ -1884,9 +1927,15 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 					// ExpectedParticipants is absent for the same reason: only
 					// the estimate reads it, so it is editable in every status
 					// and a draw-ready save of it alone is a 200.
+					// A league or knockout draw stores the pool size it drew with,
+					// while normalizePoolConfig has already zeroed the request's, so
+					// the stored pair is read the way the request is: otherwise any
+					// save of a drawn league was refused as a pool-size change.
+					storedPools := *current
+					normalizePoolConfig(&storedPools)
 					outputAffectingChanged :=
-						comp.PoolSize != current.PoolSize ||
-							comp.PoolWinners != current.PoolWinners ||
+						comp.PoolSize != storedPools.PoolSize ||
+							comp.PoolWinners != storedPools.PoolWinners ||
 							comp.PoolSizeMode != current.PoolSizeMode ||
 							// bc-qual LP-5a: ExtraQualifiers selects which
 							// draw builder runs (standard/larger-pools/
@@ -2052,11 +2101,16 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				// block below). HasParticipantIDs is auto-managed,
 				// only set to true in the roster-only branch above when
 				// participants are being saved.
+				before := *current
 				current.Name = comp.Name
 				current.Date = comp.Date
 				current.StartTime = comp.StartTime
-				current.PoolSize = comp.PoolSize
-				current.PoolWinners = comp.PoolWinners
+				// A drawn competition keeps the pool size and winners it drew
+				// with: the guard above has already refused any change to them.
+				if current.Status != state.CompStatusDrawReady {
+					current.PoolSize = comp.PoolSize
+					current.PoolWinners = comp.PoolWinners
+				}
 				current.PoolSizeMode = comp.PoolSizeMode
 				// bc-qual LP-5a: sibling of PoolSize/PoolWinners/PoolSizeMode
 				// immediately above. Already validated (ValidateExtraQualifiers,
@@ -2233,8 +2287,12 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				// with the same wording pattern. Pointer identity can't be compared
 				// directly: nil and non-nil pointers to equal values must compare
 				// equal, so this dereferences before comparing.
-				sameTwoThirdPlaces := (comp.TwoThirdPlaces == nil) == (current.TwoThirdPlaces == nil) &&
-					(comp.TwoThirdPlaces == nil || *comp.TwoThirdPlaces == *current.TwoThirdPlaces)
+				// A competition that never stored the field resolves it from its
+				// format (EffectiveTwoThirdPlaces), and the Settings page and the
+				// calendar send that resolved value back, so an explicit value
+				// that equals the effective one is no change.
+				sameTwoThirdPlaces := (comp.TwoThirdPlaces == nil && current.TwoThirdPlaces == nil) ||
+					(comp.TwoThirdPlaces != nil && *comp.TwoThirdPlaces == current.EffectiveTwoThirdPlaces())
 				if started && !sameTwoThirdPlaces {
 					validationErr = fmt.Errorf("twoThirdPlaces can only be changed before the competition starts")
 					return nil, nil
@@ -2242,6 +2300,44 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				current.TwoThirdPlaces = comp.TwoThirdPlaces
 				if req.ExpectedParticipants != nil {
 					current.ExpectedParticipants = comp.ExpectedParticipants
+				}
+				if current.Status != state.CompStatusDrawReady {
+					if req.RestoreMatchTimes != nil {
+						undoStaleFlag = true
+						return nil, nil
+					}
+					return current, nil
+				}
+				switch {
+				case req.RestoreMatchTimes != nil:
+					// The exact Undo: write the times the move replaced, instead of
+					// the re-time the date change would run. Nothing is staged
+					// before every listed match has been checked.
+					switch rerr := engine.RestoreMatchTimesTx(tx, current, *req.RestoreMatchTimes); {
+					case errors.Is(rerr, engine.ErrUndoStale):
+						undoStaleFlag = true
+						return nil, nil
+					case errors.Is(rerr, engine.ErrRestoreUnknownMatch):
+						validationErr = rerr
+						return nil, nil
+					case rerr != nil:
+						return nil, rerr
+					}
+					timesRestored = len(*req.RestoreMatchTimes) > 0
+				case before.Date != current.Date || before.StartTime != current.StartTime:
+					if retimeIn == nil || retimeFor != (retimeKey{before.Date, before.StartTime, current.Date, current.StartTime}) {
+						retimeRetryFlag = true
+						return nil, nil
+					}
+					out, rerr := engine.RetimeDrawTx(tx, &before, current, *retimeIn)
+					if errors.Is(rerr, engine.ErrRetimeUnavailable) {
+						retimeUnavailableFlag = true
+						return nil, nil
+					}
+					if rerr != nil {
+						return nil, rerr
+					}
+					retimeOut = &out
 				}
 				return current, nil
 			})
@@ -2253,6 +2349,18 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		// escapes the transform unexpectedly.
 		if notFoundFlag {
 			c.JSON(http.StatusNotFound, gin.H{"error": "competition not found"})
+			return
+		}
+		if undoStaleFlag {
+			c.JSON(http.StatusConflict, gin.H{"code": "undo_stale", "error": "Changed since the move; Undo not applied."})
+			return
+		}
+		if retimeRetryFlag {
+			c.JSON(http.StatusConflict, gin.H{"code": "retime_retry", "error": "This competition was drawn while you were moving it. Nothing was moved; try again."})
+			return
+		}
+		if retimeUnavailableFlag {
+			c.JSON(http.StatusConflict, gin.H{"code": "retime_unavailable", "error": "This competition's match order could not be read back, so its matches were not moved. Nothing was changed."})
 			return
 		}
 		if configChangedFlag {
@@ -2454,6 +2562,9 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		if changed || participantsChanged || renumbered {
 			hub.Broadcast(EventTournamentUpdated, nil)
 		}
+		if timesRestored || (retimeOut != nil && retimeOut.AnyChange) {
+			hub.Broadcast(EventScheduleUpdated, nil)
+		}
 		// Re-load to return the actual on-disk state (with non-settings
 		// fields preserved from current) rather than the partial body.
 		// LoadCompetition doesn't repopulate Players from participants.csv,
@@ -2538,10 +2649,27 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		// warnings (empty array on the settings-only path). The embedded
 		// pointer promotes the competition's JSON fields to the top level,
 		// so existing clients see the same shape plus a `warnings` field.
-		c.JSON(http.StatusOK, struct {
+		answer := struct {
 			*state.Competition
 			Warnings []helper.NearDupWarning `json:"warnings"`
-		}{Competition: updated, Warnings: nearDupWarnings})
+			// A save that re-timed a drawn competition answers with every match
+			// whose time changed (the exact Undo's input, present even when
+			// empty), how many matches no longer held the time a fresh draw
+			// would give, and whether any time changed.
+			PreviousTimes *[]engine.MatchTimeChange `json:"previousTimes,omitempty"`
+			NotFreshCount *int                      `json:"notFreshCount,omitempty"`
+			TimesChanged  *bool                     `json:"timesChanged,omitempty"`
+		}{Competition: updated, Warnings: nearDupWarnings}
+		if retimeOut != nil {
+			previous := retimeOut.Changes
+			if previous == nil {
+				previous = []engine.MatchTimeChange{}
+			}
+			answer.PreviousTimes = &previous
+			answer.NotFreshCount = &retimeOut.NotFreshCount
+			answer.TimesChanged = &retimeOut.AnyChange
+		}
+		c.JSON(http.StatusOK, answer)
 	})
 
 	r.DELETE("/competitions/:id", func(c *gin.Context) {

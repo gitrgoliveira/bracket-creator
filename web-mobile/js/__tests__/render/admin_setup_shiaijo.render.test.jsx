@@ -44,6 +44,10 @@ let AdminImportPage;
 beforeAll(async () => {
   restoreGlobals = installWindowStubs(STUBBED_GLOBALS);
   await import('../../admin_setup.jsx');
+  // The import pulls in the real API client, which installs itself as
+  // window.API; the stub goes back in, or the tests below would call the real
+  // client.
+  window.API = STUBBED_GLOBALS.API;
   AdminEditTournament = window.AdminEditTournament;
   AdminImportPage = window.AdminImportPage;
 });

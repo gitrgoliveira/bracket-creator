@@ -535,10 +535,6 @@ func (e *Engine) TournamentCalendar() (*TournamentCalendarResult, error) {
 		}
 	}
 
-	if calComps == nil {
-		calComps = []CalendarCompetition{}
-	}
-
 	return &TournamentCalendarResult{
 		Days:         days,
 		Courts:       lanes,

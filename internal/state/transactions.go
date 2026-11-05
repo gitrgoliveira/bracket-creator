@@ -104,6 +104,9 @@ var ErrTxCommitted = errors.New("transaction committed; its writes are replayed 
 type StoreTx interface {
 	LoadCompetition(compID string) (*Competition, error)
 	SaveCompetition(c *Competition) error
+	// SaveCompetitionChanged is Store.SaveCompetitionChanged under the held
+	// lock: it stages the config and reports whether its bytes differ.
+	SaveCompetitionChanged(c *Competition) (bool, error)
 	LoadPools(compID string) ([]helper.Pool, error)
 	SavePools(compID string, pools []helper.Pool) error
 	LoadPoolMatches(compID string) ([]MatchResult, error)
@@ -530,6 +533,13 @@ func (t *storeTx) SaveCompetition(c *Competition) error {
 		return err
 	}
 	return t.store.saveCompetitionLocked(c, t.txWriteFn())
+}
+
+func (t *storeTx) SaveCompetitionChanged(c *Competition) (bool, error) {
+	if err := t.checkCompID(c.ID); err != nil {
+		return false, err
+	}
+	return t.store.saveCompetitionChangedLocked(c, t.txWriteFn())
 }
 
 func (t *storeTx) LoadPools(compID string) ([]helper.Pool, error) {

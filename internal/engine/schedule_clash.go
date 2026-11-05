@@ -51,10 +51,7 @@ func (e *Engine) DetectClashesForCompetition(compID string) ([]ClashWarning, err
 	out := []ClashWarning{}
 
 	tourn, tournErr := e.store.LoadTournament()
-	inheritedFromUnreadable := false
-	if tournErr != nil && len(target.Courts) == 0 {
-		inheritedFromUnreadable = true
-	}
+	inheritedFromUnreadable := tournErr != nil && len(target.Courts) == 0
 	defer func() {
 		if inheritedFromUnreadable {
 			log.Printf("engine: clash check for %q: tournament unreadable, inherited courts are taken as [\"A\"]: %v", compID, tournErr)

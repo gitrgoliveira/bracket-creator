@@ -327,7 +327,7 @@ The schedule estimator evaluates pauses under four rules:
 * **Incomplete rows are ignored.** An incomplete row with no start time or an unparseable duration is saved and preserved on disk, but the schedule ignores it.
 * **Overlapping pauses count as one.** When two pauses overlap in time, the schedule treats them as one longer pause: a match that would start inside either of them starts when the later one ends.
 * **Pauses on missing days are ignored.** A pause whose day index falls outside the tournament duration or on a day with no scheduled competition is ignored by the schedule.
-* **Drawn competitions keep their times.** Once a competition is drawn, its stored match times stay as they are when pauses are edited later. A draw made after the edit uses the new pauses.
+* **Drawn competitions keep their times.** Once a competition is drawn, its stored match times stay as they are when pauses are edited later. A draw made after the edit uses the new pauses. Changing a drawn competition's date or start time is the one edit that re-times its matches, in the same save as the settings.
 
 The earlier `lunch_block`, `opening_block` and `closing_block` keys are no longer part of the model: `pauses` replaces them (see the upgrade below).
 

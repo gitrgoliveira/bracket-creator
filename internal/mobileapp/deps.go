@@ -40,6 +40,8 @@ type DraftEstimator interface {
 type CalendarPlanner interface {
 	TournamentCalendar() (*engine.TournamentCalendarResult, error)
 	PlaceCompetition(comp *state.Competition, tournament *state.Tournament) engine.CompetitionPlacement
+	// RetimePreview is the dry run of moving a drawn competition's matches.
+	RetimePreview(oldComp, newComp *state.Competition) (engine.RetimeOutcome, error)
 }
 
 // CalendarStore is the consumer-boundary view of state.Store used by the

@@ -336,7 +336,7 @@ describe('Settings re-time warning for draw-ready competitions (c-setretime)', (
   it('8. Save on a draw-ready competition with a changed start time sends PUT with pinned configVersion, no players key, and toast repeats count', async () => {
     const onUpdate = vi.fn().mockResolvedValue({
       configVersion: 'v-next',
-      previousTimes: new Array(31).fill({}),
+      previousTimes: Array.from({ length: 31 }, () => ({})),
     });
     const showToast = vi.fn();
 

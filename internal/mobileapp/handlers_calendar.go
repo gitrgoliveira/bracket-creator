@@ -9,6 +9,7 @@
 package mobileapp
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"sort"
@@ -36,10 +37,15 @@ type calendarPreviewResponse struct {
 	// day/startTime/courts (competition status is setup), and false when the
 	// competition is already drawn so the placement (day, windows) and
 	// overlaps reflect where the competition sits now rather than the
-	// requested values (re-time dry run is separate work).
+	// requested values; Retime carries what moving it would do instead.
 	Previewed bool                        `json:"previewed"`
 	Placement engine.CompetitionPlacement `json:"placement"`
 	Overlaps  []CalendarOverlap           `json:"overlaps"`
+	// Retime is the dry run of moving a drawn (draw-ready) competition to the
+	// requested day and start: per shiaijo the old and new first start and last
+	// end, the number of matches no longer holding a fresh time, and whether any
+	// time changes. Absent for a competition that is not draw ready.
+	Retime *engine.RetimeOutcome `json:"retime,omitempty"`
 }
 
 // RegisterCalendarHandlers registers the tournament schedule calendar endpoints.
@@ -195,7 +201,27 @@ func RegisterCalendarHandlers(r gin.IRoutes, store CalendarStore, eng CalendarPl
 			return overlapsList[i].Court < overlapsList[j].Court
 		})
 
-		// A drawn competition's windows come from the stored draw; the re-time dry run is separate work.
+		// A drawn competition's windows come from the stored draw; moving it
+		// moves its matches, so the answer carries that dry run (nothing written).
+		var retime *engine.RetimeOutcome
+		if comp.Status == state.CompStatusDrawReady {
+			moved := *comp
+			moved.Date = matchedDay
+			moved.StartTime = rawStartTime
+			out, err := eng.RetimePreview(comp, &moved)
+			switch {
+			case errors.Is(err, engine.ErrRetimeUnavailable):
+				c.JSON(http.StatusConflict, gin.H{"code": "retime_unavailable", "error": "This competition's match order could not be read back, so its matches were not moved. Nothing was changed."})
+				return
+			case errors.Is(err, state.ErrCourtFloorPastMidnight):
+				c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+				return
+			case err != nil:
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to work out the new match times"})
+				return
+			}
+			retime = &out
+		}
 
 		c.JSON(http.StatusOK, calendarPreviewResponse{
 			CompetitionID: comp.ID,
@@ -203,6 +229,7 @@ func RegisterCalendarHandlers(r gin.IRoutes, store CalendarStore, eng CalendarPl
 			Previewed:     notDrawn,
 			Placement:     placement,
 			Overlaps:      overlapsList,
+			Retime:        retime,
 		})
 	})
 }

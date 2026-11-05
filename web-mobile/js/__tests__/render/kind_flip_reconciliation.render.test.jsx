@@ -104,7 +104,8 @@ describe('bc-symm: the Settings kind pills route through normalizeConfigForKind'
     // Sanity: the Team size AND Team match format controls are visible
     // before the flip, so what follows is exercising a real
     // hide-the-controls scenario, not a fixture that was already individual.
-    const teamSizeInput = container.querySelector('input[type="number"][max]');
+    // (Not the Expected participants box, which is also a number input with a max.)
+    const teamSizeInput = container.querySelector('input[type="number"][max]:not([max="1024"])');
     expect(teamSizeInput, 'expected the Team size input to be present for a team competition').not.toBeNull();
     expect(teamSizeInput.value).toBe('5');
     expect(byText(container, 'Kachinuki (winner stays on)'), 'expected the Team match format pills, with Kachinuki as the stored pick').toBeDefined();
@@ -121,7 +122,7 @@ describe('bc-symm: the Settings kind pills route through normalizeConfigForKind'
     // -- this is the state the defect left the operator in: the values
     // staged underneath are now unreachable from this screen, so whatever
     // the PUT body ends up carrying for them can no longer be fixed by hand.
-    expect(container.querySelector('input[type="number"][max]')).toBeNull();
+    expect(container.querySelector('input[type="number"][max]:not([max="1024"])')).toBeNull();
     expect(byText(container, 'Kachinuki (winner stays on)')).toBeUndefined();
 
     const save = byText(container, 'Save changes');

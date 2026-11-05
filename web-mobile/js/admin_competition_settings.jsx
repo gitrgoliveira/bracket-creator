@@ -5,7 +5,8 @@
 
 import { teamMatchTypeHint } from './pool_ids.jsx';
 import { DurationInput } from './duration.jsx';
-import { EstimateHeadline, finishClock, timeToMinutes } from './admin_schedule_utils.jsx';
+import { EstimateHeadline, timeToMinutes } from './admin_schedule_utils.jsx';
+import { readRetimePreview, RetimeWarning } from './retime_warning.jsx';
 import { formatPerShiaijoRow, formatPausesRow } from './admin_competition_overview.jsx';
 // bc-qual LP-5a: the "Knockout qualifiers" preview arithmetic AND the
 // pool-size/winners form-coupling rules are shared with admin_setup.jsx
@@ -84,38 +85,7 @@ export function formatCompMinutes(m) {
   return `${h}h ${String(min).padStart(2, "0")}m`;
 }
 
-// Contract to reconcile with the server (dry-run retime response):
-// answer.retime = {
-//   anyChange: boolean,
-//   matchCount: number,
-//   notFreshCount: number,
-//   courts: [ { court: "A", oldStart: 855, oldEnd: 962, newStart: 900, newEnd: 1007 } ]
-// }
-// where the four times are minutes from midnight (an end can be 1440 or more for
-// a finish past midnight; formatted with finishClock which wraps at 24h).
-export function readRetimePreview(answer) {
-  if (!answer || !answer.retime) return null;
-  const r = answer.retime;
-  const formatClock = (mins) => {
-    if (typeof mins === "string") return mins;
-    if (Number.isFinite(mins)) return finishClock("00:00", mins).clock;
-    return "";
-  };
-  return {
-    anyChange: !!r.anyChange,
-    matchCount: Number(r.matchCount) || 0,
-    notFreshCount: Number(r.notFreshCount) || 0,
-    courts: Array.isArray(r.courts)
-      ? r.courts.map((c) => ({
-          court: c.court,
-          oldStart: formatClock(c.oldStart),
-          oldEnd: formatClock(c.oldEnd),
-          newStart: formatClock(c.newStart),
-          newEnd: formatClock(c.newEnd),
-        }))
-      : [],
-  };
-}
+export { readRetimePreview };
 
 // Human-readable rendering of a cleared field's CURRENT (about-to-be-lost)
 // value. Booleans read "on" (pendingConfigClears only ever reports a
@@ -446,7 +416,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
       // falls through to the normal saved-and-return path.
       if (!stillDirty) {
         const savedToastMsg = (() => {
-          if (Array.isArray(answer?.previousTimes)) {
+          if (Array.isArray(answer?.previousTimes) && answer.previousTimes.length > 0) {
             const n = answer.previousTimes.length;
             return `Competition settings saved. ${n === 1 ? "1 match has a new time." : `${n} matches have new times.`}`;
           }
@@ -1477,40 +1447,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
           condition nor the blocking message is restated here. The transient
           "Saving…"/"✓ Saved at" states are the header's alone, by choice. */}
       {/* Retime warning (c-setretime): shown before Save when date or start time changed on a draw-ready competition */}
-      {isDrawReady && retimePreview && retimePreview.anyChange && (
-        <div role="status" className="alert alert--warn" style={{ marginTop: 16, marginBottom: 12 }} data-testid="retime-warning">
-          <div style={{ fontWeight: 600, marginBottom: 6 }}>
-            {retimePreview.matchCount === 1
-              ? "Saving moves its 1 match, in the same order:"
-              : `Saving moves its ${retimePreview.matchCount} matches, in the same order:`}
-          </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 4, marginBottom: 6 }}>
-            {retimePreview.courts.map((courtInfo) => (
-              <div
-                key={courtInfo.court}
-                style={{
-                  display: "flex",
-                  flexWrap: "wrap",
-                  color: "var(--ink-2)",
-                }}
-              >
-                <span>{`Shiaijo ${courtInfo.court}: ${courtInfo.newStart} to ${courtInfo.newEnd} `}</span>
-                <span>{`(was ${courtInfo.oldStart} to ${courtInfo.oldEnd})`}</span>
-              </div>
-            ))}
-          </div>
-          {retimePreview.notFreshCount > 0 && (
-            <div style={{ marginBottom: 6 }}>
-              {retimePreview.notFreshCount === 1
-                ? "1 of its matches no longer has the time a fresh draw would give it now: a time set by hand, a pause added or changed, or another competition moved since the draw. It gets a new time too."
-                : `${retimePreview.notFreshCount} of its matches no longer have the times a fresh draw would give them now: a time set by hand, a pause added or changed, or another competition moved since the draw. They get new times too.`}
-            </div>
-          )}
-          <div style={{ fontSize: 12, color: "var(--ink-2)" }}>
-            The pools, the bracket and the competitor numbers stay as they are, and so do its shiaijo. Anyone who printed or noted the old times will need the new ones.
-          </div>
-        </div>
-      )}
+      {isDrawReady && <RetimeWarning preview={retimePreview} />}
       <div style={{ marginTop: 20, display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 10 }}>
         {/* Same badge-like status role as the header chip above (13px, "Buttons,
             inputs, badges" per DESIGN.md Typography): both are a bold coloured

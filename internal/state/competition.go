@@ -333,6 +333,31 @@ func (s *Store) UpdateCompetitionChanged(id string, transform func(current *Comp
 	return s.saveCompetitionChangedLocked(desired, s.directWrite)
 }
 
+// UpdateCompetitionChangedTx is UpdateCompetitionChanged inside a store
+// transaction: transform is handed the transaction handle as well as the
+// stored competition, so it can stage other files (a re-timed draw) that
+// commit together with the config or not at all. A transform that returns a
+// nil competition, or an error, stages nothing it has not already staged
+// itself; an error discards everything staged. It reports whether the config
+// bytes changed. transform must not call a public Store method.
+func (s *Store) UpdateCompetitionChangedTx(id string, transform func(tx StoreTx, current *Competition) (*Competition, error)) (bool, error) {
+	changed := false
+	err := s.WithTransaction(id, func(tx StoreTx) error {
+		current, err := tx.LoadCompetition(id)
+		if err != nil {
+			return err
+		}
+		desired, err := transform(tx, current)
+		if err != nil || desired == nil {
+			return err
+		}
+		desired.ID = id
+		changed, err = tx.SaveCompetitionChanged(desired)
+		return err
+	})
+	return changed, err
+}
+
 // allowedDrawFiles is the set of artifact filenames that DiscardDraw may
 // delete. The allowlist prevents a future caller from passing a user-
 // controlled value and gaining an arbitrary-file-deletion primitive inside

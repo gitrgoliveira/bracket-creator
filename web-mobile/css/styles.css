@@ -11870,6 +11870,96 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   }
 }
 
+/* Move button: shown on hover or focus with a mouse, always under a touch screen. */
+.cal-block {
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.cal-block__move-btn {
+  display: none;
+  margin: 4px;
+  padding: 2px 8px;
+  min-height: 24px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-1);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm, 6px);
+  cursor: pointer;
+}
+
+.cal-block:hover .cal-block__move-btn,
+.cal-block:focus-within .cal-block__move-btn,
+.cal-block__move-btn:focus-visible {
+  display: inline-block;
+}
+
+@media (pointer: coarse) {
+  .cal-block__move-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 44px;
+    min-height: 44px;
+    margin: 0;
+  }
+}
+
+.cal-moved-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 0 12px;
+  padding: 10px 14px;
+  font-size: 14px;
+  color: var(--ink-1);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md, 8px);
+}
+
+.cal-ghost {
+  position: fixed;
+  z-index: 1000;
+  box-sizing: border-box;
+  padding: 8px 10px;
+  pointer-events: none;
+  color: var(--ink-1);
+  background: var(--surface);
+  border: 2px solid var(--ink-1);
+  border-radius: var(--r-md, 8px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+  opacity: 0.95;
+}
+
+.cal-ghost__name {
+  font-weight: 700;
+  font-size: 13px;
+}
+
+.cal-ghost__label {
+  font-size: 12px;
+  color: var(--ink-2);
+}
+
+.cal-move-dialog {
+  max-width: 480px;
+  width: calc(100vw - 32px);
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
+}
+
+.cal-move-dialog__fields {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
 .cal-tray {
   margin-top: 24px;
   padding: 16px;

@@ -696,9 +696,12 @@ describe('AdminCreateCompetition expected participants and draft estimate (p2-cr
   });
 
   it('(f) with a stacking candidate, the first estimateDraft call carries the stacked start time and never 09:00', async () => {
-    window.API.estimateCompetitionSchedule = vi.fn().mockResolvedValue({
-      totalDurationMinutes: 120,
-      courtEnds: { A: '11:15' },
+    // The start is stacked after the latest planned end on the chosen shiaijo,
+    // read from the calendar's placements (11:15 is 675 minutes).
+    window.API.fetchCalendar = vi.fn().mockResolvedValue({
+      days: [{ day: 1, date: '10-08-2026', breaks: [] }],
+      courts: ['A', 'B', 'C'],
+      competitions: [{ id: 'comp-1', placement: { placed: true, day: 1, courts: ['A'], windows: { A: { start: 540, end: 675 } } } }],
     });
     const estimateDraft = vi.fn().mockResolvedValue(makeSampleDraftEstimate());
     window.API.estimateDraft = estimateDraft;

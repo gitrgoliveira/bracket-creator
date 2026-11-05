@@ -325,7 +325,7 @@ The **Schedule blocks** card on the tournament setup page lists the times when n
 - **Length**, how long the pause lasts.
 - **On**, which day it applies to, or **Every day**. This choice appears only for a tournament that lasts more than one day.
 
-Every estimate and every new schedule works around the pauses. A match whose start time falls inside a pause moves to the end of that pause. A match that starts just before a pause is not shortened or moved, so it may run into the pause. Pauses that overlap count as one longer pause, and the row says so. A pause that ends after midnight is marked as such, and a pause that does not change any schedule (for example one that starts after the last match) is marked as not used. A competition that is already drawn keeps its match times when you add or change a pause, and the card names the competitions affected. To re-time one of them, use **Auto-schedule competition**.
+Every estimate and every new schedule works around the pauses. A match whose start time falls inside a pause moves to the end of that pause. A match that starts just before a pause is not shortened or moved, so it may run into the pause. Pauses that overlap count as one longer pause, and the row says so. A pause that ends after midnight is marked as such, and a pause that does not change any schedule (for example one that starts after the last match) is marked as not used. A competition that is already drawn keeps its match times when you add or change a pause, and the card names the competitions affected. To re-time one of them, use **Auto-schedule competition**, or [move the competition](#moving-a-competition-on-the-calendar), which re-times its matches too.
 
 A tournament saved by an earlier version shows its lunch break as a **Lunch** pause at 12:00, and its opening and closing ceremony lengths as pauses of their own.
 
@@ -344,6 +344,14 @@ A few notices can appear above the calendar:
 - **Competitions that are not on the calendar**, for example because one needs a start time or a date, or its date is outside the tournament. Each one names the reason, so open the competition's **Settings** to fix it.
 - **Settings that could not be read.** A competition whose settings file cannot be read is left off the calendar, and the notice names it so you can check that competition's `config.md` file rather than think it was never created.
 - **A pause that is not used**, with the reason, for example that it has no start time or no length, or that its day is outside the tournament. **Edit tournament** opens the tournament setup page, where the pause is listed under **Schedule blocks**, so you can correct it.
+
+### Moving a competition on the calendar
+
+Drag a competition's block to another day or start time. On a touch screen, press and hold the block first, then drag. You can also use the block's **Move** button, or press **M** while the block is focused. The Move dialog lets you pick the day, the start time and the shiai-jo. Starts snap to 5 minutes, and a start that falls inside a pause moves to the end of that pause. A move that makes two competitions overlap on a shiai-jo is a warning, never a block. A competition that has started cannot be moved.
+
+A competition that is already drawn moves by day and start time only, and keeps its shiai-jo. Its matches move with it: each match gets the time the draw would give it at the new day and start, in the same order, and nothing else about the pools, the bracket or the competitor numbers changes. Before you confirm, the message shows each shiai-jo's old and new times. If some matches no longer have the times a fresh draw would give them (a time you set by hand, a pause you added or changed, or another competition you moved), the message says so and those matches get new times too. If no match would change its time, the move is saved without asking. The competition and its matches are saved together, or not at all. Changing the **Date** or **Start time** in the competition's **Settings** does the same, with the same message before you save.
+
+After a move, a line saying **Moved just now** with an **Undo** button stays above the calendar until you move something else or leave the page. Undo puts the settings back and, for a drawn competition, every match back to its exact earlier time. If anything changed in the meantime, such as a match time you edited, Undo says "Changed since the move; Undo not applied." and changes nothing.
 
 ### Sharing a shiai-jo between competitions
 

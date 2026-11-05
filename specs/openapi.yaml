@@ -1365,6 +1365,19 @@ paths:
         the current config version and the current competition with `rosterVersion`
         and `configVersion` stamped. A save without `configVersion` is written unchecked.
 
+        Changing the `date` or `startTime` of a competition that is `draw-ready`
+        moves its matches too, in the same save: every pool, league, bracket and
+        bronze match is re-timed by the draw's own rules at the new day and start
+        (pairings, shiaijo and ids never change), or nothing is saved. The answer
+        then carries `previousTimes` (every match whose time changed, with the time
+        before and after, present even when empty), `notFreshCount` (matches that no
+        longer held the time a fresh draw would give them: a time set by hand, a
+        pause changed, another competition moved) and `timesChanged`. A save that
+        sends `restoreMatchTimes` (the `previousTimes` of the move it undoes, with
+        that answer's `configVersion`) writes those `was` times instead of running
+        a re-time; a present list, even an empty one, is a restore, an absent one is
+        not. The preview of a move is `retime` on `GET /api/schedule/calendar/preview`.
+
         The seed ranks in a roster save are NOT validated for
         completeness, unlike `PUT /api/competitions/{id}/seeds`. The
         admin console sends this request on every keystroke in its
@@ -1408,7 +1421,21 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           description: |
-            Conflict. Five distinct cases, all 409:
+            Conflict. Eight distinct cases, all 409:
+
+            * `undo_stale`: a save with `restoreMatchTimes` for a competition that is no
+              longer `draw-ready`, or one of whose listed matches no longer holds the time
+              the move gave it. Nothing was written; the body is
+              `{code: "undo_stale", error: "Changed since the move; Undo not applied."}`.
+              An unknown match id in the list is a 400.
+
+            * `retime_retry`: the date or start was moved on a competition that was drawn,
+              or changed, between the server's read and the save. Nothing was moved; the
+              body is `{code: "retime_retry", error}`; send the save again.
+
+            * `retime_unavailable`: a league's stored match order could not be read back as
+              time slots, so its matches were not moved and nothing was saved; the body is
+              `{code: "retime_unavailable", error}`.
 
             * `config_changed`: a settings save whose `configVersion` is not
               the stored config's. Nothing was written; the body is
@@ -7464,7 +7491,32 @@ components:
             The version of the competition's settings (16 lowercase hex characters).
             Read-only on answers, optional on the PUT body: the version the page
             loaded; a mismatch is 409 config_changed; omit to skip the check.
-            Never stored.
+            Never stored. Required with `restoreMatchTimes`.
+        restoreMatchTimes:
+          type: array
+          description: >
+            Request only: the `previousTimes` a re-time answered with, sent back to undo
+            it under that answer's `configVersion`. A present list, even an empty one,
+            writes those times and runs no re-time; an absent one means re-time as the
+            date or start change asks. Only for a `draw-ready` competition.
+          items:
+            $ref: '#/components/schemas/MatchTimeChange'
+        previousTimes:
+          type: array
+          description: >
+            Answer only, when the save re-timed a draw-ready competition: every match
+            whose time changed, with the time before (`was`) and after (`now`). Present
+            even when no time changed (then empty).
+          items:
+            $ref: '#/components/schemas/MatchTimeChange'
+        notFreshCount:
+          type: integer
+          description: >
+            Answer only, with `previousTimes`: matches whose stored time differed from a
+            re-time at the competition's former day and start.
+        timesChanged:
+          type: boolean
+          description: Answer only, with `previousTimes`; whether any match time changed.
 
     FightingSpiritAward:
       type: object
@@ -9142,14 +9194,69 @@ components:
             True when the placement was computed from the requested day, start time,
             and courts (competition status is setup). False when the competition
             is already drawn so the placement (day, windows) and overlaps reflect
-            where the competition sits now rather than the requested values; the
-            re-time dry run is separate work.
+            where the competition sits now rather than the requested values; `retime`
+            says what moving it would do.
         placement:
           $ref: '#/components/schemas/CompetitionPlacement'
         overlaps:
           type: array
           items:
             $ref: '#/components/schemas/CalendarOverlap'
+        retime:
+          $ref: '#/components/schemas/RetimeOutcome'
+
+    MatchTimeChange:
+      type: object
+      required: [matchId, was, now]
+      properties:
+        matchId:
+          type: string
+        was:
+          type: string
+          description: The match's time before the move, HH:MM.
+        now:
+          type: string
+          description: The match's time after the move, HH:MM.
+
+    RetimeOutcome:
+      type: object
+      description: >
+        The dry run of moving a draw-ready competition to another day or start time.
+        Absent for a competition that is not draw-ready. Nothing is written.
+      required: [anyChange, matchCount, notFreshCount, courts]
+      properties:
+        anyChange:
+          type: boolean
+          description: At least one match time would change.
+        matchCount:
+          type: integer
+          description: Matches still to be played in the draw.
+        notFreshCount:
+          type: integer
+          description: >
+            Matches whose stored time differs from what a re-time at the competition's
+            current day and start would give: a time set by hand, a pause added or
+            changed, or another competition moved since the draw.
+        courts:
+          type: array
+          items:
+            $ref: '#/components/schemas/RetimeCourt'
+
+    RetimeCourt:
+      type: object
+      required: [court, oldStart, oldEnd, newStart, newEnd]
+      description: One shiaijo's span, in minutes from midnight (an end can be 1440 or more).
+      properties:
+        court:
+          type: string
+        oldStart:
+          type: integer
+        oldEnd:
+          type: integer
+        newStart:
+          type: integer
+        newEnd:
+          type: integer
 
     CalendarOverlap:
       type: object

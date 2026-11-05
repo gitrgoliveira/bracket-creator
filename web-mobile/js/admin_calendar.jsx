@@ -2,6 +2,12 @@
 // Displays competitions placed across tournament days and shiaijo lanes.
 
 import { formatClockHHMM, overlaps } from './calendar_rules.jsx';
+import {
+  LONG_PRESS_MS, PX_PER_MINUTE, MoveDialog, dropTarget, isDrawn, isMovable, moveErrorMessage,
+  saveMove, shiftClock, shiftLanes, undoMove,
+} from './calendar_move.jsx';
+import { readRetimePreview } from './retime_warning.jsx';
+import { pushToast } from './toast_queue.jsx';
 
 const { useState, useEffect, useRef, useMemo, useCallback } = React;
 
@@ -13,7 +19,7 @@ export const PHONE_MAX_PX = 720;
 export const PHONE_LANE_PX = 76;
 export const PLACEHOLDER_MIN_PX = 52;
 export const REFRESH_DEBOUNCE_MS = 1000;
-export const PX_PER_MINUTE = 1;
+export { PX_PER_MINUTE, shiftLanes };
 
 const CALENDAR_SSE_EVENTS = new Set([
   'tournament_updated',
@@ -114,27 +120,6 @@ export function unreadableCompetitionsText(ids) {
     return `The settings of competition ${ids[0]} could not be read, so it is not on the calendar. Check its config.md file.`;
   }
   return `The settings of ${ids.length} competitions could not be read (${ids.join(', ')}), so they are not on the calendar. Check their config.md files.`;
-}
-
-/**
- * Shifts an array of courts by delta lanes, keeping court count and clamping at bounds.
- */
-export function shiftLanes(courts, allCourts, delta) {
-  if (!Array.isArray(courts) || courts.length === 0 || !Array.isArray(allCourts) || allCourts.length === 0) {
-    return [];
-  }
-  const indices = courts.map(c => allCourts.indexOf(c)).filter(i => i !== -1);
-  if (indices.length === 0) return [];
-  const minIdx = Math.min(...indices);
-  const maxIdx = Math.max(...indices);
-  let shift = delta;
-  if (minIdx + shift < 0) {
-    shift = -minIdx;
-  }
-  if (maxIdx + shift >= allCourts.length) {
-    shift = allCourts.length - 1 - maxIdx;
-  }
-  return indices.map(i => allCourts[i + shift]);
 }
 
 /**
@@ -495,6 +480,16 @@ export function AdminCalendarPage({
   const debounceRef = useRef(null);
   const downPosRef = useRef(null);
 
+  // Moving: a competition is moved by dragging its block (a mouse drags past a
+  // few pixels, a touch screen presses and holds) or with its Move button.
+  const [moveDialog, setMoveDialog] = useState(null); // { comp, initial }
+  const [lastMove, setLastMove] = useState(null); // the move Undo would take back
+  const [undoing, setUndoing] = useState(false);
+  const [drag, setDrag] = useState(null); // the picked-up block, for its ghost
+  const dragRef = useRef(null);
+  const suppressClickRef = useRef(false);
+  const refreshHeldRef = useRef(false);
+
   // Monitor coarse pointer media query
   useEffect(() => {
     if (typeof window === 'undefined' || !window.matchMedia) return;
@@ -541,6 +536,11 @@ export function AdminCalendarPage({
     fetchCal();
 
     const debouncedRefresh = () => {
+      // The page holds still while a block is held; it reads again at the drop.
+      if (dragRef.current?.active) {
+        refreshHeldRef.current = true;
+        return;
+      }
       if (debounceRef.current) clearTimeout(debounceRef.current);
       debounceRef.current = setTimeout(() => {
         fetchCal();
@@ -613,6 +613,7 @@ export function AdminCalendarPage({
   };
 
   const handleBlockClick = (e, compId) => {
+    if (suppressClickRef.current) return;
     if (e.detail === 0) {
       onOpenCompetition?.(compId, 'overview');
       return;
@@ -631,12 +632,202 @@ export function AdminCalendarPage({
     }
   };
 
-  const handleBlockKeyDown = (e, compId) => {
+  const handleBlockKeyDown = (e, comp) => {
+    if (e.target !== e.currentTarget) return;
     if (e.key === 'Enter') {
       e.preventDefault();
-      onOpenCompetition?.(compId, 'overview');
+      onOpenCompetition?.(comp.id, 'overview');
+    } else if ((e.key === 'm' || e.key === 'M') && isMovable(comp)) {
+      e.preventDefault();
+      setMoveDialog({ comp });
     }
   };
+
+  const dayLabelFor = (date) => {
+    const info = (calendar?.days || []).find((d) => d.date === date);
+    return info ? `${formatDayDate(date)} (day ${info.day})` : date;
+  };
+
+  // Saves a move, tells the operator, and keeps what Undo needs. Throws when
+  // the save is refused so the Move dialog can show why.
+  const commitMove = async (args) => {
+    const move = await saveMove({ password, ...args });
+    setLastMove(move);
+    pushToast(`Moved ${move.name} to ${dayLabelFor(move.after.date)} at ${move.after.startTime}.`, 'success');
+    setMoveDialog(null);
+    fetchCal();
+  };
+
+  const commitMoveFromDrop = async (args) => {
+    try {
+      await commitMove(args);
+    } catch (err) {
+      pushToast(moveErrorMessage(err), 'error');
+      if (err.code === 'config_changed') fetchCal();
+    }
+  };
+
+  const handleUndo = async () => {
+    if (!lastMove || undoing) return;
+    setUndoing(true);
+    try {
+      await undoMove({ password, move: lastMove });
+      pushToast(`Undone. ${lastMove.name} is back where it was.`, 'success');
+      setLastMove(null);
+      fetchCal();
+    } catch (err) {
+      pushToast(moveErrorMessage(err), 'error');
+      // After a refusal the move can no longer be taken back safely.
+      if (err.code === 'undo_stale' || err.code === 'config_changed') setLastMove(null);
+      fetchCal();
+    } finally {
+      setUndoing(false);
+    }
+  };
+
+  // A drop on a day, start and shiaijo. A drawn competition shows what its
+  // matches would do first, unless no match changes its time.
+  const handleDrop = async (comp, block, target) => {
+    const dayInfo = (calendar?.days || []).find((d) => d.day === target.day);
+    if (!dayInfo) return;
+    const deltaMins = target.startMins - block.startMins;
+    const courts = isDrawn(comp) ? (comp.placement.courts || []) : target.courts;
+    if (!isDrawn(comp)) {
+      await commitMoveFromDrop({ competitionId: comp.id, date: dayInfo.date, deltaMins, courts });
+      return;
+    }
+    try {
+      const comps = await window.API.fetchCompetitions();
+      const fresh = (Array.isArray(comps) ? comps : []).find((c) => c.id === comp.id);
+      const startTime = fresh ? shiftClock(fresh.startTime, deltaMins) : null;
+      if (!fresh || !startTime) {
+        pushToast('That would move the start out of the day. Pick a start time on the same day.', 'error');
+        return;
+      }
+      const answer = await window.API.previewMove({ competitionId: comp.id, date: dayInfo.date, startTime, courts: fresh.courts || [] }, password);
+      const preview = readRetimePreview(answer);
+      if (preview && !preview.anyChange) {
+        await commitMoveFromDrop({ competitionId: comp.id, date: dayInfo.date, startTime, courts: fresh.courts });
+        return;
+      }
+      setMoveDialog({ comp, initial: { date: dayInfo.date, startTime, courts: fresh.courts || [] } });
+    } catch (err) {
+      pushToast(moveErrorMessage(err), 'error');
+    }
+  };
+
+  const readGeometry = () => {
+    const days = [];
+    document.querySelectorAll('[data-cal-day]').forEach((el) => {
+      const r = el.getBoundingClientRect();
+      const num = Number(el.getAttribute('data-cal-day'));
+      const info = (calendar?.days || []).find((d) => d.day === num);
+      days.push({ day: num, left: r.left, top: r.top, right: r.right, bottom: r.bottom, breaks: info?.breaks || [] });
+    });
+    return { days, laneWidth: layout.laneWidth, startHour: layout.hourRange.startHour, courts: calendar?.courts || [] };
+  };
+
+  // Pointer down on a movable block: a mouse picks it up after a few pixels,
+  // a touch after a press and hold (a scroll that starts first picks nothing
+  // up). Esc puts it back.
+  const handleBlockPointerDown = (e, comp, block) => {
+    handlePointerDown(e);
+    if (!isMovable(comp) || (e.pointerType === 'mouse' && e.button !== 0)) return;
+    if (e.target.closest && e.target.closest('.cal-block__move-btn')) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const isTouch = e.pointerType === 'touch';
+    const st = {
+      comp, block, active: false, target: null,
+      grabX: e.clientX - rect.left, grabY: e.clientY - rect.top, width: rect.width, height: rect.height,
+      x: e.clientX, y: e.clientY, timer: null, cleanup: null,
+    };
+    dragRef.current = st;
+
+    const compute = (x, y) => {
+      const target = dropTarget({
+        geometry: readGeometry(), blockLeft: x - st.grabX, blockTop: y - st.grabY,
+        pointerX: x, pointerY: y, blockCourts: comp.placement.courts || [],
+      });
+      if (target && isDrawn(comp)) target.courts = comp.placement.courts || [];
+      st.target = target;
+      const dur = block.endMins - block.startMins;
+      const info = target ? (calendar?.days || []).find((d) => d.day === target.day) : null;
+      const label = target && info
+        ? `${formatDayDate(info.date)}, ${formatClockHHMM(target.startMins)} to ${formatClockHHMM((target.startMins + dur) % 1440)}${isDrawn(comp) ? '' : `, Shiaijo ${target.courts.join(' and ')}`}`
+        : 'Drop it on a day';
+      setDrag({ comp, x: x - st.grabX, y: y - st.grabY, width: st.width, height: st.height, label, hint: target && isDrawn(comp) && target.courts.join() !== (comp.placement.courts || []).join() ? 'Its shiaijo stay as drawn.' : '' });
+    };
+
+    const pickUp = () => {
+      if (dragRef.current !== st) return;
+      st.active = true;
+      st.timer = null;
+      try { if (navigator.vibrate) navigator.vibrate(10); } catch (_e) { /* no vibration here */ }
+      try { e.target.setPointerCapture?.(e.pointerId); } catch (_e) { /* capture is best effort */ }
+      compute(st.x, st.y);
+    };
+
+    const stop = () => {
+      if (st.timer) clearTimeout(st.timer);
+      st.cleanup?.();
+      if (dragRef.current === st) dragRef.current = null;
+      setDrag(null);
+      if (refreshHeldRef.current) {
+        refreshHeldRef.current = false;
+        fetchCal();
+      }
+    };
+
+    const onMove = (ev) => {
+      st.x = ev.clientX;
+      st.y = ev.clientY;
+      const dist = Math.hypot(ev.clientX - e.clientX, ev.clientY - e.clientY);
+      if (!st.active) {
+        if (isTouch ? dist > TOUCH_SLOP_PX : dist > MOUSE_SLOP_PX) {
+          if (isTouch) stop(); // the browser is scrolling
+          else pickUp();
+        }
+        return;
+      }
+      compute(ev.clientX, ev.clientY);
+    };
+    const onTouchMove = (ev) => { if (st.active && ev.cancelable) ev.preventDefault(); };
+    const onKey = (ev) => { if (ev.key === 'Escape' && st.active) { ev.preventDefault(); stop(); } };
+    const onUp = (ev) => {
+      const wasActive = st.active;
+      const target = st.target;
+      const movedPx = Math.hypot(ev.clientX - e.clientX, ev.clientY - e.clientY);
+      stop();
+      if (!wasActive) return;
+      suppressClickRef.current = true;
+      setTimeout(() => { suppressClickRef.current = false; }, 0);
+      const same = target && target.day === comp.placement.day
+        && target.startMins === block.startMins
+        && (isDrawn(comp) || target.courts.join() === (comp.placement.courts || []).join());
+      if (!target || same) {
+        // A touch held and let go where it was opens the Move dialog.
+        if (isTouch && movedPx <= TOUCH_SLOP_PX) setMoveDialog({ comp });
+        return;
+      }
+      handleDrop(comp, block, target);
+    };
+
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', stop);
+    window.addEventListener('keydown', onKey);
+    if (isTouch) window.addEventListener('touchmove', onTouchMove, { passive: false });
+    st.cleanup = () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', stop);
+      window.removeEventListener('keydown', onKey);
+      window.removeEventListener('touchmove', onTouchMove);
+    };
+    if (isTouch) st.timer = setTimeout(pickUp, LONG_PRESS_MS);
+  };
+
+  useEffect(() => () => { dragRef.current?.cleanup?.(); }, []);
 
   const handleShowDay = (dayNum) => {
     if (isPhoneScreen) {
@@ -855,6 +1046,15 @@ export function AdminCalendarPage({
         )}
 
         {/* Calendar Grid Frame */}
+        {lastMove && (
+          <div className="cal-moved-line" role="status" data-testid="cal-moved-line">
+            <span>Moved just now: <strong>{lastMove.name}</strong> to {dayLabelFor(lastMove.after.date)} at {lastMove.after.startTime}.</span>
+            <button type="button" className="btn btn--sm" onClick={handleUndo} disabled={undoing}>
+              {undoing ? 'Undoing...' : 'Undo'}
+            </button>
+          </div>
+        )}
+
         <div className="cal-grid-frame">
           {/* Clock column (sticky) */}
           <div className="cal-clock-col">
@@ -905,6 +1105,7 @@ export function AdminCalendarPage({
                   {/* Day body with pause bands and blocks */}
                   <div
                     className="cal-day-body"
+                    data-cal-day={day.day}
                     style={{
                       height: `${layout.hourRange.totalMinutes * PX_PER_MINUTE}px`,
                       width: `${layout.dayGridWidth}px`,
@@ -950,7 +1151,7 @@ export function AdminCalendarPage({
                         const isPlaceholder = block.isPlaceholder;
                         const isDraw = comp.placement?.lengthSource === 'draw';
                         const isExpected = comp.placement?.lengthSource === 'expected';
-                        const isRunning = comp.status === 'running';
+                        const isRunning = comp.status === 'pools' || comp.status === 'knockout';
                         const isCompleted = comp.status === 'completed';
 
                         let blockClass = 'cal-block';
@@ -1001,9 +1202,9 @@ export function AdminCalendarPage({
                               height: `${block.height}px`,
                             }}
                             aria-label={ariaLabel}
-                            onPointerDown={handlePointerDown}
+                            onPointerDown={(e) => handleBlockPointerDown(e, comp, block)}
                             onClick={(e) => handleBlockClick(e, comp.id)}
-                            onKeyDown={(e) => handleBlockKeyDown(e, comp.id)}
+                            onKeyDown={(e) => handleBlockKeyDown(e, comp)}
                           >
                             {/* In-block pause strips */}
                             {pausesInBlock.map((p, pi) => {
@@ -1075,6 +1276,15 @@ export function AdminCalendarPage({
 
                             {/* Slot for Move button (rendered by c-move) */}
                             <div className="cal-block__move-slot">
+                              {isMovable(comp) && (
+                                <button
+                                  type="button"
+                                  className="cal-block__move-btn"
+                                  aria-label={`Move ${comp.name}`}
+                                  onPointerDown={(e) => e.stopPropagation()}
+                                  onClick={(e) => { e.stopPropagation(); setMoveDialog({ comp }); }}
+                                >Move</button>
+                              )}
                               {renderBlockExtras?.(comp)}
                             </div>
                           </div>
@@ -1118,6 +1328,27 @@ export function AdminCalendarPage({
           </div>
         )}
       </div>
+
+      {drag && (
+        <div className="cal-ghost" aria-hidden="true"
+          style={{ left: `${drag.x}px`, top: `${drag.y}px`, width: `${drag.width}px`, minHeight: `${drag.height}px` }}>
+          <div className="cal-ghost__name">{drag.comp.name}</div>
+          <div className="cal-ghost__label">{drag.label}</div>
+          {drag.hint && <div className="cal-ghost__label">{drag.hint}</div>}
+        </div>
+      )}
+
+      {moveDialog && (
+        <MoveDialog
+          comp={moveDialog.comp}
+          initial={moveDialog.initial}
+          allCourts={calendar.courts || []}
+          dayOptions={(calendar.days || []).map((d) => ({ date: d.date, label: `${formatDayDate(d.date)} (day ${d.day})` }))}
+          password={password}
+          onSave={(fields) => commitMove({ competitionId: moveDialog.comp.id, ...fields })}
+          onClose={() => setMoveDialog(null)}
+        />
+      )}
     </div>
   );
 }

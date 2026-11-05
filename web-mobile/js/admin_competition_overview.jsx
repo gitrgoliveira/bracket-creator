@@ -4,7 +4,7 @@
 // imports (no standalone <script> tag) and consumed by the AdminCompetition
 // shell via window.*.
 
-import { EstimateHeadline, formatEstimateMinutes, finishClock, timeToMinutes } from './admin_schedule_utils.jsx';
+import { formatEstimateMinutes, finishClock, timeToMinutes } from './admin_schedule_utils.jsx';
 import { blockMinutes, parseClock, formatClock, computePauseRowStatus } from './pause_list.jsx';
 // seededRanks: the one owner of "which seed ranks has this roster actually
 // got" (integer > 0 normalization), shared with the seeding blocker and the
@@ -925,12 +925,10 @@ function AdminCompOverview({ c, tournament, pools, poolMatches, bracket, onSecti
     const total = formatCompMinutes(estimate && estimate.totalDurationMinutes);
     const perShiaijo = formatPerShiaijoRow(estimate, c.courts);
     const pausesRow = formatPausesRow(tournament, c);
-    // mp-gmcg: kachinuki has a variable bout count, so the server returns a
-    // best/average/worst range (it knows the competition's teamMatchType).
-    // The headline totalDurationMinutes is the AVERAGE; when the range
-    // collapses (fixed/individual) the single total renders as before.
-    // EstimateHeadline (admin_schedule_utils.jsx) owns that decision for
-    // both this footer and the Settings panel.
+    // The footer carries no total: the stats strip's Est. duration tile,
+    // drawn in every state beside this footer, already reads "about 1h 50m"
+    // (and kachinuki's best-to-worst range), so a second "Total:" here only
+    // repeated it in different words.
     return (
       <div className="schedule-estimate" data-testid="overview-estimate">
         <div className="schedule-estimate__title">
@@ -950,7 +948,6 @@ function AdminCompOverview({ c, tournament, pools, poolMatches, bracket, onSecti
           }
           return (
             <div className="schedule-estimate__body">
-              <EstimateHeadline estimate={estimate} total={total} format={formatCompMinutes} testId="overview-est-range" />
               {perShiaijo && (
                 <div className="schedule-estimate__row">
                   <strong>Per shiaijo:</strong> {perShiaijo}

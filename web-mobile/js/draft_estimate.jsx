@@ -89,7 +89,7 @@ export function useDraftEstimate(shape, password) {
         }
       } catch (err) {
         if (!controller.signal.aborted && err.name !== "AbortError") {
-          setError(err.message || "Failed to estimate schedule");
+          setError(err.message || "Could not estimate the schedule. Reload the page to try again.");
           setEstimate(null);
           setLoading(false);
         }
@@ -150,7 +150,7 @@ export function DraftEstimatePanel({
       return (
         <div className="draft-estimate draft-estimate--loading">
           <div className="draft-estimate__note" data-testid="draft-estimate-note">
-            Working out...
+            Working out…
           </div>
         </div>
       );
@@ -311,7 +311,7 @@ export function DraftEstimatePanel({
       {warningItems}
       {loading && (
         <div className="draft-estimate__note" data-testid="draft-estimate-note">
-          Working out...
+          Working out…
         </div>
       )}
     </div>

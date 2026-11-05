@@ -1583,7 +1583,7 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
             onChangeShiaijo={handleFocusShiaijo}
           />
 
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
+          <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
             <button type="button" className="btn" onClick={onCancel}>Cancel</button>
             {/* Disabled on the same condition that drives the red hint under
                 the shiaijo pills, so the button never invites a request the

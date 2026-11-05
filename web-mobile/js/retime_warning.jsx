@@ -44,35 +44,28 @@ export function readRetimePreview(answer) {
 export function RetimeWarning({ preview, lead = "Saving moves" }) {
   if (!preview || !preview.anyChange) return null;
   return (
-    <div role="status" className="alert alert--warn" style={{ marginTop: 16, marginBottom: 12 }} data-testid="retime-warning">
-      <div style={{ fontWeight: 600, marginBottom: 6 }}>
+    <div role="status" className="alert alert--warn retime-warning" data-testid="retime-warning">
+      <div className="retime-warning__lead">
         {preview.matchCount === 1
           ? `${lead} its 1 match, in the same order:`
           : `${lead} its ${preview.matchCount} matches, in the same order:`}
       </div>
-      <div style={{ display: "flex", flexDirection: "column", gap: 4, marginBottom: 6 }}>
+      <div className="retime-warning__courts">
         {preview.courts.map((courtInfo) => (
-          <div
-            key={courtInfo.court}
-            style={{
-              display: "flex",
-              flexWrap: "wrap",
-              color: "var(--ink-2)",
-            }}
-          >
+          <div key={courtInfo.court} className="retime-warning__court">
             <span>{`Shiaijo ${courtInfo.court}: ${courtInfo.newStart} to ${courtInfo.newEnd} `}</span>
             <span>{`(was ${courtInfo.oldStart} to ${courtInfo.oldEnd})`}</span>
           </div>
         ))}
       </div>
       {preview.notFreshCount > 0 && (
-        <div style={{ marginBottom: 6 }}>
+        <div className="retime-warning__stale">
           {preview.notFreshCount === 1
             ? "1 of its matches no longer has the time a fresh draw would give it now: a time set by hand, a pause added or changed, or another competition moved since the draw. It gets a new time too."
             : `${preview.notFreshCount} of its matches no longer have the times a fresh draw would give them now: a time set by hand, a pause added or changed, or another competition moved since the draw. They get new times too.`}
         </div>
       )}
-      <div style={{ fontSize: 12, color: "var(--ink-2)" }}>
+      <div className="retime-warning__note">
         The pools, the bracket and the competitor numbers stay as they are, and so do its shiaijo. Anyone who printed or noted the old times will need the new ones.
       </div>
     </div>

@@ -229,6 +229,12 @@ export function computePaging({ days, daysShown, page = 0 }) {
   };
 }
 
+// joinCourts lists shiaijo letters as "A", "A and B" or "A, B and C".
+function joinCourts(list) {
+  if (list.length <= 1) return list[0] || '';
+  return `${list.slice(0, -1).join(', ')} and ${list[list.length - 1]}`;
+}
+
 /**
  * Detects overlaps on days that are not on the currently displayed page.
  */
@@ -268,18 +274,12 @@ export function detectOffScreenOverlaps({ calendar, currentPageDays }) {
   for (const [day, courtsSet] of overlapsByDay.entries()) {
     if (!visibleDayNums.has(day)) {
       const courtList = Array.from(courtsSet).sort();
-      let courtStr = '';
-      if (courtList.length === 1) {
-        courtStr = courtList[0];
-      } else if (courtList.length === 2) {
-        courtStr = `${courtList[0]} and ${courtList[1]}`;
-      } else {
-        courtStr = `${courtList.slice(0, -1).join(', ')} and ${courtList[courtList.length - 1]}`;
-      }
+      const date = (calendar?.days || []).find((d) => d.day === day)?.date;
+      const dated = formatDayDate(date);
       offScreen.push({
         day,
         courts: courtList,
-        label: `Overlap on Day ${day}, Shiaijo ${courtStr}`,
+        label: `Overlap on ${dated ? `${dated} (day ${day})` : `day ${day}`}, Shiaijo ${joinCourts(courtList)}`,
       });
     }
   }
@@ -354,16 +354,9 @@ export function computeBlocksLayout({ calendar, visibleDays, courts, laneWidth, 
         }
       }
       if (worstPartner) {
-        const sortedCourts = Array.from(clashingCourts).sort();
-        let courtStr = sortedCourts[0] || '';
-        if (sortedCourts.length === 2) {
-          courtStr = `${sortedCourts[0]} and ${sortedCourts[1]}`;
-        } else if (sortedCourts.length > 2) {
-          courtStr = `${sortedCourts.slice(0, -1).join(', ')} and ${sortedCourts[sortedCourts.length - 1]}`;
-        }
         overlapDetail = {
           partnerName: worstPartner.name,
-          courtsStr: courtStr,
+          courtsStr: joinCourts(Array.from(clashingCourts).sort()),
           durationStr: formatOverlapDuration(maxOverlapMins),
         };
       }
@@ -384,6 +377,7 @@ export function computeBlocksLayout({ calendar, visibleDays, courts, laneWidth, 
       top,
       height,
       isPlaceholder,
+      short: rawHeight < PLACEHOLDER_MIN_PX,
       pastMidnight,
       hasOverlap,
       overlapDetail,
@@ -670,7 +664,7 @@ export function AdminCalendarPage({
   const commitMove = async (args) => {
     const move = await saveMove({ password, ...args });
     setLastMove(move);
-    pushToast(`Moved ${move.name} to ${dayLabelFor(move.after.date)} at ${move.after.startTime}.`, 'success');
+    pushToast(`Moved ${move.name} from ${dayLabelFor(move.before.date)} at ${move.before.startTime} to ${dayLabelFor(move.after.date)} at ${move.after.startTime}.`, 'success');
     setMoveDialog(null);
     fetchCal();
   };
@@ -867,10 +861,10 @@ export function AdminCalendarPage({
     return (
       <div className="app">
         <AdminTopbar onLogout={onLogout} onViewerMode={onViewerMode} tournament={tournament} />
-        <div className="page page--wide cal-page" style={{ maxWidth: 1400 }}>
+        <div className="page page--wide cal-page">
           <Breadcrumbs items={[{ label: tournament.name, onClick: onBack }, { label: 'Competition calendar' }]} />
           <div className="cal-state-card">
-            <div className="cal-state-title">Loading the calendar...</div>
+            <div className="cal-state-title">Loading the calendar…</div>
           </div>
         </div>
       </div>
@@ -882,7 +876,7 @@ export function AdminCalendarPage({
     return (
       <div className="app">
         <AdminTopbar onLogout={onLogout} onViewerMode={onViewerMode} tournament={tournament} />
-        <div className="page page--wide cal-page" style={{ maxWidth: 1400 }}>
+        <div className="page page--wide cal-page">
           <Breadcrumbs items={[{ label: tournament.name, onClick: onBack }, { label: 'Competition calendar' }]} />
           <div className="cal-state-card">
             <div className="cal-state-title">Could not load the calendar.</div>
@@ -901,7 +895,7 @@ export function AdminCalendarPage({
     return (
       <div className="app">
         <AdminTopbar onLogout={onLogout} onViewerMode={onViewerMode} tournament={tournament} />
-        <div className="page page--wide cal-page" style={{ maxWidth: 1400 }}>
+        <div className="page page--wide cal-page">
           <Breadcrumbs items={[{ label: tournament.name, onClick: onBack }, { label: 'Competition calendar' }]} />
           <div className="cal-state-card">
             <div className="cal-state-title">Set the tournament date first.</div>
@@ -922,7 +916,7 @@ export function AdminCalendarPage({
     return (
       <div className="app">
         <AdminTopbar onLogout={onLogout} onViewerMode={onViewerMode} tournament={tournament} />
-        <div className="page page--wide cal-page" style={{ maxWidth: 1400 }}>
+        <div className="page page--wide cal-page">
           <Breadcrumbs items={[{ label: tournament.name, onClick: onBack }, { label: 'Competition calendar' }]} />
           <div className="cal-state-card">
             <div className="cal-state-title">No competitions yet.</div>
@@ -956,7 +950,7 @@ export function AdminCalendarPage({
   return (
     <div className="app">
       <AdminTopbar onLogout={onLogout} onViewerMode={onViewerMode} tournament={tournament} />
-      <div className="page page--wide cal-page" style={{ maxWidth: 1400 }} ref={containerRef}>
+      <div className="page page--wide cal-page" ref={containerRef}>
         <Breadcrumbs items={[{ label: tournament.name, onClick: onBack }, { label: 'Competition calendar' }]} />
 
         <div className="page-head">
@@ -975,7 +969,7 @@ export function AdminCalendarPage({
                 {withContentKeys(unusedPauses, (u) => `${u.name}|${u.reason}`).map(({ key, item: p }) => (
                   <div key={key} className="cal-unused-pause">
                     {p.name} is not used: {formatUnusedPauseReason(p.reason)}{' '}
-                    <button type="button" className="cal-link" onClick={onEditTournament}>
+                    <button type="button" className="btn btn--link" onClick={onEditTournament}>
                       Edit tournament
                     </button>
                   </div>
@@ -992,7 +986,7 @@ export function AdminCalendarPage({
               {notPlacedComps.length === 1
                 ? '1 competition is not on the calendar.'
                 : `${notPlacedComps.length} competitions are not on the calendar.`}{' '}
-              <button type="button" className="cal-link" onClick={handleScrollToTray}>
+              <button type="button" className="btn btn--link" onClick={handleScrollToTray}>
                 Show them
               </button>
             </span>
@@ -1005,7 +999,7 @@ export function AdminCalendarPage({
             {layout.offScreenOverlaps.map(o => (
               <div key={o.day} className="cal-offscreen-overlap">
                 <span>{o.label}</span>
-                <button type="button" className="cal-link" onClick={() => handleShowDay(o.day)}>
+                <button type="button" className="btn btn--link" onClick={() => handleShowDay(o.day)}>
                   Show Day {o.day}
                 </button>
               </div>
@@ -1043,7 +1037,7 @@ export function AdminCalendarPage({
             <span>{layout.paging.label}</span>
             <button
               type="button"
-              className="cal-paging-btn"
+              className="btn btn--icon-sm"
               disabled={!layout.paging.hasPrev}
               onClick={() => setDesktopPage(p => Math.max(0, p - 1))}
               aria-label="Previous days"
@@ -1052,7 +1046,7 @@ export function AdminCalendarPage({
             </button>
             <button
               type="button"
-              className="cal-paging-btn"
+              className="btn btn--icon-sm"
               disabled={!layout.paging.hasNext}
               onClick={() => setDesktopPage(p => p + 1)}
               aria-label="Next days"
@@ -1065,9 +1059,9 @@ export function AdminCalendarPage({
         {/* Calendar Grid Frame */}
         {lastMove && (
           <div className="cal-moved-line" role="status" data-testid="cal-moved-line">
-            <span>Moved just now: <strong>{lastMove.name}</strong> to {dayLabelFor(lastMove.after.date)} at {lastMove.after.startTime}.</span>
+            <span>Moved <strong>{lastMove.name}</strong> just now. Undo puts it back where it was.</span>
             <button type="button" className="btn btn--sm" onClick={handleUndo} disabled={undoing}>
-              {undoing ? 'Undoing...' : 'Undo'}
+              {undoing ? 'Undoing…' : 'Undo'}
             </button>
           </div>
         )}
@@ -1176,6 +1170,7 @@ export function AdminCalendarPage({
                         else if (isDraw) blockClass += ' cal-block--draw';
                         else blockClass += ' cal-block--estimate';
 
+                        if (block.short && !isPlaceholder) blockClass += ' cal-block--short';
                         if (block.hasOverlap || block.pastMidnight) {
                           blockClass += ' cal-block--warn';
                         }
@@ -1280,7 +1275,7 @@ export function AdminCalendarPage({
 
                               {block.overlapDetail && (
                                 <div className="cal-block__warn-line">
-                                  Overlaps {block.overlapDetail.partnerName} on {block.overlapDetail.courtsStr}, {block.overlapDetail.durationStr}
+                                  Overlaps {block.overlapDetail.partnerName} on Shiaijo {block.overlapDetail.courtsStr}, {block.overlapDetail.durationStr}
                                 </div>
                               )}
 
@@ -1329,17 +1324,15 @@ export function AdminCalendarPage({
             )}
             <div className="cal-tray__list">
               {notPlacedComps.map(c => (
-                <div
+                <button
                   key={c.id}
+                  type="button"
                   className="cal-tray__item"
-                  role="button"
-                  tabIndex={0}
                   onClick={() => onOpenCompetition?.(c.id, 'overview')}
-                  onKeyDown={(e) => { if (e.key === 'Enter') onOpenCompetition?.(c.id, 'overview'); }}
                 >
                   <span className="cal-tray__item-name">{c.name}</span>
                   <span className="cal-tray__item-reason">{formatNotPlacedReason(c.placement?.notPlacedReason)}</span>
-                </div>
+                </button>
               ))}
             </div>
           </div>

@@ -53,7 +53,7 @@ describe('AdminCalendarPage render tests', () => {
     courts: ['A', 'B'],
   };
 
-  it('renders loading state verbatim: "Loading the calendar..."', async () => {
+  it('renders loading state verbatim: "Loading the calendar…"', async () => {
     window.API.fetchCalendar.mockReturnValue(new Promise(() => {})); // Hangs
     render(
       <AdminCalendarPage
@@ -62,7 +62,7 @@ describe('AdminCalendarPage render tests', () => {
         onBack={() => {}}
       />
     );
-    expect(screen.getByText('Loading the calendar...')).toBeInTheDocument();
+    expect(screen.getByText('Loading the calendar…')).toBeInTheDocument();
   });
 
   it('renders failed state verbatim: "Could not load the calendar." / "Check the connection to the tournament server." and [Try again] re-fetches', async () => {
@@ -317,7 +317,7 @@ describe('AdminCalendarPage render tests', () => {
 
     // Off-screen overlap on Day 6, Shiaijo B
     await waitFor(() => {
-      expect(screen.getByText('Overlap on Day 6, Shiaijo B')).toBeInTheDocument();
+      expect(screen.getByText('Overlap on day 6, Shiaijo B')).toBeInTheDocument();
     });
     const showDayBtn = screen.getByRole('button', { name: 'Show Day 6' });
     expect(showDayBtn).toBeInTheDocument();
@@ -447,7 +447,7 @@ describe('AdminCalendarPage render tests', () => {
     });
 
     render(<AdminCalendarPage tournament={TOURNAMENT} password="pass" onBack={() => {}} />);
-    expect(screen.getByText('Loading the calendar...')).toBeInTheDocument();
+    expect(screen.getByText('Loading the calendar…')).toBeInTheDocument();
 
     // A push starts a second fetch, which aborts the first.
     act(() => { sseHandler({ type: 'tournament_updated' }); });
@@ -456,7 +456,7 @@ describe('AdminCalendarPage render tests', () => {
       await Promise.resolve();
     });
     expect(calls).toBe(2);
-    expect(screen.getByText('Loading the calendar...')).toBeInTheDocument();
+    expect(screen.getByText('Loading the calendar…')).toBeInTheDocument();
 
     await act(async () => {
       resolveSecond({
@@ -466,6 +466,6 @@ describe('AdminCalendarPage render tests', () => {
       });
       await Promise.resolve();
     });
-    expect(screen.queryByText('Loading the calendar...')).not.toBeInTheDocument();
+    expect(screen.queryByText('Loading the calendar…')).not.toBeInTheDocument();
   });
 });

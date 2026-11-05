@@ -251,7 +251,7 @@ export function MoveDialog({ comp, dayOptions, allCourts, password, initial, onS
         aria-labelledby="cal-move-title" data-testid="cal-move-dialog" onClick={(e) => e.stopPropagation()}>
         <h3 id="cal-move-title" className="shiaijo-move-confirm__title">Move {comp.name}</h3>
         {loadErr && <div className="alert alert--error" role="alert">{loadErr}</div>}
-        {!fresh && !loadErr && <p className="shiaijo-move-confirm__body">Reading the competition...</p>}
+        {!fresh && !loadErr && <p className="shiaijo-move-confirm__body">Reading the competition…</p>}
         {fresh && (
           <div className="cal-move-dialog__fields">
             <div className="field">
@@ -303,7 +303,7 @@ export function MoveDialog({ comp, dayOptions, allCourts, password, initial, onS
         <div className="shiaijo-move-confirm__actions">
           <button type="button" className="btn" onClick={onClose} disabled={saving}>Cancel</button>
           <button type="button" className="btn btn--primary" onClick={save} disabled={!fresh || !ready || unchanged || saving}>
-            {saving ? 'Moving...' : 'Move'}
+            {saving ? 'Moving…' : 'Move'}
           </button>
         </div>
       </div>

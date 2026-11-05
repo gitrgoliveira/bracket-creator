@@ -84,7 +84,9 @@ describe('moving a competition on the calendar', () => {
     expect(body.restoreMatchTimes).toBeUndefined();
 
     const line = await screen.findByTestId('cal-moved-line');
-    expect(line).toHaveTextContent('Moved just now');
+    expect(line).toHaveTextContent('just now. Undo puts it back where it was.');
+    // The toast names where it went from and to; the line carries Undo.
+    expect(toastSnapshot()?.message).toMatch(/^Moved .+ from .+ at 09:00 to .+ at 10:30\.$/);
     fireEvent.click(within(line).getByRole('button', { name: 'Undo' }));
     await waitFor(() => expect(window.API.updateCompetition).toHaveBeenCalledTimes(2));
     const undoBody = window.API.updateCompetition.mock.calls[1][1];
@@ -205,7 +207,7 @@ describe('moving a competition on the calendar', () => {
       expect(body.date).toBe('15-03-2026');
       expect(body.startTime).toBe('09:00');
       expect(body.configVersion).toBe('v1');
-      expect(await screen.findByTestId('cal-moved-line')).toHaveTextContent('Moved just now');
+      expect(await screen.findByTestId('cal-moved-line')).toHaveTextContent('just now. Undo puts it back where it was.');
     });
 
     it('writes nothing for a drop where the block already is, nor for a click', async () => {

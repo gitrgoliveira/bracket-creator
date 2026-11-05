@@ -245,7 +245,7 @@ export function PauseList({
       </div>
 
       {changed && drawnCompetitions && drawnCompetitions.length > 0 && (
-        <div className="pause-warning alert alert--warn" style={{ marginBottom: 16 }}>
+        <div className="pause-warning alert alert--warn">
           Already drawn, keeps its times: {drawnCompetitions.join(', ')}.
         </div>
       )}
@@ -345,7 +345,7 @@ export function PauseList({
         </div>
       )}
 
-      <div className="pause-actions" style={{ marginTop: pauses.length > 0 ? 14 : 0, marginBottom: 16 }}>
+      <div className="pause-actions">
         <button
           type="button"
           className="btn"
@@ -355,17 +355,17 @@ export function PauseList({
           + Add a pause
         </button>
         {isMaxReached && (
-          <span className="pause-max-hint" style={{ marginLeft: 12, fontSize: 13, color: 'var(--ink-3)' }}>
+          <span className="pause-max-hint">
             {`Maximum of ${MAX_PAUSES} pauses reached.`}
           </span>
         )}
       </div>
 
       <div className="pause-impact-notice">
-        <div className="pause-impact-title" style={{ fontWeight: 600, fontSize: 13, marginBottom: 6 }}>
+        <div className="pause-impact-title">
           What a pause changes
         </div>
-        <ul className="pause-impact-list" style={{ margin: 0, paddingLeft: 18, fontSize: 13, color: 'var(--ink-2)', lineHeight: 1.5 }}>
+        <ul className="pause-impact-list">
           <li>Planned match times skip it on every shiaijo.</li>
           <li>Every estimate follows it: Add competition, each Overview and the competition calendar.</li>
           <li>A draw made after you save also follows it. A competition already drawn keeps the times its draw set.</li>

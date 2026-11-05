@@ -271,7 +271,15 @@ describe('admin_calendar pure layout helper', () => {
       const offScreen = detectOffScreenOverlaps({ calendar, currentPageDays });
       expect(offScreen).toHaveLength(1);
       expect(offScreen[0].day).toBe(6);
-      expect(offScreen[0].label).toBe('Overlap on Day 6, Shiaijo B');
+      expect(offScreen[0].label).toBe('Overlap on day 6, Shiaijo B');
+
+      // With the tournament's dates the label names the day the way the rest
+      // of the page does.
+      const dated = detectOffScreenOverlaps({
+        calendar: { ...calendar, days: [{ day: 6, date: '21-05-2026' }] },
+        currentPageDays,
+      });
+      expect(dated[0].label).toBe('Overlap on Thu 21 May (day 6), Shiaijo B');
     });
   });
 

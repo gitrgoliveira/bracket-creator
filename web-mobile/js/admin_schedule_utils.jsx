@@ -1,6 +1,5 @@
 // Pure utility functions extracted from admin_schedule.jsx (mp-d7tl), plus
-// EstimateHeadline, the one presentational component the two schedule-estimate
-// panels share. No window dependencies and no React import: the component
+// EstimateHeadline, the Settings panel's schedule-estimate headline. No window dependencies and no React import: the component
 // touches the global React only when it is rendered, so importing this module
 // stays safe anywhere including tests.
 
@@ -24,18 +23,17 @@ export function estimateRangeParts(est) {
   return { best, average: est.totalDurationMinutes, worst };
 }
 
-// EstimateHeadline: the headline line of a schedule-estimate panel, shared by
-// the competition Overview footer and the competition Settings panel — the
-// two carried byte-identical copies of it. ONE home for the range-vs-total
-// decision: when estimateRangeParts says the estimate genuinely spans a range
+// EstimateHeadline: the headline line of the competition Settings panel's
+// schedule estimate. (The Overview footer used it too until its total moved
+// to the stats strip's Est. duration tile alone.) ONE home for the
+// range-vs-total decision: when estimateRangeParts says the estimate genuinely spans a range
 // (kachinuki's variable bout count) it reads "Best · Average · Worst",
 // otherwise the single "Total:" line exactly as before.
 //
-// `total` is the ALREADY-FORMATTED total string (each call site formats it
-// anyway for its own empty-estimate guard) and `format` is that site's minute
-// formatter: Overview resolves window.formatCompMinutes with a fallback while
-// Settings imports it directly, so it is passed in rather than imported here.
-// `testId` keeps each call site's own data-testid on the range row.
+// `total` is the ALREADY-FORMATTED total string (the caller formats it anyway
+// for its own empty-estimate guard) and `format` is the caller's minute
+// formatter, passed in rather than imported so this module stays free of
+// window dependencies. `testId` is the caller's data-testid for the range row.
 export function EstimateHeadline({ estimate, total, format, testId }) {
   const range = estimateRangeParts(estimate);
   if (!range) return <div><strong>Total:</strong> {total}</div>;

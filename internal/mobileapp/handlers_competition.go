@@ -1656,8 +1656,12 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		// (DR1), saved in the same transaction as the settings. What the re-time
 		// reads from the store (the tournament and the court floors) is read
 		// here, before the lock, because the transaction may not call a public
-		// Store method; the key records what it was read for, so a change that
-		// landed in between is a retry and never a guess.
+		// Store method. The key records only this competition's own date and
+		// start: a change to either that lands in between is a retry and never a
+		// guess. A pause edit or another competition's move in that window is NOT
+		// guarded; the times it would have shifted are saved from the floors read
+		// here, which is the same drift the dialog's preview already shows (the
+		// engine's NotFreshCount).
 		type retimeKey struct{ oldDate, oldStart, newDate, newStart string }
 		var retimeIn *engine.RetimeInputs
 		var retimeFor retimeKey
@@ -2356,7 +2360,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			return
 		}
 		if retimeRetryFlag {
-			c.JSON(http.StatusConflict, gin.H{"code": "retime_retry", "error": "This competition was drawn while you were moving it. Nothing was moved; try again."})
+			c.JSON(http.StatusConflict, gin.H{"code": "retime_retry", "error": "This competition changed while you were moving it. Nothing was moved; try again."})
 			return
 		}
 		if retimeUnavailableFlag {

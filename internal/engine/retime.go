@@ -379,8 +379,12 @@ func clockMinutes(at string) (int, bool) {
 // does not rise; and it leaves one slot empty exactly where the next match
 // would put a player straight back in, so one idle slot sits wherever two
 // consecutive filled slots share a player. The result is checked against the
-// invariants the scheduler guarantees; if they do not hold, nothing can be
-// safely re-timed and ErrRetimeUnavailable is returned.
+// invariants the scheduler guarantees: every slot fills the shiaijo in order
+// from the first (so a match the operator moved to another shiaijo after the
+// draw breaks the pattern and the slot boundaries cannot be trusted), every
+// side carries a participant id, and no player appears twice in a slot or in
+// two adjacent ones. If they do not hold, nothing can be safely re-timed and
+// ErrRetimeUnavailable is returned.
 func recoverLeagueSlots(matches []state.MatchResult, courts []string) ([]int, error) {
 	if len(courts) == 0 {
 		courts = []string{""}
@@ -400,7 +404,8 @@ func recoverLeagueSlots(matches []state.MatchResult, courts []string) ([]int, er
 		if !ok {
 			return nil, ErrRetimeUnavailable
 		}
-		if i > 0 && idx <= prevIdx {
+		newSlot := i > 0 && idx <= prevIdx
+		if newSlot {
 			prevPlayers, curPlayers = curPlayers, map[string]bool{}
 			slot++
 			adjacent = true
@@ -409,12 +414,19 @@ func recoverLeagueSlots(matches []state.MatchResult, courts []string) ([]int, er
 				adjacent = false
 			}
 		}
+		wantIdx := prevIdx + 1 // the next shiaijo in the slot
+		if i == 0 || newSlot {
+			wantIdx = 0 // a slot fills from the first shiaijo
+		}
+		if idx != wantIdx {
+			return nil, ErrRetimeUnavailable
+		}
 		if adjacent && sharesPlayer(prevPlayers, m) {
 			return nil, ErrRetimeUnavailable
 		}
 		for _, id := range []string{m.SideAID, m.SideBID} {
 			if id == "" {
-				continue
+				return nil, ErrRetimeUnavailable
 			}
 			if curPlayers[id] {
 				return nil, ErrRetimeUnavailable

@@ -259,6 +259,31 @@ func TestRetime_ALeaguePlayerTwiceInOneSlotCannotBeReadBack(t *testing.T) {
 	assert.ErrorIs(t, err, ErrRetimeUnavailable)
 }
 
+// A match the operator moved to another shiaijo after the draw leaves the
+// fill-from-the-first-shiaijo pattern, so the slot boundaries cannot be read
+// back: A,B,A,B becomes A,B,B,B and every later match would be re-timed a slot
+// late. It is refused instead.
+func TestRetime_ALeagueMatchMovedToAnotherShiaijoCannotBeReadBack(t *testing.T) {
+	eng, store, comp := drawnForRetime(t, state.CompFormatLeague, []string{"A", "B"}, 6, retimeTournament([]string{"A", "B"}))
+	pool, err := store.LoadPoolMatches(comp.ID)
+	require.NoError(t, err)
+	require.Equal(t, "A", pool[2].Court)
+	pool[2].Court = "B"
+	require.NoError(t, store.SavePoolMatches(comp.ID, pool))
+	before := storedTimes(t, store, comp)
+
+	_, err = retimeInTx(t, eng, store, comp, movedTo(comp, comp.Date, "11:00"))
+	assert.ErrorIs(t, err, ErrRetimeUnavailable)
+	assert.Equal(t, before, storedTimes(t, store, comp))
+}
+
+func TestRecoverLeagueSlots_RefusesASideWithNoParticipantId(t *testing.T) {
+	_, err := recoverLeagueSlots([]state.MatchResult{
+		{ID: "Pool A-0", SideAID: "p0", SideBID: "", Court: "A"},
+	}, []string{"A"})
+	assert.ErrorIs(t, err, ErrRetimeUnavailable)
+}
+
 func TestRestoreMatchTimesTx_PutsEveryMatchBackExactly(t *testing.T) {
 	eng, store, comp := drawnForRetime(t, state.CompFormatMixed, []string{"A", "B"}, 8, retimeTournament([]string{"A", "B"}))
 	before := storedTimes(t, store, comp)

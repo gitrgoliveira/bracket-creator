@@ -128,7 +128,7 @@ describe('moving a competition on the calendar', () => {
   });
 
   it('keeps the dialog and the server\'s sentence when the move is refused', async () => {
-    const err = new Error('This competition was drawn while you were moving it. Nothing was moved; try again.');
+    const err = new Error('This competition changed while you were moving it. Nothing was moved; try again.');
     err.code = 'retime_retry';
     window.API.updateCompetition.mockRejectedValue(err);
     await open();

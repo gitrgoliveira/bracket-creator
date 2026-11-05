@@ -154,6 +154,9 @@ type RestoreCompetitionPlan struct {
 	// competition the archive lacks.
 	ID   string `json:"id"`
 	Name string `json:"name"`
+	// CurrentName is the folder's name for a competition both hold, set only
+	// when it differs from Name (it was renamed after the backup).
+	CurrentName string `json:"currentName,omitempty"`
 	// Action is the answer given (or the one the restore takes by itself);
 	// empty while an asked competition is unanswered.
 	Action RestoreAction `json:"action,omitempty"`

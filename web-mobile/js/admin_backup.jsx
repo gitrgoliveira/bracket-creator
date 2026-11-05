@@ -771,15 +771,20 @@ function AdminBackupPage({ tournament, onBack, onLogout, onViewerMode, password,
                     const nameId = `backup-comp-${c.id}`;
                     const leftOut = canLeaveOut(c) && currentDecision.action === "keep";
                     const copyTaken = copyNameTaken(c);
+                    // A competition renamed after the backup is read with its current name too.
+                    const labelledBy = c.currentName ? `${nameId} ${nameId}-current ${nameId}-note` : `${nameId} ${nameId}-note`;
 
                     return (
                       <div key={c.id} className="backup-row backup-row--plan">
                         <div className="backup-row__head">
                           <span id={nameId} className="backup-row__name">{c.name}</span>
                         </div>
+                        {c.currentName && (
+                          <div id={`${nameId}-current`} className="backup-row__note">Called &ldquo;{c.currentName}&rdquo; in this tournament now.</div>
+                        )}
 
                         {canLeaveOut(c) ? (
-                          <div role="group" aria-labelledby={`${nameId} ${nameId}-note`}>
+                          <div role="group" aria-labelledby={labelledBy}>
                             <div id={`${nameId}-note`} className="backup-row__note">{leftOut ? LEFT_OUT_NOTE : UNASKED_NOTES.create}</div>
                             <label className="backup-choice">
                               <input
@@ -794,7 +799,7 @@ function AdminBackupPage({ tournament, onBack, onLogout, onViewerMode, password,
                         ) : !c.asked ? (
                           <div className="backup-row__note">{UNASKED_NOTES[c.action]}</div>
                         ) : isMissingFromArchive(c) ? (
-                          <fieldset className="backup-choices" aria-labelledby={`${nameId} ${nameId}-note`}>
+                          <fieldset className="backup-choices" aria-labelledby={labelledBy}>
                             <legend id={`${nameId}-note`} className="backup-row__note">This competition is not in the backup archive:</legend>
                             <label className="backup-choice">
                               <input
@@ -818,7 +823,7 @@ function AdminBackupPage({ tournament, onBack, onLogout, onViewerMode, password,
                             </label>
                           </fieldset>
                         ) : (
-                          <fieldset className="backup-choices" aria-labelledby={`${nameId} ${nameId}-note`}>
+                          <fieldset className="backup-choices" aria-labelledby={labelledBy}>
                             <legend id={`${nameId}-note`} className="backup-row__note">This competition already exists:</legend>
                             <label className="backup-choice">
                               <input

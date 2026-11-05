@@ -38,10 +38,13 @@ func TestRestore_TournamentScopeOffersKeepForArchiveCompetitions(t *testing.T) {
 	men := planEntry(t, plan, "men")
 	assert.True(t, men.Asked)
 	assert.Equal(t, []RestoreAction{RestoreReplace, RestoreCopy, RestoreKeep}, men.Choices)
+	assert.Equal(t, "Men", men.Name, "the row is listed under the backup's name")
+	assert.Equal(t, "Men Live", men.CurrentName, "and names the folder's name, since men was renamed after the backup")
 	solo := planEntry(t, plan, "solo")
 	assert.False(t, solo.Asked, "a competition only the backup holds is added unless the operator says otherwise")
 	assert.Equal(t, RestoreCreate, solo.Action)
 	assert.Equal(t, []RestoreAction{RestoreCreate, RestoreKeep}, solo.Choices)
+	assert.Empty(t, solo.CurrentName, "the folder holds no solo to name")
 	assert.Equal(t, []string{"men"}, plan.Missing, "leaving solo unanswered is not a missing answer")
 
 	// Under competition scope keeping would restore nothing, so it is not offered.
@@ -57,6 +60,7 @@ func TestRestore_TournamentScopeOffersKeepForArchiveCompetitions(t *testing.T) {
 	cp, err := s.PlanRestore(RestoreRequest{Archive: compArchive})
 	require.NoError(t, err)
 	assert.Equal(t, []RestoreAction{RestoreReplace, RestoreCopy}, planEntry(t, cp, "men").Choices)
+	assert.Empty(t, planEntry(t, cp, "men").CurrentName, "a backup taken after the rename holds the same name")
 
 	// A create answered with something it does not offer is refused.
 	_, err = s.PlanRestore(RestoreRequest{Archive: req.Archive, Decisions: map[string]RestoreDecision{"solo": {Action: RestoreReplace}}})

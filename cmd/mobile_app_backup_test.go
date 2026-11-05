@@ -302,7 +302,7 @@ func TestMobileAppBackupRestore_KeepAnArchiveCompetition(t *testing.T) {
 
 	out, err := executeMobileApp("restore", "--folder", targetDir, zipPath)
 	require.Error(t, err)
-	assert.Contains(t, out+err.Error(), `open-comp ("Open Championship"): choose replace, copy or keep`)
+	assert.Contains(t, out+err.Error(), `open-comp ("Open Championship", called "Existing Open" now): choose replace, copy or keep`)
 	assert.NotContains(t, out+err.Error(), "solo", "a competition only the backup holds is added unless left out")
 
 	out, err = executeMobileApp("restore", "--folder", targetDir, "--only", "open-comp", "--keep", "open-comp", zipPath)
@@ -311,7 +311,7 @@ func TestMobileAppBackupRestore_KeepAnArchiveCompetition(t *testing.T) {
 
 	out, err = executeMobileApp("restore", "--folder", targetDir, "--keep", "open-comp", "--keep", "solo", zipPath)
 	require.NoError(t, err, "output: %s", out)
-	assert.Contains(t, out, `Kept: open-comp ("Open Championship")`)
+	assert.Contains(t, out, `Kept: open-comp ("Open Championship", called "Existing Open" now)`)
 	assert.Contains(t, out, `Left out: solo ("Solo")`)
 
 	reopened, err := state.NewStore(targetDir)

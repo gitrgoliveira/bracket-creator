@@ -7150,7 +7150,15 @@ components:
                 description: Competition ID in archive (or in folder for one the archive lacks).
               name:
                 type: string
-                description: Competition display name.
+                description: >
+                  Competition display name: its name in the archive, or in the folder for one
+                  the archive lacks.
+              currentName:
+                type: string
+                description: >
+                  The folder's name for a competition both hold, sent only when it differs from
+                  `name` (the competition was renamed after the backup). `replace` brings back
+                  `name`; `keep` leaves `currentName`.
               action:
                 type: string
                 enum: [create, replace, copy, keep, remove]

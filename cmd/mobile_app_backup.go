@@ -336,7 +336,7 @@ func (o *mobileAppRestoreOptions) run(cmd *cobra.Command, archivePath string) (e
 					for i, c := range comp.Choices {
 						choiceStrs[i] = string(c)
 					}
-					lines = append(lines, fmt.Sprintf("  - %s (%q): choose %s", comp.ID, comp.Name, joinChoices(choiceStrs)))
+					lines = append(lines, fmt.Sprintf("  - %s (%s): choose %s", comp.ID, restoreCompName(comp), joinChoices(choiceStrs)))
 					found = true
 					break
 				}
@@ -398,6 +398,15 @@ func joinChoices(choices []string) string {
 	return strings.Join(choices[:len(choices)-1], ", ") + " or " + choices[len(choices)-1]
 }
 
+// restoreCompName names a competition by its name in the backup, adding the
+// folder's name when it was renamed after the backup.
+func restoreCompName(comp state.RestoreCompetitionPlan) string {
+	if comp.CurrentName == "" {
+		return fmt.Sprintf("%q", comp.Name)
+	}
+	return fmt.Sprintf("%q, called %q now", comp.Name, comp.CurrentName)
+}
+
 func printRestoreOutcome(out io.Writer, plan state.RestorePlan) error {
 	var created, replaced, copied, kept, leftOut, removed []string
 	for _, comp := range plan.Competitions {
@@ -413,7 +422,7 @@ func printRestoreOutcome(out io.Writer, plan state.RestorePlan) error {
 			if slices.Contains(comp.Choices, state.RestoreCreate) {
 				leftOut = append(leftOut, fmt.Sprintf("%s (%q)", comp.ID, comp.Name))
 			} else {
-				kept = append(kept, fmt.Sprintf("%s (%q)", comp.ID, comp.Name))
+				kept = append(kept, fmt.Sprintf("%s (%s)", comp.ID, restoreCompName(comp)))
 			}
 		case state.RestoreRemove:
 			removed = append(removed, fmt.Sprintf("%s (%q)", comp.ID, comp.Name))

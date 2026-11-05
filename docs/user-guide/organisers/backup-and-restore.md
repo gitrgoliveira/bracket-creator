@@ -60,7 +60,7 @@ Above the competitions in the restore plan, the **Restore** list starts at **All
 
 When restoring, the plan presents you with decisions depending on what is currently in your data folder:
 
-- **For a competition that already exists in the folder**:
+- **For a competition that already exists in the folder**: the plan lists it under its name in the backup. If you renamed it after the backup was made, a line below gives the name it has now: **Replace it** brings back the backup's name, and **Keep the one I have** keeps the new one. The command line shows the same, for example `("Men up to 2D", called "Men Kyu to 2D" now)`.
     - **Replace it**: overwrites the current competition with the one from the backup.
     - **Restore as a copy named:** keeps your current competition intact and restores the backup copy under a new name. You must type a name for the new copy in the box.
     - **Keep the one I have (don't restore it)**: leaves your current competition exactly as it is, and the backup's version of it is not restored. Offered when restoring a whole tournament.

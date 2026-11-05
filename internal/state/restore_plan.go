@@ -44,6 +44,9 @@ func buildRestoreCompetitionEntries(
 	var entries []RestoreCompetitionPlan
 	for _, id := range archiveIDs {
 		e := RestoreCompetitionPlan{ID: id, Name: ai.names[id]}
+		if current := competitionName(live, id); inFolder[id] && current != e.Name {
+			e.CurrentName = current
+		}
 		// Keep (leave the folder as it is for this id) is offered only in a
 		// whole-tournament restore: under competition scope, keeping the
 		// competition would restore nothing, which is what Cancel does.

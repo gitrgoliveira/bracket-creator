@@ -1370,6 +1370,17 @@ describe('AdminBackupPage render tests', () => {
   const copyBox = () => screen.getByRole('textbox', { name: 'Name for the copy of "Open Individual"' });
   const lastDecisionsSent = () => mockApi.planRestore.mock.calls.at(-1)[0].decisions;
 
+  it('names the current name of a competition renamed after the backup, and only then', async () => {
+    const { container } = render(<AdminBackupPage tournament={defaultTournament} password={TEST_KEY} />);
+    const renamed = { ...keepPlan, competitions: [{ ...keepPlan.competitions[0], currentName: 'Open Men' }, keepPlan.competitions[1]] };
+    await openPlan(container, renamed);
+
+    const note = 'Called \u201cOpen Men\u201d in this tournament now.';
+    expect(screen.getByText(note)).toBeInTheDocument();
+    expect(screen.getByRole('group', { name: `Open Individual ${note} This competition already exists:` })).toBeInTheDocument();
+    expect(screen.queryAllByText(/in this tournament now\./)).toHaveLength(1);
+  });
+
   it('offers to keep a competition you already have, and sums it up as left out', async () => {
     window.promptDialog = vi.fn(() => Promise.resolve(null));
     const { container } = render(<AdminBackupPage tournament={defaultTournament} password={TEST_KEY} />);

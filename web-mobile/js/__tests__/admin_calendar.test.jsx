@@ -19,6 +19,9 @@ import {
   detectOffScreenOverlaps,
   computeBlocksLayout,
   CASCADE_PX,
+  COARSE_LANE_PX,
+  pauseLabelLane,
+  fitBlockLines,
   calendarLayout,
   withContentKeys,
 } from '../admin_calendar.jsx';
@@ -362,7 +365,7 @@ describe('admin_calendar pure layout helper', () => {
     });
 
     it('draws the later block after the earlier one, inset from the left, on a shared lane', () => {
-      const blocks = layout([comp('late', 'Later', ['A'], 630, 700), comp('early', 'Earlier', ['A', 'B'], 600, 720)]);
+      const blocks = layout([comp('late', 'Later', ['A'], 690, 760), comp('early', 'Earlier', ['A', 'B'], 600, 780)]);
       expect(blocks.map((b) => b.comp.id)).toEqual(['early', 'late']);
       expect(blocks[0].left).toBe(0);
       expect(blocks[0].width).toBe(400);
@@ -375,16 +378,90 @@ describe('admin_calendar pure layout helper', () => {
       expect(blocks.map((b) => b.left)).toEqual([0, 200, 0]);
     });
 
+    it('gives a block that starts with an earlier one the right half, and keeps the earlier one\'s text to its own half', () => {
+      const blocks = layout([comp('a', 'First', ['A'], 600, 700), comp('b', 'Second', ['A'], 600, 700)]);
+      expect(blocks.map((b) => [b.left, b.width])).toEqual([[0, 200], [100, 100]]);
+      expect(blocks[0].coveredRight).toBe(100);
+      expect(blocks[1].coveredRight).toBe(0);
+    });
+
+    it('keeps the earlier block\'s text clear of a later block that covers its right part', () => {
+      const blocks = layout([comp('w', 'Wide', ['A', 'B'], 600, 700), comp('s', 'Later on B', ['B'], 630, 700)]);
+      expect(blocks[1].left).toBe(200 + CASCADE_PX);
+      expect(blocks[0].coveredRight).toBe(400 - (200 + CASCADE_PX));
+    });
+
     it('steps a third clash further in, and keeps at least half the width', () => {
-      const blocks = layout([comp('1', 'One', ['A'], 600, 800), comp('2', 'Two', ['A'], 620, 800), comp('3', 'Three', ['A'], 640, 800)]);
+      const blocks = layout([comp('1', 'One', ['A'], 600, 900), comp('2', 'Two', ['A'], 670, 900), comp('3', 'Three', ['A'], 740, 900)]);
       expect(blocks.map((b) => b.left)).toEqual([0, CASCADE_PX, 2 * CASCADE_PX]);
       const deep = computeBlocksLayout({
         calendar: { competitions: Array.from({ length: 8 }, (_, i) => comp(String(i), `C${i}`, ['A'], 600 + i, 800)) },
         visibleDays: [{ day: 1 }], courts: ['A'], laneWidth: 76, startHour: 8, endHour: 18,
       });
       for (const b of deep) expect(b.width).toBeGreaterThanOrEqual(38);
-      // A phone's narrow lane insets by a quarter of the lane, not the full step.
-      expect(deep[1].left).toBe(19);
+      // Starting a minute apart, the second takes the right half of the first.
+      expect(deep[1].left).toBe(38);
+      // A narrow lane insets a later start by a quarter of the lane, not the full step.
+      const narrow = computeBlocksLayout({
+        calendar: { competitions: [comp('x', 'X', ['A'], 600, 900), comp('y', 'Y', ['A'], 700, 900)] },
+        visibleDays: [{ day: 1 }], courts: ['A'], laneWidth: 76, startHour: 8, endHour: 18,
+      });
+      expect(narrow[1].left).toBe(19);
+    });
+  });
+
+  describe('touch screens', () => {
+    it('never draws a lane narrower than a name beside its Move button', () => {
+      const calendar = { courts: ['A', 'B', 'C'], days: [{ day: 1, date: '16-05-2026' }, { day: 2, date: '17-05-2026' }], competitions: [] };
+      const phone = calendarLayout({ calendar, width: 320, phone: true, coarse: true });
+      expect(phone.laneWidth).toBe(COARSE_LANE_PX);
+      expect(phone.lanesScrollSideways).toBe(true);
+      const tablet = calendarLayout({ calendar, width: 768, coarse: true });
+      expect(tablet.laneWidth).toBeGreaterThanOrEqual(COARSE_LANE_PX);
+      expect(tablet.daysShown).toBe(1);
+      expect(calendarLayout({ calendar, width: 320, phone: true }).laneWidth).toBeLessThan(COARSE_LANE_PX);
+    });
+  });
+
+  describe('pauseLabelLane', () => {
+    it('puts a pause\'s name in the first lane no block covers during it', () => {
+      const blocks = [{ startMins: 570, endMins: 900, minCourtIdx: 0, maxCourtIdx: 0 }];
+      expect(pauseLabelLane(blocks, 3, 750, 810)).toBe(1);
+      expect(pauseLabelLane(blocks, 3, 1000, 1060)).toBe(0);
+      expect(pauseLabelLane([{ ...blocks[0], maxCourtIdx: 2 }], 3, 750, 810)).toBe(0);
+    });
+  });
+
+  describe('fitBlockLines', () => {
+    const line = (offsetTop, offsetHeight) => ({ offsetTop, offsetHeight, style: {} });
+    it('clamps the line a block\'s foot cuts to the lines that fit, and leaves out the rest', () => {
+      const name = line(6, 15);
+      const time = line(23, 14);
+      const warn = line(39, 42);
+      const meta = line(83, 14);
+      const content = { children: [name, time, warn, meta] };
+      const open = { clientHeight: 80, querySelector: () => content };
+      const root = { querySelectorAll: () => [open] };
+      const saved = globalThis.getComputedStyle;
+      globalThis.getComputedStyle = (el) => (el === open ? { paddingBottom: '6px' } : { lineHeight: '14px' });
+      try {
+        fitBlockLines(root);
+      } finally {
+        globalThis.getComputedStyle = saved;
+      }
+      expect(name.style).toEqual({});
+      expect(time.style.display).toBe('');
+      expect(warn.style.display).toBe('-webkit-box');
+      expect(warn.style.webkitLineClamp).toBe('2');
+      expect(meta.style.display).toBe('none');
+    });
+    it('leaves a block that has no height yet alone', () => {
+      const meta = line(83, 14);
+      const content = { children: [line(6, 15), meta] };
+      const root = { querySelectorAll: () => [{ clientHeight: 0, querySelector: () => content }] };
+      fitBlockLines(root);
+      expect(meta.style.display).toBe('');
+      expect(() => fitBlockLines(null)).not.toThrow();
     });
   });
 

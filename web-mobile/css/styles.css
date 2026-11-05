@@ -11900,6 +11900,28 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   -webkit-line-clamp: 1;
 }
 
+/* A short block has one line at rest: its name and start. Lifted by hover
+   or focus it has room for the full time line instead. */
+.cal-block__short-start {
+  font-weight: 400;
+  color: var(--ink-2);
+}
+
+.cal-block--short:not(:hover):not(:focus-within) .cal-block__time,
+.cal-block--short:not(:hover):not(:focus-within) .cal-block__meta,
+.cal-block--short:not(:hover):not(:focus-within) .cal-block__warn-line,
+.cal-block--short:hover .cal-block__short-start,
+.cal-block--short:focus-within .cal-block__short-start {
+  display: none;
+}
+
+/* The part of a block that a later, cascaded block covers on the right
+   (--cal-covered, set per block): its text wraps and its Move button sits
+   inside the part that stays in view. */
+.cal-block__content {
+  margin-right: var(--cal-covered, 0px);
+}
+
 .cal-block--estimate {
   border: 1.5px dashed var(--ink-3);
 }
@@ -11932,6 +11954,7 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 
 .cal-block__time {
   font-size: 11px;
+  line-height: 1.3;
   color: var(--ink-2);
   margin-top: 2px;
   white-space: nowrap;
@@ -11941,12 +11964,14 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 
 .cal-block__meta {
   font-size: 11px;
+  line-height: 1.3;
   color: var(--ink-3);
   margin-top: 2px;
 }
 
 .cal-block__warn-line {
   font-size: 11px;
+  line-height: 1.3;
   color: var(--warn-ink);
   font-weight: 500;
   margin-top: 2px;
@@ -11986,7 +12011,7 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 .cal-block__move-slot {
   position: absolute;
   top: 0;
-  right: 0;
+  right: var(--cal-covered, 0px);
   z-index: 1;
 }
 
@@ -11994,6 +12019,10 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   /* The name and time lines beside the 44 px Move button keep clear of it;
      the lines below it use the block's full width, which a phone's narrow
      lane needs. A block with no Move button keeps all of its width. */
+  /* A short movable block is drawn tall enough for its whole Move button. */
+  .cal-block--short.cal-block--movable {
+    min-height: 44px;
+  }
   .cal-block--movable .cal-block__content::before {
     content: '';
     float: right;
@@ -12003,6 +12032,25 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   .cal-block__move-slot {
     min-width: 44px;
     min-height: 44px;
+  }
+  /* Too narrow for the name beside Move: the name and time take the whole
+     width and Move a row of its own at the foot, the block drawn tall enough
+     for both. */
+  .cal-block--narrow.cal-block--movable {
+    min-height: 100px;
+  }
+  .cal-block--narrow.cal-block--movable .cal-block__open {
+    padding: 6px 5px 48px;
+  }
+  .cal-block--narrow .cal-block__content::before {
+    display: none;
+  }
+  .cal-block--narrow.cal-block--movable .cal-block__name {
+    -webkit-line-clamp: 2;
+  }
+  .cal-block--narrow .cal-block__move-slot {
+    top: auto;
+    bottom: 0;
   }
 }
 

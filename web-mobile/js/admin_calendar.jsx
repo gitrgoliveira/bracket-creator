@@ -21,6 +21,17 @@ export const PLACEHOLDER_MIN_PX = 52;
 // How far a block that overlaps an earlier one on its lane is inset from the
 // left (a quarter of the lane at most, so a phone's narrow lane keeps room).
 export const CASCADE_PX = 24;
+// Under a touch screen every movable block carries a 44 px Move button beside
+// its name, so a lane is never narrower than this: a name of about 90 px fits
+// beside the button. Lanes that do not fit the screen scroll sideways inside
+// the grid's frame, as they already do for many shiaijo.
+export const COARSE_LANE_PX = 150;
+// A block that starts this close below an earlier one it overlaps would hide
+// the earlier one's name and time, so it is inset to half the earlier block.
+export const NEAR_START_PX = 60;
+// Under this much visible width a touch screen's 44 px Move button and a
+// readable name do not fit side by side, so Move goes on a row of its own.
+export const NARROW_BLOCK_PX = 120;
 export const REFRESH_DEBOUNCE_MS = 1000;
 export { PX_PER_MINUTE, shiftLanes };
 
@@ -184,13 +195,13 @@ export function computeHourRange(calendar) {
 /**
  * Computes how many days can be shown side-by-side (4-day rule).
  */
-export function computeDaysShown({ width, shiaijoCount, tournamentDays, phone = false }) {
+export function computeDaysShown({ width, shiaijoCount, tournamentDays, phone = false, minLane = MIN_LANE_PX }) {
   const isPhone = phone || (typeof width === 'number' && width <= PHONE_MAX_PX);
   if (isPhone) return 1;
   const numDays = Math.max(1, tournamentDays || 1);
   const numCourts = Math.max(1, shiaijoCount || 1);
   const gridWidth = Math.max(0, (width || 1024) - CLOCK_COL_PX);
-  const denom = numCourts * MIN_LANE_PX;
+  const denom = numCourts * Math.max(MIN_LANE_PX, minLane);
   const fits = Math.floor(gridWidth / denom);
   const maxAllowed = Math.min(4, numDays);
   return Math.max(1, Math.min(fits, maxAllowed));
@@ -392,6 +403,60 @@ export function computeBlocksLayout({ calendar, visibleDays, courts, laneWidth, 
 }
 
 /**
+ * Keeps every block under root to whole lines. A block is as tall as its
+ * minutes, so its text can run past its foot; the line the foot would cut is
+ * clamped to the lines that fit and the lines after it are left out. The
+ * name always stays, and a short block is left alone (it shows one line at
+ * rest and lifts on hover or focus). Their aria-label still says it all.
+ */
+export function fitBlockLines(root) {
+  if (!root) return;
+  root.querySelectorAll('.cal-block:not(.cal-block--short) .cal-block__open').forEach((open) => {
+    const content = open.querySelector('.cal-block__content');
+    if (!content) return;
+    const lines = Array.from(content.children).slice(1);
+    lines.forEach((el) => {
+      el.style.display = '';
+      el.style.webkitLineClamp = '';
+      el.style.webkitBoxOrient = '';
+      el.style.overflow = '';
+    });
+    if (open.clientHeight === 0) return;
+    const avail = open.clientHeight - (parseFloat(getComputedStyle(open).paddingBottom) || 0);
+    let cut = false;
+    lines.forEach((el) => {
+      if (cut) { el.style.display = 'none'; return; }
+      const bottom = el.offsetTop + el.offsetHeight;
+      if (bottom <= avail) return;
+      cut = true;
+      const lineH = parseFloat(getComputedStyle(el).lineHeight) || 14;
+      const fit = Math.floor((avail - el.offsetTop) / lineH);
+      if (fit < 1) { el.style.display = 'none'; return; }
+      el.style.display = '-webkit-box';
+      el.style.webkitLineClamp = String(fit);
+      el.style.webkitBoxOrient = 'vertical';
+      el.style.overflow = 'hidden';
+    });
+  });
+}
+
+/**
+ * The lane a pause band's name goes in: the first one no block covers during
+ * the pause, or the first lane when every lane is covered (each block then
+ * names the pause in its own strip).
+ */
+export function pauseLabelLane(blocks, laneCount, start, end) {
+  const covered = new Set();
+  for (const b of blocks || []) {
+    if (b.startMins < end && start < b.endMins) {
+      for (let i = b.minCourtIdx; i <= b.maxCourtIdx; i++) covered.add(i);
+    }
+  }
+  for (let i = 0; i < laneCount; i++) if (!covered.has(i)) return i;
+  return 0;
+}
+
+/**
  * Cascades blocks that overlap on a lane, as the approved calendar draws a
  * clash: the later block sits over the earlier one, inset from the left, so
  * the earlier one's name and time stay readable beside it. Blocks come back in
@@ -403,17 +468,35 @@ export function cascadeBlocks(blocks, laneWidth) {
     || String(a.comp?.name || '').localeCompare(String(b.comp?.name || '')));
   const step = Math.max(8, Math.min(CASCADE_PX, Math.floor((laneWidth || 0) / 4)));
   const placed = [];
+  const clashes = (p, b) => p.day === b.day
+    && p.minCourtIdx <= b.maxCourtIdx && b.minCourtIdx <= p.maxCourtIdx
+    && p.top < b.top + b.height && b.top < p.top + p.height;
   for (const b of ordered) {
     let depth = 0;
+    let minLeft = b.left;
     for (const p of placed) {
-      if (p.day !== b.day) continue;
-      const sharesLane = p.minCourtIdx <= b.maxCourtIdx && b.minCourtIdx <= p.maxCourtIdx;
-      const sharesTime = p.top < b.top + b.height && b.top < p.top + p.height;
-      if (sharesLane && sharesTime) depth = Math.max(depth, p.cascadeDepth + 1);
+      if (!clashes(p, b)) continue;
+      depth = Math.max(depth, p.cascadeDepth + 1);
+      // Starting at about the same time it would cover the earlier block's
+      // name and time, so it takes the right half of the earlier block.
+      if (b.top - p.top < NEAR_START_PX) minLeft = Math.max(minLeft, p.left + Math.floor(p.width / 2));
     }
     // At least half of the block keeps its width, however deep the clash.
-    const inset = Math.min(depth * step, Math.floor(b.width / 2));
-    placed.push({ ...b, cascadeDepth: depth, left: b.left + inset, width: b.width - inset });
+    const maxInset = Math.floor(b.width / 2);
+    const inset = Math.min(Math.max(depth * step, minLeft - b.left), maxInset);
+    placed.push({ ...b, cascadeDepth: depth, left: b.left + inset, width: b.width - inset, coveredRight: 0 });
+  }
+  // The part of each block a later one covers on the right: its text and its
+  // Move button keep to the part that stays in view.
+  for (let i = 0; i < placed.length; i++) {
+    const b = placed[i];
+    for (let j = i + 1; j < placed.length; j++) {
+      const p = placed[j];
+      if (!clashes(b, p) || p.left <= b.left) continue;
+      const covered = Math.max(0, Math.min(b.left + b.width, p.left + p.width) - p.left);
+      if (p.left + p.width >= b.left + b.width) b.coveredRight = Math.max(b.coveredRight, covered);
+    }
+    b.coveredRight = Math.min(b.coveredRight, b.width - Math.floor(b.width / 2));
   }
   return placed;
 }
@@ -421,27 +504,29 @@ export function cascadeBlocks(blocks, laneWidth) {
 /**
  * Pure layout helper for the tournament calendar.
  */
-export function calendarLayout({ calendar, width = 1024, page = 0, phone = false }) {
+export function calendarLayout({ calendar, width = 1024, page = 0, phone = false, coarse = false }) {
   const courts = calendar?.courts || [];
   const days = calendar?.days || [];
   const shiaijoCount = courts.length;
   const tournamentDays = days.length;
 
   const isPhone = phone || (typeof width === 'number' && width <= PHONE_MAX_PX);
-  const daysShown = computeDaysShown({ width, shiaijoCount, tournamentDays, phone: isPhone });
+  const minLane = coarse ? COARSE_LANE_PX : MIN_LANE_PX;
+  const daysShown = computeDaysShown({ width, shiaijoCount, tournamentDays, phone: isPhone, minLane });
 
   const gridWidth = Math.max(0, width - CLOCK_COL_PX);
   let laneWidth;
+  const phoneFloor = coarse ? COARSE_LANE_PX : PHONE_LANE_PX;
   if (isPhone) {
-    laneWidth = Math.max(PHONE_LANE_PX, shiaijoCount > 0 ? Math.floor(gridWidth / shiaijoCount) : PHONE_LANE_PX);
+    laneWidth = Math.max(phoneFloor, shiaijoCount > 0 ? Math.floor(gridWidth / shiaijoCount) : phoneFloor);
   } else {
     const totalLanesShown = daysShown * shiaijoCount;
-    laneWidth = Math.max(MIN_LANE_PX, totalLanesShown > 0 ? Math.floor(gridWidth / totalLanesShown) : MIN_LANE_PX);
+    laneWidth = Math.max(minLane, totalLanesShown > 0 ? Math.floor(gridWidth / totalLanesShown) : minLane);
   }
 
   const dayGridWidth = shiaijoCount * laneWidth;
   const lanesScrollSideways = isPhone
-    ? (shiaijoCount * PHONE_LANE_PX > gridWidth)
+    ? (shiaijoCount * phoneFloor > gridWidth)
     : (dayGridWidth > gridWidth / daysShown);
 
   const hourRange = computeHourRange(calendar);
@@ -642,8 +727,15 @@ export function AdminCalendarPage({
       width: containerWidth,
       page: activePage,
       phone: isPhoneScreen,
+      coarse: isCoarse,
     });
-  }, [calendar, containerWidth, activePage, isPhoneScreen]);
+  }, [calendar, containerWidth, activePage, isPhoneScreen, isCoarse]);
+
+  // A block shows only whole lines: the line its height cuts through is
+  // clamped to the lines that fit, and the lines after it are left out.
+  useEffect(() => {
+    fitBlockLines(containerRef.current);
+  }, [layout]);
 
   // Slop detection for click vs drag
   const handlePointerDown = (e) => {
@@ -1177,6 +1269,9 @@ export function AdminCalendarPage({
                       const bEnd = b.endMins ?? b.EndMins;
                       const bTop = (bStart - layout.hourRange.startHour * 60) * PX_PER_MINUTE;
                       const bHeight = (bEnd - bStart) * PX_PER_MINUTE;
+                      // The band's name sits in the first lane no block covers
+                      // during the pause, so a block never hides it.
+                      const labelLane = pauseLabelLane(dayBlocks, (calendar.courts || []).length, bStart, bEnd);
                       return (
                         <div
                           key={bandKey}
@@ -1186,7 +1281,9 @@ export function AdminCalendarPage({
                             height: `${bHeight}px`,
                           }}
                         >
-                          {b.name} {b.start} to {b.end}
+                          <span className="cal-pause-band__label" style={{ marginLeft: `${labelLane * layout.laneWidth}px` }}>
+                            {b.name} {b.start} to {b.end}
+                          </span>
                         </div>
                       );
                     })}
@@ -1208,6 +1305,10 @@ export function AdminCalendarPage({
 
                         if (block.short && !isPlaceholder) blockClass += ' cal-block--short';
                         if (isMovable(comp)) blockClass += ' cal-block--movable';
+                        // Too little of it in view for the name and a touch
+                        // screen's Move button side by side: Move takes a row
+                        // of its own at the foot.
+                        if (block.width - (block.coveredRight || 0) < NARROW_BLOCK_PX) blockClass += ' cal-block--narrow';
                         if (block.hasOverlap || block.pastMidnight) {
                           blockClass += ' cal-block--warn';
                         }
@@ -1271,6 +1372,7 @@ export function AdminCalendarPage({
                               width: `${block.width}px`,
                               top: `${block.top}px`,
                               height: `${block.height}px`,
+                              '--cal-covered': `${block.coveredRight || 0}px`,
                             }}
                             onPointerDown={(e) => handleBlockPointerDown(e, comp, block)}
                           >
@@ -1311,6 +1413,10 @@ export function AdminCalendarPage({
                                 <div className="cal-block__name" title={comp.name}>
                                   {isPlaceholder && <span className="cal-block__chip">?</span>}
                                   {comp.name}
+                                  {/* A short block has room for one line: its start goes there. */}
+                                  {block.short && !isPlaceholder && (
+                                    <span className="cal-block__short-start"> · {formatClockHHMM(block.startMins)}</span>
+                                  )}
                                 </div>
 
                                 {isPlaceholder ? (
@@ -1319,11 +1425,13 @@ export function AdminCalendarPage({
                                   <div className="cal-block__time">{timeSpan}</div>
                                 )}
 
+                                {/* A warning comes straight after the time, so a block
+                                    too short for every line still shows it. */}
+                                {overlapLine && <div className="cal-block__warn-line">{overlapLine}</div>}
+                                {midnightLine && <div className="cal-block__warn-line">{midnightLine}</div>}
                                 {rangeLine && <div className="cal-block__meta">{rangeLine}</div>}
                                 {expectedLine && <div className="cal-block__meta">{expectedLine}</div>}
                                 {statusLine && <div className="cal-block__meta">{statusLine}</div>}
-                                {overlapLine && <div className="cal-block__warn-line">{overlapLine}</div>}
-                                {midnightLine && <div className="cal-block__warn-line">{midnightLine}</div>}
                               </div>
                             </div>
 

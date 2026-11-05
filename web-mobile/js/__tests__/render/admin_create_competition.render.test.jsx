@@ -38,6 +38,9 @@ const STUBBED_GLOBALS = {
   API: {
     estimateCompetitionSchedule: vi.fn().mockResolvedValue(null),
     estimateDraft: vi.fn().mockResolvedValue(null),
+    // The form reads the calendar to stack its start time after the chosen
+    // shiaijo's last planned match; an empty one leaves the default start.
+    fetchCalendar: vi.fn().mockResolvedValue({ days: [], courts: [], competitions: [] }),
     // bc-pnum: the number-prefix pre-fill effect fires on mount as the name
     // field changes (starting blank). Resolving "" keeps it a no-op for
     // every fixture here, none of which is about numbering.

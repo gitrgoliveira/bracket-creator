@@ -325,7 +325,7 @@ The **Schedule blocks** card on the tournament setup page lists the times when n
 - **Length**, how long the pause lasts.
 - **On**, which day it applies to, or **Every day**. This choice appears only for a tournament that lasts more than one day.
 
-Every estimate and every new schedule works around the pauses. A match that would run into a pause waits until the pause ends. Pauses that overlap count as one longer pause, and the row says so. A pause that ends after midnight is marked as such, and a pause that does not change any schedule (for example one that starts after the last match) is marked as not used. A competition that is already drawn keeps its match times when you add or change a pause, and the card names the competitions affected. To re-time one of them, use **Auto-schedule competition**.
+Every estimate and every new schedule works around the pauses. A match whose start time falls inside a pause moves to the end of that pause. A match that starts just before a pause is not shortened or moved, so it may run into the pause. Pauses that overlap count as one longer pause, and the row says so. A pause that ends after midnight is marked as such, and a pause that does not change any schedule (for example one that starts after the last match) is marked as not used. A competition that is already drawn keeps its match times when you add or change a pause, and the card names the competitions affected. To re-time one of them, use **Auto-schedule competition**.
 
 A tournament saved by an earlier version shows its lunch break as a **Lunch** pause at 12:00, and its opening and closing ceremony lengths as pauses of their own.
 

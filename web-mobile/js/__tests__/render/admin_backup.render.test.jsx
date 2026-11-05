@@ -60,6 +60,7 @@ const defaultTournament = {
 
 describe('AdminBackupPage render tests', () => {
   beforeEach(() => {
+    vi.useRealTimers();
     vi.clearAllMocks();
     mockApi.planRestore.mockReset();
     mockApi.restore.mockReset();
@@ -140,7 +141,7 @@ describe('AdminBackupPage render tests', () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByText(/Restore Plan \(tournament archive\)/i)).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "Restore plan: whole tournament" })).toBeInTheDocument();
     });
 
     // Verify warnings and offline devices text
@@ -164,6 +165,8 @@ describe('AdminBackupPage render tests', () => {
     window.promptDialog = vi.fn();
     fireEvent.click(restoreBtn);
     expect(window.promptDialog).not.toHaveBeenCalled();
+    // The tap takes the operator to the choice the button names.
+    expect(choiceIn('Open Individual', 'Replace it')).toHaveFocus();
 
     // Answer choice for c1 as "replace"
     const replaceRadio = choiceIn('Open Individual', 'Replace it');
@@ -352,7 +355,7 @@ describe('AdminBackupPage render tests', () => {
     expect(screen.queryByRole('button', { name: /Undo this restore/i })).toBeNull();
   });
 
-  it('re-runs the dry run with only when "Restore only this one" is clicked', async () => {
+  it('re-runs the dry run with only when the Restore picker names one competition', async () => {
     const multiPlan = {
       scope: 'tournament',
       competitions: [
@@ -375,17 +378,18 @@ describe('AdminBackupPage render tests', () => {
       fireEvent.change(fileInput, { target: { files: [fakeFile] } });
     });
 
-    const onlyBtn = await screen.findByRole('button', { name: 'Restore only "Open Individual"' });
-    expect(onlyBtn).toBeInTheDocument();
+    const picker = await screen.findByRole('combobox', { name: 'Restore' });
+    expect(picker.value).toBe('');
+    expect(screen.queryByRole('button', { name: /Restore only/ })).toBeNull();
 
     const singlePlan = {
-      scope: 'tournament',
+      scope: 'competition',
       competitions: [{ id: 'c1', name: 'Open Individual', asked: true, choices: ['replace', 'copy'] }],
     };
     mockApi.planRestore.mockResolvedValueOnce(singlePlan);
 
     await act(async () => {
-      fireEvent.click(onlyBtn);
+      fireEvent.change(picker, { target: { value: 'c1' } });
     });
 
     await waitFor(() => {
@@ -397,13 +401,22 @@ describe('AdminBackupPage render tests', () => {
         SESSION_KEY
       );
     });
+    await screen.findByRole('heading', { name: 'Restore plan: one competition' });
+    const narrowed = screen.getByRole('combobox', { name: 'Restore' });
+    expect(narrowed.value).toBe('c1');
+    expect(Array.from(narrowed.options).map((o) => o.textContent)).toEqual([
+      'All competitions',
+      'Only Open Individual',
+      'Only Women Individual',
+    ]);
   });
 
-  it('shows "Restore only this one" for a competition in the backup but not for a missing competition', async () => {
+  it('lists only the backup\'s competitions in the Restore picker, and shows none for a one-competition backup', async () => {
     const plan = {
       scope: 'tournament',
       competitions: [
         { id: 'c1', name: 'Open Individual', asked: true, choices: ['replace', 'copy'] },
+        { id: 'c3', name: 'Kids Individual', asked: false, action: 'create' },
         { id: 'c2_missing', name: 'Legacy Division', asked: true, choices: ['keep', 'remove'] },
       ],
     };
@@ -422,12 +435,27 @@ describe('AdminBackupPage render tests', () => {
       fireEvent.change(fileInput, { target: { files: [fakeFile] } });
     });
 
-    await waitFor(() => {
-      expect(screen.getByText(/Restore Plan \(tournament archive\)/i)).toBeInTheDocument();
-    });
+    const picker = await screen.findByRole('combobox', { name: 'Restore' });
+    expect(Array.from(picker.options).map((o) => o.textContent)).toEqual([
+      'All competitions',
+      'Only Open Individual',
+      'Only Kids Individual',
+    ]);
 
-    expect(screen.getByRole('button', { name: 'Restore only "Open Individual"' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Restore only "Legacy Division"' })).not.toBeInTheDocument();
+    mockApi.planRestore.mockResolvedValueOnce({
+      scope: 'tournament',
+      competitions: [
+        { id: 'c1', name: 'Open Individual', asked: true, choices: ['replace', 'copy'] },
+        { id: 'c2_missing', name: 'Legacy Division', asked: true, choices: ['keep', 'remove'] },
+      ],
+    });
+    await act(async () => {
+      fireEvent.change(fileInput, { target: { files: [fakeFile] } });
+    });
+    await waitFor(() => {
+      expect(screen.queryByText('Kids Individual')).toBeNull();
+    });
+    expect(screen.queryByRole('combobox', { name: 'Restore' })).toBeNull();
   });
 
   it('loads plan for a listed copy, with no Undo button on the row, and asking choices even for before-restore', async () => {
@@ -1045,7 +1073,7 @@ describe('AdminBackupPage render tests', () => {
     expect(fileInput.value).toBe('');
   });
 
-  it('shows "Show all competitions" button after filtering to one competition, and clicking it restores full plan without only key', async () => {
+  it('goes back to the whole tournament when the Restore picker is set to All competitions', async () => {
     const multiPlan = {
       scope: 'tournament',
       competitions: [
@@ -1054,7 +1082,7 @@ describe('AdminBackupPage render tests', () => {
       ],
     };
     const singlePlan = {
-      scope: 'tournament',
+      scope: 'competition',
       competitions: [
         { id: 'c1', name: 'Open Individual', asked: true, choices: ['replace', 'copy'] },
       ],
@@ -1077,32 +1105,13 @@ describe('AdminBackupPage render tests', () => {
       fireEvent.change(fileInput, { target: { files: [fakeFile] } });
     });
 
-    const onlyBtn = await screen.findByRole('button', { name: 'Restore only "Open Individual"' });
-    expect(onlyBtn).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Show all competitions' })).toBeNull();
-
-    // Click "Restore only this one"
     await act(async () => {
-      fireEvent.click(onlyBtn);
+      fireEvent.change(await screen.findByRole('combobox', { name: 'Restore' }), { target: { value: 'c1' } });
     });
+    await screen.findByRole('heading', { name: 'Restore plan: one competition' });
 
-    await waitFor(() => {
-      expect(mockApi.planRestore).toHaveBeenCalledWith(
-        expect.objectContaining({
-          file: fakeFile,
-          only: 'c1',
-        }),
-        SESSION_KEY
-      );
-    });
-
-    // "Show all competitions" button appears
-    const showAllBtn = await screen.findByRole('button', { name: 'Show all competitions' });
-    expect(showAllBtn).toBeInTheDocument();
-
-    // Click "Show all competitions"
     await act(async () => {
-      fireEvent.click(showAllBtn);
+      fireEvent.change(screen.getByRole('combobox', { name: 'Restore' }), { target: { value: '' } });
     });
 
     await waitFor(() => {
@@ -1114,17 +1123,17 @@ describe('AdminBackupPage render tests', () => {
     expect(lastCallArg.only).toBeUndefined();
     expect(mockApi.planRestore.mock.calls[2][1]).toBe(SESSION_KEY);
 
-    // Button is gone once full plan is back
-    await waitFor(() => {
-      expect(screen.queryByRole('button', { name: 'Show all competitions' })).toBeNull();
-    });
-    expect(screen.getByRole('button', { name: 'Restore only "Open Individual"' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Restore only "Women Individual"' })).toBeInTheDocument();
+    await screen.findByRole('heading', { name: 'Restore plan: whole tournament' });
+    expect(screen.getByRole('combobox', { name: 'Restore' }).value).toBe('');
+    expect(Array.from(container.querySelectorAll('.backup-plan .backup-row__name')).map((n) => n.textContent)).toEqual([
+      'Open Individual',
+      'Women Individual',
+    ]);
   });
 
   it.each([
     ['tournament', { name: 'Back up the whole tournament' }, 'backupTournament', [TEST_KEY], 'spring-taikai-20261104T120000Z.zip', 'Tournament backup downloaded'],
-    ['competition', { name: 'Back up' }, 'backupCompetition', ['c1', TEST_KEY], 'spring-taikai-c1-20261104T120000Z.zip', 'Backup for "Open Individual" downloaded'],
+    ['competition', { name: 'Back up "Open Individual"' }, 'backupCompetition', ['c1', TEST_KEY], 'spring-taikai-c1-20261104T120000Z.zip', 'Backup for "Open Individual" downloaded'],
   ])('downloads the %s backup under the name the server sent', async (_scope, buttonQuery, apiName, apiArgs, serverName, toast) => {
     const showToast = vi.fn();
     vi.spyOn(window.URL, 'createObjectURL').mockReturnValue('blob:test');
@@ -1218,5 +1227,322 @@ describe('AdminBackupPage render tests', () => {
 
     expect(await screen.findByText(/Restore completed/i)).toBeInTheDocument();
     expect(screen.getByText(requeueSentence)).toBeInTheDocument();
+  });
+  // Picks a backup file and waits for its plan. Each later check of the
+  // answers gets the same plan back, with no name taken.
+  const openPlan = async (container, plan) => {
+    mockApi.planRestore.mockResolvedValue(plan);
+    await act(async () => {
+      fireEvent.change(container.querySelector('input[type="file"]'), {
+        target: { files: [new File(['zip'], 'full.zip')] },
+      });
+    });
+  };
+
+  it('says on each row what an undo does with it, and the undo dialog sums it up', async () => {
+    window.promptDialog = vi.fn((opts) => { void opts; return Promise.resolve(null); });
+    mockApi.planRestore.mockResolvedValueOnce({
+      scope: 'tournament',
+      competitions: [{ id: 'c1', name: 'Open Individual', asked: false, action: 'create' }],
+    });
+    mockApi.restore.mockResolvedValueOnce({ safetyCopy: '20261104T150000Z-before-restore-tournament.zip' });
+    const { container } = render(<AdminBackupPage tournament={defaultTournament} password={TEST_KEY} />);
+    await act(async () => {
+      fireEvent.change(container.querySelector('input[type="file"]'), { target: { files: [new File(['zip'], 'full.zip')] } });
+    });
+    await act(async () => { fireEvent.click(await screen.findByRole('button', { name: /^Restore$/ })); });
+    await act(async () => { await window.promptDialog.mock.calls[0][0].submit('pw'); });
+
+    mockApi.planRestore.mockResolvedValueOnce({
+      scope: 'tournament',
+      undo: true,
+      tournamentReplaced: true,
+      competitions: [
+        { id: 'c1', name: 'Open Individual', asked: false, action: 'replace', resultsChanged: ['m1', 'm2'] },
+        { id: 'c9', name: 'Open Individual (copy)', asked: false, action: 'remove', resultsChanged: ['m3'] },
+        { id: 'c2', name: 'Women Individual', asked: false, action: 'keep' },
+        { id: 'c4', name: 'Juniors', asked: false, action: 'create' },
+      ],
+    });
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Undo this restore' })); });
+
+    expect(await screen.findByText('Will be put back as it was before the restore.')).toBeInTheDocument();
+    expect(screen.getByText('Will be removed: the restore added it.')).toBeInTheDocument();
+    expect(screen.getByText('Will be left as it is.')).toBeInTheDocument();
+    expect(screen.getAllByText('Will be created as a new competition.')).toHaveLength(1);
+    expect(screen.getByRole('heading', { name: 'Undo plan' })).toHaveFocus();
+
+    const undoOpts = window.promptDialog.mock.calls[1][0];
+    expect(undoOpts.title).toBe('Confirm undo');
+    expect(undoOpts.message).toBe(
+      'This undo puts back 1 competition, adds 1 new competition, removes 1 competition and puts back the tournament settings. '
+      + '3 recorded results will be lost or changed. '
+      + 'Enter the admin password to undo the restore using safety copy 20261104T150000Z-before-restore-tournament.zip.',
+    );
+  });
+
+  it('sums up the restore in the confirm dialog from the answers given', async () => {
+    window.promptDialog = vi.fn(() => Promise.resolve(null));
+    const { container } = render(<AdminBackupPage tournament={defaultTournament} password={TEST_KEY} />);
+    await openPlan(container, {
+      scope: 'tournament',
+      competitions: [
+        { id: 'c1', name: 'Open Individual', asked: true, choices: ['replace', 'copy'], resultsChanged: ['m1', 'm2'] },
+        { id: 'c2', name: 'Women Individual', asked: true, choices: ['replace', 'copy'], resultsChanged: ['m3'] },
+        { id: 'c3', name: 'Legacy', asked: true, choices: ['keep', 'remove'] },
+      ],
+    });
+    await act(async () => { fireEvent.click(choiceIn('Open Individual', 'Replace it')); });
+    await act(async () => { fireEvent.click(choiceIn('Women Individual', 'Restore as a copy named:')); });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Name for the copy of "Women Individual"' }), { target: { value: 'Women Old' } });
+    await act(async () => { fireEvent.click(choiceIn('Legacy', 'Keep it')); });
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: /^Restore$/ })); });
+
+    // A copy loses nothing, so only the replaced competition's results are counted.
+    expect(window.promptDialog.mock.calls[0][0].message).toBe(
+      'This restore replaces 1 competition and adds 1 copy. 2 recorded results will be lost or changed. '
+      + 'Enter the admin password to confirm the restore.',
+    );
+  });
+
+  it('names the copy in the reprint warning when the copy got the new prefix', async () => {
+    window.promptDialog = vi.fn(() => Promise.resolve(null));
+    const { container } = render(<AdminBackupPage tournament={defaultTournament} password={TEST_KEY} />);
+    await openPlan(container, {
+      scope: 'competition',
+      competitions: [{ id: 'c1', name: 'Open Individual', asked: true, choices: ['replace', 'copy'] }],
+    });
+    await act(async () => { fireEvent.click(choiceIn('Open Individual', 'Restore as a copy named:')); });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Name for the copy of "Open Individual"' }), { target: { value: ' Open Copy ' } });
+    mockApi.restore.mockResolvedValueOnce({
+      plan: { competitions: [{ id: 'c1', name: 'Open Individual', action: 'copy', newId: 'open-copy' }] },
+      safetyCopy: '20261104T100000Z-before-restore-competition.zip',
+      prefixWarnings: [{ competitionId: 'open-copy', oldPrefix: 'A', newPrefix: 'OC' }],
+    });
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: /^Restore$/ })); });
+    await act(async () => { await window.promptDialog.mock.calls[0][0].submit('pw'); });
+
+    expect(await screen.findByText("Open Copy: number prefix changed from A to OC. Reprint its competitors' tags.")).toBeInTheDocument();
+  });
+
+  it('focuses the plan when a kept copy asks for one, and Replace all existing answers every existing competition', async () => {
+    render(<AdminBackupPage tournament={defaultTournament} password={TEST_KEY} />);
+    mockApi.planRestore.mockResolvedValueOnce({
+      scope: 'tournament',
+      competitions: [
+        { id: 'c1', name: 'Open Individual', asked: true, choices: ['replace', 'copy'] },
+        { id: 'c2', name: 'Women Individual', asked: true, choices: ['replace', 'copy'] },
+        { id: 'c3', name: 'Legacy', asked: true, choices: ['keep', 'remove'] },
+      ],
+    });
+    const rowRestore = await screen.findByRole('button', { name: 'Restore 20261104T120000Z-scheduled.zip' });
+    await act(async () => { fireEvent.click(rowRestore); });
+
+    expect(await screen.findByRole('heading', { name: 'Restore plan: whole tournament' })).toHaveFocus();
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Replace all existing' })); });
+    expect(choiceIn('Open Individual', 'Replace it')).toBeChecked();
+    expect(choiceIn('Women Individual', 'Replace it')).toBeChecked();
+    expect(choiceIn('Legacy', 'Keep it')).not.toBeChecked();
+    expect(screen.getByRole('button', { name: 'Choose what to do with "Legacy"' })).toBeInTheDocument();
+  });
+
+  it('a tap on the Restore button that asks for a copy name goes to that name box', async () => {
+    const { container } = render(<AdminBackupPage tournament={defaultTournament} password={TEST_KEY} />);
+    await openPlan(container, {
+      scope: 'competition',
+      competitions: [{ id: 'c1', name: 'Open Individual', asked: true, choices: ['replace', 'copy'] }],
+    });
+    await act(async () => { fireEvent.click(choiceIn('Open Individual', 'Restore as a copy named:')); });
+    fireEvent.click(screen.getByRole('button', { name: 'Enter name for copy of "Open Individual"' }));
+    expect(screen.getByRole('textbox', { name: 'Name for the copy of "Open Individual"' })).toHaveFocus();
+    // One existing competition is not a list worth a shortcut.
+    expect(screen.queryByRole('button', { name: 'Replace all existing' })).toBeNull();
+  });
+
+  const keepPlan = {
+    scope: 'tournament',
+    tournamentReplaced: true,
+    competitions: [
+      { id: 'c1', name: 'Open Individual', asked: true, choices: ['replace', 'copy', 'keep'], resultsChanged: ['m1'] },
+      { id: 'c4', name: 'Juniors', asked: false, action: 'create', choices: ['create', 'keep'] },
+    ],
+  };
+  const copyBox = () => screen.getByRole('textbox', { name: 'Name for the copy of "Open Individual"' });
+  const lastDecisionsSent = () => mockApi.planRestore.mock.calls.at(-1)[0].decisions;
+
+  it('offers to keep a competition you already have, and sums it up as left out', async () => {
+    window.promptDialog = vi.fn(() => Promise.resolve(null));
+    const { container } = render(<AdminBackupPage tournament={defaultTournament} password={TEST_KEY} />);
+    await openPlan(container, keepPlan);
+
+    const keep = choiceIn('Open Individual', "Keep the one I have (don't restore it)");
+    expect(keep).not.toBeChecked();
+    // The row is still one the backup holds, so the Restore picker lists it.
+    expect(screen.getByText('This competition already exists:')).toBeInTheDocument();
+    await act(async () => { fireEvent.click(keep); });
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: /^Restore$/ })); });
+
+    expect(lastDecisionsSent()).toEqual({ c1: { action: 'keep', copyName: '' } });
+    expect(window.promptDialog.mock.calls[0][0].message).toBe(
+      'This restore adds 1 new competition, leaves out 1 competition and puts back the tournament settings. '
+      + 'Enter the admin password to confirm the restore.',
+    );
+  });
+
+  it("adds a competition only the backup holds unless Don't add it is ticked", async () => {
+    window.promptDialog = vi.fn(() => Promise.resolve(null));
+    mockApi.restore.mockResolvedValue({ safetyCopy: '' });
+    const { container } = render(<AdminBackupPage tournament={defaultTournament} password={TEST_KEY} />);
+    await openPlan(container, keepPlan);
+    await act(async () => { fireEvent.click(choiceIn('Open Individual', 'Replace it')); });
+
+    const leaveOut = choiceIn('Juniors', "Don't add it");
+    expect(leaveOut).not.toBeChecked();
+    expect(screen.getByText('Will be created as a new competition.')).toBeInTheDocument();
+    // Nothing to choose for it: Restore is ready with the box unticked.
+    expect(screen.getByRole('button', { name: /^Restore$/ })).not.toHaveAttribute('aria-disabled');
+
+    await act(async () => { fireEvent.click(leaveOut); });
+    expect(screen.getByText('Will be left out.')).toBeInTheDocument();
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: /^Restore$/ })); });
+    expect(window.promptDialog.mock.calls[0][0].message).toMatch(/^This restore replaces 1 competition, leaves out 1 competition and puts back/);
+    await act(async () => { await window.promptDialog.mock.calls[0][0].submit('pw'); });
+    expect(mockApi.restore.mock.calls[0][0].decisions).toEqual({
+      c1: { action: 'replace', copyName: '' },
+      c4: { action: 'keep' },
+    });
+
+    // Unticked again, it sends no answer for it at all.
+    await openPlan(container, keepPlan);
+    await act(async () => { fireEvent.click(choiceIn('Open Individual', 'Replace it')); });
+    await act(async () => { fireEvent.click(choiceIn('Juniors', "Don't add it")); });
+    await act(async () => { fireEvent.click(choiceIn('Juniors', "Don't add it")); });
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: /^Restore$/ })); });
+    await act(async () => { await window.promptDialog.mock.calls[1][0].submit('pw'); });
+    expect(mockApi.restore.mock.calls[1][0].decisions).toEqual({ c1: { action: 'replace', copyName: '' } });
+  });
+
+  it('checks the answers again as they are typed and shows a taken copy name before the password, keeping the focus', async () => {
+    window.promptDialog = vi.fn(() => Promise.resolve(null));
+    const { container } = render(<AdminBackupPage tournament={defaultTournament} password={TEST_KEY} />);
+    await openPlan(container, keepPlan);
+    const takenPlan = {
+      ...keepPlan,
+      competitions: [{ ...keepPlan.competitions[0], action: 'copy', copyNameTaken: true }, keepPlan.competitions[1]],
+    };
+    mockApi.planRestore.mockResolvedValue(takenPlan);
+    const planCalls = mockApi.planRestore.mock.calls.length;
+
+    vi.useFakeTimers();
+    await act(async () => { fireEvent.click(choiceIn('Open Individual', 'Restore as a copy named:')); });
+    copyBox().focus();
+    fireEvent.change(copyBox(), { target: { value: 'Women Individual' } });
+    await act(async () => { vi.advanceTimersByTime(399); });
+    // Nothing is asked before the pause.
+    expect(mockApi.planRestore.mock.calls.length).toBe(planCalls);
+    await act(async () => { vi.advanceTimersByTime(1); });
+
+    // One check, for the answers as they stand when the typing stops.
+    expect(mockApi.planRestore.mock.calls.length).toBe(planCalls + 1);
+    expect(lastDecisionsSent()).toEqual({ c1: { action: 'copy', copyName: 'Women Individual' } });
+    expect(mockApi.planRestore.mock.calls.at(-1)[0].file).toBeInstanceOf(File);
+    expect(screen.getByText('That name is already used.')).toBeInTheDocument();
+    expect(copyBox()).toHaveAttribute('aria-invalid', 'true');
+    // The plan stays, the answer stays, and the box keeps the focus.
+    expect(copyBox()).toHaveFocus();
+    expect(copyBox()).toHaveValue('Women Individual');
+    expect(choiceIn('Open Individual', 'Restore as a copy named:')).toBeChecked();
+
+    const btn = screen.getByRole('button', { name: 'Pick another name for the copy of "Open Individual"' });
+    expect(btn).toHaveAttribute('aria-disabled', 'true');
+    fireEvent.click(btn);
+    expect(window.promptDialog).not.toHaveBeenCalled();
+    expect(copyBox()).toHaveFocus();
+
+    // A free name clears it.
+    mockApi.planRestore.mockResolvedValue(keepPlan);
+    fireEvent.change(copyBox(), { target: { value: 'Open Old' } });
+    expect(screen.queryByText('That name is already used.')).toBeNull();
+    await act(async () => { vi.advanceTimersByTime(400); });
+    expect(screen.getByRole('button', { name: /^Restore$/ })).not.toHaveAttribute('aria-disabled');
+  });
+
+  it('checks once more when Restore is pressed and does not ask the password over a taken name', async () => {
+    window.promptDialog = vi.fn(() => Promise.resolve(null));
+    const { container } = render(<AdminBackupPage tournament={defaultTournament} password={TEST_KEY} />);
+    await openPlan(container, keepPlan);
+    await act(async () => { fireEvent.click(choiceIn('Open Individual', 'Restore as a copy named:')); });
+    fireEvent.change(copyBox(), { target: { value: 'Juniors' } });
+    mockApi.planRestore.mockResolvedValue({
+      ...keepPlan,
+      competitions: [{ ...keepPlan.competitions[0], copyNameTaken: true }, keepPlan.competitions[1]],
+    });
+
+    // Pressed at once, before the pause would have asked.
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: /^Restore$/ })); });
+
+    expect(lastDecisionsSent()).toEqual({ c1: { action: 'copy', copyName: 'Juniors' } });
+    expect(window.promptDialog).not.toHaveBeenCalled();
+    expect(screen.getByText('That name is already used.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Pick another name for the copy of "Open Individual"' })).toHaveAttribute('aria-disabled', 'true');
+  });
+
+  it('names a competition whose own name is taken on its row and on the Restore button', async () => {
+    const { container } = render(<AdminBackupPage tournament={defaultTournament} password={TEST_KEY} />);
+    await openPlan(container, {
+      scope: 'tournament',
+      competitions: [{ id: 'c4', name: 'Juniors', asked: false, action: 'create', choices: ['create', 'keep'], nameTaken: true }],
+    });
+    expect(screen.getByText('Another competition already has this name.')).toBeInTheDocument();
+    const btn = screen.getByRole('button', { name: '"Juniors": its name is already used' });
+    fireEvent.click(btn);
+    expect(choiceIn('Juniors', "Don't add it")).toHaveFocus();
+  });
+
+  it('drops a check that answers after a newer one', async () => {
+    const { container } = render(<AdminBackupPage tournament={defaultTournament} password={TEST_KEY} />);
+    await openPlan(container, keepPlan);
+    const answers = [];
+    mockApi.planRestore.mockImplementation(() => new Promise((resolve) => { answers.push(resolve); }));
+    const taken = { ...keepPlan, competitions: [{ ...keepPlan.competitions[0], copyNameTaken: true }, keepPlan.competitions[1]] };
+
+    vi.useFakeTimers();
+    await act(async () => { fireEvent.click(choiceIn('Open Individual', 'Restore as a copy named:')); });
+    fireEvent.change(copyBox(), { target: { value: 'Same' } });
+    await act(async () => { vi.advanceTimersByTime(400); });
+    fireEvent.change(copyBox(), { target: { value: 'Same 2' } });
+    fireEvent.change(copyBox(), { target: { value: 'Same' } });
+    await act(async () => { vi.advanceTimersByTime(400); });
+    expect(answers).toHaveLength(2);
+
+    // Both were asked with the same answers; the older one answers last.
+    await act(async () => { answers[1](keepPlan); });
+    await act(async () => { answers[0](taken); });
+    expect(screen.queryByText('That name is already used.')).toBeNull();
+    expect(screen.getByRole('button', { name: /^Restore$/ })).not.toHaveAttribute('aria-disabled');
+  });
+
+  it('downloads once for a double tap while the backup is being made', async () => {
+    let finish;
+    mockApi.backupTournament.mockReturnValueOnce(new Promise((resolve) => { finish = resolve; }));
+    vi.spyOn(window.URL, 'createObjectURL').mockReturnValue('blob:test');
+    vi.spyOn(window.URL, 'revokeObjectURL').mockImplementation(() => {});
+    render(<AdminBackupPage tournament={defaultTournament} password={TEST_KEY} showToast={vi.fn()} />);
+    const btn = screen.getByRole('button', { name: 'Back up the whole tournament' });
+    fireEvent.click(btn);
+    fireEvent.click(btn);
+    await waitFor(() => expect(btn).toBeDisabled());
+    expect(screen.getByRole('button', { name: 'Back up "Open Individual"' })).toBeDisabled();
+    await act(async () => { finish({ blob: new Blob(['zip']), filename: 'spring-taikai.zip' }); });
+    expect(mockApi.backupTournament).toHaveBeenCalledTimes(1);
+    expect(btn).toBeEnabled();
+  });
+
+  it('leads a kept copy with its kind and local time, the file name below', async () => {
+    render(<AdminBackupPage tournament={defaultTournament} password={TEST_KEY} />);
+    const when = new Date('2026-11-04T10:00:00Z').toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'medium' });
+    const name = await screen.findByText(when);
+    expect(name).toHaveClass('backup-row__name');
+    expect(screen.getByText('20261104T100000Z-before-restore-tournament.zip')).toHaveClass('backup-row__file');
   });
 });

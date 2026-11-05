@@ -28,7 +28,10 @@ const (
 	// RestoreCopy puts an archive competition in place under a new name and id,
 	// leaving the folder's one with its id as it is.
 	RestoreCopy RestoreAction = "copy"
-	// RestoreKeep leaves a folder competition the tournament archive lacks as it is.
+	// RestoreKeep leaves the folder as it is for this id: a folder competition
+	// the tournament archive lacks, or one both hold, stays as it is, and an
+	// archive competition the folder lacks is not added. Only a tournament
+	// restore offers it for an archive competition.
 	RestoreKeep RestoreAction = "keep"
 	// RestoreRemove removes a folder competition the tournament archive lacks.
 	RestoreRemove RestoreAction = "remove"
@@ -60,7 +63,8 @@ type RestoreRequest struct {
 	// competition scope (D8).
 	Only string
 	// Decisions answers each competition the plan asks about, by its id in the
-	// archive (replace or copy) or in the folder (keep or remove).
+	// archive (replace, copy or keep) or in the folder (keep or remove), and
+	// may leave out (keep) a create the plan offers that choice for.
 	Decisions map[string]RestoreDecision
 	// Undo restores a before-restore safety copy as the undo of the restore
 	// that took it: it answers its own questions.
@@ -146,14 +150,16 @@ type RestoreWarning struct {
 
 // RestoreCompetitionPlan is what the restore does with one competition.
 type RestoreCompetitionPlan struct {
-	// ID is the competition's id in the archive, or in the folder for a keep
-	// or a remove.
+	// ID is the competition's id in the archive, or in the folder for a
+	// competition the archive lacks.
 	ID   string `json:"id"`
 	Name string `json:"name"`
 	// Action is the answer given (or the one the restore takes by itself);
 	// empty while an asked competition is unanswered.
 	Action RestoreAction `json:"action,omitempty"`
 	// Asked is set when the operator must choose; Choices lists the answers.
+	// An unasked entry may carry Choices too (a create that a tournament
+	// restore can leave out): it takes Action unless it is answered.
 	Asked   bool            `json:"asked"`
 	Choices []RestoreAction `json:"choices,omitempty"`
 	// NewID is a copy's id; CopyNameTaken is set when its name is empty, does

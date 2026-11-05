@@ -11302,8 +11302,9 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 }
 
 /* Backup and restore page (bc-bkrs). The page keeps .page's padding but a
-   narrower measure, since it is read as prose and answered as a form. */
-.backup-page { max-width: 1000px; }
+   narrower measure, since it is read as prose and answered as a form. The
+   bottom room lets the plan's Restore scroll clear of a toast. */
+.backup-page { max-width: 1000px; padding-bottom: 96px; }
 .backup-page > .alert,
 .backup-page > .card { margin-bottom: 20px; }
 .backup-intro,
@@ -11384,6 +11385,7 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   font-size: var(--fs-sm);
   color: var(--ink-2);
 }
+.backup-row__note--error { margin: 4px 0 0; color: var(--danger); font-weight: 600; }
 .backup-row__actions,
 .backup-row__head .btn { white-space: nowrap; }
 .backup-row__actions { display: flex; flex-wrap: wrap; gap: 8px; }
@@ -11401,12 +11403,38 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 .backup-choice input[type="radio"] { margin: 0; flex-shrink: 0; }
 .backup-choice--copy { flex-wrap: wrap; }
 .backup-copy-name { width: 240px; max-width: 100%; }
+.backup-scope {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 16px;
+}
+.backup-scope__label { font-weight: 600; }
+.backup-scope .input { width: auto; max-width: 100%; }
+.backup-plan__listhead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 20px 0 8px;
+}
+.backup-plan__listhead .backup-subhead { margin: 0; }
+.backup-sync > summary { cursor: pointer; }
+.backup-sync[open] > summary { margin-bottom: 4px; }
 .backup-result .card__body > * { margin: 8px 0 0; }
 .backup-result .card__body > :first-child { margin-top: 0; }
-.backup-result .card__title:focus-visible {
+/* The focus ring sits clear of the line below the title. */
+.backup-result .card__title { margin-bottom: 6px; }
+.backup-plan__title { scroll-margin-top: var(--topbar-stack-h, 0px); }
+.backup-result .card__title:focus-visible,
+.backup-plan__title:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
 @media (pointer: coarse) {
-  .backup-choice { min-height: 44px; }
+  .backup-choice,
+  .backup-page .btn,
+  .backup-scope .input { min-height: 44px; }
 }

@@ -272,6 +272,62 @@ func TestMobileAppBackupRestore_MissingInArchiveChoice(t *testing.T) {
 	assert.Contains(t, comps, "open-comp")
 }
 
+// --keep also answers a competition the tournament backup holds: one the folder
+// has stays as it is, and one only the backup holds is not added. Under --only
+// keeping would restore nothing, so it is not a choice there.
+func TestMobileAppBackupRestore_KeepAnArchiveCompetition(t *testing.T) {
+	srcDir, _ := buildTestPopulatedFolder(t)
+	srcStore, err := state.NewStore(srcDir)
+	require.NoError(t, err)
+	require.NoError(t, srcStore.SaveCompetition(&state.Competition{
+		ID: "solo", Name: "Solo", Courts: []string{"A"}, NumberPrefix: "S",
+	}))
+	zipPath := filepath.Join(t.TempDir(), "backup.zip")
+	_, err = executeMobileApp("backup", "--folder", srcDir, "--out", zipPath)
+	require.NoError(t, err)
+
+	targetDir := t.TempDir()
+	targetStore, err := state.NewStore(targetDir)
+	require.NoError(t, err)
+	require.NoError(t, targetStore.SaveTournament(&state.Tournament{Name: "Target Taikai", Password: "pass", Courts: []string{"A"}}))
+	require.NoError(t, targetStore.SaveCompetition(&state.Competition{
+		ID: "open-comp", Name: "Existing Open", Courts: []string{"A"}, NumberPrefix: "E",
+	}))
+	openBefore := map[string]string{}
+	for k, v := range testDataFiles(t, targetDir) {
+		if strings.HasPrefix(k, "competitions/open-comp/") {
+			openBefore[k] = v
+		}
+	}
+
+	out, err := executeMobileApp("restore", "--folder", targetDir, zipPath)
+	require.Error(t, err)
+	assert.Contains(t, out+err.Error(), `open-comp ("Open Championship"): choose replace, copy or keep`)
+	assert.NotContains(t, out+err.Error(), "solo", "a competition only the backup holds is added unless left out")
+
+	out, err = executeMobileApp("restore", "--folder", targetDir, "--only", "open-comp", "--keep", "open-comp", zipPath)
+	require.Error(t, err)
+	assert.Contains(t, out+err.Error(), "One of the choices is not allowed for that competition.")
+
+	out, err = executeMobileApp("restore", "--folder", targetDir, "--keep", "open-comp", "--keep", "solo", zipPath)
+	require.NoError(t, err, "output: %s", out)
+	assert.Contains(t, out, `Kept: open-comp ("Open Championship")`)
+	assert.Contains(t, out, `Left out: solo ("Solo")`)
+
+	reopened, err := state.NewStore(targetDir)
+	require.NoError(t, err)
+	comps, err := reopened.ListCompetitions()
+	require.NoError(t, err)
+	assert.Equal(t, []string{"open-comp"}, comps, "solo is not added")
+	openAfter := map[string]string{}
+	for k, v := range testDataFiles(t, targetDir) {
+		if strings.HasPrefix(k, "competitions/open-comp/") {
+			openAfter[k] = v
+		}
+	}
+	assert.Equal(t, openBefore, openAfter, "the kept competition is the folder's, byte for byte")
+}
+
 // (4) A fresh folder (no tournament.md) is refused without --password.
 func TestMobileAppBackupRestore_FreshFolderRequiresPassword(t *testing.T) {
 	srcDir, _ := buildTestPopulatedFolder(t)

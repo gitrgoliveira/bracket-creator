@@ -4997,12 +4997,15 @@ function _backupFilename(res) {
     // The server always names the archive: `attachment; filename="<name>.zip"`.
     return /filename="([^"]+)"/.exec(res.headers.get('Content-Disposition'))[1];
 }
-function _restoreForm({ file, from, only, undo }) {
+// The plan and the restore take the same fields, decisions included: the plan
+// applies them, so a copy name already used shows before the password.
+function _restoreForm({ file, from, only, undo, decisions }) {
     const fd = new FormData();
     if (file) fd.append('archive', file);
     if (from) fd.append('from', from);
     if (only) fd.append('only', only);
     if (undo === true) fd.append('undo', 'true');
+    if (decisions) fd.append('decisions', typeof decisions === 'string' ? decisions : JSON.stringify(decisions));
     return fd;
 }
 const API = {
@@ -5955,14 +5958,13 @@ const API = {
         const blob = await res.blob();
         return { blob, filename };
     },
-    planRestore({ file, from, only, undo } = {}, password) {
+    planRestore({ file, from, only, undo, decisions } = {}, password) {
         return _backupRequest('/api/tournament/restore/plan', 'Failed to plan restore', {
-            method: 'POST', password, body: _restoreForm({ file, from, only, undo })
+            method: 'POST', password, body: _restoreForm({ file, from, only, undo, decisions })
         }).then(r => r.json());
     },
     async restore({ file, from, only, undo, decisions, allowRunning } = {}, password, confirmPassword) {
-        const fd = _restoreForm({ file, from, only, undo });
-        if (decisions) fd.append('decisions', typeof decisions === 'string' ? decisions : JSON.stringify(decisions));
+        const fd = _restoreForm({ file, from, only, undo, decisions });
         if (allowRunning === true) fd.append('allowRunning', 'true');
         const res = await _backupRequest('/api/tournament/restore', 'Failed to restore', {
             method: 'POST', password, confirmPassword: confirmPassword ?? '', body: fd

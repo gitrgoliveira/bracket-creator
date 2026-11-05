@@ -10,6 +10,10 @@ const pluralize = window.pluralize;
 
 const RESTORE_TOO_LARGE_MESSAGE = "The backup file is over 64 MB. Restore it from Copies kept on this computer or the command line.";
 
+// After a choice or a copy name changes, the plan is asked again with the
+// answers so far, so a name already used shows before the password.
+const RECHECK_DELAY_MS = 400;
+
 function formatFileSize(bytes) {
   if (typeof bytes !== "number" || isNaN(bytes)) return "";
   if (bytes < 1024) return `${bytes} B`;
@@ -28,10 +32,74 @@ function triggerBlobDownload(blob, filename) {
   window.URL.revokeObjectURL(url);
 }
 
-function lookupCompetitionName(competitions, compId) {
+// A restore plan row the operator is not asked about says what the restore does
+// with it by itself (an undo answers every row).
+const UNASKED_NOTES = {
+  create: "Will be created as a new competition.",
+  replace: "Will be put back as it was before the restore.",
+  remove: "Will be removed: the restore added it.",
+  keep: "Will be left as it is.",
+};
+const LEFT_OUT_NOTE = "Will be left out.";
+const COPY_NAME_TAKEN_NOTE = "That name is already used.";
+const NAME_TAKEN_NOTE = "Another competition already has this name.";
+
+// A copy is listed under the name of the competition it copies; its own name
+// lives only in the operator's answer.
+// A plan row for a competition the folder has and the tournament backup lacks.
+// A row the backup holds may offer keep too (keep the one I have, or do not
+// add it), so only remove, or keep on a row that is not a create, says so.
+function isMissingFromArchive(c) {
+  if (c.asked) return c.choices.includes("remove");
+  return c.action === "remove" || (c.action === "keep" && !canLeaveOut(c));
+}
+
+// A competition only the backup holds, which a whole-tournament restore adds
+// unless the operator ticks "Don't add it". An unasked row carries choices only
+// then (the server omits an empty list).
+function canLeaveOut(c) {
+  return !c.asked && Array.isArray(c.choices) && c.choices.includes("keep");
+}
+
+function lookupCompetitionName(competitions, compId, copyNames) {
   if (!Array.isArray(competitions)) return compId;
   const match = competitions.find((c) => c.newId === compId || c.id === compId);
+  if (match && match.newId === compId && copyNames?.[match.id]) return copyNames[match.id];
   return match?.name || compId;
+}
+
+function joinClauses(parts) {
+  if (parts.length <= 1) return parts.join("");
+  return `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}`;
+}
+
+// What a restore will do, in one or two sentences, for the confirm dialog.
+function restoreSummary(plan, decisions) {
+  const counts = { replace: 0, copy: 0, create: 0, remove: 0, leaveOut: 0 };
+  let results = 0;
+  for (const c of plan?.competitions || []) {
+    const action = decisions[c.id]?.action || (c.asked ? undefined : c.action);
+    if (action === "keep") {
+      // Keeping a competition the backup lacks changes nothing worth saying;
+      // keeping one the backup holds leaves that one out of the restore.
+      if (!isMissingFromArchive(c)) counts.leaveOut += 1;
+    } else if (action in counts) {
+      counts[action] += 1;
+    }
+    if ((action === "replace" || action === "remove") && Array.isArray(c.resultsChanged)) {
+      results += c.resultsChanged.length;
+    }
+  }
+  const parts = [];
+  if (counts.replace) parts.push(`${plan.undo ? "puts back" : "replaces"} ${pluralize(counts.replace, "competition")}`);
+  if (counts.copy) parts.push(`adds ${pluralize(counts.copy, "copy", "copies")}`);
+  if (counts.create) parts.push(`adds ${pluralize(counts.create, "new competition")}`);
+  if (counts.remove) parts.push(`removes ${pluralize(counts.remove, "competition")}`);
+  if (counts.leaveOut) parts.push(`leaves out ${pluralize(counts.leaveOut, "competition")}`);
+  if (plan?.tournamentReplaced) parts.push("puts back the tournament settings");
+  let text = parts.length > 0 ? `This ${plan.undo ? "undo" : "restore"} ${joinClauses(parts)}.` : "";
+  if (results > 0) text += ` ${pluralize(results, "recorded result")} will be lost or changed.`;
+  return text.trim();
 }
 
 function planHasRunningMatches(p) {
@@ -54,13 +122,31 @@ function AdminBackupPage({ tournament, onBack, onLogout, onViewerMode, password,
   const [plan, setPlan] = useState(null);
   const [planError, setPlanError] = useState(null);
   const [onlyCompId, setOnlyCompId] = useState(null);
+  // The competitions a whole-tournament backup holds, for the Restore picker;
+  // kept while the plan is narrowed to one of them.
+  const [archiveComps, setArchiveComps] = useState([]);
   const [decisions, setDecisions] = useState({});
+  // The latest plan asked again with the answers (key: those answers as JSON),
+  // its rows by id. Only the row flags are read from it (a copy name or a name
+  // already used); the plan on screen stays the one first asked for.
+  const [checked, setChecked] = useState(null);
   const [restoreResult, setRestoreResult] = useState(null);
+  // The backup being downloaded: "tournament" or a competition id.
+  const [backingUp, setBackingUp] = useState(null);
 
   const mountedRef = useRef(true);
   const fileInputRef = useRef(null);
   const resultTitleRef = useRef(null);
-  useEffect(() => () => { mountedRef.current = false; }, []);
+  const planRef = useRef(null);
+  const planTitleRef = useRef(null);
+  // Each check, and each new plan, takes the next number; an answer that
+  // arrives for an older one is dropped.
+  const checkSeqRef = useRef(0);
+  const checkTimerRef = useRef(null);
+  useEffect(() => () => {
+    mountedRef.current = false;
+    clearTimeout(checkTimerRef.current);
+  }, []);
 
   // The button that opened the confirm dialog is gone once a restore lands, so the
   // dialog cannot hand focus back to it: focus the result's title, which reads it out
@@ -68,6 +154,13 @@ function AdminBackupPage({ tournament, onBack, onLogout, onViewerMode, password,
   useEffect(() => {
     if (restoreResult) resultTitleRef.current?.focus();
   }, [restoreResult]);
+
+  // A plan opens in the Restore from a file card, away from a kept copy's Restore
+  // or the Undo button that asked for it: focus its title, which reads it out and
+  // brings it into view.
+  useEffect(() => {
+    if (plan) planTitleRef.current?.focus();
+  }, [plan]);
 
   const loadKeptBackups = useCallback(async () => {
     if (!window.API || !window.API.listBackups) return;
@@ -87,27 +180,36 @@ function AdminBackupPage({ tournament, onBack, onLogout, onViewerMode, password,
     loadKeptBackups();
   }, [loadKeptBackups]);
 
-  const handleBackupTournament = async () => {
+  // One backup at a time: the buttons are disabled while an archive is being
+  // made, so a second tap does not download it twice.
+  const runBackup = async (target, download, doneMessage) => {
+    setBackingUp(target);
     try {
-      const { blob, filename } = await window.API.backupTournament(password);
+      const { blob, filename } = await download();
       triggerBlobDownload(blob, filename);
-      showToast?.("Tournament backup downloaded");
+      showToast?.(doneMessage);
     } catch (e) {
       showToast?.(e.message || "Backup failed", "error");
+    } finally {
+      if (mountedRef.current) setBackingUp(null);
     }
   };
 
-  const handleBackupCompetition = async (comp) => {
-    try {
-      const { blob, filename } = await window.API.backupCompetition(comp.id, password);
-      triggerBlobDownload(blob, filename);
-      showToast?.(`Backup for "${comp.name}" downloaded`);
-    } catch (e) {
-      showToast?.(e.message || "Backup failed", "error");
-    }
+  const handleBackupTournament = () =>
+    runBackup("tournament", () => window.API.backupTournament(password), "Tournament backup downloaded");
+
+  const handleBackupCompetition = (comp) =>
+    runBackup(comp.id, () => window.API.backupCompetition(comp.id, password), `Backup for "${comp.name}" downloaded`);
+
+  // A new plan drops every check asked for the one before.
+  const forgetChecks = () => {
+    checkSeqRef.current += 1;
+    clearTimeout(checkTimerRef.current);
+    setChecked(null);
   };
 
   const runPlan = async ({ file, from, only, undo = false }) => {
+    forgetChecks();
     setPlanning(true);
     setPlanError(null);
     setPlan(null);
@@ -119,6 +221,9 @@ function AdminBackupPage({ tournament, onBack, onLogout, onViewerMode, password,
       setSelectedFile(file || null);
       setSelectedFromName(from || null);
       setOnlyCompId(only || null);
+      if (!only) {
+        setArchiveComps(p.scope === "tournament" ? p.competitions.filter((c) => !isMissingFromArchive(c)) : []);
+      }
     } catch (e) {
       if (!mountedRef.current) return;
       if (e?.status === 413) {
@@ -139,18 +244,44 @@ function AdminBackupPage({ tournament, onBack, onLogout, onViewerMode, password,
     runPlan({ file });
   };
 
-  const handleRestoreOnly = (compId) => {
+  const handleScopeChange = (e) => {
     runPlan({
       file: selectedFile,
       from: selectedFromName,
-      only: compId,
+      only: e.target.value || undefined,
     });
   };
 
-  const handleShowAll = () => {
-    runPlan({
-      file: selectedFile,
-      from: selectedFromName,
+  // Asks the plan again with these answers. Resolves to the check, or to null
+  // when a newer check or plan has been asked for since.
+  const checkDecisions = useCallback(async (sent) => {
+    checkSeqRef.current += 1;
+    const seq = checkSeqRef.current;
+    const p = await window.API.planRestore(
+      { file: selectedFile, from: selectedFromName, only: onlyCompId, decisions: sent },
+      password
+    );
+    if (!mountedRef.current || seq !== checkSeqRef.current) return null;
+    const result = { key: JSON.stringify(sent), byId: Object.fromEntries(p.competitions.map((c) => [c.id, c])) };
+    setChecked(result);
+    return result;
+  }, [selectedFile, selectedFromName, onlyCompId, password]);
+
+  useEffect(() => {
+    if (!plan || plan.undo || Object.keys(decisions).length === 0) return undefined;
+    checkTimerRef.current = setTimeout(() => {
+      // Restore asks again before the password, and says what went wrong then.
+      checkDecisions(decisions).catch((e) => console.warn("Restore plan check failed:", e));
+    }, RECHECK_DELAY_MS);
+    return () => clearTimeout(checkTimerRef.current);
+  }, [plan, decisions, checkDecisions]);
+
+  const handleLeaveOutChange = (compId, leaveOut) => {
+    setDecisions((prev) => {
+      const next = { ...prev };
+      if (leaveOut) next[compId] = { action: "keep" };
+      else delete next[compId];
+      return next;
     });
   };
 
@@ -178,18 +309,76 @@ function AdminBackupPage({ tournament, onBack, onLogout, onViewerMode, password,
     }
   }
 
-  const allChoicesMade = askedComps.length === 0 || firstOpenComp === null;
+  // The flags for the answers on screen: the plan's own while nothing is
+  // answered, else the check asked with exactly these answers (none while it
+  // is on its way).
+  const decisionsKey = JSON.stringify(decisions);
+  const flagsById = Object.keys(decisions).length === 0
+    ? Object.fromEntries((plan?.competitions || []).map((c) => [c.id, c]))
+    : checked?.key === decisionsKey ? checked.byId : {};
+  const copyNameTaken = (c) =>
+    decisions[c.id]?.action === "copy" && Boolean(decisions[c.id].copyName.trim()) && Boolean(flagsById[c.id]?.copyNameTaken);
+  const nameTaken = (c) => Boolean(flagsById[c.id]?.nameTaken);
+  if (firstOpenComp === null) {
+    const taken = (plan?.competitions || []).find((c) => copyNameTaken(c) || nameTaken(c));
+    if (taken) firstOpenComp = { ...taken, taken: copyNameTaken(taken) ? "copy" : "name" };
+  }
 
-  const handleRestoreSubmit = () => {
-    if (!allChoicesMade) return;
+  const allChoicesMade = firstOpenComp === null;
+  const replaceableComps = askedComps.filter((c) => c.choices?.includes("replace"));
+
+  const handleReplaceAll = () => {
+    setDecisions((prev) => {
+      const next = { ...prev };
+      for (const c of replaceableComps) next[c.id] = { action: "replace", copyName: prev[c.id]?.copyName || "" };
+      return next;
+    });
+  };
+
+  // The button names the next open choice; a tap on it takes the operator there.
+  const focusFirstOpenChoice = () => {
+    const inputs = Array.from(planRef.current.querySelectorAll("input"));
+    const target = firstOpenComp.needsCopyName || firstOpenComp.taken === "copy"
+      ? inputs.find((el) => el.dataset.copyNameFor === firstOpenComp.id)
+      : inputs.find((el) => el.name === `decision-${firstOpenComp.id}`);
+    // A name taken by a competition restored with competition scope offers no
+    // choice to go to: the competition in the folder must be renamed first.
+    target?.focus();
+  };
+
+  const handleRestoreSubmit = async () => {
+    if (!allChoicesMade) {
+      focusFirstOpenChoice();
+      return;
+    }
     const prompt = window.promptDialog;
     if (!prompt) return;
 
+    // One last check with these answers, so a name already used is shown on
+    // its row (and names the button) instead of refusing after the password.
+    if (Object.keys(decisions).length > 0 && !plan.undo) {
+      clearTimeout(checkTimerRef.current);
+      let result;
+      try {
+        result = await checkDecisions(decisions);
+      } catch (e) {
+        if (mountedRef.current) setPlanError(e.message || "Failed to check restore plan");
+        return;
+      }
+      if (!result) return;
+      if (Object.values(result.byId).some((c) => c.copyNameTaken || c.nameTaken)) return;
+    }
+
     const hasRunning = planHasRunningMatches(plan);
+    const copyNames = {};
+    for (const [id, d] of Object.entries(decisions)) {
+      if (d.action === "copy") copyNames[id] = d.copyName.trim();
+    }
+    const summary = restoreSummary(plan, decisions);
 
     prompt({
       title: "Confirm restore",
-      message: "Enter the admin password to confirm the restore.",
+      message: `${summary ? `${summary} ` : ""}Enter the admin password to confirm the restore.`,
       placeholder: "Admin password",
       password: true,
       danger: true,
@@ -211,12 +400,14 @@ function AdminBackupPage({ tournament, onBack, onLogout, onViewerMode, password,
             typed
           );
           if (mountedRef.current) {
-            setRestoreResult(plan?.undo ? { ...res, isUndoResult: true } : res);
+            setRestoreResult({ ...res, copyNames, isUndoResult: Boolean(plan?.undo) });
+            forgetChecks();
             setPlan(null);
             setDecisions({});
             setSelectedFile(null);
             setSelectedFromName(null);
             setOnlyCompId(null);
+            setArchiveComps([]);
             loadKeptBackups();
           }
         } catch (e) {
@@ -247,6 +438,7 @@ function AdminBackupPage({ tournament, onBack, onLogout, onViewerMode, password,
     if (!restoreResult?.safetyCopy) return;
     const safetyCopy = restoreResult.safetyCopy;
     let undoPlanResult;
+    forgetChecks();
     try {
       setPlanning(true);
       setPlanError(null);
@@ -256,6 +448,7 @@ function AdminBackupPage({ tournament, onBack, onLogout, onViewerMode, password,
       setSelectedFile(null);
       setSelectedFromName(safetyCopy);
       setOnlyCompId(null);
+      setArchiveComps([]);
       setDecisions({});
     } catch (e) {
       if (!mountedRef.current) return;
@@ -269,10 +462,11 @@ function AdminBackupPage({ tournament, onBack, onLogout, onViewerMode, password,
     if (!prompt) return;
 
     const hasRunning = planHasRunningMatches(undoPlanResult);
+    const summary = restoreSummary(undoPlanResult, {});
 
     prompt({
       title: "Confirm undo",
-      message: `Enter the admin password to undo the restore using safety copy ${safetyCopy}.`,
+      message: `${summary ? `${summary} ` : ""}Enter the admin password to undo the restore using safety copy ${safetyCopy}.`,
       placeholder: "Admin password",
       password: true,
       danger: true,
@@ -385,7 +579,7 @@ function AdminBackupPage({ tournament, onBack, onLogout, onViewerMode, password,
               {restoreResult.prefixWarnings && restoreResult.prefixWarnings.length > 0 && (
                 <div className="alert alert--warn">
                   {restoreResult.prefixWarnings.map((w) => {
-                    const compName = lookupCompetitionName(restoreResult.plan?.competitions, w.competitionId);
+                    const compName = lookupCompetitionName(restoreResult.plan?.competitions, w.competitionId, restoreResult.copyNames);
                     return (
                       <div key={w.competitionId}>
                         {w.newPrefix ? (
@@ -405,15 +599,20 @@ function AdminBackupPage({ tournament, onBack, onLogout, onViewerMode, password,
                 <div className="alert alert--error">{restoreResult.requeueError}</div>
               )}
               {restoreResult.safetyCopy && !restoreResult.isUndoResult && (
-                <div className="backup-actions">
-                  <button
-                    type="button"
-                    className="btn btn--secondary"
-                    onClick={handleUndo}
-                  >
-                    Undo this restore
-                  </button>
-                </div>
+                <>
+                  <div className="backup-actions">
+                    <button
+                      type="button"
+                      className="btn btn--secondary"
+                      onClick={handleUndo}
+                    >
+                      Undo this restore
+                    </button>
+                  </div>
+                  <p className="backup-detail">
+                    This card goes when you leave or reload the page. After that, restore the safety copy from Copies kept on this computer.
+                  </p>
+                </>
               )}
             </div>
           </div>
@@ -429,8 +628,10 @@ function AdminBackupPage({ tournament, onBack, onLogout, onViewerMode, password,
               <button
                 type="button"
                 className="btn btn--primary"
+                disabled={backingUp !== null}
                 onClick={handleBackupTournament}
               >
+                {backingUp === "tournament" && <span className="spinner" />}
                 Back up the whole tournament
               </button>
             </div>
@@ -448,8 +649,11 @@ function AdminBackupPage({ tournament, onBack, onLogout, onViewerMode, password,
                       <button
                         type="button"
                         className="btn btn--sm"
+                        aria-label={`Back up "${c.name}"`}
+                        disabled={backingUp !== null}
                         onClick={() => handleBackupCompetition(c)}
                       >
+                        {backingUp === c.id && <span className="spinner" />}
                         Back up
                       </button>
                     </div>
@@ -491,8 +695,14 @@ function AdminBackupPage({ tournament, onBack, onLogout, onViewerMode, password,
             )}
 
             {plan && (
-              <div className="backup-plan">
-                <h2 className="backup-subhead">Restore plan ({plan.scope} archive)</h2>
+              <div ref={planRef} className="backup-plan">
+                <h2 ref={planTitleRef} className="backup-subhead backup-plan__title" tabIndex={-1}>
+                  {plan.undo
+                    ? "Undo plan"
+                    : plan.scope === "tournament"
+                      ? "Restore plan: whole tournament"
+                      : "Restore plan: one competition"}
+                </h2>
                 {(selectedFromName || selectedFile?.name) && (
                   <p className="backup-detail">
                     From <strong>{selectedFromName || selectedFile.name}</strong>
@@ -500,14 +710,15 @@ function AdminBackupPage({ tournament, onBack, onLogout, onViewerMode, password,
                 )}
 
                 <div className="backup-alerts">
-                  <div className="alert alert--warn">
-                    <strong>Let every court device sync before you restore.</strong> A score a device sends after the restore:
+                  <details className="alert alert--warn backup-sync">
+                    <summary><strong>Let every court device sync before you restore.</strong></summary>
+                    A score a device sends after the restore:
                     <ul>
                       <li>is applied when it is newer than the restored match</li>
                       <li>goes to the match&apos;s history, not the result, when it is older or the backup has that match finished</li>
                       <li>is refused when the backup does not hold that match</li>
                     </ul>
-                  </div>
+                  </details>
                   {(plan.warnings || []).map((w) => (
                     <div key={`${w.code}-${w.competitionId || ""}-${w.court || ""}`} className="alert alert--warn">
                       {w.message}
@@ -529,43 +740,60 @@ function AdminBackupPage({ tournament, onBack, onLogout, onViewerMode, password,
                   )}
                 </div>
 
-                <h3 className="backup-subhead">Competitions to restore</h3>
+                {archiveComps.length >= 2 && !plan.undo && (
+                  <label className="backup-scope">
+                    <span className="backup-scope__label">Restore</span>
+                    <select
+                      className="input"
+                      value={onlyCompId || ""}
+                      disabled={planning}
+                      onChange={handleScopeChange}
+                    >
+                      <option value="">All competitions</option>
+                      {archiveComps.map((c) => (
+                        <option key={c.id} value={c.id}>Only {c.name}</option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+
+                <div className="backup-plan__listhead">
+                  <h3 className="backup-subhead">Competitions to restore</h3>
+                  {replaceableComps.length >= 2 && (
+                    <button type="button" className="btn btn--sm" onClick={handleReplaceAll}>
+                      Replace all existing
+                    </button>
+                  )}
+                </div>
                 <div className="backup-list">
                   {plan.competitions.map((c) => {
                     const currentDecision = decisions[c.id] || {};
-                    const isMissingFromArchive = c.choices?.includes("keep") || c.choices?.includes("remove");
                     const nameId = `backup-comp-${c.id}`;
+                    const leftOut = canLeaveOut(c) && currentDecision.action === "keep";
+                    const copyTaken = copyNameTaken(c);
 
                     return (
                       <div key={c.id} className="backup-row backup-row--plan">
                         <div className="backup-row__head">
                           <span id={nameId} className="backup-row__name">{c.name}</span>
-                          {plan.scope === "tournament" && !plan.undo && !onlyCompId && !isMissingFromArchive && (
-                            <button
-                              type="button"
-                              className="btn btn--sm"
-                              aria-label={`Restore only "${c.name}"`}
-                              disabled={planning}
-                              onClick={() => handleRestoreOnly(c.id)}
-                            >
-                              Restore only this one
-                            </button>
-                          )}
-                          {plan.scope === "tournament" && !plan.undo && onlyCompId && (
-                            <button
-                              type="button"
-                              className="btn btn--sm"
-                              disabled={planning}
-                              onClick={handleShowAll}
-                            >
-                              Show all competitions
-                            </button>
-                          )}
                         </div>
 
-                        {!c.asked ? (
-                          <div className="backup-row__note">Will be created as a new competition.</div>
-                        ) : isMissingFromArchive ? (
+                        {canLeaveOut(c) ? (
+                          <div role="group" aria-labelledby={`${nameId} ${nameId}-note`}>
+                            <div id={`${nameId}-note`} className="backup-row__note">{leftOut ? LEFT_OUT_NOTE : UNASKED_NOTES.create}</div>
+                            <label className="backup-choice">
+                              <input
+                                type="checkbox"
+                                name={`decision-${c.id}`}
+                                checked={leftOut}
+                                onChange={(e) => handleLeaveOutChange(c.id, e.target.checked)}
+                              />
+                              Don&apos;t add it
+                            </label>
+                          </div>
+                        ) : !c.asked ? (
+                          <div className="backup-row__note">{UNASKED_NOTES[c.action]}</div>
+                        ) : isMissingFromArchive(c) ? (
                           <fieldset className="backup-choices" aria-labelledby={`${nameId} ${nameId}-note`}>
                             <legend id={`${nameId}-note`} className="backup-row__note">This competition is not in the backup archive:</legend>
                             <label className="backup-choice">
@@ -617,12 +845,35 @@ function AdminBackupPage({ tournament, onBack, onLogout, onViewerMode, password,
                                 type="text"
                                 className="input backup-copy-name"
                                 aria-label={`Name for the copy of "${c.name}"`}
+                                data-copy-name-for={c.id}
+                                aria-invalid={copyTaken ? "true" : undefined}
+                                aria-describedby={copyTaken ? `${nameId}-copy-taken` : undefined}
                                 value={currentDecision.copyName || ""}
                                 onChange={(e) => handleDecisionChange(c.id, "copy", e.target.value)}
                                 onClick={() => handleDecisionChange(c.id, "copy")}
                               />
                             </label>
+                            {copyTaken && (
+                              <div id={`${nameId}-copy-taken`} className="backup-row__note backup-row__note--error">
+                                {COPY_NAME_TAKEN_NOTE}
+                              </div>
+                            )}
+                            {c.choices.includes("keep") && (
+                              <label className="backup-choice">
+                                <input
+                                  type="radio"
+                                  name={`decision-${c.id}`}
+                                  value="keep"
+                                  checked={currentDecision.action === "keep"}
+                                  onChange={() => handleDecisionChange(c.id, "keep")}
+                                />
+                                Keep the one I have (don&apos;t restore it)
+                              </label>
+                            )}
                           </fieldset>
+                        )}
+                        {nameTaken(c) && (
+                          <div className="backup-row__note backup-row__note--error">{NAME_TAKEN_NOTE}</div>
                         )}
                       </div>
                     );
@@ -641,11 +892,15 @@ function AdminBackupPage({ tournament, onBack, onLogout, onViewerMode, password,
                       aria-disabled={allChoicesMade ? undefined : "true"}
                       onClick={handleRestoreSubmit}
                     >
-                      {!allChoicesMade
-                        ? firstOpenComp?.needsCopyName
+                      {allChoicesMade
+                        ? "Restore"
+                        : firstOpenComp.needsCopyName
                           ? `Enter name for copy of "${firstOpenComp.name}"`
-                          : `Choose what to do with "${firstOpenComp?.name}"`
-                        : "Restore"}
+                          : firstOpenComp.taken === "copy"
+                            ? `Pick another name for the copy of "${firstOpenComp.name}"`
+                            : firstOpenComp.taken === "name"
+                              ? `"${firstOpenComp.name}": its name is already used`
+                              : `Choose what to do with "${firstOpenComp.name}"`}
                     </button>
                   </div>
                 )}
@@ -676,10 +931,12 @@ function AdminBackupPage({ tournament, onBack, onLogout, onViewerMode, password,
                       <div className="backup-row__main">
                         <div className="backup-row__title">
                           <span className="badge badge--archive">{kindLabel}</span>
-                          <span className="backup-row__name">{b.name}</span>
+                          <span className="backup-row__name">
+                            {new Date(b.time).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "medium" })}
+                          </span>
                         </div>
                         <div className="backup-row__meta">
-                          {b.time ? new Date(b.time).toLocaleString() : ""} · {formatFileSize(b.size)}
+                          <span className="backup-row__file">{b.name}</span> · {formatFileSize(b.size)}
                         </div>
                       </div>
                       <div className="backup-row__actions">
@@ -708,7 +965,7 @@ function AdminBackupPage({ tournament, onBack, onLogout, onViewerMode, password,
                         </button>
                         <button
                           type="button"
-                          className="btn btn--sm btn--danger"
+                          className="btn btn--sm btn--ghost btn--danger"
                           aria-label={`Delete ${b.name}`}
                           onClick={() => handleDeleteBackup(b)}
                         >

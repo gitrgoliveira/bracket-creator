@@ -120,6 +120,23 @@ describe('admin_backup_api', () => {
       expect(opts.body.get('undo')).toBe('true');
     });
 
+    it('sends the decisions as JSON, as the restore does, so the plan can check them', async () => {
+      global.fetch = mockFetch(200, { scope: 'tournament', competitions: [] });
+      const decisions = { c1: { action: 'copy', copyName: 'Open 2' }, c2: { action: 'keep' } };
+
+      await API.planRestore({ from: '20260101T000000Z-scheduled.zip', decisions }, ORGANISER_KEY);
+
+      const [, opts] = global.fetch.mock.calls[0];
+      expect(JSON.parse(opts.body.get('decisions'))).toEqual(decisions);
+    });
+
+    it('sends no decisions field when none are given', async () => {
+      global.fetch = mockFetch(200, { scope: 'tournament', competitions: [] });
+      await API.planRestore({ from: '20260101T000000Z-scheduled.zip' }, ORGANISER_KEY);
+      const [, opts] = global.fetch.mock.calls[0];
+      expect(opts.body.get('decisions')).toBeNull();
+    });
+
     it('attaches HTTP status to thrown error when request fails', async () => {
       global.fetch = mockFetch(413, { error: 'request body too large' });
       const fakeFile = new File(['dummy'], 'large.zip', { type: 'application/zip' });

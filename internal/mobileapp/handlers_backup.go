@@ -344,11 +344,6 @@ func RegisterRestoreHandlers(r *gin.RouterGroup, store BackupStore, eng RestoreE
 		if !ok {
 			return
 		}
-		decisions, ok := readRestoreDecisions(c)
-		if !ok {
-			return
-		}
-		req.Decisions = decisions
 		allowRunning, ok := readFormBool(c, "allowRunning")
 		if !ok {
 			return
@@ -390,8 +385,10 @@ func RegisterRestoreHandlers(r *gin.RouterGroup, store BackupStore, eng RestoreE
 }
 
 // readRestoreRequest reads the fields the plan and the restore share: the
-// archive (an uploaded `archive` file, or `from`, a copy in backups/), `only`
-// and `undo`. On a refusal it has answered and returns false.
+// archive (an uploaded `archive` file, or `from`, a copy in backups/), `only`,
+// `undo` and `decisions` (the plan applies them too, so a copy name already
+// used is found before the restore asks for the password). On a refusal it has
+// answered and returns false.
 func readRestoreRequest(c *gin.Context, store BackupStore, verifier PasswordVerifier) (state.RestoreRequest, bool) {
 	var req state.RestoreRequest
 	if err := c.Request.ParseMultipartForm(MaxImportBodyBytes); err != nil {
@@ -418,6 +415,11 @@ func readRestoreRequest(c *gin.Context, store BackupStore, verifier PasswordVeri
 		return req, false
 	}
 	req.Undo = undo
+	decisions, ok := readRestoreDecisions(c)
+	if !ok {
+		return req, false
+	}
+	req.Decisions = decisions
 	req.LockedMode = verifier.Mode() == "locked"
 	return req, true
 }

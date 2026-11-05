@@ -277,6 +277,61 @@ func TestRestorePlan_ChangesNothingAndNeedsOnlyTheSignIn(t *testing.T) {
 	assert.Equal(t, http.StatusUnauthorized, w.Code)
 }
 
+// The plan reads the same decisions the restore takes, so a copy name already
+// used is reported before the restore asks for the password again; a bad
+// decision is refused there too.
+func TestRestorePlan_AppliesDecisionsAndReportsATakenCopyName(t *testing.T) {
+	rig := newBackupRig(t)
+	archive := takeBackup(t, rig.r, "/api/tournament/backup")
+	before := folderHash(t, rig.dir)
+
+	w := restorePost(t, rig.r, "/api/tournament/restore/plan", archive,
+		map[string]string{"decisions": decisionsJSON(t, map[string]state.RestoreDecision{
+			"alpha": {Action: state.RestoreCopy, CopyName: "Beta"},
+			"beta":  {Action: state.RestoreKeep},
+		})},
+		backupTestPassword, "")
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var plan state.RestorePlan
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &plan))
+	assert.Empty(t, plan.Missing)
+	byID := map[string]state.RestoreCompetitionPlan{}
+	for _, c := range plan.Competitions {
+		byID[c.ID] = c
+	}
+	assert.True(t, byID["alpha"].CopyNameTaken, "Beta stays in place, so its name is taken")
+	assert.Empty(t, byID["alpha"].NewID)
+	assert.Equal(t, state.RestoreKeep, byID["beta"].Action)
+	assert.Equal(t, before, folderHash(t, rig.dir), "a plan changes nothing")
+
+	w = restorePost(t, rig.r, "/api/tournament/restore/plan", archive,
+		map[string]string{"decisions": decisionsJSON(t, map[string]state.RestoreDecision{
+			"alpha": {Action: state.RestoreCopy, CopyName: "Alpha Two"},
+		})},
+		backupTestPassword, "")
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var plan2 state.RestorePlan
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &plan2))
+	assert.Equal(t, []string{"beta"}, plan2.Missing, "an unanswered question is listed, not refused")
+	for _, c := range plan2.Competitions {
+		if c.ID == "alpha" {
+			assert.Equal(t, "alpha-two", c.NewID)
+			assert.False(t, c.CopyNameTaken)
+		}
+	}
+
+	w = restorePost(t, rig.r, "/api/tournament/restore/plan", archive,
+		map[string]string{"decisions": decisionsJSON(t, map[string]state.RestoreDecision{"alpha": {Action: state.RestoreRemove}})},
+		backupTestPassword, "")
+	require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+	assert.Equal(t, state.RestoreCodeBadDecision, responseCode(t, w))
+
+	w = restorePost(t, rig.r, "/api/tournament/restore/plan", archive,
+		map[string]string{"decisions": "{not json"}, backupTestPassword, "")
+	require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+	assert.Equal(t, backupCodeBadRequest, responseCode(t, w))
+}
+
 // waitForEvent reports whether the hub sends an event of type within a second.
 func waitForEvent(t *testing.T, ch chan historyEntry, eventType EventType) bool {
 	t.Helper()

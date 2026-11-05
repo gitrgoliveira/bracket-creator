@@ -115,7 +115,7 @@ bracket-creator mobile-app restore FILE [flags]
 | `--only` | (none) | `""` | Restore only this competition ID from the archive |
 | `--replace` | (none) | (none) | Competition ID to replace (can be specified multiple times) |
 | `--copy` | (none) | (none) | Competition ID and new name to copy: `ID=NAME` (can be specified multiple times) |
-| `--keep` | (none) | (none) | Competition ID to keep (can be specified multiple times) |
+| `--keep` | (none) | (none) | Competition ID to leave as the folder has it (can be specified multiple times). In a whole-tournament restore it also answers a competition the backup holds: one you already have is not replaced, and one only the backup holds is not added |
 | `--remove` | (none) | (none) | Competition ID to remove (can be specified multiple times) |
 | `--undo` | (none) | `false` | Undo a previous restore using its safety copy |
 | `--password` | (none) | `""` | Admin password for the restored tournament (file mode only) |
@@ -126,7 +126,9 @@ In file mode, `--password` is required when the folder has no `tournament.md` ye
 
 Each competition ID may appear in only one of `--replace`, `--copy`, `--keep`, and `--remove`. `--undo` cannot be combined with `--only` or with any of those four flags, and it refuses an archive that is not a `before-restore` safety copy.
 
-Before applying changes, the command evaluates a dry run plan. If any competition requires a decision (such as replacing or copying an existing competition, or keeping or removing a competition missing from the backup), the command refuses and prints the required flags.
+Before applying changes, the command evaluates a dry run plan. If any competition requires a decision (such as replacing, copying or keeping an existing competition, or keeping or removing a competition missing from the backup), the command refuses and prints the choices for each, for example `mens-individual ("Mens Individual"): choose replace, copy or keep`. A competition only the backup holds needs no flag: it is added unless you pass `--keep` for it. With `--only`, or for a competition archive, `--keep` is not a choice for the competition restored, since keeping it would restore nothing.
+
+After a restore, the command lists what it did with each competition: `Created:`, `Replaced:`, `Copied:`, `Kept:`, `Left out:` (a competition only the backup held, not added) and `Removed:`.
 
 Just before swapping files on disk, the restore command automatically saves a `before-restore` safety copy in the `backups/` folder. You can reverse a restore by passing the safety copy file with the `--undo` flag.
 

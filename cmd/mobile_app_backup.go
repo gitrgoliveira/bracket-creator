@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -94,7 +95,7 @@ func newMobileAppRestoreCmd() *cobra.Command {
 	cmd.Flags().StringVar(&o.only, "only", "", "restore only this competition ID")
 	cmd.Flags().StringArrayVar(&o.replace, "replace", nil, "competition ID to replace")
 	cmd.Flags().StringArrayVar(&o.copy, "copy", nil, "competition ID and new name to copy (ID=NAME)")
-	cmd.Flags().StringArrayVar(&o.keep, "keep", nil, "competition ID to keep")
+	cmd.Flags().StringArrayVar(&o.keep, "keep", nil, "competition ID to leave as the folder has it (whole-tournament restore): a competition you already have stays as it is, and one only the backup holds is not added")
 	cmd.Flags().StringArrayVar(&o.remove, "remove", nil, "competition ID to remove")
 	cmd.Flags().BoolVar(&o.undo, "undo", false, "undo a previous restore using its safety copy")
 	cmd.Flags().StringVar(&o.password, "password", "", "admin password for the restored tournament (file mode only)")
@@ -335,7 +336,7 @@ func (o *mobileAppRestoreOptions) run(cmd *cobra.Command, archivePath string) (e
 					for i, c := range comp.Choices {
 						choiceStrs[i] = string(c)
 					}
-					lines = append(lines, fmt.Sprintf("  - %s (%q): choose %s", comp.ID, comp.Name, strings.Join(choiceStrs, " or ")))
+					lines = append(lines, fmt.Sprintf("  - %s (%q): choose %s", comp.ID, comp.Name, joinChoices(choiceStrs)))
 					found = true
 					break
 				}
@@ -389,8 +390,16 @@ func (o *mobileAppRestoreOptions) run(cmd *cobra.Command, archivePath string) (e
 	return nil
 }
 
+// joinChoices lists choices as "a or b", or "a, b or c".
+func joinChoices(choices []string) string {
+	if len(choices) <= 1 {
+		return strings.Join(choices, "")
+	}
+	return strings.Join(choices[:len(choices)-1], ", ") + " or " + choices[len(choices)-1]
+}
+
 func printRestoreOutcome(out io.Writer, plan state.RestorePlan) error {
-	var created, replaced, copied, kept, removed []string
+	var created, replaced, copied, kept, leftOut, removed []string
 	for _, comp := range plan.Competitions {
 		switch comp.Action {
 		case state.RestoreCreate:
@@ -400,7 +409,12 @@ func printRestoreOutcome(out io.Writer, plan state.RestorePlan) error {
 		case state.RestoreCopy:
 			copied = append(copied, fmt.Sprintf("%s (%q) -> %s", comp.ID, comp.Name, comp.NewID))
 		case state.RestoreKeep:
-			kept = append(kept, fmt.Sprintf("%s (%q)", comp.ID, comp.Name))
+			// A create answered keep was only in the backup: it was not added.
+			if slices.Contains(comp.Choices, state.RestoreCreate) {
+				leftOut = append(leftOut, fmt.Sprintf("%s (%q)", comp.ID, comp.Name))
+			} else {
+				kept = append(kept, fmt.Sprintf("%s (%q)", comp.ID, comp.Name))
+			}
 		case state.RestoreRemove:
 			removed = append(removed, fmt.Sprintf("%s (%q)", comp.ID, comp.Name))
 		}
@@ -422,6 +436,11 @@ func printRestoreOutcome(out io.Writer, plan state.RestorePlan) error {
 	}
 	if len(kept) > 0 {
 		if _, err := fmt.Fprintf(out, "Kept: %s\n", strings.Join(kept, ", ")); err != nil {
+			return err
+		}
+	}
+	if len(leftOut) > 0 {
+		if _, err := fmt.Fprintf(out, "Left out: %s\n", strings.Join(leftOut, ", ")); err != nil {
 			return err
 		}
 	}

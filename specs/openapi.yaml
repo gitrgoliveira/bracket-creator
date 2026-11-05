@@ -899,18 +899,25 @@ paths:
         full restore flow, the archive is uploaded twice: first to `/restore/plan`
         to inspect choices and warnings, then to `/restore` with operator decisions.
 
+        The plan takes the same `decisions` as `/restore` and applies them, so the
+        answers so far can be checked before the restore asks for `X-Confirm-Password`:
+        each competition comes back with `copyNameTaken`, `nameTaken` and `newId` as the
+        restore would find them, and `missing` lists the questions still unanswered.
+        A missing answer is not a refusal here; a decision a competition does not offer is
+        (400 `bad_decision`).
+
         In self-run mode this is an organiser action: it requires `X-Tournament-Password`.
 
         ### Refusals (refusals change nothing)
 
         | Status | Code | Meaning |
         | --- | --- | --- |
-        | 400 | `bad_restore_request` | Multipart parse failure, both `archive` and `from` supplied or neither supplied, invalid ID in `only`, or invalid boolean in `undo` |
+        | 400 | `bad_restore_request` | Multipart parse failure, both `archive` and `from` supplied or neither supplied, invalid ID in `only`, invalid boolean in `undo`, or malformed `decisions` JSON |
         | 400 | `bad_backup_name` | `from` does not match the valid backup filename pattern |
         | 400 | `archive_invalid` | Archive validation failed; carries reader reason code in `reason` and details in `detail` |
         | 400 | `not_a_safety_copy` | `undo=true` on an archive whose kind is not `before-restore` |
         | 400 | `competition_not_in_archive` | `only` names a competition not present in the archive |
-        | 400 | `bad_decision` | `undo=true` combined with `only` (an undo puts back the whole safety copy) |
+        | 400 | `bad_decision` | `undo=true` combined with `only` (an undo puts back the whole safety copy) or with `decisions` (an undo answers its own questions), or a decision that is not one of the competition's `choices`, or for a competition with none |
         | 400 | `file_unreadable` | A file in the backup cannot be read |
         | 404 | `backup_not_found` | Kept backup file specified in `from` does not exist |
 
@@ -939,6 +946,11 @@ paths:
                 undo:
                   type: boolean
                   description: When true, plans an undo of a previous restore using a safety copy.
+                decisions:
+                  type: string
+                  description: >
+                    The same JSON as on `/restore`, mapping competition ID to `{action, copyName}`.
+                    Optional: the plan applies whatever answers are given and lists the rest in `missing`.
       responses:
         '200':
           description: Restore plan computed successfully.
@@ -1050,8 +1062,12 @@ paths:
                   type: string
                   description: >
                     JSON string mapping competition ID to decision `{action, copyName}`.
-                    Action enum: `create`, `replace`, `copy`, `keep`, `remove`.
-                    `copyName` is required when action is `copy`.
+                    Action enum: `create`, `replace`, `copy`, `keep`, `remove`; each must be one of
+                    that competition's `choices` in the plan. `copyName` is required when action is `copy`.
+                    `keep` leaves the folder as it is for that ID: a competition the folder holds
+                    stays as it is, and one only the archive holds is not added. An asked
+                    competition must be answered; a create that offers `choices` (`create`, `keep`)
+                    may be left unanswered, and is then created.
                 allowRunning:
                   type: boolean
                   description: When true, permits replacing or removing competitions that have matches currently running.
@@ -7131,7 +7147,7 @@ components:
             properties:
               id:
                 type: string
-                description: Competition ID in archive (or in folder for keep or remove).
+                description: Competition ID in archive (or in folder for one the archive lacks).
               name:
                 type: string
                 description: Competition display name.
@@ -7147,7 +7163,13 @@ components:
                 items:
                   type: string
                   enum: [create, replace, copy, keep, remove]
-                description: Valid actions available for the operator to choose from.
+                description: >
+                  Valid actions available for the operator to choose from. Only a whole-tournament
+                  restore (no `only`, not an undo) offers `keep` for a competition the archive holds:
+                  an asked competition both hold gets `[replace, copy, keep]` (otherwise
+                  `[replace, copy]`), and one only the archive holds stays unasked with action
+                  `create` and `choices: [create, keep]`, so it is added unless answered `keep`.
+                  A competition only the folder holds gets `[keep, remove]`. An undo offers none.
               newId:
                 type: string
                 description: Derived competition ID when action is copy.

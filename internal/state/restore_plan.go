@@ -44,14 +44,24 @@ func buildRestoreCompetitionEntries(
 	var entries []RestoreCompetitionPlan
 	for _, id := range archiveIDs {
 		e := RestoreCompetitionPlan{ID: id, Name: ai.names[id]}
+		// Keep (leave the folder as it is for this id) is offered only in a
+		// whole-tournament restore: under competition scope, keeping the
+		// competition would restore nothing, which is what Cancel does.
+		offerKeep := tournament && !undo
 		switch {
 		case !inFolder[id]:
 			e.Action = RestoreCreate
+			if offerKeep {
+				e.Choices = []RestoreAction{RestoreCreate, RestoreKeep}
+			}
 		case undo:
 			e.Action = RestoreReplace
 		default:
 			e.Asked = true
 			e.Choices = []RestoreAction{RestoreReplace, RestoreCopy}
+			if offerKeep {
+				e.Choices = append(e.Choices, RestoreKeep)
+			}
 		}
 		entries = append(entries, e)
 	}
@@ -76,24 +86,28 @@ func buildRestoreCompetitionEntries(
 	return entries
 }
 
-// applyRestoreDecisions applies decisions to asked entries, checks for valid actions and unknown decisions,
-// and collects missing decision IDs and copy names.
+// applyRestoreDecisions applies decisions to the entries that carry Choices,
+// checks for valid actions and unknown decisions, and collects missing decision
+// IDs (asked entries only: an unasked entry with Choices, a create that can be
+// left out, takes its own Action when unanswered) and copy names.
 func applyRestoreDecisions(
 	entries []RestoreCompetitionPlan,
 	decisions map[string]RestoreDecision,
 	plan *RestorePlan,
 ) (map[string]string, error) {
 	copyNames := map[string]string{}
-	asked := map[string]bool{}
+	answerable := map[string]bool{}
 	for i := range entries {
 		e := &entries[i]
-		if !e.Asked {
+		if len(e.Choices) == 0 {
 			continue
 		}
-		asked[e.ID] = true
+		answerable[e.ID] = true
 		d, ok := decisions[e.ID]
 		if !ok {
-			plan.Missing = append(plan.Missing, e.ID)
+			if e.Asked {
+				plan.Missing = append(plan.Missing, e.ID)
+			}
 			continue
 		}
 		if !slices.Contains(e.Choices, d.Action) {
@@ -110,7 +124,7 @@ func applyRestoreDecisions(
 	}
 	var unknown []string
 	for id := range decisions {
-		if !asked[id] {
+		if !answerable[id] {
 			unknown = append(unknown, id)
 		}
 	}

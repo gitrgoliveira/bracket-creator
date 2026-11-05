@@ -333,7 +333,7 @@ The earlier `lunch_block`, `opening_block` and `closing_block` keys are no longe
 
 ### Upgrading legacy ceremony blocks
 
-Releases v2.2.0 and v2.3.0 stored ceremonies and lunch as duration strings without clock times (`lunch_block`, `opening_block` and `closing_block`). A one-time startup upgrade migrates these legacy keys into `pauses`:
+Releases up to and including v2.3.0 stored ceremonies and lunch as duration strings without clock times (`lunch_block`, `opening_block` and `closing_block`). A one-time startup upgrade migrates these legacy keys into `pauses`:
 
 * `lunch_block`: Converted to a "Lunch" pause starting at 12:00 on every day (Day 0) when the tournament has no existing pauses.
 * `opening_block`: Converted into one "Opening ceremony" pause per tournament day that has a competition, starting at that day's earliest competition start time (an empty start time defaults to 09:00). On a single-day tournament the pause uses Day 0; on a multi-day tournament it uses the specific day index. If no competition has a day within the tournament, a single start-less "Opening ceremony" row is created so the organiser can provide a time.

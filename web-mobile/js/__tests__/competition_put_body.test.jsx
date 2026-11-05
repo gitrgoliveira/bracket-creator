@@ -1,9 +1,17 @@
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { resolve, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   settingsPutBody,
   describeSettingsEdits,
   expectedParticipantsHint,
+  mergeSavedCompetition,
+  MAX_EXPECTED_PARTICIPANTS,
 } from '../competition_put_body.jsx';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 describe('settingsPutBody', () => {
   const base = {
@@ -231,5 +239,111 @@ describe('expectedParticipantsHint', () => {
       .toBe('The draw has been made, so estimates use the 1 participant in it.');
     expect(expectedParticipantsHint(40, { status: 'draw-ready', isTeam: true, rosterCount: 1 }))
       .toBe('The draw has been made, so estimates use the 1 team in it.');
+  });
+});
+
+describe('mergeSavedCompetition', () => {
+  const base = {
+    id: 'c1',
+    name: "Men's Individual",
+    date: '14-03-2026',
+    startTime: '09:00',
+    format: 'mixed',
+    kind: 'individual',
+    poolSize: 4,
+    poolWinners: 2,
+    poolSizeMode: 'min',
+    courts: ['A', 'B'],
+    roundRobin: false,
+    withZekkenName: true,
+    teamSize: 0,
+    numberPrefix: 'M',
+    poolFormat: '',
+    poolMatchDurationSeconds: 180,
+    knockoutMatchDurationSeconds: 240,
+    swissRounds: 0,
+    naginata: false,
+    engi: false,
+    checkInEnabled: false,
+    leagueTiebreakTopN: 0,
+    twoThirdPlaces: true,
+    teamMatchType: '',
+    extraQualifiers: '',
+    status: 'setup',
+    players: [{ id: 'p1', name: 'Aki Sato', dojo: 'Kodokan' }],
+    rosterVersion: 'r1',
+    configVersion: 'old',
+    expectedParticipants: 40,
+  };
+
+  it('a save that cleared the expected count does not resend the old count', () => {
+    const held = {
+      ...base,
+      expectedParticipants: 40,
+    };
+    const sent = { expectedParticipants: 0 };
+    const answerWithoutKey = {
+      id: 'c1',
+      name: "Men's Individual",
+      configVersion: 'v2',
+    };
+    const merged = mergeSavedCompetition(held, answerWithoutKey, sent);
+    expect(merged.expectedParticipants).toBe(0);
+
+    const nextBody = settingsPutBody(merged, {}, 'v3');
+    expect(nextBody.body.expectedParticipants).toBe(0);
+  });
+
+  it('an answer without a configVersion clears the held version', () => {
+    const held = {
+      ...base,
+      configVersion: 'v-old',
+    };
+    const answerWithoutVersion = {
+      id: 'c1',
+      name: "Men's Individual",
+    };
+    const merged = mergeSavedCompetition(held, answerWithoutVersion);
+    expect(merged.configVersion).toBe('');
+  });
+
+  it('clearing with empty string, null, or NaN sets expectedParticipants to 0', () => {
+    const held = { ...base, expectedParticipants: 40 };
+    const answerWithoutKey = { id: 'c1', name: "Men's Individual" };
+
+    for (const val of ['', null, NaN]) {
+      const merged = mergeSavedCompetition(held, answerWithoutKey, { expectedParticipants: val });
+      expect(merged.expectedParticipants).toBe(0);
+    }
+  });
+
+  it('keeps held expectedParticipants when sent did not clear it or sent is omitted', () => {
+    const held = { ...base, expectedParticipants: 40 };
+    const answerWithoutKey = { id: 'c1', name: "Men's Individual" };
+
+    const mergedNoSent = mergeSavedCompetition(held, answerWithoutKey);
+    expect(mergedNoSent.expectedParticipants).toBe(40);
+
+    const mergedSentOther = mergeSavedCompetition(held, answerWithoutKey, { name: "New Name" });
+    expect(mergedSentOther.expectedParticipants).toBe(40);
+
+    const mergedSentValue = mergeSavedCompetition(held, answerWithoutKey, { expectedParticipants: 50 });
+    expect(mergedSentValue.expectedParticipants).toBe(40);
+  });
+});
+
+describe('MAX_EXPECTED_PARTICIPANTS constant and source gates', () => {
+  it('is a positive integer', () => {
+    expect(Number.isInteger(MAX_EXPECTED_PARTICIPANTS)).toBe(true);
+    expect(MAX_EXPECTED_PARTICIPANTS).toBeGreaterThan(0);
+    expect(MAX_EXPECTED_PARTICIPANTS).toBe(1024);
+  });
+
+  it('admin_setup.jsx and admin_competition_settings.jsx contain no bare 1024 literal for expected participants cap', () => {
+    const setupSrc = readFileSync(resolve(__dirname, '../admin_setup.jsx'), 'utf8');
+    const settingsSrc = readFileSync(resolve(__dirname, '../admin_competition_settings.jsx'), 'utf8');
+
+    expect(setupSrc).not.toMatch(/\b1024\b/);
+    expect(settingsSrc).not.toMatch(/\b1024\b/);
   });
 });

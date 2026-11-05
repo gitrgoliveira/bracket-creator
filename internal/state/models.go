@@ -262,7 +262,6 @@ func ValidateTournamentMode(mode string) error {
 //   - RulesURLLegacy is migrated to WebsiteURL and cleared
 //   - When len(Pauses) == 0 and LunchBlockLegacy parses with time.ParseDuration
 //     to > 0, appends a Pause{Name: "Lunch", Start: "12:00", Length: LunchBlockLegacy, Day: 0}
-//   - LunchBlockLegacy is always cleared
 func migrateLegacyTournament(t *Tournament) {
 	if t == nil {
 		return
@@ -284,7 +283,6 @@ func migrateLegacyTournament(t *Tournament) {
 			})
 		}
 	}
-	t.LunchBlockLegacy = ""
 }
 
 // ApplyTournamentDefaults fills zero-valued schedule-estimator tuning

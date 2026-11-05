@@ -290,6 +290,37 @@ func TestCalendar_NoParticipantsAndNoExpectedCountAtMinimum(t *testing.T) {
 	assert.Equal(t, 9*60+MinClashFootprintMinutes, place.Windows["A"].End)
 }
 
+func TestPlaceCompetition_PastSetupEmptyRosterWithExpectedIsNoParticipantsMinimum(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	tourn := &state.Tournament{
+		Name:         "Tourn",
+		Date:         "01-07-2026",
+		DurationDays: 1,
+		Courts:       []string{"A"},
+	}
+	require.NoError(t, store.SaveTournament(tourn))
+
+	comp := &state.Competition{
+		ID:                   "past-setup-empty",
+		Date:                 "01-07-2026",
+		StartTime:            "09:00",
+		Courts:               []string{"A"},
+		ExpectedParticipants: 16,
+		Status:               state.CompStatusDrawReady,
+	}
+	require.NoError(t, store.SaveCompetition(comp))
+
+	place := eng.PlaceCompetition(comp, tourn)
+	require.True(t, place.Placed)
+	assert.Equal(t, "minimum", place.LengthSource)
+	assert.Equal(t, "no_participants", place.LengthReason)
+	assert.Equal(t, 1, place.Day)
+	assert.Equal(t, []string{"A"}, place.Courts)
+	assert.Equal(t, 9*60, place.Windows["A"].Start)
+	assert.Equal(t, 9*60+MinClashFootprintMinutes, place.Windows["A"].End)
+	assert.Equal(t, MinClashFootprintMinutes, place.Minutes)
+}
+
 func TestCalendar_ExpectedParticipantsCountWithNoRoster(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	tourn := &state.Tournament{
@@ -632,6 +663,69 @@ func TestCalendar_DrawnCompWithUnreadableWindowsNotPlaced(t *testing.T) {
 	assert.False(t, place.Placed)
 	assert.Equal(t, "draw_unreadable", place.NotPlacedReason)
 	assert.Contains(t, logBuf.String(), "unreadable-comp")
+}
+
+func TestTournamentCalendar_EmptySlicesAreNeverNil(t *testing.T) {
+	t.Run("store with tournament and no competitions", func(t *testing.T) {
+		eng, store, _ := setupTestEngine(t)
+		require.NoError(t, store.SaveTournament(&state.Tournament{
+			Name:         "Tourn",
+			Date:         "01-07-2026",
+			DurationDays: 1,
+			Courts:       []string{"A"},
+		}))
+
+		cal, err := eng.TournamentCalendar()
+		require.NoError(t, err)
+
+		assert.NotNil(t, cal.Days)
+		for _, d := range cal.Days {
+			assert.NotNil(t, d.Breaks)
+		}
+		assert.NotNil(t, cal.Courts)
+		assert.NotNil(t, cal.UnusedPauses)
+		assert.NotNil(t, cal.Competitions)
+		for _, c := range cal.Competitions {
+			assert.NotNil(t, c.ClashPartners)
+		}
+	})
+
+	t.Run("store with one competition that clashes with nothing", func(t *testing.T) {
+		eng, store, _ := setupTestEngine(t)
+		require.NoError(t, store.SaveTournament(&state.Tournament{
+			Name:         "Tourn",
+			Date:         "01-07-2026",
+			DurationDays: 1,
+			Courts:       []string{"A"},
+		}))
+
+		require.NoError(t, store.SaveCompetition(&state.Competition{
+			ID:                   "c1",
+			Name:                 "Solo Comp",
+			Date:                 "01-07-2026",
+			StartTime:            "09:00",
+			Courts:               []string{"A"},
+			Format:               state.CompFormatKnockout,
+			ExpectedParticipants: 8,
+			Status:               state.CompStatusSetup,
+		}))
+
+		cal, err := eng.TournamentCalendar()
+		require.NoError(t, err)
+
+		assert.NotNil(t, cal.Days)
+		for _, d := range cal.Days {
+			assert.NotNil(t, d.Breaks)
+		}
+		assert.NotNil(t, cal.Courts)
+		assert.NotNil(t, cal.UnusedPauses)
+		assert.NotNil(t, cal.Competitions)
+		require.Len(t, cal.Competitions, 1)
+		for _, c := range cal.Competitions {
+			assert.NotNil(t, c.ClashPartners)
+			assert.Empty(t, c.ClashPartners)
+		}
+	})
 }
 
 func BenchmarkTournamentCalendar(b *testing.B) {

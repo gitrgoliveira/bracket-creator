@@ -20,7 +20,7 @@ func (s *Store) upgradeLegacyCeremonies() error {
 	if err != nil {
 		return err
 	}
-	if t == nil || (t.OpeningBlockLegacy == "" && t.ClosingBlockLegacy == "") {
+	if t == nil || (t.OpeningBlockLegacy == "" && t.ClosingBlockLegacy == "" && t.LunchBlockLegacy == "") {
 		return nil
 	}
 
@@ -122,6 +122,7 @@ func (s *Store) upgradeLegacyCeremonies() error {
 
 		desired.OpeningBlockLegacy = ""
 		desired.ClosingBlockLegacy = ""
+		desired.LunchBlockLegacy = ""
 
 		return nil
 	})

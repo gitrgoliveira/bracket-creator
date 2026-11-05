@@ -616,6 +616,7 @@ func estimateForPlayerCount(t *testing.T, comp *state.Competition, tourn *state.
 		SwissRounds:      comp.SwissRounds,
 		ExtraQualifiers:  comp.ExtraQualifiers,
 		SingleThirdPlace: comp.RequiresSingleThirdPlace(),
+		Draft:            comp == nil || comp.Status == state.CompStatusSetup || comp.Status == "",
 	})
 	require.NoError(t, err)
 	return EstimateForCounts(poolCount, knockoutCount, comp, tourn)
@@ -1047,4 +1048,76 @@ func TestEstimateScheduleForCompetition_SeedsOnlyReadForMixed(t *testing.T) {
 		require.ErrorAs(t, err, &valErr, "must return ValidationError for HTTP 400")
 		assert.ErrorIs(t, err, domain.ErrInvalidSeedAssignments)
 	})
+}
+
+// TestEstimate_SavedSetupFillBracketUnseededGivesANumber tests that a saved
+// mixed competition still in setup with fill-bracket qualifiers and no seeds
+// succeeds with a positive duration, while past setup keeps today's refusal.
+func TestEstimate_SavedSetupFillBracketUnseededGivesANumber(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	const compID = "setup-fill-bracket-unseeded"
+
+	require.NoError(t, store.SaveTournament(&state.Tournament{
+		Name:         "Tourn",
+		Date:         "01-07-2026",
+		DurationDays: 1,
+		Courts:       []string{"A"},
+	}))
+
+	comp := &state.Competition{
+		ID:                           compID,
+		Name:                         "Fill Bracket Setup",
+		Format:                       state.CompFormatMixed,
+		Kind:                         "individual",
+		PoolSize:                     3,
+		PoolSizeMode:                 "min",
+		PoolWinners:                  1,
+		ExtraQualifiers:              state.ExtraQualifiersFillBracket,
+		RoundRobin:                   true,
+		Courts:                       []string{"A"},
+		StartTime:                    "09:00",
+		Date:                         "01-07-2026",
+		PoolMatchDurationSeconds:     180,
+		KnockoutMatchDurationSeconds: 300,
+		Status:                       state.CompStatusSetup,
+	}
+	require.NoError(t, store.SaveCompetition(comp))
+
+	// 17 entrants in pools of at least 3 need seeded pools to supply drafted
+	// 2nd places under fill-bracket.
+	names := make([]string, 17)
+	for i := range names {
+		names[i] = fmt.Sprintf("P%02d", i+1)
+	}
+	saveTestParticipants(t, store, compID, names)
+
+	// 1. In setup: estimate succeeds with positive duration.
+	est, err := eng.EstimateScheduleForCompetition(compID)
+	require.NoError(t, err)
+	assert.Greater(t, est.TotalDurationMinutes, 0)
+	assert.Equal(t, 17, est.Participants)
+
+	tourn, err := store.LoadTournament()
+	require.NoError(t, err)
+
+	placement := eng.PlaceCompetition(comp, tourn)
+	assert.True(t, placement.Placed)
+	assert.Equal(t, "estimate", placement.LengthSource)
+	assert.NotEqual(t, "estimate_failed", placement.LengthReason)
+
+	// 2. Past setup (e.g. DrawReady): keeps today's behaviour and refuses unseeded draw.
+	comp.Status = state.CompStatusDrawReady
+	require.NoError(t, store.SaveCompetition(comp))
+
+	_, err = eng.EstimateScheduleForCompetition(compID)
+	require.Error(t, err)
+	var valErr *ValidationError
+	require.ErrorAs(t, err, &valErr)
+	var countErr *helper.EstimateCountError
+	require.ErrorAs(t, err, &countErr)
+	assert.Contains(t, err.Error(), "seed more pools")
+
+	placementPast := eng.PlaceCompetition(comp, tourn)
+	assert.Equal(t, "minimum", placementPast.LengthSource)
+	assert.Equal(t, "estimate_failed", placementPast.LengthReason)
 }

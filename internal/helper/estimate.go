@@ -69,10 +69,10 @@ type EstimateMatchCountsInput struct {
 	// state.Competition.RequiresSingleThirdPlace().
 	SingleThirdPlace bool
 
-	// Draft marks the estimate for a competition that does not exist yet
-	// (the Add competition form). Such a competition has no seeds, so a
-	// fill-bracket draft is estimated as if it were seeded enough for the
-	// draw to run, rather than refused with "seed more pools".
+	// Draft marks the estimate for an unsaved competition or a competition whose
+	// roster is still being built (in setup). Such a competition may have unseeded
+	// entrants, so a fill-bracket draw is estimated as if it were seeded enough for
+	// the draw to run, rather than refused with "seed more pools".
 	Draft bool
 }
 
@@ -180,15 +180,29 @@ func estimateMixed(in EstimateMatchCountsInput) (poolMatchCount, knockoutMatchCo
 	var numFinalists int
 
 	if in.ExtraQualifiers == QualifierModeFillBracket {
-		if in.Draft && len(in.SeedRanks) == 0 {
-			// A draft has no roster to seed yet, so estimate the draw the
-			// organiser gets once it is seeded: seeding the first
-			// ceil(n/(size+1)) entrants supplies every drafted 2nd place
-			// FillBracketPoolCount can ask for, and seeds move no one
-			// between pool sizes, so the counts are the seeded draw's.
+		if in.Draft {
+			// A draft or competition still in setup may not have a complete
+			// seeded roster yet, so estimate the draw the organiser gets once
+			// it is seeded: seeding the first ceil(n/(size+1)) entrants supplies
+			// every drafted 2nd place FillBracketPoolCount can ask for, and seeds
+			// move no one between pool sizes, so the counts are the seeded draw's.
 			minPools := (in.PlayerCount + in.PoolSize) / (in.PoolSize + 1)
+			used := make(map[int]bool, len(in.SeedRanks)+minPools)
+			for _, r := range in.SeedRanks {
+				if r > 0 {
+					used[r] = true
+				}
+			}
+			nextRank := 1
 			for i := 0; i < minPools && i < len(synth); i++ {
-				synth[i].Seed = i + 1
+				if synth[i].Seed != 0 {
+					continue
+				}
+				for used[nextRank] {
+					nextRank++
+				}
+				synth[i].Seed = nextRank
+				used[nextRank] = true
 			}
 		}
 		pools, _, perr := BuildPoolPhaseFillBracket(synth, in.PoolSize, 1)

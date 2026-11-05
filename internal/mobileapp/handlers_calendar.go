@@ -34,8 +34,9 @@ type calendarPreviewResponse struct {
 	Status        state.CompetitionStatus `json:"status"`
 	// Previewed is true when the placement was computed from the requested
 	// day/startTime/courts (competition status is setup), and false when the
-	// competition is already drawn so the windows returned are the stored ones
-	// (re-time dry run is separate work).
+	// competition is already drawn so the placement (day, windows) and
+	// overlaps reflect where the competition sits now rather than the
+	// requested values (re-time dry run is separate work).
 	Previewed bool                        `json:"previewed"`
 	Placement engine.CompetitionPlacement `json:"placement"`
 	Overlaps  []CalendarOverlap           `json:"overlaps"`
@@ -48,29 +49,6 @@ func RegisterCalendarHandlers(r gin.IRoutes, store CalendarStore, eng CalendarPl
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to build the calendar"})
 			return
-		}
-
-		if res.Days == nil {
-			res.Days = []engine.CalendarDay{}
-		}
-		for i := range res.Days {
-			if res.Days[i].Breaks == nil {
-				res.Days[i].Breaks = []engine.CalendarBreak{}
-			}
-		}
-		if res.Courts == nil {
-			res.Courts = []string{}
-		}
-		if res.UnusedPauses == nil {
-			res.UnusedPauses = []engine.UnusedPause{}
-		}
-		if res.Competitions == nil {
-			res.Competitions = []engine.CalendarCompetition{}
-		}
-		for i := range res.Competitions {
-			if res.Competitions[i].ClashPartners == nil {
-				res.Competitions[i].ClashPartners = []string{}
-			}
 		}
 
 		c.JSON(http.StatusOK, res)
@@ -175,12 +153,16 @@ func RegisterCalendarHandlers(r gin.IRoutes, store CalendarStore, eng CalendarPl
 			}
 		}
 
-		clone := *comp
-		clone.Date = matchedDay
-		clone.StartTime = rawStartTime
-		clone.Courts = append([]string(nil), chosenCourts...)
+		targetToPlace := comp
+		if comp.Status == state.CompStatusSetup {
+			clone := *comp
+			clone.Date = matchedDay
+			clone.StartTime = rawStartTime
+			clone.Courts = append([]string(nil), chosenCourts...)
+			targetToPlace = &clone
+		}
 
-		placement := eng.PlaceCompetition(&clone, tourn)
+		placement := eng.PlaceCompetition(targetToPlace, tourn)
 
 		cal, err := eng.TournamentCalendar()
 		if err != nil {

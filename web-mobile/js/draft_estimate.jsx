@@ -98,6 +98,10 @@ export function useDraftEstimate(shape, password) {
         clearTimeout(timerRef.current);
         timerRef.current = null;
       }
+      if (controllerRef.current) {
+        controllerRef.current.abort();
+        controllerRef.current = null;
+      }
     };
   }, [shapeKey, password]);
 

@@ -520,6 +520,13 @@ const (
 	MaxLenPauseLength = 16
 )
 
+func pauseLabel(name string, index int) string {
+	if strings.TrimSpace(name) != "" {
+		return fmt.Sprintf("Pause %q", strings.TrimSpace(name))
+	}
+	return fmt.Sprintf("Pause %d", index+1)
+}
+
 // validateTournamentPauses enforces the caps and day range on tournament pauses.
 // An incomplete row (e.g. no start) is accepted; the schedule ignores it.
 func validateTournamentPauses(pauses []state.Pause) *ValidationError {
@@ -528,7 +535,7 @@ func validateTournamentPauses(pauses []state.Pause) *ValidationError {
 			Message: fmt.Sprintf("A tournament can have at most %d pauses.", MaxPauses),
 		}
 	}
-	for _, p := range pauses {
+	for i, p := range pauses {
 		if utf8.RuneCountInString(p.Name) > MaxLenPauseName {
 			return &ValidationError{
 				Message: fmt.Sprintf("A pause name can be at most %d characters.", MaxLenPauseName),
@@ -547,6 +554,22 @@ func validateTournamentPauses(pauses []state.Pause) *ValidationError {
 		if p.Day < 0 || p.Day > MaxTournamentDurationDays {
 			return &ValidationError{
 				Message: fmt.Sprintf("A pause day must be from 0 (every day) to %d.", MaxTournamentDurationDays),
+			}
+		}
+		label := pauseLabel(p.Name, i)
+		if p.Start != "" {
+			if _, err := engine.ParseClockTime(p.Start); err != nil {
+				return &ValidationError{
+					Message: fmt.Sprintf("%s: start time %s is not a time of day. Use HH:MM, for example 12:00.", label, p.Start),
+				}
+			}
+		}
+		if p.Length != "" {
+			mins := engine.ParseDurationMinutes(p.Length)
+			if mins <= 0 || mins > 24*60 {
+				return &ValidationError{
+					Message: fmt.Sprintf("%s: length must be between 1 minute and 24 hours, for example 45m or 1h30m.", label),
+				}
 			}
 		}
 	}

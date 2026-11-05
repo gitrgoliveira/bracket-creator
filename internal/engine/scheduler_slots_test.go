@@ -480,7 +480,7 @@ func TestParseDurationMinutes_Valid(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.in, func(t *testing.T) {
-			assert.Equal(t, tc.want, parseDurationMinutes(tc.in))
+			assert.Equal(t, tc.want, ParseDurationMinutes(tc.in))
 		})
 	}
 }
@@ -488,9 +488,9 @@ func TestParseDurationMinutes_Valid(t *testing.T) {
 // TestParseDurationMinutes_FallbackToZero verifies that empty or
 // unparseable inputs return 0 (treated as "no pause configured").
 func TestParseDurationMinutes_FallbackToZero(t *testing.T) {
-	assert.Equal(t, 0, parseDurationMinutes(""))
-	assert.Equal(t, 0, parseDurationMinutes("not-a-duration"))
-	assert.Equal(t, 0, parseDurationMinutes("-1h"))
+	assert.Equal(t, 0, ParseDurationMinutes(""))
+	assert.Equal(t, 0, ParseDurationMinutes("not-a-duration"))
+	assert.Equal(t, 0, ParseDurationMinutes("-1h"))
 }
 
 // TestParseClockHHMM_Valid verifies exact HH:MM parsing.
@@ -702,7 +702,7 @@ func TestParseDurationMinutes_SharedCases(t *testing.T) {
 
 	for _, tc := range fixture.Cases {
 		t.Run(fmt.Sprintf("%q", tc.Input), func(t *testing.T) {
-			assert.Equal(t, tc.Minutes, parseDurationMinutes(tc.Input))
+			assert.Equal(t, tc.Minutes, ParseDurationMinutes(tc.Input))
 		})
 	}
 }

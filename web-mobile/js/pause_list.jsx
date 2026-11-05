@@ -155,7 +155,7 @@ export function computePauseRowStatus(pause, index, allPauses, durationDays = 1)
 
     const mergedStartClock = formatClock(mergedStart);
     const mergedEndClock = formatClock(mergedEnd);
-    const pastMidnight = mergedEnd >= 1440 ? ' (after midnight)' : '';
+    const pastMidnight = mergedEnd > 1440 ? ' (after midnight)' : '';
 
     const firstConflictDay = overlaps[0].conflictDay;
     const dayClause = (daysCount > 1 && firstConflictDay > 0) ? ` on Day ${firstConflictDay}` : '';
@@ -170,7 +170,7 @@ export function computePauseRowStatus(pause, index, allPauses, durationDays = 1)
   // Usable standalone row
   const startClock = formatClock(startMin);
   const endClock = formatClock(endMin);
-  const pastMidnight = endMin >= 1440 ? ' (after midnight)' : '';
+  const pastMidnight = endMin > 1440 ? ' (after midnight)' : '';
 
   return {
     type: 'usable',

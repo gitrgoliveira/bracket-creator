@@ -530,6 +530,22 @@ describe('Overview estimate helpers (p2-overview)', () => {
     expect(formatPausesRow(twoDay, { date: '06-06-2026' })).toBe('Lunch 12:30 to 13:30');
   });
 
+  it('lists the pauses in start order', () => {
+    const c = { date: '05-06-2026' };
+    const t = {
+      date: '05-06-2026',
+      durationDays: 1,
+      pauses: [
+        { name: 'Closing ceremony', start: '17:00', length: '30m', day: 0 },
+        { name: 'Lunch', start: '12:30', length: '1h', day: 0 },
+        { name: 'Opening ceremony', start: '09:30', length: '30m', day: 0 },
+      ],
+    };
+    expect(formatPausesRow(t, c)).toBe(
+      'Opening ceremony 09:30 to 10:00, Lunch 12:30 to 13:30, Closing ceremony 17:00 to 17:30',
+    );
+  });
+
   it('formatPausesRow lists only day-0 pauses when competition date is not a tournament day', () => {
     const t = {
       date: '05-06-2026',

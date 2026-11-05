@@ -250,3 +250,34 @@ func TestDetectClashes_DisjointCourtsReportsEarliestSpanOnly(t *testing.T) {
 	assert.Equal(t, "09:15", clashes[0].OverlapStart)
 	assert.Less(t, clashes[0].OverlapEnd, "14:00", "the span must not reach the afternoon clash on court A")
 }
+
+func TestDetectClashes_OutsideTournamentDaysStillClash(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	require.NoError(t, store.SaveTournament(&state.Tournament{
+		Name:         "Tourn",
+		Date:         "01-07-2026",
+		DurationDays: 2,
+		Courts:       []string{"A"},
+	}))
+
+	// Outside tournament days (05-07-2026), same shiaijo A, overlapping start times (09:00 and 09:15).
+	emptyComp(t, store, "a", "Alpha", "05-07-2026", "09:00", []string{"A"})
+	emptyComp(t, store, "b", "Bravo", "05-07-2026", "09:15", []string{"A"})
+
+	clashes, err := eng.DetectClashesForCompetition("a")
+	require.NoError(t, err)
+	require.Len(t, clashes, 1, "overlapping competitions outside tournament days must report a clash")
+	assert.Equal(t, "b", clashes[0].OtherCompID)
+	assert.Equal(t, "Bravo", clashes[0].OtherCompName)
+	assert.Equal(t, []string{"A"}, clashes[0].SharedCourts)
+	assert.Equal(t, "09:15", clashes[0].OverlapStart)
+	assert.Equal(t, "09:30", clashes[0].OverlapEnd)
+
+	// Non-overlapping start times (11:00 and 11:30 with 30-min footprint).
+	emptyComp(t, store, "c", "Charlie", "05-07-2026", "11:00", []string{"A"})
+	emptyComp(t, store, "d", "Delta", "05-07-2026", "11:30", []string{"A"})
+
+	clashesNonOverlapping, err := eng.DetectClashesForCompetition("c")
+	require.NoError(t, err)
+	assert.Empty(t, clashesNonOverlapping, "non-overlapping competitions outside tournament days report no clash")
+}

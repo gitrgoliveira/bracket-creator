@@ -62,6 +62,7 @@ import {
   LABEL_EXPECTED_PARTICIPANTS,
   LABEL_EXPECTED_TEAMS,
   expectedParticipantsHint,
+  MAX_EXPECTED_PARTICIPANTS,
 } from './competition_put_body.jsx';
 
 const { useState, useEffect, useRef, useMemo } = React;
@@ -198,7 +199,13 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
   // when the handler was defined). Same shape as admin.jsx's tRef/onUpdateRef
   // pattern from round-11.
   const cRef = useRef(c);
-  useEffect(() => { cRef.current = c; }, [c]);
+  const configVersionRef = useRef(null);
+  useEffect(() => {
+    cRef.current = c;
+    if (!c?.configVersion) {
+      configVersionRef.current = "";
+    }
+  }, [c]);
   const localRef = useRef(local);
   useEffect(() => { localRef.current = local; }, [local]);
 
@@ -216,7 +223,6 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
   // effect AND overwritten by saveNow: net effect: saving one field silently
   // reverts simultaneous edits to other fields. Caught by Copilot round-15.
   const editedFieldsRef = useRef(new Set());
-  const configVersionRef = useRef(null);
   const [conflict, setConflict] = useState(null);
 
   const markEdited = (k) => {
@@ -319,6 +325,8 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
       if (!mountedRef.current) return;
       if (answer && answer.configVersion) {
         configVersionRef.current = answer.configVersion;
+      } else {
+        configVersionRef.current = "";
       }
       // Drop only the persisted fields whose staged value is unchanged, so the
       // sync effect can absorb the server-confirmed values on the next SSE
@@ -700,8 +708,8 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
 
   const isTeam = local.kind === "team" || (Number(local.teamSize) || 0) > 0;
   const expectedParticipantsLabel = isTeam ? LABEL_EXPECTED_TEAMS : LABEL_EXPECTED_PARTICIPANTS;
-  const expectedParticipantsErr = (Number.isFinite(local.expectedParticipants) && (!Number.isInteger(local.expectedParticipants) || local.expectedParticipants < 0 || local.expectedParticipants > 1024))
-    ? `${expectedParticipantsLabel} must be a whole number from 0 to 1024.`
+  const expectedParticipantsErr = (Number.isFinite(local.expectedParticipants) && (!Number.isInteger(local.expectedParticipants) || local.expectedParticipants < 0 || local.expectedParticipants > MAX_EXPECTED_PARTICIPANTS))
+    ? `${expectedParticipantsLabel} must be a whole number from 0 to ${MAX_EXPECTED_PARTICIPANTS}.`
     : null;
   const blockingExpectedParticipantsErr = !!expectedParticipantsErr;
 
@@ -1264,7 +1272,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
       <NumberField
         label={expectedParticipantsLabel}
         min={0}
-        max={1024}
+        max={MAX_EXPECTED_PARTICIPANTS}
         value={local.expectedParticipants}
         onChange={(raw) => updateNumber("expectedParticipants", raw, 0)}
         hint={expectedParticipantsHint({

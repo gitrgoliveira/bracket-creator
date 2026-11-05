@@ -885,7 +885,7 @@ func TestScheduleGolden(t *testing.T) {
 
 			closingMin := 0
 			if gc.LegacyClosing != "" {
-				closingMin = parseDurationMinutes(gc.LegacyClosing)
+				closingMin = ParseDurationMinutes(gc.LegacyClosing)
 			}
 			expectedEstimate.TotalDurationMinutes -= closingMin
 			expectedEstimate.BestCaseMinutes -= closingMin

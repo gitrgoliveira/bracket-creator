@@ -62,16 +62,11 @@ func (e *Engine) DetectClashesForCompetition(compID string) ([]ClashWarning, err
 	}()
 
 	targetPlace := e.PlaceCompetition(target, tourn)
-	if !targetPlace.Placed {
+	targetClash, ok := toClashCandidate(target, targetPlace)
+	if !ok {
 		// Target can't be placed on a timeline → nothing to compare against.
 		return out, nil
 	}
-
-	targetCourts := make([]string, 0, len(targetPlace.Windows))
-	for c := range targetPlace.Windows {
-		targetCourts = append(targetCourts, c)
-	}
-	sort.Strings(targetCourts)
 
 	ids, err := e.store.ListCompetitions()
 	if err != nil {
@@ -87,26 +82,27 @@ func (e *Engine) DetectClashesForCompetition(compID string) ([]ClashWarning, err
 			// check, a single bad file shouldn't hide every other clash.
 			continue
 		}
-		if !state.SameDate(target.Date, other.Date) {
+		if !state.SameDate(targetClash.date, other.Date) {
 			continue
 		}
 		if tournErr != nil && len(other.Courts) == 0 {
 			inheritedFromUnreadable = true
 		}
 		otherPlace := e.PlaceCompetition(other, tourn)
-		if !otherPlace.Placed {
+		otherClash, ok := toClashCandidate(other, otherPlace)
+		if !ok {
 			continue
 		}
 
 		var clashingCourts []string
 		overlapStart := -1
 		overlapEnd := -1
-		for _, c := range targetCourts {
-			wO, okO := otherPlace.Windows[c]
+		for _, c := range targetClash.courts {
+			wO, okO := otherClash.windows[c]
 			if !okO {
 				continue
 			}
-			wT := targetPlace.Windows[c]
+			wT := targetClash.windows[c]
 			if Overlaps(wT, wO) {
 				clashingCourts = append(clashingCourts, c)
 				oS := max(wT.Start, wO.Start)
@@ -131,6 +127,31 @@ func (e *Engine) DetectClashesForCompetition(compID string) ([]ClashWarning, err
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].OtherCompName < out[j].OtherCompName })
 	return out, nil
+}
+
+type clashCandidate struct {
+	date    string
+	courts  []string
+	windows map[string]state.CourtWindow
+}
+
+func toClashCandidate(comp *state.Competition, place CompetitionPlacement) (*clashCandidate, bool) {
+	if !place.Placed && place.NotPlacedReason != "date_outside_tournament" {
+		return nil, false
+	}
+	if len(place.Windows) == 0 {
+		return nil, false
+	}
+	courts := make([]string, 0, len(place.Windows))
+	for c := range place.Windows {
+		courts = append(courts, c)
+	}
+	sort.Strings(courts)
+	return &clashCandidate{
+		date:    comp.Date,
+		courts:  courts,
+		windows: place.Windows,
+	}, true
 }
 
 // fmtHHMM renders minutes-since-midnight as "HH:MM". It does NOT wrap at 24h:

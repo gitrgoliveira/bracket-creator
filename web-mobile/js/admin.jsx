@@ -18,6 +18,7 @@ import { normalizeCompetitionDetail } from './api_serializers.jsx';
 import { confirmMatchLabel, confirmRunningCourtMove } from './court_move.jsx';
 import { holdsUnsaved, discardUnsaved } from './unsaved_entries.jsx';
 import { scoreRowMatchLabel } from './pool_ids.jsx';
+import { mergeSavedCompetition } from './competition_put_body.jsx';
 
 const { useState, useEffect, useRef } = React;
 
@@ -311,12 +312,12 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
     // those updates with stale state. Same reasoning applies to
     // onUpdateRef.current vs the closure-captured onUpdate.
     onUpdateRef.current(mergeCompetitionsIntoTournament(tRef.current,
-      comps => comps.map(c => c.id === cid ? { ...c, ...updatedComp } : c)));
+      comps => comps.map(c => c.id === cid ? mergeSavedCompetition(c, updatedComp, next) : c)));
     // The competition page shows what was stored at once, from the PUT's own
     // answer (stage 6 review 10, m10): the refetch below can fail, and the
     // page then showed the old value (a seed box its old seed) until a push.
     if (updated && mountedRef.current) {
-      setAdminCompData((prev) => storedCompetitionInDetail(prev, cid, updatedComp));
+      setAdminCompData((prev) => storedCompetitionInDetail(prev, cid, updatedComp, next));
     }
     // Best-effort detail refresh. Isolated from the rethrow above.
     // a transient failure fetching details after a successful save
@@ -1023,9 +1024,9 @@ function normalizeCreatedRecord(created) {
 // normalized as a fetched detail is, so the page shows what was stored even
 // when the refetch after the save fails (stage 6 review 10, m10). A detail of
 // another competition, or none, is left as it is.
-function storedCompetitionInDetail(prev, cid, stored) {
+function storedCompetitionInDetail(prev, cid, stored, sent) {
   if (!prev || !prev.config || prev.config.id !== cid || !stored) return prev;
-  const { config } = normalizeCompetitionDetail({ config: { ...prev.config, ...stored } });
+  const { config } = normalizeCompetitionDetail({ config: mergeSavedCompetition(prev.config, stored, sent) });
   // A competitor's number is composed when the competition is read, never
   // stored, so the PUT's answer carries none: the number shown stays, by id,
   // composed again under the prefix the save stored (stage 6 review 11,
@@ -1160,9 +1161,10 @@ window.AdminApp = AdminApp;
 window.mergeCompetitionsIntoTournament = mergeCompetitionsIntoTournament;
 window.mergeTournamentPatch = mergeTournamentPatch;
 window.normalizeCreatedRecord = normalizeCreatedRecord;
+window.mergeSavedCompetition = mergeSavedCompetition;
 
 // StartAllModal is exported for the render suite only: it is a module-internal
 // component with no window binding, and its confirm phase now carries the
 // "will NOT be started" list, which is the surface that stops "Start all"
 // offering a competition the server would refuse.
-export { mergeCompetitionsIntoTournament, mergeTournamentPatch, normalizeCreatedRecord, refreshFailureToast, StartAllModal, attemptScoreWrite, storedCompetitionInDetail };
+export { mergeCompetitionsIntoTournament, mergeTournamentPatch, normalizeCreatedRecord, refreshFailureToast, StartAllModal, attemptScoreWrite, storedCompetitionInDetail, mergeSavedCompetition };

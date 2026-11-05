@@ -95,13 +95,13 @@ func perMatchElapsedMinutesBouts(comp *state.Competition, tournament *state.Tour
 	return per
 }
 
-// parseDurationMinutes converts a Go-style duration string ("30m",
+// ParseDurationMinutes converts a Go-style duration string ("30m",
 // "1h", "1h30m") to whole minutes. Empty string returns 0 (no pause
 // configured). Unparseable strings return 0, we treat invalid
 // tournament configs as "no pause" rather than failing the whole
 // match-generation pipeline; the operator notices the missing skip
 // in the rendered schedule. T151.
-func parseDurationMinutes(s string) int {
+func ParseDurationMinutes(s string) int {
 	if s == "" {
 		return 0
 	}
@@ -115,6 +115,14 @@ func parseDurationMinutes(s string) int {
 	// Round to nearest minute. ParseDuration accepts sub-minute
 	// units but we operate at minute resolution on the wire.
 	return int(math.Round(d.Minutes()))
+}
+
+// ParseClockTime parses a strict 24-hour "HH:MM" (or "H:MM") clock time into time.Time.
+func ParseClockTime(s string) (time.Time, error) {
+	if len(s) == 4 && s[1] == ':' {
+		s = "0" + s
+	}
+	return time.Parse(scheduleClockLayout, s)
 }
 
 // parseClockHHMM parses the "HH:MM" wire format used by
@@ -146,7 +154,7 @@ type breakWindow struct {
 // every pause with Day 0, plus those whose Day equals the day index of date
 // (1-based position of date in tournament.Days(); an empty date is Day 1; a date
 // not in Days() gets only the Day 0 pauses). Drop incomplete rows: a Start that
-// is not a strict "HH:MM" (or "H:MM") clock, a Length that parseDurationMinutes
+// is not a strict "HH:MM" (or "H:MM") clock, a Length that ParseDurationMinutes
 // turns into 0. Pauses with a Day greater than the tournament's day count never
 // match, so they are ignored. The times are on the same reference date
 // parseClockHHMM uses so they compare with the cursors. nil tournament gives nil.
@@ -179,15 +187,11 @@ func dayBreaks(tournament *state.Tournament, date string) []breakWindow {
 		if p.Day != 0 && p.Day != dayIdx {
 			continue
 		}
-		startStr := p.Start
-		if len(startStr) == 4 && startStr[1] == ':' {
-			startStr = "0" + startStr
-		}
-		start, err := time.Parse(scheduleClockLayout, startStr)
+		start, err := ParseClockTime(p.Start)
 		if err != nil {
 			continue
 		}
-		lengthMin := parseDurationMinutes(p.Length)
+		lengthMin := ParseDurationMinutes(p.Length)
 		if lengthMin <= 0 {
 			continue
 		}

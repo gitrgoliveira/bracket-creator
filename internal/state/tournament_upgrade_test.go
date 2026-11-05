@@ -87,6 +87,58 @@ closing_block: 30m
 	assert.Equal(t, statBefore.ModTime(), statAfter.ModTime())
 }
 
+func TestTournamentUpgrade_LunchOnlyIsRewrittenOnce(t *testing.T) {
+	dir := t.TempDir()
+	tournPath := filepath.Join(dir, "tournament.md")
+	tournContent := `---
+name: Lunch Only Tournament
+date: 01-08-2026
+lunch_block: 45m
+---
+`
+	require.NoError(t, os.WriteFile(tournPath, []byte(tournContent), 0o600))
+
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+
+	tourn, err := store.LoadTournament()
+	require.NoError(t, err)
+	require.NotNil(t, tourn)
+
+	expectedPauses := []Pause{
+		{
+			Name:   "Lunch",
+			Start:  "12:00",
+			Length: "45m",
+			Day:    0,
+		},
+	}
+	assert.Equal(t, expectedPauses, tourn.Pauses)
+	assert.Empty(t, tourn.LunchBlockLegacy)
+
+	raw, err := os.ReadFile(tournPath)
+	require.NoError(t, err)
+	text := string(raw)
+	assert.NotContains(t, text, "lunch_block")
+	assert.Contains(t, text, "name: Lunch")
+
+	// Calling upgradeLegacyCeremonies again writes nothing (file bytes and mtime unchanged)
+	statBefore, err := os.Stat(tournPath)
+	require.NoError(t, err)
+	bytesBefore, err := os.ReadFile(tournPath)
+	require.NoError(t, err)
+
+	require.NoError(t, store.upgradeLegacyCeremonies())
+
+	statAfter, err := os.Stat(tournPath)
+	require.NoError(t, err)
+	bytesAfter, err := os.ReadFile(tournPath)
+	require.NoError(t, err)
+
+	assert.Equal(t, bytesBefore, bytesAfter)
+	assert.Equal(t, statBefore.ModTime(), statAfter.ModTime())
+}
+
 func TestTournamentUpgrade_OneDayTournamentGetsDayZero(t *testing.T) {
 	dir := t.TempDir()
 	tournPath := filepath.Join(dir, "tournament.md")

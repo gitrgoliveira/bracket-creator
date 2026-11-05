@@ -1193,6 +1193,158 @@ func TestPauseNameCapCountsCharacters(t *testing.T) {
 	assert.Contains(t, wOver.Body.String(), "A pause name can be at most 60 characters.")
 }
 
+func TestValidateTournamentPauses_StartAndLength(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	require.NoError(t, store.SaveTournament(&state.Tournament{
+		Name:     "Seed",
+		Password: "secret",
+		Courts:   []string{"A"},
+	}))
+
+	// Invalid start "25:99" is 400
+	t.Run("InvalidStart", func(t *testing.T) {
+		tourn := state.Tournament{
+			Name:     "OK",
+			Password: "secret",
+			Courts:   []string{"A"},
+			Pauses: []state.Pause{
+				{Name: "Lunch", Start: "25:99", Length: "45m"},
+			},
+		}
+		body, _ := json.Marshal(tourn)
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		var errResp map[string]string
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &errResp))
+		assert.Equal(t, `Pause "Lunch": start time 25:99 is not a time of day. Use HH:MM, for example 12:00.`, errResp["error"])
+	})
+
+	// Unbounded length "9999h" (> 24h) is 400
+	t.Run("LengthTooLong", func(t *testing.T) {
+		tourn := state.Tournament{
+			Name:     "OK",
+			Password: "secret",
+			Courts:   []string{"A"},
+			Pauses: []state.Pause{
+				{Name: "Lunch", Start: "12:00", Length: "9999h"},
+			},
+		}
+		body, _ := json.Marshal(tourn)
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		var errResp map[string]string
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &errResp))
+		assert.Equal(t, `Pause "Lunch": length must be between 1 minute and 24 hours, for example 45m or 1h30m.`, errResp["error"])
+	})
+
+	// Unparseable length "abc" is 400
+	t.Run("UnparseableLength", func(t *testing.T) {
+		tourn := state.Tournament{
+			Name:     "OK",
+			Password: "secret",
+			Courts:   []string{"A"},
+			Pauses: []state.Pause{
+				{Name: "Lunch", Start: "12:00", Length: "abc"},
+			},
+		}
+		body, _ := json.Marshal(tourn)
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		var errResp map[string]string
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &errResp))
+		assert.Equal(t, `Pause "Lunch": length must be between 1 minute and 24 hours, for example 45m or 1h30m.`, errResp["error"])
+	})
+
+	// Non-positive length "0m" is 400
+	t.Run("ZeroLength", func(t *testing.T) {
+		tourn := state.Tournament{
+			Name:     "OK",
+			Password: "secret",
+			Courts:   []string{"A"},
+			Pauses: []state.Pause{
+				{Name: "Lunch", Start: "12:00", Length: "0m"},
+			},
+		}
+		body, _ := json.Marshal(tourn)
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		var errResp map[string]string
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &errResp))
+		assert.Equal(t, `Pause "Lunch": length must be between 1 minute and 24 hours, for example 45m or 1h30m.`, errResp["error"])
+	})
+
+	// Empty start with good length is accepted (incomplete row)
+	t.Run("EmptyStartGoodLength", func(t *testing.T) {
+		tourn := state.Tournament{
+			Name:     "OK",
+			Password: "secret",
+			Courts:   []string{"A"},
+			Pauses: []state.Pause{
+				{Name: "Closing ceremony", Start: "", Length: "30m"},
+			},
+		}
+		body, _ := json.Marshal(tourn)
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
+
+	// Good "12:00"/"45m" pause is accepted
+	t.Run("GoodPause", func(t *testing.T) {
+		tourn := state.Tournament{
+			Name:     "OK",
+			Password: "secret",
+			Courts:   []string{"A"},
+			Pauses: []state.Pause{
+				{Name: "Lunch", Start: "12:00", Length: "45m"},
+			},
+		}
+		body, _ := json.Marshal(tourn)
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
+
+	// Unnamed pause error naming check
+	t.Run("UnnamedPause", func(t *testing.T) {
+		tourn := state.Tournament{
+			Name:     "OK",
+			Password: "secret",
+			Courts:   []string{"A"},
+			Pauses: []state.Pause{
+				{Name: "", Start: "25:99", Length: "45m"},
+			},
+		}
+		body, _ := json.Marshal(tourn)
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		var errResp map[string]string
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &errResp))
+		assert.Equal(t, `Pause 1: start time 25:99 is not a time of day. Use HH:MM, for example 12:00.`, errResp["error"])
+	})
+}
+
 // TestTournamentHandlers_ConcurrentPUT_PasswordChangeNotLost pins the
 // TOCTOU fix in store.UpdateTournamentChanged. Pre-atomic-primitive,
 // the PUT handler called LoadTournament + SaveTournamentChanged

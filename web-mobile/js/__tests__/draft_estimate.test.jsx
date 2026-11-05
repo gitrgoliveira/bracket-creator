@@ -323,4 +323,31 @@ describe('useDraftEstimate hook behaviour with fake timers', () => {
     runtime.unmount();
     expect(capturedSignals[0].aborted).toBe(true);
   });
+
+  it('does not show old answer when inputs change before request resolves and old request resolves late', async () => {
+    let resolveFirst;
+    const firstPromise = new Promise((resolve) => {
+      resolveFirst = resolve;
+    });
+
+    const mockEstimate = vi.fn()
+      .mockImplementationOnce(() => firstPromise)
+      .mockImplementationOnce(() => new Promise(() => {}));
+
+    window.API = { estimateDraft: mockEstimate };
+
+    runtime.mount(TestHook, { shape: { participants: 10, startTime: '09:00' }, password: 'pw' });
+    vi.advanceTimersByTime(250);
+
+    expect(mockEstimate).toHaveBeenCalledTimes(1);
+
+    // Change inputs before first request resolves
+    runtime.updateProps({ shape: { participants: 20, startTime: '09:00' }, password: 'pw' });
+
+    // Resolve old request late
+    resolveFirst({ totalDurationMinutes: 100 });
+    await Promise.resolve();
+
+    expect(latestResult.estimate).toBeNull();
+  });
 });

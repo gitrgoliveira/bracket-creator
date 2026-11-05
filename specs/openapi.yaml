@@ -7189,11 +7189,11 @@ components:
         start:
           type: string
           maxLength: 16
-          description: Start time as "HH:MM" (e.g. "12:00"). Empty or omitted when not yet scheduled.
+          description: Start time as 24-hour "HH:MM" (e.g. "12:00"). Empty or omitted when not yet scheduled.
         length:
           type: string
           maxLength: 16
-          description: Duration text format (e.g. "1h", "45m", "1h30m").
+          description: Duration text format up to 24 hours (e.g. "1h", "45m", "1h30m").
         day:
           type: integer
           minimum: 0
@@ -9129,8 +9129,9 @@ components:
           description: >
             True when the placement was computed from the requested day, start time,
             and courts (competition status is setup). False when the competition
-            is already drawn so the windows returned are the stored ones; the re-time
-            dry run is separate work.
+            is already drawn so the placement (day, windows) and overlaps reflect
+            where the competition sits now rather than the requested values; the
+            re-time dry run is separate work.
         placement:
           $ref: '#/components/schemas/CompetitionPlacement'
         overlaps:

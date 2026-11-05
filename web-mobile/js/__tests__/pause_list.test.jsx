@@ -72,6 +72,18 @@ describe('computePauseRowStatus', () => {
       expect(status.text).toBe('Matches stop 23:30 to 00:30 (after midnight).');
       expect(status.warn).toBe(false);
     });
+
+    it('does not call a pause ending at 24:00 after midnight', () => {
+      const atMidnight = [{ name: 'Late Break', start: '23:00', length: '1h', day: 1 }];
+      const statusAt = computePauseRowStatus(atMidnight[0], 0, atMidnight, 1);
+      expect(statusAt.text).toBe('Matches stop 23:00 to 00:00.');
+      expect(statusAt.warn).toBe(false);
+
+      const pastMidnight = [{ name: 'Late Break', start: '23:01', length: '1h', day: 1 }];
+      const statusPast = computePauseRowStatus(pastMidnight[0], 0, pastMidnight, 1);
+      expect(statusPast.text).toBe('Matches stop 23:01 to 00:01 (after midnight).');
+      expect(statusPast.warn).toBe(false);
+    });
   });
 
   describe('incomplete pause rows', () => {

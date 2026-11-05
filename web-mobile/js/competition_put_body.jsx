@@ -41,6 +41,8 @@ import {
 
 export const LABEL_EXPECTED_PARTICIPANTS = "Expected participants";
 export const LABEL_EXPECTED_TEAMS = "Expected teams";
+// Mirrors engine.MaxEstimateParticipants; pinned by internal/engine/expected_cap_test.go.
+export const MAX_EXPECTED_PARTICIPANTS = 1024;
 
 export function expectedParticipantsHint(expectedOrOpts, maybeOpts) {
   const opts = (typeof expectedOrOpts === "object" && expectedOrOpts !== null)
@@ -458,4 +460,26 @@ export function settingsPutBody(base, edits, configVersion) {
   };
 
   return { body: finalNext };
+}
+
+// mergeSavedCompetition: merges a competition PUT's answer (from the server)
+// into the client's held competition copy. Handles omitempty fields where the
+// server's answer omits keys (e.g. expectedParticipants: 0, or missing configVersion
+// when reload fails). Knowledge of which fields are omitempty lives here next to
+// the body builder.
+export function mergeSavedCompetition(held, answer, sent) {
+  const merged = { ...held, ...answer };
+  if (!("expectedParticipants" in (answer || {}))) {
+    const sentCleared = sent != null && (
+      Number(sent.expectedParticipants) === 0 ||
+      Number.isNaN(sent.expectedParticipants)
+    );
+    if (sentCleared) {
+      merged.expectedParticipants = 0;
+    }
+  }
+  if (!answer || !answer.configVersion) {
+    merged.configVersion = "";
+  }
+  return merged;
 }

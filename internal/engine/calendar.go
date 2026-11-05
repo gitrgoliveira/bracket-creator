@@ -140,6 +140,7 @@ func (e *Engine) PlaceCompetition(comp *state.Competition, tournament *state.Tou
 		days = tournament.Days()
 	}
 	dayIdx := 0
+	notPlacedReason := ""
 	if len(days) > 0 {
 		for i, d := range days {
 			if d == trimmedDate {
@@ -148,13 +149,21 @@ func (e *Engine) PlaceCompetition(comp *state.Competition, tournament *state.Tou
 			}
 		}
 		if dayIdx == 0 {
-			return CompetitionPlacement{Placed: false, NotPlacedReason: "date_outside_tournament"}
+			notPlacedReason = "date_outside_tournament"
 		}
 	} else {
 		// When tournament.Days() is empty (the tournament has no date yet),
 		// the competition is still placed with Day 0 so the clash check keeps
 		// today's results for a tournament with no date.
 		dayIdx = 0
+	}
+
+	outsideDays := func(p CompetitionPlacement) CompetitionPlacement {
+		if notPlacedReason != "" {
+			p.Placed = false
+			p.NotPlacedReason = notPlacedReason
+		}
+		return p
 	}
 
 	courts := append([]string(nil), InheritedDrawCourts(comp.Courts, tournament)...)
@@ -188,7 +197,7 @@ func (e *Engine) PlaceCompetition(comp *state.Competition, tournament *state.Tou
 					pastMid = true
 				}
 			}
-			return CompetitionPlacement{
+			return outsideDays(CompetitionPlacement{
 				Placed:        true,
 				Day:           dayIdx,
 				Courts:        courts,
@@ -196,7 +205,7 @@ func (e *Engine) PlaceCompetition(comp *state.Competition, tournament *state.Tou
 				LengthSource:  "draw",
 				ReplayRecipes: recipes,
 				PastMidnight:  pastMid,
-			}
+			})
 		}
 	}
 
@@ -206,17 +215,17 @@ func (e *Engine) PlaceCompetition(comp *state.Competition, tournament *state.Tou
 	n := estimateCourtCount(comp, tournament)
 
 	playerCount, source, seedRanks, countErr := e.estimateParticipantCount(comp, tournament)
-	if countErr != nil || (playerCount == 0 && comp.ExpectedParticipants == 0) {
+	if countErr != nil || playerCount == 0 {
 		reason := "no_participants"
 		if countErr != nil {
 			reason = "estimate_failed"
 		}
-		return minimumPlacement(dayIdx, courts, startMins, reason, normTourn.SlowestCourtBufferPct)
+		return outsideDays(minimumPlacement(dayIdx, courts, startMins, reason, normTourn.SlowestCourtBufferPct))
 	}
 
 	est, poolCount, knockoutCount, estErr := estimateForPlayers(comp, tournament, playerCount, seedRanks, false)
 	if estErr != nil {
-		return minimumPlacement(dayIdx, courts, startMins, "estimate_failed", normTourn.SlowestCourtBufferPct)
+		return outsideDays(minimumPlacement(dayIdx, courts, startMins, "estimate_failed", normTourn.SlowestCourtBufferPct))
 	}
 
 	footprint := est.TotalDurationMinutes
@@ -279,7 +288,7 @@ func (e *Engine) PlaceCompetition(comp *state.Competition, tournament *state.Tou
 		}
 	}
 
-	return CompetitionPlacement{
+	return outsideDays(CompetitionPlacement{
 		Placed:        true,
 		Day:           dayIdx,
 		Courts:        courts,
@@ -290,7 +299,7 @@ func (e *Engine) PlaceCompetition(comp *state.Competition, tournament *state.Tou
 		ReplayRecipes: recipes,
 		PastMidnight:  pastMidnight(endMins),
 		Minutes:       footprint,
-	}
+	})
 }
 
 // calendarDays builds the CalendarDay slice and UnusedPause slice for tournament t.
@@ -341,9 +350,19 @@ func calendarDays(t *state.Tournament) ([]CalendarDay, []UnusedPause) {
 	}
 
 	for i := range days {
+		if days[i].Breaks == nil {
+			days[i].Breaks = []CalendarBreak{}
+		}
 		sort.SliceStable(days[i].Breaks, func(a, b int) bool {
 			return days[i].Breaks[a].StartMins < days[i].Breaks[b].StartMins
 		})
+	}
+
+	if days == nil {
+		days = []CalendarDay{}
+	}
+	if unused == nil {
+		unused = []UnusedPause{}
 	}
 
 	return days, unused
@@ -364,7 +383,7 @@ func unusedPauseReason(p state.Pause, t *state.Tournament) string {
 	if p.Day < 0 || p.Day > durDays {
 		return "day_not_in_tournament"
 	}
-	if parseDurationMinutes(p.Length) <= 0 {
+	if ParseDurationMinutes(p.Length) <= 0 {
 		return "no_length"
 	}
 	return "unreadable_start_time"
@@ -413,6 +432,9 @@ func (e *Engine) TournamentCalendar() (*TournamentCalendarResult, error) {
 		}
 	}
 	for _, p := range placements {
+		if !p.Placed {
+			continue
+		}
 		for _, c := range p.Courts {
 			c = strings.TrimSpace(c)
 			if c != "" {
@@ -431,6 +453,9 @@ func (e *Engine) TournamentCalendar() (*TournamentCalendarResult, error) {
 		lanes = append(lanes, c)
 	}
 	sortCourtLabels(lanes)
+	if lanes == nil {
+		lanes = []string{}
+	}
 
 	clashMap := make(map[string][]string, len(comps))
 	for i := 0; i < len(comps); i++ {
@@ -476,6 +501,10 @@ func (e *Engine) TournamentCalendar() (*TournamentCalendarResult, error) {
 			Placement:     placements[i],
 			ClashPartners: partners,
 		}
+	}
+
+	if calComps == nil {
+		calComps = []CalendarCompetition{}
 	}
 
 	return &TournamentCalendarResult{

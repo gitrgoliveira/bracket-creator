@@ -163,6 +163,7 @@ import { DurationInput } from './duration.jsx';
 import { useUnsavedInput } from './app_version.jsx';
 import { useLatestRef } from './latest_ref.jsx';
 import { PauseList } from './pause_list.jsx';
+import { MAX_EXPECTED_PARTICIPANTS } from './competition_put_body.jsx';
 import { useDraftEstimate, DraftEstimatePanel } from './draft_estimate.jsx';
 
 function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerMode, authConfig, password, showToast }) {
@@ -1082,8 +1083,8 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
     }
 
     if (Number.isFinite(expectedParticipants)) {
-      if (!Number.isInteger(expectedParticipants) || expectedParticipants < 0 || expectedParticipants > 1024) {
-        setError(`${isTeam ? "Expected teams" : "Expected participants"} must be a whole number from 0 to 1024.`);
+      if (!Number.isInteger(expectedParticipants) || expectedParticipants < 0 || expectedParticipants > MAX_EXPECTED_PARTICIPANTS) {
+        setError(`${isTeam ? "Expected teams" : "Expected participants"} must be a whole number from 0 to ${MAX_EXPECTED_PARTICIPANTS}.`);
         return;
       }
     }
@@ -1561,7 +1562,7 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
           <NumberField
             label={isTeam ? "Expected teams" : "Expected participants"}
             min={0}
-            max={1024}
+            max={MAX_EXPECTED_PARTICIPANTS}
             value={expectedParticipants}
             onChange={(raw) => {
               setError("");

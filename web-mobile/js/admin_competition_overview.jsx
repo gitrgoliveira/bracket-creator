@@ -5,7 +5,7 @@
 // shell via window.*.
 
 import { EstimateHeadline, formatEstimateMinutes, finishClock, timeToMinutes } from './admin_schedule_utils.jsx';
-import { blockMinutes, parseClock, formatClock } from './pause_list.jsx';
+import { blockMinutes, parseClock, formatClock, computePauseRowStatus } from './pause_list.jsx';
 // seededRanks: the one owner of "which seed ranks has this roster actually
 // got" (integer > 0 normalization), shared with the seeding blocker and the
 // settings preview so this stat, the checklist and the preview cannot
@@ -295,7 +295,8 @@ export function latestCourtFinish(courtEnds, startTime) {
 
 export function formatPausesRow(tournament, c) {
   const pauses = Array.isArray(tournament?.pauses) ? tournament.pauses : [];
-  const days = deriveTournamentDays(tournament?.date, Number(tournament?.durationDays) || 1);
+  const durationDays = Number(tournament?.durationDays) || 1;
+  const days = deriveTournamentDays(tournament?.date, durationDays);
   // The server's dayBreaks rule: no date is day 1, and a date that is not one
   // of the tournament's days (0 here) gets only the every-day pauses.
   const compDay = c?.date ? days.indexOf(c.date) + 1 : 1;
@@ -305,19 +306,26 @@ export function formatPausesRow(tournament, c) {
   const usable = [];
   const unused = [];
 
-  for (const p of relevant) {
+  for (let i = 0; i < relevant.length; i++) {
+    const p = relevant[i];
     const name = (p.name || "").trim() || "Pause";
-    const startMin = parseClock(p.start);
-    const durMin = blockMinutes(p.length);
-    if (startMin !== null && durMin > 0) {
+    const status = computePauseRowStatus(p, i, relevant, durationDays);
+    if (!status.warn) {
+      const startMin = parseClock(p.start);
+      const durMin = blockMinutes(p.length);
       const endClock = formatClock(startMin + durMin);
-      usable.push(`${name} ${p.start} to ${endClock}`);
+      usable.push({
+        text: `${name} ${p.start} to ${endClock}`,
+        startMin,
+      });
     } else {
-      unused.push(`${name}: not used, ${startMin === null ? "no start time" : "no length"}`);
+      unused.push(`${name}: not used, ${status.type === 'missing_start' ? "no start time" : "no length"}`);
     }
   }
 
-  const dayText = usable.length > 0 ? usable.join(", ") : "No pauses that day";
+  usable.sort((a, b) => a.startMin - b.startMin);
+
+  const dayText = usable.length > 0 ? usable.map(u => u.text).join(", ") : "No pauses that day";
   const allParts = [dayText, ...unused];
   return allParts.join(" · ");
 }

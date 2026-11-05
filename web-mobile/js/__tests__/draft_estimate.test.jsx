@@ -206,8 +206,10 @@ describe('useDraftEstimate hook behaviour with fake timers', () => {
   let prevReact;
   let latestResult;
 
+  const record = (result) => { latestResult = result; };
+
   function TestHook({ shape, password }) {
-    latestResult = useDraftEstimate(shape, password);
+    record(useDraftEstimate(shape, password));
     return null;
   }
 

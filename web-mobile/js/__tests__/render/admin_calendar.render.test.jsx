@@ -12,8 +12,8 @@ const STUBBED_GLOBALS = {
   AdminTopbar: Stub('admin-topbar'),
   Breadcrumbs: ({ items }) => (
     <nav data-testid="breadcrumbs">
-      {(items || []).map((it, i) => (
-        <span key={i} onClick={it.onClick}>{it.label}</span>
+      {(items || []).map((it) => (
+        <span key={it.label} onClick={it.onClick}>{it.label}</span>
       ))}
     </nav>
   ),

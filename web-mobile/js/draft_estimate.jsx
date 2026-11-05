@@ -35,16 +35,20 @@ export function useDraftEstimate(shape, password) {
   const timerRef = React.useRef(null);
   const controllerRef = React.useRef(null);
   const shapeRef = React.useRef(shape);
-  shapeRef.current = shape;
   const passwordRef = React.useRef(password);
-  passwordRef.current = password;
+  // Declared before the request effect so the refs hold this render's values
+  // when it runs, and when its debounced request reads them later.
+  React.useEffect(() => {
+    shapeRef.current = shape;
+    passwordRef.current = password;
+  });
 
   // Track serialization of shape to detect changes.
   const shapeKey = JSON.stringify(shape);
 
   React.useEffect(() => {
     // If shape lacks participants or start time, report idle state.
-    if (isShapeIdle(shape)) {
+    if (isShapeIdle(shapeRef.current)) {
       if (timerRef.current) {
         clearTimeout(timerRef.current);
         timerRef.current = null;
@@ -237,7 +241,7 @@ export function DraftEstimatePanel({
     timingElement = (
       <div className="draft-estimate__timing" data-testid="draft-estimate-timing">
         <span>
-          Uses this tournament's timing: each match counts as {multiplier} times its clock time, plus {allowancePct}% for the slowest shiaijo. {pausesText}
+          Uses this tournament&apos;s timing: each match counts as {multiplier} times its clock time, plus {allowancePct}% for the slowest shiaijo. {pausesText}
         </span>
         {onEditTournament && (
           <button
@@ -271,14 +275,14 @@ export function DraftEstimatePanel({
 
   // 7. Warnings
   const warnings = Array.isArray(estimate.warnings) ? estimate.warnings : [];
-  const warningItems = warnings.map((w, idx) => {
+  const warningItems = warnings.map((w) => {
     if (w.code === "too_many_shiaijo") {
       const count = w.participants;
       const pLabel = isTeam ? (count === 1 ? "team" : "teams") : (count === 1 ? "participant" : "participants");
       const usable = w.usable;
       const mLabel = usable === 1 ? "match" : "matches";
       return (
-        <div key={idx} className="draft-estimate__warning alert alert--warn" role="alert" data-testid="draft-estimate-warning">
+        <div key={w.code} className="draft-estimate__warning alert alert--warn" role="alert" data-testid="draft-estimate-warning">
           <span>
             With {count} {pLabel} only {usable} {mLabel} can run at a time, so {idleShiaijoText(usable, w.chosen)} would stand empty. Use {usable} shiaijo.
           </span>

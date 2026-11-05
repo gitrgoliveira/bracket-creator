@@ -445,6 +445,9 @@ export function calendarLayout({ calendar, width = 1024, page = 0, phone = false
   };
 }
 
+// Stands in for a shell component (AdminTopbar, Breadcrumbs) not yet on window.
+const RenderNothing = () => null;
+
 /**
  * AdminCalendarPage component.
  */
@@ -842,8 +845,8 @@ export function AdminCalendarPage({
     trayRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
-  const AdminTopbar = window.AdminTopbar || (({ onLogout, onViewerMode, tournament }) => null);
-  const Breadcrumbs = window.Breadcrumbs || (({ items }) => null);
+  const AdminTopbar = window.AdminTopbar || RenderNothing;
+  const Breadcrumbs = window.Breadcrumbs || RenderNothing;
 
   // Loading state
   if (loading && !calendar) {
@@ -955,8 +958,8 @@ export function AdminCalendarPage({
             )}
             {unusedPauses.length > 0 && (
               <div className="cal-unused-pauses">
-                {unusedPauses.map((p, idx) => (
-                  <div key={idx} className="cal-unused-pause">
+                {unusedPauses.map((p) => (
+                  <div key={`${p.name}|${p.reason}`} className="cal-unused-pause">
                     {p.name} is not used: {formatUnusedPauseReason(p.reason)}{' '}
                     <button type="button" className="cal-link" onClick={onEditTournament}>
                       Edit tournament
@@ -1125,14 +1128,14 @@ export function AdminCalendarPage({
                     ))}
 
                     {/* Day pause bands across all lanes (under blocks) */}
-                    {(day.breaks || []).map((b, bi) => {
+                    {(day.breaks || []).map((b) => {
                       const bStart = b.startMins ?? b.StartMins;
                       const bEnd = b.endMins ?? b.EndMins;
                       const bTop = (bStart - layout.hourRange.startHour * 60) * PX_PER_MINUTE;
                       const bHeight = (bEnd - bStart) * PX_PER_MINUTE;
                       return (
                         <div
-                          key={bi}
+                          key={`${bStart}-${bEnd}`}
                           className="cal-pause-band"
                           style={{
                             top: `${bTop}px`,
@@ -1207,7 +1210,7 @@ export function AdminCalendarPage({
                             onKeyDown={(e) => handleBlockKeyDown(e, comp)}
                           >
                             {/* In-block pause strips */}
-                            {pausesInBlock.map((p, pi) => {
+                            {pausesInBlock.map((p) => {
                               const pStart = p.startMins ?? p.StartMins;
                               const pEnd = p.endMins ?? p.EndMins;
                               const stripStart = Math.max(pStart, block.effectiveStart);
@@ -1219,7 +1222,7 @@ export function AdminCalendarPage({
 
                               return (
                                 <div
-                                  key={pi}
+                                  key={`${pStart}-${pEnd}`}
                                   className="cal-block-pause-strip"
                                   style={{
                                     top: `${stripTop}px`,

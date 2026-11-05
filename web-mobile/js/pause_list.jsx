@@ -197,12 +197,15 @@ export function PauseList({
   drawnCompetitions = NO_DRAWN,
   changed = false,
 }) {
-  const keysRef = React.useRef([]);
-  while (keysRef.current.length < pauses.length) {
-    keysRef.current.push(allocPauseKey());
-  }
-  if (keysRef.current.length > pauses.length) {
-    keysRef.current.length = pauses.length;
+  // One stable key per row, so editing a row never remounts its inputs. Add and
+  // Remove keep the keys in step; a list replaced from outside (a reload) is
+  // brought to the same length here, during render, as React allows for state
+  // derived from props.
+  const [rowKeys, setRowKeys] = React.useState(() => pauses.map(allocPauseKey));
+  if (rowKeys.length !== pauses.length) {
+    const nextKeys = rowKeys.slice(0, pauses.length);
+    while (nextKeys.length < pauses.length) nextKeys.push(allocPauseKey());
+    setRowKeys(nextKeys);
   }
 
   const daysCount = Number.isInteger(durationDays) && durationDays > 0 ? durationDays : 1;
@@ -218,14 +221,14 @@ export function PauseList({
   };
 
   const handleRemove = (index) => {
-    keysRef.current.splice(index, 1);
+    setRowKeys(keys => keys.filter((_, i) => i !== index));
     const next = pauses.filter((_, i) => i !== index);
     onChange?.(next);
   };
 
   const handleAdd = () => {
     if (isMaxReached) return;
-    keysRef.current.push(allocPauseKey());
+    setRowKeys(keys => [...keys, allocPauseKey()]);
     const newPause = {
       name: '',
       start: '',
@@ -252,7 +255,7 @@ export function PauseList({
           {pauses.map((pause, idx) => {
             const status = computePauseRowStatus(pause, idx, pauses, daysCount);
             const pauseDay = pause.day ?? 0;
-            const rowKey = keysRef.current[idx];
+            const rowKey = rowKeys[idx];
 
             return (
               <div key={rowKey} className="pause-row-card">

@@ -47,7 +47,7 @@ export const MAX_EXPECTED_PARTICIPANTS = 1024;
 export function expectedParticipantsHint(expectedOrOpts, maybeOpts) {
   const opts = (typeof expectedOrOpts === "object" && expectedOrOpts !== null)
     ? expectedOrOpts
-    : { expectedParticipants: expectedOrOpts, ...(maybeOpts || {}) };
+    : { expectedParticipants: expectedOrOpts, ...maybeOpts };
 
   const expectedRaw = opts.expectedParticipants;
   const status = opts.status || "setup";

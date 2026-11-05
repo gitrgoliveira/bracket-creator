@@ -288,6 +288,9 @@ export const recipes = [
       await clickPill(page, 'Format', 'Pools + Knockout');
       await fillFieldByLabel(page, 'Expected participants', '24');
       await page.getByText('Est. duration', { exact: false }).first().waitFor({ state: 'visible', timeout: 15000 });
+      // The panel sits below the long form: bring it, with the Expected
+      // participants field above it, into the captured viewport.
+      await page.locator('.draft-estimate').first().evaluate((el) => el.scrollIntoView({ block: 'center' }));
     },
   },
 
@@ -311,7 +314,8 @@ export const recipes = [
     name: 'mobile-pause-editor',
     family: 'estimate',
     viewport: { width: 1280, height: 1000 },
-    capture: 'fullPage',
+    dpr: 2,
+    capture: { selector: '.card:has(.pause-list)' },
     waitFor: 'text=Add a pause',
     auth: 'admin',
     route: '/admin/edit-tournament',

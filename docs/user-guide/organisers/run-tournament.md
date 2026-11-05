@@ -318,6 +318,8 @@ The competition **Overview** has an **Est. duration** tile, for example *about 4
 
 The tile also says which number of participants the estimate used, for example *For 40 expected participants (12 registered)*. While the competition is in setup, the estimate uses the [expected number](#expected-participants-and-the-estimate-on-a-new-competition) until more people have registered than that. When the competition uses check-in, the tile counts people who have checked in and says *checked in* instead of *registered*. Once the draw is made, the finish comes from the match times the draw gave, and the tile reads *For the 18 participants in the draw*.
 
+![The Overview of a competition in setup: the Est. duration tile reads about 1h 50m, finishes about 11:20, for 24 expected participants (0 registered), and the strip below lists the time for each shiai-jo and the opening ceremony and lunch pauses.](../../screenshots/mobile-overview-estimate.png)
+
 For a kachinuki (winner stays on) competition the number of bouts is not fixed, so the estimate is a range rather than a single figure. The tile is headed **Average est. duration** and a line under it reads, for example, *Best 2h 09m to worst 4h 28m*. Best is a clean sweep where one fighter wins every bout, worst is the longest run where each bout retires one fighter, and the average sits between them. Use the worst figure for planning the day and the average for a realistic finish time.
 
 ![The competition Overview for a kachinuki competition: the Average est. duration tile with the best to worst range and the finish time under it, and the strip of per-shiai-jo times and pauses below.](../../screenshots/kachinuki-estimate-range.png)
@@ -331,6 +333,8 @@ The **Schedule blocks** card on the tournament setup page lists the times when n
 - **Length**, how long the pause lasts.
 - **On**, which day it applies to, or **Every day**. This choice appears only for a tournament that lasts more than one day.
 
+![The Schedule blocks card of a one-day tournament with two pauses, Opening ceremony at 09:00 for 30m and Lunch at 12:30 for 1h, each with the times its matches stop, and the + Add a pause button.](../../screenshots/mobile-pause-editor.png)
+
 Every estimate and every new schedule works around the pauses. A match whose start time falls inside a pause moves to the end of that pause. A match that starts just before a pause is not shortened or moved, so it may run into the pause. Pauses that overlap count as one longer pause, and the row says so. A pause that ends after midnight is marked as such, and a pause that does not change any schedule (for example one that starts after the last match) is marked as not used. A competition that is already drawn keeps its match times when you add or change a pause, and the card names the competitions affected. To re-time one of them, use **Auto-schedule competition**, or [move the competition](#moving-a-competition-on-the-calendar), which re-times its matches too.
 
 A tournament saved by an earlier version is converted the first time the server starts. Its lunch break becomes a **Lunch** pause at 12:00 on every day. Its opening ceremony becomes an **Opening ceremony** pause on each day that has a competition, starting at the earliest start time of that day's competitions (09:00 for a competition with no start time). Its closing ceremony becomes a **Closing ceremony** pause with no start time, which the schedule ignores until you give it one under **Schedule blocks**. Competitions that are already drawn keep their match times. An estimate counts a closing ceremony only once that pause has a time, and only the first competition of a day waits for the opening ceremony.
@@ -341,9 +345,13 @@ The **Add competition** form has an **Expected participants** field (**Expected 
 
 While you fill in the form, a live estimate below the fields shows about how long the competition will take and when it finishes, using the format, the number of shiai-jo, the match durations and the tournament's pauses. It updates as you change the fields. If the finish falls after midnight, the estimate says so and suggests an earlier start or more shiai-jo. Once the draw is made, the finish comes from the draw itself and no longer from the estimate.
 
+![The bottom of the Add competition form: Expected participants set to 24, and the live estimate below it reading Finishes about 14:10, about 2h 50m, 24 pool matches and 15 knockout matches, the time for each shiai-jo, and the pauses that day.](../../screenshots/mobile-create-estimate.png)
+
 ### Competition calendar
 
 Open **Competition calendar** from the dashboard to see every competition on its day and shiai-jo, from its start time to its expected finish. A competition that is already drawn takes its times from the draw; one that is not drawn yet uses the estimate. When two competitions on the same shiai-jo overlap, both are marked, and an overlap on a day that is not on screen is listed above the calendar with a button to show that day. Click a competition to open it.
+
+![The competition calendar of a two-day tournament with shiai-jo A and B: the opening ceremony and lunch drawn as bands across each day, a drawn competition with its times from the draw, and two dotted estimate blocks that say how many entries they expect.](../../screenshots/mobile-calendar.png)
 
 A few notices can appear above the calendar:
 
@@ -356,9 +364,13 @@ A few notices can appear above the calendar:
 
 Drag a competition's block to another day or start time. On a touch screen, press and hold the block first, then drag. You can also use the block's **Move** button, or press **M** while the block is focused. The Move dialog lets you pick the day, the start time and the shiai-jo. Starts snap to 5 minutes, and a start that falls inside a pause moves to the end of that pause. A move that makes two competitions overlap on a shiai-jo is a warning, never a block. A competition that is running or completed cannot be moved, and its block says so. Pause times are drawn as bands across each day, and the time span in a block reads, for example, *09:30 to about 13:38* for an estimate or *14:15 to 16:02* for a draw. A block built from an expected number says so (*Estimate for 24 expected*).
 
+![The Move dialog for Women's Individual: the day, a start time of 11:00, shiai-jo A and B chosen, and the line Runs 11:00 to about 12:17, with Cancel and Move.](../../screenshots/mobile-calendar-move.png)
+
 A competition that is already drawn moves by day and start time only, and keeps its shiai-jo. Its matches move with it: each match gets the time the draw would give it at the new day and start, in the same order, and nothing else about the pools, the bracket or the competitor numbers changes. Before you confirm, the message shows each shiai-jo's old and new times. If some matches no longer have the times a fresh draw would give them (a time you set by hand, a pause you added or changed, or another competition you moved), the message says so and those matches get new times too. If no match would change its time, the move is saved without asking. The competition and its matches are saved together, or not at all. Changing the **Date** or **Start time** in the competition's **Settings** does the same, with the same message before you save.
 
 After a move, a line saying **Moved just now** with an **Undo** button stays above the calendar until you move something else or leave the page. Undo puts the settings back and, for a drawn competition, every match back to its exact earlier time. If anything changed in the meantime, such as a match time you edited, Undo says "Changed since the move; Undo not applied." and changes nothing.
+
+![The calendar after the move: the line Moved just now: Women's Individual to Sat 16 May (day 1) at 11:00 with its Undo button, and the block in its new place before lunch.](../../screenshots/mobile-calendar-moved.png)
 
 If someone else changed the competition after the calendar loaded (another screen, another device or its **Settings** page), the move is refused with "This competition changed, reload it" and nothing is moved. The **Settings** page does the same: if the competition changed somewhere else after you opened it, **Save** is refused, the message lists what you had changed, and you click **Reload** to see the current settings and make your change again.
 

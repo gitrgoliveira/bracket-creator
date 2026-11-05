@@ -1642,6 +1642,115 @@ describe('API Utils', () => {
       });
     });
 
+    describe('fetchCalendar', () => {
+      it('calls /api/schedule/calendar with the password header and abort signal, returning parsed body', async () => {
+        const payload = { days: [], unplaced: [] };
+        global.fetch = vi.fn().mockResolvedValue({
+          ok: true,
+          json: async () => payload,
+        });
+        const controller = new AbortController();
+        const result = await API.fetchCalendar('secret-pw', controller.signal);
+        expect(result).toEqual(payload);
+        expect(global.fetch).toHaveBeenCalledWith(
+          '/api/schedule/calendar',
+          {
+            headers: { 'X-Tournament-Password': 'secret-pw' },
+            signal: controller.signal,
+          }
+        );
+      });
+
+      it('rejects with the server error sentence on a non-2xx response', async () => {
+        global.fetch = vi.fn().mockResolvedValue({
+          ok: false,
+          json: async () => ({ error: 'Calendar unavailable' }),
+        });
+        await expect(API.fetchCalendar('pw'))
+          .rejects.toThrow('Calendar unavailable');
+      });
+
+      it('rejects with fallback sentence on non-2xx with unparseable JSON', async () => {
+        global.fetch = vi.fn().mockResolvedValue({
+          ok: false,
+          json: async () => { throw new Error('parse error'); },
+        });
+        await expect(API.fetchCalendar('pw'))
+          .rejects.toThrow('Failed to load the calendar');
+      });
+    });
+
+    describe('previewMove', () => {
+      it('calls /api/schedule/calendar/preview with query params and password header', async () => {
+        const payload = { ok: true };
+        global.fetch = vi.fn().mockResolvedValue({
+          ok: true,
+          json: async () => payload,
+        });
+        const controller = new AbortController();
+        const result = await API.previewMove({
+          competitionId: 'c1',
+          date: '2026-11-05',
+          startTime: '10:00',
+          courts: ['B', 'C'],
+        }, 'secret-pw', controller.signal);
+
+        expect(result).toEqual(payload);
+        expect(global.fetch).toHaveBeenCalledTimes(1);
+        const [url, opts] = global.fetch.mock.calls[0];
+        const parsed = new URL(url, 'http://x');
+        expect(parsed.pathname).toBe('/api/schedule/calendar/preview');
+        expect(parsed.searchParams.get('competitionId')).toBe('c1');
+        expect(parsed.searchParams.get('date')).toBe('2026-11-05');
+        expect(parsed.searchParams.get('startTime')).toBe('10:00');
+        expect(parsed.searchParams.get('courts') === 'B,C').toBe(true);
+        expect(opts.headers['X-Tournament-Password']).toBe('secret-pw');
+        expect(opts.signal).toBe(controller.signal);
+      });
+
+      it('omits empty, null, or undefined fields and empty courts array', async () => {
+        global.fetch = vi.fn().mockResolvedValue({
+          ok: true,
+          json: async () => ({ ok: true }),
+        });
+
+        await API.previewMove({
+          competitionId: 'c1',
+          date: '',
+          startTime: null,
+          courts: [],
+        }, 'pw');
+
+        const [url] = global.fetch.mock.calls[0];
+        const parsed = new URL(url, 'http://x');
+        expect(parsed.pathname).toBe('/api/schedule/calendar/preview');
+        expect(parsed.searchParams.get('competitionId')).toBe('c1');
+        expect(parsed.searchParams.has('date')).toBe(false);
+        expect(parsed.searchParams.has('startTime')).toBe(false);
+        expect(parsed.searchParams.has('courts')).toBe(false);
+      });
+
+      it('rejects with the server error sentence on a non-2xx response', async () => {
+        global.fetch = vi.fn().mockResolvedValue({
+          ok: false,
+          json: async () => ({ error: 'Invalid time slot' }),
+        });
+
+        await expect(API.previewMove({ competitionId: 'c1' }, 'pw'))
+          .rejects.toThrow('Invalid time slot');
+      });
+
+      it('rejects with fallback sentence on non-2xx with unparseable JSON', async () => {
+        global.fetch = vi.fn().mockResolvedValue({
+          ok: false,
+          json: async () => { throw new Error('parse error'); },
+        });
+
+        await expect(API.previewMove({ competitionId: 'c1' }, 'pw'))
+          .rejects.toThrow('Failed to preview the move');
+      });
+    });
+
     describe('estimateDraft', () => {
       it('GETs /api/schedule/draft-estimate with shape params as strings and returns the payload', async () => {
         const payload = { totalDurationMinutes: 120, perCourtMinutes: [120], ceremonyMinutes: 0 };
@@ -1914,6 +2023,50 @@ describe('API Utils', () => {
         expect(caught.code).toBe('config_changed');
         expect(caught.configVersion).toBe('v-server-curr');
         expect(caught.competition).toEqual(conflictComp);
+      });
+
+      it.each([
+        ['undo_stale', 'Undo is stale, please refresh.'],
+        ['retime_retry', 'Retime conflict, retry.'],
+        ['retime_unavailable', 'Retime slot unavailable.'],
+      ])('rejects with e.code %s and server message on 409', async (code, errorMsg) => {
+        global.fetch = vi.fn().mockResolvedValue({
+          ok: false,
+          status: 409,
+          json: async () => ({
+            code,
+            error: errorMsg,
+          }),
+        });
+        let caught;
+        try {
+          await API.updateCompetition('c1', { name: 'My Name' }, 'pw');
+        } catch (e) {
+          caught = e;
+        }
+        expect(caught).toBeDefined();
+        expect(caught.message).toBe(errorMsg);
+        expect(caught.code).toBe(code);
+      });
+
+      it('leaves e.code undefined on 409 with an unknown code', async () => {
+        global.fetch = vi.fn().mockResolvedValue({
+          ok: false,
+          status: 409,
+          json: async () => ({
+            code: 'unknown_code',
+            error: 'Some conflict error',
+          }),
+        });
+        let caught;
+        try {
+          await API.updateCompetition('c1', { name: 'My Name' }, 'pw');
+        } catch (e) {
+          caught = e;
+        }
+        expect(caught).toBeDefined();
+        expect(caught.message).toBe('Some conflict error');
+        expect(caught.code).toBeUndefined();
       });
     });
 

@@ -5,7 +5,7 @@
 
 import { teamMatchTypeHint } from './pool_ids.jsx';
 import { DurationInput } from './duration.jsx';
-import { EstimateHeadline } from './admin_schedule_utils.jsx';
+import { EstimateHeadline, finishClock, timeToMinutes } from './admin_schedule_utils.jsx';
 import { formatPerShiaijoRow, formatPausesRow } from './admin_competition_overview.jsx';
 // bc-qual LP-5a: the "Knockout qualifiers" preview arithmetic AND the
 // pool-size/winners form-coupling rules are shared with admin_setup.jsx
@@ -82,6 +82,39 @@ export function formatCompMinutes(m) {
   const min = m % 60;
   if (h === 0) return `${min}m`;
   return `${h}h ${String(min).padStart(2, "0")}m`;
+}
+
+// Contract to reconcile with the server (dry-run retime response):
+// answer.retime = {
+//   anyChange: boolean,
+//   matchCount: number,
+//   notFreshCount: number,
+//   courts: [ { court: "A", oldStart: 855, oldEnd: 962, newStart: 900, newEnd: 1007 } ]
+// }
+// where the four times are minutes from midnight (an end can be 1440 or more for
+// a finish past midnight; formatted with finishClock which wraps at 24h).
+export function readRetimePreview(answer) {
+  if (!answer || !answer.retime) return null;
+  const r = answer.retime;
+  const formatClock = (mins) => {
+    if (typeof mins === "string") return mins;
+    if (Number.isFinite(mins)) return finishClock("00:00", mins).clock;
+    return "";
+  };
+  return {
+    anyChange: !!r.anyChange,
+    matchCount: Number(r.matchCount) || 0,
+    notFreshCount: Number(r.notFreshCount) || 0,
+    courts: Array.isArray(r.courts)
+      ? r.courts.map((c) => ({
+          court: c.court,
+          oldStart: formatClock(c.oldStart),
+          oldEnd: formatClock(c.oldEnd),
+          newStart: formatClock(c.newStart),
+          newEnd: formatClock(c.newEnd),
+        }))
+      : [],
+  };
 }
 
 // Human-readable rendering of a cleared field's CURRENT (about-to-be-lost)
@@ -187,6 +220,53 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
     c.extraQualifiers, c.twoThirdPlaces, c.naginata, c.expectedParticipants, c.status, c.date, c.startTime, password,
     pausesKey,
     tournament?.clockToElapsedMultiplier, tournament?.slowestCourtBufferPct]);
+
+  // Retime dry-run preview (c-setretime): when a draw-ready competition has its
+  // date or start time edited, fetch a preview of match movements before Save.
+  // Debounced by 250ms; aborts in-flight request when field changes or unmounts.
+  const [retimePreview, setRetimePreview] = useState(null);
+  useEffect(() => {
+    const isDrawn = local.status === "draw-ready";
+    const savedDate = c.date || "";
+    const stagedDate = local.date || "";
+    const savedStartTime = c.startTime || "";
+    const stagedStartTime = local.startTime || "";
+    const timeOrDateChanged = stagedDate !== savedDate || stagedStartTime !== savedStartTime;
+
+    if (!isDrawn || !timeOrDateChanged) {
+      setRetimePreview(null);
+      return;
+    }
+
+    if (!stagedDate || !stagedStartTime || timeToMinutes(stagedStartTime) === null) {
+      setRetimePreview(null);
+      return;
+    }
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => {
+      if (controller.signal.aborted) return;
+      window.API.previewMove({
+        competitionId: c.id,
+        date: stagedDate,
+        startTime: stagedStartTime,
+        courts: c.courts || [],
+      }, password, controller.signal).then((answer) => {
+        if (!controller.signal.aborted) {
+          setRetimePreview(readRetimePreview(answer));
+        }
+      }).catch(() => {
+        if (!controller.signal.aborted) {
+          setRetimePreview(null);
+        }
+      });
+    }, 250);
+
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [local.status, local.date, local.startTime, c.date, c.startTime, c.id, c.courts, password]);
   // AdminSettings unmounts when the user navigates to a different section
   // via onSection() (AdminCompetition rerenders with a different child).
   // saveNow's .then/.catch and the delete handler's finally fire on
@@ -365,6 +445,13 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
       // dashboard. A clash-check failure must not strand the operator, so it
       // falls through to the normal saved-and-return path.
       if (!stillDirty) {
+        const savedToastMsg = (() => {
+          if (Array.isArray(answer?.previousTimes)) {
+            const n = answer.previousTimes.length;
+            return `Competition settings saved. ${n === 1 ? "1 match has a new time." : `${n} matches have new times.`}`;
+          }
+          return "Competition settings saved";
+        })();
         window.API.getScheduleClashes(c.id, password)
           .then((clashes) => {
             if (!mountedRef.current) return;
@@ -373,7 +460,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
               showToast(`Saved. ${clashes.length} court clash${clashes.length > 1 ? "es" : ""} detected, review below`, "error");
             } else {
               setClashWarnings(null);
-              showToast("Competition settings saved");
+              showToast(savedToastMsg);
               // Don't navigate away if the operator started a NEW edit during
               // the clash round-trip: that would silently discard it. Stay on
               // the page so the pending change can be saved.
@@ -382,7 +469,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
           })
           .catch(() => {
             if (!mountedRef.current) return;
-            showToast("Competition settings saved");
+            showToast(savedToastMsg);
             if (onBack && editedFieldsRef.current.size === 0) onBack();
           });
       }
@@ -1212,12 +1299,6 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
       )}
       <div className="field">
         <label className="field__label" id="settings-courts-label">{LABEL_COURTS}</label>
-        {/* draw-ready lock: courts is output-affecting. Discard the draw to reassign. */}
-        {isDrawReady && (
-          <div className="field__hint" style={{ marginBottom: 6, color: "var(--ink-2)", fontWeight: 500 }}>
-            Discard the draw to change pools, courts, or format.
-          </div>
-        )}
         {/* Pills come from courtPillOptions, not from tournament.courts, so
             the rendered selection always equals local.courts: a shiaijo this
             competition still holds after the tournament dropped it gets its
@@ -1230,12 +1311,19 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
               key={cc}
               active={selected}
               onClick={() => toggleCourt(cc)}
-              disabled={isDrawReady}
+              disabled={lockedAfterDraw}
+              aria-disabled={lockedAfterDraw ? "true" : undefined}
               style={inTournament ? undefined : { borderColor: "var(--red)", color: selected ? undefined : "var(--red)" }}
               data-testid={inTournament ? undefined : `orphan-court-${cc}`}
             >Shiaijo (court) {cc}{inTournament ? "" : " (not in tournament)"}</PillButton>
           ))}
         </div>
+        {/* draw-ready lock: courts is output-affecting. Discard the draw to reassign. */}
+        {lockedAfterDraw && (
+          <div className="field__hint" style={{ marginTop: 4, color: "var(--ink-2)", fontWeight: 500 }}>
+            Set by the draw. Discard the draw to change shiaijo.
+          </div>
+        )}
         <window.FieldError testId="orphan-shiaijo-hint">{orphanedCourtsErr}</window.FieldError>
         {/* Shiaijo-count rule, shown with the other court hints below so the
             operator reads cap, suggestion and count rule in one place. The
@@ -1388,6 +1476,41 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
           as the header: the two cannot drift because neither the block
           condition nor the blocking message is restated here. The transient
           "Saving…"/"✓ Saved at" states are the header's alone, by choice. */}
+      {/* Retime warning (c-setretime): shown before Save when date or start time changed on a draw-ready competition */}
+      {isDrawReady && retimePreview && retimePreview.anyChange && (
+        <div role="status" className="alert alert--warn" style={{ marginTop: 16, marginBottom: 12 }} data-testid="retime-warning">
+          <div style={{ fontWeight: 600, marginBottom: 6 }}>
+            {retimePreview.matchCount === 1
+              ? "Saving moves its 1 match, in the same order:"
+              : `Saving moves its ${retimePreview.matchCount} matches, in the same order:`}
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 4, marginBottom: 6 }}>
+            {retimePreview.courts.map((courtInfo) => (
+              <div
+                key={courtInfo.court}
+                style={{
+                  display: "flex",
+                  flexWrap: "wrap",
+                  color: "var(--ink-2)",
+                }}
+              >
+                <span>{`Shiaijo ${courtInfo.court}: ${courtInfo.newStart} to ${courtInfo.newEnd} `}</span>
+                <span>{`(was ${courtInfo.oldStart} to ${courtInfo.oldEnd})`}</span>
+              </div>
+            ))}
+          </div>
+          {retimePreview.notFreshCount > 0 && (
+            <div style={{ marginBottom: 6 }}>
+              {retimePreview.notFreshCount === 1
+                ? "1 of its matches no longer has the time a fresh draw would give it now: a time set by hand, a pause added or changed, or another competition moved since the draw. It gets a new time too."
+                : `${retimePreview.notFreshCount} of its matches no longer have the times a fresh draw would give them now: a time set by hand, a pause added or changed, or another competition moved since the draw. They get new times too.`}
+            </div>
+          )}
+          <div style={{ fontSize: 12, color: "var(--ink-2)" }}>
+            The pools, the bracket and the competitor numbers stay as they are, and so do its shiaijo. Anyone who printed or noted the old times will need the new ones.
+          </div>
+        </div>
+      )}
       <div style={{ marginTop: 20, display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 10 }}>
         {/* Same badge-like status role as the header chip above (13px, "Buttons,
             inputs, badges" per DESIGN.md Typography): both are a bold coloured

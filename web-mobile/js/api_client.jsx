@@ -5208,6 +5208,9 @@ const API = {
                 e.configVersion = err.configVersion || '';
                 e.competition = err.competition || null;
             }
+            if (res.status === 409 && (err.code === 'undo_stale' || err.code === 'retime_retry' || err.code === 'retime_unavailable')) {
+                e.code = err.code;
+            }
             throw e;
         }
         return res.json();
@@ -5695,6 +5698,43 @@ const API = {
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
             throw new Error(err.error || "Failed to check schedule clashes");
+        }
+        return res.json();
+    },
+    async fetchCalendar(password, signal) {
+        const res = await fetch('/api/schedule/calendar', {
+            headers: { 'X-Tournament-Password': password },
+            signal,
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || "Failed to load the calendar");
+        }
+        return res.json();
+    },
+    async previewMove({ competitionId, date, startTime, courts } = {}, password, signal) {
+        const params = new URLSearchParams();
+        if (competitionId !== undefined && competitionId !== null && competitionId !== "") {
+            params.append('competitionId', competitionId);
+        }
+        if (date !== undefined && date !== null && date !== "") {
+            params.append('date', date);
+        }
+        if (startTime !== undefined && startTime !== null && startTime !== "") {
+            params.append('startTime', startTime);
+        }
+        if (Array.isArray(courts) && courts.length > 0) {
+            params.append('courts', courts.join(','));
+        }
+        const qs = params.toString();
+        const url = qs ? `/api/schedule/calendar/preview?${qs}` : '/api/schedule/calendar/preview';
+        const res = await fetch(url, {
+            headers: { 'X-Tournament-Password': password },
+            signal,
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || "Failed to preview the move");
         }
         return res.json();
     },

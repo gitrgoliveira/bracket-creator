@@ -56,10 +56,11 @@ const DAILY_COPY_STAMP = '20260514T070000Z';
 
 // Upload an archive to the file input and wait for the dry-run plan to render.
 async function uploadArchive(page, archivePath) {
+  // The input is hidden behind the "Choose a backup file" button.
   const fileInput = page.locator('input[type="file"]');
-  await fileInput.waitFor({ state: 'visible', timeout: 10000 });
+  await fileInput.waitFor({ state: 'attached', timeout: 10000 });
   await fileInput.setInputFiles(archivePath);
-  await page.locator('text=Restore Plan').first().waitFor({ state: 'visible', timeout: 15000 });
+  await page.locator('text=Restore plan').first().waitFor({ state: 'visible', timeout: 15000 });
 }
 
 // Select "Replace" for an existing competition by its accessible label.

@@ -40,8 +40,8 @@ The file is named after the tournament, then the competition ID for a single com
 
 You can restore data from a file on your computer, or from one of the copies kept on the server machine:
 
-1. Under **Restore from a file**, pick your backup zip file with the file chooser. Alternatively, scroll down to **Copies kept on this computer** and click **Restore** next to any saved copy.
-2. The app inspects the archive and calculates a **Restore Plan**. This is a dry run: nothing on disk changes yet.
+1. Under **Restore from a file**, click **Choose a backup file** and pick your backup zip file. Alternatively, scroll down to **Copies kept on this computer** and click **Restore** next to any saved copy.
+2. The app inspects the archive and shows a **Restore plan**, naming the file it came from. This is a dry run: nothing on disk changes yet.
 3. Review the plan warnings, including how many recorded results each competition will lose or change, and make your choices for each competition.
 4. Click **Restore**.
 5. Enter the admin password in the confirmation dialog to proceed.

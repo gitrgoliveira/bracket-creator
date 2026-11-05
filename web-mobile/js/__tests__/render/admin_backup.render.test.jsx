@@ -465,6 +465,7 @@ describe('AdminBackupPage render tests', () => {
       warnings: [
         { code: 'mode_changes', message: 'Mode will change to individual only' },
         { code: 'court_missing', court: 'Court 3', message: 'Court 3 is missing in this tournament' },
+        { code: 'matches_running', competitionId: 'c1', message: 'Open Individual has 1 match running now.' },
       ],
       competitions: [
         {
@@ -489,9 +490,41 @@ describe('AdminBackupPage render tests', () => {
 
     expect(await screen.findByText('Mode will change to individual only')).toBeInTheDocument();
     expect(screen.getByText('Court 3 is missing in this tournament')).toBeInTheDocument();
-    expect(screen.getByText(/return to the backup's state/i)).toBeInTheDocument();
+    // The server's warning is the one place running matches are named: no second list repeats it.
+    expect(screen.getByText('Open Individual has 1 match running now.')).toBeInTheDocument();
+    expect(screen.queryByText(/Running matches affected/i)).not.toBeInTheDocument();
     expect(screen.getByText(/2 recorded results in "Open Individual" will be lost or changed/i)).toBeInTheDocument();
     expect(screen.getByText(/Let every court device sync before you restore/i)).toBeInTheDocument();
+  });
+
+  it('says each hint once: no second list, label or line repeats a warning or the button', async () => {
+    const plan = {
+      scope: 'tournament',
+      warnings: [
+        { code: 'matches_running', competitionId: 'c2', message: 'Juniors has 1 match running now; if you remove it, that match is removed with it.' },
+        { code: 'prefix_reassigned', competitionId: 'c1', message: "Open's number prefix is used by another competition, so it gets a new one; reprint this competition's tags." },
+      ],
+      competitions: [
+        { id: 'c1', name: 'Open', asked: false, prefixCollides: true },
+        { id: 'c2', name: 'Juniors', asked: true, choices: ['keep', 'remove'], runningNow: ['m7'] },
+      ],
+    };
+    mockApi.planRestore.mockResolvedValueOnce(plan);
+
+    const { container } = render(
+      <AdminBackupPage tournament={defaultTournament} password={TEST_KEY} />
+    );
+    const fileInput = container.querySelector('input[type="file"]');
+    await act(async () => {
+      fireEvent.change(fileInput, { target: { files: [new File(['dummy'], 'backup.zip')] } });
+    });
+
+    expect(await screen.findAllByText(/Juniors has 1 match running now/)).toHaveLength(1);
+    expect(screen.getAllByText(/reprint/i)).toHaveLength(1);
+    expect(screen.queryByText(/running:/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/m7/)).not.toBeInTheDocument();
+    expect(screen.getAllByText(/Juniors/).filter((el) => /Choose what to do/.test(el.textContent))).toHaveLength(1);
+    expect(screen.queryByText(/Please /)).not.toBeInTheDocument();
   });
 
   it('b. allowRunning: with running matches in the plan, restore is called with allowRunning true; without, it is not', async () => {

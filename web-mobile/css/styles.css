@@ -7060,6 +7060,13 @@ button.vsched-item:not([data-clickable]) {
   color: var(--warn-ink);
 }
 
+/* A neutral notice: grey, so it never reads as the navy running signal. */
+.alert--info {
+  background: var(--surface-2);
+  border-color: var(--line);
+  color: var(--ink-2);
+}
+
 /* Data-integrity notices (data_integrity.jsx). They ride on the shared .alert
    families rather than inventing a colour. The competition banner is
    .alert--error (--danger): a file that will not load has every write to it
@@ -11294,16 +11301,101 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   .team-summary__fact { white-space: normal; }
 }
 
-/* Backup and restore page (bc-bkrs) */
-.backup-choice-row {
+/* Backup and restore page (bc-bkrs). The page keeps .page's padding but a
+   narrower measure, since it is read as prose and answered as a form. */
+.backup-page { max-width: 1000px; }
+.backup-page > .alert,
+.backup-page > .card { margin-bottom: 20px; }
+.backup-intro {
+  margin: 0 0 12px;
+  font-size: var(--fs-sm);
+  line-height: var(--lh-base);
+  color: var(--ink-2);
+}
+.backup-subhead {
+  margin: 20px 0 8px;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+.backup-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.backup-actions .btn { white-space: nowrap; }
+.backup-plan,
+.backup-plan-error { margin-top: 16px; }
+.backup-plan-end { margin-top: 16px; }
+.backup-alerts {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.backup-alerts ul { margin: 4px 0 0; padding-left: 20px; }
+.backup-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.backup-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+}
+.backup-row--plan {
+  flex-direction: column;
+  align-items: stretch;
+}
+.backup-row__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.backup-row__main,
+.backup-row__name { min-width: 0; overflow-wrap: anywhere; }
+.backup-row__name { font-weight: 600; }
+.backup-row__main .backup-row__meta { margin-left: 8px; }
+.backup-row__title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.backup-row__title + .backup-row__meta { display: block; margin: 2px 0 0; }
+.backup-row__meta {
+  font-size: var(--fs-sm);
+  color: var(--ink-3);
+}
+.backup-row__note {
+  margin-bottom: 4px;
+  font-size: var(--fs-sm);
+  color: var(--ink-2);
+}
+.backup-row__actions,
+.backup-row__head .btn { white-space: nowrap; }
+.backup-row__actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.backup-choice,
+.backup-choice__radio {
   display: flex;
   align-items: center;
   gap: 8px;
-  flex-wrap: wrap;
+  font-size: var(--fs-sm);
+  cursor: pointer;
 }
-@media (max-width: 600px) {
-  .backup-choice-row {
-    flex-direction: column;
-    align-items: flex-start;
-  }
+.backup-choice { min-height: 36px; }
+.backup-choice input[type="radio"] { margin: 0; flex-shrink: 0; }
+.backup-choice--copy { flex-wrap: wrap; }
+.backup-copy-name { width: 240px; max-width: 100%; }
+.backup-result .card__body > * { margin: 8px 0 0; }
+.backup-result .card__body > :first-child { margin-top: 0; }
+@media (pointer: coarse) {
+  .backup-choice { min-height: 44px; }
 }

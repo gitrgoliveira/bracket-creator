@@ -56,6 +56,7 @@ function AdminBackupPage({ tournament, onBack, onLogout, onViewerMode, password,
   const [restoreResult, setRestoreResult] = useState(null);
 
   const mountedRef = useRef(true);
+  const fileInputRef = useRef(null);
   useEffect(() => () => { mountedRef.current = false; }, []);
 
   const loadKeptBackups = useCallback(async () => {
@@ -343,7 +344,7 @@ function AdminBackupPage({ tournament, onBack, onLogout, onViewerMode, password,
       {AdminTopbar && (
         <AdminTopbar onLogout={onLogout} onViewerMode={onViewerMode} tournament={tournament} />
       )}
-      <div className="page page--wide" style={{ maxWidth: 1000, margin: "0 auto", padding: "16px" }}>
+      <div className="page backup-page">
         {Breadcrumbs && (
           <Breadcrumbs
             items={[
@@ -352,26 +353,25 @@ function AdminBackupPage({ tournament, onBack, onLogout, onViewerMode, password,
             ]}
           />
         )}
-        <div className="page-head" style={{ marginBottom: 16 }}>
+        <div className="page-head">
           <h1 className="page-head__title">Backup and restore</h1>
         </div>
 
-        <div className="alert alert--info" style={{ marginBottom: 20 }}>
+        <div className="alert alert--info">
           A backup file does not contain the admin password, but it does hold every competitor&apos;s name and dojo, so keep it private.
         </div>
 
         {restoreResult && (
-          <div className="card" style={{ marginBottom: 20, border: "1px solid var(--accent, #1d3557)" }}>
+          <div className="card backup-result">
             <div className="card__title">Restore completed</div>
             <div className="card__body">
-              <p>The restore finished successfully.</p>
               {restoreResult.safetyCopy && (
-                <p>
+                <p className="backup-intro">
                   Safety copy created: <strong>{restoreResult.safetyCopy}</strong>
                 </p>
               )}
               {restoreResult.prefixWarnings && restoreResult.prefixWarnings.length > 0 && (
-                <div className="alert alert--warn" style={{ marginTop: 8, marginBottom: 8 }}>
+                <div className="alert alert--warn">
                   {restoreResult.prefixWarnings.map((w) => {
                     const compName = lookupCompetitionName(restoreResult.plan?.competitions, w.competitionId);
                     return (
@@ -387,17 +387,13 @@ function AdminBackupPage({ tournament, onBack, onLogout, onViewerMode, password,
                 </div>
               )}
               {restoreResult.prefixError && (
-                <div className="alert alert--error" style={{ marginTop: 8, marginBottom: 8 }}>
-                  {restoreResult.prefixError}
-                </div>
+                <div className="alert alert--error">{restoreResult.prefixError}</div>
               )}
               {restoreResult.requeueError && (
-                <div className="alert alert--error" style={{ marginTop: 8, marginBottom: 8 }}>
-                  {restoreResult.requeueError}
-                </div>
+                <div className="alert alert--error">{restoreResult.requeueError}</div>
               )}
               {restoreResult.safetyCopy && !restoreResult.isUndoResult && (
-                <div style={{ marginTop: 12 }}>
+                <div className="backup-actions">
                   <button
                     type="button"
                     className="btn btn--secondary"
@@ -411,13 +407,13 @@ function AdminBackupPage({ tournament, onBack, onLogout, onViewerMode, password,
           </div>
         )}
 
-        <div className="card" style={{ marginBottom: 20 }}>
+        <div className="card">
           <div className="card__title">Back up tournament</div>
           <div className="card__body">
-            <p style={{ fontSize: 13, color: "var(--ink-2)", marginTop: 0 }}>
+            <p className="backup-intro">
               Download a complete archive of the tournament including all competitions, participants, matches and settings.
             </p>
-            <div style={{ marginBottom: 16 }}>
+            <div className="backup-actions">
               <button
                 type="button"
                 className="btn btn--primary"
@@ -428,29 +424,14 @@ function AdminBackupPage({ tournament, onBack, onLogout, onViewerMode, password,
             </div>
 
             {comps.length > 0 && (
-              <div>
-                <h3 style={{ fontSize: 14, fontWeight: 600, marginBottom: 8 }}>
-                  Back up individual competitions
-                </h3>
-                <div className="tlist">
+              <>
+                <h3 className="backup-subhead">Back up individual competitions</h3>
+                <div className="backup-list">
                   {comps.map((c) => (
-                    <div
-                      key={c.id}
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "space-between",
-                        padding: "8px 12px",
-                        border: "1px solid var(--line)",
-                        borderRadius: 6,
-                        marginBottom: 6,
-                      }}
-                    >
-                      <div>
-                        <strong>{c.name}</strong>
-                        <span style={{ fontSize: 12, color: "var(--ink-3)", marginLeft: 8 }}>
-                          ({c.format || "pools"})
-                        </span>
+                    <div key={c.id} className="backup-row">
+                      <div className="backup-row__main">
+                        <span className="backup-row__name">{c.name}</span>
+                        <span className="backup-row__meta">{c.format || "pools"}</span>
                       </div>
                       <button
                         type="button"
@@ -462,122 +443,85 @@ function AdminBackupPage({ tournament, onBack, onLogout, onViewerMode, password,
                     </div>
                   ))}
                 </div>
-              </div>
+              </>
             )}
           </div>
         </div>
 
-        <div className="card" style={{ marginBottom: 20 }}>
+        <div className="card">
           <div className="card__title">Restore from a file</div>
           <div className="card__body">
-            <p style={{ fontSize: 13, color: "var(--ink-2)", marginTop: 0 }}>
+            <p className="backup-intro">
               Upload a zip archive to preview the restore. No changes will be made until you confirm.
             </p>
-            <div style={{ marginBottom: 16 }}>
+            <div className="backup-actions">
               <input
+                ref={fileInputRef}
                 type="file"
                 accept=".zip"
+                hidden
                 onChange={handleFileChange}
                 disabled={planning}
               />
+              <button
+                type="button"
+                className="btn"
+                disabled={planning}
+                onClick={() => fileInputRef.current?.click()}
+              >
+                Choose a backup file
+              </button>
+              {planning && <span className="backup-row__meta" role="status">Checking backup archive…</span>}
             </div>
 
-            {planning && <p>Checking backup archive...</p>}
-
             {planError && (
-              <div className="alert alert--error" style={{ marginBottom: 16 }}>
-                {planError}
-              </div>
+              <div className="alert alert--error backup-plan-error">{planError}</div>
             )}
 
             {plan && (
-              <div style={{ marginTop: 16 }}>
-                <h3 style={{ fontSize: 15, fontWeight: 600, marginBottom: 8 }}>
-                  Restore Plan ({plan.scope} archive)
-                </h3>
+              <div className="backup-plan">
+                <h3 className="backup-subhead">Restore plan ({plan.scope} archive)</h3>
+                {(selectedFromName || selectedFile?.name) && (
+                  <p className="backup-intro">
+                    From <strong>{selectedFromName || selectedFile.name}</strong>
+                  </p>
+                )}
 
-                <div className="alert alert--warn" style={{ marginBottom: 12 }}>
-                  Let every court device sync before you restore. A change a court device makes before the restore and sends after it is usually applied when it arrives, because it is newer than the restored record. If the restored copy already has that match finished, the change is kept in the match&apos;s history instead and not shown. If the restored copy does not hold that match, the change is refused.
+                <div className="backup-alerts">
+                  <div className="alert alert--warn">
+                    Let every court device sync before you restore. A change a court device makes before the restore and sends after it is usually applied when it arrives, because it is newer than the restored record. If the restored copy already has that match finished, the change is kept in the match&apos;s history instead and not shown. If the restored copy does not hold that match, the change is refused.
+                  </div>
+                  {(plan.warnings || []).map((w) => (
+                    <div key={`${w.code}-${w.competitionId || ""}-${w.court || ""}`} className="alert alert--warn">
+                      {w.message}
+                    </div>
+                  ))}
+                  {(plan.competitions || []).some((c) => c.resultsChanged && c.resultsChanged.length > 0) && (
+                    <div className="alert alert--error">
+                      <strong>Results that will be lost:</strong>
+                      <ul>
+                        {plan.competitions
+                          .filter((c) => c.resultsChanged && c.resultsChanged.length > 0)
+                          .map((c) => (
+                            <li key={c.id}>
+                              {c.resultsChanged.length} recorded results in &quot;{c.name}&quot; will be lost or changed.
+                            </li>
+                          ))}
+                      </ul>
+                    </div>
+                  )}
                 </div>
 
-                {plan.warnings && plan.warnings.length > 0 && (
-                  <div style={{ marginBottom: 12 }}>
-                    {plan.warnings.map((w) => (
-                      <div key={`${w.code}-${w.competitionId || ""}-${w.court || ""}`} className="alert alert--warn" style={{ marginBottom: 6 }}>
-                        {w.message}
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                {(plan.competitions || []).some((c) => c.resultsChanged && c.resultsChanged.length > 0) && (
-                  <div className="alert alert--error" style={{ marginBottom: 12 }}>
-                    <strong>Results that will be lost:</strong>
-                    <ul>
-                      {plan.competitions
-                        .filter((c) => c.resultsChanged && c.resultsChanged.length > 0)
-                        .map((c) => (
-                          <li key={c.id}>
-                            {c.resultsChanged.length} recorded results in &quot;{c.name}&quot; will be lost or changed.
-                          </li>
-                        ))}
-                    </ul>
-                  </div>
-                )}
-
-                {(plan.competitions || []).some((c) => c.runningNow && c.runningNow.length > 0) && (
-                  <div className="alert alert--warn" style={{ marginBottom: 12 }}>
-                    <strong>Running matches affected:</strong>
-                    <ul>
-                      {plan.competitions
-                        .filter((c) => c.runningNow && c.runningNow.length > 0)
-                        .map((c) => (
-                          <li key={c.id}>
-                            &quot;{c.name}&quot;: {c.runningNow.join(", ")} will return to the backup&apos;s state.
-                          </li>
-                        ))}
-                    </ul>
-                  </div>
-                )}
-
-                {(plan.competitions || []).some((c) => c.prefixCollides) && (
-                  <div className="alert alert--warn" style={{ marginBottom: 12 }}>
-                    {plan.competitions
-                      .filter((c) => c.prefixCollides)
-                      .map((c) => (
-                        <div key={c.id}>
-                          {c.name} gets a new number prefix: reprint its competitors&apos; tags.
-                        </div>
-                      ))}
-                  </div>
-                )}
-
-                <div style={{ marginBottom: 16 }}>
-                  <h4 style={{ fontSize: 14, fontWeight: 600, marginBottom: 8 }}>
-                    Competitions to restore:
-                  </h4>
+                <h4 className="backup-subhead">Competitions to restore</h4>
+                <div className="backup-list">
                   {plan.competitions.map((c) => {
                     const currentDecision = decisions[c.id] || {};
                     const isMissingFromArchive = c.choices?.includes("keep") || c.choices?.includes("remove");
 
                     return (
-                      <div
-                        key={c.id}
-                        style={{
-                          padding: 12,
-                          border: "1px solid var(--line)",
-                          borderRadius: 6,
-                          marginBottom: 8,
-                          background: "var(--bg-1)",
-                        }}
-                      >
-                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
-                          <div style={{ fontWeight: 600 }}>
-                            {c.name}{" "}
-                            <span style={{ fontSize: 12, fontWeight: "normal", color: "var(--ink-3)" }}>
-                              ({c.id})
-                            </span>
-                          </div>
+                      <div key={c.id} className="backup-row backup-row--plan">
+                        <div className="backup-row__head">
+                          <span className="backup-row__name">{c.name}</span>
                           {plan.scope === "tournament" && !plan.undo && !onlyCompId && !isMissingFromArchive && (
                             <button
                               type="button"
@@ -602,70 +546,58 @@ function AdminBackupPage({ tournament, onBack, onLogout, onViewerMode, password,
                         </div>
 
                         {!c.asked ? (
-                          <div style={{ fontSize: 13, color: "var(--ink-2)" }}>
-                            Will be created as a new competition.
-                          </div>
+                          <div className="backup-row__note">Will be created as a new competition.</div>
                         ) : isMissingFromArchive ? (
-                          <div style={{ marginTop: 6 }}>
-                            <div style={{ fontSize: 13, color: "var(--ink-2)", marginBottom: 6 }}>
-                              This competition is not in the backup archive:
-                            </div>
-                            <label style={{ display: "block", marginBottom: 4, cursor: "pointer" }}>
+                          <div>
+                            <div className="backup-row__note">This competition is not in the backup archive:</div>
+                            <label className="backup-choice">
                               <input
                                 type="radio"
                                 name={`decision-${c.id}`}
                                 value="keep"
                                 checked={currentDecision.action === "keep"}
                                 onChange={() => handleDecisionChange(c.id, "keep")}
-                              />{" "}
+                              />
                               Keep &quot;{c.name}&quot;
                             </label>
-                            <label style={{ display: "block", cursor: "pointer" }}>
+                            <label className="backup-choice">
                               <input
                                 type="radio"
                                 name={`decision-${c.id}`}
                                 value="remove"
                                 checked={currentDecision.action === "remove"}
                                 onChange={() => handleDecisionChange(c.id, "remove")}
-                              />{" "}
+                              />
                               Remove &quot;{c.name}&quot;
-                              {c.runningNow && c.runningNow.length > 0 && (
-                                <span style={{ color: "var(--red, #e63946)", marginLeft: 6 }}>
-                                  (running: {c.runningNow.join(", ")})
-                                </span>
-                              )}
                             </label>
                           </div>
                         ) : (
-                          <div style={{ marginTop: 6 }}>
-                            <div style={{ fontSize: 13, color: "var(--ink-2)", marginBottom: 6 }}>
-                              This competition already exists:
-                            </div>
-                            <label style={{ display: "block", marginBottom: 4, cursor: "pointer" }}>
+                          <div>
+                            <div className="backup-row__note">This competition already exists:</div>
+                            <label className="backup-choice">
                               <input
                                 type="radio"
                                 name={`decision-${c.id}`}
                                 value="replace"
                                 checked={currentDecision.action === "replace"}
                                 onChange={() => handleDecisionChange(c.id, "replace")}
-                              />{" "}
+                              />
                               Replace &quot;{c.name}&quot;
                             </label>
-                            <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
-                              <span>
+                            <label className="backup-choice backup-choice--copy">
+                              <span className="backup-choice__radio">
                                 <input
                                   type="radio"
                                   name={`decision-${c.id}`}
                                   value="copy"
                                   checked={currentDecision.action === "copy"}
                                   onChange={() => handleDecisionChange(c.id, "copy")}
-                                />{" "}
+                                />
                                 Restore as a copy named:
                               </span>
                               <input
                                 type="text"
-                                className="input"
-                                style={{ width: 200, padding: "4px 8px" }}
+                                className="input backup-copy-name"
                                 placeholder={`${c.name} (Copy)`}
                                 value={currentDecision.copyName || ""}
                                 onChange={(e) => handleDecisionChange(c.id, "copy", e.target.value)}
@@ -680,11 +612,11 @@ function AdminBackupPage({ tournament, onBack, onLogout, onViewerMode, password,
                 </div>
 
                 {plan.nothingToRestore ? (
-                  <div className="alert alert--info" style={{ marginTop: 16 }}>
+                  <div className="alert alert--info backup-plan-end">
                     {plan.message || "Nothing to restore."}
                   </div>
                 ) : (
-                  <div style={{ marginTop: 16 }}>
+                  <div className="backup-actions backup-plan-end">
                     <button
                       type="button"
                       className="btn btn--primary"
@@ -697,13 +629,6 @@ function AdminBackupPage({ tournament, onBack, onLogout, onViewerMode, password,
                           : `Choose what to do with "${firstOpenComp?.name}"`
                         : "Restore"}
                     </button>
-                    {!allChoicesMade && (
-                      <span style={{ fontSize: 12, color: "var(--ink-3)", marginLeft: 12 }}>
-                        {firstOpenComp?.needsCopyName
-                          ? `Please enter a name for the copy of "${firstOpenComp.name}".`
-                          : `Please make a choice for "${firstOpenComp?.name}".`}
-                      </span>
-                    )}
                   </div>
                 )}
               </div>
@@ -714,50 +639,31 @@ function AdminBackupPage({ tournament, onBack, onLogout, onViewerMode, password,
         <div className="card">
           <div className="card__title">Copies kept on this computer</div>
           <div className="card__body">
-            <p style={{ fontSize: 13, color: "var(--ink-2)", marginTop: 0 }}>
+            <p className="backup-intro">
               The app takes a daily copy by itself when something changed. Copies are never deleted automatically.
             </p>
 
             {loadingBackups ? (
-              <p>Loading kept copies...</p>
+              <p className="backup-row__meta" role="status">Loading kept copies…</p>
             ) : backupsList.length === 0 ? (
-              <p style={{ color: "var(--ink-3)" }}>No backup copies kept yet.</p>
+              <p className="backup-row__meta">No backup copies kept yet.</p>
             ) : (
-              <div className="tlist">
+              <div className="backup-list">
                 {backupsList.map((b) => {
-                  const isScheduled = b.kind === "scheduled";
-                  const kindLabel = isScheduled ? "Daily" : "Before restore";
+                  const kindLabel = b.kind === "scheduled" ? "Daily" : "Before restore";
 
                   return (
-                    <div
-                      key={b.name}
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "space-between",
-                        padding: "10px 12px",
-                        border: "1px solid var(--line)",
-                        borderRadius: 6,
-                        marginBottom: 6,
-                        flexWrap: "wrap",
-                        gap: 8,
-                      }}
-                    >
-                      <div>
-                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                          <span
-                            className={`badge ${isScheduled ? "badge--pools" : "badge--setup"}`}
-                            style={{ fontSize: 11, whiteSpace: "nowrap", flexShrink: 0 }}
-                          >
-                            {kindLabel}
-                          </span>
-                          <strong>{b.name}</strong>
+                    <div key={b.name} className="backup-row">
+                      <div className="backup-row__main">
+                        <div className="backup-row__title">
+                          <span className="badge badge--archive">{kindLabel}</span>
+                          <span className="backup-row__name">{b.name}</span>
                         </div>
-                        <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 2 }}>
+                        <div className="backup-row__meta">
                           {b.time ? new Date(b.time).toLocaleString() : ""} · {formatFileSize(b.size)}
                         </div>
                       </div>
-                      <div style={{ display: "flex", gap: 8 }}>
+                      <div className="backup-row__actions">
                         <button
                           type="button"
                           className="btn btn--sm"

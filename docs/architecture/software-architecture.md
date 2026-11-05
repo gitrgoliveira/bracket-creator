@@ -99,7 +99,7 @@ Its types carry Excel coordinates (`sheetName`, `cell`) tightly coupled to outpu
 | `cmd` | Cobra commands (each an options struct with `run()`) |
 | `internal/helper` | CSV parsing, pool/match generation, binary-tree brackets, seeding, Excel rendering |
 | `internal/domain` | Clean models + canonical decision/lineup rules |
-| `internal/engine` | Thin adapter that drives `helper` generation from a `state.Competition`; handles scoring, eligibility, kachinuki, schedule estimate |
+| `internal/engine` | Thin adapter that drives `helper` generation from a `state.Competition`; handles scoring, eligibility, kachinuki, schedule estimate, the competition calendar's placement and the re-timing of a drawn competition's matches (`dayBreaks` owns a day's pauses, `countForEstimate` the participant count an estimate uses) |
 | `internal/state` | File-backed store (`tournament.md`, `competitions/<id>/config.md`, `participants.csv`). Transactions + write-ahead log, per-competition locks |
 | `internal/excel` | Excel lifecycle + `NewFileFromScratch` |
 | `internal/pdf` | PDF exports (LibreOffice-backed) |
@@ -113,7 +113,7 @@ flowchart TB
     subgraph proc["mobile-app process (Gin + http.Server)"]
         mw["middleware.go<br/>X-Tournament-Password auth · body caps"]
         authsrc["auth_source.go<br/>PasswordVerifier (file | locked/bcrypt)"]
-        handlers["handlers_*.go<br/>competition · match · participants · tournament<br/>score-events · decision · eligibility · lineup · schedule · reset · auth-config"]
+        handlers["handlers_*.go<br/>competition · match · participants · tournament<br/>score-events · decision · eligibility · lineup · schedule · draft-estimate · calendar · reset · auth-config"]
         hub["hub.go (SSE hub)<br/>seq stamping · 200-event replay ring · resync · heartbeat"]
         safego["safego.go<br/>panic-safe goroutines"]
         engine["engine adapter"]

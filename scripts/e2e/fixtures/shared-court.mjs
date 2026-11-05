@@ -47,52 +47,35 @@ export const pageMark = (page) => page.evaluate(() => window.__e2eMark || null);
 // the shiaijo choice. Read on the wizard page itself, the one
 // createCompetition then fills.
 //
-// The stacked default comes from GET /api/competitions/<id>/schedule/estimate,
-// which the wizard sends for each same-day competition with a start time that
-// shares a chosen shiaijo (findStackCandidates); with none it keeps the 09:00
-// default and sends nothing. The caller knows which
-// case it is in (`expectEstimate`: a competition was created before this one,
-// all on the tournament's date), so the read does not guess from timing:
-//   - expected: the response is awaited (registered before the page loads, so
-//     it cannot be missed), the page is given two animation frames to render
-//     the value the answer set, and the input is then read once two reads
-//     agree (a competitions refresh can re-send the estimate; the earlier
-//     request is aborted and the later one wins).
-//   - not expected: the input is read as soon as the form shows, and an
-//     estimate request seen meanwhile is an error, never a stale default.
-export async function wizardDefaults(page, { expectEstimate = false } = {}) {
-  const isEstimate = (r) => /\/api\/competitions\/[^/]+\/schedule\/estimate$/.test(new URL(r.url()).pathname);
-  let sent = 0;
-  const onRequest = (r) => { if (isEstimate(r)) sent += 1; };
-  page.on('request', onRequest);
-  try {
-    const answered = expectEstimate
-      ? page.waitForResponse((r) => isEstimate(r.request()) && r.ok(), { timeout: EXPECT_TIMEOUT_MS })
-      : null;
-    await page.goto('/admin/create-competition');
-    await expect(page.getByRole('heading', { level: 1, name: 'Add competition' })).toBeVisible();
-    const input = page.locator('#create-start-time');
-    await expect(input).toBeVisible();
-    if (answered) {
-      const res = await answered;
-      await res.finished();
-      await rendered(page);
-      let prev = null;
-      await expect.poll(async () => {
-        const v = await input.inputValue();
-        const settled = v === prev;
-        prev = v;
-        return settled;
-      }, { intervals: [100], timeout: 5_000 }).toBe(true);
-    } else if (sent) {
-      throw new Error('wizardDefaults: the wizard sent a schedule estimate request, but the caller said no same-day competition exists (pass expectEstimate: true)');
-    }
-    const hint = await page.locator('.field__hint', { hasText: 'Different competitions can share' }).first()
-      .innerText().then((t) => t.trim(), () => null);
-    return { startTime: await input.inputValue(), sharedCourtHint: hint };
-  } finally {
-    page.off('request', onRequest);
-  }
+// The stacked default comes from GET /api/schedule/calendar, which the wizard
+// reads whenever its date is set (it starts on the tournament's date): the
+// start is the latest planned end among the same-day competitions sharing a
+// chosen shiaijo, or 09:00 when there is none (calendarStackEnd). So the read
+// does not guess from timing: the calendar response is awaited (registered
+// before the page loads, so it cannot be missed), the page is given two
+// animation frames to render the value the answer set, and the input is then
+// read once two reads agree (a competitions refresh can re-read the calendar;
+// the earlier request is aborted and the later one wins).
+export async function wizardDefaults(page) {
+  const isCalendar = (r) => new URL(r.url()).pathname === '/api/schedule/calendar';
+  const answered = page.waitForResponse((r) => isCalendar(r.request()) && r.ok(), { timeout: EXPECT_TIMEOUT_MS });
+  await page.goto('/admin/create-competition');
+  await expect(page.getByRole('heading', { level: 1, name: 'Add competition' })).toBeVisible();
+  const input = page.locator('#create-start-time');
+  await expect(input).toBeVisible();
+  const res = await answered;
+  await res.finished();
+  await rendered(page);
+  let prev = null;
+  await expect.poll(async () => {
+    const v = await input.inputValue();
+    const settled = v === prev;
+    prev = v;
+    return settled;
+  }, { intervals: [100], timeout: 5_000 }).toBe(true);
+  const hint = await page.locator('.field__hint', { hasText: 'Different competitions can share' }).first()
+    .innerText().then((t) => t.trim(), () => null);
+  return { startTime: await input.inputValue(), sharedCourtHint: hint };
 }
 
 // Create every competition first, then paste each roster, generate its draw and
@@ -102,7 +85,7 @@ export async function seedCompetitions(page, specs) {
   const ids = {};
   const defaults = {};
   for (const s of specs) {
-    defaults[s.key] = await wizardDefaults(page, { expectEstimate: Object.keys(ids).length > 0 });
+    defaults[s.key] = await wizardDefaults(page);
     ids[s.key] = await createCompetition(page, s.opts);
   }
   for (const s of specs) {

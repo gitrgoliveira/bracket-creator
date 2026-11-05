@@ -158,7 +158,12 @@ describe('AdminBackupPage render tests', () => {
 
     // Check Restore button is disabled and names the open choice
     const restoreBtn = screen.getByRole('button', { name: /Choose what to do with "Open Individual"/i });
-    expect(restoreBtn).toBeDisabled();
+    expect(restoreBtn).toHaveAttribute('aria-disabled', 'true');
+    // It stays focusable so Tab reaches what it says, and a tap on it asks nothing.
+    expect(restoreBtn).toBeEnabled();
+    window.promptDialog = vi.fn();
+    fireEvent.click(restoreBtn);
+    expect(window.promptDialog).not.toHaveBeenCalled();
 
     // Answer choice for c1 as "replace"
     const replaceRadio = choiceIn('Open Individual', 'Replace it');
@@ -168,7 +173,7 @@ describe('AdminBackupPage render tests', () => {
 
     // Now it should name the second open choice (Legacy Division)
     const restoreBtn2 = screen.getByRole('button', { name: /Choose what to do with "Legacy Division"/i });
-    expect(restoreBtn2).toBeDisabled();
+    expect(restoreBtn2).toHaveAttribute('aria-disabled', 'true');
 
     // Answer choice for c3_missing as "remove"
     const removeRadio = choiceIn('Legacy Division', 'Remove it');
@@ -178,7 +183,7 @@ describe('AdminBackupPage render tests', () => {
 
     // Now all choices made: Restore button is enabled
     const enabledRestoreBtn = screen.getByRole('button', { name: /^Restore$/i });
-    expect(enabledRestoreBtn).toBeEnabled();
+    expect(enabledRestoreBtn).not.toHaveAttribute('aria-disabled');
   });
 
   it('handles the confirm flow, keeps wrong password in the dialog, and updates result surviving refetch', async () => {
@@ -248,6 +253,8 @@ describe('AdminBackupPage render tests', () => {
 
     // Verify result is shown
     expect(await screen.findByText(/Restore completed/i)).toBeInTheDocument();
+    // The Restore button that opened the dialog is gone, so focus goes to the result.
+    expect(screen.getByText('Restore completed')).toHaveFocus();
     expect(screen.getByText('20261104T150000Z-before-restore-competition.zip')).toBeInTheDocument();
     expect(screen.getByText(/Open Individual: number prefix changed from A to B\. Reprint its competitors' tags\./i)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Undo this restore/i })).toBeInTheDocument();
@@ -335,6 +342,14 @@ describe('AdminBackupPage render tests', () => {
         title: 'Confirm undo',
       })
     );
+    await act(async () => {
+      await dialogSubmitCb('correct-pw');
+    });
+
+    // The undo is named as one, takes focus, and offers no second undo.
+    expect(await screen.findByText('Restore undone')).toHaveFocus();
+    expect(screen.queryByText('Restore completed')).toBeNull();
+    expect(screen.queryByRole('button', { name: /Undo this restore/i })).toBeNull();
   });
 
   it('re-runs the dry run with only when "Restore only this one" is clicked', async () => {
@@ -808,7 +823,7 @@ describe('AdminBackupPage render tests', () => {
 
     // Main restore button is disabled (names open choice)
     const restoreBtn = screen.getByRole('button', { name: /Choose what to do with "Open Individual"/i });
-    expect(restoreBtn).toBeDisabled();
+    expect(restoreBtn).toHaveAttribute('aria-disabled', 'true');
 
     // Still no button named /Undo/
     expect(screen.queryByRole('button', { name: /Undo/i })).toBeNull();
@@ -935,6 +950,10 @@ describe('AdminBackupPage render tests', () => {
       SESSION_KEY,
       'correct-pw'
     );
+    // An undo made from the undo plan's Restore button reads as an undo too.
+    expect(await screen.findByText('Restore undone')).toHaveFocus();
+    expect(screen.queryByText('Restore completed')).toBeNull();
+    expect(screen.queryByRole('button', { name: /Undo this restore/i })).toBeNull();
   });
 
   it('renders prefix warnings showing reassignment or refusal message when newPrefix is empty', async () => {

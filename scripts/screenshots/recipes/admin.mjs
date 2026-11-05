@@ -258,8 +258,8 @@ export const recipes = [
       await choice(page, 'Mens Individual', 'Replace it').waitFor({ state: 'visible', timeout: 5000 });
       const openBtn = page.getByRole('button', { name: 'Choose what to do with "Juniors Individual"' });
       await openBtn.waitFor({ state: 'visible', timeout: 5000 });
-      if (!(await openBtn.isDisabled())) {
-        throw new Error('expected Restore button to be disabled while a choice is open');
+      if ((await openBtn.getAttribute('aria-disabled')) !== 'true') {
+        throw new Error('expected Restore button to be aria-disabled while a choice is open');
       }
     },
   },

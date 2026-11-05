@@ -59,7 +59,15 @@ function AdminBackupPage({ tournament, onBack, onLogout, onViewerMode, password,
 
   const mountedRef = useRef(true);
   const fileInputRef = useRef(null);
+  const resultTitleRef = useRef(null);
   useEffect(() => () => { mountedRef.current = false; }, []);
+
+  // The button that opened the confirm dialog is gone once a restore lands, so the
+  // dialog cannot hand focus back to it: focus the result's title, which reads it out
+  // and brings the card into view.
+  useEffect(() => {
+    if (restoreResult) resultTitleRef.current?.focus();
+  }, [restoreResult]);
 
   const loadKeptBackups = useCallback(async () => {
     if (!window.API || !window.API.listBackups) return;
@@ -203,7 +211,7 @@ function AdminBackupPage({ tournament, onBack, onLogout, onViewerMode, password,
             typed
           );
           if (mountedRef.current) {
-            setRestoreResult(res);
+            setRestoreResult(plan?.undo ? { ...res, isUndoResult: true } : res);
             setPlan(null);
             setDecisions({});
             setSelectedFile(null);
@@ -365,7 +373,9 @@ function AdminBackupPage({ tournament, onBack, onLogout, onViewerMode, password,
 
         {restoreResult && (
           <div className="card backup-result">
-            <div className="card__title">Restore completed</div>
+            <div ref={resultTitleRef} className="card__title" tabIndex={-1}>
+              {restoreResult.isUndoResult ? "Restore undone" : "Restore completed"}
+            </div>
             <div className="card__body">
               {restoreResult.safetyCopy && (
                 <p className="backup-detail">
@@ -473,7 +483,7 @@ function AdminBackupPage({ tournament, onBack, onLogout, onViewerMode, password,
               >
                 Choose a backup file
               </button>
-              {planning && <span className="backup-row__meta" role="status">Checking backup archive…</span>}
+              <span className="backup-row__meta" role="status">{planning ? "Checking backup archive…" : ""}</span>
             </div>
 
             {planError && (
@@ -628,7 +638,7 @@ function AdminBackupPage({ tournament, onBack, onLogout, onViewerMode, password,
                     <button
                       type="button"
                       className="btn btn--primary"
-                      disabled={!allChoicesMade}
+                      aria-disabled={allChoicesMade ? undefined : "true"}
                       onClick={handleRestoreSubmit}
                     >
                       {!allChoicesMade
@@ -651,10 +661,11 @@ function AdminBackupPage({ tournament, onBack, onLogout, onViewerMode, password,
               The app takes a daily copy by itself when something changed. Copies are never deleted automatically.
             </p>
 
-            {loadingBackups ? (
-              <p className="backup-row__meta" role="status">Loading kept copies…</p>
-            ) : backupsList.length === 0 ? (
-              <p className="backup-row__meta">No backup copies kept yet.</p>
+            <div className="backup-row__meta" role="status">
+              {loadingBackups && backupsList.length === 0 ? "Loading kept copies…" : ""}
+            </div>
+            {backupsList.length === 0 ? (
+              !loadingBackups && <p className="backup-row__meta">No backup copies kept yet.</p>
             ) : (
               <div className="backup-list">
                 {backupsList.map((b) => {

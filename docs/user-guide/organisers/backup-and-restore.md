@@ -121,7 +121,7 @@ Clicking **Undo this restore** prompts for the admin password and immediately pu
 
 The card, and its button, last until you leave or reload the page. After that, click **Restore** on the `before-restore` copy in the list instead, which asks the usual choices.
 
-An undo is itself a restore, so the app takes a new safety copy before undoing. To reverse an undo, restore that new safety copy from **Copies kept on this computer**.
+An undo is itself a restore, so the app takes a new safety copy before undoing. The card then reads **Restore undone**, names that new copy, and offers no second undo. To reverse an undo, restore that new safety copy from **Copies kept on this computer**.
 
 If you later want to restore an older `before-restore` file from the **Copies kept on this computer** list, clicking **Restore** on that row opens the regular restore planner and asks all the normal choices. Only the immediate **Undo this restore** button shown right after a restore executes the automatic undo workflow.
 

@@ -11916,10 +11916,24 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 }
 
 /* The part of a block that a later, cascaded block covers on the right
-   (--cal-covered, set per block): its text wraps and its Move button sits
-   inside the part that stays in view. */
+   (--cal-covered, set per block): its text wraps inside the part that stays
+   in view, and its Move button sits there too (--cal-move-right). */
 .cal-block__content {
   margin-right: var(--cal-covered, 0px);
+}
+
+/* A later block drawn below this one's head covers its right part from there
+   down: the head keeps the full width and the lines below wrap beside the
+   cover (the gap's height is the head's, set per block). */
+.cal-block__cover-gap {
+  float: right;
+  width: 0;
+}
+
+.cal-block__cover {
+  float: right;
+  clear: right;
+  height: 2000px;
 }
 
 .cal-block--estimate {
@@ -12011,7 +12025,7 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 .cal-block__move-slot {
   position: absolute;
   top: 0;
-  right: var(--cal-covered, 0px);
+  right: var(--cal-move-right, 0px);
   z-index: 1;
 }
 
@@ -12037,16 +12051,27 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
      width and Move a row of its own at the foot, the block drawn tall enough
      for both. */
   .cal-block--narrow.cal-block--movable {
+    /* NARROW_HEAD_PX in admin_calendar.jsx */
     min-height: 100px;
   }
   .cal-block--narrow.cal-block--movable .cal-block__open {
-    padding: 6px 5px 48px;
+    padding: 6px 5px 46px;
   }
   .cal-block--narrow .cal-block__content::before {
     display: none;
   }
   .cal-block--narrow.cal-block--movable .cal-block__name {
-    -webkit-line-clamp: 2;
+    -webkit-line-clamp: 3;
+  }
+  /* A touch screen keeps a hover after a tap: a short narrow block stays at
+     its name and start, with the Move row under them, hovered or not. */
+  .cal-block--short.cal-block--narrow.cal-block--movable .cal-block__time,
+  .cal-block--short.cal-block--narrow.cal-block--movable .cal-block__meta,
+  .cal-block--short.cal-block--narrow.cal-block--movable .cal-block__warn-line {
+    display: none;
+  }
+  .cal-block--short.cal-block--narrow.cal-block--movable .cal-block__short-start {
+    display: inline;
   }
   .cal-block--narrow .cal-block__move-slot {
     top: auto;

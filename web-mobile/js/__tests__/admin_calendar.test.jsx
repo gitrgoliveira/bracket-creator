@@ -19,7 +19,8 @@ import {
   detectOffScreenOverlaps,
   computeBlocksLayout,
   CASCADE_PX,
-  COARSE_LANE_PX,
+  SAME_START_DROP_PX,
+  NARROW_HEAD_PX,
   pauseLabelLane,
   fitBlockLines,
   calendarLayout,
@@ -378,11 +379,32 @@ describe('admin_calendar pure layout helper', () => {
       expect(blocks.map((b) => b.left)).toEqual([0, 200, 0]);
     });
 
-    it('gives a block that starts with an earlier one the right half, and keeps the earlier one\'s text to its own half', () => {
+    it('draws a block that starts with an earlier one below its head, cascaded over its right part like a later start', () => {
       const blocks = layout([comp('a', 'First', ['A'], 600, 700), comp('b', 'Second', ['A'], 600, 700)]);
+      const top = (600 - 8 * 60) * PX_PER_MINUTE;
       expect(blocks.map((b) => [b.left, b.width])).toEqual([[0, 200], [100, 100]]);
+      expect(blocks[0].top).toBe(top);
+      expect(blocks[1].top).toBe(top + SAME_START_DROP_PX);
+      // Its foot stays at its end.
+      expect(blocks[1].top + blocks[1].height).toBe(blocks[0].top + blocks[0].height);
+      // The first keeps its full width for its head, and is covered on the right below it.
       expect(blocks[0].coveredRight).toBe(100);
+      expect(blocks[0].coveredTop).toBe(SAME_START_DROP_PX);
       expect(blocks[1].coveredRight).toBe(0);
+      // A third with the same start goes below the second's head.
+      const three = layout([comp('a', 'First', ['A'], 600, 800), comp('b', 'Second', ['A'], 600, 800), comp('c', 'Third', ['A'], 600, 800)]);
+      expect(three.map((b) => b.top)).toEqual([top, top + SAME_START_DROP_PX, top + 2 * SAME_START_DROP_PX]);
+    });
+
+    it('draws a block that starts with a touch screen\'s narrow block below the whole of it, Move row included', () => {
+      const blocks = computeBlocksLayout({
+        calendar: { competitions: [comp('a', 'First', ['A'], 600, 683), comp('b', 'Second', ['A'], 600, 650)] },
+        visibleDays: [{ day: 1 }], courts: ['A'], laneWidth: 78, startHour: 8, endHour: 18, coarse: true,
+      });
+      expect(blocks[1].top - blocks[0].top).toBe(NARROW_HEAD_PX);
+      // Below the first's foot it no longer clashes, so it keeps the lane's full width.
+      expect([blocks[1].left, blocks[1].width]).toEqual([0, 78]);
+      expect(blocks[0].coveredRight).toBe(0);
     });
 
     it('keeps the earlier block\'s text clear of a later block that covers its right part', () => {
@@ -410,16 +432,24 @@ describe('admin_calendar pure layout helper', () => {
     });
   });
 
-  describe('touch screens', () => {
-    it('never draws a lane narrower than a name beside its Move button', () => {
-      const calendar = { courts: ['A', 'B', 'C'], days: [{ day: 1, date: '16-05-2026' }, { day: 2, date: '17-05-2026' }], competitions: [] };
-      const phone = calendarLayout({ calendar, width: 320, phone: true, coarse: true });
-      expect(phone.laneWidth).toBe(COARSE_LANE_PX);
-      expect(phone.lanesScrollSideways).toBe(true);
-      const tablet = calendarLayout({ calendar, width: 768, coarse: true });
-      expect(tablet.laneWidth).toBeGreaterThanOrEqual(COARSE_LANE_PX);
-      expect(tablet.daysShown).toBe(1);
-      expect(calendarLayout({ calendar, width: 320, phone: true }).laneWidth).toBeLessThan(COARSE_LANE_PX);
+  describe('lane widths', () => {
+    const calendar = { courts: ['A', 'B', 'C'], days: [{ day: 1, date: '16-05-2026' }, { day: 2, date: '17-05-2026' }], competitions: [] };
+    it('keeps a phone\'s lanes at the plan\'s 76 px at least, and scrolls only when they do not fit', () => {
+      const tight = calendarLayout({ calendar, width: 240, phone: true });
+      expect(tight.laneWidth).toBe(PHONE_LANE_PX);
+      expect(tight.lanesScrollSideways).toBe(true);
+      const phone = calendarLayout({ calendar, width: 320, phone: true });
+      expect(phone.laneWidth).toBeGreaterThanOrEqual(PHONE_LANE_PX);
+      expect(phone.lanesScrollSideways).toBe(false);
+    });
+    it('shares the inside of the grid\'s frame, not the page\'s width, so lanes that fit do not scroll', () => {
+      // A 375 px phone: 16 px page padding each side and the frame's 1 px border.
+      const layoutAt375 = calendarLayout({ calendar, width: 375, frameWidth: 341, phone: true });
+      expect(layoutAt375.laneWidth).toBe(Math.floor((341 - CLOCK_COL_PX) / 3));
+      expect(CLOCK_COL_PX + layoutAt375.dayGridWidth).toBeLessThanOrEqual(341);
+      expect(layoutAt375.lanesScrollSideways).toBe(false);
+      // The page's width still decides the phone layout.
+      expect(calendarLayout({ calendar, width: 1280, frameWidth: 1214 }).isPhone).toBe(false);
     });
   });
 

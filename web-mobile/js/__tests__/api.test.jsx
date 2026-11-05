@@ -2029,6 +2029,8 @@ describe('API Utils', () => {
         ['undo_stale', 'Undo is stale, please refresh.'],
         ['retime_retry', 'Retime conflict, retry.'],
         ['retime_unavailable', 'Retime slot unavailable.'],
+        ['retime_past_midnight', 'That start runs past midnight.'],
+        ['court_past_midnight', 'Shiaijo A is planned until after midnight.'],
       ])('rejects with e.code %s and server message on 409', async (code, errorMsg) => {
         global.fetch = vi.fn().mockResolvedValue({
           ok: false,

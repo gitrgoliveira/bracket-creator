@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gitrgoliveira/bracket-creator/internal/engine"
@@ -111,7 +110,7 @@ func RegisterDraftEstimateHandlers(r gin.IRoutes, store TournamentLoader, eng Dr
 				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 				return
 			}
-			if _, err := time.Parse("15:04", rawStartTime); err != nil {
+			if _, ok := state.ParseClockMinutes(rawStartTime); !ok {
 				c.JSON(http.StatusBadRequest, gin.H{"error": "startTime must be HH:MM"})
 				return
 			}

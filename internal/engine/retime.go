@@ -31,6 +31,14 @@ var (
 	// ErrRestoreUnknownMatch is returned by a restore that names a match the
 	// competition does not hold. Nothing is written.
 	ErrRestoreUnknownMatch = errors.New("restore names a match this competition does not hold")
+	// ErrRestoreBadTime is returned by a restore whose time to put back is
+	// neither empty nor an "HH:MM" clock. Nothing is written.
+	ErrRestoreBadTime = errors.New("restore names a match time that is not HH:MM")
+	// ErrRetimePastMidnight is returned when the new day and start would carry a
+	// match past midnight: a match time is a bare "HH:MM", so it would read as
+	// an early-morning time and sort first in the court queue. Nothing is
+	// written.
+	ErrRetimePastMidnight = errors.New("the new day and start would run some matches past midnight")
 )
 
 // MatchTimeChange is one match whose ScheduledAt a re-time changed. Was and
@@ -160,8 +168,9 @@ func RetimeDrawTx(tx state.StoreTx, oldComp, newComp *state.Competition, in Reti
 }
 
 // RestoreMatchTimesTx puts back the times a move changed (the exact Undo,
-// DR3). It checks every listed match first: each must exist and still hold
-// the time the move gave it, else nothing is written.
+// DR3). It checks every listed match first: each must exist, still hold the
+// time the move gave it, and have a time to put back that is empty or an
+// "HH:MM" clock, else nothing is written.
 func RestoreMatchTimesTx(tx state.StoreTx, comp *state.Competition, restore []MatchTimeChange) error {
 	if comp.Status != state.CompStatusDrawReady {
 		return ErrRetimeNotDrawReady
@@ -201,6 +210,9 @@ func RestoreMatchTimesTx(tx state.StoreTx, comp *state.Competition, restore []Ma
 		if *at != ch.Now {
 			return ErrUndoStale
 		}
+		if _, ok := state.ParseClockMinutes(ch.Was); ch.Was != "" && !ok {
+			return fmt.Errorf("%w: %q", ErrRestoreBadTime, ch.Was)
+		}
 	}
 	for _, ch := range restore {
 		*slots[ch.MatchID] = ch.Was
@@ -234,6 +246,9 @@ func planRetime(pool []state.MatchResult, bracket *state.Bracket, oldComp, newCo
 
 	stored := scheduledRows(pool, bracket)
 	moved := scheduledRows(newPool, newBracket)
+	if wrapsPastMidnight(moved, newComp) {
+		return nil, nil, RetimeOutcome{}, ErrRetimePastMidnight
+	}
 	fresh := scheduledRows(oldPool, oldBracket)
 
 	var out RetimeOutcome
@@ -302,6 +317,20 @@ type scheduledRow struct {
 	inBracket bool
 }
 
+// wrapsPastMidnight reports whether a re-timed match reads earlier than the
+// day's first possible start. The assigners only move a time forward from that
+// start, so such a time is one that ran past 24:00 and wrapped to "00:xx".
+func wrapsPastMidnight(rows []scheduledRow, comp *state.Competition) bool {
+	dayStart, _ := parseCeremonyParams(comp, nil)
+	first := dayStart.Hour()*60 + dayStart.Minute()
+	for _, r := range rows {
+		if mins, ok := state.ParseClockMinutes(r.at); ok && mins < first {
+			return true
+		}
+	}
+	return false
+}
+
 func scheduledRows(pool []state.MatchResult, bracket *state.Bracket) []scheduledRow {
 	rows := make([]scheduledRow, 0, len(pool))
 	for _, m := range pool {
@@ -335,8 +364,8 @@ func retimeCourts(old, moved []scheduledRow, poolMin, knockoutMin int) (int, []R
 		if !old[i].toPlay {
 			continue
 		}
-		before, okBefore := clockMinutes(old[i].at)
-		after, okAfter := clockMinutes(moved[i].at)
+		before, okBefore := state.ParseClockMinutes(old[i].at)
+		after, okAfter := state.ParseClockMinutes(moved[i].at)
 		if !okBefore || !okAfter {
 			continue
 		}
@@ -362,15 +391,6 @@ func retimeCourts(old, moved []scheduledRow, poolMin, knockoutMin int) (int, []R
 	}
 	sort.Slice(courts, func(i, j int) bool { return courts[i].Court < courts[j].Court })
 	return count, courts
-}
-
-// clockMinutes reads a ScheduledAt ("15:04") as minutes from midnight.
-func clockMinutes(at string) (int, bool) {
-	t, err := time.Parse(scheduleClockLayout, at)
-	if err != nil {
-		return 0, false
-	}
-	return t.Hour()*60 + t.Minute(), true
 }
 
 // recoverLeagueSlots reads the time slots of a stored league back from its

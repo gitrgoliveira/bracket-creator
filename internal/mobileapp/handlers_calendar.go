@@ -9,12 +9,10 @@
 package mobileapp
 
 import (
-	"errors"
 	"fmt"
 	"net/http"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gitrgoliveira/bracket-creator/internal/engine"
@@ -117,48 +115,21 @@ func RegisterCalendarHandlers(r gin.IRoutes, store CalendarStore, eng CalendarPl
 			c.JSON(http.StatusBadRequest, gin.H{"error": "startTime is required"})
 			return
 		}
-		if _, err := time.Parse("15:04", rawStartTime); err != nil {
+		if _, ok := state.ParseClockMinutes(rawStartTime); !ok {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "startTime must be HH:MM"})
 			return
-		}
-
-		rawCourts := c.Query("courts")
-		if strings.TrimSpace(rawCourts) == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "courts is required"})
-			return
-		}
-		parts := strings.Split(rawCourts, ",")
-		chosenCourts := make([]string, 0, len(parts))
-		seenCourts := make(map[string]bool, len(parts))
-		for _, p := range parts {
-			trimmed := strings.TrimSpace(p)
-			if trimmed == "" {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "court label cannot be empty"})
-				return
-			}
-			if seenCourts[trimmed] {
-				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("duplicate court label %q", trimmed)})
-				return
-			}
-			seenCourts[trimmed] = true
-			chosenCourts = append(chosenCourts, trimmed)
-		}
-
-		tournCourtMap := make(map[string]bool, len(tourn.Courts))
-		for _, tc := range tourn.Courts {
-			tournCourtMap[strings.TrimSpace(tc)] = true
-		}
-		for _, cc := range chosenCourts {
-			if !tournCourtMap[cc] {
-				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("court label %q is not held by the tournament", cc)})
-				return
-			}
 		}
 
 		// A config with no status is one not yet drawn, as the estimate reads it.
 		notDrawn := comp.Status == state.CompStatusSetup || comp.Status == ""
 		targetToPlace := comp
 		if notDrawn {
+			// Only a competition not yet drawn is placed on the courts asked for;
+			// a drawn one keeps the shiaijo of its draw, so it needs none.
+			chosenCourts, ok := calendarPreviewCourts(c, tourn)
+			if !ok {
+				return
+			}
 			clone := *comp
 			clone.Date = matchedDay
 			clone.StartTime = rawStartTime
@@ -209,14 +180,11 @@ func RegisterCalendarHandlers(r gin.IRoutes, store CalendarStore, eng CalendarPl
 			moved.Date = matchedDay
 			moved.StartTime = rawStartTime
 			out, err := eng.RetimePreview(comp, &moved)
-			switch {
-			case errors.Is(err, engine.ErrRetimeUnavailable):
-				c.JSON(http.StatusConflict, gin.H{"code": "retime_unavailable", "error": "This competition's match order could not be read back, so its matches were not moved. Nothing was changed."})
-				return
-			case errors.Is(err, state.ErrCourtFloorPastMidnight):
-				c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
-				return
-			case err != nil:
+			if err != nil {
+				if refusal := retimeRefusal(err); refusal != nil {
+					writeTxResponse(c, refusal)
+					return
+				}
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to work out the new match times"})
 				return
 			}
@@ -232,4 +200,42 @@ func RegisterCalendarHandlers(r gin.IRoutes, store CalendarStore, eng CalendarPl
 			Retime:        retime,
 		})
 	})
+}
+
+// calendarPreviewCourts reads and checks the `courts` query of a preview for a
+// competition not yet drawn: shiaijo labels, each held by the tournament and
+// none repeated. It answers 400 and returns false when they do not hold.
+func calendarPreviewCourts(c *gin.Context, tourn *state.Tournament) ([]string, bool) {
+	rawCourts := c.Query("courts")
+	if strings.TrimSpace(rawCourts) == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "courts is required"})
+		return nil, false
+	}
+	held := make(map[string]bool, len(tourn.Courts))
+	for _, tc := range tourn.Courts {
+		held[strings.TrimSpace(tc)] = true
+	}
+	parts := strings.Split(rawCourts, ",")
+	chosen := make([]string, 0, len(parts))
+	seen := make(map[string]bool, len(parts))
+	for _, p := range parts {
+		label := strings.TrimSpace(p)
+		switch {
+		case label == "":
+			c.JSON(http.StatusBadRequest, gin.H{"error": "court label cannot be empty"})
+			return nil, false
+		case seen[label]:
+			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("duplicate court label %q", label)})
+			return nil, false
+		}
+		seen[label] = true
+		chosen = append(chosen, label)
+	}
+	for _, label := range chosen {
+		if !held[label] {
+			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("court label %q is not held by the tournament", label)})
+			return nil, false
+		}
+	}
+	return chosen, true
 }

@@ -1654,38 +1654,20 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		var numberPrefixMoved bool
 		// Moving a drawn competition's date or start moves its matches with it
 		// (DR1), saved in the same transaction as the settings. What the re-time
-		// reads from the store (the tournament and the court floors) is read
-		// here, before the lock, because the transaction may not call a public
-		// Store method. The key records only this competition's own date and
-		// start: a change to either that lands in between is a retry and never a
-		// guess. A pause edit or another competition's move in that window is NOT
-		// guarded; the times it would have shifted are saved from the floors read
-		// here, which is the same drift the dialog's preview already shows (the
-		// engine's NotFreshCount).
-		type retimeKey struct{ oldDate, oldStart, newDate, newStart string }
-		var retimeIn *engine.RetimeInputs
-		var retimeFor retimeKey
+		// reads from the store is read here, before the lock, see readPendingRetime.
+		var pending *pendingRetime
 		if comp.Players == nil && req.RestoreMatchTimes == nil {
-			if pre, perr := store.LoadCompetition(id); perr == nil && pre != nil &&
-				pre.Status == state.CompStatusDrawReady && (pre.Date != comp.Date || pre.StartTime != comp.StartTime) {
-				moved := *pre
-				moved.Date, moved.StartTime = comp.Date, comp.StartTime
-				in, rerr := eng.ReadRetimeInputs(pre, &moved)
-				if rerr != nil {
-					if errors.Is(rerr, state.ErrCourtFloorPastMidnight) {
-						c.JSON(http.StatusConflict, gin.H{"error": rerr.Error()})
-						return
-					}
-					c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to read the schedule for the new time"})
+			var rerr error
+			if pending, rerr = readPendingRetime(store, eng, id, &comp); rerr != nil {
+				if refusal := retimeRefusal(rerr); refusal != nil {
+					writeTxResponse(c, refusal)
 					return
 				}
-				retimeIn = &in
-				retimeFor = retimeKey{pre.Date, pre.StartTime, comp.Date, comp.StartTime}
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to read the schedule for the new time"})
+				return
 			}
 		}
-		var undoStaleFlag, retimeRetryFlag, retimeUnavailableFlag bool
-		var retimeOut *engine.RetimeOutcome
-		timesRestored := false
+		var times drawnTimes
 		err := store.WithCompetitionRenameLock(func() error {
 			var updateErr error
 			changed, updateErr = store.UpdateCompetitionChangedTx(id, func(tx state.StoreTx, current *state.Competition) (*state.Competition, error) {
@@ -2305,43 +2287,9 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				if req.ExpectedParticipants != nil {
 					current.ExpectedParticipants = comp.ExpectedParticipants
 				}
-				if current.Status != state.CompStatusDrawReady {
-					if req.RestoreMatchTimes != nil {
-						undoStaleFlag = true
-						return nil, nil
-					}
-					return current, nil
-				}
-				switch {
-				case req.RestoreMatchTimes != nil:
-					// The exact Undo: write the times the move replaced, instead of
-					// the re-time the date change would run. Nothing is staged
-					// before every listed match has been checked.
-					switch rerr := engine.RestoreMatchTimesTx(tx, current, *req.RestoreMatchTimes); {
-					case errors.Is(rerr, engine.ErrUndoStale):
-						undoStaleFlag = true
-						return nil, nil
-					case errors.Is(rerr, engine.ErrRestoreUnknownMatch):
-						validationErr = rerr
-						return nil, nil
-					case rerr != nil:
-						return nil, rerr
-					}
-					timesRestored = len(*req.RestoreMatchTimes) > 0
-				case before.Date != current.Date || before.StartTime != current.StartTime:
-					if retimeIn == nil || retimeFor != (retimeKey{before.Date, before.StartTime, current.Date, current.StartTime}) {
-						retimeRetryFlag = true
-						return nil, nil
-					}
-					out, rerr := engine.RetimeDrawTx(tx, &before, current, *retimeIn)
-					if errors.Is(rerr, engine.ErrRetimeUnavailable) {
-						retimeUnavailableFlag = true
-						return nil, nil
-					}
-					if rerr != nil {
-						return nil, rerr
-					}
-					retimeOut = &out
+				var terr error
+				if times, terr = applyDrawnTimes(tx, &before, current, req.RestoreMatchTimes, pending); terr != nil || times.refusal != nil {
+					return nil, terr
 				}
 				return current, nil
 			})
@@ -2355,16 +2303,8 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			c.JSON(http.StatusNotFound, gin.H{"error": "competition not found"})
 			return
 		}
-		if undoStaleFlag {
-			c.JSON(http.StatusConflict, gin.H{"code": "undo_stale", "error": "Changed since the move; Undo not applied."})
-			return
-		}
-		if retimeRetryFlag {
-			c.JSON(http.StatusConflict, gin.H{"code": "retime_retry", "error": "This competition changed while you were moving it. Nothing was moved; try again."})
-			return
-		}
-		if retimeUnavailableFlag {
-			c.JSON(http.StatusConflict, gin.H{"code": "retime_unavailable", "error": "This competition's match order could not be read back, so its matches were not moved. Nothing was changed."})
+		if times.refusal != nil {
+			writeTxResponse(c, times.refusal)
 			return
 		}
 		if configChangedFlag {
@@ -2566,7 +2506,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		if changed || participantsChanged || renumbered {
 			hub.Broadcast(EventTournamentUpdated, nil)
 		}
-		if timesRestored || (retimeOut != nil && retimeOut.AnyChange) {
+		if times.restored || (times.retime != nil && times.retime.AnyChange) {
 			hub.Broadcast(EventScheduleUpdated, nil)
 		}
 		// Re-load to return the actual on-disk state (with non-settings
@@ -2664,14 +2604,14 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			NotFreshCount *int                      `json:"notFreshCount,omitempty"`
 			TimesChanged  *bool                     `json:"timesChanged,omitempty"`
 		}{Competition: updated, Warnings: nearDupWarnings}
-		if retimeOut != nil {
-			previous := retimeOut.Changes
+		if times.retime != nil {
+			previous := times.retime.Changes
 			if previous == nil {
 				previous = []engine.MatchTimeChange{}
 			}
 			answer.PreviousTimes = &previous
-			answer.NotFreshCount = &retimeOut.NotFreshCount
-			answer.TimesChanged = &retimeOut.AnyChange
+			answer.NotFreshCount = &times.retime.NotFreshCount
+			answer.TimesChanged = &times.retime.AnyChange
 		}
 		c.JSON(http.StatusOK, answer)
 	})

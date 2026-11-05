@@ -5208,7 +5208,7 @@ const API = {
                 e.configVersion = err.configVersion || '';
                 e.competition = err.competition || null;
             }
-            if (res.status === 409 && (err.code === 'undo_stale' || err.code === 'retime_retry' || err.code === 'retime_unavailable')) {
+            if (res.status === 409 && ['undo_stale', 'retime_retry', 'retime_unavailable', 'retime_past_midnight', 'court_past_midnight'].includes(err.code)) {
                 e.code = err.code;
             }
             throw e;

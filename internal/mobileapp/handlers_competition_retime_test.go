@@ -333,3 +333,77 @@ func TestPutRetime_ADrawnCompetitionThatNeverStoredTwoThirdPlacesCanStillMove(t 
 	require.Equalf(t, http.StatusOK, w.Code, "%s", w.Body.String())
 	_ = version
 }
+
+// A match time is a bare "HH:MM": a start that carries the competition's own
+// matches past midnight is refused with a code the client can branch on, and
+// neither the settings nor the times are written.
+func TestPutRetime_AStartThatRunsPastMidnightIs409WithACode(t *testing.T) {
+	r, store, _, version, cid := retimeFixture(t, state.CompFormatMixed)
+	before := retimeTimes(t, store, cid)
+
+	w, ans := retimePut(t, r, store, cid, version, map[string]any{"startTime": "23:50"})
+	require.Equal(t, http.StatusConflict, w.Code, w.Body.String())
+	assert.Equal(t, "retime_past_midnight", ans.Code)
+	assert.Contains(t, ans.Error, "past midnight")
+	assert.Equal(t, before, retimeTimes(t, store, cid))
+	stored, err := store.LoadCompetition(cid)
+	require.NoError(t, err)
+	assert.Equal(t, "09:00", stored.StartTime, "the start is not saved when the matches cannot move")
+}
+
+// The time an Undo puts back is written as it comes, so it must be a clock.
+func TestPutRetime_ARestoreWithAMalformedTimeIs400AndWritesNothing(t *testing.T) {
+	r, store, _, version, cid := retimeFixture(t, state.CompFormatMixed)
+	before := retimeTimes(t, store, cid)
+	var id string
+	for matchID := range before {
+		id = matchID
+		break
+	}
+
+	w, ans := retimePut(t, r, store, cid, version, map[string]any{
+		"restoreMatchTimes": []engine.MatchTimeChange{{MatchID: id, Was: "later", Now: before[id]}},
+	})
+	require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+	assert.Contains(t, ans.Error, "not HH:MM")
+	assert.Equal(t, before, retimeTimes(t, store, cid))
+}
+
+// Every refusal of a move names its cause in a `code`, on the preview as on
+// the save: a start past midnight, and a shiaijo another competition holds
+// until midnight or later.
+func TestCalendarPreview_RefusalsOfAMoveCarryACode(t *testing.T) {
+	_, store, _, _, cid := retimeFixture(t, state.CompFormatMixed)
+	r := calendarOnlyRouter(store)
+
+	w := getCalendarPreview(t, r, "competitionId="+cid+"&date=10-06-2026&startTime=23:50", "")
+	require.Equal(t, http.StatusConflict, w.Code, w.Body.String())
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+	assert.Equal(t, "retime_past_midnight", body["code"])
+
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: "late", Name: "Late Open", Format: state.CompFormatLeague,
+		Date: "10-06-2026", StartTime: "21:00", Courts: []string{"A"},
+		PoolMatchDurationSeconds: 180, Status: state.CompStatusDrawReady,
+	}))
+	require.NoError(t, store.SavePoolMatches("late", []state.MatchResult{
+		{ID: "Pool A-0", Court: "A", ScheduledAt: "23:58", Status: state.MatchStatusScheduled},
+	}))
+	w = getCalendarPreview(t, r, "competitionId="+cid+"&date=10-06-2026&startTime=22:00", "")
+	require.Equal(t, http.StatusConflict, w.Code, w.Body.String())
+	body = nil
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+	assert.Equal(t, "court_past_midnight", body["code"])
+	assert.Equal(t, "late", body["competitionId"])
+	assert.NotEmpty(t, body["court"])
+}
+
+// A drawn competition keeps the shiaijo of its draw, so its preview asks for
+// no `courts`; one not yet drawn still must name them.
+func TestCalendarPreview_ADrawnCompetitionNeedsNoCourts(t *testing.T) {
+	_, store, _, _, cid := retimeFixture(t, state.CompFormatMixed)
+	r := calendarOnlyRouter(store)
+	w := cvGet(t, r, "/api/schedule/calendar/preview?competitionId="+cid+"&date=10-06-2026&startTime=11:00")
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+}

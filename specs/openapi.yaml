@@ -1421,13 +1421,14 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           description: |
-            Conflict. Eight distinct cases, all 409:
+            Conflict. Ten distinct cases, all 409:
 
             * `undo_stale`: a save with `restoreMatchTimes` for a competition that is no
               longer `draw-ready`, or one of whose listed matches no longer holds the time
               the move gave it. Nothing was written; the body is
               `{code: "undo_stale", error: "Changed since the move; Undo not applied."}`.
-              An unknown match id in the list is a 400.
+              An unknown match id in the list, or a `was` that is neither empty nor an `HH:MM`
+              clock, is a 400.
 
             * `retime_retry`: the date or start was moved on a competition that was drawn,
               or changed, between the server's read and the save. Nothing was moved; the
@@ -1436,6 +1437,17 @@ paths:
             * `retime_unavailable`: a league's stored match order could not be read back as
               time slots, so its matches were not moved and nothing was saved; the body is
               `{code: "retime_unavailable", error}`.
+
+            * `retime_past_midnight`: the new date or start would carry some of the
+              drawn competition's own matches past midnight, which a match time
+              (`HH:MM`) cannot show. Nothing was moved or saved; the body is
+              `{code: "retime_past_midnight", error}`.
+
+            * `court_past_midnight`: a shiaijo the competition shares is planned until
+              after midnight by another competition that day, so the move has no slot
+              there. Nothing was moved or saved; the body is
+              `{code: "court_past_midnight", error, court, competitionId}`, as on
+              `POST .../generate-draw`.
 
             * `config_changed`: a settings save whose `configVersion` is not
               the stored config's. Nothing was written; the body is
@@ -5960,11 +5972,14 @@ paths:
           description: Start time, 24-hour HH:MM.
         - in: query
           name: courts
-          required: true
+          required: false
           schema:
             type: string
           example: "B,C"
-          description: Comma-separated shiaijo labels (e.g. B,C).
+          description: >
+            Comma-separated shiaijo labels (e.g. B,C). Required for a competition not
+            yet drawn, which is placed on them; a drawn competition keeps the shiaijo
+            of its draw and ignores it.
       responses:
         '200':
           description: The preview placement and overlaps.
@@ -5978,6 +5993,26 @@ paths:
           description: Missing or incorrect admin password.
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          description: |
+            The move of a drawn competition cannot be previewed. The body always
+            carries a `code`: `retime_unavailable` (a league's stored match order
+            could not be read back), `retime_past_midnight` (the start would carry
+            the competition's own matches past midnight) or `court_past_midnight`
+            (another competition holds a shared shiaijo until after midnight; the
+            body also names `court` and `competitionId`).
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [code, error]
+                properties:
+                  code:
+                    type: string
+                    enum: [retime_unavailable, retime_past_midnight, court_past_midnight]
+                  error: { type: string }
+                  court: { type: string }
+                  competitionId: { type: string }
         '500':
           $ref: '#/components/responses/InternalError'
 

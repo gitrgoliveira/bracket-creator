@@ -74,7 +74,7 @@ func storedTimes(t *testing.T, store *state.Store, comp *state.Competition) map[
 
 func minutesOf(t *testing.T, at string) int {
 	t.Helper()
-	m, ok := clockMinutes(at)
+	m, ok := state.ParseClockMinutes(at)
 	require.True(t, ok, "time %q", at)
 	return m
 }
@@ -221,6 +221,25 @@ func TestRetime_PreviewWritesNothingAndMatchesTheSave(t *testing.T) {
 	assert.Equal(t, preview, saved)
 }
 
+// A match time is a bare "HH:MM", so a start late enough to carry the
+// competition's own matches past 24:00 would write "00:xx" times that sort first
+// in the court queue. It is refused, in the dry run and the save, and nothing is
+// written.
+func TestRetime_AStartThatRunsTheCompetitionPastMidnightIsRefused(t *testing.T) {
+	eng, store, comp := drawnForRetime(t, state.CompFormatMixed, []string{"A", "B"}, 8, retimeTournament([]string{"A", "B"}))
+	before := storedTimes(t, store, comp)
+	late := movedTo(comp, comp.Date, "23:50")
+
+	_, err := eng.RetimePreview(comp, late)
+	assert.ErrorIs(t, err, ErrRetimePastMidnight)
+	_, err = retimeInTx(t, eng, store, comp, late)
+	assert.ErrorIs(t, err, ErrRetimePastMidnight)
+	assert.Equal(t, before, storedTimes(t, store, comp))
+
+	_, err = eng.RetimePreview(comp, movedTo(comp, comp.Date, "20:00"))
+	assert.NoError(t, err, "a start that finishes before midnight is not refused")
+}
+
 func TestRetime_RefusesACompetitionThatIsNotDrawReady(t *testing.T) {
 	eng, store, comp := drawnForRetime(t, state.CompFormatMixed, []string{"A", "B"}, 8, retimeTournament([]string{"A", "B"}))
 	before := storedTimes(t, store, comp)
@@ -327,6 +346,21 @@ func TestRestoreMatchTimesTx_UnknownMatchEmptyListAndStartedCompetition(t *testi
 	require.NoError(t, store.WithTransaction(comp.ID, func(tx state.StoreTx) error {
 		return RestoreMatchTimesTx(tx, comp, []MatchTimeChange{})
 	}))
+
+	// A time to put back must be empty or an HH:MM clock: it is written as it
+	// comes, so nothing else may reach the store.
+	var someID string
+	for id := range before {
+		someID = id
+		break
+	}
+	for _, bad := range []string{"9am", "25:00", "09:60", "09:00:00"} {
+		err = store.WithTransaction(comp.ID, func(tx state.StoreTx) error {
+			return RestoreMatchTimesTx(tx, comp, []MatchTimeChange{{MatchID: someID, Was: bad, Now: before[someID]}})
+		})
+		assert.ErrorIs(t, err, ErrRestoreBadTime, bad)
+	}
+	assert.Equal(t, before, storedTimes(t, store, comp), "nothing is written")
 
 	started := *comp
 	started.Status = state.CompStatusPools

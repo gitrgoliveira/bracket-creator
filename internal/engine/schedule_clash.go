@@ -136,7 +136,7 @@ type clashCandidate struct {
 }
 
 func toClashCandidate(comp *state.Competition, place CompetitionPlacement) (*clashCandidate, bool) {
-	if !place.Placed && place.NotPlacedReason != "date_outside_tournament" {
+	if !place.TakesPartInClashes() {
 		return nil, false
 	}
 	if len(place.Windows) == 0 {

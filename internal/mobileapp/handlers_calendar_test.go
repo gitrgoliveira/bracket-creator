@@ -177,7 +177,6 @@ func TestCalendarPreview_Refusals(t *testing.T) {
 		{"missing date", "competitionId=c1&startTime=09:00&courts=A", "date is required"},
 		{"date not a tournament day", "competitionId=c1&date=03-06-2026&startTime=09:00&courts=A", "date must be one of the tournament days"},
 		{"bad startTime format", "competitionId=c1&date=01-06-2026&startTime=25:00&courts=A", "startTime must be HH:MM"},
-		{"bad startTime length", "competitionId=c1&date=01-06-2026&startTime=9:00&courts=A", "startTime must be HH:MM"},
 		{"empty startTime", "competitionId=c1&date=01-06-2026&startTime=&courts=A", "startTime is required"},
 		{"missing courts", "competitionId=c1&date=01-06-2026&startTime=09:00", "courts is required"},
 		{"empty courts", "competitionId=c1&date=01-06-2026&startTime=09:00&courts=", "courts is required"},
@@ -388,4 +387,28 @@ func TestCalendarPreview_DrawnCompetitionOverlapsUseStoredDay(t *testing.T) {
 	require.Len(t, resp.Overlaps, 1, "overlaps must only include competitions overlapping stored windows on day 1")
 	assert.Equal(t, "c_day1", resp.Overlaps[0].CompetitionID)
 	assert.Equal(t, "Day 1 Comp", resp.Overlaps[0].Name)
+}
+
+func TestCalendarPreview_StartTimeValidation(t *testing.T) {
+	store, r := setupCalendarTestEnv(t)
+
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:                   "c1",
+		Name:                 "Preview Comp",
+		Date:                 "01-06-2026",
+		StartTime:            "09:00",
+		Courts:               []string{"A"},
+		Format:               state.CompFormatKnockout,
+		ExpectedParticipants: 8,
+		Status:               state.CompStatusSetup,
+	}))
+
+	wValid := getCalendarPreview(t, r, "competitionId=c1&date=01-06-2026&startTime=9:05&courts=A", "main-pw")
+	assert.Equal(t, http.StatusOK, wValid.Code, wValid.Body.String())
+
+	wInvalid := getCalendarPreview(t, r, "competitionId=c1&date=01-06-2026&startTime=25:99&courts=A", "main-pw")
+	assert.Equal(t, http.StatusBadRequest, wInvalid.Code, wInvalid.Body.String())
+	var body map[string]string
+	require.NoError(t, json.Unmarshal(wInvalid.Body.Bytes(), &body))
+	assert.Contains(t, body["error"], "startTime must be HH:MM")
 }

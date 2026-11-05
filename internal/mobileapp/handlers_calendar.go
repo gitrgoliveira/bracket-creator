@@ -111,10 +111,6 @@ func RegisterCalendarHandlers(r gin.IRoutes, store CalendarStore, eng CalendarPl
 			c.JSON(http.StatusBadRequest, gin.H{"error": "startTime is required"})
 			return
 		}
-		if len(rawStartTime) != 5 {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "startTime must be HH:MM"})
-			return
-		}
 		if _, err := time.Parse("15:04", rawStartTime); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "startTime must be HH:MM"})
 			return
@@ -171,12 +167,12 @@ func RegisterCalendarHandlers(r gin.IRoutes, store CalendarStore, eng CalendarPl
 		}
 
 		overlapsList := make([]CalendarOverlap, 0)
-		if placement.Placed {
+		if placement.TakesPartInClashes() {
 			for _, other := range cal.Competitions {
 				if other.ID == comp.ID {
 					continue
 				}
-				if !other.Placement.Placed || other.Placement.Day != placement.Day {
+				if !other.Placement.TakesPartInClashes() || other.Placement.Day != placement.Day {
 					continue
 				}
 				for court, previewWin := range placement.Windows {

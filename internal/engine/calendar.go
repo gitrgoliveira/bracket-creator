@@ -37,6 +37,11 @@ type CompetitionPlacement struct {
 	Minutes         int                          `json:"minutes,omitempty"`
 }
 
+// TakesPartInClashes reports whether the placement is compared for schedule clashes: a placed competition, or one whose date falls outside the tournament (it still holds its courts on that date).
+func (p CompetitionPlacement) TakesPartInClashes() bool {
+	return p.Placed || p.NotPlacedReason == "date_outside_tournament"
+}
+
 // CalendarBreak describes a scheduled pause window during a tournament day.
 type CalendarBreak struct {
 	Name      string `json:"name"`
@@ -467,7 +472,7 @@ func (e *Engine) TournamentCalendar() (*TournamentCalendarResult, error) {
 		for j := i + 1; j < len(comps); j++ {
 			pI := placements[i]
 			pJ := placements[j]
-			if !pI.Placed || !pJ.Placed {
+			if !pI.TakesPartInClashes() || !pJ.TakesPartInClashes() {
 				continue
 			}
 			if !state.SameDate(comps[i].Date, comps[j].Date) {

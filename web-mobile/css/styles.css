@@ -11306,7 +11306,8 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 .backup-page { max-width: 1000px; }
 .backup-page > .alert,
 .backup-page > .card { margin-bottom: 20px; }
-.backup-intro {
+.backup-intro,
+.backup-detail {
   margin: 0 0 12px;
   font-size: var(--fs-sm);
   line-height: var(--lh-base);
@@ -11362,6 +11363,10 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 .backup-row__main,
 .backup-row__name { min-width: 0; overflow-wrap: anywhere; }
 .backup-row__name { font-weight: 600; }
+/* The name column wraps its own text before the row drops its buttons below,
+   so a long name never moves the button; only a row of several buttons wraps. */
+.backup-row__main { flex: 1 1 10rem; }
+.backup-row__head .backup-row__name { flex: 1 1 0; }
 .backup-row__main .backup-row__meta { margin-left: 8px; }
 .backup-row__title {
   display: flex;
@@ -11369,7 +11374,7 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   align-items: center;
   gap: 8px;
 }
-.backup-row__title + .backup-row__meta { display: block; margin: 2px 0 0; }
+.backup-row__title + .backup-row__meta { display: block; margin: 4px 0 0; }
 .backup-row__meta {
   font-size: var(--fs-sm);
   color: var(--ink-3);
@@ -11382,6 +11387,8 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 .backup-row__actions,
 .backup-row__head .btn { white-space: nowrap; }
 .backup-row__actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.backup-choices { margin: 0; padding: 0; border: 0; min-width: 0; }
+.backup-choices > legend { padding: 0; }
 .backup-choice,
 .backup-choice__radio {
   display: flex;

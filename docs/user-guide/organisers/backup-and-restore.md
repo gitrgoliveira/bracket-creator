@@ -61,11 +61,11 @@ In the restore plan, each competition from the backup has a **Restore only this 
 When restoring, the plan presents you with decisions depending on what is currently in your data folder:
 
 - **For a competition that already exists in the folder**:
-    - **Replace "<name>"**: overwrites the current competition with the one from the backup.
+    - **Replace it**: overwrites the current competition with the one from the backup.
     - **Restore as a copy named:** keeps your current competition intact and restores the backup copy under a new name. You must type a name for the new copy in the box.
 - **For a competition that exists in the folder but is missing from the backup file** (when restoring a whole tournament):
-    - **Keep "<name>"**: leaves the competition in your tournament folder as it is.
-    - **Remove "<name>"**: deletes the competition from your tournament folder.
+    - **Keep it**: leaves the competition in your tournament folder as it is.
+    - **Remove it**: deletes the competition from your tournament folder.
 
 Nothing is preselected. Until you make a choice for every competition that requires one, the button stays disabled and names the next open choice, for example `Choose what to do with "Mens Individual"` or `Enter name for copy of "Mens Individual"`.
 

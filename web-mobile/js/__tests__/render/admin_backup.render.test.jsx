@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, act, fireEvent, waitFor, screen } from '@testing-library/react';
+import { render, act, fireEvent, waitFor, screen, within } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vitest';
 import { installWindowStubs } from '../helpers/stub_globals.js';
 
@@ -42,13 +42,18 @@ afterAll(() => {
   restoreGlobals();
 });
 
+// A competition's choices are one group, named by the competition; inside it
+// each label says only what it does ("Replace it"), so the name is said once.
+const choiceIn = (compName, label) =>
+  within(screen.getByRole('group', { name: new RegExp(`^${compName} `) })).getByLabelText(label);
+
 const defaultTournament = {
   name: 'Spring Taikai',
   date: '01-06-2026',
   venue: 'Main Arena',
   courts: ['A', 'B'],
   competitions: [
-    { id: 'c1', name: 'Open Individual', format: 'pools' },
+    { id: 'c1', name: 'Open Individual', format: 'mixed' },
     { id: 'c2', name: 'Women Individual', format: 'knockout' },
   ],
 };
@@ -143,7 +148,7 @@ describe('AdminBackupPage render tests', () => {
     expect(screen.getByText('Matches running')).toBeInTheDocument();
     expect(screen.getByText('Mode change')).toBeInTheDocument();
     expect(screen.getByText('Court missing')).toBeInTheDocument();
-    expect(screen.getByText(/1 recorded results in "Open Individual" will be lost or changed/i)).toBeInTheDocument();
+    expect(screen.getByText(/^1 recorded result in "Open Individual"$/)).toBeInTheDocument();
 
     // Verify both choice sets rendered with nothing preselected
     const radios = screen.getAllByRole('radio');
@@ -156,7 +161,7 @@ describe('AdminBackupPage render tests', () => {
     expect(restoreBtn).toBeDisabled();
 
     // Answer choice for c1 as "replace"
-    const replaceRadio = screen.getByLabelText(/Replace "Open Individual"/i);
+    const replaceRadio = choiceIn('Open Individual', 'Replace it');
     await act(async () => {
       fireEvent.click(replaceRadio);
     });
@@ -166,7 +171,7 @@ describe('AdminBackupPage render tests', () => {
     expect(restoreBtn2).toBeDisabled();
 
     // Answer choice for c3_missing as "remove"
-    const removeRadio = screen.getByLabelText(/Remove "Legacy Division"/i);
+    const removeRadio = choiceIn('Legacy Division', 'Remove it');
     await act(async () => {
       fireEvent.click(removeRadio);
     });
@@ -453,7 +458,7 @@ describe('AdminBackupPage render tests', () => {
 
     // Expect choices to be asked
     await waitFor(() => {
-      expect(screen.getByLabelText(/Replace "Open Individual"/i)).toBeInTheDocument();
+      expect(choiceIn('Open Individual', 'Replace it')).toBeInTheDocument();
     });
   });
 
@@ -493,7 +498,7 @@ describe('AdminBackupPage render tests', () => {
     // The server's warning is the one place running matches are named: no second list repeats it.
     expect(screen.getByText('Open Individual has 1 match running now.')).toBeInTheDocument();
     expect(screen.queryByText(/Running matches affected/i)).not.toBeInTheDocument();
-    expect(screen.getByText(/2 recorded results in "Open Individual" will be lost or changed/i)).toBeInTheDocument();
+    expect(screen.getByText(/^2 recorded results in "Open Individual"$/)).toBeInTheDocument();
     expect(screen.getByText(/Let every court device sync before you restore/i)).toBeInTheDocument();
   });
 
@@ -525,6 +530,29 @@ describe('AdminBackupPage render tests', () => {
     expect(screen.queryByText(/m7/)).not.toBeInTheDocument();
     expect(screen.getAllByText(/Juniors/).filter((el) => /Choose what to do/.test(el.textContent))).toHaveLength(1);
     expect(screen.queryByText(/Please /)).not.toBeInTheDocument();
+    // The competition's name heads its row once; the choices do not repeat it.
+    const group = screen.getByRole('group', { name: /Juniors.*not in the backup archive/ });
+    expect(within(group).getByLabelText('Keep it')).toBeInTheDocument();
+    expect(within(group).getByLabelText('Remove it')).toBeInTheDocument();
+    expect(within(group).queryByText(/Juniors/)).not.toBeInTheDocument();
+  });
+
+  it('names the copy box for its competition and shows each format by its label', async () => {
+    mockApi.planRestore.mockResolvedValueOnce({
+      scope: 'tournament',
+      competitions: [{ id: 'c1', name: 'Open Individual', asked: true, choices: ['replace', 'copy'] }],
+    });
+    const { container } = render(
+      <AdminBackupPage tournament={defaultTournament} password={TEST_KEY} />
+    );
+    expect(screen.getByText('Pools + Knockout')).toBeInTheDocument();
+    expect(screen.getByText('Knockout')).toBeInTheDocument();
+    const fileInput = container.querySelector('input[type="file"]');
+    await act(async () => {
+      fireEvent.change(fileInput, { target: { files: [new File(['dummy'], 'backup.zip')] } });
+    });
+    const box = await screen.findByRole('textbox', { name: 'Name for the copy of "Open Individual"' });
+    expect(box).not.toHaveAttribute('placeholder');
   });
 
   it('b. allowRunning: with running matches in the plan, restore is called with allowRunning true; without, it is not', async () => {
@@ -773,7 +801,8 @@ describe('AdminBackupPage render tests', () => {
     expect(mockApi.planRestore.mock.calls[0][0].undo).not.toBe(true);
 
     // Asked choices render with nothing selected
-    const radio = await screen.findByLabelText(/Replace "Open Individual"/i);
+    await screen.findByRole('group', { name: /Open Individual/ });
+    const radio = choiceIn('Open Individual', 'Replace it');
     expect(radio).toBeInTheDocument();
     expect(radio).not.toBeChecked();
 

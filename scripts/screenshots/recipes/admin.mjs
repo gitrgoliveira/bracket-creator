@@ -63,27 +63,30 @@ async function uploadArchive(page, archivePath) {
   await page.locator('text=Restore plan').first().waitFor({ state: 'visible', timeout: 15000 });
 }
 
-// Select "Replace" for an existing competition by its accessible label.
-async function chooseReplace(page, compName) {
-  const radio = page.getByLabel(`Replace "${compName}"`);
-  await radio.click();
+// A competition's choices are one group, named by the competition; each
+// label inside says only what it does ("Replace it"). The group's name starts
+// with the competition's, so "Mens Individual" never finds "Womens Individual".
+function choice(page, compName, label) {
+  return page.getByRole('group', { name: new RegExp(`^${compName} `) }).getByLabel(label, { exact: true });
 }
 
-// Select "Restore as a copy" and fill the new copy name.
-// The copy option wraps both the radio and text input inside a single label
-// with no unique accessible name, so we target the radio input directly by name
-// and the text input by placeholder.
+// Select "Replace" for an existing competition.
+async function chooseReplace(page, compName) {
+  await choice(page, compName, 'Replace it').click();
+}
+
+// Select "Restore as a copy" and fill the new copy name. The copy option wraps
+// both the radio and the text box in one label, so the radio is found by its
+// name and value, and the text box by its own accessible name.
 async function chooseCopy(page, compId, compName, copyName) {
   const radio = page.locator(`input[name="decision-${compId}"][value="copy"]`);
   await radio.click();
-  const input = page.getByPlaceholder(`${compName} (Copy)`);
-  await input.fill(copyName);
+  await page.getByLabel(`Name for the copy of "${compName}"`).fill(copyName);
 }
 
 // Select "Keep" for a competition missing from the backup archive.
 async function chooseKeep(page, compName) {
-  const radio = page.getByLabel(`Keep "${compName}"`);
-  await radio.click();
+  await choice(page, compName, 'Keep it').click();
 }
 
 // Answer the choices for the two competitions present in the backup archive.
@@ -251,8 +254,8 @@ export const recipes = [
     },
     assert: async ({ page }) => {
       // Both kinds of choice are on the page: replace-or-copy and keep-or-remove.
-      await page.getByLabel('Remove "Juniors Individual"').waitFor({ state: 'visible', timeout: 5000 });
-      await page.getByLabel('Replace "Mens Individual"').waitFor({ state: 'visible', timeout: 5000 });
+      await choice(page, 'Juniors Individual', 'Remove it').waitFor({ state: 'visible', timeout: 5000 });
+      await choice(page, 'Mens Individual', 'Replace it').waitFor({ state: 'visible', timeout: 5000 });
       const openBtn = page.getByRole('button', { name: 'Choose what to do with "Juniors Individual"' });
       await openBtn.waitFor({ state: 'visible', timeout: 5000 });
       if (!(await openBtn.isDisabled())) {

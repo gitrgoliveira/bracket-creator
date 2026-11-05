@@ -5,6 +5,8 @@ const { useState, useEffect, useRef, useCallback } = React;
 
 const AdminTopbar = window.AdminTopbar;
 const Breadcrumbs = window.Breadcrumbs;
+const formatLabel = window.formatLabel;
+const pluralize = window.pluralize;
 
 const RESTORE_TOO_LARGE_MESSAGE = "The backup file is over 64 MB. Restore it from Copies kept on this computer or the command line.";
 
@@ -366,7 +368,7 @@ function AdminBackupPage({ tournament, onBack, onLogout, onViewerMode, password,
             <div className="card__title">Restore completed</div>
             <div className="card__body">
               {restoreResult.safetyCopy && (
-                <p className="backup-intro">
+                <p className="backup-detail">
                   Safety copy created: <strong>{restoreResult.safetyCopy}</strong>
                 </p>
               )}
@@ -425,13 +427,13 @@ function AdminBackupPage({ tournament, onBack, onLogout, onViewerMode, password,
 
             {comps.length > 0 && (
               <>
-                <h3 className="backup-subhead">Back up individual competitions</h3>
+                <h2 className="backup-subhead">Back up individual competitions</h2>
                 <div className="backup-list">
                   {comps.map((c) => (
                     <div key={c.id} className="backup-row">
                       <div className="backup-row__main">
                         <span className="backup-row__name">{c.name}</span>
-                        <span className="backup-row__meta">{c.format || "pools"}</span>
+                        <span className="backup-row__meta">{formatLabel(c.format)}</span>
                       </div>
                       <button
                         type="button"
@@ -480,16 +482,21 @@ function AdminBackupPage({ tournament, onBack, onLogout, onViewerMode, password,
 
             {plan && (
               <div className="backup-plan">
-                <h3 className="backup-subhead">Restore plan ({plan.scope} archive)</h3>
+                <h2 className="backup-subhead">Restore plan ({plan.scope} archive)</h2>
                 {(selectedFromName || selectedFile?.name) && (
-                  <p className="backup-intro">
+                  <p className="backup-detail">
                     From <strong>{selectedFromName || selectedFile.name}</strong>
                   </p>
                 )}
 
                 <div className="backup-alerts">
                   <div className="alert alert--warn">
-                    Let every court device sync before you restore. A change a court device makes before the restore and sends after it is usually applied when it arrives, because it is newer than the restored record. If the restored copy already has that match finished, the change is kept in the match&apos;s history instead and not shown. If the restored copy does not hold that match, the change is refused.
+                    <strong>Let every court device sync before you restore.</strong> A score a device sends after the restore:
+                    <ul>
+                      <li>is applied when it is newer than the restored match</li>
+                      <li>goes to the match&apos;s history, not the result, when it is older or the backup has that match finished</li>
+                      <li>is refused when the backup does not hold that match</li>
+                    </ul>
                   </div>
                   {(plan.warnings || []).map((w) => (
                     <div key={`${w.code}-${w.competitionId || ""}-${w.court || ""}`} className="alert alert--warn">
@@ -498,13 +505,13 @@ function AdminBackupPage({ tournament, onBack, onLogout, onViewerMode, password,
                   ))}
                   {(plan.competitions || []).some((c) => c.resultsChanged && c.resultsChanged.length > 0) && (
                     <div className="alert alert--error">
-                      <strong>Results that will be lost:</strong>
+                      <strong>Results that will be lost or changed:</strong>
                       <ul>
                         {plan.competitions
                           .filter((c) => c.resultsChanged && c.resultsChanged.length > 0)
                           .map((c) => (
                             <li key={c.id}>
-                              {c.resultsChanged.length} recorded results in &quot;{c.name}&quot; will be lost or changed.
+                              {pluralize(c.resultsChanged.length, "recorded result")} in &quot;{c.name}&quot;
                             </li>
                           ))}
                       </ul>
@@ -512,16 +519,17 @@ function AdminBackupPage({ tournament, onBack, onLogout, onViewerMode, password,
                   )}
                 </div>
 
-                <h4 className="backup-subhead">Competitions to restore</h4>
+                <h3 className="backup-subhead">Competitions to restore</h3>
                 <div className="backup-list">
                   {plan.competitions.map((c) => {
                     const currentDecision = decisions[c.id] || {};
                     const isMissingFromArchive = c.choices?.includes("keep") || c.choices?.includes("remove");
+                    const nameId = `backup-comp-${c.id}`;
 
                     return (
                       <div key={c.id} className="backup-row backup-row--plan">
                         <div className="backup-row__head">
-                          <span className="backup-row__name">{c.name}</span>
+                          <span id={nameId} className="backup-row__name">{c.name}</span>
                           {plan.scope === "tournament" && !plan.undo && !onlyCompId && !isMissingFromArchive && (
                             <button
                               type="button"
@@ -548,8 +556,8 @@ function AdminBackupPage({ tournament, onBack, onLogout, onViewerMode, password,
                         {!c.asked ? (
                           <div className="backup-row__note">Will be created as a new competition.</div>
                         ) : isMissingFromArchive ? (
-                          <div>
-                            <div className="backup-row__note">This competition is not in the backup archive:</div>
+                          <fieldset className="backup-choices" aria-labelledby={`${nameId} ${nameId}-note`}>
+                            <legend id={`${nameId}-note`} className="backup-row__note">This competition is not in the backup archive:</legend>
                             <label className="backup-choice">
                               <input
                                 type="radio"
@@ -558,7 +566,7 @@ function AdminBackupPage({ tournament, onBack, onLogout, onViewerMode, password,
                                 checked={currentDecision.action === "keep"}
                                 onChange={() => handleDecisionChange(c.id, "keep")}
                               />
-                              Keep &quot;{c.name}&quot;
+                              Keep it
                             </label>
                             <label className="backup-choice">
                               <input
@@ -568,12 +576,12 @@ function AdminBackupPage({ tournament, onBack, onLogout, onViewerMode, password,
                                 checked={currentDecision.action === "remove"}
                                 onChange={() => handleDecisionChange(c.id, "remove")}
                               />
-                              Remove &quot;{c.name}&quot;
+                              Remove it
                             </label>
-                          </div>
+                          </fieldset>
                         ) : (
-                          <div>
-                            <div className="backup-row__note">This competition already exists:</div>
+                          <fieldset className="backup-choices" aria-labelledby={`${nameId} ${nameId}-note`}>
+                            <legend id={`${nameId}-note`} className="backup-row__note">This competition already exists:</legend>
                             <label className="backup-choice">
                               <input
                                 type="radio"
@@ -582,7 +590,7 @@ function AdminBackupPage({ tournament, onBack, onLogout, onViewerMode, password,
                                 checked={currentDecision.action === "replace"}
                                 onChange={() => handleDecisionChange(c.id, "replace")}
                               />
-                              Replace &quot;{c.name}&quot;
+                              Replace it
                             </label>
                             <label className="backup-choice backup-choice--copy">
                               <span className="backup-choice__radio">
@@ -598,13 +606,13 @@ function AdminBackupPage({ tournament, onBack, onLogout, onViewerMode, password,
                               <input
                                 type="text"
                                 className="input backup-copy-name"
-                                placeholder={`${c.name} (Copy)`}
+                                aria-label={`Name for the copy of "${c.name}"`}
                                 value={currentDecision.copyName || ""}
                                 onChange={(e) => handleDecisionChange(c.id, "copy", e.target.value)}
                                 onClick={() => handleDecisionChange(c.id, "copy")}
                               />
                             </label>
-                          </div>
+                          </fieldset>
                         )}
                       </div>
                     );

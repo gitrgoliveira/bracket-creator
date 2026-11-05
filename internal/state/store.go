@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"log"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -141,7 +140,7 @@ func NewStore(folder string) (*Store, error) {
 	s.sweepLegacyUpgrades()
 
 	if err := s.upgradeLegacyCeremonies(); err != nil {
-		log.Printf("state: startup ceremony upgrade: %v", err)
+		slog.Warn("state: startup ceremony upgrade failed; it runs again on the next start", "err", err)
 	}
 
 	return s, nil

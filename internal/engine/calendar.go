@@ -71,8 +71,14 @@ type CalendarCompetition struct {
 	Kind          string                  `json:"kind"`
 	Status        state.CompetitionStatus `json:"status"`
 	ConfigVersion string                  `json:"configVersion,omitempty"`
-	Placement     CompetitionPlacement    `json:"placement"`
-	ClashPartners []string                `json:"clashPartners"`
+	// Date is the competition's own DD-MM-YYYY date, the one the clash rule
+	// compares (a placement's Day is 0 for every date outside the tournament).
+	Date string `json:"date,omitempty"`
+	// ExpectedParticipants is the organiser's expected entry count, the
+	// count a placement whose LengthSource is "expected" was estimated for.
+	ExpectedParticipants int                  `json:"expectedParticipants,omitempty"`
+	Placement            CompetitionPlacement `json:"placement"`
+	ClashPartners        []string             `json:"clashPartners"`
 }
 
 // TournamentCalendarResult represents the complete tournament calendar response.
@@ -81,6 +87,9 @@ type TournamentCalendarResult struct {
 	Courts       []string              `json:"courts"`
 	UnusedPauses []UnusedPause         `json:"unusedPauses"`
 	Competitions []CalendarCompetition `json:"competitions"`
+	// Unreadable lists the ids of competitions whose settings could not be
+	// read, so the page can say they are missing rather than drop them.
+	Unreadable []string `json:"unreadableCompetitions"`
 }
 
 // pastMidnight reports whether endMins is after midnight (greater than 24*60).
@@ -97,6 +106,25 @@ func Overlaps(a, b state.CourtWindow) bool {
 		return false
 	}
 	return a.Start < b.End && b.Start < a.End
+}
+
+// ClashingCourts returns, sorted, the shiaijo on which two competitions'
+// placements clash: both take part in clashes, their dates are the same day
+// (state.SameDate) and a shiaijo they share has overlapping windows. It is the
+// one spelling of the clash rule, asked by the calendar, its move preview and
+// the clash warning.
+func ClashingCourts(dateA string, a CompetitionPlacement, dateB string, b CompetitionPlacement) []string {
+	if !a.TakesPartInClashes() || !b.TakesPartInClashes() || !state.SameDate(dateA, dateB) {
+		return nil
+	}
+	var courts []string
+	for c, wA := range a.Windows {
+		if wB, ok := b.Windows[c]; ok && Overlaps(wA, wB) {
+			courts = append(courts, c)
+		}
+	}
+	sort.Strings(courts)
+	return courts
 }
 
 func minimumPlacement(dayIdx int, courts []string, startMins int, reason string, bufferPct int) CompetitionPlacement {
@@ -335,7 +363,10 @@ func calendarDays(t *state.Tournament) ([]CalendarDay, []UnusedPause) {
 	unused := []UnusedPause{}
 
 	for _, p := range t.Pauses {
-		pUsed := false
+		// An undated tournament has no day to draw a pause on, but its
+		// schedule still runs as Day 1 (dayBreaks reads no date that way),
+		// so a pause it applies there is in use, not unused.
+		pUsed := len(dates) == 0 && len(dayBreaksFor(t, p, "")) > 0
 
 		for di, d := range dates {
 			windows := dayBreaksFor(t, p, d)
@@ -380,9 +411,6 @@ func calendarDays(t *state.Tournament) ([]CalendarDay, []UnusedPause) {
 
 // unusedPauseReason explains why a configured pause was not used by the schedule.
 func unusedPauseReason(p state.Pause, t *state.Tournament) string {
-	if t == nil || len(t.Days()) == 0 {
-		return "no_tournament_date"
-	}
 	if strings.TrimSpace(p.Start) == "" {
 		return "no_start_time"
 	}
@@ -396,7 +424,12 @@ func unusedPauseReason(p state.Pause, t *state.Tournament) string {
 	if ParseDurationMinutes(p.Length) <= 0 {
 		return "no_length"
 	}
-	return "unreadable_start_time"
+	if _, err := ParseClockTime(p.Start); err != nil {
+		return "unreadable_start_time"
+	}
+	// The pause itself is sound, so what drops it is a later day of an
+	// undated tournament, whose schedule runs as Day 1 only.
+	return "no_tournament_date"
 }
 
 // TournamentCalendar produces the complete schedule calendar for the active tournament.
@@ -414,14 +447,18 @@ func (e *Engine) TournamentCalendar() (*TournamentCalendarResult, error) {
 	}
 
 	comps := make([]*state.Competition, 0, len(ids))
+	unreadable := []string{}
 	for _, id := range ids {
 		c, err := e.store.LoadCompetition(id)
 		if err != nil {
+			// The organiser is told on the page: a competition missing from
+			// the calendar with no word would look like one that was never made.
 			log.Printf("engine: tournament calendar: load competition %s: %v", id, err)
+			unreadable = append(unreadable, id)
 			continue
 		}
 		if c == nil {
-			log.Printf("engine: tournament calendar: load competition %s: not found", id)
+			// Deleted between the listing and the read: nothing to show.
 			continue
 		}
 		comps = append(comps, c)
@@ -470,24 +507,7 @@ func (e *Engine) TournamentCalendar() (*TournamentCalendarResult, error) {
 	clashMap := make(map[string][]string, len(comps))
 	for i := 0; i < len(comps); i++ {
 		for j := i + 1; j < len(comps); j++ {
-			pI := placements[i]
-			pJ := placements[j]
-			if !pI.TakesPartInClashes() || !pJ.TakesPartInClashes() {
-				continue
-			}
-			if !state.SameDate(comps[i].Date, comps[j].Date) {
-				continue
-			}
-			hasClash := false
-			for court, wI := range pI.Windows {
-				if wJ, ok := pJ.Windows[court]; ok {
-					if Overlaps(wI, wJ) {
-						hasClash = true
-						break
-					}
-				}
-			}
-			if hasClash {
+			if len(ClashingCourts(comps[i].Date, placements[i], comps[j].Date, placements[j])) > 0 {
 				clashMap[comps[i].ID] = append(clashMap[comps[i].ID], comps[j].ID)
 				clashMap[comps[j].ID] = append(clashMap[comps[j].ID], comps[i].ID)
 			}
@@ -503,13 +523,15 @@ func (e *Engine) TournamentCalendar() (*TournamentCalendarResult, error) {
 			sort.Strings(partners)
 		}
 		calComps[i] = CalendarCompetition{
-			ID:            comp.ID,
-			Name:          comp.Name,
-			Kind:          comp.Kind,
-			Status:        comp.Status,
-			ConfigVersion: state.ConfigVersion(comp),
-			Placement:     placements[i],
-			ClashPartners: partners,
+			ID:                   comp.ID,
+			Name:                 comp.Name,
+			Kind:                 comp.Kind,
+			Status:               comp.Status,
+			ConfigVersion:        state.ConfigVersion(comp),
+			Date:                 comp.Date,
+			ExpectedParticipants: comp.ExpectedParticipants,
+			Placement:            placements[i],
+			ClashPartners:        partners,
 		}
 	}
 
@@ -522,6 +544,7 @@ func (e *Engine) TournamentCalendar() (*TournamentCalendarResult, error) {
 		Courts:       lanes,
 		UnusedPauses: unused,
 		Competitions: calComps,
+		Unreadable:   unreadable,
 	}, nil
 }
 

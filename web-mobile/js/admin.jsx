@@ -19,6 +19,7 @@ import { confirmMatchLabel, confirmRunningCourtMove } from './court_move.jsx';
 import { holdsUnsaved, discardUnsaved } from './unsaved_entries.jsx';
 import { scoreRowMatchLabel } from './pool_ids.jsx';
 import { mergeSavedCompetition } from './competition_put_body.jsx';
+import { AdminCalendarPage } from './admin_calendar.jsx';
 
 const { useState, useEffect, useRef } = React;
 
@@ -807,6 +808,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
         onEditTournament={() => setView({ kind: "editTournament" })}
         onAnnounce={() => setAnnounceOpen(true)}
         onOpenSchedule={() => setView({ kind: "schedule" })}
+        onOpenCalendar={() => setView({ kind: "calendar" })}
         onOpenScoreEditor={() => setView({ kind: "scoreEditor" })}
         onOpenRegistration={() => setView({ kind: "registrationDesk" })}
         onOpenImport={() => setView({ kind: "import" })}
@@ -883,6 +885,18 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
       onLogout={onLogout}
       onViewerMode={onViewerMode}
       password={password}
+    />;
+  }
+
+  if (view.kind === "calendar") {
+    return <AdminCalendarPage
+      tournament={t}
+      password={password}
+      onBack={() => setView({ kind: "dashboard" })}
+      onLogout={onLogout}
+      onViewerMode={onViewerMode}
+      onOpenCompetition={(id, section) => setView({ kind: "competition", id, section: section || "overview" })}
+      onEditTournament={() => setView({ kind: "editTournament" })}
     />;
   }
 

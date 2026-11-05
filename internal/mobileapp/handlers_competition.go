@@ -438,6 +438,9 @@ func validateSwissConfig(comp *state.Competition) error {
 	if comp.SwissRounds < 1 {
 		return fmt.Errorf("swiss format requires swissRounds >= 1")
 	}
+	if comp.SwissRounds > engine.MaxSwissRounds {
+		return fmt.Errorf("swissRounds must be at most %d", engine.MaxSwissRounds)
+	}
 	return nil
 }
 
@@ -464,6 +467,70 @@ func validateLeagueTiebreakConfig(comp *state.Competition) error {
 		return fmt.Errorf("leagueTiebreakTopN must be 3 or 4 (got %d)", comp.LeagueTiebreakTopN)
 	}
 	return nil
+}
+
+// validateNewCompetition is the one chain that judges a competition being
+// authored from nothing: the create POST and the draft estimate both ask it,
+// so the estimate never accepts a shape the create would refuse. It also
+// normalizes, as the create stores: the pool config for formats with no pool
+// phase, and an omitted mixed pool size.
+func validateNewCompetition(comp *state.Competition) error {
+	// Reject invalid competition shape (durations, format, swiss config)
+	// and normalize pool config for formats with no pool phase.
+	if err := validateCompetitionShape(comp); err != nil {
+		return err
+	}
+	// bc-symm: an omitted pool size is DEFAULTED, not refused, and it is
+	// defaulted to the same number /api/tournament/import has always
+	// used (see defaultPoolSize). Refusing it instead made
+	// `POST {"name":"X","format":"mixed","courts":["A"]}` -- a body that
+	// returned 201 for the whole life of the endpoint -- start returning
+	// 400, while the identical competition arriving through the import door
+	// landed fine. Runs after normalizePoolConfig above, so it can only ever
+	// fire for "mixed": league and knockout have had PoolSize zeroed by then
+	// and must keep it.
+	if comp.Format == state.CompFormatMixed && comp.PoolSize == 0 {
+		comp.PoolSize = defaultPoolSize
+	}
+	// What remains for the guard is the value a caller STATED and that the
+	// draw could never build (a negative). Unlike the PUT twin
+	// (change-scoped, see its call site) a new record inherits nothing, so
+	// there is no stored value to protect and no lockout risk in checking
+	// unconditionally.
+	if err := validateMixedPoolSize(comp); err != nil {
+		return err
+	}
+	// League tie-breaker config validation (leagueTiebreakTopN must be 0/3/4).
+	if err := validateLeagueTiebreakConfig(comp); err != nil {
+		return err
+	}
+	// TeamMatchType enum-style validation. Empty == fixed (default);
+	// "kachinuki" requires TeamSize >= 2. FR-044.
+	if err := state.ValidateTeamMatchType(comp.TeamMatchType, comp.TeamSize); err != nil {
+		return err
+	}
+	// Kind must be one of the values the server recognises ("",
+	// "individual" or "team"; see state.ValidateCompetitionKind for why ""
+	// belongs in that set). A new record has nothing to inherit, so unlike
+	// the PUT guard (change-scoped to avoid locking an operator out of an
+	// already-stored illegal value) this check runs unconditionally.
+	if err := state.ValidateCompetitionKind(comp.Kind); err != nil {
+		return fmt.Errorf("kind: %w", err)
+	}
+	// Team competitions require at least 2 members per team.
+	if err := state.ValidateCompetitionTeamSize(comp.Kind, comp.TeamSize); err != nil {
+		return err
+	}
+	// Knockout qualifiers (bc-qual LP-5a): "" is always valid;
+	// larger-pools/fill-bracket additionally require minimum-players-per-pool
+	// sizing and poolWinners == 1. normalizePoolConfig above already zeroed
+	// ExtraQualifiers for league/knockout, so this only ever rejects a
+	// genuinely invalid combination for "mixed" (or a hand-crafted request
+	// for another format). EffectivePoolWinners() resolves an unset/<=0
+	// PoolWinners to the same default of 2 the draw/schedule layers use, so a
+	// request that omits poolWinners is judged on the value it will actually
+	// run with (see ValidateExtraQualifiers's own doc comment).
+	return state.ValidateExtraQualifiers(comp.ExtraQualifiers, comp.PoolSizeMode, comp.EffectivePoolWinners())
 }
 
 // validateCompetitionLengths enforces the persisted-string caps from
@@ -1013,78 +1080,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			return
 		}
 
-		// Reject invalid competition shape (durations, format, swiss config)
-		// and normalize pool config for formats with no pool phase.
-		if err := validateCompetitionShape(&comp); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-
-		// bc-symm: an omitted pool size is DEFAULTED, not refused, and it is
-		// defaulted to the same number /api/tournament/import has always
-		// used (see defaultPoolSize). Refusing it instead made
-		// `POST {"name":"X","format":"mixed","courts":["A"]}` -- a body that
-		// returned 201 for the whole life of the endpoint, and that four
-		// existing tests in this package send -- start returning 400, while
-		// the identical competition arriving through the import door landed
-		// fine. Runs after normalizePoolConfig above, so it can only ever
-		// fire for "mixed": league and knockout have had PoolSize zeroed by
-		// then and must keep it.
-		if comp.Format == state.CompFormatMixed && comp.PoolSize == 0 {
-			comp.PoolSize = defaultPoolSize
-		}
-		// What remains for the guard is the value a caller STATED and that
-		// the draw could never build (a negative). Unlike the PUT twin
-		// (change-scoped, see its call site) POST authors a brand-new
-		// record: nothing here is inherited, so there is no stored value to
-		// protect and no lockout risk in checking unconditionally.
-		if err := validateMixedPoolSize(&comp); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-
-		// League tie-breaker config validation (leagueTiebreakTopN must be 0/3/4).
-		if err := validateLeagueTiebreakConfig(&comp); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-
-		// TeamMatchType enum-style validation. Empty == fixed (default);
-		// "kachinuki" requires TeamSize >= 2. FR-044.
-		if err := state.ValidateTeamMatchType(comp.TeamMatchType, comp.TeamSize); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-
-		// Kind must be one of the values the server recognises ("",
-		// "individual" or "team"; see state.ValidateCompetitionKind for why
-		// "" belongs in that set). POST authors a brand-new record with
-		// nothing to inherit, so unlike the PUT guard below (change-scoped
-		// to avoid locking an operator out of an already-stored illegal
-		// value) this check runs unconditionally.
-		if err := state.ValidateCompetitionKind(comp.Kind); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "kind: " + err.Error()})
-			return
-		}
-
-		// Team competitions require at least 2 members per team.
-		if err := state.ValidateCompetitionTeamSize(comp.Kind, comp.TeamSize); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-
-		// Knockout qualifiers (bc-qual LP-5a): "" is always valid;
-		// larger-pools/fill-bracket additionally require minimum-players-
-		// per-pool sizing and poolWinners == 1. normalizePoolConfig above
-		// already zeroed ExtraQualifiers for league/knockout, so this only
-		// ever rejects a genuinely invalid combination for "mixed" (or a
-		// hand-crafted request for another format). EffectivePoolWinners()
-		// resolves an unset/<=0 PoolWinners to the same default of 2 the
-		// draw/schedule layers use, so a request that omits poolWinners
-		// entirely is judged on the value it will actually run with, not on
-		// the raw possibly-zero field (see ValidateExtraQualifiers's own
-		// doc comment on why passing the raw field would be wrong).
-		if err := state.ValidateExtraQualifiers(comp.ExtraQualifiers, comp.PoolSizeMode, comp.EffectivePoolWinners()); err != nil {
+		if err := validateNewCompetition(&comp); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}

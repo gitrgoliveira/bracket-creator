@@ -389,6 +389,57 @@ func TestCalendarPreview_DrawnCompetitionOverlapsUseStoredDay(t *testing.T) {
 	assert.Equal(t, "Day 1 Comp", resp.Overlaps[0].Name)
 }
 
+// Two drawn competitions dated outside the tournament both carry Day 0, so
+// the preview compares their dates, as the calendar does, not their days.
+func TestCalendarPreview_OutsideTheTournamentComparesDatesNotDays(t *testing.T) {
+	store, r := setupCalendarTestEnv(t)
+	for _, c := range []struct{ id, date string }{{"c_out1", "10-06-2026"}, {"c_out2", "11-06-2026"}} {
+		require.NoError(t, store.SaveCompetition(&state.Competition{
+			ID:                       c.id,
+			Name:                     c.id,
+			Date:                     c.date,
+			StartTime:                "09:00",
+			Courts:                   []string{"A"},
+			Format:                   state.CompFormatKnockout,
+			PoolMatchDurationSeconds: 180,
+			Status:                   state.CompStatusDrawReady,
+		}))
+		require.NoError(t, store.SavePoolMatches(c.id, []state.MatchResult{
+			{ID: "m1", Court: "A", ScheduledAt: "09:00", Status: state.MatchStatusScheduled},
+		}))
+	}
+
+	w := getCalendarPreview(t, r, "competitionId=c_out1&date=01-06-2026&startTime=09:00&courts=A", "main-pw")
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var resp calendarPreviewResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	require.Equal(t, "date_outside_tournament", resp.Placement.NotPlacedReason)
+	assert.Empty(t, resp.Overlaps, "a competition on another date never overlaps")
+}
+
+// A config with no status has not been drawn, so the preview places it where
+// it is asked to go, as it does a competition in setup.
+func TestCalendarPreview_NoStatusIsPreviewedLikeSetup(t *testing.T) {
+	store, r := setupCalendarTestEnv(t)
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:                   "c_nostatus",
+		Name:                 "No Status",
+		Date:                 "01-06-2026",
+		StartTime:            "09:00",
+		Courts:               []string{"A"},
+		Format:               state.CompFormatKnockout,
+		ExpectedParticipants: 8,
+	}))
+
+	w := getCalendarPreview(t, r, "competitionId=c_nostatus&date=02-06-2026&startTime=14:00&courts=B", "main-pw")
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var resp calendarPreviewResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	assert.True(t, resp.Previewed)
+	assert.Equal(t, 2, resp.Placement.Day)
+	assert.Equal(t, 14*60, resp.Placement.Windows["B"].Start)
+}
+
 func TestCalendarPreview_StartTimeValidation(t *testing.T) {
 	store, r := setupCalendarTestEnv(t)
 

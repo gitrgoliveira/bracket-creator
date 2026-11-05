@@ -9,10 +9,9 @@ import {
   PLACEHOLDER_MIN_PX,
   REFRESH_DEBOUNCE_MS,
   PX_PER_MINUTE,
-  formatClockHHMM,
   formatDayDate,
   getNextDayFormatted,
-  formatOverlapDuration,
+  unreadableCompetitionsText,
   shiftLanes,
   computeHourRange,
   computeDaysShown,
@@ -21,6 +20,30 @@ import {
   computeBlocksLayout,
   calendarLayout,
 } from '../admin_calendar.jsx';
+
+describe('calendar day dates', () => {
+  // The calendar's days carry Tournament.Days() dates, DD-MM-YYYY.
+  it('formats a DD-MM-YYYY day and the day after it', () => {
+    expect(formatDayDate('16-05-2026')).toBe('Sat 16 May');
+    expect(getNextDayFormatted('16-05-2026')).toBe('Sun 17 May');
+    expect(getNextDayFormatted('31-12-2026')).toBe('Fri 1 Jan');
+  });
+
+  it('gives nothing to show for a date that is not DD-MM-YYYY', () => {
+    expect(formatDayDate('2026-05-16')).toBe('');
+    expect(formatDayDate(undefined)).toBe('');
+    expect(getNextDayFormatted('2026-05-16')).toBe('the next day');
+  });
+});
+
+describe('unreadableCompetitionsText', () => {
+  it('names one competition or several', () => {
+    expect(unreadableCompetitionsText(['kids'])).toBe(
+      'The settings of competition kids could not be read, so it is not on the calendar. Check its config.md file.');
+    expect(unreadableCompetitionsText(['kids', 'teams'])).toBe(
+      'The settings of 2 competitions could not be read (kids, teams), so they are not on the calendar. Check their config.md files.');
+  });
+});
 
 describe('admin_calendar pure layout helper', () => {
   describe('exported constants', () => {

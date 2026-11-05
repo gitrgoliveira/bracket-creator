@@ -1,7 +1,7 @@
 // admin_calendar.jsx: The competition calendar page and pure layout helper.
 // Displays competitions placed across tournament days and shiaijo lanes.
 
-import { overlaps } from './calendar_rules.jsx';
+import { formatClockHHMM, overlaps } from './calendar_rules.jsx';
 
 const { useState, useEffect, useRef, useMemo, useCallback } = React;
 
@@ -27,47 +27,31 @@ const CALENDAR_SSE_EVENTS = new Set([
   'resync_required',
 ]);
 
-/**
- * Formats minutes since midnight into 24-hour "HH:MM".
- */
-export function formatClockHHMM(mins) {
-  let m = typeof mins === 'number' ? mins : 0;
-  if (m < 0) m = 0;
-  const h = Math.floor(m / 60);
-  const min = Math.floor(m % 60);
-  return `${String(h).padStart(2, '0')}:${String(min).padStart(2, '0')}`;
+const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+// shortDayDate formats the tournament day dateStr (DD-MM-YYYY, the shape the
+// calendar's days carry), moved on by addDays, as "Sat 16 May"; null when the
+// string is not a DD-MM-YYYY date.
+function shortDayDate(dateStr, addDays) {
+  const m = typeof dateStr === 'string' ? /^(\d{2})-(\d{2})-(\d{4})$/.exec(dateStr) : null;
+  if (!m) return null;
+  const d = new Date(Date.UTC(Number(m[3]), Number(m[2]) - 1, Number(m[1]) + addDays, 12, 0, 0));
+  return `${WEEKDAYS[d.getUTCDay()]} ${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]}`;
 }
 
 /**
- * Formats an ISO "YYYY-MM-DD" date string to "Day DD Mon", e.g. "Sat 16 May".
+ * Formats a tournament day's DD-MM-YYYY date as "Sat 16 May"; '' when it is not one.
  */
 export function formatDayDate(dateStr) {
-  if (!dateStr || typeof dateStr !== 'string') return '';
-  const parts = dateStr.split('-');
-  if (parts.length !== 3) return dateStr;
-  const year = parseInt(parts[0], 10);
-  const month = parseInt(parts[1], 10) - 1;
-  const day = parseInt(parts[2], 10);
-  const d = new Date(Date.UTC(year, month, day, 12, 0, 0));
-  const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-  return `${days[d.getUTCDay()]} ${day} ${months[month]}`;
+  return shortDayDate(dateStr, 0) || '';
 }
 
 /**
- * Formats the day after an ISO date string to "Day DD Mon", e.g. "Sun 17 May".
+ * Formats the day after a tournament day's DD-MM-YYYY date as "Sun 17 May".
  */
 export function getNextDayFormatted(dateStr) {
-  if (!dateStr || typeof dateStr !== 'string') return 'the next day';
-  const parts = dateStr.split('-');
-  if (parts.length !== 3) return 'the next day';
-  const year = parseInt(parts[0], 10);
-  const month = parseInt(parts[1], 10) - 1;
-  const day = parseInt(parts[2], 10);
-  const d = new Date(Date.UTC(year, month, day + 1, 12, 0, 0));
-  const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-  return `${days[d.getUTCDay()]} ${d.getUTCDate()} ${months[d.getUTCMonth()]}`;
+  return shortDayDate(dateStr, 1) || 'the next day';
 }
 
 /**
@@ -118,6 +102,18 @@ export function formatNotPlacedReason(reason) {
     default:
       return 'Cannot be placed on the calendar.';
   }
+}
+
+
+/**
+ * The line naming the competitions whose settings could not be read, by the
+ * ids the calendar lists, so a missing one is never taken for one not made.
+ */
+export function unreadableCompetitionsText(ids) {
+  if (ids.length === 1) {
+    return `The settings of competition ${ids[0]} could not be read, so it is not on the calendar. Check its config.md file.`;
+  }
+  return `The settings of ${ids.length} competitions could not be read (${ids.join(', ')}), so they are not on the calendar. Check their config.md files.`;
 }
 
 /**
@@ -535,7 +531,8 @@ export function AdminCalendarPage({
       if (err.name === 'AbortError') return;
       setError(err.message || 'Could not load the calendar.');
     } finally {
-      setLoading(false);
+      // A newer fetch aborted this one and owns the loading flag now.
+      if (abortControllerRef.current === controller) setLoading(false);
     }
   }, [password]);
 
@@ -732,6 +729,7 @@ export function AdminCalendarPage({
   }
 
   const notPlacedComps = (calendar.competitions || []).filter(c => !c.placement?.placed);
+  const unreadableComps = calendar.unreadableCompetitions || [];
   const placeholderCount = (calendar.competitions || []).filter(c => c.placement?.placed && c.placement.lengthSource === 'minimum').length;
   const unusedPauses = calendar.unusedPauses || [];
 
@@ -757,6 +755,13 @@ export function AdminCalendarPage({
           <div>
             <h1 className="page-head__title">Competition calendar</h1>
             <div className="cal-key-line">{instructionCopy}</div>
+            {unreadableComps.length > 0 && (
+              <div className="cal-unused-pauses">
+                <div className="cal-unused-pause">
+                  {unreadableCompetitionsText(unreadableComps)}
+                </div>
+              </div>
+            )}
             {unusedPauses.length > 0 && (
               <div className="cal-unused-pauses">
                 {unusedPauses.map((p, idx) => (
@@ -1043,7 +1048,7 @@ export function AdminCalendarPage({
 
                               {isExpected && (
                                 <div className="cal-block__meta">
-                                  Estimate for {comp.expectedParticipants || 24} expected
+                                  Estimate for {comp.expectedParticipants} expected
                                 </div>
                               )}
 

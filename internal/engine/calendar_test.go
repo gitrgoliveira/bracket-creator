@@ -729,6 +729,63 @@ func TestTournamentCalendar_EmptySlicesAreNeverNil(t *testing.T) {
 	})
 }
 
+// An undated tournament still runs its schedule as Day 1, so an every-day or
+// Day 1 pause is in use there; only a later day's pause is reported unused.
+func TestCalendar_UndatedTournamentPausesTheScheduleAppliesAreNotUnused(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	require.NoError(t, store.SaveTournament(&state.Tournament{
+		Name:         "No Date Tourn",
+		DurationDays: 2,
+		Courts:       []string{"A"},
+		Pauses: []state.Pause{
+			{Name: "Lunch", Start: "12:00", Length: "1h", Day: 0},
+			{Name: "Grading", Start: "15:00", Length: "30m", Day: 1},
+			{Name: "Day two", Start: "10:00", Length: "1h", Day: 2},
+		},
+	}))
+
+	cal, err := eng.TournamentCalendar()
+	require.NoError(t, err)
+
+	require.Len(t, cal.UnusedPauses, 1)
+	assert.Equal(t, UnusedPause{Name: "Day two", Reason: "no_tournament_date"}, cal.UnusedPauses[0])
+}
+
+// A competition whose settings cannot be read is named in the calendar's
+// answer instead of vanishing from it.
+func TestTournamentCalendar_NamesAnUnreadableCompetition(t *testing.T) {
+	eng, store, dir := setupTestEngine(t)
+	require.NoError(t, store.SaveTournament(&state.Tournament{Name: "T", Date: "01-07-2026", Courts: []string{"A"}}))
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: "fine", Name: "Fine", Status: state.CompStatusSetup}))
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: "broken", Name: "Broken", Status: state.CompStatusSetup}))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "competitions", "broken", "config.md"), []byte("not front matter at all"), 0o600))
+
+	cal, err := eng.TournamentCalendar()
+	require.NoError(t, err)
+
+	assert.Equal(t, []string{"broken"}, cal.Unreadable)
+	require.Len(t, cal.Competitions, 1)
+	assert.Equal(t, "fine", cal.Competitions[0].ID)
+}
+
+// A placement estimated for the expected count carries that count, so the
+// page can say which number the estimate is for.
+func TestTournamentCalendar_CarriesTheExpectedCount(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	require.NoError(t, store.SaveTournament(&state.Tournament{Name: "T", Date: "01-07-2026", Courts: []string{"A"}}))
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: "exp", Name: "Expected", Status: state.CompStatusSetup, Format: state.CompFormatKnockout,
+		Date: "01-07-2026", StartTime: "09:00", Courts: []string{"A"}, ExpectedParticipants: 18,
+	}))
+
+	cal, err := eng.TournamentCalendar()
+	require.NoError(t, err)
+
+	require.Len(t, cal.Competitions, 1)
+	assert.Equal(t, "expected", cal.Competitions[0].Placement.LengthSource)
+	assert.Equal(t, 18, cal.Competitions[0].ExpectedParticipants)
+}
+
 func BenchmarkTournamentCalendar(b *testing.B) {
 	dir := b.TempDir()
 	store, err := state.NewStore(dir)

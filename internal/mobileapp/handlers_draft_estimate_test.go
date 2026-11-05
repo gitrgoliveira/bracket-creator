@@ -194,6 +194,8 @@ func TestDraftEstimate_ShapeRefusals(t *testing.T) {
 		{"unknown format", "participants=8&format=bogus", `unknown format "bogus"`},
 		{"unknown pool format", "participants=8&format=mixed&poolFormat=bogus", `unknown poolFormat "bogus"`},
 		{"swiss with no rounds", "participants=8&format=swiss", "swiss format requires swissRounds >= 1"},
+		{"swiss rounds past the cap", fmt.Sprintf("participants=8&format=swiss&swissRounds=%d", engine.MaxSwissRounds+1),
+			fmt.Sprintf("swissRounds must be at most %d", engine.MaxSwissRounds)},
 		{"duration out of band", "participants=8&format=knockout&poolMatchDurationSeconds=1",
 			fmt.Sprintf("match duration must be between %d and %d seconds", state.MinMatchDurationSeconds, state.MaxMatchDurationSeconds)},
 		{"kachinuki under team size 2", "participants=8&format=knockout&kind=team&teamSize=1&teamMatchType=kachinuki",
@@ -206,6 +208,21 @@ func TestDraftEstimate_ShapeRefusals(t *testing.T) {
 			assert.Equal(t, tc.want, draftErrorSentence(t, getDraftEstimate(t, r, tc.query, "main-pw")))
 		})
 	}
+}
+
+// The largest Swiss draft the caps allow is still answered, so the cap is
+// what bounds the estimate's work.
+func TestDraftEstimate_LargestSwissIsAnswered(t *testing.T) {
+	r := setupDraftEstimateRouter(t)
+	w := getDraftEstimate(t, r, fmt.Sprintf("participants=%d&format=swiss&swissRounds=%d", engine.MaxEstimateParticipants, engine.MaxSwissRounds), "main-pw")
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+}
+
+// A draft is judged by the create POST's own chain: a shape the create
+// refuses is refused here with the same sentence.
+func TestDraftEstimate_RefusesWhatTheCreateRefuses(t *testing.T) {
+	r := setupDraftEstimateRouter(t)
+	assert.Equal(t, `kind: unknown kind "bogus" (expected "individual" or "team")`, draftErrorSentence(t, getDraftEstimate(t, r, "participants=8&format=knockout&kind=bogus", "main-pw")))
 }
 
 func TestDraftEstimate_RequiresThePassword(t *testing.T) {

@@ -135,6 +135,7 @@ function parsePath(path) {
       const parts = path.split("/").filter(Boolean);
       if (parts.length === 1) return { mode: "admin", admin: { kind: "dashboard" } };
       if (parts[1] === "schedule") return { mode: "admin", admin: { kind: "schedule" } };
+      if (parts[1] === "calendar") return { mode: "admin", admin: { kind: "calendar" } };
       if (parts[1] === "score-editor") return { mode: "admin", admin: { kind: "scoreEditor" } };
       if (parts[1] === "import") return { mode: "admin", admin: { kind: "import" } };
       if (parts[1] === "edit-tournament") return { mode: "admin", admin: { kind: "editTournament" } };
@@ -206,6 +207,7 @@ function pathFromState(m, vs, vcid, av, vt) {
     if (m === "admin") {
       if (av.kind === "dashboard") return "/admin";
       if (av.kind === "schedule") return "/admin/schedule";
+      if (av.kind === "calendar") return "/admin/calendar";
       if (av.kind === "scoreEditor") return "/admin/score-editor";
       if (av.kind === "import") return "/admin/import";
       if (av.kind === "editTournament") return "/admin/edit-tournament";

@@ -121,10 +121,6 @@ func RegisterDraftEstimateHandlers(r gin.IRoutes, store TournamentLoader, eng Dr
 		comp.Format = strings.TrimSpace(c.Query("format"))
 
 		comp.Kind = strings.TrimSpace(c.Query("kind"))
-		if err := state.ValidateCompetitionKind(comp.Kind); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "kind: " + err.Error()})
-			return
-		}
 
 		if v, set, ok := parseDraftQueryOptionalInt(c, "teamSize"); !ok {
 			return
@@ -133,15 +129,6 @@ func RegisterDraftEstimateHandlers(r gin.IRoutes, store TournamentLoader, eng Dr
 		}
 
 		comp.TeamMatchType = state.TeamMatchType(strings.TrimSpace(c.Query("teamMatchType")))
-		if err := state.ValidateTeamMatchType(comp.TeamMatchType, comp.TeamSize); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-
-		if err := state.ValidateCompetitionTeamSize(comp.Kind, comp.TeamSize); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
 
 		if v, set, ok := parseDraftQueryOptionalInt(c, "poolSize"); !ok {
 			return
@@ -197,25 +184,9 @@ func RegisterDraftEstimateHandlers(r gin.IRoutes, store TournamentLoader, eng Dr
 			comp.KnockoutMatchDurationSeconds = v
 		}
 
-		if err := validateCompetitionShape(&comp); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-
-		if comp.Format == state.CompFormatMixed && comp.PoolSize == 0 {
-			comp.PoolSize = defaultPoolSize
-		}
-		if err := validateMixedPoolSize(&comp); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-
-		if err := validateLeagueTiebreakConfig(&comp); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-
-		if err := state.ValidateExtraQualifiers(comp.ExtraQualifiers, comp.PoolSizeMode, comp.EffectivePoolWinners()); err != nil {
+		// The create POST's own chain, so a draft is judged as the competition
+		// it describes would be.
+		if err := validateNewCompetition(&comp); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}

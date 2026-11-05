@@ -8940,7 +8940,7 @@ components:
 
     TournamentCalendarResult:
       type: object
-      required: [days, courts, unusedPauses, competitions]
+      required: [days, courts, unusedPauses, competitions, unreadableCompetitions]
       properties:
         days:
           type: array
@@ -8959,6 +8959,11 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/CalendarCompetition'
+        unreadableCompetitions:
+          type: array
+          items:
+            type: string
+          description: Ids of competitions whose settings could not be read, so they are not on the calendar.
 
     CalendarDay:
       type: object
@@ -9021,6 +9026,13 @@ components:
           type: string
           pattern: '^[0-9a-f]{16}$'
           description: 16-character hex config version hash.
+        date:
+          type: string
+          description: The competition's own date, DD-MM-YYYY; schedule clashes compare it.
+        expectedParticipants:
+          type: integer
+          minimum: 1
+          description: The organiser's expected entry count, the count a placement whose lengthSource is "expected" was estimated for.
         placement:
           $ref: '#/components/schemas/CompetitionPlacement'
         clashPartners:

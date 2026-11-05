@@ -149,8 +149,10 @@ func RegisterCalendarHandlers(r gin.IRoutes, store CalendarStore, eng CalendarPl
 			}
 		}
 
+		// A config with no status is one not yet drawn, as the estimate reads it.
+		notDrawn := comp.Status == state.CompStatusSetup || comp.Status == ""
 		targetToPlace := comp
-		if comp.Status == state.CompStatusSetup {
+		if notDrawn {
 			clone := *comp
 			clone.Date = matchedDay
 			clone.StartTime = rawStartTime
@@ -167,27 +169,19 @@ func RegisterCalendarHandlers(r gin.IRoutes, store CalendarStore, eng CalendarPl
 		}
 
 		overlapsList := make([]CalendarOverlap, 0)
-		if placement.TakesPartInClashes() {
-			for _, other := range cal.Competitions {
-				if other.ID == comp.ID {
-					continue
-				}
-				if !other.Placement.TakesPartInClashes() || other.Placement.Day != placement.Day {
-					continue
-				}
-				for court, previewWin := range placement.Windows {
-					if otherWin, ok := other.Placement.Windows[court]; ok {
-						if engine.Overlaps(previewWin, otherWin) {
-							overlapsList = append(overlapsList, CalendarOverlap{
-								CompetitionID: other.ID,
-								Name:          other.Name,
-								Court:         court,
-								Start:         otherWin.Start,
-								End:           otherWin.End,
-							})
-						}
-					}
-				}
+		for _, other := range cal.Competitions {
+			if other.ID == comp.ID {
+				continue
+			}
+			for _, court := range engine.ClashingCourts(targetToPlace.Date, placement, other.Date, other.Placement) {
+				otherWin := other.Placement.Windows[court]
+				overlapsList = append(overlapsList, CalendarOverlap{
+					CompetitionID: other.ID,
+					Name:          other.Name,
+					Court:         court,
+					Start:         otherWin.Start,
+					End:           otherWin.End,
+				})
 			}
 		}
 
@@ -206,7 +200,7 @@ func RegisterCalendarHandlers(r gin.IRoutes, store CalendarStore, eng CalendarPl
 		c.JSON(http.StatusOK, calendarPreviewResponse{
 			CompetitionID: comp.ID,
 			Status:        comp.Status,
-			Previewed:     comp.Status == state.CompStatusSetup,
+			Previewed:     notDrawn,
 			Placement:     placement,
 			Overlaps:      overlapsList,
 		})

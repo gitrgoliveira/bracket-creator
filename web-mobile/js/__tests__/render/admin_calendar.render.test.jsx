@@ -71,7 +71,7 @@ describe('AdminCalendarPage render tests', () => {
       callCount++;
       if (callCount === 1) throw new Error('Server unreachable');
       return {
-        days: [{ day: 1, date: '2026-05-16', breaks: [] }],
+        days: [{ day: 1, date: '16-05-2026', breaks: [] }],
         courts: ['A'],
         competitions: [{ id: 'c1', name: 'Open Individual', placement: { placed: true, day: 1, courts: ['A'], windows: { A: { start: 540, end: 600 } } } }],
       };
@@ -101,7 +101,7 @@ describe('AdminCalendarPage render tests', () => {
 
   it('renders no competitions state verbatim: "No competitions yet." / "Add one from the dashboard and it appears here on its day." and [Back to the dashboard]', async () => {
     window.API.fetchCalendar.mockResolvedValue({
-      days: [{ day: 1, date: '2026-05-16', breaks: [] }],
+      days: [{ day: 1, date: '16-05-2026', breaks: [] }],
       courts: ['A'],
       competitions: [],
     });
@@ -133,18 +133,19 @@ describe('AdminCalendarPage render tests', () => {
       days: [
         {
           day: 1,
-          date: '2026-05-16',
+          date: '16-05-2026',
           breaks: [
             { name: 'Lunch', start: '12:30', end: '13:30', startMins: 750, endMins: 810 },
           ],
         },
         {
           day: 2,
-          date: '2026-05-17',
+          date: '17-05-2026',
           breaks: [],
         },
       ],
       courts: ['A', 'B'],
+      unreadableCompetitions: ['kids'],
       unusedPauses: [
         { name: 'Closing ceremony', reason: 'no_start_time' },
       ],
@@ -177,7 +178,7 @@ describe('AdminCalendarPage render tests', () => {
           id: 'c3',
           name: 'Junior Open',
           status: 'setup',
-          expectedParticipants: 24,
+          expectedParticipants: 18,
           placement: {
             placed: true,
             day: 1,
@@ -238,6 +239,12 @@ describe('AdminCalendarPage render tests', () => {
     // Pause band copy verbatim
     expect(screen.getByText('Lunch 12:30 to 13:30')).toBeInTheDocument();
 
+    // The day heading reads the DD-MM-YYYY date the server sends.
+    expect(screen.getAllByText('Sat 16 May').length).toBeGreaterThan(0);
+
+    // A competition whose settings could not be read is named, not dropped.
+    expect(screen.getByText(/The settings of competition kids could not be read/)).toBeInTheDocument();
+
     // Key line unused pause verbatim: "Closing ceremony is not used: it has no start time."
     expect(screen.getByText(/Closing ceremony is not used: it has no start time\./)).toBeInTheDocument();
     const editTournBtns = screen.getAllByRole('button', { name: 'Edit tournament' });
@@ -251,8 +258,8 @@ describe('AdminCalendarPage render tests', () => {
     // Draw has no "about"
     expect(screen.getByText('14:15 to 16:02')).toBeInTheDocument();
 
-    // Length source with expected count: "Estimate for 24 expected"
-    expect(screen.getByText('Estimate for 24 expected')).toBeInTheDocument();
+    // Length source with expected count, the count the payload carries.
+    expect(screen.getByText('Estimate for 18 expected')).toBeInTheDocument();
 
     // Placeholder block: "?" chip and "No participants yet: length unknown"
     expect(screen.getByText('No participants yet: length unknown')).toBeInTheDocument();
@@ -325,7 +332,7 @@ describe('AdminCalendarPage render tests', () => {
   it('calls onOpenCompetition on click under MOUSE_SLOP_PX and on Enter key', async () => {
     const onOpenCompetition = vi.fn();
     window.API.fetchCalendar.mockResolvedValue({
-      days: [{ day: 1, date: '2026-05-16' }],
+      days: [{ day: 1, date: '16-05-2026' }],
       courts: ['A'],
       competitions: [
         {
@@ -369,7 +376,7 @@ describe('AdminCalendarPage render tests', () => {
     window.API.fetchCalendar = vi.fn(async () => {
       fetchCount++;
       return {
-        days: [{ day: 1, date: '2026-05-16' }],
+        days: [{ day: 1, date: '16-05-2026' }],
         courts: ['A'],
         competitions: [{ id: 'c1', name: 'Open', placement: { placed: true, day: 1, courts: ['A'], windows: { A: { start: 540, end: 600 } } } }],
       };
@@ -418,5 +425,47 @@ describe('AdminCalendarPage render tests', () => {
 
     // Exactly one re-fetch occurred
     expect(fetchCount).toBe(2);
+  });
+
+  it('keeps showing the loading state while the fetch that aborted an earlier one is still out', async () => {
+    vi.useFakeTimers();
+
+    let resolveSecond;
+    let calls = 0;
+    window.API.fetchCalendar = vi.fn((_pw, signal) => {
+      calls++;
+      if (calls === 1) {
+        return new Promise((_, reject) => {
+          signal.addEventListener('abort', () => {
+            const err = new Error('aborted');
+            err.name = 'AbortError';
+            reject(err);
+          });
+        });
+      }
+      return new Promise((resolve) => { resolveSecond = resolve; });
+    });
+
+    render(<AdminCalendarPage tournament={TOURNAMENT} password="pass" onBack={() => {}} />);
+    expect(screen.getByText('Loading the calendar...')).toBeInTheDocument();
+
+    // A push starts a second fetch, which aborts the first.
+    act(() => { sseHandler({ type: 'tournament_updated' }); });
+    await act(async () => {
+      vi.advanceTimersByTime(1000);
+      await Promise.resolve();
+    });
+    expect(calls).toBe(2);
+    expect(screen.getByText('Loading the calendar...')).toBeInTheDocument();
+
+    await act(async () => {
+      resolveSecond({
+        days: [{ day: 1, date: '16-05-2026' }],
+        courts: ['A'],
+        competitions: [{ id: 'c1', name: 'Open', placement: { placed: true, day: 1, courts: ['A'], windows: { A: { start: 540, end: 600 } } } }],
+      });
+      await Promise.resolve();
+    });
+    expect(screen.queryByText('Loading the calendar...')).not.toBeInTheDocument();
   });
 });

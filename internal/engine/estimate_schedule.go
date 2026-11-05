@@ -13,6 +13,11 @@ import (
 // for: the cap on a competition's ExpectedParticipants.
 const MaxEstimateParticipants = 1024
 
+// MaxSwissRounds is the most rounds a Swiss competition may be set to: the
+// largest field an estimate takes has that many opponents for each entrant,
+// and an unbounded count made an estimate schedule that many rounds.
+const MaxSwissRounds = MaxEstimateParticipants - 1
+
 // Where the count on ScheduleEstimate.Participants came from.
 const (
 	// ParticipantsSourceRoster: the roster (checked in, when check-in applies).

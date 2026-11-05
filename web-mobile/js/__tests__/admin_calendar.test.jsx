@@ -19,7 +19,18 @@ import {
   detectOffScreenOverlaps,
   computeBlocksLayout,
   calendarLayout,
+  withContentKeys,
 } from '../admin_calendar.jsx';
+
+describe('withContentKeys', () => {
+  it('gives identical pauses distinct keys, and a unique one its own key', () => {
+    const blank = { name: '', reason: 'no_start' };
+    const lunch = { name: 'Lunch', reason: 'no_length' };
+    const keyed = withContentKeys([blank, lunch, blank, blank], (u) => `${u.name}|${u.reason}`);
+    expect(keyed.map((k) => k.key)).toEqual(['|no_start', 'Lunch|no_length', '|no_start#1', '|no_start#2']);
+    expect(keyed.map((k) => k.item)).toEqual([blank, lunch, blank, blank]);
+  });
+});
 
 describe('calendar day dates', () => {
   // The calendar's days carry Tournament.Days() dates, DD-MM-YYYY.

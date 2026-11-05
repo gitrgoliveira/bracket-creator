@@ -519,6 +519,7 @@ func TestCalendar_DrawnCompetitionRecipeSlotLengthsInStartOrder(t *testing.T) {
 	assert.Equal(t, []int{5, 5}, recipe.SlotLengths)
 	assert.Equal(t, 9*60, place.Windows["A"].Start)
 	assert.Equal(t, 9*60+25, place.Windows["A"].End)
+	assert.Equal(t, 25, place.Minutes)
 }
 
 func TestCalendar_DrawnCompetitionHoldingUnlistedCourtShowsInLanes(t *testing.T) {

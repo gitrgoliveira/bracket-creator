@@ -191,10 +191,14 @@ func (e *Engine) PlaceCompetition(comp *state.Competition, tournament *state.Tou
 
 			recipes := make(map[string]ReplayRecipe, len(drawWindows))
 			pastMid := false
+			maxSpan := 0
 			for c, w := range drawWindows {
 				recipes[c] = ReplayRecipe{SlotLengths: w.SlotLengths}
 				if pastMidnight(w.End) {
 					pastMid = true
+				}
+				if span := w.End - w.Start; span > maxSpan {
+					maxSpan = span
 				}
 			}
 			return outsideDays(CompetitionPlacement{
@@ -205,6 +209,7 @@ func (e *Engine) PlaceCompetition(comp *state.Competition, tournament *state.Tou
 				LengthSource:  "draw",
 				ReplayRecipes: recipes,
 				PastMidnight:  pastMid,
+				Minutes:       maxSpan,
 			})
 		}
 	}

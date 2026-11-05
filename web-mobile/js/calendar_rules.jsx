@@ -9,7 +9,7 @@
 //   internal/state:
 //     - ParseClockMinutes, FormatClockHHMM (court_floor.go)
 
-import { blockMinutes } from './pause_list.jsx';
+import { blockMinutes, parseClock } from './pause_list.jsx';
 
 export { blockMinutes };
 
@@ -18,13 +18,7 @@ export { blockMinutes };
  * Returns minutes since midnight (0..1439) or null when invalid.
  */
 export function parseClockTime(s) {
-  if (typeof s !== 'string') return null;
-  if (!/^\d{1,2}:\d{2}$/.test(s)) return null;
-  const colon = s.indexOf(':');
-  const h = Number(s.slice(0, colon));
-  const m = Number(s.slice(colon + 1));
-  if (h < 0 || h > 23 || m < 0 || m > 59) return null;
-  return h * 60 + m;
+  return typeof s === 'string' && s === s.trim() ? parseClock(s) : null;
 }
 
 /**

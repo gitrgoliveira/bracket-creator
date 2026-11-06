@@ -68,6 +68,21 @@ func NewRouterWithHub(store *state.Store, eng *engine.Engine, res *resources.Res
 
 	noteRetiredAdminPasswordHash()
 
+	// A restore a crash stopped before its last step left
+	// prefixes-pending.json: give those competitions their new number
+	// prefixes before the server serves (bc-bkrs). On a failure the file
+	// stays and the next start tries again.
+	if warnings, err := ResolveRestoredPrefixes(store, eng); err != nil {
+		slog.Warn("mobile-app: restored competitions' number prefixes not reassigned; retried at the next start", "err", err)
+	} else {
+		for _, w := range warnings {
+			slog.Warn("mobile-app: restored competition: "+w.Message, "competition", w.CompetitionID)
+		}
+	}
+	if err := ResolveRestoredRequeues(store, eng); err != nil {
+		slog.Warn("mobile-app: restored running matches not returned to queue; retried at the next start", "err", err)
+	}
+
 	// Enable CORS
 	r.Use(func(c *gin.Context) {
 		c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
@@ -189,9 +204,10 @@ func NewRouterWithHub(store *state.Store, eng *engine.Engine, res *resources.Res
 
 	adminSmallBody := adminGroup(r, DefaultMaxBodyBytes, verifier, store)
 	RegisterTournamentHandlers(adminSmallBody, store, hub, verifier)
-	// Deleting a competition asks for the password again (X-Confirm-Password);
-	// this middleware judges only that one route, after the sign-in.
-	adminSmallBody.Use(RequireConfirmPasswordForDelete(verifier))
+	// Deleting a competition or a kept backup asks for the password again
+	// (X-Confirm-Password); this middleware judges only the routes in
+	// confirmedRoutes, after the sign-in, and covers only the routes below.
+	adminSmallBody.Use(RequireConfirmPassword(verifier))
 	RegisterCompetitionHandlers(adminSmallBody, store, eng, hub)
 	RegisterDraftEstimateHandlers(adminSmallBody, store, eng)
 	RegisterCalendarHandlers(adminSmallBody, store, eng)
@@ -217,9 +233,15 @@ func NewRouterWithHub(store *state.Store, eng *engine.Engine, res *resources.Res
 	// uses DefaultMaxBodyBytes for consistency with the other admin JSON tier.
 	RegisterPrintHandlers(adminSmallBody, eng)
 	RegisterExportResultsHandlers(adminSmallBody, store, eng)
+	// Backups (bc-bkrs): after the confirm middleware above, so the delete is judged.
+	RegisterBackupHandlers(adminSmallBody, store)
 
 	adminLargeBody := adminGroup(r, MaxImportBodyBytes, verifier, store)
 	RegisterImportHandlers(adminLargeBody, store, eng, hub)
+	// The restore asks for the password again; Use covers only the routes
+	// registered after it, so the import above is not judged.
+	adminLargeBody.Use(RequireConfirmPassword(verifier))
+	RegisterRestoreHandlers(adminLargeBody, store, eng, hub, verifier)
 
 	// Sponsor uploads (mp-c38), multipart logo upload needs envelope
 	// headroom for the file plus boundary/form-field overhead; so it gets

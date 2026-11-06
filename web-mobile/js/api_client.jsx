@@ -4980,6 +4980,34 @@ function _shownMember(member, fields) {
     return { ...member, ...fields, modifiedAt: _serverNowMs() };
 }
 
+// One fetch for the backup and restore endpoints: the password headers, and a
+// refusal turned into an Error carrying the server's `code`. A confirmPassword
+// of undefined sends no header.
+async function _backupRequest(url, failure, { method = 'GET', password, confirmPassword, body } = {}) {
+    const headers = password ? { 'X-Tournament-Password': password } : {};
+    if (confirmPassword !== undefined) headers['X-Confirm-Password'] = confirmPassword;
+    const res = await fetch(url, { method, headers, ...(body ? { body } : {}) });
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw Object.assign(new Error(err.error || failure), { code: err.code, status: res.status });
+    }
+    return res;
+}
+function _backupFilename(res) {
+    // The server always names the archive: `attachment; filename="<name>.zip"`.
+    return /filename="([^"]+)"/.exec(res.headers.get('Content-Disposition'))[1];
+}
+// The plan and the restore take the same fields, decisions included: the plan
+// applies them, so a copy name already used shows before the password.
+function _restoreForm({ file, from, only, undo, decisions }) {
+    const fd = new FormData();
+    if (file) fd.append('archive', file);
+    if (from) fd.append('from', from);
+    if (only) fd.append('only', only);
+    if (undo === true) fd.append('undo', 'true');
+    if (decisions) fd.append('decisions', typeof decisions === 'string' ? decisions : JSON.stringify(decisions));
+    return fd;
+}
 const API = {
     async fetchTournament() {
         const res = await fetch('/api/viewer/tournament');
@@ -5976,6 +6004,44 @@ const API = {
         // name (X4); another device hears of it as a tournament_updated push.
         _forgetShownMatches(id);
         return true;
+    },
+    async backupTournament(password) {
+        const res = await _backupRequest('/api/tournament/backup', 'Failed to download tournament backup', { password });
+        const filename = _backupFilename(res);
+        const blob = await res.blob();
+        return { blob, filename };
+    },
+    async backupCompetition(id, password) {
+        const res = await _backupRequest(`/api/competitions/${encodeURIComponent(id)}/backup`, 'Failed to download competition backup', { password });
+        const filename = _backupFilename(res);
+        const blob = await res.blob();
+        return { blob, filename };
+    },
+    planRestore({ file, from, only, undo, decisions } = {}, password) {
+        return _backupRequest('/api/tournament/restore/plan', 'Failed to plan restore', {
+            method: 'POST', password, body: _restoreForm({ file, from, only, undo, decisions })
+        }).then(r => r.json());
+    },
+    async restore({ file, from, only, undo, decisions, allowRunning } = {}, password, confirmPassword) {
+        const fd = _restoreForm({ file, from, only, undo, decisions });
+        if (allowRunning === true) fd.append('allowRunning', 'true');
+        const res = await _backupRequest('/api/tournament/restore', 'Failed to restore', {
+            method: 'POST', password, confirmPassword: confirmPassword ?? '', body: fd
+        });
+        _forgetAllShownMatches();
+        return res.json();
+    },
+    async listBackups(password) {
+        const data = await (await _backupRequest('/api/tournament/backups', 'Failed to list backups', { password })).json();
+        return data.backups || [];
+    },
+    downloadBackup(name, password) {
+        return _backupRequest(`/api/tournament/backups/${encodeURIComponent(name)}`, 'Failed to download backup', { password }).then(r => r.blob());
+    },
+    deleteBackup(name, password, confirmPassword) {
+        return _backupRequest(`/api/tournament/backups/${encodeURIComponent(name)}`, 'Failed to delete backup', {
+            method: 'DELETE', password, confirmPassword: confirmPassword ?? ''
+        }).then(r => r.json());
     },
     // Returns the updated competition JSON (including the new `status`) so
     // callers can apply it to local state immediately instead of waiting for

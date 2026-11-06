@@ -1342,3 +1342,39 @@ func TestSelfRun_BulkAndQuickScoreRequireMainPassword(t *testing.T) {
 		})
 	}
 }
+
+// Backup and restore (bc-bkrs) hold and replace every competition's data, so
+// all seven routes stay organiser-only in self-run.
+func TestSelfRun_BackupAndRestoreRoutes_RequireMainPassword(t *testing.T) {
+	store := newTempStore(t)
+	seedSelfRunTournament(t, store)
+	r := setupSelfRunRouter(t, store, NewFileVerifier(store))
+
+	routes := []struct{ method, fullPath, path string }{
+		{http.MethodGet, "/api/tournament/backup", "/api/tournament/backup"},
+		{http.MethodGet, "/api/competitions/:id/backup", "/api/competitions/some-id/backup"},
+		{http.MethodPost, "/api/tournament/restore/plan", "/api/tournament/restore/plan"},
+		{http.MethodPost, "/api/tournament/restore", "/api/tournament/restore"},
+		{http.MethodGet, "/api/tournament/backups", "/api/tournament/backups"},
+		{http.MethodGet, "/api/tournament/backups/:name", "/api/tournament/backups/20260601T090000Z-scheduled.zip"},
+		{http.MethodDelete, "/api/tournament/backups/:name", "/api/tournament/backups/20260601T090000Z-scheduled.zip"},
+	}
+	for _, rt := range routes {
+		assert.True(t, isSelfRunMainGatedConfigRoute(rt.method, rt.fullPath), "%s %s must be organiser-only in self-run", rt.method, rt.fullPath)
+		t.Run(rt.method+"_"+rt.path, func(t *testing.T) {
+			req := httptest.NewRequest(rt.method, rt.path, nil)
+			req.Header.Set("X-Tournament-Password", "")
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusUnauthorized, w.Code, "an anonymous caller must be refused: %s", w.Body.String())
+			assert.Contains(t, w.Body.String(), "invalid admin password")
+
+			req = httptest.NewRequest(rt.method, rt.path, nil)
+			req.Header.Set("X-Tournament-Password", "main-pw")
+			req.Header.Set("X-Confirm-Password", "main-pw")
+			w = httptest.NewRecorder()
+			r.ServeHTTP(w, req)
+			assert.NotEqual(t, http.StatusUnauthorized, w.Code, "the password clears the gate: %s", w.Body.String())
+		})
+	}
+}

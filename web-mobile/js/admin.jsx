@@ -71,6 +71,7 @@ const AdminCompetition = window.AdminCompetition;
 const AdminEditTournament = window.AdminEditTournament;
 const AdminCreateCompetition = window.AdminCreateCompetition;
 const AdminImportPage = window.AdminImportPage;
+const AdminBackupPage = window.AdminBackupPage;
 const AdminSchedulePage = window.AdminSchedulePage;
 const AdminScoreEditorPage = window.AdminScoreEditorPage;
 const AdminShiaijoPage = window.AdminShiaijoPage;
@@ -812,6 +813,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
         onOpenScoreEditor={() => setView({ kind: "scoreEditor" })}
         onOpenRegistration={() => setView({ kind: "registrationDesk" })}
         onOpenImport={() => setView({ kind: "import" })}
+        onOpenBackup={() => setView({ kind: "backup" })}
         onOpenShiaijo={(court) => setView({ kind: "shiaijo", court })}
         onStartAll={startAllCompetitions}
         onStartCompetition={startCompetition}
@@ -956,6 +958,17 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
       onLogout={onLogout}
       onViewerMode={onViewerMode}
       password={password}
+    />;
+  }
+
+  if (view.kind === "backup") {
+    return <AdminBackupPage
+      tournament={t}
+      onBack={() => setView({ kind: "dashboard" })}
+      onLogout={onLogout}
+      onViewerMode={onViewerMode}
+      password={password}
+      showToast={showToast}
     />;
   }
 

@@ -26,6 +26,10 @@ The Docker baseline is the reusable core: the GCP and Oracle Terraform modules r
 
 Any deployment reachable over the internet should run in locked mode rather than the default file mode. Locked mode reads a bcrypt hash from an environment variable and turns the password-reset endpoint off (in file mode it answers only the machine running the server). Refer to [Admin authentication](../organisers/operating-modes.md#admin-authentication-mode) for the setup steps.
 
+## Backups
+
+The app keeps its daily backup copies in the `backups/` folder of the data directory, on the server's own disk. Download a backup from the admin console to keep a copy off the server, before the event and after each round. Refer to [Backup and restore](../organisers/backup-and-restore.md).
+
 ## What still needs printing
 
 A fully digital setup still leaves one job on paper: organisers print competitor tags and numbers before the event. Everything else (pools, scoring, scoreboards, and result pages) runs on screen. Refer to the [three ways to run a tournament](../../index.md#three-ways-to-run-a-tournament) for how this mode compares to the offline and partially connected setups.

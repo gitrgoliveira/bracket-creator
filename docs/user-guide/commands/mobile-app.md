@@ -4,15 +4,17 @@ Starts the tournament management server (Preact UI + REST/SSE backend). Used **o
 
 ```
 bracket-creator mobile-app [flags]
+bracket-creator mobile-app backup [flags]
+bracket-creator mobile-app restore FILE [flags]
 ```
 
-Refer to the [Tournament app guide](../organisers/run-tournament.md) for a full walkthrough of the UI.
+Refer to the [Tournament app guide](../organisers/run-tournament.md) for a full walkthrough of the UI, and [Backup and restore](../organisers/backup-and-restore.md) for operational routines and recovery procedures.
 
 ## Flags
 
 | Flag | Short | Default | Description |
 |------|-------|---------|-------------|
-| `--folder` | `-f` | `.` | Folder containing `tournament.md` and `competitions/`. Created at startup if it does not exist. |
+| `--folder` | `-f` | `.` (or `$TOURNAMENT_DATA_DIR`) | Folder containing `tournament.md` and `competitions/`. Created at startup if it does not exist. |
 | `--port` | `-p` | `8080` (or `$PORT`) | Port to listen on |
 | `--bind` | `-b` | `localhost` (or `$BIND_ADDRESS`) | Address to bind to. Use `0.0.0.0` to reach the server from other devices on the LAN. |
 | `--lock-password` | (none) | unset (or `$LOCK_PASSWORD=true`) | Switch to locked mode. Requires `TOURNAMENT_PASSWORD_HASH`. Refer to [Authentication](#authentication). |
@@ -76,6 +78,62 @@ A competition's pool and knockout settings are stored in its `competitions/<id>/
 |---|---|---|---|---|
 | `extra_qualifiers` | `extraQualifiers` | `""`, `"larger-pools"`, `"fill-bracket"` | `""` (standard) | How many finishers each pool sends to the knockout. Only meaningful for a Mixed competition with a minimum-players-per-pool size; requires `pool_winners: 1` (`poolWinners: 1` in JSON) for either non-default value. Refer to [How many qualify from each pool](../organisers/knockout-draw.md#how-many-qualify-from-each-pool). When updating a competition through the API, leaving the JSON key out keeps whatever is already stored; send the key with an empty string to set a competition back to standard. |
 
+## Subcommands
+
+The `mobile-app` command provides subcommands for offline maintenance and disaster recovery when the web server is stopped.
+
+!!! warning "Stop the server first"
+    Always stop the running `mobile-app` server before invoking `backup` or `restore`. The command-line tool operates directly on tournament files on disk and cannot detect or coordinate with a live server process. If a competition has a pending write in the transaction log (`.wal/`) that cannot be finished, the command refuses: start the app once so it replays its pending writes, stop it, then run the command again.
+
+### mobile-app backup
+
+Creates a zip archive backup of tournament data or a single competition.
+
+```
+bracket-creator mobile-app backup [flags]
+```
+
+| Flag | Short | Default | Description |
+|---|---|---|---|
+| `--folder` | `-f` | `.` (or `$TOURNAMENT_DATA_DIR`) | Folder storing tournament data |
+| `--out` | (none) | (required) | Output backup zip file path |
+| `--competition` | (none) | `""` | Competition ID to back up (leave it out to back up the whole tournament) |
+
+The backup command reads all competition files and tournament settings, strips the admin password from `tournament.md`, and writes the zip archive to `--out`.
+
+### mobile-app restore
+
+Restores tournament data from a backup zip archive.
+
+```
+bracket-creator mobile-app restore FILE [flags]
+```
+
+| Flag | Short | Default | Description |
+|---|---|---|---|
+| `--folder` | `-f` | `.` (or `$TOURNAMENT_DATA_DIR`) | Folder storing tournament data |
+| `--only` | (none) | `""` | Restore only this competition ID from the archive |
+| `--replace` | (none) | (none) | Competition ID to replace (can be specified multiple times) |
+| `--copy` | (none) | (none) | Competition ID and new name to copy: `ID=NAME` (can be specified multiple times) |
+| `--keep` | (none) | (none) | Competition ID to leave as the folder has it (can be specified multiple times). In a whole-tournament restore it also answers a competition the backup holds: one you already have is not replaced, and one only the backup holds is not added |
+| `--remove` | (none) | (none) | Competition ID to remove (can be specified multiple times) |
+| `--undo` | (none) | `false` | Undo a previous restore using its safety copy |
+| `--password` | (none) | `""` | Admin password for the restored tournament (file mode only). When given, it replaces the folder's current admin password; leave it out to keep the current one |
+| `--lock-password` | (none) | `false` (or `$LOCK_PASSWORD=true`) | Handle the restored password as in locked mode: password comes from `TOURNAMENT_PASSWORD_HASH`, so `--password` is not needed |
+| `--allow-running` | (none) | `false` | Restore even when matches are running in a competition the restore replaces or removes |
+
+In file mode, a whole-tournament restore needs `--password` when the folder has no `tournament.md` yet, or its `tournament.md` has no admin password, so you can sign in to the restored tournament. `--lock-password` waives that requirement: the server you then start with `--lock-password` takes its password from `TOURNAMENT_PASSWORD_HASH`, which the restore command itself never reads. A folder with no `tournament.md` accepts only a whole-tournament archive: a competition archive, or `--only`, is refused until a tournament exists.
+
+Each competition ID may appear in only one of `--replace`, `--copy`, `--keep`, and `--remove`. `--undo` cannot be combined with `--only` or with any of those four flags, and it refuses an archive that is not a `before-restore` safety copy.
+
+Before applying changes, the command evaluates a dry run plan. If any competition requires a decision (such as replacing, copying or keeping an existing competition, or keeping or removing a competition missing from the backup), the command refuses and prints the choices for each, for example `mens-individual ("Mens Individual"): choose replace, copy or keep`. A competition only the backup holds needs no flag: it is added unless you pass `--keep` for it. With `--only`, or for a competition archive, `--keep` is not a choice for the competition restored, since keeping it would restore nothing.
+
+After a restore, the command lists what it did with each competition: `Created:`, `Replaced:`, `Copied:`, `Kept:`, `Left out:` (a competition only the backup held, not added) and `Removed:`.
+
+Just before swapping files on disk, the restore command automatically saves a `before-restore` safety copy in the `backups/` folder. You can reverse a restore by passing the safety copy file with the `--undo` flag.
+
+Refer to the [Backup and restore guide](../organisers/backup-and-restore.md) for detailed workflows, safety copy rules, and offline device synchronization.
+
 ## Examples
 
 Local LAN, file mode, default port:
@@ -96,4 +154,44 @@ Locked mode for a public deployment, with the hash generated as shown under [Loc
 HASH=$(printf '%s' "$MY_ADMIN_SECRET" | bracket-creator hash-password)
 TOURNAMENT_PASSWORD_HASH="$HASH" \
   bracket-creator mobile-app --lock-password -f /var/lib/bracket-creator -b 0.0.0.0
+```
+
+### Backup and restore examples
+
+Back up the entire tournament:
+
+```bash
+bracket-creator mobile-app backup -f ./tournament-data --out ./backups/event-round1.zip
+```
+
+Back up a single competition:
+
+```bash
+bracket-creator mobile-app backup -f ./tournament-data --competition mens-individual --out ./mens.zip
+```
+
+Restore with explicit decisions for existing and missing competitions:
+
+```bash
+bracket-creator mobile-app restore ./backups/event-round1.zip \
+  -f ./tournament-data \
+  --replace mens-individual \
+  --copy juniors-individual="Juniors Individual (Copy)" \
+  --keep open-championship
+```
+
+Restore into a fresh directory in file mode, setting the admin password:
+
+```bash
+bracket-creator mobile-app restore ./backups/event-round1.zip \
+  -f ./tournament-data \
+  --password "<admin-password>"
+```
+
+Undo a previous restore using its safety copy:
+
+```bash
+bracket-creator mobile-app restore ./tournament-data/backups/20261104T031552Z-before-restore-tournament.zip \
+  -f ./tournament-data \
+  --undo
 ```

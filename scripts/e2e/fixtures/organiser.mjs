@@ -1,6 +1,7 @@
 // The organiser's own pages: the Excel download on a competition's Export
-// section, the folder import, the forgotten-password reset page, and the
-// branding and sponsor uploads on Edit tournament details. Every selector for
+// section, the folder import, the forgotten-password reset page, the
+// branding and sponsor uploads on Edit tournament details, and the Backup and
+// restore page. Every selector for
 // those lives here, with the runtime file makers they need (a PNG, an
 // import bundle) and the small zip reader that looks inside a workbook.
 import { expect } from '@playwright/test';
@@ -189,6 +190,63 @@ export async function resetPassword(page, password) {
   await page.getByLabel('New password', { exact: true }).fill(password);
   await page.getByLabel('Confirm new password').fill(password);
   await page.getByRole('button', { name: 'Reset password', exact: true }).tap();
+}
+
+// ------------------------------------------------------- backup, restore --
+
+export async function openBackupPage(page) {
+  await page.goto('/admin/backup');
+  await expect(page.getByRole('heading', { level: 1, name: 'Backup and restore' })).toBeVisible();
+}
+
+// Tap "Back up the whole tournament" and save the download into `dir`.
+// Returns the saved file's path.
+export async function backUpTournament(page, dir) {
+  const [download] = await Promise.all([
+    page.waitForEvent('download'),
+    page.getByRole('button', { name: 'Back up the whole tournament' }).tap(),
+  ]);
+  const file = path.join(dir, download.suggestedFilename());
+  await download.saveAs(file);
+  await expect(page.getByText('Tournament backup downloaded')).toBeVisible();
+  return file;
+}
+
+// Pick a backup with "Choose a backup file" and return once its plan is up.
+export async function chooseBackup(page, file) {
+  const [chooser] = await Promise.all([
+    page.waitForEvent('filechooser'),
+    page.getByRole('button', { name: 'Choose a backup file' }).tap(),
+  ]);
+  await chooser.setFiles(file);
+  await expect(page.locator('.backup-plan__title')).toBeVisible();
+}
+
+// A restore plan row, by the backup's name for the competition.
+export const planRow = (page, name) => page.locator('.backup-row--plan')
+  .filter({ has: page.locator('.backup-row__name', { hasText: new RegExp(`^${name}$`) }) });
+
+// The plan's Restore button, which names the next open choice until every
+// row is answered.
+export const restoreButton = (page) => page.locator('.backup-plan-end .btn--primary');
+
+// The names under "Back up individual competitions": the tournament's
+// competitions as they are now.
+export const backupListNames = (page) => page.locator('.card')
+  .filter({ has: page.getByRole('heading', { name: 'Back up tournament' }) })
+  .locator('.backup-row__name').allTextContents();
+
+// Answer the password prompt a restore, an undo or a delete opens, and
+// return once it has closed.
+export async function confirmWithPassword(page, title, confirmLabel, password) {
+  const dialog = page.getByRole('dialog', { name: title });
+  await expect(dialog).toBeVisible();
+  const shown = Date.now();
+  await dialog.locator('.dialog-prompt-input').fill(password);
+  // The dialog ignores a tap inside the bounce window of its opening.
+  await dwell(page, shown);
+  await dialog.getByRole('button', { name: confirmLabel, exact: true }).tap();
+  await expect(dialog).toHaveCount(0);
 }
 
 // ------------------------------------------------------ branding, sponsors --

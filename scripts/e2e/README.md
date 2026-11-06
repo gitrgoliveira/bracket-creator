@@ -97,8 +97,9 @@ browser, `--debug` opens the inspector, and a failing test leaves a trace
                             the competition calendar: its blocks, clock rows,
                             the Move dialog and Undo, line boxes and overlaps
     fixtures/organiser.mjs  the Excel download, folder import, /reset, logo and
-                            sponsor uploads; runtime PNG and import-bundle
-                            makers; a zip reader for workbooks.
+                            sponsor uploads, the Backup and restore page;
+                            runtime PNG and import-bundle makers; a zip reader
+                            for workbooks.
     fixtures/clumsy.mjs     the clumsy operator (below)
     fixtures/pointer.mjs    the coarse pointer: check, restore, ensureCoarse
                             (the one "if not coarse, restore"), tap-target size
@@ -155,6 +156,10 @@ browser, `--debug` opens the inspector, and a failing test leaves a trace
                                   workbook, folder import, including a row with
                                   no date, logo and sponsor, forgotten-password
                                   reset.
+      backup-restore              a whole-tournament backup restored over a
+                                  changed tournament (a renamed competition, a
+                                  new one): the plan's rows, Cancel, a copy
+                                  name already used, the password, and Undo.
       organiser-locked            locked mode: sign-in with the hashed password,
                                   no Forgot password, and /reset shows it is
                                   disabled.

@@ -2,6 +2,7 @@ package state
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -74,6 +75,33 @@ func (s *Store) parseCompetitionFile(path string) (any, error) {
 		}
 		return nil, err
 	}
+	c, err := parseCompetitionBytes(raw)
+	if err != nil {
+		return nil, &settingsParseError{err: err}
+	}
+	return c, nil
+}
+
+// settingsParseError marks a config.md that was read but would not parse, so
+// a caller can tell the competition's own settings from a fault reading them
+// (IsSettingsUnparseable). Its message is the parser's own.
+type settingsParseError struct{ err error }
+
+func (e *settingsParseError) Error() string { return e.err.Error() }
+func (e *settingsParseError) Unwrap() error { return e.err }
+
+// IsSettingsUnparseable reports whether a LoadCompetition error is the
+// competition's config.md itself, read but not parseable, as opposed to any
+// other fault (reading the file, the id, the store).
+func IsSettingsUnparseable(err error) bool {
+	var p *settingsParseError
+	return errors.As(err, &p)
+}
+
+// parseCompetitionBytes is config.md's parse from bytes, the one the disk
+// loader above calls once it has read the file. The restore's archive check
+// (restore.go) calls it on an archive's bytes before anything is staged.
+func parseCompetitionBytes(raw []byte) (*Competition, error) {
 	var c Competition
 	if err := parseFrontMatter(raw, &c); err != nil {
 		return nil, err

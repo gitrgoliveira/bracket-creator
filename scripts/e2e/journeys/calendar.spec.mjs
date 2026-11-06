@@ -12,11 +12,18 @@
 //      day it sits on follow the move, "Moved <name> just now" appears, and
 //      Undo puts the label back and says "Undone."
 //   b. The phone: the grid frame does not scroll sideways when the shiaijo
-//      fit, and a narrow block's Move button keeps clear of its name.
+//      fit, and no block shows a Move button.
 //   c. The same-start pair, desk and phone: both blocks start on the 10:00
 //      row, the second ends where its label says, and it is drawn on top.
 //   d. Hovering the block the pair's second covers (desk): raised, its Move
 //      button keeps clear of every line of text it shows.
+//   e. The phone draws a short competition at its real length: its top and
+//      bottom on its start and end rows, its name shown, no Move button of
+//      its own, and a tap opens it.
+//   f. The phone moves a block by press and hold, then a drag; Undo puts it
+//      back.
+//   g. A 768 px touch tablet keeps its Move buttons, each clear of its
+//      block's name.
 // A console error or a failed request fails the test (the console policy,
 // fixtures/test.mjs).
 import { test, expect } from '../fixtures/test.mjs';
@@ -26,11 +33,12 @@ import { createCompetition } from '../fixtures/wizard.mjs';
 import { toastText } from '../fixtures/roster.mjs';
 import {
   block, blockOpen, blockTimes, clockY, dayBody, intersects, lineBoxes, moveBlock, moveButton,
-  movedLine, openCalendar, ownsItsCentre, press, setSchedule, undoMove,
+  holdAndDrag, movedLine, openCalendar, ownsItsCentre, press, setSchedule, undoMove,
 } from '../fixtures/calendar.mjs';
 
 const DESK = { viewport: { width: 1280, height: 900 }, hasTouch: false, isMobile: false, deviceScaleFactor: 1 };
 const PHONE = { viewport: { width: 375, height: 900 }, hasTouch: true, isMobile: true, deviceScaleFactor: 1 };
+const TABLET = { viewport: { width: 768, height: 1024 }, hasTouch: true, isMobile: true, deviceScaleFactor: 1 };
 
 const MOVED = "Women's Individual";
 const FIRST = 'Kids Individual';
@@ -88,12 +96,12 @@ test.describe('calendar', () => {
     });
     const comps = [
       { name: "Men's Individual", day: 1, courts: ['A', 'B'], startTime: '09:30', expected: 32 },
-      { name: MOVED, day: 1, courts: ['C'], startTime: '10:30', expected: 12 },
+      { name: MOVED, day: 1, courts: ['C'], startTime: '10:30', expected: 16 },
       { name: 'Veterans Individual', day: 2, courts: ['A', 'B'], startTime: '09:30', expected: 16 },
-      // The same-start pair. Both are long enough (well over the 100 px a
-      // phone's narrow block is held to) that a block's height is its time.
-      { name: FIRST, day: 2, courts: ['C'], startTime: '10:00', expected: 32 },
-      { name: SECOND, day: 2, courts: ['C'], startTime: '10:00', expected: 24 },
+      // The same-start pair. The second is short (well under 100 minutes),
+      // too short on a phone for the Move row under its name.
+      { name: FIRST, day: 2, courts: ['C'], startTime: '10:00', expected: 16 },
+      { name: SECOND, day: 2, courts: ['C'], startTime: '10:00', expected: 8 },
     ];
     for (const c of comps) await createCompetition(page, c);
   });
@@ -120,7 +128,7 @@ test.describe('calendar', () => {
     }
   });
 
-  test('b. phone: no sideways scroll, and Move keeps clear of a narrow block\'s name', async ({ browser, baseURL }) => {
+  test('b. phone: no sideways scroll, and no Move button in any block', async ({ browser, baseURL }) => {
     const { ctx, page } = await calendarOn(browser, baseURL, PHONE);
     try {
       for (const day of [1, 2]) {
@@ -131,17 +139,9 @@ test.describe('calendar', () => {
         expect(scrollWidth, `day ${day}: the grid frame scrolls sideways`).toBeLessThanOrEqual(clientWidth);
         expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), `day ${day}: the page scrolls sideways`).toBe(true);
 
-        const narrow = dayBody(page, day).locator('.cal-block--narrow.cal-block--movable');
-        const count = await narrow.count();
-        expect(count, `day ${day} has a narrow movable block`).toBeGreaterThan(0);
-        for (let i = 0; i < count; i += 1) {
-          const b = narrow.nth(i);
-          await b.scrollIntoViewIfNeeded();
-          const name = await b.locator('.cal-block__name').boundingBox();
-          const move = await b.locator('.cal-block__move-btn').boundingBox();
-          const label = (await b.locator('.cal-block__name').innerText()).trim();
-          expect(intersects(name, move), `day ${day} ${label}: Move ${JSON.stringify(move)} over the name ${JSON.stringify(name)}`).toBe(false);
-        }
+        const blocks = dayBody(page, day).locator('[data-testid="cal-block"]');
+        expect(await blocks.count(), `day ${day} has blocks`).toBeGreaterThan(0);
+        await expect(blocks.getByRole('button', { name: /^Move / })).toHaveCount(0);
         await shot(page, `phone-day-${day}`);
       }
     } finally {
@@ -191,6 +191,70 @@ test.describe('calendar', () => {
       await expect.poll(clash, { message: 'lines under the raised Move button' }).toEqual([]);
       expect((await lineBoxes(covered)).length, 'the raised block shows its lines').toBeGreaterThan(1);
       await shot(page, 'desk-raised');
+    } finally {
+      await ctx.close();
+    }
+  });
+
+  test('e. phone: a short competition at its real length, name only, opened by a tap', async ({ browser, baseURL }) => {
+    const { ctx, page } = await calendarOn(browser, baseURL, PHONE);
+    try {
+      await press(page, page.getByRole('tab', { name: /^Day 2/ }));
+      const scope = dayBody(page, 2);
+      const short = block(scope, SECOND);
+      await short.scrollIntoViewIfNeeded();
+      const t = await blockTimes(scope, SECOND);
+      expect(t.end - t.start, `${t.label} is under 100 minutes`).toBeLessThan(100);
+      const box = await short.boundingBox();
+      const top = await clockY(page, t.start);
+      const bottom = await clockY(page, t.end);
+      expect(Math.abs(box.y - top), `top ${box.y} vs its start row ${top}`).toBeLessThanOrEqual(SLACK_PX);
+      expect(Math.abs(box.y + box.height - bottom), `bottom ${box.y + box.height} vs its end row ${bottom}`).toBeLessThanOrEqual(SLACK_PX);
+      await expect(short.locator('.cal-block__name')).toBeVisible();
+      expect((await lineBoxes(short)).map((l) => l.text).every((t) => t === SECOND), 'only its name shows').toBe(true);
+      await expect(moveButton(short, SECOND)).toHaveCount(0);
+      await shot(page, 'phone-short-name-only');
+      await blockOpen(scope, SECOND).tap();
+      await expect(page).toHaveURL(/\/admin\/competition\/[^/]+/);
+      await expect(page.getByRole('heading', { level: 1, name: SECOND })).toBeVisible();
+    } finally {
+      await ctx.close();
+    }
+  });
+
+  test('f. phone: press and hold, then drag, moves a block', async ({ browser, baseURL }) => {
+    const { ctx, page } = await calendarOn(browser, baseURL, PHONE);
+    try {
+      const scope = dayBody(page, 1);
+      const before = await blockTimes(scope, MOVED);
+      // An hour down: the clock's own rows give the distance.
+      const dy = (await clockY(page, before.start + 60)) - (await clockY(page, before.start));
+      await holdAndDrag(page, blockOpen(scope, MOVED), { dy });
+      await expect(movedLine(page)).toContainText(`Moved ${MOVED} just now`);
+      const hh = (m) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+      await expect(blockOpen(scope, MOVED)).toHaveAttribute('aria-label', new RegExp(`^${MOVED}, ${hh(before.start + 60)} to about `));
+      await shot(page, 'phone-dragged');
+      await undoMove(page);
+      await expect(blockOpen(scope, MOVED)).toHaveAttribute('aria-label', before.label);
+    } finally {
+      await ctx.close();
+    }
+  });
+
+  test('g. touch tablet: Move buttons stay, clear of the names', async ({ browser, baseURL }) => {
+    const { ctx, page } = await calendarOn(browser, baseURL, TABLET);
+    try {
+      const moves = page.locator('[data-testid="cal-block"] .cal-block__move-btn');
+      expect(await moves.count(), 'the tablet shows Move buttons').toBeGreaterThan(0);
+      const frames = page.locator('[data-testid="cal-block"]').filter({ has: page.locator('.cal-block__move-btn') });
+      for (let i = 0; i < await frames.count(); i += 1) {
+        const f = frames.nth(i);
+        await f.scrollIntoViewIfNeeded();
+        const name = await f.locator('.cal-block__name').boundingBox();
+        const move = await f.locator('.cal-block__move-btn').boundingBox();
+        expect(intersects(name, move), `${(await f.locator('.cal-block__name').innerText()).trim()}: Move over the name`).toBe(false);
+      }
+      await shot(page, 'tablet');
     } finally {
       await ctx.close();
     }

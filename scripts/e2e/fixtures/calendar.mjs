@@ -2,6 +2,8 @@
 // calendar (/admin/calendar, admin_calendar.jsx): its blocks, its clock rows,
 // the Move dialog, the "Moved ... just now" line and its Undo. Every selector
 // for those lives here.
+import fs from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { expect } from '@playwright/test';
 import { isCoarse } from './pointer.mjs';
 import { dwell } from './pace.mjs';
@@ -144,4 +146,38 @@ export function ownsItsCentre(frame) {
     const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
     return !!hit && el.contains(hit);
   });
+}
+
+// The calendar's long press, read from its one source as pace.mjs reads the
+// tap guard's window: a guessed hold would drift from the app unnoticed.
+const LONG_PRESS_MS = (() => {
+  const file = fileURLToPath(new URL('../../../web-mobile/js/calendar_move.jsx', import.meta.url));
+  const m = /export const LONG_PRESS_MS = (\d+);/.exec(fs.readFileSync(file, 'utf8'));
+  if (!m) throw new Error(`calendar: no LONG_PRESS_MS found in ${file}`);
+  return Number(m[1]);
+})();
+
+// Press and hold `loc` with one finger past the calendar's long press, drag it
+// `dy` pixels down in small steps, and let go: the touch screen's drag. Sent
+// as raw touch events over CDP, which Chromium turns into the pointer events
+// the calendar listens for (Playwright's touchscreen only taps).
+export async function holdAndDrag(page, loc, { dy, steps = 12 }) {
+  await loc.scrollIntoViewIfNeeded();
+  const box = await loc.boundingBox();
+  const x = Math.round(box.x + Math.min(12, box.width / 2));
+  const y = Math.round(box.y + Math.min(10, box.height / 2));
+  const cdp = await page.context().newCDPSession(page);
+  try {
+    const touch = (type, py) => cdp.send('Input.dispatchTouchEvent', {
+      type, touchPoints: type === 'touchEnd' ? [] : [{ x, y: py, id: 1 }],
+    });
+    await touch('touchStart', y);
+    // The press has to be held, not waited for: nothing on the page says the
+    // long press has fired until the drag shows its ghost.
+    await page.waitForTimeout(LONG_PRESS_MS + 250);
+    for (let i = 1; i <= steps; i += 1) await touch('touchMove', Math.round(y + (dy * i) / steps));
+    await touch('touchEnd');
+  } finally {
+    await cdp.detach();
+  }
 }

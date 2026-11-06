@@ -369,6 +369,38 @@ describe('AdminCalendarPage render tests', () => {
     expect(container.querySelector('[role="button"] button, button button, [role="button"] [role="button"]')).toBeNull();
   });
 
+  it('on a touch screen, gives a block too short for Move its name only and no Move button, and M still moves it', async () => {
+    const savedMatchMedia = window.matchMedia;
+    window.matchMedia = (q) => ({ matches: q === '(pointer: coarse)', addEventListener() {}, removeEventListener() {} });
+    try {
+      const onOpenCompetition = vi.fn();
+      // The Move dialog reads the competition afresh when it opens.
+      window.API.fetchCompetitions = vi.fn(() => new Promise(() => {}));
+      window.API.fetchCalendar.mockResolvedValue({
+        days: [{ day: 1, date: '16-05-2026', breaks: [] }],
+        courts: ['A', 'B'],
+        competitions: [
+          { id: 's1', name: 'Short One', status: 'setup', placement: { placed: true, day: 1, courts: ['A'], lengthSource: 'estimate', windows: { A: { start: 600, end: 630 } } } },
+          { id: 'l1', name: 'Long One', status: 'setup', placement: { placed: true, day: 1, courts: ['B'], lengthSource: 'estimate', windows: { B: { start: 600, end: 720 } } } },
+        ],
+      });
+      render(<AdminCalendarPage tournament={TOURNAMENT} password="pass" onBack={() => {}} onOpenCompetition={onOpenCompetition} />);
+      await waitFor(() => expect(screen.getByText('Short One')).toBeInTheDocument());
+
+      const short = screen.getByRole('button', { name: /^Short One, / });
+      expect(short.getAttribute('aria-label')).toBe('Short One, 10:00 to about 10:30.');
+      expect(short.closest('[data-testid="cal-block"]').className).toContain('cal-block--name-only');
+      expect(screen.queryByRole('button', { name: 'Move Short One' })).toBeNull();
+      expect(screen.getByRole('button', { name: 'Move Long One' })).toBeInTheDocument();
+
+      fireEvent.keyDown(short, { key: 'm' });
+      await waitFor(() => expect(screen.getByTestId('cal-move-dialog')).toBeInTheDocument());
+      expect(screen.getByRole('heading', { name: 'Move Short One' })).toBeInTheDocument();
+    } finally {
+      window.matchMedia = savedMatchMedia;
+    }
+  });
+
   it('calls onOpenCompetition on click under MOUSE_SLOP_PX and on Enter key', async () => {
     const onOpenCompetition = vi.fn();
     window.API.fetchCalendar.mockResolvedValue({

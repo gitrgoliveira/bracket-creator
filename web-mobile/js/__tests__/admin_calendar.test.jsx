@@ -24,6 +24,9 @@ import {
   CASCADE_PX,
   pauseLabelLane,
   fitBlockLines,
+  touchMoveFits,
+  MOVE_ROW_PX,
+  NAME_ROW_PX,
   calendarLayout,
   withContentKeys,
 } from '../admin_calendar.jsx';
@@ -475,6 +478,24 @@ describe('admin_calendar pure layout helper', () => {
     });
   });
 
+  describe('touchMoveFits', () => {
+    it('fits a touch screen\'s Move beside the name from 46 px, and under it from 68 px', () => {
+      expect(MOVE_ROW_PX).toBe(46);
+      expect(NAME_ROW_PX + MOVE_ROW_PX).toBe(68);
+      expect(touchMoveFits(45, false)).toBe(false);
+      expect(touchMoveFits(46, false)).toBe(true);
+      expect(touchMoveFits(67, true)).toBe(false);
+      expect(touchMoveFits(68, true)).toBe(true);
+    });
+    it('draws every block at its real length on a touch screen: no minimum height for a movable block', () => {
+      const css = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', 'css', 'styles.css'), 'utf8');
+      const coarse = (css.match(/@media \(pointer: coarse\)\s*\{[\s\S]*?\n\}/g) || []).join('\n');
+      const rules = coarse.match(/[^{}]*cal-block--movable[^{}]*\{[^}]*\}/g) || [];
+      for (const r of rules) expect(r).not.toMatch(/min-height/);
+      expect(coarse).toMatch(/\.cal-block--name-only:hover,\s*\.cal-block--name-only:focus-within\s*\{\s*min-height:\s*0;/);
+    });
+  });
+
   describe('pauseLabelLane', () => {
     it('puts a pause\'s name in the first lane no block covers during it', () => {
       const blocks = [{ startMins: 570, endMins: 900, minCourtIdx: 0, maxCourtIdx: 0 }];
@@ -506,6 +527,24 @@ describe('admin_calendar pure layout helper', () => {
       expect(warn.style.display).toBe('-webkit-box');
       expect(warn.style.webkitLineClamp).toBe('2');
       expect(meta.style.display).toBe('none');
+    });
+    it('keeps a name-only block to the whole name lines that fit, one at least, and none of its other lines', () => {
+      const name = line(2, 30);
+      const time = line(32, 14);
+      const content = { children: [name, time] };
+      const frame = { classList: { contains: (c) => c === 'cal-block--name-only' } };
+      const open = { clientHeight: 34, querySelector: () => content, closest: () => frame };
+      const saved = globalThis.getComputedStyle;
+      globalThis.getComputedStyle = (el) => (el === open ? { paddingTop: '2px', paddingBottom: '2px' } : { lineHeight: '15px' });
+      try {
+        fitBlockLines({ querySelectorAll: () => [open] });
+        expect(name.style.webkitLineClamp).toBe('2');
+        expect(time.style.display).toBe('none');
+        fitBlockLines({ querySelectorAll: () => [{ ...open, clientHeight: 10 }] });
+        expect(name.style.webkitLineClamp).toBe('1');
+      } finally {
+        globalThis.getComputedStyle = saved;
+      }
     });
     it('leaves a block that has no height yet alone', () => {
       const meta = line(83, 14);

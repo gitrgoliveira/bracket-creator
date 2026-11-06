@@ -12038,11 +12038,9 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 @media (pointer: coarse) {
   /* The name and time lines beside the 44 px Move button keep clear of it;
      the lines below it use the block's full width, which a phone's narrow
-     lane needs. A block with no Move button keeps all of its width. */
-  /* A short movable block is drawn tall enough for its whole Move button. */
-  .cal-block--short.cal-block--movable {
-    min-height: 44px;
-  }
+     lane needs. A block with no Move button keeps all of its width. Every
+     block is drawn at its real length: one too short for Move shows its name
+     only (cal-block--name-only, touchMoveFits in admin_calendar.jsx). */
   .cal-block--movable .cal-block__content::before {
     content: '';
     float: right;
@@ -12054,11 +12052,7 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
     min-height: 44px;
   }
   /* Too narrow for the name beside Move: the name and time take the whole
-     width and Move a row of its own at the foot, the block drawn tall enough
-     for both. */
-  .cal-block--narrow.cal-block--movable {
-    min-height: 100px;
-  }
+     width and Move a row of its own at the foot. */
   .cal-block--narrow.cal-block--movable .cal-block__open {
     padding: 6px 5px 46px;
   }
@@ -12068,15 +12062,20 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   .cal-block--narrow.cal-block--movable .cal-block__name {
     -webkit-line-clamp: 3;
   }
-  /* A touch screen keeps a hover after a tap: a short narrow block stays at
-     its name and start, with the Move row under them, hovered or not. */
-  .cal-block--short.cal-block--narrow.cal-block--movable .cal-block__time,
-  .cal-block--short.cal-block--narrow.cal-block--movable .cal-block__meta,
-  .cal-block--short.cal-block--narrow.cal-block--movable .cal-block__warn-line {
-    display: none;
+  /* Name only, at its real length: a touch screen keeps a hover after a tap,
+     so the block neither lifts nor shows its other lines then either. */
+  .cal-block--name-only:hover,
+  .cal-block--name-only:focus-within {
+    min-height: 0;
   }
-  .cal-block--short.cal-block--narrow.cal-block--movable .cal-block__short-start {
-    display: inline;
+  .cal-block--name-only .cal-block__open {
+    padding: 2px 5px;
+  }
+  .cal-block--name-only .cal-block__time,
+  .cal-block--name-only .cal-block__meta,
+  .cal-block--name-only .cal-block__warn-line,
+  .cal-block--name-only .cal-block__short-start {
+    display: none;
   }
   .cal-block--narrow .cal-block__move-slot {
     top: auto;

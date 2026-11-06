@@ -24,10 +24,25 @@ export const CASCADE_PX = 24;
 // A block that starts this close below an earlier one it overlaps would hide
 // the earlier one's name and time, so it is inset to half the earlier block.
 export const NEAR_START_PX = 60;
-// Under this much visible width a touch screen's 44 px Move button and a
+// Under this much visible width a touch tablet's 44 px Move button and a
 // readable name do not fit side by side, so Move goes on a row of its own
-// under the name (a phone's 76 px lanes always do).
+// under the name. (A touch phone shows no Move button at all.)
 export const NARROW_BLOCK_PX = 120;
+// A touch screen's Move row: the 44 px button and the 2 px under it. Beside
+// the name (a wide block) Move needs that much height; under it (a narrow
+// block) it needs the name's row as well: 6 px padding, one 15 px name line
+// (12 px at 1.25) and the block's 1 px border.
+export const MOVE_ROW_PX = 46;
+export const NAME_ROW_PX = 22;
+
+/**
+ * Does a touch tablet's Move button fit in a block this tall? A block is drawn
+ * at its real length, so one too short for it shows its name only, opens on a
+ * tap and is moved by press and hold (or the M key) instead.
+ */
+export function touchMoveFits(height, narrow) {
+  return height >= (narrow ? NAME_ROW_PX + MOVE_ROW_PX : MOVE_ROW_PX);
+}
 export const REFRESH_DEBOUNCE_MS = 1000;
 export { PX_PER_MINUTE, shiftLanes };
 
@@ -403,14 +418,26 @@ export function computeBlocksLayout({ calendar, visibleDays, courts, laneWidth, 
  * minutes, so its text can run past its foot; the line the foot would cut is
  * clamped to the lines that fit and the lines after it are left out. The
  * name always stays, and a short block is left alone (it shows one line at
- * rest and lifts on hover or focus). Their aria-label still says it all.
+ * rest and lifts on hover or focus). A block that shows its name only (too
+ * short for a touch screen's Move button) keeps the whole name lines that fit,
+ * one at least. Their aria-label still says it all.
  */
 export function fitBlockLines(root) {
   if (!root) return;
-  root.querySelectorAll('.cal-block:not(.cal-block--short) .cal-block__open').forEach((open) => {
+  root.querySelectorAll('.cal-block:not(.cal-block--short) .cal-block__open, .cal-block--name-only .cal-block__open').forEach((open) => {
     const content = open.querySelector('.cal-block__content');
     if (!content) return;
-    const lines = Array.from(content.children).slice(1);
+    const [name, ...lines] = Array.from(content.children);
+    if (open.closest?.('.cal-block')?.classList.contains('cal-block--name-only')) {
+      lines.forEach((el) => { el.style.display = 'none'; });
+      if (!name || open.clientHeight === 0) return;
+      const pad = getComputedStyle(open);
+      const avail = open.clientHeight - (parseFloat(pad.paddingTop) || 0) - (parseFloat(pad.paddingBottom) || 0);
+      const lineH = parseFloat(getComputedStyle(name).lineHeight) || 15;
+      name.style.webkitLineClamp = String(Math.max(1, Math.floor(avail / lineH)));
+      return;
+    }
+    if (name?.style.webkitLineClamp) name.style.webkitLineClamp = '';
     lines.forEach((el) => {
       el.style.display = '';
       el.style.webkitLineClamp = '';
@@ -1078,7 +1105,9 @@ export function AdminCalendarPage({
     }
   }
 
-  const instructionCopy = isCoarse
+  const instructionCopy = isCoarse && isPhoneScreen
+    ? 'Tap a competition to open it, or press and hold it to drag it to another time.'
+    : isCoarse
     ? 'Tap Move on a competition to move it, or press and hold it to drag. Tap the competition to open it.'
     : 'Drag a competition to move it, or use its Move button. Click it to open it.';
 
@@ -1316,13 +1345,22 @@ export function AdminCalendarPage({
                         else blockClass += ' cal-block--estimate';
 
                         if (block.short && !isPlaceholder) blockClass += ' cal-block--short';
-                        if (isMovable(comp)) blockClass += ' cal-block--movable';
                         // Too little of it in view for the name and a touch
                         // screen's Move button side by side: Move takes a row
                         // of its own at the foot.
                         const covered = block.coveredRight || 0;
                         const narrow = block.width - covered < NARROW_BLOCK_PX;
                         if (narrow) blockClass += ' cal-block--narrow';
+                        // A touch phone shows no Move button: a tap opens the
+                        // block, press and hold drags it (or, let go in place,
+                        // opens the Move dialog), and the M key moves it. A
+                        // touch tablet's block too short for Move shows its name
+                        // only, as a phone's short block does.
+                        const phoneTouch = isCoarse && layout.isPhone;
+                        const moveShown = isMovable(comp) && !phoneTouch && (!isCoarse || touchMoveFits(block.height, narrow));
+                        const extras = renderBlockExtras?.(comp);
+                        if (moveShown) blockClass += ' cal-block--movable';
+                        else if (phoneTouch ? block.short && !isPlaceholder : isMovable(comp)) blockClass += ' cal-block--name-only';
                         if (block.hasOverlap || block.pastMidnight) {
                           blockClass += ' cal-block--warn';
                         }
@@ -1456,8 +1494,9 @@ export function AdminCalendarPage({
                               </div>
                             </div>
 
+                            {(moveShown || extras) && (
                             <div className="cal-block__move-slot">
-                              {isMovable(comp) && (
+                              {moveShown && (
                                 <button
                                   type="button"
                                   className="cal-block__move-btn"
@@ -1466,8 +1505,9 @@ export function AdminCalendarPage({
                                   onClick={(e) => { e.stopPropagation(); setMoveDialog({ comp }); }}
                                 >Move</button>
                               )}
-                              {renderBlockExtras?.(comp)}
+                              {extras}
                             </div>
+                            )}
                           </div>
                         );
                       })}

@@ -129,6 +129,27 @@ describe('moving a competition on the calendar', () => {
     expect(window.API.updateCompetition.mock.calls[1][1].restoreMatchTimes).toEqual(times);
   });
 
+  it('warns about a clash at the new time for a drawn competition, and still moves it', async () => {
+    window.API.previewMove.mockResolvedValue({
+      placement: {},
+      overlaps: [{ competitionId: 'c1', name: 'Open', court: 'A', start: 630, end: 690 }],
+      retime: { anyChange: true, matchCount: 7, notFreshCount: 0, courts: [{ court: 'A', oldStart: 540, oldEnd: 600, newStart: 630, newEnd: 690 }] },
+    });
+    window.API.updateCompetition.mockResolvedValue({ ...CONFIG, id: 'c2', status: 'draw-ready', configVersion: 'v2', previousTimes: [] });
+    await open();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Move Drawn' }));
+    const dialog = await screen.findByTestId('cal-move-dialog');
+    const start = within(dialog).getByLabelText('Start time');
+    await waitFor(() => expect(start.value).toBe('09:00'));
+    fireEvent.change(start, { target: { value: '10:30' } });
+
+    expect(await within(dialog).findByText('Overlaps Open on Shiaijo A. You can still move it.')).toBeInTheDocument();
+    expect(within(dialog).getByTestId('retime-warning')).toHaveTextContent('Moving it moves its 7 matches');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Move' }));
+    await waitFor(() => expect(window.API.updateCompetition).toHaveBeenCalledTimes(1));
+  });
+
   it('keeps the dialog and the server\'s sentence when the move is refused', async () => {
     const err = new Error('This competition changed while you were moving it. Nothing was moved; try again.');
     err.code = 'retime_retry';

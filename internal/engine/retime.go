@@ -78,6 +78,16 @@ type RetimeOutcome struct {
 	Changes []MatchTimeChange `json:"-"`
 }
 
+// NewWindows gives each shiaijo's span after the re-time as a court window, so
+// the move preview judges a clash where the matches would go (ClashingCourts).
+func (o RetimeOutcome) NewWindows() map[string]state.CourtWindow {
+	windows := make(map[string]state.CourtWindow, len(o.Courts))
+	for _, c := range o.Courts {
+		windows[c.Court] = state.CourtWindow{Start: c.NewStart, End: c.NewEnd}
+	}
+	return windows
+}
+
 // RetimeInputs is what a re-time reads from the store. It is read BEFORE the
 // store lock is taken, because a transaction may not call a public Store
 // method.

@@ -171,6 +171,27 @@ export function moveFieldsReady({ date, startTime, courts }) {
   return !!date && parseClockTime(startTime) !== null && Array.isArray(courts) && courts.length > 0;
 }
 
+/**
+ * The Move dialog's clash line: each competition named once, with every
+ * shiaijo it shares, in the order the server listed them. Empty with none.
+ */
+export function overlapSentence(overlaps) {
+  if (!Array.isArray(overlaps) || overlaps.length === 0) return '';
+  const courtsByName = new Map();
+  for (const o of overlaps) {
+    if (!courtsByName.has(o.name)) courtsByName.set(o.name, []);
+    const courts = courtsByName.get(o.name);
+    if (!courts.includes(o.court)) courts.push(o.court);
+  }
+  const parts = [...courtsByName].map(([name, courts]) => {
+    const list = courts.length === 1
+      ? courts[0]
+      : `${courts.slice(0, -1).join(', ')} and ${courts[courts.length - 1]}`;
+    return `${name} on Shiaijo ${list}`;
+  });
+  return `Overlaps ${parts.join(', ')}. You can still move it.`;
+}
+
 function placementSummary(placement) {
   const windows = Object.values(placement?.windows || {});
   const starts = windows.map((w) => w.start ?? w.Start).filter(Number.isFinite);
@@ -295,10 +316,9 @@ export function MoveDialog({ comp, dayOptions, allCourts, password, initial, onS
             {!drawn && preview && placementSummary(preview.placement) && (
               <p className="shiaijo-move-confirm__body" aria-live="polite">{placementSummary(preview.placement)}</p>
             )}
-            {!drawn && preview && (preview.overlaps || []).length > 0 && (
-              <div className="alert alert--warn" role="status">
-                {`Overlaps ${preview.overlaps.map((o) => `${o.name} on Shiaijo ${o.court}`).join(', ')}. You can still move it.`}
-              </div>
+            {/* For a drawn competition the server judges the clash at its matches' new times. */}
+            {preview && overlapSentence(preview.overlaps) && (
+              <div className="alert alert--warn" role="status">{overlapSentence(preview.overlaps)}</div>
             )}
             {drawn && <RetimeWarning preview={retime} lead="Moving it moves" />}
             {drawn && retime && !retime.anyChange && !unchanged && (

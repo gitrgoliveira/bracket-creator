@@ -398,6 +398,27 @@ export const recipes = [
   },
 
   {
+    // The Move dialog of the drawn competition, moved onto the setup
+    // competition's start on the same shiaijo: the dialog names the clash at
+    // the new time and says the move is still allowed.
+    name: 'mobile-calendar-move-drawn-clash',
+    family: 'calendar',
+    route: '/admin/calendar',
+    viewport: { width: 1280, height: 900 },
+    capture: 'viewport',
+    auth: 'admin',
+    waitFor: `text=${CAL_DRAWN}`,
+    drive: async ({ page }) => {
+      await openMoveDialog(page, CAL_DRAWN);
+      // A drawn competition's dialog shows no "Runs" line, which setMoveStart
+      // waits for, so wait for the clash line itself.
+      await page.getByLabel('Start time').fill('14:00');
+      await page.getByTestId('cal-move-dialog').getByText(`Overlaps ${CAL_SETUP} on Shiaijo A and B`, { exact: false })
+        .waitFor({ state: 'visible', timeout: 15000 });
+    },
+  },
+
+  {
     // The calendar straight after a move is confirmed: the block in its new
     // place, and the "Moved <name> just now. Undo puts it back where it was."
     // line with its Undo button above it.

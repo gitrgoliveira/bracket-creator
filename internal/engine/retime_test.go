@@ -139,6 +139,19 @@ func TestRetime_LaterStartMovesEveryMatchByTheSameAmount(t *testing.T) {
 	}
 }
 
+// The move preview judges a drawn competition's clashes on these windows.
+func TestRetime_NewWindowsAreEachShiaijosNewSpan(t *testing.T) {
+	out := RetimeOutcome{Courts: []RetimeCourt{
+		{Court: "A", OldStart: 540, OldEnd: 600, NewStart: 660, NewEnd: 720},
+		{Court: "B", OldStart: 545, OldEnd: 590, NewStart: 665, NewEnd: 710},
+	}}
+	assert.Equal(t, map[string]state.CourtWindow{
+		"A": {Start: 660, End: 720},
+		"B": {Start: 665, End: 710},
+	}, out.NewWindows())
+	assert.Empty(t, RetimeOutcome{}.NewWindows())
+}
+
 func TestRetime_APauseTheNewStartRunsIntoPushesMatchesPastIt(t *testing.T) {
 	tourn := retimeTournament([]string{"A", "B"}, state.Pause{Name: "Lunch", Start: "12:00", Length: "1h"})
 	eng, store, comp := drawnForRetime(t, state.CompFormatMixed, []string{"A", "B"}, 8, tourn)

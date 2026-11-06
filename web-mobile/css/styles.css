@@ -1445,6 +1445,8 @@ a:hover {
 .retime-warning__court {
   display: flex;
   flex-wrap: wrap;
+  /* A flex item drops its trailing space, so the gap keeps "to 14:50" apart from "(was". */
+  column-gap: 0.3em;
   color: var(--ink-2);
 }
 

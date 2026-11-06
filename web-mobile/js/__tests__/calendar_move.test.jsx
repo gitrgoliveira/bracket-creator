@@ -1,8 +1,29 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   snapStart, dropTarget, shiftClock, shiftLanes, saveMove, undoMove, moveErrorMessage,
-  isMovable, isDrawn, moveFieldsReady,
+  isMovable, isDrawn, moveFieldsReady, overlapSentence,
 } from '../calendar_move.jsx';
+
+describe('overlapSentence', () => {
+  it('names each competition once, with all the shiaijo it shares', () => {
+    expect(overlapSentence([
+      { name: "Women's Individual", court: 'A' },
+      { name: "Women's Individual", court: 'B' },
+      { name: 'Kids', court: 'C' },
+    ])).toBe("Overlaps Women's Individual on Shiaijo A and B, Kids on Shiaijo C. You can still move it.");
+  });
+
+  it('lists three or more shiaijo with commas', () => {
+    expect(overlapSentence([
+      { name: 'Open', court: 'A' }, { name: 'Open', court: 'B' }, { name: 'Open', court: 'C' },
+    ])).toBe('Overlaps Open on Shiaijo A, B and C. You can still move it.');
+  });
+
+  it('is empty with no overlaps', () => {
+    expect(overlapSentence([])).toBe('');
+    expect(overlapSentence(undefined)).toBe('');
+  });
+});
 
 const BASE = {
   id: 'c1', name: "Men's Individual", date: '14-03-2026', startTime: '09:00', format: 'mixed',

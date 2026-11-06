@@ -6441,7 +6441,8 @@ paths:
       description: >
         Calculates the schedule placement of an existing competition on a specified
         day, start time, and court allocation, and detects overlaps with other placed
-        competitions on that day.
+        competitions on that day. A draw-ready competition's overlaps are judged at
+        its matches' new times on that day.
       security:
         - TournamentPassword: []
       parameters:
@@ -10002,12 +10003,17 @@ components:
           description: >
             True when the placement was computed from the requested day, start time,
             and courts (competition status is setup). False when the competition
-            is already drawn so the placement (day, windows) and overlaps reflect
-            where the competition sits now rather than the requested values; `retime`
-            says what moving it would do.
+            is already drawn so the placement (day, windows) reflects where the
+            competition sits now rather than the requested values; `retime` says
+            what moving it would do.
         placement:
           $ref: '#/components/schemas/CompetitionPlacement'
         overlaps:
+          description: >
+            The other competitions that would clash on a shared shiaijo at the
+            requested day and start. For a draw-ready competition they are judged
+            on the new span of its matches on each shiaijo (`retime.courts`), not
+            on its stored placement. A clash is a warning; the move is still allowed.
           type: array
           items:
             $ref: '#/components/schemas/CalendarOverlap'

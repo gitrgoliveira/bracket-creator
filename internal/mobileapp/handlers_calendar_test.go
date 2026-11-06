@@ -330,7 +330,10 @@ func TestCalendarPreview_PreviewedStatus(t *testing.T) {
 	})
 }
 
-func TestCalendarPreview_DrawnCompetitionOverlapsUseStoredDay(t *testing.T) {
+// A drawn competition's overlaps are judged where the move would put its
+// matches (the re-time's new span on each shiaijo), as an undrawn one's are,
+// while its placement stays where it sits now.
+func TestCalendarPreview_DrawnCompetitionOverlapsUseNewTime(t *testing.T) {
 	store, r := setupCalendarTestEnv(t)
 
 	// Tournament duration is 2 days: day 1 is 01-06-2026, day 2 is 02-06-2026.
@@ -349,7 +352,7 @@ func TestCalendarPreview_DrawnCompetitionOverlapsUseStoredDay(t *testing.T) {
 		{ID: "m1", Court: "A", ScheduledAt: "09:00", Status: state.MatchStatusScheduled},
 	}))
 
-	// c_day1 sits on day 1 at 09:00 on court A, overlapping c_drawn's stored window.
+	// c_day1 sits on day 1 at 09:00 on court A, clashing with c_drawn where it is now.
 	require.NoError(t, store.SaveCompetition(&state.Competition{
 		ID:                   "c_day1",
 		Name:                 "Day 1 Comp",
@@ -373,20 +376,46 @@ func TestCalendarPreview_DrawnCompetitionOverlapsUseStoredDay(t *testing.T) {
 		Status:               state.CompStatusSetup,
 	}))
 
-	// Preview c_drawn for day 2 at 09:00 on court A.
-	w := getCalendarPreview(t, r, "competitionId=c_drawn&date=02-06-2026&startTime=09:00&courts=A", "main-pw")
-	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	t.Run("moved onto a clash on a shared shiaijo reports it", func(t *testing.T) {
+		w := getCalendarPreview(t, r, "competitionId=c_drawn&date=02-06-2026&startTime=09:00&courts=A", "main-pw")
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 
-	var resp calendarPreviewResponse
-	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
-	assert.False(t, resp.Previewed, "drawn competition must have previewed=false")
-	assert.True(t, resp.Placement.Placed)
-	assert.Equal(t, 1, resp.Placement.Day, "placement day must be stored day 1, not previewed day 2")
+		var resp calendarPreviewResponse
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.False(t, resp.Previewed, "drawn competition must have previewed=false")
+		assert.True(t, resp.Placement.Placed)
+		assert.Equal(t, 1, resp.Placement.Day, "placement day must be stored day 1, not previewed day 2")
 
-	// c_day1 overlaps the stored windows on day 1, while c_day2 on day 2 is not listed.
-	require.Len(t, resp.Overlaps, 1, "overlaps must only include competitions overlapping stored windows on day 1")
-	assert.Equal(t, "c_day1", resp.Overlaps[0].CompetitionID)
-	assert.Equal(t, "Day 1 Comp", resp.Overlaps[0].Name)
+		// c_day2 clashes at the new time on day 2; c_day1, left behind on day 1, does not.
+		require.Len(t, resp.Overlaps, 1, resp.Overlaps)
+		assert.Equal(t, "c_day2", resp.Overlaps[0].CompetitionID)
+		assert.Equal(t, "Day 2 Comp", resp.Overlaps[0].Name)
+		assert.Equal(t, "A", resp.Overlaps[0].Court)
+	})
+
+	t.Run("moved away from a clash reports none", func(t *testing.T) {
+		// Day 1, starting where c_day1's window ends: the two only touch.
+		wCal := getCalendar(t, r, "main-pw")
+		require.Equal(t, http.StatusOK, wCal.Code)
+		var cal engine.TournamentCalendarResult
+		require.NoError(t, json.Unmarshal(wCal.Body.Bytes(), &cal))
+		day1End := 0
+		for _, c := range cal.Competitions {
+			if c.ID == "c_day1" {
+				day1End = c.Placement.Windows["A"].End
+			}
+		}
+		require.Positive(t, day1End)
+
+		q := fmt.Sprintf("competitionId=c_drawn&date=01-06-2026&startTime=%s&courts=A", state.FormatClockHHMM(day1End))
+		w := getCalendarPreview(t, r, q, "main-pw")
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+		var resp calendarPreviewResponse
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		require.NotNil(t, resp.Retime)
+		assert.Empty(t, resp.Overlaps, "c_day1 clashes where c_drawn is now, not where it would go")
+	})
 }
 
 // Two drawn competitions dated outside the tournament both carry Day 0, so

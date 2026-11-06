@@ -33,12 +33,16 @@ type calendarPreviewResponse struct {
 	Status        state.CompetitionStatus `json:"status"`
 	// Previewed is true when the placement was computed from the requested
 	// day/startTime/courts (competition status is setup), and false when the
-	// competition is already drawn so the placement (day, windows) and
-	// overlaps reflect where the competition sits now rather than the
-	// requested values; Retime carries what moving it would do instead.
+	// competition is already drawn so the placement (day, windows) reflects
+	// where the competition sits now rather than the requested values; Retime
+	// carries what moving it would do instead.
 	Previewed bool                        `json:"previewed"`
 	Placement engine.CompetitionPlacement `json:"placement"`
-	Overlaps  []CalendarOverlap           `json:"overlaps"`
+	// Overlaps lists the clashes at the requested day and start in every case:
+	// for a drawn (draw-ready) competition they are judged on the new span of
+	// its matches on each shiaijo (Retime), not on its stored windows. A drawn
+	// competition that has started is judged where it sits now.
+	Overlaps []CalendarOverlap `json:"overlaps"`
 	// Retime is the dry run of moving a drawn (draw-ready) competition to the
 	// requested day and start: per shiaijo the old and new first start and last
 	// end, the number of matches no longer holding a fresh time, and whether any
@@ -139,8 +143,36 @@ func RegisterCalendarHandlers(r gin.IRoutes, store CalendarStore, eng CalendarPl
 
 		placement := eng.PlaceCompetition(targetToPlace, tourn)
 
+		// A drawn competition's windows come from the stored draw; moving it
+		// moves its matches, so the answer carries that dry run (nothing written).
+		var retime *engine.RetimeOutcome
+		if comp.Status == state.CompStatusDrawReady {
+			moved := *comp
+			moved.Date = matchedDay
+			moved.StartTime = rawStartTime
+			out, err := eng.RetimePreview(comp, &moved)
+			if err != nil {
+				if refusal := retimeRefusal(err); refusal != nil {
+					writeTxResponse(c, refusal)
+					return
+				}
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to work out the new match times"})
+				return
+			}
+			retime = &out
+		}
+
+		// A clash is judged where the move would put the competition: an undrawn
+		// one at its placement on the requested day, a drawn one at its matches'
+		// new spans on the requested day. Its placement stays where it is now.
+		clashDate, clashPlacement := targetToPlace.Date, placement
+		if retime != nil {
+			clashDate = matchedDay
+			clashPlacement = engine.CompetitionPlacement{Placed: true, Windows: retime.NewWindows()}
+		}
+
 		// Only a competition on the same day can clash, so only those are placed.
-		others, err := eng.PlacementsOnDate(tourn, targetToPlace.Date, comp.ID)
+		others, err := eng.PlacementsOnDate(tourn, clashDate, comp.ID)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to build the calendar"})
 			return
@@ -148,7 +180,7 @@ func RegisterCalendarHandlers(r gin.IRoutes, store CalendarStore, eng CalendarPl
 
 		overlapsList := make([]CalendarOverlap, 0)
 		for _, other := range others {
-			for _, court := range engine.ClashingCourts(targetToPlace.Date, placement, other.Date, other.Placement) {
+			for _, court := range engine.ClashingCourts(clashDate, clashPlacement, other.Date, other.Placement) {
 				otherWin := other.Placement.Windows[court]
 				overlapsList = append(overlapsList, CalendarOverlap{
 					CompetitionID: other.ID,
@@ -169,25 +201,6 @@ func RegisterCalendarHandlers(r gin.IRoutes, store CalendarStore, eng CalendarPl
 			}
 			return overlapsList[i].Court < overlapsList[j].Court
 		})
-
-		// A drawn competition's windows come from the stored draw; moving it
-		// moves its matches, so the answer carries that dry run (nothing written).
-		var retime *engine.RetimeOutcome
-		if comp.Status == state.CompStatusDrawReady {
-			moved := *comp
-			moved.Date = matchedDay
-			moved.StartTime = rawStartTime
-			out, err := eng.RetimePreview(comp, &moved)
-			if err != nil {
-				if refusal := retimeRefusal(err); refusal != nil {
-					writeTxResponse(c, refusal)
-					return
-				}
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to work out the new match times"})
-				return
-			}
-			retime = &out
-		}
 
 		c.JSON(http.StatusOK, calendarPreviewResponse{
 			CompetitionID: comp.ID,

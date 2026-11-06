@@ -8,7 +8,7 @@ const Breadcrumbs = window.Breadcrumbs;
 const formatLabel = window.formatLabel;
 const pluralize = window.pluralize;
 
-const RESTORE_TOO_LARGE_MESSAGE = "The backup file is over 64 MB. Restore it from Copies kept on this computer or the command line.";
+const RESTORE_TOO_LARGE_MESSAGE = "The backup file is over 64 MB. Restore it from the command line, or, for a daily or safety copy, from Copies kept on this computer.";
 
 // After a choice or a copy name changes, the plan is asked again with the
 // answers so far, so a name already used shows before the password.

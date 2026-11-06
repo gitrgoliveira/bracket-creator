@@ -1180,7 +1180,7 @@ describe('AdminBackupPage render tests', () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByText('The backup file is over 64 MB. Restore it from Copies kept on this computer or the command line.')).toBeInTheDocument();
+      expect(screen.getByText('The backup file is over 64 MB. Restore it from the command line, or, for a daily or safety copy, from Copies kept on this computer.')).toBeInTheDocument();
     });
   });
 

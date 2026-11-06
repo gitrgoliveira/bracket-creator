@@ -20,8 +20,8 @@ Inspectability, repairability and diffability matter more here than normalisatio
   a USB stick as a backup. Two copies can then be compared line by line. The app's own
   backup archive (refer to [Backup archives and the backups/ folder](#backup-archives-and-the-backups-folder))
   is the consistent way to take one while the server runs, and it leaves the password out.
-  One exception: `tournament.md` holds the admin password in plain text, so strip or
-  change it before sharing a copy. A `tournament.md` that carries an `admin_password` field
+  A plain copy of the folder is the exception: its `tournament.md` holds the admin password
+  in plain text, so strip or change it before sharing that copy. A `tournament.md` that carries an `admin_password` field
   may hold another password in plain text there. The app ignores that field and drops it the
   next time it writes the file; remove it by hand before sharing a copy that still has it.
   Refer to

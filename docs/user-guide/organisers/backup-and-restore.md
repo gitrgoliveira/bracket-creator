@@ -16,7 +16,7 @@ You can back up the entire tournament at once, or back up any single competition
 
 While it runs, the server checks when it starts and then once an hour, and takes a backup of the entire tournament when the newest daily copy is at least 24 hours old (or there is none yet):
 
-- A daily copy is created only if something has changed since the newest daily copy. Backups you download and safety copies do not count. Repeated identical saves, date-only refreshes, or actions that change no data do not trigger a backup.
+- A daily copy is created only if something has changed since the newest daily copy. Backups you download and safety copies do not count. A save that changes nothing, such as the same score sent twice, does not count as a change.
 - A copy is also taken when the app is closed normally, if something changed since the newest daily copy. A crash, a pulled plug, or a shutdown that runs past its time limit takes none.
 - No daily copy is taken while the tournament has no competitions.
 - Daily copies are saved inside the `backups/` folder within your tournament data directory.
@@ -46,7 +46,7 @@ You can restore data from a file on your computer, or from one of the copies kep
 4. Click **Restore**. To leave the plan without restoring anything, click **Cancel** beside it.
 5. The app checks your choices once more, so a name that is already used is shown on its competition before you are asked for the password. The confirmation dialog then sums up what the restore will do, for example `This restore replaces 5 competitions, adds 1 copy and leaves out 1 competition. 42 recorded results will be lost or changed.` Enter the admin password to proceed.
 
-An uploaded file can be at most 64 MB. A larger backup restores from **Copies kept on this computer** or from the command line.
+An uploaded file can be at most 64 MB. A downloaded file larger than that restores from the command line; a daily or safety copy of any size restores from **Copies kept on this computer**.
 
 ![Previewing a tournament restore plan with choices for existing and missing competitions](../../screenshots/backup-restore-plan.png)
 
@@ -98,12 +98,15 @@ A refused restore changes nothing. The page tells you why, and the common reason
 
 - **That name is already used**: the name you typed for a copy is taken. The plan normally shows this before you are asked for the password; the restore still refuses it if another competition took the name in the meantime. Pick another name.
 - **Another competition already has that name**: a competition from the backup has the same name as one that stays in place. The plan shows this on the competition before you are asked for the password, and the restore refuses it if it still holds. Rename one of them, restore it as a copy with a new name, or keep the one you have.
+- **Matches are running**: after the plan was made, a match started in a competition the restore replaces or removes. The plan is checked again; click **Restore** again to go ahead.
 - **The competitions changed since the restore was checked**: someone added or removed a competition after the plan was made. Check the plan again, then restore.
 - **A competition folder in the app has no settings file**: that competition cannot be copied before the restore replaces or removes it. Keep it, or restore the backup's competition as a copy.
 - **A competition has a write that could not be finished**: restart the app, then try again.
 - **The backup file could not be read from the upload**: the upload failed. Choose the file again.
-- **The backup file is over 64 MB**: the page cannot take an upload that large. Restore it from **Copies kept on this computer** or from the command line.
+- **The backup file is over 64 MB**: the page cannot take an upload that large. Restore it from the command line, or, for a daily or safety copy, from **Copies kept on this computer**.
 - **A file in the backup cannot be read**: the backup is damaged. Try another copy.
+
+If the page says **The restore could not be completed**, something failed partway through. Restart the app: it finishes a restore that was under way as it starts.
 - **That backup is not there any more**: the kept copy was deleted, for example from another browser tab. Reload the list.
 - **Wrong password. Nothing was restored.**: the password typed in the confirmation dialog was wrong. Type it again.
 - **The file is not a backup this app can restore**: the file is damaged, was changed after it was made, or is not a backup archive.
@@ -128,8 +131,6 @@ Clicking **Undo this restore** shows the undo's plan, with a line on each compet
 The card, and its button, last until you leave or reload the page. After that, click **Restore** on the `before-restore` copy in the list instead, which asks the usual choices.
 
 An undo is itself a restore, so the app takes a new safety copy before undoing. The card then reads **Restore undone**, names that new copy, and offers no second undo. To reverse an undo, restore that new safety copy from **Copies kept on this computer**.
-
-If you later want to restore an older `before-restore` file from the **Copies kept on this computer** list, clicking **Restore** on that row opens the regular restore planner and asks all the normal choices. Only the immediate **Undo this restore** button shown right after a restore executes the automatic undo workflow.
 
 ## Copies kept on this computer
 
@@ -182,6 +183,6 @@ In a whole-tournament restore, `--keep ID` leaves the folder as it is for that c
 
 Add `--only ID` to restore one competition from a tournament archive, `--remove ID` to remove a competition that the backup does not hold, and `--undo` with a `before-restore` file to undo a restore. The [mobile-app command reference](../commands/mobile-app.md#mobile-app-restore) lists every flag.
 
-Into a folder with no tournament yet, only a whole-tournament archive can be restored, and you must pass `--password` to set the admin password, unless the server runs in locked mode and you pass `--lock-password`.
+Into a folder with no tournament yet, only a whole-tournament archive can be restored, and you must pass `--password` to set the admin password, unless you pass `--lock-password` because you will start the server in locked mode.
 
 If you run `mobile-app restore` without specifying decisions for competitions that require them, the command does not make any changes. Instead, it prints the required choices so you can re-run with the appropriate `--replace`, `--copy`, `--keep`, or `--remove` flags, for example `mens-individual ("Mens Individual"): choose replace, copy or keep`.

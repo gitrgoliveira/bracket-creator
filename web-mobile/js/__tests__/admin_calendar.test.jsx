@@ -22,11 +22,6 @@ import {
   detectOffScreenOverlaps,
   computeBlocksLayout,
   CASCADE_PX,
-  SAME_START_DROP_PX,
-  NARROW_HEAD_PX,
-  ONE_LINE_BLOCK_PX,
-  headLinesPx,
-  cascadeBlocks,
   pauseLabelLane,
   fitBlockLines,
   calendarLayout,
@@ -385,57 +380,33 @@ describe('admin_calendar pure layout helper', () => {
       expect(blocks.map((b) => b.left)).toEqual([0, 200, 0]);
     });
 
-    it('draws a block that starts with an earlier one below its head, cascaded over its right part like a later start', () => {
-      const blocks = layout([comp('a', 'First', ['A'], 600, 700), comp('b', 'Second', ['A'], 600, 700)]);
-      const top = (600 - 8 * 60) * PX_PER_MINUTE;
-      expect(blocks.map((b) => [b.left, b.width])).toEqual([[0, 200], [100, 100]]);
-      expect(blocks[0].top).toBe(top);
-      expect(blocks[1].top).toBe(top + SAME_START_DROP_PX);
-      // Its foot stays at its end.
-      expect(blocks[1].top + blocks[1].height).toBe(blocks[0].top + blocks[0].height);
-      // The first keeps its full width for its head, and is covered on the right below it.
-      expect(blocks[0].coveredRight).toBe(100);
-      expect(blocks[0].coveredTop).toBe(SAME_START_DROP_PX);
-      expect(blocks[1].coveredRight).toBe(0);
-      // A third with the same start goes below the second's head.
-      const three = layout([comp('a', 'First', ['A'], 600, 800), comp('b', 'Second', ['A'], 600, 800), comp('c', 'Third', ['A'], 600, 800)]);
-      expect(three.map((b) => b.top)).toEqual([top, top + SAME_START_DROP_PX, top + 2 * SAME_START_DROP_PX]);
-    });
-
-    it('draws a block that starts with an earlier one below all of the earlier one\'s head: name, warning and time', () => {
+    it('draws a block that starts with an earlier one at its real time, over the earlier one\'s right half', () => {
       const blocks = layout([comp('k', 'Kids Individual', ['A'], 600, 683), comp('l', 'Ladies Kata', ['A'], 600, 650)]);
-      // No overlap detail here (no partner windows): the head is the name and the time.
-      expect(blocks[1].top - blocks[0].top).toBe(SAME_START_DROP_PX);
-      const first = { comp: { name: 'Kids Individual' }, width: 200, height: 83,
-        overlapDetail: { partnerName: 'Ladies Kata', courtsStr: 'C', durationStr: '50 min' } };
-      const second = { comp: { name: 'Ladies Kata' }, width: 200, height: 50, short: true };
-      const head = headLinesPx(first);
-      // Name, a two-line overlap warning and the time line.
-      expect(head).toBe(Math.ceil(6 + 15 + 2 + 2 * 14.3 + 2 + 14.3));
-      const cascaded = cascadeBlocks([
-        { ...first, day: 1, startMins: 600, top: 120, left: 0, minCourtIdx: 0, maxCourtIdx: 0 },
-        { ...second, day: 1, startMins: 600, top: 120, left: 0, minCourtIdx: 0, maxCourtIdx: 0 },
-      ], 200);
-      expect(cascaded[1].top).toBe(120 + head);
-      // Too short for its line below the head, it keeps one line, past its real end.
-      expect(cascaded[1].height).toBe(ONE_LINE_BLOCK_PX);
-      expect(cascaded[1].short).toBe(true);
-      // Dropped past a near start, it is inset like a later start, over the first's right part.
-      expect(cascaded[1].left).toBe(CASCADE_PX);
-      expect(cascaded[0].coveredTop).toBe(head);
-      // The head never counts more than the block shows.
-      expect(headLinesPx({ ...first, height: 30 })).toBe(30);
+      const top = (600 - 8 * 60) * PX_PER_MINUTE;
+      // Both at their real start and end.
+      expect(blocks.map((b) => [b.top, b.top + b.height])).toEqual([[top, top + 83], [top, top + 50]]);
+      // The second covers the first's right half and is drawn on top (after it).
+      expect(blocks.map((b) => b.comp.id)).toEqual(['k', 'l']);
+      expect(blocks.map((b) => [b.left, b.width])).toEqual([[0, 200], [100, 100]]);
+      // The first's text wraps in its uncovered left half.
+      expect(blocks[0].coveredRight).toBe(100);
+      expect(blocks[1].coveredRight).toBe(0);
     });
 
-    it('draws a block that starts with a touch screen\'s narrow block below the whole of it, Move row included', () => {
-      const blocks = computeBlocksLayout({
+    it('steps a third block that starts with two others one step further in than the second', () => {
+      const three = layout([comp('a', 'First', ['A'], 600, 800), comp('b', 'Second', ['A'], 600, 800), comp('c', 'Third', ['A'], 600, 800)]);
+      const top = (600 - 8 * 60) * PX_PER_MINUTE;
+      expect(three.map((b) => b.top)).toEqual([top, top, top]);
+      expect(three.map((b) => b.left)).toEqual([0, 100, 100 + CASCADE_PX]);
+      // Each keeps its text to the part the next one leaves in view.
+      expect(three[0].coveredRight).toBe(100);
+      expect(three[1].coveredRight).toBe(50);
+      // On a phone's narrow lane it still overlaps at its real time, a quarter of the lane apart.
+      const narrow = computeBlocksLayout({
         calendar: { competitions: [comp('a', 'First', ['A'], 600, 683), comp('b', 'Second', ['A'], 600, 650)] },
-        visibleDays: [{ day: 1 }], courts: ['A'], laneWidth: 78, startHour: 8, endHour: 18, coarse: true,
+        visibleDays: [{ day: 1 }], courts: ['A'], laneWidth: 78, startHour: 8, endHour: 18,
       });
-      expect(blocks[1].top - blocks[0].top).toBe(NARROW_HEAD_PX);
-      // Below the first's foot it no longer clashes, so it keeps the lane's full width.
-      expect([blocks[1].left, blocks[1].width]).toEqual([0, 78]);
-      expect(blocks[0].coveredRight).toBe(0);
+      expect(narrow.map((b) => [b.top, b.left])).toEqual([[top, 0], [top, 39]]);
     });
 
     it('keeps the earlier block\'s text clear of a later block that covers its right part', () => {
@@ -451,7 +422,8 @@ describe('admin_calendar pure layout helper', () => {
         calendar: { competitions: Array.from({ length: 8 }, (_, i) => comp(String(i), `C${i}`, ['A'], 600 + i, 800)) },
         visibleDays: [{ day: 1 }], courts: ['A'], laneWidth: 76, startHour: 8, endHour: 18,
       });
-      for (const b of deep) expect(b.width).toBeGreaterThanOrEqual(38);
+      // A quarter of each block always stays in view.
+      for (const b of deep) expect(b.width).toBeGreaterThanOrEqual(19);
       // Starting a minute apart, the second takes the right half of the first.
       expect(deep[1].left).toBe(38);
       // A narrow lane insets a later start by a quarter of the lane, not the full step.
@@ -490,9 +462,16 @@ describe('admin_calendar pure layout helper', () => {
       const rule = css.match(/\.cal-block:hover,\s*\.cal-block:focus-within\s*\{([^}]*)\}/g) || [];
       const body = rule.join('\n');
       expect(body).toMatch(/--cal-covered:\s*0px\s*!important/);
-      expect(body).toMatch(/--cal-move-right:\s*0px\s*!important/);
-      // The short block still lifts.
+            // The short block still lifts.
       expect(body).toMatch(/min-height:\s*52px/);
+    });
+    it('keeps the lines beside a raised block\'s Move button clear of it', () => {
+      const css = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', 'css', 'styles.css'), 'utf8');
+      const fine = css.match(/@media \(pointer: fine\)\s*\{([\s\S]*?)\n\}/);
+      expect(fine).not.toBeNull();
+      expect(fine[1]).toMatch(/\.cal-block--movable:hover \.cal-block__content::before/);
+      expect(fine[1]).toMatch(/\.cal-block--movable:focus-within \.cal-block__content::before/);
+      expect(fine[1]).toMatch(/float:\s*right/);
     });
   });
 

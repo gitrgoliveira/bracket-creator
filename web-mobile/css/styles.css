@@ -11917,23 +11917,9 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 
 /* The part of a block that a later, cascaded block covers on the right
    (--cal-covered, set per block): its text wraps inside the part that stays
-   in view, and its Move button sits there too (--cal-move-right). */
+   in view, and its Move button sits there too. */
 .cal-block__content {
   margin-right: var(--cal-covered, 0px);
-}
-
-/* A later block drawn below this one's head covers its right part from there
-   down: the head keeps the full width and the lines below wrap beside the
-   cover (the gap's height is the head's, set per block). */
-.cal-block__cover-gap {
-  float: right;
-  width: 0;
-}
-
-.cal-block__cover {
-  float: right;
-  clear: right;
-  height: 2000px;
 }
 
 /* A block raised by hover or focus is drawn over the one that covers it, so
@@ -11941,14 +11927,19 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 .cal-block:hover,
 .cal-block:focus-within {
   --cal-covered: 0px !important;
-  --cal-move-right: 0px !important;
 }
 
-.cal-block:hover .cal-block__cover,
-.cal-block:hover .cal-block__cover-gap,
-.cal-block:focus-within .cal-block__cover,
-.cal-block:focus-within .cal-block__cover-gap {
-  display: none;
+/* With a mouse the Move button shows only on a raised block: the lines beside
+   it keep clear of it (its 4 px margin, about 50 px wide and 24 px tall, less
+   the block's 8 px and 6 px padding). */
+@media (pointer: fine) {
+  .cal-block--movable:hover .cal-block__content::before,
+  .cal-block--movable:focus-within .cal-block__content::before {
+    content: '';
+    float: right;
+    width: 52px;
+    height: 24px;
+  }
 }
 
 .cal-block--estimate {
@@ -12040,7 +12031,7 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 .cal-block__move-slot {
   position: absolute;
   top: 0;
-  right: var(--cal-move-right, 0px);
+  right: var(--cal-covered, 0px);
   z-index: 1;
 }
 
@@ -12066,7 +12057,6 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
      width and Move a row of its own at the foot, the block drawn tall enough
      for both. */
   .cal-block--narrow.cal-block--movable {
-    /* NARROW_HEAD_PX in admin_calendar.jsx */
     min-height: 100px;
   }
   .cal-block--narrow.cal-block--movable .cal-block__open {

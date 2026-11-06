@@ -24,18 +24,6 @@ export const CASCADE_PX = 24;
 // A block that starts this close below an earlier one it overlaps would hide
 // the earlier one's name and time, so it is inset to half the earlier block.
 export const NEAR_START_PX = 60;
-// A block that starts at the same time as an earlier one on its lane is drawn
-// below the earlier one's head (its name, warnings and time: headLinesPx),
-// never less than this (a touch screen's 44 px Move button), and then
-// cascades like a later start.
-export const SAME_START_DROP_PX = 44;
-// The height of one line of a short block (its name and start), which a block
-// drawn below an earlier one keeps even past its real end.
-export const ONE_LINE_BLOCK_PX = 22;
-// A touch screen's narrow block has its Move button on a row of its own under
-// the name, and is drawn this tall at least (styles.css, .cal-block--narrow):
-// a block starting with it is drawn below all of it.
-export const NARROW_HEAD_PX = 100;
 // Under this much visible width a touch screen's 44 px Move button and a
 // readable name do not fit side by side, so Move goes on a row of its own
 // under the name (a phone's 76 px lanes always do).
@@ -313,7 +301,7 @@ export function detectOffScreenOverlaps({ calendar, currentPageDays }) {
 /**
  * Computes block coordinates and clipping for placed competitions.
  */
-export function computeBlocksLayout({ calendar, visibleDays, courts, laneWidth, startHour, endHour, coarse = false }) {
+export function computeBlocksLayout({ calendar, visibleDays, courts, laneWidth, startHour, endHour }) {
   const visibleDayNums = new Set((visibleDays || []).map(d => d.day));
   const comps = calendar?.competitions || [];
   const compMap = new Map(comps.map(c => [c.id, c]));
@@ -407,7 +395,7 @@ export function computeBlocksLayout({ calendar, visibleDays, courts, laneWidth, 
     });
   }
 
-  return cascadeBlocks(placedBlocks, laneWidth, { coarse });
+  return cascadeBlocks(placedBlocks, laneWidth);
 }
 
 /**
@@ -422,7 +410,7 @@ export function fitBlockLines(root) {
   root.querySelectorAll('.cal-block:not(.cal-block--short) .cal-block__open').forEach((open) => {
     const content = open.querySelector('.cal-block__content');
     if (!content) return;
-    const lines = Array.from(content.children).filter((el) => !el.dataset?.float).slice(1);
+    const lines = Array.from(content.children).slice(1);
     lines.forEach((el) => {
       el.style.display = '';
       el.style.webkitLineClamp = '';
@@ -470,25 +458,7 @@ export function pauseLabelLane(blocks, laneCount, start, end) {
  * the earlier one's name and time stay readable beside it. Blocks come back in
  * start order within each day, so a later start is drawn on top.
  */
-/**
- * How tall a block's head is drawn: its name (up to two lines), its warning
- * lines and its time line, estimated from their text and the block's width
- * (12 px and 11 px type, styles.css .cal-block__*). On a touch screen the
- * lines beside its Move button keep clear of it. Capped at the block's own
- * height, which is all of it that shows.
- */
-export function headLinesPx(block, { coarse = false } = {}) {
-  const inner = Math.max(20, (block.width || 0) - 16 - (coarse ? 44 : 0));
-  const lines = (text, charPx) => Math.max(1, Math.ceil((String(text).length * charPx) / inner));
-  let px = 6 + 15 * Math.min(2, lines(block.comp?.name || '', 6.8));
-  const d = block.overlapDetail;
-  if (d) px += 2 + 14.3 * lines(`Overlaps ${d.partnerName} on Shiaijo ${d.courtsStr}, ${d.durationStr}`, 6);
-  if (block.pastMidnight) px += 2 + 14.3 * lines('x'.repeat(100), 6);
-  px += 2 + 14.3;
-  return Math.min(Math.ceil(px), block.height || 0);
-}
-
-export function cascadeBlocks(blocks, laneWidth, { coarse = false } = {}) {
+export function cascadeBlocks(blocks, laneWidth) {
   const ordered = [...blocks].sort((a, b) => (a.day - b.day)
     || (a.startMins - b.startMins)
     || String(a.comp?.name || '').localeCompare(String(b.comp?.name || '')));
@@ -497,51 +467,35 @@ export function cascadeBlocks(blocks, laneWidth, { coarse = false } = {}) {
   const clashes = (p, b) => p.day === b.day
     && p.minCourtIdx <= b.maxCourtIdx && b.minCourtIdx <= p.maxCourtIdx
     && p.top < b.top + b.height && b.top < p.top + p.height;
-  for (const o of ordered) {
-    // Starting with an earlier block, it is drawn below that block's head; its
-    // foot stays at its end where it can.
-    let b = o;
-    const sameStart = () => placed.find((p) => clashes(p, b) && p.top === b.top);
-    for (let guard = 0, p = sameStart(); guard < 8 && p; guard++, p = sameStart()) {
-      // A touch screen's narrow block keeps its Move button under its name,
-      // so the one starting with it goes below the whole of it.
-      const drop = coarse && p.width < NARROW_BLOCK_PX
-        ? NARROW_HEAD_PX
-        : Math.max(SAME_START_DROP_PX, headLinesPx(p, { coarse }));
-      const height = Math.max(b.height - drop, ONE_LINE_BLOCK_PX);
-      b = { ...b, top: b.top + drop, height, short: b.short || (!b.isPlaceholder && height < PLACEHOLDER_MIN_PX) };
-    }
+  for (const b of ordered) {
     let depth = 0;
     let minLeft = b.left;
     for (const p of placed) {
       if (!clashes(p, b)) continue;
       depth = Math.max(depth, p.cascadeDepth + 1);
-      // Starting at about the same time it would cover the earlier block's
-      // name and time, so it takes the right half of the earlier block.
+      // Starting at about the same time (or at the same time) it would cover
+      // the earlier block's name and time, so it takes the right half of the
+      // earlier block, at its real start.
       if (b.top - p.top < NEAR_START_PX) minLeft = Math.max(minLeft, p.left + Math.floor(p.width / 2));
     }
-    // At least half of the block keeps its width, however deep the clash.
-    const maxInset = Math.floor(b.width / 2);
+    // Half of the block keeps its width, and each deeper clash one step more,
+    // so a third block that starts with two others still stands out from the
+    // second; a quarter of the block always stays.
+    const maxInset = Math.min(Math.floor(b.width / 2) + Math.max(0, depth - 1) * step, Math.floor((b.width * 3) / 4));
     const inset = Math.min(Math.max(depth * step, minLeft - b.left), maxInset);
-    placed.push({ ...b, cascadeDepth: depth, left: b.left + inset, width: b.width - inset, coveredRight: 0, coveredTop: 0 });
+    placed.push({ ...b, cascadeDepth: depth, left: b.left + inset, width: b.width - inset, coveredRight: 0 });
   }
-  // The part of each block a later one covers on the right (coveredRight),
-  // from coveredTop down: its text and its Move button keep to the part that
-  // stays in view.
+  // The part of each block a later one covers on the right: its text and its
+  // Move button keep to the part that stays in view.
   for (let i = 0; i < placed.length; i++) {
     const b = placed[i];
-    let coveredTop = Infinity;
     for (let j = i + 1; j < placed.length; j++) {
       const p = placed[j];
       if (!clashes(b, p) || p.left <= b.left) continue;
       const covered = Math.max(0, Math.min(b.left + b.width, p.left + p.width) - p.left);
-      if (p.left + p.width >= b.left + b.width && covered > 0) {
-        b.coveredRight = Math.max(b.coveredRight, covered);
-        coveredTop = Math.min(coveredTop, Math.max(0, p.top - b.top));
-      }
+      if (p.left + p.width >= b.left + b.width) b.coveredRight = Math.max(b.coveredRight, covered);
     }
     b.coveredRight = Math.min(b.coveredRight, b.width - Math.floor(b.width / 2));
-    b.coveredTop = b.coveredRight > 0 ? coveredTop : 0;
   }
   return placed;
 }
@@ -552,7 +506,7 @@ export function cascadeBlocks(blocks, laneWidth, { coarse = false } = {}) {
  * grid's frame, which the lanes share (the page's padding and the frame's
  * border are not theirs, or lanes that fit would still scroll sideways).
  */
-export function calendarLayout({ calendar, width = 1024, frameWidth, page = 0, phone = false, coarse = false }) {
+export function calendarLayout({ calendar, width = 1024, frameWidth, page = 0, phone = false }) {
   const courts = calendar?.courts || [];
   const days = calendar?.days || [];
   const shiaijoCount = courts.length;
@@ -586,7 +540,6 @@ export function calendarLayout({ calendar, width = 1024, frameWidth, page = 0, p
     laneWidth,
     startHour: hourRange.startHour,
     endHour: hourRange.endHour,
-    coarse,
   });
 
   return {
@@ -780,11 +733,15 @@ export function AdminCalendarPage({
       calendar,
       width: containerWidth,
       frameWidth,
-      coarse: isCoarse,
       page: activePage,
       phone: isPhoneScreen,
     });
-  }, [calendar, containerWidth, frameWidth, activePage, isPhoneScreen, isCoarse]);
+  }, [calendar, containerWidth, frameWidth, activePage, isPhoneScreen]);
+
+  const refitBlock = useCallback((e) => {
+    const el = e.currentTarget;
+    requestAnimationFrame(() => fitBlockLines(el));
+  }, []);
 
   // A block shows only whole lines: the line its height cuts through is
   // clamped to the lines that fit, and the lines after it are left out.
@@ -1364,11 +1321,7 @@ export function AdminCalendarPage({
                         // screen's Move button side by side: Move takes a row
                         // of its own at the foot.
                         const covered = block.coveredRight || 0;
-                        // A later block drawn below this one's head leaves the
-                        // head its full width: only the lines below it wrap
-                        // into the part in view.
-                        const headClear = covered > 0 && block.coveredTop >= SAME_START_DROP_PX;
-                        const narrow = block.width - (headClear ? 0 : covered) < NARROW_BLOCK_PX;
+                        const narrow = block.width - covered < NARROW_BLOCK_PX;
                         if (narrow) blockClass += ' cal-block--narrow';
                         if (block.hasOverlap || block.pastMidnight) {
                           blockClass += ' cal-block--warn';
@@ -1433,10 +1386,15 @@ export function AdminCalendarPage({
                               width: `${block.width}px`,
                               top: `${block.top}px`,
                               height: `${block.height}px`,
-                              '--cal-covered': `${headClear ? 0 : covered}px`,
-                              '--cal-move-right': `${headClear && !narrow ? 0 : covered}px`,
+                              '--cal-covered': `${covered}px`,
                             }}
                             onPointerDown={(e) => handleBlockPointerDown(e, comp, block)}
+                            // Raised, a block's lines take its full width and keep
+                            // clear of its Move button: fit them again.
+                            onPointerEnter={refitBlock}
+                            onPointerLeave={refitBlock}
+                            onFocus={refitBlock}
+                            onBlur={refitBlock}
                           >
                             {/* In-block pause strips */}
                             {withContentKeys(pausesInBlock, (x) => `${x.name}|${x.startMins ?? x.StartMins}-${x.endMins ?? x.EndMins}`).map(({ key: stripKey, item: p }) => {
@@ -1472,12 +1430,6 @@ export function AdminCalendarPage({
                               onKeyDown={(e) => handleBlockKeyDown(e, comp)}
                             >
                               <div className="cal-block__content">
-                                {headClear && (
-                                  <>
-                                    <span className="cal-block__cover-gap" data-float="1" aria-hidden="true" style={{ height: `${Math.max(0, block.coveredTop - 6)}px` }} />
-                                    <span className="cal-block__cover" data-float="1" aria-hidden="true" style={{ width: `${covered}px` }} />
-                                  </>
-                                )}
                                 <div className="cal-block__name" title={comp.name}>
                                   {isPlaceholder && <span className="cal-block__chip">?</span>}
                                   {comp.name}

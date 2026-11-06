@@ -150,7 +150,16 @@ type breakWindow struct {
 	start, end time.Time
 }
 
-// dayBreaks returns the usable pauses of the competition's day, sorted by start:
+// dayBreaks returns the pauses the schedule works around on the competition's
+// day: the drawn windows (pauseWindows) of the pauses that stop matches
+// (state.Pause.StopsMatches). A pause whose matches go on through it is drawn
+// on the calendar but moves no slot, estimate or retime.
+func dayBreaks(tournament *state.Tournament, date string) []breakWindow {
+	return pauseWindows(tournament, date, state.Pause.StopsMatches)
+}
+
+// pauseWindows returns the drawn windows of the pauses keep accepts on the
+// competition's day, sorted by start:
 // every pause with Day 0, plus those whose Day equals the day index of date
 // (1-based position of date in tournament.Days(); an empty date is Day 1; a date
 // not in Days() gets only the Day 0 pauses). Drop incomplete rows: a Start that
@@ -158,7 +167,7 @@ type breakWindow struct {
 // turns into 0. Pauses with a Day greater than the tournament's day count never
 // match, so they are ignored. The times are on the same reference date
 // parseClockHHMM uses so they compare with the cursors. nil tournament gives nil.
-func dayBreaks(tournament *state.Tournament, date string) []breakWindow {
+func pauseWindows(tournament *state.Tournament, date string, keep func(state.Pause) bool) []breakWindow {
 	if tournament == nil {
 		return nil
 	}
@@ -181,6 +190,9 @@ func dayBreaks(tournament *state.Tournament, date string) []breakWindow {
 
 	var breaks []breakWindow
 	for _, p := range tournament.Pauses {
+		if !keep(p) {
+			continue
+		}
 		if p.Day < 0 || p.Day > dayCount {
 			continue
 		}
@@ -204,15 +216,26 @@ func dayBreaks(tournament *state.Tournament, date string) []breakWindow {
 	return breaks
 }
 
-// dayBreaksFor returns the break windows for a single pause of tournament on date.
-// It delegates to dayBreaks without mutating the caller's tournament.
+// dayBreaksFor returns the break windows the schedule works around for a single
+// pause of tournament on date (none for a pause matches go on through). It
+// delegates to dayBreaks without mutating the caller's tournament.
 func dayBreaksFor(tournament *state.Tournament, pause state.Pause, date string) []breakWindow {
+	return onePause(tournament, pause, date, state.Pause.StopsMatches)
+}
+
+// drawnPauseWindowsFor returns the windows the calendar draws for a single
+// pause of tournament on date, whether or not matches stop for it.
+func drawnPauseWindowsFor(tournament *state.Tournament, pause state.Pause, date string) []breakWindow {
+	return onePause(tournament, pause, date, func(state.Pause) bool { return true })
+}
+
+func onePause(tournament *state.Tournament, pause state.Pause, date string, keep func(state.Pause) bool) []breakWindow {
 	if tournament == nil {
 		return nil
 	}
 	tCopy := *tournament
 	tCopy.Pauses = []state.Pause{pause}
-	return dayBreaks(&tCopy, date)
+	return pauseWindows(&tCopy, date, keep)
 }
 
 // skipBreaks pushes t past any pause window it falls inside: while t lies

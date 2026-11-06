@@ -17,12 +17,25 @@ import (
 // a closing ceremony); Start is a clock "HH:MM"; Length uses the duration text
 // format ("1h", "45m", "1h30m"); Day is the 1-based tournament day index, 0
 // meaning every day; a row with no start or an unreadable length is kept but
-// not used by the schedule.
+// skipped by the schedule.
+//
+// MatchesGoOn is the setup page's "Matches stop for this pause" box, unticked
+// (operator ruling 2026-11-06): the pause is drawn on the calendar but moves
+// no match. The zero value stops matches, so a pause saved before the box
+// existed loads as ticked and a save writes no key for it (no write-back).
+// Ask StopsMatches, never the field.
 type Pause struct {
-	Name   string `yaml:"name" json:"name"`
-	Start  string `yaml:"start,omitempty" json:"start"`
-	Length string `yaml:"length,omitempty" json:"length"`
-	Day    int    `yaml:"day,omitempty" json:"day"`
+	Name        string `yaml:"name" json:"name"`
+	Start       string `yaml:"start,omitempty" json:"start"`
+	Length      string `yaml:"length,omitempty" json:"length"`
+	Day         int    `yaml:"day,omitempty" json:"day"`
+	MatchesGoOn bool   `yaml:"matches_go_on,omitempty" json:"matchesGoOn,omitempty"`
+}
+
+// StopsMatches reports whether the schedule works around this pause: the one
+// owner of that question for every slot, estimate and retime.
+func (p Pause) StopsMatches() bool {
+	return !p.MatchesGoOn
 }
 
 type Tournament struct {

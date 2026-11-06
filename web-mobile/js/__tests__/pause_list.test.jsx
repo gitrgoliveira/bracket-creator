@@ -7,6 +7,7 @@ import {
   parseClock,
   formatClock,
   computePauseRowStatus,
+  pauseStopsMatches,
 } from '../pause_list.jsx';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -90,21 +91,21 @@ describe('computePauseRowStatus', () => {
     it('shows exact sentence when start time is missing', () => {
       const pauses = [{ name: 'Opening', start: '', length: '30m', day: 1 }];
       const status = computePauseRowStatus(pauses[0], 0, pauses, 1);
-      expect(status.text).toBe('Not used yet: give it a start time.');
+      expect(status.text).toBe('Matches will not stop for this pause: give it a start time.');
       expect(status.warn).toBe(true);
     });
 
     it('shows missing length message when length is missing or unparseable', () => {
       const pauses = [{ name: 'Lunch', start: '12:00', length: '', day: 1 }];
       const status = computePauseRowStatus(pauses[0], 0, pauses, 1);
-      expect(status.text).toBe('Not used yet: give it a length like 30m.');
+      expect(status.text).toBe('Matches will not stop for this pause: give it a length like 30m.');
       expect(status.warn).toBe(true);
     });
 
     it('prioritizes missing start over missing length', () => {
       const pauses = [{ name: 'TBD', start: '', length: '', day: 1 }];
       const status = computePauseRowStatus(pauses[0], 0, pauses, 1);
-      expect(status.text).toBe('Not used yet: give it a start time.');
+      expect(status.text).toBe('Matches will not stop for this pause: give it a start time.');
       expect(status.warn).toBe(true);
     });
   });
@@ -113,7 +114,7 @@ describe('computePauseRowStatus', () => {
     it('warns when day is greater than tournament durationDays', () => {
       const pauses = [{ name: 'Closing', start: '17:00', length: '45m', day: 3 }];
       const status = computePauseRowStatus(pauses[0], 0, pauses, 2);
-      expect(status.text).toBe('Not used: the tournament no longer has Day 3.');
+      expect(status.text).toBe('Matches will not stop for this pause: the tournament no longer has Day 3.');
       expect(status.warn).toBe(true);
     });
   });
@@ -174,6 +175,28 @@ describe('computePauseRowStatus', () => {
       ];
       const status = computePauseRowStatus(pauses[0], 0, pauses, 2);
       expect(status.text).toBe('Matches stop 12:00 to 13:00.');
+    });
+  });
+
+  describe('a pause matches go on through', () => {
+    it('stops matches when the field is absent or false, not when true', () => {
+      expect(pauseStopsMatches({ name: 'Lunch' })).toBe(true);
+      expect(pauseStopsMatches({ name: 'Lunch', matchesGoOn: false })).toBe(true);
+      expect(pauseStopsMatches({ name: 'Lunch', matchesGoOn: true })).toBe(false);
+    });
+
+    it('says matches go on through it', () => {
+      const pauses = [{ name: 'Opening', start: '09:00', length: '30m', day: 0, matchesGoOn: true }];
+      const status = computePauseRowStatus(pauses[0], 0, pauses, 1);
+      expect(status).toEqual({ type: 'matches_go_on', text: 'Matches go on through it, 09:00 to 09:30.', warn: false });
+    });
+
+    it('is never named as a pause another one merges with', () => {
+      const pauses = [
+        { name: 'Lunch', start: '12:00', length: '1h', day: 0 },
+        { name: 'Grading', start: '12:30', length: '1h', day: 0, matchesGoOn: true },
+      ];
+      expect(computePauseRowStatus(pauses[0], 0, pauses, 1).text).toBe('Matches stop 12:00 to 13:00.');
     });
   });
 });

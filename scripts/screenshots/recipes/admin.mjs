@@ -167,7 +167,7 @@ export const recipes = [
 
   {
     // The calendar on a phone with a touch screen: one day at a time, a tab
-    // for each day, and each block's Move button always shown.
+    // for each day, and no Move button on any block.
     name: 'mobile-calendar-phone',
     family: 'calendar',
     route: '/admin/calendar',

@@ -6,6 +6,7 @@
 // exactly, or says that something changed since.
 
 import { formatClockHHMM, parseClockTime } from './calendar_rules.jsx';
+import { pauseStopsMatches } from './pause_list.jsx';
 import { settingsPutBody } from './competition_put_body.jsx';
 import { readRetimePreview, RetimeWarning } from './retime_warning.jsx';
 import { PillButton } from './competition_fields.jsx';
@@ -52,13 +53,15 @@ export function shiftLanes(courts, allCourts, delta) {
 }
 
 /**
- * Snaps a start to 5 minutes; a start that falls inside a pause moves to the
- * end of that pause. Stays within the day.
+ * Snaps a start to 5 minutes; a start that falls inside a pause that stops
+ * matches moves to the end of that pause (one matches go on through keeps it).
+ * Stays within the day.
  */
 export function snapStart(mins, breaks) {
   let m = Math.round(mins / SNAP_MINUTES) * SNAP_MINUTES;
   m = Math.max(0, Math.min(m, 24 * 60 - SNAP_MINUTES));
   const windows = (breaks || [])
+    .filter(pauseStopsMatches)
     .map((b) => ({ start: b.startMins ?? b.StartMins, end: b.endMins ?? b.EndMins }))
     .filter((w) => Number.isFinite(w.start) && Number.isFinite(w.end))
     .sort((a, b) => a.start - b.start);

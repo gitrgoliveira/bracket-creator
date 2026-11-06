@@ -7263,6 +7263,15 @@ components:
           description: >
             1-based tournament day index (1 = Day 1, 2 = Day 2, etc.);
             0 means every day of the tournament.
+        matchesGoOn:
+          type: boolean
+          default: false
+          description: >
+            True when the pause's "Matches stop for this pause" box is
+            unticked: the calendar still draws the pause, but no planned
+            match time, estimate or calendar move works around it. Omitted
+            or false, the pause stops matches (a pause saved before this
+            field existed stops matches).
 
     Competition:
       type: object
@@ -9085,6 +9094,13 @@ components:
         endMins:
           type: integer
           description: End time in minutes from midnight.
+        matchesGoOn:
+          type: boolean
+          default: false
+          description: >
+            True for a pause matches go on through (its Pause.matchesGoOn):
+            drawn on its day, but no match time works around it. Omitted
+            when the pause stops matches.
 
     UnusedPause:
       type: object
@@ -9094,7 +9110,7 @@ components:
           type: string
         reason:
           type: string
-          description: Reason why the pause was not applied to the schedule.
+          description: Reason why the schedule skips the pause (matches will not stop for it).
 
     CalendarCompetition:
       type: object

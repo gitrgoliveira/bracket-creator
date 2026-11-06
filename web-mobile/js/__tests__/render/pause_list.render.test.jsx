@@ -33,13 +33,13 @@ describe('PauseList component', () => {
     expect(screen.getByText('Matches stop 12:00 to 13:00.')).toBeInTheDocument();
   });
 
-  it('renders incomplete row status: "Not used yet: give it a start time."', () => {
+  it('renders incomplete row status: "Matches will not stop for this pause: give it a start time."', () => {
     const pauses = [
       { name: 'Closing ceremony', start: '', length: '30m', day: 0 },
     ];
     render(<PauseList pauses={pauses} onChange={vi.fn()} durationDays={1} />);
 
-    expect(screen.getByText('Not used yet: give it a start time.')).toBeInTheDocument();
+    expect(screen.getByText('Matches will not stop for this pause: give it a start time.')).toBeInTheDocument();
   });
 
   it('renders overlapping rows status with merged window and other pause name', () => {
@@ -150,5 +150,24 @@ describe('PauseList component', () => {
     );
 
     expect(screen.queryByText(/Already drawn, keeps its times/)).not.toBeInTheDocument();
+  });
+
+  it('ticks "Matches stop for this pause" for a pause saved without the field', () => {
+    render(<PauseList pauses={[{ name: 'Lunch', start: '12:00', length: '1h', day: 0 }]} onChange={vi.fn()} durationDays={1} />);
+    expect(screen.getByRole('checkbox', { name: 'Matches stop for this pause' })).toBeChecked();
+  });
+
+  it('unticking the box saves matchesGoOn, and the row says matches go on', () => {
+    const onChange = vi.fn();
+    const pauses = [{ name: 'Opening ceremony', start: '09:00', length: '30m', day: 0 }];
+    const { rerender } = render(<PauseList pauses={pauses} onChange={onChange} durationDays={1} />);
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Matches stop for this pause' }));
+    expect(onChange).toHaveBeenCalledWith([{ ...pauses[0], matchesGoOn: true }]);
+
+    rerender(<PauseList pauses={[{ ...pauses[0], matchesGoOn: true }]} onChange={onChange} durationDays={1} />);
+    expect(screen.getByRole('checkbox', { name: 'Matches stop for this pause' })).not.toBeChecked();
+    expect(screen.getByText('Matches go on through it, 09:00 to 09:30.')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Matches stop for this pause' }));
+    expect(onChange).toHaveBeenLastCalledWith([{ ...pauses[0], matchesGoOn: false }]);
   });
 });

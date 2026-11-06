@@ -152,8 +152,8 @@ Operators need best / average / worst.
 - [x] `kachinukiBoutRange`, `perMatchElapsedBouts` (float bouts),
   `perMatchElapsedMinutesBouts` (`engine/scheduler_slots.go`).
 - [x] The stored per-competition estimate prices 3 scenarios; the stateless
-  `GET /api/schedule/estimate` no longer takes `teamMatchType` and always
-  returns a single collapsed value.
+  `GET /api/schedule/estimate` takes no `teamMatchType` and always returns a
+  single collapsed value.
 - [x] Tests: range math pinned on the stored path only (exact hand-derived
   values), non-kachinuki collapse, fractional-bout helpers (no handler param test).
 

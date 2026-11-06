@@ -1309,6 +1309,11 @@ a:hover {
   width: 100%;
 }
 
+/* The "Matches stop for this pause" box, under the row's fields. */
+.pause-stops-matches {
+  margin-top: 10px;
+}
+
 .pause-row-footer {
   display: flex;
   justify-content: space-between;
@@ -11828,6 +11833,14 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   color: var(--ink-2);
   pointer-events: none;
   box-sizing: border-box;
+}
+
+/* A pause matches go on through: drawn lighter, with a dashed edge, so it
+   reads as a marked time rather than a stop. */
+.cal-pause-band--matches-go-on {
+  background: transparent;
+  border-top-style: dashed;
+  border-bottom-style: dashed;
 }
 
 .cal-blocks-layer {

@@ -234,7 +234,7 @@ export function DraftEstimatePanel({
   const perCourtParts = perCourt.map((m, idx) => {
     const label = (courtLabels && courtLabels[idx]) || String.fromCharCode(65 + idx);
     if (m === 0) {
-      return `${label} not used`;
+      return `${label} has no matches`;
     }
     return `${label} about ${formatEstimateMinutes(m)}`;
   });

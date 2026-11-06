@@ -304,13 +304,17 @@ export function formatPausesRow(tournament, c) {
   const relevant = pauses.filter(p => (p && (p.day === 0 || p.day === compDay)));
 
   const usable = [];
+  // Pauses the estimate does not work around: matches go on through them by
+  // choice, or the row is incomplete. Named after the day's pauses.
   const unused = [];
 
   for (let i = 0; i < relevant.length; i++) {
     const p = relevant[i];
     const name = (p.name || "").trim() || "Pause";
     const status = computePauseRowStatus(p, i, relevant, durationDays);
-    if (!status.warn) {
+    if (status.type === 'matches_go_on') {
+      unused.push(`${name}: matches go on`);
+    } else if (!status.warn) {
       const startMin = parseClock(p.start);
       const durMin = blockMinutes(p.length);
       const endClock = formatClock(startMin + durMin);
@@ -319,7 +323,7 @@ export function formatPausesRow(tournament, c) {
         startMin,
       });
     } else {
-      unused.push(`${name}: not used, ${status.type === 'missing_start' ? "no start time" : "no length"}`);
+      unused.push(`${name}: ${status.type === 'missing_start' ? "no start time" : "no length"}, matches will not stop`);
     }
   }
 
@@ -337,7 +341,7 @@ export function formatPerShiaijoRow(estimate, courts) {
   return estimate.perCourtMinutes.map((m, i) => {
     const letter = (Array.isArray(courts) && courts[i]) || String.fromCharCode(65 + i);
     if (!m || m <= 0) {
-      return `${letter} not used`;
+      return `${letter} has no matches`;
     }
     return `${letter} about ${formatEstimateMinutes(m)}`;
   }).join(" · ");

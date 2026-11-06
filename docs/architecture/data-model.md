@@ -321,15 +321,17 @@ A tournament holds a list of scheduled stops in `pauses` (at most 20 pauses). Ea
 * `start`: The scheduled clock time in "HH:MM" format (for example 12:00).
 * `length`: The duration text string (such as "1h", "45m", or "1h30m").
 * `day`: The 1-based tournament day index (1 for Day 1, 2 for Day 2). A day index of 0 means the pause applies on every day of the tournament.
+* `matches_go_on`: A bool, written only when true (absent reads false). True when the setup page's **Matches stop for this pause** box is unticked. A pause saved before this field existed carries no key and stops matches, and a save writes no key for it, so an older `tournament.md` needs no rewrite.
 
-The schedule estimator evaluates pauses under four rules:
+The schedule estimator evaluates pauses under five rules:
 
 * **Incomplete rows are ignored.** An incomplete row with no start time or an unparseable duration is saved and preserved on disk, but the schedule ignores it.
 * **Overlapping pauses count as one.** When two pauses overlap in time, the schedule treats them as one longer pause: a match that would start inside either of them starts when the later one ends.
 * **Pauses on missing days are ignored.** A pause whose day index falls outside the tournament duration or on a day with no scheduled competition is ignored by the schedule.
-* **Drawn competitions keep their times.** Once a competition is drawn, its stored match times stay as they are when pauses are edited later. A draw made after the edit uses the new pauses. Changing a drawn competition's date or start time is the one edit that re-times its matches, in the same save as the settings.
+* **A pause with `matches_go_on` moves no match.** The calendar draws it on its day, flagged `matchesGoOn` on the day's break, but match slots, every estimate and a calendar move or retime treat it as absent.
+* **Drawn competitions keep their times.** Once a competition is drawn, its stored match times stay as they are when pauses are edited later. A draw made after the edit uses the new pauses. Changing a drawn competition's date or start time is the one settings edit that re-times its matches, in the same save as the settings.
 
-The earlier `lunch_block`, `opening_block` and `closing_block` keys are no longer part of the model: `pauses` replaces them (see the upgrade below).
+The model has no `lunch_block`, `opening_block` or `closing_block` key; `pauses` holds those stops. Refer to [Upgrading legacy ceremony blocks](#upgrading-legacy-ceremony-blocks) for a file that still carries them.
 
 ### Upgrading legacy ceremony blocks
 
@@ -338,8 +340,8 @@ Releases up to and including v2.3.0 stored ceremonies and lunch as duration stri
 * `lunch_block`: Converted to a "Lunch" pause starting at 12:00 on every day (Day 0) when the tournament has no existing pauses.
 * `opening_block`: Converted into one "Opening ceremony" pause per tournament day that has a competition, starting at that day's earliest competition start time (an empty start time defaults to 09:00). On a single-day tournament the pause uses Day 0; on a multi-day tournament it uses the specific day index. If no competition has a day within the tournament, a single start-less "Opening ceremony" row is created so the organiser can provide a time.
 * `closing_block`: Converted into one "Closing ceremony" pause with no start time on Day 0.
-* **Removal of legacy keys:** Once converted, the legacy keys are removed from `tournament.md` on the next file write.
-* **Failure handling:** The ceremony migration runs once at server startup. If the conversion fails, the error is logged, the legacy keys stay on disk, and the migration is retried at the next startup.
+
+Once converted, the legacy keys are removed from `tournament.md` on the next file write. The ceremony migration runs once at server startup. If the conversion fails, the error is logged, the legacy keys stay on disk, and the migration is retried at the next startup.
 
 ## 3. The match and result model
 
@@ -683,7 +685,7 @@ Markdown, CSV, and JSON or YAML each earn their place:
 | JSON and YAML | bracket, eligibility, lineups, overrides | Tree shaped data that does not fit a row |
 | JSON lines (JSONL) | match history and per-match score event logs | Append-only audit trail and event sourcing stream; one line per write or event |
 
-In `tournament.md`, YAML front matter stores tournament settings: `name`, `date`, `venue`, `courts`, `mode`, `duration_days`, `pauses`, `clock_to_elapsed_multiplier`, `slowest_court_buffer_pct`, `sponsors`, and `theme`. A file that still carries `lunch_block`, `opening_block` or `closing_block` is converted to `pauses` at startup. The optional `theme` block holds the accent colours, the window title, `logo_path`, and `logo_on_lobby` (a bool; absent reads false). When `logo_on_lobby` is true and a logo is uploaded in `branding/`, the lobby display shows the logo.
+In `tournament.md`, YAML front matter stores the tournament settings, among them `name`, `date`, `venue`, `courts`, `mode`, `duration_days`, `pauses`, `clock_to_elapsed_multiplier`, `slowest_court_buffer_pct`, `sponsors`, and `theme`. A file that still carries `lunch_block`, `opening_block` or `closing_block` is converted to `pauses` at startup. The optional `theme` block holds the accent colours, the window title, `logo_path`, and `logo_on_lobby` (a bool; absent reads false). When `logo_on_lobby` is true and a logo is uploaded in `branding/`, the lobby display shows the logo.
 
 In `competitions/<id>/config.md`, YAML front matter stores competition configuration: `name`, `date`, `start_time`, `courts`, `kind`, `format`, `status`, rules and match durations, `expected_participants`, and format-specific options. The `expected_participants` field is an optional integer (0 to 1024, absent means 0) representing the organiser's expected entry count (expected teams in team competitions) for setup schedule estimation. It needs no migration because no earlier release wrote the key.
 

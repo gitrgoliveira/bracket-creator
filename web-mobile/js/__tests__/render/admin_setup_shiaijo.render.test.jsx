@@ -65,13 +65,13 @@ const makeTournament = (over = {}) => ({
   ...over,
 });
 
-async function mountEdit(tournament = makeTournament()) {
+async function mountEdit(tournament = makeTournament(), onSave = noop) {
   let result;
   await act(async () => {
     result = render(
       <AdminEditTournament
         tournament={tournament}
-        onSave={noop}
+        onSave={onSave}
         onCancel={noop}
         onLogout={noop}
         onViewerMode={noop}
@@ -382,5 +382,29 @@ describe('Import warning: a reassigned row surfaces without being mistaken for a
     expect(container.textContent).toContain('Returning to dashboard');
     await act(async () => { await new Promise((r) => setTimeout(r, 1700)); });
     expect(onImported).toHaveBeenCalledTimes(1);
+  });
+});
+
+// Operator ruling 2026-11-06: each pause has a "Matches stop for this pause"
+// box. Unticking it saves matchesGoOn; a pause saved before the box existed
+// saves with no such key, so it keeps stopping matches.
+describe('Schedule blocks: the "Matches stop for this pause" box reaches the save', () => {
+  it('saves matchesGoOn only for the pause whose box is unticked', async () => {
+    const onSave = vi.fn().mockResolvedValue(undefined);
+    const { getAllByRole, getByRole } = await mountEdit(makeTournament({
+      pauses: [
+        { name: 'Opening ceremony', start: '09:00', length: '30m', day: 0 },
+        { name: 'Lunch', start: '12:00', length: '1h', day: 0 },
+      ],
+    }), onSave);
+    const boxes = getAllByRole('checkbox', { name: 'Matches stop for this pause' });
+    expect(boxes).toHaveLength(2);
+    await act(async () => { fireEvent.click(boxes[0]); });
+    await act(async () => { fireEvent.click(getByRole('button', { name: 'Save changes' })); });
+    expect(onSave).toHaveBeenCalledTimes(1);
+    expect(onSave.mock.calls[0][0].pauses).toEqual([
+      { name: 'Opening ceremony', start: '09:00', length: '30m', day: 0, matchesGoOn: true },
+      { name: 'Lunch', start: '12:00', length: '1h', day: 0 },
+    ]);
   });
 });

@@ -98,7 +98,7 @@ export function formatOverlapDuration(durationMins) {
 }
 
 /**
- * Explains why an unused pause was dropped from the schedule.
+ * Explains why the schedule skips a pause (matches will not stop for it).
  */
 export function formatUnusedPauseReason(reason) {
   switch (reason) {
@@ -1132,7 +1132,7 @@ export function AdminCalendarPage({
               <div className="cal-unused-pauses">
                 {withContentKeys(unusedPauses, (u) => `${u.name}|${u.reason}`).map(({ key, item: p }) => (
                   <div key={key} className="cal-unused-pause">
-                    {p.name} is not used: {formatUnusedPauseReason(p.reason)}{' '}
+                    Matches will not stop for {p.name}: {formatUnusedPauseReason(p.reason)}{' '}
                     <button type="button" className="btn btn--link" onClick={onEditTournament}>
                       Edit tournament
                     </button>
@@ -1316,14 +1316,14 @@ export function AdminCalendarPage({
                       return (
                         <div
                           key={bandKey}
-                          className="cal-pause-band"
+                          className={`cal-pause-band${b.matchesGoOn ? ' cal-pause-band--matches-go-on' : ''}`}
                           style={{
                             top: `${bTop}px`,
                             height: `${bHeight}px`,
                           }}
                         >
                           <span className="cal-pause-band__label" style={{ marginLeft: `${labelLane * layout.laneWidth}px` }}>
-                            {b.name} {b.start} to {b.end}
+                            {b.name} {b.start} to {b.end}{b.matchesGoOn ? ' · matches go on' : ''}
                           </span>
                         </div>
                       );
@@ -1396,8 +1396,11 @@ export function AdminCalendarPage({
                           : '';
 
                         // Screen reader description: every line the block shows,
-                        // and the pauses it holds.
+                        // and the pauses it holds. A pause matches go on
+                        // through holds no time in the block, so it has no
+                        // strip and is not named here.
                         const pausesInBlock = (day.breaks || []).filter(b => {
+                          if (b.matchesGoOn) return false;
                           const bs = b.startMins ?? b.StartMins;
                           const be = b.endMins ?? b.EndMins;
                           return overlaps({ start: bs, end: be }, { start: block.startMins, end: block.endMins });

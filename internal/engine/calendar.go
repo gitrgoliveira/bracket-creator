@@ -49,6 +49,9 @@ type CalendarBreak struct {
 	End       string `json:"end"`
 	StartMins int    `json:"startMins"`
 	EndMins   int    `json:"endMins"`
+	// MatchesGoOn marks a pause drawn on its day that moves no match (its
+	// "Matches stop for this pause" box is unticked).
+	MatchesGoOn bool `json:"matchesGoOn,omitempty"`
 }
 
 // CalendarDay describes a tournament day and its scheduled pauses.
@@ -341,7 +344,8 @@ func (e *Engine) PlaceCompetition(comp *state.Competition, tournament *state.Tou
 }
 
 // calendarDays builds the CalendarDay slice and UnusedPause slice for tournament t.
-// dayBreaks remains the single owner of pause usability.
+// pauseWindows remains the single owner of where a pause falls; a pause matches
+// go on through is drawn with MatchesGoOn set.
 func calendarDays(t *state.Tournament) ([]CalendarDay, []UnusedPause) {
 	if t == nil {
 		return []CalendarDay{}, []UnusedPause{}
@@ -366,20 +370,21 @@ func calendarDays(t *state.Tournament) ([]CalendarDay, []UnusedPause) {
 		// An undated tournament has no day to draw a pause on, but its
 		// schedule still runs as Day 1 (dayBreaks reads no date that way),
 		// so a pause it applies there is in use, not unused.
-		pUsed := len(dates) == 0 && len(dayBreaksFor(t, p, "")) > 0
+		pUsed := len(dates) == 0 && len(drawnPauseWindowsFor(t, p, "")) > 0
 
 		for di, d := range dates {
-			windows := dayBreaksFor(t, p, d)
+			windows := drawnPauseWindowsFor(t, p, d)
 			for _, w := range windows {
 				pUsed = true
 				startMins := int(w.start.Sub(refMidnight).Minutes())
 				endMins := int(w.end.Sub(refMidnight).Minutes())
 				days[di].Breaks = append(days[di].Breaks, CalendarBreak{
-					Name:      p.Name,
-					Start:     state.FormatClockHHMM(startMins),
-					End:       state.FormatClockHHMM(endMins),
-					StartMins: startMins,
-					EndMins:   endMins,
+					Name:        p.Name,
+					Start:       state.FormatClockHHMM(startMins),
+					End:         state.FormatClockHHMM(endMins),
+					StartMins:   startMins,
+					EndMins:     endMins,
+					MatchesGoOn: !p.StopsMatches(),
 				})
 			}
 		}
@@ -409,7 +414,7 @@ func calendarDays(t *state.Tournament) ([]CalendarDay, []UnusedPause) {
 	return days, unused
 }
 
-// unusedPauseReason explains why a configured pause was not used by the schedule.
+// unusedPauseReason explains why the schedule skips a configured pause.
 func unusedPauseReason(p state.Pause, t *state.Tournament) string {
 	if strings.TrimSpace(p.Start) == "" {
 		return "no_start_time"

@@ -136,6 +136,7 @@ describe('AdminCalendarPage render tests', () => {
           date: '16-05-2026',
           breaks: [
             { name: 'Lunch', start: '12:30', end: '13:30', startMins: 750, endMins: 810 },
+            { name: 'Opening ceremony', start: '09:00', end: '09:45', startMins: 540, endMins: 585, matchesGoOn: true },
           ],
         },
         {
@@ -238,6 +239,15 @@ describe('AdminCalendarPage render tests', () => {
 
     // Pause band copy verbatim
     expect(screen.getByText('Lunch 12:30 to 13:30')).toBeInTheDocument();
+    // A pause matches go on through is drawn lighter and says so, and the
+    // block it overlaps neither strips it nor names it among its pauses.
+    const goesOn = screen.getByText('Opening ceremony 09:00 to 09:45 · matches go on');
+    expect(goesOn.closest('.cal-pause-band')).toHaveClass('cal-pause-band--matches-go-on');
+    expect(screen.getByText('Lunch 12:30 to 13:30').closest('.cal-pause-band')).not.toHaveClass('cal-pause-band--matches-go-on');
+    const mens = screen.getAllByTestId('cal-block').find(b => b.textContent.includes("Men's Individual"));
+    const mensLabel = mens.querySelector('[aria-label]').getAttribute('aria-label');
+    expect(mensLabel).toContain('Pauses: Lunch 12:30 to 13:30.');
+    expect(mensLabel).not.toContain('Opening ceremony');
 
     // The day heading reads the DD-MM-YYYY date the server sends.
     expect(screen.getAllByText('Sat 16 May').length).toBeGreaterThan(0);
@@ -245,8 +255,8 @@ describe('AdminCalendarPage render tests', () => {
     // A competition whose settings could not be read is named, not dropped.
     expect(screen.getByText(/The settings of competition kids could not be read/)).toBeInTheDocument();
 
-    // Key line unused pause verbatim: "Closing ceremony is not used: it has no start time."
-    expect(screen.getByText(/Closing ceremony is not used: it has no start time\./)).toBeInTheDocument();
+    // Key line skipped pause verbatim: "Matches will not stop for Closing ceremony: it has no start time."
+    expect(screen.getByText(/Matches will not stop for Closing ceremony: it has no start time\./)).toBeInTheDocument();
     const editTournBtns = screen.getAllByRole('button', { name: 'Edit tournament' });
     expect(editTournBtns.length).toBeGreaterThan(0);
     fireEvent.click(editTournBtns[0]);

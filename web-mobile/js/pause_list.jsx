@@ -65,6 +65,18 @@ export function formatClock(minutes) {
 }
 
 /**
+ * Whether the schedule works around this pause: its "Matches stop for this
+ * pause" box is ticked. A pause saved before the box existed carries no
+ * matchesGoOn and stops matches. The browser's one owner of the question,
+ * mirroring Go's state.Pause.StopsMatches.
+ */
+export function pauseStopsMatches(pause) {
+  return pause?.matchesGoOn !== true;
+}
+
+const WILL_NOT_STOP = 'Matches will not stop for this pause';
+
+/**
  * Computes status explanation for a pause row.
  */
 export function computePauseRowStatus(pause, index, allPauses, durationDays = 1) {
@@ -74,7 +86,7 @@ export function computePauseRowStatus(pause, index, allPauses, durationDays = 1)
   if (day > daysCount) {
     return {
       type: 'invalid_day',
-      text: `Not used: the tournament no longer has Day ${day}.`,
+      text: `${WILL_NOT_STOP}: the tournament no longer has Day ${day}.`,
       warn: true,
     };
   }
@@ -83,7 +95,7 @@ export function computePauseRowStatus(pause, index, allPauses, durationDays = 1)
   if (startMin === null) {
     return {
       type: 'missing_start',
-      text: 'Not used yet: give it a start time.',
+      text: `${WILL_NOT_STOP}: give it a start time.`,
       warn: true,
     };
   }
@@ -92,18 +104,28 @@ export function computePauseRowStatus(pause, index, allPauses, durationDays = 1)
   if (durMin <= 0) {
     return {
       type: 'missing_length',
-      text: 'Not used yet: give it a length like 30m.',
+      text: `${WILL_NOT_STOP}: give it a length like 30m.`,
       warn: true,
     };
   }
 
   const endMin = startMin + durMin;
 
+  if (!pauseStopsMatches(pause)) {
+    const pastMidnight = endMin > 1440 ? ' (after midnight)' : '';
+    return {
+      type: 'matches_go_on',
+      text: `Matches go on through it, ${formatClock(startMin)} to ${formatClock(endMin)}${pastMidnight}.`,
+      warn: false,
+    };
+  }
+
   // Check for overlaps with other usable pauses on the same day.
   // Day 0 overlaps every day.
   const overlaps = [];
   allPauses.forEach((other, otherIdx) => {
     if (otherIdx === index) return;
+    if (!pauseStopsMatches(other)) return;
     const oDay = other.day ?? 0;
     if (oDay > daysCount) return;
 
@@ -326,6 +348,15 @@ export function PauseList({
                   </div>
                 </div>
 
+                <label className="checkbox pause-stops-matches">
+                  <input
+                    type="checkbox"
+                    checked={pauseStopsMatches(pause)}
+                    onChange={(e) => handleUpdate(idx, 'matchesGoOn', !e.target.checked)}
+                  />
+                  Matches stop for this pause
+                </label>
+
                 <div className="pause-row-footer">
                   <div className={`pause-row-status ${status.warn ? 'pause-row-status--warn' : ''}`}>
                     {status.text}
@@ -367,6 +398,7 @@ export function PauseList({
         </div>
         <ul className="pause-impact-list">
           <li>Planned match times skip it on every shiaijo.</li>
+          <li>Untick its box and matches go on through it. The calendar still shows it.</li>
           <li>Every estimate follows it: Add competition, each Overview and the competition calendar.</li>
           <li>A draw made after you save also follows it. A competition already drawn keeps the times its draw set.</li>
         </ul>

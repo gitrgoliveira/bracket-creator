@@ -25,6 +25,9 @@ describe('snapStart', () => {
     expect(snapStart(780, breaks)).toBe(780);
     expect(snapStart(715, breaks)).toBe(715);
   });
+  it('keeps a start dropped inside a pause matches go on through', () => {
+    expect(snapStart(725, [{ startMins: 720, endMins: 780, matchesGoOn: true }])).toBe(725);
+  });
   it('stays inside the day', () => {
     expect(snapStart(-30, [])).toBe(0);
     expect(snapStart(2000, [])).toBe(1435);

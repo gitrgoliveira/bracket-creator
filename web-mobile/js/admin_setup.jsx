@@ -187,7 +187,7 @@ import { PillGroup, PillButton, CheckboxField, NumberField, TextField } from './
 import { DurationInput } from './duration.jsx';
 import { useUnsavedInput } from './app_version.jsx';
 import { useLatestRef } from './latest_ref.jsx';
-import { PauseList } from './pause_list.jsx';
+import { PauseList, pauseStopsMatches } from './pause_list.jsx';
 import { MAX_EXPECTED_PARTICIPANTS } from './competition_put_body.jsx';
 import { useDraftEstimate, DraftEstimatePanel } from './draft_estimate.jsx';
 
@@ -209,12 +209,15 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
   // Tournament mode (mp-7h7): read-only after creation: shown for
   // information only and NEVER included in the PUT payload.
   const tournamentMode = tournament.mode || "officiated";
-  // Schedule pauses: list of pause objects {name, start, length, day}.
+  // Schedule pauses: list of pause objects {name, start, length, day}, plus
+  // matchesGoOn: true only for a pause whose "Matches stop for this pause" box
+  // is unticked (absent stops matches, so re-ticking compares unchanged).
   const normalizePauses = (list) => (Array.isArray(list) ? list : []).map(p => ({
     name: (p.name || "").trim(),
     start: (p.start || "").trim(),
     length: (p.length || "").trim(),
     day: Number.isInteger(p.day) ? p.day : 0,
+    ...(pauseStopsMatches(p) ? {} : { matchesGoOn: true }),
   }));
   const [pauses, setPauses] = useState(normalizePauses(tournament.pauses));
   // mp-ef3: public tournament info fields.

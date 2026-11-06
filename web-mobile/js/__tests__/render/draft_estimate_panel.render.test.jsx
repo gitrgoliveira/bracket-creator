@@ -178,7 +178,7 @@ describe('DraftEstimatePanel render tests', () => {
     );
 
     const perShiaijo = getByTestId('draft-estimate-per-shiaijo');
-    expect(perShiaijo.textContent).toBe('Per shiaijo: A about 55m · B not used');
+    expect(perShiaijo.textContent).toBe('Per shiaijo: A about 55m · B has no matches');
   });
 
   it('renders no timing line when estimate has no timing', () => {

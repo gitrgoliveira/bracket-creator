@@ -90,6 +90,20 @@
         {"name": "Lunch", "start": "12:00", "end": "13:00"},
         {"name": "Afternoon", "start": "15:00", "end": "15:30"}
       ]
+    },
+    {
+      "name": "a pause matches go on through moves no match",
+      "days": ["01-07-2026"],
+      "date": "01-07-2026",
+      "pauses": [
+        {"name": "Opening ceremony", "start": "09:00", "length": "30m", "day": 0, "matchesGoOn": true},
+        {"name": "Lunch", "start": "12:00", "length": "1h", "day": 0, "matchesGoOn": false},
+        {"name": "Grading", "start": "15:00", "length": "30m", "day": 0}
+      ],
+      "expected": [
+        {"name": "Lunch", "start": "12:00", "end": "13:00"},
+        {"name": "Grading", "start": "15:00", "end": "15:30"}
+      ]
     }
   ],
   "replayCourt": [

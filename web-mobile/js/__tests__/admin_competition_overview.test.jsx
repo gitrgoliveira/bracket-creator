@@ -504,7 +504,7 @@ describe('Overview estimate helpers (p2-overview)', () => {
   it('formatPerShiaijoRow labels by the competition shiaijo, says about, and names an idle one', () => {
     const est = { perCourtMinutes: [229, 221] };
     expect(formatPerShiaijoRow(est, ['A', 'B'])).toBe('A about 3h 49m · B about 3h 41m');
-    expect(formatPerShiaijoRow({ perCourtMinutes: [55, 0] }, ['C', 'D'])).toBe('C about 55m · D not used');
+    expect(formatPerShiaijoRow({ perCourtMinutes: [55, 0] }, ['C', 'D'])).toBe('C about 55m · D has no matches');
     expect(formatPerShiaijoRow({ perCourtMinutes: [] }, ['A'])).toBeNull();
     expect(formatPerShiaijoRow(null, ['A'])).toBeNull();
   });
@@ -521,9 +521,12 @@ describe('Overview estimate helpers (p2-overview)', () => {
       ],
     };
     expect(formatPausesRow(t, c)).toBe(
-      'Opening ceremony 09:30 to 10:00, Lunch 12:30 to 13:30 · Closing ceremony: not used, no start time',
+      'Opening ceremony 09:30 to 10:00, Lunch 12:30 to 13:30 · Closing ceremony: no start time, matches will not stop',
     );
     expect(formatPausesRow({ ...t, pauses: [] }, c)).toBe('No pauses that day');
+    // A pause matches go on through is not among the pauses the estimate worked around.
+    const goesOn = { ...t, pauses: [{ ...t.pauses[0], matchesGoOn: true }, t.pauses[1]] };
+    expect(formatPausesRow(goesOn, c)).toBe('Lunch 12:30 to 13:30 · Opening ceremony: matches go on');
     // A pause on another day is not that day's pause.
     const twoDay = { date: '05-06-2026', durationDays: 2, pauses: [{ name: 'Lunch', start: '12:30', length: '1h', day: 2 }] };
     expect(formatPausesRow(twoDay, c)).toBe('No pauses that day');
@@ -583,7 +586,7 @@ describe('Overview estimate helpers (p2-overview)', () => {
       ],
     };
     expect(formatPausesRow(t, { date: '05-06-2026' })).toBe(
-      'No pauses that day · Zero length break: not used, no length · Unreadable length break: not used, no length · No start break: not used, no start time',
+      'No pauses that day · Zero length break: no length, matches will not stop · Unreadable length break: no length, matches will not stop · No start break: no start time, matches will not stop',
     );
   });
 });

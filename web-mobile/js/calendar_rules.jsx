@@ -9,7 +9,7 @@
 //   internal/state:
 //     - ParseClockMinutes, FormatClockHHMM (court_floor.go)
 
-import { blockMinutes, parseClock } from './pause_list.jsx';
+import { blockMinutes, parseClock, pauseStopsMatches } from './pause_list.jsx';
 
 export { blockMinutes };
 
@@ -43,7 +43,8 @@ export function pastMidnight(endMins) {
 }
 
 /**
- * Derives usable pauses for date, sorted ascending by start time.
+ * Derives the pauses the schedule works around on date (those that stop
+ * matches), sorted ascending by start time.
  * Returns an array of {start, end} windows in minutes since midnight.
  */
 export function dayBreaks(pauses, date, days) {
@@ -65,7 +66,7 @@ export function dayBreaks(pauses, date, days) {
   const breaks = [];
 
   for (const p of pauseList) {
-    if (!p) continue;
+    if (!p || !pauseStopsMatches(p)) continue;
     const day = (p.day !== undefined && p.day !== null) ? p.day : 0;
     if (day < 0 || day > dayCount) {
       continue;

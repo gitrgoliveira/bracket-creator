@@ -369,15 +369,18 @@ func calendarDays(t *state.Tournament) ([]CalendarDay, []UnusedPause) {
 
 	refMidnight := time.Date(0, 1, 1, 0, 0, 0, 0, time.UTC)
 	unused := []UnusedPause{}
+	// dates is t.Days(), so the day of dates[di] is di+1 (pauseDayIndex).
+	dayCount := pauseDayCount(t)
 
 	for _, p := range t.Pauses {
+		one := []state.Pause{p}
 		// An undated tournament has no day to draw a pause on, but its
 		// schedule still runs as Day 1 (dayBreaks reads no date that way),
 		// so a pause it applies there is in use, not unused.
-		pUsed := len(dates) == 0 && len(drawnPauseWindowsFor(t, p, "")) > 0
+		pUsed := len(dates) == 0 && len(pausesOnDay(one, 1, dayCount, anyPause)) > 0
 
-		for di, d := range dates {
-			windows := drawnPauseWindowsFor(t, p, d)
+		for di := range dates {
+			windows := pausesOnDay(one, di+1, dayCount, anyPause)
 			for _, w := range windows {
 				pUsed = true
 				startMins := int(w.start.Sub(refMidnight).Minutes())
@@ -450,27 +453,9 @@ func (e *Engine) TournamentCalendar() (*TournamentCalendarResult, error) {
 
 	days, unused := calendarDays(tourn)
 
-	ids, err := e.store.ListCompetitions()
+	comps, unreadable, err := e.loadCalendarCompetitions()
 	if err != nil {
 		return nil, err
-	}
-
-	comps := make([]*state.Competition, 0, len(ids))
-	unreadable := []string{}
-	for _, id := range ids {
-		c, err := e.store.LoadCompetition(id)
-		if err != nil {
-			// The organiser is told on the page: a competition missing from
-			// the calendar with no word would look like one that was never made.
-			log.Printf("engine: tournament calendar: load competition %s: %v", id, err)
-			unreadable = append(unreadable, id)
-			continue
-		}
-		if c == nil {
-			// Deleted between the listing and the read: nothing to show.
-			continue
-		}
-		comps = append(comps, c)
 	}
 
 	placements := make([]CompetitionPlacement, len(comps))
@@ -551,6 +536,62 @@ func (e *Engine) TournamentCalendar() (*TournamentCalendarResult, error) {
 		Competitions: calComps,
 		Unreadable:   unreadable,
 	}, nil
+}
+
+// loadCalendarCompetitions loads every competition of the tournament, with the
+// ids of those whose settings could not be read (logged and left out).
+func (e *Engine) loadCalendarCompetitions() ([]*state.Competition, []string, error) {
+	ids, err := e.store.ListCompetitions()
+	if err != nil {
+		return nil, nil, err
+	}
+
+	comps := make([]*state.Competition, 0, len(ids))
+	unreadable := []string{}
+	for _, id := range ids {
+		c, err := e.store.LoadCompetition(id)
+		if err != nil {
+			// The organiser is told on the page: a competition missing from
+			// the calendar with no word would look like one that was never made.
+			log.Printf("engine: tournament calendar: load competition %s: %v", id, err)
+			unreadable = append(unreadable, id)
+			continue
+		}
+		if c == nil {
+			// Deleted between the listing and the read: nothing to show.
+			continue
+		}
+		comps = append(comps, c)
+	}
+	return comps, unreadable, nil
+}
+
+// PlacementsOnDate places, as TournamentCalendar does, every competition but
+// excludeID whose date is the same day as date (state.SameDate): the only ones
+// ClashingCourts can find a clash with on that date. A competition whose
+// settings cannot be read is logged and left out. ClashPartners is not filled.
+func (e *Engine) PlacementsOnDate(tourn *state.Tournament, date, excludeID string) ([]CalendarCompetition, error) {
+	comps, _, err := e.loadCalendarCompetitions()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]CalendarCompetition, 0, len(comps))
+	for _, comp := range comps {
+		if comp.ID == excludeID || !state.SameDate(comp.Date, date) {
+			continue
+		}
+		out = append(out, CalendarCompetition{
+			ID:                   comp.ID,
+			Name:                 comp.Name,
+			Kind:                 comp.Kind,
+			Status:               comp.Status,
+			ConfigVersion:        state.ConfigVersion(comp),
+			Date:                 comp.Date,
+			ExpectedParticipants: comp.ExpectedParticipants,
+			Placement:            e.PlaceCompetition(comp, tourn),
+		})
+	}
+	return out, nil
 }
 
 func sortCourtLabels(courts []string) {

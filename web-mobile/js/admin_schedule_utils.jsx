@@ -3,6 +3,8 @@
 // touches the global React only when it is rendered, so importing this module
 // stays safe anywhere including tests.
 
+import { pastMidnight } from './calendar_rules.jsx';
+
 export function formatMinutes(m) {
   return `${Math.floor(m / 60)}h ${m % 60}m`;
 }
@@ -55,7 +57,8 @@ export function timeToMinutes(t) {
 
 // finishClock derives an estimated end time from a "HH:MM" start time and
 // total duration in minutes. Returns { clock: "HH:MM", nextDay: boolean }.
-// nextDay is true when the finish time reaches or crosses 24:00 (midnight).
+// nextDay is true when the finish is after midnight (pastMidnight, the rule Go's
+// calendar applies): a finish at exactly 24:00 shows "00:00" with nextDay false.
 // For invalid start strings or non-finite minutes, returns { clock: "", nextDay: false }.
 export function finishClock(start, minutes) {
   if (typeof start !== "string" || !Number.isFinite(minutes)) {
@@ -74,7 +77,7 @@ export function finishClock(start, minutes) {
     return { clock: "", nextDay: false };
   }
   const total = startM + Math.round(minutes);
-  const nextDay = total >= 1440;
+  const nextDay = pastMidnight(total);
   const wrapped = ((total % 1440) + 1440) % 1440;
   const outH = Math.floor(wrapped / 60);
   const outM = wrapped % 60;

@@ -805,7 +805,7 @@ func TestDayBreaks_SortedByStart(t *testing.T) {
 	assert.Equal(t, parseClockHHMM("14:00"), breaks[1].start)
 }
 
-func TestDayBreaksFor(t *testing.T) {
+func TestPausesOnDay_OnePause(t *testing.T) {
 	tourn := &state.Tournament{
 		Date:         "01-05-2026",
 		DurationDays: 2,
@@ -814,29 +814,47 @@ func TestDayBreaksFor(t *testing.T) {
 			{Name: "Ceremony", Start: "17:00", Length: "30m", Day: 2},
 		},
 	}
+	breaksFor := func(p state.Pause, date string) []breakWindow {
+		return pausesOnDay([]state.Pause{p}, pauseDayIndex(tourn.Days(), date), pauseDayCount(tourn), state.Pause.StopsMatches)
+	}
 
 	t.Run("nil tournament returns nil", func(t *testing.T) {
-		assert.Nil(t, dayBreaksFor(nil, tourn.Pauses[0], "01-05-2026"))
+		assert.Nil(t, dayBreaks(nil, "01-05-2026"))
 	})
 
 	t.Run("single pause matches day 1", func(t *testing.T) {
-		breaks := dayBreaksFor(tourn, tourn.Pauses[0], "01-05-2026")
+		breaks := breaksFor(tourn.Pauses[0], "01-05-2026")
 		require.Len(t, breaks, 1)
 		assert.Equal(t, parseClockHHMM("12:00"), breaks[0].start)
 		assert.Equal(t, parseClockHHMM("13:00"), breaks[0].end)
 	})
 
 	t.Run("day 2 pause does not match day 1", func(t *testing.T) {
-		breaks := dayBreaksFor(tourn, tourn.Pauses[1], "01-05-2026")
+		breaks := breaksFor(tourn.Pauses[1], "01-05-2026")
 		assert.Empty(t, breaks)
 	})
 
 	t.Run("day 2 pause matches day 2", func(t *testing.T) {
-		breaks := dayBreaksFor(tourn, tourn.Pauses[1], "02-05-2026")
+		breaks := breaksFor(tourn.Pauses[1], "02-05-2026")
 		require.Len(t, breaks, 1)
 		assert.Equal(t, parseClockHHMM("17:00"), breaks[0].start)
 		assert.Equal(t, parseClockHHMM("17:30"), breaks[0].end)
 	})
+}
+
+// A competition date padded with spaces is the day PlaceCompetition finds for
+// it (it trims the date), so its pauses are that day's too.
+func TestPauseWindows_TrimsTheDate(t *testing.T) {
+	tourn := &state.Tournament{
+		Date:         "01-05-2026",
+		DurationDays: 2,
+		Pauses: []state.Pause{
+			{Name: "Ceremony", Start: "17:00", Length: "30m", Day: 2},
+		},
+	}
+	breaks := dayBreaks(tourn, " 02-05-2026 ")
+	require.Len(t, breaks, 1)
+	assert.Equal(t, parseClockHHMM("17:00"), breaks[0].start)
 }
 
 func TestAssignSlots_OverlappingPausesSkipAsOne(t *testing.T) {

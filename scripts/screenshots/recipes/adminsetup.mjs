@@ -26,6 +26,11 @@ const DRAW_ID = 'third-dan-and-above';
 const KACHINUKI_ID = 'kachinuki-teams';
 const EXPECTED_ID = 'expected-individual';
 
+// A start for 8 kachinuki teams on one shiaijo whose average finish falls
+// before midnight and whose worst case falls after it: the estimate is about
+// 4h 53m, with a range of about 3h 28m to 6h 17m, so 19:00 ends near 23:53.
+const KACHINUKI_LATE_START = '19:00';
+
 // The pauses the estimate family's tournament keeps: an opening ceremony with
 // its own start time, and lunch. Both apply on every day (day 0).
 const ESTIMATE_PAUSES = [
@@ -329,5 +334,28 @@ export const recipes = [
     waitFor: 'text=Schedule estimate',
     auth: 'admin',
     route: `/admin/competition/${KACHINUKI_ID}/overview`,
+  },
+
+  {
+    // The Add competition form's estimate for a late kachinuki competition:
+    // the average finish is before midnight, the latest finish in the range
+    // after it, so the "Could end" line carries the after-midnight warning.
+    name: 'kachinuki-create-past-midnight',
+    family: 'kachinuki',
+    viewport: { width: 1280, height: 1000 },
+    capture: { selector: '.draft-estimate' },
+    waitFor: 'text=Add competition',
+    auth: 'admin',
+    route: '/admin/create-competition',
+    drive: async ({ page }) => {
+      await fillFieldByLabel(page, 'Display name', 'Late Kachinuki');
+      await clickPill(page, 'Competition type', 'Team');
+      await clickPill(page, 'Team match format', 'Kachinuki (winner stays on)');
+      await fillFieldByLabel(page, 'Start time', KACHINUKI_LATE_START);
+      await fillFieldByLabel(page, 'Expected teams', '8');
+      await page.getByTestId('draft-estimate-kachinuki').filter({ hasText: 'after midnight' })
+        .waitFor({ state: 'visible', timeout: 15000 });
+      await page.locator('.draft-estimate').first().evaluate((el) => el.scrollIntoView({ block: 'center' }));
+    },
   },
 ];

@@ -38,9 +38,15 @@ describe('finishClock', () => {
     expect(res).toEqual({ clock: '13:38', nextDay: false });
   });
 
+  // A finish at exactly 24:00 is at midnight, not after it (pastMidnight).
   it('handles finish at exactly midnight', () => {
     const res = finishClock('23:00', 60);
-    expect(res).toEqual({ clock: '00:00', nextDay: true });
+    expect(res).toEqual({ clock: '00:00', nextDay: false });
+  });
+
+  it('handles finish one minute after midnight', () => {
+    const res = finishClock('23:00', 61);
+    expect(res).toEqual({ clock: '00:01', nextDay: true });
   });
 
   it('handles finish past midnight', () => {

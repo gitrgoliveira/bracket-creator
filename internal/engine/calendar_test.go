@@ -52,6 +52,31 @@ func TestCalendar_BeforeDrawParityWithClashes(t *testing.T) {
 	assert.Equal(t, []string{"a"}, compB.ClashPartners)
 }
 
+// PlacementsOnDate places only the other competitions on the same day, each as
+// the calendar places it.
+func TestPlacementsOnDate_SameDayOthersOnly(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	tourn := &state.Tournament{Name: "Tourn", Date: "01-07-2026", DurationDays: 2, Courts: []string{"A", "B"}}
+	require.NoError(t, store.SaveTournament(tourn))
+
+	emptyComp(t, store, "a", "Alpha", "01-07-2026", "09:00", []string{"A"})
+	emptyComp(t, store, "b", "Bravo", "01-07-2026", "09:15", []string{"B"})
+	emptyComp(t, store, "c", "Charlie", "02-07-2026", "09:00", []string{"A"})
+
+	got, err := eng.PlacementsOnDate(tourn, " 01-07-2026 ", "a")
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	assert.Equal(t, "b", got[0].ID)
+
+	cal, err := eng.TournamentCalendar()
+	require.NoError(t, err)
+	for _, cc := range cal.Competitions {
+		if cc.ID == "b" {
+			assert.Equal(t, cc.Placement, got[0].Placement)
+		}
+	}
+}
+
 func TestCalendar_DrawnCompPushedByCourtFloorNoLongerClashes(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	require.NoError(t, store.SaveTournament(&state.Tournament{

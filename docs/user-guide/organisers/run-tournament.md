@@ -356,6 +356,8 @@ While you fill in the form, a live estimate below the fields shows about how lon
 
 ![The bottom of the Add competition form: Expected participants set to 24, and the live estimate below it reading Finishes about 14:10, about 2h 50m, 24 pool matches and 15 knockout matches, the time for each shiai-jo, and the pauses that day.](../../screenshots/mobile-create-estimate.png)
 
+![The live estimate for a kachinuki team competition starting at 19:00: Finishes about 23:53, and below it the warning Could end 22:28 to 01:17, after midnight. Start it earlier or give it more shiaijo.](../../screenshots/kachinuki-create-past-midnight.png)
+
 ### Competition calendar
 
 Open **Competition calendar** from the dashboard to see every competition on its day and shiai-jo, from its start time to its expected finish. A competition that is already drawn takes its times from the draw; one that is not drawn yet uses the estimate. When two competitions on the same shiai-jo overlap, both are marked, and an overlap on a day that is not on screen is listed above the calendar with a button to show that day. Click a competition to open it.

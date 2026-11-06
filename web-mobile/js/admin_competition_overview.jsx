@@ -5,6 +5,7 @@
 // shell via window.*.
 
 import { formatEstimateMinutes, finishClock, timeToMinutes } from './admin_schedule_utils.jsx';
+import { pastMidnight } from './calendar_rules.jsx';
 import { blockMinutes, parseClock, formatClock, computePauseRowStatus } from './pause_list.jsx';
 // seededRanks: the one owner of "which seed ranks has this roster actually
 // got" (integer > 0 normalization), shared with the seeding blocker and the
@@ -256,7 +257,6 @@ export function latestCourtFinish(courtEnds, startTime) {
   const startM = timeToMinutes(startTime);
 
   let latestTotalMinutes = -Infinity;
-  let anyNextDay = false;
 
   for (const timeStr of entries) {
     if (typeof timeStr !== "string") continue;
@@ -267,24 +267,16 @@ export function latestCourtFinish(courtEnds, startTime) {
     if (!Number.isFinite(h) || !Number.isFinite(m) || h < 0 || m < 0 || m > 59) continue;
 
     let totalM = h * 60 + m;
-    let isNextDay = false;
+    // An end that reads earlier than the start ran over midnight.
+    if (totalM < 1440 && startM !== null && totalM < startM) totalM += 1440;
 
-    if (totalM >= 1440) {
-      isNextDay = true;
-    } else if (startM !== null && totalM < startM) {
-      isNextDay = true;
-      totalM += 1440;
-    }
-
-    if (totalM > latestTotalMinutes) {
-      latestTotalMinutes = totalM;
-      anyNextDay = isNextDay;
-    }
+    if (totalM > latestTotalMinutes) latestTotalMinutes = totalM;
   }
 
   if (latestTotalMinutes === -Infinity) return null;
 
-  const nextDay = anyNextDay || latestTotalMinutes >= 1440;
+  // After midnight by the calendar's rule: an end at exactly 24:00 is not.
+  const nextDay = pastMidnight(latestTotalMinutes);
   const wrapped = ((latestTotalMinutes % 1440) + 1440) % 1440;
   const outH = Math.floor(wrapped / 60);
   const outM = wrapped % 60;

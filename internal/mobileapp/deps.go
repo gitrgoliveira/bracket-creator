@@ -43,6 +43,8 @@ type DraftEstimator interface {
 type CalendarPlanner interface {
 	TournamentCalendar() (*engine.TournamentCalendarResult, error)
 	PlaceCompetition(comp *state.Competition, tournament *state.Tournament) engine.CompetitionPlacement
+	// PlacementsOnDate places every other competition on the same day as date.
+	PlacementsOnDate(tournament *state.Tournament, date, excludeID string) ([]engine.CalendarCompetition, error)
 	// RetimePreview is the dry run of moving a drawn competition's matches.
 	RetimePreview(oldComp, newComp *state.Competition) (engine.RetimeOutcome, error)
 }

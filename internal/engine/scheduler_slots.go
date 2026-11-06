@@ -3,6 +3,7 @@ package engine
 import (
 	"math"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
@@ -161,35 +162,50 @@ func dayBreaks(tournament *state.Tournament, date string) []breakWindow {
 // pauseWindows returns the drawn windows of the pauses keep accepts on the
 // competition's day, sorted by start:
 // every pause with Day 0, plus those whose Day equals the day index of date
-// (1-based position of date in tournament.Days(); an empty date is Day 1; a date
-// not in Days() gets only the Day 0 pauses). Drop incomplete rows: a Start that
-// is not a strict "HH:MM" (or "H:MM") clock, a Length that ParseDurationMinutes
-// turns into 0. Pauses with a Day greater than the tournament's day count never
-// match, so they are ignored. The times are on the same reference date
-// parseClockHHMM uses so they compare with the cursors. nil tournament gives nil.
+// (pauseDayIndex: the 1-based position of the trimmed date in tournament.Days();
+// an empty date is Day 1; a date not in Days() gets only the Day 0 pauses).
+// nil tournament gives nil; pausesOnDay says which rows are dropped.
 func pauseWindows(tournament *state.Tournament, date string, keep func(state.Pause) bool) []breakWindow {
 	if tournament == nil {
 		return nil
 	}
-	days := tournament.Days()
-	dayIdx := 0
+	return pausesOnDay(tournament.Pauses, pauseDayIndex(tournament.Days(), date), pauseDayCount(tournament), keep)
+}
+
+// pauseDayIndex is the day a pause's Day is compared with for date: its 1-based
+// position in days (tournament.Days()), trimmed as PlaceCompetition trims it, 1
+// for an empty date, and 0 for a date that is not one of the days.
+func pauseDayIndex(days []string, date string) int {
+	date = strings.TrimSpace(date)
 	if date == "" {
-		dayIdx = 1
-	} else {
-		for i, d := range days {
-			if d == date {
-				dayIdx = i + 1
-				break
-			}
+		return 1
+	}
+	for i, d := range days {
+		if d == date {
+			return i + 1
 		}
 	}
-	dayCount := tournament.DurationDays
-	if dayCount < 1 {
-		dayCount = 1
-	}
+	return 0
+}
 
+// pauseDayCount is the tournament's day count as a pause's Day is checked
+// against it: at least 1.
+func pauseDayCount(tournament *state.Tournament) int {
+	if tournament.DurationDays < 1 {
+		return 1
+	}
+	return tournament.DurationDays
+}
+
+// pausesOnDay returns, sorted by start, the windows of the pauses keep accepts
+// whose Day is 0 or dayIdx. Drop incomplete rows: a Start that is not a strict
+// "HH:MM" (or "H:MM") clock, a Length that ParseDurationMinutes turns into 0.
+// Pauses with a Day greater than dayCount never match, so they are ignored. The
+// times are on the same reference date parseClockHHMM uses so they compare with
+// the cursors.
+func pausesOnDay(pauses []state.Pause, dayIdx, dayCount int, keep func(state.Pause) bool) []breakWindow {
 	var breaks []breakWindow
-	for _, p := range tournament.Pauses {
+	for _, p := range pauses {
 		if !keep(p) {
 			continue
 		}
@@ -216,27 +232,9 @@ func pauseWindows(tournament *state.Tournament, date string, keep func(state.Pau
 	return breaks
 }
 
-// dayBreaksFor returns the break windows the schedule works around for a single
-// pause of tournament on date (none for a pause matches go on through). It
-// delegates to dayBreaks without mutating the caller's tournament.
-func dayBreaksFor(tournament *state.Tournament, pause state.Pause, date string) []breakWindow {
-	return onePause(tournament, pause, date, state.Pause.StopsMatches)
-}
-
-// drawnPauseWindowsFor returns the windows the calendar draws for a single
-// pause of tournament on date, whether or not matches stop for it.
-func drawnPauseWindowsFor(tournament *state.Tournament, pause state.Pause, date string) []breakWindow {
-	return onePause(tournament, pause, date, func(state.Pause) bool { return true })
-}
-
-func onePause(tournament *state.Tournament, pause state.Pause, date string, keep func(state.Pause) bool) []breakWindow {
-	if tournament == nil {
-		return nil
-	}
-	tCopy := *tournament
-	tCopy.Pauses = []state.Pause{pause}
-	return pauseWindows(&tCopy, date, keep)
-}
+// anyPause is the keep of the windows the calendar draws: every pause, whether
+// or not matches stop for it.
+func anyPause(state.Pause) bool { return true }
 
 // skipBreaks pushes t past any pause window it falls inside: while t lies
 // inside some break (!t.Before(b.start) && t.Before(b.end)), move t to that

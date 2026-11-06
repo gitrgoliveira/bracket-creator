@@ -139,17 +139,15 @@ func RegisterCalendarHandlers(r gin.IRoutes, store CalendarStore, eng CalendarPl
 
 		placement := eng.PlaceCompetition(targetToPlace, tourn)
 
-		cal, err := eng.TournamentCalendar()
+		// Only a competition on the same day can clash, so only those are placed.
+		others, err := eng.PlacementsOnDate(tourn, targetToPlace.Date, comp.ID)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to build the calendar"})
 			return
 		}
 
 		overlapsList := make([]CalendarOverlap, 0)
-		for _, other := range cal.Competitions {
-			if other.ID == comp.ID {
-				continue
-			}
+		for _, other := range others {
 			for _, court := range engine.ClashingCourts(targetToPlace.Date, placement, other.Date, other.Placement) {
 				otherWin := other.Placement.Windows[court]
 				overlapsList = append(overlapsList, CalendarOverlap{

@@ -173,14 +173,16 @@ func tournamentAllowancePct(tournament *state.Tournament) int {
 }
 
 // draftBreaks returns the list of draft breaks for the given date, preserving
-// pause names while delegating day and duration filtering to dayBreaks.
+// pause names while filtering day and duration by dayBreaks' rule (the day is
+// worked out once for the date).
 func draftBreaks(tournament *state.Tournament, date string) []DraftBreak {
 	if tournament == nil || len(tournament.Pauses) == 0 {
 		return []DraftBreak{}
 	}
 	out := make([]DraftBreak, 0, len(tournament.Pauses))
+	dayIdx, dayCount := pauseDayIndex(tournament.Days(), date), pauseDayCount(tournament)
 	for _, p := range tournament.Pauses {
-		windows := dayBreaksFor(tournament, p, date)
+		windows := pausesOnDay([]state.Pause{p}, dayIdx, dayCount, state.Pause.StopsMatches)
 		if len(windows) == 1 {
 			w := windows[0]
 			out = append(out, DraftBreak{

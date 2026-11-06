@@ -497,6 +497,9 @@ describe('Overview estimate helpers (p2-overview)', () => {
     expect(latestCourtFinish({ A: '23:30', B: '00:40' }, '20:00')).toEqual({ clock: '00:40', nextDay: true });
     // The server may report a clock past 24:00.
     expect(latestCourtFinish({ A: '24:40' }, '20:00')).toEqual({ clock: '00:40', nextDay: true });
+    // A court end of exactly midnight is at midnight, not after it (pastMidnight).
+    expect(latestCourtFinish({ A: '24:00' }, '20:00')).toEqual({ clock: '00:00', nextDay: false });
+    expect(latestCourtFinish({ A: '23:30', B: '00:00' }, '20:00')).toEqual({ clock: '00:00', nextDay: false });
     expect(latestCourtFinish({}, '09:00')).toBeNull();
     expect(latestCourtFinish(undefined, '09:00')).toBeNull();
   });

@@ -67,10 +67,14 @@ async function setNumber(page, label, value) {
 //   startTime      "HH:MM": the competition's start time, typed over the
 //                  wizard's default (which then no longer follows the
 //                  estimate of an earlier competition on the same shiaijo)
+//   day            number: the tournament day (1-based) of a multi-day
+//                  tournament, chosen in the "Day" select
+//   expected       number: "Expected participants" (or "Expected teams"),
+//                  which sizes the estimate until a roster is pasted
 export async function createCompetition(page, opts = {}) {
   const {
     name, kind, format, teamSize, teamMatchType, poolSizeMode, poolSize, poolWinners, extraQualifiers,
-    courts, numberPrefix, twoThirdPlaces, engi, checkIn, startTime,
+    courts, numberPrefix, twoThirdPlaces, engi, checkIn, startTime, day, expected,
   } = opts;
   await page.goto('/admin/create-competition');
   await expect(page.getByRole('heading', { level: 1, name: 'Add competition' })).toBeVisible();
@@ -116,6 +120,13 @@ export async function createCompetition(page, opts = {}) {
   if (numberPrefix !== undefined) {
     await input(page, 'Player number prefix').fill(numberPrefix);
   }
+  if (day !== undefined) {
+    const sel = page.locator('#create-day');
+    const label = (await sel.locator('option').allInnerTexts()).find((t) => t.startsWith(`Day ${day}:`));
+    if (!label) throw new Error(`createCompetition: the Day select offers no Day ${day}`);
+    await sel.selectOption({ label });
+  }
+  if (expected !== undefined) await setNumber(page, 'Expected', expected);
   if (startTime !== undefined) {
     const box = page.locator('#create-start-time');
     await box.fill(startTime);

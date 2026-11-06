@@ -152,7 +152,9 @@ Most captures are at a device scale factor of 1, so the committed dimensions are
 the viewport. Six are at 2, where a committed 2560x1800 means a 1280x900
 viewport: `mobile-dashboard`, `mobile-participants`, `mobile-draw-preview`,
 `mobile-pool-standings`, `selfrun-register` and `selfrun-viewer-home`. Those six
-declare `dpr: 2`; a recipe that says nothing is at 1. The runner compares width always,
+declare `dpr: 2`; a recipe that says nothing is at 1. A phone capture that
+must lay out as on a touch screen (the calendar's always-shown Move buttons)
+declares `touch: true`. The runner compares width always,
 and height for every mode except `fullPage`, whose height moves with content.
 
 A new capture has nothing to compare against and reports `NEW`.

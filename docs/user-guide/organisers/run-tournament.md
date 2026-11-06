@@ -353,6 +353,8 @@ Open **Competition calendar** from the dashboard to see every competition on its
 
 ![The competition calendar of a two-day tournament with shiai-jo A and B: the opening ceremony and lunch drawn as bands across each day, a drawn competition with its times from the draw, and two dashed estimate blocks that say how many entries they expect.](../../screenshots/mobile-calendar.png)
 
+![Kids Individual and Ladies Individual, both starting at 10:00 on shiai-jo C: Ladies Individual is drawn over the right half of Kids Individual, and each block says it overlaps the other on shiai-jo C.](../../screenshots/mobile-calendar-overlap.png)
+
 A few notices can appear above the calendar:
 
 - **Not on the calendar**, a tray of competitions that cannot be placed yet, for example because one needs a start time or a date, or its date is outside the tournament. Each one names the reason, so open the competition's **Settings** to fix it. A line above the calendar tells you how many there are and has a button to open the tray.
@@ -363,6 +365,8 @@ A few notices can appear above the calendar:
 ### Moving a competition on the calendar
 
 Drag a competition's block to another day or start time. On a touch screen, press and hold the block first, then drag. You can also use the block's **Move** button, or press **M** while the block is focused. The Move dialog lets you pick the day, the start time and the shiai-jo. Starts snap to 5 minutes, and a start that falls inside a pause moves to the end of that pause. A move that makes two competitions overlap on a shiai-jo is a warning, never a block. A competition that is running or completed cannot be moved, and its block says so. Pause times are drawn as bands across each day, and the time span in a block reads, for example, *09:30 to about 13:38* for an estimate or *14:15 to 16:02* for a draw. A block built from an expected number says so (*Estimate for 24 expected*).
+
+![The calendar on a phone: buttons for Day 1 and Day 2, the first day's shiai-jo A and B, and the Men's Individual and Women's Individual blocks, each with its Move button.](../../screenshots/mobile-calendar-phone.png)
 
 ![The Move dialog for Women's Individual: the day, a start time of 11:00, shiai-jo A and B chosen, and the line Runs 11:00 to about 12:17, with Cancel and Move.](../../screenshots/mobile-calendar-move.png)
 

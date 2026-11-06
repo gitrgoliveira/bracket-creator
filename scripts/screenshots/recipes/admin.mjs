@@ -41,6 +41,34 @@ async function seedCalendar({ api }) {
   });
 }
 
+// The overlap fixture: the calendar's tournament on shiaijo A, B and C, with
+// two competitions that start together at 10:00 on shiaijo C. The later one
+// (by name) is drawn over the right half of the earlier one at its real time,
+// and both are marked. Kept in a family of its own so the three captures above
+// keep their two-shiaijo tournament.
+const CAL_PAIR_FIRST = 'Kids Individual';
+const CAL_PAIR_SECOND = 'Ladies Individual';
+
+async function seedCalendarOverlap({ api }) {
+  await api.tournament({
+    name: 'Spring Kendo Taikai 2026', date: CAL_DATE_1, durationDays: 2, courts: ['A', 'B', 'C'], pauses: CAL_PAUSES,
+  });
+  await api.competition('cal-mens', CAL_DRAWN, {
+    date: CAL_DATE_1, courts: ['A', 'B'], startTime: '09:30',
+  });
+  await api.participants('cal-mens', CAL_ROSTER);
+  await api.generateDraw('cal-mens');
+  await api.competition('cal-womens', CAL_SETUP, {
+    date: CAL_DATE_1, courts: ['A', 'B'], startTime: '14:00', expectedParticipants: 16,
+  });
+  await api.competition('cal-kids', CAL_PAIR_FIRST, {
+    date: CAL_DATE_1, courts: ['C'], startTime: '10:00', expectedParticipants: 16,
+  });
+  await api.competition('cal-ladies', CAL_PAIR_SECOND, {
+    date: CAL_DATE_1, courts: ['C'], startTime: '10:00', expectedParticipants: 8,
+  });
+}
+
 // The Move dialog of the setup competition, opened the way the page documents
 // it: focus the block, press M. Dragging is not used because a recipe cannot
 // show a drag in progress as a still, and the dialog is the same state a drag
@@ -96,6 +124,11 @@ export const families = {
     sources: ['web-mobile/js/admin_calendar', 'web-mobile/js/calendar_', 'web-mobile/js/pause_list'],
     seed: seedCalendar,
   },
+  calendar_overlap: {
+    server: 'mobile',
+    sources: ['web-mobile/js/admin_calendar', 'web-mobile/js/calendar_', 'web-mobile/js/pause_list'],
+    seed: seedCalendarOverlap,
+  },
 };
 
 export const recipes = [
@@ -115,6 +148,32 @@ export const recipes = [
     family: 'calendar',
     route: '/admin/calendar',
     viewport: { width: 1280, height: 900 },
+    capture: 'viewport',
+    auth: 'admin',
+    waitFor: `text=${CAL_DRAWN}`,
+  },
+
+  {
+    // Two competitions starting together on shiaijo C: the second over the
+    // right half of the first, both at their real times and both marked.
+    name: 'mobile-calendar-overlap',
+    family: 'calendar_overlap',
+    route: '/admin/calendar',
+    viewport: { width: 1280, height: 900 },
+    capture: 'viewport',
+    auth: 'admin',
+    waitFor: `text=${CAL_PAIR_SECOND}`,
+  },
+
+  {
+    // The calendar on a phone with a touch screen: one day at a time, a tab
+    // for each day, and each block's Move button always shown.
+    name: 'mobile-calendar-phone',
+    family: 'calendar',
+    route: '/admin/calendar',
+    viewport: { width: 375, height: 812 },
+    dpr: 2,
+    touch: true,
     capture: 'viewport',
     auth: 'admin',
     waitFor: `text=${CAL_DRAWN}`,

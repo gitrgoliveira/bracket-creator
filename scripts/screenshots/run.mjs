@@ -216,6 +216,9 @@ async function runRecipe(browser, recipe, ctx) {
   const context = await browser.newContext({
     viewport: recipe.viewport,
     deviceScaleFactor: recipe.dpr || 1,
+    // A phone with a touch screen (`touch: true`): the page matches
+    // (pointer: coarse), so it lays out as it does on the device.
+    ...(recipe.touch ? { hasTouch: true, isMobile: true } : {}),
     ...(isVideo ? { recordVideo: { dir: OUT, size: recipe.viewport } } : {}),
   });
   // Before the page exists, so there is no navigation order to reason about:

@@ -41,30 +41,56 @@ function deriveCompetitionName(rawName, kind) {
   return "Individual";
 }
 
-// findStackCandidates returns all same-day competitions that share at least
-// one shiaijo (court) with selectedCourts (or all same-day competitions if
-// selectedCourts is omitted/null) and have a parseable startTime.
-// Following SameDate, a blank form date returns no candidates (a competition
-// not placed on a day stacks with nothing); otherwise dates are compared trimmed.
-// A competition whose `courts` is missing or empty uses every tournament court
-// (safeCourts / tournamentCourts).
-//
-// Entries are filtered on PARSEABLE start times (timeToMinutes !== null), not
-// just truthy ones: the backend only length-caps StartTime (no format
-// validation), so a legacy/imported competition could carry a malformed value.
-function findStackCandidates(competitions, date, selectedCourts, tournamentCourts) {
+// calendarStackEnd returns the latest window END, in minutes from midnight,
+// among the placements of the calendar that are on the form date, on the chosen
+// shiaijo (courts; when courts is empty or missing, tournamentCourts is used),
+// or null when there is none.
+// Rules:
+// - A blank or whitespace date returns null.
+// - A placement counts if placement.placed is true or placement.notPlacedReason === "date_outside_tournament".
+// - It is on the form date when placement.day indexes a calendar day whose date equals the trimmed form date.
+//   For date_outside_tournament (day 0) when the competition date cannot be read from the calendar, it does not count.
+// - Only windows keyed by a chosen court count.
+// - An end >= 24*60 counts as no end at all (draw refuses a court planned past midnight).
+// - Malformed or missing windows are skipped.
+function calendarStackEnd(calendar, date, courts, tournamentCourts) {
   const trimmedDate = (date || "").trim();
-  if (!trimmedDate) return [];
-  const normTournCourts = (Array.isArray(tournamentCourts) && tournamentCourts.length > 0)
-    ? tournamentCourts
-    : (typeof window !== "undefined" && window.normalizeCourts ? window.normalizeCourts(tournamentCourts) : ["A"]);
-  return (competitions || []).filter((cc) => {
-    const compDate = (cc.date || "").trim();
-    if (compDate !== trimmedDate || timeToMinutes(cc.startTime) === null) return false;
-    if (!selectedCourts) return true;
-    const compCourts = (Array.isArray(cc.courts) && cc.courts.length > 0) ? cc.courts : normTournCourts;
-    return compCourts.some((c) => selectedCourts.includes(c));
-  });
+  if (!trimmedDate) return null;
+  const chosenCourts = (Array.isArray(courts) && courts.length > 0)
+    ? courts
+    : (Array.isArray(tournamentCourts) ? tournamentCourts : []);
+  if (chosenCourts.length === 0) return null;
+
+  const days = Array.isArray(calendar && calendar.days) ? calendar.days : [];
+  const comps = Array.isArray(calendar && calendar.competitions) ? calendar.competitions : [];
+
+  let latestEnd = null;
+
+  for (const comp of comps) {
+    const p = comp && comp.placement;
+    if (!p) continue;
+    if (!p.placed && p.notPlacedReason !== "date_outside_tournament") continue;
+    if (!Number.isInteger(p.day) || p.day < 1 || p.day > days.length) continue;
+    const targetDay = days[p.day - 1];
+    if ((targetDay && targetDay.date ? targetDay.date : "").trim() !== trimmedDate) continue;
+
+    const windows = p.windows;
+    if (!windows || typeof windows !== "object") continue;
+
+    for (const c of chosenCourts) {
+      const win = windows[c];
+      if (!win || typeof win !== "object") continue;
+      const end = typeof win.end === "number"
+        ? win.end
+        : (typeof win.end === "string" && win.end.trim() !== "" ? Number(win.end) : NaN);
+      if (!Number.isFinite(end) || end < 0 || end >= 24 * 60) continue;
+      if (latestEnd === null || end > latestEnd) {
+        latestEnd = end;
+      }
+    }
+  }
+
+  return latestEnd;
 }
 
 // Pure submit-time validation for AdminCreateCompetition's pool-format
@@ -116,7 +142,6 @@ function validateSwissSettings(format, swissRounds) {
 // dirty-tracking snapshot here can't drift from the shape BrandingManager emits
 // (mp-sspn). Importing keeps the defaults in one place.
 import { normalizeTheme } from './admin_branding.jsx';
-import { timeToMinutes } from './admin_schedule_utils.jsx';
 import { teamMatchTypeHint } from './pool_ids.jsx';
 // bc-qual LP-5a: the qualifier-preview arithmetic AND the pool-size/winners
 // form-coupling rules are shared with admin_competition_settings.jsx (the
@@ -162,6 +187,9 @@ import { PillGroup, PillButton, CheckboxField, NumberField, TextField } from './
 import { DurationInput } from './duration.jsx';
 import { useUnsavedInput } from './app_version.jsx';
 import { useLatestRef } from './latest_ref.jsx';
+import { PauseList, pauseStopsMatches } from './pause_list.jsx';
+import { MAX_EXPECTED_PARTICIPANTS } from './competition_put_body.jsx';
+import { useDraftEstimate, DraftEstimatePanel } from './draft_estimate.jsx';
 
 function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerMode, authConfig, password, showToast }) {
   // In locked mode the on-disk Password is irrelevant: auth comes
@@ -181,11 +209,17 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
   // Tournament mode (mp-7h7): read-only after creation: shown for
   // information only and NEVER included in the PUT payload.
   const tournamentMode = tournament.mode || "officiated";
-  // mp-zoh Phase 5: ceremony block duration strings ("30m", "1h", "1h30m").
-  // Empty string means "no block configured".
-  const [openingBlock, setOpeningBlock] = useState(tournament.openingBlock || "");
-  const [lunchBlock, setLunchBlock] = useState(tournament.lunchBlock || "");
-  const [closingBlock, setClosingBlock] = useState(tournament.closingBlock || "");
+  // Schedule pauses: list of pause objects {name, start, length, day}, plus
+  // matchesGoOn: true only for a pause whose "Matches stop for this pause" box
+  // is unticked (absent stops matches, so re-ticking compares unchanged).
+  const normalizePauses = (list) => (Array.isArray(list) ? list : []).map(p => ({
+    name: (p.name || "").trim(),
+    start: (p.start || "").trim(),
+    length: (p.length || "").trim(),
+    day: Number.isInteger(p.day) ? p.day : 0,
+    ...(pauseStopsMatches(p) ? {} : { matchesGoOn: true }),
+  }));
+  const [pauses, setPauses] = useState(normalizePauses(tournament.pauses));
   // mp-ef3: public tournament info fields.
   // mp-s1gl: externally-shareable base URL for QR codes / share links.
   const [publicURL, setPublicURL] = useState(tournament.publicURL || "");
@@ -263,7 +297,7 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
   useUnsavedInput(dirty);
   useEffect(() => {
     const snap = JSON.stringify({
-      name, venue, date, durationDays, courts, openingBlock, lunchBlock, closingBlock,
+      name, venue, date, durationDays, courts, pauses: normalizePauses(pauses),
       publicURL, venueAddress, venueMapURL, openingTime, closingTime, websiteURL,
       awardsNote, infoNotes, pass,
       contacts: contacts.map(c => ({ label: c.label || "", value: c.value || "" })),
@@ -272,7 +306,7 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
     });
     if (initialSnapRef.current === null) { initialSnapRef.current = snap; return; }
     setDirty(snap !== initialSnapRef.current);
-  }, [name, venue, date, durationDays, courts, openingBlock, lunchBlock, closingBlock,
+  }, [name, venue, date, durationDays, courts, pauses,
     publicURL, venueAddress, venueMapURL, openingTime, closingTime, websiteURL,
     awardsNote, infoNotes, pass, contacts, theme, logoOnLobby]);
 
@@ -323,9 +357,7 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
         durationDays,
         password: pass || undefined,
         courts: Array.from({ length: courts }, (_, i) => String.fromCharCode(65 + i)),
-        openingBlock: openingBlock.trim() || undefined,
-        lunchBlock: lunchBlock.trim() || undefined,
-        closingBlock: closingBlock.trim() || undefined,
+        pauses: normalizePauses(pauses),
         publicURL: publicURL.trim() || undefined,
         venueAddress: venueAddress.trim() || undefined,
         venueMapURL: venueMapURL.trim() || undefined,
@@ -494,33 +526,22 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
             </div>
           </div>
         </div>
-        {/* mp-zoh Phase 5: ceremony block duration inputs. These feed the */}
-        {/* schedule estimator (backend Tournament.OpeningBlock etc.). */}
-        {/* Duration strings like "30m", "1h", "1h30m". Leave blank to omit. */}
+        {/* Schedule pauses editor: feed the schedule estimator */}
         <div className="card card--pad-lg">
           <div className="card__head">
             <div>
               <div className="card__title">Schedule blocks</div>
-              <div className="card__sub">Durations feed the schedule estimator. Leave blank to omit a block.</div>
+              <div className="card__sub">Times when no matches are fought. All are optional.</div>
             </div>
           </div>
-          <div className="row-3" style={{ marginBottom: 0 }}>
-            <div className="field" style={{ marginBottom: 0 }}>
-              <label className="field__label" htmlFor="edit-opening-block">Opening ceremony <span style={{ fontWeight: 400, color: "var(--ink-3)" }}>(duration)</span></label>
-              <input id="edit-opening-block" className="input" value={openingBlock} onChange={(e) => setOpeningBlock(e.target.value)} placeholder="e.g. 30m" />
-              <div className="field__hint">Duration of the opening ceremony block (e.g. &quot;30m&quot;, &quot;1h&quot;).</div>
-            </div>
-            <div className="field" style={{ marginBottom: 0 }}>
-              <label className="field__label" htmlFor="edit-lunch-block">Lunch break <span style={{ fontWeight: 400, color: "var(--ink-3)" }}>(duration)</span></label>
-              <input id="edit-lunch-block" className="input" value={lunchBlock} onChange={(e) => setLunchBlock(e.target.value)} placeholder="e.g. 1h" />
-              <div className="field__hint">Duration of the lunch break block (e.g. &quot;1h&quot;, &quot;45m&quot;).</div>
-            </div>
-            <div className="field" style={{ marginBottom: 0 }}>
-              <label className="field__label" htmlFor="edit-closing-block">Closing ceremony <span style={{ fontWeight: 400, color: "var(--ink-3)" }}>(duration)</span></label>
-              <input id="edit-closing-block" className="input" value={closingBlock} onChange={(e) => setClosingBlock(e.target.value)} placeholder="e.g. 30m" />
-              <div className="field__hint">Duration of the closing ceremony block.</div>
-            </div>
-          </div>
+          <PauseList
+            pauses={pauses}
+            onChange={setPauses}
+            durationDays={durationDays}
+            tournamentDays={deriveTournamentDays ? deriveTournamentDays(date, durationDays) : []}
+            drawnCompetitions={(tournament.competitions || []).filter(c => c.status && c.status !== "setup").map(c => c.name)}
+            changed={JSON.stringify(normalizePauses(pauses)) !== JSON.stringify(normalizePauses(tournament.pauses))}
+          />
         </div>
         {/* mp-ef3: Tournament Information (Public) */}
         {/* mp-sspn: collapsible: all fields here are optional, so the section */}
@@ -700,12 +721,6 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
   );
 }
 
-// Minimum gap (minutes) stacked after the previous competition when defaulting
-// a new competition's start time. Before a competition has a roster its
-// schedule estimate is ~0, so this floor keeps successive competitions visibly
-// stacked; once a roster exists the real estimate takes over if it is larger.
-const MIN_STACK_BLOCK_MIN = 30;
-
 // mintCompetitionId: the id a new competition named `finalName` is created
 // under. Two distinct names can normalize to the same slug (e.g. "Men's" vs
 // "Mens" both → "mens"). The name-uniqueness check is case-insensitive on the
@@ -854,16 +869,32 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
   // dropped while the red error states it one line above.
   const courtsHint = window.shiaijoCountHintFor(format, safeCourts.length, !courtsErr);
 
-  // Auto-stack the default start time after the latest planned end among same-day
-  // competitions that share any of the chosen shiaijo (courts). For drawn
-  // competitions, we take the latest planned end across the chosen courts from
-  // estimate.courtEnds. For an undrawn competition (no estimate or no courtEnds
-  // entry on a chosen court), we use its startTime plus estimated duration
-  // floored at MIN_STACK_BLOCK_MIN. Behaviour:
+  const courtsGroupRef = useRef(null);
+  const handleFocusShiaijo = () => {
+    if (courtsGroupRef.current) {
+      courtsGroupRef.current.focus();
+      if (typeof courtsGroupRef.current.scrollIntoView === "function") {
+        courtsGroupRef.current.scrollIntoView({ block: "center" });
+      }
+    }
+  };
+
+  const [expectedParticipants, setExpectedParticipants] = useState(NaN);
+  const isTeam = kind === "team" || effectiveTeamSize > 0;
+
+  // Stacking pending flag: true from the moment
+  // calendar fetch begins until the stacked start (or default) lands;
+  // false on error/cancelled/latch/no-candidates.
+  const [stackPending, setStackPending] = useState(false);
+
+  // Auto-stack the default start time after the latest planned window end among
+  // same-day competitions that share any of the chosen shiaijo (courts),
+  // computed via calendarStackEnd over window.API.fetchCalendar placements.
+  // Behaviour:
   //  - Recomputes when the operator switches days or changes chosen courts
   //    BEFORE editing the start time.
-  //  - Keeps the 09:00 default when there are no candidate competitions sharing
-  //    a chosen court.
+  //  - Keeps the 09:00 default when there are no qualifying window ends.
+  //  - A blank date skips the fetch entirely: keeps the 09:00 default and pending false.
   //  - Once the operator types a start time, startTimeEditedRef latches and
   //    this effect short-circuits: a deliberate manual choice survives
   //    subsequent changes rather than being silently overwritten.
@@ -873,53 +904,80 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
   const safeCourtsKey = safeCourts.join(",");
   const courtsRef = useLatestRef({ selectedCourts, safeCourts });
   useEffect(() => {
-    if (startTimeEditedRef.current) return;
-    const { selectedCourts, safeCourts } = courtsRef.current;
-    const candidates = findStackCandidates(tournament.competitions, date, selectedCourts, safeCourts);
-    if (candidates.length === 0) {
+    if (startTimeEditedRef.current) {
+      setStackPending(false);
+      return;
+    }
+    const trimmedDate = (date || "").trim();
+    if (!trimmedDate) {
+      setStackPending(false);
       if (!startTimeEditedRef.current) {
         setStartTime(COMPETITION_DEFAULTS.startTime);
       }
-      return; // no sharing candidates: keep the 09:00 default
+      return;
     }
 
+    setStackPending(true);
     const controller = new AbortController();
-    const candidatePromises = candidates.map((cc) =>
-      window.API.estimateCompetitionSchedule(cc.id, password, controller.signal)
-        .catch(() => null)
-        .then((est) => {
-          if (est && est.courtEnds && typeof est.courtEnds === "object") {
-            const chosenCourtEnds = Object.entries(est.courtEnds)
-              // An end past midnight reads "24:05" (the server never wraps it):
-              // it is no start time, so it counts as no end here, and the draw
-              // itself refuses a court planned past midnight.
-              .filter(([court, endTime]) => selectedCourts.includes(court) && typeof endTime === "string" && timeToMinutes(endTime) !== null && timeToMinutes(endTime) < 24 * 60)
-              .map(([, endTime]) => endTime);
-            if (chosenCourtEnds.length > 0) {
-              return chosenCourtEnds.reduce((a, b) => (timeToMinutes(b) > timeToMinutes(a) ? b : a));
-            }
+    const { selectedCourts, safeCourts } = courtsRef.current;
+
+    window.API.fetchCalendar(password, controller.signal)
+      .then((cal) => {
+        if (controller.signal.aborted || startTimeEditedRef.current) return;
+        const endMinutes = calendarStackEnd(cal, date, selectedCourts, safeCourts);
+        if (endMinutes === null) {
+          if (!startTimeEditedRef.current) {
+            setStartTime(COMPETITION_DEFAULTS.startTime);
           }
-          const block = Math.max(Math.round(est?.totalDurationMinutes || 0), MIN_STACK_BLOCK_MIN);
-          return window.addMinutes(cc.startTime, block);
-        })
-    );
-
-    Promise.all(candidatePromises).then((ends) => {
-      if (controller.signal.aborted || startTimeEditedRef.current) return;
-      const validEnds = ends.filter((t) => typeof t === "string" && timeToMinutes(t) !== null);
-      if (validEnds.length === 0) {
-        if (!startTimeEditedRef.current) {
-          setStartTime(COMPETITION_DEFAULTS.startTime);
+          return;
         }
-        return;
-      }
-      const latestEnd = validEnds.reduce((a, b) => (timeToMinutes(b) > timeToMinutes(a) ? b : a));
-      if (controller.signal.aborted || startTimeEditedRef.current) return;
-      setStartTime(latestEnd);
-    });
+        const h = Math.floor(endMinutes / 60);
+        const m = endMinutes % 60;
+        const formatted = `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+        if (controller.signal.aborted || startTimeEditedRef.current) return;
+        setStartTime(formatted);
+      })
+      .catch(() => {
+        if (controller.signal.aborted || startTimeEditedRef.current) return;
+        setStartTime(COMPETITION_DEFAULTS.startTime);
+      })
+      .finally(() => {
+        if (mountedRef.current && !controller.signal.aborted) {
+          setStackPending(false);
+        }
+      });
 
-    return () => { controller.abort(); };
+    return () => {
+      controller.abort();
+      setStackPending(false);
+    };
   }, [date, tournament.competitions, password, selectedCourtsKey, safeCourtsKey, courtsRef]);
+
+  // Draft estimate shape & hook (task p2-create item 2). Sends nothing while
+  // stackPending (startTime: ""), and uses Expected participants value.
+  const draftShape = {
+    participants: Number.isFinite(expectedParticipants) ? expectedParticipants : "",
+    format,
+    kind,
+    poolSizeMode: poolMode,
+    poolWinners: winners,
+    poolSize,
+    poolFormat,
+    roundRobin,
+    swissRounds,
+    courts: selectedCourts.length > 0 ? selectedCourts.length : undefined,
+    courtLabels: selectedCourts,
+    teamSize: effectiveTeamSize,
+    teamMatchType: teamFieldsVisible(kind) ? teamMatchType : undefined,
+    extraQualifiers: format === FORMAT_MIXED ? extraQualifiers : undefined,
+    twoThirdPlaces,
+    naginata,
+    date,
+    startTime: stackPending ? "" : startTime,
+    poolMatchDurationSeconds: poolDurationVisible(format) ? poolMatchDurationSeconds : undefined,
+    knockoutMatchDurationSeconds: knockoutDurationVisible(format) ? knockoutMatchDurationSeconds : undefined,
+  };
+  const { estimate, loading: estimateLoading, error: estimateError, retry: retryEstimate } = useDraftEstimate(draftShape, password);
 
   // bc-pnum G2/R6: pre-fill the prefix field with the SAME value a save
   // left blank would actually assign server-side (assignDefaultNumberPrefix),
@@ -1028,6 +1086,13 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
     if (teamSizeErr) {
       setError(teamSizeErr);
       return;
+    }
+
+    if (Number.isFinite(expectedParticipants)) {
+      if (!Number.isInteger(expectedParticipants) || expectedParticipants < 0 || expectedParticipants > MAX_EXPECTED_PARTICIPANTS) {
+        setError(`${isTeam ? "Expected teams" : "Expected participants"} must be a whole number from 0 to ${MAX_EXPECTED_PARTICIPANTS}.`);
+        return;
+      }
     }
 
     const id = mintCompetitionId(finalName, tournament.competitions);
@@ -1164,6 +1229,9 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
     // it for individual comps is harmless but omitting it keeps the payload clean.
     if (teamFieldsVisible(kind)) {
       c.teamMatchType = teamMatchType;
+    }
+    if (Number.isFinite(expectedParticipants)) {
+      c.expectedParticipants = expectedParticipants;
     }
     // Surface a SERVER rejection in this form's own error banner, the same
     // channel every client-side guard above uses. Previously onCreate's
@@ -1415,7 +1483,13 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
 
           <div className="field">
             <label className="field__label" id="create-courts-label">{LABEL_COURTS}</label>
-            <div className="radio-group" role="group" aria-labelledby="create-courts-label">
+            <div
+              ref={courtsGroupRef}
+              tabIndex={-1}
+              className="radio-group"
+              role="group"
+              aria-labelledby="create-courts-label"
+            >
               {safeCourts.map((cc) => (
                 <PillButton key={cc} active={selectedCourts.includes(cc)} onClick={() => toggleCourt(cc)}>Shiaijo (court) {cc}</PillButton>
               ))}
@@ -1491,7 +1565,29 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
 
           {tournamentHasCheckIn(tournament) && <CheckboxField label={LABEL_CHECK_IN} checked={checkInEnabled} onChange={setCheckInEnabled} hint={HINT_CHECK_IN} />}
 
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
+          <NumberField
+            label={isTeam ? "Expected teams" : "Expected participants"}
+            min={0}
+            max={MAX_EXPECTED_PARTICIPANTS}
+            value={expectedParticipants}
+            onChange={(raw) => {
+              setError("");
+              setExpectedParticipants(decideNumericUpdate(raw, 0).value);
+            }}
+            hint="How many you expect. Estimates use this number until more register. Kept with the competition; change it in Settings."
+          />
+
+          <DraftEstimatePanel
+            estimate={estimate}
+            loading={estimateLoading}
+            error={estimateError}
+            onRetry={retryEstimate}
+            shape={draftShape}
+            tournamentCourts={safeCourts}
+            onChangeShiaijo={handleFocusShiaijo}
+          />
+
+          <div className="create-comp-actions">
             <button type="button" className="btn" onClick={onCancel}>Cancel</button>
             {/* Disabled on the same condition that drives the red hint under
                 the shiaijo pills, so the button never invites a request the
@@ -1827,6 +1923,6 @@ window.AdminImportPage = AdminImportPage;
 // AnnouncementComposer component they drive (mp-djc).
 export {
   deriveCompetitionName, validatePoolSettings, validateSwissSettings,
-  findStackCandidates,
+  calendarStackEnd,
   previewRowCourts, previewRowShiaijoError, importRowErrorText,
 };

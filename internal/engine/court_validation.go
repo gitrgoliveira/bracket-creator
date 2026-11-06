@@ -16,6 +16,12 @@ func SuggestedMaxCourts(numPlayers int) int {
 	return max(1, numPlayers/2-1)
 }
 
+// MaxUsefulCourts returns the largest court count the draw accepts for numPlayers
+// entrants, i.e. floor(numPlayers/2), minimum 1.
+func MaxUsefulCourts(numPlayers int) int {
+	return max(1, numPlayers/2)
+}
+
 // ValidateCourtCount checks if numCourts is valid for a single-pool
 // competition with numPlayers entrants.
 //
@@ -37,7 +43,7 @@ func SuggestedMaxCourts(numPlayers int) int {
 // The warning case (numCourts == floor(N/2), no rest between fights) is
 // handled exclusively by the frontend, see admin_competition.jsx.
 func ValidateCourtCount(numPlayers, numCourts int) error {
-	hardCap := max(1, numPlayers/2)
+	hardCap := MaxUsefulCourts(numPlayers)
 	if numCourts > hardCap {
 		return validationErrorf(
 			"too many courts for the entry: %d shiaijo but only %d bout%s can run at once with %d entrants, so the rest would sit idle; give this competition at most %d",

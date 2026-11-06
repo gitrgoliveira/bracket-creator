@@ -141,13 +141,13 @@ func scheduleLeagueSlots(matches []state.MatchResult, courts []string) (ordered 
 
 // assignLeagueSlotTimesFrom writes ScheduledAt on each match according to its slot:
 // all matches in slot k share one start time; slot k+1 starts one match-duration
-// after slot k (lunch/opening blocks respected via the same rules as
-// assignPoolMatchSlotsFrom). Anchors the whole grid at the latest of dayStart + opening
+// after slot k (pauses respected via the same rules as
+// assignPoolMatchSlotsFrom). Anchors the whole grid at the latest of dayStart
 // and the floor of every court the league uses. It does not shift courts independently.
 // Returns matches and the max end cursor.
 //
-// A single global cursor is used: slot k's start = dayStart + OpeningBlock +
-// k*perMatchMin, pushed past LunchBlock via skipCeremonyBlocks. This keeps all
+// A single global cursor is used: slot k's start = dayStart +
+// k*perMatchMin, pushed past pauses via skipBreaks. This keeps all
 // courts in the same slot strictly time-aligned, unlike the per-court cursors of
 // assignPoolMatchSlotsFrom (which is the defect G2 scheduling is designed to fix).
 //
@@ -159,11 +159,10 @@ func assignLeagueSlotTimesFrom(matches []state.MatchResult, slots []int, comp *s
 		return matches, time.Time{}
 	}
 
-	dayStart, openingMin, lunchMin, lunchStart := parseCeremonyParams(comp, tournament)
-	openAt := dayStart.Add(time.Duration(openingMin) * time.Minute)
+	dayStart, breaks := parseCeremonyParams(comp, tournament)
 
 	if len(matches) == 0 {
-		return matches, openAt
+		return matches, dayStart
 	}
 
 	// Only a court a league match lands on may raise the shared anchor: a
@@ -175,7 +174,7 @@ func assignLeagueSlotTimesFrom(matches []state.MatchResult, slots []int, comp *s
 		}
 	}
 
-	anchor := openAt
+	anchor := dayStart
 	if courtStart != nil {
 		for c := range usedCourts {
 			if t, ok := courtStart[c]; ok && t.After(anchor) {
@@ -187,7 +186,7 @@ func assignLeagueSlotTimesFrom(matches []state.MatchResult, slots []int, comp *s
 	perMatchMin := perMatchElapsedMinutes(comp, tournament, false /*isKnockout*/)
 
 	// Build a map from slot index to start time by walking slot 0..maxSlot
-	// with a single cursor, skipping ceremony blocks.
+	// with a single cursor, skipping pauses.
 	maxSlot := 0
 	for _, s := range slots {
 		if s > maxSlot {
@@ -198,7 +197,7 @@ func assignLeagueSlotTimesFrom(matches []state.MatchResult, slots []int, comp *s
 	slotTime := make([]time.Time, maxSlot+1)
 	cursor := anchor
 	for k := range maxSlot + 1 {
-		cursor = skipCeremonyBlocks(cursor, lunchStart, lunchMin)
+		cursor = skipBreaks(cursor, breaks)
 		slotTime[k] = cursor
 		cursor = cursor.Add(time.Duration(perMatchMin) * time.Minute)
 	}

@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"log"
 	"sort"
-	"strings"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
@@ -19,24 +18,25 @@ const MinClashFootprintMinutes = 30
 
 // ClashWarning describes a court (shiaijo) scheduling conflict between the
 // queried competition and another competition: they run on the same date,
-// share at least one court, and their time windows overlap.
+// share at least one court, and their time windows overlap. OverlapStart and
+// OverlapEnd report the span of the earliest clash (the clashing court whose
+// overlap starts first; ties go to the court earliest in the sorted order).
 type ClashWarning struct {
 	OtherCompID   string   `json:"otherCompId"`
 	OtherCompName string   `json:"otherCompName"`
 	Date          string   `json:"date"`
 	SharedCourts  []string `json:"sharedCourts"`
-	OverlapStart  string   `json:"overlapStart"` // HH:MM
-	OverlapEnd    string   `json:"overlapEnd"`   // HH:MM
+	OverlapStart  string   `json:"overlapStart"` // HH:MM, earliest clash
+	OverlapEnd    string   `json:"overlapEnd"`   // HH:MM, earliest clash
 }
 
 // DetectClashesForCompetition returns the court-scheduling clashes between the
 // competition identified by compID and every other competition. Two
 // competitions clash when they share a date, share at least one court, and
-// their [start, start+footprint) windows overlap. Footprint is
-// max(estimated duration, MinClashFootprintMinutes).
+// their placement windows overlap on a shared court.
 //
 // Returns an empty (non-nil) slice when there are no clashes. A competition
-// that cannot be placed on a timeline, no date or an unparseable start time,
+// that cannot be placed on a timeline (no date or an unparseable start time)
 // is skipped rather than reported. Clashes are sorted by the other
 // competition's name for a stable UI/test order.
 func (e *Engine) DetectClashesForCompetition(compID string) ([]ClashWarning, error) {
@@ -50,36 +50,19 @@ func (e *Engine) DetectClashesForCompetition(compID string) ([]ClashWarning, err
 
 	out := []ClashWarning{}
 
-	tStart, ok := state.ParseClockMinutes(target.StartTime)
-	if !ok || strings.TrimSpace(target.Date) == "" {
-		// Target can't be placed on a timeline → nothing to compare against.
-		return out, nil
-	}
-	tEnd := tStart + e.clashFootprintMinutes(compID)
-
-	// Resolve courts the same way the draw paths do: an empty competition
-	// court list inherits the tournament's courts (or ["A"]). Without this a
-	// legacy competition saved before court materialization, nil Courts,
-	// would silently never clash even though at draw time it occupies a real
-	// court. A LoadTournament failure leaves tourn nil; InheritedDrawCourts
-	// then falls back to ["A"], matching resolveCompetitionCourts.
 	tourn, tournErr := e.store.LoadTournament()
-	// Only a competition with no courts of its own inherits the tournament's,
-	// so the unreadable tournament matters only when the target or a
-	// competition compared with it has none. Said once for the check.
-	inheritedFromUnreadable := false
-	courtsOf := func(own []string) []string {
-		if tournErr != nil && len(own) == 0 {
-			inheritedFromUnreadable = true
-		}
-		return InheritedDrawCourts(own, tourn)
-	}
+	inheritedFromUnreadable := tournErr != nil && len(target.Courts) == 0
 	defer func() {
 		if inheritedFromUnreadable {
 			log.Printf("engine: clash check for %q: tournament unreadable, inherited courts are taken as [\"A\"]: %v", compID, tournErr)
 		}
 	}()
-	targetCourts := courtsOf(target.Courts)
+
+	targetPlace := e.PlaceCompetition(target, tourn)
+	if !targetPlace.TakesPartInClashes() {
+		// Target can't be placed on a timeline → nothing to compare against.
+		return out, nil
+	}
 
 	ids, err := e.store.ListCompetitions()
 	if err != nil {
@@ -96,43 +79,38 @@ func (e *Engine) DetectClashesForCompetition(compID string) ([]ClashWarning, err
 			continue
 		}
 		if !state.SameDate(target.Date, other.Date) {
+			// Skipped before the placement is worked out, which costs an estimate.
 			continue
 		}
-		shared := sharedCourts(targetCourts, courtsOf(other.Courts))
-		if len(shared) == 0 {
-			continue
+		if tournErr != nil && len(other.Courts) == 0 {
+			inheritedFromUnreadable = true
 		}
-		oStart, ok := state.ParseClockMinutes(other.StartTime)
-		if !ok {
-			continue
+		otherPlace := e.PlaceCompetition(other, tourn)
+		clashingCourts := ClashingCourts(target.Date, targetPlace, other.Date, otherPlace)
+		overlapStart := -1
+		overlapEnd := -1
+		for _, c := range clashingCourts {
+			wT, wO := targetPlace.Windows[c], otherPlace.Windows[c]
+			oS := max(wT.Start, wO.Start)
+			if overlapStart == -1 || oS < overlapStart {
+				overlapStart = oS
+				overlapEnd = min(wT.End, wO.End)
+			}
 		}
-		oEnd := oStart + e.clashFootprintMinutes(id)
-		// Half-open overlap: [tStart,tEnd) ∩ [oStart,oEnd) is non-empty.
-		if tStart < oEnd && oStart < tEnd {
+
+		if len(clashingCourts) > 0 {
 			out = append(out, ClashWarning{
 				OtherCompID:   other.ID,
 				OtherCompName: other.Name,
 				Date:          other.Date,
-				SharedCourts:  shared,
-				OverlapStart:  fmtHHMM(max(tStart, oStart)),
-				OverlapEnd:    fmtHHMM(min(tEnd, oEnd)),
+				SharedCourts:  clashingCourts,
+				OverlapStart:  fmtHHMM(overlapStart),
+				OverlapEnd:    fmtHHMM(overlapEnd),
 			})
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].OtherCompName < out[j].OtherCompName })
 	return out, nil
-}
-
-// clashFootprintMinutes is the time a competition occupies for clash detection:
-// max(estimated total duration, MinClashFootprintMinutes). It never errors, an
-// estimate failure (config issue / missing roster) falls back to the floor so a
-// single un-estimatable competition can't break the whole clash check.
-func (e *Engine) clashFootprintMinutes(compID string) int {
-	est, err := e.EstimateScheduleForCompetition(compID)
-	if err != nil || est.TotalDurationMinutes < MinClashFootprintMinutes {
-		return MinClashFootprintMinutes
-	}
-	return est.TotalDurationMinutes
 }
 
 // fmtHHMM renders minutes-since-midnight as "HH:MM". It does NOT wrap at 24h:
@@ -144,23 +122,4 @@ func fmtHHMM(mins int) string {
 		mins = 0
 	}
 	return fmt.Sprintf("%02d:%02d", mins/60, mins%60)
-}
-
-// sharedCourts returns the sorted intersection of two court-label lists.
-// Deleting matched entries from the set as we go both de-dups (a repeated
-// label in b is only emitted once) and avoids a second bookkeeping map.
-func sharedCourts(a, b []string) []string {
-	inA := make(map[string]struct{}, len(a))
-	for _, c := range a {
-		inA[c] = struct{}{}
-	}
-	out := []string{}
-	for _, c := range b {
-		if _, ok := inA[c]; ok {
-			out = append(out, c)
-			delete(inA, c)
-		}
-	}
-	sort.Strings(out)
-	return out
 }

@@ -92,8 +92,8 @@ func TestExcelTimeEstimatorParity(t *testing.T) {
 // TestEstimateScheduleCeremonyAddsToTotal verifies CeremonyMinutes is
 // passed through verbatim onto TotalDurationMinutes. The estimator just
 // adds the ceremony block to the total so callers can render the "all-in"
-// estimate; the auto-scheduler skips its own ceremony windows when it
-// places matches (skipCeremonyBlocks in scheduler_slots.go).
+// estimate; the auto-scheduler skips its own pause windows when it
+// places matches.
 func TestEstimateScheduleCeremonyAddsToTotal(t *testing.T) {
 	base := EstimateInput{
 		MatchDurationClockMinutes: 3,
@@ -239,39 +239,6 @@ func TestPerMatchElapsedBouts_Fractional(t *testing.T) {
 	}
 }
 
-// TestEstimateSchedule_KachinukiRange pins the exact best/average/worst
-// arithmetic for a kachinuki estimate (mp-gmcg). Fixture: clock=3min,
-// multiplier=1.5, 2 matches on 1 court, team size 5, no buffer/ceremony.
-//
-// kachinukiBoutRange(5) = (5, 7, 9) bouts. Per match
-// (perMatchElapsedBouts, includes the (bouts-1)*1min changeover):
-//
-//	best:  5*3*1.5 + 4 = 26.5 min → ×2 matches = 53
-//	avg:   7*3*1.5 + 6 = 37.5 min → ×2 matches = 75
-//	worst: 9*3*1.5 + 8 = 48.5 min → ×2 matches = 97
-//
-// TotalDurationMinutes carries the AVERAGE scenario; PerCourtMinutes
-// reflects the average too.
-func TestEstimateSchedule_KachinukiRange(t *testing.T) {
-	result := EstimateSchedule(EstimateInput{
-		MatchDurationClockMinutes: 3,
-		Multiplier:                1.5,
-		NumMatches:                2,
-		NumCourts:                 1,
-		TeamSize:                  5,
-		BoutsPerTeamMatch:         5,
-		Kachinuki:                 true,
-	})
-
-	assert.Equal(t, 53, result.BestCaseMinutes, "best: 2 × (5*3*1.5 + 4) = 53")
-	assert.Equal(t, 75, result.TotalDurationMinutes, "avg headline: 2 × (7*3*1.5 + 6) = 75")
-	assert.Equal(t, 97, result.WorstCaseMinutes, "worst: 2 × (9*3*1.5 + 8) = 97")
-	assert.Less(t, result.BestCaseMinutes, result.TotalDurationMinutes)
-	assert.Less(t, result.TotalDurationMinutes, result.WorstCaseMinutes)
-	require.Len(t, result.PerCourtMinutes, 1)
-	assert.Equal(t, 75, result.PerCourtMinutes[0], "PerCourtMinutes reflects the average scenario")
-}
-
 // TestEstimateSchedule_ClampsHostileBoutDrivers pins mp-gmcg review R5: a
 // pathologically large TeamSize / BoutsPerTeamMatch must not overflow the
 // duration math. Before the clamp, `worst = 2n-1` and `bouts*clock*mult`
@@ -285,7 +252,7 @@ func TestEstimateSchedule_ClampsHostileBoutDrivers(t *testing.T) {
 	}{
 		// math.MaxInt (not a fixed 1<<62) so the test compiles on 32-bit
 		// GOARCHs where int is 32-bit (mp-gmcg review).
-		{"huge teamSize", EstimateInput{MatchDurationClockMinutes: 3, Multiplier: 1.5, NumMatches: 1, NumCourts: 1, TeamSize: math.MaxInt, Kachinuki: true}},
+		{"huge teamSize", EstimateInput{MatchDurationClockMinutes: 3, Multiplier: 1.5, NumMatches: 1, NumCourts: 1, TeamSize: math.MaxInt}},
 		{"huge boutsPerTeamMatch", EstimateInput{MatchDurationClockMinutes: 3, Multiplier: 1.5, NumMatches: 1, NumCourts: 1, TeamSize: 5, BoutsPerTeamMatch: math.MaxInt}},
 		{"negative teamSize", EstimateInput{MatchDurationClockMinutes: 3, Multiplier: 1.5, NumMatches: 1, NumCourts: 1, TeamSize: -5}},
 	} {
@@ -379,17 +346,6 @@ func TestEstimateSchedule_BoutsDefaultToTeamSize(t *testing.T) {
 		assert.Equal(t, 53, EstimateSchedule(base).TotalDurationMinutes)
 	})
 
-	t.Run("kachinuki derives its range from TeamSize when bouts are omitted", func(t *testing.T) {
-		k := base
-		k.Kachinuki = true
-		got := EstimateSchedule(k)
-		// Identical to TestEstimateSchedule_KachinukiRange, which passes
-		// BoutsPerTeamMatch: 5 explicitly. The range must not collapse.
-		assert.Equal(t, 53, got.BestCaseMinutes)
-		assert.Equal(t, 75, got.TotalDurationMinutes)
-		assert.Equal(t, 97, got.WorstCaseMinutes)
-	})
-
 	t.Run("an explicit override still wins", func(t *testing.T) {
 		override := base
 		override.BoutsPerTeamMatch = 3
@@ -404,83 +360,6 @@ func TestEstimateSchedule_BoutsDefaultToTeamSize(t *testing.T) {
 		assert.Equal(t, 9, EstimateSchedule(orphan).TotalDurationMinutes,
 			"TeamSize is the team/individual gate: 2 × 3*1.5 = 9")
 	})
-}
-
-// TestEstimateSchedule_KachinukiCeremonyAdditive verifies CeremonyMinutes
-// is added verbatim to ALL THREE scenario fields, not just the headline.
-func TestEstimateSchedule_KachinukiCeremonyAdditive(t *testing.T) {
-	base := EstimateInput{
-		MatchDurationClockMinutes: 3,
-		Multiplier:                1.5,
-		NumMatches:                2,
-		NumCourts:                 1,
-		TeamSize:                  5,
-		BoutsPerTeamMatch:         5,
-		Kachinuki:                 true,
-	}
-	plain := EstimateSchedule(base)
-
-	withCeremony := base
-	withCeremony.CeremonyMinutes = 10
-	cer := EstimateSchedule(withCeremony)
-
-	assert.Equal(t, plain.BestCaseMinutes+10, cer.BestCaseMinutes)
-	assert.Equal(t, plain.TotalDurationMinutes+10, cer.TotalDurationMinutes)
-	assert.Equal(t, plain.WorstCaseMinutes+10, cer.WorstCaseMinutes)
-}
-
-// TestEstimateSchedule_NonKachinukiCollapses pins the collapse contract:
-// when Kachinuki is false (fixed-format team or individual), or when
-// Kachinuki is set but there is no bout count to widen (individual), the
-// bout count is constant, so BestCaseMinutes == TotalDurationMinutes ==
-// WorstCaseMinutes.
-func TestEstimateSchedule_NonKachinukiCollapses(t *testing.T) {
-	tests := []struct {
-		name string
-		in   EstimateInput
-	}{
-		{
-			name: "fixed-format team match",
-			in: EstimateInput{
-				MatchDurationClockMinutes: 3,
-				Multiplier:                1.5,
-				NumMatches:                2,
-				NumCourts:                 1,
-				TeamSize:                  5,
-				BoutsPerTeamMatch:         5,
-				Kachinuki:                 false,
-			},
-		},
-		{
-			name: "individual match",
-			in: EstimateInput{
-				MatchDurationClockMinutes: 3,
-				Multiplier:                1.5,
-				NumMatches:                4,
-				NumCourts:                 1,
-			},
-		},
-		{
-			name: "kachinuki flag without team bouts is inert",
-			in: EstimateInput{
-				MatchDurationClockMinutes: 3,
-				Multiplier:                1.5,
-				NumMatches:                4,
-				NumCourts:                 1,
-				Kachinuki:                 true, // TeamSize=0 → no bout count to widen
-			},
-		},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			result := EstimateSchedule(tc.in)
-			assert.Equal(t, result.TotalDurationMinutes, result.BestCaseMinutes,
-				"best must equal total when the bout count is constant")
-			assert.Equal(t, result.TotalDurationMinutes, result.WorstCaseMinutes,
-				"worst must equal total when the bout count is constant")
-			assert.Greater(t, result.TotalDurationMinutes, 0)
-		})
-	}
 }
 
 // ---------------------------------------------------------------------------
@@ -500,12 +379,31 @@ func newIndivComp(courts []string, poolDur, knockoutDur int, startTime string) *
 }
 
 func newTournament(multiplier float64, bufferPct int, opening, lunch, closing string) *state.Tournament {
+	var pauses []state.Pause
+	if opening != "" {
+		pauses = append(pauses, state.Pause{
+			Name:   "Opening ceremony",
+			Start:  "09:00",
+			Length: opening,
+		})
+	}
+	if lunch != "" {
+		pauses = append(pauses, state.Pause{
+			Name:   "Lunch",
+			Start:  "12:00",
+			Length: lunch,
+		})
+	}
+	if closing != "" {
+		pauses = append(pauses, state.Pause{
+			Name:   "Closing ceremony",
+			Length: closing,
+		})
+	}
 	return &state.Tournament{
 		ClockToElapsedMultiplier: multiplier,
 		SlowestCourtBufferPct:    bufferPct,
-		OpeningBlock:             opening,
-		LunchBlock:               lunch,
-		ClosingBlock:             closing,
+		Pauses:                   pauses,
 	}
 }
 
@@ -553,7 +451,7 @@ func TestEstimateForCounts_PoolThenKnockoutSequential(t *testing.T) {
 		combined.TotalDurationMinutes, knockoutOnly.TotalDurationMinutes)
 	assert.Equal(t, poolOnly.TotalDurationMinutes+knockoutOnly.TotalDurationMinutes,
 		combined.TotalDurationMinutes,
-		"with no opening/lunch blocks the buffer is linear, so combined == poolOnly + knockoutOnly")
+		"with no pauses the buffer is linear, so combined == poolOnly + knockoutOnly")
 }
 
 // TestEstimateForCounts_TeamComp exercises the comp.Kind == "team" branch of
@@ -748,17 +646,102 @@ func TestEstimateForCounts_NoLunchIfFinishesBefore(t *testing.T) {
 		with.TotalDurationMinutes, without.TotalDurationMinutes)
 }
 
-// TestEstimateForCounts_ClosingBlock verifies that CeremonyMinutes is populated
-// from tournament.ClosingBlock and added to the total.
-// With an explicit 5% buffer: 4*3=12min * 1.05 = 12.6 → 13, + 30 ceremony = 43.
-func TestEstimateForCounts_ClosingBlock(t *testing.T) {
+// TestEstimateForCounts_StartlessClosingPauseAddsNothing verifies that a
+// start-less "Closing ceremony" pause leaves CeremonyMinutes at 0 and does
+// not increase the total duration.
+// 4 matches * 3min = 12min * 1.05 = 12.6 → 13.
+func TestEstimateForCounts_StartlessClosingPauseAddsNothing(t *testing.T) {
 	comp := newIndivComp([]string{"A"}, 3, 3, "09:00")
-	tourn := newTournament(1.0, 5, "", "", "30m") // 5% buffer, 30m closing block
+	tourn := newTournament(1.0, 5, "", "", "30m") // 5% buffer, 30m start-less closing pause
 	est := EstimateForCounts(4, 0, comp, tourn)
 
-	assert.Equal(t, 30, est.CeremonyMinutes)
-	// 4 * 3 = 12 match minutes * 1.05 = 12.6 → 13 + 30 ceremony = 43.
-	assert.Equal(t, 43, est.TotalDurationMinutes)
+	noPauseTourn := newTournament(1.0, 5, "", "", "")
+	noPauseEst := EstimateForCounts(4, 0, comp, noPauseTourn)
+
+	assert.Equal(t, 0, est.CeremonyMinutes)
+	assert.Equal(t, noPauseEst.TotalDurationMinutes, est.TotalDurationMinutes)
+	// 4 * 3 = 12 match minutes * 1.05 = 12.6 → 13.
+	assert.Equal(t, 13, est.TotalDurationMinutes)
+}
+
+// TestEstimateForCounts_ClosingPauseWithStartIsSkipped verifies that a closing
+// pause with an explicit Start time inside the walk pushes subsequent matches,
+// growing the total by the portion of the pause the cursor meets.
+func TestEstimateForCounts_ClosingPauseWithStartIsSkipped(t *testing.T) {
+	comp := newIndivComp([]string{"A"}, 3, 3, "09:00")
+	baseTourn := newTournament(1.0, 5, "", "", "") // 5% buffer, no pause
+	baseEst := EstimateForCounts(4, 0, comp, baseTourn)
+
+	// 4 matches from 09:00 at 3min end at 09:12. Place closing pause at 09:05 (15m length).
+	// Match 1: 09:00-09:03. Match 2: 09:03-09:06. At 09:06 cursor is inside [09:05, 09:20),
+	// so it skips to 09:20 (+14m met). Matches 3 & 4 finish at 09:26.
+	// matchMin=12, buffer=5% -> 12.6. fixedOverhead = 26 - 12 = 14m. Total = 14 + 12.6 = 26.6 -> 27.
+	withPauseTourn := &state.Tournament{
+		ClockToElapsedMultiplier: 1.0,
+		SlowestCourtBufferPct:    5,
+		Pauses: []state.Pause{
+			{Name: "Closing ceremony", Start: "09:05", Length: "15m"},
+		},
+	}
+	withPauseEst := EstimateForCounts(4, 0, comp, withPauseTourn)
+
+	assert.Equal(t, 0, withPauseEst.CeremonyMinutes)
+	assert.Equal(t, 27, withPauseEst.TotalDurationMinutes)
+	assert.Equal(t, 14, withPauseEst.TotalDurationMinutes-baseEst.TotalDurationMinutes)
+}
+
+// TestEstimateForCounts_OverlappingPausesSkipAsOne verifies that overlapping
+// pauses count as one continuous break window without needing explicit merge logic.
+func TestEstimateForCounts_OverlappingPausesSkipAsOne(t *testing.T) {
+	comp := newIndivComp([]string{"A"}, 3, 3, "11:30")
+	tournOverlapping := &state.Tournament{
+		ClockToElapsedMultiplier: 1.0,
+		SlowestCourtBufferPct:    10,
+		Pauses: []state.Pause{
+			{Name: "Lunch", Start: "12:00", Length: "1h"},
+			{Name: "Grading", Start: "12:30", Length: "1h15m"},
+		},
+	}
+	tournMerged := &state.Tournament{
+		ClockToElapsedMultiplier: 1.0,
+		SlowestCourtBufferPct:    10,
+		Pauses: []state.Pause{
+			{Name: "Merged", Start: "12:00", Length: "1h45m"},
+		},
+	}
+	estOverlapping := EstimateForCounts(12, 0, comp, tournOverlapping)
+	estMerged := EstimateForCounts(12, 0, comp, tournMerged)
+	assert.Equal(t, estMerged, estOverlapping,
+		"overlapping pauses (12:00 1h + 12:30 1h15m) must produce the same estimate as a single 12:00 to 13:45 pause")
+}
+
+// TestEstimateForCounts_Day2PauseLeavesDay1Alone verifies that a pause configured
+// for Day 2 does not affect an estimate for a Day 1 competition.
+func TestEstimateForCounts_Day2PauseLeavesDay1Alone(t *testing.T) {
+	comp := newIndivComp([]string{"A"}, 3, 3, "11:30")
+	comp.Date = "01-05-2026"
+
+	tournWithDay2Pause := &state.Tournament{
+		Date:                     "01-05-2026",
+		DurationDays:             2,
+		ClockToElapsedMultiplier: 1.0,
+		SlowestCourtBufferPct:    10,
+		Pauses: []state.Pause{
+			{Name: "Lunch", Start: "12:00", Length: "1h", Day: 2},
+		},
+	}
+	tournNoPauses := &state.Tournament{
+		Date:                     "01-05-2026",
+		DurationDays:             2,
+		ClockToElapsedMultiplier: 1.0,
+		SlowestCourtBufferPct:    10,
+	}
+
+	estWithDay2 := EstimateForCounts(12, 0, comp, tournWithDay2Pause)
+	estNoPause := EstimateForCounts(12, 0, comp, tournNoPauses)
+
+	assert.Equal(t, estNoPause, estWithDay2,
+		"Day 2 pause must not affect a Day 1 competition estimate")
 }
 
 // TestEstimateForCounts_BufferIncreasesTotal verifies that a larger
@@ -779,7 +762,7 @@ func TestEstimateForCounts_BufferIncreasesTotal(t *testing.T) {
 }
 
 // TestEstimateForCounts_BufferExcludesFixedBlocks verifies the slowest-court
-// buffer is applied to MATCH time only, never to the fixed OpeningBlock offset.
+// buffer is applied to MATCH time only, never to the fixed opening pause.
 // 1 court, 30m opening, 10 matches × (4min×1.5=6min) = 60 match-min, 10% buffer:
 //
 //	total = 30 (unbuffered opening) + round(60 × 1.10) = 30 + 66 = 96.
@@ -813,6 +796,20 @@ func TestEstimateForCounts_NoCourts(t *testing.T) {
 	assert.Equal(t, estOne, estEmpty, "empty courts must behave as a single court")
 	assert.Greater(t, estEmpty.TotalDurationMinutes, 0, "empty-courts estimate must not be zero")
 	assert.Len(t, estEmpty.PerCourtMinutes, 1, "empty courts must yield exactly one per-court entry")
+}
+
+func TestEstimateForCountsInheritsTournamentCourts(t *testing.T) {
+	compEmpty := newIndivComp([]string{}, 3, 3, "09:00")
+	compOne := newIndivComp([]string{"A"}, 3, 3, "09:00")
+	tourn := newTournament(1.0, 10, "", "", "")
+	tourn.Courts = []string{"A", "B"}
+
+	estTwoCourts := EstimateForCounts(10, 0, compEmpty, tourn)
+	estOneCourt := EstimateForCounts(10, 0, compOne, tourn)
+
+	assert.Less(t, estTwoCourts.TotalDurationMinutes, estOneCourt.TotalDurationMinutes,
+		"two courts sharing bouts must reduce total duration vs single court")
+	assert.Len(t, estTwoCourts.PerCourtMinutes, 2, "must have per-court minutes for both inherited courts")
 }
 
 // TestEstimateForCounts_NegativeCountsClamped verifies negative match counts are

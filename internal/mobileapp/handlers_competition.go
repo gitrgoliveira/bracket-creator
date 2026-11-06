@@ -243,6 +243,23 @@ func validateCompetitionFormat(format, poolFormat string) (int, error) {
 	return 0, nil
 }
 
+// validateCompetitionShape groups the four shape checks that both the POST
+// (create) and PUT (update) competition handlers run: duration bounds,
+// format validation, pool-config normalization, and swiss config validation.
+func validateCompetitionShape(comp *state.Competition) error {
+	if err := validateCompetitionDurations(comp); err != nil {
+		return err
+	}
+	if _, err := validateCompetitionFormat(comp.Format, comp.PoolFormat); err != nil {
+		return err
+	}
+	normalizePoolConfig(comp)
+	if err := validateSwissConfig(comp); err != nil {
+		return err
+	}
+	return nil
+}
+
 // normalizePoolConfig silently zeroes PoolSize and PoolWinners for formats
 // that have no pool phase. League has a single implicit pool containing all
 // participants (engine overrides PoolSize at start time); knockout is a direct
@@ -333,6 +350,19 @@ const defaultPoolSize = 4
 type competitionUpdateRequest struct {
 	state.Competition
 	ExtraQualifiers *string `json:"extraQualifiers"`
+	// ExpectedParticipants carries the key's presence the same way: a PUT that
+	// omits it (a page that predates the field, or any partial body) keeps the
+	// stored count, and an explicit 0 clears it. Without this a settings save
+	// that never mentions the field would silently drop the organiser's
+	// expected count and shrink every estimate built on it.
+	ExpectedParticipants *int `json:"expectedParticipants"`
+
+	// RestoreMatchTimes is the exact Undo of a re-time (DR3): the previousTimes
+	// the move answered with, sent back with the configVersion that answer
+	// carried. A PRESENT list, even an empty one, means "write these times and
+	// run no re-time"; an absent one means re-time as the date change asks, so
+	// the field is a pointer.
+	RestoreMatchTimes *[]engine.MatchTimeChange `json:"restoreMatchTimes"`
 
 	// RetiredKnockoutMatchDurationSeconds exists ONLY to detect a client still
 	// sending the pre-rename key and refuse it. It is never read as a value.
@@ -389,6 +419,9 @@ func validateSwissConfig(comp *state.Competition) error {
 	if comp.SwissRounds < 1 {
 		return fmt.Errorf("swiss format requires swissRounds >= 1")
 	}
+	if comp.SwissRounds > engine.MaxSwissRounds {
+		return fmt.Errorf("swissRounds must be at most %d", engine.MaxSwissRounds)
+	}
 	return nil
 }
 
@@ -417,6 +450,70 @@ func validateLeagueTiebreakConfig(comp *state.Competition) error {
 	return nil
 }
 
+// validateNewCompetition is the one chain that judges a competition being
+// authored from nothing: the create POST and the draft estimate both ask it,
+// so the estimate never accepts a shape the create would refuse. It also
+// normalizes, as the create stores: the pool config for formats with no pool
+// phase, and an omitted mixed pool size.
+func validateNewCompetition(comp *state.Competition) error {
+	// Reject invalid competition shape (durations, format, swiss config)
+	// and normalize pool config for formats with no pool phase.
+	if err := validateCompetitionShape(comp); err != nil {
+		return err
+	}
+	// bc-symm: an omitted pool size is DEFAULTED, not refused, and it is
+	// defaulted to the same number /api/tournament/import has always
+	// used (see defaultPoolSize). Refusing it instead made
+	// `POST {"name":"X","format":"mixed","courts":["A"]}` -- a body that
+	// returned 201 for the whole life of the endpoint -- start returning
+	// 400, while the identical competition arriving through the import door
+	// landed fine. Runs after normalizePoolConfig above, so it can only ever
+	// fire for "mixed": league and knockout have had PoolSize zeroed by then
+	// and must keep it.
+	if comp.Format == state.CompFormatMixed && comp.PoolSize == 0 {
+		comp.PoolSize = defaultPoolSize
+	}
+	// What remains for the guard is the value a caller STATED and that the
+	// draw could never build (a negative). Unlike the PUT twin
+	// (change-scoped, see its call site) a new record inherits nothing, so
+	// there is no stored value to protect and no lockout risk in checking
+	// unconditionally.
+	if err := validateMixedPoolSize(comp); err != nil {
+		return err
+	}
+	// League tie-breaker config validation (leagueTiebreakTopN must be 0/3/4).
+	if err := validateLeagueTiebreakConfig(comp); err != nil {
+		return err
+	}
+	// TeamMatchType enum-style validation. Empty == fixed (default);
+	// "kachinuki" requires TeamSize >= 2. FR-044.
+	if err := state.ValidateTeamMatchType(comp.TeamMatchType, comp.TeamSize); err != nil {
+		return err
+	}
+	// Kind must be one of the values the server recognises ("",
+	// "individual" or "team"; see state.ValidateCompetitionKind for why ""
+	// belongs in that set). A new record has nothing to inherit, so unlike
+	// the PUT guard (change-scoped to avoid locking an operator out of an
+	// already-stored illegal value) this check runs unconditionally.
+	if err := state.ValidateCompetitionKind(comp.Kind); err != nil {
+		return fmt.Errorf("kind: %w", err)
+	}
+	// Team competitions require at least 2 members per team.
+	if err := state.ValidateCompetitionTeamSize(comp.Kind, comp.TeamSize); err != nil {
+		return err
+	}
+	// Knockout qualifiers (bc-qual LP-5a): "" is always valid;
+	// larger-pools/fill-bracket additionally require minimum-players-per-pool
+	// sizing and poolWinners == 1. normalizePoolConfig above already zeroed
+	// ExtraQualifiers for league/knockout, so this only ever rejects a
+	// genuinely invalid combination for "mixed" (or a hand-crafted request
+	// for another format). EffectivePoolWinners() resolves an unset/<=0
+	// PoolWinners to the same default of 2 the draw/schedule layers use, so a
+	// request that omits poolWinners is judged on the value it will actually
+	// run with (see ValidateExtraQualifiers's own doc comment).
+	return state.ValidateExtraQualifiers(comp.ExtraQualifiers, comp.PoolSizeMode, comp.EffectivePoolWinners())
+}
+
 // validateCompetitionLengths enforces the persisted-string caps from
 // validation.go on the settings-relevant string fields of comp. Called
 // after trim. Returns the first *ValidationError on failure.
@@ -436,6 +533,18 @@ func validateCompetitionLengths(comp *state.Competition) error {
 	}
 	if err := validateMaxLen("date", comp.Date, MaxLenCompetitionDate); err != nil {
 		return err
+	}
+	return nil
+}
+
+// validateExpectedParticipants refuses an expected entry count outside 0 to
+// engine.MaxEstimateParticipants (0 clears it). The answer is the sentence
+// alone, not "field: message", because the operator reads it as it stands.
+func validateExpectedParticipants(comp *state.Competition) error {
+	if comp.ExpectedParticipants < 0 || comp.ExpectedParticipants > engine.MaxEstimateParticipants {
+		return &ValidationError{
+			Message: fmt.Sprintf("Expected participants must be a whole number from 0 to %d.", engine.MaxEstimateParticipants),
+		}
 	}
 	return nil
 }
@@ -769,7 +878,13 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			internalError(c, err)
 			return
 		}
-		c.JSON(http.StatusOK, migrateMissingNumberPrefixes(store, eng, comps))
+		migrated := migrateMissingNumberPrefixes(store, eng, comps)
+		for _, comp := range migrated {
+			if comp != nil {
+				comp.ConfigVersion = state.ConfigVersion(comp)
+			}
+		}
+		c.JSON(http.StatusOK, migrated)
 	})
 
 	// GET /number-prefix-default?name=, previews the number prefix
@@ -853,6 +968,10 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		}
 
 		if err := validateCompetitionLengths(&comp); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		if err := validateExpectedParticipants(&comp); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
@@ -942,97 +1061,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			return
 		}
 
-		// Reject per-phase durations outside the shiai band.
-		if err := validateCompetitionDurations(&comp); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-
-		// Format / PoolFormat enum-style validation. Empty values are
-		// accepted; unknown values 400. FR-050a: swiss is accepted but
-		// validateSwissConfig must additionally enforce swissRounds >= 1.
-		if code, err := validateCompetitionFormat(comp.Format, comp.PoolFormat); err != nil {
-			c.JSON(code, gin.H{"error": err.Error()})
-			return
-		}
-
-		// Zero out pool-config fields that have no meaning for the chosen
-		// format (league / knockout). The engine already ignores them at
-		// start time; this keeps the persisted config consistent with what
-		// the engine actually uses. See normalizePoolConfig for full rationale.
-		normalizePoolConfig(&comp)
-
-		// bc-symm: an omitted pool size is DEFAULTED, not refused, and it is
-		// defaulted to the same number /api/tournament/import has always
-		// used (see defaultPoolSize). Refusing it instead made
-		// `POST {"name":"X","format":"mixed","courts":["A"]}` -- a body that
-		// returned 201 for the whole life of the endpoint, and that four
-		// existing tests in this package send -- start returning 400, while
-		// the identical competition arriving through the import door landed
-		// fine. Runs after normalizePoolConfig above, so it can only ever
-		// fire for "mixed": league and knockout have had PoolSize zeroed by
-		// then and must keep it.
-		if comp.Format == state.CompFormatMixed && comp.PoolSize == 0 {
-			comp.PoolSize = defaultPoolSize
-		}
-		// What remains for the guard is the value a caller STATED and that
-		// the draw could never build (a negative). Unlike the PUT twin
-		// (change-scoped, see its call site) POST authors a brand-new
-		// record: nothing here is inherited, so there is no stored value to
-		// protect and no lockout risk in checking unconditionally.
-		if err := validateMixedPoolSize(&comp); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-
-		// FR-050a: swiss-specific config validation.
-		if err := validateSwissConfig(&comp); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-
-		// League tie-breaker config validation (leagueTiebreakTopN must be 0/3/4).
-		if err := validateLeagueTiebreakConfig(&comp); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-
-		// TeamMatchType enum-style validation. Empty == fixed (default);
-		// "kachinuki" requires TeamSize >= 2. FR-044.
-		if err := state.ValidateTeamMatchType(comp.TeamMatchType, comp.TeamSize); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-
-		// Kind must be one of the values the server recognises ("",
-		// "individual" or "team"; see state.ValidateCompetitionKind for why
-		// "" belongs in that set). POST authors a brand-new record with
-		// nothing to inherit, so unlike the PUT guard below (change-scoped
-		// to avoid locking an operator out of an already-stored illegal
-		// value) this check runs unconditionally.
-		if err := state.ValidateCompetitionKind(comp.Kind); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "kind: " + err.Error()})
-			return
-		}
-
-		// Team competitions require at least 2 members per team.
-		if err := state.ValidateCompetitionTeamSize(comp.Kind, comp.TeamSize); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-
-		// Knockout qualifiers (bc-qual LP-5a): "" is always valid;
-		// larger-pools/fill-bracket additionally require minimum-players-
-		// per-pool sizing and poolWinners == 1. normalizePoolConfig above
-		// already zeroed ExtraQualifiers for league/knockout, so this only
-		// ever rejects a genuinely invalid combination for "mixed" (or a
-		// hand-crafted request for another format). EffectivePoolWinners()
-		// resolves an unset/<=0 PoolWinners to the same default of 2 the
-		// draw/schedule layers use, so a request that omits poolWinners
-		// entirely is judged on the value it will actually run with, not on
-		// the raw possibly-zero field (see ValidateExtraQualifiers's own
-		// doc comment on why passing the raw field would be wrong).
-		if err := state.ValidateExtraQualifiers(comp.ExtraQualifiers, comp.PoolSizeMode, comp.EffectivePoolWinners()); err != nil {
+		if err := validateNewCompetition(&comp); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
@@ -1165,6 +1194,16 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			return
 		}
 
+		if loaded, lerr := store.LoadCompetition(comp.ID); lerr == nil && loaded != nil {
+			comp.ConfigVersion = state.ConfigVersion(loaded)
+		} else {
+			// Reload failed; clear version so the next save is unchecked and gets a fresh version on next load.
+			comp.ConfigVersion = ""
+		}
+		if comp.Players != nil {
+			comp.RosterVersion = state.RosterVersion(comp.Players)
+		}
+
 		hub.Broadcast(EventTournamentUpdated, nil)
 		c.JSON(http.StatusCreated, comp)
 	})
@@ -1183,6 +1222,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			c.JSON(http.StatusNotFound, gin.H{"error": "competition not found"})
 			return
 		}
+		comp.ConfigVersion = state.ConfigVersion(comp)
 		c.JSON(http.StatusOK, comp)
 	})
 
@@ -1275,6 +1315,9 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		if req.ExtraQualifiers != nil {
 			comp.ExtraQualifiers = *req.ExtraQualifiers
 		}
+		if req.ExpectedParticipants != nil {
+			comp.ExpectedParticipants = *req.ExpectedParticipants
+		}
 		// Refuse the pre-rename duration key rather than letting the decoder
 		// drop it and the transform zero the stored value. See the field's
 		// comment on competitionUpdateRequest.
@@ -1293,6 +1336,12 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			return
 		}
 		comp.ID = id // ensure ID matches URL (also for empty-body case)
+		// An Undo restores times under the version of the answer it undoes, so
+		// a restore without one could overwrite a later change.
+		if req.RestoreMatchTimes != nil && comp.ConfigVersion == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "restoreMatchTimes needs the configVersion of the save it undoes"})
+			return
+		}
 
 		// This handler doubles as a roster writer (a non-nil Players field
 		// below triggers SaveParticipants/SaveSeeds). It needs no second
@@ -1374,6 +1423,10 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			}
 
 			if err := validateCompetitionLengths(&comp); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				return
+			}
+			if err := validateExpectedParticipants(&comp); err != nil {
 				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 				return
 			}
@@ -1460,26 +1513,9 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				}
 			}
 
-			// Reject negative per-phase or legacy durations.
-			if err := validateCompetitionDurations(&comp); err != nil {
-				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-				return
-			}
-
-			// Format / PoolFormat enum-style validation. Empty values are
-			// accepted; unknown values 400. FR-050a: swiss requires the
-			// additional swissRounds >= 1 check below.
-			if code, err := validateCompetitionFormat(comp.Format, comp.PoolFormat); err != nil {
-				c.JSON(code, gin.H{"error": err.Error()})
-				return
-			}
-
-			// Zero out pool-config fields that have no meaning for the
-			// chosen format. Mirrors the same call in the POST handler.
-			normalizePoolConfig(&comp)
-
-			// FR-050a: swiss-specific config validation.
-			if err := validateSwissConfig(&comp); err != nil {
+			// Reject invalid competition shape (durations, format, swiss config)
+			// and normalize pool config for formats with no pool phase.
+			if err := validateCompetitionShape(&comp); err != nil {
 				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 				return
 			}
@@ -1558,6 +1594,8 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		// set HasParticipantIDs=true (saveParticipants writes UUID rows).
 		var validationErr error
 		var notFoundFlag bool
+		var configChangedFlag bool
+		var staleCurrent *state.Competition
 		var drawReadyFlag bool
 		var teamMatchTypeStartedFlag bool
 		// bc-symm: format and kind repoint pool-vs-bracket generation and
@@ -1588,9 +1626,25 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		// is as much "this write moved it" as a settings PUT that retypes the
 		// field.
 		var numberPrefixMoved bool
+		// Moving a drawn competition's date or start moves its matches with it
+		// (DR1), saved in the same transaction as the settings. What the re-time
+		// reads from the store is read here, before the lock, see readPendingRetime.
+		var pending *pendingRetime
+		if comp.Players == nil && req.RestoreMatchTimes == nil {
+			var rerr error
+			if pending, rerr = readPendingRetime(store, eng, id, &comp); rerr != nil {
+				if refusal := retimeRefusal(rerr); refusal != nil {
+					writeTxResponse(c, refusal)
+					return
+				}
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to read the schedule for the new time"})
+				return
+			}
+		}
+		var times drawnTimes
 		err := store.WithCompetitionRenameLock(func() error {
 			var updateErr error
-			changed, updateErr = store.UpdateCompetitionChanged(id, func(current *state.Competition) (*state.Competition, error) {
+			changed, updateErr = store.UpdateCompetitionChangedTx(id, func(tx state.StoreTx, current *state.Competition) (*state.Competition, error) {
 				if current == nil {
 					notFoundFlag = true
 					return nil, nil
@@ -1663,6 +1717,13 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 					// succeeds; see the participants/seeds save block
 					// below for the deferred flip.
 					return current, nil
+				}
+
+				if comp.ConfigVersion != "" && comp.ConfigVersion != state.ConfigVersion(current) {
+					configChangedFlag = true
+					cp := *current
+					staleCurrent = &cp
+					return nil, nil
 				}
 
 				// formatChanged / kindChanged: the same "is this PUT actually
@@ -1823,9 +1884,18 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 					// deliberately absent from the comparison set below: they do
 					// not reach the draw, so editing them while draw-ready is
 					// allowed and must not force a regenerate.
+					// ExpectedParticipants is absent for the same reason: only
+					// the estimate reads it, so it is editable in every status
+					// and a draw-ready save of it alone is a 200.
+					// A league or knockout draw stores the pool size it drew with,
+					// while normalizePoolConfig has already zeroed the request's, so
+					// the stored pair is read the way the request is: otherwise any
+					// save of a drawn league was refused as a pool-size change.
+					storedPools := *current
+					normalizePoolConfig(&storedPools)
 					outputAffectingChanged :=
-						comp.PoolSize != current.PoolSize ||
-							comp.PoolWinners != current.PoolWinners ||
+						comp.PoolSize != storedPools.PoolSize ||
+							comp.PoolWinners != storedPools.PoolWinners ||
 							comp.PoolSizeMode != current.PoolSizeMode ||
 							// bc-qual LP-5a: ExtraQualifiers selects which
 							// draw builder runs (standard/larger-pools/
@@ -1991,11 +2061,16 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				// block below). HasParticipantIDs is auto-managed,
 				// only set to true in the roster-only branch above when
 				// participants are being saved.
+				before := *current
 				current.Name = comp.Name
 				current.Date = comp.Date
 				current.StartTime = comp.StartTime
-				current.PoolSize = comp.PoolSize
-				current.PoolWinners = comp.PoolWinners
+				// A drawn competition keeps the pool size and winners it drew
+				// with: the guard above has already refused any change to them.
+				if current.Status != state.CompStatusDrawReady {
+					current.PoolSize = comp.PoolSize
+					current.PoolWinners = comp.PoolWinners
+				}
 				current.PoolSizeMode = comp.PoolSizeMode
 				// bc-qual LP-5a: sibling of PoolSize/PoolWinners/PoolSizeMode
 				// immediately above. Already validated (ValidateExtraQualifiers,
@@ -2172,13 +2247,28 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				// with the same wording pattern. Pointer identity can't be compared
 				// directly: nil and non-nil pointers to equal values must compare
 				// equal, so this dereferences before comparing.
-				sameTwoThirdPlaces := (comp.TwoThirdPlaces == nil) == (current.TwoThirdPlaces == nil) &&
-					(comp.TwoThirdPlaces == nil || *comp.TwoThirdPlaces == *current.TwoThirdPlaces)
+				// A competition that never stored the field resolves it from its
+				// format (EffectiveTwoThirdPlaces), and the Settings page and the
+				// calendar send that resolved value back, so an explicit value
+				// that equals the effective one is no change. An omitted value
+				// keeps the stored one, as an omitted teamMatchType does.
+				if comp.TwoThirdPlaces == nil {
+					comp.TwoThirdPlaces = current.TwoThirdPlaces
+				}
+				sameTwoThirdPlaces := (comp.TwoThirdPlaces == nil && current.TwoThirdPlaces == nil) ||
+					(comp.TwoThirdPlaces != nil && *comp.TwoThirdPlaces == current.EffectiveTwoThirdPlaces())
 				if started && !sameTwoThirdPlaces {
 					validationErr = fmt.Errorf("twoThirdPlaces can only be changed before the competition starts")
 					return nil, nil
 				}
 				current.TwoThirdPlaces = comp.TwoThirdPlaces
+				if req.ExpectedParticipants != nil {
+					current.ExpectedParticipants = comp.ExpectedParticipants
+				}
+				var terr error
+				if times, terr = applyDrawnTimes(tx, &before, current, req.RestoreMatchTimes, pending); terr != nil || times.refusal != nil {
+					return nil, terr
+				}
 				return current, nil
 			})
 			return updateErr
@@ -2189,6 +2279,28 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		// escapes the transform unexpectedly.
 		if notFoundFlag {
 			c.JSON(http.StatusNotFound, gin.H{"error": "competition not found"})
+			return
+		}
+		if times.refusal != nil {
+			writeTxResponse(c, times.refusal)
+			return
+		}
+		if configChangedFlag {
+			loadOpts := state.LoadParticipantsOpts{WithSeeds: true, HasIDs: staleCurrent.ParticipantIDsHint()}
+			if players, lerr := store.LoadParticipantsOpt(id, staleCurrent.EffectiveWithZekkenName(), loadOpts); lerr == nil {
+				staleCurrent.Players = players
+				staleCurrent.RosterVersion = state.RosterVersion(players)
+			} else {
+				staleCurrent.Players = []domain.Player{}
+				staleCurrent.RosterVersion = state.RosterVersion(staleCurrent.Players)
+			}
+			staleCurrent.ConfigVersion = state.ConfigVersion(staleCurrent)
+			c.JSON(http.StatusConflict, gin.H{
+				"code":          "config_changed",
+				"error":         "This competition changed, reload it.",
+				"configVersion": staleCurrent.ConfigVersion,
+				"competition":   staleCurrent,
+			})
 			return
 		}
 		if drawReadyFlag {
@@ -2372,6 +2484,9 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		if changed || participantsChanged || renumbered {
 			hub.Broadcast(EventTournamentUpdated, nil)
 		}
+		if times.restored || (times.retime != nil && times.retime.AnyChange) {
+			hub.Broadcast(EventScheduleUpdated, nil)
+		}
 		// Re-load to return the actual on-disk state (with non-settings
 		// fields preserved from current) rather than the partial body.
 		// LoadCompetition doesn't repopulate Players from participants.csv,
@@ -2387,6 +2502,8 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			logRequestError(c, fmt.Errorf("re-read competition %q after its settings save: %w", id, reloadErr))
 		}
 		if updated == nil {
+			// Reload failed; clear version so the next save is unchecked and gets a fresh version on next load.
+			comp.ConfigVersion = ""
 			c.JSON(http.StatusOK, comp)
 			return
 		}
@@ -2449,14 +2566,32 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				updated.RosterVersion = state.RosterVersion(updated.Players)
 			}
 		}
+		updated.ConfigVersion = state.ConfigVersion(updated)
 		// Embed the competition fields inline and add the near-duplicate
 		// warnings (empty array on the settings-only path). The embedded
 		// pointer promotes the competition's JSON fields to the top level,
 		// so existing clients see the same shape plus a `warnings` field.
-		c.JSON(http.StatusOK, struct {
+		answer := struct {
 			*state.Competition
 			Warnings []helper.NearDupWarning `json:"warnings"`
-		}{Competition: updated, Warnings: nearDupWarnings})
+			// A save that re-timed a drawn competition answers with every match
+			// whose time changed (the exact Undo's input, present even when
+			// empty), how many matches no longer held the time a fresh draw
+			// would give, and whether any time changed.
+			PreviousTimes *[]engine.MatchTimeChange `json:"previousTimes,omitempty"`
+			NotFreshCount *int                      `json:"notFreshCount,omitempty"`
+			TimesChanged  *bool                     `json:"timesChanged,omitempty"`
+		}{Competition: updated, Warnings: nearDupWarnings}
+		if times.retime != nil {
+			previous := times.retime.Changes
+			if previous == nil {
+				previous = []engine.MatchTimeChange{}
+			}
+			answer.PreviousTimes = &previous
+			answer.NotFreshCount = &times.retime.NotFreshCount
+			answer.TimesChanged = &times.retime.AnyChange
+		}
+		c.JSON(http.StatusOK, answer)
 	})
 
 	r.DELETE("/competitions/:id", func(c *gin.Context) {

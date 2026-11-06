@@ -1,12 +1,41 @@
 package engine
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestMaxUsefulCourts(t *testing.T) {
+	tests := []struct {
+		players  int
+		expected int
+	}{
+		{1, 1},
+		{2, 1},
+		{3, 1},
+		{4, 2},
+		{5, 2},
+		{6, 3},
+		{7, 3},
+		{8, 4},
+		{9, 4},
+		{16, 8},
+		{32, 16},
+	}
+
+	for _, tc := range tests {
+		t.Run(fmt.Sprintf("%d entrants", tc.players), func(t *testing.T) {
+			got := MaxUsefulCourts(tc.players)
+			assert.Equal(t, tc.expected, got)
+			assert.NoError(t, ValidateCourtCount(tc.players, got))
+			assert.Error(t, ValidateCourtCount(tc.players, got+1))
+		})
+	}
+}
 
 func TestSuggestedMaxCourts(t *testing.T) {
 	tests := []struct {

@@ -348,6 +348,7 @@ func loadViewerCompetition(store *state.Store, compID, courtFilter string) *view
 	} else {
 		comp.RosterVersion = state.RosterVersion(players)
 	}
+	comp.ConfigVersion = state.ConfigVersion(comp)
 	comp.Players = players
 	// One gated pools.csv read serves both the number merge and the pools.csv
 	// notice below, and its error is the one poolsErr that joins dataIssues:
@@ -801,6 +802,7 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 				playersErr, poolsErr, poolMatchesErr, standingsErr, bracketErr error
 			)
 
+			comp.ConfigVersion = state.ConfigVersion(comp)
 			var wg sync.WaitGroup
 			var panicRef atomic.Pointer[recoveredPanic]
 			safeGo(&wg, &panicRef, func() {

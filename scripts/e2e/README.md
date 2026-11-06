@@ -93,6 +93,9 @@ browser, `--debug` opens the inspector, and a failing test leaves a trace
                             (pickerEntries); schedule rows; the watchlist hero;
                             the doors to a match card (homeNowRow, poolRow,
                             upNextRow); the card's marks (cardMarks)
+    fixtures/calendar.mjs   the tournament's days and pauses (Edit details);
+                            the competition calendar: its blocks, clock rows,
+                            the Move dialog and Undo, line boxes and overlaps
     fixtures/organiser.mjs  the Excel download, folder import, /reset, logo and
                             sponsor uploads, the Backup and restore page;
                             runtime PNG and import-bundle makers; a zip reader
@@ -106,6 +109,15 @@ browser, `--debug` opens the inspector, and a failing test leaves a trace
       smoke                       the harness end to end: seeding through the
                                   interface, scoring on both editors, every
                                   clumsy helper once, a spectator's phone
+      calendar                    the competition calendar on a desk (mouse),
+                                  a phone and a tablet (touch): Move then
+                                  Undo, no sideways scroll and no Move
+                                  buttons on the phone, a short block at its
+                                  real length opened by a tap, press and hold
+                                  to drag, a same-start pair at its real time
+                                  with the second on top, a raised block's
+                                  Move clear of its lines, and the tablet's
+                                  Move clear of the names
       knockout-mixed-individual   the court operator's review of individual
                                   competitions (pools and knockout), and the
                                   bead guards (bc-ltap and others)

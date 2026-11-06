@@ -302,7 +302,9 @@ func TestAssignLeagueSlotTimes_LunchSkip(t *testing.T) {
 	}
 	tournament := &state.Tournament{
 		ClockToElapsedMultiplier: 1.0, // 3 min * 1.0 = 3 min elapsed
-		LunchBlock:               "1h",
+		Pauses: []state.Pause{
+			{Name: "Lunch", Start: "12:00", Length: "1h"},
+		},
 	}
 	matches := []state.MatchResult{
 		{ID: "m0", SideA: "P0", SideB: "P1"},
@@ -313,7 +315,7 @@ func TestAssignLeagueSlotTimes_LunchSkip(t *testing.T) {
 	out, _ := assignLeagueSlotTimesFrom(matches, slots, comp, tournament, nil)
 	require.Len(t, out, 2)
 
-	// Slot 1 must be at or after 13:00 (past the lunch block).
+	// Slot 1 must be at or after 13:00 (past the lunch pause).
 	slot1Time := parseClockHHMM(out[1].ScheduledAt)
 	lunchEnd := parseClockHHMM("13:00")
 	assert.False(t, slot1Time.Before(lunchEnd),
@@ -328,7 +330,7 @@ func TestGeneratePools_League_G1G2(t *testing.T) {
 	// Every case must satisfy G1 and G2: G2 is a hard invariant at any court
 	// count, so a 1-court league is included alongside the SuggestedMaxCourts
 	// cases. Court count only changes schedule length, not the guarantee. The
-	// lunch case exercises the ceremony-block skip so a lunch break between two
+	// lunch case exercises the pause skip so a lunch break between two
 	// of a player's matches never reads as a false adjacency.
 	tests := []struct {
 		n         int
@@ -340,7 +342,7 @@ func TestGeneratePools_League_G1G2(t *testing.T) {
 		{n: 8, courts: courtLabels(SuggestedMaxCourts(8)), startTime: "09:00"},
 		{n: 10, courts: courtLabels(SuggestedMaxCourts(10)), startTime: "09:00"},
 		{n: 6, courts: []string{"A"}, startTime: "09:00"},              // single court still gets G2 via idle slots
-		{n: 8, courts: []string{"A"}, startTime: "11:50", lunch: true}, // slots straddle the noon lunch block
+		{n: 8, courts: []string{"A"}, startTime: "11:50", lunch: true}, // slots straddle the noon lunch pause
 	}
 
 	for _, tt := range tests {
@@ -351,7 +353,9 @@ func TestGeneratePools_League_G1G2(t *testing.T) {
 			compID := fmt.Sprintf("league-g1g2-%d-%d-%v", tt.n, len(tt.courts), tt.lunch)
 
 			if tt.lunch {
-				require.NoError(t, store.SaveTournament(&state.Tournament{LunchBlock: "1h"}))
+				require.NoError(t, store.SaveTournament(&state.Tournament{
+					Pauses: []state.Pause{{Name: "Lunch", Start: "12:00", Length: "1h"}},
+				}))
 			}
 
 			comp := &state.Competition{
@@ -396,10 +400,10 @@ func TestGeneratePools_League_G1G2(t *testing.T) {
 			}
 
 			// G2: no player appears in two adjacent slots. Wall-clock minute gaps
-			// cannot detect this across a lunch/ceremony boundary (a skip inflates
+			// cannot detect this across a pause boundary (a skip inflates
 			// the gap of an adjacent pair), so map each ScheduledAt back to its
 			// slot INDEX by replaying the same cursor loop assignLeagueSlotTimesFrom
-			// uses (parseCeremonyParams + skipCeremonyBlocks + perMatch steps),
+			// uses (parseCeremonyParams + skipBreaks + perMatch steps),
 			// then assert no player has two matches in consecutive slot indices.
 			loadedComp, err := store.LoadCompetition(compID)
 			require.NoError(t, err)
@@ -410,11 +414,11 @@ func TestGeneratePools_League_G1G2(t *testing.T) {
 			perMatch := perMatchElapsedMinutes(loadedComp, tournament, false)
 			require.Positive(t, perMatch)
 
-			dayStart, openingMin, lunchMin, lunchStart := parseCeremonyParams(loadedComp, tournament)
+			dayStart, breaks := parseCeremonyParams(loadedComp, tournament)
 			timeToSlot := make(map[string]int)
-			cursor := dayStart.Add(time.Duration(openingMin) * time.Minute)
+			cursor := dayStart
 			for k := 0; k < len(matches)*3+2; k++ { // generous bound: idle slots at most ~1 per match
-				cursor = skipCeremonyBlocks(cursor, lunchStart, lunchMin)
+				cursor = skipBreaks(cursor, breaks)
 				timeToSlot[cursor.Format(scheduleClockLayout)] = k
 				cursor = cursor.Add(time.Duration(perMatch) * time.Minute)
 			}

@@ -1,5 +1,6 @@
 // Admin SETUP surfaces: create-competition, participants/seeding, the
-// pools-preview draw, and the kachinuki schedule-estimate range.
+// pools-preview draw, the create form's live estimate and the pause editor,
+// and the kachinuki schedule-estimate range.
 //
 // Unlike the `demo` family (admin.mjs), these show a competition still in
 // `setup` (or, for the pools-preview shot, `draw-ready`) status: nothing has
@@ -23,6 +24,19 @@ const KNOCKOUT_ID = 'knockout-cup';
 const OVERVIEW_ID = 'up-to-2nd-dan';
 const DRAW_ID = 'third-dan-and-above';
 const KACHINUKI_ID = 'kachinuki-teams';
+const EXPECTED_ID = 'expected-individual';
+
+// A start for 8 kachinuki teams on one shiaijo whose average finish falls
+// before midnight and whose worst case falls after it: the estimate is about
+// 4h 53m, with a range of about 3h 28m to 6h 17m, so 19:00 ends near 23:53.
+const KACHINUKI_LATE_START = '19:00';
+
+// The pauses the estimate family's tournament keeps: an opening ceremony with
+// its own start time, and lunch. Both apply on every day (day 0).
+const ESTIMATE_PAUSES = [
+  { name: 'Opening ceremony', start: '09:00', length: '30m', day: 0 },
+  { name: 'Lunch', start: '12:30', length: '1h', day: 0 },
+];
 
 // Every field on the create-competition form is tied to its visible label
 // (htmlFor/id, admin_setup.jsx's AdminCreateCompetition and
@@ -75,7 +89,7 @@ const ROSTER_10 = [
 ].map(([name, dojo]) => ({ name, dojo }));
 
 export const families = {
-  // Covers every recipe except kachinuki-estimate-range: one tournament,
+  // Covers every recipe except the estimate and kachinuki families': one tournament,
   // one competition per capture, all left in setup (or, for the draw
   // preview, draw-ready) status.
   setup: {
@@ -104,6 +118,32 @@ export const families = {
       await api.competition(DRAW_ID, "Men's Individual: 3rd dan and above", { date: TOURNAMENT_DATE, format: 'mixed', poolSize: 3, poolWinners: 2, courts: ['A', 'B'] });
       await api.participants(DRAW_ID, ROSTER_18);
       await api.generateDraw(DRAW_ID);
+    },
+  },
+
+  // The estimate and the pauses it works around: a one-day tournament with an
+  // opening ceremony and a lunch, a competition still in setup that carries an
+  // expected number (its Overview tile reads "For 24 expected participants"),
+  // and the Add competition form the live estimate sits in. The tournament
+  // keeps its pauses in the saved tournament, so the form's panel and the
+  // Overview strip both name them.
+  estimate: {
+    server: 'mobile',
+    // SINCE scoping inputs (lib/scope.mjs): the create form and its live
+    // estimate panel, the pause editor on the tournament setup page, and the
+    // competition overview.
+    sources: [
+      'web-mobile/js/admin_setup', 'web-mobile/js/draft_estimate',
+      'web-mobile/js/pause_list', 'web-mobile/js/admin_competition',
+    ],
+    seed: async ({ api }) => {
+      await api.tournament({
+        name: TOURNAMENT_NAME, date: TOURNAMENT_DATE, durationDays: 1, courts: ['A', 'B'],
+        pauses: ESTIMATE_PAUSES,
+      });
+      await api.competition(EXPECTED_ID, "Men's Individual", {
+        date: TOURNAMENT_DATE, courts: ['A', 'B'], startTime: '09:30', expectedParticipants: 24,
+      });
     },
   },
 
@@ -237,6 +277,56 @@ export const recipes = [
   },
 
   {
+    // The Add competition form with its live estimate. "Expected participants"
+    // is typed with fill (fillFieldByLabel), so the panel shows the estimate
+    // for 24 expected entries and the pauses of that day. The estimate is
+    // fetched after a short debounce, so the capture waits for its headline.
+    name: 'mobile-create-estimate',
+    family: 'estimate',
+    viewport: { width: 1600, height: 1000 },
+    capture: 'viewport',
+    waitFor: 'text=Add competition',
+    auth: 'admin',
+    route: '/admin/create-competition',
+    drive: async ({ page }) => {
+      await fillFieldByLabel(page, 'Display name', "Men's Individual");
+      await clickPill(page, 'Format', 'Pools + Knockout');
+      await fillFieldByLabel(page, 'Expected participants', '24');
+      await page.getByText('Est. duration', { exact: false }).first().waitFor({ state: 'visible', timeout: 15000 });
+      // The panel sits below the long form: bring it, with the Expected
+      // participants field above it, into the captured viewport.
+      await page.locator('.draft-estimate').first().evaluate((el) => el.scrollIntoView({ block: 'center' }));
+    },
+  },
+
+  {
+    // The Overview of a competition in setup that carries an expected number:
+    // the Est. duration tile names the count it used, and the strip below
+    // lists the per-shiaijo times and the pauses.
+    name: 'mobile-overview-estimate',
+    family: 'estimate',
+    viewport: { width: 1280, height: 1000 },
+    capture: 'viewport',
+    waitFor: 'text=Schedule estimate',
+    auth: 'admin',
+    route: `/admin/competition/${EXPECTED_ID}/overview`,
+  },
+
+  {
+    // The Schedule blocks card on the tournament setup page: the pauses with
+    // their start times, lengths and the "On" choice hidden for a one-day
+    // tournament.
+    name: 'mobile-pause-editor',
+    family: 'estimate',
+    viewport: { width: 1280, height: 1000 },
+    dpr: 2,
+    capture: { selector: '.card:has(.pause-list)' },
+    waitFor: 'text=Add a pause',
+    auth: 'admin',
+    route: '/admin/edit-tournament',
+  },
+
+  {
     name: 'kachinuki-estimate-range',
     family: 'kachinuki',
     viewport: { width: 920, height: 900 },
@@ -244,5 +334,28 @@ export const recipes = [
     waitFor: 'text=Schedule estimate',
     auth: 'admin',
     route: `/admin/competition/${KACHINUKI_ID}/overview`,
+  },
+
+  {
+    // The Add competition form's estimate for a late kachinuki competition:
+    // the average finish is before midnight, the latest finish in the range
+    // after it, so the "Could end" line carries the after-midnight warning.
+    name: 'kachinuki-create-past-midnight',
+    family: 'kachinuki',
+    viewport: { width: 1280, height: 1000 },
+    capture: { selector: '.draft-estimate' },
+    waitFor: 'text=Add competition',
+    auth: 'admin',
+    route: '/admin/create-competition',
+    drive: async ({ page }) => {
+      await fillFieldByLabel(page, 'Display name', 'Late Kachinuki');
+      await clickPill(page, 'Competition type', 'Team');
+      await clickPill(page, 'Team match format', 'Kachinuki (winner stays on)');
+      await fillFieldByLabel(page, 'Start time', KACHINUKI_LATE_START);
+      await fillFieldByLabel(page, 'Expected teams', '8');
+      await page.getByTestId('draft-estimate-kachinuki').filter({ hasText: 'after midnight' })
+        .waitFor({ state: 'visible', timeout: 15000 });
+      await page.locator('.draft-estimate').first().evaluate((el) => el.scrollIntoView({ block: 'center' }));
+    },
   },
 ];

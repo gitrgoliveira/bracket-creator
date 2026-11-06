@@ -3,6 +3,7 @@ package engine
 import (
 	"math"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
@@ -12,21 +13,6 @@ import (
 // is HH:MM (24h), with a zero-valued date so we operate purely on
 // minutes-of-day arithmetic. T150 / T151.
 const scheduleClockLayout = state.ScheduledAtLayout
-
-// defaultLunchStartClock is the fallback start-of-lunch when a
-// tournament defines LunchBlock duration but does not (yet) carry a
-// start time. The struct in internal/state/models.go currently models
-// only the duration string; data-model §6 envisions a TimeBlock with
-// {StartTime, Duration} but the Go shape has not caught up.
-//
-// We pick 12:00 because it matches operator convention for kendo
-// tournaments scheduled around midday, and because the only consumer
-// that actually cares (the slot-skip loop) needs a definite window.
-// When the tournament struct gains a typed TimeBlock the resolution
-// changes, and the test suite documents this assumption explicitly
-// so a future refactor is forced to update the convention together
-// with the type.
-const defaultLunchStartClock = "12:00"
 
 // defaultPerMatchClockSeconds is the fallback on-clock seconds per
 // match when a competition carries no configured per-phase or legacy
@@ -93,10 +79,7 @@ func perMatchElapsedMinutesBouts(comp *state.Competition, tournament *state.Tour
 	// slot times are minute-granular (HH:MM).
 	clockMin := float64(clockSec) / 60.0
 
-	multiplier := 1.5
-	if tournament != nil && tournament.ClockToElapsedMultiplier > 0 {
-		multiplier = tournament.ClockToElapsedMultiplier
-	}
+	multiplier := tournamentMultiplier(tournament)
 
 	// Delegate to the shared pure core so this function and
 	// EstimateSchedule stay in exact agreement (FR-059).
@@ -113,13 +96,13 @@ func perMatchElapsedMinutesBouts(comp *state.Competition, tournament *state.Tour
 	return per
 }
 
-// parseDurationMinutes converts a Go-style duration string ("30m",
-// "1h", "1h30m") to whole minutes. Empty string returns 0 (no block
+// ParseDurationMinutes converts a Go-style duration string ("30m",
+// "1h", "1h30m") to whole minutes. Empty string returns 0 (no pause
 // configured). Unparseable strings return 0, we treat invalid
-// tournament configs as "no block" rather than failing the whole
+// tournament configs as "no pause" rather than failing the whole
 // match-generation pipeline; the operator notices the missing skip
 // in the rendered schedule. T151.
-func parseDurationMinutes(s string) int {
+func ParseDurationMinutes(s string) int {
 	if s == "" {
 		return 0
 	}
@@ -133,6 +116,14 @@ func parseDurationMinutes(s string) int {
 	// Round to nearest minute. ParseDuration accepts sub-minute
 	// units but we operate at minute resolution on the wire.
 	return int(math.Round(d.Minutes()))
+}
+
+// ParseClockTime parses a strict 24-hour "HH:MM" (or "H:MM") clock time into time.Time.
+func ParseClockTime(s string) (time.Time, error) {
+	if len(s) == 4 && s[1] == ':' {
+		s = "0" + s
+	}
+	return time.Parse(scheduleClockLayout, s)
 }
 
 // parseClockHHMM parses the "HH:MM" wire format used by
@@ -156,45 +147,126 @@ func parseClockHHMM(s string) time.Time {
 // answers it: a time of day on the zero date, in UTC.
 var defaultClockStart = time.Date(0, time.January, 1, 9, 0, 0, 0, time.UTC)
 
-// skipCeremonyBlocks pushes t past any ceremony window it falls
-// inside. Currently models LunchBlock as the only mid-day block,
-// OpeningBlock is applied as a pre-loop offset to the per-court
-// start (see assignPoolMatchSlotsFrom / assignBracketMatchSlots) and
-// ClosingBlock is treated as an end-of-day reservation that the
-// forward-marching slot loop will not naturally enter unless the
-// operator over-fills the day. T151.
-//
-// dayStart is the parsed StartTime used as the day anchor. lunchStart
-// is the time at which LunchBlock begins; lunchDurationMin is its
-// length. When lunchDurationMin <= 0 the function is a no-op.
-//
-// The push is "to the END of the block", never partial. If t lands
-// at 12:15 with a 13:00 lunch end, ScheduledAt becomes 13:00. The
-// subsequent match on that court therefore can start at 13:00 + this
-// match's elapsed minutes, which is correct: the operator does not
-// have to manually advance past the block.
-func skipCeremonyBlocks(t, lunchStart time.Time, lunchDurationMin int) time.Time {
-	if lunchDurationMin <= 0 {
-		return t
+type breakWindow struct {
+	start, end time.Time
+}
+
+// dayBreaks returns the pauses the schedule works around on the competition's
+// day: the drawn windows (pauseWindows) of the pauses that stop matches
+// (state.Pause.StopsMatches). A pause whose matches go on through it is drawn
+// on the calendar but moves no slot, estimate or retime.
+func dayBreaks(tournament *state.Tournament, date string) []breakWindow {
+	return pauseWindows(tournament, date, state.Pause.StopsMatches)
+}
+
+// pauseWindows returns the drawn windows of the pauses keep accepts on the
+// competition's day, sorted by start:
+// every pause with Day 0, plus those whose Day equals the day index of date
+// (pauseDayIndex: the 1-based position of the trimmed date in tournament.Days();
+// an empty date is Day 1; a date not in Days() gets only the Day 0 pauses).
+// nil tournament gives nil; pausesOnDay says which rows are dropped.
+func pauseWindows(tournament *state.Tournament, date string, keep func(state.Pause) bool) []breakWindow {
+	if tournament == nil {
+		return nil
 	}
-	lunchEnd := lunchStart.Add(time.Duration(lunchDurationMin) * time.Minute)
-	if !t.Before(lunchStart) && t.Before(lunchEnd) {
-		return lunchEnd
+	return pausesOnDay(tournament.Pauses, pauseDayIndex(tournament.Days(), date), pauseDayCount(tournament), keep)
+}
+
+// pauseDayIndex is the day a pause's Day is compared with for date: its 1-based
+// position in days (tournament.Days()), trimmed as PlaceCompetition trims it, 1
+// for an empty date, and 0 for a date that is not one of the days.
+func pauseDayIndex(days []string, date string) int {
+	date = strings.TrimSpace(date)
+	if date == "" {
+		return 1
 	}
-	return t
+	for i, d := range days {
+		if d == date {
+			return i + 1
+		}
+	}
+	return 0
+}
+
+// pauseDayCount is the tournament's day count as a pause's Day is checked
+// against it: at least 1.
+func pauseDayCount(tournament *state.Tournament) int {
+	if tournament.DurationDays < 1 {
+		return 1
+	}
+	return tournament.DurationDays
+}
+
+// pausesOnDay returns, sorted by start, the windows of the pauses keep accepts
+// whose Day is 0 or dayIdx. Drop incomplete rows: a Start that is not a strict
+// "HH:MM" (or "H:MM") clock, a Length that ParseDurationMinutes turns into 0.
+// Pauses with a Day greater than dayCount never match, so they are ignored. The
+// times are on the same reference date parseClockHHMM uses so they compare with
+// the cursors.
+func pausesOnDay(pauses []state.Pause, dayIdx, dayCount int, keep func(state.Pause) bool) []breakWindow {
+	var breaks []breakWindow
+	for _, p := range pauses {
+		if !keep(p) {
+			continue
+		}
+		if p.Day < 0 || p.Day > dayCount {
+			continue
+		}
+		if p.Day != 0 && p.Day != dayIdx {
+			continue
+		}
+		start, err := ParseClockTime(p.Start)
+		if err != nil {
+			continue
+		}
+		lengthMin := ParseDurationMinutes(p.Length)
+		if lengthMin <= 0 {
+			continue
+		}
+		end := start.Add(time.Duration(lengthMin) * time.Minute)
+		breaks = append(breaks, breakWindow{start: start, end: end})
+	}
+	sort.SliceStable(breaks, func(i, j int) bool {
+		return breaks[i].start.Before(breaks[j].start)
+	})
+	return breaks
+}
+
+// anyPause is the keep of the windows the calendar draws: every pause, whether
+// or not matches stop for it.
+func anyPause(state.Pause) bool { return true }
+
+// skipBreaks pushes t past any pause window it falls inside: while t lies
+// inside some break (!t.Before(b.start) && t.Before(b.end)), move t to that
+// break's end; repeat until no break holds t (a fixed point), so overlapping
+// or touching pauses count as one with no merge code.
+func skipBreaks(t time.Time, breaks []breakWindow) time.Time {
+	for {
+		moved := false
+		for _, b := range breaks {
+			if !t.Before(b.start) && t.Before(b.end) {
+				t = b.end
+				moved = true
+				break
+			}
+		}
+		if !moved {
+			return t
+		}
+	}
 }
 
 // parseCeremonyParams derives the shared scheduling anchors from a competition
-// and (optional) tournament. dayStart is always valid; openingMin/lunchMin are
-// 0 and lunchStart is the zero Time when tournament is nil. Callers must still
-// guard comp == nil themselves (they return before reaching this).
-func parseCeremonyParams(comp *state.Competition, tournament *state.Tournament) (dayStart time.Time, openingMin, lunchMin int, lunchStart time.Time) {
-	dayStart = parseClockHHMM(comp.StartTime)
-	if tournament != nil {
-		openingMin = parseDurationMinutes(tournament.OpeningBlock)
-		lunchMin = parseDurationMinutes(tournament.LunchBlock)
-		lunchStart = parseClockHHMM(defaultLunchStartClock)
+// and (optional) tournament. dayStart is always valid; breaks holds the usable
+// pauses for comp's day, or nil when tournament is nil. Callers must still guard
+// comp == nil themselves (they return before reaching this).
+func parseCeremonyParams(comp *state.Competition, tournament *state.Tournament) (dayStart time.Time, breaks []breakWindow) {
+	date := ""
+	if comp != nil {
+		dayStart = parseClockHHMM(comp.StartTime)
+		date = comp.Date
 	}
+	breaks = dayBreaks(tournament, date)
 	return
 }
 
@@ -203,11 +275,10 @@ func parseCeremonyParams(comp *state.Competition, tournament *state.Tournament) 
 // are grouped by Court; matches on the same court are sequential,
 // matches on different courts run in parallel.
 //
-// Each court's cursor starts at the later of `comp.StartTime +
-// OpeningBlock` and courtStart[court]; a court absent from the map
-// starts at `comp.StartTime + OpeningBlock`. Subsequent matches start at
-// the previous match's end. Any match whose start would fall inside
-// LunchBlock is pushed past the block before its ScheduledAt is recorded.
+// Each court's cursor starts at the later of `comp.StartTime` and
+// courtStart[court]; a court absent from the map starts at `comp.StartTime`.
+// Subsequent matches start at the previous match's end. Any match whose start
+// would fall inside a pause is pushed past the pause before its ScheduledAt is recorded.
 // T150, T151.
 //
 // Mutates `matches` in place: the slice header is passed by value, but
@@ -221,36 +292,33 @@ func parseCeremonyParams(comp *state.Competition, tournament *state.Tournament) 
 // per-court cursors. Callers that only want the mutated slice may discard the
 // second return value.
 //
-// The end-cursor is the per-court start anchor (comp.StartTime + OpeningBlock)
+// The end-cursor is the per-court start anchor (comp.StartTime)
 // when there are no matches, matching where the first match on each court
-// would have started, and consistent with EstimateForCounts(0,…). So a
-// post-draw consumer computing cursor.Sub(dayStart) gets the opening offset (or
-// 0 with no OpeningBlock), never a bogus year-from-zero value. A zero time.Time
+// would have started, and consistent with EstimateForCounts(0,…). A zero time.Time
 // is returned ONLY when comp is nil (dayStart cannot be derived).
 func assignPoolMatchSlotsFrom(matches []state.MatchResult, comp *state.Competition, tournament *state.Tournament, courtStart map[string]time.Time) ([]state.MatchResult, time.Time) {
 	if comp == nil {
 		return matches, time.Time{}
 	}
-	dayStart, openingMin, lunchMin, lunchStart := parseCeremonyParams(comp, tournament)
-	openAt := dayStart.Add(time.Duration(openingMin) * time.Minute)
+	dayStart, breaks := parseCeremonyParams(comp, tournament)
 	if len(matches) == 0 {
-		return matches, openAt
+		return matches, dayStart
 	}
 
 	startFor := func(court string) time.Time {
 		if courtStart != nil {
-			if t, ok := courtStart[court]; ok && t.After(openAt) {
+			if t, ok := courtStart[court]; ok && t.After(dayStart) {
 				return t
 			}
 		}
-		return openAt
+		return dayStart
 	}
 
 	courtCursor := map[string]time.Time{}
 	perMatchMin := perMatchElapsedMinutes(comp, tournament, false /*isKnockout*/)
 
 	// Pre-anchor each known court to startFor(court) so a court
-	// with N>1 matches gets the opening/floor offset applied to the first
+	// with N>1 matches gets the floor offset applied to the first
 	// slot consistently. Courts not present in the comp config but
 	// present on matches (defensive) are anchored on first sight.
 	for _, court := range comp.Courts {
@@ -263,7 +331,7 @@ func assignPoolMatchSlotsFrom(matches []state.MatchResult, comp *state.Competiti
 		if !ok {
 			cursor = startFor(court)
 		}
-		cursor = skipCeremonyBlocks(cursor, lunchStart, lunchMin)
+		cursor = skipBreaks(cursor, breaks)
 		matches[i].ScheduledAt = cursor.Format(scheduleClockLayout)
 		cursor = cursor.Add(time.Duration(perMatchMin) * time.Minute)
 		courtCursor[court] = cursor
@@ -322,8 +390,8 @@ func knockoutCourtStart(poolMatches []state.MatchResult, comp *state.Competition
 	if len(floor) == 0 || comp == nil {
 		return ends
 	}
-	dayStart, openingMin, _, _ := parseCeremonyParams(comp, tournament)
-	latest := dayStart.Add(time.Duration(openingMin) * time.Minute)
+	dayStart, _ := parseCeremonyParams(comp, tournament)
+	latest := dayStart
 	for _, t := range ends {
 		if t.After(latest) {
 			latest = t
@@ -359,7 +427,7 @@ func knockoutCourtStart(poolMatches []state.MatchResult, comp *state.Competition
 // after its pool end is left exactly as it is, so a time the operator set
 // survives. Otherwise its scheduled matches keep their order and gaps and are
 // moved only as far as they must be: each starts no earlier than the pool end,
-// and no earlier than the end of the match before it, past lunch. A court
+// and no earlier than the end of the match before it, past pauses. A court
 // where a knockout match is already running or finished is not touched.
 // Courts are judged as assignBracketMatchSlots judges them: one with no pool
 // bout waits for the latest pool end on any court. Reports whether anything
@@ -408,7 +476,7 @@ func pushKnockoutPastPools(b *state.Bracket, comp *state.Competition, tournament
 		visit(b.ThirdPlaceMatch)
 	}
 
-	_, _, lunchMin, lunchStart := parseCeremonyParams(comp, tournament)
+	_, breaks := parseCeremonyParams(comp, tournament)
 	slot := time.Duration(perMatchElapsedMinutes(comp, tournament, true)) * time.Minute
 	// A push past midnight would write "00:0x", which sorts first: a match it
 	// would carry there ties for last at 23:59 instead, as a court move's
@@ -430,10 +498,10 @@ func pushKnockoutPastPools(b *state.Bracket, comp *state.Competition, tournament
 		cursor := poolEnd
 		for _, x := range ms {
 			t := x.at
-			// Only a match the push moves is moved past lunch: a later
-			// time the operator set, even one inside lunch, stays theirs.
+			// Only a match the push moves is moved past pauses: a later
+			// time the operator set, even one inside a pause, stays theirs.
 			if t.Before(cursor) {
-				t = skipCeremonyBlocks(cursor, lunchStart, lunchMin)
+				t = skipBreaks(cursor, breaks)
 			}
 			if t.After(dayEnd) {
 				t = dayEnd
@@ -488,7 +556,7 @@ func moveKnockoutPastPools(tx state.StoreTx, compID string, poolMatches []state.
 // no court time).
 //
 // courtStart is the per-court earliest start (bc-kosc): a court's cursor
-// begins at the later of dayStart + OpeningBlock and courtStart[court], so a
+// begins at the later of dayStart and courtStart[court], so a
 // pools + knockout competition schedules each court's knockout after THAT
 // court's last pool bout (see poolPhaseEndByCourt). A court absent from a
 // non-empty map (one that holds no pool bout) starts after the latest pool
@@ -501,22 +569,21 @@ func moveKnockoutPastPools(tx state.StoreTx, compID string, poolMatches []state.
 // the in-place mutation may discard the return value.
 //
 // As with assignPoolMatchSlotsFrom, the end-cursor is the per-court start anchor
-// (comp.StartTime + OpeningBlock) when there are no rounds, and a zero
+// (comp.StartTime) when there are no rounds, and a zero
 // time.Time only when comp is nil.
 func assignBracketMatchSlots(rounds [][]state.BracketMatch, comp *state.Competition, tournament *state.Tournament, courtStart map[string]time.Time) time.Time {
 	if comp == nil {
 		return time.Time{}
 	}
-	dayStart, openingMin, lunchMin, lunchStart := parseCeremonyParams(comp, tournament)
-	openAt := dayStart.Add(time.Duration(openingMin) * time.Minute)
+	dayStart, breaks := parseCeremonyParams(comp, tournament)
 	if len(rounds) == 0 {
-		return openAt
+		return dayStart
 	}
 
 	// A court that holds no pool bout still waits for the pool phase: its
 	// knockout is fed by qualifiers from other courts, so it starts after
 	// the latest pool end anywhere.
-	latestPoolEnd := openAt
+	latestPoolEnd := dayStart
 	for _, t := range courtStart {
 		if t.After(latestPoolEnd) {
 			latestPoolEnd = t
@@ -524,10 +591,10 @@ func assignBracketMatchSlots(rounds [][]state.BracketMatch, comp *state.Competit
 	}
 	startFor := func(court string) time.Time {
 		if t, ok := courtStart[court]; ok {
-			if t.After(openAt) {
+			if t.After(dayStart) {
 				return t
 			}
-			return openAt
+			return dayStart
 		}
 		return latestPoolEnd
 	}
@@ -565,7 +632,7 @@ func assignBracketMatchSlots(rounds [][]state.BracketMatch, comp *state.Competit
 		if !ok {
 			cursor = startFor(court)
 		}
-		cursor = skipCeremonyBlocks(cursor, lunchStart, lunchMin)
+		cursor = skipBreaks(cursor, breaks)
 		m.ScheduledAt = cursor.Format(scheduleClockLayout)
 
 		// Don't advance the court cursor for auto-resolved byes.
@@ -625,16 +692,11 @@ func scheduleBronze(bracket *state.Bracket, comp *state.Competition, tournament 
 	if bronze.Court != final.Court {
 		return
 	}
-	// Push the final one match-slot later, honoring ceremony/lunch blocks the
+	// Push the final one match-slot later, honoring pauses the
 	// same way assignBracketMatchSlots does.
-	lunchMin := 0
-	var lunchStart time.Time
-	if tournament != nil {
-		lunchMin = parseDurationMinutes(tournament.LunchBlock)
-		lunchStart = parseClockHHMM(defaultLunchStartClock)
-	}
+	_, breaks := parseCeremonyParams(comp, tournament)
 	perMatchMin := perMatchElapsedMinutes(comp, tournament, true /*isKnockout*/)
 	cursor := parseClockHHMM(final.ScheduledAt).Add(time.Duration(perMatchMin) * time.Minute)
-	cursor = skipCeremonyBlocks(cursor, lunchStart, lunchMin)
+	cursor = skipBreaks(cursor, breaks)
 	final.ScheduledAt = cursor.Format(scheduleClockLayout)
 }

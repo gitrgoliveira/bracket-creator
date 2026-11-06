@@ -1,8 +1,14 @@
 package engine
 
 import (
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
 	"testing"
+	"time"
 
+	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 	"github.com/stretchr/testify/assert"
@@ -570,4 +576,548 @@ func TestEstimateForCounts_KachinukiRange_Golden(t *testing.T) {
 	assert.Equal(t, 404, got.TotalDurationMinutes)
 	assert.Equal(t, 520, got.WorstCaseMinutes)
 	assert.Equal(t, []int{404, 297}, got.PerCourtMinutes)
+}
+
+// TestCountForEstimate pins the one count rule: the larger of the expected
+// count and the counted roster, "expected" only while the expected count is
+// the larger (an equal count is the roster's).
+func TestCountForEstimate(t *testing.T) {
+	cases := []struct {
+		expected, counted int
+		wantN             int
+		wantSource        string
+	}{
+		{0, 0, 0, ParticipantsSourceRoster},
+		{40, 0, 40, ParticipantsSourceExpected},
+		{40, 12, 40, ParticipantsSourceExpected},
+		{40, 50, 50, ParticipantsSourceRoster},
+		{40, 40, 40, ParticipantsSourceRoster},
+		{0, 9, 9, ParticipantsSourceRoster},
+	}
+	for _, tc := range cases {
+		n, source := countForEstimate(tc.expected, tc.counted)
+		assert.Equal(t, tc.wantN, n, "expected=%d counted=%d", tc.expected, tc.counted)
+		assert.Equal(t, tc.wantSource, source, "expected=%d counted=%d", tc.expected, tc.counted)
+	}
+}
+
+// estimateForPlayerCount is the estimate EstimateScheduleForCompetition must
+// give for n entries: the match counts for n, then EstimateForCounts.
+func estimateForPlayerCount(t *testing.T, comp *state.Competition, tourn *state.Tournament, n int) ScheduleEstimate {
+	t.Helper()
+	poolCount, knockoutCount, err := helper.EstimateMatchCounts(helper.EstimateMatchCountsInput{
+		Format:           comp.Format,
+		PlayerCount:      n,
+		PoolSize:         comp.PoolSize,
+		PoolSizeMode:     comp.PoolSizeMode,
+		PoolWinners:      comp.EffectivePoolWinners(),
+		RoundRobin:       comp.RoundRobin,
+		PoolFormat:       comp.PoolFormat,
+		SwissRounds:      comp.SwissRounds,
+		ExtraQualifiers:  comp.ExtraQualifiers,
+		SingleThirdPlace: comp.RequiresSingleThirdPlace(),
+		Draft:            comp == nil || comp.Status == state.CompStatusSetup || comp.Status == "",
+	})
+	require.NoError(t, err)
+	return EstimateForCounts(poolCount, knockoutCount, comp, tourn)
+}
+
+// TestEstimateScheduleForCompetition_ExpectedParticipants drives the stored
+// expected count through the per-competition estimate: it is weighed against
+// the counted roster (checked in, when check-in applies) only in setup, and the
+// answer says which count it used.
+func TestEstimateScheduleForCompetition_ExpectedParticipants(t *testing.T) {
+	cases := []struct {
+		name       string
+		status     state.CompetitionStatus
+		kind       string
+		teamSize   int
+		checkIn    bool
+		expected   int
+		registered int
+		checkedIn  int
+		wantN      int
+		wantSource string
+	}{
+		{name: "expected 40, nobody registered", status: state.CompStatusSetup, expected: 40, wantN: 40, wantSource: "expected"},
+		{name: "12 registered of 40 expected", status: state.CompStatusSetup, expected: 40, registered: 12, wantN: 40, wantSource: "expected"},
+		{name: "50 registered past 40 expected", status: state.CompStatusSetup, expected: 40, registered: 50, wantN: 50, wantSource: "roster"},
+		{name: "check-in on, nobody checked in, 40 expected", status: state.CompStatusSetup, checkIn: true, expected: 40, registered: 12, wantN: 40, wantSource: "expected"},
+		{name: "check-in on, 5 of 50 checked in, 40 expected", status: state.CompStatusSetup, checkIn: true, expected: 40, registered: 50, checkedIn: 5, wantN: 40, wantSource: "expected"},
+		{name: "draw ready: 30 drawn, 40 expected", status: state.CompStatusDrawReady, expected: 40, registered: 30, wantN: 30, wantSource: "roster"},
+		{name: "no expected count, 10 registered", status: state.CompStatusSetup, registered: 10, wantN: 10, wantSource: "roster"},
+		{name: "team competition: 6 teams expected, 2 entered", status: state.CompStatusSetup, kind: "team", teamSize: 3, expected: 6, registered: 2, wantN: 6, wantSource: "expected"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			eng, store, _ := setupTestEngine(t)
+			const compID = "est-expected"
+			kind := tc.kind
+			if kind == "" {
+				kind = "individual"
+			}
+			require.NoError(t, store.SaveCompetition(&state.Competition{
+				ID:                           compID,
+				Format:                       state.CompFormatKnockout,
+				Kind:                         kind,
+				TeamSize:                     tc.teamSize,
+				Courts:                       []string{"A"},
+				StartTime:                    "09:00",
+				KnockoutMatchDurationSeconds: 300,
+				Status:                       tc.status,
+				CheckInEnabled:               tc.checkIn,
+				ExpectedParticipants:         tc.expected,
+			}))
+			names := make([]string, tc.registered)
+			checked := map[string]bool{}
+			for i := range names {
+				names[i] = fmt.Sprintf("P%02d", i+1)
+				if i < tc.checkedIn {
+					checked[names[i]] = true
+				}
+			}
+			if tc.registered > 0 {
+				saveParticipantsWithCheckIn(t, store, compID, names, checked)
+			}
+
+			est, err := eng.EstimateScheduleForCompetition(compID)
+			require.NoError(t, err)
+			assert.Equal(t, tc.wantN, est.Participants)
+			assert.Equal(t, tc.wantSource, est.ParticipantsSource)
+
+			comp, err := store.LoadCompetition(compID)
+			require.NoError(t, err)
+			tourn, err := store.LoadTournament()
+			require.NoError(t, err)
+			want := estimateForPlayerCount(t, comp, tourn, tc.wantN)
+			want.Participants = tc.wantN
+			want.ParticipantsSource = tc.wantSource
+			assert.Equal(t, want, est, "the estimate must be the one for %d entries", tc.wantN)
+		})
+	}
+}
+
+// TestEstimateScheduleForCompetition_NoCountNoParticipantsKeys pins that a
+// competition with no roster and no expected count answers the zero estimate
+// with neither participants key on the wire, and that EstimateForCounts never
+// carries them, so the golden record (schedule_golden.json) is unchanged.
+func TestEstimateScheduleForCompetition_NoCountNoParticipantsKeys(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	const compID = "est-no-count"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:                           compID,
+		Format:                       state.CompFormatKnockout,
+		Kind:                         "individual",
+		Courts:                       []string{"A"},
+		StartTime:                    "09:00",
+		KnockoutMatchDurationSeconds: 300,
+		Status:                       state.CompStatusSetup,
+	}))
+	est, err := eng.EstimateScheduleForCompetition(compID)
+	require.NoError(t, err)
+	assert.Zero(t, est.Participants)
+	assert.Empty(t, est.ParticipantsSource)
+
+	comp, err := store.LoadCompetition(compID)
+	require.NoError(t, err)
+	tourn, err := store.LoadTournament()
+	require.NoError(t, err)
+	for _, e := range []ScheduleEstimate{est, EstimateForCounts(0, 7, comp, tourn)} {
+		raw, err := json.Marshal(e)
+		require.NoError(t, err)
+		assert.NotContains(t, string(raw), `"participants"`)
+		assert.NotContains(t, string(raw), `"participantsSource"`)
+	}
+}
+
+// drawCounts runs the real draw for compID and counts what it schedules:
+// every pool match, every bracket match the draw does not resolve itself (a
+// bye is Completed at generation time and takes no court time), and the
+// bronze bout when the bracket carries one.
+func drawCounts(t *testing.T, eng *Engine, store *state.Store, compID string) (pool, knockout int) {
+	t.Helper()
+	require.NoError(t, eng.GenerateDraw(compID))
+	poolMatches, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	bracket, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	require.NotNil(t, bracket, "the draw writes the bracket")
+	for _, round := range bracket.Rounds {
+		for _, m := range round {
+			if m.Status != state.MatchStatusCompleted {
+				knockout++
+			}
+		}
+	}
+	if bracket.ThirdPlaceMatch != nil {
+		knockout++
+	}
+	return len(poolMatches), knockout
+}
+
+// storedCounts is what the stored estimate counts for compID: the entry count
+// and the counted roster's seed ranks from estimateParticipantCount, then the
+// match counts from estimateForPlayers.
+func storedCounts(t *testing.T, eng *Engine, store *state.Store, compID string) (pool, knockout int, seedRanks []int) {
+	t.Helper()
+	comp, err := store.LoadCompetition(compID)
+	require.NoError(t, err)
+	tourn, err := store.LoadTournament()
+	require.NoError(t, err)
+	n, _, seedRanks, err := eng.estimateParticipantCount(comp, tourn)
+	require.NoError(t, err)
+	_, pool, knockout, err = estimateForPlayers(comp, tourn, n, seedRanks, false)
+	require.NoError(t, err)
+	return pool, knockout, seedRanks
+}
+
+// realDrawShape is one competition shape the estimate is checked against the
+// real draw for.
+type realDrawShape struct {
+	format    string
+	n         int
+	poolSize  int
+	mode      string
+	winners   int
+	extra     string
+	seeds     int // the first `seeds` participants are seeded 1..seeds
+	dropRank  int // the participant seeded at this rank is not checked in (0: none)
+	single3rd bool
+	courts    []string
+	expected  int // ExpectedParticipants
+}
+
+// saveRealDrawShape stores a setup competition of shape s with a roster of
+// s.n participants and their seeds.
+func saveRealDrawShape(t *testing.T, store *state.Store, compID string, s realDrawShape) {
+	t.Helper()
+	twoThirdPlaces := !s.single3rd
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:                           compID,
+		Name:                         compID,
+		Kind:                         "individual",
+		Format:                       s.format,
+		PoolSize:                     s.poolSize,
+		PoolSizeMode:                 s.mode,
+		PoolWinners:                  s.winners,
+		ExtraQualifiers:              s.extra,
+		RoundRobin:                   true,
+		Courts:                       s.courts,
+		StartTime:                    "09:00",
+		PoolMatchDurationSeconds:     180,
+		KnockoutMatchDurationSeconds: 300,
+		Status:                       state.CompStatusSetup,
+		TwoThirdPlaces:               &twoThirdPlaces,
+		CheckInEnabled:               s.dropRank > 0,
+		ExpectedParticipants:         s.expected,
+	}))
+
+	names := make([]string, s.n)
+	checkedIn := make(map[string]bool, s.n)
+	for i := range names {
+		names[i] = fmt.Sprintf("P%02d", i+1)
+		checkedIn[names[i]] = true
+	}
+	if s.dropRank > 0 {
+		checkedIn[names[s.dropRank-1]] = false
+		saveParticipantsWithCheckIn(t, store, compID, names, checkedIn)
+	} else {
+		saveTestParticipants(t, store, compID, names)
+	}
+
+	if s.seeds == 0 {
+		return
+	}
+	loaded, err := store.LoadParticipants(compID, false)
+	require.NoError(t, err)
+	rank := make(map[string]int, s.seeds)
+	for i := 0; i < s.seeds; i++ {
+		rank[names[i]] = i + 1
+	}
+	var assignments []domain.SeedAssignment
+	for _, p := range loaded {
+		if r, ok := rank[p.Name]; ok {
+			assignments = append(assignments, domain.SeedAssignment{ID: p.ID, Name: p.Name, Dojo: p.Dojo, SeedRank: r})
+		}
+	}
+	require.Len(t, assignments, s.seeds)
+	require.NoError(t, store.SaveSeeds(compID, assignments))
+}
+
+// TestEstimateCounts_vs_RealDraw is the parity of the stored estimate's
+// counts with the real draw (GenerateDraw, which runs
+// BuildPoolPhaseTreeAwareWithMode or BuildPoolPhaseFillBracket and builds the
+// bracket) over pool size, through-per-pool, sizing mode, extra qualifiers,
+// seeds (one dropped by check-in), the bronze bout and the shiaijo count.
+func TestEstimateCounts_vs_RealDraw(t *testing.T) {
+	one := []string{"A"}
+	four := []string{"A", "B", "C", "D"}
+	mixed := state.CompFormatMixed
+	cases := []struct {
+		name  string
+		shape realDrawShape
+	}{
+		{"mixed 12 pools of 3, two through", realDrawShape{format: mixed, n: 12, poolSize: 3, mode: "min", winners: 2, courts: one}},
+		{"mixed 12 pools of 3, two through, bronze, 4 shiaijo", realDrawShape{format: mixed, n: 12, poolSize: 3, mode: "min", winners: 2, single3rd: true, courts: four}},
+		{"mixed 33 max 4, two through, seeds, bronze", realDrawShape{format: mixed, n: 33, poolSize: 4, mode: "max", winners: 2, seeds: 2, single3rd: true, courts: []string{"A", "B"}}},
+		{"mixed 9 min 3, seed dropped by check-in", realDrawShape{format: mixed, n: 9, poolSize: 3, mode: "min", winners: 2, seeds: 2, dropRank: 2, courts: one}},
+		{"larger-pools 17 min 4, seeds, bronze", realDrawShape{format: mixed, n: 17, poolSize: 4, mode: "min", winners: 1, extra: state.ExtraQualifiersLargerPools, seeds: 2, single3rd: true, courts: one}},
+		{"larger-pools 23 min 4, 4 shiaijo", realDrawShape{format: mixed, n: 23, poolSize: 4, mode: "min", winners: 1, extra: state.ExtraQualifiersLargerPools, courts: four}},
+		{"fill-bracket 20 min 3, seeds", realDrawShape{format: mixed, n: 20, poolSize: 3, mode: "min", winners: 1, extra: state.ExtraQualifiersFillBracket, seeds: 2, courts: one}},
+		{"fill-bracket 20 min 3, seeds, bronze, 4 shiaijo", realDrawShape{format: mixed, n: 20, poolSize: 3, mode: "min", winners: 1, extra: state.ExtraQualifiersFillBracket, seeds: 2, single3rd: true, courts: four}},
+		{"fill-bracket 18 min 3, seeds change the pool cut", realDrawShape{format: mixed, n: 18, poolSize: 3, mode: "min", winners: 1, extra: state.ExtraQualifiersFillBracket, seeds: 2, courts: one}},
+		{"fill-bracket 22 min 3, seed 2 of 3 dropped by check-in (ranks 1 and 3), bronze", realDrawShape{format: mixed, n: 22, poolSize: 3, mode: "min", winners: 1, extra: state.ExtraQualifiersFillBracket, seeds: 3, dropRank: 2, single3rd: true, courts: one}},
+		{"knockout 6, bronze", realDrawShape{format: state.CompFormatKnockout, n: 6, single3rd: true, courts: one}},
+		{"knockout 2, bronze asked, no semifinal", realDrawShape{format: state.CompFormatKnockout, n: 2, single3rd: true, courts: one}},
+	}
+	for i, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			eng, store, _ := setupTestEngine(t)
+			compID := fmt.Sprintf("real-draw-%d", i)
+			saveRealDrawShape(t, store, compID, tc.shape)
+
+			estPool, estKnockout, seedRanks := storedCounts(t, eng, store, compID)
+			if tc.shape.dropRank > 0 {
+				assert.Len(t, seedRanks, tc.shape.seeds-1, "the seed of a competitor not checked in is not counted")
+			} else {
+				assert.Len(t, seedRanks, tc.shape.seeds)
+			}
+
+			realPool, realKnockout := drawCounts(t, eng, store, compID)
+			assert.Equal(t, realPool, estPool, "pool matches")
+			assert.Equal(t, realKnockout, estKnockout, "knockout matches")
+		})
+	}
+}
+
+// TestEstimateCounts_SameAtOneAndFourShiaijo pins that the shiaijo count
+// never changes the counts: only the time per court does.
+func TestEstimateCounts_SameAtOneAndFourShiaijo(t *testing.T) {
+	for _, s := range []realDrawShape{
+		{format: state.CompFormatMixed, n: 20, poolSize: 3, mode: "min", winners: 1, extra: state.ExtraQualifiersFillBracket, seeds: 2, single3rd: true},
+		{format: state.CompFormatMixed, n: 17, poolSize: 4, mode: "min", winners: 1, extra: state.ExtraQualifiersLargerPools, single3rd: true},
+		{format: state.CompFormatMixed, n: 33, poolSize: 4, mode: "max", winners: 2},
+	} {
+		eng, store, _ := setupTestEngine(t)
+		s.courts = []string{"A"}
+		saveRealDrawShape(t, store, "one-court", s)
+		s.courts = []string{"A", "B", "C", "D"}
+		saveRealDrawShape(t, store, "four-courts", s)
+
+		p1, k1, _ := storedCounts(t, eng, store, "one-court")
+		p4, k4, _ := storedCounts(t, eng, store, "four-courts")
+		assert.Equal(t, p1, p4, "pool matches, %d entrants %s", s.n, s.extra)
+		assert.Equal(t, k1, k4, "knockout matches, %d entrants %s", s.n, s.extra)
+	}
+}
+
+// TestEstimateScheduleForCompetition_ExpectedCountAboveRosterSeeds pins that
+// an expected count above the roster counts the roster's seeds and unseeded
+// entries for the rest: 5 registered (2 seeded) with 9 expected counts what
+// the real draw of 9 entrants with those 2 seeds plays.
+func TestEstimateScheduleForCompetition_ExpectedCountAboveRosterSeeds(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	shape := realDrawShape{format: state.CompFormatMixed, poolSize: 3, mode: "min", winners: 1, extra: state.ExtraQualifiersFillBracket, seeds: 2, courts: []string{"A"}}
+
+	planned := shape
+	planned.n, planned.expected = 5, 9
+	saveRealDrawShape(t, store, "planned", planned)
+	est, err := eng.EstimateScheduleForCompetition("planned")
+	require.NoError(t, err)
+	assert.Equal(t, 9, est.Participants)
+	assert.Equal(t, ParticipantsSourceExpected, est.ParticipantsSource)
+	estPool, estKnockout, seedRanks := storedCounts(t, eng, store, "planned")
+	assert.ElementsMatch(t, []int{1, 2}, seedRanks)
+
+	full := shape
+	full.n = 9
+	saveRealDrawShape(t, store, "full", full)
+	realPool, realKnockout := drawCounts(t, eng, store, "full")
+	assert.Equal(t, realPool, estPool, "pool matches")
+	assert.Equal(t, realKnockout, estKnockout, "knockout matches")
+}
+
+// TestEstimateForPlayers_TypedError verifies that count errors from helper are
+// preserved as typed errors through estimateForPlayers.
+func TestEstimateForPlayers_TypedError(t *testing.T) {
+	comp := &state.Competition{
+		ID:           "test-err",
+		Format:       state.CompFormatMixed,
+		PoolSize:     5,
+		PoolSizeMode: "min",
+	}
+	// 3 players < poolSize 5 in min mode
+	_, _, _, err := estimateForPlayers(comp, nil, 3, nil, false)
+	require.Error(t, err)
+
+	var valErr *ValidationError
+	require.ErrorAs(t, err, &valErr, "must be a ValidationError for HTTP 400")
+
+	var countErr *helper.EstimateCountError
+	require.ErrorAs(t, err, &countErr, "must wrap helper.EstimateCountError")
+	assert.Contains(t, err.Error(), "cannot create pools: player count (3) is less than pool size (5)")
+}
+
+// TestEstimateDraft_MaxParticipantsCost times one EstimateDraft at
+// MaxEstimateParticipants in each pool mode, since every call builds the real
+// pool draw over synthetic entrants. The bound is 2 seconds a call.
+//
+// Measured on 2026-11-04 (8-core Linux, 1024 entrants, pool size 3, three
+// runs): standard about 28 ms, larger-pools about 21 ms, fill-bracket about
+// 17 ms. Standard is the most expensive, so the cap of 1024 is cheap.
+func TestEstimateDraft_MaxParticipantsCost(t *testing.T) {
+	eng, _, _ := setupTestEngine(t)
+	for _, extra := range []string{state.ExtraQualifiersNone, state.ExtraQualifiersLargerPools, state.ExtraQualifiersFillBracket} {
+		comp := &state.Competition{
+			ID:                           "cost-test",
+			Format:                       state.CompFormatMixed,
+			Kind:                         "individual",
+			PoolSize:                     3,
+			PoolSizeMode:                 "min",
+			PoolWinners:                  1,
+			ExtraQualifiers:              extra,
+			RoundRobin:                   true,
+			Courts:                       []string{"A", "B"},
+			StartTime:                    "09:00",
+			PoolMatchDurationSeconds:     180,
+			KnockoutMatchDurationSeconds: 300,
+		}
+
+		start := time.Now()
+		est, err := eng.EstimateDraft(comp, nil, MaxEstimateParticipants)
+		elapsed := time.Since(start)
+		t.Logf("extra qualifiers %q: %s", extra, elapsed)
+
+		require.NoError(t, err)
+		assert.Greater(t, est.PoolMatches, 0)
+		assert.Greater(t, est.KnockoutMatches, 0)
+		assert.Less(t, elapsed, 2*time.Second, "one call must take less than 2 seconds, took %s", elapsed)
+	}
+}
+
+func TestEstimateScheduleForCompetition_SeedsOnlyReadForMixed(t *testing.T) {
+	t.Run("knockout competition ignores invalid seeds", func(t *testing.T) {
+		eng, store, dir := setupTestEngine(t)
+		compID := "est-ko-invalid-seeds"
+
+		require.NoError(t, store.SaveCompetition(&state.Competition{
+			ID:                           compID,
+			Format:                       state.CompFormatKnockout,
+			Kind:                         "individual",
+			Courts:                       []string{"A"},
+			StartTime:                    "09:00",
+			KnockoutMatchDurationSeconds: 300,
+			Status:                       state.CompStatusSetup,
+		}))
+		saveTestParticipants(t, store, compID, []string{"P1", "P2", "P3", "P4"})
+
+		seedsPath := filepath.Join(dir, "competitions", compID, "seeds.csv")
+		require.NoError(t, os.WriteFile(seedsPath, []byte("Rank,Name,Dojo,ID\n1,P1,Wakaba,\n1,P2,Wakaba,\n"), 0600))
+
+		est, err := eng.EstimateScheduleForCompetition(compID)
+		require.NoError(t, err)
+		assert.Greater(t, est.TotalDurationMinutes, 0)
+	})
+
+	t.Run("mixed competition fails on invalid seeds", func(t *testing.T) {
+		eng, store, dir := setupTestEngine(t)
+		compID := "est-mixed-invalid-seeds"
+
+		require.NoError(t, store.SaveCompetition(&state.Competition{
+			ID:                           compID,
+			Format:                       state.CompFormatMixed,
+			Kind:                         "individual",
+			PoolSize:                     3,
+			PoolSizeMode:                 "min",
+			PoolWinners:                  2,
+			RoundRobin:                   true,
+			Courts:                       []string{"A"},
+			StartTime:                    "09:00",
+			PoolMatchDurationSeconds:     180,
+			KnockoutMatchDurationSeconds: 300,
+			Status:                       state.CompStatusSetup,
+		}))
+		saveTestParticipants(t, store, compID, []string{"P1", "P2", "P3", "P4", "P5", "P6"})
+
+		seedsPath := filepath.Join(dir, "competitions", compID, "seeds.csv")
+		require.NoError(t, os.WriteFile(seedsPath, []byte("Rank,Name,Dojo,ID\n1,P1,Wakaba,\n1,P2,Wakaba,\n"), 0600))
+
+		_, err := eng.EstimateScheduleForCompetition(compID)
+		require.Error(t, err)
+		var valErr *ValidationError
+		require.ErrorAs(t, err, &valErr, "must return ValidationError for HTTP 400")
+		assert.ErrorIs(t, err, domain.ErrInvalidSeedAssignments)
+	})
+}
+
+// TestEstimate_SavedSetupFillBracketUnseededGivesANumber tests that a saved
+// mixed competition still in setup with fill-bracket qualifiers and no seeds
+// succeeds with a positive duration, while past setup keeps today's refusal.
+func TestEstimate_SavedSetupFillBracketUnseededGivesANumber(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	const compID = "setup-fill-bracket-unseeded"
+
+	require.NoError(t, store.SaveTournament(&state.Tournament{
+		Name:         "Tourn",
+		Date:         "01-07-2026",
+		DurationDays: 1,
+		Courts:       []string{"A"},
+	}))
+
+	comp := &state.Competition{
+		ID:                           compID,
+		Name:                         "Fill Bracket Setup",
+		Format:                       state.CompFormatMixed,
+		Kind:                         "individual",
+		PoolSize:                     3,
+		PoolSizeMode:                 "min",
+		PoolWinners:                  1,
+		ExtraQualifiers:              state.ExtraQualifiersFillBracket,
+		RoundRobin:                   true,
+		Courts:                       []string{"A"},
+		StartTime:                    "09:00",
+		Date:                         "01-07-2026",
+		PoolMatchDurationSeconds:     180,
+		KnockoutMatchDurationSeconds: 300,
+		Status:                       state.CompStatusSetup,
+	}
+	require.NoError(t, store.SaveCompetition(comp))
+
+	// 17 entrants in pools of at least 3 need seeded pools to supply drafted
+	// 2nd places under fill-bracket.
+	names := make([]string, 17)
+	for i := range names {
+		names[i] = fmt.Sprintf("P%02d", i+1)
+	}
+	saveTestParticipants(t, store, compID, names)
+
+	// 1. In setup: estimate succeeds with positive duration.
+	est, err := eng.EstimateScheduleForCompetition(compID)
+	require.NoError(t, err)
+	assert.Greater(t, est.TotalDurationMinutes, 0)
+	assert.Equal(t, 17, est.Participants)
+
+	tourn, err := store.LoadTournament()
+	require.NoError(t, err)
+
+	placement := eng.PlaceCompetition(comp, tourn)
+	assert.True(t, placement.Placed)
+	assert.Equal(t, "estimate", placement.LengthSource)
+	assert.NotEqual(t, "estimate_failed", placement.LengthReason)
+
+	// 2. Past setup (e.g. DrawReady): keeps today's behaviour and refuses unseeded draw.
+	comp.Status = state.CompStatusDrawReady
+	require.NoError(t, store.SaveCompetition(comp))
+
+	_, err = eng.EstimateScheduleForCompetition(compID)
+	require.Error(t, err)
+	var valErr *ValidationError
+	require.ErrorAs(t, err, &valErr)
+	var countErr *helper.EstimateCountError
+	require.ErrorAs(t, err, &countErr)
+	assert.Contains(t, err.Error(), "seed more pools")
+
+	placementPast := eng.PlaceCompetition(comp, tourn)
+	assert.Equal(t, "minimum", placementPast.LengthSource)
+	assert.Equal(t, "estimate_failed", placementPast.LengthReason)
 }

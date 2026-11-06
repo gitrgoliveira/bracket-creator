@@ -37,6 +37,10 @@ const STUBBED_GLOBALS = {
   addMinutes: (t) => t,
   API: {
     estimateCompetitionSchedule: vi.fn().mockResolvedValue(null),
+    estimateDraft: vi.fn().mockResolvedValue(null),
+    // The form reads the calendar to stack its start time after the chosen
+    // shiaijo's last planned match; an empty one leaves the default start.
+    fetchCalendar: vi.fn().mockResolvedValue({ days: [], courts: [], competitions: [] }),
     // bc-pnum: the number-prefix pre-fill effect fires on mount as the name
     // field changes (starting blank). Resolving "" keeps it a no-op for
     // every fixture here, none of which is about numbering.
@@ -566,5 +570,192 @@ describe('AdminEditTournament server-error surfacing (bc-draw R9 gap 3)', () => 
 
     expect(onSave).toHaveBeenCalledTimes(1);
     expect(container.querySelector('[role="alert"]')).toBeNull();
+  });
+});
+
+function makeSampleDraftEstimate(overrides = {}) {
+  return {
+    totalDurationMinutes: 248,
+    bestCaseMinutes: 248,
+    worstCaseMinutes: 248,
+    perCourtMinutes: [248, 242],
+    poolMatches: 12,
+    knockoutMatches: 7,
+    participants: 16,
+    participantsSource: 'expected',
+    timing: {
+      multiplier: 1.5,
+      allowancePct: 10,
+      breaks: [
+        { name: 'Opening ceremony', start: '09:30', end: '10:00' },
+        { name: 'Lunch', start: '12:30', end: '13:30' },
+      ],
+    },
+    warnings: [],
+    ...overrides,
+  };
+}
+
+describe('AdminCreateCompetition expected participants and draft estimate (p2-create)', () => {
+  const getExpectedParticipantsInput = (container, isTeam = false) => {
+    const labelText = isTeam ? 'Expected teams' : 'Expected participants';
+    const label = Array.from(container.querySelectorAll('.field__label')).find((l) => l.textContent.trim() === labelText);
+    return label ? label.parentElement.querySelector('input') : null;
+  };
+
+  it('(a) typing a count in "Expected participants" calls estimateDraft with courts omitted when none chosen', async () => {
+    const estimateDraft = vi.fn().mockResolvedValue(makeSampleDraftEstimate());
+    window.API.estimateDraft = estimateDraft;
+    const { container } = await mountForm();
+
+    // Deselect court A and court B so no shiaijo are chosen
+    await clickPill(container, 'Shiaijo (court) A');
+    await clickPill(container, 'Shiaijo (court) B');
+
+    const input = getExpectedParticipantsInput(container, false);
+    expect(input).not.toBeNull();
+    await act(async () => {
+      fireEvent.change(input, { target: { value: '16' } });
+    });
+
+    await waitFor(() => expect(estimateDraft).toHaveBeenCalled(), { timeout: 1000 });
+    const lastCall = estimateDraft.mock.calls[estimateDraft.mock.calls.length - 1];
+    const shape = lastCall[0];
+    expect(shape.participants).toBe(16);
+    expect(shape.format).toBe('knockout');
+    expect(shape.startTime).toBe('09:00');
+    expect(shape.courts).toBeUndefined();
+  });
+
+  it('(b) panel shows the answer from the mocked estimate', async () => {
+    window.API.estimateDraft = vi.fn().mockResolvedValue(makeSampleDraftEstimate({ totalDurationMinutes: 248 }));
+    const { container } = await mountForm();
+
+    const input = getExpectedParticipantsInput(container, false);
+    await act(async () => {
+      fireEvent.change(input, { target: { value: '16' } });
+    });
+
+    const duration = await waitFor(() => {
+      const el = container.querySelector('[data-testid="draft-estimate-duration"]');
+      expect(el).not.toBeNull();
+      return el;
+    });
+    expect(duration.textContent).toContain('Est. duration: about 4h 08m');
+  });
+
+  it('(c) create POST body carries expectedParticipants when filled and omits key when empty', async () => {
+    // 1. When empty:
+    const onCreateEmpty = vi.fn().mockResolvedValue({ id: 'c1' });
+    const { container: containerEmpty } = await mountForm({ onCreate: onCreateEmpty });
+    await act(async () => { fireEvent.click(submitButton(containerEmpty)); });
+    expect(onCreateEmpty).toHaveBeenCalledTimes(1);
+    const sentEmpty = onCreateEmpty.mock.calls[0][0];
+    expect('expectedParticipants' in sentEmpty).toBe(false);
+
+    // 2. When filled:
+    const onCreateFilled = vi.fn().mockResolvedValue({ id: 'c2' });
+    const { container: containerFilled } = await mountForm({ onCreate: onCreateFilled });
+    const input = getExpectedParticipantsInput(containerFilled, false);
+    await act(async () => {
+      fireEvent.change(input, { target: { value: '16' } });
+    });
+    await act(async () => { fireEvent.click(submitButton(containerFilled)); });
+    expect(onCreateFilled).toHaveBeenCalledTimes(1);
+    const sentFilled = onCreateFilled.mock.calls[0][0];
+    expect(sentFilled.expectedParticipants).toBe(16);
+  });
+
+  it('(d) label reads "Expected teams" for a team competition', async () => {
+    const { container } = await mountForm();
+    expect(getExpectedParticipantsInput(container, false)).not.toBeNull();
+    expect(getExpectedParticipantsInput(container, true)).toBeNull();
+
+    await clickPill(container, 'Team');
+    expect(getExpectedParticipantsInput(container, true)).not.toBeNull();
+    expect(getExpectedParticipantsInput(container, false)).toBeNull();
+  });
+
+  it('(e) too_many_shiaijo warning renders "Change shiaijo" and clicking it focuses Shiaijo field', async () => {
+    window.API.estimateDraft = vi.fn().mockResolvedValue(makeSampleDraftEstimate({
+      warnings: [{ code: 'too_many_shiaijo', participants: 4, usable: 1, chosen: 2 }],
+    }));
+    const { container } = await mountForm();
+
+    const input = getExpectedParticipantsInput(container, false);
+    await act(async () => {
+      fireEvent.change(input, { target: { value: '4' } });
+    });
+
+    const changeBtn = await waitFor(() => {
+      const btn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent.includes('Change shiaijo'));
+      expect(btn).not.toBeUndefined();
+      return btn;
+    });
+
+    await act(async () => { fireEvent.click(changeBtn); });
+    const shiaijoGroup = container.querySelector('[role="group"][aria-labelledby="create-courts-label"]');
+    expect(document.activeElement).toBe(shiaijoGroup);
+  });
+
+  it('(f) with a stacking candidate, the first estimateDraft call carries the stacked start time and never 09:00', async () => {
+    // The start is stacked after the latest planned end on the chosen shiaijo,
+    // read from the calendar's placements (11:15 is 675 minutes).
+    window.API.fetchCalendar = vi.fn().mockResolvedValue({
+      days: [{ day: 1, date: '10-08-2026', breaks: [] }],
+      courts: ['A', 'B', 'C'],
+      competitions: [{ id: 'comp-1', placement: { placed: true, day: 1, courts: ['A'], windows: { A: { start: 540, end: 675 } } } }],
+    });
+    const estimateDraft = vi.fn().mockResolvedValue(makeSampleDraftEstimate());
+    window.API.estimateDraft = estimateDraft;
+
+    const tournament = makeTournament({
+      courts: ['A', 'B', 'C'],
+      competitions: [
+        { id: 'comp-1', name: 'Morning Individual', date: '10-08-2026', startTime: '09:00', courts: ['A'] },
+      ],
+    });
+    const { container } = await mountForm({ tournament });
+
+    const input = getExpectedParticipantsInput(container, false);
+    await act(async () => {
+      fireEvent.change(input, { target: { value: '16' } });
+    });
+
+    await waitFor(() => expect(estimateDraft).toHaveBeenCalled());
+    const firstCallShape = estimateDraft.mock.calls[0][0];
+    expect(firstCallShape.startTime).toBe('11:15');
+
+    for (const call of estimateDraft.mock.calls) {
+      expect(call[0].startTime).not.toBe('09:00');
+    }
+  });
+
+  it('validates expectedParticipants between 0 and 1024 and blocks submit', async () => {
+    const onCreate = vi.fn();
+    const { container } = await mountForm({ onCreate });
+    const input = getExpectedParticipantsInput(container, false);
+
+    // Negative number
+    await act(async () => {
+      fireEvent.change(input, { target: { value: '-1' } });
+    });
+    await act(async () => { fireEvent.click(submitButton(container)); });
+    expect(onCreate).not.toHaveBeenCalled();
+    expect(container.querySelector('.alert--error').textContent).toBe('Expected participants must be a whole number from 0 to 1024.');
+
+    // Greater than 1024
+    await act(async () => {
+      fireEvent.change(input, { target: { value: '1025' } });
+    });
+    await act(async () => { fireEvent.click(submitButton(container)); });
+    expect(onCreate).not.toHaveBeenCalled();
+    expect(container.querySelector('.alert--error').textContent).toBe('Expected participants must be a whole number from 0 to 1024.');
+
+    // In team mode
+    await clickPill(container, 'Team');
+    await act(async () => { fireEvent.click(submitButton(container)); });
+    expect(onCreate).not.toHaveBeenCalled();
+    expect(container.querySelector('.alert--error').textContent).toBe('Expected teams must be a whole number from 0 to 1024.');
   });
 });

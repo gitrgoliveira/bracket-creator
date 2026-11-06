@@ -1,0 +1,1819 @@
+{
+  "cases": [
+    {
+      "name": "knockout-no-blocks-1court",
+      "slots": [
+        {
+          "id": "m-r1-0",
+          "court": "A",
+          "at": "09:00"
+        },
+        {
+          "id": "m-r1-1",
+          "court": "A",
+          "at": "09:06"
+        },
+        {
+          "id": "m-r1-2",
+          "court": "A",
+          "at": "09:12"
+        },
+        {
+          "id": "m-r1-3",
+          "court": "A",
+          "at": "09:18"
+        },
+        {
+          "id": "m-r2-0",
+          "court": "A",
+          "at": "09:24"
+        },
+        {
+          "id": "m-r2-1",
+          "court": "A",
+          "at": "09:30"
+        },
+        {
+          "id": "m-r3-0",
+          "court": "A",
+          "at": "09:36"
+        }
+      ],
+      "end": "09:42",
+      "estimate": {
+        "totalDurationMinutes": 46,
+        "bestCaseMinutes": 46,
+        "worstCaseMinutes": 46,
+        "perCourtMinutes": [
+          46
+        ],
+        "ceremonyMinutes": 0
+      }
+    },
+    {
+      "name": "knockout-lunch-only-1court",
+      "slots": [
+        {
+          "id": "m-r1-0",
+          "court": "A",
+          "at": "11:40"
+        },
+        {
+          "id": "m-r1-1",
+          "court": "A",
+          "at": "11:46"
+        },
+        {
+          "id": "m-r1-2",
+          "court": "A",
+          "at": "11:52"
+        },
+        {
+          "id": "m-r1-3",
+          "court": "A",
+          "at": "11:58"
+        },
+        {
+          "id": "m-r2-0",
+          "court": "A",
+          "at": "13:00"
+        },
+        {
+          "id": "m-r2-1",
+          "court": "A",
+          "at": "13:06"
+        },
+        {
+          "id": "m-r3-0",
+          "court": "A",
+          "at": "13:12"
+        }
+      ],
+      "end": "13:18",
+      "estimate": {
+        "totalDurationMinutes": 102,
+        "bestCaseMinutes": 102,
+        "worstCaseMinutes": 102,
+        "perCourtMinutes": [
+          102
+        ],
+        "ceremonyMinutes": 0
+      }
+    },
+    {
+      "name": "knockout-opening-only-2courts",
+      "slots": [
+        {
+          "id": "m-r1-0",
+          "court": "A",
+          "at": "09:30"
+        },
+        {
+          "id": "m-r1-2",
+          "court": "A",
+          "at": "09:36"
+        },
+        {
+          "id": "m-r2-1",
+          "court": "A",
+          "at": "09:42"
+        },
+        {
+          "id": "m-r3-0",
+          "court": "A",
+          "at": "09:48"
+        },
+        {
+          "id": "m-r1-1",
+          "court": "B",
+          "at": "09:30"
+        },
+        {
+          "id": "m-r1-3",
+          "court": "B",
+          "at": "09:36"
+        },
+        {
+          "id": "m-r2-0",
+          "court": "B",
+          "at": "09:42"
+        }
+      ],
+      "end": "09:54",
+      "estimate": {
+        "totalDurationMinutes": 56,
+        "bestCaseMinutes": 56,
+        "worstCaseMinutes": 56,
+        "perCourtMinutes": [
+          56,
+          50
+        ],
+        "ceremonyMinutes": 0
+      }
+    },
+    {
+      "name": "knockout-closing-only-2courts-bronze-on",
+      "slots": [
+        {
+          "id": "m-r1-0",
+          "court": "A",
+          "at": "09:00"
+        },
+        {
+          "id": "m-r1-2",
+          "court": "A",
+          "at": "09:06"
+        },
+        {
+          "id": "m-r2-1",
+          "court": "A",
+          "at": "09:12"
+        },
+        {
+          "id": "m-bronze",
+          "court": "A",
+          "at": "09:18"
+        },
+        {
+          "id": "m-r3-0",
+          "court": "A",
+          "at": "09:24"
+        },
+        {
+          "id": "m-r1-1",
+          "court": "B",
+          "at": "09:00"
+        },
+        {
+          "id": "m-r1-3",
+          "court": "B",
+          "at": "09:06"
+        },
+        {
+          "id": "m-r2-0",
+          "court": "B",
+          "at": "09:12"
+        }
+      ],
+      "end": "09:30",
+      "estimate": {
+        "totalDurationMinutes": 56,
+        "bestCaseMinutes": 56,
+        "worstCaseMinutes": 56,
+        "perCourtMinutes": [
+          26,
+          26
+        ],
+        "ceremonyMinutes": 30
+      }
+    },
+    {
+      "name": "knockout-all-blocks-bronze-on-2courts",
+      "slots": [
+        {
+          "id": "m-r1-0",
+          "court": "A",
+          "at": "11:30"
+        },
+        {
+          "id": "m-r1-2",
+          "court": "A",
+          "at": "11:36"
+        },
+        {
+          "id": "m-r2-1",
+          "court": "A",
+          "at": "11:42"
+        },
+        {
+          "id": "m-bronze",
+          "court": "A",
+          "at": "11:48"
+        },
+        {
+          "id": "m-r3-0",
+          "court": "A",
+          "at": "11:54"
+        },
+        {
+          "id": "m-r1-1",
+          "court": "B",
+          "at": "11:30"
+        },
+        {
+          "id": "m-r1-3",
+          "court": "B",
+          "at": "11:36"
+        },
+        {
+          "id": "m-r2-0",
+          "court": "B",
+          "at": "11:42"
+        }
+      ],
+      "end": "12:00",
+      "estimate": {
+        "totalDurationMinutes": 86,
+        "bestCaseMinutes": 86,
+        "worstCaseMinutes": 86,
+        "perCourtMinutes": [
+          56,
+          56
+        ],
+        "ceremonyMinutes": 30
+      }
+    },
+    {
+      "name": "knockout-all-blocks-bronze-off-3courts",
+      "slots": [
+        {
+          "id": "m-r1-0",
+          "court": "A",
+          "at": "11:30"
+        },
+        {
+          "id": "m-r1-3",
+          "court": "A",
+          "at": "11:36"
+        },
+        {
+          "id": "m-r3-0",
+          "court": "A",
+          "at": "11:42"
+        },
+        {
+          "id": "m-r1-1",
+          "court": "B",
+          "at": "11:30"
+        },
+        {
+          "id": "m-r2-0",
+          "court": "B",
+          "at": "11:36"
+        },
+        {
+          "id": "m-r1-2",
+          "court": "C",
+          "at": "11:30"
+        },
+        {
+          "id": "m-r2-1",
+          "court": "C",
+          "at": "11:36"
+        }
+      ],
+      "end": "11:48",
+      "estimate": {
+        "totalDurationMinutes": 80,
+        "bestCaseMinutes": 80,
+        "worstCaseMinutes": 80,
+        "perCourtMinutes": [
+          50,
+          43,
+          43
+        ],
+        "ceremonyMinutes": 30
+      }
+    },
+    {
+      "name": "league-no-blocks-1court",
+      "slots": [
+        {
+          "id": "m000",
+          "court": "A",
+          "at": "09:00"
+        },
+        {
+          "id": "m001",
+          "court": "A",
+          "at": "09:05"
+        },
+        {
+          "id": "m002",
+          "court": "A",
+          "at": "09:10"
+        },
+        {
+          "id": "m003",
+          "court": "A",
+          "at": "09:15"
+        },
+        {
+          "id": "m004",
+          "court": "A",
+          "at": "09:20"
+        },
+        {
+          "id": "m005",
+          "court": "A",
+          "at": "09:25"
+        },
+        {
+          "id": "m007",
+          "court": "A",
+          "at": "09:30"
+        },
+        {
+          "id": "m006",
+          "court": "A",
+          "at": "09:35"
+        },
+        {
+          "id": "m009",
+          "court": "A",
+          "at": "09:40"
+        },
+        {
+          "id": "m008",
+          "court": "A",
+          "at": "09:45"
+        }
+      ],
+      "end": "09:50",
+      "estimate": {
+        "totalDurationMinutes": 55,
+        "bestCaseMinutes": 55,
+        "worstCaseMinutes": 55,
+        "perCourtMinutes": [
+          55
+        ],
+        "ceremonyMinutes": 0
+      }
+    },
+    {
+      "name": "league-lunch-only-2courts",
+      "slots": [
+        {
+          "id": "m000",
+          "court": "A",
+          "at": "11:40"
+        },
+        {
+          "id": "m002",
+          "court": "A",
+          "at": "11:45"
+        },
+        {
+          "id": "m003",
+          "court": "A",
+          "at": "11:50"
+        },
+        {
+          "id": "m004",
+          "court": "A",
+          "at": "13:00"
+        },
+        {
+          "id": "m006",
+          "court": "A",
+          "at": "13:10"
+        },
+        {
+          "id": "m010",
+          "court": "A",
+          "at": "13:20"
+        },
+        {
+          "id": "m009",
+          "court": "A",
+          "at": "13:25"
+        },
+        {
+          "id": "m014",
+          "court": "A",
+          "at": "13:30"
+        },
+        {
+          "id": "m012",
+          "court": "A",
+          "at": "13:35"
+        },
+        {
+          "id": "m001",
+          "court": "B",
+          "at": "11:40"
+        },
+        {
+          "id": "m008",
+          "court": "B",
+          "at": "11:50"
+        },
+        {
+          "id": "m005",
+          "court": "B",
+          "at": "13:00"
+        },
+        {
+          "id": "m007",
+          "court": "B",
+          "at": "13:10"
+        },
+        {
+          "id": "m011",
+          "court": "B",
+          "at": "13:20"
+        },
+        {
+          "id": "m013",
+          "court": "B",
+          "at": "13:35"
+        }
+      ],
+      "end": "13:40",
+      "estimate": {
+        "totalDurationMinutes": 104,
+        "bestCaseMinutes": 104,
+        "worstCaseMinutes": 104,
+        "perCourtMinutes": [
+          104,
+          99
+        ],
+        "ceremonyMinutes": 0
+      }
+    },
+    {
+      "name": "league-opening-only-1court",
+      "slots": [
+        {
+          "id": "m000",
+          "court": "A",
+          "at": "09:30"
+        },
+        {
+          "id": "m001",
+          "court": "A",
+          "at": "09:35"
+        },
+        {
+          "id": "m002",
+          "court": "A",
+          "at": "09:40"
+        },
+        {
+          "id": "m003",
+          "court": "A",
+          "at": "09:45"
+        },
+        {
+          "id": "m004",
+          "court": "A",
+          "at": "09:50"
+        },
+        {
+          "id": "m005",
+          "court": "A",
+          "at": "09:55"
+        },
+        {
+          "id": "m007",
+          "court": "A",
+          "at": "10:00"
+        },
+        {
+          "id": "m006",
+          "court": "A",
+          "at": "10:05"
+        },
+        {
+          "id": "m009",
+          "court": "A",
+          "at": "10:10"
+        },
+        {
+          "id": "m008",
+          "court": "A",
+          "at": "10:15"
+        }
+      ],
+      "end": "10:20",
+      "estimate": {
+        "totalDurationMinutes": 85,
+        "bestCaseMinutes": 85,
+        "worstCaseMinutes": 85,
+        "perCourtMinutes": [
+          85
+        ],
+        "ceremonyMinutes": 0
+      }
+    },
+    {
+      "name": "league-closing-only-2courts",
+      "slots": [
+        {
+          "id": "m000",
+          "court": "A",
+          "at": "09:00"
+        },
+        {
+          "id": "m002",
+          "court": "A",
+          "at": "09:05"
+        },
+        {
+          "id": "m003",
+          "court": "A",
+          "at": "09:10"
+        },
+        {
+          "id": "m004",
+          "court": "A",
+          "at": "09:20"
+        },
+        {
+          "id": "m006",
+          "court": "A",
+          "at": "09:30"
+        },
+        {
+          "id": "m010",
+          "court": "A",
+          "at": "09:40"
+        },
+        {
+          "id": "m009",
+          "court": "A",
+          "at": "09:45"
+        },
+        {
+          "id": "m014",
+          "court": "A",
+          "at": "09:50"
+        },
+        {
+          "id": "m012",
+          "court": "A",
+          "at": "09:55"
+        },
+        {
+          "id": "m001",
+          "court": "B",
+          "at": "09:00"
+        },
+        {
+          "id": "m008",
+          "court": "B",
+          "at": "09:10"
+        },
+        {
+          "id": "m005",
+          "court": "B",
+          "at": "09:20"
+        },
+        {
+          "id": "m007",
+          "court": "B",
+          "at": "09:30"
+        },
+        {
+          "id": "m011",
+          "court": "B",
+          "at": "09:40"
+        },
+        {
+          "id": "m013",
+          "court": "B",
+          "at": "09:55"
+        }
+      ],
+      "end": "10:00",
+      "estimate": {
+        "totalDurationMinutes": 74,
+        "bestCaseMinutes": 74,
+        "worstCaseMinutes": 74,
+        "perCourtMinutes": [
+          44,
+          39
+        ],
+        "ceremonyMinutes": 30
+      }
+    },
+    {
+      "name": "league-all-blocks-3courts",
+      "slots": [
+        {
+          "id": "m000",
+          "court": "A",
+          "at": "11:30"
+        },
+        {
+          "id": "m003",
+          "court": "A",
+          "at": "11:40"
+        },
+        {
+          "id": "m006",
+          "court": "A",
+          "at": "11:50"
+        },
+        {
+          "id": "m009",
+          "court": "A",
+          "at": "13:00"
+        },
+        {
+          "id": "m012",
+          "court": "A",
+          "at": "13:10"
+        },
+        {
+          "id": "m001",
+          "court": "B",
+          "at": "11:30"
+        },
+        {
+          "id": "m004",
+          "court": "B",
+          "at": "11:40"
+        },
+        {
+          "id": "m007",
+          "court": "B",
+          "at": "11:50"
+        },
+        {
+          "id": "m010",
+          "court": "B",
+          "at": "13:00"
+        },
+        {
+          "id": "m013",
+          "court": "B",
+          "at": "13:10"
+        },
+        {
+          "id": "m002",
+          "court": "C",
+          "at": "11:30"
+        },
+        {
+          "id": "m005",
+          "court": "C",
+          "at": "11:40"
+        },
+        {
+          "id": "m008",
+          "court": "C",
+          "at": "11:50"
+        },
+        {
+          "id": "m011",
+          "court": "C",
+          "at": "13:00"
+        },
+        {
+          "id": "m014",
+          "court": "C",
+          "at": "13:10"
+        }
+      ],
+      "end": "13:15",
+      "estimate": {
+        "totalDurationMinutes": 88,
+        "bestCaseMinutes": 88,
+        "worstCaseMinutes": 88,
+        "perCourtMinutes": [
+          58,
+          58,
+          58
+        ],
+        "ceremonyMinutes": 30
+      }
+    },
+    {
+      "name": "mixed-no-blocks-1court-bronze-off",
+      "slots": [
+        {
+          "id": "Pool A-0",
+          "court": "A",
+          "at": "09:00"
+        },
+        {
+          "id": "Pool A-1",
+          "court": "A",
+          "at": "09:05"
+        },
+        {
+          "id": "Pool A-2",
+          "court": "A",
+          "at": "09:10"
+        },
+        {
+          "id": "Pool B-0",
+          "court": "A",
+          "at": "09:15"
+        },
+        {
+          "id": "Pool B-1",
+          "court": "A",
+          "at": "09:20"
+        },
+        {
+          "id": "Pool B-2",
+          "court": "A",
+          "at": "09:25"
+        },
+        {
+          "id": "m-r1-0",
+          "court": "A",
+          "at": "09:30"
+        },
+        {
+          "id": "m-r1-1",
+          "court": "A",
+          "at": "09:36"
+        },
+        {
+          "id": "m-r2-0",
+          "court": "A",
+          "at": "09:42"
+        }
+      ],
+      "end": "09:48",
+      "estimate": {
+        "totalDurationMinutes": 53,
+        "bestCaseMinutes": 53,
+        "worstCaseMinutes": 53,
+        "perCourtMinutes": [
+          53
+        ],
+        "ceremonyMinutes": 0
+      }
+    },
+    {
+      "name": "mixed-lunch-only-2courts-bronze-on",
+      "slots": [
+        {
+          "id": "Pool A-0",
+          "court": "A",
+          "at": "11:40"
+        },
+        {
+          "id": "Pool A-1",
+          "court": "A",
+          "at": "11:45"
+        },
+        {
+          "id": "Pool A-2",
+          "court": "A",
+          "at": "11:50"
+        },
+        {
+          "id": "m-r1-0",
+          "court": "A",
+          "at": "11:55"
+        },
+        {
+          "id": "m-bronze",
+          "court": "A",
+          "at": "13:00"
+        },
+        {
+          "id": "m-r2-0",
+          "court": "A",
+          "at": "13:06"
+        },
+        {
+          "id": "Pool B-0",
+          "court": "B",
+          "at": "11:40"
+        },
+        {
+          "id": "Pool B-1",
+          "court": "B",
+          "at": "11:45"
+        },
+        {
+          "id": "Pool B-2",
+          "court": "B",
+          "at": "11:50"
+        },
+        {
+          "id": "m-r1-1",
+          "court": "B",
+          "at": "11:55"
+        }
+      ],
+      "end": "13:12",
+      "estimate": {
+        "totalDurationMinutes": 89,
+        "bestCaseMinutes": 89,
+        "worstCaseMinutes": 89,
+        "perCourtMinutes": [
+          89,
+          89
+        ],
+        "ceremonyMinutes": 0
+      }
+    },
+    {
+      "name": "mixed-opening-only-2courts-bronze-off",
+      "slots": [
+        {
+          "id": "Pool A-0",
+          "court": "A",
+          "at": "09:30"
+        },
+        {
+          "id": "Pool A-1",
+          "court": "A",
+          "at": "09:35"
+        },
+        {
+          "id": "Pool A-2",
+          "court": "A",
+          "at": "09:40"
+        },
+        {
+          "id": "m-r1-0",
+          "court": "A",
+          "at": "09:45"
+        },
+        {
+          "id": "m-r2-0",
+          "court": "A",
+          "at": "09:51"
+        },
+        {
+          "id": "Pool B-0",
+          "court": "B",
+          "at": "09:30"
+        },
+        {
+          "id": "Pool B-1",
+          "court": "B",
+          "at": "09:35"
+        },
+        {
+          "id": "Pool B-2",
+          "court": "B",
+          "at": "09:40"
+        },
+        {
+          "id": "m-r1-1",
+          "court": "B",
+          "at": "09:45"
+        }
+      ],
+      "end": "09:57",
+      "estimate": {
+        "totalDurationMinutes": 60,
+        "bestCaseMinutes": 60,
+        "worstCaseMinutes": 60,
+        "perCourtMinutes": [
+          60,
+          53
+        ],
+        "ceremonyMinutes": 0
+      }
+    },
+    {
+      "name": "mixed-closing-only-3courts-bronze-on",
+      "slots": [
+        {
+          "id": "Pool A-0",
+          "court": "A",
+          "at": "09:00"
+        },
+        {
+          "id": "Pool A-1",
+          "court": "A",
+          "at": "09:05"
+        },
+        {
+          "id": "Pool A-2",
+          "court": "A",
+          "at": "09:10"
+        },
+        {
+          "id": "m-r1-0",
+          "court": "A",
+          "at": "09:15"
+        },
+        {
+          "id": "m-bronze",
+          "court": "A",
+          "at": "09:21"
+        },
+        {
+          "id": "m-r2-0",
+          "court": "A",
+          "at": "09:27"
+        },
+        {
+          "id": "Pool B-0",
+          "court": "B",
+          "at": "09:00"
+        },
+        {
+          "id": "Pool B-1",
+          "court": "B",
+          "at": "09:05"
+        },
+        {
+          "id": "Pool B-2",
+          "court": "B",
+          "at": "09:10"
+        },
+        {
+          "id": "m-r1-1",
+          "court": "B",
+          "at": "09:15"
+        }
+      ],
+      "end": "09:33",
+      "estimate": {
+        "totalDurationMinutes": 54,
+        "bestCaseMinutes": 54,
+        "worstCaseMinutes": 54,
+        "perCourtMinutes": [
+          24,
+          18,
+          18
+        ],
+        "ceremonyMinutes": 30
+      }
+    },
+    {
+      "name": "mixed-all-blocks-2courts-bronze-on",
+      "slots": [
+        {
+          "id": "Pool A-0",
+          "court": "A",
+          "at": "11:30"
+        },
+        {
+          "id": "Pool A-1",
+          "court": "A",
+          "at": "11:35"
+        },
+        {
+          "id": "Pool A-2",
+          "court": "A",
+          "at": "11:40"
+        },
+        {
+          "id": "m-r1-0",
+          "court": "A",
+          "at": "11:45"
+        },
+        {
+          "id": "m-bronze",
+          "court": "A",
+          "at": "11:51"
+        },
+        {
+          "id": "m-r2-0",
+          "court": "A",
+          "at": "11:57"
+        },
+        {
+          "id": "Pool B-0",
+          "court": "B",
+          "at": "11:30"
+        },
+        {
+          "id": "Pool B-1",
+          "court": "B",
+          "at": "11:35"
+        },
+        {
+          "id": "Pool B-2",
+          "court": "B",
+          "at": "11:40"
+        },
+        {
+          "id": "m-r1-1",
+          "court": "B",
+          "at": "11:45"
+        }
+      ],
+      "end": "12:03",
+      "estimate": {
+        "totalDurationMinutes": 90,
+        "bestCaseMinutes": 90,
+        "worstCaseMinutes": 90,
+        "perCourtMinutes": [
+          60,
+          60
+        ],
+        "ceremonyMinutes": 30
+      }
+    },
+    {
+      "name": "mixed-all-blocks-3courts-bronze-off",
+      "slots": [
+        {
+          "id": "Pool A-0",
+          "court": "A",
+          "at": "11:30"
+        },
+        {
+          "id": "Pool A-1",
+          "court": "A",
+          "at": "11:35"
+        },
+        {
+          "id": "Pool A-2",
+          "court": "A",
+          "at": "11:40"
+        },
+        {
+          "id": "m-r1-0",
+          "court": "A",
+          "at": "11:45"
+        },
+        {
+          "id": "m-r1-3",
+          "court": "A",
+          "at": "11:51"
+        },
+        {
+          "id": "m-r3-0",
+          "court": "A",
+          "at": "11:57"
+        },
+        {
+          "id": "Pool B-0",
+          "court": "B",
+          "at": "11:30"
+        },
+        {
+          "id": "Pool B-1",
+          "court": "B",
+          "at": "11:35"
+        },
+        {
+          "id": "Pool B-2",
+          "court": "B",
+          "at": "11:40"
+        },
+        {
+          "id": "m-r1-1",
+          "court": "B",
+          "at": "11:45"
+        },
+        {
+          "id": "m-r2-0",
+          "court": "B",
+          "at": "11:51"
+        },
+        {
+          "id": "Pool C-0",
+          "court": "C",
+          "at": "11:30"
+        },
+        {
+          "id": "Pool C-1",
+          "court": "C",
+          "at": "11:35"
+        },
+        {
+          "id": "Pool C-2",
+          "court": "C",
+          "at": "11:40"
+        },
+        {
+          "id": "m-r1-2",
+          "court": "C",
+          "at": "11:45"
+        },
+        {
+          "id": "m-r2-1",
+          "court": "C",
+          "at": "11:51"
+        }
+      ],
+      "end": "12:03",
+      "estimate": {
+        "totalDurationMinutes": 96,
+        "bestCaseMinutes": 96,
+        "worstCaseMinutes": 96,
+        "perCourtMinutes": [
+          66,
+          60,
+          60
+        ],
+        "ceremonyMinutes": 30
+      }
+    },
+    {
+      "name": "twoday-day2-knockout-2courts",
+      "slots": [
+        {
+          "id": "m-r1-0",
+          "court": "A",
+          "at": "11:30"
+        },
+        {
+          "id": "m-r1-2",
+          "court": "A",
+          "at": "11:36"
+        },
+        {
+          "id": "m-r2-1",
+          "court": "A",
+          "at": "11:42"
+        },
+        {
+          "id": "m-bronze",
+          "court": "A",
+          "at": "11:48"
+        },
+        {
+          "id": "m-r3-0",
+          "court": "A",
+          "at": "11:54"
+        },
+        {
+          "id": "m-r1-1",
+          "court": "B",
+          "at": "11:30"
+        },
+        {
+          "id": "m-r1-3",
+          "court": "B",
+          "at": "11:36"
+        },
+        {
+          "id": "m-r2-0",
+          "court": "B",
+          "at": "11:42"
+        }
+      ],
+      "end": "12:00",
+      "estimate": {
+        "totalDurationMinutes": 56,
+        "bestCaseMinutes": 56,
+        "worstCaseMinutes": 56,
+        "perCourtMinutes": [
+          56,
+          56
+        ],
+        "ceremonyMinutes": 0
+      }
+    },
+    {
+      "name": "twoday-day1-league-1court",
+      "slots": [
+        {
+          "id": "m000",
+          "court": "A",
+          "at": "11:40"
+        },
+        {
+          "id": "m001",
+          "court": "A",
+          "at": "11:45"
+        },
+        {
+          "id": "m002",
+          "court": "A",
+          "at": "11:50"
+        },
+        {
+          "id": "m003",
+          "court": "A",
+          "at": "11:55"
+        },
+        {
+          "id": "m004",
+          "court": "A",
+          "at": "13:00"
+        },
+        {
+          "id": "m005",
+          "court": "A",
+          "at": "13:05"
+        },
+        {
+          "id": "m007",
+          "court": "A",
+          "at": "13:10"
+        },
+        {
+          "id": "m006",
+          "court": "A",
+          "at": "13:15"
+        },
+        {
+          "id": "m009",
+          "court": "A",
+          "at": "13:20"
+        },
+        {
+          "id": "m008",
+          "court": "A",
+          "at": "13:25"
+        }
+      ],
+      "end": "13:30",
+      "estimate": {
+        "totalDurationMinutes": 115,
+        "bestCaseMinutes": 115,
+        "worstCaseMinutes": 115,
+        "perCourtMinutes": [
+          115
+        ],
+        "ceremonyMinutes": 0
+      }
+    },
+    {
+      "name": "sameday-separate-shiaijo-afternoon",
+      "slots": [
+        {
+          "id": "m-r1-0",
+          "court": "B",
+          "at": "14:15"
+        },
+        {
+          "id": "m-r1-1",
+          "court": "B",
+          "at": "14:21"
+        },
+        {
+          "id": "m-r2-0",
+          "court": "B",
+          "at": "14:27"
+        }
+      ],
+      "end": "14:33",
+      "estimate": {
+        "totalDurationMinutes": 20,
+        "bestCaseMinutes": 20,
+        "worstCaseMinutes": 20,
+        "perCourtMinutes": [
+          20
+        ],
+        "ceremonyMinutes": 0
+      }
+    },
+    {
+      "name": "sameday-shared-shiaijo-with-floor",
+      "slots": [
+        {
+          "id": "m-r1-0",
+          "court": "A",
+          "at": "13:30"
+        },
+        {
+          "id": "m-r2-0",
+          "court": "A",
+          "at": "13:36"
+        },
+        {
+          "id": "m-r1-1",
+          "court": "B",
+          "at": "14:00"
+        }
+      ],
+      "end": "14:06",
+      "estimate": {
+        "totalDurationMinutes": 13,
+        "bestCaseMinutes": 13,
+        "worstCaseMinutes": 13,
+        "perCourtMinutes": [
+          13,
+          7
+        ],
+        "ceremonyMinutes": 0
+      }
+    },
+    {
+      "name": "start-inside-lunch-knockout",
+      "slots": [
+        {
+          "id": "m-r1-0",
+          "court": "A",
+          "at": "13:00"
+        },
+        {
+          "id": "m-r1-1",
+          "court": "A",
+          "at": "13:06"
+        },
+        {
+          "id": "m-r2-0",
+          "court": "A",
+          "at": "13:12"
+        }
+      ],
+      "end": "13:18",
+      "estimate": {
+        "totalDurationMinutes": 70,
+        "bestCaseMinutes": 70,
+        "worstCaseMinutes": 70,
+        "perCourtMinutes": [
+          70
+        ],
+        "ceremonyMinutes": 0
+      }
+    },
+    {
+      "name": "start-inside-lunch-mixed",
+      "slots": [
+        {
+          "id": "Pool A-0",
+          "court": "A",
+          "at": "13:00"
+        },
+        {
+          "id": "Pool A-1",
+          "court": "A",
+          "at": "13:05"
+        },
+        {
+          "id": "Pool A-2",
+          "court": "A",
+          "at": "13:10"
+        },
+        {
+          "id": "m-r1-0",
+          "court": "A",
+          "at": "13:15"
+        },
+        {
+          "id": "m-r2-0",
+          "court": "A",
+          "at": "13:21"
+        },
+        {
+          "id": "Pool B-0",
+          "court": "B",
+          "at": "13:00"
+        },
+        {
+          "id": "Pool B-1",
+          "court": "B",
+          "at": "13:05"
+        },
+        {
+          "id": "Pool B-2",
+          "court": "B",
+          "at": "13:10"
+        },
+        {
+          "id": "m-r1-1",
+          "court": "B",
+          "at": "13:15"
+        }
+      ],
+      "end": "13:27",
+      "estimate": {
+        "totalDurationMinutes": 80,
+        "bestCaseMinutes": 80,
+        "worstCaseMinutes": 80,
+        "perCourtMinutes": [
+          80,
+          73
+        ],
+        "ceremonyMinutes": 0
+      }
+    },
+    {
+      "name": "team-mixed-all-blocks-2courts",
+      "slots": [
+        {
+          "id": "Pool A-0",
+          "court": "A",
+          "at": "11:30"
+        },
+        {
+          "id": "Pool A-1",
+          "court": "A",
+          "at": "11:57"
+        },
+        {
+          "id": "Pool A-2",
+          "court": "A",
+          "at": "13:00"
+        },
+        {
+          "id": "m-r1-0",
+          "court": "A",
+          "at": "13:27"
+        },
+        {
+          "id": "m-bronze",
+          "court": "A",
+          "at": "14:01"
+        },
+        {
+          "id": "m-r2-0",
+          "court": "A",
+          "at": "14:35"
+        },
+        {
+          "id": "Pool B-0",
+          "court": "B",
+          "at": "11:30"
+        },
+        {
+          "id": "Pool B-1",
+          "court": "B",
+          "at": "11:57"
+        },
+        {
+          "id": "Pool B-2",
+          "court": "B",
+          "at": "13:00"
+        },
+        {
+          "id": "m-r1-1",
+          "court": "B",
+          "at": "13:27"
+        }
+      ],
+      "end": "15:09",
+      "estimate": {
+        "totalDurationMinutes": 260,
+        "bestCaseMinutes": 260,
+        "worstCaseMinutes": 260,
+        "perCourtMinutes": [
+          230,
+          230
+        ],
+        "ceremonyMinutes": 30
+      }
+    },
+    {
+      "name": "opening-lands-inside-lunch-knockout",
+      "slots": [
+        {
+          "id": "m-r1-0",
+          "court": "A",
+          "at": "13:00"
+        },
+        {
+          "id": "m-r1-1",
+          "court": "A",
+          "at": "13:06"
+        },
+        {
+          "id": "m-r2-0",
+          "court": "A",
+          "at": "13:12"
+        }
+      ],
+      "end": "13:18",
+      "estimate": {
+        "totalDurationMinutes": 100,
+        "bestCaseMinutes": 100,
+        "worstCaseMinutes": 100,
+        "perCourtMinutes": [
+          100
+        ],
+        "ceremonyMinutes": 0
+      }
+    },
+    {
+      "name": "league-lunch-only-1court-1130",
+      "slots": [
+        {
+          "id": "m000",
+          "court": "A",
+          "at": "11:30"
+        },
+        {
+          "id": "m001",
+          "court": "A",
+          "at": "11:35"
+        },
+        {
+          "id": "m002",
+          "court": "A",
+          "at": "11:40"
+        },
+        {
+          "id": "m003",
+          "court": "A",
+          "at": "11:45"
+        },
+        {
+          "id": "m004",
+          "court": "A",
+          "at": "11:50"
+        },
+        {
+          "id": "m005",
+          "court": "A",
+          "at": "11:55"
+        },
+        {
+          "id": "m007",
+          "court": "A",
+          "at": "13:00"
+        },
+        {
+          "id": "m006",
+          "court": "A",
+          "at": "13:05"
+        },
+        {
+          "id": "m009",
+          "court": "A",
+          "at": "13:10"
+        },
+        {
+          "id": "m008",
+          "court": "A",
+          "at": "13:15"
+        }
+      ],
+      "end": "13:20",
+      "estimate": {
+        "totalDurationMinutes": 115,
+        "bestCaseMinutes": 115,
+        "worstCaseMinutes": 115,
+        "perCourtMinutes": [
+          115
+        ],
+        "ceremonyMinutes": 0
+      }
+    },
+    {
+      "name": "ceremony-day1-first-0930",
+      "slots": [
+        {
+          "id": "Pool A-0",
+          "court": "A",
+          "at": "10:00"
+        },
+        {
+          "id": "Pool A-1",
+          "court": "A",
+          "at": "10:05"
+        },
+        {
+          "id": "Pool A-2",
+          "court": "A",
+          "at": "10:10"
+        },
+        {
+          "id": "m-r1-0",
+          "court": "A",
+          "at": "10:15"
+        },
+        {
+          "id": "m-r2-0",
+          "court": "A",
+          "at": "10:21"
+        },
+        {
+          "id": "Pool B-0",
+          "court": "B",
+          "at": "10:00"
+        },
+        {
+          "id": "Pool B-1",
+          "court": "B",
+          "at": "10:05"
+        },
+        {
+          "id": "Pool B-2",
+          "court": "B",
+          "at": "10:10"
+        },
+        {
+          "id": "m-r1-1",
+          "court": "B",
+          "at": "10:15"
+        }
+      ],
+      "end": "10:27",
+      "estimate": {
+        "totalDurationMinutes": 90,
+        "bestCaseMinutes": 90,
+        "worstCaseMinutes": 90,
+        "perCourtMinutes": [
+          60,
+          53
+        ],
+        "ceremonyMinutes": 30
+      }
+    },
+    {
+      "name": "ceremony-day1-later-1415-separate",
+      "slots": [
+        {
+          "id": "m-r1-0",
+          "court": "C",
+          "at": "14:45"
+        },
+        {
+          "id": "m-r2-0",
+          "court": "C",
+          "at": "14:51"
+        },
+        {
+          "id": "m-r1-1",
+          "court": "D",
+          "at": "14:45"
+        }
+      ],
+      "end": "14:57",
+      "estimate": {
+        "totalDurationMinutes": 73,
+        "bestCaseMinutes": 73,
+        "worstCaseMinutes": 73,
+        "perCourtMinutes": [
+          43,
+          37
+        ],
+        "ceremonyMinutes": 30
+      }
+    },
+    {
+      "name": "ceremony-day1-later-1415-shared",
+      "slots": [
+        {
+          "id": "m-r1-0",
+          "court": "A",
+          "at": "14:45"
+        },
+        {
+          "id": "m-r2-0",
+          "court": "A",
+          "at": "14:51"
+        },
+        {
+          "id": "m-r1-1",
+          "court": "B",
+          "at": "14:45"
+        }
+      ],
+      "end": "14:57",
+      "estimate": {
+        "totalDurationMinutes": 73,
+        "bestCaseMinutes": 73,
+        "worstCaseMinutes": 73,
+        "perCourtMinutes": [
+          43,
+          37
+        ],
+        "ceremonyMinutes": 30
+      }
+    },
+    {
+      "name": "ceremony-day2-first-0930",
+      "slots": [
+        {
+          "id": "m000",
+          "court": "A",
+          "at": "10:00"
+        },
+        {
+          "id": "m002",
+          "court": "A",
+          "at": "10:05"
+        },
+        {
+          "id": "m003",
+          "court": "A",
+          "at": "10:10"
+        },
+        {
+          "id": "m004",
+          "court": "A",
+          "at": "10:20"
+        },
+        {
+          "id": "m006",
+          "court": "A",
+          "at": "10:30"
+        },
+        {
+          "id": "m010",
+          "court": "A",
+          "at": "10:40"
+        },
+        {
+          "id": "m009",
+          "court": "A",
+          "at": "10:45"
+        },
+        {
+          "id": "m014",
+          "court": "A",
+          "at": "10:50"
+        },
+        {
+          "id": "m012",
+          "court": "A",
+          "at": "10:55"
+        },
+        {
+          "id": "m001",
+          "court": "B",
+          "at": "10:00"
+        },
+        {
+          "id": "m008",
+          "court": "B",
+          "at": "10:10"
+        },
+        {
+          "id": "m005",
+          "court": "B",
+          "at": "10:20"
+        },
+        {
+          "id": "m007",
+          "court": "B",
+          "at": "10:30"
+        },
+        {
+          "id": "m011",
+          "court": "B",
+          "at": "10:40"
+        },
+        {
+          "id": "m013",
+          "court": "B",
+          "at": "10:55"
+        }
+      ],
+      "end": "11:00",
+      "estimate": {
+        "totalDurationMinutes": 104,
+        "bestCaseMinutes": 104,
+        "worstCaseMinutes": 104,
+        "perCourtMinutes": [
+          74,
+          69
+        ],
+        "ceremonyMinutes": 30
+      }
+    },
+    {
+      "name": "ceremony-day1-inside-opening-0945",
+      "slots": [
+        {
+          "id": "m-r1-0",
+          "court": "C",
+          "at": "10:15"
+        },
+        {
+          "id": "m-r2-0",
+          "court": "C",
+          "at": "10:21"
+        },
+        {
+          "id": "m-r1-1",
+          "court": "D",
+          "at": "10:15"
+        }
+      ],
+      "end": "10:27",
+      "estimate": {
+        "totalDurationMinutes": 73,
+        "bestCaseMinutes": 73,
+        "worstCaseMinutes": 73,
+        "perCourtMinutes": [
+          43,
+          37
+        ],
+        "ceremonyMinutes": 30
+      }
+    }
+  ]
+}

@@ -1,0 +1,350 @@
+// draft_estimate.jsx: Schedule estimate hook and panel for unsaved competition shapes.
+// Consumed by the Add competition form (admin_setup.jsx).
+
+import { finishClock, formatEstimateMinutes, estimateRangeParts } from './admin_schedule_utils.jsx';
+
+// isShapeIdle reports true when required fields (participants count and start time)
+// are missing or empty, in which case no request is sent.
+function isShapeIdle(shape) {
+  if (!shape) return true;
+  const rawP = shape.participants;
+  if (rawP === "" || rawP === null || rawP === undefined) return true;
+  const p = Number(rawP);
+  if (!Number.isFinite(p) || p <= 0) return true;
+  const rawStart = shape.startTime;
+  if (typeof rawStart !== "string" || rawStart.trim().length === 0) return true;
+  return false;
+}
+
+// idleShiaijoText words the shiaijo a too_many_shiaijo warning leaves idle:
+// the chosen count less the usable one, both sent with the warning.
+export function idleShiaijoText(usable, chosen) {
+  const idle = chosen - usable;
+  if (idle === 1) return usable === 1 ? "a second shiaijo" : "one shiaijo";
+  return `${idle} shiaijo`;
+}
+
+// useDraftEstimate debounces shape changes by 250 ms, manages an AbortController
+// per request, and queries the draft estimate endpoint. Returns
+// { estimate, loading, error, retry }: retry asks again for the same shape.
+export function useDraftEstimate(shape, password) {
+  const [estimate, setEstimate] = React.useState(null);
+  const [loading, setLoading] = React.useState(false);
+  const [error, setError] = React.useState(null);
+  const [attempt, setAttempt] = React.useState(0);
+  const retry = React.useCallback(() => setAttempt((n) => n + 1), []);
+
+  const timerRef = React.useRef(null);
+  const controllerRef = React.useRef(null);
+  const shapeRef = React.useRef(shape);
+  const passwordRef = React.useRef(password);
+  // Declared before the request effect so the refs hold this render's values
+  // when it runs, and when its debounced request reads them later.
+  React.useEffect(() => {
+    shapeRef.current = shape;
+    passwordRef.current = password;
+  });
+
+  // Track serialization of shape to detect changes.
+  const shapeKey = JSON.stringify(shape);
+
+  React.useEffect(() => {
+    // If shape lacks participants or start time, report idle state.
+    if (isShapeIdle(shapeRef.current)) {
+      if (timerRef.current) {
+        clearTimeout(timerRef.current);
+        timerRef.current = null;
+      }
+      if (controllerRef.current) {
+        controllerRef.current.abort();
+        controllerRef.current = null;
+      }
+      setEstimate(null);
+      setLoading(false);
+      setError(null);
+      return;
+    }
+
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+    }
+
+    timerRef.current = setTimeout(async () => {
+      timerRef.current = null;
+      if (controllerRef.current) {
+        controllerRef.current.abort();
+      }
+      const controller = new AbortController();
+      controllerRef.current = controller;
+
+      setLoading(true);
+
+      const api = window.API;
+      const curShape = shapeRef.current;
+      const curPw = passwordRef.current;
+
+      try {
+        const res = await api.estimateDraft(curShape, curPw, controller.signal);
+        if (!controller.signal.aborted) {
+          setEstimate(res);
+          setError(null);
+          setLoading(false);
+        }
+      } catch (err) {
+        if (!controller.signal.aborted && err.name !== "AbortError") {
+          // A fetch that never reached the server throws a TypeError whose
+          // browser wording means nothing to an organiser.
+          setError(err instanceof TypeError || !err.message ? DRAFT_ESTIMATE_FAILED : err.message);
+          setEstimate(null);
+          setLoading(false);
+        }
+      }
+    }, 250);
+
+    return () => {
+      if (timerRef.current) {
+        clearTimeout(timerRef.current);
+        timerRef.current = null;
+      }
+      if (controllerRef.current) {
+        controllerRef.current.abort();
+        controllerRef.current = null;
+      }
+    };
+  }, [shapeKey, password, attempt]);
+
+  // Unmount cleanup: cancel any pending timer and abort in-flight controller.
+  React.useEffect(() => {
+    return () => {
+      if (timerRef.current) {
+        clearTimeout(timerRef.current);
+        timerRef.current = null;
+      }
+      if (controllerRef.current) {
+        controllerRef.current.abort();
+        controllerRef.current = null;
+      }
+    };
+  }, []);
+
+  return { estimate, loading, error, retry };
+}
+
+// What the Add competition form says when no estimate came back. The form
+// itself is unaffected, so it says the competition can still be created.
+export const DRAFT_ESTIMATE_FAILED = "Could not work out an estimate right now.";
+export const DRAFT_ESTIMATE_STILL_CREATE = "You can still create the competition.";
+
+// DraftEstimatePanel renders a draft competition schedule estimate.
+export function DraftEstimatePanel({
+  estimate,
+  loading,
+  error,
+  shape,
+  tournamentCourts,
+  onChangeShiaijo,
+  onEditTournament,
+  onRetry,
+}) {
+  if (error) {
+    return (
+      <div className="alert alert--warn draft-estimate__error" role="alert" data-testid="draft-estimate-error">
+        {error} {DRAFT_ESTIMATE_STILL_CREATE}
+        {onRetry && (
+          <>
+            {' '}
+            <button type="button" className="btn btn--link" onClick={onRetry} disabled={loading}>
+              {loading ? "Trying again…" : "Try again"}
+            </button>
+          </>
+        )}
+      </div>
+    );
+  }
+
+  const isTeam = shape?.kind === "team" || Number(shape?.teamSize) > 0;
+
+  if (!estimate) {
+    if (loading) {
+      return (
+        <div className="draft-estimate draft-estimate--loading">
+          <div className="draft-estimate__note" data-testid="draft-estimate-note">
+            Working out…
+          </div>
+        </div>
+      );
+    }
+    return (
+      <div className="draft-estimate">
+        <div className="draft-estimate__note" data-testid="draft-estimate-note">
+          Enter the expected number of {isTeam ? "teams" : "participants"} and a start time to see an estimate.
+        </div>
+      </div>
+    );
+  }
+
+  // 1. Finish line
+  const { clock: finishTime, nextDay } = finishClock(shape?.startTime, estimate.totalDurationMinutes);
+  let finishElement = null;
+  if (nextDay) {
+    finishElement = (
+      <div className="draft-estimate__finish draft-estimate__finish--warn alert alert--warn" data-testid="draft-estimate-finish">
+        Finishes about {finishTime}, after midnight. Start it earlier or give it more shiaijo.
+      </div>
+    );
+  } else if (finishTime) {
+    finishElement = (
+      <div className="draft-estimate__finish" data-testid="draft-estimate-finish">
+        Finishes about {finishTime}
+      </div>
+    );
+  }
+
+  // 2. Duration line
+  const durationElement = (
+    <div className="draft-estimate__duration" data-testid="draft-estimate-duration">
+      Est. duration: about {formatEstimateMinutes(estimate.totalDurationMinutes)}
+    </div>
+  );
+
+  // 3. Derived matches line
+  const matchWord = isTeam ? "team match" : "match";
+  const matchesWord = isTeam ? "team matches" : "matches";
+  const matchParts = [];
+  if (estimate.poolMatches > 0) {
+    matchParts.push(`${estimate.poolMatches} pool ${estimate.poolMatches === 1 ? matchWord : matchesWord}`);
+  }
+  if (estimate.knockoutMatches > 0) {
+    matchParts.push(`${estimate.knockoutMatches} knockout ${estimate.knockoutMatches === 1 ? matchWord : matchesWord}`);
+  }
+  const derivedMatchesElement = matchParts.length > 0 ? (
+    <div className="draft-estimate__matches">
+      {matchParts.join(" · ")}
+    </div>
+  ) : null;
+
+  // 4. Per shiaijo line
+  const courtLabels = (Array.isArray(shape?.courtLabels) && shape.courtLabels.length > 0)
+    ? shape.courtLabels
+    : ((Array.isArray(tournamentCourts) && tournamentCourts.length > 0)
+        ? tournamentCourts
+        : null);
+
+  const perCourt = Array.isArray(estimate.perCourtMinutes) ? estimate.perCourtMinutes : [];
+  const perCourtParts = perCourt.map((m, idx) => {
+    const label = (courtLabels && courtLabels[idx]) || String.fromCharCode(65 + idx);
+    if (m === 0) {
+      return `${label} has no matches`;
+    }
+    return `${label} about ${formatEstimateMinutes(m)}`;
+  });
+  const perShiaijoElement = perCourtParts.length > 0 ? (
+    <div className="draft-estimate__per-shiaijo" data-testid="draft-estimate-per-shiaijo">
+      Per shiaijo: {perCourtParts.join(" · ")}
+    </div>
+  ) : null;
+
+  // 5. Timing line
+  let timingElement = null;
+  if (estimate.timing) {
+    const timing = estimate.timing;
+    const multiplier = timing.multiplier;
+    const allowancePct = timing.allowancePct;
+    const breaks = Array.isArray(timing.breaks) ? timing.breaks : [];
+    let pausesText = "No pauses that day.";
+    if (breaks.length > 0) {
+      const breakItems = breaks.map(b => `${b.name} ${b.start} to ${b.end}`);
+      pausesText = `Pauses that day: ${breakItems.join(", ")}.`;
+    }
+    timingElement = (
+      <div className="draft-estimate__timing" data-testid="draft-estimate-timing">
+        <span>
+          Uses this tournament&apos;s timing: each match counts as {multiplier} times its clock time, plus {allowancePct}% for the slowest shiaijo. {pausesText}
+        </span>
+        {onEditTournament && (
+          <button
+            type="button"
+            className="btn btn--sm btn--ghost"
+            onClick={onEditTournament}
+          >
+            Edit tournament
+          </button>
+        )}
+      </div>
+    );
+  }
+
+  // 6. Kachinuki range
+  let kachinukiElement = null;
+  if (shape?.teamMatchType === "kachinuki") {
+    const range = estimateRangeParts(estimate);
+    if (range) {
+      const bestFinish = finishClock(shape?.startTime, range.best);
+      const worstFinish = finishClock(shape?.startTime, range.worst);
+      // The finish line already warns when the average runs past midnight;
+      // this one warns when only the worst case does.
+      const worstAfterMidnight = worstFinish.nextDay && !nextDay;
+      if (bestFinish.clock && worstFinish.clock) {
+        kachinukiElement = worstAfterMidnight ? (
+          <div className="draft-estimate__kachinuki alert alert--warn" data-testid="draft-estimate-kachinuki">
+            Could end {bestFinish.clock} to {worstFinish.clock}, after midnight. Start it earlier or give it more shiaijo.
+          </div>
+        ) : (
+          <div className="draft-estimate__kachinuki" data-testid="draft-estimate-kachinuki">
+            Could end {bestFinish.clock} to {worstFinish.clock}
+          </div>
+        );
+      }
+    }
+  }
+
+  // 7. Warnings
+  const warnings = Array.isArray(estimate.warnings) ? estimate.warnings : [];
+  const warningItems = warnings.map((w) => {
+    if (w.code === "too_many_shiaijo") {
+      const count = w.participants;
+      const pLabel = isTeam ? (count === 1 ? "team" : "teams") : (count === 1 ? "participant" : "participants");
+      const usable = w.usable;
+      const mLabel = usable === 1 ? "match" : "matches";
+      return (
+        <div key={w.code} className="draft-estimate__warning alert alert--warn" role="alert" data-testid="draft-estimate-warning">
+          <span>
+            With {count} {pLabel} only {usable} {mLabel} can run at a time, so {idleShiaijoText(usable, w.chosen)} would stand empty. Use {usable} shiaijo.
+          </span>
+          {onChangeShiaijo && (
+            <button
+              type="button"
+              className="btn btn--sm btn--ghost"
+              onClick={onChangeShiaijo}
+            >
+              Change shiaijo
+            </button>
+          )}
+        </div>
+      );
+    }
+    return null;
+  }).filter(Boolean);
+
+  return (
+    <div className={`draft-estimate ${loading ? "draft-estimate--loading" : ""}`}>
+      {finishElement}
+      {durationElement}
+      {derivedMatchesElement}
+      {perShiaijoElement}
+      {kachinukiElement}
+      {timingElement}
+      {warningItems}
+      {loading && (
+        <div className="draft-estimate__note" data-testid="draft-estimate-note">
+          Working out…
+        </div>
+      )}
+    </div>
+  );
+}
+
+if (typeof window !== "undefined") {
+  window.useDraftEstimate = useDraftEstimate;
+  window.DraftEstimatePanel = DraftEstimatePanel;
+}

@@ -172,7 +172,7 @@ func TestPushKnockoutPastPools(t *testing.T) {
 // alone rather than read as 09:00 and re-timed.
 func TestPushKnockoutPastPools_LeavesWhatItNeedNotMove(t *testing.T) {
 	comp := &state.Competition{StartTime: "09:00", KnockoutMatchDurationSeconds: 240, PoolMatchDurationSeconds: 240, Courts: []string{"A", "B"}}
-	tournament := &state.Tournament{LunchBlock: "1h"}
+	tournament := &state.Tournament{Pauses: []state.Pause{{Name: "Lunch", Start: "12:00", Length: "1h"}}}
 	ko := func(id, court, at string, n int) state.BracketMatch {
 		return state.BracketMatch{ID: id, Court: court, ScheduledAt: at, MatchNumber: n, Status: state.MatchStatusScheduled}
 	}

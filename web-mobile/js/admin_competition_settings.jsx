@@ -5,7 +5,9 @@
 
 import { teamMatchTypeHint } from './pool_ids.jsx';
 import { DurationInput } from './duration.jsx';
-import { EstimateHeadline } from './admin_schedule_utils.jsx';
+import { EstimateHeadline, timeToMinutes } from './admin_schedule_utils.jsx';
+import { readRetimePreview, RetimeWarning } from './retime_warning.jsx';
+import { formatPerShiaijoRow, formatPausesRow } from './admin_competition_overview.jsx';
 // bc-qual LP-5a: the "Knockout qualifiers" preview arithmetic AND the
 // pool-size/winners form-coupling rules are shared with admin_setup.jsx
 // (the competition CREATE form renders the same "Pool size is a" /
@@ -21,10 +23,11 @@ import {
 // bc-symm Phase 3: option lists, copy and coupling rules shared with the
 // competition CREATE form (admin_setup.jsx's AdminCreateCompetition), so the
 // two screens cannot drift apart. See competition_shape.jsx's header for the
-// full split rationale. shapeConfigForSave, resolveTeamSize and
-// kindChangeBlockedReason are settings-only imports: the create form builds
-// a payload from scratch rather than re-shaping a stored one, and it has no
-// roster that could ever block a kind change.
+// full split rationale. resolveTeamSize and kindChangeBlockedReason are
+// settings-only imports (shapeConfigForSave moved with the PUT body into
+// competition_put_body.jsx): the create form builds a payload from scratch
+// rather than re-shaping a stored one, and it has no roster that could ever
+// block a kind change.
 import {
   LABEL_KIND, KIND_OPTIONS, LABEL_FORMAT, FORMAT_OPTIONS, formatHint,
   LABEL_POOL_FORMAT, POOL_FORMAT_OPTIONS, poolFormatVisible,
@@ -38,7 +41,7 @@ import {
   LABEL_TEAM_SIZE, LABEL_TEAM_MATCH_TYPE, TEAM_MATCH_TYPE_OPTIONS,
   LABEL_ZEKKEN, LABEL_ENGI,
   teamFieldsVisible, zekkenApplies, engiApplies, teamSizeError,
-  shapeConfigForSave, resolveTeamSize, kindChangeBlockedReason,
+  resolveTeamSize, kindChangeBlockedReason,
   FORMAT_LEAGUE, FORMAT_MIXED, POOL_FORMAT_PARTIAL,
   MIN_TEAM_SIZE, poolSettingsError, pendingConfigClears, swissSettingsError,
   CLEARED_FIELD_LABELS, optionLabel, poolFormatHint, resolvePoolFormat,
@@ -54,12 +57,19 @@ import {
 import { PillGroup, PillButton, CheckboxField, NumberField, TextField } from './competition_fields.jsx';
 import { seededRanks } from './admin_helpers.jsx';
 import { useUnsavedInput } from './app_version.jsx';
+import {
+  settingsPutBody,
+  describeSettingsEdits,
+  LABEL_EXPECTED_PARTICIPANTS,
+  LABEL_EXPECTED_TEAMS,
+  expectedParticipantsHint,
+  MAX_EXPECTED_PARTICIPANTS,
+} from './competition_put_body.jsx';
 
 const { useState, useEffect, useRef, useMemo } = React;
 
 const dmyToIso = window.dmyToIso;
 const isoToDmy = window.isoToDmy;
-const validateAndNormalizeDate = window.validateAndNormalizeDate;
 const decideNumericUpdate = window.decideNumericUpdate;
 const deriveTournamentDays = window.deriveTournamentDays;
 const MIN_YEAR = window.MIN_YEAR;
@@ -74,6 +84,8 @@ export function formatCompMinutes(m) {
   if (h === 0) return `${min}m`;
   return `${h}h ${String(min).padStart(2, "0")}m`;
 }
+
+export { readRetimePreview };
 
 // Human-readable rendering of a cleared field's CURRENT (about-to-be-lost)
 // value. Booleans read "on" (pendingConfigClears only ever reports a
@@ -103,7 +115,11 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
   // from the wire), and a plain copy would read that as "off" -- wrong for
   // e.g. a legacy non-naginata knockout, whose effective rule is "on". See
   // effectiveTwoThirdPlaces's own comment for the full resolution order.
-  const [local, setLocal] = useState({ ...c, twoThirdPlaces: effectiveTwoThirdPlaces(c) });
+  const [local, setLocal] = useState({
+    ...c,
+    twoThirdPlaces: effectiveTwoThirdPlaces(c),
+    expectedParticipants: c.expectedParticipants,
+  });
   // Manual-save model (mp-3xn6): edits only persist when the operator clicks
   // "Save changes", matching the Tournament Edit-details page. isDirty drives
   // the unsaved indicator + the Save button's enabled state; saving disables
@@ -145,6 +161,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
   const [compEstimate, setCompEstimate] = useState(null);
   const [compEstimateLoading, setCompEstimateLoading] = useState(false);
   const [compEstimateErr, setCompEstimateErr] = useState(null);
+  const pausesKey = JSON.stringify(tournament?.pauses || []);
   useEffect(() => {
     if (!c.id) return;
     const controller = new AbortController();
@@ -165,14 +182,61 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
   // in `c`, not on every unsaved edit. This also fires on mount and on any
   // SSE-driven competition_updated / schedule_updated refresh.
   //
-  // Tournament ceremony/timing fields are included so the estimate refreshes
-  // when the operator changes openingBlock, lunchBlock, closingBlock,
-  // clockToElapsedMultiplier, or slowestCourtBufferPct on the tournament
-  // settings screen and then returns here: otherwise the display would be
-  // stale until a competition field changed (Finding 5 fix).
-  }, [c.id, c.format, c.kind, c.poolMatchDurationSeconds, c.knockoutMatchDurationSeconds, c.courts, c.teamSize, c.poolSize, c.poolSizeMode, c.poolWinners, c.roundRobin, c.poolFormat, c.swissRounds, c.checkInEnabled, password,
-    tournament?.openingBlock, tournament?.lunchBlock, tournament?.closingBlock,
+  // Tournament timing fields and pauses are included so the estimate refreshes
+  // when the operator changes pauses, clockToElapsedMultiplier, or
+  // slowestCourtBufferPct on the tournament settings screen and then returns here:
+  // otherwise the display would be stale until a competition field changed.
+  }, [c.id, c.format, c.kind, c.poolMatchDurationSeconds, c.knockoutMatchDurationSeconds, c.courts, c.teamSize, c.teamMatchType, c.poolSize, c.poolSizeMode, c.poolWinners, c.roundRobin, c.poolFormat, c.swissRounds, c.checkInEnabled,
+    c.extraQualifiers, c.twoThirdPlaces, c.naginata, c.expectedParticipants, c.status, c.date, c.startTime, password,
+    pausesKey,
     tournament?.clockToElapsedMultiplier, tournament?.slowestCourtBufferPct]);
+
+  // Retime dry-run preview (c-setretime): when a draw-ready competition has its
+  // date or start time edited, fetch a preview of match movements before Save.
+  // Debounced by 250ms; aborts in-flight request when field changes or unmounts.
+  const [retimePreview, setRetimePreview] = useState(null);
+  useEffect(() => {
+    const isDrawn = local.status === "draw-ready";
+    const savedDate = c.date || "";
+    const stagedDate = local.date || "";
+    const savedStartTime = c.startTime || "";
+    const stagedStartTime = local.startTime || "";
+    const timeOrDateChanged = stagedDate !== savedDate || stagedStartTime !== savedStartTime;
+
+    if (!isDrawn || !timeOrDateChanged) {
+      setRetimePreview(null);
+      return;
+    }
+
+    if (!stagedDate || !stagedStartTime || timeToMinutes(stagedStartTime) === null) {
+      setRetimePreview(null);
+      return;
+    }
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => {
+      if (controller.signal.aborted) return;
+      window.API.previewMove({
+        competitionId: c.id,
+        date: stagedDate,
+        startTime: stagedStartTime,
+        courts: c.courts || [],
+      }, password, controller.signal).then((answer) => {
+        if (!controller.signal.aborted) {
+          setRetimePreview(readRetimePreview(answer));
+        }
+      }).catch(() => {
+        if (!controller.signal.aborted) {
+          setRetimePreview(null);
+        }
+      });
+    }, 250);
+
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [local.status, local.date, local.startTime, c.date, c.startTime, c.id, c.courts, password]);
   // AdminSettings unmounts when the user navigates to a different section
   // via onSection() (AdminCompetition rerenders with a different child).
   // saveNow's .then/.catch and the delete handler's finally fire on
@@ -185,7 +249,13 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
   // when the handler was defined). Same shape as admin.jsx's tRef/onUpdateRef
   // pattern from round-11.
   const cRef = useRef(c);
-  useEffect(() => { cRef.current = c; }, [c]);
+  const configVersionRef = useRef(null);
+  useEffect(() => {
+    cRef.current = c;
+    if (!c?.configVersion) {
+      configVersionRef.current = "";
+    }
+  }, [c]);
   const localRef = useRef(local);
   useEffect(() => { localRef.current = local; }, [local]);
 
@@ -203,6 +273,14 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
   // effect AND overwritten by saveNow: net effect: saving one field silently
   // reverts simultaneous edits to other fields. Caught by Copilot round-15.
   const editedFieldsRef = useRef(new Set());
+  const [conflict, setConflict] = useState(null);
+
+  const markEdited = (k) => {
+    if (editedFieldsRef.current.size === 0) {
+      configVersionRef.current = cRef.current?.configVersion || "";
+    }
+    editedFieldsRef.current.add(k);
+  };
 
   // Sync server-driven changes into local state (SSE → AdminApp → c prop).
   // For each field on `c`, propagate to `local` UNLESS the user has an
@@ -238,9 +316,12 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
       if (!editedFieldsRef.current.has("twoThirdPlaces")) {
         next.twoThirdPlaces = effectiveTwoThirdPlaces(latestC);
       }
+      if (!editedFieldsRef.current.has("expectedParticipants")) {
+        next.expectedParticipants = latestC.expectedParticipants;
+      }
       return next;
     });
-  }, [c.id, c.name, c.date, c.startTime, c.poolSize, c.poolWinners, c.poolSizeMode, c.courts, c.roundRobin, c.withZekkenName, c.teamSize, c.numberPrefix, c.format, c.kind, c.status, c.poolFormat, c.poolMatchDurationSeconds, c.knockoutMatchDurationSeconds, c.swissRounds, c.swissCurrentRound, c.naginata, c.engi, c.checkInEnabled, c.leagueTiebreakTopN, c.leagueTwoThirdPlaces, c.twoThirdPlaces, c.teamMatchType]);
+  }, [c.id, c.name, c.date, c.startTime, c.poolSize, c.poolWinners, c.poolSizeMode, c.courts, c.roundRobin, c.withZekkenName, c.teamSize, c.numberPrefix, c.format, c.kind, c.status, c.poolFormat, c.poolMatchDurationSeconds, c.knockoutMatchDurationSeconds, c.swissRounds, c.swissCurrentRound, c.naginata, c.engi, c.checkInEnabled, c.leagueTiebreakTopN, c.leagueTwoThirdPlaces, c.twoThirdPlaces, c.teamMatchType, c.expectedParticipants]);
 
   const saveNow = () => {
     // Build `effective` from the LATEST server-known state (cRef.current)
@@ -251,50 +332,19 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
     // fields. Caught by Copilot round-15.
     const latestC = cRef.current;
     const localSnap = localRef.current;
-    const effective = { ...latestC };
+    const edits = {};
     editedFieldsRef.current.forEach(k => {
-      effective[k] = localSnap[k];
+      edits[k] = localSnap[k];
     });
-    // twoThirdPlaces (bc-3rdp): if the operator touched it this session, their
-    // choice wins (already staged as a real boolean in localSnap by the
-    // checkbox's onChange). Otherwise DERIVE it via effectiveTwoThirdPlaces
-    // rather than trusting latestC.twoThirdPlaces raw -- a legacy competition
-    // has no stored value at all, and sending `false` for one on every
-    // unrelated settings save (this field is round-tripped unconditionally
-    // below, like naginata/teamMatchType) would silently flip its
-    // effective rule from "on" (via the !naginata fallback) to an explicit
-    // "off" the operator never chose.
-    effective.twoThirdPlaces = editedFieldsRef.current.has("twoThirdPlaces")
-      ? !!localSnap.twoThirdPlaces
-      : effectiveTwoThirdPlaces(latestC);
 
-    // Use the shared validator (admin_helpers.jsx). Returns the
-    // canonical DD-MM-YYYY form on success, or an error message on
-    // failure (bad shape, semantic-invalid day, year out of range).
-    //
-    // Skip validation for empty date: the backend's validateDateDMY
-    // accepts "" as "Date TBA" and competitions created via the import
-    // path can land here with an empty Date. Without this skip, the
-    // user would be unable to save ANY unrelated setting on a date-less
-    // competition (round-robin toggle, pool size, etc.): saveNow would
-    // reject with "Invalid date" even though the user hasn't touched the date.
-    let dateNorm = "";
-    if (effective.date && effective.date.trim() !== "") {
-      const { norm, error: dateError } = validateAndNormalizeDate(effective.date);
-      if (dateError) {
-        setSaveErr(dateError);
-        return;
-      }
-      dateNorm = norm;
+    const version = configVersionRef.current != null ? configVersionRef.current : (latestC.configVersion || "");
+    const res = settingsPutBody(latestC, edits, version);
+    if (res.error) {
+      setSaveErr(res.error);
+      return;
     }
+    const finalNext = res.body;
 
-    // Trim before comparing AND before sending. The backend trims
-    // `comp.Name` on save, so without normalizing here the JS-side
-    // uniqueness check would compare "  Men's Cup  " against the
-    // canonical "Men's Cup" and miss: landing two competitions with the
-    // same effective name. Send the trimmed value so the value the user
-    // sees in the input matches what the server stores.
-    const trimmedName = (effective.name || "").trim();
     // Cross-file guard symmetry with the tournament edit/create paths
     // (admin_setup.jsx AdminEditTournament:80, app.jsx CreateTournament:410)
     // and with handlers_competition.go PUT (which now returns 400 on
@@ -302,230 +352,14 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
     // with an empty Name fires a wasted PUT roundtrip and only surfaces the
     // error via the inline .catch handler. Keep the failure inline + immediate
     // like the date validation above.
-    if (!trimmedName) {
-      setSaveErr("Competition name is required.");
-      return;
-    }
-    if (trimmedName.toLowerCase() !== latestC.name.toLowerCase()) {
-      const exists = (tournament.competitions || []).some(cc => cc.id !== latestC.id && cc.name.toLowerCase() === trimmedName.toLowerCase());
+    if (finalNext.name.toLowerCase() !== latestC.name.toLowerCase()) {
+      const exists = (tournament.competitions || []).some(cc => cc.id !== latestC.id && cc.name.toLowerCase() === finalNext.name.toLowerCase());
       if (exists) {
-        setSaveErr(`Competition name "${trimmedName}" is already in use.`);
+        setSaveErr(`Competition name "${finalNext.name}" is already in use.`);
         return;
       }
     }
 
-    // cutNumberPrefix (competition_shape.jsx,): the TextField's
-    // onChange already runs this per keystroke, so `effective.numberPrefix`
-    // should already be trimmed and character-safe-capped -- this is a
-    // defensive re-application at the payload boundary, the same posture
-    // normalizeConfigForFormat/normalizeConfigForKind take (only ever
-    // called here, never a second time from the control's own onChange).
-    // Historically this line only trimmed (`.trim()`), because the
-    // per-keystroke cut used `.substring(0, 3)` and never trimmed, so
-    // typing "  A" stored "  A" in local state and (without this) landed
-    // "  A" on the server; the CREATE flow (AdminCreateCompetition.create's
-    // deriveCompetitionName + trim chain in admin_setup.jsx) already
-    // trimmed at create time, so this mirrored that for the SETTINGS edit
-    // flow. cutNumberPrefix now does both jobs in one call.
-    const trimmedPrefix = cutNumberPrefix(effective.numberPrefix);
-    // Build the PUT payload from settings fields ONLY: do NOT spread the
-    // full `c` snapshot or the full `next` snapshot. Pre-fix this was
-    // `{ ...c, ...next, ... }`, which carried `local.status` and
-    // `local.players` (and any other field the JSX/effects don't touch)
-    // into the PUT body. If the sync-to-local effect deps list was
-    // incomplete for any such field, SSE-pushed changes to that field
-    // would not propagate into `local`, and the next save of ANY unrelated
-    // setting would PUT the stale value back to the server: effectively
-    // reverting the server-side change. Whitelisting the payload makes
-    // AdminSettings genuinely settings-only and decouples save correctness
-    // from the deps-list completeness of the sync effect.
-    //
-    // Fields server-managed via dedicated endpoints (status, players,
-    // hasParticipantIDs) are deliberately excluded. If a new settings
-    // field is added to the JSX or the OpenAPI settings list, also add
-    // it here.
-    //
-    // safeInt for the numeric fields: decideNumericUpdate stores NaN in
-    // local state when the user clears a number input (so the render
-    // layer can show "" instead of "0"). If the user clears swissRounds and
-    // then clicks Save, the cleared swissRounds is still NaN in the edited
-    // overlay. JSON.stringify({n: NaN}) produces '{"n":null}'. Go binds
-    // JSON null to int as 0: backend transform writes 0 to disk,
-    // clobbering the prior good value. Falling back to `latestC.<field>`
-    // when the effective value isn't a usable positive integer preserves
-    // the disk value until the user types a valid replacement.
-    const safeInt = (v, fallback) =>
-      Number.isFinite(v) && Number.isInteger(v) && v >= 1 ? v : fallback;
-    // safeNonNegInt is the >=0 sibling, for the per-phase duration fields and
-    // for poolSize/poolWinners. Same NaN/fractional/negative guards as
-    // safeInt; the only difference is the lower bound, and the bound is the
-    // whole point: each of these fields has a legitimate 0 that safeInt's
-    // >=1 floor would read as invalid input and replace with the stale
-    // stored value.
-    //
-    // T047: on a duration, 0 means "unset, use the scheduler default", so
-    // clearing one has to round-trip as 0 or it cannot be reset.
-    // poolSize/poolWinners (below, read from `shaped`) joined it for the
-    // same shape of reason: normalizeConfigForFormat's 0 going out of
-    // "mixed" is a DECISION (no pool phase to size), not a cleared input,
-    // and re-sending the stale mixed-only value would silently defeat the
-    // clear.
-    //
-    // teamSize is NOT one of its callers, though it was until the review
-    // round, and the reason it left is worth keeping: 0 is teamSize's
-    // required value for an INDIVIDUAL kind, so it needed the >=0 bound for
-    // exactly the reason above -- but the guard was reading
-    // normalizeConfigForKind's OUTPUT, which is always a finite integer, so
-    // it never fired at all. It is resolved against the stored value BEFORE
-    // shaping instead (resolveTeamSize, below).
-    //
-    // The NaN fallback to latestC.<field> still protects a field the
-    // operator never touched from being zeroed by an unrelated save.
-    const safeNonNegInt = (v, fallback) =>
-      Number.isFinite(v) && Number.isInteger(v) && v >= 0 ? v : fallback;
-
-    // The ONE place normalization runs now. It used to run on the
-    // Format/Kind pill's onClick itself (staging
-    // normalizeConfigForFormat/normalizeConfigForKind's result straight
-    // into `local`), which meant the operator's real values were
-    // overwritten before Save was ever clicked: reproduced on a stored
-    // mixed competition (poolSize: 4, poolWinners: 2) by tapping "Knockout
-    // only" (stages poolSize/poolWinners: 0) and then tapping "Pools +
-    // Knockout" to go straight back -- a no-op for those fields going back
-    // INTO mixed, per normalizeConfigForFormat's own comment -- so two taps
-    // that cancelled out on `format` left poolSize/poolWinners at 0 with no
-    // operator action able to recover them, and Save blocked by
-    // poolSettingsError. Operator ruling: a config change must never
-    // quietly overwrite or delete the operator's data -- it must surface
-    // what will happen and let the operator decide. Normalizing only here,
-    // at the payload boundary, means `local` (and therefore every input on
-    // screen) always shows exactly what the operator staged, right up until
-    // the instant Save actually sends it; pendingConfigClears
-    // (competition_shape.jsx), rendered below the Format/Kind controls,
-    // tells the operator what THIS save is about to clear before they
-    // commit to it. shapeConfigForSave is also what SCOPES the two
-    // normalizers to a staged format/kind change -- see its own comment for
-    // the draw-ready 409 an unscoped run caused on a stored team
-    // competition carrying withZekkenName.
-    // teamSize is resolved against the stored value BEFORE shaping, never
-    // after. normalizeConfigForKind rewrites it on BOTH branches (0 going
-    // individual, DEFAULT_TEAM_SIZE for a team under the floor), so
-    // shaped.teamSize is always a finite integer and the
-    // `safeNonNegInt(shaped.teamSize, latestC.teamSize)` this line used to
-    // pair with could never fire: clearing the Team size input on a stored 3
-    // silently saved 5, and typing a 1 or a 0 did the same, while the input's
-    // own comment promised a fall back to the last-saved value.
-    // resolveTeamSize (competition_shape.jsx) is that fall back, and the
-    // pendingClears notice below calls it too so the warning can never name a
-    // value the save will not send.
-    const shaped = shapeConfigForSave(latestC, {
-      ...effective,
-      teamSize: resolveTeamSize(effective.teamSize, latestC.teamSize),
-    });
-    const finalNext = {
-      id: latestC.id,
-      name: trimmedName,
-      date: dateNorm,
-      startTime: effective.startTime,
-      // poolSize/poolWinners read from `shaped`, not `effective`:
-      // normalizeConfigForFormat is the function that zeroes them on the way
-      // out of "mixed", and shaped is where that now runs (see the `shaped`
-      // comment above). safeNonNegInt, not safeInt, so the deliberate 0
-      // survives -- see safeNonNegInt's own comment.
-      poolSize: safeNonNegInt(shaped.poolSize, latestC.poolSize),
-      poolWinners: safeNonNegInt(shaped.poolWinners, latestC.poolWinners),
-      poolSizeMode: effective.poolSizeMode,
-      courts: effective.courts,
-      roundRobin: effective.roundRobin,
-      // withZekkenName is normalizeConfigForKind's field (forced false going
-      // team; see that function's own comment for why), so it reads from
-      // `shaped` for the same reason poolSize/poolWinners do above.
-      withZekkenName: shaped.withZekkenName,
-      // No safeNonNegInt here: see the resolveTeamSize note on `shaped` above
-      // -- the guard belongs before the normalizer, not after it.
-      teamSize: shaped.teamSize,
-      numberPrefix: trimmedPrefix,
-      format: effective.format,
-      kind: effective.kind,
-      // FR-050 / T044: round-robin shape selector. Only meaningful when
-      // the format runs pool play; the backend's validateCompetitionFormat
-      // accepts the empty value, so a non-pool format can safely PUT "".
-      poolFormat: effective.poolFormat || "",
-      // FR-052..FR-054 / T047: per-phase durations, in SECONDS. The retired
-      // whole-minute fields are no longer sent; seconds are the only duration
-      // representation the API carries. safeNonNegInt still guards the
-      // disk-clobber case for a field the operator never touched (NaN falls
-      // back to the last-saved value); an explicit clear stages 0, which is
-      // finite and therefore round-trips as a genuine reset to the default.
-      poolMatchDurationSeconds: safeNonNegInt(effective.poolMatchDurationSeconds, latestC.poolMatchDurationSeconds || 0),
-      knockoutMatchDurationSeconds: safeNonNegInt(effective.knockoutMatchDurationSeconds, latestC.knockoutMatchDurationSeconds || 0),
-      // T190 (FR-050a): swissRounds is editable pre-start; safeInt
-      // preserves the previously-saved value when the input is
-      // cleared (so the cleared display doesn't clobber the disk
-      // value before the user types a valid replacement).
-      swissRounds: safeInt(effective.swissRounds, latestC.swissRounds || 0),
-      naginata: !!effective.naginata,
-      // Engi (flag-scoring kata pairs). Round-tripped for the same reason as
-      // `teamMatchType`: the backend transform unconditionally
-      // applies `current.Engi = comp.Engi`, so omitting the field JSON-encodes
-      // to false and either silently converts an engi competition to kendo
-      // ippon scoring (status=setup, where the change guard doesn't fire) or
-      // rejects EVERY settings save with "engi can only be changed before the
-      // competition starts" (draw-ready and later, where it does) — even
-      // though the operator never touched the control, which is disabled at
-      // those statuses. Reads from `shaped`: normalizeConfigForKind is the
-      // function that forces this false going team (the checkbox is
-      // disabled for team, so the operator cannot clear it themselves), and
-      // shaped is where that now runs.
-      engi: !!shaped.engi,
-      checkInEnabled: !!effective.checkInEnabled,
-      // Phase 3b (mp-8rc9): league tie-breaker config. Only meaningful for
-      // team-league competitions; safe to include for all formats because
-      // the backend's PUT allowlist ignores unknown fields.
-      leagueTiebreakTopN: safeInt(effective.leagueTiebreakTopN, latestC.leagueTiebreakTopN || 0),
-      // twoThirdPlaces (bc-3rdp): round-tripped unconditionally, like
-      // naginata above (and teamMatchType below), so an untouched control
-      // never clobbers the stored rule -- `effective.twoThirdPlaces` was already
-      // resolved to a real boolean above (the operator's edit, or the
-      // derived effective default), never the possibly-absent raw value.
-      // LeagueTwoThirdPlaces itself is legacy read-only and is never sent.
-      twoThirdPlaces: !!effective.twoThirdPlaces,
-      // teamMatchType is edited via the Team match format pills above; the
-      // merge is a full replace: omitting it would clobber a kachinuki
-      // competition's value to "" (fixed) on any save. Round-trip it like
-      // `engi` above to preserve the stored value. Reads from `shaped`:
-      // normalizeConfigForKind stages "fixed" (never "") going individual --
-      // see that function's own comment for why "" would be re-filled from
-      // latestC.teamMatchType here and the rejected kachinuki would come
-      // straight back.
-      teamMatchType: shaped.teamMatchType || latestC.teamMatchType || "",
-      // bc-qual LP-5a: knockout qualifiers, edited by the "Knockout
-      // qualifiers" pills below. Included for the same reason as
-      // teamMatchType/naginata above: the backend transform
-      // unconditionally applies `current.ExtraQualifiers =
-      // comp.ExtraQualifiers`, so omitting the field would clobber a stored
-      // non-standard value to "" on every settings save.
-      //
-      // NO `|| latestC.extraQualifiers` fallback: "" is this field's STANDARD
-      // value, not "unset". A falsy-coalescing chain reads the operator's
-      // "Standard" pick as absent and re-sends the stored non-standard value,
-      // which makes Standard unreachable from this screen -- and worse on the
-      // sibling path, where switching "Pool size is a" to maximum stages
-      // poolSizeMode="max" AND extraQualifiers="" together: the chain would
-      // ship max sizing with the old non-standard value, which
-      // state.ValidateExtraQualifiers rejects, 400ing every settings save with
-      // no control able to clear it. `effective` is latestC overlaid with the
-      // edited fields, so it already carries the stored value for an untouched
-      // field; the `|| ""` only normalizes a legacy record's undefined.
-      //
-      // Reads from `shaped`, not `effective`: normalizeConfigForFormat is the
-      // function that forces this to "" once the format leaves "mixed", and
-      // shaped is where that now runs (see the `shaped` comment above). The
-      // "no `|| latestC.extraQualifiers` fallback" rule above still holds --
-      // shaped already carries the stored value for a format that didn't
-      // change, exactly as effective did.
-      extraQualifiers: shaped.extraQualifiers || "",
-    };
     // Snapshot the VALUE of each edited field we're about to persist (not just
     // the field name). On success we clear a field only if its current staged
     // value still equals what we sent: so a field RE-EDITED during the
@@ -537,8 +371,13 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
     const persistingValues = {};
     editedFieldsRef.current.forEach(k => { persistingValues[k] = localRef.current[k]; });
     setSaving(true);
-    Promise.resolve(onUpdate(finalNext)).then(() => {
+    Promise.resolve(onUpdate(finalNext)).then((answer) => {
       if (!mountedRef.current) return;
+      if (answer && answer.configVersion) {
+        configVersionRef.current = answer.configVersion;
+      } else {
+        configVersionRef.current = "";
+      }
       // Drop only the persisted fields whose staged value is unchanged, so the
       // sync effect can absorb the server-confirmed values on the next SSE
       // round-trip. Fields re-edited DURING the in-flight save (value differs)
@@ -576,6 +415,13 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
       // dashboard. A clash-check failure must not strand the operator, so it
       // falls through to the normal saved-and-return path.
       if (!stillDirty) {
+        const savedToastMsg = (() => {
+          if (Array.isArray(answer?.previousTimes) && answer.previousTimes.length > 0) {
+            const n = answer.previousTimes.length;
+            return `Competition settings saved. ${n === 1 ? "1 match has a new time." : `${n} matches have new times.`}`;
+          }
+          return "Competition settings saved";
+        })();
         window.API.getScheduleClashes(c.id, password)
           .then((clashes) => {
             if (!mountedRef.current) return;
@@ -584,7 +430,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
               showToast(`Saved. ${clashes.length} court clash${clashes.length > 1 ? "es" : ""} detected, review below`, "error");
             } else {
               setClashWarnings(null);
-              showToast("Competition settings saved");
+              showToast(savedToastMsg);
               // Don't navigate away if the operator started a NEW edit during
               // the clash round-trip: that would silently discard it. Stay on
               // the page so the pending change can be saved.
@@ -593,19 +439,44 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
           })
           .catch(() => {
             if (!mountedRef.current) return;
-            showToast("Competition settings saved");
+            showToast(savedToastMsg);
             if (onBack && editedFieldsRef.current.size === 0) onBack();
           });
       }
     }).catch((e) => {
       if (!mountedRef.current) return;
       setSaving(false);
+      // CC1: the competition changed elsewhere since the first edit (the
+      // version pinned then). Nothing was written; the alert names what the
+      // operator had changed, and Save waits for Reload.
+      if (e && e.code === "config_changed") {
+        setSaveErr(null);
+        setConflict({
+          configVersion: e.configVersion,
+          competition: e.competition,
+          changes: persistingValues,
+        });
+        return;
+      }
       // Keep edited fields in the set and stay dirty: the user can retry.
       // updateCompetition already surfaced the error via showToast; mirror it
       // inline next to the Save button so the cause is visible without a
       // duplicate toast.
       setSaveErr(e?.message || "Save failed");
     });
+  };
+
+  const reloadConflict = () => {
+    if (!conflict) return;
+    const base = { ...cRef.current, ...conflict.competition };
+    const next = { ...base, twoThirdPlaces: effectiveTwoThirdPlaces(base) };
+    localRef.current = next;
+    setLocal(next);
+    editedFieldsRef.current.clear();
+    configVersionRef.current = conflict.configVersion;
+    setConflict(null);
+    setSaveErr(null);
+    setIsDirty(false);
   };
 
   // Manual-save model: edit handlers stage the change into `local` and mark
@@ -615,7 +486,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
   // `c` update lands before they click Save (same concurrent-edit guard as
   // before, just over a longer window).
   const update = (k, v) => {
-    editedFieldsRef.current.add(k);
+    markEdited(k);
     // Functional updater so back-to-back edits (e.g. fast successive
     // toggles / paste-driven multi-field updates) don't clobber each other
     // by spreading a stale closure-captured `local`. We also write the
@@ -651,7 +522,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
   // valid replacement or moves on.
   const updateNumber = (k, raw, min = 1) => {
     const { value } = decideNumericUpdate(raw, min);
-    editedFieldsRef.current.add(k);
+    markEdited(k);
     setLocal((prev) => {
       const next = { ...prev, [k]: value };
       localRef.current = next;
@@ -892,6 +763,13 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
   const teamSizeErr = teamSizeError(local.kind, local.teamSize, MAX_TEAM_SIZE);
   const blockingTeamSizeErr = !!teamSizeErr && (kindChanged || teamSizeChanged);
 
+  const isTeam = local.kind === "team" || (Number(local.teamSize) || 0) > 0;
+  const expectedParticipantsLabel = isTeam ? LABEL_EXPECTED_TEAMS : LABEL_EXPECTED_PARTICIPANTS;
+  const expectedParticipantsErr = (Number.isFinite(local.expectedParticipants) && (!Number.isInteger(local.expectedParticipants) || local.expectedParticipants < 0 || local.expectedParticipants > MAX_EXPECTED_PARTICIPANTS))
+    ? `${expectedParticipantsLabel} must be a whole number from 0 to ${MAX_EXPECTED_PARTICIPANTS}.`
+    : null;
+  const blockingExpectedParticipantsErr = !!expectedParticipantsErr;
+
   // What THIS save is about to clear, per the operator ruling that a config
   // change must never quietly overwrite or delete the operator's data --
   // it must surface what will happen and let the operator decide.
@@ -946,7 +824,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
   // an invalid shiaijo count the header button greyed out while the footer
   // one stayed live, fired the PUT and took a 400. Anything that should block
   // saving belongs here, never at a call site.
-  const saveDisabled = !isDirty || saving || hasDurationError || blockingCourtsErr || blockingPoolSettingsErr || blockingSwissSettingsErr || blockingTeamSizeErr;
+  const saveDisabled = !!conflict || !isDirty || saving || hasDurationError || blockingCourtsErr || blockingPoolSettingsErr || blockingSwissSettingsErr || blockingTeamSizeErr || blockingExpectedParticipantsErr;
 
   // The blocking message and its precedence, shared by the header chip and the
   // footer for the same reason saveDisabled is: the footer used to restate the
@@ -971,7 +849,8 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
           // Same reasoning as the pool arm above: swissSettingsError already
           // names the field and the rule, so it prints directly.
           : blockingSwissSettingsErr ? `⚠ ${swissSettingsErr}`
-            : blockingTeamSizeErr ? `⚠ ${teamSizeErr}` : "";
+            : blockingTeamSizeErr ? `⚠ ${teamSizeErr}`
+              : blockingExpectedParticipantsErr ? `⚠ ${expectedParticipantsErr}` : "";
   const saveBlocked = !!saveBlockMessage;
 
   return (
@@ -999,6 +878,16 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
           </button>
         </div>
       </div>
+      {conflict && (
+        <div className="alert alert--error settings-conflict-alert" role="alert" data-testid="settings-conflict-alert">
+          <div className="settings-conflict-alert__text">
+            Not saved: this competition changed somewhere else after you opened it (another screen, another device, or the calendar). Reload it to see the current settings, then make your change again. You had changed: {describeSettingsEdits(conflict.changes)}
+          </div>
+          <button type="button" className="btn btn--primary" onClick={reloadConflict}>
+            Reload
+          </button>
+        </div>
+      )}
       {/* Persistent warning for an allocation ALREADY on disk that the draw
           cannot halve down. Not a blocker: the competition keeps running and
           the rest of this screen stays editable (the server validates courts
@@ -1380,12 +1269,6 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
       )}
       <div className="field">
         <label className="field__label" id="settings-courts-label">{LABEL_COURTS}</label>
-        {/* draw-ready lock: courts is output-affecting. Discard the draw to reassign. */}
-        {isDrawReady && (
-          <div className="field__hint" style={{ marginBottom: 6, color: "var(--ink-2)", fontWeight: 500 }}>
-            Discard the draw to change pools, courts, or format.
-          </div>
-        )}
         {/* Pills come from courtPillOptions, not from tournament.courts, so
             the rendered selection always equals local.courts: a shiaijo this
             competition still holds after the tournament dropped it gets its
@@ -1398,12 +1281,19 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
               key={cc}
               active={selected}
               onClick={() => toggleCourt(cc)}
-              disabled={isDrawReady}
+              disabled={lockedAfterDraw}
+              aria-disabled={lockedAfterDraw ? "true" : undefined}
               style={inTournament ? undefined : { borderColor: "var(--red)", color: selected ? undefined : "var(--red)" }}
               data-testid={inTournament ? undefined : `orphan-court-${cc}`}
             >Shiaijo (court) {cc}{inTournament ? "" : " (not in tournament)"}</PillButton>
           ))}
         </div>
+        {/* draw-ready lock: courts is output-affecting. Discard the draw to reassign. */}
+        {lockedAfterDraw && (
+          <div className="field__hint field__hint--locked">
+            Set by the draw. Discard the draw to change shiaijo.
+          </div>
+        )}
         <window.FieldError testId="orphan-shiaijo-hint">{orphanedCourtsErr}</window.FieldError>
         {/* Shiaijo-count rule, shown with the other court hints below so the
             operator reads cap, suggestion and count rule in one place. The
@@ -1437,6 +1327,22 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
           <div className="field__hint">Concurrency = number of shiaijo assigned. Schedule prevents double-booking with other competitions.</div>
         )}
       </div>
+      <NumberField
+        label={expectedParticipantsLabel}
+        min={0}
+        max={MAX_EXPECTED_PARTICIPANTS}
+        value={local.expectedParticipants}
+        onChange={(raw) => updateNumber("expectedParticipants", raw, 0)}
+        hint={expectedParticipantsHint({
+          expectedParticipants: local.expectedParticipants,
+          status: local.status,
+          isTeam,
+          rosterCount: (c.players || []).length,
+          checkedInCount: (c.players || []).filter((p) => p && p.checkedIn).length,
+          checkInApplies: checkInApplies(tournament, local.checkInEnabled),
+        })}
+        error={expectedParticipantsErr}
+      />
       {/* FR-052..FR-054 / T047: per-phase match-duration inputs. Visibility
           and label/hint text now come from competition_shape.jsx
           (poolDurationVisible/knockoutDurationVisible, poolDurationLabel/
@@ -1475,37 +1381,28 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
           )}
           {compEstimate && !compEstimateErr && (() => {
             const total = formatCompMinutes(compEstimate.totalDurationMinutes);
-            const perCourt = (compEstimate.perCourtMinutes || []).map(m => formatCompMinutes(m) || "0m");
-            const ceremony = formatCompMinutes(compEstimate.ceremonyMinutes);
+            const perShiaijo = formatPerShiaijoRow(compEstimate, c.courts);
+            const pausesRow = formatPausesRow(tournament, c);
             // mp-gmcg: kachinuki has a variable bout count, so the server
             // returns a best/average/worst range (it knows the competition's
             // teamMatchType; no extra param needed here). The headline
             // totalDurationMinutes is the AVERAGE scenario; when the range
-            // collapses (fixed/individual) the single total renders as before.
-            // EstimateHeadline (admin_schedule_utils.jsx) owns that decision
-            // for both this panel and the Overview footer.
+            // collapses (fixed/individual) the single total renders instead.
+            // EstimateHeadline (admin_schedule_utils.jsx) owns that decision.
             if (!total) {
               return <div style={{ fontSize: 12, color: "var(--ink-3)" }}>No estimate yet. Add participants and configure duration to see a projection.</div>;
             }
             return (
               <div style={{ fontSize: 12, color: "var(--ink-1)" }}>
                 <EstimateHeadline estimate={compEstimate} total={total} format={formatCompMinutes} testId="comp-est-range" />
-                {perCourt.length > 1 && (
+                {perShiaijo && (
                   <div style={{ marginTop: 2 }}>
-                    <strong>Per court:</strong>{" "}
-                    {perCourt.map((t, i) => `Court ${c.courts?.[i] || String.fromCharCode(65 + i)}: ${t}`).join(" · ")}
+                    <strong>Per shiaijo:</strong> {perShiaijo}
                   </div>
                 )}
-                {perCourt.length === 1 && (
-                  <div style={{ marginTop: 2 }}>
-                    <strong>Per court:</strong> {perCourt[0]}
-                  </div>
-                )}
-                {ceremony && (
-                  <div style={{ marginTop: 2 }}>
-                    <strong>Ceremony blocks:</strong> {ceremony}
-                  </div>
-                )}
+                <div style={{ marginTop: 2 }}>
+                  <strong>Pauses:</strong> {pausesRow}
+                </div>
               </div>
             );
           })()}
@@ -1548,6 +1445,8 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
           as the header: the two cannot drift because neither the block
           condition nor the blocking message is restated here. The transient
           "Saving…"/"✓ Saved at" states are the header's alone, by choice. */}
+      {/* Retime warning (c-setretime): shown before Save when date or start time changed on a draw-ready competition */}
+      {isDrawReady && <RetimeWarning preview={retimePreview} />}
       <div style={{ marginTop: 20, display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 10 }}>
         {/* Same badge-like status role as the header chip above (13px, "Buttons,
             inputs, badges" per DESIGN.md Typography): both are a bold coloured

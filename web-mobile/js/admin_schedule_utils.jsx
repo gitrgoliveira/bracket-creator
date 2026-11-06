@@ -1,8 +1,9 @@
 // Pure utility functions extracted from admin_schedule.jsx (mp-d7tl), plus
-// EstimateHeadline, the one presentational component the two schedule-estimate
-// panels share. No window dependencies and no React import: the component
+// EstimateHeadline, the Settings panel's schedule-estimate headline. No window dependencies and no React import: the component
 // touches the global React only when it is rendered, so importing this module
 // stays safe anywhere including tests.
+
+import { pastMidnight } from './calendar_rules.jsx';
 
 export function formatMinutes(m) {
   return `${Math.floor(m / 60)}h ${m % 60}m`;
@@ -24,21 +25,21 @@ export function estimateRangeParts(est) {
   return { best, average: est.totalDurationMinutes, worst };
 }
 
-// EstimateHeadline: the headline line of a schedule-estimate panel, shared by
-// the competition Overview footer and the competition Settings panel — the
-// two carried byte-identical copies of it. ONE home for the range-vs-total
-// decision: when estimateRangeParts says the estimate genuinely spans a range
+// EstimateHeadline: the headline line of the competition Settings panel's
+// schedule estimate. (The Overview footer used it too until its total moved
+// to the stats strip's Est. duration tile alone.) ONE home for the
+// range-vs-total decision: when estimateRangeParts says the estimate genuinely spans a range
 // (kachinuki's variable bout count) it reads "Best · Average · Worst",
-// otherwise the single "Total:" line exactly as before.
+// otherwise the single "Est. duration: about ..." line, worded as the Add
+// competition form words it.
 //
-// `total` is the ALREADY-FORMATTED total string (each call site formats it
-// anyway for its own empty-estimate guard) and `format` is that site's minute
-// formatter: Overview resolves window.formatCompMinutes with a fallback while
-// Settings imports it directly, so it is passed in rather than imported here.
-// `testId` keeps each call site's own data-testid on the range row.
+// `total` is the ALREADY-FORMATTED total string (the caller formats it anyway
+// for its own empty-estimate guard) and `format` is the caller's minute
+// formatter, passed in rather than imported so this module stays free of
+// window dependencies. `testId` is the caller's data-testid for the range row.
 export function EstimateHeadline({ estimate, total, format, testId }) {
   const range = estimateRangeParts(estimate);
-  if (!range) return <div><strong>Total:</strong> {total}</div>;
+  if (!range) return <div><strong>Est. duration:</strong> about {total}</div>;
   return (
     <div data-testid={testId}>
       <strong>Best</strong> {format(range.best) || "0m"} · <strong>Average</strong> {format(range.average) || "0m"} · <strong>Worst</strong> {format(range.worst) || "0m"}
@@ -52,6 +53,46 @@ export function timeToMinutes(t) {
   const [h, m] = t.split(":").map(Number);
   if (isNaN(h) || isNaN(m)) return null;
   return h * 60 + m;
+}
+
+// finishClock derives an estimated end time from a "HH:MM" start time and
+// total duration in minutes. Returns { clock: "HH:MM", nextDay: boolean }.
+// nextDay is true when the finish is after midnight (pastMidnight, the rule Go's
+// calendar applies): a finish at exactly 24:00 shows "00:00" with nextDay false.
+// For invalid start strings or non-finite minutes, returns { clock: "", nextDay: false }.
+export function finishClock(start, minutes) {
+  if (typeof start !== "string" || !Number.isFinite(minutes)) {
+    return { clock: "", nextDay: false };
+  }
+  const parts = start.split(":");
+  if (parts.length !== 2) {
+    return { clock: "", nextDay: false };
+  }
+  const [h, m] = parts.map(Number);
+  if (!Number.isInteger(h) || !Number.isInteger(m) || h < 0 || h > 23 || m < 0 || m > 59) {
+    return { clock: "", nextDay: false };
+  }
+  const startM = timeToMinutes(start);
+  if (startM === null) {
+    return { clock: "", nextDay: false };
+  }
+  const total = startM + Math.round(minutes);
+  const nextDay = pastMidnight(total);
+  const wrapped = ((total % 1440) + 1440) % 1440;
+  const outH = Math.floor(wrapped / 60);
+  const outM = wrapped % 60;
+  const clock = `${String(outH).padStart(2, "0")}:${String(outM).padStart(2, "0")}`;
+  return { clock, nextDay };
+}
+
+// Format duration minutes with zero-padded minutes (e.g. "4h 08m", "55m").
+export function formatEstimateMinutes(m) {
+  if (!Number.isFinite(m) || m <= 0) return "0m";
+  const mins = Math.round(m);
+  const h = Math.floor(mins / 60);
+  const rem = mins % 60;
+  if (h === 0) return `${rem}m`;
+  return `${h}h ${String(rem).padStart(2, "0")}m`;
 }
 
 // True when the user's time edit (newVal, a "HH:MM" string from the

@@ -494,7 +494,7 @@ func importCompetition(store *state.Store, eng *engine.Engine, entry ImportManif
 		existing, loadErr := store.LoadCompetition(comp.ID)
 		if loadErr != nil {
 			what := "the competition ID could not be checked"
-			if settingsUnparseable(loadErr) {
+			if state.IsSettingsUnparseable(loadErr) {
 				// An unreadable config.md under this id is not a free id:
 				// saving over it would destroy whatever it holds.
 				what = competitionIDUnreadableMessage(comp.ID)

@@ -3,7 +3,6 @@ package mobileapp
 import (
 	"errors"
 	"fmt"
-	"io/fs"
 	"log"
 	"net/http"
 	"strings"
@@ -129,15 +128,6 @@ const codeCompetitionIDUnreadable = "competition_id_unreadable"
 // the read error itself goes to the server log.
 func competitionIDUnreadableMessage(id string) string {
 	return fmt.Sprintf("competition ID %q is held by a competition whose settings cannot be read; repair or remove it", id)
-}
-
-// settingsUnparseable reports whether a LoadCompetition error is the settings
-// file itself (read, but not parseable), as opposed to a fault reading it
-// (an *fs.PathError: a folder in the way, a permission), which is the
-// server's and answered as one.
-func settingsUnparseable(err error) bool {
-	var pathErr *fs.PathError
-	return !errors.As(err, &pathErr)
 }
 
 func extractSeeds(players []domain.Player) []domain.SeedAssignment {
@@ -1096,7 +1086,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			existing, loadErr := store.LoadCompetition(comp.ID)
 			if loadErr != nil {
 				loadErr = fmt.Errorf("check competition ID %q: %w", comp.ID, loadErr)
-				if !settingsUnparseable(loadErr) {
+				if !state.IsSettingsUnparseable(loadErr) {
 					return loadErr // a read fault, not the competition's own settings
 				}
 				// An unreadable config.md under this id is not a free id:

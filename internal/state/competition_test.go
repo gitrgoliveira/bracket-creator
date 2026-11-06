@@ -722,3 +722,29 @@ func TestLoadCompetition_LegacyConfigWithoutExtraQualifiers(t *testing.T) {
 		"the loaded default must itself be a valid setting")
 	assert.Equal(t, 2, got.EffectivePoolWinners())
 }
+
+// TestIsSettingsUnparseable_OnlyTheSettingsFileItself pins the positive check
+// the create and import refusals ask: a config.md that was read but will not
+// parse is the competition's own settings; an id the store refuses and a
+// config.md that cannot be read are not, so neither is told to "repair or
+// remove" a competition.
+func TestIsSettingsUnparseable_OnlyTheSettingsFileItself(t *testing.T) {
+	store, cleanup := newTestStore(t)
+	defer cleanup()
+	comps := filepath.Join(store.folder, "competitions")
+
+	require.NoError(t, os.MkdirAll(filepath.Join(comps, "garbled"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(comps, "garbled", "config.md"), []byte("no front matter here"), 0o644))
+	_, err := store.LoadCompetition("garbled")
+	require.Error(t, err)
+	assert.True(t, IsSettingsUnparseable(err), "a config.md that will not parse: %v", err)
+
+	require.NoError(t, os.MkdirAll(filepath.Join(comps, "folder-in-the-way", "config.md"), 0o755))
+	_, err = store.LoadCompetition("folder-in-the-way")
+	require.Error(t, err)
+	assert.False(t, IsSettingsUnparseable(err), "a config.md that cannot be read: %v", err)
+
+	_, err = store.LoadCompetition("../escape")
+	require.Error(t, err)
+	assert.False(t, IsSettingsUnparseable(err), "an id the store refuses: %v", err)
+}

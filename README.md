@@ -64,12 +64,14 @@ Highlights:
 * **Public viewer and court displays**: real-time schedule, standings, and brackets for spectators, plus big-screen court displays and a transparent overlay for streaming.
 * **All formats**: Knockout, Pools + Knockout, League, and Swiss, for individuals and teams (including kachinuki), plus naginata and Engi-kyogi (kata) competitions.
 * **Excel export**: download the results as a workbook at any point during the event.
+* **Backup and restore**: download a backup of the tournament or one competition, restore it with a preview first, and undo a restore. The server also keeps a daily copy when the data changed.
 
 Start with these guides on the documentation site:
 
 * [Choosing your setup](https://gitrgoliveira.github.io/bracket-creator/user-guide/start-here/choosing-your-setup/)
 * [Your first tournament](https://gitrgoliveira.github.io/bracket-creator/user-guide/start-here/first-tournament/)
 * [Run a tournament on the day](https://gitrgoliveira.github.io/bracket-creator/user-guide/organisers/run-tournament/)
+* [Backup and restore](https://gitrgoliveira.github.io/bracket-creator/user-guide/organisers/backup-and-restore/)
 * [Host the tournament app](https://gitrgoliveira.github.io/bracket-creator/user-guide/install/hosting/) and [operating modes and access control](https://gitrgoliveira.github.io/bracket-creator/user-guide/organisers/operating-modes/)
 * [mobile-app command reference](https://gitrgoliveira.github.io/bracket-creator/user-guide/commands/mobile-app/)
 

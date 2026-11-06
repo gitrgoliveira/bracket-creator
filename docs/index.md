@@ -132,4 +132,4 @@ If you have multiple shiai-jo, upload the Excel file to Google Drive (or similar
 
 ## On the day
 
-Use the **tournament app** to manage pools and scores in real time across all devices on your network (no Excel required on the day). Refer to the [tournament app guide](user-guide/organisers/run-tournament.md).
+Use the **tournament app** to manage pools and scores in real time across all devices on your network (no Excel required on the day). Refer to the [tournament app guide](user-guide/organisers/run-tournament.md), and to [Backup and restore](user-guide/organisers/backup-and-restore.md) for saving the tournament before the event and after each round.

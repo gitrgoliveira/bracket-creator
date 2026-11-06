@@ -16,6 +16,9 @@
 package mobileapp
 
 import (
+	"os"
+	"time"
+
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/engine"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
@@ -324,4 +327,70 @@ type KachinukiLineupKeeper interface {
 	// started it keeps the lineup in force then as the match's own. It
 	// reports whether anything in force changed.
 	UsePreviousLineupAt(compID, teamID, matchID string, at int64) (bool, error)
+}
+
+// PrefixStore is what ReassignRestoredPrefixes reads and writes: a restored
+// competition's settings, saved under the rename lock like every other
+// uniqueness check. *state.Store satisfies it.
+type PrefixStore interface {
+	WithCompetitionRenameLock(fn func() error) error
+	LoadCompetition(id string) (*state.Competition, error)
+	SaveCompetition(comp *state.Competition) error
+}
+
+// PrefixEngine is what a number prefix reassignment asks the engine: whether
+// a prefix collides, a fresh one, and the renumbering that follows it.
+// *engine.Engine satisfies it.
+type PrefixEngine interface {
+	CheckUniqueCompFields(name, numberPrefix, excludeID string) error
+	DefaultNumberPrefixFor(name, id string) (string, error)
+	RenumberCompetitors(compID string) (bool, error)
+}
+
+// RequeueEngine is what ResolveRestoredRequeues calls on the engine to send
+// a restored running match back to the queue.
+// *engine.Engine satisfies it.
+type RequeueEngine interface {
+	RevertMatchToQueue(compID, matchID string, opts ...engine.ForceOptions) error
+}
+
+// RestoreEngine combines what restore needs from the engine: number prefix
+// reassignment and returning restored running matches to the queue.
+// *engine.Engine satisfies it.
+type RestoreEngine interface {
+	PrefixEngine
+	RequeueEngine
+}
+
+// PendingPrefixStore adds prefixes-pending.json, the list a restore leaves of
+// the competitions still waiting for a new prefix (ResolveRestoredPrefixes).
+type PendingPrefixStore interface {
+	PrefixStore
+	PrefixesPending() ([]string, error)
+	RemovePrefixesPending(ids []string) error
+}
+
+// PendingRequeueStore adds requeue-pending.json, the list a restore leaves of
+// matches that were running in the backup and must be returned to the queue.
+// *state.Store satisfies it.
+type PendingRequeueStore interface {
+	RequeuePending() (map[string][]string, error)
+	RemoveRequeuePending(compID string, matchIDs []string) error
+}
+
+// BackupStore is what handlers_backup.go reaches in the store: snapshots,
+// the restore and its plan, and the copies kept in backups/.
+// *state.Store satisfies it.
+type BackupStore interface {
+	PendingPrefixStore
+	PendingRequeueStore
+	Snapshot(scope state.SnapshotScope, compID string) (state.Snapshot, error)
+	PlanRestore(req state.RestoreRequest) (state.RestorePlan, error)
+	Restore(req state.RestoreRequest) (state.RestorePlan, error)
+	SaveBackupFile(kind state.BackupKind, scope state.SnapshotScope, at time.Time, data []byte) (string, error)
+	ListBackupFiles() ([]state.BackupFile, error)
+	OpenBackupFile(name string) (*os.File, error)
+	DeleteBackupFile(name string) error
+	// LoadTournament names a competition backup after its tournament.
+	LoadTournament() (*state.Tournament, error)
 }

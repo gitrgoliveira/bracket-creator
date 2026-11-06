@@ -9,14 +9,18 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/gitrgoliveira/bracket-creator/internal/backup"
 )
 
-// BrandingDirName and SponsorsDirName are the folders, under the tournament
-// data folder, that hold the uploaded logo and sponsor images. Named here so
-// the startup write check and the upload handlers agree on them.
+// BrandingDirName, SponsorsDirName, BackupsDirName and RestoreDirName are the
+// top-level folders under the tournament data folder for uploaded images, kept
+// backup archives and restore staging.
 const (
-	BrandingDirName = "branding"
-	SponsorsDirName = "sponsors"
+	BrandingDirName = backup.BrandingDirName
+	SponsorsDirName = backup.SponsorsDirName
+	BackupsDirName  = backup.BackupsDirName
+	RestoreDirName  = backup.RestoreDirName
 )
 
 // ErrDataNotWritable: the server cannot write to a folder of its tournament
@@ -49,11 +53,14 @@ func checkDataWritable(root *dataRoot) error {
 			failed = append(failed, fmt.Sprintf("  %s: %v; %s", dir, err, writeRemedy(err)))
 		}
 	}
-	// The upload handlers write branding/ and sponsors/ by path, not through
-	// the root, so each is probed only when the root opens it as a folder.
-	for _, name := range []string{BrandingDirName, SponsorsDirName} {
+	// Optional top-level folders (branding/, sponsors/, backups/, .restore/)
+	// are read and written through the root by snapshots, backups, and
+	// restores: when an entry already sits there (a folder, a file blocking
+	// its creation, or a link out of the data folder), probe it so startup
+	// refuses before a later backup, restore, or upload fails.
+	for _, name := range []string{BrandingDirName, SponsorsDirName, BackupsDirName, RestoreDirName} {
 		d := filepath.Join(folder, name)
-		if info, err := root.stat(d); err == nil && info.IsDir() {
+		if _, err := root.stat(d); !errors.Is(err, fs.ErrNotExist) {
 			dirs = append(dirs, d)
 		}
 	}

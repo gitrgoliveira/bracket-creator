@@ -43,4 +43,4 @@ Go to the **Scores** tab, open a match, and record the result. Refer to [Scoring
 
 ## Next steps
 
-For the complete organiser workflow, including pools, seeding, and competition settings, refer to [Run a tournament](../organisers/run-tournament.md). To generate print-ready brackets without the tournament app, refer to [Legacy Web UI](../organisers/web-ui.md) and the [create-pools command](../commands/create-pools.md).
+For the complete organiser workflow, including pools, seeding, and competition settings, refer to [Run a tournament](../organisers/run-tournament.md). Before the event, take a backup of the whole tournament: refer to [Backup and restore](../organisers/backup-and-restore.md). To generate print-ready brackets without the tournament app, refer to [Legacy Web UI](../organisers/web-ui.md) and the [create-pools command](../commands/create-pools.md).

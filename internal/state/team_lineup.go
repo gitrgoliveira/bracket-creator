@@ -322,11 +322,9 @@ func copyTeamLineups(in map[string]domain.TeamLineup) map[string]domain.TeamLine
 // parse per transaction (stage 6 review 8, m4).
 var lineupParses atomic.Int64
 
-// parseTeamLineupsBytes parses lineups.yaml from in-memory bytes.
-// Used by tx-internal read-your-own-writes (storeTx LoadTeamLineups).
-// Empty input → empty map, matching the "file does not exist" contract.
-func parseTeamLineupsBytes(compID string, data []byte) (map[string]domain.TeamLineup, error) {
-	lineupParses.Add(1)
+// decodeTeamLineupsBytes decodes lineups.yaml from in-memory bytes without
+// touching the parse counter or arrival stamps.
+func decodeTeamLineupsBytes(data []byte) (map[string]domain.TeamLineup, error) {
 	if len(data) == 0 {
 		return map[string]domain.TeamLineup{}, nil
 	}
@@ -337,6 +335,18 @@ func parseTeamLineupsBytes(compID string, data []byte) (map[string]domain.TeamLi
 	out := make(map[string]domain.TeamLineup, len(file.Lineups))
 	for _, l := range file.Lineups {
 		out[lineupStorageKey(l)] = l
+	}
+	return out, nil
+}
+
+// parseTeamLineupsBytes parses lineups.yaml from in-memory bytes.
+// Used by tx-internal read-your-own-writes (storeTx LoadTeamLineups).
+// Empty input → empty map, matching the "file does not exist" contract.
+func parseTeamLineupsBytes(compID string, data []byte) (map[string]domain.TeamLineup, error) {
+	lineupParses.Add(1)
+	out, err := decodeTeamLineupsBytes(data)
+	if err != nil || len(data) == 0 {
+		return out, err
 	}
 	noteLineupStamps(compID, out)
 	return out, nil

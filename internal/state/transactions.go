@@ -295,9 +295,10 @@ func (s *Store) WithTransaction(compID string, fn func(tx StoreTx) error) error 
 	// bytes, so cache.mtime was captured from the OLD file (or 0
 	// if absent). After Apply the on-disk file has a NEW mtime, and
 	// the next reader would see mtime != cache.mtime and re-parse
-	// from disk, silently losing any in-memory-only fields the
-	// parser doesn't know about (e.g., MatchResult.DecisionBy and
-	// MatchResult.Encho, which pool-matches.csv doesn't serialize).
+	// from disk for nothing. Every MatchResult field a reader needs,
+	// DecisionBy and Encho included, is a pool-matches.csv column now
+	// (poolMatchColumns, pools.go), so that parse loses nothing; the
+	// refresh only saves it.
 	// Walk the WAL intents and refresh each touched cache's mtime
 	// to match the now-final file mtime so the in-memory snapshot
 	// continues to win cache hits.
@@ -372,11 +373,10 @@ func (s *Store) invalidateCachesForWALIntents(compID string, intents []wal.FileI
 // PRE-write mtime. In WAL mode the actual disk write happens later
 // (in Apply, after fn returns), so the recorded mtime is stale by
 // the time Apply finishes. Without this refresh, the next reader
-// sees cache.mtime ≠ file.mtime, re-parses from disk, and silently
-// loses fields the on-disk format doesn't carry (e.g.,
-// MatchResult.DecisionBy, MatchResult.Encho, pool-matches.csv
-// doesn't have columns for them, so the in-memory cache is the only
-// authoritative source for those fields after a save).
+// sees cache.mtime ≠ file.mtime and re-parses from disk. That parse
+// reads back every field the save wrote (DecisionBy and Encho are
+// pool-matches.csv columns, poolMatchColumns in pools.go), so the
+// refresh saves a parse; it no longer guards fields the file lacks.
 func (s *Store) refreshCachesAfterWALApply(compID string, intents []wal.FileIntent) {
 	for _, in := range intents {
 		base := filepath.Base(in.Path)

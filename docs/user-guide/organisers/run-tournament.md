@@ -50,6 +50,12 @@ The dashboard lists all competitions for the tournament. Each card shows the com
 
 ![Admin dashboard](../../screenshots/mobile-dashboard.png)
 
+## Backup and restore
+
+Click **Backup and restore** on the dashboard to save or restore tournament data. Take a backup before the event starts, after each round finishes, and before a risky correction. You can download an archive of the entire tournament or an individual competition, review restore plans before applying changes, and undo a restore if needed. The server also takes daily backup copies automatically when data changes.
+
+Refer to [Backup and restore](backup-and-restore.md) for the complete guide on taking archives, making restore choices, and managing safety copies.
+
 ## Tournament details and the public info page
 
 Open **Edit details** from the dashboard to fill in the public information your attendees see:
@@ -289,13 +295,15 @@ When the **Public URL** is set and competitors have assigned numbers, each print
 
 ## Data format
 
-Tournament state is stored as plain files inside the data folder you specified with `--folder`. You can hand-edit these files between rounds when a correction is needed:
+Tournament state is stored as plain files inside the data folder you specified with `--folder`. You can hand-edit these files between rounds when a correction is needed. Take a [backup](#backup-and-restore) first, so a wrong edit can be restored:
 
 - `tournament.md`: YAML front-matter with the tournament name, date, venue, court count, and the admin password.
 - `competitions/<id>/config.md`: YAML front-matter with competition kind, format, pool settings, and courts.
 - `competitions/<id>/participants.csv`: one participant per line with name, optional display name (zekken), dojo, and optional dan grade.
 
 Do not hand-edit the match logs, during play or between rounds. `competitions/<id>/events/` holds one append-only score log per match, every tap and every finish or correction made to it, and the app replays that log to work out the match's score, so a line changed by hand can change a score, and a line the app cannot read makes it refuse taps for that match until the file is repaired. `competitions/<id>/history/` holds the audit trail of each match, which the **History** button in the score editors shows. Both are written together with the match, and both go with their competition when it is deleted or its draw is discarded.
+
+The `backups/` folder holds the app's own backup copies and `.restore/` is used while a restore runs; leave both to the app, and manage the copies from the **Backup and restore** page.
 
 Refer to [Data model](../../architecture/data-model.md) for every file in the folder and what each holds.
 

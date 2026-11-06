@@ -421,7 +421,7 @@ function AllWinnersModal({ comps, onClose }) {
   );
 }
 
-function AdminDashboard({ tournament, password, onOpenCompetition, onCreateCompetition, onEditTournament, onAnnounce, onOpenSchedule, onOpenScoreEditor, onOpenImport, onOpenShiaijo, onOpenRegistration, onStartAll, onStartCompetition, onLogout, onViewerMode, onUpdate, showToast, authConfig }) {
+function AdminDashboard({ tournament, password, onOpenCompetition, onCreateCompetition, onEditTournament, onAnnounce, onOpenSchedule, onOpenScoreEditor, onOpenImport, onOpenBackup, onOpenShiaijo, onOpenRegistration, onStartAll, onStartCompetition, onLogout, onViewerMode, onUpdate, showToast, authConfig }) {
   const t = tournament;
   const comps = t.competitions || NO_COMPETITIONS;
   // Whether "Start all" has anything to offer, answered by the same helper the
@@ -480,7 +480,7 @@ function AdminDashboard({ tournament, password, onOpenCompetition, onCreateCompe
       }, jitter);
     };
     const unsub = window.API.subscribeToEvents((event) => {
-      if (event.type === "tournament_updated" || event.type === "competition_started" || event.type === "competition_completed" || event.type === "competition_deleted" || event.type === "match_updated" || event.type === "schedule_updated" || event.type === "resync_required") {
+      if (event.type === "tournament_updated" || event.type === "competition_started" || event.type === "competition_completed" || event.type === "match_updated" || event.type === "schedule_updated" || event.type === "resync_required") {
         scheduleRefresh();
       }
     });
@@ -567,6 +567,7 @@ function AdminDashboard({ tournament, password, onOpenCompetition, onCreateCompe
             <div className="empty__cta" style={{ display: "flex", gap: 8, justifyContent: "center", flexWrap: "wrap" }}>
               <button type="button" className="btn btn--primary" onClick={onCreateCompetition}>+ Add competition</button>
               <button type="button" className="btn" onClick={onOpenImport}>Import from folder</button>
+              <button type="button" className="btn" onClick={onOpenBackup}>Backup and restore</button>
             </div>
           </div>
         ) : (<>
@@ -636,6 +637,11 @@ function AdminDashboard({ tournament, password, onOpenCompetition, onCreateCompe
             <div style={{ color: "var(--ink-3)" }}><Icon name="folder" size={28} /></div>
             <div style={{ fontWeight: 600, marginTop: 4 }}>Import competitions</div>
             <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 2 }}>From folder with manifest.yaml</div>
+          </button>
+          <button type="button" className="tcard tcard--add" onClick={onOpenBackup}>
+            <div style={{ color: "var(--ink-3)" }}><Icon name="folder" size={28} /></div>
+            <div style={{ fontWeight: 600, marginTop: 4 }}>Backup and restore</div>
+            <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 2 }}>Save or restore tournament data</div>
           </button>
         </div>
         </>)}

@@ -481,6 +481,46 @@ func TestCalendar_KachinukiTeamBeforeDraw(t *testing.T) {
 	assert.NotEmpty(t, recipe.WorstRuns)
 }
 
+func TestCalendar_KachinukiWorstCasePastMidnightIsFlagged(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	tourn := &state.Tournament{
+		Name:         "Tourn",
+		Date:         "01-07-2026",
+		DurationDays: 1,
+		Courts:       []string{"A"},
+	}
+	require.NoError(t, store.SaveTournament(tourn))
+
+	comp := &state.Competition{
+		ID:                           "kachinuki-late",
+		Name:                         "Kachinuki Late",
+		Date:                         "01-07-2026",
+		StartTime:                    "09:00",
+		Kind:                         "team",
+		TeamSize:                     5,
+		TeamMatchType:                state.TeamMatchTypeKachinuki,
+		Courts:                       []string{"A"},
+		ExpectedParticipants:         8,
+		PoolMatchDurationSeconds:     180,
+		KnockoutMatchDurationSeconds: 180,
+		Status:                       state.CompStatusSetup,
+	}
+	require.NoError(t, store.SaveCompetition(comp))
+
+	early := eng.PlaceCompetition(comp, tourn)
+	require.True(t, early.Placed)
+	worstMins, ok := state.ParseClockMinutes(early.WorstEnd)
+	require.True(t, ok)
+	require.Greater(t, worstMins-9*60, early.Minutes, "the worst case must outrun the average")
+
+	// Start so the average ends exactly at midnight and the worst case after it.
+	comp.StartTime = state.FormatClockHHMM(24*60 - early.Minutes)
+	late := eng.PlaceCompetition(comp, tourn)
+	require.True(t, late.Placed)
+	assert.Equal(t, 24*60, late.Windows["A"].End, "the average finish is not past midnight")
+	assert.True(t, late.PastMidnight, "a worst case after midnight is flagged")
+}
+
 func TestCalendar_DrawnCompetitionRecipeSlotLengthsInStartOrder(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	tourn := &state.Tournament{

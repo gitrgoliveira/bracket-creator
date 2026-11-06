@@ -199,6 +199,22 @@ describe('DraftEstimatePanel Part D copy mapping', () => {
     expect(getNodeText(el)).toBe('Could end 10:30 to 11:30');
     expect(getNodeText(el)).not.toContain('(average)');
   });
+
+  it('warns on the kachinuki range when only the worst case is after midnight', () => {
+    const tree = DraftEstimatePanel({
+      estimate: {
+        totalDurationMinutes: 50,
+        bestCaseMinutes: 30,
+        worstCaseMinutes: 90,
+      },
+      shape: { startTime: '23:00', teamMatchType: 'kachinuki' },
+    });
+    const el = findTestId(tree, 'draft-estimate-kachinuki');
+    expect(getNodeText(el)).toBe(
+      'Could end 23:30 to 00:30, after midnight. Start it earlier or give it more shiaijo.'
+    );
+    expect(getNodeText(findTestId(tree, 'draft-estimate-finish'))).toBe('Finishes about 23:50');
+  });
 });
 
 describe('useDraftEstimate hook behaviour with fake timers', () => {

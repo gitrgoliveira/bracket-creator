@@ -281,8 +281,15 @@ export function DraftEstimatePanel({
     if (range) {
       const bestFinish = finishClock(shape?.startTime, range.best);
       const worstFinish = finishClock(shape?.startTime, range.worst);
+      // The finish line already warns when the average runs past midnight;
+      // this one warns when only the worst case does.
+      const worstAfterMidnight = worstFinish.nextDay && !nextDay;
       if (bestFinish.clock && worstFinish.clock) {
-        kachinukiElement = (
+        kachinukiElement = worstAfterMidnight ? (
+          <div className="draft-estimate__kachinuki alert alert--warn" data-testid="draft-estimate-kachinuki">
+            Could end {bestFinish.clock} to {worstFinish.clock}, after midnight. Start it earlier or give it more shiaijo.
+          </div>
+        ) : (
           <div className="draft-estimate__kachinuki" data-testid="draft-estimate-kachinuki">
             Could end {bestFinish.clock} to {worstFinish.clock}
           </div>

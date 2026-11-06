@@ -285,9 +285,13 @@ func (e *Engine) PlaceCompetition(comp *state.Competition, tournament *state.Tou
 	}
 
 	var bestEnd, worstEnd string
+	pastMid := pastMidnight(endMins)
 	if normComp.IsKachinuki() {
 		bestEnd = state.FormatClockHHMM(startMins + est.BestCaseMinutes)
 		worstEnd = state.FormatClockHHMM(startMins + est.WorstCaseMinutes)
+		// A kachinuki range whose latest finish is after midnight is
+		// flagged, even when the average finish is not.
+		pastMid = pastMid || pastMidnight(startMins+est.WorstCaseMinutes)
 	}
 
 	recipes := make(map[string]ReplayRecipe, len(courts))
@@ -338,7 +342,7 @@ func (e *Engine) PlaceCompetition(comp *state.Competition, tournament *state.Tou
 		BestEnd:       bestEnd,
 		WorstEnd:      worstEnd,
 		ReplayRecipes: recipes,
-		PastMidnight:  pastMidnight(endMins),
+		PastMidnight:  pastMid,
 		Minutes:       footprint,
 	})
 }

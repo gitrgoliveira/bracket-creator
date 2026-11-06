@@ -3026,3 +3026,56 @@ lunch_block: 1h
 	assert.Contains(t, content, "Lunch")
 	assert.NotContains(t, content, "lunch_block")
 }
+
+// A tournament.md that still holds lunch_block once the server is running (a
+// restore of an older backup, or a startup upgrade that failed) shows its lunch
+// as a pause. The organiser deleting that pause must delete it: the save drops
+// the old key, so the next read does not add the lunch back.
+func TestTournamentPUT_DeletingTheMigratedLunchPauseKeepsItDeleted(t *testing.T) {
+	tempDir := t.TempDir()
+	store, err := state.NewStore(tempDir)
+	require.NoError(t, err)
+	fileContent := `---
+name: Lunch Tourn
+venue: Initial Venue
+date: 01-01-2026
+password: secret
+courts:
+  - A
+lunch_block: 1h
+---
+`
+	require.NoError(t, os.WriteFile(filepath.Join(tempDir, "tournament.md"), []byte(fileContent), 0600))
+
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	hub := NewHub()
+	defer hub.Close()
+	RegisterTournamentHandlers(r.Group("/api"), store, hub, NewFileVerifier(store))
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/tournament", nil)
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+	var tour state.Tournament
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &tour))
+	require.Len(t, tour.Pauses, 1, "the old lunch shows as a pause")
+
+	// The page sends the list it shows, now empty ("pauses": []).
+	var sent map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &sent))
+	sent["pauses"] = []any{}
+	body, _ := json.Marshal(sent)
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	raw, err := os.ReadFile(filepath.Join(tempDir, "tournament.md"))
+	require.NoError(t, err)
+	assert.NotContains(t, string(raw), "lunch_block")
+	reloaded, err := store.LoadTournament()
+	require.NoError(t, err)
+	assert.Empty(t, reloaded.Pauses)
+}

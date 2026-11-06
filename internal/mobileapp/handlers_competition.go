@@ -2250,7 +2250,11 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				// A competition that never stored the field resolves it from its
 				// format (EffectiveTwoThirdPlaces), and the Settings page and the
 				// calendar send that resolved value back, so an explicit value
-				// that equals the effective one is no change.
+				// that equals the effective one is no change. An omitted value
+				// keeps the stored one, as an omitted teamMatchType does.
+				if comp.TwoThirdPlaces == nil {
+					comp.TwoThirdPlaces = current.TwoThirdPlaces
+				}
 				sameTwoThirdPlaces := (comp.TwoThirdPlaces == nil && current.TwoThirdPlaces == nil) ||
 					(comp.TwoThirdPlaces != nil && *comp.TwoThirdPlaces == current.EffectiveTwoThirdPlaces())
 				if started && !sameTwoThirdPlaces {

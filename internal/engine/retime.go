@@ -235,18 +235,18 @@ func planRetime(pool []state.MatchResult, bracket *state.Bracket, oldComp, newCo
 	if oldComp.Status != state.CompStatusDrawReady || newComp.Status != state.CompStatusDrawReady {
 		return nil, nil, RetimeOutcome{}, ErrRetimeNotDrawReady
 	}
-	newPool, newBracket, err := freshTimes(pool, bracket, newComp, in.Tournament, in.NewFloor)
+	newPool, newBracket, newWraps, err := freshTimes(pool, bracket, newComp, in.Tournament, in.NewFloor)
 	if err != nil {
 		return nil, nil, RetimeOutcome{}, err
 	}
-	oldPool, oldBracket, err := freshTimes(pool, bracket, oldComp, in.Tournament, in.OldFloor)
+	oldPool, oldBracket, _, err := freshTimes(pool, bracket, oldComp, in.Tournament, in.OldFloor)
 	if err != nil {
 		return nil, nil, RetimeOutcome{}, err
 	}
 
 	stored := scheduledRows(pool, bracket)
 	moved := scheduledRows(newPool, newBracket)
-	if wrapsPastMidnight(moved, newComp) {
+	if newWraps || wrapsPastMidnight(moved, newComp) {
 		return nil, nil, RetimeOutcome{}, ErrRetimePastMidnight
 	}
 	fresh := scheduledRows(oldPool, oldBracket)
@@ -268,27 +268,44 @@ func planRetime(pool []state.MatchResult, bracket *state.Bracket, oldComp, newCo
 
 // freshTimes copies the stored matches and gives the copies the times a draw
 // at comp's day and start would give them, by the draw's own assigners and in
-// the draw's own order.
-func freshTimes(pool []state.MatchResult, bracket *state.Bracket, comp *state.Competition, tournament *state.Tournament, floor map[string]time.Time) ([]state.MatchResult, *state.Bracket, error) {
-	newPool := append([]state.MatchResult(nil), pool...)
+// the draw's own order, on the shiaijo the draw used (InheritedDrawCourts, as
+// runDrawPipeline resolves them). wraps reports whether some match would start
+// on the next day: the assigners' cursors keep the day a bare "HH:MM" loses.
+func freshTimes(pool []state.MatchResult, bracket *state.Bracket, comp *state.Competition, tournament *state.Tournament, floor map[string]time.Time) (newPool []state.MatchResult, newBracket *state.Bracket, wraps bool, err error) {
+	drawn := *comp
+	drawn.Courts = InheritedDrawCourts(comp.Courts, tournament)
+	comp = &drawn
+	dayStart, _ := parseCeremonyParams(comp, tournament)
+	nextDay := time.Date(dayStart.Year(), dayStart.Month(), dayStart.Day()+1, 0, 0, 0, 0, dayStart.Location())
+	// Every assigner returns the cursor after its last slot: a court's last
+	// match starts one slot before it.
+	startsNextDay := func(end time.Time, knockout bool) bool {
+		slot := time.Duration(perMatchElapsedMinutes(comp, tournament, knockout)) * time.Minute
+		return !end.Add(-slot).Before(nextDay)
+	}
+
+	newPool = append([]state.MatchResult(nil), pool...)
+	var poolEnd time.Time
 	if comp.Format == state.CompFormatLeague {
 		slots, err := recoverLeagueSlots(newPool, comp.Courts)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, false, err
 		}
-		newPool, _ = assignLeagueSlotTimesFrom(newPool, slots, comp, tournament, floor)
+		newPool, poolEnd = assignLeagueSlotTimesFrom(newPool, slots, comp, tournament, floor)
 	} else {
-		newPool, _ = assignPoolMatchSlotsFrom(newPool, comp, tournament, floor)
+		newPool, poolEnd = assignPoolMatchSlotsFrom(newPool, comp, tournament, floor)
 	}
+	wraps = len(newPool) > 0 && startsNextDay(poolEnd, false)
 	if bracket == nil || len(bracket.Rounds) == 0 {
-		return newPool, nil, nil
+		return newPool, nil, wraps, nil
 	}
-	newBracket := copyBracketForRetime(bracket)
-	assignBracketMatchSlots(newBracket.Rounds, comp, tournament, knockoutCourtStart(newPool, comp, tournament, floor))
+	newBracket = copyBracketForRetime(bracket)
+	bracketEnd := assignBracketMatchSlots(newBracket.Rounds, comp, tournament, knockoutCourtStart(newPool, comp, tournament, floor))
+	wraps = wraps || startsNextDay(bracketEnd, true)
 	if newBracket.ThirdPlaceMatch != nil {
 		scheduleBronze(newBracket, comp, tournament)
 	}
-	return newPool, newBracket, nil
+	return newPool, newBracket, wraps, nil
 }
 
 // copyBracketForRetime copies the parts of a bracket a re-time writes (the

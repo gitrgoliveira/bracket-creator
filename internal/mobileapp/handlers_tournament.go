@@ -846,9 +846,14 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 			// Preserve legacy ceremony block strings (json:"-"): the bound
 			// body never carries them. Without this, an Edit tournament save
 			// before the startup ceremony upgrade succeeded would drop the old
-			// ceremony lengths.
+			// ceremony lengths. The lunch is the exception once the body sends
+			// its own pauses: a load shows the old lunch as a pause, so that
+			// list already holds it, or the organiser deleted it, and keeping
+			// the old key would add it back on the next load.
 			if current != nil {
-				desired.LunchBlockLegacy = current.LunchBlockLegacy
+				if desired.Pauses == nil {
+					desired.LunchBlockLegacy = current.LunchBlockLegacy
+				}
 				desired.OpeningBlockLegacy = current.OpeningBlockLegacy
 				desired.ClosingBlockLegacy = current.ClosingBlockLegacy
 			}

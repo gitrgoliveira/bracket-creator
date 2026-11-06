@@ -38,6 +38,11 @@ func readPendingRetime(store *state.Store, eng *engine.Engine, id string, comp *
 		(pre.Date == comp.Date && pre.StartTime == comp.StartTime) {
 		return nil, nil
 	}
+	// A stale save is refused config_changed in the transaction; reading the
+	// re-time's inputs for it could only answer a refusal it should not see.
+	if comp.ConfigVersion != "" && comp.ConfigVersion != state.ConfigVersion(pre) {
+		return nil, nil
+	}
 	moved := *pre
 	moved.Date, moved.StartTime = comp.Date, comp.StartTime
 	in, err := eng.ReadRetimeInputs(pre, &moved)

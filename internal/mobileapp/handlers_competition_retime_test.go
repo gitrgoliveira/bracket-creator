@@ -407,3 +407,65 @@ func TestCalendarPreview_ADrawnCompetitionNeedsNoCourts(t *testing.T) {
 	w := cvGet(t, r, "/api/schedule/calendar/preview?competitionId="+cid+"&date=10-06-2026&startTime=11:00")
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 }
+
+// A stale save is answered config_changed, whatever a re-time of it would have
+// met: the version is the save's first refusal, so the reader reloads instead
+// of being told about a shiaijo past midnight it may no longer be moving onto.
+func TestPutRetime_AStaleVersionIsConfigChangedBeforeACourtPastMidnight(t *testing.T) {
+	r, store, _, version, cid := retimeFixture(t, state.CompFormatMixed)
+	w, _ := retimePut(t, r, store, cid, version, map[string]any{"startTime": "10:00"})
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: "late", Name: "Late Open", Format: state.CompFormatLeague,
+		Date: "10-06-2026", StartTime: "21:00", Courts: []string{"A"},
+		PoolMatchDurationSeconds: 180, Status: state.CompStatusDrawReady,
+	}))
+	require.NoError(t, store.SavePoolMatches("late", []state.MatchResult{
+		{ID: "Pool A-0", Court: "A", ScheduledAt: "23:58", Status: state.MatchStatusScheduled},
+	}))
+
+	w, ans := retimePut(t, r, store, cid, version, map[string]any{"startTime": "22:00"})
+	require.Equal(t, http.StatusConflict, w.Code, w.Body.String())
+	assert.Equal(t, "config_changed", ans.Code)
+}
+
+// putOmitting sends the stored settings with the given keys left out of the body.
+func putOmitting(t *testing.T, r *gin.Engine, store *state.Store, cid string, keys ...string) *httptest.ResponseRecorder {
+	t.Helper()
+	stored, err := store.LoadCompetition(cid)
+	require.NoError(t, err)
+	var m map[string]any
+	require.NoError(t, json.Unmarshal(cvSettingsBody(t, stored, "", nil), &m))
+	for _, k := range keys {
+		delete(m, k)
+	}
+	b, err := json.Marshal(m)
+	require.NoError(t, err)
+	return cvPut(t, r, cid, b)
+}
+
+// A settings save that leaves twoThirdPlaces out keeps the stored value, as an
+// omitted teamMatchType does: before the start it is not wiped, and after the
+// start the save is not refused for a change it never asked for.
+func TestPutSettings_AnOmittedTwoThirdPlacesKeepsTheStoredValue(t *testing.T) {
+	off := false
+	for _, status := range []state.CompetitionStatus{state.CompStatusSetup, state.CompStatusPools} {
+		t.Run(string(status), func(t *testing.T) {
+			r, store, _, _, _ := setupTestRouter(t)
+			_, _ = cvSeed(t, r, store, "ttp", func(c *state.Competition) {
+				c.TwoThirdPlaces = &off // the format's own default is true
+			})
+			stored, err := store.LoadCompetition("ttp")
+			require.NoError(t, err)
+			stored.Status = status
+			require.NoError(t, store.SaveCompetition(stored))
+
+			w := putOmitting(t, r, store, "ttp", "twoThirdPlaces")
+			require.Equalf(t, http.StatusOK, w.Code, "%s", w.Body.String())
+			after, err := store.LoadCompetition("ttp")
+			require.NoError(t, err)
+			require.NotNil(t, after.TwoThirdPlaces)
+			assert.False(t, *after.TwoThirdPlaces)
+		})
+	}
+}

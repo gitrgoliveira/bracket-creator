@@ -122,7 +122,7 @@ func estimateForPlayers(comp *state.Competition, tournament *state.Tournament, n
 		return EstimateForCounts(0, 0, comp, tournament), 0, 0, nil
 	}
 
-	rosterBuilding := draft || comp == nil || comp.Status == state.CompStatusSetup || comp.Status == ""
+	rosterBuilding := draft || comp.Status == state.CompStatusSetup || comp.Status == ""
 
 	poolWinners := comp.EffectivePoolWinners()
 	in := helper.EstimateMatchCountsInput{

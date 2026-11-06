@@ -240,6 +240,33 @@ func TestRetime_AStartThatRunsTheCompetitionPastMidnightIsRefused(t *testing.T) 
 	assert.NoError(t, err, "a start that finishes before midnight is not refused")
 }
 
+// A wrap that lands at or after the competition's own start reads as a normal
+// morning time, so the start-minute check alone cannot see it: here a pause
+// that runs through midnight sends the next match to 10:05 the next day, after
+// a 10:00 start. The assigner's cursor still knows it left the day.
+func TestRetime_AWrapPastTheCompetitionsOwnStartIsRefused(t *testing.T) {
+	eng, store, comp := drawnForRetime(t, state.CompFormatMixed, []string{"A", "B"}, 8, retimeTournament([]string{"A", "B"}))
+	require.NoError(t, store.SaveTournament(retimeTournament([]string{"A", "B"},
+		state.Pause{Name: "Overnight", Start: "10:05", Length: "24h"})))
+	_, err := eng.RetimePreview(comp, movedTo(comp, comp.Date, "10:00"))
+	assert.ErrorIs(t, err, ErrRetimePastMidnight)
+}
+
+// A competition with no shiaijo of its own is drawn on the tournament's
+// (InheritedDrawCourts), so its re-time reads the league's slots on them too.
+func TestRetime_ALeagueOnTheTournamentsShiaijoCanBeRetimed(t *testing.T) {
+	eng, store, comp := drawnForRetime(t, state.CompFormatLeague, nil, 6, retimeTournament([]string{"A", "B"}))
+	pool, err := store.LoadPoolMatches(comp.ID)
+	require.NoError(t, err)
+	require.Equal(t, "B", pool[1].Court, "the draw used the tournament's two shiaijo")
+	comp.Courts = nil // as stored by a competition that never chose its own
+
+	out, err := eng.RetimePreview(comp, movedTo(comp, comp.Date, "11:00"))
+	require.NoError(t, err)
+	assert.True(t, out.AnyChange)
+	assert.Zero(t, out.NotFreshCount)
+}
+
 func TestRetime_RefusesACompetitionThatIsNotDrawReady(t *testing.T) {
 	eng, store, comp := drawnForRetime(t, state.CompFormatMixed, []string{"A", "B"}, 8, retimeTournament([]string{"A", "B"}))
 	before := storedTimes(t, store, comp)

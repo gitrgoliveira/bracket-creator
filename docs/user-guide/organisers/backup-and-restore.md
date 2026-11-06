@@ -43,7 +43,7 @@ You can restore data from a file on your computer, or from one of the copies kep
 1. Under **Restore from a file**, click **Choose a backup file** and pick your backup zip file. Alternatively, scroll down to **Copies kept on this computer** and click **Restore** next to any saved copy.
 2. The app inspects the archive and shows a **Restore plan**, naming the file it came from. This is a dry run: nothing on disk changes yet.
 3. Review the plan warnings, including how many recorded results each competition will lose or change, and make your choices for each competition.
-4. Click **Restore**.
+4. Click **Restore**. To leave the plan without restoring anything, click **Cancel** beside it.
 5. The app checks your choices once more, so a name that is already used is shown on its competition before you are asked for the password. The confirmation dialog then sums up what the restore will do, for example `This restore replaces 5 competitions, adds 1 copy and leaves out 1 competition. 42 recorded results will be lost or changed.` Enter the admin password to proceed.
 
 An uploaded file can be at most 64 MB. A larger backup restores from **Copies kept on this computer** or from the command line.
@@ -69,7 +69,7 @@ When restoring, the plan presents you with decisions depending on what is curren
     - **Keep it**: leaves the competition in your tournament folder as it is.
     - **Remove it**: deletes the competition from your tournament folder.
 
-When you restore **Only** one competition, or a competition backup, there is no choice to keep your current competition or to leave the competition out: that would restore nothing, so choose **Cancel** instead. A competition you keep, or do not add, keeps its own name and number prefix, so the name and prefix checks below treat it as staying in place.
+When you restore **Only** one competition, or a competition backup, there is no choice to keep your current competition or to leave the competition out: that would restore nothing, so click **Cancel** under the plan instead. A competition you keep, or do not add, keeps its own name and number prefix, so the name and prefix checks below treat it as staying in place.
 
 Nothing is preselected. **Replace all existing** answers **Replace it** for every competition that already exists; you can still change any of them. Until you make a choice for every competition that requires one, the button stays disabled and names the next open choice, for example `Choose what to do with "Mens Individual"` or `Enter name for copy of "Mens Individual"`. Tapping it takes you to that choice.
 

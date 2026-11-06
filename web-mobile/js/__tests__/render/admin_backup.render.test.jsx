@@ -876,6 +876,9 @@ describe('AdminBackupPage render tests', () => {
 
     expect(await screen.findByText('The backup archive has no files to restore.')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /^Restore$/i })).toBeNull();
+    // A plan with nothing to restore can still be put away.
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Cancel' })); });
+    expect(screen.queryByText('The backup archive has no files to restore.')).toBeNull();
   });
 
   it('submits restore with undo: true when plan is an undo plan, and undo: false for normal plan', async () => {
@@ -1379,6 +1382,40 @@ describe('AdminBackupPage render tests', () => {
     expect(screen.getByText(note)).toBeInTheDocument();
     expect(screen.getByRole('group', { name: `Open Individual ${note} This competition already exists:` })).toBeInTheDocument();
     expect(screen.queryAllByText(/in this tournament now\./)).toHaveLength(1);
+  });
+
+  it('Cancel puts the plan away without restoring, and gives focus back to Choose a backup file', async () => {
+    window.promptDialog = vi.fn(() => Promise.resolve(null));
+    const { container } = render(<AdminBackupPage tournament={defaultTournament} password={TEST_KEY} />);
+    await openPlan(container, keepPlan);
+    await act(async () => { fireEvent.click(choiceIn('Open Individual', 'Replace it')); });
+
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Cancel' })); });
+
+    expect(screen.queryByRole('heading', { name: 'Restore plan: whole tournament' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Choose a backup file' })).toHaveFocus();
+    expect(window.promptDialog).not.toHaveBeenCalled();
+    expect(mockApi.restore).not.toHaveBeenCalled();
+    // The next file opens a fresh plan: the answer given before is gone.
+    await openPlan(container, keepPlan);
+    expect(choiceIn('Open Individual', 'Replace it')).not.toBeChecked();
+  });
+
+  it('gives the cards headings, with the plan and its list inside the Restore from a file card', async () => {
+    const { container } = render(<AdminBackupPage tournament={defaultTournament} password={TEST_KEY} />);
+    await openPlan(container, keepPlan);
+    const outline = screen.getAllByRole('heading').map((h) => `${h.tagName} ${h.textContent}`);
+    expect(outline).toEqual(expect.arrayContaining([
+      'H2 Back up tournament',
+      'H3 Back up individual competitions',
+      'H2 Restore from a file',
+      'H3 Restore plan: whole tournament',
+      'H4 Competitions to restore',
+      'H2 Copies kept on this computer',
+    ]));
+    const order = outline.filter((h) => /^H[234] /.test(h)).map((h) => h.slice(3));
+    expect(order.indexOf('Restore plan: whole tournament')).toBeGreaterThan(order.indexOf('Restore from a file'));
+    expect(order.indexOf('Restore plan: whole tournament')).toBeLessThan(order.indexOf('Copies kept on this computer'));
   });
 
   it('offers to keep a competition you already have, and sums it up as left out', async () => {

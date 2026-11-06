@@ -136,6 +136,7 @@ function AdminBackupPage({ tournament, onBack, onLogout, onViewerMode, password,
 
   const mountedRef = useRef(true);
   const fileInputRef = useRef(null);
+  const chooseFileRef = useRef(null);
   const resultTitleRef = useRef(null);
   const planRef = useRef(null);
   const planTitleRef = useRef(null);
@@ -206,6 +207,23 @@ function AdminBackupPage({ tournament, onBack, onLogout, onViewerMode, password,
     checkSeqRef.current += 1;
     clearTimeout(checkTimerRef.current);
     setChecked(null);
+  };
+
+  // Puts the plan away: the restore landed, or the operator cancelled it.
+  const clearPlan = () => {
+    forgetChecks();
+    setPlan(null);
+    setDecisions({});
+    setSelectedFile(null);
+    setSelectedFromName(null);
+    setOnlyCompId(null);
+    setArchiveComps([]);
+  };
+
+  const handleCancelPlan = () => {
+    clearPlan();
+    setPlanError(null);
+    chooseFileRef.current?.focus();
   };
 
   const runPlan = async ({ file, from, only, undo = false }) => {
@@ -401,13 +419,7 @@ function AdminBackupPage({ tournament, onBack, onLogout, onViewerMode, password,
           );
           if (mountedRef.current) {
             setRestoreResult({ ...res, copyNames, isUndoResult: Boolean(plan?.undo) });
-            forgetChecks();
-            setPlan(null);
-            setDecisions({});
-            setSelectedFile(null);
-            setSelectedFromName(null);
-            setOnlyCompId(null);
-            setArchiveComps([]);
+            clearPlan();
             loadKeptBackups();
           }
         } catch (e) {
@@ -486,9 +498,7 @@ function AdminBackupPage({ tournament, onBack, onLogout, onViewerMode, password,
           );
           if (mountedRef.current) {
             setRestoreResult({ ...res, isUndoResult: true });
-            setPlan(null);
-            setDecisions({});
-            setSelectedFromName(null);
+            clearPlan();
             loadKeptBackups();
           }
         } catch (e) {
@@ -567,9 +577,9 @@ function AdminBackupPage({ tournament, onBack, onLogout, onViewerMode, password,
 
         {restoreResult && (
           <div className="card backup-result">
-            <div ref={resultTitleRef} className="card__title" tabIndex={-1}>
+            <h2 ref={resultTitleRef} className="card__title" tabIndex={-1}>
               {restoreResult.isUndoResult ? "Restore undone" : "Restore completed"}
-            </div>
+            </h2>
             <div className="card__body">
               {restoreResult.safetyCopy && (
                 <p className="backup-detail">
@@ -619,7 +629,7 @@ function AdminBackupPage({ tournament, onBack, onLogout, onViewerMode, password,
         )}
 
         <div className="card">
-          <div className="card__title">Back up tournament</div>
+          <h2 className="card__title">Back up tournament</h2>
           <div className="card__body">
             <p className="backup-intro">
               Download a complete archive of the tournament including all competitions, participants, matches and settings.
@@ -638,7 +648,7 @@ function AdminBackupPage({ tournament, onBack, onLogout, onViewerMode, password,
 
             {comps.length > 0 && (
               <>
-                <h2 className="backup-subhead">Back up individual competitions</h2>
+                <h3 className="backup-subhead">Back up individual competitions</h3>
                 <div className="backup-list">
                   {comps.map((c) => (
                     <div key={c.id} className="backup-row">
@@ -665,7 +675,7 @@ function AdminBackupPage({ tournament, onBack, onLogout, onViewerMode, password,
         </div>
 
         <div className="card">
-          <div className="card__title">Restore from a file</div>
+          <h2 className="card__title">Restore from a file</h2>
           <div className="card__body">
             <p className="backup-intro">
               Upload a zip archive to preview the restore. No changes will be made until you confirm.
@@ -680,6 +690,7 @@ function AdminBackupPage({ tournament, onBack, onLogout, onViewerMode, password,
                 disabled={planning}
               />
               <button
+                ref={chooseFileRef}
                 type="button"
                 className="btn"
                 disabled={planning}
@@ -696,13 +707,13 @@ function AdminBackupPage({ tournament, onBack, onLogout, onViewerMode, password,
 
             {plan && (
               <div ref={planRef} className="backup-plan">
-                <h2 ref={planTitleRef} className="backup-subhead backup-plan__title" tabIndex={-1}>
+                <h3 ref={planTitleRef} className="backup-subhead backup-plan__title" tabIndex={-1}>
                   {plan.undo
                     ? "Undo plan"
                     : plan.scope === "tournament"
                       ? "Restore plan: whole tournament"
                       : "Restore plan: one competition"}
-                </h2>
+                </h3>
                 {(selectedFromName || selectedFile?.name) && (
                   <p className="backup-detail">
                     From <strong>{selectedFromName || selectedFile.name}</strong>
@@ -758,7 +769,7 @@ function AdminBackupPage({ tournament, onBack, onLogout, onViewerMode, password,
                 )}
 
                 <div className="backup-plan__listhead">
-                  <h3 className="backup-subhead">Competitions to restore</h3>
+                  <h4 className="backup-subhead">Competitions to restore</h4>
                   {replaceableComps.length >= 2 && (
                     <button type="button" className="btn btn--sm" onClick={handleReplaceAll}>
                       Replace all existing
@@ -885,12 +896,13 @@ function AdminBackupPage({ tournament, onBack, onLogout, onViewerMode, password,
                   })}
                 </div>
 
-                {plan.nothingToRestore ? (
+                {plan.nothingToRestore && (
                   <div className="alert alert--info backup-plan-end">
                     {plan.message || "Nothing to restore."}
                   </div>
-                ) : (
-                  <div className="backup-actions backup-plan-end">
+                )}
+                <div className="backup-actions backup-plan-end">
+                  {!plan.nothingToRestore && (
                     <button
                       type="button"
                       className="btn btn--primary"
@@ -907,15 +919,18 @@ function AdminBackupPage({ tournament, onBack, onLogout, onViewerMode, password,
                               ? `"${firstOpenComp.name}": its name is already used`
                               : `Choose what to do with "${firstOpenComp.name}"`}
                     </button>
-                  </div>
-                )}
+                  )}
+                  <button type="button" className="btn" onClick={handleCancelPlan}>
+                    Cancel
+                  </button>
+                </div>
               </div>
             )}
           </div>
         </div>
 
         <div className="card">
-          <div className="card__title">Copies kept on this computer</div>
+          <h2 className="card__title">Copies kept on this computer</h2>
           <div className="card__body">
             <p className="backup-intro">
               The app takes a daily copy by itself when something changed. Copies are never deleted automatically.

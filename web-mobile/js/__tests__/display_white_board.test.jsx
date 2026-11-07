@@ -30,15 +30,20 @@ describe('sideLabel: numberPrefix + zekken', () => {
   });
 });
 
-describe('overlayPositionLabel: FIK names only for 5-person teams', () => {
+describe('overlayPositionLabel: names for 5- and 3-person teams', () => {
   it('returns Senpo..Taisho for a 5-person team', () => {
     expect(overlayPositionLabel(5, 0, {})).toBe('Senpo');
     expect(overlayPositionLabel(5, 2, {})).toBe('Chuken');
     expect(overlayPositionLabel(5, 4, {})).toBe('Taisho');
   });
-  it('falls back to the bare bout number for non-5 teams (3, 7, kachinuki 11/15)', () => {
-    expect(overlayPositionLabel(3, 0, {})).toBe('1');
-    expect(overlayPositionLabel(3, 2, {})).toBe('3');
+  it('returns Senpo, Chuken, Taisho for a 3-person team', () => {
+    expect(overlayPositionLabel(3, 0, {})).toBe('Senpo');
+    expect(overlayPositionLabel(3, 1, {})).toBe('Chuken');
+    expect(overlayPositionLabel(3, 2, {})).toBe('Taisho');
+  });
+  it('falls back to the bare bout number for other teams (4, 7, kachinuki 11/15)', () => {
+    expect(overlayPositionLabel(4, 0, {})).toBe('1');
+    expect(overlayPositionLabel(7, 2, {})).toBe('3');
     expect(overlayPositionLabel(11, 9, {})).toBe('10');
     expect(overlayPositionLabel(15, 14, {})).toBe('15');
   });

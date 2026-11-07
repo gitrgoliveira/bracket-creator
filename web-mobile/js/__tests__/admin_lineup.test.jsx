@@ -185,11 +185,21 @@ describe('positionsForSize', () => {
     ]);
   });
 
-  it('returns numeric "1".."N" labels for non-5 sizes', () => {
+  it('names a 3-person team Senpo, Chuken, Taisho over its stored keys "1".."3"', () => {
+    // Operator ruling 2026-11-07: display only, the keys stay numbered.
     expect(positionsForSize(3)).toEqual([
+      { key: '1', label: 'Senpo', termId: 'senpo' },
+      { key: '2', label: 'Chuken', termId: 'chuken' },
+      { key: '3', label: 'Taisho', termId: 'taisho' },
+    ]);
+  });
+
+  it('returns numeric "1".."N" labels for other sizes', () => {
+    expect(positionsForSize(4)).toEqual([
       { key: '1', label: '1' },
       { key: '2', label: '2' },
       { key: '3', label: '3' },
+      { key: '4', label: '4' },
     ]);
   });
 

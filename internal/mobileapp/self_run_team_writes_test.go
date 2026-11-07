@@ -162,10 +162,28 @@ func TestSelfRun_MatchLineup_RefusesAMemberTheTeamDoesNotHold(t *testing.T) {
 	for name, id := range map[string]string{"another team's member": foreign, "an id no team holds": "00000000-0000-4000-8000-000000000000"} {
 		t.Run(name, func(t *testing.T) {
 			w := f.send(http.MethodPut, f.lineupPath("PoolA-0"), "", senpo("Mei Ito", id))
-			requireRefusal(t, w, http.StatusBadRequest, "team_member_not_in_team", "The member chosen for senpo is not on this team. Pick again from the list.")
+			requireRefusal(t, w, http.StatusBadRequest, "team_member_not_in_team", "The member chosen for Senpo is not on this team. Pick again from the list.")
 			_, ok := f.savedLineup(t, "PoolA-0")
 			assert.False(t, ok, "a refused lineup writes nothing")
 		})
+	}
+}
+
+// The refusal names the position as a person reads it, never the stored key.
+func TestErrLineupMemberNotInTeam_NamesThePositionAsRead(t *testing.T) {
+	for _, tc := range []struct {
+		size int
+		pos  domain.Position
+		want string
+	}{
+		{5, domain.PosSenpo, "Senpo"},
+		{3, "1", "Senpo"},
+		{3, "2", "Chuken"},
+		{3, "3", "Taisho"},
+		{4, "2", "position 2"},
+	} {
+		assert.Equal(t, "The member chosen for "+tc.want+" is not on this team. Pick again from the list.",
+			errLineupMemberNotInTeam(tc.size, tc.pos).message, "size %d pos %q", tc.size, tc.pos)
 	}
 }
 

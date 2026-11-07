@@ -74,7 +74,7 @@ func (e *Engine) collectKachinukiMatches(compID string, comp *state.Competition)
 	// A match not yet decided and with no bout recorded gets the empty rows
 	// for hand entry.
 	return draw.sections(comp, func(m *state.MatchResult, label string) (helper.KachinukiMatchDetail, bool) {
-		detail := buildKachinukiDetail(m, label, rule.positionsForMatch(m), teamNumbers, squads)
+		detail := buildKachinukiDetail(m, label, rule.positionsForMatch(m, comp.TeamSize), teamNumbers, squads)
 		if len(detail.Bouts) == 0 && m.Status != state.MatchStatusCompleted {
 			detail.BlankBoutRows = comp.TeamBoutRows()
 		}
@@ -396,12 +396,13 @@ func memberKey(memberID string) string {
 //
 // The result is keyed by lineupKey(team name, fighter): by name, and by member
 // id (memberKey) as well, since a fighter fielded by number alone has an id and
-// no name.
-func (r *lineupRule) positionsForMatch(m *state.MatchResult) map[string]string {
+// no name. Each position is labelled as a person reads it in a team of
+// teamSize (domain.PositionLabel).
+func (r *lineupRule) positionsForMatch(m *state.MatchResult, teamSize int) map[string]string {
 	out := map[string]string{}
 	for _, side := range []struct{ id, name string }{{m.SideAID, m.SideA}, {m.SideBID, m.SideB}} {
 		if in := r.inForce(side.id, m.ID); in.Found {
-			indexLineupPositions(out, side.name, in.Lineup)
+			indexLineupPositions(out, side.name, in.Lineup, teamSize)
 		}
 	}
 	return out
@@ -420,19 +421,19 @@ func (r *lineupRule) positionsForMatch(m *state.MatchResult) map[string]string {
 // roster (TeamLineup.OrderedMembers) fields the fighter at; a text order of the
 // position names gave "Chuken" here for a fighter the roster fields as "Senpo",
 // and "10" ahead of "2".
-func indexLineupPositions(out map[string]string, team string, lineup domain.TeamLineup) {
-	indexFirstPositionHeld(out, team, lineup.Positions, func(name string) string { return name })
+func indexLineupPositions(out map[string]string, team string, lineup domain.TeamLineup, teamSize int) {
+	indexFirstPositionHeld(out, team, lineup.Positions, teamSize, func(name string) string { return name })
 	// Every position held by id is indexed under the id as well, so a
 	// nameless fighter (bc-dnst) still resolves; resolveKachinukiBoutPosition
 	// tries the id first.
-	indexFirstPositionHeld(out, team, lineup.MemberIDs, memberKey)
+	indexFirstPositionHeld(out, team, lineup.MemberIDs, teamSize, memberKey)
 }
 
 // indexFirstPositionHeld indexes held (position to a fighter's name or member
 // id, empty for a vacant position) into out under lineupKey(team, key(held)),
 // walking the positions in the order a lineup is fielded so a fighter held twice
-// keeps the label of the first.
-func indexFirstPositionHeld(out map[string]string, team string, held map[domain.Position]string, key func(string) string) {
+// keeps the label of the first, as a person reads it in a team of teamSize.
+func indexFirstPositionHeld(out map[string]string, team string, held map[domain.Position]string, teamSize int, key func(string) string) {
 	indexed := make(map[string]struct{}, len(held))
 	for _, pos := range slices.SortedFunc(maps.Keys(held), domain.ComparePositions) {
 		fighter := held[pos]
@@ -443,7 +444,7 @@ func indexFirstPositionHeld(out map[string]string, team string, held map[domain.
 			continue
 		}
 		indexed[fighter] = struct{}{}
-		out[lineupKey(team, key(fighter))] = pos.Label()
+		out[lineupKey(team, key(fighter))] = domain.PositionLabel(teamSize, pos)
 	}
 }
 

@@ -119,7 +119,7 @@ async function click(button) {
 
 async function typeName(utils, position, name) {
   await act(async () => {
-    const input = utils.getByLabelText(`${position} player`);
+    const input = utils.getByLabelText(`${({ 1: 'Senpo', 2: 'Chuken', 3: 'Taisho' })[position] ?? position} player`);
     fireEvent.focus(input);
     fireEvent.change(input, { target: { value: name } });
     fireEvent.keyDown(input, { key: 'Enter' });
@@ -138,7 +138,7 @@ describe('the at-court panel, for a lineup that could not be read', () => {
     const utils = await mountPanel();
     expect(utils.getByText('competition not found')).toBeTruthy();
     expect(saveButton(utils).disabled).toBe(true);
-    expect(utils.getByLabelText('1 player').disabled).toBe(true);
+    expect(utils.getByLabelText('Senpo player').disabled).toBe(true);
     // Nothing to say about where the lineup was saved, when it was not read.
     expect(utils.queryByText('No lineup saved yet')).toBeNull();
     expect(useButton(utils)).toBeNull();
@@ -155,8 +155,8 @@ describe('the at-court panel, for a lineup that could not be read', () => {
     expect(api.fetchLineupInForce).toHaveBeenCalledTimes(2);
     expect(utils.queryByText('competition not found')).toBeNull();
     expect(utils.queryByRole('button', { name: 'Try again' })).toBeNull();
-    expect(utils.getByLabelText('1 player').value).toBe('Aoki');
-    expect(utils.getByLabelText('1 player').disabled).toBe(false);
+    expect(utils.getByLabelText('Senpo player').value).toBe('Aoki');
+    expect(utils.getByLabelText('Senpo player').disabled).toBe(false);
     expect(utils.getByText('Same as Pool A · Match 1')).toBeTruthy();
     await typeName(utils, 1, 'Mori');
     expect(saveButton(utils).disabled).toBe(false);
@@ -178,7 +178,7 @@ describe('the at-court panel, for a lineup that could not be read', () => {
     api.fetchLineupInForce.mockResolvedValue(CARRIED);
     await click(tryAgain(failed));
 
-    expect(failed.getByLabelText('1 player').value).toBe('Mori');
+    expect(failed.getByLabelText('Senpo player').value).toBe('Mori');
     expect(failed.getByTestId('match-lineup-draft-team-a').textContent).toContain('Unsaved lineup changes restored');
   });
 
@@ -305,8 +305,8 @@ describe('a removal whose re-read fails', () => {
     expect(utils.getByText(REMOVED_UNREAD)).toBeTruthy();
     expect(utils.queryByText('Lineup for this match')).toBeNull();
     expect(useButton(utils)).toBeNull();
-    expect(utils.getByLabelText('1 player').value).toBe('');
-    expect(utils.getByLabelText('1 player').disabled).toBe(true);
+    expect(utils.getByLabelText('Senpo player').value).toBe('');
+    expect(utils.getByLabelText('Senpo player').disabled).toBe(true);
     expect(saveButton(utils).disabled).toBe(true);
     // What was typed was made against the lineup that went.
     expect(sessionStorage.getItem(MATCH_KEY)).toBeNull();
@@ -321,7 +321,7 @@ describe('a removal whose re-read fails', () => {
 
     expect(utils.queryByText(REMOVED_UNREAD)).toBeNull();
     expect(utils.getByText('Same as Pool A · Match 1')).toBeTruthy();
-    expect(utils.getByLabelText('1 player').value).toBe('Aoki');
+    expect(utils.getByLabelText('Senpo player').value).toBe('Aoki');
     expect(saveButton(utils).disabled).toBe(true);
   });
 
@@ -399,7 +399,7 @@ describe('a lineup change announced for the competition', () => {
   const announce = () => act(async () => {
     window.dispatchEvent(new CustomEvent('lineup-updated', { detail: { competitionId: 'comp-1' } }));
   });
-  const nameBox = (utils, position) => utils.getByLabelText(`${position} player`);
+  const nameBox = (utils, position) => utils.getByLabelText(`${({ 1: 'Senpo', 2: 'Chuken', 3: 'Taisho' })[position] ?? position} player`);
 
   it('shows in the at-court panel while it is untouched', async () => {
     const utils = await mountPanel();

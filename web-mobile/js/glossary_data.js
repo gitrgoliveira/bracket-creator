@@ -7,7 +7,7 @@
 
 export const GLOSSARY = {
   "aka": {"id":"aka","kanji":"赤","short":"Red","tooltip":"The competitor wearing a red ribbon at the back. Always shown on the right in this app."},
-  "chuken": {"id":"chuken","kanji":"中堅","short":"Middle player","tooltip":"The team's middle player, fights bout 3 in a 5-person team."},
+  "chuken": {"id":"chuken","kanji":"中堅","short":"Middle player","tooltip":"The team's middle player, fights bout 3 in a 5-person team and bout 2 in a 3-person team."},
   "daihyosen": {"id":"daihyosen","kanji":"代表選","short":"Representative bout","tooltip":"Representative tiebreaker bout for teams. When teams finish level, each side sends one player to fight a single-point bout (ippon-shobu). In a tied team pool or league it decides the order in the standings; in a tied team knockout match it decides the winner (who advances).","seeAlso":["ippon-shobu","ippon"]},
   "dan": {"id":"dan","kanji":"段","short":"Rank","tooltip":"A competitor's grade, shodan (1st), nidan (2nd), sandan (3rd), up to 8th. Optional in the entry form."},
   "dojo": {"id":"dojo","kanji":"道場","short":"Club or school","tooltip":"The training school or club a competitor represents. The pool generator avoids placing two competitors from the same dojo in the same pool when it can."},
@@ -25,11 +25,11 @@ export const GLOSSARY = {
   "kiken": {"id":"kiken","kanji":"棄権","short":"Withdrawal","tooltip":"The competitor withdraws. Two sub-types: Voluntary (FIK Art. 31), permanent disqualification from the competition; Injury (FIK Art. 30), can be reinstated if they are fit to fight again. The match is awarded to the opponent; any points the withdrawing competitor had already scored stand."},
   "kiken-injury": {"id":"kiken-injury","kanji":"棄権","short":"Injury withdrawal","tooltip":"FIK Article 30, the competitor withdraws due to injury or illness. The match is awarded to the opponent; any points the withdrawing competitor had already scored stand. They are blocked from later matches, but can be reinstated if they are fit to fight again."},
   "kiken-voluntary": {"id":"kiken-voluntary","kanji":"棄権","short":"Voluntary withdrawal","tooltip":"FIK Article 31, the competitor voluntarily withdraws. The match is awarded to the opponent; any points the withdrawing competitor had already scored stand. They are permanently barred from all later matches in this competition."},
-  "senpo": {"id":"senpo","kanji":"先鋒","short":"First player","tooltip":"The team's first player, fights bout 1 in a 5-person team. Senpo must be filled; this position cannot be left vacant, even when a teammate is withdrawn."},
+  "senpo": {"id":"senpo","kanji":"先鋒","short":"First player","tooltip":"The team's first player, fights bout 1 in a 3- or 5-person team. Senpo must be filled; this position cannot be left vacant, even when a teammate is withdrawn."},
   "shiaijo": {"id":"shiaijo","kanji":"試合場","short":"Court","tooltip":"The marked floor area where matches are fought. Labelled A, B, C, etc."},
   "shiro": {"id":"shiro","kanji":"白","short":"White","tooltip":"The competitor wearing a white ribbon at the back. Always shown on the left in this app."},
   "sune": {"id":"sune","kanji":"すね","short":"Shin strike","tooltip":"A strike to the shin. Scores a point in Naginata competitions. Not a valid scoring technique in Kendo."},
-  "taisho": {"id":"taisho","kanji":"大将","short":"Captain","tooltip":"The team's captain, fights the final bout (bout 5). Like senpo, Taisho must be filled; this position cannot be left vacant.","seeAlso":["senpo"]},
+  "taisho": {"id":"taisho","kanji":"大将","short":"Captain","tooltip":"The team's captain, fights the final bout (bout 5 in a 5-person team, bout 3 in a 3-person team). Like senpo, Taisho must be filled; this position cannot be left vacant.","seeAlso":["senpo"]},
   "waza": {"id":"waza","kanji":"技","short":"Technique","tooltip":"The specific type of strike scored, for example, men, kote, or do. Recorded with each ippon for the match record.","seeAlso":["ippon"]},
   "zekken": {"id":"zekken","kanji":"ゼッケン","short":"Name tag (nafuda)","tooltip":"The name tag affixed to the centre of the tare (waist protector). Also called nafuda. The display can show this name (instead of the registered name) so spectators see what's physically visible."}
 };

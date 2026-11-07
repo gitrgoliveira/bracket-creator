@@ -39,6 +39,44 @@ func (p Position) Label() string {
 	return strings.ToUpper(s[:1]) + s[1:]
 }
 
+// namedPositionsFor is the named positions of a team size in fighting order,
+// nil for a size whose positions are read as numbers: a 5-person team's five
+// FIK names, and a 3-person team's senpo, chuken and taisho (operator ruling
+// 2026-11-07). Display only: a 3-person team still STORES its positions as
+// "1".."3" (canonicalPositionOrder), so the names are what a person reads.
+func namedPositionsFor(teamSize int) []Position {
+	switch teamSize {
+	case 3:
+		return []Position{PosSenpo, PosChuken, PosTaisho}
+	case 5:
+		return fikPositionOrder[:]
+	}
+	return nil
+}
+
+// BoutPositionName is the name of the position that fights numbered bout
+// `bout` (1-based) in a team of teamSize ("Taisho"), or "" when the size's
+// positions have no names or bout is outside them.
+func BoutPositionName(teamSize, bout int) string {
+	named := namedPositionsFor(teamSize)
+	if bout < 1 || bout > len(named) {
+		return ""
+	}
+	return named[bout-1].Label()
+}
+
+// PositionLabel is a stored position as a person reads it in a team of
+// teamSize: the position's name where the size names its positions ("2" of a
+// 3-person team reads "Chuken", "senpo" reads "Senpo"), else Label().
+func PositionLabel(teamSize int, p Position) string {
+	if i := slices.Index(canonicalPositionOrder(teamSize), p); i >= 0 {
+		if name := BoutPositionName(teamSize, i+1); name != "" {
+			return name
+		}
+	}
+	return p.Label()
+}
+
 // TeamLineup pins which player occupies each Position for a team in a
 // given round OR for a specific match. The lineup is always editable,
 // including while a match is running or completed.

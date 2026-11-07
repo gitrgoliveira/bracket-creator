@@ -67,7 +67,7 @@ async function flush() {
 
 async function typeName(utils, position, name) {
   await act(async () => {
-    const input = utils.getByLabelText(`${position} player`);
+    const input = utils.getByLabelText(`${({ 1: 'Senpo', 2: 'Chuken', 3: 'Taisho' })[position] ?? position} player`);
     fireEvent.focus(input);
     fireEvent.change(input, { target: { value: name } });
     fireEvent.keyDown(input, { key: 'Enter' });

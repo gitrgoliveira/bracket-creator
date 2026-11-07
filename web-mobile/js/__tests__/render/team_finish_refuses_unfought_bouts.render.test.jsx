@@ -81,7 +81,7 @@ describe('team editor: Finish refuses while a bout has no result', () => {
     await act(async () => { fireEvent.click(screen.getByText('Finish')); });
 
     const refusal = screen.getByTestId('team-finish-unfinished-bouts');
-    expect(refusal.textContent).toBe('Bout 2 and Bout 3 have no result. Record a score, a Tie, or a Fusensho before finishing.');
+    expect(refusal.textContent).toBe('Bout 2 (Chuken) and Bout 3 (Taisho) have no result. Record a score, a Tie, or a Fusensho before finishing.');
     expect(refusal.textContent).not.toMatch(/lineup/i);
     expect(screen.queryByText('Tap again to finish')).toBeNull();
     expect(window.API.recordScore.mock.calls.filter(([, , p]) => p?.status === 'completed')).toHaveLength(0);
@@ -97,7 +97,7 @@ describe('team editor: Finish refuses while a bout has no result', () => {
     const ties = () => [...document.querySelectorAll('[data-testid="scoring-modal-tie-button"]')];
     expect(ties()).toHaveLength(3);
     await act(async () => { fireEvent.click(ties()[1]); });
-    expect(screen.getByTestId('team-finish-unfinished-bouts').textContent).toMatch(/^Bout 3 has no result\./);
+    expect(screen.getByTestId('team-finish-unfinished-bouts').textContent).toMatch(/^Bout 3 \(Taisho\) has no result\./);
     await act(async () => { fireEvent.click(ties()[2]); });
     expect(screen.queryByTestId('team-finish-unfinished-bouts')).toBeNull();
 
@@ -115,7 +115,7 @@ describe('team editor: Finish refuses while a bout has no result', () => {
     expect(save).toBeTruthy();
     await act(async () => { fireEvent.click(save); });
     expect(screen.getByTestId('team-finish-unfinished-bouts').textContent)
-      .toBe('Bout 2 and Bout 3 have no result. Record a score, a Tie, or a Fusensho before finishing.');
+      .toBe('Bout 2 (Chuken) and Bout 3 (Taisho) have no result. Record a score, a Tie, or a Fusensho before finishing.');
     expect(window.API.recordScore.mock.calls.filter(([, , p]) => p?.status === 'completed')).toHaveLength(0);
   });
 

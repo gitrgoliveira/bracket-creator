@@ -74,6 +74,11 @@ const B = { id: 'team-b', name: 'Team B' };
 const C = { id: 'team-c', name: 'Team C' };
 const match = (id, sideA, sideB) => ({ id, status: 'scheduled', sideA, sideB });
 const POOL_MATCHES = [match('Pool A-0', A, B), match('Pool A-1', B, C), match('Pool A-2', A, C)];
+// A three-person team stores its positions as "1".."3" and shows them as Senpo,
+// Chuken and Taisho (operator ruling 2026-11-07): a position named by its key here
+// is read on the page by that name.
+const POSITION_NAMES_3 = { 1: 'Senpo', 2: 'Chuken', 3: 'Taisho' };
+const labelOf = (position) => POSITION_NAMES_3[position] ?? position;
 const COMP = { id: 'comp-1', name: 'Team Event', kind: 'team', format: 'pools', status: 'active', teamSize: 3, players: [A, B, C] };
 // A team member's name can be cleared until the competition has started; a drawn one has its matches.
 const DRAWN_COMP = { ...COMP, status: 'draw-ready' };
@@ -179,7 +184,7 @@ async function click(button) {
 
 async function typeName(utils, position, name) {
   await act(async () => {
-    const input = utils.getByLabelText(`${position} player`);
+    const input = utils.getByLabelText(`${labelOf(position)} player`);
     fireEvent.focus(input);
     fireEvent.change(input, { target: { value: name } });
     fireEvent.keyDown(input, { key: 'Enter' });
@@ -193,7 +198,7 @@ const pick = (utils, position, memberId) => act(async () => {
 // The panel's name box offers the team's members in a list: opens it and takes one.
 async function pickFromList(utils, position, name) {
   const row = utils.getByTestId(`match-lineup-pos-team-a-${position}`);
-  await act(async () => { fireEvent.focus(within(row).getByLabelText(`${position} player`)); });
+  await act(async () => { fireEvent.focus(within(row).getByLabelText(`${labelOf(position)} player`)); });
   await act(async () => { fireEvent.click(within(row).getByText(name)); });
 }
 
@@ -247,15 +252,15 @@ describe('the at-court panel', () => {
     expect(changedOf(api.putMatchLineup.mock.calls[0])).toEqual(['1']);
     expect(api.addTeamMember, 'the position left alone is not minted').not.toHaveBeenCalled();
     // The server's answer is what is shown afterwards: the lineup it holds, Kato included.
-    expect(utils.getByLabelText('2 player').value).toBe('Kato');
-    expect(utils.getByLabelText('1 player').value).toBe('Mori');
+    expect(utils.getByLabelText('Chuken player').value).toBe('Kato');
+    expect(utils.getByLabelText('Senpo player').value).toBe('Mori');
     expect(saveButton(utils).disabled, 'saved: nothing left to save').toBe(true);
   });
 
   it('never resolves or mints a position left alone, even when it names a member this list has never heard of', async () => {
     serverHolds(ZED_AT_3);
     const utils = await mountPanel();
-    expect(utils.getByLabelText('3 player').value).toBe('Zed');
+    expect(utils.getByLabelText('Taisho player').value).toBe('Zed');
     await typeName(utils, 1, 'Mori');
 
     await click(saveButton(utils));
@@ -265,7 +270,7 @@ describe('the at-court panel', () => {
     expect(api.renameTeamMember).not.toHaveBeenCalled();
     const asked = resolver.mock.calls.flatMap(([, , positions]) => Object.keys(positions));
     expect(asked, 'only the position the operator typed over was resolved').toEqual(['1']);
-    expect(utils.getByLabelText('3 player').value, 'and the position left alone is still shown').toBe('Zed');
+    expect(utils.getByLabelText('Taisho player').value, 'and the position left alone is still shown').toBe('Zed');
   });
 
   it('still resolves a name typed over a position, with the id that position holds now', async () => {
@@ -323,7 +328,7 @@ describe('the at-court panel', () => {
     await flush();
 
     expect(panelRow(utils, 1).getByText('Slot 6'), 'the member the Save minted is still listed').toBeTruthy();
-    expect(panelRow(utils, 1).getByRole('button', { name: 'Rename 1 player' })).toBeTruthy();
+    expect(panelRow(utils, 1).getByRole('button', { name: 'Rename Senpo player' })).toBeTruthy();
   });
 
   it('places the member a rename gave its new name by its id when that name is typed: a read of the team\'s members begun before the rename, answering after it with the old name, does not undo it', async () => {
@@ -336,8 +341,8 @@ describe('the at-court panel', () => {
     await announce();
     // The operator renames Ito (position 3) to Itoh; the server answers the member with the
     // stamp of that write, and no read is made after it.
-    await click(panelRow(utils, 3).getByRole('button', { name: 'Rename 3 player' }));
-    await act(async () => { fireEvent.change(panelRow(utils, 3).getByLabelText('Rename 3 player'), { target: { value: 'Itoh' } }); });
+    await click(panelRow(utils, 3).getByRole('button', { name: 'Rename Taisho player' }));
+    await act(async () => { fireEvent.change(panelRow(utils, 3).getByLabelText('Rename Taisho player'), { target: { value: 'Itoh' } }); });
     await click(panelRow(utils, 3).getByRole('button', { name: 'Save' }));
     expect(api.renameTeamMember).toHaveBeenCalledWith('comp-1', 'team-a', 'mem-3', 'Itoh', 'pw', expect.any(Object));
     // The read begun before it answers now, with the old name.
@@ -367,8 +372,8 @@ describe('the at-court panel', () => {
     expect(putOf(api.putMatchLineup.mock.calls[0])).toEqual({ positions: { 1: '' } });
     expect(changedOf(api.putMatchLineup.mock.calls[0])).toEqual(['1']);
     expect(serverMatch.positions).toEqual({ 2: 'Kato', 3: 'Ito' });
-    expect(utils.getByLabelText('1 player').value).toBe('');
-    expect(utils.getByLabelText('2 player').value).toBe('Kato');
+    expect(utils.getByLabelText('Senpo player').value).toBe('');
+    expect(utils.getByLabelText('Chuken player').value).toBe('Kato');
   });
 
   describe('with no connection', () => {
@@ -385,7 +390,7 @@ describe('the at-court panel', () => {
       expect(changedOf(api.putMatchLineup.mock.calls[0])).toEqual(['1']);
       // The held-write words every editor uses, with the pending icon: not a success.
       expect(showToast).toHaveBeenCalledWith(QUEUED_NOTICE, 'pending');
-      expect(utils.getByLabelText('1 player').value).toBe('Mori');
+      expect(utils.getByLabelText('Senpo player').value).toBe('Mori');
       expect(saveButton(utils).disabled, 'still unsaved').toBe(false);
     });
 
@@ -409,7 +414,7 @@ describe('the at-court panel', () => {
     await click(saveButton(utils));
 
     expect(savingButton(utils).disabled).toBe(true);
-    expect(utils.getByLabelText('2 player').disabled).toBe(true);
+    expect(utils.getByLabelText('Chuken player').disabled).toBe(true);
     expect(api.putMatchLineup).toHaveBeenCalledTimes(1);
 
     await act(async () => { write.resolve({ positions: { 1: 'Mori', 2: 'Sato', 3: 'Ito' }, memberIds: { 1: 'mem-4', 2: 'mem-2', 3: 'mem-3' } }); });
@@ -431,7 +436,7 @@ describe('the at-court panel', () => {
     expect(api.putMatchLineup).toHaveBeenCalledTimes(1);
     expect(utils.getByText(/is at positions/), 'the server\'s refusal is shown').toBeTruthy();
     expect(saveButton(utils).disabled, 'the operator can still fix it and save').toBe(false);
-    expect(utils.getByLabelText('1 player').value, 'the operator\'s own change stays').toBe('Mori');
+    expect(utils.getByLabelText('Senpo player').value, 'the operator\'s own change stays').toBe('Mori');
   });
 
   it('names the position that was already there, not the one the operator typed into, when a typed name is a member stored elsewhere', async () => {
@@ -441,7 +446,7 @@ describe('the at-court panel', () => {
 
     await click(saveButton(utils));
 
-    expect(utils.getByText('Mori is already at Position 1.')).toBeTruthy();
+    expect(utils.getByText('Mori is already at Senpo.')).toBeTruthy();
     expect(api.putMatchLineup).not.toHaveBeenCalled();
     expect(api.addTeamMember).not.toHaveBeenCalled();
   });
@@ -453,7 +458,7 @@ describe('the at-court panel', () => {
 
     await click(saveButton(utils));
 
-    expect(utils.getByText('Mori is already at Position 2.')).toBeTruthy();
+    expect(utils.getByText('Mori is already at Chuken.')).toBeTruthy();
     expect(api.putMatchLineup).not.toHaveBeenCalled();
     expect(api.addTeamMember).not.toHaveBeenCalled();
     expect(api.renameTeamMember).not.toHaveBeenCalled();
@@ -478,11 +483,11 @@ describe('the at-court panel', () => {
       await pickFromList(utils, 2, 'Mori');
       await typeName(utils, 3, 'Mori');
       await click(saveButton(utils));
-      expect(utils.getByText('Mori is already at Position 2.')).toBeTruthy();
+      expect(utils.getByText('Mori is already at Chuken.')).toBeTruthy();
 
       await typeName(utils, 3, 'Ito');
 
-      expect(utils.queryByText('Mori is already at Position 2.')).toBeNull();
+      expect(utils.queryByText('Mori is already at Chuken.')).toBeNull();
     });
 
     it('is refused before anything is minted or renamed when a typed name is a member the lineup holds elsewhere', async () => {
@@ -493,7 +498,7 @@ describe('the at-court panel', () => {
 
       await click(saveButton(utils));
 
-      expect(utils.getByText('Mori is already at Position 1.')).toBeTruthy();
+      expect(utils.getByText('Mori is already at Senpo.')).toBeTruthy();
       expect(resolver, 'the names are not resolved for a Save that is refused').not.toHaveBeenCalled();
       expect(api.addTeamMember, 'Kato is not minted').not.toHaveBeenCalled();
       expect(api.renameTeamMember).not.toHaveBeenCalled();
@@ -553,7 +558,7 @@ describe('the at-court panel', () => {
 
       await click(saveButton(utils));
 
-      expect(utils.getByText('Kato is already at Position 2.')).toBeTruthy();
+      expect(utils.getByText('Kato is already at Chuken.')).toBeTruthy();
       refusedBeforeAnythingIsWritten();
     });
 
@@ -566,7 +571,7 @@ describe('the at-court panel', () => {
 
       await click(saveButton(utils));
 
-      expect(utils.getByText('Ito is already at Position 1.')).toBeTruthy();
+      expect(utils.getByText('Ito is already at Senpo.')).toBeTruthy();
       refusedBeforeAnythingIsWritten();
       expect(saveButton(utils).disabled, 'the operator can still fix it and save').toBe(false);
     });
@@ -580,7 +585,7 @@ describe('the at-court panel', () => {
 
       await click(saveButton(utils));
 
-      expect(utils.getByText('Kato is already at Position 1.')).toBeTruthy();
+      expect(utils.getByText('Kato is already at Senpo.')).toBeTruthy();
       refusedBeforeAnythingIsWritten();
     });
 
@@ -593,7 +598,7 @@ describe('the at-court panel', () => {
 
       await click(saveButton(utils));
 
-      expect(utils.getByText('Ito is already at Position 1.')).toBeTruthy();
+      expect(utils.getByText('Ito is already at Senpo.')).toBeTruthy();
       refusedBeforeAnythingIsWritten();
     });
 
@@ -655,20 +660,20 @@ describe('the at-court panel', () => {
     it('turns an open rename box and its buttons off, since a rename made then would be overwritten by the Save', async () => {
       const utils = await mountPanel();
       await typeName(utils, 2, 'Mori');
-      await click(panelRow(utils, 1).getByRole('button', { name: 'Rename 1 player' }));
+      await click(panelRow(utils, 1).getByRole('button', { name: 'Rename Senpo player' }));
       const write = deferred();
       api.putMatchLineup.mockReturnValue(write.promise);
 
       await click(saveButton(utils));
 
       expect(savingButton(utils).disabled).toBe(true);
-      expect(panelRow(utils, 1).getByLabelText('Rename 1 player').disabled).toBe(true);
+      expect(panelRow(utils, 1).getByLabelText('Rename Senpo player').disabled).toBe(true);
       expect(panelRow(utils, 1).getByRole('button', { name: 'Save' }).disabled, 'its own label does not say it is saving').toBe(true);
       expect(panelRow(utils, 1).getByRole('button', { name: 'Cancel' }).disabled).toBe(true);
 
       await act(async () => { write.resolve({ positions: { 1: 'Aoki', 2: 'Mori', 3: 'Ito' }, memberIds: { 1: 'mem-1', 2: 'mem-4', 3: 'mem-3' } }); });
       await flush();
-      expect(panelRow(utils, 1).getByLabelText('Rename 1 player').disabled, 'usable again once the Save is done').toBe(false);
+      expect(panelRow(utils, 1).getByLabelText('Rename Senpo player').disabled, 'usable again once the Save is done').toBe(false);
     });
 
     it('turns the draft notice\'s Discard off', async () => {
@@ -691,14 +696,14 @@ describe('the at-court panel', () => {
   it('keeps Save on through a rename: the rename is the outbox\'s and shows at once', async () => {
     const utils = await mountPanel();
     await typeName(utils, 2, 'Mori');
-    await click(panelRow(utils, 1).getByRole('button', { name: 'Rename 1 player' }));
-    await act(async () => { fireEvent.change(panelRow(utils, 1).getByLabelText('Rename 1 player'), { target: { value: 'Aoki-san' } }); });
+    await click(panelRow(utils, 1).getByRole('button', { name: 'Rename Senpo player' }));
+    await act(async () => { fireEvent.change(panelRow(utils, 1).getByLabelText('Rename Senpo player'), { target: { value: 'Aoki-san' } }); });
 
     await click(panelRow(utils, 1).getByRole('button', { name: 'Save' }));
 
     expect(api.renameTeamMember).toHaveBeenCalledTimes(1);
     expect(saveButton(utils).disabled, 'the lineup is still unsaved, and nothing is out to wait for').toBe(false);
-    expect(utils.getByLabelText('1 player').value).toBe('Aoki-san');
+    expect(utils.getByLabelText('Senpo player').value).toBe('Aoki-san');
   });
 });
 
@@ -831,7 +836,7 @@ describe('the Lineups page', () => {
 
     await click(saveButton(utils));
 
-    expect(utils.getByText('Mori is already at Position 1.')).toBeTruthy();
+    expect(utils.getByText('Mori is already at Senpo.')).toBeTruthy();
     expect(api.putTeamLineup).not.toHaveBeenCalled();
     expect(saveButton(utils).disabled, 'the operator can still fix it and save').toBe(false);
   });
@@ -875,7 +880,7 @@ describe('the Lineups page', () => {
     await announce();
     // Meanwhile the operator adds Kato at position 3.
     await pick(utils, 3, '__add__');
-    await act(async () => { fireEvent.change(utils.getByLabelText('New member name for 3'), { target: { value: 'Kato' } }); });
+    await act(async () => { fireEvent.change(utils.getByLabelText('New member name for Taisho'), { target: { value: 'Kato' } }); });
     await click(utils.getByRole('button', { name: 'Add' }));
     expect(utils.getByTestId('squad-member-mem-minted')).toBeTruthy();
 
@@ -902,7 +907,7 @@ describe('the Lineups page', () => {
 describe('the Lineups page while a Save waits for its write', () => {
   const openAddRow = async (utils, position) => {
     await pick(utils, position, '__add__');
-    await act(async () => { fireEvent.change(utils.getByLabelText(`New member name for ${position}`), { target: { value: 'Kato' } }); });
+    await act(async () => { fireEvent.change(utils.getByLabelText(`New member name for ${labelOf(position)}`), { target: { value: 'Kato' } }); });
   };
 
   it('turns off what would change the lineup or its members: Rename, Clear name, an open add row, an open rename box and Discard', async () => {
@@ -920,7 +925,7 @@ describe('the Lineups page while a Save waits for its write', () => {
     expect(savingButton(utils).disabled).toBe(true);
     expect(memberRow(utils, 'mem-1').getByRole('button', { name: 'Rename' }).disabled).toBe(true);
     expect(memberRow(utils, 'mem-1').getByRole('button', { name: 'Clear name' }).disabled).toBe(true);
-    const addInput = utils.getByLabelText('New member name for 3');
+    const addInput = utils.getByLabelText('New member name for Taisho');
     expect(addInput.disabled).toBe(true);
     expect(within(addInput.parentElement).getByRole('button', { name: 'Add' }).disabled).toBe(true);
     expect(within(addInput.parentElement).getByRole('button', { name: 'Cancel' }).disabled).toBe(true);
@@ -1025,10 +1030,10 @@ describe('a lineup followed from another device that names a member created ther
 
     await announce();
 
-    expect(utils.getByLabelText('2 player').value).toBe('Zed');
+    expect(utils.getByLabelText('Chuken player').value).toBe('Zed');
     const row = utils.getByTestId('match-lineup-pos-team-a-2');
     expect(within(row).getByText('Slot 5')).toBeTruthy();
-    expect(within(row).getByRole('button', { name: 'Rename 2 player' })).toBeTruthy();
+    expect(within(row).getByRole('button', { name: 'Rename Chuken player' })).toBeTruthy();
   });
 
   it('is still shown, with the list as it was, when the members cannot be read again', async () => {
@@ -1122,8 +1127,8 @@ describe('a rename box holds the reload only while it holds a change', () => {
 
   it('on the at-court panel', async () => {
     const utils = await mountPanel();
-    await click(panelRow(utils, 3).getByRole('button', { name: 'Rename 3 player' }));
-    const box = panelRow(utils, 3).getByLabelText('Rename 3 player');
+    await click(panelRow(utils, 3).getByRole('button', { name: 'Rename Taisho player' }));
+    const box = panelRow(utils, 3).getByLabelText('Rename Taisho player');
     await act(async () => { fireEvent.change(box, { target: { value: 'Itoh' } }); });
     act(() => { AppVersion.noteServerBuild('build-b'); });
     expect(reload, 'a changed name holds the reload').not.toHaveBeenCalled();

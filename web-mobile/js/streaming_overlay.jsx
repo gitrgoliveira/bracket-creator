@@ -4,7 +4,7 @@
 import { findRunningOnCourt, sideLabel, sideLabelParts, TermD, StreamingQR } from './display_helpers.jsx';
 import { NumberedName } from './numbered_name.jsx';
 import { useTeamLineups, teamIVPW } from './match_scoreboard.jsx';
-import { pickFromLineup, pickMemberIdFromLineup, boutSideView, POS_LABELS_5, kachinukiHidesLineupPosition, resolveBoutSideSquadLabel } from './lineup_resolver.jsx';
+import { pickFromLineup, pickMemberIdFromLineup, boutSideView, boutPositionName, kachinukiHidesLineupPosition, resolveBoutSideSquadLabel } from './lineup_resolver.jsx';
 import { isPoolDaihyosenBout, teamMatchTypeFor, DAIHYOSEN_POSITION } from './pool_ids.jsx';
 import { realIppons, nameOf } from './result_slot.jsx';
 
@@ -15,19 +15,18 @@ const { useEffect, useMemo } = React;
 const NO_SUB_RESULTS = [];
 
 // overlayPositionLabel: FIK position label for the current bout, used as the
-// fallback when no per-match lineup pins a player name. Uses POS_LABELS_5
+// fallback when no per-match lineup pins a player name. Uses boutPositionName
 // from lineup_resolver.jsx (single source of truth). Senpo/Jiho/... for
-// 5-person teams, "Daihyosen" for the rep bout (position === DAIHYOSEN_POSITION),
+// 5-person teams, Senpo/Chuken/Taisho for 3-person teams, "Daihyosen" for the rep bout (position === DAIHYOSEN_POSITION),
 // else the bare bout number ("1", "2", …). NEVER the team name.
 function overlayPositionLabel(teamSize, index, sub) {
     if (sub && sub.position === DAIHYOSEN_POSITION) return "Daihyosen";
     if (sub && typeof sub.position === "string" && sub.position.length > 0 && /[a-z]/i.test(sub.position)) return sub.position;
-    // FIK named positions exist ONLY for 5-person teams. For 3/7/11/13/15 and
-    // kachinuki the app uses numeric positions "1".."N" everywhere
-    // (domain.PositionNumbered, admin_lineup positionsForSize): so the
-    // overlay falls back to the bare bout number, which scales to any size.
-    if (teamSize === 5 && index >= 0 && index < 5) return POS_LABELS_5[index];
-    return String(index + 1);
+    // Named positions exist only for 5- and 3-person teams (positionLabelsFor).
+    // Every other size reads numeric positions "1".."N" (domain.PositionNumbered,
+    // admin_lineup positionsForSize): so the overlay falls back to the bare
+    // bout number, which scales to any size.
+    return boutPositionName(teamSize, index) || String(index + 1);
 }
 
 // findCurrentBoutIndex: returns the 0-based index of the bout that is

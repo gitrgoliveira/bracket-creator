@@ -119,7 +119,7 @@ async function click(button) {
 
 async function typeName(utils, position, name) {
   await act(async () => {
-    const input = utils.getByLabelText(`${position} player`);
+    const input = utils.getByLabelText(`${({ 1: 'Senpo', 2: 'Chuken', 3: 'Taisho' })[position] ?? position} player`);
     fireEvent.focus(input);
     fireEvent.change(input, { target: { value: name } });
     fireEvent.keyDown(input, { key: 'Enter' });
@@ -183,7 +183,7 @@ describe('the at-court panel: a Save with a typed name never waits for the team\
     await typeName(utils, 3, 'Kato');
     await click(saveButton(utils));
 
-    expect(utils.getByText('Mori is already at Position 1.')).toBeTruthy();
+    expect(utils.getByText('Mori is already at Senpo.')).toBeTruthy();
     expect(api.addTeamMember, 'Kato is not minted for a Save that is refused').not.toHaveBeenCalled();
     expect(api.renameTeamMember).not.toHaveBeenCalled();
     expect(api.putMatchLineup).not.toHaveBeenCalled();
@@ -227,7 +227,7 @@ describe('the at-court panel: a Save with a typed name never waits for the team\
 describe('the Lineups page: an add row never waits for the team\'s members', () => {
   const addRow = async (utils, name) => {
     await act(async () => { fireEvent.change(utils.getByTestId('lineup-position-1'), { target: { value: '__add__' } }); });
-    await act(async () => { fireEvent.change(utils.getByLabelText('New member name for 1'), { target: { value: name } }); });
+    await act(async () => { fireEvent.change(utils.getByLabelText('New member name for Senpo'), { target: { value: name } }); });
   };
   const addButton = (utils) => utils.getByRole('button', { name: /^(Add|Adding…)$/ });
 
@@ -242,7 +242,7 @@ describe('the Lineups page: an add row never waits for the team\'s members', () 
     expect(window.confirmDialog, 'nor asked').not.toHaveBeenCalled();
     expect(addButton(utils).disabled, 'nothing waits').toBe(false);
     expect(utils.getByText(membersNotReadNotice('Mori'))).toBeTruthy();
-    expect(utils.getByLabelText('New member name for 1').value).toBe('Mori');
+    expect(utils.getByLabelText('New member name for Senpo').value).toBe('Mori');
   });
 
   it('selects a member the team has, once the members were read, instead of adding the name again', async () => {

@@ -1037,9 +1037,8 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
       )}
       {teamFieldsVisible(local.kind) && (
         <>
-          {/* Cap is MAX_TEAM_SIZE (admin_helpers.jsx). TEAM_POSITIONS in */}
-          {/* admin_scoring_modal.jsx is built from the same constant, so */}
-          {/* this input can't allow a value the scoring UI doesn't render. */}
+          {/* Cap is MAX_TEAM_SIZE (admin_helpers.jsx), equal to the */}
+          {/* server's state.MaxTeamSize. */}
           {/* Floor is MIN_TEAM_SIZE (competition_shape.jsx): teamSize == 1 */}
           {/* is rejected unconditionally by ValidateCompetitionTeamSize */}
           {/* (state/models.go), so this field's legal domain starts at 2, */}

@@ -166,7 +166,7 @@ export function preserveStoredDaihyosenVerdict({ armed, pickedSide, tied, existi
 // StreamingOverlay). The implementations live in lineup_resolver.jsx;
 // re-exported here so existing imports from admin_scoring_modal.jsx (which
 // re-exports them onward) continue to work.
-import { resolveMatchLineup, resolveLineupTeamId, resolveBoutSideName, resolveBoutSideMemberId, resolveSquadMember, squadMemberIdForUniqueName, squadRosterEntries, rosterWithoutPlacedElsewhere, resolveBoutSideDisplayName, buildInlineLineupWrite, resolveTypedMemberName, memberRefusalNote, alreadyPlacedNote, lineupPositionLabel, POS_KEYS_5, POS_LABELS_5 } from './lineup_resolver.jsx';
+import { resolveMatchLineup, resolveLineupTeamId, resolveBoutSideName, resolveBoutSideMemberId, resolveSquadMember, squadMemberIdForUniqueName, squadRosterEntries, rosterWithoutPlacedElsewhere, resolveBoutSideDisplayName, buildInlineLineupWrite, resolveTypedMemberName, memberRefusalNote, alreadyPlacedNote, lineupPositionLabel, POS_KEYS_5, boutPositionName } from './lineup_resolver.jsx';
 // The one owner of what a lineup save carries: the one position a name-box pick changes.
 import { changedLineupSave } from './lineup_save.jsx';
 // The one owner of what a list of team members that arrives does to the members
@@ -240,17 +240,16 @@ function recordedDaihyosenSideOf(existingDaihyosen, m) {
 }
 
 // Human-friendly position label for the team-match scoring
-// modal. 5-person teams use the canonical FIK names (POS_LABELS_5 from
-// lineup_resolver.jsx, the single source of truth); non-5 sizes use the
-// position number.
+// modal. A team size that names its positions (5: the FIK names, 3: Senpo,
+// Chuken, Taisho) reads the name, from boutPositionName in lineup_resolver.jsx,
+// the single source of truth; other sizes use the position number.
 function positionLabelFor(teamSize, index, sub) {
   if (sub && sub.position && typeof sub.position === "string" && sub.position.length > 0 && /[a-z]/i.test(sub.position)) {
     // Backend may emit a name string in Position for non-5 sizes once
     // domain.Position is wire-stable. Use it verbatim when present.
     return sub.position;
   }
-  if (teamSize === 5 && index >= 0 && index < 5) return POS_LABELS_5[index];
-  return `Match ${index + 1}`;
+  return boutPositionName(teamSize, index) || `Match ${index + 1}`;
 }
 // teamResultLabel: the RESULT-band / Finish-button verdict text for a team
 // encounter. A knockout match cannot be a draw (a tie is broken by a daihyosen,
@@ -304,7 +303,10 @@ export function unfinishedTeamBouts({ subs, teamSize }) {
 // names the bouts and what to record, and never mentions the lineup: a vacancy
 // is legitimate play, not something to complete.
 export function unfinishedTeamBoutsMessage(teamSize, bouts) {
-  const labels = (bouts || []).map(b => `Bout ${b}${teamSize === 5 && b >= 1 && b <= 5 ? ` (${POS_LABELS_5[b - 1]})` : ""}`);
+  const labels = (bouts || []).map(b => {
+    const name = boutPositionName(teamSize, b - 1);
+    return `Bout ${b}${name ? ` (${name})` : ""}`;
+  });
   if (labels.length === 0) return "";
   const list = joinList(labels, "and", "");
   return `${list} ${labels.length === 1 ? "has" : "have"} no result. Record a score, a Tie, or a Fusensho before finishing.`;
@@ -2255,7 +2257,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
         if (!mountedRef.current || sideChanged()) return false;
         if (err && err.revertMember) wroteSideMembers(side, [err.revertMember]);
         const composer = window.AdminLineupHelpers?.memberIdentityWarning;
-        const warning = typeof composer === "function" ? composer([failure], false) : "";
+        const warning = typeof composer === "function" ? composer([failure], false, teamSize) : "";
         notify("warn", warning || (err && err.message) || "");
         return true;
       };
@@ -2270,7 +2272,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
       // positions. Tell the operator which position already holds them and
       // leave the box exactly as it was.
       if (built.refused) {
-        notify("error", alreadyPlacedNote(built.refused.name, lineupPositionLabel(built.refused.position)));
+        notify("error", alreadyPlacedNote(built.refused.name, lineupPositionLabel(built.refused.position, teamSize)));
         return;
       }
       const { positions: shown, memberIds: shownIds, changed, squad: nextSquad, failures } = built;
@@ -2318,7 +2320,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
       const warnIdentity = () => {
         const composer = window.AdminLineupHelpers?.memberIdentityWarning;
         if (typeof composer !== "function" || !mountedRef.current) return;
-        const warning = composer(failures || [], membersUnavailable);
+        const warning = composer(failures || [], membersUnavailable, teamSize);
         if (warning) notify("warn", warning);
       };
       if (writePending(answer)) {

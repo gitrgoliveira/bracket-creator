@@ -13,7 +13,9 @@
     { "teamSize": 5, "bouts": [5], "message": "Bout 5 (Taisho) has no result. Record a score, a Tie, or a Fusensho before finishing." },
     { "teamSize": 5, "bouts": [2, 3], "message": "Bout 2 (Jiho) and Bout 3 (Chuken) have no result. Record a score, a Tie, or a Fusensho before finishing." },
     { "teamSize": 5, "bouts": [1, 4, 5], "message": "Bout 1 (Senpo), Bout 4 (Fukusho) and Bout 5 (Taisho) have no result. Record a score, a Tie, or a Fusensho before finishing." },
-    { "teamSize": 3, "bouts": [3], "message": "Bout 3 has no result. Record a score, a Tie, or a Fusensho before finishing." },
+    { "teamSize": 3, "bouts": [3], "message": "Bout 3 (Taisho) has no result. Record a score, a Tie, or a Fusensho before finishing." },
+    { "teamSize": 3, "bouts": [1, 2], "message": "Bout 1 (Senpo) and Bout 2 (Chuken) have no result. Record a score, a Tie, or a Fusensho before finishing." },
+    { "teamSize": 4, "bouts": [3], "message": "Bout 3 has no result. Record a score, a Tie, or a Fusensho before finishing." },
     { "teamSize": 7, "bouts": [6, 7], "message": "Bout 6 and Bout 7 have no result. Record a score, a Tie, or a Fusensho before finishing." }
   ]
 }

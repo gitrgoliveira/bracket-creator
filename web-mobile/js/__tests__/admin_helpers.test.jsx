@@ -642,11 +642,10 @@ describe('numeric bounds constants', () => {
     expect(MAX_YEAR).toBe(2100);
   });
 
-  it('MAX_TEAM_SIZE matches kendo team-position conventions', () => {
-    // Pin the current cap. admin_scoring_modal.jsx builds
-    // TEAM_POSITIONS from this; if you bump it, also extend the
-    // scoring UI / docs / screenshot fixtures.
-    expect(MAX_TEAM_SIZE).toBe(9);
+  it('MAX_TEAM_SIZE is the server team-size cap', () => {
+    // Pin the cap: it must equal state.MaxTeamSize (internal/state/models.go),
+    // or the form offers sizes the server refuses, or refuses ones it takes.
+    expect(MAX_TEAM_SIZE).toBe(30);
   });
 
   it('MAX_COURTS matches the supported court cap (lockstep with helper.MaxCourts)', () => {

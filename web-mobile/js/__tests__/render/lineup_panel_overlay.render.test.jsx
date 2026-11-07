@@ -101,7 +101,7 @@ describe('Escape', () => {
   it('closes only an open name list first, and the panel on the next one', async () => {
     const utils = await mount();
     await settle();
-    const input = sideA(utils).getByLabelText('1 player');
+    const input = sideA(utils).getByLabelText('Senpo player');
     await act(async () => { fireEvent.focus(input); });
     expect(sideA(utils).getByText('Mori'), 'the list is open, with the member nobody holds').toBeTruthy();
 
@@ -116,11 +116,11 @@ describe('Escape', () => {
   it('cancels an open rename box only, and closes the panel on the next one', async () => {
     const utils = await mount();
     await settle();
-    await act(async () => { fireEvent.click(sideA(utils).getByRole('button', { name: 'Rename 1 player' })); });
-    const box = sideA(utils).getByRole('textbox', { name: 'Rename 1 player' });
+    await act(async () => { fireEvent.click(sideA(utils).getByRole('button', { name: 'Rename Senpo player' })); });
+    const box = sideA(utils).getByRole('textbox', { name: 'Rename Senpo player' });
 
     await escape(box);
-    expect(sideA(utils).queryByRole('textbox', { name: 'Rename 1 player' }), 'the rename box is gone').toBeNull();
+    expect(sideA(utils).queryByRole('textbox', { name: 'Rename Senpo player' }), 'the rename box is gone').toBeNull();
     expect(utils.onClose, 'the rename took it').not.toHaveBeenCalled();
 
     await escape();
@@ -132,7 +132,7 @@ describe('Escape', () => {
     api.putMatchLineup.mockImplementation(() => new Promise((resolve) => { answer = resolve; }));
     const utils = await mount();
     await settle();
-    const input = sideA(utils).getByLabelText('1 player');
+    const input = sideA(utils).getByLabelText('Senpo player');
     await act(async () => {
       fireEvent.focus(input);
       fireEvent.change(input, { target: { value: 'Mori' } });

@@ -32,13 +32,12 @@ func unfinishedTeamBouts(subs []state.SubMatchResult, teamSize int) []int {
 }
 
 // teamBoutLabel names a numbered bout for the operator: "Bout 3", plus its
-// FIK position name for a five-person team ("Bout 5 (Taisho)").
+// position name for a team size that names its positions ("Bout 5 (Taisho)",
+// domain.BoutPositionName).
 func teamBoutLabel(teamSize, bout int) string {
 	label := "Bout " + strconv.Itoa(bout)
-	if teamSize == 5 {
-		if pos, ok := domain.PositionForBout(teamSize, bout); ok {
-			label += " (" + pos.Label() + ")"
-		}
+	if name := domain.BoutPositionName(teamSize, bout); name != "" {
+		label += " (" + name + ")"
 	}
 	return label
 }

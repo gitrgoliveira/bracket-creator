@@ -570,3 +570,44 @@ func TestPosition_Label(t *testing.T) {
 		assert.Equal(t, tc.want, tc.pos.Label(), "position %q", tc.pos)
 	}
 }
+
+// TestPositionLabel_NamesThreeAndFiveMemberTeams pins the operator ruling of
+// 2026-11-07: a 3-person team's stored positions "1".."3" read Senpo, Chuken
+// and Taisho, a 5-person team's FIK keys read as before, and every other size
+// keeps its numbers.
+func TestPositionLabel_NamesThreeAndFiveMemberTeams(t *testing.T) {
+	tests := []struct {
+		teamSize int
+		pos      domain.Position
+		want     string
+	}{
+		{3, "1", "Senpo"},
+		{3, "2", "Chuken"},
+		{3, "3", "Taisho"},
+		{3, "4", "4"},
+		{3, domain.PosJiho, "Jiho"},
+		{5, domain.PosSenpo, "Senpo"},
+		{5, domain.PosJiho, "Jiho"},
+		{5, domain.PosChuken, "Chuken"},
+		{5, domain.PosFukusho, "Fukusho"},
+		{5, domain.PosTaisho, "Taisho"},
+		{5, "2", "2"},
+		{4, "1", "1"},
+		{4, "4", "4"},
+		{7, "3", "3"},
+		{0, "1", "1"},
+	}
+	for _, tc := range tests {
+		assert.Equal(t, tc.want, domain.PositionLabel(tc.teamSize, tc.pos), "size %d position %q", tc.teamSize, tc.pos)
+	}
+}
+
+func TestBoutPositionName(t *testing.T) {
+	assert.Equal(t, []string{"Senpo", "Chuken", "Taisho"},
+		[]string{domain.BoutPositionName(3, 1), domain.BoutPositionName(3, 2), domain.BoutPositionName(3, 3)})
+	assert.Equal(t, []string{"Senpo", "Jiho", "Chuken", "Fukusho", "Taisho"},
+		[]string{domain.BoutPositionName(5, 1), domain.BoutPositionName(5, 2), domain.BoutPositionName(5, 3), domain.BoutPositionName(5, 4), domain.BoutPositionName(5, 5)})
+	for _, c := range []struct{ size, bout int }{{3, 0}, {3, 4}, {5, 6}, {4, 1}, {7, 7}, {1, 1}} {
+		assert.Empty(t, domain.BoutPositionName(c.size, c.bout), "size %d bout %d", c.size, c.bout)
+	}
+}

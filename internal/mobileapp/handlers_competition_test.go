@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -5495,6 +5496,73 @@ func TestUpdateCompetition_MixedFormatRequiresUsablePoolSize(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, state.CompFormatMixed, stored.Format)
 		assert.Equal(t, 4, stored.PoolSize)
+	})
+}
+
+// TestCompetition_PoolWinnersBound pins the save-time bound on poolWinners on
+// both doors. Before it, any value saved, and the calendar and the estimate
+// then built a qualifier skeleton of pools x poolWinners leaves until the
+// server ran out of memory. The PUT check is change-scoped like the pool-size
+// guard, so a stored value past it stays editable for unrelated fields.
+func TestCompetition_PoolWinnersBound(t *testing.T) {
+	r, store, _, _, _ := setupTestRouter(t)
+	send := func(method, path string, body map[string]any) *httptest.ResponseRecorder {
+		raw, _ := json.Marshal(body)
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest(method, path, bytes.NewBuffer(raw))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		return w
+	}
+
+	t.Run("POST refuses more winners than a pool holds", func(t *testing.T) {
+		w := send("POST", "/api/competitions", map[string]any{
+			"id": "pw-create", "name": "PW Create", "format": state.CompFormatMixed, "courts": []string{"A"},
+			"poolSize": 3, "poolSizeMode": "max", "poolWinners": 300,
+		})
+		require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+		assert.Contains(t, w.Body.String(), "poolWinners must be at most 3 for pools of 3 (got 300)")
+		stored, err := store.LoadCompetition("pw-create")
+		require.NoError(t, err)
+		assert.Nil(t, stored, "a refused create persists nothing")
+	})
+
+	const cid = "pw-update"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: cid, Name: "PW Update", Format: state.CompFormatMixed, Courts: []string{"A"},
+		PoolSize: 3, PoolSizeMode: "max", PoolWinners: 300, Status: state.CompStatusSetup,
+	}))
+	base := map[string]any{"id": cid, "name": "PW Update", "format": state.CompFormatMixed, "courts": []string{"A"},
+		"poolSize": 3, "poolSizeMode": "max", "poolWinners": 300}
+
+	t.Run("PUT leaves a stored value editable for unrelated fields", func(t *testing.T) {
+		body := maps.Clone(base)
+		body["name"] = "PW Renamed"
+		w := send("PUT", "/api/competitions/"+cid, body)
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	})
+
+	t.Run("PUT refuses a change that lands past the bound", func(t *testing.T) {
+		body := maps.Clone(base)
+		body["name"] = "PW Renamed"
+		body["poolWinners"] = 299
+		w := send("PUT", "/api/competitions/"+cid, body)
+		require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+		assert.Contains(t, w.Body.String(), "poolWinners must be at most 3")
+		stored, err := store.LoadCompetition(cid)
+		require.NoError(t, err)
+		assert.Equal(t, 300, stored.PoolWinners, "a refused write leaves the record as it was")
+	})
+
+	t.Run("PUT accepts a change back inside the bound", func(t *testing.T) {
+		body := maps.Clone(base)
+		body["name"] = "PW Renamed"
+		body["poolWinners"] = 2
+		w := send("PUT", "/api/competitions/"+cid, body)
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		stored, err := store.LoadCompetition(cid)
+		require.NoError(t, err)
+		assert.Equal(t, 2, stored.PoolWinners)
 	})
 }
 

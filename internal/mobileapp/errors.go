@@ -134,7 +134,7 @@ func retimeRefusal(err error) *txResponse {
 		return &txResponse{status: http.StatusConflict, body: gin.H{"code": "retime_past_midnight", "error": "At that start some matches would run past midnight, which a match time cannot show. Choose an earlier start. Nothing was changed."}}
 	case errors.Is(err, engine.ErrUndoStale):
 		return &txResponse{status: http.StatusConflict, body: gin.H{"code": "undo_stale", "error": "Changed since the move; Undo not applied."}}
-	case errors.Is(err, engine.ErrRestoreUnknownMatch), errors.Is(err, engine.ErrRestoreBadTime):
+	case errors.Is(err, engine.ErrRestoreUnknownMatch), errors.Is(err, engine.ErrRestoreBadTime), errors.Is(err, engine.ErrRestoreDuplicateMatch):
 		return &txResponse{status: http.StatusBadRequest, body: gin.H{"error": err.Error()}}
 	}
 	return nil

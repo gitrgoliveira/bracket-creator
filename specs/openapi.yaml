@@ -227,8 +227,8 @@ paths:
                   type: integer
                   default: 0
                   minimum: 0
-                  maximum: 100
-                  description: Team size; 0 draws an individual competition. Outside 0 to 100 is a 400, the schedule estimate's bound, since the size sets every team block's bout rows.
+                  maximum: 30
+                  description: Team size; 0 draws an individual competition. Outside 0 to 30 is a 400, the schedule estimate's bound, since the size sets every team block's bout rows.
                 teamMatchType:
                   type: string
                   enum: [fixed, kachinuki]
@@ -6218,9 +6218,9 @@ paths:
           schema:
             type: integer
             minimum: 0
-            maximum: 100
+            maximum: 30
           description: >
-            0 = individual matches; > 0 = team matches. Bounded to 0..100
+            0 = individual matches; > 0 = team matches. Bounded to 0..30
             (a value out of range returns 400): it scales the whole estimate,
             so an unbounded value would overflow the duration math.
         - in: query
@@ -6229,7 +6229,7 @@ paths:
           schema:
             type: integer
             minimum: 0
-            maximum: 100
+            maximum: 30
           description: >
             OVERRIDE for the bouts per team match. Omit it for the normal case:
             when `teamSize > 0` the bout count defaults to `teamSize`, which is
@@ -7216,7 +7216,7 @@ components:
         pos:
           type: integer
           minimum: -1
-          maximum: 199
+          maximum: 59
         side:
           type: string
           enum: [a, b]

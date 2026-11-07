@@ -365,6 +365,10 @@ func importCompetition(store *state.Store, eng *engine.Engine, entry ImportManif
 		res.Error = "extraQualifiers: " + err.Error()
 		return res
 	}
+	if err := comp.ValidatePoolWinners(); err != nil {
+		res.Error = err.Error()
+		return res
+	}
 
 	// Parse participants AND seeds BEFORE saving the competition config.
 	// Pre-fix, the config was saved first and the participants parse

@@ -83,9 +83,9 @@ const (
 	MaxScoreEventFieldLen = 256
 	// MaxScoreEventPos is the highest bout an event may name: the most bouts
 	// a kachinuki encounter can take (KachinukiMaxBouts) between teams of
-	// 100, the largest team size the app plans for anywhere
+	// 30, the largest team size the app plans for anywhere
 	// (engine.MaxTeamSize, pinned equal by an engine test).
-	MaxScoreEventPos = 199
+	MaxScoreEventPos = 59
 )
 
 // The outcomes the replay gives each event (engine.ReplayScoring). They are

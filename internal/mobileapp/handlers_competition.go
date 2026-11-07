@@ -481,6 +481,9 @@ func validateNewCompetition(comp *state.Competition) error {
 	if err := validateMixedPoolSize(comp); err != nil {
 		return err
 	}
+	if err := comp.ValidatePoolWinners(); err != nil {
+		return err
+	}
 	// League tie-breaker config validation (leagueTiebreakTopN must be 0/3/4).
 	if err := validateLeagueTiebreakConfig(comp); err != nil {
 		return err
@@ -2049,6 +2052,14 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				// the operator is locked out of settings entirely.
 				if formatChanged || comp.PoolSize != current.PoolSize {
 					if err := validateMixedPoolSize(&comp); err != nil {
+						validationErr = err
+						return nil, nil
+					}
+				}
+				// The same change scoping for the pool-winners bound: a
+				// stored value past it stays editable for unrelated fields.
+				if formatChanged || comp.PoolSize != current.PoolSize || comp.PoolWinners != current.PoolWinners || comp.PoolSizeMode != current.PoolSizeMode {
+					if err := comp.ValidatePoolWinners(); err != nil {
 						validationErr = err
 						return nil, nil
 					}

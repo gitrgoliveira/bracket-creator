@@ -34,6 +34,10 @@ var (
 	// ErrRestoreBadTime is returned by a restore whose time to put back is
 	// neither empty nor an "HH:MM" clock. Nothing is written.
 	ErrRestoreBadTime = errors.New("restore names a match time that is not HH:MM")
+	// ErrRestoreDuplicateMatch is returned by a restore that names one match
+	// twice: which of its times to put back would be ambiguous. Nothing is
+	// written.
+	ErrRestoreDuplicateMatch = errors.New("restore names a match more than once")
 	// ErrRetimePastMidnight is returned when the new day and start would carry a
 	// match past midnight: a match time is a bare "HH:MM", so it would read as
 	// an early-morning time and sort first in the court queue. Nothing is
@@ -178,7 +182,7 @@ func RetimeDrawTx(tx state.StoreTx, oldComp, newComp *state.Competition, in Reti
 }
 
 // RestoreMatchTimesTx puts back the times a move changed (the exact Undo,
-// DR3). It checks every listed match first: each must exist, still hold the
+// DR3). It checks every listed match first: each must exist, be listed once, still hold the
 // time the move gave it, and have a time to put back that is empty or an
 // "HH:MM" clock, else nothing is written.
 func RestoreMatchTimesTx(tx state.StoreTx, comp *state.Competition, restore []MatchTimeChange) error {
@@ -212,11 +216,16 @@ func RestoreMatchTimesTx(tx state.StoreTx, comp *state.Competition, restore []Ma
 			slots[bracket.ThirdPlaceMatch.ID] = &bracket.ThirdPlaceMatch.ScheduledAt
 		}
 	}
+	seen := make(map[string]bool, len(restore))
 	for _, ch := range restore {
 		at, ok := slots[ch.MatchID]
 		if !ok {
 			return fmt.Errorf("%w: %q", ErrRestoreUnknownMatch, ch.MatchID)
 		}
+		if seen[ch.MatchID] {
+			return fmt.Errorf("%w: %q", ErrRestoreDuplicateMatch, ch.MatchID)
+		}
+		seen[ch.MatchID] = true
 		if *at != ch.Now {
 			return ErrUndoStale
 		}

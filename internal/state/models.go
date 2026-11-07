@@ -1081,6 +1081,27 @@ func ValidateExtraQualifiers(value, poolSizeMode string, poolWinners int) error 
 	}
 }
 
+// ValidatePoolWinners refuses a stated poolWinners that no pool of a mixed
+// competition can hold: poolSize under max sizing, one more under min sizing,
+// whose remainder can add a seat. It is the save-time twin of the draw's own
+// bound (helper.BuildPoolPhaseTreeAwareWithMode), so the operator hears it at
+// the field rather than from the estimate or the draw. An unset value (<= 0)
+// is not judged: it runs as the default, and a body that omits it has always
+// been accepted.
+func (c Competition) ValidatePoolWinners() error {
+	if c.Format != CompFormatMixed || c.PoolWinners <= 0 || c.PoolSize <= 0 {
+		return nil
+	}
+	most := c.PoolSize
+	if c.PoolSizeMode != "max" {
+		most++
+	}
+	if c.PoolWinners > most {
+		return fmt.Errorf("poolWinners must be at most %d for pools of %d (got %d)", most, c.PoolSize, c.PoolWinners)
+	}
+	return nil
+}
+
 // QualifiersForPool returns the number of finishers pool promotes to the
 // knockout stage, extending EffectivePoolWinners() per c.ExtraQualifiers:
 //
@@ -1283,6 +1304,14 @@ func ValidateTeamMatchType(t TeamMatchType, teamSize int) error {
 	}
 }
 
+// MaxTeamSize is a defensive upper bound on a team size (members per team).
+// It is NOT a domain rule (team sizes are unregulated; standard kendo teams
+// are 3/5/7, and 12 is about the largest seen), but an unbounded value
+// overflows the bout math (`worst = 2n-1`, `bouts * clock`) and sizes
+// per-team allocations. 30 is a guard well past any real team (operator
+// ruling 2026-11-07). engine.MaxTeamSize is this constant.
+const MaxTeamSize = 30
+
 // ValidateCompetitionTeamSize rejects invalid teamSize values. Engine code
 // uses both TeamSize > 0 and Kind == "team" in different paths; an inconsistent
 // pair (e.g. kind="individual" with teamSize=3) causes misclassification:
@@ -1290,9 +1319,13 @@ func ValidateTeamMatchType(t TeamMatchType, teamSize int) error {
 //   - teamSize == 1 is always invalid (would flag as team via TeamSize > 0)
 //   - non-team kinds require teamSize == 0
 //   - kind == "team" requires teamSize >= 2
+//   - teamSize above MaxTeamSize is invalid
 func ValidateCompetitionTeamSize(kind string, teamSize int) error {
 	if teamSize < 0 {
 		return fmt.Errorf("teamSize must be non-negative")
+	}
+	if teamSize > MaxTeamSize {
+		return fmt.Errorf("teamSize must be at most %d (got %d)", MaxTeamSize, teamSize)
 	}
 	if teamSize == 1 {
 		return fmt.Errorf("teamSize 1 is invalid: use 0 for individual competitions or >= 2 for teams")

@@ -27,12 +27,14 @@ const MaxCourts = helper.MaxCourts
 // `worst = 2n-1` and `bouts * clock * multiplier` overflow int64 for a large
 // n, and the final int(math.Round(...)) conversion of an out-of-range float is
 // implementation-defined in Go, yielding a negative duration or an inverted
-// best/worst range (mp-gmcg review). 100 is ~14× the largest real team, so no
-// legitimate planning number is rejected. Clamped in EstimateSchedule (all
+// best/worst range (mp-gmcg review). 30 is well past the largest real team
+// (about 12), so no legitimate planning number is rejected. Clamped in EstimateSchedule (all
 // callers) and 400'd by the handler (matching the MaxCourts precedent). The
 // stateless workbook generator (POST /create, cmd/create_handler.go) 400s a
 // team size past it too, since that size sizes every team block's bout rows.
-const MaxTeamSize = 100
+// It IS state.MaxTeamSize, which the competition create, settings and import
+// paths also refuse past (state.ValidateCompetitionTeamSize).
+const MaxTeamSize = state.MaxTeamSize
 
 // MaxScheduleCount and MaxSchedulePct are the same class of defensive bound for
 // the OTHER scalars that scale the estimate — numMatches and ceremonyMinutes

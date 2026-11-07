@@ -402,6 +402,17 @@ func TestRestoreMatchTimesTx_UnknownMatchEmptyListAndStartedCompetition(t *testi
 	}
 	assert.Equal(t, before, storedTimes(t, store, comp), "nothing is written")
 
+	// One match listed twice is ambiguous (which time goes back?): refused
+	// whole, even when both entries would otherwise pass.
+	err = store.WithTransaction(comp.ID, func(tx state.StoreTx) error {
+		return RestoreMatchTimesTx(tx, comp, []MatchTimeChange{
+			{MatchID: someID, Was: "", Now: before[someID]},
+			{MatchID: someID, Was: "08:00", Now: before[someID]},
+		})
+	})
+	assert.ErrorIs(t, err, ErrRestoreDuplicateMatch)
+	assert.Equal(t, before, storedTimes(t, store, comp), "nothing is written")
+
 	started := *comp
 	started.Status = state.CompStatusPools
 	err = store.WithTransaction(comp.ID, func(tx state.StoreTx) error {

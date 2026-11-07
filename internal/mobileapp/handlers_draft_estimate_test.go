@@ -218,6 +218,16 @@ func TestDraftEstimate_LargestSwissIsAnswered(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 }
 
+// A poolWinners past what a pool can hold is refused, not built: the
+// qualifier skeleton grows with pools x poolWinners, and before the bound
+// this query exhausted the server's memory.
+func TestDraftEstimate_RefusesMorePoolWinnersThanAPoolHolds(t *testing.T) {
+	r := setupDraftEstimateRouter(t)
+	w := getDraftEstimate(t, r, fmt.Sprintf("participants=%d&format=mixed&poolSize=3&poolWinners=300", engine.MaxEstimateParticipants), "main-pw")
+	require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+	assert.Contains(t, draftErrorSentence(t, w), "pool winners (300) is more than a pool can hold")
+}
+
 // A draft is judged by the create POST's own chain: a shape the create
 // refuses is refused here with the same sentence.
 func TestDraftEstimate_RefusesWhatTheCreateRefuses(t *testing.T) {

@@ -313,6 +313,30 @@ func TestBuildPoolPhaseTreeAwareWithMode_RefusesBlankDojo(t *testing.T) {
 	assert.Nil(t, pools3)
 }
 
+// TestBuildPoolPhaseTreeAwareWithMode_RefusesMorePoolWinnersThanPlayers pins
+// the bound on poolWinners. The qualifier skeleton has about pools x
+// poolWinners leaves, so an unbounded value let one saved setting (or one
+// draft-estimate request) exhaust the server's memory: 1024 entrants in pools
+// of 3 with poolWinners 300 died with "fatal error: out of memory". A pool can
+// promote at most every player it holds, so the largest pool is the bound.
+func TestBuildPoolPhaseTreeAwareWithMode_RefusesMorePoolWinnersThanPlayers(t *testing.T) {
+	players := makePlayers(1024)
+
+	pools, drawCourts, err := BuildPoolPhaseTreeAwareWithMode(players, 3, true, 1, 300, "")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "pool winners (300)")
+	assert.Nil(t, pools)
+	assert.Zero(t, drawCourts)
+
+	_, _, err = BuildPoolPhaseTreeAware(players, 3, true, 1, 1<<62)
+	require.Error(t, err, "the default-mode entry point shares the bound")
+
+	// Promoting every player of the largest pool is still a legal draw.
+	pools, _, err = BuildPoolPhaseTreeAwareWithMode(makePlayers(12), 3, true, 1, 3, "")
+	require.NoError(t, err)
+	assert.Len(t, pools, 4)
+}
+
 // TestBuildPoolPhaseTreeAwareWithMode_RefusesBlankDojo_MultipleNames checks
 // that every offending player is named, not just the first found, so an
 // operator with several bad rows can fix them all from one error rather

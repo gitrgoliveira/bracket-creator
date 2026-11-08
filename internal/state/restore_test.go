@@ -1345,7 +1345,7 @@ func TestRestore_ConfigLessCompetitionFolderIsRefused(t *testing.T) {
 	}
 }
 
-// A v2.2.0 or v2.3.0 archive stores the ceremonies as opening_block and
+// An archive that passes the version check can still store the ceremonies as opening_block and
 // closing_block, which only the ceremony upgrade reads. A live restore runs it
 // once the swap is done, so the pauses are there without a restart.
 func TestRestore_LegacyCeremoniesBecomePausesWithoutARestart(t *testing.T) {

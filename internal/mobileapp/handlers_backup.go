@@ -12,11 +12,13 @@ import (
 	"slices"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/backup"
+	"github.com/gitrgoliveira/bracket-creator/internal/cmd/version"
 	"github.com/gitrgoliveira/bracket-creator/internal/engine"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
@@ -46,6 +48,9 @@ const (
 	backupCodeBadBackupName  = "bad_backup_name"
 	backupCodeBackupNotFound = "backup_not_found"
 	backupCodeBadRequest     = "bad_restore_request"
+	// backupCodeVersionMismatch: the archive was made by another version of
+	// the app (backup.CheckAppVersion).
+	backupCodeVersionMismatch = "backup_version_mismatch"
 )
 
 // BackupChecks returns the store's validators for backup archives.
@@ -489,6 +494,14 @@ func readRestoreArchive(c *gin.Context, store BackupStore) (*backup.Archive, boo
 		respondBackupRefusal(c, http.StatusBadRequest, backupCodeArchiveInvalid,
 			"This file is not a backup this app can restore, so nothing was changed.",
 			gin.H{"reason": reason, "detail": err.Error()})
+		return nil, false
+	}
+	// A backup is restored only on the version that made it; the plan is
+	// refused too, so the page says so before any choice is made.
+	running := version.GetVersion()
+	if verr := backup.CheckAppVersion(archive.Manifest, running); verr != nil {
+		respondBackupRefusal(c, http.StatusBadRequest, backupCodeVersionMismatch, verr.Detail,
+			gin.H{"backupVersion": strings.TrimSpace(archive.Manifest.AppVersion), "appVersion": strings.TrimSpace(running)})
 		return nil, false
 	}
 	return archive, true

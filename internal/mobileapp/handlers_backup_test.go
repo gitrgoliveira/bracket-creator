@@ -23,9 +23,11 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/backup"
+	"github.com/gitrgoliveira/bracket-creator/internal/cmd/version"
 	"github.com/gitrgoliveira/bracket-creator/internal/engine"
 	"github.com/gitrgoliveira/bracket-creator/internal/resources"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
+	bctest "github.com/gitrgoliveira/bracket-creator/internal/test"
 )
 
 const backupTestPassword = "main-pw"
@@ -198,6 +200,13 @@ func TestBackup_DownloadsATournamentAndACompetition(t *testing.T) {
 func TestRestore_RefusalsLeaveTheFolderUnchanged(t *testing.T) {
 	rig := newBackupRig(t)
 	tournamentArchive := takeBackup(t, rig.r, "/api/tournament/backup")
+	// A backup is restored only on the version that made it.
+	otherVersion, err := bctest.ArchiveWithAppVersion(tournamentArchive, version.GetVersion()+"-other")
+	require.NoError(t, err)
+	// The same, kept on this computer (a daily copy the earlier version took).
+	const otherVersionCopy = "20260102T000000Z-scheduled.zip"
+	require.NoError(t, os.MkdirAll(filepath.Join(rig.dir, state.BackupsDirName), 0o750))
+	require.NoError(t, os.WriteFile(filepath.Join(rig.dir, state.BackupsDirName, otherVersionCopy), otherVersion, 0o600))
 
 	cases := []struct {
 		name    string
@@ -209,6 +218,10 @@ func TestRestore_RefusalsLeaveTheFolderUnchanged(t *testing.T) {
 		code    string
 	}{
 		{"not a zip", "/api/tournament/restore", []byte("not a zip at all"), nil, backupTestPassword, http.StatusBadRequest, backupCodeArchiveInvalid},
+		{"another version's backup", "/api/tournament/restore", otherVersion, nil, backupTestPassword, http.StatusBadRequest, backupCodeVersionMismatch},
+		{"plan of another version's backup", "/api/tournament/restore/plan", otherVersion, nil, "", http.StatusBadRequest, backupCodeVersionMismatch},
+		{"another version's kept copy", "/api/tournament/restore", nil, map[string]string{"from": otherVersionCopy}, backupTestPassword, http.StatusBadRequest, backupCodeVersionMismatch},
+		{"plan of another version's kept copy", "/api/tournament/restore/plan", nil, map[string]string{"from": otherVersionCopy}, "", http.StatusBadRequest, backupCodeVersionMismatch},
 		{"no archive", "/api/tournament/restore", nil, nil, backupTestPassword, http.StatusBadRequest, backupCodeBadRequest},
 		{"both archive and from", "/api/tournament/restore", tournamentArchive, map[string]string{"from": "20260101T000000Z-scheduled.zip"}, backupTestPassword, http.StatusBadRequest, backupCodeBadRequest},
 		{"from a bad name", "/api/tournament/restore", nil, map[string]string{"from": "../tournament.md"}, backupTestPassword, http.StatusBadRequest, backupCodeBadBackupName},
@@ -231,6 +244,21 @@ func TestRestore_RefusalsLeaveTheFolderUnchanged(t *testing.T) {
 			assert.Equal(t, before, folderHash(t, rig.dir), "a refusal changed the data folder")
 		})
 	}
+
+	// The refusal names both versions, in its sentence and as fields.
+	w := restorePost(t, rig.r, "/api/tournament/restore/plan", otherVersion, nil, backupTestPassword, "")
+	require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+	var body struct {
+		Error         string `json:"error"`
+		BackupVersion string `json:"backupVersion"`
+		AppVersion    string `json:"appVersion"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+	running := strings.TrimSpace(version.GetVersion())
+	assert.Equal(t, running+"-other", body.BackupVersion)
+	assert.Equal(t, running, body.AppVersion)
+	assert.Equal(t, "This backup was made with version "+running+"-other and this app is version "+running+
+		". A backup can be restored only with the version that made it, so nothing was changed.", body.Error)
 }
 
 func TestRestore_DecisionMissingNamesTheCompetitions(t *testing.T) {

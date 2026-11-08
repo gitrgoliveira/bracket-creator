@@ -147,7 +147,7 @@ The following clip walks through the flows end to end, recorded from the score e
 
 ### Choosing the team match format
 
-When you create a team competition, pick the format under **Team match format**: **Regular** (every position plays its opposite number, the default) or **Kachinuki (winner stays on)**. The same control appears in the competition's **Settings** tab. It locks once the draw is generated: discard the draw to change it. Once the competition has started, the format can no longer be changed.
+When you create a team competition, set **Team size**, the number of fighters in a team, from 2 to 30. Then pick the format under **Team match format**: **Regular** (every position plays its opposite number, the default) or **Kachinuki (winner stays on)**. The **Team match format** control also appears in the competition's **Settings** tab. It locks once the draw is generated: discard the draw to change it. Once the competition has started, the format can no longer be changed.
 
 ### Scoring a kachinuki encounter
 

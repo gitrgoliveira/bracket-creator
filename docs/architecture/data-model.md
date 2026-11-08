@@ -64,6 +64,7 @@ classDiagram
         +string Start
         +string Length
         +int Day
+        +bool MatchesGoOn
     }
 
     class Theme {
@@ -327,23 +328,23 @@ A tournament holds a list of scheduled stops in `pauses` (at most 20 pauses). Ea
 
 The schedule estimator evaluates pauses under five rules:
 
-* **Incomplete rows are ignored.** An incomplete row with no start time or an unparseable duration is saved and preserved on disk, but the schedule ignores it.
+* **Incomplete rows are ignored.** A row with no start time, a start that is not an "HH:MM" clock, or a length that is missing, cannot be read, or is zero is saved and preserved on disk, but the schedule ignores it.
 * **Overlapping pauses count as one.** When two pauses overlap in time, the schedule treats them as one longer pause: a match that would start inside either of them starts when the later one ends.
-* **Pauses on missing days are ignored.** A pause whose day index falls outside the tournament duration or on a day with no scheduled competition is ignored by the schedule.
+* **Pauses on missing days are ignored.** A pause whose day index falls outside the tournament duration is ignored by the schedule. So is a pause for Day 2 or later of a tournament with no date, whose schedule runs as Day 1 only. A pause on a day with no competition stays in force for that day and is drawn on the calendar.
 * **A pause with `matches_go_on` moves no match.** The calendar draws it on its day, flagged `matchesGoOn` on the day's break, but match slots, every estimate and a calendar move or retime treat it as absent.
 * **Drawn competitions keep their times.** Once a competition is drawn, its stored match times stay as they are when pauses are edited later. A draw made after the edit uses the new pauses. Changing a drawn competition's date or start time is the one settings edit that re-times its matches, in the same save as the settings.
 
-The model has no `lunch_block`, `opening_block` or `closing_block` key; `pauses` holds those stops. Refer to [Upgrading legacy ceremony blocks](#upgrading-legacy-ceremony-blocks) for a file that still carries them.
+`pauses` holds those stops. The legacy `lunch_block`, `opening_block` and `closing_block` keys are read only so they can be upgraded. A tournament settings save carries `opening_block` and `closing_block` forward unchanged, and `lunch_block` too when the save sends no `pauses` (a load already lists it as the Lunch pause); the upgrade's own write removes them. Refer to [Upgrading legacy ceremony blocks](#upgrading-legacy-ceremony-blocks) for a file that still carries them.
 
 ### Upgrading legacy ceremony blocks
 
-Releases up to and including v2.3.0 stored ceremonies and lunch as duration strings without clock times (`lunch_block`, `opening_block` and `closing_block`). A one-time startup upgrade migrates these legacy keys into `pauses`:
+Releases up to and including v2.3.0 stored ceremonies and lunch as duration strings without clock times (`lunch_block`, `opening_block` and `closing_block`). An upgrade migrates these legacy keys into `pauses` whenever the store is opened (server start, or a command-line backup or restore) and after every restore:
 
 * `lunch_block`: Converted to a "Lunch" pause starting at 12:00 on every day (Day 0) when the tournament has no existing pauses.
 * `opening_block`: Converted into one "Opening ceremony" pause per tournament day that has a competition, starting at that day's earliest competition start time (an empty start time defaults to 09:00). On a single-day tournament the pause uses Day 0; on a multi-day tournament it uses the specific day index. If no competition has a day within the tournament, a single start-less "Opening ceremony" row is created so the organiser can provide a time.
 * `closing_block`: Converted into one "Closing ceremony" pause with no start time on Day 0.
 
-Once converted, the legacy keys are removed from `tournament.md` on the next file write. The ceremony migration runs once at server startup. If the conversion fails, the error is logged, the legacy keys stay on disk, and the migration is retried at the next startup.
+The upgrade rewrites `tournament.md` itself, with the new pauses and without the legacy keys, so it has nothing left to do on a later start. Until then, a load already shows `lunch_block` as the Lunch pause, but nothing reads `opening_block` or `closing_block`. The upgrade reads every competition's `config.md` to find each day's earliest start, so one that cannot be read stops it, as does a failure to read or write `tournament.md`. A failure is logged as a warning, leaves `tournament.md` as it was, and never stops the server starting or fails the restore; the upgrade runs again at the next startup or restore.
 
 ## 3. The match and result model
 

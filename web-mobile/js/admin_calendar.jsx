@@ -1062,7 +1062,7 @@ export function AdminCalendarPage({
           <div className="cal-state-card">
             <div className="cal-state-title">Set the tournament date first.</div>
             <div className="cal-state-sub">
-              The tournament has no dates set yet. Add start and end dates in Edit tournament to place competitions on the calendar.
+              The tournament has no date set yet. Add its start date and number of days in Edit tournament to place competitions on the calendar.
             </div>
             <button type="button" className="btn btn--primary" onClick={onEditTournament}>
               Edit tournament

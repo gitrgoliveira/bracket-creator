@@ -10,7 +10,7 @@ It describes the **Pools + Knockout** format, pools followed by a knockout. A **
 
 The rest of this page assumes you already know how many competitors each pool sends up. This section is about where that number comes from.
 
-By default, every pool sends the same number of qualifiers, set by **Winners per pool** in competition setup. When pool size is set to a **minimum** number of players rather than a maximum, so pools can come out different sizes, two further options let some pools send an extra qualifier instead of leaving the difference as byes. Choose between the three under **Knockout qualifiers**, which only appears for **Pools + Knockout** competitions under that pool-size setting. Refer to [Knockout qualifiers](run-tournament.md#knockout-qualifiers) for where this lives in the app.
+By default, every pool sends the same number of qualifiers, set by **Winners per pool** in competition setup. It can be at most **Players per pool**, or one more than that when **Pool size is a** is set to **minimum**, because a pool can then hold one extra player. When pool size is set to a **minimum** number of players rather than a maximum, so pools can come out different sizes, two further options let some pools send an extra qualifier instead of leaving the difference as byes. Choose between the three under **Knockout qualifiers**, which only appears for **Pools + Knockout** competitions under that pool-size setting. Refer to [Knockout qualifiers](run-tournament.md#knockout-qualifiers) for where this lives in the app.
 
 ### Standard
 

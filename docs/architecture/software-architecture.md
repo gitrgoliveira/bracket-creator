@@ -99,7 +99,7 @@ Its types carry Excel coordinates (`sheetName`, `cell`) tightly coupled to outpu
 | `cmd` | Cobra commands (each an options struct with `run()`) |
 | `internal/helper` | CSV parsing, pool/match generation, binary-tree brackets, seeding, Excel rendering |
 | `internal/domain` | Clean models + canonical decision/lineup rules |
-| `internal/engine` | Thin adapter that drives `helper` generation from a `state.Competition`; handles scoring, eligibility, kachinuki, schedule estimate, the competition calendar's placement and the re-timing of a drawn competition's matches (`dayBreaks` owns a day's pauses, `countForEstimate` the participant count an estimate uses) |
+| `internal/engine` | Thin adapter that drives `helper` generation from a `state.Competition`; handles scoring, eligibility, kachinuki, schedule estimate, the competition calendar's placement and the re-timing of a drawn competition's matches (`pausesOnDay` owns which pauses apply on a day and `dayBreaks` is its view of the ones that stop matches; `countForEstimate` owns the participant count an estimate uses) |
 | `internal/state` | File-backed store (`tournament.md`, `competitions/<id>/config.md`, `participants.csv`). Transactions + write-ahead log, per-competition locks |
 | `internal/excel` | Excel lifecycle + `NewFileFromScratch` |
 | `internal/pdf` | PDF exports (LibreOffice-backed) |

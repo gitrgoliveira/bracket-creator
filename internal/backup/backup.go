@@ -54,9 +54,13 @@ const (
 	CodeTournamentMissing        = "tournament_missing"
 	CodeRestoreCreatedNotAllowed = "restore_created_not_allowed"
 	CodeFrontMatterInvalid       = "front_matter_invalid"
+	CodeVersionMismatch          = "version_mismatch"
 )
 
-// Error is every refusal Write and Read make; the HTTP layer maps it to 400 archive_invalid with Code as the reason.
+// Error is every refusal Write and Read make, and CheckAppVersion's. The HTTP
+// layer answers a Read refusal as 400 archive_invalid with Code as the reason
+// and CheckAppVersion's as 400 backup_version_mismatch; a Write refusal is a
+// server fault (500).
 type Error struct {
 	Code   string // one of the Code* constants
 	Path   string // the entry or competition id concerned, when there is one
@@ -68,6 +72,37 @@ func (e *Error) Error() string {
 		return fmt.Sprintf("backup %s (%s): %s", e.Code, e.Path, e.Detail)
 	}
 	return fmt.Sprintf("backup %s: %s", e.Code, e.Detail)
+}
+
+// SameAppVersion reports whether an archive whose manifest names made can be
+// restored by the app version running: a backup is restored only on the
+// version that made it (operator ruling 2026-11-08). The one comparison, used
+// by CheckAppVersion and by the scheduled job's choice of the newest daily
+// copy, so the two never disagree.
+func SameAppVersion(made, running string) bool {
+	return strings.TrimSpace(made) == strings.TrimSpace(running)
+}
+
+// CheckAppVersion refuses to restore an archive that another version of the
+// app made (SameAppVersion), so a restore never has to read data a different
+// release wrote. running is the version of the app doing the restore
+// (version.GetVersion). It is a restore check and NOT part of Read, because
+// the scheduled backup job reads every kept copy, older versions' included.
+// Detail is a whole sentence a person reads; the HTTP layer answers it as
+// 400 backup_version_mismatch and the CLI prints it.
+func CheckAppVersion(m Manifest, running string) *Error {
+	if SameAppVersion(m.AppVersion, running) {
+		return nil
+	}
+	made := strings.TrimSpace(m.AppVersion)
+	running = strings.TrimSpace(running)
+	which := "This backup does not say which version made it"
+	if made != "" {
+		which = "This backup was made with version " + made
+	}
+	return &Error{Code: CodeVersionMismatch, Path: ManifestName, Detail: fmt.Sprintf(
+		"%s and this app is version %s. A backup can be restored only with the version that made it, so nothing was changed.",
+		which, running)}
 }
 
 func validScope(s Scope) bool {

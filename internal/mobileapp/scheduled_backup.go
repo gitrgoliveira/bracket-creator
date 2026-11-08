@@ -10,14 +10,17 @@ import (
 	"time"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/backup"
+	"github.com/gitrgoliveira/bracket-creator/internal/cmd/version"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
-// cachedFingerprint is the fingerprint read from one backup file, kept with
-// the file's size so a rewritten file is read again.
+// cachedFingerprint is the fingerprint and the app version read from one
+// backup file's manifest, kept with the file's size so a rewritten file is
+// read again.
 type cachedFingerprint struct {
-	size int64
-	fp   string
+	size       int64
+	fp         string
+	appVersion string
 }
 
 // ScheduledBackups runs a periodic backup job that creates a tournament
@@ -94,11 +97,11 @@ func (s *ScheduledBackups) tickOnceSafe(ctx context.Context) {
 	}
 }
 
-func (s *ScheduledBackups) readArchiveFingerprint(name string, checks backup.Checks) (string, bool) {
+func (s *ScheduledBackups) readArchiveFingerprint(name string, checks backup.Checks) (fp, appVersion string, ok bool) {
 	f, err := s.Store.OpenBackupFile(name)
 	if err != nil {
 		slog.Warn("scheduled backup: open backup file for fingerprint check failed", "file", name, "err", err)
-		return "", false
+		return "", "", false
 	}
 	defer func() {
 		if cerr := f.Close(); cerr != nil {
@@ -109,39 +112,40 @@ func (s *ScheduledBackups) readArchiveFingerprint(name string, checks backup.Che
 	info, err := f.Stat()
 	if err != nil {
 		slog.Warn("scheduled backup: stat backup file failed", "file", name, "err", err)
-		return "", false
+		return "", "", false
 	}
 
 	arc, err := backup.Read(f, info.Size(), checks)
 	if err != nil {
 		slog.Warn("scheduled backup: read backup archive failed", "file", name, "err", err)
-		return "", false
+		return "", "", false
 	}
-	return arc.Manifest.Fingerprint, true
+	return arc.Manifest.Fingerprint, arc.Manifest.AppVersion, true
 }
 
 // getOrReadArchiveFingerprint is readArchiveFingerprint through the cache.
-func (s *ScheduledBackups) getOrReadArchiveFingerprint(bf state.BackupFile, checks backup.Checks) (string, bool) {
+func (s *ScheduledBackups) getOrReadArchiveFingerprint(bf state.BackupFile, checks backup.Checks) (cachedFingerprint, bool) {
 	s.mu.Lock()
 	if c, ok := s.cache[bf.Name]; ok && c.size == bf.Size {
 		s.mu.Unlock()
-		return c.fp, true
+		return c, true
 	}
 	s.mu.Unlock()
 
-	fp, ok := s.readArchiveFingerprint(bf.Name, checks)
+	fp, appVersion, ok := s.readArchiveFingerprint(bf.Name, checks)
 	if !ok {
-		return "", false
+		return cachedFingerprint{}, false
 	}
 
+	c := cachedFingerprint{size: bf.Size, fp: fp, appVersion: appVersion}
 	s.mu.Lock()
 	if s.cache == nil {
 		s.cache = make(map[string]cachedFingerprint)
 	}
-	s.cache[bf.Name] = cachedFingerprint{size: bf.Size, fp: fp}
+	s.cache[bf.Name] = c
 	s.mu.Unlock()
 
-	return fp, true
+	return c, true
 }
 
 // ShutdownCopy takes one daily copy at a clean shutdown if the data changed since the newest daily copy, without the 24-hour age rule. Like tickOnceSafe it recovers a panic and logs a failure, so it never holds up shutdown.
@@ -198,6 +202,17 @@ func (s *ScheduledBackups) copyOnce(ctx context.Context, checkAge bool) error {
 		}
 	}
 
+	// A copy another version of the app made cannot be restored by this one
+	// (backup.CheckAppVersion), so it is no daily copy for this version: after
+	// an upgrade the newest copy is due at once and is never "unchanged".
+	running := version.GetVersion()
+	checks := BackupChecks()
+	if newestNonFuture != nil {
+		if c, ok := s.getOrReadArchiveFingerprint(*newestNonFuture, checks); ok && !backup.SameAppVersion(c.appVersion, running) {
+			newestNonFuture = nil
+		}
+	}
+
 	if checkAge {
 		isDue := false
 		if newestNonFuture == nil {
@@ -228,11 +243,9 @@ func (s *ScheduledBackups) copyOnce(ctx context.Context, checkAge bool) error {
 	}
 	copiesToCheck = append(copiesToCheck, futureScheduled...)
 
-	checks := BackupChecks()
-
 	for _, copyFile := range copiesToCheck {
-		existingFP, ok := s.getOrReadArchiveFingerprint(copyFile, checks)
-		if ok && existingFP == fp {
+		c, ok := s.getOrReadArchiveFingerprint(copyFile, checks)
+		if ok && c.fp == fp && backup.SameAppVersion(c.appVersion, running) {
 			return nil
 		}
 	}

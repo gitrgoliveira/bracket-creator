@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/backup"
+	"github.com/gitrgoliveira/bracket-creator/internal/cmd/version"
 	"github.com/gitrgoliveira/bracket-creator/internal/engine"
 	"github.com/gitrgoliveira/bracket-creator/internal/mobileapp"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
@@ -287,6 +288,9 @@ func (o *mobileAppRestoreOptions) run(cmd *cobra.Command, archivePath string) (e
 			return fmt.Errorf("this file is not a backup this app can restore (%s): %s", be.Code, be.Detail)
 		}
 		return fmt.Errorf("this file is not a backup this app can restore: %w", err)
+	}
+	if verr := backup.CheckAppVersion(archive.Manifest, version.GetVersion()); verr != nil {
+		return operatorSentence(verr.Detail)
 	}
 
 	if !tournExists {

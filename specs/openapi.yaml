@@ -915,6 +915,7 @@ paths:
         | 400 | `bad_restore_request` | Multipart parse failure, both `archive` and `from` supplied or neither supplied, invalid ID in `only`, invalid boolean in `undo`, or malformed `decisions` JSON |
         | 400 | `bad_backup_name` | `from` does not match the valid backup filename pattern |
         | 400 | `archive_invalid` | Archive validation failed; carries reader reason code in `reason` and details in `detail` |
+        | 400 | `backup_version_mismatch` | The archive was made by another version of the app (its manifest `appVersion` is not the running version): a backup is restored only with the version that made it. The body carries `backupVersion` and `appVersion` |
         | 400 | `not_a_safety_copy` | `undo=true` on an archive whose kind is not `before-restore` |
         | 400 | `competition_not_in_archive` | `only` names a competition not present in the archive |
         | 400 | `bad_decision` | `undo=true` combined with `only` (an undo puts back the whole safety copy) or with `decisions` (an undo answers its own questions), or a decision that is not one of the competition's `choices`, or for a competition with none |
@@ -961,7 +962,7 @@ paths:
         '400':
           description: >
             Invalid request or unreadable backup archive. Refusals change nothing.
-            Codes: `bad_restore_request`, `bad_backup_name`, `archive_invalid`,
+            Codes: `bad_restore_request`, `bad_backup_name`, `archive_invalid`, `backup_version_mismatch`,
             `not_a_safety_copy`, `competition_not_in_archive`, `bad_decision`, `file_unreadable`.
           content:
             application/json:
@@ -1018,6 +1019,7 @@ paths:
         | 400 | `bad_restore_request` | Multipart parse failure, missing/conflicting fields, invalid boolean, or malformed JSON |
         | 400 | `bad_backup_name` | `from` does not match the valid backup filename pattern |
         | 400 | `archive_invalid` | Archive validation failed; carries reader reason code in `reason` and details in `detail` |
+        | 400 | `backup_version_mismatch` | The archive was made by another version of the app (its manifest `appVersion` is not the running version): a backup is restored only with the version that made it. The body carries `backupVersion` and `appVersion` |
         | 400 | `not_a_safety_copy` | `undo=true` on an archive whose kind is not `before-restore` |
         | 400 | `competition_not_in_archive` | `only` names a competition not present in the archive |
         | 400 | `bad_decision` | Action chosen is not permitted for this competition |
@@ -1081,7 +1083,7 @@ paths:
         '400':
           description: >
             Invalid request or unreadable backup archive. Refusals change nothing.
-            Codes: `bad_restore_request`, `bad_backup_name`, `archive_invalid`,
+            Codes: `bad_restore_request`, `bad_backup_name`, `archive_invalid`, `backup_version_mismatch`,
             `not_a_safety_copy`, `competition_not_in_archive`, `bad_decision`, `file_unreadable`.
           content:
             application/json:
@@ -1912,7 +1914,19 @@ paths:
               schema:
                 $ref: '#/components/schemas/Competition'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          description: |
+            Invalid input, including these refusals of an Undo
+            (`restoreMatchTimes`), none of which writes anything:
+
+            * `restoreMatchTimes` sent without `configVersion`
+              (`restoreMatchTimes needs the configVersion of the save it undoes`).
+            * A match id in the list that the competition does not have.
+            * A match listed more than once.
+            * A `was` that is neither empty nor an `HH:MM` clock.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
@@ -1923,8 +1937,8 @@ paths:
               longer `draw-ready`, or one of whose listed matches no longer holds the time
               the move gave it. Nothing was written; the body is
               `{code: "undo_stale", error: "Changed since the move; Undo not applied."}`.
-              An unknown match id in the list, or a `was` that is neither empty nor an `HH:MM`
-              clock, is a 400.
+              An unknown match id in the list, a match listed more than once, or a `was`
+              that is neither empty nor an `HH:MM` clock, is a 400.
 
             * `retime_retry`: the date or start was moved on a competition that was drawn,
               or changed, between the server's read and the save. Nothing was moved; the
@@ -6330,6 +6344,8 @@ paths:
           schema:
             type: integer
             minimum: 0
+            maximum: 30
+          description: 0 for an individual competition; otherwise 2 to 30.
         - in: query
           name: teamMatchType
           required: false
@@ -6349,12 +6365,19 @@ paths:
           required: false
           schema:
             type: string
+            enum: [max, min]
+          description: >
+            `max`: `poolSize` is the most players a pool holds. Absent or `min`
+            means it is the fewest, so a pool can hold one more.
         - in: query
           name: poolWinners
           required: false
           schema:
             type: integer
             minimum: 0
+          description: >
+            On a mixed competition, at most `poolSize`, or `poolSize` + 1 when
+            `poolSizeMode` is not `max`; 0 or absent means the default.
         - in: query
           name: poolFormat
           required: false
@@ -6387,18 +6410,22 @@ paths:
           schema:
             type: integer
             minimum: 0
-          description: Required (at least 1) when `format` is swiss.
+          description: Required when `format` is swiss, and then 1 to 1023.
         - in: query
           name: poolMatchDurationSeconds
           required: false
           schema:
             type: integer
+            minimum: 0
+            maximum: 3600
           description: 0 or absent means the default; otherwise 60 to 3600.
         - in: query
           name: knockoutMatchDurationSeconds
           required: false
           schema:
             type: integer
+            minimum: 0
+            maximum: 3600
           description: 0 or absent means the default; otherwise 60 to 3600.
       responses:
         '200':
@@ -7422,6 +7449,12 @@ components:
         path:
           type: string
           description: Archive entry path or competition ID concerned.
+        backupVersion:
+          type: string
+          description: For backup_version_mismatch, the version of the app that made the archive (empty when the manifest names none).
+        appVersion:
+          type: string
+          description: For backup_version_mismatch, the version of the app refusing it.
         competitionIds:
           type: array
           items:
@@ -8064,20 +8097,33 @@ components:
         teamSize:
           type: integer
           minimum: 0
+          maximum: 30
           not:
             enum: [1]
           description: >
             Number of members per team. 0 for individual competitions;
-            >= 2 for team competitions. The value 1 is always rejected
+            2 to 30 for team competitions. The value 1 is always rejected
             (regardless of kind) because engine code uses TeamSize > 0
-            to detect team competitions, making 1 ambiguous.
+            to detect team competitions, making 1 ambiguous. A value above
+            30 is a 400 on POST, and on PUT when the save changes `teamSize`
+            or `kind`, so a competition stored above 30 before the cap stays
+            editable for its other settings.
         poolSize:
           type: integer
         poolSizeMode:
           type: string
-          enum: [max, exact]
+          enum: [max, min]
+          description: >
+            `max`: `poolSize` is the most players a pool holds. `min`, or no
+            value, means it is the fewest, so a pool can hold one more.
         poolWinners:
           type: integer
+          description: >
+            Qualifiers each pool sends to the knockout (mixed format). At
+            most `poolSize`, or `poolSize` + 1 when `poolSizeMode` is not
+            `max`; a larger value is a 400 on POST, and on PUT when the save
+            changes the format, `poolSize`, `poolWinners` or `poolSizeMode`.
+            0 or absent means the default.
         roundRobin:
           type: boolean
         courts:
@@ -8294,7 +8340,8 @@ components:
             The version of the competition's settings (16 lowercase hex characters).
             Read-only on answers, optional on the PUT body: the version the page
             loaded; a mismatch is 409 config_changed; omit to skip the check.
-            Never stored. Required with `restoreMatchTimes`.
+            Never stored. Required with `restoreMatchTimes`: a save that sends
+            `restoreMatchTimes` without it is a 400.
         restoreMatchTimes:
           type: array
           description: >

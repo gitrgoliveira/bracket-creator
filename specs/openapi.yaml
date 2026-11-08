@@ -683,7 +683,10 @@ paths:
           rest of the import proceeds.
 
         `pool_size` and `pool_size_mode`, by contrast, ARE defaulted when
-        omitted (to 4 and `"max"`).
+        omitted (to 4 and `"max"`). A stated `pool_size_mode` must be `"max"`
+        or `"min"`; any other value fails that row with
+        `poolSizeMode: unknown poolSizeMode "<value>" (expected "max" or "min")`
+        while the rest of the import proceeds.
 
         `date` is defaulted too: a row without one takes the tournament's
         date (Day 1), as `POST /api/competitions` does, because a
@@ -915,7 +918,7 @@ paths:
         | 400 | `bad_restore_request` | Multipart parse failure, both `archive` and `from` supplied or neither supplied, invalid ID in `only`, invalid boolean in `undo`, or malformed `decisions` JSON |
         | 400 | `bad_backup_name` | `from` does not match the valid backup filename pattern |
         | 400 | `archive_invalid` | Archive validation failed; carries reader reason code in `reason` and details in `detail` |
-        | 400 | `backup_version_mismatch` | The archive was made by another version of the app (its manifest `appVersion` is not the running version): a backup is restored only with the version that made it. The body carries `backupVersion` and `appVersion` |
+        | 400 | `backup_version_mismatch` | The running version of the app cannot restore the archive: its manifest `appVersion` is a later version, or the two versions differ and either has no release order (a branch name, a commit or `dev`). A backup is restored with the version that made it or a later one, which brings it up to date. The body carries `backupVersion` and `appVersion` |
         | 400 | `not_a_safety_copy` | `undo=true` on an archive whose kind is not `before-restore` |
         | 400 | `competition_not_in_archive` | `only` names a competition not present in the archive |
         | 400 | `bad_decision` | `undo=true` combined with `only` (an undo puts back the whole safety copy) or with `decisions` (an undo answers its own questions), or a decision that is not one of the competition's `choices`, or for a competition with none |
@@ -1019,7 +1022,7 @@ paths:
         | 400 | `bad_restore_request` | Multipart parse failure, missing/conflicting fields, invalid boolean, or malformed JSON |
         | 400 | `bad_backup_name` | `from` does not match the valid backup filename pattern |
         | 400 | `archive_invalid` | Archive validation failed; carries reader reason code in `reason` and details in `detail` |
-        | 400 | `backup_version_mismatch` | The archive was made by another version of the app (its manifest `appVersion` is not the running version): a backup is restored only with the version that made it. The body carries `backupVersion` and `appVersion` |
+        | 400 | `backup_version_mismatch` | The running version of the app cannot restore the archive: its manifest `appVersion` is a later version, or the two versions differ and either has no release order (a branch name, a commit or `dev`). A backup is restored with the version that made it or a later one, which brings it up to date. The body carries `backupVersion` and `appVersion` |
         | 400 | `not_a_safety_copy` | `undo=true` on an archive whose kind is not `before-restore` |
         | 400 | `competition_not_in_archive` | `only` names a competition not present in the archive |
         | 400 | `bad_decision` | Action chosen is not permitted for this competition |
@@ -1915,8 +1918,9 @@ paths:
                 $ref: '#/components/schemas/Competition'
         '400':
           description: |
-            Invalid input, including these refusals of an Undo
-            (`restoreMatchTimes`), none of which writes anything:
+            Invalid input, for example a save that changes `poolSizeMode` to a
+            value other than `max` or `min`, including these refusals of an
+            Undo (`restoreMatchTimes`), none of which writes anything:
 
             * `restoreMatchTimes` sent without `configVersion`
               (`restoreMatchTimes needs the configVersion of the save it undoes`).
@@ -6368,7 +6372,8 @@ paths:
             enum: [max, min]
           description: >
             `max`: `poolSize` is the most players a pool holds. Absent or `min`
-            means it is the fewest, so a pool can hold one more.
+            means it is the fewest, so a pool can hold one more. Any other value
+            (after trimming) returns 400, as the create does.
         - in: query
           name: poolWinners
           required: false
@@ -8115,7 +8120,10 @@ components:
           enum: [max, min]
           description: >
             `max`: `poolSize` is the most players a pool holds. `min`, or no
-            value, means it is the fewest, so a pool can hold one more.
+            value, means it is the fewest, so a pool can hold one more. Any
+            other value (after trimming) is a 400 on POST, and on PUT when the
+            save changes `poolSizeMode`, so a competition stored with another
+            value stays editable for its other settings.
         poolWinners:
           type: integer
           description: >

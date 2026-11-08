@@ -4,6 +4,8 @@ package backup
 import (
 	"fmt"
 	"path"
+	"regexp"
+	"strconv"
 	"strings"
 	"unicode"
 )
@@ -74,24 +76,69 @@ func (e *Error) Error() string {
 	return fmt.Sprintf("backup %s: %s", e.Code, e.Detail)
 }
 
-// SameAppVersion reports whether an archive whose manifest names made can be
-// restored by the app version running: a backup is restored only on the
-// version that made it (operator ruling 2026-11-08). The one comparison, used
-// by CheckAppVersion and by the scheduled job's choice of the newest daily
-// copy, so the two never disagree.
-func SameAppVersion(made, running string) bool {
-	return strings.TrimSpace(made) == strings.TrimSpace(running)
+// releaseVersion matches the versions that can be put in order: a release
+// tag (v2.4.0), or the git-describe form a build from main carries
+// (v2.4.0-12-gabc1234: 12 commits after v2.4.0), either with -dirty after it.
+// A branch name, a short sha or "dev" (get_build_info.sh) does not match.
+var releaseVersion = regexp.MustCompile(`^v?(\d+)\.(\d+)\.(\d+)(?:-(\d+)-g[0-9a-f]+)?(?:-dirty)?$`)
+
+// versionOrder returns v's place in release order: major, minor, patch, then
+// the commits since that release (0 for the release itself). ok is false for
+// a version with no order. Not semver precedence, which would put
+// v2.4.0-12-gabc1234 BEFORE v2.4.0; git-describe means 12 commits after it.
+func versionOrder(v string) (order [4]int, ok bool) {
+	m := releaseVersion.FindStringSubmatch(strings.TrimSpace(v))
+	if m == nil {
+		return order, false
+	}
+	for i, s := range m[1:] {
+		if s == "" {
+			continue
+		}
+		n, err := strconv.Atoi(s)
+		if err != nil {
+			return order, false
+		}
+		order[i] = n
+	}
+	return order, true
 }
 
-// CheckAppVersion refuses to restore an archive that another version of the
-// app made (SameAppVersion), so a restore never has to read data a different
-// release wrote. running is the version of the app doing the restore
-// (version.GetVersion). It is a restore check and NOT part of Read, because
-// the scheduled backup job reads every kept copy, older versions' included.
-// Detail is a whole sentence a person reads; the HTTP layer answers it as
-// 400 backup_version_mismatch and the CLI prints it.
+// RestorableBy reports whether the app version running can restore an
+// archive whose manifest names made: the version that made it or a later one
+// (operator ruling 2026-11-08). A later version brings an older backup up to
+// date with the upgrades the store already runs on what it loads; an earlier
+// version never reads what a later one wrote. Two versions with no order (a
+// branch name, a short sha, "dev") restore each other only when they are the
+// same. The one comparison, used by CheckAppVersion and by the scheduled
+// job's choice of the newest daily copy, so the two never disagree.
+func RestorableBy(made, running string) bool {
+	made, running = strings.TrimSpace(made), strings.TrimSpace(running)
+	if made == running {
+		return true
+	}
+	m, okMade := versionOrder(made)
+	r, okRunning := versionOrder(running)
+	if !okMade || !okRunning {
+		return false
+	}
+	for i := range m {
+		if m[i] != r[i] {
+			return m[i] < r[i]
+		}
+	}
+	return true
+}
+
+// CheckAppVersion refuses to restore an archive that the running version of
+// the app cannot restore (RestorableBy): one a later version made, or one
+// whose version cannot be put in order against it. running is the version of
+// the app doing the restore (version.GetVersion). It is a restore check and
+// NOT part of Read, because the scheduled backup job reads every kept copy,
+// later versions' included. Detail is a whole sentence a person reads; the
+// HTTP layer answers it as 400 backup_version_mismatch and the CLI prints it.
 func CheckAppVersion(m Manifest, running string) *Error {
-	if SameAppVersion(m.AppVersion, running) {
+	if RestorableBy(m.AppVersion, running) {
 		return nil
 	}
 	made := strings.TrimSpace(m.AppVersion)
@@ -100,9 +147,15 @@ func CheckAppVersion(m Manifest, running string) *Error {
 	if made != "" {
 		which = "This backup was made with version " + made
 	}
+	why := ""
+	_, okMade := versionOrder(made)
+	_, okRunning := versionOrder(running)
+	if made != "" && (!okMade || !okRunning) {
+		why = " These two versions cannot be compared."
+	}
 	return &Error{Code: CodeVersionMismatch, Path: ManifestName, Detail: fmt.Sprintf(
-		"%s and this app is version %s. A backup can be restored only with the version that made it, so nothing was changed.",
-		which, running)}
+		"%s and this app is version %s.%s A backup can be restored only with the version that made it or a later one, so nothing was changed.",
+		which, running, why)}
 }
 
 func validScope(s Scope) bool {

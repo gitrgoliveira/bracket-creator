@@ -1400,6 +1400,23 @@ func ValidateCompetitionKind(kind string) error {
 	}
 }
 
+// ValidatePoolSizeMode rejects a PoolSizeMode outside the set the server
+// recognises. Every reader asks only `PoolSizeMode == "max"`, so before this
+// check any other value ("maxx", "MAX") was silently run as minimum sizing
+// (operator decision 2026-11-08: refuse it instead).
+//
+// "" is a member of the set, as it is for ValidateCompetitionKind: an
+// omitted value means minimum sizing on create and the draft estimate, and
+// the import defaults it to "max" before validating.
+func ValidatePoolSizeMode(mode string) error {
+	switch mode {
+	case "", "max", "min":
+		return nil
+	default:
+		return fmt.Errorf("unknown poolSizeMode %q (expected \"max\" or \"min\")", mode)
+	}
+}
+
 // DecisionDraw is the canonical value for a tied (hikiwake) match.
 const DecisionDraw = "hikiwake"
 

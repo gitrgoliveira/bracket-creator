@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -663,6 +664,21 @@ func TestValidateCompetitionKind(t *testing.T) {
 			} else {
 				assert.NoError(t, err)
 			}
+		})
+	}
+}
+
+func TestValidatePoolSizeMode(t *testing.T) {
+	for _, mode := range []string{"", "max", "min"} {
+		t.Run("accepts "+strconv.Quote(mode), func(t *testing.T) {
+			assert.NoError(t, ValidatePoolSizeMode(mode))
+		})
+	}
+	for _, mode := range []string{"maxx", "MAX", "Min", "minimum", " max"} {
+		t.Run("refuses "+strconv.Quote(mode), func(t *testing.T) {
+			err := ValidatePoolSizeMode(mode)
+			require.Error(t, err)
+			assert.Equal(t, "unknown poolSizeMode "+strconv.Quote(mode)+` (expected "max" or "min")`, err.Error())
 		})
 	}
 }

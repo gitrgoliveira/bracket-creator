@@ -348,6 +348,12 @@ func importCompetition(store *state.Store, eng *engine.Engine, entry ImportManif
 	if comp.PoolSizeMode == "" {
 		comp.PoolSizeMode = "max"
 	}
+	// Cross-file guard symmetry with POST /competitions: a stated mode must
+	// be "max" or "min", never silently run as minimum sizing.
+	if err := state.ValidatePoolSizeMode(comp.PoolSizeMode); err != nil {
+		res.Error = "poolSizeMode: " + err.Error()
+		return res
+	}
 
 	// Cross-file guard symmetry with POST /competitions and PUT
 	// /competitions/:id: a knockout-qualifier mode a manifest states must pass

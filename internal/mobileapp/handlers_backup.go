@@ -48,8 +48,9 @@ const (
 	backupCodeBadBackupName  = "bad_backup_name"
 	backupCodeBackupNotFound = "backup_not_found"
 	backupCodeBadRequest     = "bad_restore_request"
-	// backupCodeVersionMismatch: the archive was made by another version of
-	// the app (backup.CheckAppVersion).
+	// backupCodeVersionMismatch: the running version of the app cannot
+	// restore the archive, a later or unordered version made it
+	// (backup.CheckAppVersion).
 	backupCodeVersionMismatch = "backup_version_mismatch"
 )
 
@@ -496,8 +497,8 @@ func readRestoreArchive(c *gin.Context, store BackupStore) (*backup.Archive, boo
 			gin.H{"reason": reason, "detail": err.Error()})
 		return nil, false
 	}
-	// A backup is restored only on the version that made it; the plan is
-	// refused too, so the page says so before any choice is made.
+	// A backup is restored only on the version that made it or a later one;
+	// the plan is refused too, so the page says so before any choice is made.
 	running := version.GetVersion()
 	if verr := backup.CheckAppVersion(archive.Manifest, running); verr != nil {
 		respondBackupRefusal(c, http.StatusBadRequest, backupCodeVersionMismatch, verr.Detail,

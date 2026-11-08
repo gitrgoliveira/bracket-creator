@@ -328,7 +328,7 @@ A tournament holds a list of scheduled stops in `pauses` (at most 20 pauses). Ea
 
 The schedule estimator evaluates pauses under five rules:
 
-* **Incomplete rows are ignored.** A row with no start time, a start that is not an "HH:MM" clock, or a length that is missing, cannot be read, or is zero is saved and preserved on disk, but the schedule ignores it.
+* **Incomplete rows are ignored.** A row with no start time or no length is saved and preserved on disk, but the schedule ignores it. The setup page refuses a start that is not a clock time and a length it cannot read, so a row with one only reaches disk through a hand edit or an earlier version; it is kept, and the schedule ignores it too. A start is read as a 24-hour clock time ("HH:MM", or "H:MM" such as "9:00"), and a length that rounds to zero minutes or less counts as missing.
 * **Overlapping pauses count as one.** When two pauses overlap in time, the schedule treats them as one longer pause: a match that would start inside either of them starts when the later one ends.
 * **Pauses on missing days are ignored.** A pause whose day index falls outside the tournament duration is ignored by the schedule. So is a pause for Day 2 or later of a tournament with no date, whose schedule runs as Day 1 only. A pause on a day with no competition stays in force for that day and is drawn on the calendar.
 * **A pause with `matches_go_on` moves no match.** The calendar draws it on its day, flagged `matchesGoOn` on the day's break, but match slots, every estimate and a calendar move or retime treat it as absent.

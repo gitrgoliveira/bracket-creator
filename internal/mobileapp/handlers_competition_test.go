@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -577,7 +578,7 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 		update := state.Competition{
 			ID: "trim-fields-update", Name: "Trim Fields Update",
 			Kind: "  team  ", Format: "  knockout  ",
-			PoolSizeMode: "  exact  ", StartTime: "  10:30  ", Date: "  15-06-2026  ",
+			PoolSizeMode: "  max  ", StartTime: "  10:30  ", Date: "  15-06-2026  ",
 			TeamSize: 2,
 		}
 		body, _ := json.Marshal(update)
@@ -591,7 +592,7 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 		require.NotNil(t, stored)
 		assert.Equal(t, "team", stored.Kind, "Kind should be trimmed on PUT")
 		assert.Equal(t, "knockout", stored.Format, "Format should be trimmed on PUT")
-		assert.Equal(t, "exact", stored.PoolSizeMode, "PoolSizeMode should be trimmed on PUT")
+		assert.Equal(t, "max", stored.PoolSizeMode, "PoolSizeMode should be trimmed on PUT")
 		assert.Equal(t, "10:30", stored.StartTime, "StartTime should be trimmed on PUT")
 		assert.Equal(t, "15-06-2026", stored.Date, "Date should be trimmed on PUT")
 	})
@@ -5809,6 +5810,117 @@ func TestUpdateCompetition_KindGuard(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, stored)
 		assert.Equal(t, "banana", stored.Kind, "the illegal kind is preserved, not silently corrected")
+		assert.Equal(t, "10:30", stored.StartTime, "the unrelated edit must land")
+	})
+}
+
+// TestCreateCompetition_RejectsIllegalPoolSizeMode pins the POST half of
+// state.ValidatePoolSizeMode (operator decision 2026-11-08): a mode other
+// than "max" or "min" is refused, not run as minimum sizing. An omitted
+// mode stays legal.
+func TestCreateCompetition_RejectsIllegalPoolSizeMode(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	post := func(body map[string]any) *httptest.ResponseRecorder {
+		raw, _ := json.Marshal(body)
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/api/competitions", bytes.NewBuffer(raw))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		return w
+	}
+
+	t.Run("REJECT an unrecognised mode", func(t *testing.T) {
+		w := post(map[string]any{
+			"id": "create-illegal-mode", "name": "Create Illegal Mode",
+			"format": "mixed", "poolSize": 3, "poolSizeMode": "maxx",
+		})
+		require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+		assert.Contains(t, w.Body.String(), `poolSizeMode: unknown poolSizeMode \"maxx\"`)
+
+		stored, err := store.LoadCompetition("create-illegal-mode")
+		require.NoError(t, err)
+		assert.Nil(t, stored, "a rejected create must persist nothing")
+	})
+
+	for _, mode := range []string{"", "max", " min "} {
+		t.Run("ALLOW "+strconv.Quote(mode), func(t *testing.T) {
+			id := "create-mode-" + strings.TrimSpace(mode)
+			w := post(map[string]any{
+				"id": id, "name": "Create Mode " + strings.TrimSpace(mode),
+				"format": "mixed", "poolSize": 3, "poolSizeMode": mode,
+			})
+			require.Equal(t, http.StatusCreated, w.Code, w.Body.String())
+			stored, err := store.LoadCompetition(id)
+			require.NoError(t, err)
+			require.NotNil(t, stored)
+			assert.Equal(t, strings.TrimSpace(mode), stored.PoolSizeMode)
+		})
+	}
+}
+
+// TestUpdateCompetition_PoolSizeModeGuard is the change-scoped pair for
+// state.ValidatePoolSizeMode on PUT, the same shape as
+// TestUpdateCompetition_KindGuard: a change to an illegal mode is refused,
+// but a save that echoes an already-illegal stored mode back unchanged
+// still lands, so a hand-edited config.md never locks the settings screen.
+func TestUpdateCompetition_PoolSizeModeGuard(t *testing.T) {
+	put := func(r http.Handler, cid string, body map[string]any) *httptest.ResponseRecorder {
+		raw, _ := json.Marshal(body)
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/"+cid, bytes.NewBuffer(raw))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		return w
+	}
+
+	t.Run("REJECT a change to an illegal mode", func(t *testing.T) {
+		r, store, _, _, tempDir := setupTestRouter(t)
+		defer os.RemoveAll(tempDir)
+
+		const cid = "mode-guard-change"
+		require.NoError(t, store.SaveCompetition(&state.Competition{
+			ID: cid, Name: "Mode Guard Change", Format: state.CompFormatMixed,
+			PoolSize: 3, PoolSizeMode: "max", Status: state.CompStatusSetup,
+		}))
+
+		w := put(r, cid, map[string]any{
+			"id": cid, "name": "Mode Guard Change", "format": "mixed",
+			"poolSize": 3, "poolSizeMode": "maxx",
+		})
+		require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+		assert.Contains(t, w.Body.String(), `poolSizeMode: unknown poolSizeMode \"maxx\"`)
+
+		stored, err := store.LoadCompetition(cid)
+		require.NoError(t, err)
+		assert.Equal(t, "max", stored.PoolSizeMode, "the rejected write must not land")
+	})
+
+	t.Run("ALLOW a save that echoes an ALREADY-illegal stored mode unchanged (lockout regression)", func(t *testing.T) {
+		r, store, _, _, tempDir := setupTestRouter(t)
+		defer os.RemoveAll(tempDir)
+
+		const cid = "mode-guard-lockout"
+		// SaveCompetition bypasses the handler, as a hand-edited config.md
+		// or a record from before the guard would.
+		require.NoError(t, store.SaveCompetition(&state.Competition{
+			ID: cid, Name: "Mode Guard Lockout", Format: state.CompFormatMixed,
+			PoolSize: 3, PoolSizeMode: "maxx", Date: "12-05-2026",
+			StartTime: "09:00", Status: state.CompStatusSetup,
+		}))
+
+		w := put(r, cid, map[string]any{
+			"id": cid, "name": "Mode Guard Lockout", "format": "mixed",
+			"poolSize": 3, "poolSizeMode": "maxx",
+			"date": "12-05-2026", "startTime": "10:30",
+		})
+		require.Equal(t, http.StatusOK, w.Code,
+			"a save that does not change an already-illegal mode must succeed: %s", w.Body.String())
+		stored, err := store.LoadCompetition(cid)
+		require.NoError(t, err)
+		require.NotNil(t, stored)
+		assert.Equal(t, "maxx", stored.PoolSizeMode, "the illegal mode is preserved, not silently corrected")
 		assert.Equal(t, "10:30", stored.StartTime, "the unrelated edit must land")
 	})
 }

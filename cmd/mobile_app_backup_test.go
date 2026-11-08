@@ -168,17 +168,17 @@ func TestMobileAppBackupRestore_RoundTrip(t *testing.T) {
 	assert.Equal(t, newPassword, tourn.Password)
 }
 
-// A backup is restored only on the version that made it: the CLI refuses
-// another version's archive with the sentence the page shows, and the folder
+// A backup is restored only on the version that made it or a later one: the
+// CLI refuses a later version's archive with the sentence the page shows, and the folder
 // is left as it was.
-func TestMobileAppBackupRestore_AnotherVersionsBackupRefused(t *testing.T) {
+func TestMobileAppBackupRestore_ALaterVersionsBackupRefused(t *testing.T) {
 	srcDir, _ := buildTestPopulatedFolder(t)
 	zipPath := filepath.Join(t.TempDir(), "backup.zip")
 	_, err := executeMobileApp("backup", "--folder", srcDir, "--out", zipPath)
 	require.NoError(t, err)
 	data, err := os.ReadFile(zipPath)
 	require.NoError(t, err)
-	other, err := bctest.ArchiveWithAppVersion(data, "v0.0.1")
+	other, err := bctest.ArchiveWithAppVersion(data, "v999.0.0")
 	require.NoError(t, err)
 	otherPath := filepath.Join(t.TempDir(), "other.zip")
 	require.NoError(t, os.WriteFile(otherPath, other, 0o600))
@@ -186,8 +186,8 @@ func TestMobileAppBackupRestore_AnotherVersionsBackupRefused(t *testing.T) {
 	before := testDataFiles(t, srcDir)
 	_, err = executeMobileApp("restore", "--folder", srcDir, otherPath)
 	require.Error(t, err)
-	assert.Equal(t, "This backup was made with version v0.0.1 and this app is version "+version.GetVersion()+
-		". A backup can be restored only with the version that made it, so nothing was changed.", err.Error())
+	// The sentence is CheckAppVersion's (its own test pins the wording).
+	assert.Equal(t, backup.CheckAppVersion(backup.Manifest{AppVersion: "v999.0.0"}, version.GetVersion()).Detail, err.Error())
 	assert.Equal(t, before, testDataFiles(t, srcDir), "a refused restore changed the folder")
 }
 

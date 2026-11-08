@@ -5,9 +5,47 @@ import (
 	"testing"
 )
 
-// A backup is restored only on the version that made it (operator ruling
-// 2026-11-08): CheckAppVersion passes the same version and refuses any other,
-// naming both in the sentence a person reads.
+// A backup is restored on the version that made it or a later one, never on
+// an earlier one (operator ruling 2026-11-08). Versions with no order (a
+// branch name, a short sha, "dev") restore each other only when they match.
+func TestRestorableBy(t *testing.T) {
+	cases := []struct {
+		name, made, running string
+		ok                  bool
+	}{
+		{"same release", "v2.4.0", "v2.4.0", true},
+		{"surrounding space ignored", " v2.4.0\n", "v2.4.0", true},
+		{"older release on a later one", "v2.4.0", "v2.5.0", true},
+		{"later release on an earlier one", "v2.5.0", "v2.4.0", false},
+		{"patch order", "v2.4.1", "v2.4.0", false},
+		{"major outranks minor", "v2.9.0", "v3.0.0", true},
+		{"numbers, not text", "v2.10.0", "v2.9.0", false},
+		{"release on a build after it", "v2.4.0", "v2.4.0-12-gabc1234", true},
+		// git-describe is commits AFTER the tag, the reverse of semver precedence.
+		{"build after a release on that release", "v2.4.0-12-gabc1234", "v2.4.0", false},
+		{"earlier build on a later one", "v2.4.0-3-gdef5678", "v2.4.0-12-gabc1234", true},
+		{"later build on an earlier one", "v2.4.0-12-gabc1234", "v2.4.0-3-gdef5678", false},
+		{"build on the next release", "v2.4.0-12-gabc1234", "v2.5.0", true},
+		{"dirty build orders as its tag", "v2.4.0-dirty", "v2.4.0", true},
+		{"leading v optional", "2.4.0", "v2.4.0", true},
+		{"same branch build", "ship/schedule-estimator-page", "ship/schedule-estimator-page", true},
+		{"release on a branch build", "v2.4.0", "ship/schedule-estimator-page", false},
+		{"branch build on a release", "main", "v2.4.0", false},
+		{"short sha on a release", "abc1234", "v2.4.0", false},
+		{"dev on dev", "dev", "dev", true},
+		{"no version recorded", "", "v2.4.0", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := RestorableBy(tc.made, tc.running); got != tc.ok {
+				t.Errorf("RestorableBy(%q, %q) = %v, want %v", tc.made, tc.running, got, tc.ok)
+			}
+		})
+	}
+}
+
+// CheckAppVersion passes what RestorableBy allows and refuses the rest,
+// naming both versions in the sentence a person reads.
 func TestCheckAppVersion(t *testing.T) {
 	cases := []struct {
 		name, made, running string
@@ -15,13 +53,13 @@ func TestCheckAppVersion(t *testing.T) {
 		detail              string
 	}{
 		{name: "same version", made: "v2.4.0", running: "v2.4.0", ok: true},
-		{name: "surrounding space ignored", made: " v2.4.0\n", running: "v2.4.0", ok: true},
-		{name: "older backup", made: "v2.3.0", running: "v2.4.0",
-			detail: "This backup was made with version v2.3.0 and this app is version v2.4.0. A backup can be restored only with the version that made it, so nothing was changed."},
-		{name: "newer backup", made: "v2.4.0", running: "v2.3.0",
-			detail: "This backup was made with version v2.4.0 and this app is version v2.3.0. A backup can be restored only with the version that made it, so nothing was changed."},
+		{name: "older backup", made: "v2.4.0", running: "v2.5.0", ok: true},
+		{name: "newer backup", made: "v2.5.0", running: "v2.4.0",
+			detail: "This backup was made with version v2.5.0 and this app is version v2.4.0. A backup can be restored only with the version that made it or a later one, so nothing was changed."},
+		{name: "versions with no order", made: "main", running: "v2.4.0",
+			detail: "This backup was made with version main and this app is version v2.4.0. These two versions cannot be compared. A backup can be restored only with the version that made it or a later one, so nothing was changed."},
 		{name: "no version recorded", made: "", running: "v2.4.0",
-			detail: "This backup does not say which version made it and this app is version v2.4.0. A backup can be restored only with the version that made it, so nothing was changed."},
+			detail: "This backup does not say which version made it and this app is version v2.4.0. A backup can be restored only with the version that made it or a later one, so nothing was changed."},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

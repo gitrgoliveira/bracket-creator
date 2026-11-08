@@ -473,6 +473,14 @@ func validateNewCompetition(comp *state.Competition) error {
 	if comp.Format == state.CompFormatMixed && comp.PoolSize == 0 {
 		comp.PoolSize = defaultPoolSize
 	}
+	// PoolSizeMode must be "", "max" or "min" (state.ValidatePoolSizeMode).
+	// Checked before ValidatePoolWinners and ValidateExtraQualifiers below,
+	// which both read any value but "max" as minimum sizing. A new record
+	// inherits nothing, so unlike the change-scoped PUT guard this runs
+	// unconditionally.
+	if err := state.ValidatePoolSizeMode(comp.PoolSizeMode); err != nil {
+		return fmt.Errorf("poolSizeMode: %w", err)
+	}
 	// What remains for the guard is the value a caller STATED and that the
 	// draw could never build (a negative). Unlike the PUT twin
 	// (change-scoped, see its call site) a new record inherits nothing, so
@@ -1753,6 +1761,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				// change between here and there.
 				formatChanged := comp.Format != current.Format
 				kindChanged := comp.Kind != current.Kind
+				poolSizeModeChanged := comp.PoolSizeMode != current.PoolSizeMode
 
 				// Settings-only PUT (Players field absent in body).
 				// Team match format (FR-044) wire contract, applied BEFORE the
@@ -2176,6 +2185,18 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				if kindChanged {
 					if err := state.ValidateCompetitionKind(comp.Kind); err != nil {
 						validationErr = fmt.Errorf("kind: %w", err)
+						return nil, nil
+					}
+				}
+				// Same change-scoped rule for poolSizeMode, for the same
+				// lockout reason: the settings page echoes the stored value
+				// back on every save, so a hand-edited illegal value must not
+				// block unrelated saves. Only a save that CHANGES the mode is
+				// judged. current.PoolSizeMode was merged above, so the
+				// comparison was taken earlier (poolSizeModeChanged).
+				if poolSizeModeChanged {
+					if err := state.ValidatePoolSizeMode(comp.PoolSizeMode); err != nil {
+						validationErr = fmt.Errorf("poolSizeMode: %w", err)
 						return nil, nil
 					}
 				}

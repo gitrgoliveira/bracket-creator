@@ -124,7 +124,7 @@ bracket-creator mobile-app restore FILE [flags]
 
 In file mode, a whole-tournament restore needs `--password` when the folder has no `tournament.md` yet, or its `tournament.md` has no admin password, so you can sign in to the restored tournament. `--lock-password` waives that requirement: the server you then start with `--lock-password` takes its password from `TOURNAMENT_PASSWORD_HASH`, which the restore command itself never reads. A folder with no `tournament.md` accepts only a whole-tournament archive: a competition archive, or `--only`, is refused until a tournament exists.
 
-The command refuses a backup made by another version of the app, and changes nothing: a backup is restored only with the version that made it, safety copies included. Refer to [Backup and restore](../organisers/backup-and-restore.md#the-backup-routine).
+The command refuses a backup made by a later version of the app than the one running, or by one it cannot be compared with, and changes nothing: a backup is restored only with the version that made it or a later one, safety copies included. Refer to [Backup and restore](../organisers/backup-and-restore.md#the-backup-routine).
 
 Each competition ID may appear in only one of `--replace`, `--copy`, `--keep`, and `--remove`. `--undo` cannot be combined with `--only` or with any of those four flags, and it refuses an archive that is not a `before-restore` safety copy.
 

@@ -234,6 +234,10 @@ func TestDraftEstimate_RefusesMorePoolWinnersThanAPoolHolds(t *testing.T) {
 func TestDraftEstimate_RefusesWhatTheCreateRefuses(t *testing.T) {
 	r := setupDraftEstimateRouter(t)
 	assert.Equal(t, `kind: unknown kind "bogus" (expected "individual" or "team")`, draftErrorSentence(t, getDraftEstimate(t, r, "participants=8&format=knockout&kind=bogus", "main-pw")))
+	assert.Equal(t, `poolSizeMode: unknown poolSizeMode "maxx" (expected "max" or "min")`, draftErrorSentence(t, getDraftEstimate(t, r, "participants=8&format=mixed&poolSize=3&poolSizeMode=maxx", "main-pw")))
+	// Trimmed first, as the create trims, so a padded legal value passes.
+	w := getDraftEstimate(t, r, "participants=8&format=mixed&poolSize=3&poolSizeMode=%20max%20", "main-pw")
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 }
 
 func TestDraftEstimate_RequiresThePassword(t *testing.T) {

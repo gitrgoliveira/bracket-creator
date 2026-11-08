@@ -606,13 +606,15 @@ func (s *Store) PlanRestore(req RestoreRequest) (RestorePlan, error) {
 //  6. Write the journal (and prefixes-pending.json), then the renames.
 //  7. The cache ritual, then the journal and the token folder are removed.
 //  8. Once every lock is released, upgradeLegacyCeremonies, as NewStore runs
-//     it. A backup restores only on the version that made it
-//     (backup.CheckAppVersion, in the callers), yet a same-version archive can
-//     still carry opening_block and closing_block, which nothing reads: a dev
-//     build's version is its branch name (get_build_info.sh), so builds from
-//     before and after pauses can share one, and tournament.md can be edited by
-//     hand. Without the upgrade its ceremonies
-//     would be left out of the draw and the estimate until the next start. It
+//     it. A backup restores on the version that made it or a later one
+//     (backup.CheckAppVersion, in the callers), and the later version brings
+//     it up to date with the upgrades the store already runs on what it
+//     loads: the cache ritual forgets each restored competition's upgrade
+//     (legacyUpgraded), so it runs again on the next read, and this step is
+//     the tournament file's. An archive that carries opening_block and
+//     closing_block, which nothing reads (a dev build, whose version is its
+//     branch name, or a hand-edited tournament.md), would without it have its
+//     ceremonies left out of the draw and the estimate until the next start. It
 //     takes the public store locks, so it cannot run inside restoreSwap. The
 //     swap is done by then, so a failure is logged, as at startup, rather than
 //     reported as a failed restore; the next start runs it again.

@@ -248,7 +248,7 @@ func TestConfigVersion_FieldCoverage(t *testing.T) {
 		{"startTime", nil, map[string]any{"startTime": "11:15"}},
 		{"poolSize", nil, map[string]any{"poolSize": 5}},
 		{"poolWinners", nil, map[string]any{"poolWinners": 2}},
-		{"poolSizeMode", nil, map[string]any{"poolSizeMode": "exact"}},
+		{"poolSizeMode", nil, map[string]any{"poolSizeMode": "min"}},
 		{"extraQualifiers", func(c *state.Competition) { c.PoolSizeMode = "min" }, map[string]any{"extraQualifiers": state.ExtraQualifiersLargerPools}},
 		{"courts", nil, map[string]any{"courts": []string{"A", "B", "C", "D"}}},
 		{"roundRobin", nil, map[string]any{"roundRobin": true}},

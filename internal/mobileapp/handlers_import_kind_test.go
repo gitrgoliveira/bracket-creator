@@ -89,6 +89,61 @@ competitions:
 	}
 }
 
+// The import door refuses an unrecognised pool_size_mode as POST
+// /competitions does (state.ValidatePoolSizeMode), instead of running it as
+// minimum sizing; an omitted key is still defaulted to "max".
+func TestImport_RejectsAnUnrecognisedPoolSizeMode(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	seedImportTournamentDate(t, store)
+	defer os.RemoveAll(tempDir)
+
+	res := importOneComp(t, r, `
+competitions:
+  - id: "mode-unknown"
+    name: "Unknown Mode"
+    format: "mixed"
+    pool_size: 3
+    pool_size_mode: "maxx"
+    courts: ["A"]
+    participants: "players.csv"
+`)
+	assert.Equal(t, `poolSizeMode: unknown poolSizeMode "maxx" (expected "max" or "min")`, res.Error)
+
+	comp, err := store.LoadCompetition("mode-unknown")
+	require.NoError(t, err)
+	assert.Nil(t, comp, "a refused row must not reach disk")
+}
+
+func TestImport_AcceptsThePoolSizeModesTheServerRecognises(t *testing.T) {
+	for _, tc := range []struct{ name, id, line, want string }{
+		{"max", "mode-max", "    pool_size_mode: \"max\"\n", "max"},
+		{"min", "mode-min", "    pool_size_mode: \" min \"\n", "min"},
+		{"omitted", "mode-omitted", "", "max"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r, store, _, _, tempDir := setupTestRouter(t)
+			seedImportTournamentDate(t, store)
+			defer os.RemoveAll(tempDir)
+
+			res := importOneComp(t, r, `
+competitions:
+  - id: "`+tc.id+`"
+    name: "Mode `+tc.name+`"
+    format: "mixed"
+    pool_size: 3
+`+tc.line+`    courts: ["A"]
+    participants: "players.csv"
+`)
+			require.Empty(t, res.Error)
+
+			comp, err := store.LoadCompetition(tc.id)
+			require.NoError(t, err)
+			require.NotNil(t, comp)
+			assert.Equal(t, tc.want, comp.PoolSizeMode)
+		})
+	}
+}
+
 func TestImport_RejectsATeamSizeItsKindForbids(t *testing.T) {
 	for _, tc := range []struct {
 		name string

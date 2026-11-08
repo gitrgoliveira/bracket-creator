@@ -112,6 +112,46 @@ func cvSeed(t *testing.T, r *gin.Engine, store *state.Store, cid string, tweak f
 	return stored, v
 }
 
+// The team-size cap is judged where a write sets the size: a competition stored
+// past it before the cap existed still saves an unrelated setting, while a
+// create or a change of the size past it is refused.
+func TestTeamSizeCap_JudgedOnlyWhereTheSizeIsSet(t *testing.T) {
+	r, store, _, _, _ := setupTestRouter(t)
+	big := &state.Competition{
+		ID: "big", Name: "Big Teams", Date: "10-06-2026", StartTime: "09:00",
+		PoolSize: 3, PoolWinners: 1, PoolSizeMode: "max", Courts: []string{"A", "B"},
+		Format: state.CompFormatMixed, Kind: "team", TeamSize: 40,
+		PoolMatchDurationSeconds: 180, KnockoutMatchDurationSeconds: 180,
+		Status: state.CompStatusSetup,
+	}
+	require.NoError(t, store.SaveCompetition(big))
+	stored, err := store.LoadCompetition("big")
+	require.NoError(t, err)
+
+	w := cvPut(t, r, "big", cvSettingsBody(t, stored, "", map[string]any{"name": "Bigger Teams"}))
+	require.Equalf(t, http.StatusOK, w.Code, "rename: %s", w.Body.String())
+	stored, err = store.LoadCompetition("big")
+	require.NoError(t, err)
+	assert.Equal(t, "Bigger Teams", stored.Name)
+	assert.Equal(t, 40, stored.TeamSize)
+
+	w = cvPut(t, r, "big", cvSettingsBody(t, stored, "", map[string]any{"teamSize": 31}))
+	require.Equalf(t, http.StatusBadRequest, w.Code, "resize: %s", w.Body.String())
+	assert.Contains(t, w.Body.String(), "teamSize must be at most 30")
+
+	post := *big
+	post.ID, post.Name, post.TeamSize, post.Status = "new-big", "New Big Teams", 31, ""
+	body, err := json.Marshal(post)
+	require.NoError(t, err)
+	wPost := httptest.NewRecorder()
+	reqPost, err := http.NewRequest(http.MethodPost, "/api/competitions", bytes.NewReader(body))
+	require.NoError(t, err)
+	reqPost.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(wPost, reqPost)
+	require.Equalf(t, http.StatusBadRequest, wPost.Code, "POST: %s", wPost.Body.String())
+	assert.Contains(t, wPost.Body.String(), "teamSize must be at most 30")
+}
+
 func TestConfigVersion_EveryReadAndAnswerAgrees(t *testing.T) {
 	r, store, _, _, _ := setupTestRouter(t)
 	cid := "version-agree"

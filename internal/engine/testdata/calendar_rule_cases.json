@@ -79,6 +79,31 @@
       ]
     },
     {
+      "name": "a dated competition in an undated tournament is Day 1",
+      "days": [],
+      "date": "01-07-2026",
+      "pauses": [
+        {"name": "Day 0", "start": "12:00", "length": "1h", "day": 0},
+        {"name": "Day 1", "start": "10:00", "length": "30m", "day": 1}
+      ],
+      "expected": [
+        {"name": "Day 1", "start": "10:00", "end": "10:30"},
+        {"name": "Day 0", "start": "12:00", "end": "13:00"}
+      ]
+    },
+    {
+      "name": "a date with stray spaces is still its day",
+      "days": ["01-07-2026", "02-07-2026"],
+      "date": " 02-07-2026 ",
+      "pauses": [
+        {"name": "Day 1 Only", "start": "10:00", "length": "30m", "day": 1},
+        {"name": "Day 2 Only", "start": "11:00", "length": "30m", "day": 2}
+      ],
+      "expected": [
+        {"name": "Day 2 Only", "start": "11:00", "end": "11:30"}
+      ]
+    },
+    {
       "name": "two pauses come back sorted by start",
       "days": ["01-07-2026"],
       "date": "01-07-2026",

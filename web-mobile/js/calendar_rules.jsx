@@ -8,6 +8,7 @@
 //     - ParseClockTime, ParseDurationMinutes (scheduler_slots.go)
 //   internal/state:
 //     - ParseClockMinutes, FormatClockHHMM (court_floor.go)
+//     - pauseDayIndex (DayIndex, models.go)
 
 import { blockMinutes, parseClock, pauseStopsMatches } from './pause_list.jsx';
 
@@ -43,6 +44,18 @@ export function pastMidnight(endMins) {
 }
 
 /**
+ * The day a pause's day is compared with for a competition dated date, as
+ * Go's state.DayIndex: the 1-based position of the trimmed date in days, 1 for
+ * an empty date or an undated tournament (no days), 0 for a date not in days.
+ */
+export function pauseDayIndex(days, date) {
+  const dayList = Array.isArray(days) ? days : [];
+  const dStr = typeof date === 'string' ? date.trim() : '';
+  if (dStr === '' || dayList.length === 0) return 1;
+  return dayList.indexOf(dStr) + 1;
+}
+
+/**
  * Derives the pauses the schedule works around on date (those that stop
  * matches), sorted ascending by start time.
  * Returns an array of {start, end} windows in minutes since midnight.
@@ -50,17 +63,7 @@ export function pastMidnight(endMins) {
 export function dayBreaks(pauses, date, days) {
   const pauseList = Array.isArray(pauses) ? pauses : [];
   const dayList = Array.isArray(days) ? days : [];
-  const dStr = typeof date === 'string' ? date : '';
-
-  let dayIdx = 0;
-  if (dStr === '') {
-    dayIdx = 1;
-  } else {
-    const idx = dayList.indexOf(dStr);
-    if (idx !== -1) {
-      dayIdx = idx + 1;
-    }
-  }
+  const dayIdx = pauseDayIndex(dayList, date);
 
   const dayCount = Math.max(dayList.length, 1);
   const breaks = [];

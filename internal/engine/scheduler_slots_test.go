@@ -842,6 +842,25 @@ func TestPausesOnDay_OnePause(t *testing.T) {
 	})
 }
 
+// A dated competition in an undated tournament runs as Day 1, as calendarDays
+// reports it, so a Day-1 pause applies to it and a Day-2 pause does not.
+func TestPauseWindows_UndatedTournamentIsDayOne(t *testing.T) {
+	tourn := &state.Tournament{
+		DurationDays: 2,
+		Pauses: []state.Pause{
+			{Name: "Lunch", Start: "12:00", Length: "1h", Day: 1},
+			{Name: "Ceremony", Start: "17:00", Length: "30m", Day: 2},
+		},
+	}
+	breaks := dayBreaks(tourn, "01-05-2026")
+	require.Len(t, breaks, 1)
+	assert.Equal(t, parseClockHHMM("12:00"), breaks[0].start)
+	assert.Equal(t, 1, pauseDayIndex(nil, "01-05-2026"))
+	drafts := draftBreaks(tourn, "01-05-2026")
+	require.Len(t, drafts, 1)
+	assert.Equal(t, "Lunch", drafts[0].Name)
+}
+
 // A competition date padded with spaces is the day PlaceCompetition finds for
 // it (it trims the date), so its pauses are that day's too.
 func TestPauseWindows_TrimsTheDate(t *testing.T) {

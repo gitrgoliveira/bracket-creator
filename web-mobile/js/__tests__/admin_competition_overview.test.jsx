@@ -578,6 +578,20 @@ describe('Overview estimate helpers (p2-overview)', () => {
     expect(formatPausesRow(t, null)).toBe('Everyday break 10:00 to 10:15, Day 1 break 11:00 to 11:30');
   });
 
+  it('formatPausesRow runs a dated competition in an undated tournament as day 1', () => {
+    const t = {
+      durationDays: 2,
+      pauses: [
+        { name: 'Everyday break', start: '10:00', length: '15m', day: 0 },
+        { name: 'Day 1 break', start: '11:00', length: '30m', day: 1 },
+        { name: 'Day 2 break', start: '12:00', length: '45m', day: 2 },
+      ],
+    };
+    expect(formatPausesRow(t, { date: '05-06-2026' })).toBe('Everyday break 10:00 to 10:15, Day 1 break 11:00 to 11:30');
+    // A date with stray spaces is still its tournament day.
+    expect(formatPausesRow({ ...t, date: '05-06-2026' }, { date: ' 06-06-2026 ' })).toBe('Everyday break 10:00 to 10:15, Day 2 break 12:00 to 12:45');
+  });
+
   it('formatPausesRow distinguishes pauses with no length from pauses with no start time', () => {
     const t = {
       date: '05-06-2026',

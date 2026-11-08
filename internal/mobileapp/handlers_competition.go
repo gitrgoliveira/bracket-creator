@@ -1200,8 +1200,10 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		if loaded, lerr := store.LoadCompetition(comp.ID); lerr == nil && loaded != nil {
 			comp.ConfigVersion = state.ConfigVersion(loaded)
 		} else {
-			// Reload failed; clear version so the next save is unchecked and gets a fresh version on next load.
-			comp.ConfigVersion = ""
+			// Reload failed. The save normalised comp in place before writing
+			// it (saveCompetitionChangedLocked), so comp is the record written
+			// and its version is the stored one: the next save stays checked.
+			comp.ConfigVersion = state.ConfigVersion(&comp)
 		}
 		if comp.Players != nil {
 			comp.RosterVersion = state.RosterVersion(comp.Players)
@@ -1541,8 +1543,9 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				return
 			}
 
-			// Team competitions require at least 2 members per team.
-			if err := state.ValidateCompetitionTeamSize(comp.Kind, comp.TeamSize); err != nil {
+			// Team competitions require at least 2 members per team. The
+			// MaxTeamSize cap is judged in the transform below, on a change only.
+			if err := state.ValidateTeamSizeShape(comp.Kind, comp.TeamSize); err != nil {
 				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 				return
 			}
@@ -1633,13 +1636,13 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		// (DR1), saved in the same transaction as the settings. What the re-time
 		// reads from the store is read here, before the lock, see readPendingRetime.
 		var pending *pendingRetime
+		// saved is the record the transform hands the save, which normalises it
+		// in place before writing it, so once the transaction commits it is
+		// the record written. Its version answers when the reload below fails.
+		var saved *state.Competition
 		if comp.Players == nil && req.RestoreMatchTimes == nil {
 			var rerr error
 			if pending, rerr = readPendingRetime(store, eng, id, &comp); rerr != nil {
-				if refusal := retimeRefusal(rerr); refusal != nil {
-					writeTxResponse(c, refusal)
-					return
-				}
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to read the schedule for the new time"})
 				return
 			}
@@ -1719,6 +1722,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 					// post-transform block AFTER SaveParticipants
 					// succeeds; see the participants/seeds save block
 					// below for the deferred flip.
+					saved = current
 					return current, nil
 				}
 
@@ -2064,6 +2068,16 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 						return nil, nil
 					}
 				}
+				// The team-size cap, scoped to a change the same way: a team
+				// size stored past MaxTeamSize before the cap existed (create and
+				// import had none) stays editable for unrelated fields, since the
+				// settings page echoes it back on every save.
+				if kindChanged || comp.TeamSize != current.TeamSize {
+					if err := state.ValidateTeamSizeCap(comp.TeamSize); err != nil {
+						validationErr = err
+						return nil, nil
+					}
+				}
 				// Settings-only merge. Status, Players, and
 				// HasParticipantIDs are deliberately not copied from
 				// the body. Status is managed via dedicated endpoints
@@ -2280,6 +2294,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				if times, terr = applyDrawnTimes(tx, &before, current, req.RestoreMatchTimes, pending); terr != nil || times.refusal != nil {
 					return nil, terr
 				}
+				saved = current
 				return current, nil
 			})
 			return updateErr
@@ -2513,8 +2528,9 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			logRequestError(c, fmt.Errorf("re-read competition %q after its settings save: %w", id, reloadErr))
 		}
 		if updated == nil {
-			// Reload failed; clear version so the next save is unchecked and gets a fresh version on next load.
-			comp.ConfigVersion = ""
+			// Reload failed: answer the version of the record the save wrote,
+			// never "", which would send the page's next save unchecked.
+			comp.ConfigVersion = state.ConfigVersion(saved)
 			c.JSON(http.StatusOK, comp)
 			return
 		}

@@ -30,18 +30,6 @@ func (s *Store) upgradeLegacyCeremonies() error {
 	}
 
 	days := t.Days()
-	dayIndex := func(compDate string) (int, bool) {
-		if compDate == "" {
-			return 1, true
-		}
-		for i, d := range days {
-			if d == compDate {
-				return i + 1, true
-			}
-		}
-		return 0, false
-	}
-
 	dayEarliest := make(map[int]int)
 	for _, id := range compIDs {
 		comp, err := s.LoadCompetition(id)
@@ -51,8 +39,9 @@ func (s *Store) upgradeLegacyCeremonies() error {
 		if comp == nil {
 			continue
 		}
-		day, ok := dayIndex(comp.Date)
-		if !ok {
+		// A competition dated outside the tournament's days (0) has no opening.
+		day := DayIndex(days, comp.Date)
+		if day == 0 {
 			continue
 		}
 		startTime := comp.StartTime

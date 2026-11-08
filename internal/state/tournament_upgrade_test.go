@@ -522,3 +522,45 @@ start_time: "09:30"
 	assert.Empty(t, tourn.OpeningBlockLegacy)
 	assert.Empty(t, tourn.ClosingBlockLegacy)
 }
+
+// An undated tournament runs every competition as Day 1 (state.DayIndex), so a
+// dated competition still gives the opening ceremony its start.
+func TestTournamentUpgrade_UndatedTournamentDatedCompetitionKeepsOpeningStart(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "tournament.md"), []byte("---\nname: Undated Open\nopening_block: 30m\n---\n"), 0o600))
+	compDir := filepath.Join(dir, "competitions", "c1")
+	require.NoError(t, os.MkdirAll(compDir, 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(compDir, "config.md"), []byte("---\nid: c1\nname: c1\ndate: 01-08-2026\nstart_time: \"09:30\"\n---\n"), 0o600))
+
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+	tourn, err := store.LoadTournament()
+	require.NoError(t, err)
+	require.NotNil(t, tourn)
+	assert.Equal(t, []Pause{{Name: "Opening ceremony", Start: "09:30", Length: "30m", Day: 0}}, tourn.Pauses)
+}
+
+// A competition date with stray spaces is still its tournament day.
+func TestTournamentUpgrade_UntrimmedCompetitionDateIsItsDay(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "tournament.md"), []byte("---\nname: Two Day Open\ndate: 01-08-2026\nduration_days: 2\nopening_block: 30m\n---\n"), 0o600))
+	compDir := filepath.Join(dir, "competitions", "c2")
+	require.NoError(t, os.MkdirAll(compDir, 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(compDir, "config.md"), []byte("---\nid: c2\nname: c2\ndate: \" 02-08-2026 \"\nstart_time: \"10:15\"\n---\n"), 0o600))
+
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+	tourn, err := store.LoadTournament()
+	require.NoError(t, err)
+	require.NotNil(t, tourn)
+	assert.Equal(t, []Pause{{Name: "Opening ceremony", Start: "10:15", Length: "30m", Day: 2}}, tourn.Pauses)
+}
+
+func TestDayIndex(t *testing.T) {
+	days := []string{"01-08-2026", "02-08-2026"}
+	assert.Equal(t, 1, DayIndex(days, ""))
+	assert.Equal(t, 1, DayIndex(days, "  "))
+	assert.Equal(t, 1, DayIndex(nil, "05-08-2026"))
+	assert.Equal(t, 2, DayIndex(days, " 02-08-2026 "))
+	assert.Equal(t, 0, DayIndex(days, "05-08-2026"))
+}

@@ -5,7 +5,7 @@
 // shell via window.*.
 
 import { formatEstimateMinutes, finishClock, timeToMinutes } from './admin_schedule_utils.jsx';
-import { pastMidnight } from './calendar_rules.jsx';
+import { pastMidnight, pauseDayIndex } from './calendar_rules.jsx';
 import { blockMinutes, parseClock, formatClock, computePauseRowStatus } from './pause_list.jsx';
 // seededRanks: the one owner of "which seed ranks has this roster actually
 // got" (integer > 0 normalization), shared with the seeding blocker and the
@@ -289,9 +289,10 @@ export function formatPausesRow(tournament, c) {
   const pauses = Array.isArray(tournament?.pauses) ? tournament.pauses : [];
   const durationDays = Number(tournament?.durationDays) || 1;
   const days = deriveTournamentDays(tournament?.date, durationDays);
-  // The server's dayBreaks rule: no date is day 1, and a date that is not one
-  // of the tournament's days (0 here) gets only the every-day pauses.
-  const compDay = c?.date ? days.indexOf(c.date) + 1 : 1;
+  // The server's dayBreaks rule: no date, or an undated tournament, is day 1,
+  // and a date that is not one of the tournament's days (0 here) gets only the
+  // every-day pauses.
+  const compDay = pauseDayIndex(days, c?.date);
 
   const relevant = pauses.filter(p => (p && (p.day === 0 || p.day === compDay)));
 

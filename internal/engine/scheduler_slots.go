@@ -3,7 +3,6 @@ package engine
 import (
 	"math"
 	"sort"
-	"strings"
 	"time"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
@@ -163,7 +162,8 @@ func dayBreaks(tournament *state.Tournament, date string) []breakWindow {
 // competition's day, sorted by start:
 // every pause with Day 0, plus those whose Day equals the day index of date
 // (pauseDayIndex: the 1-based position of the trimmed date in tournament.Days();
-// an empty date is Day 1; a date not in Days() gets only the Day 0 pauses).
+// an empty date, or any date in an undated tournament, is Day 1; a date not in
+// Days() gets only the Day 0 pauses).
 // nil tournament gives nil; pausesOnDay says which rows are dropped.
 func pauseWindows(tournament *state.Tournament, date string, keep func(state.Pause) bool) []breakWindow {
 	if tournament == nil {
@@ -174,18 +174,11 @@ func pauseWindows(tournament *state.Tournament, date string, keep func(state.Pau
 
 // pauseDayIndex is the day a pause's Day is compared with for date: its 1-based
 // position in days (tournament.Days()), trimmed as PlaceCompetition trims it, 1
-// for an empty date, and 0 for a date that is not one of the days.
+// for an empty date or an undated tournament (no days, which calendarDays also
+// runs as Day 1), and 0 for a date that is not one of the days. The rule is
+// state.DayIndex, which the ceremony upgrade shares.
 func pauseDayIndex(days []string, date string) int {
-	date = strings.TrimSpace(date)
-	if date == "" {
-		return 1
-	}
-	for i, d := range days {
-		if d == date {
-			return i + 1
-		}
-	}
-	return 0
+	return state.DayIndex(days, date)
 }
 
 // pauseDayCount is the tournament's day count as a pause's Day is checked

@@ -1344,3 +1344,38 @@ func TestRestore_ConfigLessCompetitionFolderIsRefused(t *testing.T) {
 		})
 	}
 }
+
+// A v2.2.0 or v2.3.0 archive stores the ceremonies as opening_block and
+// closing_block, which only the ceremony upgrade reads. A live restore runs it
+// once the swap is done, so the pauses are there without a restart.
+func TestRestore_LegacyCeremoniesBecomePausesWithoutARestart(t *testing.T) {
+	src, _ := newRestoreTestStore(t)
+	restoreTestTournament(t, src, "pw")
+	require.NoError(t, src.SaveCompetition(&Competition{
+		ID: "men", Name: "Men", Date: "03-11-2026", StartTime: "09:30", Status: CompStatusSetup,
+	}))
+	snap, err := src.Snapshot(ScopeTournament, "")
+	require.NoError(t, err)
+	snap.Files["tournament.md"] = []byte("---\nname: Restore Taikai\ndate: 03-11-2026\nvenue: Budokan\nduration_days: 1\ncourts: [A, B]\nopening_block: 30m\nclosing_block: 45m\n---\n")
+	a := archiveFiles(t, backup.ScopeTournament, backup.KindManual, snap, nil)
+
+	dst, dir := newRestoreTestStore(t)
+	restoreTestTournament(t, dst, "pw")
+	_, err = dst.Restore(RestoreRequest{Archive: a})
+	require.NoError(t, err)
+
+	tourn, err := dst.LoadTournament()
+	require.NoError(t, err)
+	require.NotNil(t, tourn)
+	assert.Equal(t, []Pause{
+		{Name: "Opening ceremony", Start: "09:30", Length: "30m", Day: 0},
+		{Name: "Closing ceremony", Length: "45m", Day: 0},
+	}, tourn.Pauses)
+	assert.Empty(t, tourn.OpeningBlockLegacy)
+	assert.Empty(t, tourn.ClosingBlockLegacy)
+	raw, err := os.ReadFile(filepath.Join(dir, "tournament.md"))
+	require.NoError(t, err)
+	assert.NotContains(t, string(raw), "opening_block")
+	assert.NotContains(t, string(raw), "closing_block")
+	assert.Contains(t, string(raw), "password: pw", "the upgrade keeps the merged password")
+}

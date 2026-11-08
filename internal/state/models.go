@@ -358,6 +358,24 @@ func (t *Tournament) Days() []string {
 	return days
 }
 
+// DayIndex is the day a pause's Day is compared with for a competition dated
+// date: its 1-based position in days (Tournament.Days()) once trimmed, 1 for
+// an empty date or an undated tournament (no days, which the calendar runs as
+// Day 1), and 0 for a date that is not one of the days. The engine's
+// pauseDayIndex and the ceremony upgrade both ask it.
+func DayIndex(days []string, date string) int {
+	date = strings.TrimSpace(date)
+	if date == "" || len(days) == 0 {
+		return 1
+	}
+	for i, d := range days {
+		if d == date {
+			return i + 1
+		}
+	}
+	return 0
+}
+
 // FightingSpiritAward is an optional, per-competition individual honour
 // (敢闘賞 / kantōshō) independent of the placement podium. Recipient is a
 // plain name string for parity with the rest of the system (no UUID ref);
@@ -1319,13 +1337,33 @@ const MaxTeamSize = 30
 //   - teamSize == 1 is always invalid (would flag as team via TeamSize > 0)
 //   - non-team kinds require teamSize == 0
 //   - kind == "team" requires teamSize >= 2
-//   - teamSize above MaxTeamSize is invalid
+//   - teamSize above MaxTeamSize is invalid (ValidateTeamSizeCap)
+//
+// It is ValidateTeamSizeCap then ValidateTeamSizeShape, for a new record (the
+// create, its draft estimate and the import). The settings PUT runs the two
+// apart: the shape on every save, the cap only on a save that changes the team
+// size or kind, so a record stored past the cap before it existed stays
+// editable for its other settings.
 func ValidateCompetitionTeamSize(kind string, teamSize int) error {
-	if teamSize < 0 {
-		return fmt.Errorf("teamSize must be non-negative")
+	if err := ValidateTeamSizeCap(teamSize); err != nil {
+		return err
 	}
+	return ValidateTeamSizeShape(kind, teamSize)
+}
+
+// ValidateTeamSizeCap rejects a teamSize above MaxTeamSize.
+func ValidateTeamSizeCap(teamSize int) error {
 	if teamSize > MaxTeamSize {
 		return fmt.Errorf("teamSize must be at most %d (got %d)", MaxTeamSize, teamSize)
+	}
+	return nil
+}
+
+// ValidateTeamSizeShape is ValidateCompetitionTeamSize without the cap: the
+// sign, the size 1, and the kind/teamSize pairing.
+func ValidateTeamSizeShape(kind string, teamSize int) error {
+	if teamSize < 0 {
+		return fmt.Errorf("teamSize must be non-negative")
 	}
 	if teamSize == 1 {
 		return fmt.Errorf("teamSize 1 is invalid: use 0 for individual competitions or >= 2 for teams")

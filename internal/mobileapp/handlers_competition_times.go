@@ -27,11 +27,15 @@ type retimeKey struct{ oldDate, oldStart, newDate, newStart string }
 type pendingRetime struct {
 	inputs engine.RetimeInputs
 	key    retimeKey
+	// refusal is a refusal the read met (a shared court held past midnight).
+	// It is answered by applyDrawnTimes, once the settings the transaction
+	// validates first have passed, so it never hides their 400.
+	refusal *txResponse
 }
 
 // readPendingRetime reads that for a save that moves a drawn competition's date
-// or start, and returns nil for any other save. A refusal in its error is
-// answered through retimeRefusal.
+// or start, and returns nil for any other save. A refusal the read meets is
+// carried in the result, never in its error, which is a failure to read.
 func readPendingRetime(store *state.Store, eng *engine.Engine, id string, comp *state.Competition) (*pendingRetime, error) {
 	pre, err := store.LoadCompetition(id)
 	if err != nil || pre == nil || pre.Status != state.CompStatusDrawReady ||
@@ -45,11 +49,15 @@ func readPendingRetime(store *state.Store, eng *engine.Engine, id string, comp *
 	}
 	moved := *pre
 	moved.Date, moved.StartTime = comp.Date, comp.StartTime
+	key := retimeKey{pre.Date, pre.StartTime, comp.Date, comp.StartTime}
 	in, err := eng.ReadRetimeInputs(pre, &moved)
 	if err != nil {
+		if refusal := retimeRefusal(err); refusal != nil {
+			return &pendingRetime{key: key, refusal: refusal}, nil
+		}
 		return nil, err
 	}
-	return &pendingRetime{inputs: in, key: retimeKey{pre.Date, pre.StartTime, comp.Date, comp.StartTime}}, nil
+	return &pendingRetime{inputs: in, key: key}, nil
 }
 
 // drawnTimes is what applyDrawnTimes did.
@@ -88,6 +96,9 @@ func applyDrawnTimes(tx state.StoreTx, before, current *state.Competition, resto
 	}
 	if pending == nil || pending.key != (retimeKey{before.Date, before.StartTime, current.Date, current.StartTime}) {
 		return drawnTimes{refusal: &txResponse{status: http.StatusConflict, body: gin.H{"code": "retime_retry", "error": "This competition changed while you were moving it. Nothing was moved; try again."}}}, nil
+	}
+	if pending.refusal != nil {
+		return drawnTimes{refusal: pending.refusal}, nil
 	}
 	out, err := engine.RetimeDrawTx(tx, before, current, pending.inputs)
 	if err != nil {

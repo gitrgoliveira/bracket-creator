@@ -429,6 +429,39 @@ func TestPutRetime_AStaleVersionIsConfigChangedBeforeACourtPastMidnight(t *testi
 	assert.Equal(t, "config_changed", ans.Code)
 }
 
+// A shiaijo held past midnight is the re-time's refusal, so it is answered only
+// once the save's own settings have passed: a move that also changes a setting
+// the transaction refuses is told about that setting, and a move with nothing
+// else wrong still gets the same 409 as before.
+func TestPutRetime_ACourtPastMidnightDoesNotHideASettingsRefusal(t *testing.T) {
+	r, store, _, version, cid := retimeFixture(t, state.CompFormatMixed)
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: "late", Name: "Late Open", Format: state.CompFormatLeague,
+		Date: "10-06-2026", StartTime: "21:00", Courts: []string{"A"},
+		PoolMatchDurationSeconds: 180, Status: state.CompStatusDrawReady,
+	}))
+	require.NoError(t, store.SavePoolMatches("late", []state.MatchResult{
+		{ID: "Pool A-0", Court: "A", ScheduledAt: "23:58", Status: state.MatchStatusScheduled},
+	}))
+	before := retimeTimes(t, store, cid)
+
+	w, ans := retimePut(t, r, store, cid, version, map[string]any{"startTime": "22:00", "naginata": true})
+	require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+	assert.Contains(t, ans.Error, "naginata can only be changed before the competition starts")
+
+	w, ans = retimePut(t, r, store, cid, version, map[string]any{"startTime": "22:00"})
+	require.Equal(t, http.StatusConflict, w.Code, w.Body.String())
+	assert.Equal(t, "court_past_midnight", ans.Code)
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+	assert.Equal(t, "late", body["competitionId"])
+	assert.NotEmpty(t, body["court"])
+	assert.Equal(t, before, retimeTimes(t, store, cid))
+	stored, err := store.LoadCompetition(cid)
+	require.NoError(t, err)
+	assert.Equal(t, "09:00", stored.StartTime, "the start is not saved when the matches cannot move")
+}
+
 // putOmitting sends the stored settings with the given keys left out of the body.
 func putOmitting(t *testing.T, r *gin.Engine, store *state.Store, cid string, keys ...string) *httptest.ResponseRecorder {
 	t.Helper()
@@ -442,6 +475,26 @@ func putOmitting(t *testing.T, r *gin.Engine, store *state.Store, cid string, ke
 	b, err := json.Marshal(m)
 	require.NoError(t, err)
 	return cvPut(t, r, cid, b)
+}
+
+// The version a settings save answers is the stored record's, even where the
+// body and the record differ: a drawn league keeps the pool size it drew with,
+// and an omitted expectedParticipants keeps the stored count. That is why the
+// PUT names the record the transform saved, never the request body, when its
+// re-read fails.
+func TestPutSettings_TheAnsweredVersionIsTheStoredRecords(t *testing.T) {
+	r, store, _, _, cid := retimeFixture(t, state.CompFormatLeague)
+	stored, err := store.LoadCompetition(cid)
+	require.NoError(t, err)
+	stored.ExpectedParticipants = 24
+	require.NoError(t, store.SaveCompetition(stored))
+
+	w := putOmitting(t, r, store, cid, "expectedParticipants")
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	fresh, err := store.LoadCompetition(cid)
+	require.NoError(t, err)
+	assert.Equal(t, 24, fresh.ExpectedParticipants)
+	assert.Equal(t, state.ConfigVersion(fresh), cvAnswerVersion(t, w))
 }
 
 // A settings save that leaves twoThirdPlaces out keeps the stored value, as an

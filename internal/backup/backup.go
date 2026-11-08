@@ -78,9 +78,38 @@ func (e *Error) Error() string {
 
 // releaseVersion matches the versions that can be put in order: a release
 // tag (v2.4.0), or the git-describe form a build from main carries
-// (v2.4.0-12-gabc1234: 12 commits after v2.4.0), either with -dirty after it.
-// A branch name, a short sha or "dev" (get_build_info.sh) does not match.
-var releaseVersion = regexp.MustCompile(`^v?(\d+)\.(\d+)\.(\d+)(?:-(\d+)-g[0-9a-f]+)?(?:-dirty)?$`)
+// (v2.4.0-12-gabc1234: 12 commits after v2.4.0). A branch name, a short sha
+// or "dev" (get_build_info.sh) does not match, and nor does a -dirty build
+// (git describe --dirty: an image built with uncommitted changes), whose code
+// no version string describes.
+var releaseVersion = regexp.MustCompile(`^v?(\d+)\.(\d+)\.(\d+)(?:-(\d+)-g[0-9a-f]+)?$`)
+
+// OldestRestorableVersion is the earliest version whose backups this app can
+// bring up to date. The store's upgrades on load cover the last two releases
+// (a storage change keeps its migration that long), so when one is retired,
+// raise this to the oldest release whose shapes the remaining upgrades still
+// read. A backup an ordered version before it made is refused; v2.3.0 is
+// older than any backup, which v2.4.0 introduced, and lets a build from main
+// after v2.3.0 (v2.3.0-12-gabc1234) restore.
+const OldestRestorableVersion = "v2.3.0"
+
+// lessThan reports whether release order a comes before b.
+func lessThan(a, b [4]int) bool {
+	for i := range a {
+		if a[i] != b[i] {
+			return a[i] < b[i]
+		}
+	}
+	return false
+}
+
+// beforeOldest reports whether made is an ordered version before
+// OldestRestorableVersion.
+func beforeOldest(made string) bool {
+	m, ok := versionOrder(made)
+	oldest, _ := versionOrder(OldestRestorableVersion)
+	return ok && lessThan(m, oldest)
+}
 
 // versionOrder returns v's place in release order: major, minor, patch, then
 // the commits since that release (0 for the release itself). ok is false for
@@ -109,9 +138,11 @@ func versionOrder(v string) (order [4]int, ok bool) {
 // (operator ruling 2026-11-08). A later version brings an older backup up to
 // date with the upgrades the store already runs on what it loads; an earlier
 // version never reads what a later one wrote. Two versions with no order (a
-// branch name, a short sha, "dev") restore each other only when they are the
-// same. The one comparison, used by CheckAppVersion and by the scheduled
-// job's choice of the newest daily copy, so the two never disagree.
+// branch name, a short sha, "dev", a -dirty build) restore each other only
+// when they are the same, and a version before OldestRestorableVersion is
+// refused, since no upgrade left reads what it wrote. The one comparison,
+// used by CheckAppVersion and by the scheduled job's choice of the newest
+// daily copy, so the two never disagree.
 func RestorableBy(made, running string) bool {
 	made, running = strings.TrimSpace(made), strings.TrimSpace(running)
 	if made == running {
@@ -119,20 +150,16 @@ func RestorableBy(made, running string) bool {
 	}
 	m, okMade := versionOrder(made)
 	r, okRunning := versionOrder(running)
-	if !okMade || !okRunning {
+	if !okMade || !okRunning || beforeOldest(made) {
 		return false
 	}
-	for i := range m {
-		if m[i] != r[i] {
-			return m[i] < r[i]
-		}
-	}
-	return true
+	return !lessThan(r, m)
 }
 
 // CheckAppVersion refuses to restore an archive that the running version of
-// the app cannot restore (RestorableBy): one a later version made, or one
-// whose version cannot be put in order against it. running is the version of
+// the app cannot restore (RestorableBy): one a later version made, one made
+// before OldestRestorableVersion, or one whose version cannot be put in order
+// against it. running is the version of
 // the app doing the restore (version.GetVersion). It is a restore check and
 // NOT part of Read, because the scheduled backup job reads every kept copy,
 // later versions' included. Detail is a whole sentence a person reads; the
@@ -146,6 +173,11 @@ func CheckAppVersion(m Manifest, running string) *Error {
 	which := "This backup does not say which version made it"
 	if made != "" {
 		which = "This backup was made with version " + made
+	}
+	if beforeOldest(made) {
+		return &Error{Code: CodeVersionMismatch, Path: ManifestName, Detail: fmt.Sprintf(
+			"%s and this app is version %s. This app can bring a backup up to date only from version %s on, so nothing was changed.",
+			which, running, OldestRestorableVersion)}
 	}
 	why := ""
 	_, okMade := versionOrder(made)

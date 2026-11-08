@@ -5897,6 +5897,32 @@ func TestUpdateCompetition_PoolSizeModeGuard(t *testing.T) {
 		assert.Equal(t, "max", stored.PoolSizeMode, "the rejected write must not land")
 	})
 
+	t.Run("REJECT an illegal mode as 400 ahead of the draw-ready 409", func(t *testing.T) {
+		r, store, _, _, tempDir := setupTestRouter(t)
+		defer os.RemoveAll(tempDir)
+
+		const cid = "mode-guard-draw-ready"
+		require.NoError(t, store.SaveCompetition(&state.Competition{
+			ID: cid, Name: "Mode Guard Draw Ready", Format: state.CompFormatMixed,
+			PoolSize: 3, PoolSizeMode: "max", Status: state.CompStatusDrawReady,
+		}))
+
+		w := put(r, cid, map[string]any{
+			"id": cid, "name": "Mode Guard Draw Ready", "format": "mixed",
+			"poolSize": 3, "poolSizeMode": "maxx",
+		})
+		require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+		assert.Contains(t, w.Body.String(), `poolSizeMode: unknown poolSizeMode \"maxx\"`)
+
+		// A valid change to the mode is the draw-ready refusal, so the 400
+		// above is the order of the checks and not a missing guard.
+		w = put(r, cid, map[string]any{
+			"id": cid, "name": "Mode Guard Draw Ready", "format": "mixed",
+			"poolSize": 3, "poolSizeMode": "min",
+		})
+		require.Equal(t, http.StatusConflict, w.Code, w.Body.String())
+	})
+
 	t.Run("ALLOW a save that echoes an ALREADY-illegal stored mode unchanged (lockout regression)", func(t *testing.T) {
 		r, store, _, _, tempDir := setupTestRouter(t)
 		defer os.RemoveAll(tempDir)

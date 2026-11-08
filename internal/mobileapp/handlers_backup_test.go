@@ -267,6 +267,35 @@ func TestRestore_RefusalsLeaveTheFolderUnchanged(t *testing.T) {
 	assert.True(t, strings.HasPrefix(body.Error, "This backup was made with version "+laterVersion+" and this app is version "+running+"."), body.Error)
 }
 
+// A backup an earlier version made restores on a later one, over HTTP as in
+// the store: the plan and the restore both go ahead. The running version is
+// set, since the test binary's own (a branch name) has no release order.
+func TestRestore_AnEarlierVersionsBackupRestores(t *testing.T) {
+	saved := runningAppVersion
+	runningAppVersion = func() string { return "v2.5.0" }
+	t.Cleanup(func() { runningAppVersion = saved })
+
+	rig := newBackupRig(t)
+	archive, err := bctest.ArchiveWithAppVersion(takeBackup(t, rig.r, "/api/tournament/backup"), "v2.4.0")
+	require.NoError(t, err)
+
+	w := restorePost(t, rig.r, "/api/tournament/restore/plan", archive, nil, backupTestPassword, "")
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	w = restorePost(t, rig.r, "/api/tournament/restore", archive,
+		map[string]string{"decisions": decisionsJSON(t, map[string]state.RestoreDecision{
+			"alpha": {Action: state.RestoreReplace},
+			"beta":  {Action: state.RestoreReplace},
+		})},
+		backupTestPassword, backupTestPassword)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	// The same backup made by a later version than the one running is refused.
+	runningAppVersion = func() string { return "v2.3.5" }
+	w = restorePost(t, rig.r, "/api/tournament/restore/plan", archive, nil, backupTestPassword, "")
+	require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+	assert.Equal(t, backupCodeVersionMismatch, responseCode(t, w))
+}
+
 func TestRestore_DecisionMissingNamesTheCompetitions(t *testing.T) {
 	rig := newBackupRig(t)
 	archive := takeBackup(t, rig.r, "/api/tournament/backup")

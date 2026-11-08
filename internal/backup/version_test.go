@@ -7,7 +7,8 @@ import (
 
 // A backup is restored on the version that made it or a later one, never on
 // an earlier one (operator ruling 2026-11-08). Versions with no order (a
-// branch name, a short sha, "dev") restore each other only when they match.
+// branch name, a short sha, "dev", a -dirty build) restore each other only
+// when they match, and no backup before OldestRestorableVersion restores.
 func TestRestorableBy(t *testing.T) {
 	cases := []struct {
 		name, made, running string
@@ -26,7 +27,12 @@ func TestRestorableBy(t *testing.T) {
 		{"earlier build on a later one", "v2.4.0-3-gdef5678", "v2.4.0-12-gabc1234", true},
 		{"later build on an earlier one", "v2.4.0-12-gabc1234", "v2.4.0-3-gdef5678", false},
 		{"build on the next release", "v2.4.0-12-gabc1234", "v2.5.0", true},
-		{"dirty build orders as its tag", "v2.4.0-dirty", "v2.4.0", true},
+		{"dirty build has no order", "v2.4.0-dirty", "v2.4.0", false},
+		{"release on a dirty build", "v2.4.0", "v2.4.0-12-gabc1234-dirty", false},
+		{"same dirty build", "v2.4.0-12-gabc1234-dirty", "v2.4.0-12-gabc1234-dirty", true},
+		{"the oldest restorable version", "v2.3.0", "v2.4.0", true},
+		{"a build after the oldest", "v2.3.0-5-g1234567", "v2.4.0", true},
+		{"before the oldest", "v2.2.9", "v2.4.0", false},
 		{"leading v optional", "2.4.0", "v2.4.0", true},
 		{"same branch build", "ship/schedule-estimator-page", "ship/schedule-estimator-page", true},
 		{"release on a branch build", "v2.4.0", "ship/schedule-estimator-page", false},
@@ -58,6 +64,8 @@ func TestCheckAppVersion(t *testing.T) {
 			detail: "This backup was made with version v2.5.0 and this app is version v2.4.0. A backup can be restored only with the version that made it or a later one, so nothing was changed."},
 		{name: "versions with no order", made: "main", running: "v2.4.0",
 			detail: "This backup was made with version main and this app is version v2.4.0. These two versions cannot be compared. A backup can be restored only with the version that made it or a later one, so nothing was changed."},
+		{name: "before the oldest", made: "v2.2.0", running: "v2.4.0",
+			detail: "This backup was made with version v2.2.0 and this app is version v2.4.0. This app can bring a backup up to date only from version v2.3.0 on, so nothing was changed."},
 		{name: "no version recorded", made: "", running: "v2.4.0",
 			detail: "This backup does not say which version made it and this app is version v2.4.0. A backup can be restored only with the version that made it or a later one, so nothing was changed."},
 	}
@@ -81,5 +89,13 @@ func TestCheckAppVersion(t *testing.T) {
 				t.Errorf("detail = %q\nwant     %q", be.Detail, tc.detail)
 			}
 		})
+	}
+}
+
+// The floor must itself be an ordered version, or beforeOldest would compare
+// every backup against a zero order and refuse none.
+func TestOldestRestorableVersionIsOrdered(t *testing.T) {
+	if _, ok := versionOrder(OldestRestorableVersion); !ok {
+		t.Fatalf("OldestRestorableVersion %q has no release order", OldestRestorableVersion)
 	}
 }

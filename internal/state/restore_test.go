@@ -1379,3 +1379,42 @@ func TestRestore_LegacyCeremoniesBecomePausesWithoutARestart(t *testing.T) {
 	assert.NotContains(t, string(raw), "closing_block")
 	assert.Contains(t, string(raw), "password: pw", "the upgrade keeps the merged password")
 }
+
+// A backup an earlier version made can store a competition in a shape this
+// version upgrades on load (here format: playoffs and the whole-minute
+// durations). A live restore runs the upgrade at once, as a start does, so the
+// files on disk, and a backup or daily copy taken right after, hold the
+// upgraded shape before anything reads the competition.
+func TestRestore_LegacyCompetitionUpgradedOnDiskWithoutARead(t *testing.T) {
+	src, _ := newRestoreTestStore(t)
+	restoreTestTournament(t, src, "pw")
+	require.NoError(t, src.SaveCompetition(&Competition{
+		ID: "bracket-court-d", Name: "Bracket Court D", Status: CompStatusSetup,
+	}))
+	snap, err := src.Snapshot(ScopeTournament, "")
+	require.NoError(t, err)
+	fixture, err := os.ReadFile(filepath.Join("testdata", "legacy_playoffs_config.md"))
+	require.NoError(t, err)
+	snap.Files["competitions/bracket-court-d/config.md"] = fixture
+	a := archiveFiles(t, backup.ScopeTournament, backup.KindManual, snap, nil)
+
+	dst, dir := newRestoreTestStore(t)
+	restoreTestTournament(t, dst, "pw")
+	_, err = dst.Restore(RestoreRequest{Archive: a})
+	require.NoError(t, err)
+
+	upgraded := func(t *testing.T, raw []byte) {
+		t.Helper()
+		assert.Contains(t, string(raw), "format: knockout")
+		assert.Contains(t, string(raw), "knockout_match_duration_seconds: 300")
+		assert.Contains(t, string(raw), "pool_match_duration_seconds: 180")
+		assert.NotContains(t, string(raw), "playoff")
+	}
+	raw, err := os.ReadFile(filepath.Join(dir, "competitions", "bracket-court-d", "config.md"))
+	require.NoError(t, err)
+	upgraded(t, raw)
+
+	after, err := dst.Snapshot(ScopeTournament, "")
+	require.NoError(t, err)
+	upgraded(t, after.Files["competitions/bracket-court-d/config.md"])
+}

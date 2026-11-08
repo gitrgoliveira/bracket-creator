@@ -269,7 +269,7 @@ func (s *ScheduledBackups) copyOnce(ctx context.Context, checkAge bool) error {
 		}
 	}
 
-	data, err := SnapshotArchive(snap, backup.KindScheduled, now, nil)
+	data, err := snapshotArchiveAs(snap, backup.KindScheduled, now, nil, s.appVersion())
 	if err != nil {
 		return fmt.Errorf("write backup archive: %w", err)
 	}

@@ -45,8 +45,13 @@ type Manifest struct {
 	RestoreCreated *[]string        `json:"restoreCreated,omitempty"` // non-nil only when Kind is before-restore
 }
 
-// Meta is what a caller supplies; Write computes Format, AppVersion and Files.
+// Meta is what a caller supplies; Write computes Format and Files.
 type Meta struct {
+	// AppVersion is the version the manifest names; empty means the running
+	// app's (version.GetVersion). A caller with its own notion of the running
+	// version (the scheduled job's Version seam) passes it, so the copy it
+	// writes and the restore check it makes name the same version.
+	AppVersion     string
 	CreatedAt      time.Time
 	Scope          Scope
 	Kind           Kind

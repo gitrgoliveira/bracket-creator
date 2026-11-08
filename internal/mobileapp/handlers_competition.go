@@ -1762,6 +1762,19 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				formatChanged := comp.Format != current.Format
 				kindChanged := comp.Kind != current.Kind
 				poolSizeModeChanged := comp.PoolSizeMode != current.PoolSizeMode
+				// poolSizeMode follows Kind's change-scoped rule (below), for the
+				// same lockout reason: the settings page echoes the stored value
+				// back on every save, so a hand-edited illegal value must not
+				// block unrelated saves. Only a save that CHANGES the mode is
+				// judged, and it is judged first, so a bad mode is the answer
+				// rather than the draw-ready or started 409 a valid one would
+				// get.
+				if poolSizeModeChanged {
+					if err := state.ValidatePoolSizeMode(comp.PoolSizeMode); err != nil {
+						validationErr = fmt.Errorf("poolSizeMode: %w", err)
+						return nil, nil
+					}
+				}
 
 				// Settings-only PUT (Players field absent in body).
 				// Team match format (FR-044) wire contract, applied BEFORE the
@@ -2185,18 +2198,6 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				if kindChanged {
 					if err := state.ValidateCompetitionKind(comp.Kind); err != nil {
 						validationErr = fmt.Errorf("kind: %w", err)
-						return nil, nil
-					}
-				}
-				// Same change-scoped rule for poolSizeMode, for the same
-				// lockout reason: the settings page echoes the stored value
-				// back on every save, so a hand-edited illegal value must not
-				// block unrelated saves. Only a save that CHANGES the mode is
-				// judged. current.PoolSizeMode was merged above, so the
-				// comparison was taken earlier (poolSizeModeChanged).
-				if poolSizeModeChanged {
-					if err := state.ValidatePoolSizeMode(comp.PoolSizeMode); err != nil {
-						validationErr = fmt.Errorf("poolSizeMode: %w", err)
 						return nil, nil
 					}
 				}

@@ -105,9 +105,13 @@ func Write(w io.Writer, meta Meta, files map[string][]byte) error {
 		restoreCreated = &rc
 	}
 
+	appVersion := meta.AppVersion
+	if appVersion == "" {
+		appVersion = version.GetVersion()
+	}
 	manifest := Manifest{
 		Format:         FormatVersion,
-		AppVersion:     version.GetVersion(),
+		AppVersion:     appVersion,
 		CreatedAt:      meta.CreatedAt.UTC(),
 		Scope:          meta.Scope,
 		Kind:           meta.Kind,

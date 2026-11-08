@@ -686,7 +686,9 @@ func TestScheduledBackups_ALaterVersionsCopyIsNotTheNewest(t *testing.T) {
 	files, err = pt.Store.ListBackupFiles()
 	require.NoError(t, err)
 	require.Len(t, files, 2, "a later version's copy does not make the hourly check skip")
-	restampCopy(t, pt, files[0].Name, "v2.5.0") // the copy just taken, as this version stamps it
+	_, madeBy, ok, _ := job.readArchiveFingerprint(files[0].Name, BackupChecks())
+	require.True(t, ok)
+	require.Equal(t, "v2.5.0", madeBy, "the job stamps the copy it takes with its own version")
 
 	// Another hour, still unchanged: this version's copy is the newest, so nothing is written.
 	clockTime = clockTime.Add(time.Hour)

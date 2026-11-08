@@ -12,7 +12,7 @@ The app saves every change to disk as it happens, but a backup archive is a copy
 
 You can back up the entire tournament at once, or back up any single competition on its own.
 
-A backup can be restored with the version of the app that made it or any later version, which brings the restored data up to date as it does a data folder after an upgrade. A backup that a later version made is refused, since an earlier version cannot read what a later one may have written. A build whose version has no place in the release order, such as one built from a source branch, restores only backups that carry exactly its version, and its own backups restore only on such a build. The same holds for daily copies and safety copies.
+A backup can be restored with the version of the app that made it or any later version, which brings the restored data up to date as it does a data folder after an upgrade. A backup that a later version made is refused, since an earlier version cannot read what a later one may have written. A build whose version has no place in the release order, such as one built from a source branch or with uncommitted changes, restores only backups that carry exactly its version, and its own backups restore only on such a build. A backup made with a version older than this app can bring up to date (before 2.3.0, for this version) is refused too. The same holds for daily copies and safety copies.
 
 ## Automatic daily copies
 
@@ -110,7 +110,8 @@ A refused restore changes nothing. The page tells you why, and the common reason
 - **That backup is not there any more**: the kept copy was deleted, for example from another browser tab. Reload the list.
 - **Wrong password. Nothing was restored.**: the password typed in the confirmation dialog was wrong. Type it again.
 - **The file is not a backup this app can restore**: the file is damaged, was changed after it was made, is not a backup archive, or was made by a newer version of the app that stores backups differently.
-- **This backup was made with version ... and this app is version ...** (or **This backup does not say which version made it**): a later version of the app made the backup, or a build this version cannot be compared with, as [The backup routine](#the-backup-routine) explains. The plan says so before anything changes. Restore it with the version that made it or a later one.
+- **This backup was made with version ... and this app is version ...** (or **This backup does not say which version made it**): a later version of the app made the backup, or a build this version cannot be compared with (the message then adds **These two versions cannot be compared**), as [The backup routine](#the-backup-routine) explains. The plan says so before anything changes. Restore it with the version that made it or a later one.
+- **This app can bring a backup up to date only from version ... on**: the backup is older than the oldest version this app can upgrade from. Restore it with a version between the two, then take a new backup there.
 
 If the page says **The restore could not be completed**, something failed partway through. Restart the app: it finishes a restore that was under way as it starts.
 

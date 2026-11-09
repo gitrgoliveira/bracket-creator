@@ -6,6 +6,7 @@
 // blank template's bronze block agrees with the same predicate every other
 // surface (settings screen, awards page) already uses.
 import { effectiveTwoThirdPlaces, resolveFormat, FORMAT_KNOCKOUT, FORMAT_LEAGUE } from './competition_shape.jsx';
+import { isNoConnection, NOT_SENT_NO_CONNECTION } from './write_result.jsx';
 
 const { useState } = React;
 
@@ -188,7 +189,8 @@ export function AdminExport({ c, t, password, showToast }) {
       // torn down (matches admin_shell.jsx); guard the timer against jsdom teardown.
       setTimeout(() => { if (typeof window !== "undefined" && window.URL) window.URL.revokeObjectURL(dlUrl); }, 100);
     } catch (err) {
-      alert("Export failed: " + err.message);
+      // A request that never left says the one "not sent" sentence (write_result.jsx).
+      alert(isNoConnection(err) ? NOT_SENT_NO_CONNECTION : "Export failed: " + err.message);
     }
   };
 

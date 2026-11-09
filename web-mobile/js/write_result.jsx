@@ -634,6 +634,23 @@ export function noAnswerSentence(notDone) {
     return `${notDone}: the server did not answer. Check the connection and try again.`;
 }
 
+// The one sentence for a write that stays direct and could not be SENT: the
+// request never left the device (a fetch rejected with a TypeError), so
+// nothing was changed. noAnswerSentence above is its counterpart for a request
+// that may have landed. api_client.jsx's _directFetch throws it for every
+// direct write; the callers that run their own fetch show it through
+// isNoConnection.
+export const NOT_SENT_NO_CONNECTION = 'Not sent: no connection. Nothing was changed; try again once connected.';
+
+// isNoConnection: the ONE test for "this failure is the connection, not the
+// server's answer": a fetch that rejected with a TypeError (whatever the
+// browser's own text for it), an error marked `timedOut` (a read given up on
+// at the deadline, _fetchJson), or the error _directFetch already turned into
+// NOT_SENT_NO_CONNECTION (`noConnection`).
+export function isNoConnection(err) {
+    return err instanceof TypeError || !!(err && (err.timedOut || err.noConnection));
+}
+
 
 // matchLabel names a match the way the OPERATOR sees it: "Match 3", the label
 // on the scores list, the bracket and the printed tree. The internal id

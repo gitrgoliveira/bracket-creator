@@ -43,7 +43,7 @@ import {
     downstreamKnockoutPlayedQueueDrop, downstreamKnockoutRunningMessage, downstreamKnockoutRunningReopenMessage,
     downstreamKnockoutRunningQueueDrop, courtBusyMessage,
     FETCH_TIMEOUT_MS, REP_BOUT_NOT_ADDED, REP_BOUT_NOT_REMOVED, tapOutcomeQuiet,
-    isFinishedResultWrite,
+    isFinishedResultWrite, NOT_SENT_NO_CONNECTION,
 } from './write_result.jsx';
 // bc-evts S2: the build this page runs against the server's, and the reload rule.
 import { noteServerBuild, setOutboxIdleProbe, setBeforeReload, noteOutboxDrained } from './app_version.jsx';
@@ -695,14 +695,17 @@ const _revSession = (typeof crypto !== 'undefined' && crypto.randomUUID)
 //
 // One entry per write, each under its own key: `${base}${QUEUE_ENTRY_SEP}${id}`,
 // where the BASE is the match the write is about (`compID:matchID` for a score
-// or a decision, `lineup:…`). Each flush pass sends the entries
-// in the order of the stamp they carry (_entryStamp), and each entry on its
-// own: one that does not land (offline, a 5xx that keeps coming back) holds
-// back nothing after it, and a new write goes straight to the server whatever
-// is queued. The server, not arrival order, decides the result: it merges a
-// match write group by group in stamp order and keeps whatever a newer change
-// outranks in the match's history (bc-mrgc), so a write that waited behind a
-// failing one gained nothing and lost the court every write after it. The ONE
+// or a decision, `lineup:…`). Each flush pass sends a base's entries
+// strictly in the order of the stamp they carry (_entryStamp), bc-evts F1
+// (which reversed bc-mrgc C2): the first entry of a base that does not settle
+// in the pass (offline, a 5xx that keeps coming back, parked, held by an open
+// fetch) ends THAT base's turn, so a write made after another on this device
+// never reaches the server before it, and a new write made while an earlier
+// one of its base is queued waits behind it. Bases go side by side, each in
+// its own order, so one match's failing entry holds back no other match. The
+// server still merges a match write group by group in stamp order and keeps
+// whatever a newer change outranks in the match's history (bc-mrgc), so the
+// order is a guarantee about this device, not the only thing deciding. The ONE
 // coalescing rule (_coalesceTarget): a score write takes the place of the
 // match's LAST entry only when that entry is a score write no newer than it,
 // and a running write only of a running one, claiming the groups both changed
@@ -4980,13 +4983,30 @@ function _shownMember(member, fields) {
     return { ...member, ...fields, modifiedAt: _serverNowMs() };
 }
 
+// _directFetch: the ONE door of a write that stays direct (not in the outbox).
+// Plain fetch with no deadline of its own: a direct write can be the 64 MB
+// import or the draw, which a fixed deadline would cut off while the server
+// still works. A request that never left the device (fetch rejects with a
+// TypeError, whatever the browser's own words) is turned into the one
+// sentence NOT_SENT_NO_CONNECTION (write_result.jsx), marked `noConnection`,
+// so every caller shows it as it is. An AbortError and any other rejection
+// pass through untouched.
+async function _directFetch(url, init) {
+    try {
+        return await fetch(url, init);
+    } catch (e) {
+        if (e instanceof TypeError) throw Object.assign(new Error(NOT_SENT_NO_CONNECTION), { noConnection: true });
+        throw e;
+    }
+}
 // One fetch for the backup and restore endpoints: the password headers, and a
 // refusal turned into an Error carrying the server's `code`. A confirmPassword
 // of undefined sends no header.
 async function _backupRequest(url, failure, { method = 'GET', password, confirmPassword, body } = {}) {
     const headers = password ? { 'X-Tournament-Password': password } : {};
     if (confirmPassword !== undefined) headers['X-Confirm-Password'] = confirmPassword;
-    const res = await fetch(url, { method, headers, ...(body ? { body } : {}) });
+    const send = method === 'GET' ? fetch : _directFetch; // a restore or a delete is a write
+    const res = await send(url, { method, headers, ...(body ? { body } : {}) });
     if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         throw Object.assign(new Error(err.error || failure), { code: err.code, status: res.status });
@@ -5073,7 +5093,7 @@ const API = {
     async resetPassword(newPassword, originatorId) {
         const body = { password: newPassword };
         if (originatorId) body.originatorId = originatorId;
-        const res = await fetch('/api/tournament/reset', {
+        const res = await _directFetch('/api/tournament/reset', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(body)
@@ -5164,7 +5184,7 @@ const API = {
         if (authPassword) {
             headers['X-Tournament-Password'] = authPassword;
         }
-        const res = await fetch('/api/tournament', {
+        const res = await _directFetch('/api/tournament', {
             method: 'POST',
             headers,
             body: JSON.stringify(config)
@@ -5210,7 +5230,7 @@ const API = {
                 }),
             };
         }
-        const res = await fetch(`/api/competitions/${id}`, {
+        const res = await _directFetch(`/api/competitions/${id}`, {
             method: 'PUT',
             headers: {
                 'Content-Type': 'application/json',
@@ -5244,7 +5264,7 @@ const API = {
         return res.json();
     },
     async createCompetition(config, password) {
-        const res = await fetch('/api/competitions', {
+        const res = await _directFetch('/api/competitions', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -5271,7 +5291,7 @@ const API = {
     // empty when the body carries none. Generation runs LibreOffice and can
     // take 30–60s, so callers should show a busy state.
     async exportPDFs(type, password) {
-        const res = await fetch(`/api/print/${type}`, {
+        const res = await _directFetch(`/api/print/${type}`, {
             method: 'POST',
             headers: password ? { 'X-Tournament-Password': password } : {}
         });
@@ -5303,7 +5323,7 @@ const API = {
         return res.blob();
     },
     async startCompetition(id, password) {
-        const res = await fetch(`/api/competitions/${id}/start`, {
+        const res = await _directFetch(`/api/competitions/${id}/start`, {
             method: 'POST',
             headers: { 'X-Tournament-Password': password }
         });
@@ -5315,7 +5335,7 @@ const API = {
         return normalizeCompetitionDetail(data);
     },
     async generateDraw(id, password) {
-        const res = await fetch(`/api/competitions/${id}/generate-draw`, {
+        const res = await _directFetch(`/api/competitions/${id}/generate-draw`, {
             method: 'POST',
             headers: { 'X-Tournament-Password': password }
         });
@@ -5349,7 +5369,7 @@ const API = {
         }
     },
     async discardDraw(id, password) {
-        const res = await fetch(`/api/competitions/${id}/draw`, {
+        const res = await _directFetch(`/api/competitions/${id}/draw`, {
             method: 'DELETE',
             headers: { 'X-Tournament-Password': password }
         });
@@ -5372,7 +5392,7 @@ const API = {
     // only record of the draw and rebuilding would invent different pairings
     // rather than restore these.
     async quarantineBracket(id, password) {
-        const res = await fetch(`/api/competitions/${id}/bracket/quarantine`, {
+        const res = await _directFetch(`/api/competitions/${id}/bracket/quarantine`, {
             method: 'POST',
             headers: { 'X-Tournament-Password': password }
         });
@@ -5392,7 +5412,7 @@ const API = {
     // not started yet), or a naginata 3rd-place match is still unscored; 404
     // when the competition doesn't exist.
     async completeCompetition(id, password) {
-        const res = await fetch(`/api/competitions/${id}/complete`, {
+        const res = await _directFetch(`/api/competitions/${id}/complete`, {
             method: 'POST',
             headers: { 'X-Tournament-Password': password }
         });
@@ -5972,7 +5992,7 @@ const API = {
         });
     },
     async importCompetitions(formData, password) {
-        const res = await fetch('/api/tournament/import', {
+        const res = await _directFetch('/api/tournament/import', {
             method: 'POST',
             headers: { 'X-Tournament-Password': password },
             body: formData
@@ -5992,7 +6012,7 @@ const API = {
     // thrown as an Error with that `code` and nothing else (no queue, no parking,
     // no sign-out), so the dialog that asked can show the sentence and ask again.
     async deleteCompetition(id, password, confirmPassword) {
-        const res = await fetch(`/api/competitions/${id}`, {
+        const res = await _directFetch(`/api/competitions/${id}`, {
             method: 'DELETE',
             headers: { 'X-Tournament-Password': password, 'X-Confirm-Password': confirmPassword ?? '' }
         });
@@ -6047,7 +6067,7 @@ const API = {
     // callers can apply it to local state immediately instead of waiting for
     // the SSE refresh / tournament refetch to land.
     async invalidateCompetition(id, password) {
-        const res = await fetch(`/api/competitions/${id}/invalidate`, {
+        const res = await _directFetch(`/api/competitions/${id}/invalidate`, {
             method: 'POST',
             headers: { 'X-Tournament-Password': password }
         });
@@ -6317,7 +6337,7 @@ const API = {
     // "current round still has incomplete matches" message in the UI;
     // the caller checks `e.code === "round_incomplete"` to branch.
     async swissGenerateRound(compID, password) {
-        const res = await fetch(`/api/competitions/${compID}/swiss/generate-round`, {
+        const res = await _directFetch(`/api/competitions/${compID}/swiss/generate-round`, {
             method: 'POST',
             headers: { 'X-Tournament-Password': password }
         });
@@ -6386,7 +6406,7 @@ const API = {
         return res.json();
     },
     async addParticipant(compID, payload, password) {
-        const res = await fetch(`/api/competitions/${encodeURIComponent(compID)}/participants`, {
+        const res = await _directFetch(`/api/competitions/${encodeURIComponent(compID)}/participants`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'X-Tournament-Password': password },
             body: JSON.stringify(payload)
@@ -6398,7 +6418,7 @@ const API = {
         return res.json();
     },
     async replaceParticipant(compID, pid, payload, password) {
-        const res = await fetch(`/api/competitions/${encodeURIComponent(compID)}/participants/${encodeURIComponent(pid)}`, {
+        const res = await _directFetch(`/api/competitions/${encodeURIComponent(compID)}/participants/${encodeURIComponent(pid)}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json', 'X-Tournament-Password': password },
             body: JSON.stringify(payload)
@@ -6461,7 +6481,7 @@ const API = {
         fd.append('name', name);
         if (link) fd.append('link', link);
         fd.append('file', file);
-        const res = await fetch('/api/sponsors', {
+        const res = await _directFetch('/api/sponsors', {
             method: 'POST',
             headers: { 'X-Tournament-Password': password },
             body: fd,
@@ -6473,7 +6493,7 @@ const API = {
         return res.json();
     },
     async deleteSponsor(index, password) {
-        const res = await fetch(`/api/sponsors/${index}`, {
+        const res = await _directFetch(`/api/sponsors/${index}`, {
             method: 'DELETE',
             headers: { 'X-Tournament-Password': password },
         });
@@ -6486,7 +6506,7 @@ const API = {
     async uploadBrandingLogo({ file, password }) {
         const fd = new FormData();
         fd.append('file', file);
-        const res = await fetch('/api/branding/logo', {
+        const res = await _directFetch('/api/branding/logo', {
             method: 'POST',
             headers: { 'X-Tournament-Password': password },
             body: fd,
@@ -6498,7 +6518,7 @@ const API = {
         return res.json();
     },
     async deleteBrandingLogo(password) {
-        const res = await fetch('/api/branding/logo', {
+        const res = await _directFetch('/api/branding/logo', {
             method: 'DELETE',
             headers: { 'X-Tournament-Password': password },
         });
@@ -6560,7 +6580,7 @@ const API = {
     // Throws on 400 (invalid group), 409 (matches already exist).
     async leagueTiebreakGenerate(compID, teamNames, password, teamIds) {
         const body = { teamNames, teamIds };
-        const res = await fetch(`/api/competitions/${encodeURIComponent(compID)}/league-tiebreak`, {
+        const res = await _directFetch(`/api/competitions/${encodeURIComponent(compID)}/league-tiebreak`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'X-Tournament-Password': password },
             body: JSON.stringify(body),
@@ -6586,7 +6606,7 @@ const API = {
     // Throws on 404 (no matches found), 409 (any match already scored).
     async leagueTiebreakRemove(compID, teamNames, password, teamIds) {
         const body = { teamNames, teamIds };
-        const res = await fetch(`/api/competitions/${encodeURIComponent(compID)}/league-tiebreak`, {
+        const res = await _directFetch(`/api/competitions/${encodeURIComponent(compID)}/league-tiebreak`, {
             method: 'DELETE',
             headers: { 'Content-Type': 'application/json', 'X-Tournament-Password': password },
             body: JSON.stringify(body),
@@ -6606,7 +6626,7 @@ const API = {
     // Returns { finalized: true } on 200.
     // Throws on 404 (comp not found), 409 (already complete).
     async leagueTiebreakFinalize(compID, password) {
-        const res = await fetch(`/api/competitions/${encodeURIComponent(compID)}/league-tiebreak/finalize`, {
+        const res = await _directFetch(`/api/competitions/${encodeURIComponent(compID)}/league-tiebreak/finalize`, {
             method: 'POST',
             headers: { 'X-Tournament-Password': password },
         });

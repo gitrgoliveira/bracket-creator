@@ -8,6 +8,7 @@
 // Both endpoints return 404 in officiated-mode tournaments.
 
 import { useUnsavedInput } from './app_version.jsx';
+import { isNoConnection, NOT_SENT_NO_CONNECTION } from './write_result.jsx';
 
 const { useState, useEffect, useRef } = React;
 
@@ -125,8 +126,10 @@ function RegistrationForm({ compId, onBack }) {
       } else {
         setErr(data.error || "Registration failed. Please try again.");
       }
-    } catch {
-      if (mountedRef.current) setErr("Could not reach server. Please try again.");
+    } catch (err) {
+      // A fetch that never left the device says the one "not sent" sentence
+      // every direct write says (write_result.jsx).
+      if (mountedRef.current) setErr(isNoConnection(err) ? NOT_SENT_NO_CONNECTION : "Registration failed. Please try again.");
     } finally {
       if (mountedRef.current) setSaving(false);
     }

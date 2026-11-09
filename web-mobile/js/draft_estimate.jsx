@@ -2,6 +2,7 @@
 // Consumed by the Add competition form (admin_setup.jsx).
 
 import { finishClock, formatEstimateMinutes, estimateRangeParts } from './admin_schedule_utils.jsx';
+import { isNoConnection } from './write_result.jsx';
 
 // isShapeIdle reports true when required fields (participants count and start time)
 // are missing or empty, in which case no request is sent.
@@ -94,7 +95,7 @@ export function useDraftEstimate(shape, password) {
         if (!controller.signal.aborted && err.name !== "AbortError") {
           // A fetch that never reached the server throws a TypeError whose
           // browser wording means nothing to an organiser.
-          setError(err instanceof TypeError || !err.message ? DRAFT_ESTIMATE_FAILED : err.message);
+          setError(isNoConnection(err) || !err.message ? DRAFT_ESTIMATE_FAILED : err.message);
           setEstimate(null);
           setLoading(false);
         }

@@ -148,4 +148,19 @@ describe('ExportPdfModal: skipped-competitions warning', () => {
     ));
     expect(container.querySelector('[data-testid="export-pdf-skipped-banner"]')).toBeNull();
   });
+
+  it('says the one "not sent" sentence as it is when the request never left', async () => {
+    // The real API door, so the error is the one _directFetch makes.
+    const { API } = await import('../../api_client.jsx');
+    const { NOT_SENT_NO_CONNECTION } = await import('../../write_result.jsx');
+    const originalFetch = global.fetch;
+    global.fetch = vi.fn(() => Promise.reject(new TypeError('Failed to fetch')));
+    try {
+      const { container, showToast } = mount({ exportPDFs: (type, pw) => API.exportPDFs(type, pw) });
+      clickDownload(container);
+      await waitFor(() => expect(showToast).toHaveBeenCalledWith(NOT_SENT_NO_CONNECTION, 'error'));
+    } finally {
+      global.fetch = originalFetch;
+    }
+  });
 });

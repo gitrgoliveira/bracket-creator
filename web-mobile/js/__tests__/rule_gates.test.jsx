@@ -243,6 +243,14 @@ describe('the tap-outcome and retired-reason rules', () => {
     expect(trips(r, "window.API.recordScore(m.compId, m, password, { changed });")).toBe(true);
     expect(trips(r, "await onSubmit(patch);")).toBe(false);
   });
+  it('a hand-rolled TypeError test for a failed fetch trips, asking isNoConnection does not', () => {
+    const r = rule('no-connection');
+    expect(r).toBeTruthy();
+    expect(trips(r, 'if (err instanceof TypeError) setError(X);')).toBe(true);
+    expect(trips(r, 'setError(err instanceof TypeError || !err.message ? X : err.message);')).toBe(true);
+    expect(trips(r, 'if (isNoConnection(err)) setError(NOT_SENT_NO_CONNECTION);')).toBe(false);
+    expect(r.exempt).toEqual(['write_result.jsx', 'api_client.jsx']);
+  });
   it('the retired needs_winner and default_win_stands codes trip anywhere', () => {
     const r = rule('retired-held-reasons');
     expect(r).toBeTruthy();

@@ -5,7 +5,7 @@
 
 // The held-writes copy (bc-offl). write_result.jsx is an import-only leaf, so
 // this script-tagged module can import it without a double evaluation.
-import { heldWritesText } from './write_result.jsx';
+import { heldWritesText, isNoConnection } from './write_result.jsx';
 import { HeldWritesPanel } from './held_writes_panel.jsx';
 import { publishHeight } from './published_height.jsx';
 import { tournamentHasCheckIn } from './competition_shape.jsx';
@@ -773,9 +773,12 @@ function ExportPdfModal({ tournament, password, comps, onClose, showToast }) {
       // `skipped` list is what the persistent banner below renders; every
       // other failure (e.g. 503 LibreOffice-absent) carries an empty one, so
       // the banner stays hidden and the toast is the only surface, unchanged.
+      // A request that never left says the one "not sent" sentence as it is
+      // (write_result.jsx), never inside "PDF export failed: ".
       setSkipped(err.skipped || []);
-      if (showToast) showToast("PDF export failed: " + err.message, "error");
-      else alert("PDF export failed: " + err.message);
+      const shown = isNoConnection(err) ? err.message : "PDF export failed: " + err.message;
+      if (showToast) showToast(shown, "error");
+      else alert(shown);
     } finally {
       setBusyType("");
     }

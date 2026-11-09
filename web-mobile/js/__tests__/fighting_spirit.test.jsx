@@ -198,7 +198,7 @@ describe('API.updateCompetitionAwards', () => {
       json: async () => ({ id: 'c1', fightingSpiritAwards: [] }),
     });
     const awards = [{ title: 'Fighting Spirit', recipientName: 'Alice', recipientDojo: 'Tokyo' }];
-    await API.updateCompetitionAwards('c1', awards, 'mainpw');
+    await API.updateCompetitionAwards('c1', awards, 'mainpw', '0123456789abcdef');
 
     expect(global.fetch).toHaveBeenCalledWith(
       '/api/competitions/c1/awards',
@@ -211,7 +211,8 @@ describe('API.updateCompetitionAwards', () => {
       })
     );
     const body = JSON.parse(global.fetch.mock.calls[0][1].body);
-    expect(body).toEqual({ fightingSpiritAwards: awards });
+    // The save carries the version of the list it was made from.
+    expect(body).toEqual({ fightingSpiritAwards: awards, awardsVersion: '0123456789abcdef' });
   });
 
   it('never sends X-Admin-Password (bc-cmpw: no separate admin password)', async () => {

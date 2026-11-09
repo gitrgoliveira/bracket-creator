@@ -26,9 +26,9 @@ type checkInCall struct {
 func checkInCalls(pid string) []checkInCall {
 	base := "/api/competitions/" + noCheckInComp + "/participants"
 	return []checkInCall{
-		{"PUT checkin", http.MethodPut, base + "/" + pid + "/checkin", nil},
-		{"POST checkin-bulk", http.MethodPost, base + "/checkin-bulk", map[string]any{"participantIds": []string{pid}}},
-		{"DELETE checkin", http.MethodDelete, base + "/" + pid + "/checkin", nil},
+		{"PUT checkin", http.MethodPut, base + "/" + pid + "/checkin", stampedBody()},
+		{"POST checkin-bulk", http.MethodPost, base + "/checkin-bulk", map[string]any{"participantIds": []string{pid}, "modifiedAt": nextCheckInStamp()}},
+		{"DELETE checkin", http.MethodDelete, base + "/" + pid + "/checkin", stampedBody()},
 	}
 }
 
@@ -104,8 +104,8 @@ func TestOfficiated_CheckInWrites_StillWork(t *testing.T) {
 	r := setupSelfRunRouter(t, store, NewFileVerifier(store))
 	organiser := "main-pw"
 
-	calls := checkInCalls(pid)
-	for _, c := range []checkInCall{calls[0], calls[2], calls[1]} {
+	for _, i := range []int{0, 2, 1} { // PUT, DELETE, bulk: each stamped when it is sent
+		c := checkInCalls(pid)[i]
 		w := serve(r, c, &organiser)
 		require.Equal(t, http.StatusOK, w.Code, "%s: %s", c.name, w.Body.String())
 	}

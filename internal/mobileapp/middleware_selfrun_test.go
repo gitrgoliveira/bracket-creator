@@ -224,7 +224,7 @@ func TestSelfRun_SelfRunMode_PUTTournament_RequiresMainPassword(t *testing.T) {
 	}
 
 	t.Run("no_pw_returns_401", func(t *testing.T) {
-		req := jsonReq(http.MethodPut, "/api/tournament", putBody)
+		req := jsonReq(http.MethodPut, "/api/tournament", withStoredTournamentVersion(t, store, putBody))
 		// No X-Tournament-Password, must be rejected (configuration mutation).
 		w := httptest.NewRecorder()
 		r.ServeHTTP(w, req)
@@ -233,7 +233,7 @@ func TestSelfRun_SelfRunMode_PUTTournament_RequiresMainPassword(t *testing.T) {
 	})
 
 	t.Run("correct_pw_succeeds", func(t *testing.T) {
-		req := jsonReq(http.MethodPut, "/api/tournament", putBody)
+		req := jsonReq(http.MethodPut, "/api/tournament", withStoredTournamentVersion(t, store, putBody))
 		req.Header.Set("X-Tournament-Password", "main-pw")
 		w := httptest.NewRecorder()
 		r.ServeHTTP(w, req)
@@ -468,6 +468,7 @@ func TestOfficiatedMode_FormerlyElevatedRoutes_NeedOnlyTheSignIn(t *testing.T) {
 		require.NoError(t, store.SaveCompetition(&state.Competition{ID: "awards-comp", Name: "Awards"}))
 		req := jsonReq(http.MethodPut, "/api/competitions/awards-comp/awards", map[string]any{
 			"fightingSpiritAwards": []map[string]any{{"title": "Spirit", "recipientName": "Alice"}},
+			"awardsVersion":        state.AwardsVersion(&state.Competition{}),
 		})
 		req.Header.Set("X-Tournament-Password", "main-pw")
 		w := httptest.NewRecorder()
@@ -816,7 +817,7 @@ func TestSelfRun_Immutability_PUT_SwitchModeRejected(t *testing.T) {
 		"courts": []string{"A"},
 		"mode":   "self-run", // attempt to change
 	}
-	req := jsonReq(http.MethodPut, "/api/tournament", putBody)
+	req := jsonReq(http.MethodPut, "/api/tournament", withStoredTournamentVersion(t, store, putBody))
 	req.Header.Set("X-Tournament-Password", "main-pw")
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
@@ -840,7 +841,7 @@ func TestSelfRun_Immutability_PUT_OmittingModePreservesIt(t *testing.T) {
 		"courts": []string{"A"},
 		// mode omitted
 	}
-	req := jsonReq(http.MethodPut, "/api/tournament", putBody)
+	req := jsonReq(http.MethodPut, "/api/tournament", withStoredTournamentVersion(t, store, putBody))
 	req.Header.Set("X-Tournament-Password", "main-pw")
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
@@ -868,7 +869,7 @@ func TestSelfRun_Immutability_PUT_SameModeIsIdempotent(t *testing.T) {
 		"courts": []string{"A"},
 		"mode":   "self-run", // same as stored
 	}
-	req := jsonReq(http.MethodPut, "/api/tournament", putBody)
+	req := jsonReq(http.MethodPut, "/api/tournament", withStoredTournamentVersion(t, store, putBody))
 	req.Header.Set("X-Tournament-Password", "main-pw")
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
@@ -1039,7 +1040,7 @@ func TestSelfRun_LockedMode_PUTEdit_NotRejectedByFailOpenGuard(t *testing.T) {
 		"venue":  "New Dojo",
 		"courts": []string{"A"},
 	}
-	req := jsonReq(http.MethodPut, "/api/tournament", putBody)
+	req := jsonReq(http.MethodPut, "/api/tournament", withStoredTournamentVersion(t, store, putBody))
 	req.Header.Set("X-Tournament-Password", "main-pw") // required: PUT /tournament is always main-gated
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)

@@ -147,6 +147,7 @@ func buildPopulatedTournament(t *testing.T) *populatedTournament {
 	// Check in all participants so checkInEnabled draws the full 6-player roster.
 	w = populatedServeJSON(t, router, password, http.MethodPost, "/api/competitions/"+pt.MixedCompID+"/participants/checkin-bulk", map[string]any{
 		"participantIds": mixedPlayerIDs,
+		"modifiedAt":     time.Now().UnixMilli(),
 	})
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 

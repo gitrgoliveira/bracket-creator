@@ -47,7 +47,7 @@ func TestPutAwardsStoresATitleCasedRecipient(t *testing.T) {
 		},
 	})
 	require.NoError(t, err)
-	w := do("PUT", "/api/competitions/c1/awards", body)
+	w := do("PUT", "/api/competitions/c1/awards", versionedAwardsBody(t, store, "c1", body))
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 
 	comp, err := store.LoadCompetition("c1")

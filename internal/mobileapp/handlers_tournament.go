@@ -30,8 +30,27 @@ import (
 // response looked like except for that one added key.
 type tournamentResponse struct {
 	*state.Tournament
-	Competitions []*state.Competition `json:"competitions"`
+	TournamentVersion string               `json:"tournamentVersion"`
+	Competitions      []*state.Competition `json:"competitions"`
 }
+
+// versionedTournament is a tournament on the wire with the version of its
+// settings (state.TournamentVersion) beside its fields: the GET answers, and
+// the copy a stale PUT is refused with. A save sends the version back as
+// tournamentVersion, so a save made against an older copy is refused
+// (tournament_changed) instead of writing over a newer one.
+type versionedTournament struct {
+	*state.Tournament
+	TournamentVersion string `json:"tournamentVersion"`
+}
+
+func withTournamentVersion(t *state.Tournament) versionedTournament {
+	return versionedTournament{Tournament: t, TournamentVersion: state.TournamentVersion(t)}
+}
+
+// errTournamentChanged refuses a PUT /api/tournament whose tournamentVersion
+// is not the stored settings' version.
+var errTournamentChanged = errors.New("tournament changed")
 
 // buildTournamentResponse wraps t with its competitions list. Every handler
 // that returns a tournament object to the SPA builds its response through
@@ -55,7 +74,7 @@ func buildTournamentResponse(t *state.Tournament, store *state.Store) tournament
 		log.Printf("mobileapp: buildTournamentResponse: loadAllCompetitions: %v", err)
 		comps = []*state.Competition{}
 	}
-	return tournamentResponse{Tournament: t, Competitions: comps}
+	return tournamentResponse{Tournament: t, TournamentVersion: state.TournamentVersion(t), Competitions: comps}
 }
 
 // validateDateDMY validates that `date` is either empty or a syntactically
@@ -657,6 +676,44 @@ func validateTournamentLengths(t *state.Tournament) error {
 	return nil
 }
 
+// adminTournamentCopy is the tournament as the admin GET serves it. In locked
+// mode the on-disk Password is irrelevant (auth comes from the env-var bcrypt
+// hash), so it is stripped from a copy: the admin UI must not show a
+// stored-but-unused value that would mislead the operator about what
+// credential actually authenticates them. Mirrors the public viewer
+// handler's password-strip step (handlers_viewer.go). The copy keeps the
+// caller's cached tournament untouched.
+func adminTournamentCopy(t *state.Tournament, verifier PasswordVerifier) *state.Tournament {
+	if verifier != nil && verifier.RedactStoredPassword() {
+		publicT := *t
+		publicT.Password = ""
+		return &publicT
+	}
+	return t
+}
+
+// respondTournamentChanged answers a PUT /api/tournament made against an
+// older copy of the settings: 409 tournament_changed with the current copy
+// (as the admin GET serves it) and its version, as config_changed does for a
+// competition, so the open form can show what is stored now.
+func respondTournamentChanged(c *gin.Context, store *state.Store, verifier PasswordVerifier) {
+	current, err := store.LoadTournament()
+	if err != nil {
+		internalError(c, err)
+		return
+	}
+	body := gin.H{
+		"code":  "tournament_changed",
+		"error": "The tournament settings changed, reload them.",
+	}
+	if current != nil {
+		cp := withTournamentVersion(adminTournamentCopy(current, verifier))
+		body["tournamentVersion"] = cp.TournamentVersion
+		body["tournament"] = cp
+	}
+	c.JSON(http.StatusConflict, body)
+}
+
 func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub, verifier PasswordVerifier) {
 	r.GET("/tournament", func(c *gin.Context) {
 		t, err := store.LoadTournament()
@@ -668,27 +725,26 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 			c.JSON(http.StatusNotFound, gin.H{"error": "tournament not initialized"})
 			return
 		}
-		// In locked mode the on-disk Password is irrelevant (auth comes
-		// from the env-var bcrypt hash). Strip it from the response so
-		// the admin UI doesn't show a stored-but-unused value that
-		// would mislead the operator about what credential actually
-		// authenticates them. Mirrors the public viewer handler's
-		// password-strip step (handlers_viewer.go).
-		if verifier != nil && verifier.RedactStoredPassword() {
-			publicT := *t
-			publicT.Password = ""
-			c.JSON(http.StatusOK, publicT)
-			return
-		}
-		c.JSON(http.StatusOK, t)
+		c.JSON(http.StatusOK, withTournamentVersion(adminTournamentCopy(t, verifier)))
 	})
 
 	r.PUT("/tournament", func(c *gin.Context) {
-		var t state.Tournament
-		if err := c.ShouldBindJSON(&t); err != nil {
+		// The body is the tournament plus the version of the copy it was
+		// made against. No version is a 400: the client and the server ship
+		// in one binary, so every save the app makes carries one.
+		var req struct {
+			state.Tournament
+			TournamentVersion string `json:"tournamentVersion"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
+		if req.TournamentVersion == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "tournamentVersion is required: send the version of the tournament settings this save was made from"})
+			return
+		}
+		t := req.Tournament
 		// Trim string fields so padded input from direct API callers
 		// doesn't persist with surrounding whitespace. Date is included
 		// for cross-file guard symmetry with handlers_import.go (which
@@ -820,6 +876,14 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 		// immediately instead of waiting for their next write to 401.
 		passwordChanged := false
 		changed, err := store.UpdateTournamentChanged(&t, func(current, desired *state.Tournament) error {
+			// Judged under the store's write lock, against the settings this
+			// save would replace, so two saves made from the same copy cannot
+			// both land: the second is refused and its device shows the
+			// current copy. With no tournament.md yet there is nothing to
+			// write over.
+			if current != nil && state.TournamentVersion(current) != req.TournamentVersion {
+				return errTournamentChanged
+			}
 			// Preserve Theme.LogoPath (mp-scf): LogoPath has json:"-" so the
 			// bound body never carries it. The logo is managed via
 			// POST/DELETE /api/branding/logo; this PUT must not clear it.
@@ -923,6 +987,10 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 		}
 		if errors.Is(err, errModeImmutable) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": errModeImmutable.Error()})
+			return
+		}
+		if errors.Is(err, errTournamentChanged) {
+			respondTournamentChanged(c, store, verifier)
 			return
 		}
 		if err != nil {

@@ -850,7 +850,7 @@ func TestBulkCheckIn(t *testing.T) {
 
 	doPost := func(t *testing.T, pids []string) *httptest.ResponseRecorder {
 		t.Helper()
-		body, _ := json.Marshal(map[string]interface{}{"participantIds": pids})
+		body, _ := json.Marshal(map[string]interface{}{"participantIds": pids, "modifiedAt": nextCheckInStamp()})
 		w := httptest.NewRecorder()
 		req, _ := http.NewRequest("POST", "/api/competitions/"+compID+"/participants/checkin-bulk", bytes.NewBuffer(body))
 		req.Header.Set("Content-Type", "application/json")
@@ -915,7 +915,7 @@ func TestBulkCheckIn(t *testing.T) {
 	})
 
 	t.Run("competition not found returns 404", func(t *testing.T) {
-		body, _ := json.Marshal(map[string]interface{}{"participantIds": []string{}})
+		body, _ := json.Marshal(map[string]interface{}{"participantIds": []string{}, "modifiedAt": nextCheckInStamp()})
 		w := httptest.NewRecorder()
 		req, _ := http.NewRequest("POST", "/api/competitions/nonexistent/participants/checkin-bulk", bytes.NewBuffer(body))
 		req.Header.Set("Content-Type", "application/json")
@@ -950,7 +950,7 @@ func TestBulkCheckIn(t *testing.T) {
 		assert.Empty(t, res.NotFound)
 	})
 
-	t.Run("no file write when nothing toggles", func(t *testing.T) {
+	t.Run("no file write when nothing changes", func(t *testing.T) {
 		csvPath := filepath.Join(tempDir, "competitions", compID, "participants.csv")
 
 		// Snapshot mtime before a no-op call (empty array).
@@ -964,8 +964,10 @@ func TestBulkCheckIn(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, before.ModTime(), after.ModTime(), "participants.csv must not be written for an empty-array call")
 
-		// All participants already checked in, file must also not be written.
-		// At this point Alice, Bob, Carol, Dave, Eve are all checked in.
+		// All five are checked in. A bulk stamped earlier than what each
+		// stores changes nothing: every id comes back superseded and the file
+		// is not written. (A LATER stamp on an already checked-in id is a
+		// change now, it advances the stamp, and is pinned below.)
 		allPIDs := make([]string, len(added))
 		for i, p := range added {
 			allPIDs[i] = p.ID
@@ -973,12 +975,31 @@ func TestBulkCheckIn(t *testing.T) {
 		before2, err := os.Stat(csvPath)
 		require.NoError(t, err)
 
-		w = doPost(t, allPIDs)
+		stale, _ := json.Marshal(map[string]any{"participantIds": allPIDs, "modifiedAt": 1})
+		w = httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/api/competitions/"+compID+"/participants/checkin-bulk", bytes.NewBuffer(stale))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
 		require.Equal(t, http.StatusOK, w.Code)
+		var res state.BulkCheckInResult
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &res))
+		assert.Len(t, res.Superseded, len(added), "every id holds a later stamp")
+		assert.Zero(t, res.CheckedIn)
+		assert.Zero(t, res.AlreadyCheckedIn)
 
 		after2, err := os.Stat(csvPath)
 		require.NoError(t, err)
-		assert.Equal(t, before2.ModTime(), after2.ModTime(), "participants.csv must not be written when all participants are already checked-in")
+		assert.Equal(t, before2.ModTime(), after2.ModTime(), "participants.csv must not be written when every id is superseded")
+	})
+
+	t.Run("a later stamp on a checked-in id advances its stamp", func(t *testing.T) {
+		w := doPost(t, []string{added[0].ID})
+		require.Equal(t, http.StatusOK, w.Code)
+		var res state.BulkCheckInResult
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &res))
+		assert.Equal(t, 0, res.CheckedIn)
+		assert.Equal(t, 1, res.AlreadyCheckedIn)
+		assert.Empty(t, res.Superseded)
 	})
 }
 
@@ -1025,7 +1046,7 @@ func TestBulkCheckIn_BroadcastBehaviour(t *testing.T) {
 	require.NoError(t, err)
 
 	doPost := func(pids []string) *httptest.ResponseRecorder {
-		body, _ := json.Marshal(map[string]any{"participantIds": pids})
+		body, _ := json.Marshal(map[string]any{"participantIds": pids, "modifiedAt": nextCheckInStamp()})
 		w := httptest.NewRecorder()
 		req, _ := http.NewRequest("POST", "/api/competitions/"+compID+"/participants/checkin-bulk", bytes.NewBuffer(body))
 		req.Header.Set("Content-Type", "application/json")
@@ -1574,12 +1595,13 @@ func TestParticipant500ErrorsAreSanitized(t *testing.T) {
 	require.NoError(t, os.Remove(participantsPath))
 	require.NoError(t, os.MkdirAll(participantsPath, 0o700))
 
+	stamped := string(stampedBytes(t))
 	cases := []struct {
 		name, method, path, body string
 	}{
 		{"PUT participant", http.MethodPut, "/api/competitions/" + compID + "/participants/" + p.ID, `{"name":"Bob","dojo":"Dojo"}`},
-		{"PUT checkin", http.MethodPut, "/api/competitions/" + compID + "/participants/" + p.ID + "/checkin", ""},
-		{"DELETE checkin", http.MethodDelete, "/api/competitions/" + compID + "/participants/" + p.ID + "/checkin", ""},
+		{"PUT checkin", http.MethodPut, "/api/competitions/" + compID + "/participants/" + p.ID + "/checkin", stamped},
+		{"DELETE checkin", http.MethodDelete, "/api/competitions/" + compID + "/participants/" + p.ID + "/checkin", stamped},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1689,7 +1711,7 @@ func TestCheckIn_BlankDojoElsewhereInRoster_Returns400(t *testing.T) {
 		writeLegacyRosterCSV(t, tempDir, compID, aliceID+",Alice,DojoA\n"+charlieID+",Charlie,\n")
 
 		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("PUT", "/api/competitions/"+compID+"/participants/"+aliceID+"/checkin", nil)
+		req, _ := http.NewRequest("PUT", "/api/competitions/"+compID+"/participants/"+aliceID+"/checkin", bytes.NewBuffer(stampedBytes(t)))
 		r.ServeHTTP(w, req)
 
 		assert.Equal(t, http.StatusBadRequest, w.Code,
@@ -1718,7 +1740,7 @@ func TestCheckIn_BlankDojoElsewhereInRoster_Returns400(t *testing.T) {
 		writeLegacyRosterCSV(t, tempDir, compID, aliceID+",Alice,DojoA,checked_in\n"+charlieID+",Charlie,\n")
 
 		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("DELETE", "/api/competitions/"+compID+"/participants/"+aliceID+"/checkin", nil)
+		req, _ := http.NewRequest("DELETE", "/api/competitions/"+compID+"/participants/"+aliceID+"/checkin", bytes.NewBuffer(stampedBytes(t)))
 		r.ServeHTTP(w, req)
 
 		assert.Equal(t, http.StatusBadRequest, w.Code,
@@ -1735,7 +1757,7 @@ func TestCheckIn_BlankDojoElsewhereInRoster_Returns400(t *testing.T) {
 		aliceID, bobID, charlieID := helper.NewUUID4(), helper.NewUUID4(), helper.NewUUID4()
 		writeLegacyRosterCSV(t, tempDir, compID, aliceID+",Alice,DojoA\n"+bobID+",Bob,DojoB\n"+charlieID+",Charlie,\n")
 
-		body, _ := json.Marshal(map[string]interface{}{"participantIds": []string{aliceID, bobID}})
+		body, _ := json.Marshal(map[string]interface{}{"participantIds": []string{aliceID, bobID}, "modifiedAt": nextCheckInStamp()})
 		w := httptest.NewRecorder()
 		req, _ := http.NewRequest("POST", "/api/competitions/"+compID+"/participants/checkin-bulk", bytes.NewBuffer(body))
 		req.Header.Set("Content-Type", "application/json")
@@ -1765,7 +1787,7 @@ func TestCheckIn_BlankNameElsewhereInRoster_Returns400(t *testing.T) {
 	writeLegacyRosterCSV(t, tempDir, compID, aliceID+",Alice,DojoA\n"+blankID+",,DojoC\n")
 
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("PUT", "/api/competitions/"+compID+"/participants/"+aliceID+"/checkin", nil)
+	req, _ := http.NewRequest("PUT", "/api/competitions/"+compID+"/participants/"+aliceID+"/checkin", bytes.NewBuffer(stampedBytes(t)))
 	r.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusBadRequest, w.Code,

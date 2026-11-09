@@ -169,6 +169,9 @@ func TestFingerprintDoors(t *testing.T) {
 			"password": pt.Password, "durationDays": tour.DurationDays,
 			"clockToElapsedMultiplier": tour.ClockToElapsedMultiplier, "slowestCourtBufferPct": tour.SlowestCourtBufferPct,
 			"mode": tour.Mode, "sponsors": tour.Sponsors,
+			// The no-op save writes nothing, so the real one below is made
+			// from the same copy.
+			"tournamentVersion": state.TournamentVersion(tour),
 		}
 		h.noOp(http.MethodPut, "/api/tournament", body)
 		body["venue"] = "North Budokan"
@@ -365,10 +368,22 @@ func TestFingerprintDoors(t *testing.T) {
 		comp.Players = players
 		h.noOp(http.MethodPut, "/api/competitions/"+compID, comp)
 
-		h.real(http.MethodPut, participants+"/"+players[0].ID+"/checkin", map[string]any{"checkedIn": true})
-		h.noOp(http.MethodPut, participants+"/"+players[0].ID+"/checkin", map[string]any{"checkedIn": true})
-		ids := []string{players[0].ID}
-		h.noOp(http.MethodPost, participants+"/checkin-bulk", map[string]any{"participantIds": ids})
+		// The three check-in doors. A check-in sent again at a later stamp only
+		// restamps the row's marker, which the fingerprint unstamps; a resend
+		// at the same stamp is superseded and writes nothing; and a check-in
+		// applied and taken back fingerprints like one never made.
+		checkin := participants + "/" + players[1].ID + "/checkin"
+		ids := []string{players[1].ID}
+		neverCheckedIn := state.Fingerprint(h.files())
+		h.real(http.MethodPut, checkin, map[string]any{"modifiedAt": now - 4000})
+		h.noOp(http.MethodPut, checkin, map[string]any{"modifiedAt": now - 3000}, "participants.csv")
+		h.noOp(http.MethodPut, checkin, map[string]any{"modifiedAt": now - 3000})
+		h.noOp(http.MethodPost, participants+"/checkin-bulk", map[string]any{"participantIds": ids, "modifiedAt": now - 2000}, "participants.csv")
+		h.noOp(http.MethodPost, participants+"/checkin-bulk", map[string]any{"participantIds": ids, "modifiedAt": now - 2000})
+		h.real(http.MethodDelete, checkin, map[string]any{"modifiedAt": now - 1000})
+		assert.Equal(t, neverCheckedIn, state.Fingerprint(h.files()), "a check-in taken back fingerprints like one never made")
+		h.noOp(http.MethodDelete, checkin, map[string]any{"modifiedAt": now - 500}, "participants.csv")
+		h.noOp(http.MethodDelete, checkin, map[string]any{"modifiedAt": now - 4500})
 
 		players, err = pt.Store.LoadParticipants(compID, false)
 		require.NoError(t, err)

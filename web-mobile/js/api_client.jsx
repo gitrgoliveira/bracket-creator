@@ -6091,14 +6091,17 @@ const API = {
     },
     // Replace the full fighting-spirit awards list for a competition.
     // awards: array of { title, recipientName, recipientDojo? }.
-    async updateCompetitionAwards(id, awards, password) {
+    // awardsVersion: the version of the list this save was made from (the
+    // competition detail's awardsVersion, or the last save's answer); a save
+    // from an older list is refused (409 awards_changed).
+    async updateCompetitionAwards(id, awards, password, awardsVersion) {
         const res = await fetch(`/api/competitions/${id}/awards`, {
             method: 'PUT',
             headers: {
                 'Content-Type': 'application/json',
                 'X-Tournament-Password': password
             },
-            body: JSON.stringify({ fightingSpiritAwards: awards })
+            body: JSON.stringify({ fightingSpiritAwards: awards, awardsVersion })
         });
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));

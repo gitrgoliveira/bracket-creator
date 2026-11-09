@@ -2830,7 +2830,7 @@ func respondClockSkew(c *gin.Context, serverNowMs, aheadMs int64) {
 		"applied":     false,
 		"reason":      "clock_skew",
 		"serverNowMs": serverNowMs,
-		"message":     "Not saved: this device's clock appears to be ahead of the server. The app will resync its clock; enter the result again.",
+		"message":     "Not saved: this device's clock appears to be ahead of the server. The app will resync its clock; try again.",
 	})
 }
 

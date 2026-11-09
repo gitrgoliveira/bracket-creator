@@ -233,7 +233,7 @@ func TestTeamMemberUniqueness_GrandfathersStoredDuplicates(t *testing.T) {
 	})
 
 	t.Run("bulk check-in still works", func(t *testing.T) {
-		res, berr := s.BulkCheckIn(id, []string{stored[1].ID, stored[2].ID})
+		res, berr := s.BulkCheckInAt(id, []string{stored[1].ID, stored[2].ID}, 1000)
 		require.NoError(t, berr)
 		assert.Equal(t, 2, res.CheckedIn)
 	})

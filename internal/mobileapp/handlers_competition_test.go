@@ -3214,7 +3214,7 @@ func TestPUTCompetitionAwards(t *testing.T) {
 			},
 		})
 		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("PUT", "/api/competitions/"+cid+"/awards", bytes.NewBuffer(body))
+		req, _ := http.NewRequest("PUT", "/api/competitions/"+cid+"/awards", bytes.NewBuffer(versionedAwardsBody(t, store, cid, body)))
 		req.Header.Set("Content-Type", "application/json")
 		r.ServeHTTP(w, req)
 
@@ -3254,7 +3254,7 @@ func TestPUTCompetitionAwards(t *testing.T) {
 	t.Run("clear awards: empty array persisted", func(t *testing.T) {
 		body, _ := json.Marshal(map[string]any{"fightingSpiritAwards": []any{}})
 		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("PUT", "/api/competitions/"+cid+"/awards", bytes.NewBuffer(body))
+		req, _ := http.NewRequest("PUT", "/api/competitions/"+cid+"/awards", bytes.NewBuffer(versionedAwardsBody(t, store, cid, body)))
 		req.Header.Set("Content-Type", "application/json")
 		r.ServeHTTP(w, req)
 
@@ -3272,7 +3272,7 @@ func TestPUTCompetitionAwards(t *testing.T) {
 			},
 		})
 		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("PUT", "/api/competitions/no-such-comp/awards", bytes.NewBuffer(body))
+		req, _ := http.NewRequest("PUT", "/api/competitions/no-such-comp/awards", bytes.NewBuffer(versionedAwardsBody(t, store, "no-such-comp", body)))
 		req.Header.Set("Content-Type", "application/json")
 		r.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusNotFound, w.Code)
@@ -3286,7 +3286,7 @@ func TestPUTCompetitionAwards(t *testing.T) {
 			},
 		})
 		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("PUT", "/api/competitions/"+cid+"/awards", bytes.NewBuffer(body))
+		req, _ := http.NewRequest("PUT", "/api/competitions/"+cid+"/awards", bytes.NewBuffer(versionedAwardsBody(t, store, cid, body)))
 		req.Header.Set("Content-Type", "application/json")
 		r.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
@@ -3300,7 +3300,7 @@ func TestPUTCompetitionAwards(t *testing.T) {
 			},
 		})
 		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("PUT", "/api/competitions/"+cid+"/awards", bytes.NewBuffer(body))
+		req, _ := http.NewRequest("PUT", "/api/competitions/"+cid+"/awards", bytes.NewBuffer(versionedAwardsBody(t, store, cid, body)))
 		req.Header.Set("Content-Type", "application/json")
 		r.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
@@ -3314,7 +3314,7 @@ func TestPUTCompetitionAwards(t *testing.T) {
 		}
 		body, _ := json.Marshal(map[string]any{"fightingSpiritAwards": awards})
 		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("PUT", "/api/competitions/"+cid+"/awards", bytes.NewBuffer(body))
+		req, _ := http.NewRequest("PUT", "/api/competitions/"+cid+"/awards", bytes.NewBuffer(versionedAwardsBody(t, store, cid, body)))
 		req.Header.Set("Content-Type", "application/json")
 		r.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
@@ -3328,7 +3328,7 @@ func TestPUTCompetitionAwards(t *testing.T) {
 			},
 		})
 		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("PUT", "/api/competitions/"+cid+"/awards", bytes.NewBuffer(body))
+		req, _ := http.NewRequest("PUT", "/api/competitions/"+cid+"/awards", bytes.NewBuffer(versionedAwardsBody(t, store, cid, body)))
 		req.Header.Set("Content-Type", "application/json")
 		r.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
@@ -3341,7 +3341,7 @@ func TestPUTCompetitionAwards(t *testing.T) {
 			},
 		})
 		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("PUT", "/api/competitions/"+cid+"/awards", bytes.NewBuffer(body))
+		req, _ := http.NewRequest("PUT", "/api/competitions/"+cid+"/awards", bytes.NewBuffer(versionedAwardsBody(t, store, cid, body)))
 		req.Header.Set("Content-Type", "application/json")
 		r.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
@@ -3354,7 +3354,7 @@ func TestPUTCompetitionAwards(t *testing.T) {
 			},
 		})
 		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("PUT", "/api/competitions/"+cid+"/awards", bytes.NewBuffer(body))
+		req, _ := http.NewRequest("PUT", "/api/competitions/"+cid+"/awards", bytes.NewBuffer(versionedAwardsBody(t, store, cid, body)))
 		req.Header.Set("Content-Type", "application/json")
 		r.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
@@ -3367,7 +3367,7 @@ func TestPUTCompetitionAwards(t *testing.T) {
 			},
 		})
 		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("PUT", "/api/competitions/"+cid+"/awards", bytes.NewBuffer(body))
+		req, _ := http.NewRequest("PUT", "/api/competitions/"+cid+"/awards", bytes.NewBuffer(versionedAwardsBody(t, store, cid, body)))
 		req.Header.Set("Content-Type", "application/json")
 		r.ServeHTTP(w, req)
 		require.Equalf(t, http.StatusOK, w.Code, "response: %s", w.Body.String())

@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"log"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
@@ -408,11 +409,13 @@ func (s *Store) readParticipantsNoLock(compID string, withZekkenName bool, opts 
 
 	var ids []string
 	var checkedInFlags []bool
+	var checkInStamps []int64
 	var playerRecords [][]string
 	var playerLines []int // the file line of each playerRecords row
 
 	for ri, record := range records {
 		isCheckedIn := false
+		var checkInAt int64
 
 		// Determine data fields (everything after the id if present).
 		//
@@ -457,13 +460,13 @@ func (s *Store) readParticipantsNoLock(compID string, withZekkenName bool, opts 
 			continue
 		}
 
-		// Detect and strip checked_in marker from the last data field.
-		// Minimum valid data row is "Name,Dojo" (2 parts), so checked_in
-		// is only treated as a marker when at least 3 data parts are present.
+		// Detect and strip the check-in marker from the last data field
+		// (parseCheckInMarker). Minimum valid data row is "Name,Dojo" (2
+		// parts), so a marker is only read when at least 3 data parts are
+		// present.
 		if len(dataFields) > 2 {
-			last := strings.TrimSpace(dataFields[len(dataFields)-1])
-			if strings.ToLower(last) == "checked_in" {
-				isCheckedIn = true
+			if in, at, ok := parseCheckInMarker(dataFields[len(dataFields)-1]); ok {
+				isCheckedIn, checkInAt = in, at
 				dataFields = dataFields[:len(dataFields)-1]
 			}
 		}
@@ -478,6 +481,7 @@ func (s *Store) readParticipantsNoLock(compID string, withZekkenName bool, opts 
 		playerRecords = append(playerRecords, dataFields)
 		playerLines = append(playerLines, recordLines[ri])
 		checkedInFlags = append(checkedInFlags, isCheckedIn)
+		checkInStamps = append(checkInStamps, checkInAt)
 	}
 
 	// requireDojo=false (bc-drwx item 10): this reads an EXISTING roster
@@ -498,6 +502,7 @@ func (s *Store) readParticipantsNoLock(compID string, withZekkenName bool, opts 
 		}
 		if i < len(checkedInFlags) {
 			players[i].CheckedIn = checkedInFlags[i]
+			players[i].CheckInAt = checkInStamps[i]
 		}
 	}
 
@@ -655,18 +660,61 @@ func resolveParticipantIndex(players []domain.Player, pid string) int {
 	return -1
 }
 
-// BulkCheckInResult carries the outcome of a BulkCheckIn call.
+// BulkCheckInResult carries the outcome of a BulkCheckInAt call.
 type BulkCheckInResult struct {
 	CheckedIn        int      `json:"checkedIn"`
 	AlreadyCheckedIn int      `json:"alreadyCheckedIn"`
 	NotFound         []string `json:"notFound"`
+	// Superseded holds, as stored, each participant whose stored check-in
+	// change is as late as or later than this one (CheckInSuperseded), so the
+	// caller can adopt each by id.
+	Superseded []domain.Player `json:"superseded"`
 }
 
-// BulkCheckIn atomically marks all participants in pids as checked-in under a
-// single lock acquire, writing participants.csv exactly once. Only participants
-// that were not already checked in count toward CheckedIn; the file is only
-// written when at least one participant was actually toggled.
-func (s *Store) BulkCheckIn(compID string, pids []string) (BulkCheckInResult, error) {
+// errCheckInSuperseded stops SetCheckIn's transform before anything is
+// written; SetCheckIn answers it as "not applied", never as an error.
+var errCheckInSuperseded = errors.New("check-in superseded by a later one")
+
+// CheckInSuperseded is the one rule for "the later tap wins": a check-in
+// change stamped at loses to the one stored on p when it is not later. At or
+// below (not strictly below) makes an exact resend harmless and settles a
+// same-millisecond tie between two desks the same way every time: the first
+// to arrive at that stamp holds.
+func CheckInSuperseded(p domain.Player, at int64) bool {
+	return at <= p.CheckInAt
+}
+
+// SetCheckIn sets participant pid checked in or not, stamped at, unless the
+// stored check-in change is as late or later (CheckInSuperseded): then nothing
+// is written and the participant is answered as stored with applied false.
+// A stored stamp is replaced by at even when CheckedIn already holds the
+// value, so a later change between the two stamps still loses to this one.
+func (s *Store) SetCheckIn(compID, pid string, withZekkenName, checkedIn bool, at int64) (p domain.Player, applied bool, err error) {
+	var stored domain.Player
+	updated, err := s.UpdateParticipant(compID, pid, withZekkenName, func(p *domain.Player) error {
+		if CheckInSuperseded(*p, at) {
+			stored = *p
+			return errCheckInSuperseded
+		}
+		p.CheckedIn, p.CheckInAt = checkedIn, at
+		return nil
+	})
+	if errors.Is(err, errCheckInSuperseded) {
+		return stored, false, nil
+	}
+	if err != nil {
+		return domain.Player{}, false, err
+	}
+	return *updated, true, nil
+}
+
+// BulkCheckInAt atomically checks in every participant in pids, stamped at,
+// under a single lock acquire, writing participants.csv at most once. Each id
+// is judged as SetCheckIn judges one: a participant whose stored change is as
+// late or later is answered in Superseded and left alone; any other is
+// checked in (CheckedIn when it was not, AlreadyCheckedIn when it was) and
+// takes the stamp. The file is written when any participant took the stamp.
+func (s *Store) BulkCheckInAt(compID string, pids []string, at int64) (BulkCheckInResult, error) {
 	mu := s.getCompLock(compID)
 	mu.Lock()
 	defer mu.Unlock()
@@ -697,7 +745,8 @@ func (s *Store) BulkCheckIn(compID string, pids []string) (BulkCheckInResult, er
 	// deduped by raw string because there is no index to compare against.
 	seenIdx := make(map[int]struct{}, len(pids))
 	seenNotFound := make(map[string]struct{})
-	result := BulkCheckInResult{NotFound: []string{}}
+	result := BulkCheckInResult{NotFound: []string{}, Superseded: []domain.Player{}}
+	changed := false
 	for _, pid := range pids {
 		if pid == "" {
 			continue
@@ -714,6 +763,12 @@ func (s *Store) BulkCheckIn(compID string, pids []string) (BulkCheckInResult, er
 			continue
 		}
 		seenIdx[idx] = struct{}{}
+		if CheckInSuperseded(players[idx], at) {
+			result.Superseded = append(result.Superseded, players[idx])
+			continue
+		}
+		players[idx].CheckInAt = at
+		changed = true
 		if players[idx].CheckedIn {
 			result.AlreadyCheckedIn++
 		} else {
@@ -722,7 +777,7 @@ func (s *Store) BulkCheckIn(compID string, pids []string) (BulkCheckInResult, er
 		}
 	}
 
-	if result.CheckedIn > 0 {
+	if changed {
 		// comp comes from withZekkenNameLocked above: bulk check-in is the
 		// highest-frequency writer, so it must not re-read config.md.
 		if err := s.saveParticipantsNoLock(compID, players, withZekkenName, teamNameRule{comp: comp}); err != nil {
@@ -967,8 +1022,8 @@ func marshalParticipantsCSV(players []domain.Player, withZekkenName bool) ([]byt
 		if src := helper.CanonicalRegistrationSource(p.Source); helper.IsRegistrationSource(src) {
 			record = append(record, src)
 		}
-		if p.CheckedIn {
-			record = append(record, "checked_in")
+		if m := checkInMarker(p.CheckedIn, p.CheckInAt); m != "" {
+			record = append(record, m)
 		}
 		if err := w.Write(record); err != nil {
 			return nil, fmt.Errorf("writing participant CSV record: %w", err)
@@ -979,6 +1034,99 @@ func marshalParticipantsCSV(players []domain.Player, withZekkenName bool) ([]byt
 		return nil, fmt.Errorf("flushing participant CSV: %w", err)
 	}
 	return []byte(sb.String()), nil
+}
+
+// The participants.csv check-in marker, the row's last column. These three
+// functions are its one owner: the writer (checkInMarker), the reader
+// (parseCheckInMarker) and the fingerprint's normalisation
+// (unstampCheckInMarkers).
+const (
+	checkInMarkerIn  = "checked_in"
+	checkInMarkerOut = "not_checked_in"
+)
+
+// checkInMarker is the marker written for a row: "checked_in@<ms>" checked
+// in, "not_checked_in@<ms>" taken back (so the stamp that beats a late, older
+// check-in is kept), and with no stamp the bare "checked_in" every release
+// before stamps wrote, or nothing for a row never checked in.
+func checkInMarker(checkedIn bool, at int64) string {
+	switch {
+	case checkedIn && at > 0:
+		return checkInMarkerIn + "@" + strconv.FormatInt(at, 10)
+	case checkedIn:
+		return checkInMarkerIn
+	case at > 0:
+		return checkInMarkerOut + "@" + strconv.FormatInt(at, 10)
+	}
+	return ""
+}
+
+// parseCheckInMarker reads a row's last column as a check-in marker, in any
+// letter case: the bare legacy "checked_in" is checked in at stamp 0, so a
+// roster from an earlier release loads as it was with no rewrite. ok is false
+// for anything else, which is then an ordinary data column.
+func parseCheckInMarker(field string) (checkedIn bool, at int64, ok bool) {
+	f := strings.ToLower(strings.TrimSpace(field))
+	if f == checkInMarkerIn {
+		return true, 0, true
+	}
+	word, stamp, found := strings.Cut(f, "@")
+	if !found || (word != checkInMarkerIn && word != checkInMarkerOut) {
+		return false, 0, false
+	}
+	if stamp == "" || strings.Trim(stamp, "0123456789") != "" {
+		return false, 0, false
+	}
+	n, err := strconv.ParseInt(stamp, 10, 64)
+	if err != nil {
+		return false, 0, false
+	}
+	return word == checkInMarkerIn, n, true
+}
+
+// unstampCheckInMarkers rewrites participants.csv records, in place, as if no
+// check-in had ever been stamped: "checked_in@<ms>" becomes "checked_in" and
+// "not_checked_in@<ms>" is dropped. The fingerprint (backup_fingerprint.go)
+// asks it, so a check-in sent again that changes nothing, or one applied and
+// taken back, fingerprints like the roster before it. Only a marker exactly
+// as checkInMarker writes it, on a row of more than two columns (the reader's
+// guard), is rewritten, so a data column that merely reads like one in
+// another letter case is left alone.
+func unstampCheckInMarkers(records [][]string) {
+	for i, r := range records {
+		if len(r) <= 2 {
+			continue
+		}
+		last := r[len(r)-1]
+		in, at, ok := parseCheckInMarker(last)
+		if !ok || at == 0 || last != checkInMarker(in, at) {
+			continue
+		}
+		if in {
+			r[len(r)-1] = checkInMarkerIn
+		} else {
+			records[i] = r[:len(r)-1]
+		}
+	}
+}
+
+// readParticipantsCSVRecords and writeParticipantsCSVRecords read and write
+// participants.csv as plain CSV records, the format marshalParticipantsCSV
+// writes, for the fingerprint, which has no competition config to parse
+// rows by (the zekken column).
+func readParticipantsCSVRecords(raw []byte) ([][]string, error) {
+	r := csv.NewReader(bytes.NewReader(raw))
+	r.FieldsPerRecord = -1
+	return r.ReadAll()
+}
+
+func writeParticipantsCSVRecords(records [][]string) ([]byte, error) {
+	var buf bytes.Buffer
+	w := csv.NewWriter(&buf)
+	if err := w.WriteAll(records); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
 }
 
 // requireSetupLocked returns ErrCompetitionNotInSetup when the on-disk
@@ -1506,7 +1654,7 @@ func (s *Store) saveParticipantsNoLock(compID string, players []domain.Player, w
 	// NEXT read retries the repair against the roster this write produced,
 	// without requiring a restart. saveParticipantsNoLock is the one
 	// chokepoint every roster write funnels through (SaveParticipants,
-	// SaveParticipantsRestored, BulkCheckIn's write-back, UpdateParticipant,
+	// SaveParticipantsRestored, BulkCheckInAt's write-back, UpdateParticipant,
 	// AddParticipant), and every one of those callers already holds the
 	// same per-comp lock EnsureLegacyUpgraded acquires, so a Delete here
 	// cannot race the repair reading a half-written file: sync.Map.Delete

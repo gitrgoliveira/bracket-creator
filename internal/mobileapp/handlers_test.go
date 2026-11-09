@@ -96,7 +96,7 @@ func TestTournamentHandlers(t *testing.T) {
 	tour.Password = "secret"
 	body, _ := json.Marshal(tour)
 	w = httptest.NewRecorder()
-	req, _ = http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(body))
+	req, _ = http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(versionedTournamentBody(t, store, body)))
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusOK, w.Code)
@@ -125,7 +125,7 @@ func TestTournamentHandlers(t *testing.T) {
 	tour.Password = "secret"
 	body, _ = json.Marshal(tour)
 	w = httptest.NewRecorder()
-	req, _ = http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(body))
+	req, _ = http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(versionedTournamentBody(t, store, body)))
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
 	require.Equal(t, http.StatusOK, w.Code)
@@ -133,6 +133,9 @@ func TestTournamentHandlers(t *testing.T) {
 	assert.Equal(t, "Padded Tournament", t3.Name)
 	assert.Equal(t, "Crystal Palace", t3.Venue)
 	assert.Equal(t, "12-05-2026", t3.Date, "Date should be trimmed on PUT")
+	// The save-error PUT below runs while tournament.md cannot be read, so
+	// its version is taken now.
+	saveErrBody := versionedTournamentBody(t, store, body)
 
 	// GET /api/tournament (not found)
 	os.Remove(filepath.Join(tempDir, "tournament.md"))
@@ -152,7 +155,7 @@ func TestTournamentHandlers(t *testing.T) {
 	os.Remove(filepath.Join(tempDir, "tournament.md"))
 	os.Mkdir(filepath.Join(tempDir, "tournament.md"), 0755)
 	w = httptest.NewRecorder()
-	req, _ = http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(body))
+	req, _ = http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(saveErrBody))
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
@@ -196,7 +199,7 @@ func TestTournamentHandlers(t *testing.T) {
 		blank := state.Tournament{Name: "   ", Venue: "Anywhere", Password: "secret"}
 		body, _ = json.Marshal(blank)
 		w = httptest.NewRecorder()
-		req, _ = http.NewRequest(method, "/api/tournament", bytes.NewBuffer(body))
+		req, _ = http.NewRequest(method, "/api/tournament", bytes.NewBuffer(versionedTournamentBody(t, store, body)))
 		req.Header.Set("Content-Type", "application/json")
 		r.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusBadRequest, w.Code,
@@ -219,7 +222,7 @@ func TestTournamentHandlers(t *testing.T) {
 			bad := state.Tournament{Name: "Some Name", Venue: "Venue", Date: badDate, Password: "secret", Courts: []string{"A"}}
 			body, _ = json.Marshal(bad)
 			w = httptest.NewRecorder()
-			req, _ = http.NewRequest(method, "/api/tournament", bytes.NewBuffer(body))
+			req, _ = http.NewRequest(method, "/api/tournament", bytes.NewBuffer(versionedTournamentBody(t, store, body)))
 			req.Header.Set("Content-Type", "application/json")
 			r.ServeHTTP(w, req)
 			assert.Equal(t, http.StatusBadRequest, w.Code,
@@ -245,7 +248,7 @@ func TestTournamentHandlers(t *testing.T) {
 			bad := state.Tournament{Name: "Some Name", Venue: "Venue", Date: outOfRangeDate, Password: "secret", Courts: []string{"A"}}
 			body, _ = json.Marshal(bad)
 			w = httptest.NewRecorder()
-			req, _ = http.NewRequest(method, "/api/tournament", bytes.NewBuffer(body))
+			req, _ = http.NewRequest(method, "/api/tournament", bytes.NewBuffer(versionedTournamentBody(t, store, body)))
 			req.Header.Set("Content-Type", "application/json")
 			r.ServeHTTP(w, req)
 			assert.Equal(t, http.StatusBadRequest, w.Code,
@@ -299,7 +302,7 @@ func TestTournamentHandlers(t *testing.T) {
 		update := state.Tournament{Name: "Preserve Test", Venue: "New Venue", Password: "", Courts: []string{"A"}}
 		body, _ := json.Marshal(update)
 		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(body))
+		req, _ := http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(versionedTournamentBody(t, store, body)))
 		req.Header.Set("Content-Type", "application/json")
 		r.ServeHTTP(w, req)
 		require.Equal(t, http.StatusOK, w.Code,
@@ -321,7 +324,7 @@ func TestTournamentHandlers(t *testing.T) {
 		update := state.Tournament{Name: "Change Test", Password: "new-secret", Courts: []string{"A"}}
 		body, _ := json.Marshal(update)
 		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(body))
+		req, _ := http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(versionedTournamentBody(t, store, body)))
 		req.Header.Set("Content-Type", "application/json")
 		r.ServeHTTP(w, req)
 		require.Equal(t, http.StatusOK, w.Code)
@@ -349,7 +352,7 @@ func TestTournamentHandlers(t *testing.T) {
 		update := state.Tournament{Name: "Legacy", Venue: "Update", Password: "", Courts: []string{"A"}}
 		body, _ := json.Marshal(update)
 		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(body))
+		req, _ := http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(versionedTournamentBody(t, store, body)))
 		req.Header.Set("Content-Type", "application/json")
 		r.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusBadRequest, w.Code,
@@ -372,7 +375,7 @@ func TestTournamentHandlers(t *testing.T) {
 		}
 		body, _ := json.Marshal(tour)
 		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(body))
+		req, _ := http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(versionedTournamentBody(t, store, body)))
 		req.Header.Set("Content-Type", "application/json")
 		r.ServeHTTP(w, req)
 		require.Equal(t, http.StatusOK, w.Code)
@@ -398,7 +401,7 @@ func TestTournamentHandlers(t *testing.T) {
 		}
 		body, _ := json.Marshal(tour)
 		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(body))
+		req, _ := http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(versionedTournamentBody(t, store, body)))
 		req.Header.Set("Content-Type", "application/json")
 		r.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
@@ -415,7 +418,7 @@ func TestTournamentHandlers(t *testing.T) {
 		}
 		body, _ := json.Marshal(tour)
 		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(body))
+		req, _ := http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(versionedTournamentBody(t, store, body)))
 		req.Header.Set("Content-Type", "application/json")
 		r.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
@@ -432,7 +435,7 @@ func TestTournamentHandlers(t *testing.T) {
 		}
 		body, _ := json.Marshal(tour)
 		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(body))
+		req, _ := http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(versionedTournamentBody(t, store, body)))
 		req.Header.Set("Content-Type", "application/json")
 		r.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
@@ -445,7 +448,7 @@ func TestTournamentHandlers(t *testing.T) {
 		tour := state.Tournament{Name: "PU Test", Password: "secret", Courts: []string{"A"}, PublicURL: ""}
 		body, _ := json.Marshal(tour)
 		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(body))
+		req, _ := http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(versionedTournamentBody(t, store, body)))
 		req.Header.Set("Content-Type", "application/json")
 		r.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusOK, w.Code)
@@ -456,7 +459,7 @@ func TestTournamentHandlers(t *testing.T) {
 		tour := state.Tournament{Name: "PU Test", Password: "secret", Courts: []string{"A"}, PublicURL: "https://my-tournament.example.com/"}
 		body, _ := json.Marshal(tour)
 		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(body))
+		req, _ := http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(versionedTournamentBody(t, store, body)))
 		req.Header.Set("Content-Type", "application/json")
 		r.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusOK, w.Code)
@@ -470,7 +473,7 @@ func TestTournamentHandlers(t *testing.T) {
 		tour := state.Tournament{Name: "PU Test", Password: "secret", Courts: []string{"A"}, PublicURL: "javascript:alert(1)"}
 		body, _ := json.Marshal(tour)
 		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(body))
+		req, _ := http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(versionedTournamentBody(t, store, body)))
 		req.Header.Set("Content-Type", "application/json")
 		r.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
@@ -483,7 +486,7 @@ func TestTournamentHandlers(t *testing.T) {
 		tour := state.Tournament{Name: "PU Test", Password: "secret", Courts: []string{"A"}, PublicURL: longURL}
 		body, _ := json.Marshal(tour)
 		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(body))
+		req, _ := http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(versionedTournamentBody(t, store, body)))
 		req.Header.Set("Content-Type", "application/json")
 		r.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
@@ -495,7 +498,7 @@ func TestTournamentHandlers(t *testing.T) {
 		tour := state.Tournament{Name: "PU Test", Password: "secret", Courts: []string{"A"}, PublicURL: "http://staging.example.com"}
 		body, _ := json.Marshal(tour)
 		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(body))
+		req, _ := http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(versionedTournamentBody(t, store, body)))
 		req.Header.Set("Content-Type", "application/json")
 		r.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusOK, w.Code)
@@ -505,7 +508,7 @@ func TestTournamentHandlers(t *testing.T) {
 		tour := state.Tournament{Name: "PU Test", Password: "secret", Courts: []string{"A"}, PublicURL: "https://"}
 		body, _ := json.Marshal(tour)
 		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(body))
+		req, _ := http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(versionedTournamentBody(t, store, body)))
 		req.Header.Set("Content-Type", "application/json")
 		r.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
@@ -579,7 +582,7 @@ func TestTournamentHandlers_LockedMode_PUTRejectsPasswordChange(t *testing.T) {
 			Password: "operator-tried-to-rotate",
 			Courts:   []string{"A"},
 		})
-		req := httptest.NewRequest(http.MethodPut, "/api/tournament", bytes.NewReader(body))
+		req := httptest.NewRequest(http.MethodPut, "/api/tournament", bytes.NewReader(versionedTournamentBody(t, store, body)))
 		req.Header.Set("X-Tournament-Password", "kotai-A")
 		req.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
@@ -599,7 +602,7 @@ func TestTournamentHandlers_LockedMode_PUTRejectsPasswordChange(t *testing.T) {
 			Name:   "Locked Renamed",
 			Courts: []string{"A"},
 		})
-		req := httptest.NewRequest(http.MethodPut, "/api/tournament", bytes.NewReader(body))
+		req := httptest.NewRequest(http.MethodPut, "/api/tournament", bytes.NewReader(versionedTournamentBody(t, store, body)))
 		req.Header.Set("X-Tournament-Password", "kotai-A")
 		req.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
@@ -650,7 +653,7 @@ func TestTournamentHandlers_FileMode_PUTPasswordChange_BroadcastsResetEvent(t *t
 		Password: "beta",
 		Courts:   []string{"A"},
 	})
-	req := httptest.NewRequest(http.MethodPut, "/api/tournament", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPut, "/api/tournament", bytes.NewReader(versionedTournamentBody(t, store, body)))
 	req.Header.Set("X-Tournament-Password", "alpha")
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -705,7 +708,7 @@ func TestTournamentHandlers_FileMode_PUTNoPasswordChange_NoResetEvent(t *testing
 		Name:   "Renamed",
 		Courts: []string{"A"},
 	})
-	req := httptest.NewRequest(http.MethodPut, "/api/tournament", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPut, "/api/tournament", bytes.NewReader(versionedTournamentBody(t, store, body)))
 	req.Header.Set("X-Tournament-Password", "alpha")
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -938,7 +941,7 @@ func TestTournamentHandlers_ModeSwitchPreservesStoredPassword(t *testing.T) {
 	putBody, _ := json.Marshal(state.Tournament{
 		Name: "Renamed", Courts: []string{"A"},
 	})
-	putReq := httptest.NewRequest(http.MethodPut, "/api/tournament", bytes.NewReader(putBody))
+	putReq := httptest.NewRequest(http.MethodPut, "/api/tournament", bytes.NewReader(versionedTournamentBody(t, store, putBody)))
 	putReq.Header.Set("X-Tournament-Password", "kotai-A")
 	putReq.Header.Set("Content-Type", "application/json")
 	putW := httptest.NewRecorder()
@@ -1037,7 +1040,7 @@ func TestTournamentHandlers_LockedMode_StripPasswordOnResponses(t *testing.T) {
 		// No Password field; even if the SPA sent one, the locked-mode
 		// transform ignores it and preserves the stored value.
 	})
-	putReq := httptest.NewRequest(http.MethodPut, "/api/tournament", bytes.NewReader(putBody))
+	putReq := httptest.NewRequest(http.MethodPut, "/api/tournament", bytes.NewReader(versionedTournamentBody(t, store, putBody)))
 	putReq.Header.Set("X-Tournament-Password", "kotai-A")
 	putReq.Header.Set("Content-Type", "application/json")
 	putW := httptest.NewRecorder()
@@ -1120,7 +1123,7 @@ func TestTournamentHandlers_MaxLengthCaps(t *testing.T) {
 		for _, lc := range overCap {
 			body, _ := json.Marshal(lc.body)
 			w := httptest.NewRecorder()
-			req, _ := http.NewRequest(method, "/api/tournament", bytes.NewBuffer(body))
+			req, _ := http.NewRequest(method, "/api/tournament", bytes.NewBuffer(versionedTournamentBody(t, store, body)))
 			req.Header.Set("Content-Type", "application/json")
 			r.ServeHTTP(w, req)
 			assert.Equal(t, http.StatusBadRequest, w.Code,
@@ -1140,7 +1143,7 @@ func TestTournamentHandlers_MaxLengthCaps(t *testing.T) {
 	}
 	body, _ := json.Marshal(atCap)
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(body))
+	req, _ := http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(versionedTournamentBody(t, store, body)))
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusOK, w.Code,
@@ -1168,7 +1171,7 @@ func TestPauseNameCapCountsCharacters(t *testing.T) {
 	}
 	body, _ := json.Marshal(atCap)
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(body))
+	req, _ := http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(versionedTournamentBody(t, store, body)))
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusOK, w.Code,
@@ -1185,7 +1188,7 @@ func TestPauseNameCapCountsCharacters(t *testing.T) {
 	}
 	bodyOver, _ := json.Marshal(overCap)
 	wOver := httptest.NewRecorder()
-	reqOver, _ := http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(bodyOver))
+	reqOver, _ := http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(versionedTournamentBody(t, store, bodyOver)))
 	reqOver.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(wOver, reqOver)
 	assert.Equal(t, http.StatusBadRequest, wOver.Code,
@@ -1215,7 +1218,7 @@ func TestValidateTournamentPauses_StartAndLength(t *testing.T) {
 		}
 		body, _ := json.Marshal(tourn)
 		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(body))
+		req, _ := http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(versionedTournamentBody(t, store, body)))
 		req.Header.Set("Content-Type", "application/json")
 		r.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
@@ -1236,7 +1239,7 @@ func TestValidateTournamentPauses_StartAndLength(t *testing.T) {
 		}
 		body, _ := json.Marshal(tourn)
 		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(body))
+		req, _ := http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(versionedTournamentBody(t, store, body)))
 		req.Header.Set("Content-Type", "application/json")
 		r.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
@@ -1257,7 +1260,7 @@ func TestValidateTournamentPauses_StartAndLength(t *testing.T) {
 		}
 		body, _ := json.Marshal(tourn)
 		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(body))
+		req, _ := http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(versionedTournamentBody(t, store, body)))
 		req.Header.Set("Content-Type", "application/json")
 		r.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
@@ -1278,7 +1281,7 @@ func TestValidateTournamentPauses_StartAndLength(t *testing.T) {
 		}
 		body, _ := json.Marshal(tourn)
 		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(body))
+		req, _ := http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(versionedTournamentBody(t, store, body)))
 		req.Header.Set("Content-Type", "application/json")
 		r.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
@@ -1299,7 +1302,7 @@ func TestValidateTournamentPauses_StartAndLength(t *testing.T) {
 		}
 		body, _ := json.Marshal(tourn)
 		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(body))
+		req, _ := http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(versionedTournamentBody(t, store, body)))
 		req.Header.Set("Content-Type", "application/json")
 		r.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusOK, w.Code)
@@ -1317,7 +1320,7 @@ func TestValidateTournamentPauses_StartAndLength(t *testing.T) {
 		}
 		body, _ := json.Marshal(tourn)
 		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(body))
+		req, _ := http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(versionedTournamentBody(t, store, body)))
 		req.Header.Set("Content-Type", "application/json")
 		r.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusOK, w.Code)
@@ -1335,7 +1338,7 @@ func TestValidateTournamentPauses_StartAndLength(t *testing.T) {
 		}
 		body, _ := json.Marshal(tourn)
 		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(body))
+		req, _ := http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(versionedTournamentBody(t, store, body)))
 		req.Header.Set("Content-Type", "application/json")
 		r.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
@@ -1386,19 +1389,25 @@ func TestTournamentHandlers_ConcurrentPUT_PasswordChangeNotLost(t *testing.T) {
 			Name: "Concurrent Test", Venue: "Hall B", Password: newPass, Courts: []string{"A"},
 		})
 
+		// Both saves are made from the same copy of the settings, so they
+		// carry the same tournamentVersion.
+		bodyA = versionedTournamentBody(t, store, bodyA)
+		bodyB = versionedTournamentBody(t, store, bodyB)
+
 		var wg sync.WaitGroup
+		var codeA, codeB int
 		wg.Add(2)
 		// Run A and B in parallel. Even with the store-level lock,
 		// they could interleave at any granularity outside the
 		// critical section; the test is that B's password change is
-		// NEVER lost regardless of which interleaving wins.
+		// NEVER silently lost regardless of which interleaving wins.
 		go func() {
 			defer wg.Done()
 			w := httptest.NewRecorder()
 			req, _ := http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(bodyA))
 			req.Header.Set("Content-Type", "application/json")
 			r.ServeHTTP(w, req)
-			assert.Equalf(t, http.StatusOK, w.Code, "PUT A (preserve) should succeed; iter %d", i)
+			codeA = w.Code
 		}()
 		go func() {
 			defer wg.Done()
@@ -1406,30 +1415,35 @@ func TestTournamentHandlers_ConcurrentPUT_PasswordChangeNotLost(t *testing.T) {
 			req, _ := http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(bodyB))
 			req.Header.Set("Content-Type", "application/json")
 			r.ServeHTTP(w, req)
-			assert.Equalf(t, http.StatusOK, w.Code, "PUT B (change) should succeed; iter %d", i)
+			codeB = w.Code
 		}()
 		wg.Wait()
 
-		// Both PUTs are done. The password-change intent (B) must win
-		// regardless of arrival order:
-		//   - If B's transaction won the lock first: stored = newPass,
-		//     then A's transaction loads current.Password = newPass,
-		//     preserves it, saves newPass + Hall A. Final: newPass + Hall A.
-		//   - If A's transaction won the lock first: stored = initialPass
-		//     + Hall A (preserved). Then B's transaction: current.Password
-		//     = initialPass, but desired.Password = newPass (no preserve
-		//     needed). Saves newPass + Hall B. Final: newPass + Hall B.
-		// Either way, Password == newPass. The Venue can be either Hall A
-		// or Hall B, the test doesn't constrain that (standard
-		// last-write-wins for fields both PUTs explicitly set).
+		// Both PUTs are done. The first to take the lock lands; the second
+		// was made from a copy that is no longer stored, so it is refused
+		// (409 tournament_changed) and its device shows the current copy:
+		//   - B first: stored = newPass + Hall B; A is refused.
+		//   - A first: stored = initialPass (preserved) + Hall A; B is
+		//     refused, and its operator is told, so the change is not lost
+		//     silently.
+		// A refused save never writes, so A's preserved password can never
+		// clobber B's new one.
 		stored, err := store.LoadTournament()
 		require.NoError(t, err)
 		require.NotNil(t, stored)
-		assert.Equal(t, newPass, stored.Password,
-			"iter %d: B's password-change intent must NEVER be lost,  "+
-				"got %q, expected %q. (Pre-fix: A's late save with preserved "+
-				"initial password could clobber B's saved new password.)",
-			i, stored.Password, newPass)
+		switch {
+		case codeB == http.StatusOK:
+			assert.Equalf(t, http.StatusConflict, codeA, "iter %d: A, made from the same copy, is refused", i)
+			assert.Equal(t, newPass, stored.Password,
+				"iter %d: B's password change answered 200, so it must be stored", i)
+			assert.Equal(t, "Hall B", stored.Venue)
+		case codeA == http.StatusOK:
+			assert.Equalf(t, http.StatusConflict, codeB, "iter %d: B, made from the same copy, is refused", i)
+			assert.Equal(t, initialPass, stored.Password, "iter %d: A keeps the stored password", i)
+			assert.Equal(t, "Hall A", stored.Venue)
+		default:
+			t.Fatalf("iter %d: one of the two saves must land; A=%d B=%d", i, codeA, codeB)
+		}
 	}
 }
 
@@ -2145,13 +2159,13 @@ func TestCheckInHandlers(t *testing.T) {
 
 	// PUT on unknown competition → 404
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("PUT", "/api/competitions/nonexistent/participants/any-pid/checkin", nil)
+	req, _ := http.NewRequest("PUT", "/api/competitions/nonexistent/participants/any-pid/checkin", bytes.NewBuffer(stampedBytes(t)))
 	r.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusNotFound, w.Code)
 
 	// DELETE on unknown competition → 404
 	w = httptest.NewRecorder()
-	req, _ = http.NewRequest("DELETE", "/api/competitions/nonexistent/participants/any-pid/checkin", nil)
+	req, _ = http.NewRequest("DELETE", "/api/competitions/nonexistent/participants/any-pid/checkin", bytes.NewBuffer(stampedBytes(t)))
 	r.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusNotFound, w.Code)
 
@@ -2163,13 +2177,13 @@ func TestCheckInHandlers(t *testing.T) {
 
 	// PUT on unknown participant → 404
 	w = httptest.NewRecorder()
-	req, _ = http.NewRequest("PUT", "/api/competitions/ci-comp/participants/nonexistent-pid/checkin", nil)
+	req, _ = http.NewRequest("PUT", "/api/competitions/ci-comp/participants/nonexistent-pid/checkin", bytes.NewBuffer(stampedBytes(t)))
 	r.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusNotFound, w.Code)
 
 	// PUT (check in) known participant → 200, checkedIn=true in response
 	w = httptest.NewRecorder()
-	req, _ = http.NewRequest("PUT", "/api/competitions/ci-comp/participants/"+aliceID+"/checkin", nil)
+	req, _ = http.NewRequest("PUT", "/api/competitions/ci-comp/participants/"+aliceID+"/checkin", bytes.NewBuffer(stampedBytes(t)))
 	r.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusOK, w.Code)
 	var resp domain.Player
@@ -2184,7 +2198,7 @@ func TestCheckInHandlers(t *testing.T) {
 
 	// DELETE (undo check-in) known participant → 200, checkedIn=false in response
 	w = httptest.NewRecorder()
-	req, _ = http.NewRequest("DELETE", "/api/competitions/ci-comp/participants/"+aliceID+"/checkin", nil)
+	req, _ = http.NewRequest("DELETE", "/api/competitions/ci-comp/participants/"+aliceID+"/checkin", bytes.NewBuffer(stampedBytes(t)))
 	r.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusOK, w.Code)
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
@@ -2198,7 +2212,7 @@ func TestCheckInHandlers(t *testing.T) {
 
 	// DELETE on unknown participant → 404
 	w = httptest.NewRecorder()
-	req, _ = http.NewRequest("DELETE", "/api/competitions/ci-comp/participants/nonexistent-pid/checkin", nil)
+	req, _ = http.NewRequest("DELETE", "/api/competitions/ci-comp/participants/nonexistent-pid/checkin", bytes.NewBuffer(stampedBytes(t)))
 	r.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusNotFound, w.Code)
 }
@@ -2228,7 +2242,7 @@ func TestCheckInPreservedOnRosterReplace(t *testing.T) {
 
 	// Check Alice in via PUT /checkin.
 	w = httptest.NewRecorder()
-	req, _ = http.NewRequest("PUT", "/api/competitions/ci-pr/participants/"+aliceID+"/checkin", nil)
+	req, _ = http.NewRequest("PUT", "/api/competitions/ci-pr/participants/"+aliceID+"/checkin", bytes.NewBuffer(stampedBytes(t)))
 	r.ServeHTTP(w, req)
 	require.Equal(t, http.StatusOK, w.Code)
 
@@ -2500,7 +2514,7 @@ func TestTournamentHandlers_DurationDays_Validation(t *testing.T) {
 			}
 			body, _ := json.Marshal(tour)
 			w := httptest.NewRecorder()
-			req, _ := http.NewRequest(tc.method, "/api/tournament", bytes.NewBuffer(body))
+			req, _ := http.NewRequest(tc.method, "/api/tournament", bytes.NewBuffer(versionedTournamentBody(t, store, body)))
 			req.Header.Set("Content-Type", "application/json")
 			r.ServeHTTP(w, req)
 			assert.Equalf(t, tc.wantStatus, w.Code, "method=%s durationDays=%d", tc.method, tc.durationDays)
@@ -2815,7 +2829,7 @@ func TestTournamentPUT_PausesRoundTrip(t *testing.T) {
 
 	body, _ := json.Marshal(tour)
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(body))
+	req, _ := http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(versionedTournamentBody(t, store, body)))
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusOK, w.Code)
@@ -2863,7 +2877,7 @@ func TestTournamentPUT_PauseValidation400(t *testing.T) {
 		Pauses:   pauses21,
 	})
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(body))
+	req, _ := http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(versionedTournamentBody(t, store, body)))
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusBadRequest, w.Code)
@@ -2881,7 +2895,7 @@ func TestTournamentPUT_PauseValidation400(t *testing.T) {
 		},
 	})
 	w = httptest.NewRecorder()
-	req, _ = http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(body))
+	req, _ = http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(versionedTournamentBody(t, store, body)))
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusBadRequest, w.Code)
@@ -2931,7 +2945,7 @@ closing_block: 30m
 	tour.Venue = "Changed Venue"
 	putBody, _ := json.Marshal(tour)
 	w = httptest.NewRecorder()
-	req, _ = http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(putBody))
+	req, _ = http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(versionedTournamentBody(t, store, putBody)))
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
 	require.Equal(t, http.StatusOK, w.Code)
@@ -3013,7 +3027,7 @@ lunch_block: 1h
 	tour.Venue = "New Venue"
 	body, _ := json.Marshal(tour)
 	w = httptest.NewRecorder()
-	req, _ = http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(body))
+	req, _ = http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(versionedTournamentBody(t, store, body)))
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
 	require.Equal(t, http.StatusOK, w.Code)
@@ -3067,7 +3081,7 @@ lunch_block: 1h
 	sent["pauses"] = []any{}
 	body, _ := json.Marshal(sent)
 	w = httptest.NewRecorder()
-	req, _ = http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(body))
+	req, _ = http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(versionedTournamentBody(t, store, body)))
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())

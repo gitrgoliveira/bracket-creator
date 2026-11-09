@@ -126,14 +126,21 @@ func (s *Store) saveRosterLocked(compID string, players []domain.Player, seeds [
 // (helper.CompetitorKey with no id). A row the write sends WITH an id is found
 // by that id only, never by name: an id the stored roster lacks is a new
 // competitor.
+//
+// The check-in's stamp (CheckInAt) is carried with it, so a roster save never
+// resets the stamp a later, older check-in tap is judged against.
 func keepStoredCheckIns(players, stored []domain.Player) []domain.Player {
-	byID := make(map[string]bool, len(stored))
-	byKey := map[string]bool{}
+	type checkIn struct {
+		in bool
+		at int64
+	}
+	byID := make(map[string]checkIn, len(stored))
+	byKey := map[string]checkIn{}
 	for _, p := range stored {
 		if !helper.ParticipantIDMissing(p.ID) {
-			byID[p.ID] = p.CheckedIn
+			byID[p.ID] = checkIn{p.CheckedIn, p.CheckInAt}
 		} else {
-			byKey[helper.CompetitorKey("", p.Name, p.Dojo)] = p.CheckedIn
+			byKey[helper.CompetitorKey("", p.Name, p.Dojo)] = checkIn{p.CheckedIn, p.CheckInAt}
 		}
 	}
 	out := make([]domain.Player, len(players))
@@ -143,11 +150,13 @@ func keepStoredCheckIns(players, stored []domain.Player) []domain.Player {
 		// id the stored roster does not hold is a new competitor); only one
 		// the write sends with no id, as the page sends a row saved before ids
 		// existed, is found by (name, dojo) among the stored rows with none.
+		var kept checkIn
 		if helper.ParticipantIDMissing(out[i].ID) {
-			out[i].CheckedIn = byKey[helper.CompetitorKey("", out[i].Name, out[i].Dojo)]
+			kept = byKey[helper.CompetitorKey("", out[i].Name, out[i].Dojo)]
 		} else {
-			out[i].CheckedIn = byID[out[i].ID]
+			kept = byID[out[i].ID]
 		}
+		out[i].CheckedIn, out[i].CheckInAt = kept.in, kept.at
 	}
 	return out
 }

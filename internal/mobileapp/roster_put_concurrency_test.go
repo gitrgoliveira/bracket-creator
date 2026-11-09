@@ -129,7 +129,7 @@ func TestRosterPut_KeepsACheckInAnotherDeskMadeWhileThePutWasOut(t *testing.T) {
 	seen := readRoster(t, do)
 
 	// Desk B checks Alice in; desk A's seed PUT was built before it.
-	w := do("PUT", "/api/competitions/c1/participants/"+idOf(t, seen.Players, "Alice")+"/checkin", nil)
+	w := do("PUT", "/api/competitions/c1/participants/"+idOf(t, seen.Players, "Alice")+"/checkin", stampedBytes(t))
 	require.Equal(t, http.StatusOK, w.Code, string(w.Body))
 
 	w = do("PUT", "/api/competitions/c1", putRosterBody(t, withSeed(seen.Players, "Dave", 1), seen.Version))
@@ -235,7 +235,7 @@ func TestRosterPut_TwoDesksSettingDifferentSeedsBothLand(t *testing.T) {
 func TestRosterPut_ACheckInDoesNotRefuseThePut(t *testing.T) {
 	_, do := rosterFixture(t)
 	seen := readRoster(t, do)
-	w := do("PUT", "/api/competitions/c1/participants/"+idOf(t, seen.Players, "Carol")+"/checkin", nil)
+	w := do("PUT", "/api/competitions/c1/participants/"+idOf(t, seen.Players, "Carol")+"/checkin", stampedBytes(t))
 	require.Equal(t, http.StatusOK, w.Code, string(w.Body))
 	after := readRoster(t, do)
 	assert.Equal(t, seen.Version, after.Version, "a check-in is not a roster change the PUT writes, so it leaves the version")

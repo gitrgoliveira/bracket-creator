@@ -1236,7 +1236,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			return
 		}
 		comp.ConfigVersion = state.ConfigVersion(comp)
-		c.JSON(http.StatusOK, comp)
+		c.JSON(http.StatusOK, withAwardsVersion(comp))
 	})
 
 	// GET /competitions/:id/draw-warnings, the seed-placement warnings for the
@@ -3254,8 +3254,12 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		// empty array" ([]). The field is documented required (OpenAPI
 		// required: [fightingSpiritAwards]); a body of `{}` must 400 rather
 		// than silently clear the list, while an explicit [] clears it.
+		// AwardsVersion is the version of the list this save was made from
+		// (state.AwardsVersion); no version is a 400, since the client and
+		// the server ship in one binary.
 		var body struct {
 			FightingSpiritAwards *[]state.FightingSpiritAward `json:"fightingSpiritAwards"`
+			AwardsVersion        string                       `json:"awardsVersion"`
 		}
 		if err := c.ShouldBindJSON(&body); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -3263,6 +3267,10 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		}
 		if body.FightingSpiritAwards == nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "fightingSpiritAwards is required (use an empty array to clear all awards)"})
+			return
+		}
+		if body.AwardsVersion == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "awardsVersion is required: send the version of the awards this save was made from"})
 			return
 		}
 
@@ -3308,11 +3316,18 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			})
 		}
 
-		var compOut *state.Competition
+		var compOut, staleCurrent *state.Competition
 		var notFoundFlag bool
 		changed, err := store.UpdateCompetitionChanged(id, func(current *state.Competition) (*state.Competition, error) {
 			if current == nil {
 				notFoundFlag = true
+				return nil, nil
+			}
+			// Judged under the competition's lock, against the list this
+			// save would replace: a save made from an older copy is refused
+			// and nothing is written.
+			if state.AwardsVersion(current) != body.AwardsVersion {
+				staleCurrent = current
 				return nil, nil
 			}
 			current.FightingSpiritAwards = trimmed
@@ -3327,11 +3342,39 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			internalError(c, err)
 			return
 		}
+		if staleCurrent != nil {
+			// The current list (always an array) and its version, so the
+			// open awards panel can show what is stored now.
+			stored := staleCurrent.FightingSpiritAwards
+			if stored == nil {
+				stored = []state.FightingSpiritAward{}
+			}
+			c.JSON(http.StatusConflict, gin.H{
+				"code":                 "awards_changed",
+				"error":                "The awards changed, reload them.",
+				"awardsVersion":        state.AwardsVersion(staleCurrent),
+				"fightingSpiritAwards": stored,
+			})
+			return
+		}
 		if changed {
 			hub.Broadcast(EventTournamentUpdated, nil)
 		}
-		c.JSON(http.StatusOK, compOut)
+		c.JSON(http.StatusOK, withAwardsVersion(compOut))
 	})
+}
+
+// versionedCompetition is a competition on the wire with the version of its
+// fighting-spirit awards (state.AwardsVersion) beside its fields, which an
+// awards save sends back as awardsVersion. state.Competition carries no field
+// for it, so it is added here, as the roster PUT adds its warnings.
+type versionedCompetition struct {
+	*state.Competition
+	AwardsVersion string `json:"awardsVersion"`
+}
+
+func withAwardsVersion(comp *state.Competition) versionedCompetition {
+	return versionedCompetition{Competition: comp, AwardsVersion: state.AwardsVersion(comp)}
 }
 
 // bracketFullyComplete reports whether every must-play match in the bracket --

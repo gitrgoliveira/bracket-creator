@@ -150,6 +150,16 @@ func TestFingerprint_StampFieldsZeroed(t *testing.T) {
 		}
 	}
 
+	roster := func(checkedIn bool, at int64, name string) func(t *testing.T, s *Store) []byte {
+		return func(t *testing.T, s *Store) []byte {
+			out, err := marshalParticipantsCSV([]domain.Player{
+				{ID: "3f2504e0-4f89-41d3-9a0c-0305e82c3301", Name: name, Dojo: "Kyoto", CheckedIn: checkedIn, CheckInAt: at},
+			}, false)
+			require.NoError(t, err)
+			return out
+		}
+	}
+
 	cases := map[string]stampCase{
 		"pool-matches.csv": {
 			base:      savePool(poolMatch(t1, 2, []string{"M"})),
@@ -160,6 +170,11 @@ func TestFingerprint_StampFieldsZeroed(t *testing.T) {
 			base:      saveBracket(bracket(t1, 2, "Sato Ken")),
 			restamped: saveBracket(bracket(t2, 3, "Sato Ken")),
 			real:      saveBracket(bracket(t2, 3, "Ito Haru")),
+		},
+		"participants.csv": {
+			base:      roster(true, t1, "Tanaka Ichiro"),
+			restamped: roster(true, t2, "Tanaka Ichiro"),
+			real:      roster(true, t2, "Tanaka Jiro"),
 		},
 		competitorStatusFilename: {
 			base:      status(time.UnixMilli(t1).UTC(), "kiken-injury"),

@@ -591,7 +591,10 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
       // the backend preserves the on-disk value rather than clearing it.
       const locked = authConfig === null || authConfig.mode === "locked";
       const sendBody = mergeTournamentPatch(tRef.current, patch, password, locked);
-      await window.API.updateTournament(sendBody, password);
+      // sendBody carries the tournamentVersion of the copy this device holds
+      // (spread from tRef.current), so a save made from an older copy is
+      // refused (tournament_changed) instead of writing over a newer one.
+      const saved = await window.API.updateTournament(sendBody, password);
       // Bail if the admin navigated away during the in-flight PUT.
       // mirrors startAllCompetitions / refreshCompsAfterCreate.
       // Without this gate, onUpdateRef.current (parent's
@@ -603,8 +606,9 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
       if (!mountedRef.current) return false;
       // Re-read tRef.current AFTER the await. Additional SSE events may
       // have landed during the save. The patch we just persisted is
-      // applied on top of the freshest snapshot.
-      onUpdateRef.current(mergeTournamentPatch(tRef.current, patch, password, locked));
+      // applied on top of the freshest snapshot, with the version the save
+      // answered, so the next save is made from the settings just stored.
+      onUpdateRef.current({ ...mergeTournamentPatch(tRef.current, patch, password, locked), tournamentVersion: saved.tournamentVersion });
       showToast("Tournament updated");
       return true;
     } catch (e) {

@@ -1012,6 +1012,11 @@ function FightingSpiritAwardsEditor({ c, password, showToast }) {
   const lastCompIdRef = useRef(c.id);
   const mountedRef = useRef(true);
   useEffect(() => () => { mountedRef.current = false; }, []);
+  // The version of the awards list the next save is made from: the one the
+  // competition detail served, or the one the last save answered (the detail
+  // refetch after a save can land later than a second save).
+  const awardsVersionRef = useRef(c.awardsVersion);
+  useEffect(() => { awardsVersionRef.current = c.awardsVersion; }, [c.id, c.awardsVersion]);
 
   // Sync from parent. Reset unconditionally when switching competitions;
   // otherwise skip while the user has unsaved edits (see `dirty` above).
@@ -1033,7 +1038,8 @@ function FightingSpiritAwardsEditor({ c, password, showToast }) {
     try {
       // Strip the client-only `_key` before sending to the API.
       const payload = awards.map(({ _key, ...rest }) => rest);
-      await window.API.updateCompetitionAwards(c.id, payload, password);
+      const saved = await window.API.updateCompetitionAwards(c.id, payload, password, awardsVersionRef.current);
+      awardsVersionRef.current = saved.awardsVersion;
       // Edits are now persisted; clear dirty so the next prop refresh
       // (the save triggers an SSE refetch) re-syncs to the saved state.
       if (mountedRef.current) { setDirty(false); showToast("Fighting Spirit awards saved.", "success"); }

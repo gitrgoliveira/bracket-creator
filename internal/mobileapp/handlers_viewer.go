@@ -726,9 +726,12 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 			return
 		}
 		if t != nil {
+			// The app reads the tournament here, so the version a settings
+			// save sends back (tournamentVersion) comes from here too. It is
+			// a hash that never reads the password.
 			publicT := *t
 			publicT.Password = ""
-			c.JSON(http.StatusOK, publicT)
+			c.JSON(http.StatusOK, withTournamentVersion(&publicT))
 		} else {
 			// No tournament configured yet is a normal bootstrap state, not an
 			// error: return 200 with a null body so the SPA opens the create-
@@ -1011,6 +1014,10 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 				"poolMatches": poolMatches,
 				"standings":   standings,
 				"bracket":     bracket,
+				// The version an awards save sends back (PUT .../awards),
+				// beside "config" as dataIssues is, since state.Competition
+				// carries no field for it.
+				"awardsVersion": state.AwardsVersion(comp),
 			}
 			// How many of each pool's places send a qualifier, by pool name,
 			// from the same owner the tie-break bouts are held to

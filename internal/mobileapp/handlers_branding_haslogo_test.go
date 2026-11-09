@@ -66,7 +66,7 @@ func TestPutTournament_HasLogoOnTheWireIsIgnored(t *testing.T) {
 
 	put := func(body string) {
 		t.Helper()
-		req := httptest.NewRequest(http.MethodPut, "/api/tournament", strings.NewReader(body))
+		req := httptest.NewRequest(http.MethodPut, "/api/tournament", strings.NewReader(tournamentBodyVia(t, h, "secret", body)))
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("X-Tournament-Password", "secret")
 		w := httptest.NewRecorder()

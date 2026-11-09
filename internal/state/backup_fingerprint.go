@@ -25,7 +25,9 @@ type StampedFile struct {
 	// Fields are the Go field names zeroed at every depth of the parsed file.
 	Fields []string
 
-	parse  func(compID string, raw []byte) (any, error)
+	parse func(compID string, raw []byte) (any, error)
+	// trim drops or rewrites the parsed file's stamp-only content in place
+	// before Fields are zeroed, and answers whether anything is left.
 	trim   func(v any) (keep bool)
 	encode func(v any) ([]byte, error)
 }
@@ -67,6 +69,23 @@ var FingerprintStampedFiles = []StampedFile{
 			}
 			return yaml.Marshal(&file)
 		},
+	},
+	{
+		// A check-in sent again restamps the row's marker, and one taken back
+		// leaves a "not_checked_in@<ms>" marker behind. Rows are parsed by the
+		// zekken setting in config.md, which this table cannot see, so the
+		// marker column is rewritten as text (unstampCheckInMarkers, the
+		// marker's owner in participants.go) rather than through a Go field.
+		Name: "participants.csv",
+		parse: func(_ string, raw []byte) (any, error) {
+			records, err := readParticipantsCSVRecords(raw)
+			return &records, err
+		},
+		trim: func(v any) bool {
+			unstampCheckInMarkers(*v.(*[][]string))
+			return true
+		},
+		encode: func(v any) ([]byte, error) { return writeParticipantsCSVRecords(*v.(*[][]string)) },
 	},
 	{
 		// A member saved under the name they already carry is stamped again.

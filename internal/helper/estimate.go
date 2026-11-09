@@ -1,6 +1,24 @@
 package helper
 
-import "fmt"
+import (
+	"fmt"
+	"math/bits"
+)
+
+// EstimateCountError is a shape the draw would refuse (a pool size, an entrant
+// count the pool builders cannot cut), so the estimate cannot count it. Its
+// text is the sentence the organiser reads; callers answer it as a 400.
+type EstimateCountError struct {
+	Err error
+}
+
+func (e *EstimateCountError) Error() string { return e.Err.Error() }
+
+func (e *EstimateCountError) Unwrap() error { return e.Err }
+
+func countErrorf(format string, args ...any) error {
+	return &EstimateCountError{Err: fmt.Errorf(format, args...)}
+}
 
 // EstimateMatchCountsInput carries the scalar fields from a competition
 // configuration that are needed to derive pre-draw pool and knockout match
@@ -11,9 +29,10 @@ import "fmt"
 //
 // Required field matrix by Format:
 //
-//	"knockout", PlayerCount only (no pool fields needed).
+//	"knockout", PlayerCount, SingleThirdPlace.
 //	"mixed", PlayerCount, PoolSize (>0), PoolSizeMode, PoolWinners,
-//	               RoundRobin, PoolFormat.
+//	               RoundRobin, PoolFormat, ExtraQualifiers, SeedRanks,
+//	               SingleThirdPlace.
 //	"league", PlayerCount only (single pool, always full round-robin).
 //	"swiss", PlayerCount, SwissRounds.
 type EstimateMatchCountsInput struct {
@@ -35,6 +54,26 @@ type EstimateMatchCountsInput struct {
 
 	// SwissRounds is the number of rounds for a swiss-format competition.
 	SwissRounds int
+
+	// ExtraQualifiers is state.Competition.ExtraQualifiers: "",
+	// "larger-pools", or "fill-bracket". Relevant for "mixed" format.
+	ExtraQualifiers string
+
+	// SeedRanks carries the seed ranks of seeded competitors among the
+	// counted participants, used in fill-bracket pool formation and draft
+	// selection.
+	SeedRanks []int
+
+	// SingleThirdPlace indicates whether the competition format requires
+	// a bronze (third-place) match. Derived from
+	// state.Competition.RequiresSingleThirdPlace().
+	SingleThirdPlace bool
+
+	// Draft marks the estimate for an unsaved competition or a competition whose
+	// roster is still being built (in setup). Such a competition may have unseeded
+	// entrants, so a fill-bracket draw is estimated as if it were seeded enough for
+	// the draw to run, rather than refused with "seed more pools".
+	Draft bool
 }
 
 // EstimateMatchCounts returns the expected number of pool matches and
@@ -42,18 +81,15 @@ type EstimateMatchCountsInput struct {
 // participant count. The estimates are purely derived from the same
 // formulas used by the real draw pipeline:
 //
-//   - Pool count: helper.CreatePools (ceiling vs floor division by PoolSize,
-//     driven by PoolSizeMode == "max").
+//   - Pool count and pool sizes: derived via BuildPoolPhaseTreeAwareWithMode
+//     or BuildPoolPhaseFillBracket depending on ExtraQualifiers.
 //   - Pool matches: poolMatchesPerPool for each individual pool size.
-//   - Bracket matches: bracketMatchCount(numFinalists), which returns the
-//     court-time-consuming match count (excludes auto-resolved byes), equal to
-//     numFinalists-1 now that byes are distributed to the top seeds (mp-sess).
-//
-// Pool count and per-pool sizes are derived by calling the real CreatePools
-// (no duplication). Per-pool match counting (poolMatchesPerPool) and bracket
-// match counting (bracketMatchCount) mirror the draw's match-generation
-// logic; these are lightweight formulas cross-checked by integration tests
-// against the real generators. See mp-zoh plan's "Central design risk".
+//   - Finalists: sum of per-pool qualifiers honoring ExtraQualifiers
+//     (QualifiersForOversizedPool in larger-pools mode, SelectFillBracketDrafts
+//     in fill-bracket mode).
+//   - Bracket matches: bracketMatchCount(numFinalists), plus a third-place
+//     match when SingleThirdPlace is requested and the bracket has a semifinal
+//     (NeedsBronzeBlock).
 //
 // Returned counts reflect court-time-consuming matches only. Auto-resolved
 // bracket byes (player-vs-bye leaf matches marked Completed at generation time)
@@ -64,11 +100,12 @@ type EstimateMatchCountsInput struct {
 // because the estimator may be called speculatively before validation is
 // complete.
 //
-// Returns an error for:
+// Returns an *EstimateCountError for:
 //   - Unknown Format strings (only when PlayerCount > 0; the zero-player
 //     early return takes precedence and returns nil, callers should not
 //     rely on a format error for zero-player inputs).
-//   - PoolSize == 0 for the mixed format (would divide by zero).
+//   - PoolSize <= 0 for the mixed format.
+//   - Player count or formation shortfalls refused by the real pool builders.
 func EstimateMatchCounts(in EstimateMatchCountsInput) (poolMatchCount, knockoutMatchCount int, err error) {
 	if in.PlayerCount <= 0 {
 		return 0, 0, nil
@@ -79,7 +116,14 @@ func EstimateMatchCounts(in EstimateMatchCountsInput) (poolMatchCount, knockoutM
 		// No pool phase. Bracket over all players.
 		// Empty format is treated as knockout for backward compatibility with
 		// legacy competition configs that predate the Format field.
-		return 0, bracketMatchCount(in.PlayerCount), nil
+		knockoutMatches := bracketMatchCount(in.PlayerCount)
+		if in.SingleThirdPlace {
+			rounds := knockoutRounds(in.PlayerCount)
+			if NeedsBronzeBlock(true, rounds) {
+				knockoutMatches++
+			}
+		}
+		return 0, knockoutMatches, nil
 
 	case "mixed":
 		return estimateMixed(in)
@@ -100,49 +144,25 @@ func EstimateMatchCounts(in EstimateMatchCountsInput) (poolMatchCount, knockoutM
 		return perRound * in.SwissRounds, 0, nil
 
 	default:
-		return 0, 0, fmt.Errorf("EstimateMatchCounts: unknown competition format %q", in.Format)
+		return 0, 0, countErrorf("unknown competition format %q: choose knockout, mixed, league or swiss", in.Format)
 	}
 }
 
-// estimateMixed handles the "mixed" (Pools + Knockout) format. Extracted for
-// readability.
+// estimateMixed handles the "mixed" (Pools + Knockout) format.
 //
-// Finding 4 fix: when playerCount < poolSize in min mode, numPools is 0 and
-// an error is returned, mirroring CreatePools' error at tournament.go:222.
-// In max mode numPools is always ≥1 when playerCount ≥1, so the error only
-// fires for min mode.
-//
-// Pool sizes are derived by calling CreatePools with synthetic players
-// (all-unique names and dojos) rather than using an even base/rem split.
-// This mirrors the EXACT distribution produced by the real draw (tournament.go
-// CreatePools → forcePoolSize), including the "overflow > numPools" case where
-// forcePoolSize piles extra players into pool[0] rather than distributing evenly.
-//
-// All-unique dojos ensure discoverPool never hits a dojo-conflict that would
-// route players via leastConflictedPool, keeping the pool-size distribution
-// identical to the pure targetSize/forcePoolSize path.
+// Pool sizes and qualifiers are derived by calling the real builders
+// (BuildPoolPhaseFillBracket or BuildPoolPhaseTreeAwareWithMode) with synthetic
+// players (unique names and dojos, with seeds applied by rank).
 func estimateMixed(in EstimateMatchCountsInput) (poolMatchCount, knockoutMatchCount int, err error) {
 	if in.PoolSize <= 0 {
-		return 0, 0, fmt.Errorf("EstimateMatchCounts: PoolSize must be > 0 for mixed format, got %d", in.PoolSize)
+		return 0, 0, countErrorf("cannot create pools: pool size must be at least 1, got %d", in.PoolSize)
+	}
+	if in.PoolSize >= MaxPoolSize {
+		return 0, 0, countErrorf("cannot create pools: pool size must be less than %d, got %d", MaxPoolSize, in.PoolSize)
 	}
 
-	// --- Pool count ---
-	// PoolCount is the same function CreatePools uses, so the estimate can
-	// never drift from the draw it is estimating (bc-draw Phase 2a; this was
-	// the third hand-rolled copy of the ceil/floor split).
 	isMax := in.PoolSizeMode == "max"
-	numPools := PoolCount(in.PlayerCount, in.PoolSize, isMax)
-	if numPools == 0 {
-		// Fewer players than pool size in min mode, mirrors CreatePools'
-		// error at tournament.go:222.
-		return 0, 0, fmt.Errorf("EstimateMatchCounts: player count (%d) is less than pool size (%d) in min mode", in.PlayerCount, in.PoolSize)
-	}
 
-	// --- Per-pool sizes via the REAL CreatePools (drift-proof) ---
-	// Synthetic players: each has a unique name and a unique dojo so that
-	// discoverPool never triggers the dojo-conflict skip, ensuring that pool
-	// sizes are driven solely by targetSizes / forcePoolSize, exactly as the
-	// real draw does for a freshly imported roster.
 	synth := make([]Player, in.PlayerCount)
 	for i := range synth {
 		synth[i] = Player{
@@ -150,9 +170,74 @@ func estimateMixed(in EstimateMatchCountsInput) (poolMatchCount, knockoutMatchCo
 			Dojo: fmt.Sprintf("d%d", i),
 		}
 	}
-	realPools, perr := CreatePools(synth, in.PoolSize, isMax)
-	if perr != nil {
-		return 0, 0, fmt.Errorf("EstimateMatchCounts: CreatePools failed: %w", perr)
+	for i, r := range in.SeedRanks {
+		if i < len(synth) {
+			synth[i].Seed = r
+		}
+	}
+
+	var realPools []Pool
+	var numFinalists int
+
+	if in.ExtraQualifiers == QualifierModeFillBracket {
+		if in.Draft {
+			// A draft or competition still in setup may not have a complete
+			// seeded roster yet, so estimate the draw the organiser gets once
+			// it is seeded: seeding the first ceil(n/(size+1)) entrants supplies
+			// every drafted 2nd place FillBracketPoolCount can ask for, and seeds
+			// move no one between pool sizes, so the counts are the seeded draw's.
+			minPools := (in.PlayerCount + in.PoolSize) / (in.PoolSize + 1)
+			used := make(map[int]bool, len(in.SeedRanks)+minPools)
+			for _, r := range in.SeedRanks {
+				if r > 0 {
+					used[r] = true
+				}
+			}
+			nextRank := 1
+			for i := 0; i < minPools && i < len(synth); i++ {
+				if synth[i].Seed != 0 {
+					continue
+				}
+				for used[nextRank] {
+					nextRank++
+				}
+				synth[i].Seed = nextRank
+				used[nextRank] = true
+			}
+		}
+		pools, _, perr := BuildPoolPhaseFillBracket(synth, in.PoolSize, 1)
+		if perr != nil {
+			return 0, 0, &EstimateCountError{Err: perr}
+		}
+		realPools = pools
+
+		draftIdx, derr := SelectFillBracketDraftIndices(realPools, in.PoolSize, 1)
+		if derr != nil {
+			return 0, 0, &EstimateCountError{Err: derr}
+		}
+		numFinalists = len(realPools) + len(draftIdx)
+	} else {
+		poolWinners := in.PoolWinners
+		if poolWinners <= 0 {
+			poolWinners = defaultPoolWinners
+		}
+
+		pools, _, perr := BuildPoolPhaseTreeAwareWithMode(synth, in.PoolSize, isMax, 1, poolWinners, in.ExtraQualifiers)
+		if perr != nil {
+			return 0, 0, &EstimateCountError{Err: perr}
+		}
+		realPools = pools
+
+		if in.ExtraQualifiers == QualifierModeLargerPools {
+			// The same arguments state.Competition.QualifiersForPool passes the
+			// draw: the competition's pool size is the minimum to be over.
+			numFinalists = 0
+			for _, p := range realPools {
+				numFinalists += QualifiersForOversizedPool(len(p.Players), in.PoolSize, poolWinners)
+			}
+		} else {
+			numFinalists = len(realPools) * poolWinners
+		}
 	}
 
 	totalPoolMatches := 0
@@ -160,15 +245,24 @@ func estimateMixed(in EstimateMatchCountsInput) (poolMatchCount, knockoutMatchCo
 		totalPoolMatches += poolMatchesPerPool(len(p.Players), in.RoundRobin, in.PoolFormat)
 	}
 
-	// --- Knockout bracket ---
-	poolWinners := in.PoolWinners
-	if poolWinners <= 0 {
-		poolWinners = defaultPoolWinners // same default ResolveQualifiedPools (engine/knockout.go) falls back to
-	}
-	numFinalists := len(realPools) * poolWinners
 	totalKnockoutMatches := bracketMatchCount(numFinalists)
+	if in.SingleThirdPlace {
+		rounds := knockoutRounds(numFinalists)
+		if NeedsBronzeBlock(true, rounds) {
+			totalKnockoutMatches++
+		}
+	}
 
 	return totalPoolMatches, totalKnockoutMatches, nil
+}
+
+// knockoutRounds returns the number of rounds for an elimination bracket
+// of the given player/finalist count, which is ceil(log2(players)).
+func knockoutRounds(players int) int {
+	if players <= 1 {
+		return 0
+	}
+	return bits.Len(uint(players - 1))
 }
 
 // poolMatchesPerPool returns the number of matches generated for a single

@@ -932,3 +932,26 @@ func TestChooseCompressionMethod_MatchesActualDeflateOutput(t *testing.T) {
 		assert.Equal(t, wantMethod, method)
 	}
 }
+
+// Meta.AppVersion, when set, is the version the manifest names; empty is the
+// running app's.
+func TestWriteNamesTheGivenAppVersion(t *testing.T) {
+	files := map[string][]byte{"tournament.md": []byte("---\nname: T\n---\n")}
+	for _, tc := range []struct{ given, want string }{
+		{"v9.9.9", "v9.9.9"},
+		{"", version.GetVersion()},
+	} {
+		var buf bytes.Buffer
+		require.NoError(t, Write(&buf, Meta{AppVersion: tc.given, CreatedAt: time.Date(2026, 11, 8, 10, 0, 0, 0, time.UTC), Scope: ScopeTournament, Kind: KindScheduled}, files))
+		zr, err := zip.NewReader(bytes.NewReader(buf.Bytes()), int64(buf.Len()))
+		require.NoError(t, err)
+		rc, err := zr.File[len(zr.File)-1].Open()
+		require.NoError(t, err)
+		raw, err := io.ReadAll(rc)
+		require.NoError(t, err)
+		require.NoError(t, rc.Close())
+		var m Manifest
+		require.NoError(t, json.Unmarshal(raw, &m))
+		assert.Equal(t, tc.want, m.AppVersion, "given %q", tc.given)
+	}
+}

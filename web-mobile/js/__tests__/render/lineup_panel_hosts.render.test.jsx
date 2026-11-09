@@ -185,7 +185,7 @@ describe('the Scores page lineup panel when the old team still has a save out', 
   // The operator types a name nobody has at team B's position 1 and saves.
   async function saveNewNameForTeamB(utils) {
     await act(async () => {
-      const input = side(utils, 'team-b').getByLabelText('1 player');
+      const input = side(utils, 'team-b').getByLabelText('Senpo player');
       fireEvent.focus(input);
       fireEvent.change(input, { target: { value: 'Kobayashi' } });
       fireEvent.keyDown(input, { key: 'Enter' });
@@ -203,15 +203,15 @@ describe('the Scores page lineup panel when the old team still has a save out', 
   // The new team's editor shows its own lineup and offers its own members, none of team B's.
   async function expectTeamCAlone(utils) {
     const c = side(utils, 'team-c');
-    expect(c.getByLabelText('1 player').value).toBe('Chiba');
-    expect(c.getByLabelText('2 player').value).toBe('Cho');
-    expect(c.getByLabelText('3 player').value).toBe('Date');
+    expect(c.getByLabelText('Senpo player').value).toBe('Chiba');
+    expect(c.getByLabelText('Chuken player').value).toBe('Cho');
+    expect(c.getByLabelText('Taisho player').value).toBe('Date');
     // The open list shows the query, not the value: look, then close it again.
-    await act(async () => { fireEvent.focus(c.getByLabelText('1 player')); });
+    await act(async () => { fireEvent.focus(c.getByLabelText('Senpo player')); });
     expect(c.getByText('Endo'), 'its own unplaced member').toBeTruthy();
     expect(c.queryByText('Bito'), 'team B\'s unplaced member').toBeNull();
     expect(c.queryByText('Kobayashi'), 'the member team B\'s Save minted').toBeNull();
-    await act(async () => { fireEvent.keyDown(c.getByLabelText('1 player'), { key: 'Escape' }); });
+    await act(async () => { fireEvent.keyDown(c.getByLabelText('Senpo player'), { key: 'Escape' }); });
   }
 
   it('lands nothing of a write the old team still has out in the new team\'s lineup or members', async () => {

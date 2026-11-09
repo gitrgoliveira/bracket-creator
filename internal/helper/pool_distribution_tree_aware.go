@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"math/bits"
+	"slices"
 	"strings"
 )
 
@@ -241,6 +242,19 @@ func BuildPoolPhaseTreeAwareWithMode(players []Player, poolSize int, isMax bool,
 	numPools, targetSizes, err := poolTargetSizes(len(players), poolSize, isMax)
 	if err != nil {
 		return nil, 0, err
+	}
+	// The qualifier skeleton has about numPools x poolWinners leaves, so an
+	// unbounded poolWinners exhausts memory (a fatal error Recovery cannot
+	// catch). No pool can promote more players than it holds; min mode's
+	// remainder can add one seat to a pool (realTargetSizes).
+	if len(targetSizes) > 0 {
+		largest := slices.Max(targetSizes)
+		if !isMax {
+			largest++
+		}
+		if poolWinners > largest {
+			return nil, 0, fmt.Errorf("cannot create pools: pool winners (%d) is more than a pool can hold (%d players)", poolWinners, largest)
+		}
 	}
 	minPoolSize := 0
 	if !isMax {

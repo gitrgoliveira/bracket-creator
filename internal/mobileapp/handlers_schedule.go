@@ -8,7 +8,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/gitrgoliveira/bracket-creator/internal/engine"
-	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
 // RegisterScheduleHandlers wires the stateless schedule estimator
@@ -36,9 +35,6 @@ func RegisterScheduleHandlers(r *gin.RouterGroup) {
 //   - numMatches:        int, total matches (default 1)
 //   - teamSize:          int, 0 = individual, >0 = team
 //   - boutsPerTeamMatch: int, used when teamSize > 0
-//   - teamMatchType:     string, "kachinuki" widens the estimate into a
-//     best/average/worst range (variable bout count, mp-gmcg); any
-//     other value (or absent) keeps a constant bout count
 //   - buffer:            int, slowest-court buffer % (default 0; lenient — a
 //     malformed value falls back to the default rather than 400ing)
 //   - ceremonyMinutes:   int, ceremony block minutes (default 0; lenient — a
@@ -136,11 +132,6 @@ func scheduleEstimateHandler(c *gin.Context) {
 		BoutsPerTeamMatch:         boutsPerTeamMatch,
 		SlowestCourtBufferPct:     queryIntDefault(c, "buffer", 0),
 		CeremonyMinutes:           queryIntDefault(c, "ceremonyMinutes", 0),
-		// teamMatchType widens the estimate into a best/average/worst range for
-		// kachinuki. No first-party caller passes it yet (Overview/Settings use
-		// the per-competition estimate); it is retained for the planned
-		// hypothetical estimator page (mp-lw5p) and documented in the OpenAPI spec.
-		Kachinuki: c.Query("teamMatchType") == string(state.TeamMatchTypeKachinuki),
 	}
 
 	c.JSON(http.StatusOK, engine.EstimateSchedule(in))
@@ -162,6 +153,24 @@ func parseOptionalBoundedInt(c *gin.Context, key string, def, max int) (int, boo
 	v, err := strconv.Atoi(raw)
 	if err != nil || v < 0 || v > max {
 		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("%s must be between 0 and %d", key, max)})
+		return 0, false
+	}
+	return v, true
+}
+
+// parseRequiredBoundedInt reads a REQUIRED query int constrained to [min, max].
+// An absent or empty value writes a 400 with a sentence naming the field and
+// returns ok=false. A present value that is unparsable or out of range writes a
+// 400 and returns ok=false.
+func parseRequiredBoundedInt(c *gin.Context, key string, min, max int) (int, bool) {
+	raw := c.Query(key)
+	if raw == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("%s is required", key)})
+		return 0, false
+	}
+	v, err := strconv.Atoi(raw)
+	if err != nil || v < min || v > max {
+		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("%s must be between %d and %d", key, min, max)})
 		return 0, false
 	}
 	return v, true

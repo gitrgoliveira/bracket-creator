@@ -2,7 +2,7 @@
 // The function is unit-testable without mounting any component: it takes
 // a plain competition object and returns a step array.
 import { describe, it, expect } from 'vitest';
-import { competitionNextSteps, overviewViewMode, overviewResultsSection, hasBracketRounds } from '../admin_competition_overview.jsx';
+import { competitionNextSteps, overviewViewMode, overviewResultsSection, hasBracketRounds, latestCourtFinish, formatPausesRow, formatPerShiaijoRow } from '../admin_competition_overview.jsx';
 
 // ---------------------------------------------------------------------------
 // hasBracketRounds: never-nil LoadBracket contract
@@ -485,5 +485,125 @@ describe('competitionNextSteps: non-setup statuses', () => {
 
   it('does not throw for completed status', () => {
     expect(() => competitionNextSteps(makeComp({ status: 'completed', players: [makePlayer(), makePlayer()] }))).not.toThrow();
+  });
+});
+
+describe('Overview estimate helpers (p2-overview)', () => {
+  it('latestCourtFinish picks the latest court end and flags a finish past midnight', () => {
+    expect(latestCourtFinish({ A: '13:10', B: '13:38' }, '09:00')).toEqual({ clock: '13:38', nextDay: false });
+    // A court end later than StartTime + total estimate still wins.
+    expect(latestCourtFinish({ A: '11:00', B: '16:45' }, '09:00')).toEqual({ clock: '16:45', nextDay: false });
+    // An end earlier than the start crossed midnight.
+    expect(latestCourtFinish({ A: '23:30', B: '00:40' }, '20:00')).toEqual({ clock: '00:40', nextDay: true });
+    // The server may report a clock past 24:00.
+    expect(latestCourtFinish({ A: '24:40' }, '20:00')).toEqual({ clock: '00:40', nextDay: true });
+    // A court end of exactly midnight is at midnight, not after it (pastMidnight).
+    expect(latestCourtFinish({ A: '24:00' }, '20:00')).toEqual({ clock: '00:00', nextDay: false });
+    expect(latestCourtFinish({ A: '23:30', B: '00:00' }, '20:00')).toEqual({ clock: '00:00', nextDay: false });
+    expect(latestCourtFinish({}, '09:00')).toBeNull();
+    expect(latestCourtFinish(undefined, '09:00')).toBeNull();
+  });
+
+  it('formatPerShiaijoRow labels by the competition shiaijo, says about, and names an idle one', () => {
+    const est = { perCourtMinutes: [229, 221] };
+    expect(formatPerShiaijoRow(est, ['A', 'B'])).toBe('A about 3h 49m · B about 3h 41m');
+    expect(formatPerShiaijoRow({ perCourtMinutes: [55, 0] }, ['C', 'D'])).toBe('C about 55m · D has no matches');
+    expect(formatPerShiaijoRow({ perCourtMinutes: [] }, ['A'])).toBeNull();
+    expect(formatPerShiaijoRow(null, ['A'])).toBeNull();
+  });
+
+  it('formatPausesRow names the day pauses, says none, and lists an unused pause', () => {
+    const c = { date: '05-06-2026' };
+    const t = {
+      date: '05-06-2026',
+      durationDays: 1,
+      pauses: [
+        { name: 'Opening ceremony', start: '09:30', length: '30m', day: 0 },
+        { name: 'Lunch', start: '12:30', length: '1h', day: 0 },
+        { name: 'Closing ceremony', start: '', length: '30m', day: 0 },
+      ],
+    };
+    expect(formatPausesRow(t, c)).toBe(
+      'Opening ceremony 09:30 to 10:00, Lunch 12:30 to 13:30 · Closing ceremony: no start time, matches will not stop',
+    );
+    expect(formatPausesRow({ ...t, pauses: [] }, c)).toBe('No pauses that day');
+    // A pause matches go on through is not among the pauses the estimate worked around.
+    const goesOn = { ...t, pauses: [{ ...t.pauses[0], matchesGoOn: true }, t.pauses[1]] };
+    expect(formatPausesRow(goesOn, c)).toBe('Lunch 12:30 to 13:30 · Opening ceremony: matches go on');
+    // A pause on another day is not that day's pause.
+    const twoDay = { date: '05-06-2026', durationDays: 2, pauses: [{ name: 'Lunch', start: '12:30', length: '1h', day: 2 }] };
+    expect(formatPausesRow(twoDay, c)).toBe('No pauses that day');
+    expect(formatPausesRow(twoDay, { date: '06-06-2026' })).toBe('Lunch 12:30 to 13:30');
+  });
+
+  it('lists the pauses in start order', () => {
+    const c = { date: '05-06-2026' };
+    const t = {
+      date: '05-06-2026',
+      durationDays: 1,
+      pauses: [
+        { name: 'Closing ceremony', start: '17:00', length: '30m', day: 0 },
+        { name: 'Lunch', start: '12:30', length: '1h', day: 0 },
+        { name: 'Opening ceremony', start: '09:30', length: '30m', day: 0 },
+      ],
+    };
+    expect(formatPausesRow(t, c)).toBe(
+      'Opening ceremony 09:30 to 10:00, Lunch 12:30 to 13:30, Closing ceremony 17:00 to 17:30',
+    );
+  });
+
+  it('formatPausesRow lists only day-0 pauses when competition date is not a tournament day', () => {
+    const t = {
+      date: '05-06-2026',
+      durationDays: 2,
+      pauses: [
+        { name: 'Everyday break', start: '10:00', length: '15m', day: 0 },
+        { name: 'Day 1 break', start: '11:00', length: '30m', day: 1 },
+      ],
+    };
+    expect(formatPausesRow(t, { date: '07-06-2026' })).toBe('Everyday break 10:00 to 10:15');
+  });
+
+  it('formatPausesRow gives day 0 and day 1 pauses to competition with no date', () => {
+    const t = {
+      date: '05-06-2026',
+      durationDays: 2,
+      pauses: [
+        { name: 'Everyday break', start: '10:00', length: '15m', day: 0 },
+        { name: 'Day 1 break', start: '11:00', length: '30m', day: 1 },
+        { name: 'Day 2 break', start: '12:00', length: '45m', day: 2 },
+      ],
+    };
+    expect(formatPausesRow(t, {})).toBe('Everyday break 10:00 to 10:15, Day 1 break 11:00 to 11:30');
+    expect(formatPausesRow(t, null)).toBe('Everyday break 10:00 to 10:15, Day 1 break 11:00 to 11:30');
+  });
+
+  it('formatPausesRow runs a dated competition in an undated tournament as day 1', () => {
+    const t = {
+      durationDays: 2,
+      pauses: [
+        { name: 'Everyday break', start: '10:00', length: '15m', day: 0 },
+        { name: 'Day 1 break', start: '11:00', length: '30m', day: 1 },
+        { name: 'Day 2 break', start: '12:00', length: '45m', day: 2 },
+      ],
+    };
+    expect(formatPausesRow(t, { date: '05-06-2026' })).toBe('Everyday break 10:00 to 10:15, Day 1 break 11:00 to 11:30');
+    // A date with stray spaces is still its tournament day.
+    expect(formatPausesRow({ ...t, date: '05-06-2026' }, { date: ' 06-06-2026 ' })).toBe('Everyday break 10:00 to 10:15, Day 2 break 12:00 to 12:45');
+  });
+
+  it('formatPausesRow distinguishes pauses with no length from pauses with no start time', () => {
+    const t = {
+      date: '05-06-2026',
+      durationDays: 1,
+      pauses: [
+        { name: 'Zero length break', start: '14:00', length: '0m', day: 0 },
+        { name: 'Unreadable length break', start: '15:00', length: 'bad', day: 0 },
+        { name: 'No start break', start: '', length: '30m', day: 0 },
+      ],
+    };
+    expect(formatPausesRow(t, { date: '05-06-2026' })).toBe(
+      'No pauses that day · Zero length break: no length, matches will not stop · Unreadable length break: no length, matches will not stop · No start break: no start time, matches will not stop',
+    );
   });
 });

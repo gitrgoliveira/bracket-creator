@@ -3,6 +3,7 @@
 // lives here.
 import { expect } from '@playwright/test';
 import { dwell } from './pace.mjs';
+import { isCoarse } from './pointer.mjs';
 
 const PASSWORD = 'e2e-operator';
 
@@ -56,8 +57,11 @@ export async function signOut(page) {
 
 // Sign in through the real form: /admin on a signed-out page opens the
 // "Admin sign in" dialog (app.jsx). Never the localStorage shortcut
-// scripts/screenshots uses: the form is part of what a journey walks.
+// scripts/screenshots uses: the form is part of what a journey walks. A page
+// with a mouse (a desktop context a journey opens itself) clicks where a
+// touch screen taps.
 export async function login(page, password = PASSWORD) {
+  const press = async (loc) => ((await isCoarse(page)) ? loc.tap() : loc.click());
   await page.goto('/admin');
   const form = page.locator('.modal.auth');
   await expect(form.getByText('Admin sign in')).toBeVisible();
@@ -65,6 +69,6 @@ export async function login(page, password = PASSWORD) {
   await form.locator('#admin-password').fill(password);
   // The dialog ignores a tap inside the bounce window of its opening.
   await dwell(page, shown);
-  await form.getByRole('button', { name: 'Sign in' }).tap();
+  await press(form.getByRole('button', { name: 'Sign in' }));
   await expect(page.getByRole('button', { name: 'Sign out' })).toBeVisible();
 }

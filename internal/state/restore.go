@@ -605,6 +605,24 @@ func (s *Store) PlanRestore(req RestoreRequest) (RestorePlan, error) {
 //  5. BeforeSwap, fed by snapshotLocked under the locks already held.
 //  6. Write the journal (and prefixes-pending.json), then the renames.
 //  7. The cache ritual, then the journal and the token folder are removed.
+//  8. Once every lock is released, the two upgrades NewStore runs:
+//     sweepLegacyUpgrades, then upgradeLegacyCeremonies. A backup restores on
+//     the version that made it or a later one (backup.CheckAppVersion, in the
+//     callers), and the later version brings it up to date with the upgrades
+//     the store already runs on what it loads. The cache ritual forgets each
+//     restored competition's upgrade (legacyUpgraded), and the sweep runs it
+//     again at once rather than at the competition's next read, so a backup
+//     or a daily copy taken right after the restore holds the upgraded files
+//     (Snapshot reads the files as they are and upgrades nothing); a
+//     competition the restore did not touch is still marked upgraded and
+//     costs nothing. upgradeLegacyCeremonies is the tournament file's. An
+//     archive that carries opening_block and closing_block, which nothing
+//     reads (a dev build, whose version is its branch name, or a hand-edited
+//     tournament.md), would without it have its ceremonies left out of the
+//     draw and the estimate until the next start. Both take the public store
+//     locks, so they cannot run inside restoreSwap. The swap is done by then,
+//     so a failure is logged, as at startup, rather than reported as a failed
+//     restore; the next start runs it again.
 //
 // Why the lock order cannot deadlock. No other path holds two competition
 // locks at once, and this one takes them in sorted id order. Every holder of
@@ -618,7 +636,20 @@ func (s *Store) PlanRestore(req RestoreRequest) (RestorePlan, error) {
 // locks (sorted) -> s.mu -> tournamentMu follows every existing order. A
 // future path that took compRenameMu inside courtCheckMu would close a cycle
 // with this one; keep it out.
-func (s *Store) Restore(req RestoreRequest) (plan RestorePlan, err error) {
+func (s *Store) Restore(req RestoreRequest) (RestorePlan, error) {
+	plan, err := s.restoreSwap(req)
+	if err != nil {
+		return plan, err
+	}
+	s.sweepLegacyUpgrades()
+	if uerr := s.upgradeLegacyCeremonies(); uerr != nil {
+		slog.Warn("state: restore done, but its ceremony upgrade failed; it runs again on the next start", "err", uerr)
+	}
+	return plan, nil
+}
+
+// restoreSwap is steps 1 to 7 of Restore, under the locks step 3 takes.
+func (s *Store) restoreSwap(req RestoreRequest) (plan RestorePlan, err error) {
 	ai, err := parseRestoreArchive(req.Archive, req.Only)
 	if err != nil {
 		return RestorePlan{}, err

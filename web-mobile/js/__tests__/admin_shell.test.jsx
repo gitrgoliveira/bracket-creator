@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
 import { installWindowStubs } from './helpers/stub_globals.js';
-import { collectText } from './helpers/vdom.js';
+import { collectText, findInTree } from './helpers/vdom.js';
 
 // Regression: CompCard crashed the entire admin console with
 //   TypeError: Cannot read properties of null (reading 'join')
@@ -206,5 +206,16 @@ describe('AdminDashboard', () => {
   it('renders a tournament with missing courts without throwing', () => {
     const t = { name: 'Missing Courts Cup', competitions: [] };
     expect(() => AdminDashboard({ tournament: t })).not.toThrow();
+  });
+
+  it('shows the competition calendar card whatever the schedule setting, and a tap opens it', () => {
+    const onOpenCalendar = vi.fn();
+    const t = { name: 'Cup', courts: ['A'], competitions: [{ id: 'c1', name: 'Open', status: 'setup' }] };
+    const tree = AdminDashboard({ tournament: t, onOpenCalendar, authConfig: { scheduleEnabled: false } });
+    const card = findInTree(tree, (n) => n?.type === 'button' && collectText(n).includes('Competition calendar'));
+    expect(card).toBeTruthy();
+    expect(collectText(card)).toContain('See every competition on its day and shiaijo, and move one.');
+    card.props.onClick();
+    expect(onOpenCalendar).toHaveBeenCalledTimes(1);
   });
 });

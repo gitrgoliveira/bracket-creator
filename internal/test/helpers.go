@@ -3,6 +3,7 @@ package test
 import (
 	"archive/zip"
 	"bytes"
+	"encoding/json"
 	"encoding/xml"
 	"errors"
 	"fmt"
@@ -331,4 +332,53 @@ func HanteiExplicit(v bool) *bool {
 // helper.ValidateShiaijoCount even by accident.
 func LegalShiaijoCount(n int) bool {
 	return n == 1 || n == 2 || n == 4 || n == 8 || n == 16
+}
+
+// ArchiveWithAppVersion returns a copy of a backup archive whose manifest.json
+// says appVersion made it, every other entry copied as it is: a backup from
+// another version of the app, for the restore's version check.
+func ArchiveWithAppVersion(archive []byte, appVersion string) ([]byte, error) {
+	zr, err := zip.NewReader(bytes.NewReader(archive), int64(len(archive)))
+	if err != nil {
+		return nil, err
+	}
+	var out bytes.Buffer
+	zw := zip.NewWriter(&out)
+	for _, f := range zr.File {
+		body, err := readZipEntry(f)
+		if err != nil {
+			return nil, err
+		}
+		if f.Name == "manifest.json" {
+			var m map[string]any
+			if err := json.Unmarshal(body, &m); err != nil {
+				return nil, fmt.Errorf("manifest.json: %w", err)
+			}
+			m["appVersion"] = appVersion
+			if body, err = json.Marshal(m); err != nil {
+				return nil, err
+			}
+		}
+		w, err := zw.Create(f.Name)
+		if err != nil {
+			return nil, err
+		}
+		if _, err := w.Write(body); err != nil {
+			return nil, err
+		}
+	}
+	if err := zw.Close(); err != nil {
+		return nil, err
+	}
+	return out.Bytes(), nil
+}
+
+func readZipEntry(f *zip.File) ([]byte, error) {
+	rc, err := f.Open()
+	if err != nil {
+		return nil, err
+	}
+	var data bytes.Buffer
+	_, err = data.ReadFrom(rc)
+	return data.Bytes(), errors.Join(err, rc.Close())
 }

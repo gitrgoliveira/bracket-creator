@@ -959,9 +959,8 @@ export function resolveTeamSize(staged, stored) {
 // close, so the rule moves here and both screens read it.
 //
 // `maxTeamSize` is a PARAMETER rather than a constant of this module: the
-// ceiling is not a config rule, it is how many bout positions the scoring
-// UI can render (MAX_TEAM_SIZE in admin_helpers.jsx, which TEAM_POSITIONS
-// in admin_scoring_modal.jsx is built from). This module is a leaf with no
+// ceiling is MAX_TEAM_SIZE in admin_helpers.jsx, which mirrors the server's
+// state.MaxTeamSize. This module is a leaf with no
 // project imports, and inventing a second copy of that number here is
 // exactly the drift it is meant to prevent. Callers pass their own
 // MAX_TEAM_SIZE; omitting it checks the floor alone.

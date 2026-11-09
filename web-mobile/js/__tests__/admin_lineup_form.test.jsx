@@ -165,7 +165,7 @@ describe('AdminLineup form (competition-admin Lineups, bc-tmid pass 3)', () => {
     // Choosing "+ Add new member…" switches that position into add-mode.
     positionSelect(tree, '1').props.onChange({ target: { value: '__add__' } });
     let tree2 = runtime.currentTree();
-    const nameField = findHosts(tree2, 'input').find(i => i.props?.['aria-label'] === 'New member name for 1');
+    const nameField = findHosts(tree2, 'input').find(i => i.props?.['aria-label'] === 'New member name for Senpo');
     expect(nameField).toBeTruthy();
     nameField.props.onChange({ target: { value: 'Ito' } });
 
@@ -194,7 +194,7 @@ describe('AdminLineup form (competition-admin Lineups, bc-tmid pass 3)', () => {
 
     positionSelect(tree, '1').props.onChange({ target: { value: '__add__' } });
     let tree2 = runtime.currentTree();
-    const nameField = findHosts(tree2, 'input').find(i => i.props?.['aria-label'] === 'New member name for 1');
+    const nameField = findHosts(tree2, 'input').find(i => i.props?.['aria-label'] === 'New member name for Senpo');
     nameField.props.onChange({ target: { value: 'Ito' } });
 
     tree2 = runtime.currentTree();
@@ -216,7 +216,7 @@ describe('AdminLineup form (competition-admin Lineups, bc-tmid pass 3)', () => {
 
     positionSelect(tree, '1').props.onChange({ target: { value: '__add__' } });
     let tree2 = runtime.currentTree();
-    const nameField = findHosts(tree2, 'input').find(i => i.props?.['aria-label'] === 'New member name for 1');
+    const nameField = findHosts(tree2, 'input').find(i => i.props?.['aria-label'] === 'New member name for Senpo');
     nameField.props.onChange({ target: { value: 'Ito' } });
 
     tree2 = runtime.currentTree();
@@ -228,7 +228,7 @@ describe('AdminLineup form (competition-admin Lineups, bc-tmid pass 3)', () => {
     // The add-row stays open with the typed name, rather than resetting, so
     // the operator can correct a typo instead of starting the picker over.
     const tree3 = runtime.currentTree();
-    const nameFieldAfter = findHosts(tree3, 'input').find(i => i.props?.['aria-label'] === 'New member name for 1');
+    const nameFieldAfter = findHosts(tree3, 'input').find(i => i.props?.['aria-label'] === 'New member name for Senpo');
     expect(nameFieldAfter, 'expected the add-name field to still be open after declining').toBeTruthy();
     expect(nameFieldAfter.props.value).toBe('Ito');
   });
@@ -244,7 +244,7 @@ describe('AdminLineup form (competition-admin Lineups, bc-tmid pass 3)', () => {
 
     positionSelect(tree, '1').props.onChange({ target: { value: '__add__' } });
     let tree2 = runtime.currentTree();
-    const nameField = findHosts(tree2, 'input').find(i => i.props?.['aria-label'] === 'New member name for 1');
+    const nameField = findHosts(tree2, 'input').find(i => i.props?.['aria-label'] === 'New member name for Senpo');
     nameField.props.onChange({ target: { value: 'Sato' } });
 
     tree2 = runtime.currentTree();
@@ -283,7 +283,7 @@ describe('AdminLineup form (competition-admin Lineups, bc-tmid pass 3)', () => {
 
     positionSelect(tree, '1').props.onChange({ target: { value: '__add__' } });
     let tree2 = runtime.currentTree();
-    const nameField = findHosts(tree2, 'input').find(i => i.props?.['aria-label'] === 'New member name for 1');
+    const nameField = findHosts(tree2, 'input').find(i => i.props?.['aria-label'] === 'New member name for Senpo');
     nameField.props.onChange({ target: { value: 'Ito' } });
 
     tree2 = runtime.currentTree();
@@ -550,7 +550,7 @@ describe('AdminLineup form (competition-admin Lineups, bc-tmid pass 3)', () => {
 
     positionSelect(tree, '1').props.onChange({ target: { value: '__add__' } });
     let tree2 = runtime.currentTree();
-    const nameField = findHosts(tree2, 'input').find(i => i.props?.['aria-label'] === 'New member name for 1');
+    const nameField = findHosts(tree2, 'input').find(i => i.props?.['aria-label'] === 'New member name for Senpo');
     nameField.props.onChange({ target: { value: 'Yamada' } });
 
     tree2 = runtime.currentTree();
@@ -575,7 +575,7 @@ describe('AdminLineup form (competition-admin Lineups, bc-tmid pass 3)', () => {
     let tree2 = runtime.currentTree();
     positionSelect(tree2, '1').props.onChange({ target: { value: '__add__' } });
     tree2 = runtime.currentTree();
-    const nameField = findHosts(tree2, 'input').find(i => i.props?.['aria-label'] === 'New member name for 1');
+    const nameField = findHosts(tree2, 'input').find(i => i.props?.['aria-label'] === 'New member name for Senpo');
     nameField.props.onChange({ target: { value: 'Yamada' } });
 
     tree2 = runtime.currentTree();
@@ -587,7 +587,7 @@ describe('AdminLineup form (competition-admin Lineups, bc-tmid pass 3)', () => {
     expect(global.window.API.renameTeamMember).not.toHaveBeenCalled();
 
     const tree3 = runtime.currentTree();
-    expect(collectText(tree3)).toContain('Yamada is already at Position 2.');
+    expect(collectText(tree3)).toContain('Yamada is already at Chuken.');
     // Position 1 was never assigned Yamada's id: the refusal returns before
     // selectMember runs, so its add-row stays open rather than switching
     // back to a select showing a (wrongly) resolved value.

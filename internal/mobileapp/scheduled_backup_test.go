@@ -17,6 +17,7 @@ import (
 
 	"github.com/gitrgoliveira/bracket-creator/internal/backup"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
+	bctest "github.com/gitrgoliveira/bracket-creator/internal/test"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -518,7 +519,7 @@ func TestScheduledBackups_UnreadableNewestCopyIsSkipped(t *testing.T) {
 				require.NotEqual(t, bad, files[0].Name)
 				snap, err := s.Snapshot(state.ScopeTournament, "")
 				require.NoError(t, err)
-				fp, ok := job.readArchiveFingerprint(files[0].Name, checks)
+				fp, _, ok, _ := job.readArchiveFingerprint(files[0].Name, checks)
 				require.True(t, ok, "the fresh copy must be readable")
 				assert.Equal(t, state.Fingerprint(snap.Files), fp)
 
@@ -627,6 +628,134 @@ func TestScheduledBackups_ArchiveFingerprintCacheAndInvalidation(t *testing.T) {
 	_, deletedStillCached := job.cache[newestBackup.Name]
 	job.mu.Unlock()
 	assert.False(t, deletedStillCached, "deleted archive must be pruned from cache")
+}
+
+// restampCopy rewrites a kept copy as if appVersion had made it.
+func restampCopy(t *testing.T, pt *populatedTournament, name, appVersion string) {
+	t.Helper()
+	path := filepath.Join(pt.Dir, state.BackupsDirName, name)
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+	stamped, err := bctest.ArchiveWithAppVersion(data, appVersion)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(path, stamped, 0o600))
+}
+
+// A daily copy an earlier version made restores on this one (backup.RestorableBy),
+// so it is the newest daily copy as usual: after an upgrade with the data
+// unchanged and the copy under 24 hours old, no copy is taken.
+func TestScheduledBackups_AnEarlierVersionsCopyCounts(t *testing.T) {
+	pt := buildPopulatedTournament(t)
+	clockTime := time.Date(2026, 6, 1, 10, 0, 0, 0, time.UTC)
+	job := &ScheduledBackups{Store: pt.Store, Clock: func() time.Time { return clockTime }, Version: func() string { return "v2.5.0" }}
+	ctx := context.Background()
+
+	require.NoError(t, job.runOnce(ctx))
+	files, err := pt.Store.ListBackupFiles()
+	require.NoError(t, err)
+	require.Len(t, files, 1)
+	restampCopy(t, pt, files[0].Name, "v2.4.0")
+
+	clockTime = clockTime.Add(time.Hour)
+	require.NoError(t, job.runOnce(ctx))
+	job.ShutdownCopy(ctx)
+	files, err = pt.Store.ListBackupFiles()
+	require.NoError(t, err)
+	assert.Len(t, files, 1, "an earlier version's copy of the same data is the newest daily copy")
+}
+
+// A daily copy a later version made cannot be restored by this one (after a
+// downgrade), so it is no daily copy for this version: the job takes one at
+// once, even with the data unchanged and the copy under 24 hours old, and the
+// copy it took then counts as usual.
+func TestScheduledBackups_ALaterVersionsCopyIsNotTheNewest(t *testing.T) {
+	pt := buildPopulatedTournament(t)
+	clockTime := time.Date(2026, 6, 1, 10, 0, 0, 0, time.UTC)
+	job := &ScheduledBackups{Store: pt.Store, Clock: func() time.Time { return clockTime }, Version: func() string { return "v2.5.0" }}
+	ctx := context.Background()
+
+	require.NoError(t, job.runOnce(ctx))
+	files, err := pt.Store.ListBackupFiles()
+	require.NoError(t, err)
+	require.Len(t, files, 1)
+	restampCopy(t, pt, files[0].Name, "v2.6.0")
+
+	// One hour later, nothing changed: a copy this version can restore is taken.
+	clockTime = clockTime.Add(time.Hour)
+	require.NoError(t, job.runOnce(ctx))
+	files, err = pt.Store.ListBackupFiles()
+	require.NoError(t, err)
+	require.Len(t, files, 2, "a later version's copy does not make the hourly check skip")
+	_, madeBy, ok, _ := job.readArchiveFingerprint(files[0].Name, BackupChecks())
+	require.True(t, ok)
+	require.Equal(t, "v2.5.0", madeBy, "the job stamps the copy it takes with its own version")
+
+	// Another hour, still unchanged: this version's copy is the newest, so nothing is written.
+	clockTime = clockTime.Add(time.Hour)
+	require.NoError(t, job.runOnce(ctx))
+	job.ShutdownCopy(ctx)
+	files, err = pt.Store.ListBackupFiles()
+	require.NoError(t, err)
+	assert.Len(t, files, 2)
+}
+
+// A future-dated copy holding the same data skips a copy only when this
+// version can restore it: after a downgrade with the clock set back, the
+// later version's future-dated copy cannot stand in for one this version can
+// restore. An earlier version's future-dated copy still can.
+func TestScheduledBackups_FutureCopySkipsOnlyWhenRestorable(t *testing.T) {
+	for _, tc := range []struct {
+		name, madeBy string
+		want         int
+	}{
+		{"a later version's copy", "v2.6.0", 2},
+		{"an earlier version's copy", "v2.4.0", 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			pt := buildPopulatedTournament(t)
+			clockTime := time.Date(2026, 6, 1, 10, 0, 0, 0, time.UTC)
+			name := writeFixtureBackup(t, pt.Store, state.BackupKindScheduled, clockTime.Add(3*24*time.Hour))
+			restampCopy(t, pt, name, tc.madeBy)
+
+			job := &ScheduledBackups{Store: pt.Store, Clock: func() time.Time { return clockTime }, Version: func() string { return "v2.5.0" }}
+			require.NoError(t, job.runOnce(context.Background()))
+			files, err := pt.Store.ListBackupFiles()
+			require.NoError(t, err)
+			assert.Len(t, files, tc.want)
+		})
+	}
+}
+
+// A newest daily copy that cannot be read is reported once, not at every
+// hourly tick, until the file changes.
+func TestScheduledBackups_ADamagedCopyIsReportedOnce(t *testing.T) {
+	pt := buildPopulatedTournament(t)
+	clockTime := time.Date(2026, 6, 1, 10, 0, 0, 0, time.UTC)
+	job := &ScheduledBackups{Store: pt.Store, Clock: func() time.Time { return clockTime }}
+	ctx := context.Background()
+	require.NoError(t, job.runOnce(ctx))
+	files, err := pt.Store.ListBackupFiles()
+	require.NoError(t, err)
+	require.Len(t, files, 1)
+	path := filepath.Join(pt.Dir, state.BackupsDirName, files[0].Name)
+	require.NoError(t, os.WriteFile(path, []byte("not a zip any more"), 0o600))
+
+	var buf bytes.Buffer
+	prevLogger := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
+	t.Cleanup(func() { slog.SetDefault(prevLogger) })
+
+	for h := 1; h <= 5; h++ {
+		clockTime = clockTime.Add(time.Hour)
+		require.NoError(t, job.runOnce(ctx))
+	}
+	assert.Equal(t, 1, strings.Count(buf.String(), "read backup archive failed"), buf.String())
+
+	// Rewritten (another size), it is read, and reported, again.
+	require.NoError(t, os.WriteFile(path, []byte("still not a zip, and longer"), 0o600))
+	clockTime = clockTime.Add(time.Hour)
+	require.NoError(t, job.runOnce(ctx))
+	assert.Equal(t, 2, strings.Count(buf.String(), "read backup archive failed"), buf.String())
 }
 
 func TestScheduledBackups_ShutdownCopyWithYoungerThan24hChange(t *testing.T) {

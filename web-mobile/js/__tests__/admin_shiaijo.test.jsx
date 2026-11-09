@@ -456,6 +456,15 @@ describe('parsePath; /admin/shiaijo/:court', () => {
   });
 });
 
+describe('parsePath; /admin/calendar', () => {
+  it('maps the calendar path to the calendar admin kind and back', () => {
+    expect(parsePath('/admin/calendar')).toEqual({ mode: 'admin', admin: { kind: 'calendar' } });
+    const url = pathFromState('admin', undefined, undefined, { kind: 'calendar' });
+    expect(url).toBe('/admin/calendar');
+    expect(parsePath(url)).toEqual({ mode: 'admin', admin: { kind: 'calendar' } });
+  });
+});
+
 describe('pathFromState; shiaijo round-trip', () => {
   const toPath = (court) =>
     pathFromState('admin', undefined, undefined, { kind: 'shiaijo', court });

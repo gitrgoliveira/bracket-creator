@@ -594,7 +594,12 @@ func RegisterLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps Com
 				if isMatchFinalized(snap.Status) {
 					return resultFinalized("This match has finished, so its lineup can no longer be changed. Contact the tournament organizer to correct it.").response()
 				}
-				return memberIDsOutsideTeam(judge, teamID, req.memberIDsRead())
+				comp, err := stx.LoadCompetition(compID)
+				if err != nil || comp == nil {
+					log.Printf("mobileapp: PUT %s: load competition: %v", c.Request.URL.Path, err)
+					return &txResponse{status: http.StatusInternalServerError, body: gin.H{"error": "internal error"}}
+				}
+				return memberIDsOutsideTeam(judge, teamID, comp.TeamSize, req.memberIDsRead())
 			}
 		}
 		saveLineup(c, tx, announce, follow, save, guard, func(lineups map[string]domain.TeamLineup) (domain.TeamLineup, bool) {
@@ -679,7 +684,7 @@ var errTeamNotInMatch = &selfRunRefusal{
 // file that cannot be read refuses the save with errTeamMembersUnreadable (409),
 // not a 500 the offline queue retries forever; a save that names no member id
 // (a cleared position) never reads it.
-func memberIDsOutsideTeam(judge *memberJudge, teamID string, memberIDs map[domain.Position]string) *txResponse {
+func memberIDsOutsideTeam(judge *memberJudge, teamID string, teamSize int, memberIDs map[domain.Position]string) *txResponse {
 	for pos, id := range memberIDs {
 		if id == "" {
 			continue
@@ -689,7 +694,7 @@ func memberIDsOutsideTeam(judge *memberJudge, teamID string, memberIDs map[domai
 			return errTeamMembersUnreadable.response()
 		}
 		if !held {
-			return errLineupMemberNotInTeam(pos).response()
+			return errLineupMemberNotInTeam(teamSize, pos).response()
 		}
 	}
 	return nil
@@ -747,11 +752,18 @@ func teamMemberIDs(squads map[string][]domain.TeamMember, teamID string) map[str
 // not hold. The lineup refusal and the representative pick's refusal both answer it.
 const codeTeamMemberNotInTeam = "team_member_not_in_team"
 
-func errLineupMemberNotInTeam(pos domain.Position) *selfRunRefusal {
+// errLineupMemberNotInTeam names the position as a person reads it, the way
+// the client's lineupPositionLabel does: its name where the team size names
+// its positions ("Senpo", "Taisho"), else "position N".
+func errLineupMemberNotInTeam(teamSize int, pos domain.Position) *selfRunRefusal {
+	label := domain.PositionLabel(teamSize, pos)
+	if label == string(pos) {
+		label = "position " + label
+	}
 	return &selfRunRefusal{
 		status:  http.StatusBadRequest,
 		code:    codeTeamMemberNotInTeam,
-		message: "The member chosen for " + string(pos) + " is not on this team. Pick again from the list.",
+		message: "The member chosen for " + label + " is not on this team. Pick again from the list.",
 	}
 }
 

@@ -4,7 +4,7 @@ Team tournaments work with any of the four formats described in [Tournament form
 
 ## Team lineups
 
-A team's lineup is its fighting order across the five positions: Senpo, Jiho, Chuken, Fukusho, and Taisho. Smaller teams use fewer positions.
+A team's lineup is its fighting order across the five positions: Senpo, Jiho, Chuken, Fukusho, and Taisho. A 3-person team fights as Senpo, Chuken, and Taisho, and a team of any other size numbers its positions.
 
 A team keeps the lineup of its previous team match unless you enter a new one for a match. The **Lineups** page sets each team's **Starting lineup**, which its first match uses unless that match has a lineup of its own, and it can set the lineup of any one of the team's matches. Pick the team, then choose **Starting lineup** or one of its matches in **Lineup for**. A lineup you enter for a match is used for that match and for every later match of the team, until you enter another. It never changes an earlier match. Changing a match's lineup also changes every later match of the team that carries it, including matches already played.
 
@@ -147,7 +147,7 @@ The following clip walks through the flows end to end, recorded from the score e
 
 ### Choosing the team match format
 
-When you create a team competition, pick the format under **Team match format**: **Regular** (every position plays its opposite number, the default) or **Kachinuki (winner stays on)**. The same control appears in the competition's **Settings** tab. It locks once the draw is generated: discard the draw to change it. Once the competition has started, the format can no longer be changed.
+When you create a team competition, set **Team size**, the number of fighters in a team, from 2 to 30. Then pick the format under **Team match format**: **Regular** (every position plays its opposite number, the default) or **Kachinuki (winner stays on)**. The **Team match format** control also appears in the competition's **Settings** tab. It locks once the draw is generated: discard the draw to change it. Once the competition has started, the format can no longer be changed.
 
 ### Scoring a kachinuki encounter
 

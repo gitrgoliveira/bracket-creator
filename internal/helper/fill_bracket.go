@@ -491,7 +491,7 @@ func SelectFillBracketDraftIndices(pools []Pool, minSize, numCourts int) ([]int,
 	drafts := NextPow2(len(pools)) - len(pools)
 	poolHalf, capacityByHalf, ok := FillBracketDraftCapacity(pools, drafts, numCourts)
 	if !ok {
-		return nil, fmt.Errorf("fill-bracket: the per-court target arithmetic is not achievable for %d pools across %d shiaijo", len(pools), numCourts)
+		return nil, fmt.Errorf("cannot fill the bracket: %d pools cannot be shared evenly across %d shiaijo; change the number of shiaijo or the Knockout qualifiers setting", len(pools), numCourts)
 	}
 	return SelectFillBracketDrafts(pools, minSize, poolHalf, capacityByHalf)
 }

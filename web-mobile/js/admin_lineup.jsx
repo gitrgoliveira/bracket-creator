@@ -48,7 +48,7 @@
 
 import { idOf, nameOf } from './competitor_identity.jsx';
 import { squadSlotLabel } from './squad_member_label.jsx';
-import { rosterWithoutPlacedElsewhere, memberPlacedElsewhere, memberRefusalNote, lineupDuplicateNote, alreadyPlacedNote, lineupPositionLabel, STARTING_ROUND } from './lineup_resolver.jsx';
+import { rosterWithoutPlacedElsewhere, memberPlacedElsewhere, memberRefusalNote, lineupDuplicateNote, alreadyPlacedNote, lineupPositionLabel, STARTING_ROUND, POS_KEYS_5, POS_LABELS_5, positionLabelsFor } from './lineup_resolver.jsx';
 import { poolMatchNumberOf, isSupplementaryBout, scoreRowMatchLabel } from './pool_ids.jsx';
 import { normalizeParticipantName } from './data.jsx';
 import { renameMemberFields } from './lineup_rename.jsx';
@@ -70,23 +70,23 @@ function TermAL(props) {
   return React.createElement('span', null, props.children);
 }
 
-// Canonical FIK position order for 5-person teams. Numeric sizes use
-// "1".."N" generated below. Each label carries an optional `termId` so
-// the renderer can wrap the label in a <Term> tooltip (U1).
-const POS_LABELS_5 = [
-  { key: "senpo", label: "Senpo", termId: "senpo" },
-  { key: "jiho", label: "Jiho", termId: "jiho" },
-  { key: "chuken", label: "Chuken", termId: "chuken" },
-  { key: "fukusho", label: "Fukusho", termId: "fukusho" },
-  { key: "taisho", label: "Taisho", termId: "taisho" },
-];
+// The positions of a team size in fighting order: { key, label, termId? }.
+// key is the stored lineup key (the FIK names for 5-person teams, "1".."N"
+// for every other size); label is what the page shows, the position's name
+// where the size names its positions (positionLabelsFor in lineup_resolver.jsx:
+// 5, and 3 as Senpo/Chuken/Taisho), else the number. A named position carries
+// a `termId` so the renderer can wrap the label in a <Term> tooltip (U1).
+const POS_ROWS_5 = POS_KEYS_5.map((key, i) => ({ key, label: POS_LABELS_5[i], termId: key }));
 
 function positionsForSize(teamSize) {
-  if (teamSize === 5) return POS_LABELS_5;
-  return Array.from({ length: teamSize }, (_, i) => ({
-    key: String(i + 1),
-    label: String(i + 1),
-  }));
+  if (teamSize === 5) return POS_ROWS_5;
+  const names = positionLabelsFor(teamSize);
+  return Array.from({ length: teamSize }, (_, i) => {
+    const name = names && names[i];
+    return name
+      ? { key: String(i + 1), label: name, termId: name.toLowerCase() }
+      : { key: String(i + 1), label: String(i + 1) };
+  });
 }
 
 
@@ -190,7 +190,7 @@ function resolveMemberIdForName(squad, name) {
 function positionNumberForKey(posKey) {
   const n = Number(posKey);
   if (Number.isInteger(n) && n > 0) return n;
-  const idx = POS_LABELS_5.findIndex(p => p.key === posKey);
+  const idx = POS_KEYS_5.indexOf(posKey);
   return idx >= 0 ? idx + 1 : 0;
 }
 
@@ -387,7 +387,7 @@ function memberWriteFailure(position, name, e) {
 // the actual cause replaces the whole list in that case.
 //
 // Returns "" when there is nothing to say.
-function memberIdentityWarning(failures, squadUnavailable) {
+function memberIdentityWarning(failures, squadUnavailable, teamSize) {
   if (squadUnavailable) {
     return "Lineup saved, but the team member list could not be loaded, so no position could be linked to a team member this time. Scores will still record normally.";
   }
@@ -396,7 +396,7 @@ function memberIdentityWarning(failures, squadUnavailable) {
   // Each part is whole sentences, so a refusal's own sentence (memberRefusalNote)
   // follows its position as it is, not in brackets.
   const parts = list.map(f => {
-    const label = lineupPositionLabel(f.position);
+    const label = lineupPositionLabel(f.position, teamSize);
     const who = f.name ? `${label} (${f.name})` : label;
     const note = memberRefusalNote(f, "");
     if (note) return `${who} could not be linked to a team member. ${note}`;
@@ -590,7 +590,7 @@ function AdminLineup({ comp, team, matchId = "", matchLabel = "", notInMatch = f
     if (write === "none") {
       const elsewhere = memberPlacedElsewhere(placed, posKey, target.id);
       if (elsewhere) {
-        setError(alreadyPlacedNote(target.name, lineupPositionLabel(elsewhere)));
+        setError(alreadyPlacedNote(target.name, lineupPositionLabel(elsewhere, teamSize)));
         return;
       }
       selectMember(posKey, target);
@@ -727,7 +727,7 @@ function AdminLineup({ comp, team, matchId = "", matchLabel = "", notInMatch = f
       // as the form shows it: the pickers never offer a member this form holds at
       // another position, but a lineup another device saved can hold one twice. The
       // server asks the same of the lineup it composes, and refuses naming both.
-      const duplicate = lineupDuplicateNote(named, shownIds, lineupPositionLabel, positionKeys, changed);
+      const duplicate = lineupDuplicateNote(named, shownIds, (k) => lineupPositionLabel(k, teamSize), positionKeys, changed);
       if (duplicate) {
         setError(duplicate);
         return;

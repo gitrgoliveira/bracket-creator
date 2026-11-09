@@ -108,6 +108,10 @@ func (s *Store) copyTournament(t *Tournament) *Tournament {
 		cp.Contacts = make([]TournamentContact, len(t.Contacts))
 		copy(cp.Contacts, t.Contacts)
 	}
+	if t.Pauses != nil {
+		cp.Pauses = make([]Pause, len(t.Pauses))
+		copy(cp.Pauses, t.Pauses)
+	}
 	return &cp
 }
 
@@ -234,18 +238,7 @@ func (s *Store) UpdateTournamentChanged(desired *Tournament, transform func(curr
 	if data, rerr := s.root.readFile(path); rerr == nil {
 		var t Tournament
 		if perr := parseFrontMatter(data, &t); perr == nil {
-			if t.DurationDays == 0 {
-				// Migrate: a legacy file with no duration_days key
-				// deserialises to the zero value (0), treat as 1.
-				t.DurationDays = 1
-			}
-			// Migrate the pre-rename rules_url key into website_url (mirrors
-			// ApplyTournamentDefaults) so an edit through this path never
-			// re-persists the legacy key or drops the value.
-			if t.WebsiteURL == "" && t.RulesURLLegacy != "" {
-				t.WebsiteURL = t.RulesURLLegacy
-			}
-			t.RulesURLLegacy = ""
+			migrateLegacyTournament(&t)
 			current = &t
 		} else {
 			// Parse failure: fall back to the same default record

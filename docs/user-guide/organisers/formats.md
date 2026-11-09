@@ -36,7 +36,7 @@ Because those blocks merge in pairs, a mixed competition must be assigned **1, 2
 
 This applies to the competition's own allocation, not to the venue. A hall with three shiai-jo is normal and stays as it is: it runs each of its competitions on 1 or 2 of the three, and can run two competitions side by side to keep all three busy. Knockout competitions follow the same rule, because they also split their bracket across shiai-jo. League and Swiss competitions produce no bracket and can use any number the tournament has. Refer to [How many shiai-jo a competition can use](knockout-draw.md#how-many-shiai-jo-a-competition-can-use).
 
-By default every pool sends the same number of qualifiers, set by **Winners per pool**. With pool size set to a minimum, two further options let oversized pools send an extra qualifier instead of leaving the difference as byes, or let you choose pool sizes so the qualifiers fill the bracket exactly. Refer to [How many qualify from each pool](knockout-draw.md#how-many-qualify-from-each-pool).
+By default every pool sends the same number of qualifiers, set by **Winners per pool**, which can be at most **Players per pool** (one more when pool size is a minimum). With pool size set to a minimum, two further options let oversized pools send an extra qualifier instead of leaving the difference as byes, or let you choose pool sizes so the qualifiers fill the bracket exactly. Refer to [How many qualify from each pool](knockout-draw.md#how-many-qualify-from-each-pool).
 
 ## League
 

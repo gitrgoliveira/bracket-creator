@@ -180,11 +180,13 @@ function isRequiredBracketMatch(m) {
 
 // Canonical numeric bounds. The year range is shared by every date
 // validator (admin_helpers.jsx validateAndNormalizeDate, admin_competition.jsx
-// saveNow inline). MAX_TEAM_SIZE is the canonical team-size cap; the
-// scoring modal's TEAM_POSITIONS array is built from it (see
-// admin_scoring_modal.jsx), and the team-size inputs in admin_competition
-// + admin_setup use it as their HTML `max` attribute. Bumping any of these
-// here flows to every consumer mechanically.
+// saveNow inline). MAX_TEAM_SIZE is the canonical team-size cap (members per
+// team), equal to the server's state.MaxTeamSize: the team-size inputs in
+// admin_competition_settings + admin_setup use it as their HTML `max` and
+// teamSizeError bound, and the team score sheet derives its kachinuki bout
+// guard from it (admin_scoring_team.jsx). 30 is a guard, not a planning
+// limit (operator ruling 2026-11-07: the largest team seen is about 12).
+// Bumping any of these here flows to every consumer mechanically.
 //
 // MIN_YEAR / MAX_YEAR mirror helper.MinDateYear / helper.MaxDateYear
 // (internal/helper/constants.go): the API's validateDateDMY rejects
@@ -200,7 +202,7 @@ function isRequiredBracketMatch(m) {
 // fails CI rather than waiting for a downstream UX bug.
 const MIN_YEAR = 1900;
 const MAX_YEAR = 2100;
-const MAX_TEAM_SIZE = 9;
+const MAX_TEAM_SIZE = 30;
 const MAX_COURTS = 16;
 const MAX_RANK = 1000;
 

@@ -493,14 +493,40 @@ export const POS_KEYS_5 = ["senpo", "jiho", "chuken", "fukusho", "taisho"];
 // Title-case labels for display (Senpo, Jiho, ...), derived from POS_KEYS_5.
 // Consumed by admin_scoring_team.jsx and streaming_overlay.jsx (single source).
 export const POS_LABELS_5 = POS_KEYS_5.map((s) => s.charAt(0).toUpperCase() + s.slice(1));
+// A 3-person team's positions read Senpo, Chuken and Taisho (operator ruling
+// 2026-11-07), taken from the five names so they are spelled once. Display
+// only: a 3-person team still STORES its positions as "1".."3".
+const POS_LABELS_3 = [0, 2, 4].map((i) => POS_LABELS_5[i]);
 
-// lineupPositionLabel: how a sentence names a lineup position, by its key: the
-// FIK name for a five-person team's (Senpo, Jiho, ...), else "Position N", which
-// reads on its own outside the rows that show the bare number. The one label every
-// lineup editor and the score sheet put into alreadyPlacedNote.
-export function lineupPositionLabel(posKey) {
+// positionLabelsFor: the ONE owner of which team sizes name their positions.
+// The names of a team size's positions in fighting order (index 0 fights bout
+// 1), or null for a size whose positions are read as numbers. Go twin:
+// domain.BoutPositionName / domain.PositionLabel.
+export function positionLabelsFor(teamSize) {
+  if (teamSize === 5) return POS_LABELS_5;
+  if (teamSize === 3) return POS_LABELS_3;
+  return null;
+}
+
+// boutPositionName: the name of the position that fights bout index `index`
+// (0-based) in a team of teamSize, or null when the size numbers its positions
+// or the index is outside them.
+export function boutPositionName(teamSize, index) {
+  const names = positionLabelsFor(teamSize);
+  return names && index >= 0 && index < names.length ? names[index] : null;
+}
+
+// lineupPositionLabel: how a sentence names a lineup position, by its key and
+// the team size: the position's name where the size names its positions (a
+// five-person team's FIK keys, a three-person team's "1".."3"), else "Position
+// N", which reads on its own outside the rows that show the bare number. The one
+// label every lineup editor and the score sheet put into alreadyPlacedNote.
+export function lineupPositionLabel(posKey, teamSize) {
   const i = POS_KEYS_5.indexOf(posKey);
-  return i >= 0 ? POS_LABELS_5[i] : `Position ${posKey}`;
+  if (i >= 0) return POS_LABELS_5[i];
+  const n = Number(posKey);
+  const named = teamSize !== 5 && Number.isInteger(n) ? boutPositionName(teamSize, n - 1) : null;
+  return named || `Position ${posKey}`;
 }
 
 // resolveBoutSideName: which name identifies one side of a sub-bout row.

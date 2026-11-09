@@ -1344,3 +1344,77 @@ func TestRestore_ConfigLessCompetitionFolderIsRefused(t *testing.T) {
 		})
 	}
 }
+
+// An archive can still store the ceremonies as opening_block and
+// closing_block, which only the ceremony upgrade reads. A live restore runs it
+// once the swap is done, so the pauses are there without a restart.
+func TestRestore_LegacyCeremoniesBecomePausesWithoutARestart(t *testing.T) {
+	src, _ := newRestoreTestStore(t)
+	restoreTestTournament(t, src, "pw")
+	require.NoError(t, src.SaveCompetition(&Competition{
+		ID: "men", Name: "Men", Date: "03-11-2026", StartTime: "09:30", Status: CompStatusSetup,
+	}))
+	snap, err := src.Snapshot(ScopeTournament, "")
+	require.NoError(t, err)
+	snap.Files["tournament.md"] = []byte("---\nname: Restore Taikai\ndate: 03-11-2026\nvenue: Budokan\nduration_days: 1\ncourts: [A, B]\nopening_block: 30m\nclosing_block: 45m\n---\n")
+	a := archiveFiles(t, backup.ScopeTournament, backup.KindManual, snap, nil)
+
+	dst, dir := newRestoreTestStore(t)
+	restoreTestTournament(t, dst, "pw")
+	_, err = dst.Restore(RestoreRequest{Archive: a})
+	require.NoError(t, err)
+
+	tourn, err := dst.LoadTournament()
+	require.NoError(t, err)
+	require.NotNil(t, tourn)
+	assert.Equal(t, []Pause{
+		{Name: "Opening ceremony", Start: "09:30", Length: "30m", Day: 0},
+		{Name: "Closing ceremony", Length: "45m", Day: 0},
+	}, tourn.Pauses)
+	assert.Empty(t, tourn.OpeningBlockLegacy)
+	assert.Empty(t, tourn.ClosingBlockLegacy)
+	raw, err := os.ReadFile(filepath.Join(dir, "tournament.md"))
+	require.NoError(t, err)
+	assert.NotContains(t, string(raw), "opening_block")
+	assert.NotContains(t, string(raw), "closing_block")
+	assert.Contains(t, string(raw), "password: pw", "the upgrade keeps the merged password")
+}
+
+// A backup an earlier version made can store a competition in a shape this
+// version upgrades on load (here format: playoffs and the whole-minute
+// durations). A live restore runs the upgrade at once, as a start does, so the
+// files on disk, and a backup or daily copy taken right after, hold the
+// upgraded shape before anything reads the competition.
+func TestRestore_LegacyCompetitionUpgradedOnDiskWithoutARead(t *testing.T) {
+	src, _ := newRestoreTestStore(t)
+	restoreTestTournament(t, src, "pw")
+	require.NoError(t, src.SaveCompetition(&Competition{
+		ID: "bracket-court-d", Name: "Bracket Court D", Status: CompStatusSetup,
+	}))
+	snap, err := src.Snapshot(ScopeTournament, "")
+	require.NoError(t, err)
+	fixture, err := os.ReadFile(filepath.Join("testdata", "legacy_playoffs_config.md"))
+	require.NoError(t, err)
+	snap.Files["competitions/bracket-court-d/config.md"] = fixture
+	a := archiveFiles(t, backup.ScopeTournament, backup.KindManual, snap, nil)
+
+	dst, dir := newRestoreTestStore(t)
+	restoreTestTournament(t, dst, "pw")
+	_, err = dst.Restore(RestoreRequest{Archive: a})
+	require.NoError(t, err)
+
+	upgraded := func(t *testing.T, raw []byte) {
+		t.Helper()
+		assert.Contains(t, string(raw), "format: knockout")
+		assert.Contains(t, string(raw), "knockout_match_duration_seconds: 300")
+		assert.Contains(t, string(raw), "pool_match_duration_seconds: 180")
+		assert.NotContains(t, string(raw), "playoff")
+	}
+	raw, err := os.ReadFile(filepath.Join(dir, "competitions", "bracket-court-d", "config.md"))
+	require.NoError(t, err)
+	upgraded(t, raw)
+
+	after, err := dst.Snapshot(ScopeTournament, "")
+	require.NoError(t, err)
+	upgraded(t, after.Files["competitions/bracket-court-d/config.md"])
+}

@@ -283,7 +283,7 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
       // sent to the resolver are the ones whose name the operator typed, so a refusal
       // names where they picked the member rather than the box they typed it into.
       const typed = Object.keys(positionsForResolver);
-      const duplicateIn = (ids) => lineupDuplicateNote(positionsOut, ids, lineupPositionLabel, positionKeys, changed, typed);
+      const duplicateIn = (ids) => lineupDuplicateNote(positionsOut, ids, (k) => lineupPositionLabel(k, teamSize), positionKeys, changed, typed);
       const refusedEarly = duplicateIn({ ...memberIdsOut, ...placedByResolver });
       if (refusedEarly) {
         setError(refusedEarly);
@@ -312,7 +312,7 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
               if (!form.isMounted()) return false;
               if (e && e.revertMember) form.memberRenamed(e.revertMember);
               const composer = window.AdminLineupHelpers?.memberIdentityWarning;
-              if (typeof composer === "function") setLineupWarning(composer([failure], false));
+              if (typeof composer === "function") setLineupWarning(composer([failure], false, teamSize));
               return true;
             };
             const resolved = await resolver(compId, teamId, positionsForResolver, form.squadRef.current, password, composedIds, { onMemberRefusal });
@@ -374,7 +374,7 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
           if (typeof showToast === "function") showToast("Match lineup saved");
         }, () => {});
         const composer = window.AdminLineupHelpers?.memberIdentityWarning;
-        if (typeof composer === "function") setLineupWarning(composer(memberFailures, membersUnavailable));
+        if (typeof composer === "function") setLineupWarning(composer(memberFailures, membersUnavailable, teamSize));
         return;
       }
       // Reflect exactly what was persisted: the whole lineup the server holds now,
@@ -383,7 +383,7 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
       if (typeof showToast === "function") showToast("Match lineup saved");
       const composer = window.AdminLineupHelpers?.memberIdentityWarning;
       if (typeof composer === "function") {
-        setLineupWarning(composer(memberFailures, membersUnavailable));
+        setLineupWarning(composer(memberFailures, membersUnavailable, teamSize));
       }
     } catch (e) {
       setError(e?.message || "Failed to save lineup");

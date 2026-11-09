@@ -895,16 +895,16 @@ describe('AdminCompetition survives a null courts list (U1)', () => {
     const comp = makeCompetition({ courts: null });
     const { container } = await mountSection('overview', { comp });
     const box = Array.from(container.querySelectorAll('.stat-box'))
-      .find((b) => /Courts?$/.test(b.querySelector('.l').textContent));
+      .find((b) => b.querySelector('.l').textContent.endsWith('Shiaijo'));
     expect(box.querySelector('.v').textContent).toBe('0');
-    expect(box.textContent).toContain('Courts');
+    expect(box.textContent).toContain('Shiaijo');
   });
 
   it('still reports a real allocation unchanged', async () => {
     const comp = makeCompetition({ courts: ['A', 'B'] });
     const { container } = await mountSection('overview', { comp });
     const box = Array.from(container.querySelectorAll('.stat-box'))
-      .find((b) => /Courts?$/.test(b.querySelector('.l').textContent));
+      .find((b) => b.querySelector('.l').textContent.endsWith('Shiaijo'));
     expect(box.querySelector('.v').textContent).toBe('2');
   });
 
@@ -1379,5 +1379,223 @@ describe('AdminSettings names its hand-written fields (bc-lbla)', () => {
     expect(within(group).getAllByRole('button')).toHaveLength(3);
     expect(pressed(group)).toHaveLength(1);
     expect(within(group).getAllByRole('button')[0].getAttribute('aria-pressed')).toBe('true');
+  });
+});
+
+describe('Schedule estimate effect dependencies (p2-overview)', () => {
+  it('Overview re-fetches estimate when teamMatchType, extraQualifiers, twoThirdPlaces, naginata or expectedParticipants changes', async () => {
+    const comp1 = makeCompetition();
+    const t = makeTournament(comp1);
+    const estimateSpy = vi.fn().mockResolvedValue(null);
+    window.API.estimateCompetitionSchedule = estimateSpy;
+
+    let result;
+    await act(async () => {
+      result = render(
+        <AdminCompetition
+          tournament={t}
+          competition={comp1}
+          pools={[]}
+          poolMatches={[]}
+          standings={[]}
+          bracket={null}
+          section="overview"
+          onSection={noop}
+          onBack={noop}
+          onOpenCompetition={noop}
+          onUpdate={noop}
+          onRefreshCompetition={noop}
+          onMoveCourt={noop}
+          onEditScore={noop}
+          onLogout={noop}
+          onViewerMode={noop}
+          tweaks={{}}
+          password=""
+          showToast={noop}
+        />
+      );
+    });
+
+    const initialCalls = estimateSpy.mock.calls.length;
+    expect(initialCalls).toBeGreaterThanOrEqual(1);
+
+    const testDeps = [
+      { teamMatchType: 'kachinuki' },
+      { extraQualifiers: 'larger_pools' },
+      { twoThirdPlaces: true },
+      { naginata: true },
+      { expectedParticipants: 40 },
+    ];
+
+    let currentComp = comp1;
+    for (const diff of testDeps) {
+      currentComp = { ...currentComp, ...diff };
+      const callCountBefore = estimateSpy.mock.calls.length;
+      await act(async () => {
+        result.rerender(
+          <AdminCompetition
+            tournament={t}
+            competition={currentComp}
+            pools={[]}
+            poolMatches={[]}
+            standings={[]}
+            bracket={null}
+            section="overview"
+            onSection={noop}
+            onBack={noop}
+            onOpenCompetition={noop}
+            onUpdate={noop}
+            onRefreshCompetition={noop}
+            onMoveCourt={noop}
+            onEditScore={noop}
+            onLogout={noop}
+            onViewerMode={noop}
+            tweaks={{}}
+            password=""
+            showToast={noop}
+          />
+        );
+      });
+      expect(estimateSpy.mock.calls.length).toBeGreaterThan(callCountBefore);
+    }
+  });
+
+  it('Settings re-fetches estimate when teamMatchType, extraQualifiers, twoThirdPlaces, naginata or expectedParticipants changes', async () => {
+    const comp1 = makeCompetition();
+    const t = makeTournament(comp1);
+    const estimateSpy = vi.fn().mockResolvedValue(null);
+    window.API.estimateCompetitionSchedule = estimateSpy;
+
+    let result;
+    await act(async () => {
+      result = render(
+        <AdminCompetition
+          tournament={t}
+          competition={comp1}
+          pools={[]}
+          poolMatches={[]}
+          standings={[]}
+          bracket={null}
+          section="settings"
+          onSection={noop}
+          onBack={noop}
+          onOpenCompetition={noop}
+          onUpdate={noop}
+          onRefreshCompetition={noop}
+          onMoveCourt={noop}
+          onEditScore={noop}
+          onLogout={noop}
+          onViewerMode={noop}
+          tweaks={{}}
+          password=""
+          showToast={noop}
+        />
+      );
+    });
+
+    const initialCalls = estimateSpy.mock.calls.length;
+    expect(initialCalls).toBeGreaterThanOrEqual(1);
+
+    const testDeps = [
+      { teamMatchType: 'kachinuki' },
+      { extraQualifiers: 'larger_pools' },
+      { twoThirdPlaces: true },
+      { naginata: true },
+      { expectedParticipants: 40 },
+    ];
+
+    let currentComp = comp1;
+    for (const diff of testDeps) {
+      currentComp = { ...currentComp, ...diff };
+      const callCountBefore = estimateSpy.mock.calls.length;
+      await act(async () => {
+        result.rerender(
+          <AdminCompetition
+            tournament={t}
+            competition={currentComp}
+            pools={[]}
+            poolMatches={[]}
+            standings={[]}
+            bracket={null}
+            section="settings"
+            onSection={noop}
+            onBack={noop}
+            onOpenCompetition={noop}
+            onUpdate={noop}
+            onRefreshCompetition={noop}
+            onMoveCourt={noop}
+            onEditScore={noop}
+            onLogout={noop}
+            onViewerMode={noop}
+            tweaks={{}}
+            password=""
+            showToast={noop}
+          />
+        );
+      });
+      expect(estimateSpy.mock.calls.length).toBeGreaterThan(callCountBefore);
+    }
+  });
+});
+
+describe('Overview Est. duration tile (p2-overview)', () => {
+  async function mountWithEstimate(estimate, compOverrides = {}, tournament = {}) {
+    const original = window.API.estimateCompetitionSchedule;
+    window.API.estimateCompetitionSchedule = vi.fn().mockResolvedValue(estimate);
+    try {
+      const comp = makeCompetition(compOverrides);
+      const { container } = await mountSection('overview', { comp, tournament });
+      return container;
+    } finally {
+      window.API.estimateCompetitionSchedule = original;
+    }
+  }
+  const tile = (container) => container.querySelector('[data-testid="stat-est-duration"]');
+
+  it('shows about, the finish and the expected count in setup', async () => {
+    const c = await mountWithEstimate(
+      { totalDurationMinutes: 248, bestCaseMinutes: 248, worstCaseMinutes: 248, perCourtMinutes: [248, 242], participants: 40, participantsSource: 'expected' },
+      { startTime: '09:30', players: [{ id: 'p1', name: 'A' }, { id: 'p2', name: 'B' }] },
+    );
+    const t = tile(c);
+    expect(t.querySelector('.l').textContent).toBe('Est. duration');
+    expect(t.querySelector('.v').textContent).toBe('about 4h 08m');
+    expect(t.textContent).toContain('Finishes about 13:38');
+    expect(t.textContent).toContain('For 40 expected participants (2 registered)');
+    expect(t.textContent).toContain('2 registered, fewer than the 40 you expected.');
+    expect(c.textContent).toContain('Per shiaijo:');
+    expect(c.textContent).toContain('A about 4h 08m');
+    expect(c.textContent).toContain('Pauses:');
+  });
+
+  it('says checked in when check-in applies', async () => {
+    const c = await mountWithEstimate(
+      { totalDurationMinutes: 60, bestCaseMinutes: 60, worstCaseMinutes: 60, perCourtMinutes: [60], participants: 40, participantsSource: 'expected' },
+      { checkInEnabled: true, players: [{ id: 'p1', name: 'A', checkedIn: true }, { id: 'p2', name: 'B' }] },
+      { checkInEnabled: true },
+    );
+    expect(tile(c).textContent).toContain('(1 checked in)');
+  });
+
+  it('uses the average label and the range for kachinuki', async () => {
+    const c = await mountWithEstimate(
+      { totalDurationMinutes: 229, bestCaseMinutes: 129, worstCaseMinutes: 268, perCourtMinutes: [229], participants: 8, participantsSource: 'expected' },
+      { kind: 'team', teamSize: 3, teamMatchType: 'kachinuki', startTime: '09:30' },
+    );
+    const t = tile(c);
+    expect(t.querySelector('.l').textContent).toBe('Average est. duration');
+    expect(t.textContent).toContain('Best 2h 09m to worst 4h 28m');
+    expect(t.textContent).toContain('For 8 expected teams');
+  });
+
+  it('after the draw counts the draw and finishes at the latest court end', async () => {
+    const c = await mountWithEstimate(
+      { totalDurationMinutes: 60, bestCaseMinutes: 60, worstCaseMinutes: 60, perCourtMinutes: [60, 50], courtEnds: { A: '11:00', B: '16:45' }, participants: 18, participantsSource: 'roster' },
+      { status: 'draw-ready', startTime: '09:00' },
+    );
+    const t = tile(c);
+    expect(t.textContent).toContain('For the 18 participants in the draw');
+    expect(t.textContent).toContain('Finishes about 16:45');
+    expect(t.textContent).not.toContain('Finishes about 10:00');
   });
 });

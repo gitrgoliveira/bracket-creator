@@ -210,7 +210,7 @@ func TestTeamFinishGate_CorrectionIsNotExempt(t *testing.T) {
 	p["correctionReason"] = "wrong bout scored"
 	w := putScore(t, r, "tf", finishGateMatchID, p)
 	require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
-	assert.Contains(t, w.Body.String(), "Bout 3 has no result.")
+	assert.Contains(t, w.Body.String(), "Bout 3 (Taisho) has no result.")
 	stored := finishGateStored(t, store)
 	require.Len(t, stored.SubResults, 3)
 	assert.Equal(t, finishGateTeamA, stored.SubResults[2].Winner, "the refused correction left the stored bout alone")
@@ -311,7 +311,7 @@ func TestTeamFinishGate_ClearWithdrawalReopensTheMatch(t *testing.T) {
 	partial := finishPayload(wonBout(1), unfoughtBout(2), unfoughtBout(3))
 	w = putScore(t, r, "tf", finishGateMatchID, partial)
 	require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
-	assert.Contains(t, w.Body.String(), "Bout 2 and Bout 3 have no result.")
+	assert.Contains(t, w.Body.String(), "Bout 2 (Chuken) and Bout 3 (Taisho) have no result.")
 
 	w = putScore(t, r, "tf", finishGateMatchID, finishPayload(wonBout(1), wonBout(2), wonBout(3)))
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
@@ -337,7 +337,7 @@ func TestTeamFinishGate_ADecisionThatReplacesTheWithdrawalIsGated(t *testing.T) 
 	c["correctionReason"] = "Scoring error"
 	w = putScore(t, r, "tf", finishGateMatchID, c)
 	require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
-	assert.Contains(t, w.Body.String(), "Bout 2 and Bout 3 have no result.")
+	assert.Contains(t, w.Body.String(), "Bout 2 (Chuken) and Bout 3 (Taisho) have no result.")
 	assert.Equal(t, "kiken-voluntary", finishGateStored(t, store).Decision, "the refused write left the withdrawal alone")
 }
 
@@ -360,7 +360,7 @@ func TestTeamFinishGate_ClearWithdrawalCorrectionSavesTheRealResult(t *testing.T
 	partial["correctionReason"] = "Withdrawal recorded by mistake"
 	w = putScore(t, r, "tf", finishGateMatchID, partial)
 	require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
-	assert.Contains(t, w.Body.String(), "Bout 2 and Bout 3 have no result.")
+	assert.Contains(t, w.Body.String(), "Bout 2 (Chuken) and Bout 3 (Taisho) have no result.")
 	assert.Equal(t, "kiken-voluntary", finishGateStored(t, store).Decision, "the refused write left the withdrawal alone")
 
 	getEvents := collectEvents(t, hub)
@@ -419,7 +419,7 @@ func TestTeamFinishGate_APositionNeitherTeamFieldsNeedsATie(t *testing.T) {
 
 	w := putScore(t, r, "tf", finishGateMatchID, finishPayload(wonBout(1), wonBout(2)))
 	require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
-	assert.Contains(t, w.Body.String(), "Bout 3 has no result.")
+	assert.Contains(t, w.Body.String(), "Bout 3 (Taisho) has no result.")
 	assert.NotContains(t, w.Body.String(), "lineup", "a vacancy is legitimate play, never something to complete")
 	assert.Equal(t, state.MatchStatusRunning, finishGateStored(t, store).Status, "a refused finish writes nothing")
 
@@ -616,7 +616,7 @@ func TestRefuseUnfinishedTeamFinish_Scope(t *testing.T) {
 	verr, err = refuseUnfinishedTeamFinish(store, "team", "Pool A-1", partial)
 	require.NoError(t, err)
 	require.NotNil(t, verr)
-	assert.Equal(t, "Bout 2 and Bout 3 have no result. Record a score, a Tie, or a Fusensho before finishing.", verr.Error())
+	assert.Equal(t, "Bout 2 (Chuken) and Bout 3 (Taisho) have no result. Record a score, a Tie, or a Fusensho before finishing.", verr.Error())
 
 	verr, err = refuseUnfinishedTeamFinish(store, "missing", "Pool A-1", partial)
 	require.NoError(t, err)

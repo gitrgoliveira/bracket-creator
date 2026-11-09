@@ -219,3 +219,65 @@ func TestDetectClashes_RosteredFootprintExtendsWindow(t *testing.T) {
 	require.Len(t, clashes, 1, "Alpha's rostered window must reach Bravo at 09:40")
 	assert.Equal(t, "b", clashes[0].OtherCompID)
 }
+
+func TestDetectClashes_DisjointCourtsReportsEarliestSpanOnly(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	// Alpha and Bravo share courts A and B, but clash at disjoint times: on court B
+	// both start in the morning, on court A both start in the afternoon. The warning
+	// must report court B's own (earliest) span, never one continuous span that runs
+	// from the morning clash to the afternoon one. SharedCourts still lists both.
+	for _, c := range []struct {
+		id, name, aAt, bAt string
+	}{
+		{"a", "Alpha", "14:00", "09:00"},
+		{"b", "Bravo", "14:30", "09:15"},
+	} {
+		require.NoError(t, store.SaveCompetition(&state.Competition{
+			ID: c.id, Name: c.name, Date: "01-07-2026", StartTime: "09:00",
+			Courts: []string{"A", "B"}, PoolMatchDurationSeconds: 3600,
+			Status: state.CompStatusDrawReady,
+		}))
+		require.NoError(t, store.SavePoolMatches(c.id, []state.MatchResult{
+			{ID: c.id + "-a", Court: "A", ScheduledAt: c.aAt, Status: state.MatchStatusScheduled},
+			{ID: c.id + "-b", Court: "B", ScheduledAt: c.bAt, Status: state.MatchStatusScheduled},
+		}))
+	}
+
+	clashes, err := eng.DetectClashesForCompetition("a")
+	require.NoError(t, err)
+	require.Len(t, clashes, 1)
+	assert.Equal(t, []string{"A", "B"}, clashes[0].SharedCourts)
+	assert.Equal(t, "09:15", clashes[0].OverlapStart)
+	assert.Less(t, clashes[0].OverlapEnd, "14:00", "the span must not reach the afternoon clash on court A")
+}
+
+func TestDetectClashes_OutsideTournamentDaysStillClash(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	require.NoError(t, store.SaveTournament(&state.Tournament{
+		Name:         "Tourn",
+		Date:         "01-07-2026",
+		DurationDays: 2,
+		Courts:       []string{"A"},
+	}))
+
+	// Outside tournament days (05-07-2026), same shiaijo A, overlapping start times (09:00 and 09:15).
+	emptyComp(t, store, "a", "Alpha", "05-07-2026", "09:00", []string{"A"})
+	emptyComp(t, store, "b", "Bravo", "05-07-2026", "09:15", []string{"A"})
+
+	clashes, err := eng.DetectClashesForCompetition("a")
+	require.NoError(t, err)
+	require.Len(t, clashes, 1, "overlapping competitions outside tournament days must report a clash")
+	assert.Equal(t, "b", clashes[0].OtherCompID)
+	assert.Equal(t, "Bravo", clashes[0].OtherCompName)
+	assert.Equal(t, []string{"A"}, clashes[0].SharedCourts)
+	assert.Equal(t, "09:15", clashes[0].OverlapStart)
+	assert.Equal(t, "09:30", clashes[0].OverlapEnd)
+
+	// Non-overlapping start times (11:00 and 11:30 with 30-min footprint).
+	emptyComp(t, store, "c", "Charlie", "05-07-2026", "11:00", []string{"A"})
+	emptyComp(t, store, "d", "Delta", "05-07-2026", "11:30", []string{"A"})
+
+	clashesNonOverlapping, err := eng.DetectClashesForCompetition("c")
+	require.NoError(t, err)
+	assert.Empty(t, clashesNonOverlapping, "non-overlapping competitions outside tournament days report no clash")
+}

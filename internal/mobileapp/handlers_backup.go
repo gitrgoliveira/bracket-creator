@@ -12,11 +12,13 @@ import (
 	"slices"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/backup"
+	"github.com/gitrgoliveira/bracket-creator/internal/cmd/version"
 	"github.com/gitrgoliveira/bracket-creator/internal/engine"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
@@ -46,6 +48,10 @@ const (
 	backupCodeBadBackupName  = "bad_backup_name"
 	backupCodeBackupNotFound = "backup_not_found"
 	backupCodeBadRequest     = "bad_restore_request"
+	// backupCodeVersionMismatch: the running version of the app cannot
+	// restore the archive, a later or unordered version made it
+	// (backup.CheckAppVersion).
+	backupCodeVersionMismatch = "backup_version_mismatch"
 )
 
 // BackupChecks returns the store's validators for backup archives.
@@ -112,14 +118,22 @@ func respondBackupRefusal(c *gin.Context, status int, code, sentence string, ext
 	c.AbortWithStatusJSON(status, body)
 }
 
-// SnapshotArchive turns a snapshot into the bytes of a backup archive.
+// SnapshotArchive turns a snapshot into the bytes of a backup archive that
+// names the running app's version.
 func SnapshotArchive(snap state.Snapshot, kind backup.Kind, at time.Time, restoreCreated []string) ([]byte, error) {
+	return snapshotArchiveAs(snap, kind, at, restoreCreated, "")
+}
+
+// snapshotArchiveAs is SnapshotArchive naming appVersion ("" for the running
+// app's, backup.Meta.AppVersion).
+func snapshotArchiveAs(snap state.Snapshot, kind backup.Kind, at time.Time, restoreCreated []string, appVersion string) ([]byte, error) {
 	comps := make([]backup.CompetitionRef, 0, len(snap.Competitions))
 	for id, name := range snap.Competitions {
 		comps = append(comps, backup.CompetitionRef{ID: id, Name: name})
 	}
 	sort.Slice(comps, func(i, j int) bool { return comps[i].ID < comps[j].ID })
 	meta := backup.Meta{
+		AppVersion:     appVersion,
 		CreatedAt:      at.UTC(),
 		Scope:          backup.Scope(snap.Scope),
 		Kind:           kind,
@@ -424,6 +438,11 @@ func readRestoreRequest(c *gin.Context, store BackupStore, verifier PasswordVeri
 	return req, true
 }
 
+// runningAppVersion is the version a restore is judged against; a test sets
+// it to restore an earlier version's backup whatever the test binary's own
+// version is (a branch name, which has no release order).
+var runningAppVersion = version.GetVersion
+
 func readRestoreArchive(c *gin.Context, store BackupStore) (*backup.Archive, bool) {
 	from := c.PostForm("from")
 	fh, fileErr := c.FormFile("archive")
@@ -489,6 +508,14 @@ func readRestoreArchive(c *gin.Context, store BackupStore) (*backup.Archive, boo
 		respondBackupRefusal(c, http.StatusBadRequest, backupCodeArchiveInvalid,
 			"This file is not a backup this app can restore, so nothing was changed.",
 			gin.H{"reason": reason, "detail": err.Error()})
+		return nil, false
+	}
+	// A backup is restored only on the version that made it or a later one;
+	// the plan is refused too, so the page says so before any choice is made.
+	running := runningAppVersion()
+	if verr := backup.CheckAppVersion(archive.Manifest, running); verr != nil {
+		respondBackupRefusal(c, http.StatusBadRequest, backupCodeVersionMismatch, verr.Detail,
+			gin.H{"backupVersion": strings.TrimSpace(archive.Manifest.AppVersion), "appVersion": strings.TrimSpace(running)})
 		return nil, false
 	}
 	return archive, true

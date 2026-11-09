@@ -147,7 +147,7 @@ var Glossary = map[string]Term{
 		ID:      "senpo",
 		Kanji:   "先鋒",
 		Short:   "First player",
-		Tooltip: "The team's first player, fights bout 1 in a 5-person team. Senpo must be filled; this position cannot be left vacant, even when a teammate is withdrawn.",
+		Tooltip: "The team's first player, fights bout 1 in a 3- or 5-person team. Senpo must be filled; this position cannot be left vacant, even when a teammate is withdrawn.",
 	},
 	"jiho": {
 		ID:      "jiho",
@@ -159,7 +159,7 @@ var Glossary = map[string]Term{
 		ID:      "chuken",
 		Kanji:   "中堅",
 		Short:   "Middle player",
-		Tooltip: "The team's middle player, fights bout 3 in a 5-person team.",
+		Tooltip: "The team's middle player, fights bout 3 in a 5-person team and bout 2 in a 3-person team.",
 	},
 	"fukusho": {
 		ID:      "fukusho",
@@ -172,7 +172,7 @@ var Glossary = map[string]Term{
 		ID:      "taisho",
 		Kanji:   "大将",
 		Short:   "Captain",
-		Tooltip: "The team's captain, fights the final bout (bout 5). Like senpo, Taisho must be filled; this position cannot be left vacant.",
+		Tooltip: "The team's captain, fights the final bout (bout 5 in a 5-person team, bout 3 in a 3-person team). Like senpo, Taisho must be filled; this position cannot be left vacant.",
 		SeeAlso: []string{"senpo"},
 	},
 

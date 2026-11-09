@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -582,6 +583,33 @@ func TestValidateTeamMatchType(t *testing.T) {
 	}
 }
 
+func TestCompetition_ValidatePoolWinners(t *testing.T) {
+	tests := []struct {
+		name    string
+		comp    Competition
+		wantErr string
+	}{
+		{"max mode at pool size ok", Competition{Format: CompFormatMixed, PoolSize: 3, PoolSizeMode: "max", PoolWinners: 3}, ""},
+		{"max mode past pool size errors", Competition{Format: CompFormatMixed, PoolSize: 3, PoolSizeMode: "max", PoolWinners: 4}, "poolWinners must be at most 3 for pools of 3 (got 4)"},
+		{"min mode allows the remainder seat", Competition{Format: CompFormatMixed, PoolSize: 3, PoolSizeMode: "min", PoolWinners: 4}, ""},
+		{"min mode past the remainder seat errors", Competition{Format: CompFormatMixed, PoolSize: 3, PoolSizeMode: "min", PoolWinners: 5}, "poolWinners must be at most 4 for pools of 3 (got 5)"},
+		{"huge value errors", Competition{Format: CompFormatMixed, PoolSize: 3, PoolSizeMode: "max", PoolWinners: 1 << 62}, "poolWinners must be at most 3"},
+		{"unset value is not judged", Competition{Format: CompFormatMixed, PoolSize: 1, PoolSizeMode: "max"}, ""},
+		{"no pool phase is not judged", Competition{Format: CompFormatKnockout, PoolWinners: 300}, ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.comp.ValidatePoolWinners()
+			if tc.wantErr == "" {
+				assert.NoError(t, err)
+			} else {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tc.wantErr)
+			}
+		})
+	}
+}
+
 func TestValidateCompetitionTeamSize(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -600,6 +628,9 @@ func TestValidateCompetitionTeamSize(t *testing.T) {
 		{"empty kind with size 0 ok", "", 0, false},
 		{"empty kind with size 1 errors", "", 1, true},
 		{"empty kind with size 3 errors", "", 3, true},
+		{"team at MaxTeamSize ok", "team", MaxTeamSize, false},
+		{"team past MaxTeamSize errors", "team", MaxTeamSize + 1, true},
+		{"huge team size errors", "team", 1 << 60, true},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -633,6 +664,21 @@ func TestValidateCompetitionKind(t *testing.T) {
 			} else {
 				assert.NoError(t, err)
 			}
+		})
+	}
+}
+
+func TestValidatePoolSizeMode(t *testing.T) {
+	for _, mode := range []string{"", "max", "min"} {
+		t.Run("accepts "+strconv.Quote(mode), func(t *testing.T) {
+			assert.NoError(t, ValidatePoolSizeMode(mode))
+		})
+	}
+	for _, mode := range []string{"maxx", "MAX", "Min", "minimum", " max"} {
+		t.Run("refuses "+strconv.Quote(mode), func(t *testing.T) {
+			err := ValidatePoolSizeMode(mode)
+			require.Error(t, err)
+			assert.Equal(t, "unknown poolSizeMode "+strconv.Quote(mode)+` (expected "max" or "min")`, err.Error())
 		})
 	}
 }

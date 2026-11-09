@@ -104,6 +104,35 @@ func TestStore_CourtEnds_PoolAndBracket(t *testing.T) {
 	assert.Equal(t, "10:00", ends["A"])
 	// Court B latest end: pool was 09:10, 3rd place is 09:30 + 15 = 09:45 -> latest is 09:45
 	assert.Equal(t, "09:45", ends["B"])
+
+	// Test CourtWindows returns the first start, last end and slot lengths
+	windows, err := store.CourtWindows("c1", dummySlotMinutes(10, 15))
+	require.NoError(t, err)
+	require.Len(t, windows, 2)
+	assert.Equal(t, 9*60, windows["A"].Start)
+	assert.Equal(t, 10*60, windows["A"].End)
+	assert.Equal(t, []int{10, 10, 15, 0}, windows["A"].SlotLengths)
+	assert.Equal(t, 9*60, windows["B"].Start)
+	assert.Equal(t, 9*60+45, windows["B"].End)
+	assert.Equal(t, []int{10, 15}, windows["B"].SlotLengths)
+}
+
+func TestStore_CourtWindows_EmptyOrUndrawn(t *testing.T) {
+	dir := t.TempDir()
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+
+	comp := &Competition{
+		ID:        "c1",
+		Date:      "2026-11-01",
+		StartTime: "09:00",
+		Courts:    []string{"A"},
+	}
+	require.NoError(t, store.SaveCompetition(comp))
+
+	windows, err := store.CourtWindows("c1", dummySlotMinutes(10, 15))
+	require.NoError(t, err)
+	assert.Empty(t, windows, "undrawn competition should have no court windows")
 }
 
 func TestStore_CourtFloor_Rules(t *testing.T) {

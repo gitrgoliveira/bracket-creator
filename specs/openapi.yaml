@@ -227,8 +227,8 @@ paths:
                   type: integer
                   default: 0
                   minimum: 0
-                  maximum: 100
-                  description: Team size; 0 draws an individual competition. Outside 0 to 100 is a 400, the schedule estimate's bound, since the size sets every team block's bout rows.
+                  maximum: 30
+                  description: Team size; 0 draws an individual competition. Outside 0 to 30 is a 400, the schedule estimate's bound, since the size sets every team block's bout rows.
                 teamMatchType:
                   type: string
                   enum: [fixed, kachinuki]
@@ -683,7 +683,10 @@ paths:
           rest of the import proceeds.
 
         `pool_size` and `pool_size_mode`, by contrast, ARE defaulted when
-        omitted (to 4 and `"max"`).
+        omitted (to 4 and `"max"`). A stated `pool_size_mode` must be `"max"`
+        or `"min"`; any other value fails that row with
+        `poolSizeMode: unknown poolSizeMode "<value>" (expected "max" or "min")`
+        while the rest of the import proceeds.
 
         `date` is defaulted too: a row without one takes the tournament's
         date (Day 1), as `POST /api/competitions` does, because a
@@ -915,6 +918,7 @@ paths:
         | 400 | `bad_restore_request` | Multipart parse failure, both `archive` and `from` supplied or neither supplied, invalid ID in `only`, invalid boolean in `undo`, or malformed `decisions` JSON |
         | 400 | `bad_backup_name` | `from` does not match the valid backup filename pattern |
         | 400 | `archive_invalid` | Archive validation failed; carries reader reason code in `reason` and details in `detail` |
+        | 400 | `backup_version_mismatch` | The running version of the app cannot restore the archive: its manifest `appVersion` is a later version, a version before the oldest this app can bring up to date (`v2.3.0`), or the two versions differ and either has no release order (a branch name, a commit, `dev`, or a backup a `-dirty` build made; a running `-dirty` build counts as the version it was built from). A backup is restored with the version that made it or a later one, which brings it up to date. The body carries `backupVersion` and `appVersion` |
         | 400 | `not_a_safety_copy` | `undo=true` on an archive whose kind is not `before-restore` |
         | 400 | `competition_not_in_archive` | `only` names a competition not present in the archive |
         | 400 | `bad_decision` | `undo=true` combined with `only` (an undo puts back the whole safety copy) or with `decisions` (an undo answers its own questions), or a decision that is not one of the competition's `choices`, or for a competition with none |
@@ -961,7 +965,7 @@ paths:
         '400':
           description: >
             Invalid request or unreadable backup archive. Refusals change nothing.
-            Codes: `bad_restore_request`, `bad_backup_name`, `archive_invalid`,
+            Codes: `bad_restore_request`, `bad_backup_name`, `archive_invalid`, `backup_version_mismatch`,
             `not_a_safety_copy`, `competition_not_in_archive`, `bad_decision`, `file_unreadable`.
           content:
             application/json:
@@ -1018,6 +1022,7 @@ paths:
         | 400 | `bad_restore_request` | Multipart parse failure, missing/conflicting fields, invalid boolean, or malformed JSON |
         | 400 | `bad_backup_name` | `from` does not match the valid backup filename pattern |
         | 400 | `archive_invalid` | Archive validation failed; carries reader reason code in `reason` and details in `detail` |
+        | 400 | `backup_version_mismatch` | The running version of the app cannot restore the archive: its manifest `appVersion` is a later version, a version before the oldest this app can bring up to date (`v2.3.0`), or the two versions differ and either has no release order (a branch name, a commit, `dev`, or a backup a `-dirty` build made; a running `-dirty` build counts as the version it was built from). A backup is restored with the version that made it or a later one, which brings it up to date. The body carries `backupVersion` and `appVersion` |
         | 400 | `not_a_safety_copy` | `undo=true` on an archive whose kind is not `before-restore` |
         | 400 | `competition_not_in_archive` | `only` names a competition not present in the archive |
         | 400 | `bad_decision` | Action chosen is not permitted for this competition |
@@ -1081,7 +1086,7 @@ paths:
         '400':
           description: >
             Invalid request or unreadable backup archive. Refusals change nothing.
-            Codes: `bad_restore_request`, `bad_backup_name`, `archive_invalid`,
+            Codes: `bad_restore_request`, `bad_backup_name`, `archive_invalid`, `backup_version_mismatch`,
             `not_a_safety_copy`, `competition_not_in_archive`, `bad_decision`, `file_unreadable`.
           content:
             application/json:
@@ -1730,7 +1735,7 @@ paths:
         `courts`, `roundRobin`, `withZekkenName`, `teamSize`,
         `numberPrefix`, `format`, `kind`,
         `poolMatchDurationSeconds`, `knockoutMatchDurationSeconds`,
-        `swissRounds`, `naginata`, `engi`, `teamMatchType`,
+        `expectedParticipants`, `swissRounds`, `naginata`, `engi`, `teamMatchType`,
         `checkInEnabled`, `leagueTiebreakTopN`, `leagueTwoThirdPlaces`.
         String fields are trimmed server-side.
 
@@ -1852,6 +1857,28 @@ paths:
         list it reports instead). A check-in does not change the version.
         A save without `rosterVersion` is written unchecked.
 
+        A settings save may send `configVersion`, the version the page loaded,
+        as every competition answer names it in `configVersion` (this endpoint's,
+        and `GET /api/viewer/competitions` and `/api/viewer/competitions/{id}`).
+        When the stored settings are no longer that one, the save is refused
+        with 409 `config_changed`, nothing is written, and the answer carries
+        `{code: "config_changed", error: "This competition changed, reload it.", configVersion, competition}`,
+        the current config version and the current competition with `rosterVersion`
+        and `configVersion` stamped. A save without `configVersion` is written unchecked.
+
+        Changing the `date` or `startTime` of a competition that is `draw-ready`
+        moves its matches too, in the same save: every pool, league, bracket and
+        bronze match is re-timed by the draw's own rules at the new day and start
+        (pairings, shiaijo and ids never change), or nothing is saved. The answer
+        then carries `previousTimes` (every match whose time changed, with the time
+        before and after, present even when empty), `notFreshCount` (matches that no
+        longer held the time a fresh draw would give them: a time set by hand, a
+        pause changed, another competition moved) and `timesChanged`. A save that
+        sends `restoreMatchTimes` (the `previousTimes` of the move it undoes, with
+        that answer's `configVersion`) writes those `was` times instead of running
+        a re-time; a present list, even an empty one, is a restore, an absent one is
+        not. The preview of a move is `retime` on `GET /api/schedule/calendar/preview`.
+
         The seed ranks in a roster save are NOT validated for
         completeness, unlike `PUT /api/competitions/{id}/seeds`. The
         admin console sends this request on every keystroke in its
@@ -1890,12 +1917,56 @@ paths:
               schema:
                 $ref: '#/components/schemas/Competition'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          description: |
+            Invalid input, for example a save that changes `poolSizeMode` to a
+            value other than `max` or `min`, including these refusals of an
+            Undo (`restoreMatchTimes`), none of which writes anything:
+
+            * `restoreMatchTimes` sent without `configVersion`
+              (`restoreMatchTimes needs the configVersion of the save it undoes`).
+            * A match id in the list that the competition does not have.
+            * A match listed more than once.
+            * A `was` that is neither empty nor an `HH:MM` clock.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
           description: |
-            Conflict. Four distinct cases, all 409:
+            Conflict. Ten distinct cases, all 409:
+
+            * `undo_stale`: a save with `restoreMatchTimes` for a competition that is no
+              longer `draw-ready`, or one of whose listed matches no longer holds the time
+              the move gave it. Nothing was written; the body is
+              `{code: "undo_stale", error: "Changed since the move; Undo not applied."}`.
+              An unknown match id in the list, a match listed more than once, or a `was`
+              that is neither empty nor an `HH:MM` clock, is a 400.
+
+            * `retime_retry`: the date or start was moved on a competition that was drawn,
+              or changed, between the server's read and the save. Nothing was moved; the
+              body is `{code: "retime_retry", error}`; send the save again.
+
+            * `retime_unavailable`: a league's stored match order could not be read back as
+              time slots, so its matches were not moved and nothing was saved; the body is
+              `{code: "retime_unavailable", error}`.
+
+            * `retime_past_midnight`: the new date or start would carry some of the
+              drawn competition's own matches past midnight, which a match time
+              (`HH:MM`) cannot show. Nothing was moved or saved; the body is
+              `{code: "retime_past_midnight", error}`.
+
+            * `court_past_midnight`: a shiaijo the competition shares is planned until
+              after midnight by another competition that day, so the move has no slot
+              there. Nothing was moved or saved; the body is
+              `{code: "court_past_midnight", error, court, competitionId}`, as on
+              `POST .../generate-draw`.
+
+            * `config_changed`: a settings save whose `configVersion` is not
+              the stored config's. Nothing was written; the body is
+              `{code: "config_changed", error: "This competition changed, reload it.", configVersion, competition}`,
+              the current config version and the current competition (with rosterVersion and configVersion stamped).
 
             * `roster_changed`: a roster save whose `rosterVersion` is not
               the stored roster's. Nothing was written; the body is
@@ -1922,7 +1993,9 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Error'
+                anyOf:
+                  - $ref: '#/components/schemas/ConfigChangedError'
+                  - $ref: '#/components/schemas/Error'
         '500':
           description: |
             Internal error. Includes the partial-success renumber case: the
@@ -6163,9 +6236,9 @@ paths:
           schema:
             type: integer
             minimum: 0
-            maximum: 100
+            maximum: 30
           description: >
-            0 = individual matches; > 0 = team matches. Bounded to 0..100
+            0 = individual matches; > 0 = team matches. Bounded to 0..30
             (a value out of range returns 400): it scales the whole estimate,
             so an unbounded value would overflow the duration math.
         - in: query
@@ -6174,25 +6247,13 @@ paths:
           schema:
             type: integer
             minimum: 0
-            maximum: 100
+            maximum: 30
           description: >
             OVERRIDE for the bouts per team match. Omit it for the normal case:
             when `teamSize > 0` the bout count defaults to `teamSize`, which is
             the rule the generated schedule itself is laid out with. Supply it
             only to price a hypothetical the scheduler will not reproduce.
             Ignored when `teamSize` is 0 (that selects individual matches).
-        - in: query
-          name: teamMatchType
-          required: false
-          schema:
-            type: string
-          description: >
-            `kachinuki` widens the estimate into a best/average/worst range
-            (winner-stays-on has a variable bout count: with nominal team size
-            N, best = N bouts, worst = 2N-1, average = midpoint; N is the
-            resolved bout count, i.e. `teamSize` unless `boutsPerTeamMatch`
-            overrides it). Any other value (or absent) keeps a constant bout
-            count and the three range fields collapse to one value.
         - in: query
           name: buffer
           required: false
@@ -6214,6 +6275,280 @@ paths:
                 $ref: '#/components/schemas/ScheduleEstimate'
         '400':
           $ref: '#/components/responses/BadRequest'
+
+  /api/schedule/draft-estimate:
+    get:
+      tags: [competitions]
+      summary: Estimate the schedule of an unsaved competition shape
+      description: >
+        Prices a competition that has not been created yet (the Add competition
+        form's estimate) for a stated number of participants, against the stored
+        tournament: its multiplier, its slowest-court allowance and the chosen
+        day's pauses. Query names are the competition payload's JSON names, and
+        each is parsed strictly: a malformed or out-of-range value returns 400
+        with a sentence naming the field. The shape is checked as the create
+        checks it, except that the shiaijo rules (a power-of-two count, and only
+        shiaijo the tournament has) are not applied: `courts` is a count. Too
+        many shiaijo for the entry is not refused: the estimate is answered with
+        a `too_many_shiaijo` entry in `warnings`. Organiser-only, also in
+        self-run mode, because the caller picks the participant count and an
+        anonymous caller could otherwise make the server build large synthetic
+        draws on demand.
+      security:
+        - TournamentPassword: []
+      parameters:
+        - in: query
+          name: participants
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 1024
+          description: Entry count to price (teams, on a team competition).
+        - in: query
+          name: courts
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 16
+          description: >
+            Number of shiaijo. Absent means the tournament's shiaijo, as a
+            competition created with none chosen gets.
+        - in: query
+          name: date
+          required: false
+          schema:
+            type: string
+            pattern: '^[0-9]{2}-[0-9]{2}-[0-9]{4}$'
+          description: >
+            Competition day, DD-MM-YYYY. Absent means the tournament's first
+            day. A date outside the tournament's days returns 400.
+        - in: query
+          name: startTime
+          required: false
+          schema:
+            type: string
+            pattern: '^[0-9]{2}:[0-9]{2}$'
+          description: Start time, HH:MM.
+        - in: query
+          name: format
+          required: false
+          schema:
+            type: string
+            enum: [knockout, mixed, league, swiss]
+        - in: query
+          name: kind
+          required: false
+          schema:
+            type: string
+            enum: [individual, team]
+        - in: query
+          name: teamSize
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+            maximum: 30
+          description: 0 for an individual competition; otherwise 2 to 30.
+        - in: query
+          name: teamMatchType
+          required: false
+          schema:
+            type: string
+            enum: [fixed, kachinuki]
+          description: Kachinuki needs a team size of at least 2.
+        - in: query
+          name: poolSize
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+          description: Absent on a mixed competition means the create's default pool size.
+        - in: query
+          name: poolSizeMode
+          required: false
+          schema:
+            type: string
+            enum: [max, min]
+          description: >
+            `max`: `poolSize` is the most players a pool holds. Absent or `min`
+            means it is the fewest, so a pool can hold one more. Any other value
+            (after trimming) returns 400, as the create does.
+        - in: query
+          name: poolWinners
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+          description: >
+            On a mixed competition, at most `poolSize`, or `poolSize` + 1 when
+            `poolSizeMode` is not `max`; 0 or absent means the default.
+        - in: query
+          name: poolFormat
+          required: false
+          schema:
+            type: string
+            enum: [full, partial]
+        - in: query
+          name: roundRobin
+          required: false
+          schema:
+            type: boolean
+        - in: query
+          name: extraQualifiers
+          required: false
+          schema:
+            type: string
+        - in: query
+          name: twoThirdPlaces
+          required: false
+          schema:
+            type: boolean
+        - in: query
+          name: naginata
+          required: false
+          schema:
+            type: boolean
+        - in: query
+          name: swissRounds
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+          description: Required when `format` is swiss, and then 1 to 1023.
+        - in: query
+          name: poolMatchDurationSeconds
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+            maximum: 3600
+          description: 0 or absent means the default; otherwise 60 to 3600.
+        - in: query
+          name: knockoutMatchDurationSeconds
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+            maximum: 3600
+          description: 0 or absent means the default; otherwise 60 to 3600.
+      responses:
+        '200':
+          description: The estimate for the shape.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DraftEstimate'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          description: Missing or incorrect admin password.
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/schedule/calendar:
+    get:
+      tags: [competitions]
+      summary: Get the tournament schedule calendar
+      description: >
+        Produces the complete schedule calendar for the active tournament: days,
+        breaks, shiaijo lanes, unused pauses, and placed competitions with their
+        time windows and clash partners.
+      security:
+        - TournamentPassword: []
+      responses:
+        '200':
+          description: The tournament schedule calendar result.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TournamentCalendarResult'
+        '401':
+          description: Missing or incorrect admin password.
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/schedule/calendar/preview:
+    get:
+      tags: [competitions]
+      summary: Preview schedule placement and court overlaps for a competition
+      description: >
+        Calculates the schedule placement of an existing competition on a specified
+        day, start time, and court allocation, and detects overlaps with other placed
+        competitions on that day. Only a competition not drawn yet is placed at the
+        requested values: a drawn one keeps its placement (`previewed: false`). A
+        draw-ready competition's overlaps are judged at its matches' new times on
+        that day, and one past draw-ready is judged where it is now.
+      security:
+        - TournamentPassword: []
+      parameters:
+        - in: query
+          name: competitionId
+          required: true
+          schema:
+            type: string
+          description: Competition ID to preview.
+        - in: query
+          name: date
+          required: true
+          schema:
+            type: string
+            pattern: '^[0-9]{2}-[0-9]{2}-[0-9]{4}$'
+          example: "01-06-2026"
+          description: Competition day in DD-MM-YYYY format, the spelling the calendar uses for its days. Must be one of the tournament days.
+        - in: query
+          name: startTime
+          required: true
+          schema:
+            type: string
+            pattern: '^[0-9]{2}:[0-9]{2}$'
+          description: Start time, 24-hour HH:MM.
+        - in: query
+          name: courts
+          required: false
+          schema:
+            type: string
+          example: "B,C"
+          description: >
+            Comma-separated shiaijo labels (e.g. B,C). Required for a competition not
+            yet drawn, which is placed on them; a drawn competition keeps the shiaijo
+            of its draw and ignores it.
+      responses:
+        '200':
+          description: The preview placement and overlaps.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CalendarPreviewResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          description: Missing or incorrect admin password.
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: |
+            The move of a drawn competition cannot be previewed. The body always
+            carries a `code`: `retime_unavailable` (a league's stored match order
+            could not be read back), `retime_past_midnight` (the start would carry
+            the competition's own matches past midnight) or `court_past_midnight`
+            (another competition holds a shared shiaijo until after midnight; the
+            body also names `court` and `competitionId`).
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [code, error]
+                properties:
+                  code:
+                    type: string
+                    enum: [retime_unavailable, retime_past_midnight, court_past_midnight]
+                  error: { type: string }
+                  court: { type: string }
+                  competitionId: { type: string }
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   # ── Viewer (Public, no auth) ───────────────────────────────────────────────
 
@@ -6918,7 +7253,7 @@ components:
         pos:
           type: integer
           minimum: -1
-          maximum: 199
+          maximum: 59
         side:
           type: string
           enum: [a, b]
@@ -7034,6 +7369,26 @@ components:
         error:
           type: string
 
+    ConfigChangedError:
+      type: object
+      required: [code, error, configVersion, competition]
+      description: >
+        409 Conflict body returned when a settings PUT sends a configVersion that does
+        not match the stored competition settings.
+      properties:
+        code:
+          type: string
+          enum: [config_changed]
+        error:
+          type: string
+          example: "This competition changed, reload it."
+        configVersion:
+          type: string
+          pattern: '^[0-9a-f]{16}$'
+          description: The current config version on the server.
+        competition:
+          $ref: '#/components/schemas/Competition'
+
     BackupFileEntry:
       type: object
       required: [name, kind, scope, time, size]
@@ -7104,6 +7459,12 @@ components:
         path:
           type: string
           description: Archive entry path or competition ID concerned.
+        backupVersion:
+          type: string
+          description: For backup_version_mismatch, the version of the app that made the archive (empty when the manifest names none).
+        appVersion:
+          type: string
+          description: For backup_version_mismatch, the version of the app refusing it.
         competitionIds:
           type: array
           items:
@@ -7591,18 +7952,15 @@ components:
             always empty in locked mode.
 
             Omitted from viewer responses (`/api/viewer/tournament`).
-        openingBlock:
-          type: string
-          maxLength: 16
-          description: Opening ceremony block label/duration.
-        lunchBlock:
-          type: string
-          maxLength: 16
-          description: Lunch break block label/duration.
-        closingBlock:
-          type: string
-          maxLength: 16
-          description: Closing ceremony block label/duration.
+        pauses:
+          type: array
+          maxItems: 20
+          description: >
+            Scheduled tournament pauses (lunch breaks, ceremonies, gradings).
+            At most 20 pauses. An incomplete pause row is accepted and saved,
+            but ignored by the scheduler.
+          items:
+            $ref: '#/components/schemas/Pause'
         clockToElapsedMultiplier:
           type: number
           description: Multiplier converting on-clock match minutes to wall-clock elapsed minutes.
@@ -7681,6 +8039,44 @@ components:
               items:
                 $ref: '#/components/schemas/Competition'
 
+    Pause:
+      type: object
+      description: >
+        A scheduled pause in the tournament day (such as a lunch break,
+        ceremony or grading). A row with no start or no length is saved and
+        ignored by the schedule. The tournament save refuses with 400 a start
+        that is not HH:MM, a length outside 1 minute to 24 hours, or a day
+        outside 0 to 30.
+      properties:
+        name:
+          type: string
+          maxLength: 60
+          description: Name of the pause (e.g. "Lunch", "Opening ceremony").
+        start:
+          type: string
+          maxLength: 16
+          description: Start time as 24-hour "HH:MM" (e.g. "12:00"). Empty or omitted when not yet scheduled.
+        length:
+          type: string
+          maxLength: 16
+          description: Duration text format up to 24 hours (e.g. "1h", "45m", "1h30m").
+        day:
+          type: integer
+          minimum: 0
+          maximum: 30
+          description: >
+            1-based tournament day index (1 = Day 1, 2 = Day 2, etc.);
+            0 means every day of the tournament.
+        matchesGoOn:
+          type: boolean
+          default: false
+          description: >
+            True when the pause's "Matches stop for this pause" box is
+            unticked: the calendar still draws the pause, but no planned
+            match time, estimate or calendar move works around it. Omitted
+            or false, the pause stops matches (a pause saved before this
+            field existed stops matches).
+
     Competition:
       type: object
       properties:
@@ -7713,20 +8109,36 @@ components:
         teamSize:
           type: integer
           minimum: 0
+          maximum: 30
           not:
             enum: [1]
           description: >
             Number of members per team. 0 for individual competitions;
-            >= 2 for team competitions. The value 1 is always rejected
+            2 to 30 for team competitions. The value 1 is always rejected
             (regardless of kind) because engine code uses TeamSize > 0
-            to detect team competitions, making 1 ambiguous.
+            to detect team competitions, making 1 ambiguous. A value above
+            30 is a 400 on POST, and on PUT when the save changes `teamSize`
+            or `kind`, so a competition stored above 30 before the cap stays
+            editable for its other settings.
         poolSize:
           type: integer
         poolSizeMode:
           type: string
-          enum: [max, exact]
+          enum: [max, min]
+          description: >
+            `max`: `poolSize` is the most players a pool holds. `min`, or no
+            value, means it is the fewest, so a pool can hold one more. Any
+            other value (after trimming) is a 400 on POST, and on PUT when the
+            save changes `poolSizeMode`, so a competition stored with another
+            value stays editable for its other settings.
         poolWinners:
           type: integer
+          description: >
+            Qualifiers each pool sends to the knockout (mixed format). At
+            most `poolSize`, or `poolSize` + 1 when `poolSizeMode` is not
+            `max`; a larger value is a 400 on POST, and on PUT when the save
+            changes the format, `poolSize`, `poolWinners` or `poolSizeMode`.
+            0 or absent means the default.
         roundRobin:
           type: boolean
         courts:
@@ -7880,6 +8292,19 @@ components:
             Estimated on-clock duration of a single knockout match, in
             SECONDS (e.g. 150 = 2m30s). Same semantics, band, and legacy-migration
             behaviour as `poolMatchDurationSeconds`.
+        expectedParticipants:
+          type: integer
+          minimum: 0
+          maximum: 1024
+          description: >
+            Expected participant entry count. Kept with the competition, used by
+            the schedule estimate while the competition is in setup as the
+            larger of it and the counted participants (checked-in count when
+            check-in applies), ignored from draw ready on. Not output-affecting
+            so editable in every status. A team competition reads it as teams
+            (the field is labelled Expected teams in the app). 0 or absent means
+            not set. Rejected with 400 outside 0 to 1024: "Expected participants
+            must be a whole number from 0 to 1024."
         checkInEnabled:
           type: boolean
           description: >
@@ -7923,6 +8348,40 @@ components:
             name, dojo, metadata, registration source and seed, in roster
             order (a check-in is not part of it). A roster save sends it back;
             see `PUT /api/competitions/{id}`. Never stored.
+        configVersion:
+          type: string
+          pattern: '^[0-9a-f]{16}$'
+          description: >
+            The version of the competition's settings (16 lowercase hex characters).
+            Read-only on answers, optional on the PUT body: the version the page
+            loaded; a mismatch is 409 config_changed; omit to skip the check.
+            Never stored. Required with `restoreMatchTimes`: a save that sends
+            `restoreMatchTimes` without it is a 400.
+        restoreMatchTimes:
+          type: array
+          description: >
+            Request only: the `previousTimes` a re-time answered with, sent back to undo
+            it under that answer's `configVersion`. A present list, even an empty one,
+            writes those times and runs no re-time; an absent one means re-time as the
+            date or start change asks. Only for a `draw-ready` competition.
+          items:
+            $ref: '#/components/schemas/MatchTimeChange'
+        previousTimes:
+          type: array
+          description: >
+            Answer only, when the save re-timed a draw-ready competition: every match
+            whose time changed, with the time before (`was`) and after (`now`). Present
+            even when no time changed (then empty).
+          items:
+            $ref: '#/components/schemas/MatchTimeChange'
+        notFreshCount:
+          type: integer
+          description: >
+            Answer only, with `previousTimes`: matches whose stored time differed from a
+            re-time at the competition's former day and start.
+        timesChanged:
+          type: boolean
+          description: Answer only, with `previousTimes`; whether any match time changed.
 
     FightingSpiritAward:
       type: object
@@ -9266,27 +9725,34 @@ components:
 
     ScheduleEstimate:
       type: object
-      description: Result of a stateless schedule duration estimate.
+      description: Result of a schedule duration estimate.
       properties:
         totalDurationMinutes:
           type: integer
           description: >
-            Headline estimate. For kachinuki (`teamMatchType=kachinuki`) this
-            is the AVERAGE scenario of the variable-bout-count range; otherwise
-            the bout count is constant and `totalDurationMinutes`,
-            `bestCaseMinutes`, and `worstCaseMinutes` are all equal.
+            Headline estimate. On the stored per-competition estimate
+            (`/api/competitions/{id}/schedule/estimate`) and the draft estimate
+            (`/api/schedule/draft-estimate`) for a kachinuki competition this is
+            the AVERAGE scenario of the variable-bout-count range; on the
+            stateless endpoint (`/api/schedule/estimate`) and for non-kachinuki
+            competitions the range fields collapse to one value,
+            so `totalDurationMinutes`, `bestCaseMinutes`, and `worstCaseMinutes`
+            are all equal.
         bestCaseMinutes:
           type: integer
           description: >
-            Best-case scenario (kachinuki: nominal team size N bouts per
-            match, one fighter sweeps). Equals `totalDurationMinutes` for
-            non-kachinuki estimates.
+            Best-case scenario (kachinuki on the stored per-competition and
+            draft paths: nominal team size N bouts per match, one fighter
+            sweeps). On the
+            stateless endpoint and for non-kachinuki competitions, collapses to
+            `totalDurationMinutes`.
         worstCaseMinutes:
           type: integer
           description: >
-            Worst-case scenario (kachinuki: 2N-1 bouts per match, every bout
-            retires exactly one player). Equals `totalDurationMinutes` for
-            non-kachinuki estimates.
+            Worst-case scenario (kachinuki on the stored per-competition and
+            draft paths: 2N-1 bouts per match, every bout retires exactly one player). On the
+            stateless endpoint and for non-kachinuki competitions, collapses to
+            `totalDurationMinutes`.
         perCourtMinutes:
           type: array
           items:
@@ -9294,6 +9760,11 @@ components:
           description: Per-court breakdown; reflects the average scenario.
         ceremonyMinutes:
           type: integer
+          description: >
+            Ceremony allowance in minutes. Always 0 on the per-competition stored
+            and draft paths, which model ceremonies and lunch as tournament pauses instead;
+            the stateless `/api/schedule/estimate` endpoint preserves caller-supplied
+            ceremony minutes.
         courtEnds:
           type: object
           description: >
@@ -9305,6 +9776,389 @@ components:
           additionalProperties:
             type: string
             pattern: '^[0-9]{2,}:[0-5][0-9]$'
+        participants:
+          type: integer
+          description: >
+            Entry count the per-competition or draft estimate used (on the
+            draft, the `participants` it was asked for). Left empty / omitted
+            by stateless estimates and when the count is 0.
+        participantsSource:
+          type: string
+          enum: [roster, expected]
+          description: >
+            Where the entry count on `participants` came from: `roster` (the
+            counted roster, filtered to checked in when check-in applies) or
+            `expected` (the organiser's expected entry count). Set only by the
+            stored per-competition estimate: left empty / omitted on the draft
+            estimate, whose count is the one it was asked for, and when
+            `participants` is not set.
+
+    DraftEstimate:
+      description: >
+        Estimate for an unsaved competition shape
+        (`GET /api/schedule/draft-estimate`): every `ScheduleEstimate` field,
+        plus the derived match counts, the timing it was priced with, and
+        warnings about the shape.
+      allOf:
+        - $ref: '#/components/schemas/ScheduleEstimate'
+        - type: object
+          required: [poolMatches, knockoutMatches, timing, warnings]
+          properties:
+            poolMatches:
+              type: integer
+              description: Pool (or league, or Swiss) matches the shape produces.
+            knockoutMatches:
+              type: integer
+              description: Knockout matches the shape produces, the bronze bout included.
+            timing:
+              type: object
+              properties:
+                multiplier:
+                  type: number
+                  description: The tournament's clock-to-elapsed multiplier.
+                allowancePct:
+                  type: integer
+                  description: The tournament's slowest-court allowance, in percent.
+                breaks:
+                  type: array
+                  description: >
+                    The competition day's usable pauses, in the order the
+                    estimate applies them.
+                  items:
+                    type: object
+                    properties:
+                      name:
+                        type: string
+                      start:
+                        type: string
+                        description: HH:MM
+                      end:
+                        type: string
+                        description: HH:MM
+            warnings:
+              type: array
+              description: >
+                Consequences of the shape the organiser should know about; the
+                estimate is answered regardless. Never null (an empty array when
+                there are none). The client words each one from its `code`.
+              items:
+                type: object
+                required: [code]
+                properties:
+                  code:
+                    type: string
+                    enum: [too_many_shiaijo]
+                    description: >
+                      `too_many_shiaijo`: more shiaijo were chosen than bouts
+                      can run at once for this entry, so some would sit idle.
+                  participants:
+                    type: integer
+                  usable:
+                    type: integer
+                    description: The largest shiaijo count the draw accepts for this entry.
+                  chosen:
+                    type: integer
+                    description: The shiaijo count asked for.
+
+    TournamentCalendarResult:
+      type: object
+      required: [days, courts, unusedPauses, competitions, unreadableCompetitions]
+      properties:
+        days:
+          type: array
+          items:
+            $ref: '#/components/schemas/CalendarDay'
+        courts:
+          type: array
+          items:
+            type: string
+          description: Shiaijo labels configured for the tournament and competitions.
+        unusedPauses:
+          type: array
+          items:
+            $ref: '#/components/schemas/UnusedPause'
+        competitions:
+          type: array
+          items:
+            $ref: '#/components/schemas/CalendarCompetition'
+        unreadableCompetitions:
+          type: array
+          items:
+            type: string
+          description: Ids of competitions whose settings could not be read, so they are not on the calendar.
+
+    CalendarDay:
+      type: object
+      required: [day, date, breaks]
+      properties:
+        day:
+          type: integer
+          description: 1-based day index.
+        date:
+          type: string
+          description: Date string for the day (DD-MM-YYYY).
+        breaks:
+          type: array
+          items:
+            $ref: '#/components/schemas/CalendarBreak'
+
+    CalendarBreak:
+      type: object
+      required: [name, start, end, startMins, endMins]
+      properties:
+        name:
+          type: string
+        start:
+          type: string
+          description: Clock start time, HH:MM.
+        end:
+          type: string
+          description: Clock end time, HH:MM.
+        startMins:
+          type: integer
+          description: Start time in minutes from midnight.
+        endMins:
+          type: integer
+          description: End time in minutes from midnight.
+        matchesGoOn:
+          type: boolean
+          default: false
+          description: >
+            True for a pause matches go on through (its Pause.matchesGoOn):
+            drawn on its day, but no match time works around it. Omitted
+            when the pause stops matches.
+
+    UnusedPause:
+      type: object
+      required: [name, reason]
+      properties:
+        name:
+          type: string
+        reason:
+          type: string
+          description: Reason why the schedule skips the pause (matches will not stop for it).
+
+    CalendarCompetition:
+      type: object
+      required: [id, name, kind, status, placement, clashPartners]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        kind:
+          type: string
+        status:
+          type: string
+          enum: [setup, draw-ready, pools, knockout, completed, invalid]
+        configVersion:
+          type: string
+          pattern: '^[0-9a-f]{16}$'
+          description: 16-character hex config version hash.
+        date:
+          type: string
+          description: The competition's own date, DD-MM-YYYY; schedule clashes compare it.
+        expectedParticipants:
+          type: integer
+          minimum: 1
+          description: The organiser's expected entry count, the count a placement whose lengthSource is "expected" was estimated for.
+        placement:
+          $ref: '#/components/schemas/CompetitionPlacement'
+        clashPartners:
+          type: array
+          items:
+            type: string
+          description: IDs of other competitions with overlapping schedule windows.
+
+    CompetitionPlacement:
+      type: object
+      required: [placed]
+      properties:
+        placed:
+          type: boolean
+        notPlacedReason:
+          type: string
+        day:
+          type: integer
+          description: 1-based day index in the tournament days.
+        courts:
+          type: array
+          items:
+            type: string
+          description: Shiaijo labels allocated to this competition.
+        windows:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/CourtWindow'
+          description: Schedule windows per shiaijo label.
+        lengthSource:
+          type: string
+          enum: [estimate, expected, draw, minimum]
+        lengthReason:
+          type: string
+        bestEnd:
+          type: string
+          description: Best-case end time (HH:MM) for kachinuki competitions.
+        worstEnd:
+          type: string
+          description: Worst-case end time (HH:MM) for kachinuki competitions.
+        replayRecipes:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/ReplayRecipe'
+        pastMidnight:
+          type: boolean
+        minutes:
+          type: integer
+          description: Total duration in minutes.
+
+    CourtWindow:
+      type: object
+      required: [start, end]
+      properties:
+        start:
+          type: integer
+          description: Start time in minutes from midnight.
+        end:
+          type: integer
+          description: End time in minutes from midnight.
+
+    ReplayRecipe:
+      type: object
+      properties:
+        runs:
+          type: array
+          items:
+            $ref: '#/components/schemas/ReplayRun'
+        bestRuns:
+          type: array
+          items:
+            $ref: '#/components/schemas/ReplayRun'
+        worstRuns:
+          type: array
+          items:
+            $ref: '#/components/schemas/ReplayRun'
+        bufferPct:
+          type: integer
+        floorMinutes:
+          type: integer
+        slotLengths:
+          type: array
+          items:
+            type: integer
+
+    ReplayRun:
+      type: object
+      required: [count, minutes]
+      properties:
+        count:
+          type: integer
+        minutes:
+          type: integer
+
+    CalendarPreviewResponse:
+      type: object
+      required: [competitionId, status, previewed, placement, overlaps]
+      properties:
+        competitionId:
+          type: string
+        status:
+          type: string
+          enum: [setup, draw-ready, pools, knockout, completed, invalid]
+        previewed:
+          type: boolean
+          description: >
+            True when the placement was computed from the requested day, start time,
+            and courts (competition status is setup). False when the competition
+            is already drawn so the placement (day, windows) reflects where the
+            competition sits now rather than the requested values; `retime` says
+            what moving it would do.
+        placement:
+          $ref: '#/components/schemas/CompetitionPlacement'
+        overlaps:
+          description: >
+            The other competitions that would clash on a shared shiaijo at the
+            requested day and start. For a draw-ready competition they are judged
+            on the new span of its matches on each shiaijo (`retime.courts`), not
+            on its stored placement. A competition past draw-ready (pools,
+            knockout or completed) is judged where it is now: the requested day
+            and start are ignored. A clash is a warning; the move is still allowed.
+          type: array
+          items:
+            $ref: '#/components/schemas/CalendarOverlap'
+        retime:
+          $ref: '#/components/schemas/RetimeOutcome'
+
+    MatchTimeChange:
+      type: object
+      required: [matchId, was, now]
+      properties:
+        matchId:
+          type: string
+        was:
+          type: string
+          description: The match's time before the move, HH:MM, or empty when the match had no time.
+        now:
+          type: string
+          description: The match's time after the move, HH:MM.
+
+    RetimeOutcome:
+      type: object
+      description: >
+        The dry run of moving a draw-ready competition to another day or start time.
+        Absent for a competition that is not draw-ready. Nothing is written.
+      required: [anyChange, matchCount, notFreshCount, courts]
+      properties:
+        anyChange:
+          type: boolean
+          description: At least one match time would change.
+        matchCount:
+          type: integer
+          description: Matches still to be played in the draw.
+        notFreshCount:
+          type: integer
+          description: >
+            Matches whose stored time differs from what a re-time at the competition's
+            current day and start would give: a time set by hand, a pause added or
+            changed, or another competition moved since the draw.
+        courts:
+          type: array
+          items:
+            $ref: '#/components/schemas/RetimeCourt'
+
+    RetimeCourt:
+      type: object
+      required: [court, oldStart, oldEnd, newStart, newEnd]
+      description: One shiaijo's span, in minutes from midnight (an end can be 1440 or more).
+      properties:
+        court:
+          type: string
+        oldStart:
+          type: integer
+        oldEnd:
+          type: integer
+        newStart:
+          type: integer
+        newEnd:
+          type: integer
+
+    CalendarOverlap:
+      type: object
+      required: [competitionId, name, court, start, end]
+      properties:
+        competitionId:
+          type: string
+        name:
+          type: string
+        court:
+          type: string
+          description: Shiaijo label where the overlap occurs.
+        start:
+          type: integer
+          description: Start time in minutes from midnight of the other competition's window.
+        end:
+          type: integer
+          description: End time in minutes from midnight of the other competition's window.
 
     ChusenCandidateGroup:
       type: object

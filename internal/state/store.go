@@ -143,6 +143,10 @@ func NewStore(folder string) (*Store, error) {
 	// prevents NewStore from succeeding.
 	s.sweepLegacyUpgrades()
 
+	if err := s.upgradeLegacyCeremonies(); err != nil {
+		slog.Warn("state: startup ceremony upgrade failed; it runs again on the next start", "err", err)
+	}
+
 	return s, nil
 }
 

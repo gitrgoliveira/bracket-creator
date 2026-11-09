@@ -8,6 +8,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/gin-gonic/gin"
 	"github.com/gitrgoliveira/bracket-creator/internal/engine"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -330,69 +331,109 @@ func TestScheduleEstimateEndpoint(t *testing.T) {
 	})
 }
 
-// TestScheduleEstimateEndpoint_Kachinuki covers the mp-gmcg range
-// contract on the wire: teamMatchType=kachinuki widens the estimate
-// into bestCaseMinutes < totalDurationMinutes < worstCaseMinutes;
-// any other (or absent) teamMatchType collapses the three fields to
-// one value.
-//
-// Fixture: matchDuration=3, multiplier=1.5, 2 matches, 1 court, team
-// size 5. kachinukiBoutRange(5) = (5, 7, 9) bouts, so per match
-// (bouts*3*1.5 + (bouts-1)*1 changeover): best 26.5, avg 37.5,
-// worst 48.5 → ×2 matches = 53 / 75 / 97.
-func TestScheduleEstimateEndpoint_Kachinuki(t *testing.T) {
-	r, _, _, _, tempDir := setupTestRouter(t)
-	defer func() {
-		require.NoError(t, os.RemoveAll(tempDir))
-	}()
+func TestParseRequiredBoundedInt(t *testing.T) {
+	gin.SetMode(gin.TestMode)
 
-	const baseQuery = "/api/schedule/estimate?matchDuration=3&multiplier=1.5&numMatches=2&courts=1&teamSize=5&boutsPerTeamMatch=5"
+	tests := []struct {
+		name       string
+		url        string
+		min        int
+		max        int
+		wantVal    int
+		wantOK     bool
+		wantStatus int
+		wantError  string
+	}{
+		{
+			name:       "missing",
+			url:        "/test",
+			min:        1,
+			max:        100,
+			wantVal:    0,
+			wantOK:     false,
+			wantStatus: http.StatusBadRequest,
+			wantError:  "participants is required",
+		},
+		{
+			name:       "empty",
+			url:        "/test?participants=",
+			min:        1,
+			max:        100,
+			wantVal:    0,
+			wantOK:     false,
+			wantStatus: http.StatusBadRequest,
+			wantError:  "participants is required",
+		},
+		{
+			name:       "non-integer",
+			url:        "/test?participants=abc",
+			min:        1,
+			max:        100,
+			wantVal:    0,
+			wantOK:     false,
+			wantStatus: http.StatusBadRequest,
+			wantError:  "participants must be between 1 and 100",
+		},
+		{
+			name:       "below min",
+			url:        "/test?participants=0",
+			min:        1,
+			max:        100,
+			wantVal:    0,
+			wantOK:     false,
+			wantStatus: http.StatusBadRequest,
+			wantError:  "participants must be between 1 and 100",
+		},
+		{
+			name:       "above max",
+			url:        "/test?participants=101",
+			min:        1,
+			max:        100,
+			wantVal:    0,
+			wantOK:     false,
+			wantStatus: http.StatusBadRequest,
+			wantError:  "participants must be between 1 and 100",
+		},
+		{
+			name:       "at min",
+			url:        "/test?participants=1",
+			min:        1,
+			max:        100,
+			wantVal:    1,
+			wantOK:     true,
+			wantStatus: http.StatusOK,
+		},
+		{
+			name:       "at max",
+			url:        "/test?participants=100",
+			min:        1,
+			max:        100,
+			wantVal:    100,
+			wantOK:     true,
+			wantStatus: http.StatusOK,
+		},
+	}
 
-	t.Run("teamMatchType=kachinuki returns a best/avg/worst range", func(t *testing.T) {
-		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("GET", baseQuery+"&teamMatchType=kachinuki", nil)
-		r.ServeHTTP(w, req)
-		assert.Equal(t, http.StatusOK, w.Code)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(w)
+			req, err := http.NewRequest(http.MethodGet, tc.url, nil)
+			require.NoError(t, err)
+			c.Request = req
 
-		var resp engine.ScheduleEstimate
-		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
-		assert.Equal(t, 53, resp.BestCaseMinutes, "best: 2 × (5*3*1.5 + 4) = 53")
-		assert.Equal(t, 75, resp.TotalDurationMinutes, "avg headline: 2 × (7*3*1.5 + 6) = 75")
-		assert.Equal(t, 97, resp.WorstCaseMinutes, "worst: 2 × (9*3*1.5 + 8) = 97")
-		assert.Less(t, resp.BestCaseMinutes, resp.TotalDurationMinutes)
-		assert.Less(t, resp.TotalDurationMinutes, resp.WorstCaseMinutes)
+			val, ok := parseRequiredBoundedInt(c, "participants", tc.min, tc.max)
+			assert.Equal(t, tc.wantOK, ok)
+			assert.Equal(t, tc.wantVal, val)
 
-		// Pin the wire field names too: the JSON keys must be the
-		// documented camelCase names, not Go field names.
-		var raw map[string]any
-		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &raw))
-		assert.Contains(t, raw, "bestCaseMinutes")
-		assert.Contains(t, raw, "worstCaseMinutes")
-		assert.Contains(t, raw, "totalDurationMinutes")
-	})
-
-	t.Run("absent teamMatchType collapses the range", func(t *testing.T) {
-		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("GET", baseQuery, nil)
-		r.ServeHTTP(w, req)
-		assert.Equal(t, http.StatusOK, w.Code)
-
-		var resp engine.ScheduleEstimate
-		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
-		assert.Equal(t, 53, resp.TotalDurationMinutes, "fixed 5-bout total: 2 × 26.5 = 53")
-		assert.Equal(t, resp.TotalDurationMinutes, resp.BestCaseMinutes)
-		assert.Equal(t, resp.TotalDurationMinutes, resp.WorstCaseMinutes)
-	})
-
-	t.Run("teamMatchType=fixed collapses the range", func(t *testing.T) {
-		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("GET", baseQuery+"&teamMatchType=fixed", nil)
-		r.ServeHTTP(w, req)
-		assert.Equal(t, http.StatusOK, w.Code)
-
-		var resp engine.ScheduleEstimate
-		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
-		assert.Equal(t, resp.TotalDurationMinutes, resp.BestCaseMinutes)
-		assert.Equal(t, resp.TotalDurationMinutes, resp.WorstCaseMinutes)
-	})
+			if !tc.wantOK {
+				assert.Equal(t, tc.wantStatus, w.Code)
+				var body map[string]string
+				require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+				assert.Equal(t, tc.wantError, body["error"])
+			} else {
+				assert.Equal(t, 200, w.Code)
+			}
+		})
+	}
 }

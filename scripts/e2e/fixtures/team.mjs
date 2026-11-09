@@ -22,10 +22,16 @@ import { dwell, settled as paceSettled, tapOnSide } from './pace.mjs';
 import { finishMatch, running, settled } from './scoring.mjs';
 import { inlineEditor, upNextCard } from './shiaijo.mjs';
 
-// FIK position names for a five-person team, in order; any other size uses
-// bare numbers (admin_lineup.jsx positionsForSize).
+// Position names in fighting order: the FIK names for a five-person team,
+// Senpo, Chuken and Taisho for a three-person team; any other size uses bare
+// numbers (admin_lineup.jsx positionsForSize, lineup_resolver.jsx positionLabelsFor).
 export const FIK5 = ['Senpo', 'Jiho', 'Chuken', 'Fukusho', 'Taisho'];
-export const positionLabels = (teamSize) => (teamSize === 5 ? FIK5 : Array.from({ length: teamSize }, (_, i) => String(i + 1)));
+export const FIK3 = ['Senpo', 'Chuken', 'Taisho'];
+export const positionLabels = (teamSize) => {
+  if (teamSize === 5) return FIK5;
+  if (teamSize === 3) return FIK3;
+  return Array.from({ length: teamSize }, (_, i) => String(i + 1));
+};
 
 // ---------------------------------------------------------------- Lineups page
 

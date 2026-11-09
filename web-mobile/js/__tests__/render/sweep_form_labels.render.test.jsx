@@ -50,9 +50,10 @@ beforeAll(async () => {
 afterAll(() => restoreGlobals());
 
 const tournament = {
-  name: 'Spring Taikai', date: '10-08-2026', durationDays: 1, venue: 'Kendo Hall',
+  name: 'Spring Taikai', date: '10-08-2026', durationDays: 2, venue: 'Kendo Hall',
   courts: ['A', 'B'], competitions: [], mode: 'officiated',
   publicURL: 'https://example.test', contacts: [{ label: 'Email', value: 'a@b.test' }],
+  pauses: [{ name: 'Lunch', start: '12:00', length: '1h', day: 0 }],
 };
 
 describe('the tournament Edit details form', () => {
@@ -65,12 +66,13 @@ describe('the tournament Edit details form', () => {
     });
     expect(screen.getByLabelText('Name').value).toBe('Spring Taikai');
     expect(screen.getByLabelText('Start date (Day 1)').type).toBe('date');
-    expect(screen.getByLabelText('Number of days').value).toBe('1');
+    expect(screen.getByLabelText('Number of days').value).toBe('2');
     expect(screen.getByLabelText('Venue').value).toBe('Kendo Hall');
     expect(screen.getByLabelText('Number of Shiaijo (courts)').value).toBe('2');
-    expect(screen.getByLabelText('Opening ceremony (duration)').tagName).toBe('INPUT');
-    expect(screen.getByLabelText('Lunch break (duration)').tagName).toBe('INPUT');
-    expect(screen.getByLabelText('Closing ceremony (duration)').tagName).toBe('INPUT');
+    expect(screen.getByLabelText('Pause name').tagName).toBe('INPUT');
+    expect(screen.getByLabelText('On').tagName).toBe('SELECT');
+    expect(screen.getByLabelText('Starts at').tagName).toBe('INPUT');
+    expect(screen.getByLabelText('Length').tagName).toBe('INPUT');
     // The public block opens by default because the tournament has public data.
     expect(screen.getByLabelText('Public URL').value).toBe('https://example.test');
     expect(screen.getByLabelText('Venue address').tagName).toBe('INPUT');

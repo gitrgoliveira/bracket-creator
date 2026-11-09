@@ -147,6 +147,8 @@ const STUBBED_GLOBALS = {
   addMinutes: (t) => t,
   API: {
     estimateCompetitionSchedule: vi.fn().mockResolvedValue(null),
+    estimateDraft: vi.fn().mockResolvedValue(null),
+    fetchCalendar: vi.fn().mockResolvedValue({ days: [], courts: [], competitions: [] }),
     getNumberPrefixDefault: vi.fn().mockResolvedValue({ numberPrefix: '' }),
   },
 };

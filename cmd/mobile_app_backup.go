@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/backup"
+	"github.com/gitrgoliveira/bracket-creator/internal/cmd/version"
 	"github.com/gitrgoliveira/bracket-creator/internal/engine"
 	"github.com/gitrgoliveira/bracket-creator/internal/mobileapp"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
@@ -288,6 +289,9 @@ func (o *mobileAppRestoreOptions) run(cmd *cobra.Command, archivePath string) (e
 		}
 		return fmt.Errorf("this file is not a backup this app can restore: %w", err)
 	}
+	if verr := backup.CheckAppVersion(archive.Manifest, restoreRunningVersion()); verr != nil {
+		return operatorSentence(verr.Detail)
+	}
 
 	if !tournExists {
 		if archive.Manifest.Scope != backup.ScopeTournament || o.only != "" {
@@ -491,3 +495,8 @@ func formatRestoreError(err error) error {
 	}
 	return err
 }
+
+// restoreRunningVersion is the version a restore is judged against; a test
+// sets it to restore an earlier version's backup whatever the test binary's
+// own version is (a branch name, which has no release order).
+var restoreRunningVersion = version.GetVersion

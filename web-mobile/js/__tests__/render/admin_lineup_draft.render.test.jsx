@@ -297,7 +297,7 @@ describe('a draft started in the at-court panel', () => {
     });
     await act(async () => { await Promise.resolve(); });
     // Pick Mori from the position's list, so the pick carries the member's id.
-    await act(async () => { fireEvent.focus(panel.getByLabelText('1 player')); });
+    await act(async () => { fireEvent.focus(panel.getByLabelText('Senpo player')); });
     await act(async () => { fireEvent.click(panel.getByText('Mori').closest('button')); });
     expect(draftAt(MATCH_KEY).current.memberIds[1]).toBe('mem-4');
     panel.unmount();
@@ -323,7 +323,7 @@ describe('a draft started in the at-court panel', () => {
     });
     await act(async () => { await Promise.resolve(); });
 
-    expect(panel.getByLabelText('1 player').value).toBe('Mori');
+    expect(panel.getByLabelText('Senpo player').value).toBe('Mori');
     expect(panel.getByTestId('match-lineup-draft-team-a').textContent).toContain('Unsaved lineup changes restored');
   });
 });

@@ -59,6 +59,29 @@ func TestImportCompetition_DateDefaulting(t *testing.T) {
 	})
 }
 
+// The import door refuses the pool-winners bound the create and settings doors
+// refuse (state.Competition.ValidatePoolWinners), so a manifest cannot persist
+// a value the estimate and the calendar would build a draw too large from.
+func TestImportCompetition_PoolWinnersBound(t *testing.T) {
+	store, err := state.NewStore(t.TempDir())
+	require.NoError(t, err)
+	seedImportTournamentDate(t, store)
+
+	res := importCompetition(store, engine.New(store), ImportManifestComp{
+		ID: "pw-import", Name: "PW Import", Format: state.CompFormatMixed,
+		PoolSize: 3, PoolSizeMode: "max", PoolWinners: 300,
+	}, map[string][]byte{})
+	assert.Equal(t, "poolWinners must be at most 3 for pools of 3 (got 300)", res.Error)
+	stored, _ := store.LoadCompetition("pw-import")
+	assert.Nil(t, stored, "a refused row must not be persisted")
+
+	res = importCompetition(store, engine.New(store), ImportManifestComp{
+		ID: "pw-import-ok", Name: "PW Import OK", Format: state.CompFormatMixed,
+		PoolSize: 3, PoolSizeMode: "max", PoolWinners: 2,
+	}, map[string][]byte{})
+	require.Emptyf(t, res.Error, "import should succeed: %s", res.Error)
+}
+
 // seedImportTournamentDate gives a test's tournament a date, which a manifest
 // row that states none takes (bc-imdt). The date is the one the importer tests
 // that state a date use, so those rows stay inside the tournament's day range.

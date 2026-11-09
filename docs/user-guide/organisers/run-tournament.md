@@ -320,9 +320,92 @@ A competition created before durations were measured in seconds is converted the
 
 Changing a match duration never invalidates a generated draw. Pools, brackets and seedings are unaffected, so you can retime a competition after generating its draw without regenerating anything.
 
-For a kachinuki (winner stays on) competition the number of bouts is not fixed, so the estimate is a range rather than a single figure. The competition Overview shows **Best**, **Average**, and **Worst**: best is a clean sweep where one fighter wins every bout, worst is the longest run where each bout retires one fighter, and average sits between them. Use the worst figure for planning the day and the average for a realistic finish time.
+### The estimate on the competition Overview
 
-![The competition Overview schedule estimate for a kachinuki competition, reading Best, Average, and Worst durations followed by a per-court breakdown.](../../screenshots/kachinuki-estimate-range.png)
+The competition **Overview** has an **Est. duration** tile, for example *about 4h 08m*, with *Finishes about 13:38* under it. A strip below the tiles lists the time for each shiai-jo and the [pauses](#pauses) the estimate worked around. A pause the schedule skips, because it has no start time or no length yet, is named there too with the reason, and so is a pause that matches go on through. If the finish falls after midnight, the tile says so.
+
+While the competition is in setup, the estimate uses the [expected number](#expected-participants-and-the-estimate-on-a-new-competition) until more people have registered than that, and the tile says so, for example *For 40 expected participants (12 registered)*. When the competition uses check-in, that line counts people who have checked in and says *checked in* instead of *registered*. A competition in setup with no expected number, or with at least as many registrations as expected, shows no count. Once the draw is made, the finish comes from the match times the draw gave, and the tile reads *For the 18 participants in the draw*.
+
+![The Overview of a competition in setup: the Est. duration tile reads about 1h 50m, finishes about 11:20, for 24 expected participants (0 registered), and the strip below lists the time for each shiai-jo and the opening ceremony and lunch pauses.](../../screenshots/mobile-overview-estimate.png)
+
+For a kachinuki (winner stays on) competition the number of bouts is not fixed, so the estimate is a range rather than a single figure. The tile is headed **Average est. duration** and a line under it reads, for example, *Best 2h 09m to worst 4h 28m*. Best is a clean sweep where one fighter wins every bout, worst is the longest run where each bout retires one fighter, and the average sits between them. Use the worst figure for planning the day and the average for a realistic finish time.
+
+![The competition Overview for a kachinuki competition: the Average est. duration tile with the best to worst range and the finish time under it, and the strip of per-shiai-jo times and pauses below.](../../screenshots/kachinuki-estimate-range.png)
+
+### Pauses
+
+The **Schedule blocks** card on the tournament setup page lists the times when no matches are fought, such as lunch or an opening or closing ceremony. Click **+ Add a pause** to add one, up to 20 pauses. Each pause has:
+
+- **Pause name**, for example `Lunch` or `Closing ceremony`.
+- **Starts at**, a clock time such as `12:00`. An opening or closing ceremony is a pause too, with a start time of its own. Give a closing ceremony the time you expect the last match to end. A pause with no start time is saved, but matches will not stop for it until you give it one.
+- **Length**, how long the pause lasts.
+- **On**, which day it applies to, or **Every day**. This choice appears only for a tournament that lasts more than one day.
+- **Matches stop for this pause**, ticked for a new pause. Untick it for a pause that the matches go on through, for example a grading held in another hall while the matches carry on. The calendar still draws that pause on its day, lighter and marked *matches go on*, but no match time, estimate or calendar move works around it.
+
+![The Schedule blocks card of a one-day tournament with two pauses, Opening ceremony at 09:00 for 30m and Lunch at 12:30 for 1h, each with its Matches stop for this pause box ticked and the times its matches stop, and the + Add a pause button.](../../screenshots/mobile-pause-editor.png)
+
+Every estimate and every new schedule works around the pauses whose **Matches stop for this pause** box is ticked. A match whose start time falls inside a pause moves to the end of that pause. A match that starts just before a pause is not shortened or moved, so it may run into the pause. Pauses that overlap count as one longer pause, and the row says so. A pause that ends after midnight is marked as such. The row of a pause the schedule skips says why, for example *Matches will not stop for this pause: give it a start time.* A competition that is already drawn keeps its match times when you add or change a pause, and the card names the competitions affected. To re-time one of them, use **Auto-schedule competition**, or [move the competition](#moving-a-competition-on-the-calendar), which re-times its matches too.
+
+A tournament saved by an earlier version is converted when the server starts, and a restored backup that still carries the old settings is converted as the restore finishes. Its lunch break becomes a **Lunch** pause at 12:00 on every day. Its opening ceremony becomes an **Opening ceremony** pause on each day that has a competition, starting at the earliest start time of that day's competitions (09:00 for a competition with no start time). Its closing ceremony becomes a **Closing ceremony** pause with no start time, which the schedule ignores until you give it one under **Schedule blocks**. Competitions that are already drawn keep their match times. An estimate counts a closing ceremony only once that pause has a time, and every competition that starts during the opening ceremony waits for it to end.
+
+If the settings of one of the competitions cannot be read, the conversion waits. The lunch pause still applies, but the opening and closing ceremonies are not listed under **Schedule blocks** and no match waits for them. The [competition calendar](#competition-calendar) names that competition. Repair its `config.md` file, then restart the server, and the conversion runs again.
+
+### Expected participants and the estimate on a new competition
+
+The **Add competition** form has an **Expected participants** field (**Expected teams** for a team competition). Enter how many you expect to register, so you can plan the day before the entries are in. It accepts a whole number from 0 to 1024. Every estimate uses your number until more people than that have registered; if fewer register, it still uses your number, so lower it to use the registrations. When the competition uses check-in, the estimate compares your number with the people who have checked in. The number is kept with the competition and you can change it in the competition's **Settings**, where a line under the field says which count the estimates use now. Once the draw is made, the estimate uses the participants in the draw and your number no longer matters.
+
+While you fill in the form, a live estimate below the fields shows about how long the competition will take and when it finishes, using the format, the number of shiai-jo, the match durations and the tournament's pauses. It appears once the form has an expected number above 0 and a start time, and updates as you change the fields. If the finish falls after midnight, the estimate says so and suggests an earlier start or more shiai-jo. Once the draw is made, the finish comes from the draw itself and no longer from the estimate.
+
+If you pick more shiai-jo than the entry can use at once, a warning says so, for example *With 2 participants only 1 match can run at a time, so a second shiaijo would stand empty. Use 1 shiaijo.* Its **Change shiaijo** button takes you to the shiai-jo field. The warning does not stop you creating the competition. If the estimate cannot be worked out, the form says why and that you can still create the competition, for example *Could not work out an estimate right now. You can still create the competition.*, with a **Try again** button.
+
+![The bottom of the Add competition form: Expected participants set to 24, and the live estimate below it reading Finishes about 14:10, about 2h 50m, 24 pool matches and 15 knockout matches, the time for each shiai-jo, and the pauses that day.](../../screenshots/mobile-create-estimate.png)
+
+A kachinuki team competition shows the range it could end in, and the past-midnight warning appears when the latest finish in that range is after midnight.
+
+![The live estimate for a kachinuki team competition starting at 19:00: Finishes about 23:53, and below it the warning Could end 22:28 to 01:17, after midnight. Start it earlier or give it more shiaijo.](../../screenshots/kachinuki-create-past-midnight.png)
+
+### Competition calendar
+
+Open **Competition calendar** from the dashboard to see every competition on its day and shiai-jo, from its start time to its expected finish. A competition that is already drawn takes its times from the draw; one that is not drawn yet uses the estimate. Click a competition to open it.
+
+Until the tournament has a date, the calendar shows *Set the tournament date first.* in place of the days. Click **Edit tournament** and fill in **Start date (Day 1)** and **Number of days**.
+
+![The competition calendar of a two-day tournament with shiai-jo A and B: the opening ceremony and lunch drawn as bands across each day, a drawn competition with its times from the draw, and two dashed estimate blocks that say how many entries they expect.](../../screenshots/mobile-calendar.png)
+
+When two competitions on the same shiai-jo overlap, both are marked, and an overlap on a day that is not on screen is listed above the calendar with a button to show that day.
+
+![Kids Individual and Ladies Individual, both starting at 10:00 on shiai-jo C: Ladies Individual is drawn over the right half of Kids Individual, and each block says it overlaps the other on shiai-jo C.](../../screenshots/mobile-calendar-overlap.png)
+
+The calendar can also show the following:
+
+- **Not on the calendar**, a tray of competitions that cannot be placed yet, for example because one needs a start time or a date, or its date is outside the tournament. Each one names the reason, so open the competition's **Settings** to fix it. A line above the calendar tells you how many there are and has a **Show them** button that scrolls to the tray.
+- **No real length.** A competition with no participants yet and no expected number is drawn as a dotted block with a **?** and the words *No participants yet: length unknown*. The tray counts these too. Set **Expected participants** in its **Settings** to give it a length.
+- **Settings that could not be read.** A competition whose settings file cannot be read is left off the calendar, and the notice gives its id so you can check that competition's `config.md` file rather than think it was never created.
+- **A pause the schedule skips**, in a line such as *Matches will not stop for Lunch: it has no start time.* The other reasons are that it has no length, that its start time could not be read, or that its day is outside the tournament. **Edit tournament** opens the tournament setup page, where the pause is listed under **Schedule blocks**, so you can correct it.
+
+### Moving a competition on the calendar
+
+Drag a competition's block to another day or start time. On a touch screen, press and hold the block first, then drag; let go without dragging and the Move dialog opens. On a computer or a tablet you can also use the block's **Move** button, or press **M** while the block is focused. A phone shows no Move buttons: tap a block to open its competition. Every block is drawn at its real start and end, so a short one may show only its name, and on a tablet a block too short for its Move button has none. A move that makes two competitions overlap on a shiai-jo is warned about, not refused. A competition that is running or completed cannot be moved, and its block says so. A drawn competition also cannot move to a start that would carry matches past midnight.
+
+Pause times are drawn as bands across each day. A pause that the matches go on through is drawn lighter, and its band ends with *matches go on*. The time span in a block reads, for example, *09:30 to about 13:38* for an estimate or *14:15 to 16:02* for a draw. A block built from an expected number says so (*Estimate for 24 expected*).
+
+![The calendar on a phone: buttons for Day 1 and Day 2, the first day's shiai-jo A and B, and the Men's Individual and Women's Individual blocks, with no Move buttons.](../../screenshots/mobile-calendar-phone.png)
+
+The Move dialog lets you pick the day, the start time and the shiai-jo. Starts snap to 5 minutes, and a start that falls inside a pause moves to the end of that pause.
+
+![The Move dialog for Women's Individual: the day, a start time of 11:00, shiai-jo A and B chosen, and the line Runs 11:00 to about 12:17, with Cancel and Move.](../../screenshots/mobile-calendar-move.png)
+
+A competition that is already drawn moves by day and start time only, and keeps its shiai-jo. Its matches move with it: each match gets the time the draw would give it at the new day and start, in the same order, and nothing else about the pools, the bracket or the competitor numbers changes. Before you confirm, the message shows each shiai-jo's old and new times. If its matches at their new times would overlap another competition on a shared shiai-jo, the Move dialog names that competition and the shiai-jo, as it does for a competition not drawn yet; you can still move it. If some matches no longer have the times a fresh draw would give them (a time you set by hand, a pause you added or changed, or another competition you moved), the message says so and those matches get new times too. If no match would change its time, the move is saved without asking. The competition and its matches are saved together, or not at all. Changing the **Date** or **Start time** in the competition's **Settings** does the same, with the same message before you save.
+
+A drawn competition cannot move, on the calendar or from its **Settings**, to a start where some of its matches would run past midnight, because a match time cannot show the next day. The message says *At that start some matches would run past midnight, which a match time cannot show. Choose an earlier start. Nothing was changed.* It also cannot move onto a day where another competition plans a shared shiai-jo until after midnight; the message names that shiai-jo and competition. A drawn league whose stored match order no longer follows the draw's pattern, for example after you moved one of its matches to another shiai-jo, cannot be re-timed either: the message says its match order could not be read back. In each case nothing is moved.
+
+![The Move dialog for the drawn Men's Individual moved to 14:00: the line Overlaps Women's Individual on Shiaijo A and B. You can still move it, and below it the message that its 19 matches move, with each shiai-jo's new and old times.](../../screenshots/mobile-calendar-move-drawn-clash.png)
+
+After a move, a message names where the competition moved from and to, and a line saying it was moved just now, with an **Undo** button, stays above the calendar until you move something else or leave the page. Undo puts the settings back and, for a drawn competition, every match back to its exact earlier time. If anything changed in the meantime, such as a match time you edited, Undo says *Changed since the move; Undo not applied.* and changes nothing.
+
+![The calendar after the move: the line Moved Women's Individual just now, Undo puts it back where it was, and its Undo button, and the block in its new place before lunch.](../../screenshots/mobile-calendar-moved.png)
+
+If someone else changed the competition after the calendar loaded (another screen, another device or its **Settings** page), the move is refused with *This competition changed, reload it.* and nothing is moved. The **Settings** page does the same: if the competition changed somewhere else after you opened it, **Save** is refused, the message lists what you had changed, and you click **Reload** to see the current settings and make your change again.
 
 ### Sharing a shiai-jo between competitions
 

@@ -342,12 +342,20 @@ test.describe('J5 kachinuki from the court console', () => {
         recoverTaps, hintShown: await editor(page).getByTestId('team-scoring-clear-hint').isVisible(), screenshot: v2Shot });
       // V1: the thumb lands on the button beside M.
       const v1 = await tapNeighbour(boutIpponButton(currentBout(page), 'shiro', 'M'), 'right');
+      const neighbourTappedAt = Date.now();
       await rendered(page);
       const after = await boutFilled(currentBout(page), 'shiro').allInnerTexts();
       record({ step: 'M1 bout 1', action: 'Shiro M (second point)', variant: 'V1 tapNeighbour right', ...v1, marksAfter: after,
         screenshot: await shot(page, 'v1-ippon-neighbour') });
       // Put the board where the operator meant it: M K for Shiro.
       await clearBoutMarks(currentBout(page), 'shiro', { keep: 1 });
+      // The double tap and the neighbour tap above share Shiro's ippon bounce
+      // guard with the strikes below, but went round tapOnSide, so its pacing
+      // does not know them. Unless clearBoutMarks took a mark off (which clears
+      // that guard), a strike made now lands inside the window of the double
+      // tap's accepted M and is ignored as its bounce: wait it out, as the
+      // operator's next deliberate tap would.
+      await dwell(page, neighbourTappedAt);
       if ((await boutFilled(currentBout(page), 'shiro').count()) === 0) await awardBoutIppon(page, 'shiro', 'M');
       await awardBoutIppon(page, 'shiro', 'K');
       // V3: the iPad reloads the tab before Record bout was tapped. The wait
@@ -1102,11 +1110,15 @@ test.describe('J5 kachinuki from the court console', () => {
           // V1: the option below is hit instead.
           await openList();
           const v1 = await tapNeighbour(option(S[1]), 'down');
+          const v1TappedAt = Date.now();
           await rendered(page);
           const wrong = await boutNames(currentBout(page));
           const v1Marks = await shiroMarks();
           const v1Shot = await shot(page, 'm2-v1-fighter-pick-neighbour');
-          // Recover: clear any mark, pick the right fighter again.
+          // Recover: clear any mark, pick the right fighter again. A pick the
+          // neighbour tap made swallows every tap in the bout list for the
+          // bounce window (onListPick, swallowBounce): wait it out first.
+          await dwell(page, v1TappedAt);
           let recoverTaps = await clearGhostMarks();
           if (wrong.shiro !== S[1]) {
             recoverTaps += await openList();

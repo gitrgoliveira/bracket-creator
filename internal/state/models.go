@@ -13,6 +13,31 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 )
 
+// Pause is a named stop in the day (an opening ceremony, lunch, a grading,
+// a closing ceremony); Start is a clock "HH:MM"; Length uses the duration text
+// format ("1h", "45m", "1h30m"); Day is the 1-based tournament day index, 0
+// meaning every day; a row with no start or an unreadable length is kept but
+// skipped by the schedule.
+//
+// MatchesGoOn is the setup page's "Matches stop for this pause" box, unticked
+// (operator ruling 2026-11-06): the pause is drawn on the calendar but moves
+// no match. The zero value stops matches, so a pause saved before the box
+// existed loads as ticked and a save writes no key for it (no write-back).
+// Ask StopsMatches, never the field.
+type Pause struct {
+	Name        string `yaml:"name" json:"name"`
+	Start       string `yaml:"start,omitempty" json:"start"`
+	Length      string `yaml:"length,omitempty" json:"length"`
+	Day         int    `yaml:"day,omitempty" json:"day"`
+	MatchesGoOn bool   `yaml:"matches_go_on,omitempty" json:"matchesGoOn,omitempty"`
+}
+
+// StopsMatches reports whether the schedule works around this pause: the one
+// owner of that question for every slot, estimate and retime.
+func (p Pause) StopsMatches() bool {
+	return !p.MatchesGoOn
+}
+
 type Tournament struct {
 	Name     string   `yaml:"name" json:"name"`
 	Date     string   `yaml:"date" json:"date"`
@@ -38,14 +63,17 @@ type Tournament struct {
 	// still carry admin_password; front-matter decoding ignores unknown keys,
 	// so it loads, and the next save drops it.
 
-	// Ceremony blocks expressed as human duration strings (e.g. "30m",
-	// "1h"). When set, the auto-scheduler reserves a contiguous range
-	// at the appropriate point in the day and skips match slots that
-	// would land inside it. Optional; zero/empty means no block.
-	// FR-056, R9, data-model §6.
-	OpeningBlock string `yaml:"opening_block,omitempty" json:"openingBlock,omitempty"`
-	LunchBlock   string `yaml:"lunch_block,omitempty" json:"lunchBlock,omitempty"`
-	ClosingBlock string `yaml:"closing_block,omitempty" json:"closingBlock,omitempty"`
+	Pauses []Pause `yaml:"pauses,omitempty" json:"pauses,omitempty"`
+
+	// LunchBlockLegacy, OpeningBlockLegacy, and ClosingBlockLegacy capture the
+	// pre-rename/pre-pauses `lunch_block`, `opening_block`, and `closing_block`
+	// YAML keys from tournament.md files written before pauses were introduced.
+	// They are migrated into Pauses and are never emitted on the wire (json:"-")
+	// nor re-persisted (the migrations clear them, so omitempty drops the old
+	// keys on the next save).
+	LunchBlockLegacy   string `yaml:"lunch_block,omitempty" json:"-"`
+	OpeningBlockLegacy string `yaml:"opening_block,omitempty" json:"-"`
+	ClosingBlockLegacy string `yaml:"closing_block,omitempty" json:"-"`
 
 	// ClockToElapsedMultiplier scales the on-clock match duration to
 	// "real elapsed minutes"; coin tosses, scoring transitions, salutes
@@ -241,10 +269,39 @@ func ValidateTournamentMode(mode string) error {
 	}
 }
 
+// migrateLegacyTournament holds the load-time migrations from older tournament
+// schema versions and applies no defaults:
+//   - DurationDays == 0 becomes 1
+//   - RulesURLLegacy is migrated to WebsiteURL and cleared
+//   - When len(Pauses) == 0 and LunchBlockLegacy parses with time.ParseDuration
+//     to > 0, appends a Pause{Name: "Lunch", Start: "12:00", Length: LunchBlockLegacy, Day: 0}
+func migrateLegacyTournament(t *Tournament) {
+	if t == nil {
+		return
+	}
+	if t.DurationDays == 0 {
+		t.DurationDays = 1
+	}
+	if t.WebsiteURL == "" && t.RulesURLLegacy != "" {
+		t.WebsiteURL = t.RulesURLLegacy
+	}
+	t.RulesURLLegacy = ""
+	if len(t.Pauses) == 0 && t.LunchBlockLegacy != "" {
+		if d, err := time.ParseDuration(t.LunchBlockLegacy); err == nil && d > 0 {
+			t.Pauses = append(t.Pauses, Pause{
+				Name:   "Lunch",
+				Start:  "12:00",
+				Length: t.LunchBlockLegacy,
+				Day:    0,
+			})
+		}
+	}
+}
+
 // ApplyTournamentDefaults fills zero-valued schedule-estimator tuning
 // fields on t with their canonical defaults: ClockToElapsedMultiplier=1.5,
-// SlowestCourtBufferPct=10, and DurationDays=1. Idempotent; safe to call
-// repeatedly.
+// SlowestCourtBufferPct=10, and DurationDays=1 (via migrateLegacyTournament).
+// Idempotent; safe to call repeatedly.
 // Also normalizes empty Mode to TournamentModeOfficiated so that
 // tournament.md files predating mp-7h7 behave as officiated tournaments.
 // FR-055, FR-057, R9.
@@ -252,14 +309,12 @@ func ApplyTournamentDefaults(t *Tournament) {
 	if t == nil {
 		return
 	}
+	migrateLegacyTournament(t)
 	if t.ClockToElapsedMultiplier == 0 {
 		t.ClockToElapsedMultiplier = 1.5
 	}
 	if t.SlowestCourtBufferPct == 0 {
 		t.SlowestCourtBufferPct = 10
-	}
-	if t.DurationDays == 0 {
-		t.DurationDays = 1
 	}
 	if t.Mode == "" {
 		t.Mode = TournamentModeOfficiated
@@ -268,14 +323,6 @@ func ApplyTournamentDefaults(t *Tournament) {
 		// Default to at least one court ("A") for legacy or malformed configs
 		t.Courts = []string{"A"}
 	}
-	// Migrate the pre-rename rules_url key into website_url. Only fill when
-	// website_url is absent so a file carrying both keys prefers the new one.
-	// Clearing the legacy field means the next save writes only website_url,
-	// completing the migration on disk. Idempotent: a no-op once migrated.
-	if t.WebsiteURL == "" && t.RulesURLLegacy != "" {
-		t.WebsiteURL = t.RulesURLLegacy
-	}
-	t.RulesURLLegacy = ""
 }
 
 // Days returns the ordered list of DD-MM-YYYY calendar day strings
@@ -309,6 +356,24 @@ func (t *Tournament) Days() []string {
 		days[i] = base.AddDate(0, 0, i).Format("02-01-2006")
 	}
 	return days
+}
+
+// DayIndex is the day a pause's Day is compared with for a competition dated
+// date: its 1-based position in days (Tournament.Days()) once trimmed, 1 for
+// an empty date or an undated tournament (no days, which the calendar runs as
+// Day 1), and 0 for a date that is not one of the days. The engine's
+// pauseDayIndex and the ceremony upgrade both ask it.
+func DayIndex(days []string, date string) int {
+	date = strings.TrimSpace(date)
+	if date == "" || len(days) == 0 {
+		return 1
+	}
+	for i, d := range days {
+		if d == date {
+			return i + 1
+		}
+	}
+	return 0
 }
 
 // FightingSpiritAward is an optional, per-competition individual honour
@@ -514,6 +579,15 @@ type Competition struct {
 	// fresh competition is judged by.
 	TwoThirdPlaces *bool `yaml:"two_third_places,omitempty" json:"twoThirdPlaces,omitempty"`
 
+	// ExpectedParticipants is the organiser's expected entry count, used by the
+	// schedule estimate while the competition is in setup (engine
+	// countForEstimate). For a team competition it counts teams, since a team
+	// is one entry in the estimate. 0 or absent means not set. The draw never
+	// reads it, so it is editable in every status. It needs no load-time
+	// migration: no earlier release writes the key, so an older config.md
+	// loads as "not set" and estimates exactly as before.
+	ExpectedParticipants int `yaml:"expected_participants,omitempty" json:"expectedParticipants,omitempty"`
+
 	// LeagueTiebreakFinalized is set to true by the operator via
 	// POST /api/competitions/:id/league-tiebreak/finalize to accept the
 	// current standings as final without running a tie-breaker. When true,
@@ -594,6 +668,13 @@ type Competition struct {
 	// with 409 roster_changed when the stored roster is no longer that one
 	// (SaveRoster). Never stored: it is worked out from the roster.
 	RosterVersion string `yaml:"-" json:"rosterVersion,omitempty"`
+
+	// ConfigVersion names the version of this competition's settings (ConfigVersion,
+	// the function), on every answer that carries one. A settings PUT sends back
+	// the version it was built from; the server refuses it with 409 config_changed
+	// when the stored settings are no longer that one. Never stored: it is worked
+	// out from the allowlisted settings fields.
+	ConfigVersion string `yaml:"-" json:"configVersion,omitempty"`
 }
 
 // ParticipantIDsHint returns the LoadParticipantsOpts.HasIDs hint for this
@@ -1018,6 +1099,27 @@ func ValidateExtraQualifiers(value, poolSizeMode string, poolWinners int) error 
 	}
 }
 
+// ValidatePoolWinners refuses a stated poolWinners that no pool of a mixed
+// competition can hold: poolSize under max sizing, one more under min sizing,
+// whose remainder can add a seat. It is the save-time twin of the draw's own
+// bound (helper.BuildPoolPhaseTreeAwareWithMode), so the operator hears it at
+// the field rather than from the estimate or the draw. An unset value (<= 0)
+// is not judged: it runs as the default, and a body that omits it has always
+// been accepted.
+func (c Competition) ValidatePoolWinners() error {
+	if c.Format != CompFormatMixed || c.PoolWinners <= 0 || c.PoolSize <= 0 {
+		return nil
+	}
+	most := c.PoolSize
+	if c.PoolSizeMode != "max" {
+		most++
+	}
+	if c.PoolWinners > most {
+		return fmt.Errorf("poolWinners must be at most %d for pools of %d (got %d)", most, c.PoolSize, c.PoolWinners)
+	}
+	return nil
+}
+
 // QualifiersForPool returns the number of finishers pool promotes to the
 // knockout stage, extending EffectivePoolWinners() per c.ExtraQualifiers:
 //
@@ -1220,6 +1322,14 @@ func ValidateTeamMatchType(t TeamMatchType, teamSize int) error {
 	}
 }
 
+// MaxTeamSize is a defensive upper bound on a team size (members per team).
+// It is NOT a domain rule (team sizes are unregulated; standard kendo teams
+// are 3/5/7, and 12 is about the largest seen), but an unbounded value
+// overflows the bout math (`worst = 2n-1`, `bouts * clock`) and sizes
+// per-team allocations. 30 is a guard well past any real team (operator
+// ruling 2026-11-07). engine.MaxTeamSize is this constant.
+const MaxTeamSize = 30
+
 // ValidateCompetitionTeamSize rejects invalid teamSize values. Engine code
 // uses both TeamSize > 0 and Kind == "team" in different paths; an inconsistent
 // pair (e.g. kind="individual" with teamSize=3) causes misclassification:
@@ -1227,7 +1337,31 @@ func ValidateTeamMatchType(t TeamMatchType, teamSize int) error {
 //   - teamSize == 1 is always invalid (would flag as team via TeamSize > 0)
 //   - non-team kinds require teamSize == 0
 //   - kind == "team" requires teamSize >= 2
+//   - teamSize above MaxTeamSize is invalid (ValidateTeamSizeCap)
+//
+// It is ValidateTeamSizeCap then ValidateTeamSizeShape, for a new record (the
+// create, its draft estimate and the import). The settings PUT runs the two
+// apart: the shape on every save, the cap only on a save that changes the team
+// size or kind, so a record stored past the cap before it existed stays
+// editable for its other settings.
 func ValidateCompetitionTeamSize(kind string, teamSize int) error {
+	if err := ValidateTeamSizeCap(teamSize); err != nil {
+		return err
+	}
+	return ValidateTeamSizeShape(kind, teamSize)
+}
+
+// ValidateTeamSizeCap rejects a teamSize above MaxTeamSize.
+func ValidateTeamSizeCap(teamSize int) error {
+	if teamSize > MaxTeamSize {
+		return fmt.Errorf("teamSize must be at most %d (got %d)", MaxTeamSize, teamSize)
+	}
+	return nil
+}
+
+// ValidateTeamSizeShape is ValidateCompetitionTeamSize without the cap: the
+// sign, the size 1, and the kind/teamSize pairing.
+func ValidateTeamSizeShape(kind string, teamSize int) error {
 	if teamSize < 0 {
 		return fmt.Errorf("teamSize must be non-negative")
 	}
@@ -1263,6 +1397,23 @@ func ValidateCompetitionKind(kind string) error {
 		return nil
 	default:
 		return fmt.Errorf("unknown kind %q (expected \"individual\" or \"team\")", kind)
+	}
+}
+
+// ValidatePoolSizeMode rejects a PoolSizeMode outside the set the server
+// recognises. Every reader asks only `PoolSizeMode == "max"`, so before this
+// check any other value ("maxx", "MAX") was silently run as minimum sizing
+// (operator decision 2026-11-08: refuse it instead).
+//
+// "" is a member of the set, as it is for ValidateCompetitionKind: an
+// omitted value means minimum sizing on create and the draft estimate, and
+// the import defaults it to "max" before validating.
+func ValidatePoolSizeMode(mode string) error {
+	switch mode {
+	case "", "max", "min":
+		return nil
+	default:
+		return fmt.Errorf("unknown poolSizeMode %q (expected \"max\" or \"min\")", mode)
 	}
 }
 

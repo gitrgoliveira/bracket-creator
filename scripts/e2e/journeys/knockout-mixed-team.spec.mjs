@@ -110,16 +110,16 @@ test.describe('knockout-mixed-team', () => {
     });
 
     // ---- Entry point 1: the Lineups page (the team's starting lineup)
-    await test.step('F3 EP1 Lineups page: positions are bare numbers, name three slots', async () => {
+    await test.step('F3 EP1 Lineups page: positions are Senpo, Chuken and Taisho, name three slots', async () => {
       await T.openLineups(page, f3, { team: pair3.shiro });
-      // teamSize 3 shows bare numbers (positionsForSize).
-      for (const l of ['1', '2', '3']) await expect(T.lineupsSelect(page, l)).toBeVisible();
-      await expect(T.lineupsSelect(page, 'Senpo')).toHaveCount(0);
+      // teamSize 3 shows the three-person position names (positionsForSize).
+      for (const l of ['Senpo', 'Chuken', 'Taisho']) await expect(T.lineupsSelect(page, l)).toBeVisible();
+      await expect(T.lineupsSelect(page, '1')).toHaveCount(0);
       await shot(page, 'f3-lineups-fresh', { fullPage: true });
 
       // V2: double tap on "Add" (the confirm could open twice).
-      await T.lineupsSelect(page, '1').selectOption('__add__');
-      await T.lineupsForm(page).getByRole('textbox', { name: 'New member name for 1' }).fill('Aoki');
+      await T.lineupsSelect(page, 'Senpo').selectOption('__add__');
+      await T.lineupsForm(page).getByRole('textbox', { name: 'New member name for Senpo' }).fill('Aoki');
       const addBtn = T.lineupsForm(page).getByRole('button', { name: /^Add$/ });
       const addBox = await tapSize(addBtn);
       const dbl = await doubleTap(addBtn);
@@ -133,64 +133,64 @@ test.describe('knockout-mixed-team', () => {
       const hasty = await hastyConfirm(page);
       const extraDialog = await page.locator('.modal[role="dialog"]').count();
       if (extraDialog) await hastyConfirm(page);
-      await expect(T.lineupsSelect(page, '1').locator('option:checked')).toContainText('Aoki');
-      record({ step: 'EP1 name slot 1', action: 'Add (name a blank slot)', variant: 'V2 doubleTap', ...dbl, dialogsOpen: dialogs, addTapBox: addBox });
-      record({ step: 'EP1 name slot 1', action: '"Name slot" confirm', variant: 'V4 hastyConfirm', ...hasty, secondDialogAfter: extraDialog });
+      await expect(T.lineupsSelect(page, 'Senpo').locator('option:checked')).toContainText('Aoki');
+      record({ step: 'EP1 name Senpo', action: 'Add (name a blank slot)', variant: 'V2 doubleTap', ...dbl, dialogsOpen: dialogs, addTapBox: addBox });
+      record({ step: 'EP1 name Senpo', action: '"Name slot" confirm', variant: 'V4 hastyConfirm', ...hasty, secondDialogAfter: extraDialog });
       const members = T.lineupsForm(page).locator('[data-testid^="squad-member-"]');
-      record({ step: 'EP1 name slot 1', action: 'Add', variant: 'V2 result', membersListed: await members.count(),
+      record({ step: 'EP1 name Senpo', action: 'Add', variant: 'V2 result', membersListed: await members.count(),
         namedAoki: await members.filter({ hasText: 'Aoki' }).count() });
 
-      await T.lineupsNameSlot(page, '2', 'Baba');
-      await T.lineupsNameSlot(page, '3', 'Chiba');
+      await T.lineupsNameSlot(page, 'Chuken', 'Baba');
+      await T.lineupsNameSlot(page, 'Taisho', 'Chiba');
       await shot(page, 'f3-lineups-named', { fullPage: true });
     });
 
     await test.step('F3 EP1 wrong fighter picked, then repaired; one member at two positions', async () => {
       // V1: the operator picks the reserve (the option under the intended one).
-      await T.lineupsPick(page, '3', '.4');
-      const wrong = await T.lineupsSelected(page, '3');
+      await T.lineupsPick(page, 'Taisho', '.4');
+      const wrong = await T.lineupsSelected(page, 'Taisho');
       // The list must not offer a member placed at another position.
-      const offered3 = await T.lineupsSelect(page, '3').locator('option').allInnerTexts();
-      await T.lineupsPick(page, '3', 'Chiba');
-      record({ step: 'EP1 wrong fighter', action: 'pick position 3', variant: 'V1 wrong option (reserve)', picked: wrong,
-        repairedTo: await T.lineupsSelected(page, '3'), tapsToRecover: 2, offeredAt3: offered3 });
+      const offered3 = await T.lineupsSelect(page, 'Taisho').locator('option').allInnerTexts();
+      await T.lineupsPick(page, 'Taisho', 'Chiba');
+      record({ step: 'EP1 wrong fighter', action: 'pick Taisho', variant: 'V1 wrong option (reserve)', picked: wrong,
+        repairedTo: await T.lineupsSelected(page, 'Taisho'), tapsToRecover: 2, offeredAtTaisho: offered3 });
       expect(offered3.some((o) => /Aoki|Baba/.test(o))).toBe(false);
 
       // Typing a name already placed elsewhere is refused with the position.
-      const dup = await T.lineupsStartAdd(page, '2', 'Aoki');
+      const dup = await T.lineupsStartAdd(page, 'Chuken', 'Aoki');
       expect(dup.dialog).toBe(false);
       expect(dup.alert).toMatch(/Aoki is already at/);
       await shot(page, 'f3-lineups-duplicate-refused', { fullPage: true });
-      record({ step: 'EP1 duplicate', action: 'type Aoki at 2 (Aoki at 1)', variant: 'refusal copy', copy: dup.alert });
+      record({ step: 'EP1 duplicate', action: 'type Aoki at Chuken (Aoki at Senpo)', variant: 'refusal copy', copy: dup.alert });
       await T.lineupsForm(page).getByRole('button', { name: 'Cancel' }).tap();
     });
 
     await test.step('F3 EP1 interruption before Save, then Save re-tapped while saving', async () => {
       // V3: an unsaved change, then the page reloads.
-      await T.lineupsPick(page, '3', '.5');
+      await T.lineupsPick(page, 'Taisho', '.5');
       const r = await interrupt(page, 'reload');
       await T.openLineups(page, f3, { team: pair3.shiro });
       // The unsaved picks come back as a draft kept in this tab, offered with
       // Discard; they are only shown, never saved.
       const draftNotice = T.lineupsForm(page).getByTestId('lineup-draft-notice');
       await expect(draftNotice).toContainText('Unsaved lineup changes restored');
-      const after = [await T.lineupsSelected(page, '1'), await T.lineupsSelected(page, '2'), await T.lineupsSelected(page, '3')];
+      const after = [await T.lineupsSelected(page, 'Senpo'), await T.lineupsSelected(page, 'Chuken'), await T.lineupsSelected(page, 'Taisho')];
       await shot(page, 'f3-lineups-after-reload-unsaved', { fullPage: true });
       record({ step: 'EP1 unsaved lineup', action: 'reload before Save', variant: 'V3 interrupt reload', ...r, positionsAfter: after,
         draftNotice: (await draftNotice.innerText()).replace(/\s+/g, ' ').trim(),
         note: 'names were minted by the confirms; the position picks come back as an unsaved draft' });
       // Re-place the three and save, re-tapping Save while it reads "Saving…".
-      await T.lineupsPick(page, '1', 'Aoki');
-      await T.lineupsPick(page, '2', 'Baba');
-      await T.lineupsPick(page, '3', 'Chiba');
+      await T.lineupsPick(page, 'Senpo', 'Aoki');
+      await T.lineupsPick(page, 'Chuken', 'Baba');
+      await T.lineupsPick(page, 'Taisho', 'Chiba');
       const saveBtn = T.lineupsForm(page).getByRole('button', { name: /Save lineup|Saving…/ });
       const re = await retapWhileSaving(saveBtn);
       await expect(page.getByText('Lineup saved').first()).toBeVisible();
       record({ step: 'EP1 save', action: 'Save lineup', variant: 'V2 retapWhileSaving', ...re, saveTapBox: await tapSize(saveBtn) });
       await page.reload();
       await T.openLineups(page, f3, { team: pair3.shiro });
-      expect(await T.lineupsSelected(page, '1')).toContain('Aoki');
-      expect(await T.lineupsSelected(page, '3')).toContain('Chiba');
+      expect(await T.lineupsSelected(page, 'Senpo')).toContain('Aoki');
+      expect(await T.lineupsSelected(page, 'Taisho')).toContain('Chiba');
       await shot(page, 'f3-lineups-saved', { fullPage: true });
     });
 
@@ -198,7 +198,7 @@ test.describe('knockout-mixed-team', () => {
     await test.step('F3 EP2 match panel from Up next: the lineup in force and where it comes from', async () => {
       await openShiaijo(page, 'A');
       await T.openPanelFromUpNext(page);
-      const shiroBoxes = await Promise.all(['1', '2', '3'].map((l) => T.panelInput(page, 0, l).inputValue()));
+      const shiroBoxes = await Promise.all(['Senpo', 'Chuken', 'Taisho'].map((l) => T.panelInput(page, 0, l).inputValue()));
       const shiroSource = (await T.panelSource(page, 0).innerText()).trim();
       await shot(page, 'f3-panel-lineup-in-force');
       record({ step: 'EP2 open panel', action: 'Enter lineup (Up next)', variant: 'correct', shiroSource, shiroBoxes,
@@ -206,11 +206,11 @@ test.describe('knockout-mixed-team', () => {
     });
 
     await test.step('F3 EP2 Aka lineup typed in the panel; V1 neighbour of Aka Save; duplicate refusal', async () => {
-      await T.typeIntoNameBox(T.panelInput(page, 1, '1'), 'Dai');
-      await T.typeIntoNameBox(T.panelInput(page, 1, '2'), 'Eto');
-      await T.typeIntoNameBox(T.panelInput(page, 1, '3'), 'Fuji');
+      await T.typeIntoNameBox(T.panelInput(page, 1, 'Senpo'), 'Dai');
+      await T.typeIntoNameBox(T.panelInput(page, 1, 'Chuken'), 'Eto');
+      await T.typeIntoNameBox(T.panelInput(page, 1, 'Taisho'), 'Fuji');
       // Is a placed member offered again at another position? Open box 2.
-      await T.panelInput(page, 1, '2').tap();
+      await T.panelInput(page, 1, 'Chuken').tap();
       const box2Options = await T.panelSide(page, 1).locator('.pmf__option').allInnerTexts();
       await T.closeNameList(page);
       await shot(page, 'f3-panel-aka-typed');
@@ -235,21 +235,21 @@ test.describe('knockout-mixed-team', () => {
       // Saved: nothing is left to save on that side until it changes again.
       await expect(T.panelSaveButton(page, 1)).toBeDisabled();
       await shot(page, 'f3-panel-aka-saved');
-      const rename = T.panelSide(page, 1).getByRole('button', { name: 'Rename 1 player' });
+      const rename = T.panelSide(page, 1).getByRole('button', { name: 'Rename Senpo player' });
       record({ step: 'EP2 Rename', action: 'Rename control on the panel', variant: 'tap target', renameTapBox: await tapSize(rename) });
 
-      // One member at two positions: type Dai (at 1) into 2 and save.
-      await T.typeIntoNameBox(T.panelInput(page, 1, '2'), 'Dai');
+      // One member at two positions: type Dai (at Senpo) into Chuken and save.
+      await T.typeIntoNameBox(T.panelInput(page, 1, 'Chuken'), 'Dai');
       await T.panelSave(page, 1, { refused: true });
       const err = T.panelSide(page, 1).locator('.alert--error');
       await expect(err).toBeVisible();
       const copy = (await err.innerText()).trim();
       await shot(page, 'f3-panel-duplicate-refused');
-      record({ step: 'EP2 duplicate', action: 'type Dai at 2 (Dai at 1), Save', variant: 'refusal copy', copy, note: 'bc-lprf when it names 2, the position being typed, not 1' });
+      record({ step: 'EP2 duplicate', action: 'type Dai at Chuken (Dai at Senpo), Save', variant: 'refusal copy', copy, note: 'bc-lprf when it names Chuken, the position being typed, not Senpo' });
       expect(copy).toMatch(/Dai is already at/);
       // Repair: put Eto back. That is the lineup already saved, so nothing is
       // left to save and Save lineup goes off again; the repair is two taps.
-      await T.pickFromNameBox(T.panelInput(page, 1, '2'), 'Eto');
+      await T.pickFromNameBox(T.panelInput(page, 1, 'Chuken'), 'Eto');
       await expect(T.panelSaveButton(page, 1)).toBeDisabled();
       record({ step: 'EP2 duplicate', action: 'repair', variant: 'recover', tapsToRecover: 2,
         refusalStillShown: await T.panelSide(page, 1).locator('.alert--error').count() });
@@ -263,11 +263,11 @@ test.describe('knockout-mixed-team', () => {
       const startingLineup = ['Aoki', 'Baba', 'Chiba'];
       const repairedPositions = [];
       for (const [i, name] of startingLineup.entries()) {
-        const box = T.panelInput(page, 0, String(i + 1));
+        const box = T.panelInput(page, 0, T.FIK3[i]);
         if ((await box.inputValue()) === name) continue;
         await T.pickFromNameBox(box, name);
         await expect(box).toHaveValue(name);
-        repairedPositions.push(String(i + 1));
+        repairedPositions.push(T.FIK3[i]);
       }
       // Shiro's boxes show the starting lineup the Lineups page holds and nothing
       // on that side differs from it, so Save lineup is off: there is no tap to land.
@@ -356,7 +356,7 @@ test.describe('knockout-mixed-team', () => {
       for (const n of [1, 2, 3]) sheet.push(await T.rowNameBox(T.boutRow(ed, n), 'shiro').inputValue());
       await shot(page, 'f3-sheet-final');
       await T.openLineups(page, f3, { team: pair3.shiro });
-      const lineupsPage = [await T.lineupsSelected(page, '1'), await T.lineupsSelected(page, '2'), await T.lineupsSelected(page, '3')];
+      const lineupsPage = [await T.lineupsSelected(page, 'Senpo'), await T.lineupsSelected(page, 'Chuken'), await T.lineupsSelected(page, 'Taisho')];
       record({ step: 'three entry points', action: 'compare Shiro positions', variant: 'consistency', sheet, lineupsPage });
     });
 
@@ -370,7 +370,7 @@ test.describe('knockout-mixed-team', () => {
       await T.openLineups(page, f3, { team: pair3.aka, lineupFor: options[1] });
       await expect(T.lineupsForm(page).getByTestId('lineup-source')).toHaveText('Lineup for this match');
       await expect(T.lineupsForm(page).getByRole('button', { name: 'Save lineup' })).toBeDisabled();
-      const names = [await T.lineupsSelected(page, '1'), await T.lineupsSelected(page, '2'), await T.lineupsSelected(page, '3')];
+      const names = [await T.lineupsSelected(page, 'Senpo'), await T.lineupsSelected(page, 'Chuken'), await T.lineupsSelected(page, 'Taisho')];
       await shot(page, 'f3-lineups-for-a-match', { fullPage: true });
       record({ step: 'Lineup for', action: 'choose the first match in "Lineup for"', variant: 'correct', options, names });
       expect(names[0]).toContain('Dai');
@@ -379,11 +379,11 @@ test.describe('knockout-mixed-team', () => {
     });
 
     await test.step('F3 V4: a sixth member through "+ Add new member…" while two reserve slots are blank', async () => {
-      // Position 3 of the Aka team holds Fuji (slot .3); its reserves .4 and
-      // .5 have no name yet. The operator adds a substitute at position 3.
+      // Taisho of the Aka team holds Fuji (slot .3); its reserves .4 and
+      // .5 have no name yet. The operator adds a substitute at Taisho.
       await T.openLineups(page, f3, { team: pair3.aka });
       const before = await T.lineupsForm(page).locator('[data-testid^="squad-member-"]').count();
-      const r = await T.lineupsStartAdd(page, '3', 'Goto');
+      const r = await T.lineupsStartAdd(page, 'Taisho', 'Goto');
       let hasty = null;
       if (r.dialog) {
         await shot(page, 'f3-lineups-add-member-confirm');
@@ -393,7 +393,7 @@ test.describe('knockout-mixed-team', () => {
       // read against the count before the add (`from`).
       const after = await untilStable(() => T.lineupsForm(page).locator('[data-testid^="squad-member-"]').count(), { from: before });
       await shot(page, 'f3-lineups-after-add-member', { fullPage: true });
-      record({ step: 'EP1 add a substitute', action: '+ Add new member… at 3 (reserves .4/.5 blank)', variant: 'V4 hastyConfirm',
+      record({ step: 'EP1 add a substitute', action: '+ Add new member… at Taisho (reserves .4/.5 blank)', variant: 'V4 hastyConfirm',
         ...(hasty || {}), membersBefore: before, membersAfter: after, alert: r.alert });
     });
 
@@ -1146,7 +1146,7 @@ test.describe('knockout-mixed-team', () => {
     // The panel shows the starting lineup as the lineup in force, says so, and
     // with nothing changed on Shiro's side offers no Save lineup.
     await expect(T.panelSource(page, 0)).toHaveText(T.STARTING_LINEUP);
-    for (const [i, name] of names.entries()) await expect(T.panelInput(page, 0, String(i + 1))).toHaveValue(name);
+    for (const [i, name] of names.entries()) await expect(T.panelInput(page, 0, T.FIK3[i])).toHaveValue(name);
     await expect(T.panelSaveButton(page, 0)).toBeDisabled();
     await T.closePanel(page);
     // The score sheet, once the match starts, names the same fighters.
@@ -1246,7 +1246,7 @@ test.describe('knockout-mixed-team', () => {
     // refusal comes on the first tap, before any arming, and says why.
     const finish = T.finishBtn(ed);
     const refusal = ed.getByTestId('team-finish-unfinished-bouts');
-    const unfinished = 'Bout 3 has no result. Record a score, a Tie, or a Fusensho before finishing.';
+    const unfinished = 'Bout 3 (Taisho) has no result. Record a score, a Tie, or a Fusensho before finishing.';
     await paceSettled(finish);
     await finish.tap();
     await expect(refusal).toHaveText(unfinished);

@@ -170,31 +170,90 @@ func TestValidateTournamentLengths_ErrorCases(t *testing.T) {
 		Password: strings.Repeat("x", MaxLenTournamentPassword+1),
 	}))
 
-	// OpeningBlock too long.
-	require.Error(t, validateTournamentLengths(&state.Tournament{
-		Name:         base.Name,
-		Venue:        base.Venue,
-		Date:         base.Date,
-		Password:     base.Password,
-		OpeningBlock: strings.Repeat("x", MaxLenCeremonyBlock+1),
-	}))
+	// 21 pauses.
+	pauses21 := make([]state.Pause, 21)
+	for i := range pauses21 {
+		pauses21[i] = state.Pause{Name: "P", Start: "10:00", Length: "10m"}
+	}
+	err := validateTournamentLengths(&state.Tournament{
+		Name:     base.Name,
+		Venue:    base.Venue,
+		Date:     base.Date,
+		Password: base.Password,
+		Pauses:   pauses21,
+	})
+	require.EqualError(t, err, "A tournament can have at most 20 pauses.")
 
-	// LunchBlock too long.
-	require.Error(t, validateTournamentLengths(&state.Tournament{
-		Name:       base.Name,
-		Venue:      base.Venue,
-		Date:       base.Date,
-		Password:   base.Password,
-		LunchBlock: strings.Repeat("x", MaxLenCeremonyBlock+1),
-	}))
+	// Pause name too long.
+	err = validateTournamentLengths(&state.Tournament{
+		Name:     base.Name,
+		Venue:    base.Venue,
+		Date:     base.Date,
+		Password: base.Password,
+		Pauses: []state.Pause{
+			{Name: strings.Repeat("x", MaxLenPauseName+1)},
+		},
+	})
+	require.EqualError(t, err, "A pause name can be at most 60 characters.")
 
-	// ClosingBlock too long.
-	require.Error(t, validateTournamentLengths(&state.Tournament{
-		Name:         base.Name,
-		Venue:        base.Venue,
-		Date:         base.Date,
-		Password:     base.Password,
-		ClosingBlock: strings.Repeat("x", MaxLenCeremonyBlock+1),
+	// Pause length too long.
+	err = validateTournamentLengths(&state.Tournament{
+		Name:     base.Name,
+		Venue:    base.Venue,
+		Date:     base.Date,
+		Password: base.Password,
+		Pauses: []state.Pause{
+			{Name: "Lunch", Length: strings.Repeat("x", MaxLenPauseLength+1)},
+		},
+	})
+	require.EqualError(t, err, "A pause length can be at most 16 characters.")
+
+	// Pause start too long.
+	err = validateTournamentLengths(&state.Tournament{
+		Name:     base.Name,
+		Venue:    base.Venue,
+		Date:     base.Date,
+		Password: base.Password,
+		Pauses: []state.Pause{
+			{Name: "Lunch", Start: strings.Repeat("x", MaxLenPauseLength+1)},
+		},
+	})
+	require.EqualError(t, err, "A pause start time can be at most 16 characters.")
+
+	// Pause day too high.
+	err = validateTournamentLengths(&state.Tournament{
+		Name:     base.Name,
+		Venue:    base.Venue,
+		Date:     base.Date,
+		Password: base.Password,
+		Pauses: []state.Pause{
+			{Name: "Break", Day: 31},
+		},
+	})
+	require.EqualError(t, err, "A pause day must be from 0 (every day) to 30.")
+
+	// Pause day negative.
+	err = validateTournamentLengths(&state.Tournament{
+		Name:     base.Name,
+		Venue:    base.Venue,
+		Date:     base.Date,
+		Password: base.Password,
+		Pauses: []state.Pause{
+			{Name: "Break", Day: -1},
+		},
+	})
+	require.EqualError(t, err, "A pause day must be from 0 (every day) to 30.")
+
+	// Accepted case: incomplete row (no start) plus a valid row.
+	require.NoError(t, validateTournamentLengths(&state.Tournament{
+		Name:     base.Name,
+		Venue:    base.Venue,
+		Date:     base.Date,
+		Password: base.Password,
+		Pauses: []state.Pause{
+			{Name: "Closing ceremony", Length: "30m"},
+			{Name: "Lunch", Start: "12:00", Length: "1h", Day: 1},
+		},
 	}))
 
 	// PublicURL too long.

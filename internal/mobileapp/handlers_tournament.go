@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gin-gonic/gin/binding"
@@ -504,6 +505,75 @@ func trimPublicInfoFields(t *state.Tournament) {
 		}
 		t.Contacts = filtered
 	}
+	for i := range t.Pauses {
+		t.Pauses[i].Name = strings.TrimSpace(t.Pauses[i].Name)
+		t.Pauses[i].Start = strings.TrimSpace(t.Pauses[i].Start)
+		t.Pauses[i].Length = strings.TrimSpace(t.Pauses[i].Length)
+	}
+}
+
+// Pause caps for tournament-wide schedule breaks.
+// A pause's start uses MaxLenPauseLength too.
+const (
+	MaxPauses         = 20
+	MaxLenPauseName   = 60
+	MaxLenPauseLength = 16
+)
+
+func pauseLabel(name string, index int) string {
+	if strings.TrimSpace(name) != "" {
+		return fmt.Sprintf("Pause %q", strings.TrimSpace(name))
+	}
+	return fmt.Sprintf("Pause %d", index+1)
+}
+
+// validateTournamentPauses enforces the caps and day range on tournament pauses.
+// An incomplete row (e.g. no start) is accepted; the schedule ignores it.
+func validateTournamentPauses(pauses []state.Pause) *ValidationError {
+	if len(pauses) > MaxPauses {
+		return &ValidationError{
+			Message: fmt.Sprintf("A tournament can have at most %d pauses.", MaxPauses),
+		}
+	}
+	for i, p := range pauses {
+		if utf8.RuneCountInString(p.Name) > MaxLenPauseName {
+			return &ValidationError{
+				Message: fmt.Sprintf("A pause name can be at most %d characters.", MaxLenPauseName),
+			}
+		}
+		if len(p.Start) > MaxLenPauseLength {
+			return &ValidationError{
+				Message: fmt.Sprintf("A pause start time can be at most %d characters.", MaxLenPauseLength),
+			}
+		}
+		if len(p.Length) > MaxLenPauseLength {
+			return &ValidationError{
+				Message: fmt.Sprintf("A pause length can be at most %d characters.", MaxLenPauseLength),
+			}
+		}
+		if p.Day < 0 || p.Day > MaxTournamentDurationDays {
+			return &ValidationError{
+				Message: fmt.Sprintf("A pause day must be from 0 (every day) to %d.", MaxTournamentDurationDays),
+			}
+		}
+		label := pauseLabel(p.Name, i)
+		if p.Start != "" {
+			if _, err := engine.ParseClockTime(p.Start); err != nil {
+				return &ValidationError{
+					Message: fmt.Sprintf("%s: start time %s is not a time of day. Use HH:MM, for example 12:00.", label, p.Start),
+				}
+			}
+		}
+		if p.Length != "" {
+			mins := engine.ParseDurationMinutes(p.Length)
+			if mins <= 0 || mins > 24*60 {
+				return &ValidationError{
+					Message: fmt.Sprintf("%s: length must be between 1 minute and 24 hours, for example 45m or 1h30m.", label),
+				}
+			}
+		}
+	}
+	return nil
 }
 
 // validateTournamentLengths enforces the persisted-string caps from
@@ -524,13 +594,7 @@ func validateTournamentLengths(t *state.Tournament) error {
 	if err := validateMaxLen("password", t.Password, MaxLenTournamentPassword); err != nil {
 		return err
 	}
-	if err := validateMaxLen("openingBlock", t.OpeningBlock, MaxLenCeremonyBlock); err != nil {
-		return err
-	}
-	if err := validateMaxLen("lunchBlock", t.LunchBlock, MaxLenCeremonyBlock); err != nil {
-		return err
-	}
-	if err := validateMaxLen("closingBlock", t.ClosingBlock, MaxLenCeremonyBlock); err != nil {
+	if err := validateTournamentPauses(t.Pauses); err != nil {
 		return err
 	}
 	// mp-s1gl: publicURL, externally-shareable base URL for QR codes / share links.
@@ -777,6 +841,21 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 			}
 			if desired.Theme != nil && desired.Theme.IsEmpty() {
 				desired.Theme = nil
+			}
+
+			// Preserve legacy ceremony block strings (json:"-"): the bound
+			// body never carries them. Without this, an Edit tournament save
+			// before the startup ceremony upgrade succeeded would drop the old
+			// ceremony lengths. The lunch is the exception once the body sends
+			// its own pauses: a load shows the old lunch as a pause, so that
+			// list already holds it, or the organiser deleted it, and keeping
+			// the old key would add it back on the next load.
+			if current != nil {
+				if desired.Pauses == nil {
+					desired.LunchBlockLegacy = current.LunchBlockLegacy
+				}
+				desired.OpeningBlockLegacy = current.OpeningBlockLegacy
+				desired.ClosingBlockLegacy = current.ClosingBlockLegacy
 			}
 
 			// Immutability of Mode (mp-7h7): Mode is chosen once at creation

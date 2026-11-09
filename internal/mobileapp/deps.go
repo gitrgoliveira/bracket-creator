@@ -32,6 +32,30 @@ type TournamentLoader interface {
 	LoadTournament() (*state.Tournament, error)
 }
 
+// DraftEstimator is the consumer-boundary view of engine.Engine used by the
+// draft schedule estimator handler. *engine.Engine satisfies this interface.
+type DraftEstimator interface {
+	EstimateDraft(comp *state.Competition, tournament *state.Tournament, participants int) (engine.DraftEstimate, error)
+}
+
+// CalendarPlanner is the consumer-boundary view of engine.Engine used by the
+// tournament schedule calendar handlers. *engine.Engine satisfies this interface.
+type CalendarPlanner interface {
+	TournamentCalendar() (*engine.TournamentCalendarResult, error)
+	PlaceCompetition(comp *state.Competition, tournament *state.Tournament) engine.CompetitionPlacement
+	// PlacementsOnDate places every other competition on the same day as date.
+	PlacementsOnDate(tournament *state.Tournament, date, excludeID string) ([]engine.CalendarCompetition, error)
+	// RetimePreview is the dry run of moving a drawn competition's matches.
+	RetimePreview(oldComp, newComp *state.Competition) (engine.RetimeOutcome, error)
+}
+
+// CalendarStore is the consumer-boundary view of state.Store used by the
+// tournament schedule calendar handlers. *state.Store satisfies this interface.
+type CalendarStore interface {
+	LoadTournament() (*state.Tournament, error)
+	LoadCompetition(id string) (*state.Competition, error)
+}
+
 // CompetitionStore is the consumer-boundary view of state.Store used by
 // handler families that need to read/write competition-level data
 // (config.md, pools, brackets, schedule). Methods are added here only as

@@ -42,28 +42,23 @@ func (e *CourtFloorPastMidnightError) Is(target error) bool {
 // isKnockout distinguishes knockout/bracket matches from pool matches.
 type SlotMinutes func(comp *Competition, isKnockout bool) int
 
-// CourtEnds calculates the planned end ("HH:MM") of compID's last slot on each
-// court it holds matches on. It reads pool matches and bracket matches (including
-// any 3rd-place match). A bracket bye (a completed match with an empty side)
-// contributes its start time but zero duration, mirroring assignBracketMatchSlots.
-// An end past midnight is not wrapped: it reads "24:10" (no clock time), so a
-// reader can tell it from a real one. Returns an empty/nil map if the
-// competition has no slots or is not drawn.
-func (s *Store) CourtEnds(compID string, minutes SlotMinutes) (map[string]string, error) {
-	latestEnd, err := s.courtEndMinutes(compID, minutes)
-	if err != nil || len(latestEnd) == 0 {
-		return nil, err
-	}
-	res := make(map[string]string, len(latestEnd))
-	for court, endMins := range latestEnd {
-		res[court] = formatClockHHMM(endMins)
-	}
-	return res, nil
+// CourtWindow holds the first slot start and last slot end on a court, in
+// minutes since midnight (unwrapped, so an end past midnight reads >= 1440),
+// and the match slot lengths on that court in chronological order.
+type CourtWindow struct {
+	Start       int   `json:"start"`
+	End         int   `json:"end"`
+	SlotLengths []int `json:"-"`
 }
 
-// courtEndMinutes is CourtEnds in minutes since midnight, unclamped: a plan
-// that runs past midnight reads 24*60 or more, which no "HH:MM" clock holds.
-func (s *Store) courtEndMinutes(compID string, minutes SlotMinutes) (map[string]int, error) {
+// CourtWindows calculates the planned window [first slot start, last slot end]
+// in minutes since midnight for compID on each court it holds matches on.
+// It reads pool matches and bracket matches (including any 3rd-place match) in
+// ONE walk. A bracket bye (a completed match with an empty side) contributes its
+// start time but zero duration, mirroring assignBracketMatchSlots.
+// An end past midnight is not wrapped: it reads >= 1440. Returns an empty/nil map
+// if the competition has no slots.
+func (s *Store) CourtWindows(compID string, minutes SlotMinutes) (map[string]CourtWindow, error) {
 	comp, err := s.LoadCompetition(compID)
 	if err != nil {
 		return nil, err
@@ -82,22 +77,34 @@ func (s *Store) courtEndMinutes(compID string, minutes SlotMinutes) (map[string]
 		return nil, err
 	}
 
-	latestEnd := make(map[string]int)
+	type slotRecord struct {
+		startMins int
+		length    int
+	}
+	courtSlots := make(map[string][]slotRecord)
+	minStart := make(map[string]int)
+	maxEnd := make(map[string]int)
 	observe := func(court, scheduledAt string, isKnockout, isBye bool) {
 		court = strings.TrimSpace(court)
 		if court == "" {
 			return
 		}
-		endMins, ok := ParseClockMinutes(scheduledAt)
+		startMins, ok := ParseClockMinutes(scheduledAt)
 		if !ok {
 			return
 		}
+		length := 0
 		if !isBye && minutes != nil {
-			endMins += minutes(comp, isKnockout)
+			length = minutes(comp, isKnockout)
 		}
-		if cur, exists := latestEnd[court]; !exists || endMins > cur {
-			latestEnd[court] = endMins
+		endMins := startMins + length
+		if cur, exists := minStart[court]; !exists || startMins < cur {
+			minStart[court] = startMins
 		}
+		if cur, exists := maxEnd[court]; !exists || endMins > cur {
+			maxEnd[court] = endMins
+		}
+		courtSlots[court] = append(courtSlots[court], slotRecord{startMins: startMins, length: length})
 	}
 
 	for i := range poolMatches {
@@ -108,10 +115,58 @@ func (s *Store) courtEndMinutes(compID string, minutes SlotMinutes) (map[string]
 		observe(bm.Court, bm.ScheduledAt, true, isBye)
 	}
 
-	if len(latestEnd) == 0 {
+	if len(minStart) == 0 {
 		return nil, nil
 	}
-	return latestEnd, nil
+	windows := make(map[string]CourtWindow, len(minStart))
+	for court := range minStart {
+		slots := courtSlots[court]
+		slices.SortStableFunc(slots, func(a, b slotRecord) int {
+			return a.startMins - b.startMins
+		})
+		lengths := make([]int, len(slots))
+		for i, s := range slots {
+			lengths[i] = s.length
+		}
+		windows[court] = CourtWindow{
+			Start:       minStart[court],
+			End:         maxEnd[court],
+			SlotLengths: lengths,
+		}
+	}
+	return windows, nil
+}
+
+// CourtEnds calculates the planned end ("HH:MM") of compID's last slot on each
+// court it holds matches on. It is a view over CourtWindows.
+// An end past midnight is not wrapped: it reads "24:10" (no clock time), so a
+// reader can tell it from a real one. Returns an empty/nil map if the
+// competition has no slots or is not drawn.
+func (s *Store) CourtEnds(compID string, minutes SlotMinutes) (map[string]string, error) {
+	windows, err := s.CourtWindows(compID, minutes)
+	if err != nil || len(windows) == 0 {
+		return nil, err
+	}
+	res := make(map[string]string, len(windows))
+	for court, w := range windows {
+		res[court] = FormatClockHHMM(w.End)
+	}
+	return res, nil
+}
+
+// courtEndMinutes is CourtEnds in minutes since midnight, unclamped: a plan
+// that runs past midnight reads 24*60 or more, which no "HH:MM" clock holds.
+// It is a view over CourtWindows.
+func (s *Store) courtEndMinutes(compID string, minutes SlotMinutes) (map[string]int, error) {
+	windows, err := s.CourtWindows(compID, minutes)
+	if err != nil || len(windows) == 0 {
+		return nil, err
+	}
+	res := make(map[string]int, len(windows))
+	for court, w := range windows {
+		res[court] = w.End
+	}
+	return res, nil
 }
 
 // CourtFloor determines the per-court earliest start time ("HH:MM") for comp
@@ -218,7 +273,7 @@ func (s *Store) CourtFloor(comp *Competition, courts []string, minutes SlotMinut
 
 	res := make(map[string]string, len(floorMins))
 	for court, mins := range floorMins {
-		res[court] = formatClockHHMM(mins)
+		res[court] = FormatClockHHMM(mins)
 	}
 	return res, nil
 }
@@ -251,13 +306,13 @@ func ParseClockMinutes(s string) (int, bool) {
 	return h*60 + m, true
 }
 
-func formatClockHHMM(mins int) string {
+// FormatClockHHMM renders minutes-since-midnight as "HH:MM". It does NOT wrap at 24h:
+// an end past midnight reads "24:10", never a clamped 23:59 that would mean an
+// earlier time than the plan holds.
+func FormatClockHHMM(mins int) string {
 	if mins < 0 {
 		mins = 0
 	}
-	// Not wrapped at 24h, as schedule_clash.go's fmtHHMM: an end past
-	// midnight reads "24:10", never a clamped 23:59 that would mean an
-	// earlier time than the plan holds.
 	return fmt.Sprintf("%02d:%02d", mins/60, mins%60)
 }
 

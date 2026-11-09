@@ -102,6 +102,44 @@ type txResponse struct {
 	body   gin.H
 }
 
+// writeTxResponse writes an answer decided inside a transaction.
+func writeTxResponse(c *gin.Context, r *txResponse) {
+	c.JSON(r.status, r.body)
+}
+
+// courtPastMidnightResponse is the one 409 for a shared court another
+// competition holds until midnight or later, for the draw, the calendar
+// preview and a re-time alike.
+func courtPastMidnightResponse(e *state.CourtFloorPastMidnightError) *txResponse {
+	return &txResponse{status: http.StatusConflict, body: gin.H{
+		"error":         e.Error(),
+		"code":          "court_past_midnight",
+		"court":         e.Court,
+		"competitionId": e.CompetitionID,
+	}}
+}
+
+// retimeRefusal is the answer for an error a re-time or an Undo restore
+// refuses with, or nil for any other error (the caller's 500). Every refusal
+// carries a `code` the client can branch on, except an unknown or malformed
+// restore, which is a 400 on the request itself.
+func retimeRefusal(err error) *txResponse {
+	var pastMidnight *state.CourtFloorPastMidnightError
+	switch {
+	case errors.As(err, &pastMidnight):
+		return courtPastMidnightResponse(pastMidnight)
+	case errors.Is(err, engine.ErrRetimeUnavailable):
+		return &txResponse{status: http.StatusConflict, body: gin.H{"code": "retime_unavailable", "error": "This competition's match order could not be read back, so its matches were not moved. Nothing was changed."}}
+	case errors.Is(err, engine.ErrRetimePastMidnight):
+		return &txResponse{status: http.StatusConflict, body: gin.H{"code": "retime_past_midnight", "error": "At that start some matches would run past midnight, which a match time cannot show. Choose an earlier start. Nothing was changed."}}
+	case errors.Is(err, engine.ErrUndoStale):
+		return &txResponse{status: http.StatusConflict, body: gin.H{"code": "undo_stale", "error": "Changed since the move; Undo not applied."}}
+	case errors.Is(err, engine.ErrRestoreUnknownMatch), errors.Is(err, engine.ErrRestoreBadTime), errors.Is(err, engine.ErrRestoreDuplicateMatch):
+		return &txResponse{status: http.StatusBadRequest, body: gin.H{"error": err.Error()}}
+	}
+	return nil
+}
+
 // respondEngineError classifies err against the two typed engine sentinels
 // every handler in this package already checks by hand -- *engine.NotFoundError
 // (404) and *engine.ValidationError (400) -- and falls back to internalError
@@ -121,12 +159,7 @@ func respondEngineError(c *gin.Context, err error) {
 		// A draw on a shared court another competition holds past midnight:
 		// no "HH:MM" slot is left there that day, so the draw is refused with
 		// what to do, never a 500 or a wrapped time.
-		c.JSON(http.StatusConflict, gin.H{
-			"error":         pastMidnight.Error(),
-			"code":          "court_past_midnight",
-			"court":         pastMidnight.Court,
-			"competitionId": pastMidnight.CompetitionID,
-		})
+		writeTxResponse(c, courtPastMidnightResponse(pastMidnight))
 	default:
 		internalError(c, err)
 	}

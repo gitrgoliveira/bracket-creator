@@ -13,9 +13,11 @@ import (
 	"testing"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/backup"
+	"github.com/gitrgoliveira/bracket-creator/internal/cmd/version"
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/engine"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
+	bctest "github.com/gitrgoliveira/bracket-creator/internal/test"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -164,6 +166,64 @@ func TestMobileAppBackupRestore_RoundTrip(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, tourn)
 	assert.Equal(t, newPassword, tourn.Password)
+}
+
+// A backup is restored only on the version that made it or a later one: the
+// CLI refuses a later version's archive with the sentence the page shows, and the folder
+// is left as it was.
+func TestMobileAppBackupRestore_ALaterVersionsBackupRefused(t *testing.T) {
+	srcDir, _ := buildTestPopulatedFolder(t)
+	zipPath := filepath.Join(t.TempDir(), "backup.zip")
+	_, err := executeMobileApp("backup", "--folder", srcDir, "--out", zipPath)
+	require.NoError(t, err)
+	data, err := os.ReadFile(zipPath)
+	require.NoError(t, err)
+	other, err := bctest.ArchiveWithAppVersion(data, "v999.0.0")
+	require.NoError(t, err)
+	otherPath := filepath.Join(t.TempDir(), "other.zip")
+	require.NoError(t, os.WriteFile(otherPath, other, 0o600))
+
+	before := testDataFiles(t, srcDir)
+	_, err = executeMobileApp("restore", "--folder", srcDir, otherPath)
+	require.Error(t, err)
+	// The sentence is CheckAppVersion's (its own test pins the wording).
+	assert.Equal(t, backup.CheckAppVersion(backup.Manifest{AppVersion: "v999.0.0"}, version.GetVersion()).Detail, err.Error())
+	assert.Equal(t, before, testDataFiles(t, srcDir), "a refused restore changed the folder")
+}
+
+// A backup an earlier version made restores with a later one. The running
+// version is set, since the test binary's own (a branch name) has no release
+// order.
+func TestMobileAppBackupRestore_AnEarlierVersionsBackupRestores(t *testing.T) {
+	saved := restoreRunningVersion
+	restoreRunningVersion = func() string { return "v2.5.0" }
+	t.Cleanup(func() { restoreRunningVersion = saved })
+
+	srcDir, _ := buildTestPopulatedFolder(t)
+	zipPath := filepath.Join(t.TempDir(), "backup.zip")
+	_, err := executeMobileApp("backup", "--folder", srcDir, "--out", zipPath)
+	require.NoError(t, err)
+	data, err := os.ReadFile(zipPath)
+	require.NoError(t, err)
+	earlier, err := bctest.ArchiveWithAppVersion(data, "v2.4.0")
+	require.NoError(t, err)
+	earlierPath := filepath.Join(t.TempDir(), "earlier.zip")
+	require.NoError(t, os.WriteFile(earlierPath, earlier, 0o600))
+
+	dst := t.TempDir()
+	_, err = executeMobileApp("restore", "--folder", dst, "--password", "pw", earlierPath)
+	require.NoError(t, err)
+	competitions := func(files map[string]string) map[string]string {
+		out := make(map[string]string)
+		for p, h := range files {
+			if strings.HasPrefix(filepath.ToSlash(p), "competitions/") {
+				out[p] = h
+			}
+		}
+		return out
+	}
+	assert.NotEmpty(t, competitions(testDataFiles(t, dst)))
+	assert.Equal(t, competitions(testDataFiles(t, srcDir)), competitions(testDataFiles(t, dst)), "the earlier version's competitions are restored as they were")
 }
 
 // (2) A clash (competition id already in the target folder) is refused without --replace or --copy, nothing changed;

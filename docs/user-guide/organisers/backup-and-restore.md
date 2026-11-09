@@ -12,12 +12,16 @@ The app saves every change to disk as it happens, but a backup archive is a copy
 
 You can back up the entire tournament at once, or back up any single competition on its own.
 
+## Which version can restore a backup
+
+A backup can be restored with the version of the app that made it or any later version, which brings the restored data up to date as it does a data folder after an upgrade. A backup that a later version made is refused, since an earlier version cannot read what a later one may have written. A build whose version has no place in the release order, such as one built from a source branch, restores only backups that carry exactly its version, and its own backups restore only on a build with that same version. A Docker image built with uncommitted changes restores as the version it was built from, so it restores that version's backups and earlier ones, but its own backups restore only on a build with exactly its version. A backup made with a version older than this app can bring up to date (before 2.3.0, for this version) is refused too. The same holds for daily copies and safety copies.
+
 ## Automatic daily copies
 
-While it runs, the server checks when it starts and then once an hour, and takes a backup of the entire tournament when the newest daily copy is at least 24 hours old (or there is none yet):
+While it runs, the server checks when it starts and then once an hour, and takes a backup of the entire tournament when the newest daily copy is at least 24 hours old, there is none yet, or this version of the app cannot restore it:
 
-- A daily copy is created only if something has changed since the newest daily copy. Backups you download and safety copies do not count. A save that changes nothing, such as the same score sent twice, does not count as a change.
-- A copy is also taken when the app is closed normally, if something changed since the newest daily copy. A crash, a pulled plug, or a shutdown that runs past its time limit takes none.
+- A daily copy is created only if something has changed since the newest daily copy. Backups you download and safety copies do not count, and a newest daily copy that this version cannot restore counts as none: after you go back to an earlier version, its first check takes a copy even when nothing has changed. A save that changes nothing, such as the same score sent twice, does not count as a change.
+- A copy is also taken when the app is closed normally, if something changed since the newest daily copy, or this version cannot restore that copy. A crash, a pulled plug, or a shutdown that runs past its time limit takes none.
 - No daily copy is taken while the tournament has no competitions.
 - Daily copies are saved inside the `backups/` folder within your tournament data directory.
 - The app never deletes backup files automatically. Every copy remains on disk until you choose to delete it.
@@ -105,11 +109,13 @@ A refused restore changes nothing. The page tells you why, and the common reason
 - **The backup file could not be read from the upload**: the upload failed. Choose the file again.
 - **The backup file is over 64 MB**: the page cannot take an upload that large. Restore it from the command line, or, for a daily or safety copy, from **Copies kept on this computer**.
 - **A file in the backup cannot be read**: the backup is damaged. Try another copy.
-
-If the page says **The restore could not be completed**, something failed partway through. Restart the app: it finishes a restore that was under way as it starts.
 - **That backup is not there any more**: the kept copy was deleted, for example from another browser tab. Reload the list.
 - **Wrong password. Nothing was restored.**: the password typed in the confirmation dialog was wrong. Type it again.
-- **The file is not a backup this app can restore**: the file is damaged, was changed after it was made, or is not a backup archive.
+- **This file is not a backup this app can restore**: the file is damaged, was changed after it was made, is not a backup archive, or was made by a newer version of the app that stores backups differently.
+- **This backup was made with version ... and this app is version ...** (or **This backup does not say which version made it**): a later version of the app made the backup, or a build this version cannot be compared with (the message then adds **These two versions cannot be compared**), as [Which version can restore a backup](#which-version-can-restore-a-backup) explains. The plan says so before anything changes. Restore it with the version that made it or a later one.
+- **This app can bring a backup up to date only from version ... on**: the backup is older than the oldest version this app can upgrade from. Restore it with a version between the two, then take a new backup there.
+
+If the page says **The restore could not be completed**, something failed partway through. Restart the app: it finishes a restore that was under way as it starts.
 
 ## Safety copies and undoing a restore
 
@@ -138,6 +144,8 @@ The **Copies kept on this computer** section lists the backup archives the app s
 
 - **Daily**: automatic copies, taken once a day when the data changed, and when the app is closed normally after a change.
 - **Before restore**: safety copies taken immediately before a restore operation.
+
+A copy this version cannot restore, such as one a later version made, stays listed, but restoring it is refused, as [Which version can restore a backup](#which-version-can-restore-a-backup) explains.
 
 A file you copy into `backups/` yourself, such as a downloaded backup, is not listed: the list shows only files with the app's own names. Restore such a file with **Restore from a file**.
 

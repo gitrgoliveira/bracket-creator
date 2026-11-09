@@ -4,12 +4,14 @@
 // imports (no standalone <script> tag) and consumed by the AdminCompetition
 // shell via window.*.
 
-import { EstimateHeadline } from './admin_schedule_utils.jsx';
+import { formatEstimateMinutes, finishClock, timeToMinutes } from './admin_schedule_utils.jsx';
+import { pastMidnight, pauseDayIndex } from './calendar_rules.jsx';
+import { blockMinutes, parseClock, formatClock, computePauseRowStatus } from './pause_list.jsx';
 // seededRanks: the one owner of "which seed ranks has this roster actually
 // got" (integer > 0 normalization), shared with the seeding blocker and the
 // settings preview so this stat, the checklist and the preview cannot
 // disagree about what counts as seeded.
-import { seededRanks } from './admin_helpers.jsx';
+import { seededRanks, deriveTournamentDays } from './admin_helpers.jsx';
 import { checkInApplies } from './competition_shape.jsx';
 import { useUnsavedInput } from './app_version.jsx';
 // One owner for what the operator is told when a file on disk does not say what
@@ -244,6 +246,186 @@ function overviewResultsSection(format, hasBracket) {
 }
 
 // ---------------------------------------------------------------------------
+// Schedule estimate helpers for Overview & Settings
+// ---------------------------------------------------------------------------
+
+export function latestCourtFinish(courtEnds, startTime) {
+  if (!courtEnds || typeof courtEnds !== "object") return null;
+  const entries = Object.values(courtEnds).filter(Boolean);
+  if (entries.length === 0) return null;
+
+  const startM = timeToMinutes(startTime);
+
+  let latestTotalMinutes = -Infinity;
+
+  for (const timeStr of entries) {
+    if (typeof timeStr !== "string") continue;
+    const parts = timeStr.trim().split(":");
+    if (parts.length !== 2) continue;
+    const h = Number(parts[0]);
+    const m = Number(parts[1]);
+    if (!Number.isFinite(h) || !Number.isFinite(m) || h < 0 || m < 0 || m > 59) continue;
+
+    let totalM = h * 60 + m;
+    // An end that reads earlier than the start ran over midnight.
+    if (totalM < 1440 && startM !== null && totalM < startM) totalM += 1440;
+
+    if (totalM > latestTotalMinutes) latestTotalMinutes = totalM;
+  }
+
+  if (latestTotalMinutes === -Infinity) return null;
+
+  // After midnight by the calendar's rule: an end at exactly 24:00 is not.
+  const nextDay = pastMidnight(latestTotalMinutes);
+  const wrapped = ((latestTotalMinutes % 1440) + 1440) % 1440;
+  const outH = Math.floor(wrapped / 60);
+  const outM = wrapped % 60;
+  const clock = `${String(outH).padStart(2, "0")}:${String(outM).padStart(2, "0")}`;
+
+  return { clock, nextDay };
+}
+
+export function formatPausesRow(tournament, c) {
+  const pauses = Array.isArray(tournament?.pauses) ? tournament.pauses : [];
+  const durationDays = Number(tournament?.durationDays) || 1;
+  const days = deriveTournamentDays(tournament?.date, durationDays);
+  // The server's dayBreaks rule: no date, or an undated tournament, is day 1,
+  // and a date that is not one of the tournament's days (0 here) gets only the
+  // every-day pauses.
+  const compDay = pauseDayIndex(days, c?.date);
+
+  const relevant = pauses.filter(p => (p && (p.day === 0 || p.day === compDay)));
+
+  const usable = [];
+  // Pauses the estimate does not work around: matches go on through them by
+  // choice, or the row is incomplete. Named after the day's pauses.
+  const unused = [];
+
+  for (let i = 0; i < relevant.length; i++) {
+    const p = relevant[i];
+    const name = (p.name || "").trim() || "Pause";
+    const status = computePauseRowStatus(p, i, relevant, durationDays);
+    if (status.type === 'matches_go_on') {
+      unused.push(`${name}: matches go on`);
+    } else if (!status.warn) {
+      const startMin = parseClock(p.start);
+      const durMin = blockMinutes(p.length);
+      const endClock = formatClock(startMin + durMin);
+      usable.push({
+        text: `${name} ${p.start} to ${endClock}`,
+        startMin,
+      });
+    } else {
+      unused.push(`${name}: ${status.type === 'missing_start' ? "no start time" : "no length"}, matches will not stop`);
+    }
+  }
+
+  usable.sort((a, b) => a.startMin - b.startMin);
+
+  const dayText = usable.length > 0 ? usable.map(u => u.text).join(", ") : "No pauses that day";
+  const allParts = [dayText, ...unused];
+  return allParts.join(" · ");
+}
+
+export function formatPerShiaijoRow(estimate, courts) {
+  if (!estimate || !Array.isArray(estimate.perCourtMinutes) || estimate.perCourtMinutes.length === 0) {
+    return null;
+  }
+  return estimate.perCourtMinutes.map((m, i) => {
+    const letter = (Array.isArray(courts) && courts[i]) || String.fromCharCode(65 + i);
+    if (!m || m <= 0) {
+      return `${letter} has no matches`;
+    }
+    return `${letter} about ${formatEstimateMinutes(m)}`;
+  }).join(" · ");
+}
+
+export function EstimateDurationTile({
+  c,
+  estimate,
+  estimateLoading,
+  rosterUnreadable,
+  estimateCheckIn,
+}) {
+  const isKachinuki = c?.teamMatchType === "kachinuki";
+  const label = isKachinuki ? "Average est. duration" : "Est. duration";
+  const loadingSuffix = estimateLoading && !rosterUnreadable ? " …" : "";
+
+  const hasMinutes = estimate && Number.isFinite(estimate.totalDurationMinutes) && estimate.totalDurationMinutes > 0;
+  const dispValue = (!rosterUnreadable && hasMinutes)
+    ? `about ${formatEstimateMinutes(estimate.totalDurationMinutes)}`
+    : "n/a";
+
+  const vCls = dispValue === "n/a" ? "v" : "v v--sm";
+
+  let rangeLine = null;
+  if (!rosterUnreadable && isKachinuki && estimate &&
+      Number.isFinite(estimate.bestCaseMinutes) &&
+      Number.isFinite(estimate.worstCaseMinutes) &&
+      estimate.bestCaseMinutes !== estimate.worstCaseMinutes) {
+    rangeLine = `Best ${formatEstimateMinutes(estimate.bestCaseMinutes)} to worst ${formatEstimateMinutes(estimate.worstCaseMinutes)}`;
+  }
+
+  let finishLine = null;
+  let finishNextDay = false;
+  if (!rosterUnreadable && estimate) {
+    const isSetup = c?.status === "setup";
+    let finishRes = null;
+    if (isSetup) {
+      finishRes = finishClock(c?.startTime, estimate.totalDurationMinutes);
+    } else {
+      finishRes = latestCourtFinish(estimate.courtEnds, c?.startTime) || finishClock(c?.startTime, estimate.totalDurationMinutes);
+    }
+    if (finishRes && finishRes.clock) {
+      finishNextDay = Boolean(finishRes.nextDay);
+      finishLine = `Finishes about ${finishRes.clock}${finishNextDay ? ", after midnight" : ""}`;
+    }
+  }
+
+  let countLine = null;
+  let hintLine = null;
+  if (!rosterUnreadable && estimate) {
+    const isTeam = c?.kind === "team" || Number(c?.teamSize) > 0;
+    const isSetup = c?.status === "setup";
+
+    if (estimate.participantsSource === "expected" && Number.isFinite(estimate.participants)) {
+      const expCount = estimate.participants;
+      const unit = expCount === 1 ? (isTeam ? "team" : "participant") : (isTeam ? "teams" : "participants");
+      const regCount = (c?.players || []).length;
+      const chkCount = estimateCheckIn ? (c?.players || []).filter(p => p && p.checkedIn).length : 0;
+      const actualCount = estimateCheckIn ? chkCount : regCount;
+      const actionWord = estimateCheckIn ? "checked in" : "registered";
+      const nounWord = estimateCheckIn ? "check-ins" : "registrations";
+
+      countLine = `For ${expCount} expected ${unit} (${actualCount} ${actionWord})`;
+
+      if (actualCount > 0 && actualCount < expCount) {
+        hintLine = `${actualCount} ${actionWord}, fewer than the ${expCount} you expected. Estimates still use ${expCount}; lower this number to use the ${nounWord}.`;
+      }
+    } else if (estimate.participantsSource === "roster" && !isSetup && Number.isFinite(estimate.participants)) {
+      const count = estimate.participants;
+      const unit = count === 1 ? (isTeam ? "team" : "participant") : (isTeam ? "teams" : "participants");
+      countLine = `For the ${count} ${unit} in the draw`;
+    }
+  }
+
+  return (
+    <div className="stat-box" data-testid="stat-est-duration">
+      <div className={vCls}>{dispValue}</div>
+      <div className="l">{label}{loadingSuffix}</div>
+      {rangeLine && <div className="stat-box__range">{rangeLine}</div>}
+      {finishLine && (
+        <div className={`stat-box__finish${finishNextDay ? " stat-box__finish--warn" : ""}`}>
+          {finishLine}
+        </div>
+      )}
+      {countLine && <div className="stat-box__count">{countLine}</div>}
+      {hintLine && <div className="stat-box__hint">{hintLine}</div>}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // AdminCompOverview: status-aware overview component
 // ---------------------------------------------------------------------------
 function AdminCompOverview({ c, tournament, pools, poolMatches, bracket, onSection, password, showToast, onRefreshCompetition }) {
@@ -333,6 +515,7 @@ function AdminCompOverview({ c, tournament, pools, poolMatches, bracket, onSecti
   // request would only answer the server's opaque failure. The page says so
   // through the tiles and the footer below instead (D26).
   const rosterUnreadable = rosterUnreadableIssues(c).length > 0;
+  const pausesKey = JSON.stringify(tournament?.pauses || []);
   useEffect(() => {
     if (!c.id || rosterUnreadable) return;
     const controller = new AbortController();
@@ -354,9 +537,10 @@ function AdminCompOverview({ c, tournament, pools, poolMatches, bracket, onSecti
       });
     return () => controller.abort();
   }, [c.id, c.format, c.kind, c.poolMatchDurationSeconds, c.knockoutMatchDurationSeconds, c.courts,
-    c.teamSize, c.poolSize, c.poolSizeMode, c.poolWinners, c.roundRobin, c.poolFormat,
-    c.swissRounds, estimateCheckIn, password, estimatePlayerCount, estimateCheckedInCount, rosterUnreadable,
-    tournament?.openingBlock, tournament?.lunchBlock, tournament?.closingBlock,
+    c.teamSize, c.teamMatchType, c.poolSize, c.poolSizeMode, c.poolWinners, c.roundRobin, c.poolFormat,
+    c.swissRounds, c.extraQualifiers, c.twoThirdPlaces, c.naginata, c.expectedParticipants, c.status, c.date, c.startTime,
+    estimateCheckIn, password, estimatePlayerCount, estimateCheckedInCount, rosterUnreadable,
+    pausesKey,
     tournament?.clockToElapsedMultiplier, tournament?.slowestCourtBufferPct]);
 
   // ---------------------------------------------------------------------------
@@ -383,18 +567,11 @@ function AdminCompOverview({ c, tournament, pools, poolMatches, bracket, onSecti
     ? window.formatCompMinutes
     : (m) => (Number.isFinite(m) && m > 0 ? `${m}m` : null);
 
-  const estDuration = (!rosterUnreadable && formatCompMinutes(estimate && estimate.totalDurationMinutes)) || "n/a";
-
   // draw-ready: pool count vs bracket size
   const poolCount = (Array.isArray(pools) && pools.length > 0) ? pools.length : (c.pools ? c.pools.length : null);
   const bracketRounds = effectiveBracket && effectiveBracket.rounds ? effectiveBracket.rounds.length : null;
 
   const pct = total ? Math.round((done / total) * 100) : 0;
-
-  // Stat values step down to 16px via .v--sm unless they are the n/a
-  // placeholder "n/a" (which keeps the 22px display size). vClass is only called
-  // for boxes that hold textual or formatted values ("2 pools", "3h 10m").
-  const vClass = (val) => (val === "n/a" ? "v" : "v v--sm");
 
   // Standings/results target for this competition's format (see helpers above).
   const resultsSection = overviewResultsSection(c.format, hasBracketRounds(effectiveBracket));
@@ -443,12 +620,15 @@ function AdminCompOverview({ c, tournament, pools, poolMatches, bracket, onSecti
           {seededTile()}
           <div className="stat-box">
             <div className="v">{numCourts}</div>
-            <div className="l">{numCourts === 1 ? "Court" : "Courts"}</div>
+            <div className="l">Shiaijo</div>
           </div>
-          <div className="stat-box">
-            <div className={vClass(estDuration)}>{estDuration}</div>
-            <div className="l">Est. duration{estimateLoading && !rosterUnreadable ? " …" : ""}</div>
-          </div>
+          <EstimateDurationTile
+            c={c}
+            estimate={estimate}
+            estimateLoading={estimateLoading}
+            rosterUnreadable={rosterUnreadable}
+            estimateCheckIn={estimateCheckIn}
+          />
         </div>
       );
     }
@@ -478,10 +658,13 @@ function AdminCompOverview({ c, tournament, pools, poolMatches, bracket, onSecti
             <div className="v v--sm">{drawSizeVal}</div>
             <div className="l">{drawSizeLabel}</div>
           </div>
-          <div className="stat-box">
-            <div className={vClass(estDuration)}>{estDuration}</div>
-            <div className="l">Est. duration{estimateLoading && !rosterUnreadable ? " …" : ""}</div>
-          </div>
+          <EstimateDurationTile
+            c={c}
+            estimate={estimate}
+            estimateLoading={estimateLoading}
+            rosterUnreadable={rosterUnreadable}
+            estimateCheckIn={estimateCheckIn}
+          />
         </div>
       );
     }
@@ -500,16 +683,18 @@ function AdminCompOverview({ c, tournament, pools, poolMatches, bracket, onSecti
             </div>
             <div className="l">Now</div>
           </div>
-          <div className="stat-box">
-            <div className={vClass(estDuration)}>{estDuration}</div>
-            <div className="l">Est. duration{estimateLoading && !rosterUnreadable ? " …" : ""}</div>
-          </div>
+          <EstimateDurationTile
+            c={c}
+            estimate={estimate}
+            estimateLoading={estimateLoading}
+            rosterUnreadable={rosterUnreadable}
+            estimateCheckIn={estimateCheckIn}
+          />
         </div>
       );
     }
 
     // completed
-    const totalDuration = estDuration;
     return (
       <div className="stats-strip">
         {participantsTile()}
@@ -527,10 +712,13 @@ function AdminCompOverview({ c, tournament, pools, poolMatches, bracket, onSecti
             <div className="l">Standings</div>
           </button>
         </div>
-        <div className="stat-box">
-          <div className={vClass(totalDuration)}>{totalDuration}</div>
-          <div className="l">Est. duration</div>
-        </div>
+        <EstimateDurationTile
+          c={c}
+          estimate={estimate}
+          estimateLoading={estimateLoading}
+          rosterUnreadable={rosterUnreadable}
+          estimateCheckIn={estimateCheckIn}
+        />
       </div>
     );
   }
@@ -732,14 +920,12 @@ function AdminCompOverview({ c, tournament, pools, poolMatches, bracket, onSecti
     }
     if (!estimate && !estimateLoading && !estimateErr) return null;
     const total = formatCompMinutes(estimate && estimate.totalDurationMinutes);
-    const perCourt = estimate ? (estimate.perCourtMinutes || []).map(m => formatCompMinutes(m) || "0m") : [];
-    const ceremony = formatCompMinutes(estimate && estimate.ceremonyMinutes);
-    // mp-gmcg: kachinuki has a variable bout count, so the server returns a
-    // best/average/worst range (it knows the competition's teamMatchType).
-    // The headline totalDurationMinutes is the AVERAGE; when the range
-    // collapses (fixed/individual) the single total renders as before.
-    // EstimateHeadline (admin_schedule_utils.jsx) owns that decision for
-    // both this footer and the Settings panel.
+    const perShiaijo = formatPerShiaijoRow(estimate, c.courts);
+    const pausesRow = formatPausesRow(tournament, c);
+    // The footer carries no total: the stats strip's Est. duration tile,
+    // drawn in every state beside this footer, already reads "about 1h 50m"
+    // (and kachinuki's best-to-worst range), so a second "Total:" here only
+    // repeated it in different words.
     return (
       <div className="schedule-estimate" data-testid="overview-estimate">
         <div className="schedule-estimate__title">
@@ -759,23 +945,14 @@ function AdminCompOverview({ c, tournament, pools, poolMatches, bracket, onSecti
           }
           return (
             <div className="schedule-estimate__body">
-              <EstimateHeadline estimate={estimate} total={total} format={formatCompMinutes} testId="overview-est-range" />
-              {perCourt.length > 1 && (
+              {perShiaijo && (
                 <div className="schedule-estimate__row">
-                  <strong>Per court:</strong>{" "}
-                  {perCourt.map((t, i) => `Court ${(c.courts && c.courts[i]) || String.fromCharCode(65 + i)}: ${t}`).join(" · ")}
+                  <strong>Per shiaijo:</strong> {perShiaijo}
                 </div>
               )}
-              {perCourt.length === 1 && (
-                <div className="schedule-estimate__row">
-                  <strong>Per court:</strong> {perCourt[0]}
-                </div>
-              )}
-              {ceremony && (
-                <div className="schedule-estimate__row">
-                  <strong>Ceremony blocks:</strong> {ceremony}
-                </div>
-              )}
+              <div className="schedule-estimate__row">
+                <strong>Pauses:</strong> {pausesRow}
+              </div>
             </div>
           );
         })()}
@@ -927,6 +1104,15 @@ if (typeof window !== "undefined") {
   window.competitionNextSteps = competitionNextSteps;
   window.overviewViewMode = overviewViewMode;
   window.overviewResultsSection = overviewResultsSection;
+  window.latestCourtFinish = latestCourtFinish;
+  window.formatPausesRow = formatPausesRow;
+  window.formatPerShiaijoRow = formatPerShiaijoRow;
+  window.EstimateDurationTile = EstimateDurationTile;
 }
 
-export { competitionNextSteps, overviewViewMode, overviewResultsSection, hasBracketRounds };
+export {
+  competitionNextSteps,
+  overviewViewMode,
+  overviewResultsSection,
+  hasBracketRounds,
+};

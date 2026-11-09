@@ -4999,6 +4999,7 @@ async function _directFetch(url, init) {
         throw e;
     }
 }
+
 // One fetch for the backup and restore endpoints: the password headers, and a
 // refusal turned into an Error carrying the server's `code`. A confirmPassword
 // of undefined sends no header.

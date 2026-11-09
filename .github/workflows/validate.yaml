@@ -15,6 +15,19 @@ jobs:
     runs-on: ubuntu-latest
     env:
       GO111MODULE: on
+      # The linter is pinned, not "latest": a floating pin means CI's linter
+      # (and its bundled gosec ruleset) can change overnight with zero commits
+      # in this repo. That is exactly what broke every open PR's gate on
+      # 2026-08-20 -- v2.13.1 was built the same day this stopped passing, and
+      # it newly flags rand.Shuffle (G404) that v2.12.2 (the Makefile's pin,
+      # used by `make go/lint` locally) did not. Keep this in lockstep with the
+      # `go install` version in the Makefile's local/deps target so a local
+      # green run predicts CI.
+      GOLANGCI_LINT_VERSION: v2.15.0
+      # The scanner the Anchore scan action runs: anchore/scan-action@v7's own
+      # default, named here so the cache key below follows it. Bump it with
+      # the action.
+      GRYPE_VERSION: v0.110.0
     steps:
       - name: Checkout Source
         uses: actions/checkout@v7
@@ -51,18 +64,50 @@ jobs:
       #  | |___| | | | | |_
       #  |_____|_|_| |_|\__|
       #
+      # golangci-lint is installed here, not by the action: the action
+      # downloads its binary from GitHub's release downloads on every run and
+      # never reuses a copy, so a GitHub outage failed this gate with nothing
+      # wrong in the code (HTTP 504 on four runs, 2026-11-08). The binary is
+      # cached by version. A run on main saves it and every pull request
+      # restores main's copy, so only a version bump (or a cache unused for 7
+      # days) downloads it, with retries and its published checksum.
+      - name: Restore golangci-lint
+        id: golangci-lint-cache
+        uses: actions/cache/restore@v6.1.0
+        with:
+          path: ~/.cache/ci-tools/golangci-lint-${{ env.GOLANGCI_LINT_VERSION }}
+          key: golangci-lint-${{ env.GOLANGCI_LINT_VERSION }}-${{ runner.os }}-${{ runner.arch }}
+
+      - name: Download golangci-lint
+        if: steps.golangci-lint-cache.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          v="${GOLANGCI_LINT_VERSION#v}"
+          asset="golangci-lint-${v}-linux-amd64.tar.gz"
+          base="https://github.com/golangci/golangci-lint/releases/download/${GOLANGCI_LINT_VERSION}"
+          tmp="$(mktemp -d)"
+          curl -fsSL --retry 5 --retry-all-errors --retry-delay 15 -o "$tmp/$asset" "$base/$asset"
+          curl -fsSL --retry 5 --retry-all-errors --retry-delay 15 -o "$tmp/checksums.txt" "$base/golangci-lint-${v}-checksums.txt"
+          (cd "$tmp" && grep " ${asset}\$" checksums.txt | sha256sum -c -)
+          tar -xzf "$tmp/$asset" -C "$tmp"
+          mkdir -p "$HOME/.cache/ci-tools/golangci-lint-${GOLANGCI_LINT_VERSION}"
+          mv "$tmp/golangci-lint-${v}-linux-amd64/golangci-lint" "$HOME/.cache/ci-tools/golangci-lint-${GOLANGCI_LINT_VERSION}/"
+
+      - name: Save golangci-lint
+        if: steps.golangci-lint-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6.1.0
+        with:
+          path: ~/.cache/ci-tools/golangci-lint-${{ env.GOLANGCI_LINT_VERSION }}
+          key: golangci-lint-${{ env.GOLANGCI_LINT_VERSION }}-${{ runner.os }}-${{ runner.arch }}
+
+      - name: Put golangci-lint on the PATH
+        run: echo "$HOME/.cache/ci-tools/golangci-lint-${GOLANGCI_LINT_VERSION}" >> "$GITHUB_PATH"
+
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v9
         with:
-          # Pinned, not "latest": a floating pin means CI's linter (and its
-          # bundled gosec ruleset) can change overnight with zero commits in
-          # this repo. That is exactly what broke every open PR's gate on
-          # 2026-08-20 -- v2.13.1 was built the same day this stopped
-          # passing, and it newly flags rand.Shuffle (G404) that v2.12.2
-          # (the Makefile's pin, used by `make go/lint` locally) did not.
-          # Keep this in lockstep with the `go install` version in
-          # Makefile's go/lint target so a local green run predicts CI.
-          version: v2.15.0
+          # Runs the golangci-lint the steps above put on the PATH.
+          install-mode: none
 
       #   ____             _
       #  |  _ \  ___   ___| | _____ _ __
@@ -72,11 +117,31 @@ jobs:
       #
       - name: Build the Docker image
         run: GH_REPOSITORY="${{ github.repository }}" make VERSION=latest docker/build
+      # The scan action looks for grype in the runner's tool cache before it
+      # downloads it (from GitHub, the same outage), so that folder is cached
+      # by version, saved by a run on main and restored by pull requests. It
+      # is saved even when the scan fails: a finding says nothing about the
+      # binary.
+      - name: Restore grype
+        id: grype-cache
+        uses: actions/cache/restore@v6.1.0
+        with:
+          path: ${{ runner.tool_cache }}/grype
+          key: grype-${{ env.GRYPE_VERSION }}-${{ runner.os }}-${{ runner.arch }}
+
       - name: Run the Anchore scan action
         uses: anchore/scan-action@v7
         with:
           image: "ghcr.io/${{ github.repository }}:latest"
           output-format: json
+          grype-version: ${{ env.GRYPE_VERSION }}
+
+      - name: Save grype
+        if: always() && steps.grype-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6.1.0
+        with:
+          path: ${{ runner.tool_cache }}/grype
+          key: grype-${{ env.GRYPE_VERSION }}-${{ runner.os }}-${{ runner.arch }}
 
   #   _____         _
   #  |_   _|__  ___| |_

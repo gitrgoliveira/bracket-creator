@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { API } from '../api_client.jsx';
+import { NOT_SENT_NO_CONNECTION } from '../write_result.jsx';
 
 const ORGANISER_KEY = 'organiser-key';
 const SESSION_KEY = 'session-key';
@@ -39,6 +40,29 @@ describe('admin_backup_api', () => {
   });
   afterEach(() => {
     global.fetch = originalFetch;
+  });
+
+  // A backup read is not a write: it goes through plain fetch, so a lost
+  // connection keeps the browser's own error and never becomes the "not sent"
+  // sentence a write says (api_client.jsx _backupRequest).
+  describe('a backup read that cannot be sent', () => {
+    const READS = {
+      backupTournament: () => API.backupTournament(ORGANISER_KEY),
+      backupCompetition: () => API.backupCompetition('c1', ORGANISER_KEY),
+      listBackups: () => API.listBackups(ORGANISER_KEY),
+      downloadBackup: () => API.downloadBackup('b.zip', ORGANISER_KEY),
+    };
+    for (const [name, call] of Object.entries(READS)) {
+      it(`${name} rejects with the browser's own error`, async () => {
+        const raw = new TypeError('Failed to fetch');
+        global.fetch = vi.fn(() => Promise.reject(raw));
+        const err = await call().then(() => null, (e) => e);
+        expect(global.fetch).toHaveBeenCalledTimes(1);
+        expect(err).toBe(raw);
+        expect(err.noConnection).toBeUndefined();
+        expect(err.message).not.toBe(NOT_SENT_NO_CONNECTION);
+      });
+    }
   });
 
   describe('backupTournament', () => {

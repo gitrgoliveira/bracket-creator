@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { makeReactive } from './helpers/reactive_react.js';
 import { collectText } from './helpers/vdom.js';
+import { NOT_SENT_NO_CONNECTION } from '../write_result.jsx';
 
 const realReact = global.React;
 
@@ -181,6 +182,51 @@ describe('RegistrationForm', () => {
       await vi.waitFor(() => {
         const text = collectText(runtime.currentTree());
         expect(text).toContain('already registered');
+      });
+    });
+  });
+
+  describe('registration that cannot be sent', () => {
+    // Mounts the form, fills the two required fields and submits, with the
+    // POST answered by `post`; the metadata GET always succeeds.
+    async function submitWith(post) {
+      global.fetch = vi.fn((url, opts) => {
+        if (!opts || opts.method !== 'POST') {
+          return Promise.resolve({
+            status: 200,
+            ok: true,
+            json: () => Promise.resolve({ id: 'c1', name: 'Open', status: 'setup', withZekkenName: false }),
+          });
+        }
+        return post();
+      });
+      runtime.mount(RegistrationForm, { compId: 'c1' });
+      await vi.waitFor(() => {
+        expect(collectText(runtime.currentTree())).toContain('Full name');
+      });
+      const findInputByPlaceholder = (ph) => findInTree(runtime.currentTree(),
+        n => n.type === 'input' && n.props?.placeholder === ph);
+      findInputByPlaceholder('e.g. Alice Tanaka').props.onChange({ target: { value: 'Alice' } });
+      findInputByPlaceholder('e.g. Gyokusen').props.onChange({ target: { value: 'Dojo' } });
+      const form = findInTree(runtime.currentTree(), n => n.type === 'form');
+      await form.props.onSubmit({ preventDefault: vi.fn() });
+    }
+
+    it('says the one not-sent sentence when the request never leaves the device', async () => {
+      await submitWith(() => Promise.reject(new TypeError('Failed to fetch')));
+      await vi.waitFor(() => {
+        const text = collectText(runtime.currentTree());
+        expect(text).toContain(NOT_SENT_NO_CONNECTION);
+        expect(text).not.toContain('Failed to fetch');
+      });
+    });
+
+    it('keeps the generic sentence for any other failure', async () => {
+      await submitWith(() => Promise.reject(new Error('boom')));
+      await vi.waitFor(() => {
+        const text = collectText(runtime.currentTree());
+        expect(text).toContain('Registration failed. Please try again.');
+        expect(text).not.toContain(NOT_SENT_NO_CONNECTION);
       });
     });
   });

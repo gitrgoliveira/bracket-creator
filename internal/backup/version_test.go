@@ -7,8 +7,10 @@ import (
 
 // A backup is restored on the version that made it or a later one, never on
 // an earlier one (operator ruling 2026-11-08). Versions with no order (a
-// branch name, a short sha, "dev", a -dirty build) restore each other only
-// when they match, and no backup before OldestRestorableVersion restores.
+// branch name, a short sha, "dev", a -dirty build's backup) restore each other
+// only when they match, a running -dirty build orders as the version it
+// describes (operator ruling 2026-11-09), and no backup before
+// OldestRestorableVersion restores.
 func TestRestorableBy(t *testing.T) {
 	cases := []struct {
 		name, made, running string
@@ -27,9 +29,15 @@ func TestRestorableBy(t *testing.T) {
 		{"earlier build on a later one", "v2.4.0-3-gdef5678", "v2.4.0-12-gabc1234", true},
 		{"later build on an earlier one", "v2.4.0-12-gabc1234", "v2.4.0-3-gdef5678", false},
 		{"build on the next release", "v2.4.0-12-gabc1234", "v2.5.0", true},
-		{"dirty build has no order", "v2.4.0-dirty", "v2.4.0", false},
-		{"release on a dirty build", "v2.4.0", "v2.4.0-12-gabc1234-dirty", false},
+		{"dirty build's backup has no order", "v2.4.0-dirty", "v2.4.0", false},
+		{"dirty build's backup on a later release", "v2.4.0-dirty", "v2.5.0", false},
+		{"two dirty builds of one release", "v2.4.0-dirty", "v2.4.0-3-gdef5678-dirty", false},
 		{"same dirty build", "v2.4.0-12-gabc1234-dirty", "v2.4.0-12-gabc1234-dirty", true},
+		{"release on a dirty build of it", "v2.4.0", "v2.4.0-dirty", true},
+		{"release on a dirty build after it", "v2.4.0", "v2.4.0-12-gabc1234-dirty", true},
+		{"same build on its dirty copy", "v2.4.0-12-gabc1234", "v2.4.0-12-gabc1234-dirty", true},
+		{"later release on a dirty build", "v2.4.1", "v2.4.0-dirty", false},
+		{"before the oldest on a dirty build", "v2.2.9", "v2.4.0-dirty", false},
 		{"the oldest restorable version", "v2.3.0", "v2.4.0", true},
 		{"a build after the oldest", "v2.3.0-5-g1234567", "v2.4.0", true},
 		{"before the oldest", "v2.2.9", "v2.4.0", false},
@@ -66,6 +74,11 @@ func TestCheckAppVersion(t *testing.T) {
 			detail: "This backup was made with version main and this app is version v2.4.0. These two versions cannot be compared. A backup can be restored only with the version that made it or a later one, so nothing was changed."},
 		{name: "before the oldest", made: "v2.2.0", running: "v2.4.0",
 			detail: "This backup was made with version v2.2.0 and this app is version v2.4.0. This app can bring a backup up to date only from version v2.3.0 on, so nothing was changed."},
+		{name: "release on a dirty build of it", made: "v2.4.0", running: "v2.4.0-dirty", ok: true},
+		{name: "later release on a dirty build", made: "v2.5.0", running: "v2.4.0-dirty",
+			detail: "This backup was made with version v2.5.0 and this app is version v2.4.0-dirty. A backup can be restored only with the version that made it or a later one, so nothing was changed."},
+		{name: "a dirty build's backup", made: "v2.4.0-dirty", running: "v2.5.0",
+			detail: "This backup was made with version v2.4.0-dirty and this app is version v2.5.0. These two versions cannot be compared. A backup can be restored only with the version that made it or a later one, so nothing was changed."},
 		{name: "no version recorded", made: "", running: "v2.4.0",
 			detail: "This backup does not say which version made it and this app is version v2.4.0. A backup can be restored only with the version that made it or a later one, so nothing was changed."},
 	}

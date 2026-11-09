@@ -81,7 +81,8 @@ func (e *Error) Error() string {
 // (v2.4.0-12-gabc1234: 12 commits after v2.4.0). A branch name, a short sha
 // or "dev" (get_build_info.sh) does not match, and nor does a -dirty build
 // (git describe --dirty: an image built with uncommitted changes), whose code
-// no version string describes.
+// no version string describes; runningOrder alone reads one as the version
+// it describes.
 var releaseVersion = regexp.MustCompile(`^v?(\d+)\.(\d+)\.(\d+)(?:-(\d+)-g[0-9a-f]+)?$`)
 
 // OldestRestorableVersion is the earliest version whose backups this app can
@@ -133,13 +134,23 @@ func versionOrder(v string) (order [4]int, ok bool) {
 	return order, true
 }
 
+// runningOrder is the release order of the running version: versionOrder,
+// except that a -dirty build counts as the version it describes, so an image
+// built with uncommitted changes restores what that version and earlier ones
+// made (operator ruling 2026-11-09). Only the running side is read this way:
+// a backup a -dirty build made restores only on that same build.
+func runningOrder(running string) (order [4]int, ok bool) {
+	return versionOrder(strings.TrimSuffix(strings.TrimSpace(running), "-dirty"))
+}
+
 // RestorableBy reports whether the app version running can restore an
 // archive whose manifest names made: the version that made it or a later one
 // (operator ruling 2026-11-08). A later version brings an older backup up to
 // date with the upgrades the store already runs on what it loads; an earlier
 // version never reads what a later one wrote. Two versions with no order (a
-// branch name, a short sha, "dev", a -dirty build) restore each other only
-// when they are the same, and a version before OldestRestorableVersion is
+// branch name, a short sha, "dev", a -dirty build's backup) restore each other
+// only when they are the same, a running -dirty build orders as the version it
+// describes (runningOrder), and a version before OldestRestorableVersion is
 // refused, since no upgrade left reads what it wrote. The one comparison,
 // used by CheckAppVersion and by the scheduled job's choice of the newest
 // daily copy, so the two never disagree.
@@ -149,7 +160,7 @@ func RestorableBy(made, running string) bool {
 		return true
 	}
 	m, okMade := versionOrder(made)
-	r, okRunning := versionOrder(running)
+	r, okRunning := runningOrder(running)
 	if !okMade || !okRunning || beforeOldest(made) {
 		return false
 	}
@@ -181,7 +192,7 @@ func CheckAppVersion(m Manifest, running string) *Error {
 	}
 	why := ""
 	_, okMade := versionOrder(made)
-	_, okRunning := versionOrder(running)
+	_, okRunning := runningOrder(running)
 	if made != "" && (!okMade || !okRunning) {
 		why = " These two versions cannot be compared."
 	}

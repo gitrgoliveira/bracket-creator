@@ -144,6 +144,9 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
   const setView = propSetView || setInternalView;
   // Hooks must be declared unconditionally before any conditional returns.
   const [adminCompData, setAdminCompData] = useState(null);
+  // Bumped by the Edit Tournament page's Reload, which remounts it from the
+  // current settings after a save was refused as stale (tournament_changed).
+  const [settingsReloads, setSettingsReloads] = useState(0);
   const [adminLoading, setAdminLoading] = useState(false);
   // mp-djc: dashboard "📣 Announce" button opens the broadcast composer
   // in a modal. State lives here (alongside other AdminApp UI state); the
@@ -614,7 +617,14 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
       return true;
     } catch (e) {
       if (!mountedRef.current) return false;
-      showToast(e.message, "error");
+      // The settings changed on another device: the app takes the current copy
+      // (the Edit form keeps what was typed until its Reload remounts it from
+      // this copy, so a stale save stays refused until then).
+      if (e && e.code === "tournament_changed" && e.tournament) {
+        onUpdateRef.current(mergeTournamentPatch(tRef.current, e.tournament, password, authConfig === null || authConfig.mode === "locked"));
+      } else {
+        showToast(e.message, "error");
+      }
       throw e;
     }
   };
@@ -873,8 +883,10 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
 
   if (view.kind === "editTournament") {
     return <AdminEditTournament
+      key={settingsReloads}
       tournament={t}
       onCancel={() => setView({ kind: "dashboard" })}
+      onReload={() => setSettingsReloads((n) => n + 1)}
       onSave={async (patch) => { const ok = await updateTournament(patch); if (ok && mountedRef.current) setView({ kind: "dashboard" }); return ok; }}
       onLogout={onLogout}
       onViewerMode={onViewerMode}

@@ -189,7 +189,7 @@ import { PauseList, pauseStopsMatches } from './pause_list.jsx';
 import { MAX_EXPECTED_PARTICIPANTS } from './competition_put_body.jsx';
 import { useDraftEstimate, DraftEstimatePanel } from './draft_estimate.jsx';
 
-function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerMode, authConfig, password, showToast }) {
+function AdminEditTournament({ tournament, onCancel, onSave, onReload, onLogout, onViewerMode, authConfig, password, showToast }) {
   // In locked mode the on-disk Password is irrelevant: auth comes
   // from TOURNAMENT_PASSWORD_HASH and the backend rejects PUTs that
   // try to set a non-empty password. Surfacing the field anyway would
@@ -240,6 +240,10 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
   // message renders inline beside its cause instead of only at the page top.
   // null = no field-scoped error (general errors still use the top banner).
   const [errorField, setErrorField] = useState(null);
+  // The settings changed on another device after this form was opened
+  // (tournament_changed): nothing was written. Save waits for Reload, which
+  // refills the form from the current settings; edits do not clear it.
+  const [conflict, setConflict] = useState(false);
   // mp-scf: theme colors (updated live by BrandingManager via onThemeChange).
   // Initialise through normalizeTheme so the very first render holds the same
   // shape BrandingManager emits: when the server returns theme:{} for a
@@ -331,7 +335,7 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
   };
 
   const handleSave = async () => {
-    if (savingRef.current) return; // synchronous re-entry guard (see savingRef)
+    if (savingRef.current || conflict) return; // synchronous re-entry guard (see savingRef)
     // Trim early and send the trimmed value. The empty-name check below
     // already used `name.trim()`, but the onSave payload was passing the
     // raw `name`: so " Tournament " on the wire would round-trip to the
@@ -373,6 +377,10 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
         theme: { ...theme, logoOnLobby: !!logoOnLobby },
       });
     } catch (e) {
+      if (e && e.code === "tournament_changed") {
+        if (mountedRef.current) setConflict(true);
+        return;
+      }
       // Server rejection (orphaned shiaijo, immutable mode, duplicate court
       // label, ...). Report it in the form's own banner, not only in the
       // toast that AdminApp already fired and that expires in 8s. errorField
@@ -444,6 +452,14 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
         {/* mp-sspn: top banner is only for general (non-field) errors; field- */}
         {/* scoped validation renders inline beside its input instead. */}
         {error && !errorField && <div className="auth__error" role="alert" style={{ marginBottom: 16 }}>{error}</div>}
+        {conflict && (
+          <div className="alert alert--error settings-conflict-alert" role="alert" data-testid="tournament-conflict-alert">
+            <div className="settings-conflict-alert__text">
+              Not saved: the tournament details changed somewhere else after you opened this page (another screen or device). Reload to see the current details, then make your change again.
+            </div>
+            <button type="button" className="btn btn--primary" onClick={onReload}>Reload</button>
+          </div>
+        )}
         <div className="edit-stack">
         <div className="card card--pad-lg">
           <div className="card__head"><div className="card__title">Tournament details</div></div>
@@ -715,7 +731,7 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
           <div className="edit-actions__buttons">
             {dirty && <span className="edit-actions__dirty" aria-live="polite">Unsaved changes</span>}
             <button type="button" className="btn" onClick={handleCancel} disabled={saving}>Cancel</button>
-            <button type="button" className="btn btn--primary" onClick={handleSave} disabled={saving}>{saving ? "Saving…" : "Save changes"}</button>
+            <button type="button" className="btn btn--primary" onClick={handleSave} disabled={saving || conflict}>{saving ? "Saving…" : "Save changes"}</button>
           </div>
         </div>
         </div>

@@ -1001,6 +1001,10 @@ function FightingSpiritAwardsEditor({ c, password, showToast }) {
   const withKey = (a) => ({ ...a, _key: keyCounterRef.current++ });
   const [awards, setAwards] = useState(() => (c.fightingSpiritAwards || []).map(withKey));
   const [saving, setSaving] = useState(false);
+  // The list changed on another device after this one was opened
+  // (awards_changed): nothing was written, and `conflict` holds the list and
+  // version now stored. Save waits for Reload, which takes them.
+  const [conflict, setConflict] = useState(null);
   // `dirty` guards the prop-sync effect: the parent refetches the competition
   // on unrelated SSE events (match updates, status changes), which would
   // otherwise clobber the operator's typed-but-unsaved edits. We only re-sync
@@ -1034,11 +1038,21 @@ function FightingSpiritAwardsEditor({ c, password, showToast }) {
   useEffect(() => {
     const switched = lastCompIdRef.current !== c.id;
     lastCompIdRef.current = c.id;
-    if (switched || !dirty) {
+    // The served list is taken only when it is the version held: a reload (or
+    // a save) answers a newer list than the props may carry yet, and the props
+    // catching up must not put the older one back under the newer version.
+    if (switched || (!dirty && c.awardsVersion === awardsVersionRef.current)) {
       setAwards((c.fightingSpiritAwards || []).map(withKey));
       if (switched) setDirty(false);
     }
   }, [c.id, c.fightingSpiritAwards, dirty]);
+
+  const reloadConflict = () => {
+    awardsVersionRef.current = conflict.version;
+    setAwards(conflict.awards.map(withKey));
+    setConflict(null);
+    setDirty(false);
+  };
 
   const addRow = () => { setDirty(true); setAwards(prev => [...prev, withKey({ title: "Fighting Spirit", recipientName: "", recipientDojo: "" })]); };
   const removeRow = (idx) => { setDirty(true); setAwards(prev => prev.filter((_, i) => i !== idx)); };
@@ -1055,7 +1069,9 @@ function FightingSpiritAwardsEditor({ c, password, showToast }) {
       // (the save triggers an SSE refetch) re-syncs to the saved state.
       if (mountedRef.current) { setDirty(false); showToast("Fighting Spirit awards saved.", "success"); }
     } catch (e) {
-      if (mountedRef.current) showToast(e.message || "Failed to save awards", "error");
+      if (!mountedRef.current) return;
+      if (e && e.code === "awards_changed") setConflict({ version: e.awardsVersion, awards: e.fightingSpiritAwards });
+      else showToast(e.message || "Failed to save awards", "error");
     } finally {
       if (mountedRef.current) setSaving(false);
     }
@@ -1082,6 +1098,14 @@ function FightingSpiritAwardsEditor({ c, password, showToast }) {
       <div className="card" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
         <div className="card__title">🔥 Fighting Spirit Awards<span style={{ fontWeight: 400, fontSize: 12, color: "var(--ink-3)" }}>(optional)</span></div>
         <div className="card__sub" style={{ marginTop: -4 }}>Record individual honourees independent of the placement podium. Shown to viewers on the Awards tab.</div>
+      {conflict && (
+        <div className="alert alert--error settings-conflict-alert" role="alert" data-testid="fs-award-conflict-alert">
+          <div className="settings-conflict-alert__text">
+            Not saved: the awards changed somewhere else after you opened this list (another screen or device). Reload to see the current awards, then make your change again.
+          </div>
+          <button type="button" className="btn btn--primary" onClick={reloadConflict} data-testid="fs-award-reload">Reload</button>
+        </div>
+      )}
       {awards.length === 0 && (
         <div style={{ fontSize: 12, color: "var(--ink-3)", fontStyle: "italic" }}>No awards yet.</div>
       )}
@@ -1121,7 +1145,7 @@ function FightingSpiritAwardsEditor({ c, password, showToast }) {
       ))}
       <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
         <button type="button" className="btn btn--sm btn--ghost" onClick={addRow} data-testid="fs-award-add">+ Add award</button>
-        <button type="button" className="btn btn--sm btn--primary" onClick={save} disabled={saving} data-testid="fs-award-save">
+        <button type="button" className="btn btn--sm btn--primary" onClick={save} disabled={saving || !!conflict} data-testid="fs-award-save">
           {saving && <span className="spinner" />}
           {saving ? "Saving…" : "Save awards"}
         </button>

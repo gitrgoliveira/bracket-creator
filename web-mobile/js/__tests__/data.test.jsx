@@ -159,6 +159,21 @@ describe('parseParticipantLines', () => {
     expect(p.dojo).toBe('Dojo');
   });
 
+  it('reads a stamped "checked_in@<ms>" marker off the row, keeping source and dan grade', () => {
+    const [p] = parseParticipantLines(['Alice, Kobe, 3-dan, manual, checked_in@1700000000000'], false);
+    expect(p.checkInIgnored).toBe(true);
+    expect(p.source).toBe('manual');
+    expect(p.danGrade).toBe('3-dan');
+    expect(p.dojo).toBe('Kobe');
+  });
+
+  it('reads a "not_checked_in@<ms>" marker off the row without reporting an ignored check-in', () => {
+    const [p] = parseParticipantLines(['Alice, Kobe, registered, not_checked_in@1700000000000'], false);
+    expect(p.checkInIgnored).toBe(false);
+    expect(p.source).toBe('registered');
+    expect(p.danGrade).toBe('');
+  });
+
   it('does NOT read "checked_in" when only 2 parts (below threshold)', () => {
     // "Name, checked_in" has only 2 parts; must not be treated as the marker.
     const [p] = parseParticipantLines(['Name, checked_in'], false);

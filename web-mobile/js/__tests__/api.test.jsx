@@ -2025,6 +2025,32 @@ describe('API Utils', () => {
         expect(caught.competition).toEqual(conflictComp);
       });
 
+      it('updateTournament rejects with e.code and the current settings on 409 tournament_changed', async () => {
+        const current = { name: 'Fresh', tournamentVersion: 'v-curr' };
+        global.fetch = vi.fn().mockResolvedValue({
+          ok: false,
+          status: 409,
+          json: async () => ({ code: 'tournament_changed', error: 'The tournament settings changed, reload them.', tournamentVersion: 'v-curr', tournament: current }),
+        });
+        const caught = await API.updateTournament({ name: 'Mine' }, 'pw').catch((e) => e);
+        expect(caught.message).toBe('The tournament settings changed, reload them.');
+        expect(caught.code).toBe('tournament_changed');
+        expect(caught.tournament).toEqual(current);
+      });
+
+      it('updateCompetitionAwards rejects with e.code, the current list and its version on 409 awards_changed', async () => {
+        const stored = [{ title: 'Fighting Spirit', recipientName: 'Suzuki' }];
+        global.fetch = vi.fn().mockResolvedValue({
+          ok: false,
+          status: 409,
+          json: async () => ({ code: 'awards_changed', error: 'The awards changed, reload them.', awardsVersion: 'a-curr', fightingSpiritAwards: stored }),
+        });
+        const caught = await API.updateCompetitionAwards('c1', [], 'pw', 'a-old').catch((e) => e);
+        expect(caught.code).toBe('awards_changed');
+        expect(caught.awardsVersion).toBe('a-curr');
+        expect(caught.fightingSpiritAwards).toEqual(stored);
+      });
+
       it.each([
         ['undo_stale', 'Undo is stale, please refresh.'],
         ['retime_retry', 'Retime conflict, retry.'],

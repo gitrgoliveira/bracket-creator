@@ -67,6 +67,21 @@ describe('Edit Tournament save version', () => {
     expect(onSave).toHaveBeenCalledTimes(1);
     expect(onSave.mock.calls[0][0].tournamentVersion).toBe('v1');
   });
+
+  it('holds Save and offers Reload after the save is refused as stale', async () => {
+    const stale = Object.assign(new Error('The tournament settings changed, reload them.'), { code: 'tournament_changed' });
+    const onSave = vi.fn().mockRejectedValue(stale);
+    const onReload = vi.fn();
+    const props = { onSave, onReload, onCancel: noop, onLogout: noop, onViewerMode: noop, authConfig: { mode: 'file' }, password: 'pw', showToast: noop };
+    await act(async () => { render(<AdminEditTournament tournament={baseTournament()} {...props} />); });
+
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Save changes' })); });
+
+    expect(screen.getByTestId('tournament-conflict-alert')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Save changes' }).disabled).toBe(true);
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Reload' })); });
+    expect(onReload).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('Fighting Spirit awards save version', () => {
@@ -107,6 +122,33 @@ describe('Fighting Spirit awards save version', () => {
     await act(async () => { fireEvent.click(screen.getByTestId('fs-award-save')); });
 
     const [, sent, , version] = window.API.updateCompetitionAwards.mock.calls[0];
+    expect(sent[0].recipientName).toBe('Suzuki');
+    expect(version).toBe('a2');
+  });
+
+  it('holds Save and reloads the stored list and version after the save is refused as stale', async () => {
+    const stale = Object.assign(new Error('The awards changed, reload them.'), {
+      code: 'awards_changed',
+      awardsVersion: 'a2',
+      fightingSpiritAwards: [{ title: 'Fighting Spirit', recipientName: 'Suzuki', recipientDojo: '' }],
+    });
+    window.API.updateCompetitionAwards.mockRejectedValueOnce(stale).mockResolvedValue({ awardsVersion: 'a3' });
+    await act(async () => { render(editor(comp())); });
+    await act(async () => { fireEvent.change(screen.getByTestId('fs-award-name-0'), { target: { value: 'Tanaka' } }); });
+    await act(async () => { fireEvent.click(screen.getByTestId('fs-award-save')); });
+
+    expect(screen.getByTestId('fs-award-conflict-alert')).toBeTruthy();
+    expect(screen.getByTestId('fs-award-save').disabled).toBe(true);
+    expect(screen.getByTestId('fs-award-name-0').value).toBe('Tanaka');
+
+    await act(async () => { fireEvent.click(screen.getByTestId('fs-award-reload')); });
+    expect(screen.queryByTestId('fs-award-conflict-alert')).toBeNull();
+    expect(screen.getByTestId('fs-award-name-0').value).toBe('Suzuki');
+
+    await act(async () => { fireEvent.click(screen.getByTestId('fs-award-add')); });
+    await act(async () => { fireEvent.click(screen.getByTestId('fs-award-save')); });
+    expect(window.API.updateCompetitionAwards).toHaveBeenCalledTimes(2);
+    const [, sent, , version] = window.API.updateCompetitionAwards.mock.calls[1];
     expect(sent[0].recipientName).toBe('Suzuki');
     expect(version).toBe('a2');
   });

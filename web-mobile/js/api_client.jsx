@@ -5217,7 +5217,14 @@ const API = {
         });
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
-            throw new Error(err.error || "Failed to update tournament");
+            const e = new Error(err.error || "Failed to update tournament");
+            // 409 tournament_changed: nothing was written; the answer carries
+            // the settings as they stand now, for the open form to reload.
+            if (res.status === 409 && err.code === 'tournament_changed') {
+                e.code = 'tournament_changed';
+                e.tournament = err.tournament || null;
+            }
+            throw e;
         }
         return res.json();
     },
@@ -6105,7 +6112,15 @@ const API = {
         });
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
-            throw new Error(err.error || "Failed to update competition awards");
+            const e = new Error(err.error || "Failed to update competition awards");
+            // 409 awards_changed: nothing was written; the answer carries the
+            // list as it stands now and its version, for the open panel to reload.
+            if (res.status === 409 && err.code === 'awards_changed') {
+                e.code = 'awards_changed';
+                e.awardsVersion = err.awardsVersion || '';
+                e.fightingSpiritAwards = err.fightingSpiritAwards || [];
+            }
+            throw e;
         }
         return res.json();
     },

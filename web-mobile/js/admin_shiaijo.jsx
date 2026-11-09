@@ -1713,7 +1713,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                 // A court that changed is judged again from the top.
                 const latest = latestRef.current;
                 const fresh = latest.allMatches.find((x) => matchKey(x) === matchKey(m));
-                const freshCur = latest.liveHere || null;
+                const freshCur = latest.liveHere;
                 if (!fresh || fresh.status !== "scheduled" || !freshCur || matchKey(freshCur) !== matchKey(cur)) {
                     if (pick && pickingRef.current === pick) pickingRef.current = null;
                     syncStartingKey();

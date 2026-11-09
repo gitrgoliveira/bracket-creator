@@ -1,11 +1,5 @@
 package state
 
-import (
-	"crypto/sha256"
-	"encoding/hex"
-	"encoding/json"
-)
-
 // configVersionPayload defines the allowlist of fields hashed to compute
 // ConfigVersion. This list is the settings merge's field set copied from the
 // request body onto current in PUT /competitions/:id (the comp.Players == nil
@@ -80,10 +74,5 @@ func ConfigVersion(c *Competition) string {
 		ExpectedParticipants:         c.ExpectedParticipants,
 		CheckInEnabled:               c.CheckInEnabled,
 	}
-	data, err := json.Marshal(p)
-	if err != nil {
-		return ""
-	}
-	h := sha256.Sum256(data)
-	return hex.EncodeToString(h[:])[:16]
+	return versionHash(p)
 }

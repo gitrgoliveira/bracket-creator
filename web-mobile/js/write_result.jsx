@@ -666,7 +666,7 @@ export function noConnectionError(sentence, cause) {
 // What a failure says on screen: a sentence from noConnectionError as it is,
 // any other failure after the caller's own prefix ("PDF export failed: ").
 export function shownMessage(err, prefix) {
-    return err.noConnection ? err.message : prefix + (err?.message || err);
+    return err?.noConnection ? err.message : prefix + (err?.message || err);
 }
 
 // The public registration form's version of WRITE_NOT_CONFIRMED: a participant

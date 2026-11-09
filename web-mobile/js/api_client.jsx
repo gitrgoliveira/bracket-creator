@@ -6407,7 +6407,8 @@ const API = {
         const method = checkedIn ? 'PUT' : 'DELETE';
         const res = await fetch(`/api/competitions/${encodeURIComponent(compID)}/participants/${encodeURIComponent(pid)}/checkin`, {
             method,
-            headers: { 'X-Tournament-Password': password }
+            headers: { 'Content-Type': 'application/json', 'X-Tournament-Password': password },
+            body: JSON.stringify({ modifiedAt: _serverNowMs() })
         });
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
@@ -6427,7 +6428,7 @@ const API = {
         const res = await fetch(`/api/competitions/${encodeURIComponent(compID)}/participants/checkin-bulk`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'X-Tournament-Password': password },
-            body: JSON.stringify({ participantIds })
+            body: JSON.stringify({ participantIds, modifiedAt: _serverNowMs() })
         });
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));

@@ -1096,7 +1096,7 @@ function FightingSpiritAwardsEditor({ c, password, showToast }) {
   return (
     <div className="row">
       <div className="card" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-        <div className="card__title">🔥 Fighting Spirit Awards<span style={{ fontWeight: 400, fontSize: 12, color: "var(--ink-3)" }}>(optional)</span></div>
+        <div className="card__title">🔥 Fighting Spirit Awards <span style={{ fontWeight: 400, fontSize: 12, color: "var(--ink-3)" }}>(optional)</span></div>
         <div className="card__sub" style={{ marginTop: -4 }}>Record individual honourees independent of the placement podium. Shown to viewers on the Awards tab.</div>
       {conflict && (
         <div className="alert alert--error settings-conflict-alert" role="alert" data-testid="fs-award-conflict-alert">

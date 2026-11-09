@@ -22,7 +22,8 @@ type tournamentVersionTheme struct {
 // TournamentVersion: the fields PUT /api/tournament writes from its body.
 // The password is NEVER included (the version is served on the public viewer
 // GET), nor are the legacy ceremony and rules_url keys, which are never on
-// the wire.
+// the wire, nor the sponsors: the PUT carries the stored list over and only
+// the sponsor routes change it, like the logo.
 type tournamentVersionPayload struct {
 	Name                     string                 `json:"name"`
 	Date                     string                 `json:"date"`
@@ -42,7 +43,6 @@ type tournamentVersionPayload struct {
 	AwardsNote               string                 `json:"awardsNote"`
 	InfoNotes                string                 `json:"infoNotes"`
 	Contacts                 []TournamentContact    `json:"contacts"`
-	Sponsors                 []Sponsor              `json:"sponsors"`
 	Theme                    tournamentVersionTheme `json:"theme"`
 }
 
@@ -91,7 +91,6 @@ func TournamentVersion(t *Tournament) string {
 		AwardsNote:               cp.AwardsNote,
 		InfoNotes:                cp.InfoNotes,
 		Contacts:                 versionList(cp.Contacts),
-		Sponsors:                 versionList(cp.Sponsors),
 		Theme:                    theme,
 	}
 	return versionHash(p)

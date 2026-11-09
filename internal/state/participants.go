@@ -1089,12 +1089,17 @@ func parseCheckInMarker(field string) (checkedIn bool, at int64, ok bool) {
 // "not_checked_in@<ms>" is dropped. The fingerprint (backup_fingerprint.go)
 // asks it, so a check-in sent again that changes nothing, or one applied and
 // taken back, fingerprints like the roster before it. Only a marker exactly
-// as checkInMarker writes it, on a row of more than two columns (the reader's
-// guard), is rewritten, so a data column that merely reads like one in
-// another letter case is left alone.
+// as checkInMarker writes it, on a row of more than two data columns after a
+// UUID id column (the reader's guard), is rewritten, so a data column that
+// merely reads like one in another letter case, or a dojo on a three-column
+// row with an id, is left alone.
 func unstampCheckInMarkers(records [][]string) {
 	for i, r := range records {
-		if len(r) <= 2 {
+		dataColumns := len(r)
+		if dataColumns > 0 && uuidRE(strings.TrimSpace(r[0])) {
+			dataColumns--
+		}
+		if dataColumns <= 2 {
 			continue
 		}
 		last := r[len(r)-1]

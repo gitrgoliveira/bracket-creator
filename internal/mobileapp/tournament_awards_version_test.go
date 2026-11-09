@@ -135,6 +135,31 @@ func TestTournamentSaveFromAnOlderCopyIsRefusedWithTheCurrentOne(t *testing.T) {
 	assert.Equal(t, "From the desk", stored.Name, "the refused save wrote nothing")
 }
 
+// A sponsor added or removed while the Edit Tournament form is open does not
+// make the form's Save stale, and the save keeps the stored list rather than
+// writing the form's older copy over it.
+func TestTournamentSaveAfterASponsorChangeLandsAndKeepsTheSponsors(t *testing.T) {
+	r, store, _, _, _ := setupTestRouter(t)
+	require.NoError(t, store.SaveTournament(&state.Tournament{Name: "Taikai", Password: "pw", Courts: []string{"A"}}))
+	opened := tournamentVersionOf(t, r)
+
+	withSponsor, err := store.LoadTournament()
+	require.NoError(t, err)
+	withSponsor.Sponsors = []state.Sponsor{{Name: "Shop", File: "s.png"}}
+	require.NoError(t, store.SaveTournament(withSponsor))
+	assert.Equal(t, opened, tournamentVersionOf(t, r), "a sponsor change leaves the version alone")
+
+	body := tournamentSaveBody("Renamed", opened)
+	body["sponsors"] = []any{}
+	w := versionDo(t, r, "PUT", "/api/tournament", body)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	stored, err := store.LoadTournament()
+	require.NoError(t, err)
+	assert.Equal(t, "Renamed", stored.Name)
+	assert.Equal(t, []state.Sponsor{{Name: "Shop", File: "s.png"}}, stored.Sponsors)
+}
+
 // A password change alone does not move the version: it is never hashed, so
 // the version is safe to serve on the public viewer GET.
 func TestTournamentVersionIgnoresAPasswordChange(t *testing.T) {

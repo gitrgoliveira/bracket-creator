@@ -29,9 +29,8 @@ import (
 // "competitions" as a sibling key, exactly what a bare state.Tournament
 // response looked like except for that one added key.
 type tournamentResponse struct {
-	*state.Tournament
-	TournamentVersion string               `json:"tournamentVersion"`
-	Competitions      []*state.Competition `json:"competitions"`
+	versionedTournament
+	Competitions []*state.Competition `json:"competitions"`
 }
 
 // versionedTournament is a tournament on the wire with the version of its
@@ -74,7 +73,7 @@ func buildTournamentResponse(t *state.Tournament, store *state.Store) tournament
 		log.Printf("mobileapp: buildTournamentResponse: loadAllCompetitions: %v", err)
 		comps = []*state.Competition{}
 	}
-	return tournamentResponse{Tournament: t, TournamentVersion: state.TournamentVersion(t), Competitions: comps}
+	return tournamentResponse{versionedTournament: withTournamentVersion(t), Competitions: comps}
 }
 
 // validateDateDMY validates that `date` is either empty or a syntactically
@@ -905,6 +904,13 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 			}
 			if desired.Theme != nil && desired.Theme.IsEmpty() {
 				desired.Theme = nil
+			}
+			// Sponsors are managed via POST/DELETE /api/sponsors, like the
+			// logo, and are not part of the version: carry the stored list
+			// over so a sponsor change made from the open form is neither
+			// a stale save nor overwritten by the form's older copy.
+			if current != nil {
+				desired.Sponsors = current.Sponsors
 			}
 
 			// Preserve legacy ceremony block strings (json:"-"): the bound

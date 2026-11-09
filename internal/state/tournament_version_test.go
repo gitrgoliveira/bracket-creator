@@ -51,12 +51,20 @@ func TestTournamentVersionIgnoresTheLogoFile(t *testing.T) {
 	}
 }
 
+func TestTournamentVersionIgnoresTheSponsors(t *testing.T) {
+	a := versionTestTournament()
+	b := versionTestTournament()
+	b.Sponsors = []Sponsor{{Name: "Shop", File: "s.png"}}
+	if TournamentVersion(a) != TournamentVersion(b) {
+		t.Fatalf("a sponsor upload moved the version; the PUT never writes the sponsors")
+	}
+}
+
 func TestTournamentVersionTreatsAbsentAndEmptyListsAlike(t *testing.T) {
 	a := versionTestTournament()
 	b := versionTestTournament()
 	b.Pauses = []Pause{}
 	b.Contacts = []TournamentContact{}
-	b.Sponsors = []Sponsor{}
 	if TournamentVersion(a) != TournamentVersion(b) {
 		t.Fatalf("empty lists hashed differently from absent ones")
 	}
@@ -109,7 +117,6 @@ func TestTournamentVersionMovesWithEveryWrittenField(t *testing.T) {
 		"awardsNote":  func(x *Tournament) { x.AwardsNote = "Medals" },
 		"infoNotes":   func(x *Tournament) { x.InfoNotes = "Bring bogu" },
 		"contacts":    func(x *Tournament) { x.Contacts = []TournamentContact{{Label: "Email", Value: "a@b.c"}} },
-		"sponsors":    func(x *Tournament) { x.Sponsors = []Sponsor{{Name: "Shop", File: "s.png"}} },
 		"colour":      func(x *Tournament) { x.Theme.AccentSoftColor = "#445566" },
 		"windowTitle": func(x *Tournament) { x.Theme.WindowTitle = "Taikai" },
 		"logoOnLobby": func(x *Tournament) { x.Theme.LogoOnLobby = true },

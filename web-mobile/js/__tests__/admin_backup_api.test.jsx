@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { API } from '../api_client.jsx';
-import { NOT_SENT_NO_CONNECTION } from '../write_result.jsx';
+import { NOT_SENT_NO_CONNECTION, WRITE_NOT_CONFIRMED } from '../write_result.jsx';
 
 const ORGANISER_KEY = 'organiser-key';
 const SESSION_KEY = 'session-key';
@@ -61,6 +61,7 @@ describe('admin_backup_api', () => {
         expect(err).toBe(raw);
         expect(err.noConnection).toBeUndefined();
         expect(err.message).not.toBe(NOT_SENT_NO_CONNECTION);
+        expect(err.message).not.toBe(WRITE_NOT_CONFIRMED);
       });
     }
   });

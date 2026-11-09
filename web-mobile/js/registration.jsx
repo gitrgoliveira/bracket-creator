@@ -8,7 +8,7 @@
 // Both endpoints return 404 in officiated-mode tournaments.
 
 import { useUnsavedInput } from './app_version.jsx';
-import { isNoConnection, NOT_SENT_NO_CONNECTION } from './write_result.jsx';
+import { isNoConnection, WRITE_NOT_CONFIRMED } from './write_result.jsx';
 
 const { useState, useEffect, useRef } = React;
 
@@ -127,9 +127,9 @@ function RegistrationForm({ compId, onBack }) {
         setErr(data.error || "Registration failed. Please try again.");
       }
     } catch (err) {
-      // A fetch that never left the device says the one "not sent" sentence
-      // every direct write says (write_result.jsx).
-      if (mountedRef.current) setErr(isNoConnection(err) ? NOT_SENT_NO_CONNECTION : "Registration failed. Please try again.");
+      // A fetch that got no answer says the one sentence every direct write
+      // says (write_result.jsx); a retry that landed twice is a 409 duplicate.
+      if (mountedRef.current) setErr(isNoConnection(err) ? WRITE_NOT_CONFIRMED : "Registration failed. Please try again.");
     } finally {
       if (mountedRef.current) setSaving(false);
     }

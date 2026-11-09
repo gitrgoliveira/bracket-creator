@@ -1,14 +1,16 @@
 // A write that stays direct (not in the outbox) says ONE plain sentence when it
-// cannot be sent: write_result.jsx's NOT_SENT_NO_CONNECTION, thrown by
+// gets no answer: write_result.jsx's WRITE_NOT_CONFIRMED, thrown by
 // api_client.jsx's _directFetch for a fetch that rejects with a TypeError
-// (whatever the browser's own words for it). The test calls every direct write
+// (whatever the browser's own words for it). It never claims the request did
+// not land, because a TypeError also means only the answer was lost. The PDF
+// export, which changes nothing, says NOT_SENT_NO_CONNECTION instead. The test calls every direct write
 // in API with fetch rejecting, and pins the list against the source so a new
 // direct write cannot ship with the browser's raw "Failed to fetch".
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { API } from '../api_client.jsx';
-import { NOT_SENT_NO_CONNECTION, isNoConnection } from '../write_result.jsx';
+import { NOT_SENT_NO_CONNECTION, WRITE_NOT_CONFIRMED, isNoConnection } from '../write_result.jsx';
 
 const PW = 'pw';
 
@@ -49,20 +51,23 @@ describe('a direct write that cannot be sent says one sentence', () => {
   beforeEach(() => { originalFetch = global.fetch; });
   afterEach(() => { global.fetch = originalFetch; });
 
-  it('names the sentence the operator reads', () => {
+  it('names the sentences the operator reads', () => {
+    expect(WRITE_NOT_CONFIRMED).toBe('No answer: the connection dropped. The change may or may not have been saved. Check, then try again if it is missing.');
     expect(NOT_SENT_NO_CONNECTION).toBe('Not sent: no connection. Nothing was changed; try again once connected.');
   });
 
   for (const [name, call] of Object.entries(DIRECT_WRITES)) {
-    it(`${name} rejects with exactly that sentence when fetch rejects with a TypeError`, async () => {
+    it(`${name} rejects with the no-answer sentence and the original error as its cause when fetch rejects with a TypeError`, async () => {
       // Chrome's, Firefox's and Safari's own words for the same failure.
       for (const raw of ['Failed to fetch', 'NetworkError when attempting to fetch resource.', 'Load failed']) {
         global.fetch = vi.fn(() => Promise.reject(new TypeError(raw)));
         const err = await Promise.resolve().then(call).then(() => null, (e) => e);
         expect(global.fetch).toHaveBeenCalledTimes(1);
         expect(err, `${name} (${raw})`).toBeInstanceOf(Error);
-        expect(err.message).toBe(NOT_SENT_NO_CONNECTION);
+        expect(err.message).toBe(name === 'exportPDFs' ? NOT_SENT_NO_CONNECTION : WRITE_NOT_CONFIRMED);
         expect(err.noConnection).toBe(true);
+        expect(err.cause).toBeInstanceOf(TypeError);
+        expect(err.cause.message).toBe(raw);
         expect(isNoConnection(err)).toBe(true);
       }
     });

@@ -171,7 +171,11 @@ export function AdminExport({ c, t, password, showToast }) {
 
       const body = buildXlsxBody(cfg, cfg.name || c.name, players);
 
-      const resp = await fetch(`/create`, { method: "POST", body });
+      // Only a fetch that rejects is "no connection"; a TypeError from reading
+      // the body or building the download is not, and keeps its own message.
+      const resp = await fetch(`/create`, { method: "POST", body }).catch((e) => {
+        throw isNoConnection(e) ? Object.assign(new Error(NOT_SENT_NO_CONNECTION, { cause: e }), { noConnection: true }) : e;
+      });
       if (!resp.ok) {
         let msg = await resp.text();
         try { msg = JSON.parse(msg).error || msg; } catch (_) { /* keep raw text */ }
@@ -189,8 +193,8 @@ export function AdminExport({ c, t, password, showToast }) {
       // torn down (matches admin_shell.jsx); guard the timer against jsdom teardown.
       setTimeout(() => { if (typeof window !== "undefined" && window.URL) window.URL.revokeObjectURL(dlUrl); }, 100);
     } catch (err) {
-      // A request that never left says the one "not sent" sentence (write_result.jsx).
-      alert(isNoConnection(err) ? NOT_SENT_NO_CONNECTION : "Export failed: " + err.message);
+      // A request that got no answer says the one "not sent" sentence (write_result.jsx).
+      alert(err.noConnection ? err.message : "Export failed: " + err.message);
     }
   };
 

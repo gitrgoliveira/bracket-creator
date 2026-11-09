@@ -163,4 +163,21 @@ describe('ExportPdfModal: skipped-competitions warning', () => {
       global.fetch = originalFetch;
     }
   });
+
+  it('keeps the prefix on a TypeError that is not the lost request (the body failing mid-stream)', async () => {
+    const { API } = await import('../../api_client.jsx');
+    const originalFetch = global.fetch;
+    global.fetch = vi.fn(() => Promise.resolve({
+      ok: true,
+      headers: { get: () => null },
+      blob: () => Promise.reject(new TypeError('network error')),
+    }));
+    try {
+      const { container, showToast } = mount({ exportPDFs: (type, pw) => API.exportPDFs(type, pw) });
+      clickDownload(container);
+      await waitFor(() => expect(showToast).toHaveBeenCalledWith('PDF export failed: network error', 'error'));
+    } finally {
+      global.fetch = originalFetch;
+    }
+  });
 });

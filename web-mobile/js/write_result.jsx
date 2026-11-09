@@ -634,19 +634,23 @@ export function noAnswerSentence(notDone) {
     return `${notDone}: the server did not answer. Check the connection and try again.`;
 }
 
-// The one sentence for a write that stays direct and could not be SENT: the
-// request never left the device (a fetch rejected with a TypeError), so
-// nothing was changed. noAnswerSentence above is its counterpart for a request
-// that may have landed. api_client.jsx's _directFetch throws it for every
-// direct write; the callers that run their own fetch show it through
-// isNoConnection.
+// The one sentence for a direct write that got no answer. A fetch rejects with
+// a TypeError both when the request never left the device and when it landed
+// and only the answer was lost, and nothing tells the two apart, so the
+// sentence claims neither: the change may or may not be saved. api_client.jsx's
+// _directFetch throws it for every direct write; the callers that run their
+// own fetch show it through isNoConnection.
+export const WRITE_NOT_CONFIRMED = 'No answer: the connection dropped. The change may or may not have been saved. Check, then try again if it is missing.';
+
+// The same failure for a read-only request (an export), where nothing can have
+// been changed whichever way it went.
 export const NOT_SENT_NO_CONNECTION = 'Not sent: no connection. Nothing was changed; try again once connected.';
 
 // isNoConnection: the ONE test for "this failure is the connection, not the
 // server's answer": a fetch that rejected with a TypeError (whatever the
 // browser's own text for it), an error marked `timedOut` (a read given up on
 // at the deadline, _fetchJson), or the error _directFetch already turned into
-// NOT_SENT_NO_CONNECTION (`noConnection`).
+// its sentence (`noConnection`).
 export function isNoConnection(err) {
     return err instanceof TypeError || !!(err && (err.timedOut || err.noConnection));
 }

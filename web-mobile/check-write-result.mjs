@@ -222,14 +222,14 @@ export const FORBIDDEN = [
   },
   {
     // "A direct write could not be sent" has ONE classifier and ONE sentence
-    // (write_result.jsx: isNoConnection, NOT_SENT_NO_CONNECTION). A fetch that
+    // (write_result.jsx: isNoConnection, WRITE_NOT_CONFIRMED). A fetch that
     // never left the device rejects with a TypeError; api_client.jsx's
     // _directFetch is the one place that turns it into the sentence, and a
     // caller that runs its own fetch asks isNoConnection(err).
     name: 'no-connection',
     re: /\binstanceof\s+TypeError\b/,
     exempt: ['write_result.jsx', 'api_client.jsx'],
-    why: 'classifies a failed fetch by hand; ask isNoConnection(err) (write_result.jsx), and say NOT_SENT_NO_CONNECTION, instead',
+    why: 'classifies a failed fetch by hand; ask isNoConnection(err) (write_result.jsx), and say WRITE_NOT_CONFIRMED (NOT_SENT_NO_CONNECTION for a read-only export), instead',
   },
 ];
 

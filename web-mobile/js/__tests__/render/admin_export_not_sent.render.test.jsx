@@ -48,6 +48,16 @@ describe('AdminExport blank template download', () => {
     expect(alert).toHaveBeenCalledWith(NOT_SENT_NO_CONNECTION);
   });
 
+  it('keeps a TypeError that is not the lost request (the body failing after the answer) in "Export failed"', async () => {
+    const alert = vi.spyOn(window, 'alert').mockImplementation(() => {});
+    global.fetch = vi.fn(() => Promise.resolve({
+      ok: true,
+      blob: () => Promise.reject(new TypeError('network error')),
+    }));
+    await clickBlankTemplate();
+    expect(alert).toHaveBeenCalledWith('Export failed: network error');
+  });
+
   it('keeps an answered refusal in its own "Export failed" wording', async () => {
     const alert = vi.spyOn(window, 'alert').mockImplementation(() => {});
     global.fetch = vi.fn(() => Promise.resolve({

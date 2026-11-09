@@ -43,7 +43,7 @@ import {
     downstreamKnockoutPlayedQueueDrop, downstreamKnockoutRunningMessage, downstreamKnockoutRunningReopenMessage,
     downstreamKnockoutRunningQueueDrop, courtBusyMessage,
     FETCH_TIMEOUT_MS, REP_BOUT_NOT_ADDED, REP_BOUT_NOT_REMOVED, tapOutcomeQuiet,
-    isFinishedResultWrite, NOT_SENT_NO_CONNECTION,
+    isFinishedResultWrite, NOT_SENT_NO_CONNECTION, WRITE_NOT_CONFIRMED,
 } from './write_result.jsx';
 // bc-evts S2: the build this page runs against the server's, and the reload rule.
 import { noteServerBuild, setOutboxIdleProbe, setBeforeReload, noteOutboxDrained } from './app_version.jsx';
@@ -4987,15 +4987,17 @@ function _shownMember(member, fields) {
 // Plain fetch with no deadline of its own: a direct write can be the 64 MB
 // import or the draw, which a fixed deadline would cut off while the server
 // still works. A request that never left the device (fetch rejects with a
-// TypeError, whatever the browser's own words) is turned into the one
-// sentence NOT_SENT_NO_CONNECTION (write_result.jsx), marked `noConnection`,
-// so every caller shows it as it is. An AbortError and any other rejection
-// pass through untouched.
-async function _directFetch(url, init) {
+// TypeError, whatever the browser's own words) may or may not have reached
+// the server, so it is turned into the one sentence WRITE_NOT_CONFIRMED
+// (write_result.jsx), marked `noConnection`, so every caller shows it as it
+// is. A read-only POST passes NOT_SENT_NO_CONNECTION as `sentence`. The
+// original TypeError stays as the error's `cause`. An AbortError and any other
+// rejection pass through untouched.
+async function _directFetch(url, init, sentence = WRITE_NOT_CONFIRMED) {
     try {
         return await fetch(url, init);
     } catch (e) {
-        if (e instanceof TypeError) throw Object.assign(new Error(NOT_SENT_NO_CONNECTION), { noConnection: true });
+        if (e instanceof TypeError) throw Object.assign(new Error(sentence, { cause: e }), { noConnection: true });
         throw e;
     }
 }
@@ -5295,7 +5297,7 @@ const API = {
         const res = await _directFetch(`/api/print/${type}`, {
             method: 'POST',
             headers: password ? { 'X-Tournament-Password': password } : {}
-        });
+        }, NOT_SENT_NO_CONNECTION); // generating PDFs changes nothing
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
             const e = new Error(err.error || "Failed to generate PDFs");

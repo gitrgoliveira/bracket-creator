@@ -6,6 +6,7 @@
 import React from 'react';
 import { render, act, fireEvent } from '@testing-library/react';
 import { describe, it, expect, vi, afterEach } from 'vitest';
+import { API } from '../../api_client.jsx';
 import { AdminExport } from '../../admin_schedule_export.jsx';
 import { NOT_SENT_NO_CONNECTION } from '../../write_result.jsx';
 
@@ -32,6 +33,33 @@ async function clickBlankTemplate() {
   );
   await act(async () => { fireEvent.click(button); });
 }
+
+async function clickResults() {
+  const { container } = render(<AdminExport c={competition} t={{ id: 't1' }} password="pw" />);
+  const button = Array.from(container.querySelectorAll('button')).find(
+    (b) => /results/i.test(b.textContent)
+  );
+  await act(async () => { fireEvent.click(button); });
+}
+
+describe('AdminExport results download', () => {
+  const originalFetch = global.fetch;
+  const originalAPI = window.API;
+  afterEach(() => {
+    global.fetch = originalFetch;
+    window.API = originalAPI;
+    vi.restoreAllMocks();
+  });
+
+  it('shows the not-sent sentence, unwrapped, when the request never leaves the device', async () => {
+    window.API = API;
+    const alert = vi.spyOn(window, 'alert').mockImplementation(() => {});
+    global.fetch = vi.fn(() => Promise.reject(new TypeError('Failed to fetch')));
+    await clickResults();
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    expect(alert).toHaveBeenCalledWith(NOT_SENT_NO_CONNECTION);
+  });
+});
 
 describe('AdminExport blank template download', () => {
   const originalFetch = global.fetch;

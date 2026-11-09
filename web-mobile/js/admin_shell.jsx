@@ -5,7 +5,7 @@
 
 // The held-writes copy (bc-offl). write_result.jsx is an import-only leaf, so
 // this script-tagged module can import it without a double evaluation.
-import { heldWritesText } from './write_result.jsx';
+import { heldWritesText, shownMessage } from './write_result.jsx';
 import { HeldWritesPanel } from './held_writes_panel.jsx';
 import { publishHeight } from './published_height.jsx';
 import { tournamentHasCheckIn } from './competition_shape.jsx';
@@ -777,7 +777,7 @@ function ExportPdfModal({ tournament, password, comps, onClose, showToast }) {
       // (write_result.jsx), never inside "PDF export failed: "; any other
       // failure, a raw TypeError from reading the body included, keeps the prefix.
       setSkipped(err.skipped || []);
-      const shown = err.noConnection ? err.message : "PDF export failed: " + err.message;
+      const shown = shownMessage(err, "PDF export failed: ");
       if (showToast) showToast(shown, "error");
       else alert(shown);
     } finally {

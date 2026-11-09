@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { makeReactive } from './helpers/reactive_react.js';
 import { collectText } from './helpers/vdom.js';
-import { WRITE_NOT_CONFIRMED } from '../write_result.jsx';
+import { REGISTRATION_NOT_CONFIRMED } from '../write_result.jsx';
 
 const realReact = global.React;
 
@@ -212,11 +212,12 @@ describe('RegistrationForm', () => {
       await form.props.onSubmit({ preventDefault: vi.fn() });
     }
 
-    it('says the one no-answer sentence when the request gets no answer', async () => {
+    it('says the participant no-answer sentence when the request gets no answer', async () => {
       await submitWith(() => Promise.reject(new TypeError('Failed to fetch')));
       await vi.waitFor(() => {
         const text = collectText(runtime.currentTree());
-        expect(text).toContain(WRITE_NOT_CONFIRMED);
+        expect(text).toContain(REGISTRATION_NOT_CONFIRMED);
+        expect(text).not.toContain('Check, then try again');
         expect(text).not.toContain('Failed to fetch');
       });
     });
@@ -226,7 +227,7 @@ describe('RegistrationForm', () => {
       await vi.waitFor(() => {
         const text = collectText(runtime.currentTree());
         expect(text).toContain('Registration failed. Please try again.');
-        expect(text).not.toContain(WRITE_NOT_CONFIRMED);
+        expect(text).not.toContain(REGISTRATION_NOT_CONFIRMED);
       });
     });
   });

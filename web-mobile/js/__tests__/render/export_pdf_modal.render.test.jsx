@@ -164,18 +164,18 @@ describe('ExportPdfModal: skipped-competitions warning', () => {
     }
   });
 
-  it('keeps the prefix on a TypeError that is not the lost request (the body failing mid-stream)', async () => {
+  it('keeps the prefix on a failure that is not the lost connection (the body failing for another reason)', async () => {
     const { API } = await import('../../api_client.jsx');
     const originalFetch = global.fetch;
     global.fetch = vi.fn(() => Promise.resolve({
       ok: true,
       headers: { get: () => null },
-      blob: () => Promise.reject(new TypeError('network error')),
+      blob: () => Promise.reject(new Error('bad archive')),
     }));
     try {
       const { container, showToast } = mount({ exportPDFs: (type, pw) => API.exportPDFs(type, pw) });
       clickDownload(container);
-      await waitFor(() => expect(showToast).toHaveBeenCalledWith('PDF export failed: network error', 'error'));
+      await waitFor(() => expect(showToast).toHaveBeenCalledWith('PDF export failed: bad archive', 'error'));
     } finally {
       global.fetch = originalFetch;
     }

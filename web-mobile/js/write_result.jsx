@@ -655,6 +655,25 @@ export function isNoConnection(err) {
     return err instanceof TypeError || !!(err && (err.timedOut || err.noConnection));
 }
 
+// The error a call throws once it has turned a lost connection into one of the
+// sentences above: `noConnection` marks it, so shownMessage prints it as it is,
+// and the browser's own TypeError stays as the `cause`. api_client.jsx's
+// _directFetch and every caller that runs its own fetch build it here.
+export function noConnectionError(sentence, cause) {
+    return Object.assign(new Error(sentence, { cause }), { noConnection: true });
+}
+
+// What a failure says on screen: a sentence from noConnectionError as it is,
+// any other failure after the caller's own prefix ("PDF export failed: ").
+export function shownMessage(err, prefix) {
+    return err.noConnection ? err.message : prefix + (err?.message || err);
+}
+
+// The public registration form's version of WRITE_NOT_CONFIRMED: a participant
+// has no screen to check, so it says what to do instead (a retry that already
+// landed is answered as a duplicate, and says they are registered).
+export const REGISTRATION_NOT_CONFIRMED = 'No answer: the connection dropped. Try again; if you were already registered it will say so.';
+
 
 // matchLabel names a match the way the OPERATOR sees it: "Match 3", the label
 // on the scores list, the bracket and the printed tree. The internal id

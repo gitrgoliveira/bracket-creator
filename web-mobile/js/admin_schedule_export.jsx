@@ -6,7 +6,7 @@
 // blank template's bronze block agrees with the same predicate every other
 // surface (settings screen, awards page) already uses.
 import { effectiveTwoThirdPlaces, resolveFormat, FORMAT_KNOCKOUT, FORMAT_LEAGUE } from './competition_shape.jsx';
-import { isNoConnection, NOT_SENT_NO_CONNECTION } from './write_result.jsx';
+import { isNoConnection, noConnectionError, shownMessage, NOT_SENT_NO_CONNECTION } from './write_result.jsx';
 
 const { useState } = React;
 
@@ -145,7 +145,7 @@ export function AdminExport({ c, t, password, showToast }) {
       setTimeout(() => { if (typeof window !== "undefined" && window.URL) window.URL.revokeObjectURL(dlUrl); }, 100);
       notify("Results workbook downloaded.");
     } catch (err) {
-      notify("Results export failed: " + (err?.message || err), "error");
+      notify(shownMessage(err, "Results export failed: "), "error");
     } finally {
       setResultsBusy(false);
     }
@@ -174,7 +174,7 @@ export function AdminExport({ c, t, password, showToast }) {
       // Only a fetch that rejects is "no connection"; a TypeError from reading
       // the body or building the download is not, and keeps its own message.
       const resp = await fetch(`/create`, { method: "POST", body }).catch((e) => {
-        throw isNoConnection(e) ? Object.assign(new Error(NOT_SENT_NO_CONNECTION, { cause: e }), { noConnection: true }) : e;
+        throw isNoConnection(e) ? noConnectionError(NOT_SENT_NO_CONNECTION, e) : e;
       });
       if (!resp.ok) {
         let msg = await resp.text();
@@ -194,7 +194,7 @@ export function AdminExport({ c, t, password, showToast }) {
       setTimeout(() => { if (typeof window !== "undefined" && window.URL) window.URL.revokeObjectURL(dlUrl); }, 100);
     } catch (err) {
       // A request that got no answer says the one "not sent" sentence (write_result.jsx).
-      alert(err.noConnection ? err.message : "Export failed: " + err.message);
+      alert(shownMessage(err, "Export failed: "));
     }
   };
 

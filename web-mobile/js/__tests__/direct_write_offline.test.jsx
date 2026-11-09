@@ -11,7 +11,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { API } from '../api_client.jsx';
-import { NOT_SENT_NO_CONNECTION, WRITE_NOT_CONFIRMED, isNoConnection } from '../write_result.jsx';
+import { NOT_SENT_NO_CONNECTION, WRITE_NOT_CONFIRMED, REGISTRATION_NOT_CONFIRMED, isNoConnection, noConnectionError, shownMessage } from '../write_result.jsx';
 
 const PW = 'pw';
 
@@ -24,6 +24,7 @@ const DIRECT_WRITES = {
   createCompetition: () => API.createCompetition({ name: 'C' }, PW),
   updateCompetition: () => API.updateCompetition('c1', { name: 'C' }, PW),
   exportPDFs: () => API.exportPDFs('all', PW),
+  exportResults: () => API.exportResults('c1', PW),
   startCompetition: () => API.startCompetition('c1', PW),
   generateDraw: () => API.generateDraw('c1', PW),
   discardDraw: () => API.discardDraw('c1', PW),
@@ -48,7 +49,7 @@ const DIRECT_WRITES = {
 };
 
 // The direct calls that change nothing: they say "Not sent", not "may have been saved".
-const READ_ONLY = new Set(['exportPDFs', 'planRestore']);
+const READ_ONLY = new Set(['exportPDFs', 'exportResults', 'planRestore']);
 
 describe('a direct write that cannot be sent says one sentence', () => {
   let originalFetch;
@@ -58,6 +59,7 @@ describe('a direct write that cannot be sent says one sentence', () => {
   it('names the sentences the operator reads', () => {
     expect(WRITE_NOT_CONFIRMED).toBe('No answer: the connection dropped. The change may or may not have been saved. Check, then try again if it is missing.');
     expect(NOT_SENT_NO_CONNECTION).toBe('Not sent: no connection. Nothing was changed; try again once connected.');
+    expect(REGISTRATION_NOT_CONFIRMED).toBe('No answer: the connection dropped. Try again; if you were already registered it will say so.');
   });
 
   for (const [name, call] of Object.entries(DIRECT_WRITES)) {
@@ -153,6 +155,22 @@ describe('a direct write that cannot be sent says one sentence', () => {
       if (src[i].includes('_directFetch(') || (src[i].includes('_backupRequest(') && /method:\s*'(POST|PUT|PATCH|DELETE)'/.test(near))) sends.add(method);
     }
     expect([...sends].sort()).toEqual(Object.keys(DIRECT_WRITES).sort());
+  });
+});
+
+describe('noConnectionError and shownMessage', () => {
+  it('builds the marked error with the original failure as its cause', () => {
+    const raw = new TypeError('Failed to fetch');
+    const err = noConnectionError(NOT_SENT_NO_CONNECTION, raw);
+    expect(err.message).toBe(NOT_SENT_NO_CONNECTION);
+    expect(err.noConnection).toBe(true);
+    expect(err.cause).toBe(raw);
+    expect(isNoConnection(err)).toBe(true);
+  });
+  it('shows the sentence as it is and any other failure after the prefix', () => {
+    expect(shownMessage(noConnectionError(WRITE_NOT_CONFIRMED, new TypeError('x')), 'PDF export failed: ')).toBe(WRITE_NOT_CONFIRMED);
+    expect(shownMessage(new Error('bad roster'), 'Export failed: ')).toBe('Export failed: bad roster');
+    expect(shownMessage('plain text', 'Export failed: ')).toBe('Export failed: plain text');
   });
 });
 

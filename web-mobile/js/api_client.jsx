@@ -43,7 +43,7 @@ import {
     downstreamKnockoutPlayedQueueDrop, downstreamKnockoutRunningMessage, downstreamKnockoutRunningReopenMessage,
     downstreamKnockoutRunningQueueDrop, courtBusyMessage,
     FETCH_TIMEOUT_MS, REP_BOUT_NOT_ADDED, REP_BOUT_NOT_REMOVED, tapOutcomeQuiet,
-    isFinishedResultWrite, NOT_SENT_NO_CONNECTION, WRITE_NOT_CONFIRMED,
+    isFinishedResultWrite, NOT_SENT_NO_CONNECTION, WRITE_NOT_CONFIRMED, noConnectionError,
 } from './write_result.jsx';
 // bc-evts S2: the build this page runs against the server's, and the reload rule.
 import { noteServerBuild, setOutboxIdleProbe, setBeforeReload, noteOutboxDrained } from './app_version.jsx';
@@ -4997,7 +4997,7 @@ function _shownMember(member, fields) {
 // formData) reject with a TypeError too, and get the same turn.
 async function _directFetch(url, init, sentence = WRITE_NOT_CONFIRMED) {
     const lost = (e) => {
-        if (e instanceof TypeError) throw Object.assign(new Error(sentence, { cause: e }), { noConnection: true });
+        if (e instanceof TypeError) throw noConnectionError(sentence, e);
         throw e;
     };
     const res = await fetch(url, init).catch(lost);
@@ -5323,10 +5323,10 @@ const API = {
     // /create path and yields a BLANK formula template. Returns an .xlsx Blob;
     // throws the server's error message on non-2xx.
     async exportResults(compID, password) {
-        const res = await fetch(`/api/competitions/${compID}/export-results`, {
+        const res = await _directFetch(`/api/competitions/${compID}/export-results`, {
             method: 'GET',
             headers: password ? { 'X-Tournament-Password': password } : {}
-        });
+        }, NOT_SENT_NO_CONNECTION); // a download changes nothing
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
             throw new Error(err.error || "Failed to export results");

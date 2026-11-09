@@ -138,6 +138,16 @@ function mergeTournamentPatch(currentT, patch, sessionPassword, locked) {
   return next;
 }
 
+// tournamentFromConflict is the tournament after a save was refused as stale
+// (tournament_changed): the 409's copy replaces ours whole, not as a patch on
+// top of it, because the server leaves an emptied optional field out of its
+// copy, and a patch would keep our stale value for it (and the reloaded form
+// would show and re-save it). What the copy does not hold carries over from
+// ours: the competitions list and, through mergeTournamentPatch, the password.
+function tournamentFromConflict(currentT, copy, sessionPassword, locked) {
+  return mergeTournamentPatch({ competitions: currentT.competitions }, copy, sessionPassword, locked);
+}
+
 function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChange, tweaks, password, view: propView, setView: propSetView, showToast, authConfig }) {
   const [internalView, setInternalView] = useState({ kind: "dashboard" });
   const view = propView || internalView;
@@ -619,9 +629,10 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
       if (!mountedRef.current) return false;
       // The settings changed on another device: the app takes the current copy
       // (the Edit form keeps what was typed until its Reload remounts it from
-      // this copy, so a stale save stays refused until then).
+      // this copy, so a stale save stays refused until then; only the form's
+      // logo-on-lobby box follows the copy at once).
       if (e && e.code === "tournament_changed" && e.tournament) {
-        onUpdateRef.current(mergeTournamentPatch(tRef.current, e.tournament, password, authConfig === null || authConfig.mode === "locked"));
+        onUpdateRef.current(tournamentFromConflict(tRef.current, e.tournament, password, authConfig === null || authConfig.mode === "locked"));
       } else {
         showToast(e.message, "error");
       }
@@ -1070,7 +1081,14 @@ function normalizeCreatedRecord(created) {
 // another competition, or none, is left as it is.
 function storedCompetitionInDetail(prev, cid, stored, sent) {
   if (!prev || !prev.config || prev.config.id !== cid || !stored) return prev;
-  const { config } = normalizeCompetitionDetail({ config: mergeSavedCompetition(prev.config, stored, sent) });
+  const { config } = normalizeCompetitionDetail({
+    config: mergeSavedCompetition(prev.config, stored, sent),
+    // Siblings of config on the wire that a PUT's answer does not carry: the
+    // detail's own stay, or the awards panel loses its version and the
+    // data-issues notice vanishes until a refetch.
+    dataIssues: prev.config.dataIssues,
+    awardsVersion: prev.config.awardsVersion,
+  });
   // A competitor's number is composed when the competition is read, never
   // stored, so the PUT's answer carries none: the number shown stays, by id,
   // composed again under the prefix the save stored (stage 6 review 11,
@@ -1211,4 +1229,4 @@ window.mergeSavedCompetition = mergeSavedCompetition;
 // component with no window binding, and its confirm phase now carries the
 // "will NOT be started" list, which is the surface that stops "Start all"
 // offering a competition the server would refuse.
-export { mergeCompetitionsIntoTournament, mergeTournamentPatch, normalizeCreatedRecord, refreshFailureToast, StartAllModal, attemptScoreWrite, storedCompetitionInDetail, mergeSavedCompetition };
+export { mergeCompetitionsIntoTournament, mergeTournamentPatch, tournamentFromConflict, normalizeCreatedRecord, refreshFailureToast, StartAllModal, attemptScoreWrite, storedCompetitionInDetail, mergeSavedCompetition };

@@ -1045,7 +1045,7 @@ function FightingSpiritAwardsEditor({ c, password, showToast }) {
       setAwards((c.fightingSpiritAwards || []).map(withKey));
       if (switched) setDirty(false);
     }
-  }, [c.id, c.fightingSpiritAwards, dirty]);
+  }, [c.id, c.fightingSpiritAwards, c.awardsVersion, dirty]);
 
   const reloadConflict = () => {
     awardsVersionRef.current = conflict.version;
@@ -1086,7 +1086,7 @@ function FightingSpiritAwardsEditor({ c, password, showToast }) {
         <div className="card">
           <div className="card__title">🔥 Fighting Spirit Awards</div>
           <div className="card__sub" data-testid="fs-award-unavailable">
-            The awards are not available because this competition's details did not load. Reload the page, then open Awards again.
+            The awards are not available because the details of this competition did not load. Reload the page, then open Awards again.
           </div>
         </div>
       </div>

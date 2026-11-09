@@ -44,3 +44,14 @@ describe('storedCompetitionInDetail numbers the competitors as the refetch will'
     expect(next.config.players[1].number).toBe('M12');
   });
 });
+
+describe('storedCompetitionInDetail keeps the detail siblings the PUT answer lacks', () => {
+  it('keeps the awards version and the data-issues notice the page already holds', () => {
+    const prev = detail('K');
+    prev.config.awardsVersion = 'v-awards';
+    prev.config.dataIssues = [{ file: 'pools.json' }];
+    const next = storedCompetitionInDetail(prev, 'c1', { numberPrefix: 'K', players: [] });
+    expect(next.config.awardsVersion).toBe('v-awards');
+    expect(next.config.dataIssues).toEqual([{ file: 'pools.json' }]);
+  });
+});

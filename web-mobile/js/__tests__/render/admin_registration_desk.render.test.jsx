@@ -263,6 +263,31 @@ describe('AdminRegistrationDeskPage check-in sends the id-only wire pid (bc-pnum
     expect(toggleCheckIn).toHaveBeenCalledWith('men', 'uuid-akira', true, 'pw');
   });
 
+  // A superseded or clock-skewed check-in is written nowhere and broadcast
+  // nowhere: the desk must say it failed and reload the stored state.
+  it('toasts and reloads when the server did not apply the check-in', async () => {
+    const showToast = vi.fn();
+    const fetchCompetitions = vi.fn().mockResolvedValue([]);
+    window.API.fetchCompetitions = fetchCompetitions;
+    toggleCheckIn.mockRejectedValue(Object.assign(new Error('Another desk changed this check-in after your tap, so nothing was changed.'), { reason: 'superseded' }));
+    const tournament = makeTournament({
+      competitions: [{
+        id: 'men', name: "Men's Individual", kind: 'individual', status: 'draw-ready',
+        checkInEnabled: true,
+        players: [{ id: 'uuid-akira', name: 'Akira Tanaka', dojo: 'Gyokusen', checkedIn: false }],
+      }],
+    });
+    let result;
+    await act(async () => {
+      result = render(
+        <AdminRegistrationDeskPage tournament={tournament} onBack={noop} password="pw" showToast={showToast} onUpdate={noop} onLogout={noop} onViewerMode={noop} />
+      );
+    });
+    await act(async () => { fireEvent.click(result.getByRole('checkbox', { name: /check in akira tanaka/i })); });
+    expect(showToast).toHaveBeenCalledWith(expect.stringContaining('1 of 1 check-in(s) failed'), 'error');
+    expect(fetchCompetitions).toHaveBeenCalled();
+  });
+
   // checkPersonEntries now filters an id-less entry
   // out of its own `targets` before sending anything, rather than sending
   // "" and letting the server 404 it.

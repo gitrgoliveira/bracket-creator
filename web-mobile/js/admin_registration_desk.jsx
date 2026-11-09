@@ -726,6 +726,7 @@ function AdminRegistrationDeskPage({ tournament, onBack, password, showToast, on
   const toggleOne = async (compId, pid, val, opts = {}) => {
     setLocal(compId, pid, val);
     inFlightRef.current += 1;
+    let superseded = false;
     try {
       await window.API.toggleCheckIn(compId, pid, val, password);
       if (val && opts.handoff) announceHandoff(opts.handoff.name, opts.handoff.tags);
@@ -733,9 +734,13 @@ function AdminRegistrationDeskPage({ tournament, onBack, password, showToast, on
       if (!mountedRef.current) return;
       showToast(e.message, "error");
       setLocal(compId, pid, !val); // revert
+      // Nothing was written and nothing was broadcast, so the person's stored
+      // state is fetched here rather than guessed from the tap.
+      superseded = e.reason === "superseded";
     } finally {
       inFlightRef.current -= 1;
     }
+    if (superseded) await refresh();
   };
 
   // Core "set this person's check-in across every competition they entered":
@@ -829,6 +834,11 @@ function AdminRegistrationDeskPage({ tournament, onBack, password, showToast, on
       // server couldn't resolve): surface that rather than silently dropping it.
       if (res && res.notFound && res.notFound.length) {
         showToast(`${res.notFound.length} not matched: reloading`, "error");
+      }
+      // Ids a later check-in already settled were left as stored: refresh below
+      // shows them, and the operator is told they were not changed.
+      if (res && res.superseded && res.superseded.length) {
+        showToast(`${res.superseded.length} changed on another desk after your tap and were left as they are: reloading`, "error");
       }
       await refresh();
     } catch (e) {

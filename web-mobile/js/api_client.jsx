@@ -5039,6 +5039,24 @@ function _restoreForm({ file, from, only, undo, decisions }) {
     if (decisions) fd.append('decisions', typeof decisions === 'string' ? decisions : JSON.stringify(decisions));
     return fd;
 }
+
+// A check-in door answers 200 {applied:false, reason} when nothing was
+// written: "superseded" (a later tap already changed that person; the
+// answer carries them as stored) or "clock_skew" (this device's clock is
+// ahead of the server's). Neither broadcasts anything, so the caller is told
+// here, with the reason on the error, rather than keep a check-in that is
+// not stored. A bulk answer that applied some ids is a result, not a refusal.
+function _checkInApplied(answer) {
+    if (answer && answer.applied === false) {
+        const e = new Error(answer.reason === 'superseded'
+            ? 'Another desk changed this check-in after your tap, so nothing was changed.'
+            : (answer.message || 'The check-in was not saved.'));
+        e.reason = answer.reason;
+        throw e;
+    }
+    return answer;
+}
+
 const API = {
     async fetchTournament() {
         const res = await fetch('/api/viewer/tournament');
@@ -6414,7 +6432,7 @@ const API = {
             const err = await res.json().catch(() => ({}));
             throw new Error(err.message || err.error || `Failed to ${checkedIn ? 'check in' : 'undo check-in'} participant`);
         }
-        return res.json();
+        return _checkInApplied(await res.json());
     },
     // Bulk check-in for one competition. participantIds is an array of pids as
     // built by checkinApiPid/rdApiPid: a stable UUID, or "" for a legacy
@@ -6434,7 +6452,7 @@ const API = {
             const err = await res.json().catch(() => ({}));
             throw new Error(err.message || err.error || 'Failed to check in participants');
         }
-        return res.json();
+        return _checkInApplied(await res.json());
     },
     async addParticipant(compID, payload, password) {
         const res = await _directFetch(`/api/competitions/${encodeURIComponent(compID)}/participants`, {

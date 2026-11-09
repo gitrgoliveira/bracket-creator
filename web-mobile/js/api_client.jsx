@@ -4992,24 +4992,32 @@ function _shownMember(member, fields) {
 // (write_result.jsx), marked `noConnection`, so every caller shows it as it
 // is. A read-only POST passes NOT_SENT_NO_CONNECTION as `sentence`. The
 // original TypeError stays as the error's `cause`. An AbortError and any other
-// rejection pass through untouched.
+// rejection pass through untouched. So does a connection that drops after the
+// headers arrived: the response's body reads (json, text, blob, arrayBuffer,
+// formData) reject with a TypeError too, and get the same turn.
 async function _directFetch(url, init, sentence = WRITE_NOT_CONFIRMED) {
-    try {
-        return await fetch(url, init);
-    } catch (e) {
+    const lost = (e) => {
         if (e instanceof TypeError) throw Object.assign(new Error(sentence, { cause: e }), { noConnection: true });
         throw e;
+    };
+    const res = await fetch(url, init).catch(lost);
+    for (const read of ['json', 'text', 'blob', 'arrayBuffer', 'formData']) {
+        if (typeof res[read] !== 'function') continue;
+        const own = res[read].bind(res);
+        res[read] = () => own().catch(lost);
     }
+    return res;
 }
 
 // One fetch for the backup and restore endpoints: the password headers, and a
 // refusal turned into an Error carrying the server's `code`. A confirmPassword
-// of undefined sends no header.
-async function _backupRequest(url, failure, { method = 'GET', password, confirmPassword, body } = {}) {
+// of undefined sends no header. A POST that only reads (the restore plan) passes
+// NOT_SENT_NO_CONNECTION as `sentence`; every other non-GET is a write.
+async function _backupRequest(url, failure, { method = 'GET', password, confirmPassword, body, sentence } = {}) {
     const headers = password ? { 'X-Tournament-Password': password } : {};
     if (confirmPassword !== undefined) headers['X-Confirm-Password'] = confirmPassword;
-    const send = method === 'GET' ? fetch : _directFetch; // a restore or a delete is a write
-    const res = await send(url, { method, headers, ...(body ? { body } : {}) });
+    const init = { method, headers, ...(body ? { body } : {}) };
+    const res = await (method === 'GET' ? fetch(url, init) : _directFetch(url, init, sentence));
     if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         throw Object.assign(new Error(err.error || failure), { code: err.code, status: res.status });
@@ -6042,7 +6050,8 @@ const API = {
     },
     planRestore({ file, from, only, undo, decisions } = {}, password) {
         return _backupRequest('/api/tournament/restore/plan', 'Failed to plan restore', {
-            method: 'POST', password, body: _restoreForm({ file, from, only, undo, decisions })
+            method: 'POST', password, body: _restoreForm({ file, from, only, undo, decisions }),
+            sentence: NOT_SENT_NO_CONNECTION // the plan is a dry run: it changes nothing
         }).then(r => r.json());
     },
     async restore({ file, from, only, undo, decisions, allowRunning } = {}, password, confirmPassword) {

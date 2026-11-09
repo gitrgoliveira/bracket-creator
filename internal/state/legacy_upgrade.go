@@ -2336,7 +2336,7 @@ func (s *Store) upgradeLineupMemberIDsLocked(compID string, roster *legacyUpgrad
 		// position's (bc-pnum: a record is read by its name only once it
 		// carries no id). Only an id of the shape a
 		// member id is minted in, by the server or a device (a lowercase UUID
-		// v4, IsClientMemberID), is judged: that is the shape the refused add
+		// v4, IsClientUUID), is judged: that is the shape the refused add
 		// leaves, and an id of any other shape was written by hand or by a
 		// tool this repair cannot read the intent of, so it is left as it is.
 		heldIDs := make(map[string]struct{}, len(members))
@@ -2345,7 +2345,7 @@ func (s *Store) upgradeLineupMemberIDsLocked(compID string, roster *legacyUpgrad
 		}
 		for _, pos := range slices.SortedFunc(maps.Keys(l.MemberIDs), domain.ComparePositions) {
 			id := l.MemberIDs[pos]
-			if !judgeIDs || id == "" || !IsClientMemberID(id) {
+			if !judgeIDs || id == "" || !IsClientUUID(id) {
 				continue
 			}
 			if _, held := heldIDs[id]; !held {

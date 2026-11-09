@@ -51,7 +51,7 @@ func TestAddTeamMemberAs(t *testing.T) {
 	assert.ErrorIs(t, err, ErrTeamMemberIDConflict)
 	// A participant id is a v4 UUID too, and public: a member may never take
 	// one (F7), or the id would name a team and one of its people at once.
-	require.True(t, IsClientMemberID(b))
+	require.True(t, IsClientUUID(b))
 	_, _, err = s.AddTeamMemberAs("c1", a, b, "Sora Mori")
 	assert.ErrorIs(t, err, ErrTeamMemberIDConflict, "another team's participant id")
 	_, _, err = s.AddTeamMemberAs("c1", a, a, "Sora Mori")
@@ -59,7 +59,7 @@ func TestAddTeamMemberAs(t *testing.T) {
 	_, _, err = s.AddTeamMemberAs("c1", a, "not-an-id", "Mei Ito")
 	assert.ErrorIs(t, err, ErrInvalidMemberID)
 
-	assert.True(t, IsClientMemberID(id))
-	assert.False(t, IsClientMemberID("0a1b2c3d-4e5f-1a6b-8c7d-8e9f0a1b2c3d"), "a version-1 id")
-	assert.False(t, IsClientMemberID("0A1B2C3D-4E5F-4A6B-8C7D-8E9F0A1B2C3D"), "upper case")
+	assert.True(t, IsClientUUID(id))
+	assert.False(t, IsClientUUID("0a1b2c3d-4e5f-1a6b-8c7d-8e9f0a1b2c3d"), "a version-1 id")
+	assert.False(t, IsClientUUID("0A1B2C3D-4E5F-4A6B-8C7D-8E9F0A1B2C3D"), "upper case")
 }

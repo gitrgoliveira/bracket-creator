@@ -68,7 +68,7 @@ type SquadMemberRequest struct {
 	Name string `json:"name"`
 	// ID is the member's id as the device minted it, on POST only and
 	// optional (bc-evts stage 3 review 2, R1): a lowercase UUID v4
-	// (state.IsClientMemberID). The add is an outbox entry, so a lineup save
+	// (state.IsClientUUID). The add is an outbox entry, so a lineup save
 	// naming the member is queued behind it with the id it will have.
 	ID string `json:"id,omitempty"`
 	// WriteID is the client's id for a rename (bc-evts stage 3 review 11,
@@ -128,7 +128,7 @@ func RegisterSquadHandlers(r *gin.RouterGroup, store SquadStore, comps Competiti
 		if !validMemberName(c, req.Name) {
 			return
 		}
-		if req.ID != "" && !state.IsClientMemberID(req.ID) {
+		if req.ID != "" && !state.IsClientUUID(req.ID) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": state.ErrInvalidMemberID.Error()})
 			return
 		}

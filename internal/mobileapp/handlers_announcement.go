@@ -40,25 +40,11 @@ type announcementAnswer struct {
 // reallocated on every POST /api/tournament/announce.
 var validAnnouncementDurations = map[int]bool{5: true, 10: true, 15: true, 30: true}
 
-// announcementMadeAt reads a request's made-at: 400 when it is missing, the
-// clock_skew answer when it is too far ahead of the server. ok is false when
-// an answer was written.
+// announcementMadeAt reads a request's made-at through the one stamp judge
+// (judgeClientStamp). ok is false when an answer was written.
 func announcementMadeAt(c *gin.Context, modifiedAt int64) (time.Time, bool) {
-	if modifiedAt <= 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "modifiedAt is required"})
-		return time.Time{}, false
-	}
-	if serverNowMs, aheadMs, refuse := clientClockSkew(modifiedAt); refuse {
-		logClockSkewRefusal(c, aheadMs, "")
-		c.JSON(http.StatusOK, gin.H{
-			"applied":     false,
-			"reason":      "clock_skew",
-			"serverNowMs": serverNowMs,
-			"message":     "Not sent: this device's clock appears to be ahead of the server. The app will resync its clock and send it again.",
-		})
-		return time.Time{}, false
-	}
-	return time.UnixMilli(clampClientModifiedAt(modifiedAt)), true
+	ms, ok := judgeClientStamp(c, modifiedAt, "when the call was made, in milliseconds")
+	return time.UnixMilli(ms), ok
 }
 
 func RegisterAnnouncementHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub) {
@@ -85,7 +71,7 @@ func RegisterAnnouncementHandlers(r *gin.RouterGroup, store *state.Store, hub *H
 			return
 		}
 
-		if !state.IsClientMemberID(req.ID) {
+		if !state.IsClientUUID(req.ID) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Announcement id must be a lowercase UUID v4"})
 			return
 		}

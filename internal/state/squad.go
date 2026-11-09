@@ -505,13 +505,13 @@ var ErrTeamMemberLimit = errors.New("team already holds as many members as allow
 var ErrTeamMemberIDConflict = errors.New("another team member already has this id")
 
 // ErrInvalidMemberID refuses a client-made member id that is not a lowercase
-// UUID v4 (IsClientMemberID).
+// UUID v4 (IsClientUUID).
 var ErrInvalidMemberID = errors.New("a team member id must be a lowercase UUID v4")
 
-// IsClientMemberID reports whether id is a member id a device may choose: a
-// lowercase canonical UUID whose version is 4 (helper.IsUUIDv4 checks the
-// shape alone).
-func IsClientMemberID(id string) bool {
+// IsClientUUID reports whether id is an id a device may mint for itself (a team
+// member's, a court call's): a lowercase canonical UUID whose version is 4
+// (helper.IsUUIDv4 checks the shape alone).
+func IsClientUUID(id string) bool {
 	return helper.IsUUIDv4(id) && id[14] == '4'
 }
 
@@ -557,7 +557,7 @@ func (s *Store) addTeamMember(compID, teamID, memberID, name string, limit int, 
 	// competitor's is, so the answer and every lineup that names the member
 	// read the stored spelling.
 	name = helper.TitleCaseName(name)
-	if memberID != "" && !IsClientMemberID(memberID) {
+	if memberID != "" && !IsClientUUID(memberID) {
 		return domain.TeamMember{}, false, ErrInvalidMemberID
 	}
 

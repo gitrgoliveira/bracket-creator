@@ -729,3 +729,25 @@ func TestAnnouncementStore_ClearKeepsAFloor(t *testing.T) {
 		t.Errorf("the floor stays at the latest clear, got %d", outcome)
 	}
 }
+
+// TestAnnouncementStore_ClearFloorNeverPassesNow: a clear stamped ahead of the
+// server (inside the skew the door accepts) takes down what exists but must
+// not hide a call another device makes before that time comes.
+func TestAnnouncementStore_ClearFloorNeverPassesNow(t *testing.T) {
+	store, clk := newClockedStore()
+	t0 := clk.now()
+	a, _, _ := store.Add(newParticipantID(), "A", t0, 10*time.Minute)
+
+	list, changed := store.Clear(t0.Add(4 * time.Second))
+	if !changed || len(list) != 0 {
+		t.Fatalf("expected the clear to take A down, got %v %v", changed, list)
+	}
+	if _, outcome, _ := store.Add(a.ID, "A", t0, 10*time.Minute); outcome != AnnounceRecorded {
+		t.Errorf("a copy of the cleared call must be recorded, got %d", outcome)
+	}
+
+	clk.advance(time.Second)
+	if _, outcome, list := store.Add(newParticipantID(), "B", clk.now(), 10*time.Minute); outcome != AnnounceAdded || len(list) != 1 {
+		t.Errorf("a call made after the clear was received must show, got %d %v", outcome, list)
+	}
+}

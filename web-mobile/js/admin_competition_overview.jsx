@@ -1014,9 +1014,20 @@ function FightingSpiritAwardsEditor({ c, password, showToast }) {
   useEffect(() => () => { mountedRef.current = false; }, []);
   // The version of the awards list the next save is made from: the one the
   // competition detail served, or the one the last save answered (the detail
-  // refetch after a save can land later than a second save).
+  // refetch after a save can land later than a second save). A served version
+  // is taken only along with the list it describes: while unsaved edits keep an
+  // older list on screen, the version stays with that list, so a save over a
+  // list another device has since changed is refused (awards_changed) instead
+  // of overwriting it.
   const awardsVersionRef = useRef(c.awardsVersion);
-  useEffect(() => { awardsVersionRef.current = c.awardsVersion; }, [c.id, c.awardsVersion]);
+  const dirtyRef = useRef(dirty);
+  dirtyRef.current = dirty;
+  const versionCompIdRef = useRef(c.id);
+  useEffect(() => {
+    const switched = versionCompIdRef.current !== c.id;
+    versionCompIdRef.current = c.id;
+    if (switched || !dirtyRef.current) awardsVersionRef.current = c.awardsVersion;
+  }, [c.id, c.awardsVersion]);
 
   // Sync from parent. Reset unconditionally when switching competitions;
   // otherwise skip while the user has unsaved edits (see `dirty` above).
@@ -1050,10 +1061,26 @@ function FightingSpiritAwardsEditor({ c, password, showToast }) {
     }
   };
 
+  // The competition list item carries no awardsVersion (only the detail does),
+  // so a save from it would be refused. When the detail has not loaded there is
+  // nothing to edit against: say so, and the form comes with the detail.
+  if (!c.awardsVersion) {
+    return (
+      <div className="row">
+        <div className="card">
+          <div className="card__title">🔥 Fighting Spirit Awards</div>
+          <div className="card__sub" data-testid="fs-award-unavailable">
+            The awards are not available because this competition's details did not load. Reload the page, then open Awards again.
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="row">
       <div className="card" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-        <div className="card__title">🔥 Fighting Spirit Awards <span style={{ fontWeight: 400, fontSize: 12, color: "var(--ink-3)" }}>(optional)</span></div>
+        <div className="card__title">🔥 Fighting Spirit Awards<span style={{ fontWeight: 400, fontSize: 12, color: "var(--ink-3)" }}>(optional)</span></div>
         <div className="card__sub" style={{ marginTop: -4 }}>Record individual honourees independent of the placement podium. Shown to viewers on the Awards tab.</div>
       {awards.length === 0 && (
         <div style={{ fontSize: 12, color: "var(--ink-3)", fontStyle: "italic" }}>No awards yet.</div>

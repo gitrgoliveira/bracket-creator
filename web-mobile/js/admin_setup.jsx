@@ -197,6 +197,10 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
   // on the backend version) either see a 400 or silently believe
   // rotation succeeded. Hide it.
   const locked = authConfig === null || authConfig.mode === "locked";
+  // The version of the settings this form was filled from. The save sends it,
+  // not the freshest copy's: a save made after another device saved is then
+  // refused (tournament_changed) instead of writing the old values over theirs.
+  const openedVersionRef = useRef(tournament.tournamentVersion);
   const [name, setName] = useState(tournament.name);
   const [venue, setVenue] = useState(tournament.venue);
   const [date, setDate] = useState(tournament.date);
@@ -349,6 +353,7 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
     setSaving(true);
     try {
       await onSave({
+        tournamentVersion: openedVersionRef.current,
         name: trimmedName,
         venue: venue.trim(),
         date: norm,

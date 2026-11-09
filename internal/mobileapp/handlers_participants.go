@@ -720,7 +720,7 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
-		at, ok := judgeCheckInStamp(c, req.ModifiedAt)
+		at, ok := judgeClientStamp(c, req.ModifiedAt, checkInStampWhat)
 		if !ok {
 			return
 		}
@@ -769,7 +769,7 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
-		at, ok := judgeCheckInStamp(c, req.ModifiedAt)
+		at, ok := judgeClientStamp(c, req.ModifiedAt, checkInStampWhat)
 		if !ok {
 			return
 		}
@@ -821,23 +821,9 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 	})
 }
 
-// judgeCheckInStamp judges a check-in write's stamp, the {modifiedAt} its body
-// carries, and reports whether the write may go on. A missing or non-positive
-// stamp is 400: every caller is the outbox, which stamps each tap, and an
-// unstamped check-in could never beat a stored one. A stamp beyond the clock
-// skew margin gets the clock_skew answer the outbox re-stamps on
-// (clientClockSkew/respondClockSkew, the score door's pair).
-func judgeCheckInStamp(c *gin.Context, modifiedAt int64) (int64, bool) {
-	if modifiedAt <= 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "modifiedAt is required: the time of the check-in tap, in milliseconds"})
-		return 0, false
-	}
-	if serverNowMs, aheadMs, refuse := clientClockSkew(modifiedAt); refuse {
-		respondClockSkew(c, serverNowMs, aheadMs)
-		return 0, false
-	}
-	return clampClientModifiedAt(modifiedAt), true
-}
+// checkInStampWhat names the moment a check-in's stamp stands for, in the 400
+// judgeClientStamp writes.
+const checkInStampWhat = "the time of the check-in tap, in milliseconds"
 
 // errCheckInNotInSelfRun refuses every check-in write in a self-run
 // tournament, whoever sends it (operator ruling 2026-10-13: "Self run mode has

@@ -4967,9 +4967,9 @@ function _membersBase(compID, teamId) {
     return _lineupKey(compID, teamId, { round: 0 });
 }
 
-// _newMemberId: a member id this device mints, a lowercase UUID v4 (the
-// server's state.IsClientMemberID).
-function _newMemberId() {
+// _newClientId: an id this device mints for a team member or a court call, a
+// lowercase UUID v4 (the server's state.IsClientUUID).
+function _newClientId() {
     if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') return crypto.randomUUID().toLowerCase();
     const hex = (n) => Array.from({ length: n }, () => Math.floor(Math.random() * 16).toString(16)).join('');
     const variant = (8 + Math.floor(Math.random() * 4)).toString(16);
@@ -6192,7 +6192,7 @@ const API = {
         // have; a resend of the add is answered as stored. The member shown
         // carries no stamp: nothing holds it yet, and the server's copy, when
         // a list brings it, stands over it.
-        const id = _newMemberId();
+        const id = _newClientId();
         const trimmed = String(name || '').trim();
         return _memberWrite({
             compID, teamId, method: 'POST',
@@ -6444,6 +6444,9 @@ const API = {
         }
         return res.json();
     },
+    // The court-call doors send the id and the made-at the server requires
+    // (modifiedAt, in the server's clock frame); they become outbox doors in the
+    // announcement client phase.
     async sendAnnouncement(message, durationMinutes, password) {
         const res = await fetch('/api/tournament/announce', {
             method: 'POST',
@@ -6451,13 +6454,16 @@ const API = {
                 'Content-Type': 'application/json',
                 'X-Tournament-Password': password
             },
-            body: JSON.stringify({ message, durationMinutes })
+            body: JSON.stringify({ id: _newClientId(), message, durationMinutes, modifiedAt: _serverNowMs() })
         });
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
             throw new Error(err.error || `Failed to send announcement (Status ${res.status})`);
         }
-        return res.json();
+        const sent = await res.json();
+        // clock_skew comes back 200 {applied: false}: the call was not made.
+        if (sent && sent.applied === false) throw new Error(sent.message || 'The announcement was not sent.');
+        return sent;
     },
     async fetchAnnouncements() {
         const res = await fetch('/api/tournament/announcements');
@@ -6483,12 +6489,15 @@ const API = {
     async clearAnnouncements(password) {
         const res = await fetch('/api/announcements', {
             method: 'DELETE',
-            headers: { 'X-Tournament-Password': password }
+            headers: { 'Content-Type': 'application/json', 'X-Tournament-Password': password },
+            body: JSON.stringify({ modifiedAt: _serverNowMs() })
         });
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
             throw new Error(err.error || `Failed to clear announcements (Status ${res.status})`);
         }
+        const cleared = await res.json().catch(() => null);
+        if (cleared && cleared.applied === false) throw new Error(cleared.message || 'The announcements were not cleared.');
     },
     // mp-c38: sponsor logo upload (multipart) and delete.
     async uploadSponsor({ file, name, link, password }) {

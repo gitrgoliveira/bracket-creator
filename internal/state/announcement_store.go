@@ -159,8 +159,15 @@ func (s *AnnouncementStore) Clear(madeAt time.Time) ([]Announcement, bool) {
 
 	now := s.clock()
 	s.pruneExpiredLocked(now)
-	if madeAt.After(s.clearFloor) {
-		s.clearFloor = madeAt
+	// The floor never passes the server's now: a clear stamped a few seconds
+	// ahead (within the skew the door accepts) must not hide a call another
+	// device makes in that window.
+	floor := madeAt
+	if floor.After(now) {
+		floor = now
+	}
+	if floor.After(s.clearFloor) {
+		s.clearFloor = floor
 	}
 	var kept, gone []Announcement
 	for _, a := range s.active {

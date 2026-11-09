@@ -704,7 +704,7 @@ describe('AdminCreateCompetition expected participants and draft estimate (p2-cr
     window.API.fetchCalendar = vi.fn().mockResolvedValue({
       days: [{ day: 1, date: '10-08-2026', breaks: [] }],
       courts: ['A', 'B', 'C'],
-      competitions: [{ id: 'comp-1', placement: { placed: true, day: 1, courts: ['A'], windows: { A: { start: 540, end: 675 } } } }],
+      competitions: [{ id: 'comp-1', date: '10-08-2026', placement: { placed: true, day: 1, courts: ['A'], windows: { A: { start: 540, end: 675 } } } }],
     });
     const estimateDraft = vi.fn().mockResolvedValue(makeSampleDraftEstimate());
     window.API.estimateDraft = estimateDraft;

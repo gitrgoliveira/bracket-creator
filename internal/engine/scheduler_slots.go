@@ -668,22 +668,27 @@ func assignBracketMatchSlots(rounds [][]state.BracketMatch, comp *state.Competit
 // the bronze simply inherits the final's time as a sane default and the final's
 // own court timeline is left untouched. A blank final time (comp == nil, or no
 // StartTime) leaves the bronze blank too, matching the rounds.
-func scheduleBronze(bracket *state.Bracket, comp *state.Competition, tournament *state.Tournament) {
+//
+// It returns the final's pushed start on the assigners' clock (parseClockHHMM's
+// day, so a push past 24:00 lands on the next day), or the zero time when it
+// pushed nothing. The final's "HH:MM" loses that day, so a caller that refuses a
+// competition running past midnight checks this instead.
+func scheduleBronze(bracket *state.Bracket, comp *state.Competition, tournament *state.Tournament) (finalStart time.Time) {
 	if bracket == nil || bracket.ThirdPlaceMatch == nil || len(bracket.Rounds) == 0 {
-		return
+		return time.Time{}
 	}
 	lastRound := bracket.Rounds[len(bracket.Rounds)-1]
 	if len(lastRound) == 0 {
-		return
+		return time.Time{}
 	}
 	final := &lastRound[0]
 	if final.ScheduledAt == "" {
-		return
+		return time.Time{}
 	}
 	bronze := bracket.ThirdPlaceMatch
 	bronze.ScheduledAt = final.ScheduledAt
 	if bronze.Court != final.Court {
-		return
+		return time.Time{}
 	}
 	// Push the final one match-slot later, honoring pauses the
 	// same way assignBracketMatchSlots does.
@@ -692,4 +697,5 @@ func scheduleBronze(bracket *state.Bracket, comp *state.Competition, tournament 
 	cursor := parseClockHHMM(final.ScheduledAt).Add(time.Duration(perMatchMin) * time.Minute)
 	cursor = skipBreaks(cursor, breaks)
 	final.ScheduledAt = cursor.Format(scheduleClockLayout)
+	return cursor
 }

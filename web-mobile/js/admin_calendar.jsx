@@ -3,7 +3,7 @@
 
 import { formatClockHHMM, overlaps } from './calendar_rules.jsx';
 import {
-  LONG_PRESS_MS, PX_PER_MINUTE, MoveDialog, dropTarget, isDrawn, isMovable, moveErrorMessage,
+  LONG_PRESS_MS, PX_PER_MINUTE, MoveDialog, dropTarget, drawnDragHint, isDrawn, isMovable, moveErrorMessage,
   saveMove, shiftClock, shiftLanes, undoMove,
 } from './calendar_move.jsx';
 import { readRetimePreview } from './retime_warning.jsx';
@@ -921,6 +921,7 @@ export function AdminCalendarPage({
         geometry: readGeometry(), blockLeft: x - st.grabX, blockTop: y - st.grabY,
         pointerX: x, pointerY: y, blockCourts: comp.placement.courts || [],
       });
+      const hint = target ? drawnDragHint(comp, target.courts) : '';
       if (target && isDrawn(comp)) target.courts = comp.placement.courts || [];
       st.target = target;
       const dur = block.endMins - block.startMins;
@@ -928,7 +929,7 @@ export function AdminCalendarPage({
       const label = target && info
         ? `${formatDayDate(info.date)}, ${formatClockHHMM(target.startMins)} to ${formatClockHHMM((target.startMins + dur) % 1440)}${isDrawn(comp) ? '' : `, Shiaijo ${target.courts.join(' and ')}`}`
         : 'Drop it on a day';
-      setDrag({ comp, x: x - st.grabX, y: y - st.grabY, width: st.width, height: st.height, label, hint: target && isDrawn(comp) && target.courts.join() !== (comp.placement.courts || []).join() ? 'Its shiaijo stay as drawn.' : '' });
+      setDrag({ comp, x: x - st.grabX, y: y - st.grabY, width: st.width, height: st.height, label, hint });
     };
 
     const pickUp = () => {

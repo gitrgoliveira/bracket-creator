@@ -265,6 +265,47 @@ func TestRetime_AWrapPastTheCompetitionsOwnStartIsRefused(t *testing.T) {
 	assert.ErrorIs(t, err, ErrRetimePastMidnight)
 }
 
+// The bronze match takes the final's slot and pushes the final one slot later,
+// after the rounds' own wrap check. A pause from that pushed slot running
+// through midnight sends the final to the next day at a time after the start,
+// so only the push itself can tell it left the day: here semifinals at 10:00
+// and one slot on, the bronze match, then the final the next day.
+func TestRetime_TheBronzeMatchPushingTheFinalPastMidnightIsRefused(t *testing.T) {
+	courts := []string{"A"}
+	eng, store, _ := setupTestEngine(t)
+	tourn := retimeTournament(courts)
+	require.NoError(t, store.SaveTournament(tourn))
+	single := false
+	createTestCompetition(t, store, "retime", state.CompFormatKnockout, 4, func(c *state.Competition) {
+		c.Courts = courts
+		c.Date = "01-07-2026"
+		c.StartTime = "09:00"
+		c.TwoThirdPlaces = &single
+	})
+	saveTestParticipants(t, store, "retime", []string{"Fighter 1", "Fighter 2", "Fighter 3", "Fighter 4"})
+	require.NoError(t, eng.GenerateDraw("retime"))
+	comp, err := store.LoadCompetition("retime")
+	require.NoError(t, err)
+	bracket, err := store.LoadBracket(comp.ID)
+	require.NoError(t, err)
+	require.NotNil(t, bracket.ThirdPlaceMatch, "a single third place draws a bronze match")
+
+	out, err := eng.RetimePreview(comp, movedTo(comp, comp.Date, "10:00"))
+	require.NoError(t, err, "with no pause in the way the same move is not refused")
+	assert.True(t, out.AnyChange)
+
+	_, slot := SlotMinutes(comp, tourn)
+	pushed := 10*60 + 3*slot
+	require.NoError(t, store.SaveTournament(retimeTournament(courts,
+		state.Pause{Name: "Overnight", Start: fmt.Sprintf("%02d:%02d", pushed/60, pushed%60), Length: "24h"})))
+	before := storedTimes(t, store, comp)
+	_, err = eng.RetimePreview(comp, movedTo(comp, comp.Date, "10:00"))
+	assert.ErrorIs(t, err, ErrRetimePastMidnight)
+	_, err = retimeInTx(t, eng, store, comp, movedTo(comp, comp.Date, "10:00"))
+	assert.ErrorIs(t, err, ErrRetimePastMidnight)
+	assert.Equal(t, before, storedTimes(t, store, comp))
+}
+
 // A competition with no shiaijo of its own is drawn on the tournament's
 // (InheritedDrawCourts), so its re-time reads the league's slots on them too.
 func TestRetime_ALeagueOnTheTournamentsShiaijoCanBeRetimed(t *testing.T) {

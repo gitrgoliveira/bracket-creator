@@ -101,6 +101,7 @@ describe('AdminCreateCompetition default start time stacking (bc-seqc)', () => {
         {
           id: 'comp-1',
           name: 'Morning Individual',
+          date: '10-08-2026',
           placement: {
             placed: true,
             day: 1,
@@ -133,6 +134,7 @@ describe('AdminCreateCompetition default start time stacking (bc-seqc)', () => {
         {
           id: 'comp-c',
           name: 'Court C Only',
+          date: '10-08-2026',
           placement: {
             placed: true,
             day: 1,
@@ -161,6 +163,7 @@ describe('AdminCreateCompetition default start time stacking (bc-seqc)', () => {
         {
           id: 'comp-a',
           name: 'Competition A',
+          date: '10-08-2026',
           placement: {
             placed: true,
             day: 1,
@@ -171,6 +174,7 @@ describe('AdminCreateCompetition default start time stacking (bc-seqc)', () => {
         {
           id: 'comp-b',
           name: 'Competition B',
+          date: '10-08-2026',
           placement: {
             placed: true,
             day: 1,
@@ -200,6 +204,7 @@ describe('AdminCreateCompetition default start time stacking (bc-seqc)', () => {
         {
           id: 'comp-a',
           name: 'Competition A',
+          date: '10-08-2026',
           placement: {
             placed: true,
             day: 1,
@@ -210,6 +215,7 @@ describe('AdminCreateCompetition default start time stacking (bc-seqc)', () => {
         {
           id: 'comp-b',
           name: 'Competition B',
+          date: '10-08-2026',
           placement: {
             placed: true,
             day: 1,
@@ -239,6 +245,7 @@ describe('AdminCreateCompetition default start time stacking (bc-seqc)', () => {
         {
           id: 'comp-undrawn',
           name: 'Undrawn Competition',
+          date: '10-08-2026',
           placement: {
             placed: true,
             day: 1,
@@ -267,6 +274,7 @@ describe('AdminCreateCompetition default start time stacking (bc-seqc)', () => {
         {
           id: 'comp-a',
           name: 'Competition A',
+          date: '10-08-2026',
           placement: {
             placed: true,
             day: 1,
@@ -277,6 +285,7 @@ describe('AdminCreateCompetition default start time stacking (bc-seqc)', () => {
         {
           id: 'comp-b',
           name: 'Competition B',
+          date: '10-08-2026',
           placement: {
             placed: true,
             day: 1,
@@ -311,6 +320,7 @@ describe('AdminCreateCompetition default start time stacking (bc-seqc)', () => {
         {
           id: 'comp-a',
           name: 'Competition A',
+          date: '10-08-2026',
           placement: {
             placed: true,
             day: 1,
@@ -321,6 +331,7 @@ describe('AdminCreateCompetition default start time stacking (bc-seqc)', () => {
         {
           id: 'comp-b',
           name: 'Competition B',
+          date: '10-08-2026',
           placement: {
             placed: true,
             day: 1,
@@ -373,6 +384,7 @@ describe('AdminCreateCompetition default start time stacking (bc-seqc)', () => {
         {
           id: 'comp-a',
           name: 'Competition A',
+          date: '10-08-2026',
           placement: {
             placed: true,
             day: 1,
@@ -489,6 +501,7 @@ describe('AdminCreateCompetition default start time stacking (bc-seqc)', () => {
         makeCalendar([
           {
             id: 'c1',
+            date: '10-08-2026',
             placement: {
               placed: true,
               day: 1,

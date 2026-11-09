@@ -48,8 +48,9 @@ function deriveCompetitionName(rawName, kind) {
 // Rules:
 // - A blank or whitespace date returns null.
 // - A placement counts if placement.placed is true or placement.notPlacedReason === "date_outside_tournament".
-// - It is on the form date when placement.day indexes a calendar day whose date equals the trimmed form date.
-//   For date_outside_tournament (day 0) when the competition date cannot be read from the calendar, it does not count.
+// - It is on the form date when the competition's own date (the calendar's comp.date) equals the trimmed form date.
+//   Never placement.day: it is 0 for every competition of a tournament with no date, and for every
+//   date_outside_tournament one.
 // - Only windows keyed by a chosen court count.
 // - An end >= 24*60 counts as no end at all (draw refuses a court planned past midnight).
 // - Malformed or missing windows are skipped.
@@ -61,7 +62,6 @@ function calendarStackEnd(calendar, date, courts, tournamentCourts) {
     : (Array.isArray(tournamentCourts) ? tournamentCourts : []);
   if (chosenCourts.length === 0) return null;
 
-  const days = Array.isArray(calendar && calendar.days) ? calendar.days : [];
   const comps = Array.isArray(calendar && calendar.competitions) ? calendar.competitions : [];
 
   let latestEnd = null;
@@ -70,9 +70,7 @@ function calendarStackEnd(calendar, date, courts, tournamentCourts) {
     const p = comp && comp.placement;
     if (!p) continue;
     if (!p.placed && p.notPlacedReason !== "date_outside_tournament") continue;
-    if (!Number.isInteger(p.day) || p.day < 1 || p.day > days.length) continue;
-    const targetDay = days[p.day - 1];
-    if ((targetDay && targetDay.date ? targetDay.date : "").trim() !== trimmedDate) continue;
+    if ((typeof comp.date === "string" ? comp.date : "").trim() !== trimmedDate) continue;
 
     const windows = p.windows;
     if (!windows || typeof windows !== "object") continue;

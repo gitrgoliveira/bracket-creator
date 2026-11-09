@@ -322,7 +322,11 @@ func freshTimes(pool []state.MatchResult, bracket *state.Bracket, comp *state.Co
 	bracketEnd := assignBracketMatchSlots(newBracket.Rounds, comp, tournament, knockoutCourtStart(newPool, comp, tournament, floor))
 	wraps = wraps || startsNextDay(bracketEnd, true)
 	if newBracket.ThirdPlaceMatch != nil {
-		scheduleBronze(newBracket, comp, tournament)
+		// The bronze pushes the final one slot later, past any pause, after the
+		// check above; that push can leave the day too.
+		if finalStart := scheduleBronze(newBracket, comp, tournament); !finalStart.IsZero() && !finalStart.Before(nextDay) {
+			wraps = true
+		}
 	}
 	return newPool, newBracket, wraps, nil
 }

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   snapStart, dropTarget, shiftClock, shiftLanes, saveMove, undoMove, moveErrorMessage,
-  isMovable, isDrawn, moveFieldsReady, overlapSentence,
+  isMovable, isDrawn, moveFieldsReady, overlapSentence, drawnDragHint,
 } from '../calendar_move.jsx';
 
 describe('overlapSentence', () => {
@@ -93,6 +93,19 @@ describe('dropTarget', () => {
   });
   it('is null when the block is not over a day', () => {
     expect(dropTarget({ geometry, blockLeft: 0, blockTop: 0, pointerX: 900, pointerY: 400, blockCourts: ['A'] })).toBeNull();
+  });
+});
+
+// The ghost is told the shiaijo under the pointer, not the ones a drawn
+// competition keeps, so it can say the move leaves them as drawn.
+describe('drawnDragHint', () => {
+  const drawn = { status: 'draw-ready', placement: { courts: ['A', 'B'] } };
+  it('says a drawn competition held over other shiaijo keeps its own', () => {
+    expect(drawnDragHint(drawn, ['B', 'C'])).toBe('Its shiaijo stay as drawn.');
+  });
+  it('says nothing over its own shiaijo, or for one not drawn', () => {
+    expect(drawnDragHint(drawn, ['A', 'B'])).toBe('');
+    expect(drawnDragHint({ status: 'setup', placement: { courts: ['A'] } }, ['B'])).toBe('');
   });
 });
 

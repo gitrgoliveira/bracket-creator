@@ -111,6 +111,15 @@ function sameList(a, b) {
 }
 
 /**
+ * The drag ghost's extra line for a drawn competition held over other
+ * shiaijo: the draw keeps its shiaijo, so only the day and the time move.
+ * pointedCourts are the shiaijo under the block (dropTarget's courts).
+ */
+export function drawnDragHint(comp, pointedCourts) {
+  return isDrawn(comp) && !sameList(pointedCourts, comp?.placement?.courts) ? 'Its shiaijo stay as drawn.' : '';
+}
+
+/**
  * Reads the competition again, then saves the move through the same settings
  * save the Settings page uses, under the version just read. For a drawn
  * competition the server moves its matches in that same save.

@@ -17,6 +17,7 @@ describe('calendarStackEnd', () => {
     competitions: [
       {
         id: 'c1',
+        date: '01-07-2026',
         name: 'Morning Comp',
         placement: {
           placed: true,
@@ -48,6 +49,7 @@ describe('calendarStackEnd', () => {
       competitions: [
         {
           id: 'c1',
+          date: '01-07-2026',
           placement: {
             placed: true,
             day: 1,
@@ -71,6 +73,7 @@ describe('calendarStackEnd', () => {
       competitions: [
         {
           id: 'c1',
+          date: '01-07-2026',
           placement: {
             placed: true,
             day: 1,
@@ -94,6 +97,7 @@ describe('calendarStackEnd', () => {
       competitions: [
         {
           id: 'c1',
+          date: '01-07-2026',
           placement: {
             placed: true,
             day: 1,
@@ -103,6 +107,7 @@ describe('calendarStackEnd', () => {
         },
         {
           id: 'c2',
+          date: '01-07-2026',
           placement: {
             placed: true,
             day: 1,
@@ -121,6 +126,7 @@ describe('calendarStackEnd', () => {
       competitions: [
         {
           id: 'c1',
+          date: '01-07-2026',
           placement: {
             placed: true,
             day: 1,
@@ -130,6 +136,7 @@ describe('calendarStackEnd', () => {
         },
         {
           id: 'c2',
+          date: '01-07-2026',
           placement: {
             placed: true,
             day: 1,
@@ -139,6 +146,7 @@ describe('calendarStackEnd', () => {
         },
         {
           id: 'c3',
+          date: '01-07-2026',
           placement: {
             placed: true,
             day: 1,
@@ -158,6 +166,7 @@ describe('calendarStackEnd', () => {
       competitions: [
         {
           id: 'c1',
+          date: '01-07-2026',
           placement: {
             placed: false,
             notPlacedReason: 'no_start_time',
@@ -171,39 +180,29 @@ describe('calendarStackEnd', () => {
     expect(calendarStackEnd(cal, '01-07-2026', ['A'], ['A'])).toBeNull();
   });
 
-  it('handles date_outside_tournament: counts only when placement.day maps to the date', () => {
-    const cal = {
-      days: [{ day: 1, date: '01-07-2026', breaks: [] }],
-      competitions: [
-        {
-          id: 'c-day0',
-          placement: {
-            placed: false,
-            notPlacedReason: 'date_outside_tournament',
-            day: 0,
-            courts: ['A'],
-            windows: { A: { start: 540, end: 660 } },
-          },
-        },
-        {
-          id: 'c-day1',
-          placement: {
-            placed: false,
-            notPlacedReason: 'date_outside_tournament',
-            day: 1,
-            courts: ['A'],
-            windows: { A: { start: 540, end: 700 } },
-          },
-        },
-      ],
+  it('matches on the competition date, so a tournament with no date still stacks', () => {
+    // A tournament with no date has no calendar days, and the server places
+    // its competitions with day 0.
+    const undated = {
+      days: [],
+      competitions: [{
+        id: 'c-undated', date: '01-07-2026',
+        placement: { placed: true, day: 0, courts: ['A'], windows: { A: { start: 540, end: 660 } } },
+      }],
     };
-    expect(calendarStackEnd(cal, '01-07-2026', ['A'], ['A'])).toBe(700);
+    expect(calendarStackEnd(undated, '01-07-2026', ['A'], ['A'])).toBe(660);
+    expect(calendarStackEnd(undated, '02-07-2026', ['A'], ['A'])).toBeNull();
 
-    const calDay0Only = {
+    // A competition dated outside the tournament also has day 0, and counts on its own date.
+    const outside = {
       days: [{ day: 1, date: '01-07-2026', breaks: [] }],
-      competitions: [cal.competitions[0]],
+      competitions: [{
+        id: 'c-outside', date: '05-07-2026',
+        placement: { placed: false, notPlacedReason: 'date_outside_tournament', day: 0, courts: ['A'], windows: { A: { start: 540, end: 700 } } },
+      }],
     };
-    expect(calendarStackEnd(calDay0Only, '01-07-2026', ['A'], ['A'])).toBeNull();
+    expect(calendarStackEnd(outside, '05-07-2026', ['A'], ['A'])).toBe(700);
+    expect(calendarStackEnd(outside, '01-07-2026', ['A'], ['A'])).toBeNull();
   });
 
   it('skips malformed or missing windows', () => {
@@ -212,6 +211,7 @@ describe('calendarStackEnd', () => {
       competitions: [
         {
           id: 'c1',
+          date: '01-07-2026',
           placement: {
             placed: true,
             day: 1,
@@ -220,6 +220,7 @@ describe('calendarStackEnd', () => {
         },
         {
           id: 'c2',
+          date: '01-07-2026',
           placement: {
             placed: true,
             day: 1,
@@ -231,6 +232,7 @@ describe('calendarStackEnd', () => {
         },
         {
           id: 'c3',
+          date: '01-07-2026',
           placement: {
             placed: true,
             day: 1,
@@ -242,6 +244,7 @@ describe('calendarStackEnd', () => {
         },
         {
           id: 'c4',
+          date: '01-07-2026',
           placement: {
             placed: true,
             day: 1,

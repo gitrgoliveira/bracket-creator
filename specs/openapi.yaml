@@ -6287,7 +6287,8 @@ paths:
         day's pauses. Query names are the competition payload's JSON names, and
         each is parsed strictly: a malformed or out-of-range value returns 400
         with a sentence naming the field. The shape is checked as the create
-        checks it, except that the power-of-two shiaijo rule is not applied. Too
+        checks it, except that the shiaijo rules (a power-of-two count, and only
+        shiaijo the tournament has) are not applied: `courts` is a count. Too
         many shiaijo for the entry is not refused: the estimate is answered with
         a `too_many_shiaijo` entry in `warnings`. Organiser-only, also in
         self-run mode, because the caller picks the participant count and an
@@ -6443,6 +6444,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           description: Missing or incorrect admin password.
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /api/schedule/calendar:
     get:
@@ -6473,8 +6476,10 @@ paths:
       description: >
         Calculates the schedule placement of an existing competition on a specified
         day, start time, and court allocation, and detects overlaps with other placed
-        competitions on that day. A draw-ready competition's overlaps are judged at
-        its matches' new times on that day.
+        competitions on that day. Only a competition not drawn yet is placed at the
+        requested values: a drawn one keeps its placement (`previewed: false`). A
+        draw-ready competition's overlaps are judged at its matches' new times on
+        that day, and one past draw-ready is judged where it is now.
       security:
         - TournamentPassword: []
       parameters:
@@ -8038,8 +8043,10 @@ components:
       type: object
       description: >
         A scheduled pause in the tournament day (such as a lunch break,
-        ceremony or grading). An incomplete row (e.g. no start time or an
-        unreadable length) is accepted and saved, but ignored by the schedule.
+        ceremony or grading). A row with no start or no length is saved and
+        ignored by the schedule. The tournament save refuses with 400 a start
+        that is not HH:MM, a length outside 1 minute to 24 hours, or a day
+        outside 0 to 30.
       properties:
         name:
           type: string
@@ -9724,24 +9731,26 @@ components:
           type: integer
           description: >
             Headline estimate. On the stored per-competition estimate
-            (`/api/competitions/{id}/schedule/estimate`) for a kachinuki
-            competition this is the AVERAGE scenario of the variable-bout-count
-            range; on the stateless endpoint (`/api/schedule/estimate`) and for
-            non-kachinuki competitions the range fields collapse to one value,
+            (`/api/competitions/{id}/schedule/estimate`) and the draft estimate
+            (`/api/schedule/draft-estimate`) for a kachinuki competition this is
+            the AVERAGE scenario of the variable-bout-count range; on the
+            stateless endpoint (`/api/schedule/estimate`) and for non-kachinuki
+            competitions the range fields collapse to one value,
             so `totalDurationMinutes`, `bestCaseMinutes`, and `worstCaseMinutes`
             are all equal.
         bestCaseMinutes:
           type: integer
           description: >
-            Best-case scenario (kachinuki on the stored per-competition path:
-            nominal team size N bouts per match, one fighter sweeps). On the
+            Best-case scenario (kachinuki on the stored per-competition and
+            draft paths: nominal team size N bouts per match, one fighter
+            sweeps). On the
             stateless endpoint and for non-kachinuki competitions, collapses to
             `totalDurationMinutes`.
         worstCaseMinutes:
           type: integer
           description: >
-            Worst-case scenario (kachinuki on the stored per-competition path:
-            2N-1 bouts per match, every bout retires exactly one player). On the
+            Worst-case scenario (kachinuki on the stored per-competition and
+            draft paths: 2N-1 bouts per match, every bout retires exactly one player). On the
             stateless endpoint and for non-kachinuki competitions, collapses to
             `totalDurationMinutes`.
         perCourtMinutes:
@@ -9753,7 +9762,7 @@ components:
           type: integer
           description: >
             Ceremony allowance in minutes. Always 0 on the per-competition stored
-            path, which models ceremonies and lunch as tournament pauses instead;
+            and draft paths, which model ceremonies and lunch as tournament pauses instead;
             the stateless `/api/schedule/estimate` endpoint preserves caller-supplied
             ceremony minutes.
         courtEnds:
@@ -9770,7 +9779,8 @@ components:
         participants:
           type: integer
           description: >
-            Entry count the per-competition estimate used. Left empty / omitted
+            Entry count the per-competition or draft estimate used (on the
+            draft, the `participants` it was asked for). Left empty / omitted
             by stateless estimates and when the count is 0.
         participantsSource:
           type: string
@@ -9778,8 +9788,10 @@ components:
           description: >
             Where the entry count on `participants` came from: `roster` (the
             counted roster, filtered to checked in when check-in applies) or
-            `expected` (the organiser's expected entry count). Left empty /
-            omitted when `participants` is not set.
+            `expected` (the organiser's expected entry count). Set only by the
+            stored per-competition estimate: left empty / omitted on the draft
+            estimate, whose count is the one it was asked for, and when
+            `participants` is not set.
 
     DraftEstimate:
       description: >
@@ -10068,7 +10080,9 @@ components:
             The other competitions that would clash on a shared shiaijo at the
             requested day and start. For a draw-ready competition they are judged
             on the new span of its matches on each shiaijo (`retime.courts`), not
-            on its stored placement. A clash is a warning; the move is still allowed.
+            on its stored placement. A competition past draw-ready (pools,
+            knockout or completed) is judged where it is now: the requested day
+            and start are ignored. A clash is a warning; the move is still allowed.
           type: array
           items:
             $ref: '#/components/schemas/CalendarOverlap'
@@ -10083,7 +10097,7 @@ components:
           type: string
         was:
           type: string
-          description: The match's time before the move, HH:MM.
+          description: The match's time before the move, HH:MM, or empty when the match had no time.
         now:
           type: string
           description: The match's time after the move, HH:MM.

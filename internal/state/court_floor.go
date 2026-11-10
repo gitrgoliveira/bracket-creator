@@ -286,6 +286,9 @@ func (s *Store) CourtFloor(comp *Competition, courts []string, minutes SlotMinut
 // never trusted once another competition changed after it (a draw, a re-time,
 // a new date or start, a competition added or deleted). It errs towards
 // "changed": a score written meanwhile also moves pool-matches.csv's counter.
+// It narrows the race and does not close it: a draw of another competition
+// takes no rename lock, so one that commits between Current and this write's
+// own commit is not seen.
 type FloorToken struct {
 	store  *Store
 	except string

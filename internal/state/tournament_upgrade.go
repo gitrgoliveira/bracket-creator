@@ -153,8 +153,9 @@ func legacyBlockPause(name, value string) (Pause, bool) {
 	return Pause{Name: name + " (" + value + ")"}, true
 }
 
-// logUnreadBlock names, at the upgrade, a legacy value that became a pause
-// with no length, so the log says where that pause came from.
+// logUnreadBlock names, at the upgrade, a legacy value that is not a length, so
+// the log says where a pause with no length came from. A lunch value only
+// becomes a pause when the tournament had no pauses yet, hence the wording.
 func logUnreadBlock(key, value string) {
 	value = strings.TrimSpace(value)
 	if value == "" {
@@ -163,5 +164,5 @@ func logUnreadBlock(key, value string) {
 	if _, err := time.ParseDuration(value); err == nil {
 		return
 	}
-	log.Printf("state: tournament.md %s %q is not a length (such as 30m or 1h30m), so it became a pause with no length; give it one in the tournament settings", key, value)
+	log.Printf("state: tournament.md %s %q is not a length (such as 30m or 1h30m), so it schedules nothing; where it became a pause, that pause has no length: give it one in the tournament settings", key, value)
 }

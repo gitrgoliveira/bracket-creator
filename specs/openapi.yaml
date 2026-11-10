@@ -1945,7 +1945,8 @@ paths:
               that is neither empty nor an `HH:MM` clock, is a 400.
 
             * `retime_retry`: the date or start was moved on a competition that was drawn,
-              or changed, between the server's read and the save. Nothing was moved; the
+              or changed, or another competition's schedule changed, between the server's
+              read and the save. Nothing was moved; the
               body is `{code: "retime_retry", error}`; send the save again.
 
             * `retime_unavailable`: a league's stored match order could not be read back as

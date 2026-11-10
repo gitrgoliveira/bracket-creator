@@ -244,7 +244,7 @@ describe('AdminApp saves the tournament settings through the outbox', () => {
     await act(async () => { saving = probe.props.onSave(patch({ password: 'NEW' })); });
 
     expect(screen.getByTestId('queued-wait-text').textContent)
-      .toBe('Waiting for 1 change to be sent. The password is changed once it arrives.');
+      .toBe('Waiting for 1 settings change to be sent. The password is changed once it arrives.');
     expect(window.API.queuedWritesOf).toHaveBeenCalledWith('', ['tournament']);
     expect(window.API.updateTournamentPassword).not.toHaveBeenCalled();
     // Nothing is sent yet, so the session password is left as it was.

@@ -61,9 +61,10 @@ export function queuedWritesBlockers(compID, kinds) {
 const NOUNS = {
   checkin: ['check-in', 'check-ins'],
   time: ['time change', 'time changes'],
+  settings: ['settings change', 'settings changes'],
 };
 
-// queuedWritesNounFor: "1 check-in", "3 check-ins", "2 time changes".
+// queuedWritesNounFor: "1 check-in", "3 check-ins", "2 time changes", "1 settings change".
 export function queuedWritesNounFor(what, n) {
   const [one, many] = NOUNS[what] || ['change', 'changes'];
   return `${n} ${n === 1 ? one : many}`;

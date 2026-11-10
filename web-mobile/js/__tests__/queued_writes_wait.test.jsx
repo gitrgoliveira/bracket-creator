@@ -44,6 +44,8 @@ describe('the words', () => {
     expect(queuedWritesNounFor('checkin', 3)).toBe('3 check-ins');
     expect(queuedWritesNounFor('time', 1)).toBe('1 time change');
     expect(queuedWritesNounFor('time', 2)).toBe('2 time changes');
+    expect(queuedWritesNounFor('settings', 1)).toBe('1 settings change');
+    expect(queuedWritesNounFor('settings', 2)).toBe('2 settings changes');
   });
 
   it('says what it waits for and what follows', () => {

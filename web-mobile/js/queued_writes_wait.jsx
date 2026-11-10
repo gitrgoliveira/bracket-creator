@@ -37,25 +37,32 @@ function apiOf() {
   return typeof window !== 'undefined' ? window.API : null;
 }
 
+// A competition id, or a list of them (Start all waits for every competition
+// it draws).
+function compList(compID) {
+  return Array.isArray(compID) ? compID : [compID];
+}
+
 // queuedWritesCount: how many writes of `kinds` this device still holds for
-// `compID`. No kinds counts none.
+// `compID` (one id, or a list summed). No kinds counts none.
 export function queuedWritesCount(compID, kinds) {
   const list = kindList(kinds);
   const api = apiOf();
   if (list.length === 0 || !api || typeof api.queuedWritesOf !== 'function') return 0;
-  return api.queuedWritesOf(compID, list) || 0;
+  return compList(compID).reduce((n, id) => n + (api.queuedWritesOf(id, list) || 0), 0);
 }
 
-// queuedWritesBlockers: the held writes of `kinds` for `compID` the server
-// keeps refusing, as API.heldWrites() lists them: each holds the wait until
-// it is discarded.
+// queuedWritesBlockers: the held writes of `kinds` for `compID` (one id, or a
+// list) the server keeps refusing, as API.heldWrites() lists them: each holds
+// the wait until it is discarded.
 export function queuedWritesBlockers(compID, kinds) {
   const set = new Set(kindList(kinds));
+  const ids = compList(compID);
   const api = apiOf();
   if (set.size === 0 || !api || typeof api.heldWrites !== 'function') return [];
   const list = api.heldWrites();
   return (Array.isArray(list) ? list : []).filter((held) => held && held.keepsFailing
-    && held.compID === compID && set.has(held.kind));
+    && ids.includes(held.compID) && set.has(held.kind));
 }
 
 const NOUNS = {
@@ -77,7 +84,8 @@ export function waitingSentence(what, n, outcome) {
   return `Waiting for ${queuedWritesNounFor(what, n)} to be sent. ${outcome} ${arrive}.`;
 }
 
-// useWaitForQueuedWrites(compID, kinds): { waiting, count, blockers, run,
+// useWaitForQueuedWrites(compID, kinds): `compID` is one competition's id or
+// a list of them, whose queued writes are counted together. { waiting, count, blockers, run,
 // runNow, cancel }. run(fn) calls fn in the same tick when nothing is queued;
 // otherwise it holds fn (a later run replaces it) and calls it once the count
 // reaches 0. A caller whose fn must read the state of the moment it fires
@@ -88,12 +96,13 @@ export function useWaitForQueuedWrites(compID, kinds) {
   const { useState, useEffect, useRef, useCallback } = React;
   const list = kindList(kinds);
   const kindsKey = list.join(',');
+  const compsKey = JSON.stringify(compList(compID));
   const readNow = () => ({ count: queuedWritesCount(compID, list), blockers: queuedWritesBlockers(compID, list) });
   const [seen, setSeen] = useState(readNow);
   const [waiting, setWaiting] = useState(false);
   const heldRef = useRef(null);
   const mountedRef = useRef(true);
-  const keyRef = useRef({ compID, kindsKey });
+  const keyRef = useRef({ compsKey, kindsKey });
 
   useEffect(() => {
     mountedRef.current = true;
@@ -101,19 +110,20 @@ export function useWaitForQueuedWrites(compID, kinds) {
   }, []);
 
   useEffect(() => {
-    keyRef.current = { compID, kindsKey };
+    keyRef.current = { compsKey, kindsKey };
     const kindsNow = kindsOfKey(kindsKey);
+    const comps = JSON.parse(compsKey);
     const onChange = () => {
       if (!mountedRef.current) return;
-      const count = queuedWritesCount(compID, kindsNow);
-      setSeen({ count, blockers: queuedWritesBlockers(compID, kindsNow) });
+      const count = queuedWritesCount(comps, kindsNow);
+      setSeen({ count, blockers: queuedWritesBlockers(comps, kindsNow) });
       const fn = heldRef.current;
       if (!fn || count > 0) return;
       // Fired outside the outbox's listener loop, which swallows what a
       // listener throws: a refusal of the held action must reach its caller.
       queueMicrotask(() => {
         if (!mountedRef.current || heldRef.current !== fn) return;
-        if (queuedWritesCount(compID, kindsNow) > 0) return;
+        if (queuedWritesCount(comps, kindsNow) > 0) return;
         heldRef.current = null;
         setWaiting(false);
         fn();
@@ -130,12 +140,13 @@ export function useWaitForQueuedWrites(compID, kinds) {
       heldRef.current = null;
       if (mountedRef.current) setWaiting(false);
     };
-  }, [compID, kindsKey]);
+  }, [compsKey, kindsKey]);
 
   const run = useCallback((fn) => {
     if (typeof fn !== 'function') return;
-    const { compID: id, kindsKey: key } = keyRef.current;
+    const { compsKey: ids, kindsKey: key } = keyRef.current;
     const kindsNow = kindsOfKey(key);
+    const id = JSON.parse(ids);
     const count = queuedWritesCount(id, kindsNow);
     if (count === 0) { fn(); return; }
     heldRef.current = fn;
@@ -160,8 +171,10 @@ export function useWaitForQueuedWrites(compID, kinds) {
 // 'checkin' or 'time'; `outcome` finishes the sentence ("The draw is made");
 // `nowLabel` names the way on ("Generate now anyway"), whose `onNow` asks its
 // own confirm and then calls wait.runNow. Cancel, Escape and the backdrop drop
-// the held action. A write the server keeps refusing is named with Discard.
-export function QueuedWritesWait({ wait, comp, what, outcome, nowLabel, onNow, title }) {
+// the held action. A write the server keeps refusing is named with Discard,
+// with the competition it belongs to: `comp`, or `comps` for a wait over
+// several.
+export function QueuedWritesWait({ wait, comp, comps, what, outcome, nowLabel, onNow, title }) {
   const { useState } = React;
   const [busyKey, setBusyKey] = useState(null);
   const Modal = typeof window !== 'undefined' ? window.Modal : null;
@@ -198,7 +211,7 @@ export function QueuedWritesWait({ wait, comp, what, outcome, nowLabel, onNow, t
             {blockers.map((held) => (
               <li key={held.key} className="held-writes__item">
                 <div className="held-writes__text">
-                  <div className="held-writes__where">{heldWriteWhere(held, comp ? [comp] : [])}</div>
+                  <div className="held-writes__where">{heldWriteWhere(held, comp ? [comp] : (comps || []))}</div>
                   <div className="held-writes__state held-writes__state--error">{heldWriteLine(held)}</div>
                 </div>
                 <button

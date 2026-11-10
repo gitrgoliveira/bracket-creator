@@ -20,7 +20,8 @@ import { holdsUnsaved, discardUnsaved } from './unsaved_entries.jsx';
 import { scoreRowMatchLabel } from './pool_ids.jsx';
 import { mergeSavedCompetition } from './competition_put_body.jsx';
 import { AdminCalendarPage } from './admin_calendar.jsx';
-import { useWaitForQueuedWrites, QueuedWritesWait } from './queued_writes_wait.jsx';
+import { useWaitForQueuedWrites, QueuedWritesWait, queuedWritesNounFor } from './queued_writes_wait.jsx';
+import { checkInApplies } from './competition_shape.jsx';
 import { isOffline, savedOfflineSentence } from './write_result.jsx';
 import { onDocumentSettled } from './document_versions.jsx';
 import { useLatestRef } from './latest_ref.jsx';
@@ -224,6 +225,15 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
   // it waits for, with Change the password now and Cancel. The form awaits the
   // save, so a Cancel answers it (`passwordWaitRef` holds that answer).
   const settingsWait = useWaitForQueuedWrites("", TOURNAMENT_WRITE_KINDS);
+  // bc-obox C1: Start all draws every offered competition not yet drawn, so it
+  // waits for the check-ins this device still has queued for those, as
+  // Generate draw and a competition's own Start do (the same owner, over the
+  // list). A drawn competition, or one check-in does not apply to, waits for
+  // nothing.
+  const startAllDraws = ((startAll && startAll.comps) || [])
+    .filter((c) => c.status !== "draw-ready" && checkInApplies(t, c.checkInEnabled));
+  const startAllWait = useWaitForQueuedWrites(startAllDraws.map((c) => c.id),
+    startAllDraws.length > 0 ? window.API.CHECK_IN_WRITE_KINDS : []);
   const passwordWaitRef = useRef(null);
   const cancelPasswordWait = () => {
     settingsWait.cancel();
@@ -596,6 +606,22 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
     // Persistent result: does NOT auto-dismiss. Operator closes it.
     setStartAll({ phase: "result", comps, failed, succeeded: comps.length - failed.length });
   };
+  const runStartAllRef = useLatestRef(runStartAll);
+  const startAllAfterCheckIns = (comps) => startAllWait.run(() => runStartAllRef.current(comps));
+  // "Start now anyway": the draws are made from the check-ins the server
+  // holds, so the operator is told who that leaves out.
+  const startAllNowAnyway = async () => {
+    const n = startAllWait.count;
+    const ok = await window.confirmDialog({
+      message:
+        `${queuedWritesNounFor("checkin", n)} made on this device ${n === 1 ? "has" : "have"} not reached the server yet. ` +
+        `A draw made now uses only the check-ins the server holds: a competitor whose check-in has not arrived is left out of the draw.\n\n` +
+        `Start now anyway?`,
+      confirmLabel: "Start now",
+      danger: true,
+    });
+    if (ok) startAllWait.runNow();
+  };
 
   const startCompetition = async (cid) => {
     const c = (t.competitions || []).find(cc => cc.id === cid);
@@ -938,10 +964,19 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
       />}
       {startAll && <StartAllModal
         state={startAll}
-        onConfirm={() => runStartAll(startAll.comps)}
-        onRetry={() => runStartAll(startAll.failed.map(f => f.comp))}
+        onConfirm={() => startAllAfterCheckIns(startAll.comps)}
+        onRetry={() => startAllAfterCheckIns(startAll.failed.map(f => f.comp))}
         onClose={() => setStartAll(null)}
       />}
+      <QueuedWritesWait
+        wait={startAllWait}
+        comps={startAllDraws}
+        what="checkin"
+        title="Waiting before the start"
+        outcome="The draws are made and the competitions start"
+        nowLabel="Start now anyway"
+        onNow={startAllNowAnyway}
+      />
     </>;
   }
 

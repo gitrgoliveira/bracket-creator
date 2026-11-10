@@ -73,6 +73,18 @@ describe('the reader', () => {
     ];
     expect(queuedWritesBlockers('c1', ['checkin', 'checkin-bulk']).map((h) => h.key)).toEqual(['a']);
   });
+
+  it('takes a list of competitions: the count is summed and the blockers are every listed one\'s', () => {
+    queued = [{ compID: 'c1', kind: 'checkin' }, { compID: 'c2', kind: 'checkin' }, { compID: 'c3', kind: 'checkin' }];
+    expect(queuedWritesCount(['c1', 'c2'], ['checkin'])).toBe(2);
+    expect(queuedWritesCount([], ['checkin'])).toBe(0);
+    held = [
+      { key: 'a', compID: 'c1', kind: 'checkin', keepsFailing: true },
+      { key: 'c', compID: 'c2', kind: 'checkin', keepsFailing: true },
+      { key: 'e', compID: 'c3', kind: 'checkin', keepsFailing: true },
+    ];
+    expect(queuedWritesBlockers(['c1', 'c2'], ['checkin']).map((h) => h.key)).toEqual(['a', 'c']);
+  });
 });
 
 describe('useWaitForQueuedWrites', () => {

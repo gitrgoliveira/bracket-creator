@@ -73,10 +73,10 @@ flowchart TB
   decisions, starts, reopens, sends back to the queue and corrections are whole writes, such as
   `PUT /api/competitions/{id}/matches/{mid}/score`; they also enter the match's log, and every
   device stamps them with the time they were made. Only the rule-bound writes (the taps, the
-  whole writes of a match, lineups, team members, reinstatements and pool rank orders) go
-  through the device's outbox (§4); setup edits, such as tournament and competition settings,
-  the roster, check-in, the draw and announcements, are direct calls that are not kept for
-  later. Auth is
+  whole writes of a match, lineups, team members, reinstatements and pool rank orders) and
+  check-in, court calls, the tournament settings and the fighting-spirit awards go through the
+  device's outbox (§4); other setup edits, such as the password change, competition settings,
+  the roster, seeds, the draw and import, are direct calls that are not kept for later. Auth is
   handled through the `X-Tournament-Password` header (two modes, §5; self-run mode allows
   unauthenticated scoring). Every response carries the `X-App-Build` header naming the git
   commit of the server build (or `unknown`), allowing clients to detect when a new server build
@@ -211,15 +211,16 @@ flowchart TD
 ```
 
 Not every write is an outbox entry. The rule-bound writes, the ones the server orders and judges
-against what the match or the team already holds, are; setup edits are direct calls:
+against what the match or the team already holds, are, and so are check-in, court calls, the
+tournament settings and the fighting-spirit awards; other setup edits are direct calls:
 
 ```mermaid
 flowchart LR
-    rule["Rule-bound writes<br/>taps · score writes (start, record bout, finish, correction)<br/>decisions · reopen · send back to the queue · queue it and reopen<br/>court move · time change<br/>representative bout added or removed · kachinuki bout removed<br/>match lineup saved or removed · starting lineup saved<br/>team member added or renamed · reinstatement · pool rank order (chusen)"]
+    rule["Rule-bound writes<br/>taps · score writes (start, record bout, finish, correction)<br/>decisions · reopen · send back to the queue · queue it and reopen<br/>court move · time change<br/>representative bout added or removed · kachinuki bout removed<br/>match lineup saved or removed · starting lineup saved<br/>team member added or renamed · reinstatement · pool rank order (chusen)<br/>and check-in · court call announced, withdrawn or cleared<br/>tournament settings · fighting-spirit awards"]
     rule --> ob["Outbox<br/>(localStorage, shared by tabs)<br/>answered pending at once"]
-    ob --> order["Sent per match (or per team, competitor<br/>or competition) strictly in the order made"]
+    ob --> order["Sent per match (or per team, competitor,<br/>competition, court call or the tournament)<br/>strictly in the order made"]
     order --> srv["Server"]
-    setup["Setup edits<br/>tournament and competition settings<br/>roster, seeds, check-in<br/>draw, competition start and completion<br/>Swiss rounds · league tie-breaks<br/>announcements · sponsors · branding · import"]
+    setup["Setup edits<br/>password change · competition settings<br/>roster, seeds<br/>draw, competition start and completion<br/>Swiss rounds · league tie-breaks<br/>sponsors · branding · import"]
     setup --> direct["Direct REST call<br/>sent at once, not kept for later<br/>an error goes back to the page at once"]
     direct --> srv
 ```

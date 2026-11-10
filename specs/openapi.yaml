@@ -7148,12 +7148,18 @@ components:
         Both are returned with HTTP 200, never an error status: neither is a
         fault, and neither can win a retry as-is, so an error status would make
         an offline write queue retry an unwinnable request forever. Nothing is
-        applied to the match and no SSE broadcast is emitted in either case; a
-        superseded write leaves its match history entry and nothing else.
+        applied and no SSE broadcast is emitted in either case; a superseded
+        match write leaves its match history entry and nothing else.
 
         PUT /score, POST /decision and both /daihyosen
         paths each carry a client-supplied modifiedAt, so the guard compares
         rather than bypassing and any of them can produce either condition.
+        Outside the match writes, POST /participants/{pid}/checkin carries a
+        client stamp too and can produce either condition (its superseded
+        answer also carries the participant as stored), while
+        POST /participants/checkin-bulk, POST /api/tournament/announce and
+        DELETE /api/announcements can produce `clock_skew` (the bulk check-in
+        reports superseded competitors in its own `superseded` list).
         The remaining match-write endpoint, /quick-score, builds its result
         server-side without a client stamp; the server stamps it with its own
         time, never older than the stored result, so it always applies; it

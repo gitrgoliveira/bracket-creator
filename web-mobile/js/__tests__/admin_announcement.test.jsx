@@ -45,9 +45,12 @@ describe('announcementSentToast', () => {
 });
 
 describe('announcementExpiredToast', () => {
-  it('says the call did not go out, with the minutes it had', () => {
+  it('says the announcement did not go out, with the minutes it had', () => {
     const t = announcementExpiredToast(10);
-    expect(t).toMatch(/did not go out/);
-    expect(t).toContain('10 minutes');
+    expect(t).toBe('That announcement did not go out: its 10 minutes ran out before it reached the server.');
+  });
+
+  it('names a court call when the court console asks', () => {
+    expect(announcementExpiredToast(5, 'court call')).toBe('That court call did not go out: its 5 minutes ran out before it reached the server.');
   });
 });

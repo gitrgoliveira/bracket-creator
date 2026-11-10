@@ -712,6 +712,14 @@ export function savedOfflineSentence(what) {
     return `${what} saved. The save goes out once the connection is back.`;
 }
 
+// What the server answered when an announcement's time had already run out on
+// arrival (a send held offline for longer than it was to show): nothing was
+// shown, and the sender has already said it was sent, so this says it was not.
+// `what` names it: the composer's announcement, the court console's call.
+export function announcementExpiredToast(minutes, what = 'announcement') {
+    return `That ${what} did not go out: its ${minutes} minutes ran out before it reached the server.`;
+}
+
 // What a failure says on screen: a sentence from noConnectionError as it is,
 // any other failure after the caller's own prefix ("PDF export failed: ").
 export function shownMessage(err, prefix) {

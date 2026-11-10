@@ -6,7 +6,9 @@
 
 import { useStableId } from './stable_id.jsx';
 import { useUnsavedInput } from './app_version.jsx';
-import { isOffline, savedOfflineSentence } from './write_result.jsx';
+// announcementExpiredToast lives in write_result.jsx because the court console
+// says it too, and this file is loaded by its own script tag, never imported.
+import { isOffline, savedOfflineSentence, announcementExpiredToast } from './write_result.jsx';
 
 const { useState, useEffect, useCallback } = React;
 
@@ -27,13 +29,6 @@ function announcementSentToast(minutes, online) {
   return online === false
     ? savedOfflineSentence("Announcement")
     : `Announcement broadcast for ${minutes} minutes!`;
-}
-
-// What the server answered when the call's time had already run out on arrival
-// (a send held offline for longer than it was to show): nothing was shown, and
-// the toast above has already said it was sent, so this says it was not.
-function announcementExpiredToast(minutes) {
-  return `That court call did not go out: its ${minutes} minutes ran out before it reached the server.`;
 }
 
 // AnnouncementComposer: the broadcast card body (active-announcements

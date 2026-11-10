@@ -31,7 +31,7 @@ import {
     startWhileCorrectingMessage, startWhileStartingMessage, startWasBlockedByStartMessage,
     courtChangeWhileStartingMessage,
     correctWhileRunningMessage, wasToasted, BRONZE_MATCH_ID,
-    writePending, writeWasRefused, writeQueueKey,
+    writePending, writeWasRefused, writeQueueKey, announcementExpiredToast,
 } from './write_result.jsx';
 // What a Start came back with (a clock_skew refusal, a thrown 409) is
 // start_match.jsx's to classify, shared with the Scores tab's own automatic
@@ -74,6 +74,9 @@ import { winnerSideLR, teamMatchMarks } from './side_marks.jsx';
 import { teamNameMark } from './match_scoreboard.jsx';
 
 const { useState, useMemo, useEffect, useRef, useCallback } = React;
+
+// How long a court call shows on the public screens, in minutes.
+const CALL_MINUTES = 5;
 
 const AdminTopbar = window.AdminTopbar;
 const Breadcrumbs = window.Breadcrumbs;
@@ -1791,7 +1794,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
             // device made, so starting the match can withdraw this call before
             // it has landed (the withdrawal then takes the unsent call out of the
             // outbox). `settled` is the server's word on it.
-            const sent = await window.API.sendAnnouncement(msg, 5, password);
+            const sent = await window.API.sendAnnouncement(msg, CALL_MINUTES, password);
             const key = matchKey(m);
             // Keep the newest call per match, with its text, so starting the match
             // can withdraw it (bc-cdbl). A refused send leaves the earlier call
@@ -1800,6 +1803,18 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
             callIdsRef.current.set(key, entry);
             sent.settled.then(
                 (landed) => {
+                    // Its time ran out before it reached the server (held offline
+                    // too long): nothing was shown and nothing was replaced, so
+                    // the earlier call, if any, stays the one kept, and the
+                    // "Called" toast below is put right.
+                    if (landed && landed.expired) {
+                        if (callIdsRef.current.get(key) === entry) {
+                            if (earlier) callIdsRef.current.set(key, earlier);
+                            else callIdsRef.current.delete(key);
+                        }
+                        if (showToast) showToast(announcementExpiredToast(CALL_MINUTES, "court call"), "error");
+                        return;
+                    }
                     // An identical text already replaced the earlier call on the
                     // server (AnnouncementStore.Add), so a withdrawal of it would
                     // 404; but a call withdrawn before it was sent replaced

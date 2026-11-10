@@ -44,7 +44,7 @@ Two environment variables tune the API rate limiter for large events:
 
 Click **Admin** in the navigation bar and enter the admin password. The rules for who can access which features depend on your tournament's operating mode. Refer to [Operating modes](operating-modes.md) for the full access-control rules.
 
-Some organiser actions are sent directly and are not held for later: typing the admin password to confirm, uploading files, adding a walk-up competitor, editing a participant or a seed, and saving a competition's settings. If the connection is down when you tap one of these, the app says "No answer: the connection dropped. The change may or may not have been saved. Check, then try again if it is missing.", so check the participant list, seed or settings you changed once the connection is back, and repeat the action only if the change is missing. Scores, lineups, check-in, court calls, tournament settings and fighting-spirit awards are held on the device and sent when the connection returns instead.
+Some organiser actions are sent directly and are not held for later: uploading files, adding a walk-up competitor, editing a participant or a seed, saving a competition's settings, changing the admin password, deleting a competition (which asks you to type the admin password to confirm), and generating a draw, starting or completing a competition. If the connection is down when you tap one of these, the app says "No answer: the connection dropped. The change may or may not have been saved. Check, then try again if it is missing.", so check the participant list, seed or settings you changed once the connection is back, and repeat the action only if the change is missing. Scores, lineups, check-in, court calls, tournament settings and fighting-spirit awards are held on the device and sent when the connection returns instead. A password change waits for tournament settings saves still held on this device; **Change the password now** asks you to confirm first.
 
 ## Dashboard
 
@@ -91,7 +91,7 @@ Posting the same text again while it is still showing replaces the banner rather
 
 A court call, made with **Call to court** on the court console, is announced the same way. It disappears once the match starts, or is closed with a decision such as a fusensho, from any device, as long as the court console that made the call is still open, even if another console called the same match again meanwhile. If that console was closed or reloaded meanwhile, the call stays up until its five minutes run out.
 
-An announcement, a court call or its withdrawal made while the connection is down is held on the device and sent when the connection returns; tap **Announce** or **Call to court** once. A held call counts its time from the moment it was made, so a call that was already over when it arrives shows nothing, and one with a little time left shows for at least a minute so players can read it. A call you withdrew while it was still held is never shown. Calling the same match twice while offline still shows one banner.
+An announcement, a court call or its withdrawal made while the connection is down is held on the device and sent when the connection returns; click **Send announcement** or **Call to court** once. If a held announcement or call is over by the time it arrives, a message says "That announcement did not go out: its N minutes ran out before it reached the server." ("call" for a court call), and you can send it again. A held call counts its time from the moment it was made, so a call that was already over when it arrives shows nothing, and one with a little time left shows for at least a minute so players can read it. A call you withdrew while it was still held is never shown. Calling the same match twice while offline still shows one banner.
 
 ## Registration desk
 
@@ -137,13 +137,7 @@ format, a note appears under the control listing each setting the save will
 clear, with its current value, so you can see the cost before you commit.
 Switching back to the original format keeps them.
 
-On a drawn competition, a **Date** or **Start time** change waits for match
-time changes still held on this device, so none lands on the old day: a screen
-titled "Waiting before the move" reads, for example, "Waiting for 2 time
-changes to be sent. The move is made once they arrive.", with **Cancel** and
-**Move now anyway**. The save is made on its own when the last one arrives.
-**Move now anyway** asks you to confirm first, because a time changed before
-the move may land on the old day.
+On a drawn competition, a **Date** or **Start time** change moves its matches. Refer to [Moving a competition on the calendar](#moving-a-competition-on-the-calendar) for how it waits for time changes still held on this device.
 
 ### Assigning shiai-jo
 
@@ -225,7 +219,7 @@ The check-in rule is opt-in: when you click **Generate draw**, if at least one p
 
 The desk keeps working when the venue connection drops. A tap on a competitor, or on **Check in all**, shows on the row at once and is held on the device; it is sent in the order you tapped when the connection returns. The bar at the top of every admin page counts what is still held, as it does for scores.
 
-Two desks can check in the same competitor. If one desk checked someone in and another desk then took the check-in back, the later tap wins. When the losing tap reaches the server after the later one, that desk is told in one line, for example "Aiko Tanaka was changed on another desk: now not checked in.", and its row shows the result that stands; otherwise its row simply updates.
+Two desks can check in the same competitor. If one desk checked someone in and another desk then took the check-in back, the later tap wins. When the losing tap reaches the server after the later one, that desk is told in one line, for example "Aiko Tanaka was changed on another desk: now not checked in.", and its row shows the result that stands; otherwise its row updates.
 
 **Generate draw** waits for check-ins that are still on their way, so the draw is made from the roster the desk sees. It waits only for check-ins held on the device you generate the draw from. Check-ins still held on a separate desk device are not counted, so check that the desk shows nothing held first. While any are held, the screen reads, for example, "Waiting for 3 check-ins to be sent. The draw is made once they arrive." The draw is made on its own when the last one arrives. Two buttons are offered meanwhile: **Cancel** leaves the competition in setup, and **Generate now anyway** makes the draw at once. Its confirmation says that the competitors whose check-ins have not arrived are left out of the draw. The same wait applies to **Start competition** on a competition that is still in setup and to **Start all** on the dashboard; on both, the button reads **Start now anyway**. If the connection stays down, reconnect, or choose **Generate now anyway**. An item the server keeps refusing is named on the waiting screen with **Discard**.
 

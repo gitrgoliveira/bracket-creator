@@ -1485,8 +1485,9 @@ paths:
           a newer one is answered as recorded and never replaces it or shortens
           its time.
         - A call made at or before the last clear (`DELETE /api/announcements`)
-          is answered as recorded and shows nothing, whenever it arrives; a call
-          made after the clear is shown whatever the arrival order.
+          is answered as recorded (or expired, when its time is already over)
+          and shows nothing, whenever it arrives; a call made after the clear is
+          shown whatever the arrival order.
 
         A `modifiedAt` more than a few seconds ahead of the server clock is
         answered 200 `RefusedWrite` with `reason` `clock_skew` and nothing is
@@ -1613,7 +1614,9 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
         '404':
-          description: No active announcement has this id.
+          description: >
+            The call is already gone or was never seen; a caller withdrawing
+            it treats this as done.
           content:
             application/json:
               schema:
@@ -7154,12 +7157,11 @@ components:
         PUT /score, POST /decision and both /daihyosen
         paths each carry a client-supplied modifiedAt, so the guard compares
         rather than bypassing and any of them can produce either condition.
-        Outside the match writes, POST /participants/{pid}/checkin carries a
-        client stamp too and can produce either condition (its superseded
-        answer also carries the participant as stored), while
+        Outside the match writes, PUT and DELETE /participants/{pid}/checkin,
         POST /participants/checkin-bulk, POST /api/tournament/announce and
-        DELETE /api/announcements can produce `clock_skew` (the bulk check-in
-        reports superseded competitors in its own `superseded` list).
+        DELETE /api/announcements can produce `clock_skew`. A superseded
+        check-in is answered as `CheckInNotApplied`, or in the bulk result's
+        `superseded` list.
         The remaining match-write endpoint, /quick-score, builds its result
         server-side without a client stamp; the server stamps it with its own
         time, never older than the stored result, so it always applies; it
@@ -8162,8 +8164,8 @@ components:
                 it, or withdrawn or cleared and remembered until its time would
                 have been over), the call is an older copy of an identical
                 message already showing (it becomes that call's alias and never
-                shortens it), it was made at or before the last clear, or it is
-                older than every one of the ten calls already showing. The
+                shortens it), it was made at or before the last clear (and its time is not
+                already over), or it is older than every one of the ten calls already showing. The
                 announcement returned is the one already stored where there is
                 one, so a resend is harmless.
             expired:

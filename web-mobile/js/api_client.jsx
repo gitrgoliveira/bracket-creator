@@ -683,10 +683,20 @@ function _nextRev(compID, matchID) {
 // Per-page-load scoring-session id. Identifies one client session so the
 // server's rev-guard can drop a single session's own out-of-order delivery
 // (a reconnect flush). Different sessions are concurrent operators: the
-// server treats those as last-write-wins. jsdom-safe fallback.
-const _revSession = (typeof crypto !== 'undefined' && crypto.randomUUID)
-    ? crypto.randomUUID()
-    : `s${Math.random().toString(36).slice(2)}`;
+// server treats those as last-write-wins.
+const _revSession = _randomId();
+
+// _randomId: a random v4 UUID for every id and token this client mints
+// (sessions, tabs, queue keys, team members, court calls). Built from
+// getRandomValues, which unlike crypto.randomUUID also exists on a plain-http
+// venue address, so it never falls back to Math.random.
+function _randomId() {
+    const b = crypto.getRandomValues(new Uint8Array(16));
+    b[6] = (b[6] & 0x0f) | 0x40;
+    b[8] = (b[8] & 0x3f) | 0x80;
+    const h = Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('');
+    return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
+}
 
 // ---------------------------------------------------------------------------
 // C2 / F4 / F5: Offline write queue
@@ -1339,7 +1349,7 @@ function _poolRanksBase(compID) {
 // tabs (the stored outbox is shared) and across reloads.
 function _newEntryKey(base) {
     _entrySeq++;
-    return `${base}${QUEUE_ENTRY_SEP}${Date.now().toString(36)}.${_entrySeq.toString(36)}.${Math.random().toString(36).slice(2, 8)}`;
+    return `${base}${QUEUE_ENTRY_SEP}${Date.now().toString(36)}.${_entrySeq.toString(36)}.${_randomId().slice(0, 8)}`;
 }
 
 // _entryStamp: the order an entry replays in: the stamp its payload carries
@@ -1741,10 +1751,6 @@ const {
 // overtakes one made before it on this device.
 // ---------------------------------------------------------------------------
 
-function _randomId() {
-    if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID();
-    return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
-}
 // The device's EVENT session: random per page load. Not _revSession, which
 // orders running snapshot writes: a tap's id is `${session}.${seq}` and the
 // server counts the session's seqs to report the taps it never got (gaps).
@@ -5257,10 +5263,7 @@ function _membersBase(compID, teamId) {
 // _newClientId: an id this device mints for a team member or a court call, a
 // lowercase UUID v4 (the server's state.IsClientUUID).
 function _newClientId() {
-    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') return crypto.randomUUID().toLowerCase();
-    const hex = (n) => Array.from({ length: n }, () => Math.floor(Math.random() * 16).toString(16)).join('');
-    const variant = (8 + Math.floor(Math.random() * 4)).toString(16);
-    return `${hex(8)}-${hex(4)}-4${hex(3)}-${variant}${hex(3)}-${hex(12)}`;
+    return _randomId();
 }
 
 // The member as this device shows it after its own write: stamped now, in

@@ -68,6 +68,17 @@ function server(reply) {
 const reconnect = async () => { window.dispatchEvent(new Event('online')); await tick(50); };
 
 describe('a team member write is the outbox\'s (R1)', () => {
+    it('the ids and queue keys come from getRandomValues, never Math.random (a plain-http venue has no randomUUID)', async () => {
+        const rnd = vi.spyOn(Math, 'random');
+        const secure = vi.spyOn(globalThis.crypto, 'getRandomValues');
+        const member = await API.addTeamMember('c1', 't1', 'Ren Abe', 'pw', { index: 6 });
+        expect(member.id).toMatch(UUID_V4);
+        expect(secure).toHaveBeenCalled();
+        expect(rnd).not.toHaveBeenCalled();
+        rnd.mockRestore();
+        secure.mockRestore();
+    });
+
     it('the add answers at once, offline, with the member under an id this device minted', async () => {
         const member = await API.addTeamMember('c1', 't1', '  Ren Abe ', 'pw', { index: 6 });
         expect(member.id).toMatch(UUID_V4);

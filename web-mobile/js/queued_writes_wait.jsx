@@ -29,6 +29,10 @@ function kindList(kinds) {
   return Array.isArray(kinds) ? kinds : [];
 }
 
+function kindsOfKey(key) {
+  return key ? key.split(',') : [];
+}
+
 function apiOf() {
   return typeof window !== 'undefined' ? window.API : null;
 }
@@ -99,7 +103,7 @@ export function useWaitForQueuedWrites(compID, kinds) {
     keyRef.current = { compID, kindsKey };
     heldRef.current = null;
     setWaiting(false);
-    const kindsNow = kindsKey ? kindsKey.split(',') : [];
+    const kindsNow = kindsOfKey(kindsKey);
     const onChange = () => {
       if (!mountedRef.current) return;
       const count = queuedWritesCount(compID, kindsNow);
@@ -125,7 +129,7 @@ export function useWaitForQueuedWrites(compID, kinds) {
   const run = useCallback((fn) => {
     if (typeof fn !== 'function') return;
     const { compID: id, kindsKey: key } = keyRef.current;
-    const kindsNow = key ? key.split(',') : [];
+    const kindsNow = kindsOfKey(key);
     const count = queuedWritesCount(id, kindsNow);
     if (count === 0) { fn(); return; }
     heldRef.current = fn;

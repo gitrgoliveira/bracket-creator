@@ -416,3 +416,45 @@ func withStoredTournamentVersion(t testing.TB, store *state.Store, body map[stri
 	require.NoError(t, json.Unmarshal(versionedTournamentBody(t, store, data), &out))
 	return out
 }
+
+// A save that landed while its answer was lost is resent at the old version.
+// The stored settings already are that save, so the resend is answered, not
+// refused as somebody else's change; a different save at the old version still
+// is refused.
+func TestTournamentSaveResentAfterItLandedIsAnswered(t *testing.T) {
+	r, store, _, _, _ := setupTestRouter(t)
+	require.NoError(t, store.SaveTournament(&state.Tournament{Name: "Taikai", Password: "pw", Courts: []string{"A"}}))
+	old := tournamentVersionOf(t, r)
+
+	w := versionDo(t, r, "PUT", "/api/tournament", tournamentSaveBody("From the desk", old))
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	current := tournamentVersionOf(t, r)
+
+	w = versionDo(t, r, "PUT", "/api/tournament", tournamentSaveBody("From the desk", old))
+	require.Equal(t, http.StatusOK, w.Code, "the resend of a save that landed is not a conflict: "+w.Body.String())
+	assert.Equal(t, current, decodeMap(t, w)["tournamentVersion"])
+
+	w = versionDo(t, r, "PUT", "/api/tournament", tournamentSaveBody("From the court", old))
+	require.Equal(t, http.StatusConflict, w.Code, w.Body.String())
+
+	// A resend that also changes the password is a change, not a replay.
+	body := tournamentSaveBody("From the desk", old)
+	body["password"] = "other"
+	w = versionDo(t, r, "PUT", "/api/tournament", body)
+	require.Equal(t, http.StatusConflict, w.Code, w.Body.String())
+}
+
+func TestAwardsSaveResentAfterItLandedIsAnswered(t *testing.T) {
+	r, _ := awardsFixture(t)
+	old := awardsVersionOf(t, r)
+	w := versionDo(t, r, "PUT", "/api/competitions/c1/awards", awardsBody("sato", old))
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	current := awardsVersionOf(t, r)
+
+	w = versionDo(t, r, "PUT", "/api/competitions/c1/awards", awardsBody("sato", old))
+	require.Equal(t, http.StatusOK, w.Code, "the resend of a save that landed is not a conflict: "+w.Body.String())
+	assert.Equal(t, current, decodeMap(t, w)["awardsVersion"])
+
+	w = versionDo(t, r, "PUT", "/api/competitions/c1/awards", awardsBody("Tanaka", old))
+	require.Equal(t, http.StatusConflict, w.Code, w.Body.String())
+}

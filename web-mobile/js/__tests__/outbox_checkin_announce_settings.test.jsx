@@ -409,6 +409,17 @@ describe('the tournament settings (G4b)', () => {
         expect(t.tournamentVersion).toBe('v0');
         expect(t.password).toBeUndefined();
     });
+
+    it('a fetch keeps the stored sponsors: the server never takes them from the save', async () => {
+        const sponsors = [{ name: 'Shop', file: 's.png' }];
+        await API.updateTournament(settings({ venue: 'Queued hall', sponsors: [] }), 'pw');
+        global.fetch = vi.fn((url) => (String(url).endsWith('/api/viewer/tournament')
+            ? respond(200, { name: 'Cup', venue: 'Stored hall', sponsors, tournamentVersion: 'v0' })
+            : Promise.reject(new TypeError('offline'))));
+        const t = await API.fetchTournament();
+        expect(t.venue).toBe('Queued hall');
+        expect(t.sponsors).toEqual(sponsors);
+    });
 });
 
 describe('the fighting-spirit awards (G4b)', () => {

@@ -6,6 +6,7 @@
 
 import { useStableId } from './stable_id.jsx';
 import { useUnsavedInput } from './app_version.jsx';
+import { isOffline, savedOfflineSentence } from './write_result.jsx';
 
 const { useState, useEffect, useCallback } = React;
 
@@ -24,8 +25,15 @@ function sendAnnouncementLabel(inFlight) {
 // link allows, so a send made with no connection says it is saved, not sent.
 function announcementSentToast(minutes, online) {
   return online === false
-    ? "Announcement saved: it goes out once the connection is back."
+    ? savedOfflineSentence("Announcement")
     : `Announcement broadcast for ${minutes} minutes!`;
+}
+
+// What the server answered when the call's time had already run out on arrival
+// (a send held offline for longer than it was to show): nothing was shown, and
+// the toast above has already said it was sent, so this says it was not.
+function announcementExpiredToast(minutes) {
+  return `That court call did not go out: its ${minutes} minutes ran out before it reached the server.`;
 }
 
 // AnnouncementComposer: the broadcast card body (active-announcements
@@ -59,8 +67,12 @@ function AnnouncementComposer({ password, showToast }) {
   // write is kept on this device and goes out when the link allows. Its
   // `settled` is the server's word; a refusal is told once by the outbox, so
   // the list is only read again here, to show what really stands.
-  const reloadWhenSettled = (answer) => {
-    if (answer && answer.settled) answer.settled.then(refreshAnnouncements, refreshAnnouncements);
+  const reloadWhenSettled = (answer, onStored) => {
+    if (!answer || !answer.settled) return;
+    answer.settled.then((stored) => {
+      if (onStored) onStored(stored);
+      refreshAnnouncements();
+    }, refreshAnnouncements);
   };
 
   const handleSendAnnouncement = async () => {
@@ -71,9 +83,12 @@ function AnnouncementComposer({ password, showToast }) {
       const answer = await window.API.sendAnnouncement(trimmed, announcementDuration, password);
       setAnnouncementMessage("");
       if (showToast) {
-        showToast(announcementSentToast(announcementDuration, typeof navigator !== "undefined" ? navigator.onLine : true), "success");
+        showToast(announcementSentToast(announcementDuration, !isOffline()), "success");
       }
-      reloadWhenSettled(answer);
+      const minutes = announcementDuration;
+      reloadWhenSettled(answer, (stored) => {
+        if (stored && stored.expired && showToast) showToast(announcementExpiredToast(minutes), "error");
+      });
     } catch (e) {
       if (showToast) {
         showToast(e.message, "error");
@@ -187,4 +202,4 @@ window.AnnouncementModal = AnnouncementModal;
 
 // ES export for the vitest suite: pure helpers only. Components stay
 // behind the window.* pattern to match the rest of admin_*.jsx.
-export { isSendAnnouncementDisabled, sendAnnouncementLabel, announcementSentToast };
+export { isSendAnnouncementDisabled, sendAnnouncementLabel, announcementSentToast, announcementExpiredToast };

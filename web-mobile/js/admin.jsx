@@ -21,6 +21,7 @@ import { scoreRowMatchLabel } from './pool_ids.jsx';
 import { mergeSavedCompetition } from './competition_put_body.jsx';
 import { AdminCalendarPage } from './admin_calendar.jsx';
 import { useWaitForQueuedWrites, QueuedWritesWait } from './queued_writes_wait.jsx';
+import { isOffline, savedOfflineSentence } from './write_result.jsx';
 
 const { useState, useEffect, useRef } = React;
 
@@ -694,9 +695,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
       // Kept on this device and sent when the link allows: a save made with no
       // connection says so now, not when it lands (the same line the court-call
       // composer gives).
-      if (typeof navigator !== "undefined" && navigator.onLine === false) {
-        showToast("Tournament settings saved: they go out once the connection is back.", "success");
-      }
+      if (isOffline()) showToast(savedOfflineSentence("Tournament settings"), "success");
       res.settled.then((saved) => {
         // Discarded from the held-writes list (or sent by another tab, whose
         // answer this one does not hold): nothing of it is known here, so the

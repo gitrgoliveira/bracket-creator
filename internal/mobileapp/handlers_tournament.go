@@ -691,6 +691,24 @@ func adminTournamentCopy(t *state.Tournament, verifier PasswordVerifier) *state.
 	return t
 }
 
+// staleTournamentSave reports whether a save made from settings version `from`
+// must be refused because the stored settings moved on. A save whose body
+// already is the stored settings is not stale: it is the resend of one that
+// landed while its answer was lost, and refusing it would tell a device its
+// own earlier save was somebody else's change. A body carrying a different
+// password is a change, so it is judged by its version like any other.
+func staleTournamentSave(current *state.Tournament, body *state.Tournament, from string) bool {
+	if current == nil {
+		return false
+	}
+	stored := state.TournamentVersion(current)
+	if stored == from {
+		return false
+	}
+	samePassword := body.Password == "" || body.Password == current.Password
+	return !(samePassword && state.TournamentVersion(body) == stored)
+}
+
 // respondTournamentChanged answers a PUT /api/tournament made against an
 // older copy of the settings: 409 tournament_changed with the current copy
 // (as the admin GET serves it) and its version, as config_changed does for a
@@ -743,19 +761,6 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 			c.JSON(http.StatusBadRequest, gin.H{"error": "tournamentVersion is required: send the version of the tournament settings this save was made from"})
 			return
 		}
-		// A save made from an older copy is told so before its body is judged:
-		// a stale form gets the current settings, not a refusal about values
-		// it was never going to write. The same check runs again under the
-		// store's lock below.
-		stored, err := store.LoadTournament()
-		if err != nil {
-			internalError(c, err)
-			return
-		}
-		if stored != nil && state.TournamentVersion(stored) != req.TournamentVersion {
-			respondTournamentChanged(c, store, verifier)
-			return
-		}
 		t := req.Tournament
 		// Trim string fields so padded input from direct API callers
 		// doesn't persist with surrounding whitespace. Date is included
@@ -769,6 +774,20 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 		t.Venue = strings.TrimSpace(t.Venue)
 		t.Date = strings.TrimSpace(t.Date)
 		trimPublicInfoFields(&t)
+
+		// A save made from an older copy is told so before its body is judged:
+		// a stale form gets the current settings, not a refusal about values
+		// it was never going to write. The same check runs again under the
+		// store's lock below.
+		stored, err := store.LoadTournament()
+		if err != nil {
+			internalError(c, err)
+			return
+		}
+		if staleTournamentSave(stored, &t, req.TournamentVersion) {
+			respondTournamentChanged(c, store, verifier)
+			return
+		}
 
 		// Reject non-empty Date that doesn't match the canonical DD-MM-YYYY
 		// shape (or semantically invalid days like Feb 31). The frontend
@@ -893,7 +912,7 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 			// both land: the second is refused and its device shows the
 			// current copy. With no tournament.md yet there is nothing to
 			// write over.
-			if current != nil && state.TournamentVersion(current) != req.TournamentVersion {
+			if staleTournamentSave(current, desired, req.TournamentVersion) {
 				return errTournamentChanged
 			}
 			// Preserve Theme.LogoPath (mp-scf): LogoPath has json:"-" so the

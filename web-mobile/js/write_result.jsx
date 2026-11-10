@@ -699,6 +699,19 @@ export function noConnectionError(sentence, cause) {
     return Object.assign(new Error(sentence, { cause }), { noConnection: true });
 }
 
+// isOffline: the browser knows it has no connection. The one read of it for the
+// surfaces that tell the operator a kept save will go out later.
+export function isOffline() {
+    return typeof navigator !== 'undefined' && navigator.onLine === false;
+}
+
+// The one line for a save the outbox keeps on this device while there is no
+// connection: it says so now, not when the save lands. `what` names the
+// thing saved ("Tournament settings", "Announcement").
+export function savedOfflineSentence(what) {
+    return `${what} saved. The save goes out once the connection is back.`;
+}
+
 // What a failure says on screen: a sentence from noConnectionError as it is,
 // any other failure after the caller's own prefix ("PDF export failed: ").
 export function shownMessage(err, prefix) {

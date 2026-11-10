@@ -524,6 +524,9 @@ paths:
         request is 400. If it is not the stored settings' version the save is
         refused with 409 `tournament_changed` (`TournamentChangedError`), nothing
         is written, and the answer carries the current copy and its version.
+        A save whose body already is the stored settings (the resend of one that
+        landed while its answer was lost) is not refused: it is answered 200 with
+        the stored settings, and nothing is written.
 
         **File mode; Password preserve semantics**: when the request
         body omits `password` or sends an empty string, the server
@@ -2599,7 +2602,9 @@ paths:
         save's answer). Without it the request is 400. If it is not the stored
         list's version the save is refused with 409 `awards_changed`
         (`AwardsChangedError`), nothing is written, and the answer carries the
-        list as stored now and its version.
+        list as stored now and its version. A save whose list already is the
+        stored one (the resend of one that landed while its answer was lost) is
+        not refused: it is answered 200 with the stored competition.
       security:
         - TournamentPassword: []
       parameters:

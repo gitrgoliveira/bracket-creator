@@ -137,7 +137,7 @@ describe('AdminApp saves the tournament settings through the outbox', () => {
       window.API.updateTournament.mockResolvedValue({ applied: true, pending: true, settled: settled.promise });
       const app = await mount();
       await act(async () => { await probe.props.onSave(patch()); });
-      expect(app.showToast).toHaveBeenCalledWith('Tournament settings saved: they go out once the connection is back.', 'success');
+      expect(app.showToast).toHaveBeenCalledWith('Tournament settings saved. The save goes out once the connection is back.', 'success');
       // The server's word still comes when it lands.
       await act(async () => { settled.resolve({ tournamentVersion: 'v2' }); await settled.promise; });
       expect(app.showToast).toHaveBeenCalledWith('Tournament updated');
@@ -367,7 +367,7 @@ describe('Fighting-spirit awards save through the outbox', () => {
       const settled = pendingAnswer();
       const showToast = await mount();
       await act(async () => { fireEvent.click(screen.getByTestId('fs-award-save')); });
-      expect(showToast).toHaveBeenCalledWith('Fighting Spirit awards saved: they go out once the connection is back.', 'success');
+      expect(showToast).toHaveBeenCalledWith('Fighting Spirit awards saved. The save goes out once the connection is back.', 'success');
       expect(showToast).not.toHaveBeenCalledWith('Fighting Spirit awards saved.', 'success');
       await act(async () => { settled.resolve({ awardsVersion: 'a2' }); await settled.promise; });
       expect(showToast).toHaveBeenCalledWith('Fighting Spirit awards saved.', 'success');

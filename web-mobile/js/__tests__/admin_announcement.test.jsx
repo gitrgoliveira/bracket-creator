@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { isSendAnnouncementDisabled, sendAnnouncementLabel, announcementSentToast } from '../admin_announcement.jsx';
+import { isSendAnnouncementDisabled, sendAnnouncementLabel, announcementSentToast, announcementExpiredToast } from '../admin_announcement.jsx';
 
 // Pure helpers for the announcement-broadcast button. Moved here from
 // admin_setup.test.jsx alongside the AnnouncementComposer extraction (mp-djc).
@@ -41,5 +41,13 @@ describe('announcementSentToast', () => {
     const t = announcementSentToast(5, false);
     expect(t).toMatch(/saved/i);
     expect(t).not.toMatch(/broadcast for/);
+  });
+});
+
+describe('announcementExpiredToast', () => {
+  it('says the call did not go out, with the minutes it had', () => {
+    const t = announcementExpiredToast(10);
+    expect(t).toMatch(/did not go out/);
+    expect(t).toContain('10 minutes');
   });
 });

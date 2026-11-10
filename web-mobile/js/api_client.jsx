@@ -43,8 +43,11 @@ import {
     downstreamKnockoutPlayedQueueDrop, downstreamKnockoutRunningMessage, downstreamKnockoutRunningReopenMessage,
     downstreamKnockoutRunningQueueDrop, courtBusyMessage,
     FETCH_TIMEOUT_MS, REP_BOUT_NOT_ADDED, REP_BOUT_NOT_REMOVED, tapOutcomeQuiet,
-    isFinishedResultWrite, NOT_SENT_NO_CONNECTION, WRITE_NOT_CONFIRMED, noConnectionError,
+    isFinishedResultWrite, isOffline, NOT_SENT_NO_CONNECTION, WRITE_NOT_CONFIRMED, noConnectionError,
 } from './write_result.jsx';
+import {
+    DOC_VERSION_FIELD, TOURNAMENT_BASE, awardsBase, tournamentRefusal, awardsRefusal, createDocumentVersions,
+} from './document_versions.jsx';
 // bc-evts S2: the build this page runs against the server's, and the reload rule.
 import { noteServerBuild, setOutboxIdleProbe, setBeforeReload, noteOutboxDrained } from './app_version.jsx';
 import { CLOCK_SKEW as TAP_CLOCK_SKEW } from './score_events.jsx';
@@ -1539,14 +1542,14 @@ function _revertLocalFields(d) {
 // _overlayPendingFields: a fetched competition (a list item or a detail) with
 // the court and time this device still has queued for its matches put on, and
 // its queued check-ins (_overlayPendingCheckIns) and awards save
-// (_overlayPendingAwards).
+// (overlayPendingAwards).
 function _overlayPendingFields(comp, compID) {
     const id = compID || (comp && (comp.id || (comp.config && comp.config.id)));
     if (!comp || !id) return comp;
     // Every fetch of a competition passes here: a tap of this device it turned
     // away since its answer is told (_tellTurnedAway), after a reload too.
     _tellTurnedAwayIn(comp, id);
-    return _overlayPendingAwards(_overlayPendingCheckIns(_overlayPendingMatchFields(comp, id), id), id);
+    return overlayPendingAwards(_overlayPendingCheckIns(_overlayPendingMatchFields(comp, id), id), id);
 }
 
 function _overlayPendingMatchFields(comp, id) {
@@ -1718,117 +1721,15 @@ function _courtCallLabel(message) {
     return `Court call: "${m.length > 40 ? `${m.slice(0, 39)}…` : m}"`;
 }
 
-// ---------------------------------------------------------------------------
-// bc-obox G4b: the tournament settings and a competition's fighting-spirit
-// awards, whole documents saved against a version.
-// ---------------------------------------------------------------------------
-// One base per document (`tournament`, `awards:<comp>`). A save not yet out
-// takes the place of a queued save of the same document (_coalesceTarget); a
-// save made against the version this device's own last save of the document
-// replaced takes the version that save answered (_rebaseQueuedVersion), so
-// the device never refuses its own earlier save; a save made against any
-// other version is sent as it is, and the server refuses it when another
-// device changed the document since (409 tournament_changed / awards_changed).
-const _DOC_VERSION_FIELD = { tournament: 'tournamentVersion', awards: 'awardsVersion' };
-const _TOURNAMENT_BASE = 'tournament';
-const _DOC_MOVES_MAX = 32;
-function _awardsBase(compID) {
-    return `awards:${compID}`;
-}
-// Per base: the versions this device's landed saves moved the document from,
-// each to the version that save answered. In memory: a reload reads the
-// document again.
-const _docVersionMoves = new Map();
-
-// _currentDocVersion: `v` moved along this device's own landed saves.
-function _currentDocVersion(base, v) {
-    const moves = _docVersionMoves.get(base);
-    let out = v;
-    for (let i = 0; moves && i < _DOC_MOVES_MAX && moves.has(out); i++) out = moves.get(out);
-    return out;
-}
-
-// _rebaseQueuedVersion: the ONE rule for both documents. A save of `base` that
-// was sent at version `sent` landed and answered `got`: a save of the same
-// document still queued at `sent` (made before the answer came) takes `got`,
-// as does a save made later at `sent`.
-function _rebaseQueuedVersion(base, field, sent, got) {
-    if (!field || typeof sent !== 'string' || !sent || typeof got !== 'string' || !got || sent === got) return;
-    let moves = _docVersionMoves.get(base);
-    if (!moves) { moves = new Map(); _docVersionMoves.set(base, moves); }
-    // A version is a hash of the document, so a save can put it back at content
-    // it had before. The document is at `got` now: a move out of `got` made
-    // earlier describes a document that no longer exists, and following it
-    // would send a version the server no longer holds.
-    moves.delete(got);
-    moves.delete(sent);
-    moves.set(sent, got);
-    while (moves.size > _DOC_MOVES_MAX) moves.delete(moves.keys().next().value);
-    let changed = false;
-    for (const [, d] of _entriesFor(base)) {
-        if (d && d.payload && !_inFlight.has(d) && d.payload[field] === sent) {
-            d.payload[field] = got;
-            changed = true;
-        }
-    }
-    if (changed) _persistQueue();
-}
-
-// The fields of a queued document save that are the document, not the
-// outbox's tags, the version it was made against or the password.
-function _documentFields(payload) {
-    const { writeId: _w, session: _s, basis: _b, password: _p, tournamentVersion: _t, awardsVersion: _a, competitions: _c, ...fields } = payload || {};
-    return fields;
-}
-
-// _pendingDocument: the payload of the save still queued for a document (its
-// last entry), or null.
-function _pendingDocument(base) {
-    const list = _entriesFor(base);
-    return list.length ? list[list.length - 1][1].payload || null : null;
-}
-
-// _overlayPendingTournament: the fetched tournament with the settings this
-// device still has queued put on, so a refetch before the save lands never
-// shows the stored copy over the operator's change.
-function _overlayPendingTournament(t) {
-    const p = t && typeof t === 'object' ? _pendingDocument(_TOURNAMENT_BASE) : null;
-    return p ? { ...t, ..._documentFields(p) } : t;
-}
-
-// _overlayPendingAwards: the same for a competition's awards.
-function _overlayPendingAwards(comp, id) {
-    const p = _pendingDocument(_awardsBase(id));
-    if (!p || !Array.isArray(p.fightingSpiritAwards)) return comp;
-    const out = { ...comp };
-    if (comp.config) out.config = { ...comp.config, fightingSpiritAwards: p.fightingSpiritAwards };
-    if (!comp.config || 'fightingSpiritAwards' in comp) out.fightingSpiritAwards = p.fightingSpiritAwards;
-    return out;
-}
-
-// _tournamentRefusal: the Error a refused tournament save rejects with, the
-// shape the direct save threw: a 409 tournament_changed carries the settings
-// as they stand now, for the open form to reload.
-function _tournamentRefusal(err, status) {
-    const e = new Error(err.error || 'Failed to update tournament');
-    if (status === 409 && err.code === 'tournament_changed') {
-        e.code = 'tournament_changed';
-        e.tournament = err.tournament || null;
-    }
-    return e;
-}
-
-// _awardsRefusal: the same for an awards save: a 409 awards_changed carries
-// the list as it stands now and its version.
-function _awardsRefusal(err, status) {
-    const e = new Error(err.error || 'Failed to update competition awards');
-    if (status === 409 && err.code === 'awards_changed') {
-        e.code = 'awards_changed';
-        e.awardsVersion = err.awardsVersion || '';
-        e.fightingSpiritAwards = err.fightingSpiritAwards || [];
-    }
-    return e;
-}
+// The tournament settings and the awards are whole documents saved against a
+// version (document_versions.jsx); it reaches the queue only through these.
+const {
+    currentDocVersion, rebaseQueuedVersion, overlayPendingTournament, overlayPendingAwards,
+} = createDocumentVersions({
+    entriesFor: (base) => _entriesFor(base),
+    isInFlight: (d) => _inFlight.has(d),
+    persistQueue: () => _persistQueue(),
+});
 
 // ---------------------------------------------------------------------------
 // bc-evts stage 3: the outbox. EVERY rule-bound write (a tap, a Finish, a
@@ -2420,7 +2321,7 @@ function _coalesceTarget(base, descriptor) {
     // A whole-document save (the tournament settings, a competition's awards)
     // restates the document, so it takes the place of a queued save of the
     // same document not yet out (bc-obox G4b).
-    if (_DOC_VERSION_FIELD[descriptor.kind]) return prev.kind === descriptor.kind ? last : null;
+    if (DOC_VERSION_FIELD[descriptor.kind]) return prev.kind === descriptor.kind ? last : null;
     if (descriptor.kind !== 'score') return null;
     if (prev.kind !== 'score') return null;
     if (prev.terminal && !descriptor.terminal) return null;
@@ -3586,9 +3487,9 @@ function _doorRefusal(d, status, body) {
         case 'announce-clear':
             return _refusalError(b, 'The court calls were not cleared.');
         case 'tournament':
-            return _tournamentRefusal(b, status);
+            return tournamentRefusal(b, status);
         case 'awards':
-            return _awardsRefusal(b, status);
+            return awardsRefusal(b, status);
         default:
             return new Error(_refusalText(b, `HTTP ${status}`));
     }
@@ -3786,8 +3687,8 @@ async function _sendEntry(key, descriptor, pass) {
             if (terminal && kind === 'score') _matchRevCounters.delete(_revKey(compID, matchID));
             // A document save that landed: a save of it still queued at the
             // version this one was sent at takes the one it answered (G4b).
-            const docField = _DOC_VERSION_FIELD[kind];
-            if (docField) _rebaseQueuedVersion(_baseOf(key), docField, payload && payload[docField], body[docField]);
+            const docField = DOC_VERSION_FIELD[kind];
+            if (docField) rebaseQueuedVersion(_baseOf(key), docField, payload && payload[docField], body[docField]);
         } else if (_writeQueue.has(key)) {
             // A later write took this one's place while it was out (the same
             // key, _placeWrite): it goes before anything queued after it.
@@ -3864,7 +3765,7 @@ async function _sendEntry(key, descriptor, pass) {
             ...(refusal.sentence ? { sentence: true } : {}),
             // The document refusals have their own words (app.jsx
             // queueAlertMessage): open the settings and save again.
-            ...(err.code && _DOC_VERSION_FIELD[kind] ? { code: err.code } : {}),
+            ...(err.code && DOC_VERSION_FIELD[kind] ? { code: err.code } : {}),
         };
         // Said once: by the editor open on the match (a terminal write's
         // banner), else by the alert.
@@ -3883,7 +3784,7 @@ async function _sendEntry(key, descriptor, pass) {
 // document save refused as stale (tournament_changed, awards_changed) at the
 // version it was refused for, or [] for any other refusal.
 function _staleDocumentSaves(key, d, err) {
-    const field = d && _DOC_VERSION_FIELD[d.kind];
+    const field = d && DOC_VERSION_FIELD[d.kind];
     if (!field || !err || err.code !== `${d.kind}_changed`) return [];
     const at = d.payload && d.payload[field];
     return _entriesFor(_baseOf(key)).filter(([k, e]) => k !== key && e && !_inFlight.has(e)
@@ -4224,7 +4125,7 @@ function _placeWrite(base, descriptor) {
     // A document save keeps the version the queued save it replaces was made
     // against: the change another device made since that save is refused, not
     // written over, whichever of the two screens the operator saved from.
-    const docField = _DOC_VERSION_FIELD[descriptor.kind];
+    const docField = DOC_VERSION_FIELD[descriptor.kind];
     if (docField) {
         descriptor.payload = { ...descriptor.payload, [docField]: prev.payload ? prev.payload[docField] : descriptor.payload[docField] };
         for (const k of _afterKeys(prev)) _addAfter(descriptor, k);
@@ -5443,7 +5344,7 @@ const API = {
             throw new Error(err.error || `Failed to fetch tournament (Status ${res.status})`);
         }
         // A settings save this device still has queued shows (G4b).
-        return _overlayPendingTournament(await res.json());
+        return overlayPendingTournament(await res.json());
     },
     // Public endpoint: returns {mode: "file"|"locked", resetEnabled: bool}.
     // Mounted on App() boot to decide whether to render the "Forgot
@@ -5611,8 +5512,8 @@ const API = {
         const { competitions: _comps, ...settings } = body;
         return _outboxWrite({
             kind: 'tournament', compID: '', matchID: '', method: 'PUT', url: '/api/tournament',
-            payload: { ...settings, password: '', tournamentVersion: _currentDocVersion(_TOURNAMENT_BASE, settings.tournamentVersion) },
-            password, onRefusal: opts && opts.onRefusal, base: _TOURNAMENT_BASE, label: 'Tournament settings',
+            payload: { ...settings, password: '', tournamentVersion: currentDocVersion(TOURNAMENT_BASE, settings.tournamentVersion) },
+            password, onRefusal: opts && opts.onRefusal, base: TOURNAMENT_BASE, label: 'Tournament settings',
         });
     },
     // The password change: direct (_directFetch), with the version it was made
@@ -5620,7 +5521,7 @@ const API = {
     // by it, so the caller waits for those first (API.queuedWritesOf).
     async updateTournamentPassword(config, password) {
         const { competitions: _comps, ...settings } = config || {};
-        const sent = _currentDocVersion(_TOURNAMENT_BASE, settings.tournamentVersion);
+        const sent = currentDocVersion(TOURNAMENT_BASE, settings.tournamentVersion);
         const res = await _directFetch('/api/tournament', {
             method: 'PUT',
             headers: {
@@ -5631,10 +5532,10 @@ const API = {
         });
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
-            throw _tournamentRefusal(err, res.status);
+            throw tournamentRefusal(err, res.status);
         }
         const saved = await res.json();
-        _rebaseQueuedVersion(_TOURNAMENT_BASE, 'tournamentVersion', sent, saved && saved.tournamentVersion);
+        rebaseQueuedVersion(TOURNAMENT_BASE, 'tournamentVersion', sent, saved && saved.tournamentVersion);
         return saved;
     },
     async updateCompetition(id, config, password) {
@@ -6317,7 +6218,7 @@ const API = {
     // them changes a match's status, its court, its sides or a bar, so one held
     // or failing for a while does not make every pick ask the operator.
     startCheckUntrusted(compID) {
-        if (typeof navigator !== 'undefined' && navigator.onLine === false) return true;
+        if (isOffline()) return true;
         if (_offlineFlag) return true;
         return API.queuedWritesOf(compID, START_CHECK_WRITE_KINDS) > 0;
     },
@@ -6532,10 +6433,10 @@ const API = {
     // `fightingSpiritAwards`, the list now). The whole list is sent, so a save
     // made while one is queued takes its place (_coalesceTarget).
     async updateCompetitionAwards(id, awards, password, awardsVersion, opts = {}) {
-        const base = _awardsBase(id);
+        const base = awardsBase(id);
         return _outboxWrite({
             kind: 'awards', compID: id, matchID: '', method: 'PUT', url: `/api/competitions/${id}/awards`,
-            payload: { fightingSpiritAwards: awards, awardsVersion: _currentDocVersion(base, awardsVersion) },
+            payload: { fightingSpiritAwards: awards, awardsVersion: currentDocVersion(base, awardsVersion) },
             password, onRefusal: opts && opts.onRefusal, base, label: 'Fighting-spirit awards',
         });
     },

@@ -1,6 +1,7 @@
 package state
 
 import (
+	"reflect"
 	"testing"
 )
 
@@ -156,4 +157,60 @@ func TestAwardsVersion(t *testing.T) {
 	if len(AwardsVersion(one)) != 16 {
 		t.Fatalf("awards version is not 16 hex characters")
 	}
+}
+
+// fieldNames lists the exported field names of a struct type.
+func fieldNames(t reflect.Type) map[string]bool {
+	names := map[string]bool{}
+	for i := 0; i < t.NumField(); i++ {
+		if f := t.Field(i); f.IsExported() {
+			names[f.Name] = true
+		}
+	}
+	return names
+}
+
+// assertCovered fails for every field of the struct that is neither hashed
+// (a same-named field of the version payload) nor named on the exclusion list
+// with its reason, and for every list entry that names no field.
+func assertCovered(t *testing.T, what string, fields, hashed reflect.Type, excluded map[string]string) {
+	t.Helper()
+	have, hashedNames := fieldNames(fields), fieldNames(hashed)
+	for name := range have {
+		_, out := excluded[name]
+		switch {
+		case hashedNames[name] && out:
+			t.Errorf("%s.%s is both hashed and excluded", what, name)
+		case !hashedNames[name] && !out:
+			t.Errorf("%s.%s is neither hashed into the version nor excluded: a change to it would not make a settings save stale. Add it to the version payload, or to the exclusion list with the reason", what, name)
+		}
+	}
+	for name := range hashedNames {
+		if !have[name] {
+			t.Errorf("the version payload hashes %s, which %s no longer has", name, what)
+		}
+	}
+	for name := range excluded {
+		if !have[name] {
+			t.Errorf("the exclusion list names %s.%s, which does not exist", what, name)
+		}
+	}
+}
+
+// The version hashes a hand-kept allowlist of what PUT /api/tournament writes.
+// This fails when a field is added to Tournament or Theme without deciding
+// whether it is part of the version, which would otherwise let two devices
+// overwrite each other's change with no tournament_changed.
+func TestTournamentVersionCoversEveryTournamentField(t *testing.T) {
+	assertCovered(t, "Tournament", reflect.TypeOf(Tournament{}), reflect.TypeOf(tournamentVersionPayload{}), map[string]string{
+		"Password":           "served on no public GET, so never in the version",
+		"Sponsors":           "changed by the sponsor routes; the PUT carries the stored list over",
+		"LunchBlockLegacy":   "legacy key, never on the wire",
+		"OpeningBlockLegacy": "legacy key, never on the wire",
+		"ClosingBlockLegacy": "legacy key, never on the wire",
+		"RulesURLLegacy":     "legacy key, never on the wire",
+	})
+	assertCovered(t, "Theme", reflect.TypeOf(Theme{}), reflect.TypeOf(tournamentVersionTheme{}), map[string]string{
+		"LogoPath": "changed by the branding logo routes; the PUT carries the stored logo over",
+	})
 }

@@ -3282,25 +3282,31 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			internalError(c, err)
 			return
 		}
-		if stored != nil && state.AwardsVersion(stored) != body.AwardsVersion {
+		// Each award is trimmed before it is judged or stored. The recipient's
+		// name and dojo are free text, stored title-cased like a competitor's
+		// (operator decision D15).
+		awards := *body.FightingSpiritAwards
+		trimmed := make([]state.FightingSpiritAward, 0, len(awards))
+		for _, a := range awards {
+			trimmed = append(trimmed, state.FightingSpiritAward{
+				Title:         strings.TrimSpace(a.Title),
+				RecipientName: helper.TitleCaseName(a.RecipientName),
+				RecipientDojo: helper.TitleCaseName(a.RecipientDojo),
+			})
+		}
+		if staleAwardsSave(stored, trimmed, body.AwardsVersion) {
 			respondAwardsChanged(c, stored)
 			return
 		}
 
-		awards := *body.FightingSpiritAwards
 		if len(awards) > MaxFightingSpiritAwards {
 			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("fightingSpiritAwards must not exceed %d entries", MaxFightingSpiritAwards)})
 			return
 		}
 
-		// Validate and trim each award before persisting. The recipient's name
-		// and dojo are free text, stored title-cased like a competitor's
-		// (operator decision D15).
-		trimmed := make([]state.FightingSpiritAward, 0, len(awards))
-		for i, a := range awards {
-			title := strings.TrimSpace(a.Title)
-			recipientName := helper.TitleCaseName(a.RecipientName)
-			recipientDojo := helper.TitleCaseName(a.RecipientDojo)
+		// Validate each award before persisting.
+		for i, a := range trimmed {
+			title, recipientName, recipientDojo := a.Title, a.RecipientName, a.RecipientDojo
 
 			if title == "" {
 				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("fightingSpiritAwards[%d]: title is required", i)})
@@ -3322,11 +3328,6 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("fightingSpiritAwards[%d]: %s", i, err.Error())})
 				return
 			}
-			trimmed = append(trimmed, state.FightingSpiritAward{
-				Title:         title,
-				RecipientName: recipientName,
-				RecipientDojo: recipientDojo,
-			})
 		}
 
 		var compOut, staleCurrent *state.Competition
@@ -3339,7 +3340,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			// Judged under the competition's lock, against the list this
 			// save would replace: a save made from an older copy is refused
 			// and nothing is written.
-			if state.AwardsVersion(current) != body.AwardsVersion {
+			if staleAwardsSave(current, trimmed, body.AwardsVersion) {
 				staleCurrent = current
 				return nil, nil
 			}
@@ -3364,6 +3365,19 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		}
 		c.JSON(http.StatusOK, withAwardsVersion(compOut))
 	})
+}
+
+// staleAwardsSave reports whether an awards save made from list version `from`
+// must be refused because the stored list moved on. A save whose list already
+// is the stored one is not stale: it is the resend of one that landed while its
+// answer was lost, and refusing it would tell a device its own earlier save
+// was somebody else's change.
+func staleAwardsSave(current *state.Competition, awards []state.FightingSpiritAward, from string) bool {
+	if current == nil {
+		return false
+	}
+	stored := state.AwardsVersion(current)
+	return stored != from && state.AwardsVersion(&state.Competition{FightingSpiritAwards: awards}) != stored
 }
 
 // respondAwardsChanged answers a PUT .../awards made from an older list: 409

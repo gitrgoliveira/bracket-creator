@@ -376,7 +376,9 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
       if (answer && answer.configVersion) {
         configVersionRef.current = answer.configVersion;
       } else {
-        configVersionRef.current = "";
+        // No version answered: the next save reads the competition's own,
+        // which mergeSavedCompetition kept, so it stays checked ("" skips it).
+        configVersionRef.current = null;
       }
       // Drop only the persisted fields whose staged value is unchanged, so the
       // sync effect can absorb the server-confirmed values on the next SSE

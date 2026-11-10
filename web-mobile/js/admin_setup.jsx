@@ -251,12 +251,9 @@ function AdminEditTournament({ tournament, onCancel, onSave, onReload, onLogout,
   // otherwise reach the dirty snapshot and the save payload as `{}` (the
   // backend tolerates it but it's cleaner not to rely on that).
   const [theme, setTheme] = useState(normalizeTheme(tournament.theme));
-  // Follow a reload of the tournament (another organiser saved) while the form is open.
-  const incomingLogoOnLobby = !!(tournament.theme && tournament.theme.logoOnLobby);
-  const [logoOnLobby, setLogoOnLobby] = useState(incomingLogoOnLobby);
-  useEffect(() => {
-    setLogoOnLobby(incomingLogoOnLobby);
-  }, [incomingLogoOnLobby]);
+  // Held to the copy the form was opened from, like every other field: a save
+  // made after another organiser saved is refused, and Reload refills the form.
+  const [logoOnLobby, setLogoOnLobby] = useState(!!(tournament.theme && tournament.theme.logoOnLobby));
 
   // mp-sspn: in-flight save state: disables the primary button and swaps its
   // label to "Saving…" so the long form's primary action gives feedback

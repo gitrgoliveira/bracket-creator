@@ -1024,13 +1024,28 @@ function FightingSpiritAwardsEditor({ c, password, showToast }) {
   // list another device has since changed is refused (awards_changed) instead
   // of overwriting it.
   const awardsVersionRef = useRef(c.awardsVersion);
+  // The versions this editor has moved past on this competition. A refetch that
+  // lands late can still carry one of them, and taking it would put the older
+  // version back under a list a later save has replaced.
+  const pastVersionsRef = useRef(new Set());
+  const holdVersion = (version) => {
+    if (version === awardsVersionRef.current) return;
+    pastVersionsRef.current.add(awardsVersionRef.current);
+    pastVersionsRef.current.delete(version);
+    awardsVersionRef.current = version;
+  };
   const dirtyRef = useRef(dirty);
   dirtyRef.current = dirty;
   const versionCompIdRef = useRef(c.id);
   useEffect(() => {
     const switched = versionCompIdRef.current !== c.id;
     versionCompIdRef.current = c.id;
-    if (switched || !dirtyRef.current) awardsVersionRef.current = c.awardsVersion;
+    if (switched) {
+      pastVersionsRef.current.clear();
+      awardsVersionRef.current = c.awardsVersion;
+    } else if (!dirtyRef.current && !pastVersionsRef.current.has(c.awardsVersion)) {
+      holdVersion(c.awardsVersion);
+    }
   }, [c.id, c.awardsVersion]);
 
   // Sync from parent. Reset unconditionally when switching competitions;
@@ -1043,12 +1058,16 @@ function FightingSpiritAwardsEditor({ c, password, showToast }) {
     // catching up must not put the older one back under the newer version.
     if (switched || (!dirty && c.awardsVersion === awardsVersionRef.current)) {
       setAwards((c.fightingSpiritAwards || []).map(withKey));
-      if (switched) setDirty(false);
+      if (switched) {
+        setDirty(false);
+        // A refusal on the competition just left says nothing about this one.
+        setConflict(null);
+      }
     }
   }, [c.id, c.fightingSpiritAwards, c.awardsVersion, dirty]);
 
   const reloadConflict = () => {
-    awardsVersionRef.current = conflict.version;
+    holdVersion(conflict.version);
     setAwards(conflict.awards.map(withKey));
     setConflict(null);
     setDirty(false);
@@ -1064,7 +1083,7 @@ function FightingSpiritAwardsEditor({ c, password, showToast }) {
       // Strip the client-only `_key` before sending to the API.
       const payload = awards.map(({ _key, ...rest }) => rest);
       const saved = await window.API.updateCompetitionAwards(c.id, payload, password, awardsVersionRef.current);
-      awardsVersionRef.current = saved.awardsVersion;
+      holdVersion(saved.awardsVersion);
       // Edits are now persisted; clear dirty so the next prop refresh
       // (the save triggers an SSE refetch) re-syncs to the saved state.
       if (mountedRef.current) { setDirty(false); showToast("Fighting Spirit awards saved.", "success"); }

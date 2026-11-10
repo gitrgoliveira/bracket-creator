@@ -629,8 +629,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
       if (!mountedRef.current) return false;
       // The settings changed on another device: the app takes the current copy
       // (the Edit form keeps what was typed until its Reload remounts it from
-      // this copy, so a stale save stays refused until then; only the form's
-      // logo-on-lobby box follows the copy at once).
+      // this copy, so a stale save stays refused until then).
       if (e && e.code === "tournament_changed" && e.tournament) {
         onUpdateRef.current(tournamentFromConflict(tRef.current, e.tournament, password, authConfig === null || authConfig.mode === "locked"));
       } else {

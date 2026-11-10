@@ -91,11 +91,16 @@ describe('the court console after the server answers a call', () => {
     expect(window.API.sendAnnouncement).toHaveBeenCalledTimes(1);
     expect(showToast).toHaveBeenCalledWith(
       'That court call did not go out: its 5 minutes ran out before it reached the server.', 'error');
+    // The card goes back to uncalled: the button offers a first call again.
+    expect(screen.queryByText('Announced to spectators. Start the match when both are at the line.')).toBeNull();
+    expect(screen.queryByText('Call again')).toBeNull();
+    expect(screen.getAllByText('Call to court').length).toBeGreaterThan(0);
   });
 
   it('says only "Called" when the call was shown', async () => {
     const showToast = await callAndAnswer({ id: 'ann-1', message: 'x' });
     expect(showToast).toHaveBeenCalledTimes(1);
     expect(showToast).toHaveBeenCalledWith('Called Tanaka and Yamada to Shiaijo A');
+    expect(screen.getAllByText('Call again').length).toBeGreaterThan(0);
   });
 });

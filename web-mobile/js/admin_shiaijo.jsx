@@ -1812,6 +1812,9 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                             if (earlier) callIdsRef.current.set(key, earlier);
                             else callIdsRef.current.delete(key);
                         }
+                        // Nothing went out, so with no earlier call standing the
+                        // card reads as if no call was made.
+                        if (!earlier && mountedRef.current) setCalledKey((k) => (k === key ? null : k));
                         if (showToast) showToast(announcementExpiredToast(CALL_MINUTES, "court call"), "error");
                         return;
                     }

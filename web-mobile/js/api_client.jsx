@@ -5040,6 +5040,18 @@ function _restoreForm({ file, from, only, undo, decisions }) {
     return fd;
 }
 
+// A direct door's 200 {applied:false, reason} answer means nothing was written
+// (a later write superseded it, or this device's clock is ahead of the server's).
+// This is the one owner of turning it into an error: the clock frame is checked
+// again, as the score doors do, so the next try uses it, and the error carries
+// the server's sentence (or `fallback`) with the reason on it.
+function _throwNotApplied(answer, fallback) {
+    _relearnClockThrottled();
+    const e = new Error(answer.message || fallback);
+    e.reason = answer.reason;
+    throw e;
+}
+
 // A check-in door answers 200 {applied:false, reason} when nothing was
 // written: "superseded" (a later tap already changed that person; the
 // answer carries them as stored) or "clock_skew" (this device's clock is
@@ -5052,15 +5064,13 @@ function _restoreForm({ file, from, only, undo, decisions }) {
 // reason re-checks the clock frame, as the score doors do; the next tap uses it.
 function _checkInApplied(answer, checkedIn) {
     if (answer && answer.applied === false) {
-        _relearnClockThrottled();
         if (answer.reason === 'superseded' && answer.participant && !!answer.participant.checkedIn === checkedIn) {
+            _relearnClockThrottled();
             return answer.participant;
         }
-        const e = new Error(answer.reason === 'superseded'
+        _throwNotApplied(answer, answer.reason === 'superseded'
             ? 'Another desk changed this check-in after your tap, so nothing was changed.'
-            : (answer.message || 'The check-in was not saved.'));
-        e.reason = answer.reason;
-        throw e;
+            : 'The check-in was not saved.');
     }
     return answer;
 }
@@ -6504,10 +6514,7 @@ const API = {
         }
         const sent = await res.json();
         // clock_skew comes back 200 {applied: false}: the call was not made.
-        if (sent && sent.applied === false) {
-            _relearnClockThrottled();
-            throw new Error(sent.message || 'The announcement was not sent.');
-        }
+        if (sent && sent.applied === false) _throwNotApplied(sent, 'The announcement was not sent.');
         return sent;
     },
     async fetchAnnouncements() {
@@ -6542,10 +6549,7 @@ const API = {
             throw new Error(err.error || `Failed to clear announcements (Status ${res.status})`);
         }
         const cleared = await res.json().catch(() => null);
-        if (cleared && cleared.applied === false) {
-            _relearnClockThrottled();
-            throw new Error(cleared.message || 'The announcements were not cleared.');
-        }
+        if (cleared && cleared.applied === false) _throwNotApplied(cleared, 'The announcements were not cleared.');
     },
     // mp-c38: sponsor logo upload (multipart) and delete.
     async uploadSponsor({ file, name, link, password }) {

@@ -157,9 +157,11 @@ func (s *AnnouncementStore) Remove(id string) (bool, []Announcement) {
 
 // Clear takes down every call made at or before madeAt and keeps that as the
 // floor below which a call arriving later shows nothing; a call made after it
-// stays. The floor never passes the server's now, and the take-down uses the
-// same floor, so a call survives the clear exactly when it would have shown had
-// it arrived after. Returns the updated snapshot and whether anything was taken down.
+// stays. The kept floor never passes the server's now, so a clear stamped a few
+// seconds ahead cannot hide a call another device makes in that window, but the
+// take-down of what is already showing goes by madeAt itself: a call the same
+// device stamped ahead of the server and then cleared does not survive the
+// clear. Returns the updated snapshot and whether anything was taken down.
 func (s *AnnouncementStore) Clear(madeAt time.Time) ([]Announcement, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -178,7 +180,7 @@ func (s *AnnouncementStore) Clear(madeAt time.Time) ([]Announcement, bool) {
 	}
 	var kept, gone []Announcement
 	for _, a := range s.active {
-		if a.SentAt.After(floor) {
+		if a.SentAt.After(madeAt) {
 			kept = append(kept, a)
 		} else {
 			gone = append(gone, a)
@@ -213,22 +215,6 @@ func (s *AnnouncementStore) Get() *Announcement {
 	}
 	c := s.active[len(s.active)-1]
 	return &c
-}
-
-// Set adds a single announcement and clears all prior ones.
-// Kept for backward-compat; new callers should prefer Add.
-func (s *AnnouncementStore) Set(msg string, dur time.Duration) Announcement {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	now := s.clock()
-	ann := Announcement{ID: newParticipantID(), Message: msg, SentAt: now, ExpiresAt: now.Add(dur)}
-	gone := s.active
-	s.active = []Announcement{ann}
-	for _, a := range gone {
-		s.retireLocked(a, now)
-	}
-	return ann
 }
 
 // pruneExpiredLocked removes expired entries and forgets spent ids whose time

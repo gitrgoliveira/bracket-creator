@@ -52,9 +52,8 @@ func TestAnnouncementStore(t *testing.T) {
 		t.Errorf("expected initial list to be empty, got: %v", list)
 	}
 
-	// Set replaces all prior.
 	msg := "Lunch break for 30 minutes"
-	ann := store.Set(msg, 30*time.Minute)
+	ann, _ := add(store, clk, msg, 30*time.Minute)
 	if ann.Message != msg {
 		t.Errorf("expected message %q, got %q", msg, ann.Message)
 	}
@@ -70,9 +69,9 @@ func TestAnnouncementStore(t *testing.T) {
 		t.Errorf("expected retrieved message %q, got %q", msg, retrieved.Message)
 	}
 
-	// Set replaces previous.
+	// A different message is the newest call.
 	newMsg := "Delay on court B"
-	newAnn := store.Set(newMsg, 5*time.Minute)
+	newAnn, _ := add(store, clk, newMsg, 5*time.Minute)
 	if newAnn.Message != newMsg {
 		t.Errorf("expected new message %q, got %q", newMsg, newAnn.Message)
 	}
@@ -85,14 +84,14 @@ func TestAnnouncementStore(t *testing.T) {
 	}
 
 	// Expiry.
-	store.Set("Short notice", 10*time.Millisecond)
-	clk.advance(20 * time.Millisecond)
+	add(store, clk, "Short notice", 10*time.Millisecond)
+	clk.advance(time.Hour)
 	if expired := store.Get(); expired != nil {
 		t.Errorf("expected announcement to be expired (nil), got: %v", expired)
 	}
 
 	// Clear.
-	store.Set("Clear me", 10*time.Minute)
+	add(store, clk, "Clear me", 10*time.Minute)
 	clk.advance(time.Millisecond)
 	store.Clear(clk.now())
 	if cleared := store.Get(); cleared != nil {
@@ -205,13 +204,13 @@ func TestAnnouncementStoreListPrunesExpired(t *testing.T) {
 	}
 }
 
-func TestAnnouncementStoreGetAfterSetReplacesExpired(t *testing.T) {
+func TestAnnouncementStoreGetAfterAddReplacesExpired(t *testing.T) {
 	store, clk := newClockedStore()
 
-	store.Set("expires now", 1*time.Nanosecond)
+	add(store, clk, "expires now", 1*time.Nanosecond)
 	clk.advance(5 * time.Millisecond)
 
-	store.Set("fresh announcement", 10*time.Minute)
+	add(store, clk, "fresh announcement", 10*time.Minute)
 
 	got := store.Get()
 	if got == nil {
@@ -477,19 +476,6 @@ func TestAnnouncementStore_AliasGoesWithItsTarget(t *testing.T) {
 			t.Error("a1 must not be found after Clear")
 		}
 	})
-
-	t.Run("replaced by Set", func(t *testing.T) {
-		store, clk := newClockedStore()
-		a1, _ := add(store, clk, "x", 5*time.Minute)
-		_, _ = add(store, clk, "x", 5*time.Minute)
-		store.Set("y", 5*time.Minute)
-		if n := aliasCount(store); n != 0 {
-			t.Errorf("expected Set to drop the alias, got %d", n)
-		}
-		if found, _ := store.Remove(a1.ID); found {
-			t.Error("a1 must not be found after Set replaced the list")
-		}
-	})
 }
 
 // TestAnnouncementStore_AliasGoesWithAnEvictedTarget: the cap evicts the oldest
@@ -752,19 +738,23 @@ func TestAnnouncementStore_ClearFloorNeverPassesNow(t *testing.T) {
 	}
 }
 
-// TestAnnouncementStore_ClearTakesDownByTheCappedFloor: a call made between the
-// server's now and a clear stamped ahead of it survives that clear, as it would
-// had it arrived after, so the outcome does not depend on arrival order.
-func TestAnnouncementStore_ClearTakesDownByTheCappedFloor(t *testing.T) {
+// TestAnnouncementStore_ClearTakesDownACallStampedAhead: a call a device stamps
+// ahead of the server, inside the skew the door accepts, goes with a clear the
+// same device makes after it, while a call made after the clear stays.
+func TestAnnouncementStore_ClearTakesDownACallStampedAhead(t *testing.T) {
 	store, clk := newClockedStore()
 	t0 := clk.now()
 	if _, outcome, _ := store.Add(newParticipantID(), "A", t0.Add(2*time.Second), 10*time.Minute); outcome != AnnounceAdded {
 		t.Fatalf("A should show, got %d", outcome)
 	}
+	b, outcome, _ := store.Add(newParticipantID(), "B", t0.Add(5*time.Second), 10*time.Minute)
+	if outcome != AnnounceAdded {
+		t.Fatalf("B should show, got %d", outcome)
+	}
 
 	list, changed := store.Clear(t0.Add(4 * time.Second))
-	if changed || len(list) != 1 || list[0].Message != "A" {
-		t.Errorf("A was made after the server's now, so the clear must keep it, got %v %v", changed, list)
+	if !changed || len(list) != 1 || list[0].ID != b.ID {
+		t.Errorf("the clear must take down A, made before it, and keep B, got %v %v", changed, list)
 	}
 }
 

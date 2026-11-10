@@ -175,6 +175,24 @@ describe('Fighting Spirit awards save version', () => {
     expect(version).toBe('a3');
   });
 
+  it('takes a list that returns to earlier content, whose version is the earlier one again', async () => {
+    window.API.updateCompetitionAwards.mockResolvedValue({ awardsVersion: 'a3' });
+    let view;
+    await act(async () => { view = render(editor(comp())); });
+    await act(async () => {
+      view.rerender(editor(comp({ awardsVersion: 'a2', fightingSpiritAwards: [{ title: 'Fighting Spirit', recipientName: 'Suzuki', recipientDojo: '' }] })));
+    });
+    // Another device puts the list back as it was: the version is the first one again.
+    await act(async () => { view.rerender(editor(comp())); });
+    expect(screen.getByTestId('fs-award-name-0').value).toBe('Yamada');
+
+    await act(async () => { fireEvent.click(screen.getByTestId('fs-award-add')); });
+    await act(async () => { fireEvent.click(screen.getByTestId('fs-award-save')); });
+    const [, sent, , version] = window.API.updateCompetitionAwards.mock.calls[0];
+    expect(sent[0].recipientName).toBe('Yamada');
+    expect(version).toBe('a1');
+  });
+
   it('drops a refusal from the competition just left when another competition opens', async () => {
     const stale = Object.assign(new Error('The awards changed, reload them.'), {
       code: 'awards_changed',

@@ -1024,9 +1024,10 @@ function FightingSpiritAwardsEditor({ c, password, showToast }) {
   // list another device has since changed is refused (awards_changed) instead
   // of overwriting it.
   const awardsVersionRef = useRef(c.awardsVersion);
-  // The versions this editor has moved past on this competition. A refetch that
-  // lands late can still carry one of them, and taking it would put the older
-  // version back under a list a later save has replaced.
+  // The versions this editor has moved past on this competition, until the
+  // served version catches up with the one held. A refetch that lands late can
+  // still carry one of them, and taking it would put the older version back
+  // under a list a later save has replaced.
   const pastVersionsRef = useRef(new Set());
   const holdVersion = (version) => {
     if (version === awardsVersionRef.current) return;
@@ -1043,8 +1044,14 @@ function FightingSpiritAwardsEditor({ c, password, showToast }) {
     if (switched) {
       pastVersionsRef.current.clear();
       awardsVersionRef.current = c.awardsVersion;
-    } else if (!dirtyRef.current && !pastVersionsRef.current.has(c.awardsVersion)) {
-      holdVersion(c.awardsVersion);
+    } else if (!dirtyRef.current) {
+      if (c.awardsVersion !== awardsVersionRef.current && !pastVersionsRef.current.has(c.awardsVersion)) {
+        holdVersion(c.awardsVersion);
+      }
+      // Once the served version is the one held, what this editor moved past is
+      // settled: a version is a hash of the list, and a list that later returns
+      // to older content brings that version back.
+      if (c.awardsVersion === awardsVersionRef.current) pastVersionsRef.current.clear();
     }
   }, [c.id, c.awardsVersion]);
 

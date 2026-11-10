@@ -37,6 +37,7 @@ import { checkinPid, checkinApiPid } from './data.jsx';
 import { NO_ID_HINT, NoIdHint } from './data_integrity.jsx';
 import { checkInApplies, tournamentHasCheckIn, SELF_RUN_NO_CHECK_IN } from './competition_shape.jsx';
 import { useUnsavedInput } from './app_version.jsx';
+import { acceptTap } from './tap_guard.jsx';
 
 const { useState, useEffect, useRef, useMemo, useCallback } = React;
 
@@ -1168,6 +1169,11 @@ function AdminRegistrationDeskPage({ tournament, onBack, password, showToast, on
 // Roster list: flat or grouped-by-dojo, with empty / no-match / all-done states.
 // ---------------------------------------------------------------------------
 function RdRoster({ mode, rows, groupByDojo, query, allChecked, canWalkUp, onOpenWalkUp, onPrimary, onToggleChip, onEdit, onBulkDojo }) {
+  // bc-dtfn: the outbox answers at once and the rows flip in the same tick, so
+  // a bounced second tap would read the flipped rows and queue the undo. Each
+  // row, and each dojo's bulk button, takes the bounce of its own last tap. The
+  // chips only ever check in and are held by their own checked state.
+  const tapRef = useRef(null);
   const rowOf = (row, isLast) => {
     if (mode === "all") {
       const rep = row.rec.entries[0].player;
@@ -1182,7 +1188,7 @@ function RdRoster({ mode, rows, groupByDojo, query, allChecked, canWalkUp, onOpe
           others={[]}
           presence={row.presence}
           isLast={isLast}
-          onPrimary={() => onPrimary(row)}
+          onPrimary={(ev) => acceptTap(tapRef, ev, row.rec.key) && onPrimary(row)}
           onToggle={onToggleChip}
         />
       );
@@ -1198,7 +1204,7 @@ function RdRoster({ mode, rows, groupByDojo, query, allChecked, canWalkUp, onOpe
         others={row.others}
         checked={row.player.checkedIn}
         isLast={isLast}
-        onPrimary={() => onPrimary(row)}
+        onPrimary={(ev) => acceptTap(tapRef, ev, `${row.comp.id}:${rdPid(row.player)}`) && onPrimary(row)}
         onToggle={onToggleChip}
         onEdit={onEdit ? () => onEdit(row) : undefined}
       />
@@ -1250,7 +1256,7 @@ function RdRoster({ mode, rows, groupByDojo, query, allChecked, canWalkUp, onOpe
                 <span className="rd-group__name">{dojo}</span>
                 <span className="rd-group__count">{theseRows.length}</span>
                 {pending > 0 && (
-                  <button type="button" className="btn btn--sm rd-group__bulk" onClick={() => onBulkDojo(dojo, theseRows)}>
+                  <button type="button" className="btn btn--sm rd-group__bulk" onClick={(ev) => acceptTap(tapRef, ev, `dojo:${dojo}`) && onBulkDojo(dojo, theseRows)}>
                     Check in all {pending}
                   </button>
                 )}

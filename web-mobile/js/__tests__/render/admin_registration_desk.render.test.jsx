@@ -265,6 +265,27 @@ describe('AdminRegistrationDeskPage check-in sends the id-only wire pid (bc-pnum
     }));
   });
 
+  // bc-dtfn: the outbox answers at once, so a bounced second tap would read the
+  // flipped row and queue the undo. A pointer tap inside the bounce window is
+  // dropped; a keyboard click (detail 0) never is.
+  it('drops the bounce of a pointer tap on a row, but not a keyboard click', async () => {
+    const tournament = makeTournament({
+      competitions: [{
+        id: 'men', name: "Men's Individual", kind: 'individual', status: 'draw-ready',
+        checkInEnabled: true,
+        players: [{ id: 'uuid-akira', name: 'Akira Tanaka', dojo: 'Gyokusen', checkedIn: false }],
+      }],
+    });
+    const { getByRole } = await mount(tournament);
+    const checkbox = getByRole('checkbox', { name: /check in akira tanaka/i });
+    toggleCheckIn.mockClear();
+    await act(async () => { fireEvent.click(checkbox, { detail: 1 }); });
+    await act(async () => { fireEvent.click(checkbox, { detail: 1 }); });
+    expect(toggleCheckIn).toHaveBeenCalledTimes(1);
+    await act(async () => { fireEvent.click(checkbox, { detail: 0 }); });
+    expect(toggleCheckIn).toHaveBeenCalledTimes(2);
+  });
+
   // A refused check-in comes back through the door's onRefusal, long after the
   // tap: the desk claims it and says why once (the row is put back by the
   // outbox's participant patch, pinned in admin_registration_desk_offline).

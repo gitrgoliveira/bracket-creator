@@ -721,7 +721,7 @@ whichever reaches the server first:
   a row with no marker as not checked in at stamp 0. A roster written by an earlier release
   therefore loads as it was and is not rewritten; any check-in tap, which carries a real
   stamp, beats those rows. Reading the marker is the whole migration.
-* The marker is the last column, and a row of two or fewer columns never carries one. A
+* The marker is the last column, and a row of two or fewer data columns (not counting a leading id) never carries one. A
   stamp is not part of what a backup fingerprint compares: `checked_in@<ms>` counts as
   `checked_in` and `not_checked_in@<ms>` as no marker, so a check-in sent again that changes
   nothing, or one applied and taken back, leaves the fingerprint where it was.

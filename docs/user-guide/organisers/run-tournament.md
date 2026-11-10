@@ -87,6 +87,8 @@ Posting the same text again while it is still showing replaces the banner rather
 
 A court call, made with **Call to court** on the court console, is announced the same way. It disappears once the match starts, or is closed with a decision such as a fusensho, from any device, as long as the court console that made the call is still open, even if another console called the same match again meanwhile. If that console was closed or reloaded meanwhile, the call stays up until its five minutes run out.
 
+An announcement, a court call or its withdrawal made while the connection is down is held on the device and sent when the connection returns; tap **Announce** or **Call to court** once. A held call counts its time from the moment it was made, so a call that was already over when it arrives shows nothing, and one with a little time left shows for at least a minute so players can read it. A call you withdrew while it was still held is never shown. Calling the same match twice while offline still shows one banner.
+
 ## Registration desk
 
 Open **Registration desk** from the dashboard to access the check-in surface for the welcome table. Check-in exists only for competitions with **Check-in tracking** turned on in their Settings, and this desk is the one place to do it: it lists every competitor across those competitions so a registration helper can mark participants present as they arrive. A competition with the setting off does not appear here, and its Ordering & seeding panel carries no check-in controls either. A self-run tournament has no check-in, so the dashboard offers no Registration desk there. Refer to the [Check-in workflow](#check-in-workflow).
@@ -206,6 +208,14 @@ Click the pencil icon on any row to open the edit modal for that competitor. You
 Enable **Check-in tracking** in **Settings** for the competition. Competitors are checked in at the [Registration desk](#registration-desk), which works across every competition; the Ordering & seeding panel carries no check-in controls. Self-run mode has no check-in: the setting is not offered and the draw includes every participant on the roster ([operating modes](operating-modes.md)).
 
 The check-in rule is opt-in: when you click **Generate draw**, if at least one participant is checked in, only checked-in participants join the draw and unchecked participants are excluded (their seeds are dropped). If nobody is checked in, everyone is included.
+
+#### Checking in through a dropout
+
+The desk keeps working when the venue connection drops. A tap on a competitor, or on **Check in all**, shows on the row at once and is held on the device; it is sent in the order you tapped when the connection returns. The bar at the top of every admin page counts what is still held, as it does for scores.
+
+Two desks can check in the same competitor. If one desk checked someone in and another desk then took the check-in back, the later tap wins. The desk whose tap lost is told in one line, for example "Aiko Tanaka was changed on another desk: now checked in.", and its row shows the result that stands.
+
+**Generate draw** waits for check-ins that are still on their way, so the draw is made from the roster the desk sees. While any are held, the screen reads, for example, "Waiting for 3 check-ins to be sent. The draw is made once they arrive." The draw is made on its own when the last one arrives. Two buttons are offered meanwhile: **Cancel** leaves the competition in setup, and **Generate now anyway** makes the draw at once. Its confirmation says that the competitors whose check-ins have not arrived are left out of the draw. The same wait applies to **Start competition** on a competition that is still in setup and to **Start all** on the dashboard. If the connection stays down, reconnect first, or discard the stuck item from the held list at the top of the page, then generate the draw.
 
 ### Draw preview
 

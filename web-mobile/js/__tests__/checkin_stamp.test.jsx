@@ -48,6 +48,36 @@ describe('check-in requests carry their stamp', () => {
     await expect(API.bulkCheckIn('c1', ['p1'], 'pw')).rejects.toMatchObject({ reason: 'clock_skew' });
   });
 
+  it('treats a superseded tap whose stored person already holds the asked state as done', async () => {
+    answer({ applied: false, reason: 'superseded', participant: { id: 'p1', checkedIn: true } });
+    await expect(API.toggleCheckIn('c1', 'p1', true, 'pw')).resolves.toEqual({ id: 'p1', checkedIn: true });
+    answer({ applied: false, reason: 'superseded', participant: { id: 'p1', checkedIn: false } });
+    await expect(API.toggleCheckIn('c1', 'p1', false, 'pw')).resolves.toEqual({ id: 'p1', checkedIn: false });
+    // An unchecked person after a check-in tap is a real loss, not a tie.
+    answer({ applied: false, reason: 'superseded', participant: { id: 'p1' } });
+    await expect(API.toggleCheckIn('c1', 'p1', true, 'pw')).rejects.toMatchObject({ reason: 'superseded' });
+  });
+
+  // The direct doors never resend, so a refusal re-checks the clock frame (the
+  // score doors do), whichever door it came from.
+  let hop = 0;
+  it.each([
+    ['a check-in', () => API.toggleCheckIn('c1', 'p1', true, 'pw'), { applied: false, reason: 'clock_skew', message: 'm' }],
+    ['a bulk check-in', () => API.bulkCheckIn('c1', ['p1'], 'pw'), { applied: false, reason: 'clock_skew', message: 'm' }],
+    ['a court call', () => API.sendAnnouncement('Hi', 5, 'pw'), { applied: false, reason: 'clock_skew', message: 'm' }],
+    ['a clear', () => API.clearAnnouncements('pw'), { applied: false, reason: 'clock_skew', message: 'm' }],
+  ])('relearns the clock when %s is refused', async (_name, call, body) => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      vi.setSystemTime(Date.now() + (++hop) * 3_600_000); // past the relearn throttle window
+      answer(body);
+      await expect(call()).rejects.toThrow();
+      expect(global.fetch.mock.calls.some(([url]) => url === '/api/time')).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('returns a bulk answer that applied some ids, superseded ones included', async () => {
     const body = { checkedIn: 1, alreadyCheckedIn: 0, notFound: [], superseded: [{ id: 'p2' }] };
     answer(body);

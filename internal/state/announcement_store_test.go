@@ -751,3 +751,51 @@ func TestAnnouncementStore_ClearFloorNeverPassesNow(t *testing.T) {
 		t.Errorf("a call made after the clear was received must show, got %d %v", outcome, list)
 	}
 }
+
+// TestAnnouncementStore_ClearTakesDownByTheCappedFloor: a call made between the
+// server's now and a clear stamped ahead of it survives that clear, as it would
+// had it arrived after, so the outcome does not depend on arrival order.
+func TestAnnouncementStore_ClearTakesDownByTheCappedFloor(t *testing.T) {
+	store, clk := newClockedStore()
+	t0 := clk.now()
+	if _, outcome, _ := store.Add(newParticipantID(), "A", t0.Add(2*time.Second), 10*time.Minute); outcome != AnnounceAdded {
+		t.Fatalf("A should show, got %d", outcome)
+	}
+
+	list, changed := store.Clear(t0.Add(4 * time.Second))
+	if changed || len(list) != 1 || list[0].Message != "A" {
+		t.Errorf("A was made after the server's now, so the clear must keep it, got %v %v", changed, list)
+	}
+}
+
+// TestAnnouncementStore_KeepsMadeAtOrder: calls reaching the server out of
+// order are held oldest made-at first, so the cap drops the oldest call and the
+// latest is the newest made.
+func TestAnnouncementStore_KeepsMadeAtOrder(t *testing.T) {
+	store, clk := newClockedStore()
+	t0 := clk.now()
+	late := t0.Add(-5 * time.Second)
+
+	for i := range maxActiveAnnouncements {
+		store.Add(newParticipantID(), fmt.Sprintf("msg %d", i), t0.Add(time.Duration(i)*time.Millisecond), 30*time.Minute)
+	}
+	// An older call reaches the server last: at the cap it is the one dropped.
+	older, outcome, list := store.Add(newParticipantID(), "older", late, 30*time.Minute)
+	if outcome != AnnounceRecorded || len(list) != maxActiveAnnouncements {
+		t.Fatalf("the oldest call must not displace a newer one, got %d %d", outcome, len(list))
+	}
+	for _, a := range list {
+		if a.ID == older.ID {
+			t.Error("the late older call must not be showing")
+		}
+	}
+	if got := store.Get(); got == nil || got.Message != fmt.Sprintf("msg %d", maxActiveAnnouncements-1) {
+		t.Errorf("Get must answer the newest made, got %v", got)
+	}
+
+	// A newer call evicts the oldest made.
+	newest, outcome, list := store.Add(newParticipantID(), "newest", t0.Add(time.Hour), 2*time.Hour)
+	if outcome != AnnounceAdded || list[0].Message != "msg 1" || list[len(list)-1].ID != newest.ID {
+		t.Errorf("expected msg 0 evicted and newest last, got %d %v", outcome, list)
+	}
+}

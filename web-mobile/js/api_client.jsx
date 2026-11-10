@@ -5046,8 +5046,16 @@ function _restoreForm({ file, from, only, undo, decisions }) {
 // ahead of the server's). Neither broadcasts anything, so the caller is told
 // here, with the reason on the error, rather than keep a check-in that is
 // not stored. A bulk answer that applied some ids is a result, not a refusal.
-function _checkInApplied(answer) {
+// `checkedIn` is what a single tap asked for: a superseded answer whose stored
+// person already holds it (a same-millisecond tie, a resend) is a success, since
+// the desk shows exactly that. These direct doors do not resend, so either
+// reason re-checks the clock frame, as the score doors do; the next tap uses it.
+function _checkInApplied(answer, checkedIn) {
     if (answer && answer.applied === false) {
+        _relearnClockThrottled();
+        if (answer.reason === 'superseded' && answer.participant && !!answer.participant.checkedIn === checkedIn) {
+            return answer.participant;
+        }
         const e = new Error(answer.reason === 'superseded'
             ? 'Another desk changed this check-in after your tap, so nothing was changed.'
             : (answer.message || 'The check-in was not saved.'));
@@ -6432,7 +6440,7 @@ const API = {
             const err = await res.json().catch(() => ({}));
             throw new Error(err.message || err.error || `Failed to ${checkedIn ? 'check in' : 'undo check-in'} participant`);
         }
-        return _checkInApplied(await res.json());
+        return _checkInApplied(await res.json(), checkedIn);
     },
     // Bulk check-in for one competition. participantIds is an array of pids as
     // built by checkinApiPid/rdApiPid: a stable UUID, or "" for a legacy
@@ -6496,7 +6504,10 @@ const API = {
         }
         const sent = await res.json();
         // clock_skew comes back 200 {applied: false}: the call was not made.
-        if (sent && sent.applied === false) throw new Error(sent.message || 'The announcement was not sent.');
+        if (sent && sent.applied === false) {
+            _relearnClockThrottled();
+            throw new Error(sent.message || 'The announcement was not sent.');
+        }
         return sent;
     },
     async fetchAnnouncements() {
@@ -6531,7 +6542,10 @@ const API = {
             throw new Error(err.error || `Failed to clear announcements (Status ${res.status})`);
         }
         const cleared = await res.json().catch(() => null);
-        if (cleared && cleared.applied === false) throw new Error(cleared.message || 'The announcements were not cleared.');
+        if (cleared && cleared.applied === false) {
+            _relearnClockThrottled();
+            throw new Error(cleared.message || 'The announcements were not cleared.');
+        }
     },
     // mp-c38: sponsor logo upload (multipart) and delete.
     async uploadSponsor({ file, name, link, password }) {

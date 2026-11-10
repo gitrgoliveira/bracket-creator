@@ -183,7 +183,10 @@ func TestAnnouncementHandlers(t *testing.T) {
 	router.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusNotFound, w.Code)
 
-	// 15. DELETE /api/announcements, clear all made at or before the clear
+	// 15. DELETE /api/announcements, clear all made at or before the clear. The
+	// store caps a clear's floor at the server's now, so let the clock pass the
+	// stamps callStamp bumped ahead of it.
+	time.Sleep(10 * time.Millisecond)
 	w = httptest.NewRecorder()
 	req, _ = http.NewRequest("DELETE", "/api/announcements", clearBody())
 	req.Header.Set("X-Tournament-Password", "secret-password")

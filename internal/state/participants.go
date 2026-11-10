@@ -978,8 +978,12 @@ func (s *Store) loadParticipantsLocked(compID string, withZekkenName bool) ([]do
 //
 // withZekkenName MUST match the value the next LoadParticipants will use.
 // The on-disk column layout differs between the two modes:
-//   - non-zekken: [id, Name, Dojo, ...Metadata, Source?, "checked_in"?]
-//   - zekken:    [id, Name, DisplayName, Dojo, ...Metadata, Source?, "checked_in"?]
+//   - non-zekken: [id, Name, Dojo, ...Metadata, Source?, CheckIn?]
+//   - zekken:    [id, Name, DisplayName, Dojo, ...Metadata, Source?, CheckIn?]
+//
+// CheckIn is the marker checkInMarker writes: "checked_in@<ms>" or
+// "not_checked_in@<ms>" for a stamped row, the bare "checked_in" for an
+// unstamped one that is checked in, and nothing for an unstamped one that is not.
 //
 // Pre-fix the function tried to be clever by writing the 2-column form (id,
 // Name, Dojo) when DisplayName was empty or auto-derivable. That broke zekken

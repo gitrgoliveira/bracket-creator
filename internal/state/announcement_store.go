@@ -115,13 +115,18 @@ func (s *AnnouncementStore) Add(id, msg string, madeAt time.Time, dur time.Durat
 		s.recordReplacementLocked(cur, ann.ID)
 	}
 
-	if len(s.active) >= maxActiveAnnouncements {
+	// Kept oldest made-at first, whatever order calls arrive in, so the cap
+	// drops the oldest call and Get answers the newest.
+	at, _ := slices.BinarySearchFunc(s.active, ann, func(a, b Announcement) int { return a.SentAt.Compare(b.SentAt) })
+	s.active = slices.Insert(s.active, at, ann)
+	if len(s.active) > maxActiveAnnouncements {
 		evicted := s.active[0]
 		s.active = s.active[1:]
 		s.retireLocked(evicted, now)
+		if evicted.ID == ann.ID {
+			return ann, AnnounceRecorded, snapshotLocked(s.active)
+		}
 	}
-
-	s.active = append(s.active, ann)
 	return ann, AnnounceAdded, snapshotLocked(s.active)
 }
 
@@ -152,7 +157,9 @@ func (s *AnnouncementStore) Remove(id string) (bool, []Announcement) {
 
 // Clear takes down every call made at or before madeAt and keeps that as the
 // floor below which a call arriving later shows nothing; a call made after it
-// stays. Returns the updated snapshot and whether anything was taken down.
+// stays. The floor never passes the server's now, and the take-down uses the
+// same floor, so a call survives the clear exactly when it would have shown had
+// it arrived after. Returns the updated snapshot and whether anything was taken down.
 func (s *AnnouncementStore) Clear(madeAt time.Time) ([]Announcement, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -171,7 +178,7 @@ func (s *AnnouncementStore) Clear(madeAt time.Time) ([]Announcement, bool) {
 	}
 	var kept, gone []Announcement
 	for _, a := range s.active {
-		if a.SentAt.After(madeAt) {
+		if a.SentAt.After(floor) {
 			kept = append(kept, a)
 		} else {
 			gone = append(gone, a)

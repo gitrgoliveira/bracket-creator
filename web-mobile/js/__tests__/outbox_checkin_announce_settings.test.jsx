@@ -420,6 +420,15 @@ describe('the tournament settings (G4b)', () => {
         expect(t.venue).toBe('Queued hall');
         expect(t.sponsors).toEqual(sponsors);
     });
+
+    it('a fetch keeps the logo flag the server adds to the stored theme', async () => {
+        await API.updateTournament(settings({ theme: { primaryColor: '#123456' } }), 'pw');
+        global.fetch = vi.fn((url) => (String(url).endsWith('/api/viewer/tournament')
+            ? respond(200, { name: 'Cup', theme: { primaryColor: '#abcdef', windowTitle: 'Cup', hasLogo: true }, tournamentVersion: 'v0' })
+            : Promise.reject(new TypeError('offline'))));
+        const t = await API.fetchTournament();
+        expect(t.theme).toEqual({ primaryColor: '#123456', windowTitle: 'Cup', hasLogo: true });
+    });
 });
 
 describe('the fighting-spirit awards (G4b)', () => {

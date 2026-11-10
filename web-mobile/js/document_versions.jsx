@@ -126,7 +126,12 @@ export function createDocumentVersions({ entriesFor, isInFlight, persistQueue })
     // shows the stored copy over the operator's change.
     function overlayPendingTournament(t) {
         const p = t && typeof t === 'object' ? pendingDocument(TOURNAMENT_BASE) : null;
-        return p ? { ...t, ...documentFields(p) } : t;
+        if (!p) return t;
+        const fields = documentFields(p);
+        // The saved theme never carries what the server adds to the fetched one
+        // (hasLogo), so it goes over the stored theme field by field.
+        if (fields.theme && typeof fields.theme === 'object') fields.theme = { ...t.theme, ...fields.theme };
+        return { ...t, ...fields };
     }
 
     // overlayPendingAwards: the same for a competition's awards.

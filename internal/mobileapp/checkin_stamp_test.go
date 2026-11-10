@@ -68,11 +68,13 @@ func TestCheckInDoors_RequireAStamp(t *testing.T) {
 			assert.Equal(t, http.StatusBadRequest, w.Code, "%s at %d: %s", c.name, stamp, w.Body.String())
 		}
 	}
-	put, del, _ := checkInStampCalls(pid, 1)
-	for _, c := range []checkInCall{put, del} {
+	put, del, bulk := checkInStampCalls(pid, 1)
+	for _, c := range []checkInCall{put, del, bulk} {
 		c.body = nil
 		w := serve(r, c, &organiser)
 		assert.Equal(t, http.StatusBadRequest, w.Code, "%s with no body: %s", c.name, w.Body.String())
+		// The same sentence the announcement doors give, not the decoder's "EOF".
+		assert.JSONEq(t, `{"error":"Invalid request payload"}`, w.Body.String(), "%s with no body", c.name)
 	}
 
 	players, err := store.LoadParticipants(noCheckInComp, false)

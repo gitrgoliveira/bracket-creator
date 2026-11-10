@@ -3,6 +3,7 @@ package mobileapp
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
+	"github.com/gitrgoliveira/bracket-creator/internal/engine"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -150,6 +152,82 @@ func TestTeamSizeCap_JudgedOnlyWhereTheSizeIsSet(t *testing.T) {
 	r.ServeHTTP(wPost, reqPost)
 	require.Equalf(t, http.StatusBadRequest, wPost.Code, "POST: %s", wPost.Body.String())
 	assert.Contains(t, wPost.Body.String(), "teamSize must be at most 30")
+}
+
+// A Swiss round count stored past engine.MaxSwissRounds (saved before the cap
+// existed) stays editable for unrelated fields; only a save that changes the
+// round count, and a create, is judged against the cap.
+func TestSwissRoundsCap_JudgedOnlyWhereTheRoundsAreSet(t *testing.T) {
+	r, store, _, _, _ := setupTestRouter(t)
+	long := &state.Competition{
+		ID: "long", Name: "Long Swiss", Date: "10-06-2026", StartTime: "09:00",
+		Courts: []string{"A"}, Format: state.CompFormatSwiss, SwissRounds: 2000,
+		PoolMatchDurationSeconds: 180, KnockoutMatchDurationSeconds: 180,
+		Status: state.CompStatusSetup,
+	}
+	require.NoError(t, store.SaveCompetition(long))
+	stored, err := store.LoadCompetition("long")
+	require.NoError(t, err)
+
+	w := cvPut(t, r, "long", cvSettingsBody(t, stored, "", map[string]any{"name": "Longer Swiss"}))
+	require.Equalf(t, http.StatusOK, w.Code, "rename: %s", w.Body.String())
+	stored, err = store.LoadCompetition("long")
+	require.NoError(t, err)
+	assert.Equal(t, "Longer Swiss", stored.Name)
+	assert.Equal(t, 2000, stored.SwissRounds)
+
+	w = cvPut(t, r, "long", cvSettingsBody(t, stored, "", map[string]any{"swissRounds": engine.MaxSwissRounds + 1}))
+	require.Equalf(t, http.StatusBadRequest, w.Code, "change: %s", w.Body.String())
+	assert.Contains(t, w.Body.String(), fmt.Sprintf("swissRounds must be at most %d", engine.MaxSwissRounds))
+
+	post := *long
+	post.ID, post.Name, post.Status = "new-long", "New Long Swiss", ""
+	body, err := json.Marshal(post)
+	require.NoError(t, err)
+	wPost := httptest.NewRecorder()
+	reqPost, err := http.NewRequest(http.MethodPost, "/api/competitions", bytes.NewReader(body))
+	require.NoError(t, err)
+	reqPost.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(wPost, reqPost)
+	require.Equalf(t, http.StatusBadRequest, wPost.Code, "POST: %s", wPost.Body.String())
+	assert.Contains(t, wPost.Body.String(), fmt.Sprintf("swissRounds must be at most %d", engine.MaxSwissRounds))
+}
+
+// The Settings page sends twoThirdPlaces resolved through the format rule on
+// every save. For a competition that never stored the field, echoing that
+// resolved value must keep it unset: it then still follows the format rule
+// (a later switch to naginata gets the single 3rd place).
+func TestPutSettings_EchoedTwoThirdPlacesKeepsANeverStoredFieldUnset(t *testing.T) {
+	r, store, _, _, _ := setupTestRouter(t)
+	legacy := &state.Competition{
+		ID: "legacy", Name: "Legacy KO", Date: "10-06-2026", StartTime: "09:00",
+		Courts: []string{"A"}, Format: state.CompFormatKnockout,
+		PoolMatchDurationSeconds: 180, KnockoutMatchDurationSeconds: 180,
+		Status: state.CompStatusSetup,
+	}
+	require.NoError(t, store.SaveCompetition(legacy))
+	stored, err := store.LoadCompetition("legacy")
+	require.NoError(t, err)
+	require.Nil(t, stored.TwoThirdPlaces)
+
+	w := cvPut(t, r, "legacy", cvSettingsBody(t, stored, "", map[string]any{"twoThirdPlaces": stored.EffectiveTwoThirdPlaces()}))
+	require.Equalf(t, http.StatusOK, w.Code, "echo: %s", w.Body.String())
+	stored, err = store.LoadCompetition("legacy")
+	require.NoError(t, err)
+	assert.Nil(t, stored.TwoThirdPlaces, "an echoed effective value must not become explicit")
+	echoed := state.ConfigVersion(stored)
+	w = cvPut(t, r, "legacy", cvSettingsBody(t, stored, "", map[string]any{"twoThirdPlaces": stored.EffectiveTwoThirdPlaces()}))
+	require.Equalf(t, http.StatusOK, w.Code, "second echo: %s", w.Body.String())
+	stored, err = store.LoadCompetition("legacy")
+	require.NoError(t, err)
+	assert.Equal(t, echoed, state.ConfigVersion(stored), "an echo save changes nothing")
+
+	w = cvPut(t, r, "legacy", cvSettingsBody(t, stored, "", map[string]any{"naginata": true, "twoThirdPlaces": true}))
+	require.Equalf(t, http.StatusOK, w.Code, "explicit: %s", w.Body.String())
+	stored, err = store.LoadCompetition("legacy")
+	require.NoError(t, err)
+	require.NotNil(t, stored.TwoThirdPlaces, "a value differing from the format rule is stored explicitly")
+	assert.True(t, *stored.TwoThirdPlaces)
 }
 
 func TestConfigVersion_EveryReadAndAnswerAgrees(t *testing.T) {

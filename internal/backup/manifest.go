@@ -48,9 +48,8 @@ type Manifest struct {
 // Meta is what a caller supplies; Write computes Format and Files.
 type Meta struct {
 	// AppVersion is the version the manifest names; empty means the running
-	// app's (version.GetVersion). A caller with its own notion of the running
-	// version (the scheduled job's Version seam) passes it, so the copy it
-	// writes and the restore check it makes name the same version.
+	// app's (RunningVersion, the same seam the restore check reads, so the
+	// copy a caller writes and the check it makes name the same version).
 	AppVersion     string
 	CreatedAt      time.Time
 	Scope          Scope

@@ -42,8 +42,10 @@ export function shiftLanes(courts, allCourts, delta) {
   if (!Array.isArray(courts) || courts.length === 0 || !Array.isArray(allCourts) || allCourts.length === 0) {
     return [];
   }
-  const indices = courts.map(c => allCourts.indexOf(c)).filter(i => i !== -1);
-  if (indices.length === 0) return [];
+  const indices = courts.map(c => allCourts.indexOf(c));
+  // A shiaijo with no lane cannot be shifted: keep the list as it is rather
+  // than shift the others and lose it.
+  if (indices.includes(-1)) return courts.slice();
   const minIdx = Math.min(...indices);
   const maxIdx = Math.max(...indices);
   let shift = delta;
@@ -59,7 +61,8 @@ export function shiftLanes(courts, allCourts, delta) {
 /**
  * Snaps a start to 5 minutes; a start that falls inside a pause that stops
  * matches moves to the end of that pause (one matches go on through keeps it).
- * Stays within the day.
+ * Stays within the day: null when the end of a pause leaves no start before
+ * the day's last one (never a start pulled back into the pause).
  */
 export function snapStart(mins, breaks) {
   let m = Math.round(mins / SNAP_MINUTES) * SNAP_MINUTES;
@@ -72,7 +75,7 @@ export function snapStart(mins, breaks) {
   for (const w of windows) {
     if (m >= w.start && m < w.end) m = w.end;
   }
-  return Math.min(m, 24 * 60 - SNAP_MINUTES);
+  return m > 24 * 60 - SNAP_MINUTES ? null : m;
 }
 
 /**
@@ -85,7 +88,8 @@ export function snapStart(mins, breaks) {
  * block: { left, top } the dragged block's top left corner on screen,
  *        { courts } its shiaijo labels, { minCourtIdx }
  *
- * Returns { day, startMins, courts } or null when the block is not over a day.
+ * Returns { day, startMins, courts } or null when the block is not over a day;
+ * startMins is null when no start fits there (snapStart).
  */
 export function dropTarget({ geometry, blockLeft, blockTop, pointerX, pointerY, blockCourts }) {
   const days = geometry?.days || [];

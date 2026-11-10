@@ -41,6 +41,16 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
+    // Quiesce this test's module instance BEFORE the real timers come back, as
+    // sync_queue.test.jsx does. A test that ends with writes queued and a flush
+    // still out (the storage-full test: setItem throws, the server is offline)
+    // leaves that flush running: its continuation schedules the backoff retry
+    // with a REAL setTimeout, and a moment later _persistQueue merges its
+    // m1, m2, m3 into the next test's fresh localStorage. Under load that landed
+    // in "a write that leaves the queue" ([m1, m2, m1, m2, m3]). clearQueue
+    // empties the queue and cancels the flush (_queueGen) and its timers.
+    if (API && typeof API.clearQueue === 'function') API.clearQueue();
+    vi.clearAllTimers();
     vi.useRealTimers();
     vi.resetModules();
     global.fetch = _origFetch;

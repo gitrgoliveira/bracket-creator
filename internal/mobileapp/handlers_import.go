@@ -298,6 +298,10 @@ func importCompetition(store *state.Store, eng *engine.Engine, entry ImportManif
 		res.Error = "swissRounds: " + err.Error()
 		return res
 	}
+	if err := validateSwissRoundsCap(comp); err != nil {
+		res.Error = "swissRounds: " + err.Error()
+		return res
+	}
 
 	// Cross-file guard symmetry with POST /competitions and PUT
 	// /competitions/:id, and for the reason ValidateCompetitionKind's own

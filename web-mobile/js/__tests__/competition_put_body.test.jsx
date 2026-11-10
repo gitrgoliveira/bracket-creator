@@ -294,17 +294,19 @@ describe('mergeSavedCompetition', () => {
     expect(nextBody.body.expectedParticipants).toBe(0);
   });
 
-  it('an answer without a configVersion clears the held version', () => {
+  it('an answer without a configVersion keeps the held version, so the next save stays checked', () => {
     const held = {
       ...base,
       configVersion: 'v-old',
     };
-    const answerWithoutVersion = {
-      id: 'c1',
-      name: "Men's Individual",
-    };
-    const merged = mergeSavedCompetition(held, answerWithoutVersion);
-    expect(merged.configVersion).toBe('');
+    for (const answerWithoutVersion of [
+      { id: 'c1', name: "Men's Individual" },
+      { id: 'c1', name: "Men's Individual", configVersion: '' },
+    ]) {
+      const merged = mergeSavedCompetition(held, answerWithoutVersion);
+      expect(merged.configVersion).toBe('v-old');
+      expect(settingsPutBody(merged, {}, merged.configVersion).body.configVersion).toBe('v-old');
+    }
   });
 
   it('clearing with empty string, null, or NaN sets expectedParticipants to 0', () => {

@@ -594,6 +594,31 @@ func validateTournamentPauses(pauses []state.Pause) *ValidationError {
 	return nil
 }
 
+// validatePauseDays refuses a new or changed pause on a day the tournament
+// does not have (durationDays, after the 0 to 1 default). A pause has no id,
+// so "unchanged" is a pause equal in every field to one stored: a pause left
+// past the end by shortening the tournament stays stored and the schedule
+// ignores it, so a save that does not touch it is never refused for it.
+// Day 0 (every day) is always accepted.
+func validatePauseDays(pauses, stored []state.Pause, durationDays int) *ValidationError {
+	if durationDays < 1 {
+		durationDays = 1
+	}
+	for i, p := range pauses {
+		if p.Day <= durationDays || slices.Contains(stored, p) {
+			continue
+		}
+		days := "1 day"
+		if durationDays > 1 {
+			days = fmt.Sprintf("%d days", durationDays)
+		}
+		return &ValidationError{
+			Message: fmt.Sprintf("%s: the tournament has %s, so it has no Day %d. Choose a day it has, or Every day.", pauseLabel(p.Name, i), days, p.Day),
+		}
+	}
+	return nil
+}
+
 // validateTournamentLengths enforces the persisted-string caps from
 // validation.go on every string field of t. Called after trim and
 // after the required-field checks so error messages report the
@@ -949,7 +974,8 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 			// body never carries them. Without this, an Edit tournament save
 			// before the startup ceremony upgrade succeeded would drop the old
 			// ceremony lengths. The lunch is the exception once the body sends
-			// its own pauses: a load shows the old lunch as a pause, so that
+			// its own pauses: a load shows the old lunch as a pause (one with
+			// no length when its length cannot be read), so that
 			// list already holds it, or the organiser deleted it, and keeping
 			// the old key would add it back on the next load.
 			if current != nil {
@@ -958,6 +984,16 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 				}
 				desired.OpeningBlockLegacy = current.OpeningBlockLegacy
 				desired.ClosingBlockLegacy = current.ClosingBlockLegacy
+			}
+
+			// Judged here, against the pauses stored under this lock, so a
+			// pause the save leaves as it was is never refused for its day.
+			var storedPauses []state.Pause
+			if current != nil {
+				storedPauses = current.Pauses
+			}
+			if verr := validatePauseDays(desired.Pauses, storedPauses, desired.DurationDays); verr != nil {
+				return verr
 			}
 
 			// Immutability of Mode (mp-7h7): Mode is chosen once at creation
@@ -1029,6 +1065,11 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 		}
 		if errors.Is(err, errTournamentChanged) {
 			respondTournamentChanged(c, store, verifier)
+			return
+		}
+		var pauseErr *ValidationError
+		if errors.As(err, &pauseErr) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": pauseErr.Error()})
 			return
 		}
 		if err != nil {
@@ -1180,6 +1221,14 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 		existingForPost, loadErrPost := store.LoadTournament()
 		if loadErrPost != nil {
 			internalError(c, loadErrPost)
+			return
+		}
+		var storedPauses []state.Pause
+		if existingForPost != nil {
+			storedPauses = existingForPost.Pauses
+		}
+		if verr := validatePauseDays(t.Pauses, storedPauses, t.DurationDays); verr != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": verr.Error()})
 			return
 		}
 

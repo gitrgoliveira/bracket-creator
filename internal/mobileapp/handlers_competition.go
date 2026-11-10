@@ -419,7 +419,18 @@ func validateSwissConfig(comp *state.Competition) error {
 	if comp.SwissRounds < 1 {
 		return fmt.Errorf("swiss format requires swissRounds >= 1")
 	}
-	if comp.SwissRounds > engine.MaxSwissRounds {
+	return nil
+}
+
+// validateSwissRoundsCap bounds swissRounds by engine.MaxSwissRounds. It is
+// kept out of validateSwissConfig (which every PUT runs) because the cap is
+// newer than the field: a stored round count past it must stay editable for
+// unrelated fields, since the settings page echoes it back on every save. So
+// create and import run it unconditionally and the settings PUT only when
+// the format or the round count changes, like the pool-winners and team-size
+// caps.
+func validateSwissRoundsCap(comp *state.Competition) error {
+	if comp.Format == state.CompFormatSwiss && comp.SwissRounds > engine.MaxSwissRounds {
 		return fmt.Errorf("swissRounds must be at most %d", engine.MaxSwissRounds)
 	}
 	return nil
@@ -459,6 +470,9 @@ func validateNewCompetition(comp *state.Competition) error {
 	// Reject invalid competition shape (durations, format, swiss config)
 	// and normalize pool config for formats with no pool phase.
 	if err := validateCompetitionShape(comp); err != nil {
+		return err
+	}
+	if err := validateSwissRoundsCap(comp); err != nil {
 		return err
 	}
 	// bc-symm: an omitted pool size is DEFAULTED, not refused, and it is
@@ -2100,6 +2114,13 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 						return nil, nil
 					}
 				}
+				// The Swiss round cap, scoped to a change the same way.
+				if formatChanged || comp.SwissRounds != current.SwissRounds {
+					if err := validateSwissRoundsCap(&comp); err != nil {
+						validationErr = err
+						return nil, nil
+					}
+				}
 				// Settings-only merge. Status, Players, and
 				// HasParticipantIDs are deliberately not copied from
 				// the body. Status is managed via dedicated endpoints
@@ -2307,6 +2328,15 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				if started && !sameTwoThirdPlaces {
 					validationErr = fmt.Errorf("twoThirdPlaces can only be changed before the competition starts")
 					return nil, nil
+				}
+				// A field never stored stays unset when the body only echoes
+				// what it resolves to after this save's format and naginata,
+				// so it keeps following the format rule (a later switch to
+				// naginata still gets the single 3rd place) and an untouched
+				// save leaves ConfigVersion alone.
+				if current.TwoThirdPlaces == nil && comp.TwoThirdPlaces != nil &&
+					*comp.TwoThirdPlaces == current.EffectiveTwoThirdPlaces() {
+					comp.TwoThirdPlaces = nil
 				}
 				current.TwoThirdPlaces = comp.TwoThirdPlaces
 				if req.ExpectedParticipants != nil {

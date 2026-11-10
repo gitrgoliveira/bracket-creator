@@ -174,6 +174,24 @@ export function ownStatusMoveHolds(mv, m) {
     return !(m.modifiedAt > mv.stamp);
 }
 
+// ownStatusMoveEnded: whether the move `mv` the server answered is over for
+// the feed's copy `m`, so its owner forgets it (the court console's forget
+// effect). A copy in a different status ends it once ownStatusMoveHolds no
+// longer holds (a later change made elsewhere). A copy that already reads the
+// move's status ends it only when it is not older than the move: stamped at or
+// after the move's own stamp, or past the answer's score version (strictly: a
+// start or a send back can leave the version where it was). An older copy can
+// read the same status by chance (bc-sssf: the pre-start copy of a bout this
+// console started and then sent back reads scheduled), and forgetting the move
+// on it let a refetch answered between the start and the send back show the
+// bout running again.
+export function ownStatusMoveEnded(mv, m) {
+    if (!mv || !mv.landed || !m) return false;
+    if (m.status !== mv.status) return !ownStatusMoveHolds(mv, m);
+    if (Number.isFinite(m.scoreVersion) && Number.isFinite(mv.version) && m.scoreVersion > mv.version) return true;
+    return m.modifiedAt >= mv.stamp;
+}
+
 // withOwnStatusMove: match `m` as the court console shows it under the move
 // `mv`: sent back reads scheduled, its score kept; finished reads completed
 // with the winner the finish names (an engi finish, which names none: the side
@@ -922,13 +940,13 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         // ownMoveOf: a move queued, answered, refused or discarded.
         [courtMatchesRaw, courtCompetitions, ownMoveOf]
     );
-    // A move the server answered ends once the feed shows it, or a later
-    // change made elsewhere: the owner forgets it.
+    // A move the server answered ends once the feed shows it on a copy not
+    // older than the move, or a later change made elsewhere: the owner
+    // forgets it (ownStatusMoveEnded).
     useEffect(() => {
         if (!window.API || typeof window.API.forgetOwnStatusMove !== "function") return;
         for (const m of courtMatchesRaw) {
-            const mv = ownMoveOf(m);
-            if (mv && mv.landed && !ownStatusMoveHolds(mv, m)) window.API.forgetOwnStatusMove(m.compId, m.id);
+            if (ownStatusMoveEnded(ownMoveOf(m), m)) window.API.forgetOwnStatusMove(m.compId, m.id);
         }
         // A match the tournament no longer holds (gone with its draw) keeps no
         // answered move (stage 6 review 9, F7). The moves are the tab's, so
@@ -1097,30 +1115,50 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         [correctingMatch, pickedMatch, running]
     );
 
-    // bc-strt: the match pickMatch started, until the refetch shows it
-    // running. ONE predicate for the editor's `started` prop and for liveBout
-    // below, so the two cannot drift.
+    // bc-strt: the feed's copy of the match this console started (startMatch
+    // pins it, `startedFrom`), until the refetch shows it running. ONE
+    // predicate for startedHere below, the editor's `started` prop and the
+    // lists that hide the started match from Up next.
     const isStartedSnapshot = useCallback(
         (m) => !!m && !!startedFrom && startedFrom.key === matchKey(m) && startedFrom.at === m.modifiedAt,
         [startedFrom]
     );
+    // That match on the court, anchored on the start pin itself and not on
+    // the pick, so a pick cleared elsewhere cannot hide it; a finish laid on
+    // it here (withOwnStatusMove) ends it.
+    const startedHere = startedFrom
+        ? sorted.find((x) => x.status !== "completed" && isStartedSnapshot(x)) || null
+        : null;
+    // The bout running on this court as this console knows it (bc-sssf): the
+    // pick when the feed says it is running, else the start this console just
+    // made (the feed still reads "scheduled" until the refetch; a queued
+    // offline start until the connection is back), else running[0]
+    // (court-wide, never filtered by the competition selector). ONE owner for
+    // the bout a pick sends back (deferAndStart, and its re-judge through
+    // latestRef), the live bout below and the Send back to queue button: read
+    // from `running` alone, a pick made in the window between a start and its
+    // refetch found nothing running and started over it, which the server
+    // refused as court_busy. A start still out (startingBlocker) stays out of
+    // it on purpose: pickMatch refuses a pick while one is out, and during a
+    // pick's own send back it names the pick itself.
+    const liveHere = (pickedMatch && pickedMatch.status === "running")
+        ? pickedMatch
+        : startedHere || running[0] || null;
     // The match whose start request is still in flight (startingKey), found on
     // the court, for the render (liveBout below). The guards read startingRef.
     const startingBlocker = startingKey ? sorted.find((x) => matchKey(x) === startingKey) || null : null;
-    // The bout live on this court right now (bc-crpn): the pick when it is
-    // running or is the start this console just made (the feed still reads
-    // "scheduled" until the refetch; a queued offline start too), else
-    // running[0] (court-wide, never filtered by the competition selector),
-    // else the match whose start request is still in flight.
-    const liveBout = (pickedMatch && (pickedMatch.status === "running" || isStartedSnapshot(pickedMatch)))
-        ? pickedMatch
-        : running[0] || startingBlocker;
+    // The bout live on this court right now (bc-crpn): liveHere, else the
+    // match whose start request is still in flight.
+    const liveBout = liveHere || startingBlocker;
     // The correction the console holds open (completed), if any. A reopened
     // one is the live bout and is handed over by the effect above.
     const openCorrection = correctingMatch && correctingMatch.status === "completed" ? correctingMatch : null;
-    // The "Another bout is running" list: the bouts beyond the one the panel
-    // shows, plus the running one itself while a correction holds the panel.
-    const alsoRunning = openCorrection ? running : running.slice(1);
+    // The "Another bout is running" list: every running bout but the one the
+    // panel shows, by key (all of them while a correction holds the panel,
+    // and while it shows this console's own start the feed does not yet hold
+    // as running, so another device's bout is never left off).
+    const shownKey = selectedMatch ? matchKey(selectedMatch) : null;
+    const alsoRunning = openCorrection ? running : running.filter((x) => matchKey(x) !== shownKey);
     // What refuses a tap right now, by kind: a live bout refuses a Correct, an
     // open correction refuses a Start, and a start still out refuses a Start of
     // another match. ONE place builds each sentence, for the toast and the
@@ -1490,8 +1528,8 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         startingRef.current = started;
         setStartingKey(key);
         try {
-            // Starting makes the match running; the scoring panel shows
-            // running[0], so it picks the match up on the next refetch.
+            // Starting makes the match running; until a refetch shows it so,
+            // the start pin below makes it the court's live bout (liveHere).
             // A pick's start follows its send back of the running bout (`after`,
             // request-only: never sent, deferAndStart).
             const res = await onEditScore(m.compId, m.id, after ? { ...startPatch(), after } : startPatch(), m, { onRefusal });
@@ -1658,8 +1696,15 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // The defer of the running bout and the start of the picked one, after
     // pickMatch's guards and its pickingRef entry (see pickMatch).
     const deferAndStart = async (m, pick) => {
-        let cur = running[0] || null;
+        // The bout sent back is the court's live bout as this console knows
+        // it, its own start the feed does not show yet included (liveHere,
+        // bc-sssf).
+        let cur = liveHere;
         const isSame = cur && matchKey(cur) === matchKey(m);
+        // A pick of the match this console has just started, the feed still
+        // reading it scheduled, is a pick of a running bout: it is started
+        // once, never a second time.
+        const startsPick = m.status === "scheduled" && !isStartedSnapshot(m);
         // The queue key of the send back the start must follow, if any.
         let after = null;
         if (cur && !isSame) {
@@ -1673,7 +1718,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
             if (!window.API || typeof window.API.revertMatchToQueue !== "function") return;
             // bc-stpf: a start the server would refuse leaves the running bout
             // running, so the check comes before anything is sent back.
-            if (m.status === "scheduled") {
+            if (startsPick) {
                 if (!(await startMayFollowSendBack(m, cur, pick))) return;
                 if (!mountedRef.current) return;
                 // The check can wait on the operator for as long as they take
@@ -1685,7 +1730,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                 // A court that changed is judged again from the top.
                 const latest = latestRef.current;
                 const fresh = latest.allMatches.find((x) => matchKey(x) === matchKey(m));
-                const freshCur = latest.running[0] || null;
+                const freshCur = latest.liveHere;
                 if (!fresh || fresh.status !== "scheduled" || !freshCur || matchKey(freshCur) !== matchKey(cur)) {
                     if (pick && pickingRef.current === pick) pickingRef.current = null;
                     syncStartingKey();
@@ -1720,7 +1765,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
             }
             if (!mountedRef.current) return;
         }
-        if (m.status === "scheduled") {
+        if (startsPick) {
             // A start that went out pins the panel and its started snapshot
             // itself (startMatch, bc-strt).
             const ok = await startMatch(m, { pick, after });
@@ -1772,7 +1817,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // End the correction of the match keyed `key` only if it is still the one
     // open: a write's answer may arrive after another correction was opened.
     const endCorrectionOf = (key) => { setCorrectingKey((k) => (k === key ? null : k)); };
-    React.useLayoutEffect(() => { latestRef.current = { pickMatch, correctMatch, allMatches, running }; });
+    React.useLayoutEffect(() => { latestRef.current = { pickMatch, correctMatch, allMatches, liveHere }; });
 
     // takeDown: withdraw the court call `id` (the device made it, so it is known
     // at once, sent or not). Fire and forget: the withdrawal is an outbox entry
@@ -2495,9 +2540,9 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                 </div>
                             )}
 
-                            {/* While a correction holds the panel the running bout has no
-                                other home, so running[0] is listed too (a match started
-                                from another screen mid-correction, bc-crpn). */}
+                            {/* Every running bout the panel does not show (alsoRunning):
+                                while a correction holds the panel that is all of them (a
+                                match started from another screen mid-correction, bc-crpn). */}
                             {!allDone && alsoRunning.length > 0 && (
                                 <div className="shiaijo-also-running" role="alert">
                                     <div className="shiaijo-also-running__title">Another bout is running on Shiaijo {court}</div>
@@ -2646,12 +2691,18 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                 "Back to court" above, which stopCorrecting
                                 deliberately withholds while running (a stray Back
                                 to court could strand a result-less bout behind
-                                another running match). `status === "running"`
-                                alone keeps this off a still-completed correction,
-                                which shows "Back to court" instead. Offered
-                                whatever has been scored: the match keeps its
-                                score in the queue (bc-sbq). */}
-                            {!allDone && selectedMatch && selectedMatch.status === "running" && window.API && typeof window.API.revertMatchToQueue === "function" && (
+                                another running match). Offered on a running match,
+                                or on the court's live bout as this console knows
+                                it (liveHere, by key): a start this console just
+                                made reads "scheduled" in the feed until the
+                                refetch (until the connection is back for one
+                                queued offline), and its exit is needed at once
+                                (bc-sssf); the outbox sends the send back after
+                                the start it follows. Neither holds for a
+                                still-completed correction, which shows "Back to
+                                court" instead. Offered whatever has been scored:
+                                the match keeps its score in the queue (bc-sbq). */}
+                            {!allDone && selectedMatch && (selectedMatch.status === "running" || (liveHere && matchKey(selectedMatch) === matchKey(liveHere))) && window.API && typeof window.API.revertMatchToQueue === "function" && (
                                 <div className="shiaijo-revert">
                                     <button
                                         type="button"

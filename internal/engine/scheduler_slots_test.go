@@ -842,6 +842,17 @@ func TestPausesOnDay_OnePause(t *testing.T) {
 	})
 }
 
+// The pause an unreadable legacy length becomes (no length, the typed text in
+// its name) moves no match until the organiser gives it a length.
+func TestPausesOnDay_UpgradedPauseWithNoLengthStopsNothing(t *testing.T) {
+	tourn := &state.Tournament{
+		Date:   "01-05-2026",
+		Pauses: []state.Pause{{Name: "Lunch (1h 30m)", Start: "12:00"}},
+	}
+	assert.Empty(t, dayBreaks(tourn, "01-05-2026"))
+	assert.Empty(t, pausesOnDay(tourn.Pauses, 1, 1, anyPause))
+}
+
 // A dated competition in an undated tournament runs as Day 1, as calendarDays
 // reports it, so a Day-1 pause applies to it and a Day-2 pause does not.
 func TestPauseWindows_UndatedTournamentIsDayOne(t *testing.T) {

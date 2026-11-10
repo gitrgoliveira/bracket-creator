@@ -926,7 +926,9 @@ export function AdminCalendarPage({
       st.target = target;
       const dur = block.endMins - block.startMins;
       const info = target ? (calendar?.days || []).find((d) => d.day === target.day) : null;
-      const label = target && info
+      const label = target && target.startMins === null
+        ? 'No start fits there before midnight'
+        : target && info
         ? `${formatDayDate(info.date)}, ${formatClockHHMM(target.startMins)} to ${formatClockHHMM((target.startMins + dur) % 1440)}${isDrawn(comp) ? '' : `, Shiaijo ${target.courts.join(' and ')}`}`
         : 'Drop it on a day';
       setDrag({ comp, x: x - st.grabX, y: y - st.grabY, width: st.width, height: st.height, label, hint });
@@ -978,8 +980,9 @@ export function AdminCalendarPage({
       const same = target && target.day === comp.placement.day
         && target.startMins === block.startMins
         && (isDrawn(comp) || target.courts.join() === (comp.placement.courts || []).join());
-      if (!target || same) {
-        // A touch held and let go where it was opens the Move dialog.
+      if (!target || target.startMins === null || same) {
+        // A touch held and let go where it was opens the Move dialog; a drop
+        // where no start fits puts the block back.
         if (isTouch && movedPx <= TOUCH_SLOP_PX) setMoveDialog({ comp });
         return;
       }

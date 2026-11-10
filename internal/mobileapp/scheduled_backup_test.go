@@ -632,6 +632,16 @@ func TestScheduledBackups_ArchiveFingerprintCacheAndInvalidation(t *testing.T) {
 }
 
 // restampCopy rewrites a kept copy as if appVersion had made it.
+// setRunningVersion makes the app report v as its running version for the
+// rest of the test (backup.RunningVersion, the one seam the scheduled job,
+// the HTTP restore and the CLI restore all read).
+func setRunningVersion(t *testing.T, v string) {
+	t.Helper()
+	saved := backup.RunningVersion
+	backup.RunningVersion = func() string { return v }
+	t.Cleanup(func() { backup.RunningVersion = saved })
+}
+
 func restampCopy(t *testing.T, pt *populatedTournament, name, appVersion string) {
 	t.Helper()
 	path := filepath.Join(pt.Dir, state.BackupsDirName, name)
@@ -648,7 +658,8 @@ func restampCopy(t *testing.T, pt *populatedTournament, name, appVersion string)
 func TestScheduledBackups_AnEarlierVersionsCopyCounts(t *testing.T) {
 	pt := buildPopulatedTournament(t)
 	clockTime := time.Date(2026, 6, 1, 10, 0, 0, 0, time.UTC)
-	job := &ScheduledBackups{Store: pt.Store, Clock: func() time.Time { return clockTime }, Version: func() string { return "v2.5.0" }}
+	setRunningVersion(t, "v2.5.0")
+	job := &ScheduledBackups{Store: pt.Store, Clock: func() time.Time { return clockTime }}
 	ctx := context.Background()
 
 	require.NoError(t, job.runOnce(ctx))
@@ -672,7 +683,8 @@ func TestScheduledBackups_AnEarlierVersionsCopyCounts(t *testing.T) {
 func TestScheduledBackups_ALaterVersionsCopyIsNotTheNewest(t *testing.T) {
 	pt := buildPopulatedTournament(t)
 	clockTime := time.Date(2026, 6, 1, 10, 0, 0, 0, time.UTC)
-	job := &ScheduledBackups{Store: pt.Store, Clock: func() time.Time { return clockTime }, Version: func() string { return "v2.5.0" }}
+	setRunningVersion(t, "v2.5.0")
+	job := &ScheduledBackups{Store: pt.Store, Clock: func() time.Time { return clockTime }}
 	ctx := context.Background()
 
 	require.NoError(t, job.runOnce(ctx))
@@ -718,7 +730,8 @@ func TestScheduledBackups_FutureCopySkipsOnlyWhenRestorable(t *testing.T) {
 			name := writeFixtureBackup(t, pt.Store, state.BackupKindScheduled, clockTime.Add(3*24*time.Hour))
 			restampCopy(t, pt, name, tc.madeBy)
 
-			job := &ScheduledBackups{Store: pt.Store, Clock: func() time.Time { return clockTime }, Version: func() string { return "v2.5.0" }}
+			setRunningVersion(t, "v2.5.0")
+			job := &ScheduledBackups{Store: pt.Store, Clock: func() time.Time { return clockTime }}
 			require.NoError(t, job.runOnce(context.Background()))
 			files, err := pt.Store.ListBackupFiles()
 			require.NoError(t, err)

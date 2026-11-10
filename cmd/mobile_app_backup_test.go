@@ -195,9 +195,9 @@ func TestMobileAppBackupRestore_ALaterVersionsBackupRefused(t *testing.T) {
 // version is set, since the test binary's own (a branch name) has no release
 // order.
 func TestMobileAppBackupRestore_AnEarlierVersionsBackupRestores(t *testing.T) {
-	saved := restoreRunningVersion
-	restoreRunningVersion = func() string { return "v2.5.0" }
-	t.Cleanup(func() { restoreRunningVersion = saved })
+	saved := backup.RunningVersion
+	backup.RunningVersion = func() string { return "v2.5.0" }
+	t.Cleanup(func() { backup.RunningVersion = saved })
 
 	srcDir, _ := buildTestPopulatedFolder(t)
 	zipPath := filepath.Join(t.TempDir(), "backup.zip")

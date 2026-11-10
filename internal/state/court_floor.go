@@ -278,6 +278,74 @@ func (s *Store) CourtFloor(comp *Competition, courts []string, minutes SlotMinut
 	return res, nil
 }
 
+// FloorToken says whether the other competitions a court floor is read from
+// are still as they were when it was taken: their set, and the write counter
+// of each one's config.md, pool-matches.csv and bracket.json (every file
+// CourtFloor reads). A caller takes it BEFORE it reads a floor and asks Current
+// under the lock its write is made in, so a floor read outside that lock is
+// never trusted once another competition changed after it (a draw, a re-time,
+// a new date or start, a competition added or deleted). It errs towards
+// "changed": a score written meanwhile also moves pool-matches.csv's counter.
+// It narrows the race and does not close it: a draw of another competition
+// takes no rename lock, so one that commits between Current and this write's
+// own commit is not seen.
+type FloorToken struct {
+	store  *Store
+	except string
+	comps  []floorTokenEntry
+}
+
+type floorTokenEntry struct {
+	id                    string
+	config, pool, bracket uint64
+}
+
+// TakeFloorToken records the other competitions (every one but exceptID) as
+// they are now.
+func (s *Store) TakeFloorToken(exceptID string) (FloorToken, error) {
+	comps, err := s.floorTokenEntries(exceptID)
+	if err != nil {
+		return FloorToken{}, err
+	}
+	return FloorToken{store: s, except: exceptID, comps: comps}, nil
+}
+
+// Current answers whether no other competition changed since the token was
+// taken. A token never taken is not current. It takes only the store-wide read
+// lock and the write counters, never a competition's lock, so it may be asked
+// inside a transaction.
+func (t FloorToken) Current() (bool, error) {
+	if t.store == nil {
+		return false, nil
+	}
+	now, err := t.store.floorTokenEntries(t.except)
+	if err != nil {
+		return false, err
+	}
+	return slices.Equal(now, t.comps), nil
+}
+
+func (s *Store) floorTokenEntries(exceptID string) ([]floorTokenEntry, error) {
+	ids, err := s.ListCompetitions()
+	if err != nil {
+		return nil, err
+	}
+	slices.Sort(ids)
+	out := make([]floorTokenEntry, 0, len(ids))
+	for _, id := range ids {
+		if id == exceptID {
+			continue
+		}
+		out = append(out, floorTokenEntry{
+			id:      id,
+			config:  s.FileVersion(id, "config.md"),
+			pool:    s.FileVersion(id, "pool-matches.csv"),
+			bracket: s.FileVersion(id, "bracket.json"),
+		})
+	}
+	return out, nil
+}
+
 // ParseClockMinutes parses a "HH:MM" clock string into minutes-since-midnight:
 // outer whitespace trimmed, a 1 or 2 digit hour, a colon and 2 minute digits,
 // digits only (no sign, no inner space). The JS mirror is queueStartRank

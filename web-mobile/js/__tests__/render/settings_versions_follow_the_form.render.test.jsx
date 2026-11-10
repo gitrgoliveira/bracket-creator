@@ -6,7 +6,9 @@ import { installWindowStubs } from '../helpers/stub_globals.js';
 // A tournament-settings or awards save names the version of the copy the
 // operator was looking at, not the freshest copy this device holds: a copy that
 // another device saved in between is then refused by the server
-// (tournament_changed, awards_changed) instead of being written over.
+// (tournament_changed, awards_changed) instead of being written over. The
+// refusals, which arrive with the outbox's later answer, are pinned in
+// tournament_awards_version_refused.render.test.jsx.
 
 const noop = () => {};
 const Stub = (name) => {
@@ -38,6 +40,9 @@ beforeAll(async () => {
 
 afterEach(() => { cleanup(); window.API.updateCompetitionAwards.mockReset(); });
 afterAll(() => restoreGlobals());
+
+// The awards door answers at once and settles with the server's word.
+const answered = (awardsVersion) => ({ pending: true, settled: Promise.resolve({ awardsVersion }) });
 
 const baseTournament = (extra) => ({
   name: 'Spring Taikai',
@@ -94,7 +99,7 @@ describe('Fighting Spirit awards save version', () => {
   const editor = (c) => <FightingSpiritAwardsEditor c={c} password="pw" showToast={noop} />;
 
   it('keeps the old version while unsaved edits keep the old list on screen', async () => {
-    window.API.updateCompetitionAwards.mockResolvedValue({ awardsVersion: 'a3' });
+    window.API.updateCompetitionAwards.mockResolvedValue(answered('a3'));
     let view;
     await act(async () => { view = render(editor(comp())); });
     await act(async () => { fireEvent.change(screen.getByTestId('fs-award-name-0'), { target: { value: 'Tanaka' } }); });
@@ -112,7 +117,7 @@ describe('Fighting Spirit awards save version', () => {
   });
 
   it('takes the newer version along with the newer list when nothing is unsaved', async () => {
-    window.API.updateCompetitionAwards.mockResolvedValue({ awardsVersion: 'a3' });
+    window.API.updateCompetitionAwards.mockResolvedValue(answered('a3'));
     let view;
     await act(async () => { view = render(editor(comp())); });
     await act(async () => {
@@ -126,57 +131,8 @@ describe('Fighting Spirit awards save version', () => {
     expect(version).toBe('a2');
   });
 
-  it('holds Save and reloads the stored list and version after the save is refused as stale', async () => {
-    const stale = Object.assign(new Error('The awards changed, reload them.'), {
-      code: 'awards_changed',
-      awardsVersion: 'a2',
-      fightingSpiritAwards: [{ title: 'Fighting Spirit', recipientName: 'Suzuki', recipientDojo: '' }],
-    });
-    window.API.updateCompetitionAwards.mockRejectedValueOnce(stale).mockResolvedValue({ awardsVersion: 'a3' });
-    await act(async () => { render(editor(comp())); });
-    await act(async () => { fireEvent.change(screen.getByTestId('fs-award-name-0'), { target: { value: 'Tanaka' } }); });
-    await act(async () => { fireEvent.click(screen.getByTestId('fs-award-save')); });
-
-    expect(screen.getByTestId('fs-award-conflict-alert')).toBeTruthy();
-    expect(screen.getByTestId('fs-award-save').disabled).toBe(true);
-    expect(screen.getByTestId('fs-award-name-0').value).toBe('Tanaka');
-
-    await act(async () => { fireEvent.click(screen.getByTestId('fs-award-reload')); });
-    expect(screen.queryByTestId('fs-award-conflict-alert')).toBeNull();
-    expect(screen.getByTestId('fs-award-name-0').value).toBe('Suzuki');
-
-    await act(async () => { fireEvent.click(screen.getByTestId('fs-award-add')); });
-    await act(async () => { fireEvent.click(screen.getByTestId('fs-award-save')); });
-    expect(window.API.updateCompetitionAwards).toHaveBeenCalledTimes(2);
-    const [, sent, , version] = window.API.updateCompetitionAwards.mock.calls[1];
-    expect(sent[0].recipientName).toBe('Suzuki');
-    expect(version).toBe('a2');
-  });
-
-  it('keeps the version the last save answered when a late refetch carries an older one', async () => {
-    window.API.updateCompetitionAwards.mockResolvedValueOnce({ awardsVersion: 'a2' }).mockResolvedValueOnce({ awardsVersion: 'a3' }).mockResolvedValue({ awardsVersion: 'a4' });
-    let view;
-    await act(async () => { view = render(editor(comp())); });
-    await act(async () => { fireEvent.change(screen.getByTestId('fs-award-name-0'), { target: { value: 'Tanaka' } }); });
-    await act(async () => { fireEvent.click(screen.getByTestId('fs-award-save')); });
-    await act(async () => { fireEvent.change(screen.getByTestId('fs-award-name-0'), { target: { value: 'Sato' } }); });
-    await act(async () => { fireEvent.click(screen.getByTestId('fs-award-save')); });
-
-    // The refetch of the first save lands after the second save.
-    await act(async () => {
-      view.rerender(editor(comp({ awardsVersion: 'a2', fightingSpiritAwards: [{ title: 'Fighting Spirit', recipientName: 'Tanaka', recipientDojo: '' }] })));
-    });
-    expect(screen.getByTestId('fs-award-name-0').value).toBe('Sato');
-
-    await act(async () => { fireEvent.change(screen.getByTestId('fs-award-name-0'), { target: { value: 'Ito' } }); });
-    await act(async () => { fireEvent.click(screen.getByTestId('fs-award-save')); });
-    const [, sent, , version] = window.API.updateCompetitionAwards.mock.calls[2];
-    expect(sent[0].recipientName).toBe('Ito');
-    expect(version).toBe('a3');
-  });
-
   it('takes a list that returns to earlier content, whose version is the earlier one again', async () => {
-    window.API.updateCompetitionAwards.mockResolvedValue({ awardsVersion: 'a3' });
+    window.API.updateCompetitionAwards.mockResolvedValue(answered('a3'));
     let view;
     await act(async () => { view = render(editor(comp())); });
     await act(async () => {
@@ -191,27 +147,6 @@ describe('Fighting Spirit awards save version', () => {
     const [, sent, , version] = window.API.updateCompetitionAwards.mock.calls[0];
     expect(sent[0].recipientName).toBe('Yamada');
     expect(version).toBe('a1');
-  });
-
-  it('drops a refusal from the competition just left when another competition opens', async () => {
-    const stale = Object.assign(new Error('The awards changed, reload them.'), {
-      code: 'awards_changed',
-      awardsVersion: 'a2',
-      fightingSpiritAwards: [{ title: 'Fighting Spirit', recipientName: 'Suzuki', recipientDojo: '' }],
-    });
-    window.API.updateCompetitionAwards.mockRejectedValueOnce(stale);
-    let view;
-    await act(async () => { view = render(editor(comp())); });
-    await act(async () => { fireEvent.change(screen.getByTestId('fs-award-name-0'), { target: { value: 'Tanaka' } }); });
-    await act(async () => { fireEvent.click(screen.getByTestId('fs-award-save')); });
-    expect(screen.getByTestId('fs-award-conflict-alert')).toBeTruthy();
-
-    await act(async () => {
-      view.rerender(editor(comp({ id: 'c2', awardsVersion: 'b1', fightingSpiritAwards: [{ title: 'Fighting Spirit', recipientName: 'Kato', recipientDojo: '' }] })));
-    });
-    expect(screen.queryByTestId('fs-award-conflict-alert')).toBeNull();
-    expect(screen.getByTestId('fs-award-save').disabled).toBe(false);
-    expect(screen.getByTestId('fs-award-name-0').value).toBe('Kato');
   });
 
   it('shows no form when the competition carries no awards version (its detail did not load)', async () => {

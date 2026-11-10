@@ -234,16 +234,19 @@ describe('court calls (A1)', () => {
         await expect(res.settled).resolves.toEqual({ id: res.id, message: 'Call' });
     });
 
-    it('a withdrawal made while the call is still queued takes both out: nothing is sent', async () => {
+    it('a withdrawal made while the call is still queued takes the send out: only the withdrawal goes', async () => {
         const send = await API.sendAnnouncement('Call', 5, 'pw');
         await tick(0);
-        const sent = server(() => [200, {}]);
+        const sent = server(() => [404, { error: 'Announcement not found' }]);
         const gone = await API.deleteAnnouncement(send.id, 'pw');
-        await expect(gone.settled).resolves.toBe(true);
         await expect(send.settled).resolves.toEqual({ discarded: true, withdrawn: true });
         window.dispatchEvent(new Event('online'));
         await tick(60_000);
-        expect(sent).toEqual([]);
+        // The call itself is never sent from here. Its withdrawal is: another tab
+        // of the device may have the send out, and the server remembers a
+        // withdrawal it could not match, so that send is recorded, not shown.
+        expect(sent.map((r) => `${r.method} ${r.url}`)).toEqual([`DELETE /api/announcements/${send.id}`]);
+        await expect(gone.settled).resolves.toBe(true);
         expect(stored()).toEqual([]);
     });
 
@@ -256,7 +259,10 @@ describe('court calls (A1)', () => {
         await tick(0);
         version.noteServerBuild('def');
         expect(reload).not.toHaveBeenCalled();
-        await API.deleteAnnouncement(send.id, 'pw');
+        server(() => [404, { error: 'Announcement not found' }]);
+        const gone = await API.deleteAnnouncement(send.id, 'pw');
+        await gone.settled;
+        await tick(0);
         expect(reload).toHaveBeenCalledTimes(1);
         document.head.querySelectorAll('meta[name="app-build"]').forEach((m) => m.remove());
     });

@@ -1578,7 +1578,11 @@ paths:
         would have expired, so a late copy of the send never brings the call
         back. The id is the key: a body (the outbox sends `modifiedAt`,
         `writeId`, `session` and `basis`) is not read. A 404 means the call is
-        already gone, which a caller withdrawing it treats as done.
+        already gone, which a caller withdrawing it treats as done. An id that
+        is a lowercase UUID v4 the server has not seen is answered 404 too, and
+        is remembered for 30 minutes: a send of that call still on its way, from
+        another tab of the device that had it out, is then answered as recorded
+        and never shown.
       security:
         - TournamentPassword: []
       parameters:

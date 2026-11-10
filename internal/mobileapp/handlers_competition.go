@@ -3273,6 +3273,19 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			c.JSON(http.StatusBadRequest, gin.H{"error": "awardsVersion is required: send the version of the awards this save was made from"})
 			return
 		}
+		// A save made from an older list is told so before its entries are
+		// judged: a stale form gets the current list, not a refusal about
+		// entries it was never going to write. The same check runs again under
+		// the competition's lock below.
+		stored, err := store.LoadCompetition(id)
+		if err != nil {
+			internalError(c, err)
+			return
+		}
+		if stored != nil && state.AwardsVersion(stored) != body.AwardsVersion {
+			respondAwardsChanged(c, stored)
+			return
+		}
 
 		awards := *body.FightingSpiritAwards
 		if len(awards) > MaxFightingSpiritAwards {
@@ -3343,24 +3356,29 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			return
 		}
 		if staleCurrent != nil {
-			// The current list (always an array) and its version, so the
-			// open awards panel can show what is stored now.
-			stored := staleCurrent.FightingSpiritAwards
-			if stored == nil {
-				stored = []state.FightingSpiritAward{}
-			}
-			c.JSON(http.StatusConflict, gin.H{
-				"code":                 "awards_changed",
-				"error":                "The awards changed, reload them.",
-				"awardsVersion":        state.AwardsVersion(staleCurrent),
-				"fightingSpiritAwards": stored,
-			})
+			respondAwardsChanged(c, staleCurrent)
 			return
 		}
 		if changed {
 			hub.Broadcast(EventTournamentUpdated, nil)
 		}
 		c.JSON(http.StatusOK, withAwardsVersion(compOut))
+	})
+}
+
+// respondAwardsChanged answers a PUT .../awards made from an older list: 409
+// awards_changed with the current list (always an array) and its version, so
+// the open awards panel can show what is stored now.
+func respondAwardsChanged(c *gin.Context, current *state.Competition) {
+	stored := current.FightingSpiritAwards
+	if stored == nil {
+		stored = []state.FightingSpiritAward{}
+	}
+	c.JSON(http.StatusConflict, gin.H{
+		"code":                 "awards_changed",
+		"error":                "The awards changed, reload them.",
+		"awardsVersion":        state.AwardsVersion(current),
+		"fightingSpiritAwards": stored,
 	})
 }
 

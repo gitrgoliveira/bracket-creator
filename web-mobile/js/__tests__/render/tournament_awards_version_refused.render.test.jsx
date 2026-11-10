@@ -130,6 +130,22 @@ describe('AdminApp saves the tournament settings through the outbox', () => {
     expect(app.showToast).toHaveBeenCalledWith('Tournament updated');
   });
 
+  it('says at once that a save made with no connection is kept and goes out later', async () => {
+    const online = vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(false);
+    try {
+      const settled = deferred();
+      window.API.updateTournament.mockResolvedValue({ applied: true, pending: true, settled: settled.promise });
+      const app = await mount();
+      await act(async () => { await probe.props.onSave(patch()); });
+      expect(app.showToast).toHaveBeenCalledWith('Tournament settings saved: they go out once the connection is back.', 'success');
+      // The server's word still comes when it lands.
+      await act(async () => { settled.resolve({ tournamentVersion: 'v2' }); await settled.promise; });
+      expect(app.showToast).toHaveBeenCalledWith('Tournament updated');
+    } finally {
+      online.mockRestore();
+    }
+  });
+
   it('shows the current copy and holds the typed values when the open form is refused as stale', async () => {
     const settled = deferred();
     window.API.updateTournament.mockResolvedValue({ applied: true, pending: true, settled: settled.promise });
@@ -343,6 +359,21 @@ describe('Fighting-spirit awards save through the outbox', () => {
     await act(async () => { settled.resolve({ awardsVersion: 'a2' }); await settled.promise; });
     expect(showToast).toHaveBeenCalledWith('Fighting Spirit awards saved.', 'success');
     expect(screen.getByTestId('fs-award-name-0').value).toBe('Tanaka');
+  });
+
+  it('says at once that a save made with no connection is kept and goes out later', async () => {
+    const online = vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(false);
+    try {
+      const settled = pendingAnswer();
+      const showToast = await mount();
+      await act(async () => { fireEvent.click(screen.getByTestId('fs-award-save')); });
+      expect(showToast).toHaveBeenCalledWith('Fighting Spirit awards saved: they go out once the connection is back.', 'success');
+      expect(showToast).not.toHaveBeenCalledWith('Fighting Spirit awards saved.', 'success');
+      await act(async () => { settled.resolve({ awardsVersion: 'a2' }); await settled.promise; });
+      expect(showToast).toHaveBeenCalledWith('Fighting Spirit awards saved.', 'success');
+    } finally {
+      online.mockRestore();
+    }
   });
 
   it('shows the current list in the conflict banner when refused as stale, keeping the typed values', async () => {

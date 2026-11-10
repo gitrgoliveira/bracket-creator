@@ -726,10 +726,11 @@ describe('AdminSettings saveNow stale-snapshot fix (Copilot round-15)', () => {
   });
 
   it('saveNow builds effective from cRef + editedFieldsRef overlay', () => {
-    // Match the start of saveNow's body and look for the three
-    // distinctive identifiers in the overlay block.
-    const m = src.match(/const saveNow = \(\) => \{([\s\S]*?)Promise\.resolve\(onUpdate/);
-    expect(m, 'expected `const saveNow = () => { ... Promise.resolve(onUpdate` block').not.toBeNull();
+    // The save itself is saveNowBody (saveNow waits for queued time changes
+    // of a drawn competition's move, then runs it): look for the three
+    // distinctive identifiers in the overlay block of its body.
+    const m = src.match(/const saveNowBody = \(\) => \{([\s\S]*?)Promise\.resolve\(onUpdate/);
+    expect(m, 'expected `const saveNowBody = () => { ... Promise.resolve(onUpdate` block').not.toBeNull();
     const body = m[1];
     expect(body).toContain('cRef.current');
     expect(body).toContain('localRef.current');

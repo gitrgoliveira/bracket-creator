@@ -789,3 +789,37 @@ func TestAnnouncementStore_KeepsMadeAtOrder(t *testing.T) {
 		t.Errorf("expected msg 0 evicted and newest last, got %d %v", outcome, list)
 	}
 }
+
+// TestAnnouncementStore_AWithdrawalBeforeTheSendKeepsTheCallDown: a send another
+// tab of the device had out can reach the server after the withdrawal of its id
+// did. The withdrawal is answered as not found, and remembered, so the late send
+// is recorded and shows nothing.
+func TestAnnouncementStore_AWithdrawalBeforeTheSendKeepsTheCallDown(t *testing.T) {
+	store, clk := newClockedStore()
+	id := newParticipantID()
+	if found, _ := store.Remove(id); found {
+		t.Fatal("a call the server has not seen cannot be found")
+	}
+	_, outcome, list := store.Add(id, "Now calling A and B to Shiaijo A.", clk.now(), 5*time.Minute)
+	if outcome != AnnounceRecorded || len(list) != 0 {
+		t.Errorf("expected the late send recorded and nothing showing, got %v %v", outcome, list)
+	}
+	// Remembered only as long as a send could still be on its way.
+	clk.advance(AnnouncementMaxShow + time.Second)
+	if _, outcome, _ := store.Add(newParticipantID(), "later", clk.now(), 5*time.Minute); outcome != AnnounceAdded {
+		t.Errorf("expected an unrelated call to show, got %v", outcome)
+	}
+	if len(store.spent) != 0 {
+		t.Errorf("expected the withdrawal to be forgotten, got %v", store.spent)
+	}
+}
+
+// TestAnnouncementStore_AWithdrawalOfNoClientIdIsNotRemembered: only an id a
+// device could have minted is kept, so a stray DELETE grows nothing.
+func TestAnnouncementStore_AWithdrawalOfNoClientIdIsNotRemembered(t *testing.T) {
+	store, _ := newClockedStore()
+	store.Remove("nonexistent")
+	if len(store.spent) != 0 {
+		t.Errorf("expected nothing remembered, got %v", store.spent)
+	}
+}

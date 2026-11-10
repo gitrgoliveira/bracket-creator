@@ -1109,6 +1109,12 @@ function FightingSpiritAwardsEditor({ c, password, showToast }) {
           return true;
         },
       });
+      // The save is kept on this device and goes out when the link allows: a
+      // save made with no connection says so now, not when it lands (the same
+      // line the court-call composer gives).
+      if (mountedRef.current && typeof navigator !== "undefined" && navigator.onLine === false) {
+        showToast("Fighting Spirit awards saved: they go out once the connection is back.", "success");
+      }
       res.settled.then((saved) => {
         // Discarded from the held-writes list (or sent by another tab, whose
         // answer this one does not hold): not saved here, so the typed list

@@ -486,7 +486,7 @@ function RdRow({ mode, comp, player, zekken, entries, others, checked, presence,
 // Walk-up add: inline panel. Setup-only (the add endpoint rejects started
 // competitions). For team competitions the "name" is the team name.
 // ---------------------------------------------------------------------------
-function RdWalkUp({ comp, seedName, password, showToast, onAdded, onCancel }) {
+function RdWalkUp({ comp, seedName, password, showToast, onAdded, onCheckInRefused, onCancel }) {
   const isTeam = comp.kind === "team";
   const [name, setName] = useState(seedName || "");
   const [dojo, setDojo] = useState("");
@@ -514,24 +514,19 @@ function RdWalkUp({ comp, seedName, password, showToast, onAdded, onCancel }) {
       // Check them in straight away: they're standing at the desk. The row
       // shows it at once (`added.checkedIn`); a refusal later puts it back
       // through the desk's participant patch and says so in one line.
-      let checkInOk = false;
       const addedId = rdApiPid(added);
-      try {
-        await window.API.toggleCheckIn(comp.id, addedId, true, password, {
-          name: n,
-          was: { [addedId]: false },
-          onRefusal: (err) => {
-            if (err && err.reason === "superseded") showToast(err.message, "warning");
-            else showToast(`${n} was added but not checked in: ${err.message}`, "error");
-            return true;
-          },
-        });
-        added.checkedIn = true;
-        checkInOk = true;
-      } catch (err) {
-        showToast(`${n} added but check-in failed: ${err.message}`, "error");
-      }
-      onAdded(comp, added, checkInOk);
+      await window.API.toggleCheckIn(comp.id, addedId, true, password, {
+        name: n,
+        was: { [addedId]: false },
+        onRefusal: (err) => {
+          onCheckInRefused(n);
+          if (err && err.reason === "superseded") showToast(err.message, "warning");
+          else showToast(`${n} was added but not checked in: ${err.message}`, "error");
+          return true;
+        },
+      });
+      added.checkedIn = true;
+      onAdded(comp, added);
     } catch (err) {
       showToast(err.message, "error");
     } finally {
@@ -751,7 +746,7 @@ function AdminRegistrationDeskPage({ tournament, onBack, password, showToast, on
     });
   }, []);
 
-  const peopleIndex =useMemo(() => rdBuildPeopleIndex(comps), [comps]);
+  const peopleIndex = useMemo(() => rdBuildPeopleIndex(comps), [comps]);
   // Tournament-wide presence, computed once and shared by the rail's "All
   // competitions" item and the "all" headline (previously each re-walked the
   // index independently).
@@ -765,6 +760,12 @@ function AdminRegistrationDeskPage({ tournament, onBack, password, showToast, on
   const announceHandoff = (name, pairs) => {
     setHandoff({ name, tags: pairs });
   };
+  // The hand-off panel says "Checked in" from the tap, before the server has
+  // answered. A check-in turned away later takes the panel of that person down,
+  // so it never says what the row no longer shows.
+  const withdrawHandoff = (name) => {
+    setHandoff((h) => (h && h.name === name ? null : h));
+  };
 
   // A check-in the server turned away (or another desk's later tap won over)
   // comes back here long after the tap, through the door's `onRefusal`. The
@@ -773,8 +774,9 @@ function AdminRegistrationDeskPage({ tournament, onBack, password, showToast, on
   // desk that has been left says nothing and lets the outbox tell it.
   // `batch` ({ total, refused }) is one tap that wrote several competitions:
   // its refusals are counted as they come.
-  const checkInRefusal = (batch) => (err) => {
+  const checkInRefusal = (batch, name) => (err) => {
     if (!mountedRef.current) return false;
+    withdrawHandoff(name);
     const msg = err && err.message ? err.message : "The check-in was not saved.";
     if (err && err.reason === "superseded") {
       showToast(msg, "warning");
@@ -802,7 +804,7 @@ function AdminRegistrationDeskPage({ tournament, onBack, password, showToast, on
       await window.API.toggleCheckIn(compId, pid, val, password, {
         name: player && player.name,
         was: { [pid]: player ? !!player.checkedIn : !val },
-        onRefusal: checkInRefusal(null),
+        onRefusal: checkInRefusal(null, player && player.name),
       });
       if (val && opts.handoff) announceHandoff(opts.handoff.name, opts.handoff.tags);
     } catch (e) {
@@ -811,23 +813,20 @@ function AdminRegistrationDeskPage({ tournament, onBack, password, showToast, on
   };
 
   // Core "set this person's check-in across every competition they entered":
-  // one outbox write per entry, handed over together. Returns how many could
-  // not even be queued; a refusal comes later, through `batch`.
+  // one outbox write per entry, handed over together. Queuing cannot fail (the
+  // door answers at once); a refusal comes later, through `batch`.
   //
   // bc-pnum: an entry whose OWN record carries no id (rdApiPid returns "" for
   // it) has no safe wire identifier -- rdPersonTargets leaves it out rather
   // than sending a write that can only 404 about a row the operator is looking
   // at, and reports `skipped` so callers can tell the operator.
-  const checkPersonEntries = async (targets, makeChecked, batch) => {
-    const results = await Promise.allSettled(
-      targets.map(({ comp, player }) => window.API.toggleCheckIn(comp.id, rdApiPid(player), makeChecked, password, {
-        name: player.name,
-        was: { [rdApiPid(player)]: !!player.checkedIn },
-        onRefusal: checkInRefusal(batch),
-      }))
-    );
-    return results.filter((r) => r.status === "rejected").length;
-  };
+  const checkPersonEntries = (targets, makeChecked, batch) => Promise.all(
+    targets.map(({ comp, player }) => window.API.toggleCheckIn(comp.id, rdApiPid(player), makeChecked, password, {
+      name: player.name,
+      was: { [rdApiPid(player)]: !!player.checkedIn },
+      onRefusal: checkInRefusal(batch, player.name),
+    }))
+  );
 
   // Person-level toggle in "all" mode: check into every competition (or undo all).
   const togglePerson = async (rec) => {
@@ -837,11 +836,7 @@ function AdminRegistrationDeskPage({ tournament, onBack, password, showToast, on
       if (skipped) showToast(`${skippedNoIdMsg(skipped)}: save the roster once and retry`, "error");
       return;
     }
-    const failed = await checkPersonEntries(targets, makeChecked, { total: targets.length, refused: 0 });
-    if (failed) {
-      showToast(`${failed} of ${targets.length} check-in(s) failed${skipped ? `, ${skipped} have no id` : ""}`, "error");
-      return;
-    }
+    await checkPersonEntries(targets, makeChecked, { total: targets.length, refused: 0 });
     if (skipped) showToast(`${skippedNoIdMsg(skipped)} and were skipped`, "error");
     if (makeChecked) {
       announceHandoff(rec.name, rec.entries.filter(({ player }) => player.id).map(({ comp, player }) => ({ compName: comp.name, ...rdPlayerTag(comp, player) })));
@@ -858,15 +853,8 @@ function AdminRegistrationDeskPage({ tournament, onBack, password, showToast, on
     const parts = pending.map((rec) => rdPersonTargets(rec, true));
     const targets = parts.flatMap((p) => p.targets);
     const skipped = parts.reduce((n, p) => n + p.skipped, 0);
-    const failed = targets.length
-      ? await checkPersonEntries(targets, true, { total: targets.length, refused: 0 })
-      : 0;
-    if (failed || skipped) {
-      const said = [];
-      if (failed) said.push(`${failed} check-in(s) failed`);
-      if (skipped) said.push(skippedNoIdMsg(skipped));
-      showToast(said.join(", "), "error");
-    }
+    if (targets.length) await checkPersonEntries(targets, true, { total: targets.length, refused: 0 });
+    if (skipped) showToast(skippedNoIdMsg(skipped), "error");
   };
 
   // Bulk check-in a dojo within the selected competition (uses the bulk
@@ -984,9 +972,9 @@ function AdminRegistrationDeskPage({ tournament, onBack, password, showToast, on
     searchRef.current && searchRef.current.focus();
   };
 
-  const onAdded = async (comp, added, checkInOk) => {
+  const onAdded = async (comp, added) => {
     setWalkUpOpen(false);
-    if (checkInOk) announceHandoff(added.name, [{ compName: comp.name, ...rdPlayerTag(comp, added) }]);
+    announceHandoff(added.name, [{ compName: comp.name, ...rdPlayerTag(comp, added) }]);
     await refresh();
   };
 
@@ -1117,6 +1105,7 @@ function AdminRegistrationDeskPage({ tournament, onBack, password, showToast, on
                   password={password}
                   showToast={showToast}
                   onAdded={onAdded}
+                  onCheckInRefused={withdrawHandoff}
                   onCancel={() => setWalkUpOpen(false)}
                 />
               )}

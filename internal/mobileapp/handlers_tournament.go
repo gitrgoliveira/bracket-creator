@@ -743,6 +743,19 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 			c.JSON(http.StatusBadRequest, gin.H{"error": "tournamentVersion is required: send the version of the tournament settings this save was made from"})
 			return
 		}
+		// A save made from an older copy is told so before its body is judged:
+		// a stale form gets the current settings, not a refusal about values
+		// it was never going to write. The same check runs again under the
+		// store's lock below.
+		stored, err := store.LoadTournament()
+		if err != nil {
+			internalError(c, err)
+			return
+		}
+		if stored != nil && state.TournamentVersion(stored) != req.TournamentVersion {
+			respondTournamentChanged(c, store, verifier)
+			return
+		}
 		t := req.Tournament
 		// Trim string fields so padded input from direct API callers
 		// doesn't persist with surrounding whitespace. Date is included

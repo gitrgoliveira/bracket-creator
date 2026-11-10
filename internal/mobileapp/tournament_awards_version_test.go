@@ -135,6 +135,21 @@ func TestTournamentSaveFromAnOlderCopyIsRefusedWithTheCurrentOne(t *testing.T) {
 	assert.Equal(t, "From the desk", stored.Name, "the refused save wrote nothing")
 }
 
+// A stale form is told it is stale before its body is judged on its merits:
+// a name the form never meant to blank, or a court list that would orphan a
+// live competition, is not the answer a save made from an older copy gets.
+func TestTournamentSaveFromAnOlderCopyIsStaleBeforeItsBodyIsJudged(t *testing.T) {
+	r, store, _, _, _ := setupTestRouter(t)
+	require.NoError(t, store.SaveTournament(&state.Tournament{Name: "Taikai", Password: "pw", Courts: []string{"A"}}))
+	old := tournamentVersionOf(t, r)
+	w := versionDo(t, r, "PUT", "/api/tournament", tournamentSaveBody("From the desk", old))
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	w = versionDo(t, r, "PUT", "/api/tournament", tournamentSaveBody("", old))
+	require.Equal(t, http.StatusConflict, w.Code, w.Body.String())
+	assert.Equal(t, "tournament_changed", decodeMap(t, w)["code"])
+}
+
 // A sponsor added or removed while the Edit Tournament form is open does not
 // make the form's Save stale, and the save keeps the stored list rather than
 // writing the form's older copy over it.
@@ -290,6 +305,19 @@ func TestAwardsSaveFromAnOlderCopyIsRefusedWithTheCurrentOne(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, comp.FightingSpiritAwards, 1)
 	assert.Equal(t, "Sato", comp.FightingSpiritAwards[0].RecipientName, "the refused save wrote nothing")
+}
+
+// The same for the awards: an entry that would be refused on its merits does
+// not hide that the list it was made from is gone.
+func TestAwardsSaveFromAnOlderCopyIsStaleBeforeItsEntriesAreJudged(t *testing.T) {
+	r, _ := awardsFixture(t)
+	old := awardsVersionOf(t, r)
+	w := versionDo(t, r, "PUT", "/api/competitions/c1/awards", awardsBody("Sato", old))
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	w = versionDo(t, r, "PUT", "/api/competitions/c1/awards", awardsBody("", old))
+	require.Equal(t, http.StatusConflict, w.Code, w.Body.String())
+	assert.Equal(t, "awards_changed", decodeMap(t, w)["code"])
 }
 
 // A settings change elsewhere on the competition does not make an awards save

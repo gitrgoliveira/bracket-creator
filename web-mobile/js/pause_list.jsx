@@ -222,12 +222,15 @@ export function PauseList({
   // One stable key per row, so editing a row never remounts its inputs. Add and
   // Remove keep the keys in step; a list replaced from outside (a reload) is
   // brought to the same length here, during render, as React allows for state
-  // derived from props.
-  const [rowKeys, setRowKeys] = React.useState(() => pauses.map(allocPauseKey));
+  // derived from props. The rows of this render read the brought-up keys, so
+  // a Remove whose parent has not yet passed the shorter list never leaves a
+  // row without one.
+  const [heldKeys, setRowKeys] = React.useState(() => pauses.map(allocPauseKey));
+  let rowKeys = heldKeys;
   if (rowKeys.length !== pauses.length) {
-    const nextKeys = rowKeys.slice(0, pauses.length);
-    while (nextKeys.length < pauses.length) nextKeys.push(allocPauseKey());
-    setRowKeys(nextKeys);
+    rowKeys = rowKeys.slice(0, pauses.length);
+    while (rowKeys.length < pauses.length) rowKeys.push(allocPauseKey());
+    setRowKeys(rowKeys);
   }
 
   const daysCount = Number.isInteger(durationDays) && durationDays > 0 ? durationDays : 1;

@@ -15,6 +15,12 @@ const maxActiveAnnouncements = 10
 // over when it arrives shows nothing.
 const AnnouncementMinShow = time.Minute
 
+// AnnouncementMaxShow is the longest a court call is made to show (the handler
+// accepts 5 to 30 minutes). It is how long a withdrawal of a call the server has
+// not seen is remembered: any send of that call still on its way was made
+// before the withdrawal, so it is over by then.
+const AnnouncementMaxShow = 30 * time.Minute
+
 // AnnounceOutcome says what Add did with a call.
 type AnnounceOutcome int
 
@@ -134,6 +140,12 @@ func (s *AnnouncementStore) Add(id, msg string, madeAt time.Time, dur time.Durat
 // identical call stands in for, that call. The call and its aliases are
 // remembered until their expiry. Returns whether it was found and the updated
 // list snapshot under the same lock.
+//
+// A withdrawal of a call the server has not seen (a client id, not showing and
+// not remembered) is answered as not found but remembered for
+// AnnouncementMaxShow: the send can still arrive from another tab of the device
+// that had it out when the withdrawal was made, and it is then recorded, never
+// shown.
 func (s *AnnouncementStore) Remove(id string) (bool, []Announcement) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -147,6 +159,9 @@ func (s *AnnouncementStore) Remove(id string) (bool, []Announcement) {
 		}
 	}
 	if i < 0 {
+		if _, known := s.knownLocked(id); !known && IsClientUUID(id) {
+			s.spendLocked(Announcement{ID: id, ExpiresAt: now.Add(AnnouncementMaxShow)}, now)
+		}
 		return false, snapshotLocked(s.active)
 	}
 	gone := s.active[i]

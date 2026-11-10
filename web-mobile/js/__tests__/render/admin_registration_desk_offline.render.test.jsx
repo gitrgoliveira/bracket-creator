@@ -141,6 +141,16 @@ describe('Registration desk on the outbox', () => {
     expect(getByRole('checkbox', { name: /check in akira tanaka/i }).getAttribute('aria-checked')).toBe('false');
   });
 
+  it('takes the "Checked in" hand-off down when the check-in is refused later', async () => {
+    const { getByRole, queryByText, getByText } = await mount(tournamentWith([akira()]));
+    await act(async () => { fireEvent.click(getByRole('checkbox', { name: /check in akira tanaka/i })); });
+    // Shown from the tap, before the server has answered.
+    expect(getByText(/Checked in:/)).toBeTruthy();
+    emit('men', [{ id: 'p1', checkedIn: false }]);
+    act(() => { doors[0].opts.onRefusal(new Error('No.')); });
+    expect(queryByText(/Checked in:/)).toBeNull();
+  });
+
   it('adopts the stored participant of a superseded answer and says it in one line', async () => {
     const showToast = vi.fn();
     const { getByRole } = await mount(tournamentWith([akira()]), showToast);
@@ -260,6 +270,18 @@ describe('Registration desk walk-up add (direct) then check-in (outbox)', () => 
     act(() => { claimed = doors[0].opts.onRefusal(new Error('No.')); });
     expect(claimed).toBe(true);
     expect(showToast).toHaveBeenCalledWith('Yuki Ito was added but not checked in: No.', 'error');
+  });
+
+  it('takes the walk-up hand-off down when the check-in is refused later', async () => {
+    // The reload after the add reads the same competition back.
+    window.API.fetchCompetitions = vi.fn().mockResolvedValue(tournamentWith([akira()]).competitions);
+    window.API.addParticipant = vi.fn().mockResolvedValue({ id: 'new-1', name: 'Yuki Ito', dojo: 'Tora' });
+    const result = await openWalkUp(vi.fn());
+    fill(result, 'Yuki Ito', 'Tora');
+    await act(async () => { fireEvent.click(result.getByText('Add & check in')); });
+    expect(result.getByText(/Checked in:/)).toBeTruthy();
+    act(() => { doors[0].opts.onRefusal(new Error('No.')); });
+    expect(result.queryByText(/Checked in:/)).toBeNull();
   });
 
   it('keeps a failed add direct: no check-in is queued and the error is shown', async () => {

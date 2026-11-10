@@ -6919,21 +6919,19 @@ const API = {
     // is down, a 404 included (it is already gone: it expired, or another
     // console withdrew it first, which is the outcome asked for, bc-cdbl); a
     // refusal rejects. A withdrawal made while the call's send is still
-    // queued and not yet out takes both out of the outbox, so the venue
-    // screens never show a call already taken back: nothing is sent, the send
-    // settles { discarded: true, withdrawn: true } and this one true.
+    // queued and not yet out takes the send out of the outbox, so the venue
+    // screens never show a call already taken back: the send settles
+    // { discarded: true, withdrawn: true }. The withdrawal is queued all the
+    // same: another tab of this device may have that send out, and it can land
+    // after the withdrawal does. The server remembers a withdrawal it could not
+    // match (AnnouncementStore.Remove) and records the late send without
+    // showing it, so the answer is a 404 or a 200, either one is done.
     async deleteAnnouncement(id, password, opts = {}) {
         const base = _announceBase(id);
         const send = _entriesFor(base).find(([k, d]) => d.kind === 'announce' && !_inFlight.has(d) && !_isFollowed(k));
         if (send) {
             const [key, d] = send;
             _dequeue(key, d, { value: { discarded: true, withdrawn: true } });
-            _persistQueue();
-            _recomputeSyncStatus();
-            // The withdrawal may have emptied the outbox: a build waiting for
-            // that to reload is told, as a flush that empties it tells it.
-            if (_outboxIdle()) noteOutboxDrained();
-            return { applied: true, pending: true, key: '', settled: Promise.resolve(true) };
         }
         return _outboxWrite({
             kind: 'announce-remove', compID: '', matchID: '', method: 'DELETE',

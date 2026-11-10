@@ -26,8 +26,6 @@ Competitors also run the representative bout (daihyosen) of a tied knockout team
 
 A competitor's taps on the public score sheet are sent as they are made, in batches when several are waiting, exactly as an organiser's are, and they are kept on the device and sent in order if the connection drops. There is no save step to forget. Once a match has finished, the sheet takes no further change from a competitor: a tap on a finished match is refused with "This match result has already been reported. Contact the tournament organizer to correct it.", and changing a finished result stays with the organiser's **Correct**.
 
-Some organiser actions are sent directly and are not held for later: typing the admin password to confirm, uploading files, adding a walk-up competitor, editing a participant or a seed, and saving a competition's settings. If the connection is down when you tap one of these, the app says "No answer: the connection dropped. The change may or may not have been saved. Check, then try again if it is missing.", so look at the list once the connection is back and repeat the action only if the change is missing. Scores, lineups, check-in, court calls, tournament settings and fighting-spirit awards are held on the device and sent when the connection returns instead.
-
 Results in self-run mode carry a provenance label. A score entered without a password is tagged "self-reported"; a score entered by an authenticated operator is tagged "admin". Officiated mode always produces "admin" results.
 
 Refer to the [Competitor self-run guide](../competitors/self-run.md) for the attendee-facing workflow.

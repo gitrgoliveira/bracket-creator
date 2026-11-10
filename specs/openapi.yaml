@@ -524,8 +524,8 @@ paths:
         request is 400. If it is not the stored settings' version the save is
         refused with 409 `tournament_changed` (`TournamentChangedError`), nothing
         is written, and the answer carries the current copy and its version.
-        A save whose body already is the stored settings (the resend of one that
-        landed while its answer was lost) is not refused: it is answered 200 with
+        A save whose body already is the stored settings and carries no new password
+        (the resend of one that landed while its answer was lost) is not refused: it is answered 200 with
         the stored settings, and nothing is written.
 
         **File mode; Password preserve semantics**: when the request
@@ -1462,7 +1462,8 @@ paths:
         The announcement is stored in-memory only (not persisted to disk); a server
         restart clears it. Late-connecting viewers can retrieve the active announcement
         via `GET /api/tournament/announcement`. A message identical to one still active
-        replaces it (new id, fresh duration) rather than adding a second entry.
+        and made after it replaces it (new id, its own time) rather than adding a
+        second entry.
         The replaced id stays valid for `DELETE /api/announcements/{id}` while the
         announcement that replaced it is active: it takes that announcement down.
 
@@ -1473,7 +1474,8 @@ paths:
           (`recorded: true`) with the announcement as stored; nothing is added
           and nothing is broadcast. Withdrawn and cleared ids are remembered
           until the time they would have expired, so a late copy of a call that
-          was already taken down never brings it back.
+          was already taken down does not bring it back while the server keeps
+          running (a restart forgets withdrawn ids along with the calls).
         - The call shows until `modifiedAt` plus `durationMinutes`. One whose
           time is already over on arrival is answered `expired: true` and shows
           nothing. One with time left shows for what is left, for at least one
@@ -1578,8 +1580,9 @@ paths:
         over SSE. An id that an identical announcement replaced stays valid
         while the replacing announcement is active, and takes that one down.
         The withdrawn call and its aliases are remembered until the time they
-        would have expired, so a late copy of the send never brings the call
-        back. The id is the key: a body (the outbox sends `modifiedAt`,
+        would have expired, so a late copy of the send does not bring the call
+        back while the server keeps running (a restart forgets withdrawn ids
+        along with the calls). The id is the key: a body (the outbox sends
         `writeId`, `session` and `basis`) is not read. A 404 means the call is
         already gone, which a caller withdrawing it treats as done. An id that
         is a lowercase UUID v4 the server has not seen is answered 404 too, and
@@ -1623,7 +1626,7 @@ paths:
       description: |
         Clears every announcement made at or before the body's `modifiedAt` and
         pushes the list left to viewers over SSE (nothing is broadcast when
-        nothing was showing to clear). The server keeps that stamp as a floor: a
+        nothing was showing to clear). The server keeps the earlier of that stamp and its own clock as a floor: a
         send made at or before it and arriving after it shows nothing, while a
         send made after the clear is untouched whatever the arrival order.
 
@@ -3209,7 +3212,7 @@ paths:
 
         `modifiedAt` is required: the time of the tap in unix milliseconds. Each
         id is judged as the single-participant door judges it: a participant
-        whose stored check-in change is stamped no later than this one is left
+        whose stored check-in change is stamped at or after this one is left
         alone and comes back in `superseded` as stored, so the desk can adopt it
         by id; the others are checked in and take the stamp. A stamp more than a
         few seconds ahead of the server clock is answered 200 `RefusedWrite`
@@ -7120,8 +7123,9 @@ components:
       additionalProperties: false
       required: [applied, reason, message]
       description: >
-        A write nothing of which was applied to the match. Two causes, told
-        apart by `reason`, and they need different remedies:
+        A write nothing of which was applied. Two causes, told
+        apart by `reason`, and they need different remedies. The check-in and
+        court-call doors use this shape for `clock_skew` only:
 
         - `superseded`: every group the write changes is held, because a NEWER
           change to each is already stored (the merge orders a match's writes
@@ -8152,7 +8156,8 @@ components:
                 it, or withdrawn or cleared and remembered until its time would
                 have been over), the call is an older copy of an identical
                 message already showing (it becomes that call's alias and never
-                shortens it), or it was made at or before the last clear. The
+                shortens it), it was made at or before the last clear, or it is
+                older than every one of the ten calls already showing. The
                 announcement returned is the one already stored where there is
                 one, so a resend is harmless.
             expired:
@@ -8858,7 +8863,7 @@ components:
             $ref: '#/components/schemas/Player'
           description: >
             Each participant, as stored, whose stored check-in change is stamped
-            no later than this request's `modifiedAt`, so the request left it
+            at or after this request's `modifiedAt`, so the request left it
             alone. The desk adopts each one by id. Always an array.
 
     ParticipantInput:

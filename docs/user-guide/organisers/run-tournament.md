@@ -44,6 +44,8 @@ Two environment variables tune the API rate limiter for large events:
 
 Click **Admin** in the navigation bar and enter the admin password. The rules for who can access which features depend on your tournament's operating mode. Refer to [Operating modes](operating-modes.md) for the full access-control rules.
 
+Some organiser actions are sent directly and are not held for later: typing the admin password to confirm, uploading files, adding a walk-up competitor, editing a participant or a seed, and saving a competition's settings. If the connection is down when you tap one of these, the app says "No answer: the connection dropped. The change may or may not have been saved. Check, then try again if it is missing.", so check the participant list, seed or settings you changed once the connection is back, and repeat the action only if the change is missing. Scores, lineups, check-in, court calls, tournament settings and fighting-spirit awards are held on the device and sent when the connection returns instead.
+
 ## Dashboard
 
 The dashboard lists all competitions for the tournament. Each card shows the competition type, participant count, bracket format, and current status. Click a card to manage that competition.
@@ -213,9 +215,9 @@ The check-in rule is opt-in: when you click **Generate draw**, if at least one p
 
 The desk keeps working when the venue connection drops. A tap on a competitor, or on **Check in all**, shows on the row at once and is held on the device; it is sent in the order you tapped when the connection returns. The bar at the top of every admin page counts what is still held, as it does for scores.
 
-Two desks can check in the same competitor. If one desk checked someone in and another desk then took the check-in back, the later tap wins. The desk whose tap lost is told in one line, for example "Aiko Tanaka was changed on another desk: now checked in.", and its row shows the result that stands.
+Two desks can check in the same competitor. If one desk checked someone in and another desk then took the check-in back, the later tap wins. The desk whose tap lost is told in one line, for example "Aiko Tanaka was changed on another desk: now not checked in.", and its row shows the result that stands.
 
-**Generate draw** waits for check-ins that are still on their way, so the draw is made from the roster the desk sees. While any are held, the screen reads, for example, "Waiting for 3 check-ins to be sent. The draw is made once they arrive." The draw is made on its own when the last one arrives. Two buttons are offered meanwhile: **Cancel** leaves the competition in setup, and **Generate now anyway** makes the draw at once. Its confirmation says that the competitors whose check-ins have not arrived are left out of the draw. The same wait applies to **Start competition** on a competition that is still in setup and to **Start all** on the dashboard. If the connection stays down, reconnect first, or discard the stuck item from the held list at the top of the page, then generate the draw.
+**Generate draw** waits for check-ins that are still on their way, so the draw is made from the roster the desk sees. It waits only for check-ins held on the device you generate the draw from. Check-ins still held on a separate desk device are not counted, so check that the desk shows nothing held first. While any are held, the screen reads, for example, "Waiting for 3 check-ins to be sent. The draw is made once they arrive." The draw is made on its own when the last one arrives. Two buttons are offered meanwhile: **Cancel** leaves the competition in setup, and **Generate now anyway** makes the draw at once. Its confirmation says that the competitors whose check-ins have not arrived are left out of the draw. The same wait applies to **Start competition** on a competition that is still in setup and to **Start all** on the dashboard, where the button reads **Start now anyway**. If the connection stays down, reconnect, or choose **Generate now anyway**. An item the server keeps refusing is named on the waiting screen with **Discard**.
 
 ### Draw preview
 

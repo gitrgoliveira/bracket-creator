@@ -710,7 +710,7 @@ stamp of the check-in change that set it, so the later of two taps on one compet
 whichever reaches the server first:
 
 * `checked_in@<ms>` is a competitor checked in, and `not_checked_in@<ms>` one whose check-in
-  was taken back. `<ms>` is the server-relative time of the tap in unix milliseconds
+  was taken back. `<ms>` is the time of the tap in unix milliseconds, on the server's clock as the device estimates it
   (`Player.CheckInAt`). A taken-back check-in keeps its stamp on purpose, so a check-in tapped
   earlier that arrives late is still beaten by the undo.
 * A change stamped at or before the stored stamp is not applied: nothing is written and the

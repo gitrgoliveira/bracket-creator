@@ -809,7 +809,9 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			return
 		}
 
-		if result.CheckedIn > 0 {
+		// A row already checked in whose stamp advanced changed too (the
+		// stored stamp is what the other desks compare), so it announces.
+		if result.CheckedIn > 0 || result.AlreadyCheckedIn > 0 {
 			hub.Broadcast(EventParticipantsUpdated, gin.H{"competitionId": id})
 		}
 

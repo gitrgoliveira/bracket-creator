@@ -247,6 +247,20 @@ describe('court calls (A1)', () => {
         expect(stored()).toEqual([]);
     });
 
+    it('a withdrawal that empties the outbox lets a newer build reload', async () => {
+        const version = await import('../app_version.jsx');
+        document.head.insertAdjacentHTML('beforeend', '<meta name="app-build" content="abc">');
+        const reload = vi.fn();
+        version.setReloader(reload);
+        const send = await API.sendAnnouncement('Call', 5, 'pw');
+        await tick(0);
+        version.noteServerBuild('def');
+        expect(reload).not.toHaveBeenCalled();
+        await API.deleteAnnouncement(send.id, 'pw');
+        expect(reload).toHaveBeenCalledTimes(1);
+        document.head.querySelectorAll('meta[name="app-build"]').forEach((m) => m.remove());
+    });
+
     it('a withdrawal made while the call is out goes after it, and a 404 is done', async () => {
         let release;
         const sent = server((r) => (r.method === 'POST'

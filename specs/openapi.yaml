@@ -6968,7 +6968,7 @@ components:
         `GET /api/competitions/{id}/teams/{tid}/match-lineups/{matchId}`,
         `GET /api/competitions/{id}/teams/{tid}/lineup-in-force/{matchId}`,
         `GET /api/competitions/{id}/swiss/standings`, and
-        `GET /api/tournament/announcement`,
+        `GET /api/tournament/announcement`, `GET /api/tournament/announcements`,
         and (in file mode only) the bootstrap PUT/POST `/api/tournament`
         while no tournament has been configured yet.
 

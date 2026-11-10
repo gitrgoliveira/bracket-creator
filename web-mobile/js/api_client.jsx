@@ -6930,6 +6930,9 @@ const API = {
             _dequeue(key, d, { value: { discarded: true, withdrawn: true } });
             _persistQueue();
             _recomputeSyncStatus();
+            // The withdrawal may have emptied the outbox: a build waiting for
+            // that to reload is told, as a flush that empties it tells it.
+            if (_outboxIdle()) noteOutboxDrained();
             return { applied: true, pending: true, key: '', settled: Promise.resolve(true) };
         }
         return _outboxWrite({

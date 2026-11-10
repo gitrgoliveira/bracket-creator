@@ -290,7 +290,7 @@ func (s *AnnouncementStore) recordReplacementLocked(old Announcement, newID stri
 // retireLocked remembers a call just taken off active, and every alias that
 // pointed at it, until the time each would have expired, and drops those
 // aliases. Call it after ANY removal from s.active (expiry, the cap's
-// eviction, Remove, Clear, Set). Must be called with mu held.
+// eviction, Remove, Clear). Must be called with mu held.
 func (s *AnnouncementStore) retireLocked(a Announcement, now time.Time) {
 	s.spendLocked(a, now)
 	for alias, al := range s.replaced {

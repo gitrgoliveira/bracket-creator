@@ -1045,8 +1045,8 @@ func TestBulkCheckIn_BroadcastBehaviour(t *testing.T) {
 	p, err := store.AddParticipant(compID, domain.Player{Name: "Alice", Dojo: "Dojo"}, false)
 	require.NoError(t, err)
 
-	doPost := func(pids []string) *httptest.ResponseRecorder {
-		body, _ := json.Marshal(map[string]any{"participantIds": pids, "modifiedAt": nextCheckInStamp()})
+	doPost := func(pids []string, at int64) *httptest.ResponseRecorder {
+		body, _ := json.Marshal(map[string]any{"participantIds": pids, "modifiedAt": at})
 		w := httptest.NewRecorder()
 		req, _ := http.NewRequest("POST", "/api/competitions/"+compID+"/participants/checkin-bulk", bytes.NewBuffer(body))
 		req.Header.Set("Content-Type", "application/json")
@@ -1055,14 +1055,21 @@ func TestBulkCheckIn_BroadcastBehaviour(t *testing.T) {
 	}
 
 	// First call: toggles Alice → exactly 1 broadcast.
-	w := doPost([]string{p.ID})
+	first := nextCheckInStamp()
+	w := doPost([]string{p.ID}, first)
 	require.Equal(t, http.StatusOK, w.Code)
 	assert.Equal(t, 1, spy.count(), "one broadcast expected when a participant is newly checked-in")
 
-	// Second call: Alice already checked-in → zero additional broadcasts.
-	w = doPost([]string{p.ID})
+	// Second call, a later stamp: Alice is already checked in but her stored
+	// stamp advances, so the other desks are told.
+	w = doPost([]string{p.ID}, nextCheckInStamp())
 	require.Equal(t, http.StatusOK, w.Code)
-	assert.Equal(t, 1, spy.count(), "no additional broadcast expected when participant is already checked-in")
+	assert.Equal(t, 2, spy.count(), "a stamp-only advance of an already checked-in participant must broadcast")
+
+	// Third call, an older stamp: superseded, nothing changed, no broadcast.
+	w = doPost([]string{p.ID}, first)
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, 2, spy.count(), "no broadcast expected when the check-in is superseded")
 }
 
 func mustLoad(t *testing.T, store *state.Store, compID string) []domain.Player {

@@ -9,6 +9,7 @@ import React from 'react';
 import { render, screen, cleanup, act, fireEvent } from '@testing-library/react';
 import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest';
 import { installWindowStubs } from '../helpers/stub_globals.js';
+import { pushToast, toastSnapshot, dismissToast } from '../../toast_queue.jsx';
 
 const noop = () => {};
 const Stub = (name) => {
@@ -79,6 +80,8 @@ afterEach(() => {
   window.API.fetchTournament.mockReset();
   window.API.queuedWritesOf.mockReset();
   window.API.queuedWritesOf.mockReturnValue(0);
+  window.confirmDialog.mockReset();
+  while (toastSnapshot()) dismissToast();
 });
 afterAll(() => restoreGlobals());
 
@@ -149,7 +152,7 @@ describe('AdminApp saves the tournament settings through the outbox', () => {
       window.API.updateTournament.mockResolvedValue({ applied: true, pending: true, settled: settled.promise });
       const app = await mount();
       await act(async () => { await probe.props.onSave(patch()); });
-      expect(app.showToast).toHaveBeenCalledWith('Tournament settings saved. The save goes out once the connection is back.', 'success');
+      expect(app.showToast).toHaveBeenCalledWith('Tournament settings saved. The save goes out once the connection is back.', 'success', { id: 'tournament-settings-saved-offline' });
       // The server's word still comes when it lands.
       await act(async () => { settled.resolve({ tournamentVersion: 'v2' }); await settled.promise; });
       expect(app.showToast).toHaveBeenCalledWith('Tournament updated');
@@ -180,6 +183,44 @@ describe('AdminApp saves the tournament settings through the outbox', () => {
     expect(copy.name).toBe('Other device');
     expect(copy.tournamentVersion).toBe('v9');
     expect(app.showToast).not.toHaveBeenCalledWith('Tournament updated');
+  });
+
+  it('takes the offline "saved" toast down when the open form shows the refusal', async () => {
+    const online = vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(false);
+    try {
+      const settled = deferred();
+      window.API.updateTournament.mockResolvedValue({ applied: true, pending: true, settled: settled.promise });
+      // The real toast queue, as app.jsx's showToast feeds it.
+      const app = await mount({ kind: 'editTournament' }, { showToast: vi.fn(pushToast) });
+      await act(async () => { await probe.props.onSave(patch()); });
+      expect(toastSnapshot().message).toBe('Tournament settings saved. The save goes out once the connection is back.');
+
+      await app.rerender({ kind: 'editTournament' });
+      const onRefusal = window.API.updateTournament.mock.calls[0][2].onRefusal;
+      const stale = Object.assign(new Error('changed'), { code: 'tournament_changed', tournament: tournament({ name: 'Other device', tournamentVersion: 'v9' }) });
+      let claimed;
+      await act(async () => { claimed = onRefusal(stale); settled.reject(stale); await settled.promise.catch(noop); });
+
+      expect(claimed).toBe(true);
+      expect(probe.props.refusal).toMatchObject({ code: 'tournament_changed' });
+      expect(toastSnapshot()).toBeNull();
+    } finally {
+      online.mockRestore();
+    }
+  });
+
+  it('leaves another toast shown when the open form shows the refusal', async () => {
+    const settled = deferred();
+    window.API.updateTournament.mockResolvedValue({ applied: true, pending: true, settled: settled.promise });
+    const app = await mount();
+    await act(async () => { await probe.props.onSave(patch()); });
+    await act(async () => { pushToast('Court A called', 'success'); });
+    await app.rerender({ kind: 'editTournament' });
+    const onRefusal = window.API.updateTournament.mock.calls[0][2].onRefusal;
+    const stale = Object.assign(new Error('changed'), { code: 'tournament_changed', tournament: tournament({ tournamentVersion: 'v9' }) });
+    await act(async () => { onRefusal(stale); settled.reject(stale); await settled.promise.catch(noop); });
+
+    expect(toastSnapshot().message).toBe('Court A called');
   });
 
   it('leaves a refusal to the outbox\'s alert when no form is open, and still takes the current copy', async () => {
@@ -272,18 +313,49 @@ describe('AdminApp saves the tournament settings through the outbox', () => {
     expect(screen.queryByTestId('queued-wait-text')).toBeNull();
   });
 
-  it('sends a held password change at once when the operator chooses to', async () => {
+  it('sends a held password change at once when the operator chooses to and confirms what it leaves out', async () => {
     window.API.queuedWritesOf.mockReturnValue(1);
     window.API.updateTournamentPassword.mockResolvedValue({ tournamentVersion: 'v3' });
-    await mount();
+    window.confirmDialog.mockResolvedValueOnce(true);
+    const app = await mount();
 
     let saving;
     await act(async () => { saving = probe.props.onSave(patch({ password: 'NEW' })); });
     let ok;
     await act(async () => { fireEvent.click(screen.getByTestId('queued-wait-now')); ok = await saving; });
 
+    expect(window.confirmDialog).toHaveBeenCalledTimes(1);
+    const asked = window.confirmDialog.mock.calls[0][0];
+    expect(asked.message).toContain('leaves out 1 settings change made on this device that has not reached the server yet');
+    expect(asked.message).toContain('it would arrive after the password change');
+    expect(asked.confirmLabel).toBe('Change now');
     expect(ok).toBe(true);
     expect(window.API.updateTournamentPassword).toHaveBeenCalledTimes(1);
+    expect(app.onPasswordChange).toHaveBeenCalledWith('NEW');
+  });
+
+  it('keeps waiting, sends nothing and keeps the session password when the confirm is cancelled', async () => {
+    window.API.queuedWritesOf.mockReturnValue(2);
+    window.API.updateTournamentPassword.mockResolvedValue({ tournamentVersion: 'v3' });
+    window.confirmDialog.mockResolvedValueOnce(false);
+    const app = await mount();
+
+    let saving;
+    await act(async () => { saving = probe.props.onSave(patch({ password: 'NEW' })); });
+    await act(async () => { fireEvent.click(screen.getByTestId('queued-wait-now')); });
+
+    expect(window.confirmDialog.mock.calls[0][0].message).toContain('leaves out 2 settings changes made on this device that have not reached the server yet: they would arrive');
+    expect(window.API.updateTournamentPassword).not.toHaveBeenCalled();
+    expect(app.onPasswordChange).not.toHaveBeenCalled();
+    expect(screen.getByTestId('queued-wait-text')).toBeTruthy();
+
+    // Still held: it goes once the queued saves arrive.
+    window.API.queuedWritesOf.mockReturnValue(0);
+    let ok;
+    await act(async () => { tellUnsent(); ok = await saving; });
+    expect(ok).toBe(true);
+    expect(window.API.updateTournamentPassword).toHaveBeenCalledTimes(1);
+    expect(app.onPasswordChange).toHaveBeenCalledWith('NEW');
   });
 
   it('sends nothing and keeps the form open when the operator cancels the wait', async () => {

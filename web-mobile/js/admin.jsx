@@ -23,6 +23,7 @@ import { AdminCalendarPage } from './admin_calendar.jsx';
 import { useWaitForQueuedWrites, QueuedWritesWait, queuedWritesNounFor } from './queued_writes_wait.jsx';
 import { checkInApplies } from './competition_shape.jsx';
 import { isOffline, savedOfflineSentence } from './write_result.jsx';
+import { toastSnapshot, dismissToast } from './toast_queue.jsx';
 import { onDocumentSettled } from './document_versions.jsx';
 import { useLatestRef } from './latest_ref.jsx';
 
@@ -165,6 +166,10 @@ function tournamentPasswordChanged(body, sessionPassword) {
 // is sent direct and a settings save still queued here would land after it.
 const TOURNAMENT_WRITE_KINDS = Object.freeze(["tournament"]);
 
+// The id of the toast a settings save made with no connection shows, so a late
+// refusal the Edit Tournament form says in its banner can take it down.
+const SETTINGS_SAVED_OFFLINE_TOAST = "tournament-settings-saved-offline";
+
 function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChange, tweaks, password, view: propView, setView: propSetView, showToast, authConfig }) {
   const [internalView, setInternalView] = useState({ kind: "dashboard" });
   const view = propView || internalView;
@@ -240,6 +245,22 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
     const answer = passwordWaitRef.current;
     passwordWaitRef.current = null;
     if (answer) answer(false);
+  };
+  // "Change the password now": the queued settings saves would land after the
+  // password change, so the operator is told what that leaves out, as Start
+  // all's "Start now anyway" does. Cancel keeps waiting; the session password
+  // switches only once the change is sent (updateTournament, after runNow).
+  const changePasswordNowAnyway = async () => {
+    const n = settingsWait.count;
+    const ok = await window.confirmDialog({
+      message:
+        `Changing the password now leaves out ${queuedWritesNounFor("settings", n)} made on this device that ${n === 1 ? "has" : "have"} not reached the server yet: ` +
+        `${n === 1 ? "it would arrive" : "they would arrive"} after the password change.\n\n` +
+        `Change the password now anyway?`,
+      confirmLabel: "Change now",
+      danger: true,
+    });
+    if (ok) settingsWait.runNow();
   };
 
   // R4 (bc-evts stage 3 review 2): a court move or time change this device
@@ -712,6 +733,10 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
           // else the outbox's alert does.
           if (!mountedRef.current || viewKindRef.current !== "editTournament") return false;
           setLateRefusal({ code: e && e.code, message: e && e.message });
+          // The "saved, goes out once the connection is back" toast would sit
+          // beside the form's "Not saved" banner: the banner replaces it.
+          const shown = toastSnapshot();
+          if (shown && shown.id === SETTINGS_SAVED_OFFLINE_TOAST) dismissToast();
           return true;
         },
       });
@@ -722,7 +747,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
       // Kept on this device and sent when the link allows: a save made with no
       // connection says so now, not when it lands (the same line the court-call
       // composer gives).
-      if (isOffline()) showToast(savedOfflineSentence("Tournament settings"), "success");
+      if (isOffline()) showToast(savedOfflineSentence("Tournament settings"), "success", { id: SETTINGS_SAVED_OFFLINE_TOAST });
       onDocumentSettled(res.settled, (saved) => {
         // Discarded from the held-writes list (or sent by another tab, whose
         // answer this one does not hold): nothing of it is known here, so the
@@ -1030,7 +1055,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
       what="settings"
       outcome="The password is changed"
       nowLabel="Change the password now"
-      onNow={() => settingsWait.runNow()}
+      onNow={changePasswordNowAnyway}
       title="Waiting for earlier settings changes"
     />
     </>;

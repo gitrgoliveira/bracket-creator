@@ -210,17 +210,18 @@ In-progress migration to keep in mind (the other tech-debt notes, such as which 
 
 **With UUIDs (new format)**: first field is a UUID v4 (lowercase hex).
 ```
-<uuid>, Name[, Zekken/DisplayName], Dojo[, DanGrade][, source]
+<uuid>, Name[, Zekken/DisplayName], Dojo[, DanGrade][, source][, checked_in | checked_in@<ms> | not_checked_in@<ms>]
 ```
 
 **Without UUIDs (legacy format)**: detected automatically when first field is not a UUID.
 ```
-Name[, Zekken/DisplayName], Dojo[, DanGrade][, source]
+Name[, Zekken/DisplayName], Dojo[, DanGrade][, source][, checked_in | checked_in@<ms> | not_checked_in@<ms>]
 ```
 
 - The zekken/display-name column is only present when `withZekkenName=true` for the competition.
 - `DanGrade` is optional; omit or leave empty.
-- `source` is the last column when present and must be one of: `manual`, `registered`, `transfer`. This is the registration provenance (admin-only). It is distinct from the competitor's "tag" (their assigned competitor number, which is the `Number`/`number` field, optionally prefixed via `numberPrefix`, e.g. "A1").
+- The optional check-in marker is the very last column; its stamp (`<ms>`, unix milliseconds) is what lets the later of two taps win, and `docs/architecture/data-model.md` owns the rules for it.
+- `source` is the last column before the check-in marker when present and must be one of: `manual`, `registered`, `transfer`. This is the registration provenance (admin-only). It is distinct from the competitor's "tag" (their assigned competitor number, which is the `Number`/`number` field, optionally prefixed via `numberPrefix`, e.g. "A1").
 - Seeds are stored separately in `seeds.csv` and merged at load time. Do **not** include seed ranks in `participants.csv`.
 - **Engi (kata-competition) pairs**: an engi competitor is a PAIR (two member names, one shared dojo) but is a SINGLE participant on the Go side. Both member names are COMBINED in the `Name` field, joined by `" - "`: a paste row is `Name1 - Name2, Dojo`. Engi does NOT alter the column layout (`EffectiveWithZekkenName()` returns `WithZekkenName` only), so an engi roster parses byte-identically to any non-engi roster with the same zekken setting; when zekken is on, the zekken column holds the combined pair zekken (`ZEKKEN1 - ZEKKEN2`). Display surfaces split the combined name on the FIRST `" - "` via `window.engiPairParts` (ui.jsx); Go keeps the name whole. A pair is one row in standings and one side in a match; the two names are presentation only and never split the entity for scoring.
 - The Go parser lives in `internal/state/participants.go`; the JS parser in `web-mobile/js/data.jsx:parseParticipantLines`. Keep both in sync with this schema when changing column layout.

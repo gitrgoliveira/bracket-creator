@@ -703,7 +703,7 @@ In `tournament.md`, YAML front matter stores the tournament settings, among them
 
 In `competitions/<id>/config.md`, YAML front matter stores competition configuration: `name`, `date`, `start_time`, `courts`, `kind`, `format`, `status`, rules and match durations, `expected_participants`, and format-specific options. The `expected_participants` field is an optional integer (0 to 1024, absent means 0) representing the organiser's expected entry count (expected teams in team competitions) for setup schedule estimation. It needs no migration because no earlier release wrote the key.
 
-The settings versions are not stored. `tournamentVersion` (over the fields a tournament save writes, never the password) and `awardsVersion` (over a competition's fighting-spirit awards list) are content hashes computed when they are served, like `configVersion`, so nothing is added to `tournament.md` or `config.md`. A save sends back the version it was made from, and a stale one is refused with the current copy.
+The settings versions are not stored. `tournamentVersion` (over the fields a tournament save writes, never the password) and `awardsVersion` (over a competition's fighting-spirit awards list) are content hashes computed when they are served, like a competition's `configVersion` (the version its settings save sends back), so nothing is added to `tournament.md` or `config.md`. A save sends back the version it was made from, and a stale one is refused with the current copy.
 
 A `participants.csv` row ends with an optional check-in marker, and the marker carries the
 stamp of the check-in change that set it, so the later of two taps on one competitor wins
@@ -721,8 +721,9 @@ whichever reaches the server first:
   a row with no marker as not checked in at stamp 0. A roster written by an earlier release
   therefore loads as it was and is not rewritten; any check-in tap, which carries a real
   stamp, beats those rows. Reading the marker is the whole migration.
-* The marker is the last column, and a row of two or fewer data columns (not counting a leading id) never carries one. A
-  stamp is not part of what a backup fingerprint compares: `checked_in@<ms>` counts as
+* The marker is the last column, and a row of two or fewer data columns (not counting a
+  leading id) never carries one.
+* A stamp is not part of what a backup fingerprint compares: `checked_in@<ms>` counts as
   `checked_in` and `not_checked_in@<ms>` as no marker, so a check-in sent again that changes
   nothing, or one applied and taken back, leaves the fingerprint where it was.
 

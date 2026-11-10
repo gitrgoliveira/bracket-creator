@@ -525,8 +525,9 @@ paths:
         refused with 409 `tournament_changed` (`TournamentChangedError`), nothing
         is written, and the answer carries the current copy and its version.
         A save whose body already is the stored settings and carries no new password
-        (the resend of one that landed while its answer was lost) is not refused: it is answered 200 with
-        the stored settings, and nothing is written.
+        (the resend of one that landed while its answer was lost) is not refused: it
+        is answered 200 with the stored settings, and nothing is written. While no
+        tournament exists, any non-empty value is accepted.
 
         **File mode; Password preserve semantics**: when the request
         body omits `password` or sends an empty string, the server

@@ -13,6 +13,7 @@
 // local-only UI (per the brief; backend persistence is a follow-up).
 
 import { createTimerPool } from './timer_pool.jsx';
+import { serverNowMs } from './server_clock.jsx';
 import { compareCourtDayQueue, courtQueueEntriesOf } from './court_queue.jsx';
 import { applyPatch, keepNewerCompetitions, matchInComp } from './patch.jsx';
 import { SideCell, WinnerTick } from './side_cell.jsx';
@@ -423,15 +424,26 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // question (pickMatch, correctMatch).
     const latestRef = useRef(null);
     // The newest court call this console made per match, keyed by matchKey, as
-    // { id, msg }: the announcement id (a promise of it, null if the send failed)
-    // and the text sent, so the call can be withdrawn once its match leaves
-    // scheduled (bc-cdbl). A reload forgets them; the 5-minute expiry is the
+    // { id, msg, endsAt, answered }: the announcement id the device made and
+    // the text sent, so the call can be withdrawn once its match leaves
+    // scheduled (bc-cdbl), and when its time is over (endsAt, in the server's
+    // clock frame: made-at plus CALL_MINUTES until the server answers, then the
+    // expiry it answered). A reload forgets them; the 5-minute expiry is the
     // backstop. Declared ahead of the court feed's handler, which withdraws one.
     const callIdsRef = useRef(new Map());
+    // One timer per called match, for the end of the call kept for it
+    // (keepCalled): the card reads as called only while that call is showing.
+    const callEndsRef = useRef(new Map());
     const withdrawCallRef = useRef(null);
     useEffect(() => {
         if (typeof window.scrollTo === "function") window.scrollTo(0, 0);
-        return () => { mountedRef.current = false; };
+        // The Map itself never changes, only what it holds.
+        const callEnds = callEndsRef.current;
+        return () => {
+            mountedRef.current = false;
+            callEnds.forEach(clearTimeout);
+            callEnds.clear();
+        };
     }, []);
 
     // mp-9h1f: the operator console is court-first AND cross-competition (the
@@ -684,7 +696,8 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     const paceLookup = useCourtPaceLookup(courtCompetitions);
 
     // Selected match for the inline scoring panel. `calledKey` marks the match
-    // the operator has announced this session (local cue only); `callingKey`
+    // the operator has announced, while that call is showing (local cue only,
+    // cleared by keepCalled once the call's time is over); `callingKey`
     // guards the in-flight announce request. `callTapRef` guards against double
     // taps on Call to court (bc-cdbl).
     const [calledKey, setCalledKey] = useState(null);
@@ -1770,6 +1783,35 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         window.API.deleteAnnouncement(id, password, { message: msg });
     };
 
+    // A call stands while its time is not over.
+    const callStands = (entry) => !!entry && entry.endsAt > serverNowMs();
+    const clearCallEnd = (key) => {
+        const t = callEndsRef.current.get(key);
+        if (t === undefined) return;
+        clearTimeout(t);
+        callEndsRef.current.delete(key);
+    };
+    // keepCalled: the card for the match keyed `key` reads as called only while
+    // the call this console keeps for it is showing. With that call standing it
+    // arms the match's one timer for the call's end, and runs again then. With
+    // none standing the card goes back to uncalled (it offers Call to court
+    // again), and a call the server has answered is dropped: there is nothing
+    // left to withdraw. One the server has not answered yet stays kept, so a
+    // start still takes it out of the outbox; it arrives expired otherwise.
+    const keepCalled = (key) => {
+        clearCallEnd(key);
+        const entry = callIdsRef.current.get(key);
+        if (callStands(entry)) {
+            callEndsRef.current.set(key, setTimeout(() => {
+                callEndsRef.current.delete(key);
+                keepCalled(key);
+            }, entry.endsAt - serverNowMs()));
+            return;
+        }
+        if (entry && entry.answered) callIdsRef.current.delete(key);
+        if (mountedRef.current) setCalledKey((k) => (k === key ? null : k));
+    };
+
     // Call to court: optional. Broadcasts a tournament announcement so the
     // competitors (and anyone watching the public app) are notified they're
     // being summoned to this shiaijo. It does NOT start the match; Start is
@@ -1789,6 +1831,17 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         // text, so a call whose text changed (a side's name resolved) would
         // otherwise leave the earlier banner up until it expired (bc-cdbl).
         const earlier = callIdsRef.current.get(matchKey(m)) || null;
+        // When the call's time is over, as the server judges it: made-at, in
+        // its clock frame, plus the minutes the call shows.
+        const endsAt = serverNowMs() + CALL_MINUTES * 60000;
+        // What stands once this call has not: the earlier call while its own
+        // time is not over, otherwise nothing.
+        const fallBack = (key, entry) => {
+            if (callIdsRef.current.get(key) !== entry) return;
+            if (callStands(earlier)) callIdsRef.current.set(key, earlier);
+            else callIdsRef.current.delete(key);
+            keepCalled(key);
+        };
         try {
             // The answer is the outbox's pending one and carries the id the
             // device made, so starting the match can withdraw this call before
@@ -1798,25 +1851,29 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
             const key = matchKey(m);
             // Keep the newest call per match, with its text, so starting the match
             // can withdraw it (bc-cdbl). A refused send leaves the earlier call
-            // and its entry in place.
-            const entry = { compId: m.compId, matchId: m.id, msg, id: sent.id };
+            // and its entry in place while its time is not over.
+            const entry = { compId: m.compId, matchId: m.id, msg, id: sent.id, endsAt, answered: false };
             callIdsRef.current.set(key, entry);
+            keepCalled(key);
             sent.settled.then(
                 (landed) => {
                     // Its time ran out before it reached the server (held offline
                     // too long): nothing was shown and nothing was replaced, so
-                    // the earlier call, if any, stays the one kept, and the
-                    // "Called" toast below is put right.
+                    // the earlier call stays the one kept while it is still
+                    // showing, and the "Called" toast below is put right. With
+                    // no call standing, the card reads as if no call was made.
                     if (landed && landed.expired) {
-                        if (callIdsRef.current.get(key) === entry) {
-                            if (earlier) callIdsRef.current.set(key, earlier);
-                            else callIdsRef.current.delete(key);
-                        }
-                        // Nothing went out, so with no earlier call standing the
-                        // card reads as if no call was made.
-                        if (!earlier && mountedRef.current) setCalledKey((k) => (k === key ? null : k));
+                        fallBack(key, entry);
                         if (showToast) showToast(announcementExpiredToast(CALL_MINUTES, "court call"), "error");
                         return;
+                    }
+                    // Shown: the call reads as called until the expiry the server
+                    // answered (a late call shows for what is left of its time).
+                    if (callIdsRef.current.get(key) === entry) {
+                        entry.answered = true;
+                        const until = landed && Date.parse(landed.expiresAt);
+                        if (Number.isFinite(until)) entry.endsAt = until;
+                        keepCalled(key);
                     }
                     // An identical text already replaced the earlier call on the
                     // server (AnnouncementStore.Add), so a withdrawal of it would
@@ -1826,10 +1883,8 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                 },
                 () => {
                     // The outbox tells the operator (_tellRefusal); here only the
-                    // bookkeeping goes back to what stands.
-                    if (callIdsRef.current.get(key) !== entry) return;
-                    if (earlier) callIdsRef.current.set(key, earlier);
-                    else callIdsRef.current.delete(key);
+                    // bookkeeping and the card go back to what stands.
+                    fallBack(key, entry);
                 },
             );
             if (!mountedRef.current) return;
@@ -1850,6 +1905,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         const entry = callIdsRef.current.get(key);
         if (!entry) return;
         callIdsRef.current.delete(key);
+        clearCallEnd(key);
         takeDown(entry.id, entry.msg);
     };
     React.useLayoutEffect(() => { withdrawCallRef.current = withdrawCall; });

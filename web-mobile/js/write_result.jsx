@@ -489,8 +489,10 @@ export function heldWriteDiscardConfirm(held) {
     const why = held && held.cycled
         ? `The ${what} held on this device waits for another held write that waits for it, so neither can be sent. `
         : `The server keeps refusing the ${what} held on this device${held ? '' : ' for this match'}, so it may never be sent. `;
+    const after = (held && HELD_WRITE_AFTER_DISCARD[held.kind])
+        || `Check ${where} afterwards, and enter it again if it is still needed.`;
     return {
-        message: `${why}Discard it? Nothing else is discarded. Check ${where} afterwards, and enter it again if it is still needed.`,
+        message: `${why}Discard it? Nothing else is discarded. ${after}`,
         confirmLabel: 'Discard it',
         danger: true,
     };
@@ -517,8 +519,41 @@ export function heldWriteWhat(held) {
         case 'lineup-remove': return 'lineup removal';
         case 'reinstate': return 'reinstatement';
         case 'pool-ranks': return 'pool order (chusen)';
+        case 'checkin': case 'checkin-bulk': return 'check-in';
+        case 'announce': return 'court call';
+        case 'announce-remove': return 'court call withdrawal';
+        case 'announce-clear': return 'clear of court calls';
+        case 'tournament': return 'tournament settings';
+        case 'awards': return 'fighting-spirit awards';
         default: return isFinishedResultWrite(held) ? 'finished result' : 'score update';
     }
+}
+
+// HELD_WRITE_AFTER_DISCARD: what the discard confirm asks the operator to
+// check for a held write that is about no match (bc-obox: the check-in, court
+// call and settings doors); every other kind is checked on its match or lineup.
+const HELD_WRITE_AFTER_DISCARD = {
+    'checkin': 'Check the competitor at the registration desk afterwards, and tap them again if it is still needed.',
+    'checkin-bulk': 'Check the competitors at the registration desk afterwards, and check them in again if it is still needed.',
+    'announce': 'Check the viewer screens afterwards, and make the call again if it is still needed.',
+    'announce-remove': 'Check the viewer screens afterwards, and withdraw the call again if it is still showing.',
+    'announce-clear': 'Check the viewer screens afterwards, and clear the court calls again if any are still showing.',
+    'tournament': 'Check the tournament settings afterwards, and save them again if it is still needed.',
+    'awards': 'Check the fighting-spirit awards afterwards, and save them again if it is still needed.',
+};
+
+// The label api_client.jsx's check-in, court-call and settings doors give
+// their held write (`where`) already names the kind ("Check-in: Ren Abe",
+// "Court call: "…"", "Tournament settings"), so only what follows that name is
+// kept: "check-in (Ren Abe)", never "check-in (Check-in: Ren Abe)".
+const DOOR_LABEL_KINDS = new Set(['checkin', 'checkin-bulk', 'announce', 'announce-remove', 'announce-clear', 'tournament', 'awards']);
+const DOOR_LABEL_LEADS = ['check-in:', 'court call:'];
+const DOOR_LABELS_WHOLE = new Set(['check-in', 'court call', 'every court call', 'tournament settings', 'fighting-spirit awards']);
+function doorLabelDetail(where) {
+    const lower = where.toLowerCase();
+    if (DOOR_LABELS_WHOLE.has(lower)) return '';
+    const lead = DOOR_LABEL_LEADS.find((l) => lower.startsWith(l));
+    return lead ? where.slice(lead.length).trim() : where;
 }
 
 // heldWriteWhatWhere: the same, with the match (as the score list labels it)
@@ -526,7 +561,8 @@ export function heldWriteWhat(held) {
 // _whereOf; stage 3 review 5, H5), e.g. "reopen (Pool A · Match 3)".
 export function heldWriteWhatWhere(held) {
     const what = heldWriteWhat(held);
-    const where = held && typeof held.where === 'string' ? held.where.trim() : '';
+    let where = held && typeof held.where === 'string' ? held.where.trim() : '';
+    if (where && DOOR_LABEL_KINDS.has(held.kind)) where = doorLabelDetail(where);
     return where ? `${what} (${where})` : what;
 }
 

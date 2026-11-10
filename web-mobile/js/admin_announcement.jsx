@@ -20,6 +20,14 @@ function sendAnnouncementLabel(inFlight) {
   return inFlight ? "Sending..." : "Send announcement";
 }
 
+// The toast after a send. The send is kept on this device and goes out when the
+// link allows, so a send made with no connection says it is saved, not sent.
+function announcementSentToast(minutes, online) {
+  return online === false
+    ? "Announcement saved: it goes out once the connection is back."
+    : `Announcement broadcast for ${minutes} minutes!`;
+}
+
 // AnnouncementComposer: the broadcast card body (active-announcements
 // list + message + duration + send). Owns all announcement state and
 // handlers. `password` is forwarded to the mutating API calls; `showToast`
@@ -47,17 +55,25 @@ function AnnouncementComposer({ password, showToast }) {
 
   useEffect(() => { refreshAnnouncements(); }, [refreshAnnouncements]);
 
+  // The three doors answer at once with the outbox's pending answer: the
+  // write is kept on this device and goes out when the link allows. Its
+  // `settled` is the server's word; a refusal is told once by the outbox, so
+  // the list is only read again here, to show what really stands.
+  const reloadWhenSettled = (answer) => {
+    if (answer && answer.settled) answer.settled.then(refreshAnnouncements, refreshAnnouncements);
+  };
+
   const handleSendAnnouncement = async () => {
     const trimmed = announcementMessage.trim();
     if (!trimmed) return;
     setAnnouncementInFlight(true);
     try {
-      await window.API.sendAnnouncement(trimmed, announcementDuration, password);
+      const answer = await window.API.sendAnnouncement(trimmed, announcementDuration, password);
       setAnnouncementMessage("");
       if (showToast) {
-        showToast(`Announcement broadcast for ${announcementDuration} minutes!`, "success");
+        showToast(announcementSentToast(announcementDuration, typeof navigator !== "undefined" ? navigator.onLine : true), "success");
       }
-      await refreshAnnouncements();
+      reloadWhenSettled(answer);
     } catch (e) {
       if (showToast) {
         showToast(e.message, "error");
@@ -69,8 +85,9 @@ function AnnouncementComposer({ password, showToast }) {
 
   const handleDismissAnnouncement = async (id) => {
     try {
-      await window.API.deleteAnnouncement(id, password);
-      await refreshAnnouncements();
+      const answer = await window.API.deleteAnnouncement(id, password);
+      setActiveAnnouncements((list) => list.filter((a) => a.id !== id));
+      reloadWhenSettled(answer);
     } catch (e) {
       if (showToast) showToast(e.message, "error");
     }
@@ -78,8 +95,9 @@ function AnnouncementComposer({ password, showToast }) {
 
   const handleClearAnnouncements = async () => {
     try {
-      await window.API.clearAnnouncements(password);
-      await refreshAnnouncements();
+      const answer = await window.API.clearAnnouncements(password);
+      setActiveAnnouncements([]);
+      reloadWhenSettled(answer);
     } catch (e) {
       if (showToast) showToast(e.message, "error");
     }
@@ -169,4 +187,4 @@ window.AnnouncementModal = AnnouncementModal;
 
 // ES export for the vitest suite: pure helpers only. Components stay
 // behind the window.* pattern to match the rest of admin_*.jsx.
-export { isSendAnnouncementDisabled, sendAnnouncementLabel };
+export { isSendAnnouncementDisabled, sendAnnouncementLabel, announcementSentToast };

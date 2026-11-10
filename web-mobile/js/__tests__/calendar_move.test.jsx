@@ -199,6 +199,38 @@ describe('saveMove and undoMove', () => {
     expect(body.restoreMatchTimes).toEqual([]);
   });
 
+  // bc-obox T1: a drawn competition is not moved while a time change this
+  // device made is still on its way, unless the operator chose to.
+  it('does not move a drawn competition while time changes are queued, and says so', async () => {
+    window.API.queuedWritesOf = vi.fn((compID, kinds) => (compID === 'c1' && kinds.includes('time') ? 2 : 0));
+    window.API.fetchCompetitions.mockResolvedValue([{ ...BASE, status: 'draw-ready' }]);
+    const err = await saveMove({ password: 'pw', competitionId: 'c1', date: '14-03-2026', startTime: '11:00' }).catch((e) => e);
+    expect(err.code).toBe('time_changes_queued');
+    expect(err.count).toBe(2);
+    expect(moveErrorMessage(err)).toBe('Not moved yet: 2 time changes made on this device are still being sent. Open Move to wait for them, or to move it now anyway.');
+    expect(window.API.queuedWritesOf).toHaveBeenCalledWith('c1', ['time']);
+    expect(window.API.updateCompetition).not.toHaveBeenCalled();
+  });
+
+  it('moves a drawn competition with time changes queued when the operator says now anyway', async () => {
+    window.API.queuedWritesOf = vi.fn(() => 1);
+    window.API.fetchCompetitions.mockResolvedValue([{ ...BASE, status: 'draw-ready' }]);
+    window.API.updateCompetition.mockResolvedValue({ ...BASE, status: 'draw-ready', configVersion: 'v2', previousTimes: [] });
+    const move = await saveMove({ password: 'pw', competitionId: 'c1', date: '14-03-2026', startTime: '11:00', nowAnyway: true });
+    expect(move.drawn).toBe(true);
+    expect(window.API.updateCompetition).toHaveBeenCalledTimes(1);
+    expect(window.API.updateCompetition.mock.calls[0][1].nowAnyway).toBeUndefined();
+  });
+
+  it('moves a competition not yet drawn whatever time changes are queued', async () => {
+    window.API.queuedWritesOf = vi.fn(() => 3);
+    window.API.fetchCompetitions.mockResolvedValue([{ ...BASE }]);
+    window.API.updateCompetition.mockResolvedValue({ ...BASE, configVersion: 'v2' });
+    await saveMove({ password: 'pw', competitionId: 'c1', date: '15-03-2026', startTime: '10:00', courts: ['A'] });
+    expect(window.API.updateCompetition).toHaveBeenCalledTimes(1);
+    expect(window.API.queuedWritesOf).not.toHaveBeenCalled();
+  });
+
   it('undoes a setup move without a restore list and with its shiaijo back', async () => {
     window.API.fetchCompetitions.mockResolvedValue([{ ...BASE, courts: ['B'], configVersion: 'v2' }]);
     window.API.updateCompetition.mockResolvedValue({ ...BASE });

@@ -1757,16 +1757,14 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     const endCorrectionOf = (key) => { setCorrectingKey((k) => (k === key ? null : k)); };
     React.useLayoutEffect(() => { latestRef.current = { pickMatch, correctMatch, allMatches, running }; });
 
-    // takeDown: delete the announcement whose id `pending` resolves to (none
-    // when it resolves to null). Fire and forget, shared by withdrawCall and the
-    // earlier call callToCourt replaces.
-    const takeDown = (pending) => {
-        pending
-            .then((id) => {
-                if (!id || !window.API || typeof window.API.deleteAnnouncement !== "function") return;
-                return window.API.deleteAnnouncement(id, password);
-            })
-            .catch((e) => console.warn("Could not withdraw the court call", e));
+    // takeDown: withdraw the court call `id` (the device made it, so it is known
+    // at once, sent or not). Fire and forget: the withdrawal is an outbox entry
+    // that goes after the call's own send, and a refusal is told once by the
+    // outbox (_tellRefusal), never here. `msg` names the call on a held-writes
+    // list. Shared by withdrawCall and the earlier call callToCourt replaces.
+    const takeDown = (id, msg) => {
+        if (!id || !window.API || typeof window.API.deleteAnnouncement !== "function") return;
+        window.API.deleteAnnouncement(id, password, { message: msg });
     };
 
     // Call to court: optional. Broadcasts a tournament announcement so the
@@ -1782,41 +1780,40 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         const b = (m.sideB && m.sideB.name) || "Shiro";
         const msg = `Now calling ${b} and ${a} to Shiaijo ${court}.`.slice(0, 200);
         setCallingKey(matchKey(m));
-        // The call already up for this match, if any: { id, msg }, where id is a
-        // promise of its announcement id. It comes down only once the new call is
-        // answered (below), so a send that fails leaves it up. The server replaces
-        // only an announcement with identical text, so a call whose text changed
-        // (a side's name resolved) would otherwise leave the earlier banner up
-        // until it expired (bc-cdbl).
+        // The call already up for this match, if any: { id, msg }. It comes down
+        // only once the new call has landed (below), so a send the server refuses
+        // leaves it up. The server replaces only an announcement with identical
+        // text, so a call whose text changed (a side's name resolved) would
+        // otherwise leave the earlier banner up until it expired (bc-cdbl).
         const earlier = callIdsRef.current.get(matchKey(m)) || null;
         try {
-            const sent = window.API.sendAnnouncement(msg, 5, password);
+            // The answer is the outbox's pending one and carries the id the
+            // device made, so starting the match can withdraw this call before
+            // it has landed (the withdrawal then takes the unsent call out of the
+            // outbox). `settled` is the server's word on it.
+            const sent = await window.API.sendAnnouncement(msg, 5, password);
             const key = matchKey(m);
             // Keep the newest call per match, with its text, so starting the match
-            // can withdraw it (bc-cdbl). The id is kept as a promise: a start that
-            // lands before the answer must still withdraw the call once its id
-            // arrives. If the send fails, the earlier call stays up, and so does
-            // its entry.
-            const entry = {
-                compId: m.compId,
-                matchId: m.id,
-                msg,
-                id: sent.then((ann) => (ann && ann.id) || null, () => (earlier ? earlier.id : null)),
-            };
+            // can withdraw it (bc-cdbl). A refused send leaves the earlier call
+            // and its entry in place.
+            const entry = { compId: m.compId, matchId: m.id, msg, id: sent.id };
             callIdsRef.current.set(key, entry);
-            sent.catch(() => {
-                if (callIdsRef.current.get(key) !== entry) return;
-                if (earlier) callIdsRef.current.set(key, earlier);
-                else callIdsRef.current.delete(key);
-            });
-            // The earlier call comes down once this one is answered, but only when
-            // its text differs. An identical text already replaced it on the server
-            // (AnnouncementStore.Add), so a DELETE of it would 404; a failed send
-            // leaves it up (its id comes back unchanged, so nothing is taken down).
-            if (earlier && earlier.msg !== msg) {
-                takeDown(Promise.all([earlier.id, entry.id]).then(([oldId, newId]) => (oldId !== newId ? oldId : null)));
-            }
-            await sent;
+            sent.settled.then(
+                (landed) => {
+                    // An identical text already replaced the earlier call on the
+                    // server (AnnouncementStore.Add), so a withdrawal of it would
+                    // 404; but a call withdrawn before it was sent replaced
+                    // nothing, so the earlier one comes down with it.
+                    if (earlier && (earlier.msg !== msg || (landed && landed.discarded))) takeDown(earlier.id, earlier.msg);
+                },
+                () => {
+                    // The outbox tells the operator (_tellRefusal); here only the
+                    // bookkeeping goes back to what stands.
+                    if (callIdsRef.current.get(key) !== entry) return;
+                    if (earlier) callIdsRef.current.set(key, earlier);
+                    else callIdsRef.current.delete(key);
+                },
+            );
             if (!mountedRef.current) return;
             setCalledKey(matchKey(m));
             if (showToast) showToast(`Called ${b} and ${a} to Shiaijo ${court}`);
@@ -1829,13 +1826,13 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
 
     // withdrawCall: take this console's court call for the match keyed `key`
     // back down once that match has left scheduled (bc-cdbl). Fire
-    // and forget: a failed delete is logged, never allowed to fail the start,
-    // and the 5-minute expiry still clears the banner.
+    // and forget: the withdrawal is an outbox entry, never allowed to fail the
+    // start, and the 5-minute expiry still clears the banner.
     const withdrawCall = (key) => {
         const entry = callIdsRef.current.get(key);
         if (!entry) return;
         callIdsRef.current.delete(key);
-        takeDown(entry.id);
+        takeDown(entry.id, entry.msg);
     };
     React.useLayoutEffect(() => { withdrawCallRef.current = withdrawCall; });
 

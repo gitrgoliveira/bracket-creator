@@ -1080,24 +1080,49 @@ function FightingSpiritAwardsEditor({ c, password, showToast }) {
     setDirty(false);
   };
 
-  const addRow = () => { setDirty(true); setAwards(prev => [...prev, withKey({ title: "Fighting Spirit", recipientName: "", recipientDojo: "" })]); };
-  const removeRow = (idx) => { setDirty(true); setAwards(prev => prev.filter((_, i) => i !== idx)); };
-  const updateField = (idx, field, val) => { setDirty(true); setAwards(prev => prev.map((a, i) => i === idx ? { ...a, [field]: val } : a)); };
+  // Counts the operator's edits, so a save that lands after more were typed
+  // does not mark them saved.
+  const editsRef = useRef(0);
+  const addRow = () => { editsRef.current++; setDirty(true); setAwards(prev => [...prev, withKey({ title: "Fighting Spirit", recipientName: "", recipientDojo: "" })]); };
+  const removeRow = (idx) => { editsRef.current++; setDirty(true); setAwards(prev => prev.filter((_, i) => i !== idx)); };
+  const updateField = (idx, field, val) => { editsRef.current++; setDirty(true); setAwards(prev => prev.map((a, i) => i === idx ? { ...a, [field]: val } : a)); };
 
+  // bc-obox G4b: a save goes to the outbox and is answered at once ({ pending,
+  // settled }): the panel stops saving on that answer and keeps what was typed
+  // on screen (dirty) until the server's answer comes, which is when the list
+  // counts as saved. A save refused as stale (awards_changed) or on its merits
+  // arrives the same way, and this panel, when still open on the competition,
+  // shows the current list in the conflict banner with the typed values kept
+  // until Reload; else the outbox's alert says it.
   const save = async () => {
     setSaving(true);
+    const compID = c.id;
+    const editsAt = editsRef.current;
     try {
       // Strip the client-only `_key` before sending to the API.
       const payload = awards.map(({ _key, ...rest }) => rest);
-      const saved = await window.API.updateCompetitionAwards(c.id, payload, password, awardsVersionRef.current);
-      holdVersion(saved.awardsVersion);
-      // Edits are now persisted; clear dirty so the next prop refresh
-      // (the save triggers an SSE refetch) re-syncs to the saved state.
-      if (mountedRef.current) { setDirty(false); showToast("Fighting Spirit awards saved.", "success"); }
+      const res = await window.API.updateCompetitionAwards(compID, payload, password, awardsVersionRef.current, {
+        onRefusal: (e) => {
+          if (!mountedRef.current || lastCompIdRef.current !== compID) return false;
+          if (e && e.code === "awards_changed") setConflict({ version: e.awardsVersion, awards: e.fightingSpiritAwards });
+          else showToast((e && e.message) || "Failed to save awards", "error");
+          return true;
+        },
+      });
+      res.settled.then((saved) => {
+        // Discarded from the held-writes list (or sent by another tab, whose
+        // answer this one does not hold): not saved here, so the typed list
+        // stays unsaved on screen and the version stays the one it was made at.
+        if (!saved || saved.discarded || lastCompIdRef.current !== compID) return;
+        holdVersion(saved.awardsVersion);
+        if (!mountedRef.current) return;
+        // Edits typed after this save was made are not in it: they stay unsaved.
+        if (editsRef.current === editsAt) setDirty(false);
+        showToast("Fighting Spirit awards saved.", "success");
+      }, () => { /* told by onRefusal, or by the outbox's alert */ });
     } catch (e) {
       if (!mountedRef.current) return;
-      if (e && e.code === "awards_changed") setConflict({ version: e.awardsVersion, awards: e.fightingSpiritAwards });
-      else showToast(e.message || "Failed to save awards", "error");
+      showToast(e.message || "Failed to save awards", "error");
     } finally {
       if (mountedRef.current) setSaving(false);
     }

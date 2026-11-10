@@ -20,6 +20,7 @@ import { holdsUnsaved, discardUnsaved } from './unsaved_entries.jsx';
 import { scoreRowMatchLabel } from './pool_ids.jsx';
 import { mergeSavedCompetition } from './competition_put_body.jsx';
 import { AdminCalendarPage } from './admin_calendar.jsx';
+import { useWaitForQueuedWrites, QueuedWritesWait } from './queued_writes_wait.jsx';
 
 const { useState, useEffect, useRef } = React;
 
@@ -148,6 +149,18 @@ function tournamentFromConflict(currentT, copy, sessionPassword, locked) {
   return mergeTournamentPatch({ competitions: currentT.competitions }, copy, sessionPassword, locked);
 }
 
+// tournamentPasswordChanged: does this settings body CHANGE the password (the
+// auth door, which stays direct)? A body carrying the session password, or none
+// (locked mode), only keeps it, and goes through the outbox like any other save.
+function tournamentPasswordChanged(body, sessionPassword) {
+  return typeof body.password === "string" && body.password !== "" && body.password !== sessionPassword;
+}
+
+// The outbox kind of a tournament settings save (API.updateTournament), which
+// belongs to no competition (`''`): what a password change waits for, since it
+// is sent direct and a settings save still queued here would land after it.
+const TOURNAMENT_WRITE_KINDS = Object.freeze(["tournament"]);
+
 function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChange, tweaks, password, view: propView, setView: propSetView, showToast, authConfig }) {
   const [internalView, setInternalView] = useState({ kind: "dashboard" });
   const view = propView || internalView;
@@ -196,6 +209,26 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
   // / setView post-await. Narrow window but real. Gate via mountedRef.
   const mountedRef = useRef(true);
   useEffect(() => () => { mountedRef.current = false; }, []);
+  // A settings save is refused after its form has closed (it was kept and sent
+  // later): the Edit Tournament form, if it is open then, shows the refusal
+  // with what was typed kept. `lateRefusal` is what it is handed; the view kind
+  // is read through a ref because the refusal arrives long after the tap.
+  const viewKindRef = useRef(view.kind);
+  viewKindRef.current = view.kind;
+  const [lateRefusal, setLateRefusal] = useState(null);
+  useEffect(() => { if (view.kind !== "editTournament") setLateRefusal(null); }, [view.kind]);
+  // A password change waits for this device's queued settings saves
+  // (useWaitForQueuedWrites, the one owner of that wait): the screen says what
+  // it waits for, with Change the password now and Cancel. The form awaits the
+  // save, so a Cancel answers it (`passwordWaitRef` holds that answer).
+  const settingsWait = useWaitForQueuedWrites("", TOURNAMENT_WRITE_KINDS);
+  const passwordWaitRef = useRef(null);
+  const cancelPasswordWait = () => {
+    settingsWait.cancel();
+    const answer = passwordWaitRef.current;
+    passwordWaitRef.current = null;
+    if (answer) answer(false);
+  };
 
   // R4 (bc-evts stage 3 review 2): a court move or time change this device
   // makes shows at once, as a push would, and a refusal puts the old value back
@@ -583,47 +616,91 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
   // orphaned-shiaijo refusal — long gone by the time the operator scrolled
   // back to the Save button. `false` still means "component unmounted mid-PUT"
   // (nothing to report to), which is why the boolean survives.
+  // bc-obox G4b: a save goes to the outbox and is answered at once ({ pending,
+  // settled }), so the form closes on that answer and the app shows the
+  // operator's settings straight away; the server's answer arrives later, as
+  // `settled`. A save refused as stale (tournament_changed) or on its merits
+  // takes the current copy back, and says so in the Edit Tournament form when it
+  // is open then (the typed values stay until its Reload), else the outbox's
+  // alert does. A password change is the auth door and stays direct: it waits
+  // for the settings saves still queued, then answers as it always did.
   const updateTournament = async (patch) => {
+    // Treat an unknown (null) authConfig conservatively; same as locked.
+    // If the mode hasn't resolved yet, sending the session password in the
+    // PUT body would trigger a 400 "password rotation is disabled" on a
+    // locked-mode server. In file mode an empty body password is safe:
+    // the backend preserves the on-disk value rather than clearing it.
+    const locked = authConfig === null || authConfig.mode === "locked";
     try {
-      // Surface a new password to the parent BEFORE the API call so the
-      // session/store updates even if the request errors after (matches
-      // pre-fix timing. onPasswordChange fired pre-await in the original).
-      if (patch.password && onPasswordChange) onPasswordChange(patch.password);
       // Use tRef.current (not the closure-captured `t`) for BOTH the API
-      // body and the post-await local-state update. Same closure-capture
-      // bug shape that mergeCompetitionsIntoTournament's docstring
-      // describes for the other async handlers. If SSE updates the
-      // tournament (e.g. a competition starts, a match completes in
-      // another comp) during the in-flight save, the closure-captured
-      // `t` would be stale; using it for `onUpdate(next)` would clobber
-      // the SSE-driven updates with pre-save state until the next refresh.
-      // Treat an unknown (null) authConfig conservatively; same as locked.
-      // If the mode hasn't resolved yet, sending the session password in the
-      // PUT body would trigger a 400 "password rotation is disabled" on a
-      // locked-mode server. In file mode an empty body password is safe:
-      // the backend preserves the on-disk value rather than clearing it.
-      const locked = authConfig === null || authConfig.mode === "locked";
+      // body and the local-state updates. Same closure-capture bug shape that
+      // mergeCompetitionsIntoTournament's docstring describes for the other
+      // async handlers: an SSE update during the save would be clobbered by
+      // pre-save state until the next refresh.
       const sendBody = mergeTournamentPatch(tRef.current, patch, password, locked);
       // sendBody carries the patch's tournamentVersion: the settings the Edit
       // Tournament form was filled from, not tRef.current's freshest copy. A
       // save made after another device's is then refused (tournament_changed)
       // instead of writing the form's old values over theirs.
-      const saved = await window.API.updateTournament(sendBody, password);
-      // Bail if the admin navigated away during the in-flight PUT.
-      // mirrors startAllCompetitions / refreshCompsAfterCreate.
-      // Without this gate, onUpdateRef.current (parent's
-      // setState) and showToast fire on an unmounted component,
-      // producing the standard React setState-after-unmount warning.
-      // Caught by /deep-review iterative pass after round-11 swept
-      // updateTournament to tRef/onUpdateRef but missed the unmount
-      // guard the other handlers carry.
-      if (!mountedRef.current) return false;
-      // Re-read tRef.current AFTER the await. Additional SSE events may
-      // have landed during the save. The patch we just persisted is
-      // applied on top of the freshest snapshot, with the version the save
-      // answered, so the next save is made from the settings just stored.
-      onUpdateRef.current({ ...mergeTournamentPatch(tRef.current, patch, password, locked), tournamentVersion: saved.tournamentVersion });
-      showToast("Tournament updated");
+      if (tournamentPasswordChanged(sendBody, password)) {
+        // Goes on at once when nothing is queued; else once the queued saves
+        // have arrived, or when the operator chooses to go on. Cancel answers
+        // false: nothing is sent and the form stays open as it was.
+        const go = await new Promise((resolve) => {
+          passwordWaitRef.current = resolve;
+          settingsWait.run(() => { passwordWaitRef.current = null; resolve(true); });
+        });
+        if (!go || !mountedRef.current) return false;
+        // Surface the new password to the parent BEFORE the API call so the
+        // session/store updates even if the request errors after.
+        if (onPasswordChange) onPasswordChange(patch.password);
+        const saved = await window.API.updateTournamentPassword(sendBody, password);
+        // Bail if the admin navigated away during the in-flight PUT.
+        if (!mountedRef.current) return false;
+        // Re-read tRef.current AFTER the await: the patch just persisted is
+        // applied on top of the freshest snapshot, with the version the save
+        // answered, so the next save is made from the settings just stored.
+        onUpdateRef.current({ ...mergeTournamentPatch(tRef.current, patch, password, locked), tournamentVersion: saved.tournamentVersion });
+        showToast("Tournament updated");
+        return true;
+      }
+      // What the form has not closed over yet: the refusal handlers below read
+      // these at the time the answer comes.
+      const takeCurrentCopy = async (e) => {
+        let copy = e && e.code === "tournament_changed" ? e.tournament : null;
+        if (!copy) {
+          // Refused on its merits: the settings shown are not what is stored,
+          // so the stored ones come back (best effort; the next refetch does it
+          // too).
+          try { copy = await window.API.fetchTournament(); } catch (_e) { copy = null; }
+        }
+        if (copy && !copy.error) {
+          onUpdateRef.current(tournamentFromConflict(tRef.current, copy, password, locked));
+        }
+      };
+      const res = await window.API.updateTournament(sendBody, password, {
+        onRefusal: (e) => {
+          // The form, when open now, says it itself (with what was typed kept);
+          // else the outbox's alert does.
+          if (!mountedRef.current || viewKindRef.current !== "editTournament") return false;
+          setLateRefusal({ code: e && e.code, message: e && e.message });
+          return true;
+        },
+      });
+      // The settings the operator just saved show at once (the freshest
+      // snapshot with the patch on top, as before); the version they were
+      // saved at comes with the server's answer.
+      onUpdateRef.current(mergeTournamentPatch(tRef.current, patch, password, locked));
+      res.settled.then((saved) => {
+        // Discarded from the held-writes list (or sent by another tab, whose
+        // answer this one does not hold): nothing of it is known here, so the
+        // stored settings come back.
+        if (!saved || saved.discarded) { takeCurrentCopy(null); return; }
+        // Only the version: tRef.current already holds the patch, and a later
+        // save of the operator's, queued behind this one, must not be undone.
+        onUpdateRef.current({ ...tRef.current, tournamentVersion: saved.tournamentVersion });
+        if (mountedRef.current) showToast("Tournament updated");
+      }, takeCurrentCopy);
       return true;
     } catch (e) {
       if (!mountedRef.current) return false;
@@ -631,7 +708,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
       // (the Edit form keeps what was typed until its Reload remounts it from
       // this copy, so a stale save stays refused until then).
       if (e && e.code === "tournament_changed" && e.tournament) {
-        onUpdateRef.current(tournamentFromConflict(tRef.current, e.tournament, password, authConfig === null || authConfig.mode === "locked"));
+        onUpdateRef.current(tournamentFromConflict(tRef.current, e.tournament, password, locked));
       } else {
         showToast(e.message, "error");
       }
@@ -892,18 +969,30 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
   }
 
   if (view.kind === "editTournament") {
-    return <AdminEditTournament
+    return <>
+    <AdminEditTournament
       key={settingsReloads}
       tournament={t}
       onCancel={() => setView({ kind: "dashboard" })}
-      onReload={() => setSettingsReloads((n) => n + 1)}
+      onReload={() => { setLateRefusal(null); setSettingsReloads((n) => n + 1); }}
+      refusal={lateRefusal}
       onSave={async (patch) => { const ok = await updateTournament(patch); if (ok && mountedRef.current) setView({ kind: "dashboard" }); return ok; }}
       onLogout={onLogout}
       onViewerMode={onViewerMode}
       authConfig={authConfig}
       password={password}
       showToast={showToast}
-    />;
+    />
+    <QueuedWritesWait
+      wait={{ ...settingsWait, cancel: cancelPasswordWait }}
+      comp={null}
+      what="settings"
+      outcome="The password is changed"
+      nowLabel="Change the password now"
+      onNow={() => settingsWait.runNow()}
+      title="Waiting for earlier settings changes"
+    />
+    </>;
   }
 
   if (view.kind === "schedule") {

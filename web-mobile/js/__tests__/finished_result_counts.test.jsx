@@ -5,7 +5,7 @@
 // dialog or the pass's "sent" alert. One predicate, isFinishedResultWrite
 // (write_result.jsx), says which entries are finished results.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { isFinishedResultWrite, queuedWritesNoun, heldWritesText } from '../write_result.jsx';
+import { isFinishedResultWrite, queuedWritesNoun, heldWritesText, heldWriteWhat, heldWriteWhatWhere, heldWriteLine, heldWriteDiscardConfirm } from '../write_result.jsx';
 
 let API;
 let mod;
@@ -97,5 +97,88 @@ describe('the outbox counts only finished results as results (R5)', () => {
         await tick(10000);
         expect(API.unsentWrites().total).toBe(0);
         expect(alerts.filter((a) => a.kind === 'sent')).toEqual([]);
+    });
+});
+
+// bc-obox: the check-in, court-call and settings doors are outbox doors, so
+// their held writes are listed, counted and offered for discard like any
+// other. Each is named as what it is, never "score update", counted as a
+// change, and its discard confirm points at where to check it, not a match.
+describe('the check-in, court-call and settings doors are named as what they are (bc-obox)', () => {
+    const KINDS = {
+        'checkin': 'check-in',
+        'checkin-bulk': 'check-in',
+        'announce': 'court call',
+        'announce-remove': 'court call withdrawal',
+        'announce-clear': 'clear of court calls',
+        'tournament': 'tournament settings',
+        'awards': 'fighting-spirit awards',
+    };
+
+    it('heldWriteWhat names each kind, and none is a finished result', () => {
+        for (const [kind, what] of Object.entries(KINDS)) {
+            expect(heldWriteWhat({ kind, terminal: true }), kind).toBe(what);
+            expect(isFinishedResultWrite({ kind, terminal: true }), kind).toBe(false);
+        }
+        expect(heldWriteLine({ kind: 'checkin' })).toBe('Check-in: waiting to be sent');
+        expect(heldWriteLine({ kind: 'announce-clear', keepsFailing: true })).toBe('Clear of court calls: the server keeps refusing it');
+    });
+
+    it('heldWriteWhatWhere keeps only what the door\'s label adds to the kind\'s name', () => {
+        expect(heldWriteWhatWhere({ kind: 'checkin', where: 'Check-in: Ren Abe' })).toBe('check-in (Ren Abe)');
+        expect(heldWriteWhatWhere({ kind: 'checkin-bulk', where: 'Check-in: 3 competitors' })).toBe('check-in (3 competitors)');
+        expect(heldWriteWhatWhere({ kind: 'checkin', where: '' })).toBe('check-in');
+        expect(heldWriteWhatWhere({ kind: 'announce', where: 'Court call: "Shiaijo A: Ren Abe"' })).toBe('court call ("Shiaijo A: Ren Abe")');
+        expect(heldWriteWhatWhere({ kind: 'announce-remove', where: 'Court call' })).toBe('court call withdrawal');
+        expect(heldWriteWhatWhere({ kind: 'announce-clear', where: 'Every court call' })).toBe('clear of court calls');
+        expect(heldWriteWhatWhere({ kind: 'tournament', where: 'Tournament settings' })).toBe('tournament settings');
+        expect(heldWriteWhatWhere({ kind: 'awards', where: 'Fighting-spirit awards' })).toBe('fighting-spirit awards');
+        // A match's label is kept whole.
+        expect(heldWriteWhatWhere({ kind: 'reopen', where: 'Check-in: Pool A' })).toBe('reopen (Check-in: Pool A)');
+    });
+
+    it('the discard confirm points at where to check each kind, never at a match', () => {
+        const after = {
+            'checkin': 'Check the competitor at the registration desk afterwards, and tap them again if it is still needed.',
+            'checkin-bulk': 'Check the competitors at the registration desk afterwards, and check them in again if it is still needed.',
+            'announce': 'Check the viewer screens afterwards, and make the call again if it is still needed.',
+            'announce-remove': 'Check the viewer screens afterwards, and withdraw the call again if it is still showing.',
+            'announce-clear': 'Check the viewer screens afterwards, and clear the court calls again if any are still showing.',
+            'tournament': 'Check the tournament settings afterwards, and save them again if it is still needed.',
+            'awards': 'Check the fighting-spirit awards afterwards, and save them again if it is still needed.',
+        };
+        for (const [kind, line] of Object.entries(after)) {
+            const { message } = heldWriteDiscardConfirm({ kind, keepsFailing: true });
+            expect(message, kind).toBe(`The server keeps refusing the ${KINDS[kind]} held on this device, so it may never be sent. Discard it? Nothing else is discarded. ${line}`);
+            expect(message, kind).not.toContain('the match');
+        }
+        expect(heldWriteDiscardConfirm({ kind: 'checkin', where: 'Check-in: Ren Abe' }).message)
+            .toContain('the check-in (Ren Abe) held on this device');
+        // The match kinds keep their own line.
+        expect(heldWriteDiscardConfirm({ kind: 'reopen' }).message).toContain('Check the match afterwards');
+        expect(heldWriteDiscardConfirm({ kind: 'lineup' }).message).toContain('Check the lineup afterwards');
+        expect(heldWriteDiscardConfirm().message).toContain('Check the match afterwards');
+    });
+
+    it('the doors\' held writes are listed by their names and counted as changes', async () => {
+        API.toggleCheckIn('c1', 'p1', true, 'pw', { name: 'Ren Abe' });
+        API.bulkCheckIn('c1', ['p2', 'p3'], 'pw');
+        API.sendAnnouncement('Shiaijo A: Ren Abe', 5, 'pw');
+        API.clearAnnouncements('pw');
+        API.updateTournament({ name: 'Cup', tournamentVersion: 'v0' }, 'pw');
+        API.updateCompetitionAwards('c1', [], 'pw', 'a0');
+        await tick();
+        const counts = API.unsentWrites();
+        expect(counts.total).toBe(6);
+        expect(counts.terminal).toBe(0);
+        expect(heldWritesText('offline', counts)).toBe('Offline: 6 changes not sent');
+        expect(API.heldWrites().map(heldWriteWhatWhere).sort()).toEqual([
+            'check-in (2 competitors)',
+            'check-in (Ren Abe)',
+            'clear of court calls',
+            'court call ("Shiaijo A: Ren Abe")',
+            'fighting-spirit awards',
+            'tournament settings',
+        ]);
     });
 });

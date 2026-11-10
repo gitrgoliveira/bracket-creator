@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   rdNorm, rdPersonKey, rdPid, rdApiPid, rdTokenScore, rdQueryScore, rdPlayerTag,
-  rdBuildPeopleIndex, rdHaystack, rdPresence, rdZekken,
+  rdBuildPeopleIndex, rdHaystack, rdPresence, rdZekken, rdApplyCheckInPatch, rdPersonTargets,
 } from '../admin_registration_desk.jsx';
 
 // Pure helpers behind the Registration desk (mp-25bk). These carry the
@@ -180,5 +180,57 @@ describe('rdZekken', () => {
       { comp: { withZekkenName: false }, player: { name: 'Akira Tanaka', displayName: 'A. TANAKA' } },
       { comp: { withZekkenName: true }, player: { name: 'Akira Tanaka', displayName: 'TANAKA' } },
     ])).toBe('TANAKA');
+  });
+});
+
+// bc-obox C1/C2: the desk follows the outbox's participant patches. The
+// patch lands by participant id only, and an echo of what the rows already
+// show returns the SAME array so nothing re-renders.
+describe('rdApplyCheckInPatch', () => {
+  const comps = () => ([
+    { id: 'men', players: [{ id: 'a', name: 'A', checkedIn: false }, { id: 'b', name: 'B', checkedIn: true }, { id: '', name: 'C', checkedIn: false }] },
+    { id: 'kata', players: [{ id: 'a', name: 'A', checkedIn: false }] },
+  ]);
+  const patch = (competitionId, participants) => ({ type: 'checkin_updated', local: true, data: { competitionId, participants } });
+
+  it('sets the checked-in flag of the named participants of that competition only', () => {
+    const out = rdApplyCheckInPatch(comps(), patch('men', [{ id: 'a', checkedIn: true }, { id: 'b', checkedIn: false }]));
+    expect(out[0].players.map((p) => p.checkedIn)).toEqual([true, false, false]);
+    expect(out[1].players[0].checkedIn).toBe(false);
+  });
+  it('returns the same array when nothing changes (an echo of what the rows show)', () => {
+    const before = comps();
+    expect(rdApplyCheckInPatch(before, patch('men', [{ id: 'b', checkedIn: true }]))).toBe(before);
+    expect(rdApplyCheckInPatch(before, patch('other', [{ id: 'a', checkedIn: true }]))).toBe(before);
+  });
+  it('never matches an id-less row, however the patch is shaped', () => {
+    const before = comps();
+    expect(rdApplyCheckInPatch(before, patch('men', [{ id: '', checkedIn: true }]))).toBe(before);
+  });
+  it('ignores events of another type and malformed ones', () => {
+    const before = comps();
+    expect(rdApplyCheckInPatch(before, { type: 'match_updated', data: {} })).toBe(before);
+    expect(rdApplyCheckInPatch(before, null)).toBe(before);
+    expect(rdApplyCheckInPatch(before, { type: 'checkin_updated', data: { competitionId: 'men' } })).toBe(before);
+  });
+});
+
+describe('rdPersonTargets', () => {
+  const rec = {
+    entries: [
+      { comp: { id: 'men' }, player: { id: 'a', checkedIn: false } },
+      { comp: { id: 'kata' }, player: { id: 'b', checkedIn: true } },
+      { comp: { id: 'iaido' }, player: { id: '', checkedIn: false } },
+    ],
+  };
+  it('lists the entries a check-in has to write and counts the id-less ones it cannot', () => {
+    const { targets, skipped } = rdPersonTargets(rec, true);
+    expect(targets.map((t) => t.comp.id)).toEqual(['men']);
+    expect(skipped).toBe(1);
+  });
+  it('lists the checked-in entries for an undo', () => {
+    const { targets, skipped } = rdPersonTargets(rec, false);
+    expect(targets.map((t) => t.comp.id)).toEqual(['kata']);
+    expect(skipped).toBe(0);
   });
 });

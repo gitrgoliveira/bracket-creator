@@ -189,7 +189,7 @@ import { PauseList, pauseStopsMatches } from './pause_list.jsx';
 import { MAX_EXPECTED_PARTICIPANTS } from './competition_put_body.jsx';
 import { useDraftEstimate, DraftEstimatePanel } from './draft_estimate.jsx';
 
-function AdminEditTournament({ tournament, onCancel, onSave, onReload, onLogout, onViewerMode, authConfig, password, showToast }) {
+function AdminEditTournament({ tournament, onCancel, onSave, onReload, refusal, onLogout, onViewerMode, authConfig, password, showToast }) {
   // In locked mode the on-disk Password is irrelevant: auth comes
   // from TOURNAMENT_PASSWORD_HASH and the backend rejects PUTs that
   // try to set a non-empty password. Surfacing the field anyway would
@@ -244,6 +244,20 @@ function AdminEditTournament({ tournament, onCancel, onSave, onReload, onLogout,
   // (tournament_changed): nothing was written. Save waits for Reload, which
   // refills the form from the current settings; edits do not clear it.
   const [conflict, setConflict] = useState(false);
+  // A save that was kept and sent later (it closed this form when it was made)
+  // is refused while a form is open again: `refusal` ({ code, message }) is
+  // that answer. Saved as stale (tournament_changed) it is the conflict above,
+  // so what was typed since stays on screen until Reload; any other refusal is
+  // the form's own banner. A refusal is handed over once: a new object each.
+  useEffect(() => {
+    if (!refusal) return;
+    if (refusal.code === "tournament_changed") {
+      setConflict(true);
+    } else {
+      setError(refusal.message || "The settings were not saved. Please try again.");
+      setErrorField(null);
+    }
+  }, [refusal]);
   // mp-scf: theme colors (updated live by BrandingManager via onThemeChange).
   // Initialise through normalizeTheme so the very first render holds the same
   // shape BrandingManager emits: when the server returns theme:{} for a

@@ -17,6 +17,8 @@ import { checkInApplies } from './competition_shape.jsx';
 import { leaveThen, confirmLeave } from './unsaved_entries.jsx';
 import { rosterUnreadableIssues } from './data_integrity.jsx';
 import { Icon } from './icon.jsx';
+import { useLatestRef } from './latest_ref.jsx';
+import { useWaitForQueuedWrites, QueuedWritesWait, queuedWritesNounFor } from './queued_writes_wait.jsx';
 export { formatCompMinutes } from './admin_competition_settings.jsx';
 export { buildRunningIpponResult, loadScoreboardPoints } from './admin_competition_bracket.jsx';
 export {
@@ -136,8 +138,21 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
     });
   };
 
-  const generateDraw = async () => {
-    if (!(await confirmCheckInExclusion())) return;
+  // bc-obox C1: a draw (Generate draw, or Start from setup, which draws) waits
+  // for the check-ins this device still has queued, so it is made from the
+  // check-ins the operator made (useWaitForQueuedWrites). `c.players` already
+  // shows them (the fetch lays this device's queued check-ins over the
+  // roster), so excludedFromDraw is the count the draw will use once they
+  // have arrived. Check-in that does not apply to the draw waits for nothing.
+  const checkInWait = useWaitForQueuedWrites(c.id, checkInApplies(t, c.checkInEnabled) ? window.API.CHECK_IN_WRITE_KINDS : []);
+  // Which door is waiting: "generate" or "start", for the screen's words.
+  const [drawWaitFor, setDrawWaitFor] = useState("generate");
+  const drawWaiting = checkInWait.waiting;
+
+  // `anyway`: the operator chose to draw before the queued check-ins arrived,
+  // and has already been told who that leaves out.
+  const generateDrawNow = async (anyway) => {
+    if (!anyway && !(await confirmCheckInExclusion())) return;
     setGenerating(true);
     try {
       await window.API.generateDraw(c.id, password);
@@ -153,6 +168,11 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
     } finally {
       if (mountedRef.current) setGenerating(false);
     }
+  };
+  const generateDrawRef = useLatestRef(generateDrawNow);
+  const generateDraw = () => {
+    setDrawWaitFor("generate");
+    checkInWait.run((opts) => generateDrawRef.current(!!(opts && opts.anyway)));
   };
 
   const discardDraw = async () => {
@@ -215,10 +235,10 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
   // draw the operator discards (which unlocks editing), changes inputs
   // (e.g. Shuffle unseeded / seeds / settings), then generates again.
 
-  const start = async () => {
+  const startNow = async (anyway) => {
     // draw-ready → running does not regenerate the draw; skip the confirmation
     // there to avoid showing stale exclusion counts against an already-fixed draw.
-    if (c.status !== "draw-ready" && !(await confirmCheckInExclusion())) return;
+    if (c.status !== "draw-ready" && !anyway && !(await confirmCheckInExclusion())) return;
     showToast(`Starting ${c.name}…`);
 
     setStarting(true);
@@ -249,6 +269,33 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
     } finally {
       if (mountedRef.current) setStarting(false);
     }
+  };
+  const startRef = useLatestRef(startNow);
+  // A start from setup draws, so it waits as Generate draw does; a start of a
+  // drawn competition draws nothing and goes at once.
+  const start = () => {
+    if (c.status === "draw-ready") { startNow(false); return; }
+    setDrawWaitFor("start");
+    checkInWait.run((opts) => startRef.current(!!(opts && opts.anyway)));
+  };
+
+  // "Generate now anyway" / "Start now anyway": the draw is made from the
+  // check-ins the server holds, so the operator is told who that leaves out.
+  const drawNowAnyway = async () => {
+    const n = checkInWait.count;
+    const verb = drawWaitFor === "start" ? "Start" : "Generate the draw";
+    const others = excludedFromDraw > 0
+      ? ` ${excludedFromDraw} other${excludedFromDraw === 1 ? " is" : "s are"} not checked in and ${excludedFromDraw === 1 ? "is" : "are"} left out too.`
+      : "";
+    const ok = await window.confirmDialog({
+      message:
+        `${queuedWritesNounFor("checkin", n)} made on this device ${n === 1 ? "has" : "have"} not reached the server yet. ` +
+        `A draw made now uses only the check-ins the server holds: a competitor whose check-in has not arrived is left out of the draw.${others}\n\n` +
+        `${verb} now anyway?`,
+      confirmLabel: drawWaitFor === "start" ? "Start now" : "Generate now",
+      danger: true,
+    });
+    if (ok) checkInWait.runNow({ anyway: true });
   };
 
   const isDrawReady = c.status === "draw-ready";
@@ -385,11 +432,11 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
             {(!c.status || c.status === "setup") && (c.players || []).length >= 2 && (
               <>
                 <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                  <button type="button" className="btn btn--primary" onClick={generateDraw} disabled={!isDateValid(c.date) || !!drawBlocker || generating || starting}>
+                  <button type="button" className="btn btn--primary" onClick={generateDraw} disabled={!isDateValid(c.date) || !!drawBlocker || generating || starting || drawWaiting}>
                     {generating && <span className="spinner" />}
                     {generating ? "Generating…" : "Generate draw"}
                   </button>
-                  <button type="button" className="btn btn--ghost" onClick={start} disabled={!isDateValid(c.date) || !!drawBlocker || starting || generating}>
+                  <button type="button" className="btn btn--ghost" onClick={start} disabled={!isDateValid(c.date) || !!drawBlocker || starting || generating || drawWaiting}>
                     {starting && <span className="spinner" />}
                     {starting ? "Starting…" : "Start competition →"}
                   </button>
@@ -413,6 +460,15 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
                 )}
               </>
             )}
+            <QueuedWritesWait
+              wait={checkInWait}
+              comp={c}
+              what="checkin"
+              title={drawWaitFor === "start" ? "Waiting before the start" : "Waiting before the draw"}
+              outcome={drawWaitFor === "start" ? "The draw is made and the competition starts" : "The draw is made"}
+              nowLabel={drawWaitFor === "start" ? "Start now anyway" : "Generate now anyway"}
+              onNow={drawNowAnyway}
+            />
             {isDrawReady && (
               <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 8 }}>
                 <div style={{ display: "flex", gap: 8 }}>

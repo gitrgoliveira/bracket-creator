@@ -98,6 +98,45 @@ function skippedNoIdMsg(n) {
   return `${n} ${n === 1 ? "entry has" : "entries have"} no id`;
 }
 
+// rdApplyCheckInPatch: the desk's competitions with one local participant
+// patch laid on (the outbox tells it when a tap is made, when a later tap of
+// another desk wins over it, and when a refused or discarded check-in puts the
+// row back: `{ type: 'checkin_updated', data: { competitionId, participants:
+// [{ id, checkedIn }] } }`). Matches by participant id only; returns the SAME
+// array when nothing changes, so an echo of what the rows already show
+// renders nothing.
+function rdApplyCheckInPatch(comps, event) {
+  const d = event && event.type === "checkin_updated" ? event.data : null;
+  if (!d || !d.competitionId || !Array.isArray(d.participants)) return comps;
+  const want = new Map();
+  d.participants.forEach((p) => { if (p && p.id) want.set(p.id, !!p.checkedIn); });
+  if (want.size === 0) return comps;
+  let changed = false;
+  const out = comps.map((c) => {
+    if (c.id !== d.competitionId) return c;
+    let touched = false;
+    const players = (c.players || []).map((p) => {
+      const id = rdApiPid(p);
+      if (!id || !want.has(id) || !!p.checkedIn === want.get(id)) return p;
+      touched = true;
+      return { ...p, checkedIn: want.get(id) };
+    });
+    if (!touched) return c;
+    changed = true;
+    return { ...c, players };
+  });
+  return changed ? out : comps;
+}
+
+// rdPersonTargets: the entries of one person a check-in (or its undo) has to
+// write, and how many it cannot (bc-pnum: an entry whose own record carries no
+// id has no safe wire identifier and is left out, counted in `skipped`).
+function rdPersonTargets(rec, makeChecked) {
+  const relevant = rec.entries.filter(({ player }) => player.checkedIn !== makeChecked);
+  const targets = relevant.filter(({ player }) => !!player.id);
+  return { targets, skipped: relevant.length - targets.length };
+}
+
 // Subsequence score for one token against a normalized haystack. Returns null
 // when the token isn't even a subsequence; otherwise a score where lower is a
 // better match (contiguous substrings beat scattered subsequences, and earlier
@@ -308,7 +347,7 @@ function RdRail({ comps, allStats, selected, onSelect }) {
 // Each chip carries its own check status; clicking checks them into that
 // competition too (the cross-competition convenience).
 // ---------------------------------------------------------------------------
-function RdOtherChips({ entries, onToggle, busy, label }) {
+function RdOtherChips({ entries, onToggle, label }) {
   if (!entries.length) return null;
   return (
     <div className="rd-chips">
@@ -328,7 +367,7 @@ function RdOtherChips({ entries, onToggle, busy, label }) {
             type="button"
             key={comp.id}
             className={`rd-chip${checked ? " is-checked" : ""}`}
-            disabled={busy || idLess}
+            disabled={idLess}
             title={idLess ? NO_ID_HINT : (checked ? `Checked in: ${comp.name}` : `Check in for ${comp.name}`)}
             onClick={() => !checked && onToggle(comp.id, rdApiPid(player), true)}
           >
@@ -347,7 +386,7 @@ function RdOtherChips({ entries, onToggle, busy, label }) {
 // check-in and the player tag is shown prominently. In "all" mode the toggle is
 // person-level presence (checks into every competition at once).
 // ---------------------------------------------------------------------------
-function RdRow({ mode, comp, player, zekken, entries, others, checked, presence, busy, onPrimary, onToggle, onEdit, isLast }) {
+function RdRow({ mode, comp, player, zekken, entries, others, checked, presence, onPrimary, onToggle, onEdit, isLast }) {
   const danGrade = player.danGrade || (player.metadata && player.metadata[0]) || "";
 
   const stateClass = mode === "all"
@@ -395,7 +434,7 @@ function RdRow({ mode, comp, player, zekken, entries, others, checked, presence,
         role="checkbox"
         aria-checked={ariaChecked}
         aria-label={checkAriaLabel}
-        disabled={busy || idLessCompRow}
+        disabled={idLessCompRow}
         title={idLessCompRow ? NO_ID_HINT : undefined}
         onClick={onPrimary}
       >
@@ -417,8 +456,8 @@ function RdRow({ mode, comp, player, zekken, entries, others, checked, presence,
           {player.seed ? <span className="rd-row__seed">Seed {player.seed}</span> : null}
           {idLessCompRow && <NoIdHint />}
         </div>
-        {mode === "all" && <RdOtherChips entries={entries} onToggle={onToggle} busy={busy} label="In" />}
-        {mode === "comp" && others.length > 0 && <RdOtherChips entries={others} onToggle={onToggle} busy={busy} label="Also in" />}
+        {mode === "all" && <RdOtherChips entries={entries} onToggle={onToggle} label="In" />}
+        {mode === "comp" && others.length > 0 && <RdOtherChips entries={others} onToggle={onToggle} label="Also in" />}
       </div>
 
       {mode === "comp" && (
@@ -432,7 +471,6 @@ function RdRow({ mode, comp, player, zekken, entries, others, checked, presence,
               className="rd-row__edit"
               aria-label={`Edit ${player.name}`}
               title="Fix name, dojo or zekken"
-              disabled={busy}
               onClick={onEdit}
             >
               <RdPencilIcon />
@@ -470,11 +508,24 @@ function RdWalkUp({ comp, seedName, password, showToast, onAdded, onCancel }) {
       const payload = { name: n, dojo: d };
       if (!isTeam && dan.trim()) payload.danGrade = dan.trim();
       if (!isTeam && comp.withZekkenName && zekken.trim()) payload.displayName = zekken.trim();
+      // The add stays a direct write (the next step needs the id it returns);
+      // the check-in that follows is the outbox's, like any other tap.
       const added = await window.API.addParticipant(comp.id, payload, password);
-      // Check them in straight away: they're standing at the desk.
+      // Check them in straight away: they're standing at the desk. The row
+      // shows it at once (`added.checkedIn`); a refusal later puts it back
+      // through the desk's participant patch and says so in one line.
       let checkInOk = false;
+      const addedId = rdApiPid(added);
       try {
-        await window.API.toggleCheckIn(comp.id, rdApiPid(added), true, password);
+        await window.API.toggleCheckIn(comp.id, addedId, true, password, {
+          name: n,
+          was: { [addedId]: false },
+          onRefusal: (err) => {
+            if (err && err.reason === "superseded") showToast(err.message, "warning");
+            else showToast(`${n} was added but not checked in: ${err.message}`, "error");
+            return true;
+          },
+        });
         added.checkedIn = true;
         checkInOk = true;
       } catch (err) {
@@ -608,11 +659,13 @@ function RdEditModal({ comp, player, password, showToast, onSaved, onClose }) {
 // ---------------------------------------------------------------------------
 function AdminRegistrationDeskPage({ tournament, onBack, password, showToast, onUpdate, onLogout, onViewerMode }) {
   // `allComps` is the desk's own authoritative copy of EVERY competition,
-  // seeded once from the parent and thereafter mutated only via setLocal
-  // (optimistic) and refresh() (server truth). We deliberately do NOT re-seed
-  // from the tournament prop: app.jsx runs its own SSE-driven setTournament
-  // independently of this desk, so a prop-sync effect would clobber an
-  // in-flight optimistic check-in with possibly-stale parent data. The desk's
+  // seeded once from the parent and thereafter mutated only by the outbox's
+  // participant patches (a check-in tap, a later tap of another desk, a refusal
+  // putting a row back: see the subscription below) and refresh() (server
+  // truth, which lays this device's queued check-ins over what it fetched). We
+  // deliberately do NOT re-seed from the tournament prop: app.jsx runs its own
+  // SSE-driven setTournament independently of this desk, so a prop-sync effect
+  // would clobber a queued check-in with possibly-stale parent data. The desk's
   // own SSE subscription (below) keeps it fresh; tRef tracks the latest
   // tournament only so refresh()'s onUpdate merge starts from the newest
   // snapshot.
@@ -625,17 +678,12 @@ function AdminRegistrationDeskPage({ tournament, onBack, password, showToast, on
   const comps = useMemo(() => rdCheckInComps(allComps, tournament), [allComps, tournament]);
   const tRef = useRef(tournament);
   useEffect(() => { tRef.current = tournament; }, [tournament]);
-  // Number of check-in writes in flight. While > 0 the SSE-driven refresh
-  // defers, so a concurrent reload (this desk's echo or another desk's event)
-  // can't momentarily revert an optimistic check-in mid-write.
-  const inFlightRef = useRef(0);
 
   const [selected, setSelected] = useState("all");
   const [query, setQuery] = useState("");
   const [dojoFilter, setDojoFilter] = useState("all");
   const [uncheckedOnly, setUncheckedOnly] = useState(false);
   const [groupByDojo, setGroupByDojo] = useState(false);
-  const [busy, setBusy] = useState(false);
   const [walkUpOpen, setWalkUpOpen] = useState(false);
   const [editTarget, setEditTarget] = useState(null); // { comp, player }
   const [handoff, setHandoff] = useState(null); // { name, tags: [{compName, kind, value}] }
@@ -676,10 +724,9 @@ function AdminRegistrationDeskPage({ tournament, onBack, password, showToast, on
   useEffect(() => {
     if (!window.API || typeof window.API.subscribeToEvents !== "function") return;
     let timer = null;
+    // No wait for this device's own check-ins: every fetch lays the ones still
+    // queued over what it reads, so a reload cannot show a tap undone.
     const fire = () => {
-      // Don't reconcile while our own writes are mid-flight: wait for them to
-      // settle so the refetch can't transiently revert an optimistic check-in.
-      if (inFlightRef.current > 0) { timer = setTimeout(fire, 300); return; }
       timer = null;
       refresh();
     };
@@ -692,7 +739,19 @@ function AdminRegistrationDeskPage({ tournament, onBack, password, showToast, on
     return () => { if (timer) clearTimeout(timer); unsub(); };
   }, [refresh]);
 
-  const peopleIndex = useMemo(() => rdBuildPeopleIndex(comps), [comps]);
+  // The rows follow the outbox: a tap is shown in the tick it is made, a later
+  // tap of another desk that won over it is adopted as stored, and a refused
+  // or discarded check-in puts the row back (api_client: the participant
+  // patch). The desk keeps no optimistic copy of its own to unwind.
+  useEffect(() => {
+    if (!window.API || typeof window.API.subscribeLocalParticipantPatch !== "function") return undefined;
+    return window.API.subscribeLocalParticipantPatch((event) => {
+      if (!mountedRef.current) return;
+      setAllComps((cs) => rdApplyCheckInPatch(cs, event));
+    });
+  }, []);
+
+  const peopleIndex =useMemo(() => rdBuildPeopleIndex(comps), [comps]);
   // Tournament-wide presence, computed once and shared by the rail's "All
   // competitions" item and the "all" headline (previously each re-walked the
   // index independently).
@@ -703,150 +762,138 @@ function AdminRegistrationDeskPage({ tournament, onBack, password, showToast, on
   }, [peopleIndex]);
   const selectedComp = selected === "all" ? null : comps.find((c) => c.id === selected);
 
-  // Optimistic local mutation of one check-in flag. `pid` here is always
-  // rdApiPid's output (id-only: see toggleOne/checkPersonEntries/bulkDojoComp
-  // below), so the match must be by id too -- never rdPid's name|dojo
-  // composite, which could match a DIFFERENT row that happens to share the
-  // same name and dojo string after an edit. The `pid &&` guard matters
-  // here specifically: rdApiPid returns "" for every id-less row, so
-  // without it an id-less write (which the server will refuse anyway)
-  // would optimistically flip ALL id-less rows in this competition at once.
-  const setLocal = (compId, pid, val) => {
-    setAllComps((cs) => cs.map((c) => c.id !== compId ? c : {
-      ...c,
-      players: (c.players || []).map((p) => (pid && rdApiPid(p) === pid) ? { ...p, checkedIn: val } : p),
-    }));
-  };
-
   const announceHandoff = (name, pairs) => {
     setHandoff({ name, tags: pairs });
   };
 
-  // Toggle one (competition, participant). Optimistic; SSE refresh reconciles.
+  // A check-in the server turned away (or another desk's later tap won over)
+  // comes back here long after the tap, through the door's `onRefusal`. The
+  // row is already put back by the outbox's participant patch; this says why,
+  // once. Returning true claims it, so the outbox raises no second alert; a
+  // desk that has been left says nothing and lets the outbox tell it.
+  // `batch` ({ total, refused }) is one tap that wrote several competitions:
+  // its refusals are counted as they come.
+  const checkInRefusal = (batch) => (err) => {
+    if (!mountedRef.current) return false;
+    const msg = err && err.message ? err.message : "The check-in was not saved.";
+    if (err && err.reason === "superseded") {
+      showToast(msg, "warning");
+    } else if (batch) {
+      batch.refused += 1;
+      showToast(`${batch.refused} of ${batch.total} check-in(s) not saved: ${msg}`, "error");
+    } else {
+      showToast(msg, "error");
+    }
+    return true;
+  };
+
+  // Toggle one (competition, participant). The check-in is the outbox's: the
+  // row shows the tap at once, it is kept through a dropout and sent when the
+  // link returns, and a refusal puts the row back and says why (checkInRefusal).
   const toggleOne = async (compId, pid, val, opts = {}) => {
-    setLocal(compId, pid, val);
-    inFlightRef.current += 1;
-    let superseded = false;
+    // bc-pnum: no safe wire identifier for an id-less row.
+    if (!pid) {
+      showToast(`${skippedNoIdMsg(1)}: save the roster once and retry`, "error");
+      return;
+    }
+    const comp = allComps.find((c) => c.id === compId);
+    const player = comp && (comp.players || []).find((p) => rdApiPid(p) === pid);
     try {
-      await window.API.toggleCheckIn(compId, pid, val, password);
+      await window.API.toggleCheckIn(compId, pid, val, password, {
+        name: player && player.name,
+        was: { [pid]: player ? !!player.checkedIn : !val },
+        onRefusal: checkInRefusal(null),
+      });
       if (val && opts.handoff) announceHandoff(opts.handoff.name, opts.handoff.tags);
     } catch (e) {
-      if (!mountedRef.current) return;
-      showToast(e.message, "error");
-      setLocal(compId, pid, !val); // revert
-      // Nothing was written and nothing was broadcast, so the person's stored
-      // state is fetched here rather than guessed from the tap.
-      superseded = e.reason === "superseded";
-    } finally {
-      inFlightRef.current -= 1;
+      if (mountedRef.current) showToast(e.message, "error");
     }
-    if (superseded) await refresh();
   };
 
   // Core "set this person's check-in across every competition they entered":
-  // optimistic local writes + parallel API calls, returning the failure and
-  // skip counts. No busy/refresh side effects so callers can coordinate one
-  // bulk operation around many people without each clearing the shared busy
-  // flag early.
+  // one outbox write per entry, handed over together. Returns how many could
+  // not even be queued; a refusal comes later, through `batch`.
   //
-  // bc-pnum: an entry whose OWN record carries no
-  // id (rdApiPid returns "" for it) has no safe wire identifier -- it is
-  // filtered out of `targets` here rather than sent as a write that can
-  // only 404 about a row the operator is looking at. `skipped` reports the
-  // count back so callers can tell the operator, rather than the write
-  // silently vanishing.
-  const checkPersonEntries = async (rec, makeChecked) => {
-    const relevant = rec.entries.filter(({ player }) => player.checkedIn !== makeChecked);
-    const targets = relevant.filter(({ player }) => !!player.id);
-    const skipped = relevant.length - targets.length;
-    if (!targets.length) return { failed: 0, total: 0, skipped };
-    targets.forEach(({ comp, player }) => setLocal(comp.id, rdApiPid(player), makeChecked));
-    inFlightRef.current += 1;
-    try {
-      const results = await Promise.allSettled(
-        targets.map(({ comp, player }) => window.API.toggleCheckIn(comp.id, rdApiPid(player), makeChecked, password))
-      );
-      return { failed: results.filter((r) => r.status === "rejected").length, total: targets.length, skipped };
-    } finally {
-      inFlightRef.current -= 1;
-    }
+  // bc-pnum: an entry whose OWN record carries no id (rdApiPid returns "" for
+  // it) has no safe wire identifier -- rdPersonTargets leaves it out rather
+  // than sending a write that can only 404 about a row the operator is looking
+  // at, and reports `skipped` so callers can tell the operator.
+  const checkPersonEntries = async (targets, makeChecked, batch) => {
+    const results = await Promise.allSettled(
+      targets.map(({ comp, player }) => window.API.toggleCheckIn(comp.id, rdApiPid(player), makeChecked, password, {
+        name: player.name,
+        was: { [rdApiPid(player)]: !!player.checkedIn },
+        onRefusal: checkInRefusal(batch),
+      }))
+    );
+    return results.filter((r) => r.status === "rejected").length;
   };
 
   // Person-level toggle in "all" mode: check into every competition (or undo all).
   const togglePerson = async (rec) => {
     const makeChecked = rdPresence(rec.entries) !== "all"; // none/partial → check all; all → undo all
-    setBusy(true);
-    try {
-      const { failed, total, skipped } = await checkPersonEntries(rec, makeChecked);
-      if (total === 0) {
-        if (skipped) showToast(`${skippedNoIdMsg(skipped)}: save the roster once and retry`, "error");
-        return;
-      }
-      if (failed) {
-        showToast(`${failed} of ${total} check-in(s) failed${skipped ? `, ${skipped} have no id` : ""}: reloading`, "error");
-      } else {
-        if (skipped) showToast(`${skippedNoIdMsg(skipped)} and were skipped`, "error");
-        if (makeChecked) {
-          announceHandoff(rec.name, rec.entries.filter(({ player }) => player.id).map(({ comp, player }) => ({ compName: comp.name, ...rdPlayerTag(comp, player) })));
-        }
-      }
-      await refresh();
-    } finally {
-      if (mountedRef.current) setBusy(false);
+    const { targets, skipped } = rdPersonTargets(rec, makeChecked);
+    if (targets.length === 0) {
+      if (skipped) showToast(`${skippedNoIdMsg(skipped)}: save the roster once and retry`, "error");
+      return;
+    }
+    const failed = await checkPersonEntries(targets, makeChecked, { total: targets.length, refused: 0 });
+    if (failed) {
+      showToast(`${failed} of ${targets.length} check-in(s) failed${skipped ? `, ${skipped} have no id` : ""}`, "error");
+      return;
+    }
+    if (skipped) showToast(`${skippedNoIdMsg(skipped)} and were skipped`, "error");
+    if (makeChecked) {
+      announceHandoff(rec.name, rec.entries.filter(({ player }) => player.id).map(({ comp, player }) => ({ compName: comp.name, ...rdPlayerTag(comp, player) })));
     }
   };
 
   // Bulk-check a whole dojo of people into all their competitions ("all" mode).
-  // One coordinated operation: busy is set once, every person's writes run
-  // concurrently, and a single refresh reconciles: instead of N independent
-  // togglePerson calls each racing the shared busy flag.
+  // One coordinated operation: every person's entries are handed to the
+  // outbox together as one batch, so a refusal is told as "N of M" rather than
+  // once per entry.
   const bulkCheckPeople = async (recs) => {
     const pending = recs.filter((rec) => rdPresence(rec.entries) !== "all");
     if (!pending.length) return;
-    setBusy(true);
-    inFlightRef.current += 1;
-    try {
-      const results = await Promise.allSettled(pending.map((rec) => checkPersonEntries(rec, true)));
-      const failed = results.reduce((n, r) => n + (r.status === "fulfilled" ? r.value.failed : 1), 0);
-      const skipped = results.reduce((n, r) => n + (r.status === "fulfilled" ? r.value.skipped : 0), 0);
-      if (failed || skipped) {
-        const parts = [];
-        if (failed) parts.push(`${failed} check-in(s) failed`);
-        if (skipped) parts.push(skippedNoIdMsg(skipped));
-        showToast(`${parts.join(", ")}: reloading`, "error");
-      }
-      await refresh();
-    } finally {
-      inFlightRef.current -= 1;
-      if (mountedRef.current) setBusy(false);
+    const parts = pending.map((rec) => rdPersonTargets(rec, true));
+    const targets = parts.flatMap((p) => p.targets);
+    const skipped = parts.reduce((n, p) => n + p.skipped, 0);
+    const failed = targets.length
+      ? await checkPersonEntries(targets, true, { total: targets.length, refused: 0 })
+      : 0;
+    if (failed || skipped) {
+      const said = [];
+      if (failed) said.push(`${failed} check-in(s) failed`);
+      if (skipped) said.push(skippedNoIdMsg(skipped));
+      showToast(said.join(", "), "error");
     }
   };
 
-  // Bulk check-in a dojo within the selected competition (uses the bulk endpoint).
+  // Bulk check-in a dojo within the selected competition (uses the bulk
+  // endpoint). The tap is the outbox's: the rows show it at once. A 200 can
+  // still report unmatched ids (e.g. legacy name-keyed pids the server couldn't
+  // resolve), which arrives with the settled answer, possibly long after the
+  // tap: say so and reload, since those rows were shown checked in. Ids another
+  // desk's later tap won over are adopted and told by the outbox itself.
   const bulkDojoComp = async (compId, pids) => {
     if (!pids.length) return;
-    setBusy(true);
-    pids.forEach((pid) => setLocal(compId, pid, true));
-    inFlightRef.current += 1;
+    const comp = allComps.find((c) => c.id === compId);
+    const was = {};
+    pids.filter(Boolean).forEach((pid) => {
+      const p = comp && (comp.players || []).find((x) => rdApiPid(x) === pid);
+      was[pid] = p ? !!p.checkedIn : false;
+    });
     try {
-      const res = await window.API.bulkCheckIn(compId, pids, password);
-      // A 200 can still report unmatched ids (e.g. legacy name-keyed pids the
-      // server couldn't resolve): surface that rather than silently dropping it.
-      if (res && res.notFound && res.notFound.length) {
-        showToast(`${res.notFound.length} not matched: reloading`, "error");
+      const answer = await window.API.bulkCheckIn(compId, pids, password, { was, onRefusal: checkInRefusal(null) });
+      if (answer && answer.settled && typeof answer.settled.then === "function") {
+        answer.settled.then((res) => {
+          if (!mountedRef.current || !res || !res.notFound || !res.notFound.length) return;
+          showToast(`${res.notFound.length} not matched: reloading`, "error");
+          refresh();
+        }, () => { /* a refusal is told by onRefusal above */ });
       }
-      // Ids a later check-in already settled were left as stored: refresh below
-      // shows them, and the operator is told they were not changed.
-      if (res && res.superseded && res.superseded.length) {
-        showToast(`${res.superseded.length} changed on another desk after your tap and were left as they are: reloading`, "error");
-      }
-      await refresh();
     } catch (e) {
-      showToast(e.message, "error");
-      await refresh();
-    } finally {
-      inFlightRef.current -= 1;
-      if (mountedRef.current) setBusy(false);
+      if (mountedRef.current) showToast(e.message, "error");
     }
   };
 
@@ -1041,7 +1088,6 @@ function AdminRegistrationDeskPage({ tournament, onBack, password, showToast, on
                 <button type="button" className={`rd-toggle${groupByDojo ? " is-on" : ""}`} aria-pressed={groupByDojo} onClick={() => setGroupByDojo((v) => !v)}>
                   Group by dojo
                 </button>
-                {busy && <span className="rd-toolbar__busy"><span className="spinner" aria-hidden="true" /> Saving…</span>}
               </div>
 
               {handoff && (() => {
@@ -1080,7 +1126,6 @@ function AdminRegistrationDeskPage({ tournament, onBack, password, showToast, on
                 rows={rows}
                 groupByDojo={groupByDojo}
                 query={query}
-                busy={busy}
                 allChecked={allChecked}
                 canWalkUp={canWalkUp}
                 onOpenWalkUp={() => setWalkUpOpen(true)}
@@ -1099,7 +1144,7 @@ function AdminRegistrationDeskPage({ tournament, onBack, password, showToast, on
                 onBulkDojo={(dojo, theseRows) => {
                   if (selected === "all") {
                     // One coordinated op: check every listed person from this dojo
-                    // into all their competitions (single busy + single refresh).
+                    // into all their competitions (one batch).
                     bulkCheckPeople(theseRows.map((r) => r.rec));
                   } else {
                     const pids = theseRows.filter((r) => !r.player.checkedIn).map((r) => rdApiPid(r.player));
@@ -1133,7 +1178,7 @@ function AdminRegistrationDeskPage({ tournament, onBack, password, showToast, on
 // ---------------------------------------------------------------------------
 // Roster list: flat or grouped-by-dojo, with empty / no-match / all-done states.
 // ---------------------------------------------------------------------------
-function RdRoster({ mode, rows, groupByDojo, query, busy, allChecked, canWalkUp, onOpenWalkUp, onPrimary, onToggleChip, onEdit, onBulkDojo }) {
+function RdRoster({ mode, rows, groupByDojo, query, allChecked, canWalkUp, onOpenWalkUp, onPrimary, onToggleChip, onEdit, onBulkDojo }) {
   const rowOf = (row, isLast) => {
     if (mode === "all") {
       const rep = row.rec.entries[0].player;
@@ -1147,7 +1192,6 @@ function RdRoster({ mode, rows, groupByDojo, query, busy, allChecked, canWalkUp,
           entries={row.rec.entries}
           others={[]}
           presence={row.presence}
-          busy={busy}
           isLast={isLast}
           onPrimary={() => onPrimary(row)}
           onToggle={onToggleChip}
@@ -1164,7 +1208,6 @@ function RdRoster({ mode, rows, groupByDojo, query, busy, allChecked, canWalkUp,
         entries={[]}
         others={row.others}
         checked={row.player.checkedIn}
-        busy={busy}
         isLast={isLast}
         onPrimary={() => onPrimary(row)}
         onToggle={onToggleChip}
@@ -1218,7 +1261,7 @@ function RdRoster({ mode, rows, groupByDojo, query, busy, allChecked, canWalkUp,
                 <span className="rd-group__name">{dojo}</span>
                 <span className="rd-group__count">{theseRows.length}</span>
                 {pending > 0 && (
-                  <button type="button" className="btn btn--sm rd-group__bulk" disabled={busy} onClick={() => onBulkDojo(dojo, theseRows)}>
+                  <button type="button" className="btn btn--sm rd-group__bulk" onClick={() => onBulkDojo(dojo, theseRows)}>
                     Check in all {pending}
                   </button>
                 )}
@@ -1238,5 +1281,5 @@ window.AdminRegistrationDeskPage = AdminRegistrationDeskPage;
 
 export {
   rdNorm, rdPersonKey, rdPid, rdApiPid, rdTokenScore, rdQueryScore, rdPlayerTag,
-  rdBuildPeopleIndex, rdHaystack, rdPresence, rdZekken,
+  rdBuildPeopleIndex, rdHaystack, rdPresence, rdZekken, rdApplyCheckInPatch, rdPersonTargets,
 };

@@ -57,6 +57,8 @@ import {
 import { PillGroup, PillButton, CheckboxField, NumberField, TextField } from './competition_fields.jsx';
 import { seededRanks } from './admin_helpers.jsx';
 import { useUnsavedInput } from './app_version.jsx';
+import { useLatestRef } from './latest_ref.jsx';
+import { useWaitForQueuedWrites, QueuedWritesWait, queuedWritesNounFor, TIME_WRITE_KINDS } from './queued_writes_wait.jsx';
 import {
   settingsPutBody,
   describeSettingsEdits,
@@ -323,7 +325,22 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
     });
   }, [c.id, c.name, c.date, c.startTime, c.poolSize, c.poolWinners, c.poolSizeMode, c.courts, c.roundRobin, c.withZekkenName, c.teamSize, c.numberPrefix, c.format, c.kind, c.status, c.poolFormat, c.poolMatchDurationSeconds, c.knockoutMatchDurationSeconds, c.swissRounds, c.swissCurrentRound, c.naginata, c.engi, c.checkInEnabled, c.leagueTiebreakTopN, c.leagueTwoThirdPlaces, c.twoThirdPlaces, c.teamMatchType, c.expectedParticipants]);
 
-  const saveNow = () => {
+  // bc-obox T1: a save that moves a drawn competition (a new date or start
+  // time, whose matches the server re-times in the same save) waits for the
+  // match time changes this device still has queued, so none lands on the old
+  // day after the move. The form stays dirty while it waits, so it still holds
+  // a new build's reload (useUnsavedInput above).
+  const timeWait = useWaitForQueuedWrites(c.id, TIME_WRITE_KINDS);
+  const movesDrawnCompetition = () => {
+    const latestC = cRef.current;
+    const localSnap = localRef.current;
+    if (!latestC || latestC.status !== "draw-ready") return false;
+    const edited = editedFieldsRef.current;
+    const changed = (k) => edited.has(k) && (localSnap[k] || "") !== (latestC[k] || "");
+    return changed("date") || changed("startTime");
+  };
+
+  const saveNowBody = () => {
     // Build `effective` from the LATEST server-known state (cRef.current)
     // overlaid with the user's currently-edited fields. Reading from refs at
     // click time (not values captured when the handler was defined) means any
@@ -464,6 +481,24 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
       // duplicate toast.
       setSaveErr(e?.message || "Save failed");
     });
+  };
+  const saveNowBodyRef = useLatestRef(saveNowBody);
+  const saveNow = () => {
+    if (!movesDrawnCompetition()) { saveNowBody(); return; }
+    timeWait.run(() => saveNowBodyRef.current());
+  };
+  // "Move now anyway": the operator is told what a late time change does.
+  const saveNowAnyway = async () => {
+    const n = timeWait.count;
+    const ok = await window.confirmDialog({
+      message:
+        `${queuedWritesNounFor("time", n)} made on this device ${n === 1 ? "has" : "have"} not reached the server yet. ` +
+        `If you move the competition now, a time changed before the move may land on the old day.\n\n` +
+        `Move now anyway?`,
+      confirmLabel: "Move now",
+      danger: true,
+    });
+    if (ok) timeWait.runNow();
   };
 
   const reloadConflict = () => {
@@ -824,7 +859,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
   // an invalid shiaijo count the header button greyed out while the footer
   // one stayed live, fired the PUT and took a 400. Anything that should block
   // saving belongs here, never at a call site.
-  const saveDisabled = !!conflict || !isDirty || saving || hasDurationError || blockingCourtsErr || blockingPoolSettingsErr || blockingSwissSettingsErr || blockingTeamSizeErr || blockingExpectedParticipantsErr;
+  const saveDisabled = !!conflict || !isDirty || saving || timeWait.waiting || hasDurationError || blockingCourtsErr || blockingPoolSettingsErr || blockingSwissSettingsErr || blockingTeamSizeErr || blockingExpectedParticipantsErr;
 
   // The blocking message and its precedence, shared by the header chip and the
   // footer for the same reason saveDisabled is: the footer used to restate the
@@ -1446,6 +1481,15 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
           "Saving…"/"✓ Saved at" states are the header's alone, by choice. */}
       {/* Retime warning (c-setretime): shown before Save when date or start time changed on a draw-ready competition */}
       {isDrawReady && <RetimeWarning preview={retimePreview} />}
+      <QueuedWritesWait
+        wait={timeWait}
+        comp={c}
+        what="time"
+        title="Waiting before the move"
+        outcome="The move is made"
+        nowLabel="Move now anyway"
+        onNow={saveNowAnyway}
+      />
       <div style={{ marginTop: 20, display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 10 }}>
         {/* Same badge-like status role as the header chip above (13px, "Buttons,
             inputs, badges" per DESIGN.md Typography): both are a bold coloured

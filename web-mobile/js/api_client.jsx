@@ -815,8 +815,10 @@ const LEGACY_QUEUE_STORAGE_KEY = 'bc_write_queue';
 // score write, a decision, a tap, a reopen, a send back, a court
 // move, a time change, a lineup save or removal, a member add, rename or
 // cleared name, a reinstatement, a chusen's order, a representative bout's add
-// or remove, a kachinuki bout's removal) is a PUT, POST or DELETE to
-// /api/competitions/…, and a DELETE only for the doors named below, so a
+// or remove, a kachinuki bout's removal, a check-in, a fighting-spirit awards
+// save) is a PUT, POST or DELETE to /api/competitions/…, and a DELETE only for
+// the doors named below, or one of the four doors named exactly outside it (a
+// court call, its withdrawal, the clear, the tournament settings), so a
 // tampered or corrupted stored entry can't be flushed into some other endpoint
 // or HTTP method. Used by both rehydrate (load) and flush, kept in one place so
 // the two checks can't drift apart.
@@ -836,20 +838,49 @@ function _isAllowedTerminalRequest(method, url) {
     } catch (_e) {
         return false;
     }
-    if (u.origin !== origin || !u.pathname.startsWith('/api/competitions/')) return false;
-    // A DELETE is queued for four doors: the representative bout's remove, a
-    // kachinuki bout's removal (bc-evts), a team member's name cleared and a
-    // match's own lineup removed (review 2, R1). A reset of the pool-rank
-    // overrides is not one: no shipped build queued it (only builds of this
-    // change between stage 3 reviews 11 and 12 did), so no stored entry needs
-    // to replay it, and the server's DELETE overrides stays a repair door
-    // (stage 6 review 11, item 11 b).
+    if (u.origin !== origin) return false;
+    // bc-obox: the doors outside /api/competitions/… are named by their exact
+    // path and method, never a prefix: a court call sent, a court call
+    // withdrawn, every court call cleared, and the tournament settings saved.
+    // POST /api/tournament/reset and /api/tournament/import sit beside them and
+    // are never replayed.
+    const outside = _OUTBOX_DOORS_OUTSIDE_COMPETITIONS.find(([re]) => re.test(u.pathname));
+    if (outside) return outside[1] === method;
+    if (!u.pathname.startsWith('/api/competitions/')) return false;
+    // A DELETE is queued for five doors: the representative bout's remove, a
+    // kachinuki bout's removal (bc-evts), a team member's name cleared, a
+    // match's own lineup removed (review 2, R1) and a check-in taken back
+    // (bc-obox). A reset of the pool-rank overrides is not one: no shipped
+    // build queued it (only builds of this change between stage 3 reviews 11
+    // and 12 did), so no stored entry needs to replay it, and the server's
+    // DELETE overrides stays a repair door (stage 6 review 11, item 11 b).
     if (method === 'DELETE') {
         return /\/(daihyosen|kachinuki-bout)$/.test(u.pathname)
-            || /\/teams\/[^/]+\/(members|match-lineups)\/[^/]+$/.test(u.pathname);
+            || /\/teams\/[^/]+\/(members|match-lineups)\/[^/]+$/.test(u.pathname)
+            || /^\/api\/competitions\/[^/]+\/participants\/[^/]+\/checkin$/.test(u.pathname);
     }
     return true;
 }
+// _replayBody: what a replayed entry sends. A save of the tournament settings
+// never carries a password, whatever storage holds (a tampered entry must not
+// rotate it): an empty one keeps the stored password. Judged on the request
+// itself, not the entry's kind, which storage holds too.
+function _replayBody(method, url, payload) {
+    if (method === 'PUT' && payload && typeof payload === 'object') {
+        const origin = (typeof location !== 'undefined' && location.origin) || 'http://localhost';
+        let path = '';
+        try { path = new URL(url, origin).pathname; } catch (_e) { path = ''; }
+        if (path === '/api/tournament') return JSON.stringify({ ...payload, password: '' });
+    }
+    return JSON.stringify(payload);
+}
+// The outbox doors outside /api/competitions/…, each [exact path, method].
+const _OUTBOX_DOORS_OUTSIDE_COMPETITIONS = [
+    [/^\/api\/tournament\/announce$/, 'POST'],
+    [/^\/api\/announcements$/, 'DELETE'],
+    [/^\/api\/announcements\/[^/]+$/, 'DELETE'],
+    [/^\/api\/tournament$/, 'PUT'],
+];
 
 // ---------------------------------------------------------------------------
 // F4: localStorage helpers (all accesses wrapped in try/catch for
@@ -1492,8 +1523,13 @@ function _pendingMatchFields(compID, matchID) {
 }
 
 // An entry left with a refusal or an operator's discard: the match shows what
-// it had, unless a later entry of the same field is still queued.
+// it had, unless a later entry of the same field is still queued. A check-in
+// puts back what each of its participants had (`was`, per id) the same way.
 function _revertLocalFields(d) {
+    if (d && _CHECKIN_KINDS.has(d.kind)) {
+        _revertLocalCheckIns(d);
+        return;
+    }
     const f = d && _LOCAL_FIELD[d.kind];
     if (!f || !d.was || typeof d.was !== 'object' || !(f in d.was)) return;
     const still = _pendingMatchFields(d.compID, d.matchID);
@@ -1501,13 +1537,19 @@ function _revertLocalFields(d) {
 }
 
 // _overlayPendingFields: a fetched competition (a list item or a detail) with
-// the court and time this device still has queued for its matches put on.
+// the court and time this device still has queued for its matches put on, and
+// its queued check-ins (_overlayPendingCheckIns) and awards save
+// (_overlayPendingAwards).
 function _overlayPendingFields(comp, compID) {
     const id = compID || (comp && (comp.id || (comp.config && comp.config.id)));
     if (!comp || !id) return comp;
     // Every fetch of a competition passes here: a tap of this device it turned
     // away since its answer is told (_tellTurnedAway), after a reload too.
     _tellTurnedAwayIn(comp, id);
+    return _overlayPendingAwards(_overlayPendingCheckIns(_overlayPendingMatchFields(comp, id), id), id);
+}
+
+function _overlayPendingMatchFields(comp, id) {
     const byMatch = new Map();
     for (const d of _writeQueue.values()) {
         if (d && _LOCAL_FIELD[d.kind] && d.compID === id && d.matchID && !byMatch.has(d.matchID)) {
@@ -1526,6 +1568,261 @@ function _overlayPendingFields(comp, compID) {
         if (comp.bracket.thirdPlaceMatch) out.bracket.thirdPlaceMatch = put(comp.bracket.thirdPlaceMatch);
     }
     return out;
+}
+
+// ---------------------------------------------------------------------------
+// bc-obox C1/C2: a check-in is an outbox entry, shown at once.
+// ---------------------------------------------------------------------------
+// A competition's check-ins go under one base, `checkin:<comp>`, so they are
+// sent in the order they were tapped; each carries its stamp (`modifiedAt`),
+// by which the server keeps the later tap whatever the arrival order. What the
+// desk shows follows them as a court move does: the new value is told to the
+// local listeners in the tick of the tap (`subscribeLocalParticipantPatch`,
+// `{ type: 'checkin_updated', local: true, data: { competitionId,
+// participants: [{ id, checkedIn }] } }`); every competition a fetch answers
+// carries the check-ins still queued for it (_overlayPendingCheckIns); a
+// refusal or a discard puts back what each participant had (`was`, per id),
+// and a `superseded` answer puts the participant as stored (another desk's
+// later tap), unless a later check-in of this device is still queued for them.
+const _CHECKIN_KINDS = new Set(['checkin', 'checkin-bulk']);
+const _localParticipantListeners = new Set();
+
+export function subscribeLocalParticipantPatch(cb) {
+    if (typeof cb !== 'function') return () => {};
+    _localParticipantListeners.add(cb);
+    return () => { _localParticipantListeners.delete(cb); };
+}
+
+function _checkInBase(compID) {
+    return `checkin:${compID}`;
+}
+
+// _checkInsOf: what one check-in entry asks, per participant id: a single
+// tap names its participant in the url (PUT checks in, DELETE takes it back),
+// a bulk check-in checks in every id it names.
+function _checkInsOf(d) {
+    const out = new Map();
+    if (!d || !_CHECKIN_KINDS.has(d.kind)) return out;
+    if (d.kind === 'checkin-bulk') {
+        const ids = d.payload && Array.isArray(d.payload.participantIds) ? d.payload.participantIds : [];
+        for (const pid of ids) if (typeof pid === 'string' && pid) out.set(pid, true);
+        return out;
+    }
+    const m = String(d.url || '').match(/\/participants\/([^/]+)\/checkin$/);
+    if (m) {
+        try { out.set(decodeURIComponent(m[1]), d.method !== 'DELETE'); } catch (_e) { /* not this device's url */ }
+    }
+    return out;
+}
+
+// _pendingCheckIns: the check-ins still queued for a competition, per id, the
+// later winning; `except` is an entry left out (the one being answered).
+function _pendingCheckIns(compID, except) {
+    const out = new Map();
+    for (const [, d] of _entriesFor(_checkInBase(compID))) {
+        if (d === except) continue;
+        for (const [pid, v] of _checkInsOf(d)) out.set(pid, v);
+    }
+    return out;
+}
+
+function _emitLocalCheckIns(compID, values) {
+    const participants = [...values].filter(([id]) => id).map(([id, checkedIn]) => ({ id, checkedIn: !!checkedIn }));
+    if (!compID || participants.length === 0) return;
+    const event = { type: 'checkin_updated', local: true, data: { competitionId: compID, participants } };
+    for (const cb of _localParticipantListeners) {
+        try { cb(event); } catch (err) { console.error('local participant patch listener failed:', err); }
+    }
+}
+
+// A check-in left with a refusal or a discard: each participant shows what it
+// had, unless a later check-in of this device is still queued for them.
+function _revertLocalCheckIns(d) {
+    const was = d && d.was && typeof d.was === 'object' ? d.was : {};
+    const still = _pendingCheckIns(d.compID, d);
+    const out = [];
+    for (const pid of _checkInsOf(d).keys()) {
+        if (still.has(pid)) out.push([pid, still.get(pid)]);
+        else if (Object.prototype.hasOwnProperty.call(was, pid)) out.push([pid, !!was[pid]]);
+    }
+    _emitLocalCheckIns(d.compID, out);
+}
+
+// _checkInAnswered: a check-in the server answered 200. A `superseded` answer
+// (a later tap of another desk already changed that person) changed nothing:
+// the desk takes the participant as stored, and when that is not what the tap
+// asked the operator is told once, by a caller that claims it (onRefusal), else
+// by the queue alert. A bulk answer names its superseded ids the same way.
+function _checkInAnswered(key, d, body) {
+    const asked = _checkInsOf(d);
+    const stored = d.kind === 'checkin-bulk'
+        ? (Array.isArray(body && body.superseded) ? body.superseded : [])
+        : (body && body.applied === false && body.reason === 'superseded' && body.participant ? [body.participant] : []);
+    // Our stamp lost: the clock frame is checked again, as a match write's is.
+    if (stored.length > 0) _relearnClockThrottled();
+    const still = _pendingCheckIns(d.compID, d);
+    const adopt = [];
+    const lost = [];
+    for (const p of stored) {
+        if (!p || !p.id) continue;
+        if (!still.has(p.id)) adopt.push([p.id, !!p.checkedIn]);
+        if (asked.has(p.id) && asked.get(p.id) !== !!p.checkedIn) lost.push(p);
+    }
+    _emitLocalCheckIns(d.compID, adopt);
+    if (lost.length === 0) return;
+    const sentence = lost.length === 1
+        ? `${lost[0].name || 'A competitor'} was changed on another desk: now ${lost[0].checkedIn ? 'checked in' : 'not checked in'}.`
+        : `${lost.length} check-ins were changed on another desk. Check the list.`;
+    const err = Object.assign(new Error(sentence), { reason: 'superseded', participants: lost });
+    if (!_claimRefusal(key, err)) {
+        _notifyQueueAlert({ kind: 'checkin_superseded', count: lost.length, terminalCount: 0, compID: d.compID, matchID: '', detail: sentence });
+    }
+}
+
+// _overlayPendingCheckIns: a fetched competition with the check-ins this
+// device still has queued for it put on its players (the list item's, the
+// detail's config and each pool's).
+function _overlayPendingCheckIns(comp, id) {
+    const pending = _pendingCheckIns(id);
+    if (pending.size === 0) return comp;
+    const put = (p) => (p && p.id && pending.has(p.id) ? { ...p, checkedIn: pending.get(p.id) } : p);
+    const out = { ...comp };
+    if (Array.isArray(comp.players)) out.players = comp.players.map(put);
+    if (comp.config && Array.isArray(comp.config.players)) out.config = { ...comp.config, players: comp.config.players.map(put) };
+    if (Array.isArray(comp.pools)) {
+        out.pools = comp.pools.map((p) => (p && Array.isArray(p.players) ? { ...p, players: p.players.map(put) } : p));
+    }
+    return out;
+}
+
+// _checkInLabel: where a check-in is, as the held-writes list names it.
+function _checkInLabel(name, count = 1) {
+    if (typeof name === 'string' && name.trim()) return `Check-in: ${name.trim()}`;
+    return count > 1 ? `Check-in: ${count} competitors` : '';
+}
+
+// ---------------------------------------------------------------------------
+// bc-obox A1: court calls through the outbox, the device makes the id.
+// ---------------------------------------------------------------------------
+// A call and its withdrawal share the base `announce:<id>`, so they go in
+// order; a clear has its own base. The server remembers withdrawn ids and the
+// clear's floor, so the order between different calls does not matter, and a
+// call the server keeps refusing holds back no other court's.
+const _ANNOUNCE_CLEAR_BASE = 'announce-clear';
+function _announceBase(id) {
+    return `announce:${id}`;
+}
+function _courtCallLabel(message) {
+    const m = typeof message === 'string' ? message.trim() : '';
+    if (!m) return 'Court call';
+    return `Court call: "${m.length > 40 ? `${m.slice(0, 39)}…` : m}"`;
+}
+
+// ---------------------------------------------------------------------------
+// bc-obox G4b: the tournament settings and a competition's fighting-spirit
+// awards, whole documents saved against a version.
+// ---------------------------------------------------------------------------
+// One base per document (`tournament`, `awards:<comp>`). A save not yet out
+// takes the place of a queued save of the same document (_coalesceTarget); a
+// save made against the version this device's own last save of the document
+// replaced takes the version that save answered (_rebaseQueuedVersion), so
+// the device never refuses its own earlier save; a save made against any
+// other version is sent as it is, and the server refuses it when another
+// device changed the document since (409 tournament_changed / awards_changed).
+const _DOC_VERSION_FIELD = { tournament: 'tournamentVersion', awards: 'awardsVersion' };
+const _TOURNAMENT_BASE = 'tournament';
+const _DOC_MOVES_MAX = 32;
+function _awardsBase(compID) {
+    return `awards:${compID}`;
+}
+// Per base: the versions this device's landed saves moved the document from,
+// each to the version that save answered. In memory: a reload reads the
+// document again.
+const _docVersionMoves = new Map();
+
+// _currentDocVersion: `v` moved along this device's own landed saves.
+function _currentDocVersion(base, v) {
+    const moves = _docVersionMoves.get(base);
+    let out = v;
+    for (let i = 0; moves && i < _DOC_MOVES_MAX && moves.has(out); i++) out = moves.get(out);
+    return out;
+}
+
+// _rebaseQueuedVersion: the ONE rule for both documents. A save of `base` that
+// was sent at version `sent` landed and answered `got`: a save of the same
+// document still queued at `sent` (made before the answer came) takes `got`,
+// as does a save made later at `sent`.
+function _rebaseQueuedVersion(base, field, sent, got) {
+    if (!field || typeof sent !== 'string' || !sent || typeof got !== 'string' || !got || sent === got) return;
+    let moves = _docVersionMoves.get(base);
+    if (!moves) { moves = new Map(); _docVersionMoves.set(base, moves); }
+    moves.delete(sent);
+    moves.set(sent, got);
+    while (moves.size > _DOC_MOVES_MAX) moves.delete(moves.keys().next().value);
+    let changed = false;
+    for (const [, d] of _entriesFor(base)) {
+        if (d && d.payload && !_inFlight.has(d) && d.payload[field] === sent) {
+            d.payload[field] = got;
+            changed = true;
+        }
+    }
+    if (changed) _persistQueue();
+}
+
+// The fields of a queued document save that are the document, not the
+// outbox's tags, the version it was made against or the password.
+function _documentFields(payload) {
+    const { writeId: _w, session: _s, basis: _b, password: _p, tournamentVersion: _t, awardsVersion: _a, competitions: _c, ...fields } = payload || {};
+    return fields;
+}
+
+// _pendingDocument: the payload of the save still queued for a document (its
+// last entry), or null.
+function _pendingDocument(base) {
+    const list = _entriesFor(base);
+    return list.length ? list[list.length - 1][1].payload || null : null;
+}
+
+// _overlayPendingTournament: the fetched tournament with the settings this
+// device still has queued put on, so a refetch before the save lands never
+// shows the stored copy over the operator's change.
+function _overlayPendingTournament(t) {
+    const p = t && typeof t === 'object' ? _pendingDocument(_TOURNAMENT_BASE) : null;
+    return p ? { ...t, ..._documentFields(p) } : t;
+}
+
+// _overlayPendingAwards: the same for a competition's awards.
+function _overlayPendingAwards(comp, id) {
+    const p = _pendingDocument(_awardsBase(id));
+    if (!p || !Array.isArray(p.fightingSpiritAwards)) return comp;
+    const out = { ...comp };
+    if (comp.config) out.config = { ...comp.config, fightingSpiritAwards: p.fightingSpiritAwards };
+    if (!comp.config || 'fightingSpiritAwards' in comp) out.fightingSpiritAwards = p.fightingSpiritAwards;
+    return out;
+}
+
+// _tournamentRefusal: the Error a refused tournament save rejects with, the
+// shape the direct save threw: a 409 tournament_changed carries the settings
+// as they stand now, for the open form to reload.
+function _tournamentRefusal(err, status) {
+    const e = new Error(err.error || 'Failed to update tournament');
+    if (status === 409 && err.code === 'tournament_changed') {
+        e.code = 'tournament_changed';
+        e.tournament = err.tournament || null;
+    }
+    return e;
+}
+
+// _awardsRefusal: the same for an awards save: a 409 awards_changed carries
+// the list as it stands now and its version.
+function _awardsRefusal(err, status) {
+    const e = new Error(err.error || 'Failed to update competition awards');
+    if (status === 409 && err.code === 'awards_changed') {
+        e.code = 'awards_changed';
+        e.awardsVersion = err.awardsVersion || '';
+        e.fightingSpiritAwards = err.fightingSpiritAwards || [];
+    }
+    return e;
 }
 
 // ---------------------------------------------------------------------------
@@ -2006,7 +2303,7 @@ function _pendingAnswer(key, settled) {
 // _outboxWrite: the ONE way a rule-bound door hands a write over. Builds the
 // descriptor synchronously, tags it (writeId, basis, session), stamps its
 // place in the match's order, enqueues it durably and kicks the flush.
-function _outboxWrite({ kind, compID, matchID, method, url, payload, password, seen, onRefusal, terminal = true, after, base: ownBase, holds, was }) {
+function _outboxWrite({ kind, compID, matchID, method, url, payload, password, seen, onRefusal, terminal = true, after, base: ownBase, holds, was, label }) {
     // `base`: the queue base when it is not the match's own (a team's starting
     // lineup, `lineup:…`).
     const base = ownBase || _revKey(compID, matchID);
@@ -2024,9 +2321,13 @@ function _outboxWrite({ kind, compID, matchID, method, url, payload, password, s
     // back to the queue frees its blocker's court): a later write of one of
     // them follows it (_commitEnqueue). Persisted.
     if (Array.isArray(holds) && holds.length > 0) descriptor.holds = holds.filter((b) => typeof b === 'string' && b);
-    // `was`: what a court move or time change replaces, put back on a refusal
-    // (R4, _revertLocalFields). Persisted.
+    // `was`: what a court move or time change replaces, or what each
+    // participant of a check-in had, put back on a refusal (R4,
+    // _revertLocalFields). Persisted.
     if (was && typeof was === 'object') descriptor.was = was;
+    // `label`: where the write is, named by the door when no match or team
+    // names it (a check-in, a court call, a document; _whereOf). Persisted.
+    if (typeof label === 'string' && label) descriptor.label = label;
     const stamped = Number(payload.modifiedAt);
     if (Number.isFinite(stamped) && stamped > 0) payload.modifiedAt = _afterOwnStamp(base, stamped);
     else descriptor.sortStamp = _afterOwnStamp(base, _serverNowMs());
@@ -2111,6 +2412,10 @@ function _coalesceTarget(base, descriptor) {
     // Never a score entry already being sent: its answer settles it, and a
     // write made since goes after it (_inFlight, set by _sendEntry).
     if (_inFlight.has(prev)) return null;
+    // A whole-document save (the tournament settings, a competition's awards)
+    // restates the document, so it takes the place of a queued save of the
+    // same document not yet out (bc-obox G4b).
+    if (_DOC_VERSION_FIELD[descriptor.kind]) return prev.kind === descriptor.kind ? last : null;
     if (descriptor.kind !== 'score') return null;
     if (prev.kind !== 'score') return null;
     if (prev.terminal && !descriptor.terminal) return null;
@@ -2399,6 +2704,8 @@ function _heldWriteItem(key, d) {
         where: _whereOf(d),
         ...(d.kind === 'lineup' && d.payload
             ? { teamId: d.payload.teamId || '', round: d.payload.round } : {}),
+        // A check-in names its participants, so the list can name them.
+        ...(_CHECKIN_KINDS.has(d.kind) ? { participantIds: [..._checkInsOf(d).keys()] } : {}),
     };
 }
 
@@ -2693,10 +3000,12 @@ let _queueGen = 0;
 //
 // Marks the entry so a SECOND refusal is terminal, and persists, so the mark
 // survives a reload (see the skewRetried note on the descriptor shape).
-async function _restampQueuedEntryForSkew(descriptor) {
+// `base` is the entry's own (a check-in's `checkin:<comp>`, a court call's
+// `announce:<id>`), never re-derived from its match.
+async function _restampQueuedEntryForSkew(descriptor, base) {
     await _learnServerClockOffset();
     const enqueuedAt = Number.isFinite(descriptor.enqueuedAt) ? descriptor.enqueuedAt : Date.now();
-    descriptor.payload.modifiedAt = _afterSettledStamp(_revKey(descriptor.compID, descriptor.matchID),
+    descriptor.payload.modifiedAt = _afterSettledStamp(base,
         _stampAfterSeen(_restampFor(enqueuedAt, descriptor.perfAtEnqueue), descriptor.seenModifiedAt));
     descriptor.skewRetried = true;
     _persistQueue();
@@ -2710,7 +3019,7 @@ async function _restampQueuedEntryForSkew(descriptor) {
 // dropped (operator rule: nothing a device sends is dropped).
 async function _resendForClock(key, descriptor, pass, alert) {
     const again = !!descriptor.skewRetried;
-    await _restampQueuedEntryForSkew(descriptor);
+    await _restampQueuedEntryForSkew(descriptor, _baseOf(key));
     if (_writeQueue.get(key) !== descriptor) return 'settled'; // discarded meanwhile
     if (!again) {
         _flushRequested = true;
@@ -3195,6 +3504,7 @@ function _doorValue(d, body) {
     switch (d && d.kind) {
         case 'revert': return true;
         case 'lineup-remove': return true;
+        case 'announce-remove': return true;
         case 'kachinuki': return (body && body.result) ?? body;
         case 'daihyosen': return _daihyosenOutcome(body || {});
         default: return body;
@@ -3260,6 +3570,20 @@ function _doorRefusal(d, status, body) {
             if (refusal && refusal.downstreamKnockoutPlayed) refusal.downstreamKnockoutPlayed.ranking = true;
             return refusal || new Error(b.error || 'Failed to override rank');
         }
+        case 'checkin':
+            return _refusalError(b, d.method === 'DELETE' ? 'The check-in was not taken back.' : 'The check-in was not saved.');
+        case 'checkin-bulk':
+            return _refusalError(b, 'The check-ins were not saved.');
+        case 'announce':
+            return _refusalError(b, 'The court call was not sent.');
+        case 'announce-remove':
+            return _refusalError(b, 'The court call was not taken down.');
+        case 'announce-clear':
+            return _refusalError(b, 'The court calls were not cleared.');
+        case 'tournament':
+            return _tournamentRefusal(b, status);
+        case 'awards':
+            return _awardsRefusal(b, status);
         default:
             return new Error(_refusalText(b, `HTTP ${status}`));
     }
@@ -3275,11 +3599,21 @@ function _doorRefusal(d, status, body) {
 // MATCH write, whose answer can be a refusal body (`applied: false`, a clock
 // refusal) read by the branch it gates in _sendEntry. A lineup save, a team
 // member write, a lineup removal and a reinstatement answer their own records,
-// never a match write's refusal shape.
-const _NOT_MATCH_WRITE_KINDS = new Set(['lineup', 'lineup-remove', 'member', 'reinstate', 'pool-ranks']);
+// never a match write's refusal shape; so do a check-in, a court call, its
+// withdrawal, the clear and the two document saves (bc-obox).
+const _NOT_MATCH_WRITE_KINDS = new Set([
+    'lineup', 'lineup-remove', 'member', 'reinstate', 'pool-ranks',
+    'checkin', 'checkin-bulk', 'announce', 'announce-remove', 'announce-clear', 'tournament', 'awards',
+]);
 function _answersMatchWrite(d) {
     return !!d && !!d.terminal && !_NOT_MATCH_WRITE_KINDS.has(d.kind);
 }
+// The doors outside a match whose body carries its stamp (`modifiedAt`), which
+// the server judges for clock skew: a 200 {applied:false, reason:"clock_skew"}
+// wrote nothing, and the entry is re-stamped and sent again (_resendForClock).
+const _STAMPED_DOOR_KINDS = new Set(['checkin', 'checkin-bulk', 'announce', 'announce-clear']);
+// The removals whose 404 is the outcome they asked for (nothing to take away).
+const _GONE_IS_DONE_KINDS = new Set(['lineup-remove', 'announce-remove']);
 
 async function _sendEntry(key, descriptor, pass) {
     // Out of the queue AND out of storage at once, not at the end of the
@@ -3335,8 +3669,9 @@ async function _sendEntry(key, descriptor, pass) {
             headers: { 'Content-Type': 'application/json', 'X-Tournament-Password': password },
             // Sent as the entry holds it: a downstream confirmation rides only
             // on the in-memory copy of a write confirmed on this page
-            // (_persistQueue never stores one).
-            body: JSON.stringify(payload),
+            // (_persistQueue never stores one). A tournament settings save
+            // never carries a password (_replayBody).
+            body: _replayBody(effectiveMethod, effectiveUrl, payload),
         }));
     } catch (err) {
         // fetch rejected (network down), or the request or its body was given
@@ -3411,6 +3746,17 @@ async function _sendEntry(key, descriptor, pass) {
                 // answer from `settled`; no alert (an autosave's would repeat).
                 _relearnClockThrottled();
             }
+        } else if (_STAMPED_DOOR_KINDS.has(kind)) {
+            // A check-in or a court call the server judged as stamped in its
+            // future wrote nothing: re-stamped and sent again, as a match
+            // write is (bc-obox).
+            if (writeWasRefusedForClock(body)) {
+                return _resendForClock(key, descriptor, pass, { count: 1, terminalCount: 0, compID, matchID });
+            }
+            // A check-in another desk's later tap superseded: the desk takes
+            // the participant as stored, told once when it is not what the
+            // tap asked (C2).
+            if (_CHECKIN_KINDS.has(kind) && _writeQueue.get(key) === descriptor) _checkInAnswered(key, descriptor, body);
         }
         // A change turned away because the match was finished (writeMatchClosed)
         // is the operator's to correct, never routine noise, so it is said
@@ -3433,6 +3779,10 @@ async function _sendEntry(key, descriptor, pass) {
             if (isFinishedResultWrite(descriptor) && writeDisplacedGroups(body).length > 0) pass.displaced++;
             // A confirmed terminal score write needs no further rev tracking.
             if (terminal && kind === 'score') _matchRevCounters.delete(_revKey(compID, matchID));
+            // A document save that landed: a save of it still queued at the
+            // version this one was sent at takes the one it answered (G4b).
+            const docField = _DOC_VERSION_FIELD[kind];
+            if (docField) _rebaseQueuedVersion(_baseOf(key), docField, payload && payload[docField], body[docField]);
         } else if (_writeQueue.has(key)) {
             // A later write took this one's place while it was out (the same
             // key, _placeWrite): it goes before anything queued after it.
@@ -3441,8 +3791,10 @@ async function _sendEntry(key, descriptor, pass) {
         }
         return 'settled';
     }
-    if (res.status === 404 && kind === 'lineup-remove') {
-        // Nothing saved to remove: the outcome the removal asked for (R1).
+    if (res.status === 404 && _GONE_IS_DONE_KINDS.has(kind)) {
+        // Nothing saved to remove: the outcome the removal asked for (R1). A
+        // court call already gone (expired, or another console withdrew it)
+        // is taken down too (bc-cdbl).
         leaveQueue({ value: true });
         return 'settled';
     }
@@ -3494,23 +3846,43 @@ async function _sendEntry(key, descriptor, pass) {
     // correction whose later match was played meanwhile.
     console.warn(`[sync] queued ${kind || 'running'} write rejected (${res.status}):`, body);
     const err = _doorRefusal(descriptor, res.status, body);
-    if (!_claimRefusal(key, err)) {
+    // A document save refused as made against an older copy: a save of the
+    // same document queued behind it at the same version would be refused
+    // the same way, so it leaves with it, and the operator is told once.
+    const staleDocs = _staleDocumentSaves(key, descriptor, err);
+    const claimed = [key, ...staleDocs.map(([k]) => k)].map((k) => _claimRefusal(k, err)).some(Boolean);
+    if (!claimed) {
         const refusal = _replayRefusal(body, kind === 'decision' && res.status === 409 ? 'conflict (409)' : `HTTP ${res.status}`);
         const alert = {
             kind: 'rejected', count: 1, terminalCount: isFinishedResultWrite(descriptor) ? 1 : 0, compID, matchID,
             detail: refusal.reason,
             ...(refusal.sentence ? { sentence: true } : {}),
+            // The document refusals have their own words (app.jsx
+            // queueAlertMessage): open the settings and save again.
+            ...(err.code && _DOC_VERSION_FIELD[kind] ? { code: err.code } : {}),
         };
         // Said once: by the editor open on the match (a terminal write's
         // banner), else by the alert.
         if (terminal) _tellRefusal({ compID, matchID, kind, status: res.status, ...refusal }, alert);
         else _notifyQueueAlert(alert);
     }
+    for (const [k, d] of staleDocs) _dequeue(k, d, { error: err });
     if (!leaveQueue({ error: err }) && _writeQueue.has(key)) {
         _flushRequested = true;
         return 'restamped';
     }
     return 'settled';
+}
+
+// _staleDocumentSaves: the saves of the same document still queued behind a
+// document save refused as stale (tournament_changed, awards_changed) at the
+// version it was refused for, or [] for any other refusal.
+function _staleDocumentSaves(key, d, err) {
+    const field = d && _DOC_VERSION_FIELD[d.kind];
+    if (!field || !err || err.code !== `${d.kind}_changed`) return [];
+    const at = d.payload && d.payload[field];
+    return _entriesFor(_baseOf(key)).filter(([k, e]) => k !== key && e && !_inFlight.has(e)
+        && e.kind === d.kind && e.payload && e.payload[field] === at);
 }
 
 // _sendTapBatch: consecutive taps of one session for one match, in one POST
@@ -3843,6 +4215,15 @@ function _placeWrite(base, descriptor) {
     // old: the later floor stands for both.
     if (Number(prev.seenModifiedAt) > (Number(descriptor.seenModifiedAt) || 0)) {
         descriptor.seenModifiedAt = prev.seenModifiedAt;
+    }
+    // A document save keeps the version the queued save it replaces was made
+    // against: the change another device made since that save is refused, not
+    // written over, whichever of the two screens the operator saved from.
+    const docField = _DOC_VERSION_FIELD[descriptor.kind];
+    if (docField) {
+        descriptor.payload = { ...descriptor.payload, [docField]: prev.payload ? prev.payload[docField] : descriptor.payload[docField] };
+        for (const k of _afterKeys(prev)) _addAfter(descriptor, k);
+        return key;
     }
     let payload = descriptor.kind === 'lineup'
         ? joinQueuedLineupSave(prev.payload, descriptor.payload)
@@ -4899,7 +5280,7 @@ function _endDiscardWhileOut(d, res, body) {
     if (!_discardedWhileOut.has(d)) return false;
     _discardedWhileOut.delete(d);
     const kept = !!res && ((res.ok && !writeWasRefusedForClock(body || {}))
-        || (res.status === 404 && d.kind === 'lineup-remove'));
+        || (res.status === 404 && _GONE_IS_DONE_KINDS.has(d.kind)));
     if (!kept) _revertLocalFields(d);
     _rerunFlushSoon();
     return true;
@@ -5040,41 +5421,6 @@ function _restoreForm({ file, from, only, undo, decisions }) {
     return fd;
 }
 
-// A direct door's 200 {applied:false, reason} answer means nothing was written
-// (a later write superseded it, or this device's clock is ahead of the server's).
-// This is the one owner of turning it into an error: the clock frame is checked
-// again, as the score doors do, so the next try uses it, and the error carries
-// the server's sentence (or `fallback`) with the reason on it.
-function _throwNotApplied(answer, fallback) {
-    _relearnClockThrottled();
-    const e = new Error(answer.message || fallback);
-    e.reason = answer.reason;
-    throw e;
-}
-
-// A check-in door answers 200 {applied:false, reason} when nothing was
-// written: "superseded" (a later tap already changed that person; the
-// answer carries them as stored) or "clock_skew" (this device's clock is
-// ahead of the server's). Neither broadcasts anything, so the caller is told
-// here, with the reason on the error, rather than keep a check-in that is
-// not stored. A bulk answer that applied some ids is a result, not a refusal.
-// `checkedIn` is what a single tap asked for: a superseded answer whose stored
-// person already holds it (a same-millisecond tie, a resend) is a success, since
-// the desk shows exactly that. These direct doors do not resend, so either
-// reason re-checks the clock frame, as the score doors do; the next tap uses it.
-function _checkInApplied(answer, checkedIn) {
-    if (answer && answer.applied === false) {
-        if (answer.reason === 'superseded' && answer.participant && !!answer.participant.checkedIn === checkedIn) {
-            _relearnClockThrottled();
-            return answer.participant;
-        }
-        _throwNotApplied(answer, answer.reason === 'superseded'
-            ? 'Another desk changed this check-in after your tap, so nothing was changed.'
-            : 'The check-in was not saved.');
-    }
-    return answer;
-}
-
 const API = {
     async fetchTournament() {
         const res = await fetch('/api/viewer/tournament');
@@ -5091,7 +5437,8 @@ const API = {
             const err = await res.json().catch(() => ({}));
             throw new Error(err.error || `Failed to fetch tournament (Status ${res.status})`);
         }
-        return res.json();
+        // A settings save this device still has queued shows (G4b).
+        return _overlayPendingTournament(await res.json());
     },
     // Public endpoint: returns {mode: "file"|"locked", resetEnabled: bool}.
     // Mounted on App() boot to decide whether to render the "Forgot
@@ -5242,27 +5589,48 @@ const API = {
         }
         return res.json();
     },
-    async updateTournament(config, password) {
-        const res = await fetch('/api/tournament', {
+    // bc-obox G4b: the tournament settings, an outbox entry under the base
+    // `tournament`, answered at once like every outbox door ({ pending,
+    // settled }); `settled` resolves with the saved settings (their
+    // tournamentVersion with them) or rejects with the refusal (409
+    // tournament_changed carries `code` and `tournament`, the copy now). The
+    // body never carries a password: an empty one keeps the stored one, so a
+    // descriptor at rest holds none. A save that CHANGES the password (a body
+    // password other than the session's, `password`) is the auth door and
+    // stays direct (updateTournamentPassword), answering as it always did.
+    async updateTournament(config, password, opts = {}) {
+        const body = config || {};
+        if (typeof body.password === 'string' && body.password !== '' && body.password !== password) {
+            return API.updateTournamentPassword(body, password);
+        }
+        const { competitions: _comps, ...settings } = body;
+        return _outboxWrite({
+            kind: 'tournament', compID: '', matchID: '', method: 'PUT', url: '/api/tournament',
+            payload: { ...settings, password: '', tournamentVersion: _currentDocVersion(_TOURNAMENT_BASE, settings.tournamentVersion) },
+            password, onRefusal: opts && opts.onRefusal, base: _TOURNAMENT_BASE, label: 'Tournament settings',
+        });
+    },
+    // The password change: direct (_directFetch), with the version it was made
+    // from. A save of the settings this device still has queued is made stale
+    // by it, so the caller waits for those first (API.queuedWritesOf).
+    async updateTournamentPassword(config, password) {
+        const { competitions: _comps, ...settings } = config || {};
+        const sent = _currentDocVersion(_TOURNAMENT_BASE, settings.tournamentVersion);
+        const res = await _directFetch('/api/tournament', {
             method: 'PUT',
             headers: {
                 'Content-Type': 'application/json',
                 'X-Tournament-Password': password
             },
-            body: JSON.stringify(config)
+            body: JSON.stringify({ ...settings, tournamentVersion: sent })
         });
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
-            const e = new Error(err.error || "Failed to update tournament");
-            // 409 tournament_changed: nothing was written; the answer carries
-            // the settings as they stand now, for the open form to reload.
-            if (res.status === 409 && err.code === 'tournament_changed') {
-                e.code = 'tournament_changed';
-                e.tournament = err.tournament || null;
-            }
-            throw e;
+            throw _tournamentRefusal(err, res.status);
         }
-        return res.json();
+        const saved = await res.json();
+        _rebaseQueuedVersion(_TOURNAMENT_BASE, 'tournamentVersion', sent, saved && saved.tournamentVersion);
+        return saved;
     },
     async updateCompetition(id, config, password) {
         // Go's domain.Player uses json:"metadata" (array); the JS layer uses the
@@ -5946,11 +6314,26 @@ const API = {
     startCheckUntrusted(compID) {
         if (typeof navigator !== 'undefined' && navigator.onLine === false) return true;
         if (_offlineFlag) return true;
-        for (const d of _writeQueue.values()) {
-            if (d && d.compID === compID && START_CHECK_WRITE_KINDS.has(d.kind || 'score')) return true;
-        }
-        return false;
+        return API.queuedWritesOf(compID, START_CHECK_WRITE_KINDS) > 0;
     },
+    // bc-obox C1/T1: the ONE reader of "this competition still has queued
+    // writes of these kinds": how many entries this device's outbox holds for
+    // `compID` whose kind is one of `kinds` (an array or a Set; a write an
+    // older build stored with no kind is a score write). Pure: it asks nothing
+    // about the connection. `compID` null counts every competition's, and the
+    // writes that belong to none (the tournament settings, `''`). Re-read it on
+    // subscribeUnsentWrites, which is told whenever an entry joins or leaves.
+    // The draw waits for API.CHECK_IN_WRITE_KINDS; a move for ['time'].
+    queuedWritesOf(compID, kinds) {
+        const set = kinds instanceof Set ? kinds : new Set(Array.isArray(kinds) ? kinds : []);
+        let n = 0;
+        for (const d of _writeQueue.values()) {
+            if (!d || !set.has(d.kind || 'score')) continue;
+            if (compID === null || compID === undefined || d.compID === compID) n++;
+        }
+        return n;
+    },
+    CHECK_IN_WRITE_KINDS: Object.freeze([..._CHECKIN_KINDS]),
     // mp-gmcg: reopen a COMPLETED kachinuki team match, or (bc-tmfn) any
     // completed match a withdrawal decided: status back to running,
     // winner/decision cleared, fought bouts kept.
@@ -6137,28 +6520,19 @@ const API = {
     // awardsVersion: the version of the list this save was made from (the
     // competition detail's awardsVersion, or the last save's answer); a save
     // from an older list is refused (409 awards_changed).
-    async updateCompetitionAwards(id, awards, password, awardsVersion) {
-        const res = await fetch(`/api/competitions/${id}/awards`, {
-            method: 'PUT',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-Tournament-Password': password
-            },
-            body: JSON.stringify({ fightingSpiritAwards: awards, awardsVersion })
+    // bc-obox G4b: an outbox entry under the base `awards:<comp>`, answered at
+    // once ({ pending, settled }); `settled` resolves with the competition as
+    // saved (its awardsVersion with it) or rejects with the refusal (409
+    // awards_changed carries `code`, `awardsVersion` and
+    // `fightingSpiritAwards`, the list now). The whole list is sent, so a save
+    // made while one is queued takes its place (_coalesceTarget).
+    async updateCompetitionAwards(id, awards, password, awardsVersion, opts = {}) {
+        const base = _awardsBase(id);
+        return _outboxWrite({
+            kind: 'awards', compID: id, matchID: '', method: 'PUT', url: `/api/competitions/${id}/awards`,
+            payload: { fightingSpiritAwards: awards, awardsVersion: _currentDocVersion(base, awardsVersion) },
+            password, onRefusal: opts && opts.onRefusal, base, label: 'Fighting-spirit awards',
         });
-        if (!res.ok) {
-            const err = await res.json().catch(() => ({}));
-            const e = new Error(err.error || "Failed to update competition awards");
-            // 409 awards_changed: nothing was written; the answer carries the
-            // list as it stands now and its version, for the open panel to reload.
-            if (res.status === 409 && err.code === 'awards_changed') {
-                e.code = 'awards_changed';
-                e.awardsVersion = err.awardsVersion || '';
-                e.fightingSpiritAwards = err.fightingSpiritAwards || [];
-            }
-            throw e;
-        }
-        return res.json();
     },
     // The GET answers saved: false when nothing is stored; lineupOrNull
     // makes that null ("blank, editable"). A 404 means the competition does
@@ -6439,18 +6813,31 @@ const API = {
         }
         return res.json();
     },
-    async toggleCheckIn(compID, pid, checkedIn, password) {
-        const method = checkedIn ? 'PUT' : 'DELETE';
-        const res = await fetch(`/api/competitions/${encodeURIComponent(compID)}/participants/${encodeURIComponent(pid)}/checkin`, {
-            method,
-            headers: { 'Content-Type': 'application/json', 'X-Tournament-Password': password },
-            body: JSON.stringify({ modifiedAt: _serverNowMs() })
+    // bc-obox C1/C2: a check-in tap (checkedIn true) or its undo (false), an
+    // outbox entry under the competition's base `checkin:<comp>`, answered at
+    // once ({ pending, settled }) and shown at once (subscribeLocalParticipantPatch,
+    // and every fetch lays it over its players until it lands). The stamp is
+    // the tap's, so the later tap wins whatever arrives first. `settled`
+    // resolves with the server's answer: the participant as stored, or 200
+    // { applied: false, reason: 'superseded', participant } when another
+    // desk's later tap already changed them (the desk takes `participant`;
+    // when it is not what was asked the operator is told once, through
+    // `opts.onRefusal` if it returns true, else the queue alert). A refusal
+    // (409 check_in_not_in_self_run, a 404) rejects. opts: `was` ({ [pid]:
+    // bool }, what the row showed before the tap, put back on a refusal or a
+    // discard; default the opposite of `checkedIn`), `name` (how the
+    // held-writes list names it), `onRefusal`.
+    async toggleCheckIn(compID, pid, checkedIn, password, opts = {}) {
+        const answer = _outboxWrite({
+            kind: 'checkin', compID, matchID: '', method: checkedIn ? 'PUT' : 'DELETE',
+            url: `/api/competitions/${encodeURIComponent(compID)}/participants/${encodeURIComponent(pid)}/checkin`,
+            payload: { modifiedAt: _serverNowMs() },
+            password, onRefusal: opts && opts.onRefusal, base: _checkInBase(compID),
+            was: opts && opts.was && typeof opts.was === 'object' ? opts.was : { [pid]: !checkedIn },
+            label: _checkInLabel(opts && opts.name),
         });
-        if (!res.ok) {
-            const err = await res.json().catch(() => ({}));
-            throw new Error(err.message || err.error || `Failed to ${checkedIn ? 'check in' : 'undo check-in'} participant`);
-        }
-        return _checkInApplied(await res.json(), checkedIn);
+        _emitLocalCheckIns(compID, [[pid, !!checkedIn]]);
+        return answer;
     },
     // Bulk check-in for one competition. participantIds is an array of pids as
     // built by checkinApiPid/rdApiPid: a stable UUID, or "" for a legacy
@@ -6458,19 +6845,25 @@ const API = {
     // the "name|dojo" composite -- name and dojo are operator-editable after
     // the draw, so that composite is not a safe wire identifier). An
     // id-less pid resolves to nothing server-side and is reported back via
-    // notFound. Returns { checkedIn, alreadyCheckedIn, notFound }. Used by
-    // the Registration desk's "check in a whole dojo" action.
-    async bulkCheckIn(compID, participantIds, password) {
-        const res = await fetch(`/api/competitions/${encodeURIComponent(compID)}/participants/checkin-bulk`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'X-Tournament-Password': password },
-            body: JSON.stringify({ participantIds, modifiedAt: _serverNowMs() })
+    // notFound. An outbox entry like toggleCheckIn's, in the same base;
+    // `settled` resolves with { checkedIn, alreadyCheckedIn, notFound,
+    // superseded: [participant as stored] }, the superseded ones taken as
+    // stored (told once when not checked in). opts.was is per id (the ids of
+    // one tap may have started in different states; default not checked in).
+    // Used by the Registration desk's "check in a whole dojo" action.
+    async bulkCheckIn(compID, participantIds, password, opts = {}) {
+        const ids = Array.isArray(participantIds) ? participantIds : [];
+        const answer = _outboxWrite({
+            kind: 'checkin-bulk', compID, matchID: '', method: 'POST',
+            url: `/api/competitions/${encodeURIComponent(compID)}/participants/checkin-bulk`,
+            payload: { participantIds: ids, modifiedAt: _serverNowMs() },
+            password, onRefusal: opts && opts.onRefusal, base: _checkInBase(compID),
+            was: opts && opts.was && typeof opts.was === 'object'
+                ? opts.was : Object.fromEntries(ids.filter(Boolean).map((id) => [id, false])),
+            label: _checkInLabel(opts && opts.name, ids.filter(Boolean).length),
         });
-        if (!res.ok) {
-            const err = await res.json().catch(() => ({}));
-            throw new Error(err.message || err.error || 'Failed to check in participants');
-        }
-        return _checkInApplied(await res.json());
+        _emitLocalCheckIns(compID, ids.filter(Boolean).map((id) => [id, true]));
+        return answer;
     },
     async addParticipant(compID, payload, password) {
         const res = await _directFetch(`/api/competitions/${encodeURIComponent(compID)}/participants`, {
@@ -6496,26 +6889,22 @@ const API = {
         }
         return res.json();
     },
-    // The court-call doors send the id and the made-at the server requires
-    // (modifiedAt, in the server's clock frame); they become outbox doors in the
-    // announcement client phase.
-    async sendAnnouncement(message, durationMinutes, password) {
-        const res = await fetch('/api/tournament/announce', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-Tournament-Password': password
-            },
-            body: JSON.stringify({ id: _newClientId(), message, durationMinutes, modifiedAt: _serverNowMs() })
+    // bc-obox A1: a court call, an outbox entry under its own base
+    // `announce:<id>`. The device makes the id (a lowercase UUID v4) and the
+    // answer carries it at once ({ pending, settled, id }), so a withdrawal can
+    // name the call before it has landed. `settled` resolves with the call as
+    // the server stored it (`recorded` when the id was already known,
+    // `expired` when its time was over on arrival), or { discarded: true,
+    // withdrawn: true } when it was withdrawn before it was sent; a refusal
+    // rejects.
+    async sendAnnouncement(message, durationMinutes, password, opts = {}) {
+        const id = _newClientId();
+        const answer = _outboxWrite({
+            kind: 'announce', compID: '', matchID: '', method: 'POST', url: '/api/tournament/announce',
+            payload: { id, message, durationMinutes, modifiedAt: _serverNowMs() },
+            password, onRefusal: opts && opts.onRefusal, base: _announceBase(id), label: _courtCallLabel(message),
         });
-        if (!res.ok) {
-            const err = await res.json().catch(() => ({}));
-            throw new Error(err.error || `Failed to send announcement (Status ${res.status})`);
-        }
-        const sent = await res.json();
-        // clock_skew comes back 200 {applied: false}: the call was not made.
-        if (sent && sent.applied === false) _throwNotApplied(sent, 'The announcement was not sent.');
-        return sent;
+        return { ...answer, id };
     },
     async fetchAnnouncements() {
         const res = await fetch('/api/tournament/announcements');
@@ -6525,31 +6914,43 @@ const API = {
         }
         return res.json();
     },
-    async deleteAnnouncement(id, password) {
-        const res = await fetch(`/api/announcements/${encodeURIComponent(id)}`, {
-            method: 'DELETE',
-            headers: { 'X-Tournament-Password': password }
-        });
-        // 404: the announcement is already gone (expired, or another console
-        // withdrew it first), which is the outcome the caller asked for.
-        if (res.status === 404) return;
-        if (!res.ok) {
-            const err = await res.json().catch(() => ({}));
-            throw new Error(err.error || `Failed to delete announcement (Status ${res.status})`);
+    // bc-obox A1: a court call withdrawn, an outbox entry in the call's base,
+    // so it goes after the call's send. `settled` resolves true once the call
+    // is down, a 404 included (it is already gone: it expired, or another
+    // console withdrew it first, which is the outcome asked for, bc-cdbl); a
+    // refusal rejects. A withdrawal made while the call's send is still
+    // queued and not yet out takes both out of the outbox, so the venue
+    // screens never show a call already taken back: nothing is sent, the send
+    // settles { discarded: true, withdrawn: true } and this one true.
+    async deleteAnnouncement(id, password, opts = {}) {
+        const base = _announceBase(id);
+        const send = _entriesFor(base).find(([k, d]) => d.kind === 'announce' && !_inFlight.has(d) && !_isFollowed(k));
+        if (send) {
+            const [key, d] = send;
+            _dequeue(key, d, { value: { discarded: true, withdrawn: true } });
+            _persistQueue();
+            _recomputeSyncStatus();
+            return { applied: true, pending: true, key: '', settled: Promise.resolve(true) };
         }
+        return _outboxWrite({
+            kind: 'announce-remove', compID: '', matchID: '', method: 'DELETE',
+            url: `/api/announcements/${encodeURIComponent(id)}`,
+            payload: {}, password, onRefusal: opts && opts.onRefusal, base,
+            label: _courtCallLabel(opts && opts.message),
+        });
     },
-    async clearAnnouncements(password) {
-        const res = await fetch('/api/announcements', {
-            method: 'DELETE',
-            headers: { 'Content-Type': 'application/json', 'X-Tournament-Password': password },
-            body: JSON.stringify({ modifiedAt: _serverNowMs() })
+    // bc-obox A1: every court call made at or before this moment taken down,
+    // an outbox entry under its own base `announce-clear`, stamped
+    // (`modifiedAt`): the server clears what was made at or before it and
+    // keeps that floor, so a call made before the clear that arrives after it
+    // shows nothing, and one made after it stands whatever the arrival order.
+    // `settled` resolves with the calls left showing; a refusal rejects.
+    async clearAnnouncements(password, opts = {}) {
+        return _outboxWrite({
+            kind: 'announce-clear', compID: '', matchID: '', method: 'DELETE', url: '/api/announcements',
+            payload: { modifiedAt: _serverNowMs() },
+            password, onRefusal: opts && opts.onRefusal, base: _ANNOUNCE_CLEAR_BASE, label: 'Every court call',
         });
-        if (!res.ok) {
-            const err = await res.json().catch(() => ({}));
-            throw new Error(err.error || `Failed to clear announcements (Status ${res.status})`);
-        }
-        const cleared = await res.json().catch(() => null);
-        if (cleared && cleared.applied === false) _throwNotApplied(cleared, 'The announcements were not cleared.');
     },
     // mp-c38: sponsor logo upload (multipart) and delete.
     async uploadSponsor({ file, name, link, password }) {
@@ -6952,6 +7353,14 @@ const API = {
     },
     subscribeLocalMatchPatch(cb) {
         return subscribeLocalMatchPatch(cb);
+    },
+    // bc-obox C1: a check-in this device makes, told in the tick it is made,
+    // and again when a refusal or a discard puts back what the row had or a
+    // superseded answer puts the participant as stored: { type:
+    // 'checkin_updated', local: true, data: { competitionId, participants:
+    // [{ id, checkedIn }] } }.
+    subscribeLocalParticipantPatch(cb) {
+        return subscribeLocalParticipantPatch(cb);
     },
     // Whether a court move of this match is still queued here: a feed that
     // shows the match on that court (the overlay above) is not yet the server's.

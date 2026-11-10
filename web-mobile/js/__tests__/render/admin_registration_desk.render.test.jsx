@@ -260,16 +260,16 @@ describe('AdminRegistrationDeskPage check-in sends the id-only wire pid (bc-pnum
     const { getByRole } = await mount(tournament);
     const checkbox = getByRole('checkbox', { name: /check in akira tanaka/i });
     await act(async () => { fireEvent.click(checkbox); });
-    expect(toggleCheckIn).toHaveBeenCalledWith('men', 'uuid-akira', true, 'pw');
+    expect(toggleCheckIn).toHaveBeenCalledWith('men', 'uuid-akira', true, 'pw', expect.objectContaining({
+      name: 'Akira Tanaka', was: { 'uuid-akira': false },
+    }));
   });
 
-  // A superseded or clock-skewed check-in is written nowhere and broadcast
-  // nowhere: the desk must say it failed and reload the stored state.
-  it('toasts and reloads when the server did not apply the check-in', async () => {
+  // A refused check-in comes back through the door's onRefusal, long after the
+  // tap: the desk claims it and says why once (the row is put back by the
+  // outbox's participant patch, pinned in admin_registration_desk_offline).
+  it('toasts a refused check-in once and claims it', async () => {
     const showToast = vi.fn();
-    const fetchCompetitions = vi.fn().mockResolvedValue([]);
-    window.API.fetchCompetitions = fetchCompetitions;
-    toggleCheckIn.mockRejectedValue(Object.assign(new Error('Another desk changed this check-in after your tap, so nothing was changed.'), { reason: 'superseded' }));
     const tournament = makeTournament({
       competitions: [{
         id: 'men', name: "Men's Individual", kind: 'individual', status: 'draw-ready',
@@ -284,8 +284,12 @@ describe('AdminRegistrationDeskPage check-in sends the id-only wire pid (bc-pnum
       );
     });
     await act(async () => { fireEvent.click(result.getByRole('checkbox', { name: /check in akira tanaka/i })); });
-    expect(showToast).toHaveBeenCalledWith(expect.stringContaining('1 of 1 check-in(s) failed'), 'error');
-    expect(fetchCompetitions).toHaveBeenCalled();
+    expect(showToast).not.toHaveBeenCalled();
+    const { onRefusal } = toggleCheckIn.mock.calls[0][4];
+    let claimed;
+    act(() => { claimed = onRefusal(new Error('Self-run mode has no check-in.')); });
+    expect(claimed).toBe(true);
+    expect(showToast).toHaveBeenCalledWith('1 of 1 check-in(s) not saved: Self-run mode has no check-in.', 'error');
   });
 
   // checkPersonEntries now filters an id-less entry
@@ -557,8 +561,8 @@ describe('AdminRegistrationDeskPage skips id-less entries in "all" mode check-in
     const checkbox = getByRole('checkbox', { name: /check in kenji sato for all their competitions/i });
     await act(async () => { fireEvent.click(checkbox); });
     expect(toggleCheckIn).toHaveBeenCalledTimes(2);
-    expect(toggleCheckIn).toHaveBeenCalledWith('men', 'p-men', true, 'pw');
-    expect(toggleCheckIn).toHaveBeenCalledWith('kata', 'p-kata', true, 'pw');
-    expect(toggleCheckIn).not.toHaveBeenCalledWith('iaido', '', true, 'pw');
+    expect(toggleCheckIn).toHaveBeenCalledWith('men', 'p-men', true, 'pw', expect.any(Object));
+    expect(toggleCheckIn).toHaveBeenCalledWith('kata', 'p-kata', true, 'pw', expect.any(Object));
+    expect(toggleCheckIn).not.toHaveBeenCalledWith('iaido', '', true, 'pw', expect.any(Object));
   });
 });

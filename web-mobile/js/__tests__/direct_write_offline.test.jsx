@@ -17,10 +17,12 @@ const PW = 'pw';
 
 // Every direct write function in API, called the way a screen calls it. The
 // seven doors the outbox takes over (check-in, bulk check-in, the three
-// announcement doors, the tournament save, the awards save) are not here.
+// announcement doors, the tournament save, the awards save) are not here. A
+// tournament save that changes the password stays direct (updateTournamentPassword).
 const DIRECT_WRITES = {
   resetPassword: () => API.resetPassword('new-password', 'tab-1'),
   createTournament: () => API.createTournament({ name: 'T' }, PW),
+  updateTournamentPassword: () => API.updateTournamentPassword({ name: 'T', password: 'new-secret', tournamentVersion: 'v0' }, PW),
   createCompetition: () => API.createCompetition({ name: 'C' }, PW),
   updateCompetition: () => API.updateCompetition('c1', { name: 'C' }, PW),
   exportPDFs: () => API.exportPDFs('all', PW),

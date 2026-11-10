@@ -121,6 +121,23 @@ describe('a door answers at once and the outbox holds the write', () => {
         expect(methods).toEqual(['DELETE', 'DELETE', 'POST', 'POST', 'POST', 'POST', 'POST']);
     });
 
+    it('the check-in, court-call and settings doors are outbox doors too (bc-obox)', async () => {
+        mockFetch(() => new Promise(() => {}));
+        const call = await API.sendAnnouncement('Call', 5, 'pw');
+        const answers = [
+            await API.toggleCheckIn('c1', 'p1', true, 'pw'),
+            await API.toggleCheckIn('c1', 'p2', false, 'pw'),
+            await API.bulkCheckIn('c1', ['p3'], 'pw'),
+            call,
+            await API.clearAnnouncements('pw'),
+            await API.updateTournament({ name: 'Cup', tournamentVersion: 'v0', password: 'pw' }, 'pw'),
+            await API.updateCompetitionAwards('c1', [], 'pw', 'a0'),
+        ];
+        for (const a of answers) expect(a.pending).toBe(true);
+        expect(stored().map(([, d]) => d.kind).sort()).toEqual(
+            ['announce', 'announce-clear', 'awards', 'checkin', 'checkin', 'checkin-bulk', 'tournament']);
+    });
+
     it('revert-to-queue sends a JSON body', async () => {
         mockFetch(() => ok({}));
         const res = await API.revertMatchToQueue('c1', 'm5', 'pw');

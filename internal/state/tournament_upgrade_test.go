@@ -139,6 +139,52 @@ lunch_block: 45m
 	assert.Equal(t, statBefore.ModTime(), statAfter.ModTime())
 }
 
+// A ceremony length v2.2 and v2.3 could store but time.ParseDuration cannot
+// read ("45 min") makes no pause, and is kept on disk rather than deleted:
+// it is what the organiser typed. A readable one beside it is still carried.
+func TestTournamentUpgrade_UnreadableCeremonyLengthIsKept(t *testing.T) {
+	dir := t.TempDir()
+	tournPath := filepath.Join(dir, "tournament.md")
+	tournContent := `---
+name: Free Text Tournament
+date: 01-08-2026
+opening_block: 45 min
+lunch_block: 1h 30m
+closing_block: 20m
+---
+`
+	require.NoError(t, os.WriteFile(tournPath, []byte(tournContent), 0o600))
+
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+
+	tourn, err := store.LoadTournament()
+	require.NoError(t, err)
+	require.NotNil(t, tourn)
+	assert.Equal(t, []Pause{{Name: "Closing ceremony", Length: "20m"}}, tourn.Pauses)
+	assert.Equal(t, "45 min", tourn.OpeningBlockLegacy)
+	assert.Equal(t, "1h 30m", tourn.LunchBlockLegacy)
+	assert.Empty(t, tourn.ClosingBlockLegacy)
+
+	raw, err := os.ReadFile(tournPath)
+	require.NoError(t, err)
+	text := string(raw)
+	assert.Contains(t, text, "opening_block: 45 min")
+	assert.Contains(t, text, "lunch_block: 1h 30m")
+	assert.NotContains(t, text, "closing_block")
+
+	// The next start writes nothing.
+	statBefore, err := os.Stat(tournPath)
+	require.NoError(t, err)
+	require.NoError(t, store.upgradeLegacyCeremonies())
+	statAfter, err := os.Stat(tournPath)
+	require.NoError(t, err)
+	bytesAfter, err := os.ReadFile(tournPath)
+	require.NoError(t, err)
+	assert.Equal(t, raw, bytesAfter)
+	assert.Equal(t, statBefore.ModTime(), statAfter.ModTime())
+}
+
 func TestTournamentUpgrade_OneDayTournamentGetsDayZero(t *testing.T) {
 	dir := t.TempDir()
 	tournPath := filepath.Join(dir, "tournament.md")

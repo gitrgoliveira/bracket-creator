@@ -464,6 +464,58 @@ func TestRestoreMatchTimesTx_UnknownMatchEmptyListAndStartedCompetition(t *testi
 	_ = eng
 }
 
+// A change whose Now is empty is no change a re-time answered (every re-time
+// gives every match a time): it is refused, never matched against a match that
+// holds no time, which would schedule it.
+func TestRestoreMatchTimesTx_RefusesAnEmptyNow(t *testing.T) {
+	_, store, comp := drawnForRetime(t, state.CompFormatMixed, []string{"A", "B"}, 8, retimeTournament([]string{"A", "B"}))
+	pool, err := store.LoadPoolMatches(comp.ID)
+	require.NoError(t, err)
+	require.NotEmpty(t, pool)
+	pool[0].ScheduledAt = ""
+	require.NoError(t, store.SavePoolMatches(comp.ID, pool))
+	before := storedTimes(t, store, comp)
+	require.Empty(t, before[pool[0].ID])
+
+	err = store.WithTransaction(comp.ID, func(tx state.StoreTx) error {
+		return RestoreMatchTimesTx(tx, comp, []MatchTimeChange{{MatchID: pool[0].ID, Was: "10:00", Now: ""}})
+	})
+	assert.ErrorIs(t, err, ErrRestoreBadTime)
+	assert.Equal(t, before, storedTimes(t, store, comp), "nothing is written")
+}
+
+// The court floors are read before the competition's lock: another competition
+// changed between that read and the transaction (here drawn on the same day and
+// shiaijo) may hold the shiaijo the stale floors call free, so the re-time is
+// refused and nothing is written.
+func TestRetime_AnotherCompetitionChangedAfterTheFloorsWereReadIsRefused(t *testing.T) {
+	eng, store, comp := drawnForRetime(t, state.CompFormatMixed, []string{"A", "B"}, 8, retimeTournament([]string{"A", "B"}))
+	createTestCompetition(t, store, "early", state.CompFormatMixed, 4, func(c *state.Competition) {
+		c.Courts = []string{"A", "B"}
+		c.Date = "01-07-2026"
+		c.StartTime = "08:00"
+	})
+	saveTestParticipants(t, store, "early", []string{"E1", "E2", "E3", "E4", "E5", "E6", "E7", "E8"})
+	before := storedTimes(t, store, comp)
+
+	newComp := movedTo(comp, comp.Date, "10:00")
+	in, err := eng.ReadRetimeInputs(comp, newComp)
+	require.NoError(t, err)
+	require.NoError(t, eng.GenerateDraw("early"))
+
+	err = store.WithTransaction(comp.ID, func(tx state.StoreTx) error {
+		_, err := RetimeDrawTx(tx, comp, newComp, in)
+		return err
+	})
+	assert.ErrorIs(t, err, ErrRetimeFloorChanged)
+	assert.Equal(t, before, storedTimes(t, store, comp), "nothing is written")
+
+	// Read again, the same move goes through.
+	out, err := retimeInTx(t, eng, store, comp, newComp)
+	require.NoError(t, err)
+	assert.True(t, out.AnyChange)
+}
+
 // The slots read back from a stored league equal the ones the scheduler made,
 // idle slots included.
 func TestRecoverLeagueSlots_EqualsSchedulerSlots(t *testing.T) {

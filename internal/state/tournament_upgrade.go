@@ -3,6 +3,7 @@ package state
 import (
 	"errors"
 	"fmt"
+	"log"
 	"slices"
 	"time"
 )
@@ -109,9 +110,15 @@ func (s *Store) upgradeLegacyCeremonies() error {
 		combined = append(combined, closingPauses...)
 		desired.Pauses = combined
 
-		desired.OpeningBlockLegacy = ""
-		desired.ClosingBlockLegacy = ""
-		desired.LunchBlockLegacy = ""
+		// A key is dropped only once its value is carried: a length moved into
+		// a pause, or one that release scheduled as nothing (empty, zero or
+		// negative). A value time.ParseDuration refuses ("45 min") was also
+		// scheduled as nothing by v2.2 and v2.3, which read it the same way,
+		// but it is what the organiser typed: it stays on disk, untouched,
+		// and is named in the log, never deleted.
+		desired.OpeningBlockLegacy = keepUnreadBlock("opening_block", desired.OpeningBlockLegacy)
+		desired.ClosingBlockLegacy = keepUnreadBlock("closing_block", desired.ClosingBlockLegacy)
+		desired.LunchBlockLegacy = keepUnreadBlock("lunch_block", desired.LunchBlockLegacy)
 
 		return nil
 	})
@@ -120,4 +127,19 @@ func (s *Store) upgradeLegacyCeremonies() error {
 		return nil
 	}
 	return err
+}
+
+// keepUnreadBlock answers what a legacy ceremony key keeps after the upgrade:
+// nothing when time.ParseDuration reads its value (the upgrade has carried it),
+// the value itself when it does not, logged so the organiser can re-enter it
+// as a pause.
+func keepUnreadBlock(key, value string) string {
+	if value == "" {
+		return ""
+	}
+	if _, err := time.ParseDuration(value); err == nil {
+		return ""
+	}
+	log.Printf("state: tournament.md %s %q is not a length (such as 30m or 1h30m), so no pause was made from it; it is kept in tournament.md: add it as a pause in the tournament settings", key, value)
+	return value
 }

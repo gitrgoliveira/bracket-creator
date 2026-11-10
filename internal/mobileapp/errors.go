@@ -132,6 +132,8 @@ func retimeRefusal(err error) *txResponse {
 		return &txResponse{status: http.StatusConflict, body: gin.H{"code": "retime_unavailable", "error": "This competition's match order could not be read back, so its matches were not moved. Nothing was changed."}}
 	case errors.Is(err, engine.ErrRetimePastMidnight):
 		return &txResponse{status: http.StatusConflict, body: gin.H{"code": "retime_past_midnight", "error": "At that start some matches would run past midnight, which a match time cannot show. Choose an earlier start. Nothing was changed."}}
+	case errors.Is(err, engine.ErrRetimeFloorChanged):
+		return &txResponse{status: http.StatusConflict, body: gin.H{"code": "retime_retry", "error": "Another competition's schedule changed while you were moving this one. Nothing was moved; try again."}}
 	case errors.Is(err, engine.ErrUndoStale):
 		return &txResponse{status: http.StatusConflict, body: gin.H{"code": "undo_stale", "error": "Changed since the move; Undo not applied."}}
 	case errors.Is(err, engine.ErrRestoreUnknownMatch), errors.Is(err, engine.ErrRestoreBadTime), errors.Is(err, engine.ErrRestoreDuplicateMatch):

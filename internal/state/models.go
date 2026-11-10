@@ -69,8 +69,9 @@ type Tournament struct {
 	// pre-rename/pre-pauses `lunch_block`, `opening_block`, and `closing_block`
 	// YAML keys from tournament.md files written before pauses were introduced.
 	// They are migrated into Pauses and are never emitted on the wire (json:"-")
-	// nor re-persisted (the migrations clear them, so omitempty drops the old
-	// keys on the next save).
+	// nor re-persisted once carried (the migrations clear them, so omitempty
+	// drops the old keys on the next save). A value time.ParseDuration cannot
+	// read makes no pause and is kept, never deleted (upgradeLegacyCeremonies).
 	LunchBlockLegacy   string `yaml:"lunch_block,omitempty" json:"-"`
 	OpeningBlockLegacy string `yaml:"opening_block,omitempty" json:"-"`
 	ClosingBlockLegacy string `yaml:"closing_block,omitempty" json:"-"`

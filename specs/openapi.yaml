@@ -7129,8 +7129,7 @@ components:
       required: [applied, reason, message]
       description: >
         A write nothing of which was applied. Two causes, told
-        apart by `reason`, and they need different remedies. The check-in and
-        court-call doors use this shape for `clock_skew` only:
+        apart by `reason`, and they need different remedies:
 
         - `superseded`: every group the write changes is held, because a NEWER
           change to each is already stored (the merge orders a match's writes

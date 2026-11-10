@@ -3,7 +3,7 @@ paths:
   - "internal/engine/{match_merge,scoring,scoring_tx,engi,kachinuki,bracket,bracket_result,bracket_seat,bracket_seat_audit,daihyosen,match_history,pool_requalify,tiebreaker,swiss}*.go"
   - "internal/state/{match_groups,match_history,match,bracket,pools,transactions,store}*.go"
   - "internal/mobileapp/{handlers_match,handlers_daihyosen,handlers_decision,handlers_match_history,handlers_time,validation}*.go"
-  - "web-mobile/js/{api_client,write_result,match_groups,match_history_view,patch,start_match,admin_scoring_autosave,admin_scoring_shared,admin_scoring_individual,admin_scoring_team,admin_scoring_engi,admin_scoring_modal,admin_schedule_score_editor,admin,admin_shell,viewer_match,server_clock,document_versions,queued_writes_wait,admin_registration_desk,admin_announcement,admin_shiaijo,admin_competition,admin_competition_settings,calendar_move,admin_setup,admin_competition_overview,held_writes_panel}.jsx"
+  - "web-mobile/js/{api_client,write_result,match_groups,match_history_view,patch,start_match,admin_scoring_autosave,admin_scoring_shared,admin_scoring_individual,admin_scoring_team,admin_scoring_engi,admin_scoring_modal,admin_schedule_score_editor,admin,admin_shell,viewer_match,server_clock,document_versions,queued_writes_wait,admin_registration_desk,admin_announcement,admin_shiaijo,admin_competition,admin_competition_settings,calendar_move,admin_setup,admin_competition_overview,held_writes_panel,qualifier_preview,toast_queue}.jsx"
   - "internal/{state/announcement_store,state/tournament_version,mobileapp/handlers_announcement}*.go"
   - "internal/mobileapp/{handlers_participants,handlers_tournament,handlers_competition}*.go"
 ---

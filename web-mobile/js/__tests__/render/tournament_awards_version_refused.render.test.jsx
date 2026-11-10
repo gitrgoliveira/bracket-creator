@@ -248,6 +248,28 @@ describe('AdminApp saves the tournament settings through the outbox', () => {
     expect(toastSnapshot().message).toBe('Court A called');
   });
 
+  it('takes the offline "saved" toast down when the refusal is left to the outbox\'s alert', async () => {
+    const online = vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(false);
+    try {
+      const settled = deferred();
+      window.API.updateTournament.mockResolvedValue({ applied: true, pending: true, settled: settled.promise });
+      const app = await mount({ kind: 'editTournament' }, { showToast: vi.fn(pushToast) });
+      await act(async () => { await probe.props.onSave(patch()); });
+      expect(toastSnapshot().message).toBe('Tournament settings saved. The save goes out once the connection is back.');
+
+      await app.rerender({ kind: 'dashboard' });
+      const onRefusal = window.API.updateTournament.mock.calls[0][2].onRefusal;
+      const stale = Object.assign(new Error('changed'), { code: 'tournament_changed', tournament: tournament({ tournamentVersion: 'v9' }) });
+      let claimed;
+      await act(async () => { claimed = onRefusal(stale); settled.reject(stale); await settled.promise.catch(noop); });
+
+      expect(claimed).toBe(false);
+      expect(toastSnapshot()).toBeNull();
+    } finally {
+      online.mockRestore();
+    }
+  });
+
   it('leaves a refusal to the outbox\'s alert when no form is open, and still takes the current copy', async () => {
     const settled = deferred();
     window.API.updateTournament.mockResolvedValue({ applied: true, pending: true, settled: settled.promise });

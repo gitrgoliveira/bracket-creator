@@ -743,14 +743,14 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
       };
       const res = await window.API.updateTournament(sendBody, password, {
         onRefusal: (e) => {
+          // The save was not made: the "saved, goes out once the connection is
+          // back" toast is no longer true, whoever tells the refusal (shown or
+          // still queued behind another toast).
+          dismissToastById(SETTINGS_SAVED_OFFLINE_TOAST);
           // The form, when open now, says it itself (with what was typed kept);
           // else the outbox's alert does.
           if (!mountedRef.current || viewKindRef.current !== "editTournament") return false;
           setLateRefusal({ code: e && e.code, message: e && e.message });
-          // The "saved, goes out once the connection is back" toast would sit
-          // beside the form's "Not saved" banner: the banner replaces it,
-          // shown or still queued behind another toast.
-          dismissToastById(SETTINGS_SAVED_OFFLINE_TOAST);
           return true;
         },
       });

@@ -227,7 +227,7 @@ describe('Generate draw waits for queued check-ins', () => {
       { id: 'p3', name: 'Suzuki', dojo: 'C', checkedIn: false },
     ],
   });
-  const NONE_HELD = 'No check-in has reached the server yet, so a draw made now includes every competitor.';
+  const NONE_HELD = 'The server holds no check-in for this competition, so a draw made now includes every competitor.';
 
   for (const [door, label, verb] of [
     ['Generate draw', 'Generate draw', 'Generate the draw'],

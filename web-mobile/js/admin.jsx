@@ -638,12 +638,14 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
     const n = startAllWait.count;
     const waitedFor = startAllDraws.filter((c) => window.API.queuedWritesOf(c.id, window.API.CHECK_IN_WRITE_KINDS) > 0);
     const noneHeld = waitedFor.filter((c) => serverHeldCheckIns(c.players, window.API.queuedCheckInsWere(c.id)) === 0);
-    let cost = NO_CHECK_IN_HELD_SENTENCE;
+    // Names the competitions whose server holds no check-in; a wait for one
+    // competition alone says NO_CHECK_IN_HELD_SENTENCE instead.
+    const noneHeldSentence = () =>
+      `The server holds no check-in for ${noneHeld.map((c) => c.name).join(", ")}, so ${noneHeld.length === 1 ? "its draw includes" : "their draws include"} every competitor.`;
+    let cost = waitedFor.length > 1 && noneHeld.length === waitedFor.length ? noneHeldSentence() : NO_CHECK_IN_HELD_SENTENCE;
     if (noneHeld.length < waitedFor.length) {
       cost = `A draw made now uses only the check-ins the server holds: a competitor whose check-in has not arrived is left out of the draw.`;
-      if (noneHeld.length > 0) {
-        cost += ` No check-in for ${noneHeld.map((c) => c.name).join(", ")} has reached the server yet, so ${noneHeld.length === 1 ? "its draw includes" : "their draws include"} every competitor.`;
-      }
+      if (noneHeld.length > 0) cost += ` ${noneHeldSentence()}`;
     }
     const ok = await window.confirmDialog({
       message:

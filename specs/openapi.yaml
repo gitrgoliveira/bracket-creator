@@ -8194,8 +8194,8 @@ components:
           type: string
           format: date-time
           description: >
-            When the call was made (the request's `modifiedAt`, clamped, RFC 3339),
-            not when it arrived. It orders an identical call against a newer one
+            When the call was made (the request's `modifiedAt`, RFC 3339), not
+            when it arrived. It orders an identical call against a newer one
             and a call against a clear.
         expiresAt:
           type: string

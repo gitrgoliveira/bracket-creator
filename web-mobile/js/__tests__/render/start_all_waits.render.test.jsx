@@ -112,7 +112,7 @@ describe('Start all waits for queued check-ins', () => {
     expect(startedIDs()).toEqual(['c1']);
   });
 
-  const NONE_HELD = 'No check-in has reached the server yet, so a draw made now includes every competitor.';
+  const NONE_HELD = 'The server holds no check-in for this competition, so a draw made now includes every competitor.';
   const player = (id, checkedIn) => ({ id, name: `P ${id}`, dojo: 'D', checkedIn });
 
   it('Start now anyway says every competitor is drawn when no check-in has reached the server', async () => {
@@ -137,8 +137,22 @@ describe('Start all waits for queued check-ins', () => {
     await act(async () => { fireEvent.click(screen.getByTestId('queued-wait-now')); });
     const msg = window.confirmDialog.mock.calls[0][0].message;
     expect(msg).toContain('a competitor whose check-in has not arrived is left out of the draw.');
-    expect(msg).toContain('No check-in for Comp c1 has reached the server yet, so its draw includes every competitor.');
+    expect(msg).toContain('The server holds no check-in for Comp c1, so its draw includes every competitor.');
     expect(msg).not.toContain(NONE_HELD);
+  });
+
+  it('Start now anyway names every competition when the server holds no check-in for any of several', async () => {
+    queued = [{ compID: 'c1', kind: 'checkin' }, { compID: 'c2', kind: 'checkin' }];
+    were = { c1: [['p2', false]], c2: [['q2', false]] };
+    await openStartAll([
+      comp('c1', { players: [player('p1', false), player('p2', true)] }),
+      comp('c2', { players: [player('q1', false), player('q2', true)] }),
+    ]);
+    await act(async () => { fireEvent.click(screen.getByTestId('queued-wait-now')); });
+    expect(window.confirmDialog.mock.calls[0][0].message).toBe(
+      '2 check-ins made on this device have not reached the server yet. ' +
+      'The server holds no check-in for Comp c1, Comp c2, so their draws include every competitor.\n\nStart now anyway?',
+    );
   });
 
   it('Start now anyway says who is left out, and starts only once confirmed', async () => {

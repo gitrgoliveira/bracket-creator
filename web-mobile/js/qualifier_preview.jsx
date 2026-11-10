@@ -234,7 +234,7 @@ export function serverHeldCheckIns(players, were) {
 // What the "now anyway" confirm of a draw says when the server holds no
 // check-in for the competition (serverHeldCheckIns is 0).
 export const NO_CHECK_IN_HELD_SENTENCE =
-  "No check-in has reached the server yet, so a draw made now includes every competitor.";
+  "The server holds no check-in for this competition, so a draw made now includes every competitor.";
 
 // --- Knockout qualifiers form coupling (bc-qual LP-5a) ---
 //

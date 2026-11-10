@@ -13,6 +13,8 @@ import { installWindowStubs } from '../helpers/stub_globals.js';
 const dashboard = { props: null };
 
 let queued = [];
+// Per competition, what each queued check-in's row showed before the tap.
+let were = {};
 const unsentListeners = new Set();
 const tellUnsent = () => { for (const fn of unsentListeners) fn(); };
 
@@ -33,6 +35,7 @@ const STUBBED_GLOBALS = {
     startCompetition: vi.fn().mockResolvedValue({}),
     CHECK_IN_WRITE_KINDS: Object.freeze(['checkin', 'checkin-bulk']),
     queuedWritesOf: (compID, kinds) => queued.filter((d) => d.compID === compID && kinds.includes(d.kind)).length,
+    queuedCheckInsWere: (compID) => new Map(were[compID] || []),
     heldWrites: () => [],
   },
 };
@@ -49,6 +52,7 @@ afterAll(() => restoreGlobals());
 
 beforeEach(() => {
   queued = [];
+  were = {};
   window.confirmDialog.mockReset();
   window.confirmDialog.mockResolvedValue(false);
   window.API.startCompetition.mockClear();
@@ -108,9 +112,38 @@ describe('Start all waits for queued check-ins', () => {
     expect(startedIDs()).toEqual(['c1']);
   });
 
+  const NONE_HELD = 'No check-in has reached the server yet, so a draw made now includes every competitor.';
+  const player = (id, checkedIn) => ({ id, name: `P ${id}`, dojo: 'D', checkedIn });
+
+  it('Start now anyway says every competitor is drawn when no check-in has reached the server', async () => {
+    queued = [{ compID: 'c1', kind: 'checkin' }];
+    // p2 shows checked in only through this device's queued check-in.
+    were = { c1: [['p2', false]] };
+    await openStartAll([comp('c1', { players: [player('p1', false), player('p2', true)] })]);
+    await act(async () => { fireEvent.click(screen.getByTestId('queued-wait-now')); });
+    expect(window.confirmDialog.mock.calls[0][0].message).toBe(
+      `1 check-in made on this device has not reached the server yet. ${NONE_HELD}\n\nStart now anyway?`,
+    );
+  });
+
+  it('Start now anyway names a competition whose server holds no check-in beside one that holds some', async () => {
+    queued = [{ compID: 'c1', kind: 'checkin' }, { compID: 'c2', kind: 'checkin' }];
+    were = { c1: [['p2', false]], c2: [['q2', false]] };
+    await openStartAll([
+      comp('c1', { players: [player('p1', false), player('p2', true)] }),
+      // q1 is checked in on the server.
+      comp('c2', { players: [player('q1', true), player('q2', true)] }),
+    ]);
+    await act(async () => { fireEvent.click(screen.getByTestId('queued-wait-now')); });
+    const msg = window.confirmDialog.mock.calls[0][0].message;
+    expect(msg).toContain('a competitor whose check-in has not arrived is left out of the draw.');
+    expect(msg).toContain('No check-in for Comp c1 has reached the server yet, so its draw includes every competitor.');
+    expect(msg).not.toContain(NONE_HELD);
+  });
+
   it('Start now anyway says who is left out, and starts only once confirmed', async () => {
     queued = [{ compID: 'c1', kind: 'checkin' }];
-    await openStartAll([comp('c1')]);
+    await openStartAll([comp('c1', { players: [player('p1', true), player('p2', true)] })]);
     await act(async () => { fireEvent.click(screen.getByTestId('queued-wait-now')); });
     expect(window.confirmDialog).toHaveBeenCalledTimes(1);
     expect(window.confirmDialog.mock.calls[0][0].message)

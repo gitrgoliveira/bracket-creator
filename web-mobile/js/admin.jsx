@@ -22,6 +22,7 @@ import { mergeSavedCompetition } from './competition_put_body.jsx';
 import { AdminCalendarPage } from './admin_calendar.jsx';
 import { useWaitForQueuedWrites, QueuedWritesWait, queuedWritesNounFor } from './queued_writes_wait.jsx';
 import { checkInApplies } from './competition_shape.jsx';
+import { serverHeldCheckIns, NO_CHECK_IN_HELD_SENTENCE } from './qualifier_preview.jsx';
 import { isOffline, savedOfflineSentence } from './write_result.jsx';
 import { toastSnapshot, dismissToast } from './toast_queue.jsx';
 import { onDocumentSettled } from './document_versions.jsx';
@@ -630,13 +631,24 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
   const runStartAllRef = useLatestRef(runStartAll);
   const startAllAfterCheckIns = (comps) => startAllWait.run(() => runStartAllRef.current(comps));
   // "Start now anyway": the draws are made from the check-ins the server
-  // holds, so the operator is told who that leaves out.
+  // holds, so the operator is told who that leaves out. A competition the wait
+  // is for whose server holds no check-in draws everyone (the opt-in rule), so
+  // the confirm says that for it instead (serverHeldCheckIns).
   const startAllNowAnyway = async () => {
     const n = startAllWait.count;
+    const waitedFor = startAllDraws.filter((c) => window.API.queuedWritesOf(c.id, window.API.CHECK_IN_WRITE_KINDS) > 0);
+    const noneHeld = waitedFor.filter((c) => serverHeldCheckIns(c.players, window.API.queuedCheckInsWere(c.id)) === 0);
+    let cost = NO_CHECK_IN_HELD_SENTENCE;
+    if (noneHeld.length < waitedFor.length) {
+      cost = `A draw made now uses only the check-ins the server holds: a competitor whose check-in has not arrived is left out of the draw.`;
+      if (noneHeld.length > 0) {
+        cost += ` No check-in for ${noneHeld.map((c) => c.name).join(", ")} has reached the server yet, so ${noneHeld.length === 1 ? "its draw includes" : "their draws include"} every competitor.`;
+      }
+    }
     const ok = await window.confirmDialog({
       message:
         `${queuedWritesNounFor("checkin", n)} made on this device ${n === 1 ? "has" : "have"} not reached the server yet. ` +
-        `A draw made now uses only the check-ins the server holds: a competitor whose check-in has not arrived is left out of the draw.\n\n` +
+        `${cost}\n\n` +
         `Start now anyway?`,
       confirmLabel: "Start now",
       danger: true,

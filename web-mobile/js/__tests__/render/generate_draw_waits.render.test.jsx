@@ -18,6 +18,8 @@ const Stub = (name) => {
 
 let queued = [];
 let held = [];
+// What each queued check-in's row showed before the tap (API.queuedCheckInsWere).
+let were = [];
 const listeners = new Set();
 function tellOutbox() {
   for (const fn of listeners) fn({ total: queued.length });
@@ -58,6 +60,7 @@ const STUBBED_GLOBALS = {
     getScheduleClashes: vi.fn().mockResolvedValue([]),
     CHECK_IN_WRITE_KINDS: Object.freeze(['checkin', 'checkin-bulk']),
     queuedWritesOf: (compID, kinds) => queued.filter((d) => d.compID === compID && kinds.includes(d.kind)).length,
+    queuedCheckInsWere: () => new Map(were),
     heldWrites: () => held,
   },
 };
@@ -76,6 +79,7 @@ afterAll(() => restoreGlobals());
 beforeEach(() => {
   queued = [];
   held = [];
+  were = [];
   window.confirmDialog.mockReset();
   window.confirmDialog.mockResolvedValue(false);
   window.API.generateDraw.mockClear();
@@ -212,6 +216,51 @@ describe('Generate draw waits for queued check-ins', () => {
     expect(window.confirmDialog).toHaveBeenCalledTimes(2);
     expect(screen.queryByTestId('queued-wait-text')).toBeNull();
   });
+
+  // The opt-in rule draws everyone while the server holds no check-in, so the
+  // confirm must not say anyone is left out then.
+  const noneOnServer = () => makeCompetition({
+    players: [
+      { id: 'p1', name: 'Yamada', dojo: 'A', checkedIn: false },
+      // Shown checked in by this device's queued check-in only.
+      { id: 'p2', name: 'Tanaka', dojo: 'B', checkedIn: true },
+      { id: 'p3', name: 'Suzuki', dojo: 'C', checkedIn: false },
+    ],
+  });
+  const NONE_HELD = 'No check-in has reached the server yet, so a draw made now includes every competitor.';
+
+  for (const [door, label, verb] of [
+    ['Generate draw', 'Generate draw', 'Generate the draw'],
+    ['Start from setup', 'Start competition →', 'Start'],
+  ]) {
+    it(`${door} now anyway says every competitor is drawn when no check-in has reached the server`, async () => {
+      queued = [{ compID: 'c1', kind: 'checkin' }];
+      were = [['p2', false]];
+      await mount(noneOnServer());
+      await act(async () => { fireEvent.click(button(label)); });
+      window.confirmDialog.mockResolvedValueOnce(true);
+      await act(async () => { fireEvent.click(screen.getByTestId('queued-wait-now')); });
+      const ask = window.confirmDialog.mock.calls[0][0];
+      expect(ask.message).toBe(
+        `1 check-in made on this device has not reached the server yet. ${NONE_HELD}\n\n${verb} now anyway?`,
+      );
+      expect(ask.message).not.toMatch(/left out/);
+    });
+
+    it(`${door} now anyway keeps the left-out wording when the server holds a check-in this device is taking back`, async () => {
+      // p1 is checked in on the server; this device's queued check-out shows
+      // it as not checked in. A draw made now still sees p1's check-in.
+      queued = [{ compID: 'c1', kind: 'checkin' }, { compID: 'c1', kind: 'checkin' }];
+      were = [['p1', true], ['p2', false]];
+      await mount(noneOnServer());
+      await act(async () => { fireEvent.click(button(label)); });
+      window.confirmDialog.mockResolvedValueOnce(true);
+      await act(async () => { fireEvent.click(screen.getByTestId('queued-wait-now')); });
+      const ask = window.confirmDialog.mock.calls[0][0];
+      expect(ask.message).toMatch(/^2 check-ins made on this device have not reached the server yet\. A draw made now uses only the check-ins the server holds: a competitor whose check-in has not arrived is left out of the draw\./);
+      expect(ask.message).not.toContain(NONE_HELD);
+    });
+  }
 
   it('names a check-in the server keeps refusing, with Discard as the way out', async () => {
     queued = [{ compID: 'c1', kind: 'checkin' }];

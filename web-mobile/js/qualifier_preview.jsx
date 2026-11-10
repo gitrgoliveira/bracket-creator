@@ -220,6 +220,22 @@ export function effectiveDrawPlayers(players, checkInEnabled) {
   return roster.filter((p) => p.checkedIn);
 }
 
+// serverHeldCheckIns: how many of `players` the server holds as checked in,
+// as this device last saw it. `players` carry this device's queued check-ins
+// laid over them, so a player one of them names counts what its row showed
+// before the tap (`were`, API.queuedCheckInsWere); any other counts its own
+// `checkedIn`. At 0 the opt-in rule above draws every competitor, which a
+// draw made before the queued check-ins arrive does (bc-obox).
+export function serverHeldCheckIns(players, were) {
+  const roster = Array.isArray(players) ? players.filter(Boolean) : [];
+  return roster.filter((p) => (p.id && were && were.has(p.id) ? were.get(p.id) : !!p.checkedIn)).length;
+}
+
+// What the "now anyway" confirm of a draw says when the server holds no
+// check-in for the competition (serverHeldCheckIns is 0).
+export const NO_CHECK_IN_HELD_SENTENCE =
+  "No check-in has reached the server yet, so a draw made now includes every competitor.";
+
 // --- Knockout qualifiers form coupling (bc-qual LP-5a) ---
 //
 // Pure coupling rules between the "Pool size is a" (poolMode/poolSizeMode)

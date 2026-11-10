@@ -12,7 +12,7 @@
 // block below reads them. Settings/bracket/swiss are pulled in via their
 // helper re-exports; overview has no pure helper, so it needs a side-effect import.
 import './admin_competition_overview.jsx';
-import { effectiveDrawPlayers } from './qualifier_preview.jsx';
+import { effectiveDrawPlayers, serverHeldCheckIns, NO_CHECK_IN_HELD_SENTENCE } from './qualifier_preview.jsx';
 import { checkInApplies } from './competition_shape.jsx';
 import { leaveThen, confirmLeave } from './unsaved_entries.jsx';
 import { rosterUnreadableIssues } from './data_integrity.jsx';
@@ -281,16 +281,23 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
 
   // "Generate now anyway" / "Start now anyway": the draw is made from the
   // check-ins the server holds, so the operator is told who that leaves out.
+  // When the server holds none, the opt-in rule draws everyone, so the confirm
+  // says that instead (serverHeldCheckIns, over what each queued row showed
+  // before the tap).
   const drawNowAnyway = async () => {
     const n = checkInWait.count;
     const verb = drawWaitFor === "start" ? "Start" : "Generate the draw";
+    const noneHeld = serverHeldCheckIns(drawPlayers, window.API.queuedCheckInsWere(c.id)) === 0;
     const others = excludedFromDraw > 0
       ? ` ${excludedFromDraw} other${excludedFromDraw === 1 ? " is" : "s are"} not checked in and ${excludedFromDraw === 1 ? "is" : "are"} left out too.`
       : "";
+    const cost = noneHeld
+      ? NO_CHECK_IN_HELD_SENTENCE
+      : `A draw made now uses only the check-ins the server holds: a competitor whose check-in has not arrived is left out of the draw.${others}`;
     const ok = await window.confirmDialog({
       message:
         `${queuedWritesNounFor("checkin", n)} made on this device ${n === 1 ? "has" : "have"} not reached the server yet. ` +
-        `A draw made now uses only the check-ins the server holds: a competitor whose check-in has not arrived is left out of the draw.${others}\n\n` +
+        `${cost}\n\n` +
         `${verb} now anyway?`,
       confirmLabel: drawWaitFor === "start" ? "Start now" : "Generate now",
       danger: true,

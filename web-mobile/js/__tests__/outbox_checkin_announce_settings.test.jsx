@@ -207,6 +207,19 @@ describe('check-ins (C1, C2)', () => {
         expect(API.startCheckUntrusted('c1')).toBe(false);
     });
 
+    it('queuedCheckInsWere answers what the earliest queued check-in of each id found on its row', async () => {
+        server(() => new Promise(() => {}));
+        // p1: checked in on the server, taken back, then checked in again.
+        await API.toggleCheckIn('c1', 'p1', false, 'pw', { was: { p1: true } });
+        await API.toggleCheckIn('c1', 'p1', true, 'pw', { was: { p1: false } });
+        // p2: a bulk check-in with no `was` of its own reads not checked in.
+        await API.bulkCheckIn('c1', ['p2'], 'pw');
+        await API.toggleCheckIn('c2', 'p9', true, 'pw', { was: { p9: true } });
+        expect([...API.queuedCheckInsWere('c1')]).toEqual([['p1', true], ['p2', false]]);
+        expect([...API.queuedCheckInsWere('c2')]).toEqual([['p9', true]]);
+        expect(API.queuedCheckInsWere('c3').size).toBe(0);
+    });
+
     it('the held-writes list names the check-in\'s participants', async () => {
         await API.toggleCheckIn('c1', 'p1', true, 'pw');
         await tick(0);

@@ -6242,6 +6242,23 @@ const API = {
         }
         return n;
     },
+    // bc-obox C1: what this device's queued check-ins for `compID` found on
+    // their rows, per participant id: the `was` of the EARLIEST queued entry
+    // naming the id, what the row showed before this device touched it (the
+    // check-in as last fetched or pushed). An id no queued entry names is not
+    // in the map; one whose entry carries no `was` for it reads false. Pure,
+    // like queuedWritesOf; the draw's "now anyway" confirm counts off it
+    // (serverHeldCheckIns, qualifier_preview.jsx).
+    queuedCheckInsWere(compID) {
+        const out = new Map();
+        for (const [, d] of _entriesFor(_checkInBase(compID))) {
+            const was = d && d.was && typeof d.was === 'object' ? d.was : {};
+            for (const pid of _checkInsOf(d).keys()) {
+                if (!out.has(pid)) out.set(pid, Object.prototype.hasOwnProperty.call(was, pid) && !!was[pid]);
+            }
+        }
+        return out;
+    },
     CHECK_IN_WRITE_KINDS: Object.freeze([..._CHECKIN_KINDS]),
     // mp-gmcg: reopen a COMPLETED kachinuki team match, or (bc-tmfn) any
     // completed match a withdrawal decided: status back to running,

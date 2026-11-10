@@ -65,7 +65,7 @@ func TestCheckIn_LegacyUUIDlessRoster_CompositePidNoLongerResolves(t *testing.T)
 		compID := "legacy-bulk"
 		writeLegacyRoster(t, store, compID, "Alice,DojoA\nBob,DojoB\nCarol,DojoC\n")
 
-		result, err := store.BulkCheckIn(compID, []string{"Alice|DojoA", "Bob|DojoB"})
+		result, err := store.BulkCheckInAt(compID, []string{"Alice|DojoA", "Bob|DojoB"}, 1000)
 		require.NoError(t, err)
 		assert.Equal(t, 0, result.CheckedIn)
 		assert.ElementsMatch(t, []string{"Alice|DojoA", "Bob|DojoB"}, result.NotFound)
@@ -102,7 +102,7 @@ func TestCheckIn_LegacyUUIDlessRoster_CompositePidNoLongerResolves(t *testing.T)
 		})
 		assert.ErrorIs(t, err, ErrParticipantNotFound)
 
-		result, berr := store.BulkCheckIn(compID, []string{"Ghost|Nowhere"})
+		result, berr := store.BulkCheckInAt(compID, []string{"Ghost|Nowhere"}, 1000)
 		require.NoError(t, berr)
 		assert.Equal(t, 0, result.CheckedIn)
 		assert.Equal(t, []string{"Ghost|Nowhere"}, result.NotFound)

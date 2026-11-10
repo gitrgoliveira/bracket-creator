@@ -44,6 +44,8 @@ Two environment variables tune the API rate limiter for large events:
 
 Click **Admin** in the navigation bar and enter the admin password. The rules for who can access which features depend on your tournament's operating mode. Refer to [Operating modes](operating-modes.md) for the full access-control rules.
 
+Some organiser actions are sent directly and are not held for later: uploading files, adding a walk-up competitor, editing a participant or a seed, saving a competition's settings, changing the admin password, deleting a competition (which asks you to type the admin password to confirm), and generating a draw, starting or completing a competition. If the connection is down when you tap one of these, the app says "No answer: the connection dropped. The change may or may not have been saved. Check, then try again if it is missing.", so check the participant list, seed or settings you changed once the connection is back, and repeat the action only if the change is missing. Scores, lineups, check-in, announcements and court calls, tournament settings and fighting-spirit awards are held on the device and sent when the connection returns instead. A password change waits for tournament settings saves still held on this device; **Change the password now** asks you to confirm first.
+
 ## Dashboard
 
 The dashboard lists all competitions for the tournament. Each card shows the competition type, participant count, bracket format, and current status. Click a card to manage that competition.
@@ -68,6 +70,8 @@ Open **Edit details** from the dashboard to fill in the public information your 
 
 Set the **Public URL** field to the externally reachable address of your app (for example, `https://my-tournament.example.com`). Setting this field enables QR codes on competitor tags and makes every shareable link work. The public URL also populates the public info page in the viewer and on spectator display screens.
 
+Save closes the form at once. If the details were saved on another device after you opened them, the save is refused when it reaches the server, and an alert says "Tournament settings were not saved: they were changed on another device. Open them and save again." The app then shows the current details. If you have opened **Edit details** again by then, the form says "Not saved: the tournament details changed somewhere else after you opened this page (another screen or device). Reload to see the current details, then make your change again.", keeps what you typed, and **Reload** shows the current details.
+
 !!! note
     For guidance on making the app reachable over the internet, refer to [Hosting](../install/hosting.md).
 
@@ -86,6 +90,8 @@ Click **Announce** from the dashboard to broadcast a short message to every view
 Posting the same text again while it is still showing replaces the banner rather than adding a second one: viewers see one message, and its time starts again from the full duration.
 
 A court call, made with **Call to court** on the court console, is announced the same way. It disappears once the match starts, or is closed with a decision such as a fusensho, from any device, as long as the court console that made the call is still open, even if another console called the same match again meanwhile. If that console was closed or reloaded meanwhile, the call stays up until its five minutes run out.
+
+An announcement, a court call, a dismissal (the × beside an active announcement) or **Clear all** made while the connection is down is held on the device and sent when the connection returns, so there is no need to click **Send announcement** or **Call to court** again. If a held announcement or call is over by the time it arrives, the page that made it, if still open, says "That announcement did not go out: its N minutes ran out before it reached the server." ("court call" for a court call, whose time is always 5 minutes), and you can send it again. A held call counts its time from the moment it was made; one with a little time left when it arrives shows for at least a minute so players can read it. A call you withdrew while it was still held is never shown. Calling the same match twice while offline still shows one banner.
 
 ## Registration desk
 
@@ -130,6 +136,8 @@ Nothing is cleared while you are still deciding. When you pick a different
 format, a note appears under the control listing each setting the save will
 clear, with its current value, so you can see the cost before you commit.
 Switching back to the original format keeps them.
+
+On a drawn competition, a **Date** or **Start time** change moves its matches. Refer to [Moving a competition on the calendar](#moving-a-competition-on-the-calendar) for how it waits for time changes still held on this device.
 
 ### Assigning shiai-jo
 
@@ -207,6 +215,14 @@ Enable **Check-in tracking** in **Settings** for the competition. Competitors ar
 
 The check-in rule is opt-in: when you click **Generate draw**, if at least one participant is checked in, only checked-in participants join the draw and unchecked participants are excluded (their seeds are dropped). If nobody is checked in, everyone is included.
 
+#### Checking in while the connection is down
+
+The desk keeps working when the venue connection drops. A tap on a competitor, or on **Check in all**, shows on the row at once and is held on the device; it is sent in the order you tapped when the connection returns. The bar at the top of every admin page counts what is still held, as it does for scores.
+
+Two desks can check in the same competitor. If one desk checked someone in and another desk then took the check-in back, the later tap wins. When the losing tap reaches the server after the later one, that desk is told in one line, for example "Aiko Tanaka was changed on another desk: now not checked in.", and its row shows the result that stands; otherwise its row updates.
+
+**Generate draw** waits for check-ins this device still holds, so the draw is made from the roster this device shows. Check-ins still held on a separate desk device are not counted, so check that the desk shows nothing held first. While any are held, the screen reads, for example, "Waiting for 3 check-ins to be sent. The draw is made once they arrive." The draw is made on its own when the last one arrives. Two buttons are offered meanwhile: **Cancel** leaves the competition in setup, and **Generate now anyway** makes the draw at once. Its confirmation says that the competitors whose check-ins have not arrived are left out of the draw. When the server holds no check-in for the competition, it says instead: "The server holds no check-in for this competition, so a draw made now includes every competitor." The same wait applies to **Start competition** on a competition that is still in setup and to **Start all** on the dashboard; on both, the button reads **Start now anyway**. If the connection stays down, reconnect, or choose **Generate now anyway**. An item the server keeps refusing is named on the waiting screen with **Discard**.
+
 ### Draw preview
 
 Click **Generate draw** to produce the bracket. The competition enters `draw-ready` status and shows an interactive preview:
@@ -267,7 +283,7 @@ The **Award two joint 3rd places** setting, on the competition's Settings tab, c
 - **Knockout with joint 3rds off**: a single 3rd place is decided by a bronze match.
 - **Pools + Knockout** (still in its pool phase): the viewer shows a provisional cross-pool ranking until the knockout decides the final places.
 
-Operators see an all-competition winners view from the dashboard. You can also record optional **fighting-spirit** (敢闘賞) awards as free text; these appear on the viewer for all spectators. Saving awards is an organiser action, so it needs the admin password in self-run mode too; refer to [Operating modes](operating-modes.md#self-run-mode).
+Operators see an all-competition winners view from the dashboard. You can also record optional **fighting-spirit** (敢闘賞) awards as free text; these appear on the viewer for all spectators. Saving awards is an organiser action, so it needs the admin password in self-run mode too; refer to [Operating modes](operating-modes.md#self-run-mode). If the awards were saved on another device after you opened them, your save is refused: the list says "Not saved: the awards changed somewhere else after you opened this list (another screen or device). Reload to see the current awards, then make your change again.", keeps what you typed, and **Reload** shows the current awards. If the list is closed by the time a held save is refused, an alert says "The fighting-spirit awards were not saved: they were changed on another device. Open them and save again."
 
 **League competitions** derive the podium from final standings. In an individual league, any tie within the top three places triggers a short ippon-shobu tie-breaker automatically, so the competition never closes with an unearned tie. Engi kata competitions never hold supplementary bouts; they rank by wins, then accumulated flags (refer to [Naginata](naginata.md#standings)). The one exception is 3rd place: with **Award two joint 3rd places** enabled, competitors tied entirely for third share the position instead, with no decider. In a team league, the operator chooses whether to run a tie-breaker or accept a tie at any position; refer to [Team standings and tie-breaks](team-tournaments.md#team-standings-and-tie-breaks).
 
@@ -396,6 +412,8 @@ The Move dialog lets you pick the day, the start time and the shiai-jo. Starts s
 ![The Move dialog for Women's Individual: the day, a start time of 11:00, shiai-jo A and B chosen, and the line Runs 11:00 to about 12:17, with Cancel and Move.](../../screenshots/mobile-calendar-move.png)
 
 A competition that is already drawn moves by day and start time only, and keeps its shiai-jo. Its matches move with it: each match gets the time the draw would give it at the new day and start, in the same order, and nothing else about the pools, the bracket or the competitor numbers changes. Before you confirm, the message shows each shiai-jo's old and new times. If its matches at their new times would overlap another competition on a shared shiai-jo, the Move dialog names that competition and the shiai-jo, as it does for a competition not drawn yet; you can still move it. If some matches no longer have the times a fresh draw would give them (a time you set by hand, a pause you added or changed, or another competition you moved), the message says so and those matches get new times too. If no match would change its time, the move is saved without asking. The competition and its matches are saved together, or not at all. Changing the **Date** or **Start time** in the competition's **Settings** does the same, with the same message before you save.
+
+A drawn competition's move also waits for match time changes still held on this device, so none lands on the old day. Dragging a block on the calendar does not wait: it says "Not moved yet: 2 time changes made on this device are still being sent. Open Move to wait for them, or to move it now anyway.", and the **Move** dialog offers the wait. In the dialog, a screen titled "Waiting before the move" reads, for example, "Waiting for 2 time changes to be sent. The move is made once they arrive.", with **Cancel** and **Move now anyway**. The move is made on its own when the last one arrives. **Move now anyway** asks you to confirm first, because a time changed before the move may land on the old day.
 
 A drawn competition cannot move, on the calendar or from its **Settings**, to a start where some of its matches would run past midnight, because a match time cannot show the next day. The message says *At that start some matches would run past midnight, which a match time cannot show. Choose an earlier start. Nothing was changed.* It also cannot move onto a day where another competition plans a shared shiai-jo until after midnight; the message names that shiai-jo and competition. A drawn league whose stored match order no longer follows the draw's pattern, for example after you moved one of its matches to another shiai-jo, cannot be re-timed either: the message says its match order could not be read back. In each case nothing is moved.
 

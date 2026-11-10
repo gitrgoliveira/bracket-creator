@@ -425,11 +425,16 @@ paths:
         and the on-disk value is irrelevant. The same redaction applies to the PUT and POST
         responses below. Use `GET /api/auth-config` to discover which mode the server is in
         without authenticating.
+
+        The answer carries `tournamentVersion`, the version of the settings,
+        which a settings save (`PUT /api/tournament`) sends back.
       security:
         - TournamentPassword: []
       responses:
         '200':
-          description: Tournament configuration. `password` is empty in locked mode.
+          description: >
+            Tournament configuration with its `tournamentVersion`. `password` is
+            empty in locked mode.
           content:
             application/json:
               schema:
@@ -513,6 +518,17 @@ paths:
 
         Validation matches POST for `name` (rejected if empty after trim).
 
+        **Version check**: the body must carry `tournamentVersion`, the version
+        of the settings the save was made from (from `GET /api/tournament`,
+        `GET /api/viewer/tournament` or the last save's answer). Without it the
+        request is 400. If it is not the stored settings' version the save is
+        refused with 409 `tournament_changed` (`TournamentChangedError`), nothing
+        is written, and the answer carries the current copy and its version.
+        A save whose body already is the stored settings and carries no new password
+        (the resend of one that landed while its answer was lost) is not refused: it
+        is answered 200 with the stored settings, and nothing is written. While no
+        tournament exists, any non-empty value is accepted.
+
         **File mode; Password preserve semantics**: when the request
         body omits `password` or sends an empty string, the server
         preserves the currently-stored password. This matches the
@@ -543,16 +559,29 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/Tournament'
+              allOf:
+                - $ref: '#/components/schemas/Tournament'
+                - type: object
+                  required: [tournamentVersion]
       responses:
         '200':
-          description: Tournament updated. Carries `competitions`, see the POST response.
+          description: >
+            Tournament updated. Carries `competitions`, see the POST response,
+            and the new `tournamentVersion`.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/TournamentWithCompetitions'
         '400':
           $ref: '#/components/responses/BadRequest'
+        '409':
+          description: >
+            `tournament_changed`: the body's `tournamentVersion` is not the
+            stored settings' version. Nothing is written.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TournamentChangedError'
 
   /api/tournament/reset:
     post:
@@ -1434,11 +1463,43 @@ paths:
         The announcement is stored in-memory only (not persisted to disk); a server
         restart clears it. Late-connecting viewers can retrieve the active announcement
         via `GET /api/tournament/announcement`. A message identical to one still active
-        replaces it (new id, fresh duration) rather than adding a second entry.
+        and made after it replaces it (new id, its own time) rather than adding a
+        second entry.
         The replaced id stays valid for `DELETE /api/announcements/{id}` while the
         announcement that replaced it is active: it takes that announcement down.
 
+        The sending device makes the call's `id` and stamps when it was made
+        (`modifiedAt`), so a call sent again, or sent late from the outbox after
+        a dropout, is harmless:
+        - An `id` the server already knows is answered as recorded
+          (`recorded: true`) with the announcement as stored; nothing is added
+          and nothing is broadcast. Withdrawn and cleared ids are remembered
+          until the time they would have expired, so a late copy of a call that
+          was already taken down does not bring it back while the server keeps
+          running (a restart forgets withdrawn ids along with the calls).
+        - The call shows until `modifiedAt` plus `durationMinutes`. One whose
+          time is already over on arrival is answered `expired: true` and shows
+          nothing. One with time left shows for what is left, for at least one
+          minute.
+        - Of two identical messages, the one made later replaces the other (the
+          older id becomes its alias, as above); an older one that arrives after
+          a newer one is answered as recorded and never replaces it or shortens
+          its time.
+        - A call made at or before the last clear (`DELETE /api/announcements`)
+          is answered as recorded (or expired, when its time is already over)
+          and shows nothing, whenever it arrives; a call made after the clear is
+          shown whatever the arrival order.
+
+        A `modifiedAt` more than a few seconds ahead of the server clock is
+        answered 200 `RefusedWrite` with `reason` `clock_skew` and nothing is
+        stored; the app resyncs its clock and sends the same call again.
+
+        The outbox adds `writeId`, `session` and `basis` to the body; they are
+        ignored.
+
         **Validation:**
+        - `id` must be a lowercase UUID v4 (400 otherwise).
+        - `modifiedAt` is required (400 without it).
         - `message` must be non-empty after trimming whitespace.
         - `message` may not exceed 200 characters (Unicode code-point count).
         - `durationMinutes` must be one of `5`, `10`, `15`, or `30`.
@@ -1450,8 +1511,17 @@ paths:
           application/json:
             schema:
               type: object
-              required: [message, durationMinutes]
+              required: [id, message, durationMinutes, modifiedAt]
               properties:
+                id:
+                  type: string
+                  description: A lowercase UUID v4 the sending device minted.
+                  example: "3f2b8c1e-5d4a-4e6b-9a7c-1b2d3e4f5a6b"
+                modifiedAt:
+                  type: integer
+                  format: int64
+                  minimum: 1
+                  description: When the call was made, in unix milliseconds.
                 message:
                   type: string
                   description: Announcement text (max 200 chars after trim).
@@ -1463,13 +1533,18 @@ paths:
                   example: 30
       responses:
         '200':
-          description: Announcement sent; returns the stored record.
+          description: >
+            Announcement sent; returns the stored record, with `recorded: true`
+            when nothing changed (a known id) and `expired: true` when its time
+            was over on arrival. Or `RefusedWrite` with `reason` `clock_skew`.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Announcement'
+                oneOf:
+                  - $ref: '#/components/schemas/AnnouncementResult'
+                  - $ref: '#/components/schemas/RefusedWrite'
         '400':
-          description: Validation failure (empty/too-long message or invalid duration).
+          description: Validation failure (empty/too-long message, invalid duration, id not a lowercase UUID v4, or missing modifiedAt).
           content:
             application/json:
               schema:
@@ -1506,6 +1581,16 @@ paths:
         Takes one announcement down and pushes the remaining list to viewers
         over SSE. An id that an identical announcement replaced stays valid
         while the replacing announcement is active, and takes that one down.
+        The withdrawn call and its aliases are remembered until the time they
+        would have expired, so a late copy of the send does not bring the call
+        back while the server keeps running (a restart forgets withdrawn ids
+        along with the calls). The id is the key: a body (the outbox sends
+        `writeId`, `session` and `basis`) is not read. A 404 means the call is
+        already gone, which a caller withdrawing it treats as done. An id that
+        is a lowercase UUID v4 the server has not seen is answered 404 too, and
+        is remembered for 30 minutes: a send of that call still on its way, from
+        another tab of the device that had it out, is then answered as recorded
+        and never shown.
       security:
         - TournamentPassword: []
       parameters:
@@ -1515,8 +1600,14 @@ paths:
           schema:
             type: string
       responses:
-        '204':
-          description: Announcement withdrawn.
+        '200':
+          description: Announcement withdrawn; returns the announcements left showing.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Announcement'
         '401':
           description: Missing or invalid X-Tournament-Password.
           content:
@@ -1524,7 +1615,9 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
         '404':
-          description: No active announcement has this id.
+          description: >
+            The call is already gone or was never seen; a caller withdrawing
+            it treats this as done.
           content:
             application/json:
               schema:
@@ -1534,12 +1627,52 @@ paths:
     delete:
       tags: [tournament]
       summary: Withdraw every announcement
-      description: Clears all announcements and pushes the empty list to viewers over SSE.
+      description: |
+        Clears every announcement made at or before the body's `modifiedAt` and
+        pushes the list left to viewers over SSE (nothing is broadcast when
+        nothing was showing to clear). The server keeps the earlier of that stamp and its own clock as a floor: a
+        send made at or before it and arriving after it shows nothing, while a
+        send made after the clear is untouched whatever the arrival order.
+
+        The body is `{modifiedAt}` (unix milliseconds), required: without it the
+        request is 400. A stamp more than a few seconds ahead of the server clock
+        is answered 200 `RefusedWrite` with `reason` `clock_skew`, and nothing is
+        cleared. The outbox adds `writeId`, `session` and `basis`; they are
+        ignored.
       security:
         - TournamentPassword: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [modifiedAt]
+              properties:
+                modifiedAt:
+                  type: integer
+                  format: int64
+                  minimum: 1
+                  description: When the clear was made, in unix milliseconds.
       responses:
-        '204':
-          description: All announcements withdrawn.
+        '200':
+          description: >
+            Announcements cleared; returns the announcements left showing (those
+            made after the clear), or `RefusedWrite` with `reason` `clock_skew`.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - type: array
+                    items:
+                      $ref: '#/components/schemas/Announcement'
+                  - $ref: '#/components/schemas/RefusedWrite'
+        '400':
+          description: Missing or invalid `modifiedAt`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '401':
           description: Missing or invalid X-Tournament-Password.
           content:
@@ -1714,11 +1847,19 @@ paths:
         - TournamentPassword: []
       responses:
         '200':
-          description: Competition details.
+          description: >
+            Competition details, with `awardsVersion` beside them: the version
+            of the fighting-spirit awards list, which an awards save sends back.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Competition'
+                allOf:
+                  - $ref: '#/components/schemas/Competition'
+                  - type: object
+                    properties:
+                      awardsVersion:
+                        type: string
+                        pattern: '^[0-9a-f]{16}$'
         '404':
           $ref: '#/components/responses/NotFound'
     put:
@@ -2462,6 +2603,16 @@ paths:
 
         In self-run mode this is an organiser action: it needs
         `X-Tournament-Password`.
+
+        The body must carry `awardsVersion`, the version of the list the save was
+        made from (answered by GET /api/competitions/{id}, the viewer's
+        competition detail as `awardsVersion` beside `config`, and the last
+        save's answer). Without it the request is 400. If it is not the stored
+        list's version the save is refused with 409 `awards_changed`
+        (`AwardsChangedError`), nothing is written, and the answer carries the
+        list as stored now and its version. A save whose list already is the
+        stored one (the resend of one that landed while its answer was lost) is
+        not refused: it is answered 200 with the stored competition.
       security:
         - TournamentPassword: []
       parameters:
@@ -2472,8 +2623,12 @@ paths:
           application/json:
             schema:
               type: object
-              required: [fightingSpiritAwards]
+              required: [fightingSpiritAwards, awardsVersion]
               properties:
+                awardsVersion:
+                  type: string
+                  pattern: '^[0-9a-f]{16}$'
+                  description: The version of the awards list this save was made from.
                 fightingSpiritAwards:
                   type: array
                   maxItems: 20
@@ -2481,15 +2636,31 @@ paths:
                     $ref: '#/components/schemas/FightingSpiritAward'
       responses:
         '200':
-          description: Awards saved; returns updated competition.
+          description: >
+            Awards saved; returns the updated competition with its new
+            `awardsVersion`.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Competition'
+                allOf:
+                  - $ref: '#/components/schemas/Competition'
+                  - type: object
+                    properties:
+                      awardsVersion:
+                        type: string
+                        pattern: '^[0-9a-f]{16}$'
         '400':
           $ref: '#/components/responses/BadRequest'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          description: >
+            `awards_changed`: the body's `awardsVersion` is not the stored
+            list's version. Nothing is written.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AwardsChangedError'
         '500':
           $ref: '#/components/responses/InternalError'
 
@@ -2947,18 +3118,39 @@ paths:
     put:
       tags: [participants]
       summary: Check in a single participant
-      description: >
+      description: |
         Sets checked-in status to true for the participant. Answers 409
         `check_in_not_in_self_run` in a self-run tournament, for every caller.
+
+        The body is `{modifiedAt}`, required: the time of the tap in unix
+        milliseconds (the outbox stamps each tap). The later tap wins: a change
+        stamped no later than the stored check-in change is answered 200
+        `CheckInNotApplied` with `reason` `superseded` and the participant as
+        stored, and nothing is written. A stamp more than a few seconds ahead of
+        the server clock is answered 200 `RefusedWrite` with `reason`
+        `clock_skew` and nothing is written. A missing or non-positive stamp is
+        400.
       security:
         - TournamentPassword: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CheckInStamp'
       responses:
         '200':
-          description: Participant checked in.
+          description: >
+            Participant checked in (the `Player` as stored), or not applied
+            (`CheckInNotApplied` for `superseded`, `RefusedWrite` for
+            `clock_skew`).
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Player'
+                oneOf:
+                  - $ref: '#/components/schemas/Player'
+                  - $ref: '#/components/schemas/CheckInNotApplied'
+                  - $ref: '#/components/schemas/RefusedWrite'
         '400':
           $ref: '#/components/responses/BadRequest'
         '404':
@@ -2970,19 +3162,40 @@ paths:
     delete:
       tags: [participants]
       summary: Undo check-in for a single participant
-      description: >
+      description: |
         Resets checked-in status to false for the participant. Answers 409
         `check_in_not_in_self_run` in a self-run tournament, for the organiser
         (an anonymous caller is refused 401 first, as this route stays organiser-only).
+
+        The body is `{modifiedAt}`, required: the time of the tap in unix
+        milliseconds (the outbox stamps each tap). The later tap wins: a change
+        stamped no later than the stored check-in change is answered 200
+        `CheckInNotApplied` with `reason` `superseded` and the participant as
+        stored, and nothing is written. A stamp more than a few seconds ahead of
+        the server clock is answered 200 `RefusedWrite` with `reason`
+        `clock_skew` and nothing is written. A missing or non-positive stamp is
+        400.
       security:
         - TournamentPassword: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CheckInStamp'
       responses:
         '200':
-          description: Participant check-in undone.
+          description: >
+            Participant check-in undone (the `Player` as stored), or not applied
+            (`CheckInNotApplied` for `superseded`, `RefusedWrite` for
+            `clock_skew`).
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Player'
+                oneOf:
+                  - $ref: '#/components/schemas/Player'
+                  - $ref: '#/components/schemas/CheckInNotApplied'
+                  - $ref: '#/components/schemas/RefusedWrite'
         '400':
           $ref: '#/components/responses/BadRequest'
         '404':
@@ -2998,9 +3211,18 @@ paths:
     post:
       tags: [participants]
       summary: Bulk check-in participants
-      description: >
+      description: |
         Atomically checks in multiple participants at once. Answers 409
         `check_in_not_in_self_run` in a self-run tournament, for every caller.
+
+        `modifiedAt` is required: the time of the tap in unix milliseconds. Each
+        id is judged as the single-participant door judges it: a participant
+        whose stored check-in change is stamped at or after this one is left
+        alone and comes back in `superseded` as stored, so the desk can adopt it
+        by id; the others are checked in and take the stamp. A stamp more than a
+        few seconds ahead of the server clock is answered 200 `RefusedWrite`
+        with `reason` `clock_skew` and nothing is written. A missing or
+        non-positive stamp is 400.
       security:
         - TournamentPassword: []
       requestBody:
@@ -3009,8 +3231,13 @@ paths:
           application/json:
             schema:
               type: object
-              required: [participantIds]
+              required: [participantIds, modifiedAt]
               properties:
+                modifiedAt:
+                  type: integer
+                  format: int64
+                  minimum: 1
+                  description: The time of the tap, in unix milliseconds.
                 participantIds:
                   type: array
                   maxItems: 1000
@@ -3026,11 +3253,15 @@ paths:
                     maxLength: 64
       responses:
         '200':
-          description: Bulk check-in completed.
+          description: >
+            Bulk check-in completed (`BulkCheckInResult`), or refused as
+            `clock_skew` (`RefusedWrite`).
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/BulkCheckInResult'
+                oneOf:
+                  - $ref: '#/components/schemas/BulkCheckInResult'
+                  - $ref: '#/components/schemas/RefusedWrite'
         '400':
           $ref: '#/components/responses/BadRequest'
         '404':
@@ -6560,7 +6791,8 @@ paths:
       description: |
         Returns tournament details with the password field redacted, or `null`
         when no tournament is configured yet (a normal bootstrap state, so the
-        response is `200` with a null body rather than a `404`).
+        response is `200` with a null body rather than a `404`). Carries
+        `tournamentVersion`, the version a settings save sends back.
       responses:
         '200':
           description: Public tournament info, or null when no tournament is configured yet.
@@ -6753,7 +6985,7 @@ components:
         `GET /api/competitions/{id}/teams/{tid}/match-lineups/{matchId}`,
         `GET /api/competitions/{id}/teams/{tid}/lineup-in-force/{matchId}`,
         `GET /api/competitions/{id}/swiss/standings`, and
-        `GET /api/tournament/announcement`,
+        `GET /api/tournament/announcement`, `GET /api/tournament/announcements`,
         and (in file mode only) the bootstrap PUT/POST `/api/tournament`
         while no tournament has been configured yet.
 
@@ -6896,7 +7128,7 @@ components:
       additionalProperties: false
       required: [applied, reason, message]
       description: >
-        A write nothing of which was applied to the match. Two causes, told
+        A write nothing of which was applied. Two causes, told
         apart by `reason`, and they need different remedies:
 
         - `superseded`: every group the write changes is held, because a NEWER
@@ -6920,12 +7152,17 @@ components:
         Both are returned with HTTP 200, never an error status: neither is a
         fault, and neither can win a retry as-is, so an error status would make
         an offline write queue retry an unwinnable request forever. Nothing is
-        applied to the match and no SSE broadcast is emitted in either case; a
-        superseded write leaves its match history entry and nothing else.
+        applied and no SSE broadcast is emitted in either case; a superseded
+        match write leaves its match history entry and nothing else.
 
         PUT /score, POST /decision and both /daihyosen
         paths each carry a client-supplied modifiedAt, so the guard compares
         rather than bypassing and any of them can produce either condition.
+        Outside the match writes, PUT and DELETE /participants/{pid}/checkin,
+        POST /participants/checkin-bulk, POST /api/tournament/announce and
+        DELETE /api/announcements can produce `clock_skew`. A superseded
+        check-in is answered as `CheckInNotApplied`, or in the bulk result's
+        `superseded` list.
         The remaining match-write endpoint, /quick-score, builds its result
         server-side without a client stamp; the server stamps it with its own
         time, never older than the stored result, so it always applies; it
@@ -7369,6 +7606,80 @@ components:
       properties:
         error:
           type: string
+
+    CheckInStamp:
+      type: object
+      required: [modifiedAt]
+      description: Body of the single-participant check-in doors (PUT and DELETE).
+      properties:
+        modifiedAt:
+          type: integer
+          format: int64
+          minimum: 1
+          description: The time of the tap, in unix milliseconds. The later tap wins.
+
+    CheckInNotApplied:
+      type: object
+      required: [applied, reason, participant]
+      description: >
+        200 answer of a single-participant check-in door whose stamp is no later
+        than the stored check-in change. Nothing was written; adopt `participant`.
+      properties:
+        applied:
+          type: boolean
+          description: Always false.
+        reason:
+          type: string
+          enum: [superseded]
+        participant:
+          $ref: '#/components/schemas/Player'
+
+    TournamentChangedError:
+      type: object
+      required: [code, error]
+      description: >
+        409 Conflict body of PUT /api/tournament whose `tournamentVersion` is not
+        the stored settings' version. Nothing is written.
+      properties:
+        code:
+          type: string
+          enum: [tournament_changed]
+        error:
+          type: string
+          example: "The tournament settings changed, reload them."
+        tournamentVersion:
+          type: string
+          pattern: '^[0-9a-f]{16}$'
+          description: The current version. Omitted when no tournament record exists.
+        tournament:
+          description: >
+            The current settings as GET /api/tournament serves them (with
+            `tournamentVersion`; `password` empty in locked mode).
+          allOf:
+            - $ref: '#/components/schemas/Tournament'
+
+    AwardsChangedError:
+      type: object
+      required: [code, error, awardsVersion, fightingSpiritAwards]
+      description: >
+        409 Conflict body of PUT /api/competitions/{id}/awards whose
+        `awardsVersion` is not the stored list's version. Nothing is written.
+      properties:
+        code:
+          type: string
+          enum: [awards_changed]
+        error:
+          type: string
+          example: "The awards changed, reload them."
+        awardsVersion:
+          type: string
+          pattern: '^[0-9a-f]{16}$'
+          description: The current version.
+        fightingSpiritAwards:
+          type: array
+          items:
+            $ref: '#/components/schemas/FightingSpiritAward'
+          description: The list as stored now (always an array).
 
     ConfigChangedError:
       type: object
@@ -7838,10 +8149,43 @@ components:
           description: Optional clickable URL shown on the viewer surface. Absent when not set (omitempty). Must be http(s) with no user-info.
           example: "https://acme.example"
 
+    AnnouncementResult:
+      description: >
+        200 answer of `POST /api/tournament/announce`: the call as stored, with
+        two flags that are present (true) only when they apply.
+      allOf:
+        - $ref: '#/components/schemas/Announcement'
+        - type: object
+          properties:
+            recorded:
+              type: boolean
+              description: >
+                True when nothing changed and nothing was broadcast: the `id` is
+                already known (showing, standing in for the call that replaced
+                it, or withdrawn or cleared and remembered until its time would
+                have been over), the call is an older copy of an identical
+                message already showing (it becomes that call's alias and never
+                shortens it), it was made at or before the last clear (and its time is not
+                already over), or it is older than every one of the ten calls already showing. The
+                announcement returned is the one already stored where there is
+                one, so a resend is harmless.
+            expired:
+              type: boolean
+              description: >
+                True when the call's time (its `modifiedAt` plus the duration)
+                was already over when it arrived, so nothing is shown.
+
     Announcement:
       type: object
-      description: A transient admin broadcast announcement stored in-memory.
+      description: >
+        A transient admin broadcast announcement stored in-memory. The device
+        that makes the call makes its `id`.
       properties:
+        id:
+          type: string
+          description: >
+            The id the sending device minted (a lowercase UUID v4). The key a
+            resend, a withdrawal and a replaced call are known by.
         message:
           type: string
           description: Announcement text (max 200 Unicode characters after trim).
@@ -7849,12 +8193,18 @@ components:
         sentAt:
           type: string
           format: date-time
-          description: Server timestamp when the announcement was sent (RFC 3339).
+          description: >
+            When the call was made (the request's `modifiedAt`, RFC 3339), not
+            when it arrived. It orders an identical call against a newer one
+            and a call against a clear.
         expiresAt:
           type: string
           format: date-time
-          description: Timestamp at which the announcement banner auto-dismisses (RFC 3339).
-      required: [message, sentAt, expiresAt]
+          description: >
+            Timestamp at which the announcement banner auto-dismisses (RFC 3339):
+            `sentAt` plus the duration. A call that reaches the server late with
+            time left shows for what is left, but for at least one minute.
+      required: [id, message, sentAt, expiresAt]
 
     AppStatus:
       type: object
@@ -7874,6 +8224,14 @@ components:
     Tournament:
       type: object
       properties:
+        tournamentVersion:
+          type: string
+          pattern: '^[0-9a-f]{16}$'
+          description: >
+            Content hash of the settings, answered by GET /api/tournament,
+            GET /api/viewer/tournament and the tournament writes' answers. Never
+            reads the password. A settings save (PUT /api/tournament) sends it
+            back as the version it was made from. Ignored on POST.
         name:
           type: string
           maxLength: 200
@@ -8452,6 +8810,14 @@ components:
         checkedIn:
           type: boolean
           description: True when the participant has checked in.
+        checkInAt:
+          type: integer
+          format: int64
+          description: >
+            The stamp (server-relative unix milliseconds) of the check-in change
+            that set `checkedIn`, which orders two taps on one competitor: the
+            later wins. Omitted for a row never stamped (0). A taken-back
+            check-in keeps its stamp.
 
     Participant:
       type: object
@@ -8492,7 +8858,7 @@ components:
 
     BulkCheckInResult:
       type: object
-      required: [checkedIn, alreadyCheckedIn, notFound]
+      required: [checkedIn, alreadyCheckedIn, notFound, superseded]
       properties:
         checkedIn:
           type: integer
@@ -8504,6 +8870,14 @@ components:
             type: string
             maxLength: 64
           description: Participant IDs from the request that did not match any roster entry (echoed back; each capped at 64 chars, matching the request-side ID limit).
+        superseded:
+          type: array
+          items:
+            $ref: '#/components/schemas/Player'
+          description: >
+            Each participant, as stored, whose stored check-in change is stamped
+            at or after this request's `modifiedAt`, so the request left it
+            alone. The desk adopts each one by id. Always an array.
 
     ParticipantInput:
       type: object
@@ -9433,6 +9807,12 @@ components:
       properties:
         config:
           $ref: '#/components/schemas/Competition'
+        awardsVersion:
+          type: string
+          pattern: '^[0-9a-f]{16}$'
+          description: >
+            Version of the fighting-spirit awards list, which an awards save
+            (PUT /api/competitions/{id}/awards) sends back as `awardsVersion`.
         pools:
           type: array
           items:

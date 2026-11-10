@@ -2830,8 +2830,27 @@ func respondClockSkew(c *gin.Context, serverNowMs, aheadMs int64) {
 		"applied":     false,
 		"reason":      "clock_skew",
 		"serverNowMs": serverNowMs,
-		"message":     "Not saved: this device's clock appears to be ahead of the server. The app will resync its clock; enter the result again.",
+		"message":     "Nothing was changed: this device's clock appears to be ahead of the server. The app is resyncing its clock; if it does not go through by itself, do it again.",
 	})
+}
+
+// judgeClientStamp judges the {modifiedAt} a stamped write's body carries (a
+// check-in, a court call, a clear) and reports whether the write may go on. A
+// missing or non-positive stamp is 400, naming what it stands for: every
+// caller is the outbox, which stamps each write, and an unstamped one could
+// never be ordered against a stored one. A stamp beyond the clock skew margin
+// gets the clock_skew answer the outbox re-stamps on (clientClockSkew and
+// respondClockSkew, the score door's pair).
+func judgeClientStamp(c *gin.Context, modifiedAt int64, what string) (int64, bool) {
+	if modifiedAt <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "modifiedAt is required: " + what})
+		return 0, false
+	}
+	if serverNowMs, aheadMs, refuse := clientClockSkew(modifiedAt); refuse {
+		respondClockSkew(c, serverNowMs, aheadMs)
+		return 0, false
+	}
+	return clampClientModifiedAt(modifiedAt), true
 }
 
 // courtBusyRemedyStart / courtBusyRemedyReopen (bc-cse item 11e) are

@@ -24,15 +24,31 @@ function useHeldWritesRefresh(refresh) {
   return mountedRef;
 }
 
+// The held writes that belong to no competition (api_client.jsx's court-call
+// doors and the tournament settings), named by where the device put them.
+const TOURNAMENT_WIDE_KINDS = new Set(['announce', 'announce-remove', 'announce-clear', 'tournament']);
+
 // heldWriteWhere: which match (or team) one held write is about, named the
 // way the score list names it (scoreRowMatchLabel) when the competition's
 // matches are loaded, else by the match's number or id (matchLabel). The
 // competition is named too: the list spans every competition on the device.
+// A check-in names its competitor, found in the competition's roster by id; a
+// court call its message, and the tournament settings themselves (`where`,
+// as api_client.jsx's door named it); an awards save the awards.
 export function heldWriteWhere(held, competitions) {
+  const where = typeof held.where === 'string' ? held.where.trim() : '';
+  if (TOURNAMENT_WIDE_KINDS.has(held.kind)) return where || (held.kind === 'tournament' ? 'Tournament settings' : 'Court call');
   const comp = (competitions || []).find((c) => c && c.id === held.compID) || null;
   const compName = (comp && comp.name) || held.compID || '';
   let what;
-  if (held.kind === 'lineup') {
+  if (held.kind === 'checkin' || held.kind === 'checkin-bulk') {
+    const ids = Array.isArray(held.participantIds) ? held.participantIds : [];
+    const one = ids.length === 1 && comp && Array.isArray(comp.players)
+      ? comp.players.find((p) => p && p.id === ids[0]) : null;
+    what = one && one.name ? `Check-in: ${one.name}` : (where || (ids.length > 1 ? `Check-in: ${ids.length} competitors` : 'Check-in'));
+  } else if (held.kind === 'awards') {
+    what = where || 'Fighting-spirit awards';
+  } else if (held.kind === 'lineup') {
     // A competition's roster is `players` (normalizeViewerCompItem); a team
     // is one entry in it, found by its participant id.
     const team = comp && Array.isArray(comp.players)

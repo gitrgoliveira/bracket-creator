@@ -694,7 +694,7 @@ func TestSaveParticipants_StoredReservedNameRefusesTheNextSave(t *testing.T) {
 	store, err = NewStore(dir) // a restart: nothing cached from before the edit
 	require.NoError(t, err)
 
-	_, err = store.BulkCheckIn(compID, []string{players[0].ID})
+	_, err = store.BulkCheckInAt(compID, []string{players[0].ID}, 1000)
 	assert.ErrorIs(t, err, ErrReservedName, "a check-in is a roster save too")
 
 	_, err = store.UpdateParticipant(compID, players[1].ID, false, func(p *domain.Player) error {
@@ -702,7 +702,7 @@ func TestSaveParticipants_StoredReservedNameRefusesTheNextSave(t *testing.T) {
 		return nil
 	})
 	require.NoError(t, err, "renaming the reserved name is the way out")
-	_, err = store.BulkCheckIn(compID, []string{players[0].ID})
+	_, err = store.BulkCheckInAt(compID, []string{players[0].ID}, 1000)
 	assert.NoError(t, err)
 }
 

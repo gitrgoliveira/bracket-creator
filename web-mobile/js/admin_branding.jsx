@@ -53,15 +53,19 @@ function BrandingManager({ tournament, password, showToast, onThemeChange }) {
 
   useEffect(() => { setHasLogo(tournamentHasLogo); }, [tournamentHasLogo]);
 
-  // Sync incoming theme changes (e.g. after a tournament SSE reload).
-  // Always update pickers/inputs, but only propagate to the parent when
-  // tournament.theme is explicitly set: passing null when absent keeps
+  // Fill the pickers from the theme the form was opened with, once. A later
+  // tournament update (another device saved) does not move them: the form is
+  // held to the copy it was opened from, and its Reload takes the new one, so
+  // an update would otherwise overwrite what was typed or mark an untouched
+  // form changed. Always update pickers/inputs, but only propagate to the parent
+  // when tournament.theme is explicitly set: passing null when absent keeps
   // the parent PUT payload clean (theme block omitted unless configured).
-  // The parent's callback is read when the tournament changes, never a reason
-  // to sync: a new callback each parent render would put the pickers back.
+  // The parent's callback is read when the effect runs, never a reason to
+  // sync: a new callback each parent render would put the pickers back.
+  const [openedTournament] = useState(tournament);
   const onThemeChangeRef = useLatestRef(onThemeChange);
   useEffect(() => {
-    const norm = normalizeTheme(tournament && tournament.theme);
+    const norm = normalizeTheme(openedTournament && openedTournament.theme);
     // Update the pickers with effective values even when no theme is set, so
     // they show defaults rather than empty; only propagate to the parent when
     // a theme is actually configured (norm !== null).
@@ -69,7 +73,7 @@ function BrandingManager({ tournament, password, showToast, onThemeChange }) {
     setAccentSoftColor((norm && norm.accentSoftColor) || BRANDING_DEFAULTS.accentSoftColor);
     setWindowTitle((norm && norm.windowTitle) || BRANDING_DEFAULTS.windowTitle);
     if (onThemeChangeRef.current) onThemeChangeRef.current(norm);
-  }, [tournament, onThemeChangeRef]);
+  }, [openedTournament, onThemeChangeRef]);
 
   const handleColorChange = (field, value) => {
     const next = {

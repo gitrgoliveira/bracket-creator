@@ -91,7 +91,7 @@ func TestBulkCheckIn(t *testing.T) {
 	require.NoError(t, store.SaveParticipants(compID, players))
 
 	t.Run("check in two players", func(t *testing.T) {
-		result, err := store.BulkCheckIn(compID, []string{pid1, pid2})
+		result, err := store.BulkCheckInAt(compID, []string{pid1, pid2}, 1000)
 		require.NoError(t, err)
 		assert.Equal(t, 2, result.CheckedIn)
 		assert.Equal(t, 0, result.AlreadyCheckedIn)
@@ -99,7 +99,7 @@ func TestBulkCheckIn(t *testing.T) {
 	})
 
 	t.Run("already checked-in counted separately", func(t *testing.T) {
-		result, err := store.BulkCheckIn(compID, []string{pid1, pid3})
+		result, err := store.BulkCheckInAt(compID, []string{pid1, pid3}, 2000)
 		require.NoError(t, err)
 		assert.Equal(t, 1, result.CheckedIn, "pid3 is new")
 		assert.Equal(t, 1, result.AlreadyCheckedIn, "pid1 was already checked in")
@@ -108,7 +108,7 @@ func TestBulkCheckIn(t *testing.T) {
 
 	t.Run("unknown pids reported", func(t *testing.T) {
 		unknown := "ffffffff-0000-4000-8000-000000000099"
-		result, err := store.BulkCheckIn(compID, []string{unknown, pid2})
+		result, err := store.BulkCheckInAt(compID, []string{unknown, pid2}, 3000)
 		require.NoError(t, err)
 		assert.Equal(t, 0, result.CheckedIn)
 		assert.Equal(t, 1, result.AlreadyCheckedIn)
@@ -116,14 +116,14 @@ func TestBulkCheckIn(t *testing.T) {
 	})
 
 	t.Run("duplicate pids in request deduplicated", func(t *testing.T) {
-		result, err := store.BulkCheckIn(compID, []string{pid1, pid1, pid1})
+		result, err := store.BulkCheckInAt(compID, []string{pid1, pid1, pid1}, 4000)
 		require.NoError(t, err)
 		assert.Equal(t, 0, result.CheckedIn)
 		assert.Equal(t, 1, result.AlreadyCheckedIn, "deduplicated to one entry")
 	})
 
 	t.Run("empty pids list is a no-op", func(t *testing.T) {
-		result, err := store.BulkCheckIn(compID, []string{})
+		result, err := store.BulkCheckInAt(compID, []string{}, 5000)
 		require.NoError(t, err)
 		assert.Equal(t, 0, result.CheckedIn)
 		assert.Equal(t, 0, result.AlreadyCheckedIn)

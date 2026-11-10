@@ -148,4 +148,36 @@ describe('ExportPdfModal: skipped-competitions warning', () => {
     ));
     expect(container.querySelector('[data-testid="export-pdf-skipped-banner"]')).toBeNull();
   });
+
+  it('says the one "not sent" sentence as it is when the request never left', async () => {
+    // The real API door, so the error is the one _directFetch makes.
+    const { API } = await import('../../api_client.jsx');
+    const { NOT_SENT_NO_CONNECTION } = await import('../../write_result.jsx');
+    const originalFetch = global.fetch;
+    global.fetch = vi.fn(() => Promise.reject(new TypeError('Failed to fetch')));
+    try {
+      const { container, showToast } = mount({ exportPDFs: (type, pw) => API.exportPDFs(type, pw) });
+      clickDownload(container);
+      await waitFor(() => expect(showToast).toHaveBeenCalledWith(NOT_SENT_NO_CONNECTION, 'error'));
+    } finally {
+      global.fetch = originalFetch;
+    }
+  });
+
+  it('keeps the prefix on a failure that is not the lost connection (the body failing for another reason)', async () => {
+    const { API } = await import('../../api_client.jsx');
+    const originalFetch = global.fetch;
+    global.fetch = vi.fn(() => Promise.resolve({
+      ok: true,
+      headers: { get: () => null },
+      blob: () => Promise.reject(new Error('bad archive')),
+    }));
+    try {
+      const { container, showToast } = mount({ exportPDFs: (type, pw) => API.exportPDFs(type, pw) });
+      clickDownload(container);
+      await waitFor(() => expect(showToast).toHaveBeenCalledWith('PDF export failed: bad archive', 'error'));
+    } finally {
+      global.fetch = originalFetch;
+    }
+  });
 });

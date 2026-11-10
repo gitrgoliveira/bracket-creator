@@ -13,6 +13,10 @@ import { PillButton } from './competition_fields.jsx';
 import { useDialogFocus } from './dialog_focus.jsx';
 import { useOpenedTapGuard } from './tap_guard.jsx';
 import { useEscapeToClose } from './ui.jsx';
+import { useLatestRef } from './latest_ref.jsx';
+import {
+  useWaitForQueuedWrites, QueuedWritesWait, queuedWritesCount, queuedWritesNounFor, TIME_WRITE_KINDS,
+} from './queued_writes_wait.jsx';
 
 const { useState, useEffect, useRef } = React;
 
@@ -130,8 +134,13 @@ export function drawnDragHint(comp, pointedCourts) {
  *
  * Give either startTime ("HH:MM") or deltaMins (move the start by that many
  * minutes, as a drag does).
+ *
+ * A drawn competition with time changes still queued on this device is not
+ * moved: the error (code `time_changes_queued`) says so, and the Move dialog
+ * waits for them. `nowAnyway` is the operator's choice to move it before they
+ * arrive.
  */
-export async function saveMove({ password, competitionId, date, startTime, deltaMins, courts }) {
+export async function saveMove({ password, competitionId, date, startTime, deltaMins, courts, nowAnyway }) {
   const comps = await window.API.fetchCompetitions();
   const fresh = (Array.isArray(comps) ? comps : []).find((c) => c.id === competitionId);
   if (!fresh) throw new Error('This competition is no longer there.');
@@ -139,6 +148,10 @@ export async function saveMove({ password, competitionId, date, startTime, delta
   const start = startTime || shiftClock(fresh.startTime, deltaMins || 0);
   if (!start) throw new Error('That would move the start out of the day. Pick a start time on the same day.');
   const drawn = isDrawn(fresh);
+  const queued = drawn && !nowAnyway ? queuedWritesCount(competitionId, TIME_WRITE_KINDS) : 0;
+  if (queued > 0) {
+    throw Object.assign(new Error(timeChangesQueuedMessage(queued)), { code: 'time_changes_queued', count: queued });
+  }
   const edits = { date, startTime: start };
   if (!drawn && Array.isArray(courts) && courts.length > 0) edits.courts = courts;
   const built = settingsPutBody(fresh, edits, fresh.configVersion);
@@ -172,10 +185,17 @@ export async function undoMove({ password, move }) {
   return window.API.updateCompetition(move.competitionId, body, password);
 }
 
+/** What a drawn competition's move says while time changes are still queued. */
+export function timeChangesQueuedMessage(n) {
+  return `Not moved yet: ${queuedWritesNounFor('time', n)} made on this device ${n === 1 ? 'is' : 'are'} still being sent. `
+    + 'Open Move to wait for them, or to move it now anyway.';
+}
+
 /** The sentence an operator reads for a move or an undo that did not happen. */
 export function moveErrorMessage(err) {
   if (!err) return 'Could not move the competition.';
   if (err.code === 'config_changed') return 'This competition changed, reload it.';
+  if (err.code === 'time_changes_queued') return timeChangesQueuedMessage(err.count || 1);
   return err.message || 'Could not move the competition.';
 }
 
@@ -233,9 +253,13 @@ export function MoveDialog({ comp, dayOptions, allCourts, password, initial, onS
   const boxRef = useRef(null);
   const { openedRef, onClickCapture } = useOpenedTapGuard();
   useDialogFocus(boxRef, true);
+  // A drawn competition's move waits for this device's queued time changes.
+  const timeWait = useWaitForQueuedWrites(comp.id, drawn ? TIME_WRITE_KINDS : []);
+  const held = saving || timeWait.waiting;
   // Escape closes it, as every dialog does, except while the move is being
-  // saved: the answer still has to land in this dialog.
-  useEscapeToClose(saving ? undefined : onClose);
+  // saved: the answer still has to land in this dialog. While it waits,
+  // Escape belongs to the waiting screen, which cancels the wait.
+  useEscapeToClose(held ? undefined : onClose);
 
   useEffect(() => {
     let cancelled = false;
@@ -271,15 +295,32 @@ export function MoveDialog({ comp, dayOptions, allCourts, password, initial, onS
   const retime = drawn ? readRetimePreview(preview) : null;
   const unchanged = fresh && date === fresh.date && startTime === fresh.startTime && (drawn || sameList(courts, fresh.courts));
 
-  const save = async () => {
+  const saveNow = async (nowAnyway) => {
     setSaving(true);
     setSaveErr(null);
     try {
-      await onSave({ date, startTime, courts: shownCourts });
+      await onSave({ date, startTime, courts: shownCourts, ...(nowAnyway ? { nowAnyway: true } : {}) });
     } catch (e) {
       setSaveErr(moveErrorMessage(e));
       setSaving(false);
     }
+  };
+  const saveNowRef = useLatestRef(saveNow);
+  const save = () => {
+    setSaveErr(null);
+    timeWait.run((opts) => saveNowRef.current(!!(opts && opts.anyway)));
+  };
+  const moveNowAnyway = async () => {
+    const n = timeWait.count;
+    const ok = await window.confirmDialog({
+      message:
+        `${queuedWritesNounFor('time', n)} made on this device ${n === 1 ? 'has' : 'have'} not reached the server yet. `
+        + 'If you move the competition now, a time changed before the move may land on the old day.\n\n'
+        + 'Move now anyway?',
+      confirmLabel: 'Move now',
+      danger: true,
+    });
+    if (ok) timeWait.runNow({ anyway: true });
   };
 
   const toggleCourt = (court) => {
@@ -287,7 +328,7 @@ export function MoveDialog({ comp, dayOptions, allCourts, password, initial, onS
   };
 
   return (
-    <div className="modal-backdrop" ref={openedRef} onClickCapture={onClickCapture} onClick={() => !saving && onClose()}>
+    <div className="modal-backdrop" ref={openedRef} onClickCapture={onClickCapture} onClick={() => !held && onClose()}>
       <div className="shiaijo-move-confirm cal-move-dialog" role="dialog" aria-modal="true" ref={boxRef}
         aria-labelledby="cal-move-title" data-testid="cal-move-dialog" onClick={(e) => e.stopPropagation()}>
         <h3 id="cal-move-title" className="shiaijo-move-confirm__title">Move {comp.name}</h3>
@@ -340,9 +381,18 @@ export function MoveDialog({ comp, dayOptions, allCourts, password, initial, onS
           </div>
         )}
         {saveErr && <div className="alert alert--error" role="alert">{saveErr}</div>}
+        <QueuedWritesWait
+          wait={timeWait}
+          comp={comp}
+          what="time"
+          title="Waiting before the move"
+          outcome="The move is made"
+          nowLabel="Move now anyway"
+          onNow={moveNowAnyway}
+        />
         <div className="shiaijo-move-confirm__actions">
-          <button type="button" className="btn" onClick={onClose} disabled={saving}>Cancel</button>
-          <button type="button" className="btn btn--primary" onClick={save} disabled={!fresh || !ready || unchanged || saving}>
+          <button type="button" className="btn" onClick={onClose} disabled={held}>Cancel</button>
+          <button type="button" className="btn btn--primary" onClick={save} disabled={!fresh || !ready || unchanged || held}>
             {saving ? 'Moving…' : 'Move'}
           </button>
         </div>

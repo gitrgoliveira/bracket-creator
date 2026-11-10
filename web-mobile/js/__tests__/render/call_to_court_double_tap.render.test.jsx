@@ -64,10 +64,22 @@ afterAll(() => restoreGlobals());
 // Each call gets its own id, so a test can tell which announcement was deleted.
 let nextAnnId = 0;
 
+// The outbox door's answer: at once, with the id the device made; `settled` is
+// the server's word on it, open until a test settles it.
+const sentAnswer = (id, settled) => ({
+  applied: true, pending: true, key: `announce:${id}`, id,
+  settled: settled || Promise.resolve({ id, message: 'x' }),
+});
+const openAnswer = () => {
+  let resolve, reject;
+  const settled = new Promise((res, rej) => { resolve = res; reject = rej; });
+  return { settled, resolve, reject };
+};
+
 beforeEach(() => {
   nextAnnId = 0;
-  window.API.sendAnnouncement = vi.fn(async () => ({ id: `ann-${++nextAnnId}`, message: 'x' }));
-  window.API.deleteAnnouncement = vi.fn(async () => {});
+  window.API.sendAnnouncement = vi.fn(async () => sentAnswer(`ann-${++nextAnnId}`));
+  window.API.deleteAnnouncement = vi.fn(async () => ({ applied: true, pending: true, key: 'k', settled: Promise.resolve(true) }));
   window.API.recordDecision = vi.fn(async () => ({ applied: true }));
   vi.useFakeTimers();
 });
@@ -188,7 +200,7 @@ describe('Call to court double tap (bc-cdbl)', () => {
     showMatches(rerender, onEditScore, firstMatchWith({ status: 'running' }));
     await act(async () => {});
     expect(window.API.deleteAnnouncement).toHaveBeenCalledTimes(1);
-    expect(window.API.deleteAnnouncement).toHaveBeenCalledWith('ann-1', '');
+    expect(window.API.deleteAnnouncement).toHaveBeenCalledWith('ann-1', '', { message: expect.stringContaining('Now calling') });
   });
 
   it('a match started on another device withdraws its call', async () => {
@@ -197,7 +209,7 @@ describe('Call to court double tap (bc-cdbl)', () => {
     await pointerTap(callButtons()[0]);
     showMatches(rerender, onEditScore, firstMatchWith({ status: 'running' }));
     await act(async () => {});
-    expect(window.API.deleteAnnouncement).toHaveBeenCalledWith('ann-1', '');
+    expect(window.API.deleteAnnouncement).toHaveBeenCalledWith('ann-1', '', { message: expect.stringContaining('Now calling') });
   });
 
   it('a call stays up while its match is scheduled or missing from the list', async () => {
@@ -214,37 +226,21 @@ describe('Call to court double tap (bc-cdbl)', () => {
     expect(window.API.deleteAnnouncement).not.toHaveBeenCalled();
   });
 
-  it('a failed withdrawal does not fail the start', async () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    window.API.deleteAnnouncement = vi.fn(async () => { throw new Error('network down'); });
+  it('a start that lands before the call is answered withdraws it at once, by the id the device made', async () => {
+    // The call's send is still out (or queued) when the match starts: the answer
+    // carried the id already, so the withdrawal does not wait for the server.
+    const open = openAnswer();
+    window.API.sendAnnouncement = vi.fn(async () => sentAnswer('ann-late', open.settled));
     const onEditScore = vi.fn().mockResolvedValue({ applied: true });
     const { rerender } = renderConsole({ onEditScore });
     await pointerTap(callButtons()[0]);
     await pointerTap(screen.getAllByRole('button', { name: 'Start match' })[0]);
     await act(async () => {});
-    expect(onEditScore).toHaveBeenCalled();
+    expect(window.API.deleteAnnouncement).not.toHaveBeenCalled();
     showMatches(rerender, onEditScore, firstMatchWith({ status: 'running' }));
     await act(async () => {});
     expect(window.API.deleteAnnouncement).toHaveBeenCalledTimes(1);
-    expect(warn).toHaveBeenCalled();
-    warn.mockRestore();
-  });
-
-  it('a start that lands before the call is answered still withdraws it', async () => {
-    let answer;
-    window.API.sendAnnouncement = vi.fn(() => new Promise((resolve) => { answer = resolve; }));
-    const onEditScore = vi.fn().mockResolvedValue({ applied: true });
-    const { rerender } = renderConsole({ onEditScore });
-    await pointerTap(callButtons()[0]);
-    // The call's request is still out when the match starts.
-    await pointerTap(screen.getAllByRole('button', { name: 'Start match' })[0]);
-    await act(async () => {});
-    showMatches(rerender, onEditScore, firstMatchWith({ status: 'running' }));
-    await act(async () => {});
-    expect(window.API.deleteAnnouncement).not.toHaveBeenCalled();
-    await act(async () => { answer({ id: 'ann-late', message: 'x' }); });
-    await act(async () => {});
-    expect(window.API.deleteAnnouncement).toHaveBeenCalledWith('ann-late', '');
+    expect(window.API.deleteAnnouncement).toHaveBeenCalledWith('ann-late', '', { message: expect.stringContaining('Now calling') });
   });
 
   it('recording the fusensho for a barred match withdraws its call', async () => {
@@ -267,7 +263,7 @@ describe('Call to court double tap (bc-cdbl)', () => {
     expect(window.API.deleteAnnouncement).not.toHaveBeenCalled();
     showMatches(rerender, onEditScore, firstMatchWith({ status: 'completed', decision: 'fusensho' }));
     await act(async () => {});
-    expect(window.API.deleteAnnouncement).toHaveBeenCalledWith('ann-1', '');
+    expect(window.API.deleteAnnouncement).toHaveBeenCalledWith('ann-1', '', { message: expect.stringContaining('Now calling') });
   });
 
   it('a second deliberate call withdraws the first banner once the second is answered, and starting the match withdraws the second', async () => {
@@ -281,8 +277,8 @@ describe('Call to court double tap (bc-cdbl)', () => {
     // so the first banner must come down here, not wait out its expiry. It comes
     // down only once the second call is answered, so the banner is never taken
     // down for a call that did not go out.
-    let answerSecond;
-    window.API.sendAnnouncement.mockImplementationOnce(() => new Promise((resolve) => { answerSecond = resolve; }));
+    const second = openAnswer();
+    window.API.sendAnnouncement.mockImplementationOnce(async () => sentAnswer('ann-2', second.settled));
     const [m1, m2] = twoScheduledMatches();
     showMatches(rerender, onEditScore, [{ ...m1, sideA: { id: 'p1', name: 'Yamada Taro' } }, m2]);
     await act(async () => {});
@@ -291,32 +287,35 @@ describe('Call to court double tap (bc-cdbl)', () => {
     expect(window.API.sendAnnouncement).toHaveBeenCalledTimes(2);
     expect(window.API.sendAnnouncement.mock.calls[1][0]).toContain('Yamada Taro');
     expect(window.API.deleteAnnouncement).not.toHaveBeenCalled();
-    await act(async () => { answerSecond({ id: 'ann-2', message: 'x' }); });
+    await act(async () => { second.resolve({ id: 'ann-2', message: 'x' }); });
     await act(async () => {});
     expect(window.API.deleteAnnouncement).toHaveBeenCalledTimes(1);
-    expect(window.API.deleteAnnouncement).toHaveBeenLastCalledWith('ann-1', '');
+    expect(window.API.deleteAnnouncement).toHaveBeenLastCalledWith('ann-1', '', { message: expect.stringContaining('Now calling') });
 
     await pointerTap(screen.getAllByRole('button', { name: 'Start match' })[0]);
     await act(async () => {});
     showMatches(rerender, onEditScore, firstMatchWith({ status: 'running', sideA: { id: 'p1', name: 'Yamada Taro' } }));
     await act(async () => {});
     expect(window.API.deleteAnnouncement).toHaveBeenCalledTimes(2);
-    expect(window.API.deleteAnnouncement).toHaveBeenLastCalledWith('ann-2', '');
+    expect(window.API.deleteAnnouncement).toHaveBeenLastCalledWith('ann-2', '', { message: expect.stringContaining('Now calling') });
   });
 
-  it('a failed re-send leaves the first call in place: nothing is withdrawn, and starting the match still takes it down', async () => {
+  it('a refused re-send leaves the first call in place: nothing is withdrawn, and starting the match still takes it down', async () => {
     const onEditScore = vi.fn().mockResolvedValue({ applied: true });
     const { rerender } = renderConsole({ onEditScore });
     await pointerTap(callButtons()[0]);
     expect(window.API.sendAnnouncement).toHaveBeenCalledTimes(1);
     await wait(TAP_BOUNCE_MS + 50);
-    window.API.sendAnnouncement.mockImplementationOnce(async () => { throw new Error('network down'); });
+    const refused = openAnswer();
+    window.API.sendAnnouncement.mockImplementationOnce(async () => sentAnswer('ann-2', refused.settled));
     const [m1, m2] = twoScheduledMatches();
     showMatches(rerender, onEditScore, [{ ...m1, sideA: { id: 'p1', name: 'Yamada Taro' } }, m2]);
     await act(async () => {});
     await pointerTap(callButtons()[0]);
     await act(async () => {});
     expect(window.API.sendAnnouncement).toHaveBeenCalledTimes(2);
+    // The server refuses the re-send (the outbox tells the operator).
+    await act(async () => { refused.reject(new Error('refused')); await refused.settled.catch(() => {}); });
     expect(window.API.deleteAnnouncement).not.toHaveBeenCalled();
     // The first banner is still up, so starting its match takes it down.
     await pointerTap(screen.getAllByRole('button', { name: 'Start match' })[0]);
@@ -324,7 +323,7 @@ describe('Call to court double tap (bc-cdbl)', () => {
     showMatches(rerender, onEditScore, firstMatchWith({ status: 'running', sideA: { id: 'p1', name: 'Yamada Taro' } }));
     await act(async () => {});
     expect(window.API.deleteAnnouncement).toHaveBeenCalledTimes(1);
-    expect(window.API.deleteAnnouncement).toHaveBeenCalledWith('ann-1', '');
+    expect(window.API.deleteAnnouncement).toHaveBeenCalledWith('ann-1', '', { message: expect.stringContaining('Now calling') });
   });
 
   it('a re-call with unchanged text deletes nothing: the server already replaced the first banner, and starting the match withdraws the new one', async () => {
@@ -346,7 +345,7 @@ describe('Call to court double tap (bc-cdbl)', () => {
     showMatches(rerender, onEditScore, firstMatchWith({ status: 'running' }));
     await act(async () => {});
     expect(window.API.deleteAnnouncement).toHaveBeenCalledTimes(1);
-    expect(window.API.deleteAnnouncement).toHaveBeenCalledWith('ann-2', '');
+    expect(window.API.deleteAnnouncement).toHaveBeenCalledWith('ann-2', '', { message: expect.stringContaining('Now calling') });
   });
 
   it('after an unchanged re-call, a changed re-call takes down the banner that is up, once it is answered', async () => {
@@ -359,8 +358,8 @@ describe('Call to court double tap (bc-cdbl)', () => {
     expect(window.API.deleteAnnouncement).not.toHaveBeenCalled();
 
     await wait(TAP_BOUNCE_MS + 50);
-    let answerThird;
-    window.API.sendAnnouncement.mockImplementationOnce(() => new Promise((resolve) => { answerThird = resolve; }));
+    const third = openAnswer();
+    window.API.sendAnnouncement.mockImplementationOnce(async () => sentAnswer('ann-3', third.settled));
     const [m1, m2] = twoScheduledMatches();
     showMatches(rerender, onEditScore, [{ ...m1, sideA: { id: 'p1', name: 'Yamada Taro' } }, m2]);
     await act(async () => {});
@@ -368,11 +367,11 @@ describe('Call to court double tap (bc-cdbl)', () => {
     await act(async () => {});
     expect(window.API.sendAnnouncement).toHaveBeenCalledTimes(3);
     expect(window.API.deleteAnnouncement).not.toHaveBeenCalled();
-    await act(async () => { answerThird({ id: 'ann-3', message: 'x' }); });
+    await act(async () => { third.resolve({ id: 'ann-3', message: 'x' }); });
     await act(async () => {});
     // ann-2 is the banner up for this match; ann-1 was replaced by the server.
     expect(window.API.deleteAnnouncement).toHaveBeenCalledTimes(1);
-    expect(window.API.deleteAnnouncement).toHaveBeenCalledWith('ann-2', '');
+    expect(window.API.deleteAnnouncement).toHaveBeenCalledWith('ann-2', '', { message: expect.stringContaining('Now calling') });
   });
 
   it('starting a match that was never called withdraws nothing', async () => {
@@ -405,7 +404,7 @@ describe('Call to court double tap (bc-cdbl)', () => {
       shown: expect.objectContaining({ id: 'm2', compId: 'c1', status: 'scheduled' }),
     });
     expect(window.API.deleteAnnouncement).toHaveBeenCalledTimes(1);
-    expect(window.API.deleteAnnouncement).toHaveBeenCalledWith('ann-1', '');
+    expect(window.API.deleteAnnouncement).toHaveBeenCalledWith('ann-1', '', { message: expect.stringContaining('Now calling') });
   });
 
   it('a move that fails leaves the call up', async () => {

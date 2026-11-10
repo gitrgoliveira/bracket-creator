@@ -20,6 +20,13 @@ import { holdsUnsaved, discardUnsaved } from './unsaved_entries.jsx';
 import { scoreRowMatchLabel } from './pool_ids.jsx';
 import { mergeSavedCompetition } from './competition_put_body.jsx';
 import { AdminCalendarPage } from './admin_calendar.jsx';
+import { useWaitForQueuedWrites, QueuedWritesWait, queuedWritesNounFor } from './queued_writes_wait.jsx';
+import { checkInApplies } from './competition_shape.jsx';
+import { serverHeldCheckIns, NO_CHECK_IN_HELD_SENTENCE } from './qualifier_preview.jsx';
+import { isOffline, savedOfflineSentence } from './write_result.jsx';
+import { dismissToastById } from './toast_queue.jsx';
+import { onDocumentSettled } from './document_versions.jsx';
+import { useLatestRef } from './latest_ref.jsx';
 
 const { useState, useEffect, useRef } = React;
 
@@ -138,12 +145,41 @@ function mergeTournamentPatch(currentT, patch, sessionPassword, locked) {
   return next;
 }
 
+// tournamentFromConflict is the tournament after a save was refused as stale
+// (tournament_changed): the 409's copy replaces ours whole, not as a patch on
+// top of it, because the server leaves an emptied optional field out of its
+// copy, and a patch would keep our stale value for it (and the reloaded form
+// would show and re-save it). What the copy does not hold carries over from
+// ours: the competitions list and, through mergeTournamentPatch, the password.
+function tournamentFromConflict(currentT, copy, sessionPassword, locked) {
+  return mergeTournamentPatch({ competitions: currentT.competitions }, copy, sessionPassword, locked);
+}
+
+// tournamentPasswordChanged: does this settings body CHANGE the password (the
+// auth door, which stays direct)? A body carrying the session password, or none
+// (locked mode), only keeps it, and goes through the outbox like any other save.
+function tournamentPasswordChanged(body, sessionPassword) {
+  return typeof body.password === "string" && body.password !== "" && body.password !== sessionPassword;
+}
+
+// The outbox kind of a tournament settings save (API.updateTournament), which
+// belongs to no competition (`''`): what a password change waits for, since it
+// is sent direct and a settings save still queued here would land after it.
+const TOURNAMENT_WRITE_KINDS = Object.freeze(["tournament"]);
+
+// The id of the toast a settings save made with no connection shows, so a late
+// refusal the Edit Tournament form says in its banner can take it down.
+const SETTINGS_SAVED_OFFLINE_TOAST = "tournament-settings-saved-offline";
+
 function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChange, tweaks, password, view: propView, setView: propSetView, showToast, authConfig }) {
   const [internalView, setInternalView] = useState({ kind: "dashboard" });
   const view = propView || internalView;
   const setView = propSetView || setInternalView;
   // Hooks must be declared unconditionally before any conditional returns.
   const [adminCompData, setAdminCompData] = useState(null);
+  // Bumped by the Edit Tournament page's Reload, which remounts it from the
+  // current settings after a save was refused as stale (tournament_changed).
+  const [settingsReloads, setSettingsReloads] = useState(0);
   const [adminLoading, setAdminLoading] = useState(false);
   // mp-djc: dashboard "📣 Announce" button opens the broadcast composer
   // in a modal. State lives here (alongside other AdminApp UI state); the
@@ -183,6 +219,50 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
   // / setView post-await. Narrow window but real. Gate via mountedRef.
   const mountedRef = useRef(true);
   useEffect(() => () => { mountedRef.current = false; }, []);
+  // A settings save is refused after its form has closed (it was kept and sent
+  // later): the Edit Tournament form, if it is open then, shows the refusal
+  // with what was typed kept. `lateRefusal` is what it is handed; the view kind
+  // is read through a ref because the refusal arrives long after the tap.
+  const viewKindRef = useLatestRef(view.kind);
+  const [lateRefusal, setLateRefusal] = useState(null);
+  useEffect(() => { if (view.kind !== "editTournament") setLateRefusal(null); }, [view.kind]);
+  // A password change waits for this device's queued settings saves
+  // (useWaitForQueuedWrites, the one owner of that wait): the screen says what
+  // it waits for, with Change the password now and Cancel. The form awaits the
+  // save, so a Cancel answers it (`passwordWaitRef` holds that answer).
+  const settingsWait = useWaitForQueuedWrites("", TOURNAMENT_WRITE_KINDS);
+  // bc-obox C1: Start all draws every offered competition not yet drawn, so it
+  // waits for the check-ins this device still has queued for those, as
+  // Generate draw and a competition's own Start do (the same owner, over the
+  // list). A drawn competition, or one check-in does not apply to, waits for
+  // nothing.
+  const startAllDraws = ((startAll && startAll.comps) || [])
+    .filter((c) => c.status !== "draw-ready" && checkInApplies(t, c.checkInEnabled));
+  const startAllWait = useWaitForQueuedWrites(startAllDraws.map((c) => c.id),
+    startAllDraws.length > 0 ? window.API.CHECK_IN_WRITE_KINDS : []);
+  const passwordWaitRef = useRef(null);
+  const cancelPasswordWait = () => {
+    settingsWait.cancel();
+    const answer = passwordWaitRef.current;
+    passwordWaitRef.current = null;
+    if (answer) answer(false);
+  };
+  // "Change the password now": the queued settings saves would land after the
+  // password change, so the operator is told what that leaves out, as Start
+  // all's "Start now anyway" does. Cancel keeps waiting; the session password
+  // switches only once the change is sent (updateTournament, after runNow).
+  const changePasswordNowAnyway = async () => {
+    const n = settingsWait.count;
+    const ok = await window.confirmDialog({
+      message:
+        `Changing the password now leaves out ${queuedWritesNounFor("settings", n)} made on this device that ${n === 1 ? "has" : "have"} not reached the server yet: ` +
+        `${n === 1 ? "it would arrive" : "they would arrive"} after the password change.\n\n` +
+        `Change the password now anyway?`,
+      confirmLabel: "Change now",
+      danger: true,
+    });
+    if (ok) settingsWait.runNow();
+  };
 
   // R4 (bc-evts stage 3 review 2): a court move or time change this device
   // makes shows at once, as a push would, and a refusal puts the old value back
@@ -548,6 +628,35 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
     // Persistent result: does NOT auto-dismiss. Operator closes it.
     setStartAll({ phase: "result", comps, failed, succeeded: comps.length - failed.length });
   };
+  const runStartAllRef = useLatestRef(runStartAll);
+  const startAllAfterCheckIns = (comps) => startAllWait.run(() => runStartAllRef.current(comps));
+  // "Start now anyway": the draws are made from the check-ins the server
+  // holds, so the operator is told who that leaves out. A competition the wait
+  // is for whose server holds no check-in draws everyone (the opt-in rule), so
+  // the confirm says that for it instead (serverHeldCheckIns).
+  const startAllNowAnyway = async () => {
+    const n = startAllWait.count;
+    const waitedFor = startAllDraws.filter((c) => window.API.queuedWritesOf(c.id, window.API.CHECK_IN_WRITE_KINDS) > 0);
+    const noneHeld = waitedFor.filter((c) => serverHeldCheckIns(c.players, window.API.queuedCheckInsWere(c.id)) === 0);
+    // Names the competitions whose server holds no check-in; a wait for one
+    // competition alone says NO_CHECK_IN_HELD_SENTENCE instead.
+    const noneHeldSentence = () =>
+      `The server holds no check-in for ${noneHeld.map((c) => c.name).join(", ")}, so ${noneHeld.length === 1 ? "its draw includes" : "their draws include"} every competitor.`;
+    let cost = waitedFor.length > 1 && noneHeld.length === waitedFor.length ? noneHeldSentence() : NO_CHECK_IN_HELD_SENTENCE;
+    if (noneHeld.length < waitedFor.length) {
+      cost = `A draw made now uses only the check-ins the server holds: a competitor whose check-in has not arrived is left out of the draw.`;
+      if (noneHeld.length > 0) cost += ` ${noneHeldSentence()}`;
+    }
+    const ok = await window.confirmDialog({
+      message:
+        `${queuedWritesNounFor("checkin", n)} made on this device ${n === 1 ? "has" : "have"} not reached the server yet. ` +
+        `${cost}\n\n` +
+        `Start now anyway?`,
+      confirmLabel: "Start now",
+      danger: true,
+    });
+    if (ok) startAllWait.runNow();
+  };
 
   const startCompetition = async (cid) => {
     const c = (t.competitions || []).find(cc => cc.id === cid);
@@ -570,46 +679,110 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
   // orphaned-shiaijo refusal — long gone by the time the operator scrolled
   // back to the Save button. `false` still means "component unmounted mid-PUT"
   // (nothing to report to), which is why the boolean survives.
+  // bc-obox G4b: a save goes to the outbox and is answered at once ({ pending,
+  // settled }), so the form closes on that answer and the app shows the
+  // operator's settings straight away; the server's answer arrives later, as
+  // `settled`. A save refused as stale (tournament_changed) or on its merits
+  // takes the current copy back, and says so in the Edit Tournament form when it
+  // is open then (the typed values stay until its Reload), else the outbox's
+  // alert does. A password change is the auth door and stays direct: it waits
+  // for the settings saves still queued, then answers as it always did.
   const updateTournament = async (patch) => {
+    // Treat an unknown (null) authConfig conservatively; same as locked.
+    // If the mode hasn't resolved yet, sending the session password in the
+    // PUT body would trigger a 400 "password rotation is disabled" on a
+    // locked-mode server. In file mode an empty body password is safe:
+    // the backend preserves the on-disk value rather than clearing it.
+    const locked = authConfig === null || authConfig.mode === "locked";
     try {
-      // Surface a new password to the parent BEFORE the API call so the
-      // session/store updates even if the request errors after (matches
-      // pre-fix timing. onPasswordChange fired pre-await in the original).
-      if (patch.password && onPasswordChange) onPasswordChange(patch.password);
       // Use tRef.current (not the closure-captured `t`) for BOTH the API
-      // body and the post-await local-state update. Same closure-capture
-      // bug shape that mergeCompetitionsIntoTournament's docstring
-      // describes for the other async handlers. If SSE updates the
-      // tournament (e.g. a competition starts, a match completes in
-      // another comp) during the in-flight save, the closure-captured
-      // `t` would be stale; using it for `onUpdate(next)` would clobber
-      // the SSE-driven updates with pre-save state until the next refresh.
-      // Treat an unknown (null) authConfig conservatively; same as locked.
-      // If the mode hasn't resolved yet, sending the session password in the
-      // PUT body would trigger a 400 "password rotation is disabled" on a
-      // locked-mode server. In file mode an empty body password is safe:
-      // the backend preserves the on-disk value rather than clearing it.
-      const locked = authConfig === null || authConfig.mode === "locked";
+      // body and the local-state updates. Same closure-capture bug shape that
+      // mergeCompetitionsIntoTournament's docstring describes for the other
+      // async handlers: an SSE update during the save would be clobbered by
+      // pre-save state until the next refresh.
       const sendBody = mergeTournamentPatch(tRef.current, patch, password, locked);
-      await window.API.updateTournament(sendBody, password);
-      // Bail if the admin navigated away during the in-flight PUT.
-      // mirrors startAllCompetitions / refreshCompsAfterCreate.
-      // Without this gate, onUpdateRef.current (parent's
-      // setState) and showToast fire on an unmounted component,
-      // producing the standard React setState-after-unmount warning.
-      // Caught by /deep-review iterative pass after round-11 swept
-      // updateTournament to tRef/onUpdateRef but missed the unmount
-      // guard the other handlers carry.
-      if (!mountedRef.current) return false;
-      // Re-read tRef.current AFTER the await. Additional SSE events may
-      // have landed during the save. The patch we just persisted is
-      // applied on top of the freshest snapshot.
+      // sendBody carries the patch's tournamentVersion: the settings the Edit
+      // Tournament form was filled from, not tRef.current's freshest copy. A
+      // save made after another device's is then refused (tournament_changed)
+      // instead of writing the form's old values over theirs.
+      if (tournamentPasswordChanged(sendBody, password)) {
+        // Goes on at once when nothing is queued; else once the queued saves
+        // have arrived, or when the operator chooses to go on. Cancel answers
+        // false: nothing is sent and the form stays open as it was.
+        const go = await new Promise((resolve) => {
+          passwordWaitRef.current = resolve;
+          settingsWait.run(() => { passwordWaitRef.current = null; resolve(true); });
+        });
+        if (!go || !mountedRef.current) return false;
+        // Surface the new password to the parent BEFORE the API call so the
+        // session/store updates even if the request errors after.
+        if (onPasswordChange) onPasswordChange(patch.password);
+        const saved = await window.API.updateTournamentPassword(sendBody, password);
+        // Bail if the admin navigated away during the in-flight PUT.
+        if (!mountedRef.current) return false;
+        // Re-read tRef.current AFTER the await: the patch just persisted is
+        // applied on top of the freshest snapshot, with the version the save
+        // answered, so the next save is made from the settings just stored.
+        onUpdateRef.current({ ...mergeTournamentPatch(tRef.current, patch, password, locked), tournamentVersion: saved.tournamentVersion });
+        showToast("Tournament updated");
+        return true;
+      }
+      // What the form has not closed over yet: the refusal handlers below read
+      // these at the time the answer comes.
+      const takeCurrentCopy = async (e) => {
+        let copy = e && e.code === "tournament_changed" ? e.tournament : null;
+        if (!copy) {
+          // Refused on its merits: the settings shown are not what is stored,
+          // so the stored ones come back (best effort; the next refetch does it
+          // too).
+          try { copy = await window.API.fetchTournament(); } catch (_e) { copy = null; }
+        }
+        if (copy && !copy.error) {
+          onUpdateRef.current(tournamentFromConflict(tRef.current, copy, password, locked));
+        }
+      };
+      const res = await window.API.updateTournament(sendBody, password, {
+        onRefusal: (e) => {
+          // The save was not made: the "saved, goes out once the connection is
+          // back" toast is no longer true, whoever tells the refusal (shown or
+          // still queued behind another toast).
+          dismissToastById(SETTINGS_SAVED_OFFLINE_TOAST);
+          // The form, when open now, says it itself (with what was typed kept);
+          // else the outbox's alert does.
+          if (!mountedRef.current || viewKindRef.current !== "editTournament") return false;
+          setLateRefusal({ code: e && e.code, message: e && e.message });
+          return true;
+        },
+      });
+      // The settings the operator just saved show at once (the freshest
+      // snapshot with the patch on top, as before); the version they were
+      // saved at comes with the server's answer.
       onUpdateRef.current(mergeTournamentPatch(tRef.current, patch, password, locked));
-      showToast("Tournament updated");
+      // Kept on this device and sent when the link allows: a save made with no
+      // connection says so now, not when it lands (the same line the court-call
+      // composer gives).
+      if (isOffline()) showToast(savedOfflineSentence("Tournament settings"), "success", { id: SETTINGS_SAVED_OFFLINE_TOAST });
+      onDocumentSettled(res.settled, (saved) => {
+        // Discarded from the held-writes list (or sent by another tab, whose
+        // answer this one does not hold): nothing of it is known here, so the
+        // stored settings come back.
+        if (!saved || saved.discarded) { takeCurrentCopy(null); return; }
+        // Only the version: tRef.current already holds the patch, and a later
+        // save of the operator's, queued behind this one, must not be undone.
+        onUpdateRef.current({ ...tRef.current, tournamentVersion: saved.tournamentVersion });
+        if (mountedRef.current) showToast("Tournament updated");
+      }, takeCurrentCopy);
       return true;
     } catch (e) {
       if (!mountedRef.current) return false;
-      showToast(e.message, "error");
+      // The settings changed on another device: the app takes the current copy
+      // (the Edit form keeps what was typed until its Reload remounts it from
+      // this copy, so a stale save stays refused until then).
+      if (e && e.code === "tournament_changed" && e.tournament) {
+        onUpdateRef.current(tournamentFromConflict(tRef.current, e.tournament, password, locked));
+      } else {
+        showToast(e.message, "error");
+      }
       throw e;
     }
   };
@@ -830,10 +1003,19 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
       />}
       {startAll && <StartAllModal
         state={startAll}
-        onConfirm={() => runStartAll(startAll.comps)}
-        onRetry={() => runStartAll(startAll.failed.map(f => f.comp))}
+        onConfirm={() => startAllAfterCheckIns(startAll.comps)}
+        onRetry={() => startAllAfterCheckIns(startAll.failed.map(f => f.comp))}
         onClose={() => setStartAll(null)}
       />}
+      <QueuedWritesWait
+        wait={startAllWait}
+        comps={startAllDraws}
+        what="checkin"
+        title="Waiting before the start"
+        outcome="The draws are made and the competitions start"
+        nowLabel="Start now anyway"
+        onNow={startAllNowAnyway}
+      />
     </>;
   }
 
@@ -867,16 +1049,30 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
   }
 
   if (view.kind === "editTournament") {
-    return <AdminEditTournament
+    return <>
+    <AdminEditTournament
+      key={settingsReloads}
       tournament={t}
       onCancel={() => setView({ kind: "dashboard" })}
+      onReload={() => { setLateRefusal(null); setSettingsReloads((n) => n + 1); }}
+      refusal={lateRefusal}
       onSave={async (patch) => { const ok = await updateTournament(patch); if (ok && mountedRef.current) setView({ kind: "dashboard" }); return ok; }}
       onLogout={onLogout}
       onViewerMode={onViewerMode}
       authConfig={authConfig}
       password={password}
       showToast={showToast}
-    />;
+    />
+    <QueuedWritesWait
+      wait={{ ...settingsWait, cancel: cancelPasswordWait }}
+      comp={null}
+      what="settings"
+      outcome="The password is changed"
+      nowLabel="Change the password now"
+      onNow={changePasswordNowAnyway}
+      title="Waiting for earlier settings changes"
+    />
+    </>;
   }
 
   if (view.kind === "schedule") {
@@ -1053,7 +1249,14 @@ function normalizeCreatedRecord(created) {
 // another competition, or none, is left as it is.
 function storedCompetitionInDetail(prev, cid, stored, sent) {
   if (!prev || !prev.config || prev.config.id !== cid || !stored) return prev;
-  const { config } = normalizeCompetitionDetail({ config: mergeSavedCompetition(prev.config, stored, sent) });
+  const { config } = normalizeCompetitionDetail({
+    config: mergeSavedCompetition(prev.config, stored, sent),
+    // Siblings of config on the wire that a PUT's answer does not carry: the
+    // detail's own stay, or the awards panel loses its version and the
+    // data-issues notice vanishes until a refetch.
+    dataIssues: prev.config.dataIssues,
+    awardsVersion: prev.config.awardsVersion,
+  });
   // A competitor's number is composed when the competition is read, never
   // stored, so the PUT's answer carries none: the number shown stays, by id,
   // composed again under the prefix the save stored (stage 6 review 11,
@@ -1194,4 +1397,4 @@ window.mergeSavedCompetition = mergeSavedCompetition;
 // component with no window binding, and its confirm phase now carries the
 // "will NOT be started" list, which is the surface that stops "Start all"
 // offering a competition the server would refuse.
-export { mergeCompetitionsIntoTournament, mergeTournamentPatch, normalizeCreatedRecord, refreshFailureToast, StartAllModal, attemptScoreWrite, storedCompetitionInDetail, mergeSavedCompetition };
+export { mergeCompetitionsIntoTournament, mergeTournamentPatch, tournamentFromConflict, normalizeCreatedRecord, refreshFailureToast, StartAllModal, attemptScoreWrite, storedCompetitionInDetail, mergeSavedCompetition };

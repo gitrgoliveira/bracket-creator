@@ -17,7 +17,7 @@
 
 import { squadMemberLabel, squadSlotLabel } from './squad_member_label.jsx';
 import { scoreRowMatchLabel } from './pool_ids.jsx';
-import { noAnswerSentence } from './write_result.jsx';
+import { noAnswerSentence, isNoConnection } from './write_result.jsx';
 import { normalizeParticipantName } from './data.jsx';
 
 // squadRosterEntries: the ONE builder of a lineup picker's list for a team
@@ -448,7 +448,7 @@ export const REMOVED_UNREAD_NOTICE = "Removed. The lineup this match now uses co
 // or in the fallback when it carries none.
 export const LINEUP_READ_NO_ANSWER = noAnswerSentence("The lineup could not be read");
 export function lineupReadFailure(error) {
-  if (error instanceof TypeError || (error && error.timedOut)) return LINEUP_READ_NO_ANSWER;
+  if (isNoConnection(error)) return LINEUP_READ_NO_ANSWER;
   return (error && error.message) || "Failed to load lineup";
 }
 

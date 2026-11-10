@@ -2025,6 +2025,45 @@ describe('API Utils', () => {
         expect(caught.competition).toEqual(conflictComp);
       });
 
+      // bc-obox: the two document doors are outbox entries; the call answers
+      // at once ({ pending, settled }) and the refusal rejects `settled`, with
+      // the shape the direct door threw. The outbox logs the refusal.
+      const expectRefusalLogged = (status) => {
+        expect(console.warn.mock.calls.map((a) => String(a[0]))).toEqual([expect.stringContaining(`rejected (${status})`)]);
+        console.warn.mockClear();
+      };
+      it('updateTournament settles rejecting with e.code and the current settings on 409 tournament_changed', async () => {
+        const current = { name: 'Fresh', tournamentVersion: 'v-curr' };
+        global.fetch = vi.fn().mockResolvedValue({
+          ok: false,
+          status: 409,
+          json: async () => ({ code: 'tournament_changed', error: 'The tournament settings changed, reload them.', tournamentVersion: 'v-curr', tournament: current }),
+        });
+        const res = await API.updateTournament({ name: 'Mine', tournamentVersion: 'v-old' }, 'pw');
+        expect(res.pending).toBe(true);
+        const caught = await res.settled.catch((e) => e);
+        expect(caught.message).toBe('The tournament settings changed, reload them.');
+        expect(caught.code).toBe('tournament_changed');
+        expect(caught.tournament).toEqual(current);
+        expectRefusalLogged(409);
+      });
+
+      it('updateCompetitionAwards settles rejecting with e.code, the current list and its version on 409 awards_changed', async () => {
+        const stored = [{ title: 'Fighting Spirit', recipientName: 'Suzuki' }];
+        global.fetch = vi.fn().mockResolvedValue({
+          ok: false,
+          status: 409,
+          json: async () => ({ code: 'awards_changed', error: 'The awards changed, reload them.', awardsVersion: 'a-curr', fightingSpiritAwards: stored }),
+        });
+        const res = await API.updateCompetitionAwards('c1', [], 'pw', 'a-old');
+        expect(res.pending).toBe(true);
+        const caught = await res.settled.catch((e) => e);
+        expect(caught.code).toBe('awards_changed');
+        expect(caught.awardsVersion).toBe('a-curr');
+        expect(caught.fightingSpiritAwards).toEqual(stored);
+        expectRefusalLogged(409);
+      });
+
       it.each([
         ['undo_stale', 'Undo is stale, please refresh.'],
         ['retime_retry', 'Retime conflict, retry.'],

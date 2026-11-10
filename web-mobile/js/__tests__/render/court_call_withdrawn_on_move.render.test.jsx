@@ -159,7 +159,7 @@ describe('Court call withdrawn on move', () => {
       await Promise.resolve();
     });
     expect(window.API.deleteAnnouncement).toHaveBeenCalledTimes(1);
-    expect(window.API.deleteAnnouncement).toHaveBeenCalledWith(annId, '');
+    expect(window.API.deleteAnnouncement).toHaveBeenCalledWith(annId, '', { message: expect.stringContaining('Now calling') });
   });
 
   it('b. withdraws call when match_updated names another court in result.court', async () => {
@@ -172,7 +172,7 @@ describe('Court call withdrawn on move', () => {
       await Promise.resolve();
     });
     expect(window.API.deleteAnnouncement).toHaveBeenCalledTimes(1);
-    expect(window.API.deleteAnnouncement).toHaveBeenCalledWith(annId, '');
+    expect(window.API.deleteAnnouncement).toHaveBeenCalledWith(annId, '', { message: expect.stringContaining('Now calling') });
   });
 
   it('c. withdraws call when a refetch lists the scheduled match on another court without push', async () => {
@@ -184,7 +184,7 @@ describe('Court call withdrawn on move', () => {
       await Promise.resolve();
     });
     expect(window.API.deleteAnnouncement).toHaveBeenCalledTimes(1);
-    expect(window.API.deleteAnnouncement).toHaveBeenCalledWith(annId, '');
+    expect(window.API.deleteAnnouncement).toHaveBeenCalledWith(annId, '', { message: expect.stringContaining('Now calling') });
   });
 
   it('d. withdraws call when a refetch no longer lists the competition at all', async () => {
@@ -195,7 +195,7 @@ describe('Court call withdrawn on move', () => {
       await Promise.resolve();
     });
     expect(window.API.deleteAnnouncement).toHaveBeenCalledTimes(1);
-    expect(window.API.deleteAnnouncement).toHaveBeenCalledWith(annId, '');
+    expect(window.API.deleteAnnouncement).toHaveBeenCalledWith(annId, '', { message: expect.stringContaining('Now calling') });
   });
 
   it('e. leaves call alone when match_updated carries no court', async () => {
@@ -259,7 +259,7 @@ describe('Court call withdrawn on move', () => {
       await Promise.resolve();
     });
     expect(window.API.deleteAnnouncement).toHaveBeenCalledTimes(1);
-    expect(window.API.deleteAnnouncement).toHaveBeenCalledWith(annId, '');
+    expect(window.API.deleteAnnouncement).toHaveBeenCalledWith(annId, '', { message: expect.stringContaining('Now calling') });
 
     const compMoved = makeComp({ court: 'B' });
     window.API.fetchCourtMatches.mockResolvedValueOnce([compMoved]);
@@ -279,7 +279,7 @@ describe('Court call withdrawn on move', () => {
       await Promise.resolve();
     });
     expect(window.API.deleteAnnouncement).toHaveBeenCalledTimes(1);
-    expect(window.API.deleteAnnouncement).toHaveBeenCalledWith(annId, '');
+    expect(window.API.deleteAnnouncement).toHaveBeenCalledWith(annId, '', { message: expect.stringContaining('Now calling') });
   });
 
   it('j. a local optimistic court patch alone does NOT withdraw the call', async () => {
@@ -308,7 +308,7 @@ describe('Court call withdrawn on move', () => {
       await Promise.resolve();
     });
     expect(window.API.deleteAnnouncement).toHaveBeenCalledTimes(1);
-    expect(window.API.deleteAnnouncement).toHaveBeenCalledWith(annId, '');
+    expect(window.API.deleteAnnouncement).toHaveBeenCalledWith(annId, '', { message: expect.stringContaining('Now calling') });
 
     // Subsequent refetch also showing it on court B does not withdraw again
     const compMoved = makeComp({ court: 'B' });
@@ -345,7 +345,7 @@ describe('Court call withdrawn on move', () => {
       await Promise.resolve();
     });
     expect(window.API.deleteAnnouncement).toHaveBeenCalledTimes(1);
-    expect(window.API.deleteAnnouncement).toHaveBeenCalledWith(annId, '');
+    expect(window.API.deleteAnnouncement).toHaveBeenCalledWith(annId, '', { message: expect.stringContaining('Now calling') });
   });
 
   it('l. a refused move (the court put back) leaves the call up', async () => {
@@ -397,7 +397,7 @@ describe('Court call withdrawn on move', () => {
       await Promise.resolve();
     });
     expect(window.API.deleteAnnouncement).toHaveBeenCalledTimes(1);
-    expect(window.API.deleteAnnouncement).toHaveBeenCalledWith(annId, '');
+    expect(window.API.deleteAnnouncement).toHaveBeenCalledWith(annId, '', { message: expect.stringContaining('Now calling') });
   });
 
   it('n2. before the court feed has loaded (courtComps is null), nothing is withdrawn', async () => {
@@ -442,7 +442,7 @@ describe('Court call withdrawn on move', () => {
     });
     // Once feed loads, the call is withdrawn.
     expect(window.API.deleteAnnouncement).toHaveBeenCalledTimes(1);
-    expect(window.API.deleteAnnouncement).toHaveBeenCalledWith(`ann-${nextAnnId}`, '');
+    expect(window.API.deleteAnnouncement).toHaveBeenCalledWith(`ann-${nextAnnId}`, '', { message: expect.stringContaining('Now calling') });
   });
 
   it('n3. leaves call alone when court feed drops competition but court move is still queued locally', async () => {
@@ -471,6 +471,6 @@ describe('Court call withdrawn on move', () => {
       await Promise.resolve();
     });
     expect(window.API.deleteAnnouncement).toHaveBeenCalledTimes(1);
-    expect(window.API.deleteAnnouncement).toHaveBeenCalledWith(annId, '');
+    expect(window.API.deleteAnnouncement).toHaveBeenCalledWith(annId, '', { message: expect.stringContaining('Now calling') });
   });
 });

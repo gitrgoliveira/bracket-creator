@@ -138,6 +138,24 @@ describe('the outbox\'s own storage key (F4)', () => {
         expect(read(NEW_KEY)).toHaveLength(1);
     });
 
+    it('a check-in, a court call and a settings save a previous page left are replayed after a reload (bc-obox)', async () => {
+        await API.toggleCheckIn('c1', 'p1', true, 'pw');
+        await API.sendAnnouncement('Call', 5, 'pw');
+        await API.updateTournament({ name: 'Cup', tournamentVersion: 'v0', password: 'pw' }, 'pw');
+        await API.updateCompetitionAwards('c1', [], 'pw', 'a0');
+        expect(read(NEW_KEY)).toHaveLength(4);
+        await load();
+        const sent = server();
+        await reconnect();
+        expect(sent.map((r) => `${r.method} ${r.url}`).sort()).toEqual([
+            'POST /api/tournament/announce',
+            'PUT /api/competitions/c1/awards',
+            'PUT /api/competitions/c1/participants/p1/checkin',
+            'PUT /api/tournament',
+        ]);
+        expect(read(NEW_KEY)).toEqual([]);
+    });
+
     it('a logout wipe clears both keys', async () => {
         await API.addTeamMember('c1', 't1', 'Ren Abe', 'pw');
         _lsStore[OLD_KEY] = '[]';

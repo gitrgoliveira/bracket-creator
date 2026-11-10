@@ -29,9 +29,13 @@ import (
 // off entirely.
 func noCompMatches(string) ([]state.MatchResult, *state.Bracket, error) { return nil, nil, nil }
 
-// membershipPutTournament PUTs a tournament body and returns the recorder.
+// membershipPutTournament PUTs a tournament body, made from the settings
+// stored now (their tournamentVersion), and returns the recorder.
 func membershipPutTournament(t *testing.T, r *gin.Engine, body map[string]any) *httptest.ResponseRecorder {
 	t.Helper()
+	if _, ok := body["tournamentVersion"]; !ok {
+		body["tournamentVersion"] = tournamentVersionOf(t, r)
+	}
 	b, err := json.Marshal(body)
 	require.NoError(t, err)
 	w := httptest.NewRecorder()

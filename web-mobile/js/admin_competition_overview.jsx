@@ -14,6 +14,9 @@ import { blockMinutes, parseClock, formatClock, computePauseRowStatus } from './
 import { seededRanks, deriveTournamentDays } from './admin_helpers.jsx';
 import { checkInApplies } from './competition_shape.jsx';
 import { useUnsavedInput } from './app_version.jsx';
+import { isOffline, savedOfflineSentence } from './write_result.jsx';
+import { onDocumentSettled } from './document_versions.jsx';
+import { dismissToastById } from './toast_queue.jsx';
 // One owner for what the operator is told when a file on disk does not say what
 // the app expects; shared with the pool surfaces so the wording cannot drift.
 import {
@@ -1001,6 +1004,10 @@ function FightingSpiritAwardsEditor({ c, password, showToast }) {
   const withKey = (a) => ({ ...a, _key: keyCounterRef.current++ });
   const [awards, setAwards] = useState(() => (c.fightingSpiritAwards || []).map(withKey));
   const [saving, setSaving] = useState(false);
+  // The list changed on another device after this one was opened
+  // (awards_changed): nothing was written, and `conflict` holds the list and
+  // version now stored. Save waits for Reload, which takes them.
+  const [conflict, setConflict] = useState(null);
   // `dirty` guards the prop-sync effect: the parent refetches the competition
   // on unrelated SSE events (match updates, status changes), which would
   // otherwise clobber the operator's typed-but-unsaved edits. We only re-sync
@@ -1012,43 +1019,168 @@ function FightingSpiritAwardsEditor({ c, password, showToast }) {
   const lastCompIdRef = useRef(c.id);
   const mountedRef = useRef(true);
   useEffect(() => () => { mountedRef.current = false; }, []);
+  // The version of the awards list the next save is made from: the one the
+  // competition detail served, or the one the last save answered (the detail
+  // refetch after a save can land later than a second save). A served version
+  // is taken only along with the list it describes: while unsaved edits keep an
+  // older list on screen, the version stays with that list, so a save over a
+  // list another device has since changed is refused (awards_changed) instead
+  // of overwriting it.
+  const awardsVersionRef = useRef(c.awardsVersion);
+  // The versions this editor has moved past on this competition, until the
+  // served version catches up with the one held. A refetch that lands late can
+  // still carry one of them, and taking it would put the older version back
+  // under a list a later save has replaced.
+  const pastVersionsRef = useRef(new Set());
+  const holdVersion = (version) => {
+    if (version === awardsVersionRef.current) return;
+    pastVersionsRef.current.add(awardsVersionRef.current);
+    pastVersionsRef.current.delete(version);
+    awardsVersionRef.current = version;
+  };
+  // Set by Reload: the first version the props serve after it can be a refetch
+  // that was out before the refusal came back, carrying a copy between the one
+  // this editor was made from and the one Reload took. It is moved past, not
+  // held.
+  const reloadedRef = useRef(false);
+  // Written in a layout effect, never during render (latest_ref.jsx), so the
+  // passive effect below reads the value this render had.
+  const dirtyRef = useRef(dirty);
+  React.useLayoutEffect(() => { dirtyRef.current = dirty; });
+  const versionCompIdRef = useRef(c.id);
+  useEffect(() => {
+    const switched = versionCompIdRef.current !== c.id;
+    versionCompIdRef.current = c.id;
+    const afterReload = reloadedRef.current;
+    reloadedRef.current = false;
+    if (switched) {
+      pastVersionsRef.current.clear();
+      awardsVersionRef.current = c.awardsVersion;
+    } else if (!dirtyRef.current) {
+      if (c.awardsVersion !== awardsVersionRef.current && !pastVersionsRef.current.has(c.awardsVersion)) {
+        if (afterReload) pastVersionsRef.current.add(c.awardsVersion);
+        else holdVersion(c.awardsVersion);
+      }
+      // Once the served version is the one held, what this editor moved past is
+      // settled: a version is a hash of the list, and a list that later returns
+      // to older content brings that version back.
+      if (c.awardsVersion === awardsVersionRef.current) pastVersionsRef.current.clear();
+    }
+  }, [c.id, c.awardsVersion]);
 
   // Sync from parent. Reset unconditionally when switching competitions;
   // otherwise skip while the user has unsaved edits (see `dirty` above).
   useEffect(() => {
     const switched = lastCompIdRef.current !== c.id;
     lastCompIdRef.current = c.id;
-    if (switched || !dirty) {
+    // The served list is taken only when it is the version held: a reload (or
+    // a save) answers a newer list than the props may carry yet, and the props
+    // catching up must not put the older one back under the newer version.
+    if (switched || (!dirty && c.awardsVersion === awardsVersionRef.current)) {
       setAwards((c.fightingSpiritAwards || []).map(withKey));
-      if (switched) setDirty(false);
+      if (switched) {
+        setDirty(false);
+        // A refusal on the competition just left says nothing about this one.
+        setConflict(null);
+      }
     }
-  }, [c.id, c.fightingSpiritAwards, dirty]);
+  }, [c.id, c.fightingSpiritAwards, c.awardsVersion, dirty]);
 
-  const addRow = () => { setDirty(true); setAwards(prev => [...prev, withKey({ title: "Fighting Spirit", recipientName: "", recipientDojo: "" })]); };
-  const removeRow = (idx) => { setDirty(true); setAwards(prev => prev.filter((_, i) => i !== idx)); };
-  const updateField = (idx, field, val) => { setDirty(true); setAwards(prev => prev.map((a, i) => i === idx ? { ...a, [field]: val } : a)); };
+  const reloadConflict = () => {
+    holdVersion(conflict.version);
+    reloadedRef.current = c.awardsVersion !== conflict.version;
+    setAwards(conflict.awards.map(withKey));
+    setConflict(null);
+    setDirty(false);
+  };
 
+  // Counts the operator's edits, so a save that lands after more were typed
+  // does not mark them saved.
+  const editsRef = useRef(0);
+  const addRow = () => { editsRef.current++; setDirty(true); setAwards(prev => [...prev, withKey({ title: "Fighting Spirit", recipientName: "", recipientDojo: "" })]); };
+  const removeRow = (idx) => { editsRef.current++; setDirty(true); setAwards(prev => prev.filter((_, i) => i !== idx)); };
+  const updateField = (idx, field, val) => { editsRef.current++; setDirty(true); setAwards(prev => prev.map((a, i) => i === idx ? { ...a, [field]: val } : a)); };
+
+  // bc-obox G4b: a save goes to the outbox and is answered at once ({ pending,
+  // settled }): the panel stops saving on that answer and keeps what was typed
+  // on screen (dirty) until the server's answer comes, which is when the list
+  // counts as saved. A save refused as stale (awards_changed) or on its merits
+  // arrives the same way, and this panel, when still open on the competition,
+  // shows the current list in the conflict banner with the typed values kept
+  // until Reload; else the outbox's alert says it.
   const save = async () => {
     setSaving(true);
+    const compID = c.id;
+    const editsAt = editsRef.current;
+    // The "saved offline" toast's id, so a refusal takes it back.
+    const offlineToastId = `awards-saved-offline:${compID}`;
     try {
       // Strip the client-only `_key` before sending to the API.
       const payload = awards.map(({ _key, ...rest }) => rest);
-      await window.API.updateCompetitionAwards(c.id, payload, password);
-      // Edits are now persisted; clear dirty so the next prop refresh
-      // (the save triggers an SSE refetch) re-syncs to the saved state.
-      if (mountedRef.current) { setDirty(false); showToast("Fighting Spirit awards saved.", "success"); }
+      const res = await window.API.updateCompetitionAwards(compID, payload, password, awardsVersionRef.current, {
+        onRefusal: (e) => {
+          // The save was not made: the "saved, goes out once the connection is
+          // back" toast is no longer true, shown or still queued behind
+          // another toast, whoever tells the refusal.
+          dismissToastById(offlineToastId);
+          if (!mountedRef.current || lastCompIdRef.current !== compID) return false;
+          if (e && e.code === "awards_changed") setConflict({ version: e.awardsVersion, awards: e.fightingSpiritAwards });
+          else showToast((e && e.message) || "Failed to save awards", "error");
+          return true;
+        },
+      });
+      // The save is kept on this device and goes out when the link allows: a
+      // save made with no connection says so now, not when it lands (the same
+      // line the court-call composer gives).
+      if (mountedRef.current && isOffline()) showToast(savedOfflineSentence("Fighting Spirit awards"), "success", { id: offlineToastId });
+      onDocumentSettled(res.settled, (saved) => {
+        // Discarded from the held-writes list (or sent by another tab, whose
+        // answer this one does not hold): not saved here, so the typed list
+        // stays unsaved on screen and the version stays the one it was made at.
+        if (!saved || saved.discarded || lastCompIdRef.current !== compID) return;
+        holdVersion(saved.awardsVersion);
+        if (!mountedRef.current) return;
+        // Edits typed after this save was made are not in it: they stay unsaved.
+        if (editsRef.current === editsAt) setDirty(false);
+        showToast("Fighting Spirit awards saved.", "success");
+      }, () => { /* told by onRefusal, or by the outbox's alert */ });
     } catch (e) {
-      if (mountedRef.current) showToast(e.message || "Failed to save awards", "error");
+      if (!mountedRef.current) return;
+      showToast(e.message || "Failed to save awards", "error");
     } finally {
       if (mountedRef.current) setSaving(false);
     }
   };
+
+  // The competition list item carries no awardsVersion (only the detail does),
+  // so a save from it would be refused. When the detail has not loaded there is
+  // nothing to edit against: say so, and the form comes with the detail.
+  if (!c.awardsVersion) {
+    return (
+      <div className="row">
+        <div className="card">
+          <div className="card__title">🔥 Fighting Spirit Awards</div>
+          <div className="card__sub" data-testid="fs-award-unavailable">
+            The awards are not available because the details of this competition did not load. Reload the page, then open Awards again.
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="row">
       <div className="card" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
         <div className="card__title">🔥 Fighting Spirit Awards <span style={{ fontWeight: 400, fontSize: 12, color: "var(--ink-3)" }}>(optional)</span></div>
         <div className="card__sub" style={{ marginTop: -4 }}>Record individual honourees independent of the placement podium. Shown to viewers on the Awards tab.</div>
+      {conflict && (
+        <div className="alert alert--error settings-conflict-alert" role="alert" data-testid="fs-award-conflict-alert">
+          <div className="settings-conflict-alert__text">
+            Not saved: the awards changed somewhere else after you opened this list (another screen or device). Reload to see the current awards, then make your change again.
+          </div>
+          <button type="button" className="btn btn--primary" onClick={reloadConflict} data-testid="fs-award-reload">Reload</button>
+        </div>
+      )}
       {awards.length === 0 && (
         <div style={{ fontSize: 12, color: "var(--ink-3)", fontStyle: "italic" }}>No awards yet.</div>
       )}
@@ -1088,7 +1220,7 @@ function FightingSpiritAwardsEditor({ c, password, showToast }) {
       ))}
       <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
         <button type="button" className="btn btn--sm btn--ghost" onClick={addRow} data-testid="fs-award-add">+ Add award</button>
-        <button type="button" className="btn btn--sm btn--primary" onClick={save} disabled={saving} data-testid="fs-award-save">
+        <button type="button" className="btn btn--sm btn--primary" onClick={save} disabled={saving || !!conflict} data-testid="fs-award-save">
           {saving && <span className="spinner" />}
           {saving ? "Saving…" : "Save awards"}
         </button>

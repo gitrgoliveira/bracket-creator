@@ -113,6 +113,7 @@ func TestParticipantRoundTripIsComplete(t *testing.T) {
 		Metadata:    []string{"3 Dan"},
 		Source:      "manual",
 		CheckedIn:   true,
+		CheckInAt:   1_793_700_000_000,
 	}
 	require.NoError(t, s.SaveParticipants("c", []domain.Player{in}))
 
@@ -132,6 +133,7 @@ func TestPoolPlayerRoundTripIsComplete(t *testing.T) {
 			"pool player.",
 		"Source":    "registration provenance, roster truth in participants.csv; same reason.",
 		"CheckedIn": "attendance, roster truth in participants.csv; same reason.",
+		"CheckInAt": "the attendance stamp, roster truth in participants.csv; same reason.",
 	}
 
 	dir := t.TempDir()

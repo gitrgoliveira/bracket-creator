@@ -150,6 +150,16 @@ func TestFingerprint_StampFieldsZeroed(t *testing.T) {
 		}
 	}
 
+	roster := func(checkedIn bool, at int64, name string) func(t *testing.T, s *Store) []byte {
+		return func(t *testing.T, s *Store) []byte {
+			out, err := marshalParticipantsCSV([]domain.Player{
+				{ID: "3f2504e0-4f89-41d3-9a0c-0305e82c3301", Name: name, Dojo: "Kyoto", CheckedIn: checkedIn, CheckInAt: at},
+			}, false)
+			require.NoError(t, err)
+			return out
+		}
+	}
+
 	cases := map[string]stampCase{
 		"pool-matches.csv": {
 			base:      savePool(poolMatch(t1, 2, []string{"M"})),
@@ -160,6 +170,11 @@ func TestFingerprint_StampFieldsZeroed(t *testing.T) {
 			base:      saveBracket(bracket(t1, 2, "Sato Ken")),
 			restamped: saveBracket(bracket(t2, 3, "Sato Ken")),
 			real:      saveBracket(bracket(t2, 3, "Ito Haru")),
+		},
+		"participants.csv": {
+			base:      roster(true, t1, "Tanaka Ichiro"),
+			restamped: roster(true, t2, "Tanaka Ichiro"),
+			real:      roster(true, t2, "Tanaka Jiro"),
 		},
 		competitorStatusFilename: {
 			base:      status(time.UnixMilli(t1).UTC(), "kiken-injury"),
@@ -197,6 +212,28 @@ func TestFingerprint_StampFieldsZeroed(t *testing.T) {
 			assert.NotEqual(t, Fingerprint(map[string][]byte{sf.Name: base}), Fingerprint(map[string][]byte{sf.Name: restamped}))
 		})
 	}
+}
+
+// The reader reads a marker only from a row of more than two data columns, the
+// id column not counted; the fingerprint rewrites by the same rule, so a
+// dojo that reads like a marker on a three-column row with an id is left alone.
+func TestUnstampCheckInMarkers_FollowsTheReadersGuard(t *testing.T) {
+	const id = "3f2504e0-4f89-41d3-9a0c-0305e82c3301"
+	records := [][]string{
+		{id, "Tanaka", "checked_in@123"},          // dojo, not a marker
+		{id, "Tanaka", "Kyoto", "checked_in@123"}, // marker
+		{id, "Tanaka", "Kyoto", "not_checked_in@123"},
+		{"Tanaka", "checked_in@123"},          // dojo, no id
+		{"Tanaka", "Kyoto", "checked_in@123"}, // marker, no id
+	}
+	unstampCheckInMarkers(records)
+	assert.Equal(t, [][]string{
+		{id, "Tanaka", "checked_in@123"},
+		{id, "Tanaka", "Kyoto", "checked_in"},
+		{id, "Tanaka", "Kyoto"},
+		{"Tanaka", "checked_in@123"},
+		{"Tanaka", "Kyoto", "checked_in"},
+	}, records)
 }
 
 func TestFingerprint_ZeroNamedFieldsReachesNestedValues(t *testing.T) {

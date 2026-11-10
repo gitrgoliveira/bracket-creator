@@ -260,7 +260,57 @@ describe('AdminRegistrationDeskPage check-in sends the id-only wire pid (bc-pnum
     const { getByRole } = await mount(tournament);
     const checkbox = getByRole('checkbox', { name: /check in akira tanaka/i });
     await act(async () => { fireEvent.click(checkbox); });
-    expect(toggleCheckIn).toHaveBeenCalledWith('men', 'uuid-akira', true, 'pw');
+    expect(toggleCheckIn).toHaveBeenCalledWith('men', 'uuid-akira', true, 'pw', expect.objectContaining({
+      name: 'Akira Tanaka', was: { 'uuid-akira': false },
+    }));
+  });
+
+  // bc-dtfn: the outbox answers at once, so a bounced second tap would read the
+  // flipped row and queue the undo. A pointer tap inside the bounce window is
+  // dropped; a keyboard click (detail 0) never is.
+  it('drops the bounce of a pointer tap on a row, but not a keyboard click', async () => {
+    const tournament = makeTournament({
+      competitions: [{
+        id: 'men', name: "Men's Individual", kind: 'individual', status: 'draw-ready',
+        checkInEnabled: true,
+        players: [{ id: 'uuid-akira', name: 'Akira Tanaka', dojo: 'Gyokusen', checkedIn: false }],
+      }],
+    });
+    const { getByRole } = await mount(tournament);
+    const checkbox = getByRole('checkbox', { name: /check in akira tanaka/i });
+    toggleCheckIn.mockClear();
+    await act(async () => { fireEvent.click(checkbox, { detail: 1 }); });
+    await act(async () => { fireEvent.click(checkbox, { detail: 1 }); });
+    expect(toggleCheckIn).toHaveBeenCalledTimes(1);
+    await act(async () => { fireEvent.click(checkbox, { detail: 0 }); });
+    expect(toggleCheckIn).toHaveBeenCalledTimes(2);
+  });
+
+  // A refused check-in comes back through the door's onRefusal, long after the
+  // tap: the desk claims it and says why once (the row is put back by the
+  // outbox's participant patch, pinned in admin_registration_desk_offline).
+  it('toasts a refused check-in once and claims it', async () => {
+    const showToast = vi.fn();
+    const tournament = makeTournament({
+      competitions: [{
+        id: 'men', name: "Men's Individual", kind: 'individual', status: 'draw-ready',
+        checkInEnabled: true,
+        players: [{ id: 'uuid-akira', name: 'Akira Tanaka', dojo: 'Gyokusen', checkedIn: false }],
+      }],
+    });
+    let result;
+    await act(async () => {
+      result = render(
+        <AdminRegistrationDeskPage tournament={tournament} onBack={noop} password="pw" showToast={showToast} onUpdate={noop} onLogout={noop} onViewerMode={noop} />
+      );
+    });
+    await act(async () => { fireEvent.click(result.getByRole('checkbox', { name: /check in akira tanaka/i })); });
+    expect(showToast).not.toHaveBeenCalled();
+    const { onRefusal } = toggleCheckIn.mock.calls[0][4];
+    let claimed;
+    act(() => { claimed = onRefusal(new Error('Self-run mode has no check-in.')); });
+    expect(claimed).toBe(true);
+    expect(showToast).toHaveBeenCalledWith('1 of 1 check-in(s) not saved: Self-run mode has no check-in.', 'error');
   });
 
   // checkPersonEntries now filters an id-less entry
@@ -532,8 +582,8 @@ describe('AdminRegistrationDeskPage skips id-less entries in "all" mode check-in
     const checkbox = getByRole('checkbox', { name: /check in kenji sato for all their competitions/i });
     await act(async () => { fireEvent.click(checkbox); });
     expect(toggleCheckIn).toHaveBeenCalledTimes(2);
-    expect(toggleCheckIn).toHaveBeenCalledWith('men', 'p-men', true, 'pw');
-    expect(toggleCheckIn).toHaveBeenCalledWith('kata', 'p-kata', true, 'pw');
-    expect(toggleCheckIn).not.toHaveBeenCalledWith('iaido', '', true, 'pw');
+    expect(toggleCheckIn).toHaveBeenCalledWith('men', 'p-men', true, 'pw', expect.any(Object));
+    expect(toggleCheckIn).toHaveBeenCalledWith('kata', 'p-kata', true, 'pw', expect.any(Object));
+    expect(toggleCheckIn).not.toHaveBeenCalledWith('iaido', '', true, 'pw', expect.any(Object));
   });
 });

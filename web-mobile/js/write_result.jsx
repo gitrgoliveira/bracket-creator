@@ -489,8 +489,10 @@ export function heldWriteDiscardConfirm(held) {
     const why = held && held.cycled
         ? `The ${what} held on this device waits for another held write that waits for it, so neither can be sent. `
         : `The server keeps refusing the ${what} held on this device${held ? '' : ' for this match'}, so it may never be sent. `;
+    const after = (held && HELD_WRITE_AFTER_DISCARD[held.kind])
+        || `Check ${where} afterwards, and enter it again if it is still needed.`;
     return {
-        message: `${why}Discard it? Nothing else is discarded. Check ${where} afterwards, and enter it again if it is still needed.`,
+        message: `${why}Discard it? Nothing else is discarded. ${after}`,
         confirmLabel: 'Discard it',
         danger: true,
     };
@@ -517,8 +519,41 @@ export function heldWriteWhat(held) {
         case 'lineup-remove': return 'lineup removal';
         case 'reinstate': return 'reinstatement';
         case 'pool-ranks': return 'pool order (chusen)';
+        case 'checkin': case 'checkin-bulk': return 'check-in';
+        case 'announce': return 'court call';
+        case 'announce-remove': return 'court call withdrawal';
+        case 'announce-clear': return 'clear of court calls';
+        case 'tournament': return 'tournament settings';
+        case 'awards': return 'fighting-spirit awards';
         default: return isFinishedResultWrite(held) ? 'finished result' : 'score update';
     }
+}
+
+// HELD_WRITE_AFTER_DISCARD: what the discard confirm asks the operator to
+// check for a held write that is about no match (bc-obox: the check-in, court
+// call and settings doors); every other kind is checked on its match or lineup.
+const HELD_WRITE_AFTER_DISCARD = {
+    'checkin': 'Check the competitor at the registration desk afterwards, and tap them again if it is still needed.',
+    'checkin-bulk': 'Check the competitors at the registration desk afterwards, and check them in again if it is still needed.',
+    'announce': 'Check the viewer screens afterwards, and make the call again if it is still needed.',
+    'announce-remove': 'Check the viewer screens afterwards, and withdraw the call again if it is still showing.',
+    'announce-clear': 'Check the viewer screens afterwards, and clear the court calls again if any are still showing.',
+    'tournament': 'Check the tournament settings afterwards, and save them again if it is still needed.',
+    'awards': 'Check the fighting-spirit awards afterwards, and save them again if it is still needed.',
+};
+
+// The label api_client.jsx's check-in, court-call and settings doors give
+// their held write (`where`) already names the kind ("Check-in: Ren Abe",
+// "Court call: "…"", "Tournament settings"), so only what follows that name is
+// kept: "check-in (Ren Abe)", never "check-in (Check-in: Ren Abe)".
+const DOOR_LABEL_KINDS = new Set(['checkin', 'checkin-bulk', 'announce', 'announce-remove', 'announce-clear', 'tournament', 'awards']);
+const DOOR_LABEL_LEADS = ['check-in:', 'court call:'];
+const DOOR_LABELS_WHOLE = new Set(['check-in', 'court call', 'every court call', 'tournament settings', 'fighting-spirit awards']);
+function doorLabelDetail(where) {
+    const lower = where.toLowerCase();
+    if (DOOR_LABELS_WHOLE.has(lower)) return '';
+    const lead = DOOR_LABEL_LEADS.find((l) => lower.startsWith(l));
+    return lead ? where.slice(lead.length).trim() : where;
 }
 
 // heldWriteWhatWhere: the same, with the match (as the score list labels it)
@@ -526,7 +561,8 @@ export function heldWriteWhat(held) {
 // _whereOf; stage 3 review 5, H5), e.g. "reopen (Pool A · Match 3)".
 export function heldWriteWhatWhere(held) {
     const what = heldWriteWhat(held);
-    const where = held && typeof held.where === 'string' ? held.where.trim() : '';
+    let where = held && typeof held.where === 'string' ? held.where.trim() : '';
+    if (where && DOOR_LABEL_KINDS.has(held.kind)) where = doorLabelDetail(where);
     return where ? `${what} (${where})` : what;
 }
 
@@ -633,6 +669,67 @@ export const REP_BOUT_NOT_REMOVED = 'The representative bout was not removed';
 export function noAnswerSentence(notDone) {
     return `${notDone}: the server did not answer. Check the connection and try again.`;
 }
+
+// The one sentence for a direct write that got no answer. A fetch rejects with
+// a TypeError both when the request never left the device and when it landed
+// and only the answer was lost, and nothing tells the two apart, so the
+// sentence claims neither: the change may or may not be saved. api_client.jsx's
+// _directFetch throws it for every direct write; the callers that run their
+// own fetch show it through isNoConnection.
+export const WRITE_NOT_CONFIRMED = 'No answer: the connection dropped. The change may or may not have been saved. Check, then try again if it is missing.';
+
+// The same failure for a read-only request (an export), where nothing can have
+// been changed whichever way it went.
+export const NOT_SENT_NO_CONNECTION = 'Not sent: no connection. Nothing was changed; try again once connected.';
+
+// isNoConnection: the ONE test for "this failure is the connection, not the
+// server's answer": a fetch that rejected with a TypeError (whatever the
+// browser's own text for it), an error marked `timedOut` (a read given up on
+// at the deadline, _fetchJson), or the error _directFetch already turned into
+// its sentence (`noConnection`).
+export function isNoConnection(err) {
+    return err instanceof TypeError || !!(err && (err.timedOut || err.noConnection));
+}
+
+// The error a call throws once it has turned a lost connection into one of the
+// sentences above: `noConnection` marks it, so shownMessage prints it as it is,
+// and the browser's own TypeError stays as the `cause`. api_client.jsx's
+// _directFetch and every caller that runs its own fetch build it here.
+export function noConnectionError(sentence, cause) {
+    return Object.assign(new Error(sentence, { cause }), { noConnection: true });
+}
+
+// isOffline: the browser knows it has no connection. The one read of it for the
+// surfaces that tell the operator a kept save will go out later.
+export function isOffline() {
+    return typeof navigator !== 'undefined' && navigator.onLine === false;
+}
+
+// The one line for a save the outbox keeps on this device while there is no
+// connection: it says so now, not when the save lands. `what` names the
+// thing saved ("Tournament settings", "Announcement").
+export function savedOfflineSentence(what) {
+    return `${what} saved. The save goes out once the connection is back.`;
+}
+
+// What the server answered when an announcement's time had already run out on
+// arrival (a send held offline for longer than it was to show): nothing was
+// shown, and the sender has already said it was sent, so this says it was not.
+// `what` names it: the composer's announcement, the court console's call.
+export function announcementExpiredToast(minutes, what = 'announcement') {
+    return `That ${what} did not go out: its ${minutes} minutes ran out before it reached the server.`;
+}
+
+// What a failure says on screen: a sentence from noConnectionError as it is,
+// any other failure after the caller's own prefix ("PDF export failed: ").
+export function shownMessage(err, prefix) {
+    return err?.noConnection ? err.message : prefix + (err?.message || err);
+}
+
+// The public registration form's version of WRITE_NOT_CONFIRMED: a participant
+// has no screen to check, so it says what to do instead (a retry that already
+// landed is answered as a duplicate, and says they are registered).
+export const REGISTRATION_NOT_CONFIRMED = 'No answer: the connection dropped. Try again; if you were already registered it will say so.';
 
 
 // matchLabel names a match the way the OPERATOR sees it: "Match 3", the label

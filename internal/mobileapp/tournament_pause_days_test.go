@@ -39,9 +39,26 @@ func getTournamentJSON(t *testing.T, r *gin.Engine) state.Tournament {
 	return tour
 }
 
+// putTournamentJSON saves tour as a save made from the settings stored now: it
+// carries the tournamentVersion the admin GET answers, so a pause refusal is
+// judged rather than the save being refused as made from an older copy.
 func putTournamentJSON(t *testing.T, r *gin.Engine, tour state.Tournament) *httptest.ResponseRecorder {
 	t.Helper()
-	body, err := json.Marshal(tour)
+	g := httptest.NewRecorder()
+	greq, _ := http.NewRequest("GET", "/api/tournament", nil)
+	r.ServeHTTP(g, greq)
+	require.Equal(t, http.StatusOK, g.Code)
+	var current struct {
+		TournamentVersion string `json:"tournamentVersion"`
+	}
+	require.NoError(t, json.Unmarshal(g.Body.Bytes(), &current))
+	require.NotEmpty(t, current.TournamentVersion)
+	raw, err := json.Marshal(tour)
+	require.NoError(t, err)
+	var m map[string]any
+	require.NoError(t, json.Unmarshal(raw, &m))
+	m["tournamentVersion"] = current.TournamentVersion
+	body, err := json.Marshal(m)
 	require.NoError(t, err)
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(body))
@@ -138,6 +155,47 @@ pauses:
 	w = putTournamentJSON(t, r, added)
 	require.Equal(t, http.StatusBadRequest, w.Code)
 	assert.Contains(t, w.Body.String(), `Pause \"Lunch\": the tournament has 2 days, so it has no Day 4.`)
+}
+
+// A save made from an older copy is told the settings changed before its
+// pauses are judged: the stale form gets the current copy, not a refusal about
+// a day it was never going to write over the newer settings.
+func TestTournamentPUT_StaleSaveWithAPausePastTheEndIsTournamentChanged(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "tournament.md"), []byte(`---
+name: Two Days
+venue: Hall
+date: 01-01-2026
+password: secret
+duration_days: 2
+courts:
+  - A
+---
+`), 0o600))
+	r := pauseTestRouter(t, dir)
+
+	g := httptest.NewRecorder()
+	greq, _ := http.NewRequest("GET", "/api/tournament", nil)
+	r.ServeHTTP(g, greq)
+	require.Equal(t, http.StatusOK, g.Code)
+	var old map[string]any
+	require.NoError(t, json.Unmarshal(g.Body.Bytes(), &old))
+
+	// Another device renames the venue.
+	tour := getTournamentJSON(t, r)
+	tour.Venue = "Other hall"
+	require.Equal(t, http.StatusOK, putTournamentJSON(t, r, tour).Code)
+
+	// The older copy adds a pause on a day the tournament does not have.
+	old["pauses"] = []map[string]any{{"name": "Lunch", "start": "12:00", "length": "1h", "day": 5}}
+	body, err := json.Marshal(old)
+	require.NoError(t, err)
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusConflict, w.Code, w.Body.String())
+	assert.Contains(t, w.Body.String(), `"code":"tournament_changed"`)
 }
 
 func TestValidatePauseDays(t *testing.T) {

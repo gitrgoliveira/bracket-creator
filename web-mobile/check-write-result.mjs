@@ -220,6 +220,17 @@ export const FORBIDDEN = [
     only: ['admin_scoring_individual.jsx', 'admin_scoring_engi.jsx', 'admin_scoring_team.jsx'],
     why: 'autosaves, keeps a running edit or writes a running score (API.recordScore) in a tap-scored editor (individual, engi, team); a running match is scored by taps (API.recordTap) and its board is the server\'s with this device\'s pending taps folded on; Save and Finish go through the host\'s onSubmit',
   },
+  {
+    // "A direct write could not be sent" has ONE classifier and ONE sentence
+    // (write_result.jsx: isNoConnection, WRITE_NOT_CONFIRMED). A fetch that
+    // never left the device rejects with a TypeError; api_client.jsx's
+    // _directFetch is the one place that turns it into the sentence, and a
+    // caller that runs its own fetch asks isNoConnection(err).
+    name: 'no-connection',
+    re: /\binstanceof\s+TypeError\b/,
+    exempt: ['write_result.jsx', 'api_client.jsx'],
+    why: 'classifies a failed fetch by hand; ask isNoConnection(err) (write_result.jsx), and say WRITE_NOT_CONFIRMED (NOT_SENT_NO_CONNECTION for a read-only export), instead',
+  },
 ];
 
 // Scanned against the WHOLE comment-stripped file (scanWholeFile) rather

@@ -189,8 +189,11 @@ describe('AwardsView + Fighting Spirit awards', () => {
 
 // --- API.updateCompetitionAwards ---
 
+// bc-obox: an outbox entry under the competition's base `awards:<comp>`,
+// answered at once ({ pending, settled }); `settled` carries the server's
+// answer or its refusal.
 describe('API.updateCompetitionAwards', () => {
-  afterEach(() => { vi.restoreAllMocks(); });
+  afterEach(() => { API.clearQueue(); vi.restoreAllMocks(); });
 
   it('calls PUT /api/competitions/:id/awards with correct headers and body', async () => {
     global.fetch = vi.fn().mockResolvedValue({
@@ -198,7 +201,10 @@ describe('API.updateCompetitionAwards', () => {
       json: async () => ({ id: 'c1', fightingSpiritAwards: [] }),
     });
     const awards = [{ title: 'Fighting Spirit', recipientName: 'Alice', recipientDojo: 'Tokyo' }];
-    await API.updateCompetitionAwards('c1', awards, 'mainpw');
+    const res = await API.updateCompetitionAwards('c1', awards, 'mainpw', '0123456789abcdef');
+    expect(res.pending).toBe(true);
+    expect(res.key.split('\u001f')[0]).toBe('awards:c1');
+    await res.settled;
 
     expect(global.fetch).toHaveBeenCalledWith(
       '/api/competitions/c1/awards',
@@ -210,30 +216,39 @@ describe('API.updateCompetitionAwards', () => {
         }),
       })
     );
-    const body = JSON.parse(global.fetch.mock.calls[0][1].body);
-    expect(body).toEqual({ fightingSpiritAwards: awards });
+    const awardsCall = global.fetch.mock.calls.find(([url]) => url === '/api/competitions/c1/awards');
+    const body = JSON.parse(awardsCall[1].body);
+    // The save carries the version of the list it was made from (and the
+    // outbox's own write id beside it).
+    expect(body).toMatchObject({ fightingSpiritAwards: awards, awardsVersion: '0123456789abcdef' });
   });
 
   it('never sends X-Admin-Password (bc-cmpw: no separate admin password)', async () => {
     global.fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) });
-    await API.updateCompetitionAwards('c1', [], 'mainpw');
-    const headers = global.fetch.mock.calls[0][1].headers;
-    expect(headers).not.toHaveProperty('X-Admin-Password');
+    const res = await API.updateCompetitionAwards('c1', [], 'mainpw');
+    await res.settled;
+    const [, init] = global.fetch.mock.calls.find(([url]) => url === '/api/competitions/c1/awards');
+    expect(init.headers).not.toHaveProperty('X-Admin-Password');
   });
 
-  it('throws on non-2xx response with server error message', async () => {
+  it('settles rejecting on a non-2xx response with the server error message', async () => {
     global.fetch = vi.fn().mockResolvedValue({
       ok: false,
       status: 400,
       json: async () => ({ error: 'title is required' }),
     });
-    await expect(API.updateCompetitionAwards('c1', [{}], 'pw')).rejects.toThrow('title is required');
+    const res = await API.updateCompetitionAwards('c1', [{}], 'pw');
+    await expect(res.settled).rejects.toThrow('title is required');
+    // The outbox logs the refusal it settles with.
+    expect(console.warn.mock.calls.map((a) => String(a[0]))).toEqual([expect.stringContaining('rejected (400)')]);
+    console.warn.mockClear();
   });
 
-  it('returns parsed competition JSON on success', async () => {
+  it('settles with the parsed competition JSON on success', async () => {
     const comp = { id: 'c1', fightingSpiritAwards: [{ title: 'Spirit', recipientName: 'Bob' }] };
     global.fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => comp });
-    const result = await API.updateCompetitionAwards('c1', comp.fightingSpiritAwards, 'pw');
+    const res = await API.updateCompetitionAwards('c1', comp.fightingSpiritAwards, 'pw');
+    const result = await res.settled;
     expect(result.fightingSpiritAwards[0].recipientName).toBe('Bob');
   });
 });

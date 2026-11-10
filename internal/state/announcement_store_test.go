@@ -7,8 +7,43 @@ import (
 	"time"
 )
 
+// fakeClock is the store's clock in these tests, so expiry is reached by
+// advancing it rather than by sleeping.
+type fakeClock struct {
+	mu sync.Mutex
+	t  time.Time
+}
+
+func (c *fakeClock) now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.t
+}
+
+func (c *fakeClock) advance(d time.Duration) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.t = c.t.Add(d)
+}
+
+func newClockedStore() (*AnnouncementStore, *fakeClock) {
+	clk := &fakeClock{t: time.Date(2026, 11, 9, 10, 0, 0, 0, time.UTC)}
+	s := NewAnnouncementStore()
+	s.now = clk.now
+	return s, clk
+}
+
+// add makes a call now with a fresh id, then moves the clock on a millisecond
+// so the next call is made strictly later (an identical call is ordered by
+// made-at).
+func add(s *AnnouncementStore, clk *fakeClock, msg string, dur time.Duration) (Announcement, []Announcement) {
+	a, _, list := s.Add(newParticipantID(), msg, clk.now(), dur)
+	clk.advance(time.Millisecond)
+	return a, list
+}
+
 func TestAnnouncementStore(t *testing.T) {
-	store := NewAnnouncementStore()
+	store, clk := newClockedStore()
 
 	if ann := store.Get(); ann != nil {
 		t.Errorf("expected initial announcement to be nil, got: %v", ann)
@@ -17,9 +52,8 @@ func TestAnnouncementStore(t *testing.T) {
 		t.Errorf("expected initial list to be empty, got: %v", list)
 	}
 
-	// Set replaces all prior.
 	msg := "Lunch break for 30 minutes"
-	ann := store.Set(msg, 30*time.Minute)
+	ann, _ := add(store, clk, msg, 30*time.Minute)
 	if ann.Message != msg {
 		t.Errorf("expected message %q, got %q", msg, ann.Message)
 	}
@@ -35,9 +69,9 @@ func TestAnnouncementStore(t *testing.T) {
 		t.Errorf("expected retrieved message %q, got %q", msg, retrieved.Message)
 	}
 
-	// Set replaces previous.
+	// A different message is the newest call.
 	newMsg := "Delay on court B"
-	newAnn := store.Set(newMsg, 5*time.Minute)
+	newAnn, _ := add(store, clk, newMsg, 5*time.Minute)
 	if newAnn.Message != newMsg {
 		t.Errorf("expected new message %q, got %q", newMsg, newAnn.Message)
 	}
@@ -50,25 +84,26 @@ func TestAnnouncementStore(t *testing.T) {
 	}
 
 	// Expiry.
-	store.Set("Short notice", 10*time.Millisecond)
-	time.Sleep(20 * time.Millisecond)
+	add(store, clk, "Short notice", 10*time.Millisecond)
+	clk.advance(time.Hour)
 	if expired := store.Get(); expired != nil {
 		t.Errorf("expected announcement to be expired (nil), got: %v", expired)
 	}
 
 	// Clear.
-	store.Set("Clear me", 10*time.Minute)
-	store.Clear()
+	add(store, clk, "Clear me", 10*time.Minute)
+	clk.advance(time.Millisecond)
+	store.Clear(clk.now())
 	if cleared := store.Get(); cleared != nil {
 		t.Errorf("expected announcement to be cleared (nil), got: %v", cleared)
 	}
 }
 
 func TestAnnouncementStoreAdd(t *testing.T) {
-	store := NewAnnouncementStore()
+	store, clk := newClockedStore()
 
-	a1, _ := store.Add("first", 30*time.Minute)
-	a2, _ := store.Add("second", 30*time.Minute)
+	a1, _ := add(store, clk, "first", 30*time.Minute)
+	a2, _ := add(store, clk, "second", 30*time.Minute)
 
 	if a1.ID == a2.ID {
 		t.Error("IDs should be unique")
@@ -93,10 +128,10 @@ func TestAnnouncementStoreAdd(t *testing.T) {
 }
 
 func TestAnnouncementStoreRemove(t *testing.T) {
-	store := NewAnnouncementStore()
+	store, clk := newClockedStore()
 
-	a1, _ := store.Add("msg1", 30*time.Minute)
-	_, _ = store.Add("msg2", 30*time.Minute)
+	a1, _ := add(store, clk, "msg1", 30*time.Minute)
+	_, _ = add(store, clk, "msg2", 30*time.Minute)
 
 	removed, list := store.Remove(a1.ID)
 	if !removed {
@@ -117,11 +152,13 @@ func TestAnnouncementStoreRemove(t *testing.T) {
 }
 
 func TestAnnouncementStoreRemovePrunesExpired(t *testing.T) {
-	store := NewAnnouncementStore()
+	store, clk := newClockedStore()
 
-	_, _ = store.Add("expires soon", 10*time.Millisecond)
-	a2, _ := store.Add("long-lived", 30*time.Minute)
-	time.Sleep(20 * time.Millisecond)
+	_, _ = add(store, clk, "expires soon", 10*time.Millisecond)
+	a2, _ := add(store, clk, "long-lived", 30*time.Minute)
+	// A fresh call shows its own time; 10 ms is under the late-call floor, so
+	// it shows a minute.
+	clk.advance(AnnouncementMinShow)
 
 	// Remove the long-lived item; snapshot must not include the expired one.
 	found, list := store.Remove(a2.ID)
@@ -134,14 +171,14 @@ func TestAnnouncementStoreRemovePrunesExpired(t *testing.T) {
 }
 
 func TestAnnouncementStoreCapEvictsOldest(t *testing.T) {
-	store := NewAnnouncementStore()
+	store, clk := newClockedStore()
 
 	// Distinct messages: an identical one would replace its predecessor
 	// (bc-cdbl), and this test is about the cap, not about replacement.
 	for i := range maxActiveAnnouncements {
-		_, _ = store.Add(fmt.Sprintf("msg %d", i), 30*time.Minute)
+		_, _ = add(store, clk, fmt.Sprintf("msg %d", i), 30*time.Minute)
 	}
-	newest, _ := store.Add("newest", 30*time.Minute)
+	newest, _ := add(store, clk, "newest", 30*time.Minute)
 	list := store.List()
 	if len(list) != maxActiveAnnouncements {
 		t.Fatalf("expected cap %d, got %d", maxActiveAnnouncements, len(list))
@@ -152,11 +189,11 @@ func TestAnnouncementStoreCapEvictsOldest(t *testing.T) {
 }
 
 func TestAnnouncementStoreListPrunesExpired(t *testing.T) {
-	store := NewAnnouncementStore()
+	store, clk := newClockedStore()
 
-	store.Add("expires soon", 10*time.Millisecond)
-	store.Add("long-lived", 30*time.Minute)
-	time.Sleep(20 * time.Millisecond)
+	add(store, clk, "expires soon", 5*time.Minute)
+	add(store, clk, "long-lived", 30*time.Minute)
+	clk.advance(6 * time.Minute)
 
 	list := store.List()
 	if len(list) != 1 {
@@ -167,13 +204,13 @@ func TestAnnouncementStoreListPrunesExpired(t *testing.T) {
 	}
 }
 
-func TestAnnouncementStoreGetAfterSetReplacesExpired(t *testing.T) {
-	store := NewAnnouncementStore()
+func TestAnnouncementStoreGetAfterAddReplacesExpired(t *testing.T) {
+	store, clk := newClockedStore()
 
-	store.Set("expires now", 1*time.Nanosecond)
-	time.Sleep(5 * time.Millisecond)
+	add(store, clk, "expires now", 1*time.Nanosecond)
+	clk.advance(5 * time.Millisecond)
 
-	store.Set("fresh announcement", 10*time.Minute)
+	add(store, clk, "fresh announcement", 10*time.Minute)
 
 	got := store.Get()
 	if got == nil {
@@ -191,7 +228,7 @@ func TestAnnouncementStoreConcurrentAddList(t *testing.T) {
 		wg.Add(2)
 		go func() {
 			defer wg.Done()
-			_, _ = store.Add("concurrent", 30*time.Minute)
+			_, _, _ = store.Add(newParticipantID(), "concurrent", time.Now(), 30*time.Minute)
 		}()
 		go func() {
 			defer wg.Done()
@@ -204,14 +241,14 @@ func TestAnnouncementStoreConcurrentAddList(t *testing.T) {
 func TestAnnouncementStore_AddReplacesIdenticalActive(t *testing.T) {
 	tests := []struct {
 		name     string
-		scenario func(t *testing.T, store *AnnouncementStore)
+		scenario func(t *testing.T, store *AnnouncementStore, clk *fakeClock)
 	}{
 		{
 			name: "identical active announcement is replaced",
-			scenario: func(t *testing.T, store *AnnouncementStore) {
+			scenario: func(t *testing.T, store *AnnouncementStore, clk *fakeClock) {
 				msg := "Call to court"
-				a1, _ := store.Add(msg, 5*time.Minute)
-				a2, list := store.Add(msg, 5*time.Minute)
+				a1, _ := add(store, clk, msg, 5*time.Minute)
+				a2, list := add(store, clk, msg, 5*time.Minute)
 
 				// Only one announcement should exist
 				if len(list) != 1 {
@@ -232,9 +269,9 @@ func TestAnnouncementStore_AddReplacesIdenticalActive(t *testing.T) {
 		},
 		{
 			name: "different messages both stack",
-			scenario: func(t *testing.T, store *AnnouncementStore) {
-				a1, _ := store.Add("First call", 5*time.Minute)
-				a2, list := store.Add("Second call", 5*time.Minute)
+			scenario: func(t *testing.T, store *AnnouncementStore, clk *fakeClock) {
+				a1, _ := add(store, clk, "First call", 5*time.Minute)
+				a2, list := add(store, clk, "Second call", 5*time.Minute)
 
 				if len(list) != 2 {
 					t.Fatalf("expected 2 announcements, got %d", len(list))
@@ -249,11 +286,11 @@ func TestAnnouncementStore_AddReplacesIdenticalActive(t *testing.T) {
 		},
 		{
 			name: "identical message after expiry just adds",
-			scenario: func(t *testing.T, store *AnnouncementStore) {
+			scenario: func(t *testing.T, store *AnnouncementStore, clk *fakeClock) {
 				msg := "Call to court"
-				a1, _ := store.Add(msg, 5*time.Millisecond)
-				time.Sleep(10 * time.Millisecond)
-				a2, list := store.Add(msg, 5*time.Minute)
+				a1, _ := add(store, clk, msg, 5*time.Minute)
+				clk.advance(6 * time.Minute)
+				a2, list := add(store, clk, msg, 5*time.Minute)
 
 				// The expired copy is pruned, so the fresh one is the only entry
 				// and nothing is replaced: the identical message just adds.
@@ -273,8 +310,8 @@ func TestAnnouncementStore_AddReplacesIdenticalActive(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			store := NewAnnouncementStore()
-			tt.scenario(t, store)
+			store, clk := newClockedStore()
+			tt.scenario(t, store, clk)
 		})
 	}
 }
@@ -286,15 +323,22 @@ func aliasCount(s *AnnouncementStore) int {
 	return len(s.replaced)
 }
 
+// spentCount reads how many taken-down ids the store remembers.
+func spentCount(s *AnnouncementStore) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.spent)
+}
+
 // TestAnnouncementStore_RemoveThroughAReplacedID pins the follow-up to bc-cdbl:
 // a court console holding the id of a call that a later identical call replaced
 // (a second device re-called the match, or its own re-call's answer was lost)
 // still takes the call down, because the id resolves to the announcement that
 // replaced it.
 func TestAnnouncementStore_RemoveThroughAReplacedID(t *testing.T) {
-	store := NewAnnouncementStore()
-	a1, _ := store.Add("x", 5*time.Minute)
-	a2, _ := store.Add("x", 5*time.Minute)
+	store, clk := newClockedStore()
+	a1, _ := add(store, clk, "x", 5*time.Minute)
+	a2, _ := add(store, clk, "x", 5*time.Minute)
 	if a1.ID == a2.ID {
 		t.Fatal("the replacement must carry a new ID")
 	}
@@ -314,10 +358,10 @@ func TestAnnouncementStore_RemoveThroughAReplacedID(t *testing.T) {
 // TestAnnouncementStore_RemoveThroughAReplacedIDLeavesOthers: the withdrawal
 // takes down only the announcement that replaced the id, never a different one.
 func TestAnnouncementStore_RemoveThroughAReplacedIDLeavesOthers(t *testing.T) {
-	store := NewAnnouncementStore()
-	a1, _ := store.Add("x", 5*time.Minute)
-	y, _ := store.Add("y", 5*time.Minute)
-	a3, _ := store.Add("x", 5*time.Minute)
+	store, clk := newClockedStore()
+	a1, _ := add(store, clk, "x", 5*time.Minute)
+	y, _ := add(store, clk, "y", 5*time.Minute)
+	a3, _ := add(store, clk, "x", 5*time.Minute)
 
 	found, list := store.Remove(a1.ID)
 	if !found {
@@ -342,17 +386,17 @@ func TestAnnouncementStore_ReplacementChainResolvesToTheLatest(t *testing.T) {
 		{"middle id", 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			store := NewAnnouncementStore()
-			a1, _ := store.Add("x", 5*time.Minute)
-			a2, _ := store.Add("x", 5*time.Minute)
-			a3, list := store.Add("x", 5*time.Minute)
+			store, clk := newClockedStore()
+			a1, _ := add(store, clk, "x", 5*time.Minute)
+			a2, _ := add(store, clk, "x", 5*time.Minute)
+			a3, list := add(store, clk, "x", 5*time.Minute)
 			if len(list) != 1 || list[0].ID != a3.ID {
 				t.Fatalf("expected only a3 to be active, got %v", list)
 			}
 
 			// One hop: re-pointed on the third Add, not a chain id1 -> id2 -> id3.
 			store.mu.Lock()
-			hop1, hop2 := store.replaced[a1.ID], store.replaced[a2.ID]
+			hop1, hop2 := store.replaced[a1.ID].target, store.replaced[a2.ID].target
 			store.mu.Unlock()
 			if hop1 != a3.ID || hop2 != a3.ID {
 				t.Fatalf("expected both aliases to point at a3 (%s), got %q and %q", a3.ID, hop1, hop2)
@@ -374,12 +418,12 @@ func TestAnnouncementStore_ReplacementChainResolvesToTheLatest(t *testing.T) {
 
 // TestAnnouncementStore_AliasGoesWithItsTarget: an alias is only an alternate
 // name for an active announcement, so once that announcement is gone, by any
-// route, the older id is not found and nothing is kept for it.
+// route, the older id is not found and no alias is kept for it.
 func TestAnnouncementStore_AliasGoesWithItsTarget(t *testing.T) {
 	t.Run("removed through its own id", func(t *testing.T) {
-		store := NewAnnouncementStore()
-		a1, _ := store.Add("x", 5*time.Minute)
-		a2, _ := store.Add("x", 5*time.Minute)
+		store, clk := newClockedStore()
+		a1, _ := add(store, clk, "x", 5*time.Minute)
+		a2, _ := add(store, clk, "x", 5*time.Minute)
 		if found, _ := store.Remove(a2.ID); !found {
 			t.Fatal("expected a2 to be found")
 		}
@@ -392,10 +436,10 @@ func TestAnnouncementStore_AliasGoesWithItsTarget(t *testing.T) {
 	})
 
 	t.Run("expired, swept by List", func(t *testing.T) {
-		store := NewAnnouncementStore()
-		a1, _ := store.Add("x", 5*time.Minute)
-		_, _ = store.Add("x", 10*time.Millisecond)
-		time.Sleep(20 * time.Millisecond)
+		store, clk := newClockedStore()
+		a1, _ := add(store, clk, "x", 5*time.Minute)
+		_, _ = add(store, clk, "x", 5*time.Minute)
+		clk.advance(6 * time.Minute)
 		if got := store.List(); len(got) != 0 {
 			t.Fatalf("expected the replacement to have expired, got %v", got)
 		}
@@ -408,10 +452,10 @@ func TestAnnouncementStore_AliasGoesWithItsTarget(t *testing.T) {
 	})
 
 	t.Run("expired, found by Remove", func(t *testing.T) {
-		store := NewAnnouncementStore()
-		a1, _ := store.Add("x", 5*time.Minute)
-		_, _ = store.Add("x", 10*time.Millisecond)
-		time.Sleep(20 * time.Millisecond)
+		store, clk := newClockedStore()
+		a1, _ := add(store, clk, "x", 5*time.Minute)
+		_, _ = add(store, clk, "x", 5*time.Minute)
+		clk.advance(6 * time.Minute)
 		if found, list := store.Remove(a1.ID); found || len(list) != 0 {
 			t.Errorf("expected not found and an empty list, got %v %v", found, list)
 		}
@@ -421,28 +465,15 @@ func TestAnnouncementStore_AliasGoesWithItsTarget(t *testing.T) {
 	})
 
 	t.Run("cleared", func(t *testing.T) {
-		store := NewAnnouncementStore()
-		a1, _ := store.Add("x", 5*time.Minute)
-		_, _ = store.Add("x", 5*time.Minute)
-		store.Clear()
+		store, clk := newClockedStore()
+		a1, _ := add(store, clk, "x", 5*time.Minute)
+		_, _ = add(store, clk, "x", 5*time.Minute)
+		store.Clear(clk.now())
 		if n := aliasCount(store); n != 0 {
 			t.Errorf("expected Clear to drop the alias, got %d", n)
 		}
 		if found, _ := store.Remove(a1.ID); found {
 			t.Error("a1 must not be found after Clear")
-		}
-	})
-
-	t.Run("replaced by Set", func(t *testing.T) {
-		store := NewAnnouncementStore()
-		a1, _ := store.Add("x", 5*time.Minute)
-		_, _ = store.Add("x", 5*time.Minute)
-		store.Set("y", 5*time.Minute)
-		if n := aliasCount(store); n != 0 {
-			t.Errorf("expected Set to drop the alias, got %d", n)
-		}
-		if found, _ := store.Remove(a1.ID); found {
-			t.Error("a1 must not be found after Set replaced the list")
 		}
 	})
 }
@@ -451,16 +482,16 @@ func TestAnnouncementStore_AliasGoesWithItsTarget(t *testing.T) {
 // announcement, and an alias that pointed at it must go too, or the map would
 // keep ids nothing can reach.
 func TestAnnouncementStore_AliasGoesWithAnEvictedTarget(t *testing.T) {
-	store := NewAnnouncementStore()
-	a1, _ := store.Add("x", 30*time.Minute)
-	a2, _ := store.Add("x", 30*time.Minute)
+	store, clk := newClockedStore()
+	a1, _ := add(store, clk, "x", 30*time.Minute)
+	a2, _ := add(store, clk, "x", 30*time.Minute)
 	if n := aliasCount(store); n != 1 {
 		t.Fatalf("expected one alias after the replacement, got %d", n)
 	}
 
 	// "x" (a2) is the oldest announcement; fill the store, then add one more.
 	for i := range maxActiveAnnouncements {
-		_, _ = store.Add(fmt.Sprintf("msg %d", i), 30*time.Minute)
+		_, _ = add(store, clk, fmt.Sprintf("msg %d", i), 30*time.Minute)
 	}
 	for _, a := range store.List() {
 		if a.ID == a2.ID {
@@ -473,5 +504,322 @@ func TestAnnouncementStore_AliasGoesWithAnEvictedTarget(t *testing.T) {
 	}
 	if found, _ := store.Remove(a1.ID); found {
 		t.Error("a1 resolved to the evicted a2: it must not be found")
+	}
+	// A late copy of the evicted call does not bring it back.
+	if _, outcome, _ := store.Add(a2.ID, "x", a2.SentAt, 30*time.Minute); outcome != AnnounceRecorded {
+		t.Errorf("a resend of the evicted call must be recorded, got outcome %d", outcome)
+	}
+}
+
+// TestAnnouncementStore_KnownIDIsRecorded: a resend of a call the store holds
+// (the outbox sending again after a lost answer) changes nothing and answers
+// the call as stored.
+func TestAnnouncementStore_KnownIDIsRecorded(t *testing.T) {
+	store, clk := newClockedStore()
+	id := newParticipantID()
+	madeAt := clk.now()
+	first, outcome, _ := store.Add(id, "Call A", madeAt, 5*time.Minute)
+	if outcome != AnnounceAdded {
+		t.Fatalf("expected the first send to be added, got %d", outcome)
+	}
+	clk.advance(30 * time.Second)
+
+	again, outcome, list := store.Add(id, "Call A", madeAt, 5*time.Minute)
+	if outcome != AnnounceRecorded {
+		t.Fatalf("expected the resend to be recorded, got %d", outcome)
+	}
+	if again != first {
+		t.Errorf("expected the call as stored %v, got %v", first, again)
+	}
+	if len(list) != 1 {
+		t.Errorf("expected one call showing, got %v", list)
+	}
+}
+
+// TestAnnouncementStore_KnownAliasIsRecorded: a resend of the older id of an
+// identical call that a newer one replaced answers the one standing in its
+// place and changes nothing.
+func TestAnnouncementStore_KnownAliasIsRecorded(t *testing.T) {
+	store, clk := newClockedStore()
+	a1, _ := add(store, clk, "x", 5*time.Minute)
+	a2, _ := add(store, clk, "x", 5*time.Minute)
+
+	got, outcome, list := store.Add(a1.ID, "x", a1.SentAt, 5*time.Minute)
+	if outcome != AnnounceRecorded {
+		t.Fatalf("expected recorded, got %d", outcome)
+	}
+	if got.ID != a2.ID {
+		t.Errorf("expected the answer to be the call standing in its place %s, got %s", a2.ID, got.ID)
+	}
+	if len(list) != 1 || list[0] != a2 {
+		t.Errorf("expected only a2 showing, unchanged, got %v", list)
+	}
+}
+
+// TestAnnouncementStore_OlderIdenticalArrivingLateBecomesAnAlias: of two
+// identical calls, the one made later stands, whatever the arrival order. The
+// older one arriving second never replaces it or shortens its time, and its id
+// still takes the call down.
+func TestAnnouncementStore_OlderIdenticalArrivingLateBecomesAnAlias(t *testing.T) {
+	store, clk := newClockedStore()
+	t0 := clk.now()
+	newer, _, _ := store.Add(newParticipantID(), "x", t0.Add(time.Second), 30*time.Minute)
+	clk.advance(2 * time.Second)
+
+	olderID := newParticipantID()
+	got, outcome, list := store.Add(olderID, "x", t0, 5*time.Minute)
+	if outcome != AnnounceRecorded {
+		t.Fatalf("expected the older call to be recorded, got %d", outcome)
+	}
+	if got != newer {
+		t.Errorf("expected the answer to be the newer call %v, got %v", newer, got)
+	}
+	if len(list) != 1 || list[0] != newer {
+		t.Fatalf("expected the newer call to stand untouched, got %v", list)
+	}
+
+	if found, after := store.Remove(olderID); !found || len(after) != 0 {
+		t.Errorf("expected the older id to take the call down, got %v %v", found, after)
+	}
+}
+
+// TestAnnouncementStore_LateCallShowsWhatIsLeftAtLeastAMinute pins decision Q1
+// (floor): a call reaching the server late shows for what is left of its time,
+// but at least AnnouncementMinShow; one whose time is over shows nothing.
+func TestAnnouncementStore_LateCallShowsWhatIsLeftAtLeastAMinute(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		late    time.Duration
+		outcome AnnounceOutcome
+		showFor time.Duration
+	}{
+		{"on time shows its full time", 0, AnnounceAdded, 5 * time.Minute},
+		{"three minutes left shows three minutes", 2 * time.Minute, AnnounceAdded, 3 * time.Minute},
+		{"fifteen seconds left shows a minute", 4*time.Minute + 45*time.Second, AnnounceAdded, AnnouncementMinShow},
+		{"no time left shows nothing", 5 * time.Minute, AnnounceExpired, 0},
+		{"long over shows nothing", 20 * time.Minute, AnnounceExpired, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store, clk := newClockedStore()
+			now := clk.now()
+			ann, outcome, list := store.Add(newParticipantID(), "late call", now.Add(-tc.late), 5*time.Minute)
+			if outcome != tc.outcome {
+				t.Fatalf("expected outcome %d, got %d", tc.outcome, outcome)
+			}
+			if tc.outcome == AnnounceExpired {
+				if len(list) != 0 || len(store.List()) != 0 {
+					t.Errorf("an expired call must not show, got %v", list)
+				}
+				return
+			}
+			if got := ann.ExpiresAt.Sub(now); got != tc.showFor {
+				t.Errorf("expected it to show for %v, got %v", tc.showFor, got)
+			}
+			if !ann.SentAt.Equal(now.Add(-tc.late)) {
+				t.Errorf("expected SentAt to be the made-at, got %v", ann.SentAt)
+			}
+		})
+	}
+}
+
+// TestAnnouncementStore_WithdrawnCallIsRemembered: a late copy of a send that
+// was already withdrawn never brings the call back, and the id is forgotten
+// once its time would have run out.
+func TestAnnouncementStore_WithdrawnCallIsRemembered(t *testing.T) {
+	store, clk := newClockedStore()
+	id := newParticipantID()
+	madeAt := clk.now()
+	if _, outcome, _ := store.Add(id, "Call A", madeAt, 5*time.Minute); outcome != AnnounceAdded {
+		t.Fatalf("expected added, got %d", outcome)
+	}
+	if found, _ := store.Remove(id); !found {
+		t.Fatal("expected the withdrawal to find the call")
+	}
+	clk.advance(time.Minute)
+
+	if _, outcome, list := store.Add(id, "Call A", madeAt, 5*time.Minute); outcome != AnnounceRecorded || len(list) != 0 {
+		t.Fatalf("a late copy of a withdrawn call must be recorded and show nothing, got %d %v", outcome, list)
+	}
+	if found, _ := store.Remove(id); found {
+		t.Error("a second withdrawal of the same call finds nothing")
+	}
+
+	clk.advance(5 * time.Minute)
+	_ = store.List()
+	if n := spentCount(store); n != 0 {
+		t.Errorf("expected the withdrawn id to be forgotten after its expiry, %d remembered", n)
+	}
+	if _, outcome, _ := store.Add(id, "Call A", madeAt, 5*time.Minute); outcome != AnnounceExpired {
+		t.Errorf("after its expiry a copy is expired, got %d", outcome)
+	}
+}
+
+// TestAnnouncementStore_WithdrawnAliasIsRemembered: the older id of an
+// identical call is remembered with the call that stood in for it, so a late
+// copy of the older send does not bring the call back either.
+func TestAnnouncementStore_WithdrawnAliasIsRemembered(t *testing.T) {
+	store, clk := newClockedStore()
+	a1, _ := add(store, clk, "x", 30*time.Minute)
+	a2, _ := add(store, clk, "x", 5*time.Minute)
+	if found, _ := store.Remove(a2.ID); !found {
+		t.Fatal("expected a2 to be found")
+	}
+	if _, outcome, list := store.Add(a1.ID, "x", a1.SentAt, 30*time.Minute); outcome != AnnounceRecorded || len(list) != 0 {
+		t.Errorf("a late copy of the older id must show nothing, got %d %v", outcome, list)
+	}
+
+	// The older call outlives the newer one's expiry: once the newer call has
+	// run out, a copy of the older one still stays down.
+	store2, clk2 := newClockedStore()
+	b1, _ := add(store2, clk2, "y", 30*time.Minute)
+	_, _ = add(store2, clk2, "y", 5*time.Minute)
+	clk2.advance(6 * time.Minute)
+	if _, outcome, list := store2.Add(b1.ID, "y", b1.SentAt, 30*time.Minute); outcome != AnnounceRecorded || len(list) != 0 {
+		t.Errorf("a copy of a call a newer one replaced must not show after the newer one ran out, got %d %v", outcome, list)
+	}
+}
+
+// TestAnnouncementStore_ClearKeepsAFloor: a clear takes down what was made at
+// or before it, keeps what was made after, and a call made before it that
+// arrives later shows nothing.
+func TestAnnouncementStore_ClearKeepsAFloor(t *testing.T) {
+	store, clk := newClockedStore()
+	t0 := clk.now()
+	a, _, _ := store.Add(newParticipantID(), "A", t0, 10*time.Minute)
+	b, _, _ := store.Add(newParticipantID(), "B", t0.Add(2*time.Second), 10*time.Minute)
+	clk.advance(3 * time.Second)
+
+	list, changed := store.Clear(t0.Add(time.Second))
+	if !changed {
+		t.Fatal("expected the clear to take A down")
+	}
+	if len(list) != 1 || list[0].ID != b.ID {
+		t.Fatalf("expected only B, made after the clear, to stay, got %v", list)
+	}
+
+	if _, outcome, _ := store.Add(a.ID, "A", t0, 10*time.Minute); outcome != AnnounceRecorded {
+		t.Errorf("a copy of a cleared call must be recorded, got %d", outcome)
+	}
+	if _, outcome, list := store.Add(newParticipantID(), "C", t0.Add(500*time.Millisecond), 10*time.Minute); outcome != AnnounceRecorded || len(list) != 1 {
+		t.Errorf("a call made before the clear and arriving after it must show nothing, got %d %v", outcome, list)
+	}
+	if _, outcome, list := store.Add(newParticipantID(), "D", t0.Add(1500*time.Millisecond), 10*time.Minute); outcome != AnnounceAdded || len(list) != 2 {
+		t.Errorf("a call made after the clear must show whatever the arrival order, got %d %v", outcome, list)
+	}
+
+	// An older clear arriving late does not lower the floor.
+	if _, changed := store.Clear(t0); changed {
+		t.Error("an older clear must take down nothing made after it")
+	}
+	if _, outcome, _ := store.Add(newParticipantID(), "E", t0.Add(800*time.Millisecond), 10*time.Minute); outcome != AnnounceRecorded {
+		t.Errorf("the floor stays at the latest clear, got %d", outcome)
+	}
+}
+
+// TestAnnouncementStore_ClearFloorNeverPassesNow: a clear stamped ahead of the
+// server (inside the skew the door accepts) takes down what exists but must
+// not hide a call another device makes before that time comes.
+func TestAnnouncementStore_ClearFloorNeverPassesNow(t *testing.T) {
+	store, clk := newClockedStore()
+	t0 := clk.now()
+	a, _, _ := store.Add(newParticipantID(), "A", t0, 10*time.Minute)
+
+	list, changed := store.Clear(t0.Add(4 * time.Second))
+	if !changed || len(list) != 0 {
+		t.Fatalf("expected the clear to take A down, got %v %v", changed, list)
+	}
+	if _, outcome, _ := store.Add(a.ID, "A", t0, 10*time.Minute); outcome != AnnounceRecorded {
+		t.Errorf("a copy of the cleared call must be recorded, got %d", outcome)
+	}
+
+	clk.advance(time.Second)
+	if _, outcome, list := store.Add(newParticipantID(), "B", clk.now(), 10*time.Minute); outcome != AnnounceAdded || len(list) != 1 {
+		t.Errorf("a call made after the clear was received must show, got %d %v", outcome, list)
+	}
+}
+
+// TestAnnouncementStore_ClearTakesDownACallStampedAhead: a call a device stamps
+// ahead of the server, inside the skew the door accepts, goes with a clear the
+// same device makes after it, while a call made after the clear stays.
+func TestAnnouncementStore_ClearTakesDownACallStampedAhead(t *testing.T) {
+	store, clk := newClockedStore()
+	t0 := clk.now()
+	if _, outcome, _ := store.Add(newParticipantID(), "A", t0.Add(2*time.Second), 10*time.Minute); outcome != AnnounceAdded {
+		t.Fatalf("A should show, got %d", outcome)
+	}
+	b, outcome, _ := store.Add(newParticipantID(), "B", t0.Add(5*time.Second), 10*time.Minute)
+	if outcome != AnnounceAdded {
+		t.Fatalf("B should show, got %d", outcome)
+	}
+
+	list, changed := store.Clear(t0.Add(4 * time.Second))
+	if !changed || len(list) != 1 || list[0].ID != b.ID {
+		t.Errorf("the clear must take down A, made before it, and keep B, got %v %v", changed, list)
+	}
+}
+
+// TestAnnouncementStore_KeepsMadeAtOrder: calls reaching the server out of
+// order are held oldest made-at first, so the cap drops the oldest call and the
+// latest is the newest made.
+func TestAnnouncementStore_KeepsMadeAtOrder(t *testing.T) {
+	store, clk := newClockedStore()
+	t0 := clk.now()
+	late := t0.Add(-5 * time.Second)
+
+	for i := range maxActiveAnnouncements {
+		store.Add(newParticipantID(), fmt.Sprintf("msg %d", i), t0.Add(time.Duration(i)*time.Millisecond), 30*time.Minute)
+	}
+	// An older call reaches the server last: at the cap it is the one dropped.
+	older, outcome, list := store.Add(newParticipantID(), "older", late, 30*time.Minute)
+	if outcome != AnnounceRecorded || len(list) != maxActiveAnnouncements {
+		t.Fatalf("the oldest call must not displace a newer one, got %d %d", outcome, len(list))
+	}
+	for _, a := range list {
+		if a.ID == older.ID {
+			t.Error("the late older call must not be showing")
+		}
+	}
+	if got := store.Get(); got == nil || got.Message != fmt.Sprintf("msg %d", maxActiveAnnouncements-1) {
+		t.Errorf("Get must answer the newest made, got %v", got)
+	}
+
+	// A newer call evicts the oldest made.
+	newest, outcome, list := store.Add(newParticipantID(), "newest", t0.Add(time.Hour), 2*time.Hour)
+	if outcome != AnnounceAdded || list[0].Message != "msg 1" || list[len(list)-1].ID != newest.ID {
+		t.Errorf("expected msg 0 evicted and newest last, got %d %v", outcome, list)
+	}
+}
+
+// TestAnnouncementStore_AWithdrawalBeforeTheSendKeepsTheCallDown: a send another
+// tab of the device had out can reach the server after the withdrawal of its id
+// did. The withdrawal is answered as not found, and remembered, so the late send
+// is recorded and shows nothing.
+func TestAnnouncementStore_AWithdrawalBeforeTheSendKeepsTheCallDown(t *testing.T) {
+	store, clk := newClockedStore()
+	id := newParticipantID()
+	if found, _ := store.Remove(id); found {
+		t.Fatal("a call the server has not seen cannot be found")
+	}
+	_, outcome, list := store.Add(id, "Now calling A and B to Shiaijo A.", clk.now(), 5*time.Minute)
+	if outcome != AnnounceRecorded || len(list) != 0 {
+		t.Errorf("expected the late send recorded and nothing showing, got %v %v", outcome, list)
+	}
+	// Remembered only as long as a send could still be on its way.
+	clk.advance(AnnouncementMaxShow + time.Second)
+	if _, outcome, _ := store.Add(newParticipantID(), "later", clk.now(), 5*time.Minute); outcome != AnnounceAdded {
+		t.Errorf("expected an unrelated call to show, got %v", outcome)
+	}
+	if len(store.spent) != 0 {
+		t.Errorf("expected the withdrawal to be forgotten, got %v", store.spent)
+	}
+}
+
+// TestAnnouncementStore_AWithdrawalOfNoClientIdIsNotRemembered: only an id a
+// device could have minted is kept, so a stray DELETE grows nothing.
+func TestAnnouncementStore_AWithdrawalOfNoClientIdIsNotRemembered(t *testing.T) {
+	store, _ := newClockedStore()
+	store.Remove("nonexistent")
+	if len(store.spent) != 0 {
+		t.Errorf("expected nothing remembered, got %v", store.spent)
 	}
 }

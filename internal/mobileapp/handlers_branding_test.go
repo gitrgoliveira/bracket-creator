@@ -207,7 +207,7 @@ func TestDeleteBrandingLogo_PreservesWindowTitle(t *testing.T) {
 
 	// Set a windowTitle via PUT /tournament.
 	body := `{"name":"Test Cup","password":"secret","courts":["A"],"theme":{"windowTitle":"My Cup 2026"}}`
-	req := httptest.NewRequest(http.MethodPut, "/api/tournament", bytes.NewBufferString(body))
+	req := httptest.NewRequest(http.MethodPut, "/api/tournament", bytes.NewBufferString(tournamentBodyVia(t, h, "secret", body)))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Tournament-Password", "secret")
 	w := httptest.NewRecorder()
@@ -251,7 +251,7 @@ func TestDeleteBrandingLogo_PreservesLogoOnLobby(t *testing.T) {
 
 	// Enable logoOnLobby with no colours via PUT /tournament.
 	body := `{"name":"Test Cup","password":"secret","courts":["A"],"theme":{"logoOnLobby":true}}`
-	req := httptest.NewRequest(http.MethodPut, "/api/tournament", bytes.NewBufferString(body))
+	req := httptest.NewRequest(http.MethodPut, "/api/tournament", bytes.NewBufferString(tournamentBodyVia(t, h, "secret", body)))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Tournament-Password", "secret")
 	w := httptest.NewRecorder()
@@ -304,7 +304,7 @@ func TestPutTournament_ThemeColorsAccepted(t *testing.T) {
 	h, _, cleanup := brandingTestSetup(t)
 	defer cleanup()
 	body := `{"name":"Test Cup","password":"secret","courts":["A"],"theme":{"primaryColor":"#ff0000","accentSoftColor":"#ffe0e0"}}`
-	req := httptest.NewRequest(http.MethodPut, "/api/tournament", bytes.NewBufferString(body))
+	req := httptest.NewRequest(http.MethodPut, "/api/tournament", bytes.NewBufferString(tournamentBodyVia(t, h, "secret", body)))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Tournament-Password", "secret")
 	w := httptest.NewRecorder()
@@ -323,7 +323,7 @@ func TestPutTournament_ThemeBadColorRejected(t *testing.T) {
 	h, _, cleanup := brandingTestSetup(t)
 	defer cleanup()
 	body := `{"name":"Test Cup","password":"secret","courts":["A"],"theme":{"primaryColor":"red"}}`
-	req := httptest.NewRequest(http.MethodPut, "/api/tournament", bytes.NewBufferString(body))
+	req := httptest.NewRequest(http.MethodPut, "/api/tournament", bytes.NewBufferString(tournamentBodyVia(t, h, "secret", body)))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Tournament-Password", "secret")
 	w := httptest.NewRecorder()
@@ -348,7 +348,7 @@ func TestPutTournament_LogoPathPreserved(t *testing.T) {
 
 	// PUT tournament without a theme field.
 	req = httptest.NewRequest(http.MethodPut, "/api/tournament",
-		bytes.NewBufferString(`{"name":"Branding Test Cup","password":"secret","courts":["A"]}`))
+		bytes.NewBufferString(tournamentBodyVia(t, h, "secret", `{"name":"Branding Test Cup","password":"secret","courts":["A"]}`)))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Tournament-Password", "secret")
 	w = httptest.NewRecorder()

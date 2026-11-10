@@ -253,6 +253,7 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				Source:       helper.CanonicalRegistrationSource(p.Source),
 				PoolPosition: int64(i),
 				CheckedIn:    match.CheckedIn,
+				CheckInAt:    match.CheckInAt,
 			})
 		}
 
@@ -691,7 +692,12 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		c.JSON(http.StatusOK, assignments)
 	})
 
-	r.PUT("/competitions/:id/participants/:pid/checkin", func(c *gin.Context) {
+	// setCheckIn is the PUT (checkedIn true) and DELETE (false) check-in door.
+	// The body carries the tap's stamp, {modifiedAt}, and the later tap wins
+	// (state.CheckInSuperseded): a change whose stamp is not later than the
+	// stored one is answered 200 {applied:false, reason:"superseded",
+	// participant} with the participant as stored, and nothing is written.
+	setCheckIn := func(c *gin.Context, checkedIn bool) {
 		id, ok := requireValidCompID(c)
 		if !ok {
 			return
@@ -707,11 +713,19 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			return
 		}
 
-		updatedPlayer, err := store.UpdateParticipant(id, pid, comp.EffectiveWithZekkenName(), func(p *domain.Player) error {
-			p.CheckedIn = true
-			return nil
-		})
+		var req struct {
+			ModifiedAt int64 `json:"modifiedAt"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request payload"})
+			return
+		}
+		at, ok := judgeClientStamp(c, req.ModifiedAt, checkInStampWhat)
+		if !ok {
+			return
+		}
 
+		player, applied, err := store.SetCheckIn(id, pid, comp.EffectiveWithZekkenName(), checkedIn, at)
 		if err != nil {
 			// Every write funnels through saveParticipantsNoLock's floor
 			// guards, so a check-in can be refused by ErrBlankDojo (a
@@ -725,9 +739,17 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			internalError(c, err)
 			return
 		}
+		if !applied {
+			c.JSON(http.StatusOK, gin.H{"applied": false, "reason": "superseded", "participant": player})
+			return
+		}
 
 		hub.Broadcast(EventParticipantsUpdated, gin.H{"competitionId": id})
-		c.JSON(http.StatusOK, updatedPlayer)
+		c.JSON(http.StatusOK, player)
+	}
+
+	r.PUT("/competitions/:id/participants/:pid/checkin", func(c *gin.Context) {
+		setCheckIn(c, true)
 	})
 
 	r.POST("/competitions/:id/participants/checkin-bulk", func(c *gin.Context) {
@@ -741,9 +763,14 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 
 		var req struct {
 			ParticipantIDs []string `json:"participantIds"`
+			ModifiedAt     int64    `json:"modifiedAt"`
 		}
 		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request payload"})
+			return
+		}
+		at, ok := judgeClientStamp(c, req.ModifiedAt, checkInStampWhat)
+		if !ok {
 			return
 		}
 
@@ -764,9 +791,12 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			return
 		}
 
-		result, err := store.BulkCheckIn(id, req.ParticipantIDs)
+		// Each id is judged as the single door judges it; a participant whose
+		// stored change is as late or later comes back in result.Superseded,
+		// as stored, so the desk can adopt each one by id.
+		result, err := store.BulkCheckInAt(id, req.ParticipantIDs, at)
 		if err != nil {
-			// BulkCheckIn is the highest-frequency roster writer and, like
+			// The bulk check-in is the highest-frequency roster writer and, like
 			// every other write, goes through saveParticipantsNoLock's floor
 			// guards: an unrelated blank-dojo row already on disk refuses
 			// this write too (ErrBlankDojo), not just an infra failure.
@@ -779,7 +809,9 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			return
 		}
 
-		if result.CheckedIn > 0 {
+		// A row already checked in whose stamp advanced changed too (the
+		// stored stamp is what the other desks compare), so it announces.
+		if result.CheckedIn > 0 || result.AlreadyCheckedIn > 0 {
 			hub.Broadcast(EventParticipantsUpdated, gin.H{"competitionId": id})
 		}
 
@@ -787,42 +819,13 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 	})
 
 	r.DELETE("/competitions/:id/participants/:pid/checkin", func(c *gin.Context) {
-		id, ok := requireValidCompID(c)
-		if !ok {
-			return
-		}
-		if refuseCheckInInSelfRun(c, store) {
-			return
-		}
-		pid := c.Param("pid")
-
-		comp, err := store.LoadCompetition(id)
-		if err != nil || comp == nil {
-			c.JSON(http.StatusNotFound, gin.H{"error": "competition not found"})
-			return
-		}
-
-		updatedPlayer, err := store.UpdateParticipant(id, pid, comp.EffectiveWithZekkenName(), func(p *domain.Player) error {
-			p.CheckedIn = false
-			return nil
-		})
-
-		if err != nil {
-			// See the checkin (PUT) handler above: this write is subject to
-			// the same saveParticipantsNoLock floor guards, so
-			// respondRosterWriteError (errors.go) classifies ErrBlankDojo
-			// too, not just ErrParticipantNotFound.
-			if respondRosterWriteError(c, err) {
-				return
-			}
-			internalError(c, err)
-			return
-		}
-
-		hub.Broadcast(EventParticipantsUpdated, gin.H{"competitionId": id})
-		c.JSON(http.StatusOK, updatedPlayer)
+		setCheckIn(c, false)
 	})
 }
+
+// checkInStampWhat names the moment a check-in's stamp stands for, in the 400
+// judgeClientStamp writes.
+const checkInStampWhat = "the time of the check-in tap, in milliseconds"
 
 // errCheckInNotInSelfRun refuses every check-in write in a self-run
 // tournament, whoever sends it (operator ruling 2026-10-13: "Self run mode has

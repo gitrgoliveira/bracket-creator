@@ -13,6 +13,11 @@ type Player struct {
 	Metadata    []string `json:"metadata,omitempty"`
 	Source      string   `json:"source,omitempty"` // registration source, how the entry was created: registered (self-registered), manual (operator-added), transfer (imported)
 	CheckedIn   bool     `json:"checkedIn"`
+	// CheckInAt is the stamp (server-relative ms) of the check-in change that
+	// set CheckedIn, so a later tap wins over an earlier one that arrives
+	// late, a taken-back check-in included. 0 is a row never stamped (every
+	// roster from before stamps, and a row never checked in).
+	CheckInAt int64 `json:"checkInAt,omitempty"`
 
 	PoolPosition int64 `json:"-"` // internal: used for Excel output and pool-draw ordering; not serialised to JSON because the value is inconsistently indexed across producer paths (0-based in handlers, 1-based in helper). Draw order on the wire is conveyed by pool.players array ordering.
 	Seed         int   `json:"seed"`

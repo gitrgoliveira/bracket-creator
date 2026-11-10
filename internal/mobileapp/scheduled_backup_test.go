@@ -161,6 +161,7 @@ func TestScheduledBackups_NoOpDoorsAndDateOnlyChange(t *testing.T) {
 		"password": pt.Password, "durationDays": tour.DurationDays,
 		"clockToElapsedMultiplier": tour.ClockToElapsedMultiplier, "slowestCourtBufferPct": tour.SlowestCourtBufferPct,
 		"mode": tour.Mode, "sponsors": tour.Sponsors,
+		"tournamentVersion": state.TournamentVersion(tour),
 	}
 	w := populatedServeJSON(t, pt.Router, pt.Password, http.MethodPut, "/api/tournament", tourBody)
 	require.Less(t, w.Code, 300)

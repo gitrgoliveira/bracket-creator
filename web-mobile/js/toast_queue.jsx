@@ -4,7 +4,8 @@
 // live here, at module level, so they survive the Toast being rendered from
 // another place (the admin and viewer branches each render one, and switching
 // between them remounts it). `Toast` (ui.jsx) only draws the snapshot and calls
-// `dismissToast`; `showToast` (app.jsx) calls `pushToast`.
+// `dismissToast`; `showToast` (app.jsx) calls `pushToast`; a toast that is no
+// longer true is taken back by its id (`dismissToastById`).
 //
 // The rules:
 // - A LATCHED toast is a notice told once: an error, a warning, and every
@@ -93,6 +94,15 @@ export function pushToast(message, type = 'success', opts = {}) {
 export function dismissToast() {
   if (!_current) return;
   _advance();
+}
+
+// dismissToastById: the toast pushed with `id` is no longer true, wherever it
+// is: shown (or fading), the next one shows; queued, it is dropped and never
+// shows. A toast with another id, or none, is left as it is.
+export function dismissToastById(id) {
+  if (id === undefined || id === null) return;
+  if (_current && _current.id === id) { _advance(); return; }
+  _queue = _queue.filter((q) => q.id !== id);
 }
 
 // toastSnapshot: the toast shown, or null. The same object while none of its

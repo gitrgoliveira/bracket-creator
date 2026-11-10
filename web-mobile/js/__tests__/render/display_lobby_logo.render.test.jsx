@@ -161,7 +161,7 @@ describe('AdminEditTournament "Show the logo on the lobby display" checkbox', ()
     expect(onSave.mock.calls[0][0].theme).toEqual({ logoOnLobby: false });
   });
 
-  it('follows tournament prop updates when logoOnLobby changes on reload', async () => {
+  it('keeps the box as it was opened when the tournament updates under the open form', async () => {
     let rerender;
     await act(async () => {
       ({ rerender } = render(
@@ -196,6 +196,7 @@ describe('AdminEditTournament "Show the logo on the lobby display" checkbox', ()
       );
     });
 
-    expect(checkbox.checked).toBe(true);
+    // The form is held to the copy it was opened from (Reload takes a newer one).
+    expect(checkbox.checked).toBe(false);
   });
 });

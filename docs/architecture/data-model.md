@@ -104,6 +104,7 @@ classDiagram
         +int Seed
         +int PoolPosition
         +bool CheckedIn
+        +int64 CheckInAt
         +string Source
     }
 
@@ -703,6 +704,32 @@ Markdown, CSV, and JSON or YAML each earn their place:
 In `tournament.md`, YAML front matter stores the tournament settings, among them `name`, `date`, `venue`, `courts`, `mode`, `duration_days`, `pauses`, `clock_to_elapsed_multiplier`, `slowest_court_buffer_pct`, `sponsors`, and `theme`. A file that still carries `lunch_block`, `opening_block` or `closing_block` is converted to `pauses` at startup. The optional `theme` block holds the accent colours, the window title, `logo_path`, and `logo_on_lobby` (a bool; absent reads false). When `logo_on_lobby` is true and a logo is uploaded in `branding/`, the lobby display shows the logo.
 
 In `competitions/<id>/config.md`, YAML front matter stores competition configuration: `name`, `date`, `start_time`, `courts`, `kind`, `format`, `status`, rules and match durations, `expected_participants`, and format-specific options. The `expected_participants` field is an optional integer (0 to 1024, absent means 0) representing the organiser's expected entry count (expected teams in team competitions) for setup schedule estimation. It needs no migration because no earlier release wrote the key.
+
+The settings versions are not stored. `tournamentVersion` (over the fields a tournament save writes, never the password) and `awardsVersion` (over a competition's fighting-spirit awards list) are content hashes computed when they are served, like a competition's `configVersion` (the version its settings save sends back), so nothing is added to `tournament.md` or `config.md`. A save sends back the version it was made from, and a stale one is refused with the current copy.
+
+A `participants.csv` row ends with an optional check-in marker, and the marker carries the
+stamp of the check-in change that set it, so the later of two taps on one competitor wins
+whichever reaches the server first:
+
+* `checked_in@<ms>` is a competitor checked in, and `not_checked_in@<ms>` one whose check-in
+  was taken back. `<ms>` is the time of the tap in unix milliseconds, on the server's clock
+  as the device estimates it (`Player.CheckInAt`). A taken-back check-in keeps its stamp on
+  purpose, so a check-in tapped earlier that arrives late is still beaten by the undo.
+* A change stamped at or before the stored stamp is not applied: nothing is written and the
+  answer carries the row as stored. Of two changes stamped in the same millisecond, the one
+  that reaches the server first stands.
+* No marker is written for a row that was never checked in and has never been stamped.
+* The bare `checked_in` that every earlier release wrote is read as checked in at stamp 0, and
+  a row with no marker as not checked in at stamp 0. A roster written by an earlier release
+  therefore loads as it was and is not rewritten; any check-in tap, which carries a real
+  stamp, beats those rows. Reading the marker is the whole migration.
+* The marker is the last column, and a row of two or fewer data columns (not counting a
+  leading id) never carries one.
+* A stamp is not part of what a backup fingerprint compares: `checked_in@<ms>` counts as
+  `checked_in` and `not_checked_in@<ms>` as no marker, so a check-in sent again that changes
+  nothing, or one applied and taken back, leaves the fingerprint where it was.
+
+Court calls (announcements) are held in memory only and are never written to the data folder.
 
 A competitor list must exist before a seed can be set: a seed ranks a participant, so a rank
 with nobody to attach it to is refused, not stored. Clearing a seeding is exempt, since that

@@ -136,3 +136,5 @@ Take a backup of the whole tournament before you upgrade (refer to [Backup and r
 * **Linux packages**: there is no hosted package repository, so upgrades are not automatic. Download the new release's package and install it the same way.
 * **Pre-compiled binaries**: download and extract the new release's archive over the old binary.
 * **Go / source builds**: re-run `go install github.com/gitrgoliveira/bracket-creator@latest`, or `git pull` and `make go/build`.
+
+After upgrading, reload every open app tab and device: a page left open on the previous version cannot save check-ins, court calls, tournament settings or fighting-spirit awards. To go back to an earlier version, restore the backup you took before upgrading, because an earlier version cannot read the check-in marks recorded since: those competitors show as not checked in and lose their registration source, the mark can show as their dan grade, and the next save keeps that. Restoring discards everything recorded since the upgrade.

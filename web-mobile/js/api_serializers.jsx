@@ -522,6 +522,10 @@ function normalizeCompetitionDetail(data) {
         // `config.dataIssues` (not the response's own top-level key) that the
         // banner actually reads; map it here so the two loading paths agree.
         config.dataIssues = result.dataIssues;
+        // The version of the fighting-spirit awards, a sibling of config for
+        // the same reason, which the awards panel (rendered off config) sends
+        // back with its save.
+        config.awardsVersion = result.awardsVersion;
         result.config = config;
     }
 

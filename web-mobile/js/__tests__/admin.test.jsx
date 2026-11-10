@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { readFileSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { mergeCompetitionsIntoTournament, mergeTournamentPatch, normalizeCreatedRecord } from '../admin.jsx';
+import { mergeCompetitionsIntoTournament, mergeTournamentPatch, normalizeCreatedRecord, tournamentFromConflict } from '../admin.jsx';
 import { UNSAVED_ENTRIES_DISCARDED } from '../unsaved_entries.jsx';
 import { SCORE_KEPT_SENTENCE } from '../court_move.jsx';
 
@@ -288,6 +288,25 @@ describe('mergeTournamentPatch', () => {
     const t = { id: 't1', name: 'Cup', password: '' };
     const result = mergeTournamentPatch(t, { name: 'New', password: 'Z' }, 'Y', true);
     expect(result.password).toBe('');
+  });
+});
+
+describe('tournamentFromConflict', () => {
+  it('drops a field the other device cleared (the server omits an empty optional field)', () => {
+    const t = { id: 't1', name: 'Cup', infoNotes: 'old notes', publicURL: 'https://old.example', pauses: [{ name: 'Lunch' }], competitions: [{ id: 'c1' }], password: 'X' };
+    const copy = { id: 't1', name: 'Cup 2', tournamentVersion: 'v2', password: '' };
+    const result = tournamentFromConflict(t, copy, 'X', false);
+    expect(result).not.toHaveProperty('infoNotes');
+    expect(result).not.toHaveProperty('publicURL');
+    expect(result).not.toHaveProperty('pauses');
+    expect(result.name).toBe('Cup 2');
+    expect(result.tournamentVersion).toBe('v2');
+  });
+
+  it('keeps the competitions list and the session password the copy does not hold', () => {
+    const t = { id: 't1', competitions: [{ id: 'c1' }] };
+    expect(tournamentFromConflict(t, { id: 't1' }, 'Y', false)).toMatchObject({ competitions: [{ id: 'c1' }], password: 'Y' });
+    expect(tournamentFromConflict(t, { id: 't1' }, 'Y', true).password).toBe('');
   });
 });
 

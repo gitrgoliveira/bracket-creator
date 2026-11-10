@@ -397,6 +397,11 @@ export function queueAlertMessage(alert) {
       // Any other change (terminalCount 0: a running score write, a court move,
       // a lineup save) is a change, not a result (R5).
       {
+        // A settings save made against a copy another device changed since
+        // (api_client.jsx's document doors): the way out is to open the
+        // current copy and save again, never to re-enter it over theirs.
+        if (alert.code === "tournament_changed") return "Tournament settings were not saved: they were changed on another device. Open them and save again.";
+        if (alert.code === "awards_changed") return "The fighting-spirit awards were not saved: they were changed on another device. Open them and save again.";
         const what = Number(alert.terminalCount) > 0 ? "A result" : "A change";
         if (alert.sentence && alert.detail) return `${what} was refused by the server and cannot be saved. ${alert.detail}`;
         return `${what} was refused by the server${detail} and cannot be saved. Re-enter it.`;
@@ -407,6 +412,10 @@ export function queueAlertMessage(alert) {
     // wrong move, so it gets its own wording.
     case "superseded":
       return supersededAlertText(n, one, !!alert.matchClosed);
+    // bc-obox C2: a check-in another desk's later tap changed, so the later
+    // tap stands; the sentence names the competitor and what they are now.
+    case "checkin_superseded":
+      return alert.detail || `${n} check-ins were changed on another desk. Check the list.`;
     case "server_error":
       // The outbox sends each match's writes strictly in order (bc-evts F1), so
       // a write the server keeps refusing holds back THAT match's later changes
@@ -458,8 +467,10 @@ export function queueAlertMessage(alert) {
 // error. Exported for test.
 export function queueAlertToastType(alert) {
   if (alert && (alert.kind === "displaced" || alert.kind === "tap_applied")) return "info";
-  // The change was kept; a carried lineup could not follow it (F5).
-  if (alert && alert.kind === "lineup_warning") return "warning";
+  // The change was kept; a carried lineup could not follow it (F5). A
+  // check-in another desk changed later stands as that desk left it: the
+  // screen changed under the operator, which they are warned of.
+  if (alert && (alert.kind === "lineup_warning" || alert.kind === "checkin_superseded")) return "warning";
   return alert && alert.kind === "sent" ? "success" : "error";
 }
 

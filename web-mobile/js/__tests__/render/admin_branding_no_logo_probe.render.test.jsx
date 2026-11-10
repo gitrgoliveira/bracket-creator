@@ -17,7 +17,7 @@ let restoreGlobals;
 let BrandingManager;
 
 beforeAll(async () => {
-  restoreGlobals = installWindowStubs({ API, confirmDialog: vi.fn().mockResolvedValue(true) });
+  restoreGlobals = installWindowStubs({ API, confirmDialog: vi.fn().mockResolvedValue(true), applyTheme: vi.fn() });
   ({ BrandingManager } = await import('../../admin_branding.jsx'));
 });
 afterAll(() => restoreGlobals());
@@ -85,5 +85,24 @@ describe('BrandingManager and the custom logo', () => {
     });
     expect(screen.getByText('Current logo')).toBeTruthy();
     expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it('leaves the colours and the parent theme alone when another organiser changes the theme', async () => {
+    const onThemeChange = vi.fn();
+    const theme = (primaryColor) => ({ primaryColor, accentSoftColor: '#e7eaf3', windowTitle: 'Cup' });
+    let view;
+    await act(async () => {
+      view = render(<BrandingManager tournament={{ name: 'Cup', theme: theme('#112233') }} password="pw" showToast={() => {}} onThemeChange={onThemeChange} />);
+    });
+    expect(onThemeChange).toHaveBeenCalledTimes(1);
+    const picker = () => document.querySelector('input[type="color"]');
+    await act(async () => { fireEvent.change(picker(), { target: { value: '#445566' } }); });
+    const calls = onThemeChange.mock.calls.length;
+
+    await act(async () => {
+      view.rerender(<BrandingManager tournament={{ name: 'Cup', theme: theme('#abcdef') }} password="pw" showToast={() => {}} onThemeChange={onThemeChange} />);
+    });
+    expect(picker().value).toBe('#445566');
+    expect(onThemeChange).toHaveBeenCalledTimes(calls);
   });
 });

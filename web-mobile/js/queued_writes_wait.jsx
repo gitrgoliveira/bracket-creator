@@ -102,8 +102,6 @@ export function useWaitForQueuedWrites(compID, kinds) {
 
   useEffect(() => {
     keyRef.current = { compID, kindsKey };
-    heldRef.current = null;
-    setWaiting(false);
     const kindsNow = kindsOfKey(kindsKey);
     const onChange = () => {
       if (!mountedRef.current) return;
@@ -124,7 +122,14 @@ export function useWaitForQueuedWrites(compID, kinds) {
     const offs = (typeof window !== 'undefined' ? [window.subscribeUnsentWrites, window.subscribeSyncStatus] : [])
       .filter((subscribe) => typeof subscribe === 'function')
       .map((subscribe) => subscribe(onChange));
-    return () => offs.forEach((off) => { if (typeof off === 'function') off(); });
+    // A change of competition or kinds drops the held run: the cleanup runs
+    // before the next key's effect, so a run held for the old key never fires
+    // under the new one.
+    return () => {
+      offs.forEach((off) => { if (typeof off === 'function') off(); });
+      heldRef.current = null;
+      if (mountedRef.current) setWaiting(false);
+    };
   }, [compID, kindsKey]);
 
   const run = useCallback((fn) => {

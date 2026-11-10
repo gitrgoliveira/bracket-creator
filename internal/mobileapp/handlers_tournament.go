@@ -705,8 +705,8 @@ func staleTournamentSave(current *state.Tournament, body *state.Tournament, from
 	if stored == from {
 		return false
 	}
-	samePassword := body.Password == "" || body.Password == current.Password
-	return !(samePassword && state.TournamentVersion(body) == stored)
+	changesPassword := body.Password != "" && body.Password != current.Password
+	return changesPassword || state.TournamentVersion(body) != stored
 }
 
 // respondTournamentChanged answers a PUT /api/tournament made against an

@@ -1042,8 +1042,10 @@ function FightingSpiritAwardsEditor({ c, password, showToast }) {
   // this editor was made from and the one Reload took. It is moved past, not
   // held.
   const reloadedRef = useRef(false);
+  // Written in a layout effect, never during render (latest_ref.jsx), so the
+  // passive effect below reads the value this render had.
   const dirtyRef = useRef(dirty);
-  dirtyRef.current = dirty;
+  React.useLayoutEffect(() => { dirtyRef.current = dirty; });
   const versionCompIdRef = useRef(c.id);
   useEffect(() => {
     const switched = versionCompIdRef.current !== c.id;

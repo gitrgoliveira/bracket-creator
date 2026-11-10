@@ -23,6 +23,7 @@ import { AdminCalendarPage } from './admin_calendar.jsx';
 import { useWaitForQueuedWrites, QueuedWritesWait } from './queued_writes_wait.jsx';
 import { isOffline, savedOfflineSentence } from './write_result.jsx';
 import { onDocumentSettled } from './document_versions.jsx';
+import { useLatestRef } from './latest_ref.jsx';
 
 const { useState, useEffect, useRef } = React;
 
@@ -215,8 +216,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
   // later): the Edit Tournament form, if it is open then, shows the refusal
   // with what was typed kept. `lateRefusal` is what it is handed; the view kind
   // is read through a ref because the refusal arrives long after the tap.
-  const viewKindRef = useRef(view.kind);
-  viewKindRef.current = view.kind;
+  const viewKindRef = useLatestRef(view.kind);
   const [lateRefusal, setLateRefusal] = useState(null);
   useEffect(() => { if (view.kind !== "editTournament") setLateRefusal(null); }, [view.kind]);
   // A password change waits for this device's queued settings saves

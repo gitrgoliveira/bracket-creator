@@ -71,7 +71,8 @@ type Tournament struct {
 	// They are migrated into Pauses and are never emitted on the wire (json:"-")
 	// nor re-persisted once carried (the migrations clear them, so omitempty
 	// drops the old keys on the next save). A value time.ParseDuration cannot
-	// read makes no pause and is kept, never deleted (upgradeLegacyCeremonies).
+	// read becomes a pause with no length named with that text, so the
+	// organiser sees it and gives it one (legacyBlockPause).
 	LunchBlockLegacy   string `yaml:"lunch_block,omitempty" json:"-"`
 	OpeningBlockLegacy string `yaml:"opening_block,omitempty" json:"-"`
 	ClosingBlockLegacy string `yaml:"closing_block,omitempty" json:"-"`
@@ -274,8 +275,9 @@ func ValidateTournamentMode(mode string) error {
 // schema versions and applies no defaults:
 //   - DurationDays == 0 becomes 1
 //   - RulesURLLegacy is migrated to WebsiteURL and cleared
-//   - When len(Pauses) == 0 and LunchBlockLegacy parses with time.ParseDuration
-//     to > 0, appends a Pause{Name: "Lunch", Start: "12:00", Length: LunchBlockLegacy, Day: 0}
+//   - When len(Pauses) == 0, LunchBlockLegacy becomes a Lunch pause at 12:00
+//     on every day (legacyBlockPause: a length it cannot read gives the pause
+//     no length and puts the text in its name)
 func migrateLegacyTournament(t *Tournament) {
 	if t == nil {
 		return
@@ -287,14 +289,10 @@ func migrateLegacyTournament(t *Tournament) {
 		t.WebsiteURL = t.RulesURLLegacy
 	}
 	t.RulesURLLegacy = ""
-	if len(t.Pauses) == 0 && t.LunchBlockLegacy != "" {
-		if d, err := time.ParseDuration(t.LunchBlockLegacy); err == nil && d > 0 {
-			t.Pauses = append(t.Pauses, Pause{
-				Name:   "Lunch",
-				Start:  "12:00",
-				Length: t.LunchBlockLegacy,
-				Day:    0,
-			})
+	if len(t.Pauses) == 0 {
+		if lunch, ok := legacyBlockPause("Lunch", t.LunchBlockLegacy); ok {
+			lunch.Start = "12:00"
+			t.Pauses = append(t.Pauses, lunch)
 		}
 	}
 }

@@ -62,6 +62,16 @@ describe('PauseList component', () => {
     expect(screen.queryByLabelText('On')).toBeNull();
   });
 
+  it('shows the "On" select on a one-day tournament for a pause left on a day it no longer has', () => {
+    const pauses = [
+      { name: 'Grading', start: '14:00', length: '1h', day: 2 },
+    ];
+    render(<PauseList pauses={pauses} onChange={vi.fn()} durationDays={1} />);
+
+    expect(screen.getByLabelText('On')).toHaveValue('2');
+    expect(screen.getByRole('option', { name: 'Every day' })).toBeInTheDocument();
+  });
+
   it('shows the "On" select on a multi-day tournament', () => {
     const pauses = [
       { name: 'Lunch', start: '12:00', length: '1h', day: 0 },

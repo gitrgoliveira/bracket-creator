@@ -8046,7 +8046,11 @@ components:
         ceremony or grading). A row with no start or no length is saved and
         ignored by the schedule. The tournament save refuses with 400 a start
         that is not HH:MM, a length outside 1 minute to 24 hours, or a day
-        outside 0 to 30.
+        outside 0 to 30. It also refuses with 400 a new or changed pause on a
+        day past the tournament's durationDays (the body's value, 0 read as
+        1); a pause equal in every field to a stored one is unchanged and is
+        accepted, so a pause left past the end by shortening the tournament
+        never fails a later save.
       properties:
         name:
           type: string

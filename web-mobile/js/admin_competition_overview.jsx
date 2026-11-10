@@ -1035,18 +1035,26 @@ function FightingSpiritAwardsEditor({ c, password, showToast }) {
     pastVersionsRef.current.delete(version);
     awardsVersionRef.current = version;
   };
+  // Set by Reload: the first version the props serve after it can be a refetch
+  // that was out before the refusal came back, carrying a copy between the one
+  // this editor was made from and the one Reload took. It is moved past, not
+  // held.
+  const reloadedRef = useRef(false);
   const dirtyRef = useRef(dirty);
   dirtyRef.current = dirty;
   const versionCompIdRef = useRef(c.id);
   useEffect(() => {
     const switched = versionCompIdRef.current !== c.id;
     versionCompIdRef.current = c.id;
+    const afterReload = reloadedRef.current;
+    reloadedRef.current = false;
     if (switched) {
       pastVersionsRef.current.clear();
       awardsVersionRef.current = c.awardsVersion;
     } else if (!dirtyRef.current) {
       if (c.awardsVersion !== awardsVersionRef.current && !pastVersionsRef.current.has(c.awardsVersion)) {
-        holdVersion(c.awardsVersion);
+        if (afterReload) pastVersionsRef.current.add(c.awardsVersion);
+        else holdVersion(c.awardsVersion);
       }
       // Once the served version is the one held, what this editor moved past is
       // settled: a version is a hash of the list, and a list that later returns
@@ -1075,6 +1083,7 @@ function FightingSpiritAwardsEditor({ c, password, showToast }) {
 
   const reloadConflict = () => {
     holdVersion(conflict.version);
+    reloadedRef.current = c.awardsVersion !== conflict.version;
     setAwards(conflict.awards.map(withKey));
     setConflict(null);
     setDirty(false);

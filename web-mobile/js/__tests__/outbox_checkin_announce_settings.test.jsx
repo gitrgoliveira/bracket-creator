@@ -346,6 +346,20 @@ describe('the tournament settings (G4b)', () => {
         expect(entries[0][1].payload).toMatchObject({ venue: 'B', tournamentVersion: 'v0' });
     });
 
+    it('a document that returns to content it had before is saved from that version, not along the old moves', async () => {
+        // v0 -> v1 -> v2 -> v0: the third save put the settings back as they were.
+        const answers = ['v1', 'v2', 'v0'];
+        let n = 0;
+        server(() => [200, { tournamentVersion: answers[n++] }]);
+        for (const from of ['v0', 'v1', 'v2']) {
+            const res = await API.updateTournament(settings({ venue: from, tournamentVersion: from }), 'pw');
+            await res.settled;
+        }
+        server(() => new Promise(() => {}));
+        await API.updateTournament(settings({ venue: 'D', tournamentVersion: 'v0' }), 'pw');
+        expect(stored()[0][1].payload.tournamentVersion).toBe('v0');
+    });
+
     it('a save queued behind one in flight takes the version the landed save answered', async () => {
         let release;
         const sent = server((r) => (r.body.venue === 'A'

@@ -399,6 +399,37 @@ describe('Fighting-spirit awards save through the outbox', () => {
     expect(screen.getByTestId('fs-award-name-0').value).toBe('Suzuki');
   });
 
+  it('does not let a refetch that was out before Reload put an older copy over the reloaded one', async () => {
+    const settled = deferred();
+    window.API.updateCompetitionAwards.mockResolvedValue({ applied: true, pending: true, settled: settled.promise });
+    const showToast = await mount();
+    await act(async () => { fireEvent.click(screen.getByTestId('fs-award-save')); });
+    const onRefusal = window.API.updateCompetitionAwards.mock.calls[0][4].onRefusal;
+    const stale = Object.assign(new Error('The awards changed.'), {
+      code: 'awards_changed', awardsVersion: 'a3',
+      fightingSpiritAwards: [{ title: 'Fighting Spirit', recipientName: 'Suzuki', recipientDojo: '' }],
+    });
+    await act(async () => { onRefusal(stale); settled.reject(stale); await settled.promise.catch(noop); });
+    await act(async () => { fireEvent.click(screen.getByTestId('fs-award-reload')); });
+    expect(screen.getByTestId('fs-award-name-0').value).toBe('Suzuki');
+
+    // A refetch that left before the refusal came back carries the copy between.
+    const props = (awardsVersion, name) => (
+      <FightingSpiritAwardsEditor c={comp({ awardsVersion, fightingSpiritAwards: [{ title: 'Fighting Spirit', recipientName: name, recipientDojo: '' }] })} password="pw" showToast={showToast} />
+    );
+    await act(async () => { view.rerender(props('a2', 'Ito')); });
+    expect(screen.getByTestId('fs-award-name-0').value).toBe('Suzuki');
+    // The refetch of the reloaded copy follows and changes nothing.
+    await act(async () => { view.rerender(props('a3', 'Suzuki')); });
+    expect(screen.getByTestId('fs-award-name-0').value).toBe('Suzuki');
+
+    // Reload held a3, so a save is made from it.
+    window.API.updateCompetitionAwards.mockResolvedValue({ applied: true, pending: true, settled: Promise.resolve({ awardsVersion: 'a4' }) });
+    await act(async () => { fireEvent.click(screen.getByTestId('fs-award-add')); });
+    await act(async () => { fireEvent.click(screen.getByTestId('fs-award-save')); });
+    expect(window.API.updateCompetitionAwards.mock.calls[1][3]).toBe('a3');
+  });
+
   it('leaves the refusal to the outbox\'s alert once the panel is gone', async () => {
     const settled = deferred();
     window.API.updateCompetitionAwards.mockResolvedValue({ applied: true, pending: true, settled: settled.promise });

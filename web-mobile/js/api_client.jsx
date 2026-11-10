@@ -1756,6 +1756,11 @@ function _rebaseQueuedVersion(base, field, sent, got) {
     if (!field || typeof sent !== 'string' || !sent || typeof got !== 'string' || !got || sent === got) return;
     let moves = _docVersionMoves.get(base);
     if (!moves) { moves = new Map(); _docVersionMoves.set(base, moves); }
+    // A version is a hash of the document, so a save can put it back at content
+    // it had before. The document is at `got` now: a move out of `got` made
+    // earlier describes a document that no longer exists, and following it
+    // would send a version the server no longer holds.
+    moves.delete(got);
     moves.delete(sent);
     moves.set(sent, got);
     while (moves.size > _DOC_MOVES_MAX) moves.delete(moves.keys().next().value);

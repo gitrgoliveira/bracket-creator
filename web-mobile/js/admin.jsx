@@ -22,6 +22,7 @@ import { mergeSavedCompetition } from './competition_put_body.jsx';
 import { AdminCalendarPage } from './admin_calendar.jsx';
 import { useWaitForQueuedWrites, QueuedWritesWait } from './queued_writes_wait.jsx';
 import { isOffline, savedOfflineSentence } from './write_result.jsx';
+import { onDocumentSettled } from './document_versions.jsx';
 
 const { useState, useEffect, useRef } = React;
 
@@ -696,7 +697,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
       // connection says so now, not when it lands (the same line the court-call
       // composer gives).
       if (isOffline()) showToast(savedOfflineSentence("Tournament settings"), "success");
-      res.settled.then((saved) => {
+      onDocumentSettled(res.settled, (saved) => {
         // Discarded from the held-writes list (or sent by another tab, whose
         // answer this one does not hold): nothing of it is known here, so the
         // stored settings come back.

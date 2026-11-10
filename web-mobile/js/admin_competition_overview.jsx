@@ -15,6 +15,7 @@ import { seededRanks, deriveTournamentDays } from './admin_helpers.jsx';
 import { checkInApplies } from './competition_shape.jsx';
 import { useUnsavedInput } from './app_version.jsx';
 import { isOffline, savedOfflineSentence } from './write_result.jsx';
+import { onDocumentSettled } from './document_versions.jsx';
 // One owner for what the operator is told when a file on disk does not say what
 // the app expects; shared with the pool surfaces so the wording cannot drift.
 import {
@@ -1123,7 +1124,7 @@ function FightingSpiritAwardsEditor({ c, password, showToast }) {
       // save made with no connection says so now, not when it lands (the same
       // line the court-call composer gives).
       if (mountedRef.current && isOffline()) showToast(savedOfflineSentence("Fighting Spirit awards"), "success");
-      res.settled.then((saved) => {
+      onDocumentSettled(res.settled, (saved) => {
         // Discarded from the held-writes list (or sent by another tab, whose
         // answer this one does not hold): not saved here, so the typed list
         // stays unsaved on screen and the version stays the one it was made at.

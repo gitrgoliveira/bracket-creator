@@ -31,6 +31,21 @@ function documentFields(payload) {
     return fields;
 }
 
+// onDocumentSettled: what a screen does when its document save is answered.
+// A save that takes the place of a queued one shares its `settled` promise
+// (_openSettlement), so each screen's save would otherwise attach one more
+// handler and show its answer once per save. The promise gets one pair of
+// handlers, and the latest save's pair is the one that runs: its closure knows
+// the most of what was typed.
+const settledHandlers = new WeakMap();
+export function onDocumentSettled(settled, onAnswer, onRefusal) {
+    const known = settledHandlers.get(settled);
+    if (known) { known.onAnswer = onAnswer; known.onRefusal = onRefusal; return; }
+    const handlers = { onAnswer, onRefusal };
+    settledHandlers.set(settled, handlers);
+    settled.then((v) => handlers.onAnswer(v), (e) => handlers.onRefusal(e));
+}
+
 // tournamentRefusal: the Error a refused tournament save rejects with, the
 // shape the direct save threw: a 409 tournament_changed carries the settings
 // as they stand now, for the open form to reload.

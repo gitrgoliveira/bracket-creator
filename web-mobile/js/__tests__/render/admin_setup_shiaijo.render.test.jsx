@@ -408,3 +408,20 @@ describe('Schedule blocks: the "Matches stop for this pause" box reaches the sav
     ]);
   });
 });
+
+// A cleared optional field goes in the save as "", not undefined: JSON drops an
+// undefined key, so a queued save read back after a reload or from another tab
+// would not say the field was cleared, and the overlay would put the old value back.
+describe('Edit Tournament: an emptied optional field survives the outbox', () => {
+  it('saves a cleared notes box and website as empty strings that JSON keeps', async () => {
+    const onSave = vi.fn().mockResolvedValue(undefined);
+    const { container, getByRole } = await mountEdit(makeTournament({ infoNotes: 'Bring a towel', publicURL: 'https://old.example' }), onSave);
+    await act(async () => { fireEvent.change(container.querySelector('#edit-notes'), { target: { value: '   ' } }); });
+    await act(async () => { fireEvent.click(getByRole('button', { name: 'Save changes' })); });
+    expect(onSave).toHaveBeenCalledTimes(1);
+    const sent = JSON.parse(JSON.stringify(onSave.mock.calls[0][0]));
+    expect(sent.infoNotes).toBe('');
+    expect(sent.awardsNote).toBe('');
+    expect(sent.publicURL).toBe('https://old.example');
+  });
+});

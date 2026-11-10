@@ -376,14 +376,18 @@ function AdminEditTournament({ tournament, onCancel, onSave, onReload, refusal, 
         password: pass || undefined,
         courts: Array.from({ length: courts }, (_, i) => String.fromCharCode(65 + i)),
         pauses: normalizePauses(pauses),
-        publicURL: publicURL.trim() || undefined,
-        venueAddress: venueAddress.trim() || undefined,
-        venueMapURL: venueMapURL.trim() || undefined,
-        openingTime: openingTime.trim() || undefined,
-        closingTime: closingTime.trim() || undefined,
-        websiteURL: websiteURL.trim() || undefined,
-        awardsNote: awardsNote.trim() || undefined,
-        infoNotes: infoNotes.trim() || undefined,
+        // An emptied optional field goes as "", not undefined: JSON drops an
+        // undefined key, so a queued save read back after a reload (or from
+        // another tab) would not say the field was cleared and the overlay
+        // would put the old stored value back (the server trims, and stores "" as none).
+        publicURL: publicURL.trim(),
+        venueAddress: venueAddress.trim(),
+        venueMapURL: venueMapURL.trim(),
+        openingTime: openingTime.trim(),
+        closingTime: closingTime.trim(),
+        websiteURL: websiteURL.trim(),
+        awardsNote: awardsNote.trim(),
+        infoNotes: infoNotes.trim(),
         contacts: contacts.filter(c => (c.value || "").trim()).map(c => ({ label: (c.label || "").trim(), value: (c.value || "").trim() })),
         theme: { ...theme, logoOnLobby: !!logoOnLobby },
       });

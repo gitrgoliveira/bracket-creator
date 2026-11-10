@@ -130,6 +130,18 @@ describe('AdminApp saves the tournament settings through the outbox', () => {
     expect(app.showToast).toHaveBeenCalledWith('Tournament updated');
   });
 
+  it('tells once when two saves queued behind each other share one answer', async () => {
+    // A save that takes the place of a queued one shares its settled promise.
+    const settled = deferred();
+    window.API.updateTournament.mockResolvedValue({ applied: true, pending: true, settled: settled.promise });
+    const app = await mount();
+    await act(async () => { await probe.props.onSave(patch()); });
+    await act(async () => { await probe.props.onSave(patch({ name: 'Winter Taikai' })); });
+
+    await act(async () => { settled.resolve({ tournamentVersion: 'v2' }); await settled.promise; });
+    expect(app.showToast.mock.calls.filter(([m]) => m === 'Tournament updated')).toHaveLength(1);
+  });
+
   it('says at once that a save made with no connection is kept and goes out later', async () => {
     const online = vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(false);
     try {
@@ -359,6 +371,18 @@ describe('Fighting-spirit awards save through the outbox', () => {
     await act(async () => { settled.resolve({ awardsVersion: 'a2' }); await settled.promise; });
     expect(showToast).toHaveBeenCalledWith('Fighting Spirit awards saved.', 'success');
     expect(screen.getByTestId('fs-award-name-0').value).toBe('Tanaka');
+  });
+
+  it('says "saved" once when two saves queued behind each other share one answer', async () => {
+    const settled = deferred();
+    window.API.updateCompetitionAwards.mockResolvedValue({ applied: true, pending: true, settled: settled.promise });
+    const showToast = await mount();
+    await act(async () => { fireEvent.click(screen.getByTestId('fs-award-save')); });
+    await act(async () => { fireEvent.click(screen.getByTestId('fs-award-save')); });
+    expect(window.API.updateCompetitionAwards).toHaveBeenCalledTimes(2);
+
+    await act(async () => { settled.resolve({ awardsVersion: 'a2' }); await settled.promise; });
+    expect(showToast.mock.calls.filter(([m]) => m === 'Fighting Spirit awards saved.')).toHaveLength(1);
   });
 
   it('says at once that a save made with no connection is kept and goes out later', async () => {

@@ -11,8 +11,6 @@ import (
 	"sort"
 	"strings"
 	"time"
-
-	"github.com/gitrgoliveira/bracket-creator/internal/cmd/version"
 )
 
 var fixedHeaderTime = time.Date(1980, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -107,7 +105,7 @@ func Write(w io.Writer, meta Meta, files map[string][]byte) error {
 
 	appVersion := meta.AppVersion
 	if appVersion == "" {
-		appVersion = version.GetVersion()
+		appVersion = RunningVersion()
 	}
 	manifest := Manifest{
 		Format:         FormatVersion,

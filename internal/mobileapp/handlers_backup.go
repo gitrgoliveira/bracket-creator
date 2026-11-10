@@ -18,7 +18,6 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/backup"
-	"github.com/gitrgoliveira/bracket-creator/internal/cmd/version"
 	"github.com/gitrgoliveira/bracket-creator/internal/engine"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
@@ -438,11 +437,6 @@ func readRestoreRequest(c *gin.Context, store BackupStore, verifier PasswordVeri
 	return req, true
 }
 
-// runningAppVersion is the version a restore is judged against; a test sets
-// it to restore an earlier version's backup whatever the test binary's own
-// version is (a branch name, which has no release order).
-var runningAppVersion = version.GetVersion
-
 func readRestoreArchive(c *gin.Context, store BackupStore) (*backup.Archive, bool) {
 	from := c.PostForm("from")
 	fh, fileErr := c.FormFile("archive")
@@ -512,7 +506,7 @@ func readRestoreArchive(c *gin.Context, store BackupStore) (*backup.Archive, boo
 	}
 	// A backup is restored only on the version that made it or a later one;
 	// the plan is refused too, so the page says so before any choice is made.
-	running := runningAppVersion()
+	running := backup.RunningVersion()
 	if verr := backup.CheckAppVersion(archive.Manifest, running); verr != nil {
 		respondBackupRefusal(c, http.StatusBadRequest, backupCodeVersionMismatch, verr.Detail,
 			gin.H{"backupVersion": strings.TrimSpace(archive.Manifest.AppVersion), "appVersion": strings.TrimSpace(running)})

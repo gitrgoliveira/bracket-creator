@@ -464,8 +464,8 @@ export function settingsPutBody(base, edits, configVersion) {
 
 // mergeSavedCompetition: merges a competition PUT's answer (from the server)
 // into the client's held competition copy. Handles omitempty fields where the
-// server's answer omits keys (e.g. expectedParticipants: 0, or missing configVersion
-// when reload fails). Knowledge of which fields are omitempty lives here next to
+// server's answer omits keys (e.g. expectedParticipants: 0, or a missing
+// configVersion, which keeps the held one). Knowledge of which fields are omitempty lives here next to
 // the body builder.
 export function mergeSavedCompetition(held, answer, sent) {
   const merged = { ...held, ...answer };
@@ -478,8 +478,11 @@ export function mergeSavedCompetition(held, answer, sent) {
       merged.expectedParticipants = 0;
     }
   }
+  // An answer naming no version keeps the one held: the next save is then
+  // still checked (at worst a config_changed the page shows and resolves),
+  // never sent with "" which the server reads as "skip the check".
   if (!answer || !answer.configVersion) {
-    merged.configVersion = "";
+    merged.configVersion = (held && held.configVersion) || "";
   }
   return merged;
 }

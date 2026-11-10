@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/backup"
-	"github.com/gitrgoliveira/bracket-creator/internal/cmd/version"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
@@ -33,9 +32,6 @@ type ScheduledBackups struct {
 	Store    *state.Store
 	Clock    func() time.Time
 	Interval time.Duration
-	// Version is the running app version; nil means version.GetVersion.
-	Version func() string
-
 	// tick provides an injectable tick source for testing. If nil, time.NewTicker is used.
 	tick func(time.Duration) (<-chan time.Time, func())
 	// save provides an injectable SaveBackupFile seam for testing. If nil, Store.SaveBackupFile is used.
@@ -46,13 +42,6 @@ type ScheduledBackups struct {
 	// newest archive again.
 	mu    sync.Mutex
 	cache map[string]cachedFingerprint
-}
-
-func (s *ScheduledBackups) appVersion() string {
-	if s.Version != nil {
-		return s.Version()
-	}
-	return version.GetVersion()
 }
 
 func (s *ScheduledBackups) now() time.Time {
@@ -224,7 +213,7 @@ func (s *ScheduledBackups) copyOnce(ctx context.Context, checkAge bool) error {
 	// against this one) is no daily copy for it, so a copy is due at once and
 	// is never "unchanged". A copy an earlier version made restores here and
 	// counts as usual.
-	running := s.appVersion()
+	running := backup.RunningVersion()
 	checks := BackupChecks()
 	if newestNonFuture != nil {
 		if c, ok := s.getOrReadArchiveFingerprint(*newestNonFuture, checks); ok && !backup.RestorableBy(c.appVersion, running) {
@@ -269,7 +258,7 @@ func (s *ScheduledBackups) copyOnce(ctx context.Context, checkAge bool) error {
 		}
 	}
 
-	data, err := snapshotArchiveAs(snap, backup.KindScheduled, now, nil, s.appVersion())
+	data, err := snapshotArchiveAs(snap, backup.KindScheduled, now, nil, backup.RunningVersion())
 	if err != nil {
 		return fmt.Errorf("write backup archive: %w", err)
 	}

@@ -43,6 +43,10 @@ var (
 	// an early-morning time and sort first in the court queue. Nothing is
 	// written.
 	ErrRetimePastMidnight = errors.New("the new day and start would run some matches past midnight")
+	// ErrRetimeFloorChanged is returned when another competition changed
+	// between reading the court floors and the re-time's transaction, so the
+	// floors it would schedule from may be stale. Nothing is written.
+	ErrRetimeFloorChanged = errors.New("another competition changed while this one was being moved")
 )
 
 // MatchTimeChange is one match whose ScheduledAt a re-time changed. Was and
@@ -104,11 +108,20 @@ type RetimeInputs struct {
 	// NewFloor is the court floor for the competition as it will be (the new
 	// day, start and shiaijo).
 	NewFloor map[string]time.Time
+	// Floor is taken before the floors are read; RetimeDrawTx asks it under
+	// the competition's lock and refuses when another competition changed.
+	Floor state.FloorToken
 }
 
 // ReadRetimeInputs reads the tournament and both court floors for a re-time
 // of oldComp (as stored) into newComp (as it will be).
 func (e *Engine) ReadRetimeInputs(oldComp, newComp *state.Competition) (RetimeInputs, error) {
+	// Taken before anything is read, so a change landing during the reads is
+	// seen by the transaction's check.
+	token, err := e.store.TakeFloorToken(oldComp.ID)
+	if err != nil {
+		return RetimeInputs{}, err
+	}
 	tournament, err := e.store.LoadTournament()
 	if err != nil {
 		return RetimeInputs{}, err
@@ -121,7 +134,7 @@ func (e *Engine) ReadRetimeInputs(oldComp, newComp *state.Competition) (RetimeIn
 	if err != nil {
 		return RetimeInputs{}, err
 	}
-	return RetimeInputs{Tournament: tournament, OldFloor: oldFloor, NewFloor: newFloor}, nil
+	return RetimeInputs{Tournament: tournament, OldFloor: oldFloor, NewFloor: newFloor, Floor: token}, nil
 }
 
 // RetimePreview is the dry run of RetimeDrawTx: what a save would change,
@@ -149,6 +162,16 @@ func (e *Engine) RetimePreview(oldComp, newComp *state.Competition) (RetimeOutco
 // start to newComp's, inside the caller's transaction, and saves them only
 // when a time changed. Ids, pairings, courts and order are never touched.
 func RetimeDrawTx(tx state.StoreTx, oldComp, newComp *state.Competition, in RetimeInputs) (RetimeOutcome, error) {
+	// The floors were read before this competition's lock was taken: another
+	// competition re-timed or drawn onto the same shiaijo since would leave
+	// them stale, and the matches written from them would overlap its own.
+	current, err := in.Floor.Current()
+	if err != nil {
+		return RetimeOutcome{}, err
+	}
+	if !current {
+		return RetimeOutcome{}, ErrRetimeFloorChanged
+	}
 	pool, err := tx.LoadPoolMatches(newComp.ID)
 	if err != nil {
 		return RetimeOutcome{}, err
@@ -226,6 +249,12 @@ func RestoreMatchTimesTx(tx state.StoreTx, comp *state.Competition, restore []Ma
 			return fmt.Errorf("%w: %q", ErrRestoreDuplicateMatch, ch.MatchID)
 		}
 		seen[ch.MatchID] = true
+		// Every re-time gives every match a time, so a change it answered
+		// always names a clock time as Now. An empty Now would match a match
+		// holding no time and schedule it.
+		if _, ok := state.ParseClockMinutes(ch.Now); !ok {
+			return fmt.Errorf("%w: %q", ErrRestoreBadTime, ch.Now)
+		}
 		if *at != ch.Now {
 			return ErrUndoStale
 		}

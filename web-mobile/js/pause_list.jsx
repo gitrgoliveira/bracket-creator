@@ -281,7 +281,7 @@ export function PauseList({
 
             return (
               <div key={rowKey} className="pause-row-card">
-                <div className={`pause-fields-grid ${isMultiDay ? 'pause-fields-grid--multiday' : ''}`}>
+                <div className={`pause-fields-grid ${(isMultiDay || pauseDay > daysCount) ? 'pause-fields-grid--multiday' : ''}`}>
                   <div className="field pause-field">
                     <label className="field__label" htmlFor={`pause-${idx}-name`}>Pause name</label>
                     <input
@@ -294,7 +294,10 @@ export function PauseList({
                     />
                   </div>
 
-                  {isMultiDay && (
+                  {/* A one-day tournament still shows the day of a pause left on
+                      a day it no longer has, so the organiser can move it: a
+                      changed pause past the end is refused on save. */}
+                  {(isMultiDay || pauseDay > daysCount) && (
                     <div className="field pause-field">
                       <label className="field__label" htmlFor={`pause-${idx}-day`}>On</label>
                       <select

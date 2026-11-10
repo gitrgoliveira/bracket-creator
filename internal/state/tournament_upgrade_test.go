@@ -139,6 +139,63 @@ lunch_block: 45m
 	assert.Equal(t, statBefore.ModTime(), statAfter.ModTime())
 }
 
+// A ceremony or lunch length v2.3 could store but time.ParseDuration cannot
+// read ("45 min") becomes a pause with no length, named with what the
+// organiser typed, so the setup page shows it to fix; the key is carried and
+// cleared in the same write. A readable one beside it is carried as before.
+func TestTournamentUpgrade_UnreadableCeremonyLengthBecomesAPauseToFix(t *testing.T) {
+	dir := t.TempDir()
+	tournPath := filepath.Join(dir, "tournament.md")
+	tournContent := `---
+name: Free Text Tournament
+date: 01-08-2026
+opening_block: 45 min
+lunch_block: 1h 30m
+closing_block: 20m
+---
+`
+	require.NoError(t, os.WriteFile(tournPath, []byte(tournContent), 0o600))
+
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+
+	tourn, err := store.LoadTournament()
+	require.NoError(t, err)
+	require.NotNil(t, tourn)
+	assert.Equal(t, []Pause{
+		{Name: "Opening ceremony (45 min)"},
+		{Name: "Lunch (1h 30m)", Start: "12:00"},
+		{Name: "Closing ceremony", Length: "20m"},
+	}, tourn.Pauses)
+	assert.Empty(t, tourn.OpeningBlockLegacy)
+	assert.Empty(t, tourn.LunchBlockLegacy)
+	assert.Empty(t, tourn.ClosingBlockLegacy)
+
+	raw, err := os.ReadFile(tournPath)
+	require.NoError(t, err)
+	text := string(raw)
+	assert.NotContains(t, text, "opening_block")
+	assert.NotContains(t, text, "lunch_block")
+	assert.NotContains(t, text, "closing_block")
+
+	// The next start writes nothing, so no pause is made twice.
+	statBefore, err := os.Stat(tournPath)
+	require.NoError(t, err)
+	require.NoError(t, store.upgradeLegacyCeremonies())
+	statAfter, err := os.Stat(tournPath)
+	require.NoError(t, err)
+	bytesAfter, err := os.ReadFile(tournPath)
+	require.NoError(t, err)
+	assert.Equal(t, raw, bytesAfter)
+	assert.Equal(t, statBefore.ModTime(), statAfter.ModTime())
+
+	reloaded, err := NewStore(dir)
+	require.NoError(t, err)
+	again, err := reloaded.LoadTournament()
+	require.NoError(t, err)
+	assert.Equal(t, tourn.Pauses, again.Pauses)
+}
+
 func TestTournamentUpgrade_OneDayTournamentGetsDayZero(t *testing.T) {
 	dir := t.TempDir()
 	tournPath := filepath.Join(dir, "tournament.md")

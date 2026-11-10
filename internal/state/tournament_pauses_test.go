@@ -152,12 +152,14 @@ pauses:
 	assert.NotContains(t, text, "Lunch")
 }
 
-func TestTournamentPauses_UnparseableOrZeroLunchBlockAddsNothingAndDropsKey(t *testing.T) {
+// A lunch v2.3 scheduled as nothing (zero or negative) is dropped with no loss.
+// One time.ParseDuration cannot read is kept, never deleted:
+// TestTournamentUpgrade_UnreadableCeremonyLengthIsKept.
+func TestTournamentPauses_ZeroLunchBlockAddsNothingAndDropsKey(t *testing.T) {
 	for _, tc := range []struct {
 		name       string
 		lunchBlock string
 	}{
-		{name: "unparseable", lunchBlock: "unparseable_duration"},
 		{name: "zero", lunchBlock: "0m"},
 		{name: "negative", lunchBlock: "-15m"},
 	} {

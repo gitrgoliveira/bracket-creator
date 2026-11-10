@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"unicode"
+
+	"github.com/gitrgoliveira/bracket-creator/internal/cmd/version"
 )
 
 const (
@@ -167,11 +169,20 @@ func RestorableBy(made, running string) bool {
 	return !lessThan(r, m)
 }
 
+// RunningVersion answers which version of the app is running: the version a
+// backup it writes names (Write, when Meta.AppVersion is empty) and the one
+// the HTTP restore, the CLI restore and the scheduled job judge a kept or
+// uploaded backup against (CheckAppVersion, RestorableBy). It is the one seam
+// for all of them, so a test that sets it (to restore an earlier version's
+// backup whatever the test binary's own version is, a branch name with no
+// release order) moves every caller together; restore it with t.Cleanup.
+var RunningVersion = version.GetVersion
+
 // CheckAppVersion refuses to restore an archive that the running version of
 // the app cannot restore (RestorableBy): one a later version made, one made
 // before OldestRestorableVersion, or one whose version cannot be put in order
 // against it. running is the version of
-// the app doing the restore (version.GetVersion). It is a restore check and
+// the app doing the restore (RunningVersion). It is a restore check and
 // NOT part of Read, because the scheduled backup job reads every kept copy,
 // later versions' included. Detail is a whole sentence a person reads; the
 // HTTP layer answers it as 400 backup_version_mismatch and the CLI prints it.

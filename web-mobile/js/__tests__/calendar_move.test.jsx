@@ -53,6 +53,11 @@ describe('snapStart', () => {
     expect(snapStart(-30, [])).toBe(0);
     expect(snapStart(2000, [])).toBe(1435);
   });
+  it('is null when a pause ends too late for any start, never a start inside the pause', () => {
+    expect(snapStart(23 * 60 + 45, [{ startMins: 23 * 60 + 40, endMins: 24 * 60 }])).toBeNull();
+    expect(snapStart(2000, [{ startMins: 23 * 60, endMins: 24 * 60 }])).toBeNull();
+    expect(snapStart(23 * 60 + 45, [{ startMins: 23 * 60 + 40, endMins: 23 * 60 + 55 }])).toBe(1435);
+  });
 });
 
 describe('shiftClock', () => {
@@ -70,6 +75,9 @@ describe('shiftLanes', () => {
     expect(shiftLanes(['A', 'B'], ['A', 'B', 'C', 'D'], 1)).toEqual(['B', 'C']);
     expect(shiftLanes(['C', 'D'], ['A', 'B', 'C', 'D'], 3)).toEqual(['C', 'D']);
     expect(shiftLanes(['B'], ['A', 'B', 'C'], -5)).toEqual(['A']);
+  });
+  it('never loses a shiaijo that has no lane: the list stays as it is', () => {
+    expect(shiftLanes(['A', 'B', 'Q'], ['A', 'B', 'C'], 1)).toEqual(['A', 'B', 'Q']);
   });
 });
 
@@ -90,6 +98,11 @@ describe('dropTarget', () => {
   it('lands a start dropped in a pause at its end', () => {
     const t = dropTarget({ geometry, blockLeft: 300, blockTop: 100 + (12 * 60 + 10 - 8 * 60), pointerX: 320, pointerY: 400, blockCourts: ['A'] });
     expect(t.startMins).toBe(780);
+  });
+  it('has no start when a late pause leaves none before midnight', () => {
+    const late = { ...geometry, days: [{ day: 1, left: 0, top: 100, right: 300, bottom: 2000, breaks: [{ startMins: 23 * 60 + 40, endMins: 24 * 60 }] }] };
+    const t = dropTarget({ geometry: late, blockLeft: 0, blockTop: 100 + (23 * 60 + 45 - 8 * 60), pointerX: 20, pointerY: 400, blockCourts: ['A'] });
+    expect(t).toEqual({ day: 1, startMins: null, courts: ['A'] });
   });
   it('is null when the block is not over a day', () => {
     expect(dropTarget({ geometry, blockLeft: 0, blockTop: 0, pointerX: 900, pointerY: 400, blockCourts: ['A'] })).toBeNull();

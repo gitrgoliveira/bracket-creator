@@ -714,8 +714,8 @@ whichever reaches the server first:
   (`Player.CheckInAt`). A taken-back check-in keeps its stamp on purpose, so a check-in tapped
   earlier that arrives late is still beaten by the undo.
 * A change stamped at or before the stored stamp is not applied: nothing is written and the
-  answer carries the row as stored. The same millisecond on two desks is settled the same way
-  every time, by whichever arrived first.
+  answer carries the row as stored. Of two changes stamped in the same millisecond, the one
+  that reaches the server first stands.
 * No marker is written for a row that was never checked in and has never been stamped.
 * The bare `checked_in` that every earlier release wrote is read as checked in at stamp 0, and
   a row with no marker as not checked in at stamp 0. A roster written by an earlier release

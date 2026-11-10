@@ -24,7 +24,7 @@ import { useWaitForQueuedWrites, QueuedWritesWait, queuedWritesNounFor } from '.
 import { checkInApplies } from './competition_shape.jsx';
 import { serverHeldCheckIns, NO_CHECK_IN_HELD_SENTENCE } from './qualifier_preview.jsx';
 import { isOffline, savedOfflineSentence } from './write_result.jsx';
-import { toastSnapshot, dismissToast } from './toast_queue.jsx';
+import { dismissToastById } from './toast_queue.jsx';
 import { onDocumentSettled } from './document_versions.jsx';
 import { useLatestRef } from './latest_ref.jsx';
 
@@ -748,9 +748,9 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
           if (!mountedRef.current || viewKindRef.current !== "editTournament") return false;
           setLateRefusal({ code: e && e.code, message: e && e.message });
           // The "saved, goes out once the connection is back" toast would sit
-          // beside the form's "Not saved" banner: the banner replaces it.
-          const shown = toastSnapshot();
-          if (shown && shown.id === SETTINGS_SAVED_OFFLINE_TOAST) dismissToast();
+          // beside the form's "Not saved" banner: the banner replaces it,
+          // shown or still queued behind another toast.
+          dismissToastById(SETTINGS_SAVED_OFFLINE_TOAST);
           return true;
         },
       });

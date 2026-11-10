@@ -695,12 +695,13 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
 
     const paceLookup = useCourtPaceLookup(courtCompetitions);
 
-    // Selected match for the inline scoring panel. `calledKey` marks the match
-    // the operator has announced, while that call is showing (local cue only,
-    // cleared by keepCalled once the call's time is over); `callingKey`
-    // guards the in-flight announce request. `callTapRef` guards against double
-    // taps on Call to court (bc-cdbl).
-    const [calledKey, setCalledKey] = useState(null);
+    // Selected match for the inline scoring panel. `calledKeys` is the render's
+    // copy of which matches read as called: the keys whose call this console
+    // keeps (callIdsRef) still stands, taken again by callsChanged whenever
+    // those calls change or one's time runs out (keepCalled, withdrawCall).
+    // `callingKey` guards the in-flight announce request. `callTapRef` guards
+    // against double taps on Call to court (bc-cdbl).
+    const [calledKeys, setCalledKeys] = useState(() => new Set());
     const [callingKey, setCallingKey] = useState(null);
     const [startingKey, setStartingKey] = useState(null);
     // The start in flight, as { key, match } (null = none). The guards READ this
@@ -1791,13 +1792,30 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         clearTimeout(t);
         callEndsRef.current.delete(key);
     };
-    // keepCalled: the card for the match keyed `key` reads as called only while
-    // the call this console keeps for it is showing. With that call standing it
-    // arms the match's one timer for the call's end, and runs again then. With
-    // none standing the card goes back to uncalled (it offers Call to court
-    // again), and a call the server has answered is dropped: there is nothing
-    // left to withdraw. One the server has not answered yet stays kept, so a
-    // start still takes it out of the outbox; it arrives expired otherwise.
+    // isCalled: the match keyed `key` reads as called (the card's "Call again"
+    // and its hint, a row's "Call again") exactly while this console keeps a
+    // call for it that stands. Each match has its own, so more than one can
+    // read as called at once. Render reads the snapshot, never the ref.
+    const isCalled = (key) => calledKeys.has(key);
+    // callsChanged: take the snapshot again from the calls kept now. The same
+    // Set is kept while the keys are the same, so nothing re-renders for it.
+    const callsChanged = () => {
+        if (!mountedRef.current) return;
+        const standing = new Set();
+        for (const [k, entry] of callIdsRef.current.entries()) {
+            if (callStands(entry)) standing.add(k);
+        }
+        setCalledKeys((prev) => (prev.size === standing.size && [...standing].every((k) => prev.has(k)) ? prev : standing));
+    };
+    // keepCalled: run whenever the call kept for the match keyed `key` changes
+    // or its time runs out. With that call standing it arms the match's one
+    // timer for the call's end, and runs again then. With none standing the
+    // match reads as uncalled (it offers Call to court again), and a call the
+    // server has answered is dropped: there is nothing left to withdraw. One
+    // the server has not answered yet stays kept, so a start still takes it out
+    // of the outbox, and it reads as uncalled since it most likely arrives
+    // expired; should it land with time left (the server's floor), its answer
+    // runs this again with the expiry answered, and it reads as called again.
     const keepCalled = (key) => {
         clearCallEnd(key);
         const entry = callIdsRef.current.get(key);
@@ -1806,10 +1824,10 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                 callEndsRef.current.delete(key);
                 keepCalled(key);
             }, entry.endsAt - serverNowMs()));
-            return;
+        } else if (entry && entry.answered) {
+            callIdsRef.current.delete(key);
         }
-        if (entry && entry.answered) callIdsRef.current.delete(key);
-        if (mountedRef.current) setCalledKey((k) => (k === key ? null : k));
+        callsChanged();
     };
 
     // Call to court: optional. Broadcasts a tournament announcement so the
@@ -1888,7 +1906,6 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                 },
             );
             if (!mountedRef.current) return;
-            setCalledKey(matchKey(m));
             if (showToast) showToast(`Called ${b} and ${a} to Shiaijo ${court}`);
         } catch (e) {
             if (showToast) showToast((e && e.message) || "Could not send the call announcement", "error");
@@ -1906,6 +1923,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         if (!entry) return;
         callIdsRef.current.delete(key);
         clearCallEnd(key);
+        callsChanged();
         takeDown(entry.id, entry.msg);
     };
     React.useLayoutEffect(() => { withdrawCallRef.current = withdrawCall; });
@@ -2304,7 +2322,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                             {upNext && (
                                 <div className="shiaijo-upnext">
                                     <div className="section-title">Up next</div>
-                                    <div className={`shiaijo-upnext__card ${calledKey === matchKey(upNext) ? "is-called" : ""}`}>
+                                    <div className={`shiaijo-upnext__card ${isCalled(matchKey(upNext)) ? "is-called" : ""}`}>
                                         <div className="shiaijo-upnext__time">
                                             <PaceTime display={paceDisplayOf(paceLookup, upNext.compId, upNext.id)} fallback={upNext.scheduledAt || "-"} /> · {upNext.compName}
                                             {shiaijoMatchNo(upNext)}
@@ -2345,7 +2363,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                                     title="Announce this match to spectators and competitors"
                                                 >
                                                     {Icon && <Icon name="megaphone" />}{" "}
-                                                    {callingKey === matchKey(upNext) ? "Calling…" : (calledKey === matchKey(upNext) ? "Call again" : "Call to court")}
+                                                    {callingKey === matchKey(upNext) ? "Calling…" : (isCalled(matchKey(upNext)) ? "Call again" : "Call to court")}
                                                 </button>
                                             )}
                                             {window.API && typeof window.API.updateMatchTime === "function" && filteredScheduled.length > 1 && (
@@ -2354,7 +2372,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                         </div>
                                         {upNextNotice && <div className="shiaijo-upnext__error" role="alert">{upNextNotice}</div>}
                                         <div className="shiaijo-upnext__hint">
-                                            {calledKey === matchKey(upNext)
+                                            {isCalled(matchKey(upNext))
                                                 ? "Announced to spectators. Start the match when both are at the line."
                                                 : "Start when both competitors are at the line. Call to court announces the match to spectators (optional)."}
                                         </div>
@@ -2372,7 +2390,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                     courts={courts} onMoveCourt={requestMoveCourt}
                                     onMove={moveMatch} onEnterLineup={(m) => setLineupKey(matchKey(m))}
                                     onPick={tapStart} noticeFor={(m) => startNoticeFor(matchKey(m))}
-                                    onCall={callToCourt} callingKey={callingKey} calledKey={calledKey} startingKey={startingKey}
+                                    onCall={callToCourt} callingKey={callingKey} isCalled={isCalled} startingKey={startingKey}
                                     scheduled={filteredScheduled}
                                     password={password}
                                 />
@@ -2822,14 +2840,14 @@ export function groupQueueMatches(matches) {
     return order.map((k) => byKey.get(k));
 }
 
-function ShiaijoQueueGroup({ label, matches, subGroup, scheduled, courts, onMoveCourt, onMove, onEnterLineup, onPick, onCorrect, noticeFor, onCall, callingKey, calledKey, startingKey, password }) {
+function ShiaijoQueueGroup({ label, matches, subGroup, scheduled, courts, onMoveCourt, onMove, onEnterLineup, onPick, onCorrect, noticeFor, onCall, callingKey, isCalled, startingKey, password }) {
     const renderRow = (m) => (
         <ShiaijoQueueRow
             key={matchKey(m)} m={m}
             notice={noticeFor ? noticeFor(m) : null}
             scheduled={scheduled}
             courts={courts} onMoveCourt={onMoveCourt} onMove={onMove} onEnterLineup={onEnterLineup} onPick={onPick} onCorrect={onCorrect}
-            onCall={onCall} callingKey={callingKey} calledKey={calledKey} startingKey={startingKey}
+            onCall={onCall} callingKey={callingKey} isCalled={isCalled} startingKey={startingKey}
             password={password}
         />
     );
@@ -2855,7 +2873,7 @@ function ShiaijoQueueGroup({ label, matches, subGroup, scheduled, courts, onMove
     );
 }
 
-export function ShiaijoQueueRow({ m, scheduled, courts, onMoveCourt, onMove, onEnterLineup, onPick, onCorrect, onCall, callingKey, calledKey, startingKey, pending, slotLabel, emptyNames, password, notice }) {
+export function ShiaijoQueueRow({ m, scheduled, courts, onMoveCourt, onMove, onEnterLineup, onPick, onCorrect, onCall, callingKey, isCalled, startingKey, pending, slotLabel, emptyNames, password, notice }) {
     const isComplete = m.status === "completed";
     // bc-cse: a scheduled match a competitor is barred from. `pending`
     // placeholder finals are excluded on purpose: their sides are still
@@ -2996,7 +3014,7 @@ export function ShiaijoQueueRow({ m, scheduled, courts, onMoveCourt, onMove, onE
                         start. */}
                     {onCall && window.API && typeof window.API.sendAnnouncement === "function" && !barred && (
                         <button type="button" className="btn btn--ghost btn--sm" disabled={callingKey === matchKey(m)} onClick={(ev) => onCall(m, ev)} title="Announce this match to spectators and competitors">
-                            {callingKey === matchKey(m) ? "Calling…" : (calledKey === matchKey(m) ? "Call again" : "Call to court")}
+                            {callingKey === matchKey(m) ? "Calling…" : (isCalled && isCalled(matchKey(m)) ? "Call again" : "Call to court")}
                         </button>
                     )}
                     {/* Start match is the primary per-row action: pushed to the end (the "go" slot).

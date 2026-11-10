@@ -201,4 +201,27 @@ describe('the court console once a call has stopped showing', () => {
     await advance(5 * MINUTE);
     expectUncalled();
   });
+
+  it('reads called again when a held call whose time ran out on the device lands with time left', async () => {
+    let answerHeld;
+    window.API.sendAnnouncement = vi.fn(async () => ({
+      applied: true, pending: true, key: 'announce:ann-1', id: 'ann-1',
+      settled: new Promise((resolve) => { answerHeld = resolve; }),
+    }));
+    renderConsole();
+    await tapCall();
+    expectCalled();
+    // Held offline past its five minutes: the device reads it as over.
+    await advance(5 * MINUTE + 10 * 1000);
+    expectUncalled();
+    // It lands late, and the server shows it for its one-minute floor: the
+    // screens show the call, so the card reads as called until that expiry.
+    const expiresAt = new Date(Date.now() + MINUTE).toISOString();
+    await act(async () => { answerHeld({ id: 'ann-1', message: 'x', expiresAt }); });
+    expectCalled();
+    await advance(MINUTE - 1000);
+    expectCalled();
+    await advance(1000);
+    expectUncalled();
+  });
 });

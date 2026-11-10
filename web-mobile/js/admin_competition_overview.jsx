@@ -16,6 +16,7 @@ import { checkInApplies } from './competition_shape.jsx';
 import { useUnsavedInput } from './app_version.jsx';
 import { isOffline, savedOfflineSentence } from './write_result.jsx';
 import { onDocumentSettled } from './document_versions.jsx';
+import { dismissToastById } from './toast_queue.jsx';
 // One owner for what the operator is told when a file on disk does not say what
 // the app expects; shared with the pool surfaces so the wording cannot drift.
 import {
@@ -1111,11 +1112,17 @@ function FightingSpiritAwardsEditor({ c, password, showToast }) {
     setSaving(true);
     const compID = c.id;
     const editsAt = editsRef.current;
+    // The "saved offline" toast's id, so a refusal takes it back.
+    const offlineToastId = `awards-saved-offline:${compID}`;
     try {
       // Strip the client-only `_key` before sending to the API.
       const payload = awards.map(({ _key, ...rest }) => rest);
       const res = await window.API.updateCompetitionAwards(compID, payload, password, awardsVersionRef.current, {
         onRefusal: (e) => {
+          // The save was not made: the "saved, goes out once the connection is
+          // back" toast is no longer true, shown or still queued behind
+          // another toast, whoever tells the refusal.
+          dismissToastById(offlineToastId);
           if (!mountedRef.current || lastCompIdRef.current !== compID) return false;
           if (e && e.code === "awards_changed") setConflict({ version: e.awardsVersion, awards: e.fightingSpiritAwards });
           else showToast((e && e.message) || "Failed to save awards", "error");
@@ -1125,7 +1132,7 @@ function FightingSpiritAwardsEditor({ c, password, showToast }) {
       // The save is kept on this device and goes out when the link allows: a
       // save made with no connection says so now, not when it lands (the same
       // line the court-call composer gives).
-      if (mountedRef.current && isOffline()) showToast(savedOfflineSentence("Fighting Spirit awards"), "success");
+      if (mountedRef.current && isOffline()) showToast(savedOfflineSentence("Fighting Spirit awards"), "success", { id: offlineToastId });
       onDocumentSettled(res.settled, (saved) => {
         // Discarded from the held-writes list (or sent by another tab, whose
         // answer this one does not hold): not saved here, so the typed list

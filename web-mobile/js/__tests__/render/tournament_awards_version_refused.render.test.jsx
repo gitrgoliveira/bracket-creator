@@ -209,6 +209,31 @@ describe('AdminApp saves the tournament settings through the outbox', () => {
     }
   });
 
+  it('drops the offline "saved" toast still queued behind another when the open form shows the refusal', async () => {
+    const online = vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(false);
+    try {
+      const settled = deferred();
+      window.API.updateTournament.mockResolvedValue({ applied: true, pending: true, settled: settled.promise });
+      const app = await mount({ kind: 'editTournament' }, { showToast: vi.fn(pushToast) });
+      // A notice told once is showing, so the "saved" toast waits behind it.
+      await act(async () => { pushToast('Court A could not be called', 'error'); });
+      await act(async () => { await probe.props.onSave(patch()); });
+      expect(toastSnapshot().message).toBe('Court A could not be called');
+
+      await app.rerender({ kind: 'editTournament' });
+      const onRefusal = window.API.updateTournament.mock.calls[0][2].onRefusal;
+      const stale = Object.assign(new Error('changed'), { code: 'tournament_changed', tournament: tournament({ tournamentVersion: 'v9' }) });
+      await act(async () => { onRefusal(stale); settled.reject(stale); await settled.promise.catch(noop); });
+
+      // The notice stays; once it is closed, the "saved" toast never shows.
+      expect(toastSnapshot().message).toBe('Court A could not be called');
+      await act(async () => { dismissToast(); });
+      expect(toastSnapshot()).toBeNull();
+    } finally {
+      online.mockRestore();
+    }
+  });
+
   it('leaves another toast shown when the open form shows the refusal', async () => {
     const settled = deferred();
     window.API.updateTournament.mockResolvedValue({ applied: true, pending: true, settled: settled.promise });
@@ -463,10 +488,59 @@ describe('Fighting-spirit awards save through the outbox', () => {
       const settled = pendingAnswer();
       const showToast = await mount();
       await act(async () => { fireEvent.click(screen.getByTestId('fs-award-save')); });
-      expect(showToast).toHaveBeenCalledWith('Fighting Spirit awards saved. The save goes out once the connection is back.', 'success');
+      expect(showToast).toHaveBeenCalledWith('Fighting Spirit awards saved. The save goes out once the connection is back.', 'success', { id: 'awards-saved-offline:c1' });
       expect(showToast).not.toHaveBeenCalledWith('Fighting Spirit awards saved.', 'success');
       await act(async () => { settled.resolve({ awardsVersion: 'a2' }); await settled.promise; });
       expect(showToast).toHaveBeenCalledWith('Fighting Spirit awards saved.', 'success');
+    } finally {
+      online.mockRestore();
+    }
+  });
+
+  it('takes the offline "saved" toast down when the held save is refused', async () => {
+    const online = vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(false);
+    try {
+      const settled = pendingAnswer();
+      // The real toast queue, as app.jsx's showToast feeds it.
+      await mount(vi.fn(pushToast));
+      await act(async () => { fireEvent.click(screen.getByTestId('fs-award-save')); });
+      expect(toastSnapshot().message).toBe('Fighting Spirit awards saved. The save goes out once the connection is back.');
+
+      const onRefusal = window.API.updateCompetitionAwards.mock.calls[0][4].onRefusal;
+      const stale = Object.assign(new Error('The awards changed.'), {
+        code: 'awards_changed', awardsVersion: 'a9',
+        fightingSpiritAwards: [{ title: 'Fighting Spirit', recipientName: 'Suzuki', recipientDojo: '' }],
+      });
+      await act(async () => { onRefusal(stale); settled.reject(stale); await settled.promise.catch(noop); });
+
+      expect(screen.getByTestId('fs-award-conflict-alert')).toBeTruthy();
+      expect(toastSnapshot()).toBeNull();
+    } finally {
+      online.mockRestore();
+    }
+  });
+
+  it('drops the offline "saved" toast still queued behind another when the held save is refused', async () => {
+    const online = vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(false);
+    try {
+      const settled = pendingAnswer();
+      await mount(vi.fn(pushToast));
+      // A notice told once is showing, so the "saved" toast waits behind it.
+      await act(async () => { pushToast('Court A could not be called', 'error'); });
+      await act(async () => { fireEvent.click(screen.getByTestId('fs-award-save')); });
+      expect(toastSnapshot().message).toBe('Court A could not be called');
+
+      const onRefusal = window.API.updateCompetitionAwards.mock.calls[0][4].onRefusal;
+      const refused = Object.assign(new Error('Award title is too long'), { code: 'invalid_request' });
+      await act(async () => { onRefusal(refused); settled.reject(refused); await settled.promise.catch(noop); });
+
+      // The notice stays, the refusal's own toast follows it, and the "saved"
+      // toast never shows.
+      expect(toastSnapshot().message).toBe('Court A could not be called');
+      await act(async () => { dismissToast(); });
+      expect(toastSnapshot().message).toBe('Award title is too long');
+      await act(async () => { dismissToast(); });
+      expect(toastSnapshot()).toBeNull();
     } finally {
       online.mockRestore();
     }

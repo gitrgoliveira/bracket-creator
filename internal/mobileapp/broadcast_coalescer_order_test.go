@@ -199,38 +199,53 @@ func setPoolStatus(t *testing.T, store *state.Store, compID string, st state.Mat
 func TestBroadcastMatchNow_AfterAHeldRunningPushLeavesTheNewestStateLast(t *testing.T) {
 	const compID = "now-after-held"
 	_, store, _, _ := seServer(t, compID)
-	c := newMatchBroadcastCoalescer()
+	t0 := time.Now()
+	clock := t0
+	c := newMatchBroadcastCoalescerWithClock(func() time.Time { return clock })
 	t.Cleanup(c.Close)
 	rec := &payloadRecorder{c: c}
 	captured := gin.H{"competitionId": compID, "matchId": seMatch, "result": "captured"}
 	running := runningPushSender(rec, store, compID, seMatch, captured)
 	key := compID + ":" + seMatch
-	start := time.Now()
 	c.Submit(key, true, running)
-	c.Submit(key, true, running) // held
 	setPoolStatus(t, store, compID, state.MatchStatusCompleted)
+	// An hour before the first send: still inside its window, so this push is
+	// held, and its timer is due in an hour, so it cannot fire before the
+	// direct send below however slow the store write above was. A held push
+	// reads the store when it is sent, so holding it after the write tests
+	// the same thing as holding it before.
+	clock = t0.Add(-time.Hour)
+	c.Submit(key, true, running) // held
 	broadcastMatchNow(rec, store, compID, seMatch, captured)
-	elapsed := time.Since(start)
-	time.Sleep(2 * matchCoalesceWindow)
-	got := rec.statuses()
-	// The held push runs on a real timer one window after the first send, so
-	// it cannot have fired before broadcastMatchNow cancelled it unless the
-	// steps above took a whole window (setPoolStatus writes files, and a slow
-	// CI runner has taken longer). Then the held push legitimately went out
-	// first, reading the stored completed match, and the newest state is
-	// still last: that is the invariant, so only the fast case pins the
-	// exact sequence.
-	if elapsed < matchCoalesceWindow {
-		assert.Equal(t, []state.MatchStatus{state.MatchStatusRunning, state.MatchStatusCompleted}, got)
-		return
-	}
-	require.NotEmpty(t, got)
-	assert.Equal(t, state.MatchStatusRunning, got[0])
-	assert.Equal(t, state.MatchStatusCompleted, got[len(got)-1])
-	for i := 1; i < len(got); i++ {
-		assert.False(t, got[i-1] == state.MatchStatusCompleted && got[i] == state.MatchStatusRunning,
-			"a running push followed a completed one: %v", got)
-	}
+	assert.Equal(t, []state.MatchStatus{state.MatchStatusRunning, state.MatchStatusCompleted}, rec.statuses())
+	// Close sends any push still held, so this proves the direct send
+	// cancelled it rather than leaving it to its timer.
+	c.Close()
+	assert.Equal(t, []state.MatchStatus{state.MatchStatusRunning, state.MatchStatusCompleted}, rec.statuses())
+}
+
+// A held running push that already went out, because its window ended before
+// the direct send came, read the stored match as it was sent: it carried the
+// completed state, and the direct send repeats it. The newest state is last
+// either way; the repeat is an identical push (the operator views patch the
+// match with the same fields again).
+func TestBroadcastMatchNow_AfterAHeldPushAlreadySentRepeatsTheNewestState(t *testing.T) {
+	const compID = "now-after-sent"
+	_, store, _, _ := seServer(t, compID)
+	t0 := time.Now()
+	c := newMatchBroadcastCoalescerWithClock(func() time.Time { return t0 })
+	t.Cleanup(c.Close)
+	rec := &payloadRecorder{c: c}
+	captured := gin.H{"competitionId": compID, "matchId": seMatch, "result": "captured"}
+	running := runningPushSender(rec, store, compID, seMatch, captured)
+	key := compID + ":" + seMatch
+	c.Submit(key, true, running)
+	setPoolStatus(t, store, compID, state.MatchStatusCompleted)
+	c.Submit(key, true, running) // held, sent when its window ends
+	require.Eventually(t, func() bool { return len(rec.statuses()) == 2 }, 5*time.Second, 10*time.Millisecond,
+		"the held push goes out when its window ends")
+	broadcastMatchNow(rec, store, compID, seMatch, captured)
+	assert.Equal(t, []state.MatchStatus{state.MatchStatusRunning, state.MatchStatusCompleted, state.MatchStatusCompleted}, rec.statuses())
 }
 
 // A match that is gone by the time the push is built (a draw discarded, a

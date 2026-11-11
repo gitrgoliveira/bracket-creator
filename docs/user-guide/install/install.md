@@ -115,7 +115,7 @@ go install github.com/gitrgoliveira/bracket-creator@latest
 If you prefer to compile from source, `bracket-creator` is written in [Go](https://golang.org/).
 
 Prerequisites:
-- [Go 1.27.3+](https://golang.org/doc/install)
+- [Go 1.27.4+](https://golang.org/doc/install)
 - [Node.js](https://nodejs.org/) (`make go/build` runs `npx esbuild` to compile the web assets)
 - `curl` (used to fetch the vendored frontend runtime)
 
@@ -129,7 +129,7 @@ The binary is at `./bin/bracket-creator`.
 
 ## Upgrading
 
-Take a backup of the whole tournament before you upgrade (refer to [Backup and restore](../organisers/backup-and-restore.md)), then:
+Take a backup of the whole tournament before you upgrade (refer to [Backup and restore](../organisers/backup-and-restore.md)). Version 2.3.0 and earlier have no backups: stop the server and copy the whole data folder instead. Then:
 
 * **Docker**: `docker pull ghcr.io/gitrgoliveira/bracket-creator-mobile:latest` to fetch the newer image, then stop the running container and start it again with the same `docker run` command.
 * **Homebrew**: `brew upgrade bracket-creator`.
@@ -137,4 +137,4 @@ Take a backup of the whole tournament before you upgrade (refer to [Backup and r
 * **Pre-compiled binaries**: download and extract the new release's archive over the old binary.
 * **Go / source builds**: re-run `go install github.com/gitrgoliveira/bracket-creator@latest`, or `git pull` and `make go/build`.
 
-After upgrading, reload every open app tab and device: a page left open on the previous version cannot save check-ins, court calls, tournament settings or fighting-spirit awards. To go back to an earlier version, restore the backup you took before upgrading, because an earlier version cannot read the check-in marks recorded since: those competitors show as not checked in and lose their registration source, the mark can show as their dan grade, and the next save keeps that. Restoring discards everything recorded since the upgrade.
+After upgrading, reload every open app tab and device: a page left open on the previous version cannot save check-ins, court calls, tournament settings or fighting-spirit awards. To go back to an earlier version, restore the backup you took before upgrading, because an earlier version cannot read the check-in marks recorded since: those competitors show as not checked in and lose their registration source, the mark can show as their dan grade, and the next save keeps that. Restoring discards everything recorded since the upgrade. To go back to 2.3.0 or earlier, stop the server and put the data folder copy in place of the data folder instead, because those versions cannot restore a backup.

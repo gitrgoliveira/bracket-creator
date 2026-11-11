@@ -53,9 +53,11 @@ local/deps: hooks/install js/deps ## Install project dependencies
 	# /v2/ is required in the module path for golangci-lint 2.x (Go module major-
 	# version convention); the path used to omit it and silently resolved anyway
 	# because GOPATH/bin already held an older cached binary (see the note above
-	# go/lint). The /v2/ path resolves the newest v2.x only; a v3 is a manual
-	# move. CI resolves the same newest release, so a local green run predicts
-	# CI as long as the local install is refreshed (rerun local/deps).
+	# go/lint). So the install asks GitHub for the newest release, as CI's
+	# resolve step does (validate.yaml), and takes the major for the path from
+	# its tag: a v3 lands here and in CI alike. A local green run predicts CI as
+	# long as the local install is refreshed (rerun local/deps). The tag is
+	# checked because a failed curl is hidden by the sed after it.
 	# GOTOOLCHAIN=go$(GO_VERSION): these analysers embed the go/types of the Go
 	# that BUILT them, and golangci-lint refuses to run when that is older than
 	# go.mod's go directive ("the Go language version (go1.26) used to build
@@ -66,7 +68,10 @@ local/deps: hooks/install js/deps ## Install project dependencies
 	# library's export data through its bundled golang.org/x/tools, and go1.27.3
 	# wrote a newer export-data version than x/tools v0.49 could read ("export
 	# data version 5 is greater than maximum supported version 4").
-	GOTOOLCHAIN=go$(GO_VERSION) go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
+	tag=$$(curl -fsSL https://api.github.com/repos/golangci/golangci-lint/releases/latest \
+		| sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p'); \
+	test -n "$$tag" || { echo "local/deps: cannot resolve golangci-lint's newest release" >&2; exit 1; }; \
+	GOTOOLCHAIN=go$(GO_VERSION) go install github.com/golangci/golangci-lint/$${tag%%.*}/cmd/golangci-lint@$$tag
 	GOTOOLCHAIN=go$(GO_VERSION) go install github.com/securego/gosec/v2/cmd/gosec@latest
 	GOTOOLCHAIN=go$(GO_VERSION) go install golang.org/x/vuln/cmd/govulncheck@latest
 	python3 -m pip install -r docs/requirements.txt

@@ -205,12 +205,32 @@ func TestBroadcastMatchNow_AfterAHeldRunningPushLeavesTheNewestStateLast(t *test
 	captured := gin.H{"competitionId": compID, "matchId": seMatch, "result": "captured"}
 	running := runningPushSender(rec, store, compID, seMatch, captured)
 	key := compID + ":" + seMatch
+	start := time.Now()
 	c.Submit(key, true, running)
 	c.Submit(key, true, running) // held
 	setPoolStatus(t, store, compID, state.MatchStatusCompleted)
 	broadcastMatchNow(rec, store, compID, seMatch, captured)
+	elapsed := time.Since(start)
 	time.Sleep(2 * matchCoalesceWindow)
-	assert.Equal(t, []state.MatchStatus{state.MatchStatusRunning, state.MatchStatusCompleted}, rec.statuses())
+	got := rec.statuses()
+	// The held push runs on a real timer one window after the first send, so
+	// it cannot have fired before broadcastMatchNow cancelled it unless the
+	// steps above took a whole window (setPoolStatus writes files, and a slow
+	// CI runner has taken longer). Then the held push legitimately went out
+	// first, reading the stored completed match, and the newest state is
+	// still last: that is the invariant, so only the fast case pins the
+	// exact sequence.
+	if elapsed < matchCoalesceWindow {
+		assert.Equal(t, []state.MatchStatus{state.MatchStatusRunning, state.MatchStatusCompleted}, got)
+		return
+	}
+	require.NotEmpty(t, got)
+	assert.Equal(t, state.MatchStatusRunning, got[0])
+	assert.Equal(t, state.MatchStatusCompleted, got[len(got)-1])
+	for i := 1; i < len(got); i++ {
+		assert.False(t, got[i-1] == state.MatchStatusCompleted && got[i] == state.MatchStatusRunning,
+			"a running push followed a completed one: %v", got)
+	}
 }
 
 // A match that is gone by the time the push is built (a draw discarded, a

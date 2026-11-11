@@ -4,11 +4,14 @@ GH_REPOSITORY ?= gitrgoliveira/bracket-creator
 IMAGE_NAME := ghcr.io/$(GH_REPOSITORY)
 BIN_PATH := ./bin
 GO_VERSION := 1.27.4
-# Tool versions are pinned so a release is built and scanned with the tools
-# it was tested with. Keep GORELEASER_VERSION in lockstep with the version in
-# .github/workflows/release.yaml.
+# goreleaser is pinned so a release is built with the version it was tested
+# with; keep it in lockstep with .github/workflows/release.yaml.
+# Security and linting tools are the opposite: they always run their newest
+# release (operator ruling 2026-11-11), here (golangci-lint, gosec,
+# govulncheck, oxlint, audit-ci) and in CI (the same, plus grype and CodeQL).
+# Pin one to a named version only while a new release breaks the gate, and
+# remove the pin with the fix.
 GORELEASER_VERSION := v2.20.1
-GOVULNCHECK_VERSION := v1.9.0
 GO_SOURCES := $(shell find . -name "*.go" -type f)
 EMBEDDED_ASSETS := $(shell find ./web ./web-mobile -type f 2>/dev/null)
 
@@ -50,22 +53,22 @@ local/deps: hooks/install js/deps ## Install project dependencies
 	# /v2/ is required in the module path for golangci-lint 2.x (Go module major-
 	# version convention); the path used to omit it and silently resolved anyway
 	# because GOPATH/bin already held an older cached binary (see the note above
-	# go/lint). Keep this version in lockstep with the pin in
-	# .github/workflows/validate.yaml so a local green run predicts CI.
+	# go/lint). The /v2/ path resolves the newest v2.x only; a v3 is a manual
+	# move. CI resolves the same newest release, so a local green run predicts
+	# CI as long as the local install is refreshed (rerun local/deps).
 	# GOTOOLCHAIN=go$(GO_VERSION): these analysers embed the go/types of the Go
 	# that BUILT them, and golangci-lint refuses to run when that is older than
 	# go.mod's go directive ("the Go language version (go1.26) used to build
 	# golangci-lint is lower than the targeted Go version"). `go install pkg@ver`
 	# runs outside this module, so it would otherwise use whatever `go` is on
 	# PATH rather than the toolchain go.mod asks for.
-	# The version also matters on its own: each analyser reads the standard
+	# A Go bump can also need a newer analyser: each reads the standard
 	# library's export data through its bundled golang.org/x/tools, and go1.27.3
-	# writes a newer export-data version than x/tools v0.49 can read ("export
-	# data version 5 is greater than maximum supported version 4"). golangci-lint
-	# v2.15.0 and gosec v2.30.0 both bundle x/tools v0.52.
-	GOTOOLCHAIN=go$(GO_VERSION) go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.15.0
-	GOTOOLCHAIN=go$(GO_VERSION) go install github.com/securego/gosec/v2/cmd/gosec@v2.30.0
-	GOTOOLCHAIN=go$(GO_VERSION) go install golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_VERSION)
+	# wrote a newer export-data version than x/tools v0.49 could read ("export
+	# data version 5 is greater than maximum supported version 4").
+	GOTOOLCHAIN=go$(GO_VERSION) go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
+	GOTOOLCHAIN=go$(GO_VERSION) go install github.com/securego/gosec/v2/cmd/gosec@latest
+	GOTOOLCHAIN=go$(GO_VERSION) go install golang.org/x/vuln/cmd/govulncheck@latest
 	python3 -m pip install -r docs/requirements.txt
 
 hooks/install: ## Wire scripts/hooks/ as the git hooks dir for this clone
@@ -152,17 +155,18 @@ js/lint: js/deps ## Run Javascript linters
 	@cd web-mobile && npm run lint
 	@# docs/assets/javascripts sits outside web-mobile, so the line above never
 	@# saw it and the docs widgets were linted by nothing at all. oxlint refuses
-	@# a path containing "..", so it is run from the repo root against
-	@# web-mobile's installed binary rather than by cd-ing and reaching back.
+	@# a path containing "..", so it is run from the repo root rather than by
+	@# cd-ing and reaching back. oxlint runs as the newest release through npx
+	@# (see the tool note at the top), as web-mobile's lint script does.
 	@# -c points it at web-mobile's config explicitly: run from the repo root
 	@# with no -c, oxlint does not discover .oxlintrc.json upward from
 	@# web-mobile/, so the react/unicorn/oxc plugins and project rules it
 	@# configures never applied and this line silently exited 0 (bc-appx item 4).
-	@npx --prefix web-mobile oxlint --deny-warnings --report-unused-disable-directives -c web-mobile/.oxlintrc.json docs/assets/javascripts/
+	@npx --yes oxlint@latest --deny-warnings --report-unused-disable-directives -c web-mobile/.oxlintrc.json docs/assets/javascripts/
 	@# web/ (the CLI's web UI) was linted by nothing either. It is plain browser
 	@# JS with Bootstrap loaded as a global, so it has its own config with no
-	@# React plugin, run with web-mobile's binary for the same reasons as above.
-	@npx --prefix web-mobile oxlint --deny-warnings --report-unused-disable-directives -c web/.oxlintrc.json web/js/ web/tests/
+	@# React plugin, run from the repo root for the same reasons as above.
+	@npx --yes oxlint@latest --deny-warnings --report-unused-disable-directives -c web/.oxlintrc.json web/js/ web/tests/
 
 js/sec: js/deps ## Run Javascript security scans (audit-ci)
 	@echo "Running Javascript security scans..."

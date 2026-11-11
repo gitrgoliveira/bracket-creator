@@ -35,7 +35,6 @@ jobs:
           # stop the step, and an empty version would reach the cache keys.
           golangci=$(gh release view --repo golangci/golangci-lint --json tagName -q .tagName)
           grype=$(gh release view --repo anchore/grype --json tagName -q .tagName)
-          test -n "$golangci" && test -n "$grype"
           echo "golangci-lint ${golangci}, grype ${grype}"
           echo "GOLANGCI_LINT_VERSION=${golangci}" >> "$GITHUB_ENV"
           echo "GRYPE_VERSION=${grype}" >> "$GITHUB_ENV"

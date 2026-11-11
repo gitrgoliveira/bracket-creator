@@ -212,10 +212,10 @@ go/build: $(BIN_PATH)/$(BIN_NAME) ## Build the application locally
 vendor-frontend:
 	@echo "Downloading frontend dependencies..."
 	@mkdir -p web-mobile/vendor
-	@curl -sL https://unpkg.com/preact@10.29.8/dist/preact.min.js -o web-mobile/vendor/preact.min.js
-	@curl -sL https://unpkg.com/preact@10.29.8/hooks/dist/hooks.umd.js -o web-mobile/vendor/hooks.umd.js
-	@curl -sL https://unpkg.com/preact@10.29.8/compat/dist/compat.umd.js -o web-mobile/vendor/compat.umd.js
-	@curl -sL https://unpkg.com/preact-router@4.1.2/dist/preact-router.umd.js -o web-mobile/vendor/preact-router.umd.js
+	@curl -fsSL https://unpkg.com/preact@10.29.8/dist/preact.min.js -o web-mobile/vendor/preact.min.js
+	@curl -fsSL https://unpkg.com/preact@10.29.8/hooks/dist/hooks.umd.js -o web-mobile/vendor/hooks.umd.js
+	@curl -fsSL https://unpkg.com/preact@10.29.8/compat/dist/compat.umd.js -o web-mobile/vendor/compat.umd.js
+	@curl -fsSL https://unpkg.com/preact-router@4.1.2/dist/preact-router.umd.js -o web-mobile/vendor/preact-router.umd.js
 
 esbuild-jsx: ## Pre-compile JSX files to web-mobile/dist/
 	@echo "Pre-compiling JSX files..."

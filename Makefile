@@ -4,6 +4,11 @@ GH_REPOSITORY ?= gitrgoliveira/bracket-creator
 IMAGE_NAME := ghcr.io/$(GH_REPOSITORY)
 BIN_PATH := ./bin
 GO_VERSION := 1.27.4
+# Tool versions are pinned so a release is built and scanned with the tools
+# it was tested with. Keep GORELEASER_VERSION in lockstep with the version in
+# .github/workflows/release.yaml.
+GORELEASER_VERSION := v2.20.1
+GOVULNCHECK_VERSION := v1.9.0
 GO_SOURCES := $(shell find . -name "*.go" -type f)
 EMBEDDED_ASSETS := $(shell find ./web ./web-mobile -type f 2>/dev/null)
 
@@ -23,6 +28,8 @@ ifeq ($(UNAME_S),Darwin)
 else
 	SED_CMD := sed -i
 endif
+# macOS ships shasum but not sha256sum; both read `<hash>  <file>` lines.
+SHA256_CHECK := $(if $(shell command -v sha256sum 2>/dev/null),sha256sum,shasum -a 256) -c --quiet -
 
 # Define phony targets
 .PHONY: default help clean local/deps hooks/install go/fmt go/generate go/test go/build go/lint go/sec go/sec-tests go/vuln go/security js/deps js/lint js/sec js/outdated js/security js/check-imports js/validate examples docker/build docker/run pre-commit docs/deps docs/serve docs/open docs/build docs/linkcheck docs/prose docs/clean docs/screenshots docs/videos docs/media e2e e2e/deps run run-mobile esbuild-jsx goreleaser/test release version
@@ -39,7 +46,7 @@ local/deps: hooks/install js/deps ## Install project dependencies
 	@echo "Installing dependencies..."
 	go mod tidy
 	go install github.com/spf13/cobra-cli@v1.3.0
-	go install github.com/goreleaser/goreleaser/v2@latest
+	go install github.com/goreleaser/goreleaser/v2@$(GORELEASER_VERSION)
 	# /v2/ is required in the module path for golangci-lint 2.x (Go module major-
 	# version convention); the path used to omit it and silently resolved anyway
 	# because GOPATH/bin already held an older cached binary (see the note above
@@ -58,7 +65,7 @@ local/deps: hooks/install js/deps ## Install project dependencies
 	# v2.15.0 and gosec v2.30.0 both bundle x/tools v0.52.
 	GOTOOLCHAIN=go$(GO_VERSION) go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.15.0
 	GOTOOLCHAIN=go$(GO_VERSION) go install github.com/securego/gosec/v2/cmd/gosec@v2.30.0
-	GOTOOLCHAIN=go$(GO_VERSION) go install golang.org/x/vuln/cmd/govulncheck@latest
+	GOTOOLCHAIN=go$(GO_VERSION) go install golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_VERSION)
 	python3 -m pip install -r docs/requirements.txt
 
 hooks/install: ## Wire scripts/hooks/ as the git hooks dir for this clone
@@ -216,6 +223,16 @@ vendor-frontend:
 	@curl -fsSL https://unpkg.com/preact@10.29.8/hooks/dist/hooks.umd.js -o web-mobile/vendor/hooks.umd.js
 	@curl -fsSL https://unpkg.com/preact@10.29.8/compat/dist/compat.umd.js -o web-mobile/vendor/compat.umd.js
 	@curl -fsSL https://unpkg.com/preact-router@4.1.2/dist/preact-router.umd.js -o web-mobile/vendor/preact-router.umd.js
+	@# The binary embeds these files, so a file unpkg serves changed under the
+	@# same version must fail the build rather than ship. On a mismatch the
+	@# downloads are removed, so a later plain `go build` cannot embed them.
+	@# Bump the hashes with the URLs (and the Homebrew formula's resources).
+	@printf '%s  %s\n' \
+		25aa00978fef96e4fd0020cc723a41c3b1a1e81c9c087eff26a77e07a4867e8e web-mobile/vendor/preact.min.js \
+		5c29238e5dc99df306d7f7fff038591a397cfcfabb59f81fbdef43d670aa0566 web-mobile/vendor/hooks.umd.js \
+		a4a23b4cbe4d8062a9c1ccddc09386357bce3168a12f917fbef1a4543b88d4fa web-mobile/vendor/compat.umd.js \
+		4807939f589eb35ce3e8d907361789ac835dc3f809bef3cda06df13b762a4d0a web-mobile/vendor/preact-router.umd.js \
+		| $(SHA256_CHECK) || { rm -f web-mobile/vendor/*.js; echo "vendor-frontend: checksum mismatch, downloads removed" >&2; exit 1; }
 
 esbuild-jsx: ## Pre-compile JSX files to web-mobile/dist/
 	@echo "Pre-compiling JSX files..."

@@ -49,7 +49,7 @@ jobs:
       #  |____/ \___|\___|\__,_|_|  |_|\__|\__, |
       #                                    |___/
       - name: Run Gosec Security Scanner
-        uses: securego/gosec@master
+        uses: securego/gosec@v2.30.0
         with:
           args: "-no-fail -fmt sarif -out results.sarif ./..."
 
@@ -216,7 +216,7 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@v7
         with:
-          node-version: "22"
+          node-version: "26"
           cache: npm
           cache-dependency-path: |
             web-mobile/package-lock.json

@@ -4,6 +4,14 @@ GH_REPOSITORY ?= gitrgoliveira/bracket-creator
 IMAGE_NAME := ghcr.io/$(GH_REPOSITORY)
 BIN_PATH := ./bin
 GO_VERSION := 1.27.4
+# goreleaser is pinned so a release is built with the version it was tested
+# with; keep it in lockstep with .github/workflows/release.yaml.
+# Security and linting tools are the opposite: they always run their newest
+# release (operator ruling 2026-11-11), here (golangci-lint, gosec,
+# govulncheck, oxlint, audit-ci) and in CI (the same, plus grype and CodeQL).
+# Pin one to a named version only while a new release breaks the gate, and
+# remove the pin with the fix.
+GORELEASER_VERSION := v2.20.1
 GO_SOURCES := $(shell find . -name "*.go" -type f)
 EMBEDDED_ASSETS := $(shell find ./web ./web-mobile -type f 2>/dev/null)
 
@@ -23,6 +31,8 @@ ifeq ($(UNAME_S),Darwin)
 else
 	SED_CMD := sed -i
 endif
+# macOS ships shasum but not sha256sum; both read `<hash>  <file>` lines.
+SHA256_CHECK := $(if $(shell command -v sha256sum 2>/dev/null),sha256sum,shasum -a 256) -c --quiet -
 
 # Define phony targets
 .PHONY: default help clean local/deps hooks/install go/fmt go/generate go/test go/build go/lint go/sec go/sec-tests go/vuln go/security js/deps js/lint js/sec js/outdated js/security js/check-imports js/validate examples docker/build docker/run pre-commit docs/deps docs/serve docs/open docs/build docs/linkcheck docs/prose docs/clean docs/screenshots docs/videos docs/media e2e e2e/deps run run-mobile esbuild-jsx goreleaser/test release version
@@ -39,25 +49,30 @@ local/deps: hooks/install js/deps ## Install project dependencies
 	@echo "Installing dependencies..."
 	go mod tidy
 	go install github.com/spf13/cobra-cli@v1.3.0
-	go install github.com/goreleaser/goreleaser/v2@latest
+	go install github.com/goreleaser/goreleaser/v2@$(GORELEASER_VERSION)
 	# /v2/ is required in the module path for golangci-lint 2.x (Go module major-
 	# version convention); the path used to omit it and silently resolved anyway
 	# because GOPATH/bin already held an older cached binary (see the note above
-	# go/lint). Keep this version in lockstep with the pin in
-	# .github/workflows/validate.yaml so a local green run predicts CI.
+	# go/lint). So the install asks GitHub for the newest release, as CI's
+	# resolve step does (validate.yaml), and takes the major for the path from
+	# its tag: a v3 lands here and in CI alike. A local green run predicts CI as
+	# long as the local install is refreshed (rerun local/deps). The tag is
+	# checked because a failed curl is hidden by the sed after it.
 	# GOTOOLCHAIN=go$(GO_VERSION): these analysers embed the go/types of the Go
 	# that BUILT them, and golangci-lint refuses to run when that is older than
 	# go.mod's go directive ("the Go language version (go1.26) used to build
 	# golangci-lint is lower than the targeted Go version"). `go install pkg@ver`
 	# runs outside this module, so it would otherwise use whatever `go` is on
 	# PATH rather than the toolchain go.mod asks for.
-	# The version also matters on its own: each analyser reads the standard
+	# A Go bump can also need a newer analyser: each reads the standard
 	# library's export data through its bundled golang.org/x/tools, and go1.27.3
-	# writes a newer export-data version than x/tools v0.49 can read ("export
-	# data version 5 is greater than maximum supported version 4"). golangci-lint
-	# v2.15.0 and gosec v2.30.0 both bundle x/tools v0.52.
-	GOTOOLCHAIN=go$(GO_VERSION) go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.15.0
-	GOTOOLCHAIN=go$(GO_VERSION) go install github.com/securego/gosec/v2/cmd/gosec@v2.30.0
+	# wrote a newer export-data version than x/tools v0.49 could read ("export
+	# data version 5 is greater than maximum supported version 4").
+	tag=$$(curl -fsSL https://api.github.com/repos/golangci/golangci-lint/releases/latest \
+		| sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p'); \
+	test -n "$$tag" || { echo "local/deps: cannot resolve golangci-lint's newest release" >&2; exit 1; }; \
+	GOTOOLCHAIN=go$(GO_VERSION) go install github.com/golangci/golangci-lint/$${tag%%.*}/cmd/golangci-lint@$$tag
+	GOTOOLCHAIN=go$(GO_VERSION) go install github.com/securego/gosec/v2/cmd/gosec@latest
 	GOTOOLCHAIN=go$(GO_VERSION) go install golang.org/x/vuln/cmd/govulncheck@latest
 	python3 -m pip install -r docs/requirements.txt
 
@@ -145,17 +160,18 @@ js/lint: js/deps ## Run Javascript linters
 	@cd web-mobile && npm run lint
 	@# docs/assets/javascripts sits outside web-mobile, so the line above never
 	@# saw it and the docs widgets were linted by nothing at all. oxlint refuses
-	@# a path containing "..", so it is run from the repo root against
-	@# web-mobile's installed binary rather than by cd-ing and reaching back.
+	@# a path containing "..", so it is run from the repo root rather than by
+	@# cd-ing and reaching back. oxlint runs as the newest release through npx
+	@# (see the tool note at the top), as web-mobile's lint script does.
 	@# -c points it at web-mobile's config explicitly: run from the repo root
 	@# with no -c, oxlint does not discover .oxlintrc.json upward from
 	@# web-mobile/, so the react/unicorn/oxc plugins and project rules it
 	@# configures never applied and this line silently exited 0 (bc-appx item 4).
-	@npx --prefix web-mobile oxlint --deny-warnings --report-unused-disable-directives -c web-mobile/.oxlintrc.json docs/assets/javascripts/
+	@npx --yes oxlint@latest --deny-warnings --report-unused-disable-directives -c web-mobile/.oxlintrc.json docs/assets/javascripts/
 	@# web/ (the CLI's web UI) was linted by nothing either. It is plain browser
 	@# JS with Bootstrap loaded as a global, so it has its own config with no
-	@# React plugin, run with web-mobile's binary for the same reasons as above.
-	@npx --prefix web-mobile oxlint --deny-warnings --report-unused-disable-directives -c web/.oxlintrc.json web/js/ web/tests/
+	@# React plugin, run from the repo root for the same reasons as above.
+	@npx --yes oxlint@latest --deny-warnings --report-unused-disable-directives -c web/.oxlintrc.json web/js/ web/tests/
 
 js/sec: js/deps ## Run Javascript security scans (audit-ci)
 	@echo "Running Javascript security scans..."
@@ -212,10 +228,20 @@ go/build: $(BIN_PATH)/$(BIN_NAME) ## Build the application locally
 vendor-frontend:
 	@echo "Downloading frontend dependencies..."
 	@mkdir -p web-mobile/vendor
-	@curl -sL https://unpkg.com/preact@10.13.1/dist/preact.min.js -o web-mobile/vendor/preact.min.js
-	@curl -sL https://unpkg.com/preact@10.13.1/hooks/dist/hooks.umd.js -o web-mobile/vendor/hooks.umd.js
-	@curl -sL https://unpkg.com/preact@10.13.1/compat/dist/compat.umd.js -o web-mobile/vendor/compat.umd.js
-	@curl -sL https://unpkg.com/preact-router@4.1.2/dist/preact-router.umd.js -o web-mobile/vendor/preact-router.umd.js
+	@curl -fsSL https://unpkg.com/preact@10.29.8/dist/preact.min.js -o web-mobile/vendor/preact.min.js
+	@curl -fsSL https://unpkg.com/preact@10.29.8/hooks/dist/hooks.umd.js -o web-mobile/vendor/hooks.umd.js
+	@curl -fsSL https://unpkg.com/preact@10.29.8/compat/dist/compat.umd.js -o web-mobile/vendor/compat.umd.js
+	@curl -fsSL https://unpkg.com/preact-router@4.1.2/dist/preact-router.umd.js -o web-mobile/vendor/preact-router.umd.js
+	@# The binary embeds these files, so a file unpkg serves changed under the
+	@# same version must fail the build rather than ship. On a mismatch the
+	@# downloads are removed, so a later plain `go build` cannot embed them.
+	@# Bump the hashes with the URLs (and the Homebrew formula's resources).
+	@printf '%s  %s\n' \
+		25aa00978fef96e4fd0020cc723a41c3b1a1e81c9c087eff26a77e07a4867e8e web-mobile/vendor/preact.min.js \
+		5c29238e5dc99df306d7f7fff038591a397cfcfabb59f81fbdef43d670aa0566 web-mobile/vendor/hooks.umd.js \
+		a4a23b4cbe4d8062a9c1ccddc09386357bce3168a12f917fbef1a4543b88d4fa web-mobile/vendor/compat.umd.js \
+		4807939f589eb35ce3e8d907361789ac835dc3f809bef3cda06df13b762a4d0a web-mobile/vendor/preact-router.umd.js \
+		| $(SHA256_CHECK) || { rm -f web-mobile/vendor/*.js; echo "vendor-frontend: checksum mismatch, downloads removed" >&2; exit 1; }
 
 esbuild-jsx: ## Pre-compile JSX files to web-mobile/dist/
 	@echo "Pre-compiling JSX files..."

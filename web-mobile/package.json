@@ -6,18 +6,16 @@
   "scripts": {
     "test": "vitest run",
     "test:render": "vitest run --config vitest.config.render.js",
-    "lint": "oxlint --deny-warnings --report-unused-disable-directives",
-    "audit": "audit-ci --config audit-ci.jsonc"
+    "lint": "npx --yes oxlint@latest --deny-warnings --report-unused-disable-directives",
+    "audit": "npx --yes audit-ci@latest --config audit-ci.jsonc"
   },
   "devDependencies": {
-    "audit-ci": "^7.1.0",
     "@testing-library/dom": "^10.4.2",
     "@testing-library/jest-dom": "^7.0.1",
     "@testing-library/react": "^16.3.3",
     "@vitejs/plugin-react": "^6.3.0",
     "jsdom": "^31.0.0",
     "jsqr": "^1.4.0",
-    "oxlint": "1.93.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
     "vitest": "^5.1.0"

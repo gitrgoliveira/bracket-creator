@@ -5,10 +5,9 @@
   "type": "module",
   "scripts": {
     "test": "vitest run",
-    "audit": "audit-ci --config audit-ci.jsonc"
+    "audit": "npx --yes audit-ci@latest --config audit-ci.jsonc"
   },
   "devDependencies": {
-    "audit-ci": "^7.1.0",
     "vitest": "^5.0.5"
   }
 }

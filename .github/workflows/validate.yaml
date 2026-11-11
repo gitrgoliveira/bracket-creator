@@ -15,22 +15,29 @@ jobs:
     runs-on: ubuntu-latest
     env:
       GO111MODULE: on
-      # The linter is pinned, not "latest": a floating pin means CI's linter
-      # (and its bundled gosec ruleset) can change overnight with zero commits
-      # in this repo. That is exactly what broke every open PR's gate on
-      # 2026-08-20 -- v2.13.1 was built the same day this stopped passing, and
-      # it newly flags rand.Shuffle (G404) that v2.12.2 (the Makefile's pin,
-      # used by `make go/lint` locally) did not. Keep this in lockstep with the
-      # `go install` version in the Makefile's local/deps target so a local
-      # green run predicts CI.
-      GOLANGCI_LINT_VERSION: v2.15.0
-      # The scanner the Anchore scan action runs: anchore/scan-action@v7's own
-      # default, named here so the cache key below follows it. Bump it with
-      # the action.
-      GRYPE_VERSION: v0.110.0
     steps:
       - name: Checkout Source
         uses: actions/checkout@v7
+
+      # Security and linting tools always run their newest release (operator
+      # ruling 2026-11-11), so a run resolves golangci-lint's and grype's
+      # latest release here; the steps below download and cache that version.
+      # The cost, knowingly taken: a release that flags existing code turns
+      # every open PR red at once, as golangci-lint v2.13.1 did on 2026-08-20
+      # (G404 on rand.Shuffle). Then fix the code, or pin that one tool to the
+      # previous version here only until the fix lands.
+      - name: Resolve the newest linter and scanner releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # Assigned first: a failed lookup inside `echo "$(...)"` would not
+          # stop the step, and an empty version would reach the cache keys.
+          golangci=$(gh release view --repo golangci/golangci-lint --json tagName -q .tagName)
+          grype=$(gh release view --repo anchore/grype --json tagName -q .tagName)
+          echo "golangci-lint ${golangci}, grype ${grype}"
+          echo "GOLANGCI_LINT_VERSION=${golangci}" >> "$GITHUB_ENV"
+          echo "GRYPE_VERSION=${grype}" >> "$GITHUB_ENV"
 
       - name: Set up Go
         uses: actions/setup-go@v7
@@ -54,7 +61,7 @@ jobs:
           args: "-no-fail -fmt sarif -out results.sarif ./..."
 
       - name: Upload SARIF file
-        uses: github/codeql-action/upload-sarif@v4.39.3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: results.sarif
 
@@ -216,7 +223,7 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@v7
         with:
-          node-version: "22"
+          node-version: "26"
           cache: npm
           cache-dependency-path: |
             web-mobile/package-lock.json

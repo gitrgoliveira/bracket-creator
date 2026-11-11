@@ -199,18 +199,53 @@ func setPoolStatus(t *testing.T, store *state.Store, compID string, st state.Mat
 func TestBroadcastMatchNow_AfterAHeldRunningPushLeavesTheNewestStateLast(t *testing.T) {
 	const compID = "now-after-held"
 	_, store, _, _ := seServer(t, compID)
-	c := newMatchBroadcastCoalescer()
+	t0 := time.Now()
+	clock := t0
+	c := newMatchBroadcastCoalescerWithClock(func() time.Time { return clock })
 	t.Cleanup(c.Close)
 	rec := &payloadRecorder{c: c}
 	captured := gin.H{"competitionId": compID, "matchId": seMatch, "result": "captured"}
 	running := runningPushSender(rec, store, compID, seMatch, captured)
 	key := compID + ":" + seMatch
 	c.Submit(key, true, running)
-	c.Submit(key, true, running) // held
 	setPoolStatus(t, store, compID, state.MatchStatusCompleted)
+	// An hour before the first send: still inside its window, so this push is
+	// held, and its timer is due in an hour, so it cannot fire before the
+	// direct send below however slow the store write above was. A held push
+	// reads the store when it is sent, so holding it after the write tests
+	// the same thing as holding it before.
+	clock = t0.Add(-time.Hour)
+	c.Submit(key, true, running) // held
 	broadcastMatchNow(rec, store, compID, seMatch, captured)
-	time.Sleep(2 * matchCoalesceWindow)
 	assert.Equal(t, []state.MatchStatus{state.MatchStatusRunning, state.MatchStatusCompleted}, rec.statuses())
+	// Close sends any push still held, so this proves the direct send
+	// cancelled it rather than leaving it to its timer.
+	c.Close()
+	assert.Equal(t, []state.MatchStatus{state.MatchStatusRunning, state.MatchStatusCompleted}, rec.statuses())
+}
+
+// A held running push that already went out, because its window ended before
+// the direct send came, read the stored match as it was sent: it carried the
+// completed state, and the direct send repeats it. The newest state is last
+// either way; the repeat is an identical push (the operator views patch the
+// match with the same fields again).
+func TestBroadcastMatchNow_AfterAHeldPushAlreadySentRepeatsTheNewestState(t *testing.T) {
+	const compID = "now-after-sent"
+	_, store, _, _ := seServer(t, compID)
+	t0 := time.Now()
+	c := newMatchBroadcastCoalescerWithClock(func() time.Time { return t0 })
+	t.Cleanup(c.Close)
+	rec := &payloadRecorder{c: c}
+	captured := gin.H{"competitionId": compID, "matchId": seMatch, "result": "captured"}
+	running := runningPushSender(rec, store, compID, seMatch, captured)
+	key := compID + ":" + seMatch
+	c.Submit(key, true, running)
+	setPoolStatus(t, store, compID, state.MatchStatusCompleted)
+	c.Submit(key, true, running) // held, sent when its window ends
+	require.Eventually(t, func() bool { return len(rec.statuses()) == 2 }, 5*time.Second, 10*time.Millisecond,
+		"the held push goes out when its window ends")
+	broadcastMatchNow(rec, store, compID, seMatch, captured)
+	assert.Equal(t, []state.MatchStatus{state.MatchStatusRunning, state.MatchStatusCompleted, state.MatchStatusCompleted}, rec.statuses())
 }
 
 // A match that is gone by the time the push is built (a draw discarded, a

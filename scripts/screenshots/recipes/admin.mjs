@@ -501,6 +501,11 @@ export const recipes = [
       await keptList.locator('.badge', { hasText: /^Daily$/ }).first().waitFor({ state: 'visible', timeout: 10000 });
       await keptList.locator('.badge', { hasText: /^Before restore$/ }).first().waitFor({ state: 'visible', timeout: 10000 });
 
+      // The restored copy's row comes from the app's tournament reload, which
+      // the restore's broadcast starts after a random 0-2 s delay; the badges
+      // above come from the page's own state and can land first.
+      await page.getByText('Womens Individual (Copy)', { exact: true }).first().waitFor({ state: 'visible', timeout: 10000 });
+
       await settle(page);
       await scrollToTop(page);
     },

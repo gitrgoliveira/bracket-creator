@@ -262,8 +262,9 @@ export async function finishLanded(ed, before) {
 }
 
 // Finish in two taps and return once the write has landed (finishLanded). The
-// label is "Finish + Start Next →" instead whenever another match waits on the
-// same shiaijo, and that form leaves the editor on the next match. Not for the
+// label is "Finish + Start Next →" instead whenever another match of the same
+// competition waits on the same shiaijo (a bout of another competition does
+// not count), and that form leaves the editor on the next match. Not for the
 // engi editor ("Save result" arms too, but is its own button) or a correction
 // ("Save correction" does not arm).
 export async function finishMatch(page, root = INLINE_EDITOR) {

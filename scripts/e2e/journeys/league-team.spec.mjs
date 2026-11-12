@@ -53,7 +53,8 @@ import {
   readLeagueTable, readNumberedRows, readPodium, requestAcceptSharedRanks, runTiebreaker, saveSettings, seedLeague,
   undoControl, undoSharedRanks, playEncounter, playTiebreakBout, escape, squash,
 } from '../fixtures/league.mjs';
-import { chooseBackup, confirmWithPassword, formatCsv, openBackupPage, parseCsv, planRow, readZip, restoreButton, writeZip } from '../fixtures/organiser.mjs';
+import { formatCsv, parseCsv, readZip, writeZip } from '../fixtures/archive.mjs';
+import { chooseBackup, confirmWithPassword, openBackupPage, planRow, restoreButton } from '../fixtures/organiser.mjs';
 
 // Enough shiaijo for every test here to have one of its own (A to J).
 const LEAGUE_CUP = { name: 'League Cup', courts: 10 };

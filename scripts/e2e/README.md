@@ -107,8 +107,8 @@ browser, `--debug` opens the inspector, and a failing test leaves a trace
                             the Move dialog and Undo, line boxes and overlaps
     fixtures/organiser.mjs  the Excel download, folder import, /reset, logo and
                             sponsor uploads, the Backup and restore page;
-                            runtime PNG and import-bundle makers; a zip reader
-                            for workbooks.
+                            runtime PNG and import-bundle makers
+    fixtures/archive.mjs    zip reader and writer, CSV parser and formatter
     fixtures/clumsy.mjs     the clumsy operator (below)
     fixtures/pointer.mjs    the coarse pointer: check, restore, ensureCoarse
                             (the one "if not coarse, restore"), tap-target size

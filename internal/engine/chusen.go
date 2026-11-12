@@ -75,8 +75,9 @@ func groupSettledByChusen(group []state.PlayerStanding, allMatches []state.Match
 // chusenRecorded: a chusen still being entered, or one over a smaller group,
 // settles nothing. poolMatches is the competition's pool rows, poolRanks is
 // state.Overrides.PoolRanks (nil when none); teams are read by participant id
-// only. Only a chusen writes a pool rank by hand, so a fully ranked group is a
-// chusen's.
+// only. Any full ranking of the group, written through the chusen door
+// (OverridePoolRanks), settles it: that door is the only way a pool rank is
+// recorded, and it does not ask whether the group was tied.
 func daihyosenRuledByChusen(m *state.MatchResult, poolMatches []state.MatchResult, poolRanks map[string]map[string]int) bool {
 	if !IsPoolDaihyosenMatchID(m.ID) || !drawnSupplementaryBout(m) {
 		return false

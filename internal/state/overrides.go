@@ -42,7 +42,7 @@ func (s *Store) LoadOverrides(compID string) (*Overrides, error) {
 }
 
 // LoadPoolRanks is the competition's recorded pool-rank overrides (a chusen's
-// order, a manual rank) keyed PoolID -> overrideKey -> Rank: the one door for
+// order, written through engine.OverridePoolRanks) keyed PoolID -> overrideKey -> Rank: the one door for
 // the callers that only judge a pool by them (a drawn representative bout the
 // lots settled, the cycle check). Never nil on success.
 func (s *Store) LoadPoolRanks(compID string) (map[string]map[string]int, error) {

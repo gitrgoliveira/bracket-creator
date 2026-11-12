@@ -30,7 +30,9 @@ func PoolMatchesSettled(matches []state.MatchResult) bool {
 // poolMatchSettled reports whether one pool-matches.csv row is played: it is
 // completed and is not a drawn supplementary bout. It is the one owner of that
 // rule, so the league's completion (PoolMatchesSettled), a mixed pool's
-// (poolCompletion) and the reopen gate (drawnSupplementaryBout) cannot drift.
+// (poolCompletion) and the reopen gate (drawnSupplementaryBout) cannot drift
+// inside Go. The Pools tab's notice reads the same rule from the wire in
+// admin_pools.jsx (drawnSupplementaryBouts), so a change here changes it too.
 func poolMatchSettled(m *state.MatchResult) bool {
 	return m.Status == state.MatchStatusCompleted && !drawnSupplementaryBout(m)
 }

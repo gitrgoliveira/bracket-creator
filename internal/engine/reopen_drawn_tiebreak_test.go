@@ -9,6 +9,7 @@ package engine
 import (
 	"testing"
 
+	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -64,4 +65,49 @@ func TestReopenDrawnSupplementaryBout_OtherMatchesAreStillRefused(t *testing.T) 
 		var verr *ValidationError
 		require.ErrorAs(t, err, &verr)
 	})
+}
+
+// A bout the both-sides-barred door closed as a draw looks like any drawn
+// supplementary bout, but its sides are withdrawn elsewhere: reopening it to
+// RUNNING would leave a bout nobody can start, so it goes back to SCHEDULED,
+// where the barred-match notice is shown again. One side barred is the same
+// (a draw names no withdrawing side), and a bar recorded BY the bout itself
+// never counts.
+func TestReopenDrawnSupplementaryBout_BarredSidesGoToScheduled(t *testing.T) {
+	bar := func(t *testing.T, store *state.Store, compID, playerID, matchID string) {
+		t.Helper()
+		require.NoError(t, store.SetCompetitorStatus(compID, domain.CompetitorStatus{
+			PlayerID: playerID, Eligible: false, Reason: "kiken", MatchID: matchID,
+		}))
+	}
+	cases := []struct {
+		name   string
+		bars   map[string]string // player id -> the match that barred them
+		expect state.MatchStatus
+	}{
+		{"both barred elsewhere", map[string]string{wrTeamAID: "other-1", wrTeamBID: "other-2"}, state.MatchStatusScheduled},
+		{"one barred elsewhere", map[string]string{wrTeamAID: "other-1"}, state.MatchStatusScheduled},
+		{"barred by the bout itself", map[string]string{wrTeamAID: "Pool A-TB-0"}, state.MatchStatusRunning},
+	}
+	for _, id := range []string{"Pool A-TB-0", "Pool A-DH-0"} {
+		for _, tc := range cases {
+			t.Run(id+"/"+tc.name, func(t *testing.T) {
+				eng, store, compID := seedDrawnSupplementary(t, id)
+				for player, matchID := range tc.bars {
+					if matchID == "Pool A-TB-0" {
+						matchID = id
+					}
+					bar(t, store, compID, player, matchID)
+				}
+				_, err := eng.ReopenMatch(compID, id, "")
+				require.NoError(t, err)
+
+				matches, err := store.LoadPoolMatches(compID)
+				require.NoError(t, err)
+				require.Len(t, matches, 1)
+				assert.Equal(t, tc.expect, matches[0].Status)
+				assert.Equal(t, "", matches[0].Decision, "the draw is gone")
+			})
+		}
+	}
 }

@@ -141,6 +141,8 @@ function enrichPoolMatchWithComp(m, comp, poolNameOverride) {
 // its tie (the engine's poolCompletion counts a winnerless supplementary bout
 // as unfinished) and, in a Pools + Knockout competition, the knockout places it
 // decides stay empty. Nothing else on the page says so, hence the notice.
+// The rule is the engine's drawnSupplementaryBout (competition.go), read here
+// from the wire fields; change the two together.
 //
 // Exported for vitest at __tests__/admin_pools.test.jsx.
 function drawnSupplementaryBouts(poolMatches) {

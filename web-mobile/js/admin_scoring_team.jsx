@@ -6092,7 +6092,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
                     : "End match"}
                 </button>
                 </>
-              ) : (isKachinuki && isComplete) ? null : onSubmitAndNext ? (
+              ) : (isKachinuki && isComplete) ? null : (
                 // mp-gmcg: a COMPLETED kachinuki match has no generic "Save
                 // correction" button. That path calls buildPatch("completed")
                 // with no endOutcome, which derives the winner from the IV/PW
@@ -6106,20 +6106,10 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
                   if (refuseUnfinishedFinish()) return;
                   if (isComplete && !correctionReason) { setReasonPromptKind("correction"); return; }
                   if (!isComplete && !confirmFinish(ev)) return;
-                  doSubmit(() => (isComplete ? onSubmit : onSubmitAndNext)(buildPatch("completed")));
+                  doSubmit(() => (isComplete || !onSubmitAndNext ? onSubmit : onSubmitAndNext)(buildPatch("completed")));
                 }} disabled={submitting || koTieBlocked || repTyping}
                   title={koTieBlocked ? koTieTitle : undefined}>
-                  {submitting ? "Saving…" : koTieBlocked ? "Needs a winner" : isComplete ? "Save correction" : finishArmed ? armedFinishLabel(startsNext) : finishButtonLabel(startsNext)}
-                </button>
-              ) : (
-                <button className={`btn btn--primary ${finishArmed && !isComplete ? "btn--confirm" : ""}`} onClick={(ev) => {
-                  if (refuseUnfinishedFinish()) return;
-                  if (isComplete && !correctionReason) { setReasonPromptKind("correction"); return; }
-                  if (!isComplete && !confirmFinish(ev)) return;
-                  doSubmit(() => onSubmit(buildPatch("completed")));
-                }} disabled={submitting || koTieBlocked || repTyping}
-                  title={koTieBlocked ? koTieTitle : undefined}>
-                  {submitting ? "Saving…" : koTieBlocked ? "Needs a winner" : isComplete ? "Save correction" : finishArmed ? armedFinishLabel(false) : finishButtonLabel(false)}
+                  {submitting ? "Saving…" : koTieBlocked ? "Needs a winner" : isComplete ? "Save correction" : finishArmed ? armedFinishLabel(!!onSubmitAndNext && startsNext) : finishButtonLabel(!!onSubmitAndNext && startsNext)}
                 </button>
               )}
             </div>

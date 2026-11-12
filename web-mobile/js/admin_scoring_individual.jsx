@@ -1760,23 +1760,14 @@ export function ScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, onSub
                 </button>
               )}
               {canClose && <button className="btn" onClick={handleDismiss} disabled={submitting}>Cancel</button>}
-              {own.kept ? null : onSubmitAndNext ? (
+              {own.kept ? null : (
                 <button className={`btn btn--primary ${finishArmed && !isComplete ? "btn--confirm" : ""}`} onClick={(ev) => {
                   if (isComplete && !correctionReason) { askCorrectionReason(); return; }
                   if (!isComplete && !confirmFinish(ev)) return;
-                  doSubmit(() => (isComplete ? onSubmit : onSubmitAndNext)(buildPatch("completed")));
+                  doSubmit(() => (isComplete || !onSubmitAndNext ? onSubmit : onSubmitAndNext)(buildPatch("completed")));
                 }} disabled={submitting || !canFinish}
                   title={koTieBlocked ? KO_TIE_REASON : hanteiFinishBlock || undefined}>
-                  {submitting ? "Saving…" : koTieBlocked ? "Needs a winner" : isComplete ? "Save correction" : finishArmed ? armedFinishLabel(startsNext) : finishButtonLabel(startsNext)}
-                </button>
-              ) : (
-                <button className={`btn btn--primary ${finishArmed && !isComplete ? "btn--confirm" : ""}`} onClick={(ev) => {
-                  if (isComplete && !correctionReason) { askCorrectionReason(); return; }
-                  if (!isComplete && !confirmFinish(ev)) return;
-                  doSubmit(() => onSubmit(buildPatch("completed")));
-                }} disabled={submitting || !canFinish}
-                  title={koTieBlocked ? KO_TIE_REASON : hanteiFinishBlock || undefined}>
-                  {submitting ? "Saving…" : koTieBlocked ? "Needs a winner" : isComplete ? "Save correction" : finishArmed ? armedFinishLabel(false) : finishButtonLabel(false)}
+                  {submitting ? "Saving…" : koTieBlocked ? "Needs a winner" : isComplete ? "Save correction" : finishArmed ? armedFinishLabel(!!onSubmitAndNext && startsNext) : finishButtonLabel(!!onSubmitAndNext && startsNext)}
                 </button>
               )}
             </div>

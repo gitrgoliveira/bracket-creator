@@ -61,6 +61,14 @@ browser, `--debug` opens the inspector, and a failing test leaves a trace
                             public viewer's Pools tab: rows, figures, rank
                             badge, advancing; the individual pool row
                             (playerRowFigures).
+    fixtures/league.mjs     a LEAGUE: seedLeague (through the interface); the
+                            settings (Break ties for top, Award two joint 3rd
+                            places); the league table's rank cell and figures
+                            on admin Pools and the public League tab; the
+                            numbered match rows and matrix cell readers; the
+                            tie-break banner (Run tie-breaker, Remove unscored
+                            tie-breaker, Accept shared ranks and its confirm,
+                            Undo); the drawn-bout notice; the chusen panel
     fixtures/shiaijo.mjs    /admin/shiaijo/:court (queue, inline editor, which
                             match an editor holds)
     fixtures/scores.mjs     the Scores tab and its overlay editor
@@ -141,6 +149,25 @@ browser, `--debug` opens the inspector, and a failing test leaves a trace
                                   third with Fit the knockout where the tie is
                                   over the 2nd the draw drafted, owed a bout
                                   while the same tie in an undrafted pool is not
+      league-team                 team league: seeding through the wizard, Run
+                                  tie-breaker with the daihyosen on the court
+                                  console and the desk, Accept shared ranks
+                                  and Undo, a drawn daihyosen, a daihyosen
+                                  cycle, a stale tab refused, corrections on a
+                                  finished league
+      league-team-settings        the two league settings on a team league:
+                                  Top 3 vs Top 4, two joint 3rd places on and
+                                  off, a tie at 4th, a tie at 3rd, a three-way
+                                  tie; the settings copy
+      league-individual           individual league: an ippon-shobu
+                                  tie-breaker added by itself for a tie at
+                                  1st-3rd, a cycle, a drawn tie-breaker, joint
+                                  3rd on and off, a tie below the band
+      league.public               a spectator's phone (public project): a team
+                                  league's League tab, Overview, Awards tab
+                                  and the TV board while a tie waits, once
+                                  accepted, and after an Undo; seeded and
+                                  scored from a second operator context
       moved-match                 a waiting match moved to another shiaijo
                                   reaches that court's console without a reload
       shared-shiaijo              two competitions on one shiaijo: the picker,

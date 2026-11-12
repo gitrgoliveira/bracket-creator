@@ -25,7 +25,7 @@ const { useState, useEffect, useRef } = React;
 import {
   ReasonPrompt, CORRECTION_PRESETS, useAdoptFromServer, HeldWriteDiscard, HeldWriteNotice, useClearPendingWhenNothingHeld,
   tapBoardOf, useTapBoard, useTapOutcomeNote, useOwnStatus, DraftKeptNotice, DraftDroppedNotice, usePublishUnsaved,
-  confirmDiscardUnsaved, LEAVE_MATCH_ANYWAY, finishButtonLabel,
+  confirmDiscardUnsaved, LEAVE_MATCH_ANYWAY, finishButtonLabel, armedFinishLabel,
 } from './admin_scoring_shared.jsx';
 import { engiDraftTaps } from './draft_taps.jsx';
 import { useChangedGroups, useKeptInHistoryNote, KeptInHistoryNote } from './admin_scoring_autosave.jsx';
@@ -738,7 +738,7 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, o
                 style={invalidOutline ? { outline: "2px solid var(--danger)" } : null}
               >
                 {submitting ? "Saving…" : isComplete ? "Save correction"
-                  : saveArmed ? (onSubmitAndNext ? "Tap again to finish →" : "Tap again to save")
+                  : saveArmed ? (onSubmitAndNext ? armedFinishLabel(startsNext) : "Tap again to save")
                   : (onSubmitAndNext ? finishButtonLabel(startsNext) : "Save result")}
               </button>
             </div>

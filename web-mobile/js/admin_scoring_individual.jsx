@@ -72,6 +72,7 @@ import {
   confirmDiscardUnsaved,
   LEAVE_MATCH_ANYWAY,
   finishButtonLabel,
+  armedFinishLabel,
 } from './admin_scoring_shared.jsx';
 import { individualDraftTaps, rebaseIndividualDraft } from './draft_taps.jsx';
 // bc-cse: a SCHEDULED match a competitor is barred from must never offer a
@@ -1766,7 +1767,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, onSub
                   doSubmit(() => (isComplete ? onSubmit : onSubmitAndNext)(buildPatch("completed")));
                 }} disabled={submitting || !canFinish}
                   title={koTieBlocked ? KO_TIE_REASON : hanteiFinishBlock || undefined}>
-                  {submitting ? "Saving…" : koTieBlocked ? "Needs a winner" : isComplete ? "Save correction" : finishArmed ? "Tap again to finish →" : finishButtonLabel(startsNext)}
+                  {submitting ? "Saving…" : koTieBlocked ? "Needs a winner" : isComplete ? "Save correction" : finishArmed ? armedFinishLabel(startsNext) : finishButtonLabel(startsNext)}
                 </button>
               ) : (
                 <button className={`btn btn--primary ${finishArmed && !isComplete ? "btn--confirm" : ""}`} onClick={(ev) => {

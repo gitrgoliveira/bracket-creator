@@ -158,18 +158,31 @@ describe.each(SITES)('bc-dtfn: $name', ({ match, withNext, button, armed }) => {
 });
 
 // The court's last bout (nothing waiting to start) says plain Finish, and the
-// button is the same two-tap commit it always was.
+// button is the same two-tap commit it always was. Armed, it keeps the plain
+// wording too: no arrow promising a start that cannot happen. The engi match
+// is built lazily because engiMatch is declared further down.
 describe.each([
-  { name: 'individual', match: individualMatch },
-  { name: 'team', match: teamMatch },
-])('the $name editor on the last bout of a court', ({ match }) => {
+  { name: 'individual', match: individualMatch, button: () => screen.getByText('Finish') },
+  { name: 'team', match: teamMatch, button: () => screen.getByText('Finish') },
+  { name: 'engi', match: () => engiMatch(), button: () => screen.getByTestId('engi-submit') },
+])('the $name editor on the last bout of a court', ({ match, button }) => {
   it('reads Finish, not Finish + Start Next, when startsNext is false', async () => {
     window.API.fetchCompetitionDetails.mockResolvedValue(null);
     await act(async () => {
       render(<ScoreEditorModal match={match()} onClose={vi.fn()} onSubmit={vi.fn()} onSubmitAndNext={vi.fn()} startsNext={false} password="" />);
     });
-    expect(screen.getByText('Finish')).toBeTruthy();
+    expect(button().textContent).toBe('Finish');
     expect(screen.queryByText('Finish + Start Next →')).toBeNull();
+  });
+
+  it('reads Tap again to finish, with no arrow, once armed', async () => {
+    window.API.fetchCompetitionDetails.mockResolvedValue(null);
+    await act(async () => {
+      render(<ScoreEditorModal match={match()} onClose={vi.fn()} onSubmit={vi.fn()} onSubmitAndNext={vi.fn()} startsNext={false} password="" />);
+    });
+    const btn = button();
+    await pointerTap(btn);
+    expect(btn.textContent).toBe('Tap again to finish');
   });
 });
 

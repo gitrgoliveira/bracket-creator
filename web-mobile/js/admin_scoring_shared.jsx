@@ -2253,6 +2253,12 @@ export function finishButtonLabel(startsNext = true) {
   return startsNext ? "Finish + Start Next →" : "Finish";
 }
 
+// The same button once the first tap has armed it: the arrow goes with the
+// start of the next match, so a court's last bout never promises one.
+export function armedFinishLabel(startsNext = true) {
+  return startsNext ? "Tap again to finish →" : "Tap again to finish";
+}
+
 // How long RecordedWithdrawal holds its one-tap clear for the later matches
 // that decide its copy, at most (see `settled` there).
 export const LATER_MATCHES_HOLD_MS = 2000;

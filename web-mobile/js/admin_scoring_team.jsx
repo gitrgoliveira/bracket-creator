@@ -57,6 +57,7 @@ import {
   ownStartRefusalText,
   StartRefusedNotice,
   finishButtonLabel,
+  armedFinishLabel,
 } from './admin_scoring_shared.jsx';
 import { teamDraftTaps } from './draft_taps.jsx';
 // bc-evts stage 5: a running team match is scored by tap events, one per
@@ -6108,7 +6109,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
                   doSubmit(() => (isComplete ? onSubmit : onSubmitAndNext)(buildPatch("completed")));
                 }} disabled={submitting || koTieBlocked || repTyping}
                   title={koTieBlocked ? koTieTitle : undefined}>
-                  {submitting ? "Saving…" : koTieBlocked ? "Needs a winner" : isComplete ? "Save correction" : finishArmed ? "Tap again to finish →" : finishButtonLabel(startsNext)}
+                  {submitting ? "Saving…" : koTieBlocked ? "Needs a winner" : isComplete ? "Save correction" : finishArmed ? armedFinishLabel(startsNext) : finishButtonLabel(startsNext)}
                 </button>
               ) : (
                 <button className={`btn btn--primary ${finishArmed && !isComplete ? "btn--confirm" : ""}`} onClick={(ev) => {

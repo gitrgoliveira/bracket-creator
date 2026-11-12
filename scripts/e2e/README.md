@@ -109,6 +109,8 @@ browser, `--debug` opens the inspector, and a failing test leaves a trace
                             sponsor uploads, the Backup and restore page;
                             runtime PNG and import-bundle makers
     fixtures/archive.mjs    zip reader and writer, CSV parser and formatter
+    fixtures/text.mjs       escape: the one regexp escape for a pattern built
+                            from the app's text
     fixtures/clumsy.mjs     the clumsy operator (below)
     fixtures/pointer.mjs    the coarse pointer: check, restore, ensureCoarse
                             (the one "if not coarse, restore"), tap-target size
@@ -149,7 +151,10 @@ browser, `--debug` opens the inspector, and a failing test leaves a trace
                                   the extra qualifier place, owed a bout too; a
                                   third with Fit the knockout where the tie is
                                   over the 2nd the draw drafted, owed a bout
-                                  while the same tie in an undrafted pool is not
+                                  while the same tie in an undrafted pool is not;
+                                  a fourth whose tie-break bout is saved as a
+                                  draw, recording what the pool, the knockout
+                                  and the court then show
       league-team                 team league: seeding through the wizard, Run
                                   tie-breaker with the daihyosen on the court
                                   console and the desk, Accept shared ranks

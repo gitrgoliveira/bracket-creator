@@ -51,7 +51,7 @@ import {
 import { editorSides, ensureRunning, inlineRunning, rosterOf } from '../fixtures/individual.mjs';
 import {
   awardsTabOffered, chooseTiebreakTop, drawnBoutNotices, leagueRanks, openLeague,
-  openLeagueSettings, openNumberedRow, openViewerAwards, readBanner, readChusen, readLeagueSettings,
+  openLeagueSettings, openNumberedRow, openViewerAwards, pairKey, readBanner, readChusen, readLeagueSettings,
   readLeagueTable, readNumberedRows, readPodium, saveSettings, seedLeague,
 } from '../fixtures/league.mjs';
 import { openViewer } from '../fixtures/public.mjs';
@@ -79,7 +79,6 @@ const zero = () => ({ W: 0, L: 0, D: 0, PW: 0, PL: 0 });
 // losses, then more hikiwake, then more points scored, then fewer points lost.
 // 0 means level on every criterion.
 const order = (a, b) => (b.W - a.W) || (a.L - b.L) || (b.D - a.D) || (b.PW - a.PW) || (a.PL - b.PL);
-const pairKey = (a, b) => [a, b].sort().join(' | ');
 
 // A script of bouts and the table it must make: `beat(w, l)` (one men to w),
 // `draw(a, b)` (Mark draw, no points). `planFor({ shiro, aka })` turns a pairing

@@ -53,6 +53,7 @@ import { EDITOR, awardIppon, finishMatch, markDraw, running, startMatch } from '
 import { boutIppon, boutRow, ensureTie, finishTeam, teamTotals } from './team.mjs';
 import { createCompetition } from './wizard.mjs';
 import { generateDraw, pasteRoster, startCompetition } from './competition.mjs';
+import { escape } from './text.mjs';
 
 // The words on screen. Today's labels where the control exists; the plan's
 // fixed wording for what the fix adds (marked "fix").
@@ -87,11 +88,12 @@ export const TEXT = {
   twoThirdPlaces: 'Award two joint 3rd places',
 };
 
-export const escape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const exact = (s) => new RegExp(`^${escape(s)}$`);
 // A `has:` locator must be built from the page, never chained off the root.
 const pageOf = (root) => (typeof root.page === 'function' ? root.page() : root);
 export const squash = (t) => (t || '').replace(/\s+/g, ' ').trim();
+// One key for a pairing, whichever side each name fights on.
+export const pairKey = (a, b) => [a, b].sort().join(' | ');
 
 // ------------------------------------------------------------------- seeding
 

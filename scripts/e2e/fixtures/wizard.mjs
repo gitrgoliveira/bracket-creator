@@ -5,6 +5,7 @@
 // the wizard breaks this file and nothing else. The labels mirror
 // competition_shape.jsx's LABEL_* constants and option lists.
 import { expect } from '@playwright/test';
+import { escape } from './text.mjs';
 
 const KIND = { individual: 'Individual', team: 'Team' };
 const FORMAT = {
@@ -25,7 +26,6 @@ const EXTRA_QUALIFIERS = { standard: 'Standard', 'larger-pools': 'Oversized send
 // pill a button whose aria-pressed says whether it is chosen. Labels are
 // matched from the start, because an optional field's label carries an
 // "(optional)" suffix and "Format" is also the end of "Team match format".
-const escape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const input = (page, label) => page.getByLabel(new RegExp(`^${escape(label)}`));
 const group = (page, label) => page.getByRole('group', { name: new RegExp(`^${escape(label)}`) });
 const pill = (grp, label) => grp.getByRole('button', { name: label, exact: true });

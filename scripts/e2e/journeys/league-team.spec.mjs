@@ -51,8 +51,9 @@ import {
   leagueMatrix, leagueRanks, leagueRowFigures, openDrawnBout, openLeague, openLeagueSettings, openMatrixCell, openNumberedRow,
   openViewerAwards, openViewerLeague, readBanner, readChusen, readChusenRecorded, readConfirm, readLeagueSettings,
   readLeagueTable, readNumberedRows, readPodium, requestAcceptSharedRanks, runTiebreaker, saveSettings, seedLeague, tiebreakWrite,
-  undoControl, undoSharedRanks, playEncounter, playTiebreakBout, escape, squash,
+  undoControl, undoSharedRanks, pairKey, playEncounter, playTiebreakBout, squash,
 } from '../fixtures/league.mjs';
+import { escape } from '../fixtures/text.mjs';
 import { formatCsv, parseCsv, readZip, writeZip } from '../fixtures/archive.mjs';
 import { chooseBackup, confirmWithPassword, openBackupPage, planRow, restoreButton } from '../fixtures/organiser.mjs';
 
@@ -73,8 +74,6 @@ const rolesOf = (tag) => {
   return { A, B, C, D };
 };
 
-
-const pairKey = (a, b) => [a, b].sort().join(' | ');
 const samePair = (row, a, b) => pairKey(row.shiro, row.aka) === pairKey(a, b);
 
 // ------------------------------------------------------------ the scripts --

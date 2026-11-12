@@ -2245,6 +2245,14 @@ function ReopenFeedback({ ctl, testIdPrefix }) {
   );
 }
 
+// The court console's finish button names what the tap does: it starts the next
+// match only while one is waiting on the court. On the court's last bout (often
+// a league's tie-breaker) it says plain "Finish", so it does not promise a start
+// that cannot happen. The editors share this one wording.
+export function finishButtonLabel(startsNext = true) {
+  return startsNext ? "Finish + Start Next →" : "Finish";
+}
+
 // How long RecordedWithdrawal holds its one-tap clear for the later matches
 // that decide its copy, at most (see `settled` there).
 export const LATER_MATCHES_HOLD_MS = 2000;

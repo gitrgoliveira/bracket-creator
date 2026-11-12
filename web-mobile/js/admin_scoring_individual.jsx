@@ -71,6 +71,7 @@ import {
   StartRefusedNotice,
   confirmDiscardUnsaved,
   LEAVE_MATCH_ANYWAY,
+  finishButtonLabel,
 } from './admin_scoring_shared.jsx';
 import { individualDraftTaps, rebaseIndividualDraft } from './draft_taps.jsx';
 // bc-cse: a SCHEDULED match a competitor is barred from must never offer a
@@ -156,7 +157,7 @@ function startedScore(patch) {
   };
 }
 
-export function ScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, onSubmitAndNext: onSubmitAndNextProp, onAfterDecision, started = false, prevMatch, nextMatch, onPrev, onNext, password, selfReport, teamMembers, variant = "modal", canClose = true, hostUnsavedRef = null, allowCourtForce = false }) {
+export function ScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, onSubmitAndNext: onSubmitAndNextProp, startsNext = true, onAfterDecision, started = false, prevMatch, nextMatch, onPrev, onNext, password, selfReport, teamMembers, variant = "modal", canClose = true, hostUnsavedRef = null, allowCourtForce = false }) {
   // bc-strt: a match whose start has landed is RUNNING, even while the host's
   // list still says scheduled (it refetches a moment after each save). The
   // editors send a point only for a match they see as running, so a point
@@ -1264,11 +1265,11 @@ export function ScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, onSub
   // editor is shown from the first render with no kendo-editor flash.
   // The team check is skipped for engi (engi is never a team).
   if (isEngi) {
-    return <EngiScoreEditorModal match={m} onClose={onClose} onSubmit={onSubmitProp} onSubmitAndNext={onSubmitAndNextProp} prevMatch={prevMatch} nextMatch={nextMatch} onPrev={onPrev} onNext={onNext} variant={variant} canClose={canClose} password={password} selfReport={selfReport} hostUnsavedRef={hostUnsavedRef} />;
+    return <EngiScoreEditorModal match={m} onClose={onClose} onSubmit={onSubmitProp} onSubmitAndNext={onSubmitAndNextProp} startsNext={startsNext} prevMatch={prevMatch} nextMatch={nextMatch} onPrev={onPrev} onNext={onNext} variant={variant} canClose={canClose} password={password} selfReport={selfReport} hostUnsavedRef={hostUnsavedRef} />;
   }
   // Team routing: forward to TeamScoreEditorModal.
   if (isTeam) {
-    return <TeamScoreEditorModal match={m} teamSize={teamSize} onClose={onClose} onSubmit={onSubmitProp} onSubmitAndNext={onSubmitAndNextProp} onAfterDecision={onAfterDecision}  prevMatch={prevMatch} nextMatch={nextMatch} onPrev={onPrev} onNext={onNext} password={password} selfReport={selfReport} teamMembers={teamMembers} variant={variant} canClose={canClose} hostUnsavedRef={hostUnsavedRef} allowCourtForce={allowCourtForce} />;
+    return <TeamScoreEditorModal match={m} teamSize={teamSize} onClose={onClose} onSubmit={onSubmitProp} onSubmitAndNext={onSubmitAndNextProp} startsNext={startsNext} onAfterDecision={onAfterDecision}  prevMatch={prevMatch} nextMatch={nextMatch} onPrev={onPrev} onNext={onNext} password={password} selfReport={selfReport} teamMembers={teamMembers} variant={variant} canClose={canClose} hostUnsavedRef={hostUnsavedRef} allowCourtForce={allowCourtForce} />;
   }
 
   // a11y: label the dialog with the match/court context so screen readers
@@ -1765,7 +1766,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, onSub
                   doSubmit(() => (isComplete ? onSubmit : onSubmitAndNext)(buildPatch("completed")));
                 }} disabled={submitting || !canFinish}
                   title={koTieBlocked ? KO_TIE_REASON : hanteiFinishBlock || undefined}>
-                  {submitting ? "Saving…" : koTieBlocked ? "Needs a winner" : isComplete ? "Save correction" : finishArmed ? "Tap again to finish →" : "Finish + Start Next →"}
+                  {submitting ? "Saving…" : koTieBlocked ? "Needs a winner" : isComplete ? "Save correction" : finishArmed ? "Tap again to finish →" : finishButtonLabel(startsNext)}
                 </button>
               ) : (
                 <button className={`btn btn--primary ${finishArmed && !isComplete ? "btn--confirm" : ""}`} onClick={(ev) => {

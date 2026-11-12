@@ -132,6 +132,20 @@ describe('the court console orders its automatic start after the write it follow
   });
 });
 
+describe('the editor is told whether a finish starts a next match', () => {
+  it('startsNext is true while a match is waiting on the court', () => {
+    renderPage(vi.fn());
+    expect(captured.props.startsNext).toBe(true);
+  });
+
+  it('startsNext is false on the last bout of the court', () => {
+    tournamentMatchesSpy.mockImplementation(() => [running]);
+    renderPage(vi.fn());
+    expect(shownMatch()).toBe('Pool A-1');
+    expect(captured.props.startsNext).toBe(false);
+  });
+});
+
 describe('the court console moves on at once on a pending finish (X3)', () => {
   it('Finish + Start Next on a POOL match shows the started match, with no push or refetch', async () => {
     const onEditScore = vi.fn(async (_c, mid) => pending(`K:${mid}`));

@@ -56,6 +56,7 @@ import {
   DraftDroppedNotice,
   ownStartRefusalText,
   StartRefusedNotice,
+  finishButtonLabel,
 } from './admin_scoring_shared.jsx';
 import { teamDraftTaps } from './draft_taps.jsx';
 // bc-evts stage 5: a running team match is scored by tap events, one per
@@ -1193,7 +1194,7 @@ function useMatchLineups(compId, matchId) {
   };
 }
 
-export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSubmitProp, onSubmitAndNext: onSubmitAndNextProp, onAfterDecision, prevMatch, nextMatch, onPrev, onNext, password, selfReport, teamMembers, variant = "modal", canClose = true, hostUnsavedRef = null, allowCourtForce = false }) {
+export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSubmitProp, onSubmitAndNext: onSubmitAndNextProp, startsNext = true, onAfterDecision, prevMatch, nextMatch, onPrev, onNext, password, selfReport, teamMembers, variant = "modal", canClose = true, hostUnsavedRef = null, allowCourtForce = false }) {
   // mp-gmcg: a successful [× Remove this bout] shrinks the SERVER bout log, and
   // the parent may not have caught up when this render runs. matchOverride
   // shadows the prop so the removed bout disappears at once, and is cleared
@@ -6107,7 +6108,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
                   doSubmit(() => (isComplete ? onSubmit : onSubmitAndNext)(buildPatch("completed")));
                 }} disabled={submitting || koTieBlocked || repTyping}
                   title={koTieBlocked ? koTieTitle : undefined}>
-                  {submitting ? "Saving…" : koTieBlocked ? "Needs a winner" : isComplete ? "Save correction" : finishArmed ? "Tap again to finish →" : "Finish + Start Next →"}
+                  {submitting ? "Saving…" : koTieBlocked ? "Needs a winner" : isComplete ? "Save correction" : finishArmed ? "Tap again to finish →" : finishButtonLabel(startsNext)}
                 </button>
               ) : (
                 <button className={`btn btn--primary ${finishArmed && !isComplete ? "btn--confirm" : ""}`} onClick={(ev) => {

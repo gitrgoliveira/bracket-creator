@@ -25,7 +25,7 @@ const { useState, useEffect, useRef } = React;
 import {
   ReasonPrompt, CORRECTION_PRESETS, useAdoptFromServer, HeldWriteDiscard, HeldWriteNotice, useClearPendingWhenNothingHeld,
   tapBoardOf, useTapBoard, useTapOutcomeNote, useOwnStatus, DraftKeptNotice, DraftDroppedNotice, usePublishUnsaved,
-  confirmDiscardUnsaved, LEAVE_MATCH_ANYWAY,
+  confirmDiscardUnsaved, LEAVE_MATCH_ANYWAY, finishButtonLabel,
 } from './admin_scoring_shared.jsx';
 import { engiDraftTaps } from './draft_taps.jsx';
 import { useChangedGroups, useKeptInHistoryNote, KeptInHistoryNote } from './admin_scoring_autosave.jsx';
@@ -106,7 +106,7 @@ function deriveWinner(flagsA, flagsB) {
 // EngiScoreEditorModal: full engi flag-counter editor.
 // Props mirror the individual ScoreEditorModal surface so the dispatch in
 // admin_scoring_individual.jsx can forward the same prop bag.
-export function EngiScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, onSubmitAndNext: onSubmitAndNextProp, prevMatch, nextMatch, onPrev, onNext, variant = "modal", canClose = true, password, selfReport, hostUnsavedRef = null }) {
+export function EngiScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, onSubmitAndNext: onSubmitAndNextProp, startsNext = true, prevMatch, nextMatch, onPrev, onNext, variant = "modal", canClose = true, password, selfReport, hostUnsavedRef = null }) {
   const m = match;
   // bc-mrgc: names the groups each write changes, against the match this
   // editor renders from (see useChangedGroups).
@@ -739,7 +739,7 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, o
               >
                 {submitting ? "Saving…" : isComplete ? "Save correction"
                   : saveArmed ? (onSubmitAndNext ? "Tap again to finish →" : "Tap again to save")
-                  : (onSubmitAndNext ? "Finish + Start Next →" : "Save result")}
+                  : (onSubmitAndNext ? finishButtonLabel(startsNext) : "Save result")}
               </button>
             </div>
             {nextMatch ? (

@@ -133,6 +133,11 @@ describe('EngiScoreEditorModal Finish + Start Next (impeccable critique P2)', ()
     expect(onSubmit).not.toHaveBeenCalled();
   });
 
+  it('says plain Finish when nothing is waiting on the court', () => {
+    render(<EngiScoreEditorModal match={makeMatch({ flagsA: 3, flagsB: 0 })} onClose={() => {}} onSubmit={vi.fn()} onSubmitAndNext={vi.fn()} startsNext={false} />);
+    expect(screen.getByTestId('engi-submit').textContent).toBe('Finish');
+  });
+
   it('a correction saves the current match only (onSubmit), never onSubmitAndNext', async () => {
     const onSubmit = vi.fn().mockResolvedValue(undefined);
     const onSubmitAndNext = vi.fn().mockResolvedValue(undefined);

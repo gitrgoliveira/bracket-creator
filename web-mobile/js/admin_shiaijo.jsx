@@ -1379,6 +1379,14 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         return pool.slice(idx + 1).find((x) => x.status !== "completed" && !isBarredMatch(x) && !involvesCompetitor(x, withdrawn)) || null;
     };
 
+    // The match a finish starts, if any: the advance target, when it is still
+    // scheduled. The editor's button reads "Finish + Start Next" only while this
+    // is non-null, and plain "Finish" on the court's last bout.
+    const nextToStartAfter = (m, withdrawn = null) => {
+        const next = nextActiveAfter(m, withdrawn);
+        return next && next.status === "scheduled" ? next : null;
+    };
+
     // Amber nudge banner logic (AC6): fires ONLY when the SELECTED competition
     // has no more matches to run on this court (it has finished, or hasn't
     // started yet: no running and no scheduled bouts here) AND another
@@ -2618,8 +2626,9 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                         }
                                         catch (_e) { /* surfaced via toast */ }
                                     }}
+                                    startsNext={!!nextToStartAfter(selectedMatch)}
                                     onSubmitAndNext={async (patch) => {
-                                        const next = nextActiveAfter(selectedMatch);
+                                        const next = nextToStartAfter(selectedMatch);
                                         let res;
                                         try {
                                             res = await onEditScore(selectedMatch.compId, selectedMatch.id, patch, selectedMatch);
@@ -2634,7 +2643,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                             if (writeDidNotLand(res)) return res;
                                             // Finish + start the next scheduled match, which then
                                             // becomes the running match the panel shows.
-                                            if (next && next.status === "scheduled") {
+                                            if (next) {
                                                 // Queued after the finish (X1): the server never
                                                 // sees this start while the finish is still out.
                                                 await startMatch(next, { after: writeQueueKey(res) });
@@ -2659,8 +2668,8 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                         // Then start the next scheduled match so the panel advances
                                         // (mirrors onSubmitAndNext), passing over the matches of a
                                         // competitor a withdrawal or no-show has just barred.
-                                        const next = nextActiveAfter(selectedMatch, sideBarredByDecision(result, selectedMatch));
-                                        if (next && next.status === "scheduled") {
+                                        const next = nextToStartAfter(selectedMatch, sideBarredByDecision(result, selectedMatch));
+                                        if (next) {
                                             // Queued after the decision (X1).
                                             await startMatch(next, { after: writeQueueKey(result) });
                                         }

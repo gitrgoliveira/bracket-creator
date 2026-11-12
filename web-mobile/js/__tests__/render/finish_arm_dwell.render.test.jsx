@@ -157,6 +157,22 @@ describe.each(SITES)('bc-dtfn: $name', ({ match, withNext, button, armed }) => {
   });
 });
 
+// The court's last bout (nothing waiting to start) says plain Finish, and the
+// button is the same two-tap commit it always was.
+describe.each([
+  { name: 'individual', match: individualMatch },
+  { name: 'team', match: teamMatch },
+])('the $name editor on the last bout of a court', ({ match }) => {
+  it('reads Finish, not Finish + Start Next, when startsNext is false', async () => {
+    window.API.fetchCompetitionDetails.mockResolvedValue(null);
+    await act(async () => {
+      render(<ScoreEditorModal match={match()} onClose={vi.fn()} onSubmit={vi.fn()} onSubmitAndNext={vi.fn()} startsNext={false} password="" />);
+    });
+    expect(screen.getByText('Finish')).toBeTruthy();
+    expect(screen.queryByText('Finish + Start Next →')).toBeNull();
+  });
+});
+
 // A refused commit disarms. The write came back refused (writeWasRefused,
 // write_result.jsx): the host reported it and handed back nothing (a busy
 // shiaijo, a finished match, a barred competitor: every host catches the

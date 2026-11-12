@@ -120,8 +120,10 @@ and Shiro (white):
 - The side with more flags wins the bout.
 - **Save result** takes two taps, as **Finish** does in the kendo editor: the
   first tap changes the button to **Tap again to save**, and the second tap
-  saves. On the court console the button can read **Finish + Start Next**,
-  which asks **Tap again to finish**. A quick double tap only does the first.
+  saves. On the court console the button reads **Finish + Start Next**
+  when another match of this competition waits on the court, and plain **Finish**
+  when none does; either way the first tap changes it to **Tap again to finish**.
+  A quick double tap only does the first.
   **`Enter`** saves at once.
 
 ### Standings

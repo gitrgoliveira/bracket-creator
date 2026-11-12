@@ -31,7 +31,7 @@
 import { test, expect } from '../fixtures/test.mjs';
 import { OPERATOR_DEVICE } from '../fixtures/devices.mjs';
 import { journeyShots } from '../fixtures/shots.mjs';
-import { auditLog } from '../fixtures/audit.mjs';
+import { flushAudits, journeyRecorder as recorder } from '../fixtures/audit.mjs';
 import { enterTournament } from '../fixtures/setup.mjs';
 import { openTvBoard, openViewer, tvBoard } from '../fixtures/public.mjs';
 import {
@@ -54,14 +54,6 @@ const teamsOf = (tag) => ({
   ],
 });
 
-// A recorder per test, flushed by afterAll to the audit.json in the test's own
-// folder (the one its screenshots go to).
-const audits = [];
-function recorder(journey, folder) {
-  const log = auditLog(folder);
-  audits.push(log);
-  return { record: (row) => log.record({ journey, ...row }) };
-}
 
 // The operator's iPad on its own context, signed in.
 async function operatorPage(browser, baseURL) {
@@ -109,7 +101,7 @@ async function readBoard(page, court) {
 }
 
 test.describe('league on a phone', () => {
-  test.afterAll(() => audits.forEach((a) => a.flush()));
+  test.afterAll(() => flushAudits(test.info().file));
 
   test('a tie at the podium waits: the League tab and the TV board while the banner is up, then with a tie-breaker scheduled', async ({ page, browser, baseURL }) => {
     test.setTimeout(480_000);

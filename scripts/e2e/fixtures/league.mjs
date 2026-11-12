@@ -486,7 +486,7 @@ export async function bannerGroup(page, teams) {
 // The answer to the next league tie-break write: POST (Run), or with `tail`
 // '/finalize' POST (Accept) and DELETE (Undo, the fix). Armed before the tap.
 // Resolves { status, ok, body }.
-function tiebreakWrite(page, method, tail = '') {
+export function tiebreakWrite(page, method, tail = '') {
   const re = new RegExp(`^/api/competitions/[^/]+/league-tiebreak${escape(tail)}$`);
   const answered = page.waitForResponse((r) => r.request().method() === method && re.test(new URL(r.url()).pathname),
     { timeout: EXPECT_TIMEOUT_MS })

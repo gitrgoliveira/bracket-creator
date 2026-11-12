@@ -36,7 +36,7 @@ import path from 'node:path';
 import { test, expect } from '../fixtures/test.mjs';
 import { OPERATOR_DEVICE, PUBLIC_DEVICE } from '../fixtures/devices.mjs';
 import { journeyShots } from '../fixtures/shots.mjs';
-import { auditLog } from '../fixtures/audit.mjs';
+import { flushAudits, journeyRecorder as recorder } from '../fixtures/audit.mjs';
 import { enterTournament } from '../fixtures/setup.mjs';
 import { createCompetition } from '../fixtures/wizard.mjs';
 import { generateDraw, pasteRoster, startCompetition } from '../fixtures/competition.mjs';
@@ -48,9 +48,9 @@ import {
 } from '../fixtures/kachinuki.mjs';
 import {
   TEXT, acceptButton, acceptSharedRanks, acceptedLines, answerConfirm, chooseTiebreakTop, confirmDialog, drawnBoutNotices,
-  leagueMatrix, leagueRowFigures, leagueRows, openLeague, openLeagueSettings, openMatrixCell, openNumberedRow,
+  leagueMatrix, leagueRanks, leagueRowFigures, openDrawnBout, openLeague, openLeagueSettings, openMatrixCell, openNumberedRow,
   openViewerAwards, openViewerLeague, readBanner, readChusen, readChusenRecorded, readConfirm, readLeagueSettings,
-  readLeagueTable, readNumberedRows, readPodium, requestAcceptSharedRanks, runTiebreaker, saveSettings, seedLeague,
+  readLeagueTable, readNumberedRows, readPodium, requestAcceptSharedRanks, runTiebreaker, saveSettings, seedLeague, tiebreakWrite,
   undoControl, undoSharedRanks, playEncounter, playTiebreakBout, escape, squash,
 } from '../fixtures/league.mjs';
 import { formatCsv, parseCsv, readZip, writeZip } from '../fixtures/archive.mjs';
@@ -73,14 +73,6 @@ const rolesOf = (tag) => {
   return { A, B, C, D };
 };
 
-// A recorder per test, flushed by afterAll to the audit.json in the test's own
-// folder (the one its screenshots go to).
-const audits = [];
-function recorder(journey, folder) {
-  const log = auditLog(folder);
-  audits.push(log);
-  return { record: (row) => log.record({ journey, ...row }) };
-}
 
 const pairKey = (a, b) => [a, b].sort().join(' | ');
 const samePair = (row, a, b) => pairKey(row.shiro, row.aka) === pairKey(a, b);
@@ -241,19 +233,6 @@ async function tiebreakRows(page, regular, teams) {
 // The expected figures of `team`, as the row reader names them.
 const figuresOf = (tally, team) => tally[team];
 
-// Every row's name -> rank, as shown.
-const ranksShown = async (page) => Object.fromEntries((await leagueRows(page)).map((r) => [r.name, r.rank]));
-
-// The answer to the next POST .../league-tiebreak/finalize, armed before the
-// tap that sends it.
-function finalizeAnswer(page) {
-  const answered = page.waitForResponse((r) => r.request().method() === 'POST'
-    && /^\/api\/competitions\/[^/]+\/league-tiebreak\/finalize$/.test(new URL(r.url()).pathname))
-    .then(async (r) => ({ status: r.status(), ok: r.ok(), body: await r.json().catch(() => null) }));
-  answered.catch(() => {});
-  return answered;
-}
-
 // Whether `locator` shows within `timeout`. The court console draws its queue
 // after its heading (openShiaijo waits only for the heading), so a bare
 // count() taken right after opening it can read 0 before the queue is there.
@@ -380,7 +359,7 @@ const expectTwoWayBanner = async (page, A, B) => {
 };
 
 test.describe('league-team', () => {
-  test.afterAll(() => audits.forEach((a) => a.flush()));
+  test.afterAll(() => flushAudits(test.info().file));
 
   test('smoke: a team league is seeded through the wizard and its table reads on Pools and the public page', async ({ page, browser, baseURL }) => {
     test.setTimeout(240_000);
@@ -608,6 +587,8 @@ test.describe('league-team', () => {
       expect([pair.shiro, pair.aka].sort()).toEqual([A, B].sort());
       await awardIppon(page, pair.shiro === A ? 'shiro' : 'aka', 'M');
       const label = squash(await finishButton(page).innerText());
+      // The league's last bout: nothing waits on the court, so plain Finish.
+      expect(label).toBe('Finish');
       record({ step: 'console', action: 'daihyosen before Finish', finishLabel: label,
         screenshot: await shot(page, 'console-daihyosen-before-finish', { fullPage: true }) });
       await finishMatch(page);
@@ -623,7 +604,7 @@ test.describe('league-team', () => {
       record({ step: 'final', action: 'after the daihyosen', table, banner: await readBanner(page),
         screenshot: await shot(page, 'final-standings', { fullPage: true }) });
       expect(table).toMatchObject({ played: 7, total: 7, winner: A });
-      expect(await ranksShown(page)).toEqual({ [A]: 1, [B]: 2, [C]: 3, [D]: 4 });
+      expect(await leagueRanks(page)).toEqual({ [A]: 1, [B]: 2, [C]: 3, [D]: 4 });
       expect((await leagueRowFigures(page, A)).dh).toBe(true);
       expect((await readBanner(page)).shown).toBe(false);
     });
@@ -696,7 +677,7 @@ test.describe('league-team', () => {
         await expect.poll(async () => (await readLeagueTable(page)).heading, { message: 'the league finished' }).toBe('Final standings');
         const tally = script.tally();
         const table = await readLeagueTable(page);
-        const ranks = await ranksShown(page);
+        const ranks = await leagueRanks(page);
         record({ step: 'accept', action: 'table after Accept', table, ranks,
           sharedRankReadsShared: ranks[A] === ranks[B], banner: await readBanner(page),
           undoControl: await undoControl(page).count(), acceptedLines: await acceptedLines(page),
@@ -727,7 +708,7 @@ test.describe('league-team', () => {
       test.fixme(true, 'F1, N2: accepted shared ranks cannot be undone, and never read as shared (A and B read 1 and 2)');
 
       await test.step('fixed: the accepted tie reads as shared, both teams at rank 1 (N2)', async () => {
-        expect(await ranksShown(page)).toMatchObject({ [A]: 1, [B]: 1, [C]: 3, [D]: 4 });
+        expect(await leagueRanks(page)).toMatchObject({ [A]: 1, [B]: 1, [C]: 3, [D]: 4 });
       });
 
       await test.step('fixed: both tabs offer Undo shared ranks beside the accepted tie (F1, F10)', async () => {
@@ -923,7 +904,7 @@ test.describe('league-team', () => {
       await ed.getByTestId('scoring-modal-hantei-shiro').tap();
       await finishMatch(page, EDITOR);
       await expect.poll(async () => (await readLeagueTable(page)).heading).toBe('Final standings');
-      const ranks = await ranksShown(page);
+      const ranks = await leagueRanks(page);
       record({ step: 'F3b', action: 'hantei decided the daihyosen', ranks, screenshot: await shot(page, 'dh-hantei-final', { fullPage: true }) });
       expect(ranks[dh.shiro]).toBe(1);
       expect(ranks[dh.aka]).toBe(2);
@@ -1069,7 +1050,7 @@ test.describe('league-team', () => {
       });
 
       await test.step('tab A confirms Accept on the table that can still change', async () => {
-        const answered = finalizeAnswer(page);
+        const answered = tiebreakWrite(page, 'POST', '/finalize');
         await answerConfirm(page, TEXT.acceptConfirm);
         answer = await answered;
         sentenceShown = await page.getByText(TEXT.notSettled).first().waitFor({ state: 'visible', timeout: 5_000 })
@@ -1266,7 +1247,7 @@ test.describe('league-team', () => {
     await test.step('Accept shared ranks: C and D share 3rd and the league finishes', async () => {
       const accepted = await acceptSharedRanks(page);
       await expect.poll(async () => (await readLeagueTable(page)).heading, { message: 'the league finished' }).toBe('Final standings');
-      const ranks = await ranksShown(page);
+      const ranks = await leagueRanks(page);
       record({ step: 'F2b', action: 'Accept shared ranks at 3rd', asked: accepted.asked, answer: { status: accepted.status, body: accepted.body },
         ranks, acceptedLines: await acceptedLines(page), screenshot: await shot(page, 'accepted-shared-3rd', { fullPage: true }) });
       expect(ranks[A]).toBe(1);
@@ -1281,7 +1262,7 @@ test.describe('league-team', () => {
         await openLeague(page, id);
         await expect.poll(async () => leagueRowFigures(page, winner), { message: 'the table follows the correction' })
           .toMatchObject(figuresOf(tally, winner));
-        const seen = { ...res, table: await readLeagueTable(page), banner: await readBanner(page), ranks: await ranksShown(page) };
+        const seen = { ...res, table: await readLeagueTable(page), banner: await readBanner(page), ranks: await leagueRanks(page) };
         after.push(seen);
         record({ step: 'F2b', action: `correction ${k + 1}: ${x} v ${y}`, ...seen,
           screenshot: await shot(page, `after-correction-${k + 1}`, { fullPage: true }) });
@@ -1415,7 +1396,7 @@ test.describe('league-team', () => {
       await ed.getByTestId('scoring-modal-hantei-shiro').tap();
       const saved = await saveCorrection(page, ed);
       await expect.poll(async () => (await readLeagueTable(page)).heading).toBe('Final standings');
-      const ranks = await ranksShown(page);
+      const ranks = await leagueRanks(page);
       record({ step: 'F3b', action: 'hantei decided the saved drawn daihyosen', saved, ranks,
         screenshot: await shot(page, 'saved-drawn-dh-hantei', { fullPage: true }) });
       expect(ranks[dh.shiro]).toBe(1);

@@ -39,7 +39,7 @@
 import { test, expect } from '../fixtures/test.mjs';
 import { EXPECT_TIMEOUT_MS, PUBLIC_DEVICE } from '../fixtures/devices.mjs';
 import { journeyShots } from '../fixtures/shots.mjs';
-import { auditLog } from '../fixtures/audit.mjs';
+import { flushAudits, journeyRecorder } from '../fixtures/audit.mjs';
 import { enterTournament } from '../fixtures/setup.mjs';
 import { createCompetition } from '../fixtures/wizard.mjs';
 import { generateDraw, pasteRoster, startCompetition } from '../fixtures/competition.mjs';
@@ -66,14 +66,10 @@ const MATCH_N_OF_M = /Match \d+ of \d+/i;
 // Words that would tell an operator why an extra bout appeared (F12).
 const SAYS_TIEBREAK = /tie-?break|ippon[- ]shobu|decides? (the )?\d|place/i;
 
-// A recorder per test, flushed by afterAll to the audit.json in the test's own
-// folder (the one its screenshots go to).
-const audits = [];
+// A recorder per test: audit rows and screenshots in the journey's own folder.
 function recorder(journey) {
   const folder = `league-individual/${journey}`;
-  const log = auditLog(folder);
-  audits.push(log);
-  return { record: (row) => log.record({ journey, ...row }), shot: journeyShots(folder) };
+  return { ...journeyRecorder(journey, folder), shot: journeyShots(folder) };
 }
 
 // ------------------------------------------------------------------ scripts
@@ -250,7 +246,7 @@ async function deskWhen(page, id, arrived, windowMs = 3_000) {
 }
 
 // The public Awards tab of the competition, read on a spectator's phone.
-async function publicPodium(browser, baseURL, id) {
+async function publicPodiumIfOffered(browser, baseURL, id) {
   const spectator = await browser.newContext({ ...PUBLIC_DEVICE, baseURL });
   try {
     const phone = await spectator.newPage();
@@ -276,7 +272,7 @@ async function expectNoTiebreak(page, id, regular) {
 }
 
 test.describe('league-individual', () => {
-  test.afterAll(() => audits.forEach((a) => a.flush()));
+  test.afterAll(() => flushAudits(test.info().file));
 
   // ------------------------------------------------------------- 1. cycle
   // Four entrants: A beats B, B beats C, C beats A, and all three beat D, so
@@ -354,7 +350,7 @@ test.describe('league-individual', () => {
       const after = await deskWhen(page, id, (d) => d.finished || tiebreakRows(d.numberedRows, 9).length > 0);
       const further = tiebreakRows(after.numberedRows, 9);
       const outcome = after.finished ? 'finished with the cycle unbroken' : (further.length ? 'a further round was added' : 'stranded: not finished, nothing to play');
-      const pub = await publicPodium(browser, baseURL, id);
+      const pub = await publicPodiumIfOffered(browser, baseURL, id);
       record({ step: 'pools', action: 'read after the cycle', outcome, ranks: await leagueRanks(page), furtherRound: further, ...after, public: pub,
         shot: await shot(page, 'pools-after-cycle', { fullPage: true }) });
       test.info().annotations.push({ type: 'finding', description: `individual ippon-shobu cycle at 1st-3rd: ${outcome}` });
@@ -403,7 +399,7 @@ test.describe('league-individual', () => {
       // tie-breaker, so the predicate never holds and the window's end is the
       // evidence.
       const desk = await deskWhen(page, id, () => false, 2_000);
-      const pub = await publicPodium(browser, baseURL, id);
+      const pub = await publicPodiumIfOffered(browser, baseURL, id);
       record({ step: 'pools', action: 'read with the tie-breaker saved drawn', finding: 'F3b', ...desk, public: pub,
         shot: await shot(page, 'pools-drawn-tiebreaker', { fullPage: true }) });
       expect(desk.finished, 'a league whose tie-breaker has no winner is not finished').toBe(false);
@@ -448,7 +444,7 @@ test.describe('league-individual', () => {
       }
       await expect(page.locator(EDITOR)).toHaveCount(0, { timeout: EXPECT_TIMEOUT_MS }).catch(() => {});
       const after = await deskOnceFinished(page).catch(async () => readDesk(page));
-      const pub = await publicPodium(browser, baseURL, id);
+      const pub = await publicPodiumIfOffered(browser, baseURL, id);
       record({ step: 'pools', action: 'the drawn tie-breaker corrected to a win for A', saveOffered, ranks: await leagueRanks(page), ...after, public: pub,
         shot: await shot(page, 'pools-tiebreaker-corrected', { fullPage: true }) });
       expect(after.finished, 'once the tie-breaker has a winner the league finishes').toBe(true);
@@ -510,7 +506,7 @@ test.describe('league-individual', () => {
       await expect(completedRowFor(page, pair)).toBeVisible();
       await openLeague(page, id);
       const desk = await deskOnceFinished(page);
-      record({ step: 'pools', action: 'after the hantei', ...desk, public: await publicPodium(browser, baseURL, id),
+      record({ step: 'pools', action: 'after the hantei', ...desk, public: await publicPodiumIfOffered(browser, baseURL, id),
         shot: await shot(page, 'pools-after-hantei', { fullPage: true }) });
       expect(desk.table.winner).toBe(A);
     });
@@ -547,7 +543,7 @@ test.describe('league-individual', () => {
       await expectNoTiebreak(page, id, 6);
       const desk = await readDesk(page);
       const ranks = await leagueRanks(page);
-      const pub = await publicPodium(browser, baseURL, id);
+      const pub = await publicPodiumIfOffered(browser, baseURL, id);
       record({ step: 'pools', action: 'read once finished', ranks, ...desk, public: pub, shot: await shot(page, 'pools-joint-third-on', { fullPage: true }) });
       expect(desk.table.winner).toBe(A);
       expect(ranks[A]).toBe(1);
@@ -580,7 +576,7 @@ test.describe('league-individual', () => {
       await openLeague(page, id);
       const desk = await deskOnceFinished(page);
       const ranks = await leagueRanks(page);
-      const pub = await publicPodium(browser, baseURL, id);
+      const pub = await publicPodiumIfOffered(browser, baseURL, id);
       record({ step: 'pools', action: 'read once finished', ranks, ...desk, public: pub, shot: await shot(page, 'pools-joint-third-off', { fullPage: true }) });
       expect(desk.table.winner).toBe(A);
       expect(ranks).toMatchObject({ [A]: 1, [B]: 2, [C]: 3, [D]: 4 });

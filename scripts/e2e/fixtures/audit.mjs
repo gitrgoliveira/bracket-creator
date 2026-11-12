@@ -50,3 +50,15 @@ export function auditLog(journey) {
   if (spec) bySpec.set(spec, [...auditsFor(spec), audit]);
   return audit;
 }
+
+// A recorder for one test: rows tagged with the journey's name, written to the
+// audit.json of `folder` (the one its screenshots go to). Call it inside the
+// test, so the spec file is on the stack; flushAudits writes what it recorded.
+export function journeyRecorder(journey, folder = journey) {
+  const log = auditLog(folder);
+  return { record: (row) => log.record({ journey, ...row }) };
+}
+
+// Write every audit a spec file made, for its afterAll hook:
+// test.afterAll(() => flushAudits(test.info().file)).
+export const flushAudits = (specFile) => auditsFor(specFile).forEach((a) => a.flush());

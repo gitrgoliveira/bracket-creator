@@ -36,7 +36,7 @@
 import { test, expect } from '../fixtures/test.mjs';
 import { PUBLIC_DEVICE } from '../fixtures/devices.mjs';
 import { journeyShots } from '../fixtures/shots.mjs';
-import { auditLog } from '../fixtures/audit.mjs';
+import { flushAudits, journeyRecorder } from '../fixtures/audit.mjs';
 import { enterTournament } from '../fixtures/setup.mjs';
 import { createCompetition } from '../fixtures/wizard.mjs';
 import {
@@ -159,13 +159,10 @@ async function playLeague(page, names, script) {
 
 const groupKey = (teams) => [...teams].sort().join('|');
 
-// A recorder per test, flushed by afterAll to the audit.json in the test's own
-// folder (the one its screenshots go to).
-const audits = [];
+// A recorder per test: audit rows and screenshots in the test's own folder.
 function recorder(folder) {
-  const log = auditLog(`${JOURNEY}/${folder}`);
-  audits.push(log);
-  return { record: (row) => log.record({ journey: JOURNEY, ...row }), shot: journeyShots(`${JOURNEY}/${folder}`) };
+  const dir = `${JOURNEY}/${folder}`;
+  return { ...journeyRecorder(JOURNEY, dir), shot: journeyShots(dir) };
 }
 
 // One league, one setting pair, one scripted set of results: seed, play every
@@ -281,7 +278,7 @@ async function runLeague({ page, browser, baseURL, folder, tag, court, n, script
 }
 
 test.describe(JOURNEY, () => {
-  test.afterAll(() => audits.forEach((a) => a.flush()));
+  test.afterAll(() => flushAudits(test.info().file));
 
   test('the settings: the band and the joint 3rd places are shown with their copy, kept across a reload', async ({ page }) => {
     test.setTimeout(240_000);

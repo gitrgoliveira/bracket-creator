@@ -60,6 +60,13 @@ describe('AdminPools: a tie-break bout saved as a draw', () => {
     expect(screen.getByTestId('drawn-tiebreak-notice').textContent).toMatch(/so the table keeps them tied/);
   });
 
+  it('does not name a pool on a league, which has none', async () => {
+    await mount([bout('Pool A-TB-0')], 'league');
+    const text = screen.getByTestId('drawn-tiebreak-notice').textContent;
+    expect(text).toMatch(/^A tie-break bout was saved as a drawBea and Cal are still tied/);
+    expect(text).not.toMatch(/Pool A/);
+  });
+
   it('Open bout opens the score editor on that bout', async () => {
     await mount([bout('Pool A-TB-0')]);
     expect(screen.queryByTestId('editor-open')).toBeNull();

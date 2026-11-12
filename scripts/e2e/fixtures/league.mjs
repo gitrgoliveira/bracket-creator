@@ -80,8 +80,10 @@ export const TEXT = {
   // fix: a result changed on a finished league.
   finishedLeague: 'This league has finished. Changing this result can change the final table and podium. If it leaves a new tie at a podium place, the league goes back to match play to settle it.',
   changeAnyway: 'Change it anyway',
-  // fix: a tie-breaker needs a winner (the notice on a saved draw).
-  drawnBout: (a, b) => `${a} v ${b} was saved as a draw. A tie-breaker needs a winner: open it and decide by encho or hantei.`,
+  // The Pools notice on a saved draw: its title, then its description, as
+  // drawnBoutNotices reads them. A league names no pool and its table keeps the
+  // two tied.
+  drawnBout: (a, b, what = 'daihyosen') => `A ${what} was saved as a draw ${a} and ${b} are still tied, so the table keeps them tied. Fight it again, or open it to decide it by encho or hantei.`,
   openBout: 'Open bout',
   // settings
   tiebreakTop: 'Break ties for top',
@@ -557,19 +559,21 @@ export async function undoSharedRanks(page, { allowRefusal = false } = {}) {
 
 // ------------------------------------------- the drawn-bout notice (the fix)
 
-const DRAWN_TAIL = / was saved as a draw\. A tie-breaker needs a winner: open it and decide by encho or hantei\.$/;
+const drawnNotice = (page) => page.getByTestId('drawn-tiebreak-notice');
 
-// The notice text(s), each "<side> v <side> was saved as a draw. ...".
+// The notice text(s) on Pools: each notice's title and description, squashed
+// (the buttons and the reopen feedback are left out), as TEXT.drawnBout spells.
 export async function drawnBoutNotices(page) {
-  return (await page.getByText(DRAWN_TAIL).allInnerTexts()).map(squash);
+  return drawnNotice(page).evaluateAll((els) => els.map((e) =>
+    ['.league-tiebreak__title', '.league-tiebreak__desc']
+      .map((s) => e.querySelector(s).textContent).join(' ').replace(/\s+/g, ' ').trim()));
 }
 
-// Tap the notice's Open bout (the notice naming `a` v `b` when given) and
+// Tap the notice's Open bout (the notice naming `a` and `b` when given) and
 // return the overlay editor it opened.
 export async function openDrawnBout(page, { a, b } = {}) {
-  let notice = page.locator('div, p, section').filter({ hasText: DRAWN_TAIL })
-    .filter({ has: page.getByRole('button', { name: TEXT.openBout, exact: true }) });
-  if (a && b) notice = notice.filter({ hasText: `${a} v ${b}` });
+  let notice = drawnNotice(page);
+  if (a && b) notice = notice.filter({ hasText: `${a} and ${b}` });
   await notice.last().getByRole('button', { name: TEXT.openBout, exact: true }).tap();
   const ed = page.locator(EDITOR);
   await expect(ed).toBeVisible();

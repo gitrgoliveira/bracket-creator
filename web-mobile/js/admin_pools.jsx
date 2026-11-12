@@ -154,7 +154,8 @@ function drawnSupplementaryBouts(poolMatches) {
 function DrawnTieBreakNotice({ match, comp, password, onOpen }) {
   const ctl = useMatchReopen({ match, password, isComplete: true, allowCourtForce: true });
   const what = isPoolDaihyosenBout(match.id) ? "daihyosen" : "tie-break bout";
-  const pool = poolNameOf(match.id);
+  // A league has one table and no pools: "Pool A" is only its storage name.
+  const pool = comp && comp.format === "league" ? "" : `${poolNameOf(match.id)}: `;
   const sides = `${nameOf(match.sideA)} and ${nameOf(match.sideB)}`;
   const effect = comp && comp.format === "mixed"
     ? "so the knockout places this pool decides stay empty"
@@ -163,7 +164,7 @@ function DrawnTieBreakNotice({ match, comp, password, onOpen }) {
     <div className="alert alert--warn league-tiebreak" role="status" aria-live="polite" data-testid="drawn-tiebreak-notice">
       <div className="league-tiebreak__title">A {what} was saved as a draw</div>
       <div className="league-tiebreak__desc">
-        {pool}: {sides} are still tied, {effect}. Fight it again, or open it to decide it by encho or hantei.
+        {pool}{sides} are still tied, {effect}. Fight it again, or open it to decide it by encho or hantei.
       </div>
       <div className="league-tiebreak__actions">
         <button type="button" className="btn btn--sm btn--primary" disabled={ctl.busy} onClick={() => ctl.reopen()}>

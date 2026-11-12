@@ -144,6 +144,21 @@ describe('the editor is told whether a finish starts a next match', () => {
     expect(shownMatch()).toBe('Pool A-1');
     expect(captured.props.startsNext).toBe(false);
   });
+
+  // The advance stays inside the finished match's competition (operator ruling
+  // 2026-09-26): another competition's bout waiting on the same court is not
+  // started by this finish, so the button reads plain Finish.
+  it('startsNext is false on the last bout of a competition while another competition waits on the court', () => {
+    const other = {
+      id: 'Pool B-1', compId: 'c2', compName: 'Plate', status: 'scheduled', phase: 'pool',
+      court: 'A', scheduledAt: '10:05', modifiedAt: 50,
+      sideA: { id: 'q1', name: 'Ito' }, sideB: { id: 'q2', name: 'Kato' },
+    };
+    tournamentMatchesSpy.mockImplementation(() => [running, other]);
+    renderPage(vi.fn());
+    expect(shownMatch()).toBe('Pool A-1');
+    expect(captured.props.startsNext).toBe(false);
+  });
 });
 
 describe('the court console moves on at once on a pending finish (X3)', () => {

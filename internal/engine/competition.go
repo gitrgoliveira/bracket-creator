@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"sync"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
@@ -43,6 +44,23 @@ func (e *Engine) PoolMatchesSettledIn(loader poolStandingsLoader, compID string,
 		return false, err
 	}
 	return PoolMatchesSettled(matches, poolRanks, standings), nil
+}
+
+// poolMatchesSettledNow is PoolMatchesSettled over everything a transaction
+// holds now: its pool matches, the recorded ranks and the standings the lots are
+// judged on, all read through tx. A completion decided under the competition's
+// lock asks this and not the scan that preceded it, since a correction landing
+// in between can change the tied group a chusen had to rank.
+func (e *Engine) poolMatchesSettledNow(tx state.StoreTx, compID string) (bool, error) {
+	matches, err := tx.LoadPoolMatches(compID)
+	if err != nil {
+		return false, err
+	}
+	poolRanks, err := LoadPoolRanksJudging(compID, matches, tx.LoadPoolRanks)
+	if err != nil {
+		return false, err
+	}
+	return e.PoolMatchesSettledIn(tx, compID, matches, poolRanks)
 }
 
 // LoadPoolRanksJudging reads a competition's recorded pool-rank overrides
@@ -401,12 +419,13 @@ func (e *Engine) maybeAutoCompletePoolsRunning(compID string, comp *state.Compet
 	if err != nil {
 		return AutoCompleteNoChange, err
 	}
-	// The standings that bound a chusen's tied group, read only for a drawn
-	// representative bout. The re-check under the lock below reuses them: it
-	// cannot compute its own there, and the ranks it judges are the fresh part.
-	lots, err := lotsStandings(matches, func() (map[string][]state.PlayerStanding, error) {
+	// The standings are computed at most once in this scan, and only when a
+	// drawn representative bout (the lots) or a team's cycle check needs them.
+	// The re-check under the lock below reads its own, on the matches it holds.
+	standings := sync.OnceValues(func() (map[string][]state.PlayerStanding, error) {
 		return e.CalculatePoolStandings(compID)
 	})
+	lots, err := lotsStandings(matches, standings)
 	if err != nil {
 		return AutoCompleteNoChange, err
 	}
@@ -524,11 +543,11 @@ func (e *Engine) maybeAutoCompletePoolsRunning(compID string, comp *state.Compet
 	// arbitrary order we block auto-completion until a decisive result exists.
 	// Any pre-existing pool-rank overrides are still honoured by dhCycleExists.
 	if isTeamComp && hasCompleteDH {
-		standings, standErr := e.CalculatePoolStandings(compID)
+		teamStandings, standErr := standings()
 		if standErr != nil {
 			return AutoCompleteNoChange, standErr
 		}
-		if dhCycleExists(standings, matches, poolRanks) {
+		if dhCycleExists(teamStandings, matches, poolRanks) {
 			return AutoCompleteNoChange, nil
 		}
 	}
@@ -538,22 +557,18 @@ func (e *Engine) maybeAutoCompletePoolsRunning(compID string, comp *state.Compet
 	// Only league reaches here (mixed short-circuited at the top to
 	// advanceMixedPools; other formats are no-ops). League flips to
 	// CompStatusComplete once every pool match is done.
-	changed, err := e.store.UpdateCompetitionChanged(compID, func(comp *state.Competition) (*state.Competition, error) {
+	changed, err := e.store.UpdateCompetitionChangedTx(compID, func(tx state.StoreTx, comp *state.Competition) (*state.Competition, error) {
 		if comp == nil || comp.Format != state.CompFormatLeague || comp.Status != state.CompStatusPools {
 			return nil, nil
 		}
-		// Re-check under the lock, on the recorded ranks as they stand now (a
-		// chusen recorded or changed since the scan above would otherwise be
-		// judged against the old ones).
-		freshMatches, ferr := e.store.LoadPoolMatchesLocked(compID)
+		// Re-check under the lock, on the matches, recorded ranks and standings
+		// as they stand now (a correction or a chusen landing since the scan
+		// above would otherwise be judged against the old ones).
+		settled, ferr := e.poolMatchesSettledNow(tx, compID)
 		if ferr != nil {
 			return nil, ferr
 		}
-		freshRanks, ferr := LoadPoolRanksJudging(compID, freshMatches, e.store.LoadPoolRanks)
-		if ferr != nil {
-			return nil, ferr
-		}
-		if !PoolMatchesSettled(freshMatches, freshRanks, lots) {
+		if !settled {
 			return nil, nil
 		}
 		comp.Status = state.CompStatusComplete

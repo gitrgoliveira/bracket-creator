@@ -1947,6 +1947,7 @@ type poolStandingsLoader interface {
 	LoadCompetition(compID string) (*state.Competition, error)
 	LoadPools(compID string) ([]helper.Pool, error)
 	LoadPoolMatches(compID string) ([]state.MatchResult, error)
+	LoadPoolRanks(compID string) (map[string]map[string]int, error)
 }
 
 // computeStandings is the non-tx standings core. It delegates to the shared

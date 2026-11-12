@@ -853,6 +853,57 @@ func TestMaybeAutoCompletePools_DrawnDHRuledByChusenTransitions(t *testing.T) {
 	assert.Equal(t, AutoCompleteTransitioned, outcome, "the recorded chusen settles the drawn daihyosen round")
 }
 
+// TestPoolMatchesSettledNow_JudgesTheWholeTiedGroup: the check a league's
+// completion makes under the competition's lock reads the standings it judges
+// the lots on from the transaction, not from the scan before the lock. A drawn
+// daihyosen round over three level teams is settled only once the chusen has
+// ranked all three, however many of them the drawn bouts name.
+func TestPoolMatchesSettledNow_JudgesTheWholeTiedGroup(t *testing.T) {
+	const compID = "settled-now-whole-group"
+	eng, store := setupTeamPoolComp(t, compID, true)
+	_, err := eng.InjectPoolDaihyosenMatches(compID)
+	require.NoError(t, err)
+
+	all, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	for i := range all {
+		all[i].Status = state.MatchStatusCompleted
+		if IsPoolDaihyosenMatchID(all[i].ID) {
+			all[i].Winner, all[i].WinnerID = "", "" // hikiwake
+		}
+	}
+	require.NoError(t, store.SavePoolMatches(compID, all))
+	eng.standingsCache.Delete(compID)
+	eng.standingsFlight.Delete(compID)
+
+	pools, err := store.LoadPools(compID)
+	require.NoError(t, err)
+	require.Len(t, pools, 1)
+	require.Len(t, pools[0].Players, 3)
+	rank := func(n int) {
+		ranks := make(map[string]int, n)
+		for i, p := range pools[0].Players[:n] {
+			ranks[helper.CompetitorKey(p.ID, p.Name, p.Dojo)] = i + 1
+		}
+		require.NoError(t, store.SaveOverrides(compID, &state.Overrides{PoolRanks: map[string]map[string]int{"Pool A": ranks}}))
+	}
+	settledNow := func() bool {
+		var settled bool
+		require.NoError(t, store.WithTransaction(compID, func(tx state.StoreTx) error {
+			var serr error
+			settled, serr = eng.poolMatchesSettledNow(tx, compID)
+			return serr
+		}))
+		return settled
+	}
+
+	assert.False(t, settledNow(), "no chusen recorded: the drawn daihyosen round settles nothing")
+	rank(2)
+	assert.False(t, settledNow(), "two of the three level teams ranked: the third still has no place")
+	rank(3)
+	assert.True(t, settledNow(), "all three ranked: the lots decided every place")
+}
+
 // TestDHStandingsApplied verifies that a completed pool-DH match result is
 // applied as a secondary sort to break a tie in team pool standings.
 func TestDHStandingsApplied(t *testing.T) {

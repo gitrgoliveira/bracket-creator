@@ -6,6 +6,7 @@ import (
 	"log"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
@@ -109,11 +110,14 @@ func (e *Engine) poolCompletion(loader poolStandingsLoader, compID string, comp 
 
 	// Recorded chusen ranks settle a drawn representative bout (poolMatchSettled),
 	// and the cycle check below reads the same ranks; read only when one exists.
-	poolRanks, err := LoadPoolRanksJudging(compID, matches, e.store.LoadPoolRanks)
+	poolRanks, err := LoadPoolRanksJudging(compID, matches, loader.LoadPoolRanks)
 	if err != nil {
 		return nil, err
 	}
 
+	// The lots and the team cycle check below both read the standings: compute
+	// them once.
+	standings = sync.OnceValues(standings)
 	lots, err := lotsStandings(matches, standings)
 	if err != nil {
 		return nil, err

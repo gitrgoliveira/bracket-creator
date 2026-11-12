@@ -175,8 +175,9 @@ describe('the court console moves on at once on a pending finish (X3)', () => {
     const onEditScore = vi.fn(async (_c, mid) => pending(`K:${mid}`));
     renderPage(onEditScore);
     expect(shownMatch()).toBe('Pool A-1');
-    await act(async () => { await captured.props.onSubmit(finishPatch); });
+    await act(async () => { await captured.props.onSubmitAndNext(finishPatch); });
     expect(shownMatch()).toBe(null);
+    expect(onEditScore, 'the finish starts nothing after it').toHaveBeenCalledTimes(1);
   });
 
   it('a decision on a POOL match shows the started match at once', async () => {
@@ -194,7 +195,7 @@ describe('the court console moves on at once on a pending finish (X3)', () => {
     const settled = new Promise((resolve) => { refuse = resolve; });
     const onEditScore = vi.fn(async (_c, mid) => pending(`K:${mid}`, settled));
     renderPage(onEditScore);
-    await act(async () => { await captured.props.onSubmit(finishPatch); });
+    await act(async () => { await captured.props.onSubmitAndNext(finishPatch); });
     expect(shownMatch()).toBe(null);
     await act(async () => { refuse({ applied: false, reason: 'superseded', heldGroups: ['result'] }); await settled; });
     expect(shownMatch()).toBe('Pool A-1');
@@ -210,7 +211,7 @@ describe('a finish or a decision the outbox holds shows after the console is mou
     tournamentMatchesSpy.mockImplementation(() => [running]);
     const onEditScore = vi.fn(async (_c, mid) => pending(`K:${mid}`));
     const first = renderPage(onEditScore);
-    await act(async () => { await captured.props.onSubmit(finishPatch); });
+    await act(async () => { await captured.props.onSubmitAndNext(finishPatch); });
     expect(shownMatch()).toBe(null);
     first.unmount();
     renderPage(onEditScore);
@@ -308,7 +309,7 @@ describe('a finish stays read as finished until a later change, not this device\
     const settled = new Promise((resolve) => { answer = resolve; });
     const onEditScore = vi.fn(async (_c, mid) => pending(`K:${mid}`, settled));
     const utils = renderPage(onEditScore);
-    await act(async () => { await captured.props.onSubmit(finishPatch); });
+    await act(async () => { await captured.props.onSubmitAndNext(finishPatch); });
     expect(shownMatch()).toBe(null);
     // The feed still shows the match running, now under another stamp, and the
     // finish's answer comes carrying the stamp the server gave the finish.

@@ -94,61 +94,27 @@ describe('AdminPools: a tie-break bout saved as a draw', () => {
     expect(screen.getByText('A daihyosen was saved as a draw')).toBeTruthy();
   });
 
-  // A drawn daihyosen leads to a chusen by design: once the pool holds a chusen
-  // tie (waiting or recorded) the chusen panel speaks for it, and the notice
-  // that says the teams are still tied stays away.
+  // A drawn daihyosen is never settled, so a chusen (waiting or recorded) does
+  // not complete the pool: the notice and its Fight it again stay, the operator's
+  // only way out, and they do not wait for the chusen answer either.
   describe.each([
     ['a chusen waiting', { candidates: [{ poolName: 'Pool A', teamNames: ['Bea', 'Cal'], teams: [{ id: 'a', name: 'Bea' }, { id: 'b', name: 'Cal' }], minPosition: 1 }], recorded: [] }],
     ['a chusen recorded', { candidates: [], recorded: [{ poolName: 'Pool A', teamNames: ['Bea', 'Cal'], teams: [{ id: 'a', name: 'Bea' }, { id: 'b', name: 'Cal' }], ranks: [1, 2], minPosition: 1 }] }],
+    ['the chusen answer outstanding', new Promise(() => {})],
   ])('on a team competition with %s', (_name, chusen) => {
     const team = { kind: 'team', teamSize: 3 };
-    const api = { chusenCandidates: vi.fn().mockResolvedValue(chusen) };
+    const api = { chusenCandidates: vi.fn().mockReturnValue(chusen instanceof Promise ? chusen : Promise.resolve(chusen)) };
 
-    it('shows no notice for the drawn daihyosen', async () => {
+    it('still shows the notice for the drawn daihyosen', async () => {
       await mount([bout('Pool A-DH-0')], 'mixed', team, api);
       await waitFor(() => expect(window.API.chusenCandidates).toHaveBeenCalled());
-      await waitFor(() => expect(screen.queryByTestId('drawn-tiebreak-notice')).toBeNull());
+      expect(screen.getByText('A daihyosen was saved as a draw')).toBeTruthy();
     });
 
     it('still shows the notice for a drawn tie-break bout', async () => {
       await mount([bout('Pool A-TB-0')], 'mixed', team, api);
       await waitFor(() => expect(window.API.chusenCandidates).toHaveBeenCalled());
       expect(screen.getByTestId('drawn-tiebreak-notice')).toBeTruthy();
-    });
-  });
-
-  // Until the chusen answer arrives the page cannot tell a stuck daihyosen from
-  // one a chusen rules, so it says nothing, then names the stuck one.
-  describe('on a team competition while the chusen answer is outstanding', () => {
-    const team = { kind: 'team', teamSize: 3 };
-    const pending = () => {
-      let settle;
-      const promise = new Promise((resolve, reject) => { settle = { resolve, reject }; });
-      return { promise, settle };
-    };
-
-    it('holds the daihyosen notice, not the tie-break notice, then shows it when no chusen rules the pool', async () => {
-      const { promise, settle } = pending();
-      await mount([bout('Pool A-DH-0'), bout('Pool A-TB-0')], 'mixed', team, { chusenCandidates: vi.fn().mockReturnValue(promise) });
-      expect(screen.queryByText('A daihyosen was saved as a draw')).toBeNull();
-      expect(screen.getByText('A tie-break bout was saved as a draw')).toBeTruthy();
-      await act(async () => { settle.resolve({ candidates: [], recorded: [] }); });
-      expect(screen.getByText('A daihyosen was saved as a draw')).toBeTruthy();
-    });
-
-    it('never shows the daihyosen notice when the answer names its pool', async () => {
-      const { promise, settle } = pending();
-      await mount([bout('Pool A-DH-0')], 'mixed', team, { chusenCandidates: vi.fn().mockReturnValue(promise) });
-      await act(async () => { settle.resolve({ candidates: [{ poolName: 'Pool A', teamNames: ['Bea', 'Cal'], teams: [], minPosition: 1 }], recorded: [] }); });
-      expect(screen.queryByTestId('drawn-tiebreak-notice')).toBeNull();
-    });
-
-    it('shows the daihyosen notice once the fetch has failed, since nothing more will arrive', async () => {
-      const { promise, settle } = pending();
-      await mount([bout('Pool A-DH-0')], 'mixed', team, { chusenCandidates: vi.fn().mockReturnValue(promise) });
-      expect(screen.queryByTestId('drawn-tiebreak-notice')).toBeNull();
-      await act(async () => { settle.reject(new Error('offline')); });
-      expect(screen.getByText('A daihyosen was saved as a draw')).toBeTruthy();
     });
   });
 

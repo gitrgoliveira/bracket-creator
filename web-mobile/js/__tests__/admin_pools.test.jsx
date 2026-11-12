@@ -41,17 +41,10 @@ describe('drawnSupplementaryBouts', () => {
     });
   });
 
-  it('names no daihyosen while the chusen answer is not known (null), but still names a tie-break bout', () => {
+  it('names a drawn daihyosen of any pool: a chusen does not settle it', () => {
     const dh = m('Pool A-DH-0');
-    const tb = m('Pool A-TB-0');
-    expect(drawnSupplementaryBouts([dh, tb], null)).toEqual([tb]);
-  });
-
-  it('leaves out a daihyosen of a pool a chusen rules, but not its tie-break bout or another pool', () => {
-    const dh = m('Pool A-DH-0');
-    const tb = m('Pool A-TB-0');
     const other = m('Pool B-DH-0');
-    expect(drawnSupplementaryBouts([dh, tb, other], ['Pool A'])).toEqual([tb, other]);
+    expect(drawnSupplementaryBouts([dh, other])).toEqual([dh, other]);
   });
 });
 

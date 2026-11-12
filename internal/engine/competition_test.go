@@ -41,6 +41,33 @@ func TestCourtsEqual(t *testing.T) {
 	}
 }
 
+// TestPoolMatchesSettled pins the rule a league is completed by: every row
+// completed, and a supplementary bout (tie-break or representative) also
+// naming a winner.
+func TestPoolMatchesSettled(t *testing.T) {
+	done := func(id, winner string) state.MatchResult {
+		return state.MatchResult{ID: id, Status: state.MatchStatusCompleted, Winner: winner}
+	}
+	tests := []struct {
+		name    string
+		matches []state.MatchResult
+		want    bool
+	}{
+		{"no rows", nil, true},
+		{"drawn regular pool match", []state.MatchResult{done("Pool A-1", "")}, true},
+		{"unsettled regular match", []state.MatchResult{done("Pool A-1", "x"), {ID: "Pool A-2", Status: state.MatchStatusScheduled}}, false},
+		{"unsettled supplementary bout", []state.MatchResult{{ID: "Pool A-TB-1", Status: state.MatchStatusScheduled}}, false},
+		{"drawn supplementary bout", []state.MatchResult{done("Pool A-1", "x"), done("Pool A-TB-1", "")}, false},
+		{"drawn representative bout", []state.MatchResult{done("Pool A-DH-1", "")}, false},
+		{"settled supplementary bout", []state.MatchResult{done("Pool A-1", "x"), done("Pool A-TB-1", "y")}, true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, PoolMatchesSettled(tc.matches))
+		})
+	}
+}
+
 // TestMaybeAutoCompletePools_AllComplete verifies that calling
 // MaybeAutoCompletePools on a league competition whose every match is
 // completed transitions Status to "completed" and returns AutoCompleteTransitioned.

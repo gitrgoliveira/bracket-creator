@@ -11,10 +11,6 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
-// courtsEqual returns true when two court-label slices are
-// element-wise equal (used by StartCompetition's mid-pipeline
-// settings-drift check). nil and empty slices are treated as
-// equivalent, both mean "no courts" from the config's POV.
 // PoolMatchesSettled reports whether a competition's pool-matches.csv rows
 // (pool, league and Swiss matches alike) are all played: every match is
 // completed, and a supplementary tie-break or representative bout also names
@@ -58,6 +54,10 @@ func SwissRoundsToDraw(comp *state.Competition) int {
 	return comp.SwissRounds - comp.SwissCurrentRound
 }
 
+// courtsEqual returns true when two court-label slices are
+// element-wise equal (used by StartCompetition's mid-pipeline
+// settings-drift check). nil and empty slices are treated as
+// equivalent, both mean "no courts" from the config's POV.
 func courtsEqual(a, b []string) bool {
 	if len(a) != len(b) {
 		return false

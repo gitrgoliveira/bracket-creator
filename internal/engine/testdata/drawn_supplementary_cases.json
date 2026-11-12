@@ -10,6 +10,9 @@
     "chusenCases is the second rule: a drawn representative bout whose two teams",
     "a recorded chusen has ranked is settled by the lots (daihyosenRuledByChusen",
     "in Go; the JS reads the ranked ids off the standings rows marked isOverridden).",
+    "The lots must cover the bout's whole tied group: every team the pool's",
+    "representative bouts link to its two sides (others lists the pool's other",
+    "representative bouts, each with its own id) has to be ranked.",
     "stuck is what the Pools tab's notice names: drawn and not ruled by the lots."
   ],
   "chusenCases": [
@@ -19,6 +22,10 @@
     {"name": "both teams ranked in another pool", "id": "Pool A-DH-0", "winner": "", "sideAId": "a", "sideBId": "b", "rankedPool": "Pool B", "ranked": ["a", "b"], "ruled": false, "stuck": true},
     {"name": "a drawn tie-break bout is not a representative bout", "id": "Pool A-TB-0", "winner": "", "sideAId": "a", "sideBId": "b", "rankedPool": "Pool A", "ranked": ["a", "b"], "ruled": false, "stuck": true},
     {"name": "a representative bout with a winner needs no lots", "id": "Pool A-DH-0", "winner": "Bea", "sideAId": "a", "sideBId": "b", "rankedPool": "Pool A", "ranked": ["a", "b"], "ruled": false, "stuck": false},
+    {"name": "a third team the group's other bouts link in is not ranked yet", "id": "Pool A-DH-0", "winner": "", "sideAId": "a", "sideBId": "b", "others": [{"id": "Pool A-DH-1", "sideAId": "b", "sideBId": "c"}], "rankedPool": "Pool A", "ranked": ["a", "b"], "ruled": false, "stuck": true},
+    {"name": "the whole linked group is ranked", "id": "Pool A-DH-0", "winner": "", "sideAId": "a", "sideBId": "b", "others": [{"id": "Pool A-DH-1", "sideAId": "b", "sideBId": "c"}, {"id": "Pool A-DH-2", "sideAId": "a", "sideBId": "c"}], "rankedPool": "Pool A", "ranked": ["a", "b", "c"], "ruled": true, "stuck": false},
+    {"name": "a separate tie in the same pool does not hold these lots", "id": "Pool A-DH-0", "winner": "", "sideAId": "a", "sideBId": "b", "others": [{"id": "Pool A-DH-1", "sideAId": "c", "sideBId": "d"}], "rankedPool": "Pool A", "ranked": ["a", "b"], "ruled": true, "stuck": false},
+    {"name": "another pool's bouts do not link teams in", "id": "Pool A-DH-0", "winner": "", "sideAId": "a", "sideBId": "b", "others": [{"id": "Pool B-DH-0", "sideAId": "b", "sideBId": "c"}], "rankedPool": "Pool A", "ranked": ["a", "b"], "ruled": true, "stuck": false},
     {"name": "sides without ids resolve to nothing", "id": "Pool A-DH-0", "winner": "", "sideAId": "", "sideBId": "", "rankedPool": "Pool A", "ranked": ["a", "b"], "ruled": false, "stuck": true}
   ],
   "cases": [

@@ -2892,21 +2892,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		// tx.LoadPoolMatches skips the first-read legacy conversion the
 		// store's own read runs; run it first, as AdvanceSwissRound does.
 		store.EnsureLegacyUpgraded(id)
-		// The recorded chusen ranks settle a drawn representative bout
-		// (engine.PoolMatchesSettled). Read before the transaction: the store's
-		// own read takes the lock the transaction holds. Fails closed, like the
-		// matches below.
-		overrides, oerr := store.LoadOverrides(id)
-		if oerr != nil {
-			if !respondIfCorruptOverrides(c, oerr) {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load overrides"})
-			}
-			return
-		}
-		var poolRanks map[string]map[string]int
-		if overrides != nil {
-			poolRanks = overrides.PoolRanks
-		}
+		var ranksFault error
 		txErr := store.WithTransaction(id, func(tx state.StoreTx) error {
 			current, lerr := tx.LoadCompetition(id)
 			if lerr != nil {
@@ -2941,6 +2927,14 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 					matchesFault = merr
 					return nil
 				}
+				// The recorded chusen ranks settle a drawn representative
+				// bout (engine.PoolMatchesSettled); read here, beside the
+				// matches the lock holds. Fails closed, like the matches.
+				poolRanks, rerr := tx.LoadPoolRanks(id)
+				if rerr != nil {
+					ranksFault = rerr
+					return nil
+				}
 				if !engine.PoolMatchesSettled(matches, poolRanks) {
 					statusErr = fmt.Errorf("all matches must be completed before this competition can be finished")
 					return nil
@@ -2964,6 +2958,12 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		}
 		if matchesFault != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load matches"})
+			return
+		}
+		if ranksFault != nil {
+			if !respondIfCorruptOverrides(c, ranksFault) {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load overrides"})
+			}
 			return
 		}
 		if statusErr != nil {
@@ -3166,12 +3166,14 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			hub.Broadcast(EventTournamentUpdated, nil)
 		}
 		broadcastReopenedDownstream(hub, store, id, reopened)
-		if changed && comp.Format == state.CompFormatMixed {
+		if changed && (comp.Format == state.CompFormatMixed || comp.Format == state.CompFormatLeague) {
 			// A new order can complete a pool (a chusen settles its last
-			// tie): seating a pool's slots for the first time is the
-			// auto-complete's job, which otherwise waited for the next score
-			// write. The full door, not the after-write one: no match was
-			// written, but the pool's standings moved.
+			// tie, or the drawn daihyosen that only the lots can settle):
+			// seating a pool's slots for the first time, or finishing a
+			// league, is the auto-complete's job, which otherwise waited for
+			// the next score write. The full door, not the after-write one: no
+			// match was written, but the pool's standings moved. A league the
+			// order leaves unsettled is a no-op.
 			tryAutoCompletePools(c, eng, hub, id)
 		}
 		c.JSON(http.StatusOK, gin.H{"reopenedMatches": blockedMatchesPayload(reopened)})

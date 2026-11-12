@@ -66,12 +66,18 @@ func groupSettledByChusen(group []state.PlayerStanding, allMatches []state.Match
 }
 
 // daihyosenRuledByChusen reports a drawn pool representative ("-DH-") bout
-// whose two teams a chusen has ranked: the operator drew lots over the group the
-// bout could not separate, so the draw needs no rematch and the pool may
-// complete (poolMatchSettled). poolRanks is state.Overrides.PoolRanks (nil when
-// none); each side is read by participant id only, like chusenRecorded. Only
-// a chusen writes a pool rank by hand, so a ranked pair is a chusen's group.
-func daihyosenRuledByChusen(m *state.MatchResult, poolRanks map[string]map[string]int) bool {
+// whose tied group a chusen has ranked: the operator drew lots over the group
+// the bout could not separate, so the draw needs no rematch and the pool may
+// complete (poolMatchSettled). The group is every team the pool's
+// representative bouts link to the bout's two sides (a round of them is fought
+// within one tied group, so two separate ties in a pool stay apart), and the
+// lots rule the bout only once every one of those teams is ranked, like
+// chusenRecorded: a chusen still being entered, or one over a smaller group,
+// settles nothing. poolMatches is the competition's pool rows, poolRanks is
+// state.Overrides.PoolRanks (nil when none); teams are read by participant id
+// only. Only a chusen writes a pool rank by hand, so a fully ranked group is a
+// chusen's.
+func daihyosenRuledByChusen(m *state.MatchResult, poolMatches []state.MatchResult, poolRanks map[string]map[string]int) bool {
 	if !IsPoolDaihyosenMatchID(m.ID) || !drawnSupplementaryBout(m) {
 		return false
 	}
@@ -79,9 +85,27 @@ func daihyosenRuledByChusen(m *state.MatchResult, poolRanks map[string]map[strin
 	if !ok {
 		return false
 	}
-	_, aRanked := lookupPoolRankOverride(poolRanks[poolName], m.SideAID)
-	_, bRanked := lookupPoolRankOverride(poolRanks[poolName], m.SideBID)
-	return aRanked && bRanked
+	group := map[string]bool{m.SideAID: true, m.SideBID: true}
+	for grew := true; grew; {
+		grew = false
+		for i := range poolMatches {
+			o := &poolMatches[i]
+			if !IsPoolDaihyosenMatchID(o.ID) || group[o.SideAID] == group[o.SideBID] {
+				continue
+			}
+			if name, ok := poolNameFromMatchID(o.ID); !ok || name != poolName {
+				continue
+			}
+			group[o.SideAID], group[o.SideBID] = true, true
+			grew = true
+		}
+	}
+	for id := range group {
+		if _, ranked := lookupPoolRankOverride(poolRanks[poolName], id); !ranked {
+			return false
+		}
+	}
+	return true
 }
 
 // chusenRecorded reports whether every member of a tied group carries a
@@ -209,13 +233,9 @@ func (e *Engine) ChusenStatus(compID string) (ChusenReport, error) {
 	if err != nil {
 		return report, err
 	}
-	overridesObj, err := e.store.LoadOverrides(compID)
+	poolRanks, err := e.store.LoadPoolRanks(compID)
 	if err != nil {
 		return report, err
-	}
-	var poolRanks map[string]map[string]int
-	if overridesObj != nil {
-		poolRanks = overridesObj.PoolRanks
 	}
 	pools, err := e.store.LoadPools(compID)
 	if err != nil {

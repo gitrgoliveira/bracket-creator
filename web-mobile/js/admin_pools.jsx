@@ -145,24 +145,38 @@ function enrichPoolMatchWithComp(m, comp, poolNameOverride) {
 // from the wire fields; both are pinned to the one table
 // internal/engine/testdata/drawn_supplementary_cases.json.
 //
-// A drawn daihyosen whose two teams a chusen has ranked is not stuck: the lots
+// A drawn daihyosen whose tied group a chusen has ranked is not stuck: the lots
 // decided that place and the engine's poolMatchSettled counts it settled
-// (daihyosenRuledByChusen), so no notice names it. The ranked teams are the
-// standings rows with isOverridden, which the server sets from the same pool
-// rank overrides; the pool is judged by name and the teams by id only. The
-// second half of the same table (chusenCases) pins both copies.
+// (daihyosenRuledByChusen), so no notice names it. The group is every team the
+// pool's daihyosen bouts link to the bout's two sides, and all of them must be
+// ranked. The ranked teams are the standings rows with isOverridden, which the
+// server sets from the same pool rank overrides; the pool is judged by name and
+// the teams by id only. The second half of the same table (chusenCases) pins
+// both copies.
 //
 // Exported for vitest at __tests__/admin_pools.test.jsx.
 function drawnSupplementaryBouts(poolMatches, standings) {
+  const rows = poolMatches || [];
   const ranked = (poolName) => new Set(
     ((standings || {})[poolName] || []).filter(s => s.isOverridden && s.player && s.player.id).map(s => s.player.id)
   );
   const ruledByChusen = (m) => {
     if (!isPoolDaihyosenBout(m.id) || !m.sideAId || !m.sideBId) return false;
-    const ids = ranked(poolNameOf(m.id));
-    return ids.has(m.sideAId) && ids.has(m.sideBId);
+    const pool = poolNameOf(m.id);
+    const linking = rows.filter(o => isPoolDaihyosenBout(o.id) && poolNameOf(o.id) === pool);
+    const group = new Set([m.sideAId, m.sideBId]);
+    for (let grew = true; grew;) {
+      grew = false;
+      for (const o of linking) {
+        if (group.has(o.sideAId) === group.has(o.sideBId)) continue;
+        group.add(o.sideAId).add(o.sideBId);
+        grew = true;
+      }
+    }
+    const ids = ranked(pool);
+    return [...group].every(id => ids.has(id));
   };
-  return (poolMatches || []).filter(m => isSupplementaryBout(m.id) && m.status === "completed" && !nameOf(m.winner) && !ruledByChusen(m));
+  return rows.filter(m => isSupplementaryBout(m.id) && m.status === "completed" && !nameOf(m.winner) && !ruledByChusen(m));
 }
 
 // DrawnTieBreakNotice: names one such bout and the two ways on, fight it again

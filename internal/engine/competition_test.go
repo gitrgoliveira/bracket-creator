@@ -89,7 +89,12 @@ func TestDaihyosenRuledByChusen_SharedCases(t *testing.T) {
 			SideBID    string   `json:"sideBId"`
 			RankedPool string   `json:"rankedPool"`
 			Ranked     []string `json:"ranked"`
-			Ruled      bool     `json:"ruled"`
+			Others     []struct {
+				ID      string `json:"id"`
+				SideAID string `json:"sideAId"`
+				SideBID string `json:"sideBId"`
+			} `json:"others"`
+			Ruled bool `json:"ruled"`
 		} `json:"chusenCases"`
 	}
 	require.NoError(t, json.Unmarshal(raw, &table))
@@ -101,7 +106,11 @@ func TestDaihyosenRuledByChusen_SharedCases(t *testing.T) {
 				ranks[helper.CompetitorKey(id, "", "")] = i + 1
 			}
 			m := state.MatchResult{ID: tc.ID, Status: state.MatchStatusCompleted, Winner: tc.Winner, SideAID: tc.SideAID, SideBID: tc.SideBID}
-			assert.Equal(t, tc.Ruled, daihyosenRuledByChusen(&m, map[string]map[string]int{tc.RankedPool: ranks}))
+			pool := []state.MatchResult{m}
+			for _, o := range tc.Others {
+				pool = append(pool, state.MatchResult{ID: o.ID, Status: state.MatchStatusCompleted, SideAID: o.SideAID, SideBID: o.SideBID})
+			}
+			assert.Equal(t, tc.Ruled, daihyosenRuledByChusen(&m, pool, map[string]map[string]int{tc.RankedPool: ranks}))
 		})
 	}
 }

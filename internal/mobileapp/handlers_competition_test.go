@@ -4772,6 +4772,14 @@ func TestChusenCandidates_ReportsTheRecordedChusen(t *testing.T) {
 		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	}
 
+	// The lots settle the league's last open item, so it finished by itself; a
+	// reopen puts it back in match play, where the chusen can be changed.
+	comp, err := store.LoadCompetition(compID)
+	require.NoError(t, err)
+	require.Equal(t, state.CompStatusComplete, comp.Status)
+	comp.Status = state.CompStatusPools
+	require.NoError(t, store.SaveCompetition(comp))
+
 	cands, recorded = get()
 	assert.Empty(t, cands, "the recorded chusen clears the candidate")
 	require.Len(t, recorded, 1, "the tie the chusen settled is listed as recorded")
@@ -4786,6 +4794,45 @@ func TestChusenCandidates_ReportsTheRecordedChusen(t *testing.T) {
 	}
 	assert.Equal(t, []string{"gamma-id", "alpha-id", "beta-id"}, ids, "teams arrive in the recorded order")
 	assert.Equal(t, []any{float64(1), float64(2), float64(3)}, group["ranks"])
+}
+
+// TestOverrideRank_ChusenCompletesALeagueWhoseDaihyosenWasDrawn: a team league
+// whose last open item is a drawn daihyosen round finishes by itself once the
+// operator records the chusen (the lots settle the drawn bouts), without a
+// manual Complete. Until every team is ranked the league stays in pools.
+func TestOverrideRank_ChusenCompletesALeagueWhoseDaihyosenWasDrawn(t *testing.T) {
+	r, store, eng, _, _ := setupTestRouter(t)
+	compID := "chusen-league-drawn-dh"
+	seedChusenCycle(t, store, eng, compID)
+
+	all, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	for i := range all {
+		if engine.IsPoolDaihyosenMatchID(all[i].ID) {
+			all[i].Winner, all[i].WinnerID = "", "" // every daihyosen bout drawn
+		}
+	}
+	require.NoError(t, store.SavePoolMatches(compID, all))
+
+	status := func() state.CompetitionStatus {
+		t.Helper()
+		comp, lerr := store.LoadCompetition(compID)
+		require.NoError(t, lerr)
+		return comp.Status
+	}
+	for i, id := range []string{"gamma-id", "alpha-id", "beta-id"} {
+		require.Equal(t, state.CompStatusPools, status(), "the league holds open until every team is ranked")
+		w := sendJSON(t, r, http.MethodPut, "/api/competitions/"+compID+"/pools/Pool%20A/override-rank",
+			map[string]any{"playerId": id, "rank": i + 1})
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		if i == 1 {
+			// Two of the three teams the daihyosen round links are ranked: the
+			// lots do not yet cover the group, so a manual Complete is refused too.
+			w = sendJSON(t, r, http.MethodPost, "/api/competitions/"+compID+"/complete", nil)
+			require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+		}
+	}
+	assert.Equal(t, state.CompStatusComplete, status(), "the recorded chusen settles the drawn daihyosen round and finishes the league")
 }
 
 func TestChusenCandidates_IncludesTeamIdentity(t *testing.T) {

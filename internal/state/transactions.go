@@ -131,6 +131,12 @@ type StoreTx interface {
 	// LoadSquads is Store.LoadSquads under the held lock, read-your-own-writes
 	// over a team-members file this transaction already staged.
 	LoadSquads(compID string) (map[string][]domain.TeamMember, error)
+	// LoadPoolRanks is Store.LoadPoolRanks read inside the transaction, so a
+	// decision judged on the matches the lock holds reads the recorded ranks
+	// beside them. Override writes still serialise on the store-wide lock, not
+	// the competition's, so a chusen can land between the two reads; the window
+	// is the gap between them, not the whole request.
+	LoadPoolRanks(compID string) (map[string]map[string]int, error)
 
 	// UpdatePoolMatchByID is the tx-aware twin of
 	// Store.UpdatePoolMatchByID. Same semantics, same return values; the
@@ -836,6 +842,17 @@ func (s *Store) announceKeptLineups(compID string, kept []keptLineup) {
 	for _, k := range kept {
 		(*fn)(compID, k.teamID, k.matchID)
 	}
+}
+
+func (t *storeTx) LoadPoolRanks(compID string) (map[string]map[string]int, error) {
+	if err := t.checkCompID(compID); err != nil {
+		return nil, err
+	}
+	// overrides.json is never staged through the WAL (modifyOverridesChanged
+	// writes it directly under s.mu), so there is no pending copy to prefer.
+	// s.mu is taken after the competition lock this transaction holds, the
+	// order the store keeps everywhere (see overrides.go).
+	return t.store.LoadPoolRanks(compID)
 }
 
 func (t *storeTx) LoadSquads(compID string) (map[string][]domain.TeamMember, error) {

@@ -61,8 +61,11 @@ describe('drawnSupplementaryBouts', () => {
 
     it.each(table.chusenCases.map(c => [c.name, c]))('%s', (_name, c) => {
       const row = m(c.id, { winner: c.winner, sideAId: c.sideAId, sideBId: c.sideBId });
+      // The pool's other representative bouts only link teams in; they carry a
+      // winner here so the notice list holds the bout under test alone.
+      const others = (c.others || []).map(o => m(o.id, { winner: 'Bea', sideAId: o.sideAId, sideBId: o.sideBId }));
       const standings = { [c.rankedPool]: c.ranked.map(id => ({ player: { id }, isOverridden: true })) };
-      expect(drawnSupplementaryBouts([row], standings)).toEqual(c.stuck ? [row] : []);
+      expect(drawnSupplementaryBouts([row, ...others], standings)).toEqual(c.stuck ? [row] : []);
     });
   });
 });

@@ -68,17 +68,19 @@ func groupSettledByChusen(group []state.PlayerStanding, allMatches []state.Match
 // daihyosenRuledByChusen reports a drawn pool representative ("-DH-") bout
 // whose tied group a chusen has ranked: the operator drew lots over the group
 // the bout could not separate, so the draw needs no rematch and the pool may
-// complete (poolMatchSettled). The group is every team the pool's
-// representative bouts link to the bout's two sides (a round of them is fought
-// within one tied group, so two separate ties in a pool stay apart), and the
-// lots rule the bout only once every one of those teams is ranked, like
-// chusenRecorded: a chusen still being entered, or one over a smaller group,
-// settles nothing. poolMatches is the competition's pool rows, poolRanks is
-// state.Overrides.PoolRanks (nil when none); teams are read by participant id
-// only. Any full ranking of the group, written through the chusen door
-// (OverridePoolRanks), settles it: that door is the only way a pool rank is
-// recorded, and it does not ask whether the group was tied.
-func daihyosenRuledByChusen(m *state.MatchResult, poolMatches []state.MatchResult, poolRanks map[string]map[string]int) bool {
+// complete (poolMatchSettled). The group is the tied group the standings hold
+// the bout's two sides in (lotsGroup: two separate ties in a pool stay apart),
+// and the lots rule the bout only once every one of those teams is ranked,
+// like chusenRecorded: a chusen still being entered, or one over a smaller
+// group, settles nothing. poolStandings is the competition's pool standings
+// (read only when a drawn representative bout exists, lotsStandings); a pool
+// they do not hold rules nothing, so the bout stays unsettled rather than
+// guessed at. poolRanks is state.Overrides.PoolRanks (nil when none); teams
+// are read by participant id only. Any full ranking of the group, written
+// through the chusen door (OverridePoolRanks), settles it: that door is the
+// only way a pool rank is recorded, and it does not ask whether the group was
+// tied.
+func daihyosenRuledByChusen(m *state.MatchResult, poolStandings map[string][]state.PlayerStanding, poolRanks map[string]map[string]int) bool {
 	if !IsPoolDaihyosenMatchID(m.ID) || !drawnSupplementaryBout(m) {
 		return false
 	}
@@ -86,27 +88,59 @@ func daihyosenRuledByChusen(m *state.MatchResult, poolMatches []state.MatchResul
 	if !ok {
 		return false
 	}
-	group := map[string]bool{m.SideAID: true, m.SideBID: true}
-	for grew := true; grew; {
-		grew = false
-		for i := range poolMatches {
-			o := &poolMatches[i]
-			if !IsPoolDaihyosenMatchID(o.ID) || group[o.SideAID] == group[o.SideBID] {
-				continue
-			}
-			if name, ok := poolNameFromMatchID(o.ID); !ok || name != poolName {
-				continue
-			}
-			group[o.SideAID], group[o.SideBID] = true, true
-			grew = true
-		}
+	standings := poolStandings[poolName]
+	if len(standings) == 0 {
+		return false
 	}
-	for id := range group {
+	for id := range lotsGroup(standings, m.SideAID, m.SideBID) {
 		if _, ranked := lookupPoolRankOverride(poolRanks[poolName], id); !ranked {
 			return false
 		}
 	}
 	return true
+}
+
+// lotsGroup is the set of teams a drawn representative bout's lots had to
+// rank: the standings group level on Points with both of its sides, the same
+// group ChusenStatus offers the operator (detectPoolTies), or just the two
+// sides when the standings no longer put them level. The pool's other
+// representative bouts are not asked: a result correction can shrink a tie
+// and leave the rows of its old, larger round behind, and those would pull a
+// team back in that the chusen panel no longer offers.
+func lotsGroup(standings []state.PlayerStanding, sideA, sideB string) map[string]bool {
+	group := map[string]bool{sideA: true, sideB: true}
+	var pointsA, pointsB int
+	var foundA, foundB bool
+	for _, s := range standings {
+		switch s.Player.ID {
+		case sideA:
+			pointsA, foundA = s.Points, true
+		case sideB:
+			pointsB, foundB = s.Points, true
+		}
+	}
+	if !foundA || !foundB || pointsA != pointsB {
+		return group
+	}
+	for _, s := range standings {
+		if s.Points == pointsA {
+			group[s.Player.ID] = true
+		}
+	}
+	return group
+}
+
+// lotsStandings reads the pool standings a drawn representative bout's lots
+// are judged against (daihyosenRuledByChusen), through load, and only when the
+// matches hold such a bout: with none, nothing consults them, so it returns
+// nil without computing any. Callers hand the result to poolMatchSettled.
+func lotsStandings(matches []state.MatchResult, load func() (map[string][]state.PlayerStanding, error)) (map[string][]state.PlayerStanding, error) {
+	for i := range matches {
+		if IsPoolDaihyosenMatchID(matches[i].ID) && drawnSupplementaryBout(&matches[i]) {
+			return load()
+		}
+	}
+	return nil, nil
 }
 
 // chusenRecorded reports whether every member of a tied group carries a

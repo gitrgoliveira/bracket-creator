@@ -148,33 +148,27 @@ function enrichPoolMatchWithComp(m, comp, poolNameOverride) {
 // A drawn daihyosen whose tied group a chusen has ranked is not stuck: the lots
 // decided that place and the engine's poolMatchSettled counts it settled
 // (daihyosenRuledByChusen), so no notice names it. The group is every team the
-// pool's daihyosen bouts link to the bout's two sides, and all of them must be
-// ranked. The ranked teams are the standings rows with isOverridden, which the
-// server sets from the same pool rank overrides; the pool is judged by name and
-// the teams by id only. The second half of the same table (chusenCases) pins
-// both copies.
+// pool's standings hold level on points with the bout's two sides (just the two
+// sides when they are no longer level), and all of them must be ranked. The
+// ranked teams are the standings rows with isOverridden, which the server sets
+// from the same pool rank overrides; the pool is judged by name and the teams by
+// id only. A pool with no standings rules nothing. The second half of the same
+// table (chusenCases) pins both copies.
 //
 // Exported for vitest at __tests__/admin_pools.test.jsx.
 function drawnSupplementaryBouts(poolMatches, standings) {
   const rows = poolMatches || [];
-  const ranked = (poolName) => new Set(
-    ((standings || {})[poolName] || []).filter(s => s.isOverridden && s.player && s.player.id).map(s => s.player.id)
-  );
   const ruledByChusen = (m) => {
     if (!isPoolDaihyosenBout(m.id) || !m.sideAId || !m.sideBId) return false;
-    const pool = poolNameOf(m.id);
-    const linking = rows.filter(o => isPoolDaihyosenBout(o.id) && poolNameOf(o.id) === pool);
-    const group = new Set([m.sideAId, m.sideBId]);
-    for (let grew = true; grew;) {
-      grew = false;
-      for (const o of linking) {
-        if (group.has(o.sideAId) === group.has(o.sideBId)) continue;
-        group.add(o.sideAId).add(o.sideBId);
-        grew = true;
-      }
-    }
-    const ids = ranked(pool);
-    return [...group].every(id => ids.has(id));
+    const poolRows = (standings || {})[poolNameOf(m.id)] || [];
+    if (poolRows.length === 0) return false;
+    const pointsOf = (id) => (poolRows.find(s => s.player && s.player.id === id) || {}).points;
+    const level = pointsOf(m.sideAId) !== undefined && pointsOf(m.sideAId) === pointsOf(m.sideBId);
+    const group = level
+      ? poolRows.filter(s => s.points === pointsOf(m.sideAId)).map(s => s.player.id)
+      : [m.sideAId, m.sideBId];
+    const ranked = new Set(poolRows.filter(s => s.isOverridden && s.player && s.player.id).map(s => s.player.id));
+    return group.every(id => ranked.has(id));
   };
   return rows.filter(m => isSupplementaryBout(m.id) && m.status === "completed" && !nameOf(m.winner) && !ruledByChusen(m));
 }

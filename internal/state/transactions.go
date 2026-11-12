@@ -133,9 +133,11 @@ type StoreTx interface {
 	LoadSquads(compID string) (map[string][]domain.TeamMember, error)
 	// LoadPoolRanks is Store.LoadPoolRanks read inside the transaction, so a
 	// decision judged on the matches the lock holds reads the recorded ranks
-	// beside them. Override writes still serialise on the store-wide lock, not
-	// the competition's, so a chusen can land between the two reads; the window
-	// is the gap between them, not the whole request.
+	// beside them. A chusen (OverridePoolRanks) writes inside a transaction, so
+	// it holds the competition's lock and cannot land between the two reads. The
+	// reset door can: DELETE .../overrides (ResetOverridesChanged,
+	// ResetOverridesForce) takes only the store-wide lock, so the window is the
+	// gap between the two reads, not the whole request.
 	LoadPoolRanks(compID string) (map[string]map[string]int, error)
 
 	// UpdatePoolMatchByID is the tx-aware twin of

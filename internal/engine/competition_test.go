@@ -64,15 +64,20 @@ func TestPoolMatchesSettled(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			assert.Equal(t, tc.want, PoolMatchesSettled(tc.matches, nil))
+			assert.Equal(t, tc.want, PoolMatchesSettled(tc.matches, nil, nil))
 		})
 	}
 
 	// A chusen that ranked both teams of a drawn representative bout settles it.
 	drawnDH := state.MatchResult{ID: "Pool A-DH-1", Status: state.MatchStatusCompleted, SideAID: "a", SideBID: "b"}
 	ranks := map[string]map[string]int{"Pool A": {helper.CompetitorKey("a", "", ""): 1, helper.CompetitorKey("b", "", ""): 2}}
-	assert.True(t, PoolMatchesSettled([]state.MatchResult{drawnDH}, ranks), "the lots settle the drawn representative bout")
-	assert.False(t, PoolMatchesSettled([]state.MatchResult{drawnDH}, nil), "no lots, no settlement")
+	standings := map[string][]state.PlayerStanding{"Pool A": {
+		{Player: domain.Player{ID: "a"}, Points: 3},
+		{Player: domain.Player{ID: "b"}, Points: 3},
+	}}
+	assert.True(t, PoolMatchesSettled([]state.MatchResult{drawnDH}, ranks, standings), "the lots settle the drawn representative bout")
+	assert.False(t, PoolMatchesSettled([]state.MatchResult{drawnDH}, nil, standings), "no lots, no settlement")
+	assert.False(t, PoolMatchesSettled([]state.MatchResult{drawnDH}, ranks, nil), "no standings to judge the group on, no settlement")
 }
 
 // TestDaihyosenRuledByChusen_SharedCases drives daihyosenRuledByChusen from the
@@ -89,11 +94,10 @@ func TestDaihyosenRuledByChusen_SharedCases(t *testing.T) {
 			SideBID    string   `json:"sideBId"`
 			RankedPool string   `json:"rankedPool"`
 			Ranked     []string `json:"ranked"`
-			Others     []struct {
-				ID      string `json:"id"`
-				SideAID string `json:"sideAId"`
-				SideBID string `json:"sideBId"`
-			} `json:"others"`
+			Standings  []struct {
+				ID     string `json:"id"`
+				Points int    `json:"points"`
+			} `json:"standings"`
 			Ruled bool `json:"ruled"`
 		} `json:"chusenCases"`
 	}
@@ -106,11 +110,13 @@ func TestDaihyosenRuledByChusen_SharedCases(t *testing.T) {
 				ranks[helper.CompetitorKey(id, "", "")] = i + 1
 			}
 			m := state.MatchResult{ID: tc.ID, Status: state.MatchStatusCompleted, Winner: tc.Winner, SideAID: tc.SideAID, SideBID: tc.SideBID}
-			pool := []state.MatchResult{m}
-			for _, o := range tc.Others {
-				pool = append(pool, state.MatchResult{ID: o.ID, Status: state.MatchStatusCompleted, SideAID: o.SideAID, SideBID: o.SideBID})
+			// The case's standings are the bout's own pool's.
+			poolName, _ := poolNameFromMatchID(tc.ID)
+			rows := []state.PlayerStanding{}
+			for _, s := range tc.Standings {
+				rows = append(rows, state.PlayerStanding{Player: domain.Player{ID: s.ID}, Points: s.Points})
 			}
-			assert.Equal(t, tc.Ruled, daihyosenRuledByChusen(&m, pool, map[string]map[string]int{tc.RankedPool: ranks}))
+			assert.Equal(t, tc.Ruled, daihyosenRuledByChusen(&m, map[string][]state.PlayerStanding{poolName: rows}, map[string]map[string]int{tc.RankedPool: ranks}))
 		})
 	}
 }

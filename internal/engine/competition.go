@@ -20,14 +20,29 @@ import (
 // competition with no knockout rounds to check. Vacuously true with no rows.
 // poolRanks is the competition's recorded pool-rank overrides
 // (state.Overrides.PoolRanks, nil when none): a drawn representative bout whose
-// two teams a chusen has ranked is settled by the lots (poolMatchSettled).
-func PoolMatchesSettled(matches []state.MatchResult, poolRanks map[string]map[string]int) bool {
+// tied group a chusen has ranked is settled by the lots (poolMatchSettled),
+// which judges the group on standings (nil when no bout is drawn,
+// lotsStandings).
+func PoolMatchesSettled(matches []state.MatchResult, poolRanks map[string]map[string]int, standings map[string][]state.PlayerStanding) bool {
 	for i := range matches {
-		if !poolMatchSettled(&matches[i], matches, poolRanks) {
+		if !poolMatchSettled(&matches[i], poolRanks, standings) {
 			return false
 		}
 	}
 	return true
+}
+
+// PoolMatchesSettledIn is PoolMatchesSettled for a caller that holds no
+// standings: it reads them through loader (a store or a transaction), but only
+// when a drawn representative bout needs them.
+func (e *Engine) PoolMatchesSettledIn(loader poolStandingsLoader, compID string, matches []state.MatchResult, poolRanks map[string]map[string]int) (bool, error) {
+	standings, err := lotsStandings(matches, func() (map[string][]state.PlayerStanding, error) {
+		return e.computeStandingsFrom(loader, compID)
+	})
+	if err != nil {
+		return false, err
+	}
+	return PoolMatchesSettled(matches, poolRanks, standings), nil
 }
 
 // LoadPoolRanksJudging reads a competition's recorded pool-rank overrides
@@ -47,7 +62,7 @@ func LoadPoolRanksJudging(compID string, matches []state.MatchResult, load func(
 // poolMatchSettled reports whether one pool-matches.csv row is played: it is
 // completed and is not a drawn supplementary bout, unless a chusen has ranked
 // every team of the group a drawn representative bout was fought for
-// (daihyosenRuledByChusen, which reads the pool's other matches to find the
+// (daihyosenRuledByChusen, which reads the pool's standings to find the
 // group): the lots then decided that place, and the bout, which settled
 // nothing, may stay drawn. It is the one owner of that rule, so the league's completion
 // (PoolMatchesSettled), a mixed pool's (poolCompletion), the auto-complete scan
@@ -57,8 +72,8 @@ func LoadPoolRanksJudging(compID string, matches []state.MatchResult, load func(
 // rule from the wire in admin_pools.jsx (drawnSupplementaryBouts); both are
 // pinned to the one table testdata/drawn_supplementary_cases.json, so a change
 // here changes the table.
-func poolMatchSettled(m *state.MatchResult, poolMatches []state.MatchResult, poolRanks map[string]map[string]int) bool {
-	return m.Status == state.MatchStatusCompleted && (!drawnSupplementaryBout(m) || daihyosenRuledByChusen(m, poolMatches, poolRanks))
+func poolMatchSettled(m *state.MatchResult, poolRanks map[string]map[string]int, standings map[string][]state.PlayerStanding) bool {
+	return m.Status == state.MatchStatusCompleted && (!drawnSupplementaryBout(m) || daihyosenRuledByChusen(m, standings, poolRanks))
 }
 
 // drawnSupplementaryBout reports a pool tie-break ("-TB-") or representative
@@ -386,6 +401,15 @@ func (e *Engine) maybeAutoCompletePoolsRunning(compID string, comp *state.Compet
 	if err != nil {
 		return AutoCompleteNoChange, err
 	}
+	// The standings that bound a chusen's tied group, read only for a drawn
+	// representative bout. The re-check under the lock below reuses them: it
+	// cannot compute its own there, and the ranks it judges are the fresh part.
+	lots, err := lotsStandings(matches, func() (map[string][]state.PlayerStanding, error) {
+		return e.CalculatePoolStandings(compID)
+	})
+	if err != nil {
+		return AutoCompleteNoChange, err
+	}
 
 	// Partition matches into regular vs tiebreaker vs pool-daihyosen.
 	allComplete := true
@@ -398,7 +422,7 @@ func (e *Engine) maybeAutoCompletePoolsRunning(compID string, comp *state.Compet
 		case IsTiebreakerMatchID(m.ID):
 			// A TB match without a winner (malformed payload) leaves standings
 			// still tied, so treat it as unresolved just like DH.
-			if !poolMatchSettled(&m, matches, poolRanks) {
+			if !poolMatchSettled(&m, poolRanks, lots) {
 				hasIncompleteTB = true
 			} else {
 				hasCompleteTB = true
@@ -406,7 +430,7 @@ func (e *Engine) maybeAutoCompletePoolsRunning(compID string, comp *state.Compet
 		case IsPoolDaihyosenMatchID(m.ID):
 			// A DH match without a winner (e.g. hikiwake) leaves standings
 			// still tied, so it must not count as resolved.
-			if !poolMatchSettled(&m, matches, poolRanks) {
+			if !poolMatchSettled(&m, poolRanks, lots) {
 				hasIncompleteDH = true
 			} else {
 				hasCompleteDH = true
@@ -529,7 +553,7 @@ func (e *Engine) maybeAutoCompletePoolsRunning(compID string, comp *state.Compet
 		if ferr != nil {
 			return nil, ferr
 		}
-		if !PoolMatchesSettled(freshMatches, freshRanks) {
+		if !PoolMatchesSettled(freshMatches, freshRanks, lots) {
 			return nil, nil
 		}
 		comp.Status = state.CompStatusComplete

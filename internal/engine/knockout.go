@@ -114,6 +114,11 @@ func (e *Engine) poolCompletion(loader poolStandingsLoader, compID string, comp 
 		return nil, err
 	}
 
+	lots, err := lotsStandings(matches, standings)
+	if err != nil {
+		return nil, err
+	}
+
 	playerCount := make(map[string]int, len(pools))
 	done := make(map[string]bool, len(pools))
 	seen := make(map[string]bool, len(pools))
@@ -127,7 +132,7 @@ func (e *Engine) poolCompletion(loader poolStandingsLoader, compID string, comp 
 			continue
 		}
 		seen[pn] = true
-		if !poolMatchSettled(&m, matches, poolRanks) {
+		if !poolMatchSettled(&m, poolRanks, lots) {
 			if _, known := done[pn]; known {
 				done[pn] = false
 			}

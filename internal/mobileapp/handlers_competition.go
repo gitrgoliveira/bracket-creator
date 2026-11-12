@@ -2935,7 +2935,12 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 					ranksFault = rerr
 					return nil
 				}
-				if !engine.PoolMatchesSettled(matches, poolRanks) {
+				settled, serr := eng.PoolMatchesSettledIn(tx, id, matches, poolRanks)
+				if serr != nil {
+					matchesFault = serr
+					return nil
+				}
+				if !settled {
 					statusErr = fmt.Errorf("all matches must be completed before this competition can be finished")
 					return nil
 				}

@@ -1457,8 +1457,13 @@ func (e *Engine) reopenResultPreconditionTx(tx state.StoreTx, compID string, com
 	if !comp.IsKachinuki() && !domain.IsDefaultWinDecisionStr(decision) && !(h.Pool != nil && drawnSupplementaryBout(h.Pool)) {
 		// bc-cse item 14: no "(correctionReason)" jargon -- that named the
 		// internal API field, not anything the operator sees on the score
-		// editor's own correction-reason box.
-		return validationErrorf("reopen is only for kachinuki team matches, for matches decided by a withdrawal (kiken, kiken-injury, or fusenpai) or a fusensho, and for a tie-break or daihyosen bout saved as a draw; correct other results via the score editor instead")
+		// editor's own correction-reason box. A tie-break or daihyosen bout
+		// exists only in a pool, so only a pool match is told about it.
+		allowed := "kachinuki team matches, for matches decided by a withdrawal (kiken, kiken-injury, or fusenpai) or a fusensho"
+		if h.Pool != nil {
+			allowed += ", and for a tie-break or daihyosen bout saved as a draw"
+		}
+		return validationErrorf("reopen is only for %s; correct other results via the score editor instead", allowed)
 	}
 	if h.Pool != nil {
 		// A pool reopen changes no knockout slot: the pool is incomplete
@@ -1990,7 +1995,13 @@ func (e *Engine) reopenTargetStatusTx(tx state.StoreTx, compID, matchID, decisio
 // (reopenUnderCourtLock) ask the one question the same way.
 func (e *Engine) reopenTargetStatusOfHome(tx state.StoreTx, compID, matchID string, h matchHome) state.MatchStatus {
 	if h.Pool != nil {
-		return e.reopenTargetStatusTx(tx, compID, matchID, h.Pool.Decision, h.Pool.DecisionBy, h.Pool.SideAID, h.Pool.SideBID)
+		decision := h.Pool.Decision
+		if drawnSupplementaryBout(h.Pool) {
+			// The entry gate admits this bout by its missing winner, and a
+			// scored tie stores no decision, so judge it as the draw it is.
+			decision = string(domain.DecisionHikiwake)
+		}
+		return e.reopenTargetStatusTx(tx, compID, matchID, decision, h.Pool.DecisionBy, h.Pool.SideAID, h.Pool.SideBID)
 	}
 	return e.reopenTargetStatusTx(tx, compID, matchID, h.Bracket.Decision, h.Bracket.DecisionBy, h.Bracket.SideAID, h.Bracket.SideBID)
 }

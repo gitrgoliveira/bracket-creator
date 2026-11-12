@@ -30,8 +30,9 @@ func PoolMatchesSettled(matches []state.MatchResult) bool {
 // poolMatchSettled reports whether one pool-matches.csv row is played: it is
 // completed and is not a drawn supplementary bout. It is the one owner of that
 // rule, so the league's completion (PoolMatchesSettled), a mixed pool's
-// (poolCompletion) and the reopen gate (drawnSupplementaryBout) cannot drift
-// inside Go. The Pools tab's notice reads the same rule from the wire in
+// (poolCompletion), the auto-complete scan (MaybeAutoCompletePools), the engi
+// self-heal (isBlockingEngiTBRow) and the reopen gate (drawnSupplementaryBout)
+// cannot drift inside Go. The Pools tab's notice reads the same rule from the wire in
 // admin_pools.jsx (drawnSupplementaryBouts), so a change here changes it too.
 func poolMatchSettled(m *state.MatchResult) bool {
 	return m.Status == state.MatchStatusCompleted && !drawnSupplementaryBout(m)
@@ -367,7 +368,7 @@ func (e *Engine) maybeAutoCompletePoolsRunning(compID string, comp *state.Compet
 		case IsTiebreakerMatchID(m.ID):
 			// A TB match without a winner (malformed payload) leaves standings
 			// still tied, so treat it as unresolved just like DH.
-			if m.Status != state.MatchStatusCompleted || m.Winner == "" {
+			if !poolMatchSettled(&m) {
 				hasIncompleteTB = true
 			} else {
 				hasCompleteTB = true
@@ -375,7 +376,7 @@ func (e *Engine) maybeAutoCompletePoolsRunning(compID string, comp *state.Compet
 		case IsPoolDaihyosenMatchID(m.ID):
 			// A DH match without a winner (e.g. hikiwake) leaves standings
 			// still tied, so it must not count as resolved.
-			if m.Status != state.MatchStatusCompleted || m.Winner == "" {
+			if !poolMatchSettled(&m) {
 				hasIncompleteDH = true
 			} else {
 				hasCompleteDH = true

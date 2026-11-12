@@ -111,3 +111,65 @@ func TestReopenDrawnSupplementaryBout_BarredSidesGoToScheduled(t *testing.T) {
 		}
 	}
 }
+
+// A scored tie stores no decision, so the bout is admitted by its missing
+// winner alone: the bars are judged for it exactly as for a stored hikiwake.
+func TestReopenDrawnSupplementaryBout_ScoredTieWithNoDecisionJudgesBars(t *testing.T) {
+	eng, store, compID := seedDrawnSupplementary(t, "Pool A-TB-0")
+	ms, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	ms[0].Decision = ""
+	require.NoError(t, store.SavePoolMatches(compID, ms))
+	require.NoError(t, store.SetCompetitorStatus(compID, domain.CompetitorStatus{
+		PlayerID: wrTeamAID, Eligible: false, Reason: "kiken", MatchID: "other-1",
+	}))
+
+	_, err = eng.ReopenMatch(compID, "Pool A-TB-0", "")
+	require.NoError(t, err)
+	matches, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	assert.Equal(t, state.MatchStatusScheduled, matches[0].Status)
+}
+
+// A kachinuki match saved as a draw is judged by the same rule: a side barred
+// by another match sends the reopen back to the queue.
+func TestReopenKachinukiHikiwake_BarredSideGoesToScheduled(t *testing.T) {
+	const compID = "kr-hikiwake"
+	eng, store, _ := setupKachinukiComp(t, compID, 3)
+	wrSaveTeams(t, store, compID)
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{{
+		ID: "Pool A-0", SideA: wrTeamA, SideAID: wrTeamAID, SideB: wrTeamB, SideBID: wrTeamBID,
+		Court: "A", Status: state.MatchStatusCompleted, Decision: "hikiwake",
+	}}))
+	require.NoError(t, store.SetCompetitorStatus(compID, domain.CompetitorStatus{
+		PlayerID: wrTeamAID, Eligible: false, Reason: "kiken", MatchID: "other-1",
+	}))
+
+	_, err := eng.ReopenMatch(compID, "Pool A-0", "")
+	require.NoError(t, err)
+	assert.Equal(t, state.MatchStatusScheduled, wrPoolMatch(t, store, compID).Status)
+}
+
+// The tie-break clause of the refusal is for a pool; a knockout match cannot
+// hold such a bout and is not told about one.
+func TestReopenRefusalNamesTiebreakOnlyForPool(t *testing.T) {
+	t.Run("pool", func(t *testing.T) {
+		eng, _, compID := seedDrawnSupplementary(t, "Pool A-0")
+		_, err := eng.ReopenMatch(compID, "Pool A-0", "")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "tie-break or daihyosen")
+	})
+	t.Run("bracket", func(t *testing.T) {
+		eng, store, _ := setupTestEngine(t)
+		const compID = "rd-ko"
+		createTestCompetition(t, store, compID, "knockout", 3)
+		wrSaveTeams(t, store, compID)
+		require.NoError(t, store.SaveBracket(compID, &state.Bracket{Rounds: [][]state.BracketMatch{{{
+			ID: "m-r1-0", SideA: wrTeamA, SideAID: wrTeamAID, SideB: wrTeamB, SideBID: wrTeamBID,
+			Status: state.MatchStatusCompleted, Winner: wrTeamA, WinnerID: wrTeamAID,
+		}}}}))
+		_, err := eng.ReopenMatch(compID, "m-r1-0", "")
+		require.Error(t, err)
+		assert.NotContains(t, err.Error(), "tie-break")
+	})
+}

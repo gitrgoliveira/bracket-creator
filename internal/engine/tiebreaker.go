@@ -504,7 +504,7 @@ func generateTiebreakerMatches(poolName string, tiedGroup []state.PlayerStanding
 // TB rows) and is safe to remove. Completed TB rows with a Winner are
 // preserved: recorded results are never deleted.
 func isBlockingEngiTBRow(m state.MatchResult) bool {
-	return IsTiebreakerMatchID(m.ID) && (m.Status != state.MatchStatusCompleted || m.Winner == "")
+	return IsTiebreakerMatchID(m.ID) && !poolMatchSettled(&m)
 }
 
 // InjectTiebreakerMatches inspects all pool standings for compID after

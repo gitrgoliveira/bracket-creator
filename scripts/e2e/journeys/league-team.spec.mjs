@@ -49,7 +49,7 @@ import {
   leagueMatrix, leagueRowFigures, leagueRows, openLeague, openLeagueSettings, openMatrixCell, openNumberedRow,
   openViewerAwards, openViewerLeague, readBanner, readChusen, readChusenRecorded, readConfirm, readLeagueSettings,
   readLeagueTable, readNumberedRows, readPodium, requestAcceptSharedRanks, runTiebreaker, saveSettings, seedLeague,
-  undoControl, undoSharedRanks, playEncounter,
+  undoControl, undoSharedRanks, playEncounter, escape, squash,
 } from '../fixtures/league.mjs';
 import { chooseBackup, confirmWithPassword, openBackupPage, planRow, readZip, restoreButton } from '../fixtures/organiser.mjs';
 
@@ -79,8 +79,6 @@ function recorder(journey, folder) {
   return { record: (row) => log.record({ journey, ...row }) };
 }
 
-const squash = (t) => (t || '').replace(/\s+/g, ' ').trim();
-const escape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const pairKey = (a, b) => [a, b].sort().join(' | ');
 const samePair = (row, a, b) => pairKey(row.shiro, row.aka) === pairKey(a, b);
 

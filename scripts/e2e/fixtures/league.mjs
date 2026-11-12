@@ -90,11 +90,11 @@ export const TEXT = {
   twoThirdPlaces: 'Award two joint 3rd places',
 };
 
-const escape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+export const escape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const exact = (s) => new RegExp(`^${escape(s)}$`);
 // A `has:` locator must be built from the page, never chained off the root.
 const pageOf = (root) => (typeof root.page === 'function' ? root.page() : root);
-const squash = (t) => (t || '').replace(/\s+/g, ' ').trim();
+export const squash = (t) => (t || '').replace(/\s+/g, ' ').trim();
 
 // ------------------------------------------------------------------- seeding
 

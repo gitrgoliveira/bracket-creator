@@ -17,6 +17,9 @@
 // (the fixture's TEXT holds its wording). The flows before the fixme are
 // written so they run on the fixed app as well (a warning the fix adds is
 // answered when it appears), so the fix only removes the fixme line.
+// The finding ids in these fixmes (F1, F2b, N1, ...) name the league UX
+// review's findings, not beads; a finding that is filed as a bead takes the
+// bead id in its fixme.
 //
 // The scripted tie (`twoWayTie`): four teams of three, A and B each beat C and
 // D by two bouts to none with one hikiwake, A v B is three hikiwake, C beats D

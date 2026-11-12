@@ -533,6 +533,15 @@ becomes
 so the suite stays green while the defect is open. The PR that fixes the bug
 removes the `fixme`, and the step then guards the fix.
 
+A step that records today's behaviour first and asserts the fixed behaviour
+after it puts the fixme inside the test body, between the two:
+
+    test.fixme(true, '<bead-id or finding id>: <one line>');
+
+The test stops there, so the lines after it run only on the fixed app. The
+league journeys name their defects by the finding ids of the league review
+(F1, F2b, N1, ...) until a finding is filed as a bead.
+
 ## Adding a journey
 
 1. Name the file `journeys/<name>.spec.mjs`. A journey about a public surface

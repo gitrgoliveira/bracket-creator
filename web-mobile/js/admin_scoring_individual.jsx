@@ -1776,7 +1776,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, onSub
                   doSubmit(() => onSubmit(buildPatch("completed")));
                 }} disabled={submitting || !canFinish}
                   title={koTieBlocked ? KO_TIE_REASON : hanteiFinishBlock || undefined}>
-                  {submitting ? "Saving…" : koTieBlocked ? "Needs a winner" : isComplete ? "Save correction" : finishArmed ? "Tap again to finish" : "Finish"}
+                  {submitting ? "Saving…" : koTieBlocked ? "Needs a winner" : isComplete ? "Save correction" : finishArmed ? armedFinishLabel(false) : finishButtonLabel(false)}
                 </button>
               )}
             </div>

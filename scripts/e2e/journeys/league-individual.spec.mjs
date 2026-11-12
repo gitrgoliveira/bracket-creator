@@ -204,7 +204,8 @@ async function readDesk(page) {
     banner: await readBanner(page),
     chusen: await readChusen(page),
     drawnNotices: await drawnBoutNotices(page),
-    tiebreakWords: (await page.locator('main').getByText(/tie-?break|ippon[- ]shobu|chusen|drawing lots/i).allInnerTexts())
+    // The app draws no <main>, so the words are read from the whole body.
+    tiebreakWords: (await page.locator('body').getByText(/tie-?break|ippon[- ]shobu|chusen|drawing lots/i).allInnerTexts())
       .map((t) => t.replace(/\s+/g, ' ').trim()),
   };
 }

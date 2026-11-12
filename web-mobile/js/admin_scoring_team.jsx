@@ -6119,7 +6119,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
                   doSubmit(() => onSubmit(buildPatch("completed")));
                 }} disabled={submitting || koTieBlocked || repTyping}
                   title={koTieBlocked ? koTieTitle : undefined}>
-                  {submitting ? "Saving…" : koTieBlocked ? "Needs a winner" : isComplete ? "Save correction" : finishArmed ? "Tap again to finish" : "Finish"}
+                  {submitting ? "Saving…" : koTieBlocked ? "Needs a winner" : isComplete ? "Save correction" : finishArmed ? armedFinishLabel(false) : finishButtonLabel(false)}
                 </button>
               )}
             </div>

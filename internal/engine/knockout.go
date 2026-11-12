@@ -107,14 +107,11 @@ func (e *Engine) poolCompletion(loader poolStandingsLoader, compID string, comp 
 		return nil, err
 	}
 
-	// A team competition's recorded chusen ranks settle a drawn representative
-	// bout (poolMatchSettled), and the cycle check below reads the same ranks.
-	var poolRanks map[string]map[string]int
-	if isTeam {
-		var oerr error
-		if poolRanks, oerr = e.store.LoadPoolRanks(compID); oerr != nil {
-			return nil, oerr
-		}
+	// Recorded chusen ranks settle a drawn representative bout (poolMatchSettled),
+	// and the cycle check below reads the same ranks; read only when one exists.
+	poolRanks, err := LoadPoolRanksJudging(compID, matches, e.store.LoadPoolRanks)
+	if err != nil {
+		return nil, err
 	}
 
 	playerCount := make(map[string]int, len(pools))

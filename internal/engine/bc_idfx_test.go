@@ -903,6 +903,41 @@ func TestMaybeAutoCompletePools_CorruptOverrides_PropagatesError(t *testing.T) {
 	assert.Error(t, err, "a corrupt overrides.json must surface as an error from MaybeAutoCompletePools, not be silently dropped")
 }
 
+// TestPoolCompletion_ReadsOverridesOnlyForARepresentativeBout pins
+// LoadPoolRanksJudging: the recorded pool ranks judge only a representative
+// (daihyosen) bout, so a team pool with none neither pays the overrides.json
+// read on every score nor fails on a corrupt file, while a pool that holds one
+// still surfaces the corruption.
+func TestPoolCompletion_ReadsOverridesOnlyForARepresentativeBout(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "pool-completion-lazy-ranks"
+	comp := &state.Competition{
+		ID: compID, Name: "Lazy Ranks", Format: state.CompFormatMixed,
+		Status: state.CompStatusPools, Courts: []string{"A"}, TeamSize: 2, Kind: "team",
+	}
+	require.NoError(t, store.SaveCompetition(comp))
+	require.NoError(t, store.SavePools(compID, []helper.Pool{
+		{PoolName: "Pool A", Players: []helper.Player{
+			{ID: "a", Name: "TeamA", Dojo: "DojoA"}, {ID: "b", Name: "TeamB", Dojo: "DojoB"},
+		}},
+	}))
+	regular := state.MatchResult{ID: "Pool A-0", SideA: "TeamA", SideAID: "a", SideB: "TeamB", SideBID: "b",
+		Winner: "TeamA", WinnerID: "a", Status: state.MatchStatusCompleted}
+	noStandings := func() (map[string][]state.PlayerStanding, error) { return nil, nil }
+	corruptOverridesFile(t, store, compID)
+
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{regular}))
+	done, err := eng.poolCompletion(store, compID, comp, noStandings)
+	require.NoError(t, err, "no representative bout, so nothing reads the corrupt overrides")
+	assert.True(t, done["Pool A"])
+
+	dh := regular
+	dh.ID = "Pool A-DH-0"
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{regular, dh}))
+	_, err = eng.poolCompletion(store, compID, comp, noStandings)
+	assert.Error(t, err, "a representative bout is judged by the ranks, so a corrupt file surfaces")
+}
+
 // --- Finding 8 / nit 16: ReplaceParticipantInDraw's bracket-ambiguity check ---
 
 // TestReplaceParticipantInDraw_NamesakeAbsentFromBracketCascadesWithoutWarning

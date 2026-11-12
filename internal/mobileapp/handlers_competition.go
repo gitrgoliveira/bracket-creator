@@ -2930,7 +2930,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				// The recorded chusen ranks settle a drawn representative
 				// bout (engine.PoolMatchesSettled); read here, beside the
 				// matches the lock holds. Fails closed, like the matches.
-				poolRanks, rerr := tx.LoadPoolRanks(id)
+				poolRanks, rerr := engine.LoadPoolRanksJudging(id, matches, tx.LoadPoolRanks)
 				if rerr != nil {
 					ranksFault = rerr
 					return nil

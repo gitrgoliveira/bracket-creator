@@ -30,6 +30,20 @@ func PoolMatchesSettled(matches []state.MatchResult, poolRanks map[string]map[st
 	return true
 }
 
+// LoadPoolRanksJudging reads a competition's recorded pool-rank overrides
+// through load (a store or a transaction's LoadPoolRanks), but only when the
+// pool matches hold a representative (daihyosen) bout: the one thing the ranks
+// judge (a drawn bout the lots settled, the cycle check). With none, nothing
+// reads them, so it returns nil without touching overrides.json: an individual
+// competition, or a team one before any tie, neither pays the read on every
+// score nor fails on a corrupt file it never needed.
+func LoadPoolRanksJudging(compID string, matches []state.MatchResult, load func(string) (map[string]map[string]int, error)) (map[string]map[string]int, error) {
+	if !slices.ContainsFunc(matches, func(m state.MatchResult) bool { return IsPoolDaihyosenMatchID(m.ID) }) {
+		return nil, nil
+	}
+	return load(compID)
+}
+
 // poolMatchSettled reports whether one pool-matches.csv row is played: it is
 // completed and is not a drawn supplementary bout, unless a chusen has ranked
 // every team of the group a drawn representative bout was fought for
@@ -368,12 +382,9 @@ func (e *Engine) maybeAutoCompletePoolsRunning(compID string, comp *state.Compet
 
 	// A drawn representative bout counts settled once a chusen has ranked its
 	// teams (poolMatchSettled), so the recorded lots are read before the scan.
-	var poolRanks map[string]map[string]int
-	if isTeamComp {
-		poolRanks, err = e.store.LoadPoolRanks(compID)
-		if err != nil {
-			return AutoCompleteNoChange, err
-		}
+	poolRanks, err := LoadPoolRanksJudging(compID, matches, e.store.LoadPoolRanks)
+	if err != nil {
+		return AutoCompleteNoChange, err
 	}
 
 	// Partition matches into regular vs tiebreaker vs pool-daihyosen.
@@ -514,7 +525,7 @@ func (e *Engine) maybeAutoCompletePoolsRunning(compID string, comp *state.Compet
 		if ferr != nil {
 			return nil, ferr
 		}
-		freshRanks, ferr := e.store.LoadPoolRanks(compID)
+		freshRanks, ferr := LoadPoolRanksJudging(compID, freshMatches, e.store.LoadPoolRanks)
 		if ferr != nil {
 			return nil, ferr
 		}

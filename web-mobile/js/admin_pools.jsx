@@ -144,9 +144,15 @@ function enrichPoolMatchWithComp(m, comp, poolNameOverride) {
 // The rule is the engine's drawnSupplementaryBout (competition.go), read here
 // from the wire fields; change the two together.
 //
+// A drawn daihyosen is the engine's designed route to a chusen, not a stuck
+// state: its pool is ruled by the drawing of lots (chusenPools, the pools
+// holding a chusen tie waiting or recorded), so the chusen panel speaks for it
+// and the notice, which would still say the teams are tied, stays away.
+//
 // Exported for vitest at __tests__/admin_pools.test.jsx.
-function drawnSupplementaryBouts(poolMatches) {
-  return (poolMatches || []).filter(m => isSupplementaryBout(m.id) && m.status === "completed" && !nameOf(m.winner));
+function drawnSupplementaryBouts(poolMatches, chusenPools = []) {
+  return (poolMatches || []).filter(m => isSupplementaryBout(m.id) && m.status === "completed" && !nameOf(m.winner)
+    && !(isPoolDaihyosenBout(m.id) && chusenPools.includes(poolNameOf(m.id))));
 }
 
 // DrawnTieBreakNotice: names one such bout and the two ways on, fight it again
@@ -834,7 +840,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
   return (
     <>
     <div>
-      {drawnSupplementaryBouts(poolMatches).map(m => (
+      {drawnSupplementaryBouts(poolMatches, [...(chusenCandidates || []), ...(chusenRecorded || [])].map(g => g.poolName)).map(m => (
         <DrawnTieBreakNotice
           key={m.id}
           match={enrichPoolMatchWithComp(m, c)}

@@ -4053,8 +4053,9 @@ paths:
         again. Status returns to
         `running` -- EXCEPT when the decision's `decisionBy` side is STILL
         barred by a decision recorded on a DIFFERENT match, which returns to
-        `scheduled` instead: this can hold for a kiken, a fusenpai, or a
-        fusensho reopen alike, not fusensho alone, since going straight to
+        `scheduled` instead (for a bout saved as a draw, which has no
+        `decisionBy`, a bar on EITHER side does): this can hold for a kiken,
+        a fusenpai, or a fusensho reopen alike, not fusensho alone, since going straight to
         `running` would strand the operator behind the eligibility gate with
         no way to start it. The identical reopen returns to `running` once
         that bar is gone, whether because the competitor was reinstated or
@@ -4195,11 +4196,13 @@ paths:
         '400':
           description: >
             The `reason` is longer than 200 characters, the body is present but
-            malformed JSON, or the match is neither a kachinuki team match nor
-            one a withdrawal or fusensho decided: "reopen is only for
-            kachinuki team matches and for matches decided by a withdrawal
-            (kiken, kiken-injury, or fusenpai) or a fusensho; correct
-            other results via the score editor instead."
+            malformed JSON, or the match is none of a kachinuki team match, one
+            a withdrawal or fusensho decided, or (in a pool) a tie-break or
+            daihyosen bout saved as a draw: "reopen is only for kachinuki team
+            matches and for matches decided by a withdrawal (kiken,
+            kiken-injury, or fusenpai) or a fusensho; correct other results via
+            the score editor instead." A pool match's sentence ends the list
+            with ", and for a tie-break or daihyosen bout saved as a draw".
           content:
             application/json:
               schema:
@@ -4371,8 +4374,9 @@ paths:
           description: >
             `blockerCompId` is missing or malformed, `blockerMatchId` is missing
             or too long, the `reason` exceeds 200 characters, the body is
-            malformed JSON, or the target is neither a kachinuki team match nor
-            one a withdrawal or fusensho decided (same message as
+            malformed JSON, or the target is none of a kachinuki team match, one
+            a withdrawal or fusensho decided, or (in a pool) a tie-break or
+            daihyosen bout saved as a draw (same message as
             `POST .../reopen`'s 400).
           content:
             application/json:

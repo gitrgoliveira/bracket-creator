@@ -171,5 +171,7 @@ func TestReopenRefusalNamesTiebreakOnlyForPool(t *testing.T) {
 		_, err := eng.ReopenMatch(compID, "m-r1-0", "")
 		require.Error(t, err)
 		assert.NotContains(t, err.Error(), "tie-break")
+		// Two list items are joined by "and", never by a bare comma.
+		assert.Contains(t, err.Error(), "kachinuki team matches and for matches decided by")
 	})
 }

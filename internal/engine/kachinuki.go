@@ -1459,7 +1459,7 @@ func (e *Engine) reopenResultPreconditionTx(tx state.StoreTx, compID string, com
 		// internal API field, not anything the operator sees on the score
 		// editor's own correction-reason box. A tie-break or daihyosen bout
 		// exists only in a pool, so only a pool match is told about it.
-		allowed := "kachinuki team matches, for matches decided by a withdrawal (kiken, kiken-injury, or fusenpai) or a fusensho"
+		allowed := "kachinuki team matches and for matches decided by a withdrawal (kiken, kiken-injury, or fusenpai) or a fusensho"
 		if h.Pool != nil {
 			allowed += ", and for a tie-break or daihyosen bout saved as a draw"
 		}

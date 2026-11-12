@@ -28,13 +28,13 @@ const bout = (id, over = {}) => ({
   id, sideA: 'Bea', sideB: 'Cal', sideAId: 'a', sideBId: 'b', status: 'completed', winner: '', court: 'A', ...over,
 });
 
-async function mount(poolMatches, format = 'mixed') {
-  window.API = { reopenMatch: vi.fn().mockResolvedValue({}) };
+async function mount(poolMatches, format = 'mixed', extra = {}, api = {}) {
+  window.API = { reopenMatch: vi.fn().mockResolvedValue({}), ...api };
   window.PoolsViewer = () => null;
   await act(async () => {
     render(
       <AdminPools
-        c={{ ...comp, format }}
+        c={{ ...comp, format, ...extra }}
         pools={[{ poolName: 'Pool A', players: [] }]}
         poolMatches={poolMatches}
         standings={{}}
@@ -92,6 +92,29 @@ describe('AdminPools: a tie-break bout saved as a draw', () => {
   it('names a daihyosen the same way', async () => {
     await mount([bout('Pool A-DH-0')]);
     expect(screen.getByText('A daihyosen was saved as a draw')).toBeTruthy();
+  });
+
+  // A drawn daihyosen leads to a chusen by design: once the pool holds a chusen
+  // tie (waiting or recorded) the chusen panel speaks for it, and the notice
+  // that says the teams are still tied stays away.
+  describe.each([
+    ['a chusen waiting', { candidates: [{ poolName: 'Pool A', teamNames: ['Bea', 'Cal'], teams: [{ id: 'a', name: 'Bea' }, { id: 'b', name: 'Cal' }], minPosition: 1 }], recorded: [] }],
+    ['a chusen recorded', { candidates: [], recorded: [{ poolName: 'Pool A', teamNames: ['Bea', 'Cal'], teams: [{ id: 'a', name: 'Bea' }, { id: 'b', name: 'Cal' }], ranks: [1, 2], minPosition: 1 }] }],
+  ])('on a team competition with %s', (_name, chusen) => {
+    const team = { kind: 'team', teamSize: 3 };
+    const api = { chusenCandidates: vi.fn().mockResolvedValue(chusen) };
+
+    it('shows no notice for the drawn daihyosen', async () => {
+      await mount([bout('Pool A-DH-0')], 'mixed', team, api);
+      await waitFor(() => expect(window.API.chusenCandidates).toHaveBeenCalled());
+      await waitFor(() => expect(screen.queryByTestId('drawn-tiebreak-notice')).toBeNull());
+    });
+
+    it('still shows the notice for a drawn tie-break bout', async () => {
+      await mount([bout('Pool A-TB-0')], 'mixed', team, api);
+      await waitFor(() => expect(window.API.chusenCandidates).toHaveBeenCalled());
+      expect(screen.getByTestId('drawn-tiebreak-notice')).toBeTruthy();
+    });
   });
 
   it.each([

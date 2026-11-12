@@ -21,6 +21,13 @@ describe('drawnSupplementaryBouts', () => {
   it('is empty for no matches', () => {
     expect(drawnSupplementaryBouts(undefined)).toEqual([]);
   });
+
+  it('leaves out a daihyosen of a pool a chusen rules, but not its tie-break bout or another pool', () => {
+    const dh = m('Pool A-DH-0');
+    const tb = m('Pool A-TB-0');
+    const other = m('Pool B-DH-0');
+    expect(drawnSupplementaryBouts([dh, tb, other], ['Pool A'])).toEqual([tb, other]);
+  });
 });
 
 describe('enrichPoolMatchWithComp', () => {

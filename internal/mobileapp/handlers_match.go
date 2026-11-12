@@ -1492,7 +1492,8 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 	// sets state.MatchResult.ReopenPending, which only lets a reason sent with
 	// the next completion be kept (see applyCorrectionReason).
 	//
-	// A completed match that is neither kachinuki nor decided by a withdrawal
+	// A completed match that is neither kachinuki, decided by a withdrawal,
+	// nor a pool tie-break or daihyosen bout finished as a draw (no winner)
 	// gets 400 (its sanctioned edit of a finished result remains the
 	// correction path), as does an over-long reason; a non-completed match, a
 	// match whose result feeds a downstream match in progress (or resolved by

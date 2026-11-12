@@ -21,6 +21,9 @@ import { NO_ID_POOL_HINT, NoIdHint } from './data_integrity.jsx';
 import { attemptScoreWrite, DOWNSTREAM_KNOCKOUT_RANKING_CANCELLED, writeKeepsEditorOpen } from './write_result.jsx';
 import { rankOrdinal } from './viewer_standings.jsx';
 import { useUnsavedInput } from './app_version.jsx';
+// Fighting a drawn tie-break bout again is the editors' reopen, so the notice
+// below runs the same hook and shows the same court-busy panel.
+import { useMatchReopen, ReopenFeedback } from './admin_scoring_shared.jsx';
 
 const { useState, useEffect, useRef, useMemo } = React;
 const EmptyState = window.EmptyState;
@@ -131,6 +134,49 @@ function enrichPoolMatchWithComp(m, comp, poolNameOverride) {
     repRosterA,
     repRosterB,
   };
+}
+
+// drawnSupplementaryBouts: the pool tie-break ("-TB-") and daihyosen ("-DH-")
+// bouts that were finished as a draw. A draw settles nothing, so the pool keeps
+// its tie (the engine's poolCompletion counts a winnerless supplementary bout
+// as unfinished) and, in a Pools + Knockout competition, the knockout places it
+// decides stay empty. Nothing else on the page says so, hence the notice.
+//
+// Exported for vitest at __tests__/admin_pools.test.jsx.
+function drawnSupplementaryBouts(poolMatches) {
+  return (poolMatches || []).filter(m => isSupplementaryBout(m.id) && m.status === "completed" && !nameOf(m.winner));
+}
+
+// DrawnTieBreakNotice: names one such bout and the two ways on, fight it again
+// (the reopen: the draw is cleared and the bout runs on its court) or open it
+// to decide it by encho or hantei. Neither is forced: the pool stays as it is
+// until the operator chooses.
+function DrawnTieBreakNotice({ match, comp, password, onOpen }) {
+  const ctl = useMatchReopen({ match, password, isComplete: true, allowCourtForce: true });
+  const what = isPoolDaihyosenBout(match.id) ? "daihyosen" : "tie-break bout";
+  const pool = poolNameOf(match.id);
+  const sides = `${nameOf(match.sideA)} and ${nameOf(match.sideB)}`;
+  const effect = comp && comp.format === "mixed"
+    ? "so the knockout places this pool decides stay empty"
+    : "so the table keeps them tied";
+  return (
+    <div className="alert alert--warn league-tiebreak" role="status" aria-live="polite" data-testid="drawn-tiebreak-notice">
+      <div className="league-tiebreak__title">A {what} was saved as a draw</div>
+      <div className="league-tiebreak__desc">
+        {pool}: {sides} are still tied, {effect}. Fight it again, or open it to decide it by encho or hantei.
+      </div>
+      <div className="league-tiebreak__actions">
+        <button type="button" className="btn btn--sm btn--primary" disabled={ctl.busy} onClick={() => ctl.reopen()}>
+          {ctl.busy && <span className="spinner" />}
+          Fight it again
+        </button>
+        <button type="button" className="btn btn--sm btn--ghost" disabled={ctl.busy} onClick={onOpen}>
+          Open bout
+        </button>
+      </div>
+      <ReopenFeedback ctl={ctl} testIdPrefix="drawn-tiebreak-reopen" />
+    </div>
+  );
 }
 
 // groupTeamIds derives the teamIds array to send alongside teamNames on a
@@ -785,6 +831,15 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
   return (
     <>
     <div>
+      {drawnSupplementaryBouts(poolMatches).map(m => (
+        <DrawnTieBreakNotice
+          key={m.id}
+          match={enrichPoolMatchWithComp(m, c)}
+          comp={c}
+          password={password}
+          onOpen={() => setScoreOpenId(m.id)}
+        />
+      ))}
       {chusenBanner}
       {chusenRecordedPanel}
       {leagueTiebreakBanner}
@@ -843,4 +898,4 @@ if (typeof window !== "undefined") {
 
 // ES export for the vitest suite: pure helpers only. The component
 // stays behind window.* to match the rest of admin_*.jsx.
-export { enrichPoolMatchWithComp, poolMatchesForPool, groupTeamIds };
+export { enrichPoolMatchWithComp, poolMatchesForPool, groupTeamIds, drawnSupplementaryBouts };

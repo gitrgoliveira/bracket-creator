@@ -796,9 +796,10 @@ test.describe('pools: a tie over the 2nd place a Fit the knockout draw drafted',
 
 // A pool tie-break bout saved as a DRAW (Mark draw, then Finish). The same pools
 // and scripts as the first competition, on court D. A league's tie-breaker is to
-// need a winner; whether a Pools + Knockout competition's does too is not ruled
-// yet, so this walk records what the pool table, the knockout and the court show
-// once the drawn bout is saved, and asserts only the steps that get it there.
+// need a winner; a Pools + Knockout competition's can still be saved as a draw,
+// and the Pools tab then names the bout (Open bout, Fight it again). This walk
+// records what the pool table, the knockout and the court show once the drawn
+// bout is saved, and asserts that notice.
 const JOURNEY_DRAWN = 'pools-tiebreak-drawn';
 const DRAWN_COURT = 'D';
 
@@ -876,6 +877,7 @@ test.describe('pools: a tie-break bout saved as a draw', () => {
     // The pool table, admin and phone.
     const rowsOf = async (p) => Object.fromEntries(await Promise.all(small.map(async (n) => [n, await playerRowFigures(p, n)])));
     await openAdminPools(page, compId);
+    await expect(page.getByTestId('drawn-tiebreak-notice'), 'the Pools tab names the drawn bout').toBeVisible();
     record({ journey: JOURNEY_DRAWN, step: 'drawn tie-break', action: 'admin Pools tab', rows: await rowsOf(page),
       screenshot: await shot(page, 'admin-pools', { fullPage: true }) });
     const spectator = await browser.newContext({ ...PUBLIC_DEVICE, baseURL });

@@ -1451,11 +1451,11 @@ func (e *Engine) reopenResultPreconditionTx(tx state.StoreTx, compID string, com
 	if status != state.MatchStatusCompleted {
 		return ErrReopenNotCompleted
 	}
-	if !comp.IsKachinuki() && !domain.IsDefaultWinDecisionStr(decision) {
+	if !comp.IsKachinuki() && !domain.IsDefaultWinDecisionStr(decision) && !(h.Pool != nil && drawnSupplementaryBout(h.Pool)) {
 		// bc-cse item 14: no "(correctionReason)" jargon -- that named the
 		// internal API field, not anything the operator sees on the score
 		// editor's own correction-reason box.
-		return validationErrorf("reopen is only for kachinuki team matches and for matches decided by a withdrawal (kiken, kiken-injury, or fusenpai) or a fusensho; correct other results via the score editor instead")
+		return validationErrorf("reopen is only for kachinuki team matches, for matches decided by a withdrawal (kiken, kiken-injury, or fusenpai) or a fusensho, and for a tie-break bout saved as a draw; correct other results via the score editor instead")
 	}
 	if h.Pool != nil {
 		// A pool reopen changes no knockout slot: the pool is incomplete
@@ -1472,6 +1472,15 @@ func (e *Engine) reopenResultPreconditionTx(tx state.StoreTx, compID string, com
 		return nil
 	}
 	return reopenBracketDownstreamCheck(h.BracketRoot, h.RIdx, h.MIdx, force)
+}
+
+// drawnSupplementaryBout reports a pool tie-break ("-TB-") or representative
+// ("-DH-") bout that was finished with no winner. It settles nothing, so the
+// pool keeps its tie (poolCompletion counts a winnerless supplementary bout as
+// unfinished) and the operator is pointed at it (admin_pools.jsx); a reopen is
+// how it is fought again.
+func drawnSupplementaryBout(m *state.MatchResult) bool {
+	return m.Status == state.MatchStatusCompleted && state.IsPoolSupplementaryMatchID(m.ID) && m.Winner == ""
 }
 
 // reopenBracketDownstreamCheck decides, for a bracket ROUND match being

@@ -4047,7 +4047,10 @@ paths:
         Sanctioned "Reopen match" for a COMPLETED match that is either a
         kachinuki team match, or any match (team or individual, pool or
         knockout) whose stored `decision` is a kiken (of any kind), a
-        fusenpai, or a fusensho. Status returns to
+        fusenpai, or a fusensho, or a pool tie-break or daihyosen bout
+        (`Pool X-TB-N`, `Pool X-DH-N`) that was finished as a draw with no
+        winner, which leaves its pool tied until it is decided or fought
+        again. Status returns to
         `running` -- EXCEPT when the decision's `decisionBy` side is STILL
         barred by a decision recorded on a DIFFERENT match, which returns to
         `scheduled` instead: this can hold for a kiken, a fusenpai, or a

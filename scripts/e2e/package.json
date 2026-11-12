@@ -3,6 +3,9 @@
   "private": true,
   "type": "module",
   "description": "Local Playwright journeys for the tournament app. Deliberately separate from web-mobile/package.json so a browser download never lands in js/deps or audit-ci's scope.",
+  "engines": {
+    "node": "^20.15.0 || >=22.2.0"
+  },
   "scripts": {
     "test": "playwright test"
   },

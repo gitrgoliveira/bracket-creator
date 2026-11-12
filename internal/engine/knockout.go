@@ -109,16 +109,10 @@ func (e *Engine) poolCompletion(loader poolStandingsLoader, compID string, comp 
 	}
 
 	// Recorded chusen ranks settle a drawn representative bout (poolMatchSettled),
-	// and the cycle check below reads the same ranks; read only when one exists.
-	poolRanks, err := LoadPoolRanksJudging(compID, matches, loader.LoadPoolRanks)
-	if err != nil {
-		return nil, err
-	}
-
-	// The lots and the team cycle check below both read the standings: compute
-	// them once.
+	// and the cycle check below reads the same ranks. The lots and the team
+	// cycle check both read the standings: compute them once.
 	standings = sync.OnceValues(standings)
-	lots, err := lotsStandings(matches, standings)
+	lots, err := loadPoolLots(compID, matches, loader.LoadPoolRanks, standings)
 	if err != nil {
 		return nil, err
 	}
@@ -136,7 +130,7 @@ func (e *Engine) poolCompletion(loader poolStandingsLoader, compID string, comp 
 			continue
 		}
 		seen[pn] = true
-		if !poolMatchSettled(&m, poolRanks, lots) {
+		if !poolMatchSettled(&m, lots) {
 			if _, known := done[pn]; known {
 				done[pn] = false
 			}
@@ -167,7 +161,7 @@ func (e *Engine) poolCompletion(loader poolStandingsLoader, compID string, comp 
 				continue
 			}
 			scoped := map[string][]state.PlayerStanding{pn: st[pn]}
-			if dhCycleExists(scoped, matches, poolRanks) {
+			if dhCycleExists(scoped, matches, lots.ranks) {
 				done[pn] = false
 			}
 		}

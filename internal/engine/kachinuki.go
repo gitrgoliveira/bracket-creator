@@ -1428,7 +1428,9 @@ func (e *Engine) RequeueBlockerAndReopen(targetComp, targetMatch, blockerComp, b
 //     is a *ValidationError (HTTP 400); its sanctioned edit is the correction
 //     path. A pool tie-break ("-TB-") or representative ("-DH-") bout saved as
 //     a draw (drawnSupplementaryBout) is one a reopen is for too: it settles
-//     nothing, and a reopen is how it is fought again. This is the reopen's
+//     nothing, and a reopen is how it is fought again, unless a chusen has
+//     ranked the group it was fought for (daihyosenRuledByChusen): the lots
+//     settled it, so it is refused. This is the reopen's
 //     one entry gate, so both doors (ReopenMatch, RequeueBlockerAndReopen)
 //     apply it, and it reads the STORED decision under the tx, never a
 //     caller's claim about it;
@@ -1464,6 +1466,22 @@ func (e *Engine) reopenResultPreconditionTx(tx state.StoreTx, compID string, com
 			allowed += ", and for a tie-break or daihyosen bout saved as a draw"
 		}
 		return validationErrorf("reopen is only for %s; correct other results via the score editor instead", allowed)
+	}
+	if h.Pool != nil && drawnSupplementaryBout(h.Pool) {
+		// A drawn representative bout the lots already ruled is settled:
+		// reopening it would leave a league completed (and the chusen ranks
+		// recorded) over a bout that is running again, and nothing puts
+		// either back.
+		lots, err := loadPoolLots(compID, []state.MatchResult{*h.Pool}, tx.LoadPoolRanks, func() (map[string][]state.PlayerStanding, error) {
+			return e.computeStandingsFrom(tx, compID)
+		})
+		if err != nil {
+			return err
+		}
+		if daihyosenRuledByChusen(h.Pool, lots.standings, lots.ranks) {
+			return validationErrorf("%s was settled by the drawing of lots, so it is not fought again. To change the order, change the drawing of lots on the Pools tab.",
+				SentenceCase(OperatorMatchLabel(comp, nil, matchID)))
+		}
 	}
 	if h.Pool != nil {
 		// A pool reopen changes no knockout slot: the pool is incomplete

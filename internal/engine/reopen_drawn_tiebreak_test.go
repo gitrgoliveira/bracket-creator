@@ -175,3 +175,51 @@ func TestReopenRefusalNamesTiebreakOnlyForPool(t *testing.T) {
 		assert.Contains(t, err.Error(), "kachinuki team matches and for matches decided by")
 	})
 }
+
+// A drawn representative bout whose group a chusen has ranked is settled by the
+// lots, and the league its ruling completed would stay complete over a running
+// bout, so the reopen is refused; before the lots it is fought again as usual,
+// and changing the lots first lifts the refusal.
+func TestReopenDrawnDaihyosen_RuledByChusenIsRefused(t *testing.T) {
+	const compID = "reopen-dh-ruled"
+	eng, store := setupTeamPoolComp(t, compID, true)
+	_, err := eng.InjectPoolDaihyosenMatches(compID)
+	require.NoError(t, err)
+
+	all, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	var dhID string
+	for i := range all {
+		all[i].Status = state.MatchStatusCompleted
+		if IsPoolDaihyosenMatchID(all[i].ID) {
+			all[i].Winner, all[i].WinnerID, all[i].Decision = "", "", "hikiwake"
+			dhID = all[i].ID
+		}
+	}
+	require.NotEmpty(t, dhID)
+	require.NoError(t, store.SavePoolMatches(compID, all))
+	eng.standingsCache.Delete(compID)
+	eng.standingsFlight.Delete(compID)
+
+	pools, err := store.LoadPools(compID)
+	require.NoError(t, err)
+	ranks := make([]RankOverride, 0, len(pools[0].Players))
+	for i, p := range pools[0].Players {
+		ranks = append(ranks, RankOverride{PlayerID: p.ID, Rank: i + 1})
+	}
+	_, err = eng.OverridePoolRanks(compID, "Pool A", ranks, ForceOptions{})
+	require.NoError(t, err)
+
+	_, err = eng.ReopenMatch(compID, dhID, "")
+	var verr *ValidationError
+	require.ErrorAs(t, err, &verr)
+	assert.Contains(t, verr.Error(), "drawing of lots")
+
+	matches, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	for _, m := range matches {
+		if m.ID == dhID {
+			assert.Equal(t, state.MatchStatusCompleted, m.Status, "the refused reopen changed nothing")
+		}
+	}
+}

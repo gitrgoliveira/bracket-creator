@@ -16,7 +16,8 @@ once per worktree), then runs `playwright test` here with `E2E_ARGS` passed
 through unchanged. It is not part of `make go/test` and does not run in CI. Run
 it before opening a PR that changes `web-mobile/`: the PR template asks.
 
-It needs Go (for the build), Node.js with npm, and a network connection on
+It needs Go (for the build), Node.js 20.15 or later in the 20 line, or 22.2 or
+later (the backup fixture uses `zlib.crc32`), with npm, and a network connection on
 every run: the first `make e2e/deps` (or `make e2e`) downloads the npm packages
 and Chromium, and each `make e2e` rebuilds the binary, whose `vendor-frontend`
 step downloads the vendored frontend libraries from unpkg every time and whose

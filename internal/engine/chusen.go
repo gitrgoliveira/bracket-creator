@@ -130,6 +130,32 @@ func lotsGroup(standings []state.PlayerStanding, sideA, sideB string) map[string
 	return group
 }
 
+// poolLots is what a drawn representative bout is judged settled on
+// (poolMatchSettled): the recorded pool ranks and the pool standings the tied
+// group is read from. loadPoolLots is the one door that fills it; the zero
+// value holds neither, so a drawn representative bout is never settled by it
+// (isBlockingEngiTBRow, which only judges tie-break rows, passes it on purpose).
+type poolLots struct {
+	ranks     map[string]map[string]int
+	standings map[string][]state.PlayerStanding
+}
+
+// loadPoolLots reads a competition's lots for matches: the recorded ranks
+// (LoadPoolRanksJudging) and the standings (lotsStandings), each only when the
+// matches hold the bout that needs it. loadRanks is a store's or a
+// transaction's LoadPoolRanks.
+func loadPoolLots(compID string, matches []state.MatchResult, loadRanks func(string) (map[string]map[string]int, error), loadStandings func() (map[string][]state.PlayerStanding, error)) (poolLots, error) {
+	ranks, err := LoadPoolRanksJudging(compID, matches, loadRanks)
+	if err != nil {
+		return poolLots{}, err
+	}
+	standings, err := lotsStandings(matches, loadStandings)
+	if err != nil {
+		return poolLots{}, err
+	}
+	return poolLots{ranks: ranks, standings: standings}, nil
+}
+
 // lotsStandings reads the pool standings a drawn representative bout's lots
 // are judged against (daihyosenRuledByChusen), through load, and only when the
 // matches hold such a bout: with none, nothing consults them, so it returns

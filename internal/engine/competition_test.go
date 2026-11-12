@@ -64,7 +64,7 @@ func TestPoolMatchesSettled(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			assert.Equal(t, tc.want, PoolMatchesSettled(tc.matches, nil, nil))
+			assert.Equal(t, tc.want, poolMatchesSettled(tc.matches, poolLots{}))
 		})
 	}
 
@@ -75,9 +75,9 @@ func TestPoolMatchesSettled(t *testing.T) {
 		{Player: domain.Player{ID: "a"}, Points: 3},
 		{Player: domain.Player{ID: "b"}, Points: 3},
 	}}
-	assert.True(t, PoolMatchesSettled([]state.MatchResult{drawnDH}, ranks, standings), "the lots settle the drawn representative bout")
-	assert.False(t, PoolMatchesSettled([]state.MatchResult{drawnDH}, nil, standings), "no lots, no settlement")
-	assert.False(t, PoolMatchesSettled([]state.MatchResult{drawnDH}, ranks, nil), "no standings to judge the group on, no settlement")
+	assert.True(t, poolMatchesSettled([]state.MatchResult{drawnDH}, poolLots{ranks: ranks, standings: standings}), "the lots settle the drawn representative bout")
+	assert.False(t, poolMatchesSettled([]state.MatchResult{drawnDH}, poolLots{standings: standings}), "no lots, no settlement")
+	assert.False(t, poolMatchesSettled([]state.MatchResult{drawnDH}, poolLots{ranks: ranks}), "no standings to judge the group on, no settlement")
 }
 
 // TestDaihyosenRuledByChusen_SharedCases drives daihyosenRuledByChusen from the

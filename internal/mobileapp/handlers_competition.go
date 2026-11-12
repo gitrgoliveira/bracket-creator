@@ -2883,7 +2883,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		//
 		// A bracketless format (league/swiss/pools: no bracket.json, which
 		// LoadBracket maps to an empty bracket + nil error) is held to its own
-		// matches instead (engine.PoolMatchesSettled, plus the Swiss round
+		// matches instead (engine.PoolMatchesSettledNow, plus the Swiss round
 		// count). Completion is IRREVERSIBLE, so a genuine I/O/parse fault
 		// fails CLOSED (500) rather than sealing with unknown state.
 		var compOut *state.Competition
@@ -2918,7 +2918,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				// No knockout rounds to check (a league, a Swiss competition,
 				// a pools-only one): the competition is finished only once its
 				// own matches are, by the rule a league completes by itself
-				// (engine.PoolMatchesSettled), and a Swiss competition only
+				// (engine.PoolMatchesSettledNow), and a Swiss competition only
 				// once every configured round has been drawn. Every caller is
 				// held to it, the anonymous self-run caller included.
 				// Fails closed: a read fault, or a corrupt overrides.json

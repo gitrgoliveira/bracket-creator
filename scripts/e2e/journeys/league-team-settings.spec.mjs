@@ -46,7 +46,8 @@ import {
 } from '../fixtures/league.mjs';
 
 const JOURNEY = 'league-team-settings';
-// Enough shiaijo for every test here to have one of its own.
+// Enough shiaijo that no two leagues played here share one. The settings league
+// is never drawn, so it may name court A again.
 const LEAGUE_CUP = { name: 'League Cup', courts: 8 };
 const TEAM_SIZE = 2;
 

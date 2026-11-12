@@ -37,7 +37,7 @@ import { openTvBoard, openViewer, tvBoard } from '../fixtures/public.mjs';
 import {
   acceptSharedRanks, awardsTabOffered, leagueRanks, openLeague, openNumberedRow, openViewerAwards, openViewerLeague,
   overviewWinner, playEncounter, readBanner, readLeagueTable, readNumberedRows, readPodium, runTiebreaker, seedLeague,
-  undoSharedRanks,
+  undoControl, undoSharedRanks,
 } from '../fixtures/league.mjs';
 
 // Enough shiaijo for each test here to have one of its own.
@@ -205,14 +205,18 @@ test.describe('league on a phone', () => {
   });
 
   test('N1: the Overview names no winner while a tie at the podium waits', async ({ page, browser, baseURL }) => {
-    test.fixme(true, 'N1: the public Overview shows a Winner badge (the first team of a three-way tie) while the tie-break banner is still up');
     test.setTimeout(480_000);
+    const shot = journeyShots('league-public/winner-too-early');
+    const { record } = recorder('winner-too-early', 'league-public/winner-too-early');
     const teams = teamsOf('N');
     const { ctx, op } = await operatorPage(browser, baseURL);
     try {
       const id = await seedRingTie(op, { name: 'Winner Too Early', court: 'C', teams });
       await openViewer(page, id);
       await expect(page.locator('.viewer__body')).toBeVisible();
+      record({ step: 'public', action: 'Overview while the tie waits', winnerBadges: await overviewWinner(page).count(), banner: (await readBanner(op)).shown });
+      await shot(page, 'overview-tie-waits', { fullPage: true });
+      test.fixme(true, 'N1: the public Overview shows a Winner badge (the first team of a three-way tie) while the tie-break banner is still up');
       expect(await overviewWinner(page).count()).toBe(0);
     } finally {
       await ctx.close();
@@ -280,7 +284,6 @@ test.describe('league on a phone', () => {
   });
 
   test('F1: after an Undo of the shared ranks nothing on the phone or the TV board reads as final', async ({ page, browser, baseURL }) => {
-    test.fixme(true, 'F1: accepted shared ranks cannot be undone, so the league never goes back to match play');
     test.setTimeout(480_000);
     const shot = journeyShots('league-public/undone');
     const { record } = recorder('undone', 'league-public/undone');
@@ -294,6 +297,9 @@ test.describe('league on a phone', () => {
         id = await seedRingTie(op, { name: 'Undone League', court: 'D', teams });
         waiting = await leagueRanks(op);
         expect((await acceptSharedRanks(op)).ok).toBe(true);
+        record({ step: 'admin', action: 'after Accept shared ranks', undoControls: await undoControl(op).count(), banner: (await readBanner(op)).shown });
+        // Recorded first, asserted after: today the accepted ranks cannot be undone.
+        test.fixme(true, 'F1: accepted shared ranks cannot be undone, so the league never goes back to match play');
         const answer = await undoSharedRanks(op);
         record({ step: 'admin', action: 'Undo shared ranks', status: answer.status, asked: answer.asked });
         expect(answer.ok).toBe(true);

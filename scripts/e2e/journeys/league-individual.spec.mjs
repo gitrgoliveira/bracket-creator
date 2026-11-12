@@ -236,6 +236,19 @@ async function deskOnceFinished(page, finished = true) {
 // The numbered rows of the tie-breakers (the rows after the regular ones).
 const tiebreakRows = (rows, regular) => rows.filter((r) => r.num > regular);
 
+// Reopen the league until `arrived(desk)` holds and return that read. When it
+// never does inside `windowMs` the last read comes back instead: the outcome
+// is then an absence (nothing was added, nothing finished), which has no state
+// to wait for, so the window's end is the evidence (Deliberate: a negative).
+async function deskWhen(page, id, arrived, windowMs = 3_000) {
+  const deadline = Date.now() + windowMs;
+  for (;;) {
+    await openLeague(page, id);
+    const desk = await readDesk(page);
+    if (arrived(desk) || Date.now() >= deadline) return desk;
+  }
+}
+
 // The public Awards tab of the competition, read on a spectator's phone.
 async function publicPodium(browser, baseURL, id) {
   const spectator = await browser.newContext({ ...PUBLIC_DEVICE, baseURL });
@@ -255,6 +268,8 @@ async function publicPodium(browser, baseURL, id) {
 // a late injection is not missed.
 async function expectNoTiebreak(page, id, regular) {
   await expect.poll(async () => (await readLeagueTable(page)).heading, { timeout: EXPECT_TIMEOUT_MS }).toBe('Final standings');
+  // Deliberate: a NEGATIVE. Nothing is to be added, so there is no state to
+  // wait for and the time is the evidence.
   await page.waitForTimeout(2_000);
   await openLeague(page, id);
   expect(tiebreakRows(await readNumberedRows(page), regular), 'no tie-breaker bout was added').toEqual([]);
@@ -334,12 +349,9 @@ test.describe('league-individual', () => {
     });
 
     await test.step('record what follows the cycle: a further round, a stranded league, or a finish', async () => {
-      await openLeague(page, id);
-      // Give the engine time to answer the last write (a further round would
-      // be added, or the league would finish) before the read is judged.
-      await page.waitForTimeout(3_000);
-      await openLeague(page, id);
-      const after = await readDesk(page);
+      // The engine answers the last write by adding a further round or by
+      // finishing the league; a stranded league is the case where neither comes.
+      const after = await deskWhen(page, id, (d) => d.finished || tiebreakRows(d.numberedRows, 9).length > 0);
       const further = tiebreakRows(after.numberedRows, 9);
       const outcome = after.finished ? 'finished with the cycle unbroken' : (further.length ? 'a further round was added' : 'stranded: not finished, nothing to play');
       const pub = await publicPodium(browser, baseURL, id);
@@ -387,10 +399,10 @@ test.describe('league-individual', () => {
     });
 
     await test.step('desk: the league is not finished; what Pools says about the drawn bout', async () => {
-      await openLeague(page, id);
-      await page.waitForTimeout(2_000);
-      await openLeague(page, id);
-      const desk = await readDesk(page);
+      // Deliberate: a NEGATIVE. The league must not finish on a drawn
+      // tie-breaker, so the predicate never holds and the window's end is the
+      // evidence.
+      const desk = await deskWhen(page, id, () => false, 2_000);
       const pub = await publicPodium(browser, baseURL, id);
       record({ step: 'pools', action: 'read with the tie-breaker saved drawn', finding: 'F3b', ...desk, public: pub,
         shot: await shot(page, 'pools-drawn-tiebreaker', { fullPage: true }) });
@@ -667,10 +679,9 @@ test.describe('league-individual', () => {
     });
 
     await test.step('record whether the hidden band of 4 adds an ippon-shobu for 4th-5th', async () => {
-      await openLeague(page, id);
-      await page.waitForTimeout(3_000);
-      await openLeague(page, id);
-      const desk = await readDesk(page);
+      // Reproduced when a tie-breaker is added; otherwise the league finishes
+      // or sits still, and the window's end is the evidence.
+      const desk = await deskWhen(page, id, (d) => d.finished || tiebreakRows(d.numberedRows, 10).length > 0);
       const added = tiebreakRows(desk.numberedRows, 10);
       const reproduced = added.length > 0;
       record({ step: 'pools', action: 'read after the ten bouts', finding: 'F6', reproduced, tiebreakers: added, ranks: await leagueRanks(page), ...desk,

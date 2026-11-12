@@ -808,7 +808,10 @@ test.describe('league-team', () => {
       // after a reload (by code the candidates answer goes empty, so a reload
       // loses the banner and its Remove).
       await test.step('the second tab after Accept, live and reloaded', async () => {
-        await tb.waitForTimeout(2_000);
+        // Deliberate: a live tab may never change (that is what F10 asks), so
+        // the wait is bounded and its end is the evidence; an update that does
+        // arrive (the banner going) ends it at once.
+        await expect.poll(async () => (await readBanner(tb)).shown, { timeout: 2_000 }).toBe(false).catch(() => {});
         const live = { banner: await readBanner(tb), table: await readLeagueTable(tb), tiebreakRows: await tiebreakRows(tb, 6, [A, B]) };
         await openLeague(tb, id);
         const reloaded = { banner: await readBanner(tb), table: await readLeagueTable(tb), tiebreakRows: await tiebreakRows(tb, 6, [A, B]) };
@@ -1149,7 +1152,10 @@ test.describe('league-team', () => {
       // The table on screen when the overlay closes, then after a reload: a
       // correction that keeps the encounter's winner changes no match's
       // status or winner, which is all the table's refetch keys on.
-      await page.waitForTimeout(2_000);
+      // Deliberate: the table is expected NOT to follow without a reload, so
+      // the wait is bounded and its end is the evidence; a table that does
+      // follow ends it at once.
+      await expect.poll(async () => (await leagueRowFigures(page, D)).IV, { timeout: 2_000 }).toBe(tally[D].IV).catch(() => {});
       first.liveFigures = { C: await leagueRowFigures(page, C), D: await leagueRowFigures(page, D) };
       first.liveTableFollowed = first.liveFigures.D.IV === tally[D].IV;
       await openLeague(page, id);

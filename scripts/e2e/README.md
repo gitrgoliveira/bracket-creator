@@ -431,8 +431,10 @@ Three fixture helpers in `fixtures/scoring.mjs` replace reading the old sync pil
 - `running(page, root)` waits until the score editor is visible and holds a
   running bout (no PRE-MATCH or CORRECTION head pill).
 
-`page.waitForTimeout` stays in four places, each marked `Deliberate:` or
-named for what it is: the dwell of a tap's pace (above); the time away of an
+`page.waitForTimeout` stays in a few places, each marked `Deliberate:` or
+named for what it is (a wait for something expected to ARRIVE polls for it
+instead, with `expect.poll` or the league journeys' `deskWhen`, which end as
+soon as it shows and keep their window only when nothing came): the dwell of a tap's pace (above); the time away of an
 `interrupt` (`awayMs`) and the operator's own delay a journey names ("3 s
 later", "300 ms after Finish"); and a NEGATIVE, where the journey asserts that
 nothing happens (no second bout appended by a bounced tap, no start after a

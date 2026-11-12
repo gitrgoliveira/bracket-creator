@@ -49,7 +49,7 @@ import {
   leagueMatrix, leagueRowFigures, leagueRows, openLeague, openLeagueSettings, openMatrixCell, openNumberedRow,
   openViewerAwards, openViewerLeague, readBanner, readChusen, readChusenRecorded, readConfirm, readLeagueSettings,
   readLeagueTable, readNumberedRows, readPodium, requestAcceptSharedRanks, runTiebreaker, saveSettings, seedLeague,
-  undoControl, undoSharedRanks, playEncounter, escape, squash,
+  undoControl, undoSharedRanks, playEncounter, playTiebreakBout, escape, squash,
 } from '../fixtures/league.mjs';
 import { chooseBackup, confirmWithPassword, openBackupPage, planRow, readZip, restoreButton } from '../fixtures/organiser.mjs';
 
@@ -579,8 +579,8 @@ test.describe('league-team', () => {
       const onConsole = await card.count();
       if (!onConsole) {
         record({ step: 'console', action: 'the daihyosen is not on the court console', screenshot: await shot(page, 'console-no-daihyosen') });
-        const ed = await openLeague(page, id).then(() => openNumberedRow(page, { num: dh.num }));
-        await playTiebreakBoutOn(ed, dh.shiro === A ? 'shiro' : 'aka');
+        await openLeague(page, id).then(() => openNumberedRow(page, { num: dh.num }));
+        await playTiebreakBout(page, { winner: dh.shiro === A ? 'shiro' : 'aka' });
         return;
       }
       const cardText = squash(await card.innerText());
@@ -921,8 +921,8 @@ test.describe('league-team', () => {
       expect(rows).toHaveLength(3);
       for (const [i, row] of rows.entries()) {
         const winner = beats.get(row.shiro) === row.aka ? row.shiro : row.aka;
-        const ed = await openNumberedRow(page, { num: row.num });
-        await playTiebreakBoutOn(ed, winner === row.shiro ? 'shiro' : 'aka');
+        await openNumberedRow(page, { num: row.num });
+        await playTiebreakBout(page, { winner: winner === row.shiro ? 'shiro' : 'aka' });
         await expect.poll(async () => (await readLeagueTable(page)).played).toBe(7 + i);
         const chusen = await readChusen(page);
         record({ step: 'cycle', action: `daihyosen ${i + 1} won by ${winner}`, chusen, banner: await readBanner(page),
@@ -1085,8 +1085,8 @@ test.describe('league-team', () => {
       await runTiebreaker(page, [A, B]);
       await expect.poll(async () => (await tiebreakRows(page, 6, [A, B])).length).toBe(1);
       const [dh] = await tiebreakRows(page, 6, [A, B]);
-      const ed = await openNumberedRow(page, { num: dh.num });
-      await playTiebreakBoutOn(ed, dh.shiro === A ? 'shiro' : 'aka');
+      await openNumberedRow(page, { num: dh.num });
+      await playTiebreakBout(page, { winner: dh.shiro === A ? 'shiro' : 'aka' });
       await expect.poll(async () => (await readLeagueTable(page)).heading).toBe('Final standings');
       await shot(page, 'finished', { fullPage: true });
     });
@@ -1483,16 +1483,4 @@ function forgeDrawnDaihyosen(file, out) {
   entries.set('manifest.json', Buffer.from(JSON.stringify(manifest, null, 2), 'utf8'));
   fs.writeFileSync(out, writeZip(entries));
   return Object.fromEntries(head.slice(0, 11).map((h, i) => [h, dh[i]]));
-}
-
-// Score a tie-breaker bout on the overlay editor `ed`: one men for `side`,
-// then Finish.
-async function playTiebreakBoutOn(ed, side) {
-  const page = ed.page();
-  await expect(ed).toBeVisible();
-  const start = ed.locator('button').filter({ hasText: /^Start match$/ }).first();
-  if (await start.isVisible()) await startMatch(page);
-  await running(page, EDITOR);
-  await awardIppon(page, side, 'M', EDITOR);
-  return finishMatch(page, EDITOR);
 }

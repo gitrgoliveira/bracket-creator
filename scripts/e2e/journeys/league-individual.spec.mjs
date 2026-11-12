@@ -236,12 +236,17 @@ const tiebreakRows = (rows, regular) => rows.filter((r) => r.num > regular);
 // never does inside `windowMs` the last read comes back instead: the outcome
 // is then an absence (nothing was added, nothing finished), which has no state
 // to wait for, so the window's end is the evidence (Deliberate: a negative).
-async function deskWhen(page, id, arrived, windowMs = 3_000) {
+// The default window is the suite's wait for a state to arrive, so a slow
+// engine is not recorded as an outcome; a caller whose outcome IS the absence
+// passes a short one. The reopens are spaced so the loop does not hammer the
+// server.
+async function deskWhen(page, id, arrived, windowMs = EXPECT_TIMEOUT_MS) {
   const deadline = Date.now() + windowMs;
   for (;;) {
     await openLeague(page, id);
     const desk = await readDesk(page);
     if (arrived(desk) || Date.now() >= deadline) return desk;
+    await page.waitForTimeout(500);
   }
 }
 

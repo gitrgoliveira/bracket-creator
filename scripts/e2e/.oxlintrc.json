@@ -1,0 +1,13 @@
+{
+  "$schema": "../../web-mobile/node_modules/oxlint/configuration_schema.json",
+  "categories": { "correctness": "off" },
+  "env": {
+    "browser": true,
+    "es2024": true,
+    "node": true
+  },
+  "rules": {
+    "no-undef": "error"
+  },
+  "ignorePatterns": ["node_modules/**", "output/**"]
+}

@@ -238,7 +238,7 @@ function rowData(tr, figureSets) {
   const names = figureSets[cells.length] || cells.map((_, i) => `c${i}`);
   const figures = Object.fromEntries(names.map((f, i) => [f, cells[i] === '' ? NaN : Number(cells[i])]));
   return {
-    rank: Number(rankText.replace(/\*$/, '')),
+    rank: rankText === '' ? NaN : Number(rankText.replace(/\*$/, '')),
     overridden: rankText.endsWith('*'),
     name: text(tr.querySelector('.pool__player-name .numbered-name__text')),
     number: text(tr.querySelector('.pool__player-name .num-prefix')),

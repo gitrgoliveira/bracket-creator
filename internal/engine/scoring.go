@@ -1962,10 +1962,10 @@ func (e *Engine) computeStandings(compId string) (map[string][]state.PlayerStand
 
 // computeStandingsFrom is the single source of truth for pool standings. It
 // reads pools/matches/competition through loader (so a transaction can pass a
-// StoreTx and see its just-applied write), and reads overrides via
-// e.store.LoadOverrides directly, overrides are read-only in the scoring path
-// and are not part of any transaction's mutation set, so no tx variant is
-// needed.
+// StoreTx and see its just-applied write), and reads the recorded pool ranks
+// through the same loader, so one caller's standings and the settled judgement
+// beside them read overrides.json by one route. Overrides are read-only in the
+// scoring path and are not part of any transaction's mutation set.
 func (e *Engine) computeStandingsFrom(loader poolStandingsLoader, compId string) (map[string][]state.PlayerStanding, error) {
 	comp, err := loader.LoadCompetition(compId)
 	if err != nil {
@@ -2012,7 +2012,7 @@ func (e *Engine) computeStandingsFrom(loader poolStandingsLoader, compId string)
 	// reason to re-read the same file once per pool -- overrides read-only in
 	// the scoring path (see this function's own doc comment above) makes a
 	// single load correct for every pool in one call.
-	overrides, err := e.store.LoadOverrides(compId)
+	poolRanks, err := loader.LoadPoolRanks(compId)
 	if err != nil {
 		return nil, fmt.Errorf("computeStandingsFrom: load overrides for %s: %w", compId, err)
 	}
@@ -2126,11 +2126,8 @@ func (e *Engine) computeStandingsFrom(loader poolStandingsLoader, compId string)
 			applyTiebreakSort(sorted, matches, IsPoolDaihyosenMatchID)
 		}
 
-		// `overrides` itself is loaded ONCE above this loop, not per pool.
-		var poolOverrides map[string]int
-		if overrides != nil {
-			poolOverrides = overrides.PoolRanks[p.PoolName]
-		}
+		// `poolRanks` itself is loaded ONCE above this loop, not per pool.
+		poolOverrides := poolRanks[p.PoolName]
 
 		// Detect ties before applying manual rank overrides. detectPoolTies walks
 		// adjacent elements, so it must run while the slice is still Points-sorted.

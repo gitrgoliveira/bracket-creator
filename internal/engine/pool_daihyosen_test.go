@@ -891,7 +891,7 @@ func TestPoolMatchesSettledNow_JudgesTheWholeTiedGroup(t *testing.T) {
 		var settled bool
 		require.NoError(t, store.WithTransaction(compID, func(tx state.StoreTx) error {
 			var serr error
-			settled, serr = eng.poolMatchesSettledNow(tx, compID)
+			settled, serr = eng.PoolMatchesSettledNow(tx, compID)
 			return serr
 		}))
 		return settled

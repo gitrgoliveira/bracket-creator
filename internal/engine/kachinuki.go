@@ -1950,13 +1950,13 @@ func reopenTargetStatus(statuses map[string]domain.CompetitorStatus, matchID, de
 }
 
 // reopenJudgesBars reports the decisions whose reopen target depends on the
-// bars on record: a default win and a draw. Any other reopens to RUNNING.
+// bars on record: kiken, fusenpai, fusensho and a draw. Any other reopens to RUNNING.
 func reopenJudgesBars(decision string) bool {
 	return domain.IsDefaultWinDecisionStr(decision) || domain.IsDrawDecisionStr(decision)
 }
 
 // reopenTargetStatusTx is reopenTargetStatus's tx-aware wrapper: it loads
-// CompetitorStatus LAZILY, only when decision is a default win or a draw (the
+// CompetitorStatus LAZILY, only when decision is kiken, fusenpai, fusensho or a draw (the
 // cases reopenTargetStatus needs it for), through the live transaction handle. A
 // load failure is logged rather than discarded and defaults to RUNNING
 // (today's behaviour), since a read the operator cannot diagnose must never

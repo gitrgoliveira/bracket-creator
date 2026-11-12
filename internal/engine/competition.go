@@ -33,25 +33,14 @@ func PoolMatchesSettled(matches []state.MatchResult, poolRanks map[string]map[st
 	return true
 }
 
-// PoolMatchesSettledIn is PoolMatchesSettled for a caller that holds no
-// standings: it reads them through loader (a store or a transaction), but only
-// when a drawn representative bout needs them.
-func (e *Engine) PoolMatchesSettledIn(loader poolStandingsLoader, compID string, matches []state.MatchResult, poolRanks map[string]map[string]int) (bool, error) {
-	standings, err := lotsStandings(matches, func() (map[string][]state.PlayerStanding, error) {
-		return e.computeStandingsFrom(loader, compID)
-	})
-	if err != nil {
-		return false, err
-	}
-	return PoolMatchesSettled(matches, poolRanks, standings), nil
-}
-
-// poolMatchesSettledNow is PoolMatchesSettled over everything a transaction
+// PoolMatchesSettledNow is PoolMatchesSettled over everything a transaction
 // holds now: its pool matches, the recorded ranks and the standings the lots are
-// judged on, all read through tx. A completion decided under the competition's
-// lock asks this and not the scan that preceded it, since a correction landing
-// in between can change the tied group a chusen had to rank.
-func (e *Engine) poolMatchesSettledNow(tx state.StoreTx, compID string) (bool, error) {
+// judged on, all read through tx (the standings only when a drawn representative
+// bout needs them). A completion decided under the competition's lock asks this
+// and not a scan that preceded it, since a correction landing in between can
+// change the tied group a chusen had to rank. A corrupt overrides.json comes
+// back wrapping state.ErrCorruptOverrides.
+func (e *Engine) PoolMatchesSettledNow(tx state.StoreTx, compID string) (bool, error) {
 	matches, err := tx.LoadPoolMatches(compID)
 	if err != nil {
 		return false, err
@@ -60,18 +49,27 @@ func (e *Engine) poolMatchesSettledNow(tx state.StoreTx, compID string) (bool, e
 	if err != nil {
 		return false, err
 	}
-	return e.PoolMatchesSettledIn(tx, compID, matches, poolRanks)
+	standings, err := lotsStandings(matches, func() (map[string][]state.PlayerStanding, error) {
+		return e.computeStandingsFrom(tx, compID)
+	})
+	if err != nil {
+		return false, err
+	}
+	return PoolMatchesSettled(matches, poolRanks, standings), nil
 }
 
 // LoadPoolRanksJudging reads a competition's recorded pool-rank overrides
 // through load (a store or a transaction's LoadPoolRanks), but only when the
-// pool matches hold a representative (daihyosen) bout: the one thing the ranks
-// judge (a drawn bout the lots settled, the cycle check). With none, nothing
-// reads them, so it returns nil without touching overrides.json: an individual
-// competition, or a team one before any tie, neither pays the read on every
-// score nor fails on a corrupt file it never needed.
+// pool matches hold a COMPLETED representative (daihyosen) bout: the one thing
+// the ranks judge (a drawn bout the lots settled, the cycle check after a
+// decided one). With none, nothing reads them, so it returns nil without
+// touching overrides.json: an individual competition, or a team one before any
+// tie or while its representative bout is still scheduled or running, neither
+// pays the read on every score nor fails on a corrupt file it never needed.
 func LoadPoolRanksJudging(compID string, matches []state.MatchResult, load func(string) (map[string]map[string]int, error)) (map[string]map[string]int, error) {
-	if !slices.ContainsFunc(matches, func(m state.MatchResult) bool { return IsPoolDaihyosenMatchID(m.ID) }) {
+	if !slices.ContainsFunc(matches, func(m state.MatchResult) bool {
+		return m.Status == state.MatchStatusCompleted && IsPoolDaihyosenMatchID(m.ID)
+	}) {
 		return nil, nil
 	}
 	return load(compID)
@@ -564,7 +562,7 @@ func (e *Engine) maybeAutoCompletePoolsRunning(compID string, comp *state.Compet
 		// Re-check under the lock, on the matches, recorded ranks and standings
 		// as they stand now (a correction or a chusen landing since the scan
 		// above would otherwise be judged against the old ones).
-		settled, ferr := e.poolMatchesSettledNow(tx, compID)
+		settled, ferr := e.PoolMatchesSettledNow(tx, compID)
 		if ferr != nil {
 			return nil, ferr
 		}

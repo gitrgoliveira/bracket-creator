@@ -846,6 +846,9 @@ func TestCompletedPoolNames_CorruptOverrides_PropagatesError(t *testing.T) {
 	}))
 	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
 		{ID: "Pool A-0", SideA: "TeamA", SideB: "TeamB", Winner: "TeamA", Status: state.MatchStatusCompleted},
+		// A completed representative bout is what the recorded ranks judge
+		// (LoadPoolRanksJudging); with none, nothing reads overrides.json.
+		{ID: "Pool A-DH-0", SideA: "TeamA", SideB: "TeamB", Winner: "TeamA", Status: state.MatchStatusCompleted},
 	}))
 
 	corruptOverridesFile(t, store, compID)
@@ -933,9 +936,16 @@ func TestPoolCompletion_ReadsOverridesOnlyForARepresentativeBout(t *testing.T) {
 
 	dh := regular
 	dh.ID = "Pool A-DH-0"
+	scheduled := dh
+	scheduled.Status = state.MatchStatusScheduled
+	scheduled.Winner, scheduled.WinnerID = "", ""
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{regular, scheduled}))
+	_, err = eng.poolCompletion(store, compID, comp, noStandings)
+	assert.NoError(t, err, "a representative bout not yet fought is judged by no rank, so the corrupt file is not read")
+
 	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{regular, dh}))
 	_, err = eng.poolCompletion(store, compID, comp, noStandings)
-	assert.Error(t, err, "a representative bout is judged by the ranks, so a corrupt file surfaces")
+	assert.Error(t, err, "a completed representative bout is judged by the ranks, so a corrupt file surfaces")
 }
 
 // --- Finding 8 / nit 16: ReplaceParticipantInDraw's bracket-ambiguity check ---

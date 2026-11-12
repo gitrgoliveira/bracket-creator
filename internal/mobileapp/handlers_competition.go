@@ -2892,7 +2892,6 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		// tx.LoadPoolMatches skips the first-read legacy conversion the
 		// store's own read runs; run it first, as AdvanceSwissRound does.
 		store.EnsureLegacyUpgraded(id)
-		var ranksFault error
 		txErr := store.WithTransaction(id, func(tx state.StoreTx) error {
 			current, lerr := tx.LoadCompetition(id)
 			if lerr != nil {
@@ -2922,20 +2921,10 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				// (engine.PoolMatchesSettled), and a Swiss competition only
 				// once every configured round has been drawn. Every caller is
 				// held to it, the anonymous self-run caller included.
-				matches, merr := tx.LoadPoolMatches(id)
-				if merr != nil {
-					matchesFault = merr
-					return nil
-				}
-				// The recorded chusen ranks settle a drawn representative
-				// bout (engine.PoolMatchesSettled); read here, beside the
-				// matches the lock holds. Fails closed, like the matches.
-				poolRanks, rerr := engine.LoadPoolRanksJudging(id, matches, tx.LoadPoolRanks)
-				if rerr != nil {
-					ranksFault = rerr
-					return nil
-				}
-				settled, serr := eng.PoolMatchesSettledIn(tx, id, matches, poolRanks)
+				// Fails closed: a read fault, or a corrupt overrides.json
+				// (the recorded chusen ranks settle a drawn representative
+				// bout), refuses the completion.
+				settled, serr := eng.PoolMatchesSettledNow(tx, id)
 				if serr != nil {
 					matchesFault = serr
 					return nil
@@ -2962,12 +2951,8 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			return
 		}
 		if matchesFault != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load matches"})
-			return
-		}
-		if ranksFault != nil {
-			if !respondIfCorruptOverrides(c, ranksFault) {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load overrides"})
+			if !respondIfCorruptOverrides(c, matchesFault) {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load matches"})
 			}
 			return
 		}

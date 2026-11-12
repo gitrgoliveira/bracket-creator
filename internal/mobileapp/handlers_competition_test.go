@@ -6056,3 +6056,37 @@ func TestChusenCandidatesHandler_CorruptOverrides_TerminalError(t *testing.T) {
 	require.Equal(t, http.StatusUnprocessableEntity, w.Code, "body: %s", w.Body.String())
 	assert.Contains(t, w.Body.String(), "corrupt_overrides")
 }
+
+// TestCompleteHandler_CorruptOverrides_TerminalError: POST /complete on a
+// league judges its pool matches by the recorded chusen ranks once a completed
+// representative bout exists, so a corrupt overrides.json is the same terminal
+// 422 the other endpoints answer with, not an opaque 500.
+func TestCompleteHandler_CorruptOverrides_TerminalError(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	compID := "corrupt-ov-complete"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: compID, Format: state.CompFormatLeague, TeamSize: 3, Kind: "team", Status: state.CompStatusPools,
+	}))
+	require.NoError(t, store.SavePools(compID, []helper.Pool{
+		{PoolName: "Pool A", Players: []helper.Player{
+			{ID: "a", Name: "TeamA", Dojo: "DojoA"}, {ID: "b", Name: "TeamB", Dojo: "DojoB"},
+		}},
+	}))
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{ID: "Pool A-0", SideA: "TeamA", SideAID: "a", SideB: "TeamB", SideBID: "b",
+			Winner: "TeamA", WinnerID: "a", Status: state.MatchStatusCompleted},
+		{ID: "Pool A-DH-0", SideA: "TeamA", SideAID: "a", SideB: "TeamB", SideBID: "b",
+			Winner: "TeamA", WinnerID: "a", Status: state.MatchStatusCompleted},
+	}))
+
+	overridesPath := filepath.Join(store.GetFolder(), "competitions", compID, "overrides.json")
+	require.NoError(t, os.WriteFile(overridesPath, []byte("{not valid json"), 0o600))
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/competitions/"+compID+"/complete", nil)
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusUnprocessableEntity, w.Code, "body: %s", w.Body.String())
+	assert.Contains(t, w.Body.String(), "corrupt_overrides")
+}

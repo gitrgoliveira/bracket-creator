@@ -30,7 +30,6 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import zlib from 'node:zlib';
 import { test, expect } from '../fixtures/test.mjs';
 import { OPERATOR_DEVICE, PUBLIC_DEVICE } from '../fixtures/devices.mjs';
 import { journeyShots } from '../fixtures/shots.mjs';
@@ -51,7 +50,7 @@ import {
   readLeagueTable, readNumberedRows, readPodium, requestAcceptSharedRanks, runTiebreaker, saveSettings, seedLeague,
   undoControl, undoSharedRanks, playEncounter, playTiebreakBout, escape, squash,
 } from '../fixtures/league.mjs';
-import { chooseBackup, confirmWithPassword, openBackupPage, planRow, readZip, restoreButton } from '../fixtures/organiser.mjs';
+import { chooseBackup, confirmWithPassword, formatCsv, openBackupPage, parseCsv, planRow, readZip, restoreButton, writeZip } from '../fixtures/organiser.mjs';
 
 // Enough shiaijo for every test here to have one of its own (A to J).
 const LEAGUE_CUP = { name: 'League Cup', courts: 10 };
@@ -251,6 +250,11 @@ function finalizeAnswer(page) {
   return answered;
 }
 
+// Whether `locator` shows within `timeout`. The court console draws its queue
+// after its heading (openShiaijo waits only for the heading), so a bare
+// count() taken right after opening it can read 0 before the queue is there.
+const appears = (locator, timeout = 10_000) => locator.first().waitFor({ state: 'visible', timeout }).then(() => true, () => false);
+
 // Close an overlay score editor left open on a finished match.
 async function closeEditor(page) {
   const ed = page.locator(EDITOR);
@@ -286,13 +290,17 @@ async function saveCorrection(page, ed) {
     const reason = page.locator('.reason-prompt').last();
     await expect(reason).toBeVisible();
     await reason.getByRole('button', { name: 'Confirm', exact: true }).tap();
-    const warned = await confirmDialog(page).waitFor({ state: 'visible', timeout: 5_000 }).then(() => true, () => false);
+    const saved = () => statuses.some((s) => s >= 200 && s < 300);
+    // Whichever comes first: the write is answered, or the warning is up (the
+    // 409 that raises it is not a success status).
+    await expect.poll(async () => saved() || confirmDialog(page).isVisible(), { message: 'the correction was saved or warned about' }).toBe(true);
+    const warned = !saved() && await confirmDialog(page).isVisible();
     let warning = null;
     if (warned) {
       warning = await readConfirm(page);
       await answerConfirm(page, TEXT.changeAnyway);
     }
-    await expect.poll(() => statuses.some((s) => s >= 200 && s < 300), { message: 'the correction was saved' }).toBe(true);
+    await expect.poll(saved, { message: 'the correction was saved' }).toBe(true);
     await settled(page);
     return { warned, warning, statuses: [...statuses] };
   } finally {
@@ -576,8 +584,7 @@ test.describe('league-team', () => {
     await test.step('court console: the daihyosen in the queue (F12), decided by one men for A', async () => {
       await openShiaijo(page, court);
       const card = upNextCard(page);
-      const onConsole = await card.count();
-      if (!onConsole) {
+      if (!await appears(card)) {
         record({ step: 'console', action: 'the daihyosen is not on the court console', screenshot: await shot(page, 'console-no-daihyosen') });
         await openLeague(page, id).then(() => openNumberedRow(page, { num: dh.num }));
         await playTiebreakBout(page, { winner: dh.shiro === A ? 'shiro' : 'aka' });
@@ -597,7 +604,8 @@ test.describe('league-team', () => {
       expect([pair.shiro, pair.aka].sort()).toEqual([A, B].sort());
       await awardIppon(page, pair.shiro === A ? 'shiro' : 'aka', 'M');
       const label = squash(await finishButton(page).innerText());
-      record({ step: 'console', action: 'daihyosen before Finish', finishLabel: label });
+      record({ step: 'console', action: 'daihyosen before Finish', finishLabel: label,
+        screenshot: await shot(page, 'console-daihyosen-before-finish', { fullPage: true }) });
       await finishMatch(page);
       record({ step: 'console', action: 'after the daihyosen', courtDone: await courtDone(page).count(),
         doneText: (await courtDone(page).count()) ? squash(await courtDone(page).innerText()) : '',
@@ -692,7 +700,6 @@ test.describe('league-team', () => {
         expect(table).toMatchObject({ played: 6, total: 6 });
         expect(await leagueRowFigures(page, A)).toMatchObject(figuresOf(tally, A));
         expect(await leagueRowFigures(page, B)).toMatchObject(figuresOf(tally, B));
-        expect([ranks[A], ranks[B]].sort()).toEqual(expect.arrayContaining([1]));
         expect(ranks[C]).toBe(3);
         expect(ranks[D]).toBe(4);
         expect((await readBanner(page)).shown).toBe(false);
@@ -713,7 +720,11 @@ test.describe('league-team', () => {
         expect(podium.places[2] && podium.places[2].name).toBe(C);
       });
 
-      test.fixme(true, 'F1: accepted shared ranks cannot be undone, so a wrong tap on Accept has no way back');
+      test.fixme(true, 'F1, N2: accepted shared ranks cannot be undone, and never read as shared (A and B read 1 and 2)');
+
+      await test.step('fixed: the accepted tie reads as shared, both teams at rank 1 (N2)', async () => {
+        expect(await ranksShown(page)).toMatchObject({ [A]: 1, [B]: 1, [C]: 3, [D]: 4 });
+      });
 
       await test.step('fixed: both tabs offer Undo shared ranks beside the accepted tie (F1, F10)', async () => {
         await expect(undoControl(page)).toBeVisible();
@@ -743,18 +754,19 @@ test.describe('league-team', () => {
   });
 
   // F3: Accept while the tie-breaker is scheduled but not fought.
-  test('accept with a scheduled daihyosen: the banner stays, the confirm names the bout, accepting removes it (F3)', async ({ page }) => {
+  test('accept with a scheduled daihyosen: the banner stays, the confirm names the bout, accepting removes it (F3)', async ({ page, browser, baseURL }) => {
     test.setTimeout(LONG);
     const shot = journeyShots('league-team/accept-scheduled-dh');
     const { record } = recorder('accept-scheduled-dh', 'league-team/accept-scheduled-dh');
     const teams = FOUR_TEAMS('Q');
     const { A, B, C, D } = rolesOf('Q');
     const script = twoWayTie({ A, B, C, D });
+    let id;
     let asked;
 
     await test.step('seed, play, Run tie-breaker', async () => {
       await enterTournament(page, LEAGUE_CUP);
-      await seedAndPlay(page, { name: 'Scheduled DH League', court: 'D', teams, script });
+      id = await seedAndPlay(page, { name: 'Scheduled DH League', court: 'D', teams, script });
       await runTiebreaker(page, [A, B]);
       await expect.poll(async () => (await tiebreakRows(page, 6, [A, B])).length).toBe(1);
     });
@@ -769,16 +781,39 @@ test.describe('league-team', () => {
     });
 
     let after;
-    await test.step('Accept shared ranks with the daihyosen not fought', async () => {
-      const res = await acceptSharedRanks(page, { allowRefusal: true });
-      asked = res.asked;
-      after = {
-        table: await readLeagueTable(page), banner: await readBanner(page),
-        tiebreakRows: await tiebreakRows(page, 6, [A, B]), undoControl: await undoControl(page).count(),
-      };
-      record({ step: 'F3', action: 'Accept shared ranks with the daihyosen scheduled', asked, answer: { status: res.status, body: res.body },
-        ...after, screenshot: await shot(page, 'after-accept-dh-scheduled', { fullPage: true }) });
-    });
+    const second = await secondOperator(browser, baseURL);
+    try {
+      const tb = second.page;
+      await test.step('a second tab holds the banner', async () => {
+        await openLeague(tb, id);
+        await expect.poll(async () => (await readBanner(tb)).shown).toBe(true);
+      });
+
+      await test.step('Accept shared ranks with the daihyosen not fought', async () => {
+        const res = await acceptSharedRanks(page, { allowRefusal: true });
+        asked = res.asked;
+        after = {
+          table: await readLeagueTable(page), banner: await readBanner(page),
+          tiebreakRows: await tiebreakRows(page, 6, [A, B]), undoControl: await undoControl(page).count(),
+        };
+        record({ step: 'F3', action: 'Accept shared ranks with the daihyosen scheduled', asked, answer: { status: res.status, body: res.body },
+          ...after, screenshot: await shot(page, 'after-accept-dh-scheduled', { fullPage: true }) });
+      });
+
+      // F3, F10: what the second tab reads once the flag is set, live and
+      // after a reload (by code the candidates answer goes empty, so a reload
+      // loses the banner and its Remove).
+      await test.step('the second tab after Accept, live and reloaded', async () => {
+        await tb.waitForTimeout(2_000);
+        const live = { banner: await readBanner(tb), table: await readLeagueTable(tb), tiebreakRows: await tiebreakRows(tb, 6, [A, B]) };
+        await openLeague(tb, id);
+        const reloaded = { banner: await readBanner(tb), table: await readLeagueTable(tb), tiebreakRows: await tiebreakRows(tb, 6, [A, B]) };
+        record({ step: 'F3', action: 'second tab after Accept', live, reloaded,
+          screenshot: await shot(tb, 'second-tab-after-accept-reloaded', { fullPage: true }) });
+      });
+    } finally {
+      await second.ctx.close();
+    }
 
     test.fixme(true, 'F3: Accept with a tie-breaker scheduled empties the banner and leaves the league waiting on a bout the organiser declined');
 
@@ -942,7 +977,7 @@ test.describe('league-team', () => {
       }
     });
 
-    test.fixme(true, 'F3b: Accept on a fought daihyosen cycle leaves the league uncompletable (design item 4)');
+    test.fixme(true, 'F3c: Accept on a fought daihyosen cycle leaves the league uncompletable (design item 4)');
 
     await test.step('fixed: Accept is offered on the cycle, names lots as the other way, and finishes the league', async () => {
       expect(offered).toBe(true);
@@ -1034,6 +1069,11 @@ test.describe('league-team', () => {
           .then(() => true, () => false);
         record({ step: 'F2', action: 'tab A: Accept confirmed', answer, sentenceShown, banner: await readBanner(page),
           table: await readLeagueTable(page), screenshot: await shot(page, 'tab-a-after-stale-accept', { fullPage: true }) });
+        // F10, the no-change branch: what tab B reads after Accept set the flag
+        // on a league that is not finished (it broadcasts schedule_updated only).
+        await openLeague(tb, id);
+        record({ step: 'F10', action: 'tab B after the stale Accept', banner: await readBanner(tb), table: await readLeagueTable(tb),
+          screenshot: await shot(tb, 'tab-b-after-stale-accept', { fullPage: true }) });
       });
 
       await test.step('tab B ends the reopened encounter at the court', async () => {
@@ -1122,7 +1162,9 @@ test.describe('league-team', () => {
       await openShiaijo(page, court);
       const pair = { shiro: '', aka: '' };
       const rowOnConsole = completedRowFor(page, { shiro: C, aka: D });
-      const onConsole = await rowOnConsole.count();
+      // Waited for: the Completed list is drawn after the heading, and a
+      // count taken before it would send the correction down the Pools path.
+      const onConsole = await appears(rowOnConsole);
       record({ step: 'F2b', action: 'console of a finished league', completedRowShown: onConsole,
         courtDone: (await courtDone(page).count()) ? squash(await courtDone(page).innerText()) : '',
         screenshot: await shot(page, 'console-finished-league', { fullPage: true }) });
@@ -1149,23 +1191,23 @@ test.describe('league-team', () => {
       await expect.poll(async () => (await leagueRowFigures(page, C)).T).toBe(tally[C].T);
       secondFix.table = await readLeagueTable(page);
       secondFix.banner = await readBanner(page);
-      secondFix.onConsole = !!onConsole;
+      secondFix.onConsole = onConsole;
       record({ step: 'F2b', action: 'correction from the court console that makes a tie at 3rd', ...secondFix,
         screenshot: await shot(page, 'after-correction-2', { fullPage: true }) });
       expect(await leagueRowFigures(page, C)).toMatchObject(figuresOf(tally, C));
       expect(await leagueRowFigures(page, D)).toMatchObject(figuresOf(tally, D));
     });
 
-    test.fixme(true, 'F2b: a correction on a finished league moves the table and podium with no warning, and a new tie is never asked');
+    test.fixme(true, 'F2b, N7: a correction on a finished league moves the table and podium with no warning, a new tie is never asked, and the table on screen keeps the old figures until a reload');
 
     await test.step('fixed: both corrections were warned first; the first kept the league finished', async () => {
       expect(first.warned).toBe(true);
       expect(first.warning.message).toContain(TEXT.finishedLeague);
       expect(first.warning.buttons).toEqual(expect.arrayContaining([TEXT.changeAnyway, TEXT.cancel]));
       expect(first.table.heading).toBe('Final standings');
-      // Recorded, not asserted here (first.liveTableFollowed): the table on
-      // screen kept the old figures until a reload, because the correction
-      // left the encounter's winner as it was. A finding of its own, not F2b's.
+      // N7: the table on screen follows a correction that keeps the
+      // encounter's winner, without a reload.
+      expect(first.liveTableFollowed, 'the table on screen followed the correction').toBe(true);
       expect(secondFix.onConsole).toBe(true);
       expect(secondFix.warned).toBe(true);
       expect(secondFix.warning.message).toContain(TEXT.finishedLeague);
@@ -1382,77 +1424,6 @@ test.describe('league-team', () => {
 // archive is the app's own backup of the league with its scheduled daihyosen
 // rewritten as a finished bout with no winner; the manifest's size and SHA-256
 // for that file are rewritten with it (the restore checks both).
-
-// RFC 4180 rows of `text` (quoted fields may hold commas, quotes, newlines).
-function parseCsv(text) {
-  const rows = [];
-  let row = [];
-  let field = '';
-  let quoted = false;
-  for (let i = 0; i < text.length; i += 1) {
-    const ch = text[i];
-    if (quoted) {
-      if (ch === '"' && text[i + 1] === '"') { field += '"'; i += 1; } else if (ch === '"') quoted = false;
-      else field += ch;
-    } else if (ch === '"') quoted = true;
-    else if (ch === ',') { row.push(field); field = ''; } else if (ch === '\n' || ch === '\r') {
-      if (ch === '\r' && text[i + 1] === '\n') i += 1;
-      row.push(field); rows.push(row); row = []; field = '';
-    } else field += ch;
-  }
-  if (field !== '' || row.length) { row.push(field); rows.push(row); }
-  return rows;
-}
-
-// The rows back as CSV, quoting a field only where it needs it.
-const formatCsv = (rows) => rows.map((r) => r.map((f) => (/[",\r\n]|^\s/.test(f) ? `"${f.replace(/"/g, '""')}"` : f)).join(',')).join('\n') + '\n';
-
-// A zip of `entries` (name -> Buffer), every entry stored.
-function writeZip(entries) {
-  const locals = [];
-  const centrals = [];
-  let offset = 0;
-  for (const [name, data] of entries) {
-    const nameBuf = Buffer.from(name, 'utf8');
-    const crc = zlib.crc32(data);
-    const local = Buffer.alloc(30);
-    local.writeUInt32LE(0x04034b50, 0);
-    local.writeUInt16LE(20, 4);
-    local.writeUInt16LE(0x0800, 6); // UTF-8 names
-    local.writeUInt16LE(0, 8); // stored
-    local.writeUInt16LE(0, 10);
-    local.writeUInt16LE(0x21, 12); // 1980-01-01
-    local.writeUInt32LE(crc, 14);
-    local.writeUInt32LE(data.length, 18);
-    local.writeUInt32LE(data.length, 22);
-    local.writeUInt16LE(nameBuf.length, 26);
-    local.writeUInt16LE(0, 28);
-    const central = Buffer.alloc(46);
-    central.writeUInt32LE(0x02014b50, 0);
-    central.writeUInt16LE(20, 4);
-    central.writeUInt16LE(20, 6);
-    central.writeUInt16LE(0x0800, 8);
-    central.writeUInt16LE(0, 10);
-    central.writeUInt16LE(0, 12);
-    central.writeUInt16LE(0x21, 14);
-    central.writeUInt32LE(crc, 16);
-    central.writeUInt32LE(data.length, 20);
-    central.writeUInt32LE(data.length, 24);
-    central.writeUInt16LE(nameBuf.length, 28);
-    central.writeUInt32LE(offset, 42);
-    locals.push(local, nameBuf, data);
-    centrals.push(central, nameBuf);
-    offset += 30 + nameBuf.length + data.length;
-  }
-  const dir = Buffer.concat(centrals);
-  const end = Buffer.alloc(22);
-  end.writeUInt32LE(0x06054b50, 0);
-  end.writeUInt16LE(entries.size, 8);
-  end.writeUInt16LE(entries.size, 10);
-  end.writeUInt32LE(dir.length, 12);
-  end.writeUInt32LE(offset, 16);
-  return Buffer.concat([...locals, dir, end]);
-}
 
 // Write to `out` the backup `file` with its one daihyosen row (MatchIdx
 // "DH-<n>") saved as a finished hikiwake. Returns the row as rewritten.

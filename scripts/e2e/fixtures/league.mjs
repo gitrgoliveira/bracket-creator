@@ -23,17 +23,19 @@
 //                         The readers are here so a journey can record that and
 //                         use the cell wherever it is drawn
 //   the tie-break banner  "Tie-breaker required" (team league, status pools):
-//                         one group per consequential tie, Run tie-breaker or
-//                         Remove unscored tie-breaker, Accept shared ranks and
-//                         its confirm; the Undo control the fix adds
+//                         one group per consequential tie, Run tie-breaker (its
+//                         Remove unscored tie-breaker button is read, not
+//                         tapped), Accept shared ranks and its confirm; the
+//                         Undo control the fix adds
 //   the drawn-bout notice the line the fix adds above the table for a
 //                         tie-breaker saved as a draw, with Open bout
-//   the chusen panel      "Chusen (drawing lots) required" / "... recorded"
+//   the chusen panel      "Chusen (drawing lots) required" / "... recorded",
+//                         read only (no journey records lots yet)
 //   the settings          "Break ties for top" pills (team league only) and the
 //                         "Award two joint 3rd places" checkbox on
 //                         /admin/competition/:id/settings; both lock once a draw
 //                         exists, so they are set before Generate draw
-//   the public page       the League tab, the Overview's league summary, the
+//   the public page       the League tab, the Overview's Winner badge, the
 //                         Awards tab and its podium
 //
 // The controls the league review's fix adds (the Undo control and its confirm,
@@ -60,20 +62,16 @@ export const TEXT = {
   chusenRecordedTitle: 'Chusen (drawing lots) recorded',
   run: 'Run tie-breaker',
   remove: 'Remove unscored tie-breaker',
-  removeConfirm: 'Remove',
   // The banner's button reads "Accept shared ranks / no tie-breaker" today.
   accept: /^Accept shared ranks/,
   acceptConfirm: 'Accept shared ranks',
   cancel: 'Cancel',
-  recordChusen: 'Record chusen result',
   // fix: the Undo control, its line and its confirm.
   undo: 'Undo shared ranks',
   undoConfirm: 'Undo shared ranks',
   acceptedLine: /^Shared ranks accepted:/,
   undoQuestion: 'Undo the shared ranks? The league goes back to match play and the tie is asked again: run a tie-breaker or accept shared ranks.',
-  undoDeadCourt: (court) => `Matches on shiaijo ${court}, which the tournament no longer has, become unassigned.`,
-  // fix: the Accept confirm. `place` is written as the app writes it.
-  acceptQuestion: (teams, place) => `Accept shared ranks? ${teams.join(', ')} share ${place}. The competition finishes now. Undo shared ranks brings the question back.`,
+  // fix: the Accept confirm.
   acceptRemovesBout: (a, b) => `This also removes the tie-breaker not yet fought: ${a} v ${b}.`,
   acceptCycleLots: 'Drawing lots is the other way to separate them.',
   // fix: finalize refused while a regular match is unfinished.
@@ -81,8 +79,7 @@ export const TEXT = {
   // fix: a result changed on a finished league.
   finishedLeague: 'This league has finished. Changing this result can change the final table and podium. If it leaves a new tie at a podium place, the league goes back to match play to settle it.',
   changeAnyway: 'Change it anyway',
-  // fix: a tie-breaker needs a winner (the write's refusal, and the notice).
-  tiebreakNeedsWinner: 'A tie-breaker needs a winner: continue with encho, then decide by hantei.',
+  // fix: a tie-breaker needs a winner (the notice on a saved draw).
   drawnBout: (a, b) => `${a} v ${b} was saved as a draw. A tie-breaker needs a winner: open it and decide by encho or hantei.`,
   openBout: 'Open bout',
   // settings
@@ -345,16 +342,9 @@ export const leagueMatrix = (root) => root.locator('table.league-matrix');
 
 // The matrix cell of `rowName` against `colName`. Its accessible name is
 // "Match: <row (dojo)> vs <col (dojo)>: <result>", the dojo only when known.
-export const matrixCell = (root, rowName, colName) => leagueMatrix(root).getByLabel(new RegExp(
+const matrixCell = (root, rowName, colName) => leagueMatrix(root).getByLabel(new RegExp(
   `^Match: ${escape(rowName)}( \\([^)]*\\))? vs ${escape(colName)}( \\([^)]*\\))?: `,
 ));
-
-// What the cell says of the row competitor: "Win", "Loss", "Draw", "Pending",
-// "Now" or "Result not attributed".
-export async function matrixResult(root, rowName, colName) {
-  const label = await matrixCell(root, rowName, colName).getAttribute('aria-label');
-  return label.slice(label.lastIndexOf(': ') + 2);
-}
 
 // Tap a matrix cell and return the overlay score editor it opened.
 export async function openMatrixCell(page, rowName, colName) {
@@ -445,7 +435,7 @@ const titled = (page, title) => page.locator('.league-tiebreak').filter({
 
 export const tiebreakBanner = (page) => titled(page, TEXT.bannerTitle);
 export const bannerGroups = (page) => tiebreakBanner(page).locator('.league-tiebreak__group');
-export const bannerError = (page) => tiebreakBanner(page).locator('.league-tiebreak__err');
+const bannerError = (page) => tiebreakBanner(page).locator('.league-tiebreak__err');
 export const acceptButton = (page) => tiebreakBanner(page).getByRole('button', { name: TEXT.accept });
 
 // "Position 3" -> { min: 3, max: 3 }; "Positions 1–2" -> { min: 1, max: 2 }.
@@ -493,9 +483,9 @@ export async function bannerGroup(page, teams) {
   return bannerGroups(page).nth(i);
 }
 
-// The answer to the next league tie-break write: `method` POST (Run), DELETE
-// (Remove), or with `tail` '/finalize' POST (Accept) and DELETE (Undo, the
-// fix). Armed before the tap. Resolves { status, ok, body }.
+// The answer to the next league tie-break write: POST (Run), or with `tail`
+// '/finalize' POST (Accept) and DELETE (Undo, the fix). Armed before the tap.
+// Resolves { status, ok, body }.
 function tiebreakWrite(page, method, tail = '') {
   const re = new RegExp(`^/api/competitions/[^/]+/league-tiebreak${escape(tail)}$`);
   const answered = page.waitForResponse((r) => r.request().method() === method && re.test(new URL(r.url()).pathname),
@@ -519,23 +509,6 @@ export async function runTiebreaker(page, teams, { allowRefusal = false } = {}) 
   const res = await landed(answered, 'Run tie-breaker', allowRefusal);
   if (res.ok) await expect(group.getByRole('button', { name: TEXT.remove, exact: true })).toBeVisible();
   return res;
-}
-
-// Tap Remove unscored tie-breaker on the group of `teams`, leaving its confirm
-// open; returns what the confirm says.
-export async function requestRemoveTiebreaker(page, teams) {
-  const group = await bannerGroup(page, teams);
-  await group.getByRole('button', { name: TEXT.remove, exact: true }).tap();
-  return readConfirm(page);
-}
-
-// Remove the unscored tie-breaker of `teams`: tap, answer the confirm with
-// Remove, return the server's answer.
-export async function removeTiebreaker(page, teams, { allowRefusal = false } = {}) {
-  const asked = await requestRemoveTiebreaker(page, teams);
-  const answered = tiebreakWrite(page, 'DELETE');
-  await answerConfirm(page, TEXT.removeConfirm);
-  return { asked, ...(await landed(answered, 'Remove unscored tie-breaker', allowRefusal)) };
 }
 
 // Tap Accept shared ranks, leaving its confirm open; returns what it says.
@@ -604,7 +577,7 @@ export async function openDrawnBout(page, { a, b } = {}) {
 // ---------------------------------------------------------- the chusen panel
 
 export const chusenPanel = (page) => titled(page, TEXT.chusenTitle);
-export const chusenRecordedPanel = (page) => titled(page, TEXT.chusenRecordedTitle);
+const chusenRecordedPanel = (page) => titled(page, TEXT.chusenRecordedTitle);
 
 // The ties waiting for lots: [{ pool, teams, min, max }].
 export async function readChusen(page) {
@@ -635,33 +608,9 @@ export async function readChusenRecorded(page) {
   }));
 }
 
-// Record the lots for the tie holding `order`'s teams: `order` lists the teams
-// in the finishing order the lots gave. Types each team's position, taps
-// Record chusen result, and returns the server's answer to the override-rank
-// PUT ({ status, ok, body }).
-export async function recordChusen(page, order) {
-  const want = [...order].sort().join('|');
-  const groups = await readChusen(page);
-  const i = groups.findIndex((g) => [...g.teams].sort().join('|') === want);
-  if (i < 0) throw new Error(`recordChusen: no chusen tie of ${order.join(', ')} (ties: ${JSON.stringify(groups.map((g) => g.teams))})`);
-  const group = chusenPanel(page).locator('.league-tiebreak__group').nth(i);
-  for (const [k, team] of order.entries()) {
-    const box = group.getByLabel(team, { exact: true });
-    await box.fill(String(groups[i].min + k));
-    await expect(box).toHaveValue(String(groups[i].min + k));
-  }
-  const answered = page.waitForResponse((r) => r.request().method() === 'PUT'
-    && /\/pools\/[^/]+\/override-rank$/.test(new URL(r.url()).pathname), { timeout: EXPECT_TIMEOUT_MS })
-    .then(async (r) => ({ status: r.status(), ok: r.ok(), body: await r.json().catch(() => null) }));
-  answered.catch(() => {});
-  await group.getByRole('button', { name: TEXT.recordChusen, exact: true }).tap();
-  return answered;
-}
-
 // ------------------------------------------------------------ public readers
 
-// The Overview's league summary (top five) and its Winner badge.
-export const overviewStandings = (page) => page.getByTestId('league-overview-standings');
+// The Overview's league Winner badge.
 export const overviewWinner = (page) => page.getByTestId('league-overview-winner');
 
 // Whether the public page offers the Awards tab (only once completed).

@@ -66,9 +66,10 @@ browser, `--debug` opens the inspector, and a failing test leaves a trace
                             places); the league table's rank cell and figures
                             on admin Pools and the public League tab; the
                             numbered match rows and matrix cell readers; the
-                            tie-break banner (Run tie-breaker, Remove unscored
-                            tie-breaker, Accept shared ranks and its confirm,
-                            Undo); the drawn-bout notice; the chusen panel
+                            tie-break banner (Run tie-breaker, Accept shared
+                            ranks and its confirm, Undo; the Remove button is
+                            read, not tapped); the drawn-bout notice; the
+                            chusen panel, read only
     fixtures/shiaijo.mjs    /admin/shiaijo/:court (queue, inline editor, which
                             match an editor holds)
     fixtures/scores.mjs     the Scores tab and its overlay editor

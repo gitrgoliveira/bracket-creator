@@ -73,6 +73,22 @@ const CONSOLE_ALLOWLIST = [
     code: /^a participant with the same name and dojo already exists$/,
     request: (r) => !!r && r.method === 'PUT',
   },
+  {
+    reason: 'A stale tab taps Accept shared ranks while a league match is back in play (league-team stale-accept): the server refuses the finalize POST and the banner shows its sentence (league_not_settled). Any other finalize refusal is a real error.',
+    text: /^Failed to load resource: the server responded with a status of 409 \(Conflict\)$/,
+    url: /\/api\/competitions\/[^/]+\/league-tiebreak\/finalize$/,
+    code: /^league_not_settled$/,
+    codeUnreadable: true,
+    request: (r) => !!r && r.method === 'POST',
+  },
+  {
+    reason: 'A journey corrects a result of a finished league (league-team finished-corrections, shared-third-moved): the server refuses the /score write until the confirm "Change it anyway" resends it with confirmFinished (league_finished). Any other /score refusal is a real error.',
+    text: /^Failed to load resource: the server responded with a status of 409 \(Conflict\)$/,
+    url: /\/api\/competitions\/[^/]+\/matches\/[^/]+\/score$/,
+    code: /^league_finished$/,
+    codeUnreadable: true,
+    request: (r) => !!r && r.method === 'PUT',
+  },
 ];
 
 // The `error` field of a refusal body; read with a pattern, since the body is

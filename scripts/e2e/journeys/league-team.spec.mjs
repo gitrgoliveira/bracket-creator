@@ -1377,8 +1377,6 @@ test.describe('league-team', () => {
       fs.rmSync(work, { recursive: true, force: true });
     }
 
-    test.fixme(true, 'F3b: nothing on Pools names a tie-breaker saved as a draw or opens it to be given a winner (D6 (b))');
-
     await test.step('fixed: one notice names the drawn daihyosen', async () => {
       expect(seen.drawnNotices).toHaveLength(1);
       expect([TEXT.drawnBout(dh.shiro, dh.aka), TEXT.drawnBout(dh.aka, dh.shiro)]).toContain(seen.drawnNotices[0]);

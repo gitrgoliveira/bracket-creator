@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { enrichPoolMatchWithComp, poolMatchesForPool, groupTeamIds } from '../admin_pools.jsx';
+import { enrichPoolMatchWithComp, poolMatchesForPool, groupTeamIds, drawnSupplementaryBouts } from '../admin_pools.jsx';
 // admin_pools.jsx's chusen banner keys its rank inputs by checkinPid
 // (chusenMemberKey was deleted, the banner now delegates to the one
 // owner of the id-else-name|dojo rule). Imported directly so the tests below
@@ -7,6 +7,21 @@ import { enrichPoolMatchWithComp, poolMatchesForPool, groupTeamIds } from '../ad
 // coverage in __tests__/render/admin_pools_chusen.render.test.jsx, which does
 // mount AdminPools.
 import { checkinPid } from '../data.jsx';
+
+describe('drawnSupplementaryBouts', () => {
+  const m = (id, over = {}) => ({ id, sideA: 'Bea', sideB: 'Cal', status: 'completed', winner: '', ...over });
+
+  it('keeps only finished tie-break and daihyosen bouts that name no winner', () => {
+    const tb = m('Pool A-TB-0');
+    const dh = m('Pool A-DH-0');
+    const rows = [tb, dh, m('Pool A-TB-1', { winner: 'Bea' }), m('Pool A-TB-2', { status: 'scheduled' }), m('Pool A-0')];
+    expect(drawnSupplementaryBouts(rows)).toEqual([tb, dh]);
+  });
+
+  it('is empty for no matches', () => {
+    expect(drawnSupplementaryBouts(undefined)).toEqual([]);
+  });
+});
 
 describe('enrichPoolMatchWithComp', () => {
   const comp = { id: 'c1', name: 'Comp One', kind: 'team', teamSize: 5 };

@@ -81,6 +81,14 @@ describe('AdminPools: a tie-break bout saved as a draw', () => {
     expect(api.reopenMatch.mock.calls[0].slice(0, 3)).toEqual(['c1', 'Pool A-TB-0', 'pw']);
   });
 
+  it('holds both buttons once the reopen has landed, so a tap is not swallowed', async () => {
+    await mount([bout('Pool A-TB-0')]);
+    await act(async () => { screen.getByRole('button', { name: /Fight it again/ }).click(); });
+    const again = await screen.findByRole('button', { name: 'Reopened' });
+    expect(again.disabled).toBe(true);
+    expect(screen.getByRole('button', { name: 'Open bout' }).disabled).toBe(true);
+  });
+
   it('names a daihyosen the same way', async () => {
     await mount([bout('Pool A-DH-0')]);
     expect(screen.getByText('A daihyosen was saved as a draw')).toBeTruthy();

@@ -899,5 +899,12 @@ test.describe('pools: a tie-break bout saved as a draw', () => {
     const seated = Object.values(await bracketSlots(page, settled)).map((s) => s.name);
     record({ journey: JOURNEY_DRAWN, step: 'drawn tie-break', action: 'admin bracket', seated,
       tiedPairSeated: [tb.b, tb.c].filter((n) => seated.includes(n)), screenshot: await shot(page, 'admin-bracket') });
+
+    // Fight it again clears the draw: the notice goes, and the bout is back on its court to be run.
+    await openAdminPools(page, compId);
+    await page.getByTestId('drawn-tiebreak-notice').getByRole('button', { name: 'Fight it again' }).tap();
+    await expect(page.getByTestId('drawn-tiebreak-notice'), 'the reopened bout is no longer a drawn one').toHaveCount(0);
+    record({ journey: JOURNEY_DRAWN, step: 'drawn tie-break', action: 'Fight it again',
+      screenshot: await shot(page, 'admin-pools-after-fight-it-again', { fullPage: true }) });
   });
 });

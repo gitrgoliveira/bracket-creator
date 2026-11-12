@@ -167,11 +167,11 @@ function DrawnTieBreakNotice({ match, comp, password, onOpen }) {
         {pool}{sides} are still tied, {effect}. Fight it again, or open it to decide it by encho or hantei.
       </div>
       <div className="league-tiebreak__actions">
-        <button type="button" className="btn btn--sm btn--primary" disabled={ctl.busy} onClick={() => ctl.reopen()}>
+        <button type="button" className="btn btn--sm btn--primary" disabled={ctl.busy || ctl.landed} onClick={() => ctl.reopen()}>
           {ctl.busy && <span className="spinner" />}
-          Fight it again
+          {ctl.landed ? "Reopened" : "Fight it again"}
         </button>
-        <button type="button" className="btn btn--sm btn--ghost" disabled={ctl.busy} onClick={onOpen}>
+        <button type="button" className="btn btn--sm btn--ghost" disabled={ctl.busy || ctl.landed} onClick={onOpen}>
           Open bout
         </button>
       </div>

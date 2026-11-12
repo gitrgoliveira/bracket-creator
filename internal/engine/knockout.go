@@ -120,11 +120,7 @@ func (e *Engine) poolCompletion(loader poolStandingsLoader, compID string, comp 
 			continue
 		}
 		seen[pn] = true
-		complete := m.Status == state.MatchStatusCompleted
-		if state.IsPoolSupplementaryMatchID(m.ID) && m.Winner == "" {
-			complete = false
-		}
-		if !complete {
+		if !poolMatchSettled(&m) {
 			if _, known := done[pn]; known {
 				done[pn] = false
 			}

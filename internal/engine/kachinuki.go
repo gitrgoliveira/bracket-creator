@@ -1426,8 +1426,10 @@ func (e *Engine) RequeueBlockerAndReopen(targetComp, targetMatch, blockerComp, b
 //     -- see restoreIfWithdrawalRemoved, scoring_tx.go, which stays scoped to
 //     domain.IsWithdrawalDecisionStr for exactly that reason). Anything else
 //     is a *ValidationError (HTTP 400); its sanctioned edit is the correction
-//     path. This is the reopen's one entry gate, so both doors (ReopenMatch,
-//     RequeueBlockerAndReopen) apply it, and it reads the STORED decision
+//     path. A pool tie-break ("-TB-") or representative ("-DH-") bout saved as
+//     a draw (drawnSupplementaryBout) is one a reopen is for too: it settles
+//     nothing, and a reopen is how it is fought again. This is the reopen's
+//     one entry gate, so both doors (ReopenMatch, RequeueBlockerAndReopen) apply it, and it reads the STORED decision
 //     under the tx, never a caller's claim about it;
 //  3. for a bracket round, its result must not have fed a downstream it
 //     cannot unwind (reopenBracketDownstreamCheck), where force is the
@@ -1472,15 +1474,6 @@ func (e *Engine) reopenResultPreconditionTx(tx state.StoreTx, compID string, com
 		return nil
 	}
 	return reopenBracketDownstreamCheck(h.BracketRoot, h.RIdx, h.MIdx, force)
-}
-
-// drawnSupplementaryBout reports a pool tie-break ("-TB-") or representative
-// ("-DH-") bout that was finished with no winner. It settles nothing, so the
-// pool keeps its tie (poolCompletion counts a winnerless supplementary bout as
-// unfinished) and the operator is pointed at it (admin_pools.jsx); a reopen is
-// how it is fought again.
-func drawnSupplementaryBout(m *state.MatchResult) bool {
-	return m.Status == state.MatchStatusCompleted && state.IsPoolSupplementaryMatchID(m.ID) && m.Winner == ""
 }
 
 // reopenBracketDownstreamCheck decides, for a bracket ROUND match being

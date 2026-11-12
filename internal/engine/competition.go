@@ -23,15 +23,28 @@ import (
 // (maybeAutoCompletePoolsRunning) and the one POST /complete asks of a
 // competition with no knockout rounds to check. Vacuously true with no rows.
 func PoolMatchesSettled(matches []state.MatchResult) bool {
-	for _, m := range matches {
-		if m.Status != state.MatchStatusCompleted {
-			return false
-		}
-		if state.IsPoolSupplementaryMatchID(m.ID) && m.Winner == "" {
+	for i := range matches {
+		if !poolMatchSettled(&matches[i]) {
 			return false
 		}
 	}
 	return true
+}
+
+// poolMatchSettled reports whether one pool-matches.csv row is played: it is
+// completed and is not a drawn supplementary bout. It is the one owner of that
+// rule, so the league's completion (PoolMatchesSettled), a mixed pool's
+// (poolCompletion) and the reopen gate (drawnSupplementaryBout) cannot drift.
+func poolMatchSettled(m *state.MatchResult) bool {
+	return m.Status == state.MatchStatusCompleted && !drawnSupplementaryBout(m)
+}
+
+// drawnSupplementaryBout reports a pool tie-break ("-TB-") or representative
+// ("-DH-") bout that was finished with no winner. It settles nothing, so the
+// pool keeps its tie and the operator is pointed at it (admin_pools.jsx); a
+// reopen is how it is fought again.
+func drawnSupplementaryBout(m *state.MatchResult) bool {
+	return m.Status == state.MatchStatusCompleted && state.IsPoolSupplementaryMatchID(m.ID) && m.Winner == ""
 }
 
 // SwissRoundsToDraw reports how many of a Swiss competition's configured

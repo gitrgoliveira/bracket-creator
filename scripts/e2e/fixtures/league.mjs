@@ -26,9 +26,9 @@
 //                         one group per consequential tie, Run tie-breaker (its
 //                         Remove unscored tie-breaker button is read, not
 //                         tapped), Accept shared ranks and its confirm; the
-//                         Undo control the fix adds
-//   the drawn-bout notice the line the fix adds above the table for a
-//                         tie-breaker saved as a draw, with Open bout
+//                         Undo control (pending: not built yet)
+//   the drawn-bout notice above the table for a tie-breaker saved as a draw,
+//                         with Open bout and Fight it again (built)
 //   the chusen panel      "Chusen (drawing lots) required" / "... recorded",
 //                         read only (no journey records lots yet)
 //   the settings          "Break ties for top" pills (team league only) and the
@@ -38,12 +38,13 @@
 //   the public page       the League tab, the Overview's Winner badge, the
 //                         Awards tab and its podium
 //
-// The controls the league review's fix adds (the Undo control and its confirm,
-// the new Accept confirm, the finished-league warning, the drawn-bout notice)
-// are found by role and the visible text the plan fixes word for word (TEXT
-// below); the fix builds them to match, so a journey written against today's
-// app only has to drop its test.fixme once they exist. Readers and confirm
-// helpers READ what is on screen and return it; the journeys assert.
+// The drawn-bout notice is built and found by its test id and the wording TEXT
+// spells. The controls the league review still has to build (the Undo control
+// and its confirm, the new Accept confirm, the finished-league warning) are
+// found by role and the visible text the plan fixes word for word (TEXT
+// below), so a journey only has to drop its test.fixme once they exist.
+// Readers and confirm helpers READ what is on screen and return it; the
+// journeys assert.
 import { expect } from '@playwright/test';
 import { EXPECT_TIMEOUT_MS } from './devices.mjs';
 import { settled as paceSettled } from './pace.mjs';
@@ -55,8 +56,8 @@ import { createCompetition } from './wizard.mjs';
 import { generateDraw, pasteRoster, startCompetition } from './competition.mjs';
 import { escape } from './text.mjs';
 
-// The words on screen. Today's labels where the control exists; the plan's
-// fixed wording for what the fix adds (marked "fix").
+// The words on screen. The built controls' labels; the plan's fixed wording
+// for the controls still to build (marked "pending").
 export const TEXT = {
   bannerTitle: 'Tie-breaker required',
   chusenTitle: 'Chusen (drawing lots) required',
@@ -67,20 +68,20 @@ export const TEXT = {
   accept: /^Accept shared ranks/,
   acceptConfirm: 'Accept shared ranks',
   cancel: 'Cancel',
-  // fix: the Undo control, its line and its confirm.
+  // pending: the Undo control, its line and its confirm.
   undo: 'Undo shared ranks',
   undoConfirm: 'Undo shared ranks',
   acceptedLine: /^Shared ranks accepted:/,
   undoQuestion: 'Undo the shared ranks? The league goes back to match play and the tie is asked again: run a tie-breaker or accept shared ranks.',
-  // fix: the Accept confirm.
+  // pending: the Accept confirm.
   acceptRemovesBout: (a, b) => `This also removes the tie-breaker not yet fought: ${a} v ${b}.`,
   acceptCycleLots: 'Drawing lots is the other way to separate them.',
-  // fix: finalize refused while a regular match is unfinished.
+  // pending: finalize refused while a regular match is unfinished.
   notSettled: 'A league match is not finished yet, so the table can still change. Finish it, then decide.',
-  // fix: a result changed on a finished league.
+  // pending: a result changed on a finished league.
   finishedLeague: 'This league has finished. Changing this result can change the final table and podium. If it leaves a new tie at a podium place, the league goes back to match play to settle it.',
   changeAnyway: 'Change it anyway',
-  // The Pools notice on a saved draw: its title, then its description, as
+  // built: the Pools notice on a saved draw: its title, then its description, as
   // drawnBoutNotices reads them. A league names no pool and its table keeps the
   // two tied.
   drawnBout: (a, b, what = 'daihyosen') => `A ${what} was saved as a draw ${a} and ${b} are still tied, so the table keeps them tied. Fight it again, or open it to decide it by encho or hantei.`,
@@ -388,7 +389,8 @@ export async function playEncounter(ed, bouts) {
 // Play a tie-breaker bout (a league's daihyosen or ippon-shobu), which the
 // INDIVIDUAL board scores even in a team league, on the overlay editor, and
 // Finish it: `winner` 'shiro' | 'aka' takes one `waza`, or `draw: true` marks
-// it drawn (which the fix refuses: the caller then reads the editor instead).
+// it drawn (a league tie-breaker saved drawn is still accepted today; the
+// refusal is pending, see league-individual F3b).
 export async function playTiebreakBout(page, { winner, waza = 'M', draw = false } = {}) {
   const ed = page.locator(EDITOR);
   await expect(ed).toBeVisible();
@@ -488,7 +490,7 @@ export async function bannerGroup(page, teams) {
 }
 
 // The answer to the next league tie-break write: POST (Run), or with `tail`
-// '/finalize' POST (Accept) and DELETE (Undo, the fix). Armed before the tap.
+// '/finalize' POST (Accept) and DELETE (Undo, pending). Armed before the tap.
 // Resolves { status, ok, body }.
 export function tiebreakWrite(page, method, tail = '') {
   const re = new RegExp(`^/api/competitions/[^/]+/league-tiebreak${escape(tail)}$`);
@@ -522,7 +524,7 @@ export async function requestAcceptSharedRanks(page) {
 }
 
 // Accept the shared ranks: tap, answer the confirm with "Accept shared ranks",
-// return { asked, status, ok, body }. A refusal (the fix's league_not_settled)
+// return { asked, status, ok, body }. A refusal (the pending league_not_settled)
 // is returned, not thrown, when `allowRefusal`.
 export async function acceptSharedRanks(page, { allowRefusal = false } = {}) {
   const asked = await requestAcceptSharedRanks(page);
@@ -531,7 +533,7 @@ export async function acceptSharedRanks(page, { allowRefusal = false } = {}) {
   return { asked, ...(await landed(answered, 'Accept shared ranks', allowRefusal)) };
 }
 
-// --------------------------------------------- the Undo control (the fix)
+// --------------------------------------------- the Undo control (pending)
 
 // The page's own "Undo shared ranks" button, never the one in its confirm.
 export const undoControl = (page) => page.locator(
@@ -557,7 +559,7 @@ export async function undoSharedRanks(page, { allowRefusal = false } = {}) {
   return { asked, ...(await landed(answered, 'Undo shared ranks', allowRefusal)) };
 }
 
-// ------------------------------------------- the drawn-bout notice (the fix)
+// ------------------------------------------- the drawn-bout notice (built)
 
 const drawnNotice = (page) => page.getByTestId('drawn-tiebreak-notice');
 

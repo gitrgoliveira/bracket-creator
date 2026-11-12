@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -64,6 +65,31 @@ func TestPoolMatchesSettled(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			assert.Equal(t, tc.want, PoolMatchesSettled(tc.matches))
+		})
+	}
+}
+
+// TestDrawnSupplementaryBout_SharedCases drives drawnSupplementaryBout from
+// testdata/drawn_supplementary_cases.json, the table the Pools tab's JS twin
+// (drawnSupplementaryBouts, admin_pools.jsx) is pinned to as well.
+func TestDrawnSupplementaryBout_SharedCases(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("testdata", "drawn_supplementary_cases.json"))
+	require.NoError(t, err)
+	var table struct {
+		Cases []struct {
+			Name   string `json:"name"`
+			ID     string `json:"id"`
+			Status string `json:"status"`
+			Winner string `json:"winner"`
+			Drawn  bool   `json:"drawn"`
+		} `json:"cases"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &table))
+	require.NotEmpty(t, table.Cases)
+	for _, tc := range table.Cases {
+		t.Run(tc.Name, func(t *testing.T) {
+			m := state.MatchResult{ID: tc.ID, Status: state.MatchStatus(tc.Status), Winner: tc.Winner}
+			assert.Equal(t, tc.Drawn, drawnSupplementaryBout(&m))
 		})
 	}
 }

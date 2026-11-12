@@ -1,4 +1,6 @@
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { enrichPoolMatchWithComp, poolMatchesForPool, groupTeamIds, drawnSupplementaryBouts } from '../admin_pools.jsx';
 // admin_pools.jsx's chusen banner keys its rank inputs by checkinPid
 // (chusenMemberKey was deleted, the banner now delegates to the one
@@ -20,6 +22,29 @@ describe('drawnSupplementaryBouts', () => {
 
   it('is empty for no matches', () => {
     expect(drawnSupplementaryBouts(undefined)).toEqual([]);
+  });
+
+  // The same table drawnSupplementaryBout (internal/engine/competition.go) is
+  // tested against, so the two copies of the rule cannot drift apart.
+  describe('the shared Go/JS table', () => {
+    const table = JSON.parse(
+      readFileSync(resolve(__dirname, '..', '..', '..', 'internal', 'engine', 'testdata', 'drawn_supplementary_cases.json'), 'utf8')
+    );
+
+    it('is present and non-empty', () => {
+      expect(table.cases?.length, 'drawn_supplementary_cases.json parsed to zero cases').toBeGreaterThan(0);
+    });
+
+    it.each(table.cases.map(c => [c.name, c]))('%s', (_name, c) => {
+      const row = m(c.id, { status: c.status, winner: c.winner });
+      expect(drawnSupplementaryBouts([row])).toEqual(c.drawn ? [row] : []);
+    });
+  });
+
+  it('names no daihyosen while the chusen answer is not known (null), but still names a tie-break bout', () => {
+    const dh = m('Pool A-DH-0');
+    const tb = m('Pool A-TB-0');
+    expect(drawnSupplementaryBouts([dh, tb], null)).toEqual([tb]);
   });
 
   it('leaves out a daihyosen of a pool a chusen rules, but not its tie-break bout or another pool', () => {

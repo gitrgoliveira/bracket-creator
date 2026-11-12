@@ -117,6 +117,41 @@ describe('AdminPools: a tie-break bout saved as a draw', () => {
     });
   });
 
+  // Until the chusen answer arrives the page cannot tell a stuck daihyosen from
+  // one a chusen rules, so it says nothing, then names the stuck one.
+  describe('on a team competition while the chusen answer is outstanding', () => {
+    const team = { kind: 'team', teamSize: 3 };
+    const pending = () => {
+      let settle;
+      const promise = new Promise((resolve, reject) => { settle = { resolve, reject }; });
+      return { promise, settle };
+    };
+
+    it('holds the daihyosen notice, not the tie-break notice, then shows it when no chusen rules the pool', async () => {
+      const { promise, settle } = pending();
+      await mount([bout('Pool A-DH-0'), bout('Pool A-TB-0')], 'mixed', team, { chusenCandidates: vi.fn().mockReturnValue(promise) });
+      expect(screen.queryByText('A daihyosen was saved as a draw')).toBeNull();
+      expect(screen.getByText('A tie-break bout was saved as a draw')).toBeTruthy();
+      await act(async () => { settle.resolve({ candidates: [], recorded: [] }); });
+      expect(screen.getByText('A daihyosen was saved as a draw')).toBeTruthy();
+    });
+
+    it('never shows the daihyosen notice when the answer names its pool', async () => {
+      const { promise, settle } = pending();
+      await mount([bout('Pool A-DH-0')], 'mixed', team, { chusenCandidates: vi.fn().mockReturnValue(promise) });
+      await act(async () => { settle.resolve({ candidates: [{ poolName: 'Pool A', teamNames: ['Bea', 'Cal'], teams: [], minPosition: 1 }], recorded: [] }); });
+      expect(screen.queryByTestId('drawn-tiebreak-notice')).toBeNull();
+    });
+
+    it('shows the daihyosen notice once the fetch has failed, since nothing more will arrive', async () => {
+      const { promise, settle } = pending();
+      await mount([bout('Pool A-DH-0')], 'mixed', team, { chusenCandidates: vi.fn().mockReturnValue(promise) });
+      expect(screen.queryByTestId('drawn-tiebreak-notice')).toBeNull();
+      await act(async () => { settle.reject(new Error('offline')); });
+      expect(screen.getByText('A daihyosen was saved as a draw')).toBeTruthy();
+    });
+  });
+
   it.each([
     ['a tie-break bout with a winner', bout('Pool A-TB-0', { winner: 'Bea' })],
     ['a tie-break bout not fought yet', bout('Pool A-TB-0', { status: 'scheduled' })],

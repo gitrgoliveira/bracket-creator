@@ -33,7 +33,8 @@ func PoolMatchesSettled(matches []state.MatchResult) bool {
 // (poolCompletion), the auto-complete scan (MaybeAutoCompletePools), the engi
 // self-heal (isBlockingEngiTBRow) and the reopen gate (drawnSupplementaryBout)
 // cannot drift inside Go. The Pools tab's notice reads the same rule from the wire in
-// admin_pools.jsx (drawnSupplementaryBouts), so a change here changes it too.
+// admin_pools.jsx (drawnSupplementaryBouts); both are pinned to the one table
+// testdata/drawn_supplementary_cases.json, so a change here changes the table.
 func poolMatchSettled(m *state.MatchResult) bool {
 	return m.Status == state.MatchStatusCompleted && !drawnSupplementaryBout(m)
 }

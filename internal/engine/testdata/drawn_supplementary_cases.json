@@ -1,0 +1,23 @@
+{
+  "_comment": [
+    "Which pool rows are a drawn supplementary bout, shared by BOTH language",
+    "implementations: drawnSupplementaryBout in internal/engine/competition.go",
+    "(Go) and drawnSupplementaryBouts in web-mobile/js/admin_pools.jsx (JS, which",
+    "reads the same rule from the wire fields). TestDrawnSupplementaryBout_SharedCases",
+    "drives the Go side and the 'drawnSupplementaryBouts' block in",
+    "web-mobile/js/__tests__/admin_pools.test.jsx the JS side. A change to the rule",
+    "changes this table, and a copy that disagrees fails its own test.",
+    "The JS-only exclusion of a daihyosen whose pool a chusen rules is not here."
+  ],
+  "cases": [
+    {"name": "completed tie-break bout, no winner", "id": "Pool A-TB-0", "status": "completed", "winner": "", "drawn": true},
+    {"name": "completed representative bout, no winner", "id": "Pool A-DH-0", "status": "completed", "winner": "", "drawn": true},
+    {"name": "tie-break bout with a winner", "id": "Pool A-TB-1", "status": "completed", "winner": "Bea", "drawn": false},
+    {"name": "representative bout with a winner", "id": "Pool A-DH-1", "status": "completed", "winner": "Bea", "drawn": false},
+    {"name": "scheduled tie-break bout", "id": "Pool A-TB-2", "status": "scheduled", "winner": "", "drawn": false},
+    {"name": "running representative bout", "id": "Pool A-DH-2", "status": "running", "winner": "", "drawn": false},
+    {"name": "drawn regular pool match", "id": "Pool A-0", "status": "completed", "winner": "", "drawn": false},
+    {"name": "pool named like a marker, regular match", "id": "Pool A-DH-East-0", "status": "completed", "winner": "", "drawn": false},
+    {"name": "knockout match without a winner", "id": "Match 3", "status": "completed", "winner": "", "drawn": false}
+  ]
+}

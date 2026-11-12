@@ -810,6 +810,49 @@ func TestMaybeAutoCompletePools_TeamDHCycleWithOverridesTransitions(t *testing.T
 	assert.Equal(t, AutoCompleteTransitioned, outcome, "manual overrides must unblock cyclic DH completion")
 }
 
+// TestMaybeAutoCompletePools_DrawnDHRuledByChusenTransitions: a daihyosen round
+// finished as all hikiwake settles nothing, so the pool holds open (and the
+// chusen panel is offered over it, daihyosenLeftTied); once the operator records
+// the chusen, the lots decide the place and the drawn bouts no longer hold the
+// pool, so it completes. Without the rule the chusen the app asked for could
+// never finish the pool.
+func TestMaybeAutoCompletePools_DrawnDHRuledByChusenTransitions(t *testing.T) {
+	const compID = "autocomplete-team-dh-drawn-chusen"
+	eng, store := setupTeamPoolComp(t, compID, true)
+	_, err := eng.InjectPoolDaihyosenMatches(compID)
+	require.NoError(t, err)
+
+	all, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	for i := range all {
+		all[i].Status = state.MatchStatusCompleted
+		if IsPoolDaihyosenMatchID(all[i].ID) {
+			all[i].Winner, all[i].WinnerID = "", "" // hikiwake
+		}
+	}
+	require.NoError(t, store.SavePoolMatches(compID, all))
+	eng.standingsCache.Delete(compID)
+	eng.standingsFlight.Delete(compID)
+
+	outcome, err := eng.MaybeAutoCompletePools(compID)
+	require.NoError(t, err)
+	require.Equal(t, AutoCompleteNoChange, outcome, "a drawn daihyosen holds the pool until the lots are drawn")
+
+	pools, err := store.LoadPools(compID)
+	require.NoError(t, err)
+	require.Len(t, pools, 1)
+	ranks := make([]RankOverride, 0, len(pools[0].Players))
+	for i, p := range pools[0].Players {
+		ranks = append(ranks, RankOverride{PlayerID: p.ID, Rank: i + 1})
+	}
+	_, err = eng.OverridePoolRanks(compID, "Pool A", ranks, ForceOptions{})
+	require.NoError(t, err)
+
+	outcome, err = eng.MaybeAutoCompletePools(compID)
+	require.NoError(t, err)
+	assert.Equal(t, AutoCompleteTransitioned, outcome, "the recorded chusen settles the drawn daihyosen round")
+}
+
 // TestDHStandingsApplied verifies that a completed pool-DH match result is
 // applied as a secondary sort to break a tie in team pool standings.
 func TestDHStandingsApplied(t *testing.T) {

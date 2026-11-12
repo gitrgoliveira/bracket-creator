@@ -795,11 +795,12 @@ test.describe('pools: a tie over the 2nd place a Fit the knockout draw drafted',
 });
 
 // A pool tie-break bout saved as a DRAW (Mark draw, then Finish). The same pools
-// and scripts as the first competition, on court D. A league's tie-breaker is to
-// need a winner; a Pools + Knockout competition's can still be saved as a draw,
-// and the Pools tab then names the bout (Open bout, Fight it again). This walk
-// records what the pool table, the knockout and the court show once the drawn
-// bout is saved, and asserts that notice.
+// and scripts as the first competition, on court D. A league's tie-breaker bout
+// needs a winner, so the editor does not offer a draw there (a draw saved before
+// that rule gets the same notice); a Pools + Knockout competition's tie-breaker
+// can still be saved as a draw, and the Pools tab then names the bout (Open
+// bout, Fight it again). This walk records what the pool table, the knockout
+// and the court show once the drawn bout is saved, and asserts that notice.
 const JOURNEY_DRAWN = 'pools-tiebreak-drawn';
 const DRAWN_COURT = 'D';
 

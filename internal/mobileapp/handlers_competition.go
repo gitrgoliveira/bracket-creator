@@ -2892,6 +2892,21 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		// tx.LoadPoolMatches skips the first-read legacy conversion the
 		// store's own read runs; run it first, as AdvanceSwissRound does.
 		store.EnsureLegacyUpgraded(id)
+		// The recorded chusen ranks settle a drawn representative bout
+		// (engine.PoolMatchesSettled). Read before the transaction: the store's
+		// own read takes the lock the transaction holds. Fails closed, like the
+		// matches below.
+		overrides, oerr := store.LoadOverrides(id)
+		if oerr != nil {
+			if !respondIfCorruptOverrides(c, oerr) {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load overrides"})
+			}
+			return
+		}
+		var poolRanks map[string]map[string]int
+		if overrides != nil {
+			poolRanks = overrides.PoolRanks
+		}
 		txErr := store.WithTransaction(id, func(tx state.StoreTx) error {
 			current, lerr := tx.LoadCompetition(id)
 			if lerr != nil {
@@ -2926,7 +2941,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 					matchesFault = merr
 					return nil
 				}
-				if !engine.PoolMatchesSettled(matches) {
+				if !engine.PoolMatchesSettled(matches, poolRanks) {
 					statusErr = fmt.Errorf("all matches must be completed before this competition can be finished")
 					return nil
 				}

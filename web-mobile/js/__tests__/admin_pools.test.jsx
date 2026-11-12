@@ -41,10 +41,29 @@ describe('drawnSupplementaryBouts', () => {
     });
   });
 
-  it('names a drawn daihyosen of any pool: a chusen does not settle it', () => {
-    const dh = m('Pool A-DH-0');
-    const other = m('Pool B-DH-0');
+  it('names a drawn daihyosen of any pool until a chusen has ranked its teams', () => {
+    const dh = m('Pool A-DH-0', { sideAId: 'a', sideBId: 'b' });
+    const other = m('Pool B-DH-0', { sideAId: 'c', sideBId: 'd' });
     expect(drawnSupplementaryBouts([dh, other])).toEqual([dh, other]);
+    const standings = { 'Pool A': [{ player: { id: 'a' }, isOverridden: true }, { player: { id: 'b' }, isOverridden: true }] };
+    expect(drawnSupplementaryBouts([dh, other], standings)).toEqual([other]);
+  });
+
+  // The second half of the shared table: a chusen's lots over a drawn daihyosen.
+  describe('the shared chusen cases', () => {
+    const table = JSON.parse(
+      readFileSync(resolve(__dirname, '..', '..', '..', 'internal', 'engine', 'testdata', 'drawn_supplementary_cases.json'), 'utf8')
+    );
+
+    it('is present and non-empty', () => {
+      expect(table.chusenCases?.length, 'drawn_supplementary_cases.json has no chusenCases').toBeGreaterThan(0);
+    });
+
+    it.each(table.chusenCases.map(c => [c.name, c]))('%s', (_name, c) => {
+      const row = m(c.id, { winner: c.winner, sideAId: c.sideAId, sideBId: c.sideBId });
+      const standings = { [c.rankedPool]: c.ranked.map(id => ({ player: { id }, isOverridden: true })) };
+      expect(drawnSupplementaryBouts([row], standings)).toEqual(c.stuck ? [row] : []);
+    });
   });
 });
 

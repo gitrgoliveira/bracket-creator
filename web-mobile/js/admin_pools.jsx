@@ -145,13 +145,24 @@ function enrichPoolMatchWithComp(m, comp, poolNameOverride) {
 // from the wire fields; both are pinned to the one table
 // internal/engine/testdata/drawn_supplementary_cases.json.
 //
-// A drawn daihyosen is a stuck state too, chusen or not: poolMatchSettled never
-// counts it settled, so recording a chusen does not complete the pool, and the
-// notice's Fight it again is the operator's way out.
+// A drawn daihyosen whose two teams a chusen has ranked is not stuck: the lots
+// decided that place and the engine's poolMatchSettled counts it settled
+// (daihyosenRuledByChusen), so no notice names it. The ranked teams are the
+// standings rows with isOverridden, which the server sets from the same pool
+// rank overrides; the pool is judged by name and the teams by id only. The
+// second half of the same table (chusenCases) pins both copies.
 //
 // Exported for vitest at __tests__/admin_pools.test.jsx.
-function drawnSupplementaryBouts(poolMatches) {
-  return (poolMatches || []).filter(m => isSupplementaryBout(m.id) && m.status === "completed" && !nameOf(m.winner));
+function drawnSupplementaryBouts(poolMatches, standings) {
+  const ranked = (poolName) => new Set(
+    ((standings || {})[poolName] || []).filter(s => s.isOverridden && s.player && s.player.id).map(s => s.player.id)
+  );
+  const ruledByChusen = (m) => {
+    if (!isPoolDaihyosenBout(m.id) || !m.sideAId || !m.sideBId) return false;
+    const ids = ranked(poolNameOf(m.id));
+    return ids.has(m.sideAId) && ids.has(m.sideBId);
+  };
+  return (poolMatches || []).filter(m => isSupplementaryBout(m.id) && m.status === "completed" && !nameOf(m.winner) && !ruledByChusen(m));
 }
 
 // DrawnTieBreakNotice: names one such bout and the two ways on, fight it again
@@ -839,7 +850,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
   return (
     <>
     <div>
-      {drawnSupplementaryBouts(poolMatches).map(m => (
+      {drawnSupplementaryBouts(poolMatches, standings).map(m => (
         <DrawnTieBreakNotice
           key={m.id}
           match={enrichPoolMatchWithComp(m, c)}

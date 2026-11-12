@@ -64,7 +64,44 @@ func TestPoolMatchesSettled(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			assert.Equal(t, tc.want, PoolMatchesSettled(tc.matches))
+			assert.Equal(t, tc.want, PoolMatchesSettled(tc.matches, nil))
+		})
+	}
+
+	// A chusen that ranked both teams of a drawn representative bout settles it.
+	drawnDH := state.MatchResult{ID: "Pool A-DH-1", Status: state.MatchStatusCompleted, SideAID: "a", SideBID: "b"}
+	ranks := map[string]map[string]int{"Pool A": {helper.CompetitorKey("a", "", ""): 1, helper.CompetitorKey("b", "", ""): 2}}
+	assert.True(t, PoolMatchesSettled([]state.MatchResult{drawnDH}, ranks), "the lots settle the drawn representative bout")
+	assert.False(t, PoolMatchesSettled([]state.MatchResult{drawnDH}, nil), "no lots, no settlement")
+}
+
+// TestDaihyosenRuledByChusen_SharedCases drives daihyosenRuledByChusen from the
+// chusenCases of the same table the Pools tab's JS twin reads.
+func TestDaihyosenRuledByChusen_SharedCases(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("testdata", "drawn_supplementary_cases.json"))
+	require.NoError(t, err)
+	var table struct {
+		ChusenCases []struct {
+			Name       string   `json:"name"`
+			ID         string   `json:"id"`
+			Winner     string   `json:"winner"`
+			SideAID    string   `json:"sideAId"`
+			SideBID    string   `json:"sideBId"`
+			RankedPool string   `json:"rankedPool"`
+			Ranked     []string `json:"ranked"`
+			Ruled      bool     `json:"ruled"`
+		} `json:"chusenCases"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &table))
+	require.NotEmpty(t, table.ChusenCases)
+	for _, tc := range table.ChusenCases {
+		t.Run(tc.Name, func(t *testing.T) {
+			ranks := map[string]int{}
+			for i, id := range tc.Ranked {
+				ranks[helper.CompetitorKey(id, "", "")] = i + 1
+			}
+			m := state.MatchResult{ID: tc.ID, Status: state.MatchStatusCompleted, Winner: tc.Winner, SideAID: tc.SideAID, SideBID: tc.SideBID}
+			assert.Equal(t, tc.Ruled, daihyosenRuledByChusen(&m, map[string]map[string]int{tc.RankedPool: ranks}))
 		})
 	}
 }

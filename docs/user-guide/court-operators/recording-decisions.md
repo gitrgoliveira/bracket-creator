@@ -71,7 +71,7 @@ When a knockout team encounter is settled by a representative bout, the results 
 
 ## Chusen (drawing lots)
 
-Chusen is the last resort when two or more tied teams have played a round of daihyosen and the bouts still do not produce a strict order. Examples are a cycle where each team beats another, an all-drawn round, or two teams finishing level on daihyosen wins.
+Chusen is the last resort when two or more tied teams have played a round of daihyosen and the bouts still do not produce a strict order. Examples are a cycle where each team beats another, an all-drawn round, or two teams finishing level on daihyosen wins. A drawn daihyosen bout still shows its notice on the Pools tab until you record the chusen; once you do, the lots settle the place and the drawn bout no longer holds the pool. Until then you can also use **Fight it again** on the notice to play the bout once more.
 
 When chusen is required, the **Pools** tab (labelled **League** for league competitions) shows a **"Chusen (drawing lots) required"** panel listing the tied teams. Draw lots offline, enter each team's finishing position in the panel, and record it to settle the order and let the competition advance.
 

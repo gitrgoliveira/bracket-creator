@@ -65,6 +65,25 @@ func groupSettledByChusen(group []state.PlayerStanding, allMatches []state.Match
 	return chusenRecorded(group, groupOverrides) && daihyosenLeftTied(group, allMatches)
 }
 
+// daihyosenRuledByChusen reports a drawn pool representative ("-DH-") bout
+// whose two teams a chusen has ranked: the operator drew lots over the group the
+// bout could not separate, so the draw needs no rematch and the pool may
+// complete (poolMatchSettled). poolRanks is state.Overrides.PoolRanks (nil when
+// none); each side is read by participant id only, like chusenRecorded. Only
+// a chusen writes a pool rank by hand, so a ranked pair is a chusen's group.
+func daihyosenRuledByChusen(m *state.MatchResult, poolRanks map[string]map[string]int) bool {
+	if !IsPoolDaihyosenMatchID(m.ID) || !drawnSupplementaryBout(m) {
+		return false
+	}
+	poolName, ok := poolNameFromMatchID(m.ID)
+	if !ok {
+		return false
+	}
+	_, aRanked := lookupPoolRankOverride(poolRanks[poolName], m.SideAID)
+	_, bRanked := lookupPoolRankOverride(poolRanks[poolName], m.SideBID)
+	return aRanked && bRanked
+}
+
 // chusenRecorded reports whether every member of a tied group carries a
 // pool-rank override, i.e. the operator has recorded the drawn order.
 //

@@ -18,9 +18,12 @@ import (
 // was played for unresolved. It is the rule a league is completed by
 // (maybeAutoCompletePoolsRunning) and the one POST /complete asks of a
 // competition with no knockout rounds to check. Vacuously true with no rows.
-func PoolMatchesSettled(matches []state.MatchResult) bool {
+// poolRanks is the competition's recorded pool-rank overrides
+// (state.Overrides.PoolRanks, nil when none): a drawn representative bout whose
+// two teams a chusen has ranked is settled by the lots (poolMatchSettled).
+func PoolMatchesSettled(matches []state.MatchResult, poolRanks map[string]map[string]int) bool {
 	for i := range matches {
-		if !poolMatchSettled(&matches[i]) {
+		if !poolMatchSettled(&matches[i], poolRanks) {
 			return false
 		}
 	}
@@ -28,15 +31,19 @@ func PoolMatchesSettled(matches []state.MatchResult) bool {
 }
 
 // poolMatchSettled reports whether one pool-matches.csv row is played: it is
-// completed and is not a drawn supplementary bout. It is the one owner of that
-// rule, so the league's completion (PoolMatchesSettled), a mixed pool's
-// (poolCompletion), the auto-complete scan (MaybeAutoCompletePools), the engi
-// self-heal (isBlockingEngiTBRow) and the reopen gate (drawnSupplementaryBout)
-// cannot drift inside Go. The Pools tab's notice reads the same rule from the wire in
-// admin_pools.jsx (drawnSupplementaryBouts); both are pinned to the one table
-// testdata/drawn_supplementary_cases.json, so a change here changes the table.
-func poolMatchSettled(m *state.MatchResult) bool {
-	return m.Status == state.MatchStatusCompleted && !drawnSupplementaryBout(m)
+// completed and is not a drawn supplementary bout, unless a chusen has ranked
+// both teams of a drawn representative bout (daihyosenRuledByChusen): the lots
+// then decided that place, and the bout, which settled nothing, may stay
+// drawn. It is the one owner of that rule, so the league's completion
+// (PoolMatchesSettled), a mixed pool's (poolCompletion), the auto-complete scan
+// (MaybeAutoCompletePools) and the engi self-heal (isBlockingEngiTBRow) cannot
+// drift inside Go; the reopen gate (drawnSupplementaryBout) stays on the raw
+// draw, since a rematch is always allowed. The Pools tab's notice reads the same
+// rule from the wire in admin_pools.jsx (drawnSupplementaryBouts); both are
+// pinned to the one table testdata/drawn_supplementary_cases.json, so a change
+// here changes the table.
+func poolMatchSettled(m *state.MatchResult, poolRanks map[string]map[string]int) bool {
+	return m.Status == state.MatchStatusCompleted && (!drawnSupplementaryBout(m) || daihyosenRuledByChusen(m, poolRanks))
 }
 
 // drawnSupplementaryBout reports a pool tie-break ("-TB-") or representative
@@ -358,6 +365,19 @@ func (e *Engine) maybeAutoCompletePoolsRunning(compID string, comp *state.Compet
 	isTeamComp := comp != nil && comp.TeamSize > 0
 	isTeamLeague := isTeamComp && comp.Format == state.CompFormatLeague
 
+	// A drawn representative bout counts settled once a chusen has ranked its
+	// teams (poolMatchSettled), so the recorded lots are read before the scan.
+	var poolRanks map[string]map[string]int
+	if isTeamComp {
+		overridesObj, oerr := e.store.LoadOverrides(compID)
+		if oerr != nil {
+			return AutoCompleteNoChange, oerr
+		}
+		if overridesObj != nil {
+			poolRanks = overridesObj.PoolRanks
+		}
+	}
+
 	// Partition matches into regular vs tiebreaker vs pool-daihyosen.
 	allComplete := true
 	hasIncompleteTB := false
@@ -369,7 +389,7 @@ func (e *Engine) maybeAutoCompletePoolsRunning(compID string, comp *state.Compet
 		case IsTiebreakerMatchID(m.ID):
 			// A TB match without a winner (malformed payload) leaves standings
 			// still tied, so treat it as unresolved just like DH.
-			if !poolMatchSettled(&m) {
+			if !poolMatchSettled(&m, poolRanks) {
 				hasIncompleteTB = true
 			} else {
 				hasCompleteTB = true
@@ -377,7 +397,7 @@ func (e *Engine) maybeAutoCompletePoolsRunning(compID string, comp *state.Compet
 		case IsPoolDaihyosenMatchID(m.ID):
 			// A DH match without a winner (e.g. hikiwake) leaves standings
 			// still tied, so it must not count as resolved.
-			if !poolMatchSettled(&m) {
+			if !poolMatchSettled(&m, poolRanks) {
 				hasIncompleteDH = true
 			} else {
 				hasCompleteDH = true
@@ -475,14 +495,6 @@ func (e *Engine) maybeAutoCompletePoolsRunning(compID string, comp *state.Compet
 		if standErr != nil {
 			return AutoCompleteNoChange, standErr
 		}
-		overridesObj, oerr := e.store.LoadOverrides(compID)
-		if oerr != nil {
-			return AutoCompleteNoChange, oerr
-		}
-		var poolRanks map[string]map[string]int
-		if overridesObj != nil {
-			poolRanks = overridesObj.PoolRanks
-		}
 		if dhCycleExists(standings, matches, poolRanks) {
 			return AutoCompleteNoChange, nil
 		}
@@ -502,7 +514,7 @@ func (e *Engine) maybeAutoCompletePoolsRunning(compID string, comp *state.Compet
 		if ferr != nil {
 			return nil, ferr
 		}
-		if !PoolMatchesSettled(freshMatches) {
+		if !PoolMatchesSettled(freshMatches, poolRanks) {
 			return nil, nil
 		}
 		comp.Status = state.CompStatusComplete

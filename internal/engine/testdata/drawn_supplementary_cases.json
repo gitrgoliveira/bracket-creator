@@ -7,7 +7,19 @@
     "drives the Go side and the 'drawnSupplementaryBouts' block in",
     "web-mobile/js/__tests__/admin_pools.test.jsx the JS side. A change to the rule",
     "changes this table, and a copy that disagrees fails its own test.",
-    "The JS-only exclusion of a daihyosen whose pool a chusen rules is not here."
+    "chusenCases is the second rule: a drawn representative bout whose two teams",
+    "a recorded chusen has ranked is settled by the lots (daihyosenRuledByChusen",
+    "in Go; the JS reads the ranked ids off the standings rows marked isOverridden).",
+    "stuck is what the Pools tab's notice names: drawn and not ruled by the lots."
+  ],
+  "chusenCases": [
+    {"name": "both teams ranked", "id": "Pool A-DH-0", "winner": "", "sideAId": "a", "sideBId": "b", "rankedPool": "Pool A", "ranked": ["a", "b", "c"], "ruled": true, "stuck": false},
+    {"name": "only one team ranked", "id": "Pool A-DH-0", "winner": "", "sideAId": "a", "sideBId": "b", "rankedPool": "Pool A", "ranked": ["a"], "ruled": false, "stuck": true},
+    {"name": "no team ranked", "id": "Pool A-DH-0", "winner": "", "sideAId": "a", "sideBId": "b", "rankedPool": "Pool A", "ranked": [], "ruled": false, "stuck": true},
+    {"name": "both teams ranked in another pool", "id": "Pool A-DH-0", "winner": "", "sideAId": "a", "sideBId": "b", "rankedPool": "Pool B", "ranked": ["a", "b"], "ruled": false, "stuck": true},
+    {"name": "a drawn tie-break bout is not a representative bout", "id": "Pool A-TB-0", "winner": "", "sideAId": "a", "sideBId": "b", "rankedPool": "Pool A", "ranked": ["a", "b"], "ruled": false, "stuck": true},
+    {"name": "a representative bout with a winner needs no lots", "id": "Pool A-DH-0", "winner": "Bea", "sideAId": "a", "sideBId": "b", "rankedPool": "Pool A", "ranked": ["a", "b"], "ruled": false, "stuck": false},
+    {"name": "sides without ids resolve to nothing", "id": "Pool A-DH-0", "winner": "", "sideAId": "", "sideBId": "", "rankedPool": "Pool A", "ranked": ["a", "b"], "ruled": false, "stuck": true}
   ],
   "cases": [
     {"name": "completed tie-break bout, no winner", "id": "Pool A-TB-0", "status": "completed", "winner": "", "drawn": true},

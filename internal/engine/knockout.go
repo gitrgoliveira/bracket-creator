@@ -107,6 +107,19 @@ func (e *Engine) poolCompletion(loader poolStandingsLoader, compID string, comp 
 		return nil, err
 	}
 
+	// A team competition's recorded chusen ranks settle a drawn representative
+	// bout (poolMatchSettled), and the cycle check below reads the same ranks.
+	var poolRanks map[string]map[string]int
+	if isTeam {
+		overrides, oerr := e.store.LoadOverrides(compID)
+		if oerr != nil {
+			return nil, oerr
+		}
+		if overrides != nil {
+			poolRanks = overrides.PoolRanks
+		}
+	}
+
 	playerCount := make(map[string]int, len(pools))
 	done := make(map[string]bool, len(pools))
 	seen := make(map[string]bool, len(pools))
@@ -120,7 +133,7 @@ func (e *Engine) poolCompletion(loader poolStandingsLoader, compID string, comp 
 			continue
 		}
 		seen[pn] = true
-		if !poolMatchSettled(&m) {
+		if !poolMatchSettled(&m, poolRanks) {
 			if _, known := done[pn]; known {
 				done[pn] = false
 			}
@@ -145,14 +158,6 @@ func (e *Engine) poolCompletion(loader poolStandingsLoader, compID string, comp 
 		st, serr := standings()
 		if serr != nil {
 			return nil, serr
-		}
-		overrides, oerr := e.store.LoadOverrides(compID)
-		if oerr != nil {
-			return nil, oerr
-		}
-		var poolRanks map[string]map[string]int
-		if overrides != nil {
-			poolRanks = overrides.PoolRanks
 		}
 		for pn, ok := range done {
 			if !ok {

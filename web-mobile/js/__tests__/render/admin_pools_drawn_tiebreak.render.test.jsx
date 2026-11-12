@@ -28,7 +28,7 @@ const bout = (id, over = {}) => ({
   id, sideA: 'Bea', sideB: 'Cal', sideAId: 'a', sideBId: 'b', status: 'completed', winner: '', court: 'A', ...over,
 });
 
-async function mount(poolMatches, format = 'mixed', extra = {}, api = {}) {
+async function mount(poolMatches, format = 'mixed', extra = {}, api = {}, standings = {}) {
   window.API = { reopenMatch: vi.fn().mockResolvedValue({}), ...api };
   window.PoolsViewer = () => null;
   await act(async () => {
@@ -37,7 +37,7 @@ async function mount(poolMatches, format = 'mixed', extra = {}, api = {}) {
         c={{ ...comp, format, ...extra }}
         pools={[{ poolName: 'Pool A', players: [] }]}
         poolMatches={poolMatches}
-        standings={{}}
+        standings={standings}
         tweaks={{}}
         onEditScore={vi.fn()}
         password="pw"
@@ -94,12 +94,11 @@ describe('AdminPools: a tie-break bout saved as a draw', () => {
     expect(screen.getByText('A daihyosen was saved as a draw')).toBeTruthy();
   });
 
-  // A drawn daihyosen is never settled, so a chusen (waiting or recorded) does
-  // not complete the pool: the notice and its Fight it again stay, the operator's
-  // only way out, and they do not wait for the chusen answer either.
+  // A chusen that is waiting, or whose answer is outstanding, has ranked nobody:
+  // the drawn bout keeps its notice and its Fight it again, the operator's way
+  // out, and the notice does not wait for the chusen answer either.
   describe.each([
     ['a chusen waiting', { candidates: [{ poolName: 'Pool A', teamNames: ['Bea', 'Cal'], teams: [{ id: 'a', name: 'Bea' }, { id: 'b', name: 'Cal' }], minPosition: 1 }], recorded: [] }],
-    ['a chusen recorded', { candidates: [], recorded: [{ poolName: 'Pool A', teamNames: ['Bea', 'Cal'], teams: [{ id: 'a', name: 'Bea' }, { id: 'b', name: 'Cal' }], ranks: [1, 2], minPosition: 1 }] }],
     ['the chusen answer outstanding', new Promise(() => {})],
   ])('on a team competition with %s', (_name, chusen) => {
     const team = { kind: 'team', teamSize: 3 };
@@ -113,6 +112,29 @@ describe('AdminPools: a tie-break bout saved as a draw', () => {
 
     it('still shows the notice for a drawn tie-break bout', async () => {
       await mount([bout('Pool A-TB-0')], 'mixed', team, api);
+      await waitFor(() => expect(window.API.chusenCandidates).toHaveBeenCalled());
+      expect(screen.getByTestId('drawn-tiebreak-notice')).toBeTruthy();
+    });
+  });
+
+  // Once a chusen has ranked the tied teams (their standings rows carry
+  // isOverridden) the lots decided the place, so the drawn daihyosen is settled
+  // and no notice names it. A drawn tie-break bout is not ruled by a chusen.
+  describe('on a team competition with a chusen recorded', () => {
+    const team = { kind: 'team', teamSize: 3 };
+    const row = (id, name) => ({ player: { id, name }, points: 2, isOverridden: true });
+    const standings = { 'Pool A': [row('a', 'Bea'), row('b', 'Cal')] };
+    const chusen = { candidates: [], recorded: [{ poolName: 'Pool A', teamNames: ['Bea', 'Cal'], teams: [{ id: 'a', name: 'Bea' }, { id: 'b', name: 'Cal' }], ranks: [1, 2], minPosition: 1 }] };
+    const api = () => ({ chusenCandidates: vi.fn().mockResolvedValue(chusen) });
+
+    it('shows no notice for the drawn daihyosen', async () => {
+      await mount([bout('Pool A-DH-0')], 'mixed', team, api(), standings);
+      await waitFor(() => expect(window.API.chusenCandidates).toHaveBeenCalled());
+      expect(screen.queryByTestId('drawn-tiebreak-notice')).toBeNull();
+    });
+
+    it('still shows the notice for a drawn tie-break bout', async () => {
+      await mount([bout('Pool A-TB-0')], 'mixed', team, api(), standings);
       await waitFor(() => expect(window.API.chusenCandidates).toHaveBeenCalled());
       expect(screen.getByTestId('drawn-tiebreak-notice')).toBeTruthy();
     });

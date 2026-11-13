@@ -3069,7 +3069,10 @@ paths:
             the response alongside the standard player fields. The participant
             edit and the draw cascade are one transaction: if the cascade fails,
             nothing is saved and the request is answered with an error (400 or
-            404 for a refusal the cascade names, 500 otherwise).
+            404 for a refusal the cascade names, 500 otherwise). A 500 can also
+            mean the edit was kept: the transaction committed but the disk then
+            refused a file write, and the edit is written at the next startup or
+            by the next write the disk accepts. Reload before editing again.
           content:
             application/json:
               schema:

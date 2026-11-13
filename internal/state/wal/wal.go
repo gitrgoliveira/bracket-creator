@@ -561,14 +561,14 @@ func Scan(walDir string, write WriteFn, remove RemoveFn) ([]*WAL, error) {
 		path := filepath.Join(walDir, n)
 		raw, rerr := root.ReadFile(n)
 		if rerr != nil {
-			// Best-effort: skip unreadable files. A future enhancement
-			// could surface these via a slog warning, but breaking the
-			// loop on one corrupt file would block recovery for the
-			// rest.
+			// Skipped, and said: breaking the loop on one file would block
+			// recovery for the rest, and the change it holds is not applied.
+			slog.Error("wal: a pending transaction log cannot be read; it is skipped and its change is not applied", "file", path, "err", rerr)
 			continue
 		}
 		var wf walFile
 		if jerr := json.Unmarshal(raw, &wf); jerr != nil {
+			slog.Error("wal: a pending transaction log is not valid JSON; it is skipped and its change is not applied", "file", path, "err", jerr)
 			continue
 		}
 		steps := wf.Intents

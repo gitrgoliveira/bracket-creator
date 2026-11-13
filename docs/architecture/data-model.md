@@ -863,7 +863,8 @@ A staged step can also remove a file, applied in its place among the writes. Mov
 members of a competition recorded by version 2.0.0 from `squads.yaml` onto `team-members.yaml`
 is such a step when it happens inside a transaction: the new file and the removal of the old one
 land together, or neither does. An earlier version of the app does not apply a log that holds a
-removal: it logs that it could not, and leaves the log in `.wal/` for this version to finish. A
+removal: it logs that it could not, and leaves the log in `.wal/` for this version to finish (unless the earlier version has since
+rewritten one of its files, as the next paragraph describes). A
 log written by a later version than the one running stops the app at startup; start that later
 version to finish it.
 
@@ -876,9 +877,15 @@ and the app never reads that file again: check the data the error names, then de
 log written by an earlier version records nothing about its files, so it is replayed as before.
 
 If a file a log names cannot be read at startup, the app does not start, and names the log and
-the file; fix access to that file and start again. If committing a log fails, the log is removed,
-so a change reported as failed never lands later. If the log cannot be removed, the change is
-reported as committed instead, and the next startup finishes it.
+the file; fix access to that file and start again. A log that itself cannot be read, or is not
+valid JSON, is skipped with an error naming it: the change it holds is not applied, and the
+other logs replay as usual.
+
+If committing a log fails, the log is removed, so a change reported as failed never lands later.
+If the log cannot be removed, or the log is committed but writing its files then fails, the change
+is kept: the request still answers 500, the server log names the disk fault, and the change is
+written at the next startup or by the next write the disk accepts. A 500 on a save can therefore
+mean the change will still land, so reload before entering it again.
 
 ```mermaid
 sequenceDiagram
@@ -1095,7 +1102,7 @@ applies, so the device with the wrong clock overwrites a newer result recorded e
 nobody is told. A few seconds ahead is ordinary and is accepted, since a device learns the
 server time over the network and a little drift is normal. Beyond that the device is told
 its clock is wrong and nothing is written. The app resyncs its clock, re-stamps the queued write
-once and sends it again by itself. Sending it again is safe precisely because the refused write
+and sends it again by itself. Sending it again is safe precisely because the refused write
 never landed. A tap is checked the same way, tap by tap within a batch: one
 stamped too far ahead is not logged, and the device stamps it again and sends it under the same id.
 
@@ -1108,7 +1115,7 @@ queue age plus the few seconds of tolerance, which is the case that would otherw
 the match or overwrite a newer result with nobody told.
 
 When a queued write is refused for a wrong clock, the app learns the server time again and
-rebuilds the stamp before retrying it once. It does this two ways and keeps whichever answer is
+rebuilds the stamp before retrying it, and does so again on every later retry. It does this two ways and keeps whichever answer is
 older. The first way reads the moment the result was entered and adds the freshly learned
 offset, which is right so long as the device clock has not moved in between. The second way
 measures how long the result has been waiting on a steadily ticking timer that a clock
@@ -1121,14 +1128,15 @@ they are already being told about. Too new, and a result entered before the outa
 beat one recorded during it, which is the silent overwrite the whole check exists to prevent.
 Where the two answers disagree, the recoverable mistake is the one to make.
 
-One case is still not recovered, and it is worth stating plainly. The steady timer is measured
+One case needs the operator, and it is worth stating plainly. The steady timer is measured
 from the moment the page was opened, so it means nothing to a page that has since been reloaded
-or to a second tab. If the clock is corrected across a reload, the rebuilt stamp is wrong again,
-the result is refused a second time, and it is then dropped rather than retried forever. That is
-accepted, and it is loud: the operator is told that nothing was recorded and that this device's
-clock needs fixing, so the result can be entered again from a device whose clock is right.
-Dropping it is the lesser harm, because an entry that can never carry a correct stamp would
-otherwise hold up every write queued behind it.
+or to a second tab. If the clock is corrected across a reload, the rebuilt stamp can be wrong
+again and the result refused a second time. It is then kept, never dropped: it stays queued and
+held, the operator is told once that this device's clock is wrong, and it is re-stamped and sent
+again on every retry until it lands. While it is held, the writes of the same match queued
+behind it wait for it, so the operator either fixes the device clock or discards the held write
+from its score editor or the list of held writes and enters the result again from a device whose
+clock is right.
 
 ### When a file is wrong
 

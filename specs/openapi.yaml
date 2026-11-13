@@ -3559,8 +3559,8 @@ paths:
 
           `confirmFinished: true` (also request-only, never stored) is the
           organiser's "Change it anyway" on a finished league: a correction
-          of a regular match of a league whose status is `complete` (an
-          engi league and a tie-breaker bout excepted) is answered 409
+          of a match of a league whose status is `complete` (a tie-breaker
+          bout included, an engi league excepted) is answered 409
           `league_finished` without it and lands with it. A correction here
           is a completed write over a completed match that carries its
           `correctionReason`; the resend of the result already recorded, a
@@ -3721,11 +3721,14 @@ paths:
             winner: continue with encho, then decide by hantei." Every result
             door gives the same refusal (score, quick-score, bulk-score, the
             score events and the decision door). On the decision door, the
-            hikiwake recorded when both sides are barred is refused too: "Both
-            sides of this tie-breaker are barred, so it cannot be fought or
-            drawn.", followed for a team league by "Accept the shared ranks
-            instead." A pools + knockout competition keeps its drawn
-            tie-breaker and its lots.
+            hikiwake recorded when both sides are barred is refused for a team
+            league's representative bout: "Both sides of this tie-breaker are
+            barred, so it cannot be fought or drawn. Accept the shared ranks
+            instead." An individual league's ippon-shobu bout is the one
+            exemption: nobody can fight it, so that draw is recorded and the
+            bout counts settled while both sides stay barred (the places stay
+            shared); a side reinstated opens the bout again. A pools +
+            knockout competition keeps its drawn tie-breaker and its lots.
 
             A request with an empty password (self-run) whose `subResults`
             list more than one representative-bout row (position `-1`) is
@@ -4229,6 +4232,9 @@ paths:
         A match reopened on a finished league puts the league back into match
         play (status `pools`, any accepted shared ranks taken back), broadcast
         as `competition_started`; `requeue-blocker-and-reopen` does the same.
+        The reopen is warned about first: a completed match of a finished
+        league is refused 409 `league_finished` (nothing is written) until the
+        request carries `confirmFinished: true`.
 
         Reopening a match a withdrawal (kiken, fusenpai) ended REMOVES the
         withdrawal: every competitor-status entry that named this match as
@@ -4306,6 +4312,12 @@ paths:
                     court checks (this competition's and every other
                     competition's) and lands, so the shiaijo runs two bouts
                     at once. The route is organiser-only in self-run mode.
+                confirmFinished:
+                  type: boolean
+                  description: >
+                    Optional, request-only, never stored. The organiser's
+                    "Change it anyway" after a 409 `league_finished`: the
+                    reopen puts the finished league back into match play.
                 writeId:
                   $ref: '#/components/schemas/WriteId'
                 basis:
@@ -4394,6 +4406,11 @@ paths:
               `forceCourt: true`. Extra fields: `court`, `matchId`, `compId`,
               `label`, `message`. Same shape as the score endpoint's
               `court_busy`, so clients keep one branch for it.
+            - `error: league_finished`: the match belongs to a finished league,
+              and reopening it puts the league back into match play. Nothing is
+              written. Extra fields: `message`, `removedCourts` (the shiaijo the
+              league's matches stand on that the tournament no longer has).
+              Retry with `confirmFinished: true`.
           content:
             application/json:
               schema:
@@ -4421,6 +4438,19 @@ paths:
                       message:
                         type: string
                         description: Human-readable sentence; what clients display.
+                  - type: object
+                    required: [error]
+                    description: The match belongs to a finished league; resend with `confirmFinished`.
+                    properties:
+                      error:
+                        type: string
+                        enum: [league_finished]
+                      message:
+                        type: string
+                      removedCourts:
+                        type: array
+                        items:
+                          type: string
                   - $ref: '#/components/schemas/DownstreamKnockoutPlayedError'
                   - type: object
                     required: [error]
@@ -4510,6 +4540,12 @@ paths:
                 forceDownstreamReopen:
                   type: boolean
                   description: Optional. As on the reopen endpoint.
+                confirmFinished:
+                  type: boolean
+                  description: >
+                    Optional, request-only, never stored. As on the reopen
+                    endpoint: the confirmation of a target that belongs to a
+                    finished league, asked before the blocker is requeued.
                 writeId:
                   $ref: '#/components/schemas/WriteId'
                 basis:
@@ -4562,7 +4598,10 @@ paths:
             is being fought now. Or `error: court_busy` (same shape as reopen:
             `court`, `matchId`, `compId`, `label`, `message`) when a
             match OTHER than the one requeued has since taken the court — the
-            client re-offers the remedy for that new blocker.
+            client re-offers the remedy for that new blocker. Or `error:
+            league_finished` (same shape as reopen's) when the target belongs
+            to a finished league and `confirmFinished` was not set; the blocker
+            is left untouched.
           content:
             application/json:
               schema:
@@ -5227,7 +5266,12 @@ paths:
         fought/hikiwake"). The equivalent knockout case, where the bracket
         needs a winner and a draw cannot stand in, is refused instead with
         409 `ineligible_competitor` naming both sides and pointing at the
-        earlier withdrawal or the draw.
+        earlier withdrawal or the draw. On a league's tie-breaker bout the
+        draw is refused for a team league's representative bout (the shared
+        ranks are accepted instead) and recorded for an individual league's
+        ippon-shobu bout (see PUT .../score). The pool match list stamps
+        `ineligibleSides` on such a drawn ippon-shobu bout, which is how the
+        Pools tab knows both sides are barred.
       security:
         - TournamentPassword: []
       parameters:

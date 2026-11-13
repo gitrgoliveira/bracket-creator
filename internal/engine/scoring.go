@@ -1950,6 +1950,10 @@ type poolStandingsLoader interface {
 	LoadPoolMatches(compID string) ([]state.MatchResult, error)
 	LoadPoolRanks(compID string) (map[string]map[string]int, error)
 	LoadBracket(compID string) (*state.Bracket, error)
+	// LoadCompetitorStatus is read by the completion judgement alone
+	// (poolCompletion), never by the standings: a standings entry must not
+	// depend on a file the standings cache does not key on.
+	LoadCompetitorStatus(compID string) (map[string]domain.CompetitorStatus, error)
 }
 
 // computeStandings is the non-tx standings core. It delegates to the shared

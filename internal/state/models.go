@@ -1678,7 +1678,9 @@ func (s *SubMatchResult) ReconcileWinnerMemberID() bool {
 }
 
 // IneligibleSidesAnnotation names which side(s) of a SCHEDULED match are
-// currently barred by a withdrawal recorded on a DIFFERENT match (bc-cse).
+// currently barred by a withdrawal recorded on a DIFFERENT match (bc-cse). A
+// pool ippon-shobu bout finished with no winner carries it too, since two barred
+// sides are what settles that draw (engine.drawnTiebreakOfBarredSides).
 // Both fields are optional and independent: either, both, or neither may be
 // set. The value is the barring status's decision string (domain.Decision,
 // e.g. "kiken-voluntary"), never the reason sentence -- a client that wants

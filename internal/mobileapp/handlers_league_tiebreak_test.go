@@ -1978,7 +1978,7 @@ func TestReopenHandler_PutsAFinishedLeagueBackInPlay(t *testing.T) {
 	t.Run("reopen", func(t *testing.T) {
 		r, store, hub := finishedLeagueWithAWithdrawal(t, nil)
 		stop := collectEvents(t, hub)
-		w := postReopen(t, r, "rwl", "Pool A-0", "Withdrawal recorded by mistake")
+		w := postReopenRaw(t, r, "rwl", "Pool A-0", []byte(`{"reason":"Withdrawal recorded by mistake","confirmFinished":true}`))
 		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 		events := stop()
 
@@ -2001,12 +2001,10 @@ func TestReopenHandler_PutsAFinishedLeagueBackInPlay(t *testing.T) {
 			}))
 		})
 		stop := collectEvents(t, hub)
-		body, err := json.Marshal(map[string]any{"blockerCompId": "blk", "blockerMatchId": "Pool A-0", "reason": "Withdrawal recorded by mistake"})
-		require.NoError(t, err)
-		req := httptest.NewRequest(http.MethodPost, "/api/competitions/rwl/matches/Pool%20A-0/requeue-blocker-and-reopen", bytes.NewReader(body))
-		req.Header.Set("Content-Type", "application/json")
-		w := httptest.NewRecorder()
-		r.ServeHTTP(w, req)
+		w := postRequeueAndReopen(t, r, "rwl", "Pool A-0", map[string]any{
+			"blockerCompId": "blk", "blockerMatchId": "Pool A-0",
+			"reason": "Withdrawal recorded by mistake", "confirmFinished": true,
+		})
 		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 		events := stop()
 
@@ -2014,5 +2012,52 @@ func TestReopenHandler_PutsAFinishedLeagueBackInPlay(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, state.CompStatusPools, comp.Status, "the league is in match play again")
 		assert.Contains(t, fmt.Sprint(events), `"type":"competition_started"`)
+	})
+}
+
+// Reopening a match of a finished league is warned about first (D2), as a
+// correction of its result is: 409 league_finished, nothing changed, until the
+// request carries confirmFinished, through either reopen door.
+func TestReopenHandler_WarnsBeforeReopeningAFinishedLeague(t *testing.T) {
+	t.Run("reopen", func(t *testing.T) {
+		r, store, _ := finishedLeagueWithAWithdrawal(t, nil)
+		w := postReopen(t, r, "rwl", "Pool A-0", "Withdrawal recorded by mistake")
+		require.Equal(t, http.StatusConflict, w.Code, w.Body.String())
+		var body map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+		assert.Equal(t, "league_finished", body["error"])
+
+		comp, err := store.LoadCompetition("rwl")
+		require.NoError(t, err)
+		assert.Equal(t, state.CompStatusComplete, comp.Status, "the warning changed nothing")
+		matches, err := store.LoadPoolMatches("rwl")
+		require.NoError(t, err)
+		assert.Equal(t, state.MatchStatusCompleted, matches[0].Status, "the match is still finished")
+
+		w = postReopenRaw(t, r, "rwl", "Pool A-0", []byte(`{"confirmFinished":true}`))
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		comp, err = store.LoadCompetition("rwl")
+		require.NoError(t, err)
+		assert.Equal(t, state.CompStatusPools, comp.Status, "confirmed, the league is back in match play")
+	})
+
+	t.Run("requeue the blocker and reopen", func(t *testing.T) {
+		r, store, _ := finishedLeagueWithAWithdrawal(t, func(store *state.Store) {
+			require.NoError(t, store.SaveCompetition(&state.Competition{ID: "blk", Name: "blk", Kind: "individual", Format: state.CompFormatLeague, Status: state.CompStatusPools}))
+			require.NoError(t, store.SaveParticipants("blk", []domain.Player{
+				{ID: rwKumaID, Name: "Kuma", Dojo: "DojoK"},
+				{ID: rwRyuID, Name: "Ryu", Dojo: "DojoR"},
+			}))
+			require.NoError(t, store.SavePoolMatches("blk", []state.MatchResult{
+				{ID: "Pool A-0", SideA: "Kuma", SideAID: rwKumaID, SideB: "Ryu", SideBID: rwRyuID, Court: "A", Status: state.MatchStatusRunning},
+			}))
+		})
+		w := postRequeueAndReopen(t, r, "rwl", "Pool A-0", map[string]any{"blockerCompId": "blk", "blockerMatchId": "Pool A-0"})
+		require.Equal(t, http.StatusConflict, w.Code, w.Body.String())
+		assert.Contains(t, w.Body.String(), "league_finished")
+
+		blocker, err := store.LoadPoolMatches("blk")
+		require.NoError(t, err)
+		assert.Equal(t, state.MatchStatusRunning, blocker[0].Status, "the blocker was not requeued by a refused reopen")
 	})
 }

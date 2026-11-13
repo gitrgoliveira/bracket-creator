@@ -41,7 +41,7 @@ const recordedGroup = {
 };
 
 function leagueComp(overrides = {}) {
-  return { id: 'c1', name: 'Team League', format: 'league', kind: 'team', teamSize: 3, status: 'complete', ...overrides };
+  return { id: 'c1', name: 'Team League', format: 'league', kind: 'team', teamSize: 3, status: 'completed', ...overrides };
 }
 
 function makeApi() {

@@ -16,7 +16,7 @@ import { render, act, screen, fireEvent, waitFor } from '@testing-library/react'
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vitest';
 import { installWindowStubs } from '../helpers/stub_globals.js';
 import { readStylesheet, cssBlock } from '../helpers/source.js';
-import { DOWNSTREAM_KNOCKOUT_REOPEN_CANCELLED } from '../../write_result.jsx';
+import { DOWNSTREAM_KNOCKOUT_REOPEN_CANCELLED, LEAGUE_FINISHED_REOPEN_CANCELLED } from '../../write_result.jsx';
 import { withdrawalLabel, LATER_MATCHES_HOLD_MS } from '../../admin_scoring_shared.jsx';
 
 const STUBBED_GLOBALS = {
@@ -194,6 +194,34 @@ describe.each([
     // the notice described it, not the match now in front of the operator.
     await act(async () => { flip({ status: 'completed', decision: 'kiken-voluntary', decisionBy: 'aka' }); });
     expect(screen.queryByTestId('withdrawal-reopen-notice')).toBeNull();
+  });
+
+  it('warns before reopening a match of a finished league, then retries with confirmFinished', async () => {
+    window.API.reopenMatch = vi.fn()
+      .mockRejectedValueOnce(Object.assign(new Error('refused'), { leagueFinished: { removedCourts: [], reopen: true } }))
+      .mockResolvedValueOnce({ reopenedMatches: [] });
+    await mountLive(fixture(), vi.fn());
+    await clearWithdrawal();
+    await waitFor(() => expect(window.API.reopenMatch).toHaveBeenCalledTimes(2));
+    const asked = window.confirmDialog.mock.calls[0][0];
+    expect(asked.message).toContain('puts the league back into match play');
+    expect(asked.message.toLowerCase()).not.toContain('correction');
+    expect(asked.confirmLabel).toBe('Change it anyway');
+    expect(window.API.reopenMatch.mock.calls[0][3]).toEqual(expect.objectContaining({ confirmFinished: false }));
+    expect(window.API.reopenMatch.mock.calls[1][3]).toEqual(expect.objectContaining({ confirmFinished: true }));
+  });
+
+  it('declining the finished-league warning leaves the match finished and says so', async () => {
+    window.confirmDialog = vi.fn().mockResolvedValue(false);
+    window.API.reopenMatch = vi.fn().mockRejectedValue(Object.assign(new Error('refused'), {
+      leagueFinished: { removedCourts: [], reopen: true },
+    }));
+    const onClose = vi.fn();
+    await mount(fixture(), { onClose });
+    await clearWithdrawal();
+    await waitFor(() => expect(screen.getByTestId('withdrawal-reopen-error').textContent).toBe(LEAGUE_FINISHED_REOPEN_CANCELLED));
+    expect(window.API.reopenMatch).toHaveBeenCalledTimes(1);
+    expect(onClose).not.toHaveBeenCalled();
   });
 
   it('declining the downstream confirm leaves everything as it was and says so', async () => {

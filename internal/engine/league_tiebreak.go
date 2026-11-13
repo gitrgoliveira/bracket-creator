@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
@@ -528,7 +529,9 @@ func (e *Engine) LeagueSharedRanks(compID string) ([]TiedGroup, error) {
 func (e *Engine) OpenDrawnSupplementaryBouts(tx state.StoreTx, compID string, matches []state.MatchResult) ([]state.MatchResult, error) {
 	lots, err := loadPoolLots(matches, sync.OnceValues(func() (map[string][]state.PlayerStanding, error) {
 		return e.computeStandingsFrom(tx, compID)
-	}))
+	}), func() (map[string]domain.CompetitorStatus, error) {
+		return tx.LoadCompetitorStatus(compID)
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -564,13 +567,13 @@ type leagueBeforeWrite struct {
 	acceptedInPlay bool
 }
 
-// leagueStateBeforeWrite reads what a REGULAR league match's write is judged
-// against afterwards (reconcileLeagueAfterWrite), in the write's transaction:
-// nil for anything else (another format, an engi league, a supplementary bout,
-// a league in play with nothing accepted), so no other write pays for a
-// standings read.
+// leagueStateBeforeWrite reads what a league pool match's write is judged
+// against afterwards (reconcileLeagueAfterWrite), in the write's transaction: a
+// regular match or a tie-breaker bout, whose correction can leave the round in
+// a circle. nil for anything else (another format, an engi league, a league in
+// play with nothing accepted), so no other write pays for a standings read.
 func (e *Engine) leagueStateBeforeWrite(tx state.StoreTx, compID, matchID string) (*leagueBeforeWrite, error) {
-	if state.IsPoolSupplementaryMatchID(matchID) || !IsPoolMatchID(matchID) {
+	if !IsPoolMatchID(matchID) {
 		return nil, nil
 	}
 	comp, err := tx.LoadCompetition(compID)
@@ -668,9 +671,10 @@ func (e *Engine) leagueTableUnsettled(tx state.StoreTx, compID string, comp *sta
 // leagueReopenNotes holds, per engine and competition, a league a write's
 // transaction put back into match play (reconcileLeagueAfterWrite), until the
 // door's auto-complete pass (maybeAutoCompletePools) takes the note and
-// reports AutoCompleteStarted, whose broadcast every surface reloads on. A
-// note left by a transaction that did not commit finds the league still
-// completed and is dropped.
+// reports AutoCompleteStarted, whose broadcast every surface reloads on. The
+// pass takes a note only once the committed league is in match play
+// (leagueBackInPlay), so a pass racing the transaction that wrote it leaves it
+// for the pass that follows the commit.
 var leagueReopenNotes sync.Map // map[leagueReopenNote]struct{}
 
 type leagueReopenNote struct {

@@ -218,4 +218,25 @@ describe('the league_finished refusal', () => {
         expect(claimed.message).toBe(SERVER_SENTENCE);
         warnSpy.mockRestore();
     });
+
+    it('rejects a reopen alike, marked as a reopen, and sends its confirmation', async () => {
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        mockFetch(() => conflict(refusalBody));
+        let claimed = null;
+        const answer = await API.reopenMatch('c1', 'Pool A-0', 'pw', {
+            onRefusal: (e) => { claimed = e; return true; },
+        });
+        answer.settled.catch(() => {});
+        await tick(50);
+
+        expect(claimed).toBeTruthy();
+        expect(claimed.leagueFinished).toEqual({ removedCourts: ['C'], reopen: true });
+        expect(writes().length).toBe(1);
+        expect(bodyOf(writes()[0]).confirmFinished).toBeUndefined();
+
+        mockFetch(() => ok({ reopenedMatches: [] }));
+        await (await API.reopenMatch('c1', 'Pool A-0', 'pw', { confirmFinished: true })).settled;
+        expect(bodyOf(writes()[0]).confirmFinished).toBe(true);
+        warnSpy.mockRestore();
+    });
 });

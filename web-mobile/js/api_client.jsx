@@ -154,6 +154,13 @@ function _reopenRefusal(err) {
         if (downstream.downstreamKnockoutPlayed) downstream.downstreamKnockoutPlayed.reopen = true;
         return downstream;
     }
+    // The match belongs to a finished league: met by a reopen, which the
+    // confirm words as one (write_result.jsx's leagueFinishedConfirm).
+    const league = _leagueFinishedError(err);
+    if (league) {
+        league.leagueFinished.reopen = true;
+        return league;
+    }
     const e = new Error(_refusalText(err, "Failed to reopen match"));
     if (err.error) e.code = err.error;
     if (err.court) e.court = err.court;
@@ -170,13 +177,15 @@ function _reopenRefusal(err) {
 }
 
 // reopenBody is the optional half of both reopen requests: the audit reason,
-// the downstream confirmation, and the court-busy override, each sent only
-// when set, so the one-tap kachinuki Reopen still posts {} exactly as before.
-function reopenBody(reason, force, forceCourt) {
+// the downstream confirmation, the court-busy override and the confirmation of
+// a finished league, each sent only when set, so the one-tap kachinuki Reopen
+// still posts {} exactly as before.
+function reopenBody(reason, force, forceCourt, confirmFinished) {
     const body = {};
     if (reason) body.reason = reason;
     if (force) body.forceDownstreamReopen = true;
     if (forceCourt) body.forceCourt = true;
+    if (confirmFinished) body.confirmFinished = true;
     return body;
 }
 
@@ -6330,13 +6339,13 @@ const API = {
      * @param {*} [opts.seen]
      * @param {Function} [opts.onRefusal]
      */
-    async reopenMatch(compID, matchID, password, { reason = "", force = false, forceCourt = false, seen, onRefusal } = {}) {
+    async reopenMatch(compID, matchID, password, { reason = "", force = false, forceCourt = false, confirmFinished = false, seen, onRefusal } = {}) {
         // bc-evts: the outbox's; `settled` resolves the server body or rejects
         // with reopenFailureError's error (court_busy, downstream, ...).
         return _outboxWrite({
             kind: 'reopen', compID, matchID, method: 'POST',
             url: `/api/competitions/${compID}/matches/${matchID}/reopen`,
-            payload: reopenBody(reason, force, forceCourt), password, seen, onRefusal,
+            payload: reopenBody(reason, force, forceCourt, confirmFinished), password, seen, onRefusal,
         });
     },
     // mp-gmcg (review A4): atomically requeue the match holding the court AND
@@ -6346,7 +6355,7 @@ const API = {
     // as reopenMatch, so the panel re-offers the remedy when a DIFFERENT match
     // has since taken the court. opts as reopenMatch's: the remedy carries the
     // same reason and confirmation the reopen it retries did.
-    async requeueBlockerAndReopen(targetComp, targetMatch, blockerComp, blockerMatch, password, { reason = "", force = false, seen, onRefusal, match, blockerLabel } = {}) {
+    async requeueBlockerAndReopen(targetComp, targetMatch, blockerComp, blockerMatch, password, { reason = "", force = false, confirmFinished = false, seen, onRefusal, match, blockerLabel } = {}) {
         // bc-evts: the outbox's, on the TARGET match's base (the one reopened),
         // and ordered under the blocker's too (M5): it follows the blocker's
         // last queued write (`after`), and a write of the blocker made after it
@@ -6359,7 +6368,7 @@ const API = {
         return _outboxWrite({
             kind: 'requeue', compID: targetComp, matchID: targetMatch, method: 'POST',
             url: `/api/competitions/${targetComp}/matches/${targetMatch}/requeue-blocker-and-reopen`,
-            payload: { blockerCompId: blockerComp, blockerMatchId: blockerMatch, ...reopenBody(reason, force) },
+            payload: { blockerCompId: blockerComp, blockerMatchId: blockerMatch, ...reopenBody(reason, force, false, confirmFinished) },
             password, seen, onRefusal,
             after: _lastEntryKey(blockerBase), holds: [blockerBase],
         });

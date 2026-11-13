@@ -1474,7 +1474,7 @@ func (e *Engine) reopenResultPreconditionTx(tx state.StoreTx, compID string, com
 		// either back.
 		lots, err := loadPoolLots([]state.MatchResult{*h.Pool}, func() (map[string][]state.PlayerStanding, error) {
 			return e.computeStandingsFrom(tx, compID)
-		})
+		}, nil)
 		if err != nil {
 			return err
 		}

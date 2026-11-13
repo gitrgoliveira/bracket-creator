@@ -3804,6 +3804,27 @@ func TestFinishedLeagueCorrection_WarnsThenSaves(t *testing.T) {
 	assert.Equal(t, mgBob, storedPoolMatch(t, store, compID, seMatch).Winner, "the confirmed correction lands")
 }
 
+// A tie-breaker bout of a finished league is warned about like a regular match:
+// correcting it can leave the round in a circle, which puts the league back into
+// match play (the engine reconciles it the same way).
+func TestFinishedLeagueCorrection_TiebreakerBoutIsWarned(t *testing.T) {
+	const compID = "fl-tiebreaker"
+	_, store, _ := finishedLeagueServer(t, compID)
+	ask := func(matchID string, confirmed bool) error {
+		var err error
+		require.NoError(t, store.WithTransaction(compID, func(stx state.StoreTx) error {
+			err = refuseFinishedLeagueCorrection(stx, nil, compID, matchID, true, confirmed)
+			return nil
+		}))
+		return err
+	}
+	for _, id := range []string{"Pool A-TB-0", "Pool A-DH-0"} {
+		var refusal *leagueFinishedRefusal
+		require.ErrorAs(t, ask(id, false), &refusal, id)
+		assert.NoError(t, ask(id, true), id+" confirmed")
+	}
+}
+
 // The confirm names a shiaijo the tournament no longer has: if the correction
 // puts the league back into match play, the matches on it lose their court.
 func TestFinishedLeagueCorrection_NamesARemovedCourt(t *testing.T) {

@@ -140,7 +140,8 @@ var ErrTiebreakNeedsWinner = errors.New("tiebreak_needs_winner")
 // replay, /decision and its both-sides-barred hikiwake, all of which reach
 // RecordMatchResultWithIneligibilityTx. A pools + knockout competition's pool
 // tie-breaker may still be saved drawn (decided apart, see the plan's note on
-// mixed pools).
+// mixed pools), and so may an ippon-shobu bout between two barred competitors
+// (see the decision-door case below).
 func refuseDrawnLeagueTiebreak(comp *state.Competition, matchID string, result *state.MatchResult) error {
 	if comp == nil || comp.Format != state.CompFormatLeague || !state.IsPoolSupplementaryMatchID(matchID) {
 		return nil
@@ -153,18 +154,20 @@ func refuseDrawnLeagueTiebreak(comp *state.Competition, matchID string, result *
 		// one door a decision reaches the engine as a hikiwake by): nobody can
 		// fight the bout, so encho and hantei are no remedy. A team league's
 		// way on is accepting the shared ranks, which removes the unfought
-		// bout; an individual league has no such door yet.
+		// bout, so its representative bout is refused. An individual league
+		// has no such door, so its ippon-shobu bout is the one exemption: the
+		// draw is recorded and the bout counts settled while both sides stay
+		// barred (drawnTiebreakOfBarredSides), the places staying shared.
 		if IsPoolDaihyosenMatchID(matchID) {
 			return wrapValidationErrorf(ErrTiebreakNeedsWinner, "%s %s", errTiebreakBothBarredSentence, errTiebreakBothBarredTeamRemedy)
 		}
-		return wrapValidationErrorf(ErrTiebreakNeedsWinner, "%s", errTiebreakBothBarredSentence)
+		return nil
 	}
 	return wrapValidationErrorf(ErrTiebreakNeedsWinner, "%s", errTiebreakNeedsWinnerSentence)
 }
 
-// The refusal of a league tie-breaker whose two sides are both barred,
-// recorded as a hikiwake (refuseDrawnLeagueTiebreak), and a team league's
-// remedy for it.
+// The refusal of a team league's representative bout whose two sides are both
+// barred, recorded as a hikiwake (refuseDrawnLeagueTiebreak), and its remedy.
 const (
 	errTiebreakBothBarredSentence   = "Both sides of this tie-breaker are barred, so it cannot be fought or drawn."
 	errTiebreakBothBarredTeamRemedy = "Accept the shared ranks instead."

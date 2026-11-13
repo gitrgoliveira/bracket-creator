@@ -106,6 +106,12 @@ func TestDaihyosenRuledByChusen_SharedCases(t *testing.T) {
 			InForce []string `json:"inForce"`
 			Ruled   bool     `json:"ruled"`
 			Stuck   bool     `json:"stuck"`
+			// The wire's stamp for a drawn tie-break bout: the sides barred
+			// elsewhere. Here it is the competitor statuses that bar them.
+			IneligibleSides struct {
+				A string `json:"a"`
+				B string `json:"b"`
+			} `json:"ineligibleSides"`
 		} `json:"chusenCases"`
 	}
 	require.NoError(t, json.Unmarshal(raw, &table))
@@ -136,7 +142,13 @@ func TestDaihyosenRuledByChusen_SharedCases(t *testing.T) {
 			assert.ElementsMatch(t, tc.InForce, gotInForce, "ranks in force")
 			standings := map[string][]state.PlayerStanding{poolName: rows}
 			assert.Equal(t, tc.Ruled, daihyosenRuledByChusen(&m, standings), "ruled by the lots")
-			assert.Equal(t, !tc.Stuck, poolMatchSettled(&m, poolLots{standings: standings}), "settled")
+			statuses := map[string]domain.CompetitorStatus{}
+			for id, reason := range map[string]string{tc.SideAID: tc.IneligibleSides.A, tc.SideBID: tc.IneligibleSides.B} {
+				if id != "" && reason != "" {
+					statuses[id] = domain.CompetitorStatus{PlayerID: id, Eligible: false, Reason: reason + ": x", MatchID: "Pool A-0"}
+				}
+			}
+			assert.Equal(t, !tc.Stuck, poolMatchSettled(&m, poolLots{standings: standings, statuses: statuses}), "settled")
 		})
 	}
 }

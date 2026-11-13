@@ -101,12 +101,12 @@ async function mount(match) {
 }
 
 describe('league team sheet: the line for a level encounter (F5)', () => {
-  it('explains a level league encounter and where a tie that matters is settled', async () => {
+  it('explains a level league encounter and what to do next', async () => {
     await mount(makeMatch());
     const line = screen.getByTestId('league-level-hint');
-    expect(line.textContent).toMatch(/league encounter can end level/i);
-    expect(line.textContent).toMatch(/counts as a draw/i);
-    expect(line.textContent).toMatch(/Pools page offers a tie-breaker/i);
+    expect(line.textContent.trim()).toBe(
+      'Level: a draw in a league, so there is no representative bout. Finish the encounter to record the draw.',
+    );
     // No representative bout is offered in a league.
     expect(screen.queryByTestId('scoring-modal-daihyosen-button')).toBeNull();
   });

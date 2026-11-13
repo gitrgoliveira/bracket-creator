@@ -5661,14 +5661,14 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
           {/* A league encounter may end level, so the sheet offers no
               representative bout there. Without this line the operator sees
               the control a knockout sheet shows go missing and cannot tell
-              why (F5). It says what a level result is and where a tie that
-              matters is settled. Shown only while the encounter IS level, so
+              why (F5). It says what a level result is and what to do next
+              (decision D5). Shown only while the encounter IS level, so
               it never nags a scoring operator mid-bout. Kachinuki is left
               out: its tie is fought on, never read from IV and PW alone. */}
           {compFormat === "league" && !isKnockoutPhase && !isKachinuki && !hasDaihyosen
             && teamEncounterIsLevel({ ivA, ivB, pwA, pwB, subTotals }) && (
             <div className="daihyosen-controls__hint" data-testid="league-level-hint" style={{ marginTop: 8 }}>
-              A league encounter can end level, so there is no representative bout (<TermAS name="daihyosen">daihyosen</TermAS>) here. It counts as a draw. If the table is still level at a podium place when every match is finished, the Pools page offers a tie-breaker.
+              Level: a draw in a league, so there is no representative bout. Finish the encounter to record the draw.
             </div>
           )}
 

@@ -228,6 +228,88 @@ func TestLeagueReopenedMatch_PutsTheLeagueBackInPlay(t *testing.T) {
 	assert.False(t, comp.LeagueTiebreakFinalized)
 }
 
+// A correction of a tie-breaker bout of a finished league is reconciled like a
+// regular match's: one that leaves the round in a circle puts the league back
+// into match play so the lots are asked, and one that only reorders the round
+// leaves it finished.
+func TestLeagueCorrection_TiebreakerBoutIsReconciled(t *testing.T) {
+	correct := func(t *testing.T, eng *Engine, store *state.Store, compID, a, b, winner string) {
+		t.Helper()
+		all, err := store.LoadPoolMatches(compID)
+		require.NoError(t, err)
+		for i := range all {
+			if !IsPoolDaihyosenMatchID(all[i].ID) {
+				continue
+			}
+			if (all[i].SideA == a && all[i].SideB == b) || (all[i].SideA == b && all[i].SideB == a) {
+				_, err := eng.RecordMatchResultWithIneligibility(compID, all[i].ID, &state.MatchResult{
+					Status:           state.MatchStatusCompleted,
+					Winner:           winner,
+					WinnerID:         teamID(winner),
+					CorrectionReason: "Scoring error",
+				})
+				require.NoError(t, err)
+				return
+			}
+		}
+		t.Fatalf("no tie-breaker bout between %s and %s", a, b)
+	}
+	finishedAfterRound := func(t *testing.T, compID string) (*Engine, *state.Store) {
+		t.Helper()
+		eng, store := cycleLeagueAt3rd(t, compID)
+		_, err := eng.GenerateLeagueTiebreakMatches(compID, []string{teamID("Gamma"), teamID("Delta"), teamID("Epsilon")})
+		require.NoError(t, err)
+		scoreInjectedDH(t, eng, store, compID, rankOrder([]string{"Gamma", "Delta", "Epsilon"}))
+		outcome, err := eng.MaybeAutoCompletePools(compID)
+		require.NoError(t, err)
+		require.Equal(t, AutoCompleteTransitioned, outcome, "the round ordered the tie")
+		return eng, store
+	}
+
+	t.Run("a circle puts the league back into match play", func(t *testing.T) {
+		eng, store := finishedAfterRound(t, "tb-fix-circle")
+		// Epsilon beat Gamma instead: Gamma > Delta > Epsilon > Gamma.
+		correct(t, eng, store, "tb-fix-circle", "Gamma", "Epsilon", "Epsilon")
+		assert.Equal(t, state.CompStatusPools, loadComp(t, store, "tb-fix-circle").Status)
+		outcome, err := eng.MaybeAutoCompletePools("tb-fix-circle")
+		require.NoError(t, err)
+		assert.Equal(t, AutoCompleteStarted, outcome, "the door's pass reports the league running again")
+	})
+
+	t.Run("a correction that still orders the round leaves it finished", func(t *testing.T) {
+		eng, store := finishedAfterRound(t, "tb-fix-order")
+		// Delta beat Gamma instead: Delta > Gamma > Epsilon, still ordered.
+		correct(t, eng, store, "tb-fix-order", "Gamma", "Delta", "Delta")
+		assert.Equal(t, state.CompStatusComplete, loadComp(t, store, "tb-fix-order").Status)
+	})
+}
+
+// A pass that races the transaction which noted a reopen finds the league still
+// finished, and must leave the note for the pass that follows the commit: taking
+// it then lost the report (no competition_started) when the commit landed.
+func TestLeagueBackInPlay_LeavesAnUncommittedNoteForTheCommit(t *testing.T) {
+	eng, store := finishedLeague(t, "note-race", "topTie")
+	leagueReopenNotes.Store(leagueReopenNote{e: eng, compID: "note-race"}, struct{}{})
+
+	reopened, _, err := eng.leagueBackInPlay("note-race", loadComp(t, store, "note-race"))
+	require.NoError(t, err)
+	assert.False(t, reopened, "the transaction has not committed: the league still reads finished")
+
+	// The transaction commits: the league is in match play.
+	comp := loadComp(t, store, "note-race")
+	comp.Status = state.CompStatusPools
+	require.NoError(t, store.SaveCompetition(comp))
+
+	reopened, fresh, err := eng.leagueBackInPlay("note-race", loadComp(t, store, "note-race"))
+	require.NoError(t, err)
+	assert.True(t, reopened, "the note survived the racing pass")
+	assert.Equal(t, state.CompStatusPools, fresh.Status)
+
+	reopened, _, err = eng.leagueBackInPlay("note-race", loadComp(t, store, "note-race"))
+	require.NoError(t, err)
+	assert.False(t, reopened, "the note is taken once")
+}
+
 // Shared ranks accepted while matches are still played go when a result
 // changes: the table they were accepted on is gone.
 func TestLeagueResultChange_InPlayTakesBackAcceptedRanks(t *testing.T) {
@@ -429,9 +511,8 @@ func TestRefuseDrawnLeagueTiebreak_BothBarredSentences(t *testing.T) {
 	require.ErrorAs(t, err, &ve)
 	assert.Equal(t, errTiebreakBothBarredSentence+" "+errTiebreakBothBarredTeamRemedy, ve.Msg)
 
-	err = refuseDrawnLeagueTiebreak(league, "Pool A-TB-0", barred)
-	require.ErrorAs(t, err, &ve)
-	assert.Equal(t, errTiebreakBothBarredSentence, ve.Msg, "an individual league has no Accept to point at")
+	assert.NoError(t, refuseDrawnLeagueTiebreak(league, "Pool A-TB-0", barred),
+		"an individual league has no Accept to point at: its barred ippon-shobu draw is the exemption")
 
 	assert.NoError(t, refuseDrawnLeagueTiebreak(league, "Pool A-0", barred), "a regular league match keeps the carve-out")
 }

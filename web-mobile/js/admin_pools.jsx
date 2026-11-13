@@ -145,8 +145,10 @@ function enrichPoolMatchWithComp(m, comp, poolNameOverride) {
 // from the wire fields; both are pinned to the one table
 // internal/engine/testdata/drawn_supplementary_cases.json.
 //
-// A drawn supplementary bout is not stuck, and no notice names it, in two
-// cases the engine's poolMatchSettled counts settled. The lots ruled a drawn
+// A drawn supplementary bout is not stuck, and no notice names it, in three
+// cases the engine's poolMatchSettled counts settled. Nobody can fight it: both
+// sides of a drawn ippon-shobu bout are barred (drawnTiebreakOfBarredSides, read
+// from the server's ineligibleSides stamp). The lots ruled a drawn
 // daihyosen (daihyosenRuledByChusen): every team the pool's standings hold level
 // on points with its two sides carries a rank in force, i.e. its standings row is
 // isOverridden (the server marks only the ranks that still govern a tie no bout
@@ -172,7 +174,12 @@ function drawnSupplementaryBouts(poolMatches, standings) {
     if (a.points !== b.points) return { group: [a, b], level: false };
     return { group: poolRows.filter(s => s.points === a.points), level: true };
   };
+  // drawnTiebreakOfBarredSides in chusen.go: an ippon-shobu bout whose two
+  // sides are both barred elsewhere (the server stamps ineligibleSides on it)
+  // cannot be fought, so its draw stands.
+  const bothSidesBarred = (m) => !isPoolDaihyosenBout(m.id) && !!(m.ineligibleSides && m.ineligibleSides.a && m.ineligibleSides.b);
   const settledWithoutRematch = (m) => {
+    if (bothSidesBarred(m)) return true;
     const { group, level } = lotsGroup(m);
     if (!group) return false;
     // Moot: any drawn supplementary bout whose sides are no longer level, or
@@ -337,7 +344,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
   const isTeamComp = c && (c.kind === "team" || c.teamSize > 0);
   const chusenOpen = !!c && (c.status === "pools"
     || (c.format === "mixed" && c.status === "knockout")
-    || (c.format === "league" && c.status === "complete"));
+    || (c.format === "league" && c.status === "completed"));
   const [chusenCandidates, setChusenCandidates] = useState(null);
   // Per-member input values: keys are "${groupKey}::${identity}" -> string,
   // where groupKey is "${poolName}::${minPosition}" and identity is
@@ -753,7 +760,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
         {changing && (
           <div className="league-tiebreak__desc" style={{ marginBottom: 8 }}>
             {isLeague
-              ? (c.status === "complete"
+              ? (c.status === "completed"
                 ? "Enter the order the lots actually gave. The final table and the podium change at once; the league stays finished and no match is reopened."
                 : "Enter the order the lots actually gave. The league table changes at once.")
               : `Enter the order the lots actually gave. Changing it can change who qualifies from ${poolName}. If ${isTeamComp ? "a team" : "a competitor"} moves out of a knockout match that has already been fought, you are asked before that match is reopened.`}

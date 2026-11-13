@@ -74,7 +74,9 @@ func (e *Engine) PoolsSettledNow(tx state.StoreTx, compID string) (PoolsVerdict,
 	standings := sync.OnceValues(func() (map[string][]state.PlayerStanding, error) {
 		return e.computeStandingsFrom(tx, compID)
 	})
-	lots, err := loadPoolLots(matches, standings)
+	lots, err := loadPoolLots(matches, standings, func() (map[string]domain.CompetitorStatus, error) {
+		return tx.LoadCompetitorStatus(compID)
+	})
 	if err != nil {
 		return PoolsMatchOpen, err
 	}
@@ -149,7 +151,8 @@ func tieBreakOwed(comp *state.Competition, pools []helper.Pool, bracket *state.B
 // (daihyosenRuledByChusen, which reads the pool's standings to find the
 // group), or a correction has since split its two sides (drawnSupplementaryMoot):
 // either way that place is decided, and the bout, which settled nothing, may
-// stay drawn. It is the one owner of that rule, so the league's completion
+// stay drawn. So may an ippon-shobu bout whose two sides are both barred
+// (drawnTiebreakOfBarredSides): nobody can fight it. It is the one owner of that rule, so the league's completion
 // (poolMatchesSettled), a mixed pool's (poolCompletion), the auto-complete scan
 // (MaybeAutoCompletePools) and the engi self-heal (isBlockingEngiTBRow) cannot
 // drift inside Go; the reopen gate (drawnSupplementaryBout) stays on the raw
@@ -158,7 +161,7 @@ func tieBreakOwed(comp *state.Competition, pools []helper.Pool, bracket *state.B
 // pinned to the one table testdata/drawn_supplementary_cases.json, so a change
 // here changes the table.
 func poolMatchSettled(m *state.MatchResult, lots poolLots) bool {
-	return m.Status == state.MatchStatusCompleted && (!drawnSupplementaryBout(m) || daihyosenRuledByChusen(m, lots.standings) || drawnSupplementaryMoot(m, lots.standings))
+	return m.Status == state.MatchStatusCompleted && (!drawnSupplementaryBout(m) || daihyosenRuledByChusen(m, lots.standings) || drawnSupplementaryMoot(m, lots.standings) || drawnTiebreakOfBarredSides(m, lots.statuses))
 }
 
 // drawnSupplementaryBout reports a pool tie-break ("-TB-") or representative
@@ -355,19 +358,30 @@ func (e *Engine) maybeAutoCompletePools(compID string, poolsMayHaveMoved bool) (
 // regular matches is no longer finished (reopenFinishedLeagueIfOpen: a reopen
 // or a send back to the queue). comp is the caller's read; the competition is
 // read again whenever it moved.
+//
+// A note is taken only once the committed competition shows the league in match
+// play: a note is made inside a transaction that has not committed yet, so a
+// pass that finds the league still finished cannot tell that transaction from
+// one that rolled back, and taking the note then would lose the report when
+// the transaction commits an instant later (the pass of the door that wrote it
+// would find no note). Such a note stays for the pass that reads the league
+// after the commit; one a rolled-back transaction left reports a reopen at
+// most once, when the league is next found in match play.
 func (e *Engine) leagueBackInPlay(compID string, comp *state.Competition) (bool, *state.Competition, error) {
 	if comp == nil || comp.Format != state.CompFormatLeague {
 		return false, comp, nil
 	}
-	noted := e.takeLeagueReopenNote(compID)
+	var noted bool
 	if comp.Status == state.CompStatusComplete {
 		reopened, err := e.reopenFinishedLeagueIfOpen(compID)
 		if err != nil || !reopened {
-			// Still finished: a note, if any, came from a transaction that
-			// did not commit.
 			return false, comp, err
 		}
 		noted = true
+		// This reopen is the report; a note beside it would report it twice.
+		e.takeLeagueReopenNote(compID)
+	} else {
+		noted = e.takeLeagueReopenNote(compID)
 	}
 	if !noted {
 		return false, comp, nil
@@ -532,6 +546,8 @@ func (e *Engine) maybeAutoCompletePoolsRunning(compID string, comp *state.Compet
 	// transaction holds then.
 	lots, err := loadPoolLots(matches, func() (map[string][]state.PlayerStanding, error) {
 		return e.CalculatePoolStandings(compID)
+	}, func() (map[string]domain.CompetitorStatus, error) {
+		return e.store.LoadCompetitorStatus(compID)
 	})
 	if err != nil {
 		return AutoCompleteNoChange, err

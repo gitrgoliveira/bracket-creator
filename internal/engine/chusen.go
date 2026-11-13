@@ -1,8 +1,10 @@
 package engine
 
 import (
+	"slices"
 	"sort"
 
+	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
@@ -206,26 +208,49 @@ func lotsGroup(poolStandings map[string][]state.PlayerStanding, m *state.MatchRe
 	return group, true
 }
 
-// poolLots is what a drawn representative bout is judged settled on
+// poolLots is what a drawn supplementary bout is judged settled on
 // (poolMatchSettled): the pool standings its tied group, and the ranks in
-// force over it (IsOverridden), are read from. loadPoolLots is the one door
-// that fills it; the zero value holds none, so a drawn supplementary bout is
-// never settled by it (isBlockingEngiTBRow, which only judges tie-break rows,
-// passes it on purpose).
+// force over it (IsOverridden), are read from, and the competitors' statuses
+// say whether the bout's two sides are both barred (drawnTiebreakOfBarredSides).
+// loadPoolLots is the one door that fills it; the zero value holds none, so a
+// drawn supplementary bout is never settled by it (isBlockingEngiTBRow, which
+// only judges tie-break rows, passes it on purpose).
 type poolLots struct {
 	standings map[string][]state.PlayerStanding
+	statuses  map[string]domain.CompetitorStatus
 }
 
 // loadPoolLots reads a competition's lots for matches: the standings
-// (lotsStandings), only when the matches hold the bout that needs them. The
-// recorded ranks are read once, inside the standings (computeStandingsFrom),
-// and nowhere else.
-func loadPoolLots(matches []state.MatchResult, loadStandings func() (map[string][]state.PlayerStanding, error)) (poolLots, error) {
+// (lotsStandings) and the competitor statuses, only when the matches hold the
+// bout that needs them. The recorded ranks are read once, inside the standings
+// (computeStandingsFrom), and nowhere else. A nil loadStatuses reads none.
+func loadPoolLots(matches []state.MatchResult, loadStandings func() (map[string][]state.PlayerStanding, error), loadStatuses func() (map[string]domain.CompetitorStatus, error)) (poolLots, error) {
 	standings, err := lotsStandings(matches, loadStandings)
 	if err != nil {
 		return poolLots{}, err
 	}
-	return poolLots{standings: standings}, nil
+	lots := poolLots{standings: standings}
+	if loadStatuses == nil || !slices.ContainsFunc(matches, func(m state.MatchResult) bool { return drawnSupplementaryBout(&m) }) {
+		return lots, nil
+	}
+	if lots.statuses, err = loadStatuses(); err != nil {
+		return poolLots{}, err
+	}
+	return lots, nil
+}
+
+// drawnTiebreakOfBarredSides reports a drawn ippon-shobu ("-TB-") bout whose
+// two sides are both barred (a withdrawal on another match, engine.BarredSides),
+// the one draw the decision door records for it (handleBothSidesBarredHikiwake,
+// the tie-breaker's only draw: nobody can fight it, so encho and hantei are no
+// remedy). It settles as it stands: the tie stays and the places stay shared.
+// Judged on the live statuses, so a side reinstated since opens the bout again.
+func drawnTiebreakOfBarredSides(m *state.MatchResult, statuses map[string]domain.CompetitorStatus) bool {
+	if !IsTiebreakerMatchID(m.ID) || !drawnSupplementaryBout(m) {
+		return false
+	}
+	a, b := BarredSides(statuses, m.ID, m.SideAID, m.SideBID)
+	return a != nil && b != nil
 }
 
 // lotsStandings reads the pool standings a drawn supplementary bout is judged

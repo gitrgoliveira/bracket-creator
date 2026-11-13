@@ -201,11 +201,13 @@ func applyQueuePositions(poolMatches []state.MatchResult, bracket *state.Bracket
 // anyMatchToAnnotate reports whether poolMatches or bracket carry a match
 // annotateEligibility can act on: a SCHEDULED match with both side ids
 // stamped (its ineligibleSides stamp; engine.BarredSides needs an id to look
-// anyone up), or a COMPLETED match a withdrawal or default win decided (its
+// anyone up), a COMPLETED match a withdrawal or default win decided (its
 // withdrawnStatus stamp, which the score editor words its clear from, so it
-// must be there once every match is finished too). Gates the
+// must be there once every match is finished too), or a pool ippon-shobu bout
+// finished with no winner (its ineligibleSides stamp, which says whether both
+// sides are barred, the draw nobody can fight). Gates the
 // LoadCompetitorStatus read in the viewer handlers behind it, so a
-// competition with neither never pays for a status-file read it cannot use.
+// competition with none never pays for a status-file read it cannot use.
 func anyMatchToAnnotate(poolMatches []state.MatchResult, bracket *state.Bracket) bool {
 	acts := func(status state.MatchStatus, decision, idA, idB string) bool {
 		switch status {
@@ -218,7 +220,7 @@ func anyMatchToAnnotate(poolMatches []state.MatchResult, bracket *state.Bracket)
 	}
 	for i := range poolMatches {
 		m := &poolMatches[i]
-		if acts(m.Status, m.Decision, m.SideAID, m.SideBID) {
+		if acts(m.Status, m.Decision, m.SideAID, m.SideBID) || drawnPoolTiebreak(m) {
 			return true
 		}
 	}
@@ -237,6 +239,13 @@ func anyMatchToAnnotate(poolMatches []state.MatchResult, bracket *state.Bracket)
 		return true
 	}
 	return false
+}
+
+// drawnPoolTiebreak reports a pool ippon-shobu bout finished with no winner:
+// the one finished match that carries the ineligibleSides stamp, because two
+// barred sides are what settles it (engine.drawnTiebreakOfBarredSides).
+func drawnPoolTiebreak(m *state.MatchResult) bool {
+	return m.Status == state.MatchStatusCompleted && m.Winner == "" && engine.IsTiebreakerMatchID(m.ID)
 }
 
 // annotateEligibility stamps state.IneligibleSidesAnnotation (bc-cse) on
@@ -259,8 +268,8 @@ func annotateEligibility(poolMatches []state.MatchResult, bracket *state.Bracket
 	if len(statuses) == 0 {
 		return
 	}
-	stamp := func(status state.MatchStatus, matchID, sideAID, sideBID string) *state.IneligibleSidesAnnotation {
-		if status != state.MatchStatusScheduled {
+	stamp := func(scheduled bool, matchID, sideAID, sideBID string) *state.IneligibleSidesAnnotation {
+		if !scheduled {
 			return nil
 		}
 		a, b := engine.BarredSides(statuses, matchID, sideAID, sideBID)
@@ -322,14 +331,14 @@ func annotateEligibility(poolMatches []state.MatchResult, bracket *state.Bracket
 	}
 	for i := range poolMatches {
 		m := &poolMatches[i]
-		m.IneligibleSides = stamp(m.Status, m.ID, m.SideAID, m.SideBID)
+		m.IneligibleSides = stamp(m.Status == state.MatchStatusScheduled || drawnPoolTiebreak(m), m.ID, m.SideAID, m.SideBID)
 		m.WithdrawnStatus = withdrawn(m.Status, m.Decision, m.DecisionBy, m.WinnerID, m.SideAID, m.SideBID)
 	}
 	if bracket == nil {
 		return
 	}
 	stampBracket := func(bm *state.BracketMatch) {
-		bm.IneligibleSides = stamp(bm.Status, bm.ID, bm.SideAID, bm.SideBID)
+		bm.IneligibleSides = stamp(bm.Status == state.MatchStatusScheduled, bm.ID, bm.SideAID, bm.SideBID)
 		bm.WithdrawnStatus = withdrawn(bm.Status, bm.Decision, bm.DecisionBy, bm.WinnerID, bm.SideAID, bm.SideBID)
 	}
 	for ri := range bracket.Rounds {
@@ -1580,6 +1589,10 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			// both court gates. The route is main-gated in self-run, so no
 			// anonymous caller reaches it.
 			ForceCourt bool `json:"forceCourt"`
+			// ConfirmFinished is the organiser's "Change it anyway" after a 409
+			// league_finished (request-only, never stored): the reopen puts a
+			// finished league back into match play.
+			ConfirmFinished bool `json:"confirmFinished"`
 			// The optional writeId and basis (bc-evts F1).
 			writeTag
 		}
@@ -1612,6 +1625,15 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 		// AuthMiddleware's verification mechanics including the F4
 		// empty-stored-password fail-closed branch. Pinned by
 		// TestSelfRun_ReopenRequiresMainPassword.
+
+		// A match of a finished league is warned about first (D2), as a
+		// correction of its result is.
+		if lerr := refuseFinishedLeagueReopen(tx, tl, id, mid, body.ConfirmFinished); lerr != nil {
+			if !respondIfLeagueFinished(c, lerr) {
+				internalError(c, lerr)
+			}
+			return
+		}
 
 		// ReopenMatch holds the court-exclusivity lock itself now
 		// (mp-gmcg review A2), so its cross-competition pre-check and in-tx
@@ -1717,6 +1739,8 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			BlockerMatchID        string `json:"blockerMatchId"`
 			Reason                string `json:"reason"`
 			ForceDownstreamReopen bool   `json:"forceDownstreamReopen"`
+			// ConfirmFinished: as on reopen, for the target's league.
+			ConfirmFinished bool `json:"confirmFinished"`
 			// The optional writeId and basis (bc-evts F1), the target's.
 			writeTag
 		}
@@ -1746,6 +1770,14 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 				return
 			}
+		}
+
+		// The target's league is warned about before the blocker is requeued.
+		if lerr := refuseFinishedLeagueReopen(tx, tl, id, mid, body.ConfirmFinished); lerr != nil {
+			if !respondIfLeagueFinished(c, lerr) {
+				internalError(c, lerr)
+			}
+			return
 		}
 
 		var reopenedDownstream []engine.ReopenedMatch
@@ -2064,22 +2096,22 @@ func (r *leagueFinishedRefusal) body() gin.H {
 }
 
 // refuseFinishedLeagueCorrection is the ONE check every result door asks (PUT
-// /score, quick-score, bulk-score, POST /decision): a correction of a regular
-// match of a finished league is refused until the write carries the
-// request-only confirmFinished (never stored). It reads the competition under
-// the write's own transaction, so a league that finished an instant before is
-// judged as finished. corrects is the door's own reading of the write as a
-// correction that would land: a completed write over a completed match,
-// neither the resend of the result already recorded nor a result the match's
-// history keeps because the writer never saw the one in force (those land
-// nothing, so there is nothing to warn about). Its scope is the reconciler's
-// (the engine's leagueStateBeforeWrite): a regular match of a league that is
-// not engi; a tie-breaker bout and an engi league are not reconciled, so the
-// warning's "goes back to match play" would not hold there. tl may be nil (no
-// court is then named). It answers nil when the write may go on; an error that
-// is not a *leagueFinishedRefusal is a fault.
+// /score, quick-score, bulk-score, POST /decision, and the reopen doors): a
+// correction of a match of a finished league is refused until the write
+// carries the request-only confirmFinished (never stored). It reads the
+// competition under the write's own transaction, so a league that finished an
+// instant before is judged as finished. corrects is the door's own reading of
+// the write as a correction that would land: a completed write over a
+// completed match, neither the resend of the result already recorded nor a
+// result the match's history keeps because the writer never saw the one in
+// force (those land nothing, so there is nothing to warn about). Its scope is
+// the reconciler's (the engine's leagueStateBeforeWrite): a pool match, a
+// tie-breaker bout included, of a league that is not engi; an engi league is
+// not reconciled, so the warning's "goes back to match play" would not hold
+// there. tl may be nil (no court is then named). It answers nil when the write
+// may go on; an error that is not a *leagueFinishedRefusal is a fault.
 func refuseFinishedLeagueCorrection(stx state.StoreTx, tl TournamentLoader, compID, matchID string, corrects, confirmed bool) error {
-	if !corrects || confirmed || !engine.IsPoolMatchID(matchID) || state.IsPoolSupplementaryMatchID(matchID) {
+	if !corrects || confirmed || !engine.IsPoolMatchID(matchID) {
 		return nil
 	}
 	comp, err := stx.LoadCompetition(compID)
@@ -2140,6 +2172,38 @@ func respondIfLeagueFinished(c *gin.Context, err error) bool {
 	}
 	c.JSON(http.StatusConflict, refusal.body())
 	return true
+}
+
+// refuseFinishedLeagueReopen is the reopen doors' ask of the same check
+// (refuseFinishedLeagueCorrection): reopening a completed match of a finished
+// league puts the league back into match play, so it is warned about first,
+// unless the request carries the confirmation. A match the competition does not
+// hold, or one that is not completed, is the reopen's own answer. It runs in a
+// transaction of its own, read-only, before the reopen: a league that finishes
+// between the two is reopened without the warning, which the organiser's tap on
+// Reopen already asked for.
+func refuseFinishedLeagueReopen(txr CompetitionTransactor, tl TournamentLoader, compID, matchID string, confirmed bool) error {
+	if confirmed || !engine.IsPoolMatchID(matchID) {
+		return nil
+	}
+	var refusal error
+	err := txr.WithTransaction(compID, func(stx state.StoreTx) error {
+		matches, err := stx.LoadPoolMatches(compID)
+		if err != nil {
+			return err
+		}
+		for i := range matches {
+			if matches[i].ID == matchID {
+				refusal = refuseFinishedLeagueCorrection(stx, tl, compID, matchID, matches[i].Status == state.MatchStatusCompleted, false)
+				break
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	return refusal
 }
 
 // repBoutHanteiRefusal is the refusal of an anonymous write that would record,

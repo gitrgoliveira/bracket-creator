@@ -61,7 +61,7 @@ describe('drawnSupplementaryBouts', () => {
     });
 
     it.each(table.chusenCases.map(c => [c.name, c]))('%s', (_name, c) => {
-      const row = m(c.id, { winner: c.winner, sideAId: c.sideAId, sideBId: c.sideBId });
+      const row = m(c.id, { winner: c.winner, sideAId: c.sideAId, sideBId: c.sideBId, ...(c.ineligibleSides ? { ineligibleSides: c.ineligibleSides } : {}) });
       // The case's standings are the bout's own pool's (named as the page names
       // it, poolNameOf); the server marks the ranks in force (inForce) on its
       // rows as isOverridden.

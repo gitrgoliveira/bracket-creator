@@ -1028,6 +1028,14 @@ export function courtBusyReopenWarning({ court, label }) {
 // with confirmFinished: true on Change it anyway.
 export const LEAGUE_FINISHED_WARNING = 'This league has finished. Changing this result can change the final table and podium. If it leaves a new tie at a podium place, the league goes back to match play to settle it.';
 
+// The same warning when what was refused is a REOPEN of a match of the finished
+// league (api_client.jsx marks the refusal `reopen`): the league goes back into
+// match play at once, whatever the match is then finished with.
+export const LEAGUE_FINISHED_REOPEN_WARNING = 'This league has finished. Reopening this match puts the league back into match play and takes back any shared places you accepted. Its final table and podium are decided again when the match is finished.';
+
+// A declined confirmation of that reopen: nothing was changed.
+export const LEAGUE_FINISHED_REOPEN_CANCELLED = 'Reopen cancelled: the league is still finished and this match was left unchanged.';
+
 export function leagueFinishedRefusal(err) {
     return (err && err.leagueFinished) || null;
 }
@@ -1035,9 +1043,9 @@ export function leagueFinishedRefusal(err) {
 // The confirm's copy. A shiaijo the tournament no longer has is named: the
 // league's matches on it lose their court if the correction puts the league
 // back into match play, so they show as unassigned.
-export function leagueFinishedConfirm({ removedCourts } = {}) {
+export function leagueFinishedConfirm({ removedCourts, reopen } = {}) {
     const courts = (removedCourts || []).filter(Boolean).map((c) => `Shiaijo ${c}`);
-    let message = LEAGUE_FINISHED_WARNING;
+    let message = reopen ? LEAGUE_FINISHED_REOPEN_WARNING : LEAGUE_FINISHED_WARNING;
     if (courts.length) {
         const named = courts.length > 1
             ? `${courts.slice(0, -1).join(', ')} and ${courts[courts.length - 1]}`

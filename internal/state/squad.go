@@ -46,6 +46,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"log/slog"
 	"os"
 	"strings"
 
@@ -235,8 +236,20 @@ func (s *Store) LoadSquads(compID string) (map[string][]domain.TeamMember, error
 	if _, statErr := s.root.stat(s.compPath(compID, legacySquadsFilename)); statErr != nil {
 		return out, nil
 	}
-	mu := s.getCompLock(compID)
-	mu.Lock()
+	if s.keptSettleWaits(compID) {
+		// A kept change failed to land moments ago: a read waits rather than
+		// trying it again (keptSettleReadBackoff); the next read adopts.
+		return out, nil
+	}
+	mu, lockErr := s.lockCompWriteForRead(compID)
+	if lockErr != nil {
+		// The same degrade-to-empty policy as a failed adoption below: a
+		// kept change the disk still refuses must not fail every reader.
+		// Debug: settleKeptWALLocked warns once per run, and this is on
+		// every read of the team members.
+		slog.Debug("state: LoadSquads: legacy team members not adopted yet", "comp", compID, "file", legacySquadsFilename, "err", lockErr)
+		return out, nil
+	}
 	adoptErr := s.upgradeTeamMembersFilenameLocked(compID, s.directRosterIO())
 	mu.Unlock()
 	if adoptErr != nil {
@@ -575,8 +588,10 @@ func (s *Store) addTeamMember(compID, teamID, memberID, name string, limit int, 
 		return domain.TeamMember{}, false, ErrInvalidMemberID
 	}
 
-	mu := s.getCompLock(compID)
-	mu.Lock()
+	mu, lockErr := s.lockCompWrite(compID)
+	if lockErr != nil {
+		return domain.TeamMember{}, false, lockErr
+	}
 	defer mu.Unlock()
 
 	comp, players, err := s.teamParticipantsLocked(compID, teamID)

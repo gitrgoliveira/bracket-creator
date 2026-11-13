@@ -868,24 +868,50 @@ rewritten one of its files, as the next paragraph describes). A
 log written by a later version than the one running stops the app at startup; start that later
 version to finish it.
 
-Every log this version writes records what each of its files held at the commit. A log can stay
-in `.wal/` while the app goes on (applying or removing it failed, or an earlier version could not
-apply it), and later changes can then rewrite its files. Replaying it would put the older content
-back, so neither the next startup nor a backup applies it. At startup it is renamed to end in
+Every log this version writes records what each of its files held at the commit. A log this
+version keeps in `.wal/` while it goes on (applying or removing it failed) is finished before the
+next read or write of that competition, as described below, so its own later changes never
+rewrite the log's files first. A log an earlier version could not apply, or one whose files were
+changed outside the app, can still have its files rewritten before it is replayed. Replaying such
+a log would put the older content back, so neither the next startup nor a backup applies it. At startup it is renamed to end in
 `.stale`, kept in `.wal/`, and an error naming it is logged. The change it holds is not applied
 and the app never reads that file again: check the data the error names, then delete the file. A
 log written by an earlier version records nothing about its files, so it is replayed as before.
 
-If a file a log names cannot be read at startup, the app does not start, and names the log and
-the file; fix access to that file and start again. A log that itself cannot be read, or is not
-valid JSON, is skipped with an error naming it: the change it holds is not applied, and the
-other logs replay as usual.
+If a log, or a file a log names, cannot be read at startup (its permissions or the disk refuse
+it), the app does not start, and names the file; fix access to that file and start again. The log
+then replays as usual, still checked against its files. If a file a log names lies outside the
+data folder, the log was written while the data folder had another path (the folder was moved or
+renamed): the app does not start and says so. Start it with the folder the log was written under
+(the path the error names), or move the log out of `.wal/` to leave its change unapplied. The app
+takes the data folder's full path at startup, so naming the same folder another way, or starting
+the app from another folder, never causes this. A log whose content is damaged, so that it
+is not a log any version can read, holds nothing that can be applied: at startup it is renamed to
+end in `.invalid`, kept in `.wal/`, the other logs replay as usual, and one error is logged saying
+that a change saved just before the restart may not have landed. Check the last results entered
+before the restart and enter again any that is missing. The renamed file is never read again, and
+the next startup does not report it. If it cannot be renamed, the app does not start. A backup
+leaves a damaged log alone; only startup renames it.
 
 If committing a log fails, the log is removed, so a change reported as failed never lands later.
 If the log cannot be removed, or the log is committed but writing its files then fails, the change
 is kept: the request still answers 500, the server log names the disk fault, and the change is
-written at the next startup or by the next write the disk accepts. A 500 on a save can therefore
-mean the change will still land, so reload before entering it again.
+written before the next read or write of that competition, or at the next startup. A 500 on a save
+can therefore mean the change will still land, so reload before entering it again. While the disk
+still refuses the kept change, every write to that competition is refused with a 500 and writes
+nothing; the server log names the disk fault and says that this write was not saved, and the kept
+change is tried again before the next write. Reads go on meanwhile, and may show only part of the
+kept change until it lands. A read tries the kept change again too, but after a try fails, reads
+wait 5 seconds before the next one, so pages and displays are not held up by a disk that keeps
+refusing; the first failure is logged as a warning, once, naming the log file in `.wal/`. Once
+the disk accepts it, the kept change lands first, and the write or read that asked goes on top of
+it. If the change can never land because a folder the log names was removed outside the app,
+restore that folder, or set the log aside by renaming it so its name no longer ends in `.json`
+(its change is then not applied), and restart. At startup, once a log of a competition cannot be
+applied, that competition's later logs wait behind it and land after it, in order, with the
+competition's next write or read. A log of another competition that
+cannot be checked (a file it names cannot be read) does not hold this up: it stops only its own
+competition's retries, a backup that includes that competition, and the next startup.
 
 ```mermaid
 sequenceDiagram
@@ -927,7 +953,9 @@ The numbers match the steps in the diagram:
 * **9.** If the work staged nothing, there is no log to commit, apply or remove.
 * **10 to 12.** Otherwise the log is committed as a file in `.wal/`, each write is applied
   atomically, and the log file is removed. If applying stops midway, the log stays in `.wal/`
-  and is replayed at the next startup, unless its files were written again since.
+  and is finished before the next read or write of the competition, or replayed at the next
+  startup. A competition holding such a log is finished at step 2, before its lock is used for
+  anything else.
 * **13 and 14.** The store releases the lock and answers the caller.
 
 **Concurrent writes are merged, never dropped.** A match result is split into groups of

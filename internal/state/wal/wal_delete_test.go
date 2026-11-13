@@ -39,7 +39,7 @@ func TestWALDeleteIntent_AppliedOnCommitInStagedOrder(t *testing.T) {
 	oldFile := filepath.Join(root, "data", "old.yaml")
 	require.NoError(t, directWrite(oldFile, []byte("old"), 0o600))
 
-	w, err := BeginTx(walDir, "tx-move", directWrite, directRemove)
+	w, err := BeginTx(walDir, "tx-move", directWrite, directRemove, os.ReadFile)
 	require.NoError(t, err)
 	require.NoError(t, w.WriteFn()(newFile, []byte("new"), 0o600))
 	require.NoError(t, w.RemoveFn()(oldFile))
@@ -66,14 +66,14 @@ func TestWALDeleteIntent_ReplayedOnStartupAndIdempotent(t *testing.T) {
 	oldFile := filepath.Join(root, "data", "old.yaml")
 	require.NoError(t, directWrite(oldFile, []byte("old"), 0o600))
 
-	w, err := BeginTx(walDir, "tx-replay-delete", directWrite, directRemove)
+	w, err := BeginTx(walDir, "tx-replay-delete", directWrite, directRemove, os.ReadFile)
 	require.NoError(t, err)
 	require.NoError(t, w.WriteFn()(newFile, []byte("new"), 0o600))
 	require.NoError(t, w.RemoveFn()(oldFile))
 	require.NoError(t, w.Commit())
 	// Crash: committed, never applied.
 
-	pending, err := Scan(walDir, directWrite, directRemove)
+	pending, err := Scan(walDir, directWrite, directRemove, os.ReadFile)
 	require.NoError(t, err)
 	require.Len(t, pending, 1)
 	intents := pending[0].Intents()
@@ -92,7 +92,7 @@ func TestWALDeleteIntent_ReplayedOnStartupAndIdempotent(t *testing.T) {
 	// A second replay (a crash after Apply, before Done) finds the file
 	// already gone: that is success, not an error.
 	require.NoError(t, pending[0].Apply(), "removing an already-absent file is success")
-	again, err := Scan(walDir, directWrite, directRemove)
+	again, err := Scan(walDir, directWrite, directRemove, os.ReadFile)
 	require.NoError(t, err)
 	require.Len(t, again, 1)
 	require.NoError(t, again[0].Apply())
@@ -111,7 +111,7 @@ func TestWALScan_MarksAStepsLogAnotherWriterOvertookStale(t *testing.T) {
 	require.NoError(t, directWrite(oldFile, []byte("old"), 0o600))
 	require.NoError(t, directWrite(newFile, []byte("before"), 0o600))
 
-	w, err := BeginTx(walDir, "tx-overtaken", directWrite, directRemove)
+	w, err := BeginTx(walDir, "tx-overtaken", directWrite, directRemove, os.ReadFile)
 	require.NoError(t, err)
 	require.NoError(t, w.WriteFn()(newFile, []byte("staged"), 0o600))
 	require.NoError(t, w.RemoveFn()(oldFile))
@@ -119,7 +119,7 @@ func TestWALScan_MarksAStepsLogAnotherWriterOvertookStale(t *testing.T) {
 	// Downgrade: the older build leaves the log and writes the file itself.
 	require.NoError(t, directWrite(newFile, []byte("written later"), 0o600))
 
-	pending, err := Scan(walDir, directWrite, directRemove)
+	pending, err := Scan(walDir, directWrite, directRemove, os.ReadFile)
 	require.NoError(t, err)
 	require.Len(t, pending, 1)
 	assert.Equal(t, newFile, pending[0].Stale(), "the overtaken file is named")
@@ -129,7 +129,7 @@ func TestWALScan_MarksAStepsLogAnotherWriterOvertookStale(t *testing.T) {
 	require.NoError(t, pending[0].SetAside())
 	_, statErr = os.Stat(filepath.Join(walDir, "tx-overtaken.json.stale"))
 	assert.NoError(t, statErr, "the log is kept beside the others")
-	again, err := Scan(walDir, directWrite, directRemove)
+	again, err := Scan(walDir, directWrite, directRemove, os.ReadFile)
 	require.NoError(t, err)
 	assert.Empty(t, again, "a log set aside is not read again")
 }
@@ -144,19 +144,19 @@ func TestWALScan_MarksAWriteLogAnotherWriterOvertookStale(t *testing.T) {
 	untouched := filepath.Join(root, "data", "pools.csv")
 	require.NoError(t, directWrite(target, []byte("roster v1"), 0o600))
 
-	w, err := BeginTx(walDir, "tx-kept", directWrite, directRemove)
+	w, err := BeginTx(walDir, "tx-kept", directWrite, directRemove, os.ReadFile)
 	require.NoError(t, err)
 	require.NoError(t, w.WriteFn()(target, []byte("roster v2"), 0o600))
 	require.NoError(t, w.WriteFn()(untouched, []byte("pools"), 0o600))
 	require.NoError(t, w.Commit())
 
-	pending, err := Scan(walDir, directWrite, directRemove)
+	pending, err := Scan(walDir, directWrite, directRemove, os.ReadFile)
 	require.NoError(t, err)
 	require.Len(t, pending, 1)
 	assert.Empty(t, pending[0].Stale(), "nothing written since: it replays")
 
 	require.NoError(t, directWrite(target, []byte("roster v3, 40 check-ins later"), 0o600))
-	pending, err = Scan(walDir, directWrite, directRemove)
+	pending, err = Scan(walDir, directWrite, directRemove, os.ReadFile)
 	require.NoError(t, err)
 	require.Len(t, pending, 1)
 	assert.Equal(t, target, pending[0].Stale())
@@ -172,27 +172,34 @@ func TestWALScan_DoesNotJudgeALogFromBeforeTheField(t *testing.T) {
 	logBody := `{"id":"tx-old","intents":[{"path":` + strconv.Quote(target) + `,"data":"QUFB","mode":384}]}`
 	require.NoError(t, directWrite(filepath.Join(walDir, "tx-old.json"), []byte(logBody), 0o600))
 
-	pending, err := Scan(walDir, directWrite, directRemove)
+	pending, err := Scan(walDir, directWrite, directRemove, os.ReadFile)
 	require.NoError(t, err)
 	require.Len(t, pending, 1)
 	assert.Empty(t, pending[0].Stale())
 }
 
-// TestWALScan_RefusesALogItCannotCheck: a file the log names cannot be read
-// (here a folder stands where it was), so Scan names the log and refuses.
-func TestWALScan_RefusesALogItCannotCheck(t *testing.T) {
+// TestWALScan_MarksALogItCannotCheck: a file the log names cannot be read
+// (here a folder stands where it was), so Scan hands the log back marked,
+// naming it, with its steps; it is never applied.
+func TestWALScan_MarksALogItCannotCheck(t *testing.T) {
 	root := t.TempDir()
 	walDir := filepath.Join(root, ".wal")
 	target := filepath.Join(root, "data", "a.txt")
-	w, err := BeginTx(walDir, "tx-unreadable", directWrite, directRemove)
+	w, err := BeginTx(walDir, "tx-unreadable", directWrite, directRemove, os.ReadFile)
 	require.NoError(t, err)
 	require.NoError(t, w.WriteFn()(target, []byte("AAA"), 0o600))
 	require.NoError(t, w.Commit())
 	require.NoError(t, os.MkdirAll(target, 0o700))
 
-	_, err = Scan(walDir, directWrite, directRemove)
-	require.ErrorIs(t, err, ErrLogUnchecked)
-	assert.Contains(t, err.Error(), "tx-unreadable.json")
+	pending, err := Scan(walDir, directWrite, directRemove, os.ReadFile)
+	require.NoError(t, err)
+	require.Len(t, pending, 1)
+	uerr := pending[0].Unchecked()
+	require.ErrorIs(t, uerr, ErrLogUnchecked)
+	assert.Contains(t, uerr.Error(), "tx-unreadable.json")
+	require.Len(t, pending[0].Intents(), 1, "the steps say which files it touches")
+	assert.Equal(t, target, pending[0].Intents()[0].Path)
+	require.ErrorIs(t, pending[0].Apply(), ErrLogUnchecked, "never applied")
 }
 
 // TestWALCommit_FailedWriteLeavesNoLog: the log write fails after the log is
@@ -206,7 +213,7 @@ func TestWALCommit_FailedWriteLeavesNoLog(t *testing.T) {
 		}
 		return errors.New("sync failed")
 	}
-	w, err := BeginTx(walDir, "tx-sync", landsThenFails, directRemove)
+	w, err := BeginTx(walDir, "tx-sync", landsThenFails, directRemove, os.ReadFile)
 	require.NoError(t, err)
 	w.Append(FileIntent{Path: filepath.Join(root, "a.txt"), Data: []byte("AAA"), Mode: 0o600})
 
@@ -229,7 +236,7 @@ func TestWALCommit_FailedWriteWhoseLogStaysSaysSo(t *testing.T) {
 		}
 		return errors.New("sync failed")
 	}
-	w, err := BeginTx(walDir, "tx-stuck", staysThenFails, directRemove)
+	w, err := BeginTx(walDir, "tx-stuck", staysThenFails, directRemove, os.ReadFile)
 	require.NoError(t, err)
 	w.Append(FileIntent{Path: filepath.Join(root, "a.txt"), Data: []byte("AAA"), Mode: 0o600})
 
@@ -242,7 +249,7 @@ func TestWALCommit_FailedWriteWhoseLogStaysSaysSo(t *testing.T) {
 func TestWALCommit_PureWriteLogKeepsThePreviousFormat(t *testing.T) {
 	root := t.TempDir()
 	walDir := filepath.Join(root, ".wal")
-	w, err := BeginTx(walDir, "tx-v1", directWrite, directRemove)
+	w, err := BeginTx(walDir, "tx-v1", directWrite, directRemove, os.ReadFile)
 	require.NoError(t, err)
 	w.Append(FileIntent{Path: "/data/a.txt", Data: []byte("AAA"), Mode: 0o600})
 	require.NoError(t, w.Commit())
@@ -273,7 +280,7 @@ func TestWALScan_ReplaysALogThePreviousReleaseWrote(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(filepath.Join(walDir, "old-release.json"), raw, 0o600))
 
-	pending, err := Scan(walDir, directWrite, directRemove)
+	pending, err := Scan(walDir, directWrite, directRemove, os.ReadFile)
 	require.NoError(t, err)
 	require.Len(t, pending, 1)
 	require.NoError(t, pending[0].Apply())
@@ -293,7 +300,7 @@ func TestWALCommit_ALogWithADeleteCannotBeAppliedByAnOlderBuild(t *testing.T) {
 	keep := filepath.Join(root, "data", "keep.yaml")
 	require.NoError(t, directWrite(keep, []byte("keep"), 0o600))
 
-	w, err := BeginTx(walDir, "tx-v2", directWrite, directRemove)
+	w, err := BeginTx(walDir, "tx-v2", directWrite, directRemove, os.ReadFile)
 	require.NoError(t, err)
 	require.NoError(t, w.WriteFn()(filepath.Join(root, "data", "new.yaml"), []byte("new"), 0o600))
 	require.NoError(t, w.RemoveFn()(keep))
@@ -315,14 +322,14 @@ func TestWALScan_RefusesALogOfAnUnknownVersion(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(walDir, "future.json"),
 		[]byte(`{"id":"future","version":99,"steps":[],"intents":[{"path":"","data":null,"mode":0}]}`), 0o600))
 
-	_, err := Scan(walDir, directWrite, directRemove)
+	_, err := Scan(walDir, directWrite, directRemove, os.ReadFile)
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrUnknownLogVersion), "a log this build cannot read must refuse, not be skipped: %v", err)
 	assert.Contains(t, err.Error(), "future.json")
 }
 
 func TestWALPending_ADeleteReadsAsAbsentAndCoalescesWithWrites(t *testing.T) {
-	w, err := BeginTx(t.TempDir(), "tx-pending-delete", directWrite, directRemove)
+	w, err := BeginTx(t.TempDir(), "tx-pending-delete", directWrite, directRemove, os.ReadFile)
 	require.NoError(t, err)
 
 	require.NoError(t, w.WriteFn()("/p", []byte("x"), 0o600))
@@ -349,7 +356,7 @@ func TestWALPending_ADeleteReadsAsAbsentAndCoalescesWithWrites(t *testing.T) {
 
 func TestWALApply_PropagatesARemoveError(t *testing.T) {
 	boom := errors.New("boom")
-	w, err := BeginTx(t.TempDir(), "tx-remove-fails", directWrite, func(string) error { return boom })
+	w, err := BeginTx(t.TempDir(), "tx-remove-fails", directWrite, func(string) error { return boom }, os.ReadFile)
 	require.NoError(t, err)
 	require.NoError(t, w.RemoveFn()("/x"))
 	err = w.Apply()
@@ -358,8 +365,46 @@ func TestWALApply_PropagatesARemoveError(t *testing.T) {
 }
 
 func TestBeginTxAndScan_NilRemove(t *testing.T) {
-	_, err := BeginTx(t.TempDir(), "tx", directWrite, nil)
+	_, err := BeginTx(t.TempDir(), "tx", directWrite, nil, os.ReadFile)
 	require.Error(t, err)
-	_, err = Scan(t.TempDir(), directWrite, nil)
+	_, err = Scan(t.TempDir(), directWrite, nil, os.ReadFile)
 	require.Error(t, err)
+}
+
+func TestBeginTxAndScan_NilRead(t *testing.T) {
+	_, err := BeginTx(t.TempDir(), "tx", directWrite, directRemove, nil)
+	require.ErrorContains(t, err, "read function is nil")
+	_, err = Scan(t.TempDir(), directWrite, directRemove, nil)
+	require.ErrorContains(t, err, "read function is nil")
+}
+
+// TestWAL_ReadsTargetsThroughItsReadFunction: what a target held is read
+// through the read function the caller passes, at Commit and at Scan, never
+// by path, so the store's root keeps those reads inside the data folder.
+func TestWAL_ReadsTargetsThroughItsReadFunction(t *testing.T) {
+	root := t.TempDir()
+	walDir := filepath.Join(root, ".wal")
+	target := filepath.Join(root, "a.txt")
+	require.NoError(t, os.WriteFile(target, []byte("old"), 0o600))
+	var read []string
+	reader := func(path string) ([]byte, error) {
+		read = append(read, path)
+		return os.ReadFile(path)
+	}
+	w, err := BeginTx(walDir, "tx-read", directWrite, directRemove, reader)
+	require.NoError(t, err)
+	require.NoError(t, w.WriteFn()(target, []byte("new"), 0o600))
+	require.NoError(t, w.Commit())
+	assert.Equal(t, []string{target}, read, "Commit records what the target held through it")
+
+	read = nil
+	refuses := errors.New("outside the data folder")
+	pending, err := Scan(walDir, directWrite, directRemove, func(path string) ([]byte, error) {
+		read = append(read, path)
+		return nil, refuses
+	})
+	require.NoError(t, err)
+	require.Len(t, pending, 1)
+	assert.Equal(t, []string{target}, read, "Scan checks the target through it")
+	assert.ErrorIs(t, pending[0].Unchecked(), refuses, "a read it refuses leaves the log unchecked")
 }

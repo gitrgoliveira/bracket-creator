@@ -45,6 +45,15 @@ type Store struct {
 	// compMu maps competition ID -> *sync.RWMutex for fine-grained locking.
 	compMu sync.Map
 
+	// keptWAL marks competitions whose transaction log this process kept in
+	// .wal after a commit it could not finish (ErrTxCommitted, or a Done that
+	// failed). The next write to that competition, and the next read, finish
+	// the kept change first (lockCompWrite, settleKeptWALBeforeRead), so
+	// nothing builds on files the log is about to replace. Keyed by
+	// competition id only: WithTransaction is the one writer of a log, and it
+	// is always scoped to one competition.
+	keptWAL sync.Map
+
 	// legacyUpgraded marks competitions whose on-disk legacy shapes have been
 	// checked (and converted) this process; see legacy_upgrade.go. Cleared on
 	// DeleteCompetition so a recreated same-ID competition is re-checked.
@@ -123,6 +132,16 @@ func (f *fileCache) invalidate() {
 }
 
 func NewStore(folder string) (*Store, error) {
+	// The folder is kept absolute (and clean) from here on: every path the
+	// store builds, and so every path a transaction log records, then names
+	// the same file however the folder was typed (-f, TOURNAMENT_DATA_DIR,
+	// the "." default) and whatever folder the process was started in. A
+	// relative "." also built paths ("competitions/...") that the inside-
+	// the-folder check ("./") refused.
+	folder, err := filepath.Abs(folder)
+	if err != nil {
+		return nil, fmt.Errorf("state: data folder: %w", err)
+	}
 	s := &Store{
 		folder:            folder,
 		walDir:            filepath.Join(folder, backup.WALDirName),
@@ -204,21 +223,38 @@ func (s *Store) init() error {
 	// to re-run on a WAL that partially applied before the crash)
 	// then Done.
 	//
-	// Errors are logged and skipped, not fatal: a corrupt WAL
-	// shouldn't block startup if the rest are healthy. The
-	// alternative (refuse to start) would brick a tournament over
-	// a single bad intent file.
-	pending, err := wal.Scan(s.walDir, s.directWriteWAL, s.directRemoveWAL)
+	// A log whose content is damaged is set aside and startup goes on;
+	// a log that cannot be read, or whose files cannot be checked, or
+	// that a later version wrote, refuses startup until it is fixed
+	// (operator decisions 2026-11-12, W2 (b), and 2026-11-13, W2 (d)).
+	pending, err := wal.Scan(s.walDir, s.directWriteWAL, s.directRemoveWAL, s.directReadWAL)
 	if errors.Is(err, wal.ErrUnknownLogVersion) {
 		// A log a later release wrote: replaying the others around it could
 		// apply a later transaction before it, and skipping it loses it.
 		return fmt.Errorf("state: a pending transaction log in %s was written by a later version of the app; start that version to finish it: %w", s.walDir, err)
 	}
+	if err == nil {
+		// A log whose files Scan could not read to check it is handed back
+		// marked; at startup it refuses like one Scan could not read at all,
+		// whichever competition it names, before anything is replayed.
+		for _, w := range pending {
+			if uerr := w.Unchecked(); uerr != nil {
+				err = uerr
+				break
+			}
+		}
+	}
+	if errors.Is(err, wal.ErrLogUnchecked) && errors.Is(err, errOutsideDataFolder) {
+		// A file it names lies outside the data folder: the log was written
+		// while the folder had another path. No access fix cures that.
+		return fmt.Errorf("state: a pending transaction log in %s was written under another data folder path; restart with the folder it was written under (the path in the error below), or move that log out of .wal to leave its change unapplied: %w", s.walDir, err)
+	}
 	if errors.Is(err, wal.ErrLogUnchecked) {
-		// A log whose files could not be read: replaying it might put older
-		// content back and skipping it might lose it, so startup waits until
-		// the file is fixed (operator decision 2026-11-12, W2 (b)).
-		return fmt.Errorf("state: a pending transaction log in %s could not be checked against the files it names; fix access to that file and start again: %w", s.walDir, err)
+		// A log that could not be read, or whose files could not be: replaying
+		// it might put older content back and skipping it might lose it, so
+		// startup waits until the file is fixed (operator decisions
+		// 2026-11-12, W2 (b), and 2026-11-13, W2 (d)).
+		return fmt.Errorf("state: a pending transaction log in %s, or a file it names, could not be read; fix access to the file named below and start again: %w", s.walDir, err)
 	}
 	if err != nil {
 		// Otherwise Scan only errors on broken ReadDir; treat as "no WAL
@@ -228,6 +264,19 @@ func (s *Store) init() error {
 		pending = nil
 	}
 	for _, w := range pending {
+		if w.Invalid() {
+			// Damaged content no build can read, so nothing in it can be
+			// applied: set aside once (renamed to end in .invalid, which no
+			// later scan reads) so startup goes on and does not say it again.
+			// A rename that fails refuses startup, as for a stale log, so the
+			// line is never logged at every start for the same file.
+			slog.Error("state: a pending transaction log is damaged and cannot be replayed; a change saved just before the restart may not have landed. Check the last results entered before the restart and re-enter any that is missing.",
+				"wal", w.ID())
+			if err := w.SetAside(); err != nil {
+				return fmt.Errorf("state: setting aside the damaged transaction log %s: %w", w.ID(), err)
+			}
+			continue
+		}
 		if file := w.Stale(); file != "" {
 			// Overtaken: a file it names was written after it (a log kept
 			// after its Apply or Done failed while the process went on, or
@@ -241,16 +290,30 @@ func (s *Store) init() error {
 			}
 			continue
 		}
+		if comp := s.walCompetition(w); comp != "" {
+			if _, kept := s.keptWAL.Load(comp); kept {
+				// An earlier log of this competition could not land and is
+				// kept: this one waits behind it. Applying it first would
+				// leave the earlier log stale, and the next start would set
+				// it aside with its change lost. The competition's next
+				// write or read settles both, in order.
+				slog.Info("state: WAL transaction waits behind an earlier log of its competition that could not be replayed",
+					"wal", w.ID(), "comp", comp)
+				continue
+			}
+		}
 		slog.Info("state: replaying WAL transaction",
 			"wal", w.ID(), "intents", len(w.Intents()))
 		if err := w.Apply(); err != nil {
-			slog.Error("state: WAL Apply failed during replay; keeping WAL for next start",
+			slog.Error("state: WAL Apply failed during replay; the competition's next write retries it",
 				"wal", w.ID(), "err", err)
+			s.noteKeptWALOf(w)
 			continue
 		}
 		if err := w.Done(); err != nil {
-			slog.Warn("state: WAL Done failed after successful replay; will retry on next start",
+			slog.Warn("state: WAL Done failed after successful replay; the competition's next write retries it",
 				"wal", w.ID(), "err", err)
+			s.noteKeptWALOf(w)
 		}
 	}
 
@@ -345,6 +408,7 @@ func (s *Store) loadCached(compID, filename string, parse func(path string) (any
 	if err := ValidateCompetitionID(compID); err != nil {
 		return nil, err
 	}
+	s.settleKeptWALBeforeRead(compID)
 	mu := s.getCompLock(compID)
 	mu.RLock()
 	defer mu.RUnlock()

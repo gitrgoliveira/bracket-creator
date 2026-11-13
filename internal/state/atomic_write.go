@@ -56,12 +56,32 @@ func (s *Store) atomicWrite(path string, data []byte, perm fs.FileMode) error {
 // (directRemoveWAL). It answers the cleaned path; op names the operation in
 // the refusal ("write to", "remove of").
 func (s *Store) insideDataFolder(op, path string) (string, error) {
-	cleanPath := filepath.Clean(path)
+	cleanPath := storePath(path)
 	cleanBase := filepath.Clean(s.folder) + string(filepath.Separator)
 	if !strings.HasPrefix(cleanPath, cleanBase) {
-		return "", fmt.Errorf("%s %q is outside data directory %q", op, cleanPath, s.folder)
+		return "", fmt.Errorf("%s %q is outside data directory %q: %w", op, cleanPath, s.folder, errOutsideDataFolder)
 	}
 	return cleanPath, nil
+}
+
+// errOutsideDataFolder marks a path insideDataFolder refused. Met by a WAL
+// step, it means the log was written while the data folder had another path
+// (the folder moved or renamed, or a log from a build that kept the folder as
+// typed, started from another folder): startup names that cause rather than
+// asking for access to be fixed.
+var errOutsideDataFolder = errors.New("the path is outside the data folder")
+
+// storePath cleans a path the store is handed back (a WAL step). NewStore
+// keeps the data folder absolute, so every path it builds is absolute; a
+// relative one comes from a log an earlier build wrote with the folder as
+// typed, and is resolved against the process's folder, as that build did.
+func storePath(path string) string {
+	if !filepath.IsAbs(path) {
+		if abs, err := filepath.Abs(path); err == nil {
+			return abs
+		}
+	}
+	return filepath.Clean(path)
 }
 
 // atomicWriteFile writes data to path, under root's data folder,

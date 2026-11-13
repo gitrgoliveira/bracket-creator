@@ -282,6 +282,7 @@ func (s *Store) loadParticipants(compID string, withZekkenName bool, opts LoadPa
 	// Before the read lock: legacy shapes convert on first read, under the
 	// WRITE lock (legacy_upgrade.go). No-op after the first call per comp.
 	s.EnsureLegacyUpgraded(compID)
+	s.settleKeptWALBeforeRead(compID)
 	mu := s.getCompLock(compID)
 	mu.RLock()
 	defer mu.RUnlock()
@@ -577,8 +578,10 @@ func (s *Store) SaveParticipants(compID string, players []domain.Player) error {
 // saveParticipantsTakingLock holds the lock/zekken preamble both exported
 // savers share, so the restore variant cannot drift from the normal one.
 func (s *Store) saveParticipantsTakingLock(compID string, players []domain.Player, enforceTeamNames bool) error {
-	mu := s.getCompLock(compID)
-	mu.Lock()
+	mu, lockErr := s.lockCompWrite(compID)
+	if lockErr != nil {
+		return lockErr
+	}
 	defer mu.Unlock()
 	withZekken, comp, err := s.withZekkenNameLocked(compID)
 	if err != nil {
@@ -728,8 +731,10 @@ func (s *Store) SetCheckIn(compID, pid string, withZekkenName, checkedIn bool, a
 // checked in (CheckedIn when it was not, AlreadyCheckedIn when it was) and
 // takes the stamp. The file is written when any participant took the stamp.
 func (s *Store) BulkCheckInAt(compID string, pids []string, at int64) (BulkCheckInResult, error) {
-	mu := s.getCompLock(compID)
-	mu.Lock()
+	mu, lockErr := s.lockCompWrite(compID)
+	if lockErr != nil {
+		return BulkCheckInResult{}, lockErr
+	}
 	defer mu.Unlock()
 
 	withZekkenName, comp, err := s.withZekkenNameLocked(compID)
@@ -805,8 +810,10 @@ func (s *Store) BulkCheckInAt(compID string, pids []string, at int64) (BulkCheck
 // to the target player, and persists the result. Used to avoid TOCTOU races
 // on concurrent check-ins.
 func (s *Store) UpdateParticipant(compID string, pid string, withZekkenName bool, transform func(p *domain.Player) error) (*domain.Player, error) {
-	mu := s.getCompLock(compID)
-	mu.Lock()
+	mu, lockErr := s.lockCompWrite(compID)
+	if lockErr != nil {
+		return nil, lockErr
+	}
 	defer mu.Unlock()
 
 	// nil comp: this path is deliberately NOT setup-gated (check-in toggles must
@@ -1253,8 +1260,10 @@ func (s *Store) requireSetupLocked(compID string) (*Competition, error) {
 // POST /competitions/:id/start landing between the handler's outer check and
 // this lock would otherwise leak a roster mutation into a started competition.
 func (s *Store) AddParticipant(compID string, p domain.Player, withZekkenName bool) (*domain.Player, error) {
-	mu := s.getCompLock(compID)
-	mu.Lock()
+	mu, lockErr := s.lockCompWrite(compID)
+	if lockErr != nil {
+		return nil, lockErr
+	}
 	defer mu.Unlock()
 
 	comp, err := s.requireSetupLocked(compID)
@@ -1302,8 +1311,10 @@ func (s *Store) AddParticipant(compID string, p domain.Player, withZekkenName bo
 // the file write. UpdateParticipant remains gateless because check-in toggles
 // must keep working after the competition is running.
 func (s *Store) ReplaceParticipant(compID string, pid string, withZekkenName bool, transform func(p *domain.Player) error) (*domain.Player, error) {
-	mu := s.getCompLock(compID)
-	mu.Lock()
+	mu, lockErr := s.lockCompWrite(compID)
+	if lockErr != nil {
+		return nil, lockErr
+	}
 	defer mu.Unlock()
 
 	comp, err := s.requireSetupLocked(compID)

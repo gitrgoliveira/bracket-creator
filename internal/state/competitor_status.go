@@ -27,6 +27,7 @@ const competitorStatusFilename = "competitor-status.yaml"
 // so a concurrent ineligibility write on a different competition does
 // not serialize behind this read.
 func (s *Store) LoadCompetitorStatus(compID string) (map[string]domain.CompetitorStatus, error) {
+	s.settleKeptWALBeforeRead(compID)
 	mu := s.getCompLock(compID)
 	mu.RLock()
 	defer mu.RUnlock()
@@ -103,8 +104,10 @@ func (s *Store) SetCompetitorStatus(compID string, status domain.CompetitorStatu
 	if err := status.Validate(); err != nil {
 		return err
 	}
-	mu := s.getCompLock(compID)
-	mu.Lock()
+	mu, lockErr := s.lockCompWrite(compID)
+	if lockErr != nil {
+		return lockErr
+	}
 	defer mu.Unlock()
 	return s.setCompetitorStatusLocked(compID, status, s.directWrite)
 }

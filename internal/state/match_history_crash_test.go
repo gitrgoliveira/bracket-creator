@@ -135,7 +135,7 @@ func TestWithTransaction_MatchHistoryCrashAtomicity(t *testing.T) {
 	_, err = os.Stat(store.matchHistoryPath(compID, matchID))
 	require.True(t, os.IsNotExist(err), "history file must not exist before staging")
 
-	w, err := wal.BeginTx(store.walDir, wal.NewWALID(), store.directWriteWAL, store.directRemoveWAL)
+	w, err := wal.BeginTx(store.walDir, wal.NewWALID(), store.directWriteWAL, store.directRemoveWAL, store.directReadWAL)
 	require.NoError(t, err)
 	w.Append(wal.FileIntent{
 		Path: store.compPath(compID, "pool-matches.csv"),
@@ -231,7 +231,7 @@ func TestWithTransaction_MatchHistoryCrashMidApply(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			store, dir := newCrashStoreWithComp(t, compID)
 
-			w, err := wal.BeginTx(store.walDir, wal.NewWALID(), store.directWriteWAL, store.directRemoveWAL)
+			w, err := wal.BeginTx(store.walDir, wal.NewWALID(), store.directWriteWAL, store.directRemoveWAL, store.directReadWAL)
 			require.NoError(t, err)
 			w.Append(wal.FileIntent{Path: store.compPath(compID, "pool-matches.csv"), Data: poolMatchesCSV, Mode: 0o600})
 			w.Append(wal.FileIntent{Path: store.matchHistoryPath(compID, matchID), Data: historyJSONL, Mode: 0o600})

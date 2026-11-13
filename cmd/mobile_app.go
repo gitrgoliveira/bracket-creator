@@ -178,7 +178,7 @@ func (o *mobileAppOptions) run(cmd *cobra.Command, args []string) error {
 		verifier = mobileapp.NewFileVerifier(store)
 	}
 
-	slog.Info("mobile-app: starting", "bind", o.bindAddress, "port", o.port, "tournamentDataDir", o.folder)
+	slog.Info("mobile-app: starting", "bind", o.bindAddress, "port", o.port, "tournamentDataDir", store.GetFolder())
 	eng := engine.New(store)
 
 	// Data written by a version that predates the never-empty number prefix

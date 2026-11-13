@@ -178,8 +178,10 @@ func (s *Store) AppendMatchHistory(compID string, entry MatchHistoryEntry) error
 	if err := ValidateCompetitionID(compID); err != nil {
 		return err
 	}
-	mu := s.getCompLock(compID)
-	mu.Lock()
+	mu, lockErr := s.lockCompWrite(compID)
+	if lockErr != nil {
+		return lockErr
+	}
 	defer mu.Unlock()
 	existing, err := s.readMatchHistoryBytesLocked(compID, entry.MatchID)
 	if err != nil {
@@ -195,6 +197,7 @@ func (s *Store) LoadMatchHistory(compID, matchID string) ([]MatchHistoryEntry, e
 	if err := ValidateCompetitionID(compID); err != nil {
 		return nil, err
 	}
+	s.settleKeptWALBeforeRead(compID)
 	mu := s.getCompLock(compID)
 	mu.RLock()
 	defer mu.RUnlock()
@@ -212,8 +215,10 @@ func (s *Store) DeleteMatchHistory(compID string) error {
 	if err := ValidateCompetitionID(compID); err != nil {
 		return err
 	}
-	mu := s.getCompLock(compID)
-	mu.Lock()
+	mu, lockErr := s.lockCompWrite(compID)
+	if lockErr != nil {
+		return lockErr
+	}
 	defer mu.Unlock()
 	dir := s.compPath(compID, matchHistoryDir)
 	if filepath.Dir(dir) != s.compPath(compID) {

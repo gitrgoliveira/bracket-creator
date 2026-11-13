@@ -48,6 +48,35 @@ func TestDataRoot_RefusesASymlinkOutOfTheDataFolder(t *testing.T) {
 	require.Error(t, err, "a write through the link is refused too")
 }
 
+// The WAL reads what a target held through the store's root (directReadWAL),
+// so a log naming a file under a competition folder that links out of the
+// data folder cannot read it: the read is refused, never followed, and a
+// path outside the data folder is refused before the root is asked.
+func TestDataRoot_TheWALReadsATargetThroughTheRoot(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlinks need privileges on Windows")
+	}
+	dir := t.TempDir()
+	s, err := NewStore(dir)
+	require.NoError(t, err)
+	outside := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(outside, "pools.csv"), []byte("x"), 0o600))
+	require.NoError(t, os.Symlink(outside, filepath.Join(dir, "competitions", "evil")))
+
+	_, err = s.directReadWAL(s.compPath("evil", "pools.csv"))
+	require.Error(t, err)
+	assert.True(t, isPathEscape(err), "the read through the link is refused: %v", err)
+
+	_, err = s.directReadWAL(filepath.Join(outside, "pools.csv"))
+	require.ErrorContains(t, err, "outside data directory")
+
+	inside := filepath.Join(dir, "inside.txt")
+	require.NoError(t, os.WriteFile(inside, []byte("in"), 0o600))
+	data, err := s.directReadWAL(inside)
+	require.NoError(t, err)
+	assert.Equal(t, "in", string(data))
+}
+
 // A data folder that is itself a symlink is followed when the root is opened,
 // so the store works on the folder it points at.
 func TestDataRoot_FollowsASymlinkedDataFolder(t *testing.T) {

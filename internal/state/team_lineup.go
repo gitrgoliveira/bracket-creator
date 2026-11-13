@@ -474,8 +474,10 @@ func (s *Store) SetTeamLineup(compID string, lineup domain.TeamLineup, teamSize 
 	if err := lineup.ValidatePositions(teamSize); err != nil {
 		return err
 	}
-	mu := s.getCompLock(compID)
-	mu.Lock()
+	mu, lockErr := s.lockCompWrite(compID)
+	if lockErr != nil {
+		return lockErr
+	}
 	defer mu.Unlock()
 	return s.setTeamLineupLocked(compID, lineup, teamSize, s.directWrite)
 }
@@ -495,8 +497,10 @@ func (s *Store) SetTeamLineups(compID string, ls []domain.TeamLineup, teamSize i
 			return err
 		}
 	}
-	mu := s.getCompLock(compID)
-	mu.Lock()
+	mu, lockErr := s.lockCompWrite(compID)
+	if lockErr != nil {
+		return lockErr
+	}
 	defer mu.Unlock()
 	current, err := s.loadTeamLineupsLocked(compID)
 	if err != nil {
@@ -552,8 +556,10 @@ func (s *Store) RemoveTeamLineupAt(compID, teamID, matchID string, round int, at
 	if err := ValidateCompetitionID(compID); err != nil {
 		return false, err
 	}
-	mu := s.getCompLock(compID)
-	mu.Lock()
+	mu, lockErr := s.lockCompWrite(compID)
+	if lockErr != nil {
+		return false, lockErr
+	}
 	defer mu.Unlock()
 
 	current, err := s.loadTeamLineupsLocked(compID)
@@ -600,8 +606,10 @@ func (s *Store) ReplaceTeamLineupSlot(compID, teamID, matchID string, round int,
 			return err
 		}
 	}
-	mu := s.getCompLock(compID)
-	mu.Lock()
+	mu, lockErr := s.lockCompWrite(compID)
+	if lockErr != nil {
+		return lockErr
+	}
 	defer mu.Unlock()
 	current, err := s.loadTeamLineupsLocked(compID)
 	if err != nil {

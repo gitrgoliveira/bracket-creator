@@ -110,7 +110,7 @@ func TestStoreInit_ReplaysACommittedLogWithADelete(t *testing.T) {
 	s, id, teamID, dir := unadoptedLegacyCompetition(t, v200SquadsYAML)
 	squadsPath := filepath.Join(dir, legacySquadsFilename)
 
-	w, err := wal.BeginTx(s.walDir, wal.NewWALID(), s.directWriteWAL, s.directRemoveWAL)
+	w, err := wal.BeginTx(s.walDir, wal.NewWALID(), s.directWriteWAL, s.directRemoveWAL, s.directReadWAL)
 	require.NoError(t, err)
 	body := []byte("members:\n    " + teamID + ":\n        - id: 11111111-1111-4111-8111-111111111111\n          index: 1\n          name: Haruki Tanaka\n")
 	require.NoError(t, w.WriteFn()(s.compPath(id, teamMembersFilename), body, 0o600))
@@ -125,7 +125,7 @@ func TestStoreInit_ReplaysACommittedLogWithADelete(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, members[teamID])
 	assert.Equal(t, "Haruki Tanaka", members[teamID][0].Name)
-	pending, err := wal.Scan(reopened.walDir, reopened.directWriteWAL, reopened.directRemoveWAL)
+	pending, err := wal.Scan(reopened.walDir, reopened.directWriteWAL, reopened.directRemoveWAL, reopened.directReadWAL)
 	require.NoError(t, err)
 	assert.Empty(t, pending, "the replayed log is done")
 }

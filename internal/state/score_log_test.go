@@ -125,7 +125,7 @@ func TestScoreLog_CrashAfterCommitReplaysTheLine(t *testing.T) {
 	s, dir := scoreLogStore(t)
 	// The transaction's append creates the events folder as it stages.
 	require.NoError(t, s.ensureScoreLogDirLocked("c"))
-	w, err := wal.BeginTx(s.walDir, wal.NewWALID(), s.directWriteWAL, s.directRemoveWAL)
+	w, err := wal.BeginTx(s.walDir, wal.NewWALID(), s.directWriteWAL, s.directRemoveWAL, s.directReadWAL)
 	require.NoError(t, err)
 	w.Append(wal.FileIntent{Path: s.scoreLogPath("c", mid), Data: want, Mode: 0o600})
 	require.NoError(t, w.Commit())

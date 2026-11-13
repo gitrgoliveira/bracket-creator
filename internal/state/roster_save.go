@@ -85,8 +85,10 @@ func (s *Store) SaveRoster(compID string, players []domain.Player, seeds []domai
 	if err := ValidateCompetitionID(compID); err != nil {
 		return nil, err
 	}
-	mu := s.getCompLock(compID)
-	mu.Lock()
+	mu, lockErr := s.lockCompWrite(compID)
+	if lockErr != nil {
+		return nil, lockErr
+	}
 	defer mu.Unlock()
 	withZekken, comp, err := s.withZekkenNameLocked(compID)
 	if err != nil {
@@ -170,8 +172,10 @@ func (s *Store) ReplaceRosterKeepingCheckIns(compID string, players []domain.Pla
 	if err := ValidateCompetitionID(compID); err != nil {
 		return nil, err
 	}
-	mu := s.getCompLock(compID)
-	mu.Lock()
+	mu, lockErr := s.lockCompWrite(compID)
+	if lockErr != nil {
+		return nil, lockErr
+	}
 	defer mu.Unlock()
 	withZekken, comp, err := s.withZekkenNameLocked(compID)
 	if err != nil {

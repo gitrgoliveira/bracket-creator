@@ -57,7 +57,7 @@ func TestSnapshot_SettlesCommittedWALBeforeReading(t *testing.T) {
 
 	// Also plant a committed WAL for otherID whose directory is read-only so
 	// that settling otherID would fail: Snapshot of compID must ignore it.
-	otherWAL, err := wal.BeginTx(walDir, wal.NewWALID(), store.directWriteWAL, store.directRemoveWAL)
+	otherWAL, err := wal.BeginTx(walDir, wal.NewWALID(), store.directWriteWAL, store.directRemoveWAL, store.directReadWAL)
 	require.NoError(t, err)
 	otherWAL.Append(wal.FileIntent{
 		Path: store.compPath(otherID, "bracket.json"),
@@ -90,7 +90,7 @@ func TestSnapshot_SettlesCommittedWALBeforeReading(t *testing.T) {
 	assert.Contains(t, statuses, "Bob")
 
 	// compID's WAL is gone; only otherID's WAL remains.
-	remaining, err := wal.Scan(walDir, store.directWriteWAL, store.directRemoveWAL)
+	remaining, err := wal.Scan(walDir, store.directWriteWAL, store.directRemoveWAL, store.directReadWAL)
 	require.NoError(t, err)
 	require.Len(t, remaining, 1)
 	assert.Equal(t, otherWAL.ID(), remaining[0].ID())
@@ -122,7 +122,7 @@ func TestSnapshot_FindsWALCommittedWhileWaitingForLock(t *testing.T) {
 	time.Sleep(25 * time.Millisecond)
 
 	// While Snapshot is waiting for the lock, commit a WAL for compID without applying it.
-	w, err := wal.BeginTx(filepath.Join(dir, ".wal"), wal.NewWALID(), store.directWriteWAL, store.directRemoveWAL)
+	w, err := wal.BeginTx(filepath.Join(dir, ".wal"), wal.NewWALID(), store.directWriteWAL, store.directRemoveWAL, store.directReadWAL)
 	require.NoError(t, err)
 	bracketBytes := []byte(`{"rounds":[[{"id":"m-under-lock","sideA":"Ken","sideB":"Ryu","winner":"Ken","status":"completed"}]]}`)
 	w.Append(wal.FileIntent{
@@ -145,7 +145,7 @@ func TestSnapshot_FindsWALCommittedWhileWaitingForLock(t *testing.T) {
 	require.Len(t, b.Rounds, 1)
 	assert.Equal(t, "m-under-lock", b.Rounds[0][0].ID)
 
-	remaining, err := wal.Scan(filepath.Join(dir, ".wal"), store.directWriteWAL, store.directRemoveWAL)
+	remaining, err := wal.Scan(filepath.Join(dir, ".wal"), store.directWriteWAL, store.directRemoveWAL, store.directReadWAL)
 	require.NoError(t, err)
 	assert.Empty(t, remaining, "the settled WAL must be removed")
 }

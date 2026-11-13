@@ -66,6 +66,7 @@ func (s *Store) LoadSeedsRaw(compID string) ([]domain.SeedAssignment, error) {
 	if err := ValidateCompetitionID(compID); err != nil {
 		return nil, err
 	}
+	s.settleKeptWALBeforeRead(compID)
 	mu := s.getCompLock(compID)
 	mu.RLock()
 	defer mu.RUnlock()
@@ -96,8 +97,10 @@ func (s *Store) SaveSeeds(compID string, assignments []domain.SeedAssignment) er
 	if err := ValidateCompetitionID(compID); err != nil {
 		return err
 	}
-	mu := s.getCompLock(compID)
-	mu.Lock()
+	mu, lockErr := s.lockCompWrite(compID)
+	if lockErr != nil {
+		return lockErr
+	}
 	defer mu.Unlock()
 	return s.saveSeedsLocked(compID, assignments)
 }

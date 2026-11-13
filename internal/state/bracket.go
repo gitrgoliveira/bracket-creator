@@ -260,8 +260,10 @@ func (s *Store) SaveBracket(compID string, b *Bracket) error {
 	if err := ValidateCompetitionID(compID); err != nil {
 		return err
 	}
-	mu := s.getCompLock(compID)
-	mu.Lock()
+	mu, lockErr := s.lockCompWrite(compID)
+	if lockErr != nil {
+		return lockErr
+	}
 	defer mu.Unlock()
 
 	if err := s.saveBracketLocked(compID, b, s.directWrite); err != nil {
@@ -370,8 +372,10 @@ func (s *Store) UpdateBracket(compID string, mutate func(*Bracket) error) error 
 		return err
 	}
 
-	mu := s.getCompLock(compID)
-	mu.Lock()
+	mu, lockErr := s.lockCompWrite(compID)
+	if lockErr != nil {
+		return lockErr
+	}
 	defer mu.Unlock()
 
 	if err := s.updateBracketLocked(compID, mutate, s.directWrite); err != nil {
@@ -543,8 +547,10 @@ func (s *Store) UpdateBracketMatchByID(compID, matchID string, mutate func(*Brac
 	if err := ValidateCompetitionID(compID); err != nil {
 		return false, err
 	}
-	mu := s.getCompLock(compID)
-	mu.Lock()
+	mu, lockErr := s.lockCompWrite(compID)
+	if lockErr != nil {
+		return false, lockErr
+	}
 	defer mu.Unlock()
 	found, err := s.updateBracketMatchByIDLocked(compID, matchID, mutate, s.directWrite)
 	if found && err == nil {

@@ -53,6 +53,29 @@ func namesOf(players []domain.Player) []string {
 	return out
 }
 
+// The round-lineup settlement a transaction runs at commit reads the roster
+// the transaction staged, not the file under it: a participant edit stages
+// participants.csv in the same transaction.
+func TestStoreTx_RoundLineupStageReadsTheStagedRoster(t *testing.T) {
+	store, compID, aliceID := participantsTxFixture(t)
+	require.NoError(t, store.WithTransaction(compID, func(tx StoreTx) error {
+		if _, err := tx.UpdateParticipant(compID, aliceID, false, renameTo("Alicia")); err != nil {
+			return err
+		}
+		comp, err := tx.LoadCompetition(compID)
+		if err != nil {
+			return err
+		}
+		players, err := tx.(*storeTx).roundLineupStage().players(comp)
+		if err != nil {
+			return err
+		}
+		assert.Contains(t, namesOf(players), "Alicia", "the stage reads the roster this transaction staged")
+		assert.NotContains(t, namesOf(players), "Alice")
+		return nil
+	}))
+}
+
 func TestStoreTx_UpdateParticipantThenAbortLeavesRosterAndSeedsUnchanged(t *testing.T) {
 	store, compID, aliceID := participantsTxFixture(t)
 	pPath := store.compPath(compID, "participants.csv")

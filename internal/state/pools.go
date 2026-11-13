@@ -203,8 +203,10 @@ func (s *Store) SavePools(compID string, pools []helper.Pool) error {
 		return err
 	}
 
-	mu := s.getCompLock(compID)
-	mu.Lock()
+	mu, lockErr := s.lockCompWrite(compID)
+	if lockErr != nil {
+		return lockErr
+	}
 	defer mu.Unlock()
 
 	return s.savePoolsLocked(compID, pools, s.directWrite)
@@ -855,8 +857,10 @@ func (s *Store) SavePoolMatches(compID string, results []MatchResult) error {
 		return err
 	}
 
-	mu := s.getCompLock(compID)
-	mu.Lock()
+	mu, lockErr := s.lockCompWrite(compID)
+	if lockErr != nil {
+		return lockErr
+	}
 	defer mu.Unlock()
 
 	if err := s.savePoolMatchesLocked(compID, results, s.directWrite); err != nil {
@@ -957,8 +961,10 @@ func (s *Store) UpdatePoolMatchByID(compID, matchID string, mutate func(*MatchRe
 		return false, err
 	}
 
-	mu := s.getCompLock(compID)
-	mu.Lock()
+	mu, lockErr := s.lockCompWrite(compID)
+	if lockErr != nil {
+		return false, lockErr
+	}
 	defer mu.Unlock()
 
 	found, err := s.updatePoolMatchByIDLocked(compID, matchID, mutate, s.directWrite)

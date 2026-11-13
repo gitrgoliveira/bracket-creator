@@ -97,20 +97,14 @@ const absentDigest = "absent"
 // staleSuffix is added to the name of a log Scan sets aside (staleStep).
 const staleSuffix = ".stale"
 
-// fileDigest names what path holds: absentDigest when there is no file,
-// else the SHA-256 of its bytes.
-func fileDigest(path string) (string, error) {
-	root, err := os.OpenRoot(filepath.Dir(path))
-	if errors.Is(err, fs.ErrNotExist) {
-		return absentDigest, nil
-	}
-	if err != nil {
-		return "", err
-	}
-	data, err := root.ReadFile(filepath.Base(path))
-	if cerr := root.Close(); cerr != nil && err == nil {
-		err = cerr
-	}
+// invalidSuffix is added to the name of a log whose content does not parse,
+// once, so Scan (which reads only names ending in .json) never meets it again.
+const invalidSuffix = ".invalid"
+
+// fileDigest names what path holds, read through read: absentDigest when
+// there is no file, else the SHA-256 of its bytes.
+func fileDigest(read ReadFn, path string) (string, error) {
+	data, err := read(path)
 	if errors.Is(err, fs.ErrNotExist) {
 		return absentDigest, nil
 	}
@@ -132,12 +126,12 @@ func bytesDigest(data []byte) string {
 // or a version-2 log a build from before the delete step kept unapplied.
 // Replaying it would put the older content back over newer. A step with no
 // Before was written by a build from before the field and is not judged.
-func staleStep(steps []FileIntent) (string, error) {
+func staleStep(read ReadFn, steps []FileIntent) (string, error) {
 	for _, in := range steps {
 		if in.Before == "" {
 			continue
 		}
-		now, err := fileDigest(in.Path)
+		now, err := fileDigest(read, in.Path)
 		if err != nil {
 			return "", err
 		}
@@ -163,6 +157,12 @@ type WriteFn func(path string, data []byte, perm os.FileMode) error
 // state already holds), which is what keeps a replay idempotent.
 type RemoveFn func(path string) error
 
+// ReadFn reads one target, for the record of what it held (fileDigest). It
+// reports a file that is not there, or whose folder is not, as
+// fs.ErrNotExist. The store passes its root-backed reader, so the WAL opens
+// no target by path, as it writes and removes none by path.
+type ReadFn func(path string) ([]byte, error)
+
 // WAL is the in-memory transaction handle.
 //
 // Append-only intents (modulo coalescing by path). State machine:
@@ -176,10 +176,20 @@ type WAL struct {
 	walDir string
 	write  WriteFn
 	remove RemoveFn
+	read   ReadFn
 	// stale is set by Scan on a log another writer overtook: the first such
 	// file (staleStep). Such a log is never applied (Stale, SetAside).
-	stale   string
-	intents []FileIntent
+	stale string
+	// invalid is set by Scan on a log whose content is not a log (it does
+	// not parse). It holds no steps, is never applied, and is set aside under
+	// invalidSuffix (Invalid, SetAside).
+	invalid bool
+	// unchecked is set by Scan on a log whose files it could not read, so it
+	// cannot tell whether another writer overtook it; it wraps
+	// ErrLogUnchecked and names the log. Such a log is never applied
+	// (Unchecked).
+	unchecked error
+	intents   []FileIntent
 	// pathIdx maps target path → index into intents for O(1)
 	// coalescing on Append.
 	pathIdx map[string]int
@@ -209,9 +219,11 @@ const logVersionSteps = 2
 // later logs without it, so the caller refuses rather than skipping.
 var ErrUnknownLogVersion = errors.New("wal: transaction log of an unknown version")
 
-// ErrLogUnchecked is returned by Scan for a log it could not check against
-// the files it names (staleStep could not read one): replaying it might put
-// older content back, and skipping it might lose it, so the caller refuses.
+// ErrLogUnchecked marks a log Scan could not check: the log file itself
+// could not be read (Scan returns it), or a file it names could not be
+// (staleStep; the log is returned marked, WAL.Unchecked). Replaying it might
+// put older content back, and skipping it might lose it, so the caller
+// refuses.
 var ErrLogUnchecked = errors.New("wal: transaction log could not be checked")
 
 // ErrCommitLeftLog is returned by Commit when writing the log failed after
@@ -252,12 +264,15 @@ func uniqueWALID() string {
 //
 // No on-disk state is created here. Commit is what publishes the
 // intent log to walDir; an uncommitted WAL leaves no trace.
-func BeginTx(walDir, id string, write WriteFn, remove RemoveFn) (*WAL, error) {
+func BeginTx(walDir, id string, write WriteFn, remove RemoveFn, read ReadFn) (*WAL, error) {
 	if write == nil {
 		return nil, fmt.Errorf("wal.BeginTx: write function is nil")
 	}
 	if remove == nil {
 		return nil, fmt.Errorf("wal.BeginTx: remove function is nil")
+	}
+	if read == nil {
+		return nil, fmt.Errorf("wal.BeginTx: read function is nil")
 	}
 	if id == "" {
 		return nil, fmt.Errorf("wal.BeginTx: id is empty")
@@ -270,6 +285,7 @@ func BeginTx(walDir, id string, write WriteFn, remove RemoveFn) (*WAL, error) {
 		walDir:  walDir,
 		write:   write,
 		remove:  remove,
+		read:    read,
 		intents: nil,
 		pathIdx: make(map[string]int),
 		path:    filepath.Join(walDir, id+".json"),
@@ -385,7 +401,7 @@ func (w *WAL) Commit() error {
 	copy(steps, w.intents)
 	hasDelete := false
 	for i := range steps {
-		before, err := fileDigest(steps[i].Path)
+		before, err := fileDigest(w.read, steps[i].Path)
 		if err != nil {
 			return fmt.Errorf("wal.Commit %q: read %s: %w", w.id, steps[i].Path, err)
 		}
@@ -406,7 +422,7 @@ func (w *WAL) Commit() error {
 		// after the rename). Removing it keeps a failed Commit an abort;
 		// if that fails too, the log stands and the caller is told so. A log
 		// folder that is missing or not a folder holds no log at all.
-		if _, serr := os.Lstat(w.path); errors.Is(serr, fs.ErrNotExist) || errors.Is(serr, syscall.ENOTDIR) {
+		if !w.logMayStand() {
 			return fmt.Errorf("wal.Commit %q: write: %w", w.id, err)
 		}
 		if derr := w.Done(); derr != nil {
@@ -415,6 +431,17 @@ func (w *WAL) Commit() error {
 		return fmt.Errorf("wal.Commit %q: write: %w", w.id, err)
 	}
 	return nil
+}
+
+// logMayStand reports whether the log file may be in place after a failed
+// write: false only when it, or the log folder, is provably not there (a
+// folder that is missing or is not a folder holds no log). Asked through the
+// caller's read function, as every target is read, so the WAL makes no call
+// by the log's own path; this is the failure path only, so reading the log
+// back costs nothing that matters.
+func (w *WAL) logMayStand() bool {
+	_, err := w.read(w.path)
+	return !errors.Is(err, fs.ErrNotExist) && !errors.Is(err, syscall.ENOTDIR)
 }
 
 // Apply writes each staged intent to its target path via the
@@ -426,6 +453,9 @@ func (w *WAL) Commit() error {
 // been written produces the same on-disk state (atomicWriteFile is
 // itself idempotent for identical bytes).
 func (w *WAL) Apply() error {
+	if w.unchecked != nil {
+		return w.unchecked
+	}
 	for i, in := range w.intents {
 		if in.Delete {
 			// Already absent is the step's end state: success, so a replay
@@ -476,7 +506,24 @@ func (w *WAL) Stale() string {
 	return w.stale
 }
 
-// SetAside renames the log to "<name>.json.stale", kept beside the logs for
+// Unchecked returns, for a log Scan could not check (a file it names could
+// not be read), the error naming it, which wraps ErrLogUnchecked; nil
+// otherwise. Such a log is never applied: replaying it might put older
+// content back, and skipping it might lose it, so the caller refuses until
+// access is fixed.
+func (w *WAL) Unchecked() error {
+	return w.unchecked
+}
+
+// Invalid reports whether Scan found this log's content damaged: it does not
+// parse, so it names no step and can never be applied. Startup sets it aside
+// (SetAside renames it to end in .invalid) and goes on.
+func (w *WAL) Invalid() bool {
+	return w.invalid
+}
+
+// SetAside renames the log to "<name>.json.stale" (or "<name>.json.invalid"
+// for a log whose content does not parse, Invalid), kept beside the logs for
 // the operator; its name no longer ends in ".json", so later scans pass it by.
 func (w *WAL) SetAside() (err error) {
 	root, err := os.OpenRoot(w.walDir)
@@ -489,7 +536,11 @@ func (w *WAL) SetAside() (err error) {
 		}
 	}()
 	name := filepath.Base(w.path)
-	if err := root.Rename(name, name+staleSuffix); err != nil {
+	suffix := staleSuffix
+	if w.invalid {
+		suffix = invalidSuffix
+	}
+	if err := root.Rename(name, name+suffix); err != nil {
 		return fmt.Errorf("wal.SetAside %q: %w", w.id, err)
 	}
 	return nil
@@ -500,24 +551,31 @@ func (w *WAL) SetAside() (err error) {
 // across crash recoveries. Uncommitted WALs leave no file on disk,
 // so anything Scan finds is committed and needs Apply + Done.
 //
-// The write and remove functions are wired into every returned WAL. A
+// The write, remove and read functions are wired into every returned WAL
+// (read also checks each log's files, staleStep). A
 // missing walDir returns (nil, nil), that's the "fresh data folder" case.
 //
-// Files that cannot be read or parsed are skipped (so a corrupted log
-// doesn't block other pending transactions). A log that parses but names a
-// version this build does not know is NOT skipped: Scan returns
-// ErrUnknownLogVersion naming the file, since replaying the other logs
-// without it could apply a later transaction before an earlier one. A log
-// whose files were changed after it was written (staleStep) is returned
-// marked Stale, so a caller never replays it; Scan itself changes nothing.
-// A log Scan cannot check (a file it names cannot be read) returns
-// ErrLogUnchecked naming it.
-func Scan(walDir string, write WriteFn, remove RemoveFn) ([]*WAL, error) {
+// A log whose content does not parse is returned marked Invalid (no steps).
+// A log file that cannot be read is NOT skipped: Scan returns
+// ErrLogUnchecked naming it, since nothing tells which files it touches. A
+// log that parses but names a version this build does not know is NOT
+// skipped either: Scan returns ErrUnknownLogVersion naming the file, since
+// replaying the other logs without it could apply a later transaction before
+// an earlier one. A log whose files were changed after it was written
+// (staleStep) is returned marked Stale, so a caller never replays it. A log
+// whose files Scan cannot read to check it is returned marked Unchecked,
+// with its steps, so a caller can tell which files it touches (startup
+// refuses on any; a settle only on one touching its competition). Scan
+// itself changes nothing.
+func Scan(walDir string, write WriteFn, remove RemoveFn, read ReadFn) ([]*WAL, error) {
 	if write == nil {
 		return nil, fmt.Errorf("wal.Scan: write function is nil")
 	}
 	if remove == nil {
 		return nil, fmt.Errorf("wal.Scan: remove function is nil")
+	}
+	if read == nil {
+		return nil, fmt.Errorf("wal.Scan: read function is nil")
 	}
 	// The listed files are read through a root on walDir, so the OS keeps
 	// each read inside it.
@@ -561,14 +619,32 @@ func Scan(walDir string, write WriteFn, remove RemoveFn) ([]*WAL, error) {
 		path := filepath.Join(walDir, n)
 		raw, rerr := root.ReadFile(n)
 		if rerr != nil {
-			// Skipped, and said: breaking the loop on one file would block
-			// recovery for the rest, and the change it holds is not applied.
-			slog.Error("wal: a pending transaction log cannot be read; it is skipped and its change is not applied", "file", path, "err", rerr)
-			continue
+			if errors.Is(rerr, fs.ErrNotExist) {
+				// Removed between the listing and the read (a Done, or a
+				// set-aside): nothing is pending under that name.
+				continue
+			}
+			// An access or I/O fault: the log may hold a change that has not
+			// landed, and skipping it would replay the logs after it without
+			// it, so the whole scan refuses until access is fixed; the log
+			// then replays with its stale guard intact.
+			return nil, fmt.Errorf("wal.Scan %q: %s cannot be read: %w: %w", walDir, n, rerr, ErrLogUnchecked)
 		}
 		var wf walFile
 		if jerr := json.Unmarshal(raw, &wf); jerr != nil {
-			slog.Error("wal: a pending transaction log is not valid JSON; it is skipped and its change is not applied", "file", path, "err", jerr)
+			// Damaged content that no build can read: it names no step, so
+			// nothing can be applied from it. Handed back marked Invalid for
+			// startup to set aside once and say so.
+			out = append(out, &WAL{
+				id:      n[:len(n)-len(".json")],
+				walDir:  walDir,
+				write:   write,
+				remove:  remove,
+				read:    read,
+				invalid: true,
+				pathIdx: map[string]int{},
+				path:    path,
+			})
 			continue
 		}
 		steps := wf.Intents
@@ -582,20 +658,25 @@ func Scan(walDir string, write WriteFn, remove RemoveFn) ([]*WAL, error) {
 			// after it without it, so the whole replay refuses.
 			return nil, fmt.Errorf("wal.Scan %q: %s has version %d: %w", walDir, n, wf.Version, ErrUnknownLogVersion)
 		}
-		stale, serr := staleStep(steps)
-		if serr != nil {
-			return nil, fmt.Errorf("wal.Scan %q: %s: %w: %w", walDir, n, serr, ErrLogUnchecked)
-		}
 		w := &WAL{
 			id:      wf.ID,
 			walDir:  walDir,
 			write:   write,
 			remove:  remove,
+			read:    read,
 			intents: steps,
 			pathIdx: make(map[string]int, len(steps)),
 			path:    path,
-			stale:   stale,
 		}
+		stale, serr := staleStep(read, steps)
+		if serr != nil {
+			// A file it names cannot be read: handed back marked, with its
+			// steps, so the caller knows which files it touches. Startup
+			// refuses on it; a settle refuses only for the competition it
+			// touches.
+			w.unchecked = fmt.Errorf("wal.Scan %q: %s: %w: %w", walDir, n, serr, ErrLogUnchecked)
+		}
+		w.stale = stale
 		for i, in := range steps {
 			// Last-write-wins coalescing already happened at Append
 			// time pre-Commit; preserve the same map shape so a

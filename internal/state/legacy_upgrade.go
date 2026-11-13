@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"log/slog"
 	"maps"
 	"os"
 	"slices"
@@ -293,8 +294,22 @@ func (s *Store) EnsureLegacyUpgraded(compID string) {
 	if _, done := s.legacyUpgraded.Load(compID); done {
 		return
 	}
-	mu := s.getCompLock(compID)
-	mu.Lock()
+	if s.keptSettleWaits(compID) {
+		// A change kept in the transaction log failed to land moments ago:
+		// this is a read door, so it waits like the other reads
+		// (keptSettleReadBackoff) rather than trying again on every viewer
+		// read. Unstamped, so a later read upgrades once it lands.
+		return
+	}
+	mu, lockErr := s.lockCompWriteForRead(compID)
+	if lockErr != nil {
+		// A change kept in the transaction log could not be finished: the
+		// upgrade writes nothing over it, and stays unstamped so the next
+		// read tries again. Quiet: this is on every viewer read, and the
+		// write that failed already logged the disk fault.
+		slog.Debug("state: legacy upgrade waits for a kept change", "comp", compID, "err", lockErr)
+		return
+	}
 	defer mu.Unlock()
 	if _, done := s.legacyUpgraded.Load(compID); done {
 		return // lost the race to a concurrent reader's upgrade

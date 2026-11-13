@@ -837,7 +837,7 @@ func stageUnsettleableWAL(t *testing.T, dir, compID string) {
 
 // (12) Unsettled-WAL branches on backup and restore print the CLI's friendly wording.
 func TestMobileAppBackupRestore_UnsettledWAL(t *testing.T) {
-	const wantSentence = "A competition has a change that could not be written to disk. Free disk space or fix the data folder's permissions, then retry."
+	const wantSentence = "A competition has a change that could not be written to disk. Free disk space or fix the data folder's permissions, then retry. If that does not clear it, a folder the change names may have been removed outside the app: restore it, or see the server log."
 
 	t.Run("backup with unsettled WAL", func(t *testing.T) {
 		srcDir, _ := buildTestPopulatedFolder(t)

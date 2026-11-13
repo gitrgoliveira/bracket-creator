@@ -848,7 +848,9 @@ paths:
             A competition has a change kept in the write-ahead log (WAL) that the
             disk still refuses (`code: pending_write_unsettled`). The backup writes
             that change first, so it succeeds once the disk accepts writes again;
-            a restart does not help. Refusals change nothing.
+            a restart does not help. If it still refuses, a folder the change
+            names may have been removed outside the app: restore it, or see the
+            server log. Refusals change nothing.
           content:
             application/json:
               schema:
@@ -908,7 +910,9 @@ paths:
             A competition has a change kept in the write-ahead log (WAL) that the
             disk still refuses (`code: pending_write_unsettled`). The backup writes
             that change first, so it succeeds once the disk accepts writes again;
-            a restart does not help. Refusals change nothing.
+            a restart does not help. If it still refuses, a folder the change
+            names may have been removed outside the app: restore it, or see the
+            server log. Refusals change nothing.
           content:
             application/json:
               schema:
@@ -1067,7 +1071,7 @@ paths:
         | 409 | `folder_incomplete` | A competition folder to replace or remove has no `config.md`, so it cannot be copied first; lists them |
         | 409 | `matches_running` | Matches running in replaced/removed competition without `allowRunning=true`; lists them |
         | 409 | `plan_changed` | Folder competitions changed between plan and restore |
-        | 409 | `pending_write_unsettled` | A competition has a change kept in the write-ahead log (WAL) that the disk still refuses; free disk space or fix permissions, then retry |
+        | 409 | `pending_write_unsettled` | A competition has a change kept in the write-ahead log (WAL) that the disk still refuses; free disk space or fix permissions, then retry. If that does not clear it, a folder the change names may have been removed outside the app: restore it, or see the server log |
         | 409 | `password_required` | Admin password required for restored tournament |
         | 409 | `nothing_to_restore` | Archive holds nothing to restore (or undo) |
       security:

@@ -886,9 +886,11 @@ data folder, the log was written while the data folder had another path (the fol
 renamed): the app does not start and says so. Start it with the folder the log was written under
 (the path the error names), or move the log out of `.wal/` to leave its change unapplied. A log
 that names no competition's folder and cannot be applied stops startup the same way, for the same
-cause. The app
-takes the data folder's full path at startup, so naming the same folder another way, or starting
-the app from another folder, never causes this. A log whose content is damaged, so that it
+cause. This version takes the data folder's full path at startup, so for a log it wrote, naming
+the same folder another way, or starting the app from another folder, never causes this. A log an
+earlier version wrote may name its files relative to the folder the app was started from: the
+error then says so, and the cure is to start the app from that same folder again (or to move the
+log out of `.wal/`). A log whose content is damaged, so that it
 is not a log any version can read, holds nothing that can be applied: at startup it is renamed to
 end in `.invalid`, kept in `.wal/`, the other logs replay as usual, and one error is logged saying
 that a change saved just before the restart may not have landed. Check the last results entered
@@ -913,8 +915,9 @@ still refuses the kept change:
 - **Backups.** A backup that includes that competition is refused. A download of the tournament
   or of that competition answers 409 (`pending_write_unsettled`), and so does a restore that
   replaces or removes that competition, before its safety copy is taken. The daily scheduled copy
-  is not taken: the server log gives a warning, and it is tried again an hour later. To keep a
-  copy meanwhile, stop the server and copy the data folder.
+  is not taken: the server log gives a warning, and it is tried again an hour later. Nor is the
+  copy taken when the app is closed normally: the server log gives a warning, and the app closes
+  without it. To keep a copy meanwhile, stop the server and copy the data folder.
 - **Once the disk accepts it.** The kept change lands first, and the write or read that asked goes
   on top of it. Nothing announces the change to other screens: they show it at their next refresh,
   or with the next change made to that competition.

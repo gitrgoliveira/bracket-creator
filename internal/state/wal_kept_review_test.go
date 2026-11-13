@@ -83,6 +83,8 @@ func TestNewStore_ALogWrittenUnderAnotherDataFolderNamesTheCause(t *testing.T) {
 	_, err = NewStore(second)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "written under another data folder path")
+	assert.Contains(t, err.Error(), walRemedyAbsolute, "a log naming absolute paths asks for the folder it was written under")
+	assert.NotContains(t, err.Error(), walRemedyRelative)
 	assert.NotContains(t, err.Error(), "fix access")
 }
 
@@ -122,6 +124,8 @@ func TestNewStore_AnEarlierBuildsRelativeLogStartedFromAnotherFolderRefusesStart
 	require.Error(t, err)
 	assert.ErrorIs(t, err, errOutsideDataFolder)
 	assert.Contains(t, err.Error(), "written under another data folder path")
+	assert.Contains(t, err.Error(), walRemedyRelative, "a relative log asks for the folder the app was started from, which -f cannot name")
+	assert.NotContains(t, err.Error(), walRemedyAbsolute)
 
 	after, rerr := os.ReadFile(logPath)
 	require.NoError(t, rerr, "the log is left in .wal")
@@ -145,6 +149,28 @@ func TestNewStore_ALogNamingNoCompetitionThatCannotApplyRefusesStartup(t *testin
 	_, err = NewStore(dataDir)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "names no competition folder")
+	assert.Contains(t, err.Error(), walRemedyAbsolute)
+	assert.NotContains(t, err.Error(), walRemedyRelative)
+	_, serr := os.Stat(logPath)
+	assert.NoError(t, serr, "the log is left in .wal")
+}
+
+// An earlier build's relative log, started from the data folder itself,
+// resolves inside the folder but under no competitions/ folder: its Apply
+// fails and no competition can retry it. The refusal asks for the folder the
+// app was started from, since the data folder path alone cannot cure it.
+func TestNewStore_ARelativeLogNamingNoCompetitionAsksForTheStartFolder(t *testing.T) {
+	dataDir := t.TempDir()
+	store, err := NewStore(dataDir)
+	require.NoError(t, err)
+	logPath := writeEarlierBuildLog(t, store.walDir, filepath.Join("data", "competitions", "x", "landed.txt"))
+
+	t.Chdir(dataDir)
+	_, err = NewStore(dataDir)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "names no competition folder")
+	assert.Contains(t, err.Error(), walRemedyRelative)
+	assert.NotContains(t, err.Error(), walRemedyAbsolute)
 	_, serr := os.Stat(logPath)
 	assert.NoError(t, serr, "the log is left in .wal")
 }

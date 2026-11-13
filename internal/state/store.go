@@ -228,6 +228,7 @@ func (s *Store) init() error {
 	// that a later version wrote, refuses startup until it is fixed
 	// (operator decisions 2026-11-12, W2 (b), and 2026-11-13, W2 (d)).
 	pending, err := wal.Scan(s.walDir, s.directWriteWAL, s.directRemoveWAL, s.directReadWAL)
+	var unchecked *wal.WAL // the log marked Unchecked that refuses startup, if any
 	if errors.Is(err, wal.ErrUnknownLogVersion) {
 		// A log a later release wrote: replaying the others around it could
 		// apply a later transaction before it, and skipping it loses it.
@@ -240,14 +241,17 @@ func (s *Store) init() error {
 		for _, w := range pending {
 			if uerr := w.Unchecked(); uerr != nil {
 				err = uerr
+				unchecked = w
 				break
 			}
 		}
 	}
 	if errors.Is(err, wal.ErrLogUnchecked) && errors.Is(err, errOutsideDataFolder) {
 		// A file it names lies outside the data folder: the log was written
-		// while the folder had another path. No access fix cures that.
-		return fmt.Errorf("state: a pending transaction log in %s was written under another data folder path; restart with the folder it was written under (the path in the error below), or move that log out of .wal to leave its change unapplied: %w", s.walDir, err)
+		// while the folder had another path, or (an earlier version's
+		// relative log) while the app was started from another folder. No
+		// access fix cures that; walRestartRemedy names which folder does.
+		return fmt.Errorf("state: a pending transaction log in %s was written under another data folder path; %s, or move that log out of .wal to leave its change unapplied: %w", s.walDir, walRestartRemedy(unchecked), err)
 	}
 	if errors.Is(err, wal.ErrLogUnchecked) {
 		// A log that could not be read, or whose files could not be: replaying
@@ -311,8 +315,9 @@ func (s *Store) init() error {
 				// change never landing. It was written under another layout
 				// of the folder (an earlier build's relative log started from
 				// the data folder itself), so startup refuses as for a log
-				// written under another data folder path.
-				return fmt.Errorf("state: a pending transaction log in %s names no competition folder of this data folder and could not be replayed; it was likely written under another data folder path. Restart with the folder it was written under, or move that log out of .wal to leave its change unapplied: %w", s.walDir, err)
+				// written under another data folder path, naming the start
+				// folder for a relative log (walRestartRemedy).
+				return fmt.Errorf("state: a pending transaction log in %s names no competition folder of this data folder and could not be replayed; it was likely written under another data folder path: %s, or move that log out of .wal to leave its change unapplied: %w", s.walDir, walRestartRemedy(w), err)
 			}
 			slog.Error("state: WAL Apply failed during replay; the competition's next write retries it",
 				"wal", w.ID(), "err", err)

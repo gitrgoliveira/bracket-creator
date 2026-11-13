@@ -80,6 +80,29 @@ func (s *Store) walCompetition(w *wal.WAL) string {
 	return ""
 }
 
+// The two remedies startup gives for a log written under another layout of
+// the data folder. A log this version wrote names absolute paths, so the data
+// folder it was written under cures it; an earlier version's log may name its
+// files relative to the folder the app was started from, which no data folder
+// path can cure, so it asks for that folder instead (storePath).
+const (
+	walRemedyAbsolute = "restart with the folder it was written under (the path in the error below)"
+	walRemedyRelative = "start the app from the folder it was started from when this log was written"
+)
+
+// walRestartRemedy picks the remedy for w: the relative one when any step
+// names a relative path, else the absolute one.
+func walRestartRemedy(w *wal.WAL) string {
+	if w != nil {
+		for _, in := range w.Intents() {
+			if !filepath.IsAbs(in.Path) {
+				return walRemedyRelative
+			}
+		}
+	}
+	return walRemedyAbsolute
+}
+
 // lockCompWrite takes compID's write lock and, when this process kept a
 // transaction log for compID, finishes that change before returning, so the
 // caller reads and writes on top of it rather than over it (a write over one

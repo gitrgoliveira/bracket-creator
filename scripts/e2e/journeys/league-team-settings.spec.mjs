@@ -27,12 +27,12 @@
 //                 two joint 3rd on           not asked, three joint 3rds
 //
 // F9 (the settings copy) is read beside each control in the first test and
-// asserted, as the fix will have it, in the test.fixme below.
+// asserted in its own test below.
 //
 // Not serial: each test signs in (or creates the tournament when this file's
 // server has none), seeds a competition of its own on a shiaijo of its own, and
-// keeps its own folder of screenshots and audit rows, so one failing test or
-// one test.fixme hides nothing else here.
+// keeps its own folder of screenshots and audit rows, so one failing test
+// hides nothing else here.
 import { test, expect } from '../fixtures/test.mjs';
 import { PUBLIC_DEVICE } from '../fixtures/devices.mjs';
 import { journeyShots } from '../fixtures/shots.mjs';
@@ -219,14 +219,13 @@ async function runLeague({ page, browser, baseURL, folder, tag, court, n, script
       const row = table.rows.find((r) => r.name === name);
       expect(row, `${name} is in the table`).toBeTruthy();
       expect(row).toMatchObject(want.stats[i]);
-      // A tie that is asked, or that lies below the band with no joint 3rd
-      // places to share it, reads as consecutive ranks inside its places (3 and
-      // 4 for a tie at 3rd and 4th, 4 and 5 below a Top 3: recorded in the
-      // audit row above); a tie the joint 3rd places cover, and a team in no
-      // tie, read as the shared or plain rank the results make.
-      const group = want.groups.find((g) => g.idx.includes(i));
-      const shared = group && joint && group.min >= 3;
-      if (group && !shared) {
+      // A tie that is asked reads as consecutive ranks inside its places (3
+      // and 4 for a tie at 3rd and 4th) until it is decided; a tie nothing
+      // asks (below the band, or one the joint 3rd places cover) shares its
+      // better place (4 and 4 below a Top 3), and a team in no tie reads the
+      // plain rank the results make.
+      const group = wantAsked.find((g) => g.idx.includes(i));
+      if (group) {
         expect(row.rank, `${name} is ranked inside places ${group.min}-${group.max}`).toBeGreaterThanOrEqual(group.min);
         expect(row.rank, `${name} is ranked inside places ${group.min}-${group.max}`).toBeLessThanOrEqual(group.max);
       } else {
@@ -323,11 +322,11 @@ test.describe(JOURNEY, () => {
     });
   });
 
-  // F9: the copy beside the two controls does not say what they change. The fix
-  // names the third choice (accepting shared ranks), drops "finalised" (nobody
+  // F9: the copy beside the two controls says what they change. It names the
+  // third choice (accepting shared ranks), never says "finalised" (nobody
   // finalises a league: it finishes), and speaks of a league's tied 3rd place
   // rather than semi-finalists and a bronze match.
-  test.fixme('F9: the copy beside the league settings says what changes, in a league\'s words', async ({ page }) => {
+  test('F9: the copy beside the league settings says what changes, in a league\'s words', async ({ page }) => {
     test.setTimeout(240_000);
     const { record, shot } = recorder('settings-copy');
     await enterTournament(page, LEAGUE_CUP);

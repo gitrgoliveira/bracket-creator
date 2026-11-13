@@ -174,4 +174,98 @@ describe('LeagueStandingsViewer (mp-dunx)', () => {
     await Promise.resolve();
     runtime.updateProps({ competition: comp, poolMatches: secondMatches, tweaks });
   });
+
+  // N7: a correction that keeps the encounter's winner still moves the table
+  // (IV/PW, ippons), so the table must be fetched again.
+  it('refetches after a correction that keeps the encounter winner', () => {
+    const team = { ...comp, kind: 'team', teamSize: 2, status: 'completed' };
+    const bout = (winner, ipponsA) => ({ winner, ipponsA, ipponsB: [], decision: '' });
+    const encounter = (subs) => [{ id: 'Pool A-0', status: 'completed', winner: 'Alpha', subResults: subs }];
+    const before = encounter([bout('Alpha', ['M']), bout('Alpha', ['K'])]);
+    runtime.mount(LeagueStandingsViewer, { competition: team, poolMatches: before, tweaks });
+    expect(global.window.API.leagueStandings).toHaveBeenCalledTimes(1);
+
+    // Same winner, one bout corrected from a win to a draw: IV and PW change.
+    const corrected = encounter([bout('Alpha', ['M', 'K']), { winner: '', ipponsA: [], ipponsB: [], decision: 'hikiwake' }]);
+    runtime.updateProps({ competition: team, poolMatches: corrected, tweaks });
+    expect(global.window.API.leagueStandings).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not refetch on a live mark of a match not yet finished', () => {
+    const running = (ipponsA) => [{ id: 'Pool A-0', status: 'running', winner: '', ipponsA, ipponsB: [] }];
+    runtime.mount(LeagueStandingsViewer, { competition: comp, poolMatches: running([]), tweaks });
+    expect(global.window.API.leagueStandings).toHaveBeenCalledTimes(1);
+    runtime.updateProps({ competition: comp, poolMatches: running(['M']), tweaks });
+    expect(global.window.API.leagueStandings).toHaveBeenCalledTimes(1);
+  });
+
+  // N2: Accept shared ranks and its Undo change the competition's status, not
+  // a match, yet change the ranks the table reads, so the table is fetched
+  // again on a status change with the same matches.
+  it('refetches when the competition status changes with the matches unchanged (Accept, Undo)', () => {
+    const played = [{ id: 'Pool A-0', status: 'completed', winner: 'P3', ipponsA: ['M'], ipponsB: [] }];
+    runtime.mount(LeagueStandingsViewer, { competition: comp, poolMatches: played, tweaks });
+    expect(global.window.API.leagueStandings).toHaveBeenCalledTimes(1);
+
+    // Accept: the league finishes, no match moves.
+    runtime.updateProps({ competition: { ...comp, status: 'completed' }, poolMatches: played, tweaks });
+    expect(global.window.API.leagueStandings).toHaveBeenCalledTimes(2);
+
+    // Undo: back to match play, still no match moves.
+    runtime.updateProps({ competition: { ...comp, status: 'pools' }, poolMatches: played, tweaks });
+    expect(global.window.API.leagueStandings).toHaveBeenCalledTimes(3);
+
+    // A re-render with nothing changed fetches nothing.
+    runtime.updateProps({ competition: { ...comp, status: 'pools' }, poolMatches: played, tweaks });
+    expect(global.window.API.leagueStandings).toHaveBeenCalledTimes(3);
+  });
+
+  // N2a/N2b: the table prints the place the server gives, so an accepted
+  // shared 1st reads 1, 1, 3 and a tie below the band 4, 4.
+  it('shows a shared place as the server ranks it', async () => {
+    const shared = mockStandings.map((s, i) => ({ ...s, rank: [1, 1, 3, 3][i] }));
+    global.window.API.leagueStandings = vi.fn().mockResolvedValue(shared);
+    runtime.mount(LeagueStandingsViewer, { competition: comp, poolMatches: [], tweaks });
+    await Promise.resolve();
+    const finalTree = runtime.updateProps({ competition: comp, poolMatches: [], tweaks });
+    const cells = findAll(finalTree, n => n.type === 'td' && typeof n.props?.className === 'string' && n.props.className.includes('pool-standings__draw-pos'));
+    expect(cells.map(c => collectText(c, expandNamed('NumberedName')))).toEqual(['1', '1', '3', '3']);
+  });
+});
+
+describe('poolMatchesSignature (N7): the one key the league table and admin Pools refetch on', () => {
+  let poolMatchesSignature;
+  beforeEach(async () => {
+    vi.resetModules();
+    ({ poolMatchesSignature } = await import('../viewer_standings.jsx'));
+  });
+
+  const done = (over) => ({ id: 'Pool A-0', status: 'completed', winner: 'A', ipponsA: ['M'], ipponsB: [], decision: '', ...over });
+
+  it('changes when a correction keeps the winner but changes the score', () => {
+    expect(poolMatchesSignature([done({ ipponsA: ['M', 'K'] })])).not.toBe(poolMatchesSignature([done()]));
+  });
+
+  it('changes when a team bout is corrected under the same encounter winner', () => {
+    const subs = (d) => [{ winner: 'A', ipponsA: ['M'], ipponsB: [], decision: '' }, { winner: d ? '' : 'A', ipponsA: [], ipponsB: [], decision: d }];
+    expect(poolMatchesSignature([done({ subResults: subs('hikiwake') })])).not.toBe(poolMatchesSignature([done({ subResults: subs('') })]));
+  });
+
+  it('changes when engi flags change', () => {
+    expect(poolMatchesSignature([done({ flagsA: 3 })])).not.toBe(poolMatchesSignature([done({ flagsA: 2 })]));
+  });
+
+  it('reads a winner given as a name or as {name} alike', () => {
+    expect(poolMatchesSignature([done({ winner: { name: 'A' } })])).toBe(poolMatchesSignature([done()]));
+  });
+
+  it('ignores the score of a match not yet finished', () => {
+    const live = (ipponsA) => [{ id: 'Pool A-0', status: 'running', winner: '', ipponsA, ipponsB: [] }];
+    expect(poolMatchesSignature(live(['M']))).toBe(poolMatchesSignature(live([])));
+  });
+
+  it('is empty for no matches', () => {
+    expect(poolMatchesSignature(undefined)).toBe('');
+    expect(poolMatchesSignature([])).toBe('');
+  });
 });

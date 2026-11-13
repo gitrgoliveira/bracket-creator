@@ -2225,31 +2225,51 @@ func applyPoolRanksInForce(sorted []state.PlayerStanding, inForce map[string]int
 	}
 }
 
-// applyJointThirdRanks implements the kendo joint-3rd convention. When a league
-// has the joint-3rd rule enabled (state.Competition.EffectiveTwoThirdPlaces,
-// bc-3rdp), a genuine Points-tie whose best finishing position is 3rd or lower
-// is given a SHARED rank (the group's best 1-based position) so both the
-// standings table and the closing-ceremony podium show two (or more) equal
-// 3rd places instead of relabeling the 4th finisher. Ranks 1 and 2 are always
-// kept distinct: a top-two tie is decided by a tie-breaker, never shared. It
-// is a no-op for non-leagues and when the setting is off. A tied group whose
-// members hold a rank in force (IsOverridden, poolRanksInForce) keeps its
-// sequential ranks, since the operator's explicit order decides that group; a
-// different tie in the same pool is still shared. Scoping to leagues keeps mixed and knockout seeding strictly sequential
-// -- those formats decide a single/joint 3rd with a bronze match instead, via
-// RequiresSingleThirdPlace; naginata leagues leave the setting off and so keep
-// a single 3rd.
+// applyJointThirdRanks is the ONE place a league's level group is given a
+// SHARED rank (the group's best 1-based position) on its table. A group shares
+// its place in three cases:
+//
+//   - the kendo joint-3rd convention: with the joint-3rd rule enabled
+//     (state.Competition.EffectiveTwoThirdPlaces, bc-3rdp), a genuine
+//     Points-tie whose best finishing position is 3rd or lower, so both the
+//     standings table and the closing-ceremony podium show two (or more)
+//     equal 3rd places instead of relabeling the 4th finisher;
+//   - a tie outside the band a tie is broken in (TieOutOfBand, stamped by
+//     markTiesOutOfBand): no bout or lots are owed for it, so its members
+//     share their better place (4, 4) (operator decision N2b: ties below the
+//     band can always share places);
+//   - a tie the operator accepted as shared ranks (LeagueTiebreakFinalized,
+//     whose groups are the ties still open in the band, which
+//     markTiedStandings stamps Tied): it reads its best place (1, 1, 3)
+//     (operator decision N2a). Only the rank changes: the rows keep their
+//     order, so a reader of the first row (the winner line) is unchanged.
+//
+// It is a no-op for non-leagues. A tied group whose members hold a rank in
+// force (IsOverridden, poolRanksInForce) keeps its sequential ranks, since the
+// operator's explicit order decides that group; a different tie in the same
+// pool is still shared. Scoping to leagues keeps mixed and knockout seeding
+// strictly sequential -- those formats decide a single/joint 3rd with a bronze
+// match instead, via RequiresSingleThirdPlace; naginata leagues leave the
+// joint-3rd setting off and so keep a single 3rd.
 //
 // Mutates sorted in place. Callers pass a Points-sorted slice that already has
-// sequential ranks assigned, so detectPoolTies groups by adjacent Points
-// equality exactly as it does for the amber-tie highlight.
+// sequential ranks assigned and the Tied/TieOutOfBand/IsOverridden stamps, so
+// detectPoolTies groups by adjacent Points equality exactly as it does for the
+// amber-tie highlight.
 func applyJointThirdRanks(comp *state.Competition, sorted []state.PlayerStanding) {
-	if comp == nil || comp.Format != state.CompFormatLeague || !comp.EffectiveTwoThirdPlaces() {
+	if comp == nil || comp.Format != state.CompFormatLeague {
 		return
 	}
 	for _, positions := range detectPoolTies(sorted) {
+		group := standingsAt(sorted, positions)
+		if slices.ContainsFunc(group, func(s state.PlayerStanding) bool { return s.IsOverridden }) {
+			continue
+		}
 		minRank := positions[0] + 1
-		if minRank < 3 || slices.ContainsFunc(standingsAt(sorted, positions), func(s state.PlayerStanding) bool { return s.IsOverridden }) {
+		jointThird := comp.EffectiveTwoThirdPlaces() && minRank >= 3
+		outOfBand := !slices.ContainsFunc(group, func(s state.PlayerStanding) bool { return !s.TieOutOfBand })
+		accepted := comp.LeagueTiebreakFinalized && !slices.ContainsFunc(group, func(s state.PlayerStanding) bool { return !s.Tied })
+		if !jointThird && !outOfBand && !accepted {
 			continue
 		}
 		for _, idx := range positions {

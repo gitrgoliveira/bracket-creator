@@ -4,6 +4,7 @@
 import { WinnerBadge } from './viewer_standings.jsx';
 import { competitionKindLabel } from './viewer_utils.jsx';
 import { useLatestRef } from './latest_ref.jsx';
+import { effectiveTwoThirdPlaces, FORMAT_LEAGUE } from './competition_shape.jsx';
 
 const { useState, useMemo, useRef, useEffect } = React;
 const EmptyState = window.EmptyState;
@@ -22,7 +23,10 @@ const EmptyState = window.EmptyState;
 // normalizeMatch() in api_serializers.jsx: both shapes are handled.
 // `standings` may be either a flat array (Swiss-shape) or an object keyed by
 // pool name (pools/league shape).
-export function deriveAwards(bracket, standings, pools, nameToPlayer) {
+// `comp` is the competition the standings belong to: a league places its
+// podium by table order (see the standings fallback below), so a caller with
+// league standings passes it; without it the standings are placed by rank.
+export function deriveAwards(bracket, standings, pools, nameToPlayer, comp) {
   // Extract the name string from a match field that may be a string (raw
   // backend payload) or a normalized object ({id, name, dojo}) produced by
   // normalizeMatch() in api_serializers.jsx.
@@ -122,22 +126,25 @@ export function deriveAwards(bracket, standings, pools, nameToPlayer) {
     list = standings[pools[0].poolName] || [];
   }
   if (list && list.length > 0) {
-    // Place finishers by the backend's authoritative rank (the same s.rank the
-    // standings table renders), NOT the array index. A completed league/pool/
-    // Swiss competition resolves consequential ties with a tie-break MATCH
-    // before it can complete (individual: InjectTiebreakerMatches; team:
-    // daihyosen/chusen; both block completion until decided), so ranks are
-    // sequential (1/2/3 → a single 1st, 2nd, and 3rd, with NO 4th) EXCEPT the
-    // sanctioned kendo joint 3rd: when the joint-3rd-place setting is enabled
-    // (bc-3rdp; state.Competition.EffectiveTwoThirdPlaces) the backend
-    // legitimately shares rank 3 between two genuinely-tied finishers
-    // (e.g. 3,3), and `place: rank` renders both as 3rd. This matches the
-    // standings table and honors the tie-break outcome / naginata single-3rd
-    // convention, instead of the old index-based logic that relabeled the
-    // 4th-ranked finisher as a fabricated joint 3rd.
+    // Swiss: place finishers by the backend's rank (the same s.rank the
+    // standings table renders).
+    //
+    // League: the table's rank is not the podium place. A league table gives a
+    // level group its best place (1, 1, 3) when the operator accepted it as
+    // shared or when it lies below the band ties are broken in
+    // (engine.applyJointThirdRanks), but the podium keeps one finisher per
+    // place in table order, so a league places each row by its position. The
+    // one shared podium place is the sanctioned kendo joint 3rd: with the
+    // joint-3rd-place setting on (bc-3rdp, effectiveTwoThirdPlaces) every level
+    // group at 3rd or lower shares rank 3, and each row ranked 3 is a 3rd. With
+    // the setting off (naginata) a shared 3rd on the table still crowns one
+    // 3rd, the first in table order.
+    const isLeague = comp?.format === FORMAT_LEAGUE;
+    const jointThird = isLeague && effectiveTwoThirdPlaces(comp);
     const podium = [];
     list.forEach((s, i) => {
-      const rank = s.rank || i + 1;
+      const rank = !isLeague ? (s.rank || i + 1)
+        : (jointThird && s.rank === 3) ? 3 : i + 1;
       if (rank > 3) return;
       const name = s.player?.name || "";
       if (name) podium.push({ place: rank, name, dojo: s.player?.dojo || "" });
@@ -197,7 +204,7 @@ export async function resolveCompetitionAwards(comp, fetchers) {
   if (fmt === "swiss" && fetchers.swissStandings) {
     try { standings = await fetchers.swissStandings(comp.id); } catch (_) { /* keep detail standings */ }
   }
-  return { state: "final", podium: deriveAwards(null, standings, d.pools, ntpFrom(d.players)) };
+  return { state: "final", podium: deriveAwards(null, standings, d.pools, ntpFrom(d.players), comp) };
 }
 
 const PLACE_STYLE = {
@@ -270,9 +277,15 @@ export function AwardsView({ c, bracket, standings, pools, players }) {
 
   const effectiveStandings = c?.format === "swiss" ? swissStandings : standings;
   const isSwissLoading = c?.format === "swiss" && swissStandings === null;
+  // The fields of c that deriveAwards reads (the format and the joint-3rd
+  // setting), held by value: c's identity churns each render.
+  const podiumRule = useMemo(
+    () => ({ format: c?.format, twoThirdPlaces: c?.twoThirdPlaces, leagueTwoThirdPlaces: c?.leagueTwoThirdPlaces, naginata: c?.naginata }),
+    [c?.format, c?.twoThirdPlaces, c?.leagueTwoThirdPlaces, c?.naginata]
+  );
   const baseAwards = useMemo(
-    () => deriveAwards(bracket, effectiveStandings, pools, nameToPlayer),
-    [bracket, effectiveStandings, pools, nameToPlayer]
+    () => deriveAwards(bracket, effectiveStandings, pools, nameToPlayer, podiumRule),
+    [bracket, effectiveStandings, pools, nameToPlayer, podiumRule]
   );
 
   // Determine the awards array and state to use for rendering.

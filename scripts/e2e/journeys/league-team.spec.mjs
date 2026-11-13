@@ -4,22 +4,17 @@
 //
 // Not serial: each test signs in (or creates the tournament when this file's
 // server has none), seeds a competition of its own on a shiaijo of its own, and
-// keeps its own folder of screenshots and audit rows, so one failing test or
-// one test.fixme hides nothing else here.
+// keeps its own folder of screenshots and audit rows, so one failing test
+// hides nothing else here.
 //
 // What is asserted is what the seeding path and the docs promise; how the rest
 // reads is recorded as AUDIT rows and judged from the screenshots.
 //
-// A defect step follows one shape: the steps before it run against today's
-// app and RECORD what it does (never asserting the defect), then a
-// `test.fixme(true, '<finding>: ...')` in the body stops the test there, and
-// what follows asserts the FIXED behaviour the league review's design names
-// (the fixture's TEXT holds its wording). The flows before the fixme are
-// written so they run on the fixed app as well (a warning the fix adds is
-// answered when it appears), so the fix only removes the fixme line.
-// The finding ids in these fixmes (F1, F2b, N1, ...) name the league UX
-// review's findings, not beads; a finding that is filed as a bead takes the
-// bead id in its fixme.
+// A finding's test follows one shape: the steps first RECORD what the app does
+// (a warning the fix added is answered when it appears), then the steps named
+// "fixed: ..." assert the behaviour the league review's design names (the
+// fixture's TEXT holds its wording). The finding ids in those steps (F1, F2b,
+// N1, ...) name the league UX review's findings, not beads.
 //
 // The scripted tie (`twoWayTie`): four teams of three, A and B each beat C and
 // D by two bouts to none with one hikiwake, A v B is three hikiwake, C beats D
@@ -472,7 +467,7 @@ test.describe('league-team', () => {
     const done = new Set();
     let id;
     // What the court console says about the daihyosen (F12), read in the
-    // console step and judged at the end, so a fixme there skips nothing else.
+    // console step and judged at the end, so a failure there hides no other check.
     let f12 = null;
 
     const captureLevel = (where) => async (ed) => {
@@ -626,12 +621,10 @@ test.describe('league-team', () => {
       await closeEditor(page);
     });
 
-    // Last in this test, so it skips only its own check. The design names no
+    // Last in this test, so a failure hides no other check. The design names no
     // wording (P2.6: "a line on the console's tie-breaker row naming the place
     // it decides"), so the check is the shape: the row says it is a
     // tie-breaker and names a place.
-    test.fixme(true, 'F12 (P2.6, only if P1.4 confirms; delete this step if dropped): the court console says nothing about why a tie-breaker bout appeared or which place it decides');
-
     await test.step('fixed: the console row of the daihyosen says it is a tie-breaker and names the place it decides (F12)', async () => {
       expect(f12, 'the daihyosen reached the court console').not.toBeNull();
       const said = `${f12.cardText} ${f12.eyebrow}`;
@@ -704,10 +697,15 @@ test.describe('league-team', () => {
         expect(podium.places[2] && podium.places[2].name).toBe(C);
       });
 
-      test.fixme(true, 'F1, N2: accepted shared ranks cannot be undone, and never read as shared (A and B read 1 and 2)');
-
-      await test.step('fixed: the accepted tie reads as shared, both teams at rank 1 (N2)', async () => {
-        expect(await leagueRanks(page)).toMatchObject({ [A]: 1, [B]: 1, [C]: 3, [D]: 4 });
+      // N2a: only the table changes. The podium above keeps A and B on the two
+      // top places and C third, as before the decision.
+      await test.step('fixed: the accepted tie reads as shared on the table, both teams at rank 1 (N2)', async () => {
+        // Soft, so the Undo steps below still run when it fails. Polled: the
+        // table reads its standings again once the league's status changes,
+        // without a reload.
+        await expect.configure({ soft: true })
+          .poll(() => leagueRanks(page), { message: 'the Pools table after Accept' })
+          .toMatchObject({ [A]: 1, [B]: 1, [C]: 3, [D]: 4 });
       });
 
       await test.step('fixed: both tabs offer Undo shared ranks beside the accepted tie (F1, F10)', async () => {
@@ -802,8 +800,6 @@ test.describe('league-team', () => {
       await second.ctx.close();
     }
 
-    test.fixme(true, 'F3: Accept with a tie-breaker scheduled empties the banner and leaves the league waiting on a bout the organiser declined');
-
     await test.step('fixed: the confirm named the bout, and accepting removed it and finished the league', async () => {
       expect(asked.message).toContain('Accept shared ranks?');
       expect(asked.message).toContain('The competition finishes now. Undo shared ranks brings the question back.');
@@ -852,7 +848,17 @@ test.describe('league-team', () => {
       };
       await shot(page, 'dh-before-draw');
       draw.saved = false;
-      if (!draw.toggleDisabled) {
+      if (draw.toggleDisabled) {
+        // At 0-0 the button reads "Finish" on purpose (bc-cse: the wording
+        // never claims a tie before anything is struck); level at one men
+        // each, it asks for a winner. The hantei below decides the level bout.
+        await awardIppon(page, 'shiro', 'M', EDITOR);
+        await awardIppon(page, 'aka', 'M', EDITOR);
+        const blocked = ed.locator('button').filter({ hasText: /^Needs a winner/ }).first();
+        draw.finishLabelLevel = squash(await blocked.innerText({ timeout: 5_000 }).catch(() => ''));
+        draw.finishLevelDisabled = await blocked.isDisabled({ timeout: 5_000 }).catch(() => null);
+        await shot(page, 'dh-level');
+      } else {
         await toggle.tap();
         await expect(toggle).toHaveText('Cancel draw');
         draw.finishLabelDrawn = squash(await finishButton(page, EDITOR).innerText().catch(() => ''));
@@ -887,13 +893,12 @@ test.describe('league-team', () => {
       await closeEditor(page);
     });
 
-    test.fixme(true, 'F3b: a league tie-breaker saved as a draw strands the league; per D6 (b) it needs a winner');
-
     await test.step('fixed: the editor refused the draw and pointed to encho and hantei', async () => {
       expect(draw.saved).toBe(false);
       expect(draw.toggleDisabled).toBe(true);
       expect(draw.toggleTitle).toMatch(/tie-breaker needs a winner/i);
-      expect(draw.finishLabel).toMatch(/^Needs a winner/);
+      expect(draw.finishLabelLevel).toMatch(/^Needs a winner/);
+      expect(draw.finishLevelDisabled).toBe(true);
     });
 
     await test.step('fixed: a hantei for Shiro decides the daihyosen and finishes the league', async () => {
@@ -963,8 +968,6 @@ test.describe('league-team', () => {
           screenshot: await shot(page, 'cycle-after-accept', { fullPage: true }) });
       }
     });
-
-    test.fixme(true, 'F3c: Accept on a fought daihyosen cycle leaves the league uncompletable (design item 4)');
 
     await test.step('fixed: Accept is offered on the cycle, names lots as the other way, and finishes the league', async () => {
       expect(offered).toBe(true);
@@ -1078,8 +1081,6 @@ test.describe('league-team', () => {
       await second.ctx.close();
     }
 
-    test.fixme(true, 'F2: a stale tab can accept shared ranks before the table is final, and the league then finishes silently');
-
     await test.step('fixed: the server said no with the D7 (a) sentence, and the tie is asked again', async () => {
       expect(answer.status).toBe(409);
       expect(sentenceShown).toBe(true);
@@ -1188,8 +1189,6 @@ test.describe('league-team', () => {
       expect(await leagueRowFigures(page, D)).toMatchObject(figuresOf(tally, D));
     });
 
-    test.fixme(true, 'F2b, N7: a correction on a finished league moves the table and podium with no warning, a new tie is never asked, and the table on screen keeps the old figures until a reload');
-
     await test.step('fixed: both corrections were warned first; the first kept the league finished', async () => {
       expect(first.warned).toBe(true);
       expect(first.warning.message).toContain(TEXT.finishedLeague);
@@ -1197,7 +1196,7 @@ test.describe('league-team', () => {
       expect(first.table.heading).toBe('Final standings');
       // N7: the table on screen follows a correction that keeps the
       // encounter's winner, without a reload.
-      expect(first.liveTableFollowed, 'the table on screen followed the correction').toBe(true);
+      expect.soft(first.liveTableFollowed, 'the table on screen followed the correction').toBe(true);
       expect(secondFix.onConsole).toBe(true);
       expect(secondFix.warned).toBe(true);
       expect(secondFix.warning.message).toContain(TEXT.finishedLeague);
@@ -1268,8 +1267,6 @@ test.describe('league-team', () => {
         for (const team of [A, B, C, D]) expect(await leagueRowFigures(page, team)).toMatchObject(figuresOf(tally, team));
       });
     }
-
-    test.fixme(true, 'F2b: an accepted shared 3rd that corrections move to a shared 1st is never asked again');
 
     await test.step('fixed: every correction was warned; the league stayed finished until the last', async () => {
       for (const [k, seen] of after.entries()) {

@@ -81,6 +81,14 @@ const CONSOLE_ALLOWLIST = [
     codeUnreadable: true,
     request: (r) => !!r && r.method === 'POST',
   },
+  {
+    reason: 'The operator corrects a result of a league that has finished (league journeys, finished-corrections): the server warns first, refusing the score write with league_finished, and the page asks to confirm the change, then sends it again with the confirmation.',
+    text: /^Failed to load resource: the server responded with a status of 409 \(Conflict\)$/,
+    url: /\/api\/competitions\/[^/]+\/matches\/[^/]+\/score$/,
+    code: /^league_finished$/,
+    codeUnreadable: true,
+    request: (r) => !!r && r.method === 'PUT',
+  },
 ];
 
 // The `error` field of a refusal body; read with a pattern, since the body is

@@ -13,18 +13,16 @@
 //                the league stays open and the Pools notice offers another
 //                round or lots (F5); the lots entry opens, and another round
 //                adds a fresh three bouts
-//   drawn today  a two-way tie at 1st, its ippon-shobu saved as a draw (today's
-//                editor allows it): what the operator sees, then whether the
-//                bout can be reopened from Pools and given a winner (F3b)
-//   F3b / D6 (b) fixme: the editor refuses a drawn league tie-breaker and
-//                encho, then hantei, decides it
+//   F3b / D6 (b) a two-way tie at 1st: the editor refuses a drawn league
+//                tie-breaker and encho, then hantei, decides it
 //   joint 3rd    a tie at 3rd with "Award two joint 3rd places" on (no bout:
 //                both share 3rd) and off (an ippon-shobu decides 3rd)
 //   below band   a tie at 4th-5th: below the band of 3, so no bout is added
+//                and the two share 4th on the table
 //   F6           a team league saved with "Top 4", switched to individual
 //                before the roster: today's hidden band of 4 (recorded), and
-//                the fixed band of 3 (fixme)
-//   F12 fixme    the court console says why an ippon-shobu is on the court
+//                the fixed band of 3, the level pair below it sharing 4th
+//   F12          the court console says why an ippon-shobu is on the court
 //
 // Everything is seeded through the interface (fixtures/league.mjs seedLeague).
 // The bouts are scripted by ROLE (a competitor's place in the roster), never by
@@ -34,8 +32,8 @@
 //
 // Not serial: each test signs in (or creates the tournament when this file's
 // server has none), seeds a competition of its own on a shiaijo of its own, and
-// keeps its own folder of screenshots and audit rows, so one failing test or
-// one test.fixme hides nothing else here.
+// keeps its own folder of screenshots and audit rows, so one failing test
+// hides nothing else here.
 import { test, expect } from '../fixtures/test.mjs';
 import { EXPECT_TIMEOUT_MS, PUBLIC_DEVICE } from '../fixtures/devices.mjs';
 import { journeyShots } from '../fixtures/shots.mjs';
@@ -45,7 +43,7 @@ import { createCompetition } from '../fixtures/wizard.mjs';
 import { generateDraw, pasteRoster, startCompetition } from '../fixtures/competition.mjs';
 import { completedRowFor, openShiaijo, sides, upNextCard, waitingRows } from '../fixtures/shiaijo.mjs';
 import {
-  EDITOR, INLINE_EDITOR, awardIppon, finishMatch, ipponButton, markDraw, nextTapWrite, running, startMatch,
+  EDITOR, INLINE_EDITOR, awardIppon, finishMatch, markDraw, nextTapWrite, running, startMatch,
   writeLanded, writtenMatchId,
 } from '../fixtures/scoring.mjs';
 import { editorSides, ensureRunning, inlineRunning, rosterOf } from '../fixtures/individual.mjs';
@@ -388,106 +386,11 @@ test.describe('league-individual', () => {
     });
   });
 
-  // ------------------------------------------------------ 2. drawn today
+  // ------------------------------------------------------- 2. F3b / D6 (b)
   // Three entrants: A and B draw, both beat C, so A and B end level at 1st.
-  test('a drawn ippon-shobu today: what the desk and the court see, and whether it can be reopened and given a winner (F3b)', async ({ page, browser, baseURL }) => {
-    test.setTimeout(360_000);
-    const { record, shot } = recorder('drawn-today');
-    const names = rosterOf('Dr', 3).map(([n]) => n);
-    const [A, B, C] = names;
-    const s = scripted(names);
-    s.draw(A, B); s.beat(A, C); s.beat(B, C);
-    let id;
-
-    await test.step('seed and play the three regular bouts on shiaijo B', async () => {
-      await enterTournament(page, CUP);
-      id = await seedLeague(page, { name: 'Drawn League', kind: 'individual', entrants: rosterOf('Dr', 3), courts: ['B'] });
-      await openShiaijo(page, 'B');
-      const played = await playOnCourt(page, 3, names, s.planFor);
-      record({ step: 'court', action: 'three regular bouts', played });
-    });
-
-    let pair;
-    await test.step('court: the ippon-shobu between A and B is queued; save it as a draw', async () => {
-      pair = await boutOnCourt(page, [A, B]);
-      await ensureRunning(page);
-      const toggle = page.locator(INLINE_EDITOR).first().getByTestId('scoring-modal-mark-draw');
-      const offered = { disabled: await toggle.isDisabled(), title: await toggle.getAttribute('title') };
-      record({ step: 'court', action: 'Mark draw on the tie-breaker', pair, offered, shot: await shot(page, 'court-tiebreaker-running') });
-      // Once the fix is in (D6 (b)) a tie-breaker cannot be saved drawn, and
-      // there is nothing left of today's shape to record.
-      test.skip(offered.disabled, 'the editor refuses a drawn league tie-breaker (D6 (b) is in): today\'s draw cannot be made');
-      await markDraw(page);
-      await finishMatch(page);
-      await expect(completedRowFor(page, pair)).toBeVisible();
-      record({ step: 'court', action: 'the console once the tie-breaker is saved drawn', court: await readCourt(page),
-        shot: await shot(page, 'court-after-drawn-tiebreaker', { fullPage: true }) });
-    });
-
-    await test.step('desk: the league is not finished; what Pools says about the drawn bout', async () => {
-      // Deliberate: a NEGATIVE. The league must not finish on a drawn
-      // tie-breaker, so the predicate never holds and the window's end is the
-      // evidence.
-      const desk = await deskWhen(page, id, () => false, 2_000);
-      const pub = await publicPodiumIfOffered(browser, baseURL, id);
-      record({ step: 'pools', action: 'read with the tie-breaker saved drawn', finding: 'F3b', ...desk, public: pub,
-        shot: await shot(page, 'pools-drawn-tiebreaker', { fullPage: true }) });
-      expect(desk.finished, 'a league whose tie-breaker has no winner is not finished').toBe(false);
-      expect(desk.table.winner).toBe('');
-      expect(tiebreakRows(desk.numberedRows, 3)).toHaveLength(1);
-    });
-
-    await test.step('desk: reopen the drawn bout from its numbered row and give it a winner', async () => {
-      const ed = await openNumberedRow(page, { num: 4 });
-      const pill = ed.locator('.editor-head-pill');
-      const opened = {
-        pill: (await pill.count()) ? (await pill.first().innerText()).trim() : '',
-        sides: await editorSides(page, EDITOR),
-        drawToggle: (await ed.getByTestId('scoring-modal-mark-draw').innerText().catch(() => '')).trim(),
-        buttons: (await ed.locator('button:visible').allInnerTexts()).map((t) => t.replace(/\s+/g, ' ').trim()).filter(Boolean),
-      };
-      record({ step: 'pools', action: 'tap the drawn tie-breaker\'s numbered row', ...opened, shot: await shot(page, 'pools-drawn-tiebreaker-opened') });
-      // Today the row opens the bout as a correction: cancel the draw, give A
-      // one men, Save correction (and its reason prompt).
-      // The toggle is upper-cased by CSS, so its state is read from its
-      // accessible name, never its rendered text.
-      const drawToggle = ed.getByTestId('scoring-modal-mark-draw');
-      const side = opened.sides.shiro === A ? 'shiro' : 'aka';
-      const drawOn = (await drawToggle.getAttribute('aria-label')) === 'Cancel draw (hikiwake)';
-      record({ step: 'pools', action: 'the reopened drawn bout\'s board', drawOn,
-        ipponOfferedWhileDrawOn: drawOn ? await ipponButton(page, side, 'M', EDITOR).isEnabled() : null });
-      if (drawOn) {
-        await drawToggle.tap();
-        await expect(drawToggle).toHaveAttribute('aria-label', 'Mark as draw (hikiwake)');
-      }
-      await awardIppon(page, side, 'M', EDITOR);
-      const save = ed.getByRole('button', { name: 'Save correction' });
-      const saveOffered = (await save.count()) > 0;
-      if (saveOffered) {
-        await save.tap();
-        const reason = ed.locator('.reason-prompt');
-        if (await reason.waitFor({ state: 'visible', timeout: 4_000 }).then(() => true, () => false)) {
-          await reason.locator('button.btn--primary').tap();
-        }
-      } else {
-        await finishMatch(page, EDITOR);
-      }
-      await expect(page.locator(EDITOR)).toHaveCount(0, { timeout: EXPECT_TIMEOUT_MS }).catch(() => {});
-      const after = await deskOnceFinished(page).catch(async () => readDesk(page));
-      const pub = await publicPodiumIfOffered(browser, baseURL, id);
-      record({ step: 'pools', action: 'the drawn tie-breaker corrected to a win for A', saveOffered, ranks: await leagueRanks(page), ...after, public: pub,
-        shot: await shot(page, 'pools-tiebreaker-corrected', { fullPage: true }) });
-      expect(after.finished, 'once the tie-breaker has a winner the league finishes').toBe(true);
-      expect(after.table.winner).toBe(A);
-      const ranks = await leagueRanks(page);
-      expect(ranks[A]).toBeLessThan(ranks[B]);
-    });
-  });
-
-  // ------------------------------------------------- 3. F3b / D6 (b) fixme
-  // The same shape as the drawn journey; the fixed editor treats a league
-  // tie-breaker as a knockout bout: no draw, encho, then hantei.
-  test.fixme('F3b: a league ippon-shobu cannot be saved drawn; encho, then hantei, decides it and the league finishes', async ({ page, browser, baseURL }) => {
+  // The editor treats a league tie-breaker as a knockout bout: no draw, encho,
+  // then hantei.
+  test('F3b: a league ippon-shobu cannot be saved drawn; encho, then hantei, decides it and the league finishes', async ({ page, browser, baseURL }) => {
     test.setTimeout(360_000);
     const { record, shot } = recorder('tiebreaker-needs-a-winner');
     const names = rosterOf('Ht', 3).map(([n]) => n);
@@ -542,7 +445,7 @@ test.describe('league-individual', () => {
     });
   });
 
-  // ------------------------------------------------------ 4/5. joint 3rd
+  // ------------------------------------------------------ 3/4. joint 3rd
   // Four entrants: A beats everyone, B beats C and D, C and D draw, so C and D
   // end level (W0 L2 D1 PW0 PL2) at 3rd-4th.
   const jointThird = (prefix) => {
@@ -613,7 +516,7 @@ test.describe('league-individual', () => {
     });
   });
 
-  // ------------------------------------------------------- 6. below band
+  // ------------------------------------------------------- 5. below band
   // Five entrants: A beats everyone, B beats C, D and E, C beats D and E, D
   // and E draw, so D and E end level (W0 L3 D1 PW0 PL3) at 4th-5th: below the
   // band of 3 an individual league breaks ties for. Two joint 3rd places is
@@ -647,19 +550,16 @@ test.describe('league-individual', () => {
       await expectNoTiebreak(page, id, 10);
       const desk = await readDesk(page);
       const ranks = await leagueRanks(page);
-      // A tie nobody breaks is a shared place, yet the table numbers the two
-      // rows apart: recorded for the findings, not asserted (no ruling says
-      // how a shared place below the band reads).
-      const shared = ranks[D] === ranks[E];
-      record({ step: 'pools', action: 'read once finished', ranks, sharedPlaceShown: shared, ...desk,
+      record({ step: 'pools', action: 'read once finished', ranks, ...desk,
         shot: await shot(page, 'pools-below-band', { fullPage: true }) });
-      test.info().annotations.push({ type: 'finding', description: `tie at 4th-5th below the band: ranks read ${ranks[D]} and ${ranks[E]}` });
-      expect(ranks).toMatchObject({ [A]: 1, [B]: 2, [C]: 3 });
+      // A tie nobody breaks below the band is a shared place: D and E both
+      // read their better place, 4th (N2b).
+      expect(ranks).toMatchObject({ [A]: 1, [B]: 2, [C]: 3, [D]: 4, [E]: 4 });
       for (const n of [D, E]) expect(desk.table.rows.find((r) => r.name === n), `${n}'s figures`).toMatchObject(s.tally[n]);
     });
   });
 
-  // --------------------------------------------------------------- 7. F6
+  // --------------------------------------------------------------- 6. F6
   // A team league saved with "Top 4", then switched to individual before the
   // roster: the settings page hides the pills for an individual competition,
   // but the stored band may still be 4.
@@ -722,10 +622,10 @@ test.describe('league-individual', () => {
     });
   });
 
-  test.fixme('F6: a league switched from team to individual breaks ties for the top 3 only, whatever band it had as a team', async ({ page }) => {
+  test('F6: a league switched from team to individual breaks ties for the top 3 only, whatever band it had as a team', async ({ page }) => {
     test.setTimeout(600_000);
     const { record, shot } = recorder('f6-fixed');
-    const { names, D, E, s } = belowBand('Fb');
+    const { names, A, B, C, D, E, s } = belowBand('Fb');
     let id;
 
     await test.step('seed: team league, Top 4, switched to individual, five entrants on shiaijo H', async () => {
@@ -742,13 +642,16 @@ test.describe('league-individual', () => {
       await openLeague(page, id);
       await expectNoTiebreak(page, id, 10);
       const ranks = await leagueRanks(page);
-      record({ step: 'pools', action: 'read once finished', ranks, shot: await shot(page, 'pools-f6-fixed', { fullPage: true }) });
-      expect(ranks[D]).toBe(ranks[E]);
+      record({ step: 'pools', action: 'read once finished', ranks,
+        shot: await shot(page, 'pools-f6-fixed', { fullPage: true }) });
+      // The band is 3 (expectNoTiebreak), and the level pair below it shares
+      // its better place on the table (N2b).
+      expect(ranks).toMatchObject({ [A]: 1, [B]: 2, [C]: 3, [D]: 4, [E]: 4 });
     });
   });
 
-  // -------------------------------------------------------- F12 fixme
-  test.fixme('F12: the court console says the ippon-shobu decides 1st place', async ({ page }) => {
+  // -------------------------------------------------------------- F12
+  test('F12: the court console says the ippon-shobu decides 1st place', async ({ page }) => {
     test.setTimeout(360_000);
     const { record, shot } = recorder('f12-fixed');
     const names = rosterOf('Wy', 3).map(([n]) => n);

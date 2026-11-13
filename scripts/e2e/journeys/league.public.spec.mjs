@@ -19,8 +19,8 @@
 //      the board and the League tab say of it
 //   2. the tie accepted: "Final standings", the Winner badge and the podium on
 //      the phone, and the board
-//   3. N1 and F1, test.fixme until the fix: the Overview names no winner while
-//      the tie waits, and after an Undo nothing reads as final
+//   3. N3 and F1: the Overview names no winner while the tie waits, and after
+//      an Undo nothing reads as final
 //
 // Not serial: each test signs the operator in (or creates the tournament when
 // this file's server has none), seeds a league of its own on a shiaijo of its
@@ -145,7 +145,7 @@ test.describe('league on a phone', () => {
         expect(await awardsTabOffered(page)).toBe(false);
       });
 
-      await test.step('the phone: the Overview while the tie waits (recorded; N1 asserts it)', async () => {
+      await test.step('the phone: the Overview while the tie waits (recorded; N3 asserts it)', async () => {
         await openViewer(page, id);
         const winners = await overviewWinner(page).count();
         record({
@@ -196,7 +196,7 @@ test.describe('league on a phone', () => {
     }
   });
 
-  test('N1: the Overview names no winner while a tie at the podium waits', async ({ page, browser, baseURL }) => {
+  test('N3: the Overview names no winner while a tie at the podium waits', async ({ page, browser, baseURL }) => {
     test.setTimeout(480_000);
     const shot = journeyShots('league-public/winner-too-early');
     const { record } = recorder('winner-too-early', 'league-public/winner-too-early');
@@ -208,7 +208,6 @@ test.describe('league on a phone', () => {
       await expect(page.locator('.viewer__body')).toBeVisible();
       record({ step: 'public', action: 'Overview while the tie waits', winnerBadges: await overviewWinner(page).count(), banner: (await readBanner(op)).shown });
       await shot(page, 'overview-tie-waits', { fullPage: true });
-      test.fixme(true, 'N1: the public Overview shows a Winner badge (the first team of a three-way tie) while the tie-break banner is still up');
       expect(await overviewWinner(page).count()).toBe(0);
     } finally {
       await ctx.close();
@@ -237,8 +236,6 @@ test.describe('league on a phone', () => {
         const table = await readLeagueTable(page);
         const ranks = await leagueRanks(page);
         const ringRanks = teams.ring.map((t) => ranks[t]);
-        // AUDIT: the three teams were accepted as SHARING their place; the
-        // rank column is read here, not judged (N2).
         record({
           step: 'public', action: 'League tab once the shared ranks are accepted', table, ranks,
           ringShareARank: new Set(ringRanks).size === 1,
@@ -246,7 +243,10 @@ test.describe('league on a phone', () => {
         await shot(page, 'league-tab-accepted', { fullPage: true });
         expect(table.heading).toBe('Final standings');
         expect(table.played).toBe(6);
-        for (const t of teams.ring) expect(ranks[t]).toBeLessThan(ranks[teams.last]);
+        // The three teams were accepted as SHARING their place: the League tab
+        // reads their best place, 1, and the last team 4th (N2a).
+        expect(ringRanks).toEqual([1, 1, 1]);
+        expect(ranks[teams.last]).toBe(4);
       });
 
       await test.step('the phone: the Awards tab is offered and reads the podium', async () => {
@@ -290,8 +290,6 @@ test.describe('league on a phone', () => {
         waiting = await leagueRanks(op);
         expect((await acceptSharedRanks(op)).ok).toBe(true);
         record({ step: 'admin', action: 'after Accept shared ranks', undoControls: await undoControl(op).count(), banner: (await readBanner(op)).shown });
-        // Recorded first, asserted after: today the accepted ranks cannot be undone.
-        test.fixme(true, 'F1: accepted shared ranks cannot be undone, so the league never goes back to match play');
         const answer = await undoSharedRanks(op);
         record({ step: 'admin', action: 'Undo shared ranks', status: answer.status, asked: answer.asked });
         expect(answer.ok).toBe(true);
@@ -308,9 +306,10 @@ test.describe('league on a phone', () => {
         expect(table.winner).toBe('');
         expect(ranks).toEqual(waiting);
         expect(await awardsTabOffered(page)).toBe(false);
-        // Nor does the Overview name a winner.
+        // Nor does the Overview name a winner (soft, so the board below is
+        // still read when it fails).
         await openViewer(page, id);
-        expect(await overviewWinner(page).count()).toBe(0);
+        expect.soft(await overviewWinner(page).count()).toBe(0);
         await shot(page, 'overview-undone', { fullPage: true });
       });
 

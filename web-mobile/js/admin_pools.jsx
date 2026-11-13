@@ -19,7 +19,7 @@ import { NO_ID_POOL_HINT, NoIdHint } from './data_integrity.jsx';
 // (downstream_knockout_played): the chusen writes go through the same
 // confirm-and-retry every score write uses.
 import { attemptScoreWrite, DOWNSTREAM_KNOCKOUT_RANKING_CANCELLED, writeKeepsEditorOpen } from './write_result.jsx';
-import { rankOrdinal } from './viewer_standings.jsx';
+import { rankOrdinal, poolMatchesSignature } from './viewer_standings.jsx';
 import { useUnsavedInput } from './app_version.jsx';
 // Fighting a drawn tie-break bout again is the editors' reopen, so the notice
 // below runs the same hook and shows the same court-busy panel.
@@ -392,13 +392,11 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
     setChusenRecorded(res ? res.recorded : null);
   };
 
-  // Lightweight signature so the effect re-runs when match results change.
-  // Memoized so typing into a chusen position input (local state) does not
-  // re-scan every pool match on each render.
-  const poolMatchesSig = useMemo(
-    () => (poolMatches || []).map(m => `${m.id}:${m.status}:${typeof m.winner === "string" ? m.winner : (m.winner && m.winner.name) || ""}`).join("|"),
-    [poolMatches]
-  );
+  // The results' signature (poolMatchesSignature, the one owner the league
+  // table uses too), so the effects re-run when a result changes, a correction
+  // that keeps the winner included. Memoized so typing into a chusen position
+  // input (local state) does not re-scan every pool match on each render.
+  const poolMatchesSig = useMemo(() => poolMatchesSignature(poolMatches), [poolMatches]);
   // Override-sensitive signature: a chusen result is a rank override, which the
   // backend broadcasts as EventTournamentUpdated WITHOUT changing pool matches.
   // Capturing rank + isOverridden lets the fetch effect refresh candidates after

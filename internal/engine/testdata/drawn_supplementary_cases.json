@@ -17,7 +17,8 @@
     "pool with no standings rules nothing) carries a rank in force. Two sides a",
     "correction no longer holds level are moot (a drawn tie-break bout too): settled, not ruled, owing no lots.",
     "So is a bout whose level group lies outside the band a tie is broken in: its standings rows carry tieOutOfBand (engine.tieNeedsBreak).",
-    "stuck is what the Pools tab's notice names: drawn and not settled."
+    "stuck is what the Pools tab's notice names: drawn and not settled.",
+    "An individual's lots follow a tie-break round the same way: a round that orders its whole group outlives them, and one that leaves the group level (a pair unfought, or a circle) keeps them in force."
   ],
   "chusenCases": [
     {"name": "both teams ranked", "id": "Pool A-DH-0", "winner": "", "sideAId": "a", "sideBId": "b", "standings": [{"id": "a", "points": 3}, {"id": "b", "points": 3}, {"id": "c", "points": 1}], "rankedPool": "Pool A", "ranked": ["a", "b", "c"], "ruled": true, "stuck": false, "inForce": ["a", "b"]},
@@ -39,7 +40,9 @@
     {"name": "a drawn tie-break bout whose tie a correction moved outside the band is moot", "id": "Pool A-TB-0", "winner": "", "sideAId": "a", "sideBId": "b", "standings": [{"id": "a", "points": 3, "tieOutOfBand": true}, {"id": "b", "points": 3, "tieOutOfBand": true}], "rankedPool": "Pool A", "ranked": [], "inForce": [], "ruled": false, "stuck": false},
     {"name": "a drawn representative bout whose tie lies outside the band is moot", "id": "Pool A-DH-0", "winner": "", "sideAId": "a", "sideBId": "b", "standings": [{"id": "a", "points": 3, "tieOutOfBand": true}, {"id": "b", "points": 3, "tieOutOfBand": true}], "rankedPool": "Pool A", "ranked": [], "inForce": [], "ruled": false, "stuck": false},
     {"name": "a separate tie outside the band does not excuse a tie inside it", "id": "Pool A-DH-0", "winner": "", "sideAId": "a", "sideBId": "b", "standings": [{"id": "a", "points": 3}, {"id": "b", "points": 3}, {"id": "c", "points": 2, "tieOutOfBand": true}, {"id": "d", "points": 2, "tieOutOfBand": true}], "rankedPool": "Pool A", "ranked": [], "inForce": [], "ruled": false, "stuck": true},
-    {"name": "a pool named like a marker", "id": "Pool A-DH-East-DH-0", "winner": "", "sideAId": "a", "sideBId": "b", "standings": [{"id": "a", "points": 3}, {"id": "b", "points": 3}], "rankedPool": "Pool A-DH-East", "ranked": ["a", "b"], "inForce": ["a", "b"], "ruled": true, "stuck": false}
+    {"name": "a pool named like a marker", "id": "Pool A-DH-East-DH-0", "winner": "", "sideAId": "a", "sideBId": "b", "standings": [{"id": "a", "points": 3}, {"id": "b", "points": 3}], "rankedPool": "Pool A-DH-East", "ranked": ["a", "b"], "inForce": ["a", "b"], "ruled": true, "stuck": false},
+    {"name": "a won tie-break bout outlives the lots", "id": "Pool A-TB-0", "winner": "Bea", "winnerId": "b", "sideAId": "a", "sideBId": "b", "standings": [{"id": "a", "points": 3}, {"id": "b", "points": 3}], "rankedPool": "Pool A", "ranked": ["a", "b"], "inForce": [], "ruled": false, "stuck": false},
+    {"name": "a tie-break round that leaves its group level keeps the lots in force", "id": "Pool A-TB-0", "winner": "Bea", "winnerId": "b", "sideAId": "a", "sideBId": "b", "standings": [{"id": "a", "points": 3}, {"id": "b", "points": 3}, {"id": "c", "points": 3}], "rankedPool": "Pool A", "ranked": ["a", "b", "c"], "inForce": ["a", "b", "c"], "ruled": false, "stuck": false}
   ],
   "cases": [
     {"name": "completed tie-break bout, no winner", "id": "Pool A-TB-0", "status": "completed", "winner": "", "drawn": true},

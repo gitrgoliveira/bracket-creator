@@ -193,9 +193,11 @@ describe('LABEL_ROUND_ROBIN / roundRobinVisible', () => {
 });
 
 describe('league tie-break band', () => {
-  it('copy is verbatim from admin_competition_settings.jsx', () => {
+  it('copy names the choice to accept shared ranks, in a league\'s words (F9)', () => {
     expect(LABEL_LEAGUE_TIEBREAK).toBe('Break ties for top');
-    expect(HINT_LEAGUE_TIEBREAK).toBe('Tied teams within this finishing band require an operator-run tie-breaker before standings are finalised.');
+    expect(HINT_LEAGUE_TIEBREAK).toBe('Teams level on every criterion within this band are asked about before the league finishes: run a tie-breaker, or accept shared ranks. Top 3 asks about ties for 1st to 3rd place, Top 4 also about 4th. Accepting shared ranks finishes the competition at once, and Undo shared ranks takes it back.');
+    expect(HINT_LEAGUE_TIEBREAK).toMatch(/shared ranks/);
+    expect(HINT_LEAGUE_TIEBREAK).not.toMatch(/finalis/i);
     expect(LEAGUE_TIEBREAK_OPTIONS).toEqual([
       { value: 3, label: 'Top 3' },
       { value: 4, label: 'Top 4' },
@@ -291,9 +293,11 @@ describe('per-phase match duration', () => {
 });
 
 describe('two-thirds-places (joint bronze, bc-3rdp)', () => {
-  it('copy matches verbatim between admin_setup.jsx and admin_competition_settings.jsx (no drift found)', () => {
+  it('copy is one constant for admin_setup.jsx and admin_competition_settings.jsx and speaks of a tie, not of semi-finalists (F9)', () => {
     expect(LABEL_TWO_THIRD_PLACES).toBe('Award two joint 3rd places');
-    expect(HINT_TWO_THIRD_PLACES).toBe('When enabled, two beaten semi-finalists share 3rd place and no bronze match is played (standard kendo convention). Leave it off to decide a single 3rd place: a knockout plays a bronze match, and a league awards one 3rd rather than a shared rank.');
+    expect(HINT_TWO_THIRD_PLACES).toBe('When enabled, competitors who tie for 3rd place share it and nothing is played to separate them (standard kendo convention). In a league, teams level at 3rd place or lower then share the place without being asked. Leave it off to decide a single 3rd place: a knockout plays a third-place match, and a league asks you to run a tie-breaker or accept shared ranks.');
+    expect(HINT_TWO_THIRD_PLACES).toMatch(/tie|level/);
+    expect(HINT_TWO_THIRD_PLACES).not.toMatch(/semi-?finalist|bronze/i);
   });
 
   // Gated on format alone (not kind): an individual league can still award

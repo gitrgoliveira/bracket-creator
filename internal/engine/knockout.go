@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -86,19 +87,18 @@ func (e *Engine) completedPoolNames(compID string, comp *state.Competition) (map
 
 // poolCompletion returns poolName → isComplete for every pool in compID. A
 // pool is complete when all of its matches (regular + any tiebreaker/daihyosen)
-// are completed with a winner and, for team competitions, its daihyosen
-// results actually broke the ties (no cycle).
+// are completed with a winner and its tie-breaker results actually broke the
+// ties: no daihyosen cycle for a team, no ippon-shobu round that went in a
+// circle for an individual.
 //
 // It only READS, through loader, so a transaction can ask it about the state
 // its own uncommitted write produced (pool_requalify.go); completedPoolNames is
 // the bare-store door that injects first. It does NOT ask whether a tie-break
 // is still owed but not yet injected: inside a transaction nothing has been
 // injected, so a caller there must also ask pendingTieBreaks. standings is
-// consulted only for a team competition, and lazily, so the bare-store door
-// can keep reading the standings cache.
+// consulted only when the pools hold a supplementary bout, and lazily, so the
+// bare-store door can keep reading the standings cache.
 func (e *Engine) poolCompletion(loader poolStandingsLoader, compID string, comp *state.Competition, standings func() (map[string][]state.PlayerStanding, error)) (map[string]bool, error) {
-	isTeam := comp.IsTeam()
-
 	pools, err := loader.LoadPools(compID)
 	if err != nil {
 		return nil, err
@@ -149,9 +149,12 @@ func (e *Engine) poolCompletion(loader poolStandingsLoader, compID string, comp 
 		}
 	}
 
-	// Team competitions: a pool whose daihyosen results produced a cycle (ties
-	// not broken) must not be treated as resolvable.
-	if isTeam {
+	// A pool whose tie-breaker left a tie level must not be treated as
+	// resolvable: a team's daihyosen results that produced a cycle, or an
+	// individual's ippon-shobu round that went in a circle (dhCycleExists asks
+	// both, per tied group, and fails closed). Only a pool holding such a bout
+	// can be in that state, so the standings are read only then.
+	if slices.ContainsFunc(matches, func(m state.MatchResult) bool { return state.IsPoolSupplementaryMatchID(m.ID) }) {
 		st, serr := standings()
 		if serr != nil {
 			return nil, serr

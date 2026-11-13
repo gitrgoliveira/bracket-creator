@@ -323,6 +323,20 @@ function _courtBusyError(body) {
     return err;
 }
 
+// _leagueFinishedError: the 409 league_finished refusal of a correction on a
+// finished league (the score and decision doors), thrown with the server's
+// sentence and its fields as `.leagueFinished` ({removedCourts}), which
+// write_result.jsx's leagueFinishedRefusal reads for the confirm. A queued
+// replay refused with it is told the server's sentence (_replayRefusal).
+// null for any other body.
+function _leagueFinishedError(body) {
+    if (!body || body.error !== 'league_finished') return null;
+    const err = new Error(_refusalText(body, 'Failed to record result'));
+    err.code = body.error;
+    err.leagueFinished = { removedCourts: body.removedCourts || [] };
+    return err;
+}
+
 // _downstreamQueueDropCopy is what a DROPPED queued write is reported with when
 // the server refused its replay for a knockout reason: the played refusal's
 // queue copy (it cannot be confirmed from the flush loop, nobody is there), or
@@ -3438,10 +3452,10 @@ function _doorRefusal(d, status, body) {
     switch (d && d.kind) {
         case 'score':
             if (ineligible) return _reasonHumanError(b, 'Failed to record score');
-            return _courtBusyError(b) || _downstreamRefusalError(b) || new Error(_refusalText(b, 'Failed to record score'));
+            return _courtBusyError(b) || _downstreamRefusalError(b) || _leagueFinishedError(b) || new Error(_refusalText(b, 'Failed to record score'));
         case 'decision':
             if (ineligible) return _reasonHumanError(b, 'Failed to record decision');
-            return _downstreamRefusalError(b) || new Error(b.error || 'Failed to record decision');
+            return _downstreamRefusalError(b) || _leagueFinishedError(b) || new Error(b.error || 'Failed to record decision');
         case 'reopen':
         case 'requeue':
             return _reopenRefusal(b);
@@ -4146,6 +4160,11 @@ function _placeWrite(base, descriptor) {
     }
     if ((prev.payload && prev.payload.forceCourt) || (descriptor.payload && descriptor.payload.forceCourt)) {
         payload = { ...payload, forceCourt: true };
+    }
+    // The organiser's confirmed correction of a finished league stands for the
+    // write that takes its place, like a confirmed forceCourt.
+    if ((prev.payload && prev.payload.confirmFinished) || (descriptor.payload && descriptor.payload.confirmFinished)) {
+        payload = { ...payload, confirmFinished: true };
     }
     // Whatever the replaced write had to follow, this one follows too.
     for (const k of _afterKeys(prev)) _addAfter(descriptor, k);
@@ -5827,6 +5846,11 @@ const API = {
         if (result && result.forceCourt) {
             payload.forceCourt = true;
         }
+        // Request-only like forceCourt: the organiser's "Change it anyway" on
+        // a finished league's correction (write_result.jsx attemptScoreWrite).
+        if (result && result.confirmFinished) {
+            payload.confirmFinished = true;
+        }
         // mp-y3nk: stamp in server-relative time for last-write-wins reconciliation.
         // Stamped when it is made (a running match's scoring is taps, each
         // stamped at its own tap, so no score write carries an older edit).
@@ -5864,12 +5888,12 @@ const API = {
         // states the flag counts the match it starts already holds: the
         // display reads a result naming a status that omits a count as 0
         // (mergeMatchPatch), which turned a kept 2-1 into 0-0. `startOnly` and
-        // `forceCourt` are request-only and stay off the display's copy.
+        // `forceCourt` (and `confirmFinished`) are request-only and stay off the display's copy.
         const _broadcastPatch = (fields) => {
             const {
                 rev: _r, revSession: _rs, changed: _ch,
                 writeId: _w, basis: _b, session: _s, forceDownstreamReopen: _f,
-                startOnly, forceCourt: _fc, ...rest
+                startOnly, forceCourt: _fc, confirmFinished: _cf, ...rest
             } = fields || {};
             if (startOnly) {
                 for (const k of START_BROADCAST_DROPS) delete rest[k];
@@ -7027,8 +7051,11 @@ const API = {
     // leagueTiebreakFinalize: POST /competitions/:id/league-tiebreak/finalize
     // Accepts the current standings as final without a tie-breaker. Sets the
     // LeagueTiebreakFinalized flag so MaybeAutoCompletePools can transition.
-    // Returns { finalized: true } on 200.
-    // Throws on 404 (comp not found), 409 (already complete).
+    // Also removes every unfought tie-breaker bout in the same transaction.
+    // Returns { finalized: true, removed: number } on 200.
+    // Throws on 404 (comp not found), 409 with e.code already_complete,
+    // league_not_settled, tiebreak_match_scored or tiebreak_drawn, and
+    // e.detail the sentence to show.
     async leagueTiebreakFinalize(compID, password) {
         const res = await _directFetch(`/api/competitions/${encodeURIComponent(compID)}/league-tiebreak/finalize`, {
             method: 'POST',
@@ -7036,9 +7063,52 @@ const API = {
         });
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
-            const e = new Error(err.error || `Failed to finalise league standings (${res.status})`);
+            const e = new Error(err.detail || err.error || `Failed to finalise league standings (${res.status})`);
             if (err.error) e.code = err.error;
+            if (err.detail) e.detail = err.detail;
             throw e;
+        }
+        return res.json();
+    },
+
+    // leagueTiebreakUndo: DELETE /competitions/:id/league-tiebreak/finalize
+    // Takes back the shared ranks leagueTiebreakFinalize accepted. A finished
+    // league goes back to match play (the server broadcasts
+    // competition_started); a match on a removed shiaijo loses its court.
+    // Returns { finalized: false, reopened, unassignedMatches, removedCourts }
+    // on 200. Throws on 404 (comp not found), 400 (not a league), 409 with
+    // e.code not_finalized and e.detail the sentence to show.
+    async leagueTiebreakUndo(compID, password) {
+        const res = await _directFetch(`/api/competitions/${encodeURIComponent(compID)}/league-tiebreak/finalize`, {
+            method: 'DELETE',
+            headers: { 'X-Tournament-Password': password },
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            const e = new Error(err.detail || err.error || `Failed to undo the shared ranks (${res.status})`);
+            if (err.error) e.code = err.error;
+            if (err.detail) e.detail = err.detail;
+            throw e;
+        }
+        return res.json();
+    },
+
+    // runTiebreakerRound: POST /competitions/:id/pools/:poolId/tiebreak-round
+    // "Run another tie-breaker round" over an individual tie a finished
+    // round left level (decision F5). Body { playerIds }: one run of the
+    // chusen candidates' stillLevel, by participant id only. Returns
+    // { matches } on 201, the bouts added. Throws on 400 with the server's
+    // sentence (no longer such a run, the lots already ordered it, the pools
+    // are over) and 404 (competition or pool not found).
+    async runTiebreakerRound(compID, poolName, playerIds, password) {
+        const res = await _directFetch(`/api/competitions/${encodeURIComponent(compID)}/pools/${encodeURIComponent(poolName)}/tiebreak-round`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-Tournament-Password': password },
+            body: JSON.stringify({ playerIds }),
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || `Failed to add another tie-breaker round (${res.status})`);
         }
         return res.json();
     },

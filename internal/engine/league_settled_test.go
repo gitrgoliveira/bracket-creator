@@ -139,9 +139,12 @@ func TestChusenStatus_LeagueCircleAt3rdIsOffered(t *testing.T) {
 	assert.Equal(t, AutoCompleteTransitioned, outcome, "the chusen settles the circle")
 }
 
-// A drawn representative bout over a two-way league tie at 3rd and 4th is
-// settled only by a rematch or the lots, so its chusen is offered as well.
-func TestChusenStatus_LeagueDrawnDaihyosenAt3rdIsOffered(t *testing.T) {
+// A league tie-breaker must have a winner (D6 (b)): a drawn representative bout
+// over a two-way league tie at 3rd and 4th, which only a write made before that
+// rule can hold, is a bout still to decide by encho and hantei, never the lots.
+// So no chusen is offered for it, and the league stays open until it is decided
+// (the 1st-place twin is TestChusenCandidates_LeagueAllDrawnRoundOffersNoLots).
+func TestChusenStatus_LeagueDrawnDaihyosenAt3rdOffersNoLots(t *testing.T) {
 	const compID = "league-drawn-3rd"
 	order := rankOrder([]string{"Alpha", "Beta", "Gamma", "Delta", "Epsilon"})
 	eng, store := teamLeagueFromResults(t, compID, []string{"Alpha", "Beta", "Gamma", "Delta", "Epsilon"}, func(a, b string) string {
@@ -156,8 +159,11 @@ func TestChusenStatus_LeagueDrawnDaihyosenAt3rdIsOffered(t *testing.T) {
 
 	report, err := eng.ChusenStatus(compID)
 	require.NoError(t, err)
-	require.Len(t, report.Pending, 1, "the drawn bout's chusen is offered")
-	assert.Equal(t, 3, report.Pending[0].MinPosition)
+	assert.Empty(t, report.Pending, "a league's drawn tie-breaker is a bout to decide, never lots")
+
+	outcome, err := eng.MaybeAutoCompletePools(compID)
+	require.NoError(t, err)
+	assert.NotEqual(t, AutoCompleteTransitioned, outcome, "the drawn tie-breaker leaves the league open")
 }
 
 // poolsVerdictNow is PoolsSettledNow inside a transaction of its own.

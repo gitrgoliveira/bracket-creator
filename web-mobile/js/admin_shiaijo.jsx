@@ -43,7 +43,9 @@ import {
 import { startPatch, classifyStartOutcome, startFailureMessage, startRefusalStands } from './start_match.jsx';
 // swissRoundLabel: single owner is pool_ids.jsx (mp-dej2); this file used to
 // carry its own copy. scoreRowMatchName names a match in the refusal notices.
-import { swissRoundLabel, scoreRowMatchName, scoreRowMatchLabel } from './pool_ids.jsx';
+import { swissRoundLabel, scoreRowMatchName, scoreRowMatchLabel, isSupplementaryBout, poolNameOf } from './pool_ids.jsx';
+// rankOrdinal: "1st", "2nd"... for the place a tie-breaker bout decides.
+import { rankOrdinal } from './viewer_standings.jsx';
 // NumberedName: single owner of the number-chip-on-the-outer-side rule
 // (bc-dnst); see that file's header for why this stays an ES import.
 import { NumberedName } from './numbered_name.jsx';
@@ -2390,6 +2392,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                             )}
                                         </div>
                                         <MatchSides m={upNext} large />
+                                        <TieBreakerReason m={upNext} className="shiaijo-upnext__hint" />
                                         <div className="shiaijo-upnext__actions">
                                             {/* Route through pickMatch (not startMatch) so starting the
                                                 Up Next bout honours the same rules as the Upcoming
@@ -2933,6 +2936,60 @@ function ShiaijoQueueGroup({ label, matches, subGroup, scheduled, courts, onMove
     );
 }
 
+// tieBreakerReasonLine: why a tie-breaker bout is on the court, in the
+// operator's words, naming the place it decides. `rows` are the standings of
+// the bout's own pool (a league has one table). The two sides are found by
+// participant id only; the teams or players level on points with them form
+// the tied group, whose best place is the row with the lowest rank. Without
+// standings (still loading, or none for this pool), or when the two sides are
+// no longer level, the line still says the bout is a tie-breaker and why, but
+// names no place it cannot know.
+export function tieBreakerReasonLine(m, rows) {
+    const generic = "Tie-breaker bout. These two finished level.";
+    const list = Array.isArray(rows) ? rows : [];
+    const rowOf = (id) => (id ? list.find((s) => s.player && s.player.id === id) : undefined);
+    const a = rowOf(m.sideAId || (m.sideA && m.sideA.id));
+    const b = rowOf(m.sideBId || (m.sideB && m.sideB.id));
+    if (!a || !b || a.points !== b.points) return generic;
+    const group = list.filter((s) => s.points === a.points);
+    const lo = Math.min(...group.map((s) => s.rank));
+    if (group.length === 2) {
+        return `Tie-breaker for ${rankOrdinal(lo)} place. They finished level, so this bout separates them.`;
+    }
+    return `Tie-breaker for ${rankOrdinal(lo)} to ${rankOrdinal(lo + group.length - 1)} place. They finished level, so this bout helps separate them.`;
+}
+
+// TieBreakerReason: the line under a tie-breaker bout's row on the court
+// console. It reads the competition's standings (the league table, or the pool's
+// rows from the competition detail) for a bout not yet fought, and renders
+// nothing for any other bout.
+export function TieBreakerReason({ m, className }) {
+    const applies = !!m && isSupplementaryBout(m.id) && m.status !== "completed";
+    const isLeague = !!m && m.compFormat === "league";
+    const compId = m && m.compId;
+    const matchId = m && m.id;
+    const matchStatus = m && m.status;
+    const [rows, setRows] = useState(null);
+    useEffect(() => {
+        setRows(null);
+        if (!applies || !compId || !window.API) return undefined;
+        const ask = isLeague ? window.API.leagueStandings : window.API.fetchCompetitionDetails;
+        if (typeof ask !== "function") return undefined;
+        let cancelled = false;
+        ask.call(window.API, compId)
+            .then((d) => {
+                if (cancelled) return;
+                setRows(isLeague ? d : (d && d.standings ? d.standings[poolNameOf(matchId)] : null));
+            })
+            .catch(() => { if (!cancelled) setRows(null); });
+        return () => { cancelled = true; };
+    }, [applies, isLeague, compId, matchId, matchStatus]);
+    if (!applies) return null;
+    return (
+        <div className={className} data-testid="tiebreaker-reason">{tieBreakerReasonLine(m, rows)}</div>
+    );
+}
+
 export function ShiaijoQueueRow({ m, scheduled, courts, onMoveCourt, onMove, onEnterLineup, onPick, onCorrect, onCall, callingKey, isCalled, startingKey, pending, slotLabel, emptyNames, password, notice }) {
     const isComplete = m.status === "completed";
     // bc-cse: a scheduled match a competitor is barred from. `pending`
@@ -2994,6 +3051,7 @@ export function ShiaijoQueueRow({ m, scheduled, courts, onMoveCourt, onMove, onE
                     {pending && <span className="shiaijo-qrow__waiting">Waiting</span>}
                 </span>
             </div>
+            <TieBreakerReason m={m} className="shiaijo-upnext__hint" />
             <div className="shiaijo-qrow__match">
                 {/* Side by CELL TINT, not a SHIRO/AKA badge (operator decision
                     2026-09-20, bc-sccl). The text channel is an sr-only span, the

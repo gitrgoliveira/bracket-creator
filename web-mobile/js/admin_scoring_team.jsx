@@ -661,6 +661,17 @@ export function teamEncounterHasResult({ ivA, ivB, pwA, pwB, subTotals, daihyose
   return (subTotals || []).some((s, i) => i !== daihyosenIdx && s.draw);
 }
 
+// teamEncounterIsLevel: some bout has landed (a point, a win or a draw) and the
+// two sides finish level on IV and PW. The one spelling of "tied" the daihyosen
+// control and the league line both ask, so they cannot disagree. A bout counts
+// as decided once it carries any ippon or is a draw: a 5-person tie reaches
+// even IV only through a drawn bout (the bug the old `allComplete && tied` gate
+// had).
+export function teamEncounterIsLevel({ ivA, ivB, pwA, pwB, subTotals }) {
+  const anyBoutDecided = (subTotals || []).some(t => t.aTotal > 0 || t.bTotal > 0 || t.draw || t.winner !== null);
+  return anyBoutDecided && ivA === ivB && pwA === pwB;
+}
+
 // resolveKachinukiBoutSides: competitor identity for a KACHINUKI sub-bout.
 // Unlike a fixed-position encounter (settled on IV/PW at the match level, where
 // computeStandings matches the match-level side first via isWinForSide), a
@@ -5600,13 +5611,10 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
             // Existing/legacy daihyosen rows still render defensively via
             // hasDaihyosen above.
             if (hasDaihyosen || !isKnockoutPhase || isKachinuki || !repBoutAddRemoveOpen) return null;
-            // Local tie detection drives the highlight + helper copy only: 
+            // Local tie detection drives the highlight + helper copy only:
             // the backend is the source of truth and re-validates on submit.
-            // A bout is "decided" once it carries any ippon or is a draw; a
-            // 5-person tie reaches even IV only via at least one drawn bout,
-            // so draws MUST count here (the bug the old gate had).
-            const anyBoutDecided = subTotals.some(t => t.aTotal > 0 || t.bTotal > 0 || t.draw || t.winner !== null);
-            const teamTied = anyBoutDecided && ivA === ivB && pwA === pwB;
+            // Draws MUST count as decided bouts (see teamEncounterIsLevel).
+            const teamTied = teamEncounterIsLevel({ ivA, ivB, pwA, pwB, subTotals });
             const onDaihyosen = () => runRepBoutChange({
               // A queued match is started first, so it starts through the score
               // path's court and eligibility checks. A running match needs no
@@ -5649,6 +5657,20 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
               </div>
             );
           })()}
+
+          {/* A league encounter may end level, so the sheet offers no
+              representative bout there. Without this line the operator sees
+              the control a knockout sheet shows go missing and cannot tell
+              why (F5). It says what a level result is and where a tie that
+              matters is settled. Shown only while the encounter IS level, so
+              it never nags a scoring operator mid-bout. Kachinuki is left
+              out: its tie is fought on, never read from IV and PW alone. */}
+          {compFormat === "league" && !isKnockoutPhase && !isKachinuki && !hasDaihyosen
+            && teamEncounterIsLevel({ ivA, ivB, pwA, pwB, subTotals }) && (
+            <div className="daihyosen-controls__hint" data-testid="league-level-hint" style={{ marginTop: 8 }}>
+              A league encounter can end level, so there is no representative bout (<TermAS name="daihyosen">daihyosen</TermAS>) here. It counts as a draw. If the table is still level at a podium place when every match is finished, the Pools page offers a tie-breaker.
+            </div>
+          )}
 
           {/* The daihyosen add/remove POSTs report here. It used to live
               INSIDE the add-daihyosen block above, which returns null for

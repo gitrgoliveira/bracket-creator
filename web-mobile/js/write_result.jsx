@@ -1017,6 +1017,41 @@ export function courtBusyReopenWarning({ court, label }) {
     };
 }
 
+// The finished-league warning (design item 3, operator decision D2: warn
+// first, then save). A correction of a finished league's result is answered
+// 409 {error: "league_finished", message, removedCourts} until it carries the
+// request-only confirmFinished; api_client.jsx parses it onto the thrown
+// Error as `.leagueFinished` ({removedCourts}), which leagueFinishedRefusal
+// reads, so no caller re-derives the shape. attemptScoreWrite asks it on every
+// host (the admin hosts and the court console alike: it is not gated on
+// allowCourtForce), shows leagueFinishedConfirm, and resends the same write
+// with confirmFinished: true on Change it anyway.
+export const LEAGUE_FINISHED_WARNING = 'This league has finished. Changing this result can change the final table and podium. If it leaves a new tie at a podium place, the league goes back to match play to settle it.';
+
+export function leagueFinishedRefusal(err) {
+    return (err && err.leagueFinished) || null;
+}
+
+// The confirm's copy. A shiaijo the tournament no longer has is named: the
+// league's matches on it lose their court if the correction puts the league
+// back into match play, so they show as unassigned.
+export function leagueFinishedConfirm({ removedCourts } = {}) {
+    const courts = (removedCourts || []).filter(Boolean).map((c) => `Shiaijo ${c}`);
+    let message = LEAGUE_FINISHED_WARNING;
+    if (courts.length) {
+        const named = courts.length > 1
+            ? `${courts.slice(0, -1).join(', ')} and ${courts[courts.length - 1]}`
+            : courts[0];
+        message += ` The tournament no longer has ${named}: if the league goes back to match play, its matches there show as unassigned until they are given a court.`;
+    }
+    return {
+        message,
+        confirmLabel: 'Change it anyway',
+        cancelLabel: 'Cancel',
+        danger: true,
+    };
+}
+
 // The court console never holds a running match and an open correction at
 // once (operator ruling 2026-09-27, bc-crpn). Each refused tap names the other
 // one, with the label string the caller built (scoreRowMatchName), and names
@@ -1177,6 +1212,13 @@ export async function attemptScoreWrite({
         const courtRefusal = allowCourtForce && !result.forceCourt ? courtBusyRefusal(e) : null;
         if (courtRefusal) {
             return { refusal: courtRefusal, buildConfirm: (r) => courtBusyForceConfirm(r, started), flagName: 'forceCourt', cancelMarker: 'courtForceCancelled' };
+        }
+        // A correction of a finished league's result: asked on every host,
+        // the court console included (never gated on allowCourtForce), once
+        // per patch, so a second refusal cannot loop the confirm.
+        const league = !result.confirmFinished ? leagueFinishedRefusal(e) : null;
+        if (league) {
+            return { refusal: league, buildConfirm: leagueFinishedConfirm, flagName: 'confirmFinished', cancelMarker: 'leagueFinishedCancelled' };
         }
         return null;
     };

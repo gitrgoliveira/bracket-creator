@@ -518,8 +518,11 @@ func TestIsConsequentialTie(t *testing.T) {
 			// calling it (see this function's own doc comment), so a
 			// non-league comp here would exercise unreachable state, not a
 			// real gap.
+			// A team league: the band is its setting alone (effectiveTopN).
 			comp := &state.Competition{
 				Format:               state.CompFormatLeague,
+				Kind:                 "team",
+				TeamSize:             2,
 				LeagueTiebreakTopN:   tc.topN,
 				LeagueTwoThirdPlaces: tc.twoThirds,
 			}
@@ -530,11 +533,19 @@ func TestIsConsequentialTie(t *testing.T) {
 	}
 }
 
-// TestEffectiveTopN verifies the default-3 fallback and explicit values.
+// TestEffectiveTopN verifies the default-3 fallback and explicit values, and
+// that the band is a team league's setting alone (F6): a "Top 4" saved while
+// the competition was a team league, then switched to individual before the
+// draw, no longer widens the individual league's ippon-shobu band.
 func TestEffectiveTopN(t *testing.T) {
-	assert.Equal(t, 3, effectiveTopN(&state.Competition{LeagueTiebreakTopN: 0}), "zero defaults to 3")
-	assert.Equal(t, 3, effectiveTopN(&state.Competition{LeagueTiebreakTopN: 3}))
-	assert.Equal(t, 4, effectiveTopN(&state.Competition{LeagueTiebreakTopN: 4}))
+	team := func(n int) *state.Competition {
+		return &state.Competition{Kind: "team", TeamSize: 2, LeagueTiebreakTopN: n}
+	}
+	assert.Equal(t, 3, effectiveTopN(team(0)), "zero defaults to 3")
+	assert.Equal(t, 3, effectiveTopN(team(3)))
+	assert.Equal(t, 4, effectiveTopN(team(4)))
+	assert.Equal(t, 3, effectiveTopN(&state.Competition{Kind: "individual", LeagueTiebreakTopN: 4}),
+		"an individual league breaks the top 3 whatever a stale team setting says")
 }
 
 // TestIsConsequentialTie_BandBoundaryEdgeCases focuses on the exact boundary
@@ -577,8 +588,11 @@ func TestIsConsequentialTie_BandBoundaryEdgeCases(t *testing.T) {
 			}
 			g := TiedGroup{Teams: teams, MinPosition: tc.minPos, MaxPosition: tc.maxPos}
 			// Format: league -- see the identical note in TestIsConsequentialTie.
+			// A team league: the band is its setting alone (effectiveTopN).
 			comp := &state.Competition{
 				Format:               state.CompFormatLeague,
+				Kind:                 "team",
+				TeamSize:             2,
 				LeagueTiebreakTopN:   tc.topN,
 				LeagueTwoThirdPlaces: tc.twoThirds,
 			}
@@ -749,4 +763,44 @@ func TestLeagueTiebreakCandidates_NonTeamAndNonLeague(t *testing.T) {
 		require.NoError(t, err)
 		assert.Empty(t, cands, "individual league (TeamSize=0) must return no tiebreak candidates")
 	})
+}
+
+// Accepting the shared ranks asks which drawn tie-breaker bouts still settle
+// nothing: inside the band a drawn round is listed, and once a setting moves
+// the tie out of the band (here the joint-3rd setting) it decides no place and
+// is no longer listed, the same rule the league's completion reads
+// (poolMatchSettled).
+func TestOpenDrawnSupplementaryBouts(t *testing.T) {
+	const compID = "open-drawn-bouts"
+	eng, store := cycleLeagueAt3rd(t, compID)
+	_, err := eng.GenerateLeagueTiebreakMatches(compID, []string{teamID("Gamma"), teamID("Delta"), teamID("Epsilon")})
+	require.NoError(t, err)
+	scoreInjectedDH(t, eng, store, compID, func(string, string) string { return "" })
+
+	openNow := func() []state.MatchResult {
+		t.Helper()
+		var open []state.MatchResult
+		require.NoError(t, store.WithTransaction(compID, func(tx state.StoreTx) error {
+			ms, err := tx.LoadPoolMatches(compID)
+			if err != nil {
+				return err
+			}
+			open, err = eng.OpenDrawnSupplementaryBouts(tx, compID, ms)
+			return err
+		}))
+		return open
+	}
+	open := openNow()
+	require.Len(t, open, 3, "inside the band each drawn bout of the round settles nothing")
+	for _, m := range open {
+		assert.True(t, IsPoolDaihyosenMatchID(m.ID), m.ID)
+	}
+
+	comp, err := store.LoadCompetition(compID)
+	require.NoError(t, err)
+	comp.LeagueTwoThirdPlaces = true
+	require.NoError(t, store.SaveCompetition(comp))
+	eng.standingsCache.Delete(compID)
+	eng.standingsFlight.Delete(compID)
+	assert.Empty(t, openNow(), "a tie moved out of the band leaves its drawn bouts settled")
 }

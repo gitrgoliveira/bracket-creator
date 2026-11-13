@@ -2515,9 +2515,11 @@ paths:
             and nothing was changed. `code: league_tiebreak_pending`: a tie in
             the band has no tie-breaker yet (a team league runs it on the Pools
             tab; for an individual league the refusal itself adds the bouts).
-            `code: league_chusen_pending`: a team tie-breaker left a tie level,
-            so only a drawing of lots can decide it. `error` is a sentence for
-            the reader.
+            `code: league_chusen_pending`: a tie-breaker left a tie level. A
+            team tie is then decided by drawing lots; an individual one by
+            another tie-breaker round (`POST .../pools/{poolId}/tiebreak-round`)
+            or, if the organiser chooses, by drawing lots. `error` is a
+            sentence for the reader.
           content:
             application/json:
               schema:
@@ -2822,9 +2824,10 @@ paths:
           description: >
             Rank overrides are only accepted while the competition is in the
             pools stage, or, for a mixed competition, in the knockout stage
-            too (`Error`), and only in a team competition (`code:
-            rank_override_team_only`: an individual tie is decided by an
-            ippon-shobu, never by lots). In a mixed competition the new order is
+            too (`Error`). In an individual competition only the ranks of a
+            tie a finished ippon-shobu round left level are taken (`code:
+            rank_override_team_only` for any other individual tie, which is
+            decided by an ippon-shobu, never by lots). In a mixed competition the new order is
             also answered like a pool result correction, with `matchId`
             empty because no match is corrected:
             `downstream_knockout_played` when it moves a qualifier out of a
@@ -2877,19 +2880,24 @@ paths:
   /api/competitions/{id}/chusen-candidates:
     get:
       tags: [competitions]
-      summary: List consequential team-pool ties needing chusen (drawing lots)
+      summary: List consequential pool ties a tie-breaker left level
       description: >
         Returns the team-pool ties that the daihyosen (representative bout)
         left undetermined; a true win/loss cycle, an all-drawn round, or any
         other partial tie on daihyosen wins; and that therefore need the
         operator to draw lots and record each team's finishing position via
-        `PUT .../pools/{poolId}/override-rank`. Only consequential ties (ones
-        that affect advancement/seeding) are returned. Admin-gated, unlike
-        the public league-tiebreak candidates endpoint. Empty (not an error)
-        for a non-team competition, a competition not in the pools stage (a
+        `PUT .../pools/{poolId}/override-rank`. In an individual competition
+        it returns the ties a finished ippon-shobu round left level, each
+        with the runs (`stillLevel`) another round
+        (`POST .../pools/{poolId}/tiebreak-round`) would fight; lots through
+        the same `override-rank` are the operator's other choice. Only
+        consequential ties (ones that affect advancement/seeding) are
+        returned. Admin-gated, unlike the public league-tiebreak candidates
+        endpoint. Empty (not an error) for a competition not in the pools stage (a
         mixed competition's knockout stage counts, since a pool correction
-        made then can reopen a tie), or when no group currently needs chusen.
-        `recorded` lists the ties a chusen already settled (every tied team
+        made then can reopen a tie, and so does a finished league, whose
+        recorded lots stay correctable), or when no group currently needs
+        chusen. `recorded` lists the ties a chusen already settled (every tied team
         carries a recorded rank), with those ranks, so a chusen recorded in
         the wrong order can be changed through the same
         `PUT .../override-rank`. It follows the same visibility rules as
@@ -2923,6 +2931,83 @@ paths:
                       $ref: '#/components/schemas/ChusenCandidateGroup'
         '404':
           $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/competitions/{id}/pools/{poolId}/tiebreak-round:
+    post:
+      tags: [competitions]
+      summary: Run another tie-breaker round
+      description: >
+        Adds a fresh round of ippon-shobu bouts, one for every pair, among a
+        run of competitors in an individual competition that a finished
+        tie-breaker round left level (a circle: A beat B, B beat C, C beat A,
+        or any equal win count). The run is named by participant id, exactly
+        as one entry of `stillLevel` in `GET .../chusen-candidates`. The
+        server never starts such a round by itself, because drawing lots
+        (`PUT .../override-rank`) is the organiser's other way on. Organiser
+        only, in self-run mode too. Broadcasts `match_updated` and
+        `schedule_updated`.
+      security:
+        - TournamentPassword: []
+      parameters:
+        - $ref: '#/components/parameters/CompetitionId'
+        - in: path
+          name: poolId
+          required: true
+          description: The pool's name, e.g. `Pool A`.
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [playerIds]
+              properties:
+                playerIds:
+                  type: array
+                  description: The run, by participant id; at least two different ids.
+                  items:
+                    type: string
+      responses:
+        '201':
+          description: The bouts added.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [matches]
+                properties:
+                  matches:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/MatchResult'
+        '400':
+          description: >
+            Nothing was added. `error` is the sentence to show: the selection
+            is not a run a finished round left level (fewer than two ids, a
+            repeated or empty id, a round already added and not yet fought,
+            or the tie is no longer level), the lots already ordered the
+            group, the competition is a team or engi one, or its pools are
+            no longer being played.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Competition not found, or poolId does not name a pool in this competition.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: overrides.json is corrupt (`corrupt_overrides`); repair it with `DELETE .../overrides`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '500':
           $ref: '#/components/responses/InternalError'
 
@@ -3472,6 +3557,21 @@ paths:
           for the court, so a shiaijo running two bouts keeps taking writes
           to both.
 
+          `confirmFinished: true` (also request-only, never stored) is the
+          organiser's "Change it anyway" on a finished league: a correction
+          of a regular match of a league whose status is `complete` (an
+          engi league and a tie-breaker bout excepted) is answered 409
+          `league_finished` without it and lands with it. A correction here
+          is a completed write over a completed match that carries its
+          `correctionReason`; the resend of the result already recorded, a
+          finish older than the stored result, and a finish from a device
+          that never saw the result (kept in the history as `match_closed`)
+          land nothing new and are not refused. After a confirmed
+          correction the league stays finished when its table still stands,
+          and goes back to match play when it leaves a new tie at a podium
+          place. A self-run participant never reaches this refusal: their
+          write over a finished match is refused `result_finalized` first.
+
           `clearWithdrawal: true` (also request-only) marks a completed
           correction that removes a kiken, fusenpai, or fusensho recorded by
           mistake: the payload is the real result (a win, or a draw) and
@@ -3615,6 +3715,18 @@ paths:
             `error` names the bouts, e.g. "Bout 5 (Taisho) has no result.
             Record a score, a Tie, or a Fusensho before finishing."
 
+            A league tie-breaker bout (a team league's representative bout,
+            id `Pool X-DH-n`, or an individual league's ippon-shobu, `Pool
+            X-TB-n`) finished with no winner is refused: "A tie-breaker needs a
+            winner: continue with encho, then decide by hantei." Every result
+            door gives the same refusal (score, quick-score, bulk-score, the
+            score events and the decision door). On the decision door, the
+            hikiwake recorded when both sides are barred is refused too: "Both
+            sides of this tie-breaker are barred, so it cannot be fought or
+            drawn.", followed for a team league by "Accept the shared ranks
+            instead." A pools + knockout competition keeps its drawn
+            tie-breaker and its lots.
+
             A request with an empty password (self-run) whose `subResults`
             list more than one representative-bout row (position `-1`) is
             refused with `error` `duplicate_daihyosen` and a `message` for the
@@ -3728,11 +3840,17 @@ paths:
                 $ref: '#/components/schemas/Error'
         '409':
           description: |
-            Conflict; one of eleven codes returned in the `error` field:
+            Conflict; one of twelve codes returned in the `error` field:
             - `court_busy`: court already has a running match in this or another competition.
               Judged only on a write that moves the match into running, and
               never when the organiser sends `forceCourt: true`.
               Extra fields: `court`, `matchId`, `compId`, `label`, `message`.
+            - `league_finished`: the write corrects a result of a finished
+              league without `confirmFinished: true`. Nothing is written.
+              Retry with `confirmFinished: true` once the organiser confirms.
+              Extra fields: `message` and `removedCourts` (the shiaijo the
+              tournament no longer has that the league's matches stand on,
+              empty when none).
             - `ineligible_competitor`: a participant is ineligible (kiken/fusenpai in a prior match, or barred by
               a decision recorded on a different match). `reasonHuman` is a full operator sentence naming the
               competitor, the match, and what to do, e.g. "Alice withdrew in Pool A · Match 1 and cannot fight
@@ -3820,10 +3938,16 @@ paths:
                       - side_mismatch
                       - downstream_knockout_played
                       - downstream_knockout_running
+                      - league_finished
                     description: Machine-readable conflict code.
                   court:
                     type: string
                     description: Court label (court_busy only).
+                  removedCourts:
+                    type: array
+                    items:
+                      type: string
+                    description: The shiaijo the tournament no longer has that the league's matches stand on (league_finished only).
                   matchId:
                     type: string
                     description: Conflicting match ID (court_busy, already_ineligible); this match (downstream_knockout_played, downstream_knockout_running).
@@ -3838,7 +3962,7 @@ paths:
                       `engine.OperatorMatchLabel`.
                   message:
                     type: string
-                    description: Human-readable detail (court_busy, result_finalized, hantei_organiser_only, no_daihyosen, daihyosen_added, team_members_unreadable, side_mismatch, downstream_knockout_played, downstream_knockout_running); for the self-run codes, the sentence the public page shows as it is.
+                    description: Human-readable detail (court_busy, result_finalized, hantei_organiser_only, no_daihyosen, daihyosen_added, team_members_unreadable, side_mismatch, downstream_knockout_played, downstream_knockout_running, league_finished); for the self-run codes, the sentence the public page shows as it is.
                   playerId:
                     type: string
                     description: Ineligible participant ID (ineligible_competitor / already_ineligible).
@@ -4102,6 +4226,9 @@ paths:
         organiser action: the route stays main-password-gated even in self-run
         mode (an organiser correction), so a request without a valid
         `X-Tournament-Password` gets 401. Broadcasts a `match_updated` event.
+        A match reopened on a finished league puts the league back into match
+        play (status `pools`, any accepted shared ranks taken back), broadcast
+        as `competition_started`; `requeue-blocker-and-reopen` does the same.
 
         Reopening a match a withdrawal (kiken, fusenpai) ended REMOVES the
         withdrawal: every competitor-status entry that named this match as
@@ -4836,6 +4963,10 @@ paths:
         `reason: team_members_unreadable`. Nothing is written for a refused entry, its history
         entry included, and other entries are unaffected. Numbered bout rows are not judged.
 
+        An entry that corrects a result of a finished league is refused as PUT /score's 409
+        `league_finished` is, reported in `errors` with `reason: league_finished`, unless the
+        entry carries the request-only `confirmFinished: true` (never stored).
+
 
         Stays main-password-gated in self-run mode (401 without it): it writes results
         without PUT /score's self-run checks.
@@ -4878,7 +5009,7 @@ paths:
                             classes `reason` names below.
                         reason:
                           type: string
-                          enum: [superseded, clock_skew, corrupt_overrides, downstream_knockout_played, downstream_knockout_running, team_member_not_in_team, team_members_unreadable]
+                          enum: [superseded, clock_skew, corrupt_overrides, downstream_knockout_played, downstream_knockout_running, team_member_not_in_team, team_members_unreadable, league_finished]
                           description: >
                             Machine-readable discriminator, present only for the
                             classes named here and omitted for every other failure, so
@@ -4912,7 +5043,10 @@ paths:
                             names a member the side's team does not hold; `error` carries
                             the sentence to show. `team_members_unreadable`: the
                             competition's team-members.yaml could not be read, so the
-                            pick could not be judged. In
+                            pick could not be judged. `league_finished`: the entry
+                            corrects a result of a finished league (as PUT /score's
+                            409); retry that entry with `confirmFinished: true` to
+                            apply it. In
                             every case the entry is excluded from `succeeded` and never
                             broadcast. Other entries in the batch are unaffected.
                         heldGroups:
@@ -5010,6 +5144,13 @@ paths:
                 draws:
                   type: integer
                   description: Number of individual bouts that were draws.
+                confirmFinished:
+                  type: boolean
+                  description: >
+                    Request-only, never stored: the organiser confirmed a
+                    correction of a finished league (see PUT /score). Without
+                    it, a quick-score over a completed match of a finished
+                    league is refused 409 `league_finished`.
                 writeId:
                   $ref: '#/components/schemas/WriteId'
                 basis:
@@ -5051,7 +5192,10 @@ paths:
             `downstream_knockout_played` (retry with
             `forceDownstreamReopen: true`), and `downstream_knockout_running`
             when the result would change a side of, or move a qualifier out
-            of, a knockout match being fought now (not confirmable).
+            of, a knockout match being fought now (not confirmable). Also
+            `league_finished` (with `message` and `removedCourts`, as PUT
+            .../score) when it corrects a result of a finished league
+            without `confirmFinished: true`.
           content:
             application/json:
               schema:
@@ -5124,6 +5268,15 @@ paths:
                     included.
                 encho:
                   $ref: '#/components/schemas/EnchoMetadata'
+                confirmFinished:
+                  type: boolean
+                  description: >
+                    Request-only, never stored: the organiser confirmed a
+                    correction of a finished league (see PUT /score). Without
+                    it, a decision that changes a completed match of a
+                    finished league is refused 409 `league_finished`; an exact
+                    replay, an older stamp, and a decision whose basis never
+                    saw the stored result change nothing and are not refused.
                 modifiedAt:
                   type: integer
                   format: int64
@@ -5196,7 +5349,10 @@ paths:
             places a decision on a mixed competition's pool match moves), or
             one that would move a qualifier out of, or change a side of, a
             knockout match being fought now (`downstream_knockout_running`,
-            not confirmable, and answered before any confirm). Same bodies as PUT .../score.
+            not confirmable, and answered before any confirm), or one that
+            corrects a result of a finished league without
+            `confirmFinished: true` (`league_finished`, with `message` and
+            `removedCourts`). Same bodies as PUT .../score.
           content:
             application/json:
               schema:
@@ -6325,7 +6481,10 @@ paths:
         fall within the configured tie-breaker band (`leagueTiebreakTopN`, honouring
         `leagueTwoThirdPlaces`). Public read (no auth): derived from the
         already-public standings. Returns an empty list for non-team-league
-        competitions and once shared ranks have been finalised.
+        competitions and once shared ranks have been accepted; then `accepted`
+        lists the ties the table still holds, the shared ranks the operator
+        accepted, so a page can name them and offer the Undo
+        (`DELETE .../league-tiebreak/finalize`).
       security: []
       responses:
         '200':
@@ -6341,6 +6500,14 @@ paths:
                       $ref: '#/components/schemas/LeagueTiebreakCandidateGroup'
                   finalized:
                     type: boolean
+                  accepted:
+                    type: array
+                    description: >
+                      Present only when `finalized` is true: the tied groups the
+                      accepted shared ranks cover, in the candidates' shape.
+                      Empty, never absent, when the table holds no tie any more.
+                    items:
+                      $ref: '#/components/schemas/LeagueTiebreakCandidateGroup'
         '404':
           $ref: '#/components/responses/NotFound'
 
@@ -6435,7 +6602,13 @@ paths:
       description: >
         Marks the league's consequential ties as final without a tie-breaker
         (`leagueTiebreakFinalized = true`) and attempts to complete the
-        competition. Admin-gated.
+        competition. Admin-gated. Accepted only once every regular league
+        match is finished: the table cannot change after the decision. The
+        same transaction removes every tie-breaker bout not yet fought
+        (scheduled, with no score), so the queue holds no bout the decision
+        made moot; a fought bout keeps its result. A later result change
+        that alters the ties takes the accepted ranks back and, on a finished
+        league, puts it back into match play (`competition_started`).
       security:
         - TournamentPassword: []
       responses:
@@ -6448,12 +6621,97 @@ paths:
                 properties:
                   finalized:
                     type: boolean
+                  removed:
+                    type: integer
+                    description: How many unfought tie-breaker bouts were removed.
+        '400':
+          description: Not a team-league competition.
         '401':
           description: Missing or invalid X-Tournament-Password.
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: Competition is already complete.
+          description: >
+            `{error, detail}` with `detail` the sentence the operator reads.
+            `already_complete`: the competition is already complete.
+            `league_not_settled`: a regular league match is not finished
+            ("A league match is not finished yet, so the table can still
+            change. Finish it, then decide."). `tiebreak_match_scored`: a
+            tie-breaker bout is being fought ("A tie-breaker bout is being
+            fought. Finish it, or send it back to the queue, then accept the
+            shared ranks."). `tiebreak_drawn`: a tie-breaker bout was saved as a
+            draw before a league tie-breaker needed a winner and its tie still
+            decides a place (a drawn bout whose tie lots ranked, or a
+            correction split or moved out of the band, is no bar); `detail` names
+            its two sides ("Alpha v Beta was saved as a draw. A tie-breaker
+            needs a winner: open it and decide by encho or hantei, then accept
+            the shared ranks if they still share the place.").
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                  detail:
+                    type: string
+    delete:
+      tags: [competitions]
+      summary: Undo accepted shared league ranks
+      description: >
+        Takes back the shared ranks `POST .../league-tiebreak/finalize`
+        accepted, in one transaction. A finished league goes back to match
+        play (status `pools`, broadcast `competition_started`), and a match on
+        a shiai-jo the tournament no longer has loses its court; every result
+        stays. A league still in match play only loses the flag. The tie is
+        then offered again by `GET .../league-tiebreak/candidates`. Organiser
+        only, in self-run mode too.
+      security:
+        - TournamentPassword: []
+      responses:
+        '200':
+          description: The accepted ranks were taken back.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [finalized, reopened, unassignedMatches, removedCourts]
+                properties:
+                  finalized:
+                    type: boolean
+                    enum: [false]
+                  reopened:
+                    type: boolean
+                    description: True when a finished league went back to match play.
+                  unassignedMatches:
+                    type: array
+                    description: Ids of the matches that lost a removed shiai-jo.
+                    items:
+                      type: string
+                  removedCourts:
+                    type: array
+                    description: The removed shiai-jo those matches sat on.
+                    items:
+                      type: string
+        '400':
+          description: Not a league competition.
+        '401':
+          description: Missing or invalid X-Tournament-Password.
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: >
+            `not_finalized`: no shared ranks were accepted ("The shared ranks
+            were not accepted, so there is nothing to undo.").
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                  detail:
+                    type: string
 
   /api/schedule/estimate:
     get:
@@ -10640,6 +10898,27 @@ components:
             on a group still waiting for its chusen.
           items:
             type: integer
+        stillLevel:
+          type: array
+          description: >
+            Present only on an individual group in `candidates`: the runs of
+            competitors a finished ippon-shobu round left level (a circle, A
+            beat B, B beat C, C beat A, or any equal win count). Each run is
+            one `POST .../pools/{poolId}/tiebreak-round` ("Run another
+            tie-breaker round"), the main way on; drawing lots over the whole
+            group through `PUT .../override-rank` is the operator's other
+            choice.
+          items:
+            type: array
+            items:
+              type: object
+              properties:
+                id:
+                  type: string
+                name:
+                  type: string
+                dojo:
+                  type: string
 
     LeagueTiebreakCandidateGroup:
       type: object

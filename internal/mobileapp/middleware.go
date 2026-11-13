@@ -241,10 +241,12 @@ func isSelfRunMainGatedConfigRoute(method, fullPath string) bool {
 		http.MethodPost + " /api/competitions/:id/matches/:mid/reopen",                     // mp-gmcg: reopen a finalized kachinuki result, an organiser correction
 		http.MethodPost + " /api/competitions/:id/matches/:mid/requeue-blocker-and-reopen", // mp-gmcg A4: destructive (requeues a blocker) organiser correction; same class as reopen
 		http.MethodPut + " /api/competitions/:id/pools/:poolId/override-rank",              // Fix 3330080949: standings correction, organiser, not participant play
+		http.MethodPost + " /api/competitions/:id/pools/:poolId/tiebreak-round",            // another individual tie-breaker round over a tie a round left level, organiser decision, the other way on beside the lots (override-rank)
 		http.MethodPost + " /api/competitions/:id/competitor-status",                       // Fix 3331033814: eligibility mutation, organiser decision, not operational play
 		http.MethodPost + " /api/competitions/:id/league-tiebreak",                         // a team league's supplementary tie-break bouts, organiser decision, same class as override-rank
 		http.MethodDelete + " /api/competitions/:id/league-tiebreak",                       // removing them, organiser decision
 		http.MethodPost + " /api/competitions/:id/league-tiebreak/finalize",                // accepting a league's shared ranks, organiser decision
+		http.MethodDelete + " /api/competitions/:id/league-tiebreak/finalize",              // undoing that acceptance (reopens a finished league), organiser decision
 		http.MethodGet + " /api/competitions/:id/export",                                   // Fix 3332740291: xlsx export, admin/CPU-heavy, not operational play
 		http.MethodGet + " /api/tournament/backup",                                         // bc-bkrs: a backup holds every competition's data, organiser only
 		http.MethodGet + " /api/competitions/:id/backup",                                   // bc-bkrs: same, one competition

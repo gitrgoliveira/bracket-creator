@@ -443,12 +443,11 @@ func validateSwissRoundsCap(comp *state.Competition) error {
 // formats/kinds and must not cause errors there. Returns nil for non-league or
 // non-team comps.
 //
-// Kind == "team" is the canonical team marker: ValidateCompetitionTeamSize (run
-// on every create/edit) enforces Kind == "team" ⟺ TeamSize >= 2, so a comp with
-// TeamSize > 0 but Kind == "" cannot be persisted, the Kind check alone is
-// sufficient to identify a team league here.
+// A team league is asked through IsTeam, the one spelling of "a team
+// competition" (ValidateCompetitionTeamSize, run on every create and edit,
+// keeps Kind == "team" exactly when TeamSize >= 2, so the two cannot disagree).
 func validateLeagueTiebreakConfig(comp *state.Competition) error {
-	if comp.Format != state.CompFormatLeague || comp.Kind != "team" {
+	if comp.Format != state.CompFormatLeague || !comp.IsTeam() {
 		return nil
 	}
 	switch comp.LeagueTiebreakTopN {
@@ -801,6 +800,38 @@ func poolHasPlayerID(players []domain.Player, playerID string) error {
 		}
 	}
 	return fmt.Errorf("playerId %q not found in this pool", playerID)
+}
+
+// lotsOfferedFor reports whether every competitor ranks names belongs to a
+// tie of pool poolName that the chusen panel offers lots for
+// (engine.ChusenStatus, waiting or already recorded): for an individual
+// competition, a group a finished ippon-shobu round left level (decision F5).
+// The panel and the override-rank door ask the one rule, so the door accepts
+// exactly the lots the panel offers. Competitors are matched by id only.
+func lotsOfferedFor(eng *engine.Engine, compID, poolName string, ranks []engine.RankOverride) (bool, error) {
+	report, err := eng.ChusenStatus(compID)
+	if err != nil {
+		return false, err
+	}
+	offered := map[string]bool{}
+	for _, groups := range [][]engine.ChusenGroup{report.Pending, report.Recorded} {
+		for _, g := range groups {
+			if g.PoolName != poolName {
+				continue
+			}
+			for _, s := range g.Teams {
+				if s.Player.ID != "" {
+					offered[s.Player.ID] = true
+				}
+			}
+		}
+	}
+	for _, r := range ranks {
+		if !offered[r.PlayerID] {
+			return false, nil
+		}
+	}
+	return len(ranks) > 0, nil
 }
 
 // loadAllCompetitions lists every competition id on disk and loads its
@@ -2302,11 +2333,22 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				// more (bc-3rdp): it is legacy read-only (see its doc comment on
 				// state.Competition), superseded by TwoThirdPlaces below, which
 				// carries its own started-guard.
-				if started && comp.LeagueTiebreakTopN != current.LeagueTiebreakTopN {
-					validationErr = fmt.Errorf("leagueTiebreakTopN can only be changed before the competition starts")
-					return nil, nil
+				//
+				// The band is a team league's setting alone (the settings page
+				// offers it for a team league only, and effectiveTopN reads it only
+				// there), so it is not kept for any other competition: a "Top 4"
+				// saved while the competition was a team league, then switched to
+				// individual before the draw, goes with the switch instead of
+				// lingering hidden. Kind and TeamSize are applied above.
+				if !current.IsTeam() {
+					current.LeagueTiebreakTopN = 0
+				} else {
+					if started && comp.LeagueTiebreakTopN != current.LeagueTiebreakTopN {
+						validationErr = fmt.Errorf("leagueTiebreakTopN can only be changed before the competition starts")
+						return nil, nil
+					}
+					current.LeagueTiebreakTopN = comp.LeagueTiebreakTopN
 				}
-				current.LeagueTiebreakTopN = comp.LeagueTiebreakTopN
 				// TwoThirdPlaces (bc-3rdp) decides whether the knockout stage plays
 				// a bronze/decider match and (for leagues) whether standings show a
 				// shared 3rd rank; both are built/computed at draw/scoring time, the
@@ -2947,7 +2989,11 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 					}
 					return nil
 				case engine.PoolsChusenOwed:
-					conflict = gin.H{"code": "league_chusen_pending", "error": "A tie-breaker left some places tied. Draw lots for them on the Pools tab before this competition can be finished."}
+					if current.IsTeam() {
+						conflict = gin.H{"code": "league_chusen_pending", "error": "A tie-breaker left some places tied. Draw lots for them on the Pools tab before this competition can be finished."}
+					} else {
+						conflict = gin.H{"code": "league_chusen_pending", "error": "A tie-breaker round left some places tied. Run another tie-breaker round, or draw lots, on the Pools tab before this competition can be finished."}
+					}
 					return nil
 				}
 				if n := engine.SwissRoundsToDraw(current); n > 0 {
@@ -3101,16 +3147,32 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		// started too: a pool correction made then can leave a tie only a
 		// chusen settles, and a wrong chusen must stay fixable. What the new
 		// order does to the knockout is answered below, as for any override.
+		// A finished league takes one as well (decision F2 (a)): its lots are
+		// corrected in place, the table and podium follow, and it stays
+		// finished (the auto-complete below finds nothing to do).
 		if !comp.AcceptsPoolRankOverride() {
-			c.JSON(http.StatusConflict, gin.H{"error": "rank overrides only accepted while competition is in pools stage, or in knockout stage for a pools + knockout competition"})
+			c.JSON(http.StatusConflict, gin.H{"error": "rank overrides only accepted while competition is in pools stage, in knockout stage for a pools + knockout competition, or for a finished league"})
 			return
 		}
-		// Lots are drawn only over a team tie a daihyosen left level
-		// (ChusenStatus); an individual tie is broken by an ippon-shobu, fought
-		// again until it names a winner, so no rank is ever set by hand there.
+		// Lots are drawn over a team tie a daihyosen left level, and over an
+		// individual tie only once a finished ippon-shobu round has gone in a
+		// circle, where the operator may choose them over another round
+		// (decision F5): both are what ChusenStatus reports. Any other
+		// individual tie is decided by an ippon-shobu, so no rank is set by
+		// hand there.
 		if !comp.IsTeam() {
-			c.JSON(http.StatusConflict, gin.H{"code": "rank_override_team_only", "error": "Lots are drawn only for a team competition. An individual tie is decided by an ippon-shobu."})
-			return
+			offered, err := lotsOfferedFor(eng, id, poolId, ranks)
+			if err != nil {
+				if respondIfCorruptOverrides(c, err) {
+					return
+				}
+				respondEngineError(c, err)
+				return
+			}
+			if !offered {
+				c.JSON(http.StatusConflict, gin.H{"code": "rank_override_team_only", "error": "Lots are drawn for an individual tie only after a tie-breaker round has left it level. Until then it is decided by an ippon-shobu."})
+				return
+			}
 		}
 		// Pool-size validation: rank within a pool is bounded by the
 		// number of players in that pool. Load the comp's pools and
@@ -3202,9 +3264,11 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 	})
 
 	// GET /competitions/:id/chusen-candidates
-	// Consequential team-pool ties the daihyosen left undetermined (a cycle /
-	// all-drawn); the operator settles each by chusen (drawing lots), recorded via
-	// the override-rank endpoint. "recorded" lists the ties a chusen already
+	// Consequential pool ties a tie-breaker left undetermined (a team's
+	// daihyosen cycle / all-drawn round, an individual's ippon-shobu round that
+	// went in a circle); the operator settles each by chusen (drawing lots),
+	// recorded via the override-rank endpoint, or an individual one by another
+	// tie-breaker round over each run its "stillLevel" names. "recorded" lists the ties a chusen already
 	// settled, with the recorded ranks, so a wrong order can be changed. Admin-gated: RegisterCompetitionHandlers is
 	// mounted under the authenticated router group, so callers must send the
 	// admin password header (unlike the public league-tiebreak candidates).
@@ -3253,6 +3317,17 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 					// array position.
 					group["ranks"] = g.Ranks
 				}
+				if len(g.StillLevel) > 0 {
+					// An individual group a finished ippon-shobu round left
+					// level: each run is one "Run another tie-breaker round"
+					// (engine.RunTiebreakerRound), the main way on; the lots
+					// over the whole group are the operator's other choice.
+					runs := make([][]competitorRef, len(g.StillLevel))
+					for i, run := range g.StillLevel {
+						runs[i] = competitorRefsFrom(run)
+					}
+					group["stillLevel"] = runs
+				}
 				out = append(out, group)
 			}
 			return out
@@ -3261,6 +3336,47 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		// recorded in the wrong order can be changed from the UI through the
 		// same override-rank door.
 		c.JSON(http.StatusOK, gin.H{"candidates": groupsJSON(report.Pending), "recorded": groupsJSON(report.Recorded)})
+	})
+
+	// POST /competitions/:id/pools/:poolId/tiebreak-round
+	// "Run another tie-breaker round" (decision F5, round-or-lots): a fresh
+	// round of ippon-shobu bouts among one run of an individual tie a finished
+	// tie-breaker round left level (a circle, A beat B, B beat C, C beat A).
+	// Body {playerIds}: the run, by participant id only, exactly as one entry
+	// of GET .../chusen-candidates' "stillLevel" names it. Organiser only, in
+	// self-run too (isSelfRunMainGatedConfigRoute), as the lots it is the
+	// other way to are. Answers 201 {matches}: the bouts added. A selection
+	// that is no longer such a run (a double tap, another device ran it first,
+	// the lots already ordered the group), a team or engi competition, or one
+	// whose pools are over is a 400 with the sentence to show.
+	r.POST("/competitions/:id/pools/:poolId/tiebreak-round", func(c *gin.Context) {
+		id, ok := requireValidCompID(c)
+		if !ok {
+			return
+		}
+		poolName := c.Param("poolId")
+		var req struct {
+			PlayerIDs []string `json:"playerIds"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		ids := make([]string, len(req.PlayerIDs))
+		for i, pid := range req.PlayerIDs {
+			ids[i] = strings.TrimSpace(pid)
+		}
+		added, err := eng.RunTiebreakerRound(id, poolName, ids)
+		if err != nil {
+			if respondIfCorruptOverrides(c, err) {
+				return
+			}
+			respondEngineError(c, err)
+			return
+		}
+		hub.Broadcast(EventMatchUpdated, gin.H{"competitionId": id})
+		hub.Broadcast(EventScheduleUpdated, nil)
+		c.JSON(http.StatusCreated, gin.H{"matches": added})
 	})
 
 	r.DELETE("/competitions/:id/overrides", func(c *gin.Context) {

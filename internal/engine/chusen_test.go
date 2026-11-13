@@ -276,13 +276,15 @@ func TestChusenCandidates_PartialRoundNotPremature(t *testing.T) {
 	assert.Empty(t, cands, "chusen must not surface mid-round (only 1 of 3 DH bouts scored)")
 }
 
-// TestChusenCandidates_AllDrawnNeedsChusen: a full daihyosen round completed as
-// all hikiwake (every bout Winner="") leaves every team on 0 wins, so the order
-// is undetermined and must surface as needing chusen (otherwise the competition
-// can never advance).
+// TestChusenCandidates_AllDrawnNeedsChusen: in a pools + knockout competition a
+// full daihyosen round completed as all hikiwake (every bout Winner="") leaves
+// every team on 0 wins, so the order is undetermined and must surface as
+// needing chusen (otherwise the competition can never advance). A league's
+// all-drawn round opens no lots (TestChusenCandidates_LeagueAllDrawnRoundOffersNoLots).
 func TestChusenCandidates_AllDrawnNeedsChusen(t *testing.T) {
 	compID := "chusen-alldrawn"
 	eng, store := setupTeamPoolComp(t, compID, true) // 3 teams fully tied
+	asMixed(t, store, compID)
 	_, err := eng.InjectPoolDaihyosenMatches(compID)
 	require.NoError(t, err)
 
@@ -307,6 +309,50 @@ func TestChusenCandidates_AllDrawnNeedsChusen(t *testing.T) {
 	require.Len(t, cands, 1, "an all-drawn daihyosen round leaves the order undetermined -> chusen")
 }
 
+// asMixed turns a fixture's league into a pools + knockout competition, whose
+// pool tie-breakers may still be drawn and reach the lots by themselves.
+func asMixed(t *testing.T, store *state.Store, compID string) {
+	t.Helper()
+	comp, err := store.LoadCompetition(compID)
+	require.NoError(t, err)
+	comp.Format = state.CompFormatMixed
+	require.NoError(t, store.SaveCompetition(comp))
+}
+
+// TestChusenCandidates_LeagueAllDrawnRoundOffersNoLots: in a LEAGUE a
+// tie-breaker must have a winner (D6 (b)), so a drawn representative bout,
+// which only a write made before that rule can hold, counts as not yet fought:
+// an all-drawn round opens no lots by itself (chusenMatches), and nothing
+// completes the league until the bouts are decided by encho and hantei.
+func TestChusenCandidates_LeagueAllDrawnRoundOffersNoLots(t *testing.T) {
+	compID := "chusen-league-alldrawn"
+	eng, store := setupTeamPoolComp(t, compID, true) // a league, 3 teams fully tied
+	_, err := eng.GenerateLeagueTiebreakMatches(compID, []string{
+		bctest.StampPlayerID("Alpha", "Dojo Alpha"), bctest.StampPlayerID("Beta", "Dojo Beta"), bctest.StampPlayerID("Gamma", "Dojo Gamma"),
+	})
+	require.NoError(t, err)
+
+	all, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	for i := range all {
+		if IsPoolDaihyosenMatchID(all[i].ID) {
+			all[i].Status = state.MatchStatusCompleted
+			all[i].Winner = "" // saved drawn before the rule
+		}
+	}
+	require.NoError(t, store.SavePoolMatches(compID, all))
+	eng.standingsCache.Delete(compID)
+	eng.standingsFlight.Delete(compID)
+
+	report, err := eng.ChusenStatus(compID)
+	require.NoError(t, err)
+	assert.Empty(t, report.Pending, "a league's drawn tie-breakers are bouts to decide, never lots")
+
+	outcome, err := eng.MaybeAutoCompletePools(compID)
+	require.NoError(t, err)
+	assert.NotEqual(t, AutoCompleteTransitioned, outcome, "drawn tie-breakers leave the league open")
+}
+
 // TestChusenCandidates_PartialTieWithoutCycleNeedsChusen: a 4-team tied group
 // whose daihyosen round has NO win/loss cycle anywhere (Alpha beats everyone
 // and loses to nobody), yet two teams still finish level on daihyosen wins
@@ -327,6 +373,9 @@ func TestChusenCandidates_PartialTieWithoutCycleNeedsChusen(t *testing.T) {
 		teamPoolMatch("Pool A-5", "A", "Gamma", "Delta", ""),
 	}
 	eng, store := setupTeamPool(t, compID, teams, matches)
+	// A pools + knockout competition: a league's drawn bout is a bout still
+	// to decide (TestChusenCandidates_LeagueAllDrawnRoundOffersNoLots).
+	asMixed(t, store, compID)
 
 	injected, err := eng.InjectPoolDaihyosenMatches(compID)
 	require.NoError(t, err)

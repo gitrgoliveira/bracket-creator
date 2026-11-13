@@ -1255,16 +1255,28 @@ func CanGenerateDraw(status CompetitionStatus) bool {
 
 // AcceptsPoolRankOverride reports whether a competition's pool order may be
 // set by hand (a chusen, recorded as a pool-rank override): in its pools
-// stage, and, for a pools + knockout competition, after the knockout has
-// started as well. A pool result corrected then can leave a qualifying tie
-// that the daihyosen cannot settle, and a chusen recorded by mistake has to
-// stay fixable (operator ruling: "Everything should be able to be fixed, in
-// case of a wrong entry"); what the new order does to the knockout is
-// answered by engine.OverridePoolRanks' requalification. The one statement of
-// this rule, shared by the override-rank door and engine.ChusenStatus, so
-// the chusen panel is never offered a tie the door would refuse.
+// stage; for a pools + knockout competition, after the knockout has started
+// as well; and for a league, once it has finished too. A pool result
+// corrected after the knockout started can leave a qualifying tie that the
+// daihyosen cannot settle, and a chusen recorded by mistake has to stay
+// fixable (operator ruling: "Everything should be able to be fixed, in case
+// of a wrong entry"); what the new order does to the knockout is answered by
+// engine.OverridePoolRanks' requalification. A finished league's lots are
+// corrected in place (decision F2 (a)): the new order moves its table and
+// podium at once and the league stays finished, since no match was written
+// and nothing is left to play. The one statement of this rule, shared by the
+// override-rank door and engine.ChusenStatus, so the chusen panel is never
+// offered a tie the door would refuse.
 func (c Competition) AcceptsPoolRankOverride() bool {
-	return c.Status == CompStatusPools || (c.Format == CompFormatMixed && c.Status == CompStatusKnockout)
+	switch c.Status {
+	case CompStatusPools:
+		return true
+	case CompStatusKnockout:
+		return c.Format == CompFormatMixed
+	case CompStatusComplete:
+		return c.Format == CompFormatLeague
+	}
+	return false
 }
 
 type MatchStatus string

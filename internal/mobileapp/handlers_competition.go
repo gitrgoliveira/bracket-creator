@@ -3425,6 +3425,18 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		}
 		if changed {
 			hub.Broadcast(EventTournamentUpdated, nil)
+			comp, err := store.LoadCompetition(id)
+			if err != nil {
+				internalError(c, err, "failed to load competition")
+				return
+			}
+			if comp != nil && (comp.Format == state.CompFormatMixed || comp.Format == state.CompFormatLeague) {
+				// Removing the lots can unsettle a pool or a finished league
+				// they had decided, exactly as a new order can settle one: the
+				// auto-complete pass reopens or completes to match, as the PUT
+				// door does after its own change.
+				tryAutoCompletePools(c, eng, hub, id)
+			}
 		}
 		c.Status(http.StatusNoContent)
 	})

@@ -2944,7 +2944,10 @@ function ShiaijoQueueGroup({ label, matches, subGroup, scheduled, courts, onMove
 // operator's words, naming the place it decides. `rows` are the standings of
 // the bout's own pool (a league has one table). The two sides are found by
 // participant id only; the teams or players level on points with them form
-// the tied group, whose best place is the row with the lowest rank. Without
+// the tied group, whose best place is the row with the lowest rank. A group of
+// more than two names its whole range as the tie this bout is part of: a later
+// round over only some of them (RunTiebreakerRound) is still part of that tie,
+// and the standings do not say which run it is. Without
 // standings (still loading, or none for this pool), or when the two sides are
 // no longer level, the line still says the bout is a tie-breaker and why, but
 // names no place it cannot know.
@@ -2960,7 +2963,7 @@ export function tieBreakerReasonLine(m, rows) {
     if (group.length === 2) {
         return `Tie-breaker for ${rankOrdinal(lo)} place. They finished level, so this bout separates them.`;
     }
-    return `Tie-breaker for ${rankOrdinal(lo)} to ${rankOrdinal(lo + group.length - 1)} place. They finished level, so this bout helps separate them.`;
+    return `Part of the tie-breaker for ${rankOrdinal(lo)} to ${rankOrdinal(lo + group.length - 1)} place. These two finished level, so this bout helps separate them.`;
 }
 
 // The standings every unfinished tie-breaker row reads (the league table, or

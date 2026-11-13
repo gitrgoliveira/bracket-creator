@@ -4858,6 +4858,41 @@ func TestOverrideRank_ChusenCompletesALeagueWhoseDaihyosenWasDrawn(t *testing.T)
 	assert.Equal(t, state.CompStatusComplete, status(), "the recorded chusen settles the drawn daihyosen round and finishes the league")
 }
 
+// TestDeleteOverrides_ReopensALeagueTheLotsHadSettled: clearing the recorded
+// lots of a finished league whose tie only they settled puts the league back
+// in play, as the PUT door's pass would, instead of leaving it completed with
+// an undecided tie.
+func TestDeleteOverrides_ReopensALeagueTheLotsHadSettled(t *testing.T) {
+	r, store, eng, _, _ := setupTestRouter(t)
+	compID := "chusen-league-delete-lots"
+	seedChusenCycle(t, store, eng, compID)
+
+	all, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	for i := range all {
+		if engine.IsPoolDaihyosenMatchID(all[i].ID) {
+			all[i].Winner, all[i].WinnerID = "", ""
+		}
+	}
+	require.NoError(t, store.SavePoolMatches(compID, all))
+
+	for i, id := range []string{"gamma-id", "alpha-id", "beta-id"} {
+		w := sendJSON(t, r, http.MethodPut, "/api/competitions/"+compID+"/pools/Pool%20A/override-rank",
+			map[string]any{"playerId": id, "rank": i + 1})
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	}
+	comp, err := store.LoadCompetition(compID)
+	require.NoError(t, err)
+	require.Equal(t, state.CompStatusComplete, comp.Status, "the lots finish the league")
+
+	w := sendJSON(t, r, http.MethodDelete, "/api/competitions/"+compID+"/overrides", nil)
+	require.Equal(t, http.StatusNoContent, w.Code, w.Body.String())
+
+	comp, err = store.LoadCompetition(compID)
+	require.NoError(t, err)
+	assert.Equal(t, state.CompStatusPools, comp.Status, "without the lots the tie is undecided again, so the league is back in play")
+}
+
 func TestChusenCandidates_IncludesTeamIdentity(t *testing.T) {
 	r, store, eng, _, _ := setupTestRouter(t)
 	compID := "chusen-identity"

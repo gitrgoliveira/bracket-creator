@@ -60,7 +60,13 @@ describe('tieBreakerReasonLine', () => {
 
   it('names the span of a larger level group', () => {
     const rows = [row('p1', 'Aki', 1, 4), row('p2', 'Bea', 2, 4), row('p3', 'Cal', 3, 4)];
-    expect(tieBreakerReasonLine(bout(), rows)).toBe('Tie-breaker for 1st to 3rd place. They finished level, so this bout helps separate them.');
+    expect(tieBreakerReasonLine(bout(), rows)).toBe('Part of the tie-breaker for 1st to 3rd place. These two finished level, so this bout helps separate them.');
+  });
+
+  it('does not claim a later round over some of a larger group is between all of them', () => {
+    const rows = [row('p1', 'Aki', 1, 4), row('p2', 'Bea', 2, 4), row('p3', 'Cal', 3, 4)];
+    const later = bout({ sideAId: 'p2', sideBId: 'p3' });
+    expect(tieBreakerReasonLine(later, rows)).toBe('Part of the tie-breaker for 1st to 3rd place. These two finished level, so this bout helps separate them.');
   });
 
   it('names no place when it cannot know one', () => {

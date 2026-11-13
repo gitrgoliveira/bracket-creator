@@ -221,8 +221,8 @@ reused, and a display index. The id is what a lineup position and a bout row rec
 member can be renamed without any record losing track of who fought. A team's member list is
 seeded with one member per position the competition's team size defines, plus two reserve
 positions, so a
-team has its shape before anyone is named. No member is ever removed, so an index is never freed and no
-renumbering question arises. Instead, an organiser can clear a name, which empties that position but keeps its id and index. That is possible only until the competition starts. After that, a name can still be corrected, which is what renaming is for: a bout row holds the member's
+team has its shape before anyone is named. A member is never removed, so an index is never freed and nothing
+is ever renumbered. Instead, an organiser can clear a name, which empties that position but keeps its id and index. That is possible only until the competition starts. After that, a name can still be corrected, which is what renaming is for: a bout row holds the member's
 id, so a bout already fought names the same person whatever the name is changed to. Adding a
 member stays available at any time, including after the start, because a team fields
 replacements mid tournament.
@@ -739,7 +739,7 @@ whichever reaches the server first:
 * A change stamped at or before the stored stamp is not applied: nothing is written and the
   answer carries the row as stored. Of two changes stamped in the same millisecond, the one
   that reaches the server first stands.
-* No marker is written for a row that was never checked in and has never been stamped.
+* A row that was never checked in and has never been stamped gets no marker.
 * The bare `checked_in` that every earlier release wrote is read as checked in at stamp 0, and
   a row with no marker as not checked in at stamp 0. A roster written by an earlier release
   therefore loads as it was and is not rewritten; any check-in tap, which carries a real
@@ -858,20 +858,27 @@ log is replayed at the next startup, so the group either lands completely or not
 A participant edit is one such group: the roster, the seeds and, while the competition is
 draw-ready, the pools, pool matches and bracket it renames the competitor in land together or
 not at all, so an edit the draw cannot take is refused whole.
+
 A staged step can also remove a file, applied in its place among the writes. Moving the team
 members of a competition recorded by version 2.0.0 from `squads.yaml` onto `team-members.yaml`
 is such a step when it happens inside a transaction: the new file and the removal of the old one
-land together, or neither does. A log that holds a removal is not applied by an earlier version
-of the app, which logs that it could not apply it and leaves it in `.wal/` for this version to
-finish. A log of a later version than the running one stops the app at startup.
-Every log records what each file held when it was written. A log can be left in `.wal/` while
-the app goes on (applying it or removing it failed, or an earlier version kept it), and later
-changes can then rewrite its files. Replaying it would put the older content back, so neither
-the next startup nor a backup applies it: at startup it is renamed to end in `.stale`, kept in
-`.wal/` and an error is logged. If a file a log names cannot be read at startup, the app does
-not start, and says which log and file, until the file can be read again. If committing a log
-fails, the log is removed, so a change reported as failed never lands later; if it cannot be
-removed, the change is reported as committed, to be finished at the next startup.
+land together, or neither does. An earlier version of the app does not apply a log that holds a
+removal: it logs that it could not, and leaves the log in `.wal/` for this version to finish. A
+log written by a later version than the one running stops the app at startup; start that later
+version to finish it.
+
+Every log this version writes records what each of its files held at the commit. A log can stay
+in `.wal/` while the app goes on (applying or removing it failed, or an earlier version could not
+apply it), and later changes can then rewrite its files. Replaying it would put the older content
+back, so neither the next startup nor a backup applies it. At startup it is renamed to end in
+`.stale`, kept in `.wal/`, and an error naming it is logged. The change it holds is not applied
+and the app never reads that file again: check the data the error names, then delete the file. A
+log written by an earlier version records nothing about its files, so it is replayed as before.
+
+If a file a log names cannot be read at startup, the app does not start, and names the log and
+the file; fix access to that file and start again. If committing a log fails, the log is removed,
+so a change reported as failed never lands later. If the log cannot be removed, the change is
+reported as committed instead, and the next startup finishes it.
 
 ```mermaid
 sequenceDiagram
@@ -1012,7 +1019,7 @@ stamped with format version `"v": 1`, containing either an event line (a scoring
 an ippon, foul, encho, or flag) or a baseline line (the state left by a non-tap write such as
 a finish, decision, correction, or migration). The pattern is explicitly per-match event sourcing
 (the match is rebuilt by replaying its log in timestamp order) with a client-side transactional
-outbox. No message broker is used: offline tablets hold the queue; order comes from when a tap
+outbox. The app uses no message broker: offline tablets hold the queue; order comes from when a tap
 was made, not when it arrived; the app is one binary that keeps its data in files.
 
 A tap is one event with its own id, the device's session and a sequence number within it, and
@@ -1038,7 +1045,7 @@ first bout has, sent back to the queue or not. The server adds
 them only where the first bout holds other names: when a write makes or changes that bout, and
 when a lineup or team member changes. They are ordered against the taps like any tap and never
 turn one away; they name who fought, never a score, so they reach a finished encounter too
-without moving its result. No device may send events under the session `server`: the request is
+without moving its result. The session `server` is reserved: a device that sends events under it is
 refused. A point entered on a kachinuki bout after it was removed, from a device that had not
 seen the removal, does not make the bout again, since it would have no fighters; it is kept in
 the match's history. Picking the bout's fighters adds it again.

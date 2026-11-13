@@ -303,9 +303,9 @@ flowchart TB
 The diagram shows the main files; [On disk layout](data-model.md#4-on-disk-layout) in the data
 model lists every file and what its columns mean.
 
-- **No database.** State is human-readable Markdown + CSV on disk, and each match keeps an
-  append-only log of its scoring taps and its writes (JSON lines) beside its audit history. Multi-file changes are made
-  durable through a write-ahead log replayed on startup. The disk survives reboots and stop/start.
+- **Files, not a database.** State is human-readable Markdown + CSV on disk, and each match keeps an
+  append-only log of its scoring taps and its writes (JSON lines) beside its audit history. Every write made
+  inside a transaction is made durable through a write-ahead log replayed on startup. The disk survives reboots and stop/start.
 - **Backups.** The app takes a daily copy of the whole tournament into `tournament-data/backups/` when the data changed, and another at a normal shutdown if anything changed since the newest daily copy. The admin console also downloads a backup on demand. Those copies sit on the same disk, so keep a downloaded archive or a disk snapshot off the VM as well. A plain copy of `tournament-data/` taken while the server runs can catch a multi-file write half done; stop the server first. Refer to [Backup and restore](../user-guide/organisers/backup-and-restore.md).
 - **Disk sizing is not about data volume.** Tournament state is tiny (KB–MB). The cloud disks
   (30 GB on GCP, 50 GB on Oracle) are the free-tier **boot-disk** allowances (they hold the OS,

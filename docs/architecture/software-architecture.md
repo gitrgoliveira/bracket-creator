@@ -175,7 +175,7 @@ flowchart TB
 | handlers | `handlers_*.go` | The REST routes, grouped below |
 | coalescer | `broadcast_coalescer.go` | Sends a match's `match_updated` pushes; a running match's at most 4 a second |
 | SSE hub | `hub.go` | Seq stamping, replay ring, resync, heartbeat |
-| backup job | `scheduled_backup.go` | Hourly check, a copy a day when the tournament changed |
+| backup job | `scheduled_backup.go` | Hourly check, a copy a day when the tournament changed, and one at a clean shutdown |
 
 The page itself (the compiled SPA, its CSS and vendored libraries) is served from the assets
 embedded in the binary (`internal/resources`). Every goroutine a handler spawns goes through
@@ -197,6 +197,8 @@ decision or any other change to the match is sent at once. Competition-wide refr
 other events go to the hub directly. The scheduled backup job runs beside the
 handlers: it checks on startup and then every hour, and writes a copy to the data folder's
 `backups/` directory when the newest one is at least a day old and the tournament has changed.
+A clean shutdown takes one more copy when the tournament has changed since the newest one,
+however recent that is.
 
 Server hardening (constants in `cmd/mobile_app.go`): `ReadHeaderTimeout 10s`, `ReadTimeout 30s`,
 `IdleTimeout 120s`, `MaxHeaderBytes 1 MB`, **`WriteTimeout 0`** (SSE streams are infinite;
@@ -299,7 +301,7 @@ sequenceDiagram
 12. The answer carries the result.
 
 Core invariant: **persist then broadcast**. A write is durable
-(`fsync` + atomic rename, WAL for multi-file changes) before the 200 and before any SSE
+(`fsync` + atomic rename, WAL for every write made inside a transaction) before the 200 and before any SSE
 fan-out. Scoring is ACID. A legitimate operator change is never dropped.
 
 ### The outbox

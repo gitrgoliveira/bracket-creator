@@ -2979,7 +2979,8 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		}
 		if conflict != nil {
 			if addTiebreakBouts {
-				tryAutoCompletePools(c, eng, hub, id)
+				answerCompleteRefusedByIndividualLeagueTie(c, eng, hub, store, id, conflict)
+				return
 			}
 			c.JSON(http.StatusConflict, conflict)
 			return

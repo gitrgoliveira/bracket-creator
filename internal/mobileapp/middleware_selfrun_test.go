@@ -696,6 +696,50 @@ func TestComplete_IndividualLeagueTieAddsItsTiebreakBouts(t *testing.T) {
 	assert.Equal(t, 3, bouts, "the refusal adds the tie-break bouts the three tied players owe")
 }
 
+// leagueScanEngine is a ScoringEngine whose scan answers a fixed outcome and error.
+type leagueScanEngine struct {
+	stubScoringEngine
+	outcome engine.AutoCompleteOutcome
+	err     error
+}
+
+func (e leagueScanEngine) MaybeAutoCompletePools(string) (engine.AutoCompleteOutcome, error) {
+	return e.outcome, e.err
+}
+
+type leagueScanStore struct{ comp *state.Competition }
+
+func (s leagueScanStore) LoadCompetition(string) (*state.Competition, error) { return s.comp, nil }
+
+// The refusal of POST .../complete for a tied individual league is worded from
+// what the scan did: bouts added, a failed or empty scan, or a league the scan
+// finished because a racing score settled the tie.
+func TestAnswerCompleteRefusedByIndividualLeagueTie_WordsTheScanOutcome(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	refusal := gin.H{"code": "league_tiebreak_pending", "error": "Their tie-break bouts have been added to the schedule."}
+	cases := []struct {
+		name     string
+		engine   leagueScanEngine
+		wantCode int
+		wantText string
+	}{
+		{"bouts added", leagueScanEngine{outcome: engine.AutoCompleteTiebreakInjected}, http.StatusConflict, "have been added"},
+		{"scan failed", leagueScanEngine{err: fmt.Errorf("disk")}, http.StatusConflict, "could not be added"},
+		{"scan changed nothing", leagueScanEngine{outcome: engine.AutoCompleteNoChange}, http.StatusConflict, "could not be added"},
+		{"racing score settled the tie", leagueScanEngine{outcome: engine.AutoCompleteTransitioned}, http.StatusOK, string(state.CompStatusComplete)},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(w)
+			store := leagueScanStore{comp: &state.Competition{ID: "l", Status: state.CompStatusComplete}}
+			answerCompleteRefusedByIndividualLeagueTie(c, tc.engine, stubBroadcaster{}, store, "l", refusal)
+			assert.Equal(t, tc.wantCode, w.Code, w.Body.String())
+			assert.Contains(t, w.Body.String(), tc.wantText)
+		})
+	}
+}
+
 // A Swiss competition is finished only once every configured round has been
 // drawn and played: the matches of the rounds drawn so far being complete is
 // not enough.

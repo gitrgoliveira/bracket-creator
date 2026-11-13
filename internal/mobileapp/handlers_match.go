@@ -605,6 +605,34 @@ func tryAutoCompletePools(c *gin.Context, eng ScoringEngine, hub Broadcaster, co
 	answerAutoComplete(c, hub, compID, outcome, err)
 }
 
+// answerCompleteRefusedByIndividualLeagueTie answers POST .../complete for an
+// individual league whose places are still tied. Such a league has no
+// tie-breaker control, so the scan adds the tie-break bouts, and the scan's
+// outcome words the answer: 409 saying the bouts were added only when they were,
+// 409 saying they could not be when the scan failed or changed nothing, and 200
+// with the competition when a racing score settled the tie and the scan finished
+// the league, in which case the completion asked for has happened.
+func answerCompleteRefusedByIndividualLeagueTie(c *gin.Context, eng ScoringEngine, hub Broadcaster, store interface {
+	LoadCompetition(id string) (*state.Competition, error)
+}, compID string, refusal gin.H) {
+	outcome, err := eng.MaybeAutoCompletePools(compID)
+	answerAutoComplete(c, hub, compID, outcome, err)
+	switch {
+	case err == nil && outcome == engine.AutoCompleteTransitioned:
+		finished, lerr := store.LoadCompetition(compID)
+		if lerr != nil || finished == nil {
+			internalError(c, fmt.Errorf("reload finished competition %s: %v", compID, lerr))
+			return
+		}
+		hub.Broadcast(EventTournamentUpdated, nil)
+		c.JSON(http.StatusOK, finished)
+	case err != nil || outcome != engine.AutoCompleteTiebreakInjected:
+		c.JSON(http.StatusConflict, gin.H{"code": refusal["code"], "error": "Some places are still tied, and their tie-break bouts could not be added. Reload the page and try again."})
+	default:
+		c.JSON(http.StatusConflict, refusal)
+	}
+}
+
 // tryAutoCompletePoolsAfterWrite is tryAutoCompletePools for a door that has
 // just written the given matches (a score, a decision, a bulk batch): it asks
 // engine.MaybeAutoCompletePoolsAfterWrite, which skips the knockout-status

@@ -25,6 +25,7 @@ type standingsTokens struct {
 	overridesMtime     int64
 	poolsMtime         int64
 	configMtime        int64
+	bracketMtime       int64
 	poolMatchesVersion uint64
 	overridesVersion   uint64
 	poolsVersion       uint64
@@ -33,6 +34,11 @@ type standingsTokens struct {
 	// the format, so a settings save that flips one of those must invalidate
 	// a live entry just as a pools.csv or pool-matches.csv write does.
 	configVersion uint64
+	// bracket.json is an input too: a mixed competition's standings mark a tie
+	// out of band (TieOutOfBand) from the placeholders the stored draw holds for
+	// the qualifier places, so a bracket-only rewrite (ResolveQualifiedPools
+	// filling a draw in) must invalidate a live entry.
+	bracketVersion uint64
 }
 
 type standingsCacheEntry struct {

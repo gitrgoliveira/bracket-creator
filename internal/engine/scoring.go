@@ -1935,6 +1935,7 @@ func (e *Engine) sampleStandingsTokens(compId string) standingsTokens {
 	t.overridesMtime, t.overridesVersion = e.store.FileToken(compId, "overrides.json")
 	t.poolsMtime, t.poolsVersion = e.store.FileToken(compId, "pools.csv")
 	t.configMtime, t.configVersion = e.store.FileToken(compId, "config.md")
+	t.bracketMtime, t.bracketVersion = e.store.FileToken(compId, "bracket.json")
 	return t
 }
 

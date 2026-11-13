@@ -695,29 +695,22 @@ func (e *Engine) takeLeagueReopenNote(compID string) bool {
 }
 
 // reopenFinishedLeagueIfOpen puts a finished league back into match play when
-// one of its pool rows is no longer played (poolMatchesSettled): a regular
+// it no longer holds the verdict it finished on (PoolsSettledNow): a regular
 // match or a tie-break bout reopened, a send back to the queue having reached
-// it outside a result write (reconcileLeagueAfterWrite covers those), or a drawn
+// it outside a result write (reconcileLeagueAfterWrite covers those), a drawn
 // tie-break bout that settled only while both its sides were barred and one has
-// been reinstated since. Decided under the competition's lock.
+// been reinstated since, or the lots that alone ordered a decisive circle
+// cleared. Decided under the competition's lock.
 func (e *Engine) reopenFinishedLeagueIfOpen(compID string) (bool, error) {
 	return e.store.UpdateCompetitionChangedTx(compID, func(tx state.StoreTx, comp *state.Competition) (*state.Competition, error) {
 		if comp == nil || comp.Format != state.CompFormatLeague || comp.Status != state.CompStatusComplete {
 			return nil, nil
 		}
-		matches, err := tx.LoadPoolMatches(compID)
+		verdict, err := e.PoolsSettledNow(tx, compID)
 		if err != nil {
 			return nil, err
 		}
-		lots, err := loadPoolLots(matches, sync.OnceValues(func() (map[string][]state.PlayerStanding, error) {
-			return e.computeStandingsFrom(tx, compID)
-		}), func() (map[string]domain.CompetitorStatus, error) {
-			return tx.LoadCompetitorStatus(compID)
-		})
-		if err != nil {
-			return nil, err
-		}
-		if poolMatchesSettled(matches, lots) {
+		if verdict == PoolsSettled {
 			return nil, nil
 		}
 		if _, err := e.reopenLeagueTx(tx, compID, comp); err != nil {

@@ -4893,6 +4893,32 @@ func TestDeleteOverrides_ReopensALeagueTheLotsHadSettled(t *testing.T) {
 	assert.Equal(t, state.CompStatusPools, comp.Status, "without the lots the tie is undecided again, so the league is back in play")
 }
 
+// TestDeleteOverrides_ReopensALeagueWhoseDecisiveCircleOnlyTheLotsOrdered: the
+// ordinary case lots are offered for, a true A>B>C>A daihyosen circle with every
+// bout fought and won. Every pool row is played, so only the league's verdict
+// (PoolsChusenOwed) tells that clearing the lots leaves it undecided.
+func TestDeleteOverrides_ReopensALeagueWhoseDecisiveCircleOnlyTheLotsOrdered(t *testing.T) {
+	r, store, eng, _, _ := setupTestRouter(t)
+	compID := "chusen-league-delete-lots-circle"
+	seedChusenCycle(t, store, eng, compID)
+
+	for i, id := range []string{"gamma-id", "alpha-id", "beta-id"} {
+		w := sendJSON(t, r, http.MethodPut, "/api/competitions/"+compID+"/pools/Pool%20A/override-rank",
+			map[string]any{"playerId": id, "rank": i + 1})
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	}
+	comp, err := store.LoadCompetition(compID)
+	require.NoError(t, err)
+	require.Equal(t, state.CompStatusComplete, comp.Status, "the lots finish the league")
+
+	w := sendJSON(t, r, http.MethodDelete, "/api/competitions/"+compID+"/overrides", nil)
+	require.Equal(t, http.StatusNoContent, w.Code, w.Body.String())
+
+	comp, err = store.LoadCompetition(compID)
+	require.NoError(t, err)
+	assert.Equal(t, state.CompStatusPools, comp.Status, "the circle is level again without its lots, so the league is back in play")
+}
+
 func TestChusenCandidates_IncludesTeamIdentity(t *testing.T) {
 	r, store, eng, _, _ := setupTestRouter(t)
 	compID := "chusen-identity"

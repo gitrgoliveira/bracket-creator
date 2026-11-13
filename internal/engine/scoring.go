@@ -2242,7 +2242,10 @@ func applyPoolRanksInForce(sorted []state.PlayerStanding, inForce map[string]int
 //     whose groups are the ties still open in the band, which
 //     markTiedStandings stamps Tied): it reads its best place (1, 1, 3)
 //     (operator decision N2a). Only the rank changes: the rows keep their
-//     order, so a reader of the first row (the winner line) is unchanged.
+//     order, so a reader of the first row (the winner line) is unchanged;
+//   - a tie whose ippon-shobu bout was recorded as a draw, which only two
+//     barred sides take (drawnTiebreakOfBarredSides): nobody can fight it, so
+//     the level members share their best place and no row is crowned.
 //
 // It is a no-op for non-leagues. A tied group whose members hold a rank in
 // force (IsOverridden, poolRanksInForce) keeps its sequential ranks, since the
@@ -2274,7 +2277,7 @@ func applyJointThirdRanks(comp *state.Competition, sorted []state.PlayerStanding
 		jointThird := comp.EffectiveTwoThirdPlaces() && minRank >= 3
 		outOfBand := !slices.ContainsFunc(group, func(s state.PlayerStanding) bool { return !s.TieOutOfBand })
 		accepted := comp.LeagueTiebreakFinalized && !slices.ContainsFunc(group, func(s state.PlayerStanding) bool { return !s.Tied })
-		if !jointThird && !outOfBand && !accepted {
+		if !jointThird && !outOfBand && !accepted && !groupHoldsDrawnTiebreaker(group, matches) {
 			continue
 		}
 		at := 0
@@ -2286,6 +2289,23 @@ func applyJointThirdRanks(comp *state.Competition, sorted []state.PlayerStanding
 			}
 		}
 	}
+}
+
+// groupHoldsDrawnTiebreaker reports a drawn ippon-shobu ("-TB-") bout between
+// two members of group. It is read off the bout alone, never the competitors'
+// statuses, because a standings entry must not depend on a file the standings
+// cache does not key on (poolStandingsLoader); the decision door records that
+// draw for two barred sides and for nothing else.
+func groupHoldsDrawnTiebreaker(group []state.PlayerStanding, matches []state.MatchResult) bool {
+	ids := make(map[string]bool, len(group))
+	for _, s := range group {
+		if s.Player.ID != "" {
+			ids[s.Player.ID] = true
+		}
+	}
+	return slices.ContainsFunc(matches, func(m state.MatchResult) bool {
+		return IsTiebreakerMatchID(m.ID) && drawnSupplementaryBout(&m) && ids[m.SideAID] && ids[m.SideBID]
+	})
 }
 
 // markTiedStandings sets Tied=true on standings rows that are genuinely tied

@@ -165,6 +165,49 @@ func TestApplyJointThirdRanks_AcceptedGroupSharesOnlyWithinLevelRuns(t *testing.
 	})
 }
 
+// An individual league's ippon-shobu bout between two barred sides is recorded
+// as a draw nobody can fight: the level pair shares its place instead of one of
+// them being crowned by the sort's tie-break on id.
+func TestApplyJointThirdRanks_DrawnTiebreakerSharesItsPlace(t *testing.T) {
+	individual := &state.Competition{Format: state.CompFormatLeague}
+	three := func() []state.PlayerStanding {
+		sorted := make([]state.PlayerStanding, 0, 3)
+		for i, id := range []string{"a", "b", "c"} {
+			pts := 100
+			if id == "c" {
+				pts = 50
+			}
+			s := rankedStanding(id, pts, i+1)
+			s.Player.ID = id
+			sorted = append(sorted, s)
+		}
+		return stamped(sorted, 0, 1, true, false)
+	}
+	bout := func(sideA, sideB, winner string) state.MatchResult {
+		return state.MatchResult{ID: "Pool A-TB-1", SideAID: sideA, SideBID: sideB,
+			Status: state.MatchStatusCompleted, Winner: winner, WinnerID: winner}
+	}
+
+	t.Run("a drawn bout between the level pair shares 1st", func(t *testing.T) {
+		sorted := three()
+		applyJointThirdRanks(individual, sorted, []state.MatchResult{bout("a", "b", "")})
+		assert.Equal(t, []int{1, 1, 3}, ranksOf(sorted))
+		assert.Equal(t, "a", sorted[0].Player.ID, "the rows keep their order")
+	})
+
+	t.Run("a fought bout keeps the sequential ranks", func(t *testing.T) {
+		sorted := three()
+		applyJointThirdRanks(individual, sorted, []state.MatchResult{bout("a", "b", "a")})
+		assert.Equal(t, []int{1, 2, 3}, ranksOf(sorted))
+	})
+
+	t.Run("a drawn bout of another pair shares nothing here", func(t *testing.T) {
+		sorted := three()
+		applyJointThirdRanks(individual, sorted, []state.MatchResult{bout("b", "c", "")})
+		assert.Equal(t, []int{1, 2, 3}, ranksOf(sorted))
+	})
+}
+
 // TestCalculatePoolStandings_AcceptedTieSharesItsPlace drives the team league
 // through the standings: the tie at 1st reads 1, 2 while it waits for the
 // operator and 1, 1 once the shared ranks are accepted, with the rows in the

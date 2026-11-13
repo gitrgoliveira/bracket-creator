@@ -645,6 +645,57 @@ func TestSelfRun_Complete_RefusesALeagueWithAnUndecidedPlace(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 }
 
+// An individual league has no tie-breaker control on the Pools tab: its
+// tie-break bouts are added by the scan. A completion refused for a tie that has
+// no bout yet adds them rather than pointing at a control that is not there.
+func TestComplete_IndividualLeagueTieAddsItsTiebreakBouts(t *testing.T) {
+	store := newTempStore(t)
+	seedSelfRunTournament(t, store)
+	r := setupSelfRunRouter(t, store, NewFileVerifier(store))
+
+	const compID = "indiv-league-tie"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: compID, Name: compID, Format: state.CompFormatLeague, Status: state.CompStatusPools, Courts: []string{"A"},
+	}))
+	players := []helper.Player{
+		{ID: "p1-id", Name: "P1", Dojo: "Dojo 1"}, {ID: "p2-id", Name: "P2", Dojo: "Dojo 2"}, {ID: "p3-id", Name: "P3", Dojo: "Dojo 3"},
+	}
+	require.NoError(t, store.SavePools(compID, []helper.Pool{{PoolName: "Pool A", Players: players}}))
+	var matches []state.MatchResult
+	idx := 0
+	for i := range players {
+		for j := i + 1; j < len(players); j++ {
+			matches = append(matches, state.MatchResult{
+				ID: fmt.Sprintf("Pool A-%d", idx), SideA: players[i].Name, SideB: players[j].Name,
+				SideAID: players[i].ID, SideBID: players[j].ID, Status: state.MatchStatusCompleted,
+				Decision: string(domain.DecisionHikiwake),
+			})
+			idx++
+		}
+	}
+	require.NoError(t, store.SavePoolMatches(compID, matches))
+
+	req := httptest.NewRequest(http.MethodPost, "/api/competitions/"+compID+"/complete", nil)
+	req.Header.Set("X-Tournament-Password", "")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusConflict, w.Code, w.Body.String())
+	var body map[string]string
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+	assert.Equal(t, "league_tiebreak_pending", body["code"])
+	assert.NotContains(t, body["error"], "Pools tab", "an individual league has no tie-breaker control to point at")
+
+	stored, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	var bouts int
+	for _, m := range stored {
+		if engine.IsTiebreakerMatchID(m.ID) {
+			bouts++
+		}
+	}
+	assert.Equal(t, 3, bouts, "the refusal adds the tie-break bouts the three tied players owe")
+}
+
 // A Swiss competition is finished only once every configured round has been
 // drawn and played: the matches of the rounds drawn so far being complete is
 // not enough.

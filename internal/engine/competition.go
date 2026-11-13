@@ -99,7 +99,7 @@ func (e *Engine) PoolsSettledNow(tx state.StoreTx, compID string) (PoolsVerdict,
 	if !comp.LeagueTiebreakFinalized && tieBreakOwed(comp, pools, bracket, st, matches) {
 		return PoolsTiebreakOwed, nil
 	}
-	if comp.TeamSize > 0 && dhCycleExists(st, matches, newBreakBand(comp, pools, bracket)) {
+	if comp.IsTeam() && dhCycleExists(st, matches, newBreakBand(comp, pools, bracket)) {
 		return PoolsChusenOwed, nil
 	}
 	return PoolsSettled, nil
@@ -111,7 +111,7 @@ func (e *Engine) PoolsSettledNow(tx state.StoreTx, compID string) (PoolsVerdict,
 // exactly while an injection or the operator's tie-breaker would still add a
 // bout). standings are the competition's computed pool standings.
 func tieBreakOwed(comp *state.Competition, pools []helper.Pool, bracket *state.Bracket, standings map[string][]state.PlayerStanding, matches []state.MatchResult) bool {
-	daihyosen := comp.TeamSize > 0
+	daihyosen := comp.IsTeam()
 	for _, p := range pools {
 		var existing []state.MatchResult
 		for _, m := range matches {

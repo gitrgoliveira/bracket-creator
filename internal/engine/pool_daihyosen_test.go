@@ -121,8 +121,8 @@ func TestGeneratePoolDaihyosenMatches_SkipsExistingPairs(t *testing.T) {
 // SideAID/SideBID both read the shared id back.
 //
 // The dedup scan is deliberately id-only (ids[m.SideAID] && ids[m.SideBID]),
-// with NO m.SideAID != m.SideBID guard: that guard belongs to the three
-// real self-pair PREVENTION sites (groupNeedsChusen, leagueGroupHasDH,
+// with NO m.SideAID != m.SideBID guard: that guard belongs to the two
+// real self-pair PREVENTION sites (groupNeedsChusen and
 // applyTiebreakSort), which decide whether a bout counts toward a win or a
 // needs-chusen verdict -- not whether a row already on disk is remembered.
 // Adding it here instead would make re-injection over the same group

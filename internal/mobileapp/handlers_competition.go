@@ -2889,7 +2889,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		var compOut *state.Competition
 		var statusErr, bracketFault, matchesFault error
 		var conflict gin.H
-		var notFoundFlag bool
+		var addTiebreakBouts, notFoundFlag bool
 		// tx.LoadPoolMatches skips the first-read legacy conversion the
 		// store's own read runs; run it first, as AdvanceSwissRound does.
 		store.EnsureLegacyUpgraded(id)
@@ -2937,7 +2937,14 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 					statusErr = fmt.Errorf("all matches must be completed before this competition can be finished")
 					return nil
 				case engine.PoolsTiebreakOwed:
-					conflict = gin.H{"code": "league_tiebreak_pending", "error": "Some places are still tied. Run the tie-breaker on the Pools tab before this competition can be finished."}
+					if current.IsTeam() {
+						conflict = gin.H{"code": "league_tiebreak_pending", "error": "Some places are still tied. Run the tie-breaker on the Pools tab before this competition can be finished."}
+					} else {
+						// An individual league has no tie-breaker control: the
+						// scan adds its bouts, so add them once the lock is released.
+						addTiebreakBouts = true
+						conflict = gin.H{"code": "league_tiebreak_pending", "error": "Some places are still tied. Their tie-break bouts have been added to the schedule: play them before this competition can be finished."}
+					}
 					return nil
 				case engine.PoolsChusenOwed:
 					conflict = gin.H{"code": "league_chusen_pending", "error": "A tie-breaker left some places tied. Draw lots for them on the Pools tab before this competition can be finished."}
@@ -2971,6 +2978,9 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			return
 		}
 		if conflict != nil {
+			if addTiebreakBouts {
+				tryAutoCompletePools(c, eng, hub, id)
+			}
 			c.JSON(http.StatusConflict, conflict)
 			return
 		}

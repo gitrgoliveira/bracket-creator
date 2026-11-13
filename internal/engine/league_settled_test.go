@@ -199,6 +199,18 @@ func TestPoolsSettledNow_LeagueOwesItsBreaks(t *testing.T) {
 		require.NoError(t, store.SaveRankOverride(compID, "Pool A", teamID("Gamma"), 5))
 		assert.Equal(t, PoolsSettled, poolsVerdictNow(t, eng, store, compID), "the lots decide the circle")
 	})
+	t.Run("a team kind with no team size still owes the lots for a circle", func(t *testing.T) {
+		const compID = "verdict-chusen-owed-kind-only"
+		eng, store := cycleLeagueAt3rd(t, compID)
+		_, err := eng.GenerateLeagueTiebreakMatches(compID, []string{teamID("Gamma"), teamID("Delta"), teamID("Epsilon")})
+		require.NoError(t, err)
+		scoreInjectedDH(t, eng, store, compID, circle)
+		comp, err := store.LoadCompetition(compID)
+		require.NoError(t, err)
+		comp.TeamSize = 0 // hand-edited: Kind alone says it is a team competition
+		require.NoError(t, store.SaveCompetition(comp))
+		assert.Equal(t, PoolsChusenOwed, poolsVerdictNow(t, eng, store, compID))
+	})
 	t.Run("a tie-breaker run for one pair only", func(t *testing.T) {
 		const compID = "verdict-tiebreak-partial"
 		eng, store := cycleLeagueAt3rd(t, compID)

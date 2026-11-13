@@ -472,8 +472,8 @@ func generateTiebreakerMatches(poolName string, tiedGroup []state.PlayerStanding
 	ids := groupMemberIDs(tiedGroup)
 	existingPairs := make(map[string]bool, len(existingRows))
 	for _, m := range existingRows {
-		// No m.SideAID != m.SideBID guard here (unlike the three real
-		// self-pair PREVENTION sites, groupNeedsChusen/leagueGroupHasDH/
+		// No m.SideAID != m.SideBID guard here (unlike the two real
+		// self-pair PREVENTION sites, groupNeedsChusen and
 		// applyTiebreakSort): this scan only remembers what is already on
 		// disk, it does not decide what to generate. A self-referential
 		// stored row (SideAID == SideBID, reachable when two distinct
@@ -675,8 +675,8 @@ func (e *Engine) InjectTiebreakerMatches(compID string) ([]state.MatchResult, er
 
 // groupMemberIDs returns the set of participant ids among a tied group's
 // members, shared by applyTiebreakSort, groupNeedsChusen (chusen.go),
-// leagueGroupHasDH (competition.go), generateTiebreakerMatches and
-// generatePoolDaihyosenMatches (daihyosen.go). All five ask the same
+// generateTiebreakerMatches and generatePoolDaihyosenMatches (daihyosen.go).
+// All four ask the same
 // question of the same kind of data: a supplementary bout names two sides,
 // and the caller needs to know whether each is a member of THIS tied group.
 //

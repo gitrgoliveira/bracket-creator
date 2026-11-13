@@ -2512,10 +2512,14 @@ paths:
         '409':
           description: |
             A league whose matches are all played still has a place to decide,
-            and nothing was changed. `code: league_tiebreak_pending`: a tie in
-            the band has no tie-breaker yet (a team league runs it on the Pools
-            tab; for an individual league the refusal itself adds the bouts).
-            `code: league_chusen_pending`: a tie-breaker left a tie level. A
+            and the competition was not completed. `code:
+            league_tiebreak_pending`: a tie in the band has no tie-breaker yet.
+            A team league runs it on the Pools tab, and nothing is changed. An
+            individual league has no such control, so the refusal also adds the
+            tie-break bouts to the schedule and announces them; its `error`
+            says whether they were added. If a score recorded at the same
+            moment settles the tie, the answer is a 200 and the league is
+            completed instead. `code: league_chusen_pending`: a tie-breaker left a tie level. A
             team tie is then decided by drawing lots; an individual one by
             another tie-breaker round (`POST .../pools/{poolId}/tiebreak-round`)
             or, if the organiser chooses, by drawing lots. `error` is a

@@ -587,7 +587,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
   const dhRowsOfGroup = (teamIds) => {
     const idSet = new Set(teamIds || []);
     return (poolMatches || []).filter(m =>
-      m.id && /(-DH-)/.test(m.id) && idSet.has(m.sideAId) && idSet.has(m.sideBId));
+      isPoolDaihyosenBout(m.id) && idSet.has(m.sideAId) && idSet.has(m.sideBId));
   };
 
   // Does the group hold a daihyosen bout for EVERY pair of its teams? The

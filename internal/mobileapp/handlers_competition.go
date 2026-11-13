@@ -802,38 +802,6 @@ func poolHasPlayerID(players []domain.Player, playerID string) error {
 	return fmt.Errorf("playerId %q not found in this pool", playerID)
 }
 
-// lotsOfferedFor reports whether every competitor ranks names belongs to a
-// tie of pool poolName that the chusen panel offers lots for
-// (engine.ChusenStatus, waiting or already recorded): for an individual
-// competition, a group a finished ippon-shobu round left level (decision F5).
-// The panel and the override-rank door ask the one rule, so the door accepts
-// exactly the lots the panel offers. Competitors are matched by id only.
-func lotsOfferedFor(eng *engine.Engine, compID, poolName string, ranks []engine.RankOverride) (bool, error) {
-	report, err := eng.ChusenStatus(compID)
-	if err != nil {
-		return false, err
-	}
-	offered := map[string]bool{}
-	for _, groups := range [][]engine.ChusenGroup{report.Pending, report.Recorded} {
-		for _, g := range groups {
-			if g.PoolName != poolName {
-				continue
-			}
-			for _, s := range g.Teams {
-				if s.Player.ID != "" {
-					offered[s.Player.ID] = true
-				}
-			}
-		}
-	}
-	for _, r := range ranks {
-		if !offered[r.PlayerID] {
-			return false, nil
-		}
-	}
-	return len(ranks) > 0, nil
-}
-
 // loadAllCompetitions lists every competition id on disk and loads its
 // config, skipping (not failing on) an id whose own load errors -- one
 // unreadable competition record must not blank the whole list, matching
@@ -3154,26 +3122,6 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			c.JSON(http.StatusConflict, gin.H{"error": "rank overrides only accepted while competition is in pools stage, in knockout stage for a pools + knockout competition, or for a finished league"})
 			return
 		}
-		// Lots are drawn over a team tie a daihyosen left level, and over an
-		// individual tie only once a finished ippon-shobu round has gone in a
-		// circle, where the operator may choose them over another round
-		// (decision F5): both are what ChusenStatus reports. Any other
-		// individual tie is decided by an ippon-shobu, so no rank is set by
-		// hand there.
-		if !comp.IsTeam() {
-			offered, err := lotsOfferedFor(eng, id, poolId, ranks)
-			if err != nil {
-				if respondIfCorruptOverrides(c, err) {
-					return
-				}
-				respondEngineError(c, err)
-				return
-			}
-			if !offered {
-				c.JSON(http.StatusConflict, gin.H{"code": "rank_override_not_level", "error": "Lots are drawn for an individual tie only after a tie-breaker round has left it level. Until then it is decided by an ippon-shobu."})
-				return
-			}
-		}
 		// Pool-size validation: rank within a pool is bounded by the
 		// number of players in that pool. Load the comp's pools and
 		// look up the target pool by name (the URL: poolId matches
@@ -3212,6 +3160,14 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			}
 		}
 
+		// Lots are drawn over a team tie a daihyosen left level, and over an
+		// individual tie only once a finished ippon-shobu round has gone in a
+		// circle, where the operator may choose them over another round
+		// (decision F5): both are what ChusenStatus reports. Any other
+		// individual tie is decided by an ippon-shobu, so no rank is set by
+		// hand there. The engine judges it under the competition's lock, with
+		// the write (engine.ErrRankOverrideNotLevel).
+		//
 		// A rank override moves the pool's order without a match write, so it
 		// answers for the knockout the pool feeds exactly as a pool result
 		// correction does: the same 409s, the same confirmation, the same
@@ -3226,6 +3182,8 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			})
 			if err != nil {
 				switch {
+				case errors.Is(err, engine.ErrRankOverrideNotLevel):
+					c.JSON(http.StatusConflict, gin.H{"code": "rank_override_not_level", "error": "Lots are drawn for an individual tie only after a tie-breaker round has left it level. Until then it is decided by an ippon-shobu."})
 				case respondIfDownstreamKnockoutRunning(c, err):
 				case respondIfDownstreamKnockoutPlayed(c, err):
 				case respondIfEngineWriteError(c, err):
@@ -3425,18 +3383,14 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		}
 		if changed {
 			hub.Broadcast(EventTournamentUpdated, nil)
-			comp, err := store.LoadCompetition(id)
-			if err != nil {
-				internalError(c, err, "failed to load competition")
-				return
-			}
-			if comp != nil && (comp.Format == state.CompFormatMixed || comp.Format == state.CompFormatLeague) {
-				// Removing the lots can unsettle a pool or a finished league
-				// they had decided, exactly as a new order can settle one: the
-				// auto-complete pass reopens or completes to match, as the PUT
-				// door does after its own change.
-				tryAutoCompletePools(c, eng, hub, id)
-			}
+			// Removing the lots can unsettle a pool or a finished league they
+			// had decided, exactly as a new order can settle one: the
+			// auto-complete pass reopens or completes to match, as the PUT door
+			// does after its own change. The reset is already written and
+			// announced, so nothing here may answer an error for it: the pass
+			// is general (a competition with nothing to settle is a no-op) and
+			// reports its own failure as a header on this 204.
+			tryAutoCompletePools(c, eng, hub, id)
 		}
 		c.Status(http.StatusNoContent)
 	})

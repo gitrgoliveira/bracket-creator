@@ -397,8 +397,19 @@ func daihyosenLeftTied(group []state.PlayerStanding, allMatches []state.MatchRes
 //
 // Pools are returned in name order for stable output.
 func (e *Engine) ChusenStatus(compID string) (ChusenReport, error) {
+	return e.chusenStatusFrom(e.store, func() (map[string][]state.PlayerStanding, error) {
+		return e.CalculatePoolStandings(compID)
+	}, compID)
+}
+
+// chusenStatusFrom is ChusenStatus' body over any loader, so a write
+// transaction can ask it under its own lock (the override-rank door's check of
+// an individual's lots, overridePoolRanksTx) and the cached store path stays
+// the read door's. standings supplies the pool standings the same way
+// poolCompletion's does.
+func (e *Engine) chusenStatusFrom(loader poolStandingsLoader, standings func() (map[string][]state.PlayerStanding, error), compID string) (ChusenReport, error) {
 	var report ChusenReport
-	comp, err := e.store.LoadCompetition(compID)
+	comp, err := loader.LoadCompetition(compID)
 	if err != nil {
 		return report, err
 	}
@@ -410,37 +421,37 @@ func (e *Engine) ChusenStatus(compID string) (ChusenReport, error) {
 		return report, nil
 	}
 
-	standings, err := e.CalculatePoolStandings(compID)
+	poolStandingsByName, err := standings()
 	if err != nil {
 		return report, err
 	}
-	matches, err := e.store.LoadPoolMatches(compID)
+	matches, err := loader.LoadPoolMatches(compID)
 	if err != nil {
 		return report, err
 	}
 	matches = chusenMatches(comp, matches)
-	poolRanks, err := e.store.LoadPoolRanks(compID)
+	poolRanks, err := loader.LoadPoolRanks(compID)
 	if err != nil {
 		return report, err
 	}
-	pools, err := e.store.LoadPools(compID)
+	pools, err := loader.LoadPools(compID)
 	if err != nil {
 		return report, err
 	}
-	bracket, err := e.store.LoadBracket(compID)
+	bracket, err := loader.LoadBracket(compID)
 	if err != nil {
 		return report, err
 	}
 
-	poolNames := make([]string, 0, len(standings))
-	for name := range standings {
+	poolNames := make([]string, 0, len(poolStandingsByName))
+	for name := range poolStandingsByName {
 		poolNames = append(poolNames, name)
 	}
 	sort.Strings(poolNames)
 
 	band := newBreakBand(comp, pools, bracket)
 	for _, poolName := range poolNames {
-		poolStandings := standings[poolName]
+		poolStandings := poolStandingsByName[poolName]
 		for _, positions := range detectPoolTies(poolStandings) {
 			group := standingsAt(poolStandings, positions)
 			// Only a tie in the band a tie-breaker is held for warrants a

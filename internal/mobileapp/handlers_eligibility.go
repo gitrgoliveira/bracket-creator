@@ -146,7 +146,12 @@ func RegisterEligibilityHandlers(r *gin.RouterGroup, store CompetitorStatusStore
 // (a reinstatement, or a status written eligible): a finished league whose
 // drawn ippon-shobu bout settled only while both its sides were barred owes
 // that fight again, and the pass puts the league back into match play and
-// reports it (competition_started). Any other competition is left as it is.
+// reports it (competition_started). The pass is the general one, whatever the
+// format: a lifted bar can change who qualifies from a pool, so it also
+// re-evaluates pools, seats knockout slots and starts a draw-ready competition
+// whose first result this is, and announces what it did. Only a finished league
+// is ever reopened by it; a failed pass shows as AutoCompleteErrorHeader on the
+// reinstatement's 200.
 func settleAfterBarLifted(c *gin.Context, eng EligibilityEngine, hub Broadcaster, compID string) {
 	outcome, err := eng.MaybeAutoCompletePools(compID)
 	answerAutoComplete(c, hub, compID, outcome, err)

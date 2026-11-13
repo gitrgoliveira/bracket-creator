@@ -510,7 +510,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
             .then(comps => {
                 if (!mountedRef.current) return;
                 setCourtComps((prev) => keepNewerCompetitions(prev, comps));
-                forgetTieBreakerStandings();
+                forgetTieBreakerStandings(comps);
             })
             .catch(err => console.error("Failed to fetch court matches", err));
     }, [court]);
@@ -2969,15 +2969,23 @@ export function tieBreakerReasonLine(m, rows) {
 // The standings every unfinished tie-breaker row reads (the league table, or
 // the competition detail a pool's rows come from), shared per competition: the
 // rows of one competition ask for the same table, so they make one request, and
-// the court feed's refresh (forgetTieBreakerStandings) makes them read it again,
-// because the results it brings are what move a table. A failed read is not
-// kept, so the next refresh asks again.
+// the court feed's refresh (forgetTieBreakerStandings) makes a competition's
+// rows read it again only when that competition's pool results changed
+// (poolMatchesSignature, which a running bout's score ticks do not move),
+// because the results are what move a table. A failed read is not kept, so the
+// next refresh asks again.
 const sharedStandings = new Map();
-const standingsListeners = new Set();
+const lastPoolSignatures = new Map();
+const standingsListeners = new Map();
 
-export function forgetTieBreakerStandings() {
-    sharedStandings.clear();
-    standingsListeners.forEach((read) => read());
+export function forgetTieBreakerStandings(competitions) {
+    (competitions || []).forEach((c) => {
+        const signature = poolMatchesSignature(c.poolMatches);
+        if (lastPoolSignatures.get(c.id) === signature) return;
+        lastPoolSignatures.set(c.id, signature);
+        sharedStandings.delete(c.id);
+        (standingsListeners.get(c.id) || []).forEach((read) => read());
+    });
 }
 
 function readSharedStandings(compId, isLeague) {
@@ -3006,8 +3014,9 @@ export function TieBreakerReason({ m, className }) {
     useEffect(() => {
         if (!applies || !compId || !canRead) return undefined;
         const again = () => setReads((n) => n + 1);
-        standingsListeners.add(again);
-        return () => { standingsListeners.delete(again); };
+        if (!standingsListeners.has(compId)) standingsListeners.set(compId, new Set());
+        standingsListeners.get(compId).add(again);
+        return () => { standingsListeners.get(compId).delete(again); };
     }, [applies, compId, canRead]);
     useEffect(() => {
         if (!applies || !compId || !canRead) {

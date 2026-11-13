@@ -38,9 +38,14 @@ beforeAll(async () => {
 });
 
 afterAll(() => restoreGlobals());
+// A court feed for competition c1 whose one finished encounter was won by
+// `winner`; a different winner is a changed result.
+const feedOf = (winner, id = 'c1') => [{ id, poolMatches: [{ id: 'Pool A-0', status: 'completed', winner }] }];
+let resets = 0;
 afterEach(() => {
   cleanup();
-  forgetTieBreakerStandings();
+  // A feed no test used before forgets whatever c1 was read.
+  forgetTieBreakerStandings(feedOf(`reset-${resets++}`));
 });
 
 const row = (id, name, rank, points) => ({ player: { id, name }, rank, points });
@@ -123,13 +128,25 @@ describe('TieBreakerReason on the queue row', () => {
     expect(window.API.leagueStandings).toHaveBeenCalledTimes(1);
   });
 
-  it('reads the table again when the court feed refreshes, since a result moves it', async () => {
+  it('reads the table again when the court feed brings a changed result, since a result moves it', async () => {
     window.API.leagueStandings = vi.fn().mockResolvedValue([row('p1', 'Aki', 1, 4), row('p2', 'Bea', 2, 4)]);
+    act(() => forgetTieBreakerStandings(feedOf('Aki')));
     queueRow(bout());
     await waitFor(() => expect(screen.getByTestId('tiebreaker-reason').textContent).toMatch(/^Tie-breaker for 1st place\./));
     window.API.leagueStandings = vi.fn().mockResolvedValue([row('p0', 'Zed', 1, 6), row('p1', 'Aki', 2, 4), row('p2', 'Bea', 3, 4)]);
-    act(() => forgetTieBreakerStandings());
+    act(() => forgetTieBreakerStandings(feedOf('Bea')));
     await waitFor(() => expect(screen.getByTestId('tiebreaker-reason').textContent).toMatch(/^Tie-breaker for 2nd place\./));
+    expect(window.API.leagueStandings).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not read the table again for a feed that changed no result, or another competition\'s', async () => {
+    window.API.leagueStandings = vi.fn().mockResolvedValue([row('p1', 'Aki', 1, 4), row('p2', 'Bea', 2, 4)]);
+    act(() => forgetTieBreakerStandings(feedOf('Aki')));
+    queueRow(bout());
+    await waitFor(() => expect(screen.getByTestId('tiebreaker-reason').textContent).toMatch(/^Tie-breaker for 1st place\./));
+    expect(window.API.leagueStandings).toHaveBeenCalledTimes(1);
+    act(() => forgetTieBreakerStandings(feedOf('Aki')));
+    act(() => forgetTieBreakerStandings(feedOf('Bea', 'c2')));
     expect(window.API.leagueStandings).toHaveBeenCalledTimes(1);
   });
 

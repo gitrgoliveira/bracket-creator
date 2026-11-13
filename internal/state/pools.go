@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/csv"
 	"encoding/json"
+	"io"
 	"log/slog"
 	"maps"
 	"os"
@@ -48,8 +49,15 @@ func (s *Store) parsePoolsFile(path string) (any, error) {
 			slog.Warn("state: closing a read file failed", "path", path, "error", err)
 		}
 	}()
+	return parsePoolsReader(path, f)
+}
 
-	records, err := csv.NewReader(f).ReadAll()
+// parsePoolsReader parses pools.csv content. It is the one parser of the
+// file: parsePoolsFile feeds it the file on disk, and storeTx.LoadPools the
+// bytes its own transaction staged (read-your-own-writes). path is used only
+// to locate a warning.
+func parsePoolsReader(path string, r io.Reader) ([]helper.Pool, error) {
+	records, err := csv.NewReader(r).ReadAll()
 	if err != nil {
 		// Located for the same reason as the results file below: pools.csv is
 		// equally hand-editable and equally able to stop a competition.
@@ -199,7 +207,7 @@ func (s *Store) SavePools(compID string, pools []helper.Pool) error {
 	mu.Lock()
 	defer mu.Unlock()
 
-	return s.savePoolsLocked(compID, pools)
+	return s.savePoolsLocked(compID, pools, s.directWrite)
 }
 
 // loadPoolsLocked reads pools.csv directly from disk without acquiring the
@@ -217,15 +225,17 @@ func (s *Store) loadPoolsLocked(compID string) ([]helper.Pool, error) {
 
 // savePoolsLocked writes pools.csv without acquiring the per-competition lock.
 // Caller MUST already hold the per-comp write lock, typically from inside a
-// WithTransaction closure. Writes directly to disk (not WAL-staged) but is
-// crash-safe via atomicWrite.
-func (s *Store) savePoolsLocked(compID string, pools []helper.Pool) error {
+// WithTransaction closure. write decides where the bytes go, as for
+// savePoolMatchesLocked: Store.SavePools passes s.directWrite (atomic, durable),
+// storeTx.SavePools the transaction's writer, so pools.csv is staged in the WAL
+// and commits or aborts with the transaction's other files.
+func (s *Store) savePoolsLocked(compID string, pools []helper.Pool, write writeFn) error {
 	path := s.compPath(compID, "pools.csv")
 
-	// Build the CSV body in memory then write it atomically + durably
-	// via atomicWriteFile. Pool CSVs are small (<1MB even for large
-	// tournaments) so memory buffering is fine and gives us crash
-	// safety the os.Create + streaming pattern lacked.
+	// Build the CSV body in memory then hand it to write: the direct writer
+	// lands it atomically + durably via atomicWriteFile, a transaction's
+	// writer stages it in the WAL. Pool CSVs are small (<1MB even for large
+	// tournaments) so memory buffering is fine.
 	var buf bytes.Buffer
 	writer := csv.NewWriter(&buf)
 	for _, p := range pools {
@@ -244,13 +254,15 @@ func (s *Store) savePoolsLocked(compID string, pools []helper.Pool) error {
 		return err
 	}
 
-	if err := s.atomicWrite(path, buf.Bytes(), 0600); err != nil {
+	if err := write(path, buf.Bytes(), 0600); err != nil {
 		return err
 	}
 
 	if pools == nil {
 		pools = []helper.Pool{}
 	}
+	// Published at stage time inside a transaction, like pool-matches.csv: an
+	// abort drops this body and moves the version (invalidateCachesForWALIntents).
 	cache := s.getFileCache(compID, "pools.csv")
 	cache.mu.Lock()
 	cache.data = s.copyPools(pools)

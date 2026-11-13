@@ -15,7 +15,7 @@ import (
 // writes bracket.json in compID, as a transaction whose Apply failed does.
 func plantCommittedWAL(t *testing.T, s *Store, dir, compID, bracketJSON string) {
 	t.Helper()
-	w, err := wal.BeginTx(filepath.Join(dir, ".wal"), wal.NewWALID(), s.directWriteWAL)
+	w, err := wal.BeginTx(filepath.Join(dir, ".wal"), wal.NewWALID(), s.directWriteWAL, s.directRemoveWAL)
 	require.NoError(t, err)
 	w.Append(wal.FileIntent{Path: s.compPath(compID, "bracket.json"), Data: []byte(bracketJSON), Mode: 0o600})
 	require.NoError(t, w.Commit())
@@ -41,7 +41,7 @@ func TestRestore_AStaleWALIsNotReplayedOverTheRestore(t *testing.T) {
 			}
 		}
 	}
-	pending, err := wal.Scan(filepath.Join(dir, ".wal"), reopened.directWriteWAL)
+	pending, err := wal.Scan(filepath.Join(dir, ".wal"), reopened.directWriteWAL, reopened.directRemoveWAL)
 	require.NoError(t, err)
 	assert.Empty(t, pending, "the restore settled the WAL")
 }

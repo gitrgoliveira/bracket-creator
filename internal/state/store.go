@@ -208,15 +208,39 @@ func (s *Store) init() error {
 	// shouldn't block startup if the rest are healthy. The
 	// alternative (refuse to start) would brick a tournament over
 	// a single bad intent file.
-	pending, err := wal.Scan(s.walDir, s.directWriteWAL)
+	pending, err := wal.Scan(s.walDir, s.directWriteWAL, s.directRemoveWAL)
+	if errors.Is(err, wal.ErrUnknownLogVersion) {
+		// A log a later release wrote: replaying the others around it could
+		// apply a later transaction before it, and skipping it loses it.
+		return fmt.Errorf("state: a pending transaction log in %s was written by a later version of the app; start that version to finish it: %w", s.walDir, err)
+	}
+	if errors.Is(err, wal.ErrLogUnchecked) {
+		// A log whose files could not be read: replaying it might put older
+		// content back and skipping it might lose it, so startup waits until
+		// the file is fixed (operator decision 2026-11-12, W2 (b)).
+		return fmt.Errorf("state: a pending transaction log in %s could not be checked against the files it names; fix access to that file and start again: %w", s.walDir, err)
+	}
 	if err != nil {
-		// Scan only errors on broken ReadDir; treat as "no WAL to
-		// replay" but log so the operator notices.
+		// Otherwise Scan only errors on broken ReadDir; treat as "no WAL
+		// to replay" but log so the operator notices.
 		slog.Warn("state: WAL scan failed at startup; skipping replay",
 			"dir", s.walDir, "err", err)
 		pending = nil
 	}
 	for _, w := range pending {
+		if file := w.Stale(); file != "" {
+			// Overtaken: a file it names was written after it (a log kept
+			// after its Apply or Done failed while the process went on, or
+			// one an older build kept). Replaying it would put older content
+			// back, so it is set aside and never replayed (operator decision
+			// 2026-11-12, W1 (a)).
+			slog.Error("state: WAL transaction not replayed: a file it names was changed after it was written; the log is kept beside the others, renamed to end in .stale",
+				"wal", w.ID(), "file", file)
+			if err := w.SetAside(); err != nil {
+				return fmt.Errorf("state: setting aside the overtaken transaction log %s: %w", w.ID(), err)
+			}
+			continue
+		}
 		slog.Info("state: replaying WAL transaction",
 			"wal", w.ID(), "intents", len(w.Intents()))
 		if err := w.Apply(); err != nil {

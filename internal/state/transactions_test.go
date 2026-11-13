@@ -350,7 +350,7 @@ func TestWithTransaction_MultiFileAtomicityCrashAfterCommit(t *testing.T) {
 	walPkgDir := filepath.Join(dir, ".wal")
 	w, err := wal.BeginTx(walPkgDir, wal.NewWALID(), func(path string, data []byte, perm os.FileMode) error {
 		return os.WriteFile(path, data, perm)
-	})
+	}, os.Remove)
 	require.NoError(t, err)
 
 	matchesCSV := []byte("PoolName,MatchIdx,SideA,SideB,Winner,IpponsA,IpponsB,HansokuA,HansokuB,Decision,Status,Court,SubResults,ScheduledAt\nPoolA,0,Alice,Bob,Alice,M|K,,0,0,fought,completed,A,,\n")

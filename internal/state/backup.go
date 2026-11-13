@@ -224,16 +224,19 @@ func (s *Store) hasPendingCompWALLocked(compID string) (bool, error) {
 }
 
 // pendingCompWALsLocked scans s.walDir and returns the committed WALs that
-// have at least one intent targeting compID's directory.
+// have at least one intent targeting compID's directory, leaving out any
+// another writer overtook.
 func (s *Store) pendingCompWALsLocked(compID string) ([]*wal.WAL, error) {
-	all, err := wal.Scan(s.walDir, s.directWriteWAL)
+	all, err := wal.Scan(s.walDir, s.directWriteWAL, s.directRemoveWAL)
 	if err != nil {
 		return nil, err
 	}
 	compDir := s.compPath(compID)
 	var matched []*wal.WAL
 	for _, w := range all {
-		if walTouchesComp(w, compDir) {
+		// An overtaken log is never replayed (wal.WAL.Stale): settling it
+		// would put older content back, and the next start sets it aside.
+		if w.Stale() == "" && walTouchesComp(w, compDir) {
 			matched = append(matched, w)
 		}
 	}

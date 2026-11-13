@@ -42,13 +42,14 @@ different competitions cannot both claim the same court.
 
 ```mermaid
 classDiagram
-    direction LR
+    direction TB
 
     class Tournament {
         +string Name
         +string Date
         +string Venue
         +string[] Courts
+        +string Password
         +string Mode
         +int DurationDays
         +Pause[] Pauses
@@ -93,25 +94,19 @@ classDiagram
         +int ExpectedParticipants
     }
 
-    class Player {
-        <<one row per entrant: a competitor, or a TEAM when Kind is team>>
-        +string ID
-        +string Name
-        +string DisplayName
-        +string Dojo
-        +string[] Metadata
-        +string Number
-        +int Seed
-        +int PoolPosition
-        +bool CheckedIn
-        +int64 CheckInAt
-        +string Source
-    }
+    Tournament "1" o-- "0..*" Competition
+    Tournament "1" o-- "0..*" Pause
+    Tournament "1" *-- "0..1" Theme
+```
 
-    class Pool {
-        +string PoolName
-        +Player[] Players
-    }
+Inside a competition, the entrants, the pools and the records kept beside them hang off the
+competition. A class drawn with no fields is shown in full in an earlier diagram.
+
+```mermaid
+classDiagram
+    direction TB
+
+    class Competition
 
     class CompetitorStatus {
         +string PlayerID
@@ -121,6 +116,46 @@ classDiagram
         +string MatchID
         +time RecordedAt
     }
+
+    class Overrides {
+        +Map PoolRanks
+    }
+
+    class Pool {
+        +string PoolName
+        +Player[] Players
+    }
+
+    class Player {
+        <<entrant: a competitor or a team>>
+        +string ID
+        +string Name
+        +string DisplayName
+        +string Dojo
+        +string[] Metadata
+        +string Number
+        +int Seed
+        +int64 PoolPosition
+        +bool CheckedIn
+        +int64 CheckInAt
+        +string Source
+    }
+
+    Competition "1" o-- "0..*" CompetitorStatus
+    Competition "1" o-- "0..1" Overrides
+    Competition "1" o-- "0..*" Pool
+    Competition "1" o-- "0..*" Player
+    Pool "1" o-- "1..*" Player : draws from
+```
+
+Team competitions add two more: the lineups and the team members they name.
+
+```mermaid
+classDiagram
+    direction TB
+
+    class Competition
+    class Player
 
     class TeamLineup {
         <<team competitions only>>
@@ -148,25 +183,24 @@ classDiagram
         +int64 ModifiedAt
     }
 
-    class Overrides {
-        +Map PoolRanks
-        +Map Winners
-    }
-
-    Tournament "1" o-- "0..*" Competition
-    Tournament "1" o-- "0..*" Pause
-    Competition "1" o-- "0..*" Player
-    Competition "1" o-- "0..*" Pool
-    Competition "1" o-- "0..*" CompetitorStatus
     Competition "1" o-- "0..*" TeamLineup
-    Competition "1" o-- "0..1" Overrides
-    Pool "1" o-- "1..*" Player : draws from
-    Player "1" o-- "0..*" TeamMember : members, only when the row is a team
+    Player "1" o-- "0..*" TeamMember : members of a team
     TeamLineup "1" ..> "0..*" TeamMember : positions reference
 ```
 
-The competition box lists the settings that shape the model, not every field it holds. Scheduling, display and format-specific settings are left out because nothing else on this
+The competition class lists the settings that shape the model, not every field it holds. Scheduling, display and format-specific settings are left out because nothing else on this
 page depends on them.
+
+Three fields in these diagrams need a word:
+
+* `Tournament.Password` is the admin password. In file mode it is stored in `tournament.md`
+  in plain text. Every backup archive leaves it out: a tournament snapshot clears the field
+  and drops the `password` key before the file goes into the archive.
+* `Player.PoolPosition` is a competitor's place in their pool. It is never part of a
+  participant row or of the app's JSON: it is read from the `Position` column of `pools.csv`
+  and used to order the pool and the workbook.
+* `Overrides.PoolRanks` maps each pool to the ranks set by hand, keyed by the competitor's
+  participant id.
 
 `Kind` separates individual from team competitions; `Format` selects knockout, pools plus
 knockout, league or Swiss. `TeamMatchType` selects fixed order or kachinuki for team
@@ -367,24 +401,24 @@ classDiagram
         +string Court
         +int Round
         +string ScheduledAt
-        +int QueuePosition (derived, not persisted)
+        +int QueuePosition, derived
         +string Decision
         +string DecisionBy
         +string DecisionReason
-        +bool? DecidedByHantei (legacy, read-only, unset = writer said nothing)
+        +bool? DecidedByHantei, legacy
         +string ResultSource
         +string CorrectionReason
         +bool ReopenPending
-        +long ModifiedAt
+        +int64 ModifiedAt
         +map GroupStamps
         +MarkIDs MarkIDs
-        +int ScoreVersion (score-log line count)
-        +map EventSeqs (per device session, the highest logged tap seq)
-        +map TurnedAway (device taps the log holds that are not applied, by id)
+        +int ScoreVersion
+        +map EventSeqs
+        +map TurnedAway
     }
 
     class CompetitorSide {
-        <<value pair, stored as A and B columns>>
+        <<value pair>>
         +string Name
         +string ParticipantID
         +string[] Ippons
@@ -395,9 +429,8 @@ classDiagram
 
     class Outcome {
         <<value object>>
-        +string WinnerName
+        +string Winner
         +string WinnerID
-        +string WinnerSide
     }
 
     class SubMatchResult {
@@ -413,14 +446,28 @@ classDiagram
         +string Winner
         +string WinnerMemberID
         +string Decision
-        +bool? DecidedByHantei (legacy, read-only, unset = writer said nothing)
-        +bool Recorded (kachinuki only, set by the server when Record bout closes the bout)
-        +MarkIDs MarkIDs (derived by the replay)
+        +bool? DecidedByHantei, legacy
+        +bool Recorded
+        +MarkIDs MarkIDs
     }
 
     class EnchoMetadata {
         +int PeriodCount
     }
+
+    MatchResult "1" *-- "2" CompetitorSide : aka and shiro
+    MatchResult "1" *-- "1" Outcome
+    MatchResult "1" *-- "0..*" SubMatchResult : team bouts
+    MatchResult "1" *-- "0..1" EnchoMetadata
+    SubMatchResult "1" *-- "0..1" EnchoMetadata
+```
+
+A knockout match is a node in the competition's bracket. It carries the same bouts and
+overtime as a pool match.
+
+```mermaid
+classDiagram
+    direction TB
 
     class Bracket {
         +bool Preview
@@ -447,8 +494,8 @@ classDiagram
         +int HansokuB
         +int FlagsA
         +int FlagsB
-        +string ScoreA (legacy, read-only)
-        +string ScoreB (legacy, read-only)
+        +string ScoreA, legacy
+        +string ScoreB, legacy
         +int MatchNumber
         +int DisplayRound
         +string[] Feeders
@@ -463,29 +510,46 @@ classDiagram
         +string ResultSource
         +string CorrectionReason
         +bool ReopenPending
-        +bool DecidedByHantei (legacy, read-only)
-        +long ModifiedAt
+        +bool DecidedByHantei, legacy
+        +int64 ModifiedAt
         +map GroupStamps
         +MarkIDs MarkIDs
-        +int ScoreVersion (score-log line count)
-        +map EventSeqs (per device session, the highest logged tap seq)
-        +map TurnedAway (device taps the log holds that are not applied, by id)
+        +int ScoreVersion
+        +map EventSeqs
+        +map TurnedAway
     }
 
-    MatchResult "1" *-- "2" CompetitorSide : side A is aka, side B is shiro
-    MatchResult "1" *-- "1" Outcome
-    MatchResult "1" *-- "0..*" SubMatchResult : team bouts
-    MatchResult "1" *-- "0..1" EnchoMetadata
-    SubMatchResult "1" *-- "0..1" EnchoMetadata
+    class SubMatchResult
+    class EnchoMetadata
+
     Bracket "1" *-- "1..*" BracketMatch
     BracketMatch "1" *-- "0..*" SubMatchResult
     BracketMatch "1" *-- "0..1" EnchoMetadata
 ```
 
-The diagram makes three points that a raw field list would hide.
+These fields need explaining:
+
+* A field marked `legacy` is a read-only channel kept so that an older file loads; nothing
+  writes it. Refer to [Match status and decision](#match-status-and-decision).
+* `QueuePosition`, marked `derived`, is the match's place in its court's queue. It is worked
+  out from the schedule each time the matches are served, and is never stored.
+* `MarkIDs` names each mark in the ippon lists by the score event that struck it, so a removal
+  can name the mark it takes away.
+* `ScoreVersion` is the number of lines in the match's score event log that the stored match
+  was derived from. It only grows, so a device orders two copies of a running match by it.
+* `EventSeqs` holds, for each device session, the highest sequence number of that session's
+  taps the log holds, so a device does not apply one of its own taps a second time.
+* `TurnedAway` lists, by event id, the device taps the log holds that the server does not
+  apply, with the reason, so the device that made a tap learns that it was turned away.
+* `Recorded` is set on a kachinuki bout when the operator closes it with Record bout.
+
+`MarkIDs`, `ScoreVersion`, `EventSeqs` and `TurnedAway` are derived by replaying the match's
+score event log, and are stored beside the match so that a reader need not replay it.
 
 **`CompetitorSide` is a value object that the storage flattens.** The name is this page's
-own, chosen for clarity: no such type exists in the code. Everything a competitor brings
+own, chosen for clarity: no such type exists in the code, and nor does `Outcome`, which
+groups the winner's name and participant id. A score write may also carry the winning side
+while it is handled, but that hint is never stored, so the diagram leaves it out. Everything a competitor brings
 to a match (name, participant id, struck points, outstanding fouls, flags, and the
 representative player for a team tie breaker) exists twice, once per side. In the object
 model those are `SideA`/`SideB`, `IpponsA`/`IpponsB`, `HansokuA`/`HansokuB` and so on. They
@@ -585,111 +649,68 @@ loads, and so that a later correction cannot silently repaint a winner that had 
 
 ## 4. On disk layout
 
-Each competition is a folder. The tournament root holds the shared settings and the uploaded
-images.
+Everything lives under one data folder. Each competition is a folder under `competitions/`,
+and the root holds the tournament settings, the uploaded images and the folders the app works
+in: the write ahead log, the backup archives and the restore staging area.
 
 ```mermaid
-classDiagram
-    direction LR
+flowchart TB
+    root["data folder"]
 
-    class tournament_md["tournament.md"] {
-        <<Markdown, YAML front matter>>
-        Tournament
-    }
-    class config_md["competitions/&lt;id&gt;/config.md"] {
-        <<Markdown, YAML front matter>>
-        Competition
-    }
-    class participants_csv["participants.csv"] {
-        <<CSV>>
-        Player rows
-    }
-    class seeds_csv["seeds.csv"] {
-        <<CSV>>
-        Rank, Name, Dojo, ID
-    }
-    class pools_csv["pools.csv"] {
-        <<CSV>>
-        PoolName, Name, Position, DisplayName, Dojo, Seed, Number, ID
-    }
-    class pool_matches_csv["pool-matches.csv"] {
-        <<CSV, one row per match>>
-        MatchResult rows
-    }
-    class bracket_json["bracket.json"] {
-        <<JSON>>
-        Bracket
-    }
-    class status_yaml["competitor-status.yaml"] {
-        <<YAML>>
-        CompetitorStatus list
-    }
-    class lineups_yaml["lineups.yaml"] {
-        <<YAML>>
-        TeamLineup per match, or the starting one
-        position to name and member id
-        a position may hold an id and an empty name
-        when each position was changed, and the values it held before
-        copiedAt, copiedFrom and own on a match lineup a first save made
-        startedAt and startedFrom on the lineup a kachinuki match started with
-    }
-    class team_members_yaml["team-members.yaml"] {
-        <<YAML>>
-        TeamMember list by team
-    }
-    class overrides_json["overrides.json"] {
-        <<JSON>>
-        Overrides
-    }
-    class history_dir["history/"] {
-        <<JSON lines, one file per match>>
-        every write that reached the match
-        applied or held, with held values
-    }
-    class events_dir["events/"] {
-        <<JSON lines, one file per match>>
-        append-only score event log
-        event and baseline lines ("v": 1)
-    }
-    class wal[".wal/"] {
-        <<pending transactions>>
-        replayed on startup
-    }
-    class backups_dir["backups/"] {
-        <<zip archives>>
-        scheduled backups and safety copies
-    }
-    class restore_dir[".restore/"] {
-        <<staging and journal>>
-        restore staging, journal.json, prefixes-pending.json
-    }
-    class branding_dir["branding/"] {
-        <<uploaded images>>
-        tournament logo (shown on the lobby when theme.logo_on_lobby is true)
-    }
-    class sponsors_dir["sponsors/"] {
-        <<uploaded images>>
-        sponsor logos
-    }
+    subgraph top ["Tournament files"]
+        direction TB
+        tournament_md["tournament.md<br/>Markdown with<br/>YAML front matter<br/>Tournament"]
+        branding_dir["branding/<br/>tournament logo, on the<br/>lobby when the theme's<br/>logo_on_lobby is true"]
+        sponsors_dir["sponsors/<br/>sponsor logos"]
+        competitions_dir["competitions/<br/>one folder per<br/>competition"]
+        tournament_md ~~~ branding_dir ~~~ sponsors_dir ~~~ competitions_dir
+    end
 
-    tournament_md --> config_md : owns
-    tournament_md --> branding_dir : owns
-    tournament_md --> sponsors_dir : owns
-    tournament_md --> wal : stages transactions in
-    tournament_md --> backups_dir : stores archives in
-    tournament_md --> restore_dir : stages restore in
-    config_md --> participants_csv
-    config_md --> seeds_csv
-    config_md --> pools_csv
-    config_md --> pool_matches_csv
-    config_md --> bracket_json
-    config_md --> status_yaml
-    config_md --> lineups_yaml
-    config_md --> team_members_yaml
-    config_md --> overrides_json
-    config_md --> history_dir
-    config_md --> events_dir
-    team_members_yaml --> lineups_yaml : positions reference members
+    subgraph work ["Working folders"]
+        direction TB
+        wal[".wal/<br/>committed, not yet applied<br/>transactions, replayed on startup"]
+        backups_dir["backups/<br/>zip archives: scheduled<br/>backups, safety copies"]
+        restore_dir[".restore/<br/>#lt;token#gt;/journal.json<br/>#lt;token#gt;/new/ staged<br/>#lt;token#gt;/old/ moved out<br/>prefixes-pending.json<br/>requeue-pending.json"]
+        wal ~~~ backups_dir ~~~ restore_dir
+    end
+
+    root --> top
+    root --> work
+```
+
+Each competition folder holds its settings, its entrants and draw, and its matches with their
+logs. The dotted arrow is a reference between files, not a folder: a lineup names its fighters
+by their team member ids.
+
+```mermaid
+flowchart TB
+    comp_dir["competitions/#lt;id#gt;/"]
+
+    subgraph roster ["Settings, entrants and draw"]
+        direction TB
+        config_md["config.md<br/>Markdown with<br/>YAML front matter<br/>Competition"]
+        participants_csv["participants.csv<br/>Player rows"]
+        seeds_csv["seeds.csv<br/>Rank, Name, Dojo, ID"]
+        pools_csv["pools.csv<br/>PoolName, Name, Position,<br/>DisplayName, Dojo, Seed,<br/>Number, ID"]
+        status_yaml["competitor-status.yaml<br/>CompetitorStatus list"]
+        overrides_json["overrides.json<br/>Overrides"]
+        team_members_yaml["team-members.yaml<br/>TeamMember list by team"]
+        config_md ~~~ participants_csv ~~~ seeds_csv ~~~ pools_csv ~~~ status_yaml ~~~ overrides_json ~~~ team_members_yaml
+    end
+
+    subgraph results ["Matches and logs"]
+        direction TB
+        pool_matches_csv["pool-matches.csv<br/>one MatchResult row<br/>per match"]
+        bracket_json["bracket.json<br/>Bracket"]
+        lineups_yaml["lineups.yaml<br/>TeamLineup per match,<br/>or the starting one;<br/>removed lineups kept<br/>with removedAt"]
+        history_dir["history/<br/>JSON lines, one file<br/>per match: every write<br/>that reached it,<br/>applied or held"]
+        events_dir["events/<br/>JSON lines, one file<br/>per match: score event<br/>and baseline lines, v = 1"]
+        pool_matches_csv ~~~ bracket_json ~~~ lineups_yaml ~~~ history_dir ~~~ events_dir
+    end
+
+    comp_dir --> roster
+    comp_dir --> results
+    lineups_yaml -. "member ids" .-> team_members_yaml
 ```
 
 Markdown, CSV, and JSON or YAML each earn their place:
@@ -830,28 +851,70 @@ example recording a withdrawal writes the match result, the competitor eligibili
 and the updated bracket. Similarly, match writes, their append-only score event logs in
 `events/<matchId>.jsonl`, and their audit trail in `history/<matchId>.jsonl` are staged in the
 same transaction as the match result (in `pool-matches.csv` or `bracket.json`). Those run as a
-transaction: the intended writes are collected, committed to a write ahead log, and only then
-applied. If the process stops midway the log is replayed at the next startup, so the group
-either lands completely or not at all.
-One write sits outside this: a participant edit lands by atomic rename rather than through the
-log, so it is crash safe on its own but is not rolled back if the rest of the group fails.
+transaction: the intended writes are collected in memory, committed to a write ahead log in
+`.wal/`, and only then applied. A transaction that fails before its commit writes nothing,
+and one that staged nothing writes no log at all. If the process stops after the commit, the
+log is replayed at the next startup, so the group either lands completely or not at all.
+A participant edit is one such group: the roster, the seeds and, while the competition is
+draw-ready, the pools, pool matches and bracket it renames the competitor in land together or
+not at all, so an edit the draw cannot take is refused whole.
+A staged step can also remove a file, applied in its place among the writes. Moving the team
+members of a competition recorded by version 2.0.0 from `squads.yaml` onto `team-members.yaml`
+is such a step when it happens inside a transaction: the new file and the removal of the old one
+land together, or neither does. A log that holds a removal is not applied by an earlier version
+of the app, which logs that it could not apply it and leaves it in `.wal/` for this version to
+finish. A log of a later version than the running one stops the app at startup.
+Every log records what each file held when it was written. A log can be left in `.wal/` while
+the app goes on (applying it or removing it failed, or an earlier version kept it), and later
+changes can then rewrite its files. Replaying it would put the older content back, so neither
+the next startup nor a backup applies it: at startup it is renamed to end in `.stale`, kept in
+`.wal/` and an error is logged. If a file a log names cannot be read at startup, the app does
+not start, and says which log and file, until the file can be read again. If committing a log
+fails, the log is removed, so a change reported as failed never lands later; if it cannot be
+removed, the change is reported as committed, to be finished at the next startup.
 
 ```mermaid
 sequenceDiagram
-    participant H as HTTP handler
+    autonumber
+    participant C as Caller
     participant S as Store
-    participant W as Write ahead log
-    participant D as Disk
+    participant L as Log
+    participant F as .wal/ and files
 
-    H->>S: begin transaction (competition id)
-    S->>S: take the competition lock
-    S->>W: stage intended writes
-    H->>S: work completes without error
-    S->>W: commit the log
-    W->>D: apply each write atomically
-    S->>W: remove the log
-    S->>S: release the lock
+    C->>S: begin on a competition
+    S->>S: lock the competition
+    S->>L: open, in memory
+    S->>C: run the work
+    C->>L: stage writes, in memory
+    C-->>S: work returns
+    alt error
+        S->>L: drop staged writes
+        S->>S: drop touched caches
+    else nothing staged
+        S->>S: skip the log
+    else writes staged
+        L->>F: commit the log file
+        L->>F: apply each write
+        L->>F: remove the log file
+    end
+    S->>S: unlock
+    S-->>C: result
 ```
+
+The numbers match the steps in the diagram:
+
+* **1 to 3.** The caller asks for a transaction on one competition. The store takes that
+  competition's lock and opens a write ahead log, which exists only in memory so far.
+* **4 to 6.** The caller's work runs, and each file it saves is staged in the log in memory
+  rather than written.
+* **7 and 8.** If the work returns an error, the staged writes are dropped and the cached copies
+  of the files they touched are forgotten, so the next read sees the files as they were.
+  Nothing is written.
+* **9.** If the work staged nothing, there is no log to commit, apply or remove.
+* **10 to 12.** Otherwise the log is committed as a file in `.wal/`, each write is applied
+  atomically, and the log file is removed. If applying stops midway, the log stays in `.wal/`
+  and is replayed at the next startup, unless its files were written again since.
+* **13 and 14.** The store releases the lock and answers the caller.
 
 **Concurrent writes are merged, never dropped.** A match result is split into groups of
 fields that change together: the scoreline, the verdict (status, winner, decision and the

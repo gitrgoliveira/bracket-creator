@@ -111,7 +111,7 @@ func (s *Store) SaveRoster(compID string, players []domain.Player, seeds []domai
 // saveRosterLocked writes players (with each stored competitor's check-in
 // kept, keepStoredCheckIns) and seeds, for a caller holding the lock.
 func (s *Store) saveRosterLocked(compID string, players []domain.Player, seeds []domain.SeedAssignment, stored []domain.Player, withZekken bool, comp *Competition) (seedsErr error, err error) {
-	if err := s.saveParticipantsNoLock(compID, keepStoredCheckIns(players, stored), withZekken, teamNameRule{comp: comp}); err != nil {
+	if err := s.saveParticipantsNoLock(compID, keepStoredCheckIns(players, stored), withZekken, teamNameRule{comp: comp}, s.directRosterIO()); err != nil {
 		return nil, err
 	}
 	return s.saveSeedsLocked(compID, seeds), nil
@@ -207,7 +207,7 @@ func (s *Store) ReplaceRosterKeepingCheckIns(compID string, players []domain.Pla
 			readErr = rerr
 		}
 	}
-	if err := s.saveParticipantsNoLock(compID, keepStoredCheckIns(players, stored), withZekken, teamNameRule{comp: comp}); err != nil {
+	if err := s.saveParticipantsNoLock(compID, keepStoredCheckIns(players, stored), withZekken, teamNameRule{comp: comp}, s.directRosterIO()); err != nil {
 		return nil, err
 	}
 	if readErr != nil {

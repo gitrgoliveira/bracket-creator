@@ -161,7 +161,7 @@ func TestLegacyUpgrade_FailedWriteLeavesTheLegacyFileIntact(t *testing.T) {
 	require.NoError(t, err)
 
 	failing := func(string, []byte, fs.FileMode) error { return errors.New("disk full") }
-	err = s.upgradeTeamMembersFilenameLocked(id, failing)
+	err = s.upgradeTeamMembersFilenameLocked(id, rosterIO{write: failing, remove: s.directRemoveWAL})
 	require.Error(t, err, "a migration that cannot write must report it, not swallow it")
 
 	survived, readErr := bctest.ReadFile(legacy)

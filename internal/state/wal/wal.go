@@ -34,6 +34,11 @@
 //     finishes the job. Apply is idempotent, replaying a fully-
 //     committed WAL just re-writes the same bytes to the same paths.
 //
+//     A step can also be a DELETE (FileIntent.Delete, staged through
+//     RemoveFn): Apply removes its path, and a path already absent is
+//     success, so a replay of a log that partly applied stays idempotent.
+//     Writes and deletes share the one ordered, path-coalesced list.
+//
 //  4. Caller calls Done, which removes the WAL file. After Done the
 //     transaction is complete and leaves no on-disk trace.
 //
@@ -52,7 +57,10 @@
 package wal
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"log/slog"
@@ -60,17 +68,88 @@ import (
 	"path/filepath"
 	"sort"
 	"sync/atomic"
+	"syscall"
 	"time"
 )
 
-// FileIntent is a single staged target write. Persisted to disk in
-// the WAL file as JSON; Data is base64-encoded by encoding/json's
-// default []byte handling. Mode is the file-permission bits the
-// target file should be created with.
+// FileIntent is a single staged step: a target write, or (Delete) the
+// removal of the target. Persisted to disk in the WAL file as JSON; Data is
+// base64-encoded by encoding/json's default []byte handling. Mode is the
+// file-permission bits the target file should be created with. A delete
+// carries no Data and no Mode.
 type FileIntent struct {
 	Path string      `json:"path"`
 	Data []byte      `json:"data"`
 	Mode os.FileMode `json:"mode"`
+	// Delete marks a staged removal of Path. omitempty leaves it out of a
+	// write's encoding, as the previous release wrote one.
+	Delete bool `json:"delete,omitempty"`
+	// Before is what the target held when the log was committed
+	// (fileDigest), so Scan can tell a log some other writer overtook
+	// (staleStep). A build from before the field ignores it, as
+	// encoding/json does any unknown key, and replays such a log as before.
+	Before string `json:"before,omitempty"`
+}
+
+// absentDigest is fileDigest's answer for a target that does not exist.
+const absentDigest = "absent"
+
+// staleSuffix is added to the name of a log Scan sets aside (staleStep).
+const staleSuffix = ".stale"
+
+// fileDigest names what path holds: absentDigest when there is no file,
+// else the SHA-256 of its bytes.
+func fileDigest(path string) (string, error) {
+	root, err := os.OpenRoot(filepath.Dir(path))
+	if errors.Is(err, fs.ErrNotExist) {
+		return absentDigest, nil
+	}
+	if err != nil {
+		return "", err
+	}
+	data, err := root.ReadFile(filepath.Base(path))
+	if cerr := root.Close(); cerr != nil && err == nil {
+		err = cerr
+	}
+	if errors.Is(err, fs.ErrNotExist) {
+		return absentDigest, nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return bytesDigest(data), nil
+}
+
+func bytesDigest(data []byte) string {
+	sum := sha256.Sum256(data)
+	return "sha256:" + hex.EncodeToString(sum[:])
+}
+
+// staleStep answers the path of the first step whose target holds neither
+// what it held at commit (the step not yet applied) nor the step's result
+// (applied): some other writer changed it after the log was made. That is a
+// log kept after its Apply or Done failed while the process went on writing,
+// or a version-2 log a build from before the delete step kept unapplied.
+// Replaying it would put the older content back over newer. A step with no
+// Before was written by a build from before the field and is not judged.
+func staleStep(steps []FileIntent) (string, error) {
+	for _, in := range steps {
+		if in.Before == "" {
+			continue
+		}
+		now, err := fileDigest(in.Path)
+		if err != nil {
+			return "", err
+		}
+		result := absentDigest
+		if !in.Delete {
+			result = bytesDigest(in.Data)
+		}
+		if now != in.Before && now != result {
+			return in.Path, nil
+		}
+	}
+	return "", nil
 }
 
 // WriteFn is the per-file atomic write function the WAL uses to land
@@ -79,18 +158,27 @@ type FileIntent struct {
 // rename + dir-fsync guarantees the rest of the package uses.
 type WriteFn func(path string, data []byte, perm os.FileMode) error
 
+// RemoveFn removes one target for a delete step. It may report a path that is
+// already absent as an error; Apply reads that as success (the step's end
+// state already holds), which is what keeps a replay idempotent.
+type RemoveFn func(path string) error
+
 // WAL is the in-memory transaction handle.
 //
 // Append-only intents (modulo coalescing by path). State machine:
 //   - BeginTx → opened, intents=[], file not yet on disk
 //   - Append… → intents grow / coalesce
 //   - Commit  → intents serialized to <walDir>/<id>.json
-//   - Apply   → each intent written to its target
+//   - Apply   → each intent written to (or removed from) its target
 //   - Done    → WAL file removed
 type WAL struct {
-	id      string
-	walDir  string
-	write   WriteFn
+	id     string
+	walDir string
+	write  WriteFn
+	remove RemoveFn
+	// stale is set by Scan on a log another writer overtook: the first such
+	// file (staleStep). Such a log is never applied (Stale, SetAside).
+	stale   string
 	intents []FileIntent
 	// pathIdx maps target path → index into intents for O(1)
 	// coalescing on Append.
@@ -100,12 +188,50 @@ type WAL struct {
 	path string
 }
 
+// logVersionSteps is the log format that can hold a delete step. A log with
+// only writes keeps the previous release's format (no version, the steps
+// under "intents"; the added "before" key is one that release ignores), so
+// either release replays the other's.
+//
+// A log holding a delete is written as this version, with its steps under
+// "steps" and, under "intents", ONE step that names no file
+// (versionGuardIntent). A build from before the delete step reads only
+// "intents": its writer refuses the empty path ("outside data directory"), so
+// its Apply fails on that step before it writes any file, it logs the failure
+// at ERROR and keeps the log for the next start. Had the delete been a field
+// on an ordinary intent, that build would have written an EMPTY file over the
+// path it names; had the steps been hidden from it, it would have applied the
+// writes alone and removed the log, losing the delete for good.
+const logVersionSteps = 2
+
+// ErrUnknownLogVersion is returned by Scan for a log written in a format this
+// build cannot read (a later release's). Replaying around it would apply the
+// later logs without it, so the caller refuses rather than skipping.
+var ErrUnknownLogVersion = errors.New("wal: transaction log of an unknown version")
+
+// ErrLogUnchecked is returned by Scan for a log it could not check against
+// the files it names (staleStep could not read one): replaying it might put
+// older content back, and skipping it might lose it, so the caller refuses.
+var ErrLogUnchecked = errors.New("wal: transaction log could not be checked")
+
+// ErrCommitLeftLog is returned by Commit when writing the log failed after
+// the log was already in place and removing it failed too: the transaction
+// is then committed after all, and the next start replays it.
+var ErrCommitLeftLog = errors.New("wal: a failed commit left its log in place")
+
+// versionGuardIntent is what a log of logVersionSteps carries under "intents"
+// for builds that read only that key: see logVersionSteps.
+var versionGuardIntent = FileIntent{}
+
 // walFile is the on-disk shape. A wrapper around the intent slice
 // keeps the schema extensible (e.g., a future "createdAt" field
 // won't change the intent shape).
 type walFile struct {
 	ID      string       `json:"id"`
+	Version int          `json:"version,omitempty"`
 	Intents []FileIntent `json:"intents"`
+	// Steps holds the steps of a logVersionSteps log; nil otherwise.
+	Steps []FileIntent `json:"steps,omitempty"`
 }
 
 // txCounter is a process-wide monotonic counter mixed into uniqueWALID
@@ -126,9 +252,12 @@ func uniqueWALID() string {
 //
 // No on-disk state is created here. Commit is what publishes the
 // intent log to walDir; an uncommitted WAL leaves no trace.
-func BeginTx(walDir, id string, write WriteFn) (*WAL, error) {
+func BeginTx(walDir, id string, write WriteFn, remove RemoveFn) (*WAL, error) {
 	if write == nil {
 		return nil, fmt.Errorf("wal.BeginTx: write function is nil")
+	}
+	if remove == nil {
+		return nil, fmt.Errorf("wal.BeginTx: remove function is nil")
 	}
 	if id == "" {
 		return nil, fmt.Errorf("wal.BeginTx: id is empty")
@@ -140,6 +269,7 @@ func BeginTx(walDir, id string, write WriteFn) (*WAL, error) {
 		id:      id,
 		walDir:  walDir,
 		write:   write,
+		remove:  remove,
 		intents: nil,
 		pathIdx: make(map[string]int),
 		path:    filepath.Join(walDir, id+".json"),
@@ -190,13 +320,22 @@ func (w *WAL) Intents() []FileIntent {
 // disturbing the staged intent.
 func (w *WAL) PendingBytes(path string) ([]byte, bool) {
 	idx, ok := w.pathIdx[path]
-	if !ok {
+	if !ok || w.intents[idx].Delete {
 		return nil, false
 	}
 	in := w.intents[idx]
 	out := make([]byte, len(in.Data))
 	copy(out, in.Data)
 	return out, true
+}
+
+// PendingRemove reports whether the transaction's last staged step for path
+// is a delete: a read inside the transaction must then see the file as
+// absent, whatever the disk still holds. PendingBytes answers false for such a
+// path, so a reader asks this first to tell "staged absent" from "not staged".
+func (w *WAL) PendingRemove(path string) bool {
+	idx, ok := w.pathIdx[path]
+	return ok && w.intents[idx].Delete
 }
 
 // WriteFn returns a function that wraps Append in the WriteFn shape.
@@ -219,6 +358,17 @@ func (w *WAL) WriteFn() WriteFn {
 	}
 }
 
+// RemoveFn returns a RemoveFn that stages a delete of path in this WAL
+// instead of removing it, the delete counterpart of WriteFn. The step lands
+// in staging order with the writes, and replaces any write of the same path
+// staged before it (a later write of the path replaces the delete in turn).
+func (w *WAL) RemoveFn() RemoveFn {
+	return func(path string) error {
+		w.Append(FileIntent{Path: path, Delete: true})
+		return nil
+	}
+}
+
 // Commit serializes the staged intents to <walDir>/<id>.json via the
 // configured write function. After Commit returns success the
 // transaction is durable: a crash from this point on will replay the
@@ -228,11 +378,40 @@ func (w *WAL) WriteFn() WriteFn {
 // callers should not Append after Commit, but if they do, a second
 // Commit will produce a WAL file with the additional intents.
 func (w *WAL) Commit() error {
-	data, err := json.Marshal(walFile{ID: w.id, Intents: w.intents})
+	// Each step records what its target holds now, so Scan can tell a log
+	// another writer overtook (staleStep). Recorded on a copy: the staged
+	// intents stay as Append left them.
+	steps := make([]FileIntent, len(w.intents))
+	copy(steps, w.intents)
+	hasDelete := false
+	for i := range steps {
+		before, err := fileDigest(steps[i].Path)
+		if err != nil {
+			return fmt.Errorf("wal.Commit %q: read %s: %w", w.id, steps[i].Path, err)
+		}
+		steps[i].Before = before
+		hasDelete = hasDelete || steps[i].Delete
+	}
+	wf := walFile{ID: w.id, Intents: steps}
+	if hasDelete {
+		// The format older builds refuse (logVersionSteps).
+		wf = walFile{ID: w.id, Version: logVersionSteps, Intents: []FileIntent{versionGuardIntent}, Steps: steps}
+	}
+	data, err := json.Marshal(wf)
 	if err != nil {
 		return fmt.Errorf("wal.Commit %q: marshal: %w", w.id, err)
 	}
 	if err := w.write(w.path, data, 0o600); err != nil {
+		// The write can fail after the log is in place (the folder sync
+		// after the rename). Removing it keeps a failed Commit an abort;
+		// if that fails too, the log stands and the caller is told so. A log
+		// folder that is missing or not a folder holds no log at all.
+		if _, serr := os.Lstat(w.path); errors.Is(serr, fs.ErrNotExist) || errors.Is(serr, syscall.ENOTDIR) {
+			return fmt.Errorf("wal.Commit %q: write: %w", w.id, err)
+		}
+		if derr := w.Done(); derr != nil {
+			return fmt.Errorf("wal.Commit %q: write: %w; removing the log: %w: %w", w.id, err, derr, ErrCommitLeftLog)
+		}
 		return fmt.Errorf("wal.Commit %q: write: %w", w.id, err)
 	}
 	return nil
@@ -248,6 +427,14 @@ func (w *WAL) Commit() error {
 // itself idempotent for identical bytes).
 func (w *WAL) Apply() error {
 	for i, in := range w.intents {
+		if in.Delete {
+			// Already absent is the step's end state: success, so a replay
+			// after a crash between this step and Done is idempotent.
+			if err := w.remove(in.Path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+				return fmt.Errorf("wal.Apply %q: intent %d (delete %s): %w", w.id, i, in.Path, err)
+			}
+			continue
+		}
 		if err := w.write(in.Path, in.Data, in.Mode); err != nil {
 			return fmt.Errorf("wal.Apply %q: intent %d (%s): %w", w.id, i, in.Path, err)
 		}
@@ -282,21 +469,55 @@ func (w *WAL) Done() (err error) {
 	return nil
 }
 
+// Stale answers the file that marks a log Scan found overtaken (staleStep),
+// or "" for one it may replay. A stale log is never applied: replaying it
+// would put older content back over what was written since.
+func (w *WAL) Stale() string {
+	return w.stale
+}
+
+// SetAside renames the log to "<name>.json.stale", kept beside the logs for
+// the operator; its name no longer ends in ".json", so later scans pass it by.
+func (w *WAL) SetAside() (err error) {
+	root, err := os.OpenRoot(w.walDir)
+	if err != nil {
+		return fmt.Errorf("wal.SetAside %q: %w", w.id, err)
+	}
+	defer func() {
+		if cerr := root.Close(); cerr != nil && err == nil {
+			err = fmt.Errorf("wal.SetAside %q: close: %w", w.id, cerr)
+		}
+	}()
+	name := filepath.Base(w.path)
+	if err := root.Rename(name, name+staleSuffix); err != nil {
+		return fmt.Errorf("wal.SetAside %q: %w", w.id, err)
+	}
+	return nil
+}
+
 // Scan reads every WAL file in walDir and returns a WAL for each.
 // Files are returned in id-sorted order so replay is deterministic
 // across crash recoveries. Uncommitted WALs leave no file on disk,
 // so anything Scan finds is committed and needs Apply + Done.
 //
-// The write function is wired into every returned WAL. A missing
-// walDir returns (nil, nil), that's the "fresh data folder" case.
+// The write and remove functions are wired into every returned WAL. A
+// missing walDir returns (nil, nil), that's the "fresh data folder" case.
 //
-// Files that fail to parse are skipped with their path included in
-// the returned error chain (so a corrupted log doesn't block other
-// pending transactions); the caller is expected to log and continue.
-// Per-file errors don't abort the scan.
-func Scan(walDir string, write WriteFn) ([]*WAL, error) {
+// Files that cannot be read or parsed are skipped (so a corrupted log
+// doesn't block other pending transactions). A log that parses but names a
+// version this build does not know is NOT skipped: Scan returns
+// ErrUnknownLogVersion naming the file, since replaying the other logs
+// without it could apply a later transaction before an earlier one. A log
+// whose files were changed after it was written (staleStep) is returned
+// marked Stale, so a caller never replays it; Scan itself changes nothing.
+// A log Scan cannot check (a file it names cannot be read) returns
+// ErrLogUnchecked naming it.
+func Scan(walDir string, write WriteFn, remove RemoveFn) ([]*WAL, error) {
 	if write == nil {
 		return nil, fmt.Errorf("wal.Scan: write function is nil")
+	}
+	if remove == nil {
+		return nil, fmt.Errorf("wal.Scan: remove function is nil")
 	}
 	// The listed files are read through a root on walDir, so the OS keeps
 	// each read inside it.
@@ -350,15 +571,32 @@ func Scan(walDir string, write WriteFn) ([]*WAL, error) {
 		if jerr := json.Unmarshal(raw, &wf); jerr != nil {
 			continue
 		}
+		steps := wf.Intents
+		switch wf.Version {
+		case 0:
+			// Writes only, under "intents".
+		case logVersionSteps:
+			steps = wf.Steps
+		default:
+			// A later release's log. Skipping it would replay the logs
+			// after it without it, so the whole replay refuses.
+			return nil, fmt.Errorf("wal.Scan %q: %s has version %d: %w", walDir, n, wf.Version, ErrUnknownLogVersion)
+		}
+		stale, serr := staleStep(steps)
+		if serr != nil {
+			return nil, fmt.Errorf("wal.Scan %q: %s: %w: %w", walDir, n, serr, ErrLogUnchecked)
+		}
 		w := &WAL{
 			id:      wf.ID,
 			walDir:  walDir,
 			write:   write,
-			intents: wf.Intents,
-			pathIdx: make(map[string]int, len(wf.Intents)),
+			remove:  remove,
+			intents: steps,
+			pathIdx: make(map[string]int, len(steps)),
 			path:    path,
+			stale:   stale,
 		}
-		for i, in := range wf.Intents {
+		for i, in := range steps {
 			// Last-write-wins coalescing already happened at Append
 			// time pre-Commit; preserve the same map shape so a
 			// second Append after Scan keeps working.

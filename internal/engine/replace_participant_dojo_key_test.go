@@ -18,6 +18,17 @@ import (
 // holds a "Mumeishi" competitor, and the operator must be warned. A raw
 // string compare (the pre-fix code) counted the two spellings as different
 // dojos and stayed silent.
+// replaceInDraw runs ReplaceParticipantInDrawTx in a transaction of its own,
+// as the participant-edit handler does beside the roster write.
+func replaceInDraw(eng *Engine, compID, pid, oldName, oldDojo, oldDisplayName, newName, newDojo, newDisplayName string) (warnings []string, err error) {
+	err = eng.store.WithTransaction(compID, func(tx state.StoreTx) error {
+		var txErr error
+		warnings, txErr = eng.ReplaceParticipantInDrawTx(tx, compID, pid, oldName, oldDojo, oldDisplayName, newName, newDojo, newDisplayName)
+		return txErr
+	})
+	return warnings, err
+}
+
 func TestReplaceParticipantInDraw_DojoConflictUsesNormalisedDojo(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "replace-dojo-key"
@@ -42,7 +53,7 @@ func TestReplaceParticipantInDraw_DojoConflictUsesNormalisedDojo(t *testing.T) {
 
 	// Bob is replaced by Carol from "mumeishi": the same dojo as Alice under
 	// the identity rule, spelled with a different case.
-	warnings, err := eng.ReplaceParticipantInDraw(compID, bobID, "Bob", "Seishin", "", "Carol", "mumeishi", "")
+	warnings, err := replaceInDraw(eng, compID, bobID, "Bob", "Seishin", "", "Carol", "mumeishi", "")
 	require.NoError(t, err)
 	require.NotEmpty(t, warnings, "a case-different spelling of a pool-mate's dojo is the same dojo and must warn")
 	assert.Contains(t, warnings[0], "dojo conflict")
@@ -85,7 +96,7 @@ func TestReplaceParticipantInDraw_LegacyDojoOnlyEdit_NoSelfAmbiguityWarning(t *t
 	}))
 
 	// Same name, dojo DojoX -> DojoY: a dojo-only edit of the sole "Alice".
-	warnings, err := eng.ReplaceParticipantInDraw(compID, "Alice|DojoX", "Alice", "DojoX", "", "Alice", "DojoY", "")
+	warnings, err := replaceInDraw(eng, compID, "Alice|DojoX", "Alice", "DojoX", "", "Alice", "DojoY", "")
 	require.NoError(t, err)
 	for _, w := range warnings {
 		assert.NotContains(t, w, "ambiguous", "a dojo-only edit of the sole \"Alice\" must not warn about itself: warnings=%v", warnings)

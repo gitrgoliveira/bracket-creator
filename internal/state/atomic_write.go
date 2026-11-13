@@ -44,12 +44,24 @@ import (
 // check also names a WAL intent replayed from a data folder that has
 // since moved, which the root would refuse with a less telling error.
 func (s *Store) atomicWrite(path string, data []byte, perm fs.FileMode) error {
+	cleanPath, err := s.insideDataFolder("write to", path)
+	if err != nil {
+		return err
+	}
+	return atomicWriteFile(s.root, cleanPath, data, perm)
+}
+
+// insideDataFolder is the one check that path lies within the store's data
+// folder, shared by the write gate above and the WAL's delete step
+// (directRemoveWAL). It answers the cleaned path; op names the operation in
+// the refusal ("write to", "remove of").
+func (s *Store) insideDataFolder(op, path string) (string, error) {
 	cleanPath := filepath.Clean(path)
 	cleanBase := filepath.Clean(s.folder) + string(filepath.Separator)
 	if !strings.HasPrefix(cleanPath, cleanBase) {
-		return fmt.Errorf("write to %q is outside data directory %q", cleanPath, s.folder)
+		return "", fmt.Errorf("%s %q is outside data directory %q", op, cleanPath, s.folder)
 	}
-	return atomicWriteFile(s.root, cleanPath, data, perm)
+	return cleanPath, nil
 }
 
 // atomicWriteFile writes data to path, under root's data folder,

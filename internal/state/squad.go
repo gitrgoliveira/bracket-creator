@@ -237,7 +237,7 @@ func (s *Store) LoadSquads(compID string) (map[string][]domain.TeamMember, error
 	}
 	mu := s.getCompLock(compID)
 	mu.Lock()
-	adoptErr := s.upgradeTeamMembersFilenameLocked(compID, s.directWrite)
+	adoptErr := s.upgradeTeamMembersFilenameLocked(compID, s.directRosterIO())
 	mu.Unlock()
 	if adoptErr != nil {
 		// Degrade to the empty read rather than failing every reader: a
@@ -278,8 +278,22 @@ func (s *Store) LoadSquads(compID string) (map[string][]domain.TeamMember, error
 // returns before reaching this read when the roster is empty, and a plain
 // load must converge the file for a competition with no entrants yet.
 func (s *Store) loadSquadsLocked(compID string) (map[string][]domain.TeamMember, error) {
-	if err := s.upgradeTeamMembersFilenameLocked(compID, s.directWrite); err != nil {
+	return s.loadSquadsVia(s.directRosterIO(), compID)
+}
+
+// loadSquadsVia is loadSquadsLocked over what rio sees, the one body of both:
+// the adoption goes through rio (inside a transaction it is staged, the write
+// and the v2.0.0 file's removal together), and the read answers the team
+// members the transaction staged, read-your-own-writes, else the file.
+func (s *Store) loadSquadsVia(rio rosterIO, compID string) (map[string][]domain.TeamMember, error) {
+	if pending, ok := rio.staged(teamMembersFilename); ok {
+		return parseSquadsBytes(pending)
+	}
+	if err := s.upgradeTeamMembersFilenameLocked(compID, rio); err != nil {
 		return nil, err
+	}
+	if pending, ok := rio.staged(teamMembersFilename); ok {
+		return parseSquadsBytes(pending) // the adoption just staged them
 	}
 	return s.parseSquadsFile(s.compPath(compID, teamMembersFilename))
 }
@@ -332,7 +346,7 @@ func (s *Store) saveSquadsLocked(compID string, squads map[string][]domain.TeamM
 // not propagated, so a roster write that already succeeded is never rolled
 // back over a squad file that failed to prune. Only writes when an entry was
 // actually dropped, matching saveSquadsLocked's own change-gated write.
-func (s *Store) pruneOrphanedTeamMembersLocked(compID string, comp *Competition, keepIDs map[string]bool) error {
+func (s *Store) pruneOrphanedTeamMembersLocked(rio rosterIO, compID string, comp *Competition, keepIDs map[string]bool) error {
 	if comp == nil || (comp.Kind != "team" && comp.TeamSize == 0) {
 		return nil
 	}
@@ -349,7 +363,7 @@ func (s *Store) pruneOrphanedTeamMembersLocked(compID string, comp *Competition,
 	if !CanGenerateDraw(comp.Status) {
 		return nil
 	}
-	squads, err := s.loadSquadsLocked(compID)
+	squads, err := s.loadSquadsVia(rio, compID)
 	if err != nil {
 		return err
 	}
@@ -366,7 +380,7 @@ func (s *Store) pruneOrphanedTeamMembersLocked(compID string, comp *Competition,
 	if !changed {
 		return nil
 	}
-	return s.saveSquadsLocked(compID, squads, s.directWrite)
+	return s.saveSquadsLocked(compID, squads, rio.write)
 }
 
 // teamParticipantsLocked refuses a teamID no participant in this
@@ -695,7 +709,7 @@ func (s *Store) nameTeamMember(compID, teamID, memberID, newName string, onlyUnn
 // or not at all. It answers with the member it stamped.
 func (s *Store) renameTeamMemberTx(tx StoreTx, compID, teamID, memberID, newName string, onlyUnnamed bool) (domain.TeamMember, error) {
 	write := tx.(*storeTx).txWriteFn()
-	squads, err := s.loadSquadsLocked(compID)
+	squads, err := s.loadSquadsVia(tx.(*storeTx).rosterIO(), compID)
 	if err != nil {
 		return domain.TeamMember{}, err
 	}
@@ -731,7 +745,7 @@ func (s *Store) renameTeamMemberTx(tx StoreTx, compID, teamID, memberID, newName
 	if err := s.saveSquadsLocked(compID, squads, write); err != nil {
 		return domain.TeamMember{}, err
 	}
-	if err := s.renameMemberInLineupsLocked(compID, memberID, newName, write); err != nil {
+	if err := s.renameMemberInLineupsLocked(tx.(*storeTx).rosterIO(), compID, memberID, newName); err != nil {
 		return domain.TeamMember{}, err
 	}
 	return existing[target], nil
@@ -745,8 +759,8 @@ func (s *Store) renameTeamMemberTx(tx StoreTx, compID, teamID, memberID, newName
 // that lineup again. Fought bouts are NOT touched: a bout row's names are
 // frozen at the time it was fought, by design. Saves only when a position
 // changed. Caller holds the competition lock.
-func (s *Store) renameMemberInLineupsLocked(compID, memberID, name string, write writeFn) error {
-	lineups, err := s.loadTeamLineupsLocked(compID)
+func (s *Store) renameMemberInLineupsLocked(rio rosterIO, compID, memberID, name string) error {
+	lineups, err := s.loadTeamLineupsVia(rio, compID)
 	if err != nil {
 		return err
 	}
@@ -780,7 +794,7 @@ func (s *Store) renameMemberInLineupsLocked(compID, memberID, name string, write
 	if !changed {
 		return nil
 	}
-	return s.saveTeamLineupsLocked(compID, lineups, write)
+	return s.saveTeamLineupsLocked(compID, lineups, rio.write)
 }
 
 // ClearTeamMemberName is the operator's "removal": it blanks memberID's
@@ -842,7 +856,7 @@ func (s *Store) clearTeamMemberNameTx(tx StoreTx, compID, teamID, memberID strin
 		return domain.TeamMember{}, ErrTeamMemberClearAfterStart
 	}
 
-	squads, err := s.loadSquadsLocked(compID)
+	squads, err := s.loadSquadsVia(tx.(*storeTx).rosterIO(), compID)
 	if err != nil {
 		return domain.TeamMember{}, err
 	}
@@ -865,7 +879,7 @@ func (s *Store) clearTeamMemberNameTx(tx StoreTx, compID, teamID, memberID strin
 	if err := s.saveSquadsLocked(compID, squads, write); err != nil {
 		return domain.TeamMember{}, err
 	}
-	if err := s.renameMemberInLineupsLocked(compID, memberID, "", write); err != nil {
+	if err := s.renameMemberInLineupsLocked(tx.(*storeTx).rosterIO(), compID, memberID, ""); err != nil {
 		return domain.TeamMember{}, err
 	}
 	return existing[target], nil

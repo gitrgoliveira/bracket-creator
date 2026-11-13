@@ -318,7 +318,7 @@ func (s *Store) EnsureLegacyUpgraded(compID string) {
 	// re-parses), but the seed-row backfill never touches participants.csv
 	// itself, so the roster this instance already loaded stays accurate for
 	// every step that follows it in the same call.
-	roster := &legacyUpgradeRoster{store: s, compID: compID}
+	roster := &legacyUpgradeRoster{store: s, compID: compID, rio: s.directRosterIO()}
 	// FIRST: every step below resolves against the roster's participant ids,
 	// so a roster that has none makes all of them no-ops.
 	if err := s.upgradeParticipantIDsLocked(compID, roster); err != nil {
@@ -367,7 +367,7 @@ func (s *Store) EnsureLegacyUpgraded(compID string) {
 	// re-attempts the adoption for all three squad mutators (squad.go). So a
 	// fault that clears is still picked up; what stops is only the re-sweep
 	// of seven unrelated steps from a read.
-	if err := s.upgradeSquadsFromMetadataLocked(compID, roster, nil); err != nil {
+	if err := s.upgradeSquadsFromMetadataLocked(s.directRosterIO(), compID, roster, nil); err != nil {
 		log.Printf("state: legacy squad upgrade for %s: %v", compID, err)
 	}
 	if err := s.upgradePoolMatchSideIDsLocked(compID, roster); err != nil {
@@ -553,8 +553,12 @@ func (s *Store) sweepLegacyUpgrades() {
 // adds no locking of its own because it is never shared beyond a single
 // EnsureLegacyUpgraded call.
 type legacyUpgradeRoster struct {
-	store   *Store
-	compID  string
+	store  *Store
+	compID string
+	// rio is what the roster reads through: the direct one reads the disk
+	// (EnsureLegacyUpgraded), a transaction's (saveParticipantsNoLock under
+	// storeTx) reads what that transaction staged first.
+	rio     rosterIO
 	loaded  bool
 	index   *domain.RosterIndex
 	players []domain.Player
@@ -601,7 +605,17 @@ func (r *legacyUpgradeRoster) get() (*domain.RosterIndex, error) {
 	if r.comp == nil {
 		return nil, nil
 	}
-	players, textChanged, err := r.store.readParticipantsNoLock(r.compID, r.withZekken, LoadParticipantsOpts{HasIDs: r.comp.ParticipantIDsHint()})
+	opts := LoadParticipantsOpts{HasIDs: r.comp.ParticipantIDsHint()}
+	var players []domain.Player
+	var textChanged bool
+	var err error
+	if raw, ok := r.rio.staged("participants.csv"); ok {
+		players, textChanged, err = r.store.decodeParticipants(r.compID, raw, r.withZekken, opts, func(id string) ([]domain.SeedAssignment, error) {
+			return r.store.readSeedsVia(r.rio, id)
+		})
+	} else {
+		players, textChanged, err = r.store.readParticipantsNoLock(r.compID, r.withZekken, opts)
+	}
 	if err != nil {
 		r.loadErr = err
 		return nil, r.loadErr
@@ -695,7 +709,7 @@ func (r *legacyUpgradeRoster) squads() (map[string][]domain.TeamMember, error) {
 		return r.squadsData, r.squadsErr
 	}
 	r.squadsLoaded = true
-	r.squadsData, r.squadsErr = r.store.loadSquadsLocked(r.compID)
+	r.squadsData, r.squadsErr = r.store.loadSquadsVia(r.rio, r.compID)
 	return r.squadsData, r.squadsErr
 }
 
@@ -710,7 +724,7 @@ func (r *legacyUpgradeRoster) lineups() (map[string]domain.TeamLineup, error) {
 		return r.lineupsData, r.lineupsErr
 	}
 	r.lineupsLoaded = true
-	r.lineupsData, r.lineupsErr = r.store.loadTeamLineupsLocked(r.compID)
+	r.lineupsData, r.lineupsErr = r.store.loadTeamLineupsVia(r.rio, r.compID)
 	return r.lineupsData, r.lineupsErr
 }
 
@@ -1020,7 +1034,7 @@ func (s *Store) upgradePoolParticipantIDsLocked(compID string, roster *legacyUpg
 	if !changed {
 		return nil
 	}
-	return s.savePoolsLocked(compID, pools)
+	return s.savePoolsLocked(compID, pools, s.directWrite)
 }
 
 // backfillPoolMemberIDs gives every id-less pools.csv member the id of the
@@ -2081,7 +2095,7 @@ func (r *legacyUpgradeRoster) adoptStampedPlayers(players []domain.Player) {
 // ruling, since the row being resolved carries no id field to resolve by.
 // EnsureLegacyUpgraded passes nil: on a plain load there is no pending
 // write to borrow an id from, so an id-less row still migrates to nothing.
-func (s *Store) upgradeSquadsFromMetadataLocked(compID string, roster *legacyUpgradeRoster, mintedByCompetitor map[string]string) error {
+func (s *Store) upgradeSquadsFromMetadataLocked(rio rosterIO, compID string, roster *legacyUpgradeRoster, mintedByCompetitor map[string]string) error {
 	// FIRST, and inside this function rather than beside one of its callers.
 	// This step MINTS blank members and writes team-members.yaml, which
 	// permanently arms the filename migration's refuse-to-overwrite guard: seed
@@ -2111,7 +2125,9 @@ func (s *Store) upgradeSquadsFromMetadataLocked(compID string, roster *legacyUpg
 	if comp.Kind != "team" && comp.TeamSize == 0 {
 		return nil
 	}
-	if err := s.upgradeTeamMembersFilenameLocked(compID, s.directWrite); err != nil {
+	// Through rio: inside a transaction the move (the write and the v2.0.0
+	// file's removal) is staged with the rest of it.
+	if err := s.upgradeTeamMembersFilenameLocked(compID, rio); err != nil {
 		return err
 	}
 	players, err := roster.rosterPlayers()
@@ -2119,7 +2135,7 @@ func (s *Store) upgradeSquadsFromMetadataLocked(compID string, roster *legacyUpg
 		return err
 	}
 
-	squads, err := s.loadSquadsLocked(compID)
+	squads, err := s.loadSquadsVia(rio, compID)
 	if err != nil {
 		return err
 	}
@@ -2170,7 +2186,9 @@ func (s *Store) upgradeSquadsFromMetadataLocked(compID string, roster *legacyUpg
 	if !changed {
 		return nil
 	}
-	if err := s.saveSquadsLocked(compID, squads, s.directWrite); err != nil {
+	// rio.write: staged with the roster save inside a transaction, direct
+	// outside one.
+	if err := s.saveSquadsLocked(compID, squads, rio.write); err != nil {
 		return err
 	}
 	// Drop the shared lazy squad cache: this call just changed team-members.yaml,
@@ -2549,7 +2567,7 @@ func (s *Store) takeRosterSpellingInPoolsLocked(compID string, idx *domain.Roste
 	if !changed {
 		return nil
 	}
-	return s.savePoolsLocked(compID, pools)
+	return s.savePoolsLocked(compID, pools, s.directWrite)
 }
 
 func (s *Store) takeRosterSpellingInPoolMatchesLocked(compID string, idx *domain.RosterIndex) error {
@@ -2790,22 +2808,31 @@ func (s *Store) upgradeRoundLineupsLocked(compID string, roster *legacyUpgradeRo
 // exactly one shape live afterwards, so no reader has to know two names
 // forever, and it matches how every other step in this file works.
 //
-// Takes the writer rather than reaching for atomicWriteFile, the same seam
+// Takes the rosterIO rather than reaching for atomicWriteFile, the same seam
 // saveSquadsLocked already has: the ordering below (write, THEN remove) is
 // the crash-safety story, and a test can only prove it by making the write
-// fail while the remove would have succeeded.
+// fail while the remove would have succeeded. Outside a transaction both land
+// at once; inside one both are staged in the WAL (operator decision D6 (b),
+// 2026-11-12), applied in that order on commit or replay, and dropped
+// together on an abort, and the transaction's reads see the move as made.
 //
 // Refuses to overwrite: if team-members.yaml already exists, this competition
 // has been migrated (or was written new) and the stale squads.yaml is left
 // alone rather than allowed to win. The old file is REMOVED only after the new
 // one is safely written, so a crash between the two leaves the original intact
 // and the next load simply retries.
-func (s *Store) upgradeTeamMembersFilenameLocked(compID string, write writeFn) error {
+func (s *Store) upgradeTeamMembersFilenameLocked(compID string, rio rosterIO) error {
+	if _, staged := rio.staged(teamMembersFilename); staged {
+		return nil // this transaction already holds the current name
+	}
 	newPath := s.compPath(compID, teamMembersFilename)
 	if _, err := s.root.stat(newPath); err == nil {
 		return nil // already on the current name
 	} else if !os.IsNotExist(err) {
 		return err
+	}
+	if rio.stagedRemoved(legacySquadsFilename) {
+		return nil // this transaction already moved it
 	}
 	oldPath := s.compPath(compID, legacySquadsFilename)
 	data, err := s.root.readFile(oldPath)
@@ -2834,12 +2861,13 @@ func (s *Store) upgradeTeamMembersFilenameLocked(compID string, write writeFn) e
 		// files alone rather than writing an empty member list over nothing.
 		return nil
 	}
-	if err := s.saveSquadsLocked(compID, members, write); err != nil {
+	if err := s.saveSquadsLocked(compID, members, rio.write); err != nil {
 		return err
 	}
-	if err := s.root.remove(oldPath); err != nil && !os.IsNotExist(err) {
+	if err := rio.remove(oldPath); err != nil && !os.IsNotExist(err) {
 		// The members are safe on the new name; a leftover old file is
-		// cosmetic and must not fail the load.
+		// cosmetic and must not fail the load. (Inside a transaction the
+		// removal is only staged and cannot fail here.)
 		log.Printf("state: team-members migration for %s left %s in place: %v", compID, legacySquadsFilename, err)
 	}
 	return nil

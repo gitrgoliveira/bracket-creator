@@ -887,10 +887,11 @@ renamed): the app does not start and says so. Start it with the folder the log w
 (the path the error names), or move the log out of `.wal/` to leave its change unapplied. A log
 that names no competition's folder and cannot be applied stops startup the same way, for the same
 cause. This version takes the data folder's full path at startup, so for a log it wrote, naming
-the same folder another way, or starting the app from another folder, never causes this. A log an
-earlier version wrote may name its files relative to the folder the app was started from: the
-error then says so, and the cure is to start the app from that same folder again (or to move the
-log out of `.wal/`). A log whose content is damaged, so that it
+the same folder by a relative or an absolute path never causes this; a path that goes through a
+link to the folder counts as another path. A log an earlier version wrote may name its files
+relative to the folder the app was started from: the error then says that, and quotes the
+relative path as the log records it (the log file the error names lists those paths). The cure is
+to start the app from the folder that path starts in (or to move the log out of `.wal/`). A log whose content is damaged, so that it
 is not a log any version can read, holds nothing that can be applied: at startup it is renamed to
 end in `.invalid`, kept in `.wal/`, the other logs replay as usual, and one error is logged saying
 that a change saved just before the restart may not have landed. Check the last results entered

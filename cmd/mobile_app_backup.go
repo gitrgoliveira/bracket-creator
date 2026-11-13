@@ -471,7 +471,7 @@ func printRestoreOutcome(out io.Writer, plan state.RestorePlan) error {
 
 // pendingWriteSentence is the one refusal for a competition whose kept change
 // could not be written to disk, on backup and restore alike.
-const pendingWriteSentence = "A competition has a change that could not be written to disk. Free disk space or fix the data folder's permissions, then retry. " + mobileapp.PendingWriteFolderHint
+const pendingWriteSentence = "A competition has a change that could not be written to disk. Free disk space or fix the data folder's permissions, then retry. If that does not clear it, a folder the change names may have been removed outside the app: restore it; the lines above name the change's log file."
 
 func formatRestoreError(err error) error {
 	if err == nil {

@@ -80,25 +80,47 @@ func (s *Store) walCompetition(w *wal.WAL) string {
 	return ""
 }
 
-// The two remedies startup gives for a log written under another layout of
+// The cause and remedy startup gives for a log written under another layout of
 // the data folder. A log this version wrote names absolute paths, so the data
 // folder it was written under cures it; an earlier version's log may name its
 // files relative to the folder the app was started from, which no data folder
-// path can cure, so it asks for that folder instead (storePath).
+// path can cure and which the log does not record, so the remedy quotes the
+// path as the log holds it and asks for the folder that path starts in
+// (storePath resolves it against the CURRENT folder, so the path in the
+// wrapped error points somewhere else).
 const (
 	walRemedyAbsolute = "restart with the folder it was written under (the path in the error below)"
-	walRemedyRelative = "start the app from the folder it was started from when this log was written"
+	walCauseAbsolute  = "was written under another data folder path"
+	walCauseRelative  = "names its files relative to the folder the app was started from"
 )
 
-// walRestartRemedy picks the remedy for w: the relative one when any step
-// names a relative path, else the absolute one.
-func walRestartRemedy(w *wal.WAL) string {
+// walRelativeStep answers the first step of w that names a relative path, as
+// the log records it.
+func walRelativeStep(w *wal.WAL) (string, bool) {
 	if w != nil {
 		for _, in := range w.Intents() {
 			if !filepath.IsAbs(in.Path) {
-				return walRemedyRelative
+				return in.Path, true
 			}
 		}
+	}
+	return "", false
+}
+
+// walRestartCause says why w cannot be applied here: the relative cause when
+// any step names a relative path, else the absolute one.
+func walRestartCause(w *wal.WAL) string {
+	if _, rel := walRelativeStep(w); rel {
+		return walCauseRelative
+	}
+	return walCauseAbsolute
+}
+
+// walRestartRemedy picks the remedy for w: the relative one, quoting the
+// recorded path, when any step names a relative path, else the absolute one.
+func walRestartRemedy(w *wal.WAL) string {
+	if p, rel := walRelativeStep(w); rel {
+		return fmt.Sprintf("this log names its files by a relative path (%s), so it must be read from the folder that path starts in: start the app from that folder", p)
 	}
 	return walRemedyAbsolute
 }

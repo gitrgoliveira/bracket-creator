@@ -229,9 +229,11 @@ func RegisterDecisionHandlers(r *gin.RouterGroup, eng ScoringEngine, store Compe
 			}
 			// A decision correcting a finished league's result is warned
 			// about first (design item 3), as on PUT /score. Only a league
-			// read as finished pays for reading the match's score log; the
-			// check itself reads the competition again under this lock.
-			if comp != nil && comp.Format == state.CompFormatLeague && comp.Status == state.CompStatusComplete && !req.ConfirmFinished {
+			// pays for the check, and the check judges whether it has finished:
+			// it reads the competition under this lock, so a league that
+			// finished after the read above is judged as finished (the format
+			// cannot change, the status can).
+			if comp != nil && comp.Format == state.CompFormatLeague && !req.ConfirmFinished {
 				score := &seenResultCheck{stx: stx, compID: id, matchID: mid}
 				tl, _ := store.(TournamentLoader)
 				if err := refuseFinishedLeagueCorrection(stx, tl, id, mid, decisionCorrects(snap, req, comp, score), false); err != nil {

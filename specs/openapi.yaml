@@ -3829,6 +3829,17 @@ paths:
                       carry a `message` the machine-readable code
                       (`duplicate_daihyosen`, `team_member_not_in_team`,
                       `winner_member_not_in_bout`).
+                  code:
+                    type: string
+                    enum: [tiebreak_needs_winner]
+                    description: >
+                      Present on the refusal of a league tie-breaker finished
+                      with no winner (`error` then holds the sentence): a
+                      tie-breaker needs a winner, so decide it by encho or
+                      hantei, and a team league's representative bout between
+                      two barred teams is settled by accepting the shared
+                      ranks. The same code is the `reason` of a bulk-score
+                      entry refused this way.
                   message:
                     type: string
                     description: The sentence the page shows as it is, for those refusals.
@@ -5048,7 +5059,7 @@ paths:
                             classes `reason` names below.
                         reason:
                           type: string
-                          enum: [superseded, clock_skew, corrupt_overrides, downstream_knockout_played, downstream_knockout_running, team_member_not_in_team, team_members_unreadable, league_finished]
+                          enum: [superseded, clock_skew, corrupt_overrides, downstream_knockout_played, downstream_knockout_running, team_member_not_in_team, team_members_unreadable, league_finished, tiebreak_needs_winner]
                           description: >
                             Machine-readable discriminator, present only for the
                             classes named here and omitted for every other failure, so
@@ -5706,6 +5717,11 @@ paths:
     post:
       tags: [competitions]
       summary: Set a competitor status entry
+      description: >
+        Writing an eligible status can open a bout again: a finished
+        individual league whose drawn ippon-shobu tie-breaker settled only
+        while both its sides were barred goes back into match play
+        (`competition_started`).
       security:
         - TournamentPassword: []
       requestBody:
@@ -5732,7 +5748,12 @@ paths:
         Restores eligibility for a competitor who was withdrawn via
         kiken-injury (FIK Art. 30). Only works when the competitor's
         status has `reinstateable: true`. Voluntary kiken (Art. 31)
-        and fusenpai are not reinstateable.
+        and fusenpai are not reinstateable. A finished individual league
+        whose drawn ippon-shobu tie-breaker settled only while both its
+        sides were barred goes back into match play when one of them is
+        reinstated (`competition_started`), as it does when a status is
+        written eligible through POST .../competitor-status: the tie owes
+        its bout again.
       security:
         - TournamentPassword: []
       parameters:

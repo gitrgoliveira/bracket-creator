@@ -60,6 +60,9 @@ export function BarredMatchNotice({ match, password, onDone, unsaved = false, on
   // bc-cse: shared by the default-win decision AND the both-barred draw
   // decision -- both are ordinary /decision writes and must land/queue/fail
   // identically.
+  // Written over a match that is not finished (the notice shows on a scheduled
+  // one), so it is never a correction of a finished league's result and carries
+  // no finished-league confirm (the server's decisionCorrects reads it so).
   const submitDecision = async (body) => {
     if (!body || !window.API || typeof window.API.recordDecision !== "function") return;
     if (holdsUnsaved(unsaved)) {

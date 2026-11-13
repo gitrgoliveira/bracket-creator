@@ -1006,6 +1006,10 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 					// stores nothing, the rest of the batch is unaffected.
 					bulkErr.Reason = leagueFinishedCode
 					bulkErr.Error = LeagueFinishedMessage
+				case errors.Is(err, engine.ErrTiebreakNeedsWinner):
+					// A league tie-breaker finished with no winner: the code rides in
+					// Reason (as the 400 body's code on the other doors), the sentence in Error.
+					bulkErr.Reason = engine.ErrTiebreakNeedsWinner.Error()
 				case errors.As(err, &landedRefusal):
 					// A pick the write landed that the side's team does not
 					// hold: the refusal's code rides in Reason and its
@@ -1289,8 +1293,11 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			}
 			// Quick-score is always a completed write, so over a completed
 			// match it is a correction: on a finished league it is warned
-			// about first.
-			if lerr := refuseFinishedLeagueCorrection(stx, tl, id, mid, snap.Status == state.MatchStatusCompleted, req.ConfirmFinished); lerr != nil {
+			// about first. The resend of a write the match's score log already
+			// holds (its writeId) lands nothing and is answered as recorded, so
+			// there is nothing to warn about.
+			corrects := snap.Status == state.MatchStatusCompleted && !eng.WriteIDLogged(stx, id, mid, req.WriteID)
+			if lerr := refuseFinishedLeagueCorrection(stx, tl, id, mid, corrects, req.ConfirmFinished); lerr != nil {
 				var league *leagueFinishedRefusal
 				if errors.As(lerr, &league) {
 					err = league
@@ -1359,9 +1366,7 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			// Completed write with no winner, which validateBracketCompletion
 			// rejects as *engine.ValidationError; map it to 400 so the caller
 			// sees "resolve via daihyosen first" instead of a generic 500.
-			var engValErr *engine.ValidationError
-			if errors.As(err, &engValErr) {
-				c.JSON(http.StatusBadRequest, gin.H{"error": engValErr.Error()})
+			if respondIfValidationError(c, err) {
 				return
 			}
 			internalError(c, err)
@@ -2110,6 +2115,12 @@ func (r *leagueFinishedRefusal) body() gin.H {
 // not reconciled, so the warning's "goes back to match play" would not hold
 // there. tl may be nil (no court is then named). It answers nil when the write
 // may go on; an error that is not a *leagueFinishedRefusal is a fault.
+//
+// It lives here and not in the engine's ForceOptions because `corrects` is the
+// door's own reading of the request (the stamp and basis the writer sent, the
+// match's score log, the reason it carried), which only the handler layer
+// holds; the engine sees the write after those judgements, so one function the
+// doors all ask is the one owner.
 func refuseFinishedLeagueCorrection(stx state.StoreTx, tl TournamentLoader, compID, matchID string, corrects, confirmed bool) error {
 	if !corrects || confirmed || !engine.IsPoolMatchID(matchID) {
 		return nil

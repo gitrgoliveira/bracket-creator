@@ -235,6 +235,29 @@ describe('the accepted shared ranks and Undo', () => {
     expect(confirmed[0].message).toContain('Matches on shiaijo C, which the tournament no longer has, become unassigned.');
   });
 
+  it('names every court a match stands on when the tournament has none', async () => {
+    answerConfirmWith(false);
+    const api = makeApi({ answer: accepted, tournament: { courts: [] } });
+    await mountAdminPools({
+      api, c: comp({ status: 'completed' }),
+      poolMatches: [{ id: 'Pool A-1', court: 'A', status: 'completed' }, { id: 'Pool A-2', court: 'C', status: 'completed' }],
+    });
+
+    await act(async () => { (await screen.findByRole('button', { name: 'Undo shared ranks' })).click(); });
+    await waitFor(() => expect(confirmed).toHaveLength(1));
+    expect(confirmed[0].message).toContain('Matches on shiaijo A, C, which the tournament no longer has, become unassigned.');
+  });
+
+  it('names no court while the league is still in match play: nothing is cleared then', async () => {
+    answerConfirmWith(false);
+    const api = makeApi({ answer: { candidates: [group], finalized: true, accepted: [group] }, tournament: { courts: ['B'] } });
+    await mountAdminPools({ api, c: comp({ status: 'pools' }), poolMatches: [{ id: 'Pool A-1', court: 'A', status: 'scheduled' }] });
+
+    await act(async () => { (await screen.findByRole('button', { name: 'Undo shared ranks' })).click(); });
+    await waitFor(() => expect(confirmed).toHaveLength(1));
+    expect(confirmed[0].message).not.toContain('become unassigned');
+  });
+
   it('undoes on a yes and reads the answer again, so the banner returns', async () => {
     answerConfirmWith(true);
     const api = makeApi({ answer: accepted });

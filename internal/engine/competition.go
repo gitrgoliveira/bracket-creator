@@ -355,9 +355,10 @@ func (e *Engine) maybeAutoCompletePools(compID string, poolsMayHaveMoved bool) (
 // leagueBackInPlay reports whether a finished league is in match play again
 // after the write this pass follows: reopened by the write's own transaction
 // (reconcileLeagueAfterWrite, which leaves a note), or here, when one of its
-// regular matches is no longer finished (reopenFinishedLeagueIfOpen: a reopen
-// or a send back to the queue). comp is the caller's read; the competition is
-// read again whenever it moved.
+// pool rows is no longer played (reopenFinishedLeagueIfOpen: a reopen, a send
+// back to the queue, or a side reinstated that a drawn tie-break bout settled
+// on). comp is the caller's read; the competition is read again whenever it
+// moved.
 //
 // A note is taken only once the committed competition shows the league in match
 // play: a note is made inside a transaction that has not committed yet, so a

@@ -289,7 +289,7 @@ func TestLeagueCorrection_TiebreakerBoutIsReconciled(t *testing.T) {
 // it then lost the report (no competition_started) when the commit landed.
 func TestLeagueBackInPlay_LeavesAnUncommittedNoteForTheCommit(t *testing.T) {
 	eng, store := finishedLeague(t, "note-race", "topTie")
-	leagueReopenNotes.Store(leagueReopenNote{e: eng, compID: "note-race"}, struct{}{})
+	eng.leagueReopenNotes.Store("note-race", struct{}{})
 
 	reopened, _, err := eng.leagueBackInPlay("note-race", loadComp(t, store, "note-race"))
 	require.NoError(t, err)

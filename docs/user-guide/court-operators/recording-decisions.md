@@ -81,6 +81,15 @@ The positions you record decide who goes through. If they change who holds a qua
 
 Chusen is the only place ranks are set by hand, and it happens only when the bouts themselves cannot decide the order.
 
+### Individual competitors: another round, or lots
+
+In an individual pool or league, a tie that matters is broken by single-point (ippon-shobu) bouts between the tied competitors. If that round goes in a circle, where each competitor won as many bouts as the others, the **Pools** tab (labelled **League** for league competitions) shows **A tie-breaker round left a tie** with the pool and the places the tied competitors share. You choose how to go on:
+
+- **Run another tie-breaker round** adds a fresh round of ippon-shobu bouts among the competitors still level. When more than one group is still level, there is one button for each, naming the competitors. The place stays open until the new bouts are scored.
+- **Draw lots instead** opens the same entry as the team chusen above: draw lots offline, enter each competitor's finishing position and record it.
+
+The app never draws the lots for you, and it never starts another round without your tap. A recorded order can be changed afterwards with **Change**, as for a team chusen, even after the league has finished.
+
 ### Change a chusen recorded in the wrong order
 
 After you record a chusen, the same tab shows a **"Chusen (drawing lots) recorded"** panel with the order you recorded, for example "Drawing lots: 1st Kyoto, 2nd Osaka, 3rd Nara". If you entered the order wrongly, select **Change**. The entry opens again with the recorded positions filled in. Enter the order the lots actually gave and record it, or select **Cancel** to leave the recorded order as it is.

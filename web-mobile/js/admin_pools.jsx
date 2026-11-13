@@ -291,6 +291,15 @@ function undoSharedRanksMessage(removedCourts) {
   return `${base} Matches on shiaijo ${removedCourts.join(", ")}, which the tournament no longer has, become unassigned.`;
 }
 
+// The shiaijo an Undo clears, as the server judges it (reopenLeagueTx): when the
+// league had finished, every court a match names that the tournament no longer
+// has, which is every named court when the tournament has none. `venue` is the
+// tournament's courts, null when they could not be read (none are then named).
+function removedCourtsOf(c, poolMatches, venue) {
+  if (!c || c.status !== "completed" || !Array.isArray(venue)) return [];
+  return [...new Set((poolMatches || []).map(m => m.court).filter(ct => ct && !venue.includes(ct)))];
+}
+
 // "Shared ranks accepted: 1st place: Team A, Team B." for one accepted group.
 function acceptedRankLine(group) {
   return `Shared ranks accepted: ${sharedPlaceLabel(group)}: ${(group.teamNames || []).join(", ")}.`;
@@ -553,14 +562,12 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
   // write). The venue is read for that sentence only; a read that fails leaves
   // it out and the Undo still goes ahead on the operator's say.
   const handleTiebreakUndo = async () => {
-    let gone = [];
+    let venue = null;
     try {
       const t = await window.API.fetchTournament();
-      const venue = (t && Array.isArray(t.courts)) ? t.courts : [];
-      if (venue.length > 0) {
-        gone = [...new Set((poolMatches || []).map(m => m.court).filter(ct => ct && !venue.includes(ct)))];
-      }
-    } catch (_err) { gone = []; }
+      venue = (t && Array.isArray(t.courts)) ? t.courts : [];
+    } catch (_err) { venue = null; }
+    const gone = removedCourtsOf(c, poolMatches, venue);
     if (!(await window.confirmDialog({ message: undoSharedRanksMessage(gone), confirmLabel: "Undo shared ranks", danger: false }))) return;
     setTiebreakActionBusy(true);
     setTiebreakBusyAction("undo");
@@ -1211,4 +1218,4 @@ if (typeof window !== "undefined") {
 
 // ES export for the vitest suite: pure helpers only. The component
 // stays behind window.* to match the rest of admin_*.jsx.
-export { enrichPoolMatchWithComp, poolMatchesForPool, groupTeamIds, drawnSupplementaryBouts, acceptSharedRanksMessage, undoSharedRanksMessage, acceptedRankLine, circleGroupLine };
+export { enrichPoolMatchWithComp, poolMatchesForPool, groupTeamIds, drawnSupplementaryBouts, acceptSharedRanksMessage, undoSharedRanksMessage, removedCourtsOf, acceptedRankLine, circleGroupLine };

@@ -639,7 +639,7 @@ func (e *Engine) reconcileLeagueAfterWrite(tx state.StoreTx, compID string, befo
 	if err := tx.SaveCompetition(comp); err != nil {
 		return err
 	}
-	leagueReopenNotes.Store(leagueReopenNote{e: e, compID: compID}, struct{}{})
+	e.leagueReopenNotes.Store(compID, struct{}{})
 	return nil
 }
 
@@ -668,30 +668,24 @@ func (e *Engine) leagueTableUnsettled(tx state.StoreTx, compID string, comp *sta
 	return false, nil
 }
 
-// leagueReopenNotes holds, per engine and competition, a league a write's
-// transaction put back into match play (reconcileLeagueAfterWrite), until the
-// door's auto-complete pass (maybeAutoCompletePools) takes the note and
-// reports AutoCompleteStarted, whose broadcast every surface reloads on. The
-// pass takes a note only once the committed league is in match play
-// (leagueBackInPlay), so a pass racing the transaction that wrote it leaves it
-// for the pass that follows the commit.
-var leagueReopenNotes sync.Map // map[leagueReopenNote]struct{}
-
-type leagueReopenNote struct {
-	e      *Engine
-	compID string
-}
-
-// takeLeagueReopenNote reports and clears a reopen noted for compID.
+// takeLeagueReopenNote reports and clears a reopen noted for compID. The notes
+// (Engine.leagueReopenNotes) hold a league a write's transaction put back into
+// match play (reconcileLeagueAfterWrite) until the door's auto-complete pass
+// (maybeAutoCompletePools) takes the note and reports AutoCompleteStarted, whose
+// broadcast every surface reloads on. The pass takes a note only once the
+// committed league is in match play (leagueBackInPlay), so a pass racing the
+// transaction that wrote it leaves it for the pass that follows the commit.
 func (e *Engine) takeLeagueReopenNote(compID string) bool {
-	_, ok := leagueReopenNotes.LoadAndDelete(leagueReopenNote{e: e, compID: compID})
+	_, ok := e.leagueReopenNotes.LoadAndDelete(compID)
 	return ok
 }
 
 // reopenFinishedLeagueIfOpen puts a finished league back into match play when
-// one of its regular matches is no longer finished, a reopen or a send back to
-// the queue having reached it outside a result write (reconcileLeagueAfterWrite
-// covers those). Decided under the competition's lock.
+// one of its pool rows is no longer played (poolMatchesSettled): a regular
+// match or a tie-break bout reopened, a send back to the queue having reached
+// it outside a result write (reconcileLeagueAfterWrite covers those), or a drawn
+// tie-break bout that settled only while both its sides were barred and one has
+// been reinstated since. Decided under the competition's lock.
 func (e *Engine) reopenFinishedLeagueIfOpen(compID string) (bool, error) {
 	return e.store.UpdateCompetitionChangedTx(compID, func(tx state.StoreTx, comp *state.Competition) (*state.Competition, error) {
 		if comp == nil || comp.Format != state.CompFormatLeague || comp.Status != state.CompStatusComplete {
@@ -701,14 +695,15 @@ func (e *Engine) reopenFinishedLeagueIfOpen(compID string) (bool, error) {
 		if err != nil {
 			return nil, err
 		}
-		open := false
-		for i := range matches {
-			if !state.IsPoolSupplementaryMatchID(matches[i].ID) && matches[i].Status != state.MatchStatusCompleted {
-				open = true
-				break
-			}
+		lots, err := loadPoolLots(matches, sync.OnceValues(func() (map[string][]state.PlayerStanding, error) {
+			return e.computeStandingsFrom(tx, compID)
+		}), func() (map[string]domain.CompetitorStatus, error) {
+			return tx.LoadCompetitorStatus(compID)
+		})
+		if err != nil {
+			return nil, err
 		}
-		if !open {
+		if poolMatchesSettled(matches, lots) {
 			return nil, nil
 		}
 		if _, err := e.reopenLeagueTx(tx, compID, comp); err != nil {

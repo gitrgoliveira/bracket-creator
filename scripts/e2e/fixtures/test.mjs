@@ -73,6 +73,14 @@ const CONSOLE_ALLOWLIST = [
     code: /^a participant with the same name and dojo already exists$/,
     request: (r) => !!r && r.method === 'PUT',
   },
+  {
+    reason: 'The organiser accepts the shared ranks on a league table that can still change (league-team journeys: a second tab reopened the last encounter, or a tie-breaker is still owed): the server refuses the Accept with league_not_settled and the page shows its sentence.',
+    text: /^Failed to load resource: the server responded with a status of 409 \(Conflict\)$/,
+    url: /\/api\/competitions\/[^/]+\/league-tiebreak\/finalize$/,
+    code: /^league_not_settled$/,
+    codeUnreadable: true,
+    request: (r) => !!r && r.method === 'POST',
+  },
 ];
 
 // The `error` field of a refusal body; read with a pattern, since the body is

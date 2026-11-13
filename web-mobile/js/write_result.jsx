@@ -1036,6 +1036,11 @@ export const LEAGUE_FINISHED_REOPEN_WARNING = 'This league has finished. Reopeni
 // A declined confirmation of that reopen: nothing was changed.
 export const LEAGUE_FINISHED_REOPEN_CANCELLED = 'Reopen cancelled: the league is still finished and this match was left unchanged.';
 
+// A declined confirmation of a CORRECTION of a finished league's result (a score
+// write): nothing was changed, and the cancel says so, as the downstream
+// knockout one does.
+export const LEAGUE_FINISHED_CORRECTION_CANCELLED = 'Correction cancelled: the league is still finished and this result was left unchanged.';
+
 export function leagueFinishedRefusal(err) {
     return (err && err.leagueFinished) || null;
 }

@@ -3943,3 +3943,80 @@ func TestFinishedLeagueCorrection_QuickScore(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	assert.Equal(t, "TeamB", storedPoolMatch(t, store, compID, "Pool A-1").Winner)
 }
+
+// The resend of the quick-score that finished the league (same writeId, its
+// answer lost) lands nothing and is answered as recorded, not warned about as a
+// correction that "was not saved".
+func TestFinishedLeagueCorrection_QuickScoreResendIsNotWarned(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+	const compID = "fl-qs-resend"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: compID, Format: state.CompFormatLeague, Status: state.CompStatusPools, Kind: "team", TeamSize: 3,
+	}))
+	teamAID, teamBID := "team-a-id", "team-b-id"
+	require.NoError(t, store.SavePools(compID, []helper.Pool{{PoolName: "Pool A", Players: []helper.Player{
+		{ID: teamAID, Name: "TeamA", Dojo: "Dojo TeamA"}, {ID: teamBID, Name: "TeamB", Dojo: "Dojo TeamB"},
+	}}}))
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{ID: "Pool A-1", SideA: "TeamA", SideAID: teamAID, SideB: "TeamB", SideBID: teamBID, Status: state.MatchStatusScheduled},
+	}))
+	path := "/api/competitions/" + compID + "/matches/Pool A-1/quick-score"
+	body := map[string]any{"sideA": "TeamA", "sideB": "TeamB", "teamAWins": 1, "teamBWins": 2, "draws": 0, "writeId": "qs-finish"}
+
+	w := serveJSON(r, http.MethodPut, path, body)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	comp, err := store.LoadCompetition(compID)
+	require.NoError(t, err)
+	require.Equal(t, state.CompStatusComplete, comp.Status, "the quick-score finished the league")
+
+	w = serveJSON(r, http.MethodPut, path, body)
+	assert.Equal(t, http.StatusOK, w.Code, "the resend is answered as recorded: %s", w.Body.String())
+
+	body["writeId"] = "qs-other"
+	w = serveJSON(r, http.MethodPut, path, body)
+	assert.Equal(t, http.StatusConflict, w.Code, "a different write over the finished league is still warned about")
+}
+
+// A league tie-breaker finished with no winner is refused 400 with a code a
+// client can match without the sentence, on the doors that write a result.
+func TestLeagueTiebreakerDraw_IsRefusedWithACode(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+	const compID = "tb-code"
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID, Format: state.CompFormatLeague, Status: state.CompStatusPools}))
+	require.NoError(t, store.SavePools(compID, []helper.Pool{{PoolName: "Pool A", Players: []helper.Player{
+		{ID: "ayu-id", Name: "Ayu", Dojo: "Dojo A"}, {ID: "ben-id", Name: "Ben", Dojo: "Dojo B"},
+	}}}))
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{ID: "Pool A-TB-0", SideA: "Ayu", SideAID: "ayu-id", SideB: "Ben", SideBID: "ben-id", Status: state.MatchStatusScheduled},
+	}))
+
+	w := serveJSON(r, http.MethodPut, "/api/competitions/"+compID+"/matches/Pool A-TB-0/score", map[string]any{
+		"sideA": "Ayu", "sideB": "Ben", "status": "completed", "decision": "hikiwake",
+	})
+	require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+	assert.Equal(t, "tiebreak_needs_winner", body["code"])
+	assert.Contains(t, body["error"], "needs a winner")
+
+	w = serveJSON(r, http.MethodPost, "/api/competitions/"+compID+"/matches/bulk-score", []map[string]any{{
+		"id": "Pool A-TB-0", "sideA": "Ayu", "sideB": "Ben", "status": "completed", "decision": "hikiwake",
+	}})
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	assert.Contains(t, w.Body.String(), `"reason":"tiebreak_needs_winner"`)
+}
+
+// The barred-match notice's decision (a both-barred draw, the awaited win) is
+// written over a match that is not finished, so it is never read as a
+// correction and the finished-league warning never asks for it.
+func TestDecisionCorrects_AMatchNotFinishedIsNoCorrection(t *testing.T) {
+	req := DecisionRequest{Decision: "kiken-voluntary", DecisionBy: "shiro"}
+	for _, status := range []state.MatchStatus{state.MatchStatusScheduled, state.MatchStatusRunning} {
+		snap := matchSnapshot{Status: status, Stored: &state.MatchResult{Status: status}}
+		assert.False(t, decisionCorrects(snap, req, nil, nil), string(status))
+	}
+	done := matchSnapshot{Status: state.MatchStatusCompleted, Stored: &state.MatchResult{Status: state.MatchStatusCompleted}}
+	assert.True(t, decisionCorrects(done, req, nil, nil), "an unstamped decision over a finished match lands as a correction")
+}

@@ -114,8 +114,20 @@ func respondIfValidationError(c *gin.Context, err error) bool {
 	if !errors.As(err, &verr) {
 		return false
 	}
-	c.JSON(http.StatusBadRequest, gin.H{"error": verr.Error()})
+	c.JSON(http.StatusBadRequest, validationBody(verr))
 	return true
+}
+
+// validationBody is the 400 body of an engine validation refusal: its sentence,
+// and a code for the refusal a client tells apart without matching the sentence
+// (a league tie-breaker finished with no winner, engine.ErrTiebreakNeedsWinner,
+// whose sentence says encho and hantei or accepting the shared ranks).
+func validationBody(err error) gin.H {
+	body := gin.H{"error": err.Error()}
+	if errors.Is(err, engine.ErrTiebreakNeedsWinner) {
+		body["code"] = engine.ErrTiebreakNeedsWinner.Error()
+	}
+	return body
 }
 
 // DaihyosenEngine is the consumer-boundary view of *engine.Engine used

@@ -51,6 +51,11 @@ type Engine struct {
 	standingsCache  sync.Map // map[compID string]*standingsCacheEntry
 	standingsFlight sync.Map // map[compID string]*sync.Once, collapses concurrent cold-cache calls
 
+	// leagueReopenNotes holds the leagues a write's transaction put back into
+	// match play, until the door's auto-complete pass reports it
+	// (takeLeagueReopenNote).
+	leagueReopenNotes sync.Map // map[compID string]struct{}
+
 	// afterMatchRead, when set (tests only), runs at the seam where a
 	// read-modify-write of a match file has read what it will write back:
 	// the pool-matches injections and the Swiss append (inside their one

@@ -114,3 +114,57 @@ func TestDrawnTiebreakOfBarredSides_OnlyAnIpponShobuBout(t *testing.T) {
 	assert.False(t, drawnTiebreakOfBarredSides(won, statuses), "a bout with a winner is not drawn")
 	assert.False(t, drawnTiebreakOfBarredSides(drawn("Pool A-TB-0"), nil), "no statuses, nobody barred")
 }
+
+// finishedBarredTiebreakLeague is barredTiebreakLeague with its bout drawn, both
+// sides barred and the league finished on it, as plan item 6 allows.
+func finishedBarredTiebreakLeague(t *testing.T, compID string) (*Engine, *state.Store, string) {
+	t.Helper()
+	eng, store, tbID := barredTiebreakLeague(t, compID)
+	_, err := eng.RecordMatchResultWithIneligibility(compID, tbID, &state.MatchResult{
+		Status: state.MatchStatusCompleted, Decision: string(domain.DecisionHikiwake),
+		Changed: []string{state.GroupResult}, WriteDoor: DoorDecision,
+	})
+	require.NoError(t, err)
+	barCompetitor(t, store, compID, "ayu-id", true)
+	barCompetitor(t, store, compID, "ben-id", true)
+	outcome, err := eng.MaybeAutoCompletePools(compID)
+	require.NoError(t, err)
+	require.Equal(t, AutoCompleteTransitioned, outcome)
+	return eng, store, tbID
+}
+
+// A side reinstated after the league finished on the barred draw opens the bout
+// again, so the pass that follows the reinstatement puts the league back into
+// match play (the tie owes a bout once more).
+func TestIndividualLeague_ReinstatingABarredSideReopensTheFinishedLeague(t *testing.T) {
+	const compID = "ind-barred-reinstate"
+	eng, store, _ := finishedBarredTiebreakLeague(t, compID)
+
+	barCompetitor(t, store, compID, "ben-id", false)
+	outcome, err := eng.MaybeAutoCompletePools(compID)
+	require.NoError(t, err)
+	assert.Equal(t, AutoCompleteStarted, outcome, "the league is running again")
+	assert.Equal(t, state.CompStatusPools, loadComp(t, store, compID).Status)
+}
+
+// A drawn tie-break bout reopened on a finished league (its row no longer
+// completed) puts the league back into match play, as a regular match does.
+func TestIndividualLeague_ReopenedTiebreakBoutReopensTheFinishedLeague(t *testing.T) {
+	const compID = "ind-tb-reopen"
+	eng, store, tbID := finishedBarredTiebreakLeague(t, compID)
+
+	all, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	for i := range all {
+		if all[i].ID == tbID {
+			all[i].Status = state.MatchStatusScheduled
+			all[i].Decision = ""
+		}
+	}
+	require.NoError(t, store.SavePoolMatches(compID, all))
+
+	outcome, err := eng.MaybeAutoCompletePools(compID)
+	require.NoError(t, err)
+	assert.Equal(t, AutoCompleteStarted, outcome)
+	assert.Equal(t, state.CompStatusPools, loadComp(t, store, compID).Status)
+}

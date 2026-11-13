@@ -1456,7 +1456,7 @@ func (e *Engine) reopenResultPreconditionTx(tx state.StoreTx, compID string, com
 	if status != state.MatchStatusCompleted {
 		return ErrReopenNotCompleted
 	}
-	if !comp.IsKachinuki() && !domain.IsDefaultWinDecisionStr(decision) && !(h.Pool != nil && drawnSupplementaryBout(h.Pool)) {
+	if !comp.IsKachinuki() && !domain.IsDefaultWinDecisionStr(decision) && (h.Pool == nil || !drawnSupplementaryBout(h.Pool)) {
 		// bc-cse item 14: no "(correctionReason)" jargon -- that named the
 		// internal API field, not anything the operator sees on the score
 		// editor's own correction-reason box. A tie-break or daihyosen bout
@@ -1472,13 +1472,13 @@ func (e *Engine) reopenResultPreconditionTx(tx state.StoreTx, compID string, com
 		// reopening it would leave a league completed (and the chusen ranks
 		// recorded) over a bout that is running again, and nothing puts
 		// either back.
-		lots, err := loadPoolLots(compID, []state.MatchResult{*h.Pool}, tx.LoadPoolRanks, func() (map[string][]state.PlayerStanding, error) {
+		lots, err := loadPoolLots([]state.MatchResult{*h.Pool}, func() (map[string][]state.PlayerStanding, error) {
 			return e.computeStandingsFrom(tx, compID)
 		})
 		if err != nil {
 			return err
 		}
-		if daihyosenRuledByChusen(h.Pool, lots.standings, lots.ranks) {
+		if daihyosenRuledByChusen(h.Pool, lots.standings) {
 			return validationErrorf("%s was settled by the drawing of lots, so it is not fought again. To change the order, change the drawing of lots on the Pools tab.",
 				SentenceCase(OperatorMatchLabel(comp, nil, matchID)))
 		}

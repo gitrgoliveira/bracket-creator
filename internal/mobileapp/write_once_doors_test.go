@@ -44,7 +44,7 @@ func TestLateDuplicate_LineupRemovalIsAnsweredAsRecorded(t *testing.T) {
 func TestLateDuplicate_ChusenOrderAndResetAreAnsweredAsRecorded(t *testing.T) {
 	r, store, _, _, _ := setupTestRouter(t)
 	compID := "once-ranks"
-	seedMixedCompWithSeatedKnockout(t, store, compID, state.MatchStatusScheduled)
+	seedTiedTeamCompWithSeatedKnockout(t, store, compID, state.MatchStatusScheduled)
 	order := func(first, second, writeID string) map[string]any {
 		return map[string]any{
 			"ranks":   []map[string]any{rankEntry(first, 1), rankEntry(second, 2)},

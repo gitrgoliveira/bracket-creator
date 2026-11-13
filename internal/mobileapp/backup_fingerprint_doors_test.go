@@ -314,7 +314,7 @@ func TestFingerprintDoors(t *testing.T) {
 
 	t.Run("pool rank override", func(t *testing.T) {
 		h.t = t
-		pools, err := pt.Store.LoadPools(pt.MixedCompID)
+		pools, err := pt.Store.LoadPools(pt.OverriddenCompID)
 		require.NoError(t, err)
 		var first, second string
 		for _, p := range pools {
@@ -323,7 +323,7 @@ func TestFingerprintDoors(t *testing.T) {
 			}
 		}
 		require.NotEmpty(t, first, "the overridden pool holds two players")
-		path := "/api/competitions/" + pt.MixedCompID + "/pools/" + url.PathEscape(pt.OverriddenPoolName) + "/override-rank"
+		path := "/api/competitions/" + pt.OverriddenCompID + "/pools/" + url.PathEscape(pt.OverriddenPoolName) + "/override-rank"
 		ranks := func(first, second string) map[string]any {
 			return map[string]any{"ranks": []map[string]any{{"playerId": first, "rank": 1}, {"playerId": second, "rank": 2}}}
 		}

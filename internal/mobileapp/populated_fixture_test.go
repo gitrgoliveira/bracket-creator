@@ -44,6 +44,7 @@ type populatedTournament struct {
 	TeamIDs            []string
 	KachinukiTeamIDs   []string
 	IneligiblePlayerID string
+	OverriddenCompID   string
 	OverriddenPoolName string
 }
 
@@ -260,21 +261,6 @@ func buildPopulatedTournament(t *testing.T) *populatedTournament {
 	})
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 
-	// Kind 8 (override): save a pool rank override through
-	// PUT /api/competitions/:id/pools/:poolId/override-rank so overrides.json exists.
-	pools, err := store.LoadPools(pt.MixedCompID)
-	require.NoError(t, err)
-	require.NotEmpty(t, pools)
-	require.GreaterOrEqual(t, len(pools[0].Players), 2)
-	pt.OverriddenPoolName = pools[0].PoolName
-	w = populatedServeJSON(t, router, password, http.MethodPut, "/api/competitions/"+pt.MixedCompID+"/pools/"+url.PathEscape(pt.OverriddenPoolName)+"/override-rank", map[string]any{
-		"ranks": []map[string]any{
-			{"playerId": pools[0].Players[0].ID, "rank": 1},
-			{"playerId": pools[0].Players[1].ID, "rank": 2},
-		},
-	})
-	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
-
 	// Kind 2 (individual knockout competition with a generated bracket and
 	// at least one recorded bracket result).
 	w = populatedServeJSON(t, router, password, http.MethodPost, "/api/competitions", map[string]any{
@@ -398,6 +384,23 @@ func buildPopulatedTournament(t *testing.T) *populatedTournament {
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 
 	w = populatedServeJSON(t, router, password, http.MethodPost, "/api/competitions/"+pt.TeamCompID+"/start", nil)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	// Kind 8 (override): save a pool rank override through
+	// PUT /api/competitions/:id/pools/:poolId/override-rank so overrides.json
+	// exists. Lots are drawn only in a team competition (rank_override_team_only).
+	pools, err := store.LoadPools(pt.TeamCompID)
+	require.NoError(t, err)
+	require.NotEmpty(t, pools)
+	require.GreaterOrEqual(t, len(pools[0].Players), 2)
+	pt.OverriddenCompID = pt.TeamCompID
+	pt.OverriddenPoolName = pools[0].PoolName
+	w = populatedServeJSON(t, router, password, http.MethodPut, "/api/competitions/"+pt.OverriddenCompID+"/pools/"+url.PathEscape(pt.OverriddenPoolName)+"/override-rank", map[string]any{
+		"ranks": []map[string]any{
+			{"playerId": pools[0].Players[0].ID, "rank": 1},
+			{"playerId": pools[0].Players[1].ID, "rank": 2},
+		},
+	})
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 
 	teamMatches, err := store.LoadPoolMatches(pt.TeamCompID)
@@ -690,11 +693,11 @@ func TestPopulatedFixture_EveryKindExists(t *testing.T) {
 	assert.NoError(t, err, "kind 7 (competitor statuses): competitor-status.yaml must exist on disk")
 
 	// 8. Override: a pool rank override saved in overrides.json.
-	overrides, err := pt.Store.LoadOverrides(pt.MixedCompID)
+	overrides, err := pt.Store.LoadOverrides(pt.OverriddenCompID)
 	require.NoError(t, err, "kind 8 (override): load overrides")
 	require.NotNil(t, overrides, "kind 8 (override): overrides must not be nil")
 	assert.NotEmpty(t, overrides.PoolRanks[pt.OverriddenPoolName], "kind 8 (override): pool rank override must exist for pool")
-	_, err = os.Stat(filepath.Join(pt.Dir, "competitions", pt.MixedCompID, "overrides.json"))
+	_, err = os.Stat(filepath.Join(pt.Dir, "competitions", pt.OverriddenCompID, "overrides.json"))
 	assert.NoError(t, err, "kind 8 (override): overrides.json must exist on disk")
 
 	// 9. Branding logo and sponsor image: branding/ and sponsors/ are non-empty.

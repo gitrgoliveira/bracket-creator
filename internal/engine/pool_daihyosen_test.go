@@ -564,6 +564,10 @@ func TestMaybeAutoCompletePools_TeamDHCompletedWithoutWinner(t *testing.T) {
 	assert.Equal(t, AutoCompleteNoChange, outcome, "DH with no winner should block auto-completion")
 }
 
+// everyTie is a breakBand that holds every tie in the band, for the
+// dhCycleExists tests that judge the cycle alone.
+func everyTie(string, []int, []state.PlayerStanding) bool { return true }
+
 // TestDHCycleExists_NoCycle verifies that dhCycleExists returns false when
 // DH results unambiguously break all ties (A wins DH against B).
 func TestDHCycleExists_NoCycle(t *testing.T) {
@@ -585,7 +589,7 @@ func TestDHCycleExists_NoCycle(t *testing.T) {
 			{Player: players[1], Points: 0},
 		},
 	}
-	assert.False(t, dhCycleExists(standings, matches, nil))
+	assert.False(t, dhCycleExists(standings, matches, everyTie))
 }
 
 // TestDHCycleExists_Cycle verifies that dhCycleExists returns true for a
@@ -612,7 +616,11 @@ func TestDHCycleExists_Cycle(t *testing.T) {
 			{Player: players[2], Points: 0},
 		},
 	}
-	assert.True(t, dhCycleExists(standings, matches, nil))
+	assert.True(t, dhCycleExists(standings, matches, everyTie))
+	// A cycle outside the band (a tie no place hangs on) is offered no chusen
+	// (ChusenStatus asks the same band), so it never holds the pool either.
+	outside := func(string, []int, []state.PlayerStanding) bool { return false }
+	assert.False(t, dhCycleExists(standings, matches, outside))
 }
 
 // TestDHCycleExists_CycleResolvedByOverrides verifies that a cyclic DH result
@@ -628,30 +636,17 @@ func TestDHCycleExists_CycleResolvedByOverrides(t *testing.T) {
 		{ID: "Pool A-DH-1", SideA: "Beta", SideB: "Gamma", Status: state.MatchStatusCompleted, Winner: "Beta"},
 		{ID: "Pool A-DH-2", SideA: "Alpha", SideB: "Gamma", Status: state.MatchStatusCompleted, Winner: "Gamma"},
 	}
-	// Id-only resolution (bc-pnum) applies to the cycle detection AND to
-	// lookupPoolRankOverride, which resolves solely via
-	// helper.CompetitorKey(id, name, dojo) with no bare-name fallback
-	// (TestCalculatePoolStandings_Override_LegacyBareNameKeyIsUnresolvable
-	// pins the removal). A poolRanks map keyed by bare name would never
-	// match, silently leaving the group "unresolved" -- so the override
-	// must be keyed exactly as a real write would key it.
+	// Id-only resolution (bc-pnum) applies to the cycle detection; the ranks
+	// in force arrive on the standings rows (IsOverridden, poolRanksInForce).
 	bctest.StampIDs(players, matches)
 	standings := map[string][]state.PlayerStanding{
 		"Pool A": {
-			{Player: players[0], Points: 0},
-			{Player: players[1], Points: 0},
-			{Player: players[2], Points: 0},
+			{Player: players[0], Points: 0, IsOverridden: true},
+			{Player: players[1], Points: 0, IsOverridden: true},
+			{Player: players[2], Points: 0, IsOverridden: true},
 		},
 	}
-	// Operator manually resolved the cycle by assigning explicit ranks.
-	poolRanks := map[string]map[string]int{
-		"Pool A": {
-			helper.CompetitorKey(players[0].ID, players[0].Name, players[0].Dojo): 1,
-			helper.CompetitorKey(players[1].ID, players[1].Name, players[1].Dojo): 2,
-			helper.CompetitorKey(players[2].ID, players[2].Name, players[2].Dojo): 3,
-		},
-	}
-	assert.False(t, dhCycleExists(standings, matches, poolRanks))
+	assert.False(t, dhCycleExists(standings, matches, everyTie))
 }
 
 // TestMaybeAutoCompletePools_TeamDHCycleBlocks verifies that auto-completion
@@ -853,12 +848,12 @@ func TestMaybeAutoCompletePools_DrawnDHRuledByChusenTransitions(t *testing.T) {
 	assert.Equal(t, AutoCompleteTransitioned, outcome, "the recorded chusen settles the drawn daihyosen round")
 }
 
-// TestPoolMatchesSettledNow_JudgesTheWholeTiedGroup: the check a league's
+// TestPoolsSettledNow_JudgesTheWholeTiedGroup: the check a league's
 // completion makes under the competition's lock reads the standings it judges
 // the lots on from the transaction, not from the scan before the lock. A drawn
 // daihyosen round over three level teams is settled only once the chusen has
 // ranked all three, however many of them the drawn bouts name.
-func TestPoolMatchesSettledNow_JudgesTheWholeTiedGroup(t *testing.T) {
+func TestPoolsSettledNow_JudgesTheWholeTiedGroup(t *testing.T) {
 	const compID = "settled-now-whole-group"
 	eng, store := setupTeamPoolComp(t, compID, true)
 	_, err := eng.InjectPoolDaihyosenMatches(compID)
@@ -887,21 +882,21 @@ func TestPoolMatchesSettledNow_JudgesTheWholeTiedGroup(t *testing.T) {
 		}
 		require.NoError(t, store.SaveOverrides(compID, &state.Overrides{PoolRanks: map[string]map[string]int{"Pool A": ranks}}))
 	}
-	settledNow := func() bool {
-		var settled bool
+	settledNow := func() PoolsVerdict {
+		var verdict PoolsVerdict
 		require.NoError(t, store.WithTransaction(compID, func(tx state.StoreTx) error {
 			var serr error
-			settled, serr = eng.PoolMatchesSettledNow(tx, compID)
+			verdict, serr = eng.PoolsSettledNow(tx, compID)
 			return serr
 		}))
-		return settled
+		return verdict
 	}
 
-	assert.False(t, settledNow(), "no chusen recorded: the drawn daihyosen round settles nothing")
+	assert.Equal(t, PoolsMatchOpen, settledNow(), "no chusen recorded: the drawn daihyosen round settles nothing")
 	rank(2)
-	assert.False(t, settledNow(), "two of the three level teams ranked: the third still has no place")
+	assert.Equal(t, PoolsMatchOpen, settledNow(), "two of the three level teams ranked: the third still has no place")
 	rank(3)
-	assert.True(t, settledNow(), "all three ranked: the lots decided every place")
+	assert.Equal(t, PoolsSettled, settledNow(), "all three ranked: the lots decided every place")
 }
 
 // TestDHStandingsApplied verifies that a completed pool-DH match result is

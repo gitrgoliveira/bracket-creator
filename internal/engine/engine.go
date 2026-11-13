@@ -59,6 +59,12 @@ type Engine struct {
 	// the settings it was generated from, so a test can land a concurrent
 	// settings save in that window. Production never sets it.
 	beforeStartCommit func(compID string)
+
+	// beforePoolsCompleteLock, when set (tests only), runs in the league's
+	// auto-completion after the unlocked scan and before the lock that decides
+	// the completion (PoolsSettledNow), so a test can land a correction in that
+	// window. Production never sets it.
+	beforePoolsCompleteLock func(compID string)
 }
 
 // noteMatchRead runs the test seam above, when one is set.

@@ -118,7 +118,7 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 	})
 
 	t.Run("Override Rank", func(t *testing.T) {
-		comp := state.Competition{ID: "rank-comp", Status: state.CompStatusPools}
+		comp := state.Competition{ID: "rank-comp", Status: state.CompStatusPools, Kind: "team", TeamSize: 2}
 		store.SaveCompetition(&comp)
 		// Seed a pool so the new pool-size validation can find pool-1
 		// (rank within a pool is bounded by len(pool.Players)). playerId is
@@ -147,7 +147,7 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 		// override's identity key, which is helper.CompetitorKey(id, name,
 		// dojo) and degrades to "id:"+id once an id is known -- so a padded
 		// playerName must have no effect on where the override lands.
-		comp := state.Competition{ID: "rank-trim-comp", Status: state.CompStatusPools}
+		comp := state.Competition{ID: "rank-trim-comp", Status: state.CompStatusPools, Kind: "team", TeamSize: 2}
 		store.SaveCompetition(&comp)
 		// Seed a pool with at least 7 players (rank=7 below), the 7th being
 		// the trim target.
@@ -195,7 +195,7 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 		// not affect the outcome: this was a behaviour change (the old
 		// handler 400'd an over-length playerName via validateMaxLen even
 		// though the value was never stored anywhere real).
-		comp := state.Competition{ID: "rank-ignores-name", Status: state.CompStatusPools}
+		comp := state.Competition{ID: "rank-ignores-name", Status: state.CompStatusPools, Kind: "team", TeamSize: 2}
 		store.SaveCompetition(&comp)
 		require.NoError(t, store.SavePools("rank-ignores-name", []helper.Pool{
 			{PoolName: "pool-1", Players: []helper.Player{
@@ -224,7 +224,7 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 	})
 
 	t.Run("Override Rank Rejects Invalid Input", func(t *testing.T) {
-		comp := state.Competition{ID: "rank-bad-comp", Status: state.CompStatusPools}
+		comp := state.Competition{ID: "rank-bad-comp", Status: state.CompStatusPools, Kind: "team", TeamSize: 2}
 		store.SaveCompetition(&comp)
 		// Seed a pool so cases that pass the rank cap checks reach the
 		// pool-size validation (rank=99999 fails earlier at the absolute
@@ -263,7 +263,7 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 	})
 
 	t.Run("Override Rank Rejects Off-Roster PlayerId With 400", func(t *testing.T) {
-		comp := state.Competition{ID: "rank-off-roster", Status: state.CompStatusPools}
+		comp := state.Competition{ID: "rank-off-roster", Status: state.CompStatusPools, Kind: "team", TeamSize: 2}
 		store.SaveCompetition(&comp)
 		require.NoError(t, store.SavePools("rank-off-roster", []helper.Pool{
 			{PoolName: "pool-1", Players: []helper.Player{
@@ -294,7 +294,7 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 		// A bogus: poolId (no matching Pool.PoolName) returns 404.
 		// The JS frontend only offers existing pools; this is a
 		// defense-in-depth check against hand-crafted API callers.
-		comp := state.Competition{ID: "rank-unknown-pool", Status: state.CompStatusPools}
+		comp := state.Competition{ID: "rank-unknown-pool", Status: state.CompStatusPools, Kind: "team", TeamSize: 2}
 		store.SaveCompetition(&comp)
 		require.NoError(t, store.SavePools("rank-unknown-pool", []helper.Pool{
 			{PoolName: "pool-a", Players: []helper.Player{{ID: "p1", Name: "P1", Dojo: "Dojo P1"}}},
@@ -309,6 +309,29 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 			"override-rank against an unknown pool name must 404")
 		assert.Contains(t, w.Body.String(), "pool",
 			"error message should identify the missing pool")
+	})
+
+	t.Run("Override Rank Refuses An Individual Competition With 409", func(t *testing.T) {
+		// Lots are drawn only over a team tie a daihyosen left level; an
+		// individual tie is fought again by ippon-shobu, so no rank is set by
+		// hand there, and overrides.json is left untouched.
+		const compID = "rank-individual"
+		require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID, Status: state.CompStatusPools, Kind: "individual"}))
+		require.NoError(t, store.SavePools(compID, []helper.Pool{
+			{PoolName: "pool-1", Players: []helper.Player{{ID: "p1", Name: "P1", Dojo: "Dojo P1"}, {ID: "p2", Name: "P2", Dojo: "Dojo P2"}}},
+		}))
+		reqBody, _ := json.Marshal(map[string]any{"playerId": "p1", "rank": 1})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/"+compID+"/pools/pool-1/override-rank", bytes.NewBuffer(reqBody))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		require.Equal(t, http.StatusConflict, w.Code, w.Body.String())
+		var body map[string]string
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+		assert.Equal(t, "rank_override_team_only", body["code"])
+		assert.NotEmpty(t, body["error"])
+		_, statErr := os.Stat(filepath.Join(tempDir, "competitions", compID, "overrides.json"))
+		assert.True(t, os.IsNotExist(statErr), "a refused override writes nothing")
 	})
 
 	t.Run("Override Rank Rejects Wrong Competition Status With 409", func(t *testing.T) {
@@ -344,7 +367,7 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 	// ONLY; there is no playerDojo narrowing left (that fallback existed
 	// only for a client with no id, which can no longer select at all).
 	t.Run("Override Rank Disambiguates Same-Name Different-Dojo By PlayerId", func(t *testing.T) {
-		comp := state.Competition{ID: "rank-dup-id", Status: state.CompStatusPools}
+		comp := state.Competition{ID: "rank-dup-id", Status: state.CompStatusPools, Kind: "team", TeamSize: 2}
 		store.SaveCompetition(&comp)
 		require.NoError(t, store.SavePools("rank-dup-id", []helper.Pool{
 			{PoolName: "pool-1", Players: []helper.Player{

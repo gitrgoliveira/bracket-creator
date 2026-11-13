@@ -509,7 +509,7 @@ type Competition struct {
 	// operator-settable (3 or 4) only for TEAM leagues; INDIVIDUAL leagues are not
 	// given the control and use the default band (3) via effectiveTopN. Team
 	// leagues break ties with a daihyosen (LeagueTiebreakCandidates); individual
-	// leagues break them with an ippon-shobu bout (tieNeedsIndividualBreak ->
+	// leagues break them with an ippon-shobu bout (tieNeedsBreak ->
 	// InjectTiebreakerMatches). Allowed explicit values are 3 (default) and 4.
 	//
 	// A "consequential" tied group is one whose position range intersects the

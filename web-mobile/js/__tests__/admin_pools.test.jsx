@@ -9,6 +9,7 @@ import { enrichPoolMatchWithComp, poolMatchesForPool, groupTeamIds, drawnSupplem
 // coverage in __tests__/render/admin_pools_chusen.render.test.jsx, which does
 // mount AdminPools.
 import { checkinPid } from '../data.jsx';
+import { poolNameOf } from '../pool_ids.jsx';
 
 describe('drawnSupplementaryBouts', () => {
   const m = (id, over = {}) => ({ id, sideA: 'Bea', sideB: 'Cal', status: 'completed', winner: '', ...over });
@@ -61,14 +62,12 @@ describe('drawnSupplementaryBouts', () => {
 
     it.each(table.chusenCases.map(c => [c.name, c]))('%s', (_name, c) => {
       const row = m(c.id, { winner: c.winner, sideAId: c.sideAId, sideBId: c.sideBId });
-      // The case's standings are the bout's own pool's; the ranked teams are its
-      // rows marked isOverridden, or, for a chusen recorded in another pool,
-      // that pool's.
-      const boutPool = c.id.replace(/-(?:TB|DH)-.*$/, '');
+      // The case's standings are the bout's own pool's (named as the page names
+      // it, poolNameOf); the server marks the ranks in force (inForce) on its
+      // rows as isOverridden.
       const standings = {
-        [boutPool]: c.standings.map(s => ({ player: { id: s.id }, points: s.points, isOverridden: c.rankedPool === boutPool && c.ranked.includes(s.id) })),
+        [poolNameOf(c.id)]: c.standings.map(s => ({ player: { id: s.id }, points: s.points, isOverridden: c.inForce.includes(s.id) })),
       };
-      if (c.rankedPool !== boutPool) standings[c.rankedPool] = c.ranked.map(id => ({ player: { id }, isOverridden: true }));
       expect(drawnSupplementaryBouts([row], standings)).toEqual(c.stuck ? [row] : []);
     });
   });

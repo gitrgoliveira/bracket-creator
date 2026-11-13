@@ -705,23 +705,55 @@ func TestRequalify_Engi_RefusedCorrectionLeavesNoHistoryEntry(t *testing.T) {
 	assert.Equal(t, state.HistoryOutcomeApplied, last.Outcomes[state.GroupFlags])
 }
 
-// A pool-rank override (the chusen door) moves a pool's order without a match
-// write, so it answers for the knockout exactly as a pool correction does:
-// named and refused while the old 1st has fought, the override taken back; a
-// knockout match being fought refuses it outright; confirmed, the fought match
-// is reopened and both places are repainted, with nobody seated twice.
-func TestOverridePoolRank_AnswersForTheKnockout(t *testing.T) {
-	f := newRQFixture(t, "rq-rank", 2, [][]string{{"A1", "A2"}, {"B1", "B2"}})
-	f.scorePool("Pool A-0", "A1")
-	f.scorePool("Pool B-0", "B1")
+// newChusenRQFixture is newRQFixture for a team competition whose Pool A (A1,
+// A2) drew its match and its representative bout, so the drawing of lots is
+// the only order Pool A has (a recorded rank governs only such a tie,
+// poolRanksInForce); Pool B is won by B1. The lots are recorded A1 then A2 and
+// the qualifiers seated.
+func newChusenRQFixture(t *testing.T, compID string, poolWinners int) *rqFix {
+	t.Helper()
+	f := newRQFixture(t, compID, poolWinners, [][]string{{"A1", "A2"}, {"B1", "B2"}}, func(c *state.Competition) {
+		c.Kind, c.TeamSize = "team", 2
+	})
+	stamp := func(m state.MatchResult) state.MatchResult {
+		m.SideAID, m.SideBID = rqID(m.SideA), rqID(m.SideB)
+		if m.Winner != "" {
+			m.WinnerID = rqID(m.Winner)
+		}
+		return m
+	}
+	drawnDH := teamPoolMatch("Pool A-DH-0", "A", "A1", "A2", "")
+	drawnDH.SubResults = nil
+	require.NoError(t, f.store.SavePoolMatches(compID, []state.MatchResult{
+		stamp(teamPoolMatch("Pool A-0", "A", "A1", "A2", "")),
+		stamp(drawnDH),
+		stamp(teamPoolMatch("Pool B-0", "A", "B1", "B2", "B1")),
+	}))
+	_, err := f.eng.OverridePoolRanks(compID, "Pool A", []RankOverride{{PlayerID: rqID("A1"), Rank: 1}, {PlayerID: rqID("A2"), Rank: 2}})
+	require.NoError(t, err)
 	f.resolve()
+	return f
+}
+
+// A pool-rank override (the chusen door) moves a pool's order without a match
+// write, so a corrected drawing of lots answers for the knockout exactly as a
+// pool correction does: named and refused while the old 1st has fought, the
+// correction taken back; a knockout match being fought refuses it outright;
+// confirmed, the fought match is reopened and both places are repainted, with
+// nobody seated twice.
+func TestOverridePoolRank_AnswersForTheKnockout(t *testing.T) {
+	f := newChusenRQFixture(t, "rq-rank", 2)
 	m1, s1 := f.slot("Pool A-1st")
 	m2, s2 := f.slot("Pool A-2nd")
+	name, _ := sideOf(m1, s1)
+	require.Equal(t, "A1", name, "the lots seat A1 1st")
 	ranks := func() map[string]int {
 		o, err := f.store.LoadOverrides(f.compID)
 		require.NoError(t, err)
 		return o.PoolRanks["Pool A"]
 	}
+	asDrawn := map[string]int{helper.CompetitorKey(rqID("A1"), "", ""): 1, helper.CompetitorKey(rqID("A2"), "", ""): 2}
+	corrected := []RankOverride{{PlayerID: rqID("A2"), Rank: 1}, {PlayerID: rqID("A1"), Rank: 2}}
 
 	// Running: terminal, never confirmable, override taken back.
 	require.NoError(t, f.store.WithTransaction(f.compID, func(tx state.StoreTx) error {
@@ -730,15 +762,15 @@ func TestOverridePoolRank_AnswersForTheKnockout(t *testing.T) {
 			return nil
 		})
 	}))
-	_, err := f.eng.OverridePoolRanks(f.compID, "Pool A", []RankOverride{{PlayerID: rqID("A2"), Rank: 1}}, ForceOptions{Force: true})
+	_, err := f.eng.OverridePoolRanks(f.compID, "Pool A", corrected, ForceOptions{Force: true})
 	var running *DownstreamKnockoutRunningError
 	require.ErrorAs(t, err, &running)
 	assert.Empty(t, running.MatchID, "no match is being corrected")
-	assert.Empty(t, ranks(), "the refused override is taken back")
+	assert.Equal(t, asDrawn, ranks(), "the refused override is taken back")
 	require.NoError(t, f.scoreKO(m1.ID, "A1"))
 
 	// Played: named, with the places that move, and taken back.
-	changed, err := f.eng.OverridePoolRanks(f.compID, "Pool A", []RankOverride{{PlayerID: rqID("A2"), Rank: 1}})
+	changed, err := f.eng.OverridePoolRanks(f.compID, "Pool A", corrected)
 	assert.False(t, changed)
 	var played *DownstreamKnockoutPlayedError
 	require.ErrorAs(t, err, &played)
@@ -748,13 +780,13 @@ func TestOverridePoolRank_AnswersForTheKnockout(t *testing.T) {
 	require.Len(t, played.QualifierChange, 2)
 	assert.Equal(t, QualifierIdentity{Name: "A2", ID: rqID("A2")}, played.QualifierChange[0].To)
 	assert.Contains(t, played.Error(), "changing the ranking of Pool A")
-	assert.Empty(t, ranks(), "the refused override is taken back")
+	assert.Equal(t, asDrawn, ranks(), "the refused override is taken back")
 	got := findBracketMatchInBracket(f.bracket(), m1.ID)
 	assert.Equal(t, state.MatchStatusCompleted, got.Status, "nothing reopened before the operator confirms")
 
 	// Confirmed: reopened, repainted, nobody twice.
 	var reopened []ReopenedMatch
-	changed, err = f.eng.OverridePoolRanks(f.compID, "Pool A", []RankOverride{{PlayerID: rqID("A2"), Rank: 1}}, ForceOptions{Force: true, Reopened: &reopened})
+	changed, err = f.eng.OverridePoolRanks(f.compID, "Pool A", corrected, ForceOptions{Force: true, Reopened: &reopened})
 	require.NoError(t, err)
 	assert.True(t, changed)
 	assert.Equal(t, 1, ranks()[helper.CompetitorKey(rqID("A2"), "", "")])
@@ -764,7 +796,7 @@ func TestOverridePoolRank_AnswersForTheKnockout(t *testing.T) {
 	got = findBracketMatchInBracket(b, m1.ID)
 	assert.Equal(t, state.MatchStatusScheduled, got.Status)
 	assert.Equal(t, "reopened: the ranking of Pool A was changed", got.CorrectionReason)
-	name, _ := sideOf(*got, s1)
+	name, _ = sideOf(*got, s1)
 	assert.Equal(t, "A2", name)
 	name, _ = sideOf(*findBracketMatchInBracket(b, m2.ID), s2)
 	assert.Equal(t, "A1", name)

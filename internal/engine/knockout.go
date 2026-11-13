@@ -108,11 +108,11 @@ func (e *Engine) poolCompletion(loader poolStandingsLoader, compID string, comp 
 		return nil, err
 	}
 
-	// Recorded chusen ranks settle a drawn representative bout (poolMatchSettled),
-	// and the cycle check below reads the same ranks. The lots and the team
-	// cycle check both read the standings: compute them once.
+	// The chusen ranks in force (IsOverridden on the standings) settle a drawn
+	// representative bout (poolMatchSettled), and the cycle check below reads the
+	// same standings: compute them once.
 	standings = sync.OnceValues(standings)
-	lots, err := loadPoolLots(compID, matches, loader.LoadPoolRanks, standings)
+	lots, err := loadPoolLots(matches, standings)
 	if err != nil {
 		return nil, err
 	}
@@ -156,12 +156,17 @@ func (e *Engine) poolCompletion(loader poolStandingsLoader, compID string, comp 
 		if serr != nil {
 			return nil, serr
 		}
+		bracket, berr := loader.LoadBracket(compID)
+		if berr != nil {
+			return nil, berr
+		}
+		band := newBreakBand(comp, pools, bracket)
 		for pn, ok := range done {
 			if !ok {
 				continue
 			}
 			scoped := map[string][]state.PlayerStanding{pn: st[pn]}
-			if dhCycleExists(scoped, matches, lots.ranks) {
+			if dhCycleExists(scoped, matches, band) {
 				done[pn] = false
 			}
 		}

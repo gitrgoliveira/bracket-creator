@@ -2883,11 +2883,12 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		//
 		// A bracketless format (league/swiss/pools: no bracket.json, which
 		// LoadBracket maps to an empty bracket + nil error) is held to its own
-		// matches instead (engine.PoolMatchesSettledNow, plus the Swiss round
+		// matches instead (engine.PoolsSettledNow, plus the Swiss round
 		// count). Completion is IRREVERSIBLE, so a genuine I/O/parse fault
 		// fails CLOSED (500) rather than sealing with unknown state.
 		var compOut *state.Competition
 		var statusErr, bracketFault, matchesFault error
+		var conflict gin.H
 		var notFoundFlag bool
 		// tx.LoadPoolMatches skips the first-read legacy conversion the
 		// store's own read runs; run it first, as AdvanceSwissRound does.
@@ -2918,19 +2919,28 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				// No knockout rounds to check (a league, a Swiss competition,
 				// a pools-only one): the competition is finished only once its
 				// own matches are, by the rule a league completes by itself
-				// (engine.PoolMatchesSettledNow), and a Swiss competition only
-				// once every configured round has been drawn. Every caller is
-				// held to it, the anonymous self-run caller included.
+				// (engine.PoolsSettledNow: for a league, no tie in the band
+				// without its tie-breaker and none a tie-breaker left level
+				// without the lots), and a Swiss competition only once every
+				// configured round has been drawn. Every caller is held to it,
+				// the anonymous self-run caller included.
 				// Fails closed: a read fault, or a corrupt overrides.json
 				// (the recorded chusen ranks settle a drawn representative
 				// bout), refuses the completion.
-				settled, serr := eng.PoolMatchesSettledNow(tx, id)
+				verdict, serr := eng.PoolsSettledNow(tx, id)
 				if serr != nil {
 					matchesFault = serr
 					return nil
 				}
-				if !settled {
+				switch verdict {
+				case engine.PoolsMatchOpen:
 					statusErr = fmt.Errorf("all matches must be completed before this competition can be finished")
+					return nil
+				case engine.PoolsTiebreakOwed:
+					conflict = gin.H{"code": "league_tiebreak_pending", "error": "Some places are still tied. Run the tie-breaker on the Pools tab before this competition can be finished."}
+					return nil
+				case engine.PoolsChusenOwed:
+					conflict = gin.H{"code": "league_chusen_pending", "error": "A tie-breaker left some places tied. Draw lots for them on the Pools tab before this competition can be finished."}
 					return nil
 				}
 				if n := engine.SwissRoundsToDraw(current); n > 0 {
@@ -2958,6 +2968,10 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		}
 		if statusErr != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": statusErr.Error()})
+			return
+		}
+		if conflict != nil {
+			c.JSON(http.StatusConflict, conflict)
 			return
 		}
 		if txErr != nil {
@@ -3078,6 +3092,13 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		// order does to the knockout is answered below, as for any override.
 		if !comp.AcceptsPoolRankOverride() {
 			c.JSON(http.StatusConflict, gin.H{"error": "rank overrides only accepted while competition is in pools stage, or in knockout stage for a pools + knockout competition"})
+			return
+		}
+		// Lots are drawn only over a team tie a daihyosen left level
+		// (ChusenStatus); an individual tie is broken by an ippon-shobu, fought
+		// again until it names a winner, so no rank is ever set by hand there.
+		if !comp.IsTeam() {
+			c.JSON(http.StatusConflict, gin.H{"code": "rank_override_team_only", "error": "Lots are drawn only for a team competition. An individual tie is decided by an ippon-shobu."})
 			return
 		}
 		// Pool-size validation: rank within a pool is bounded by the

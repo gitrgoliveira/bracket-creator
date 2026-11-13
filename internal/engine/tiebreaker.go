@@ -196,18 +196,23 @@ func strictlyOrderedByWins(group []state.PlayerStanding, wins map[string]int) bo
 
 // tieSettled reports whether a Points-tied group's finishing order has
 // already been decided, so it is no longer a tie to break: the operator
-// recorded a chusen for every member (chusenRecorded, the per-pool rank
-// overrides), or the group's supplementary bouts ordered it completely, the
-// ippon-shobu (TB) bouts in any competition and the daihyosen (DH) bouts in a
-// team one, the same two passes computeStandingsFrom sorts by. Points never
-// change after either (applyTiebreakSort only reorders within the group), so
-// detectPoolTies alone still reports such a group, and the tie highlight read
-// it as a tie forever (operator ruling 2026-09-24: a tie settled by chusen or
-// by daihyosen is no longer a tie).
-func tieSettled(group []state.PlayerStanding, matches []state.MatchResult, isTeam bool, groupOverrides map[string]int) bool {
-	if chusenRecorded(group, groupOverrides) {
-		return true
-	}
+// recorded a chusen for every member that is in force (chusenRecorded, reading
+// the rows' IsOverridden), or the group's supplementary bouts ordered it
+// completely (tieSettledByBouts). Points never change after either
+// (applyTiebreakSort only reorders within the group), so detectPoolTies alone
+// still reports such a group, and the tie highlight read it as a tie forever
+// (operator ruling 2026-09-24: a tie settled by chusen or by daihyosen is no
+// longer a tie).
+func tieSettled(group []state.PlayerStanding, matches []state.MatchResult, isTeam bool) bool {
+	return chusenRecorded(group) || tieSettledByBouts(group, matches, isTeam)
+}
+
+// tieSettledByBouts reports whether a Points-tied group's supplementary bouts
+// ordered it completely: the ippon-shobu (TB) bouts in any competition and the
+// daihyosen (DH) bouts in a team one, the same two passes computeStandingsFrom
+// sorts by. A group they settled is decided by what was fought, so no recorded
+// lots govern it (poolRanksInForce).
+func tieSettledByBouts(group []state.PlayerStanding, matches []state.MatchResult, isTeam bool) bool {
 	if strictlyOrderedByWins(group, supplementaryGroupWins(group, matches, IsTiebreakerMatchID)) {
 		return true
 	}
@@ -323,20 +328,24 @@ func PoolQualifierCuts(comp *state.Competition, pools []helper.Pool, bracket *st
 	return out
 }
 
-// tieNeedsIndividualBreak decides whether InjectTiebreakerMatches should hold an
-// ippon-shobu bout for a tied group in an INDIVIDUAL competition.
+// tieNeedsBreak is the ONE statement of the band a tied group is broken in, for
+// every kind of break: whether an ippon-shobu or a daihyosen round is held for
+// it, whether a tie-breaker that left it level is offered a chusen
+// (ChusenStatus), and whether such a group blocks completion (dhCycleExists).
+// One band for all three, or a tie the round was held for could be left with no
+// chusen offered and the competition stranded.
 //
 //   - League: a final placement must be EARNED, exactly like a bracket/knockout,
 //     so every tie inside the tie-break band [1..effectiveTopN] is broken. The
 //     one sanctioned exception is the kendo joint-3rd convention: when
 //     LeagueTwoThirdPlaces is enabled and the group sits entirely at 3rd or
 //     below, the tie is allowed to stand as a shared bronze (isConsequentialTie
-//     returns false). This mirrors the team-league LeagueTiebreakCandidates gate
-//     so an individual league never completes with an unearned tied position.
+//     returns false). It is the team-league LeagueTiebreakCandidates gate too,
+//     so a league never completes with an unearned tied position.
 //   - Non-league (mixed pools feeding a knockout): only ties that change who
 //     advances or their seed warrant a bout; a tie entirely below the qualifying
 //     cut shares its rank with no bout.
-func tieNeedsIndividualBreak(comp *state.Competition, positions []int, group []state.PlayerStanding, cut int) bool {
+func tieNeedsBreak(comp *state.Competition, positions []int, group []state.PlayerStanding, cut int) bool {
 	if len(positions) == 0 {
 		return false
 	}
@@ -349,6 +358,17 @@ func tieNeedsIndividualBreak(comp *state.Competition, positions []int, group []s
 		return isConsequentialTie(g, comp)
 	}
 	return tieAffectsAdvancement(positions, cut)
+}
+
+// breakBand is tieNeedsBreak for a competition's pools, each judged against its
+// own cut (poolTieBreakCut over the stored draw): the form the readers that walk
+// every pool take it in (ChusenStatus, dhCycleExists).
+type breakBand func(poolName string, positions []int, group []state.PlayerStanding) bool
+
+func newBreakBand(comp *state.Competition, pools []helper.Pool, bracket *state.Bracket) breakBand {
+	return func(poolName string, positions []int, group []state.PlayerStanding) bool {
+		return tieNeedsBreak(comp, positions, group, poolTieBreakCut(comp, pools, bracket, poolName))
+	}
 }
 
 // pendingTieBreak is one tied group of a pool that still owes supplementary
@@ -373,9 +393,8 @@ type pendingTieBreak struct {
 // "unsettled". A caller wanting "unsettled" must use this, never
 // detectPoolTies alone, or a settled pool reads as tied forever.
 //
-// The band each kind breaks is the injector's own: individual bouts follow
-// tieNeedsIndividualBreak, team daihyosen follows tieAffectsAdvancement, both
-// against the pool's OWN qualifier count, cut (poolTieBreakCut, which is
+// The band both kinds break is tieNeedsBreak, against the pool's OWN qualifier
+// count, cut (poolTieBreakCut, which is
 // Competition.QualifiersForPool), so a larger-pools extra qualifier's place
 // is tie-broken like any other qualifying place. Not MatchWinnerRanksNeeded:
 // that is the one global bound for the whole competition, so a pool that
@@ -389,16 +408,13 @@ func pendingTieBreaks(comp *state.Competition, poolName string, cut int, poolSta
 	var out []pendingTieBreak
 	for _, positions := range detectPoolTies(poolStandings) {
 		group := standingsAt(poolStandings, positions)
+		if !tieNeedsBreak(comp, positions, group, cut) {
+			continue
+		}
 		var bouts []state.MatchResult
 		if daihyosen {
-			if !tieAffectsAdvancement(positions, cut) {
-				continue
-			}
 			bouts = generatePoolDaihyosenMatches(poolName, group, existingCount, court, existingRows)
 		} else {
-			if !tieNeedsIndividualBreak(comp, positions, group, cut) {
-				continue
-			}
 			bouts = generateTiebreakerMatches(poolName, group, existingCount, court, existingRows)
 		}
 		if len(bouts) == 0 {

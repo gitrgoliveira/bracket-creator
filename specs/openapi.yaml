@@ -2489,7 +2489,8 @@ paths:
         3rd-place match included, must be completed). A competition with no
         knockout rounds (a league, a pools-only or a Swiss one) is held to its
         own matches instead: every match must be completed, and a Swiss one must
-        have drawn all its configured rounds.
+        have drawn all its configured rounds. A league must also have decided
+        every place its tie-break band covers (409 below).
 
         In officiated mode it needs `X-Tournament-Password`, like starting a
         competition; in self-run mode it is public, like starting one.
@@ -2508,6 +2509,18 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          description: |
+            A league whose matches are all played still has a place to decide,
+            and nothing was changed. `code: league_tiebreak_pending`: a tie in
+            the band has no tie-breaker yet (run it on the Pools tab).
+            `code: league_chusen_pending`: a team tie-breaker left a tie level,
+            so only a drawing of lots can decide it. `error` is a sentence for
+            the reader.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '500':
           $ref: '#/components/responses/InternalError'
 
@@ -2670,7 +2683,11 @@ paths:
       summary: Override pool rank
       description: >
         Manually set one or more players' ranks within a pool, overriding the
-        computed value. Used, among other callers, by the chusen
+        computed value. A recorded rank orders only a tie the standings still
+        hold level on points that no fought tie-breaker or representative bout
+        has settled, and only within that tie; once a correction or a fought
+        bout decides the order, the rank is ignored (and governs again if the
+        tie comes back). Used, among other callers, by the chusen
         (drawing-lots) resolver (see `GET .../chusen-candidates`) to record
         the finishing order once the operator has drawn lots. Send either
         `playerId` and `rank` (one player) or `ranks` (several players), never
@@ -2804,7 +2821,9 @@ paths:
           description: >
             Rank overrides are only accepted while the competition is in the
             pools stage, or, for a mixed competition, in the knockout stage
-            too (`Error`). In a mixed competition the new order is
+            too (`Error`), and only in a team competition (`code:
+            rank_override_team_only`: an individual tie is decided by an
+            ippon-shobu, never by lots). In a mixed competition the new order is
             also answered like a pool result correction, with `matchId`
             empty because no match is corrected:
             `downstream_knockout_played` when it moves a qualifier out of a

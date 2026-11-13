@@ -24,7 +24,9 @@ import (
 	"testing/fstest"
 
 	"github.com/gin-gonic/gin"
+	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/engine"
+	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/resources"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 	"github.com/stretchr/testify/assert"
@@ -568,6 +570,79 @@ func TestSelfRun_Complete_RefusesALeagueWithAMatchToPlay(t *testing.T) {
 	stored, err = store.LoadCompetition(compID)
 	require.NoError(t, err)
 	assert.Equal(t, state.CompStatusComplete, stored.Status)
+}
+
+// A league is finished only once its places are decided: every match played
+// is not enough while a tie in the band has no tie-breaker, or a tie-breaker
+// left it level without the lots (engine.PoolsSettledNow, judged under the
+// lock). The anonymous self-run caller is refused with a code and a sentence.
+func TestSelfRun_Complete_RefusesALeagueWithAnUndecidedPlace(t *testing.T) {
+	store := newTempStore(t)
+	seedSelfRunTournament(t, store)
+	r := setupSelfRunRouter(t, store, NewFileVerifier(store))
+
+	const compID = "league-undecided"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: compID, Name: compID, Format: state.CompFormatLeague, Status: state.CompStatusPools,
+		Kind: "team", TeamSize: 2, Courts: []string{"A"},
+	}))
+	teams := []helper.Player{
+		{ID: "t1-id", Name: "T1", Dojo: "Dojo T1"}, {ID: "t2-id", Name: "T2", Dojo: "Dojo T2"}, {ID: "t3-id", Name: "T3", Dojo: "Dojo T3"},
+	}
+	require.NoError(t, store.SavePools(compID, []helper.Pool{{PoolName: "Pool A", Players: teams}}))
+	// Every match drawn: the three teams are level for 1st to 3rd.
+	var matches []state.MatchResult
+	idx := 0
+	for i := range teams {
+		for j := i + 1; j < len(teams); j++ {
+			matches = append(matches, state.MatchResult{
+				ID: fmt.Sprintf("Pool A-%d", idx), SideA: teams[i].Name, SideB: teams[j].Name,
+				SideAID: teams[i].ID, SideBID: teams[j].ID, Status: state.MatchStatusCompleted,
+				Decision: string(domain.DecisionHikiwake),
+			})
+			idx++
+		}
+	}
+	require.NoError(t, store.SavePoolMatches(compID, matches))
+
+	complete := func() *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, "/api/competitions/"+compID+"/complete", nil)
+		req.Header.Set("X-Tournament-Password", "")
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		return w
+	}
+	refusedWith := func(code string) {
+		t.Helper()
+		w := complete()
+		require.Equal(t, http.StatusConflict, w.Code, w.Body.String())
+		var body map[string]string
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+		assert.Equal(t, code, body["code"])
+		assert.NotEmpty(t, body["error"])
+		stored, err := store.LoadCompetition(compID)
+		require.NoError(t, err)
+		assert.Equal(t, state.CompStatusPools, stored.Status, "a refused completion leaves the competition unfinished")
+	}
+
+	refusedWith("league_tiebreak_pending")
+
+	// The tie-breaker goes in a circle: T1 > T2, T2 > T3, T3 > T1.
+	circle := [][3]string{{"t1-id", "t2-id", "t1-id"}, {"t2-id", "t3-id", "t2-id"}, {"t1-id", "t3-id", "t3-id"}}
+	names := map[string]string{"t1-id": "T1", "t2-id": "T2", "t3-id": "T3"}
+	for k, c := range circle {
+		matches = append(matches, state.MatchResult{
+			ID: fmt.Sprintf("Pool A-DH-%d", k), SideA: names[c[0]], SideB: names[c[1]], SideAID: c[0], SideBID: c[1],
+			Winner: names[c[2]], WinnerID: c[2], Status: state.MatchStatusCompleted,
+		})
+	}
+	require.NoError(t, store.SavePoolMatches(compID, matches))
+	refusedWith("league_chusen_pending")
+
+	_, err := store.SaveRankOverridesChanged(compID, "Pool A", map[string]int{"t2-id": 1, "t3-id": 2, "t1-id": 3})
+	require.NoError(t, err)
+	w := complete()
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 }
 
 // A Swiss competition is finished only once every configured round has been

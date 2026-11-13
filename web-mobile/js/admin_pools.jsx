@@ -145,32 +145,38 @@ function enrichPoolMatchWithComp(m, comp, poolNameOverride) {
 // from the wire fields; both are pinned to the one table
 // internal/engine/testdata/drawn_supplementary_cases.json.
 //
-// A drawn daihyosen whose tied group a chusen has ranked is not stuck: the lots
-// decided that place and the engine's poolMatchSettled counts it settled
-// (daihyosenRuledByChusen), so no notice names it. The group is every team the
-// pool's standings hold level on points with the bout's two sides (just the two
-// sides when they are no longer level), and all of them must be ranked. The
-// ranked teams are the standings rows with isOverridden, which the server sets
-// from the same pool rank overrides; the pool is judged by name and the teams by
-// id only. A pool with no standings rules nothing. The second half of the same
-// table (chusenCases) pins both copies.
+// A drawn daihyosen is not stuck, and no notice names it, in two cases the
+// engine's poolMatchSettled counts settled. The lots ruled it
+// (daihyosenRuledByChusen): every team the pool's standings hold level on
+// points with its two sides carries a rank in force, i.e. its standings row is
+// isOverridden (the server marks only the ranks that still govern a tie no bout
+// settled, poolRanksInForce). Or it is moot (drawnDaihyosenMoot): a correction
+// no longer holds its two sides level, so it decides no place. The pool is
+// judged by name and the teams by id only; a pool with no standings, or a side
+// it does not hold, settles nothing. The second half of the same table
+// (chusenCases) pins both copies.
 //
 // Exported for vitest at __tests__/admin_pools.test.jsx.
 function drawnSupplementaryBouts(poolMatches, standings) {
   const rows = poolMatches || [];
-  const ruledByChusen = (m) => {
-    if (!isPoolDaihyosenBout(m.id) || !m.sideAId || !m.sideBId) return false;
+  // lotsGroup in chusen.go: the rows level with both sides, or just the two
+  // sides when they are no longer level, or none when a side is not held.
+  const lotsGroup = (m) => {
     const poolRows = (standings || {})[poolNameOf(m.id)] || [];
-    if (poolRows.length === 0) return false;
-    const pointsOf = (id) => (poolRows.find(s => s.player && s.player.id === id) || {}).points;
-    const level = pointsOf(m.sideAId) !== undefined && pointsOf(m.sideAId) === pointsOf(m.sideBId);
-    const group = level
-      ? poolRows.filter(s => s.points === pointsOf(m.sideAId)).map(s => s.player.id)
-      : [m.sideAId, m.sideBId];
-    const ranked = new Set(poolRows.filter(s => s.isOverridden && s.player && s.player.id).map(s => s.player.id));
-    return group.every(id => ranked.has(id));
+    const rowOf = (id) => (id ? poolRows.find(s => s.player && s.player.id === id) : undefined);
+    const a = rowOf(m.sideAId);
+    const b = rowOf(m.sideBId);
+    if (!a || !b) return { group: null, level: false };
+    if (a.points !== b.points) return { group: [a, b], level: false };
+    return { group: poolRows.filter(s => s.points === a.points), level: true };
   };
-  return rows.filter(m => isSupplementaryBout(m.id) && m.status === "completed" && !nameOf(m.winner) && !ruledByChusen(m));
+  const settledWithoutRematch = (m) => {
+    if (!isPoolDaihyosenBout(m.id)) return false;
+    const { group, level } = lotsGroup(m);
+    if (!group) return false;
+    return !level || group.every(s => s.isOverridden);
+  };
+  return rows.filter(m => isSupplementaryBout(m.id) && m.status === "completed" && !nameOf(m.winner) && !settledWithoutRematch(m));
 }
 
 // DrawnTieBreakNotice: names one such bout and the two ways on, fight it again

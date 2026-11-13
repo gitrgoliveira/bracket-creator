@@ -58,6 +58,36 @@ func TestOverrides(t *testing.T) {
 	assert.Empty(t, overrides.PoolRanks)
 }
 
+// LoadPoolRanks answers the recorded ranks (an empty, non-nil map when none),
+// on the store and inside a transaction alike.
+func TestLoadPoolRanks(t *testing.T) {
+	store, err := NewStore(t.TempDir())
+	require.NoError(t, err)
+	compID := "comp-pool-ranks"
+	require.NoError(t, store.SaveCompetition(&Competition{ID: compID, Name: "Comp Pool Ranks"}))
+
+	ranks, err := store.LoadPoolRanks(compID)
+	require.NoError(t, err)
+	require.NotNil(t, ranks)
+	assert.Empty(t, ranks)
+
+	require.NoError(t, store.SaveRankOverride(compID, "Pool A", "alice-id", 1))
+	key := helper.CompetitorKey("alice-id", "", "")
+
+	ranks, err = store.LoadPoolRanks(compID)
+	require.NoError(t, err)
+	assert.Equal(t, 1, ranks["Pool A"][key])
+
+	require.NoError(t, store.WithTransaction(compID, func(tx StoreTx) error {
+		inTx, terr := tx.LoadPoolRanks(compID)
+		require.NoError(t, terr)
+		assert.Equal(t, 1, inTx["Pool A"][key])
+		_, terr = tx.LoadPoolRanks("another-comp")
+		assert.Error(t, terr, "a transaction reads only its own competition")
+		return nil
+	}))
+}
+
 // RestoreRankOverrides is the undo of a refused override group: it puts back
 // the value each competitor held before the change, or removes the key when
 // there was none, in one write.

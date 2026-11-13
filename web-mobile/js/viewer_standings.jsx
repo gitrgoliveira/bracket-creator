@@ -99,6 +99,23 @@ export function matchWinnerName(m) {
   return typeof m.winner === "string" ? m.winner : (m.winner && m.winner.name) || "";
 }
 
+// poolMatchesSignature is the ONE owner of "did the pool results change", the
+// key a surface refetches its standings (or the tie-break and lots answers
+// that read them) on: LeagueStandingsViewer below and admin_pools.jsx both use
+// it. Keyed on what a result write changes, not on the winner alone: a
+// correction that keeps an encounter's winner still moves its IV/PW, ippons,
+// flags or decision, and so the table. A match not finished counts for its id
+// and status only, so a live score in progress does not refetch the table on
+// every mark (the standings count finished matches only).
+export function poolMatchesSignature(poolMatches) {
+  return (poolMatches || []).map(m => {
+    const head = `${m.id}:${m.status}:${matchWinnerName(m)}`;
+    if (m.status !== "completed") return head;
+    const subs = (m.subResults || []).map(s => s && [matchWinnerName(s), s.ipponsA, s.ipponsB, s.hansokuA, s.hansokuB, s.decision]);
+    return `${head}:${JSON.stringify([m.ipponsA, m.ipponsB, m.hansokuA, m.hansokuB, m.decision, m.flagsA, m.flagsB, subs])}`;
+  }).join("|");
+}
+
 // Module-private thead shared by LeagueStandingsViewer and PoolsViewer.
 // The three-way branch (isEngi / isTeam / individual) is byte-identical in
 // both consumers; extracted here to keep them in sync automatically.
@@ -248,18 +265,30 @@ export function LeagueStandingsViewer({ competition, poolMatches, tweaks, onMatc
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  // Signature of id:status:winner per match, not just the array length: an
-  // SSE-driven bout completion mutates status/winner in place without adding
-  // or removing a match, so a length-only dependency would miss it and leave
-  // standings stale until the match count itself changed. Same pattern as
-  // admin_pools.jsx's poolMatchesSig.
-  const poolMatchesSig = useMemo(
-    () => (poolMatches || []).map(m => `${m.id}:${m.status}:${matchWinnerName(m)}`).join("|"),
-    [poolMatches]
-  );
+  // The results' signature (poolMatchesSignature), not just the array length:
+  // an SSE-driven completion or correction changes a match in place without
+  // adding or removing one, so a length-only dependency would leave the
+  // standings stale.
+  const poolMatchesSig = useMemo(() => poolMatchesSignature(poolMatches), [poolMatches]);
+
+  // A rank written without a match write (lots, Accept shared ranks and its
+  // Undo) is announced as tournament_updated and changes no prop this viewer
+  // gets: a finished league keeps its status and matches while the lots move
+  // its order. So the push itself is a reason to fetch again.
+  const [ranksTick, setRanksTick] = useState(0);
+  React.useEffect(() => {
+    if (!window.API || typeof window.API.subscribeToEvents !== "function") return undefined;
+    return window.API.subscribeToEvents((event) => {
+      if (event && event.type === "tournament_updated") setRanksTick(t => t + 1);
+    });
+  }, []);
 
   // Re-fetch whenever the match signature changes (SSE-driven) so the
-  // standings table reflects the latest state after each scored bout.
+  // standings table reflects the latest state after each scored bout, and
+  // whenever the competition's status changes: Accept shared ranks and its
+  // Undo move the league between completed and running without touching a
+  // match, yet change the ranks the table reads (an accepted group shares
+  // its best place).
   React.useEffect(() => {
     let cancelled = false;
     setLoading(true);
@@ -277,7 +306,7 @@ export function LeagueStandingsViewer({ competition, poolMatches, tweaks, onMatc
         setLoading(false);
       });
     return () => { cancelled = true; };
-  }, [c.id, poolMatchesSig]);
+  }, [c.id, c.status, poolMatchesSig, ranksTick]);
 
   const isTeam = competition && (competition.kind === "team" || competition.teamSize > 0);
   const isEngi = !!(competition && competition.engi);

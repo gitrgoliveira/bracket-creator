@@ -633,7 +633,7 @@ func TestGroupNeedsChusen_HanteiDHWithNoWinnerID_NeedsChusen(t *testing.T) {
 	}
 	// No WinnerID anywhere: every member accrues 0 wins and ties, so a
 	// chusen is (correctly) still needed despite the round being complete.
-	assert.True(t, groupNeedsChusen(group, matches, nil),
+	assert.True(t, groupNeedsChusen(group, matches),
 		"a daihyosen round with no WinnerID anywhere resolves no wins at all, so every member ties and still needs a chusen")
 }
 
@@ -820,23 +820,17 @@ func TestApplyPoolWrite_ForwardPolicyStillRejectsWinnerIDMismatch(t *testing.T) 
 // TestCompletedPoolNames_CorruptOverrides_PropagatesError is finding 5 from
 // the round-2 review: knockout.go's completedPoolNames LoadOverrides
 // propagation had no dedicated regression test (reverting it stayed green).
-// A team competition's completedPoolNames unconditionally consults overrides
-// (to gate a pool whose daihyosen cycle isn't yet broken), and a corrupt
-// overrides.json there must surface as an error, not silently read as "no
-// overrides" and let a cyclic pool falsely read as complete.
+// A team competition's completedPoolNames unconditionally reads the standings
+// (to gate a pool whose daihyosen cycle isn't yet broken), which carry the
+// ranks in force, and a corrupt overrides.json there must surface as an error,
+// not silently read as "no overrides" and let a cyclic pool falsely read as
+// complete. The ranks are read once, inside the standings (poolRanksInForce).
 func TestCompletedPoolNames_CorruptOverrides_PropagatesError(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "completed-pool-corrupt-overrides"
-	// Engi=true so CalculatePoolStandings (called by InjectPoolDaihyosenMatches
-	// and directly below) dispatches to computeEngiStandings, which never
-	// touches overrides.json -- isolating THIS function's own LoadOverrides
-	// call from the one computeStandingsFrom already propagates (fixed and
-	// pinned separately), so a revert of THIS site alone is what turns this
-	// test red.
 	comp := &state.Competition{
 		ID: compID, Name: "Corrupt Overrides Team", Format: state.CompFormatMixed,
 		Status: state.CompStatusPools, Courts: []string{"A"}, TeamSize: 2, Kind: "team",
-		Engi: true,
 	}
 	require.NoError(t, store.SaveCompetition(comp))
 	require.NoError(t, store.SavePools(compID, []helper.Pool{
@@ -846,6 +840,7 @@ func TestCompletedPoolNames_CorruptOverrides_PropagatesError(t *testing.T) {
 	}))
 	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
 		{ID: "Pool A-0", SideA: "TeamA", SideB: "TeamB", Winner: "TeamA", Status: state.MatchStatusCompleted},
+		{ID: "Pool A-DH-0", SideA: "TeamA", SideB: "TeamB", Winner: "TeamA", Status: state.MatchStatusCompleted},
 	}))
 
 	corruptOverridesFile(t, store, compID)
@@ -855,35 +850,19 @@ func TestCompletedPoolNames_CorruptOverrides_PropagatesError(t *testing.T) {
 }
 
 // TestMaybeAutoCompletePools_CorruptOverrides_PropagatesError is finding 5's
-// second site: competition.go's MaybeAutoCompletePools LoadOverrides
-// propagation, reached once a team competition's regular matches are all
-// complete and at least one pool daihyosen bout has been scored (the
-// dhCycleExists guard consults overrides to honour any already-recorded
-// chusen). Team-LEAGUE format is used because MIXED short-circuits to
-// advanceMixedPools before this code, and because LeagueTiebreakCandidates
-// (checked first for a team league) reports no candidates here -- the
-// regular match is a clean win, not a tie -- so execution falls through to
-// the target LoadOverrides call rather than returning early.
+// second site: a team league whose matches are all settled is judged under the
+// lock (PoolsSettledNow), which reads the standings, and with them the ranks in
+// force (the cycle check honours any recorded chusen); a corrupt
+// overrides.json must surface there as an error.
 func TestMaybeAutoCompletePools_CorruptOverrides_PropagatesError(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "auto-complete-corrupt-overrides"
-	// Engi=true for the same isolation reason as TestCompletedPoolNames_CorruptOverrides_PropagatesError:
-	// CalculatePoolStandings (called by LeagueTiebreakCandidates and directly
-	// below) dispatches to computeEngiStandings, which never touches
-	// overrides.json, so only THIS function's own LoadOverrides call can turn
-	// this test red on a revert.
 	require.NoError(t, store.SaveCompetition(&state.Competition{
 		ID: compID, Name: "Corrupt Overrides Auto Complete", Format: state.CompFormatLeague,
 		Status: state.CompStatusPools, Courts: []string{"A"}, TeamSize: 2, Kind: "team",
-		Engi: true,
 	}))
 	// SideAID/SideBID/WinnerID and roster ids are stamped (operator ruling
-	// bc-pnum): leagueGroupHasDH resolves the DH row against the group's
-	// OWN member ids (groupMemberIDs, id-only), so an id-less roster
-	// and DH row would never resolve, and MaybeAutoCompletePools would
-	// short-circuit at AwaitingLeagueTiebreak BEFORE ever reaching the
-	// LoadOverrides call this test targets -- for a reason unrelated to
-	// what it is testing.
+	// bc-pnum), so the results resolve and the league reaches the judgement.
 	teamAID, teamBID := "team-a-id", "team-b-id"
 	require.NoError(t, store.SavePools(compID, []helper.Pool{
 		{PoolName: "Pool A", Players: []helper.Player{
@@ -901,6 +880,46 @@ func TestMaybeAutoCompletePools_CorruptOverrides_PropagatesError(t *testing.T) {
 
 	_, err := eng.MaybeAutoCompletePools(compID)
 	assert.Error(t, err, "a corrupt overrides.json must surface as an error from MaybeAutoCompletePools, not be silently dropped")
+}
+
+// TestPoolCompletion_ReadsTheRanksOnlyThroughTheStandings pins the one read of
+// the recorded pool ranks: computeStandingsFrom reads them once and marks the
+// ranks in force on the rows (poolRanksInForce), and poolCompletion judges a
+// representative bout off those rows, never reading overrides.json itself. So
+// handed standings that read nothing, a corrupt file goes unread, and handed
+// the real standings it surfaces.
+func TestPoolCompletion_ReadsTheRanksOnlyThroughTheStandings(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "pool-completion-lazy-ranks"
+	comp := &state.Competition{
+		ID: compID, Name: "Lazy Ranks", Format: state.CompFormatMixed,
+		Status: state.CompStatusPools, Courts: []string{"A"}, TeamSize: 2, Kind: "team",
+	}
+	require.NoError(t, store.SaveCompetition(comp))
+	require.NoError(t, store.SavePools(compID, []helper.Pool{
+		{PoolName: "Pool A", Players: []helper.Player{
+			{ID: "a", Name: "TeamA", Dojo: "DojoA"}, {ID: "b", Name: "TeamB", Dojo: "DojoB"},
+		}},
+	}))
+	regular := state.MatchResult{ID: "Pool A-0", SideA: "TeamA", SideAID: "a", SideB: "TeamB", SideBID: "b",
+		Winner: "TeamA", WinnerID: "a", Status: state.MatchStatusCompleted}
+	noStandings := func() (map[string][]state.PlayerStanding, error) { return nil, nil }
+	realStandings := func() (map[string][]state.PlayerStanding, error) { return eng.computeStandingsFrom(store, compID) }
+	corruptOverridesFile(t, store, compID)
+
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{regular}))
+	done, err := eng.poolCompletion(store, compID, comp, noStandings)
+	require.NoError(t, err, "no representative bout, and nothing reads the corrupt overrides")
+	assert.True(t, done["Pool A"])
+
+	drawn := regular
+	drawn.ID = "Pool A-DH-0"
+	drawn.Winner, drawn.WinnerID = "", ""
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{regular, drawn}))
+	_, err = eng.poolCompletion(store, compID, comp, noStandings)
+	assert.NoError(t, err, "a drawn representative bout is judged off the standings it is handed, so poolCompletion reads no ranks of its own")
+	_, err = eng.poolCompletion(store, compID, comp, realStandings)
+	assert.Error(t, err, "the standings read the ranks, so a corrupt file surfaces there")
 }
 
 // --- Finding 8 / nit 16: ReplaceParticipantInDraw's bracket-ambiguity check ---

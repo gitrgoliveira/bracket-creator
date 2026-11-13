@@ -100,6 +100,13 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 		writeID = firstForceOptions(opts).WriteID
 	}
 	before := e.storedStatus(tx, compID, matchID)
+	// A league's table as it stood before this write, for the reconcile
+	// below (nil unless the write can move a finished league or shared ranks
+	// accepted in play).
+	league, err := e.leagueStateBeforeWrite(tx, compID, matchID)
+	if err != nil {
+		return nil, err
+	}
 	status, err := e.recordMatchResultWithIneligibilityTx(tx, compID, matchID, result, opts...)
 	// A kachinuki match keeps the lineups it started with, and bout 1 is
 	// brought to what its lineup says (operator decision K1 (c),
@@ -107,8 +114,64 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 	if err == nil {
 		result.LineupWarning, err = e.afterMatchWrite(tx, compID, matchID, before, door, writeID, stamp)
 	}
+	if err == nil {
+		err = e.reconcileLeagueAfterWrite(tx, compID, league, result)
+	}
 	return status, err
 }
+
+// errTiebreakNeedsWinnerSentence is the operator sentence a league
+// tie-breaker saved with no winner is refused with.
+const errTiebreakNeedsWinnerSentence = "A tie-breaker needs a winner: continue with encho, then decide by hantei."
+
+// ErrTiebreakNeedsWinner is the cause of the ValidationError (400) a
+// completed write with no winner on a league's tie-breaker bout is refused
+// with (refuseDrawnLeagueTiebreak), so a caller can tell it from other client
+// errors with errors.Is.
+var ErrTiebreakNeedsWinner = errors.New("tiebreak_needs_winner")
+
+// refuseDrawnLeagueTiebreak is the ONE check that a league's tie-breaker bout
+// (an ippon-shobu "-TB-" or a representative "-DH-" bout,
+// state.IsPoolSupplementaryMatchID) is finished with a winner (operator
+// decision D6 (b): a league tie-breaker must have a winner, and lots are the
+// operator's rare exception, never the app's): the pool twin of
+// validateBracketCompletion. It runs before the write, so a refused write
+// stages nothing on any door: /score, quick-score, bulk-score, the score-event
+// replay, /decision and its both-sides-barred hikiwake, all of which reach
+// RecordMatchResultWithIneligibilityTx. A pools + knockout competition's pool
+// tie-breaker may still be saved drawn (decided apart, see the plan's note on
+// mixed pools), and so may an ippon-shobu bout between two barred competitors
+// (see the decision-door case below).
+func refuseDrawnLeagueTiebreak(comp *state.Competition, matchID string, result *state.MatchResult) error {
+	if comp == nil || comp.Format != state.CompFormatLeague || !state.IsPoolSupplementaryMatchID(matchID) {
+		return nil
+	}
+	if result.Status != state.MatchStatusCompleted || result.Winner != "" || result.WinnerID != "" {
+		return nil
+	}
+	if result.WriteDoor == DoorDecision && result.Decision == string(domain.DecisionHikiwake) {
+		// The both-sides-barred hikiwake (handleBothSidesBarredHikiwake, the
+		// one door a decision reaches the engine as a hikiwake by): nobody can
+		// fight the bout, so encho and hantei are no remedy. A team league's
+		// way on is accepting the shared ranks, which removes the unfought
+		// bout, so its representative bout is refused. An individual league
+		// has no such door, so its ippon-shobu bout is the one exemption: the
+		// draw is recorded and the bout counts settled while both sides stay
+		// barred (drawnTiebreakOfBarredSides), the places staying shared.
+		if IsPoolDaihyosenMatchID(matchID) {
+			return wrapValidationErrorf(ErrTiebreakNeedsWinner, "%s %s", errTiebreakBothBarredSentence, errTiebreakBothBarredTeamRemedy)
+		}
+		return nil
+	}
+	return wrapValidationErrorf(ErrTiebreakNeedsWinner, "%s", errTiebreakNeedsWinnerSentence)
+}
+
+// The refusal of a team league's representative bout whose two sides are both
+// barred, recorded as a hikiwake (refuseDrawnLeagueTiebreak), and its remedy.
+const (
+	errTiebreakBothBarredSentence   = "Both sides of this tie-breaker are barred, so it cannot be fought or drawn."
+	errTiebreakBothBarredTeamRemedy = "Accept the shared ranks instead."
+)
 
 // recordMatchResultWithIneligibilityTx is RecordMatchResultWithIneligibilityTx
 // before bout 1 of a kachinuki encounter is seated.
@@ -278,6 +341,9 @@ func (e *Engine) recordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 		if err := shapeScoreWrite(comp, prior, result, matchID, lines); err != nil {
 			return nil, err
 		}
+	}
+	if err := refuseDrawnLeagueTiebreak(comp, matchID, result); err != nil {
+		return nil, err
 	}
 
 	// K3 ahead of the write: a withdrawal whose loser a DIFFERENT match has

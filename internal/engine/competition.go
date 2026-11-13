@@ -5,33 +5,171 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"sync"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
-// courtsEqual returns true when two court-label slices are
-// element-wise equal (used by StartCompetition's mid-pipeline
-// settings-drift check). nil and empty slices are treated as
-// equivalent, both mean "no courts" from the config's POV.
-// PoolMatchesSettled reports whether a competition's pool-matches.csv rows
+// poolMatchesSettled reports whether a competition's pool-matches.csv rows
 // (pool, league and Swiss matches alike) are all played: every match is
 // completed, and a supplementary tie-break or representative bout also names
 // a winner, since one decided without a winner (a hikiwake) leaves the tie it
-// was played for unresolved. It is the rule a league is completed by
-// (maybeAutoCompletePoolsRunning) and the one POST /complete asks of a
+// was played for unresolved. It is the first of the rules a league is
+// completed by (PoolsSettledNow) and the one POST /complete asks of a
 // competition with no knockout rounds to check. Vacuously true with no rows.
-func PoolMatchesSettled(matches []state.MatchResult) bool {
-	for _, m := range matches {
-		if m.Status != state.MatchStatusCompleted {
-			return false
-		}
-		if state.IsPoolSupplementaryMatchID(m.ID) && m.Winner == "" {
+// lots is what a drawn representative bout is judged settled on
+// (poolMatchSettled), read once by loadPoolLots.
+func poolMatchesSettled(matches []state.MatchResult, lots poolLots) bool {
+	for i := range matches {
+		if !poolMatchSettled(&matches[i], lots) {
 			return false
 		}
 	}
 	return true
+}
+
+// PoolsVerdict is what PoolsSettledNow finds of a competition's pool rows.
+type PoolsVerdict int
+
+const (
+	// PoolsSettled: every row is played and no place in a league's band is
+	// left undecided.
+	PoolsSettled PoolsVerdict = iota
+	// PoolsMatchOpen: a match, or a supplementary bout, is still to be played
+	// or was drawn and settles nothing (poolMatchesSettled).
+	PoolsMatchOpen
+	// PoolsTiebreakOwed: a league tie in the band has no tie-breaker yet
+	// (pendingTieBreaks, the injectors' own rule; a team league's operator
+	// runs it, an individual league's is injected).
+	PoolsTiebreakOwed
+	// PoolsChusenOwed: a tie-breaker left a league's tie in the band level
+	// (dhCycleExists): a team's only the lots can decide, an individual's
+	// another tie-breaker round or the lots, as the operator chooses.
+	PoolsChusenOwed
+)
+
+// PoolsSettledNow is the ONE owner of "this competition's pool rows are
+// finished", judged on everything a transaction holds now: its pool matches,
+// the standings (with the ranks in force, poolRanksInForce) and, for a league,
+// its pools and draw, all read through tx. A completion decided under the
+// competition's lock asks this and not a scan that preceded it, since a
+// correction landing in between can make a new tie, or change the tied group a
+// chusen had to rank: the league's own completion (maybeAutoCompletePoolsRunning)
+// and POST /complete both ask it. For a league it also requires every tie in
+// the band (tieNeedsBreak) to hold its tie-breaker and no tie-breaker, of
+// either kind, to have left one level without the lots (dhCycleExists), unless the operator
+// accepted shared ranks (LeagueTiebreakFinalized), which settles both. A corrupt
+// overrides.json comes back wrapping state.ErrCorruptOverrides.
+func (e *Engine) PoolsSettledNow(tx state.StoreTx, compID string) (PoolsVerdict, error) {
+	comp, err := tx.LoadCompetition(compID)
+	if err != nil {
+		return PoolsMatchOpen, err
+	}
+	matches, err := tx.LoadPoolMatches(compID)
+	if err != nil {
+		return PoolsMatchOpen, err
+	}
+	standings := sync.OnceValues(func() (map[string][]state.PlayerStanding, error) {
+		return e.computeStandingsFrom(tx, compID)
+	})
+	lots, err := loadPoolLots(matches, standings, func() (map[string]domain.CompetitorStatus, error) {
+		return tx.LoadCompetitorStatus(compID)
+	})
+	if err != nil {
+		return PoolsMatchOpen, err
+	}
+	if !poolMatchesSettled(matches, lots) {
+		return PoolsMatchOpen, nil
+	}
+	if comp == nil || comp.Format != state.CompFormatLeague || comp.Engi {
+		// Engi ranks by wins then flags and holds no supplementary bout.
+		return PoolsSettled, nil
+	}
+	pools, err := tx.LoadPools(compID)
+	if err != nil {
+		return PoolsMatchOpen, err
+	}
+	bracket, err := tx.LoadBracket(compID)
+	if err != nil {
+		return PoolsMatchOpen, err
+	}
+	st, err := standings()
+	if err != nil {
+		return PoolsMatchOpen, err
+	}
+	// Accepted shared ranks cover every tie the table holds: the flag is set
+	// only on a finished table (finalize refuses league_not_settled) and is
+	// cleared by any correction that leaves a tie it did not cover
+	// (reconcileLeagueAfterWrite), so a group a fought round left in a circle
+	// shares its place too and owes no lots.
+	if comp.LeagueTiebreakFinalized {
+		return PoolsSettled, nil
+	}
+	if tieBreakOwed(comp, pools, bracket, st, matches) {
+		return PoolsTiebreakOwed, nil
+	}
+	// Asked per tied group of either kind, and failing closed: a team's
+	// daihyosen round, or an individual's ippon-shobu round, that left a group
+	// in the band level (a circle) holds the league open until the operator
+	// runs another round (an individual's) or records the lots.
+	if dhCycleExists(st, chusenMatches(comp, matches), newBreakBand(comp, pools, bracket)) {
+		return PoolsChusenOwed, nil
+	}
+	return PoolsSettled, nil
+}
+
+// tieBreakOwed reports whether a pool still owes a supplementary bout for a tie
+// in its band: a daihyosen round in a team competition, an ippon-shobu one in an
+// individual one (pendingTieBreaks, the injectors' own rule, so it is owed
+// exactly while an injection or the operator's tie-breaker would still add a
+// bout). standings are the competition's computed pool standings.
+func tieBreakOwed(comp *state.Competition, pools []helper.Pool, bracket *state.Bracket, standings map[string][]state.PlayerStanding, matches []state.MatchResult) bool {
+	daihyosen := comp.IsTeam()
+	for _, p := range pools {
+		var existing []state.MatchResult
+		for _, m := range matches {
+			if pn, ok := poolNameFromMatchID(m.ID); !ok || pn != p.PoolName {
+				continue
+			}
+			if (daihyosen && IsPoolDaihyosenMatchID(m.ID)) || (!daihyosen && IsTiebreakerMatchID(m.ID)) {
+				existing = append(existing, m)
+			}
+		}
+		cut := poolTieBreakCut(comp, pools, bracket, p.PoolName)
+		if len(pendingTieBreaks(comp, p.PoolName, cut, standings[p.PoolName], existing, "", daihyosen)) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// poolMatchSettled reports whether one pool-matches.csv row is played: it is
+// completed and is not a drawn supplementary bout, unless a chusen in force
+// ranks every team of the group a drawn representative bout was fought for
+// (daihyosenRuledByChusen, which reads the pool's standings to find the
+// group), or a correction has since split its two sides (drawnSupplementaryMoot):
+// either way that place is decided, and the bout, which settled nothing, may
+// stay drawn. So may an ippon-shobu bout whose two sides are both barred
+// (drawnTiebreakOfBarredSides): nobody can fight it. It is the one owner of that rule, so the league's completion
+// (poolMatchesSettled), a mixed pool's (poolCompletion), the auto-complete scan
+// (MaybeAutoCompletePools) and the engi self-heal (isBlockingEngiTBRow) cannot
+// drift inside Go; the reopen gate (drawnSupplementaryBout) stays on the raw
+// draw, since a rematch is always allowed. The Pools tab's notice reads the same
+// rule from the wire in admin_pools.jsx (drawnSupplementaryBouts); both are
+// pinned to the one table testdata/drawn_supplementary_cases.json, so a change
+// here changes the table.
+func poolMatchSettled(m *state.MatchResult, lots poolLots) bool {
+	return m.Status == state.MatchStatusCompleted && (!drawnSupplementaryBout(m) || daihyosenRuledByChusen(m, lots.standings) || drawnSupplementaryMoot(m, lots.standings) || drawnTiebreakOfBarredSides(m, lots.statuses))
+}
+
+// drawnSupplementaryBout reports a pool tie-break ("-TB-") or representative
+// ("-DH-") bout that was finished with no winner. It settles nothing, so the
+// pool keeps its tie and the operator is pointed at it (admin_pools.jsx); a
+// reopen is how it is fought again.
+func drawnSupplementaryBout(m *state.MatchResult) bool {
+	return m.Status == state.MatchStatusCompleted && state.IsPoolSupplementaryMatchID(m.ID) && m.Winner == ""
 }
 
 // SwissRoundsToDraw reports how many of a Swiss competition's configured
@@ -45,6 +183,10 @@ func SwissRoundsToDraw(comp *state.Competition) int {
 	return comp.SwissRounds - comp.SwissCurrentRound
 }
 
+// courtsEqual returns true when two court-label slices are
+// element-wise equal (used by StartCompetition's mid-pipeline
+// settings-drift check). nil and empty slices are treated as
+// equivalent, both mean "no courts" from the config's POV.
 func courtsEqual(a, b []string) bool {
 	if len(a) != len(b) {
 		return false
@@ -102,8 +244,11 @@ const (
 	// nothing else changed. Operator ruling (bc-prow): the shiaijo operator
 	// view lists a draw-ready competition's matches, and scoring one of them
 	// IS the start. A write that CLEARS a result (status back to scheduled)
-	// is not a start, see MaybeAutoCompletePools' result gate. Callers should
-	// broadcast EventCompetitionStarted and EventScheduleUpdated.
+	// is not a start, see MaybeAutoCompletePools' result gate. It also reports
+	// a finished league put back into match play (leagueBackInPlay: a
+	// correction left its table unsettled, or a match on it was reopened),
+	// which is running again just the same. Callers should broadcast
+	// EventCompetitionStarted and EventScheduleUpdated.
 	AutoCompleteStarted AutoCompleteOutcome = 6
 )
 
@@ -186,6 +331,10 @@ func (e *Engine) maybeAutoCompletePools(compID string, poolsMayHaveMoved bool) (
 	if err != nil {
 		return AutoCompleteNoChange, err
 	}
+	reopened, comp, err := e.leagueBackInPlay(compID, comp)
+	if err != nil {
+		return AutoCompleteNoChange, err
+	}
 	outcome, err := e.maybeAutoCompletePoolsRunning(compID, comp, poolsMayHaveMoved)
 	if err != nil {
 		return outcome, err
@@ -193,7 +342,56 @@ func (e *Engine) maybeAutoCompletePools(compID string, poolsMayHaveMoved bool) (
 	if started && outcome == AutoCompleteNoChange {
 		return AutoCompleteStarted, nil
 	}
+	// A finished league back in match play is running again: reported as a
+	// start, whatever else this pass did (an awaited tie-breaker, injected
+	// bouts), since every surface reloads the whole competition on it. One
+	// the same pass finished again reports that instead.
+	if reopened && outcome != AutoCompleteTransitioned {
+		return AutoCompleteStarted, nil
+	}
 	return outcome, nil
+}
+
+// leagueBackInPlay reports whether a finished league is in match play again
+// after the write this pass follows: reopened by the write's own transaction
+// (reconcileLeagueAfterWrite, which leaves a note), or here, when one of its
+// pool rows is no longer played or its tie is no longer decided
+// (reopenFinishedLeagueIfOpen: a reopen, a send back to the queue, a side
+// reinstated that a drawn tie-break bout settled on, or lots cleared). comp is the caller's read; the competition is read again whenever it
+// moved.
+//
+// A note is taken only once the committed competition shows the league in match
+// play: a note is made inside a transaction that has not committed yet, so a
+// pass that finds the league still finished cannot tell that transaction from
+// one that rolled back, and taking the note then would lose the report when
+// the transaction commits an instant later (the pass of the door that wrote it
+// would find no note). Such a note stays for the pass that reads the league
+// after the commit; one a rolled-back transaction left reports a reopen at
+// most once, when the league is next found in match play.
+func (e *Engine) leagueBackInPlay(compID string, comp *state.Competition) (bool, *state.Competition, error) {
+	if comp == nil || comp.Format != state.CompFormatLeague {
+		return false, comp, nil
+	}
+	var noted bool
+	if comp.Status == state.CompStatusComplete {
+		reopened, err := e.reopenFinishedLeagueIfOpen(compID)
+		if err != nil || !reopened {
+			return false, comp, err
+		}
+		noted = true
+		// This reopen is the report; a note beside it would report it twice.
+		e.takeLeagueReopenNote(compID)
+	} else {
+		noted = e.takeLeagueReopenNote(compID)
+	}
+	if !noted {
+		return false, comp, nil
+	}
+	fresh, err := e.store.LoadCompetition(compID)
+	if err != nil {
+		return false, comp, err
+	}
+	return fresh != nil && fresh.Status == state.CompStatusPools, fresh, nil
 }
 
 // autoStartOnFirstResult moves a draw-ready competition holding a recorded
@@ -338,8 +536,23 @@ func (e *Engine) maybeAutoCompletePoolsRunning(compID string, comp *state.Compet
 		}
 	}
 
-	isTeamComp := comp != nil && comp.TeamSize > 0
+	isTeamComp := comp.IsTeam()
 	isTeamLeague := isTeamComp && comp.Format == state.CompFormatLeague
+
+	// A drawn supplementary bout counts settled once a chusen in force has
+	// ranked its teams or a correction has split its sides (poolMatchSettled),
+	// which the standings carry, so they are computed for the scan only when
+	// such a bout exists. The decision
+	// itself is taken under the lock below (PoolsSettledNow), on what the
+	// transaction holds then.
+	lots, err := loadPoolLots(matches, func() (map[string][]state.PlayerStanding, error) {
+		return e.CalculatePoolStandings(compID)
+	}, func() (map[string]domain.CompetitorStatus, error) {
+		return e.store.LoadCompetitorStatus(compID)
+	})
+	if err != nil {
+		return AutoCompleteNoChange, err
+	}
 
 	// Partition matches into regular vs tiebreaker vs pool-daihyosen.
 	allComplete := true
@@ -352,7 +565,7 @@ func (e *Engine) maybeAutoCompletePoolsRunning(compID string, comp *state.Compet
 		case IsTiebreakerMatchID(m.ID):
 			// A TB match without a winner (malformed payload) leaves standings
 			// still tied, so treat it as unresolved just like DH.
-			if m.Status != state.MatchStatusCompleted || m.Winner == "" {
+			if !poolMatchSettled(&m, lots) {
 				hasIncompleteTB = true
 			} else {
 				hasCompleteTB = true
@@ -360,7 +573,7 @@ func (e *Engine) maybeAutoCompletePoolsRunning(compID string, comp *state.Compet
 		case IsPoolDaihyosenMatchID(m.ID):
 			// A DH match without a winner (e.g. hikiwake) leaves standings
 			// still tied, so it must not count as resolved.
-			if m.Status != state.MatchStatusCompleted || m.Winner == "" {
+			if !poolMatchSettled(&m, lots) {
 				hasIncompleteDH = true
 			} else {
 				hasCompleteDH = true
@@ -382,46 +595,24 @@ func (e *Engine) maybeAutoCompletePoolsRunning(compID string, comp *state.Compet
 	// All regular matches (and any existing TB/DH matches) are complete.
 	//
 	// Team-league path: the operator decides whether to run supplementary
-	// tie-breaker matches, we do NOT auto-inject DH matches. Instead, block
-	// completion while any CONSEQUENTIAL tied group still lacks an operator
-	// tie-breaker, returning AwaitingLeagueTiebreak so the UI can surface the
-	// decision.
+	// tie-breaker matches, we do NOT auto-inject DH matches. Completion is
+	// blocked under the lock below while a tie in the band still lacks its
+	// tie-breaker (PoolsSettledNow answers PoolsTiebreakOwed, and the outcome
+	// is AwaitingLeagueTiebreak so the UI can surface the decision), or while a
+	// tie-breaker left one level that only the lots can decide (PoolsChusenOwed).
+	// Ties outside the band (below it, or covered by the LeagueTwoThirdPlaces
+	// exemption) are accepted as shared ranks, and so is every tie once the
+	// operator has finalized shared ranks.
 	//
-	// We check per-group, NOT via the coarse hasCompleteDH flag: a league
-	// table can hold several separate consequential ties (e.g. 1st–2nd and
-	// 3rd–4th). Resolving one group's DH would flip hasCompleteDH true and,
-	// under a blanket `!hasCompleteDH` gate, let the competition complete with
-	// the other group still unresolved. DH results are excluded from the Points
-	// totals (scoring.go), so LeagueTiebreakCandidates keeps reporting a group
-	// even after its DH is scored; we therefore treat a group as "actioned"
-	// when a DH match exists for it (any DH is guaranteed complete here,
-	// hasIncompleteDH bailed above) and hand the resolved/cyclic verdict to the
-	// dhCycleExists guard below. LeagueTiebreakCandidates returns [] when the
-	// operator has finalized shared ranks, so that path completes normally.
-	//
-	// Non-consequential ties (below the tie-break band, or covered by the
-	// LeagueTwoThirdPlaces exemption) are accepted as shared ranks.
-	if isTeamLeague {
-		candidates, candErr := e.LeagueTiebreakCandidates(compID)
-		if candErr != nil {
-			return AutoCompleteNoChange, candErr
-		}
-		for _, g := range candidates {
-			if !leagueGroupHasDH(g.Teams, matches) {
-				// A consequential tie with no tie-breaker yet, operator must act.
-				return AutoCompleteAwaitingLeagueTiebreak, nil
-			}
-		}
-		// Every consequential group either has a DH (verified below) or none
-		// remain; fall through to the dhCycleExists guard / completion.
-	}
-
-	// Non-team-league team competitions (mixed): auto-inject DH matches for
-	// any ties. Individual competitions: auto-inject TB matches.
-	// Skip for team-league (handled above) and when supplementary matches
-	// already exist (hasCompleteDH / hasCompleteTB flags prevent double-inject).
+	// Other competitions auto-inject: DH matches for a team one, TB matches
+	// for an individual one. The injectors are idempotent (pendingTieBreaks
+	// skips a pair already held), so an individual league asks on every scan:
+	// a correction can make a new tie after an earlier one was broken, and the
+	// completion below would wait for its bouts forever. Elsewhere existing
+	// supplementary matches still skip the call (hasCompleteDH / hasCompleteTB).
 	if !isTeamLeague {
-		if (isTeamComp && !hasCompleteDH) || (!isTeamComp && !hasCompleteTB) {
+		isLeague := comp != nil && comp.Format == state.CompFormatLeague
+		if (isTeamComp && !hasCompleteDH) || (!isTeamComp && (!hasCompleteTB || isLeague)) {
 			if isTeamComp {
 				injected, injErr := e.InjectPoolDaihyosenMatches(compID)
 				if injErr != nil {
@@ -442,50 +633,32 @@ func (e *Engine) maybeAutoCompletePoolsRunning(compID string, comp *state.Compet
 		}
 	}
 
-	// For team competitions where DH matches have been played (either via
-	// operator-triggered league tie-breakers or auto-injected mixed/pools DH):
-	// verify that the DH results actually broke all ties before transitioning.
-	// In the rare event that DH bouts produce a cycle (A>B, B>C, C>A, only
-	// possible in a 3+ team pool whose tie was consequential), every team in
-	// that group still has equal DH win counts and standings remain unresolved.
-	// Per the rules a still-level 3-4 way group goes to a further round of
-	// supplementary ippon-shobu and ultimately chusen / drawing lots
-	// (running_a_kendo_tournament.md:181); rather than seed the knockout from an
-	// arbitrary order we block auto-completion until a decisive result exists.
-	// Any pre-existing pool-rank overrides are still honoured by dhCycleExists.
-	if isTeamComp && hasCompleteDH {
-		standings, standErr := e.CalculatePoolStandings(compID)
-		if standErr != nil {
-			return AutoCompleteNoChange, standErr
-		}
-		overridesObj, oerr := e.store.LoadOverrides(compID)
-		if oerr != nil {
-			return AutoCompleteNoChange, oerr
-		}
-		var poolRanks map[string]map[string]int
-		if overridesObj != nil {
-			poolRanks = overridesObj.PoolRanks
-		}
-		if dhCycleExists(standings, matches, poolRanks) {
-			return AutoCompleteNoChange, nil
-		}
-	}
-
-	// No ties (or ties already resolved). Advance past pools.
+	// Advance past pools, decided under the lock (PoolsSettledNow) on the
+	// matches, standings and ranks in force as they stand then: a correction or
+	// a chusen landing since the scan above would otherwise be judged against
+	// the old ones. A tie-breaker that went in a circle (A>B, B>C, C>A, or a
+	// team's all-drawn round) leaves the order undecided; per the rules it goes
+	// ultimately to chusen / drawing lots (running_a_kendo_tournament.md:181),
+	// or for an individual to another round the operator runs, so the league is
+	// not completed on an arbitrary order (PoolsChusenOwed).
 	//
 	// Only league reaches here (mixed short-circuited at the top to
 	// advanceMixedPools; other formats are no-ops). League flips to
-	// CompStatusComplete once every pool match is done.
-	changed, err := e.store.UpdateCompetitionChanged(compID, func(comp *state.Competition) (*state.Competition, error) {
+	// CompStatusComplete once its pool rows are settled.
+	if e.beforePoolsCompleteLock != nil {
+		e.beforePoolsCompleteLock(compID)
+	}
+	verdict := PoolsSettled
+	changed, err := e.store.UpdateCompetitionChangedTx(compID, func(tx state.StoreTx, comp *state.Competition) (*state.Competition, error) {
 		if comp == nil || comp.Format != state.CompFormatLeague || comp.Status != state.CompStatusPools {
 			return nil, nil
 		}
-		// Re-check under the lock.
-		freshMatches, ferr := e.store.LoadPoolMatchesLocked(compID)
+		v, ferr := e.PoolsSettledNow(tx, compID)
 		if ferr != nil {
 			return nil, ferr
 		}
-		if !PoolMatchesSettled(freshMatches) {
+		verdict = v
+		if v != PoolsSettled {
 			return nil, nil
 		}
 		comp.Status = state.CompStatusComplete
@@ -496,6 +669,10 @@ func (e *Engine) maybeAutoCompletePoolsRunning(compID string, comp *state.Compet
 	}
 	if changed {
 		return AutoCompleteTransitioned, nil
+	}
+	if verdict == PoolsTiebreakOwed && isTeamLeague {
+		// A consequential tie with no tie-breaker yet: the operator must act.
+		return AutoCompleteAwaitingLeagueTiebreak, nil
 	}
 	return AutoCompleteNoChange, nil
 }
@@ -519,7 +696,7 @@ func (e *Engine) maybeAutoCompletePoolsRunning(compID string, comp *state.Compet
 func (e *Engine) advanceMixedPools(compID string, comp *state.Competition) (AutoCompleteOutcome, error) {
 	// 1. Inject tie-break matches for tied pools (idempotent; per-tied-pool).
 	injected := 0
-	if comp.TeamSize > 0 {
+	if comp.IsTeam() {
 		m, err := e.InjectPoolDaihyosenMatches(compID)
 		if err != nil {
 			return AutoCompleteNoChange, err
@@ -562,63 +739,24 @@ func (e *Engine) advanceMixedPools(compID string, comp *state.Competition) (Auto
 	return AutoCompleteNoChange, nil
 }
 
-// leagueGroupHasDH reports whether a daihyosen tie-breaker match already exists
-// BETWEEN TWO DISTINCT members of the given tied group, i.e. the operator has
-// run a tie-breaker for it. Used by MaybeAutoCompletePools to decide, per
-// consequential group, whether the operator still needs to act. At that call
-// site every DH match is guaranteed complete (an incomplete DH bails earlier),
-// so "a DH match exists" means "the operator has actioned this group"; whether
-// that tie-breaker actually resolved the order is then verified by
-// dhCycleExists.
-//
-// Membership is resolved via groupMemberIDs (id-only, operator ruling
-// bc-pnum), mirroring groupNeedsChusen's identical conversion (chusen.go) --
-// the two functions ask the same question of the same kind of data. An
-// id-only membership test correctly rejects a row that pairs ONE group
-// member against THEMSELVES (SideA and SideB both naming the identical
-// group member -- corrupted/self-referential data): the SideAID != SideBID
-// guard below catches it directly, since a self-pairing means both fields
-// hold the same id regardless of how the row got that way.
-//
-// A group member with no id (Player.ID == "") is never inserted into
-// groupMemberIDs' set, so no DH row can ever resolve to it; a genuine
-// tie-breaker played between two id-less same-name members is therefore
-// reported as NOT having a DH, exactly like the corrupted self-pair case
-// above. This fails CLOSED, which is the safe direction for this guard: the
-// group is reported as still lacking a tie-breaker, so
-// MaybeAutoCompletePools keeps returning AwaitingLeagueTiebreak /
-// AutoCompleteNoChange instead of advancing on a result this function
-// cannot actually verify belongs to two distinct competitors, and the
-// operator sees the group still needs action rather than the competition
-// silently completing on an unverifiable DH.
-func leagueGroupHasDH(group []state.PlayerStanding, allMatches []state.MatchResult) bool {
-	ids := groupMemberIDs(group)
-	for _, m := range allMatches {
-		if !IsPoolDaihyosenMatchID(m.ID) {
-			continue
-		}
-		if ids[m.SideAID] && ids[m.SideBID] && m.SideAID != m.SideBID {
-			return true
-		}
-	}
-	return false
-}
-
-// dhCycleExists reports whether any tied group is still unresolved after its
-// daihyosen bouts (a cycle / all-drawn), i.e. it needs a chusen. Delegates the
-// per-group check to groupNeedsChusen (the same predicate ChusenStatus uses
-// to surface those groups to the operator). Below-cut ties never block: DH
-// matches are injected only for advancement-affecting groups, so a below-cut
-// group has no DH bouts and groupNeedsChusen returns false. When it does return
-// true the operator resolves the group via the chusen (drawing lots) panel,
-// which writes poolRanks (pool name -> helper.CompetitorKey(id, "", "") ->
-// rank, i.e. participant id only, bc-pnum); a group whose every member has
-// an override is resolved and no longer blocks completion.
-func dhCycleExists(standings map[string][]state.PlayerStanding, allMatches []state.MatchResult, poolRanks map[string]map[string]int) bool {
+// dhCycleExists reports whether any tied group in the band (band, the same
+// tieNeedsBreak ChusenStatus offers a chusen in) is still unresolved after its
+// tie-breaker: a team's daihyosen bouts (a cycle / all-drawn) or an
+// individual's finished ippon-shobu round (a circle, tieBreakLeftLevel), i.e.
+// it needs the lots, or for an individual another round. Delegates the
+// per-group check to groupNeedsChusen (the same predicate ChusenStatus uses to
+// surface those groups to the operator), so every group that blocks here is
+// offered its chusen there. A tie outside the band never blocks, even over the
+// rows of an old round a correction moved out of it. The operator resolves the
+// group via the chusen (drawing lots) panel, which writes poolRanks (pool name
+// -> helper.CompetitorKey(id, "", "") -> rank, i.e. participant id only,
+// bc-pnum); a group whose every member has a rank in force (IsOverridden on the
+// standings) is resolved and no longer blocks completion.
+func dhCycleExists(standings map[string][]state.PlayerStanding, allMatches []state.MatchResult, band breakBand) bool {
 	for poolName, poolStandings := range standings {
 		for _, positions := range detectPoolTies(poolStandings) {
 			group := standingsAt(poolStandings, positions)
-			if groupNeedsChusen(group, allMatches, poolRanks[poolName]) {
+			if band(poolName, positions, group) && groupNeedsChusen(group, allMatches) {
 				return true
 			}
 		}

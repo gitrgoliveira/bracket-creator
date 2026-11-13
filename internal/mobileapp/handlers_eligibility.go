@@ -90,7 +90,7 @@ func RegisterPublicEligibilityHandlers(r *gin.RouterGroup, store CompetitorStatu
 // registered via RegisterPublicEligibilityHandlers.
 //
 // T091, FR-034.
-func RegisterEligibilityHandlers(r *gin.RouterGroup, store CompetitorStatusStore, hub Broadcaster) {
+func RegisterEligibilityHandlers(r *gin.RouterGroup, store CompetitorStatusStore, eng EligibilityEngine, hub Broadcaster) {
 	r.POST("/competitions/:id/competitor-status", func(c *gin.Context) {
 		id, ok := requireValidCompID(c)
 		if !ok {
@@ -135,8 +135,26 @@ func RegisterEligibilityHandlers(r *gin.RouterGroup, store CompetitorStatusStore
 			"competitionId": id,
 			"status":        status,
 		})
+		if status.Eligible {
+			settleAfterBarLifted(c, eng, hub, id)
+		}
 		c.JSON(http.StatusOK, status)
 	})
+}
+
+// settleAfterBarLifted runs the auto-complete pass after a bar was lifted
+// (a reinstatement, or a status written eligible): a finished league whose
+// drawn ippon-shobu bout settled only while both its sides were barred owes
+// that fight again, and the pass puts the league back into match play and
+// reports it (competition_started). The pass is the general one, whatever the
+// format: a lifted bar can change who qualifies from a pool, so it also
+// re-evaluates pools, seats knockout slots and starts a draw-ready competition
+// whose first result this is, and announces what it did. Only a finished league
+// is ever reopened by it; a failed pass shows as AutoCompleteErrorHeader on the
+// reinstatement's 200.
+func settleAfterBarLifted(c *gin.Context, eng EligibilityEngine, hub Broadcaster, compID string) {
+	outcome, err := eng.MaybeAutoCompletePools(compID)
+	answerAutoComplete(c, hub, compID, outcome, err)
 }
 
 // RegisterReinstateHandler wires POST /competitions/:id/competitors/:pid/reinstate
@@ -196,6 +214,7 @@ func RegisterReinstateHandler(r *gin.RouterGroup, eng EligibilityEngine, hub Bro
 			"competitionId": id,
 			"status":        status,
 		})
+		settleAfterBarLifted(c, eng, hub, id)
 		c.JSON(http.StatusOK, status)
 	})
 }

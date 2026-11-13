@@ -7,6 +7,7 @@ import { createTimerPool } from './timer_pool.jsx';
 // import-only (see its header) and every consumer ES-imports it directly.
 import {
   DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED,
+  LEAGUE_FINISHED_CORRECTION_CANCELLED,
   attemptScoreWrite,
   downstreamKnockoutReopenedNotice,
   writeKeepsEditorOpen,
@@ -522,6 +523,11 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
         // Declining the override leaves everything as it was: neither this
         // match nor the later one it depends on was written.
         showToast(DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED);
+        throw markToasted(e);
+      }
+      // Declining the finished-league warning leaves the result as it was.
+      if (e.leagueFinishedCancelled) {
+        showToast(LEAGUE_FINISHED_CORRECTION_CANCELLED);
         throw markToasted(e);
       }
       // bc-adna: if the operator cancelled forcing court, toast nothing and mark toasted

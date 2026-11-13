@@ -121,8 +121,8 @@ func TestGeneratePoolDaihyosenMatches_SkipsExistingPairs(t *testing.T) {
 // SideAID/SideBID both read the shared id back.
 //
 // The dedup scan is deliberately id-only (ids[m.SideAID] && ids[m.SideBID]),
-// with NO m.SideAID != m.SideBID guard: that guard belongs to the three
-// real self-pair PREVENTION sites (groupNeedsChusen, leagueGroupHasDH,
+// with NO m.SideAID != m.SideBID guard: that guard belongs to the two
+// real self-pair PREVENTION sites (groupNeedsChusen and
 // applyTiebreakSort), which decide whether a bout counts toward a win or a
 // needs-chusen verdict -- not whether a row already on disk is remembered.
 // Adding it here instead would make re-injection over the same group
@@ -564,6 +564,10 @@ func TestMaybeAutoCompletePools_TeamDHCompletedWithoutWinner(t *testing.T) {
 	assert.Equal(t, AutoCompleteNoChange, outcome, "DH with no winner should block auto-completion")
 }
 
+// everyTie is a breakBand that holds every tie in the band, for the
+// dhCycleExists tests that judge the cycle alone.
+func everyTie(string, []int, []state.PlayerStanding) bool { return true }
+
 // TestDHCycleExists_NoCycle verifies that dhCycleExists returns false when
 // DH results unambiguously break all ties (A wins DH against B).
 func TestDHCycleExists_NoCycle(t *testing.T) {
@@ -585,7 +589,7 @@ func TestDHCycleExists_NoCycle(t *testing.T) {
 			{Player: players[1], Points: 0},
 		},
 	}
-	assert.False(t, dhCycleExists(standings, matches, nil))
+	assert.False(t, dhCycleExists(standings, matches, everyTie))
 }
 
 // TestDHCycleExists_Cycle verifies that dhCycleExists returns true for a
@@ -612,7 +616,11 @@ func TestDHCycleExists_Cycle(t *testing.T) {
 			{Player: players[2], Points: 0},
 		},
 	}
-	assert.True(t, dhCycleExists(standings, matches, nil))
+	assert.True(t, dhCycleExists(standings, matches, everyTie))
+	// A cycle outside the band (a tie no place hangs on) is offered no chusen
+	// (ChusenStatus asks the same band), so it never holds the pool either.
+	outside := func(string, []int, []state.PlayerStanding) bool { return false }
+	assert.False(t, dhCycleExists(standings, matches, outside))
 }
 
 // TestDHCycleExists_CycleResolvedByOverrides verifies that a cyclic DH result
@@ -628,30 +636,17 @@ func TestDHCycleExists_CycleResolvedByOverrides(t *testing.T) {
 		{ID: "Pool A-DH-1", SideA: "Beta", SideB: "Gamma", Status: state.MatchStatusCompleted, Winner: "Beta"},
 		{ID: "Pool A-DH-2", SideA: "Alpha", SideB: "Gamma", Status: state.MatchStatusCompleted, Winner: "Gamma"},
 	}
-	// Id-only resolution (bc-pnum) applies to the cycle detection AND to
-	// lookupPoolRankOverride, which resolves solely via
-	// helper.CompetitorKey(id, name, dojo) with no bare-name fallback
-	// (TestCalculatePoolStandings_Override_LegacyBareNameKeyIsUnresolvable
-	// pins the removal). A poolRanks map keyed by bare name would never
-	// match, silently leaving the group "unresolved" -- so the override
-	// must be keyed exactly as a real write would key it.
+	// Id-only resolution (bc-pnum) applies to the cycle detection; the ranks
+	// in force arrive on the standings rows (IsOverridden, poolRanksInForce).
 	bctest.StampIDs(players, matches)
 	standings := map[string][]state.PlayerStanding{
 		"Pool A": {
-			{Player: players[0], Points: 0},
-			{Player: players[1], Points: 0},
-			{Player: players[2], Points: 0},
+			{Player: players[0], Points: 0, IsOverridden: true},
+			{Player: players[1], Points: 0, IsOverridden: true},
+			{Player: players[2], Points: 0, IsOverridden: true},
 		},
 	}
-	// Operator manually resolved the cycle by assigning explicit ranks.
-	poolRanks := map[string]map[string]int{
-		"Pool A": {
-			helper.CompetitorKey(players[0].ID, players[0].Name, players[0].Dojo): 1,
-			helper.CompetitorKey(players[1].ID, players[1].Name, players[1].Dojo): 2,
-			helper.CompetitorKey(players[2].ID, players[2].Name, players[2].Dojo): 3,
-		},
-	}
-	assert.False(t, dhCycleExists(standings, matches, poolRanks))
+	assert.False(t, dhCycleExists(standings, matches, everyTie))
 }
 
 // TestMaybeAutoCompletePools_TeamDHCycleBlocks verifies that auto-completion
@@ -808,6 +803,100 @@ func TestMaybeAutoCompletePools_TeamDHCycleWithOverridesTransitions(t *testing.T
 	outcome, err = eng.MaybeAutoCompletePools("autocomplete-team-dh-cycle-override")
 	require.NoError(t, err)
 	assert.Equal(t, AutoCompleteTransitioned, outcome, "manual overrides must unblock cyclic DH completion")
+}
+
+// TestMaybeAutoCompletePools_DrawnDHRuledByChusenTransitions: a daihyosen round
+// finished as all hikiwake settles nothing, so the pool holds open (and the
+// chusen panel is offered over it, daihyosenLeftTied); once the operator records
+// the chusen, the lots decide the place and the drawn bouts no longer hold the
+// pool, so it completes. Without the rule the chusen the app asked for could
+// never finish the pool.
+func TestMaybeAutoCompletePools_DrawnDHRuledByChusenTransitions(t *testing.T) {
+	const compID = "autocomplete-team-dh-drawn-chusen"
+	eng, store := setupTeamPoolComp(t, compID, true)
+	_, err := eng.InjectPoolDaihyosenMatches(compID)
+	require.NoError(t, err)
+
+	all, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	for i := range all {
+		all[i].Status = state.MatchStatusCompleted
+		if IsPoolDaihyosenMatchID(all[i].ID) {
+			all[i].Winner, all[i].WinnerID = "", "" // hikiwake
+		}
+	}
+	require.NoError(t, store.SavePoolMatches(compID, all))
+	eng.standingsCache.Delete(compID)
+	eng.standingsFlight.Delete(compID)
+
+	outcome, err := eng.MaybeAutoCompletePools(compID)
+	require.NoError(t, err)
+	require.Equal(t, AutoCompleteNoChange, outcome, "a drawn daihyosen holds the pool until the lots are drawn")
+
+	pools, err := store.LoadPools(compID)
+	require.NoError(t, err)
+	require.Len(t, pools, 1)
+	ranks := make([]RankOverride, 0, len(pools[0].Players))
+	for i, p := range pools[0].Players {
+		ranks = append(ranks, RankOverride{PlayerID: p.ID, Rank: i + 1})
+	}
+	_, err = eng.OverridePoolRanks(compID, "Pool A", ranks, ForceOptions{})
+	require.NoError(t, err)
+
+	outcome, err = eng.MaybeAutoCompletePools(compID)
+	require.NoError(t, err)
+	assert.Equal(t, AutoCompleteTransitioned, outcome, "the recorded chusen settles the drawn daihyosen round")
+}
+
+// TestPoolsSettledNow_JudgesTheWholeTiedGroup: the check a league's
+// completion makes under the competition's lock reads the standings it judges
+// the lots on from the transaction, not from the scan before the lock. A drawn
+// daihyosen round over three level teams is settled only once the chusen has
+// ranked all three, however many of them the drawn bouts name.
+func TestPoolsSettledNow_JudgesTheWholeTiedGroup(t *testing.T) {
+	const compID = "settled-now-whole-group"
+	eng, store := setupTeamPoolComp(t, compID, true)
+	_, err := eng.InjectPoolDaihyosenMatches(compID)
+	require.NoError(t, err)
+
+	all, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	for i := range all {
+		all[i].Status = state.MatchStatusCompleted
+		if IsPoolDaihyosenMatchID(all[i].ID) {
+			all[i].Winner, all[i].WinnerID = "", "" // hikiwake
+		}
+	}
+	require.NoError(t, store.SavePoolMatches(compID, all))
+	eng.standingsCache.Delete(compID)
+	eng.standingsFlight.Delete(compID)
+
+	pools, err := store.LoadPools(compID)
+	require.NoError(t, err)
+	require.Len(t, pools, 1)
+	require.Len(t, pools[0].Players, 3)
+	rank := func(n int) {
+		ranks := make(map[string]int, n)
+		for i, p := range pools[0].Players[:n] {
+			ranks[helper.CompetitorKey(p.ID, p.Name, p.Dojo)] = i + 1
+		}
+		require.NoError(t, store.SaveOverrides(compID, &state.Overrides{PoolRanks: map[string]map[string]int{"Pool A": ranks}}))
+	}
+	settledNow := func() PoolsVerdict {
+		var verdict PoolsVerdict
+		require.NoError(t, store.WithTransaction(compID, func(tx state.StoreTx) error {
+			var serr error
+			verdict, serr = eng.PoolsSettledNow(tx, compID)
+			return serr
+		}))
+		return verdict
+	}
+
+	assert.Equal(t, PoolsMatchOpen, settledNow(), "no chusen recorded: the drawn daihyosen round settles nothing")
+	rank(2)
+	assert.Equal(t, PoolsMatchOpen, settledNow(), "two of the three level teams ranked: the third still has no place")
+	rank(3)
+	assert.Equal(t, PoolsSettled, settledNow(), "all three ranked: the lots decided every place")
 }
 
 // TestDHStandingsApplied verifies that a completed pool-DH match result is

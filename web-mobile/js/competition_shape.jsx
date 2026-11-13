@@ -271,7 +271,7 @@ export function roundRobinVisible(format, poolFormat) {
 // create form has no equivalent control at all -- leagueTiebreakTopN is
 // absent from admin_setup.jsx entirely.
 export const LABEL_LEAGUE_TIEBREAK = "Break ties for top";
-export const HINT_LEAGUE_TIEBREAK = "Tied teams within this finishing band require an operator-run tie-breaker before standings are finalised.";
+export const HINT_LEAGUE_TIEBREAK = "Teams level on every criterion within this band are asked about before the league finishes: run a tie-breaker, or accept shared ranks. Top 3 asks about ties for 1st to 3rd place, Top 4 also about 4th. Accepting shared ranks finishes the competition at once, and Undo shared ranks takes it back.";
 // LEAGUE_TIEBREAK_OPTIONS: the stored value is an int (3 or 4), not a
 // wire-string sentinel like the other option lists here, because
 // state.Competition.LeagueTiebreakTopN is int on both sides of the wire.
@@ -372,7 +372,7 @@ export function knockoutDurationVisible(format) {
 // generically ("competitors genuinely tied for 3rd", not "league standings"),
 // so it needed no wording change to cover knockout/mixed too.
 export const LABEL_TWO_THIRD_PLACES = "Award two joint 3rd places";
-export const HINT_TWO_THIRD_PLACES = "When enabled, two beaten semi-finalists share 3rd place and no bronze match is played (standard kendo convention). Leave it off to decide a single 3rd place: a knockout plays a bronze match, and a league awards one 3rd rather than a shared rank.";
+export const HINT_TWO_THIRD_PLACES = "When enabled, competitors who tie for 3rd place share it and nothing is played to separate them (standard kendo convention). In a league, teams level at 3rd place or lower then share the place without being asked. Leave it off to decide a single 3rd place: a knockout plays a third-place match, and a league asks you to run a tie-breaker or accept shared ranks.";
 
 // twoThirdPlacesVisible: visible for every format that can produce a 3rd
 // place at all -- knockout/mixed decide it with a bronze match (or not) at

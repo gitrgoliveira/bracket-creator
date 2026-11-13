@@ -8,7 +8,7 @@ const { useState, useEffect, useRef, useMemo } = React;
 // Leaf module (no side effects): safe to ES-import. The DH label is
 // daihyosen-specific; the rep pickers below stay gated on m.repIsTeam (a "-TB-"
 // tiebreaker is also a rep bout, just not a daihyosen).
-import { isPoolDaihyosenBout } from './pool_ids.jsx';
+import { isPoolDaihyosenBout, isSupplementaryBout } from './pool_ids.jsx';
 import { SideLabel, sideWithColour } from './side_cell.jsx';
 import { realIppons, hanteiTied, hanteiSlot, hanteiWinnerKey, sideSlotOrder, struckIppons } from './result_slot.jsx';
 import { sameCompetitor } from './competitor_identity.jsx';
@@ -71,6 +71,8 @@ import {
   StartRefusedNotice,
   confirmDiscardUnsaved,
   LEAVE_MATCH_ANYWAY,
+  finishButtonLabel,
+  armedFinishLabel,
 } from './admin_scoring_shared.jsx';
 import { individualDraftTaps, rebaseIndividualDraft } from './draft_taps.jsx';
 // bc-cse: a SCHEDULED match a competitor is barred from must never offer a
@@ -156,7 +158,7 @@ function startedScore(patch) {
   };
 }
 
-export function ScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, onSubmitAndNext: onSubmitAndNextProp, onAfterDecision, started = false, prevMatch, nextMatch, onPrev, onNext, password, selfReport, teamMembers, variant = "modal", canClose = true, hostUnsavedRef = null, allowCourtForce = false }) {
+export function ScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, onSubmitAndNext: onSubmitAndNextProp, startsNext = true, onAfterDecision, started = false, prevMatch, nextMatch, onPrev, onNext, password, selfReport, teamMembers, variant = "modal", canClose = true, hostUnsavedRef = null, allowCourtForce = false }) {
   // bc-strt: a match whose start has landed is RUNNING, even while the host's
   // list still says scheduled (it refetches a moment after each save). The
   // editors send a point only for a match they see as running, so a point
@@ -925,6 +927,13 @@ export function ScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, onSub
   // so the hikiwake toggle is suppressed in the bracket phase: m.phase ===
   // "bracket" is the in-modal KO signal (see TeamScoreEditorModal).
   const isKnockoutPhase = m.phase === "bracket";
+  // A league tie-breaker (-TB-) or daihyosen (-DH-) bout is decided the same
+  // way: a drawn one decides nothing, so it needs a winner (encho, then
+  // hantei). A mixed competition's pool tie-breaker is NOT included here (it
+  // can still be saved drawn); compFormat is stamped by every host that opens
+  // the editor on such a bout (enrichPoolMatchWithComp).
+  const isLeagueSupplementary = m.compFormat === "league" && isSupplementaryBout(m.id);
+  const needsWinner = isKnockoutPhase || isLeagueSupplementary;
   // bc-rawm: a tied individual knockout bout (0 encho periods or several,
   // 1-1 or any other equal score) has no winner, and the server refuses it
   // outright -- validateBracketCompletion runs on a Finish AND on a later
@@ -951,12 +960,15 @@ export function ScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, onSub
   // wrong, claiming a tie that never happened.
   const hasPointsOrDraw = isDrawToggled || aTotal > 0 || bTotal > 0;
   const koTieBlocked = !decidedByHantei && m.status !== "scheduled" && hasPointsOrDraw &&
-    isKoTieBlocked({ isKnockoutPhase, teamWinner: individualWinner, isComplete: false });
+    isKoTieBlocked({ isKnockoutPhase: needsWinner, teamWinner: individualWinner, isComplete: false });
   // A participant on the public self-run page cannot record a hantei (see the
   // decision place below), so it points them at the organizer instead.
   const KO_TIE_REASON = selfReport
     ? "Needs a winner: fight encho, then ask the organizer for a hantei if still tied."
     : "Needs a winner: fight encho, then record hantei if still tied.";
+  const DRAW_BLOCKED_REASON = isLeagueSupplementary
+    ? "A tie-breaker needs a winner: fight encho, then decide by hantei"
+    : "Knockout matches can't draw: decide by hantei after encho";
   // bc-htsd: hantei is valid at 0-0, so the picked side stands in for points.
   // It needs the tied scoreline the hantei row is shown on: a recorded hantei
   // on an untied line (legacy data) cannot be finished, as before.
@@ -1180,7 +1192,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, onSub
   // element (input, button, link, …) has focus so native activation still works.
   const kbRef = React.useRef(null);
   React.useLayoutEffect(() => {
-    kbRef.current = { delegated: isTeam || isEngi, submitting, canFinish, isDrawToggled, isKnockoutPhase, aTotal, bTotal, handleDismiss, canClose, onPrev, onNext, goPrev, goNext, prevMatch, nextMatch, onSubmit, onSubmitAndNext, buildPatch, addPt, doSubmit, isNaginata, decidedByHantei, isComplete, correctionReason, askCorrectionReason, applyDrawToggle };
+    kbRef.current = { delegated: isTeam || isEngi, submitting, canFinish, isDrawToggled, needsWinner, aTotal, bTotal, handleDismiss, canClose, onPrev, onNext, goPrev, goNext, prevMatch, nextMatch, onSubmit, onSubmitAndNext, buildPatch, addPt, doSubmit, isNaginata, decidedByHantei, isComplete, correctionReason, askCorrectionReason, applyDrawToggle };
   });
 
   useEffect(() => {
@@ -1248,8 +1260,8 @@ export function ScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, onSub
       }
       if (k === "x" || k === "X") {
         ev.preventDefault();
-        // No hikiwake in a knockout match: leave the key inert there.
-        if (s.isKnockoutPhase && !s.isDrawToggled) return;
+        // No hikiwake in a knockout match or a league tie-breaker: leave the key inert there.
+        if (s.needsWinner && !s.isDrawToggled) return;
         const r = decideDrawToggle({ isDrawToggled: s.isDrawToggled, aTotal: s.aTotal, bTotal: s.bTotal });
         s.applyDrawToggle(r);
       }
@@ -1264,11 +1276,11 @@ export function ScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, onSub
   // editor is shown from the first render with no kendo-editor flash.
   // The team check is skipped for engi (engi is never a team).
   if (isEngi) {
-    return <EngiScoreEditorModal match={m} onClose={onClose} onSubmit={onSubmitProp} onSubmitAndNext={onSubmitAndNextProp} prevMatch={prevMatch} nextMatch={nextMatch} onPrev={onPrev} onNext={onNext} variant={variant} canClose={canClose} password={password} selfReport={selfReport} hostUnsavedRef={hostUnsavedRef} />;
+    return <EngiScoreEditorModal match={m} onClose={onClose} onSubmit={onSubmitProp} onSubmitAndNext={onSubmitAndNextProp} startsNext={startsNext} prevMatch={prevMatch} nextMatch={nextMatch} onPrev={onPrev} onNext={onNext} variant={variant} canClose={canClose} password={password} selfReport={selfReport} hostUnsavedRef={hostUnsavedRef} />;
   }
   // Team routing: forward to TeamScoreEditorModal.
   if (isTeam) {
-    return <TeamScoreEditorModal match={m} teamSize={teamSize} onClose={onClose} onSubmit={onSubmitProp} onSubmitAndNext={onSubmitAndNextProp} onAfterDecision={onAfterDecision}  prevMatch={prevMatch} nextMatch={nextMatch} onPrev={onPrev} onNext={onNext} password={password} selfReport={selfReport} teamMembers={teamMembers} variant={variant} canClose={canClose} hostUnsavedRef={hostUnsavedRef} allowCourtForce={allowCourtForce} />;
+    return <TeamScoreEditorModal match={m} teamSize={teamSize} onClose={onClose} onSubmit={onSubmitProp} onSubmitAndNext={onSubmitAndNextProp} startsNext={startsNext} onAfterDecision={onAfterDecision}  prevMatch={prevMatch} nextMatch={nextMatch} onPrev={onPrev} onNext={onNext} password={password} selfReport={selfReport} teamMembers={teamMembers} variant={variant} canClose={canClose} hostUnsavedRef={hostUnsavedRef} allowCourtForce={allowCourtForce} />;
   }
 
   // a11y: label the dialog with the match/court context so screen readers
@@ -1422,8 +1434,8 @@ export function ScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, onSub
                           onClick={() => {
                             applyDrawToggle(decideDrawToggle({ isDrawToggled, aTotal, bTotal }));
                           }}
-                          disabled={decidedByHantei || (!isDrawToggled && (aTotal > 0 || bTotal > 0)) || (!isDrawToggled && isKnockoutPhase)}
-                          title={decidedByHantei ? (hanteiRecorded ? "Locked: hantei already recorded" : "Hantei armed: choose a winner above, or cancel") : (!isDrawToggled && isKnockoutPhase ? "Knockout matches can't draw: decide by hantei after encho" : (!isDrawToggled && (aTotal > 0 || bTotal > 0) ? "Clear scores before marking a draw" : (isDrawToggled ? "Cancel draw" : "Mark as draw (hikiwake)")))}
+                          disabled={decidedByHantei || (!isDrawToggled && (aTotal > 0 || bTotal > 0)) || (!isDrawToggled && needsWinner)}
+                          title={decidedByHantei ? (hanteiRecorded ? "Locked: hantei already recorded" : "Hantei armed: choose a winner above, or cancel") : (!isDrawToggled && needsWinner ? DRAW_BLOCKED_REASON : (!isDrawToggled && (aTotal > 0 || bTotal > 0) ? "Clear scores before marking a draw" : (isDrawToggled ? "Cancel draw" : "Mark as draw (hikiwake)")))}
                           aria-label={isDrawToggled ? "Cancel draw (hikiwake)" : "Mark as draw (hikiwake)"}
                         >{isDrawToggled ? "Cancel draw" : "Mark draw"}</button>
                       </div>
@@ -1758,23 +1770,14 @@ export function ScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, onSub
                 </button>
               )}
               {canClose && <button className="btn" onClick={handleDismiss} disabled={submitting}>Cancel</button>}
-              {own.kept ? null : onSubmitAndNext ? (
+              {own.kept ? null : (
                 <button className={`btn btn--primary ${finishArmed && !isComplete ? "btn--confirm" : ""}`} onClick={(ev) => {
                   if (isComplete && !correctionReason) { askCorrectionReason(); return; }
                   if (!isComplete && !confirmFinish(ev)) return;
-                  doSubmit(() => (isComplete ? onSubmit : onSubmitAndNext)(buildPatch("completed")));
+                  doSubmit(() => (isComplete || !onSubmitAndNext ? onSubmit : onSubmitAndNext)(buildPatch("completed")));
                 }} disabled={submitting || !canFinish}
                   title={koTieBlocked ? KO_TIE_REASON : hanteiFinishBlock || undefined}>
-                  {submitting ? "Saving…" : koTieBlocked ? "Needs a winner" : isComplete ? "Save correction" : finishArmed ? "Tap again to finish →" : "Finish + Start Next →"}
-                </button>
-              ) : (
-                <button className={`btn btn--primary ${finishArmed && !isComplete ? "btn--confirm" : ""}`} onClick={(ev) => {
-                  if (isComplete && !correctionReason) { askCorrectionReason(); return; }
-                  if (!isComplete && !confirmFinish(ev)) return;
-                  doSubmit(() => onSubmit(buildPatch("completed")));
-                }} disabled={submitting || !canFinish}
-                  title={koTieBlocked ? KO_TIE_REASON : hanteiFinishBlock || undefined}>
-                  {submitting ? "Saving…" : koTieBlocked ? "Needs a winner" : isComplete ? "Save correction" : finishArmed ? "Tap again to finish" : "Finish"}
+                  {submitting ? "Saving…" : koTieBlocked ? "Needs a winner" : isComplete ? "Save correction" : finishArmed ? armedFinishLabel(!!onSubmitAndNext && startsNext) : finishButtonLabel(!!onSubmitAndNext && startsNext)}
                 </button>
               )}
             </div>

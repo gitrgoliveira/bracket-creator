@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -37,6 +38,173 @@ func TestCourtsEqual(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			assert.Equal(t, tc.want, courtsEqual(tc.a, tc.b))
+		})
+	}
+}
+
+// TestPoolMatchesSettled pins the rule a league is completed by: every row
+// completed, and a supplementary bout (tie-break or representative) also
+// naming a winner.
+func TestPoolMatchesSettled(t *testing.T) {
+	done := func(id, winner string) state.MatchResult {
+		return state.MatchResult{ID: id, Status: state.MatchStatusCompleted, Winner: winner}
+	}
+	tests := []struct {
+		name    string
+		matches []state.MatchResult
+		want    bool
+	}{
+		{"no rows", nil, true},
+		{"drawn regular pool match", []state.MatchResult{done("Pool A-1", "")}, true},
+		{"unsettled regular match", []state.MatchResult{done("Pool A-1", "x"), {ID: "Pool A-2", Status: state.MatchStatusScheduled}}, false},
+		{"unsettled supplementary bout", []state.MatchResult{{ID: "Pool A-TB-1", Status: state.MatchStatusScheduled}}, false},
+		{"drawn supplementary bout", []state.MatchResult{done("Pool A-1", "x"), done("Pool A-TB-1", "")}, false},
+		{"drawn representative bout", []state.MatchResult{done("Pool A-DH-1", "")}, false},
+		{"settled supplementary bout", []state.MatchResult{done("Pool A-1", "x"), done("Pool A-TB-1", "y")}, true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, poolMatchesSettled(tc.matches, poolLots{}))
+		})
+	}
+
+	// A chusen in force over both teams of a drawn representative bout settles it.
+	drawnDH := state.MatchResult{ID: "Pool A-DH-1", Status: state.MatchStatusCompleted, SideAID: "a", SideBID: "b"}
+	standings := func(overridden bool) map[string][]state.PlayerStanding {
+		return map[string][]state.PlayerStanding{"Pool A": {
+			{Player: domain.Player{ID: "a"}, Points: 3, IsOverridden: overridden},
+			{Player: domain.Player{ID: "b"}, Points: 3, IsOverridden: overridden},
+		}}
+	}
+	assert.True(t, poolMatchesSettled([]state.MatchResult{drawnDH}, poolLots{standings: standings(true)}), "the lots settle the drawn representative bout")
+	assert.False(t, poolMatchesSettled([]state.MatchResult{drawnDH}, poolLots{standings: standings(false)}), "no lots, no settlement")
+	assert.False(t, poolMatchesSettled([]state.MatchResult{drawnDH}, poolLots{}), "no standings to judge the group on, no settlement")
+}
+
+// TestDaihyosenRuledByChusen_SharedCases drives the lots from the chusenCases of
+// the same table the Pools tab's JS twin reads: which recorded ranks are in
+// force (poolRanksInForce), whether they rule the drawn representative bout
+// (daihyosenRuledByChusen), and whether the bout holds the pool (poolMatchSettled).
+func TestDaihyosenRuledByChusen_SharedCases(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("testdata", "drawn_supplementary_cases.json"))
+	require.NoError(t, err)
+	var table struct {
+		ChusenCases []struct {
+			Name       string   `json:"name"`
+			ID         string   `json:"id"`
+			Winner     string   `json:"winner"`
+			WinnerID   string   `json:"winnerId"`
+			SideAID    string   `json:"sideAId"`
+			SideBID    string   `json:"sideBId"`
+			RankedPool string   `json:"rankedPool"`
+			Ranked     []string `json:"ranked"`
+			Standings  []struct {
+				ID           string `json:"id"`
+				Points       int    `json:"points"`
+				TieOutOfBand bool   `json:"tieOutOfBand"`
+			} `json:"standings"`
+			InForce []string `json:"inForce"`
+			Ruled   bool     `json:"ruled"`
+			Stuck   bool     `json:"stuck"`
+			// The wire's stamp for a drawn tie-break bout: the sides barred
+			// elsewhere. Here it is the competitor statuses that bar them.
+			IneligibleSides struct {
+				A string `json:"a"`
+				B string `json:"b"`
+			} `json:"ineligibleSides"`
+		} `json:"chusenCases"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &table))
+	require.NotEmpty(t, table.ChusenCases)
+	for _, tc := range table.ChusenCases {
+		t.Run(tc.Name, func(t *testing.T) {
+			ranks := map[string]int{}
+			for i, id := range tc.Ranked {
+				ranks[helper.CompetitorKey(id, "", "")] = i + 1
+			}
+			m := state.MatchResult{ID: tc.ID, Status: state.MatchStatusCompleted, Winner: tc.Winner, WinnerID: tc.WinnerID, SideAID: tc.SideAID, SideBID: tc.SideBID}
+			// The case's standings are the bout's own pool's.
+			poolName, ok := poolNameFromMatchID(tc.ID)
+			require.True(t, ok)
+			rows := []state.PlayerStanding{}
+			for _, s := range tc.Standings {
+				rows = append(rows, state.PlayerStanding{Player: domain.Player{ID: s.ID}, Points: s.Points, TieOutOfBand: s.TieOutOfBand})
+			}
+			recorded := map[string]map[string]int{tc.RankedPool: ranks}
+			inForce := poolRanksInForce(rows, []state.MatchResult{m}, true, recorded[poolName])
+			var gotInForce []string
+			for i := range rows {
+				if _, held := lookupPoolRankOverride(inForce, rows[i].Player.ID); held {
+					rows[i].IsOverridden = true
+					gotInForce = append(gotInForce, rows[i].Player.ID)
+				}
+			}
+			assert.ElementsMatch(t, tc.InForce, gotInForce, "ranks in force")
+			standings := map[string][]state.PlayerStanding{poolName: rows}
+			assert.Equal(t, tc.Ruled, daihyosenRuledByChusen(&m, standings), "ruled by the lots")
+			statuses := map[string]domain.CompetitorStatus{}
+			for id, reason := range map[string]string{tc.SideAID: tc.IneligibleSides.A, tc.SideBID: tc.IneligibleSides.B} {
+				if id != "" && reason != "" {
+					statuses[id] = domain.CompetitorStatus{PlayerID: id, Eligible: false, Reason: reason + ": x", MatchID: "Pool A-0"}
+				}
+			}
+			assert.Equal(t, !tc.Stuck, poolMatchSettled(&m, poolLots{standings: standings, statuses: statuses}), "settled")
+		})
+	}
+}
+
+// TestLotsStandings_LoadsForAnyDrawnSupplementaryBout pins that the standings a
+// drawn bout is judged on are read for a drawn tie-break ("-TB-") bout as well
+// as a drawn representative one, since a correction can split either's tie, and
+// only then.
+func TestLotsStandings_LoadsForAnyDrawnSupplementaryBout(t *testing.T) {
+	completed := func(id, winner string) state.MatchResult {
+		return state.MatchResult{ID: id, Status: state.MatchStatusCompleted, Winner: winner}
+	}
+	loaded := 0
+	load := func() (map[string][]state.PlayerStanding, error) {
+		loaded++
+		return map[string][]state.PlayerStanding{"Pool A": nil}, nil
+	}
+	for name, tc := range map[string]struct {
+		matches []state.MatchResult
+		loads   int
+	}{
+		"drawn tie-break":       {[]state.MatchResult{completed("Pool A-TB-0", "")}, 1},
+		"drawn representative":  {[]state.MatchResult{completed("Pool A-DH-0", "")}, 1},
+		"tie-break with winner": {[]state.MatchResult{completed("Pool A-TB-0", "Bea")}, 0},
+		"regular draw":          {[]state.MatchResult{completed("Pool A-0", "")}, 0},
+	} {
+		t.Run(name, func(t *testing.T) {
+			loaded = 0
+			_, err := lotsStandings(tc.matches, load)
+			require.NoError(t, err)
+			assert.Equal(t, tc.loads, loaded)
+		})
+	}
+}
+
+// TestDrawnSupplementaryBout_SharedCases drives drawnSupplementaryBout from
+// testdata/drawn_supplementary_cases.json, the table the Pools tab's JS twin
+// (drawnSupplementaryBouts, admin_pools.jsx) is pinned to as well.
+func TestDrawnSupplementaryBout_SharedCases(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("testdata", "drawn_supplementary_cases.json"))
+	require.NoError(t, err)
+	var table struct {
+		Cases []struct {
+			Name   string `json:"name"`
+			ID     string `json:"id"`
+			Status string `json:"status"`
+			Winner string `json:"winner"`
+			Drawn  bool   `json:"drawn"`
+		} `json:"cases"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &table))
+	require.NotEmpty(t, table.Cases)
+	for _, tc := range table.Cases {
+		t.Run(tc.Name, func(t *testing.T) {
+			m := state.MatchResult{ID: tc.ID, Status: state.MatchStatus(tc.Status), Winner: tc.Winner}
+			assert.Equal(t, tc.Drawn, drawnSupplementaryBout(&m))
 		})
 	}
 }
@@ -1124,58 +1292,4 @@ func TestReplaceParticipantInDraw_NoopWhenUnchanged(t *testing.T) {
 	poolsAfter, err := store.LoadPools(compID)
 	require.NoError(t, err)
 	assert.Equal(t, poolsBefore, poolsAfter, "pools must be unchanged on no-op")
-}
-
-// --- leagueGroupHasDH: identity-keyed membership (symmetry with groupNeedsChusen) ---
-
-// TestLeagueGroupHasDH_TwoDistinctMembers is the baseline: a real DH bout
-// between two DIFFERENT group members is recognized regardless of whether an
-// id is present (name-fallback resolution still applies for legacy rows with
-// no SideAID/SideBID).
-func TestLeagueGroupHasDH_TwoDistinctMembers(t *testing.T) {
-	group := []state.PlayerStanding{
-		{Player: domain.Player{ID: "id-a", Name: "Team A", Dojo: "Dojo A"}},
-		{Player: domain.Player{ID: "id-b", Name: "Team B", Dojo: "Dojo B"}},
-	}
-	matches := []state.MatchResult{
-		{ID: "Pool A-DH-0", SideA: "Team A", SideB: "Team B", SideAID: "id-a", SideBID: "id-b", Status: state.MatchStatusCompleted, Winner: "Team A"},
-	}
-	assert.True(t, leagueGroupHasDH(group, matches))
-}
-
-// TestLeagueGroupHasDH_SelfPairSameNameRejected is the regression guard for
-// the finding that leagueGroupHasDH's bare-name membership test collapses two
-// SAME-NAME group members (a namesake collision -- the unique-team-name rule
-// has documented enforcement holes, checkNewTeamNameCollisions) into one map
-// entry. A DH row whose two sides BOTH resolve to the SAME group member
-// (corrupted/self-referential data, e.g. SideAID == SideBID) is not a bout
-// between two distinct group members and must not count as "the group has a
-// tie-breaker". Under the old code, `names["Team X"]` collapses both
-// namesakes into one key present on the map, so
-// `names[m.SideA] && names[m.SideB]` reads true for a self-pairing row even
-// though it never actually paired the two DIFFERENT namesakes against each
-// other.
-func TestLeagueGroupHasDH_SelfPairSameNameRejected(t *testing.T) {
-	group := []state.PlayerStanding{
-		{Player: domain.Player{ID: "id-tokyo", Name: "Team X", Dojo: "Tokyo"}},
-		{Player: domain.Player{ID: "id-osaka", Name: "Team X", Dojo: "Osaka"}},
-	}
-	matches := []state.MatchResult{
-		{ID: "Pool A-DH-0", SideA: "Team X", SideB: "Team X", SideAID: "id-tokyo", SideBID: "id-tokyo", Status: state.MatchStatusCompleted, Winner: "Team X", WinnerID: "id-tokyo"},
-	}
-	assert.False(t, leagueGroupHasDH(group, matches), "a DH row whose two sides resolve to the SAME group member is not a tie-breaker between the group's two distinct members")
-}
-
-// TestLeagueGroupHasDH_NamesakePairRecognized proves the fix does not merely
-// reject the self-pair: a GENUINE DH bout between the two DIFFERENT namesake
-// members (distinct ids) must still be recognized.
-func TestLeagueGroupHasDH_NamesakePairRecognized(t *testing.T) {
-	group := []state.PlayerStanding{
-		{Player: domain.Player{ID: "id-tokyo", Name: "Team X", Dojo: "Tokyo"}},
-		{Player: domain.Player{ID: "id-osaka", Name: "Team X", Dojo: "Osaka"}},
-	}
-	matches := []state.MatchResult{
-		{ID: "Pool A-DH-0", SideA: "Team X", SideB: "Team X", SideAID: "id-tokyo", SideBID: "id-osaka", Status: state.MatchStatusCompleted, Winner: "Team X", WinnerID: "id-osaka"},
-	}
-	assert.True(t, leagueGroupHasDH(group, matches), "a genuine DH bout between the two distinct namesake members must be recognized")
 }

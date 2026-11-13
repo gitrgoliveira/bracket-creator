@@ -509,11 +509,12 @@ export function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, runningM
   const isEngi = !!(c && c.engi);
   const leaguePoolName = isLeague && pools && pools[0] ? pools[0].poolName : null;
   const leagueStandings = leaguePoolName && standings ? (standings[leaguePoolName] || []) : [];
-  const allMatchesComplete = isLeague && (() => {
-    const all = poolMatches || [];
-    return all.length > 0 && all.every(m => m.status === "completed");
-  })();
-  const leagueWinner = allMatchesComplete && leagueStandings.length > 0 ? leagueStandings[0] : null;
+  // A league is decided when the competition is completed, never merely when
+  // every match is scored: a tie at a podium place can still wait for the
+  // organiser's tie-breaker or decision then, and naming a winner over it
+  // would be wrong.
+  const leagueFinished = isLeague && c.status === "completed";
+  const leagueWinner = leagueFinished && leagueStandings.length > 0 ? leagueStandings[0] : null;
   // Teams that won a completed daihyosen play-off in the league. Mirrors the
   // full standings (PoolsViewer): the play-off decides order within the tied
   // group only, so the badge is the sole signal that a DH settled otherwise
@@ -609,7 +610,7 @@ export function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, runningM
         <div className="pool pool--overview-summary" data-testid="league-overview-standings">
           {leagueWinner && <WinnerBadge name={leagueWinner.player?.name || ""} testId="league-overview-winner" marginBottom={12} />}
           <div className="pool__head">
-            <div className="pool__name">{allMatchesComplete ? "Final standings" : "Standings"}</div>
+            <div className="pool__name">{leagueFinished ? "Final standings" : "Standings"}</div>
             {poolMatches && (
               <div className="pool__match-count">
                 {poolMatches.filter(m => m.status === "completed").length}/{poolMatches.length} matches

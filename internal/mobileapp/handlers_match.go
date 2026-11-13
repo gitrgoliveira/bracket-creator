@@ -201,11 +201,13 @@ func applyQueuePositions(poolMatches []state.MatchResult, bracket *state.Bracket
 // anyMatchToAnnotate reports whether poolMatches or bracket carry a match
 // annotateEligibility can act on: a SCHEDULED match with both side ids
 // stamped (its ineligibleSides stamp; engine.BarredSides needs an id to look
-// anyone up), or a COMPLETED match a withdrawal or default win decided (its
+// anyone up), a COMPLETED match a withdrawal or default win decided (its
 // withdrawnStatus stamp, which the score editor words its clear from, so it
-// must be there once every match is finished too). Gates the
+// must be there once every match is finished too), or a pool ippon-shobu bout
+// finished with no winner (its ineligibleSides stamp, which says whether both
+// sides are barred, the draw nobody can fight). Gates the
 // LoadCompetitorStatus read in the viewer handlers behind it, so a
-// competition with neither never pays for a status-file read it cannot use.
+// competition with none never pays for a status-file read it cannot use.
 func anyMatchToAnnotate(poolMatches []state.MatchResult, bracket *state.Bracket) bool {
 	acts := func(status state.MatchStatus, decision, idA, idB string) bool {
 		switch status {
@@ -218,7 +220,7 @@ func anyMatchToAnnotate(poolMatches []state.MatchResult, bracket *state.Bracket)
 	}
 	for i := range poolMatches {
 		m := &poolMatches[i]
-		if acts(m.Status, m.Decision, m.SideAID, m.SideBID) {
+		if acts(m.Status, m.Decision, m.SideAID, m.SideBID) || drawnPoolTiebreak(m) {
 			return true
 		}
 	}
@@ -237,6 +239,13 @@ func anyMatchToAnnotate(poolMatches []state.MatchResult, bracket *state.Bracket)
 		return true
 	}
 	return false
+}
+
+// drawnPoolTiebreak reports a pool ippon-shobu bout finished with no winner:
+// the one finished match that carries the ineligibleSides stamp, because two
+// barred sides are what settles it (engine.drawnTiebreakOfBarredSides).
+func drawnPoolTiebreak(m *state.MatchResult) bool {
+	return m.Status == state.MatchStatusCompleted && m.Winner == "" && engine.IsTiebreakerMatchID(m.ID)
 }
 
 // annotateEligibility stamps state.IneligibleSidesAnnotation (bc-cse) on
@@ -259,8 +268,8 @@ func annotateEligibility(poolMatches []state.MatchResult, bracket *state.Bracket
 	if len(statuses) == 0 {
 		return
 	}
-	stamp := func(status state.MatchStatus, matchID, sideAID, sideBID string) *state.IneligibleSidesAnnotation {
-		if status != state.MatchStatusScheduled {
+	stamp := func(scheduled bool, matchID, sideAID, sideBID string) *state.IneligibleSidesAnnotation {
+		if !scheduled {
 			return nil
 		}
 		a, b := engine.BarredSides(statuses, matchID, sideAID, sideBID)
@@ -322,14 +331,14 @@ func annotateEligibility(poolMatches []state.MatchResult, bracket *state.Bracket
 	}
 	for i := range poolMatches {
 		m := &poolMatches[i]
-		m.IneligibleSides = stamp(m.Status, m.ID, m.SideAID, m.SideBID)
+		m.IneligibleSides = stamp(m.Status == state.MatchStatusScheduled || drawnPoolTiebreak(m), m.ID, m.SideAID, m.SideBID)
 		m.WithdrawnStatus = withdrawn(m.Status, m.Decision, m.DecisionBy, m.WinnerID, m.SideAID, m.SideBID)
 	}
 	if bracket == nil {
 		return
 	}
 	stampBracket := func(bm *state.BracketMatch) {
-		bm.IneligibleSides = stamp(bm.Status, bm.ID, bm.SideAID, bm.SideBID)
+		bm.IneligibleSides = stamp(bm.Status == state.MatchStatusScheduled, bm.ID, bm.SideAID, bm.SideBID)
 		bm.WithdrawnStatus = withdrawn(bm.Status, bm.Decision, bm.DecisionBy, bm.WinnerID, bm.SideAID, bm.SideBID)
 	}
 	for ri := range bracket.Rounds {
@@ -605,6 +614,34 @@ func tryAutoCompletePools(c *gin.Context, eng ScoringEngine, hub Broadcaster, co
 	answerAutoComplete(c, hub, compID, outcome, err)
 }
 
+// answerCompleteRefusedByIndividualLeagueTie answers POST .../complete for an
+// individual league whose places are still tied. Such a league has no
+// tie-breaker control, so the scan adds the tie-break bouts, and the scan's
+// outcome words the answer: 409 saying the bouts were added only when they were,
+// 409 saying they could not be when the scan failed or changed nothing, and 200
+// with the competition when a racing score settled the tie and the scan finished
+// the league, in which case the completion asked for has happened.
+func answerCompleteRefusedByIndividualLeagueTie(c *gin.Context, eng ScoringEngine, hub Broadcaster, store interface {
+	LoadCompetition(id string) (*state.Competition, error)
+}, compID string, refusal gin.H) {
+	outcome, err := eng.MaybeAutoCompletePools(compID)
+	answerAutoComplete(c, hub, compID, outcome, err)
+	switch {
+	case err == nil && outcome == engine.AutoCompleteTransitioned:
+		finished, lerr := store.LoadCompetition(compID)
+		if lerr != nil || finished == nil {
+			internalError(c, fmt.Errorf("reload finished competition %s: %v", compID, lerr))
+			return
+		}
+		hub.Broadcast(EventTournamentUpdated, nil)
+		c.JSON(http.StatusOK, finished)
+	case err != nil || outcome != engine.AutoCompleteTiebreakInjected:
+		c.JSON(http.StatusConflict, gin.H{"code": refusal["code"], "error": "Some places are still tied, and their tie-break bouts could not be added. Reload the page and try again."})
+	default:
+		c.JSON(http.StatusConflict, refusal)
+	}
+}
+
 // tryAutoCompletePoolsAfterWrite is tryAutoCompletePools for a door that has
 // just written the given matches (a score, a decision, a bulk batch): it asks
 // engine.MaybeAutoCompletePoolsAfterWrite, which skips the knockout-status
@@ -698,6 +735,10 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			// every other knockout-correction write (see
 			// scoreRequestBody.ForceDownstreamReopen).
 			ForceDownstreamReopen bool `json:"forceDownstreamReopen"`
+			// ConfirmFinished lets THIS entry's correction of a finished
+			// league's result land (see scoreRequestBody.ConfirmFinished);
+			// without it the entry fails with reason "league_finished".
+			ConfirmFinished bool `json:"confirmFinished"`
 			// ChangedGroups is this entry's `changed`, the groups it changes
 			// (bc-mrgc), with the same meaning and default as /score's.
 			ChangedGroups []string `json:"changed"`
@@ -739,7 +780,10 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			// (the entry stores nothing; /score answers it with a 400); and
 			// "team_members_unreadable" when the competition's team members
 			// cannot be read to judge such a pick (the entry stores nothing;
-			// /score answers it with a 409).
+			// /score answers it with a 409); and "league_finished" when the
+			// entry corrects a finished league's result without
+			// confirmFinished (the entry stores nothing; /score answers it with
+			// a 409).
 			//
 			// It matters because the single-match endpoints answer those
 			// conditions with a distinct body ({"applied": false, "reason":
@@ -908,6 +952,9 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 				if refusal := teamFinishRefusalUnderTx(finishRefusal, check, &results[i].MatchResult); refusal != nil {
 					return errors.New(refusal.Error())
 				}
+				if err := refuseFinishedLeagueCorrection(stx, tl, id, results[i].ID, check.Corrects, results[i].ConfirmFinished); err != nil {
+					return err
+				}
 				// The entry's representative picks are judged on what the write
 				// landed, as /score's are (landedMembersRefusal), decided here,
 				// before the engine rewrites the entry. Its numbered rows are
@@ -951,7 +998,18 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 				var downstreamRunningErr *engine.DownstreamKnockoutRunningError
 				var alreadyIneligErr *engine.AlreadyIneligibleError
 				var landedRefusal *landedWriteRefusal
+				var leagueRefusal *leagueFinishedRefusal
 				switch {
+				case errors.As(err, &leagueRefusal):
+					// A correction of a finished league's result, refused
+					// until the entry carries confirmFinished: the entry
+					// stores nothing, the rest of the batch is unaffected.
+					bulkErr.Reason = leagueFinishedCode
+					bulkErr.Error = LeagueFinishedMessage
+				case errors.Is(err, engine.ErrTiebreakNeedsWinner):
+					// A league tie-breaker finished with no winner: the code rides in
+					// Reason (as the 400 body's code on the other doors), the sentence in Error.
+					bulkErr.Reason = engine.ErrTiebreakNeedsWinner.Error()
 				case errors.As(err, &landedRefusal):
 					// A pick the write landed that the side's team does not
 					// hold: the refusal's code rides in Reason and its
@@ -1081,6 +1139,10 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			// correction guard, same field name and contract as the score-write
 			// endpoint's (see scoreRequestBody.ForceDownstreamReopen).
 			ForceDownstreamReopen bool `json:"forceDownstreamReopen"`
+			// ConfirmFinished lets a correction of a finished league's result
+			// land, same field name and contract as the score-write
+			// endpoint's (see scoreRequestBody.ConfirmFinished).
+			ConfirmFinished bool `json:"confirmFinished"`
 			// writeTag is the optional writeId and basis (bc-evts).
 			writeTag
 		}
@@ -1219,15 +1281,29 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			refusal            *ValidationError
 		)
 		txErr := tx.WithTransaction(id, func(stx state.StoreTx) error {
+			snap, _, snapErr := matchSnapshotOrErr(stx, id, mid, "quick-score")
+			if snapErr != nil {
+				return snapErr
+			}
 			if finishRefusal != nil {
-				snap, _, snapErr := matchSnapshotOrErr(stx, id, mid, "team-finish")
-				if snapErr != nil {
-					return snapErr
-				}
 				check := correctionCheck{StoredStatus: snap.Status, StoredDecision: snap.Decision}
 				if refusal = teamFinishRefusalUnderTx(finishRefusal, check, &result); refusal != nil {
 					return nil
 				}
+			}
+			// Quick-score is always a completed write, so over a completed
+			// match it is a correction: on a finished league it is warned
+			// about first. The resend of a write the match's score log already
+			// holds (its writeId) lands nothing and is answered as recorded, so
+			// there is nothing to warn about.
+			corrects := snap.Status == state.MatchStatusCompleted && !eng.WriteIDLogged(stx, id, mid, req.WriteID)
+			if lerr := refuseFinishedLeagueCorrection(stx, tl, id, mid, corrects, req.ConfirmFinished); lerr != nil {
+				var league *leagueFinishedRefusal
+				if errors.As(lerr, &league) {
+					err = league
+					return nil
+				}
+				return lerr
 			}
 			// Quick-score replaces the whole encounter it builds: every group,
 			// and every bout row the stored match holds that it does not
@@ -1262,6 +1338,9 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 				respondSuperseded(c, result.Merge.HeldGroups(), result.Merge.HeldReason(), err)
 				return
 			}
+			if respondIfLeagueFinished(c, err) {
+				return
+			}
 			if errors.Is(err, engine.ErrMatchSideMismatch) {
 				c.JSON(http.StatusConflict, gin.H{
 					"error":   "side_mismatch",
@@ -1287,9 +1366,7 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			// Completed write with no winner, which validateBracketCompletion
 			// rejects as *engine.ValidationError; map it to 400 so the caller
 			// sees "resolve via daihyosen first" instead of a generic 500.
-			var engValErr *engine.ValidationError
-			if errors.As(err, &engValErr) {
-				c.JSON(http.StatusBadRequest, gin.H{"error": engValErr.Error()})
+			if respondIfValidationError(c, err) {
 				return
 			}
 			internalError(c, err)
@@ -1492,7 +1569,8 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 	// sets state.MatchResult.ReopenPending, which only lets a reason sent with
 	// the next completion be kept (see applyCorrectionReason).
 	//
-	// A completed match that is neither kachinuki nor decided by a withdrawal
+	// A completed match that is neither kachinuki, decided by a withdrawal,
+	// nor a pool tie-break or daihyosen bout finished as a draw (no winner)
 	// gets 400 (its sanctioned edit of a finished result remains the
 	// correction path), as does an over-long reason; a non-completed match, a
 	// match whose result feeds a downstream match in progress (or resolved by
@@ -1516,6 +1594,10 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			// both court gates. The route is main-gated in self-run, so no
 			// anonymous caller reaches it.
 			ForceCourt bool `json:"forceCourt"`
+			// ConfirmFinished is the organiser's "Change it anyway" after a 409
+			// league_finished (request-only, never stored): the reopen puts a
+			// finished league back into match play.
+			ConfirmFinished bool `json:"confirmFinished"`
 			// The optional writeId and basis (bc-evts F1).
 			writeTag
 		}
@@ -1548,6 +1630,15 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 		// AuthMiddleware's verification mechanics including the F4
 		// empty-stored-password fail-closed branch. Pinned by
 		// TestSelfRun_ReopenRequiresMainPassword.
+
+		// A match of a finished league is warned about first (D2), as a
+		// correction of its result is.
+		if lerr := refuseFinishedLeagueReopen(tx, tl, id, mid, body.ConfirmFinished); lerr != nil {
+			if !respondIfLeagueFinished(c, lerr) {
+				internalError(c, lerr)
+			}
+			return
+		}
 
 		// ReopenMatch holds the court-exclusivity lock itself now
 		// (mp-gmcg review A2), so its cross-competition pre-check and in-tx
@@ -1614,6 +1705,10 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 				"status":        restored,
 			})
 		}
+		// A match reopened on a finished league puts the league back into
+		// match play (the engine's leagueBackInPlay), which only the pass
+		// does; it reports a start, broadcast as competition_started.
+		tryAutoCompletePoolsAfterWrite(c, eng, hub, id)
 
 		c.JSON(http.StatusOK, gin.H{"reopenedMatches": blockedMatchesPayload(reopenedDownstream)})
 	})
@@ -1649,6 +1744,8 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			BlockerMatchID        string `json:"blockerMatchId"`
 			Reason                string `json:"reason"`
 			ForceDownstreamReopen bool   `json:"forceDownstreamReopen"`
+			// ConfirmFinished: as on reopen, for the target's league.
+			ConfirmFinished bool `json:"confirmFinished"`
 			// The optional writeId and basis (bc-evts F1), the target's.
 			writeTag
 		}
@@ -1678,6 +1775,14 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 				return
 			}
+		}
+
+		// The target's league is warned about before the blocker is requeued.
+		if lerr := refuseFinishedLeagueReopen(tx, tl, id, mid, body.ConfirmFinished); lerr != nil {
+			if !respondIfLeagueFinished(c, lerr) {
+				internalError(c, lerr)
+			}
+			return
 		}
 
 		var reopenedDownstream []engine.ReopenedMatch
@@ -1755,6 +1860,9 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 				"status":        restored,
 			})
 		}
+		// The target's league, if finished, is back in match play (see the
+		// plain reopen above).
+		tryAutoCompletePoolsAfterWrite(c, eng, hub, id)
 
 		c.JSON(http.StatusOK, gin.H{"reopenedMatches": blockedMatchesPayload(reopenedDownstream)})
 	})
@@ -1961,6 +2069,137 @@ func resultFinalized(message string) *selfRunRefusal {
 // errResultFinalized is resultFinalized with the score path's sentence, which
 // the representative bout's add and remove send too.
 var errResultFinalized = resultFinalized("This match result has already been reported. Contact the tournament organizer to correct it.")
+
+// leagueFinishedCode is the 409 a correction of a finished league's result
+// answers until the organiser confirms it (design item 3, operator decision
+// D2: warn first, then save).
+const leagueFinishedCode = "league_finished"
+
+// LeagueFinishedMessage is the refusal's sentence. The confirm the app shows
+// is write_result.jsx's leagueFinishedConfirm; this one is what a queued
+// correction refused on replay, with nobody there to confirm it, is told with.
+const LeagueFinishedMessage = "This league has finished. Changing this result can change the final table and podium, so it was not saved: correct it again and confirm the change."
+
+// leagueFinishedRefusal is the refusal of a correction on a finished league
+// written without the request-only confirmFinished. RemovedCourts names the
+// shiaijo the league's matches stand on that the tournament no longer has: if
+// the correction puts the league back into match play, those matches lose
+// their court (the engine's reopenLeagueTx), and the confirm says so.
+type leagueFinishedRefusal struct {
+	removedCourts []string
+}
+
+func (r *leagueFinishedRefusal) Error() string { return leagueFinishedCode }
+
+// body is the 409 body: the code, the sentence and the removed courts.
+func (r *leagueFinishedRefusal) body() gin.H {
+	courts := r.removedCourts
+	if courts == nil {
+		courts = []string{}
+	}
+	return gin.H{"error": leagueFinishedCode, "message": LeagueFinishedMessage, "removedCourts": courts}
+}
+
+// refuseFinishedLeagueCorrection is the ONE check every result door asks (PUT
+// /score, quick-score, bulk-score, POST /decision, and the reopen doors): a
+// correction of a match of a finished league is refused until the write
+// carries the request-only confirmFinished (never stored). It reads the
+// competition under the write's own transaction, so a league that finished an
+// instant before is judged as finished. corrects is the door's own reading of
+// the write as a correction that would land: a completed write over a
+// completed match, neither the resend of the result already recorded nor a
+// result the match's history keeps because the writer never saw the one in
+// force (those land nothing, so there is nothing to warn about). Its scope is
+// the reconciler's (the engine's leagueStateBeforeWrite): a pool match, a
+// tie-breaker bout included, of a league that is not engi; an engi league is
+// not reconciled, so the warning's "goes back to match play" would not hold
+// there. tl may be nil (no court is then named). It answers nil when the write
+// may go on; an error that is not a *leagueFinishedRefusal is a fault.
+//
+// It lives here and not in the engine's ForceOptions because `corrects` is the
+// door's own reading of the request (the stamp and basis the writer sent, the
+// match's score log, the reason it carried), which only the handler layer
+// holds; the engine sees the write after those judgements, so one function the
+// doors all ask is the one owner.
+func refuseFinishedLeagueCorrection(stx state.StoreTx, tl TournamentLoader, compID, matchID string, corrects, confirmed bool) error {
+	if !corrects || confirmed || !engine.IsPoolMatchID(matchID) {
+		return nil
+	}
+	comp, err := stx.LoadCompetition(compID)
+	if err != nil {
+		return err
+	}
+	if comp == nil || comp.Format != state.CompFormatLeague || comp.Engi || comp.Status != state.CompStatusComplete {
+		return nil
+	}
+	courts, err := leagueRemovedCourts(stx, tl, compID)
+	if err != nil {
+		return err
+	}
+	return &leagueFinishedRefusal{removedCourts: courts}
+}
+
+// leagueRemovedCourts names, in name order, the shiaijo the competition's pool
+// matches stand on that the tournament no longer has (the engine's
+// reopenLeagueTx clears them when the league goes back to match play).
+func leagueRemovedCourts(stx state.StoreTx, tl TournamentLoader, compID string) ([]string, error) {
+	if tl == nil {
+		return nil, nil
+	}
+	tournament, err := tl.LoadTournament()
+	if err != nil {
+		return nil, err
+	}
+	matches, err := stx.LoadPoolMatches(compID)
+	if err != nil {
+		return nil, err
+	}
+	_, courts := engine.MatchesOnRemovedCourts(matches, tournament)
+	return courts, nil
+}
+
+// respondIfLeagueFinished answers a leagueFinishedRefusal with its 409 and
+// reports whether it did.
+func respondIfLeagueFinished(c *gin.Context, err error) bool {
+	var refusal *leagueFinishedRefusal
+	if !errors.As(err, &refusal) {
+		return false
+	}
+	c.JSON(http.StatusConflict, refusal.body())
+	return true
+}
+
+// refuseFinishedLeagueReopen is the reopen doors' ask of the same check
+// (refuseFinishedLeagueCorrection): reopening a completed match of a finished
+// league puts the league back into match play, so it is warned about first,
+// unless the request carries the confirmation. A match the competition does not
+// hold, or one that is not completed, is the reopen's own answer. It runs in a
+// transaction of its own, read-only, before the reopen: a league that finishes
+// between the two is reopened without the warning, which the organiser's tap on
+// Reopen already asked for.
+func refuseFinishedLeagueReopen(txr CompetitionTransactor, tl TournamentLoader, compID, matchID string, confirmed bool) error {
+	if confirmed || !engine.IsPoolMatchID(matchID) {
+		return nil
+	}
+	var refusal error
+	err := txr.WithTransaction(compID, func(stx state.StoreTx) error {
+		matches, err := stx.LoadPoolMatches(compID)
+		if err != nil {
+			return err
+		}
+		for i := range matches {
+			if matches[i].ID == matchID {
+				refusal = refuseFinishedLeagueCorrection(stx, tl, compID, matchID, matches[i].Status == state.MatchStatusCompleted, false)
+				break
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	return refusal
+}
 
 // repBoutHanteiRefusal is the refusal of an anonymous write that would record,
 // move or clear the judges' decision (hantei) on the representative bout, or
@@ -3049,6 +3288,12 @@ type correctionCheck struct {
 	StoredDecision            string
 	Reject                    *ValidationError
 	ClearBracketReopenPending bool
+	// Corrects is true for a completed -> completed write that carries its
+	// reason and so lands as a correction: not a finish older than the stored
+	// result, not the resend of the one recorded, not a reason-less finish from
+	// a device that never saw it (the replay keeps those in the history). The
+	// finished-league check asks it (refuseFinishedLeagueCorrection).
+	Corrects bool
 }
 
 // applyCorrectionReason applies the correction-reason audit policy to r over
@@ -3218,7 +3463,7 @@ func applyCorrectionReason(snap matchSnapshot, r *state.MatchResult, comp *state
 			}
 			return correctionCheck{StoredStatus: snap.Status, StoredDecision: snap.Decision, Reject: missingCorrectionReasonError()}
 		}
-		return correctionCheck{StoredStatus: snap.Status, StoredDecision: snap.Decision}
+		return correctionCheck{StoredStatus: snap.Status, StoredDecision: snap.Decision, Corrects: true}
 	}
 	if r.Status == state.MatchStatusCompleted && snap.ReopenPending {
 		// Ended again after a reason-less reopen: never refused, the
@@ -3404,6 +3649,12 @@ type scoreRequestBody struct {
 	// sides gate still runs. Request-only, like StartOnly, and dropped for
 	// an anonymous self-run caller (enforceSelfRunPolicy).
 	ForceCourt bool `json:"forceCourt"`
+	// ConfirmFinished is the organiser's "Change it anyway": a correction of
+	// a finished league's result lands (refuseFinishedLeagueCorrection, 409
+	// league_finished without it). Request-only, like ForceCourt. A participant
+	// never reaches it: their write over a finished match is refused first
+	// (result_finalized).
+	ConfirmFinished bool `json:"confirmFinished"`
 	// ClearWithdrawal marks a completed correction that removes a withdrawal
 	// or default win recorded by mistake: the payload is the real result and
 	// replaces the ruling (state.MatchResult.ClearsWithdrawal,
@@ -3821,6 +4072,17 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 					engErr = refusal
 					return nil
 				}
+				// A correction of a finished league's result is warned about
+				// first (design item 3): after the self-run judge above, so a
+				// participant is still answered result_finalized.
+				if err := refuseFinishedLeagueCorrection(stx, tl, id, mid, check.Corrects, body.ConfirmFinished); err != nil {
+					var refusal *leagueFinishedRefusal
+					if errors.As(err, &refusal) {
+						engErr = refusal
+						return nil
+					}
+					return err
+				}
 				// A running- or scheduled-status write over a finished match
 				// never reverts it: such a write never carries the result group
 				// (engine.runningOverFinished), so the match stays finished.
@@ -3935,6 +4197,9 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 			var refusal *selfRunRefusal
 			if errors.As(engErr, &refusal) {
 				c.JSON(refusal.status, refusal.body())
+				return
+			}
+			if respondIfLeagueFinished(c, engErr) {
 				return
 			}
 			if errors.Is(engErr, engine.ErrMatchSideMismatch) {

@@ -24,7 +24,9 @@ import (
 	"testing/fstest"
 
 	"github.com/gin-gonic/gin"
+	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/engine"
+	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/resources"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 	"github.com/stretchr/testify/assert"
@@ -276,6 +278,11 @@ func TestSelfRun_SelfRunMode_CompetitionConfigRoutes_RequireMainPassword(t *test
 		{http.MethodPost, "/api/competitions/some-id/league-tiebreak"},
 		{http.MethodDelete, "/api/competitions/some-id/league-tiebreak"},
 		{http.MethodPost, "/api/competitions/some-id/league-tiebreak/finalize"},
+		// Undoing the accepted shared ranks reopens a finished league.
+		{http.MethodDelete, "/api/competitions/some-id/league-tiebreak/finalize"},
+		// Another individual tie-breaker round over a tie a round left level
+		// is the organiser's choice, beside the lots (decision F5).
+		{http.MethodPost, "/api/competitions/some-id/pools/Pool%20A/tiebreak-round"},
 		// The caller picks N, so an anonymous caller could make the server build large synthetic draws on demand.
 		{http.MethodGet, "/api/schedule/draft-estimate"},
 		// The calendar is the organiser planning view, and each call places every competition once (one estimate per competition).
@@ -288,11 +295,12 @@ func TestSelfRun_SelfRunMode_CompetitionConfigRoutes_RequireMainPassword(t *test
 		"GET /api/schedule/calendar must be organiser-only in self-run")
 	assert.True(t, isSelfRunMainGatedConfigRoute(http.MethodGet, "/api/schedule/calendar/preview"),
 		"GET /api/schedule/calendar/preview must be organiser-only in self-run")
-	for _, fullPath := range []string{"/api/competitions/:id/league-tiebreak", "/api/competitions/:id/league-tiebreak/finalize"} {
+	for _, fullPath := range []string{"/api/competitions/:id/league-tiebreak", "/api/competitions/:id/league-tiebreak/finalize", "/api/competitions/:id/pools/:poolId/tiebreak-round"} {
 		assert.True(t, isSelfRunMainGatedConfigRoute(http.MethodPost, fullPath), "POST %s must be organiser-only in self-run", fullPath)
 	}
-	assert.True(t, isSelfRunMainGatedConfigRoute(http.MethodDelete, "/api/competitions/:id/league-tiebreak"),
-		"DELETE /api/competitions/:id/league-tiebreak must be organiser-only in self-run")
+	for _, fullPath := range []string{"/api/competitions/:id/league-tiebreak", "/api/competitions/:id/league-tiebreak/finalize"} {
+		assert.True(t, isSelfRunMainGatedConfigRoute(http.MethodDelete, fullPath), "DELETE %s must be organiser-only in self-run", fullPath)
+	}
 
 	for _, tc := range configRoutes {
 		t.Run("no_pw_401_"+tc.method+"_"+tc.path, func(t *testing.T) {
@@ -568,6 +576,174 @@ func TestSelfRun_Complete_RefusesALeagueWithAMatchToPlay(t *testing.T) {
 	stored, err = store.LoadCompetition(compID)
 	require.NoError(t, err)
 	assert.Equal(t, state.CompStatusComplete, stored.Status)
+}
+
+// A league is finished only once its places are decided: every match played
+// is not enough while a tie in the band has no tie-breaker, or a tie-breaker
+// left it level without the lots (engine.PoolsSettledNow, judged under the
+// lock). The anonymous self-run caller is refused with a code and a sentence.
+func TestSelfRun_Complete_RefusesALeagueWithAnUndecidedPlace(t *testing.T) {
+	store := newTempStore(t)
+	seedSelfRunTournament(t, store)
+	r := setupSelfRunRouter(t, store, NewFileVerifier(store))
+
+	const compID = "league-undecided"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: compID, Name: compID, Format: state.CompFormatLeague, Status: state.CompStatusPools,
+		Kind: "team", TeamSize: 2, Courts: []string{"A"},
+	}))
+	teams := []helper.Player{
+		{ID: "t1-id", Name: "T1", Dojo: "Dojo T1"}, {ID: "t2-id", Name: "T2", Dojo: "Dojo T2"}, {ID: "t3-id", Name: "T3", Dojo: "Dojo T3"},
+	}
+	require.NoError(t, store.SavePools(compID, []helper.Pool{{PoolName: "Pool A", Players: teams}}))
+	// Every match drawn: the three teams are level for 1st to 3rd.
+	var matches []state.MatchResult
+	idx := 0
+	for i := range teams {
+		for j := i + 1; j < len(teams); j++ {
+			matches = append(matches, state.MatchResult{
+				ID: fmt.Sprintf("Pool A-%d", idx), SideA: teams[i].Name, SideB: teams[j].Name,
+				SideAID: teams[i].ID, SideBID: teams[j].ID, Status: state.MatchStatusCompleted,
+				Decision: string(domain.DecisionHikiwake),
+			})
+			idx++
+		}
+	}
+	require.NoError(t, store.SavePoolMatches(compID, matches))
+
+	complete := func() *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, "/api/competitions/"+compID+"/complete", nil)
+		req.Header.Set("X-Tournament-Password", "")
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		return w
+	}
+	refusedWith := func(code string) {
+		t.Helper()
+		w := complete()
+		require.Equal(t, http.StatusConflict, w.Code, w.Body.String())
+		var body map[string]string
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+		assert.Equal(t, code, body["code"])
+		assert.NotEmpty(t, body["error"])
+		stored, err := store.LoadCompetition(compID)
+		require.NoError(t, err)
+		assert.Equal(t, state.CompStatusPools, stored.Status, "a refused completion leaves the competition unfinished")
+	}
+
+	refusedWith("league_tiebreak_pending")
+
+	// The tie-breaker goes in a circle: T1 > T2, T2 > T3, T3 > T1.
+	circle := [][3]string{{"t1-id", "t2-id", "t1-id"}, {"t2-id", "t3-id", "t2-id"}, {"t1-id", "t3-id", "t3-id"}}
+	names := map[string]string{"t1-id": "T1", "t2-id": "T2", "t3-id": "T3"}
+	for k, c := range circle {
+		matches = append(matches, state.MatchResult{
+			ID: fmt.Sprintf("Pool A-DH-%d", k), SideA: names[c[0]], SideB: names[c[1]], SideAID: c[0], SideBID: c[1],
+			Winner: names[c[2]], WinnerID: c[2], Status: state.MatchStatusCompleted,
+		})
+	}
+	require.NoError(t, store.SavePoolMatches(compID, matches))
+	refusedWith("league_chusen_pending")
+
+	_, err := store.SaveRankOverridesChanged(compID, "Pool A", map[string]int{"t2-id": 1, "t3-id": 2, "t1-id": 3})
+	require.NoError(t, err)
+	w := complete()
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+}
+
+// An individual league has no tie-breaker control on the Pools tab: its
+// tie-break bouts are added by the scan. A completion refused for a tie that has
+// no bout yet adds them rather than pointing at a control that is not there.
+func TestComplete_IndividualLeagueTieAddsItsTiebreakBouts(t *testing.T) {
+	store := newTempStore(t)
+	seedSelfRunTournament(t, store)
+	r := setupSelfRunRouter(t, store, NewFileVerifier(store))
+
+	const compID = "indiv-league-tie"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: compID, Name: compID, Format: state.CompFormatLeague, Status: state.CompStatusPools, Courts: []string{"A"},
+	}))
+	players := []helper.Player{
+		{ID: "p1-id", Name: "P1", Dojo: "Dojo 1"}, {ID: "p2-id", Name: "P2", Dojo: "Dojo 2"}, {ID: "p3-id", Name: "P3", Dojo: "Dojo 3"},
+	}
+	require.NoError(t, store.SavePools(compID, []helper.Pool{{PoolName: "Pool A", Players: players}}))
+	var matches []state.MatchResult
+	idx := 0
+	for i := range players {
+		for j := i + 1; j < len(players); j++ {
+			matches = append(matches, state.MatchResult{
+				ID: fmt.Sprintf("Pool A-%d", idx), SideA: players[i].Name, SideB: players[j].Name,
+				SideAID: players[i].ID, SideBID: players[j].ID, Status: state.MatchStatusCompleted,
+				Decision: string(domain.DecisionHikiwake),
+			})
+			idx++
+		}
+	}
+	require.NoError(t, store.SavePoolMatches(compID, matches))
+
+	req := httptest.NewRequest(http.MethodPost, "/api/competitions/"+compID+"/complete", nil)
+	req.Header.Set("X-Tournament-Password", "")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusConflict, w.Code, w.Body.String())
+	var body map[string]string
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+	assert.Equal(t, "league_tiebreak_pending", body["code"])
+	assert.NotContains(t, body["error"], "Pools tab", "an individual league has no tie-breaker control to point at")
+
+	stored, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	var bouts int
+	for _, m := range stored {
+		if engine.IsTiebreakerMatchID(m.ID) {
+			bouts++
+		}
+	}
+	assert.Equal(t, 3, bouts, "the refusal adds the tie-break bouts the three tied players owe")
+}
+
+// leagueScanEngine is a ScoringEngine whose scan answers a fixed outcome and error.
+type leagueScanEngine struct {
+	stubScoringEngine
+	outcome engine.AutoCompleteOutcome
+	err     error
+}
+
+func (e leagueScanEngine) MaybeAutoCompletePools(string) (engine.AutoCompleteOutcome, error) {
+	return e.outcome, e.err
+}
+
+type leagueScanStore struct{ comp *state.Competition }
+
+func (s leagueScanStore) LoadCompetition(string) (*state.Competition, error) { return s.comp, nil }
+
+// The refusal of POST .../complete for a tied individual league is worded from
+// what the scan did: bouts added, a failed or empty scan, or a league the scan
+// finished because a racing score settled the tie.
+func TestAnswerCompleteRefusedByIndividualLeagueTie_WordsTheScanOutcome(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	refusal := gin.H{"code": "league_tiebreak_pending", "error": "Their tie-break bouts have been added to the schedule."}
+	cases := []struct {
+		name     string
+		engine   leagueScanEngine
+		wantCode int
+		wantText string
+	}{
+		{"bouts added", leagueScanEngine{outcome: engine.AutoCompleteTiebreakInjected}, http.StatusConflict, "have been added"},
+		{"scan failed", leagueScanEngine{err: fmt.Errorf("disk")}, http.StatusConflict, "could not be added"},
+		{"scan changed nothing", leagueScanEngine{outcome: engine.AutoCompleteNoChange}, http.StatusConflict, "could not be added"},
+		{"racing score settled the tie", leagueScanEngine{outcome: engine.AutoCompleteTransitioned}, http.StatusOK, string(state.CompStatusComplete)},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(w)
+			store := leagueScanStore{comp: &state.Competition{ID: "l", Status: state.CompStatusComplete}}
+			answerCompleteRefusedByIndividualLeagueTie(c, tc.engine, stubBroadcaster{}, store, "l", refusal)
+			assert.Equal(t, tc.wantCode, w.Code, w.Body.String())
+			assert.Contains(t, w.Body.String(), tc.wantText)
+		})
+	}
 }
 
 // A Swiss competition is finished only once every configured round has been

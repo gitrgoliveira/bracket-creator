@@ -4,8 +4,10 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"slices"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
@@ -69,7 +71,7 @@ type resolvedFinisher struct {
 // complete" on this very call. The judgement itself is poolCompletion's; this
 // is the bare-store door, which may write (the injectors do).
 func (e *Engine) completedPoolNames(compID string, comp *state.Competition) (map[string]bool, error) {
-	if comp != nil && comp.TeamSize > 0 {
+	if comp.IsTeam() {
 		if _, err := e.InjectPoolDaihyosenMatches(compID); err != nil {
 			return nil, err
 		}
@@ -85,24 +87,34 @@ func (e *Engine) completedPoolNames(compID string, comp *state.Competition) (map
 
 // poolCompletion returns poolName → isComplete for every pool in compID. A
 // pool is complete when all of its matches (regular + any tiebreaker/daihyosen)
-// are completed with a winner and, for team competitions, its daihyosen
-// results actually broke the ties (no cycle).
+// are completed with a winner and its tie-breaker results actually broke the
+// ties: no daihyosen cycle for a team, no ippon-shobu round that went in a
+// circle for an individual.
 //
 // It only READS, through loader, so a transaction can ask it about the state
 // its own uncommitted write produced (pool_requalify.go); completedPoolNames is
 // the bare-store door that injects first. It does NOT ask whether a tie-break
 // is still owed but not yet injected: inside a transaction nothing has been
 // injected, so a caller there must also ask pendingTieBreaks. standings is
-// consulted only for a team competition, and lazily, so the bare-store door
-// can keep reading the standings cache.
+// consulted only when the pools hold a supplementary bout, and lazily, so the
+// bare-store door can keep reading the standings cache.
 func (e *Engine) poolCompletion(loader poolStandingsLoader, compID string, comp *state.Competition, standings func() (map[string][]state.PlayerStanding, error)) (map[string]bool, error) {
-	isTeam := comp != nil && comp.TeamSize > 0
-
 	pools, err := loader.LoadPools(compID)
 	if err != nil {
 		return nil, err
 	}
 	matches, err := loader.LoadPoolMatches(compID)
+	if err != nil {
+		return nil, err
+	}
+
+	// The chusen ranks in force (IsOverridden on the standings) settle a drawn
+	// representative bout (poolMatchSettled), and the cycle check below reads the
+	// same standings: compute them once.
+	standings = sync.OnceValues(standings)
+	lots, err := loadPoolLots(matches, standings, func() (map[string]domain.CompetitorStatus, error) {
+		return loader.LoadCompetitorStatus(compID)
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -120,11 +132,7 @@ func (e *Engine) poolCompletion(loader poolStandingsLoader, compID string, comp 
 			continue
 		}
 		seen[pn] = true
-		complete := m.Status == state.MatchStatusCompleted
-		if state.IsPoolSupplementaryMatchID(m.ID) && m.Winner == "" {
-			complete = false
-		}
-		if !complete {
+		if !poolMatchSettled(&m, lots) {
 			if _, known := done[pn]; known {
 				done[pn] = false
 			}
@@ -143,27 +151,27 @@ func (e *Engine) poolCompletion(loader poolStandingsLoader, compID string, comp 
 		}
 	}
 
-	// Team competitions: a pool whose daihyosen results produced a cycle (ties
-	// not broken) must not be treated as resolvable.
-	if isTeam {
+	// A pool whose tie-breaker left a tie level must not be treated as
+	// resolvable: a team's daihyosen results that produced a cycle, or an
+	// individual's ippon-shobu round that went in a circle (dhCycleExists asks
+	// both, per tied group, and fails closed). Only a pool holding such a bout
+	// can be in that state, so the standings are read only then.
+	if slices.ContainsFunc(matches, func(m state.MatchResult) bool { return state.IsPoolSupplementaryMatchID(m.ID) }) {
 		st, serr := standings()
 		if serr != nil {
 			return nil, serr
 		}
-		overrides, oerr := e.store.LoadOverrides(compID)
-		if oerr != nil {
-			return nil, oerr
+		bracket, berr := loader.LoadBracket(compID)
+		if berr != nil {
+			return nil, berr
 		}
-		var poolRanks map[string]map[string]int
-		if overrides != nil {
-			poolRanks = overrides.PoolRanks
-		}
+		band := newBreakBand(comp, pools, bracket)
 		for pn, ok := range done {
 			if !ok {
 				continue
 			}
 			scoped := map[string][]state.PlayerStanding{pn: st[pn]}
-			if dhCycleExists(scoped, matches, poolRanks) {
+			if dhCycleExists(scoped, matches, band) {
 				done[pn] = false
 			}
 		}

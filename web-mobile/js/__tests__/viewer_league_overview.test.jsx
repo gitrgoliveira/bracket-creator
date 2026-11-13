@@ -286,6 +286,27 @@ describe('ViewerOverview league standings (mp-ldnr)', () => {
     expect(winnerBadge).toBeNull();
   });
 
+  // N3: every match scored is not a decided league. A tie at a podium place
+  // can still wait for the organiser (tie-breaker or Accept shared ranks), and
+  // the league stays in match play until it is settled.
+  it('every match scored but the league still in match play names no winner and no final table', () => {
+    const standings = { League: makeTeamStandings(4) };
+    const tree = runtime.mount(ViewerOverview, {
+      ...baseProps,
+      c: teamLeagueComp('pools'),
+      standings,
+      pools,
+      poolMatches: completedMatches(6),
+    });
+    const text = collectText(tree, expandNamed('NumberedName'));
+    expect(text).toContain('Standings');
+    expect(text).not.toContain('Final standings');
+    const winnerBadge = findInTree(tree, n =>
+      typeof n?.type === 'function' && n.props?.testId === 'league-overview-winner'
+    );
+    expect(winnerBadge).toBeNull();
+  });
+
   it('completed league shows match progress as N/N', () => {
     const standings = { League: makeStandings(3) };
     const tree = runtime.mount(ViewerOverview, {
@@ -450,5 +471,55 @@ describe('ViewerOverview league standings (mp-ldnr)', () => {
     expect(text).not.toContain('Flags');
     expect(text).toContain('Player');
     expect(text).toContain('PW');
+  });
+});
+
+// N2a: a league table gives an accepted shared group (and a level group below
+// the band) its best place, 1, 1, 3, but the Awards podium stays as it was:
+// one finisher per place in table order, the kendo joint 3rd (the joint-3rd
+// setting on, every row ranked 3) its one shared place.
+describe('league Awards podium with shared table ranks (N2a)', () => {
+  let deriveAwards;
+  beforeEach(async () => {
+    vi.resetModules();
+    ({ deriveAwards } = await import('../viewer_awards.jsx'));
+  });
+
+  const row = (rank, name) => ({ rank, player: { name, dojo: `${name} Dojo` } });
+  const pools = [{ poolName: 'League' }];
+  const places = (list, comp) =>
+    deriveAwards(null, { League: list }, pools, new Map(), comp).map(p => [p.place, p.name]);
+
+  it('an accepted shared 1st reads 1st, 2nd, 3rd on the podium in table order', () => {
+    const list = [row(1, 'A'), row(1, 'B'), row(3, 'C'), row(4, 'D')];
+    expect(places(list, { format: 'league', twoThirdPlaces: true })).toEqual([[1, 'A'], [2, 'B'], [3, 'C']]);
+    expect(places(list, { format: 'league', twoThirdPlaces: false })).toEqual([[1, 'A'], [2, 'B'], [3, 'C']]);
+  });
+
+  it('an accepted shared 2nd keeps a single 2nd and a single 3rd', () => {
+    const list = [row(1, 'A'), row(2, 'B'), row(2, 'C'), row(2, 'D')];
+    expect(places(list, { format: 'league', twoThirdPlaces: true })).toEqual([[1, 'A'], [2, 'B'], [3, 'C']]);
+  });
+
+  it('a shared 3rd with the joint-3rd setting off crowns one 3rd', () => {
+    const list = [row(1, 'A'), row(2, 'B'), row(3, 'C'), row(3, 'D')];
+    expect(places(list, { format: 'league', twoThirdPlaces: false })).toEqual([[1, 'A'], [2, 'B'], [3, 'C']]);
+    // a legacy naginata league resolves the setting off the same way
+    expect(places(list, { format: 'league' })).toEqual([[1, 'A'], [2, 'B'], [3, 'C']]);
+  });
+
+  it('the kendo joint 3rd still shows every row ranked 3 as a 3rd', () => {
+    const list = [row(1, 'A'), row(2, 'B'), row(3, 'C'), row(3, 'D'), row(5, 'E')];
+    expect(places(list, { format: 'league', twoThirdPlaces: true })).toEqual([[1, 'A'], [2, 'B'], [3, 'C'], [3, 'D']]);
+  });
+
+  it('a level group below the band (4, 4) never reaches the podium', () => {
+    const list = [row(1, 'A'), row(2, 'B'), row(3, 'C'), row(4, 'D'), row(4, 'E')];
+    expect(places(list, { format: 'league', twoThirdPlaces: true })).toEqual([[1, 'A'], [2, 'B'], [3, 'C']]);
+  });
+
+  it('Swiss standings keep their rank as the place', () => {
+    const list = [row(1, 'A'), row(1, 'B'), row(3, 'C')];
+    expect(deriveAwards(null, list, null, new Map(), { format: 'swiss' }).map(p => p.place)).toEqual([1, 1, 3]);
   });
 });

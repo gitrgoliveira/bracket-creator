@@ -61,6 +61,38 @@ func seedMixedCompWithSeatedKnockout(t *testing.T, store *state.Store, compID st
 	require.NoError(t, store.SaveBracket(compID, &state.Bracket{Rounds: [][]state.BracketMatch{{ko}}}))
 }
 
+// seedTiedTeamCompWithSeatedKnockout is seedMixedCompWithSeatedKnockout for a
+// team competition whose Pool A match and representative bout were both drawn,
+// so a drawing of lots is the only order A1 and A2 can have (a recorded rank
+// governs only a tie no bout has settled; lots are drawn only in a team
+// competition). The lots entered so far put A1 2nd (lotsSoFar), and the
+// knockout still seats A1 as Pool A's 1st, so lots completed with A2 1st move
+// that place.
+func seedTiedTeamCompWithSeatedKnockout(t *testing.T, store *state.Store, compID string, koStatus state.MatchStatus) {
+	t.Helper()
+	seedMixedCompWithSeatedKnockout(t, store, compID, koStatus)
+	comp, err := store.LoadCompetition(compID)
+	require.NoError(t, err)
+	comp.Kind, comp.TeamSize = "team", 2
+	require.NoError(t, store.SaveCompetition(comp))
+	matches, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	for i := range matches {
+		if matches[i].ID == "Pool A-0" {
+			matches[i].Winner, matches[i].WinnerID, matches[i].IpponsA = "", "", nil
+			matches[i].Decision = string(domain.DecisionHikiwake)
+		}
+	}
+	matches = append(matches, state.MatchResult{ID: "Pool A-DH-0", SideA: "A1", SideB: "A2", SideAID: "a1-id", SideBID: "a2-id",
+		Status: state.MatchStatusCompleted, Decision: string(domain.DecisionHikiwake)})
+	require.NoError(t, store.SavePoolMatches(compID, matches))
+	require.NoError(t, store.SaveRankOverride(compID, "Pool A", "a1-id", 2))
+}
+
+// lotsSoFar is the Pool A lots seedTiedTeamCompWithSeatedKnockout records: A1
+// 2nd, A2 not drawn yet. A refused override leaves exactly these.
+var lotsSoFar = map[string]int{helper.CompetitorKey("a1-id", "", ""): 2}
+
 // poolFixDoors are the four write doors a pool correction can come through,
 // each sending the same correction: Pool A-0 now won by A2. force adds the
 // operator's confirmation.
@@ -342,7 +374,7 @@ func TestPoolRankOverride_AnswersForTheKnockout(t *testing.T) {
 
 func testPoolRankOverrideAnswersForTheKnockout(t *testing.T, compStatus state.CompetitionStatus) {
 	seed := func(t *testing.T, store *state.Store, compID string, koStatus state.MatchStatus) {
-		seedMixedCompWithSeatedKnockout(t, store, compID, koStatus)
+		seedTiedTeamCompWithSeatedKnockout(t, store, compID, koStatus)
 		comp, err := store.LoadCompetition(compID)
 		require.NoError(t, err)
 		comp.Status = compStatus
@@ -356,7 +388,7 @@ func testPoolRankOverrideAnswersForTheKnockout(t *testing.T, compStatus state.Co
 	noOverride := func(t *testing.T, store *state.Store, compID string) {
 		o, err := store.LoadOverrides(compID)
 		require.NoError(t, err)
-		assert.Empty(t, o.PoolRanks["Pool A"], "the refused override is taken back")
+		assert.Equal(t, lotsSoFar, o.PoolRanks["Pool A"], "the refused override is taken back")
 	}
 
 	t.Run("played", func(t *testing.T) {

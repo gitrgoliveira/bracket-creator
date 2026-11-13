@@ -236,6 +236,12 @@ type CompetitorStatusStore interface {
 // reinstatement is an eligibility concern, not a scoring concern.
 type EligibilityEngine interface {
 	ReinstateCompetitor(compID, playerID string) (*domain.CompetitorStatus, error)
+	// MaybeAutoCompletePools is the general auto-complete pass, which a lifted
+	// bar owes every competition because it can change who qualifies from a
+	// pool. It reopens only a finished league, whose drawn ippon-shobu bout
+	// settled only while both its sides were barred and owes its fight again,
+	// so the league goes back into match play.
+	MaybeAutoCompletePools(compID string) (engine.AutoCompleteOutcome, error)
 }
 
 // TeamLineupStore is the consumer-boundary view of state.Store used by

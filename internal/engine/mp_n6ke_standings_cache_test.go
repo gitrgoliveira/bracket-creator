@@ -331,6 +331,32 @@ func TestSampleStandingsTokensCarriesPoolsVersion(t *testing.T) {
 		"a pools.csv rewrite must move the sampled poolsVersion, or a standings cache entry stamped before a renumber would keep validating against post-renumber reads")
 }
 
+// TestSampleStandingsTokensCarriesBracketVersion pins the bracket.json half of
+// the cache key: a mixed competition's standings read the stored draw's
+// qualifier places to mark TieOutOfBand, so a bracket-only rewrite must move
+// the sampled token, or a cached standings entry keeps the old flags.
+func TestSampleStandingsTokensCarriesBracketVersion(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "n6ke-bracket-version"
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID, Name: compID, Format: state.CompFormatMixed}))
+	require.NoError(t, store.SaveBracket(compID, &state.Bracket{
+		Rounds: [][]state.BracketMatch{{{ID: "m0", SideA: "Pool A-1st", SideB: "Pool B-2nd", Status: state.MatchStatusScheduled}}},
+	}))
+
+	before := eng.sampleStandingsTokens(compID)
+
+	// A second bracket write with no sleep: a draw filled in by pool resolution.
+	require.NoError(t, store.SaveBracket(compID, &state.Bracket{
+		Rounds: [][]state.BracketMatch{{{ID: "m0", SideA: "Alice", SideB: "Pool B-2nd", Status: state.MatchStatusScheduled}}},
+	}))
+	after := eng.sampleStandingsTokens(compID)
+
+	assert.Equal(t, store.FileVersion(compID, "bracket.json"), after.bracketVersion,
+		"sampleStandingsTokens.bracketVersion must equal the store's CURRENT bracket.json FileVersion")
+	assert.NotEqual(t, before, after,
+		"a bracket.json rewrite must move the sampled tokens, or a standings entry stamped before it would keep validating")
+}
+
 // TestSampleStandingsTokensCarriesConfigVersion pins the config.md half of
 // the cache key: computeStandingsFrom reads the competition record for the
 // scoring mode (Engi, TeamSize) and markTiedStandings for the format, so a

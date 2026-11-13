@@ -42,7 +42,7 @@ Encho is the extra period played when a match is level at the end of regulation 
 
 An individual knockout match cannot be finished level. While the score is tied, the **Finish** button reads **Needs a winner** instead: fight encho, then record a hantei if the competitors are still level after it.
 
-To record a hantei, tap **Decide by hantei** and pick the winning side. Each button names the side's colour and competitor, for example **SHIRO (White) wins: Tanaka** and **AKA (Red) wins: Yamada**. Then finish the match as usual: **Finish** (on the court console, **Finish + Start Next**) and tap it again to confirm, or **Save correction** when you are correcting a result. Picking a side on its own records nothing, so a slip of the thumb between the two buttons can be put right before anything is saved.
+To record a hantei, tap **Decide by hantei** and pick the winning side. Each button names the side's colour and competitor, for example **SHIRO (White) wins: Tanaka** and **AKA (Red) wins: Yamada**. Then finish the match as usual: **Finish** (on the court console, **Finish + Start Next**, or plain **Finish** when no later match of this competition is waiting on the court) and tap it again to confirm, or **Save correction** when you are correcting a result. Picking a side on its own records nothing, so a slip of the thumb between the two buttons can be put right before anything is saved.
 
 In the score editor, open the **Overtime** control and tick **Encho started**. A counter appears so you can record how many overtime periods were fought, using the **+** and **-** buttons. The counter starts at 1 and has no upper limit. How many periods are fought, and how a match still level after them is finally settled, is the shimpan's call. That may be a judges' decision for an individual bout, or a daihyosen for a team encounter. Record what actually happened on court, however many periods that took.
 
@@ -63,15 +63,15 @@ It applies in two situations:
 - In the knockout phase, when a team encounter finishes level.
 - In team pool or league play, when two teams finish equal on every ranking criterion and the tie decides who advances or how they are seeded.
 
-A tie that does not affect advancement is left as a shared rank with no extra bout. In league play, running the daihyosen is the operator's choice rather than an automatic step; refer to [Team standings and tie-breaks](../organisers/team-tournaments.md#team-standings-and-tie-breaks) for both options.
+A tie that does not affect advancement is left as a shared rank with no extra bout. In league play, running the daihyosen is the operator's choice rather than an automatic step; refer to [Ties in a league](../organisers/team-tournaments.md#ties-in-a-league) for the choices, including **Accept shared ranks** and **Undo shared ranks**.
 
-The bout is a single-point ippon-shobu with no time limit, between one representative from each tied team. Because it runs until someone scores, a daihyosen has no encho. The score editor lets you pick each team's representative from its roster. On the court console, the bout appears with a **(DH)** mark in the centre of the score. In pool and league standings, the team that won its daihyosen carries a **DH** badge.
+The bout is a single-point ippon-shobu between one representative from each tied team. It runs until someone scores. If it is still level, record encho and keep fighting, or decide it by hantei. A league daihyosen needs a winner: saving it as a draw is refused with "A tie-breaker needs a winner: continue with encho, then decide by hantei." The score editor lets you pick each team's representative from its roster. On the court console, the bout appears with a **(DH)** mark in the centre of the score. In pool and league standings, the team that won its daihyosen carries a **DH** badge.
 
 When a knockout team encounter is settled by a representative bout, the results workbook (**Export & print**, then **Download results (.xlsx)**) lists it on a **Representative Bouts** sheet, one section for each such encounter. A section is titled as that encounter is on the **Elimination Matches** sheet, followed by (Representative bout), with White (Shiro) on the left and Red (Aka) on the right. The bout's row shows **DH** where a numbered bout shows its number, then each team's representative with their number and name, the score, **(DH)** in the centre column, and the result mark (Ht, Kiken or Fus.) beside the side it names. A side whose representative was not picked shows no name. The sheet appears only when at least one encounter had a representative bout. The tie-break daihyosen of a team pool or league is not on it.
 
 ## Chusen (drawing lots)
 
-Chusen is the last resort when two or more tied teams have played a round of daihyosen and the bouts still do not produce a strict order. Examples are a cycle where each team beats another, an all-drawn round, or two teams finishing level on daihyosen wins.
+Chusen is the last resort when two or more tied teams have played a round of daihyosen and the bouts still do not produce a strict order. Examples are a cycle where each team beats another, or two teams finishing level on daihyosen wins. In a league, lots are the rare exception and are always yours to run: a league daihyosen cannot be saved as a draw, so lots are offered only for a genuine cycle, and the app never draws them or ranks the cycle itself. In a pool before a knockout, a drawn daihyosen bout can still be saved, and it shows its notice on the Pools tab until you record the chusen; once you do, the lots settle the place and the drawn bout no longer holds the pool. Until then you can also use **Fight it again** on the notice to play the bout once more. A league's other way out of a cycle is **Accept shared ranks**, which leaves the teams level; refer to [Ties in a league](../organisers/team-tournaments.md#ties-in-a-league).
 
 When chusen is required, the **Pools** tab (labelled **League** for league competitions) shows a **"Chusen (drawing lots) required"** panel listing the tied teams. Draw lots offline, enter each team's finishing position in the panel, and record it to settle the order and let the competition advance.
 
@@ -80,6 +80,15 @@ In a competition with pools and then a knockout, the panel can also appear after
 The positions you record decide who goes through. If they change who holds a qualifying place after the old holder has already fought a knockout match, the app asks first, in the same way as for a corrected pool result: it names who moves and which match was fought, and **Apply and reopen** records the positions and reopens that match for the new qualifier. If that knockout match is being fought right now, the positions are not recorded until it is finished or sent back to the queue. Refer to [Correct a pool result after the knockout has started](scoring-a-match.md#correct-a-pool-result-after-the-knockout-has-started).
 
 Chusen is the only place ranks are set by hand, and it happens only when the bouts themselves cannot decide the order.
+
+### Individual competitors: another round, or lots
+
+In an individual pool or league, a tie that matters is broken by single-point (ippon-shobu) bouts between the tied competitors. If that round goes in a circle, where each competitor won as many bouts as the others, the **Pools** tab (labelled **League** for league competitions) shows **A tie-breaker round left a tie** with the pool and the places the tied competitors share. You choose how to go on:
+
+- **Run another tie-breaker round** adds a fresh round of ippon-shobu bouts among the competitors still level. When more than one group is still level, there is one button for each, naming the competitors. The place stays open until the new bouts are scored.
+- **Draw lots instead** opens the same entry as the team chusen above: draw lots offline, enter each competitor's finishing position and record it.
+
+The app never draws the lots for you, and it never starts another round without your tap. A recorded order can be changed afterwards with **Change**, as for a team chusen, even after the league has finished.
 
 ### Change a chusen recorded in the wrong order
 

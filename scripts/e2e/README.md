@@ -16,7 +16,8 @@ once per worktree), then runs `playwright test` here with `E2E_ARGS` passed
 through unchanged. It is not part of `make go/test` and does not run in CI. Run
 it before opening a PR that changes `web-mobile/`: the PR template asks.
 
-It needs Go (for the build), Node.js with npm, and a network connection on
+It needs Go (for the build), Node.js 20.15 or later in the 20 line, or 22.2 or
+later (the backup fixture uses `zlib.crc32`), with npm, and a network connection on
 every run: the first `make e2e/deps` (or `make e2e`) downloads the npm packages
 and Chromium, and each `make e2e` rebuilds the binary, whose `vendor-frontend`
 step downloads the vendored frontend libraries from unpkg every time and whose
@@ -61,6 +62,15 @@ browser, `--debug` opens the inspector, and a failing test leaves a trace
                             public viewer's Pools tab: rows, figures, rank
                             badge, advancing; the individual pool row
                             (playerRowFigures).
+    fixtures/league.mjs     a LEAGUE: seedLeague (through the interface); the
+                            settings (Break ties for top, Award two joint 3rd
+                            places); the league table's rank cell and figures
+                            on admin Pools and the public League tab; the
+                            numbered match rows and matrix cell readers; the
+                            tie-break banner (Run tie-breaker, Accept shared
+                            ranks and its confirm, Undo; the Remove button is
+                            read, not tapped); the drawn-bout notice; the
+                            chusen panel, read only
     fixtures/shiaijo.mjs    /admin/shiaijo/:court (queue, inline editor, which
                             match an editor holds)
     fixtures/scores.mjs     the Scores tab and its overlay editor
@@ -98,8 +108,10 @@ browser, `--debug` opens the inspector, and a failing test leaves a trace
                             the Move dialog and Undo, line boxes and overlaps
     fixtures/organiser.mjs  the Excel download, folder import, /reset, logo and
                             sponsor uploads, the Backup and restore page;
-                            runtime PNG and import-bundle makers; a zip reader
-                            for workbooks.
+                            runtime PNG and import-bundle makers
+    fixtures/archive.mjs    zip reader and writer, CSV parser and formatter
+    fixtures/text.mjs       escape: the one regexp escape for a pattern built
+                            from the app's text
     fixtures/clumsy.mjs     the clumsy operator (below)
     fixtures/pointer.mjs    the coarse pointer: check, restore, ensureCoarse
                             (the one "if not coarse, restore"), tap-target size
@@ -140,7 +152,29 @@ browser, `--debug` opens the inspector, and a failing test leaves a trace
                                   the extra qualifier place, owed a bout too; a
                                   third with Fit the knockout where the tie is
                                   over the 2nd the draw drafted, owed a bout
-                                  while the same tie in an undrafted pool is not
+                                  while the same tie in an undrafted pool is not;
+                                  a fourth whose tie-break bout is saved as a
+                                  draw, recording what the pool, the knockout
+                                  and the court then show
+      league-team                 team league: seeding through the wizard, Run
+                                  tie-breaker with the daihyosen on the court
+                                  console and the desk, Accept shared ranks
+                                  and Undo, a drawn daihyosen, a daihyosen
+                                  cycle, a stale tab refused, corrections on a
+                                  finished league
+      league-team-settings        the two league settings on a team league:
+                                  Top 3 vs Top 4, two joint 3rd places on and
+                                  off, a tie at 4th, a tie at 3rd, a three-way
+                                  tie; the settings copy
+      league-individual           individual league: an ippon-shobu
+                                  tie-breaker added by itself for a tie at
+                                  1st-3rd, a cycle, a drawn tie-breaker, joint
+                                  3rd on and off, a tie below the band
+      league.public               a spectator's phone (public project): a team
+                                  league's League tab, Overview, Awards tab
+                                  and the TV board while a tie waits, once
+                                  accepted, and after an Undo; seeded and
+                                  scored from a second operator context
       moved-match                 a waiting match moved to another shiaijo
                                   reaches that court's console without a reload
       shared-shiaijo              two competitions on one shiaijo: the picker,
@@ -403,8 +437,10 @@ Three fixture helpers in `fixtures/scoring.mjs` replace reading the old sync pil
 - `running(page, root)` waits until the score editor is visible and holds a
   running bout (no PRE-MATCH or CORRECTION head pill).
 
-`page.waitForTimeout` stays in four places, each marked `Deliberate:` or
-named for what it is: the dwell of a tap's pace (above); the time away of an
+`page.waitForTimeout` stays in a few places, each marked `Deliberate:` or
+named for what it is (a wait for something expected to ARRIVE polls for it
+instead, with `expect.poll` or the league journeys' `deskWhen`, which end as
+soon as it shows and keep their window only when nothing came): the dwell of a tap's pace (above); the time away of an
 `interrupt` (`awayMs`) and the operator's own delay a journey names ("3 s
 later", "300 ms after Finish"); and a NEGATIVE, where the journey asserts that
 nothing happens (no second bout appended by a bounced tap, no start after a
@@ -504,6 +540,15 @@ becomes
 
 so the suite stays green while the defect is open. The PR that fixes the bug
 removes the `fixme`, and the step then guards the fix.
+
+A step that records today's behaviour first and asserts the fixed behaviour
+after it puts the fixme inside the test body, between the two:
+
+    test.fixme(true, '<bead-id or finding id>: <one line>');
+
+The test stops there, so the lines after it run only on the fixed app. The
+league journeys name their defects by the finding ids of the league review
+(F1, F2b, N1, ...) until a finding is filed as a bead.
 
 ## Adding a journey
 

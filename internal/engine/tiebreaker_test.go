@@ -631,16 +631,19 @@ func TestMaybeAutoCompletePools_TiebreakersComplete(t *testing.T) {
 		Status: state.CompStatusPools,
 		Courts: []string{"A"},
 	}))
-	require.NoError(t, store.SavePools(compID, []helper.Pool{
-		{PoolName: "Pool A", Players: []helper.Player{{Name: "Alice", Dojo: "Dojo Alice"}, {Name: "Bob", Dojo: "Dojo Bob"}}},
-	}))
+	players := []helper.Player{{Name: "Alice", Dojo: "Dojo Alice"}, {Name: "Bob", Dojo: "Dojo Bob"}}
 	// Regular match complete + TB match complete
-	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+	matches := []state.MatchResult{
 		{ID: "Pool A-0", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusCompleted, Winner: "",
 			Decision: string(domain.DecisionHikiwake)},
 		{ID: "Pool A-TB-0", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusCompleted, Winner: "Alice",
 			Decision: string(domain.DecisionIpponShobu)},
-	}))
+	}
+	// The tie-break bout settles the tie by participant id only (bc-pnum): an
+	// id-less bout covers no pair, so the league would still owe one.
+	bctest.StampIDs(players, matches)
+	require.NoError(t, store.SavePools(compID, []helper.Pool{{PoolName: "Pool A", Players: players}}))
+	require.NoError(t, store.SavePoolMatches(compID, matches))
 
 	outcome, err := eng.MaybeAutoCompletePools(compID)
 	require.NoError(t, err)

@@ -3,11 +3,13 @@
 // branding and sponsor uploads on Edit tournament details, and the Backup and
 // restore page. Every selector for
 // those lives here, with the runtime file makers they need (a PNG, an
-// import bundle) and the small zip reader that looks inside a workbook.
+// import bundle) and the reader that looks inside a workbook (archive.mjs
+// holds the zip and CSV helpers).
 import { expect } from '@playwright/test';
 import fs from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
+import { readZip } from './archive.mjs';
 import { dwell } from './pace.mjs';
 import { EXPECT_TIMEOUT_MS } from './devices.mjs';
 
@@ -41,34 +43,6 @@ export function pngBytes(w, h, [r, g, b] = [200, 30, 30]) {
 }
 
 // ---------------------------------------------------------------- workbook --
-
-// Every entry of a zip, by name, read from its central directory and inflated
-// with node:zlib. Enough for an .xlsx, which is a plain deflated zip.
-export function readZip(buf) {
-  let eocd = -1;
-  for (let i = buf.length - 22; i >= 0; i -= 1) {
-    if (buf.readUInt32LE(i) === 0x06054b50) { eocd = i; break; }
-  }
-  if (eocd < 0) throw new Error('readZip: no end-of-central-directory record: not a zip');
-  const count = buf.readUInt16LE(eocd + 10);
-  let p = buf.readUInt32LE(eocd + 16);
-  const entries = new Map();
-  for (let n = 0; n < count; n += 1) {
-    if (buf.readUInt32LE(p) !== 0x02014b50) throw new Error('readZip: bad central directory entry');
-    const method = buf.readUInt16LE(p + 10);
-    const size = buf.readUInt32LE(p + 20);
-    const nameLen = buf.readUInt16LE(p + 28);
-    const extraLen = buf.readUInt16LE(p + 30);
-    const commentLen = buf.readUInt16LE(p + 32);
-    const local = buf.readUInt32LE(p + 42);
-    const name = buf.toString('utf8', p + 46, p + 46 + nameLen);
-    const dataAt = local + 30 + buf.readUInt16LE(local + 26) + buf.readUInt16LE(local + 28);
-    const packed = buf.subarray(dataAt, dataAt + size);
-    entries.set(name, method === 0 ? packed : zlib.inflateRawSync(packed));
-    p += 46 + nameLen + extraLen + commentLen;
-  }
-  return entries;
-}
 
 // One pass, so a decoded '&' is never decoded again ("&amp;lt;" reads "&lt;").
 const XML_ENTITIES = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" };

@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
+	"github.com/gitrgoliveira/bracket-creator/internal/engine"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
@@ -44,7 +45,7 @@ func TestLateDuplicate_LineupRemovalIsAnsweredAsRecorded(t *testing.T) {
 func TestLateDuplicate_ChusenOrderAndResetAreAnsweredAsRecorded(t *testing.T) {
 	r, store, _, _, _ := setupTestRouter(t)
 	compID := "once-ranks"
-	seedMixedCompWithSeatedKnockout(t, store, compID, state.MatchStatusScheduled)
+	seedTiedTeamCompWithSeatedKnockout(t, store, compID, state.MatchStatusScheduled)
 	order := func(first, second, writeID string) map[string]any {
 		return map[string]any{
 			"ranks":   []map[string]any{rankEntry(first, 1), rankEntry(second, 2)},
@@ -75,6 +76,10 @@ func TestLateDuplicate_ChusenOrderAndResetAreAnsweredAsRecorded(t *testing.T) {
 
 // countingEligibilityEngine counts the reinstatements the door applied.
 type countingEligibilityEngine struct{ calls int }
+
+func (e *countingEligibilityEngine) MaybeAutoCompletePools(string) (engine.AutoCompleteOutcome, error) {
+	return engine.AutoCompleteNoChange, nil
+}
 
 func (e *countingEligibilityEngine) ReinstateCompetitor(_, playerID string) (*domain.CompetitorStatus, error) {
 	e.calls++

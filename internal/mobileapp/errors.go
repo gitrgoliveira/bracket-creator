@@ -156,7 +156,7 @@ func respondEngineError(c *gin.Context, err error) {
 	case errors.As(err, &notFound):
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 	case errors.As(err, &validation):
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, validationBody(err))
 	case errors.As(err, &pastMidnight):
 		// A draw on a shared court another competition holds past midnight:
 		// no "HH:MM" slot is left there that day, so the draw is refused with

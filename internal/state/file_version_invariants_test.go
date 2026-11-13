@@ -109,8 +109,8 @@ func TestFileVersionAdvancesOnSavePools(t *testing.T) {
 
 // TestFileVersionAdvancesOnBracketWrite pins that the bracket writers advance
 // FileVersion("bracket.json") exactly like the pool writers advance the pool
-// token (mp-gmcg review R4). No version-keyed consumer reads the bracket token
-// today, so this guards the asymmetry — saveBracketLocked used to refresh the
+// token (mp-gmcg review R4). The engine's standings cache key reads the bracket
+// token (TieOutOfBand comes from the stored draw), so this guards the asymmetry — saveBracketLocked used to refresh the
 // cache without bumping — so a future bracket-derived cache is correct by
 // construction. It also pins the save-only-if-found contract.
 func TestFileVersionAdvancesOnBracketWrite(t *testing.T) {

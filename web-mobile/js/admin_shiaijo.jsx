@@ -43,7 +43,9 @@ import {
 import { startPatch, classifyStartOutcome, startFailureMessage, startRefusalStands } from './start_match.jsx';
 // swissRoundLabel: single owner is pool_ids.jsx (mp-dej2); this file used to
 // carry its own copy. scoreRowMatchName names a match in the refusal notices.
-import { swissRoundLabel, scoreRowMatchName, scoreRowMatchLabel } from './pool_ids.jsx';
+import { swissRoundLabel, scoreRowMatchName, scoreRowMatchLabel, isSupplementaryBout, poolNameOf } from './pool_ids.jsx';
+// rankOrdinal: "1st", "2nd"... for the place a tie-breaker bout decides.
+import { rankOrdinal, poolMatchesSignature } from './viewer_standings.jsx';
 // NumberedName: single owner of the number-chip-on-the-outer-side rule
 // (bc-dnst); see that file's header for why this stays an ES import.
 import { NumberedName } from './numbered_name.jsx';
@@ -505,7 +507,11 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
             // A refetch never puts a row back to an older state
             // (keepNewerCompetitions, patch.jsx): the rule showRunningPush
             // applies to a push.
-            .then(comps => { if (mountedRef.current) setCourtComps((prev) => keepNewerCompetitions(prev, comps)); })
+            .then(comps => {
+                if (!mountedRef.current) return;
+                setCourtComps((prev) => keepNewerCompetitions(prev, comps));
+                forgetTieBreakerStandings(comps);
+            })
             .catch(err => console.error("Failed to fetch court matches", err));
     }, [court]);
     // Operator-triggered re-sync: the last-resort recovery when a court's tablet
@@ -1377,6 +1383,14 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         // this court's list does not show their matches barred until it is
         // refetched.
         return pool.slice(idx + 1).find((x) => x.status !== "completed" && !isBarredMatch(x) && !involvesCompetitor(x, withdrawn)) || null;
+    };
+
+    // The match a finish starts, if any: the advance target, when it is still
+    // scheduled. The editor's button reads "Finish + Start Next" only while this
+    // is non-null, and plain "Finish" on the court's last bout.
+    const nextToStartAfter = (m, withdrawn = null) => {
+        const next = nextActiveAfter(m, withdrawn);
+        return next && next.status === "scheduled" ? next : null;
     };
 
     // Amber nudge banner logic (AC6): fires ONLY when the SELECTED competition
@@ -2382,6 +2396,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                             )}
                                         </div>
                                         <MatchSides m={upNext} large />
+                                        <TieBreakerReason m={upNext} className="shiaijo-upnext__hint" />
                                         <div className="shiaijo-upnext__actions">
                                             {/* Route through pickMatch (not startMatch) so starting the
                                                 Up Next bout honours the same rules as the Upcoming
@@ -2618,8 +2633,9 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                         }
                                         catch (_e) { /* surfaced via toast */ }
                                     }}
+                                    startsNext={!!nextToStartAfter(selectedMatch)}
                                     onSubmitAndNext={async (patch) => {
-                                        const next = nextActiveAfter(selectedMatch);
+                                        const next = nextToStartAfter(selectedMatch);
                                         let res;
                                         try {
                                             res = await onEditScore(selectedMatch.compId, selectedMatch.id, patch, selectedMatch);
@@ -2634,7 +2650,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                             if (writeDidNotLand(res)) return res;
                                             // Finish + start the next scheduled match, which then
                                             // becomes the running match the panel shows.
-                                            if (next && next.status === "scheduled") {
+                                            if (next) {
                                                 // Queued after the finish (X1): the server never
                                                 // sees this start while the finish is still out.
                                                 await startMatch(next, { after: writeQueueKey(res) });
@@ -2659,8 +2675,8 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                         // Then start the next scheduled match so the panel advances
                                         // (mirrors onSubmitAndNext), passing over the matches of a
                                         // competitor a withdrawal or no-show has just barred.
-                                        const next = nextActiveAfter(selectedMatch, sideBarredByDecision(result, selectedMatch));
-                                        if (next && next.status === "scheduled") {
+                                        const next = nextToStartAfter(selectedMatch, sideBarredByDecision(result, selectedMatch));
+                                        if (next) {
                                             // Queued after the decision (X1).
                                             await startMatch(next, { after: writeQueueKey(result) });
                                         }
@@ -2924,6 +2940,104 @@ function ShiaijoQueueGroup({ label, matches, subGroup, scheduled, courts, onMove
     );
 }
 
+// tieBreakerReasonLine: why a tie-breaker bout is on the court, in the
+// operator's words, naming the place it decides. `rows` are the standings of
+// the bout's own pool (a league has one table). The two sides are found by
+// participant id only; the teams or players level on points with them form
+// the tied group, whose best place is the row with the lowest rank. A group of
+// more than two names its whole range as the tie this bout is part of: a later
+// round over only some of them (RunTiebreakerRound) is still part of that tie,
+// and the standings do not say which run it is. Without
+// standings (still loading, or none for this pool), or when the two sides are
+// no longer level, the line still says the bout is a tie-breaker and why, but
+// names no place it cannot know.
+export function tieBreakerReasonLine(m, rows) {
+    const generic = "Tie-breaker bout. These two finished level.";
+    const list = Array.isArray(rows) ? rows : [];
+    const rowOf = (id) => (id ? list.find((s) => s.player && s.player.id === id) : undefined);
+    const a = rowOf(m.sideAId || (m.sideA && m.sideA.id));
+    const b = rowOf(m.sideBId || (m.sideB && m.sideB.id));
+    if (!a || !b || a.points !== b.points) return generic;
+    const group = list.filter((s) => s.points === a.points);
+    const lo = Math.min(...group.map((s) => s.rank));
+    if (group.length === 2) {
+        return `Tie-breaker for ${rankOrdinal(lo)} place. They finished level, so this bout separates them.`;
+    }
+    return `Part of the tie-breaker for ${rankOrdinal(lo)} to ${rankOrdinal(lo + group.length - 1)} place. These two finished level, so this bout helps separate them.`;
+}
+
+// The standings every unfinished tie-breaker row reads (the league table, or
+// the competition detail a pool's rows come from), shared per competition: the
+// rows of one competition ask for the same table, so they make one request, and
+// the court feed's refresh (forgetTieBreakerStandings) makes a competition's
+// rows read it again only when that competition's pool results changed
+// (poolMatchesSignature, which a running bout's score ticks do not move),
+// because the results are what move a table. A failed read is not kept, so the
+// next refresh asks again.
+const sharedStandings = new Map();
+const lastPoolSignatures = new Map();
+const standingsListeners = new Map();
+
+export function forgetTieBreakerStandings(competitions) {
+    (competitions || []).forEach((c) => {
+        const signature = poolMatchesSignature(c.poolMatches);
+        if (lastPoolSignatures.get(c.id) === signature) return;
+        lastPoolSignatures.set(c.id, signature);
+        sharedStandings.delete(c.id);
+        (standingsListeners.get(c.id) || []).forEach((read) => read());
+    });
+}
+
+function readSharedStandings(compId, isLeague) {
+    if (!sharedStandings.has(compId)) {
+        const ask = isLeague ? window.API.leagueStandings : window.API.fetchCompetitionDetails;
+        const read = ask.call(window.API, compId);
+        sharedStandings.set(compId, read);
+        read.catch(() => { if (sharedStandings.get(compId) === read) sharedStandings.delete(compId); });
+    }
+    return sharedStandings.get(compId);
+}
+
+// TieBreakerReason: the line under a tie-breaker bout's row on the court
+// console. It reads the competition's standings (the league table, or the pool's
+// rows from the competition detail) for a bout not yet fought, and renders
+// nothing for any other bout.
+export function TieBreakerReason({ m, className }) {
+    const applies = !!m && isSupplementaryBout(m.id) && m.status !== "completed";
+    const isLeague = !!m && m.compFormat === "league";
+    const compId = m && m.compId;
+    const matchId = m && m.id;
+    const matchStatus = m && m.status;
+    const [rows, setRows] = useState(null);
+    const [reads, setReads] = useState(0);
+    const canRead = !!window.API && typeof (isLeague ? window.API.leagueStandings : window.API.fetchCompetitionDetails) === "function";
+    useEffect(() => {
+        if (!applies || !compId || !canRead) return undefined;
+        const again = () => setReads((n) => n + 1);
+        if (!standingsListeners.has(compId)) standingsListeners.set(compId, new Set());
+        standingsListeners.get(compId).add(again);
+        return () => { standingsListeners.get(compId).delete(again); };
+    }, [applies, compId, canRead]);
+    useEffect(() => {
+        if (!applies || !compId || !canRead) {
+            setRows(null);
+            return undefined;
+        }
+        let cancelled = false;
+        readSharedStandings(compId, isLeague)
+            .then((d) => {
+                if (cancelled) return;
+                setRows(isLeague ? d : (d && d.standings ? d.standings[poolNameOf(matchId)] : null));
+            })
+            .catch(() => { if (!cancelled) setRows(null); });
+        return () => { cancelled = true; };
+    }, [applies, isLeague, compId, matchId, matchStatus, canRead, reads]);
+    if (!applies) return null;
+    return (
+        <div className={className} data-testid="tiebreaker-reason">{tieBreakerReasonLine(m, rows)}</div>
+    );
+}
+
 export function ShiaijoQueueRow({ m, scheduled, courts, onMoveCourt, onMove, onEnterLineup, onPick, onCorrect, onCall, callingKey, isCalled, startingKey, pending, slotLabel, emptyNames, password, notice }) {
     const isComplete = m.status === "completed";
     // bc-cse: a scheduled match a competitor is barred from. `pending`
@@ -2985,6 +3099,7 @@ export function ShiaijoQueueRow({ m, scheduled, courts, onMoveCourt, onMove, onE
                     {pending && <span className="shiaijo-qrow__waiting">Waiting</span>}
                 </span>
             </div>
+            <TieBreakerReason m={m} className="shiaijo-upnext__hint" />
             <div className="shiaijo-qrow__match">
                 {/* Side by CELL TINT, not a SHIRO/AKA badge (operator decision
                     2026-09-20, bc-sccl). The text channel is an sr-only span, the
@@ -3153,17 +3268,16 @@ function ShiaijoContext({ match, competitions, court, nextPoolName, tweaks, lead
     // Pools/standings aren't on the console's competition list payload: fetch
     // the competition detail on demand. Refetch whenever this comp's pool
     // matches change (a scored bout), so standings stay current. poolSig is the
-    // change key; it's cheap and keyed only to this comp. Leagues skip this
+    // change key (poolMatchesSignature, the one owner of "did the pool results
+    // change", so a correction that keeps the winner counts); it's cheap and
+    // keyed only to this comp. Leagues skip this
     // fetch entirely (Copilot, PR #333): LeagueStandingsViewer fetches its own
     // standings via window.API.leagueStandings(c.id) and only needs
     // `comp`/`comp.poolMatches`, both already on the court feed - waiting on
     // fetchCompetitionDetails here would be an unneeded dependency that could
     // stall or blank the league panel if that endpoint (unlike the dedicated
     // league-standings one) has a transient failure.
-    const poolSig = useMemo(() => {
-        const pms = (comp && comp.poolMatches) || [];
-        return pms.map((m) => `${m.id}:${m.status}:${(m.ipponsA || []).join("")}:${(m.ipponsB || []).join("")}`).join("|");
-    }, [comp]);
+    const poolSig = useMemo(() => poolMatchesSignature(comp && comp.poolMatches), [comp]);
     const [detail, setDetail] = useState(null);
     const [detailErr, setDetailErr] = useState(false);
     useEffect(() => {

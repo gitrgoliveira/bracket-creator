@@ -226,6 +226,38 @@ name order as the final deterministic fallback.
     When two or more teams remain tied after all eight criteria and the tie is consequential (it decides who advances or how they are seeded), the next step depends on format:
 
     - **Pools + Knockout**: the app schedules a daihyosen automatically to break the tie.
-    - **League**: the operator decides. From the League tab, either run a daihyosen among the tied teams or accept the shared ranks to finalise standings with the tie left in place. This choice is available for any tied position, including joint first, once every regular league match is complete.
+    - **League**: the operator decides. From the League tab, either run a daihyosen among the tied teams or accept the shared ranks to finalise standings with the tie left in place. This applies to a tie for any place inside the league's tie-break band (refer to [Ties in a league](#ties-in-a-league)), including joint first, once every regular league match is finished.
 
     A tie that does not affect advancement is left as a shared rank with no extra bout. If a daihyosen still cannot separate the teams, it goes to chusen (drawing lots). Refer to [Recording decisions](../court-operators/recording-decisions.md) for the procedures for both.
+
+### Ties in a league
+
+A league has no knockout, so its table is its result and a tie for a podium place has to be settled before the league finishes. The steps below are for a team league; an individual league breaks its ties with ippon-shobu bouts that the app schedules itself, and has no **Accept shared ranks** button.
+
+**The tie-break band.** On the competition's Settings tab, **Break ties for top** sets which places a tie must be settled for: **Top 3** (the default) asks about ties for 1st to 3rd place, and **Top 4** also asks about a tie for 4th. A tie that starts below the band shares its place with no question. An individual league always uses Top 3. The setting is locked once the draw exists; discard the draw to change it.
+
+**The 3rd-place exemption.** With **Award two joint 3rd places** on (the default), teams tied entirely for 3rd place or lower share 3rd, so no bout is held for them and Top 4 adds nothing. Turn that setting off for a single 3rd place, and a tie for 3rd, or for 4th under Top 4, is asked about. A tie that includes 1st or 2nd place is always asked about.
+
+**When you are asked.** Once every regular league match is finished, the League tab shows **Tie-breaker required** with the tied teams of each group and three choices:
+
+- **Run tie-breaker** schedules a daihyosen among the tied teams.
+- **Remove unscored tie-breaker** replaces Run tie-breaker once one is scheduled, and takes it back while nobody has scored it, so you can run it again or accept the shared ranks instead.
+- **Accept shared ranks** leaves the tied teams level and finishes the league.
+
+If you tap **Accept shared ranks** while a league match is still unfinished, the app says "A league match is not finished yet, so the table can still change. Finish it, then decide." and records nothing.
+
+**A tie-breaker needs a winner.** A league tie-breaker bout cannot be saved as a draw. If you try, the app refuses with "A tie-breaker needs a winner: continue with encho, then decide by hantei." Record encho while the bout is level, and if it is still level afterwards, tap **Decide by hantei** and pick the winning side. Refer to [Recording decisions](../court-operators/recording-decisions.md#encho-overtime). A tie-breaker already on record as a draw holds the league until it has a winner: the Pools tab shows a notice naming the bout, with **Open bout** to decide it by encho or hantei, and **Fight it again** to play it again.
+
+**Lots are the exception, and they are yours to run.** Chusen (drawing lots) is offered only when a tie-breaker round has been fought and the teams are still level, for example a cycle in which A beat B, B beat C and C beat A. A tie-breaker that was drawn does not count as fought, and the app never ranks a cycle or draws the lots itself: you draw them offline and enter the order in the panel. Refer to [Recording decisions](../court-operators/recording-decisions.md#chusen-drawing-lots). A recorded order can still be changed with **Change** after the league has finished, and the table and podium follow it at once.
+
+**What Accept shared ranks does.** The app asks first. The confirmation names the teams and the place they share, says the competition finishes now, and says **Undo shared ranks** brings the question back. If a tie-breaker has been scheduled and not yet fought, it also names each such bout ("This also removes the tie-breaker not yet fought: Team A v Team B.") and confirming removes it. If the group has already fought its round and is still level, accepting settles it: the teams share the place, and the confirmation notes that drawing lots is the other way to separate them. The league then finishes at once, and the League tab shows "Shared ranks accepted: 1st place: Team A, Team B." with an **Undo shared ranks** button.
+
+**Undo shared ranks.** Tap it when you accepted by mistake. After you confirm ("Undo the shared ranks? The league goes back to match play and the tie is asked again: run a tie-breaker or accept shared ranks."), the league goes back to match play and the **Tie-breaker required** banner returns with its choices. A tie-breaker that Accept removed is not brought back, because it had not been fought; run a new one if you want it. If a shiaijo was removed from the tournament while the league was finished, its matches become unassigned and the confirmation names that shiaijo.
+
+**Correcting a result after the league has finished.** Open any finished match and change its result as usual. Because the league is finished, the app warns first: "This league has finished. Changing this result can change the final table and podium. If it leaves a new tie at a podium place, the league goes back to match play to settle it." Choose **Change it anyway** to save it, or **Cancel** to leave everything as it was. Reopening a match of a finished league asks in the same way, and also takes back any shared ranks you accepted. After a corrected result:
+
+- if the table and podium are still settled, the league stays finished and they follow the corrected result;
+- if a match is no longer finished, or the correction leaves a tie that has no full tie-breaker round and was not one you had accepted, the league goes back to match play and asks about the tie again;
+- shared ranks you accepted cover only the ties that were on the table when you accepted them, so a shared 3rd place that a correction moves up to a shared 1st place is asked about again.
+
+A tie-breaker that was already fought is never deleted by a correction. If the correction unties its group, the bout stops counting.

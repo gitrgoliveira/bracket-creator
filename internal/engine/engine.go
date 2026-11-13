@@ -25,6 +25,7 @@ type standingsTokens struct {
 	overridesMtime     int64
 	poolsMtime         int64
 	configMtime        int64
+	bracketMtime       int64
 	poolMatchesVersion uint64
 	overridesVersion   uint64
 	poolsVersion       uint64
@@ -33,6 +34,11 @@ type standingsTokens struct {
 	// the format, so a settings save that flips one of those must invalidate
 	// a live entry just as a pools.csv or pool-matches.csv write does.
 	configVersion uint64
+	// bracket.json is an input too: a mixed competition's standings mark a tie
+	// out of band (TieOutOfBand) from the placeholders the stored draw holds for
+	// the qualifier places, so a bracket-only rewrite (ResolveQualifiedPools
+	// filling a draw in) must invalidate a live entry.
+	bracketVersion uint64
 }
 
 type standingsCacheEntry struct {
@@ -44,6 +50,11 @@ type Engine struct {
 	store           *state.Store
 	standingsCache  sync.Map // map[compID string]*standingsCacheEntry
 	standingsFlight sync.Map // map[compID string]*sync.Once, collapses concurrent cold-cache calls
+
+	// leagueReopenNotes holds the leagues a write's transaction put back into
+	// match play, until the door's auto-complete pass reports it
+	// (takeLeagueReopenNote).
+	leagueReopenNotes sync.Map // map[compID string]struct{}
 
 	// afterMatchRead, when set (tests only), runs at the seam where a
 	// read-modify-write of a match file has read what it will write back:
@@ -59,6 +70,12 @@ type Engine struct {
 	// the settings it was generated from, so a test can land a concurrent
 	// settings save in that window. Production never sets it.
 	beforeStartCommit func(compID string)
+
+	// beforePoolsCompleteLock, when set (tests only), runs in the league's
+	// auto-completion after the unlocked scan and before the lock that decides
+	// the completion (PoolsSettledNow), so a test can land a correction in that
+	// window. Production never sets it.
+	beforePoolsCompleteLock func(compID string)
 }
 
 // noteMatchRead runs the test seam above, when one is set.

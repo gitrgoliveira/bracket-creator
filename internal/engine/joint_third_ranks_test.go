@@ -39,7 +39,7 @@ func TestApplyJointThirdRanks(t *testing.T) {
 			rankedStanding("A", 100, 1), rankedStanding("B", 90, 2),
 			rankedStanding("C", 50, 3), rankedStanding("D", 50, 4),
 		}
-		applyJointThirdRanks(leagueOn, sorted, false)
+		applyJointThirdRanks(leagueOn, sorted, nil)
 		assert.Equal(t, []int{1, 2, 3, 3}, ranksOf(sorted))
 	})
 
@@ -48,7 +48,7 @@ func TestApplyJointThirdRanks(t *testing.T) {
 			rankedStanding("A", 100, 1), rankedStanding("B", 90, 2),
 			rankedStanding("C", 50, 3), rankedStanding("D", 50, 4),
 		}
-		applyJointThirdRanks(leagueOff, sorted, false)
+		applyJointThirdRanks(leagueOff, sorted, nil)
 		assert.Equal(t, []int{1, 2, 3, 4}, ranksOf(sorted))
 	})
 
@@ -57,7 +57,7 @@ func TestApplyJointThirdRanks(t *testing.T) {
 			rankedStanding("A", 100, 1), rankedStanding("B", 90, 2),
 			rankedStanding("C", 50, 3), rankedStanding("D", 50, 4), rankedStanding("E", 50, 5),
 		}
-		applyJointThirdRanks(leagueOn, sorted, false)
+		applyJointThirdRanks(leagueOn, sorted, nil)
 		assert.Equal(t, []int{1, 2, 3, 3, 3}, ranksOf(sorted))
 	})
 
@@ -66,7 +66,7 @@ func TestApplyJointThirdRanks(t *testing.T) {
 			rankedStanding("A", 100, 1), rankedStanding("B", 90, 2),
 			rankedStanding("C", 80, 3), rankedStanding("D", 70, 4),
 		}
-		applyJointThirdRanks(leagueOn, sorted, false)
+		applyJointThirdRanks(leagueOn, sorted, nil)
 		assert.Equal(t, []int{1, 2, 3, 4}, ranksOf(sorted))
 	})
 
@@ -75,7 +75,7 @@ func TestApplyJointThirdRanks(t *testing.T) {
 			rankedStanding("A", 100, 1), rankedStanding("B", 80, 2),
 			rankedStanding("C", 80, 3), rankedStanding("D", 40, 4),
 		}
-		applyJointThirdRanks(leagueOn, sorted, false)
+		applyJointThirdRanks(leagueOn, sorted, nil)
 		assert.Equal(t, []int{1, 2, 3, 4}, ranksOf(sorted),
 			"a 2nd/3rd tie must be decided by a tie-breaker, never shared")
 	})
@@ -85,17 +85,29 @@ func TestApplyJointThirdRanks(t *testing.T) {
 			rankedStanding("A", 100, 1), rankedStanding("B", 100, 2),
 			rankedStanding("C", 50, 3), rankedStanding("D", 40, 4),
 		}
-		applyJointThirdRanks(leagueOn, sorted, false)
+		applyJointThirdRanks(leagueOn, sorted, nil)
 		assert.Equal(t, []int{1, 2, 3, 4}, ranksOf(sorted))
 	})
 
-	t.Run("pool has manual overrides → not collapsed (operator order wins)", func(t *testing.T) {
+	t.Run("a tie holding a rank in force is not collapsed (operator order wins)", func(t *testing.T) {
 		sorted := []state.PlayerStanding{
 			rankedStanding("A", 100, 1), rankedStanding("B", 90, 2),
 			rankedStanding("C", 50, 3), rankedStanding("D", 50, 4),
 		}
-		applyJointThirdRanks(leagueOn, sorted, true)
+		sorted[2].IsOverridden, sorted[3].IsOverridden = true, true
+		applyJointThirdRanks(leagueOn, sorted, nil)
 		assert.Equal(t, []int{1, 2, 3, 4}, ranksOf(sorted))
+	})
+
+	t.Run("lots over a different tie leave the joint 3rd shared", func(t *testing.T) {
+		sorted := []state.PlayerStanding{
+			rankedStanding("A", 100, 1), rankedStanding("B", 100, 2),
+			rankedStanding("C", 50, 3), rankedStanding("D", 50, 4),
+		}
+		sorted[0].IsOverridden, sorted[1].IsOverridden = true, true
+		applyJointThirdRanks(leagueOn, sorted, nil)
+		assert.Equal(t, []int{1, 2, 3, 3}, ranksOf(sorted),
+			"the chusen decided 1st and 2nd only; the 3rd/4th tie is still a joint 3rd")
 	})
 
 	t.Run("non-league (mixed) with setting on → not collapsed", func(t *testing.T) {
@@ -104,15 +116,15 @@ func TestApplyJointThirdRanks(t *testing.T) {
 			rankedStanding("A", 100, 1), rankedStanding("B", 90, 2),
 			rankedStanding("C", 50, 3), rankedStanding("D", 50, 4),
 		}
-		applyJointThirdRanks(mixed, sorted, false)
+		applyJointThirdRanks(mixed, sorted, nil)
 		assert.Equal(t, []int{1, 2, 3, 4}, ranksOf(sorted),
 			"mixed pools feed knockout seeding and must keep sequential ranks")
 	})
 
 	t.Run("nil comp / empty slice → no panic", func(t *testing.T) {
-		applyJointThirdRanks(nil, nil, false)
+		applyJointThirdRanks(nil, nil, nil)
 		var empty []state.PlayerStanding
-		applyJointThirdRanks(leagueOn, empty, false)
+		applyJointThirdRanks(leagueOn, empty, nil)
 		assert.Empty(t, empty)
 	})
 }
@@ -263,32 +275,32 @@ func TestIndividualLeague_ThirdPlaceTie_TieBreak(t *testing.T) {
 	})
 }
 
-// TestTieNeedsIndividualBreak covers the gate directly: leagues break band ties
+// TestTieNeedsBreak covers the gate directly: leagues break band ties
 // (minus the joint-3rd exemption); mixed pools break only advancement ties.
-func TestTieNeedsIndividualBreak(t *testing.T) {
+func TestTieNeedsBreak(t *testing.T) {
 	grp := func(n int) []state.PlayerStanding { return make([]state.PlayerStanding, n) }
 
 	t.Run("league breaks a 3rd/4th tie by default", func(t *testing.T) {
 		comp := &state.Competition{Format: state.CompFormatLeague}
-		assert.True(t, tieNeedsIndividualBreak(comp, []int{2, 3}, grp(2), 2))
+		assert.True(t, tieNeedsBreak(comp, []int{2, 3}, grp(2), 2))
 	})
 	t.Run("league exempts the joint-3rd tie when enabled", func(t *testing.T) {
 		comp := &state.Competition{Format: state.CompFormatLeague, LeagueTwoThirdPlaces: true}
-		assert.False(t, tieNeedsIndividualBreak(comp, []int{2, 3}, grp(2), 2))
+		assert.False(t, tieNeedsBreak(comp, []int{2, 3}, grp(2), 2))
 	})
 	t.Run("league still breaks a 1st/2nd tie even with joint-3rd on", func(t *testing.T) {
 		comp := &state.Competition{Format: state.CompFormatLeague, LeagueTwoThirdPlaces: true}
-		assert.True(t, tieNeedsIndividualBreak(comp, []int{0, 1}, grp(2), 2))
+		assert.True(t, tieNeedsBreak(comp, []int{0, 1}, grp(2), 2))
 	})
 	t.Run("league leaves a below-band 5th/6th tie unbroken", func(t *testing.T) {
 		comp := &state.Competition{Format: state.CompFormatLeague} // effectiveTopN=3
-		assert.False(t, tieNeedsIndividualBreak(comp, []int{4, 5}, grp(2), 2))
+		assert.False(t, tieNeedsBreak(comp, []int{4, 5}, grp(2), 2))
 	})
 	t.Run("mixed pool uses the advancement cut, not the band", func(t *testing.T) {
 		comp := &state.Competition{Format: state.CompFormatMixed}
 		// poolWinners=2: a 3rd/4th tie does not affect who advances.
-		assert.False(t, tieNeedsIndividualBreak(comp, []int{2, 3}, grp(2), 2))
-		assert.True(t, tieNeedsIndividualBreak(comp, []int{1, 2}, grp(2), 2))
+		assert.False(t, tieNeedsBreak(comp, []int{2, 3}, grp(2), 2))
+		assert.True(t, tieNeedsBreak(comp, []int{1, 2}, grp(2), 2))
 	})
 }
 

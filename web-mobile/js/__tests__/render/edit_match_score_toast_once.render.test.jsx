@@ -12,7 +12,7 @@ import React from 'react';
 import { render, act } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vitest';
 import { installWindowStubs } from '../helpers/stub_globals.js';
-import { DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED, wasToasted, downstreamKnockoutReopenedNotice } from '../../write_result.jsx';
+import { DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED, LEAGUE_FINISHED_CORRECTION_CANCELLED, wasToasted, downstreamKnockoutReopenedNotice } from '../../write_result.jsx';
 
 const probe = { props: null };
 
@@ -89,6 +89,23 @@ describe('editMatchScore marks every error it toasts', () => {
 
     expect(caught).toBe(refusal);
     expect(showToast.mock.calls).toEqual([[DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED]]);
+    expect(wasToasted(caught)).toBe(true);
+  });
+
+  it('a declined finished-league warning is toasted once, with its own words, and carries the mark', async () => {
+    const { showToast, onEditScore } = await mountScoresView();
+    const refusal = Object.assign(new Error('This league has finished.'), { code: 'league_finished', leagueFinished: { removedCourts: [] } });
+    window.API.recordScore.mockRejectedValue(refusal);
+    window.confirmDialog.mockResolvedValue(false);
+
+    let caught;
+    await act(async () => {
+      try { await onEditScore('c1', 'm1', { status: 'completed' }, { id: 'm1' }); } catch (e) { caught = e; }
+    });
+
+    expect(caught).toBe(refusal);
+    expect(window.confirmDialog).toHaveBeenCalledTimes(1);
+    expect(showToast.mock.calls).toEqual([[LEAGUE_FINISHED_CORRECTION_CANCELLED]]);
     expect(wasToasted(caught)).toBe(true);
   });
 });

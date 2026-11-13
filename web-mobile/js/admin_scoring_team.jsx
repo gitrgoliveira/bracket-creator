@@ -56,6 +56,8 @@ import {
   DraftDroppedNotice,
   ownStartRefusalText,
   StartRefusedNotice,
+  finishButtonLabel,
+  armedFinishLabel,
 } from './admin_scoring_shared.jsx';
 import { teamDraftTaps } from './draft_taps.jsx';
 // bc-evts stage 5: a running team match is scored by tap events, one per
@@ -659,6 +661,17 @@ export function teamEncounterHasResult({ ivA, ivB, pwA, pwB, subTotals, daihyose
   return (subTotals || []).some((s, i) => i !== daihyosenIdx && s.draw);
 }
 
+// teamEncounterIsLevel: some bout has landed (a point, a win or a draw) and the
+// two sides finish level on IV and PW. The one spelling of "tied" the daihyosen
+// control and the league line both ask, so they cannot disagree. A bout counts
+// as decided once it carries any ippon or is a draw: a 5-person tie reaches
+// even IV only through a drawn bout (the bug the old `allComplete && tied` gate
+// had).
+export function teamEncounterIsLevel({ ivA, ivB, pwA, pwB, subTotals }) {
+  const anyBoutDecided = (subTotals || []).some(t => t.aTotal > 0 || t.bTotal > 0 || t.draw || t.winner !== null);
+  return anyBoutDecided && ivA === ivB && pwA === pwB;
+}
+
 // resolveKachinukiBoutSides: competitor identity for a KACHINUKI sub-bout.
 // Unlike a fixed-position encounter (settled on IV/PW at the match level, where
 // computeStandings matches the match-level side first via isWinForSide), a
@@ -1193,7 +1206,7 @@ function useMatchLineups(compId, matchId) {
   };
 }
 
-export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSubmitProp, onSubmitAndNext: onSubmitAndNextProp, onAfterDecision, prevMatch, nextMatch, onPrev, onNext, password, selfReport, teamMembers, variant = "modal", canClose = true, hostUnsavedRef = null, allowCourtForce = false }) {
+export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSubmitProp, onSubmitAndNext: onSubmitAndNextProp, startsNext = true, onAfterDecision, prevMatch, nextMatch, onPrev, onNext, password, selfReport, teamMembers, variant = "modal", canClose = true, hostUnsavedRef = null, allowCourtForce = false }) {
   // mp-gmcg: a successful [× Remove this bout] shrinks the SERVER bout log, and
   // the parent may not have caught up when this render runs. matchOverride
   // shadows the prop so the removed bout disappears at once, and is cleared
@@ -5598,13 +5611,10 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
             // Existing/legacy daihyosen rows still render defensively via
             // hasDaihyosen above.
             if (hasDaihyosen || !isKnockoutPhase || isKachinuki || !repBoutAddRemoveOpen) return null;
-            // Local tie detection drives the highlight + helper copy only: 
+            // Local tie detection drives the highlight + helper copy only:
             // the backend is the source of truth and re-validates on submit.
-            // A bout is "decided" once it carries any ippon or is a draw; a
-            // 5-person tie reaches even IV only via at least one drawn bout,
-            // so draws MUST count here (the bug the old gate had).
-            const anyBoutDecided = subTotals.some(t => t.aTotal > 0 || t.bTotal > 0 || t.draw || t.winner !== null);
-            const teamTied = anyBoutDecided && ivA === ivB && pwA === pwB;
+            // Draws MUST count as decided bouts (see teamEncounterIsLevel).
+            const teamTied = teamEncounterIsLevel({ ivA, ivB, pwA, pwB, subTotals });
             const onDaihyosen = () => runRepBoutChange({
               // A queued match is started first, so it starts through the score
               // path's court and eligibility checks. A running match needs no
@@ -5647,6 +5657,20 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
               </div>
             );
           })()}
+
+          {/* A league encounter may end level, so the sheet offers no
+              representative bout there. Without this line the operator sees
+              the control a knockout sheet shows go missing and cannot tell
+              why (F5). It says what a level result is and what to do next
+              (decision D5). Shown only while the encounter IS level, so
+              it never nags a scoring operator mid-bout. Kachinuki is left
+              out: its tie is fought on, never read from IV and PW alone. */}
+          {compFormat === "league" && !isKnockoutPhase && !isKachinuki && !hasDaihyosen
+            && teamEncounterIsLevel({ ivA, ivB, pwA, pwB, subTotals }) && (
+            <div className="daihyosen-controls__hint" data-testid="league-level-hint" style={{ marginTop: 8 }}>
+              Level: a draw in a league, so there is no representative bout. Finish the encounter to record the draw.
+            </div>
+          )}
 
           {/* The daihyosen add/remove POSTs report here. It used to live
               INSIDE the add-daihyosen block above, which returns null for
@@ -6090,7 +6114,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
                     : "End match"}
                 </button>
                 </>
-              ) : (isKachinuki && isComplete) ? null : onSubmitAndNext ? (
+              ) : (isKachinuki && isComplete) ? null : (
                 // mp-gmcg: a COMPLETED kachinuki match has no generic "Save
                 // correction" button. That path calls buildPatch("completed")
                 // with no endOutcome, which derives the winner from the IV/PW
@@ -6104,20 +6128,10 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
                   if (refuseUnfinishedFinish()) return;
                   if (isComplete && !correctionReason) { setReasonPromptKind("correction"); return; }
                   if (!isComplete && !confirmFinish(ev)) return;
-                  doSubmit(() => (isComplete ? onSubmit : onSubmitAndNext)(buildPatch("completed")));
+                  doSubmit(() => (isComplete || !onSubmitAndNext ? onSubmit : onSubmitAndNext)(buildPatch("completed")));
                 }} disabled={submitting || koTieBlocked || repTyping}
                   title={koTieBlocked ? koTieTitle : undefined}>
-                  {submitting ? "Saving…" : koTieBlocked ? "Needs a winner" : isComplete ? "Save correction" : finishArmed ? "Tap again to finish →" : "Finish + Start Next →"}
-                </button>
-              ) : (
-                <button className={`btn btn--primary ${finishArmed && !isComplete ? "btn--confirm" : ""}`} onClick={(ev) => {
-                  if (refuseUnfinishedFinish()) return;
-                  if (isComplete && !correctionReason) { setReasonPromptKind("correction"); return; }
-                  if (!isComplete && !confirmFinish(ev)) return;
-                  doSubmit(() => onSubmit(buildPatch("completed")));
-                }} disabled={submitting || koTieBlocked || repTyping}
-                  title={koTieBlocked ? koTieTitle : undefined}>
-                  {submitting ? "Saving…" : koTieBlocked ? "Needs a winner" : isComplete ? "Save correction" : finishArmed ? "Tap again to finish" : "Finish"}
+                  {submitting ? "Saving…" : koTieBlocked ? "Needs a winner" : isComplete ? "Save correction" : finishArmed ? armedFinishLabel(!!onSubmitAndNext && startsNext) : finishButtonLabel(!!onSubmitAndNext && startsNext)}
                 </button>
               )}
             </div>

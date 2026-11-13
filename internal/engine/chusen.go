@@ -1,18 +1,24 @@
 package engine
 
 import (
+	"slices"
 	"sort"
 
+	"github.com/gitrgoliveira/bracket-creator/internal/domain"
+	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
-// ChusenGroup is a consequential team-pool tie that the daihyosen could not
-// separate: two or more members share the same daihyosen win count (a true
-// win/loss cycle, an all-drawn round, or any other tie in win counts), so the
-// finishing order is still undetermined. Per the rules (running_a_kendo_
-// tournament.md:181, EKC 6.2.5.1) the last resort is chusen (drawing lots): the
-// operator draws lots and records the order, which persists as a per-pool rank
-// override and lets the competition advance.
+// ChusenGroup is a consequential pool tie that its tie-breaker could not
+// separate: for a team, two or more members share the same daihyosen win count
+// (a true win/loss cycle, an all-drawn round, or any other tie in win counts);
+// for an individual, a finished ippon-shobu round left some of them level (a
+// circle, every bout won). The finishing order is still undetermined. Per the
+// rules (running_a_kendo_tournament.md:181, EKC 6.2.5.1) the last resort is
+// chusen (drawing lots): the operator draws lots and records the order, which
+// persists as a per-pool rank override and lets the competition advance. An
+// individual group can be fought again instead (StillLevel, RunTiebreakerRound),
+// the operator's choice (decision F5).
 //
 // This is an INTERNAL engine type, not a wire DTO: the GET /chusen-candidates
 // handler builds its JSON response from a gin.H literal (a "teamNames" array),
@@ -29,12 +35,20 @@ type ChusenGroup struct {
 	// group already settled by chusen (ChusenReport.Recorded); nil on one
 	// still waiting for it.
 	Ranks []int
+	// StillLevel lists, for an individual group still waiting for a decision,
+	// the runs of its members a finished ippon-shobu round left level
+	// (tieBreakLeftLevel), in standings order: each is what "Run another
+	// tie-breaker round" fights again (RunTiebreakerRound). The lots, when the
+	// operator chooses them, rank the whole group (Teams), as for a team. Nil
+	// for a team group and for a recorded one.
+	StillLevel [][]state.PlayerStanding
 }
 
-// ChusenReport is every consequential team-pool tie the daihyosen left
+// ChusenReport is every consequential pool tie a tie-breaker left
 // undetermined, split by whether the operator has recorded its chusen yet.
 type ChusenReport struct {
-	// Pending groups still need a chusen (drawing lots).
+	// Pending groups still need a chusen (drawing lots), or for an individual
+	// group the lots or another tie-breaker round (StillLevel).
 	Pending []ChusenGroup
 	// Recorded groups were settled by a chusen already recorded
 	// (groupSettledByChusen). The operator may change the recorded order, in
@@ -43,45 +57,253 @@ type ChusenReport struct {
 }
 
 // groupNeedsChusen reports whether a tied group remains unresolved after its
-// daihyosen bouts and therefore needs a chusen (drawing lots). It is the single
+// tie-breaker (tieBreakerLeftTied) and therefore needs a chusen (drawing lots),
+// or for an individual group another round instead. It is the single
 // per-group predicate shared by dhCycleExists (which blocks auto-completion) and
-// ChusenStatus (which surfaces the groups to the operator). groupOverrides is
-// poolRanks[poolName] for the group's pool (nil when none).
+// ChusenStatus (which surfaces the groups to the operator). group is rows of
+// computed standings, whose IsOverridden says which recorded ranks are in force
+// (poolRanksInForce).
 //
 // Returns false when the operator has already ranked every member (chusen
-// recorded, chusenRecorded) or when daihyosenLeftTied says the bouts settled
+// recorded, chusenRecorded) or when tieBreakerLeftTied says the bouts settled
 // the order or have not all been fought yet.
-func groupNeedsChusen(group []state.PlayerStanding, allMatches []state.MatchResult, groupOverrides map[string]int) bool {
-	return !chusenRecorded(group, groupOverrides) && daihyosenLeftTied(group, allMatches)
+func groupNeedsChusen(group []state.PlayerStanding, allMatches []state.MatchResult) bool {
+	return !chusenRecorded(group) && tieBreakerLeftTied(group, allMatches)
 }
 
 // groupSettledByChusen reports whether a tied group WAS decided by chusen: its
-// daihyosen left the order undetermined, exactly as groupNeedsChusen requires,
+// tie-breaker left the order undetermined, exactly as groupNeedsChusen requires,
 // and the operator has since recorded a rank for every member. It is the one
 // owner of "which groups were decided by chusen", which are the only groups
 // whose recorded order the operator is offered to change: a chusen entered in
 // the wrong order must stay fixable, but no other rank is set by hand.
-func groupSettledByChusen(group []state.PlayerStanding, allMatches []state.MatchResult, groupOverrides map[string]int) bool {
-	return chusenRecorded(group, groupOverrides) && daihyosenLeftTied(group, allMatches)
+func groupSettledByChusen(group []state.PlayerStanding, allMatches []state.MatchResult) bool {
+	return chusenRecorded(group) && tieBreakerLeftTied(group, allMatches)
+}
+
+// tieBreakerLeftTied reports whether a tied group's tie-breaker left its order
+// undetermined, whatever the operator has recorded since: its daihyosen round
+// (daihyosenLeftTied, a team's) or a finished ippon-shobu round that left a run
+// of it level (tieBreakLeftLevel, an individual's: a circle, every bout won).
+// Only one kind of row is ever held for a competition (InjectPoolDaihyosenMatches
+// for a team one, InjectTiebreakerMatches for an individual one), so asking both
+// is the kind-aware question with no kind to pass. An individual group left
+// level has two ways on, another tie-breaker round (RunTiebreakerRound) or the
+// lots, both the operator's choice (decision F5); the lots are why it is asked
+// here.
+func tieBreakerLeftTied(group []state.PlayerStanding, allMatches []state.MatchResult) bool {
+	return daihyosenLeftTied(group, allMatches) || len(tieBreakLeftLevel(group, allMatches)) > 0
+}
+
+// poolRanksInForce is the ONE owner of which recorded pool ranks govern a
+// pool's order now; computeStandingsFrom asks it and marks the rows it keeps
+// IsOverridden, and every other reader of a chusen (chusenRecorded, so
+// ChusenStatus and dhCycleExists; daihyosenRuledByChusen; the Pools tab's notice
+// in admin_pools.jsx) reads that mark off the standings, never the recorded
+// ranks. sorted is the pool's standings in Points order (after the
+// supplementary bouts' sort, which reorders only within a tied group); recorded
+// is the pool's recorded ranks (state.Overrides.PoolRanks[pool]), keyed and read
+// by participant id only (lookupPoolRankOverride).
+//
+// A recorded rank is in force only for a member of a group the standings still
+// hold level on Points that no fought supplementary result has settled
+// (tieSettledByBouts): there the lots are the only order there is, and they
+// order that group alone. Anywhere else the rank has outlived the tie it was
+// drawn for and is ignored, with nothing written: a regular-match correction
+// that moved the team off the tie, or a re-fought representative bout that now
+// names a winner, decides the order instead, and a correction that puts the tie
+// back puts the lots back with it.
+func poolRanksInForce(sorted []state.PlayerStanding, matches []state.MatchResult, isTeam bool, recorded map[string]int) map[string]int {
+	if len(recorded) == 0 {
+		return nil
+	}
+	var inForce map[string]int
+	for _, positions := range detectPoolTies(sorted) {
+		group := standingsAt(sorted, positions)
+		if tieSettledByBouts(group, matches, isTeam) {
+			continue
+		}
+		for _, s := range group {
+			if r, ok := lookupPoolRankOverride(recorded, s.Player.ID); ok {
+				if inForce == nil {
+					inForce = map[string]int{}
+				}
+				inForce[helper.CompetitorKey(s.Player.ID, "", "")] = r
+			}
+		}
+	}
+	return inForce
+}
+
+// daihyosenRuledByChusen reports a drawn pool representative ("-DH-") bout
+// whose tied group a chusen has ranked: the operator drew lots over the group
+// the bout could not separate, so the draw needs no rematch and the pool may
+// complete (poolMatchSettled), and the bout is not fought again (the reopen
+// refuses it). The group is the tied group the standings hold the bout's two
+// sides in (lotsGroup: two separate ties in a pool stay apart), and the lots
+// rule the bout only once every one of those teams carries a rank in force
+// (IsOverridden, poolRanksInForce), like chusenRecorded: a chusen still being
+// entered, or one over a smaller group, settles nothing. poolStandings is the
+// competition's pool standings (read only when a drawn representative bout
+// exists, lotsStandings); a pool they do not hold, or a side they no longer
+// hold level with the other (drawnSupplementaryMoot), rules nothing. Teams are read
+// by participant id only.
+func daihyosenRuledByChusen(m *state.MatchResult, poolStandings map[string][]state.PlayerStanding) bool {
+	if !IsPoolDaihyosenMatchID(m.ID) || !drawnSupplementaryBout(m) {
+		return false
+	}
+	group, level := lotsGroup(poolStandings, m)
+	return level && chusenRecorded(group)
+}
+
+// drawnSupplementaryMoot reports a drawn supplementary bout (a representative
+// "-DH-" bout or an ippon-shobu "-TB-" one) whose two sides the standings hold
+// and whose tie decides no place any more: a regular-match correction split the
+// tie the bout was fought for (the sides are no longer level on Points), or moved
+// it outside the band a tie is broken in (TieOutOfBand, tieNeedsBreak). It
+// settles as it stands (poolMatchSettled), with no rematch and no lots owed.
+func drawnSupplementaryMoot(m *state.MatchResult, poolStandings map[string][]state.PlayerStanding) bool {
+	if !drawnSupplementaryBout(m) {
+		return false
+	}
+	group, level := lotsGroup(poolStandings, m)
+	return group != nil && (!level || group[0].TieOutOfBand)
+}
+
+// lotsGroup is the standings group a drawn representative bout's lots had to
+// rank: every row level on Points with both of its sides, the same group
+// ChusenStatus offers the operator (detectPoolTies). level is false when the
+// standings no longer put the two sides level (group is then the two sides'
+// rows) or do not hold both (group is then nil). The pool's other
+// representative bouts are not asked: a result correction can shrink a tie
+// and leave the rows of its old, larger round behind, and those would pull a
+// team back in that the chusen panel no longer offers.
+func lotsGroup(poolStandings map[string][]state.PlayerStanding, m *state.MatchResult) (group []state.PlayerStanding, level bool) {
+	poolName, ok := poolNameFromMatchID(m.ID)
+	if !ok {
+		return nil, false
+	}
+	standings := poolStandings[poolName]
+	var a, b *state.PlayerStanding
+	for i := range standings {
+		switch standings[i].Player.ID {
+		case "":
+		case m.SideAID:
+			a = &standings[i]
+		case m.SideBID:
+			b = &standings[i]
+		}
+	}
+	if a == nil || b == nil {
+		return nil, false
+	}
+	if a.Points != b.Points {
+		return []state.PlayerStanding{*a, *b}, false
+	}
+	for _, s := range standings {
+		if s.Points == a.Points {
+			group = append(group, s)
+		}
+	}
+	return group, true
+}
+
+// poolLots is what a drawn supplementary bout is judged settled on
+// (poolMatchSettled): the pool standings its tied group, and the ranks in
+// force over it (IsOverridden), are read from, and the competitors' statuses
+// say whether the bout's two sides are both barred (drawnTiebreakOfBarredSides).
+// loadPoolLots is the one door that fills it; the zero value holds none, so a
+// drawn supplementary bout is never settled by it (isBlockingEngiTBRow, which
+// only judges tie-break rows, passes it on purpose).
+type poolLots struct {
+	standings map[string][]state.PlayerStanding
+	statuses  map[string]domain.CompetitorStatus
+}
+
+// loadPoolLots reads a competition's lots for matches: the standings
+// (lotsStandings) and the competitor statuses, only when the matches hold the
+// bout that needs them. The recorded ranks are read once, inside the standings
+// (computeStandingsFrom), and nowhere else. A nil loadStatuses reads none.
+func loadPoolLots(matches []state.MatchResult, loadStandings func() (map[string][]state.PlayerStanding, error), loadStatuses func() (map[string]domain.CompetitorStatus, error)) (poolLots, error) {
+	standings, err := lotsStandings(matches, loadStandings)
+	if err != nil {
+		return poolLots{}, err
+	}
+	lots := poolLots{standings: standings}
+	if loadStatuses == nil || !slices.ContainsFunc(matches, func(m state.MatchResult) bool { return drawnSupplementaryBout(&m) }) {
+		return lots, nil
+	}
+	if lots.statuses, err = loadStatuses(); err != nil {
+		return poolLots{}, err
+	}
+	return lots, nil
+}
+
+// drawnTiebreakOfBarredSides reports a drawn ippon-shobu ("-TB-") bout whose
+// two sides are both barred (a withdrawal on another match, engine.BarredSides),
+// the one draw the decision door records for it (handleBothSidesBarredHikiwake,
+// the tie-breaker's only draw: nobody can fight it, so encho and hantei are no
+// remedy). It settles as it stands: the tie stays and the places stay shared.
+// Judged on the live statuses, so a side reinstated since opens the bout again.
+func drawnTiebreakOfBarredSides(m *state.MatchResult, statuses map[string]domain.CompetitorStatus) bool {
+	if !IsTiebreakerMatchID(m.ID) || !drawnSupplementaryBout(m) {
+		return false
+	}
+	a, b := BarredSides(statuses, m.ID, m.SideAID, m.SideBID)
+	return a != nil && b != nil
+}
+
+// lotsStandings reads the pool standings a drawn supplementary bout is judged
+// against (daihyosenRuledByChusen for the lots, drawnSupplementaryMoot for a
+// split tie), through load, and only when the matches hold such a bout: with
+// none, nothing consults them, so it returns nil without computing any.
+// Callers hand the result to poolMatchSettled.
+func lotsStandings(matches []state.MatchResult, load func() (map[string][]state.PlayerStanding, error)) (map[string][]state.PlayerStanding, error) {
+	for i := range matches {
+		if drawnSupplementaryBout(&matches[i]) {
+			return load()
+		}
+	}
+	return nil, nil
 }
 
 // chusenRecorded reports whether every member of a tied group carries a
-// pool-rank override, i.e. the operator has recorded the drawn order.
-//
-// groupOverrides is resolved per member via lookupPoolRankOverride, keyed by
-// participant id ONLY (bc-cse, bc-pnum). Two same-name, different-dojo
-// teammates in one tied group therefore never share a single "already
-// recorded" verdict -- each is checked against its own override entry.
-func chusenRecorded(group []state.PlayerStanding, groupOverrides map[string]int) bool {
-	if len(groupOverrides) == 0 {
+// pool rank in force (IsOverridden, poolRanksInForce), i.e. the operator has
+// recorded the drawn order and it still governs the group. Each member is
+// judged on its own row, by participant id, so two same-name, different-dojo
+// teams never share one verdict.
+func chusenRecorded(group []state.PlayerStanding) bool {
+	if len(group) == 0 {
 		return false
 	}
 	for _, s := range group {
-		if _, ok := lookupPoolRankOverride(groupOverrides, s.Player.ID); !ok {
+		if !s.IsOverridden {
 			return false
 		}
 	}
 	return true
+}
+
+// chusenMatches is the pool rows a competition's lots are judged on
+// (daihyosenLeftTied, through dhCycleExists and ChusenStatus). In a LEAGUE a
+// tie-breaker must have a winner (refuseDrawnLeagueTiebreak), so a drawn
+// representative bout, which only a write made before that rule can hold, is
+// a bout still to be decided by encho and hantei, never a fought one: it is
+// left out, so an all-drawn round is an unfinished round and opens no lots by
+// itself, which stay the operator's choice for a true cycle (every bout won).
+// A pools + knockout competition's rows are returned as they are.
+func chusenMatches(comp *state.Competition, matches []state.MatchResult) []state.MatchResult {
+	if comp == nil || comp.Format != state.CompFormatLeague {
+		return matches
+	}
+	out := make([]state.MatchResult, 0, len(matches))
+	for i := range matches {
+		if IsPoolDaihyosenMatchID(matches[i].ID) && drawnSupplementaryBout(&matches[i]) {
+			continue
+		}
+		out = append(out, matches[i])
+	}
+	return out
 }
 
 // daihyosenLeftTied reports whether a tied group's daihyosen bouts left its
@@ -90,12 +312,14 @@ func chusenRecorded(group []state.PlayerStanding, groupOverrides map[string]int)
 // complete, or the played bouts produced a strictly-ordered win count. Returns
 // true whenever two or more members finish the completed round on the same
 // daihyosen win count (a true win/loss cycle, an all-drawn round, or any other
-// partial tie).
+// partial tie). A league's callers pass its rows through chusenMatches, so
+// there a drawn bout leaves the round incomplete rather than counting as
+// fought.
 func daihyosenLeftTied(group []state.PlayerStanding, allMatches []state.MatchResult) bool {
 	// Membership and win counts key on competitor identity by participant id
 	// ONLY (operator ruling bc-pnum), matching applyTiebreakSort next door.
-	// Note what this is and is not: chusen is team-only (ChusenStatus
-	// reports nothing for an individual competition) and two TEAMS may not share
+	// Note what this is and is not: representative bouts are team-only (an
+	// individual's circle is tieBreakLeftLevel's) and two TEAMS may not share
 	// a name even across dojos (checkNewTeamNameCollisions,
 	// state/participants.go), so unlike the individual tiebreak path this is
 	// NOT a routinely reachable collision. It is kept because the team-name
@@ -156,21 +380,36 @@ func daihyosenLeftTied(group []state.PlayerStanding, allMatches []state.MatchRes
 	return false
 }
 
-// ChusenStatus returns the consequential team-pool ties that the daihyosen
-// left undetermined, split into those that still need a chusen (drawing lots)
-// and those a recorded chusen already settled. It is the single source of
-// truth for both, used by the GET /chusen-candidates endpoint: "which groups
-// still need an operator lots-draw" is groupNeedsChusen, and "which groups were
-// decided by chusen" is groupSettledByChusen. Empty (not an error) when the
-// competition is not a team comp whose pool order can still be set by hand
-// (state.Competition.AcceptsPoolRankOverride: the pools stage, or a pools +
-// knockout competition's knockout, where a pool correction can reopen a tie),
-// or no such group exists.
+// ChusenStatus returns the consequential pool ties that a tie-breaker left
+// undetermined (a team's daihyosen round, an individual's ippon-shobu round
+// that went in a circle), split into those that still need a decision (the
+// lots, or for an individual another round, StillLevel) and those a recorded
+// chusen already settled. It is the single source of truth for both, used by
+// the GET /chusen-candidates endpoint and the override-rank door's check of an
+// individual's lots: "which groups still need an operator decision" is
+// groupNeedsChusen, and "which groups were decided by chusen" is
+// groupSettledByChusen. Empty (not an error) when the competition's pool order
+// can no longer be set by hand
+// (state.Competition.AcceptsPoolRankOverride: the pools stage, a pools +
+// knockout competition's knockout, where a pool correction can reopen a tie,
+// or a finished league, whose recorded lots stay correctable), or no such
+// group exists.
 //
 // Pools are returned in name order for stable output.
 func (e *Engine) ChusenStatus(compID string) (ChusenReport, error) {
+	return e.chusenStatusFrom(e.store, func() (map[string][]state.PlayerStanding, error) {
+		return e.CalculatePoolStandings(compID)
+	}, compID)
+}
+
+// chusenStatusFrom is ChusenStatus' body over any loader, so a write
+// transaction can ask it under its own lock (the override-rank door's check of
+// an individual's lots, overridePoolRanksTx) and the cached store path stays
+// the read door's. standings supplies the pool standings the same way
+// poolCompletion's does.
+func (e *Engine) chusenStatusFrom(loader poolStandingsLoader, standings func() (map[string][]state.PlayerStanding, error), compID string) (ChusenReport, error) {
 	var report ChusenReport
-	comp, err := e.store.LoadCompetition(compID)
+	comp, err := loader.LoadCompetition(compID)
 	if err != nil {
 		return report, err
 	}
@@ -178,63 +417,66 @@ func (e *Engine) ChusenStatus(compID string) (ChusenReport, error) {
 		return report, notFoundErrorf("competition %s not found", compID)
 	}
 	isTeam := comp.IsTeam()
-	if !isTeam || !comp.AcceptsPoolRankOverride() {
+	if !comp.AcceptsPoolRankOverride() {
 		return report, nil
 	}
 
-	standings, err := e.CalculatePoolStandings(compID)
+	poolStandingsByName, err := standings()
 	if err != nil {
 		return report, err
 	}
-	matches, err := e.store.LoadPoolMatches(compID)
+	matches, err := loader.LoadPoolMatches(compID)
 	if err != nil {
 		return report, err
 	}
-	overridesObj, err := e.store.LoadOverrides(compID)
+	matches = chusenMatches(comp, matches)
+	poolRanks, err := loader.LoadPoolRanks(compID)
 	if err != nil {
 		return report, err
 	}
-	var poolRanks map[string]map[string]int
-	if overridesObj != nil {
-		poolRanks = overridesObj.PoolRanks
-	}
-	pools, err := e.store.LoadPools(compID)
+	pools, err := loader.LoadPools(compID)
 	if err != nil {
 		return report, err
 	}
-	bracket, err := e.store.LoadBracket(compID)
+	bracket, err := loader.LoadBracket(compID)
 	if err != nil {
 		return report, err
 	}
 
-	poolNames := make([]string, 0, len(standings))
-	for name := range standings {
+	poolNames := make([]string, 0, len(poolStandingsByName))
+	for name := range poolStandingsByName {
 		poolNames = append(poolNames, name)
 	}
 	sort.Strings(poolNames)
 
+	band := newBreakBand(comp, pools, bracket)
 	for _, poolName := range poolNames {
-		poolStandings := standings[poolName]
-		groupOverrides := poolRanks[poolName]
-		cut := poolTieBreakCut(comp, pools, bracket, poolName)
+		poolStandings := poolStandingsByName[poolName]
 		for _, positions := range detectPoolTies(poolStandings) {
-			// Only a tie that affects advancement/seed warrants a decider at all.
-			if !tieAffectsAdvancement(positions, cut) {
+			group := standingsAt(poolStandings, positions)
+			// Only a tie in the band a tie-breaker is held for warrants a
+			// decider at all: the same band the cycle gate blocks on.
+			if !band(poolName, positions, group) {
 				continue
 			}
-			group := standingsAt(poolStandings, positions)
 			g := ChusenGroup{
 				PoolName:    poolName,
 				Teams:       group,
 				MinPosition: positions[0] + 1,
 			}
 			switch {
-			case groupNeedsChusen(group, matches, groupOverrides):
+			// Accepted shared ranks cover a circle (PoolsSettledNow), so a
+			// finished league no longer lists it as owed; lots already
+			// recorded stay listed below, to stay correctable.
+			case !comp.LeagueTiebreakFinalized && groupNeedsChusen(group, matches):
+				if !isTeam {
+					g.StillLevel = tieBreakLeftLevel(group, matches)
+				}
 				report.Pending = append(report.Pending, g)
-			case groupSettledByChusen(group, matches, groupOverrides):
+			case groupSettledByChusen(group, matches):
 				g.Ranks = make([]int, len(group))
 				for i, s := range group {
-					if r, ok := lookupPoolRankOverride(groupOverrides, s.Player.ID); ok {
+					if r, ok := lookupPoolRankOverride(poolRanks[poolName], s.Player.ID); ok {
 						g.Ranks[i] = r
 					}
 				}

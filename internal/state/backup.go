@@ -36,10 +36,16 @@ var ErrPendingWALUnsettled = errors.New("pending transaction log could not be se
 // failure.
 type PendingWALError struct {
 	CompetitionID string
-	Err           error
+	// Log is the id of the log that could not land (its file in .wal is
+	// <Log>.json), so the operator can find it; empty when none is known.
+	Log string
+	Err error
 }
 
 func (e *PendingWALError) Error() string {
+	if e.Log != "" {
+		return fmt.Sprintf("%s for competition %q (transaction log %s.json): %v", ErrPendingWALUnsettled.Error(), e.CompetitionID, e.Log, e.Err)
+	}
 	return fmt.Sprintf("%s for competition %q: %v", ErrPendingWALUnsettled.Error(), e.CompetitionID, e.Err)
 }
 
@@ -224,18 +230,30 @@ func (s *Store) hasPendingCompWALLocked(compID string) (bool, error) {
 }
 
 // pendingCompWALsLocked scans s.walDir and returns the committed WALs that
-// have at least one intent targeting compID's directory.
+// have at least one intent targeting compID's directory, leaving out any
+// another writer overtook.
 func (s *Store) pendingCompWALsLocked(compID string) ([]*wal.WAL, error) {
-	all, err := wal.Scan(s.walDir, s.directWriteWAL)
+	all, err := wal.Scan(s.walDir, s.directWriteWAL, s.directRemoveWAL, s.directReadWAL)
 	if err != nil {
 		return nil, err
 	}
 	compDir := s.compPath(compID)
 	var matched []*wal.WAL
 	for _, w := range all {
-		if walTouchesComp(w, compDir) {
-			matched = append(matched, w)
+		// An overtaken log is never replayed (wal.WAL.Stale): settling it
+		// would put older content back, and the next start sets it aside.
+		// A damaged log names no step (wal.WAL.Invalid): only startup sets
+		// it aside.
+		if w.Stale() != "" || w.Invalid() || !walTouchesComp(w, compDir) {
+			continue
 		}
+		// A log of this competition Scan could not check refuses the
+		// settle; one of another competition does not concern it (startup
+		// still refuses on it).
+		if uerr := w.Unchecked(); uerr != nil {
+			return nil, uerr
+		}
+		matched = append(matched, w)
 	}
 	return matched, nil
 }
@@ -244,7 +262,7 @@ func walTouchesComp(w *wal.WAL, compDir string) bool {
 	cleanDir := filepath.Clean(compDir)
 	prefix := cleanDir + string(filepath.Separator)
 	for _, in := range w.Intents() {
-		cleanPath := filepath.Clean(in.Path)
+		cleanPath := storePath(in.Path)
 		if cleanPath == cleanDir || strings.HasPrefix(cleanPath, prefix) {
 			return true
 		}
@@ -263,13 +281,16 @@ func (s *Store) settleCompWALsLocked(compID string) error {
 	}
 	for _, w := range pending {
 		if err := w.Apply(); err != nil {
-			return &PendingWALError{CompetitionID: compID, Err: err}
+			return &PendingWALError{CompetitionID: compID, Log: w.ID(), Err: err}
 		}
 		s.invalidateCachesForWALIntents(compID, w.Intents())
 		if err := w.Done(); err != nil {
-			return &PendingWALError{CompetitionID: compID, Err: err}
+			return &PendingWALError{CompetitionID: compID, Log: w.ID(), Err: err}
 		}
 	}
+	// Every log for compID has landed, whichever door settled it (a write,
+	// a read, a snapshot or a restore), so the write path stops asking.
+	s.keptWAL.Delete(compID)
 	return nil
 }
 

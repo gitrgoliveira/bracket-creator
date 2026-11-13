@@ -796,9 +796,6 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
       if (updated.warnings && updated.warnings.length > 0) {
         updated.warnings.forEach(w => showToast(`Warning: ${w}`, "error"));
       }
-      if (updated.cascadeError) {
-        showToast(`Draw update failed: ${updated.cascadeError}`, "error");
-      }
     } catch (err) {
       if (!mountedRef.current) return;
       showToast(err.message, "error");
@@ -1323,7 +1320,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
                       </div>
                       {/* Editable in setup AND draw-ready: the single-competitor PUT
                           accepts both and cascades a draw-ready rename into the
-                          draw (engine.ReplaceParticipantInDraw, mp-et2); it 409s
+                          draw (engine.ReplaceParticipantInDrawTx, mp-et2); it 409s
                           once the competition has started, so the pencil goes then.
                           Operator ruling bc-prow, reversing the 26dcd631 hide. */}
                       {(isSetup || isDrawReady) && (

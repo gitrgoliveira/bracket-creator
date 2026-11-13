@@ -516,12 +516,15 @@ type roundLineupStage struct {
 	poolMatches func() ([]MatchResult, error)
 	bracket     func() (*Bracket, error)
 	players     func(comp *Competition) ([]domain.Player, error)
+	// rio is how the roster is read: the disk for a direct stage, the
+	// transaction's staged roster first for a transaction's (loadPlayers).
+	rio rosterIO
 }
 
 // directRoundLineupStage is the stage of a write that goes straight to disk.
 // Caller holds the competition's per-comp lock.
 func (s *Store) directRoundLineupStage(compID string) *roundLineupStage {
-	st := &roundLineupStage{store: s, compID: compID, write: s.directWrite}
+	st := &roundLineupStage{store: s, compID: compID, write: s.directWrite, rio: s.directRosterIO()}
 	st.comp = func() (*Competition, error) { return s.loadCompetitionLocked(compID) }
 	st.lineups = func() (map[string]domain.TeamLineup, error) { return s.loadTeamLineupsLocked(compID) }
 	st.poolMatches = func() ([]MatchResult, error) { return s.LoadPoolMatchesLocked(compID) }
@@ -533,7 +536,7 @@ func (s *Store) directRoundLineupStage(compID string) *roundLineupStage {
 // roundLineupStage is the stage of a transaction: every read sees what the
 // transaction has staged, every write is staged with it.
 func (t *storeTx) roundLineupStage() *roundLineupStage {
-	st := &roundLineupStage{store: t.store, compID: t.compID, write: t.txWriteFn()}
+	st := &roundLineupStage{store: t.store, compID: t.compID, write: t.txWriteFn(), rio: t.rosterIO()}
 	st.comp = func() (*Competition, error) { return t.LoadCompetition(t.compID) }
 	st.lineups = func() (map[string]domain.TeamLineup, error) { return t.LoadTeamLineupsWithRemoved(t.compID) }
 	st.poolMatches = func() ([]MatchResult, error) { return t.LoadPoolMatches(t.compID) }
@@ -542,10 +545,12 @@ func (t *storeTx) roundLineupStage() *roundLineupStage {
 	return st
 }
 
-// loadPlayers reads the roster. participants.csv is never staged in a
-// transaction (it is written directly), so both stages read it from disk.
+// loadPlayers reads the roster through the stage's rosterIO: a participant
+// edit stages participants.csv in its transaction, so a transaction's stage
+// reads the roster it staged (read-your-own-writes), and a direct stage the
+// file.
 func (st *roundLineupStage) loadPlayers(comp *Competition) ([]domain.Player, error) {
-	return st.store.loadParticipantsNoLock(st.compID, comp.EffectiveWithZekkenName(), LoadParticipantsOpts{HasIDs: comp.ParticipantIDsHint()})
+	return st.store.loadParticipantsVia(st.rio, st.compID, comp.EffectiveWithZekkenName(), LoadParticipantsOpts{HasIDs: comp.ParticipantIDsHint()})
 }
 
 // settle runs one settlement and stores what it decided: the lineups when they

@@ -277,7 +277,7 @@ func TestRecordDecisionTx_SameNamePairing_RescoreAsFoughtRestoresEligibility(t *
 	assert.True(t, statuses[tanakaAID].Eligible, "Tanaka@DojoA must be eligible again after the rescore")
 }
 
-// --- Finding 3: ReplaceParticipantInDraw must match by participant id when available ---
+// --- Finding 3: ReplaceParticipantInDrawTx must match by participant id when available ---
 
 // TestReplaceParticipantInDraw_MatchesByID_NotBareName is the bead's repro:
 // Tanaka Kenji/Osaka and Tanaka Kenji/Tokyo sit in one pool with distinct
@@ -308,7 +308,7 @@ func TestReplaceParticipantInDraw_MatchesByID_NotBareName(t *testing.T) {
 			Winner: "Tanaka Kenji", WinnerID: osakaID, Status: state.MatchStatusScheduled, Court: "A"},
 	}))
 
-	warnings, err := eng.ReplaceParticipantInDraw(compID, osakaID, "Tanaka Kenji", "Osaka", "", "Tanaka K.", "Osaka", "")
+	warnings, err := replaceInDraw(eng, compID, osakaID, "Tanaka Kenji", "Osaka", "", "Tanaka K.", "Osaka", "")
 	require.NoError(t, err)
 	assert.Empty(t, warnings)
 
@@ -903,7 +903,7 @@ func TestMaybeAutoCompletePools_CorruptOverrides_PropagatesError(t *testing.T) {
 	assert.Error(t, err, "a corrupt overrides.json must surface as an error from MaybeAutoCompletePools, not be silently dropped")
 }
 
-// --- Finding 8 / nit 16: ReplaceParticipantInDraw's bracket-ambiguity check ---
+// --- Finding 8 / nit 16: ReplaceParticipantInDrawTx's bracket-ambiguity check ---
 
 // TestReplaceParticipantInDraw_NamesakeAbsentFromBracketCascadesWithoutWarning
 // pins the second-Opus-pass fix for item 2: the ambiguity check now collects
@@ -958,7 +958,7 @@ func TestReplaceParticipantInDraw_NamesakeAbsentFromBracketCascadesWithoutWarnin
 	// for this rename, since oldName is not a candidate bracket name.
 	corruptParticipantsFile(t, store, compID)
 
-	warnings, err := eng.ReplaceParticipantInDraw(compID, aliceID, "Alice", "Dojo0", "", "Alicia", "Dojo0", "")
+	warnings, err := replaceInDraw(eng, compID, aliceID, "Alice", "Dojo0", "", "Alicia", "Dojo0", "")
 	require.NoError(t, err, "the pass-1 bracketNames check must skip the participants.csv load entirely for a name the bracket never uses")
 	assert.Empty(t, warnings)
 
@@ -1021,7 +1021,7 @@ func TestReplaceParticipantInDraw_CheckedOutNamesakeBlocksRewrite(t *testing.T) 
 		},
 	}))
 
-	warnings, err := eng.ReplaceParticipantInDraw(compID, aliceID, "Alice", "Dojo0", "", "Alicia", "Dojo0", "")
+	warnings, err := replaceInDraw(eng, compID, aliceID, "Alice", "Dojo0", "", "Alicia", "Dojo0", "")
 	require.NoError(t, err)
 	require.Len(t, warnings, 1)
 	assert.Contains(t, warnings[0], "ambiguous across dojos", "a checked-out namesake must still be found and block the rewrite")
@@ -1069,7 +1069,7 @@ func TestReplaceParticipantInDraw_IDStampedNamesakeRenameCascades(t *testing.T) 
 		},
 	}))
 
-	warnings, err := eng.ReplaceParticipantInDraw(compID, aliceID, "Alice", "Dojo0", "", "Alicia", "Dojo0", "")
+	warnings, err := replaceInDraw(eng, compID, aliceID, "Alice", "Dojo0", "", "Alicia", "Dojo0", "")
 	require.NoError(t, err)
 	assert.Empty(t, warnings, "the rename resolves unambiguously by id, so no ambiguity warning should fire")
 
@@ -1129,7 +1129,7 @@ func TestReplaceParticipantInDraw_EmptyBracketSkipsParticipantsLoad(t *testing.T
 	pid := participantID(t, store, compID, "Alice")
 	corruptParticipantsFile(t, store, compID)
 
-	warnings, err := eng.ReplaceParticipantInDraw(compID, pid, "Alice", "Dojo0", "", "Alicia", "Dojo0", "")
+	warnings, err := replaceInDraw(eng, compID, pid, "Alice", "Dojo0", "", "Alicia", "Dojo0", "")
 	require.NoError(t, err, "the empty-bracket branch must not touch the corrupted participants.csv at all")
 	assert.Empty(t, warnings)
 

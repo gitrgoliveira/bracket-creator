@@ -303,6 +303,15 @@ func (s *Store) loadTeamLineupsLocked(compID string) (map[string]domain.TeamLine
 	return s.parseTeamLineupsFile(compID, s.compPath(compID, teamLineupFilename))
 }
 
+// loadTeamLineupsVia is loadTeamLineupsLocked over what rio sees: the lineups
+// a transaction staged, read-your-own-writes, else the file.
+func (s *Store) loadTeamLineupsVia(rio rosterIO, compID string) (map[string]domain.TeamLineup, error) {
+	if pending, ok := rio.staged(teamLineupFilename); ok {
+		return parseTeamLineupsBytes(compID, pending)
+	}
+	return s.loadTeamLineupsLocked(compID)
+}
+
 // copyTeamLineups deep-copies a lineups map so cached data is never
 // aliased to a caller (callers mutate the returned map in
 // load-mutate-save flows, see setTeamLineupLocked).
@@ -410,7 +419,7 @@ func (s *Store) saveTeamLineupsLocked(compID string, lineups map[string]domain.T
 // it is keyed by that id first, by the rule the round-lineup settlement keys it
 // by (roundLineupSettlement.keyByTeamID), so the write that mints the ids keeps
 // it. One whose name is no team's, or is several teams', is left to the prune.
-func (s *Store) pruneOrphanedTeamLineupsLocked(compID string, comp *Competition, players []domain.Player) error {
+func (s *Store) pruneOrphanedTeamLineupsLocked(rio rosterIO, compID string, comp *Competition, players []domain.Player) error {
 	if comp == nil || (comp.Kind != "team" && comp.TeamSize == 0) {
 		return nil
 	}
@@ -422,7 +431,7 @@ func (s *Store) pruneOrphanedTeamLineupsLocked(compID string, comp *Competition,
 	if !CanGenerateDraw(comp.Status) {
 		return nil
 	}
-	lineups, err := s.loadTeamLineupsLocked(compID)
+	lineups, err := s.loadTeamLineupsVia(rio, compID)
 	if err != nil {
 		return err
 	}
@@ -445,7 +454,7 @@ func (s *Store) pruneOrphanedTeamLineupsLocked(compID string, comp *Competition,
 	if !changed {
 		return nil
 	}
-	return s.saveTeamLineupsLocked(compID, lineups, s.directWrite)
+	return s.saveTeamLineupsLocked(compID, lineups, rio.write)
 }
 
 // SetTeamLineup validates and persists a lineup, replacing any prior
@@ -465,8 +474,10 @@ func (s *Store) SetTeamLineup(compID string, lineup domain.TeamLineup, teamSize 
 	if err := lineup.ValidatePositions(teamSize); err != nil {
 		return err
 	}
-	mu := s.getCompLock(compID)
-	mu.Lock()
+	mu, lockErr := s.lockCompWrite(compID)
+	if lockErr != nil {
+		return lockErr
+	}
 	defer mu.Unlock()
 	return s.setTeamLineupLocked(compID, lineup, teamSize, s.directWrite)
 }
@@ -486,8 +497,10 @@ func (s *Store) SetTeamLineups(compID string, ls []domain.TeamLineup, teamSize i
 			return err
 		}
 	}
-	mu := s.getCompLock(compID)
-	mu.Lock()
+	mu, lockErr := s.lockCompWrite(compID)
+	if lockErr != nil {
+		return lockErr
+	}
 	defer mu.Unlock()
 	current, err := s.loadTeamLineupsLocked(compID)
 	if err != nil {
@@ -543,8 +556,10 @@ func (s *Store) RemoveTeamLineupAt(compID, teamID, matchID string, round int, at
 	if err := ValidateCompetitionID(compID); err != nil {
 		return false, err
 	}
-	mu := s.getCompLock(compID)
-	mu.Lock()
+	mu, lockErr := s.lockCompWrite(compID)
+	if lockErr != nil {
+		return false, lockErr
+	}
 	defer mu.Unlock()
 
 	current, err := s.loadTeamLineupsLocked(compID)
@@ -591,8 +606,10 @@ func (s *Store) ReplaceTeamLineupSlot(compID, teamID, matchID string, round int,
 			return err
 		}
 	}
-	mu := s.getCompLock(compID)
-	mu.Lock()
+	mu, lockErr := s.lockCompWrite(compID)
+	if lockErr != nil {
+		return lockErr
+	}
 	defer mu.Unlock()
 	current, err := s.loadTeamLineupsLocked(compID)
 	if err != nil {

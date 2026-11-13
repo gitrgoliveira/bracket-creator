@@ -58,11 +58,13 @@
 package state
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"time"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
@@ -153,10 +155,11 @@ type StoreTx interface {
 	// participant while the transaction lock is held, so the caller
 	// can serialise a competition-status pre-check (via LoadCompetition
 	// in the same tx body) and the participant write under one lock
-	// acquire. Participants.csv and seeds.csv are written directly via
-	// atomic rename, they are not staged through the WAL, but each
-	// write is individually crash-safe, and no other WAL-staged file
-	// is touched by this path, so cross-file atomicity is not required.
+	// acquire. participants.csv and seeds.csv are staged through the WAL
+	// (operator decision D5 (a), 2026-11-12) with the transaction's other
+	// files, so a participant edit and the draw cascade beside it
+	// (engine.ReplaceParticipantInDrawTx) commit or abort as one;
+	// LoadParticipants reads them back, read-your-own-writes.
 	UpdateParticipant(compID, pid string, withZekkenName bool, transform func(*domain.Player) error) (*domain.Player, error)
 	// AppendMatchHistory stages one entry onto a match's history file
 	// (match_history.go) in this transaction, so the entry lands exactly when
@@ -233,8 +236,13 @@ func (s *Store) WithTransaction(compID string, fn func(tx StoreTx) error) error 
 	if err := ValidateCompetitionID(compID); err != nil {
 		return err
 	}
-	mu := s.getCompLock(compID)
-	mu.Lock()
+	// lockCompWrite first finishes a change an earlier transaction left in
+	// the log, so this one reads and stages on top of it. When that still
+	// fails, fn never runs and nothing is staged.
+	mu, err := s.lockCompWrite(compID)
+	if err != nil {
+		return fmt.Errorf("WithTransaction %q: %w", compID, err)
+	}
 	// The lineups a kachinuki match started with are announced once the
 	// transaction has committed, after its lock is released (this defer runs
 	// after the unlock below).
@@ -245,7 +253,7 @@ func (s *Store) WithTransaction(compID string, fn func(tx StoreTx) error) error 
 	// Begin a fresh WAL for this transaction. The WAL has no on-disk
 	// footprint until Commit runs; if fn returns an error we just
 	// drop the in-memory intents and return.
-	w, err := wal.BeginTx(s.walDir, wal.NewWALID(), s.directWriteWAL)
+	w, err := wal.BeginTx(s.walDir, wal.NewWALID(), s.directWriteWAL, s.directRemoveWAL, s.directReadWAL)
 	if err != nil {
 		return fmt.Errorf("WithTransaction %q: BeginTx: %w", compID, err)
 	}
@@ -280,6 +288,19 @@ func (s *Store) WithTransaction(compID string, fn func(tx StoreTx) error) error 
 	}
 
 	if err := w.Commit(); err != nil {
+		if errors.Is(err, wal.ErrCommitLeftLog) {
+			// The log is on disk after all and could not be removed: the next
+			// start replays it, so the change is committed, as after a failed
+			// Apply (operator decision 2026-11-12, W3 (a)). The next write
+			// or read of this competition finishes it first (lockCompWrite).
+			s.noteKeptWAL(compID)
+			return fmt.Errorf("WithTransaction %q: Commit: %w (%w)", compID, err, ErrTxCommitted)
+		}
+		// Nothing landed and Commit removed any log it wrote, so this is an
+		// abort: the savers published their staged bodies into the caches
+		// (pools.csv, pool-matches.csv, ...), which must not outlive the
+		// transaction.
+		s.invalidateCachesForWALIntents(compID, w.Intents())
 		return fmt.Errorf("WithTransaction %q: Commit: %w", compID, err)
 	}
 	if err := w.Apply(); err != nil {
@@ -290,6 +311,13 @@ func (s *Store) WithTransaction(compID string, fn func(tx StoreTx) error) error 
 		// completion. Marked ErrTxCommitted so a caller holding work
 		// done outside the WAL can tell this from a dropped
 		// transaction.
+		//
+		// The caches keep the staged bodies: they are the committed
+		// change, and nothing builds on them before it lands, because the
+		// next write or read of this competition finishes the kept log
+		// first (lockCompWrite, settleKeptWALBeforeRead), and that settle
+		// drops the caches once the files are written.
+		s.noteKeptWAL(compID)
 		return fmt.Errorf("WithTransaction %q: Apply: %w (%w)", compID, err, ErrTxCommitted)
 	}
 
@@ -314,7 +342,11 @@ func (s *Store) WithTransaction(compID string, fn func(tx StoreTx) error) error 
 		// and re-attempt Done. The transaction is effectively
 		// complete; surface the error for observability but the
 		// caller can treat it as success.
-		slog.Warn("WithTransaction: WAL Done failed; will retry on restart",
+		// Recorded so the next write or read removes it: left in place,
+		// that write would leave it stale and the next start would set it
+		// aside with an error for a change that did land.
+		s.noteKeptWAL(compID)
+		slog.Warn("WithTransaction: WAL Done failed; the next write retries it",
 			"comp", compID, "wal", w.ID(), "err", err)
 	}
 	kept = tx.kept
@@ -335,6 +367,33 @@ func (s *Store) directWriteWAL(path string, data []byte, perm os.FileMode) error
 	return s.atomicWrite(path, data, perm)
 }
 
+// directRemoveWAL is the RemoveFn the WAL replays a delete step with, the
+// counterpart of directWriteWAL: the same inside-the-data-folder check, then
+// a removal through the store's root (s.root, data_root.go). A file already
+// gone is success, so a replay of a log that partly applied stays idempotent.
+func (s *Store) directRemoveWAL(path string) error {
+	cleanPath, err := s.insideDataFolder("remove of", path)
+	if err != nil {
+		return err
+	}
+	if err := s.root.remove(cleanPath); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return nil
+}
+
+// directReadWAL is the ReadFn the WAL records what a target held with (at
+// Commit) and checks a log against (Scan): through the data folder's root, as
+// the WAL writes and removes, so a competition folder that links out of the
+// data folder is refused rather than followed.
+func (s *Store) directReadWAL(path string) ([]byte, error) {
+	cleanPath, err := s.insideDataFolder("read of", path)
+	if err != nil {
+		return nil, err
+	}
+	return s.root.readFile(cleanPath)
+}
+
 // invalidateCachesForWALIntents zeroes out the file caches the
 // staged-but-aborted intents would have updated, so the next reader
 // re-parses from the (untouched) on-disk file. Used on the abort
@@ -346,6 +405,10 @@ func (s *Store) invalidateCachesForWALIntents(compID string, intents []wal.FileI
 		base := filepath.Base(in.Path)
 		switch base {
 		case "config.md",
+			// pools.csv joined when storeTx.SavePools started staging it
+			// (operator decision 2026-11-12): savePoolsLocked publishes into
+			// cache.data at stage time like the other savers.
+			"pools.csv",
 			"pool-matches.csv",
 			"bracket.json",
 			competitorStatusFilename,
@@ -362,6 +425,13 @@ func (s *Store) invalidateCachesForWALIntents(compID string, intents []wal.FileI
 			// results were published into cache.data at save time), so the
 			// version has to move here as well as the body being dropped.
 			s.getFileCache(compID, base).invalidate()
+		case "participants.csv", "seeds.csv":
+			// Staged by storeTx.UpdateParticipant (operator decision D5 (a),
+			// 2026-11-12). The roster is cached under per-parse-mode keys
+			// (participantsCacheKey), not under the file name, so those are
+			// dropped too; the file's own entry carries the version.
+			s.getFileCache(compID, base).invalidate()
+			s.invalidateParticipantCaches(compID)
 		}
 	}
 }
@@ -382,12 +452,23 @@ func (s *Store) invalidateCachesForWALIntents(compID string, intents []wal.FileI
 // refresh saves a parse; it no longer guards fields the file lacks.
 func (s *Store) refreshCachesAfterWALApply(compID string, intents []wal.FileIntent) {
 	for _, in := range intents {
+		if in.Delete {
+			// The file is gone: nothing to re-stamp, so drop whatever a cache
+			// holds for it, as the abort does. (The one file a delete names
+			// today, squads.yaml, has no cache; this keeps a later one right.)
+			s.invalidateCachesForWALIntents(compID, []wal.FileIntent{in})
+			continue
+		}
 		base := filepath.Base(in.Path)
 		// The cache keys we know how to refresh; if a WAL intent
 		// targets a path we don't recognize, skip it (no cache to
 		// refresh, the saver didn't populate one).
 		switch base {
 		case "config.md",
+			// pools.csv joined when storeTx.SavePools started staging it
+			// (operator decision 2026-11-12): savePoolsLocked publishes into
+			// cache.data at stage time like the other savers.
+			"pools.csv",
 			"pool-matches.csv",
 			"bracket.json",
 			competitorStatusFilename,
@@ -405,6 +486,12 @@ func (s *Store) refreshCachesAfterWALApply(compID string, intents []wal.FileInte
 				cache.mtime = s.FileMtime(compID, base)
 			}
 			cache.mu.Unlock()
+		case "participants.csv", "seeds.csv":
+			// The roster caches are mtime-keyed and saveParticipantsNoLock
+			// dropped them at stage time; drop them again so nothing a read
+			// filled between the stage and the apply (same mtime tick) is
+			// served over the applied bytes.
+			s.invalidateParticipantCaches(compID)
 		}
 	}
 }
@@ -432,7 +519,17 @@ type storeTx struct {
 	// write of the file (txWriteFn) drops it, to be parsed again. nil until
 	// first read.
 	lineups map[string]domain.TeamLineup
+	// pools is the pools.csv this transaction staged, parsed once
+	// (poolsParsed): every LoadPools answers a copy of it, and a staged write
+	// or delete of the file (txWriteFn, txRemoveFn) drops it, to be parsed
+	// again.
+	pools       []helper.Pool
+	poolsParsed bool
 }
+
+// stagedPoolsParses counts the parses of a staged pools.csv, for the test
+// that pins one per staged write (storeTx.pools).
+var stagedPoolsParses atomic.Int64
 
 // IsTransactional reports whether h is a LIVE transaction handle rather than
 // the bare *Store.
@@ -470,12 +567,34 @@ func IsTransactional(h StoreTx) bool {
 func (t *storeTx) txWriteFn() writeFn {
 	walWrite := t.wal.WriteFn()
 	lineupsPath := t.store.compPath(t.compID, teamLineupFilename)
+	poolsPath := t.store.compPath(t.compID, "pools.csv")
 	return func(path string, data []byte, perm os.FileMode) error {
-		if path == lineupsPath {
+		switch path {
+		case lineupsPath:
 			// The parsed copy no longer says what is staged (m4).
 			t.lineups = nil
+		case poolsPath:
+			t.pools, t.poolsParsed = nil, false
 		}
 		return walWrite(path, data, perm)
+	}
+}
+
+// txRemoveFn is txWriteFn's delete counterpart: a removal staged in the WAL,
+// applied on commit in order with the writes and on replay, and read back by
+// the transaction as the file being absent (removedFor).
+func (t *storeTx) txRemoveFn() func(path string) error {
+	walRemove := t.wal.RemoveFn()
+	lineupsPath := t.store.compPath(t.compID, teamLineupFilename)
+	poolsPath := t.store.compPath(t.compID, "pools.csv")
+	return func(path string) error {
+		switch path {
+		case lineupsPath:
+			t.lineups = nil
+		case poolsPath:
+			t.pools, t.poolsParsed = nil, false
+		}
+		return walRemove(path)
 	}
 }
 
@@ -499,6 +618,12 @@ func (t *storeTx) keepLineups(lineups map[string]domain.TeamLineup) {
 // to support read-your-own-writes within a tx body.
 func (t *storeTx) pendingFor(filename string) ([]byte, bool) {
 	return t.wal.PendingBytes(t.store.compPath(t.compID, filename))
+}
+
+// removedFor reports whether this transaction staged a delete of the
+// competition's file: a read inside it must see the file as absent.
+func (t *storeTx) removedFor(filename string) bool {
+	return t.wal.PendingRemove(t.store.compPath(t.compID, filename))
 }
 
 // checkCompID enforces the transaction-bound-compID invariant. Wraps
@@ -546,6 +671,21 @@ func (t *storeTx) LoadPools(compID string) ([]helper.Pool, error) {
 	if err := t.checkCompID(compID); err != nil {
 		return nil, err
 	}
+	// Read-your-own-writes: pools.csv is staged in the WAL, so the pools this
+	// transaction saved are what it loads next, parsed once per staged write
+	// (t.pools).
+	if t.poolsParsed {
+		return t.store.copyPools(t.pools), nil
+	}
+	if pending, ok := t.pendingFor("pools.csv"); ok {
+		stagedPoolsParses.Add(1)
+		pools, err := parsePoolsReader(t.store.compPath(compID, "pools.csv"), bytes.NewReader(pending))
+		if err != nil {
+			return nil, err
+		}
+		t.pools, t.poolsParsed = pools, true
+		return t.store.copyPools(pools), nil
+	}
 	return t.store.loadPoolsLocked(compID)
 }
 
@@ -553,7 +693,7 @@ func (t *storeTx) SavePools(compID string, pools []helper.Pool) error {
 	if err := t.checkCompID(compID); err != nil {
 		return err
 	}
-	return t.store.savePoolsLocked(compID, pools)
+	return t.store.savePoolsLocked(compID, pools, t.txWriteFn())
 }
 
 func (t *storeTx) LoadPoolMatches(compID string) ([]MatchResult, error) {
@@ -842,17 +982,22 @@ func (t *storeTx) LoadSquads(compID string) (map[string][]domain.TeamMember, err
 	if err := t.checkCompID(compID); err != nil {
 		return nil, err
 	}
-	if pending, ok := t.pendingFor(teamMembersFilename); ok {
-		return parseSquadsBytes(pending)
-	}
-	return t.store.loadSquadsLocked(compID)
+	return t.store.loadSquadsVia(t.rosterIO(), compID)
 }
 
 func (t *storeTx) LoadParticipants(compID string, withZekkenName bool) ([]domain.Player, error) {
 	if err := t.checkCompID(compID); err != nil {
 		return nil, err
 	}
-	return t.store.loadParticipantsLocked(compID, withZekkenName)
+	// Read-your-own-writes: participants.csv and seeds.csv are staged in the
+	// WAL, so the roster this transaction updated is what it loads next.
+	return t.store.loadParticipantsVia(t.rosterIO(), compID, withZekkenName, LoadParticipantsOpts{WithSeeds: true})
+}
+
+// rosterIO is the transaction's view of the roster files: writes staged
+// through txWriteFn, reads answering what was staged.
+func (t *storeTx) rosterIO() rosterIO {
+	return rosterIO{write: t.txWriteFn(), remove: t.txRemoveFn(), pending: t.pendingFor, removed: t.removedFor}
 }
 
 func (t *storeTx) UpdateParticipant(compID, pid string, withZekkenName bool, transform func(*domain.Player) error) (*domain.Player, error) {
@@ -860,7 +1005,7 @@ func (t *storeTx) UpdateParticipant(compID, pid string, withZekkenName bool, tra
 		return nil, err
 	}
 	// nil comp: see Store.UpdateParticipant — the ungated check-in path.
-	return t.store.updateParticipantNoLock(compID, pid, withZekkenName, nil, transform)
+	return t.store.updateParticipantNoLock(t.rosterIO(), compID, pid, withZekkenName, nil, transform)
 }
 
 // UpdatePoolMatchByID dispatches to a lock-free body that mirrors

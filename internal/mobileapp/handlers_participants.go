@@ -432,6 +432,8 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			oldDojo        string
 			oldDisplayName string
 			isDrawReady    bool
+			warnings       []string
+			cascadeErr     error
 			httpStatus     = http.StatusInternalServerError
 			httpMsg        string
 		)
@@ -499,8 +501,36 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				return err
 			}
 			updatedPlayer = p
+			if !isDrawReady || oldName == "" {
+				return nil
+			}
+			// Cascade the name/dojo change through the draw IN THIS
+			// transaction (operator decision D5 (a), 2026-11-12): the roster,
+			// the seeds and the draw files are all WAL-staged and land or
+			// abort as one, so a failed cascade leaves the edit unapplied.
+			// Use the canonical post-save DisplayName so auto-derived display
+			// names propagate into pools.csv. For non-zekken competitions
+			// UpdateParticipant returns DisplayName="" (not persisted), but
+			// pools.csv carries the auto-derived SanitizeName form; match what
+			// saveParticipantsNoLock writes so the cascade doesn't blank it.
+			cascadeDisplayName := p.DisplayName
+			if cascadeDisplayName == "" {
+				cascadeDisplayName = helper.SanitizeName(p.Name)
+			}
+			w, cerr := eng.ReplaceParticipantInDrawTx(tx, id, pid, oldName, oldDojo, oldDisplayName, p.Name, p.Dojo, cascadeDisplayName)
+			if cerr != nil {
+				cascadeErr = cerr
+				return cerr
+			}
+			warnings = w
 			return nil
 		})
+		if cascadeErr != nil {
+			// The engine's own classification: a refusal it names (not found,
+			// validation) keeps its 4xx, anything else is a logged 500.
+			respondEngineError(c, cascadeErr)
+			return
+		}
 		if txErr != nil {
 			// The 4xx branches above carry a curated, user-actionable message;
 			// preserve those verbatim. The 500 default is an unexpected error
@@ -518,42 +548,7 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			c.JSON(httpStatus, gin.H{"error": msg})
 			return
 		}
-		var warnings []string
-		if isDrawReady && oldName != "" {
-			// Cascade the name/dojo change through draw artifacts outside the
-			// transaction, WithTransaction's per-comp lock is released above
-			// (non-reentrant mutex), so the cascade function can acquire it.
-			// Use updatedPlayer.DisplayName (the canonical post-save value) so
-			// auto-derived display names propagate correctly into pools.csv.
-			// For non-zekken competitions UpdateParticipant returns DisplayName=""
-			// (not persisted), but pools.csv carries the auto-derived SanitizeName form.
-			// Match what saveParticipantsNoLock writes so the cascade doesn't blank it.
-			cascadeDisplayName := updatedPlayer.DisplayName
-			if cascadeDisplayName == "" {
-				cascadeDisplayName = helper.SanitizeName(updatedPlayer.Name)
-			}
-			w, cascadeErr := eng.ReplaceParticipantInDraw(id, pid, oldName, oldDojo, oldDisplayName, updatedPlayer.Name, updatedPlayer.Dojo, cascadeDisplayName)
-			if cascadeErr != nil {
-				// participants.csv (and seeds.csv) were already updated, broadcast and
-				// return 200 with the updated player so the client keeps its local state.
-				// Include any warnings collected before the failure (e.g. dojo conflicts
-				// from pools) and a cascadeError field for operator visibility.
-				hub.Broadcast(EventParticipantsUpdated, gin.H{"competitionId": id})
-				type playerWithCascadeError struct {
-					domain.Player
-					Warnings     []string `json:"warnings,omitempty"`
-					CascadeError string   `json:"cascadeError"`
-				}
-				c.JSON(http.StatusOK, playerWithCascadeError{
-					Player:       *updatedPlayer,
-					Warnings:     w,
-					CascadeError: cascadeErr.Error(),
-				})
-				return
-			}
-			warnings = w
-		}
-
+		// After the commit only, so a refused or aborted edit announces nothing.
 		hub.Broadcast(EventParticipantsUpdated, gin.H{"competitionId": id})
 		if len(warnings) > 0 {
 			type playerWithWarnings struct {

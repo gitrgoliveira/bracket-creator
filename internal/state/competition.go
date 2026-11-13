@@ -173,8 +173,10 @@ func (s *Store) SaveCompetitionChanged(c *Competition) (bool, error) {
 		return false, fmt.Errorf("invalid competition ID: %w", err)
 	}
 
-	mu := s.getCompLock(c.ID)
-	mu.Lock()
+	mu, lockErr := s.lockCompWrite(c.ID)
+	if lockErr != nil {
+		return false, lockErr
+	}
 	defer mu.Unlock()
 
 	return s.saveCompetitionChangedLocked(c, s.directWrite)
@@ -332,8 +334,10 @@ func (s *Store) UpdateCompetitionChanged(id string, transform func(current *Comp
 		return false, fmt.Errorf("invalid competition ID: %w", err)
 	}
 
-	mu := s.getCompLock(id)
-	mu.Lock()
+	mu, lockErr := s.lockCompWrite(id)
+	if lockErr != nil {
+		return false, lockErr
+	}
 	defer mu.Unlock()
 
 	// Load directly under the lock (bypass the cached path; the
@@ -413,8 +417,10 @@ func (s *Store) DeleteCompetitionFile(id, filename string) error {
 	if _, ok := allowedDrawFiles[filename]; !ok {
 		return fmt.Errorf("DeleteCompetitionFile: filename %q is not an allowed draw artifact", filename)
 	}
-	mu := s.getCompLock(id)
-	mu.Lock()
+	mu, lockErr := s.lockCompWrite(id)
+	if lockErr != nil {
+		return lockErr
+	}
 	defer mu.Unlock()
 	path := s.compPath(id, filename)
 	if err := s.root.remove(path); err != nil && !os.IsNotExist(err) {
@@ -457,8 +463,10 @@ func (s *Store) QuarantineCompetitionFile(id, filename string) (string, error) {
 		return "", fmt.Errorf("QuarantineCompetitionFile: filename %q is not an allowed draw artifact", filename)
 	}
 
-	mu := s.getCompLock(id)
-	mu.Lock()
+	mu, lockErr := s.lockCompWrite(id)
+	if lockErr != nil {
+		return "", lockErr
+	}
 	defer mu.Unlock()
 
 	path := s.compPath(id, filename)
@@ -491,8 +499,10 @@ func (s *Store) DeleteCompetition(id string) error {
 		return fmt.Errorf("invalid competition ID: %w", err)
 	}
 
-	mu := s.getCompLock(id)
-	mu.Lock()
+	mu, lockErr := s.lockCompWrite(id)
+	if lockErr != nil {
+		return lockErr
+	}
 	defer mu.Unlock()
 
 	// A recreated same-ID competition must be re-checked for legacy shapes

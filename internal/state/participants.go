@@ -282,6 +282,7 @@ func (s *Store) loadParticipants(compID string, withZekkenName bool, opts LoadPa
 	// Before the read lock: legacy shapes convert on first read, under the
 	// WRITE lock (legacy_upgrade.go). No-op after the first call per comp.
 	s.EnsureLegacyUpgraded(compID)
+	s.settleKeptWALBeforeRead(compID)
 	mu := s.getCompLock(compID)
 	mu.RLock()
 	defer mu.RUnlock()
@@ -362,6 +363,26 @@ func (s *Store) readParticipantsNoLock(compID string, withZekkenName bool, opts 
 		}
 		return nil, false, err
 	}
+	players, textChanged, err := s.decodeParticipants(compID, raw, withZekkenName, opts, s.readSeedsRaw)
+	if err != nil {
+		return nil, false, err
+	}
+	// helper.Player is a type alias for domain.Player (NFR-007); the
+	// parser output can flow straight into the cache without conversion.
+	cache.data = participantsRead{players: players, textChanged: textChanged}
+	cache.mtime = mtime
+
+	res := make([]domain.Player, len(players))
+	copy(res, players)
+	return res, textChanged, nil
+}
+
+// decodeParticipants parses participants.csv content and, with
+// opts.WithSeeds, merges the seeds readSeeds answers. It is the one roster
+// parser: readParticipantsNoLock feeds it the file on disk (and caches the
+// result), loadParticipantsVia the bytes a transaction staged
+// (read-your-own-writes, never cached).
+func (s *Store) decodeParticipants(compID string, raw []byte, withZekkenName bool, opts LoadParticipantsOpts, readSeeds func(string) ([]domain.SeedAssignment, error)) ([]domain.Player, bool, error) {
 	records, recordLines, err := helper.ReadCSVRecords(bytes.NewReader(raw))
 	if err != nil {
 		return nil, false, err
@@ -520,7 +541,7 @@ func (s *Store) readParticipantsNoLock(compID string, withZekkenName bool, opts 
 		// seeds to see it. Refusal belongs at the point seeds are USED (the draw
 		// pipeline, which returns a 400 naming the problem), not at the point
 		// they are shown.
-		seeds, seedsErr := s.readSeedsRaw(compID)
+		seeds, seedsErr := readSeeds(compID)
 		if seedsErr != nil && !errors.Is(seedsErr, fs.ErrNotExist) {
 			// The roster is still shown, unseeded: a seeds file that cannot be
 			// read must not hide the participants.
@@ -543,14 +564,7 @@ func (s *Store) readParticipantsNoLock(compID string, withZekkenName bool, opts 
 			}
 		}
 	}
-	// helper.Player is a type alias for domain.Player (NFR-007); the
-	// parser output can flow straight into the cache without conversion.
-	cache.data = participantsRead{players: players, textChanged: textChanged}
-	cache.mtime = mtime
-
-	res := make([]domain.Player, len(players))
-	copy(res, players)
-	return res, textChanged, nil
+	return players, textChanged, nil
 }
 
 // SaveParticipants persists the roster. It loads the competition under the
@@ -564,8 +578,10 @@ func (s *Store) SaveParticipants(compID string, players []domain.Player) error {
 // saveParticipantsTakingLock holds the lock/zekken preamble both exported
 // savers share, so the restore variant cannot drift from the normal one.
 func (s *Store) saveParticipantsTakingLock(compID string, players []domain.Player, enforceTeamNames bool) error {
-	mu := s.getCompLock(compID)
-	mu.Lock()
+	mu, lockErr := s.lockCompWrite(compID)
+	if lockErr != nil {
+		return lockErr
+	}
 	defer mu.Unlock()
 	withZekken, comp, err := s.withZekkenNameLocked(compID)
 	if err != nil {
@@ -573,7 +589,7 @@ func (s *Store) saveParticipantsTakingLock(compID string, players []domain.Playe
 	}
 	// comp is handed on so the team-name gate does not re-read config.md under
 	// the lock we already read it under.
-	return s.saveParticipantsNoLock(compID, players, withZekken, teamNameRule{skip: !enforceTeamNames, comp: comp})
+	return s.saveParticipantsNoLock(compID, players, withZekken, teamNameRule{skip: !enforceTeamNames, comp: comp}, s.directRosterIO())
 }
 
 // SaveParticipantsRestored persists a roster recovered from an operator's own
@@ -715,8 +731,10 @@ func (s *Store) SetCheckIn(compID, pid string, withZekkenName, checkedIn bool, a
 // checked in (CheckedIn when it was not, AlreadyCheckedIn when it was) and
 // takes the stamp. The file is written when any participant took the stamp.
 func (s *Store) BulkCheckInAt(compID string, pids []string, at int64) (BulkCheckInResult, error) {
-	mu := s.getCompLock(compID)
-	mu.Lock()
+	mu, lockErr := s.lockCompWrite(compID)
+	if lockErr != nil {
+		return BulkCheckInResult{}, lockErr
+	}
 	defer mu.Unlock()
 
 	withZekkenName, comp, err := s.withZekkenNameLocked(compID)
@@ -780,7 +798,7 @@ func (s *Store) BulkCheckInAt(compID string, pids []string, at int64) (BulkCheck
 	if changed {
 		// comp comes from withZekkenNameLocked above: bulk check-in is the
 		// highest-frequency writer, so it must not re-read config.md.
-		if err := s.saveParticipantsNoLock(compID, players, withZekkenName, teamNameRule{comp: comp}); err != nil {
+		if err := s.saveParticipantsNoLock(compID, players, withZekkenName, teamNameRule{comp: comp}, s.directRosterIO()); err != nil {
 			return BulkCheckInResult{}, err
 		}
 	}
@@ -792,23 +810,27 @@ func (s *Store) BulkCheckInAt(compID string, pids []string, at int64) (BulkCheck
 // to the target player, and persists the result. Used to avoid TOCTOU races
 // on concurrent check-ins.
 func (s *Store) UpdateParticipant(compID string, pid string, withZekkenName bool, transform func(p *domain.Player) error) (*domain.Player, error) {
-	mu := s.getCompLock(compID)
-	mu.Lock()
+	mu, lockErr := s.lockCompWrite(compID)
+	if lockErr != nil {
+		return nil, lockErr
+	}
 	defer mu.Unlock()
 
 	// nil comp: this path is deliberately NOT setup-gated (check-in toggles must
 	// keep working after the competition starts), so it has no already-loaded
 	// competition to hand on and the rule lazy-loads if it ever needs one.
-	return s.updateParticipantNoLock(compID, pid, withZekkenName, nil, transform)
+	return s.updateParticipantNoLock(s.directRosterIO(), compID, pid, withZekkenName, nil, transform)
 }
 
 // updateParticipantNoLock contains the full mutate-load-rewrite body of
 // UpdateParticipant. Caller MUST hold the per-comp lock. Factored out so
 // ReplaceParticipant can wrap the same logic under a status-gated lock
 // without forcing the lock-only check-in callers to pay for that gate.
-func (s *Store) updateParticipantNoLock(compID string, pid string, withZekkenName bool, comp *Competition, transform func(p *domain.Player) error) (*domain.Player, error) {
+func (s *Store) updateParticipantNoLock(rio rosterIO, compID string, pid string, withZekkenName bool, comp *Competition, transform func(p *domain.Player) error) (*domain.Player, error) {
 	// Seeds are not merged here; check-in mutations don't need seed data.
-	players, err := s.loadParticipantsNoLock(compID, withZekkenName, LoadParticipantsOpts{WithSeeds: false})
+	// Read through io: inside a transaction a second edit starts from the
+	// roster the first one staged.
+	players, err := s.loadParticipantsVia(rio, compID, withZekkenName, LoadParticipantsOpts{WithSeeds: false})
 	if err != nil {
 		return nil, err
 	}
@@ -845,13 +867,6 @@ func (s *Store) updateParticipantNoLock(compID string, pid string, withZekkenNam
 	// of a name or a dojo is no identity change at all.
 	helper.CanonicalizePlayerText(&players[foundIdx])
 
-	// The roster rule saveParticipantsNoLock asks, asked here first because
-	// the seeds.csv rewrite below lands before that save: a rename the save
-	// would refuse must not have renamed the seed already.
-	if err := RefuseReservedNames(players); err != nil {
-		return nil, err
-	}
-
 	// Duplicate guard: reject if any OTHER participant already has the same
 	// (normalizedName, normalizedDojo) pair. This runs unconditionally; even
 	// for check-in-only transforms that don't rename; which is harmless
@@ -870,6 +885,19 @@ func (s *Store) updateParticipantNoLock(compID string, pid string, withZekkenNam
 		}
 	}
 
+	identityChanged := oldName != players[foundIdx].Name || oldDojo != players[foundIdx].Dojo
+
+	// The floors saveParticipantsNoLock asks, asked here first because the
+	// seeds.csv rewrite below lands (or is staged) before that save: an edit
+	// the save would refuse must not have renamed the seed already. Only an
+	// identity change rewrites seeds.csv, so any other edit leaves the floors
+	// to the save alone.
+	if identityChanged {
+		if err := s.refuseRosterWrite(rio, compID, players, withZekkenName, teamNameRule{comp: comp}); err != nil {
+			return nil, err
+		}
+	}
+
 	// Pre-validate and load seeds before touching participants.csv so
 	// that a corrupt seeds file is caught before any disk write. If seeds
 	// doesn't exist, seeds is nil and the rename step is skipped.
@@ -879,7 +907,6 @@ func (s *Store) updateParticipantNoLock(compID string, pid string, withZekkenNam
 	// skipped this would orphan the seed -- the merge fallback below is
 	// blocked because the row's dojo is non-empty, and generate-draw then
 	// fails "seeded participant not found in main list".
-	identityChanged := oldName != players[foundIdx].Name || oldDojo != players[foundIdx].Dojo
 	var seeds []domain.SeedAssignment
 	var seedsPath string
 	if identityChanged {
@@ -890,7 +917,7 @@ func (s *Store) updateParticipantNoLock(compID string, pid string, withZekkenNam
 		// the rename and leave seeds.csv naming a competitor who no longer
 		// exists under that name, which is a worse state than the incomplete
 		// seeding the operator is in the middle of fixing.
-		seeds, loadErr = s.readSeedsRaw(compID)
+		seeds, loadErr = s.readSeedsVia(rio, compID)
 		switch {
 		case loadErr == nil:
 			// seeds loaded; will rename below.
@@ -907,7 +934,9 @@ func (s *Store) updateParticipantNoLock(compID string, pid string, withZekkenNam
 	// longer matches any row) and skip the rewrite, then successfully write
 	// participants. The reverse order (participants first) is not
 	// retryable; the old identity is gone from participants so the seeds
-	// rewrite can never be applied again.
+	// rewrite can never be applied again. Inside a transaction both writes
+	// are staged in the WAL and land or abort together, so the order only
+	// matters on the direct path.
 	if identityChanged && seeds != nil {
 		// A row refers to THIS participant iff domain.RosterIndex.Lookup
 		// (built over the pre-edit roster above) resolves its (name, dojo) to
@@ -947,29 +976,90 @@ func (s *Store) updateParticipantNoLock(compID string, pid string, withZekkenNam
 			if merr != nil {
 				return nil, fmt.Errorf("rename seed for %q: %w", oldName, merr)
 			}
-			if werr := s.atomicWrite(seedsPath, data, 0600); werr != nil {
+			if werr := rio.write(seedsPath, data, 0600); werr != nil {
 				return nil, fmt.Errorf("rename seed for %q: %w", oldName, werr)
 			}
+			// After the bytes land (or are staged: an abort moves it
+			// again, invalidateCachesForWALIntents), bumpFileVersion's rule.
+			s.bumpFileVersion(compID, "seeds.csv")
 		}
 	}
 
-	if err := s.saveParticipantsNoLock(compID, players, withZekkenName, teamNameRule{comp: comp}); err != nil {
+	if err := s.saveParticipantsNoLock(compID, players, withZekkenName, teamNameRule{comp: comp}, rio); err != nil {
 		return nil, err
 	}
 	return &players[foundIdx], nil
 }
 
-// loadParticipantsLocked reads participants (with seeds merged) without
-// acquiring a lock. Caller must hold the per-comp lock for compID. Used by
-// the StoreTx transaction handle (transactions.go), which already holds the
-// per-comp lock across its load/save sequence.
-//
-// Delegates to the canonical loadParticipantsNoLock (WithSeeds:true, no HasIDs
-// hint → it consults Competition.HasParticipantIDs and keeps the per-record
-// uuidRE fallback for mixed legacy files) so the parse logic lives in one
-// place.
-func (s *Store) loadParticipantsLocked(compID string, withZekkenName bool) ([]domain.Player, error) {
-	return s.loadParticipantsNoLock(compID, withZekkenName, LoadParticipantsOpts{WithSeeds: true})
+// rosterIO says where a roster read finds participants.csv and seeds.csv and
+// where a roster write sends them. Outside a transaction (directRosterIO)
+// reads go to disk through the cache and writes land atomically; inside one
+// (storeTx.rosterIO) writes are staged in the WAL and reads answer what the
+// transaction staged (operator decision D5 (a), 2026-11-12), so one save body
+// serves both and every floor runs on both.
+type rosterIO struct {
+	write writeFn
+	// remove removes a file: at once outside a transaction, staged in the WAL
+	// (and applied in order with the writes on commit) inside one.
+	remove func(path string) error
+	// pending answers the bytes this transaction staged for a file of the
+	// competition; nil outside a transaction.
+	pending func(filename string) ([]byte, bool)
+	// removed answers whether this transaction staged a delete of a file of
+	// the competition; nil outside a transaction.
+	removed func(filename string) bool
+}
+
+func (s *Store) directRosterIO() rosterIO {
+	return rosterIO{write: s.directWrite, remove: s.directRemoveWAL}
+}
+
+func (rio rosterIO) staged(filename string) ([]byte, bool) {
+	if rio.pending == nil {
+		return nil, false
+	}
+	return rio.pending(filename)
+}
+
+// stagedRemoved reports whether the transaction staged a delete of filename,
+// so a read through rio sees the file as absent whatever the disk holds.
+func (rio rosterIO) stagedRemoved(filename string) bool {
+	return rio.removed != nil && rio.removed(filename)
+}
+
+// readSeedsVia is readSeedsRaw over what rio sees.
+func (s *Store) readSeedsVia(rio rosterIO, compID string) ([]domain.SeedAssignment, error) {
+	if raw, ok := rio.staged("seeds.csv"); ok {
+		return helper.ReadSeedsRaw(bytes.NewReader(raw))
+	}
+	return s.readSeedsRaw(compID)
+}
+
+// loadParticipantsVia is loadParticipantsNoLock over what rio sees: when the
+// transaction staged participants.csv (or, for a seeded read, seeds.csv) the
+// roster is parsed from the staged bytes and not cached; otherwise it is the
+// ordinary cached read.
+func (s *Store) loadParticipantsVia(rio rosterIO, compID string, withZekkenName bool, opts LoadParticipantsOpts) ([]domain.Player, error) {
+	rawStaged, participantsStaged := rio.staged("participants.csv")
+	_, seedsStaged := rio.staged("seeds.csv")
+	if !participantsStaged && (!opts.WithSeeds || !seedsStaged) {
+		return s.loadParticipantsNoLock(compID, withZekkenName, opts)
+	}
+	raw := rawStaged
+	if !participantsStaged {
+		var err error
+		raw, err = s.root.readFile(s.compPath(compID, "participants.csv"))
+		if err != nil {
+			if os.IsNotExist(err) {
+				return []domain.Player{}, nil
+			}
+			return nil, err
+		}
+	}
+	players, _, err := s.decodeParticipants(compID, raw, withZekkenName, opts, func(id string) ([]domain.SeedAssignment, error) {
+		return s.readSeedsVia(rio, id)
+	})
+	return players, err
 }
 
 // marshalParticipantsCSV serialises players into RFC 4180 CSV bytes.
@@ -1170,8 +1260,10 @@ func (s *Store) requireSetupLocked(compID string) (*Competition, error) {
 // POST /competitions/:id/start landing between the handler's outer check and
 // this lock would otherwise leak a roster mutation into a started competition.
 func (s *Store) AddParticipant(compID string, p domain.Player, withZekkenName bool) (*domain.Player, error) {
-	mu := s.getCompLock(compID)
-	mu.Lock()
+	mu, lockErr := s.lockCompWrite(compID)
+	if lockErr != nil {
+		return nil, lockErr
+	}
 	defer mu.Unlock()
 
 	comp, err := s.requireSetupLocked(compID)
@@ -1205,7 +1297,7 @@ func (s *Store) AddParticipant(compID string, p domain.Player, withZekkenName bo
 
 	players = append(players, p)
 
-	if err := s.saveParticipantsNoLock(compID, players, withZekkenName, teamNameRule{comp: comp}); err != nil {
+	if err := s.saveParticipantsNoLock(compID, players, withZekkenName, teamNameRule{comp: comp}, s.directRosterIO()); err != nil {
 		return nil, err
 	}
 
@@ -1219,8 +1311,10 @@ func (s *Store) AddParticipant(compID string, p domain.Player, withZekkenName bo
 // the file write. UpdateParticipant remains gateless because check-in toggles
 // must keep working after the competition is running.
 func (s *Store) ReplaceParticipant(compID string, pid string, withZekkenName bool, transform func(p *domain.Player) error) (*domain.Player, error) {
-	mu := s.getCompLock(compID)
-	mu.Lock()
+	mu, lockErr := s.lockCompWrite(compID)
+	if lockErr != nil {
+		return nil, lockErr
+	}
 	defer mu.Unlock()
 
 	comp, err := s.requireSetupLocked(compID)
@@ -1228,7 +1322,7 @@ func (s *Store) ReplaceParticipant(compID string, pid string, withZekkenName boo
 		return nil, err
 	}
 
-	return s.updateParticipantNoLock(compID, pid, withZekkenName, comp, transform)
+	return s.updateParticipantNoLock(s.directRosterIO(), compID, pid, withZekkenName, comp, transform)
 }
 
 // teamNameRule is the per-write context for the team-name uniqueness gate. The
@@ -1271,7 +1365,7 @@ type teamNameRule struct {
 //
 // comp is the caller's already-loaded competition, or nil to load on demand.
 // Caller MUST hold the per-comp lock.
-func (s *Store) checkNewTeamNameCollisions(compID string, players []domain.Player, withZekkenName bool, comp *Competition) error {
+func (s *Store) checkNewTeamNameCollisions(rio rosterIO, compID string, players []domain.Player, withZekkenName bool, comp *Competition) error {
 	names := make([]string, len(players))
 	for i, p := range players {
 		names[i] = p.Name
@@ -1320,7 +1414,7 @@ func (s *Store) checkNewTeamNameCollisions(compID string, players []domain.Playe
 	// keeps the read on the same participants-cache key the hot check-in path
 	// uses (the cache is keyed by opts), instead of populating a second
 	// _with_seeds_ entry and paying an extra seeds.csv read to build it.
-	if stored, lerr := s.loadParticipantsNoLock(compID, withZekkenName, LoadParticipantsOpts{WithSeeds: false}); lerr == nil {
+	if stored, lerr := s.loadParticipantsVia(rio, compID, withZekkenName, LoadParticipantsOpts{WithSeeds: false}); lerr == nil {
 		for _, p := range stored {
 			storedCounts[helper.NormalizeParticipantName(p.Name)]++
 		}
@@ -1433,7 +1527,7 @@ func nonBlankMetadata(metadata []string) []string {
 // own doc comment -- a restore writes into a freshly created competition
 // with nothing stored to grandfather against, so it is refused there
 // exactly as fresh operator input would be.
-func (s *Store) checkTeamMemberNameCollisions(compID string, players []domain.Player, withZekkenName bool, comp *Competition) error {
+func (s *Store) checkTeamMemberNameCollisions(rio rosterIO, compID string, players []domain.Player, withZekkenName bool, comp *Competition) error {
 	type incomingTeamDupes struct {
 		team   string // raw team name, for the operator-facing message only
 		key    string // helper.PlayerKey(players[i]) -- the identity used for the grandfather lookup, never the raw name
@@ -1490,7 +1584,7 @@ func (s *Store) checkTeamMemberNameCollisions(compID string, players []domain.Pl
 	// rationale as the comp-load failure above; an unenforced write here is
 	// still safer than a bricked one.
 	storedCounts := make(map[string]map[string]int)
-	if stored, lerr := s.loadParticipantsNoLock(compID, withZekkenName, LoadParticipantsOpts{WithSeeds: false}); lerr == nil {
+	if stored, lerr := s.loadParticipantsVia(rio, compID, withZekkenName, LoadParticipantsOpts{WithSeeds: false}); lerr == nil {
 		for _, p := range stored {
 			names := nonBlankMetadata(p.Metadata)
 			if len(names) == 0 {
@@ -1528,7 +1622,12 @@ func (s *Store) checkTeamMemberNameCollisions(compID string, players []domain.Pl
 	return &duplicateTeamMemberError{violations: violations}
 }
 
-func (s *Store) saveParticipantsNoLock(compID string, players []domain.Player, withZekkenName bool, rule teamNameRule) error {
+// refuseRosterWrite is every floor a roster write must pass, asked by
+// saveParticipantsNoLock (the chokepoint every roster write funnels through)
+// and, ahead of its seeds.csv rewrite, by updateParticipantNoLock, so an edit
+// the save would refuse never renames the seed first (a blank dojo used to).
+// It writes nothing.
+func (s *Store) refuseRosterWrite(rio rosterIO, compID string, players []domain.Player, withZekkenName bool, rule teamNameRule) error {
 	// Tier-1 (perfect-duplicate) guard at the lowest write layer so EVERY
 	// persistence path; the bulk PUT /competitions/:id roster import (the
 	// SPA's primary flow), single add/edit, and any future caller; rejects
@@ -1559,22 +1658,25 @@ func (s *Store) saveParticipantsNoLock(compID string, players []domain.Player, w
 	// Unconditional (not gated by rule.skip): see ErrDuplicateTeamMember's
 	// own doc comment for why this floor is never exempted, unlike the
 	// team-NAME rule just below.
-	if err := s.checkTeamMemberNameCollisions(compID, players, withZekkenName, rule.comp); err != nil {
+	if err := s.checkTeamMemberNameCollisions(rio, compID, players, withZekkenName, rule.comp); err != nil {
 		return err
 	}
 
 	if !rule.skip {
-		if err := s.checkNewTeamNameCollisions(compID, players, withZekkenName, rule.comp); err != nil {
+		if err := s.checkNewTeamNameCollisions(rio, compID, players, withZekkenName, rule.comp); err != nil {
 			return err
 		}
 	}
 
-	// Reserved-name guard, the one place the roster rule is asked of a write
-	// (updateParticipantNoLock asks it early too, only because its seeds.csv
-	// rewrite lands before this call). Names arrive raw from the paste box
-	// and title-cased from an add, an edit or an import; the rule ignores
-	// case, so every spelling is refused alike.
-	if err := RefuseReservedNames(players); err != nil {
+	// Reserved-name guard, the one place the roster rule is asked of a write.
+	// Names arrive raw from the paste box and title-cased from an add, an
+	// edit or an import; the rule ignores case, so every spelling is refused
+	// alike.
+	return RefuseReservedNames(players)
+}
+
+func (s *Store) saveParticipantsNoLock(compID string, players []domain.Player, withZekkenName bool, rule teamNameRule, rio rosterIO) error {
+	if err := s.refuseRosterWrite(rio, compID, players, withZekkenName, rule); err != nil {
 		return err
 	}
 
@@ -1629,8 +1731,8 @@ func (s *Store) saveParticipantsNoLock(compID string, players []domain.Player, w
 	// orphan prune below can reuse its cached competition() lookup: both
 	// steps need Kind/TeamSize, and loadComp() memoises the read for the
 	// life of this one saveParticipantsNoLock call.
-	roster := &legacyUpgradeRoster{store: s, compID: compID}
-	if err := s.upgradeSquadsFromMetadataLocked(compID, roster, mintedByCompetitor); err != nil {
+	roster := &legacyUpgradeRoster{store: s, compID: compID, rio: rio}
+	if err := s.upgradeSquadsFromMetadataLocked(rio, compID, roster, mintedByCompetitor); err != nil {
 		log.Printf("state: saveParticipants %s: pre-write squad migration: %v", compID, err)
 	}
 
@@ -1641,15 +1743,24 @@ func (s *Store) saveParticipantsNoLock(compID string, players []domain.Player, w
 		return err
 	}
 
-	if err := s.atomicWrite(path, data, 0600); err != nil {
+	// rio decides where the bytes go: the direct writer lands them
+	// atomically, a transaction's writer stages them in the WAL (operator
+	// decision D5 (a), 2026-11-12), so every floor above runs on both paths.
+	// The side writes (the member migration above, the prunes below) go the
+	// same way.
+	if err := rio.write(path, data, 0600); err != nil {
 		return err
 	}
 
 	// Invalidate every parse-mode variant of the participant cache so a
 	// subsequent Load (regardless of HasIDs hint / WithSeeds) re-parses
 	// from the freshly-written file. See participantsCacheKey for the
-	// matrix mp-p7n round-6 split into.
+	// matrix mp-p7n round-6 split into. Inside a transaction its own loads
+	// read the staged bytes (loadParticipantsVia) and never fill the cache.
 	s.invalidateParticipantCaches(compID)
+	// After the bytes land (bumpFileVersion's rule); a transaction abort
+	// moves it again (invalidateCachesForWALIntents).
+	s.bumpFileVersion(compID, "participants.csv")
 
 	// Re-arm EnsureLegacyUpgraded's once-per-process gate (bc-pnum): the
 	// pools.csv/pool-matches.csv repair copies ids FROM the roster this
@@ -1693,10 +1804,10 @@ func (s *Store) saveParticipantsNoLock(compID string, players []domain.Player, w
 	if comp, err := roster.competition(); err != nil {
 		log.Printf("state: saveParticipants %s: prune orphaned team data: load competition: %v", compID, err)
 	} else {
-		if err := s.pruneOrphanedTeamMembersLocked(compID, comp, keepIDs); err != nil {
+		if err := s.pruneOrphanedTeamMembersLocked(rio, compID, comp, keepIDs); err != nil {
 			log.Printf("state: saveParticipants %s: prune orphaned team members: %v", compID, err)
 		}
-		if err := s.pruneOrphanedTeamLineupsLocked(compID, comp, stamped); err != nil {
+		if err := s.pruneOrphanedTeamLineupsLocked(rio, compID, comp, stamped); err != nil {
 			log.Printf("state: saveParticipants %s: prune orphaned team lineups: %v", compID, err)
 		}
 	}

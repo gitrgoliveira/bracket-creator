@@ -845,9 +845,12 @@ paths:
                 $ref: '#/components/schemas/Error'
         '409':
           description: >
-            A competition has an unsettled pending write (WAL). The backup cannot
-            be taken until the app is restarted (`code: pending_write_unsettled`).
-            Refusals change nothing.
+            A competition has a change kept in the write-ahead log (WAL) that the
+            disk still refuses (`code: pending_write_unsettled`). The backup writes
+            that change first, so it succeeds once the disk accepts writes again;
+            a restart does not help. If it still refuses, a folder the change
+            names may have been removed outside the app: restore it, or see the
+            server log. Refusals change nothing.
           content:
             application/json:
               schema:
@@ -904,9 +907,12 @@ paths:
                 $ref: '#/components/schemas/Error'
         '409':
           description: >
-            A competition has an unsettled pending write (WAL). The backup cannot
-            be taken until the app is restarted (`code: pending_write_unsettled`).
-            Refusals change nothing.
+            A competition has a change kept in the write-ahead log (WAL) that the
+            disk still refuses (`code: pending_write_unsettled`). The backup writes
+            that change first, so it succeeds once the disk accepts writes again;
+            a restart does not help. If it still refuses, a folder the change
+            names may have been removed outside the app: restore it, or see the
+            server log. Refusals change nothing.
           content:
             application/json:
               schema:
@@ -1065,7 +1071,7 @@ paths:
         | 409 | `folder_incomplete` | A competition folder to replace or remove has no `config.md`, so it cannot be copied first; lists them |
         | 409 | `matches_running` | Matches running in replaced/removed competition without `allowRunning=true`; lists them |
         | 409 | `plan_changed` | Folder competitions changed between plan and restore |
-        | 409 | `pending_write_unsettled` | A competition has a pending write (WAL) that could not be finished; restart the app |
+        | 409 | `pending_write_unsettled` | A competition has a change kept in the write-ahead log (WAL) that the disk still refuses; free disk space or fix permissions, then retry. If that does not clear it, a folder the change names may have been removed outside the app: restore it, or see the server log |
         | 409 | `password_required` | Admin password required for restored tournament |
         | 409 | `nothing_to_restore` | Archive holds nothing to restore (or undo) |
       security:
@@ -3066,11 +3072,15 @@ paths:
           description: |
             Participant updated. When the competition is in `draw-ready` state and
             the cascade detects dojo conflicts, a `warnings` array is included in
-            the response alongside the standard player fields. If the draw cascade
-            itself fails (e.g. an I/O error after pools were already updated), the
-            participant update is still persisted and the response includes a
-            `cascadeError` string; any warnings collected before the failure are
-            also included.
+            the response alongside the standard player fields. The participant
+            edit and the draw cascade are one transaction: if the cascade fails,
+            nothing is saved and the request is answered with an error (400 or
+            404 for a refusal the cascade names, 500 otherwise). A 500 can also
+            mean the edit was kept: the transaction committed but the disk then
+            refused a file write, and the edit is written before the next read
+            or write of the competition, or at the next startup. While the disk
+            still refuses it, a later write to the competition is also answered
+            500 and makes no change. Reload before editing again.
           content:
             application/json:
               schema:
@@ -3086,18 +3096,14 @@ paths:
                           Non-fatal advisory messages from the draw cascade (e.g. dojo
                           conflict). Present only when at least one warning was
                           generated; absent in setup state.
-                      cascadeError:
-                        type: string
-                        description: |
-                          Present when the participant update succeeded but the draw
-                          cascade failed (e.g. I/O error updating bracket artifacts).
-                          The operator should review and may need to re-generate the draw.
         '400':
           $ref: '#/components/responses/BadRequest'
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /api/competitions/{id}/participants/{pid}/checkin:
     parameters:

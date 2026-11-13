@@ -15,8 +15,7 @@
 // and that test tells you at once whether the page still tells the truth.
 //
 // Material's navigation.instant swaps pages over XHR, so the widget mounts
-// from the document$ observable rather than DOMContentLoaded, exactly as
-// mermaid-init.js does.
+// from the document$ observable rather than DOMContentLoaded.
 (function () {
   "use strict";
 

@@ -32,7 +32,7 @@ import (
 func TestReplaceParticipantInDraw_IDLessCrossPoolRow_NeverRenamed(t *testing.T) {
 	eng, store, compID := setupLegacyIDLessMixedTwoPools(t)
 
-	warnings, err := eng.ReplaceParticipantInDraw(compID, "Alice|DojoX", "Alice", "DojoX", "", "Alicia", "DojoX", "")
+	warnings, err := replaceInDraw(eng, compID, "Alice|DojoX", "Alice", "DojoX", "", "Alicia", "DojoX", "")
 	require.NoError(t, err)
 	require.Len(t, warnings, 1, "an id-less pid matches no row anywhere, so the generic not-found warning fires")
 	assert.Contains(t, warnings[0], "not found in draw artifacts")
@@ -101,7 +101,7 @@ func TestReplaceParticipantInDraw_IDLessSamePoolRow_NeverRenamed(t *testing.T) {
 		{ID: "Pool A-0", SideA: "Alice", SideB: "Carol", Status: state.MatchStatusScheduled, Court: "A"},
 	}))
 
-	warnings, err := eng.ReplaceParticipantInDraw(compID, "Alice|DojoX", "Alice", "DojoX", "", "Alicia", "DojoX", "")
+	warnings, err := replaceInDraw(eng, compID, "Alice|DojoX", "Alice", "DojoX", "", "Alicia", "DojoX", "")
 	require.NoError(t, err)
 	require.Len(t, warnings, 1, "an id-less pid matches no row anywhere, so the generic not-found warning fires")
 	assert.Contains(t, warnings[0], "not found in draw artifacts")

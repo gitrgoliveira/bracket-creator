@@ -690,7 +690,8 @@ func RegisterLeagueTiebreakHandlers(r *gin.RouterGroup, eng LeagueTiebreakEngine
 	// Undo of the Accept above: the accepted shared ranks are taken back in one
 	// transaction (engine.UndoLeagueSharedRanks). A finished league goes back to
 	// match play (competition_started), and a match on a shiaijo the tournament
-	// no longer has loses its court. The tie is then asked again. Organiser
+	// no longer has loses its court. The tie is then asked again, unless a
+	// correction dissolved it, when the completion pass finishes the league. Organiser
 	// only, also in self-run (isSelfRunMainGatedConfigRoute).
 	// 404 competition missing, 400 not a team league, 409 not_finalized.
 	r.DELETE("/competitions/:id/league-tiebreak/finalize", func(c *gin.Context) {
@@ -709,6 +710,12 @@ func RegisterLeagueTiebreakHandlers(r *gin.RouterGroup, eng LeagueTiebreakEngine
 		}
 		if out.Reopened {
 			hub.Broadcast(EventCompetitionStarted, gin.H{"competitionId": id})
+			// A late correction may have dissolved the accepted tie, leaving the
+			// table settled: only the pass completes such a league again, as the
+			// Accept door's own pass does. One that still owes its tie stays in
+			// match play.
+			outcome, autoErr := eng.MaybeAutoCompletePools(id)
+			answerAutoComplete(c, hub, id, outcome, autoErr)
 		}
 		hub.Broadcast(EventMatchUpdated, gin.H{"competitionId": id})
 		hub.Broadcast(EventScheduleUpdated, nil)

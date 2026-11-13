@@ -1127,6 +1127,41 @@ func TestLeagueTiebreakUndo_ReopensAFinishedLeague(t *testing.T) {
 	assert.Contains(t, hub.events, EventScheduleUpdated)
 }
 
+// A late correction can dissolve the accepted tie before the Undo: the league
+// is reopened with nothing left to decide, so the completion pass finishes it
+// again rather than stranding it in match play.
+func TestLeagueTiebreakUndo_RunsThePassOnAReopenedLeague(t *testing.T) {
+	eng := &stubLeagueTiebreakEngine{
+		undo:        engine.LeagueReopen{Reopened: true},
+		autoOutcome: engine.AutoCompleteTransitioned,
+	}
+	hub := &recordingBroadcaster{}
+	r := leagueTiebreakRouter(eng, &stubLeagueTiebreakStore{}, hub)
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/competitions/comp-1/league-tiebreak/finalize", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	assert.Contains(t, hub.events, EventCompetitionStarted)
+	assert.Contains(t, hub.events, EventCompetitionCompleted, "a settled league is finished again at once")
+}
+
+func TestLeagueTiebreakUndo_PassFailureIsFlaggedNotFatal(t *testing.T) {
+	eng := &stubLeagueTiebreakEngine{
+		undo:    engine.LeagueReopen{Reopened: true},
+		autoErr: fmt.Errorf("disk full"),
+	}
+	r := leagueTiebreakRouter(eng, &stubLeagueTiebreakStore{}, &recordingBroadcaster{})
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/competitions/comp-1/league-tiebreak/finalize", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	assert.Equal(t, AutoCompleteErrorValue, w.Header().Get(AutoCompleteErrorHeader))
+}
+
 func TestLeagueTiebreakUndo_InPlayAnswersEmptyLists(t *testing.T) {
 	hub := &recordingBroadcaster{}
 	r := leagueTiebreakRouter(&stubLeagueTiebreakEngine{}, &stubLeagueTiebreakStore{}, hub)

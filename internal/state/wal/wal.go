@@ -125,15 +125,18 @@ func bytesDigest(data []byte) string {
 // log kept after its Apply or Done failed while the process went on writing,
 // or a version-2 log a build from before the delete step kept unapplied.
 // Replaying it would put the older content back over newer. A step with no
-// Before was written by a build from before the field and is not judged.
+// Before was written by a build from before the field and is not judged
+// stale, but its file is read all the same: a read that fails (a path outside
+// the data folder, a file that cannot be read) marks the log unchecked
+// whatever version wrote it, so it is never replayed unchecked.
 func staleStep(read ReadFn, steps []FileIntent) (string, error) {
 	for _, in := range steps {
-		if in.Before == "" {
-			continue
-		}
 		now, err := fileDigest(read, in.Path)
 		if err != nil {
 			return "", err
+		}
+		if in.Before == "" {
+			continue
 		}
 		result := absentDigest
 		if !in.Delete {

@@ -178,6 +178,25 @@ func TestWALScan_DoesNotJudgeALogFromBeforeTheField(t *testing.T) {
 	assert.Empty(t, pending[0].Stale())
 }
 
+// TestWALScan_ChecksTheFilesOfALogFromBeforeTheField: a log with no "before"
+// is not judged stale, but its files are still read, so one the read refuses
+// (here a folder stands where the file was) is marked unchecked and never
+// applied, whatever version wrote it.
+func TestWALScan_ChecksTheFilesOfALogFromBeforeTheField(t *testing.T) {
+	root := t.TempDir()
+	walDir := filepath.Join(root, ".wal")
+	target := filepath.Join(root, "data", "a.txt")
+	require.NoError(t, os.MkdirAll(target, 0o700))
+	logBody := `{"id":"tx-old","intents":[{"path":` + strconv.Quote(target) + `,"data":"QUFB","mode":384}]}`
+	require.NoError(t, directWrite(filepath.Join(walDir, "tx-old.json"), []byte(logBody), 0o600))
+
+	pending, err := Scan(walDir, directWrite, directRemove, os.ReadFile)
+	require.NoError(t, err)
+	require.Len(t, pending, 1)
+	require.ErrorIs(t, pending[0].Unchecked(), ErrLogUnchecked)
+	require.ErrorIs(t, pending[0].Apply(), ErrLogUnchecked, "never applied")
+}
+
 // TestWALScan_MarksALogItCannotCheck: a file the log names cannot be read
 // (here a folder stands where it was), so Scan hands the log back marked,
 // naming it, with its steps; it is never applied.

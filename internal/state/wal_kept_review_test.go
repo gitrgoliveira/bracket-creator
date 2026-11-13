@@ -2,6 +2,7 @@ package state
 
 import (
 	"bytes"
+	"encoding/json"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -83,6 +84,69 @@ func TestNewStore_ALogWrittenUnderAnotherDataFolderNamesTheCause(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "written under another data folder path")
 	assert.NotContains(t, err.Error(), "fix access")
+}
+
+// writeEarlierBuildLog writes, by hand, a log as an earlier build wrote it:
+// version 0, writes only under "intents", and no "before" on any step, so the
+// stale guard has nothing to judge. It answers the log's path in .wal.
+func writeEarlierBuildLog(t *testing.T, walDir, target string) string {
+	t.Helper()
+	raw, err := json.Marshal(map[string]any{
+		"id":      "1-earlier",
+		"intents": []map[string]any{{"path": target, "data": []byte("landed"), "mode": 0o600}},
+	})
+	require.NoError(t, err)
+	logPath := filepath.Join(walDir, "1-earlier.json")
+	require.NoError(t, os.WriteFile(logPath, raw, 0o600))
+	return logPath
+}
+
+// An earlier build's log names its files as the folder was typed, relative to
+// the folder the process started in. Started from another folder, those paths
+// lie outside the data folder: startup refuses and names the cause, rather
+// than starting with the log failing unrecorded at every start.
+func TestNewStore_AnEarlierBuildsRelativeLogStartedFromAnotherFolderRefusesStartup(t *testing.T) {
+	parent := t.TempDir()
+	dataDir := filepath.Join(parent, "data")
+	store, err := NewStore(dataDir)
+	require.NoError(t, err)
+	const compID = "earlier-relative"
+	require.NoError(t, store.SaveCompetition(&Competition{ID: compID, Name: "Earlier Relative"}))
+	relTarget := filepath.Join("data", "competitions", compID, "landed.txt")
+	logPath := writeEarlierBuildLog(t, store.walDir, relTarget)
+	before, err := os.ReadFile(logPath)
+	require.NoError(t, err)
+
+	t.Chdir(t.TempDir())
+	_, err = NewStore(dataDir)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, errOutsideDataFolder)
+	assert.Contains(t, err.Error(), "written under another data folder path")
+
+	after, rerr := os.ReadFile(logPath)
+	require.NoError(t, rerr, "the log is left in .wal")
+	assert.Equal(t, before, after, "the log is left untouched")
+	_, serr := os.Stat(filepath.Join(dataDir, "competitions", compID, "landed.txt"))
+	assert.True(t, os.IsNotExist(serr), "nothing of the log was applied")
+}
+
+// A log whose files lie inside the data folder but under no competition folder
+// (an earlier build's relative log started from the data folder itself) has no
+// competition to retry it with: when it cannot be applied, startup refuses
+// rather than starting with it unrecorded.
+func TestNewStore_ALogNamingNoCompetitionThatCannotApplyRefusesStartup(t *testing.T) {
+	dataDir := t.TempDir()
+	store, err := NewStore(dataDir)
+	require.NoError(t, err)
+	// competitions/ under a "data" folder that does not exist: the write fails.
+	target := filepath.Join(dataDir, "data", "competitions", "x", "landed.txt")
+	logPath := writeEarlierBuildLog(t, store.walDir, target)
+
+	_, err = NewStore(dataDir)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "names no competition folder")
+	_, serr := os.Stat(logPath)
+	assert.NoError(t, serr, "the log is left in .wal")
 }
 
 // Readers that all saw a settle due queue on the competition's lock; only the

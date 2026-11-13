@@ -130,7 +130,7 @@ func (o *mobileAppBackupOptions) run(cmd *cobra.Command) (err error) {
 				return fmt.Errorf("competition %q not found", o.competition)
 			}
 			if errors.Is(err, state.ErrPendingWALUnsettled) {
-				return operatorSentence("A competition has a write that could not be finished. Start the app once so it replays its pending writes, stop it, then retry.")
+				return operatorSentence("A competition has a change that could not be written to disk. Free disk space or fix the data folder's permissions, then retry.")
 			}
 			return fmt.Errorf("snapshot competition %q: %w", o.competition, err)
 		}
@@ -143,7 +143,7 @@ func (o *mobileAppBackupOptions) run(cmd *cobra.Command) (err error) {
 		snap, err = store.Snapshot(state.ScopeTournament, "")
 		if err != nil {
 			if errors.Is(err, state.ErrPendingWALUnsettled) {
-				return operatorSentence("A competition has a write that could not be finished. Start the app once so it replays its pending writes, stop it, then retry.")
+				return operatorSentence("A competition has a change that could not be written to disk. Free disk space or fix the data folder's permissions, then retry.")
 			}
 			return fmt.Errorf("snapshot tournament: %w", err)
 		}
@@ -477,7 +477,7 @@ func formatRestoreError(err error) error {
 	if errors.As(err, &re) {
 		switch re.Code {
 		case state.RestoreCodePendingWriteUnsettled:
-			return operatorSentence("A competition has a write that could not be finished. Start the app once so it replays its pending writes, stop it, then retry.")
+			return operatorSentence("A competition has a change that could not be written to disk. Free disk space or fix the data folder's permissions, then retry.")
 		case state.RestoreCodeMatchesRunning:
 			return operatorSentence("Matches are running in a competition this restore replaces or removes. Finish them, or pass --allow-running to restore anyway.")
 		case state.RestoreCodePasswordRequired:
@@ -490,7 +490,7 @@ func formatRestoreError(err error) error {
 		}
 	}
 	if errors.Is(err, state.ErrPendingWALUnsettled) {
-		return operatorSentence("A competition has a write that could not be finished. Start the app once so it replays its pending writes, stop it, then retry.")
+		return operatorSentence("A competition has a change that could not be written to disk. Free disk space or fix the data folder's permissions, then retry.")
 	}
 	return err
 }

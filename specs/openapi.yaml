@@ -845,9 +845,10 @@ paths:
                 $ref: '#/components/schemas/Error'
         '409':
           description: >
-            A competition has an unsettled pending write (WAL). The backup cannot
-            be taken until the app is restarted (`code: pending_write_unsettled`).
-            Refusals change nothing.
+            A competition has a change kept in the write-ahead log (WAL) that the
+            disk still refuses (`code: pending_write_unsettled`). The backup writes
+            that change first, so it succeeds once the disk accepts writes again;
+            a restart does not help. Refusals change nothing.
           content:
             application/json:
               schema:
@@ -904,9 +905,10 @@ paths:
                 $ref: '#/components/schemas/Error'
         '409':
           description: >
-            A competition has an unsettled pending write (WAL). The backup cannot
-            be taken until the app is restarted (`code: pending_write_unsettled`).
-            Refusals change nothing.
+            A competition has a change kept in the write-ahead log (WAL) that the
+            disk still refuses (`code: pending_write_unsettled`). The backup writes
+            that change first, so it succeeds once the disk accepts writes again;
+            a restart does not help. Refusals change nothing.
           content:
             application/json:
               schema:
@@ -1065,7 +1067,7 @@ paths:
         | 409 | `folder_incomplete` | A competition folder to replace or remove has no `config.md`, so it cannot be copied first; lists them |
         | 409 | `matches_running` | Matches running in replaced/removed competition without `allowRunning=true`; lists them |
         | 409 | `plan_changed` | Folder competitions changed between plan and restore |
-        | 409 | `pending_write_unsettled` | A competition has a pending write (WAL) that could not be finished; restart the app |
+        | 409 | `pending_write_unsettled` | A competition has a change kept in the write-ahead log (WAL) that the disk still refuses; free disk space or fix permissions, then retry |
         | 409 | `password_required` | Admin password required for restored tournament |
         | 409 | `nothing_to_restore` | Archive holds nothing to restore (or undo) |
       security:

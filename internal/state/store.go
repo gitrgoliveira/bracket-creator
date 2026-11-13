@@ -305,6 +305,15 @@ func (s *Store) init() error {
 		slog.Info("state: replaying WAL transaction",
 			"wal", w.ID(), "intents", len(w.Intents()))
 		if err := w.Apply(); err != nil {
+			if s.walCompetition(w) == "" {
+				// No competition of this data folder to retry it with: going
+				// on would leave it failing unrecorded at every start, its
+				// change never landing. It was written under another layout
+				// of the folder (an earlier build's relative log started from
+				// the data folder itself), so startup refuses as for a log
+				// written under another data folder path.
+				return fmt.Errorf("state: a pending transaction log in %s names no competition folder of this data folder and could not be replayed; it was likely written under another data folder path. Restart with the folder it was written under, or move that log out of .wal to leave its change unapplied: %w", s.walDir, err)
+			}
 			slog.Error("state: WAL Apply failed during replay; the competition's next write retries it",
 				"wal", w.ID(), "err", err)
 			s.noteKeptWALOf(w)

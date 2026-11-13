@@ -105,7 +105,7 @@ A refused restore changes nothing. The page tells you why, and the common reason
 - **Matches are running**: after the plan was made, a match started in a competition the restore replaces or removes. The plan is checked again; click **Restore** again to go ahead.
 - **The competitions changed since the restore was checked**: someone added or removed a competition after the plan was made. Check the plan again, then restore.
 - **A competition folder in the app has no settings file**: that competition cannot be copied before the restore replaces or removes it. Keep it, or restore the backup's competition as a copy.
-- **A competition has a write that could not be finished**: restart the app, then try again.
+- **A competition has a change that could not be written to disk**: free disk space or fix the data folder's permissions, then try again. The backup writes that change first, so it goes ahead once the disk accepts writes; restarting the app does not help.
 - **The backup file could not be read from the upload**: the upload failed. Choose the file again.
 - **The backup file is over 64 MB**: the page cannot take an upload that large. Restore it from the command line, or, for a daily or safety copy, from **Copies kept on this computer**.
 - **A file in the backup cannot be read**: the backup is damaged. Try another copy.
@@ -159,7 +159,7 @@ Each copy shows its kind and the local time it was taken first, then its file na
 
 If the app will not start, or you need to restore data onto a new computer before starting the app there, use the command line.
 
-Always stop the `mobile-app` server before running command-line backup or restore commands. The command-line tool reads and writes the tournament files directly on disk and cannot coordinate with a running server. If a competition has a write that could not be finished, the command refuses: start the app once so it replays its pending writes, stop it, then run the command again.
+Always stop the `mobile-app` server before running command-line backup or restore commands. The command-line tool reads and writes the tournament files directly on disk and cannot coordinate with a running server. If a competition has a change that could not be written to disk, the command refuses: free disk space or fix the data folder's permissions, then run the command again.
 
 ### Command-line backup
 

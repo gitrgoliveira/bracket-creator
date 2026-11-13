@@ -876,14 +876,17 @@ changed outside the app, can still have its files rewritten before it is replaye
 a log would put the older content back, so neither the next startup nor a backup applies it. At startup it is renamed to end in
 `.stale`, kept in `.wal/`, and an error naming it is logged. The change it holds is not applied
 and the app never reads that file again: check the data the error names, then delete the file. A
-log written by an earlier version records nothing about its files, so it is replayed as before.
+log written by an earlier version records nothing about its files, so it is replayed as before;
+its files are still read first, so the checks below apply to it too.
 
 If a log, or a file a log names, cannot be read at startup (its permissions or the disk refuse
 it), the app does not start, and names the file; fix access to that file and start again. The log
 then replays as usual, still checked against its files. If a file a log names lies outside the
 data folder, the log was written while the data folder had another path (the folder was moved or
 renamed): the app does not start and says so. Start it with the folder the log was written under
-(the path the error names), or move the log out of `.wal/` to leave its change unapplied. The app
+(the path the error names), or move the log out of `.wal/` to leave its change unapplied. A log
+that names no competition's folder and cannot be applied stops startup the same way, for the same
+cause. The app
 takes the data folder's full path at startup, so naming the same folder another way, or starting
 the app from another folder, never causes this. A log whose content is damaged, so that it
 is not a log any version can read, holds nothing that can be applied: at startup it is renamed to
@@ -898,20 +901,32 @@ If the log cannot be removed, or the log is committed but writing its files then
 is kept: the request still answers 500, the server log names the disk fault, and the change is
 written before the next read or write of that competition, or at the next startup. A 500 on a save
 can therefore mean the change will still land, so reload before entering it again. While the disk
-still refuses the kept change, every write to that competition is refused with a 500 and writes
-nothing; the server log names the disk fault and says that this write was not saved, and the kept
-change is tried again before the next write. Reads go on meanwhile, and may show only part of the
-kept change until it lands. A read tries the kept change again too, but after a try fails, reads
-wait 5 seconds before the next one, so pages and displays are not held up by a disk that keeps
-refusing; the first failure is logged as a warning, once, naming the log file in `.wal/`. Once
-the disk accepts it, the kept change lands first, and the write or read that asked goes on top of
-it. If the change can never land because a folder the log names was removed outside the app,
-restore that folder, or set the log aside by renaming it so its name no longer ends in `.json`
-(its change is then not applied), and restart. At startup, once a log of a competition cannot be
-applied, that competition's later logs wait behind it and land after it, in order, with the
-competition's next write or read. A log of another competition that
-cannot be checked (a file it names cannot be read) does not hold this up: it stops only its own
-competition's retries, a backup that includes that competition, and the next startup.
+still refuses the kept change:
+
+- **Writes.** Every write to that competition is refused with a 500 and writes nothing. The
+  server log names the disk fault and says that this write was not saved, and the kept change is
+  tried again before the next write.
+- **Reads.** Reads go on meanwhile, and may show only part of the kept change until it lands. A
+  read tries the kept change again too, but after a try fails, reads wait 5 seconds before the
+  next one, so pages and displays are not held up by a disk that keeps refusing. The first failure
+  is logged as a warning, once, naming the log file in `.wal/`.
+- **Backups.** A backup that includes that competition is refused. A download of the tournament
+  or of that competition answers 409 (`pending_write_unsettled`), and so does a restore that
+  replaces or removes that competition, before its safety copy is taken. The daily scheduled copy
+  is not taken: the server log gives a warning, and it is tried again an hour later. To keep a
+  copy meanwhile, stop the server and copy the data folder.
+- **Once the disk accepts it.** The kept change lands first, and the write or read that asked goes
+  on top of it. Nothing announces the change to other screens: they show it at their next refresh,
+  or with the next change made to that competition.
+- **If it can never land.** When a folder the log names was removed outside the app, restore that
+  folder, or set the log aside by renaming it so its name no longer ends in `.json` (its change is
+  then not applied). The competition's next write then goes ahead, with no restart.
+- **At startup.** Once a log of a competition cannot be applied, that competition's later logs
+  wait behind it and land after it, in order, with the competition's next write or read.
+
+A log of another competition that cannot be checked (a file it names cannot be read) does not hold
+this up: it stops only its own competition's retries, a backup that includes that competition, and
+the next startup.
 
 ```mermaid
 sequenceDiagram

@@ -823,7 +823,9 @@ func stageUnsettleableWAL(t *testing.T, dir, compID string) {
 		"id": "unsettleable-tx",
 		"intents": []map[string]any{
 			{
-				"path": filepath.Join(dir, "competitions", compID, "config.md", "subfile"),
+				// A folder of the competition that does not exist: Scan reads
+				// the file as absent, and Apply cannot write it.
+				"path": filepath.Join(dir, "competitions", compID, "missing-folder", "subfile"),
 				"data": []byte("test-data"),
 				"mode": 0o600,
 			},
@@ -835,7 +837,7 @@ func stageUnsettleableWAL(t *testing.T, dir, compID string) {
 
 // (12) Unsettled-WAL branches on backup and restore print the CLI's friendly wording.
 func TestMobileAppBackupRestore_UnsettledWAL(t *testing.T) {
-	const wantSentence = "A competition has a write that could not be finished. Start the app once so it replays its pending writes, stop it, then retry."
+	const wantSentence = "A competition has a change that could not be written to disk. Free disk space or fix the data folder's permissions, then retry."
 
 	t.Run("backup with unsettled WAL", func(t *testing.T) {
 		srcDir, _ := buildTestPopulatedFolder(t)

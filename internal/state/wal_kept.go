@@ -123,7 +123,7 @@ func (s *Store) settleKeptWALLocked(compID string) error {
 			logID = pending.Log
 		}
 		if k.warned.CompareAndSwap(false, true) {
-			slog.Warn("state: a change kept in the transaction log still cannot be written; the competition's writes are refused until it lands, and its reads wait a few seconds between tries. If the folder the log names was removed outside the app, restore it, or set the named log aside by renaming it so it no longer ends in .json, then restart",
+			slog.Warn("state: a change kept in the transaction log still cannot be written; the competition's writes are refused until it lands, and its reads wait a few seconds between tries. If the folder the log names was removed outside the app, restore it, or set the named log aside by renaming it so it no longer ends in .json; the competition's next write then goes ahead, with no restart",
 				"comp", compID, "wal", logID, "err", err)
 		} else {
 			slog.Debug("state: the kept change still cannot be written", "comp", compID, "wal", logID, "err", err)

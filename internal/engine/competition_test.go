@@ -99,8 +99,9 @@ func TestDaihyosenRuledByChusen_SharedCases(t *testing.T) {
 			RankedPool string   `json:"rankedPool"`
 			Ranked     []string `json:"ranked"`
 			Standings  []struct {
-				ID     string `json:"id"`
-				Points int    `json:"points"`
+				ID           string `json:"id"`
+				Points       int    `json:"points"`
+				TieOutOfBand bool   `json:"tieOutOfBand"`
 			} `json:"standings"`
 			InForce []string `json:"inForce"`
 			Ruled   bool     `json:"ruled"`
@@ -121,7 +122,7 @@ func TestDaihyosenRuledByChusen_SharedCases(t *testing.T) {
 			require.True(t, ok)
 			rows := []state.PlayerStanding{}
 			for _, s := range tc.Standings {
-				rows = append(rows, state.PlayerStanding{Player: domain.Player{ID: s.ID}, Points: s.Points})
+				rows = append(rows, state.PlayerStanding{Player: domain.Player{ID: s.ID}, Points: s.Points, TieOutOfBand: s.TieOutOfBand})
 			}
 			recorded := map[string]map[string]int{tc.RankedPool: ranks}
 			inForce := poolRanksInForce(rows, []state.MatchResult{m}, true, recorded[poolName])

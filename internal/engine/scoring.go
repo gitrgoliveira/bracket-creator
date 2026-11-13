@@ -1994,7 +1994,21 @@ func (e *Engine) computeStandingsFrom(loader poolStandingsLoader, compId string)
 		return nil, err
 	}
 
-	isTeam := comp != nil && comp.TeamSize > 0
+	isTeam := comp.IsTeam()
+
+	// The band a tie is broken in (tieNeedsBreak) reads the stored draw's
+	// qualifier places only outside a league, whose band is its own tie-break
+	// band.
+	var band breakBand
+	if comp != nil {
+		var bracket *state.Bracket
+		if comp.Format != state.CompFormatLeague {
+			if bracket, err = loader.LoadBracket(compId); err != nil {
+				return nil, err
+			}
+		}
+		band = newBreakBand(comp, pools, bracket)
+	}
 
 	// Map match results by pool using poolNameFromMatchID so hyphenated pool
 	// names (e.g. "Pool A-East") are handled correctly for all ID forms
@@ -2146,6 +2160,9 @@ func (e *Engine) computeStandingsFrom(loader poolStandingsLoader, compId string)
 		// ordered it completely, decided the order, so the group is no longer a
 		// tie to break (operator ruling 2026-09-24; see tieSettled).
 		markTiedStandings(comp, sorted, poolResults[p.PoolName], playerStandings)
+		if band != nil {
+			markTiesOutOfBand(band, p.PoolName, sorted)
+		}
 
 		// Apply the ranks in force. They are keyed by competitor participant id
 		// ONLY (bc-cse, bc-pnum), not bare name: lookupPoolRankOverride
@@ -2156,12 +2173,11 @@ func (e *Engine) computeStandingsFrom(loader poolStandingsLoader, compId string)
 			applyPoolRanksInForce(sorted, poolOverrides)
 		}
 
-		poolHasOverrides := len(poolOverrides) > 0
 		for i := range sorted {
 			sorted[i].Rank = i + 1
 		}
 
-		applyJointThirdRanks(comp, sorted, poolHasOverrides)
+		applyJointThirdRanks(comp, sorted)
 		allStandings[p.PoolName] = sorted
 	}
 
@@ -2211,9 +2227,10 @@ func applyPoolRanksInForce(sorted []state.PlayerStanding, inForce map[string]int
 // standings table and the closing-ceremony podium show two (or more) equal
 // 3rd places instead of relabeling the 4th finisher. Ranks 1 and 2 are always
 // kept distinct: a top-two tie is decided by a tie-breaker, never shared. It
-// is a no-op for non-leagues, when the setting is off, or when the pool
-// carries manual rank overrides (the operator's explicit order wins).
-// Scoping to leagues keeps mixed and knockout seeding strictly sequential
+// is a no-op for non-leagues and when the setting is off. A tied group whose
+// members hold a rank in force (IsOverridden, poolRanksInForce) keeps its
+// sequential ranks, since the operator's explicit order decides that group; a
+// different tie in the same pool is still shared. Scoping to leagues keeps mixed and knockout seeding strictly sequential
 // -- those formats decide a single/joint 3rd with a bronze match instead, via
 // RequiresSingleThirdPlace; naginata leagues leave the setting off and so keep
 // a single 3rd.
@@ -2221,13 +2238,13 @@ func applyPoolRanksInForce(sorted []state.PlayerStanding, inForce map[string]int
 // Mutates sorted in place. Callers pass a Points-sorted slice that already has
 // sequential ranks assigned, so detectPoolTies groups by adjacent Points
 // equality exactly as it does for the amber-tie highlight.
-func applyJointThirdRanks(comp *state.Competition, sorted []state.PlayerStanding, poolHasOverrides bool) {
-	if comp == nil || comp.Format != state.CompFormatLeague || !comp.EffectiveTwoThirdPlaces() || poolHasOverrides {
+func applyJointThirdRanks(comp *state.Competition, sorted []state.PlayerStanding) {
+	if comp == nil || comp.Format != state.CompFormatLeague || !comp.EffectiveTwoThirdPlaces() {
 		return
 	}
 	for _, positions := range detectPoolTies(sorted) {
 		minRank := positions[0] + 1
-		if minRank < 3 {
+		if minRank < 3 || slices.ContainsFunc(standingsAt(sorted, positions), func(s state.PlayerStanding) bool { return s.IsOverridden }) {
 			continue
 		}
 		for _, idx := range positions {
@@ -2283,7 +2300,7 @@ func markTiedStandings(comp *state.Competition, sorted []state.PlayerStanding, m
 	}
 
 	isLeague := comp != nil && comp.Format == state.CompFormatLeague
-	isTeam := comp != nil && comp.TeamSize > 0
+	isTeam := comp.IsTeam()
 
 	// The supplementary rows are read here, from the full pool list, before
 	// the branches see only the regular matches.

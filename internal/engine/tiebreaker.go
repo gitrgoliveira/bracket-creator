@@ -371,6 +371,21 @@ func newBreakBand(comp *state.Competition, pools []helper.Pool, bracket *state.B
 	}
 }
 
+// markTiesOutOfBand sets TieOutOfBand on every row of a tied group of sorted (a
+// pool's Points-sorted standings) that band leaves outside the places a tie is
+// broken in. It is how the standings carry the band to poolMatchSettled and the
+// Pools tab's notice, which have no competition or draw to ask it of.
+func markTiesOutOfBand(band breakBand, poolName string, sorted []state.PlayerStanding) {
+	for _, positions := range detectPoolTies(sorted) {
+		if band(poolName, positions, standingsAt(sorted, positions)) {
+			continue
+		}
+		for _, idx := range positions {
+			sorted[idx].TieOutOfBand = true
+		}
+	}
+}
+
 // pendingTieBreak is one tied group of a pool that still owes supplementary
 // bouts: its positions (0-based, into the Points-sorted standings) and the
 // bouts that would settle it.

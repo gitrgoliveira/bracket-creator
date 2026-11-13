@@ -464,7 +464,7 @@ func (e *Engine) maybeAutoCompletePoolsRunning(compID string, comp *state.Compet
 		}
 	}
 
-	isTeamComp := comp != nil && comp.TeamSize > 0
+	isTeamComp := comp.IsTeam()
 	isTeamLeague := isTeamComp && comp.Format == state.CompFormatLeague
 
 	// A drawn supplementary bout counts settled once a chusen in force has
@@ -621,7 +621,7 @@ func (e *Engine) maybeAutoCompletePoolsRunning(compID string, comp *state.Compet
 func (e *Engine) advanceMixedPools(compID string, comp *state.Competition) (AutoCompleteOutcome, error) {
 	// 1. Inject tie-break matches for tied pools (idempotent; per-tied-pool).
 	injected := 0
-	if comp.TeamSize > 0 {
+	if comp.IsTeam() {
 		m, err := e.InjectPoolDaihyosenMatches(compID)
 		if err != nil {
 			return AutoCompleteNoChange, err

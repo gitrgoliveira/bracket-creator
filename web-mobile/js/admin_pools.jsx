@@ -151,8 +151,9 @@ function enrichPoolMatchWithComp(m, comp, poolNameOverride) {
 // on points with its two sides carries a rank in force, i.e. its standings row is
 // isOverridden (the server marks only the ranks that still govern a tie no bout
 // settled, poolRanksInForce). Or it is moot (drawnSupplementaryMoot, a daihyosen
-// or a tie-break bout): a correction no longer holds its two sides level, so it
-// decides no place. The pool is
+// or a tie-break bout): a correction no longer holds its two sides level, or has
+// moved their tie outside the band a tie is broken in (tieOutOfBand on the
+// standings rows, tieNeedsBreak in Go), so it decides no place. The pool is
 // judged by name and the teams by id only; a pool with no standings, or a side
 // it does not hold, settles nothing. The second half of the same table
 // (chusenCases) pins both copies.
@@ -174,9 +175,11 @@ function drawnSupplementaryBouts(poolMatches, standings) {
   const settledWithoutRematch = (m) => {
     const { group, level } = lotsGroup(m);
     if (!group) return false;
-    // Moot: any drawn supplementary bout whose sides are no longer level.
-    // Only a representative bout can be ruled by the lots.
-    return !level || (isPoolDaihyosenBout(m.id) && group.every(s => s.isOverridden));
+    // Moot: any drawn supplementary bout whose sides are no longer level, or
+    // whose level group lies outside the band a tie is broken in (the server
+    // marks those rows tieOutOfBand). Only a representative bout can be ruled
+    // by the lots.
+    return !level || group[0].tieOutOfBand || (isPoolDaihyosenBout(m.id) && group.every(s => s.isOverridden));
   };
   return rows.filter(m => isSupplementaryBout(m.id) && m.status === "completed" && !nameOf(m.winner) && !settledWithoutRematch(m));
 }

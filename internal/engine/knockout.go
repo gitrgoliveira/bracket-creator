@@ -70,7 +70,7 @@ type resolvedFinisher struct {
 // complete" on this very call. The judgement itself is poolCompletion's; this
 // is the bare-store door, which may write (the injectors do).
 func (e *Engine) completedPoolNames(compID string, comp *state.Competition) (map[string]bool, error) {
-	if comp != nil && comp.TeamSize > 0 {
+	if comp.IsTeam() {
 		if _, err := e.InjectPoolDaihyosenMatches(compID); err != nil {
 			return nil, err
 		}
@@ -97,7 +97,7 @@ func (e *Engine) completedPoolNames(compID string, comp *state.Competition) (map
 // consulted only for a team competition, and lazily, so the bare-store door
 // can keep reading the standings cache.
 func (e *Engine) poolCompletion(loader poolStandingsLoader, compID string, comp *state.Competition, standings func() (map[string][]state.PlayerStanding, error)) (map[string]bool, error) {
-	isTeam := comp != nil && comp.TeamSize > 0
+	isTeam := comp.IsTeam()
 
 	pools, err := loader.LoadPools(compID)
 	if err != nil {

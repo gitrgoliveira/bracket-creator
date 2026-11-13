@@ -258,7 +258,7 @@ func (e *Engine) tiedQualifyingLabels(tx state.StoreTx, compID string, comp *sta
 	if err != nil {
 		return nil, fmt.Errorf("requalification: load pool matches for %s: %w", compID, err)
 	}
-	daihyosen := comp.TeamSize > 0
+	daihyosen := comp.IsTeam()
 	var existing []state.MatchResult
 	court, courtSet := "", false
 	for _, m := range rows {

@@ -9827,6 +9827,13 @@ components:
           type: integer
         pointsLost:
           type: integer
+        tieOutOfBand:
+          type: boolean
+          description: >
+            The row sits in a tie that lies outside the places a tie is broken
+            in, so no tie-breaker or lots are owed for it. A drawn tie-break or
+            daihyosen bout fought for such a tie settles as it stands. Omitted
+            when false.
 
     CompetitionDetail:
       type: object

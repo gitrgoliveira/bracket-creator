@@ -248,6 +248,56 @@ func TestPoolsSettledNow_LeagueOwesItsBreaks(t *testing.T) {
 	})
 }
 
+// A tie-breaker bout drawn for a tie that a correction has since moved out of
+// the band (here the joint-3rd setting exempts the tie at 3rd to 5th) decides
+// no place, so it no longer holds the league, exactly as a won cycle in the
+// same position does not (dhCycleExists).
+func TestPoolsSettledNow_DrawnBoutOutsideTheBandDoesNotBlock(t *testing.T) {
+	const compID = "verdict-drawn-outside-band"
+	eng, store := cycleLeagueAt3rd(t, compID)
+	_, err := eng.GenerateLeagueTiebreakMatches(compID, []string{teamID("Gamma"), teamID("Delta"), teamID("Epsilon")})
+	require.NoError(t, err)
+	scoreInjectedDH(t, eng, store, compID, func(string, string) string { return "" })
+	require.Equal(t, PoolsMatchOpen, poolsVerdictNow(t, eng, store, compID), "inside the band a drawn bout settles nothing")
+
+	comp, err := store.LoadCompetition(compID)
+	require.NoError(t, err)
+	comp.LeagueTwoThirdPlaces = true
+	require.NoError(t, store.SaveCompetition(comp))
+	eng.standingsCache.Delete(compID)
+	eng.standingsFlight.Delete(compID)
+
+	assert.Equal(t, PoolsSettled, poolsVerdictNow(t, eng, store, compID), "the tie is no longer owed a break")
+	outcome, err := eng.MaybeAutoCompletePools(compID)
+	require.NoError(t, err)
+	assert.Equal(t, AutoCompleteTransitioned, outcome, "the unlocked scan agrees with the verdict")
+}
+
+// A team league whose config was hand-edited to kind team with teamSize 0 is
+// still a team league to the unlocked scan, as it is to the verdict: the tie at
+// 3rd awaits the operator's tie-breaker instead of getting individual
+// ippon-shobu bouts injected.
+func TestMaybeAutoCompletePools_KindOnlyTeamLeagueAwaitsItsTiebreak(t *testing.T) {
+	const compID = "scan-kind-only-team"
+	eng, store := cycleLeagueAt3rd(t, compID)
+	comp, err := store.LoadCompetition(compID)
+	require.NoError(t, err)
+	comp.TeamSize = 0
+	require.NoError(t, store.SaveCompetition(comp))
+
+	outcome, err := eng.MaybeAutoCompletePools(compID)
+	require.NoError(t, err)
+	assert.Equal(t, AutoCompleteAwaitingLeagueTiebreak, outcome)
+	cands, err := eng.LeagueTiebreakCandidates(compID)
+	require.NoError(t, err)
+	assert.Len(t, cands, 1, "the tie-breaker candidates are offered for a kind-only team league")
+	ms, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	for _, m := range ms {
+		assert.False(t, IsTiebreakerMatchID(m.ID), "no individual tie-break bout is injected for a team league")
+	}
+}
+
 // A correction that lands between the league's unlocked scan and the lock that
 // completes it is judged: the scan saw no tie, the correction made one in the
 // band, and the league waits for its tie-breaker instead of completing on an

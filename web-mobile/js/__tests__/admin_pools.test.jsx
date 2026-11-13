@@ -66,7 +66,7 @@ describe('drawnSupplementaryBouts', () => {
       // it, poolNameOf); the server marks the ranks in force (inForce) on its
       // rows as isOverridden.
       const standings = {
-        [poolNameOf(c.id)]: c.standings.map(s => ({ player: { id: s.id }, points: s.points, isOverridden: c.inForce.includes(s.id) })),
+        [poolNameOf(c.id)]: c.standings.map(s => ({ player: { id: s.id }, points: s.points, isOverridden: c.inForce.includes(s.id), tieOutOfBand: !!s.tieOutOfBand })),
       };
       expect(drawnSupplementaryBouts([row], standings)).toEqual(c.stuck ? [row] : []);
     });

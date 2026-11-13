@@ -130,15 +130,16 @@ func daihyosenRuledByChusen(m *state.MatchResult, poolStandings map[string][]sta
 
 // drawnSupplementaryMoot reports a drawn supplementary bout (a representative
 // "-DH-" bout or an ippon-shobu "-TB-" one) whose two sides the standings hold
-// but no longer level on Points: a regular-match correction split the tie the
-// bout was fought for, so it decides no place and settles as it stands
-// (poolMatchSettled), with no rematch and no lots owed.
+// and whose tie decides no place any more: a regular-match correction split the
+// tie the bout was fought for (the sides are no longer level on Points), or moved
+// it outside the band a tie is broken in (TieOutOfBand, tieNeedsBreak). It
+// settles as it stands (poolMatchSettled), with no rematch and no lots owed.
 func drawnSupplementaryMoot(m *state.MatchResult, poolStandings map[string][]state.PlayerStanding) bool {
 	if !drawnSupplementaryBout(m) {
 		return false
 	}
 	group, level := lotsGroup(poolStandings, m)
-	return !level && group != nil
+	return group != nil && (!level || group[0].TieOutOfBand)
 }
 
 // lotsGroup is the standings group a drawn representative bout's lots had to

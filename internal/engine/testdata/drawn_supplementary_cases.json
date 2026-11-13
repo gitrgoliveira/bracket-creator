@@ -16,6 +16,7 @@
     "with its two sides; standings lists the pool's rows as id and points, and a",
     "pool with no standings rules nothing) carries a rank in force. Two sides a",
     "correction no longer holds level are moot (a drawn tie-break bout too): settled, not ruled, owing no lots.",
+    "So is a bout whose level group lies outside the band a tie is broken in: its standings rows carry tieOutOfBand (engine.tieNeedsBreak).",
     "stuck is what the Pools tab's notice names: drawn and not settled."
   ],
   "chusenCases": [
@@ -35,6 +36,9 @@
     {"name": "a team that fell out of the tie loses its lots", "id": "Pool A-DH-0", "winner": "", "sideAId": "a", "sideBId": "b", "standings": [{"id": "a", "points": 3}, {"id": "b", "points": 3}, {"id": "c", "points": 1}], "rankedPool": "Pool A", "ranked": ["c", "a", "b"], "inForce": ["a", "b"], "ruled": true, "stuck": false},
     {"name": "a drawn tie-break bout whose sides a correction split is moot", "id": "Pool A-TB-0", "winner": "", "sideAId": "a", "sideBId": "b", "standings": [{"id": "a", "points": 4}, {"id": "b", "points": 3}], "rankedPool": "Pool A", "ranked": [], "inForce": [], "ruled": false, "stuck": false},
     {"name": "sides a correction split need no lots", "id": "Pool A-DH-0", "winner": "", "sideAId": "a", "sideBId": "b", "standings": [{"id": "a", "points": 4}, {"id": "b", "points": 3}], "rankedPool": "Pool A", "ranked": [], "inForce": [], "ruled": false, "stuck": false},
+    {"name": "a drawn tie-break bout whose tie a correction moved outside the band is moot", "id": "Pool A-TB-0", "winner": "", "sideAId": "a", "sideBId": "b", "standings": [{"id": "a", "points": 3, "tieOutOfBand": true}, {"id": "b", "points": 3, "tieOutOfBand": true}], "rankedPool": "Pool A", "ranked": [], "inForce": [], "ruled": false, "stuck": false},
+    {"name": "a drawn representative bout whose tie lies outside the band is moot", "id": "Pool A-DH-0", "winner": "", "sideAId": "a", "sideBId": "b", "standings": [{"id": "a", "points": 3, "tieOutOfBand": true}, {"id": "b", "points": 3, "tieOutOfBand": true}], "rankedPool": "Pool A", "ranked": [], "inForce": [], "ruled": false, "stuck": false},
+    {"name": "a separate tie outside the band does not excuse a tie inside it", "id": "Pool A-DH-0", "winner": "", "sideAId": "a", "sideBId": "b", "standings": [{"id": "a", "points": 3}, {"id": "b", "points": 3}, {"id": "c", "points": 2, "tieOutOfBand": true}, {"id": "d", "points": 2, "tieOutOfBand": true}], "rankedPool": "Pool A", "ranked": [], "inForce": [], "ruled": false, "stuck": true},
     {"name": "a pool named like a marker", "id": "Pool A-DH-East-DH-0", "winner": "", "sideAId": "a", "sideBId": "b", "standings": [{"id": "a", "points": 3}, {"id": "b", "points": 3}], "rankedPool": "Pool A-DH-East", "ranked": ["a", "b"], "inForce": ["a", "b"], "ruled": true, "stuck": false}
   ],
   "cases": [

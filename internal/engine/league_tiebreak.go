@@ -80,7 +80,7 @@ func isConsequentialTie(g TiedGroup, comp *state.Competition) bool {
 // is not covered by the LeagueTwoThirdPlaces exemption (see isConsequentialTie).
 //
 // Returns an empty slice (not an error) when:
-//   - The competition is not a team league (Format != "league" or TeamSize == 0).
+//   - The competition is not a team league (Format != "league" or not IsTeam()).
 //   - There are no ties in the standings.
 //   - All ties fall outside the consequential band.
 //
@@ -102,7 +102,7 @@ func (e *Engine) LeagueTiebreakCandidates(compID string) ([]TiedGroup, error) {
 	}
 
 	// Only applicable to team leagues.
-	if comp.Format != state.CompFormatLeague || comp.TeamSize == 0 {
+	if comp.Format != state.CompFormatLeague || !comp.IsTeam() {
 		return nil, nil
 	}
 
@@ -205,7 +205,7 @@ func (e *Engine) GenerateLeagueTiebreakMatches(compID string, tiedTeamIDs []stri
 		if comp == nil {
 			return notFoundErrorf("competition %s not found", compID)
 		}
-		if comp.Format != state.CompFormatLeague || comp.TeamSize == 0 {
+		if comp.Format != state.CompFormatLeague || !comp.IsTeam() {
 			return validationErrorf("GenerateLeagueTiebreakMatches is only valid for team-league competitions")
 		}
 		if len(tiedTeamIDs) < 2 {

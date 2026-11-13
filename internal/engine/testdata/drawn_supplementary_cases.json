@@ -15,7 +15,7 @@
     "drawn representative bout's whole tied group (every team level on points",
     "with its two sides; standings lists the pool's rows as id and points, and a",
     "pool with no standings rules nothing) carries a rank in force. Two sides a",
-    "correction no longer holds level are moot: settled, not ruled, owing no lots.",
+    "correction no longer holds level are moot (a drawn tie-break bout too): settled, not ruled, owing no lots.",
     "stuck is what the Pools tab's notice names: drawn and not settled."
   ],
   "chusenCases": [
@@ -33,6 +33,7 @@
     {"name": "a pool the standings do not hold rules nothing", "id": "Pool A-DH-0", "winner": "", "sideAId": "a", "sideBId": "b", "standings": [], "rankedPool": "Pool A", "ranked": ["a", "b"], "ruled": false, "stuck": true, "inForce": []},
     {"name": "sides without ids resolve to nothing", "id": "Pool A-DH-0", "winner": "", "sideAId": "", "sideBId": "", "standings": [{"id": "a", "points": 3}, {"id": "b", "points": 3}], "rankedPool": "Pool A", "ranked": ["a", "b"], "ruled": false, "stuck": true, "inForce": ["a", "b"]},
     {"name": "a team that fell out of the tie loses its lots", "id": "Pool A-DH-0", "winner": "", "sideAId": "a", "sideBId": "b", "standings": [{"id": "a", "points": 3}, {"id": "b", "points": 3}, {"id": "c", "points": 1}], "rankedPool": "Pool A", "ranked": ["c", "a", "b"], "inForce": ["a", "b"], "ruled": true, "stuck": false},
+    {"name": "a drawn tie-break bout whose sides a correction split is moot", "id": "Pool A-TB-0", "winner": "", "sideAId": "a", "sideBId": "b", "standings": [{"id": "a", "points": 4}, {"id": "b", "points": 3}], "rankedPool": "Pool A", "ranked": [], "inForce": [], "ruled": false, "stuck": false},
     {"name": "sides a correction split need no lots", "id": "Pool A-DH-0", "winner": "", "sideAId": "a", "sideBId": "b", "standings": [{"id": "a", "points": 4}, {"id": "b", "points": 3}], "rankedPool": "Pool A", "ranked": [], "inForce": [], "ruled": false, "stuck": false},
     {"name": "a pool named like a marker", "id": "Pool A-DH-East-DH-0", "winner": "", "sideAId": "a", "sideBId": "b", "standings": [{"id": "a", "points": 3}, {"id": "b", "points": 3}], "rankedPool": "Pool A-DH-East", "ranked": ["a", "b"], "inForce": ["a", "b"], "ruled": true, "stuck": false}
   ],

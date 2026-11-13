@@ -134,7 +134,7 @@ func tieBreakOwed(comp *state.Competition, pools []helper.Pool, bracket *state.B
 // completed and is not a drawn supplementary bout, unless a chusen in force
 // ranks every team of the group a drawn representative bout was fought for
 // (daihyosenRuledByChusen, which reads the pool's standings to find the
-// group), or a correction has since split its two sides (drawnDaihyosenMoot):
+// group), or a correction has since split its two sides (drawnSupplementaryMoot):
 // either way that place is decided, and the bout, which settled nothing, may
 // stay drawn. It is the one owner of that rule, so the league's completion
 // (poolMatchesSettled), a mixed pool's (poolCompletion), the auto-complete scan
@@ -145,7 +145,7 @@ func tieBreakOwed(comp *state.Competition, pools []helper.Pool, bracket *state.B
 // pinned to the one table testdata/drawn_supplementary_cases.json, so a change
 // here changes the table.
 func poolMatchSettled(m *state.MatchResult, lots poolLots) bool {
-	return m.Status == state.MatchStatusCompleted && (!drawnSupplementaryBout(m) || daihyosenRuledByChusen(m, lots.standings) || drawnDaihyosenMoot(m, lots.standings))
+	return m.Status == state.MatchStatusCompleted && (!drawnSupplementaryBout(m) || daihyosenRuledByChusen(m, lots.standings) || drawnSupplementaryMoot(m, lots.standings))
 }
 
 // drawnSupplementaryBout reports a pool tie-break ("-TB-") or representative
@@ -467,9 +467,10 @@ func (e *Engine) maybeAutoCompletePoolsRunning(compID string, comp *state.Compet
 	isTeamComp := comp != nil && comp.TeamSize > 0
 	isTeamLeague := isTeamComp && comp.Format == state.CompFormatLeague
 
-	// A drawn representative bout counts settled once a chusen in force has
-	// ranked its teams (poolMatchSettled), which the standings carry, so they
-	// are computed for the scan only when such a bout exists. The decision
+	// A drawn supplementary bout counts settled once a chusen in force has
+	// ranked its teams or a correction has split its sides (poolMatchSettled),
+	// which the standings carry, so they are computed for the scan only when
+	// such a bout exists. The decision
 	// itself is taken under the lock below (PoolsSettledNow), on what the
 	// transaction holds then.
 	lots, err := loadPoolLots(matches, func() (map[string][]state.PlayerStanding, error) {

@@ -140,6 +140,37 @@ func TestDaihyosenRuledByChusen_SharedCases(t *testing.T) {
 	}
 }
 
+// TestLotsStandings_LoadsForAnyDrawnSupplementaryBout pins that the standings a
+// drawn bout is judged on are read for a drawn tie-break ("-TB-") bout as well
+// as a drawn representative one, since a correction can split either's tie, and
+// only then.
+func TestLotsStandings_LoadsForAnyDrawnSupplementaryBout(t *testing.T) {
+	completed := func(id, winner string) state.MatchResult {
+		return state.MatchResult{ID: id, Status: state.MatchStatusCompleted, Winner: winner}
+	}
+	loaded := 0
+	load := func() (map[string][]state.PlayerStanding, error) {
+		loaded++
+		return map[string][]state.PlayerStanding{"Pool A": nil}, nil
+	}
+	for name, tc := range map[string]struct {
+		matches []state.MatchResult
+		loads   int
+	}{
+		"drawn tie-break":       {[]state.MatchResult{completed("Pool A-TB-0", "")}, 1},
+		"drawn representative":  {[]state.MatchResult{completed("Pool A-DH-0", "")}, 1},
+		"tie-break with winner": {[]state.MatchResult{completed("Pool A-TB-0", "Bea")}, 0},
+		"regular draw":          {[]state.MatchResult{completed("Pool A-0", "")}, 0},
+	} {
+		t.Run(name, func(t *testing.T) {
+			loaded = 0
+			_, err := lotsStandings(tc.matches, load)
+			require.NoError(t, err)
+			assert.Equal(t, tc.loads, loaded)
+		})
+	}
+}
+
 // TestDrawnSupplementaryBout_SharedCases drives drawnSupplementaryBout from
 // testdata/drawn_supplementary_cases.json, the table the Pools tab's JS twin
 // (drawnSupplementaryBouts, admin_pools.jsx) is pinned to as well.

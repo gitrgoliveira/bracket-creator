@@ -145,13 +145,14 @@ function enrichPoolMatchWithComp(m, comp, poolNameOverride) {
 // from the wire fields; both are pinned to the one table
 // internal/engine/testdata/drawn_supplementary_cases.json.
 //
-// A drawn daihyosen is not stuck, and no notice names it, in two cases the
-// engine's poolMatchSettled counts settled. The lots ruled it
-// (daihyosenRuledByChusen): every team the pool's standings hold level on
-// points with its two sides carries a rank in force, i.e. its standings row is
+// A drawn supplementary bout is not stuck, and no notice names it, in two
+// cases the engine's poolMatchSettled counts settled. The lots ruled a drawn
+// daihyosen (daihyosenRuledByChusen): every team the pool's standings hold level
+// on points with its two sides carries a rank in force, i.e. its standings row is
 // isOverridden (the server marks only the ranks that still govern a tie no bout
-// settled, poolRanksInForce). Or it is moot (drawnDaihyosenMoot): a correction
-// no longer holds its two sides level, so it decides no place. The pool is
+// settled, poolRanksInForce). Or it is moot (drawnSupplementaryMoot, a daihyosen
+// or a tie-break bout): a correction no longer holds its two sides level, so it
+// decides no place. The pool is
 // judged by name and the teams by id only; a pool with no standings, or a side
 // it does not hold, settles nothing. The second half of the same table
 // (chusenCases) pins both copies.
@@ -171,10 +172,11 @@ function drawnSupplementaryBouts(poolMatches, standings) {
     return { group: poolRows.filter(s => s.points === a.points), level: true };
   };
   const settledWithoutRematch = (m) => {
-    if (!isPoolDaihyosenBout(m.id)) return false;
     const { group, level } = lotsGroup(m);
     if (!group) return false;
-    return !level || group.every(s => s.isOverridden);
+    // Moot: any drawn supplementary bout whose sides are no longer level.
+    // Only a representative bout can be ruled by the lots.
+    return !level || (isPoolDaihyosenBout(m.id) && group.every(s => s.isOverridden));
   };
   return rows.filter(m => isSupplementaryBout(m.id) && m.status === "completed" && !nameOf(m.winner) && !settledWithoutRematch(m));
 }
@@ -408,28 +410,29 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
     }
   };
 
-  // Does a DH match already exist for the given group (both sides present in
-  // poolMatches)? Used to decide whether to show "Run tie-breaker" vs "Remove".
-  const dhMatchExistsForGroup = (groupTeamNames) => {
-    const nameSet = new Set(groupTeamNames);
-    return (poolMatches || []).some(m => {
-      const sideA = m.sideA?.name || m.sideA;
-      const sideB = m.sideB?.name || m.sideB;
-      return m.id && /(-DH-)/.test(m.id) && nameSet.has(sideA) && nameSet.has(sideB);
-    });
+  // The group's daihyosen rows: every "-DH-" row whose two sides are both
+  // members of the group, judged by team id only. Undefined ids (a legacy
+  // id-less group) hold nothing, and the buttons are disabled for it anyway.
+  const dhRowsOfGroup = (teamIds) => {
+    const idSet = new Set(teamIds || []);
+    return (poolMatches || []).filter(m =>
+      m.id && /(-DH-)/.test(m.id) && idSet.has(m.sideAId) && idSet.has(m.sideBId));
   };
 
-  // Returns true if any DH match for the given group is running or already scored.
-  // The DELETE endpoint returns 409 in that state, so the Remove button must be disabled.
-  const dhMatchScoredForGroup = (groupTeamNames) => {
-    const nameSet = new Set(groupTeamNames);
-    return (poolMatches || []).some(m => {
-      const sideA = m.sideA?.name || m.sideA;
-      const sideB = m.sideB?.name || m.sideB;
-      if (!(m.id && /(-DH-)/.test(m.id) && nameSet.has(sideA) && nameSet.has(sideB))) return false;
-      return m.status === "running" || m.status === "completed" || !!m.winner;
-    });
+  // Does the group hold a daihyosen bout for EVERY pair of its teams? The
+  // server keeps a team league open until it does (pendingTieBreaks), and
+  // refuses "Run tie-breaker" only when every pair is held, so a correction
+  // that grows a tie leaves a partial set: "Run tie-breaker" then adds the
+  // missing pairs, and only a complete set shows "Remove".
+  const dhPairsComplete = (dhRows, groupSize) => {
+    const pairs = new Set(dhRows.map(m => [m.sideAId, m.sideBId].sort().join("|")));
+    return pairs.size >= (groupSize * (groupSize - 1)) / 2;
   };
+
+  // Is any of those daihyosen bouts running or already scored? The DELETE
+  // endpoint returns 409 in that state, so the Remove button must be disabled.
+  const dhRowsScored = (dhRows) =>
+    dhRows.some(m => m.status === "running" || m.status === "completed" || !!m.winner);
 
   // chusenEntry renders one tie's position entry: the team inputs, their
   // validation and the overridePoolRanks write. The pending banner uses it for
@@ -743,8 +746,9 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
         // the chusen idsMissing comment above for why an id-less team
         // disables the button instead of letting the write 400.
         const idsMissing = !teamIds;
-        const hasDH = dhMatchExistsForGroup(names);
-        const dhScored = hasDH && dhMatchScoredForGroup(names);
+        const dhRows = dhRowsOfGroup(teamIds);
+        const dhComplete = dhPairsComplete(dhRows, names.length);
+        const dhScored = dhRowsScored(dhRows);
         const posLabel = group.minPosition === group.maxPosition
           ? `Position ${group.minPosition}`
           : `Positions ${group.minPosition}–${group.maxPosition}`;
@@ -757,7 +761,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
               <span className="league-tiebreak__teams">{names.join(" · ")}</span>
             </div>
             <div className="league-tiebreak__actions">
-              {!hasDH ? (
+              {!dhComplete ? (
                 <>
                   <button
                     type="button"

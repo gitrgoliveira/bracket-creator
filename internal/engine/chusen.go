@@ -118,7 +118,7 @@ func poolRanksInForce(sorted []state.PlayerStanding, matches []state.MatchResult
 // entered, or one over a smaller group, settles nothing. poolStandings is the
 // competition's pool standings (read only when a drawn representative bout
 // exists, lotsStandings); a pool they do not hold, or a side they no longer
-// hold level with the other (drawnDaihyosenMoot), rules nothing. Teams are read
+// hold level with the other (drawnSupplementaryMoot), rules nothing. Teams are read
 // by participant id only.
 func daihyosenRuledByChusen(m *state.MatchResult, poolStandings map[string][]state.PlayerStanding) bool {
 	if !IsPoolDaihyosenMatchID(m.ID) || !drawnSupplementaryBout(m) {
@@ -128,12 +128,13 @@ func daihyosenRuledByChusen(m *state.MatchResult, poolStandings map[string][]sta
 	return level && chusenRecorded(group)
 }
 
-// drawnDaihyosenMoot reports a drawn representative bout whose two sides the
-// standings hold but no longer level on Points: a regular-match correction
-// split the tie the bout was fought for, so it decides no place and settles as
-// it stands (poolMatchSettled), with no rematch and no lots owed.
-func drawnDaihyosenMoot(m *state.MatchResult, poolStandings map[string][]state.PlayerStanding) bool {
-	if !IsPoolDaihyosenMatchID(m.ID) || !drawnSupplementaryBout(m) {
+// drawnSupplementaryMoot reports a drawn supplementary bout (a representative
+// "-DH-" bout or an ippon-shobu "-TB-" one) whose two sides the standings hold
+// but no longer level on Points: a regular-match correction split the tie the
+// bout was fought for, so it decides no place and settles as it stands
+// (poolMatchSettled), with no rematch and no lots owed.
+func drawnSupplementaryMoot(m *state.MatchResult, poolStandings map[string][]state.PlayerStanding) bool {
+	if !drawnSupplementaryBout(m) {
 		return false
 	}
 	group, level := lotsGroup(poolStandings, m)
@@ -181,7 +182,7 @@ func lotsGroup(poolStandings map[string][]state.PlayerStanding, m *state.MatchRe
 // poolLots is what a drawn representative bout is judged settled on
 // (poolMatchSettled): the pool standings its tied group, and the ranks in
 // force over it (IsOverridden), are read from. loadPoolLots is the one door
-// that fills it; the zero value holds none, so a drawn representative bout is
+// that fills it; the zero value holds none, so a drawn supplementary bout is
 // never settled by it (isBlockingEngiTBRow, which only judges tie-break rows,
 // passes it on purpose).
 type poolLots struct {
@@ -200,13 +201,14 @@ func loadPoolLots(matches []state.MatchResult, loadStandings func() (map[string]
 	return poolLots{standings: standings}, nil
 }
 
-// lotsStandings reads the pool standings a drawn representative bout's lots
-// are judged against (daihyosenRuledByChusen), through load, and only when the
-// matches hold such a bout: with none, nothing consults them, so it returns
-// nil without computing any. Callers hand the result to poolMatchSettled.
+// lotsStandings reads the pool standings a drawn supplementary bout is judged
+// against (daihyosenRuledByChusen for the lots, drawnSupplementaryMoot for a
+// split tie), through load, and only when the matches hold such a bout: with
+// none, nothing consults them, so it returns nil without computing any.
+// Callers hand the result to poolMatchSettled.
 func lotsStandings(matches []state.MatchResult, load func() (map[string][]state.PlayerStanding, error)) (map[string][]state.PlayerStanding, error) {
 	for i := range matches {
-		if IsPoolDaihyosenMatchID(matches[i].ID) && drawnSupplementaryBout(&matches[i]) {
+		if drawnSupplementaryBout(&matches[i]) {
 			return load()
 		}
 	}

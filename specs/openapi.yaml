@@ -4222,6 +4222,10 @@ paths:
             kiken-injury, or fusenpai) or a fusensho; correct other results via
             the score editor instead." A pool match's sentence ends the list
             with ", and for a tie-break or daihyosen bout saved as a draw".
+            A drawn daihyosen whose tied group a chusen has ranked is refused
+            too: "<Match> was settled by the drawing of lots, so it is not
+            fought again. To change the order, change the drawing of lots on
+            the Pools tab."
           content:
             application/json:
               schema:
@@ -4396,7 +4400,9 @@ paths:
             malformed JSON, or the target is none of a kachinuki team match, one
             a withdrawal or fusensho decided, or (in a pool) a tie-break or
             daihyosen bout saved as a draw (same message as
-            `POST .../reopen`'s 400).
+            `POST .../reopen`'s 400), or the target is a drawn daihyosen that a
+            chusen has ranked ("... was settled by the drawing of lots, so it
+            is not fought again ...", same as `POST .../reopen`'s 400).
           content:
             application/json:
               schema:

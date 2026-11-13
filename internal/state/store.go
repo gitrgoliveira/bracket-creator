@@ -320,7 +320,7 @@ func (s *Store) init() error {
 				return fmt.Errorf("state: a pending transaction log in %s names no competition folder of this data folder and could not be replayed; it %s: %s, or move that log out of .wal to leave its change unapplied: %w", s.walDir, walRestartCause(w), walRestartRemedy(w), err)
 			}
 			slog.Error("state: WAL Apply failed during replay; the competition's next write retries it",
-				"wal", w.ID(), "err", err)
+				"wal", w.ID()+".json", "err", err)
 			s.noteKeptWALOf(w)
 			continue
 		}

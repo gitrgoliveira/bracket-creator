@@ -161,7 +161,7 @@ Each copy shows its kind and the local time it was taken first, then its file na
 
 If the app will not start, or you need to restore data onto a new computer before starting the app there, use the command line.
 
-Always stop the `mobile-app` server before running command-line backup or restore commands. The command-line tool reads and writes the tournament files directly on disk and cannot coordinate with a running server. If a competition has a change that could not be written to disk, the command refuses: free disk space or fix the data folder's permissions, then run the command again. If that does not clear it, a folder the change names may have been removed outside the app: restore that folder; the lines the command prints above the refusal name the change's log file, as [Write guarantees](../../architecture/data-model.md#5-write-guarantees) explains.
+Always stop the `mobile-app` server before running command-line backup or restore commands. The command-line tool reads and writes the tournament files directly on disk and cannot coordinate with a running server. If a competition has a change that could not be written to disk, the command refuses: free disk space or fix the data folder's permissions, then run the command again. If that does not clear it, a folder the change names may have been removed outside the app: restore that folder, or set aside the log the lines the command prints above the refusal name by renaming it so it no longer ends in `.json`, as [Write guarantees](../../architecture/data-model.md#5-write-guarantees) explains.
 
 ### Command-line backup
 

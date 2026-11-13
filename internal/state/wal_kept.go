@@ -85,7 +85,7 @@ func (s *Store) walCompetition(w *wal.WAL) string {
 // folder it was written under cures it; an earlier version's log may name its
 // files relative to the folder the app was started from, which no data folder
 // path can cure and which the log does not record, so the remedy quotes the
-// path as the log holds it and asks for the folder that path starts in
+// path as the log holds it and asks for the folder that path is relative to
 // (storePath resolves it against the CURRENT folder, so the path in the
 // wrapped error points somewhere else).
 const (
@@ -120,7 +120,7 @@ func walRestartCause(w *wal.WAL) string {
 // recorded path, when any step names a relative path, else the absolute one.
 func walRestartRemedy(w *wal.WAL) string {
 	if p, rel := walRelativeStep(w); rel {
-		return fmt.Sprintf("this log names its files by a relative path (%s), so it must be read from the folder that path starts in: start the app from that folder", p)
+		return fmt.Sprintf("start the app from the folder the path %s is relative to (the folder that holds its first folder)", p)
 	}
 	return walRemedyAbsolute
 }

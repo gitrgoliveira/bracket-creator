@@ -464,12 +464,12 @@ func (w *WAL) Apply() error {
 			// Already absent is the step's end state: success, so a replay
 			// after a crash between this step and Done is idempotent.
 			if err := w.remove(in.Path); err != nil && !errors.Is(err, fs.ErrNotExist) {
-				return fmt.Errorf("wal.Apply %q: intent %d (delete %s): %w", w.id, i, in.Path, err)
+				return fmt.Errorf("wal.Apply %q: intent %d (delete %s): %w", w.id+".json", i, in.Path, err)
 			}
 			continue
 		}
 		if err := w.write(in.Path, in.Data, in.Mode); err != nil {
-			return fmt.Errorf("wal.Apply %q: intent %d (%s): %w", w.id, i, in.Path, err)
+			return fmt.Errorf("wal.Apply %q: intent %d (%s): %w", w.id+".json", i, in.Path, err)
 		}
 	}
 	return nil

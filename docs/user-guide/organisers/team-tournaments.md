@@ -246,7 +246,7 @@ A league has no knockout, so its table is its result and a tie for a podium plac
 
 If you tap **Accept shared ranks** while a league match is still unfinished, the app says "A league match is not finished yet, so the table can still change. Finish it, then decide." and records nothing.
 
-**A tie-breaker needs a winner.** A league tie-breaker bout cannot be saved as a draw. If you try, the app refuses with "A tie-breaker needs a winner: continue with encho, then decide by hantei." Record encho while the bout is level, and if it is still level afterwards, tap **Decide by hantei** and pick the winning side. Refer to [Recording decisions](../court-operators/recording-decisions.md#encho-overtime). A tie-breaker that was saved as a draw before this rule applied still holds the league: the Pools tab shows a notice naming the bout, with **Open bout** to decide it by encho or hantei, and **Fight it again** to play it again.
+**A tie-breaker needs a winner.** A league tie-breaker bout cannot be saved as a draw. If you try, the app refuses with "A tie-breaker needs a winner: continue with encho, then decide by hantei." Record encho while the bout is level, and if it is still level afterwards, tap **Decide by hantei** and pick the winning side. Refer to [Recording decisions](../court-operators/recording-decisions.md#encho-overtime). A tie-breaker already on record as a draw holds the league until it has a winner: the Pools tab shows a notice naming the bout, with **Open bout** to decide it by encho or hantei, and **Fight it again** to play it again.
 
 **Lots are the exception, and they are yours to run.** Chusen (drawing lots) is offered only when a tie-breaker round has been fought and the teams are still level, for example a cycle in which A beat B, B beat C and C beat A. A tie-breaker that was drawn does not count as fought, and the app never ranks a cycle or draws the lots itself: you draw them offline and enter the order in the panel. Refer to [Recording decisions](../court-operators/recording-decisions.md#chusen-drawing-lots). A recorded order can still be changed with **Change** after the league has finished, and the table and podium follow it at once.
 
@@ -260,4 +260,4 @@ If you tap **Accept shared ranks** while a league match is still unfinished, the
 - if a match is no longer finished, or the correction leaves a tie that has no full tie-breaker round and was not one you had accepted, the league goes back to match play and asks about the tie again;
 - shared ranks you accepted cover only the ties that were on the table when you accepted them, so a shared 3rd place that a correction moves up to a shared 1st place is asked about again.
 
-A tie-breaker that was already fought is never deleted by a correction. If the correction unties its group, the bout simply stops counting.
+A tie-breaker that was already fought is never deleted by a correction. If the correction unties its group, the bout stops counting.

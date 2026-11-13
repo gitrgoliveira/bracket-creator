@@ -208,6 +208,11 @@ type tieBreakVerdict struct {
 	// either another tie-breaker round among its members or the lots, both the
 	// operator's choice (decision F5, round-or-lots).
 	level [][]state.PlayerStanding
+	// runs partitions the group, in order, into the stretches the bouts fought
+	// so far left level: a member the bouts put clear of the rest is a run of
+	// one, and a group no bout has separated is one run. A round still short of
+	// a bout (an unfought pair the Accept removed) separates by the wins it has.
+	runs [][]state.PlayerStanding
 }
 
 // judgeTieBreakRounds is the ONE reader of a tied group's supplementary rounds
@@ -218,7 +223,7 @@ type tieBreakVerdict struct {
 // are id-only, exactly as applyTiebreakSort's doc comment states.
 func judgeTieBreakRounds(group []state.PlayerStanding, matches []state.MatchResult, isSupplementaryID func(string) bool) tieBreakVerdict {
 	var v tieBreakVerdict
-	v.order, v.settled = rankTieBreakRound(group, tieBreakRounds(group, matches, isSupplementaryID), 0, &v.level)
+	v.order, v.settled = rankTieBreakRound(group, tieBreakRounds(group, matches, isSupplementaryID), 0, &v)
 	return v
 }
 
@@ -228,10 +233,12 @@ func judgeTieBreakRounds(group []state.PlayerStanding, matches []state.MatchResu
 // orders by the bouts decided so far, as the table always has. A run with no
 // row in round k after a finished round k-1 is a run left level (level); with
 // no row in the first round it is a tie whose round is still to be added
-// (pendingTieBreaks), not a run left level.
-func rankTieBreakRound(members []state.PlayerStanding, rounds []map[string]state.MatchResult, k int, level *[][]state.PlayerStanding) ([]state.PlayerStanding, bool) {
+// (pendingTieBreaks), not a run left level. v collects the runs left level
+// (v.level) and the whole partition into runs (v.runs).
+func rankTieBreakRound(members []state.PlayerStanding, rounds []map[string]state.MatchResult, k int, v *tieBreakVerdict) ([]state.PlayerStanding, bool) {
 	out := append([]state.PlayerStanding(nil), members...)
 	if len(out) < 2 {
+		v.runs = append(v.runs, out)
 		return out, true
 	}
 	var round map[string]state.MatchResult
@@ -268,30 +275,48 @@ func rankTieBreakRound(members []state.PlayerStanding, rounds []map[string]state
 	}
 	if present == 0 {
 		if k > 0 {
-			*level = append(*level, out)
+			v.level = append(v.level, out)
 		}
+		v.runs = append(v.runs, out)
 		return out, false
 	}
 	sort.SliceStable(out, func(a, b int) bool {
 		return wins[out[a].Player.ID] > wins[out[b].Player.ID]
 	})
-	if decided < pairs {
-		return out, false
-	}
-	settled := true
+	finished := decided == pairs
+	settled := finished
 	for i := 0; i < len(out); {
 		j := i + 1
 		for j < len(out) && wins[out[j].Player.ID] == wins[out[i].Player.ID] {
 			j++
 		}
-		if j-i >= 2 {
-			run, ok := rankTieBreakRound(out[i:j], rounds, k+1, level)
+		if j-i >= 2 && finished {
+			run, ok := rankTieBreakRound(out[i:j], rounds, k+1, v)
 			copy(out[i:j], run)
 			settled = settled && ok
+		} else {
+			v.runs = append(v.runs, out[i:j])
 		}
 		i = j
 	}
 	return out, settled
+}
+
+// tieBreakRuns partitions a Points-tied group, in the order applyTiebreakSort
+// left it, into the runs its fought tie-breaker bouts left level: the ippon-shobu
+// (TB) bouts in any competition, then in a team one the daihyosen (DH) bouts
+// among each run those left. A team the bouts put clear of the others is a run
+// of one, so a place shared among the level ones is never shared with it.
+func tieBreakRuns(group []state.PlayerStanding, matches []state.MatchResult, isTeam bool) [][]state.PlayerStanding {
+	runs := judgeTieBreakRounds(group, matches, IsTiebreakerMatchID).runs
+	if !isTeam {
+		return runs
+	}
+	var refined [][]state.PlayerStanding
+	for _, run := range runs {
+		refined = append(refined, judgeTieBreakRounds(run, matches, IsPoolDaihyosenMatchID).runs...)
+	}
+	return refined
 }
 
 // tieBreakLeftLevel lists the runs of a tied group that a finished ippon-shobu

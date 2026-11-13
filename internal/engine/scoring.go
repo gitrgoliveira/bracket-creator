@@ -2182,7 +2182,7 @@ func (e *Engine) computeStandingsFrom(loader poolStandingsLoader, compId string)
 			sorted[i].Rank = i + 1
 		}
 
-		applyJointThirdRanks(comp, sorted)
+		applyJointThirdRanks(comp, sorted, matches)
 		allStandings[p.PoolName] = sorted
 	}
 
@@ -2252,11 +2252,16 @@ func applyPoolRanksInForce(sorted []state.PlayerStanding, inForce map[string]int
 // match instead, via RequiresSingleThirdPlace; naginata leagues leave the
 // joint-3rd setting off and so keep a single 3rd.
 //
+// A shared place is shared only among the members the group's fought
+// tie-breaker bouts left level (tieBreakRuns): a team that beat both others
+// keeps its place, and the two it beat share the next one. A group no bout
+// separated is one run, so it shares as a whole.
+//
 // Mutates sorted in place. Callers pass a Points-sorted slice that already has
 // sequential ranks assigned and the Tied/TieOutOfBand/IsOverridden stamps, so
 // detectPoolTies groups by adjacent Points equality exactly as it does for the
-// amber-tie highlight.
-func applyJointThirdRanks(comp *state.Competition, sorted []state.PlayerStanding) {
+// amber-tie highlight, and the pool's matches, which hold those bouts.
+func applyJointThirdRanks(comp *state.Competition, sorted []state.PlayerStanding, matches []state.MatchResult) {
 	if comp == nil || comp.Format != state.CompFormatLeague {
 		return
 	}
@@ -2272,8 +2277,13 @@ func applyJointThirdRanks(comp *state.Competition, sorted []state.PlayerStanding
 		if !jointThird && !outOfBand && !accepted {
 			continue
 		}
-		for _, idx := range positions {
-			sorted[idx].Rank = minRank
+		at := 0
+		for _, run := range tieBreakRuns(group, matches, comp.IsTeam()) {
+			place := positions[at] + 1
+			for range run {
+				sorted[positions[at]].Rank = place
+				at++
+			}
 		}
 	}
 }

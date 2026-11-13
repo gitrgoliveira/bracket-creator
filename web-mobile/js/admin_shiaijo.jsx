@@ -45,7 +45,7 @@ import { startPatch, classifyStartOutcome, startFailureMessage, startRefusalStan
 // carry its own copy. scoreRowMatchName names a match in the refusal notices.
 import { swissRoundLabel, scoreRowMatchName, scoreRowMatchLabel, isSupplementaryBout, poolNameOf } from './pool_ids.jsx';
 // rankOrdinal: "1st", "2nd"... for the place a tie-breaker bout decides.
-import { rankOrdinal } from './viewer_standings.jsx';
+import { rankOrdinal, poolMatchesSignature } from './viewer_standings.jsx';
 // NumberedName: single owner of the number-chip-on-the-outer-side rule
 // (bc-dnst); see that file's header for why this stays an ES import.
 import { NumberedName } from './numbered_name.jsx';
@@ -3256,17 +3256,16 @@ function ShiaijoContext({ match, competitions, court, nextPoolName, tweaks, lead
     // Pools/standings aren't on the console's competition list payload: fetch
     // the competition detail on demand. Refetch whenever this comp's pool
     // matches change (a scored bout), so standings stay current. poolSig is the
-    // change key; it's cheap and keyed only to this comp. Leagues skip this
+    // change key (poolMatchesSignature, the one owner of "did the pool results
+    // change", so a correction that keeps the winner counts); it's cheap and
+    // keyed only to this comp. Leagues skip this
     // fetch entirely (Copilot, PR #333): LeagueStandingsViewer fetches its own
     // standings via window.API.leagueStandings(c.id) and only needs
     // `comp`/`comp.poolMatches`, both already on the court feed - waiting on
     // fetchCompetitionDetails here would be an unneeded dependency that could
     // stall or blank the league panel if that endpoint (unlike the dedicated
     // league-standings one) has a transient failure.
-    const poolSig = useMemo(() => {
-        const pms = (comp && comp.poolMatches) || [];
-        return pms.map((m) => `${m.id}:${m.status}:${(m.ipponsA || []).join("")}:${(m.ipponsB || []).join("")}`).join("|");
-    }, [comp]);
+    const poolSig = useMemo(() => poolMatchesSignature(comp && comp.poolMatches), [comp]);
     const [detail, setDetail] = useState(null);
     const [detailErr, setDetailErr] = useState(false);
     useEffect(() => {

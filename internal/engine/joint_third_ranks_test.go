@@ -39,7 +39,7 @@ func TestApplyJointThirdRanks(t *testing.T) {
 			rankedStanding("A", 100, 1), rankedStanding("B", 90, 2),
 			rankedStanding("C", 50, 3), rankedStanding("D", 50, 4),
 		}
-		applyJointThirdRanks(leagueOn, sorted)
+		applyJointThirdRanks(leagueOn, sorted, nil)
 		assert.Equal(t, []int{1, 2, 3, 3}, ranksOf(sorted))
 	})
 
@@ -48,7 +48,7 @@ func TestApplyJointThirdRanks(t *testing.T) {
 			rankedStanding("A", 100, 1), rankedStanding("B", 90, 2),
 			rankedStanding("C", 50, 3), rankedStanding("D", 50, 4),
 		}
-		applyJointThirdRanks(leagueOff, sorted)
+		applyJointThirdRanks(leagueOff, sorted, nil)
 		assert.Equal(t, []int{1, 2, 3, 4}, ranksOf(sorted))
 	})
 
@@ -57,7 +57,7 @@ func TestApplyJointThirdRanks(t *testing.T) {
 			rankedStanding("A", 100, 1), rankedStanding("B", 90, 2),
 			rankedStanding("C", 50, 3), rankedStanding("D", 50, 4), rankedStanding("E", 50, 5),
 		}
-		applyJointThirdRanks(leagueOn, sorted)
+		applyJointThirdRanks(leagueOn, sorted, nil)
 		assert.Equal(t, []int{1, 2, 3, 3, 3}, ranksOf(sorted))
 	})
 
@@ -66,7 +66,7 @@ func TestApplyJointThirdRanks(t *testing.T) {
 			rankedStanding("A", 100, 1), rankedStanding("B", 90, 2),
 			rankedStanding("C", 80, 3), rankedStanding("D", 70, 4),
 		}
-		applyJointThirdRanks(leagueOn, sorted)
+		applyJointThirdRanks(leagueOn, sorted, nil)
 		assert.Equal(t, []int{1, 2, 3, 4}, ranksOf(sorted))
 	})
 
@@ -75,7 +75,7 @@ func TestApplyJointThirdRanks(t *testing.T) {
 			rankedStanding("A", 100, 1), rankedStanding("B", 80, 2),
 			rankedStanding("C", 80, 3), rankedStanding("D", 40, 4),
 		}
-		applyJointThirdRanks(leagueOn, sorted)
+		applyJointThirdRanks(leagueOn, sorted, nil)
 		assert.Equal(t, []int{1, 2, 3, 4}, ranksOf(sorted),
 			"a 2nd/3rd tie must be decided by a tie-breaker, never shared")
 	})
@@ -85,7 +85,7 @@ func TestApplyJointThirdRanks(t *testing.T) {
 			rankedStanding("A", 100, 1), rankedStanding("B", 100, 2),
 			rankedStanding("C", 50, 3), rankedStanding("D", 40, 4),
 		}
-		applyJointThirdRanks(leagueOn, sorted)
+		applyJointThirdRanks(leagueOn, sorted, nil)
 		assert.Equal(t, []int{1, 2, 3, 4}, ranksOf(sorted))
 	})
 
@@ -95,7 +95,7 @@ func TestApplyJointThirdRanks(t *testing.T) {
 			rankedStanding("C", 50, 3), rankedStanding("D", 50, 4),
 		}
 		sorted[2].IsOverridden, sorted[3].IsOverridden = true, true
-		applyJointThirdRanks(leagueOn, sorted)
+		applyJointThirdRanks(leagueOn, sorted, nil)
 		assert.Equal(t, []int{1, 2, 3, 4}, ranksOf(sorted))
 	})
 
@@ -105,7 +105,7 @@ func TestApplyJointThirdRanks(t *testing.T) {
 			rankedStanding("C", 50, 3), rankedStanding("D", 50, 4),
 		}
 		sorted[0].IsOverridden, sorted[1].IsOverridden = true, true
-		applyJointThirdRanks(leagueOn, sorted)
+		applyJointThirdRanks(leagueOn, sorted, nil)
 		assert.Equal(t, []int{1, 2, 3, 3}, ranksOf(sorted),
 			"the chusen decided 1st and 2nd only; the 3rd/4th tie is still a joint 3rd")
 	})
@@ -116,15 +116,15 @@ func TestApplyJointThirdRanks(t *testing.T) {
 			rankedStanding("A", 100, 1), rankedStanding("B", 90, 2),
 			rankedStanding("C", 50, 3), rankedStanding("D", 50, 4),
 		}
-		applyJointThirdRanks(mixed, sorted)
+		applyJointThirdRanks(mixed, sorted, nil)
 		assert.Equal(t, []int{1, 2, 3, 4}, ranksOf(sorted),
 			"mixed pools feed knockout seeding and must keep sequential ranks")
 	})
 
 	t.Run("nil comp / empty slice → no panic", func(t *testing.T) {
-		applyJointThirdRanks(nil, nil)
+		applyJointThirdRanks(nil, nil, nil)
 		var empty []state.PlayerStanding
-		applyJointThirdRanks(leagueOn, empty)
+		applyJointThirdRanks(leagueOn, empty, nil)
 		assert.Empty(t, empty)
 	})
 }

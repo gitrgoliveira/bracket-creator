@@ -220,6 +220,28 @@ describe('LeagueStandingsViewer (mp-dunx)', () => {
     expect(global.window.API.leagueStandings).toHaveBeenCalledTimes(3);
   });
 
+  // Lots (and Accept shared ranks) write a rank, not a match: a finished league
+  // keeps its status and matches, and only tournament_updated says the order
+  // moved.
+  it('refetches on tournament_updated with status and matches unchanged (lots on a finished league)', () => {
+    let push = null;
+    const unsub = vi.fn();
+    global.window.API.subscribeToEvents = vi.fn((cb) => { push = cb; return unsub; });
+    const done = { ...comp, status: 'completed' };
+    const played = [{ id: 'Pool A-0', status: 'completed', winner: 'P3', ipponsA: ['M'], ipponsB: [] }];
+    runtime.mount(LeagueStandingsViewer, { competition: done, poolMatches: played, tweaks });
+    expect(global.window.API.leagueStandings).toHaveBeenCalledTimes(1);
+
+    // Another event kind is not a rank change.
+    push({ type: 'match_updated', data: { competitionId: 'league-1' } });
+    runtime.updateProps({ competition: done, poolMatches: played, tweaks });
+    expect(global.window.API.leagueStandings).toHaveBeenCalledTimes(1);
+
+    push({ type: 'tournament_updated', data: null });
+    runtime.updateProps({ competition: done, poolMatches: played, tweaks });
+    expect(global.window.API.leagueStandings).toHaveBeenCalledTimes(2);
+  });
+
   // N2a/N2b: the table prints the place the server gives, so an accepted
   // shared 1st reads 1, 1, 3 and a tie below the band 4, 4.
   it('shows a shared place as the server ranks it', async () => {

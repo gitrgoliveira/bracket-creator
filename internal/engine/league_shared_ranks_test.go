@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -42,26 +43,26 @@ func TestApplyJointThirdRanks_SharedPlaces(t *testing.T) {
 
 	t.Run("an accepted tie at 1st reads 1, 1, 3", func(t *testing.T) {
 		sorted := stamped(four(100, 100, 50, 40), 0, 1, true, false)
-		applyJointThirdRanks(accepted, sorted)
+		applyJointThirdRanks(accepted, sorted, nil)
 		assert.Equal(t, []int{1, 1, 3, 4}, ranksOf(sorted))
 		assert.Equal(t, "A", sorted[0].Player.Name, "the rows keep their order: the winner line reads the first row as before")
 	})
 
 	t.Run("an accepted three-way tie at 1st reads 1, 1, 1, 4", func(t *testing.T) {
 		sorted := stamped(four(100, 100, 100, 40), 0, 2, true, false)
-		applyJointThirdRanks(accepted, sorted)
+		applyJointThirdRanks(accepted, sorted, nil)
 		assert.Equal(t, []int{1, 1, 1, 4}, ranksOf(sorted))
 	})
 
 	t.Run("an accepted tie at 2nd reads 1, 2, 2", func(t *testing.T) {
 		sorted := stamped(four(100, 80, 80, 40), 1, 2, true, false)
-		applyJointThirdRanks(accepted, sorted)
+		applyJointThirdRanks(accepted, sorted, nil)
 		assert.Equal(t, []int{1, 2, 2, 4}, ranksOf(sorted))
 	})
 
 	t.Run("a tie still waiting for the operator keeps sequential ranks", func(t *testing.T) {
 		sorted := stamped(four(100, 100, 50, 40), 0, 1, true, false)
-		applyJointThirdRanks(open, sorted)
+		applyJointThirdRanks(open, sorted, nil)
 		assert.Equal(t, []int{1, 2, 3, 4}, ranksOf(sorted))
 	})
 
@@ -69,7 +70,7 @@ func TestApplyJointThirdRanks_SharedPlaces(t *testing.T) {
 		// A group a fought tie-breaker or lots ordered is not Tied: it keeps
 		// the order it earned.
 		sorted := four(100, 100, 50, 40)
-		applyJointThirdRanks(accepted, sorted)
+		applyJointThirdRanks(accepted, sorted, nil)
 		assert.Equal(t, []int{1, 2, 3, 4}, ranksOf(sorted))
 	})
 
@@ -79,7 +80,7 @@ func TestApplyJointThirdRanks_SharedPlaces(t *testing.T) {
 			rankedStanding("D", 50, 4), rankedStanding("E", 50, 5),
 		}
 		stamped(sorted, 3, 4, false, true)
-		applyJointThirdRanks(open, sorted)
+		applyJointThirdRanks(open, sorted, nil)
 		assert.Equal(t, []int{1, 2, 3, 4, 4}, ranksOf(sorted))
 	})
 
@@ -90,7 +91,7 @@ func TestApplyJointThirdRanks_SharedPlaces(t *testing.T) {
 			rankedStanding("D", 50, 4), rankedStanding("E", 50, 5), rankedStanding("F", 50, 6),
 		}
 		stamped(sorted, 3, 5, false, true)
-		applyJointThirdRanks(individual, sorted)
+		applyJointThirdRanks(individual, sorted, nil)
 		assert.Equal(t, []int{1, 2, 3, 4, 4, 4}, ranksOf(sorted))
 	})
 
@@ -101,7 +102,7 @@ func TestApplyJointThirdRanks_SharedPlaces(t *testing.T) {
 		}
 		stamped(sorted, 3, 4, false, true)
 		sorted[3].IsOverridden, sorted[4].IsOverridden = true, true
-		applyJointThirdRanks(open, sorted)
+		applyJointThirdRanks(open, sorted, nil)
 		assert.Equal(t, []int{1, 2, 3, 4, 5}, ranksOf(sorted))
 	})
 
@@ -109,9 +110,58 @@ func TestApplyJointThirdRanks_SharedPlaces(t *testing.T) {
 		mixed := &state.Competition{Format: state.CompFormatMixed, LeagueTiebreakFinalized: true}
 		sorted := stamped(four(100, 100, 50, 50), 0, 1, true, false)
 		stamped(sorted, 2, 3, false, true)
-		applyJointThirdRanks(mixed, sorted)
+		applyJointThirdRanks(mixed, sorted, nil)
 		assert.Equal(t, []int{1, 2, 3, 4}, ranksOf(sorted),
 			"mixed pools feed knockout seeding and must keep sequential ranks")
+	})
+}
+
+// An accepted shared place is shared only among the members the fought
+// tie-breaker bouts left level: a team that beat the others keeps its place.
+func TestApplyJointThirdRanks_AcceptedGroupSharesOnlyWithinLevelRuns(t *testing.T) {
+	accepted := &state.Competition{Format: state.CompFormatLeague, Kind: "team", TeamSize: 2, LeagueTiebreakFinalized: true}
+	four := func() []state.PlayerStanding {
+		sorted := make([]state.PlayerStanding, 0, 4)
+		for i, id := range []string{"a", "b", "c", "d"} {
+			pts := 100
+			if id == "d" {
+				pts = 40
+			}
+			s := rankedStanding(id, pts, i+1)
+			s.Player.ID = id
+			sorted = append(sorted, s)
+		}
+		return stamped(sorted, 0, 2, true, false)
+	}
+	n := 0
+	won := func(winner, loser string) state.MatchResult {
+		n++
+		return state.MatchResult{ID: fmt.Sprintf("Pool A-DH-%d", n), SideAID: winner, SideBID: loser,
+			Status: state.MatchStatusCompleted, Winner: winner, WinnerID: winner}
+	}
+
+	t.Run("a team that beat both others keeps 1st, the two it beat share 2nd", func(t *testing.T) {
+		sorted := four()
+		applyJointThirdRanks(accepted, sorted, []state.MatchResult{won("a", "b"), won("a", "c")})
+		assert.Equal(t, []int{1, 2, 2, 4}, ranksOf(sorted))
+	})
+
+	t.Run("a circle fought to the end leaves all three level", func(t *testing.T) {
+		sorted := four()
+		applyJointThirdRanks(accepted, sorted, []state.MatchResult{won("a", "b"), won("b", "c"), won("c", "a")})
+		assert.Equal(t, []int{1, 1, 1, 4}, ranksOf(sorted))
+	})
+
+	t.Run("a bout nobody fought separates nobody", func(t *testing.T) {
+		sorted := four()
+		applyJointThirdRanks(accepted, sorted, nil)
+		assert.Equal(t, []int{1, 1, 1, 4}, ranksOf(sorted))
+	})
+
+	t.Run("a team that beat nobody reads below the two level ahead of it", func(t *testing.T) {
+		sorted := four()
+		applyJointThirdRanks(accepted, sorted, []state.MatchResult{won("a", "b"), won("b", "c")})
+		assert.Equal(t, []int{1, 1, 3, 4}, ranksOf(sorted))
 	})
 }
 

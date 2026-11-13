@@ -271,6 +271,18 @@ export function LeagueStandingsViewer({ competition, poolMatches, tweaks, onMatc
   // standings stale.
   const poolMatchesSig = useMemo(() => poolMatchesSignature(poolMatches), [poolMatches]);
 
+  // A rank written without a match write (lots, Accept shared ranks and its
+  // Undo) is announced as tournament_updated and changes no prop this viewer
+  // gets: a finished league keeps its status and matches while the lots move
+  // its order. So the push itself is a reason to fetch again.
+  const [ranksTick, setRanksTick] = useState(0);
+  React.useEffect(() => {
+    if (!window.API || typeof window.API.subscribeToEvents !== "function") return undefined;
+    return window.API.subscribeToEvents((event) => {
+      if (event && event.type === "tournament_updated") setRanksTick(t => t + 1);
+    });
+  }, []);
+
   // Re-fetch whenever the match signature changes (SSE-driven) so the
   // standings table reflects the latest state after each scored bout, and
   // whenever the competition's status changes: Accept shared ranks and its
@@ -294,7 +306,7 @@ export function LeagueStandingsViewer({ competition, poolMatches, tweaks, onMatc
         setLoading(false);
       });
     return () => { cancelled = true; };
-  }, [c.id, c.status, poolMatchesSig]);
+  }, [c.id, c.status, poolMatchesSig, ranksTick]);
 
   const isTeam = competition && (competition.kind === "team" || competition.teamSize > 0);
   const isEngi = !!(competition && competition.engi);

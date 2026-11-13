@@ -83,5 +83,5 @@ func TestOverrideRank_FinishedIndividualLeagueIsRefused(t *testing.T) {
 	require.Equal(t, http.StatusConflict, w.Code, w.Body.String())
 	var body map[string]string
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
-	assert.Equal(t, "rank_override_team_only", body["code"])
+	assert.Equal(t, "rank_override_not_level", body["code"])
 }

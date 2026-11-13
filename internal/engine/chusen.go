@@ -454,7 +454,10 @@ func (e *Engine) ChusenStatus(compID string) (ChusenReport, error) {
 				MinPosition: positions[0] + 1,
 			}
 			switch {
-			case groupNeedsChusen(group, matches):
+			// Accepted shared ranks cover a circle (PoolsSettledNow), so a
+			// finished league no longer lists it as owed; lots already
+			// recorded stay listed below, to stay correctable.
+			case !comp.LeagueTiebreakFinalized && groupNeedsChusen(group, matches):
 				if !isTeam {
 					g.StillLevel = tieBreakLeftLevel(group, matches)
 				}

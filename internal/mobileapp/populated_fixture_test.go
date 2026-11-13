@@ -388,7 +388,8 @@ func buildPopulatedTournament(t *testing.T) *populatedTournament {
 
 	// Kind 8 (override): save a pool rank override through
 	// PUT /api/competitions/:id/pools/:poolId/override-rank so overrides.json
-	// exists. Lots are drawn only in a team competition (rank_override_team_only).
+	// exists. An individual tie takes lots only once a tie-breaker round left it
+	// level (rank_override_not_level), so this is a team competition's.
 	pools, err := store.LoadPools(pt.TeamCompID)
 	require.NoError(t, err)
 	require.NotEmpty(t, pools)

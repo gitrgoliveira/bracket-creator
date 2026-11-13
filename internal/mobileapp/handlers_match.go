@@ -2150,27 +2150,11 @@ func leagueRemovedCourts(stx state.StoreTx, tl TournamentLoader, compID string) 
 	if err != nil {
 		return nil, err
 	}
-	have := map[string]bool{}
-	if tournament != nil {
-		for _, c := range tournament.Courts {
-			have[c] = true
-		}
-	}
 	matches, err := stx.LoadPoolMatches(compID)
 	if err != nil {
 		return nil, err
 	}
-	gone := map[string]bool{}
-	for i := range matches {
-		if c := matches[i].Court; c != "" && !have[c] {
-			gone[c] = true
-		}
-	}
-	courts := make([]string, 0, len(gone))
-	for c := range gone {
-		courts = append(courts, c)
-	}
-	slices.Sort(courts)
+	_, courts := engine.MatchesOnRemovedCourts(matches, tournament)
 	return courts, nil
 }
 

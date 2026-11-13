@@ -84,7 +84,7 @@ func TestOverrideRank_IndividualTieBeforeItsRoundIsRefused(t *testing.T) {
 	require.Equal(t, http.StatusConflict, w.Code, w.Body.String())
 	var refusal map[string]string
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &refusal))
-	assert.Equal(t, "rank_override_team_only", refusal["code"])
+	assert.Equal(t, "rank_override_not_level", refusal["code"])
 }
 
 // "Run another tie-breaker round" (decision F5): POST .../tiebreak-round adds a

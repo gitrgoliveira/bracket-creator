@@ -507,7 +507,11 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
             // A refetch never puts a row back to an older state
             // (keepNewerCompetitions, patch.jsx): the rule showRunningPush
             // applies to a push.
-            .then(comps => { if (mountedRef.current) setCourtComps((prev) => keepNewerCompetitions(prev, comps)); })
+            .then(comps => {
+                if (!mountedRef.current) return;
+                setCourtComps((prev) => keepNewerCompetitions(prev, comps));
+                forgetTieBreakerStandings();
+            })
             .catch(err => console.error("Failed to fetch court matches", err));
     }, [court]);
     // Operator-triggered re-sync: the last-resort recovery when a court's tablet
@@ -2959,6 +2963,30 @@ export function tieBreakerReasonLine(m, rows) {
     return `Tie-breaker for ${rankOrdinal(lo)} to ${rankOrdinal(lo + group.length - 1)} place. They finished level, so this bout helps separate them.`;
 }
 
+// The standings every unfinished tie-breaker row reads (the league table, or
+// the competition detail a pool's rows come from), shared per competition: the
+// rows of one competition ask for the same table, so they make one request, and
+// the court feed's refresh (forgetTieBreakerStandings) makes them read it again,
+// because the results it brings are what move a table. A failed read is not
+// kept, so the next refresh asks again.
+const sharedStandings = new Map();
+const standingsListeners = new Set();
+
+export function forgetTieBreakerStandings() {
+    sharedStandings.clear();
+    standingsListeners.forEach((read) => read());
+}
+
+function readSharedStandings(compId, isLeague) {
+    if (!sharedStandings.has(compId)) {
+        const ask = isLeague ? window.API.leagueStandings : window.API.fetchCompetitionDetails;
+        const read = ask.call(window.API, compId);
+        sharedStandings.set(compId, read);
+        read.catch(() => { if (sharedStandings.get(compId) === read) sharedStandings.delete(compId); });
+    }
+    return sharedStandings.get(compId);
+}
+
 // TieBreakerReason: the line under a tie-breaker bout's row on the court
 // console. It reads the competition's standings (the league table, or the pool's
 // rows from the competition detail) for a bout not yet fought, and renders
@@ -2970,20 +2998,28 @@ export function TieBreakerReason({ m, className }) {
     const matchId = m && m.id;
     const matchStatus = m && m.status;
     const [rows, setRows] = useState(null);
+    const [reads, setReads] = useState(0);
+    const canRead = !!window.API && typeof (isLeague ? window.API.leagueStandings : window.API.fetchCompetitionDetails) === "function";
     useEffect(() => {
-        setRows(null);
-        if (!applies || !compId || !window.API) return undefined;
-        const ask = isLeague ? window.API.leagueStandings : window.API.fetchCompetitionDetails;
-        if (typeof ask !== "function") return undefined;
+        if (!applies || !compId || !canRead) return undefined;
+        const again = () => setReads((n) => n + 1);
+        standingsListeners.add(again);
+        return () => { standingsListeners.delete(again); };
+    }, [applies, compId, canRead]);
+    useEffect(() => {
+        if (!applies || !compId || !canRead) {
+            setRows(null);
+            return undefined;
+        }
         let cancelled = false;
-        ask.call(window.API, compId)
+        readSharedStandings(compId, isLeague)
             .then((d) => {
                 if (cancelled) return;
                 setRows(isLeague ? d : (d && d.standings ? d.standings[poolNameOf(matchId)] : null));
             })
             .catch(() => { if (!cancelled) setRows(null); });
         return () => { cancelled = true; };
-    }, [applies, isLeague, compId, matchId, matchStatus]);
+    }, [applies, isLeague, compId, matchId, matchStatus, canRead, reads]);
     if (!applies) return null;
     return (
         <div className={className} data-testid="tiebreaker-reason">{tieBreakerReasonLine(m, rows)}</div>

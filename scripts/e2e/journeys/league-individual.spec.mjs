@@ -10,9 +10,9 @@
 //   cycle        a three-way tie at 1st-3rd: three ippon-shobu bouts are added;
 //                what tells the desk and the court operator why (F12); the
 //                round is then won in a cycle (A beats B, B beats C, C beats A):
-//                does a further round come, does the league strand, or does it
-//                finish? Recorded, not asserted: the outcome is a question for
-//                the boundary (chusen is team-only, internal/engine/chusen.go)
+//                the league stays open and the Pools notice offers another
+//                round or lots (F5); the lots entry opens, and another round
+//                adds a fresh three bouts
 //   drawn today  a two-way tie at 1st, its ippon-shobu saved as a draw (today's
 //                editor allows it): what the operator sees, then whether the
 //                bout can be reopened from Pools and given a winner (F3b)
@@ -348,17 +348,43 @@ test.describe('league-individual', () => {
       for (const b of tbs) expect(b.id, `${b.shiro} v ${b.aka} is a tie-breaker`).toMatch(TB_ID);
     });
 
-    await test.step('record what follows the cycle: a further round, a stranded league, or a finish', async () => {
-      // The engine answers the last write by adding a further round or by
-      // finishing the league; a stranded league is the case where neither comes.
-      const after = await deskWhen(page, id, (d) => d.finished || tiebreakRows(d.numberedRows, 9).length > 0);
-      const further = tiebreakRows(after.numberedRows, 9);
-      const outcome = after.finished ? 'finished with the cycle unbroken' : (further.length ? 'a further round was added' : 'stranded: not finished, nothing to play');
+    // F5: the cycle leaves the league open and nothing is added by itself; the
+    // Pools notice names the three and offers another round (the main step) or
+    // lots (the operator's other choice).
+    const circleNotice = () => page.locator('.league-tiebreak').filter({ hasText: 'A tie-breaker round left a tie' });
+    await test.step('desk: the Pools notice says the round left a tie and offers another round or lots', async () => {
+      await openLeague(page, id);
+      await expect(circleNotice(), 'the notice names the tie the round left').toBeVisible({ timeout: EXPECT_TIMEOUT_MS });
+      const after = await readDesk(page);
+      const group = circleNotice().locator('.league-tiebreak__group');
+      await expect(group.locator('.league-tiebreak__teams')).toHaveText([A, B, C].join(' · '), { useInnerText: true });
+      await expect(circleNotice().getByRole('button', { name: 'Run another tie-breaker round' })).toBeVisible();
+      await expect(circleNotice().getByRole('button', { name: 'Draw lots instead' })).toBeVisible();
+      expect(after.finished, 'the cycle leaves the league open').toBe(false);
+      expect(tiebreakRows(after.numberedRows, 9), 'no further round is added by itself').toEqual([]);
       const pub = await publicPodiumIfOffered(browser, baseURL, id);
-      record({ step: 'pools', action: 'read after the cycle', outcome, ranks: await leagueRanks(page), furtherRound: further, ...after, public: pub,
+      record({ step: 'pools', action: 'the notice after the cycle', ranks: await leagueRanks(page), ...after, public: pub,
         shot: await shot(page, 'pools-after-cycle', { fullPage: true }) });
-      test.info().annotations.push({ type: 'finding', description: `individual ippon-shobu cycle at 1st-3rd: ${outcome}` });
-      expect(after.table.rows.map((r) => r.name).sort()).toEqual([...names].sort());
+      expect(pub.offered, 'no podium while the cycle is unbroken').toBe(false);
+    });
+
+    await test.step('desk: Draw lots instead opens the lots entry, still offering another round', async () => {
+      await circleNotice().getByRole('button', { name: 'Draw lots instead' }).tap();
+      await expect(circleNotice().getByRole('button', { name: 'Draw lots instead' })).toHaveCount(0);
+      await expect(circleNotice().getByRole('button', { name: 'Run another tie-breaker round' })).toBeVisible();
+      record({ step: 'pools', action: 'the lots entry opened from the notice', shot: await shot(page, 'pools-circle-lots-open', { fullPage: true }) });
+    });
+
+    await test.step('desk: Run another tie-breaker round adds a fresh round among the three', async () => {
+      await circleNotice().getByRole('button', { name: 'Run another tie-breaker round' }).tap();
+      await expect.poll(async () => (await readNumberedRows(page)).length, {
+        message: 'three more tie-breaker bouts are added', timeout: EXPECT_TIMEOUT_MS,
+      }).toBe(12);
+      const rows = await readNumberedRows(page);
+      expect(tiebreakRows(rows, 9).map((r) => pairKey(r.shiro, r.aka)).sort()).toEqual([pairKey(A, B), pairKey(A, C), pairKey(B, C)].sort());
+      record({ step: 'pools', action: 'a fresh round added among the three', numberedRows: rows,
+        shot: await shot(page, 'pools-another-round-added', { fullPage: true }) });
+      await expect(circleNotice(), 'the notice is gone while the new round is unfought').toHaveCount(0);
     });
   });
 

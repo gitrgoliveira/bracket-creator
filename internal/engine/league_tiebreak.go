@@ -351,32 +351,46 @@ func (e *Engine) reopenLeagueTx(tx state.StoreTx, compID string, comp *state.Com
 	if err != nil {
 		return out, err
 	}
-	courts := map[string]bool{}
-	if tournament != nil {
-		for _, c := range tournament.Courts {
-			courts[c] = true
-		}
-	}
 	matches, err := tx.LoadPoolMatches(compID)
 	if err != nil {
 		return out, err
 	}
-	removed := map[string]bool{}
-	for i := range matches {
-		if c := matches[i].Court; c != "" && !courts[c] {
-			removed[c] = true
-			matches[i].Court = ""
-			out.UnassignedMatches = append(out.UnassignedMatches, matches[i].ID)
-		}
-	}
-	if len(out.UnassignedMatches) == 0 {
+	stranded, removed := MatchesOnRemovedCourts(matches, tournament)
+	if len(stranded) == 0 {
 		return out, nil
 	}
-	for c := range removed {
-		out.RemovedCourts = append(out.RemovedCourts, c)
+	for _, i := range stranded {
+		matches[i].Court = ""
+		out.UnassignedMatches = append(out.UnassignedMatches, matches[i].ID)
 	}
-	sort.Strings(out.RemovedCourts)
+	out.RemovedCourts = removed
 	return out, tx.SavePoolMatches(compID, matches)
+}
+
+// MatchesOnRemovedCourts is the ONE owner of "which shiaijo has the tournament
+// lost since these matches were given one": it returns the indexes of the
+// matches whose court the tournament no longer lists, and those courts in name
+// order. reopenLeagueTx clears them; the finished-league confirm names them
+// beforehand, so the warning and the change cannot drift.
+func MatchesOnRemovedCourts(matches []state.MatchResult, tournament *state.Tournament) (stranded []int, removed []string) {
+	have := map[string]bool{}
+	if tournament != nil {
+		for _, c := range tournament.Courts {
+			have[c] = true
+		}
+	}
+	gone := map[string]bool{}
+	for i := range matches {
+		if c := matches[i].Court; c != "" && !have[c] {
+			stranded = append(stranded, i)
+			gone[c] = true
+		}
+	}
+	for c := range gone {
+		removed = append(removed, c)
+	}
+	sort.Strings(removed)
+	return stranded, removed
 }
 
 // UndoLeagueSharedRanks takes back a team league's accepted shared ranks

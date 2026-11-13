@@ -6,7 +6,7 @@
 // tie-breaker carry no line.
 
 import React from 'react';
-import { render, screen, cleanup, waitFor } from '@testing-library/react';
+import { render, screen, cleanup, waitFor, act } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll, afterEach } from 'vitest';
 import { installWindowStubs } from '../helpers/stub_globals.js';
 
@@ -30,14 +30,18 @@ const STUBBED_GLOBALS = {
 let restoreGlobals;
 let ShiaijoQueueRow;
 let tieBreakerReasonLine;
+let forgetTieBreakerStandings;
 
 beforeAll(async () => {
   restoreGlobals = installWindowStubs(STUBBED_GLOBALS);
-  ({ ShiaijoQueueRow, tieBreakerReasonLine } = await import('../../admin_shiaijo.jsx'));
+  ({ ShiaijoQueueRow, tieBreakerReasonLine, forgetTieBreakerStandings } = await import('../../admin_shiaijo.jsx'));
 });
 
 afterAll(() => restoreGlobals());
-afterEach(() => cleanup());
+afterEach(() => {
+  cleanup();
+  forgetTieBreakerStandings();
+});
 
 const row = (id, name, rank, points) => ({ player: { id, name }, rank, points });
 const bout = (over = {}) => ({
@@ -99,6 +103,28 @@ describe('TieBreakerReason on the queue row', () => {
     window.API.leagueStandings = vi.fn().mockResolvedValue([row('p1', 'Aki', 1, 4), row('p2', 'Bea', 2, 4)]);
     queueRow(bout({ id: 'Pool A-DH-0' }));
     await waitFor(() => expect(screen.getByTestId('tiebreaker-reason').textContent).toMatch(/^Tie-breaker for 1st place\./));
+  });
+
+  it('reads the table once for every tie-breaker row of a competition', async () => {
+    window.API.leagueStandings = vi.fn().mockResolvedValue([row('p1', 'Aki', 1, 4), row('p2', 'Bea', 2, 4), row('p3', 'Cal', 3, 0)]);
+    const first = bout();
+    const second = bout({ id: 'Pool A-TB-1' });
+    render(<><ShiaijoQueueRow m={first} scheduled={[first]} courts={['A']} /><ShiaijoQueueRow m={second} scheduled={[second]} courts={['A']} /></>);
+    await waitFor(() => expect(screen.getAllByTestId('tiebreaker-reason').map((n) => n.textContent)).toEqual([
+      expect.stringMatching(/^Tie-breaker for 1st place\./),
+      expect.stringMatching(/^Tie-breaker for 1st place\./),
+    ]));
+    expect(window.API.leagueStandings).toHaveBeenCalledTimes(1);
+  });
+
+  it('reads the table again when the court feed refreshes, since a result moves it', async () => {
+    window.API.leagueStandings = vi.fn().mockResolvedValue([row('p1', 'Aki', 1, 4), row('p2', 'Bea', 2, 4)]);
+    queueRow(bout());
+    await waitFor(() => expect(screen.getByTestId('tiebreaker-reason').textContent).toMatch(/^Tie-breaker for 1st place\./));
+    window.API.leagueStandings = vi.fn().mockResolvedValue([row('p0', 'Zed', 1, 6), row('p1', 'Aki', 2, 4), row('p2', 'Bea', 3, 4)]);
+    act(() => forgetTieBreakerStandings());
+    await waitFor(() => expect(screen.getByTestId('tiebreaker-reason').textContent).toMatch(/^Tie-breaker for 2nd place\./));
+    expect(window.API.leagueStandings).toHaveBeenCalledTimes(1);
   });
 
   it('adds no line to a regular bout or a finished tie-breaker', () => {

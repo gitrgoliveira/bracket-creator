@@ -3170,7 +3170,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				return
 			}
 			if !offered {
-				c.JSON(http.StatusConflict, gin.H{"code": "rank_override_team_only", "error": "Lots are drawn for an individual tie only after a tie-breaker round has left it level. Until then it is decided by an ippon-shobu."})
+				c.JSON(http.StatusConflict, gin.H{"code": "rank_override_not_level", "error": "Lots are drawn for an individual tie only after a tie-breaker round has left it level. Until then it is decided by an ippon-shobu."})
 				return
 			}
 		}

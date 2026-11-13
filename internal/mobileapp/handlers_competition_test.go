@@ -328,7 +328,7 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 		require.Equal(t, http.StatusConflict, w.Code, w.Body.String())
 		var body map[string]string
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
-		assert.Equal(t, "rank_override_team_only", body["code"])
+		assert.Equal(t, "rank_override_not_level", body["code"])
 		assert.NotEmpty(t, body["error"])
 		_, statErr := os.Stat(filepath.Join(tempDir, "competitions", compID, "overrides.json"))
 		assert.True(t, os.IsNotExist(statErr), "a refused override writes nothing")

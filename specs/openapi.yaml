@@ -2826,7 +2826,7 @@ paths:
             pools stage, or, for a mixed competition, in the knockout stage
             too (`Error`). In an individual competition only the ranks of a
             tie a finished ippon-shobu round left level are taken (`code:
-            rank_override_team_only` for any other individual tie, which is
+            rank_override_not_level` for any other individual tie, which is
             decided by an ippon-shobu, never by lots). In a mixed competition the new order is
             also answered like a pool result correction, with `matchId`
             empty because no match is corrected:

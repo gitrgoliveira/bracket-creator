@@ -198,6 +198,9 @@ function isDrawnSupplementary(m) {
 
 // lotsGroup in chusen.go: the rows level with both of a bout's sides, or just
 // the two sides when they are no longer level, or none when a side is not held.
+// Lots rank a run the fought bouts left level (tieRun on the rows), so when both
+// sides are in one run the group is that run alone; sides in different runs are
+// judged on the whole level group, which no lots rank.
 function lotsGroupOf(standings, m) {
   const poolRows = (standings || {})[poolNameOf(m.id)] || [];
   const rowOf = (id) => (id ? poolRows.find(s => s.player && s.player.id === id) : undefined);
@@ -205,7 +208,9 @@ function lotsGroupOf(standings, m) {
   const b = rowOf(m.sideBId);
   if (!a || !b) return { group: null, level: false };
   if (a.points !== b.points) return { group: [a, b], level: false };
-  return { group: poolRows.filter(s => s.points === a.points), level: true };
+  const runOf = (s) => s.tieRun || 0;
+  const sameRun = runOf(a) === runOf(b);
+  return { group: poolRows.filter(s => s.points === a.points && (!sameRun || runOf(s) === runOf(a))), level: true };
 }
 
 // lotsRuledBouts: the drawn tie-break and daihyosen bouts the organiser's lots

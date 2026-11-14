@@ -2168,6 +2168,7 @@ func (e *Engine) computeStandingsFrom(loader poolStandingsLoader, compId string)
 				sorted[i].IsOverridden = true
 			}
 		}
+		markTieRuns(sorted, matches, isTeam)
 
 		// Detect ties before applying manual rank overrides. detectPoolTies walks
 		// adjacent elements, so it must run while the slice is still Points-sorted.

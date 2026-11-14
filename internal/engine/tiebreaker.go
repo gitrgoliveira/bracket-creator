@@ -548,6 +548,24 @@ func markTiesOutOfBand(band breakBand, poolName string, sorted []state.PlayerSta
 	}
 }
 
+// markTieRuns stamps TieRun on every row of a tied group of sorted (a pool's
+// Points-sorted standings): the index of the run (tieBreakRuns) its fought
+// tie-breaker bouts left it in. It is how the standings carry the runs to the
+// code that judges a drawn bout against the lots, which rank a run alone
+// (lotsGroup) and which has no matches to ask (poolMatchSettled, and the Pools
+// tab's notice).
+func markTieRuns(sorted []state.PlayerStanding, matches []state.MatchResult, isTeam bool) {
+	for _, positions := range detectPoolTies(sorted) {
+		at := 0
+		for index, run := range tieBreakRuns(standingsAt(sorted, positions), matches, isTeam) {
+			for range run {
+				sorted[positions[at]].TieRun = index
+				at++
+			}
+		}
+	}
+}
+
 // pendingTieBreak is one tied group of a pool that still owes supplementary
 // bouts: its positions (0-based, into the Points-sorted standings) and the
 // bouts that would settle it.

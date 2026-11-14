@@ -66,7 +66,7 @@ describe('drawnSupplementaryBouts', () => {
       // it, poolNameOf); the server marks the ranks in force (inForce) on its
       // rows as isOverridden.
       const standings = {
-        [poolNameOf(c.id)]: c.standings.map(s => ({ player: { id: s.id }, points: s.points, isOverridden: c.inForce.includes(s.id), tieOutOfBand: !!s.tieOutOfBand })),
+        [poolNameOf(c.id)]: c.standings.map(s => ({ player: { id: s.id }, points: s.points, isOverridden: c.inForce.includes(s.id), tieOutOfBand: !!s.tieOutOfBand, tieRun: s.tieRun || 0 })),
       };
       // `league` is the competition's format, which the page passes as the third argument.
       expect(drawnSupplementaryBouts([row], standings, !!c.league)).toEqual(c.stuck ? [row] : []);
@@ -77,7 +77,7 @@ describe('drawnSupplementaryBouts', () => {
     it.each(table.chusenCases.map(c => [c.name, c]))('lotsRuledBouts: %s', (_name, c) => {
       const row = m(c.id, { winner: c.winner, sideAId: c.sideAId, sideBId: c.sideBId });
       const standings = {
-        [poolNameOf(c.id)]: c.standings.map(s => ({ player: { id: s.id }, points: s.points, isOverridden: c.inForce.includes(s.id), tieOutOfBand: !!s.tieOutOfBand })),
+        [poolNameOf(c.id)]: c.standings.map(s => ({ player: { id: s.id }, points: s.points, isOverridden: c.inForce.includes(s.id), tieOutOfBand: !!s.tieOutOfBand, tieRun: s.tieRun || 0 })),
       };
       expect(lotsRuledBouts([row], standings)).toEqual(c.ruled ? [row] : []);
     });

@@ -12,9 +12,10 @@
     "the bout's pool (poolRanksInForce in Go: a member of a group still level on",
     "points that no fought supplementary result settled; the JS reads it as the",
     "standings rows marked isOverridden). ruled is drawnSupplementaryRuledByChusen: the",
-    "drawn representative or tie-break bout's whole tied group (every competitor level on points",
-    "with its two sides; standings lists the pool's rows as id and points, and a",
-    "pool with no standings rules nothing) carries a rank in force. Two sides a",
+    "drawn representative or tie-break bout's tied group (every competitor level on points",
+    "with its two sides, narrowed to the run the fought bouts left level when both sides are in one: a row's tieRun, 0 when omitted;",
+    "standings lists the pool's rows as id, points and tieRun, and a",
+    "pool with no standings rules nothing) carries a rank in force. Lots rank a run alone. Two sides a",
     "correction no longer holds level are moot (a drawn tie-break bout too): settled, not ruled, owing no lots.",
     "So is a bout whose level group lies outside the band a tie is broken in: its standings rows carry tieOutOfBand (engine.tieNeedsBreak).",
     "The lots are drawn outside the app and the organiser enters the order they gave, so a recorded order rules a drawn tie-break bout exactly as it rules a drawn representative one, and nothing the app does afterwards (a side reinstated, say) overturns it.",
@@ -23,6 +24,9 @@
     "An individual's lots follow a tie-break round the same way: a round that orders its whole group outlives them, and one that leaves the group level (a pair unfought, or a circle) keeps them in force."
   ],
   "chusenCases": [
+    {"name": "a run smaller than its level group is ruled by its own lots", "id": "Pool A-TB-0", "winner": "", "sideAId": "a", "sideBId": "b", "standings": [{"id": "c", "points": 3, "tieRun": 0}, {"id": "a", "points": 3, "tieRun": 1}, {"id": "b", "points": 3, "tieRun": 1}, {"id": "d", "points": 3, "tieRun": 2}], "rankedPool": "Pool A", "ranked": ["a", "b"], "ruled": true, "stuck": false, "inForce": ["a", "b"]},
+    {"name": "the lots of another run do not rule the bout", "id": "Pool A-TB-0", "winner": "", "sideAId": "a", "sideBId": "b", "standings": [{"id": "a", "points": 3, "tieRun": 0}, {"id": "b", "points": 3, "tieRun": 0}, {"id": "c", "points": 3, "tieRun": 1}, {"id": "d", "points": 3, "tieRun": 1}], "rankedPool": "Pool A", "ranked": ["c", "d"], "ruled": false, "stuck": true, "inForce": ["c", "d"]},
+    {"name": "sides the bouts put in different runs are judged on the whole level group", "id": "Pool A-TB-0", "winner": "", "sideAId": "a", "sideBId": "b", "standings": [{"id": "a", "points": 3, "tieRun": 0}, {"id": "c", "points": 3, "tieRun": 0}, {"id": "b", "points": 3, "tieRun": 1}], "rankedPool": "Pool A", "ranked": ["a", "b"], "ruled": false, "stuck": true, "inForce": ["a", "b"]},
     {"name": "both teams ranked", "id": "Pool A-DH-0", "winner": "", "sideAId": "a", "sideBId": "b", "standings": [{"id": "a", "points": 3}, {"id": "b", "points": 3}, {"id": "c", "points": 1}], "rankedPool": "Pool A", "ranked": ["a", "b", "c"], "ruled": true, "stuck": false, "inForce": ["a", "b"]},
     {"name": "only one team ranked", "id": "Pool A-DH-0", "winner": "", "sideAId": "a", "sideBId": "b", "standings": [{"id": "a", "points": 3}, {"id": "b", "points": 3}], "rankedPool": "Pool A", "ranked": ["a"], "ruled": false, "stuck": true, "inForce": ["a"]},
     {"name": "no team ranked", "id": "Pool A-DH-0", "winner": "", "sideAId": "a", "sideBId": "b", "standings": [{"id": "a", "points": 3}, {"id": "b", "points": 3}], "rankedPool": "Pool A", "ranked": [], "ruled": false, "stuck": true, "inForce": []},

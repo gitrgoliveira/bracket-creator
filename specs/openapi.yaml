@@ -10105,6 +10105,14 @@ components:
             in, so no tie-breaker or lots are owed for it. A drawn tie-break or
             daihyosen bout fought for such a tie settles as it stands. Omitted
             when false.
+        tieRun:
+          type: integer
+          description: >
+            Which stretch of its tied group the fought tie-breaker bouts left
+            level this row in, counted from 0. Rows of one group with the same
+            value are still level; a lower value finished ahead. Lots rank one
+            such stretch at a time, so a drawn tie-break or daihyosen bout is
+            judged on the stretch holding both its sides. Omitted when 0.
 
     CompetitionDetail:
       type: object

@@ -103,6 +103,7 @@ func TestDrawnSupplementaryRuledByChusen_SharedCases(t *testing.T) {
 				ID           string `json:"id"`
 				Points       int    `json:"points"`
 				TieOutOfBand bool   `json:"tieOutOfBand"`
+				TieRun       int    `json:"tieRun"`
 			} `json:"standings"`
 			InForce []string `json:"inForce"`
 			Ruled   bool     `json:"ruled"`
@@ -131,7 +132,7 @@ func TestDrawnSupplementaryRuledByChusen_SharedCases(t *testing.T) {
 			require.True(t, ok)
 			rows := []state.PlayerStanding{}
 			for _, s := range tc.Standings {
-				rows = append(rows, state.PlayerStanding{Player: domain.Player{ID: s.ID}, Points: s.Points, TieOutOfBand: s.TieOutOfBand})
+				rows = append(rows, state.PlayerStanding{Player: domain.Player{ID: s.ID}, Points: s.Points, TieOutOfBand: s.TieOutOfBand, TieRun: s.TieRun})
 			}
 			recorded := map[string]map[string]int{tc.RankedPool: ranks}
 			inForce := poolRanksInForce(rows, []state.MatchResult{m}, true, recorded[poolName])

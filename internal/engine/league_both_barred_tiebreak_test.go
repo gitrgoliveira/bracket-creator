@@ -281,7 +281,7 @@ func TestIndividualLeague_DecisionOverTheLotsNeedsAConfirm(t *testing.T) {
 
 	_, _, err = eng.RecordDecisionWithOptions(compID, tbID, string(domain.DecisionFusensho), "shiro", "", nil, ForceOptions{ConfirmLots: true})
 	require.NoError(t, err)
-	assert.NotEmpty(t, poolMatchWinner(t, store, compID, tbID), "the bout's result decides the place")
+	assert.Equal(t, "Ayu", poolMatchWinner(t, store, compID, tbID), "Ben withdrew, so Ayu's result decides the place")
 	overrides, err := store.LoadOverrides(compID)
 	require.NoError(t, err)
 	assert.NotEmpty(t, overrides.PoolRanks["Pool A"], "the lots stay stored")
@@ -309,6 +309,12 @@ func TestIndividualLeague_ScoreOverTheLotsNeedsAConfirm(t *testing.T) {
 	_, err = eng.RecordMatchResultWithIneligibility(compID, tbID, fought(), ForceOptions{ConfirmLots: true})
 	require.NoError(t, err)
 	assert.Equal(t, "Ben", poolMatchWinner(t, store, compID, tbID))
+	// The result decides the place: the table follows it, not the lots (Ayu 1st).
+	standings, err := eng.LeagueStandings(compID)
+	require.NoError(t, err)
+	assert.Equal(t, "Ben", standings[0].Player.Name, "the bout's result put Ben 1st")
+	assert.Equal(t, "Ayu", standings[1].Player.Name)
+	assertDistinctRanks(t, standings)
 }
 
 func poolMatchStatus(t *testing.T, store *state.Store, compID, matchID string) state.MatchStatus {
@@ -496,6 +502,113 @@ func TestIndividualLeague_BarredDrawOwesLotsOnlyToItsRun(t *testing.T) {
 	assert.Empty(t, report.Pending)
 	require.Len(t, report.Recorded, 1, "the recorded lots stay correctable")
 	assert.ElementsMatch(t, []string{"Ayu", "Ben"}, chusenTeamNames(report.Recorded[0]))
+}
+
+// tiebreakBoutBetween is the id of the tie-break bout fought between two players.
+func tiebreakBoutBetween(t *testing.T, store *state.Store, compID, a, b string) string {
+	t.Helper()
+	all, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	for _, m := range all {
+		if IsTiebreakerMatchID(m.ID) && ((m.SideAID == a && m.SideBID == b) || (m.SideAID == b && m.SideBID == a)) {
+			return m.ID
+		}
+	}
+	t.Fatalf("no tie-break bout between %s and %s", a, b)
+	return ""
+}
+
+// finishedBarredPairLeague is barredPairLeague (Ayu and Ben the run the bouts
+// left level at 1st, inside a group of four level on Points) with the lots
+// entered, Ben 1st, and the league finished on them.
+func finishedBarredPairLeague(t *testing.T, compID string) (*Engine, *state.Store, string) {
+	t.Helper()
+	eng, store := barredPairLeague(t, compID, false, map[string]int{"ayu-id": 0, "ben-id": 0, "cal-id": 1, "dee-id": 2})
+	enterLots(t, eng, compID, []string{"ben-id", "ayu-id"})
+	outcome, err := eng.MaybeAutoCompletePools(compID)
+	require.NoError(t, err)
+	require.Equal(t, AutoCompleteTransitioned, outcome)
+	return eng, store, tiebreakBoutBetween(t, store, compID, "ayu-id", "ben-id")
+}
+
+// The lots rank a run, not the group of four it sits in. A side reinstated after
+// the league finished on them changes nothing even though Cal and Dee, level on
+// Points with the pair, carry no lots: the league stays finished, the lots stay
+// listed as recorded and correctable, and fighting the pair's bout again is
+// warned about first, as for a pair that is the whole group.
+func TestIndividualLeague_ReinstatedRunInALargerGroupKeepsItsLots(t *testing.T) {
+	const compID = "ind-barred-run-reinstate"
+	eng, store, pairBout := finishedBarredPairLeague(t, compID)
+	barCompetitor(t, store, compID, "ben-id", false)
+
+	outcome, err := eng.MaybeAutoCompletePools(compID)
+	require.NoError(t, err)
+	assert.NotEqual(t, AutoCompleteStarted, outcome, "the league is not put back into play")
+	assert.Equal(t, state.CompStatusComplete, loadComp(t, store, compID).Status)
+
+	report, err := eng.ChusenStatus(compID)
+	require.NoError(t, err)
+	assert.Empty(t, report.Pending)
+	require.Len(t, report.Recorded, 1, "the lots that decide 1st can still be corrected")
+	assert.ElementsMatch(t, []string{"Ayu", "Ben"}, chusenTeamNames(report.Recorded[0]))
+
+	_, err = eng.ReopenMatch(compID, pairBout, "fight it again")
+	var replaced *LotsReplacedError
+	require.ErrorAs(t, err, &replaced)
+	assert.Equal(t, "This replaces the lots you entered for 1st: Ben 1st, Ayu 2nd. The bout's result will decide the place.", replaced.Error())
+	assert.Equal(t, state.CompStatusComplete, loadComp(t, store, compID).Status, "the refused reopen changed nothing")
+
+	_, err = eng.ReopenMatch(compID, pairBout, "fight it again", ForceOptions{ConfirmLots: true})
+	require.NoError(t, err)
+	assert.NotEqual(t, state.MatchStatusCompleted, poolMatchStatus(t, store, compID, pairBout), "the confirmed reopen opens the bout again")
+}
+
+// The promise the warning makes holds for a run inside a larger group: once the
+// organiser confirms, the bout's result decides the pair's place, and the table
+// follows it, not the lots.
+func TestIndividualLeague_ScoreOverARunsLotsDecidesItsPlace(t *testing.T) {
+	const compID = "ind-barred-run-score"
+	eng, store, pairBout := finishedBarredPairLeague(t, compID)
+	barCompetitor(t, store, compID, "ben-id", false)
+	barCompetitor(t, store, compID, "ayu-id", false)
+	ayuWins := func() *state.MatchResult {
+		return &state.MatchResult{
+			Status: state.MatchStatusCompleted, Winner: "Ayu", WinnerID: "ayu-id", IpponsA: []string{"M"},
+			CorrectionReason: "fought it",
+		}
+	}
+
+	_, err := eng.RecordMatchResultWithIneligibility(compID, pairBout, ayuWins())
+	var replaced *LotsReplacedError
+	require.ErrorAs(t, err, &replaced, "the lots rule the bout, so the write is warned about")
+
+	_, err = eng.RecordMatchResultWithIneligibility(compID, pairBout, ayuWins(), ForceOptions{ConfirmLots: true})
+	require.NoError(t, err)
+	standings, err := eng.LeagueStandings(compID)
+	require.NoError(t, err)
+	var order []string
+	for _, s := range standings {
+		order = append(order, s.Player.Name)
+	}
+	assert.Equal(t, []string{"Ayu", "Ben", "Cal", "Dee"}, order, "the result put Ayu ahead of Ben; the pair stays above the players the bouts placed")
+	assertDistinctRanks(t, standings)
+	assert.Equal(t, state.CompStatusComplete, loadComp(t, store, compID).Status)
+}
+
+// In a group of three or more, one decided bout cannot put the places in order:
+// the lots keep ruling it until every bout has a result. The warning says so
+// instead of promising that the one bout decides the place.
+func TestLotsReplacedSentence_LargerGroupDoesNotPromiseOneBoutDecides(t *testing.T) {
+	row := func(id, name string) state.PlayerStanding {
+		return state.PlayerStanding{Player: domain.Player{ID: id, Name: name}}
+	}
+	standings := []state.PlayerStanding{row("a", "Aki"), row("b", "Bea"), row("c", "Cal")}
+
+	pair := lotsReplacedSentence(standings[:2], standings)
+	assert.Equal(t, "This replaces the lots you entered for 1st: Aki 1st, Bea 2nd. The bout's result will decide the place.", pair)
+
+	trio := lotsReplacedSentence(standings, standings)
+	assert.Equal(t, "This replaces the lots you entered for 1st: Aki 1st, Bea 2nd, Cal 3rd. Your lots still decide the places until every bout of this tie-break has a result that puts them in order.", trio)
 }
 
 // The barred pair level at 3rd and 4th shares 3rd where joint 3rd places are

@@ -2131,6 +2131,14 @@ type PlayerStanding struct {
 	// stamped reads as. A drawn supplementary bout fought for such a tie decides no
 	// place, so the pool settles with it as it stands (engine.drawnSupplementaryMoot).
 	TieOutOfBand bool `json:"tieOutOfBand,omitempty"`
+	// TieRun numbers, from 0, the stretch of its tied group (equal Points) that
+	// the fought tie-breaker bouts left level around this row (engine.tieBreakRuns):
+	// rows of one group with the same TieRun are still level, a lower TieRun
+	// finished ahead. A group no bout has separated is one run, so every row reads
+	// 0, which is also what a row nobody stamped reads as. Lots the organiser
+	// entered rank a run alone, so a drawn supplementary bout is judged on the run
+	// holding both its sides (engine.lotsGroup).
+	TieRun int `json:"tieRun,omitempty"`
 	// Flags is the total accumulated own-side referee flags for engi (kata
 	// demonstration) standings. A dedicated field, NOT an overload of
 	// IpponsGiven, so the wire stays self-describing (wins vs flags as distinct

@@ -1960,9 +1960,8 @@ type poolStandingsLoader interface {
 // computeStandingsFrom so the kendo scoring weights, tiebreaker/daihyosen
 // grouping, and override sort live in exactly ONE place.
 func (e *Engine) computeStandings(compId string) (map[string][]state.PlayerStanding, error) {
-	// The engi dispatch lives inside computeStandingsFrom so it happens on a
-	// single competition load shared with the kendo path, not one load here plus
-	// another there.
+	// The engi accrual lives inside computeStandingsFrom, on the one
+	// competition load the rest of the rule shares.
 	return e.computeStandingsFrom(e.store, compId)
 }
 
@@ -1981,14 +1980,12 @@ func (e *Engine) computeStandingsFrom(loader poolStandingsLoader, compId string)
 		// absent competition maps to (nil, nil) and is left as individual mode.
 		return nil, fmt.Errorf("computeStandingsFrom: load competition %s: %w", compId, err)
 	}
-	// Engi dispatch seam: a flag-scored competition delegates to the engi
-	// standings slice; the kendo logic below is left fully unchanged. Uses the
-	// same loader so a tx caller sees its just-applied write. Non-engi tx callers
-	// never reach the engi branch: the tx scoring path early-returns on engi
-	// before computeStandingsFrom is ever called.
-	if comp != nil && comp.Engi {
-		return e.computeEngiStandings(loader, compId)
-	}
+	// A flag-scored (engi) competition accrues its own figures (accrueEngiMatch:
+	// wins, then flags) and packs them with engiStandingPoints; everything after
+	// the accrual, the tie-break bouts, the lots, the tie marks and the shared
+	// places, is the same rule as every other format's (operator ruling: a tie
+	// in engi is settled like any other match).
+	isEngi := comp != nil && comp.Engi
 
 	pools, err := loader.LoadPools(compId)
 	if err != nil {
@@ -2061,6 +2058,10 @@ func (e *Engine) computeStandingsFrom(loader poolStandingsLoader, compId string)
 			if sA == nil || sB == nil {
 				continue
 			}
+			if isEngi {
+				accrueEngiMatch(sA, sB, m)
+				continue
+			}
 
 			// Winner by id only (operator ruling bc-pnum); see resolveWinnerSide.
 			winnerIsA, winnerIsB := resolveWinnerSide(m)
@@ -2102,12 +2103,17 @@ func (e *Engine) computeStandingsFrom(loader poolStandingsLoader, compId string)
 
 		var sorted []state.PlayerStanding
 		for _, s := range order {
-			if isTeam {
+			switch {
+			case isEngi:
+				// Wins, then own-side flags. See engiStandingPoints.
+				s.Points = engiStandingPoints(*s)
+				s.ScoreSummary = engiScoreSummary(s)
+			case isTeam:
 				// Single packed ranking score over the full team tiebreak chain
 				// (W, L, T, IV, IL, IT, PW, PL). See teamStandingPoints.
 				s.Points = teamStandingPoints(*s)
 				s.ScoreSummary = teamScoreSummary(s)
-			} else {
+			default:
 				// Single packed ranking score over the individual chain
 				// (W, L, D, ippons given, ippons taken). See individualStandingPoints.
 				s.Points = individualStandingPoints(*s)
@@ -2226,8 +2232,9 @@ func applyPoolRanksInForce(sorted []state.PlayerStanding, inForce map[string]int
 }
 
 // applyJointThirdRanks is the ONE place a league's level group is given a
-// SHARED rank (the group's best 1-based position) on its table. A group shares
-// its place in three cases:
+// SHARED rank (the group's best 1-based position) on its table. Only 3rd can
+// be shared (operator rule, rounds rule-1 and rule-3); a group shares its place
+// in two cases:
 //
 //   - the kendo joint-3rd convention: with the joint-3rd rule enabled
 //     (state.Competition.EffectiveTwoThirdPlaces, bc-3rdp), a genuine
@@ -2237,15 +2244,11 @@ func applyPoolRanksInForce(sorted []state.PlayerStanding, inForce map[string]int
 //   - a tie outside the band a tie is broken in (TieOutOfBand, stamped by
 //     markTiesOutOfBand): no bout or lots are owed for it, so its members
 //     share their better place (4, 4) (operator decision N2b: ties below the
-//     band can always share places);
-//   - a tie the operator accepted as shared ranks (LeagueTiebreakFinalized,
-//     whose groups are the ties still open in the band, which
-//     markTiedStandings stamps Tied): it reads its best place (1, 1, 3)
-//     (operator decision N2a). Only the rank changes: the rows keep their
-//     order, so a reader of the first row (the winner line) is unchanged;
-//   - a tie whose ippon-shobu bout was recorded as a draw, which only two
-//     barred sides take (drawnTiebreakOfBarredSides): nobody can fight it, so
-//     the level members share their best place and no row is crowned.
+//     band can always share places).
+//
+// A tie at 1st or 2nd (or at 3rd with joint 3rd places off) never shares: a
+// tie-breaker with a winner orders it, or the lots do (a circle the bouts
+// cannot separate, or a tie-breaker drawn because both its sides are barred).
 //
 // It is a no-op for non-leagues. A tied group whose members hold a rank in
 // force (IsOverridden, poolRanksInForce) keeps its sequential ranks, since the
@@ -2276,8 +2279,7 @@ func applyJointThirdRanks(comp *state.Competition, sorted []state.PlayerStanding
 		minRank := positions[0] + 1
 		jointThird := comp.EffectiveTwoThirdPlaces() && minRank >= 3
 		outOfBand := !slices.ContainsFunc(group, func(s state.PlayerStanding) bool { return !s.TieOutOfBand })
-		accepted := comp.LeagueTiebreakFinalized && !slices.ContainsFunc(group, func(s state.PlayerStanding) bool { return !s.Tied })
-		if !jointThird && !outOfBand && !accepted && !groupHoldsDrawnTiebreaker(group, matches) {
+		if !jointThird && !outOfBand {
 			continue
 		}
 		at := 0
@@ -2289,23 +2291,6 @@ func applyJointThirdRanks(comp *state.Competition, sorted []state.PlayerStanding
 			}
 		}
 	}
-}
-
-// groupHoldsDrawnTiebreaker reports a drawn ippon-shobu ("-TB-") bout between
-// two members of group. It is read off the bout alone, never the competitors'
-// statuses, because a standings entry must not depend on a file the standings
-// cache does not key on (poolStandingsLoader); the decision door records that
-// draw for two barred sides and for nothing else.
-func groupHoldsDrawnTiebreaker(group []state.PlayerStanding, matches []state.MatchResult) bool {
-	ids := make(map[string]bool, len(group))
-	for _, s := range group {
-		if s.Player.ID != "" {
-			ids[s.Player.ID] = true
-		}
-	}
-	return slices.ContainsFunc(matches, func(m state.MatchResult) bool {
-		return IsTiebreakerMatchID(m.ID) && drawnSupplementaryBout(&m) && ids[m.SideAID] && ids[m.SideBID]
-	})
 }
 
 // markTiedStandings sets Tied=true on standings rows that are genuinely tied
@@ -2320,9 +2305,9 @@ func groupHoldsDrawnTiebreaker(group []state.PlayerStanding, matches []state.Mat
 //
 //   - League (comp.Format == state.CompFormatLeague), both team and individual:
 //     EMERGING-TIE trigger. Once ANY of the top-N competitors (N =
-//     effectiveTopN(comp), clamped to pool size) has completed ALL their own
+//     leagueTiebreakBand, clamped to pool size) has completed ALL their own
 //     regular fights, mark Tied=true on every tied group whose MinPosition <=
-//     effectiveTopN AND that is not covered by the two-joint-3rd-places
+//     leagueTiebreakBand AND that is not covered by the two-joint-3rd-places
 //     exemption (LeagueTwoThirdPlaces + MinPosition >= 3).
 //
 // matches contains only the regular+supplementary matches for this specific
@@ -2430,7 +2415,7 @@ func markTiedStandingsPools(sorted []state.PlayerStanding, regularMatches []stat
 //     is id-only), exactly as it contributes nothing to computeStandingsFrom's
 //     own tally, so the two never disagree about who a match side means.
 func markTiedStandingsLeague(comp *state.Competition, sorted []state.PlayerStanding, regularMatches []state.MatchResult, rosterIndex map[string]*state.PlayerStanding, open [][]int) {
-	topN := min(effectiveTopN(comp), len(sorted))
+	topN := min(leagueTiebreakBand, len(sorted))
 
 	// statusFor is keyed by helper.CompetitorKey (id-preferred, name+dojo
 	// fallback -- see the fix-1 note above), not by a locally rebuilt

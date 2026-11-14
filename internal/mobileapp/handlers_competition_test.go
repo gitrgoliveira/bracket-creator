@@ -3854,36 +3854,26 @@ func TestPUTCompetition_LeaguePoolConfigNormalized(t *testing.T) {
 	assert.Equal(t, 0, stored.PoolWinners, "league PoolWinners must be zeroed on PUT")
 }
 
-// TestPUTCompetition_LeagueTiebreakConfigImmutableAfterStart verifies that the
-// league tie-breaker knob (leagueTiebreakTopN) can be changed before the
-// competition starts but is rejected (400) once it has progressed past
-// setup, changing it mid-league would alter the consequential-tie set and
-// which ties already-played tie-breakers resolve.
-//
-// twoThirdPlaces (bc-3rdp) is locked the same way, via its own guard right
-// next to this one in the handler; leagueTwoThirdPlaces itself is legacy
-// read-only (never written by this PUT any more, superseded by
-// twoThirdPlaces), so this test sends and asserts on twoThirdPlaces, not the
-// legacy field. See TestPUTCompetition_TwoThirdPlacesImmutableAfterStart for
-// the dedicated pre/post-start coverage of that field alone.
-func TestPUTCompetition_LeagueTiebreakConfigImmutableAfterStart(t *testing.T) {
+// TestPUTCompetition_LeagueWritesTwoThirdPlacesNotTheLegacyField verifies that
+// a league's settings PUT stores twoThirdPlaces (bc-3rdp) and never writes the
+// legacy leagueTwoThirdPlaces, which is read-only now. The league has no
+// tie-break band to set: it is always the top three places.
+func TestPUTCompetition_LeagueWritesTwoThirdPlacesNotTheLegacyField(t *testing.T) {
 	r, store, _, _, tempDir := setupTestRouter(t)
 	defer os.RemoveAll(tempDir)
 
-	// Pre-start (setup): a change is accepted.
 	require.NoError(t, store.SaveCompetition(&state.Competition{
-		ID:                 "lp-setup",
-		Name:               "LP Setup",
-		Format:             state.CompFormatLeague,
-		Kind:               "team",
-		TeamSize:           5,
-		Status:             state.CompStatusSetup,
-		LeagueTiebreakTopN: 3,
+		ID:       "lp-setup",
+		Name:     "LP Setup",
+		Format:   state.CompFormatLeague,
+		Kind:     "team",
+		TeamSize: 5,
+		Status:   state.CompStatusSetup,
 	}))
 	twoThirdPlacesOn := true
 	body, _ := json.Marshal(state.Competition{
 		ID: "lp-setup", Name: "LP Setup", Format: state.CompFormatLeague,
-		Kind: "team", TeamSize: 5, LeagueTiebreakTopN: 4, TwoThirdPlaces: &twoThirdPlacesOn,
+		Kind: "team", TeamSize: 5, TwoThirdPlaces: &twoThirdPlacesOn,
 	})
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("PUT", "/api/competitions/lp-setup", bytes.NewBuffer(body))
@@ -3892,39 +3882,15 @@ func TestPUTCompetition_LeagueTiebreakConfigImmutableAfterStart(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	stored, err := store.LoadCompetition("lp-setup")
 	require.NoError(t, err)
-	assert.Equal(t, 4, stored.LeagueTiebreakTopN, "pre-start change must persist")
 	require.NotNil(t, stored.TwoThirdPlaces)
 	assert.True(t, *stored.TwoThirdPlaces)
 	assert.False(t, stored.LeagueTwoThirdPlaces, "legacy field is never written by this PUT any more")
-
-	// Started (pools): a change is rejected with 400, on-disk value unchanged.
-	require.NoError(t, store.SaveCompetition(&state.Competition{
-		ID:                 "lp-started",
-		Name:               "LP Started",
-		Format:             state.CompFormatLeague,
-		Kind:               "team",
-		TeamSize:           5,
-		Status:             state.CompStatusPools,
-		LeagueTiebreakTopN: 3,
-	}))
-	body, _ = json.Marshal(state.Competition{
-		ID: "lp-started", Name: "LP Started", Format: state.CompFormatLeague,
-		Kind: "team", TeamSize: 5, LeagueTiebreakTopN: 4,
-	})
-	w = httptest.NewRecorder()
-	req, _ = http.NewRequest("PUT", "/api/competitions/lp-started", bytes.NewBuffer(body))
-	req.Header.Set("Content-Type", "application/json")
-	r.ServeHTTP(w, req)
-	require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
-	stored, err = store.LoadCompetition("lp-started")
-	require.NoError(t, err)
-	assert.Equal(t, 3, stored.LeagueTiebreakTopN, "started league config must be unchanged")
 }
 
 // TestPUTCompetition_TwoThirdPlacesImmutableAfterStart (bc-3rdp) verifies
 // twoThirdPlaces can be changed before the competition starts but is
 // rejected (400) once it has progressed past setup, mirroring the sibling
-// Naginata/LeagueTiebreakTopN guards: the bronze match is built at draw
+// Naginata guard: the bronze match is built at draw
 // time, so flipping the rule afterward would add or remove a bronze match
 // while results may already be in flight.
 func TestPUTCompetition_TwoThirdPlacesImmutableAfterStart(t *testing.T) {

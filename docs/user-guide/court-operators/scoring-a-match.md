@@ -8,6 +8,12 @@ A match can be moved to another shiai-jo from the court console (which asks befo
 
 Open a match from the Upcoming list to start scoring it; the score editor opens inline within the court console. For outcomes that are not decided on points (withdrawals, no-shows, draws, and representative bouts), refer to [Record match decisions](recording-decisions.md).
 
+A tie-breaker bout, the extra bout that settles a tie for a place in a league or a pool, is scored like any other match. In a league it has one difference: it needs a winner. Record encho while it is level, then decide it by hantei if it is still level; a draw is refused. In an Engi competition the winner is the pair with more flags, and the flags cannot end level. When both sides of a tie-breaker withdrew earlier, the bout cannot be fought: the app says so and offers **Record as drawn (neither can fight)**, and the organiser then settles the place by lots. Refer to [Daihyosen](recording-decisions.md#daihyosen) and [Chusen (drawing lots)](recording-decisions.md#chusen-drawing-lots).
+
+On the court console a tie-breaker waits as Up next like any other match, marked **DH**, with a line saying which place it settles.
+
+![The court console of Shiaijo A with a tie-breaker as Up next: a DH mark, the two teams that finished level, the line "Tie-breaker for 1st place. They finished level, so this bout separates them.", and Start match and Call to court buttons.](../../screenshots/court-tiebreak-up-next.png)
+
 ![The score editor: Shiro on the left and Aka on the right, each with ippon buttons (men, kote, do, tsuki), a Mark draw control, foul counters, and an overtime toggle.](../../screenshots/mobile-score-editor.png)
 
 !!! tip

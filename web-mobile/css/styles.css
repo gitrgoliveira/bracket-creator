@@ -7528,12 +7528,6 @@ button.vsched-item:not([data-clickable]) {
   margin-top: 6px;
 }
 
-.league-tiebreak__finalize {
-  border-top: 1px solid var(--warn-border);
-  margin-top: 14px;
-  padding-top: 12px;
-}
-
 .league-tiebreak__err {
   color: var(--danger);
   font-size: 12px;

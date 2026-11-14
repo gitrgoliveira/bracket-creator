@@ -126,7 +126,10 @@ function enrichPoolMatchWithComp(m, comp, poolNameOverride) {
     compKind: isSupplementary ? "" : (m.compKind || (comp && comp.kind) || ""),
     teamSize: isSupplementary ? 0 : (m.teamSize ?? (comp && comp.teamSize) ?? 0),
     teamMatchType: isSupplementary ? "" : (m.teamMatchType || teamMatchTypeFor(comp)),
-    compEngi: isSupplementary ? false : !!(m.compEngi ?? (comp && comp.engi)),
+    // An engi tie-break bout is scored by flags like the bouts it breaks, so it
+    // opens in the engi flag editor. Engi is never a team competition, so the
+    // team overrides above never meet it.
+    compEngi: !!(m.compEngi ?? (comp && comp.engi)),
     phase: m.phase || "pool",
     poolName: m.poolName || derivedPoolName,
     // Rep-bout dropdown inputs (empty/false for non-supplementary matches).
@@ -148,7 +151,11 @@ function enrichPoolMatchWithComp(m, comp, poolNameOverride) {
 // A drawn supplementary bout is not stuck, and no notice names it, in three
 // cases the engine's poolMatchSettled counts settled. Nobody can fight it: both
 // sides of a drawn ippon-shobu bout are barred (drawnTiebreakOfBarredSides, read
-// from the server's ineligibleSides stamp). The lots ruled a drawn
+// from the server's ineligibleSides stamp), and so are both sides of a LEAGUE's
+// drawn representative bout (`isLeague`): the place it was for then goes to the
+// lots the chusen panel asks for, which is that panel's notice, not this one.
+// In pools + knockout a representative bout with both sides barred waits for its
+// lots like any drawn one and stays named here. The lots ruled a drawn
 // daihyosen (daihyosenRuledByChusen): every team the pool's standings hold level
 // on points with its two sides carries a rank in force, i.e. its standings row is
 // isOverridden (the server marks only the ranks that still govern a tie no bout
@@ -161,7 +168,7 @@ function enrichPoolMatchWithComp(m, comp, poolNameOverride) {
 // (chusenCases) pins both copies.
 //
 // Exported for vitest at __tests__/admin_pools.test.jsx.
-function drawnSupplementaryBouts(poolMatches, standings) {
+function drawnSupplementaryBouts(poolMatches, standings, isLeague = false) {
   const rows = poolMatches || [];
   // lotsGroup in chusen.go: the rows level with both sides, or just the two
   // sides when they are no longer level, or none when a side is not held.
@@ -174,10 +181,10 @@ function drawnSupplementaryBouts(poolMatches, standings) {
     if (a.points !== b.points) return { group: [a, b], level: false };
     return { group: poolRows.filter(s => s.points === a.points), level: true };
   };
-  // drawnTiebreakOfBarredSides in chusen.go: an ippon-shobu bout whose two
-  // sides are both barred elsewhere (the server stamps ineligibleSides on it)
-  // cannot be fought, so its draw stands.
-  const bothSidesBarred = (m) => !isPoolDaihyosenBout(m.id) && !!(m.ineligibleSides && m.ineligibleSides.a && m.ineligibleSides.b);
+  // drawnTiebreakOfBarredSides in chusen.go: a tie-break bout (a league's
+  // representative bout too) whose two sides are both barred elsewhere (the
+  // server stamps ineligibleSides on it) cannot be fought, so its draw stands.
+  const bothSidesBarred = (m) => (isLeague || !isPoolDaihyosenBout(m.id)) && !!(m.ineligibleSides && m.ineligibleSides.a && m.ineligibleSides.b);
   const settledWithoutRematch = (m) => {
     if (bothSidesBarred(m)) return true;
     const { group, level } = lotsGroup(m);
@@ -268,43 +275,6 @@ function circleGroupLine(group) {
   return `${group.poolName}, ${places}`;
 }
 
-// The Accept shared ranks confirm (the wording the e2e fixture reads). `groups`
-// are the tied groups being accepted, `unfought` the tie-breaker bouts not yet
-// fought that accepting removes ("Team A v Team B"), `cyclic` whether a group
-// already fought its tie-breaker round without separating the teams.
-//
-// Exported for vitest at __tests__/render/league_tiebreak_banner.render.test.jsx.
-function acceptSharedRanksMessage(groups, unfought, cyclic) {
-  const shares = (groups || []).map(g => `${(g.teamNames || []).join(", ")} share ${sharedPlaceLabel(g)}.`).join(" ");
-  const parts = [`Accept shared ranks? ${shares} The competition finishes now. Undo shared ranks brings the question back.`];
-  for (const bout of unfought || []) parts.push(`This also removes the tie-breaker not yet fought: ${bout}.`);
-  if (cyclic) parts.push("Drawing lots is the other way to separate them.");
-  return parts.join(" ");
-}
-
-// The Undo shared ranks confirm. `removedCourts` are shiaijo the tournament no
-// longer has that some of the league's matches still name: the undo clears
-// those courts, so the matches show as unassigned.
-function undoSharedRanksMessage(removedCourts) {
-  const base = "Undo the shared ranks? The league goes back to match play and the tie is asked again: run a tie-breaker or accept shared ranks.";
-  if (!removedCourts || removedCourts.length === 0) return base;
-  return `${base} Matches on shiaijo ${removedCourts.join(", ")}, which the tournament no longer has, become unassigned.`;
-}
-
-// The shiaijo an Undo clears, as the server judges it (reopenLeagueTx): when the
-// league had finished, every court a match names that the tournament no longer
-// has, which is every named court when the tournament has none. `venue` is the
-// tournament's courts, null when they could not be read (none are then named).
-function removedCourtsOf(c, poolMatches, venue) {
-  if (!c || c.status !== "completed" || !Array.isArray(venue)) return [];
-  return [...new Set((poolMatches || []).map(m => m.court).filter(ct => ct && !venue.includes(ct)))];
-}
-
-// "Shared ranks accepted: 1st place: Team A, Team B." for one accepted group.
-function acceptedRankLine(group) {
-  return `Shared ranks accepted: ${sharedPlaceLabel(group)}: ${(group.teamNames || []).join(", ")}.`;
-}
-
 function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, password }) {
   const isLeague = c && c.format === "league";
   // A KEY, re-resolved from the live poolMatches every render, never a captured
@@ -317,24 +287,12 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
   const mountedRef = useRef(true);
   useEffect(() => () => { mountedRef.current = false; }, []);
 
-  // Phase 3b (mp-8rc9): league tie-breaker candidate state.
-  // Fetched for every team league whatever its status: once the shared ranks
-  // are accepted the league is finished, and the Undo surface still has to
-  // read the accepted groups from the same answer.
+  // Phase 3b (mp-8rc9): league tie-breaker candidate state. Fetched for every
+  // team league whatever its status; the banner shows while it is in match play.
   const isTeamLeague = isLeague && (c.teamSize > 0 || c.kind === "team");
   const [tiebreakCandidates, setTiebreakCandidates] = useState(null);
-  const [tiebreakFinalized, setTiebreakFinalized] = useState(false);
-  // The ties the operator accepted as shared ranks (the candidates answer's
-  // `accepted`, same shape as a candidate group). Empty for a legacy flag that
-  // stored none: the Undo control still shows, naming no teams.
-  const [tiebreakAccepted, setTiebreakAccepted] = useState([]);
-  // The refusal to accept while a league match is unfinished (league_not_settled).
-  // Its own state, shown outside the banner: the refetch it triggers answers an
-  // unfinished table with no candidates, so the banner (and an error inside it)
-  // goes away at once.
-  const [tiebreakNotSettled, setTiebreakNotSettled] = useState(null);
   const [tiebreakActionBusy, setTiebreakActionBusy] = useState(false);
-  // Per-button busy key: "<teamNamesKey>:<action>" or "finalize". Keeps the
+  // Per-button busy key: "<teamNamesKey>:<action>". Keeps the
   // spinner scoped to exactly the clicked button while all others stay
   // disabled (tiebreakActionBusy is still set on all). null = no action in
   // flight.
@@ -450,22 +408,11 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
 
   // Fetch candidates whenever poolMatches changes (triggered by match_updated
   // SSE events, which the Go handler now broadcasts for AwaitingLeagueTiebreak).
-  // The answer, applied: what is still asked, whether the operator accepted
-  // shared ranks, and which ties that covers.
+  // The answer, applied: what is still asked.
   const applyTiebreak = (data) => {
     setTiebreakCandidates(data.candidates || []);
-    setTiebreakFinalized(!!data.finalized);
-    setTiebreakAccepted(data.accepted || []);
     setTiebreakErr(null);
   };
-  const reloadTiebreak = () => window.API.leagueTiebreakCandidates(c.id).then(data => {
-    if (mountedRef.current) applyTiebreak(data);
-  }).catch(e => {
-    if (mountedRef.current) setTiebreakErr(e.message);
-  });
-  // A result recorded changes what the table says, so a "not finished yet"
-  // sentence about the table as it was no longer holds.
-  useEffect(() => { setTiebreakNotSettled(null); }, [poolMatchesSig]);
 
   useEffect(() => {
     if (!isTeamLeague) return;
@@ -509,73 +456,6 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
       await window.API.leagueTiebreakRemove(c.id, groupTeamNames, password, teamIds);
     } catch (e) {
       if (mountedRef.current) setTiebreakErr(e.message || "Failed to remove tie-breaker matches");
-    } finally {
-      if (mountedRef.current) { setTiebreakActionBusy(false); setTiebreakBusyAction(null); }
-    }
-  };
-
-  // Accept shared ranks: the confirm names every tie-breaker bout not yet
-  // fought that accepting removes (the operator declined it by accepting), says
-  // the competition finishes now and that Undo brings the question back, and
-  // for a fought round that went in a circle, that lots are the other way.
-  const handleTiebreakFinalize = async () => {
-    const groups = tiebreakCandidates || [];
-    const unfought = [];
-    let cyclic = false;
-    for (const g of groups) {
-      const names = g.teamNames || [];
-      const dhRows = dhRowsOfGroup(groupTeamIds(g.teams, names));
-      const open = dhRows.filter(m => !dhRowsScored([m]));
-      for (const m of open) unfought.push(`${nameOf(m.sideA)} v ${nameOf(m.sideB)}`);
-      if (dhRows.length > 0 && open.length === 0 && dhPairsComplete(dhRows, names.length)) cyclic = true;
-    }
-    if (!(await window.confirmDialog({ message: acceptSharedRanksMessage(groups, unfought, cyclic), confirmLabel: "Accept shared ranks", danger: false }))) return;
-    setTiebreakActionBusy(true);
-    setTiebreakBusyAction("finalize");
-    setTiebreakErr(null);
-    setTiebreakNotSettled(null);
-    try {
-      await window.API.leagueTiebreakFinalize(c.id, password);
-      if (mountedRef.current) setTiebreakFinalized(true);
-      // The accepted groups (and the Undo control) come from the server's answer.
-      await reloadTiebreak();
-    } catch (e) {
-      if (!mountedRef.current) return;
-      if (e.code === "league_not_settled") {
-        // A match was put back to play since this banner was drawn: say so, and
-        // read the table again so the banner follows what the server holds.
-        setTiebreakNotSettled(e.detail || e.message);
-        await reloadTiebreak();
-      } else {
-        setTiebreakErr(e.message || "Failed to accept the shared ranks");
-      }
-    } finally {
-      if (mountedRef.current) { setTiebreakActionBusy(false); setTiebreakBusyAction(null); }
-    }
-  };
-
-  // Undo shared ranks: the league goes back to match play and the tie is asked
-  // again. The confirm names any shiaijo the tournament no longer has, whose
-  // matches become unassigned (the server clears those courts in the same
-  // write). The venue is read for that sentence only; a read that fails leaves
-  // it out and the Undo still goes ahead on the operator's say.
-  const handleTiebreakUndo = async () => {
-    let venue = null;
-    try {
-      const t = await window.API.fetchTournament();
-      venue = (t && Array.isArray(t.courts)) ? t.courts : [];
-    } catch (_err) { venue = null; }
-    const gone = removedCourtsOf(c, poolMatches, venue);
-    if (!(await window.confirmDialog({ message: undoSharedRanksMessage(gone), confirmLabel: "Undo shared ranks", danger: false }))) return;
-    setTiebreakActionBusy(true);
-    setTiebreakBusyAction("undo");
-    setTiebreakErr(null);
-    try {
-      await window.API.leagueTiebreakUndo(c.id, password);
-      if (mountedRef.current) setTiebreakFinalized(false);
-      await reloadTiebreak();
-    } catch (e) {
-      if (mountedRef.current) setTiebreakErr(e.message || "Failed to undo the shared ranks");
     } finally {
       if (mountedRef.current) { setTiebreakActionBusy(false); setTiebreakBusyAction(null); }
     }
@@ -857,7 +737,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
     >
       <div className="league-tiebreak__title">Chusen (drawing lots) required</div>
       <div className="league-tiebreak__desc">
-        The daihyosen didn&apos;t settle the order (two or more teams tied on daihyosen wins). Draw lots and record each team&apos;s finishing position below.
+        A tie at 1st or 2nd place (and at 3rd place when joint 3rd places are off) needs a winner, and the tie-breaker could not give one: the daihyosen left two or more teams level on daihyosen wins, or the teams to fight it withdrew earlier. Draw lots and record each team&apos;s finishing position below.
       </div>
       {chusenCandidates.map(group => chusenEntry(group))}
     </div>
@@ -876,11 +756,14 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
     >
       <div className="league-tiebreak__title">A tie-breaker round left a tie</div>
       <div className="league-tiebreak__desc">
-        Each won as many tie-breaker bouts as the others, so the round did not decide the order. Run another tie-breaker round among them, or draw lots instead.
+        A tie at 1st or 2nd place (and at 3rd place when joint 3rd places are off) needs a winner. Each won as many tie-breaker bouts as the others, or the teams to fight it withdrew earlier, so the order is still open. Run another tie-breaker round among them where one can be fought, or draw lots instead.
       </div>
       {chusenCandidates.map(group => {
         const groupKey = `${group.poolName}::${group.minPosition}`;
         const runs = group.stillLevel || [];
+        // No round can be offered when nobody can fight it (both sides of the
+        // tie-breaker withdrew earlier): the lots are then the only way on.
+        const lotsOnly = runs.length === 0;
         const errMsg = circleErr[groupKey] || null;
         return (
           <div key={groupKey} className="league-tiebreak__group">
@@ -908,7 +791,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
                   </button>
                 );
               })}
-              {!lotsOpen[groupKey] && (
+              {!lotsOnly && !lotsOpen[groupKey] && (
                 <button
                   type="button"
                   className="btn btn--sm btn--ghost"
@@ -920,7 +803,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
               )}
             </div>
             {errMsg && <div className="league-tiebreak__err">{errMsg}</div>}
-            {lotsOpen[groupKey] && chusenEntry(group)}
+            {(lotsOnly || lotsOpen[groupKey]) && chusenEntry(group)}
           </div>
         );
       })}
@@ -966,42 +849,6 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
     </div>
   ) : null;
 
-  // The accepted shared ranks, shown whatever the league's status: a finished
-  // league has no banner, and this is where the operator takes the acceptance
-  // back. One line per accepted tie; a legacy flag that stored none still
-  // offers Undo.
-  const acceptedRanksPanel = isTeamLeague && tiebreakFinalized ? (
-    <div className="alert alert--info league-tiebreak" role="status" aria-live="polite" data-testid="league-shared-ranks">
-      {tiebreakAccepted.length === 0 && (
-        <div className="league-tiebreak__desc">Shared ranks accepted.</div>
-      )}
-      {tiebreakAccepted.map((g) => (
-        <div key={`${g.minPosition}:${(g.teamNames || []).join(",")}`} className="league-tiebreak__desc">{acceptedRankLine(g)}</div>
-      ))}
-      <div className="league-tiebreak__actions">
-        <button
-          type="button"
-          className="btn btn--sm btn--ghost"
-          disabled={tiebreakActionBusy}
-          onClick={handleTiebreakUndo}
-        >
-          {tiebreakBusyAction === "undo" && <span className="spinner" />}
-          Undo shared ranks
-        </button>
-      </div>
-      {tiebreakErr && (
-        <div className="league-tiebreak__err">{tiebreakErr}</div>
-      )}
-    </div>
-  ) : null;
-
-  // The sentence for an Accept refused because a league match is unfinished.
-  const notSettledNotice = isTeamLeague && tiebreakNotSettled ? (
-    <div className="alert alert--warn league-tiebreak" role="alert" data-testid="league-not-settled">
-      {tiebreakNotSettled}
-    </div>
-  ) : null;
-
   // Banner element: shown when there are consequential tied groups with no
   // tie-breaker matches yet, OR when tie-breaker matches have been generated.
   const leagueTiebreakBanner = isTeamLeague && c.status === "pools" && tiebreakCandidates && tiebreakCandidates.length > 0 ? (
@@ -1012,7 +859,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
     >
       <div className="league-tiebreak__title">Tie-breaker required</div>
       <div className="league-tiebreak__desc">
-        All regular matches are finished, and the teams below are level on every criterion for a place that counts. Run a tie-breaker to separate them, or accept shared ranks, which finishes the competition now.
+        All regular matches are finished, and the teams below are level on every criterion for a place that counts. A tie at 1st or 2nd place (and at 3rd place when joint 3rd places are off) needs a tie-breaker with a winner. Run a tie-breaker to separate them.
       </div>
       {tiebreakCandidates.map((group) => {
         const names = group.teamNames || [];
@@ -1066,7 +913,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
                     <NoIdHint text={NO_ID_POOL_HINT} />
                   )}
                   {dhScored && !dhRows.some(m => m.status !== "completed") && (
-                    <span className="field__hint">Every tie-breaker bout is finished and these teams are still level. Accept shared ranks, or draw lots.</span>
+                    <span className="field__hint">Every tie-breaker bout is finished and these teams are still level. Draw lots in the panel above.</span>
                   )}
                   {dhScored && dhRows.some(m => m.status !== "completed") && (
                     <span className="field__hint">Tie-breaker is running or already scored: score it to continue.</span>
@@ -1077,20 +924,6 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
           </div>
         );
       })}
-      {!tiebreakFinalized && (
-        <div className="league-tiebreak__finalize">
-          <button
-            type="button"
-            className="btn btn--sm btn--ghost"
-            disabled={tiebreakActionBusy}
-            onClick={handleTiebreakFinalize}
-          >
-            {tiebreakBusyAction === "finalize" && <span className="spinner" />}
-            Accept shared ranks
-          </button>
-          <div className="field__hint" style={{ marginTop: 4 }}>The tied teams share the place with no tie-breaker, and the competition finishes now. Undo shared ranks brings the question back.</div>
-        </div>
-      )}
       {tiebreakErr && (
         <div className="league-tiebreak__err">{tiebreakErr}</div>
       )}
@@ -1146,7 +979,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
   return (
     <>
     <div>
-      {drawnSupplementaryBouts(poolMatches, standings).map(m => (
+      {drawnSupplementaryBouts(poolMatches, standings, isLeague).map(m => (
         <DrawnTieBreakNotice
           key={m.id}
           match={enrichPoolMatchWithComp(m, c)}
@@ -1158,9 +991,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
       {chusenBanner}
       {circleNotice}
       {chusenRecordedPanel}
-      {notSettledNotice}
       {leagueTiebreakBanner}
-      {acceptedRanksPanel}
       {/* Standings ordering is decided by FORMAT (mp-ahu6): pools always
           draw-order via PoolsViewer, leagues always rank-order via
           LeagueStandingsViewer. Mirrored in viewer_competition.jsx and
@@ -1216,4 +1047,4 @@ if (typeof window !== "undefined") {
 
 // ES export for the vitest suite: pure helpers only. The component
 // stays behind window.* to match the rest of admin_*.jsx.
-export { enrichPoolMatchWithComp, poolMatchesForPool, groupTeamIds, drawnSupplementaryBouts, acceptSharedRanksMessage, undoSharedRanksMessage, removedCourtsOf, acceptedRankLine, circleGroupLine };
+export { enrichPoolMatchWithComp, poolMatchesForPool, groupTeamIds, drawnSupplementaryBouts, circleGroupLine };

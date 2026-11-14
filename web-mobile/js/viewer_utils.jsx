@@ -114,9 +114,12 @@ export function compMatches(c) {
   const rawPoolMatches = c.poolMatches || (c.pools ? c.pools.flatMap(p => (p.matches || []).map(m => ({ ...m, phase: "pool", poolName: p.poolName || p.name, phaseName: p.poolName || p.name }))) : []);
   // Pool supplementary bouts (daihyosen "Pool X-DH-N" and tiebreaker
   // "Pool X-TB-N") are representative bouts scored as individual matches even in
-  // team competitions: override compKind/teamSize/compEngi so all isTeam checks
+  // team competitions: override compKind/teamSize so all isTeam checks
   // (compKind === "team" || teamSize > 0) evaluate false, routing to the
   // individual ScoreEditorModal and rendering individual match UI.
+  // compEngi is NOT overridden: an Engi competition is never a team one, so a
+  // supplementary bout there is a tie-break between pairs and opens the flag
+  // editor like every other Engi bout.
   // Flat poolMatches from the viewer API don't carry phase/poolName; derive them
   // from the match ID (e.g. "Pool A-0" → poolName "Pool A") when absent.
   rawPoolMatches.forEach(m => {
@@ -126,7 +129,7 @@ export function compMatches(c) {
     // omit (or null) phase/poolName/phaseName, so if `...m` came last it would
     // clobber the derived pool name with undefined. derivedPool already prefers
     // m.poolName when present, so putting it last is both safe and authoritative.
-    out.push({ ...m, phase: "pool", poolName: derivedPool, phaseName: derivedPool, compId: c.id, compName: c.name, compFormat: c.format, compKind: isRepBout ? "" : c.kind, teamSize: isRepBout ? 0 : c.teamSize, compEngi: isRepBout ? false : !!c.engi, teamMatchType: isRepBout ? "" : compTMT });
+    out.push({ ...m, phase: "pool", poolName: derivedPool, phaseName: derivedPool, compId: c.id, compName: c.name, compFormat: c.format, compKind: isRepBout ? "" : c.kind, teamSize: isRepBout ? 0 : c.teamSize, compEngi: !!c.engi, teamMatchType: isRepBout ? "" : compTMT });
   });
 
   // mp-9dz: a preview bracket on a mixed source carries pool-origin

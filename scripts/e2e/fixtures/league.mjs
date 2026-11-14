@@ -23,60 +23,72 @@
 //                         The readers are here so a journey can record that and
 //                         use the cell wherever it is drawn
 //   the tie-break banner  "Tie-breaker required" (team league, status pools):
-//                         one group per consequential tie, Run tie-breaker (its
-//                         Remove unscored tie-breaker button is read, not
-//                         tapped), Accept shared ranks and its confirm; the
-//                         Undo control and its confirm
+//                         one group per tie at a place that cannot be shared
+//                         (1st and 2nd, and 3rd when two joint 3rd places are
+//                         off), Run tie-breaker (its Remove unscored
+//                         tie-breaker button is read, not tapped)
 //   the drawn-bout notice above the table for a tie-breaker saved as a draw,
 //                         with Open bout and Fight it again (built)
-//   the chusen panel      "Chusen (drawing lots) required" / "... recorded",
-//                         read only (no journey records lots yet)
-//   the settings          "Break ties for top" pills (team league only) and the
-//                         "Award two joint 3rd places" checkbox on
-//                         /admin/competition/:id/settings; both lock once a draw
-//                         exists, so they are set before Generate draw
+//   the lots              the team "Chusen (drawing lots) required" panel, the
+//                         individual "A tie-breaker round left a tie" notice
+//                         (another round, or Draw lots instead) and the
+//                         "... recorded" panel: read, and entered (recordLots)
+//   the settings          the "Award two joint 3rd places" checkbox on
+//                         /admin/competition/:id/settings; it locks once a draw
+//                         exists, so it is set before Generate draw. Every
+//                         league breaks its ties at 1st to 3rd: no other band
+//                         is offered (RETIRED names the controls that went)
 //   the public page       the League tab, the Overview's Winner badge, the
 //                         Awards tab and its podium
+//   a backup copy         a competition backed up, its archive rewritten
+//                         (config.md, pool-matches.csv) and restored as a copy:
+//                         the one door to a league an earlier release saved
 //
 // The drawn-bout notice is built and found by its test id and the wording TEXT
-// spells. The controls the league review built (the Undo control and its
-// confirm, the Accept confirm, the finished-league warning) are found by role
-// and the visible text the plan fixed word for word (TEXT below).
+// spells. The controls the league review built (the finished-league warning,
+// the lots entry) are found by role and the visible text the plan fixed word
+// for word (TEXT below).
 // Readers and confirm helpers READ what is on screen and return it; the
 // journeys assert.
+import crypto from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
 import { expect } from '@playwright/test';
 import { EXPECT_TIMEOUT_MS } from './devices.mjs';
 import { settled as paceSettled } from './pace.mjs';
 import { FIGURES, INDIVIDUAL_FIGURES } from './pools.mjs';
 import { competitionTab, openViewer } from './public.mjs';
-import { EDITOR, awardIppon, finishMatch, running, startMatch } from './scoring.mjs';
+import { EDITOR, INLINE_EDITOR, awardIppon, finishButton, finishMatch, running, startMatch } from './scoring.mjs';
+import { completedRowFor, sides, upNextCard } from './shiaijo.mjs';
+import { editorSides, ensureRunning, inlineRunning } from './individual.mjs';
 import { boutIppon, boutRow, ensureTie, finishTeam, teamTotals } from './team.mjs';
 import { createCompetition } from './wizard.mjs';
 import { generateDraw, pasteRoster, startCompetition } from './competition.mjs';
+import { chooseBackup, confirmWithPassword, openBackupPage, planRow, restoreButton } from './organiser.mjs';
+import { readZip, writeZip } from './archive.mjs';
 import { escape } from './text.mjs';
 
 // The words on screen: the controls' labels and the wording the league review
 // fixed for its confirms and refusals.
 export const TEXT = {
   bannerTitle: 'Tie-breaker required',
+  // The banner's rule, in its description: which places a tie-breaker settles.
+  bannerRule: 'A tie at 1st or 2nd place (and at 3rd place when joint 3rd places are off) needs a tie-breaker with a winner.',
   chusenTitle: 'Chusen (drawing lots) required',
   chusenRecordedTitle: 'Chusen (drawing lots) recorded',
+  // The individual notice once a tie-breaker round leaves a tie (a circle, or
+  // both sides of the tie-breaker withdrew earlier).
+  circleTitle: 'A tie-breaker round left a tie',
+  anotherRound: 'Run another tie-breaker round',
+  drawLotsInstead: 'Draw lots instead',
+  recordLots: 'Record chusen result',
   run: 'Run tie-breaker',
   remove: 'Remove unscored tie-breaker',
-  // The banner's button; matched by its start, so a hint beside it never counts.
-  accept: /^Accept shared ranks/,
-  acceptConfirm: 'Accept shared ranks',
   cancel: 'Cancel',
-  // The Undo control, its line and its confirm.
-  undo: 'Undo shared ranks',
-  undoConfirm: 'Undo shared ranks',
-  acceptedLine: /^Shared ranks accepted:/,
-  undoQuestion: 'Undo the shared ranks? The league goes back to match play and the tie is asked again: run a tie-breaker or accept shared ranks.',
-  // The Accept confirm.
-  acceptRemovesBout: (a, b) => `This also removes the tie-breaker not yet fought: ${a} v ${b}.`,
-  acceptCycleLots: 'Drawing lots is the other way to separate them.',
-  // Accept refused while a regular match is unfinished.
-  notSettled: 'A league match is not finished yet, so the table can still change. Finish it, then decide.',
+  // A tie-breaker whose two sides both withdrew earlier: its row's note and
+  // the one action it offers (ineligible_match.jsx).
+  bothBarred: 'Both withdrew earlier: neither can fight this match.',
+  recordDrawn: 'Record as drawn (neither can fight)',
   // The warning before a result on a finished league is changed.
   finishedLeague: 'This league has finished. Changing this result can change the final table and podium. If it leaves a new tie at a podium place, the league goes back to match play to settle it.',
   changeAnyway: 'Change it anyway',
@@ -86,9 +98,23 @@ export const TEXT = {
   drawnBout: (a, b, what = 'daihyosen') => `A ${what} was saved as a draw ${a} and ${b} are still tied, so the table keeps them tied. Fight it again, or open it to decide it by encho or hantei.`,
   openBout: 'Open bout',
   // settings
-  tiebreakTop: 'Break ties for top',
   twoThirdPlaces: 'Award two joint 3rd places',
 };
+
+// The league controls the tie rule retired (only 3rd can be shared): no page
+// may offer them again. A journey asserts each counts 0.
+export const RETIRED = {
+  tiebreakTop: 'Break ties for top',
+  sharedRanks: /Accept shared ranks|Undo shared ranks|Shared ranks accepted/,
+};
+
+// How many of the retired league controls the page shows (expected 0).
+export async function retiredControls(page) {
+  return {
+    tiebreakTop: await page.getByText(RETIRED.tiebreakTop).count(),
+    sharedRanks: await page.getByText(RETIRED.sharedRanks).count(),
+  };
+}
 
 const exact = (s) => new RegExp(`^${escape(s)}$`);
 // A `has:` locator must be built from the page, never chained off the root.
@@ -99,26 +125,20 @@ export const pairKey = (a, b) => [a, b].sort().join(' | ');
 
 // ------------------------------------------------------------------- seeding
 
-// Create a league through the wizard, set its league settings, paste the
-// roster, draw and start it, and return its id. `entrants` are [name, dojo]
-// pairs (teams for kind 'team'). `topN` (3 | 4) is the "Break ties for top"
-// pill, which only the settings page offers; `twoThirdPlaces` is the wizard's
-// checkbox. Both are set before the draw, which locks them. `draw: false`
-// stops after the roster, `start: false` after the draw.
+// Create a league through the wizard, paste the roster, draw and start it, and
+// return its id. `entrants` are [name, dojo] pairs (teams for kind 'team',
+// "Name 1 - Name 2" pairs for `engi`). `twoThirdPlaces` is the wizard's
+// checkbox, set before the draw, which locks it. `draw: false` stops after the
+// roster, `start: false` after the draw.
 export async function seedLeague(page, {
   name, kind = 'team', entrants, teamSize = 3, teamMatchType = 'fixed', courts = ['A'], numberPrefix,
-  twoThirdPlaces, topN, draw = true, start = true,
+  twoThirdPlaces, engi, draw = true, start = true,
 } = {}) {
   const team = kind === 'team';
   const id = await createCompetition(page, {
-    name, kind, format: 'league', courts, numberPrefix, twoThirdPlaces,
+    name, kind, format: 'league', courts, numberPrefix, twoThirdPlaces, engi,
     ...(team ? { teamSize, teamMatchType } : {}),
   });
-  if (topN !== undefined) {
-    await openLeagueSettings(page, id);
-    await chooseTiebreakTop(page, topN);
-    await saveSettings(page, id);
-  }
   await pasteRoster(page, id, entrants);
   if (!draw) return id;
   await generateDraw(page, id);
@@ -133,38 +153,16 @@ export async function openLeagueSettings(page, id) {
   await expect(page.getByText('Competition settings', { exact: true })).toBeVisible();
 }
 
-// The "Break ties for top" row (a PillGroup: role="group" named by its label,
-// each pill a button whose aria-pressed says whether it is the stored value).
-export const tiebreakTopGroup = (page) => page.getByRole('group', { name: new RegExp(`^${escape(TEXT.tiebreakTop)}`) });
 export const twoThirdPlacesBox = (page) => page.getByRole('checkbox', { name: TEXT.twoThirdPlaces });
 
-// Everything the two league settings say: whether each is shown, what is
-// chosen, whether it is locked, and the hint beside it (the settings copy F9
-// reads).
+// What the league settings say: the "Award two joint 3rd places" checkbox
+// (shown, checked, locked, and the hint beside it, the settings copy F9 reads),
+// and how many of the retired league controls the page still shows (RETIRED,
+// expected 0).
 export async function readLeagueSettings(page) {
-  const grp = tiebreakTopGroup(page);
   const box = twoThirdPlacesBox(page);
-  const out = { tiebreakTop: { shown: false }, twoThirdPlaces: { shown: false } };
-  if (await grp.count()) {
-    const pills = grp.getByRole('button');
-    const options = [];
-    for (let i = 0; i < await pills.count(); i += 1) {
-      const p = pills.nth(i);
-      options.push({
-        label: squash(await p.innerText()),
-        pressed: (await p.getAttribute('aria-pressed')) === 'true',
-        disabled: await p.isDisabled(),
-      });
-    }
-    const hint = grp.locator('xpath=ancestor::div[contains(concat(" ", normalize-space(@class), " "), " field ")][1]').locator('.field__hint');
-    out.tiebreakTop = {
-      shown: true,
-      options,
-      active: (options.find((o) => o.pressed) || {}).label || null,
-      locked: options.length > 0 && options.every((o) => o.disabled),
-      hint: (await hint.count()) ? squash(await hint.first().innerText()) : '',
-    };
-  }
+  await expect(page.getByRole('button', { name: 'Save changes' }).first()).toBeVisible();
+  const out = { twoThirdPlaces: { shown: false }, retired: await retiredControls(page) };
   if (await box.count()) {
     const hint = box.locator('xpath=ancestor::div[contains(concat(" ", normalize-space(@class), " "), " field ")][1]').locator('.field__hint');
     out.twoThirdPlaces = {
@@ -175,13 +173,6 @@ export async function readLeagueSettings(page) {
     };
   }
   return out;
-}
-
-// Choose "Top 3" or "Top 4" (not saved until saveSettings).
-export async function chooseTiebreakTop(page, n) {
-  const pill = tiebreakTopGroup(page).getByRole('button', { name: `Top ${n}`, exact: true });
-  await pill.tap();
-  await expect(pill).toHaveAttribute('aria-pressed', 'true');
 }
 
 // Tick or untick "Award two joint 3rd places" (not saved until saveSettings).
@@ -399,6 +390,48 @@ export async function playTiebreakBout(page, { winner, waza = 'M' } = {}) {
   return finishMatch(page, EDITOR);
 }
 
+// The court console's bout between two of `among`, waiting as Up next or
+// already running (a Finish + Start Next starts it), as its pairing.
+export async function courtBoutAmong(page, among) {
+  let pair = null;
+  await expect.poll(async () => {
+    pair = (await inlineRunning(page))
+      ? await editorSides(page).catch(() => null)
+      : await sides(upNextCard(page)).catch(() => null);
+    return !!pair && among.includes(pair.shiro) && among.includes(pair.aka);
+  }, { message: `the court holds a bout between two of ${among.join(', ')}`, timeout: EXPECT_TIMEOUT_MS }).toBe(true);
+  return pair;
+}
+
+// The court operator plays a tie-breaker bout (a daihyosen or an
+// ippon-shobu, on the individual board) on the console already open, and the
+// journey's camera takes the four named shots of it: `<flow>-console-up-next`
+// (the queue holding it, Up next or already running after the Finish + Start
+// Next before it), `-running`, `-before-finish` and `-after`. `winner` names
+// the competitor who takes it with one men, or `decide(page, pair)` records
+// the result instead (an encho and a hantei). Returns what the console said:
+// { pair, upNext (the card's text, '' when it was already running), eyebrow,
+// finishLabel, shots }.
+export async function playTiebreakOnCourt(page, { among, winner, decide, shot, flow }) {
+  await courtBoutAmong(page, among);
+  const card = upNextCard(page);
+  const upNext = (await inlineRunning(page)) ? '' : squash(await card.first().innerText());
+  const shots = { upNext: await shot(page, `${flow}-console-up-next`, { fullPage: true }) };
+  const pair = await ensureRunning(page);
+  expect(pair, 'the tie-breaker bout runs on the court').toBeTruthy();
+  expect(among.includes(pair.shiro) && among.includes(pair.aka), `${pair.shiro} v ${pair.aka} is the tie-breaker`).toBe(true);
+  const eyebrow = squash((await page.locator(INLINE_EDITOR).first().locator('.editor-modal__eyebrow').allInnerTexts())[0] || '');
+  shots.running = await shot(page, `${flow}-console-running`, { fullPage: true });
+  if (decide) await decide(page, pair);
+  else await awardIppon(page, pair.shiro === winner ? 'shiro' : 'aka', 'M');
+  const finishLabel = squash(await finishButton(page).innerText());
+  shots.beforeFinish = await shot(page, `${flow}-console-before-finish`, { fullPage: true });
+  await finishMatch(page);
+  await expect(completedRowFor(page, pair)).toBeVisible();
+  shots.after = await shot(page, `${flow}-console-after`, { fullPage: true });
+  return { pair, upNext, eyebrow, finishLabel, shots };
+}
+
 // ----------------------------------------------------------- confirm dialogs
 
 // The app's confirm (window.confirmDialog, ui.jsx): it carries no accessible
@@ -439,7 +472,6 @@ const titled = (page, title) => page.locator('.league-tiebreak').filter({
 export const tiebreakBanner = (page) => titled(page, TEXT.bannerTitle);
 export const bannerGroups = (page) => tiebreakBanner(page).locator('.league-tiebreak__group');
 const bannerError = (page) => tiebreakBanner(page).locator('.league-tiebreak__err');
-export const acceptButton = (page) => tiebreakBanner(page).getByRole('button', { name: TEXT.accept });
 
 // "Position 3" -> { min: 3, max: 3 }; "Positions 1–2" -> { min: 1, max: 2 }.
 const positions = (t) => {
@@ -447,9 +479,9 @@ const positions = (t) => {
   return m ? { min: Number(m[1]), max: Number(m[2] || m[1]) } : { min: NaN, max: NaN };
 };
 
-// The banner as data: { shown, description, groups, acceptOffered, error }.
-// Each group: { position (as shown), min, max, teams, run, remove (whether
-// each is offered, and enabled), hint }.
+// The banner as data: { shown, description, groups, error }. Each group:
+// { position (as shown), min, max, teams, run, remove (whether each is
+// offered, and enabled), hint }.
 export async function readBanner(page) {
   const banner = tiebreakBanner(page);
   if (!(await banner.count())) return { shown: false, groups: [] };
@@ -466,13 +498,10 @@ export async function readBanner(page) {
     };
   }));
   const err = bannerError(page);
-  const accept = acceptButton(page);
   return {
     shown: true,
     description: squash(await banner.locator('.league-tiebreak__desc').first().innerText()),
     groups: groups.map((g) => ({ ...g, ...positions(g.position) })),
-    acceptOffered: (await accept.count()) > 0,
-    acceptLabel: (await accept.count()) ? squash(await accept.first().innerText()) : '',
     error: (await err.count()) ? squash(await err.first().innerText()) : '',
   };
 }
@@ -486,11 +515,10 @@ export async function bannerGroup(page, teams) {
   return bannerGroups(page).nth(i);
 }
 
-// The answer to the next league tie-break write: POST (Run), or with `tail`
-// '/finalize' POST (Accept) and DELETE (Undo). Armed before the tap.
-// Resolves { status, ok, body }.
-export function tiebreakWrite(page, method, tail = '') {
-  const re = new RegExp(`^/api/competitions/[^/]+/league-tiebreak${escape(tail)}$`);
+// The answer to the next league tie-break write: POST (Run) or DELETE (Remove
+// unscored tie-breaker). Armed before the tap. Resolves { status, ok, body }.
+export function tiebreakWrite(page, method) {
+  const re = /^\/api\/competitions\/[^/]+\/league-tiebreak$/;
   const answered = page.waitForResponse((r) => r.request().method() === method && re.test(new URL(r.url()).pathname),
     { timeout: EXPECT_TIMEOUT_MS })
     .then(async (r) => ({ status: r.status(), ok: r.ok(), body: await r.json().catch(() => null) }));
@@ -512,48 +540,6 @@ export async function runTiebreaker(page, teams, { allowRefusal = false } = {}) 
   const res = await landed(answered, 'Run tie-breaker', allowRefusal);
   if (res.ok) await expect(group.getByRole('button', { name: TEXT.remove, exact: true })).toBeVisible();
   return res;
-}
-
-// Tap Accept shared ranks, leaving its confirm open; returns what it says.
-export async function requestAcceptSharedRanks(page) {
-  await acceptButton(page).first().tap();
-  return readConfirm(page);
-}
-
-// Accept the shared ranks: tap, answer the confirm with "Accept shared ranks",
-// return { asked, status, ok, body }. A refusal (league_not_settled)
-// is returned, not thrown, when `allowRefusal`.
-export async function acceptSharedRanks(page, { allowRefusal = false } = {}) {
-  const asked = await requestAcceptSharedRanks(page);
-  const answered = tiebreakWrite(page, 'POST', '/finalize');
-  await answerConfirm(page, TEXT.acceptConfirm);
-  return { asked, ...(await landed(answered, 'Accept shared ranks', allowRefusal)) };
-}
-
-// ------------------------------------------------------- the Undo control
-
-// The page's own "Undo shared ranks" button, never the one in its confirm.
-export const undoControl = (page) => page.locator(
-  `xpath=//button[normalize-space(.)="${TEXT.undo}"][not(ancestor::*[@role="dialog"])]`,
-);
-
-// The "Shared ranks accepted: <place>: <team>, <team>." lines, one per group.
-export async function acceptedLines(page) {
-  return (await page.getByText(TEXT.acceptedLine).allInnerTexts()).map(squash);
-}
-
-export async function requestUndoSharedRanks(page) {
-  await undoControl(page).first().tap();
-  return readConfirm(page);
-}
-
-// Undo the accepted shared ranks: tap, answer "Undo shared ranks", return the
-// server's answer to DELETE .../league-tiebreak/finalize.
-export async function undoSharedRanks(page, { allowRefusal = false } = {}) {
-  const asked = await requestUndoSharedRanks(page);
-  const answered = tiebreakWrite(page, 'DELETE', '/finalize');
-  await answerConfirm(page, TEXT.undoConfirm);
-  return { asked, ...(await landed(answered, 'Undo shared ranks', allowRefusal)) };
 }
 
 // ------------------------------------------- the drawn-bout notice (built)
@@ -598,6 +584,47 @@ export async function readChusen(page) {
       max: range ? Number(range[2]) : NaN,
     };
   }));
+}
+
+// The individual notice once a tie-breaker round leaves a tie, and its group
+// of `names` (in the order the notice lists them).
+export const circleNotice = (page) => titled(page, TEXT.circleTitle);
+export const circleGroup = (page, names) => circleNotice(page).locator('.league-tiebreak__group').filter({
+  has: page.locator('.league-tiebreak__teams', { hasText: exact(names.join(' · ')) }),
+});
+
+// The lots entry that holds a number box for each of `names`, wherever it is
+// drawn: the team chusen panel, the individual notice (once Draw lots instead
+// is tapped, or at once when nobody can fight another round), or a recorded
+// group being changed. They all draw one entry: a box per competitor,
+// labelled with their name, and Record chusen result.
+const lotsEntry = (page, names) => names.reduce(
+  (loc, name) => loc.filter({ has: page.getByLabel(name, { exact: true }) }),
+  // The innermost group: the individual notice draws the entry inside its own.
+  page.locator('.league-tiebreak__group')
+    .filter({ hasNot: page.locator('.league-tiebreak__group') })
+    .filter({ has: page.getByRole('button', { name: TEXT.recordLots, exact: true }) }),
+);
+
+// Enter the order the lots gave: `order` lists the competitors best first.
+// Each box gets its place (the entry's first position, then one more each),
+// Record chusen result is tapped, and the call returns the server's answer to
+// PUT .../pools/<pool>/override-rank ({ status, ok, body }) once it succeeded.
+export async function recordLots(page, order) {
+  const entry = lotsEntry(page, order);
+  await expect(entry, `one lots entry for ${order.join(', ')}`).toHaveCount(1);
+  const from = /positions (\d+) to (\d+)/i.exec(squash(await entry.innerText()));
+  expect(from, 'the lots entry names the places it assigns').toBeTruthy();
+  const first = Number(from[1]);
+  for (const [i, name] of order.entries()) await entry.getByLabel(name, { exact: true }).fill(String(first + i));
+  const answered = page.waitForResponse((r) => r.request().method() === 'PUT'
+    && /^\/api\/competitions\/[^/]+\/pools\/[^/]+\/override-rank$/.test(new URL(r.url()).pathname), { timeout: EXPECT_TIMEOUT_MS })
+    .then(async (r) => ({ status: r.status(), ok: r.ok(), body: await r.json().catch(() => null) }));
+  answered.catch(() => {});
+  await entry.getByRole('button', { name: TEXT.recordLots, exact: true }).tap();
+  const res = await answered;
+  expect(res.ok, `Record chusen result was answered ${res.status} ${JSON.stringify(res.body)}`).toBe(true);
+  return res;
 }
 
 // The recorded lots: [{ pool, order }] with `order` as shown ("1st A, 2nd B").
@@ -646,4 +673,79 @@ export async function readPodium(page) {
   const badge = page.getByTestId('league-winner-badge');
   const winner = (await badge.count()) ? squash(await badge.innerText()).replace(/^Winner:\s*/, '') : '';
   return { winner, places };
+}
+
+// ------------------------------------------------------------ a backup copy
+//
+// A league saved by an earlier release (a setting the app no longer offers, a
+// record no screen can make any more) reaches the app the way such a
+// tournament does: a backup archive, restored through Backup and restore. The
+// archive is the app's own backup of a league, with files rewritten; the
+// manifest's size and SHA-256 of each rewritten file are rewritten with it
+// (the restore checks both).
+
+// Back the competition named `name` up from Backup and restore; returns the
+// archive's path inside `dir`.
+export async function backUpCompetition(page, name, dir) {
+  await openBackupPage(page);
+  const [download] = await Promise.all([
+    page.waitForEvent('download'),
+    page.getByRole('button', { name: `Back up "${name}"`, exact: true }).tap(),
+  ]);
+  const file = path.join(dir, download.suggestedFilename());
+  await download.saveAs(file);
+  return file;
+}
+
+// Write to `out` the archive `file` with the entries rewritten: `edits` maps
+// the end of an entry's name ('/config.md', '/pool-matches.csv') to a function
+// of its text that returns the new text. Each edit must match exactly one
+// entry. Returns the names rewritten.
+export function rewriteBackup(file, out, edits) {
+  const entries = readZip(fs.readFileSync(file));
+  const manifest = JSON.parse(entries.get('manifest.json').toString('utf8'));
+  const rewritten = [];
+  for (const [tail, edit] of Object.entries(edits)) {
+    const names = [...entries.keys()].filter((n) => n.endsWith(tail));
+    if (names.length !== 1) throw new Error(`rewriteBackup: ${names.length} entries end with ${tail}: ${[...entries.keys()].join(', ')}`);
+    const [name] = names;
+    const body = Buffer.from(edit(entries.get(name).toString('utf8')), 'utf8');
+    entries.set(name, body);
+    const listed = manifest.files.find((f) => f.path === name);
+    listed.size = body.length;
+    listed.sha256 = crypto.createHash('sha256').update(body).digest('hex');
+    rewritten.push(name);
+  }
+  entries.set('manifest.json', Buffer.from(JSON.stringify(manifest, null, 2), 'utf8'));
+  fs.writeFileSync(out, writeZip(entries));
+  return rewritten;
+}
+
+// config.md with `line` added to its front matter (after the opening "---").
+export function withFrontMatterLine(text, line) {
+  if (!text.startsWith('---\n')) throw new Error(`config.md has no front matter: ${text.slice(0, 40)}`);
+  return `---\n${line}\n${text.slice(4)}`;
+}
+
+// Restore the competition named `name` from `archive` as a copy named
+// `copyName` (Backup and restore, confirmed with the tournament password);
+// returns the copy's id.
+export async function restoreAsCopy(page, { archive, name, copyName, password }) {
+  await openBackupPage(page);
+  await chooseBackup(page, archive);
+  const row = planRow(page, name);
+  await row.getByRole('radio', { name: /Restore as a copy named/ }).check();
+  await row.getByRole('textbox', { name: `Name for the copy of "${name}"` }).fill(copyName);
+  await expect(restoreButton(page)).toHaveText('Restore');
+  const answered = page.waitForResponse((r) => r.request().method() === 'POST'
+    && new URL(r.url()).pathname === '/api/tournament/restore');
+  await restoreButton(page).tap();
+  await confirmWithPassword(page, 'Confirm restore', 'Restore', password);
+  const res = await answered;
+  expect(res.ok(), `restore answered ${res.status()}`).toBe(true);
+  const body = await res.json();
+  await expect(page.getByRole('heading', { level: 2, name: 'Restore completed' })).toBeVisible();
+  const copyId = ((body.plan && body.plan.competitions) || []).find((c) => c.newId)?.newId;
+  expect(copyId, 'the copy has an id').toBeTruthy();
+  return copyId;
 }

@@ -241,11 +241,12 @@ func anyMatchToAnnotate(poolMatches []state.MatchResult, bracket *state.Bracket)
 	return false
 }
 
-// drawnPoolTiebreak reports a pool ippon-shobu bout finished with no winner:
-// the one finished match that carries the ineligibleSides stamp, because two
-// barred sides are what settles it (engine.drawnTiebreakOfBarredSides).
+// drawnPoolTiebreak reports a pool tie-break bout (an ippon-shobu "-TB-" or a
+// representative "-DH-" bout) finished with no winner: the one finished match
+// that carries the ineligibleSides stamp, because two barred sides are what
+// make it a draw nobody fought (engine.drawnTiebreakOfBarredSides).
 func drawnPoolTiebreak(m *state.MatchResult) bool {
-	return m.Status == state.MatchStatusCompleted && m.Winner == "" && engine.IsTiebreakerMatchID(m.ID)
+	return m.Status == state.MatchStatusCompleted && m.Winner == "" && state.IsPoolSupplementaryMatchID(m.ID)
 }
 
 // annotateEligibility stamps state.IneligibleSidesAnnotation (bc-cse) on
@@ -686,8 +687,8 @@ func answerAutoComplete(c *gin.Context, hub Broadcaster, compID string, outcome 
 		hub.Broadcast(EventScheduleUpdated, nil)
 	case engine.AutoCompleteAwaitingLeagueTiebreak:
 		// All regular team-league pool matches are complete but consequential ties
-		// remain, the operator must either generate tie-breaker matches or finalize
-		// shared ranks via the league-tiebreak endpoints (Phase 3b). Broadcast both
+		// remain, the operator must generate tie-breaker matches via the
+		// league-tiebreak endpoints (Phase 3b). Broadcast both
 		// EventMatchUpdated (reload standings) and EventScheduleUpdated (display
 		// the "tie-breaker required" banner) as documented on AutoCompleteAwaitingLeagueTiebreak.
 		hub.Broadcast(EventMatchUpdated, gin.H{"competitionId": compID})
@@ -2111,10 +2112,9 @@ func (r *leagueFinishedRefusal) body() gin.H {
 // result the match's history keeps because the writer never saw the one in
 // force (those land nothing, so there is nothing to warn about). Its scope is
 // the reconciler's (the engine's leagueStateBeforeWrite): a pool match, a
-// tie-breaker bout included, of a league that is not engi; an engi league is
-// not reconciled, so the warning's "goes back to match play" would not hold
-// there. tl may be nil (no court is then named). It answers nil when the write
-// may go on; an error that is not a *leagueFinishedRefusal is a fault.
+// tie-breaker bout included, of a league, engi or not. tl may be nil (no court
+// is then named). It answers nil when the write may go on; an error that is
+// not a *leagueFinishedRefusal is a fault.
 //
 // It lives here and not in the engine's ForceOptions because `corrects` is the
 // door's own reading of the request (the stamp and basis the writer sent, the
@@ -2129,7 +2129,7 @@ func refuseFinishedLeagueCorrection(stx state.StoreTx, tl TournamentLoader, comp
 	if err != nil {
 		return err
 	}
-	if comp == nil || comp.Format != state.CompFormatLeague || comp.Engi || comp.Status != state.CompStatusComplete {
+	if comp == nil || comp.Format != state.CompFormatLeague || comp.Status != state.CompStatusComplete {
 		return nil
 	}
 	courts, err := leagueRemovedCourts(stx, tl, compID)

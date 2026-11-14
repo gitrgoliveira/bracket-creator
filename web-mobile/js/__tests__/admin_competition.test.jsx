@@ -451,10 +451,6 @@ describe('AdminSettings.saveNow payload whitelist', () => {
     'engi',
     // mp-6nq: per-competition check-in tracking flag.
     'checkInEnabled',
-    // Phase 3b (mp-8rc9): league tie-breaker config. Only meaningful for
-    // team-league competitions; safe to include for all formats because
-    // the backend PUT allowlist ignores unknown fields.
-    'leagueTiebreakTopN',
     // bc-3rdp: joint-3rd-place rule, generalised from leagueTwoThirdPlaces
     // (now legacy read-only, see FORBIDDEN below) to every format that can
     // award a 3rd place. Round-tripped for the same zero-value-clobber

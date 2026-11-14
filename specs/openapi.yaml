@@ -1877,7 +1877,8 @@ paths:
         `numberPrefix`, `format`, `kind`,
         `poolMatchDurationSeconds`, `knockoutMatchDurationSeconds`,
         `expectedParticipants`, `swissRounds`, `naginata`, `engi`, `teamMatchType`,
-        `checkInEnabled`, `leagueTiebreakTopN`, `leagueTwoThirdPlaces`.
+        `checkInEnabled`, `twoThirdPlaces`. The legacy `leagueTwoThirdPlaces`
+        is never written here (`twoThirdPlaces` supersedes it).
         String fields are trimmed server-side.
 
         Several of those fields are refused once the competition has
@@ -1886,12 +1887,11 @@ paths:
         only a save that actually CHANGES it while started. `format` and
         `kind` (409, see below) and `teamMatchType` (409, see below) are
         refused together with the output-affecting draw-ready gate.
-        `naginata`, `engi`, and the pair `leagueTiebreakTopN` /
-        `leagueTwoThirdPlaces` are refused with 400 (`naginata can only be
-        changed before the competition starts`, `engi can only be changed
-        before the competition starts`, `leagueTiebreakTopN and
-        leagueTwoThirdPlaces can only be changed before the competition
-        starts`, respectively). Every other field in the list above
+        `naginata`, `engi` and `twoThirdPlaces` are refused with 400
+        (`naginata can only be changed before the competition starts`,
+        `engi can only be changed before the competition starts`,
+        `twoThirdPlaces can only be changed before the competition starts`,
+        respectively). Every other field in the list above
         (including `poolMatchDurationSeconds` / `knockoutMatchDurationSeconds`,
         `checkInEnabled`, `swissRounds` and `numberPrefix`) is editable
         regardless of status through this endpoint; `poolSize`, `poolWinners`,
@@ -2894,7 +2894,11 @@ paths:
         it returns the ties a finished ippon-shobu round left level, each
         with the runs (`stillLevel`) another round
         (`POST .../pools/{poolId}/tiebreak-round`) would fight; lots through
-        the same `override-rank` are the operator's other choice. Only
+        the same `override-rank` are the operator's other choice. In a
+        league, a tie whose tie-breaker bout was recorded as drawn because
+        both sides are barred (neither can fight) is returned too, for a team
+        and an individual alike, with no `stillLevel`: only the lots decide
+        it, and the league finishes once they are entered. Only
         consequential ties (ones that affect advancement/seeding) are
         returned. Admin-gated, unlike the public league-tiebreak candidates
         endpoint. Empty (not an error) for a competition not in the pools stage (a
@@ -3724,15 +3728,17 @@ paths:
             X-TB-n`) finished with no winner is refused: "A tie-breaker needs a
             winner: continue with encho, then decide by hantei." Every result
             door gives the same refusal (score, quick-score, bulk-score, the
-            score events and the decision door). On the decision door, the
-            hikiwake recorded when both sides are barred is refused for a team
-            league's representative bout: "Both sides of this tie-breaker are
-            barred, so it cannot be fought or drawn. Accept the shared ranks
-            instead." An individual league's ippon-shobu bout is the one
-            exemption: nobody can fight it, so that draw is recorded and the
-            bout counts settled while both sides stay barred (the places stay
-            shared); a side reinstated opens the bout again. A pools +
-            knockout competition keeps its drawn tie-breaker and its lots.
+            score events and the decision door). The one exemption is the
+            decision door's hikiwake when both sides are barred ("Record as
+            drawn (neither can fight)"), for a team league's representative
+            bout and an individual league's ippon-shobu bout alike: nobody can
+            fight it, so that draw is recorded and the bout counts as played
+            while both sides stay barred. It never shares the place it was
+            for: the place is then decided by the lots the organiser enters
+            (`PUT .../pools/{poolId}/override-rank`), and the league finishes
+            once they are entered. A side reinstated opens the bout again. A
+            pools + knockout competition keeps its drawn tie-breaker and its
+            lots.
 
             A request with an empty password (self-run) whose `subResults`
             list more than one representative-bout row (position `-1`) is
@@ -4245,8 +4251,7 @@ paths:
         mode (an organiser correction), so a request without a valid
         `X-Tournament-Password` gets 401. Broadcasts a `match_updated` event.
         A match reopened on a finished league puts the league back into match
-        play (status `pools`, any accepted shared ranks taken back), broadcast
-        as `competition_started`; `requeue-blocker-and-reopen` does the same.
+        play (status `pools`), broadcast as `competition_started`; `requeue-blocker-and-reopen` does the same.
         The reopen is warned about first: a completed match of a finished
         league is refused 409 `league_finished` (nothing is written) until the
         request carries `confirmFinished: true`.
@@ -5281,12 +5286,12 @@ paths:
         fought/hikiwake"). The equivalent knockout case, where the bracket
         needs a winner and a draw cannot stand in, is refused instead with
         409 `ineligible_competitor` naming both sides and pointing at the
-        earlier withdrawal or the draw. On a league's tie-breaker bout the
-        draw is refused for a team league's representative bout (the shared
-        ranks are accepted instead) and recorded for an individual league's
-        ippon-shobu bout (see PUT .../score). The pool match list stamps
-        `ineligibleSides` on such a drawn ippon-shobu bout, which is how the
-        Pools tab knows both sides are barred.
+        earlier withdrawal or the draw. On a league's tie-breaker bout (a
+        team league's representative bout or an individual league's
+        ippon-shobu bout) the draw is recorded too, and the place it was for
+        is then decided by the lots (see PUT .../score). The pool match list
+        stamps `ineligibleSides` on such a drawn tie-breaker bout, which is
+        how the Pools tab knows both sides are barred.
       security:
         - TournamentPassword: []
       parameters:
@@ -6546,35 +6551,29 @@ paths:
       tags: [competitions]
       summary: List consequential league tie-breaker tied groups
       description: >
-        Returns the consequential tied groups for a team-league competition; groups of teams tied on all official criteria whose finishing positions
-        fall within the configured tie-breaker band (`leagueTiebreakTopN`, honouring
-        `leagueTwoThirdPlaces`). Public read (no auth): derived from the
-        already-public standings. Returns an empty list for non-team-league
-        competitions and once shared ranks have been accepted; then `accepted`
-        lists the ties the table still holds, the shared ranks the operator
-        accepted, so a page can name them and offer the Undo
-        (`DELETE .../league-tiebreak/finalize`).
+        Returns the consequential tied groups for a team-league competition
+        once every regular league match is finished: groups of teams tied on
+        all official criteria that hold a place a league cannot share. Only
+        3rd can be shared, and only when two joint 3rd places are awarded
+        (`twoThirdPlaces`, or the legacy `leagueTwoThirdPlaces`), so a tie at
+        1st or 2nd, and at 3rd otherwise, is listed; a tie at 4th or lower
+        always shares its place and is never listed. A listed tie is settled
+        only by a tie-breaker with a winner, or by the lots the organiser
+        enters for a tie the bouts cannot separate. Public read (no auth):
+        derived from the already-public standings. Returns an empty list for
+        non-team-league competitions.
       security: []
       responses:
         '200':
-          description: Tied groups plus the finalized flag.
+          description: The tied groups.
           content:
             application/json:
               schema:
                 type: object
+                required: [candidates]
                 properties:
                   candidates:
                     type: array
-                    items:
-                      $ref: '#/components/schemas/LeagueTiebreakCandidateGroup'
-                  finalized:
-                    type: boolean
-                  accepted:
-                    type: array
-                    description: >
-                      Present only when `finalized` is true: the tied groups the
-                      accepted shared ranks cover, in the candidates' shape.
-                      Empty, never absent, when the table holds no tie any more.
                     items:
                       $ref: '#/components/schemas/LeagueTiebreakCandidateGroup'
         '404':
@@ -6661,126 +6660,6 @@ paths:
           description: One or more matches are in progress or already scored.
         '413':
           $ref: '#/components/responses/PayloadTooLarge'
-
-  /api/competitions/{id}/league-tiebreak/finalize:
-    parameters:
-      - $ref: '#/components/parameters/CompetitionId'
-    post:
-      tags: [competitions]
-      summary: Accept shared league ranks without a tie-breaker
-      description: >
-        Marks the league's consequential ties as final without a tie-breaker
-        (`leagueTiebreakFinalized = true`) and attempts to complete the
-        competition. Admin-gated. Accepted only once every regular league
-        match is finished: the table cannot change after the decision. The
-        same transaction removes every tie-breaker bout not yet fought
-        (scheduled, with no score), so the queue holds no bout the decision
-        made moot; a fought bout keeps its result. A later result change
-        that alters the ties takes the accepted ranks back and, on a finished
-        league, puts it back into match play (`competition_started`).
-      security:
-        - TournamentPassword: []
-      responses:
-        '200':
-          description: Finalized.
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  finalized:
-                    type: boolean
-                  removed:
-                    type: integer
-                    description: How many unfought tie-breaker bouts were removed.
-        '400':
-          description: Not a team-league competition.
-        '401':
-          description: Missing or invalid X-Tournament-Password.
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '409':
-          description: >
-            `{error, detail}` with `detail` the sentence the operator reads.
-            `already_complete`: the competition is already complete.
-            `league_not_settled`: a regular league match is not finished
-            ("A league match is not finished yet, so the table can still
-            change. Finish it, then decide."). `tiebreak_match_scored`: a
-            tie-breaker bout is being fought ("A tie-breaker bout is being
-            fought. Finish it, or send it back to the queue, then accept the
-            shared ranks."). `tiebreak_drawn`: a tie-breaker bout was saved as a
-            draw before a league tie-breaker needed a winner and its tie still
-            decides a place (a drawn bout whose tie lots ranked, or a
-            correction split or moved out of the band, is no bar); `detail` names
-            its two sides ("Alpha v Beta was saved as a draw. A tie-breaker
-            needs a winner: open it and decide by encho or hantei, then accept
-            the shared ranks if they still share the place.").
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  error:
-                    type: string
-                  detail:
-                    type: string
-    delete:
-      tags: [competitions]
-      summary: Undo accepted shared league ranks
-      description: >
-        Takes back the shared ranks `POST .../league-tiebreak/finalize`
-        accepted, in one transaction. A finished league goes back to match
-        play (status `pools`, broadcast `competition_started`), and a match on
-        a shiai-jo the tournament no longer has loses its court; every result
-        stays. A league still in match play only loses the flag. The tie is
-        then offered again by `GET .../league-tiebreak/candidates`. Organiser
-        only, in self-run mode too.
-      security:
-        - TournamentPassword: []
-      responses:
-        '200':
-          description: The accepted ranks were taken back.
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [finalized, reopened, unassignedMatches, removedCourts]
-                properties:
-                  finalized:
-                    type: boolean
-                    enum: [false]
-                  reopened:
-                    type: boolean
-                    description: True when a finished league went back to match play.
-                  unassignedMatches:
-                    type: array
-                    description: Ids of the matches that lost a removed shiai-jo.
-                    items:
-                      type: string
-                  removedCourts:
-                    type: array
-                    description: The removed shiai-jo those matches sat on.
-                    items:
-                      type: string
-        '400':
-          description: Not a league competition.
-        '401':
-          description: Missing or invalid X-Tournament-Password.
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '409':
-          description: >
-            `not_finalized`: no shared ranks were accepted ("The shared ranks
-            were not accepted, so there is nothing to undo.").
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  error:
-                    type: string
-                  detail:
-                    type: string
 
   /api/schedule/estimate:
     get:

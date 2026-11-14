@@ -177,7 +177,7 @@ func TestMarkTiedStandings_League(t *testing.T) {
 			})
 
 			t.Run("tie outside the top-N band → not marked", func(t *testing.T) {
-				// effectiveTopN defaults to 3. Tie sits at positions 4-5 (MinPosition 4 > 3).
+				// The band is 3 (leagueTiebreakBand). Tie sits at positions 4-5 (MinPosition 4 > 3).
 				sorted := []state.PlayerStanding{
 					tiedStanding("A", 100), tiedStanding("B", 90), tiedStanding("C", 80),
 					tiedStanding("D", 50), tiedStanding("E", 50),
@@ -253,7 +253,7 @@ func TestMarkTiedStandings_TwoThirdPlacesExemption(t *testing.T) {
 	matches := leagueRoundRobin([]string{"A", "B", "C", "D"}, true)
 
 	t.Run("exemption on → pure 3rd/4th tie not marked", func(t *testing.T) {
-		comp := &state.Competition{Format: state.CompFormatLeague, LeagueTiebreakTopN: 4, LeagueTwoThirdPlaces: true}
+		comp := &state.Competition{Format: state.CompFormatLeague, LeagueTwoThirdPlaces: true}
 		sorted := []state.PlayerStanding{tiedStanding("A", 100), tiedStanding("B", 90), tiedStanding("C", 50), tiedStanding("D", 50)}
 		stampStandingsAndMatchIDs(sorted, matches)
 		markTiedStandings(comp, sorted, matches, rosterIndexFrom(sorted))
@@ -261,7 +261,7 @@ func TestMarkTiedStandings_TwoThirdPlacesExemption(t *testing.T) {
 	})
 
 	t.Run("exemption off → same 3rd/4th tie IS marked", func(t *testing.T) {
-		comp := &state.Competition{Format: state.CompFormatLeague, LeagueTiebreakTopN: 4, LeagueTwoThirdPlaces: false}
+		comp := &state.Competition{Format: state.CompFormatLeague, LeagueTwoThirdPlaces: false}
 		sorted := []state.PlayerStanding{tiedStanding("A", 100), tiedStanding("B", 90), tiedStanding("C", 50), tiedStanding("D", 50)}
 		stampStandingsAndMatchIDs(sorted, matches)
 		markTiedStandings(comp, sorted, matches, rosterIndexFrom(sorted))
@@ -269,7 +269,7 @@ func TestMarkTiedStandings_TwoThirdPlacesExemption(t *testing.T) {
 	})
 
 	t.Run("exemption on but tie straddles 2nd/3rd → still marked", func(t *testing.T) {
-		comp := &state.Competition{Format: state.CompFormatLeague, LeagueTiebreakTopN: 3, LeagueTwoThirdPlaces: true}
+		comp := &state.Competition{Format: state.CompFormatLeague, LeagueTwoThirdPlaces: true}
 		// Tie at positions 2-3 (MinPosition 2 < 3): a decider IS needed for 2nd.
 		sorted := []state.PlayerStanding{tiedStanding("A", 100), tiedStanding("B", 80), tiedStanding("C", 80), tiedStanding("D", 40)}
 		stampStandingsAndMatchIDs(sorted, matches)

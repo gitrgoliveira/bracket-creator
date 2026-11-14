@@ -180,6 +180,83 @@ describe('compEngi stamping on competition-page match objects (mp-94v0)', () => 
     });
   });
 
+  // ── Supplementary (tie-break / daihyosen) bouts on both standings paths ───
+  // An Engi competition is never a team one, so its "-TB-" bout is a tie-break
+  // between pairs and must open the flag editor. The team branch is driven with
+  // kind "team" + engi to prove the supplementary override no longer clears
+  // compEngi; a team daihyosen (engi false) keeps compKind "" and teamSize 0.
+  describe('supplementary bouts keep compEngi from the competition', () => {
+    const tbMatch = { ...poolMatch, id: 'Pool A-TB-0' };
+    const dhMatch = { ...poolMatch, id: 'Pool A-DH-0' };
+    const compOf = (over) => ({ id: 'c1', name: 'Kata Open', kind: 'individual', teamSize: 0, format: 'mixed', engi: false, ...over });
+
+    const pools = (competition, matches) => {
+      const captured = [];
+      const onMatchClick = (m) => captured.push(m);
+      const tree = runtime.mount(PoolsViewer, {
+        pools: [{ poolName: 'Pool A', players: engiPlayers }],
+        standings: {},
+        poolMatches: matches,
+        tweaks: { showDojo: false },
+        competition,
+        onMatchClick,
+      });
+      matchClickHandlers(tree, onMatchClick).forEach(h => h());
+      return captured;
+    };
+
+    const league = async (competition, matches) => {
+      const captured = [];
+      const onMatchClick = (m) => captured.push(m);
+      runtime.mount(LeagueStandingsViewer, {
+        competition: { ...competition, format: 'league', players: engiPlayers },
+        poolMatches: matches,
+        tweaks: { showDojo: false },
+        onMatchClick,
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+      matchClickHandlers(runtime.currentTree(), onMatchClick).forEach(h => h());
+      return captured;
+    };
+
+    it('PoolsViewer: an Engi tie-break bout carries compEngi:true', () => {
+      const got = pools(compOf({ engi: true }), [tbMatch]);
+      expect(got.length).toBeGreaterThan(0);
+      got.forEach(m => expect(m.compEngi).toBe(true));
+    });
+
+    it('PoolsViewer team branch: a supplementary bout keeps compEngi from the competition', () => {
+      const got = pools(compOf({ engi: true, kind: 'team', teamSize: 3 }), [tbMatch]);
+      expect(got.length).toBeGreaterThan(0);
+      got.forEach(m => { expect(m.compEngi).toBe(true); expect(m.compKind).toBe(''); expect(m.teamSize).toBe(0); });
+    });
+
+    it('PoolsViewer: a team daihyosen bout still carries compKind empty and teamSize 0', () => {
+      const got = pools(compOf({ kind: 'team', teamSize: 3 }), [dhMatch]);
+      expect(got.length).toBeGreaterThan(0);
+      got.forEach(m => { expect(m.compKind).toBe(''); expect(m.teamSize).toBe(0); expect(m.compEngi).toBe(false); });
+    });
+
+    it('LeagueStandingsViewer: an Engi tie-break bout carries compEngi:true', async () => {
+      const got = await league(compOf({ engi: true }), [tbMatch]);
+      expect(got.length).toBeGreaterThan(0);
+      got.forEach(m => expect(m.compEngi).toBe(true));
+    });
+
+    it('LeagueStandingsViewer team branch: a supplementary bout keeps compEngi from the competition', async () => {
+      const got = await league(compOf({ engi: true, kind: 'team', teamSize: 3 }), [tbMatch]);
+      expect(got.length).toBeGreaterThan(0);
+      got.forEach(m => { expect(m.compEngi).toBe(true); expect(m.compKind).toBe(''); expect(m.teamSize).toBe(0); });
+    });
+
+    it('LeagueStandingsViewer: a team daihyosen bout still carries compKind empty and teamSize 0', async () => {
+      const got = await league(compOf({ kind: 'team', teamSize: 3 }), [dhMatch]);
+      expect(got.length).toBeGreaterThan(0);
+      got.forEach(m => { expect(m.compKind).toBe(''); expect(m.teamSize).toBe(0); expect(m.compEngi).toBe(false); });
+    });
+  });
+
   // ── LeagueMatrix: the cross-table cell click ──────────────────────────────
   describe('LeagueMatrix (cross-table cell)', () => {
     it('stamps compEngi on a cell-click match when isEngi is threaded in', () => {

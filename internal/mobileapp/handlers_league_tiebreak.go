@@ -1,15 +1,17 @@
-// Package mobileapp, handlers_league_tiebreak.go owns the four operator
+// Package mobileapp, handlers_league_tiebreak.go owns the three operator
 // endpoints for league tie-breaker management (Phase 3b, mp-8rc9):
 //
 //	GET  /api/competitions/:cid/league-tiebreak/candidates  (public, no auth)
 //	POST /api/competitions/:cid/league-tiebreak             (admin-gated)
 //	DELETE /api/competitions/:cid/league-tiebreak           (admin-gated)
-//	POST /api/competitions/:cid/league-tiebreak/finalize    (admin-gated)
-//	DELETE /api/competitions/:cid/league-tiebreak/finalize  (admin-gated)
+//
+// A tie at 1st or 2nd (and at 3rd when two joint 3rd places are off) is
+// settled only by a tie-breaker with a winner, or by the lots the organiser
+// enters on the chusen panel; there is no accepting a shared rank.
 //
 // The GET read is public (registered via RegisterPublicLeagueTiebreakHandlers
 // on the unauthenticated api group, mirroring RegisterPublicSwissHandlers).
-// The four write/mutate operations require X-Tournament-Password and are
+// The two write/mutate operations require X-Tournament-Password and are
 // registered via RegisterLeagueTiebreakHandlers on the adminSmallBody group.
 //
 // The design mirrors handlers_daihyosen.go: narrow consumer-boundary
@@ -19,7 +21,6 @@
 package mobileapp
 
 import (
-	"errors"
 	"log"
 	"net/http"
 	"strings"
@@ -31,14 +32,10 @@ import (
 
 // LeagueTiebreakEngine is the consumer-boundary view of *engine.Engine used
 // by the league-tiebreak handler family. Methods are restricted to what these
-// four endpoints actually call.
+// three endpoints actually call.
 type LeagueTiebreakEngine interface {
 	LeagueTiebreakCandidates(compID string) ([]engine.TiedGroup, error)
 	GenerateLeagueTiebreakMatches(compID string, tiedTeamIDs []string) ([]state.MatchResult, error)
-	MaybeAutoCompletePools(compID string) (engine.AutoCompleteOutcome, error)
-	UndoLeagueSharedRanks(compID string) (engine.LeagueReopen, error)
-	LeagueSharedRanks(compID string) ([]engine.TiedGroup, error)
-	OpenDrawnSupplementaryBouts(tx state.StoreTx, compID string, matches []state.MatchResult) ([]state.MatchResult, error)
 }
 
 // LeagueTiebreakStore is the consumer-boundary view of *state.Store used by
@@ -48,7 +45,7 @@ type LeagueTiebreakStore interface {
 	LoadPoolMatches(id string) ([]state.MatchResult, error)
 	SavePoolMatches(id string, matches []state.MatchResult) error
 	// WithTransaction holds the per-comp lock across a read-modify-write so the
-	// DELETE and finalize handlers' load→guard→filter→save can't lose a
+	// DELETE handler's load→guard→filter→save can't lose a
 	// concurrent score write that lands mid-sequence.
 	WithTransaction(compID string, fn func(tx state.StoreTx) error) error
 }
@@ -233,26 +230,6 @@ func RegisterPublicLeagueTiebreakHandlers(r *gin.RouterGroup, eng LeagueTiebreak
 			return
 		}
 
-		// Accepted shared ranks: nothing is asked any more (candidates is
-		// empty, as LeagueTiebreakCandidates answers), and `accepted` names the
-		// ties the acceptance covers, which the Undo control lists.
-		if comp.LeagueTiebreakFinalized {
-			accepted, err := eng.LeagueSharedRanks(id)
-			if err != nil {
-				if respondIfCorruptOverrides(c, err) {
-					return
-				}
-				respondEngineError(c, err)
-				return
-			}
-			c.JSON(http.StatusOK, gin.H{
-				"candidates": []leagueTiebreakCandidateGroup{},
-				"finalized":  true,
-				"accepted":   leagueTiebreakGroupsJSON(accepted),
-			})
-			return
-		}
-
 		candidates, err := eng.LeagueTiebreakCandidates(id)
 		if err != nil {
 			// LeagueTiebreakCandidates calls CalculatePoolStandings, which reads
@@ -267,18 +244,14 @@ func RegisterPublicLeagueTiebreakHandlers(r *gin.RouterGroup, eng LeagueTiebreak
 			return
 		}
 
-		// Finalized flag: surface whether the operator has already accepted
-		// shared ranks so the frontend can reflect that state.
 		c.JSON(http.StatusOK, gin.H{
 			"candidates": leagueTiebreakGroupsJSON(candidates),
-			"finalized":  comp.LeagueTiebreakFinalized,
 		})
 	})
 }
 
 // leagueTiebreakGroupsJSON is the wire shape of the candidates GET's tied
-// groups, the ones still asked (`candidates`) and the ones accepted as shared
-// ranks (`accepted`) alike. Never nil, so the wire carries [].
+// groups. Never nil, so the wire carries [].
 func leagueTiebreakGroupsJSON(groups []engine.TiedGroup) []leagueTiebreakCandidateGroup {
 	out := make([]leagueTiebreakCandidateGroup, 0, len(groups))
 	for _, g := range groups {
@@ -296,7 +269,7 @@ func leagueTiebreakGroupsJSON(groups []engine.TiedGroup) []leagueTiebreakCandida
 	return out
 }
 
-// RegisterLeagueTiebreakHandlers wires the four admin-gated league-tiebreak
+// RegisterLeagueTiebreakHandlers wires the two admin-gated league-tiebreak
 // mutation endpoints. Callers pass *engine.Engine and *state.Store which
 // satisfy the local interfaces by structural match.
 func RegisterLeagueTiebreakHandlers(r *gin.RouterGroup, eng LeagueTiebreakEngine, store LeagueTiebreakStore, hub Broadcaster) {
@@ -539,212 +512,15 @@ func RegisterLeagueTiebreakHandlers(r *gin.RouterGroup, eng LeagueTiebreakEngine
 
 		c.JSON(http.StatusOK, gin.H{"deleted": deleted})
 	})
-
-	// POST /competitions/:id/league-tiebreak/finalize
-	// Operator accepts the current standings as final (shared ranks) instead of
-	// running, or finishing, a tie-breaker. In ONE transaction: the league must
-	// have every regular match finished (409 league_not_settled: the table can
-	// still change), no tie-breaker bout may be on a court (409
-	// tiebreak_match_scored), the tie-breaker bouts nobody fought are removed
-	// through the same body DELETE .../league-tiebreak uses (removePoolMatches),
-	// and LeagueTiebreakFinalized is set. MaybeAutoCompletePools then finishes
-	// the league (PoolsSettledNow counts accepted shared ranks as settled).
-	// Answers {finalized: true, removed: <bouts removed>}.
-	r.POST("/competitions/:id/league-tiebreak/finalize", func(c *gin.Context) {
-		id, ok := requireValidCompID(c)
-		if !ok {
-			return
-		}
-
-		var (
-			notFoundFlag    bool
-			notTeamLeague   bool
-			alreadyComplete bool
-			notSettled      bool
-			boutOnCourt     bool
-			drawnBout       string
-			removed         int
-		)
-		err := store.WithTransaction(id, func(stx state.StoreTx) error {
-			comp, err := stx.LoadCompetition(id)
-			if err != nil {
-				return err
-			}
-			switch {
-			case comp == nil:
-				notFoundFlag = true
-				return nil
-			case comp.Format != state.CompFormatLeague || !comp.IsTeam():
-				notTeamLeague = true
-				return nil
-			case comp.Status == state.CompStatusComplete:
-				alreadyComplete = true
-				return nil
-			}
-			matches, err := stx.LoadPoolMatches(id)
-			if err != nil {
-				return err
-			}
-			unfought := map[string]bool{}
-			for _, m := range matches {
-				switch {
-				case !state.IsPoolSupplementaryMatchID(m.ID):
-					if m.Status != state.MatchStatusCompleted {
-						notSettled = true
-						return nil
-					}
-				case !engine.IsPoolDaihyosenMatchID(m.ID):
-					// Not a team tie-breaker bout: left as it is.
-				case m.Status == state.MatchStatusRunning:
-					boutOnCourt = true
-					return nil
-				case !tiebreakBoutStarted(m):
-					unfought[m.ID] = true
-				}
-			}
-			// A bout saved as a draw before a league tie-breaker needed a
-			// winner settles nothing, so the flag would be set on a league
-			// that can never finish: the operator decides it first, by encho
-			// or hantei. One whose tie the lots ranked, or a correction split
-			// or moved out of the band, settles as it stands and is no reason
-			// to refuse (poolMatchSettled).
-			open, err := eng.OpenDrawnSupplementaryBouts(stx, id, matches)
-			if err != nil {
-				return err
-			}
-			for _, m := range open {
-				if engine.IsPoolDaihyosenMatchID(m.ID) {
-					drawnBout = m.SideA + " v " + m.SideB
-					return nil
-				}
-			}
-			if len(unfought) > 0 {
-				if err := removePoolMatches(stx, id, matches, unfought); err != nil {
-					return err
-				}
-				removed = len(unfought)
-			}
-			comp.LeagueTiebreakFinalized = true
-			return stx.SaveCompetition(comp)
-		})
-		if err != nil {
-			log.Printf("league-tiebreak finalize WithTransaction(%s): %v", id, err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
-			return
-		}
-		switch {
-		case notFoundFlag:
-			c.JSON(http.StatusNotFound, gin.H{"error": "competition not found"})
-			return
-		case notTeamLeague:
-			c.JSON(http.StatusBadRequest, gin.H{"error": "league tie-breaker endpoints apply only to team-league competitions"})
-			return
-		case alreadyComplete:
-			c.JSON(http.StatusConflict, gin.H{"error": "already_complete", "detail": "competition is already complete"})
-			return
-		case notSettled:
-			c.JSON(http.StatusConflict, gin.H{"error": "league_not_settled", "detail": leagueNotSettledSentence})
-			return
-		case boutOnCourt:
-			c.JSON(http.StatusConflict, gin.H{"error": "tiebreak_match_scored", "detail": tiebreakBoutOnCourtSentence})
-			return
-		case drawnBout != "":
-			c.JSON(http.StatusConflict, gin.H{"error": "tiebreak_drawn", "detail": drawnBout + tiebreakDrawnSentence})
-			return
-		}
-
-		// Trigger completion via MaybeAutoCompletePools. With
-		// LeagueTiebreakFinalized=true the league's ties count as settled and
-		// the gate passes through to the completion transition.
-		outcome, autoErr := eng.MaybeAutoCompletePools(id)
-		matchesMoved := removed > 0
-		if autoErr != nil {
-			log.Printf("MaybeAutoCompletePools(%s) after finalize: %v", id, autoErr)
-			c.Header(AutoCompleteErrorHeader, AutoCompleteErrorValue)
-		} else {
-			switch outcome {
-			case engine.AutoCompleteTransitioned:
-				hub.Broadcast(EventCompetitionCompleted, gin.H{"competitionId": id})
-			case engine.AutoCompleteStarted:
-				// A still-draw-ready competition holding a recorded result was
-				// started by this call (bc-prow). Same events as
-				// tryAutoCompletePools' own branch, so every surface reloads
-				// the now-running competition.
-				hub.Broadcast(EventCompetitionStarted, gin.H{"competitionId": id})
-			default:
-				// The league stays in match play (another decision is still
-				// owed): the banner and the tables reload on match_updated,
-				// which the schedule refresh alone does not reach.
-				matchesMoved = true
-			}
-		}
-		if matchesMoved {
-			hub.Broadcast(EventMatchUpdated, gin.H{"competitionId": id})
-		}
-		hub.Broadcast(EventScheduleUpdated, nil)
-
-		c.JSON(http.StatusOK, gin.H{"finalized": true, "removed": removed})
-	})
-
-	// DELETE /competitions/:id/league-tiebreak/finalize
-	// Undo of the Accept above: the accepted shared ranks are taken back in one
-	// transaction (engine.UndoLeagueSharedRanks). A finished league goes back to
-	// match play (competition_started), and a match on a shiaijo the tournament
-	// no longer has loses its court. The tie is then asked again, unless a
-	// correction dissolved it, when the completion pass finishes the league. Organiser
-	// only, also in self-run (isSelfRunMainGatedConfigRoute).
-	// 404 competition missing, 400 not a team league, 409 not_finalized.
-	r.DELETE("/competitions/:id/league-tiebreak/finalize", func(c *gin.Context) {
-		id, ok := requireValidCompID(c)
-		if !ok {
-			return
-		}
-		out, err := eng.UndoLeagueSharedRanks(id)
-		if errors.Is(err, engine.ErrLeagueNotFinalized) {
-			c.JSON(http.StatusConflict, gin.H{"error": "not_finalized", "detail": leagueNotFinalizedSentence})
-			return
-		}
-		if err != nil {
-			respondEngineError(c, err)
-			return
-		}
-		if out.Reopened {
-			hub.Broadcast(EventCompetitionStarted, gin.H{"competitionId": id})
-			// A late correction may have dissolved the accepted tie, leaving the
-			// table settled: only the pass completes such a league again, as the
-			// Accept door's own pass does. One that still owes its tie stays in
-			// match play.
-			outcome, autoErr := eng.MaybeAutoCompletePools(id)
-			answerAutoComplete(c, hub, id, outcome, autoErr)
-		}
-		hub.Broadcast(EventMatchUpdated, gin.H{"competitionId": id})
-		hub.Broadcast(EventScheduleUpdated, nil)
-		c.JSON(http.StatusOK, gin.H{
-			"finalized":         false,
-			"reopened":          out.Reopened,
-			"unassignedMatches": emptyIfNil(out.UnassignedMatches),
-			"removedCourts":     emptyIfNil(out.RemovedCourts),
-		})
-	})
 }
 
-// The operator sentences the finalize doors answer with.
-const (
-	leagueNotSettledSentence    = "A league match is not finished yet, so the table can still change. Finish it, then decide."
-	tiebreakBoutOnCourtSentence = "A tie-breaker bout is being fought. Finish it, or send it back to the queue, then accept the shared ranks."
-	leagueNotFinalizedSentence  = "The shared ranks were not accepted, so there is nothing to undo."
-	// tiebreakDrawnSentence follows the bout's two sides ("Alpha v Beta").
-	tiebreakDrawnSentence = " was saved as a draw. A tie-breaker needs a winner: open it and decide by encho or hantei, then accept the shared ranks if they still share the place."
-)
-
 // tiebreakBoutStarted reports whether a tie-breaker bout has been started or
-// scored, which removing it refuses (DELETE .../league-tiebreak) or keeps
-// (finalize: only the bouts nobody fought go).
+// scored, which removing it refuses (DELETE .../league-tiebreak).
 func tiebreakBoutStarted(m state.MatchResult) bool {
 	return m.Winner != "" || m.Status == state.MatchStatusCompleted || m.Status == state.MatchStatusRunning
 }
 
-// removePoolMatches is the ONE removal body of the league tie-breaker doors:
+// removePoolMatches is the removal body of DELETE .../league-tiebreak:
 // it saves the competition's pool matches without the rows named in drop, in
 // the caller's transaction.
 func removePoolMatches(stx state.StoreTx, compID string, all []state.MatchResult, drop map[string]bool) error {

@@ -287,8 +287,8 @@ describe('ViewerOverview league standings (mp-ldnr)', () => {
   });
 
   // N3: every match scored is not a decided league. A tie at a podium place
-  // can still wait for the organiser (tie-breaker or Accept shared ranks), and
-  // the league stays in match play until it is settled.
+  // can still wait for a tie-breaker or the lots, and the league stays in
+  // match play until it is settled.
   it('every match scored but the league still in match play names no winner and no final table', () => {
     const standings = { League: makeTeamStandings(4) };
     const tree = runtime.mount(ViewerOverview, {

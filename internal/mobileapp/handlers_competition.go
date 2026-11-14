@@ -436,30 +436,6 @@ func validateSwissRoundsCap(comp *state.Competition) error {
 	return nil
 }
 
-// validateLeagueTiebreakConfig validates the league-tiebreak configuration knob
-// LeagueTiebreakTopN (the joint-3rd rule is now TwoThirdPlaces/EffectiveTwoThirdPlaces,
-// bc-3rdp, and being a plain bool has nothing to validate). This field is only
-// meaningful for team-league competitions; it is silently ignored for other
-// formats/kinds and must not cause errors there. Returns nil for non-league or
-// non-team comps.
-//
-// A team league is asked through IsTeam, the one spelling of "a team
-// competition" (ValidateCompetitionTeamSize, run on every create and edit,
-// keeps Kind == "team" exactly when TeamSize >= 2, so the two cannot disagree).
-func validateLeagueTiebreakConfig(comp *state.Competition) error {
-	if comp.Format != state.CompFormatLeague || !comp.IsTeam() {
-		return nil
-	}
-	switch comp.LeagueTiebreakTopN {
-	case 0, 3, 4:
-		// 0 = unset (will default to 3 at draw time); 3 and 4 are the only
-		// legal explicit values (per owner decision Q1).
-	default:
-		return fmt.Errorf("leagueTiebreakTopN must be 3 or 4 (got %d)", comp.LeagueTiebreakTopN)
-	}
-	return nil
-}
-
 // validateNewCompetition is the one chain that judges a competition being
 // authored from nothing: the create POST and the draft estimate both ask it,
 // so the estimate never accepts a shape the create would refuse. It also
@@ -503,10 +479,6 @@ func validateNewCompetition(comp *state.Competition) error {
 		return err
 	}
 	if err := comp.ValidatePoolWinners(); err != nil {
-		return err
-	}
-	// League tie-breaker config validation (leagueTiebreakTopN must be 0/3/4).
-	if err := validateLeagueTiebreakConfig(comp); err != nil {
 		return err
 	}
 	// TeamMatchType enum-style validation. Empty == fixed (default);
@@ -1546,12 +1518,6 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				return
 			}
 
-			// League tie-breaker config validation (leagueTiebreakTopN must be 0/3/4).
-			if err := validateLeagueTiebreakConfig(&comp); err != nil {
-				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-				return
-			}
-
 			// TeamMatchType enum-style validation. Empty == fixed (default);
 			// "kachinuki" requires TeamSize >= 2. FR-044. Settings-only PUT
 			// (comp.Players == nil): roster-only PUTs carry a stale
@@ -2287,36 +2253,10 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				}
 				current.TeamMatchType = comp.TeamMatchType
 				current.CheckInEnabled = comp.CheckInEnabled
-				// League tie-breaker config (Phase 3b) is only settable pre-start.
-				// Once the competition has started (status past setup) the
-				// consequential-tie set is in play, so changing leagueTiebreakTopN
-				// could re-block or unblock completion and change which ties
-				// already-played tie-breakers were meant to resolve. Reject a
-				// change rather than silently ignoring it. The draw-ready state
-				// already returned early above; the PUT validator enforces
-				// LeagueTiebreakTopN ∈ {0,3,4}. LeagueTiebreakFinalized is managed by
-				// the finalize endpoint, never here.
-				//
-				// LeagueTwoThirdPlaces itself is NOT compared or written here any
-				// more (bc-3rdp): it is legacy read-only (see its doc comment on
+				// LeagueTwoThirdPlaces is NOT compared or written here (bc-3rdp):
+				// it is legacy read-only (see its doc comment on
 				// state.Competition), superseded by TwoThirdPlaces below, which
 				// carries its own started-guard.
-				//
-				// The band is a team league's setting alone (the settings page
-				// offers it for a team league only, and effectiveTopN reads it only
-				// there), so it is not kept for any other competition: a "Top 4"
-				// saved while the competition was a team league, then switched to
-				// individual before the draw, goes with the switch instead of
-				// lingering hidden. Kind and TeamSize are applied above.
-				if !current.IsTeam() {
-					current.LeagueTiebreakTopN = 0
-				} else {
-					if started && comp.LeagueTiebreakTopN != current.LeagueTiebreakTopN {
-						validationErr = fmt.Errorf("leagueTiebreakTopN can only be changed before the competition starts")
-						return nil, nil
-					}
-					current.LeagueTiebreakTopN = comp.LeagueTiebreakTopN
-				}
 				// TwoThirdPlaces (bc-3rdp) decides whether the knockout stage plays
 				// a bronze/decider match and (for leagues) whether standings show a
 				// shared 3rd rank; both are built/computed at draw/scoring time, the

@@ -2,6 +2,9 @@ package engine
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -227,13 +230,12 @@ func TestLeagueTiebreakCandidates_ThreeWayTopTie(t *testing.T) {
 }
 
 // TestLeagueTiebreakCandidates_BottomTieTwoThirdsFalse verifies that a tie at
-// positions 3–4 IS consequential when LeagueTwoThirdPlaces is false (default)
-// and TopN >= 3.
+// positions 3–4 IS consequential when LeagueTwoThirdPlaces is false (default):
+// with two joint 3rd places off, 3rd cannot be shared.
 func TestLeagueTiebreakCandidates_BottomTieTwoThirdsFalse(t *testing.T) {
 	eng, _ := setupTeamLeagueComp(t, "league-bottomtie-default", "bottomTie",
 		func(c *state.Competition) {
 			c.LeagueTwoThirdPlaces = false
-			c.LeagueTiebreakTopN = 3
 		})
 
 	candidates, err := eng.LeagueTiebreakCandidates("league-bottomtie-default")
@@ -252,7 +254,6 @@ func TestLeagueTiebreakCandidates_BottomTieTwoThirdsTrue(t *testing.T) {
 	eng, _ := setupTeamLeagueComp(t, "league-bottomtie-twothirds", "bottomTie",
 		func(c *state.Competition) {
 			c.LeagueTwoThirdPlaces = true
-			c.LeagueTiebreakTopN = 3
 		})
 
 	candidates, err := eng.LeagueTiebreakCandidates("league-bottomtie-twothirds")
@@ -261,11 +262,11 @@ func TestLeagueTiebreakCandidates_BottomTieTwoThirdsTrue(t *testing.T) {
 		"3rd/4th tie is non-consequential when LeagueTwoThirdPlaces=true (both share 3rd)")
 }
 
-// TestLeagueTiebreakCandidates_BelowBandWithTopN4 verifies that a tie at positions
-// 5–6 is NOT consequential when TopN=4, those teams sit outside the tie-break band.
+// TestLeagueTiebreakCandidates_BelowBand5th verifies that a tie at positions
+// 5–6 is NOT consequential: those teams sit outside the tie-break band [1..3].
 // Uses a 6-team league where Alpha/Beta/Gamma/Delta occupy the top 4 and
 // Epsilon/Zeta tie at 5th.
-func TestLeagueTiebreakCandidates_BelowBandWithTopN4(t *testing.T) {
+func TestLeagueTiebreakCandidates_BelowBand5th(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	const compID = "league-below-band"
 
@@ -276,7 +277,6 @@ func TestLeagueTiebreakCandidates_BelowBandWithTopN4(t *testing.T) {
 		Courts:               []string{"A"},
 		TeamSize:             2,
 		Kind:                 "team",
-		LeagueTiebreakTopN:   4,
 		LeagueTwoThirdPlaces: false,
 	}))
 
@@ -337,7 +337,7 @@ func TestLeagueTiebreakCandidates_BelowBandWithTopN4(t *testing.T) {
 	candidates, err := eng.LeagueTiebreakCandidates(compID)
 	require.NoError(t, err)
 	assert.Empty(t, candidates,
-		"5th/6th tie is not consequential when TopN=4")
+		"5th/6th tie is not consequential: it shares its place")
 }
 
 // --- MaybeAutoCompletePools team-league tests ---
@@ -382,12 +382,11 @@ func TestMaybeAutoCompletePools_TeamLeague_NoTie_Completes(t *testing.T) {
 
 // TestMaybeAutoCompletePools_TeamLeague_BelowBand_Completes verifies that a
 // team-league where the ONLY tie is below the consequential band (positions 3–4
-// when TopN=3 and LeagueTwoThirdPlaces=true) completes normally with shared 3rd.
+// when LeagueTwoThirdPlaces=true) completes normally with shared 3rd.
 func TestMaybeAutoCompletePools_TeamLeague_BelowBand_Completes(t *testing.T) {
 	eng, _ := setupTeamLeagueComp(t, "league-twothirds-complete", "bottomTie",
 		func(c *state.Competition) {
 			c.LeagueTwoThirdPlaces = true
-			c.LeagueTiebreakTopN = 3
 		})
 
 	outcome, err := eng.MaybeAutoCompletePools("league-twothirds-complete")
@@ -476,25 +475,22 @@ func TestIsConsequentialTie(t *testing.T) {
 		name       string
 		minPos     int
 		maxPos     int
-		topN       int
 		twoThirds  bool
 		wantConseq bool
 	}{
 		// Within band, no exemption
-		{"1st-2nd tie, TopN=3, noTwoThirds", 1, 2, 3, false, true},
-		{"1st-3rd tie, TopN=3, noTwoThirds", 1, 3, 3, false, true},
-		// Below band entirely
-		{"4th-5th, TopN=3", 4, 5, 3, false, false},
-		{"5th-6th, TopN=4", 5, 6, 4, false, false},
+		{"1st-2nd tie, noTwoThirds", 1, 2, false, true},
+		{"1st-3rd tie, noTwoThirds", 1, 3, false, true},
+		// Below band entirely: a tie at 4th or lower always shares
+		{"4th-5th", 4, 5, false, false},
+		{"5th-6th", 5, 6, false, false},
 		// At the band edge but within
-		{"3rd-4th, TopN=4, noTwoThirds", 3, 4, 4, false, true},
-		{"3rd-4th, TopN=3, noTwoThirds", 3, 4, 3, false, true},
+		{"3rd-4th, noTwoThirds", 3, 4, false, true},
 		// Two-thirds exemption: group entirely at pos>=3
-		{"3rd-4th, TopN=3, twoThirds", 3, 4, 3, true, false},
-		{"3rd-4th, TopN=4, twoThirds", 3, 4, 4, true, false},
+		{"3rd-4th, twoThirds", 3, 4, true, false},
 		// Two-thirds exemption does NOT fire when group crosses 2nd/3rd boundary
-		{"2nd-3rd, TopN=3, twoThirds", 2, 3, 3, true, true},
-		{"1st-3rd, TopN=3, twoThirds", 1, 3, 3, true, true},
+		{"2nd-3rd, twoThirds", 2, 3, true, true},
+		{"1st-3rd, twoThirds", 1, 3, true, true},
 	}
 
 	for _, tc := range tests {
@@ -518,66 +514,47 @@ func TestIsConsequentialTie(t *testing.T) {
 			// calling it (see this function's own doc comment), so a
 			// non-league comp here would exercise unreachable state, not a
 			// real gap.
-			// A team league: the band is its setting alone (effectiveTopN).
-			comp := &state.Competition{
-				Format:               state.CompFormatLeague,
-				Kind:                 "team",
-				TeamSize:             2,
-				LeagueTiebreakTopN:   tc.topN,
-				LeagueTwoThirdPlaces: tc.twoThirds,
+			// The band is every league's, team or individual
+			// (leagueTiebreakBand): both kinds judge the same.
+			for _, kind := range []string{"team", "individual"} {
+				comp := &state.Competition{
+					Format:               state.CompFormatLeague,
+					Kind:                 kind,
+					LeagueTwoThirdPlaces: tc.twoThirds,
+				}
+				if kind == "team" {
+					comp.TeamSize = 2
+				}
+				got := isConsequentialTie(g, comp)
+				assert.Equal(t, tc.wantConseq, got,
+					"isConsequentialTie(%d-%d, %s, twoThirds=%v)", tc.minPos, tc.maxPos, kind, tc.twoThirds)
 			}
-			got := isConsequentialTie(g, comp)
-			assert.Equal(t, tc.wantConseq, got,
-				"isConsequentialTie(%d-%d, topN=%d, twoThirds=%v)", tc.minPos, tc.maxPos, tc.topN, tc.twoThirds)
 		})
 	}
 }
 
-// TestEffectiveTopN verifies the default-3 fallback and explicit values, and
-// that the band is a team league's setting alone (F6): a "Top 4" saved while
-// the competition was a team league, then switched to individual before the
-// draw, no longer widens the individual league's ippon-shobu band.
-func TestEffectiveTopN(t *testing.T) {
-	team := func(n int) *state.Competition {
-		return &state.Competition{Kind: "team", TeamSize: 2, LeagueTiebreakTopN: n}
-	}
-	assert.Equal(t, 3, effectiveTopN(team(0)), "zero defaults to 3")
-	assert.Equal(t, 3, effectiveTopN(team(3)))
-	assert.Equal(t, 4, effectiveTopN(team(4)))
-	assert.Equal(t, 3, effectiveTopN(&state.Competition{Kind: "individual", LeagueTiebreakTopN: 4}),
-		"an individual league breaks the top 3 whatever a stale team setting says")
-}
-
 // TestIsConsequentialTie_BandBoundaryEdgeCases focuses on the exact boundary
-// where MinPosition == TopN (still consequential, within the band) vs
-// MinPosition == TopN+1 (NOT consequential, one step outside), for both
-// TopN=3 and TopN=4.
+// of the band [1..3] every league breaks its ties in: MinPosition 3 is still
+// consequential, MinPosition 4 is not (a tie at 4th or lower always shares its
+// place).
 func TestIsConsequentialTie_BandBoundaryEdgeCases(t *testing.T) {
 	tests := []struct {
 		name       string
 		minPos     int
 		maxPos     int
-		topN       int
 		twoThirds  bool
 		wantConseq bool
 	}{
-		// TopN=3 boundary: minPos=3 is within [1..3] → consequential
-		{"minPos==TopN3, no exemption", 3, 4, 3, false, true},
-		// TopN=3 boundary: minPos=4 is outside [1..3] → NOT consequential
-		{"minPos==TopN3+1, no exemption", 4, 5, 3, false, false},
-		// TopN=4 boundary: minPos=4 is within [1..4] → consequential
-		{"minPos==TopN4, no exemption", 4, 5, 4, false, true},
-		// TopN=4 boundary: minPos=5 is outside [1..4] → NOT consequential
-		{"minPos==TopN4+1, no exemption", 5, 6, 4, false, false},
-		// Two-thirds exemption: tie at exactly 3–4 with topN=3 and twoThirds=true
+		// minPos=3 is within [1..3] → consequential
+		{"minPos==3, no exemption", 3, 4, false, true},
+		// minPos=4 is outside [1..3] → NOT consequential
+		{"minPos==4, no exemption", 4, 5, false, false},
+		{"minPos==5, no exemption", 5, 6, false, false},
+		// Two-thirds exemption: tie at exactly 3–4 with twoThirds=true
 		// → NOT consequential (all positions >= 3)
-		{"minPos==TopN3 with TwoThirds", 3, 4, 3, true, false},
+		{"minPos==3 with TwoThirds", 3, 4, true, false},
 		// Two-thirds exemption does NOT fire when minPos < 3 (tie spans 2nd/3rd)
-		{"minPos<3 with TwoThirds, topN=3", 2, 3, 3, true, true},
-		// Default TopN=0 treated as 3: minPos=3 → consequential (within default band)
-		{"minPos==3, TopN=0 defaults to 3", 3, 4, 0, false, true},
-		// Default TopN=0 treated as 3: minPos=4 → NOT consequential
-		{"minPos==4, TopN=0 defaults to 3", 4, 5, 0, false, false},
+		{"minPos<3 with TwoThirds", 2, 3, true, true},
 	}
 
 	for _, tc := range tests {
@@ -588,17 +565,21 @@ func TestIsConsequentialTie_BandBoundaryEdgeCases(t *testing.T) {
 			}
 			g := TiedGroup{Teams: teams, MinPosition: tc.minPos, MaxPosition: tc.maxPos}
 			// Format: league -- see the identical note in TestIsConsequentialTie.
-			// A team league: the band is its setting alone (effectiveTopN).
-			comp := &state.Competition{
-				Format:               state.CompFormatLeague,
-				Kind:                 "team",
-				TeamSize:             2,
-				LeagueTiebreakTopN:   tc.topN,
-				LeagueTwoThirdPlaces: tc.twoThirds,
+			// The band is every league's, team or individual
+			// (leagueTiebreakBand): both kinds judge the same.
+			for _, kind := range []string{"team", "individual"} {
+				comp := &state.Competition{
+					Format:               state.CompFormatLeague,
+					Kind:                 kind,
+					LeagueTwoThirdPlaces: tc.twoThirds,
+				}
+				if kind == "team" {
+					comp.TeamSize = 2
+				}
+				got := isConsequentialTie(g, comp)
+				assert.Equal(t, tc.wantConseq, got,
+					"isConsequentialTie(%d-%d, %s, twoThirds=%v)", tc.minPos, tc.maxPos, kind, tc.twoThirds)
 			}
-			got := isConsequentialTie(g, comp)
-			assert.Equal(t, tc.wantConseq, got,
-				"isConsequentialTie(%d-%d, topN=%d, twoThirds=%v)", tc.minPos, tc.maxPos, tc.topN, tc.twoThirds)
 		})
 	}
 }
@@ -619,7 +600,7 @@ func TestLeagueTiebreakCandidates_LargeTieSpanningBand(t *testing.T) {
 		Courts:   []string{"A"},
 		TeamSize: 2,
 		Kind:     "team",
-		// Default TopN=0 → effective 3; large tie spans positions 1–4 so even
+		// The band is 3; large tie spans positions 1–4 so even
 		// just MinPosition=1 makes it consequential.
 	}))
 
@@ -665,72 +646,68 @@ func TestLeagueTiebreakCandidates_LargeTieSpanningBand(t *testing.T) {
 
 // TestLeagueTiebreakCandidates_BelowBandSharedRanks verifies that a tie sitting
 // entirely below the consequential band returns zero candidates (the league
-// completes with shared ranks, no tiebreaker needed). Tested for both TopN=3
-// and TopN=4 using a 6-team league where only positions 5–6 are tied.
+// completes with those teams sharing their place, no tiebreaker needed), using
+// a 6-team league where only positions 5–6 are tied.
 func TestLeagueTiebreakCandidates_BelowBandSharedRanks(t *testing.T) {
-	for _, topN := range []int{3, 4} {
-		topN := topN
-		t.Run(fmt.Sprintf("TopN=%d", topN), func(t *testing.T) {
-			eng, store, _ := setupTestEngine(t)
-			compID := fmt.Sprintf("league-below-band-shared-%d", topN)
+	t.Run("below the band", func(t *testing.T) {
+		eng, store, _ := setupTestEngine(t)
+		const compID = "league-below-band-shared"
 
-			require.NoError(t, store.SaveCompetition(&state.Competition{
-				ID:                   compID,
-				Format:               state.CompFormatLeague,
-				Status:               state.CompStatusPools,
-				Courts:               []string{"A"},
-				TeamSize:             2,
-				Kind:                 "team",
-				LeagueTiebreakTopN:   topN,
-				LeagueTwoThirdPlaces: false,
-			}))
+		require.NoError(t, store.SaveCompetition(&state.Competition{
+			ID:                   compID,
+			Format:               state.CompFormatLeague,
+			Status:               state.CompStatusPools,
+			Courts:               []string{"A"},
+			TeamSize:             2,
+			Kind:                 "team",
+			LeagueTwoThirdPlaces: false,
+		}))
 
-			teams := []string{"Alpha", "Beta", "Gamma", "Delta", "Epsilon", "Zeta"}
-			players := make([]helper.Player, len(teams))
-			for i, n := range teams {
-				players[i] = helper.Player{Name: n}
-			}
+		teams := []string{"Alpha", "Beta", "Gamma", "Delta", "Epsilon", "Zeta"}
+		players := make([]helper.Player, len(teams))
+		for i, n := range teams {
+			players[i] = helper.Player{Name: n}
+		}
 
-			// Top 4 have clear ordering (each beats all below); Epsilon/Zeta draw each
-			// other and lose all others → both stuck at position 5 (below the band).
-			var ms []state.MatchResult
-			idx := 0
-			for i, ta := range teams {
-				for _, tb := range teams[i+1:] {
-					m := state.MatchResult{
-						ID:     fmt.Sprintf("Pool A-%d", idx),
-						SideA:  ta,
-						SideB:  tb,
-						Status: state.MatchStatusCompleted,
-						Court:  "A",
-					}
-					if ta == "Epsilon" && tb == "Zeta" {
-						m.Decision = string(domain.DecisionHikiwake)
-						m.SubResults = []state.SubMatchResult{
-							{Position: 1, SideA: ta, SideB: tb, Decision: string(domain.DecisionHikiwake)},
-							{Position: 2, SideA: ta, SideB: tb, Decision: string(domain.DecisionHikiwake)},
-						}
-					} else {
-						m.Winner = ta
-						m.SubResults = []state.SubMatchResult{
-							{Position: 1, SideA: ta, SideB: tb, Winner: ta},
-							{Position: 2, SideA: ta, SideB: tb, Winner: ta},
-						}
-					}
-					ms = append(ms, m)
-					idx++
+		// Top 4 have clear ordering (each beats all below); Epsilon/Zeta draw each
+		// other and lose all others → both stuck at position 5 (below the band).
+		var ms []state.MatchResult
+		idx := 0
+		for i, ta := range teams {
+			for _, tb := range teams[i+1:] {
+				m := state.MatchResult{
+					ID:     fmt.Sprintf("Pool A-%d", idx),
+					SideA:  ta,
+					SideB:  tb,
+					Status: state.MatchStatusCompleted,
+					Court:  "A",
 				}
+				if ta == "Epsilon" && tb == "Zeta" {
+					m.Decision = string(domain.DecisionHikiwake)
+					m.SubResults = []state.SubMatchResult{
+						{Position: 1, SideA: ta, SideB: tb, Decision: string(domain.DecisionHikiwake)},
+						{Position: 2, SideA: ta, SideB: tb, Decision: string(domain.DecisionHikiwake)},
+					}
+				} else {
+					m.Winner = ta
+					m.SubResults = []state.SubMatchResult{
+						{Position: 1, SideA: ta, SideB: tb, Winner: ta},
+						{Position: 2, SideA: ta, SideB: tb, Winner: ta},
+					}
+				}
+				ms = append(ms, m)
+				idx++
 			}
-			bctest.StampIDs(players, ms)
-			require.NoError(t, store.SavePools(compID, []helper.Pool{{PoolName: "Pool A", Players: players}}))
-			require.NoError(t, store.SavePoolMatches(compID, ms))
+		}
+		bctest.StampIDs(players, ms)
+		require.NoError(t, store.SavePools(compID, []helper.Pool{{PoolName: "Pool A", Players: players}}))
+		require.NoError(t, store.SavePoolMatches(compID, ms))
 
-			candidates, err := eng.LeagueTiebreakCandidates(compID)
-			require.NoError(t, err)
-			assert.Empty(t, candidates,
-				"5th/6th tie is below topN=%d band, league should complete with shared ranks", topN)
-		})
-	}
+		candidates, err := eng.LeagueTiebreakCandidates(compID)
+		require.NoError(t, err)
+		assert.Empty(t, candidates,
+			"5th/6th tie is below the band, league should complete with shared ranks")
+	})
 }
 
 // TestLeagueTiebreakCandidates_NonTeamAndNonLeague exercises the early-exit
@@ -765,42 +742,155 @@ func TestLeagueTiebreakCandidates_NonTeamAndNonLeague(t *testing.T) {
 	})
 }
 
-// Accepting the shared ranks asks which drawn tie-breaker bouts still settle
-// nothing: inside the band a drawn round is listed, and once a setting moves
-// the tie out of the band (here the joint-3rd setting) it decides no place and
-// is no longer listed, the same rule the league's completion reads
-// (poolMatchSettled).
-func TestOpenDrawnSupplementaryBouts(t *testing.T) {
-	const compID = "open-drawn-bouts"
-	eng, store := cycleLeagueAt3rd(t, compID)
-	_, err := eng.GenerateLeagueTiebreakMatches(compID, []string{teamID("Gamma"), teamID("Delta"), teamID("Epsilon")})
-	require.NoError(t, err)
-	scoreInjectedDH(t, eng, store, compID, func(string, string) string { return "" })
+// --- The tie rule: only 3rd can be shared ---
 
-	openNow := func() []state.MatchResult {
-		t.Helper()
-		var open []state.MatchResult
-		require.NoError(t, store.WithTransaction(compID, func(tx state.StoreTx) error {
-			ms, err := tx.LoadPoolMatches(compID)
-			if err != nil {
-				return err
-			}
-			open, err = eng.OpenDrawnSupplementaryBouts(tx, compID, ms)
-			return err
-		}))
-		return open
+// individualLeagueFromResults saves a single-pool individual league (each
+// competitor's dojo "Dojo <name>") whose every match is completed: winner
+// names the side that won by one men, "" a hikiwake.
+func individualLeagueFromResults(t *testing.T, compID string, names []string, winner func(a, b string) string, opts ...func(*state.Competition)) (*Engine, *state.Store) {
+	t.Helper()
+	eng, store, _ := setupTestEngine(t)
+	comp := &state.Competition{
+		ID: compID, Name: "League " + compID, Format: state.CompFormatLeague,
+		Status: state.CompStatusPools, Courts: []string{"A"},
 	}
-	open := openNow()
-	require.Len(t, open, 3, "inside the band each drawn bout of the round settles nothing")
-	for _, m := range open {
-		assert.True(t, IsPoolDaihyosenMatchID(m.ID), m.ID)
+	for _, opt := range opts {
+		opt(comp)
 	}
-
-	comp, err := store.LoadCompetition(compID)
-	require.NoError(t, err)
-	comp.LeagueTwoThirdPlaces = true
 	require.NoError(t, store.SaveCompetition(comp))
-	eng.standingsCache.Delete(compID)
-	eng.standingsFlight.Delete(compID)
-	assert.Empty(t, openNow(), "a tie moved out of the band leaves its drawn bouts settled")
+	players := make([]helper.Player, len(names))
+	for i, n := range names {
+		players[i] = helper.Player{Name: n, Dojo: "Dojo " + n}
+	}
+	var matches []state.MatchResult
+	idx := 0
+	for i, a := range names {
+		for _, b := range names[i+1:] {
+			m := state.MatchResult{ID: fmt.Sprintf("Pool A-%d", idx), SideA: a, SideB: b, Status: state.MatchStatusCompleted, Court: "A"}
+			switch winner(a, b) {
+			case a:
+				m.Winner, m.IpponsA = a, []string{"M"}
+			case b:
+				m.Winner, m.IpponsB = b, []string{"M"}
+			default:
+				m.Decision = string(domain.DecisionHikiwake)
+			}
+			matches = append(matches, m)
+			idx++
+		}
+	}
+	bctest.StampIDs(players, matches)
+	require.NoError(t, store.SaveParticipants(compID, players))
+	require.NoError(t, store.SavePools(compID, []helper.Pool{{PoolName: "Pool A", Players: players}}))
+	require.NoError(t, store.SavePoolMatches(compID, matches))
+	return eng, store
+}
+
+// tieAtPlace is a five-competitor league order (A, B, C, D, E) with the match
+// between the competitors at place and place+1 drawn, so exactly those two are
+// level there.
+func tieAtPlace(place int) func(a, b string) string {
+	names := []string{"A", "B", "C", "D", "E"}
+	order := rankOrder(names)
+	return func(a, b string) string {
+		if a == names[place-1] && b == names[place] {
+			return ""
+		}
+		return order(a, b)
+	}
+}
+
+// TestLeagueTieRule pins the tie rule for team and individual leagues alike: a
+// tie at 1st or 2nd always gets a tie-breaker bout, a tie at 3rd gets one
+// unless two joint 3rd places are awarded (then the place is shared), and a tie
+// at 4th or lower always shares its place.
+func TestLeagueTieRule(t *testing.T) {
+	cases := []struct {
+		place      int
+		jointThird bool
+		bout       bool
+	}{
+		{1, false, true}, {1, true, true},
+		{2, false, true}, {2, true, true},
+		{3, false, true}, {3, true, false},
+		{4, false, false}, {4, true, false},
+	}
+	for _, kind := range []string{"team", "individual"} {
+		for _, tc := range cases {
+			name := fmt.Sprintf("%s tie at %d joint3rd=%v", kind, tc.place, tc.jointThird)
+			t.Run(name, func(t *testing.T) {
+				compID := fmt.Sprintf("rule-%s-%d-%v", kind, tc.place, tc.jointThird)
+				opt := func(c *state.Competition) { c.LeagueTwoThirdPlaces = tc.jointThird }
+				var eng *Engine
+				var store *state.Store
+				if kind == "team" {
+					eng, store = teamLeagueFromResults(t, compID, []string{"A", "B", "C", "D", "E"}, tieAtPlace(tc.place), opt)
+				} else {
+					eng, store = individualLeagueFromResults(t, compID, []string{"A", "B", "C", "D", "E"}, tieAtPlace(tc.place), opt)
+				}
+				assertTieRule(t, eng, store, compID, kind, tc.place, tc.bout)
+			})
+		}
+	}
+}
+
+// assertTieRule checks a finished round of regular matches against the rule:
+// bout says whether the tie at place (place and place+1 level) owes a
+// tie-breaker bout, or else shares its place.
+func assertTieRule(t *testing.T, eng *Engine, store *state.Store, compID, kind string, place int, bout bool) {
+	t.Helper()
+	outcome, err := eng.MaybeAutoCompletePools(compID)
+	require.NoError(t, err)
+	if bout {
+		want := AutoCompleteAwaitingLeagueTiebreak
+		if kind == "individual" {
+			want = AutoCompleteTiebreakInjected
+		}
+		assert.Equal(t, want, outcome, "the tie at %d is broken by a bout", place)
+		assert.Equal(t, state.CompStatusPools, loadComp(t, store, compID).Status)
+		if kind == "team" {
+			cands, err := eng.LeagueTiebreakCandidates(compID)
+			require.NoError(t, err)
+			require.Len(t, cands, 1)
+			assert.Equal(t, place, cands[0].MinPosition)
+		}
+		return
+	}
+	assert.Equal(t, AutoCompleteTransitioned, outcome, "the tie at %d shares its place", place)
+	standings, err := eng.LeagueStandings(compID)
+	require.NoError(t, err)
+	require.Len(t, standings, 5)
+	assert.Equal(t, place, standings[place-1].Rank)
+	assert.Equal(t, place, standings[place].Rank, "both share place %d", place)
+}
+
+// A league saved by a release with "Break ties for top" at 4 is read as every
+// league is now: a tie at 4th shares its place, and the setting's key goes from
+// config.md at the next start.
+func TestLeagueTieRule_ASavedTop4BehavesAsTop3(t *testing.T) {
+	for _, kind := range []string{"team", "individual"} {
+		t.Run(kind, func(t *testing.T) {
+			compID := "rule-top4-" + kind
+			var store *state.Store
+			if kind == "team" {
+				_, store = teamLeagueFromResults(t, compID, []string{"A", "B", "C", "D", "E"}, tieAtPlace(4))
+			} else {
+				_, store = individualLeagueFromResults(t, compID, []string{"A", "B", "C", "D", "E"}, tieAtPlace(4))
+			}
+			dir := store.GetFolder()
+			path := filepath.Join(dir, "competitions", compID, "config.md")
+			raw, err := os.ReadFile(path)
+			require.NoError(t, err)
+			released := strings.Replace(string(raw), "\nstatus:", "\nleague_tiebreak_top_n: 4\nstatus:", 1)
+			require.NotEqual(t, string(raw), released)
+			require.NoError(t, os.WriteFile(path, []byte(released), 0o600))
+
+			reopened, err := state.NewStore(dir)
+			require.NoError(t, err)
+			after, err := os.ReadFile(path)
+			require.NoError(t, err)
+			assert.NotContains(t, string(after), "league_tiebreak_top_n")
+			assertTieRule(t, New(reopened), reopened, compID, kind, 4, false)
+		})
+	}
 }

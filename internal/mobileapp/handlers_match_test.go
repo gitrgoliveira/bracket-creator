@@ -3825,6 +3825,27 @@ func TestFinishedLeagueCorrection_TiebreakerBoutIsWarned(t *testing.T) {
 	}
 }
 
+// An engi league is reconciled like any other (the engine's
+// leagueStateBeforeWrite), so a correction of its finished table, a tie-break
+// bout included, is warned about the same way.
+func TestFinishedLeagueCorrection_EngiLeagueIsWarned(t *testing.T) {
+	const compID = "fl-engi"
+	_, store, _ := finishedLeagueServer(t, compID)
+	comp, err := store.LoadCompetition(compID)
+	require.NoError(t, err)
+	comp.Engi = true
+	require.NoError(t, store.SaveCompetition(comp))
+	for _, id := range []string{seMatch, "Pool A-TB-0"} {
+		var refusal error
+		require.NoError(t, store.WithTransaction(compID, func(stx state.StoreTx) error {
+			refusal = refuseFinishedLeagueCorrection(stx, nil, compID, id, true, false)
+			return nil
+		}))
+		var finished *leagueFinishedRefusal
+		assert.ErrorAs(t, refusal, &finished, id)
+	}
+}
+
 // The confirm names a shiaijo the tournament no longer has: if the correction
 // puts the league back into match play, the matches on it lose their court.
 func TestFinishedLeagueCorrection_NamesARemovedCourt(t *testing.T) {

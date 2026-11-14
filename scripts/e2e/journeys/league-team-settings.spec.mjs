@@ -1,10 +1,12 @@
-// TEAM LEAGUE SETTINGS journey: what the two league settings change on a team
-// league, from the desk organiser's seat. "Break ties for top" (Top 3 or Top 4)
-// is the band of finishing places whose ties the organiser must decide, and
-// "Award two joint 3rd places" lets a tie at 3rd or below stand without a
-// decision (engine isConsequentialTie, internal/engine/league_tiebreak.go: a
-// tied group is asked when its best place is within the band, except a group
-// wholly at 3rd or below when two joint 3rd places is on).
+// TEAM LEAGUE SETTINGS journey: what the league's one tie setting changes on a
+// team league, from the desk organiser's seat. In a league only 3rd can be
+// shared: a tie at 1st or 2nd always needs a tie-breaker with a winner, a tie
+// at 3rd follows "Award two joint 3rd places" (on: the level teams share 3rd
+// and nothing is asked; off: a tie-breaker decides 3rd), and a tie at 4th or
+// lower always shares its place, nothing asked (engine isConsequentialTie,
+// internal/engine/league_tiebreak.go). No other band is offered: a league an
+// earlier release saved with "Top 4" breaks its ties at 1st to 3rd like any
+// other, which a backup restored as a copy shows.
 //
 // Each competition is a team league of teams of two, seeded through the
 // interface (fixtures/league.mjs seedLeague) with the setting under test, and
@@ -16,9 +18,12 @@
 // never read back from the app.
 //
 //   tie at 4th    5 teams, the 4th and 5th level on every figure
-//                 Top 3                      not asked, the league finishes
-//                 Top 4                      asked ("Positions 4-5")
-//                 Top 4 + two joint 3rd      not asked (the exemption covers 4th)
+//                 two joint 3rd off          not asked, both share 4th
+//                 two joint 3rd on           not asked, both share 4th
+//                 saved with Top 4           not asked, both share 4th (a
+//                                            backup restored as a copy; a
+//                                            fresh backup of the copy shows
+//                                            its config.md without the key)
 //   tie at 3rd    4 teams, the 3rd and 4th level
 //                 two joint 3rd off          asked ("Positions 3-4")
 //                 two joint 3rd on           not asked, two joint 3rds
@@ -26,23 +31,27 @@
 //                 two joint 3rd off          asked as ONE group of three
 //                 two joint 3rd on           not asked, three joint 3rds
 //
-// F9 (the settings copy) is read beside each control in the first test and
+// F9 (the settings copy) is read beside the control in the first test and
 // asserted in its own test below.
 //
 // Not serial: each test signs in (or creates the tournament when this file's
 // server has none), seeds a competition of its own on a shiaijo of its own, and
 // keeps its own folder of screenshots and audit rows, so one failing test
 // hides nothing else here.
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { test, expect } from '../fixtures/test.mjs';
 import { PUBLIC_DEVICE } from '../fixtures/devices.mjs';
+import { readZip } from '../fixtures/archive.mjs';
 import { journeyShots } from '../fixtures/shots.mjs';
 import { flushAudits, journeyRecorder } from '../fixtures/audit.mjs';
 import { enterTournament } from '../fixtures/setup.mjs';
 import { createCompetition } from '../fixtures/wizard.mjs';
 import {
-  chooseTiebreakTop, openLeague, openLeagueSettings, openNumberedRow, openViewerAwards, openViewerLeague,
-  playEncounter, readBanner, readLeagueSettings, readLeagueTable, readNumberedRows, readPodium, saveSettings,
-  seedLeague, setTwoThirdPlaces, tiebreakBanner,
+  TEXT, backUpCompetition, openLeague, openLeagueSettings, openNumberedRow, openViewerAwards, openViewerLeague,
+  playEncounter, readBanner, readLeagueSettings, readLeagueTable, readNumberedRows, readPodium, restoreAsCopy,
+  retiredControls, rewriteBackup, saveSettings, seedLeague, setTwoThirdPlaces, tiebreakBanner, withFrontMatterLine,
 } from '../fixtures/league.mjs';
 
 const JOURNEY = 'league-team-settings';
@@ -50,6 +59,10 @@ const JOURNEY = 'league-team-settings';
 // is never drawn, so it may name court A again.
 const LEAGUE_CUP = { name: 'League Cup', courts: 8 };
 const TEAM_SIZE = 2;
+// The tournament password enterTournament signs in with (fixtures/setup.mjs).
+const PASSWORD = 'e2e-operator';
+// What an earlier release wrote for "Break ties for top: Top 4".
+const SAVED_TOP_4 = 'league_tiebreak_top_n: 4';
 
 const NAMES = ['Hayabusa', 'Inoshishi', 'Kitsune', 'Tanuki', 'Washi'];
 const DOJOS = ['Kita Dojo', 'Minami Dojo', 'Higashi Dojo', 'Nishi Dojo', 'Chuo Dojo'];
@@ -126,9 +139,10 @@ function expectedTable(n, script) {
   return { stats, ranks, groups };
 }
 
-// The groups the organiser must decide: the best place within the band, except
-// a group wholly at 3rd or below when two joint 3rd places is on.
-const asked = (groups, { topN, joint }) => groups.filter((g) => g.min <= topN && !(joint && g.min >= 3));
+// The groups the organiser must decide: a tie whose best place is 1st to 3rd,
+// except a tie at 3rd when two joint 3rd places is on (only 3rd can be shared).
+// A tie at 4th or lower is never asked.
+const asked = (groups, { joint }) => groups.filter((g) => g.min <= 3 && !(joint && g.min >= 3));
 
 // -------------------------------------------------------------------- driving
 
@@ -165,32 +179,38 @@ function recorder(folder) {
   return { ...journeyRecorder(JOURNEY, dir), shot: journeyShots(dir) };
 }
 
-// One league, one setting pair, one scripted set of results: seed, play every
+// One league, one setting, one scripted set of results: seed, play every
 // encounter, then judge whether the organiser is asked and what the table says.
 //   court     the shiaijo of this competition
 //   n, script the roster size and the scripted encounters
-//   topN      the "Break ties for top" pill (3 or 4)
 //   joint     "Award two joint 3rd places"
-async function runLeague({ page, browser, baseURL, folder, tag, court, n, script, topN, joint }) {
+//   savedTop4 the league as an earlier release saved it with "Top 4": seeded,
+//             backed up with that key written into its config.md, restored
+//             as a copy, and the copy played
+async function runLeague({ page, browser, baseURL, folder, tag, court, n, script, joint, savedTop4 = false }) {
   const { record, shot } = recorder(folder);
   const teams = teamsOf(tag, n);
   const names = teams.map(([t]) => t);
   const want = expectedTable(n, script);
-  const wantAsked = asked(want.groups, { topN, joint });
-  const setting = { topN, joint };
+  const wantAsked = asked(want.groups, { joint });
+  const setting = { joint, savedTop4 };
   let id;
 
-  await test.step(`seed a team league: Top ${topN}, two joint 3rd places ${joint ? 'on' : 'off'}`, async () => {
+  await test.step(`seed a team league: two joint 3rd places ${joint ? 'on' : 'off'}${savedTop4 ? ', saved with Top 4' : ''}`, async () => {
     await enterTournament(page, LEAGUE_CUP);
+    const name = `${tag} League`;
     id = await seedLeague(page, {
-      name: `${tag} League`, kind: 'team', entrants: teams, teamSize: TEAM_SIZE, teamMatchType: 'fixed',
-      courts: [court], twoThirdPlaces: joint, topN,
+      name, kind: 'team', entrants: teams, teamSize: TEAM_SIZE, teamMatchType: 'fixed',
+      courts: [court], twoThirdPlaces: joint,
     });
+    if (savedTop4) id = await restoredSavedWithTop4(page, { name, record, shot });
     await openLeagueSettings(page, id);
     const stored = await readLeagueSettings(page);
-    record({ step: 'settings', action: 'read once drawn', ...setting, ...stored });
-    expect(stored.tiebreakTop.active).toBe(`Top ${topN}`);
+    record({ step: 'settings', action: 'read once drawn', ...setting, ...stored,
+      screenshot: await shot(page, 'settings-once-drawn', { fullPage: true }) });
     expect(stored.twoThirdPlaces.checked).toBe(joint);
+    // No band to choose, whatever the league was saved with.
+    expect(stored.retired).toEqual({ tiebreakTop: 0, sharedRanks: 0 });
   });
 
   await test.step('score every encounter from its numbered row', async () => {
@@ -221,9 +241,9 @@ async function runLeague({ page, browser, baseURL, folder, tag, court, n, script
       expect(row).toMatchObject(want.stats[i]);
       // A tie that is asked reads as consecutive ranks inside its places (3
       // and 4 for a tie at 3rd and 4th) until it is decided; a tie nothing
-      // asks (below the band, or one the joint 3rd places cover) shares its
-      // better place (4 and 4 below a Top 3), and a team in no tie reads the
-      // plain rank the results make.
+      // asks (at 4th or lower, or one the joint 3rd places cover) shares its
+      // better place (4 and 4), and a team in no tie reads the plain rank the
+      // results make.
       const group = wantAsked.find((g) => g.idx.includes(i));
       if (group) {
         expect(row.rank, `${name} is ranked inside places ${group.min}-${group.max}`).toBeGreaterThanOrEqual(group.min);
@@ -246,13 +266,23 @@ async function runLeague({ page, browser, baseURL, folder, tag, court, n, script
     expect(banner.shown, 'the tie-break banner').toBe(true);
     expect(table.heading, 'the league waits for the decision').toBe('Standings');
     expect(table.winner).toBe('');
-    expect(banner.acceptOffered).toBe(true);
+    expect(banner.description).toContain(TEXT.bannerRule);
+    expect(await retiredControls(page)).toEqual({ tiebreakTop: 0, sharedRanks: 0 });
     expect(banner.groups.map((g) => ({ min: g.min, max: g.max, teams: groupKey(g.teams) })).sort((a, b) => a.min - b.min))
       .toEqual(wantAsked.map((g) => ({ min: g.min, max: g.max, teams: groupKey(g.idx.map((i) => names[i])) })).sort((a, b) => a.min - b.min));
     for (const g of banner.groups) {
       expect(g.run.offered, `Run tie-breaker for ${g.teams.join(', ')}`).toBe(true);
     }
   });
+
+  if (savedTop4) {
+    await test.step('the copy, backed up again, no longer carries the Top 4 key', async () => {
+      const config = await backedUpConfig(page, `${tag} League Top 4`);
+      record({ step: 'saved with Top 4', action: 'config.md of the copy, backed up once played', ...setting, config });
+      expect(config, 'config.md keeps its front matter').toMatch(/^---\n/);
+      expect(config, 'the load dropped the retired key').not.toMatch(/league_tiebreak_top_n/);
+    });
+  }
 
   if (wantAsked.length === 0) {
     await test.step('a spectator phone reads the finished league and its podium', async () => {
@@ -276,10 +306,43 @@ async function runLeague({ page, browser, baseURL, folder, tag, court, n, script
   }
 }
 
+// The league named `name` as an earlier release saved it with "Break ties for
+// top: Top 4": backed up from Backup and restore, the old key written into its
+// config.md, and restored as a copy. Returns the copy's id; the copy is the
+// league the test then plays.
+async function restoredSavedWithTop4(page, { name, record, shot }) {
+  const work = fs.mkdtempSync(path.join(os.tmpdir(), 'league-saved-top4-'));
+  try {
+    const file = await backUpCompetition(page, name, work);
+    const forged = path.join(work, 'saved-top4.zip');
+    const rewritten = rewriteBackup(file, forged, { '/config.md': (text) => withFrontMatterLine(text, SAVED_TOP_4) });
+    const copyId = await restoreAsCopy(page, { archive: forged, name, copyName: `${name} Top 4`, password: PASSWORD });
+    record({ step: 'saved with Top 4', action: 'restored as a copy', backup: path.basename(file), rewritten, line: SAVED_TOP_4, copyId,
+      screenshot: await shot(page, 'saved-top4-restored-copy', { fullPage: true }) });
+    return copyId;
+  } finally {
+    fs.rmSync(work, { recursive: true, force: true });
+  }
+}
+
+// The config.md the competition named `name` holds now, read from a fresh
+// backup of it (Backup and restore).
+async function backedUpConfig(page, name) {
+  const work = fs.mkdtempSync(path.join(os.tmpdir(), 'league-config-'));
+  try {
+    const entries = readZip(fs.readFileSync(await backUpCompetition(page, name, work)));
+    const names = [...entries.keys()].filter((n) => n.endsWith('/config.md'));
+    expect(names, 'the backup holds one config.md').toHaveLength(1);
+    return entries.get(names[0]).toString('utf8');
+  } finally {
+    fs.rmSync(work, { recursive: true, force: true });
+  }
+}
+
 test.describe(JOURNEY, () => {
   test.afterAll(() => flushAudits(test.info().file));
 
-  test('the settings: the band and the joint 3rd places are shown with their copy, kept across a reload', async ({ page }) => {
+  test('the settings: two joint 3rd places is the one tie setting, on by default, kept across a reload', async ({ page }) => {
     test.setTimeout(240_000);
     const { record, shot } = recorder('settings');
     let id;
@@ -291,42 +354,37 @@ test.describe(JOURNEY, () => {
       });
       await openLeagueSettings(page, id);
       const s = await readLeagueSettings(page);
-      record({ step: 'settings', action: 'read before the draw', ...s });
-      await shot(page, 'settings-before-draw', { fullPage: true });
-      expect(s.tiebreakTop.shown).toBe(true);
-      expect(s.tiebreakTop.options.map((o) => o.label)).toEqual(['Top 3', 'Top 4']);
-      expect(s.tiebreakTop.active).toBe('Top 3');
-      expect(s.tiebreakTop.hint, 'the band has copy beside it').not.toBe('');
+      record({ step: 'settings', action: 'read before the draw', ...s,
+        screenshot: await shot(page, 'settings-before-draw', { fullPage: true }) });
+      // No band of places to choose, and no shared ranks to accept.
+      expect(s.retired).toEqual({ tiebreakTop: 0, sharedRanks: 0 });
       expect(s.twoThirdPlaces.shown).toBe(true);
+      expect(s.twoThirdPlaces.checked, 'on by default').toBe(true);
       expect(s.twoThirdPlaces.hint, 'the joint 3rd places have copy beside them').not.toBe('');
     });
 
-    await test.step('Top 4 and two joint 3rd places are kept across a reload, and put back', async () => {
-      await chooseTiebreakTop(page, 4);
-      await setTwoThirdPlaces(page, true);
-      await saveSettings(page, id);
-      await openLeagueSettings(page, id);
-      const kept = await readLeagueSettings(page);
-      record({ step: 'settings', action: 'read after saving Top 4 and joint 3rd on', ...kept });
-      await shot(page, 'settings-top4-joint-on', { fullPage: true });
-      expect(kept.tiebreakTop.active).toBe('Top 4');
-      expect(kept.twoThirdPlaces.checked).toBe(true);
-
-      await chooseTiebreakTop(page, 3);
+    await test.step('two joint 3rd places off is kept across a reload, and put back', async () => {
       await setTwoThirdPlaces(page, false);
       await saveSettings(page, id);
       await openLeagueSettings(page, id);
+      const kept = await readLeagueSettings(page);
+      record({ step: 'settings', action: 'read after saving joint 3rd off', ...kept,
+        screenshot: await shot(page, 'settings-joint-off', { fullPage: true }) });
+      expect(kept.twoThirdPlaces.checked).toBe(false);
+      expect(kept.retired).toEqual({ tiebreakTop: 0, sharedRanks: 0 });
+
+      await setTwoThirdPlaces(page, true);
+      await saveSettings(page, id);
+      await openLeagueSettings(page, id);
       const back = await readLeagueSettings(page);
-      expect(back.tiebreakTop.active).toBe('Top 3');
-      expect(back.twoThirdPlaces.checked).toBe(false);
+      expect(back.twoThirdPlaces.checked).toBe(true);
     });
   });
 
-  // F9: the copy beside the two controls says what they change. It names the
-  // third choice (accepting shared ranks), never says "finalised" (nobody
-  // finalises a league: it finishes), and speaks of a league's tied 3rd place
-  // rather than semi-finalists and a bronze match.
-  test('F9: the copy beside the league settings says what changes, in a league\'s words', async ({ page }) => {
+  // F9: the copy beside the setting says what it changes: a tie at 3rd shares
+  // it or is broken by a tie-breaker, and a tie at 1st or 2nd always needs a
+  // winner. It never says "finalised" (nobody finalises a league: it finishes).
+  test('F9: the copy beside the league setting says what changes, in a league\'s words', async ({ page }) => {
     test.setTimeout(240_000);
     const { record, shot } = recorder('settings-copy');
     await enterTournament(page, LEAGUE_CUP);
@@ -335,46 +393,46 @@ test.describe(JOURNEY, () => {
     });
     await openLeagueSettings(page, id);
     const s = await readLeagueSettings(page);
-    record({ step: 'settings', action: 'read the copy', tiebreakHint: s.tiebreakTop.hint, twoThirdPlacesHint: s.twoThirdPlaces.hint });
-    await shot(page, 'settings-copy', { fullPage: true });
-    expect(s.tiebreakTop.hint, 'names the choice to accept shared ranks').toMatch(/shared ranks/i);
-    expect(s.tiebreakTop.hint, 'nobody finalises a league').not.toMatch(/finalis/i);
-    expect(s.twoThirdPlaces.hint, 'speaks of a league tie').toMatch(/tie|tied|level/i);
-    expect(s.twoThirdPlaces.hint, 'not written for a knockout').not.toMatch(/semi-?finalist|bronze/i);
+    record({ step: 'settings', action: 'read the copy', twoThirdPlacesHint: s.twoThirdPlaces.hint,
+      screenshot: await shot(page, 'settings-copy', { fullPage: true }) });
+    expect(s.twoThirdPlaces.hint, 'a league breaks a tie at 3rd with a tie-breaker').toMatch(/league breaks a tie at 3rd place with a tie-breaker/);
+    expect(s.twoThirdPlaces.hint, 'a tie at 1st or 2nd needs a winner').toMatch(/tie at 1st or 2nd place always needs a tie-breaker with a winner/);
+    expect(s.twoThirdPlaces.hint, 'nobody finalises a league').not.toMatch(/finalis/i);
+    expect(s.twoThirdPlaces.hint, 'no shared ranks to accept').not.toMatch(/shared ranks/i);
   });
 
-  test('Top 3: a tie at 4th is not asked and the league finishes', async ({ page, browser, baseURL }) => {
+  test('two joint 3rd places off: a tie at 4th is not asked and the two share 4th', async ({ page, browser, baseURL }) => {
     test.setTimeout(720_000);
-    await runLeague({ page, browser, baseURL, folder: 'top3-tie-at-4th', tag: 'A', court: 'C', n: 5, script: TIE_AT_4TH, topN: 3, joint: false });
+    await runLeague({ page, browser, baseURL, folder: 'joint-off-tie-at-4th', tag: 'A', court: 'C', n: 5, script: TIE_AT_4TH, joint: false });
   });
 
-  test('Top 4: the same tie at 4th is asked', async ({ page, browser, baseURL }) => {
+  test('two joint 3rd places on: a tie at 4th is not asked and the two share 4th', async ({ page, browser, baseURL }) => {
     test.setTimeout(720_000);
-    await runLeague({ page, browser, baseURL, folder: 'top4-tie-at-4th', tag: 'B', court: 'D', n: 5, script: TIE_AT_4TH, topN: 4, joint: false });
+    await runLeague({ page, browser, baseURL, folder: 'joint-on-tie-at-4th', tag: 'B', court: 'D', n: 5, script: TIE_AT_4TH, joint: true });
   });
 
-  test('Top 4 with two joint 3rd places: the tie at 4th is not asked (the joint places cover it)', async ({ page, browser, baseURL }) => {
+  test('a league saved with Top 4 reads as any other: the tie at 4th is not asked and the two share 4th', async ({ page, browser, baseURL }) => {
     test.setTimeout(720_000);
-    await runLeague({ page, browser, baseURL, folder: 'top4-joint-tie-at-4th', tag: 'C', court: 'E', n: 5, script: TIE_AT_4TH, topN: 4, joint: true });
+    await runLeague({ page, browser, baseURL, folder: 'saved-top4-tie-at-4th', tag: 'C', court: 'E', n: 5, script: TIE_AT_4TH, joint: false, savedTop4: true });
   });
 
   test('two joint 3rd places off: a tie at 3rd is asked', async ({ page, browser, baseURL }) => {
     test.setTimeout(480_000);
-    await runLeague({ page, browser, baseURL, folder: 'joint-off-tie-at-3rd', tag: 'D', court: 'F', n: 4, script: TIE_AT_3RD, topN: 3, joint: false });
+    await runLeague({ page, browser, baseURL, folder: 'joint-off-tie-at-3rd', tag: 'D', court: 'F', n: 4, script: TIE_AT_3RD, joint: false });
   });
 
   test('two joint 3rd places on: a tie at 3rd is not asked and the two share 3rd', async ({ page, browser, baseURL }) => {
     test.setTimeout(480_000);
-    await runLeague({ page, browser, baseURL, folder: 'joint-on-tie-at-3rd', tag: 'E', court: 'G', n: 4, script: TIE_AT_3RD, topN: 3, joint: true });
+    await runLeague({ page, browser, baseURL, folder: 'joint-on-tie-at-3rd', tag: 'E', court: 'G', n: 4, script: TIE_AT_3RD, joint: true });
   });
 
   test('two joint 3rd places off: a three-way tie at 3rd is asked as one group', async ({ page, browser, baseURL }) => {
     test.setTimeout(720_000);
-    await runLeague({ page, browser, baseURL, folder: 'joint-off-three-way', tag: 'F', court: 'H', n: 5, script: THREE_WAY_AT_3RD, topN: 3, joint: false });
+    await runLeague({ page, browser, baseURL, folder: 'joint-off-three-way', tag: 'F', court: 'H', n: 5, script: THREE_WAY_AT_3RD, joint: false });
   });
 
   test('two joint 3rd places on: a three-way tie at 3rd is not asked and the three share 3rd', async ({ page, browser, baseURL }) => {
     test.setTimeout(720_000);
-    await runLeague({ page, browser, baseURL, folder: 'joint-on-three-way', tag: 'G', court: 'A', n: 5, script: THREE_WAY_AT_3RD, topN: 3, joint: true });
+    await runLeague({ page, browser, baseURL, folder: 'joint-on-three-way', tag: 'G', court: 'A', n: 5, script: THREE_WAY_AT_3RD, joint: true });
   });
 });

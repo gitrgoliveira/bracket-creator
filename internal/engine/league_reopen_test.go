@@ -11,19 +11,26 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
-// finishedLeague sets up a team league whose table carries the scenario's tie
-// and marks it as the finalize door leaves it: shared ranks accepted, league
-// completed.
-func finishedLeague(t *testing.T, compID, scenario string) (*Engine, *state.Store) {
+// finishedLeague sets up a team league with a clear table (Alpha, Beta,
+// Gamma, Delta, scenario "noTie") and finishes it through the league's own
+// completion, as a played league finishes.
+func finishedLeague(t *testing.T, compID string) (*Engine, *state.Store) {
 	t.Helper()
-	eng, store := setupTeamLeagueComp(t, compID, scenario)
-	comp, err := store.LoadCompetition(compID)
-	require.NoError(t, err)
-	comp.LeagueTiebreakFinalized = true
-	comp.Status = state.CompStatusComplete
-	require.NoError(t, store.SaveCompetition(comp))
+	eng, store := setupTeamLeagueComp(t, compID, "noTie")
 	require.NoError(t, store.SaveTournament(&state.Tournament{Name: "T", Courts: []string{"A"}}))
+	outcome, err := eng.MaybeAutoCompletePools(compID)
+	require.NoError(t, err)
+	require.Equal(t, AutoCompleteTransitioned, outcome)
+	require.Equal(t, state.CompStatusComplete, loadComp(t, store, compID).Status)
 	return eng, store
+}
+
+// tieAt1st corrects Alpha - Beta to a draw on a finished "noTie" league: Alpha
+// and Beta are then level at 1st, a place that cannot be shared.
+func tieAt1st(t *testing.T, eng *Engine, compID string) {
+	t.Helper()
+	_, err := eng.RecordMatchResultWithIneligibility(compID, "Pool A-0", teamDraw("Alpha", "Beta"))
+	require.NoError(t, err)
 }
 
 // leagueTeamID returns a team's participant id from the league's pool.
@@ -81,139 +88,104 @@ func loadComp(t *testing.T, store *state.Store, compID string) *state.Competitio
 	return comp
 }
 
-// --- Undo (DELETE .../league-tiebreak/finalize) ---
+// --- A correction that unsettles a finished league (reconcileLeagueAfterWrite) ---
 
-func TestUndoLeagueSharedRanks_ReopensFinishedLeagueAndClearsDeadCourts(t *testing.T) {
-	eng, store := finishedLeague(t, "undo-finished", "topTie")
+// A correction that leaves a tie at 1st puts the finished league back into
+// match play: the tie is asked again, the verdict owes its tie-breaker, the
+// door's pass reports the league as started (competition_started) once, and a
+// match on a shiaijo the tournament has since removed loses its court.
+func TestLeagueCorrection_TieAt1stReopensAndClearsDeadCourts(t *testing.T) {
+	eng, store := finishedLeague(t, "fix-dead-courts")
 	// Shiaijo A was removed while the league was completed.
 	require.NoError(t, store.SaveTournament(&state.Tournament{Name: "T", Courts: []string{"B"}}))
+	tieAt1st(t, eng, "fix-dead-courts")
 
-	out, err := eng.UndoLeagueSharedRanks("undo-finished")
-	require.NoError(t, err)
-	assert.True(t, out.Reopened)
-	assert.Equal(t, []string{"A"}, out.RemovedCourts)
-	assert.Len(t, out.UnassignedMatches, 6, "every league match sat on the removed shiaijo")
-
-	comp := loadComp(t, store, "undo-finished")
-	assert.Equal(t, state.CompStatusPools, comp.Status, "back in match play")
-	assert.False(t, comp.LeagueTiebreakFinalized)
-	matches, err := store.LoadPoolMatches("undo-finished")
+	assert.Equal(t, state.CompStatusPools, loadComp(t, store, "fix-dead-courts").Status, "back in match play")
+	matches, err := store.LoadPoolMatches("fix-dead-courts")
 	require.NoError(t, err)
 	for _, m := range matches {
 		assert.Empty(t, m.Court, "%s lost the removed shiaijo", m.ID)
 		assert.Equal(t, state.MatchStatusCompleted, m.Status, "%s keeps its result", m.ID)
 	}
+	assert.Equal(t, PoolsTiebreakOwed, poolsVerdictNow(t, eng, store, "fix-dead-courts"),
+		"POST /complete agrees with the reopened league")
 
-	cands, err := eng.LeagueTiebreakCandidates("undo-finished")
+	outcome, err := eng.MaybeAutoCompletePools("fix-dead-courts")
 	require.NoError(t, err)
-	assert.Len(t, cands, 1, "the tie is asked again")
+	assert.Equal(t, AutoCompleteStarted, outcome)
+	again, err := eng.MaybeAutoCompletePools("fix-dead-courts")
+	require.NoError(t, err)
+	assert.NotEqual(t, AutoCompleteStarted, again, "the note is taken once")
+	assert.NotEqual(t, AutoCompleteTransitioned, again, "the tie at 1st keeps the league open")
+
+	cands, err := eng.LeagueTiebreakCandidates("fix-dead-courts")
+	require.NoError(t, err)
+	require.Len(t, cands, 1, "the tie is asked")
+	assert.Equal(t, 1, cands[0].MinPosition)
 }
 
-func TestUndoLeagueSharedRanks_LiveCourtsAreKept(t *testing.T) {
-	eng, store := finishedLeague(t, "undo-courts", "topTie")
-	out, err := eng.UndoLeagueSharedRanks("undo-courts")
-	require.NoError(t, err)
-	assert.True(t, out.Reopened)
-	assert.Empty(t, out.UnassignedMatches)
-	matches, err := store.LoadPoolMatches("undo-courts")
+func TestLeagueCorrection_ReopenKeepsLiveCourts(t *testing.T) {
+	eng, store := finishedLeague(t, "fix-live-courts")
+	tieAt1st(t, eng, "fix-live-courts")
+	require.Equal(t, state.CompStatusPools, loadComp(t, store, "fix-live-courts").Status)
+	matches, err := store.LoadPoolMatches("fix-live-courts")
 	require.NoError(t, err)
 	for _, m := range matches {
 		assert.Equal(t, "A", m.Court)
 	}
 }
 
-func TestUndoLeagueSharedRanks_InPlayClearsTheFlagOnly(t *testing.T) {
-	eng, store := setupTeamLeagueComp(t, "undo-inplay", "topTie", func(c *state.Competition) {
-		c.LeagueTiebreakFinalized = true
-	})
-	out, err := eng.UndoLeagueSharedRanks("undo-inplay")
-	require.NoError(t, err)
-	assert.False(t, out.Reopened)
-	comp := loadComp(t, store, "undo-inplay")
-	assert.Equal(t, state.CompStatusPools, comp.Status)
-	assert.False(t, comp.LeagueTiebreakFinalized)
-}
-
-func TestUndoLeagueSharedRanks_Refusals(t *testing.T) {
-	eng, store := setupTeamLeagueComp(t, "undo-not-accepted", "topTie")
-
-	_, err := eng.UndoLeagueSharedRanks("undo-not-accepted")
-	assert.ErrorIs(t, err, ErrLeagueNotFinalized)
-
-	_, err = eng.UndoLeagueSharedRanks("no-such-competition")
-	var nf *NotFoundError
-	assert.ErrorAs(t, err, &nf)
-
-	require.NoError(t, store.SaveCompetition(&state.Competition{
-		ID: "undo-mixed", Format: state.CompFormatMixed, Status: state.CompStatusPools,
-		Kind: "team", TeamSize: 2, LeagueTiebreakFinalized: true,
-	}))
-	_, err = eng.UndoLeagueSharedRanks("undo-mixed")
-	var ve *ValidationError
-	assert.ErrorAs(t, err, &ve)
-	assert.True(t, loadComp(t, store, "undo-mixed").LeagueTiebreakFinalized, "a refusal writes nothing")
-}
-
-// --- The completed-league reconciler (reconcileLeagueAfterWrite) ---
-
-// A correction that keeps the accepted tie where it was leaves the league
-// finished: its table and podium follow the corrected result.
-func TestLeagueCorrection_KeepingTheAcceptedTieStaysFinished(t *testing.T) {
-	eng, store := finishedLeague(t, "fix-keeps", "topTie")
-	// Gamma beat Delta; the correction gives it to Delta. Alpha and Beta
-	// still share 1st.
+// A correction that keeps the table settled leaves the league finished: its
+// table and podium follow the corrected result.
+func TestLeagueCorrection_KeepingTheTableSettledStaysFinished(t *testing.T) {
+	eng, store := finishedLeague(t, "fix-keeps")
+	// Gamma beat Delta; the correction gives it to Delta. No two teams are level.
 	_, err := eng.RecordMatchResultWithIneligibility("fix-keeps", "Pool A-5", teamWin(t, store, "fix-keeps", "Gamma", "Delta", "B"))
 	require.NoError(t, err)
 
-	comp := loadComp(t, store, "fix-keeps")
-	assert.Equal(t, state.CompStatusComplete, comp.Status)
-	assert.True(t, comp.LeagueTiebreakFinalized)
+	assert.Equal(t, state.CompStatusComplete, loadComp(t, store, "fix-keeps").Status)
 	outcome, err := eng.MaybeAutoCompletePools("fix-keeps")
 	require.NoError(t, err)
 	assert.Equal(t, AutoCompleteNoChange, outcome)
 }
 
-// A correction that settles a tie (no tie left) also leaves it finished.
-func TestLeagueCorrection_SettlingTheTieStaysFinished(t *testing.T) {
-	eng, store := finishedLeague(t, "fix-settles", "bottomTie")
-	// Beta beat Delta; drawn instead, Gamma and Delta no longer share 3rd.
-	_, err := eng.RecordMatchResultWithIneligibility("fix-settles", "Pool A-4", teamDraw("Beta", "Delta"))
-	require.NoError(t, err)
-	assert.Equal(t, state.CompStatusComplete, loadComp(t, store, "fix-settles").Status)
-}
-
-// A correction that makes a tie the operator never saw puts the league back
-// into match play, so the tie is asked again, and the door's pass reports it
-// as a start (competition_started).
-func TestLeagueCorrection_NewTieReopensTheLeague(t *testing.T) {
-	eng, store := finishedLeague(t, "fix-newtie", "topTie")
-	// Gamma beat Delta; drawn instead, Gamma and Delta share 3rd, in the band.
-	_, err := eng.RecordMatchResultWithIneligibility("fix-newtie", "Pool A-5", teamDraw("Gamma", "Delta"))
-	require.NoError(t, err)
-
-	comp := loadComp(t, store, "fix-newtie")
-	assert.Equal(t, state.CompStatusPools, comp.Status, "back in match play")
-	assert.False(t, comp.LeagueTiebreakFinalized, "the accepted ranks went with the table")
-
-	outcome, err := eng.MaybeAutoCompletePools("fix-newtie")
-	require.NoError(t, err)
-	assert.Equal(t, AutoCompleteStarted, outcome)
-	again, err := eng.MaybeAutoCompletePools("fix-newtie")
-	require.NoError(t, err)
-	assert.NotEqual(t, AutoCompleteStarted, again, "the note is taken once")
-	assert.NotEqual(t, AutoCompleteTransitioned, again, "the new tie keeps the league open")
-
-	cands, err := eng.LeagueTiebreakCandidates("fix-newtie")
-	require.NoError(t, err)
-	assert.Len(t, cands, 2, "both ties are asked")
+// A correction that makes a tie at 3rd reopens the league while two joint 3rd
+// places are off, and leaves it finished while they are on: 3rd is the one
+// place a league may share.
+func TestLeagueCorrection_TieAt3rdFollowsTheJointThirdSetting(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		jointThird bool
+		want       state.CompetitionStatus
+	}{
+		{"joint 3rd off: the tie is broken", false, state.CompStatusPools},
+		{"joint 3rd on: the place is shared", true, state.CompStatusComplete},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			compID := "fix-3rd-off"
+			if tc.jointThird {
+				compID = "fix-3rd-on"
+			}
+			eng, store := finishedLeague(t, compID)
+			if tc.jointThird {
+				comp := loadComp(t, store, compID)
+				comp.LeagueTwoThirdPlaces = true
+				require.NoError(t, store.SaveCompetition(comp))
+			}
+			// Gamma beat Delta; drawn instead, Gamma and Delta are level at 3rd.
+			_, err := eng.RecordMatchResultWithIneligibility(compID, "Pool A-5", teamDraw("Gamma", "Delta"))
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, loadComp(t, store, compID).Status)
+		})
+	}
 }
 
 // A regular match reopened on a finished league puts the league back into
 // match play when the door's pass runs.
 func TestLeagueReopenedMatch_PutsTheLeagueBackInPlay(t *testing.T) {
-	eng, store := finishedLeague(t, "reopen-match", "topTie")
-	// A withdrawal recorded on the finished league (Delta takes the match, the
-	// accepted tie at 1st stands, so it stays finished), then reopened.
+	eng, store := finishedLeague(t, "reopen-match")
+	// A withdrawal recorded on the finished league (Delta takes the match, no
+	// two teams are level, so it stays finished), then reopened.
 	_, _, err := eng.RecordDecision("reopen-match", "Pool A-5", "kiken", "aka", "", nil)
 	require.NoError(t, err)
 	require.Equal(t, state.CompStatusComplete, loadComp(t, store, "reopen-match").Status)
@@ -223,9 +195,7 @@ func TestLeagueReopenedMatch_PutsTheLeagueBackInPlay(t *testing.T) {
 	outcome, err := eng.MaybeAutoCompletePools("reopen-match")
 	require.NoError(t, err)
 	assert.Equal(t, AutoCompleteStarted, outcome)
-	comp := loadComp(t, store, "reopen-match")
-	assert.Equal(t, state.CompStatusPools, comp.Status)
-	assert.False(t, comp.LeagueTiebreakFinalized)
+	assert.Equal(t, state.CompStatusPools, loadComp(t, store, "reopen-match").Status)
 }
 
 // A correction of a tie-breaker bout of a finished league is reconciled like a
@@ -288,7 +258,7 @@ func TestLeagueCorrection_TiebreakerBoutIsReconciled(t *testing.T) {
 // finished, and must leave the note for the pass that follows the commit: taking
 // it then lost the report (no competition_started) when the commit landed.
 func TestLeagueBackInPlay_LeavesAnUncommittedNoteForTheCommit(t *testing.T) {
-	eng, store := finishedLeague(t, "note-race", "topTie")
+	eng, store := finishedLeague(t, "note-race")
 	eng.leagueReopenNotes.Store("note-race", struct{}{})
 
 	reopened, _, err := eng.leagueBackInPlay("note-race", loadComp(t, store, "note-race"))
@@ -308,19 +278,6 @@ func TestLeagueBackInPlay_LeavesAnUncommittedNoteForTheCommit(t *testing.T) {
 	reopened, _, err = eng.leagueBackInPlay("note-race", loadComp(t, store, "note-race"))
 	require.NoError(t, err)
 	assert.False(t, reopened, "the note is taken once")
-}
-
-// Shared ranks accepted while matches are still played go when a result
-// changes: the table they were accepted on is gone.
-func TestLeagueResultChange_InPlayTakesBackAcceptedRanks(t *testing.T) {
-	eng, store := setupTeamLeagueComp(t, "inplay-change", "topTie", func(c *state.Competition) {
-		c.LeagueTiebreakFinalized = true
-	})
-	_, err := eng.RecordMatchResultWithIneligibility("inplay-change", "Pool A-5", teamWin(t, store, "inplay-change", "Gamma", "Delta", "B"))
-	require.NoError(t, err)
-	comp := loadComp(t, store, "inplay-change")
-	assert.False(t, comp.LeagueTiebreakFinalized)
-	assert.NotEqual(t, state.CompStatusComplete, comp.Status)
 }
 
 // --- D6 (b): a league tie-breaker needs a winner ---
@@ -379,12 +336,13 @@ func TestRefuseDrawnLeagueTiebreak(t *testing.T) {
 	assert.NoError(t, refuseDrawnLeagueTiebreak(nil, "Pool A-DH-0", drawn))
 }
 
-// --- Accept on a fought, cyclic tie-breaker round ---
+// --- A fought tie-breaker round that went in a circle: the lots decide ---
 
 // A tie-breaker round that went round in a circle (each team beat one and lost
-// to one) leaves the tie unbroken; in a league that is the operator's to accept
-// as shared ranks, and the Accept finishes the league (no lots).
-func TestLeagueAccept_OnACyclicRoundFinishesTheLeague(t *testing.T) {
+// to one) leaves a tie at 1st the bouts cannot separate: the lots are offered,
+// the league stays open until they are entered, and then it finishes with
+// distinct places.
+func TestLeagueCyclicRound_LotsFinishTheLeague(t *testing.T) {
 	eng, store := setupTeamPoolComp(t, "dh-cycle", true)
 	injected, err := eng.InjectPoolDaihyosenMatches("dh-cycle")
 	require.NoError(t, err)
@@ -427,101 +385,50 @@ func TestLeagueAccept_OnACyclicRoundFinishesTheLeague(t *testing.T) {
 
 	outcome, err := eng.MaybeAutoCompletePools("dh-cycle")
 	require.NoError(t, err)
-	require.NotEqual(t, AutoCompleteTransitioned, outcome, "an unbroken tie keeps the league open until the operator decides")
+	require.NotEqual(t, AutoCompleteTransitioned, outcome, "an unbroken tie at 1st keeps the league open")
+	assert.Equal(t, PoolsChusenOwed, poolsVerdictNow(t, eng, store, "dh-cycle"))
 
-	comp := loadComp(t, store, "dh-cycle")
-	comp.LeagueTiebreakFinalized = true
-	require.NoError(t, store.SaveCompetition(comp))
+	report, err := eng.ChusenStatus("dh-cycle")
+	require.NoError(t, err)
+	require.Len(t, report.Pending, 1, "the lots are offered for the circle")
+	assert.Equal(t, 1, report.Pending[0].MinPosition)
+
+	for rank, name := range []string{"Beta", "Gamma", "Alpha"} {
+		require.NoError(t, store.SaveRankOverride("dh-cycle", "Pool A", teamID(name), rank+1))
+	}
+	eng.standingsCache.Delete("dh-cycle")
+	eng.standingsFlight.Delete("dh-cycle")
 	outcome, err = eng.MaybeAutoCompletePools("dh-cycle")
 	require.NoError(t, err)
-	assert.Equal(t, AutoCompleteTransitioned, outcome, "accepted shared ranks finish the league")
+	assert.Equal(t, AutoCompleteTransitioned, outcome, "the lots settle the circle")
 	assert.Equal(t, state.CompStatusComplete, loadComp(t, store, "dh-cycle").Status)
 }
 
-// --- The accepted shared ranks, as the candidates read shows them ---
+// --- The both-sides-barred draw on a league tie-breaker ---
 
-func TestLeagueSharedRanks(t *testing.T) {
-	eng, _ := finishedLeague(t, "shared-ranks", "topTie")
-	groups, err := eng.LeagueSharedRanks("shared-ranks")
-	require.NoError(t, err)
-	require.Len(t, groups, 1)
-	assert.Equal(t, 1, groups[0].MinPosition)
-	names := []string{}
-	for _, p := range groups[0].Teams {
-		names = append(names, p.Player.Name)
-	}
-	assert.ElementsMatch(t, []string{"Alpha", "Beta"}, names)
-
-	eng2, _ := setupTeamLeagueComp(t, "shared-none", "topTie")
-	groups, err = eng2.LeagueSharedRanks("shared-none")
-	require.NoError(t, err)
-	assert.Nil(t, groups, "nothing accepted, nothing shown")
-
-	_, err = eng2.LeagueSharedRanks("no-such-competition")
-	var nf *NotFoundError
-	assert.ErrorAs(t, err, &nf)
-}
-
-// --- After Undo, the league's own verdict owes the tie again ---
-
-func TestUndoLeagueSharedRanks_VerdictOwesTheTieAgain(t *testing.T) {
-	eng, store := finishedLeague(t, "undo-verdict", "topTie")
-	_, err := eng.UndoLeagueSharedRanks("undo-verdict")
-	require.NoError(t, err)
-	assert.Equal(t, PoolsTiebreakOwed, poolsVerdictNow(t, eng, store, "undo-verdict"),
-		"POST /complete agrees with the reopened league")
-}
-
-// --- The both-sides-barred hikiwake on a league tie-breaker ---
-
-func TestLeagueTiebreaker_BothBarredHikiwakeIsRefused(t *testing.T) {
-	eng, store := setupTeamPoolComp(t, "dh-barred", true)
-	injected, err := eng.InjectPoolDaihyosenMatches("dh-barred")
-	require.NoError(t, err)
-	require.NotEmpty(t, injected)
-	dh := injected[0]
-
-	_, err = eng.RecordMatchResultWithIneligibility("dh-barred", dh.ID, &state.MatchResult{
-		Status:    state.MatchStatusCompleted,
-		Decision:  string(domain.DecisionHikiwake),
-		Changed:   []string{state.GroupResult},
-		WriteDoor: DoorDecision,
-	})
-	require.ErrorIs(t, err, ErrTiebreakNeedsWinner)
-	var ve *ValidationError
-	require.ErrorAs(t, err, &ve)
-	assert.Equal(t, errTiebreakBothBarredSentence+" "+errTiebreakBothBarredTeamRemedy, ve.Msg)
-
-	after, err := store.LoadPoolMatches("dh-barred")
-	require.NoError(t, err)
-	for _, m := range after {
-		if m.ID == dh.ID {
-			assert.NotEqual(t, state.MatchStatusCompleted, m.Status, "nothing was written")
-		}
-	}
-}
-
-func TestRefuseDrawnLeagueTiebreak_BothBarredSentences(t *testing.T) {
+// "Record as drawn (neither can fight)" on a league tie-breaker is let through
+// for a team bout and an individual one alike: the place is then settled by
+// the lots (barredDrawOwesLots). A plain draw through the score door is still
+// refused.
+func TestRefuseDrawnLeagueTiebreak_BothBarredDrawIsLetThrough(t *testing.T) {
 	league := &state.Competition{Format: state.CompFormatLeague}
 	barred := &state.MatchResult{Status: state.MatchStatusCompleted,
 		Decision: string(domain.DecisionHikiwake), WriteDoor: DoorDecision}
+	scored := &state.MatchResult{Status: state.MatchStatusCompleted,
+		Decision: string(domain.DecisionHikiwake)}
 
-	err := refuseDrawnLeagueTiebreak(league, "Pool A-DH-0", barred)
-	var ve *ValidationError
-	require.ErrorAs(t, err, &ve)
-	assert.Equal(t, errTiebreakBothBarredSentence+" "+errTiebreakBothBarredTeamRemedy, ve.Msg)
-
-	assert.NoError(t, refuseDrawnLeagueTiebreak(league, "Pool A-TB-0", barred),
-		"an individual league has no Accept to point at: its barred ippon-shobu draw is the exemption")
-
-	assert.NoError(t, refuseDrawnLeagueTiebreak(league, "Pool A-0", barred), "a regular league match keeps the carve-out")
+	assert.NoError(t, refuseDrawnLeagueTiebreak(league, "Pool A-DH-0", barred), "a team tie-breaker")
+	assert.NoError(t, refuseDrawnLeagueTiebreak(league, "Pool A-TB-0", barred), "an individual tie-breaker")
+	assert.NoError(t, refuseDrawnLeagueTiebreak(league, "Pool A-0", barred), "a regular league match")
+	assert.ErrorIs(t, refuseDrawnLeagueTiebreak(league, "Pool A-DH-0", scored), ErrTiebreakNeedsWinner)
+	assert.ErrorIs(t, refuseDrawnLeagueTiebreak(league, "Pool A-TB-0", scored), ErrTiebreakNeedsWinner)
 }
 
 // A participant's team-member add is refused on the finished league and works
-// once Undo puts it back into match play: the reopen is a real reopen for the
-// writes that ask whether the competition has finished.
-func TestUndoLeagueSharedRanks_ReopensTeamMemberWrites(t *testing.T) {
-	eng, store := finishedLeague(t, "undo-members", "topTie")
+// once a correction puts it back into match play: the reopen is a real reopen
+// for the writes that ask whether the competition has finished.
+func TestLeagueCorrection_ReopensTeamMemberWrites(t *testing.T) {
+	eng, store := finishedLeague(t, "undo-members")
 	alpha := leagueTeamID(t, store, "undo-members", "Alpha")
 	// The roster the draw was made from: the pool's teams, under the same ids.
 	pools, err := store.LoadPools("undo-members")
@@ -540,17 +447,16 @@ func TestUndoLeagueSharedRanks_ReopensTeamMemberWrites(t *testing.T) {
 	_, err = store.AddTeamMemberUpTo("undo-members", alpha, "Late Arrival", 0)
 	require.ErrorIs(t, err, state.ErrCompetitionFinished)
 
-	_, err = eng.UndoLeagueSharedRanks("undo-members")
-	require.NoError(t, err)
+	tieAt1st(t, eng, "undo-members")
 	member, err := store.AddTeamMemberUpTo("undo-members", alpha, "Late Arrival", 0)
 	require.NoError(t, err)
 	assert.Equal(t, "Late Arrival", member.Name)
 }
 
-// The match lineups saved while the league was played survive the reopen:
-// Undo moves the status and the courts, never a team's lineup.
-func TestUndoLeagueSharedRanks_KeepsMatchLineups(t *testing.T) {
-	eng, store := finishedLeague(t, "undo-lineups", "topTie")
+// The match lineups saved while the league was played survive the reopen: it
+// moves the status and the courts, never a team's lineup.
+func TestLeagueCorrection_ReopenKeepsMatchLineups(t *testing.T) {
+	eng, store := finishedLeague(t, "undo-lineups")
 	alpha := leagueTeamID(t, store, "undo-lineups", "Alpha")
 	require.NoError(t, store.SetTeamLineup("undo-lineups", domain.TeamLineup{
 		TeamID: alpha, CompetitionID: "undo-lineups", MatchID: "Pool A-0",
@@ -560,8 +466,8 @@ func TestUndoLeagueSharedRanks_KeepsMatchLineups(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, before)
 
-	_, err = eng.UndoLeagueSharedRanks("undo-lineups")
-	require.NoError(t, err)
+	tieAt1st(t, eng, "undo-lineups")
+	require.Equal(t, state.CompStatusPools, loadComp(t, store, "undo-lineups").Status)
 	after, err := store.LoadTeamLineups("undo-lineups")
 	require.NoError(t, err)
 	assert.Equal(t, before, after)

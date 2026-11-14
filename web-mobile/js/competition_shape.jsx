@@ -265,56 +265,6 @@ export function roundRobinVisible(format, poolFormat) {
   return format === FORMAT_MIXED && poolFormat !== POOL_FORMAT_PARTIAL;
 }
 
-// --- League tie-break band ("Break ties for top") -----------------------
-//
-// Settings-only today (admin_competition_settings.jsx ~1090-1106); the
-// create form has no equivalent control at all -- leagueTiebreakTopN is
-// absent from admin_setup.jsx entirely.
-export const LABEL_LEAGUE_TIEBREAK = "Break ties for top";
-export const HINT_LEAGUE_TIEBREAK = "Teams level on every criterion within this band are asked about before the league finishes: run a tie-breaker, or accept shared ranks. Top 3 asks about ties for 1st to 3rd place, Top 4 also about 4th. Accepting shared ranks finishes the competition at once, and Undo shared ranks takes it back.";
-// LEAGUE_TIEBREAK_OPTIONS: the stored value is an int (3 or 4), not a
-// wire-string sentinel like the other option lists here, because
-// state.Competition.LeagueTiebreakTopN is int on both sides of the wire.
-// A stored/legacy 0 (unset) reads as "Top 3" is active -- see
-// state.Competition's own doc comment ("Zero is treated as the default
-// (3)...") and admin_competition_settings.jsx:1094's
-// `(local.leagueTiebreakTopN || 0) === 0 || local.leagueTiebreakTopN === 3`
-// active-pill check -- but 0 is not a selectable OPTION, only the default
-// resolution of "not yet chosen", so it is not listed as a value here.
-export const LEAGUE_TIEBREAK_DEFAULT = 3;
-export const LEAGUE_TIEBREAK_OPTIONS = [
-  { value: LEAGUE_TIEBREAK_DEFAULT, label: "Top 3" },
-  { value: 4, label: "Top 4" },
-];
-
-// leagueTiebreakActive: is `option` the lit pill for the stored value?
-// The "a stored/legacy 0 (unset) reads as Top 3" rule described above was
-// previously stated in THIS COMMENT ONLY, while both screens carried the
-// same nested ternary
-//   (o.value === 3 ? ((v || 0) === 0 || v === 3) : v === o.value)
-// with the 3 hardcoded a second and third time. That is precisely the
-// per-surface chain this module exists to replace, so the rule is now
-// executable here and the screens ask instead of re-deriving.
-export function leagueTiebreakActive(option, stored) {
-  return option === (stored || LEAGUE_TIEBREAK_DEFAULT);
-}
-
-// leagueTiebreakVisible: mirrors admin_competition_settings.jsx's gate,
-// `local.format === "league" && (local.teamSize > 0 || local.kind ===
-// "team")`, AS CLOSELY AS A TWO-ARGUMENT (format, kind) PREDICATE CAN.
-//
-// The teamSize term is NOT redundant with kind. `kind !== "team"` paired
-// with `teamSize > 0` is real, if inconsistent, stored data that
-// models.go:885-886 calls out by name ("kind=\"individual\" with
-// teamSize=3"), and the settings page shows the tie-break control for
-// exactly those records today. Dropping the term would hide a control an
-// operator can currently see, on the records least able to afford a
-// surprise, so the predicate takes teamSize rather than narrowing to kind.
-export function leagueTiebreakVisible(format, kind, teamSize) {
-  const isTeam = kind === KIND_TEAM || (Number.isFinite(teamSize) && teamSize > 0);
-  return format === FORMAT_LEAGUE && isTeam;
-}
-
 // --- Per-phase match duration ------------------------------------------
 //
 // Settings-only today (admin_competition_settings.jsx ~972-989); the
@@ -372,7 +322,7 @@ export function knockoutDurationVisible(format) {
 // generically ("competitors genuinely tied for 3rd", not "league standings"),
 // so it needed no wording change to cover knockout/mixed too.
 export const LABEL_TWO_THIRD_PLACES = "Award two joint 3rd places";
-export const HINT_TWO_THIRD_PLACES = "When enabled, competitors who tie for 3rd place share it and nothing is played to separate them (standard kendo convention). In a league, teams level at 3rd place or lower then share the place without being asked. Leave it off to decide a single 3rd place: a knockout plays a third-place match, and a league asks you to run a tie-breaker or accept shared ranks.";
+export const HINT_TWO_THIRD_PLACES = "When enabled, competitors level at 3rd place share it and nothing is asked or played to separate them (standard kendo convention). Leave it off to decide a single 3rd place: a knockout plays a third-place match, and a league breaks a tie at 3rd place with a tie-breaker. A tie at 1st or 2nd place always needs a tie-breaker with a winner.";
 
 // twoThirdPlacesVisible: visible for every format that can produce a 3rd
 // place at all -- knockout/mixed decide it with a bronze match (or not) at
@@ -1246,10 +1196,6 @@ export const COMPETITION_DEFAULTS = {
   // leagueTwoThirdPlaces now that the rule applies to every format, not just
   // leagues -- see state.Competition.EffectiveTwoThirdPlaces.
   twoThirdPlaces: true,
-  // 0, not LEAGUE_TIEBREAK_DEFAULT: the stored zero IS "not yet chosen" and
-  // leagueTiebreakActive resolves it to Top 3 for display. Seeding the
-  // resolved value instead would persist a choice the operator never made.
-  leagueTiebreakTopN: 0,
   numberPrefix: "",
   // 0 means "unset, use the scheduler default" for both durations (T047).
   poolMatchDurationSeconds: 0,

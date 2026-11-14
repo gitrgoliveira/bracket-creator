@@ -271,9 +271,8 @@ export function LeagueStandingsViewer({ competition, poolMatches, tweaks, onMatc
   // standings stale.
   const poolMatchesSig = useMemo(() => poolMatchesSignature(poolMatches), [poolMatches]);
 
-  // A rank written without a match write (lots, Accept shared ranks and its
-  // Undo) is announced as tournament_updated and changes no prop this viewer
-  // gets: a finished league keeps its status and matches while the lots move
+  // A rank written without a match write (the lots, and a change to them) is
+  // announced as tournament_updated and changes no prop this viewer gets: a finished league keeps its status and matches while the lots move
   // its order. So the push itself is a reason to fetch again.
   const [ranksTick, setRanksTick] = useState(0);
   React.useEffect(() => {
@@ -285,10 +284,9 @@ export function LeagueStandingsViewer({ competition, poolMatches, tweaks, onMatc
 
   // Re-fetch whenever the match signature changes (SSE-driven) so the
   // standings table reflects the latest state after each scored bout, and
-  // whenever the competition's status changes: Accept shared ranks and its
-  // Undo move the league between completed and running without touching a
-  // match, yet change the ranks the table reads (an accepted group shares
-  // its best place).
+  // whenever the competition's status changes: a league that finishes or goes
+  // back to match play changes the ranks the table reads (a level group below
+  // the band ties are broken in shares its best place) without a match write.
   React.useEffect(() => {
     let cancelled = false;
     setLoading(true);
@@ -409,7 +407,7 @@ export function LeagueStandingsViewer({ competition, poolMatches, tweaks, onMatc
               {(poolMatches || []).map((m, idx) => {
                 if (isTeam) {
                   const isRepBout = isSupplementaryBout(m.id || "");
-                  const enriched = { ...m, phase: "pool", poolName: m.poolName || "", phaseName: m.poolName || "", compFormat: competition.format, compId: competition.id, compName: competition.name, compKind: isRepBout ? "" : competition.kind, teamSize: isRepBout ? 0 : competition.teamSize, compEngi: isRepBout ? false : isEngi, teamMatchType: isRepBout ? "" : compTMT };
+                  const enriched = { ...m, phase: "pool", poolName: m.poolName || "", phaseName: m.poolName || "", compFormat: competition.format, compId: competition.id, compName: competition.name, compKind: isRepBout ? "" : competition.kind, teamSize: isRepBout ? 0 : competition.teamSize, compEngi: isEngi, teamMatchType: isRepBout ? "" : compTMT };
                   return (
                     <React.Fragment key={m.id}>
                       <PoolNumberedMatchRow
@@ -1008,7 +1006,7 @@ export function PoolsViewer({ pools, standings, poolMatches, tweaks, competition
                       // bout even in a team comp, so force compKind/teamSize to route
                       // it to the individual editor (matches enrichPoolMatchWithComp).
                       const isRepBout = isSupplementaryBout(m.id || "");
-                      const enriched = { ...m, phase: "pool", poolName: pool.poolName, phaseName: pool.poolName, compFormat: competition.format, compId: competition.id, compName: competition.name, compKind: isRepBout ? "" : competition.kind, teamSize: isRepBout ? 0 : competition.teamSize, compEngi: isRepBout ? false : isEngi, teamMatchType: isRepBout ? "" : compTMT };
+                      const enriched = { ...m, phase: "pool", poolName: pool.poolName, phaseName: pool.poolName, compFormat: competition.format, compId: competition.id, compName: competition.name, compKind: isRepBout ? "" : competition.kind, teamSize: isRepBout ? 0 : competition.teamSize, compEngi: isEngi, teamMatchType: isRepBout ? "" : compTMT };
                       return (
                         <React.Fragment key={m.id}>
                           <PoolNumberedMatchRow

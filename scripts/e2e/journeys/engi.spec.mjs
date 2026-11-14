@@ -1,4 +1,5 @@
-// Engi (kata pairs) journey: a knockout of four pairs, scored in flags.
+// Engi (kata pairs) journey: a knockout of four pairs, scored in flags, and a
+// league of four pairs whose tie at 1st the court console decides by flags.
 //
 // The tournament, the engi competition (the wizard's "Engi (kata competition)"
 // box), the roster of pairs ("Name 1 - Name 2, Dojo"), the draw and the start
@@ -6,7 +7,12 @@
 // walk the court console: one scores a match and checks the result on a
 // spectator's phone, the other guards bc-evts, the engi editor's counterpart
 // of bc-ltap (a flag taken back while the save of the one before is still out
-// must stay taken back).
+// must stay taken back). The last test seeds a league of its own on shiaijo B
+// and plays it on that court's console: two pairs end level at 1st (the same
+// wins and the same flags), the engine adds their tie-breaker, and the
+// console's evidence is named by the flow (engi-tie-at-1st-console-up-next,
+// -running, -before-finish, -after; engi-tie-at-1st-desk-table and
+// -public-awards).
 import { test, expect } from '../fixtures/test.mjs';
 import { OPERATOR_DEVICE, PUBLIC_DEVICE, EXPECT_TIMEOUT_MS } from '../fixtures/devices.mjs';
 import { journeyShots } from '../fixtures/shots.mjs';
@@ -14,12 +20,14 @@ import { auditLog } from '../fixtures/audit.mjs';
 import { createTournament, login } from '../fixtures/setup.mjs';
 import { createCompetition } from '../fixtures/wizard.mjs';
 import { generateDraw, pasteRoster, startCompetition } from '../fixtures/competition.mjs';
-import { openShiaijo, completedRows, upNextCard } from '../fixtures/shiaijo.mjs';
+import { openShiaijo, completedRows, sides, upNextCard } from '../fixtures/shiaijo.mjs';
+import { INLINE_EDITOR } from '../fixtures/scoring.mjs';
 import { openViewer } from '../fixtures/public.mjs';
 import { holdScoreWrites } from '../fixtures/held-write.mjs';
 import {
-  engiEditor, engiSettle, engiTotal, enterFlags, flagCount, flagButton, saveEngiResult, startUpNextEngi,
+  engiEditor, engiPair, engiSettle, engiTotal, enterFlags, flagCount, flagButton, saveEngiResult, startUpNextEngi,
 } from '../fixtures/engi.mjs';
+import { openLeague, openViewerAwards, readLeagueTable, readNumberedRows, readPodium, seedLeague } from '../fixtures/league.mjs';
 
 // Four pairs, one dojo each: (name, dojo) is unique per pair.
 const PAIRS = [
@@ -165,5 +173,133 @@ test.describe('engi', () => {
       await writes.stop();
     }
     writes.assertNoSafetyRelease(); // after the body succeeded: a throw in the finally would hide its error
+  });
+
+  // An engi LEAGUE of four pairs on shiaijo B, every bout scored in flags on
+  // the court console. By the first member's name (a pair's card shows it
+  // first): Ann v Ben 0-3, Ann v Cas 3-0, Ann v Dee 3-0, Ben v Cas 3-0,
+  // Ben v Dee 0-3, Cas v Dee 3-2. Ann and Ben end level at 1st, two wins and
+  // six flags each; Dee is 3rd (one win, five flags) and Cas 4th (one win, three
+  // flags). The engine adds the Ann v Ben tie-breaker, which Ann wins 2-1.
+  test('an engi league tie at 1st is decided by flags on the court console', async ({ page, browser, baseURL }) => {
+    test.setTimeout(360_000);
+    const flow = 'engi-tie-at-1st';
+    const LEAGUE = [
+      ['Ann Sato - Aya Kudo', 'Gyokusen'],
+      ['Ben Ono - Bo Ueda', 'Musashi'],
+      ['Cas Hori - Cy Endo', 'Seishinkan'],
+      ['Dee Oda - Di Sano', 'Thames'],
+    ];
+    const first = (name) => name.split(' - ')[0].trim();
+    const [ANN, BEN, CAS, DEE] = LEAGUE.map(([n]) => first(n));
+    // Flags per bout, keyed by the two first members sorted: { [member]: flags }.
+    const key = (a, b) => [a, b].sort().join('|');
+    const FLAGS = new Map([
+      [key(ANN, BEN), { [ANN]: 0, [BEN]: 3 }],
+      [key(ANN, CAS), { [ANN]: 3, [CAS]: 0 }],
+      [key(ANN, DEE), { [ANN]: 3, [DEE]: 0 }],
+      [key(BEN, CAS), { [BEN]: 3, [CAS]: 0 }],
+      [key(BEN, DEE), { [BEN]: 0, [DEE]: 3 }],
+      [key(CAS, DEE), { [CAS]: 3, [DEE]: 2 }],
+    ]);
+    // A side's first member as the console shows it: the editor's pair line,
+    // or the first member of the whole pair name the Up next card carries.
+    // The Up next card's Start match is there only while no bout runs (a Finish
+    // + Start Next starts the next one itself); the editor may show beside it
+    // before a start, so the card decides.
+    const start = upNextCard(page).getByRole('button', { name: 'Start match' });
+    const editorOrCard = async () => ((await start.isVisible().catch(() => false))
+      ? sides(upNextCard(page)).then((p) => ({ shiro: first(p.shiro), aka: first(p.aka) })).catch(() => null)
+      : engiPair(page).catch(() => null));
+    const startOrHeld = async () => {
+      await expect(engiEditor(page).or(start).first()).toBeVisible({ timeout: EXPECT_TIMEOUT_MS });
+      return (await start.isVisible()) ? startUpNextEngi(page) : engiPair(page);
+    };
+    let id;
+
+    await login(page);
+    id = await seedLeague(page, { name: 'Engi League', kind: 'individual', engi: true, entrants: LEAGUE, courts: ['B'], numberPrefix: 'EL', twoThirdPlaces: true });
+
+    await test.step('the court console scores the six bouts in flags', async () => {
+      await openShiaijo(page, 'B');
+      const played = [];
+      for (let n = 1; n <= 6; n += 1) {
+        const pair = await startOrHeld();
+        const flags = FLAGS.get(key(pair.shiro, pair.aka));
+        expect(flags, `a scripted bout for ${pair.shiro} v ${pair.aka}`).toBeTruthy();
+        await enterFlags(page, { shiro: flags[pair.shiro], aka: flags[pair.aka] });
+        await engiSettle(page);
+        await saveEngiResult(page);
+        await expect(completedRows(page)).toHaveCount(n);
+        played.push({ ...pair, flags });
+      }
+      record({ journey: 'engi', flow, action: 'six league bouts on the court console', played });
+    });
+
+    await test.step('the desk: Ann and Ben level at 1st, and their tie-breaker is added', async () => {
+      await openLeague(page, id);
+      await expect.poll(async () => (await readNumberedRows(page)).length, { message: 'the tie-breaker is added', timeout: EXPECT_TIMEOUT_MS }).toBe(7);
+      const table = await readLeagueTable(page);
+      const tb = (await readNumberedRows(page)).at(-1);
+      record({ journey: 'engi', flow, action: 'the table once the six are played', table, tiebreaker: tb,
+        screenshot: await shot(page, `${flow}-desk-banner`, { fullPage: true }) });
+      expect(table.heading).toBe('Standings');
+      expect([first(tb.shiro), first(tb.aka)].sort()).toEqual([ANN, BEN].sort());
+    });
+
+    const shots = {};
+    let tbPair;
+    await test.step('the court console: the tie-breaker is Up next, runs, is decided 2-1 in flags for Ann, and finishes', async () => {
+      await openShiaijo(page, 'B');
+      await expect.poll(async () => {
+        const p = await editorOrCard();
+        return !!p && [p.shiro, p.aka].sort().join('|') === key(ANN, BEN);
+      }, { message: 'the console holds the Ann v Ben tie-breaker', timeout: EXPECT_TIMEOUT_MS }).toBe(true);
+      const upNext = (await upNextCard(page).count()) ? (await upNextCard(page).first().innerText()).replace(/\s+/g, ' ').trim() : '';
+      shots.upNext = await shot(page, `${flow}-console-up-next`, { fullPage: true });
+      const startTb = upNextCard(page).getByRole('button', { name: 'Start match' });
+      if (await startTb.isVisible()) await startTb.tap();
+      // fixed (E1): the tie-breaker ("Pool A-TB-1") opens the flag editor, as
+      // the league bouts do, never the kendo ippon editor (M K D T H, fouls,
+      // hantei). Waiting on either editor lets a regression fail on the
+      // assertion below rather than on a timeout.
+      const ipponEditor = page.locator(INLINE_EDITOR).first().getByTestId('scoring-modal-mark-draw');
+      await expect(engiEditor(page).or(ipponEditor).first()).toBeVisible({ timeout: EXPECT_TIMEOUT_MS });
+      const flagsEditor = await engiEditor(page).isVisible();
+      shots.running = await shot(page, `${flow}-console-running`, { fullPage: true });
+      record({ journey: 'engi', flow, action: 'the tie-breaker started on the court console', upNext, flagsEditor, screenshot: shots.running });
+      expect(flagsEditor, 'the engi tie-breaker opens the flag editor, not the ippon editor').toBe(true);
+      tbPair = await engiPair(page);
+      await enterFlags(page, { shiro: tbPair.shiro === ANN ? 2 : 1, aka: tbPair.aka === ANN ? 2 : 1 });
+      await engiSettle(page);
+      const total = (await engiTotal(page).innerText()).trim();
+      shots.beforeFinish = await shot(page, `${flow}-console-before-finish`, { fullPage: true });
+      await saveEngiResult(page);
+      await expect(completedRows(page)).toHaveCount(7);
+      shots.after = await shot(page, `${flow}-console-after`, { fullPage: true });
+      record({ journey: 'engi', flow, action: 'the tie-breaker on the court console', upNext, pair: tbPair, total, shots });
+      expect(upNext === '' || /tie-?break/i.test(upNext), 'the Up next card says it is a tie-breaker').toBe(true);
+      expect(total).toBe(`Total: 3, ${tbPair.shiro === ANN ? 'Shiro' : 'Aka'} wins`);
+    });
+
+    await test.step('the desk reads Final standings with Ann first; the phone\'s Awards agree', async () => {
+      await openLeague(page, id);
+      await expect.poll(async () => (await readLeagueTable(page)).heading, { message: 'the league finished', timeout: EXPECT_TIMEOUT_MS }).toBe('Final standings');
+      const table = await readLeagueTable(page);
+      const rank = (member) => table.rows.find((r) => r.name.startsWith(member))?.rank;
+      record({ journey: 'engi', flow, action: 'Final standings', table, screenshot: await shot(page, `${flow}-desk-table`, { fullPage: true }) });
+      expect([ANN, BEN, DEE, CAS].map(rank)).toEqual([1, 2, 3, 4]);
+      expect(table.winner.startsWith(ANN), `the winner is Ann's pair (${table.winner})`).toBe(true);
+      const spectator = await browser.newContext({ ...PUBLIC_DEVICE, baseURL });
+      try {
+        const phone = await spectator.newPage();
+        await openViewerAwards(phone, id);
+        const podium = await readPodium(phone);
+        record({ journey: 'engi', flow, action: 'public Awards', podium, screenshot: await shot(phone, `${flow}-public-awards`, { fullPage: true }) });
+        expect(podium.places.slice(0, 3).map((pl) => first(pl.name))).toEqual([ANN, BEN, DEE]);
+      } finally {
+        await spectator.close();
+      }
+    });
   });
 });

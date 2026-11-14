@@ -121,7 +121,7 @@ func respondIfValidationError(c *gin.Context, err error) bool {
 // validationBody is the 400 body of an engine validation refusal: its sentence,
 // and a code for the refusal a client tells apart without matching the sentence
 // (a league tie-breaker finished with no winner, engine.ErrTiebreakNeedsWinner,
-// whose sentence says encho and hantei or accepting the shared ranks).
+// whose sentence says encho, then hantei).
 func validationBody(err error) gin.H {
 	body := gin.H{"error": err.Error()}
 	if errors.Is(err, engine.ErrTiebreakNeedsWinner) {

@@ -141,18 +141,11 @@ func (e *Engine) planRequalification(tx state.StoreTx, compID string, comp *stat
 
 	// A tie the corrected standings leave on a place the injectors would break
 	// is not a finisher: that place returns to its label until the tie-break
-	// is fought, and advanceMixedPools seats the winner then.
-	//
-	// Not for engi: it has no supplementary bouts (the injectors heal any
-	// that appear), and every engi standing carries Points 0, so the tie
-	// check would read every place as tied and send each slot back to its
-	// label. Engi places are decided by the standings' own order.
-	tied := map[string]bool{}
-	if !comp.Engi {
-		tied, err = e.tiedQualifyingLabels(tx, compID, comp, poolName, poolTieBreakCut(comp, pools, bracket, poolName), standings[poolName], ranksNeeded)
-		if err != nil {
-			return nil, err
-		}
+	// is fought, and advanceMixedPools seats the winner then. Engi follows
+	// the same rule: a level engi place gets its tie-break bout too.
+	tied, err := e.tiedQualifyingLabels(tx, compID, comp, poolName, poolTieBreakCut(comp, pools, bracket, poolName), standings[poolName], ranksNeeded)
+	if err != nil {
+		return nil, err
 	}
 	for label := range tied {
 		resolver[label] = resolvedFinisher{Name: label}

@@ -293,7 +293,7 @@ func TestTieNeedsBreak(t *testing.T) {
 		assert.True(t, tieNeedsBreak(comp, []int{0, 1}, grp(2), 2))
 	})
 	t.Run("league leaves a below-band 5th/6th tie unbroken", func(t *testing.T) {
-		comp := &state.Competition{Format: state.CompFormatLeague} // effectiveTopN=3
+		comp := &state.Competition{Format: state.CompFormatLeague} // the band is 3
 		assert.False(t, tieNeedsBreak(comp, []int{4, 5}, grp(2), 2))
 	})
 	t.Run("mixed pool uses the advancement cut, not the band", func(t *testing.T) {

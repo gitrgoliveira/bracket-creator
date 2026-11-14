@@ -3,7 +3,6 @@ package engine
 import (
 	"errors"
 	"fmt"
-	"slices"
 	"strings"
 	"sync"
 
@@ -59,8 +58,10 @@ const (
 // chusen had to rank: the league's own completion (maybeAutoCompletePoolsRunning)
 // and POST /complete both ask it. For a league it also requires every tie in
 // the band (tieNeedsBreak) to hold its tie-breaker and no tie-breaker, of
-// either kind, to have left one level without the lots (dhCycleExists), unless the operator
-// accepted shared ranks (LeagueTiebreakFinalized), which settles both. A corrupt
+// either kind, to have left one level without the lots (dhCycleExists), nor
+// been drawn because both its sides are barred without the lots
+// (barredDrawOwesLots): only 3rd can be shared, so a tie at 1st or 2nd (and at
+// 3rd with joint 3rd places off) is never left to share its place. A corrupt
 // overrides.json comes back wrapping state.ErrCorruptOverrides.
 func (e *Engine) PoolsSettledNow(tx state.StoreTx, compID string) (PoolsVerdict, error) {
 	comp, err := tx.LoadCompetition(compID)
@@ -80,11 +81,11 @@ func (e *Engine) PoolsSettledNow(tx state.StoreTx, compID string) (PoolsVerdict,
 	if err != nil {
 		return PoolsMatchOpen, err
 	}
+	lots.league = comp != nil && comp.Format == state.CompFormatLeague
 	if !poolMatchesSettled(matches, lots) {
 		return PoolsMatchOpen, nil
 	}
-	if comp == nil || comp.Format != state.CompFormatLeague || comp.Engi {
-		// Engi ranks by wins then flags and holds no supplementary bout.
+	if comp == nil || comp.Format != state.CompFormatLeague {
 		return PoolsSettled, nil
 	}
 	pools, err := tx.LoadPools(compID)
@@ -99,14 +100,6 @@ func (e *Engine) PoolsSettledNow(tx state.StoreTx, compID string) (PoolsVerdict,
 	if err != nil {
 		return PoolsMatchOpen, err
 	}
-	// Accepted shared ranks cover every tie the table holds: the flag is set
-	// only on a finished table (finalize refuses league_not_settled) and is
-	// cleared by any correction that leaves a tie it did not cover
-	// (reconcileLeagueAfterWrite), so a group a fought round left in a circle
-	// shares its place too and owes no lots.
-	if comp.LeagueTiebreakFinalized {
-		return PoolsSettled, nil
-	}
 	if tieBreakOwed(comp, pools, bracket, st, matches) {
 		return PoolsTiebreakOwed, nil
 	}
@@ -114,10 +107,28 @@ func (e *Engine) PoolsSettledNow(tx state.StoreTx, compID string) (PoolsVerdict,
 	// daihyosen round, or an individual's ippon-shobu round, that left a group
 	// in the band level (a circle) holds the league open until the operator
 	// runs another round (an individual's) or records the lots.
-	if dhCycleExists(st, chusenMatches(comp, matches), newBreakBand(comp, pools, bracket)) {
+	band := newBreakBand(comp, pools, bracket)
+	if dhCycleExists(st, chusenMatches(comp, matches), band) || barredDrawLotsOwed(st, matches, band, lots.statuses, comp.IsTeam()) {
 		return PoolsChusenOwed, nil
 	}
 	return PoolsSettled, nil
+}
+
+// barredDrawLotsOwed reports whether a league tie in the band whose tie-breaker
+// was drawn because both its sides are barred still waits for its lots
+// (barredDrawOwesLots, with no rank in force over the group, chusenRecorded).
+// statuses are loaded with the lots (loadPoolLots) whenever a drawn
+// supplementary bout exists, the only case it can hold.
+func barredDrawLotsOwed(standings map[string][]state.PlayerStanding, matches []state.MatchResult, band breakBand, statuses map[string]domain.CompetitorStatus, isTeam bool) bool {
+	for poolName, poolStandings := range standings {
+		for _, positions := range detectPoolTies(poolStandings) {
+			group := standingsAt(poolStandings, positions)
+			if band(poolName, positions, group) && !chusenRecorded(group) && barredDrawOwesLots(group, matches, statuses, isTeam) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // tieBreakOwed reports whether a pool still owes a supplementary bout for a tie
@@ -151,8 +162,10 @@ func tieBreakOwed(comp *state.Competition, pools []helper.Pool, bracket *state.B
 // (daihyosenRuledByChusen, which reads the pool's standings to find the
 // group), or a correction has since split its two sides (drawnSupplementaryMoot):
 // either way that place is decided, and the bout, which settled nothing, may
-// stay drawn. So may an ippon-shobu bout whose two sides are both barred
-// (drawnTiebreakOfBarredSides): nobody can fight it. It is the one owner of that rule, so the league's completion
+// stay drawn. So may a tie-break bout whose two sides are both barred, an
+// ippon-shobu bout anywhere and a league's representative bout
+// (poolLots.barredDrawPlayed): nobody can fight it, and in a league the place
+// then goes to the lots (barredDrawOwesLots). It is the one owner of that rule, so the league's completion
 // (poolMatchesSettled), a mixed pool's (poolCompletion), the auto-complete scan
 // (MaybeAutoCompletePools) and the engi self-heal (isBlockingEngiTBRow) cannot
 // drift inside Go; the reopen gate (drawnSupplementaryBout) stays on the raw
@@ -161,7 +174,7 @@ func tieBreakOwed(comp *state.Competition, pools []helper.Pool, bracket *state.B
 // pinned to the one table testdata/drawn_supplementary_cases.json, so a change
 // here changes the table.
 func poolMatchSettled(m *state.MatchResult, lots poolLots) bool {
-	return m.Status == state.MatchStatusCompleted && (!drawnSupplementaryBout(m) || daihyosenRuledByChusen(m, lots.standings) || drawnSupplementaryMoot(m, lots.standings) || drawnTiebreakOfBarredSides(m, lots.statuses))
+	return m.Status == state.MatchStatusCompleted && (!drawnSupplementaryBout(m) || daihyosenRuledByChusen(m, lots.standings) || drawnSupplementaryMoot(m, lots.standings) || lots.barredDrawPlayed(m))
 }
 
 // drawnSupplementaryBout reports a pool tie-break ("-TB-") or representative
@@ -229,11 +242,11 @@ const (
 	AutoCompletePoolsResolved AutoCompleteOutcome = 4
 	// AutoCompleteAwaitingLeagueTiebreak means all regular team-league matches are
 	// done and there is at least one consequential tie (a group of tied teams whose
-	// position range intersects [1..LeagueTiebreakTopN], adjusted for the two-joint-
-	// 3rd-places convention). The competition stays in CompStatusPools; the engine
-	// did NOT auto-inject any DH matches. The operator must use the league-tiebreak
-	// endpoints to either generate tie-breaker matches or accept shared ranks. Until
-	// the operator acts, the competition cannot transition to CompStatusComplete.
+	// position range intersects [1..3], adjusted for the two-joint-3rd-places
+	// convention). The competition stays in CompStatusPools; the engine did NOT
+	// auto-inject any DH matches. The operator runs the tie-breaker through the
+	// league-tiebreak endpoint; until it has a winner (or the lots settle it),
+	// the competition cannot transition to CompStatusComplete.
 	// Callers should broadcast both EventMatchUpdated (reload standings) and
 	// EventScheduleUpdated (so the UI shows the "awaiting tie-breaker" banner).
 	AutoCompleteAwaitingLeagueTiebreak AutoCompleteOutcome = 5
@@ -264,7 +277,7 @@ const (
 //     and the competition stays in CompStatusPools; NO DH matches are auto-injected.
 //     The operator decides whether to run a tie-breaker (Phase 3b). If all ties are
 //     non-consequential (below the tie-break band or covered by the two-thirds rule),
-//     the league completes with shared ranks.
+//     the league completes with those ties sharing their place.
 //   - Mixed format → delegates to advanceMixedPools, which seeds each COMPLETED
 //     pool's finishers into the in-place knockout bracket incrementally (no
 //     separate knockout competition, no manual "start knockout" step), and flips
@@ -516,23 +529,28 @@ func (e *Engine) maybeAutoCompletePoolsRunning(compID string, comp *state.Compet
 		return AutoCompleteNoChange, err
 	}
 
-	// Engi pre-heal: a pre-fix engine may have injected spurious TB rows into
-	// an engi competition (engi standings all have Points=0, so detectPoolTies
-	// saw every pool as tied). Any TB row that is not completed with a
-	// recorded winner would set hasIncompleteTB below, and the early return at
-	// that guard would leave the competition stuck forever, never reaching the
-	// injection block whose engi guard performs the heal. Heal first, then
-	// partition the healed slice. The ContainsFunc pre-scan is a cheap
-	// in-memory pass; it exists so clean engi comps skip the injector call
-	// and its two extra disk reads plus the reload below (the injector's
-	// writes and schedule regeneration only run when rows are removed).
-	if comp != nil && comp.Engi && slices.ContainsFunc(matches, isBlockingEngiTBRow) {
-		if _, healErr := e.InjectTiebreakerMatches(compID); healErr != nil {
+	// Engi pre-heal: an engine that ranked engi with no tie measure saw every
+	// pool as tied and injected a TB row for every pair (orphanedEngiTBRow).
+	// Such a row would set hasIncompleteTB below, and the early return at that
+	// guard would leave the competition stuck forever, never reaching the
+	// injection block that performs the heal. Heal first, then partition the
+	// healed slice. Only a row the tie rule does not hold is removed: a
+	// tie-break bout at a place that counts is played like any other format's
+	// (engiHealOwed), and while one waits the guard below holds the pools open
+	// with no extra transaction.
+	if comp != nil && comp.Engi {
+		owed, healErr := e.engiHealOwed(compID, comp, matches)
+		if healErr != nil {
 			return AutoCompleteNoChange, healErr
 		}
-		matches, err = e.store.LoadPoolMatches(compID)
-		if err != nil {
-			return AutoCompleteNoChange, err
+		if owed {
+			if _, healErr := e.InjectTiebreakerMatches(compID); healErr != nil {
+				return AutoCompleteNoChange, healErr
+			}
+			matches, err = e.store.LoadPoolMatches(compID)
+			if err != nil {
+				return AutoCompleteNoChange, err
+			}
 		}
 	}
 
@@ -553,6 +571,7 @@ func (e *Engine) maybeAutoCompletePoolsRunning(compID string, comp *state.Compet
 	if err != nil {
 		return AutoCompleteNoChange, err
 	}
+	lots.league = comp.Format == state.CompFormatLeague
 
 	// Partition matches into regular vs tiebreaker vs pool-daihyosen.
 	allComplete := true
@@ -600,9 +619,8 @@ func (e *Engine) maybeAutoCompletePoolsRunning(compID string, comp *state.Compet
 	// tie-breaker (PoolsSettledNow answers PoolsTiebreakOwed, and the outcome
 	// is AwaitingLeagueTiebreak so the UI can surface the decision), or while a
 	// tie-breaker left one level that only the lots can decide (PoolsChusenOwed).
-	// Ties outside the band (below it, or covered by the LeagueTwoThirdPlaces
-	// exemption) are accepted as shared ranks, and so is every tie once the
-	// operator has finalized shared ranks.
+	// Ties outside the band (below 3rd, or at 3rd under the two joint 3rd
+	// places exemption) share their place.
 	//
 	// Other competitions auto-inject: DH matches for a team one, TB matches
 	// for an individual one. The injectors are idempotent (pendingTieBreaks

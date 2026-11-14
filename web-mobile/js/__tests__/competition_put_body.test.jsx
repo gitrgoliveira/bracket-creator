@@ -36,7 +36,6 @@ describe('settingsPutBody', () => {
     naginata: false,
     engi: false,
     checkInEnabled: false,
-    leagueTiebreakTopN: 0,
     twoThirdPlaces: true,
     teamMatchType: '',
     extraQualifiers: '',
@@ -90,7 +89,8 @@ describe('settingsPutBody', () => {
     expect(res.body.naginata).toBe(base.naginata);
     expect(res.body.engi).toBe(base.engi);
     expect(res.body.checkInEnabled).toBe(base.checkInEnabled);
-    expect(res.body.leagueTiebreakTopN).toBe(base.leagueTiebreakTopN);
+    // The removed Break ties for top setting is no longer sent.
+    expect('leagueTiebreakTopN' in res.body).toBe(false);
     expect(res.body.twoThirdPlaces).toBe(base.twoThirdPlaces);
     expect(res.body.expectedParticipants).toBe(0);
   });
@@ -265,7 +265,6 @@ describe('mergeSavedCompetition', () => {
     naginata: false,
     engi: false,
     checkInEnabled: false,
-    leagueTiebreakTopN: 0,
     twoThirdPlaces: true,
     teamMatchType: '',
     extraQualifiers: '',

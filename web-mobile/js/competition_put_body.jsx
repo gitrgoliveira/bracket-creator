@@ -21,7 +21,6 @@ import {
   LABEL_POOL_FORMAT,
   LABEL_SWISS_ROUNDS,
   LABEL_ROUND_ROBIN,
-  LABEL_LEAGUE_TIEBREAK,
   LABEL_KNOCKOUT_DURATION,
   LABEL_POOL_DURATION,
   LABEL_TWO_THIRD_PLACES,
@@ -119,7 +118,6 @@ const SETTINGS_FIELD_LABELS = {
   naginata: LABEL_NAGINATA,
   checkInEnabled: LABEL_CHECK_IN,
   twoThirdPlaces: LABEL_TWO_THIRD_PLACES,
-  leagueTiebreakTopN: LABEL_LEAGUE_TIEBREAK,
   extraQualifiers: LABEL_EXTRA_QUALIFIERS,
   numberPrefix: LABEL_NUMBER_PREFIX,
   poolMatchDurationSeconds: LABEL_POOL_DURATION,
@@ -409,10 +407,6 @@ export function settingsPutBody(base, edits, configVersion) {
     // shaped is where that now runs.
     engi: !!shaped.engi,
     checkInEnabled: !!effective.checkInEnabled,
-    // Phase 3b (mp-8rc9): league tie-breaker config. Only meaningful for
-    // team-league competitions; safe to include for all formats because
-    // the backend's PUT allowlist ignores unknown fields.
-    leagueTiebreakTopN: safeInt(effective.leagueTiebreakTopN, base.leagueTiebreakTopN || 0),
     // twoThirdPlaces (bc-3rdp): round-tripped unconditionally, like
     // naginata above (and teamMatchType below), so an untouched control
     // never clobbers the stored rule -- `effective.twoThirdPlaces` was already

@@ -199,19 +199,19 @@ describe('LeagueStandingsViewer (mp-dunx)', () => {
     expect(global.window.API.leagueStandings).toHaveBeenCalledTimes(1);
   });
 
-  // N2: Accept shared ranks and its Undo change the competition's status, not
-  // a match, yet change the ranks the table reads, so the table is fetched
-  // again on a status change with the same matches.
-  it('refetches when the competition status changes with the matches unchanged (Accept, Undo)', () => {
+  // N2: a league that finishes or goes back to match play changes the
+  // competition's status, not a match, yet changes the ranks the table reads,
+  // so the table is fetched again on a status change with the same matches.
+  it('refetches when the competition status changes with the matches unchanged (finish, back to play)', () => {
     const played = [{ id: 'Pool A-0', status: 'completed', winner: 'P3', ipponsA: ['M'], ipponsB: [] }];
     runtime.mount(LeagueStandingsViewer, { competition: comp, poolMatches: played, tweaks });
     expect(global.window.API.leagueStandings).toHaveBeenCalledTimes(1);
 
-    // Accept: the league finishes, no match moves.
+    // The league finishes, no match moves.
     runtime.updateProps({ competition: { ...comp, status: 'completed' }, poolMatches: played, tweaks });
     expect(global.window.API.leagueStandings).toHaveBeenCalledTimes(2);
 
-    // Undo: back to match play, still no match moves.
+    // Back to match play, still no match moves.
     runtime.updateProps({ competition: { ...comp, status: 'pools' }, poolMatches: played, tweaks });
     expect(global.window.API.leagueStandings).toHaveBeenCalledTimes(3);
 
@@ -220,9 +220,8 @@ describe('LeagueStandingsViewer (mp-dunx)', () => {
     expect(global.window.API.leagueStandings).toHaveBeenCalledTimes(3);
   });
 
-  // Lots (and Accept shared ranks) write a rank, not a match: a finished league
-  // keeps its status and matches, and only tournament_updated says the order
-  // moved.
+  // Lots write a rank, not a match: a finished league keeps its status and
+  // matches, and only tournament_updated says the order moved.
   it('refetches on tournament_updated with status and matches unchanged (lots on a finished league)', () => {
     let push = null;
     const unsub = vi.fn();
@@ -242,16 +241,17 @@ describe('LeagueStandingsViewer (mp-dunx)', () => {
     expect(global.window.API.leagueStandings).toHaveBeenCalledTimes(2);
   });
 
-  // N2a/N2b: the table prints the place the server gives, so an accepted
-  // shared 1st reads 1, 1, 3 and a tie below the band 4, 4.
+  // N2a/N2b: the table prints the place the server gives, so a shared 3rd
+  // reads 3, 3 and a tie below the band 4, 4. A tie at 1st or 2nd is never
+  // shared: a tie-breaker or the lots orders it.
   it('shows a shared place as the server ranks it', async () => {
-    const shared = mockStandings.map((s, i) => ({ ...s, rank: [1, 1, 3, 3][i] }));
+    const shared = mockStandings.map((s, i) => ({ ...s, rank: [1, 2, 3, 3][i] }));
     global.window.API.leagueStandings = vi.fn().mockResolvedValue(shared);
     runtime.mount(LeagueStandingsViewer, { competition: comp, poolMatches: [], tweaks });
     await Promise.resolve();
     const finalTree = runtime.updateProps({ competition: comp, poolMatches: [], tweaks });
     const cells = findAll(finalTree, n => n.type === 'td' && typeof n.props?.className === 'string' && n.props.className.includes('pool-standings__draw-pos'));
-    expect(cells.map(c => collectText(c, expandNamed('NumberedName')))).toEqual(['1', '1', '3', '3']);
+    expect(cells.map(c => collectText(c, expandNamed('NumberedName')))).toEqual(['1', '2', '3', '3']);
   });
 });
 

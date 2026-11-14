@@ -49,6 +49,16 @@ func individualStandingPoints(s state.PlayerStanding) int {
 	return s.Wins*100_000_000 - s.Losses*1_000_000 + s.Draws*10_000 + s.IpponsGiven*100 - s.IpponsTaken
 }
 
+// engiStandingPoints packs the engi chain (naginata.md): wins, then the
+// own-side flags accrued over every bout. An engi bout cannot end level
+// (engiValidTotal), so there is no loss or draw criterion to add: two pairs are
+// level exactly when their wins and their flags are equal, and a level place
+// that counts goes to a tie-break bout like any other format's. A pair raises
+// at most five flags a bout, so the flag total never reaches the wins weight.
+func engiStandingPoints(s state.PlayerStanding) int {
+	return s.Wins*1_000_000 + s.Flags
+}
+
 // detectPoolTies walks a sorted (descending Points) standings slice and returns
 // the POSITIONS of every group of 2+ competitors that share the same Points
 // value. Each inner slice holds the 0-based positions (indices into the passed
@@ -469,7 +479,7 @@ func PoolQualifierCuts(comp *state.Competition, pools []helper.Pool, bracket *st
 // chusen offered and the competition stranded.
 //
 //   - League: a final placement must be EARNED, exactly like a bracket/knockout,
-//     so every tie inside the tie-break band [1..effectiveTopN] is broken. The
+//     so every tie inside the tie-break band [1..3] (leagueTiebreakBand) is broken. The
 //     one sanctioned exception is the kendo joint-3rd convention: when
 //     LeagueTwoThirdPlaces is enabled and the group sits entirely at 3rd or
 //     below, the tie is allowed to stand as a shared bronze (isConsequentialTie
@@ -687,15 +697,75 @@ func nextSupplementaryBoutNumber(rows []state.MatchResult, floor int) int {
 }
 
 // isBlockingEngiTBRow reports whether m is a tiebreaker row that would block
-// pool completion of an engi competition. A TB row blocks unless it is
-// completed with a recorded winner (the completion guards treat
-// Status != completed OR Winner == "" as unresolved). Engi never holds TB
-// bouts, so every blocking TB row is a pre-fix leftover with no ranking
-// information (engi standings and applyTiebreakSort both ignore winnerless
-// TB rows) and is safe to remove. Completed TB rows with a Winner are
-// preserved: recorded results are never deleted.
+// pool completion of an engi competition: a TB row not completed with a
+// recorded winner (the completion guards treat Status != completed OR
+// Winner == "" as unresolved). Completed TB rows with a Winner are never
+// removed: recorded results are never deleted.
 func isBlockingEngiTBRow(m state.MatchResult) bool {
 	return IsTiebreakerMatchID(m.ID) && !poolMatchSettled(&m, poolLots{})
+}
+
+// orphanedEngiTBRow reports whether m is a blocking engi TB row
+// (isBlockingEngiTBRow) the tie rule does not hold: its two sides are not both
+// members of one tied group of its pool that band breaks. Such a row is a
+// leftover of an engine that ranked engi with no tie measure, so every pool
+// looked tied and got a bout for every pair; nothing can settle it and it
+// blocks completion forever, so the injector removes it (self-heal). A row the
+// rule does hold (a tie at a place that counts, or another round among the
+// members a round left level) is a tie-break bout like any other format's and
+// is kept. standings are the competition's (computeStandingsFrom), band its
+// tieNeedsBreak.
+func orphanedEngiTBRow(m state.MatchResult, standings map[string][]state.PlayerStanding, band breakBand) bool {
+	if !isBlockingEngiTBRow(m) {
+		return false
+	}
+	poolName, ok := poolNameFromMatchID(m.ID)
+	if !ok {
+		return true
+	}
+	poolStandings := standings[poolName]
+	for _, positions := range detectPoolTies(poolStandings) {
+		group := standingsAt(poolStandings, positions)
+		if !band(poolName, positions, group) {
+			continue
+		}
+		ids := groupMemberIDs(group)
+		if m.SideAID != m.SideBID && ids[m.SideAID] && ids[m.SideBID] {
+			return false
+		}
+	}
+	return true
+}
+
+// engiHealOwed reports whether matches (an engi competition's pool rows, read
+// outside the lock) hold a TB row the injector's self-heal would remove
+// (orphanedEngiTBRow), so the auto-complete scan calls the injector for it.
+// It is a cheap in-memory pass when no TB row blocks, the common case; the
+// standings, pools and draw are read only when one does. The heal itself is
+// decided again inside the injector's transaction. comp is the caller's
+// already-loaded competition.
+func (e *Engine) engiHealOwed(compID string, comp *state.Competition, matches []state.MatchResult) (bool, error) {
+	if comp == nil || !slices.ContainsFunc(matches, isBlockingEngiTBRow) {
+		return false, nil
+	}
+	standings, err := e.CalculatePoolStandings(compID)
+	if err != nil {
+		return false, err
+	}
+	pools, err := e.store.LoadPools(compID)
+	if err != nil {
+		return false, err
+	}
+	var bracket *state.Bracket
+	if comp.Format != state.CompFormatLeague {
+		if bracket, err = e.store.LoadBracket(compID); err != nil {
+			return false, err
+		}
+	}
+	band := newBreakBand(comp, pools, bracket)
+	return slices.ContainsFunc(matches, func(m state.MatchResult) bool {
+		return orphanedEngiTBRow(m, standings, band)
+	}), nil
 }
 
 // InjectTiebreakerMatches inspects all pool standings for compID after
@@ -730,35 +800,6 @@ func (e *Engine) InjectTiebreakerMatches(compID string) ([]state.MatchResult, er
 			return notFoundErrorf("competition %s not found", compID)
 		}
 
-		// Engi (kata competition) ranks by wins then accumulated flags (naginata.md);
-		// Points is left at zero for all engi standings (no points metric), so
-		// detectPoolTies would see every pool as fully tied and inject spurious
-		// ippon-shobu bouts. Supplementary bouts are never held for engi.
-		// Self-heal: remove any TB row a pre-fix engine left behind that would
-		// block pool completion (Status != completed OR Winner == "", including a
-		// bogus bout finalized as hikiwake via the decision endpoint); left in
-		// place such rows block completion forever. Only completed TB rows with a
-		// recorded winner are preserved: recorded results are never deleted.
-		if comp.Engi {
-			allMatches, loadErr := tx.LoadPoolMatches(compID)
-			if loadErr != nil {
-				return loadErr
-			}
-			e.noteMatchRead(compID)
-			var kept []state.MatchResult
-			for _, m := range allMatches {
-				if isBlockingEngiTBRow(m) {
-					continue
-				}
-				kept = append(kept, m)
-			}
-			if len(kept) < len(allMatches) {
-				healed = true
-				return tx.SavePoolMatches(compID, kept)
-			}
-			return nil
-		}
-
 		// Supplementary ippon-shobu bouts are held only where the tie affects
 		// advancement/seeding; pendingTieBreaks owns that band.
 		standings, err := e.computeStandingsFrom(tx, compID)
@@ -778,6 +819,24 @@ func (e *Engine) InjectTiebreakerMatches(compID string) ([]state.MatchResult, er
 		bracket, err := tx.LoadBracket(compID)
 		if err != nil {
 			return err
+		}
+
+		// Engi self-heal (orphanedEngiTBRow): a TB row an earlier engine left
+		// that the tie rule does not hold is removed, in this same
+		// read-modify-write, before the injection below reads the pool's rows.
+		// The standings are unchanged by it: a blocking row decides no order.
+		if comp.Engi {
+			band := newBreakBand(comp, pools, bracket)
+			kept := make([]state.MatchResult, 0, len(allMatches))
+			for _, m := range allMatches {
+				if !orphanedEngiTBRow(m, standings, band) {
+					kept = append(kept, m)
+				}
+			}
+			if len(kept) < len(allMatches) {
+				healed = true
+				allMatches = kept
+			}
 		}
 
 		// Scan existing TB matches per pool for idempotency and ID sequencing.
@@ -825,6 +884,9 @@ func (e *Engine) InjectTiebreakerMatches(compID string) ([]state.MatchResult, er
 		}
 
 		if len(injected) == 0 {
+			if healed {
+				return tx.SavePoolMatches(compID, allMatches)
+			}
 			return nil
 		}
 		if tournErr != nil {
@@ -859,8 +921,8 @@ func (e *Engine) InjectTiebreakerMatches(compID string) ([]state.MatchResult, er
 // round. Returns the bouts added.
 //
 // Refused with a ValidationError for a team competition (a circle of
-// representative bouts is decided by the lots), an engi one (no supplementary
-// bouts), a competition whose pools are no longer being played (status pools,
+// representative bouts is decided by the lots), a competition whose pools are
+// no longer being played (status pools,
 // or knockout for a pools + knockout competition), a selection that is not
 // exactly such a run, or a group the lots already ordered. NotFoundError for a
 // competition or a pool that does not exist.
@@ -883,7 +945,7 @@ func (e *Engine) RunTiebreakerRound(compID, poolName string, memberIDs []string)
 		if comp == nil {
 			return notFoundErrorf("competition %s not found", compID)
 		}
-		if comp.IsTeam() || comp.Engi {
+		if comp.IsTeam() {
 			return validationErrorf("another tie-breaker round is held only in an individual competition")
 		}
 		if comp.Status != state.CompStatusPools && (comp.Format != state.CompFormatMixed || comp.Status != state.CompStatusKnockout) {

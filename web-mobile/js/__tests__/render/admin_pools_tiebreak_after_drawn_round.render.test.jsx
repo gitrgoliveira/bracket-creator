@@ -50,10 +50,9 @@ function dh(status) {
 async function mount(poolMatches, tied = group) {
   const api = {
     chusenCandidates: vi.fn().mockResolvedValue({ candidates: [], recorded: [] }),
-    leagueTiebreakCandidates: vi.fn().mockResolvedValue({ candidates: [tied], finalized: false }),
+    leagueTiebreakCandidates: vi.fn().mockResolvedValue({ candidates: [tied] }),
     leagueTiebreakGenerate: vi.fn().mockResolvedValue({ matches: [] }),
     leagueTiebreakRemove: vi.fn().mockResolvedValue({ deleted: 0 }),
-    leagueTiebreakFinalize: vi.fn().mockResolvedValue({ finalized: true }),
   };
   window.API = api;
   window.PoolsViewer = () => null;

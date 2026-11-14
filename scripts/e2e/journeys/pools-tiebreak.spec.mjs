@@ -39,6 +39,12 @@
 // mark; no tie-break bout for the pool settled on points lost; after the
 // tie-break bout, the winner ranked above the loser and seated in the knockout
 // (the loser out), on the admin pages and the public viewer.
+//
+// The first competition's evidence is named by the flow, as the league
+// journeys name theirs: pool-tiebreak-console-up-next, -running,
+// -before-finish and -after on the shiaijo route, pool-tiebreak-desk-table
+// (and -table-after), -desk-bracket-before and -after on the desk, and
+// pool-tiebreak-public-pools and -public-bracket on the phone.
 import { test, expect } from '../fixtures/test.mjs';
 import { journeyShots } from '../fixtures/shots.mjs';
 import { auditLog } from '../fixtures/audit.mjs';
@@ -232,7 +238,7 @@ test.describe('pools: minimum pool size and a tie-break bout', () => {
   test('the level pair: a tie-break bout is added, and the table shows them level until it is fought', async ({ page, browser, baseURL }) => {
     await login(page);
     const pair = await tieBreakPairing(page);
-    record({ journey: JOURNEY, step: 'tie-break', action: 'on the court console', pair, screenshot: await shot(page, 'tie-break-on-console') });
+    record({ journey: JOURNEY, step: 'tie-break', action: 'on the court console', pair, screenshot: await shot(page, 'pool-tiebreak-console-up-next', { fullPage: true }) });
     const card = (await inlineRunning(page)) ? page.locator('.editor-modal__eyebrow').first() : upNextCard(page);
     expect((await card.innerText()), 'a tie-break bout carries no "Match n of m"').not.toMatch(POOL_MATCH_LABEL);
 
@@ -244,7 +250,7 @@ test.describe('pools: minimum pool size and a tie-break bout', () => {
     await expect(toScore.first()).toContainText(tb.b);
     await expect(toScore.first()).toContainText(tb.c);
     expect(await toScore.first().innerText()).not.toMatch(POOL_MATCH_LABEL);
-    await shot(page, 'scores-tab-tie-break');
+    await shot(page, 'pool-tiebreak-desk-scores');
 
     // The pool table: B and C level on every figure, marked tied, sharing ONE
     // place (=2nd) with no advancing mark on either, since the tie-break bout
@@ -254,7 +260,7 @@ test.describe('pools: minimum pool size and a tie-break bout', () => {
     await openAdminPools(page, compId);
     await expectTable(page, 'admin Pools tab', [tb.b, tb.c], level);
     const rows = { b: await playerRowFigures(page, tb.b), c: await playerRowFigures(page, tb.c) };
-    record({ journey: JOURNEY, step: 'tie-break', action: 'table before the bout', columns: INDIVIDUAL_FIGURES, rows, screenshot: await shot(page, 'admin-pools-level', { fullPage: true }) });
+    record({ journey: JOURNEY, step: 'tie-break', action: 'table before the bout', columns: INDIVIDUAL_FIGURES, rows, screenshot: await shot(page, 'pool-tiebreak-desk-table', { fullPage: true }) });
     await expectTable(page, 'admin Pools tab', [tb.a], (n) => ({ ...tally[n], rank: '1st', advancing: true, tied: false }));
     const spectator = await browser.newContext({ ...PUBLIC_DEVICE, baseURL });
     try {
@@ -284,7 +290,7 @@ test.describe('pools: minimum pool size and a tie-break bout', () => {
       return names.includes(ranked[0]) && names.includes(ranked[1]);
     };
     const seated = Object.values(await bracketSlots(page, settled)).map((s) => s.name);
-    record({ journey: JOURNEY, step: 'tie-break', action: 'bracket before the bout', seated, screenshot: await shot(page, 'admin-bracket-before') });
+    record({ journey: JOURNEY, step: 'tie-break', action: 'bracket before the bout', seated, screenshot: await shot(page, 'pool-tiebreak-desk-bracket-before') });
     expect(seated, 'the pool of 4 is settled: its two qualifiers are seated').toEqual(expect.arrayContaining([ranked[0], ranked[1]]));
     for (const name of [tb.b, tb.c]) {
       expect(seated, `${name} is not seated while the tie is open`).not.toContain(name);
@@ -297,6 +303,8 @@ test.describe('pools: minimum pool size and a tie-break bout', () => {
     // The bout starts from its Up next card unless a Finish + Start Next already did.
     const running = await ensureRunning(page);
     expect(running, 'the tie-break bout runs on the court').toEqual(pair);
+    record({ journey: JOURNEY, step: 'tie-break', action: 'running on the court console', pair,
+      screenshot: await shot(page, 'pool-tiebreak-console-running', { fullPage: true }) });
     // The last of the pair in the draw (role C) wins, one men: the table
     // read them level, so the bout, not the draw order, decides the place.
     const side = pair.shiro === tb.c ? 'shiro' : 'aka';
@@ -308,15 +316,15 @@ test.describe('pools: minimum pool size and a tie-break bout', () => {
     const res = await writeLanded(wrote, 'the tie-break bout\'s first mark');
     const id = writtenMatchId(res);
     expect(id, 'the bout is the pool\'s supplementary bout').toMatch(/^Pool [A-Z]-TB-\d+$/);
-    await shot(page, 'tie-break-scored');
+    await shot(page, 'pool-tiebreak-console-before-finish', { fullPage: true });
     await finishMatch(page);
     await expect(completedRowFor(page, pair)).toBeVisible();
     record({ journey: JOURNEY, step: 'tie-break', action: 'Finish', id, winner: tbWinner, loser: tbLoser,
-      screenshot: await shot(page, 'tie-break-finished') });
+      screenshot: await shot(page, 'pool-tiebreak-console-after', { fullPage: true }) });
 
     await openAdminPools(page, compId);
     await expectOrdered(page, 'admin Pools tab');
-    await shot(page, 'admin-pools-after', { fullPage: true });
+    await shot(page, 'pool-tiebreak-desk-table-after', { fullPage: true });
   });
 
   // After the tie-break bout: the pool of 3 is A, the winner, the loser; the
@@ -344,18 +352,18 @@ test.describe('pools: minimum pool size and a tie-break bout', () => {
       .map((s) => s.name).filter((n) => NAMES.includes(n)).sort();
     await openCompetitionTab(page, compId, 'bracket');
     expect(await seatedIn(page), 'the admin bracket seats the four qualifiers').toEqual(qualifiers);
-    await shot(page, 'admin-bracket-after');
+    await shot(page, 'pool-tiebreak-desk-bracket-after');
 
     const spectator = await browser.newContext({ ...PUBLIC_DEVICE, baseURL });
     try {
       const phone = await spectator.newPage();
       await openViewerPools(phone, compId);
       await expectOrdered(phone, 'public viewer Pools tab');
-      await shot(phone, 'viewer-pools-after', { fullPage: true });
+      await shot(phone, 'pool-tiebreak-public-pools', { fullPage: true });
       await openViewer(phone, compId);
       await phone.getByRole('button', { name: 'Bracket' }).tap();
       expect(await seatedIn(phone), 'the public bracket seats the same four').toEqual(qualifiers);
-      await shot(phone, 'viewer-bracket-after');
+      await shot(phone, 'pool-tiebreak-public-bracket');
     } finally {
       await spectator.close();
     }

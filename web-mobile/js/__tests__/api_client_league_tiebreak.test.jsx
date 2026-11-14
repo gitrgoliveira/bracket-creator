@@ -22,6 +22,15 @@ function mockFetch(status, body) {
   );
 }
 
+// A tie at 1st or 2nd is settled by a tie-breaker with a winner (or the lots),
+// never accepted as shared, so the accept and undo doors are gone.
+describe('the removed accept and undo doors', () => {
+  it('has no leagueTiebreakFinalize or leagueTiebreakUndo', () => {
+    expect(API.leagueTiebreakFinalize).toBeUndefined();
+    expect(API.leagueTiebreakUndo).toBeUndefined();
+  });
+});
+
 describe('API.leagueTiebreakGenerate', () => {
   let originalFetch;
   beforeEach(() => { originalFetch = global.fetch; });

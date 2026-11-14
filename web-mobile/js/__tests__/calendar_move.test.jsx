@@ -30,7 +30,7 @@ const BASE = {
   kind: 'individual', poolSize: 4, poolWinners: 2, poolSizeMode: 'min', courts: ['A', 'B'],
   roundRobin: false, withZekkenName: false, teamSize: 0, numberPrefix: 'M', poolFormat: '',
   poolMatchDurationSeconds: 180, knockoutMatchDurationSeconds: 240, swissRounds: 0, naginata: false,
-  engi: false, checkInEnabled: false, leagueTiebreakTopN: 0, twoThirdPlaces: true, teamMatchType: '',
+  engi: false, checkInEnabled: false, twoThirdPlaces: true, teamMatchType: '',
   extraQualifiers: '', status: 'setup', configVersion: 'v1',
 };
 

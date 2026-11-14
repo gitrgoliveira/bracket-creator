@@ -6968,7 +6968,7 @@ const API = {
     // Phase 3b (mp-8rc9): league tie-breaker operator API.
     //
     // leagueTiebreakCandidates: GET /competitions/:id/league-tiebreak/candidates
-    // Returns { candidates: [{teamNames, teams, minPosition, maxPosition}], finalized: bool }
+    // Returns { candidates: [{teamNames, teams, minPosition, maxPosition}] }
     // where teams is [{id, name, dojo}] (id "" for a legacy competitor): groupTeamIds
     // in admin_pools.jsx derives the teamIds a namesake group needs from it.
     async leagueTiebreakCandidates(compID) {
@@ -7052,51 +7052,6 @@ const API = {
             const err = await res.json().catch(() => ({}));
             const e = new Error(err.error || `Failed to remove league tie-breaker matches (${res.status})`);
             if (err.error) e.code = err.error;
-            throw e;
-        }
-        return res.json();
-    },
-
-    // leagueTiebreakFinalize: POST /competitions/:id/league-tiebreak/finalize
-    // Accepts the current standings as final without a tie-breaker. Sets the
-    // LeagueTiebreakFinalized flag so MaybeAutoCompletePools can transition.
-    // Also removes every unfought tie-breaker bout in the same transaction.
-    // Returns { finalized: true, removed: number } on 200.
-    // Throws on 404 (comp not found), 409 with e.code already_complete,
-    // league_not_settled, tiebreak_match_scored or tiebreak_drawn, and
-    // e.detail the sentence to show.
-    async leagueTiebreakFinalize(compID, password) {
-        const res = await _directFetch(`/api/competitions/${encodeURIComponent(compID)}/league-tiebreak/finalize`, {
-            method: 'POST',
-            headers: { 'X-Tournament-Password': password },
-        });
-        if (!res.ok) {
-            const err = await res.json().catch(() => ({}));
-            const e = new Error(err.detail || err.error || `Failed to finalise league standings (${res.status})`);
-            if (err.error) e.code = err.error;
-            if (err.detail) e.detail = err.detail;
-            throw e;
-        }
-        return res.json();
-    },
-
-    // leagueTiebreakUndo: DELETE /competitions/:id/league-tiebreak/finalize
-    // Takes back the shared ranks leagueTiebreakFinalize accepted. A finished
-    // league goes back to match play (the server broadcasts
-    // competition_started); a match on a removed shiaijo loses its court.
-    // Returns { finalized: false, reopened, unassignedMatches, removedCourts }
-    // on 200. Throws on 404 (comp not found), 400 (not a league), 409 with
-    // e.code not_finalized and e.detail the sentence to show.
-    async leagueTiebreakUndo(compID, password) {
-        const res = await _directFetch(`/api/competitions/${encodeURIComponent(compID)}/league-tiebreak/finalize`, {
-            method: 'DELETE',
-            headers: { 'X-Tournament-Password': password },
-        });
-        if (!res.ok) {
-            const err = await res.json().catch(() => ({}));
-            const e = new Error(err.detail || err.error || `Failed to undo the shared ranks (${res.status})`);
-            if (err.error) e.code = err.error;
-            if (err.detail) e.detail = err.detail;
             throw e;
         }
         return res.json();

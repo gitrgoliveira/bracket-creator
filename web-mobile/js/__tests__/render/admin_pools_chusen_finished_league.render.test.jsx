@@ -48,7 +48,7 @@ function makeApi() {
   return {
     chusenCandidates: vi.fn().mockResolvedValue({ candidates: [], recorded: [recordedGroup] }),
     overridePoolRanks: vi.fn().mockResolvedValue(true),
-    leagueTiebreakCandidates: vi.fn().mockResolvedValue({ candidates: [], finalized: false, accepted: [] }),
+    leagueTiebreakCandidates: vi.fn().mockResolvedValue({ candidates: [] }),
   };
 }
 

@@ -76,7 +76,7 @@ func teamID(name string) string { return bctest.StampPlayerID(name, "Dojo "+name
 // cycleLeagueAt3rd is a 6-team league: Alpha, then Beta, then Gamma, Delta and
 // Epsilon level at 3rd to 5th (Gamma beat Delta, Delta beat Epsilon, Epsilon
 // beat Gamma), then Zeta. A league's places 3rd to 5th are consequential (the
-// tie-break band is the top three by default), but its Winners per pool is 2.
+// tie-break band is the top three), but its Winners per pool is 2.
 func cycleLeagueAt3rd(t *testing.T, compID string, opts ...func(*state.Competition)) (*Engine, *state.Store) {
 	t.Helper()
 	order := rankOrder([]string{"Alpha", "Beta", "Gamma", "Delta", "Epsilon", "Zeta"})
@@ -163,30 +163,6 @@ func TestMatchesOnRemovedCourts(t *testing.T) {
 	assert.Empty(t, removed)
 }
 
-// A league finished by accepting the shared ranks over a circle no longer owes
-// its lots: the circle is not listed as pending, so the Pools tab shows no
-// "lots required" beside the accepted ranks.
-func TestChusenStatus_AcceptedSharedRanksLeaveNoCirclePending(t *testing.T) {
-	const compID = "league-circle-accepted"
-	eng, store := cycleLeagueAt3rd(t, compID)
-	_, err := eng.GenerateLeagueTiebreakMatches(compID, []string{teamID("Gamma"), teamID("Delta"), teamID("Epsilon")})
-	require.NoError(t, err)
-	scoreInjectedDH(t, eng, store, compID, circle)
-
-	report, err := eng.ChusenStatus(compID)
-	require.NoError(t, err)
-	require.Len(t, report.Pending, 1, "before the ranks are accepted the circle is owed")
-
-	comp, err := store.LoadCompetition(compID)
-	require.NoError(t, err)
-	comp.LeagueTiebreakFinalized = true
-	require.NoError(t, store.SaveCompetition(comp))
-
-	report, err = eng.ChusenStatus(compID)
-	require.NoError(t, err)
-	assert.Empty(t, report.Pending, "accepted shared ranks cover the circle")
-}
-
 // A league tie-breaker must have a winner (D6 (b)): a drawn representative bout
 // over a two-way league tie at 3rd and 4th, which only a write made before that
 // rule can hold, is a bout still to decide by encho and hantei, never the lots.
@@ -235,11 +211,6 @@ func TestPoolsSettledNow_LeagueOwesItsBreaks(t *testing.T) {
 		const compID = "verdict-tiebreak-owed"
 		eng, store := cycleLeagueAt3rd(t, compID)
 		assert.Equal(t, PoolsTiebreakOwed, poolsVerdictNow(t, eng, store, compID))
-	})
-	t.Run("the operator accepted shared ranks", func(t *testing.T) {
-		const compID = "verdict-tiebreak-finalized"
-		eng, store := cycleLeagueAt3rd(t, compID, func(c *state.Competition) { c.LeagueTiebreakFinalized = true })
-		assert.Equal(t, PoolsSettled, poolsVerdictNow(t, eng, store, compID))
 	})
 	t.Run("a team tie-breaker that went in a circle", func(t *testing.T) {
 		const compID = "verdict-chusen-owed"

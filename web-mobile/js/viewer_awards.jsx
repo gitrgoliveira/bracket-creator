@@ -130,9 +130,9 @@ export function deriveAwards(bracket, standings, pools, nameToPlayer, comp) {
     // standings table renders).
     //
     // League: the table's rank is not the podium place. A league table gives a
-    // level group its best place (1, 1, 3) when the operator accepted it as
-    // shared or when it lies below the band ties are broken in
-    // (engine.applyJointThirdRanks), but the podium keeps one finisher per
+    // level group its best place (3, 3 at 3rd with joint 3rd places on, 4, 4
+    // below the band ties are broken in: engine.applyJointThirdRanks; a tie at
+    // 1st or 2nd is never shared, a tie-breaker or the lots orders it), but the podium keeps one finisher per
     // place in table order, so a league places each row by its position. The
     // one shared podium place is the sanctioned kendo joint 3rd: with the
     // joint-3rd-place setting on (bc-3rdp, effectiveTwoThirdPlaces) every level

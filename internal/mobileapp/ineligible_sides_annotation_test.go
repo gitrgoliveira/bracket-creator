@@ -69,6 +69,10 @@ func TestAnyMatchToAnnotate(t *testing.T) {
 		ms := []state.MatchResult{{ID: "Pool A-TB-0", Status: state.MatchStatusCompleted, SideAID: "a", SideBID: "b"}}
 		assert.True(t, anyMatchToAnnotate(ms, nil))
 	})
+	t.Run("completed representative bout with no winner", func(t *testing.T) {
+		ms := []state.MatchResult{{ID: "Pool A-DH-0", Status: state.MatchStatusCompleted, SideAID: "a", SideBID: "b"}}
+		assert.True(t, anyMatchToAnnotate(ms, nil), "a league's representative bout drawn between two barred teams goes to the lots too")
+	})
 	t.Run("completed pool tie-break bout with a winner does not count", func(t *testing.T) {
 		ms := []state.MatchResult{{ID: "Pool A-TB-0", Status: state.MatchStatusCompleted, Winner: "A", SideAID: "a", SideBID: "b"}}
 		assert.False(t, anyMatchToAnnotate(ms, nil))
@@ -119,7 +123,8 @@ func TestAnnotateEligibility(t *testing.T) {
 	})
 
 	// The wire's side of drawnTiebreakOfBarredSides: the Pools tab reads both
-	// sides stamped to know nobody can fight a drawn ippon-shobu bout.
+	// sides stamped to know nobody can fight a drawn tie-break bout, an
+	// ippon-shobu or a representative bout.
 	t.Run("a drawn tie-break bout is stamped for each barred side", func(t *testing.T) {
 		both := map[string]domain.CompetitorStatus{
 			"alice": statuses["alice"],
@@ -129,6 +134,7 @@ func TestAnnotateEligibility(t *testing.T) {
 			{ID: "Pool A-TB-0", Status: state.MatchStatusCompleted, SideAID: "alice", SideBID: "carol"},
 			{ID: "Pool A-TB-1", Status: state.MatchStatusCompleted, Winner: "Bob", SideAID: "alice", SideBID: "carol"},
 			{ID: "Pool A-5", Status: state.MatchStatusCompleted, SideAID: "alice", SideBID: "carol"},
+			{ID: "Pool A-DH-0", Status: state.MatchStatusCompleted, SideAID: "alice", SideBID: "carol"},
 		}
 		annotateEligibility(ms, nil, both)
 		require.NotNil(t, ms[0].IneligibleSides)
@@ -136,6 +142,9 @@ func TestAnnotateEligibility(t *testing.T) {
 		assert.Equal(t, "fusenpai", ms[0].IneligibleSides.B)
 		assert.Nil(t, ms[1].IneligibleSides, "a tie-break bout with a winner is not stamped")
 		assert.Nil(t, ms[2].IneligibleSides, "a finished regular match is not stamped")
+		require.NotNil(t, ms[3].IneligibleSides, "a drawn representative bout is stamped too")
+		assert.Equal(t, "kiken-voluntary", ms[3].IneligibleSides.A)
+		assert.Equal(t, "fusenpai", ms[3].IneligibleSides.B)
 	})
 
 	t.Run("no barred side: not stamped", func(t *testing.T) {

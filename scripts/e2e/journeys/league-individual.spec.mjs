@@ -11,18 +11,26 @@
 //                what tells the desk and the court operator why (F12); the
 //                round is then won in a cycle (A beats B, B beats C, C beats A):
 //                the league stays open and the Pools notice offers another
-//                round or lots (F5); the lots entry opens, and another round
-//                adds a fresh three bouts
+//                round or lots (F5); another round adds a fresh three bouts,
+//                won in a cycle again, and the desk enters the lots
 //   F3b / D6 (b) a two-way tie at 1st: the editor refuses a drawn league
-//                tie-breaker and encho, then hantei, decides it
+//                tie-breaker and encho, then hantei, decides it ("ippon-shobu"
+//                shots on the court console and the desk)
 //   joint 3rd    a tie at 3rd with "Award two joint 3rd places" on (no bout:
 //                both share 3rd) and off (an ippon-shobu decides 3rd)
-//   below band   a tie at 4th-5th: below the band of 3, so no bout is added
-//                and the two share 4th on the table
-//   F6           a team league saved with "Top 4", switched to individual
-//                before the roster: today's hidden band of 4 (recorded), and
-//                the fixed band of 3, the level pair below it sharing 4th
+//   tie at 4th   a tie at 4th-5th: a tie at 4th or lower always shares its
+//                place, so no bout is added and the two share 4th
+//   F6           a league an earlier release saved with "Top 4" (a backup
+//                restored as a copy): the same tie at 4th-5th, no bout, the
+//                two sharing 4th
+//   both barred  a tie at 1st between two competitors who both withdrew: the
+//                court console lists their ippon-shobu but never as Up next,
+//                records it drawn (neither can fight), and the desk draws lots
 //   F12          the court console says why an ippon-shobu is on the court
+//
+// Court console evidence is named by the flow: <flow>-console-up-next,
+// -running, -before-finish and -after on the shiaijo route, and
+// <flow>-desk-table and <flow>-public-awards on the desk and the phone.
 //
 // Everything is seeded through the interface (fixtures/league.mjs seedLeague).
 // The bouts are scripted by ROLE (a competitor's place in the roster), never by
@@ -34,28 +42,32 @@
 // server has none), seeds a competition of its own on a shiaijo of its own, and
 // keeps its own folder of screenshots and audit rows, so one failing test
 // hides nothing else here.
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { test, expect } from '../fixtures/test.mjs';
 import { EXPECT_TIMEOUT_MS, PUBLIC_DEVICE } from '../fixtures/devices.mjs';
 import { journeyShots } from '../fixtures/shots.mjs';
 import { flushAudits, journeyRecorder } from '../fixtures/audit.mjs';
 import { enterTournament } from '../fixtures/setup.mjs';
-import { createCompetition } from '../fixtures/wizard.mjs';
-import { generateDraw, pasteRoster, startCompetition } from '../fixtures/competition.mjs';
 import { completedRowFor, openShiaijo, sides, upNextCard, waitingRows } from '../fixtures/shiaijo.mjs';
 import {
   EDITOR, INLINE_EDITOR, awardIppon, finishMatch, markDraw, nextTapWrite, running, startMatch,
   writeLanded, writtenMatchId,
 } from '../fixtures/scoring.mjs';
-import { editorSides, ensureRunning, inlineRunning, rosterOf } from '../fixtures/individual.mjs';
+import { editorSides, ensureRunning, inlineRunning, recordDecision, rosterOf } from '../fixtures/individual.mjs';
 import {
-  awardsTabOffered, chooseTiebreakTop, drawnBoutNotices, leagueRanks, openLeague,
-  openLeagueSettings, openNumberedRow, openViewerAwards, pairKey, readBanner, readChusen, readLeagueSettings,
-  readLeagueTable, readNumberedRows, readPodium, saveSettings, seedLeague,
+  TEXT, awardsTabOffered, backUpCompetition, circleNotice, drawnBoutNotices, leagueRanks, openLeague,
+  openLeagueSettings, openNumberedRow, openViewerAwards, pairKey, readBanner, readChusen, readChusenRecorded,
+  readLeagueSettings, readLeagueTable, readNumberedRows, readPodium, recordLots, restoreAsCopy, rewriteBackup,
+  seedLeague, withFrontMatterLine,
 } from '../fixtures/league.mjs';
 import { openViewer } from '../fixtures/public.mjs';
 
 // Enough shiaijo for every test here to have one of its own.
 const CUP = { name: 'Individual League Cup', courts: 10 };
+// The tournament password enterTournament signs in with (fixtures/setup.mjs).
+const PASSWORD = 'e2e-operator';
 
 // A tie-breaker bout (ippon-shobu) id, as the score write names it.
 const TB_ID = /^Pool [^-]+-TB-\d+$/;
@@ -247,15 +259,17 @@ async function deskWhen(page, id, arrived, windowMs = EXPECT_TIMEOUT_MS) {
   }
 }
 
-// The public Awards tab of the competition, read on a spectator's phone.
-async function publicPodiumIfOffered(browser, baseURL, id) {
+// The public Awards tab of the competition, read on a spectator's phone; with
+// `shot` and `step`, the Awards tab is also captured as `step`.
+async function publicPodiumIfOffered(browser, baseURL, id, { shot, step } = {}) {
   const spectator = await browser.newContext({ ...PUBLIC_DEVICE, baseURL });
   try {
     const phone = await spectator.newPage();
     await openViewer(phone, id);
     if (!(await awardsTabOffered(phone))) return { offered: false, podium: null };
     await openViewerAwards(phone, id);
-    return { offered: true, podium: await readPodium(phone) };
+    const podium = await readPodium(phone);
+    return { offered: true, podium, ...(shot ? { screenshot: await shot(phone, step, { fullPage: true }) } : {}) };
   } finally {
     await spectator.close();
   }
@@ -279,8 +293,8 @@ test.describe('league-individual', () => {
   // ------------------------------------------------------------- 1. cycle
   // Four entrants: A beats B, B beats C, C beats A, and all three beat D, so
   // A, B and C end level on every criterion (W2 L1 D0 PW2 PL1) at 1st-3rd.
-  test('a three-way tie at 1st: ippon-shobu bouts are added by themselves (F12), then won in a cycle', async ({ page, browser, baseURL }) => {
-    test.setTimeout(480_000);
+  test('a three-way tie at 1st: ippon-shobu bouts are added by themselves (F12), won in a cycle twice, then settled by lots', async ({ page, browser, baseURL }) => {
+    test.setTimeout(600_000);
     const { record, shot } = recorder('cycle');
     const names = rosterOf('Cy', 4).map(([n]) => n);
     const [A, B, C, D] = names;
@@ -349,15 +363,15 @@ test.describe('league-individual', () => {
     // F5: the cycle leaves the league open and nothing is added by itself; the
     // Pools notice names the three and offers another round (the main step) or
     // lots (the operator's other choice).
-    const circleNotice = () => page.locator('.league-tiebreak').filter({ hasText: 'A tie-breaker round left a tie' });
+    const notice = () => circleNotice(page);
     await test.step('desk: the Pools notice says the round left a tie and offers another round or lots', async () => {
       await openLeague(page, id);
-      await expect(circleNotice(), 'the notice names the tie the round left').toBeVisible({ timeout: EXPECT_TIMEOUT_MS });
+      await expect(notice(), 'the notice names the tie the round left').toBeVisible({ timeout: EXPECT_TIMEOUT_MS });
       const after = await readDesk(page);
-      const group = circleNotice().locator('.league-tiebreak__group');
+      const group = notice().locator('.league-tiebreak__group');
       await expect(group.locator('.league-tiebreak__teams')).toHaveText([A, B, C].join(' · '), { useInnerText: true });
-      await expect(circleNotice().getByRole('button', { name: 'Run another tie-breaker round' })).toBeVisible();
-      await expect(circleNotice().getByRole('button', { name: 'Draw lots instead' })).toBeVisible();
+      await expect(notice().getByRole('button', { name: 'Run another tie-breaker round' })).toBeVisible();
+      await expect(notice().getByRole('button', { name: 'Draw lots instead' })).toBeVisible();
       expect(after.finished, 'the cycle leaves the league open').toBe(false);
       expect(tiebreakRows(after.numberedRows, 9), 'no further round is added by itself').toEqual([]);
       const pub = await publicPodiumIfOffered(browser, baseURL, id);
@@ -367,14 +381,14 @@ test.describe('league-individual', () => {
     });
 
     await test.step('desk: Draw lots instead opens the lots entry, still offering another round', async () => {
-      await circleNotice().getByRole('button', { name: 'Draw lots instead' }).tap();
-      await expect(circleNotice().getByRole('button', { name: 'Draw lots instead' })).toHaveCount(0);
-      await expect(circleNotice().getByRole('button', { name: 'Run another tie-breaker round' })).toBeVisible();
+      await notice().getByRole('button', { name: 'Draw lots instead' }).tap();
+      await expect(notice().getByRole('button', { name: 'Draw lots instead' })).toHaveCount(0);
+      await expect(notice().getByRole('button', { name: 'Run another tie-breaker round' })).toBeVisible();
       record({ step: 'pools', action: 'the lots entry opened from the notice', shot: await shot(page, 'pools-circle-lots-open', { fullPage: true }) });
     });
 
     await test.step('desk: Run another tie-breaker round adds a fresh round among the three', async () => {
-      await circleNotice().getByRole('button', { name: 'Run another tie-breaker round' }).tap();
+      await notice().getByRole('button', { name: 'Run another tie-breaker round' }).tap();
       await expect.poll(async () => (await readNumberedRows(page)).length, {
         message: 'three more tie-breaker bouts are added', timeout: EXPECT_TIMEOUT_MS,
       }).toBe(12);
@@ -382,7 +396,41 @@ test.describe('league-individual', () => {
       expect(tiebreakRows(rows, 9).map((r) => pairKey(r.shiro, r.aka)).sort()).toEqual([pairKey(A, B), pairKey(A, C), pairKey(B, C)].sort());
       record({ step: 'pools', action: 'a fresh round added among the three', numberedRows: rows,
         shot: await shot(page, 'pools-another-round-added', { fullPage: true }) });
-      await expect(circleNotice(), 'the notice is gone while the new round is unfought').toHaveCount(0);
+      await expect(notice(), 'the notice is gone while the new round is unfought').toHaveCount(0);
+    });
+
+    await test.step('court: the second round is won in a cycle too', async () => {
+      await openShiaijo(page, 'A');
+      const t = tiebreakScript();
+      t.beat(A, B); t.beat(B, C); t.beat(C, A);
+      const again = await playOnCourt(page, 3, [A, B, C], t.planFor);
+      record({ step: 'court', action: 'the second round, won in a cycle', played: again,
+        shot: await shot(page, 'cycle-console-after', { fullPage: true }) });
+      for (const b of again) expect(b.id, `${b.shiro} v ${b.aka} is a tie-breaker`).toMatch(TB_ID);
+    });
+
+    // The lots, in an order that is not the name order, so the table shows them.
+    const lots = [C, A, B];
+    await test.step('desk: Draw lots instead, the order entered, and the league finishes', async () => {
+      await openLeague(page, id);
+      await expect(notice(), 'the notice names the tie the second round left').toBeVisible({ timeout: EXPECT_TIMEOUT_MS });
+      await notice().getByRole('button', { name: TEXT.drawLotsInstead }).tap();
+      record({ step: 'pools', action: 'the lots entry after the second cycle',
+        shot: await shot(page, 'cycle-desk-lots', { fullPage: true }) });
+      const res = await recordLots(page, lots);
+      const desk = await deskOnceFinished(page);
+      const ranks = await leagueRanks(page);
+      const recorded = await readChusenRecorded(page);
+      record({ step: 'pools', action: 'lots recorded', answer: { status: res.status }, ranks, recorded, ...desk,
+        shot: await shot(page, 'cycle-desk-table', { fullPage: true }) });
+      expect(ranks).toEqual({ [C]: 1, [A]: 2, [B]: 3, [D]: 4 });
+      expect(desk.table.winner).toBe(C);
+      for (const n of lots) expect(desk.table.rows.find((r) => r.name === n).overridden, `${n}'s place came from the lots`).toBe(true);
+      expect(recorded.map((r) => r.order)).toEqual([`1st ${C}, 2nd ${A}, 3rd ${B}`]);
+      const pub = await publicPodiumIfOffered(browser, baseURL, id, { shot, step: 'cycle-public-awards' });
+      record({ step: 'public', action: 'Awards after the lots', ...pub });
+      expect(pub.offered).toBe(true);
+      expect(pub.podium.places.slice(0, 3).map((pl) => pl.name)).toEqual(lots);
     });
   });
 
@@ -406,9 +454,16 @@ test.describe('league-individual', () => {
       await playOnCourt(page, 3, names, s.planFor);
     });
 
+    const flow = 'ippon-shobu';
+    const shots = {};
     await test.step('the tie-breaker\'s editor offers no draw, and the x key marks none', async () => {
       await boutOnCourt(page, [A, B]);
+      const court = await readCourt(page);
+      shots.upNext = await shot(page, `${flow}-console-up-next`, { fullPage: true });
+      record({ step: 'court', action: 'the ippon-shobu Up next', ...court, screenshot: shots.upNext });
+      expect(court.upNext).toMatch(/tie-?break/i);
       await ensureRunning(page);
+      shots.running = await shot(page, `${flow}-console-running`, { fullPage: true });
       const ed = page.locator(INLINE_EDITOR).first();
       const toggle = ed.getByTestId('scoring-modal-mark-draw');
       record({ step: 'court', action: 'the tie-breaker\'s Mark draw', disabled: await toggle.isDisabled(), title: await toggle.getAttribute('title'),
@@ -435,13 +490,19 @@ test.describe('league-individual', () => {
       await ed.getByTestId('scoring-modal-hantei-arm').tap();
       const pair = await editorSides(page);
       await ed.getByTestId(pair.shiro === A ? 'scoring-modal-hantei-shiro' : 'scoring-modal-hantei-aka').tap();
+      shots.beforeFinish = await shot(page, `${flow}-console-before-finish`, { fullPage: true });
       await finishMatch(page);
       await expect(completedRowFor(page, pair)).toBeVisible();
+      shots.after = await shot(page, `${flow}-console-after`, { fullPage: true });
       await openLeague(page, id);
       const desk = await deskOnceFinished(page);
-      record({ step: 'pools', action: 'after the hantei', ...desk, public: await publicPodiumIfOffered(browser, baseURL, id),
-        shot: await shot(page, 'pools-after-hantei', { fullPage: true }) });
+      const pub = await publicPodiumIfOffered(browser, baseURL, id, { shot, step: `${flow}-public-awards` });
+      record({ step: 'pools', action: 'after the hantei', ...desk, public: pub, shots,
+        shot: await shot(page, `${flow}-desk-table`, { fullPage: true }) });
       expect(desk.table.winner).toBe(A);
+      expect(await leagueRanks(page)).toEqual({ [A]: 1, [B]: 2, [C]: 3 });
+      expect(pub.offered).toBe(true);
+      expect(pub.podium.places.slice(0, 3).map((pl) => pl.name)).toEqual([A, B, C]);
     });
   });
 
@@ -516,11 +577,11 @@ test.describe('league-individual', () => {
     });
   });
 
-  // ------------------------------------------------------- 5. below band
+  // ------------------------------------------------------- 5. tie at 4th
   // Five entrants: A beats everyone, B beats C, D and E, C beats D and E, D
-  // and E draw, so D and E end level (W0 L3 D1 PW0 PL3) at 4th-5th: below the
-  // band of 3 an individual league breaks ties for. Two joint 3rd places is
-  // off, so the 3rd-place exemption plays no part in the outcome.
+  // and E draw, so D and E end level (W0 L3 D1 PW0 PL3) at 4th-5th: a tie at
+  // 4th or lower always shares its place. Two joint 3rd places is off, so the
+  // 3rd-place rule plays no part in the outcome.
   const belowBand = (prefix) => {
     const names = rosterOf(prefix, 5).map(([n]) => n);
     const [A, B, C, D, E] = names;
@@ -532,7 +593,7 @@ test.describe('league-individual', () => {
     return { names, A, B, C, D, E, s };
   };
 
-  test('a tie below the band (4th-5th): no ippon-shobu, the league finishes', async ({ page }) => {
+  test('a tie at 4th-5th: no ippon-shobu, the two share 4th and the league finishes', async ({ page }) => {
     test.setTimeout(600_000);
     const { record, shot } = recorder('below-band');
     const { names, A, B, C, D, E, s } = belowBand('Bb');
@@ -552,101 +613,170 @@ test.describe('league-individual', () => {
       const ranks = await leagueRanks(page);
       record({ step: 'pools', action: 'read once finished', ranks, ...desk,
         shot: await shot(page, 'pools-below-band', { fullPage: true }) });
-      // A tie nobody breaks below the band is a shared place: D and E both
-      // read their better place, 4th (N2b).
+      // A tie at 4th is a shared place: D and E both read their better
+      // place, 4th (N2b).
       expect(ranks).toMatchObject({ [A]: 1, [B]: 2, [C]: 3, [D]: 4, [E]: 4 });
       for (const n of [D, E]) expect(desk.table.rows.find((r) => r.name === n), `${n}'s figures`).toMatchObject(s.tally[n]);
     });
   });
 
   // --------------------------------------------------------------- 6. F6
-  // A team league saved with "Top 4", then switched to individual before the
-  // roster: the settings page hides the pills for an individual competition,
-  // but the stored band may still be 4.
-  async function seedTeamThenIndividual(page, { name, court, record, shot }) {
-    const id = await createCompetition(page, {
-      name, kind: 'team', format: 'league', teamSize: 3, teamMatchType: 'fixed', courts: [court], twoThirdPlaces: false,
-    });
-    await openLeagueSettings(page, id);
-    await chooseTiebreakTop(page, 4);
-    await saveSettings(page, id);
-    await openLeagueSettings(page, id);
-    const asTeam = await readLeagueSettings(page);
-    const kind = page.getByRole('group', { name: /^Competition type/ });
-    await kind.getByRole('button', { name: 'Individual', exact: true }).tap();
-    await expect(kind.getByRole('button', { name: 'Individual', exact: true })).toHaveAttribute('aria-pressed', 'true');
-    const clears = page.getByTestId('config-clears-notice');
-    const clearsNotice = (await clears.count()) ? (await clears.innerText()).replace(/\s+/g, ' ').trim() : '';
-    record({ step: 'settings', action: 'Top 4 saved, then Individual chosen', asTeam: asTeam.tiebreakTop, clearsNotice,
-      shot: await shot(page, 'settings-switched-to-individual', { fullPage: true }) });
-    await saveSettings(page, id);
-    await openLeagueSettings(page, id);
-    const asIndividual = await readLeagueSettings(page);
-    record({ step: 'settings', action: 'read once saved as individual', ...asIndividual });
-    expect(asTeam.tiebreakTop.active).toBe('Top 4');
-    expect(asIndividual.tiebreakTop.shown, 'the band is not offered for an individual league').toBe(false);
-    return { id, clearsNotice };
-  }
-
-  test('F6 today: a team league saved with Top 4 and switched to individual, with a tie at 4th-5th', async ({ page }) => {
+  // A league an earlier release saved with "Break ties for top: Top 4" reaches
+  // the app as that tournament would: its backup, the old key in config.md,
+  // restored as a copy. No band is offered any more, so the copy breaks ties at
+  // 1st to 3rd like any league, and the level pair at 4th-5th shares 4th. The
+  // copy is played from the desk's numbered rows: the league it was copied
+  // from is on the same shiaijo with the same names, so the court console
+  // could start either.
+  test('F6: a league saved with Top 4 reads as any other: a tie at 4th-5th adds no ippon-shobu and the two share 4th', async ({ page }) => {
     test.setTimeout(600_000);
-    const { record, shot } = recorder('f6-today');
-    const { names, D, E, s } = belowBand('Fa');
+    const { record, shot } = recorder('f6-saved-top4');
+    const { A, B, C, D, E, s } = belowBand('Fb');
+    const name = 'Saved Top 4 League';
+    const work = fs.mkdtempSync(path.join(os.tmpdir(), 'league-individual-top4-'));
     let id;
 
-    await test.step('seed: team league, Top 4, switched to individual, five entrants on shiaijo G', async () => {
-      await enterTournament(page, CUP);
-      ({ id } = await seedTeamThenIndividual(page, { name: 'Switched League', court: 'G', record, shot }));
-      await pasteRoster(page, id, rosterOf('Fa', 5));
-      await generateDraw(page, id);
-      await startCompetition(page, id);
-      await openShiaijo(page, 'G');
-      record({ step: 'court', action: 'ten regular bouts', played: await playOnCourt(page, 10, names, s.planFor) });
-    });
+    try {
+      await test.step('seed on shiaijo H, back it up with "league_tiebreak_top_n: 4" and restore it as a copy', async () => {
+        await enterTournament(page, CUP);
+        await seedLeague(page, { name, kind: 'individual', entrants: rosterOf('Fb', 5), courts: ['H'], twoThirdPlaces: false });
+        const file = await backUpCompetition(page, name, work);
+        const forged = path.join(work, 'saved-top4.zip');
+        const rewritten = rewriteBackup(file, forged, { '/config.md': (text) => withFrontMatterLine(text, 'league_tiebreak_top_n: 4') });
+        id = await restoreAsCopy(page, { archive: forged, name, copyName: `${name} Copy`, password: PASSWORD });
+        await openLeagueSettings(page, id);
+        const settings = await readLeagueSettings(page);
+        record({ step: 'settings', action: 'the restored copy', rewritten, copyId: id, ...settings,
+          shot: await shot(page, 'f6-copy-settings', { fullPage: true }) });
+        expect(settings.retired, 'no band is offered').toEqual({ tiebreakTop: 0, sharedRanks: 0 });
+      });
 
-    await test.step('record whether the hidden band of 4 adds an ippon-shobu for 4th-5th', async () => {
-      // Reproduced when a tie-breaker is added; otherwise the league finishes
-      // or sits still, and the window's end is the evidence.
-      const desk = await deskWhen(page, id, (d) => d.finished || tiebreakRows(d.numberedRows, 10).length > 0);
-      const added = tiebreakRows(desk.numberedRows, 10);
-      const reproduced = added.length > 0;
-      record({ step: 'pools', action: 'read after the ten bouts', finding: 'F6', reproduced, tiebreakers: added, ranks: await leagueRanks(page), ...desk,
-        shot: await shot(page, 'pools-f6-today', { fullPage: true }) });
-      test.info().annotations.push({ type: 'finding', description: `F6 ${reproduced ? 'reproduced' : 'not reproduced'}: ${added.length} tie-breaker(s) added at 4th-5th` });
-      if (reproduced) {
-        expect(added.map((r) => pairKey(r.shiro, r.aka))).toEqual([pairKey(D, E)]);
-        expect(desk.finished).toBe(false);
-      } else {
-        expect(desk.finished).toBe(true);
-      }
-    });
+      await test.step('desk: score the ten bouts of the copy from its numbered rows', async () => {
+        await openLeague(page, id);
+        const played = await playOnPools(page, Array.from({ length: 10 }, (_, k) => k + 1), s.planFor);
+        record({ step: 'pools', action: 'ten regular bouts', played });
+      });
+
+      await test.step('no ippon-shobu is added for 4th-5th; the league finishes with D and E sharing 4th', async () => {
+        await expectNoTiebreak(page, id, 10);
+        const desk = await readDesk(page);
+        const ranks = await leagueRanks(page);
+        record({ step: 'pools', action: 'read once finished', ranks, ...desk,
+          shot: await shot(page, 'f6-desk-table', { fullPage: true }) });
+        expect(ranks).toMatchObject({ [A]: 1, [B]: 2, [C]: 3, [D]: 4, [E]: 4 });
+        expect(desk.table.winner).toBe(A);
+      });
+    } finally {
+      fs.rmSync(work, { recursive: true, force: true });
+    }
   });
 
-  test('F6: a league switched from team to individual breaks ties for the top 3 only, whatever band it had as a team', async ({ page }) => {
+  // ------------------------------------------------------- 7. both barred
+  // Five entrants. A and B draw, both beat C and D; C and D draw, both beat E;
+  // then, LAST, A and B each withdraw (kiken) in their bout against E, so the
+  // bar closes nothing else. A and B end level at 1st (W2 L1 D1, the same
+  // points), E 3rd (W2 L2), C and D level at 4th (shared, nothing asked). The
+  // engine adds the A v B ippon-shobu; neither can fight it, so the court
+  // console lists it but never as Up next, the operator records it drawn, and
+  // the desk draws lots for 1st.
+  test('both sides barred at 1st: the console lists the ippon-shobu but never as Up next, records it drawn, and lots decide 1st', async ({ page, browser, baseURL }) => {
     test.setTimeout(600_000);
-    const { record, shot } = recorder('f6-fixed');
-    const { names, A, B, C, D, E, s } = belowBand('Fb');
+    const { record, shot } = recorder('both-barred');
+    const flow = 'both-barred';
+    const roster = rosterOf('Bw', 5);
+    const names = roster.map(([n]) => n);
+    const [A, B, C, D, E] = names;
+    const s = scripted(names);
+    s.draw(A, B); s.beat(A, C); s.beat(A, D); s.beat(B, C); s.beat(B, D);
+    s.draw(C, D); s.beat(C, E); s.beat(D, E);
+    const lots = [B, A];
+    const court = 'J';
     let id;
 
-    await test.step('seed: team league, Top 4, switched to individual, five entrants on shiaijo H', async () => {
+    await test.step('seed on shiaijo J; the desk scores the eight bouts that are not against E for A or B', async () => {
       await enterTournament(page, CUP);
-      ({ id } = await seedTeamThenIndividual(page, { name: 'Switched League Two', court: 'H', record, shot }));
-      await pasteRoster(page, id, rosterOf('Fb', 5));
-      await generateDraw(page, id);
-      await startCompetition(page, id);
-      await openShiaijo(page, 'H');
-      await playOnCourt(page, 10, names, s.planFor);
+      id = await seedLeague(page, { name: 'Both Barred League', kind: 'individual', entrants: roster, courts: [court] });
+      await openLeague(page, id);
+      const rows = await readNumberedRows(page);
+      expect(rows).toHaveLength(10);
+      const withdrawals = new Set([pairKey(A, E), pairKey(B, E)]);
+      const nums = rows.filter((r) => !withdrawals.has(pairKey(r.shiro, r.aka))).map((r) => r.num);
+      record({ step: 'pools', action: 'eight regular bouts', played: await playOnPools(page, nums, s.planFor) });
     });
 
-    await test.step('no tie-breaker is added for 4th-5th; the league finishes with D and E sharing 4th', async () => {
+    await test.step('desk: A, then B, withdraws (kiken) in the bout against E', async () => {
+      for (const [who, playedAfter] of [[A, 9], [B, 10]]) {
+        const row = (await readNumberedRows(page)).find((r) => pairKey(r.shiro, r.aka) === pairKey(who, E));
+        await openNumberedRow(page, { num: row.num });
+        const pair = await editorSides(page, EDITOR);
+        const start = page.locator(EDITOR).locator('button').filter({ hasText: /^Start match$/ }).first();
+        if (await start.isVisible()) await startMatch(page);
+        await running(page, EDITOR);
+        const kiken = await recordDecision(page, 'kiken-voluntary', { side: pair.shiro === who ? 'shiro' : 'aka', root: EDITOR });
+        const close = page.locator(EDITOR).getByRole('button', { name: /✕ Close/ });
+        if (await close.isVisible().catch(() => false)) await close.tap();
+        await expect.poll(async () => (await readLeagueTable(page)).played, { message: `${who} v ${E} is counted` }).toBe(playedAfter);
+        record({ step: 'pools', action: `${who} withdraws against ${E}`, pair, ...kiken });
+      }
+    });
+
+    let desk;
+    await test.step('desk: the table ties A and B at 1st and the engine adds their ippon-shobu', async () => {
+      desk = await deskWhen(page, id, (d) => tiebreakRows(d.numberedRows, 10).length > 0);
+      const rowOf = (n) => desk.table.rows.find((r) => r.name === n);
+      record({ step: 'pools', action: 'once every regular bout is recorded', ranks: await leagueRanks(page), ...desk,
+        shot: await shot(page, `${flow}-desk-before`, { fullPage: true }) });
+      // The two withdrawals are A's and B's losses: A and B are level on
+      // every figure, whatever points a kiken gives.
+      for (const k of ['W', 'L', 'D', 'PW', 'PL']) expect(rowOf(A)[k], `A and B level on ${k}`).toBe(rowOf(B)[k]);
+      expect(rowOf(A)).toMatchObject({ W: 2, L: 1, D: 1 });
+      const tbs = tiebreakRows(desk.numberedRows, 10);
+      expect(tbs.map((r) => pairKey(r.shiro, r.aka))).toEqual([pairKey(A, B)]);
+      expect(desk.finished).toBe(false);
+    });
+
+    await test.step('court: the ippon-shobu is listed with the barred notice and is never Up next', async () => {
+      await openShiaijo(page, court);
+      const row = page.locator('.shiaijo-qrow').filter({ has: page.getByTestId('barred-match-notice') });
+      await expect(row, 'the ippon-shobu is listed with why it cannot start').toHaveCount(1);
+      const notice = row.getByTestId('barred-match-notice');
+      await expect(notice).toContainText(TEXT.bothBarred);
+      const court1 = await readCourt(page);
+      record({ step: 'court', action: 'the console with the barred ippon-shobu', ...court1,
+        notice: (await notice.innerText()).replace(/\s+/g, ' ').trim(),
+        screenshot: await shot(page, `${flow}-console-up-next`, { fullPage: true }) });
+      expect(await upNextCard(page).count(), 'a bout neither side can fight is never Up next').toBe(0);
+      expect(court1.running).toBe(false);
+      await expect(notice.getByRole('button', { name: TEXT.recordDrawn })).toBeVisible();
+      record({ step: 'court', action: 'before Record as drawn',
+        screenshot: await shot(page, `${flow}-console-before-finish`, { fullPage: true }) });
+      await notice.getByRole('button', { name: TEXT.recordDrawn }).tap();
+      await expect(completedRowFor(page, { shiro: desk.numberedRows.at(-1).shiro, aka: desk.numberedRows.at(-1).aka })).toBeVisible();
+      record({ step: 'court', action: 'after Record as drawn', ...(await readCourt(page)),
+        screenshot: await shot(page, `${flow}-console-after`, { fullPage: true }) });
+    });
+
+    await test.step('desk: the lots entry is drawn at once, the order entered, and the league finishes', async () => {
       await openLeague(page, id);
-      await expectNoTiebreak(page, id, 10);
+      await expect(circleNotice(page), 'the notice for the tie the drawn bout left').toBeVisible({ timeout: EXPECT_TIMEOUT_MS });
+      const offersAnotherRound = await circleNotice(page).getByRole('button', { name: TEXT.anotherRound }).count();
+      record({ step: 'pools', action: 'the notice after the drawn ippon-shobu', offersAnotherRound,
+        screenshot: await shot(page, `${flow}-desk-banner`, { fullPage: true }) });
+      expect(offersAnotherRound, 'neither can fight another round').toBe(0);
+      const res = await recordLots(page, lots);
+      const after = await deskOnceFinished(page);
       const ranks = await leagueRanks(page);
-      record({ step: 'pools', action: 'read once finished', ranks,
-        shot: await shot(page, 'pools-f6-fixed', { fullPage: true }) });
-      // The band is 3 (expectNoTiebreak), and the level pair below it shares
-      // its better place on the table (N2b).
-      expect(ranks).toMatchObject({ [A]: 1, [B]: 2, [C]: 3, [D]: 4, [E]: 4 });
+      record({ step: 'pools', action: 'lots recorded', answer: { status: res.status }, ranks, recorded: await readChusenRecorded(page), ...after,
+        shot: await shot(page, `${flow}-desk-table`, { fullPage: true }) });
+      expect(ranks).toMatchObject({ [B]: 1, [A]: 2, [E]: 3, [C]: 4, [D]: 4 });
+      expect(after.table.winner).toBe(B);
+    });
+
+    await test.step('public: the Awards follow the lots', async () => {
+      const pub = await publicPodiumIfOffered(browser, baseURL, id, { shot, step: `${flow}-public-awards` });
+      record({ step: 'public', action: 'Awards after the lots', ...pub });
+      expect(pub.offered).toBe(true);
+      expect(pub.podium.places.slice(0, 3).map((pl) => pl.name)).toEqual([B, A, E]);
     });
   });
 

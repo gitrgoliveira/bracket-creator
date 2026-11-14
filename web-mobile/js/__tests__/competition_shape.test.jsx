@@ -8,7 +8,6 @@ import {
   LABEL_POOL_FORMAT, POOL_FORMAT_OPTIONS, poolFormatVisible,
   LABEL_SWISS_ROUNDS, HINT_SWISS_ROUNDS, swissRoundsVisible,
   LABEL_ROUND_ROBIN, roundRobinVisible,
-  LABEL_LEAGUE_TIEBREAK, HINT_LEAGUE_TIEBREAK, LEAGUE_TIEBREAK_OPTIONS, leagueTiebreakVisible,
   LABEL_POOL_DURATION, HINT_POOL_DURATION, poolDurationLabel, poolDurationHint,
   LABEL_KNOCKOUT_DURATION, HINT_KNOCKOUT_DURATION,
   poolDurationVisible, knockoutDurationVisible,
@@ -26,6 +25,7 @@ import {
   cutNumberPrefix, MAX_NUMBER_PREFIX_CHARS, HINT_NUMBER_PREFIX, numberPrefixHint,
   resolveFormat,
 } from '../competition_shape.jsx';
+import * as shape from '../competition_shape.jsx';
 
 // The four format values a competition can hold. Used to sweep every
 // visibility predicate across every format so a new format added to one
@@ -192,40 +192,13 @@ describe('LABEL_ROUND_ROBIN / roundRobinVisible', () => {
   });
 });
 
-describe('league tie-break band', () => {
-  it('copy names the choice to accept shared ranks, in a league\'s words (F9)', () => {
-    expect(LABEL_LEAGUE_TIEBREAK).toBe('Break ties for top');
-    expect(HINT_LEAGUE_TIEBREAK).toBe('Teams level on every criterion within this band are asked about before the league finishes: run a tie-breaker, or accept shared ranks. Top 3 asks about ties for 1st to 3rd place, Top 4 also about 4th. Accepting shared ranks finishes the competition at once, and Undo shared ranks takes it back.');
-    expect(HINT_LEAGUE_TIEBREAK).toMatch(/shared ranks/);
-    expect(HINT_LEAGUE_TIEBREAK).not.toMatch(/finalis/i);
-    expect(LEAGUE_TIEBREAK_OPTIONS).toEqual([
-      { value: 3, label: 'Top 3' },
-      { value: 4, label: 'Top 4' },
-    ]);
-  });
-
-  // Full (format, kind, teamSize) cross product. The teamSize term is the
-  // legacy-data allowance: settings shows this control for a league whose
-  // teamSize > 0 even when kind is not "team" (models.go:885-886 names that
-  // pairing as real stored data), so a two-argument narrowing would hide a
-  // control those records show today.
-  const table = [];
-  for (const format of ALL_FORMATS) {
-    for (const kind of ALL_KINDS) {
-      for (const teamSize of [0, 3, undefined]) {
-        const isTeam = kind === KIND_TEAM || teamSize > 0;
-        table.push([format, kind, teamSize, format === FORMAT_LEAGUE && isTeam]);
-      }
+describe('league tie-break band (removed)', () => {
+  // A tie at 1st or 2nd is always broken and a tie at 3rd follows the joint
+  // 3rd setting, so there is no "Break ties for top" setting to choose.
+  it('exports nothing for the removed Break ties for top setting', () => {
+    for (const name of ['LABEL_LEAGUE_TIEBREAK', 'HINT_LEAGUE_TIEBREAK', 'LEAGUE_TIEBREAK_OPTIONS', 'LEAGUE_TIEBREAK_DEFAULT', 'leagueTiebreakActive', 'leagueTiebreakVisible']) {
+      expect(shape[name], name).toBeUndefined();
     }
-  }
-  it.each(table)('leagueTiebreakVisible(%j, %j, %j) -> %j', (format, kind, teamSize, expected) => {
-    expect(leagueTiebreakVisible(format, kind, teamSize)).toBe(expected);
-  });
-
-  // The regression the widening exists to prevent, stated on its own so a
-  // future narrowing back to (format, kind) fails here by name.
-  it('shows the tie-break band for a drifted league record: kind individual, teamSize > 0', () => {
-    expect(leagueTiebreakVisible(FORMAT_LEAGUE, KIND_INDIVIDUAL, 3)).toBe(true);
   });
 });
 
@@ -295,8 +268,9 @@ describe('per-phase match duration', () => {
 describe('two-thirds-places (joint bronze, bc-3rdp)', () => {
   it('copy is one constant for admin_setup.jsx and admin_competition_settings.jsx and speaks of a tie, not of semi-finalists (F9)', () => {
     expect(LABEL_TWO_THIRD_PLACES).toBe('Award two joint 3rd places');
-    expect(HINT_TWO_THIRD_PLACES).toBe('When enabled, competitors who tie for 3rd place share it and nothing is played to separate them (standard kendo convention). In a league, teams level at 3rd place or lower then share the place without being asked. Leave it off to decide a single 3rd place: a knockout plays a third-place match, and a league asks you to run a tie-breaker or accept shared ranks.');
+    expect(HINT_TWO_THIRD_PLACES).toBe('When enabled, competitors level at 3rd place share it and nothing is asked or played to separate them (standard kendo convention). Leave it off to decide a single 3rd place: a knockout plays a third-place match, and a league breaks a tie at 3rd place with a tie-breaker. A tie at 1st or 2nd place always needs a tie-breaker with a winner.');
     expect(HINT_TWO_THIRD_PLACES).toMatch(/tie|level/);
+    expect(HINT_TWO_THIRD_PLACES).not.toMatch(/shared ranks/i);
     expect(HINT_TWO_THIRD_PLACES).not.toMatch(/semi-?finalist|bronze/i);
   });
 

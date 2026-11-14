@@ -218,6 +218,22 @@ func lotsGroup(poolStandings map[string][]state.PlayerStanding, m *state.MatchRe
 type poolLots struct {
 	standings map[string][]state.PlayerStanding
 	statuses  map[string]domain.CompetitorStatus
+	// league is set by a caller judging a league (PoolsSettledNow, the
+	// league's own completion scan): only there does a representative bout
+	// drawn between two barred teams count as played (barredDrawPlayed). A
+	// pools + knockout competition, and every caller that leaves it unset,
+	// keeps that bout open until its lots are entered, as before.
+	league bool
+}
+
+// barredDrawPlayed reports a drawn tie-break bout between two barred sides that
+// counts as played (drawnTiebreakOfBarredSides): an individual ippon-shobu bout
+// in any competition, a team representative bout in a league only.
+func (l poolLots) barredDrawPlayed(m *state.MatchResult) bool {
+	if IsPoolDaihyosenMatchID(m.ID) && !l.league {
+		return false
+	}
+	return drawnTiebreakOfBarredSides(m, l.statuses)
 }
 
 // loadPoolLots reads a competition's lots for matches: the standings
@@ -239,18 +255,54 @@ func loadPoolLots(matches []state.MatchResult, loadStandings func() (map[string]
 	return lots, nil
 }
 
-// drawnTiebreakOfBarredSides reports a drawn ippon-shobu ("-TB-") bout whose
-// two sides are both barred (a withdrawal on another match, engine.BarredSides),
-// the one draw the decision door records for it (handleBothSidesBarredHikiwake,
-// the tie-breaker's only draw: nobody can fight it, so encho and hantei are no
-// remedy). It settles as it stands: the tie stays and the places stay shared.
+// drawnTiebreakOfBarredSides reports a drawn tie-break bout (an ippon-shobu
+// "-TB-" or a representative "-DH-" bout) whose two sides are both barred (a
+// withdrawal on another match, engine.BarredSides), the one draw the decision
+// door records for a league's tie-breaker (handleBothSidesBarredHikiwake:
+// nobody can fight it, so encho and hantei are no remedy). It is a draw nobody
+// fought and counts played as it stands (poolMatchSettled); the tie it was for
+// stays, and in a league the place goes to the lots (barredDrawOwesLots).
 // Judged on the live statuses, so a side reinstated since opens the bout again.
 func drawnTiebreakOfBarredSides(m *state.MatchResult, statuses map[string]domain.CompetitorStatus) bool {
-	if !IsTiebreakerMatchID(m.ID) || !drawnSupplementaryBout(m) {
+	if !drawnSupplementaryBout(m) {
 		return false
 	}
 	a, b := BarredSides(statuses, m.ID, m.SideAID, m.SideBID)
 	return a != nil && b != nil
+}
+
+// barredDrawOwesLots reports a league tie whose tie-breaker the bouts cannot
+// settle because two of its members could not fight: every tie-break bout among
+// the group's members is finished, at least one of them is a draw nobody fought
+// (drawnTiebreakOfBarredSides), and the bouts did not order the group
+// (tieSettledByBouts). A place that cannot be shared then goes to the lots the
+// organiser draws and enters on the chusen panel, the panel a circle uses
+// (operator decision Q1, round rule-3); the lots rank the whole group, as they
+// do for a team's circle, and no further round is offered, since nobody can
+// fight it. It is the league's rule only (PoolsSettledNow, chusenStatusFrom):
+// a pools + knockout competition keeps its own. matches are the pool rows as
+// stored (a drawn representative bout included, which chusenMatches leaves
+// out), statuses the competitors' statuses now. The caller asks it only of a
+// group in the band, and leaves out one whose lots are recorded.
+func barredDrawOwesLots(group []state.PlayerStanding, matches []state.MatchResult, statuses map[string]domain.CompetitorStatus, isTeam bool) bool {
+	if len(statuses) == 0 {
+		return false
+	}
+	ids := groupMemberIDs(group)
+	barredDraw := false
+	for i := range matches {
+		m := &matches[i]
+		if !state.IsPoolSupplementaryMatchID(m.ID) || !ids[m.SideAID] || !ids[m.SideBID] || m.SideAID == m.SideBID {
+			continue
+		}
+		if m.Status != state.MatchStatusCompleted {
+			return false
+		}
+		if drawnTiebreakOfBarredSides(m, statuses) {
+			barredDraw = true
+		}
+	}
+	return barredDraw && !tieSettledByBouts(group, matches, isTeam)
 }
 
 // lotsStandings reads the pool standings a drawn supplementary bout is judged
@@ -425,11 +477,20 @@ func (e *Engine) chusenStatusFrom(loader poolStandingsLoader, standings func() (
 	if err != nil {
 		return report, err
 	}
-	matches, err := loader.LoadPoolMatches(compID)
+	stored, err := loader.LoadPoolMatches(compID)
 	if err != nil {
 		return report, err
 	}
-	matches = chusenMatches(comp, matches)
+	matches := chusenMatches(comp, stored)
+	// A league's tie-breaker drawn because both its sides are barred is
+	// settled by the lots (barredDrawOwesLots), judged on the statuses now.
+	var statuses map[string]domain.CompetitorStatus
+	isLeague := comp.Format == state.CompFormatLeague
+	if isLeague && slices.ContainsFunc(stored, func(m state.MatchResult) bool { return drawnSupplementaryBout(&m) }) {
+		if statuses, err = loader.LoadCompetitorStatus(compID); err != nil {
+			return report, err
+		}
+	}
 	poolRanks, err := loader.LoadPoolRanks(compID)
 	if err != nil {
 		return report, err
@@ -464,16 +525,17 @@ func (e *Engine) chusenStatusFrom(loader poolStandingsLoader, standings func() (
 				Teams:       group,
 				MinPosition: positions[0] + 1,
 			}
+			barredDraw := isLeague && barredDrawOwesLots(group, stored, statuses, isTeam)
 			switch {
-			// Accepted shared ranks cover a circle (PoolsSettledNow), so a
-			// finished league no longer lists it as owed; lots already
-			// recorded stay listed below, to stay correctable.
-			case !comp.LeagueTiebreakFinalized && groupNeedsChusen(group, matches):
+			case groupNeedsChusen(group, matches):
 				if !isTeam {
 					g.StillLevel = tieBreakLeftLevel(group, matches)
 				}
 				report.Pending = append(report.Pending, g)
-			case groupSettledByChusen(group, matches):
+			case barredDraw && !chusenRecorded(group):
+				// Lots only: nobody can fight another round (StillLevel nil).
+				report.Pending = append(report.Pending, g)
+			case groupSettledByChusen(group, matches) || (barredDraw && chusenRecorded(group)):
 				g.Ranks = make([]int, len(group))
 				for i, s := range group {
 					if r, ok := lookupPoolRankOverride(poolRanks[poolName], s.Player.ID); ok {

@@ -49,7 +49,7 @@ function makeApi(candidates = [circle]) {
     chusenCandidates: vi.fn().mockResolvedValue({ candidates, recorded: [] }),
     runTiebreakerRound: vi.fn().mockResolvedValue({ matches: [] }),
     overridePoolRanks: vi.fn().mockResolvedValue(true),
-    leagueTiebreakCandidates: vi.fn().mockResolvedValue({ candidates: [], finalized: false, accepted: [] }),
+    leagueTiebreakCandidates: vi.fn().mockResolvedValue({ candidates: [] }),
   };
 }
 
@@ -139,6 +139,27 @@ describe('AdminPools: an individual tie-breaker round that went in a circle', ()
       fireEvent.click(screen.getByRole('button', { name: 'Run another tie-breaker round: Cal · Dai' }));
     });
     await waitFor(() => expect(api.runTiebreakerRound).toHaveBeenCalledWith('c1', 'Pool A', ['id-cal', 'id-dai'], PASSWORD));
+  });
+
+  // A tie-breaker whose two sides both withdrew earlier can never be fought:
+  // the server lists the tie with no run still level, so lots are the only way.
+  it('opens the lots at once, with no round to run, when nobody can fight the tie-breaker', async () => {
+    const barred = { poolName: 'Pool A', teamNames: ['Aki', 'Bea'], teams: members.slice(0, 2), minPosition: 1, stillLevel: null };
+    const api = await mount(leagueComp(), makeApi([barred]));
+    await screen.findByText('A tie-breaker round left a tie');
+
+    expect(screen.getByText(/one per competitor/)).toBeTruthy();
+    expect(screen.getByText(/needs a winner/)).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /Run another tie-breaker round/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Draw lots instead' })).toBeNull();
+
+    fireEvent.change(screen.getByLabelText('Aki'), { target: { value: '2' } });
+    fireEvent.change(screen.getByLabelText('Bea'), { target: { value: '1' } });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /Record chusen result/ }));
+    });
+    await waitFor(() => expect(api.overridePoolRanks).toHaveBeenCalledTimes(1));
+    expect(api.runTiebreakerRound).not.toHaveBeenCalled();
   });
 
   it('keeps the team chusen banner for a team competition', async () => {

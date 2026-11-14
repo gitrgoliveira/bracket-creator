@@ -68,7 +68,8 @@ describe('drawnSupplementaryBouts', () => {
       const standings = {
         [poolNameOf(c.id)]: c.standings.map(s => ({ player: { id: s.id }, points: s.points, isOverridden: c.inForce.includes(s.id), tieOutOfBand: !!s.tieOutOfBand })),
       };
-      expect(drawnSupplementaryBouts([row], standings)).toEqual(c.stuck ? [row] : []);
+      // `league` is the competition's format, which the page passes as the third argument.
+      expect(drawnSupplementaryBouts([row], standings, !!c.league)).toEqual(c.stuck ? [row] : []);
     });
   });
 });
@@ -330,6 +331,17 @@ describe('enrichPoolMatchWithComp', () => {
         window.AdminLineupHelpers = prevHelpers;
       }
     }
+  });
+
+  it('keeps compEngi on an engi tie-break bout, so it opens in the flag editor', () => {
+    // Engi follows the same tie rule as fought formats: a level place gets a
+    // "-TB-" bout, scored by flags like every other engi bout.
+    const engiComp = { id: 'ec1', name: 'Engi Cup', kind: 'individual', format: 'league', engi: true };
+    const enriched = enrichPoolMatchWithComp({ id: 'Pool A-TB-0', status: 'scheduled', sideA: 'Ann - Bo', sideB: 'Cy - Di' }, engiComp);
+    expect(enriched.compEngi).toBe(true);
+    expect(enriched.repIsTeam).toBe(false);
+    const fought = enrichPoolMatchWithComp({ id: 'Pool A-TB-0', status: 'scheduled', sideA: 'Ann', sideB: 'Bo' }, { id: 'k1', kind: 'individual', format: 'league' });
+    expect(fought.compEngi).toBe(false);
   });
 
   it('sets repIsTeam=false for a regular pool match in a team competition', () => {

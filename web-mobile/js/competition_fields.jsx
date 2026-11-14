@@ -87,8 +87,8 @@ export function PillButton({ active, onClick, disabled, children, className, ...
 // other than equality and each of those readings is a rule with a single
 // owner in competition_shape.jsx: resolvePoolFormat (a stored "" means
 // "full"), resolvePoolSizeMode (a stored "" means minimum, which is what the
-// engine does with it), leagueTiebreakActive (a stored 0 means Top 3) and
-// teamMatchTypeActive (anything that is not exactly "kachinuki" is Regular).
+// engine does with it) and teamMatchTypeActive (anything that is not exactly
+// "kachinuki" is Regular).
 // Defaulting it to equality keeps the simple callers simple without letting
 // the awkward ones re-spell their rule inline.
 //

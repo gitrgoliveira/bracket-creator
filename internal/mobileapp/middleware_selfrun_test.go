@@ -272,14 +272,10 @@ func TestSelfRun_SelfRunMode_CompetitionConfigRoutes_RequireMainPassword(t *test
 		// bc-mrgc: a match's write history, held values included, is the
 		// score editors' organiser view; the public page never reads it.
 		{http.MethodGet, "/api/competitions/some-id/matches/some-match/history"},
-		// A team league's tie-breaker decisions (run supplementary bouts,
-		// remove them, or accept the shared ranks) are the organiser's, as a
-		// pool rank override is.
+		// A team league's tie-breaker decisions (run supplementary bouts, or
+		// remove them) are the organiser's, as a pool rank override is.
 		{http.MethodPost, "/api/competitions/some-id/league-tiebreak"},
 		{http.MethodDelete, "/api/competitions/some-id/league-tiebreak"},
-		{http.MethodPost, "/api/competitions/some-id/league-tiebreak/finalize"},
-		// Undoing the accepted shared ranks reopens a finished league.
-		{http.MethodDelete, "/api/competitions/some-id/league-tiebreak/finalize"},
 		// Another individual tie-breaker round over a tie a round left level
 		// is the organiser's choice, beside the lots (decision F5).
 		{http.MethodPost, "/api/competitions/some-id/pools/Pool%20A/tiebreak-round"},
@@ -295,11 +291,16 @@ func TestSelfRun_SelfRunMode_CompetitionConfigRoutes_RequireMainPassword(t *test
 		"GET /api/schedule/calendar must be organiser-only in self-run")
 	assert.True(t, isSelfRunMainGatedConfigRoute(http.MethodGet, "/api/schedule/calendar/preview"),
 		"GET /api/schedule/calendar/preview must be organiser-only in self-run")
-	for _, fullPath := range []string{"/api/competitions/:id/league-tiebreak", "/api/competitions/:id/league-tiebreak/finalize", "/api/competitions/:id/pools/:poolId/tiebreak-round"} {
+	for _, fullPath := range []string{"/api/competitions/:id/league-tiebreak", "/api/competitions/:id/pools/:poolId/tiebreak-round"} {
 		assert.True(t, isSelfRunMainGatedConfigRoute(http.MethodPost, fullPath), "POST %s must be organiser-only in self-run", fullPath)
 	}
-	for _, fullPath := range []string{"/api/competitions/:id/league-tiebreak", "/api/competitions/:id/league-tiebreak/finalize"} {
-		assert.True(t, isSelfRunMainGatedConfigRoute(http.MethodDelete, fullPath), "DELETE %s must be organiser-only in self-run", fullPath)
+	assert.True(t, isSelfRunMainGatedConfigRoute(http.MethodDelete, "/api/competitions/:id/league-tiebreak"),
+		"DELETE /api/competitions/:id/league-tiebreak must be organiser-only in self-run")
+	// Accepting shared ranks is gone: the route is no longer registered, so it
+	// has no place in the list.
+	for _, method := range []string{http.MethodPost, http.MethodDelete} {
+		assert.False(t, isSelfRunMainGatedConfigRoute(method, "/api/competitions/:id/league-tiebreak/finalize"),
+			"%s .../league-tiebreak/finalize was removed", method)
 	}
 
 	for _, tc := range configRoutes {

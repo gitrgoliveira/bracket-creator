@@ -290,3 +290,164 @@ func TestMixedPool_BothBarredRepresentativeBoutStillOwesTheLots(t *testing.T) {
 		}
 	}
 }
+
+// barredPairLeague is an individual league of four players level on Points
+// (every regular match drawn) whose tie-break round has been fought: each pair
+// is won by the player placed better in place, and the two players placed
+// equal (Ayu and Ben) drew their bout nobody could fight. Both are then barred.
+// So Ayu and Ben are the only run the bouts left level, wherever place puts
+// them.
+func barredPairLeague(t *testing.T, compID string, jointThird bool, place map[string]int) (*Engine, *state.Store) {
+	t.Helper()
+	eng, store, _ := setupTestEngine(t)
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: compID, Name: compID, Format: state.CompFormatLeague, Status: state.CompStatusPools, Courts: []string{"A"},
+		LeagueTwoThirdPlaces: jointThird,
+	}))
+	players := []helper.Player{
+		{ID: "ayu-id", Name: "Ayu", Dojo: "Dojo A"}, {ID: "ben-id", Name: "Ben", Dojo: "Dojo B"},
+		{ID: "cal-id", Name: "Cal", Dojo: "Dojo C"}, {ID: "dee-id", Name: "Dee", Dojo: "Dojo D"},
+	}
+	require.NoError(t, store.SaveParticipants(compID, players))
+	require.NoError(t, store.SavePools(compID, []helper.Pool{{PoolName: "Pool A", Players: players}}))
+	var regular []state.MatchResult
+	for i := range players {
+		for j := i + 1; j < len(players); j++ {
+			regular = append(regular, state.MatchResult{
+				ID: "Pool A-" + string(rune('0'+len(regular))), SideA: players[i].Name, SideAID: players[i].ID,
+				SideB: players[j].Name, SideBID: players[j].ID, Court: "A",
+				Status: state.MatchStatusCompleted, Decision: string(domain.DecisionHikiwake),
+			})
+		}
+	}
+	require.NoError(t, store.SavePoolMatches(compID, regular))
+	outcome, err := eng.MaybeAutoCompletePools(compID)
+	require.NoError(t, err)
+	require.Equal(t, AutoCompleteTiebreakInjected, outcome, "four players level at 1st owe a round")
+
+	all, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	var pairBout string
+	for i := range all {
+		m := &all[i]
+		if !IsTiebreakerMatchID(m.ID) {
+			continue
+		}
+		a, b := place[m.SideAID], place[m.SideBID]
+		if a == b {
+			pairBout = m.ID
+			continue
+		}
+		m.Status = state.MatchStatusCompleted
+		if a < b {
+			m.Winner, m.WinnerID, m.IpponsA = m.SideA, m.SideAID, []string{"M"}
+		} else {
+			m.Winner, m.WinnerID, m.IpponsB = m.SideB, m.SideBID, []string{"M"}
+		}
+	}
+	require.NoError(t, store.SavePoolMatches(compID, all))
+	require.NotEmpty(t, pairBout, "the equal pair has its bout")
+	drawnByDecision(t, eng, compID, pairBout)
+	barCompetitor(t, store, compID, "ayu-id", true)
+	barCompetitor(t, store, compID, "ben-id", true)
+	return eng, store
+}
+
+// A both-barred draw owes the lots only to the run the fought bouts left level:
+// with Ayu and Ben level at 1st and Cal and Dee separated below them, the lots
+// are Ayu's and Ben's alone, Cal keeps 3rd and Dee 4th, and lots typed over a
+// player the bouts placed are refused.
+func TestIndividualLeague_BarredDrawOwesLotsOnlyToItsRun(t *testing.T) {
+	const compID = "ind-barred-run-top"
+	eng, store := barredPairLeague(t, compID, false, map[string]int{"ayu-id": 0, "ben-id": 0, "cal-id": 1, "dee-id": 2})
+
+	assert.Equal(t, PoolsChusenOwed, poolsVerdictNow(t, eng, store, compID))
+	report, err := eng.ChusenStatus(compID)
+	require.NoError(t, err)
+	require.Len(t, report.Pending, 1)
+	assert.Equal(t, 1, report.Pending[0].MinPosition)
+	assert.ElementsMatch(t, []string{"Ayu", "Ben"}, chusenTeamNames(report.Pending[0]), "the bouts placed Cal and Dee")
+	assert.Nil(t, report.Pending[0].StillLevel)
+
+	_, err = eng.OverridePoolRanks(compID, "Pool A", []RankOverride{{PlayerID: "cal-id", Rank: 1}, {PlayerID: "ayu-id", Rank: 2}, {PlayerID: "ben-id", Rank: 3}})
+	require.ErrorIs(t, err, ErrRankOverrideNotLevel, "lots never overrule a place the bouts gave")
+
+	standings := enterLots(t, eng, compID, []string{"ben-id", "ayu-id"})
+	assertDistinctRanks(t, standings)
+	var order []string
+	for _, s := range standings {
+		order = append(order, s.Player.Name)
+	}
+	assert.Equal(t, []string{"Ben", "Ayu", "Cal", "Dee"}, order)
+	assert.Equal(t, PoolsSettled, poolsVerdictNow(t, eng, store, compID))
+
+	report, err = eng.ChusenStatus(compID)
+	require.NoError(t, err)
+	assert.Empty(t, report.Pending)
+	require.Len(t, report.Recorded, 1, "the recorded lots stay correctable")
+	assert.ElementsMatch(t, []string{"Ayu", "Ben"}, chusenTeamNames(report.Recorded[0]))
+}
+
+// The barred pair level at 3rd and 4th shares 3rd where joint 3rd places are
+// awarded (no lots), and owes the lots for 3rd, over the pair alone, where they
+// are not.
+func TestIndividualLeague_BarredDrawBelowThePodiumBand(t *testing.T) {
+	place := map[string]int{"cal-id": 0, "dee-id": 1, "ayu-id": 2, "ben-id": 2}
+
+	t.Run("joint 3rd places awarded: the pair shares 3rd", func(t *testing.T) {
+		const compID = "ind-barred-run-joint"
+		eng, store := barredPairLeague(t, compID, true, place)
+		assert.Equal(t, PoolsSettled, poolsVerdictNow(t, eng, store, compID), "no lots for a pair that shares 3rd")
+		report, err := eng.ChusenStatus(compID)
+		require.NoError(t, err)
+		assert.Empty(t, report.Pending)
+		standings, err := eng.LeagueStandings(compID)
+		require.NoError(t, err)
+		for _, s := range standings {
+			if s.Player.Name == "Ayu" || s.Player.Name == "Ben" {
+				assert.Equal(t, 3, s.Rank, s.Player.Name)
+			}
+		}
+	})
+
+	t.Run("one 3rd place: the lots are the pair's alone", func(t *testing.T) {
+		const compID = "ind-barred-run-single"
+		eng, store := barredPairLeague(t, compID, false, place)
+		assert.Equal(t, PoolsChusenOwed, poolsVerdictNow(t, eng, store, compID))
+		report, err := eng.ChusenStatus(compID)
+		require.NoError(t, err)
+		require.Len(t, report.Pending, 1)
+		assert.Equal(t, 3, report.Pending[0].MinPosition)
+		assert.ElementsMatch(t, []string{"Ayu", "Ben"}, chusenTeamNames(report.Pending[0]))
+	})
+}
+
+// Lots that settled a team league's both-barred representative bout stay
+// listed, and so correctable, when one of the two teams is reinstated: the bout
+// stays settled on those lots (daihyosenRuledByChusen), so the league stays
+// finished, and the place is still the lots' (decision F2).
+func TestTeamLeague_ReinstatedBarredDrawKeepsItsLotsCorrectable(t *testing.T) {
+	const compID = "team-barred-dh-reinstated"
+	eng, store := setupTeamLeagueComp(t, compID, "topTie")
+	alpha := leagueTeamID(t, store, compID, "Alpha")
+	beta := leagueTeamID(t, store, compID, "Beta")
+	injected, err := eng.GenerateLeagueTiebreakMatches(compID, []string{alpha, beta})
+	require.NoError(t, err)
+	require.Len(t, injected, 1)
+	barCompetitor(t, store, compID, alpha, true)
+	barCompetitor(t, store, compID, beta, true)
+	drawnByDecision(t, eng, compID, injected[0].ID)
+	enterLots(t, eng, compID, []string{beta, alpha})
+	outcome, err := eng.MaybeAutoCompletePools(compID)
+	require.NoError(t, err)
+	require.Equal(t, AutoCompleteTransitioned, outcome)
+
+	barCompetitor(t, store, compID, beta, false)
+	assert.Equal(t, state.CompStatusComplete, loadComp(t, store, compID).Status, "the lots still rule the drawn bout")
+	report, err := eng.ChusenStatus(compID)
+	require.NoError(t, err)
+	assert.Empty(t, report.Pending)
+	require.Len(t, report.Recorded, 1, "the lots that decide 1st can still be corrected")
+	assert.ElementsMatch(t, []string{"Alpha", "Beta"}, chusenTeamNames(report.Recorded[0]))
+	assert.Equal(t, []int{1, 2}, report.Recorded[0].Ranks, "Beta 1st by the lots, Alpha 2nd, in table order")
+}

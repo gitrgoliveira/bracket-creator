@@ -340,13 +340,32 @@ func tieBreakLeftLevel(group []state.PlayerStanding, matches []state.MatchResult
 // already been decided, so it is no longer a tie to break: the operator
 // recorded a chusen for every member that is in force (chusenRecorded, reading
 // the rows' IsOverridden), or the group's supplementary bouts ordered it
-// completely (tieSettledByBouts). Points never change after either
-// (applyTiebreakSort only reorders within the group), so detectPoolTies alone
-// still reports such a group, and the tie highlight read it as a tie forever
-// (operator ruling 2026-09-24: a tie settled by chusen or by daihyosen is no
-// longer a tie).
+// completely (tieSettledByBouts), or the bouts separated all but some runs and
+// the operator recorded a chusen for each of those (a draw nobody could fight,
+// barredDrawRuns: the lots rank the run alone). Points never change after any
+// of them (applyTiebreakSort only reorders within the group), so
+// detectPoolTies alone still reports such a group, and the tie highlight read
+// it as a tie forever (operator ruling 2026-09-24: a tie settled by chusen or
+// by daihyosen is no longer a tie).
 func tieSettled(group []state.PlayerStanding, matches []state.MatchResult, isTeam bool) bool {
-	return chusenRecorded(group) || tieSettledByBouts(group, matches, isTeam)
+	return chusenRecorded(group) || tieSettledByBouts(group, matches, isTeam) || levelRunsRecorded(group, matches, isTeam)
+}
+
+// levelRunsRecorded reports whether a group its fought bouts left in two or
+// more runs has a chusen in force for every run of more than one member, so the
+// lots decided each stretch the bouts could not (tieBreakRuns).
+func levelRunsRecorded(group []state.PlayerStanding, matches []state.MatchResult, isTeam bool) bool {
+	level := false
+	for _, run := range tieBreakRuns(group, matches, isTeam) {
+		if len(run) < 2 {
+			continue
+		}
+		if !chusenRecorded(run) {
+			return false
+		}
+		level = true
+	}
+	return level
 }
 
 // tieSettledByBouts reports whether a Points-tied group's supplementary bouts
@@ -713,10 +732,13 @@ func isBlockingEngiTBRow(m state.MatchResult) bool {
 // blocks completion forever, so the injector removes it (self-heal). A row the
 // rule does hold (a tie at a place that counts, or another round among the
 // members a round left level) is a tie-break bout like any other format's and
-// is kept. standings are the competition's (computeStandingsFrom), band its
-// tieNeedsBreak.
+// is kept. So is a row that is being or was fought (ResultRecorded: running, or
+// a recorded draw) or that holds a score (HoldsScore: sent back to the queue),
+// as a kendo row is: a correction after the bout started that moved the tie
+// away must never delete a result taken on a court. standings are the
+// competition's (computeStandingsFrom), band its tieNeedsBreak.
 func orphanedEngiTBRow(m state.MatchResult, standings map[string][]state.PlayerStanding, band breakBand) bool {
-	if !isBlockingEngiTBRow(m) {
+	if !isBlockingEngiTBRow(m) || m.ResultRecorded() || m.HoldsScore() {
 		return false
 	}
 	poolName, ok := poolNameFromMatchID(m.ID)

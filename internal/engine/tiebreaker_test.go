@@ -1083,10 +1083,12 @@ func TestInjectTiebreakerMatches_Engi_FullCycleTieGetsBouts(t *testing.T) {
 }
 
 // TestInjectTiebreakerMatches_Engi_SelfHeal verifies the self-heal path:
-// every TB row an earlier engine left that the tie rule does not hold and that
-// would block completion (scheduled, running, or completed without a recorded
-// winner, e.g. finalized as hikiwake via the decision endpoint) is removed,
-// while a completed TB row with a Winner is preserved.
+// a TB row an earlier engine left that the tie rule does not hold and that
+// would block completion while it is still scheduled with nothing scored is
+// removed. A row that is running, or was finished (with a Winner, or as a
+// hikiwake via the decision endpoint), is a result taken on a court and is
+// preserved (orphanedEngiTBRow); a moot drawn row blocks nothing
+// (drawnSupplementaryMoot).
 func TestInjectTiebreakerMatches_Engi_SelfHeal(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "engi-self-heal"
@@ -1134,8 +1136,8 @@ func TestInjectTiebreakerMatches_Engi_SelfHeal(t *testing.T) {
 		ids = append(ids, m.ID)
 	}
 	assert.NotContains(t, ids, spuriousTB, "spurious scheduled TB row must be removed")
-	assert.NotContains(t, ids, runningTB, "spurious running winnerless TB row must be removed")
-	assert.NotContains(t, ids, hikiwakeTB, "completed winnerless TB row must be removed")
+	assert.Contains(t, ids, runningTB, "a running TB row is on a court: it is never deleted")
+	assert.Contains(t, ids, hikiwakeTB, "a completed winnerless TB row is a recorded result: it is never deleted")
 	assert.Contains(t, ids, "Pool A-0", "regular match must be preserved")
 	assert.Contains(t, ids, completedTB, "completed TB row with a winner must be preserved")
 }

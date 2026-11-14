@@ -18,7 +18,7 @@
     "correction no longer holds level are moot (a drawn tie-break bout too): settled, not ruled, owing no lots.",
     "So is a bout whose level group lies outside the band a tie is broken in: its standings rows carry tieOutOfBand (engine.tieNeedsBreak).",
     "stuck is what the Pools tab's notice names: drawn and not settled.",
-    "ineligibleSides is the stamp a drawn tie-break or representative bout carries on the wire (the Go side bars those ids in the competitor statuses): two barred sides settle it, nobody can fight it. A representative bout settles that way only in a league (league: true on the case; the Go side reads it as poolLots.league), where the place it was for is then decided by the lots (barredDrawOwesLots), which is not this table's notice; in pools + knockout it waits for its lots as any drawn representative bout does.",
+    "ineligibleSides is the stamp a drawn tie-break or representative bout carries on the wire (the Go side bars those ids in the competitor statuses): two barred sides settle it, nobody can fight it. A representative bout settles that way only in a league (league: true on the case; the Go side reads it as poolLots.league), where the place it was for is then decided by the lots (barredDrawRuns), which is not this table's notice; in pools + knockout it waits for its lots as any drawn representative bout does.",
     "An individual's lots follow a tie-break round the same way: a round that orders its whole group outlives them, and one that leaves the group level (a pair unfought, or a circle) keeps them in force."
   ],
   "chusenCases": [

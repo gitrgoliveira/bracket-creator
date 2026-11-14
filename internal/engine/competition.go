@@ -60,7 +60,7 @@ const (
 // the band (tieNeedsBreak) to hold its tie-breaker and no tie-breaker, of
 // either kind, to have left one level without the lots (dhCycleExists), nor
 // been drawn because both its sides are barred without the lots
-// (barredDrawOwesLots): only 3rd can be shared, so a tie at 1st or 2nd (and at
+// (barredDrawRuns): only 3rd can be shared, so a tie at 1st or 2nd (and at
 // 3rd with joint 3rd places off) is never left to share its place. A corrupt
 // overrides.json comes back wrapping state.ErrCorruptOverrides.
 func (e *Engine) PoolsSettledNow(tx state.StoreTx, compID string) (PoolsVerdict, error) {
@@ -114,17 +114,19 @@ func (e *Engine) PoolsSettledNow(tx state.StoreTx, compID string) (PoolsVerdict,
 	return PoolsSettled, nil
 }
 
-// barredDrawLotsOwed reports whether a league tie in the band whose tie-breaker
-// was drawn because both its sides are barred still waits for its lots
-// (barredDrawOwesLots, with no rank in force over the group, chusenRecorded).
-// statuses are loaded with the lots (loadPoolLots) whenever a drawn
-// supplementary bout exists, the only case it can hold.
+// barredDrawLotsOwed reports whether a league tie whose tie-breaker was drawn
+// because both its sides are barred still waits for its lots: a run
+// (barredDrawRuns) at places in the band with no rank in force over it
+// (chusenRecorded). statuses are loaded with the lots (loadPoolLots) whenever a
+// drawn supplementary bout exists, the only case it can hold.
 func barredDrawLotsOwed(standings map[string][]state.PlayerStanding, matches []state.MatchResult, band breakBand, statuses map[string]domain.CompetitorStatus, isTeam bool) bool {
 	for poolName, poolStandings := range standings {
 		for _, positions := range detectPoolTies(poolStandings) {
 			group := standingsAt(poolStandings, positions)
-			if band(poolName, positions, group) && !chusenRecorded(group) && barredDrawOwesLots(group, matches, statuses, isTeam) {
-				return true
+			for _, run := range barredDrawRuns(group, positions, matches, statuses, isTeam) {
+				if band(poolName, run.positions, run.members) && !chusenRecorded(run.members) {
+					return true
+				}
 			}
 		}
 	}
@@ -165,7 +167,7 @@ func tieBreakOwed(comp *state.Competition, pools []helper.Pool, bracket *state.B
 // stay drawn. So may a tie-break bout whose two sides are both barred, an
 // ippon-shobu bout anywhere and a league's representative bout
 // (poolLots.barredDrawPlayed): nobody can fight it, and in a league the place
-// then goes to the lots (barredDrawOwesLots). It is the one owner of that rule, so the league's completion
+// then goes to the lots (barredDrawRuns). It is the one owner of that rule, so the league's completion
 // (poolMatchesSettled), a mixed pool's (poolCompletion), the auto-complete scan
 // (MaybeAutoCompletePools) and the engi self-heal (isBlockingEngiTBRow) cannot
 // drift inside Go; the reopen gate (drawnSupplementaryBout) stays on the raw

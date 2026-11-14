@@ -408,7 +408,7 @@ func TestLeagueCyclicRound_LotsFinishTheLeague(t *testing.T) {
 
 // "Record as drawn (neither can fight)" on a league tie-breaker is let through
 // for a team bout and an individual one alike: the place is then settled by
-// the lots (barredDrawOwesLots). A plain draw through the score door is still
+// the lots (barredDrawRuns). A plain draw through the score door is still
 // refused.
 func TestRefuseDrawnLeagueTiebreak_BothBarredDrawIsLetThrough(t *testing.T) {
 	league := &state.Competition{Format: state.CompFormatLeague}

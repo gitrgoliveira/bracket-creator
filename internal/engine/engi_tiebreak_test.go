@@ -308,6 +308,64 @@ func TestEngiHeal_KeepsTheBoutTheTieRuleHolds(t *testing.T) {
 	assert.Len(t, engiTBRows(t, store, id), 1)
 }
 
+// TestEngiHeal_KeepsABoutBeingFought pins that the self-heal never deletes a row
+// that is on a court: a tie-break bout whose pair a later correction made no
+// longer level is kept while it runs (a kendo row in the same state is kept),
+// and goes only while it is still scheduled with nothing scored.
+func TestEngiHeal_KeepsABoutBeingFought(t *testing.T) {
+	ann, ben, cas, dee := engiPlayer("Ann"), engiPlayer("Ben"), engiPlayer("Cas"), engiPlayer("Dee")
+	tb := func(status state.MatchStatus, flagsA int) state.MatchResult {
+		return state.MatchResult{ID: "Pool A-TB-1", SideA: cas.Name, SideB: dee.Name, SideAID: cas.ID, SideBID: dee.ID,
+			Status: status, Court: "A", FlagsA: flagsA}
+	}
+	cases := []struct {
+		name string
+		row  state.MatchResult
+		kept bool
+	}{
+		{"running", tb(state.MatchStatusRunning, 1), true},
+		{"scheduled with a score", tb(state.MatchStatusScheduled, 1), true},
+		{"scheduled, nothing scored", tb(state.MatchStatusScheduled, 0), false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			eng, store, _ := setupTestEngine(t)
+			id := "engi-heal-fought"
+			setupEngiComp(t, store, id, state.CompFormatLeague)
+			require.NoError(t, store.SavePools(id, []helper.Pool{
+				{PoolName: "Pool A", Players: []helper.Player{ann, ben, cas, dee}},
+			}))
+			// Cas and Dee are not level: the tie rule holds only Ann and Ben.
+			require.NoError(t, store.SavePoolMatches(id, []state.MatchResult{
+				engiBout("Pool A-0", ann, ben, 0, 3),
+				engiBout("Pool A-1", ann, cas, 3, 0),
+				engiBout("Pool A-2", ann, dee, 3, 0),
+				engiBout("Pool A-3", ben, cas, 3, 0),
+				engiBout("Pool A-4", ben, dee, 0, 3),
+				engiBout("Pool A-5", cas, dee, 3, 2),
+				tc.row,
+			}))
+
+			stored, err := store.LoadPoolMatches(id)
+			require.NoError(t, err)
+			owed, err := eng.engiHealOwed(id, loadComp(t, store, id), stored)
+			require.NoError(t, err)
+			assert.Equal(t, !tc.kept, owed)
+			_, err = eng.InjectTiebreakerMatches(id)
+			require.NoError(t, err)
+			var ids []string
+			for _, m := range engiTBRows(t, store, id) {
+				ids = append(ids, m.ID)
+			}
+			if tc.kept {
+				assert.Contains(t, ids, "Pool A-TB-1", "a bout on a court is never deleted")
+			} else {
+				assert.NotContains(t, ids, "Pool A-TB-1")
+			}
+		})
+	}
+}
+
 // TestEngiLeague_FinishedCorrectionThatMakesATieReopens pins that a finished
 // engi league is reconciled like any other (leagueStateBeforeWrite): a
 // correction that leaves a level place that counts puts the league back into

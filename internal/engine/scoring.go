@@ -2238,7 +2238,8 @@ func applyPoolRanksInForce(sorted []state.PlayerStanding, inForce map[string]int
 //
 //   - the kendo joint-3rd convention: with the joint-3rd rule enabled
 //     (state.Competition.EffectiveTwoThirdPlaces, bc-3rdp), a genuine
-//     Points-tie whose best finishing position is 3rd or lower, so both the
+//     Points-tie, or a run of one the bouts left level (tieBreakRuns), whose
+//     best finishing position is 3rd or lower, so both the
 //     standings table and the closing-ceremony podium show two (or more)
 //     equal 3rd places instead of relabeling the 4th finisher;
 //   - a tie outside the band a tie is broken in (TieOutOfBand, stamped by
@@ -2276,8 +2277,7 @@ func applyJointThirdRanks(comp *state.Competition, sorted []state.PlayerStanding
 		if slices.ContainsFunc(group, func(s state.PlayerStanding) bool { return s.IsOverridden }) {
 			continue
 		}
-		minRank := positions[0] + 1
-		jointThird := comp.EffectiveTwoThirdPlaces() && minRank >= 3
+		jointThird := comp.EffectiveTwoThirdPlaces()
 		outOfBand := !slices.ContainsFunc(group, func(s state.PlayerStanding) bool { return !s.TieOutOfBand })
 		if !jointThird && !outOfBand {
 			continue
@@ -2285,8 +2285,14 @@ func applyJointThirdRanks(comp *state.Competition, sorted []state.PlayerStanding
 		at := 0
 		for _, run := range tieBreakRuns(group, matches, comp.IsTeam()) {
 			place := positions[at] + 1
+			// The joint 3rd rule is judged on the run's own best place: a pair
+			// the bouts left level at 3rd and 4th shares 3rd even where the
+			// group it came from started at 1st.
+			shares := outOfBand || (jointThird && place >= 3)
 			for range run {
-				sorted[positions[at]].Rank = place
+				if shares {
+					sorted[positions[at]].Rank = place
+				}
 				at++
 			}
 		}

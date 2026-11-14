@@ -156,7 +156,7 @@ func refuseDrawnLeagueTiebreak(comp *state.Competition, matchID string, result *
 		// and an individual's ippon-shobu bout alike; it counts played while
 		// both sides stay barred (drawnTiebreakOfBarredSides), and the place
 		// it was for, which cannot be shared, goes to the lots the organiser
-		// enters on the chusen panel (barredDrawOwesLots).
+		// enters on the chusen panel (barredDrawRuns).
 		return nil
 	}
 	return wrapValidationErrorf(ErrTiebreakNeedsWinner, "%s", errTiebreakNeedsWinnerSentence)

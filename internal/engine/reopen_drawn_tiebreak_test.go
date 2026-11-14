@@ -177,10 +177,10 @@ func TestReopenRefusalNamesTiebreakOnlyForPool(t *testing.T) {
 }
 
 // A drawn representative bout whose group a chusen has ranked is settled by the
-// lots, and the league its ruling completed would stay complete over a running
-// bout, so the reopen is refused; before the lots it is fought again as usual,
-// and changing the lots first lifts the refusal.
-func TestReopenDrawnDaihyosen_RuledByChusenIsRefused(t *testing.T) {
+// lots the organiser entered. Fighting it again is allowed, after a warning that
+// its result replaces the lots for that place: the reopen without the
+// confirmation changes nothing, and with it the bout is open again.
+func TestReopenDrawnDaihyosen_RuledByChusenNeedsAConfirm(t *testing.T) {
 	const compID = "reopen-dh-ruled"
 	eng, store := setupTeamPoolComp(t, compID, true)
 	_, err := eng.InjectPoolDaihyosenMatches(compID)
@@ -211,9 +211,10 @@ func TestReopenDrawnDaihyosen_RuledByChusenIsRefused(t *testing.T) {
 	require.NoError(t, err)
 
 	_, err = eng.ReopenMatch(compID, dhID, "")
-	var verr *ValidationError
-	require.ErrorAs(t, err, &verr)
-	assert.Contains(t, verr.Error(), "drawing of lots")
+	var replaced *LotsReplacedError
+	require.ErrorAs(t, err, &replaced)
+	assert.Contains(t, replaced.Error(), "This replaces the lots you entered for 1st: ")
+	assert.Contains(t, replaced.Error(), "The bout's result will decide the place.")
 
 	matches, err := store.LoadPoolMatches(compID)
 	require.NoError(t, err)
@@ -222,4 +223,8 @@ func TestReopenDrawnDaihyosen_RuledByChusenIsRefused(t *testing.T) {
 			assert.Equal(t, state.MatchStatusCompleted, m.Status, "the refused reopen changed nothing")
 		}
 	}
+
+	_, err = eng.ReopenMatch(compID, dhID, "", ForceOptions{ConfirmLots: true})
+	require.NoError(t, err)
+	assert.NotEqual(t, state.MatchStatusCompleted, poolMatchStatus(t, store, compID, dhID), "the confirmed reopen opens the bout again")
 }

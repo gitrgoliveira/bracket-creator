@@ -156,11 +156,14 @@ function enrichPoolMatchWithComp(m, comp, poolNameOverride) {
 // lots the chusen panel asks for, which is that panel's notice, not this one.
 // In pools + knockout a representative bout with both sides barred waits for its
 // lots like any drawn one and stays named here. The lots ruled a drawn
-// daihyosen (daihyosenRuledByChusen): every team the pool's standings hold level
-// on points with its two sides carries a rank in force, i.e. its standings row is
-// isOverridden (the server marks only the ranks that still govern a tie no bout
-// settled, poolRanksInForce). Or it is moot (drawnSupplementaryMoot, a daihyosen
-// or a tie-break bout): a correction no longer holds its two sides level, or has
+// daihyosen or tie-break bout (drawnSupplementaryRuledByChusen): every
+// competitor the pool's standings hold level on points with its two sides
+// carries a rank in force, i.e. its standings row is isOverridden (the server
+// marks only the ranks that still govern a tie no bout settled,
+// poolRanksInForce). The lots are drawn outside the app and the organiser
+// enters the order they gave, so a side reinstated later does not reopen the
+// bout; lotsRuledBouts below lists those, for the notice that offers Fight it
+// again with its warning. Or it is moot (drawnSupplementaryMoot, a daihyosen or a tie-break bout): a correction no longer holds its two sides level, or has
 // moved their tie outside the band a tie is broken in (tieOutOfBand on the
 // standings rows, tieNeedsBreak in Go), so it decides no place. The pool is
 // judged by name and the teams by id only; a pool with no standings, or a side
@@ -170,39 +173,62 @@ function enrichPoolMatchWithComp(m, comp, poolNameOverride) {
 // Exported for vitest at __tests__/admin_pools.test.jsx.
 function drawnSupplementaryBouts(poolMatches, standings, isLeague = false) {
   const rows = poolMatches || [];
-  // lotsGroup in chusen.go: the rows level with both sides, or just the two
-  // sides when they are no longer level, or none when a side is not held.
-  const lotsGroup = (m) => {
-    const poolRows = (standings || {})[poolNameOf(m.id)] || [];
-    const rowOf = (id) => (id ? poolRows.find(s => s.player && s.player.id === id) : undefined);
-    const a = rowOf(m.sideAId);
-    const b = rowOf(m.sideBId);
-    if (!a || !b) return { group: null, level: false };
-    if (a.points !== b.points) return { group: [a, b], level: false };
-    return { group: poolRows.filter(s => s.points === a.points), level: true };
-  };
   // drawnTiebreakOfBarredSides in chusen.go: a tie-break bout (a league's
   // representative bout too) whose two sides are both barred elsewhere (the
   // server stamps ineligibleSides on it) cannot be fought, so its draw stands.
   const bothSidesBarred = (m) => (isLeague || !isPoolDaihyosenBout(m.id)) && !!(m.ineligibleSides && m.ineligibleSides.a && m.ineligibleSides.b);
   const settledWithoutRematch = (m) => {
     if (bothSidesBarred(m)) return true;
-    const { group, level } = lotsGroup(m);
+    const { group, level } = lotsGroupOf(standings, m);
     if (!group) return false;
     // Moot: any drawn supplementary bout whose sides are no longer level, or
     // whose level group lies outside the band a tie is broken in (the server
-    // marks those rows tieOutOfBand). Only a representative bout can be ruled
-    // by the lots.
-    return !level || group[0].tieOutOfBand || (isPoolDaihyosenBout(m.id) && group.every(s => s.isOverridden));
+    // marks those rows tieOutOfBand). Or the lots rule it: drawn outside the app
+    // and entered by the organiser, a recorded order over the whole level group
+    // settles a drawn tie-break bout as it does a representative one.
+    return !level || group[0].tieOutOfBand || group.every(s => s.isOverridden);
   };
-  return rows.filter(m => isSupplementaryBout(m.id) && m.status === "completed" && !nameOf(m.winner) && !settledWithoutRematch(m));
+  return rows.filter(m => isDrawnSupplementary(m) && !settledWithoutRematch(m));
+}
+
+// A supplementary bout finished with no winner: the draw nothing else decides.
+function isDrawnSupplementary(m) {
+  return isSupplementaryBout(m.id) && m.status === "completed" && !nameOf(m.winner);
+}
+
+// lotsGroup in chusen.go: the rows level with both of a bout's sides, or just
+// the two sides when they are no longer level, or none when a side is not held.
+function lotsGroupOf(standings, m) {
+  const poolRows = (standings || {})[poolNameOf(m.id)] || [];
+  const rowOf = (id) => (id ? poolRows.find(s => s.player && s.player.id === id) : undefined);
+  const a = rowOf(m.sideAId);
+  const b = rowOf(m.sideBId);
+  if (!a || !b) return { group: null, level: false };
+  if (a.points !== b.points) return { group: [a, b], level: false };
+  return { group: poolRows.filter(s => s.points === a.points), level: true };
+}
+
+// lotsRuledBouts: the drawn tie-break and daihyosen bouts the organiser's lots
+// settle (drawnSupplementaryRuledByChusen in chusen.go, the table's `ruled`):
+// every competitor level with the bout's two sides carries a rank in force. The
+// lots were drawn outside the app and entered by the organiser, so the app never
+// removes them and the bout counts as played; the organiser may still correct it,
+// after a warning that its result replaces the lots. The Pools tab lists these
+// beside the stuck ones so Fight it again and Open bout stay within reach.
+// Exported for vitest at __tests__/admin_pools.test.jsx.
+function lotsRuledBouts(poolMatches, standings) {
+  return (poolMatches || []).filter((m) => {
+    if (!isDrawnSupplementary(m)) return false;
+    const { group, level } = lotsGroupOf(standings, m);
+    return level && group.every(s => s.isOverridden);
+  });
 }
 
 // DrawnTieBreakNotice: names one such bout and the two ways on, fight it again
 // (the reopen: the draw is cleared and the bout runs on its court) or open it
 // to decide it by encho or hantei. Neither is forced: the pool stays as it is
 // until the operator chooses.
-function DrawnTieBreakNotice({ match, comp, password, onOpen }) {
+function DrawnTieBreakNotice({ match, comp, password, onOpen, byLots = false }) {
   const ctl = useMatchReopen({ match, password, isComplete: true, allowCourtForce: true });
   const what = isPoolDaihyosenBout(match.id) ? "daihyosen" : "tie-break bout";
   // A league has one table and no pools: "Pool A" is only its storage name.
@@ -211,11 +237,16 @@ function DrawnTieBreakNotice({ match, comp, password, onOpen }) {
   const effect = comp && comp.format === "mixed"
     ? "so the knockout places this pool decides stay empty"
     : "so the table keeps them tied";
+  // The lots the organiser entered decide this place, so the pair is not "still
+  // tied" and nothing here is stuck: the notice is the way back to the bout,
+  // which asks before its result replaces the lots.
   return (
-    <div className="alert alert--warn league-tiebreak" role="status" aria-live="polite" data-testid="drawn-tiebreak-notice">
-      <div className="league-tiebreak__title">A {what} was saved as a draw</div>
+    <div className={`alert ${byLots ? "alert--info" : "alert--warn"} league-tiebreak`} role="status" aria-live="polite" data-testid="drawn-tiebreak-notice">
+      <div className="league-tiebreak__title">A {what} was saved as a draw{byLots ? ", and your lots decide it" : ""}</div>
       <div className="league-tiebreak__desc">
-        {pool}{sides} are still tied, {effect}. Fight it again, or open it to decide it by encho or hantei.
+        {byLots
+          ? <>{pool}{sides}: the order you entered from the lots stands. Fight it again, or open it to decide it by encho or hantei. You are asked first, because its result then replaces the lots for that place.</>
+          : <>{pool}{sides} are still tied, {effect}. Fight it again, or open it to decide it by encho or hantei.</>}
       </div>
       <div className="league-tiebreak__actions">
         <button type="button" className="btn btn--sm btn--primary" disabled={ctl.busy || ctl.landed} onClick={() => ctl.reopen()}>
@@ -988,6 +1019,16 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
           onOpen={() => setScoreOpenId(m.id)}
         />
       ))}
+      {lotsRuledBouts(poolMatches, standings).map(m => (
+        <DrawnTieBreakNotice
+          key={m.id}
+          match={enrichPoolMatchWithComp(m, c)}
+          comp={c}
+          password={password}
+          onOpen={() => setScoreOpenId(m.id)}
+          byLots
+        />
+      ))}
       {chusenBanner}
       {circleNotice}
       {chusenRecordedPanel}
@@ -1047,4 +1088,4 @@ if (typeof window !== "undefined") {
 
 // ES export for the vitest suite: pure helpers only. The component
 // stays behind window.* to match the rest of admin_*.jsx.
-export { enrichPoolMatchWithComp, poolMatchesForPool, groupTeamIds, drawnSupplementaryBouts, circleGroupLine };
+export { enrichPoolMatchWithComp, poolMatchesForPool, groupTeamIds, drawnSupplementaryBouts, lotsRuledBouts, circleGroupLine };

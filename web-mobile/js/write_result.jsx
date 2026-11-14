@@ -1065,6 +1065,34 @@ export function leagueFinishedConfirm({ removedCourts, reopen } = {}) {
     };
 }
 
+// The lots warning: the organiser drew lots outside the app and entered the
+// order they gave, and a result for the bout those lots settled replaces them
+// for that place. The app never draws, changes or deletes lots itself, so a
+// fight it again, a correction or a decision on that bout is answered 409
+// {error: "lots_replaced", message} until it carries the request-only
+// confirmLots. The server words the sentence (the place and the order entered:
+// "This replaces the lots you entered for 1st: Bea 1st, Aki 2nd. The bout's
+// result will decide the place."); api_client.jsx parses the refusal onto the
+// thrown Error as `.lotsReplaced`, which lotsReplacedRefusal reads, and
+// attemptScoreWrite shows lotsReplacedConfirm and resends with confirmLots on
+// Replace the lots. The lots stay stored; only the bout's result then decides.
+export function lotsReplacedRefusal(err) {
+    return (err && err.lotsReplaced) || null;
+}
+
+// The confirm's copy: the server's own sentence, so the words are said once.
+export function lotsReplacedConfirm({ message } = {}) {
+    return {
+        message: message || 'This replaces the lots you entered. The bout\'s result will decide the place.',
+        confirmLabel: 'Replace the lots',
+        cancelLabel: 'Cancel',
+        danger: true,
+    };
+}
+
+// A declined confirmation: nothing was changed, and the cancel says so.
+export const LOTS_REPLACED_CANCELLED = 'Cancelled: the lots you entered stand and the bout was left unchanged.';
+
 // The court console never holds a running match and an open correction at
 // once (operator ruling 2026-09-27, bc-crpn). Each refused tap names the other
 // one, with the label string the caller built (scoreRowMatchName), and names
@@ -1232,6 +1260,12 @@ export async function attemptScoreWrite({
         const league = !result.confirmFinished ? leagueFinishedRefusal(e) : null;
         if (league) {
             return { refusal: league, buildConfirm: leagueFinishedConfirm, flagName: 'confirmFinished', cancelMarker: 'leagueFinishedCancelled' };
+        }
+        // A result over lots the organiser entered: asked on every host, once
+        // per patch, like the finished-league warning.
+        const lots = !result.confirmLots ? lotsReplacedRefusal(e) : null;
+        if (lots) {
+            return { refusal: { message: e.message, ...lots }, buildConfirm: lotsReplacedConfirm, flagName: 'confirmLots', cancelMarker: 'lotsReplacedCancelled' };
         }
         return null;
     };

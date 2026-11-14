@@ -718,6 +718,11 @@ type ForceOptions struct {
 	// set after the write it would be a result-group field its log did not
 	// replay to. Taken only when the stored match holds no correction reason.
 	ReopenReason string
+	// ConfirmLots is the organiser's "Replace the lots" after a *LotsReplacedError:
+	// a write that gives a drawn tie-breaker bout a winner, or reopens it, while the
+	// lots they entered rule it (drawnSupplementaryRuledByChusen) lands, and the
+	// bout's result decides the place. Request-only, never stored.
+	ConfirmLots bool
 }
 
 // HoldReasonOlderRevision is the history reason of a previous build's running

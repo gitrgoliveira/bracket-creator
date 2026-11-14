@@ -97,9 +97,10 @@ func assertDistinctRanks(t *testing.T, standings []state.PlayerStanding) {
 
 // An individual league's ippon-shobu bout for 1st between two barred
 // competitors is recorded as the draw nobody fought. That never shares 1st: it
-// counts as played only while both stay barred, the lots are then offered (with
-// no further round to fight), and once they are entered the league finishes
-// with every place distinct. A side reinstated opens the bout again.
+// counts as played while both are barred, the lots are then offered (with no
+// further round to fight), and once the organiser has entered the order the lots
+// gave, the league finishes with every place distinct. A side reinstated
+// afterwards changes nothing: the app never overturns a recorded lots result.
 func TestIndividualLeague_BothBarredTiebreakDrawOwesTheLots(t *testing.T) {
 	const compID = "ind-barred-tb"
 	eng, store, tbID := barredTiebreakLeague(t, compID)
@@ -130,7 +131,7 @@ func TestIndividualLeague_BothBarredTiebreakDrawOwesTheLots(t *testing.T) {
 	assert.Equal(t, state.CompStatusComplete, loadComp(t, store, compID).Status)
 
 	barCompetitor(t, store, compID, "ben-id", false)
-	assert.Equal(t, PoolsMatchOpen, poolsVerdictNow(t, eng, store, compID), "a side reinstated opens the bout again")
+	assert.Equal(t, PoolsSettled, poolsVerdictNow(t, eng, store, compID), "a side reinstated does not undo the lots the organiser entered")
 }
 
 // A team league's representative bout for 1st between two barred teams is
@@ -213,18 +214,127 @@ func finishedBarredTiebreakLeague(t *testing.T, compID string) (*Engine, *state.
 	return eng, store, tbID
 }
 
-// A side reinstated after the league finished on the barred draw opens the bout
-// again, so the pass that follows the reinstatement puts the league back into
-// match play (the tie owes a bout once more).
-func TestIndividualLeague_ReinstatingABarredSideReopensTheFinishedLeague(t *testing.T) {
+// A side reinstated after the league finished on the barred draw changes
+// nothing, as for a team league: the lots were drawn outside the app and the
+// organiser entered them, so the app does not reopen the league, the lots stay
+// listed as recorded and the organiser can still correct them.
+func TestIndividualLeague_ReinstatingABarredSideKeepsTheLotsInForce(t *testing.T) {
 	const compID = "ind-barred-reinstate"
 	eng, store, _ := finishedBarredTiebreakLeague(t, compID)
 
 	barCompetitor(t, store, compID, "ben-id", false)
 	outcome, err := eng.MaybeAutoCompletePools(compID)
 	require.NoError(t, err)
-	assert.Equal(t, AutoCompleteStarted, outcome, "the league is running again")
-	assert.Equal(t, state.CompStatusPools, loadComp(t, store, compID).Status)
+	assert.NotEqual(t, AutoCompleteStarted, outcome, "the league is not put back into play")
+	assert.Equal(t, state.CompStatusComplete, loadComp(t, store, compID).Status)
+
+	report, err := eng.ChusenStatus(compID)
+	require.NoError(t, err)
+	assert.Empty(t, report.Pending)
+	require.Len(t, report.Recorded, 1, "the lots that decide 1st can still be corrected")
+	assert.ElementsMatch(t, []string{"Ayu", "Ben"}, chusenTeamNames(report.Recorded[0]))
+}
+
+// lotsReplacedSentenceForAyuAndBen is what the organiser is told before the
+// bout the lots settled is fought again: the place and the order they entered.
+const lotsReplacedSentenceForAyuAndBen = "This replaces the lots you entered for 1st: Ayu 1st, Ben 2nd. The bout's result will decide the place."
+
+// Fighting the drawn tie-breaker again is allowed once a side is reinstated, but
+// only after a warning that the bout's result replaces the lots the organiser
+// entered: without the confirmation nothing changes, with it the bout is open
+// again and the lots stay stored.
+func TestIndividualLeague_ReopeningTheBoutTheLotsSettledNeedsAConfirm(t *testing.T) {
+	const compID = "ind-barred-reopen-confirm"
+	eng, store, tbID := finishedBarredTiebreakLeague(t, compID)
+	barCompetitor(t, store, compID, "ben-id", false)
+
+	_, err := eng.ReopenMatch(compID, tbID, "fight it again")
+	var replaced *LotsReplacedError
+	require.ErrorAs(t, err, &replaced)
+	assert.Equal(t, lotsReplacedSentenceForAyuAndBen, replaced.Error())
+	assert.Equal(t, tbID, replaced.MatchID)
+	assert.Equal(t, state.CompStatusComplete, loadComp(t, store, compID).Status, "the refused reopen changed nothing")
+
+	_, err = eng.ReopenMatch(compID, tbID, "fight it again", ForceOptions{ConfirmLots: true})
+	require.NoError(t, err)
+	assert.Equal(t, state.MatchStatusScheduled, poolMatchStatus(t, store, compID, tbID),
+		"Ayu is still barred, so the bout is scheduled (the console shows the barred notice), not running")
+	overrides, err := store.LoadOverrides(compID)
+	require.NoError(t, err)
+	assert.Equal(t, map[string]int{"id:ayu-id": 1, "id:ben-id": 2}, overrides.PoolRanks["Pool A"], "the lots stay stored")
+}
+
+// A fusensho on the drawn tie-breaker, after a side is reinstated, is warned about
+// the same way. Confirmed, the bout's result decides 1st: the lots stop applying
+// to it, though they stay stored, and the league stays finished on the result.
+func TestIndividualLeague_DecisionOverTheLotsNeedsAConfirm(t *testing.T) {
+	const compID = "ind-barred-fusensho-confirm"
+	eng, store, tbID := finishedBarredTiebreakLeague(t, compID)
+	barCompetitor(t, store, compID, "ben-id", false)
+
+	_, _, err := eng.RecordDecision(compID, tbID, string(domain.DecisionFusensho), "shiro", "", nil)
+	var replaced *LotsReplacedError
+	require.ErrorAs(t, err, &replaced)
+	assert.Equal(t, lotsReplacedSentenceForAyuAndBen, replaced.Error())
+	assert.Empty(t, poolMatchWinner(t, store, compID, tbID), "the bout stays drawn")
+	assert.Equal(t, state.CompStatusComplete, loadComp(t, store, compID).Status)
+
+	_, _, err = eng.RecordDecisionWithOptions(compID, tbID, string(domain.DecisionFusensho), "shiro", "", nil, ForceOptions{ConfirmLots: true})
+	require.NoError(t, err)
+	assert.NotEmpty(t, poolMatchWinner(t, store, compID, tbID), "the bout's result decides the place")
+	overrides, err := store.LoadOverrides(compID)
+	require.NoError(t, err)
+	assert.NotEmpty(t, overrides.PoolRanks["Pool A"], "the lots stay stored")
+}
+
+// A score write that gives the drawn bout a winner is warned about by the same
+// owner, and lands with the confirmation.
+func TestIndividualLeague_ScoreOverTheLotsNeedsAConfirm(t *testing.T) {
+	const compID = "ind-barred-score-confirm"
+	eng, store, tbID := finishedBarredTiebreakLeague(t, compID)
+	barCompetitor(t, store, compID, "ben-id", false)
+	barCompetitor(t, store, compID, "ayu-id", false)
+	fought := func() *state.MatchResult {
+		return &state.MatchResult{
+			Status: state.MatchStatusCompleted, Winner: "Ben", WinnerID: "ben-id", IpponsB: []string{"M"},
+			CorrectionReason: "fought it",
+		}
+	}
+
+	_, err := eng.RecordMatchResultWithIneligibility(compID, tbID, fought())
+	var replaced *LotsReplacedError
+	require.ErrorAs(t, err, &replaced)
+	assert.Empty(t, poolMatchWinner(t, store, compID, tbID))
+
+	_, err = eng.RecordMatchResultWithIneligibility(compID, tbID, fought(), ForceOptions{ConfirmLots: true})
+	require.NoError(t, err)
+	assert.Equal(t, "Ben", poolMatchWinner(t, store, compID, tbID))
+}
+
+func poolMatchStatus(t *testing.T, store *state.Store, compID, matchID string) state.MatchStatus {
+	t.Helper()
+	all, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	for _, m := range all {
+		if m.ID == matchID {
+			return m.Status
+		}
+	}
+	t.Fatalf("no match %s", matchID)
+	return ""
+}
+
+func poolMatchWinner(t *testing.T, store *state.Store, compID, matchID string) string {
+	t.Helper()
+	all, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	for _, m := range all {
+		if m.ID == matchID {
+			return m.Winner
+		}
+	}
+	t.Fatalf("no match %s", matchID)
+	return ""
 }
 
 // A drawn tie-break bout reopened on a finished league (its row no longer
@@ -424,7 +534,7 @@ func TestIndividualLeague_BarredDrawBelowThePodiumBand(t *testing.T) {
 
 // Lots that settled a team league's both-barred representative bout stay
 // listed, and so correctable, when one of the two teams is reinstated: the bout
-// stays settled on those lots (daihyosenRuledByChusen), so the league stays
+// stays settled on those lots (drawnSupplementaryRuledByChusen), so the league stays
 // finished, and the place is still the lots' (decision F2).
 func TestTeamLeague_ReinstatedBarredDrawKeepsItsLotsCorrectable(t *testing.T) {
 	const compID = "team-barred-dh-reinstated"

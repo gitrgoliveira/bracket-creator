@@ -15,7 +15,7 @@ import {
 export { OWN_START, OWN_REOPEN, OWN_REQUEUE, OWN_REP, OWN_REFUSED };
 import {
   writeDidNotLand, writeRetryable, decisionWord,
-  attemptScoreWrite, DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED, DOWNSTREAM_KNOCKOUT_REOPEN_CANCELLED, LEAGUE_FINISHED_REOPEN_CANCELLED, downstreamKnockoutReopenedNotice,
+  attemptScoreWrite, DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED, DOWNSTREAM_KNOCKOUT_REOPEN_CANCELLED, LEAGUE_FINISHED_REOPEN_CANCELLED, LOTS_REPLACED_CANCELLED, downstreamKnockoutReopenedNotice,
   courtBusyMessage, courtBusyReopenWarning, heldWriteDiscardLabel, heldWriteDiscardConfirm, queuedNotice,
   tapNotAppliedText, tapOutcomeQuiet, writePending, writeWasRefused,
 } from './write_result.jsx';
@@ -973,6 +973,11 @@ function makeSubmitDecision({
         if (mountedRef.current) setDecisionErr(DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED);
         return;
       }
+      // The organiser declined the lots warning: the bout and the lots stand.
+      if (e && e.lotsReplacedCancelled) {
+        if (mountedRef.current) setDecisionErr(LOTS_REPLACED_CANCELLED);
+        return;
+      }
       // Any other refusal is shown as the server worded it; nothing is
       // retried with a stronger flag.
       if (mountedRef.current) setDecisionErr(msg);
@@ -1843,7 +1848,11 @@ function makeUnsavedProbe(unsavedRef, discardRef) {
 //     declining leaves everything as it was and says so in `err`;
 //   - a match of a finished league (league_finished): the same loop asks the
 //     finished-league confirm worded as a reopen and retries with
-//     confirmFinished, the way a correction of that match is.
+//     confirmFinished, the way a correction of that match is;
+//   - a drawn tie-breaker the organiser's lots settled (lots_replaced): the
+//     same loop asks the lots confirm (the server's sentence: the place and the
+//     order entered) and retries with confirmLots; declining leaves the bout
+//     and the lots as they were and says so in `err`.
 // Every other refusal is the server's sentence, shown verbatim in `err`.
 function useMatchReopen({ match, password, isComplete, own, unsaved = false, onDiscard, allowCourtForce = false }) {
   const mountedRef = useRef(true);
@@ -1875,6 +1884,8 @@ function useMatchReopen({ match, password, isComplete, own, unsaved = false, onD
   // The same for the finished league's confirmation (a write sent with
   // confirmFinished), so a court-busy remedy after it does not ask again.
   const finishedConfirmedRef = useRef(false);
+  // And for the lots confirmation (a write sent with confirmLots).
+  const lotsConfirmedRef = useRef(false);
 
   // Once the match reopens (status flips to running), a stale error or
   // conflict describes a completed-state action that no longer applies. When it
@@ -1897,6 +1908,11 @@ function useMatchReopen({ match, password, isComplete, own, unsaved = false, onD
       setErr(LEAGUE_FINISHED_REOPEN_CANCELLED);
       return;
     }
+    if (e && e.lotsReplacedCancelled) {
+      setConflict(null);
+      setErr(LOTS_REPLACED_CANCELLED);
+      return;
+    }
     const msg = String(e?.message || "Failed to reopen match");
     if (e?.code === "court_busy" && e?.matchId) {
       setErr("");
@@ -1917,6 +1933,7 @@ function useMatchReopen({ match, password, isComplete, own, unsaved = false, onD
         force: confirmedRef.current,
         // The finished league's confirmation stands for the remedy that follows.
         finished: finishedConfirmedRef.current,
+        lots: lotsConfirmedRef.current,
       });
       return;
     }
@@ -1932,14 +1949,16 @@ function useMatchReopen({ match, password, isComplete, own, unsaved = false, onD
     const n = downstreamKnockoutReopenedNotice(ids);
     if (n && mountedRef.current) setNotice(n);
   };
-  const run = (call, reason, force, onRefusal, onForced, forceCourt = false, confirmFinished = false) => attemptScoreWrite({
+  const run = (call, reason, force, onRefusal, onForced, forceCourt = false, confirmFinished = false, confirmLots = false) => attemptScoreWrite({
     recordScore: (_compId, _matchId, result, pw, _match, o) => {
       if (result.confirmFinished) finishedConfirmedRef.current = true;
+      if (result.confirmLots) lotsConfirmedRef.current = true;
       return call(pw, {
         reason,
         force: !!result.forceDownstreamReopen,
         forceCourt: !!result.forceCourt,
         confirmFinished: !!result.confirmFinished,
+        confirmLots: !!result.confirmLots,
         seen: match.scoreVersion || 0,
         onRefusal: o && o.onRefusal,
       });
@@ -1958,6 +1977,7 @@ function useMatchReopen({ match, password, isComplete, own, unsaved = false, onD
       ...(force ? { forceDownstreamReopen: true } : {}),
       ...(forceCourt ? { forceCourt: true } : {}),
       ...(confirmFinished ? { confirmFinished: true } : {}),
+      ...(confirmLots ? { confirmLots: true } : {}),
     },
     password: resolveDecisionPassword(password),
     match,
@@ -1991,6 +2011,7 @@ function useMatchReopen({ match, password, isComplete, own, unsaved = false, onD
     setNotice("");
     confirmedRef.current = false;
     finishedConfirmedRef.current = false;
+    lotsConfirmedRef.current = false;
     setBusy(true);
     // The editor's own reopen (useOwnStatus): a draft it holds is not kept as
     // if another device had reopened the match.
@@ -2046,6 +2067,7 @@ function useMatchReopen({ match, password, isComplete, own, unsaved = false, onD
         forced,
         forceCourt,
         c.finished,
+        c.lots,
       );
       if (own) own.settle(token, res, { rejections: false });
       if (!mountedRef.current) return;

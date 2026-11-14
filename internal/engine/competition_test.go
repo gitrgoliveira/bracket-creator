@@ -81,11 +81,12 @@ func TestPoolMatchesSettled(t *testing.T) {
 	assert.False(t, poolMatchesSettled([]state.MatchResult{drawnDH}, poolLots{}), "no standings to judge the group on, no settlement")
 }
 
-// TestDaihyosenRuledByChusen_SharedCases drives the lots from the chusenCases of
+// TestDrawnSupplementaryRuledByChusen_SharedCases drives the lots from the chusenCases of
 // the same table the Pools tab's JS twin reads: which recorded ranks are in
-// force (poolRanksInForce), whether they rule the drawn representative bout
-// (daihyosenRuledByChusen), and whether the bout holds the pool (poolMatchSettled).
-func TestDaihyosenRuledByChusen_SharedCases(t *testing.T) {
+// force (poolRanksInForce), whether they rule the drawn representative or
+// tie-break bout (drawnSupplementaryRuledByChusen), and whether the bout holds
+// the pool (poolMatchSettled).
+func TestDrawnSupplementaryRuledByChusen_SharedCases(t *testing.T) {
 	raw, err := os.ReadFile(filepath.Join("testdata", "drawn_supplementary_cases.json"))
 	require.NoError(t, err)
 	var table struct {
@@ -143,7 +144,7 @@ func TestDaihyosenRuledByChusen_SharedCases(t *testing.T) {
 			}
 			assert.ElementsMatch(t, tc.InForce, gotInForce, "ranks in force")
 			standings := map[string][]state.PlayerStanding{poolName: rows}
-			assert.Equal(t, tc.Ruled, daihyosenRuledByChusen(&m, standings), "ruled by the lots")
+			assert.Equal(t, tc.Ruled, drawnSupplementaryRuledByChusen(&m, standings), "ruled by the lots")
 			statuses := map[string]domain.CompetitorStatus{}
 			for id, reason := range map[string]string{tc.SideAID: tc.IneligibleSides.A, tc.SideBID: tc.IneligibleSides.B} {
 				if id != "" && reason != "" {

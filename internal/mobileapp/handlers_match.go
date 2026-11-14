@@ -740,6 +740,10 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			// league's result land (see scoreRequestBody.ConfirmFinished);
 			// without it the entry fails with reason "league_finished".
 			ConfirmFinished bool `json:"confirmFinished"`
+			// ConfirmLots is the organiser's "Replace the lots": a write that gives a drawn
+			// tie-breaker bout a winner, or reopens it, over lots they entered lands (409
+			// lots_replaced without it). Request-only, never stored.
+			ConfirmLots bool `json:"confirmLots"`
 			// ChangedGroups is this entry's `changed`, the groups it changes
 			// (bc-mrgc), with the same meaning and default as /score's.
 			ChangedGroups []string `json:"changed"`
@@ -962,8 +966,9 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 				// not: this is the organiser's tooling.
 				judgePicks := introducesJudgedMember(results[i].SubResults, snap, false)
 				status, err := eng.RecordMatchResultWithIneligibilityTx(stx, id, results[i].ID, &results[i].MatchResult, engine.ForceOptions{
-					Force:    results[i].ForceDownstreamReopen,
-					Reopened: &reopenedThisItem,
+					Force:       results[i].ForceDownstreamReopen,
+					ConfirmLots: results[i].ConfirmLots,
+					Reopened:    &reopenedThisItem,
 				})
 				if errors.Is(err, engine.ErrMatchSuperseded) {
 					// Committed, not aborted: the entry's history record is
@@ -1000,6 +1005,7 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 				var alreadyIneligErr *engine.AlreadyIneligibleError
 				var landedRefusal *landedWriteRefusal
 				var leagueRefusal *leagueFinishedRefusal
+				var lotsReplaced *engine.LotsReplacedError
 				switch {
 				case errors.As(err, &leagueRefusal):
 					// A correction of a finished league's result, refused
@@ -1007,6 +1013,12 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 					// stores nothing, the rest of the batch is unaffected.
 					bulkErr.Reason = leagueFinishedCode
 					bulkErr.Error = LeagueFinishedMessage
+				case errors.As(err, &lotsReplaced):
+					// A result that would replace the lots the organiser entered
+					// for a drawn tie-breaker, refused until the entry carries
+					// confirmLots: the entry stores nothing.
+					bulkErr.Reason = lotsReplacedCode
+					bulkErr.Error = lotsReplaced.Msg
 				case errors.Is(err, engine.ErrTiebreakNeedsWinner):
 					// A league tie-breaker finished with no winner: the code rides in
 					// Reason (as the 400 body's code on the other doors), the sentence in Error.
@@ -1144,6 +1156,10 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			// land, same field name and contract as the score-write
 			// endpoint's (see scoreRequestBody.ConfirmFinished).
 			ConfirmFinished bool `json:"confirmFinished"`
+			// ConfirmLots is the organiser's "Replace the lots": a write that gives a drawn
+			// tie-breaker bout a winner, or reopens it, over lots they entered lands (409
+			// lots_replaced without it). Request-only, never stored.
+			ConfirmLots bool `json:"confirmLots"`
 			// writeTag is the optional writeId and basis (bc-evts).
 			writeTag
 		}
@@ -1316,8 +1332,9 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			}
 			result.Changed = changed
 			engStatus, err = eng.RecordMatchResultWithIneligibilityTx(stx, id, mid, &result, engine.ForceOptions{
-				Force:    req.ForceDownstreamReopen,
-				Reopened: &reopenedDownstream,
+				Force:       req.ForceDownstreamReopen,
+				ConfirmLots: req.ConfirmLots,
+				Reopened:    &reopenedDownstream,
 			})
 			return nil
 		})
@@ -1339,7 +1356,7 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 				respondSuperseded(c, result.Merge.HeldGroups(), result.Merge.HeldReason(), err)
 				return
 			}
-			if respondIfLeagueFinished(c, err) {
+			if respondIfLeagueFinished(c, err) || respondIfLotsReplaced(c, err) {
 				return
 			}
 			if errors.Is(err, engine.ErrMatchSideMismatch) {
@@ -1599,6 +1616,10 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			// league_finished (request-only, never stored): the reopen puts a
 			// finished league back into match play.
 			ConfirmFinished bool `json:"confirmFinished"`
+			// ConfirmLots is the organiser's "Replace the lots": a write that gives a drawn
+			// tie-breaker bout a winner, or reopens it, over lots they entered lands (409
+			// lots_replaced without it). Request-only, never stored.
+			ConfirmLots bool `json:"confirmLots"`
 			// The optional writeId and basis (bc-evts F1).
 			writeTag
 		}
@@ -1647,9 +1668,10 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 		// has to remember to wrap the call.
 		var reopenedDownstream []engine.ReopenedMatch
 		restored, err := eng.ReopenMatch(id, mid, reason, body.tagInto(engine.ForceOptions{
-			Force:      body.ForceDownstreamReopen,
-			Reopened:   &reopenedDownstream,
-			ForceCourt: body.ForceCourt,
+			Force:       body.ForceDownstreamReopen,
+			ConfirmLots: body.ConfirmLots,
+			Reopened:    &reopenedDownstream,
+			ForceCourt:  body.ForceCourt,
 		}))
 		if err != nil {
 			var notFoundErr *engine.NotFoundError
@@ -1667,6 +1689,9 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			case respondIfDownstreamKnockoutPlayed(c, err):
 				// A downstream knockout match has its own result: the
 				// operator is told and may retry with forceDownstreamReopen.
+			case respondIfLotsReplaced(c, err):
+				// The bout is a drawn tie-breaker the organiser's lots
+				// settled: warned about, and reopened on confirmLots.
 			case errors.Is(err, engine.ErrReopenDownstreamFought):
 				// Defensive backstop only (retractPropagatedWinner's
 				// re-check at the mutation point); the two typed errors
@@ -1747,6 +1772,10 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			ForceDownstreamReopen bool   `json:"forceDownstreamReopen"`
 			// ConfirmFinished: as on reopen, for the target's league.
 			ConfirmFinished bool `json:"confirmFinished"`
+			// ConfirmLots is the organiser's "Replace the lots": a write that gives a drawn
+			// tie-breaker bout a winner, or reopens it, over lots they entered lands (409
+			// lots_replaced without it). Request-only, never stored.
+			ConfirmLots bool `json:"confirmLots"`
 			// The optional writeId and basis (bc-evts F1), the target's.
 			writeTag
 		}
@@ -1788,8 +1817,9 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 
 		var reopenedDownstream []engine.ReopenedMatch
 		restored, err := eng.RequeueBlockerAndReopen(id, mid, body.BlockerCompID, body.BlockerMatchID, reason, body.tagInto(engine.ForceOptions{
-			Force:    body.ForceDownstreamReopen,
-			Reopened: &reopenedDownstream,
+			Force:       body.ForceDownstreamReopen,
+			ConfirmLots: body.ConfirmLots,
+			Reopened:    &reopenedDownstream,
 		}))
 		if err != nil {
 			var notFoundErr *engine.NotFoundError
@@ -1837,6 +1867,9 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 				// Refused BEFORE the revert (checkTargetReopenable runs first),
 				// so the blocker still holds its score; the operator may retry
 				// with forceDownstreamReopen once they have confirmed.
+			case respondIfLotsReplaced(c, err):
+				// Refused BEFORE the revert too (the same pre-check): the
+				// blocker keeps its score until confirmLots is sent.
 			case errors.As(err, &courtBusyErr):
 				// A match OTHER than the one we requeued still holds the court.
 				respondCourtBusy(c, store, courtBusyErr, courtBusyRemedyReopen)
@@ -3655,6 +3688,12 @@ type scoreRequestBody struct {
 	// never reaches it: their write over a finished match is refused first
 	// (result_finalized).
 	ConfirmFinished bool `json:"confirmFinished"`
+	// ConfirmLots is the organiser's "Replace the lots": a write that gives a drawn
+	// tie-breaker bout a winner, or reopens it, over lots they entered lands (409
+	// lots_replaced without it). Request-only, never stored. A participant never
+	// reaches it, as with ConfirmFinished: a drawn bout is a finished match, so
+	// their write over it is refused first (result_finalized).
+	ConfirmLots bool `json:"confirmLots"`
 	// ClearWithdrawal marks a completed correction that removes a withdrawal
 	// or default win recorded by mistake: the payload is the real result and
 	// replaces the ruling (state.MatchResult.ClearsWithdrawal,
@@ -4118,10 +4157,11 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 					}
 				}
 				engStatus, engErr = eng.RecordMatchResultWithIneligibilityTx(stx, id, mid, result, engine.ForceOptions{
-					Force:      body.ForceDownstreamReopen,
-					Reopened:   &reopenedDownstream,
-					StartOnly:  body.StartOnly,
-					ForceCourt: body.ForceCourt,
+					Force:       body.ForceDownstreamReopen,
+					ConfirmLots: body.ConfirmLots,
+					Reopened:    &reopenedDownstream,
+					StartOnly:   body.StartOnly,
+					ForceCourt:  body.ForceCourt,
 					// A participant's exact resend of a finish changes nothing,
 					// so it leaves no history line to loop.
 					NoReplayHistory: selfReported,
@@ -4199,7 +4239,7 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 				c.JSON(refusal.status, refusal.body())
 				return
 			}
-			if respondIfLeagueFinished(c, engErr) {
+			if respondIfLeagueFinished(c, engErr) || respondIfLotsReplaced(c, engErr) {
 				return
 			}
 			if errors.Is(engErr, engine.ErrMatchSideMismatch) {

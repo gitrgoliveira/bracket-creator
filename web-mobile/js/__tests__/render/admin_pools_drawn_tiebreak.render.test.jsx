@@ -118,25 +118,57 @@ describe('AdminPools: a tie-break bout saved as a draw', () => {
   });
 
   // Once a chusen has ranked the tied teams (their standings rows carry
-  // isOverridden) the lots decided the place, so the drawn daihyosen is settled
-  // and no notice names it. A drawn tie-break bout is not ruled by a chusen.
+  // isOverridden) the lots decided the place: the pool is settled and nothing is
+  // stuck, so the "still tied" notice is gone. The lots were drawn outside the
+  // app and the organiser entered the order they gave, so the bout stays within
+  // reach for a correction: the notice says the lots decide it and Fight it
+  // again asks before its result replaces them.
   describe('on a team competition with a chusen recorded', () => {
     const team = { kind: 'team', teamSize: 3 };
     const row = (id, name) => ({ player: { id, name }, points: 2, isOverridden: true });
     const standings = { 'Pool A': [row('a', 'Bea'), row('b', 'Cal')] };
     const chusen = { candidates: [], recorded: [{ poolName: 'Pool A', teamNames: ['Bea', 'Cal'], teams: [{ id: 'a', name: 'Bea' }, { id: 'b', name: 'Cal' }], ranks: [1, 2], minPosition: 1 }] };
-    const api = () => ({ chusenCandidates: vi.fn().mockResolvedValue(chusen) });
+    const api = (extra = {}) => ({ chusenCandidates: vi.fn().mockResolvedValue(chusen), ...extra });
 
-    it('shows no notice for the drawn daihyosen', async () => {
-      await mount([bout('Pool A-DH-0')], 'mixed', team, api(), standings);
+    it.each([
+      ['daihyosen', 'Pool A-DH-0', 'A daihyosen was saved as a draw, and your lots decide it'],
+      ['tie-break bout', 'Pool A-TB-0', 'A tie-break bout was saved as a draw, and your lots decide it'],
+    ])('names the drawn %s as one the lots decide, never as still tied', async (_what, id, title) => {
+      await mount([bout(id)], 'mixed', team, api(), standings);
       await waitFor(() => expect(window.API.chusenCandidates).toHaveBeenCalled());
-      expect(screen.queryByTestId('drawn-tiebreak-notice')).toBeNull();
+      expect(screen.getByText(title)).toBeTruthy();
+      const text = screen.getByTestId('drawn-tiebreak-notice').textContent;
+      expect(text).toMatch(/the order you entered from the lots stands/);
+      expect(text).toMatch(/its result then replaces the lots for that place/);
+      expect(text).not.toMatch(/still tied|keeps them tied|stay empty/);
+      expect(screen.getByRole('button', { name: /Fight it again/ })).toBeTruthy();
+      expect(screen.getByRole('button', { name: 'Open bout' })).toBeTruthy();
     });
 
-    it('still shows the notice for a drawn tie-break bout', async () => {
-      await mount([bout('Pool A-TB-0')], 'mixed', team, api(), standings);
-      await waitFor(() => expect(window.API.chusenCandidates).toHaveBeenCalled());
-      expect(screen.getByTestId('drawn-tiebreak-notice')).toBeTruthy();
+    it('Fight it again asks first, and on Replace the lots reopens with confirmLots', async () => {
+      const sentence = "This replaces the lots you entered for 1st: Bea 1st, Cal 2nd. The bout's result will decide the place.";
+      const refused = Object.assign(new Error(sentence), { code: 'lots_replaced', lotsReplaced: { matchId: 'Pool A-TB-0' } });
+      const reopenMatch = vi.fn().mockRejectedValueOnce(refused).mockResolvedValue({});
+      window.confirmDialog = vi.fn().mockResolvedValue(true);
+      await mount([bout('Pool A-TB-0')], 'mixed', team, api({ reopenMatch }), standings);
+      await act(async () => { screen.getByRole('button', { name: /Fight it again/ }).click(); });
+
+      await waitFor(() => expect(reopenMatch).toHaveBeenCalledTimes(2));
+      expect(window.confirmDialog).toHaveBeenCalledTimes(1);
+      expect(window.confirmDialog.mock.calls[0][0]).toMatchObject({ message: sentence, confirmLabel: 'Replace the lots' });
+      expect(reopenMatch.mock.calls[0][3].confirmLots).toBe(false);
+      expect(reopenMatch.mock.calls[1][3].confirmLots).toBe(true);
+    });
+
+    it('Cancel on the warning leaves the bout and the lots as they were, and says so', async () => {
+      const refused = Object.assign(new Error('sentence'), { code: 'lots_replaced', lotsReplaced: { matchId: 'Pool A-TB-0' } });
+      const reopenMatch = vi.fn().mockRejectedValue(refused);
+      window.confirmDialog = vi.fn().mockResolvedValue(false);
+      await mount([bout('Pool A-TB-0')], 'mixed', team, api({ reopenMatch }), standings);
+      await act(async () => { screen.getByRole('button', { name: /Fight it again/ }).click(); });
+
+      await screen.findByText('Cancelled: the lots you entered stand and the bout was left unchanged.');
+      expect(reopenMatch).toHaveBeenCalledTimes(1);
     });
   });
 

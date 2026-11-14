@@ -1129,7 +1129,7 @@ func (e *Engine) ReopenMatch(compID, matchID, reason string, opts ...ForceOption
 		// requeue path already pre-checks before its revert and need not re-run it
 		// (the check is read-only, so a second run would be wasted work, not a
 		// hazard).
-		landsScheduled, verr := e.checkTargetReopenable(compID, comp, matchID, fo.Force)
+		landsScheduled, verr := e.checkTargetReopenable(compID, comp, matchID, fo)
 		if verr != nil {
 			return verr
 		}
@@ -1210,7 +1210,7 @@ func (e *Engine) reopenUnderCourtLock(compID string, comp *state.Competition, ma
 			// /bulk-score completing a downstream between the entry pre-check's tx
 			// close and CheckCrossCompCourtBusy can still surface court_busy for a
 			// now-unreopenable target (a retry then reports the permanent 409).
-			if rerr := e.reopenResultPreconditionTx(tx, compID, comp, matchID, h, fo.Force); rerr != nil {
+			if rerr := e.reopenResultPreconditionTx(tx, compID, comp, matchID, h, fo); rerr != nil {
 				opErr = rerr
 				return nil
 			}
@@ -1387,7 +1387,7 @@ func (e *Engine) RequeueBlockerAndReopen(targetComp, targetMatch, blockerComp, b
 		// would need the pre-check, revert, and reopen under one target-comp
 		// transaction, which the cross-comp revert (it takes the BLOCKER comp's
 		// lock) cannot provide.
-		landsScheduled, perr := e.checkTargetReopenable(targetComp, comp, targetMatch, fo.Force)
+		landsScheduled, perr := e.checkTargetReopenable(targetComp, comp, targetMatch, fo)
 		if perr != nil {
 			return perr
 		}
@@ -1429,13 +1429,14 @@ func (e *Engine) RequeueBlockerAndReopen(targetComp, targetMatch, blockerComp, b
 //     path. A pool tie-break ("-TB-") or representative ("-DH-") bout saved as
 //     a draw (drawnSupplementaryBout) is one a reopen is for too: it settles
 //     nothing, and a reopen is how it is fought again, unless a chusen has
-//     ranked the group it was fought for (daihyosenRuledByChusen): the lots
-//     settled it, so it is refused. This is the reopen's
+//     ranked the group it was fought for (drawnSupplementaryRuledByChusen): the
+//     lots settled it, so a reopen is warned about first (*LotsReplacedError)
+//     and lands only with fo.ConfirmLots. This is the reopen's
 //     one entry gate, so both doors (ReopenMatch, RequeueBlockerAndReopen)
 //     apply it, and it reads the STORED decision under the tx, never a
 //     caller's claim about it;
 //  3. for a bracket round, its result must not have fed a downstream it
-//     cannot unwind (reopenBracketDownstreamCheck), where force is the
+//     cannot unwind (reopenBracketDownstreamCheck), where fo.Force is the
 //     operator's confirmation for a downstream closed with its own result. A
 //     pool match has no such check: reopening it moves no knockout slot, and
 //     the write that finishes it answers for any qualifier it moves.
@@ -1445,7 +1446,7 @@ func (e *Engine) RequeueBlockerAndReopen(targetComp, targetMatch, blockerComp, b
 // checkTargetReopenable and reopenUnderCourtLock both run it, so a RESULT
 // precondition added to one path can't be missed by the other — the drift
 // that reopens the wipe-for-nothing hazard (mp-gmcg review).
-func (e *Engine) reopenResultPreconditionTx(tx state.StoreTx, compID string, comp *state.Competition, matchID string, h matchHome, force bool) error {
+func (e *Engine) reopenResultPreconditionTx(tx state.StoreTx, compID string, comp *state.Competition, matchID string, h matchHome, fo ForceOptions) error {
 	var status state.MatchStatus
 	var decision string
 	if h.Pool != nil {
@@ -1468,19 +1469,12 @@ func (e *Engine) reopenResultPreconditionTx(tx state.StoreTx, compID string, com
 		return validationErrorf("reopen is only for %s; correct other results via the score editor instead", allowed)
 	}
 	if h.Pool != nil && drawnSupplementaryBout(h.Pool) {
-		// A drawn representative bout the lots already ruled is settled:
+		// A drawn representative or tie-break bout the lots already ruled is settled:
 		// reopening it would leave a league completed (and the chusen ranks
 		// recorded) over a bout that is running again, and nothing puts
 		// either back.
-		lots, err := loadPoolLots([]state.MatchResult{*h.Pool}, func() (map[string][]state.PlayerStanding, error) {
-			return e.computeStandingsFrom(tx, compID)
-		}, nil)
-		if err != nil {
+		if err := e.refuseOverRecordedLots(tx, compID, comp, h.Pool, fo.ConfirmLots); err != nil {
 			return err
-		}
-		if daihyosenRuledByChusen(h.Pool, lots.standings) {
-			return validationErrorf("%s was settled by the drawing of lots, so it is not fought again. To change the order, change the drawing of lots on the Pools tab.",
-				SentenceCase(OperatorMatchLabel(comp, nil, matchID)))
 		}
 	}
 	if h.Pool != nil {
@@ -1497,7 +1491,7 @@ func (e *Engine) reopenResultPreconditionTx(tx state.StoreTx, compID string, com
 	if h.Bronze {
 		return nil
 	}
-	return reopenBracketDownstreamCheck(h.BracketRoot, h.RIdx, h.MIdx, force)
+	return reopenBracketDownstreamCheck(h.BracketRoot, h.RIdx, h.MIdx, fo.Force)
 }
 
 // reopenBracketDownstreamCheck decides, for a bracket ROUND match being
@@ -1555,12 +1549,12 @@ func reopenBracketDownstreamCheck(bracket *state.Bracket, rIdx, mIdx int, force 
 // the same tx. Such a reopen takes no court, so reopenUnderCourtLock skips both court
 // gates for it and holds it to scheduled even if the bar lifts in between (see
 // the COURT GATE note on ReopenMatch).
-func (e *Engine) checkTargetReopenable(compID string, comp *state.Competition, matchID string, force bool) (bool, error) {
+func (e *Engine) checkTargetReopenable(compID string, comp *state.Competition, matchID string, fo ForceOptions) (bool, error) {
 	var checkErr error
 	landsScheduled := false
 	txErr := e.store.WithTransaction(compID, func(tx state.StoreTx) error {
 		found, ferr := findMatchHome(tx, compID, matchID, func(h matchHome) error {
-			checkErr = e.reopenResultPreconditionTx(tx, compID, comp, matchID, h, force)
+			checkErr = e.reopenResultPreconditionTx(tx, compID, comp, matchID, h, fo)
 			if checkErr == nil {
 				landsScheduled = e.reopenTargetStatusOfHome(tx, compID, matchID, h) == state.MatchStatusScheduled
 			}

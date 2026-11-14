@@ -161,6 +161,9 @@ function _reopenRefusal(err) {
         league.leagueFinished.reopen = true;
         return league;
     }
+    // The bout is a drawn tie-breaker the organiser's lots settled.
+    const lots = _lotsReplacedError(err);
+    if (lots) return lots;
     const e = new Error(_refusalText(err, "Failed to reopen match"));
     if (err.error) e.code = err.error;
     if (err.court) e.court = err.court;
@@ -177,15 +180,16 @@ function _reopenRefusal(err) {
 }
 
 // reopenBody is the optional half of both reopen requests: the audit reason,
-// the downstream confirmation, the court-busy override and the confirmation of
-// a finished league, each sent only when set, so the one-tap kachinuki Reopen
+// the downstream confirmation, the court-busy override, the confirmation of
+// a finished league and the one that replaces entered lots, each sent only when set, so the one-tap kachinuki Reopen
 // still posts {} exactly as before.
-function reopenBody(reason, force, forceCourt, confirmFinished) {
+function reopenBody(reason, force, forceCourt, confirmFinished, confirmLots) {
     const body = {};
     if (reason) body.reason = reason;
     if (force) body.forceDownstreamReopen = true;
     if (forceCourt) body.forceCourt = true;
     if (confirmFinished) body.confirmFinished = true;
+    if (confirmLots) body.confirmLots = true;
     return body;
 }
 
@@ -343,6 +347,19 @@ function _leagueFinishedError(body) {
     const err = new Error(_refusalText(body, 'Failed to record result'));
     err.code = body.error;
     err.leagueFinished = { removedCourts: body.removedCourts || [] };
+    return err;
+}
+
+// _lotsReplacedError: the 409 lots_replaced refusal of a result, a decision or a
+// reopen over lots the organiser entered for a drawn tie-breaker, thrown with the
+// server's sentence (the place and the order entered) and `.lotsReplaced`
+// ({matchId}), which write_result.jsx's lotsReplacedRefusal reads for the
+// confirm. null for any other body.
+function _lotsReplacedError(body) {
+    if (!body || body.error !== 'lots_replaced') return null;
+    const err = new Error(_refusalText(body, 'Failed to record result'));
+    err.code = body.error;
+    err.lotsReplaced = { matchId: body.matchId || '' };
     return err;
 }
 
@@ -3461,10 +3478,10 @@ function _doorRefusal(d, status, body) {
     switch (d && d.kind) {
         case 'score':
             if (ineligible) return _reasonHumanError(b, 'Failed to record score');
-            return _courtBusyError(b) || _downstreamRefusalError(b) || _leagueFinishedError(b) || new Error(_refusalText(b, 'Failed to record score'));
+            return _courtBusyError(b) || _downstreamRefusalError(b) || _leagueFinishedError(b) || _lotsReplacedError(b) || new Error(_refusalText(b, 'Failed to record score'));
         case 'decision':
             if (ineligible) return _reasonHumanError(b, 'Failed to record decision');
-            return _downstreamRefusalError(b) || _leagueFinishedError(b) || new Error(b.error || 'Failed to record decision');
+            return _downstreamRefusalError(b) || _leagueFinishedError(b) || _lotsReplacedError(b) || new Error(b.error || 'Failed to record decision');
         case 'reopen':
         case 'requeue':
             return _reopenRefusal(b);
@@ -4174,6 +4191,10 @@ function _placeWrite(base, descriptor) {
     // write that takes its place, like a confirmed forceCourt.
     if ((prev.payload && prev.payload.confirmFinished) || (descriptor.payload && descriptor.payload.confirmFinished)) {
         payload = { ...payload, confirmFinished: true };
+    }
+    // So does their confirmation that the bout's result replaces the lots.
+    if ((prev.payload && prev.payload.confirmLots) || (descriptor.payload && descriptor.payload.confirmLots)) {
+        payload = { ...payload, confirmLots: true };
     }
     // Whatever the replaced write had to follow, this one follows too.
     for (const k of _afterKeys(prev)) _addAfter(descriptor, k);
@@ -5860,6 +5881,11 @@ const API = {
         if (result && result.confirmFinished) {
             payload.confirmFinished = true;
         }
+        // Request-only too: the organiser's "Replace the lots" on a result for
+        // the drawn tie-breaker their lots settled.
+        if (result && result.confirmLots) {
+            payload.confirmLots = true;
+        }
         // mp-y3nk: stamp in server-relative time for last-write-wins reconciliation.
         // Stamped when it is made (a running match's scoring is taps, each
         // stamped at its own tap, so no score write carries an older edit).
@@ -5902,7 +5928,7 @@ const API = {
             const {
                 rev: _r, revSession: _rs, changed: _ch,
                 writeId: _w, basis: _b, session: _s, forceDownstreamReopen: _f,
-                startOnly, forceCourt: _fc, confirmFinished: _cf, ...rest
+                startOnly, forceCourt: _fc, confirmFinished: _cf, confirmLots: _cl, ...rest
             } = fields || {};
             if (startOnly) {
                 for (const k of START_BROADCAST_DROPS) delete rest[k];
@@ -6339,13 +6365,13 @@ const API = {
      * @param {*} [opts.seen]
      * @param {Function} [opts.onRefusal]
      */
-    async reopenMatch(compID, matchID, password, { reason = "", force = false, forceCourt = false, confirmFinished = false, seen, onRefusal } = {}) {
+    async reopenMatch(compID, matchID, password, { reason = "", force = false, forceCourt = false, confirmFinished = false, confirmLots = false, seen, onRefusal } = {}) {
         // bc-evts: the outbox's; `settled` resolves the server body or rejects
         // with reopenFailureError's error (court_busy, downstream, ...).
         return _outboxWrite({
             kind: 'reopen', compID, matchID, method: 'POST',
             url: `/api/competitions/${compID}/matches/${matchID}/reopen`,
-            payload: reopenBody(reason, force, forceCourt, confirmFinished), password, seen, onRefusal,
+            payload: reopenBody(reason, force, forceCourt, confirmFinished, confirmLots), password, seen, onRefusal,
         });
     },
     // mp-gmcg (review A4): atomically requeue the match holding the court AND
@@ -6355,7 +6381,7 @@ const API = {
     // as reopenMatch, so the panel re-offers the remedy when a DIFFERENT match
     // has since taken the court. opts as reopenMatch's: the remedy carries the
     // same reason and confirmation the reopen it retries did.
-    async requeueBlockerAndReopen(targetComp, targetMatch, blockerComp, blockerMatch, password, { reason = "", force = false, confirmFinished = false, seen, onRefusal, match, blockerLabel } = {}) {
+    async requeueBlockerAndReopen(targetComp, targetMatch, blockerComp, blockerMatch, password, { reason = "", force = false, confirmFinished = false, confirmLots = false, seen, onRefusal, match, blockerLabel } = {}) {
         // bc-evts: the outbox's, on the TARGET match's base (the one reopened),
         // and ordered under the blocker's too (M5): it follows the blocker's
         // last queued write (`after`), and a write of the blocker made after it
@@ -6368,7 +6394,7 @@ const API = {
         return _outboxWrite({
             kind: 'requeue', compID: targetComp, matchID: targetMatch, method: 'POST',
             url: `/api/competitions/${targetComp}/matches/${targetMatch}/requeue-blocker-and-reopen`,
-            payload: { blockerCompId: blockerComp, blockerMatchId: blockerMatch, ...reopenBody(reason, force, false, confirmFinished) },
+            payload: { blockerCompId: blockerComp, blockerMatchId: blockerMatch, ...reopenBody(reason, force, false, confirmFinished, confirmLots) },
             password, seen, onRefusal,
             after: _lastEntryKey(blockerBase), holds: [blockerBase],
         });

@@ -54,6 +54,10 @@ type DecisionRequest struct {
 	// without it). Request-only, same field name and contract as
 	// scoreRequestBody.ConfirmFinished.
 	ConfirmFinished bool `json:"confirmFinished"`
+	// ConfirmLots lets a decision that gives a drawn tie-breaker bout a winner
+	// land over the lots the organiser entered for it (409 lots_replaced without
+	// it). Request-only, never stored.
+	ConfirmLots bool `json:"confirmLots"`
 	// writeTag is the optional writeId and basis (bc-evts F1): a resend of a
 	// decision the match's score event log holds answers as recorded.
 	writeTag
@@ -256,7 +260,7 @@ func RegisterDecisionHandlers(r *gin.RouterGroup, eng ScoringEngine, store Compe
 			// req.ForceDownstreamReopen (the bc-kcdg downstream-knockout-
 			// correction guard) and surfaces the reopened downstream match
 			// ids so they can be broadcast below.
-			fo := engine.ForceOptions{Force: req.ForceDownstreamReopen, Reopened: &reopenedDownstream}
+			fo := engine.ForceOptions{Force: req.ForceDownstreamReopen, Reopened: &reopenedDownstream, ConfirmLots: req.ConfirmLots}
 			if snap.ReopenPending {
 				// The reason is part of the result group: it goes on the
 				// write itself, so the baseline the write leaves holds it.
@@ -361,6 +365,9 @@ func respondDecisionEngineError(c *gin.Context, store CompetitionStore, compID, 
 	case respondIfLeagueFinished(c, engErr):
 		// A correction of a finished league's result: resent with
 		// confirmFinished once the organiser confirms (design item 3).
+	case respondIfLotsReplaced(c, engErr):
+		// A decision that would replace the lots the organiser entered for a
+		// drawn tie-breaker: resent with confirmLots once they confirm.
 	case errors.As(engErr, &alreadyIneligErr):
 		// T105/CHK047: concurrent kiken, another operator already
 		// recorded ineligibility for this player on a different

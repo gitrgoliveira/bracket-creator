@@ -334,6 +334,14 @@ func (e *Engine) recordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 	if err := refuseDrawnLeagueTiebreak(comp, matchID, result); err != nil {
 		return nil, err
 	}
+	// A write that would take a drawn bout out of its draw (a fight, a decision,
+	// a reopen by score) while the lots rule it replaces the lots, which the
+	// organiser entered: it is warned about first (refuseOverRecordedLots).
+	if result.Status != state.MatchStatusCompleted || result.Winner != "" || result.WinnerID != "" {
+		if err := e.refuseOverRecordedLots(tx, compID, comp, prior, fo.ConfirmLots); err != nil {
+			return nil, err
+		}
+	}
 
 	// K3 ahead of the write: a withdrawal whose loser a DIFFERENT match has
 	// already made ineligible is refused before anything is written. The

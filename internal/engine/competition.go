@@ -160,8 +160,8 @@ func tieBreakOwed(comp *state.Competition, pools []helper.Pool, bracket *state.B
 
 // poolMatchSettled reports whether one pool-matches.csv row is played: it is
 // completed and is not a drawn supplementary bout, unless a chusen in force
-// ranks every team of the group a drawn representative bout was fought for
-// (daihyosenRuledByChusen, which reads the pool's standings to find the
+// ranks every competitor of the group a drawn representative or tie-break bout
+// was fought for (drawnSupplementaryRuledByChusen, which reads the pool's standings to find the
 // group), or a correction has since split its two sides (drawnSupplementaryMoot):
 // either way that place is decided, and the bout, which settled nothing, may
 // stay drawn. So may a tie-break bout whose two sides are both barred, an
@@ -176,7 +176,7 @@ func tieBreakOwed(comp *state.Competition, pools []helper.Pool, bracket *state.B
 // pinned to the one table testdata/drawn_supplementary_cases.json, so a change
 // here changes the table.
 func poolMatchSettled(m *state.MatchResult, lots poolLots) bool {
-	return m.Status == state.MatchStatusCompleted && (!drawnSupplementaryBout(m) || daihyosenRuledByChusen(m, lots.standings) || drawnSupplementaryMoot(m, lots.standings) || lots.barredDrawPlayed(m))
+	return m.Status == state.MatchStatusCompleted && (!drawnSupplementaryBout(m) || drawnSupplementaryRuledByChusen(m, lots.standings) || drawnSupplementaryMoot(m, lots.standings) || lots.barredDrawPlayed(m))
 }
 
 // drawnSupplementaryBout reports a pool tie-break ("-TB-") or representative

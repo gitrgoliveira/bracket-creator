@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { enrichPoolMatchWithComp, poolMatchesForPool, groupTeamIds, drawnSupplementaryBouts } from '../admin_pools.jsx';
+import { enrichPoolMatchWithComp, poolMatchesForPool, groupTeamIds, drawnSupplementaryBouts, lotsRuledBouts } from '../admin_pools.jsx';
 // admin_pools.jsx's chusen banner keys its rank inputs by checkinPid
 // (chusenMemberKey was deleted, the banner now delegates to the one
 // owner of the id-else-name|dojo rule). Imported directly so the tests below
@@ -70,6 +70,16 @@ describe('drawnSupplementaryBouts', () => {
       };
       // `league` is the competition's format, which the page passes as the third argument.
       expect(drawnSupplementaryBouts([row], standings, !!c.league)).toEqual(c.stuck ? [row] : []);
+    });
+
+    // The same cases name the bouts the lots rule (the table's `ruled`), which the
+    // Pools tab lists with Fight it again instead of the still-tied notice.
+    it.each(table.chusenCases.map(c => [c.name, c]))('lotsRuledBouts: %s', (_name, c) => {
+      const row = m(c.id, { winner: c.winner, sideAId: c.sideAId, sideBId: c.sideBId });
+      const standings = {
+        [poolNameOf(c.id)]: c.standings.map(s => ({ player: { id: s.id }, points: s.points, isOverridden: c.inForce.includes(s.id), tieOutOfBand: !!s.tieOutOfBand })),
+      };
+      expect(lotsRuledBouts([row], standings)).toEqual(c.ruled ? [row] : []);
     });
   });
 });

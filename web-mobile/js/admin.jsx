@@ -8,6 +8,7 @@ import { createTimerPool } from './timer_pool.jsx';
 import {
   DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED,
   LEAGUE_FINISHED_CORRECTION_CANCELLED,
+  LOTS_REPLACED_CANCELLED,
   attemptScoreWrite,
   downstreamKnockoutReopenedNotice,
   writeKeepsEditorOpen,
@@ -528,6 +529,11 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
       // Declining the finished-league warning leaves the result as it was.
       if (e.leagueFinishedCancelled) {
         showToast(LEAGUE_FINISHED_CORRECTION_CANCELLED);
+        throw markToasted(e);
+      }
+      // Declining the lots warning leaves the bout and the lots as they were.
+      if (e.lotsReplacedCancelled) {
+        showToast(LOTS_REPLACED_CANCELLED);
         throw markToasted(e);
       }
       // bc-adna: if the operator cancelled forcing court, toast nothing and mark toasted

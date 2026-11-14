@@ -440,6 +440,25 @@ func respondIfDownstreamKnockoutPlayed(c *gin.Context, err error) bool {
 	return true
 }
 
+// lotsReplacedCode is the 409 code of a write that would replace the lots the
+// organiser entered (engine.LotsReplacedError): a drawn tie-breaker bout given a
+// winner, or reopened, while recorded lots rule its draw. The write carries the
+// request-only confirmLots to land.
+const lotsReplacedCode = "lots_replaced"
+
+// respondIfLotsReplaced answers engine.LotsReplacedError with HTTP 409
+// {"error":"lots_replaced","matchId","message"} and reports whether it did.
+// message is the confirm's own sentence. A 409, never a 5xx, so the offline
+// write queue drops a replay that meets it instead of retrying it forever.
+func respondIfLotsReplaced(c *gin.Context, err error) bool {
+	var replaced *engine.LotsReplacedError
+	if !errors.As(err, &replaced) {
+		return false
+	}
+	c.JSON(http.StatusConflict, gin.H{"error": lotsReplacedCode, "matchId": replaced.MatchID, "message": replaced.Msg})
+	return true
+}
+
 // qualifierChangePayload renders a refusal's qualifier changes as a list,
 // never null, so a client reads one shape whichever kind of correction it
 // made.

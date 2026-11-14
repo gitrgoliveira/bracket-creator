@@ -12,7 +12,7 @@ import React from 'react';
 import { render, act } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vitest';
 import { installWindowStubs } from '../helpers/stub_globals.js';
-import { DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED, LEAGUE_FINISHED_CORRECTION_CANCELLED, wasToasted, downstreamKnockoutReopenedNotice } from '../../write_result.jsx';
+import { DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED, LEAGUE_FINISHED_CORRECTION_CANCELLED, LOTS_REPLACED_CANCELLED, wasToasted, downstreamKnockoutReopenedNotice } from '../../write_result.jsx';
 
 const probe = { props: null };
 
@@ -106,6 +106,25 @@ describe('editMatchScore marks every error it toasts', () => {
     expect(caught).toBe(refusal);
     expect(window.confirmDialog).toHaveBeenCalledTimes(1);
     expect(showToast.mock.calls).toEqual([[LEAGUE_FINISHED_CORRECTION_CANCELLED]]);
+    expect(wasToasted(caught)).toBe(true);
+  });
+
+  it('a declined lots warning is toasted once, with its own words, and carries the mark', async () => {
+    const { showToast, onEditScore } = await mountScoresView();
+    const refusal = Object.assign(new Error('This replaces the lots you entered for 1st: Bea 1st, Aki 2nd. The bout\'s result will decide the place.'),
+      { code: 'lots_replaced', lotsReplaced: { matchId: 'm1' } });
+    window.API.recordScore.mockRejectedValue(refusal);
+    window.confirmDialog.mockResolvedValue(false);
+
+    let caught;
+    await act(async () => {
+      try { await onEditScore('c1', 'm1', { status: 'completed' }, { id: 'm1' }); } catch (e) { caught = e; }
+    });
+
+    expect(caught).toBe(refusal);
+    expect(window.confirmDialog).toHaveBeenCalledTimes(1);
+    expect(window.confirmDialog.mock.calls[0][0].message).toBe(refusal.message);
+    expect(showToast.mock.calls).toEqual([[LOTS_REPLACED_CANCELLED]]);
     expect(wasToasted(caught)).toBe(true);
   });
 });

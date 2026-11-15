@@ -538,7 +538,11 @@ export function ScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, onSub
   // other side's button is a different action.
   const ipponTapRef = useRef(null);
   const tapIppon = (ev, side, letter) => {
-    if (acceptTap(ipponTapRef, ev, side)) addPt(side, letter);
+    if (!acceptTap(ipponTapRef, ev, side)) return;
+    // A tapped point exits draw mode first, as a point key does: a point kept
+    // under the draw would be dropped by buildPatch, which saves a hikiwake.
+    if (isDrawToggled) setIsDrawToggled(false);
+    addPt(side, letter);
   };
   const addPt = (side, letter) => {
     // No-op when the side is already at the 2-ippon max: nothing is sent for a

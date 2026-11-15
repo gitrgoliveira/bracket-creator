@@ -25,8 +25,10 @@
 //                two sharing 4th
 //   both barred  a tie at 1st between two competitors who both withdrew: the
 //                court console lists their ippon-shobu but never as Up next,
-//                records it drawn (neither can fight), and the desk draws lots
-//   F12          the court console says why an ippon-shobu is on the court
+//                records it drawn (neither can fight), and the desk draws lots;
+//                giving that drawn bout a winner then warns that its result
+//                replaces the lots, and Cancel keeps them
+//   F12         the court console says why an ippon-shobu is on the court
 //
 // Court console evidence is named by the flow: <flow>-console-up-next,
 // -running, -before-finish and -after on the shiaijo route, and
@@ -57,9 +59,9 @@ import {
 } from '../fixtures/scoring.mjs';
 import { editorSides, ensureRunning, inlineRunning, recordDecision, rosterOf } from '../fixtures/individual.mjs';
 import {
-  TEXT, awardsTabOffered, backUpCompetition, circleNotice, drawnBoutNotices, leagueRanks, openLeague,
-  openLeagueSettings, openNumberedRow, openViewerAwards, pairKey, readBanner, readChusen, readChusenRecorded,
-  readLeagueSettings, readLeagueTable, readNumberedRows, readPodium, recordLots, restoreAsCopy, rewriteBackup,
+  TEXT, answerConfirm, awardsTabOffered, backUpCompetition, circleNotice, drawnBoutNotices, leagueRanks,
+  openDrawnBout, openLeague, openLeagueSettings, openNumberedRow, openViewerAwards, pairKey, readBanner,
+  readChusen, readChusenRecorded, readConfirm, readLeagueSettings, readLeagueTable, readNumberedRows, readPodium, recordLots, restoreAsCopy, rewriteBackup,
   seedLeague, withFrontMatterLine,
 } from '../fixtures/league.mjs';
 import { openViewer } from '../fixtures/public.mjs';
@@ -782,6 +784,39 @@ test.describe('league-individual', () => {
       record({ step: 'public', action: 'Awards after the lots', ...pub });
       expect(pub.offered).toBe(true);
       expect(pub.podium.places.slice(0, 3).map((pl) => pl.name)).toEqual([B, A, E]);
+    });
+
+    // The drawn bout the lots settled can still be corrected, after a warning
+    // that its result replaces the lots (operator ruling 2026-11-14). Cancel
+    // keeps the lots deciding 1st.
+    await test.step('desk: giving the drawn ippon-shobu a winner warns that its result replaces the lots; Cancel keeps them', async () => {
+      await openLeague(page, id);
+      const notices = await drawnBoutNotices(page);
+      await openDrawnBout(page);
+      const pair = await editorSides(page, EDITOR);
+      await awardIppon(page, pair.shiro === A ? 'shiro' : 'aka', 'M', EDITOR);
+      // The tapped point ends the draw, so the correction carries it.
+      await expect(page.locator(EDITOR).getByTestId('scoring-modal-mark-draw')).toHaveText('Mark draw');
+      await page.locator(EDITOR).getByRole('button', { name: 'Save correction', exact: true }).tap();
+      const reason = page.locator('.reason-prompt').last();
+      await expect(reason).toBeVisible();
+      await reason.getByRole('button', { name: 'Confirm', exact: true }).tap();
+      // The league is finished, so its own warning may come first.
+      const warnings = [];
+      for (let i = 0; i < 3; i += 1) {
+        const w = await readConfirm(page);
+        warnings.push(w);
+        if (!w.message.includes(TEXT.finishedLeague)) break;
+        await answerConfirm(page, TEXT.changeAnyway);
+      }
+      const replace = warnings[warnings.length - 1];
+      record({ step: 'pools', action: 'give the drawn ippon-shobu a winner', notices, pair, warnings,
+        shot: await shot(page, `${flow}-desk-replace-lots-warning`) });
+      expect(replace.message).toContain('This replaces the lots you entered for 1st');
+      expect(replace.buttons).toEqual(expect.arrayContaining(['Replace the lots', TEXT.cancel]));
+      await answerConfirm(page, TEXT.cancel);
+      await openLeague(page, id);
+      expect(await leagueRanks(page), 'Cancel leaves the lots deciding 1st').toMatchObject({ [B]: 1, [A]: 2 });
     });
   });
 

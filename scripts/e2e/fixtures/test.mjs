@@ -74,10 +74,10 @@ const CONSOLE_ALLOWLIST = [
     request: (r) => !!r && r.method === 'PUT',
   },
   {
-    reason: 'The operator corrects a result of a league that has finished (league journeys, finished-corrections): the server warns first, refusing the score write with league_finished, and the page asks to confirm the change, then sends it again with the confirmation.',
+    reason: 'The operator corrects a result of a league that has finished (league journeys, finished-corrections), or gives a winner to a drawn tie-breaker the recorded lots decide (league-individual, both-barred): the server warns first, refusing the score write with league_finished or lots_replaced, and the page asks to confirm the change, then sends it again with the confirmation.',
     text: /^Failed to load resource: the server responded with a status of 409 \(Conflict\)$/,
     url: /\/api\/competitions\/[^/]+\/matches\/[^/]+\/score$/,
-    code: /^league_finished$/,
+    code: /^(league_finished|lots_replaced)$/,
     codeUnreadable: true,
     request: (r) => !!r && r.method === 'PUT',
   },

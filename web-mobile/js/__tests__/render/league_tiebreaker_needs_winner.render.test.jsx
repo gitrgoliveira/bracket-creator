@@ -137,3 +137,28 @@ describe('a bout that does not need a winner is unchanged', () => {
     expect(drawToggle().textContent).toBe('Cancel draw');
   });
 });
+
+// A tapped point ends the draw, as a point key does: before, the point showed on
+// the board while the draw stayed on, and the save sent a hikiwake without it.
+describe('a point tapped onto a draw ends the draw', () => {
+  it('on a bout marked as a draw, the point is saved and the draw is not', async () => {
+    const { onSubmit } = await mount(bout('Pool A-3', 'league'));
+    await act(async () => { fireEvent.click(drawToggle()); });
+    await act(async () => { fireEvent.click(addButton('aka', 'M')); });
+    expect(drawToggle().textContent).toBe('Mark draw');
+    await act(async () => { fireEvent.keyDown(window, { key: 'Enter' }); });
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    const patch = onSubmit.mock.calls[0][0];
+    expect([...patch.ipponsA, ...patch.ipponsB]).toEqual(['M']);
+    expect(patch.winner).toBeTruthy();
+  });
+
+  it('on a league tie-breaker saved as a draw, a point gives it a winner to save', async () => {
+    await mount(bout('Pool A-TB-1', 'league', { status: 'completed', decision: 'hikiwake', winner: null }));
+    await act(async () => { fireEvent.click(addButton('aka', 'M')); });
+    expect(drawToggle().textContent).toBe('Mark draw');
+    const btn = finishButton();
+    expect(btn.textContent).toBe('Save correction');
+    expect(btn.disabled).toBe(false);
+  });
+});

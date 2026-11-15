@@ -214,7 +214,7 @@ func drawnSupplementaryRuledByChusen(m *state.MatchResult, poolStandings map[str
 // and the lots stop applying to it (poolRanksInForce) while they stay stored.
 // It reads the standings only for a drawn supplementary bout (loadPoolLots), so
 // any other row costs nothing.
-func (e *Engine) refuseOverRecordedLots(tx state.StoreTx, compID string, comp *state.Competition, stored *state.MatchResult, confirmed bool) error {
+func (e *Engine) refuseOverRecordedLots(tx state.StoreTx, compID string, stored *state.MatchResult, confirmed bool) error {
 	if confirmed || stored == nil || !drawnSupplementaryBout(stored) {
 		return nil
 	}

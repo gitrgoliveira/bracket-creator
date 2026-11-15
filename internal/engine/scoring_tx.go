@@ -266,7 +266,7 @@ func (e *Engine) recordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 			// Flags that give a bout the lots ruled a winner replace the lots, so
 			// the organiser is warned first, as for a fought bout (below). After
 			// the hold, so a stale replay is never misreported.
-			if err := e.refuseOverRecordedLots(tx, compID, comp, engiPrior, fo.ConfirmLots); err != nil {
+			if err := e.refuseOverRecordedLots(tx, compID, engiPrior, fo.ConfirmLots); err != nil {
 				return nil, err
 			}
 		}
@@ -342,7 +342,7 @@ func (e *Engine) recordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 	// a reopen by score) while the lots rule it replaces the lots, which the
 	// organiser entered: it is warned about first (refuseOverRecordedLots).
 	if refusal == nil && (result.Status != state.MatchStatusCompleted || result.Winner != "" || result.WinnerID != "") {
-		refusal = e.refuseOverRecordedLots(tx, compID, comp, prior, fo.ConfirmLots)
+		refusal = e.refuseOverRecordedLots(tx, compID, prior, fo.ConfirmLots)
 	}
 	// A write the merge holds whole lands nothing, so neither refusal applies to
 	// it: it goes on to the merge, which keeps it in the match's history.

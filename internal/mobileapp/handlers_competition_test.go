@@ -4874,6 +4874,42 @@ func TestDeleteOverrides_ReopensALeagueTheLotsHadSettled(t *testing.T) {
 	assert.Equal(t, state.CompStatusPools, comp.Status, "without the lots the tie is undecided again, so the league is back in play")
 }
 
+// TestDeleteOverrides_CorruptOverridesOnAFinishedLeagueStillRepairs: the reset is
+// the repair door for a corrupt overrides.json, so the finished-league warning's
+// look at the lots (which reads that same file) must not turn it into a 500: the
+// reset runs and leaves a file that parses.
+func TestDeleteOverrides_CorruptOverridesOnAFinishedLeagueStillRepairs(t *testing.T) {
+	r, store, eng, _, _ := setupTestRouter(t)
+	compID := "chusen-league-delete-corrupt"
+	seedChusenCycle(t, store, eng, compID)
+
+	all, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	for i := range all {
+		if engine.IsPoolDaihyosenMatchID(all[i].ID) {
+			all[i].Winner, all[i].WinnerID = "", ""
+		}
+	}
+	require.NoError(t, store.SavePoolMatches(compID, all))
+	for i, id := range []string{"gamma-id", "alpha-id", "beta-id"} {
+		w := sendJSON(t, r, http.MethodPut, "/api/competitions/"+compID+"/pools/Pool%20A/override-rank",
+			map[string]any{"playerId": id, "rank": i + 1})
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	}
+	comp, err := store.LoadCompetition(compID)
+	require.NoError(t, err)
+	require.Equal(t, state.CompStatusComplete, comp.Status, "the lots finish the league")
+
+	overridesPath := filepath.Join(store.GetFolder(), "competitions", compID, "overrides.json")
+	require.NoError(t, os.WriteFile(overridesPath, []byte("{not valid json"), 0o600))
+
+	w := sendJSON(t, r, http.MethodDelete, "/api/competitions/"+compID+"/overrides", nil)
+	require.Equal(t, http.StatusNoContent, w.Code, w.Body.String())
+	repaired, err := store.LoadOverrides(compID)
+	require.NoError(t, err, "overrides.json must parse cleanly after the repair")
+	assert.Empty(t, repaired.PoolRanks)
+}
+
 // TestDeleteOverrides_NoWarningForAFinishedLeagueHoldingNoLots: a finished league
 // that is unsettled without lots and holds none (one finished before the tie
 // rule, left complete by design) has nothing for the reset to reopen, so the

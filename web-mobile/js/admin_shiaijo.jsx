@@ -2945,20 +2945,21 @@ function ShiaijoQueueGroup({ label, matches, subGroup, scheduled, courts, onMove
 // the bout's own pool (a league has one table). The two sides are found by
 // participant id only; the teams or players level on points with them form
 // the tied group, whose best place is the row with the lowest rank. A group of
-// more than two names its whole range as the tie this bout is part of: a later
-// round over only some of them (RunTiebreakerRound) is still part of that tie,
-// and the standings do not say which run it is. Without
-// standings (still loading, or none for this pool), or when the two sides are
-// no longer level, the line still says the bout is a tie-breaker and why, but
-// names no place it cannot know.
+// more than two names its whole range as the tie this bout is part of. The group
+// is the run the two sides share (`tieRun` on the rows), so a later round over
+// only some of a bigger tie (RunTiebreakerRound) names the places of that run
+// alone. Without standings (still loading, or none for this pool), or when the
+// two sides are no longer level or sit in different runs, the line still says
+// the bout is a tie-breaker and why, but names no place it cannot know.
 export function tieBreakerReasonLine(m, rows) {
     const generic = "Tie-breaker bout. These two finished level.";
     const list = Array.isArray(rows) ? rows : [];
     const rowOf = (id) => (id ? list.find((s) => s.player && s.player.id === id) : undefined);
     const a = rowOf(m.sideAId || (m.sideA && m.sideA.id));
     const b = rowOf(m.sideBId || (m.sideB && m.sideB.id));
-    if (!a || !b || a.points !== b.points) return generic;
-    const group = list.filter((s) => s.points === a.points);
+    const runOf = (s) => s.tieRun || 0;
+    if (!a || !b || a.points !== b.points || runOf(a) !== runOf(b)) return generic;
+    const group = list.filter((s) => s.points === a.points && runOf(s) === runOf(a));
     const lo = Math.min(...group.map((s) => s.rank));
     if (group.length === 2) {
         return `Tie-breaker for ${rankOrdinal(lo)} place. They finished level, so this bout separates them.`;

@@ -1473,7 +1473,7 @@ func (e *Engine) reopenResultPreconditionTx(tx state.StoreTx, compID string, com
 		// reopening it would leave a league completed (and the chusen ranks
 		// recorded) over a bout that is running again, and nothing puts
 		// either back.
-		if err := e.refuseOverRecordedLots(tx, compID, comp, h.Pool, fo.ConfirmLots); err != nil {
+		if err := e.refuseOverRecordedLots(tx, compID, h.Pool, fo.ConfirmLots); err != nil {
 			return err
 		}
 	}

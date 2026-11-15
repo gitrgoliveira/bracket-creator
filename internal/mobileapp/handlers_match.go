@@ -2250,7 +2250,9 @@ func refuseFinishedLeagueReopen(txr CompetitionTransactor, tl TournamentLoader, 
 // they alone decided puts the league back into match play, so it is warned
 // about first (engine.LotsResetReopensLeague, a dry run that writes nothing),
 // unless the request carries the confirmation. A league the reset leaves
-// finished, and any other competition, is cleared as before. Like
+// finished, and any other competition, is cleared as before. A corrupt
+// overrides.json is no lots to warn about: the reset is the repair door for
+// exactly that file, so the check lets it through. Like
 // refuseFinishedLeagueReopen it runs in a transaction of its own: a league that
 // finishes between the check and the reset is cleared without the warning.
 func refuseFinishedLeagueLotsReset(store *state.Store, eng *engine.Engine, compID string, confirmed bool) error {
@@ -2260,6 +2262,9 @@ func refuseFinishedLeagueLotsReset(store *state.Store, eng *engine.Engine, compI
 	var refusal error
 	err := store.WithTransaction(compID, func(stx state.StoreTx) error {
 		reopens, err := eng.LotsResetReopensLeague(stx, compID)
+		if errors.Is(err, state.ErrCorruptOverrides) {
+			return nil
+		}
 		if err != nil || !reopens {
 			return err
 		}

@@ -74,6 +74,19 @@ describe('tieBreakerReasonLine', () => {
     expect(tieBreakerReasonLine(later, rows)).toBe('Part of the tie-breaker for 1st to 3rd place. These two finished level, so this bout helps separate them.');
   });
 
+  it('names the places of the run the two sides share, not every row level on points', () => {
+    const inRun = (r, tieRun) => ({ ...r, tieRun });
+    const rows = [
+      inRun(row('p1', 'Aki', 1, 4), 1), inRun(row('p2', 'Bea', 2, 4), 1),
+      inRun(row('p3', 'Cal', 3, 4), 2), inRun(row('p4', 'Dee', 4, 4), 2), inRun(row('p5', 'Eli', 5, 4), 2),
+    ];
+    const later = bout({ sideAId: 'p3', sideBId: 'p4' });
+    expect(tieBreakerReasonLine(later, rows)).toBe('Part of the tie-breaker for 3rd to 5th place. These two finished level, so this bout helps separate them.');
+    expect(tieBreakerReasonLine(bout(), rows)).toBe('Tie-breaker for 1st place. They finished level, so this bout separates them.');
+    // Sides in different runs are no longer one tie: no place is named.
+    expect(tieBreakerReasonLine(bout({ sideAId: 'p2', sideBId: 'p3' }), rows)).toBe('Tie-breaker bout. These two finished level.');
+  });
+
   it('names no place when it cannot know one', () => {
     const generic = 'Tie-breaker bout. These two finished level.';
     expect(tieBreakerReasonLine(bout(), null)).toBe(generic);

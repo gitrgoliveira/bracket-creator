@@ -839,7 +839,9 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
     >
       <div className="league-tiebreak__title">A tie-breaker round left a tie</div>
       <div className="league-tiebreak__desc">
-        The order is still open: a tie at 1st or 2nd place (and at 3rd place when joint 3rd places are off) needs a winner.
+        {isLeague
+          ? "The order is still open: a tie at 1st or 2nd place (and at 3rd place when joint 3rd places are off) needs a winner."
+          : "The order is still open: this tie decides who goes through or where they are seated."}
       </div>
       {chusenCandidates.map(group => {
         const groupKey = `${group.poolName}::${group.minPosition}`;

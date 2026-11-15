@@ -232,7 +232,7 @@ name order as the final deterministic fallback.
 
 ### Ties in a league
 
-A league has no knockout, so its table is its result, and one rule decides which tied places the app asks about. The steps below are for a team league; an individual league breaks its ties with ippon-shobu bouts that the app schedules itself, by the same rule.
+A league has no knockout, so its table is its result, and one rule decides which tied places the app asks about. The steps below are for a team league; an individual league breaks its ties with ippon-shobu bouts that the app schedules itself, by the same rule (refer to [Individual competitors: another round, or lots](../court-operators/recording-decisions.md#individual-competitors-another-round-or-lots)).
 
 **Of the podium places, only 3rd can be shared.**
 
@@ -247,7 +247,7 @@ A league has no knockout, so its table is its result, and one rule decides which
 
 ![The League tab of a team league after the last regular match: a Tie-breaker required banner naming Kenshinkan A and Mumeishi as level for 1st to 2nd place, with a Run tie-breaker button, above the standings table where both teams share rank 1 on amber rows, with two wins, one draw and the same IV and PW.](../../screenshots/league-tiebreak-banner.png)
 
-Once the tie-breaker is run, it joins the shiaijo's queue like any other match. On the court console it waits as Up next with a **DH** mark and a line saying which place it settles; the court operator starts it and scores it there.
+Once the tie-breaker is run, it joins the shiai-jo's queue like any other match. On the court console it waits as Up next with a **DH** mark and a line saying which place it settles; the court operator starts it and scores it there.
 
 ![The court console of Shiaijo A with the tie-breaker as Up next: a DH mark, Mumeishi against Kenshinkan A, the line "Tie-breaker for 1st place. They finished level, so this bout separates them.", and Start match and Call to court buttons, with the six finished encounters listed below.](../../screenshots/court-tiebreak-up-next.png)
 

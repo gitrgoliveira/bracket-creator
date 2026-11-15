@@ -208,6 +208,17 @@ describe('AdminPools: an individual tie-breaker round that went in a circle', ()
     expect(await screen.findByText('Pool A, 1st to 3rd place')).toBeTruthy();
   });
 
+  it('states the pool rule in a pools competition and the league rule in a league', async () => {
+    await mount(leagueComp({ format: 'mixed' }));
+    const pool = (await screen.findByText('A tie-breaker round left a tie')).closest('.league-tiebreak');
+    expect(pool.textContent).toContain('this tie decides who goes through or where they are seated');
+    expect(pool.textContent).not.toContain('joint 3rd places');
+    cleanup();
+    await mount(leagueComp());
+    const league = (await screen.findByText('A tie-breaker round left a tie')).closest('.league-tiebreak');
+    expect(league.textContent).toContain('a tie at 1st or 2nd place (and at 3rd place when joint 3rd places are off) needs a winner');
+  });
+
   it('shows the lots without a header of their own, spaced from the buttons, and Cancel closes them', async () => {
     await mount(leagueComp());
     await screen.findByText('A tie-breaker round left a tie');

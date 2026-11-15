@@ -245,7 +245,7 @@ A league has no knockout, so its table is its result, and one rule decides which
 - **Run tie-breaker** schedules a daihyosen among the tied teams.
 - **Remove unscored tie-breaker** replaces Run tie-breaker once one is scheduled, and takes it back while nobody has scored it, so you can run it again.
 
-![The League tab of a team league after the last regular match: a Tie-breaker required banner naming Kenshinkan A and Mumeishi as level for positions 1 to 2, with a Run tie-breaker button, above the standings table where both teams show two wins, one draw and the same IV and PW.](../../screenshots/league-tiebreak-banner.png)
+![The League tab of a team league after the last regular match: a Tie-breaker required banner naming Kenshinkan A and Mumeishi as level for 1st to 2nd place, with a Run tie-breaker button, above the standings table where both teams share rank 1 on amber rows, with two wins, one draw and the same IV and PW.](../../screenshots/league-tiebreak-banner.png)
 
 Once the tie-breaker is run, it joins the shiaijo's queue like any other match. On the court console it waits as Up next with a **DH** mark and a line saying which place it settles; the court operator starts it and scores it there.
 

@@ -613,6 +613,82 @@ func TestIndividualLeague_BarredDrawAcrossRunsOwesTheLotsToTheLevelRun(t *testin
 	require.Len(t, report.Recorded, 1, "the lots stay correctable")
 }
 
+// A both-barred draw leaves the round unfinished for the whole group, so a circle
+// among the other members is still level and owes its lots too. Five players
+// level on Points: Ayu beat Ben, Ben beat Cal and Cal beat Ayu, all three beat
+// Dee and Eli, and Dee and Eli's bout was drawn because both are barred. The
+// league holds open for the lots over the circle at 1st to 3rd (the pair at 4th
+// is below the podium), and finishes once they are entered.
+func TestIndividualLeague_BarredDrawElsewhereLeavesACircleToTheLots(t *testing.T) {
+	const compID = "ind-barred-circle"
+	eng, store, _ := setupTestEngine(t)
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: compID, Name: compID, Format: state.CompFormatLeague, Status: state.CompStatusPools, Courts: []string{"A"},
+	}))
+	players := []helper.Player{
+		{ID: "ayu-id", Name: "Ayu", Dojo: "Dojo A"}, {ID: "ben-id", Name: "Ben", Dojo: "Dojo B"}, {ID: "cal-id", Name: "Cal", Dojo: "Dojo C"},
+		{ID: "dee-id", Name: "Dee", Dojo: "Dojo D"}, {ID: "eli-id", Name: "Eli", Dojo: "Dojo E"},
+	}
+	require.NoError(t, store.SaveParticipants(compID, players))
+	require.NoError(t, store.SavePools(compID, []helper.Pool{{PoolName: "Pool A", Players: players}}))
+	var regular []state.MatchResult
+	for i := range players {
+		for j := i + 1; j < len(players); j++ {
+			regular = append(regular, state.MatchResult{
+				ID: "Pool A-" + string(rune('0'+len(regular))), SideA: players[i].Name, SideAID: players[i].ID,
+				SideB: players[j].Name, SideBID: players[j].ID, Court: "A",
+				Status: state.MatchStatusCompleted, Decision: string(domain.DecisionHikiwake),
+			})
+		}
+	}
+	require.NoError(t, store.SavePoolMatches(compID, regular))
+	outcome, err := eng.MaybeAutoCompletePools(compID)
+	require.NoError(t, err)
+	require.Equal(t, AutoCompleteTiebreakInjected, outcome, "five players level at 1st owe a round")
+
+	beats := map[string]bool{"ayu-id|ben-id": true, "ben-id|cal-id": true, "cal-id|ayu-id": true}
+	for _, circle := range []string{"ayu-id", "ben-id", "cal-id"} {
+		beats[circle+"|dee-id"], beats[circle+"|eli-id"] = true, true
+	}
+	all, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	for i := range all {
+		m := &all[i]
+		if !IsTiebreakerMatchID(m.ID) {
+			continue
+		}
+		var winner string
+		switch {
+		case beats[m.SideAID+"|"+m.SideBID]:
+			winner = m.SideAID
+		case beats[m.SideBID+"|"+m.SideAID]:
+			winner = m.SideBID
+		default:
+			continue // Dee and Eli: drawn below
+		}
+		m.Status, m.WinnerID = state.MatchStatusCompleted, winner
+		if winner == m.SideAID {
+			m.Winner, m.IpponsA = m.SideA, []string{"M"}
+		} else {
+			m.Winner, m.IpponsB = m.SideB, []string{"M"}
+		}
+	}
+	require.NoError(t, store.SavePoolMatches(compID, all))
+	drawnByDecision(t, eng, compID, tiebreakBoutBetween(t, store, compID, "dee-id", "eli-id"))
+	barCompetitor(t, store, compID, "dee-id", true)
+	barCompetitor(t, store, compID, "eli-id", true)
+
+	assert.Equal(t, PoolsChusenOwed, poolsVerdictNow(t, eng, store, compID), "the circle at 1st to 3rd is level")
+	report, err := eng.ChusenStatus(compID)
+	require.NoError(t, err)
+	require.Len(t, report.Pending, 1, "the barred pair at 4th is below the band")
+	assert.Equal(t, 1, report.Pending[0].MinPosition)
+	assert.ElementsMatch(t, []string{"Ayu", "Ben", "Cal"}, chusenTeamNames(report.Pending[0]))
+
+	enterLots(t, eng, compID, []string{"cal-id", "ayu-id", "ben-id"})
+	assert.Equal(t, PoolsSettled, poolsVerdictNow(t, eng, store, compID))
+}
+
 // tiebreakBoutBetween is the id of the tie-break bout fought between two players.
 func tiebreakBoutBetween(t *testing.T, store *state.Store, compID, a, b string) string {
 	t.Helper()

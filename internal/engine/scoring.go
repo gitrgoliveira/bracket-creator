@@ -2258,8 +2258,8 @@ func applyPoolRanksInForce(sorted []state.PlayerStanding, inForce map[string]int
 //     best finishing position is 3rd or lower, so both the
 //     standings table and the closing-ceremony podium show two (or more)
 //     equal 3rd places instead of relabeling the 4th finisher;
-//   - a tie outside the band a tie is broken in (TieOutOfBand, stamped by
-//     markTiesOutOfBand): no bout or lots are owed for it, so its members
+//   - a run the bouts left level outside the band a tie is broken in (its best
+//     place is 4th or lower): no bout or lots are owed for it, so its members
 //     share their better place (4, 4) (operator decision N2b: ties below the
 //     band can always share places).
 //
@@ -2281,7 +2281,7 @@ func applyPoolRanksInForce(sorted []state.PlayerStanding, inForce map[string]int
 // separated is one run, so it shares as a whole.
 //
 // Mutates sorted in place. Callers pass a Points-sorted slice that already has
-// sequential ranks assigned and the Tied/TieOutOfBand/IsOverridden stamps, so
+// sequential ranks assigned and the Tied/IsOverridden stamps, so
 // detectPoolTies groups by adjacent Points equality exactly as it does for the
 // amber-tie highlight, and the pool's matches, which hold those bouts.
 func applyJointThirdRanks(comp *state.Competition, sorted []state.PlayerStanding, matches []state.MatchResult) {
@@ -2290,22 +2290,18 @@ func applyJointThirdRanks(comp *state.Competition, sorted []state.PlayerStanding
 	}
 	for _, positions := range detectPoolTies(sorted) {
 		group := standingsAt(sorted, positions)
-		jointThird := comp.EffectiveTwoThirdPlaces()
-		outOfBand := !slices.ContainsFunc(group, func(s state.PlayerStanding) bool { return !s.TieOutOfBand })
-		if !jointThird && !outOfBand {
-			continue
-		}
 		at := 0
 		for _, run := range tieBreakRuns(group, matches, comp.IsTeam()) {
 			place := positions[at] + 1
-			// The joint 3rd rule is judged on the run's own best place: a pair
-			// the bouts left level at 3rd and 4th shares 3rd even where the
-			// group it came from started at 1st.
+			// Both rules are judged on the run's own best place, never the
+			// group's: a pair the bouts left level at 4th and 5th shares 4th
+			// inside a group that started at 1st, and one level at 3rd and 4th
+			// shares 3rd where joint 3rd places are awarded.
 			// A run holding a rank in force keeps its sequential ranks: the
 			// operator's order decides it. A different run of the group is
 			// judged on its own.
 			held := slices.ContainsFunc(run, func(s state.PlayerStanding) bool { return s.IsOverridden })
-			shares := !held && (outOfBand || (jointThird && place >= 3))
+			shares := !held && (place > leagueTiebreakBand || (comp.EffectiveTwoThirdPlaces() && place >= 3))
 			for range run {
 				if shares {
 					sorted[positions[at]].Rank = place

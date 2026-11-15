@@ -182,11 +182,11 @@ function drawnSupplementaryBouts(poolMatches, standings, isLeague = false) {
     const { group, level } = lotsGroupOf(standings, m);
     if (!group) return false;
     // Moot: any drawn supplementary bout whose sides are no longer level, or
-    // whose level group lies outside the band a tie is broken in (the server
-    // marks those rows tieOutOfBand). Or the lots rule it: drawn outside the app
+    // whose level run lies outside the band a tie is broken in (the server
+    // marks those rows tieOutOfBand, judged on the run's own places). Or the lots rule it: drawn outside the app
     // and entered by the organiser, a recorded order over the whole level group
     // settles a drawn tie-break bout as it does a representative one.
-    return !level || group[0].tieOutOfBand || group.every(s => s.isOverridden);
+    return !level || group.every(s => s.tieOutOfBand) || group.every(s => s.isOverridden);
   };
   return rows.filter(m => isDrawnSupplementary(m) && !settledWithoutRematch(m));
 }

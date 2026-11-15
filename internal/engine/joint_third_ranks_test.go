@@ -138,6 +138,23 @@ func TestApplyJointThirdRanks(t *testing.T) {
 			"lots over the run at 3rd keep its sequential places")
 	})
 
+	t.Run("a run level at 4th inside a group that started at 1st shares 4th, joint 3rd places off", func(t *testing.T) {
+		// One Points group of five. The bouts put a, b and c clear, in that order,
+		// and leave d and e level (their own bout is unfought): the run at 4th
+		// shares its place whatever the setting, though the group is in the band.
+		round := []state.MatchResult{
+			tbBout(0, "a", "b", "a"), tbBout(1, "a", "c", "a"), tbBout(2, "a", "d", "a"), tbBout(3, "a", "e", "a"),
+			tbBout(4, "b", "c", "b"), tbBout(5, "b", "d", "b"), tbBout(6, "b", "e", "b"),
+			tbBout(7, "c", "d", "c"), tbBout(8, "c", "e", "c"),
+		}
+		sorted := runRows("a", "b", "c", "d", "e")
+		for i := range sorted {
+			sorted[i].Rank = i + 1
+		}
+		applyJointThirdRanks(leagueOff, sorted, round)
+		assert.Equal(t, []int{1, 2, 3, 4, 4}, ranksOf(sorted))
+	})
+
 	t.Run("non-league (mixed) with setting on → not collapsed", func(t *testing.T) {
 		mixed := &state.Competition{Format: state.CompFormatMixed, LeagueTwoThirdPlaces: true}
 		sorted := []state.PlayerStanding{
@@ -330,6 +347,27 @@ func TestTieNeedsBreak(t *testing.T) {
 		assert.False(t, tieNeedsBreak(comp, []int{2, 3}, grp(2), 2))
 		assert.True(t, tieNeedsBreak(comp, []int{1, 2}, grp(2), 2))
 	})
+}
+
+// TestMarkTiesOutOfBand_JudgesEachRunOnItsOwnPlaces pins that a run the bouts
+// left level below the band is marked out of band inside a group that started in
+// it, and the run above it is not.
+func TestMarkTiesOutOfBand_JudgesEachRunOnItsOwnPlaces(t *testing.T) {
+	comp := &state.Competition{Format: state.CompFormatLeague}
+	band := func(poolName string, positions []int, group []state.PlayerStanding) bool {
+		return tieNeedsBreak(comp, positions, group, 0)
+	}
+	row := func(run int) state.PlayerStanding {
+		return state.PlayerStanding{Points: 3, TieRun: run}
+	}
+	// One Points group of five: runs {0,1}, {2}, {3,4} at places 1-2, 3 and 4-5.
+	sorted := []state.PlayerStanding{row(0), row(0), row(1), row(2), row(2)}
+	markTiesOutOfBand(band, "Pool A", sorted)
+	var got []bool
+	for _, s := range sorted {
+		got = append(got, s.TieOutOfBand)
+	}
+	assert.Equal(t, []bool{false, false, false, true, true}, got)
 }
 
 // TestCalculatePoolStandings_JointThirdWiring proves the joint-3rd convention is

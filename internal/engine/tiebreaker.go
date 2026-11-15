@@ -543,17 +543,27 @@ func newBreakBand(comp *state.Competition, pools []helper.Pool, bracket *state.B
 	}
 }
 
-// markTiesOutOfBand sets TieOutOfBand on every row of a tied group of sorted (a
-// pool's Points-sorted standings) that band leaves outside the places a tie is
-// broken in. It is how the standings carry the band to poolMatchSettled and the
+// markTiesOutOfBand sets TieOutOfBand on every row whose run (TieRun, stamped by
+// markTieRuns, which must have run) of a tied group of sorted (a pool's
+// Points-sorted standings) band leaves outside the places a tie is broken in. A
+// run is judged on its own places, as every other reader of a level run does
+// (levelRuns): a run level below the cut inside a group that started above it is
+// out of band. It is how the standings carry the band to poolMatchSettled and the
 // Pools tab's notice, which have no competition or draw to ask it of.
 func markTiesOutOfBand(band breakBand, poolName string, sorted []state.PlayerStanding) {
 	for _, positions := range detectPoolTies(sorted) {
-		if band(poolName, positions, standingsAt(sorted, positions)) {
-			continue
-		}
-		for _, idx := range positions {
-			sorted[idx].TieOutOfBand = true
+		for start := 0; start < len(positions); {
+			end := start + 1
+			for end < len(positions) && sorted[positions[end]].TieRun == sorted[positions[start]].TieRun {
+				end++
+			}
+			run := positions[start:end]
+			if !band(poolName, run, standingsAt(sorted, run)) {
+				for _, idx := range run {
+					sorted[idx].TieOutOfBand = true
+				}
+			}
+			start = end
 		}
 	}
 }

@@ -266,14 +266,16 @@ func lotsReplacedSentence(group, standings []state.PlayerStanding) string {
 // "-DH-" bout or an ippon-shobu "-TB-" one) whose two sides the standings hold
 // and whose tie decides no place any more: a regular-match correction split the
 // tie the bout was fought for (the sides are no longer level on Points), or moved
-// it outside the band a tie is broken in (TieOutOfBand, tieNeedsBreak). It
-// settles as it stands (poolMatchSettled), with no rematch and no lots owed.
+// it outside the band a tie is broken in (TieOutOfBand, tieNeedsBreak, judged on
+// the run's own places: a run level below the qualifying cut decides no place
+// even inside a group that started above it). It settles as it stands
+// (poolMatchSettled), with no rematch and no lots owed.
 func drawnSupplementaryMoot(m *state.MatchResult, poolStandings map[string][]state.PlayerStanding) bool {
 	if !drawnSupplementaryBout(m) {
 		return false
 	}
 	group, level := lotsGroup(poolStandings, m)
-	return group != nil && (!level || group[0].TieOutOfBand)
+	return group != nil && (!level || !slices.ContainsFunc(group, func(s state.PlayerStanding) bool { return !s.TieOutOfBand }))
 }
 
 // lotsGroup is the standings group a drawn representative bout's lots had to
@@ -416,27 +418,27 @@ func levelRuns(group []state.PlayerStanding, positions []int, matches []state.Ma
 // barredDrawRuns lists the runs of a league tie whose tie-breaker the bouts
 // cannot settle because two of its members could not fight: every tie-break bout
 // among the group's members is finished and at least one of them is a draw nobody
-// fought (drawnTiebreakOfBarredSides). Each run (tieBreakRuns) of two or more
-// holding a side of such a bout owes its place to the lots the organiser draws
-// and enters on the chusen panel, the panel a circle uses (operator decision Q1,
-// round rule-3). A bout whose two sides the fought bouts put in different runs
-// leaves each of those runs level for the same reason, since the round never
-// finished, while a side that stands alone owes nothing. The
-// lots rank that run alone, at the places it stands at: the fought bouts that put
-// other members clear of it stand, and the barred pair never decides a place the
-// bouts already gave. No further round is offered, since nobody can fight it. It
-// is the league's rule only (PoolsSettledNow, chusenStatusFrom): a pools +
-// knockout competition keeps its own. positions are the group's places
-// (detectPoolTies), matches the pool rows as stored (a drawn representative bout
-// included, which chusenMatches leaves out), statuses the competitors' statuses
-// now. The caller judges each run against the band and leaves out one whose lots
-// are recorded.
+// fought (drawnTiebreakOfBarredSides). That draw leaves the round unfinished, so
+// the fought bouts never recurse into a next round and no run is reported level
+// (tieBreakLeftLevel): every run (tieBreakRuns) of two or more is still level,
+// the barred pair's and a circle among the group's other members alike, and each
+// owes its place to the lots the organiser draws and enters on the chusen panel,
+// the panel a circle uses (operator decision Q1, round rule-3). A member the
+// bouts put clear of the rest stands alone and owes nothing. The lots rank a run
+// alone, at the places it stands at: the fought bouts that put other members
+// clear of it stand, and the barred pair never decides a place the bouts already
+// gave. No further round is offered, since nobody can fight it. It is the
+// league's rule only (PoolsSettledNow, chusenStatusFrom): a pools + knockout
+// competition keeps its own. positions are the group's places (detectPoolTies),
+// matches the pool rows as stored (a drawn representative bout included, which
+// chusenMatches leaves out), statuses the competitors' statuses now. The caller
+// judges each run against the band and leaves out one whose lots are recorded.
 func barredDrawRuns(group []state.PlayerStanding, positions []int, matches []state.MatchResult, statuses map[string]domain.CompetitorStatus, isTeam bool) []levelRun {
 	if len(statuses) == 0 {
 		return nil
 	}
 	ids := groupMemberIDs(group)
-	var drawn []*state.MatchResult
+	drawn := false
 	for i := range matches {
 		m := &matches[i]
 		if !state.IsPoolSupplementaryMatchID(m.ID) || !ids[m.SideAID] || !ids[m.SideBID] || m.SideAID == m.SideBID {
@@ -445,17 +447,14 @@ func barredDrawRuns(group []state.PlayerStanding, positions []int, matches []sta
 		if m.Status != state.MatchStatusCompleted {
 			return nil
 		}
-		if drawnTiebreakOfBarredSides(m, statuses) {
-			drawn = append(drawn, m)
-		}
+		drawn = drawn || drawnTiebreakOfBarredSides(m, statuses)
 	}
-	if len(drawn) == 0 {
+	if !drawn {
 		return nil
 	}
 	var out []levelRun
 	for _, run := range levelRuns(group, positions, matches, isTeam) {
-		runIDs := groupMemberIDs(run.members)
-		if len(run.members) > 1 && slices.ContainsFunc(drawn, func(m *state.MatchResult) bool { return runIDs[m.SideAID] || runIDs[m.SideBID] }) {
+		if len(run.members) > 1 {
 			out = append(out, run)
 		}
 	}

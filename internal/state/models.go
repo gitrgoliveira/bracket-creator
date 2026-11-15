@@ -2125,9 +2125,9 @@ type PlayerStanding struct {
 	// row): equal Points, and not yet settled by a recorded chusen or by its
 	// supplementary bouts (engine.markTiedStandings).
 	Tied bool `json:"tied,omitempty"`
-	// TieOutOfBand marks a row whose tied group (equal Points) lies outside the
-	// band a tie is broken in (engine.tieNeedsBreak), so no bout or lots are owed
-	// for it. The zero value, in the band or not tied at all, is what a row nobody
+	// TieOutOfBand marks a row whose run of the tied group (equal Points, TieRun)
+	// lies outside the band a tie is broken in (engine.tieNeedsBreak, judged on the
+	// run's own places), so no bout or lots are owed for it. The zero value, in the band or not tied at all, is what a row nobody
 	// stamped reads as. A drawn supplementary bout fought for such a tie decides no
 	// place, so the pool settles with it as it stands (engine.drawnSupplementaryMoot).
 	TieOutOfBand bool `json:"tieOutOfBand,omitempty"`

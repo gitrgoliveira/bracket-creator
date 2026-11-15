@@ -240,7 +240,11 @@ func judgeTieBreakRounds(group []state.PlayerStanding, matches []state.MatchResu
 // rankTieBreakRound orders members by their wins in round k (0-based) and,
 // once that round is finished, each run it left level by the next round. It
 // returns the order and whether it is complete. A round still being fought
-// orders by the bouts decided so far, as the table always has. A run with no
+// orders by the bouts decided so far, as the table always has. A bout finished
+// with no winner counts as played (it gives nobody a win), so the round it sits
+// in can finish and the runs the other bouts left level are read into the next
+// round; a run holding one of its two sides stays level, unsettled and never
+// reported in v.level (holdsDrawnSide). A run with no
 // row in round k after a finished round k-1 is a run left level (level); with
 // no row in the first round it is a tie whose round is still to be added
 // (pendingTieBreaks), not a run left level. v collects the runs left level
@@ -256,6 +260,7 @@ func rankTieBreakRound(members []state.PlayerStanding, rounds []map[string]state
 		round = rounds[k]
 	}
 	wins := map[string]int{}
+	drawnSide := map[string]bool{}
 	pairs, present, decided := 0, 0, 0
 	for i := range out {
 		for j := i + 1; j < len(out); j++ {
@@ -280,6 +285,14 @@ func rankTieBreakRound(members []state.PlayerStanding, rounds []map[string]state
 			case winnerIsB:
 				wins[m.SideBID]++
 				decided++
+			case drawnSupplementaryBout(&m):
+				// A bout finished with no winner (in a league only the draw nobody
+				// could fight, refuseDrawnLeagueTiebreak) is played: the round no
+				// longer waits on it, so the runs the others' results left level are
+				// read into the next round. It gives nobody a win, and its two sides
+				// are marked: they cannot be told apart by this bout.
+				decided++
+				drawnSide[m.SideAID], drawnSide[m.SideBID] = true, true
 			}
 		}
 	}
@@ -300,16 +313,29 @@ func rankTieBreakRound(members []state.PlayerStanding, rounds []map[string]state
 		for j < len(out) && wins[out[j].Player.ID] == wins[out[i].Player.ID] {
 			j++
 		}
-		if j-i >= 2 && finished {
+		switch {
+		case j-i >= 2 && finished && !holdsDrawnSide(out[i:j], drawnSide):
 			run, ok := rankTieBreakRound(out[i:j], rounds, k+1, v)
 			copy(out[i:j], run)
 			settled = settled && ok
-		} else {
+		default:
+			// A run holding a side of a drawn bout is never read into another
+			// round, nor reported level: that bout settled nothing and is fought
+			// again or, where nobody can fight it, left to the lots.
+			if j-i >= 2 {
+				settled = false
+			}
 			v.runs = append(v.runs, out[i:j])
 		}
 		i = j
 	}
 	return out, settled
+}
+
+// holdsDrawnSide reports whether any member of run is a side of a drawn bout of
+// the round being read (rankTieBreakRound's drawnSide, keyed by participant id).
+func holdsDrawnSide(run []state.PlayerStanding, drawnSide map[string]bool) bool {
+	return slices.ContainsFunc(run, func(s state.PlayerStanding) bool { return drawnSide[s.Player.ID] })
 }
 
 // tieBreakRuns partitions a Points-tied group, in the order applyTiebreakSort

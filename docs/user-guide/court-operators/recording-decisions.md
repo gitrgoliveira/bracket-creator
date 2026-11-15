@@ -90,7 +90,7 @@ In an individual pool or league, a tie that matters is broken by single-point (i
 - **Run another tie-breaker round** adds a fresh round of ippon-shobu bouts among the competitors still level. When more than one group is still level, there is one button for each, naming the competitors. The place stays open until the new bouts are scored.
 - **Draw lots instead** opens the same entry as the team chusen above: draw lots offline, enter each competitor's finishing position and record it.
 
-When nobody can fight another round because both sides withdrew earlier, only the lots are offered.
+When two competitors level for a place both withdrew earlier, their tie-breaker was recorded as a draw nobody fought, and only the lots are offered for them. That draw does not hold back the others: competitors in the same tie who can still fight, for example a circle of three, are offered both choices, another round or lots, as in any other tie. Their next round counts even though the withdrawn pair's bout was drawn.
 
 The app never draws the lots for you, and it never starts another round without your tap. A recorded order can be changed afterwards with **Change**, as for a team chusen, even after the league has finished.
 

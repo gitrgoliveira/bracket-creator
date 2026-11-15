@@ -613,14 +613,12 @@ func TestIndividualLeague_BarredDrawAcrossRunsOwesTheLotsToTheLevelRun(t *testin
 	require.Len(t, report.Recorded, 1, "the lots stay correctable")
 }
 
-// A both-barred draw leaves the round unfinished for the whole group, so a circle
-// among the other members is still level and owes its lots too. Five players
-// level on Points: Ayu beat Ben, Ben beat Cal and Cal beat Ayu, all three beat
-// Dee and Eli, and Dee and Eli's bout was drawn because both are barred. The
-// league holds open for the lots over the circle at 1st to 3rd (the pair at 4th
-// is below the podium), and finishes once they are entered.
-func TestIndividualLeague_BarredDrawElsewhereLeavesACircleToTheLots(t *testing.T) {
-	const compID = "ind-barred-circle"
+// barredDrawWithACircle is an individual league of five players level on Points:
+// Ayu beat Ben, Ben beat Cal and Cal beat Ayu, all three beat Dee and Eli, and
+// Dee and Eli's bout was drawn because both are barred. The three in the circle
+// can still fight.
+func barredDrawWithACircle(t *testing.T, compID string) (*Engine, *state.Store) {
+	t.Helper()
 	eng, store, _ := setupTestEngine(t)
 	require.NoError(t, store.SaveCompetition(&state.Competition{
 		ID: compID, Name: compID, Format: state.CompFormatLeague, Status: state.CompStatusPools, Courts: []string{"A"},
@@ -677,6 +675,17 @@ func TestIndividualLeague_BarredDrawElsewhereLeavesACircleToTheLots(t *testing.T
 	drawnByDecision(t, eng, compID, tiebreakBoutBetween(t, store, compID, "dee-id", "eli-id"))
 	barCompetitor(t, store, compID, "dee-id", true)
 	barCompetitor(t, store, compID, "eli-id", true)
+	return eng, store
+}
+
+// A both-barred draw is a bout played: it does not stop a circle among the other
+// members from being level, and a circle of players who can still fight is
+// offered another round or the lots, the organiser's choice (round p4-review-3,
+// R3). The league holds open for either at 1st to 3rd (the barred pair at 4th is
+// below the podium), and finishes once the circle is settled by lots.
+func TestIndividualLeague_BarredDrawElsewhereLeavesACircleToARoundOrLots(t *testing.T) {
+	const compID = "ind-barred-circle"
+	eng, store := barredDrawWithACircle(t, compID)
 
 	assert.Equal(t, PoolsChusenOwed, poolsVerdictNow(t, eng, store, compID), "the circle at 1st to 3rd is level")
 	report, err := eng.ChusenStatus(compID)
@@ -684,9 +693,42 @@ func TestIndividualLeague_BarredDrawElsewhereLeavesACircleToTheLots(t *testing.T
 	require.Len(t, report.Pending, 1, "the barred pair at 4th is below the band")
 	assert.Equal(t, 1, report.Pending[0].MinPosition)
 	assert.ElementsMatch(t, []string{"Ayu", "Ben", "Cal"}, chusenTeamNames(report.Pending[0]))
+	require.Len(t, report.Pending[0].StillLevel, 1, "the circle can fight another round: both choices are offered")
+	assert.ElementsMatch(t, []string{"Ayu", "Ben", "Cal"}, standingNames(report.Pending[0].StillLevel[0]))
 
 	enterLots(t, eng, compID, []string{"cal-id", "ayu-id", "ben-id"})
 	assert.Equal(t, PoolsSettled, poolsVerdictNow(t, eng, store, compID))
+}
+
+// The other choice: another tie-breaker round among the circle. The barred pair
+// is refused one (nobody can fight it), the round's results count although
+// another bout of the first round was drawn, and the table settles 1st to 3rd
+// with Dee and Eli sharing 4th.
+func TestIndividualLeague_BarredDrawElsewhereLetsTheCircleFightAnotherRound(t *testing.T) {
+	const compID = "ind-barred-circle-round"
+	eng, store := barredDrawWithACircle(t, compID)
+
+	_, err := eng.RunTiebreakerRound(compID, "Pool A", []string{"dee-id", "eli-id"})
+	var verr *ValidationError
+	require.ErrorAs(t, err, &verr, "the pair nobody can fight is owed lots, not a round")
+
+	added, err := eng.RunTiebreakerRound(compID, "Pool A", []string{"ayu-id", "ben-id", "cal-id"})
+	require.NoError(t, err)
+	require.Len(t, added, 3, "every pair of the circle fights again")
+	assert.Equal(t, PoolsMatchOpen, poolsVerdictNow(t, eng, store, compID), "the second round is still to fight")
+
+	// Ben beats both, Cal beats Ayu.
+	require.Equal(t, 3, scoreScheduledTB(t, eng, store, compID, rankOrder([]string{"Ben", "Cal", "Ayu"})))
+	assert.Equal(t, PoolsSettled, poolsVerdictNow(t, eng, store, compID), "a decisive second round settles the circle")
+	outcome, err := eng.MaybeAutoCompletePools(compID)
+	require.NoError(t, err)
+	assert.Equal(t, AutoCompleteTransitioned, outcome)
+
+	standings, err := eng.LeagueStandings(compID)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"Ben", "Cal", "Ayu"}, standingNames(standings[:3]), "the table follows the second round")
+	assert.Equal(t, standings[3].Rank, standings[4].Rank, "Dee and Eli still share 4th")
+	assert.Equal(t, 4, standings[3].Rank)
 }
 
 // tiebreakBoutBetween is the id of the tie-break bout fought between two players.

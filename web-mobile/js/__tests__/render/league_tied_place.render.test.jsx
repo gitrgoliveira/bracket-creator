@@ -32,7 +32,7 @@ beforeEach(() => { savedAPI = window.API; });
 afterEach(() => { window.API = savedAPI; });
 
 async function renderLeague(standings) {
-  window.API = { ...(savedAPI || {}), leagueStandings: () => Promise.resolve(standings) };
+  window.API = { ...savedAPI, leagueStandings: () => Promise.resolve(standings) };
   const { container } = render(
     <LeagueStandingsViewer competition={competition} poolMatches={[]} tweaks={tweaks} highlightPlayers={[]} />,
   );

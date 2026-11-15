@@ -633,7 +633,7 @@ func TestGroupNeedsChusen_HanteiDHWithNoWinnerID_NeedsChusen(t *testing.T) {
 	}
 	// No WinnerID anywhere: every member accrues 0 wins and ties, so a
 	// chusen is (correctly) still needed despite the round being complete.
-	assert.True(t, groupNeedsChusen(group, []int{0, 1, 2}, matches, inEveryBand),
+	assert.True(t, groupNeedsChusen(group, []int{0, 1, 2}, matches, nil, inEveryBand),
 		"a daihyosen round with no WinnerID anywhere resolves no wins at all, so every member ties and still needs a chusen")
 }
 

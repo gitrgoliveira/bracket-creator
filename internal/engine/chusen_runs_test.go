@@ -128,13 +128,13 @@ func TestGroupNeedsChusen_JudgesEachRunOnItsOwnPlaces(t *testing.T) {
 	positions := []int{0, 1, 2, 3, 4}
 	belowTheBand := func(runPositions []int, _ []state.PlayerStanding) bool { return runPositions[0] < 2 }
 
-	assert.True(t, groupNeedsChusen(group, positions, matches, inEveryBand), "in the band the circle owes lots")
-	assert.False(t, groupNeedsChusen(group, positions, matches, belowTheBand), "a circle at 3rd to 5th shares 3rd and owes none")
-	assert.False(t, groupSettledByChusen(group, positions, matches, belowTheBand), "and has none recorded")
+	assert.True(t, groupNeedsChusen(group, positions, matches, nil, inEveryBand), "in the band the circle owes lots")
+	assert.False(t, groupNeedsChusen(group, positions, matches, nil, belowTheBand), "a circle at 3rd to 5th shares 3rd and owes none")
+	assert.False(t, groupSettledByChusen(group, positions, matches, nil, belowTheBand), "and has none recorded")
 
 	for i := 2; i < 5; i++ {
 		group[i].IsOverridden = true
 	}
-	assert.False(t, groupNeedsChusen(group, positions, matches, inEveryBand), "lots over the circle settle it")
-	assert.True(t, groupSettledByChusen(group, positions, matches, inEveryBand), "and they stay correctable")
+	assert.False(t, groupNeedsChusen(group, positions, matches, nil, inEveryBand), "lots over the circle settle it")
+	assert.True(t, groupSettledByChusen(group, positions, matches, nil, inEveryBand), "and they stay correctable")
 }

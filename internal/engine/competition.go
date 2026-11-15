@@ -107,7 +107,7 @@ func (e *Engine) PoolsSettledNow(tx state.StoreTx, compID string) (PoolsVerdict,
 	// in the band level (a circle) holds the league open until the operator
 	// runs another round (an individual's) or records the lots.
 	band := newBreakBand(comp, pools, bracket)
-	if dhCycleExists(st, chusenMatches(comp, matches), band) || barredDrawLotsOwed(st, matches, band, lots.statuses, comp.IsTeam()) {
+	if dhCycleExists(st, chusenMatches(comp, matches, lots.statuses), lots.statuses, band) || barredDrawLotsOwed(st, matches, band, lots.statuses, comp.IsTeam()) {
 		return PoolsChusenOwed, nil
 	}
 	return PoolsSettled, nil
@@ -774,15 +774,16 @@ func (e *Engine) advanceMixedPools(compID string, comp *state.Competition) (Auto
 // group via the chusen (drawing lots) panel, which writes poolRanks (pool name
 // -> helper.CompetitorKey(id, "", "") -> rank, i.e. participant id only,
 // bc-pnum); a group whose every member has a rank in force (IsOverridden on the
-// standings) is resolved and no longer blocks completion.
-func dhCycleExists(standings map[string][]state.PlayerStanding, allMatches []state.MatchResult, band breakBand) bool {
+// standings) is resolved and no longer blocks completion. statuses are the
+// competitors' statuses now (nil reads none), for the drawn bout nobody can fight.
+func dhCycleExists(standings map[string][]state.PlayerStanding, allMatches []state.MatchResult, statuses map[string]domain.CompetitorStatus, band breakBand) bool {
 	for poolName, poolStandings := range standings {
 		for _, positions := range detectPoolTies(poolStandings) {
 			group := standingsAt(poolStandings, positions)
 			inBand := func(runPositions []int, members []state.PlayerStanding) bool {
 				return band(poolName, runPositions, members)
 			}
-			if groupNeedsChusen(group, positions, allMatches, inBand) {
+			if groupNeedsChusen(group, positions, allMatches, statuses, inBand) {
 				return true
 			}
 		}

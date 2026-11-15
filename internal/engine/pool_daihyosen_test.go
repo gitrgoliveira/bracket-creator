@@ -589,7 +589,7 @@ func TestDHCycleExists_NoCycle(t *testing.T) {
 			{Player: players[1], Points: 0},
 		},
 	}
-	assert.False(t, dhCycleExists(standings, matches, everyTie))
+	assert.False(t, dhCycleExists(standings, matches, nil, everyTie))
 }
 
 // TestDHCycleExists_Cycle verifies that dhCycleExists returns true for a
@@ -616,11 +616,11 @@ func TestDHCycleExists_Cycle(t *testing.T) {
 			{Player: players[2], Points: 0},
 		},
 	}
-	assert.True(t, dhCycleExists(standings, matches, everyTie))
+	assert.True(t, dhCycleExists(standings, matches, nil, everyTie))
 	// A cycle outside the band (a tie no place hangs on) is offered no chusen
 	// (ChusenStatus asks the same band), so it never holds the pool either.
 	outside := func(string, []int, []state.PlayerStanding) bool { return false }
-	assert.False(t, dhCycleExists(standings, matches, outside))
+	assert.False(t, dhCycleExists(standings, matches, nil, outside))
 }
 
 // TestDHCycleExists_CycleResolvedByOverrides verifies that a cyclic DH result
@@ -646,7 +646,7 @@ func TestDHCycleExists_CycleResolvedByOverrides(t *testing.T) {
 			{Player: players[2], Points: 0, IsOverridden: true},
 		},
 	}
-	assert.False(t, dhCycleExists(standings, matches, everyTie))
+	assert.False(t, dhCycleExists(standings, matches, nil, everyTie))
 }
 
 // TestMaybeAutoCompletePools_TeamDHCycleBlocks verifies that auto-completion

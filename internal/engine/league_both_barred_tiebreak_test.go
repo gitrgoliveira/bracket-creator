@@ -619,6 +619,14 @@ func TestIndividualLeague_BarredDrawAcrossRunsOwesTheLotsToTheLevelRun(t *testin
 // can still fight.
 func barredDrawWithACircle(t *testing.T, compID string) (*Engine, *state.Store) {
 	t.Helper()
+	return barredDrawLeague(t, compID, false)
+}
+
+// barredDrawLeague is barredDrawWithACircle, or with pairOnTop the same league
+// with Dee and Eli beating the circle instead, so the barred pair stands at 1st
+// and 2nd and the circle at 3rd to 5th.
+func barredDrawLeague(t *testing.T, compID string, pairOnTop bool) (*Engine, *state.Store) {
+	t.Helper()
 	eng, store, _ := setupTestEngine(t)
 	require.NoError(t, store.SaveCompetition(&state.Competition{
 		ID: compID, Name: compID, Format: state.CompFormatLeague, Status: state.CompStatusPools, Courts: []string{"A"},
@@ -646,7 +654,11 @@ func barredDrawWithACircle(t *testing.T, compID string) (*Engine, *state.Store) 
 
 	beats := map[string]bool{"ayu-id|ben-id": true, "ben-id|cal-id": true, "cal-id|ayu-id": true}
 	for _, circle := range []string{"ayu-id", "ben-id", "cal-id"} {
-		beats[circle+"|dee-id"], beats[circle+"|eli-id"] = true, true
+		if pairOnTop {
+			beats["dee-id|"+circle], beats["eli-id|"+circle] = true, true
+		} else {
+			beats[circle+"|dee-id"], beats[circle+"|eli-id"] = true, true
+		}
 	}
 	all, err := store.LoadPoolMatches(compID)
 	require.NoError(t, err)
@@ -729,6 +741,33 @@ func TestIndividualLeague_BarredDrawElsewhereLetsTheCircleFightAnotherRound(t *t
 	assert.Equal(t, []string{"Ben", "Cal", "Ayu"}, standingNames(standings[:3]), "the table follows the second round")
 	assert.Equal(t, standings[3].Rank, standings[4].Rank, "Dee and Eli still share 4th")
 	assert.Equal(t, 4, standings[3].Rank)
+}
+
+// A circle elsewhere in the group does not owe lots to a pair whose drawn bout can
+// be fought again. While Dee and Eli are both barred their draw owes the lots
+// beside the circle; once Dee is reinstated the bout opens again, and the lots
+// are no longer offered for a place that bout can decide (the league holds open
+// on the bout). The circle keeps both choices.
+func TestIndividualLeague_ReinstatedSideOfABarredDrawIsOwedNoLotsBesideACircle(t *testing.T) {
+	const compID = "ind-barred-pair-top-reinstate"
+	eng, store := barredDrawLeague(t, compID, true)
+
+	report, err := eng.ChusenStatus(compID)
+	require.NoError(t, err)
+	var pairs [][]string
+	for _, g := range report.Pending {
+		pairs = append(pairs, chusenTeamNames(g))
+	}
+	assert.Contains(t, pairs, []string{"Dee", "Eli"}, "both barred: the draw nobody could fight owes lots")
+
+	barCompetitor(t, store, compID, "dee-id", false)
+	assert.Equal(t, PoolsMatchOpen, poolsVerdictNow(t, eng, store, compID), "the reinstated side can fight the bout again")
+	report, err = eng.ChusenStatus(compID)
+	require.NoError(t, err)
+	for _, g := range report.Pending {
+		assert.NotContains(t, chusenTeamNames(g), "Dee", "no lots for a bout that can be fought")
+		assert.NotContains(t, chusenTeamNames(g), "Eli", "no lots for a bout that can be fought")
+	}
 }
 
 // tiebreakBoutBetween is the id of the tie-break bout fought between two players.
@@ -900,6 +939,55 @@ func TestTeamLeague_ReinstatedBarredDrawKeepsItsLotsCorrectable(t *testing.T) {
 	require.Len(t, report.Recorded, 1, "the lots that decide 1st can still be corrected")
 	assert.ElementsMatch(t, []string{"Alpha", "Beta"}, chusenTeamNames(report.Recorded[0]))
 	assert.Equal(t, []int{1, 2}, report.Recorded[0].Ranks, "Beta 1st by the lots, Alpha 2nd, in table order")
+}
+
+// A team league's representative-bout circle beside a representative bout drawn
+// because both its teams are barred is still owed the lots, as an individual's
+// circle is (barredDrawElsewhereLeavesACircleToARoundOrLots): the draw is a bout
+// played, so the round is finished, and only the lots can order the circle. Five
+// teams level on Points; Alpha beat Beta, Beta beat Gamma and Gamma beat Alpha
+// in the round and all three beat Delta and Echo, whose bout was drawn.
+func TestTeamLeague_BarredDrawElsewhereLeavesACircleToTheLots(t *testing.T) {
+	const compID = "team-barred-dh-circle"
+	teams := []string{"Alpha", "Beta", "Gamma", "Delta", "Echo"}
+	eng, store := teamLeagueFromResults(t, compID, teams, func(string, string) string { return "" })
+	ids := make([]string, len(teams))
+	for i, n := range teams {
+		ids[i] = teamID(n)
+	}
+	_, err := eng.GenerateLeagueTiebreakMatches(compID, ids)
+	require.NoError(t, err)
+	scoreInjectedDH(t, eng, store, compID, func(a, b string) string {
+		switch pair := map[string]bool{a: true, b: true}; {
+		case pair["Delta"] && pair["Echo"]:
+			return ""
+		case pair["Alpha"] && pair["Beta"]:
+			return "Alpha"
+		case pair["Beta"] && pair["Gamma"]:
+			return "Beta"
+		case pair["Gamma"] && pair["Alpha"]:
+			return "Gamma"
+		case a == "Delta" || a == "Echo":
+			return b
+		default:
+			return a
+		}
+	})
+	barCompetitor(t, store, compID, teamID("Delta"), true)
+	barCompetitor(t, store, compID, teamID("Echo"), true)
+
+	assert.Equal(t, PoolsChusenOwed, poolsVerdictNow(t, eng, store, compID), "the circle at 1st to 3rd is owed its lots")
+	outcome, err := eng.MaybeAutoCompletePools(compID)
+	require.NoError(t, err)
+	assert.NotEqual(t, AutoCompleteTransitioned, outcome, "1st is never shared")
+	report, err := eng.ChusenStatus(compID)
+	require.NoError(t, err)
+	require.Len(t, report.Pending, 1, "the barred pair at 4th is below the band")
+	assert.Equal(t, 1, report.Pending[0].MinPosition)
+	assert.ElementsMatch(t, []string{"Alpha", "Beta", "Gamma"}, chusenTeamNames(report.Pending[0]))
+
+	enterLots(t, eng, compID, []string{teamID("Gamma"), teamID("Alpha"), teamID("Beta")})
+	assert.Equal(t, PoolsSettled, poolsVerdictNow(t, eng, store, compID))
 }
 
 // A stale resend of a winnerless finish for a league's tie-breaker bout, over a

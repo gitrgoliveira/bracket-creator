@@ -171,7 +171,9 @@ func (e *Engine) poolCompletion(loader poolStandingsLoader, compID string, comp 
 				continue
 			}
 			scoped := map[string][]state.PlayerStanding{pn: st[pn]}
-			if dhCycleExists(scoped, matches, band) {
+			// No statuses: only a league owes lots for a draw nobody could fight
+			// (ChusenStatus reads none for a pools + knockout competition either).
+			if dhCycleExists(scoped, matches, nil, band) {
 				done[pn] = false
 			}
 		}

@@ -447,7 +447,7 @@ func TestGroupNeedsChusen_SameNameTeamsKeyOnIdentity(t *testing.T) {
 		dh(2, "id-b", "Tora", "id-c", "Kuma", "id-b", "Tora"), // Osaka beats Kuma
 	}
 	// Strict 2/1/0 order: Tokyo 2, Osaka 1, Kuma 0.
-	assert.False(t, groupNeedsChusen(group, []int{0, 1, 2}, matches, inEveryBand),
+	assert.False(t, groupNeedsChusen(group, []int{0, 1, 2}, matches, nil, inEveryBand),
 		"a decided daihyosen order must not need a chusen just because two teams share a name")
 }
 

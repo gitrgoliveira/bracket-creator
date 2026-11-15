@@ -71,9 +71,10 @@ type ChusenReport struct {
 // Returns false when the operator has already ranked every run still level
 // (chusen recorded, chusenRecorded), when no such run is in the band a tie is
 // broken in (chusenOfRuns), or when tieBreakerLeftTied says the bouts settled
-// the order or have not all been fought yet.
-func groupNeedsChusen(group []state.PlayerStanding, positions []int, allMatches []state.MatchResult, inBand runBand) bool {
-	owed, _ := chusenOfRuns(group, positions, allMatches, inBand)
+// the order or have not all been fought yet. statuses are the competitors'
+// statuses now (nil reads none), which say which drawn bout nobody can fight.
+func groupNeedsChusen(group []state.PlayerStanding, positions []int, allMatches []state.MatchResult, statuses map[string]domain.CompetitorStatus, inBand runBand) bool {
+	owed, _ := chusenOfRuns(group, positions, allMatches, statuses, inBand)
 	return len(owed) > 0
 }
 
@@ -89,22 +90,51 @@ type runBand func(positions []int, members []state.PlayerStanding) bool
 // place: a run level at 3rd and 4th inside a group that started at 1st shares
 // 3rd where joint 3rd places are awarded, and owes no lots. levelRuns is asked
 // as a team's (isTeam true): an individual's competition holds no representative
-// bouts, so the refinement by them leaves its runs as they were.
-func chusenOfRuns(group []state.PlayerStanding, positions []int, allMatches []state.MatchResult, inBand runBand) (owed, recorded []levelRun) {
+// bouts, so the refinement by them leaves its runs as they were. A run holding a
+// side of a drawn ippon-shobu bout that can be fought again (fightableDrawnSides)
+// owes nothing even when a circle elsewhere in the group makes the group level:
+// the bout is the way on, so lots would settle it without anyone fighting. Its
+// lots, once recorded, stay listed.
+func chusenOfRuns(group []state.PlayerStanding, positions []int, allMatches []state.MatchResult, statuses map[string]domain.CompetitorStatus, inBand runBand) (owed, recorded []levelRun) {
 	if !tieBreakerLeftTied(group, allMatches) {
 		return nil, nil
 	}
+	fightable := fightableDrawnSides(group, allMatches, statuses)
 	for _, run := range levelRuns(group, positions, allMatches, true) {
 		if len(run.members) < 2 || !inBand(run.positions, run.members) {
 			continue
 		}
-		if chusenRecorded(run.members) {
+		switch {
+		case chusenRecorded(run.members):
 			recorded = append(recorded, run)
-		} else {
+		case !holdsDrawnSide(run.members, fightable):
 			owed = append(owed, run)
 		}
 	}
 	return owed, recorded
+}
+
+// fightableDrawnSides keys, by participant id, the sides of a drawn ippon-shobu
+// ("-TB-") bout among the group that can be fought again: a bout finished with no
+// winner whose two sides are not both barred (drawnTiebreakOfBarredSides, judged
+// on statuses now, nil reads none). A side reinstated since opens the bout again,
+// and a plain draw in a pools + knockout competition is fought again too; neither
+// is owed lots. A representative bout is not read here: a league leaves out a
+// drawn one nobody barred (chusenMatches), and a pools + knockout competition's
+// waits for its lots (daihyosenLeftTied).
+func fightableDrawnSides(group []state.PlayerStanding, matches []state.MatchResult, statuses map[string]domain.CompetitorStatus) map[string]bool {
+	ids := groupMemberIDs(group)
+	sides := map[string]bool{}
+	for i := range matches {
+		m := &matches[i]
+		if !IsTiebreakerMatchID(m.ID) || !drawnSupplementaryBout(m) || !ids[m.SideAID] || !ids[m.SideBID] || m.SideAID == m.SideBID {
+			continue
+		}
+		if !drawnTiebreakOfBarredSides(m, statuses) {
+			sides[m.SideAID], sides[m.SideBID] = true, true
+		}
+	}
+	return sides
 }
 
 // groupSettledByChusen reports whether a tied group WAS decided by chusen: its
@@ -113,8 +143,8 @@ func chusenOfRuns(group []state.PlayerStanding, positions []int, allMatches []st
 // owner of "which groups were decided by chusen", which are the only groups
 // whose recorded order the operator is offered to change: a chusen entered in
 // the wrong order must stay fixable, but no other rank is set by hand.
-func groupSettledByChusen(group []state.PlayerStanding, positions []int, allMatches []state.MatchResult, inBand runBand) bool {
-	owed, recorded := chusenOfRuns(group, positions, allMatches, inBand)
+func groupSettledByChusen(group []state.PlayerStanding, positions []int, allMatches []state.MatchResult, statuses map[string]domain.CompetitorStatus, inBand runBand) bool {
+	owed, recorded := chusenOfRuns(group, positions, allMatches, statuses, inBand)
 	return len(owed) == 0 && len(recorded) > 0
 }
 
@@ -514,14 +544,17 @@ func chusenRecorded(group []state.PlayerStanding) bool {
 // a bout still to be decided by encho and hantei, never a fought one: it is
 // left out, so an all-drawn round is an unfinished round and opens no lots by
 // itself, which stay the operator's choice for a true cycle (every bout won).
-// A pools + knockout competition's rows are returned as they are.
-func chusenMatches(comp *state.Competition, matches []state.MatchResult) []state.MatchResult {
+// The one drawn bout kept is the draw nobody could fight (drawnTiebreakOfBarredSides,
+// judged on statuses now, nil reads none): it is a bout played, so a circle
+// among the group's other teams is a round finished and a cycle, as an
+// individual's is. A pools + knockout competition's rows are returned as they are.
+func chusenMatches(comp *state.Competition, matches []state.MatchResult, statuses map[string]domain.CompetitorStatus) []state.MatchResult {
 	if comp == nil || comp.Format != state.CompFormatLeague {
 		return matches
 	}
 	out := make([]state.MatchResult, 0, len(matches))
 	for i := range matches {
-		if IsPoolDaihyosenMatchID(matches[i].ID) && drawnSupplementaryBout(&matches[i]) {
+		if IsPoolDaihyosenMatchID(matches[i].ID) && drawnSupplementaryBout(&matches[i]) && !drawnTiebreakOfBarredSides(&matches[i], statuses) {
 			continue
 		}
 		out = append(out, matches[i])
@@ -537,7 +570,7 @@ func chusenMatches(comp *state.Competition, matches []state.MatchResult) []state
 // daihyosen win count (a true win/loss cycle, an all-drawn round, or any other
 // partial tie). A league's callers pass its rows through chusenMatches, so
 // there a drawn bout leaves the round incomplete rather than counting as
-// fought.
+// fought, except the draw nobody could fight, which counts played and gives no win.
 func daihyosenLeftTied(group []state.PlayerStanding, allMatches []state.MatchResult) bool {
 	// Membership and win counts key on competitor identity by participant id
 	// ONLY (operator ruling bc-pnum), matching applyTiebreakSort next door.
@@ -652,7 +685,6 @@ func (e *Engine) chusenStatusFrom(loader poolStandingsLoader, standings func() (
 	if err != nil {
 		return report, err
 	}
-	matches := chusenMatches(comp, stored)
 	// A league's tie-breaker drawn because both its sides are barred is
 	// settled by the lots (barredDrawRuns), judged on the statuses now.
 	var statuses map[string]domain.CompetitorStatus
@@ -662,6 +694,7 @@ func (e *Engine) chusenStatusFrom(loader poolStandingsLoader, standings func() (
 			return report, err
 		}
 	}
+	matches := chusenMatches(comp, stored, statuses)
 	poolRanks, err := loader.LoadPoolRanks(compID)
 	if err != nil {
 		return report, err
@@ -708,11 +741,11 @@ func (e *Engine) chusenStatusFrom(loader poolStandingsLoader, standings func() (
 				return band(poolName, runPositions, members)
 			}
 			switch {
-			case groupNeedsChusen(group, positions, matches, inBand):
+			case groupNeedsChusen(group, positions, matches, statuses, inBand):
 				// Only the runs that owe lots are asked for them, each with the rounds
 				// that run could fight again (StillLevel); a run of the same group
 				// that has its lots, or is not in the band, stays out of the ask.
-				owedRuns, recordedRuns := chusenOfRuns(group, positions, matches, inBand)
+				owedRuns, recordedRuns := chusenOfRuns(group, positions, matches, statuses, inBand)
 				level := tieBreakLeftLevel(group, matches)
 				for _, run := range owedRuns {
 					rg := runGroup(run)
@@ -729,10 +762,10 @@ func (e *Engine) chusenStatusFrom(loader poolStandingsLoader, standings func() (
 				for _, run := range recordedRuns {
 					recorded(runGroup(run))
 				}
-			case groupSettledByChusen(group, positions, matches, inBand):
+			case groupSettledByChusen(group, positions, matches, statuses, inBand):
 				// Each run the lots ranked is its own group, on its own places: a
 				// member the bouts already placed clear of the circle is not in it.
-				_, recordedRuns := chusenOfRuns(group, positions, matches, inBand)
+				_, recordedRuns := chusenOfRuns(group, positions, matches, statuses, inBand)
 				for _, run := range recordedRuns {
 					recorded(runGroup(run))
 				}

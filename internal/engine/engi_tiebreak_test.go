@@ -2,10 +2,12 @@ package engine
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
@@ -398,4 +400,64 @@ func TestEngiLeague_FinishedCorrectionThatMakesATieReopens(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, AutoCompleteStarted, outcome, "the door's pass reports the reopen")
 	assert.Len(t, engiTBRows(t, store, id), 3, "and the circle at 1st gets its tie-break bouts")
+}
+
+// A flag count that gives an engi tie-break bout a winner over the lots that
+// ruled it is warned about by the same owner as a fought bout's score (decision
+// R2): the lots were entered by the organiser, and the bout's result replaces
+// them only once confirmed.
+func TestEngiLeague_FlagsOverTheLotsNeedAConfirm(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "engi-league-flags-over-lots"
+	ann, ben, cas, dee := engiPlayer("Ann"), engiPlayer("Ben"), engiPlayer("Cas"), engiPlayer("Dee")
+	setupEngiComp(t, store, compID, state.CompFormatLeague)
+	require.NoError(t, store.SavePools(compID, []helper.Pool{
+		{PoolName: "Pool A", Players: []helper.Player{ann, ben, cas, dee}},
+	}))
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		engiBout("Pool A-0", ann, ben, 0, 3),
+		engiBout("Pool A-1", ann, cas, 3, 0),
+		engiBout("Pool A-2", ann, dee, 3, 0),
+		engiBout("Pool A-3", ben, cas, 3, 0),
+		engiBout("Pool A-4", ben, dee, 0, 3),
+		engiBout("Pool A-5", cas, dee, 3, 2),
+	}))
+	outcome, err := eng.MaybeAutoCompletePools(compID)
+	require.NoError(t, err)
+	require.Equal(t, AutoCompleteTiebreakInjected, outcome)
+	tb := engiTBRows(t, store, compID)
+	require.Len(t, tb, 1)
+
+	// Neither pair can fight the bout: it is a draw nobody fought, and the lots
+	// the organiser entered rule the place.
+	all, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	for i := range all {
+		if all[i].ID == tb[0].ID {
+			all[i].Status = state.MatchStatusCompleted
+			all[i].Decision = string(domain.DecisionHikiwake)
+		}
+	}
+	require.NoError(t, store.SavePoolMatches(compID, all))
+	for _, id := range []string{ann.ID, ben.ID} {
+		require.NoError(t, store.SetCompetitorStatus(compID, domain.CompetitorStatus{
+			PlayerID: id, Eligible: false, Reason: "kiken-voluntary: withdrew", MatchID: "Pool A-1", RecordedAt: time.Now(),
+		}))
+	}
+	enterLots(t, eng, compID, []string{ann.ID, ben.ID})
+	outcome, err = eng.MaybeAutoCompletePools(compID)
+	require.NoError(t, err)
+	require.Equal(t, AutoCompleteTransitioned, outcome)
+
+	flags := func() *state.MatchResult {
+		return &state.MatchResult{FlagsA: 1, FlagsB: 2, Status: state.MatchStatusCompleted, CorrectionReason: "fought it"}
+	}
+	_, err = eng.RecordMatchResultWithIneligibility(compID, tb[0].ID, flags())
+	var replaced *LotsReplacedError
+	require.ErrorAs(t, err, &replaced)
+	assert.Empty(t, poolMatchWinner(t, store, compID, tb[0].ID), "the refused write changed nothing")
+
+	_, err = eng.RecordMatchResultWithIneligibility(compID, tb[0].ID, flags(), ForceOptions{ConfirmLots: true})
+	require.NoError(t, err)
+	assert.NotEmpty(t, poolMatchWinner(t, store, compID, tb[0].ID), "the flags decided the bout once confirmed")
 }

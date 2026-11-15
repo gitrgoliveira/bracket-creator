@@ -2982,8 +2982,9 @@ paths:
       tags: [competitions]
       summary: Run another tie-breaker round
       description: >
-        Adds a fresh round of ippon-shobu bouts, one for every pair, among a
-        run of competitors in an individual competition that a finished
+        Adds a fresh round of tie-break bouts (ippon-shobu, or scored on flags
+        in an engi competition), one for every pair, among a run of
+        competitors in an individual or engi competition that a finished
         tie-breaker round left level (a circle: A beat B, B beat C, C beat A,
         or any equal win count). The run is named by participant id, exactly
         as one entry of `stillLevel` in `GET .../chusen-candidates`. The

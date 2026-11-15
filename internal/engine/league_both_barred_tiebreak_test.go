@@ -760,3 +760,39 @@ func TestTeamLeague_ReinstatedBarredDrawKeepsItsLotsCorrectable(t *testing.T) {
 	assert.ElementsMatch(t, []string{"Alpha", "Beta"}, chusenTeamNames(report.Recorded[0]))
 	assert.Equal(t, []int{1, 2}, report.Recorded[0].Ranks, "Beta 1st by the lots, Alpha 2nd, in table order")
 }
+
+// A stale resend of a winnerless finish for a league's tie-breaker bout, over a
+// bout already decided by a later stamp, is held by the merge and kept in the
+// history: the tie-breaker's own refusal (a winner is needed) is not what it is
+// answered with, since nothing of it would have landed.
+func TestIndividualLeague_StaleWinnerlessTiebreakFinishIsHeldNotRefused(t *testing.T) {
+	const compID = "ind-tb-stale-winnerless"
+	eng, store, tbID := barredTiebreakLeague(t, compID)
+	_, err := eng.RecordMatchResultWithIneligibility(compID, tbID, &state.MatchResult{
+		Status: state.MatchStatusCompleted, Winner: "Ben", WinnerID: "ben-id", IpponsB: []string{"M"}, ModifiedAt: 2000,
+	})
+	require.NoError(t, err)
+
+	_, err = eng.RecordMatchResultWithIneligibility(compID, tbID, &state.MatchResult{
+		Status: state.MatchStatusCompleted, ModifiedAt: 1000,
+	})
+	require.ErrorIs(t, err, ErrMatchSuperseded, "held and kept in the history, not refused")
+	assert.NotErrorIs(t, err, ErrTiebreakNeedsWinner)
+	assert.Equal(t, "Ben", poolMatchWinner(t, store, compID, tbID))
+
+	// A winnerless finish that would land is still refused.
+	_, err = eng.RecordMatchResultWithIneligibility(compID, tbID, &state.MatchResult{
+		Status: state.MatchStatusCompleted, ModifiedAt: 3000, CorrectionReason: "no winner",
+	})
+	require.ErrorIs(t, err, ErrTiebreakNeedsWinner)
+}
+
+// A competition deleted between a write and its auto-complete pass is nothing
+// to complete: the pass answers no change rather than reading a missing
+// competition.
+func TestMaybeAutoCompletePools_NoSuchCompetitionIsNoChange(t *testing.T) {
+	eng, _, _ := setupTestEngine(t)
+	outcome, err := eng.MaybeAutoCompletePools("no-such-competition")
+	require.NoError(t, err)
+	assert.Equal(t, AutoCompleteNoChange, outcome)
+}

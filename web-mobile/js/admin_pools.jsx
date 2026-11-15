@@ -788,6 +788,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
   // The main way on is another round among the ones still level
   // (group.stillLevel, each run one round); drawing lots is the operator's
   // other choice, and opens the same entry the team chusen uses.
+  const circleSideWord = c && c.engi ? "pairs" : "competitors";
   const circleNotice = !isTeamComp && chusenCandidates && chusenCandidates.length > 0 ? (
     <div
       className="alert alert--warn league-tiebreak"
@@ -796,7 +797,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
     >
       <div className="league-tiebreak__title">A tie-breaker round left a tie</div>
       <div className="league-tiebreak__desc">
-        A tie at 1st or 2nd place (and at 3rd place when joint 3rd places are off) needs a winner. Each won as many tie-breaker bouts as the others, or the teams to fight it withdrew earlier, so the order is still open. Run another tie-breaker round among them where one can be fought, or draw lots instead.
+        A tie at 1st or 2nd place (and at 3rd place when joint 3rd places are off) needs a winner. Each won as many tie-breaker bouts as the others, or the {circleSideWord} to fight it withdrew earlier, so the order is still open. Run another tie-breaker round among them where one can be fought, or draw lots instead.
       </div>
       {chusenCandidates.map(group => {
         const groupKey = `${group.poolName}::${group.minPosition}`;

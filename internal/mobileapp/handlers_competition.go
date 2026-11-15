@@ -3245,8 +3245,9 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 	// self-run too (isSelfRunMainGatedConfigRoute), as the lots it is the
 	// other way to are. Answers 201 {matches}: the bouts added. A selection
 	// that is no longer such a run (a double tap, another device ran it first,
-	// the lots already ordered the group), a team or engi competition, or one
-	// whose pools are over is a 400 with the sentence to show.
+	// the lots already ordered the group), a team competition, or one whose
+	// pools are over is a 400 with the sentence to show. An engi competition
+	// runs the round too, its bouts decided on flags.
 	r.POST("/competitions/:id/pools/:poolId/tiebreak-round", func(c *gin.Context) {
 		id, ok := requireValidCompID(c)
 		if !ok {

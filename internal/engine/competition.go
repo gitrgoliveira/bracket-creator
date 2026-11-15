@@ -494,6 +494,11 @@ func (e *Engine) hasRecordedResult(compID string) (bool, error) {
 // is false only when the caller knows its write cannot have moved pool
 // standings (MaybeAutoCompletePoolsAfterWrite).
 func (e *Engine) maybeAutoCompletePoolsRunning(compID string, comp *state.Competition, poolsMayHaveMoved bool) (AutoCompleteOutcome, error) {
+	// A competition deleted between the write and this pass has nothing to complete.
+	if comp == nil {
+		return AutoCompleteNoChange, nil
+	}
+
 	// MIXED (Pools + Knockout): resolve incrementally, pool finishers drop into
 	// their knockout slots the moment each pool completes, with NO wait for the
 	// rest of the pool phase. Short-circuit BEFORE the comp-wide "all pools done"
@@ -512,7 +517,7 @@ func (e *Engine) maybeAutoCompletePoolsRunning(compID string, comp *state.Compet
 	// almost every write is a knockout match (or its autosave), which can move
 	// nothing here. Such a write returns NoChange rather than falling through
 	// to the league path below, which a mixed competition has no use for.
-	if comp != nil && comp.Format == state.CompFormatMixed {
+	if comp.Format == state.CompFormatMixed {
 		switch {
 		case comp.Status == state.CompStatusPools:
 			return e.advanceMixedPools(compID, comp)
@@ -539,7 +544,7 @@ func (e *Engine) maybeAutoCompletePoolsRunning(compID string, comp *state.Compet
 	// tie-break bout at a place that counts is played like any other format's
 	// (engiHealOwed), and while one waits the guard below holds the pools open
 	// with no extra transaction.
-	if comp != nil && comp.Engi {
+	if comp.Engi {
 		owed, healErr := e.engiHealOwed(compID, comp, matches)
 		if healErr != nil {
 			return AutoCompleteNoChange, healErr

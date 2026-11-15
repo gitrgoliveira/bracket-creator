@@ -162,6 +162,19 @@ describe('AdminPools: an individual tie-breaker round that went in a circle', ()
     expect(api.runTiebreakerRound).not.toHaveBeenCalled();
   });
 
+  it('speaks of competitors, and of pairs for engi, never of teams', async () => {
+    await mount(leagueComp());
+    const notice = (await screen.findByText('A tie-breaker round left a tie')).closest('.league-tiebreak');
+    expect(notice.textContent).toContain('or the competitors to fight it withdrew earlier');
+    expect(notice.textContent).not.toMatch(/teams/);
+  });
+
+  it('speaks of pairs for an engi competition', async () => {
+    await mount(leagueComp({ engi: true }));
+    const notice = (await screen.findByText('A tie-breaker round left a tie')).closest('.league-tiebreak');
+    expect(notice.textContent).toContain('or the pairs to fight it withdrew earlier');
+  });
+
   it('keeps the team chusen banner for a team competition', async () => {
     await mount(leagueComp({ kind: 'team', teamSize: 3 }));
     await screen.findByText('Chusen (drawing lots) required');

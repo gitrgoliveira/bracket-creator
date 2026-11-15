@@ -263,6 +263,12 @@ func (e *Engine) recordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 					}
 				}
 			}
+			// Flags that give a bout the lots ruled a winner replace the lots, so
+			// the organiser is warned first, as for a fought bout (below). After
+			// the hold, so a stale replay is never misreported.
+			if err := e.refuseOverRecordedLots(tx, compID, comp, engiPrior, fo.ConfirmLots); err != nil {
+				return nil, err
+			}
 		}
 		if comp.Format != state.CompFormatMixed || !IsPoolMatchID(matchID) {
 			engiPrior = nil
@@ -310,7 +316,7 @@ func (e *Engine) recordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 	// the write's error: every guard below (the kachinuki merge, K3, the
 	// rollback, the pool requalification refusal) reads a nil prior as
 	// "nothing stored", which would let the write through unguarded.
-	prior, err := e.lookupExistingResult(tx, compID, matchID)
+	prior, inPool, err := e.lookupExistingResultIn(tx, compID, matchID)
 	if err != nil {
 		return nil, err
 	}
@@ -331,16 +337,17 @@ func (e *Engine) recordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 			return nil, err
 		}
 	}
-	if err := refuseDrawnLeagueTiebreak(comp, matchID, result); err != nil {
-		return nil, err
-	}
+	refusal := refuseDrawnLeagueTiebreak(comp, matchID, result)
 	// A write that would take a drawn bout out of its draw (a fight, a decision,
 	// a reopen by score) while the lots rule it replaces the lots, which the
 	// organiser entered: it is warned about first (refuseOverRecordedLots).
-	if result.Status != state.MatchStatusCompleted || result.Winner != "" || result.WinnerID != "" {
-		if err := e.refuseOverRecordedLots(tx, compID, comp, prior, fo.ConfirmLots); err != nil {
-			return nil, err
-		}
+	if refusal == nil && (result.Status != state.MatchStatusCompleted || result.Winner != "" || result.WinnerID != "") {
+		refusal = e.refuseOverRecordedLots(tx, compID, comp, prior, fo.ConfirmLots)
+	}
+	// A write the merge holds whole lands nothing, so neither refusal applies to
+	// it: it goes on to the merge, which keeps it in the match's history.
+	if refusal != nil && !writeHeldWhole(prior, result, comp, inPool, lines) {
+		return nil, refusal
 	}
 
 	// K3 ahead of the write: a withdrawal whose loser a DIFFERENT match has
@@ -1566,16 +1573,12 @@ func mayBeExactScoreReplay(stored, incoming *state.MatchResult) bool {
 		incoming.ModifiedAt == stored.GroupStamp(state.GroupResult)
 }
 
-// exactScoreReplayProbe is ExactScoreReplay's judgement, handing back the
-// write as the merge would land it (a copy: incoming is not changed), its
-// MergeReport on probe.Merge, which the replay's history entry records.
-func exactScoreReplayProbe(stored, incoming *state.MatchResult, comp *state.Competition, nilSubsClear bool, lines []state.ScoreLogLine) (*state.MatchResult, bool) {
-	if !mayBeExactScoreReplay(stored, incoming) {
-		return nil, false
-	}
+// probeCopy is a write the merge may be run over without changing the
+// original: every slice and map the merge touches is copied, keeping nil apart
+// from empty (a nil list is a writer with nothing to say, an empty one says
+// zero).
+func probeCopy(incoming *state.MatchResult) state.MatchResult {
 	probe := *incoming
-	// Copies that keep nil apart from empty (a nil list is a writer with
-	// nothing to say, an empty one says zero).
 	if incoming.IpponsA != nil {
 		probe.IpponsA = append(make([]string, 0, len(incoming.IpponsA)), incoming.IpponsA...)
 	}
@@ -1585,6 +1588,32 @@ func exactScoreReplayProbe(stored, incoming *state.MatchResult, comp *state.Comp
 	probe.SubResults = state.CloneSubResults(incoming.SubResults)
 	probe.GroupStamps = state.CloneGroupStamps(incoming.GroupStamps)
 	probe.Changed = slices.Clone(incoming.Changed)
+	return probe
+}
+
+// writeHeldWhole reports whether the merge owner would hold every change of a
+// shaped write over the stored match, so it lands nothing and is answered
+// superseded. A refusal that judges what the write would put on the match
+// (refuseDrawnLeagueTiebreak, refuseOverRecordedLots) must not turn such a
+// write away: a stale resend is kept in the match's history, not misreported
+// as a refusal. nilSubsClear is the branch's, as in mergeCtx. The write is not
+// changed.
+func writeHeldWhole(stored, incoming *state.MatchResult, comp *state.Competition, nilSubsClear bool, lines []state.ScoreLogLine) bool {
+	if stored == nil {
+		return false
+	}
+	probe := probeCopy(incoming)
+	return mergeMatchWrite(stored, &probe, matchWriteForward, mergeCtx{comp: comp, knockout: !nilSubsClear, nilSubsClear: nilSubsClear, lines: lines}).Superseded()
+}
+
+// exactScoreReplayProbe is ExactScoreReplay's judgement, handing back the
+// write as the merge would land it (a copy: incoming is not changed), its
+// MergeReport on probe.Merge, which the replay's history entry records.
+func exactScoreReplayProbe(stored, incoming *state.MatchResult, comp *state.Competition, nilSubsClear bool, lines []state.ScoreLogLine) (*state.MatchResult, bool) {
+	if !mayBeExactScoreReplay(stored, incoming) {
+		return nil, false
+	}
+	probe := probeCopy(incoming)
 	if probe.CorrectionReason == "" {
 		probe.CorrectionReason = stored.CorrectionReason
 	}

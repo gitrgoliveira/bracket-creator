@@ -2957,8 +2957,18 @@ export function tieBreakerReasonLine(m, rows) {
     // says neither can fight).
     const barred = barredSides(m);
     const bothBarred = !!(barred.a && barred.b);
+    // What the operator does with a bout nobody can fight. The lots are asked
+    // only for a tie inside the band a tie is broken in; a pair level below it
+    // (`tieOutOfBand` on its rows) shares its place and owes none. Without the
+    // standings the line cannot say which, so it names the Pools tab only as
+    // the place that asks.
+    const neither = (outOfBand) => outOfBand === undefined
+        ? "Neither can fight: record it as drawn. The Pools tab asks for lots if any are owed."
+        : outOfBand
+            ? "Neither can fight: record it as drawn. They share this place, so no lots are owed."
+            : "Neither can fight: record it as drawn, then enter the lots on the Pools tab.";
     const generic = bothBarred
-        ? "Tie-breaker bout. Neither can fight: record it as drawn, then enter the lots on the Pools tab."
+        ? `Tie-breaker bout. ${neither()}`
         : "Tie-breaker bout. These two finished level.";
     const list = Array.isArray(rows) ? rows : [];
     const rowOf = (id) => (id ? list.find((s) => s.player && s.player.id === id) : undefined);
@@ -2968,10 +2978,11 @@ export function tieBreakerReasonLine(m, rows) {
     if (!a || !b || a.points !== b.points || runOf(a) !== runOf(b)) return generic;
     const group = list.filter((s) => s.points === a.points && runOf(s) === runOf(a));
     const lo = Math.min(...group.map((s) => s.rank));
+    const outOfBand = group.every((s) => s.tieOutOfBand);
     if (group.length === 2) {
-        return `Tie-breaker for ${rankOrdinal(lo)} place. ${bothBarred ? "Neither can fight: record it as drawn, then enter the lots on the Pools tab." : "They finished level, so this bout separates them."}`;
+        return `Tie-breaker for ${rankOrdinal(lo)} place. ${bothBarred ? neither(outOfBand) : "They finished level, so this bout separates them."}`;
     }
-    return `Part of the tie-breaker for ${rankOrdinal(lo)} to ${rankOrdinal(lo + group.length - 1)} place. ${bothBarred ? "Neither can fight: record it as drawn, then enter the lots on the Pools tab." : "These two finished level, so this bout helps separate them."}`;
+    return `Part of the tie-breaker for ${rankOrdinal(lo)} to ${rankOrdinal(lo + group.length - 1)} place. ${bothBarred ? neither(outOfBand) : "These two finished level, so this bout helps separate them."}`;
 }
 
 // The standings every unfinished tie-breaker row reads (the league table, or

@@ -940,7 +940,9 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
   // tie-breaker matches yet, OR when tie-breaker matches have been generated.
   // A group whose every tie-breaker bout is finished and that a chusen candidate
   // names (the same teams, by id) is owed lots, which the chusen banner above
-  // asks for: one tie shows in one banner, so it leaves this one.
+  // asks for: one tie shows in one banner, so it leaves this one. A candidate
+  // may name only a run of the group (the bouts already placed the others), and
+  // that run's lots still make this banner repeat it.
   const lotsOwed = (group) => {
     const ids = groupTeamIds(group.teams, group.teamNames || []);
     if (!ids || !isTeamComp || !chusenCandidates) return false;
@@ -948,7 +950,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
     if (rows.length === 0 || !dhPairsComplete(rows, ids.length) || rows.some(m => m.status !== "completed")) return false;
     return chusenCandidates.some(g => {
       const gids = (g.teams || []).map(t => t && t.id);
-      return gids.length === ids.length && gids.every(id => id && ids.includes(id));
+      return gids.length > 0 && gids.every(id => id && ids.includes(id));
     });
   };
   const bannerGroups = (tiebreakCandidates || []).filter(g => !lotsOwed(g));

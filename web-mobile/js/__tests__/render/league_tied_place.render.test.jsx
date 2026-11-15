@@ -86,7 +86,15 @@ describe('the awards podium at phone width', () => {
   it('wraps and lets every step shrink under 480px', () => {
     expect(phone).not.toBeNull();
     expect(phone[0]).toMatch(/\.podium \{[^}]*flex-wrap: wrap/);
-    expect(phone[0]).toMatch(/\.podium-step \{[^}]*min-width: 0/);
-    expect(phone[0]).toMatch(/\.podium-step--1,\s*\.podium-step--2 \{[^}]*flex-basis: 100%/);
+    expect(phone[0]).toMatch(/\.podium \.podium-step \{[^}]*min-width: 0/);
+    expect(phone[0]).toMatch(/\.podium \.podium-step--1,\s*\.podium \.podium-step--2 \{[^}]*flex-basis: 100%/);
+  });
+
+  it('keeps the phone rules inside .podium, so the champion-hero cards keep their heights', () => {
+    // A selector here that does not start at .podium would strip the 130px/110px
+    // step heights from the hero Awards cards, which share the step class.
+    const selectors = phone[0].split('\n').filter((l) => /^\s+\.podium/.test(l) || /^\s+\.podium-step/.test(l));
+    expect(selectors.length).toBeGreaterThan(0);
+    expect(selectors.filter((l) => /^\s+\.podium-step/.test(l))).toEqual([]);
   });
 });

@@ -77,6 +77,13 @@ describe.each([
       .toBe('A tie-breaker needs a winner: fight encho, then decide by hantei');
   });
 
+  it('on the public self-run sheet it points to the organizer, who alone can record hantei', async () => {
+    await mount(bout(id, 'league'), { selfReport: true });
+    const line = 'A tie-breaker needs a winner: fight encho, then ask the organizer for a hantei';
+    expect(drawToggle().title).toBe(line);
+    expect(screen.getByTestId('scoring-modal-draw-blocked-reason').textContent).toBe(line);
+  });
+
   it('the x key does nothing', async () => {
     await mount(bout(id, 'league'));
     await act(async () => { fireEvent.keyDown(window, { key: 'x' }); });

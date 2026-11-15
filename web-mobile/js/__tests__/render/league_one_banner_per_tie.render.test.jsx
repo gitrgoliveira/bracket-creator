@@ -89,6 +89,15 @@ describe('one tie, one banner', () => {
     expect(screen.queryAllByText(/needs a winner|needs a tie-breaker with a winner/)).toHaveLength(0);
   });
 
+  it('shows only the lots banner when the lots are owed for part of the group (one run left level)', async () => {
+    const run = { ...group, teamNames: [teams[0].name, teams[1].name], teams: teams.slice(0, 2), maxPosition: 2 };
+    await mount({ poolMatches: everyPair('completed'), chusen: [run] });
+
+    await screen.findByText('Chusen (drawing lots) required');
+    await waitFor(() => expect(screen.queryByText('Tie-breaker required')).toBeNull());
+    expect(document.querySelectorAll('.league-tiebreak')).toHaveLength(1);
+  });
+
   it('keeps the tie-breaker banner while a bout is still to be fought, even with a lots banner for another tie', async () => {
     const other = { poolName: 'Pool A', teamNames: ['Team X', 'Team Y'], teams: [{ id: 'id-x', name: 'Team X' }, { id: 'id-y', name: 'Team Y' }], minPosition: 4 };
     await mount({ poolMatches: everyPair('scheduled'), chusen: [other] });

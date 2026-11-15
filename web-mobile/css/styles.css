@@ -3951,19 +3951,21 @@ button.vsched-item:not([data-clickable]) {
     flex-wrap: wrap;
     align-items: stretch;
   }
-  .podium-step {
+  /* Scoped to .podium: the champion-hero Awards cards share the step class and
+     keep their own heights. */
+  .podium .podium-step {
     min-width: 0;
     min-height: 0;
     border-radius: 12px;
     flex: 1 1 calc(50% - 6px);
     overflow-wrap: anywhere;
   }
-  .podium-step--1,
-  .podium-step--2 {
+  .podium .podium-step--1,
+  .podium .podium-step--2 {
     flex-basis: 100%;
   }
-  .podium-step--1 { order: 1; }
-  .podium-step--2 { order: 2; }
+  .podium .podium-step--1 { order: 1; }
+  .podium .podium-step--2 { order: 2; }
 }
 
 .podium-step .place {

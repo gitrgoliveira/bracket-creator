@@ -92,12 +92,22 @@ describe('tieBreakerReasonLine', () => {
     const both = bout({ ineligibleSides: { a: 'kiken-injury', b: 'fusenpai' } });
     const fix = 'Neither can fight: record it as drawn, then enter the lots on the Pools tab.';
     expect(tieBreakerReasonLine(both, rows)).toBe(`Tie-breaker for 2nd place. ${fix}`);
-    expect(tieBreakerReasonLine(both, null)).toBe(`Tie-breaker bout. ${fix}`);
+    // Without the standings the line cannot say whether lots are owed.
+    expect(tieBreakerReasonLine(both, null)).toBe('Tie-breaker bout. Neither can fight: record it as drawn. The Pools tab asks for lots if any are owed.');
     const three = [row('p1', 'Aki', 1, 4), row('p2', 'Bea', 2, 4), row('p3', 'Cal', 3, 4)];
     expect(tieBreakerReasonLine(both, three)).toBe(`Part of the tie-breaker for 1st to 3rd place. ${fix}`);
     expect(tieBreakerReasonLine(both, rows)).not.toMatch(/separates/);
     // One side barred: the bout can still be decided, so the line is unchanged.
     expect(tieBreakerReasonLine(bout({ ineligibleSides: { a: 'fusenpai' } }), rows)).toMatch(/separates them\.$/);
+  });
+
+  it('promises no lots for a withdrawn pair level below the band a tie is broken in', () => {
+    const below = (r) => ({ ...r, tieOutOfBand: true });
+    const rows = [row('p0', 'Zed', 1, 9), row('p1', 'Aki', 2, 7), row('p3', 'Cal', 3, 6), below(row('p4', 'Dee', 4, 4)), below(row('p5', 'Eli', 5, 4))];
+    const both = bout({ sideAId: 'p4', sideBId: 'p5', ineligibleSides: { a: 'kiken-injury', b: 'fusenpai' } });
+    const line = tieBreakerReasonLine(both, rows);
+    expect(line).toBe('Tie-breaker for 4th place. Neither can fight: record it as drawn. They share this place, so no lots are owed.');
+    expect(line).not.toMatch(/enter the lots/);
   });
 
   it('names no place when it cannot know one', () => {

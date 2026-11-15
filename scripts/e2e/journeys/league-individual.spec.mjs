@@ -752,7 +752,7 @@ test.describe('league-individual', () => {
       await expect(notice).toContainText(TEXT.bothBarred);
       // The queue row's reason line says what to do and no longer claims the bout
       // separates two people who cannot fight it.
-      await expect(row.locator('.shiaijo-qrow__reason')).toContainText('Neither can fight: record it as drawn, then enter the lots on the Pools tab.');
+      await expect(row.locator('.shiaijo-qrow__reason')).toContainText('Neither can fight: record it as drawn');
       await expect(row).not.toContainText(/this bout separates them|finished level/);
       const court1 = await readCourt(page);
       record({ step: 'court', action: 'the console with the barred ippon-shobu', ...court1,

@@ -762,25 +762,28 @@ PoolNumberedMatchRow.displayName = "PoolNumberedMatchRow";
 // place leaves none of them marked until its bout is scored.
 // `points` is the server's packed ranking key (engine individual/teamStandingPoints),
 // equal exactly when two rows are level on every criterion, so rows that share
-// it among the tied ones form one group. Pool standings only: a league has no
-// advancing mark to withhold.
+// it among the tied ones form one group. The server marks a tie per run
+// (`tieRun`), and two open runs can share one `points` value, so a group is
+// the points plus its run. A league passes 0 qualifiers: it has no advancing
+// mark to withhold, so it reads the shared place only.
 export function tiedPlaces(poolStandings, qualifiers) {
+  const groupKey = (s) => `${s.points}|${s.tieRun || 0}`;
   const groups = new Map();
   (poolStandings || []).forEach((s, i) => {
     if (!s || !s.tied) return;
     const rank = s.rank || i + 1;
-    const g = groups.get(s.points);
+    const g = groups.get(groupKey(s));
     if (g) {
       g.place = Math.min(g.place, rank);
       g.last = Math.max(g.last, rank);
     } else {
-      groups.set(s.points, { place: rank, last: rank });
+      groups.set(groupKey(s), { place: rank, last: rank });
     }
   });
   const byRow = new Map();
   (poolStandings || []).forEach((s) => {
     if (!s || !s.tied) return;
-    const g = groups.get(s.points);
+    const g = groups.get(groupKey(s));
     const key = s.player.id || `${s.player.name}||${s.player.dojo || ""}`;
     const boutOwed = g.place <= qualifiers;
     byRow.set(key, { place: g.place, boutOwed, decidesAdvancement: boutOwed && g.last > qualifiers });

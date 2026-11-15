@@ -970,9 +970,10 @@ export function ScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, onSub
   const KO_TIE_REASON = selfReport
     ? "Needs a winner: fight encho, then ask the organizer for a hantei if still tied."
     : "Needs a winner: fight encho, then record hantei if still tied.";
+  const hanteiWay = selfReport ? "ask the organizer for a hantei" : "decide by hantei";
   const DRAW_BLOCKED_REASON = isLeagueSupplementary
-    ? "A tie-breaker needs a winner: fight encho, then decide by hantei"
-    : "Knockout matches can't draw: decide by hantei after encho";
+    ? `A tie-breaker needs a winner: fight encho, then ${hanteiWay}`
+    : `Knockout matches can't draw: fight encho, then ${hanteiWay}`;
   // bc-htsd: hantei is valid at 0-0, so the picked side stands in for points.
   // It needs the tied scoreline the hantei row is shown on: a recorded hantei
   // on an untied line (legacy data) cannot be finished, as before.

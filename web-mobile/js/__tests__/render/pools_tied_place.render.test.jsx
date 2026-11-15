@@ -218,6 +218,17 @@ describe('tiedPlaces', () => {
     expect(m.get('d')).toEqual({ place: 4, boutOwed: false, decidesAdvancement: false });
   });
 
+  it('keeps two open runs that share one points value apart (a league tie run)', () => {
+    const m = tiedPlaces(rows(
+      row(A, 1, { points: 4, tied: true, tieRun: 1 }), row(B, 2, { points: 4, tied: true, tieRun: 1 }),
+      row(C, 3, { points: 4, tied: true, tieRun: 2 }), row(D, 4, { points: 4, tied: true, tieRun: 2 }),
+    ), 0);
+    expect(m.get('a').place).toBe(1);
+    expect(m.get('b').place).toBe(1);
+    expect(m.get('c').place).toBe(3);
+    expect(m.get('d').place).toBe(3);
+  });
+
   it('keeps two separate tied groups apart', () => {
     const m = tiedPlaces(rows(
       row(A, 1, { points: 9, tied: true }), row(B, 2, { points: 9, tied: true }),

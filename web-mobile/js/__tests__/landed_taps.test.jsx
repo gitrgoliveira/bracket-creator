@@ -128,7 +128,12 @@ describe('landed taps', () => {
         expect(landedEntries(storage)).toBeLessThanOrEqual(1200);
         expect(perDay[5], `characters held after each day: ${perDay}`).toBeLessThanOrEqual(perDay[1]);
         expect(perDay[5]).toBeLessThan(300_000);
-    });
+        // 15 s, not the 5 s default. Each never-seen match runs a full sweep,
+        // so six days of 100 matches takes about 1.4 s alone and about 3.2 s
+        // inside the full suite, and it once ran past 5 s on a loaded machine.
+        // The six days are the pin ("whatever the days before held"), so they
+        // stay; the arbitrary default is what gives way.
+    }, 15_000);
 
     it('keeps at most LANDED_TAPS_MAX in all, the latest', () => {
         const storage = fakeStorage();

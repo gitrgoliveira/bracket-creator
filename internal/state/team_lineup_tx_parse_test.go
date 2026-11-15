@@ -6,6 +6,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
+	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 )
 
 // A transaction parses lineups.yaml once, however often it reads and writes it
@@ -45,4 +46,34 @@ func TestStoreTx_LineupsAreParsedOncePerTransaction(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "Mori", live["t1-0"].Positions[p1], "committed as staged")
 	require.Equal(t, "Endo", live[teamLineupMatchKey("t1", "M1")].Positions[p2])
+}
+
+// A transaction parses the pools.csv it staged once, however often it reads
+// it back, and again only after it stages the file again; each read answers
+// a copy.
+func TestStoreTx_StagedPoolsAreParsedOncePerStagedWrite(t *testing.T) {
+	s, err := NewStore(t.TempDir())
+	require.NoError(t, err)
+	const comp = "c"
+	require.NoError(t, s.SaveCompetition(&Competition{ID: comp}))
+	pool := func(name string) []helper.Pool {
+		return []helper.Pool{{PoolName: name, Players: []helper.Player{{Name: "Sato", Dojo: "D"}}}}
+	}
+	before := stagedPoolsParses.Load()
+	require.NoError(t, s.WithTransaction(comp, func(tx StoreTx) error {
+		require.NoError(t, tx.SavePools(comp, pool("Pool A")))
+		for range 3 {
+			got, err := tx.LoadPools(comp)
+			require.NoError(t, err)
+			require.Equal(t, "Pool A", got[0].PoolName)
+			got[0].PoolName = "changed in the copy"
+		}
+		require.Equal(t, int64(1), stagedPoolsParses.Load()-before, "one parse for one staged write")
+		require.NoError(t, tx.SavePools(comp, pool("Pool B")))
+		got, err := tx.LoadPools(comp)
+		require.NoError(t, err)
+		require.Equal(t, "Pool B", got[0].PoolName, "a write staged again is read again")
+		return nil
+	}))
+	require.Equal(t, int64(2), stagedPoolsParses.Load()-before)
 }

@@ -45,7 +45,7 @@ func TestWALCommitApplyDone(t *testing.T) {
 	targetA := filepath.Join(root, "data", "a.txt")
 	targetB := filepath.Join(root, "data", "b.txt")
 
-	w, err := BeginTx(walDir, "tx-happy", directWrite)
+	w, err := BeginTx(walDir, "tx-happy", directWrite, directRemove, os.ReadFile)
 	require.NoError(t, err)
 
 	w.Append(FileIntent{Path: targetA, Data: []byte("AAA"), Mode: 0o600})
@@ -85,7 +85,7 @@ func TestWALScanReplaysCommittedWAL(t *testing.T) {
 	walDir := filepath.Join(root, ".wal")
 	target := filepath.Join(root, "data", "x.txt")
 
-	w, err := BeginTx(walDir, "tx-replay", directWrite)
+	w, err := BeginTx(walDir, "tx-replay", directWrite, directRemove, os.ReadFile)
 	require.NoError(t, err)
 	w.Append(FileIntent{Path: target, Data: []byte("HELLO"), Mode: 0o600})
 	require.NoError(t, w.Commit())
@@ -94,7 +94,7 @@ func TestWALScanReplaysCommittedWAL(t *testing.T) {
 	require.True(t, os.IsNotExist(err), "target must not exist pre-replay")
 
 	// Restart: Scan must find the committed WAL.
-	pending, err := Scan(walDir, directWrite)
+	pending, err := Scan(walDir, directWrite, directRemove, os.ReadFile)
 	require.NoError(t, err)
 	require.Len(t, pending, 1, "Scan must find the committed WAL")
 	require.Equal(t, "tx-replay", pending[0].ID())
@@ -108,7 +108,7 @@ func TestWALScanReplaysCommittedWAL(t *testing.T) {
 	require.NoError(t, pending[0].Done())
 
 	// A second Scan must not surface this WAL again.
-	pending2, err := Scan(walDir, directWrite)
+	pending2, err := Scan(walDir, directWrite, directRemove, os.ReadFile)
 	require.NoError(t, err)
 	assert.Empty(t, pending2)
 }
@@ -122,12 +122,12 @@ func TestWALScanIgnoresUnCommittedWAL(t *testing.T) {
 	walDir := filepath.Join(root, ".wal")
 	target := filepath.Join(root, "data", "ghost.txt")
 
-	w, err := BeginTx(walDir, "tx-aborted", directWrite)
+	w, err := BeginTx(walDir, "tx-aborted", directWrite, directRemove, os.ReadFile)
 	require.NoError(t, err)
 	w.Append(FileIntent{Path: target, Data: []byte("never-written"), Mode: 0o600})
 	// Deliberately skip Commit.
 
-	pending, err := Scan(walDir, directWrite)
+	pending, err := Scan(walDir, directWrite, directRemove, os.ReadFile)
 	require.NoError(t, err)
 	assert.Empty(t, pending,
 		"uncommitted WAL must not be visible to Scan, Append is in-memory only")
@@ -147,7 +147,7 @@ func TestWALAppendCoalesces(t *testing.T) {
 	walDir := filepath.Join(root, ".wal")
 	target := filepath.Join(root, "data", "score.csv")
 
-	w, err := BeginTx(walDir, "tx-coalesce", directWrite)
+	w, err := BeginTx(walDir, "tx-coalesce", directWrite, directRemove, os.ReadFile)
 	require.NoError(t, err)
 	w.Append(FileIntent{Path: target, Data: []byte("first"), Mode: 0o600})
 	w.Append(FileIntent{Path: target, Data: []byte("second"), Mode: 0o600})
@@ -179,7 +179,7 @@ func TestWALApplyIsIdempotent(t *testing.T) {
 	walDir := filepath.Join(root, ".wal")
 	target := filepath.Join(root, "data", "idemp.txt")
 
-	w, err := BeginTx(walDir, "tx-idemp", directWrite)
+	w, err := BeginTx(walDir, "tx-idemp", directWrite, directRemove, os.ReadFile)
 	require.NoError(t, err)
 	w.Append(FileIntent{Path: target, Data: []byte("FINAL"), Mode: 0o600})
 	require.NoError(t, w.Commit())
@@ -209,7 +209,7 @@ func TestWALApplyPropagatesError(t *testing.T) {
 	// Succeeds for targetA (call 2, call 1 was Commit) then fails on targetB.
 	injected := os.ErrPermission
 	wf := failingWrite(t, 2, injected)
-	w, err := BeginTx(walDir, "tx-applyfail", wf)
+	w, err := BeginTx(walDir, "tx-applyfail", wf, directRemove, os.ReadFile)
 	require.NoError(t, err)
 	w.Append(FileIntent{Path: targetA, Data: []byte("A"), Mode: 0o600})
 	w.Append(FileIntent{Path: targetB, Data: []byte("B"), Mode: 0o600})
@@ -220,7 +220,7 @@ func TestWALApplyPropagatesError(t *testing.T) {
 	assert.ErrorIs(t, err, injected)
 
 	// WAL file remains on disk: a subsequent Scan must replay it.
-	pending, err := Scan(walDir, directWrite)
+	pending, err := Scan(walDir, directWrite, directRemove, os.ReadFile)
 	require.NoError(t, err)
 	require.Len(t, pending, 1, "failed-Apply WAL must remain for replay")
 }
@@ -235,7 +235,7 @@ func TestWALWriteFnCaptures(t *testing.T) {
 	walDir := filepath.Join(root, ".wal")
 	target := filepath.Join(root, "data", "captured.txt")
 
-	w, err := BeginTx(walDir, "tx-capture", directWrite)
+	w, err := BeginTx(walDir, "tx-capture", directWrite, directRemove, os.ReadFile)
 	require.NoError(t, err)
 
 	wf := w.WriteFn()
@@ -259,7 +259,7 @@ func TestWALWriteFnCaptures(t *testing.T) {
 // must return (nil, nil), NOT an error, so Store.NewStore can call
 // it unconditionally without special-casing.
 func TestScanReturnsEmptyForMissingWalDir(t *testing.T) {
-	pending, err := Scan(filepath.Join(t.TempDir(), "does-not-exist"), directWrite)
+	pending, err := Scan(filepath.Join(t.TempDir(), "does-not-exist"), directWrite, directRemove, os.ReadFile)
 	require.NoError(t, err)
 	assert.Empty(t, pending)
 }
@@ -268,7 +268,7 @@ func TestScanReturnsEmptyForMissingWalDir(t *testing.T) {
 // an appended path and (nil, false) for an unknown path.
 func TestPendingBytes(t *testing.T) {
 	dir := t.TempDir()
-	w, err := BeginTx(dir, "tx-pending", directWrite)
+	w, err := BeginTx(dir, "tx-pending", directWrite, directRemove, os.ReadFile)
 	require.NoError(t, err)
 
 	// Before any Append: unknown path.
@@ -292,14 +292,14 @@ func TestPendingBytes(t *testing.T) {
 
 // TestBeginTx_NilWrite verifies that BeginTx rejects a nil write function.
 func TestBeginTx_NilWrite(t *testing.T) {
-	_, err := BeginTx(t.TempDir(), "tx-nil", nil)
+	_, err := BeginTx(t.TempDir(), "tx-nil", nil, directRemove, os.ReadFile)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "nil")
 }
 
 // TestBeginTx_EmptyID verifies that BeginTx rejects an empty transaction id.
 func TestBeginTx_EmptyID(t *testing.T) {
-	_, err := BeginTx(t.TempDir(), "", directWrite)
+	_, err := BeginTx(t.TempDir(), "", directWrite, directRemove, os.ReadFile)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "empty")
 }
@@ -308,7 +308,7 @@ func TestBeginTx_EmptyID(t *testing.T) {
 // file doesn't exist (e.g., after an uncommitted BeginTx or a double Done).
 func TestDone_NoFileIsNoop(t *testing.T) {
 	dir := t.TempDir()
-	w, err := BeginTx(dir, "tx-no-file", directWrite)
+	w, err := BeginTx(dir, "tx-no-file", directWrite, directRemove, os.ReadFile)
 	require.NoError(t, err)
 
 	// No Commit → no WAL file on disk. Done must return nil.
@@ -324,7 +324,7 @@ func TestDone_NoFileIsNoop(t *testing.T) {
 // WAL folder itself has gone: nothing is left to remove.
 func TestDone_WALFolderGoneIsNoop(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), ".wal")
-	w, err := BeginTx(dir, "tx-folder-gone", directWrite)
+	w, err := BeginTx(dir, "tx-folder-gone", directWrite, directRemove, os.ReadFile)
 	require.NoError(t, err)
 	require.NoError(t, os.RemoveAll(dir))
 
@@ -336,7 +336,7 @@ func TestDone_WALFolderGoneIsNoop(t *testing.T) {
 // transaction.
 func TestDone_WALFolderNotAFolderErrors(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), ".wal")
-	w, err := BeginTx(dir, "tx-folder-file", directWrite)
+	w, err := BeginTx(dir, "tx-folder-file", directWrite, directRemove, os.ReadFile)
 	require.NoError(t, err)
 	require.NoError(t, os.RemoveAll(dir))
 	require.NoError(t, os.WriteFile(dir, []byte("x"), 0o600))
@@ -350,7 +350,7 @@ func TestDone_WALFolderNotAFolderErrors(t *testing.T) {
 // it cannot remove (here a non-empty folder stands at its path).
 func TestDone_RemoveErrorIsReported(t *testing.T) {
 	dir := t.TempDir()
-	w, err := BeginTx(dir, "tx-remove-err", directWrite)
+	w, err := BeginTx(dir, "tx-remove-err", directWrite, directRemove, os.ReadFile)
 	require.NoError(t, err)
 	require.NoError(t, os.MkdirAll(filepath.Join(w.path, "child"), 0o750))
 
@@ -368,7 +368,7 @@ func TestCommit_WriteFnError(t *testing.T) {
 		return errWrite
 	}
 	dir := t.TempDir()
-	w, err := BeginTx(dir, "tx-commit-err", failFn)
+	w, err := BeginTx(dir, "tx-commit-err", failFn, directRemove, os.ReadFile)
 	require.NoError(t, err)
 
 	w.Append(FileIntent{Path: filepath.Join(dir, "foo.txt"), Data: []byte("x"), Mode: 0o600})
@@ -386,7 +386,7 @@ func TestScan_WalDirIsRegularFile(t *testing.T) {
 	fileAsDir := filepath.Join(dir, "not-a-dir.txt")
 	require.NoError(t, os.WriteFile(fileAsDir, []byte("data"), 0o600))
 
-	_, err := Scan(fileAsDir, directWrite)
+	_, err := Scan(fileAsDir, directWrite, directRemove, os.ReadFile)
 	assert.Error(t, err, "Scan on a regular file path must return an error")
 }
 
@@ -399,7 +399,7 @@ func TestBeginTx_MkdirAllError(t *testing.T) {
 	require.NoError(t, os.WriteFile(blocker, []byte("x"), 0o600))
 
 	// Try to create walDir as a subpath of the blocker file.
-	_, err := BeginTx(filepath.Join(blocker, "wal"), "tx1", directWrite)
+	_, err := BeginTx(filepath.Join(blocker, "wal"), "tx1", directWrite, directRemove, os.ReadFile)
 	assert.Error(t, err, "mkdir under a regular file must fail")
 }
 
@@ -413,7 +413,7 @@ func TestScan_MultipleEntries(t *testing.T) {
 	// Commit two WALs with different data. WAL id ordering is nanos-based,
 	// but we just need two distinct ids.
 	for i, content := range []string{"first", "second"} {
-		w, err := BeginTx(dir, NewWALID(), directWrite)
+		w, err := BeginTx(dir, NewWALID(), directWrite, directRemove, os.ReadFile)
 		require.NoError(t, err)
 		w.Append(FileIntent{
 			Path: filepath.Join(target, "file.txt"),
@@ -424,7 +424,7 @@ func TestScan_MultipleEntries(t *testing.T) {
 		_ = i
 	}
 
-	wals, err := Scan(dir, directWrite)
+	wals, err := Scan(dir, directWrite, directRemove, os.ReadFile)
 	require.NoError(t, err)
 	assert.Len(t, wals, 2)
 	// IDs should be non-empty and distinct.

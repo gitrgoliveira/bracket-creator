@@ -1424,6 +1424,79 @@ func TestPutParticipant_DrawReady_Succeeds(t *testing.T) {
 	assert.True(t, aliciaInPools, "Alicia must appear in pools after cascade")
 }
 
+// TestPutParticipant_DrawReady_CascadeFailureAbortsTheEdit pins operator
+// decision D5 (a) (2026-11-12): a participant edit and its draw cascade are
+// ONE transaction, so a cascade that fails leaves participants.csv and
+// seeds.csv as they were and the edit is answered as an error, never 200 with
+// a half-applied change.
+func TestPutParticipant_DrawReady_CascadeFailureAbortsTheEdit(t *testing.T) {
+	r, store, eng, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	compID := "comp-draw-ready-cascade-fails"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:           compID,
+		Name:         "Draw-Ready Cascade Failure",
+		Status:       state.CompStatusSetup,
+		Format:       state.CompFormatMixed,
+		PoolSize:     3,
+		PoolSizeMode: "min",
+		PoolWinners:  2,
+		RoundRobin:   true,
+		Courts:       []string{"A"},
+		StartTime:    "09:00",
+		Kind:         "individual",
+	}))
+	names := []string{"Alice", "Bob", "Charlie", "Dave", "Eve", "Frank"}
+	players := make([]domain.Player, len(names))
+	for i, n := range names {
+		players[i] = domain.Player{Name: n, Dojo: "Dojo" + string(rune('A'+i))}
+	}
+	require.NoError(t, store.SaveParticipants(compID, players))
+	saved, err := store.LoadParticipants(compID, false)
+	require.NoError(t, err)
+	aliceID := ""
+	for _, p := range saved {
+		if p.Name == "Alice" {
+			aliceID = p.ID
+		}
+	}
+	require.NotEmpty(t, aliceID)
+	require.NoError(t, store.SaveSeeds(compID, []domain.SeedAssignment{{ID: aliceID, Name: "Alice", Dojo: "DojoA", SeedRank: 1}}))
+	require.NoError(t, eng.GenerateDraw(compID))
+
+	// A pools.csv the cascade cannot parse: a real failing input, no seam.
+	compDir := filepath.Join(tempDir, "competitions", compID)
+	require.NoError(t, os.WriteFile(filepath.Join(compDir, "pools.csv"), []byte("\"unterminated\n"), 0600))
+
+	participantsBefore, err := os.ReadFile(filepath.Join(compDir, "participants.csv"))
+	require.NoError(t, err)
+	seedsBefore, err := os.ReadFile(filepath.Join(compDir, "seeds.csv"))
+	require.NoError(t, err)
+
+	body, _ := json.Marshal(map[string]any{"name": "Alicia", "dojo": "DojoA"})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("PUT", "/api/competitions/"+compID+"/participants/"+aliceID, bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+
+	assert.Equalf(t, http.StatusInternalServerError, w.Code, "a failed cascade must fail the edit; body: %s", w.Body.String())
+	assert.NotContains(t, w.Body.String(), "cascadeError")
+
+	participantsAfter, err := os.ReadFile(filepath.Join(compDir, "participants.csv"))
+	require.NoError(t, err)
+	assert.Equal(t, string(participantsBefore), string(participantsAfter), "participants.csv must be unchanged")
+	seedsAfter, err := os.ReadFile(filepath.Join(compDir, "seeds.csv"))
+	require.NoError(t, err)
+	assert.Equal(t, string(seedsBefore), string(seedsAfter), "seeds.csv must be unchanged")
+
+	roster, err := store.LoadParticipants(compID, false)
+	require.NoError(t, err)
+	for _, p := range roster {
+		assert.NotEqual(t, "Alicia", p.Name, "the cache must not serve the aborted edit")
+	}
+}
+
 // TestPutParticipant_DrawReady_DojoConflictWarning verifies that when a PUT in
 // draw-ready state introduces a dojo conflict, the response includes a warnings
 // field alongside the player data.

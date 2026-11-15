@@ -31,11 +31,19 @@ func internalError(c *gin.Context, err error, publicMsg ...string) {
 	logRequestError(c, err)
 	// A transaction whose log committed and whose file write then failed
 	// (state.ErrTxCommitted) is a disk fault, not a refused write: the change
-	// is kept and lands on restart, or with the next write the disk accepts.
-	// The answer stays a 500, so the device keeps retrying until one lands
-	// (operator decision 2026-10-04), and the log says so as an error.
-	if errors.Is(err, state.ErrTxCommitted) {
-		log.Printf("mobileapp: ERROR: %s %s: the server's disk refused a file write. The change is kept in the transaction log and is written on restart, or by the next write the disk accepts; the device keeps retrying it. Check the disk (space, permissions).",
+	// is kept and is written before the next read or write of that
+	// competition, or on restart. A write refused because such a kept change
+	// still cannot be written (state.ErrKeptChangeUnsettled) is the same
+	// fault, but that write itself was not kept. The answer stays a 500, so
+	// the device keeps retrying until one lands (operator decision
+	// 2026-10-04), and the log says so as an error. %q on the path, as in
+	// logRequestError: it is the client's.
+	switch {
+	case errors.Is(err, state.ErrKeptChangeUnsettled):
+		log.Printf("mobileapp: ERROR: %s %q: the server's disk refused a file write. This write was refused and not saved: an earlier change to this competition is still waiting in the transaction log, and the disk refused it again. That change is tried again at the next read or write of the competition, or on restart; the device keeps retrying this one. Check the disk (space, permissions).",
+			c.Request.Method, c.Request.URL.Path)
+	case errors.Is(err, state.ErrTxCommitted):
+		log.Printf("mobileapp: ERROR: %s %q: the server's disk refused a file write. The change is kept in the transaction log and is written before the next read or write of that competition, or on restart; the device keeps retrying it. Check the disk (space, permissions).",
 			c.Request.Method, c.Request.URL.Path)
 	}
 	// A file the operator can repair is the ONE internal failure worth naming.

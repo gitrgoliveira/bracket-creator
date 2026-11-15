@@ -18,7 +18,7 @@ import (
 // (SubMatchResult.SideAMemberID/SideBMemberID, the state.GroupRepPickA and
 // state.GroupRepPickB groups), so a side given ANOTHER team takes its pick away.
 //
-// ReplaceParticipantInDraw, which renames a team while the competition is
+// ReplaceParticipantInDrawTx, which renames a team while the competition is
 // draw-ready, writes a side through here when the side carries the team's id
 // (the same id under a new name: the same team, so no pick is cleared). A
 // representative bout CAN exist in a draw-ready competition: the add commits

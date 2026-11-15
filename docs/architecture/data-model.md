@@ -42,13 +42,14 @@ different competitions cannot both claim the same court.
 
 ```mermaid
 classDiagram
-    direction LR
+    direction TB
 
     class Tournament {
         +string Name
         +string Date
         +string Venue
         +string[] Courts
+        +string Password
         +string Mode
         +int DurationDays
         +Pause[] Pauses
@@ -93,25 +94,19 @@ classDiagram
         +int ExpectedParticipants
     }
 
-    class Player {
-        <<one row per entrant: a competitor, or a TEAM when Kind is team>>
-        +string ID
-        +string Name
-        +string DisplayName
-        +string Dojo
-        +string[] Metadata
-        +string Number
-        +int Seed
-        +int PoolPosition
-        +bool CheckedIn
-        +int64 CheckInAt
-        +string Source
-    }
+    Tournament "1" o-- "0..*" Competition
+    Tournament "1" o-- "0..*" Pause
+    Tournament "1" *-- "0..1" Theme
+```
 
-    class Pool {
-        +string PoolName
-        +Player[] Players
-    }
+Inside a competition, the entrants, the pools and the records kept beside them hang off the
+competition. A class drawn with no fields is shown in full in an earlier diagram.
+
+```mermaid
+classDiagram
+    direction TB
+
+    class Competition
 
     class CompetitorStatus {
         +string PlayerID
@@ -121,6 +116,46 @@ classDiagram
         +string MatchID
         +time RecordedAt
     }
+
+    class Overrides {
+        +Map PoolRanks
+    }
+
+    class Pool {
+        +string PoolName
+        +Player[] Players
+    }
+
+    class Player {
+        <<entrant: a competitor or a team>>
+        +string ID
+        +string Name
+        +string DisplayName
+        +string Dojo
+        +string[] Metadata
+        +string Number
+        +int Seed
+        +int64 PoolPosition
+        +bool CheckedIn
+        +int64 CheckInAt
+        +string Source
+    }
+
+    Competition "1" o-- "0..*" CompetitorStatus
+    Competition "1" o-- "0..1" Overrides
+    Competition "1" o-- "0..*" Pool
+    Competition "1" o-- "0..*" Player
+    Pool "1" o-- "1..*" Player : draws from
+```
+
+Team competitions add two more: the lineups and the team members they name.
+
+```mermaid
+classDiagram
+    direction TB
+
+    class Competition
+    class Player
 
     class TeamLineup {
         <<team competitions only>>
@@ -148,25 +183,24 @@ classDiagram
         +int64 ModifiedAt
     }
 
-    class Overrides {
-        +Map PoolRanks
-        +Map Winners
-    }
-
-    Tournament "1" o-- "0..*" Competition
-    Tournament "1" o-- "0..*" Pause
-    Competition "1" o-- "0..*" Player
-    Competition "1" o-- "0..*" Pool
-    Competition "1" o-- "0..*" CompetitorStatus
     Competition "1" o-- "0..*" TeamLineup
-    Competition "1" o-- "0..1" Overrides
-    Pool "1" o-- "1..*" Player : draws from
-    Player "1" o-- "0..*" TeamMember : members, only when the row is a team
+    Player "1" o-- "0..*" TeamMember : members of a team
     TeamLineup "1" ..> "0..*" TeamMember : positions reference
 ```
 
-The competition box lists the settings that shape the model, not every field it holds. Scheduling, display and format-specific settings are left out because nothing else on this
+The competition class lists the settings that shape the model, not every field it holds. Scheduling, display and format-specific settings are left out because nothing else on this
 page depends on them.
+
+Three fields in these diagrams need a word:
+
+* `Tournament.Password` is the admin password. In file mode it is stored in `tournament.md`
+  in plain text. Every backup archive leaves it out: a tournament snapshot clears the field
+  and drops the `password` key before the file goes into the archive.
+* `Player.PoolPosition` is a competitor's place in their pool. It is never part of a
+  participant row or of the app's JSON: it is read from the `Position` column of `pools.csv`
+  and used to order the pool and the workbook.
+* `Overrides.PoolRanks` maps each pool to the ranks set by hand, keyed by the competitor's
+  participant id.
 
 `Kind` separates individual from team competitions; `Format` selects knockout, pools plus
 knockout, league or Swiss. `TeamMatchType` selects fixed order or kachinuki for team
@@ -187,8 +221,8 @@ reused, and a display index. The id is what a lineup position and a bout row rec
 member can be renamed without any record losing track of who fought. A team's member list is
 seeded with one member per position the competition's team size defines, plus two reserve
 positions, so a
-team has its shape before anyone is named. No member is ever removed, so an index is never freed and no
-renumbering question arises. Instead, an organiser can clear a name, which empties that position but keeps its id and index. That is possible only until the competition starts. After that, a name can still be corrected, which is what renaming is for: a bout row holds the member's
+team has its shape before anyone is named. A member is never removed, so an index is never freed and nothing
+is ever renumbered. Instead, an organiser can clear a name, which empties that position but keeps its id and index. That is possible only until the competition starts. After that, a name can still be corrected, which is what renaming is for: a bout row holds the member's
 id, so a bout already fought names the same person whatever the name is changed to. Adding a
 member stays available at any time, including after the start, because a team fields
 replacements mid tournament.
@@ -367,24 +401,24 @@ classDiagram
         +string Court
         +int Round
         +string ScheduledAt
-        +int QueuePosition (derived, not persisted)
+        +int QueuePosition, derived
         +string Decision
         +string DecisionBy
         +string DecisionReason
-        +bool? DecidedByHantei (legacy, read-only, unset = writer said nothing)
+        +bool? DecidedByHantei, legacy
         +string ResultSource
         +string CorrectionReason
         +bool ReopenPending
-        +long ModifiedAt
+        +int64 ModifiedAt
         +map GroupStamps
         +MarkIDs MarkIDs
-        +int ScoreVersion (score-log line count)
-        +map EventSeqs (per device session, the highest logged tap seq)
-        +map TurnedAway (device taps the log holds that are not applied, by id)
+        +int ScoreVersion
+        +map EventSeqs
+        +map TurnedAway
     }
 
     class CompetitorSide {
-        <<value pair, stored as A and B columns>>
+        <<value pair>>
         +string Name
         +string ParticipantID
         +string[] Ippons
@@ -395,9 +429,8 @@ classDiagram
 
     class Outcome {
         <<value object>>
-        +string WinnerName
+        +string Winner
         +string WinnerID
-        +string WinnerSide
     }
 
     class SubMatchResult {
@@ -413,14 +446,28 @@ classDiagram
         +string Winner
         +string WinnerMemberID
         +string Decision
-        +bool? DecidedByHantei (legacy, read-only, unset = writer said nothing)
-        +bool Recorded (kachinuki only, set by the server when Record bout closes the bout)
-        +MarkIDs MarkIDs (derived by the replay)
+        +bool? DecidedByHantei, legacy
+        +bool Recorded
+        +MarkIDs MarkIDs
     }
 
     class EnchoMetadata {
         +int PeriodCount
     }
+
+    MatchResult "1" *-- "2" CompetitorSide : aka and shiro
+    MatchResult "1" *-- "1" Outcome
+    MatchResult "1" *-- "0..*" SubMatchResult : team bouts
+    MatchResult "1" *-- "0..1" EnchoMetadata
+    SubMatchResult "1" *-- "0..1" EnchoMetadata
+```
+
+A knockout match is a node in the competition's bracket. It carries the same bouts and
+overtime as a pool match.
+
+```mermaid
+classDiagram
+    direction TB
 
     class Bracket {
         +bool Preview
@@ -447,8 +494,8 @@ classDiagram
         +int HansokuB
         +int FlagsA
         +int FlagsB
-        +string ScoreA (legacy, read-only)
-        +string ScoreB (legacy, read-only)
+        +string ScoreA, legacy
+        +string ScoreB, legacy
         +int MatchNumber
         +int DisplayRound
         +string[] Feeders
@@ -463,29 +510,46 @@ classDiagram
         +string ResultSource
         +string CorrectionReason
         +bool ReopenPending
-        +bool DecidedByHantei (legacy, read-only)
-        +long ModifiedAt
+        +bool DecidedByHantei, legacy
+        +int64 ModifiedAt
         +map GroupStamps
         +MarkIDs MarkIDs
-        +int ScoreVersion (score-log line count)
-        +map EventSeqs (per device session, the highest logged tap seq)
-        +map TurnedAway (device taps the log holds that are not applied, by id)
+        +int ScoreVersion
+        +map EventSeqs
+        +map TurnedAway
     }
 
-    MatchResult "1" *-- "2" CompetitorSide : side A is aka, side B is shiro
-    MatchResult "1" *-- "1" Outcome
-    MatchResult "1" *-- "0..*" SubMatchResult : team bouts
-    MatchResult "1" *-- "0..1" EnchoMetadata
-    SubMatchResult "1" *-- "0..1" EnchoMetadata
+    class SubMatchResult
+    class EnchoMetadata
+
     Bracket "1" *-- "1..*" BracketMatch
     BracketMatch "1" *-- "0..*" SubMatchResult
     BracketMatch "1" *-- "0..1" EnchoMetadata
 ```
 
-The diagram makes three points that a raw field list would hide.
+These fields need explaining:
+
+* A field marked `legacy` is a read-only channel kept so that an older file loads; nothing
+  writes it. Refer to [Match status and decision](#match-status-and-decision).
+* `QueuePosition`, marked `derived`, is the match's place in its court's queue. It is worked
+  out from the schedule each time the matches are served, and is never stored.
+* `MarkIDs` names each mark in the ippon lists by the score event that struck it, so a removal
+  can name the mark it takes away.
+* `ScoreVersion` is the number of lines in the match's score event log that the stored match
+  was derived from. It only grows, so a device orders two copies of a running match by it.
+* `EventSeqs` holds, for each device session, the highest sequence number of that session's
+  taps the log holds, so a device does not apply one of its own taps a second time.
+* `TurnedAway` lists, by event id, the device taps the log holds that the server does not
+  apply, with the reason, so the device that made a tap learns that it was turned away.
+* `Recorded` is set on a kachinuki bout when the operator closes it with Record bout.
+
+`MarkIDs`, `ScoreVersion`, `EventSeqs` and `TurnedAway` are derived by replaying the match's
+score event log, and are stored beside the match so that a reader need not replay it.
 
 **`CompetitorSide` is a value object that the storage flattens.** The name is this page's
-own, chosen for clarity: no such type exists in the code. Everything a competitor brings
+own, chosen for clarity: no such type exists in the code, and nor does `Outcome`, which
+groups the winner's name and participant id. A score write may also carry the winning side
+while it is handled, but that hint is never stored, so the diagram leaves it out. Everything a competitor brings
 to a match (name, participant id, struck points, outstanding fouls, flags, and the
 representative player for a team tie breaker) exists twice, once per side. In the object
 model those are `SideA`/`SideB`, `IpponsA`/`IpponsB`, `HansokuA`/`HansokuB` and so on. They
@@ -585,111 +649,68 @@ loads, and so that a later correction cannot silently repaint a winner that had 
 
 ## 4. On disk layout
 
-Each competition is a folder. The tournament root holds the shared settings and the uploaded
-images.
+Everything lives under one data folder. Each competition is a folder under `competitions/`,
+and the root holds the tournament settings, the uploaded images and the folders the app works
+in: the write ahead log, the backup archives and the restore staging area.
 
 ```mermaid
-classDiagram
-    direction LR
+flowchart TB
+    root["data folder"]
 
-    class tournament_md["tournament.md"] {
-        <<Markdown, YAML front matter>>
-        Tournament
-    }
-    class config_md["competitions/&lt;id&gt;/config.md"] {
-        <<Markdown, YAML front matter>>
-        Competition
-    }
-    class participants_csv["participants.csv"] {
-        <<CSV>>
-        Player rows
-    }
-    class seeds_csv["seeds.csv"] {
-        <<CSV>>
-        Rank, Name, Dojo, ID
-    }
-    class pools_csv["pools.csv"] {
-        <<CSV>>
-        PoolName, Name, Position, DisplayName, Dojo, Seed, Number, ID
-    }
-    class pool_matches_csv["pool-matches.csv"] {
-        <<CSV, one row per match>>
-        MatchResult rows
-    }
-    class bracket_json["bracket.json"] {
-        <<JSON>>
-        Bracket
-    }
-    class status_yaml["competitor-status.yaml"] {
-        <<YAML>>
-        CompetitorStatus list
-    }
-    class lineups_yaml["lineups.yaml"] {
-        <<YAML>>
-        TeamLineup per match, or the starting one
-        position to name and member id
-        a position may hold an id and an empty name
-        when each position was changed, and the values it held before
-        copiedAt, copiedFrom and own on a match lineup a first save made
-        startedAt and startedFrom on the lineup a kachinuki match started with
-    }
-    class team_members_yaml["team-members.yaml"] {
-        <<YAML>>
-        TeamMember list by team
-    }
-    class overrides_json["overrides.json"] {
-        <<JSON>>
-        Overrides
-    }
-    class history_dir["history/"] {
-        <<JSON lines, one file per match>>
-        every write that reached the match
-        applied or held, with held values
-    }
-    class events_dir["events/"] {
-        <<JSON lines, one file per match>>
-        append-only score event log
-        event and baseline lines ("v": 1)
-    }
-    class wal[".wal/"] {
-        <<pending transactions>>
-        replayed on startup
-    }
-    class backups_dir["backups/"] {
-        <<zip archives>>
-        scheduled backups and safety copies
-    }
-    class restore_dir[".restore/"] {
-        <<staging and journal>>
-        restore staging, journal.json, prefixes-pending.json
-    }
-    class branding_dir["branding/"] {
-        <<uploaded images>>
-        tournament logo (shown on the lobby when theme.logo_on_lobby is true)
-    }
-    class sponsors_dir["sponsors/"] {
-        <<uploaded images>>
-        sponsor logos
-    }
+    subgraph top ["Tournament files"]
+        direction TB
+        tournament_md["tournament.md<br/>Markdown with<br/>YAML front matter<br/>Tournament"]
+        branding_dir["branding/<br/>tournament logo, on the<br/>lobby when the theme's<br/>logo_on_lobby is true"]
+        sponsors_dir["sponsors/<br/>sponsor logos"]
+        competitions_dir["competitions/<br/>one folder per<br/>competition"]
+        tournament_md ~~~ branding_dir ~~~ sponsors_dir ~~~ competitions_dir
+    end
 
-    tournament_md --> config_md : owns
-    tournament_md --> branding_dir : owns
-    tournament_md --> sponsors_dir : owns
-    tournament_md --> wal : stages transactions in
-    tournament_md --> backups_dir : stores archives in
-    tournament_md --> restore_dir : stages restore in
-    config_md --> participants_csv
-    config_md --> seeds_csv
-    config_md --> pools_csv
-    config_md --> pool_matches_csv
-    config_md --> bracket_json
-    config_md --> status_yaml
-    config_md --> lineups_yaml
-    config_md --> team_members_yaml
-    config_md --> overrides_json
-    config_md --> history_dir
-    config_md --> events_dir
-    team_members_yaml --> lineups_yaml : positions reference members
+    subgraph work ["Working folders"]
+        direction TB
+        wal[".wal/<br/>committed, not yet applied<br/>transactions, replayed on startup"]
+        backups_dir["backups/<br/>zip archives: scheduled<br/>backups, safety copies"]
+        restore_dir[".restore/<br/>#lt;token#gt;/journal.json<br/>#lt;token#gt;/new/ staged<br/>#lt;token#gt;/old/ moved out<br/>prefixes-pending.json<br/>requeue-pending.json"]
+        wal ~~~ backups_dir ~~~ restore_dir
+    end
+
+    root --> top
+    root --> work
+```
+
+Each competition folder holds its settings, its entrants and draw, and its matches with their
+logs. The dotted arrow is a reference between files, not a folder: a lineup names its fighters
+by their team member ids.
+
+```mermaid
+flowchart TB
+    comp_dir["competitions/#lt;id#gt;/"]
+
+    subgraph roster ["Settings, entrants and draw"]
+        direction TB
+        config_md["config.md<br/>Markdown with<br/>YAML front matter<br/>Competition"]
+        participants_csv["participants.csv<br/>Player rows"]
+        seeds_csv["seeds.csv<br/>Rank, Name, Dojo, ID"]
+        pools_csv["pools.csv<br/>PoolName, Name, Position,<br/>DisplayName, Dojo, Seed,<br/>Number, ID"]
+        status_yaml["competitor-status.yaml<br/>CompetitorStatus list"]
+        overrides_json["overrides.json<br/>Overrides"]
+        team_members_yaml["team-members.yaml<br/>TeamMember list by team"]
+        config_md ~~~ participants_csv ~~~ seeds_csv ~~~ pools_csv ~~~ status_yaml ~~~ overrides_json ~~~ team_members_yaml
+    end
+
+    subgraph results ["Matches and logs"]
+        direction TB
+        pool_matches_csv["pool-matches.csv<br/>one MatchResult row<br/>per match"]
+        bracket_json["bracket.json<br/>Bracket"]
+        lineups_yaml["lineups.yaml<br/>TeamLineup per match,<br/>or the starting one;<br/>removed lineups kept<br/>with removedAt"]
+        history_dir["history/<br/>JSON lines, one file<br/>per match: every write<br/>that reached it,<br/>applied or held"]
+        events_dir["events/<br/>JSON lines, one file<br/>per match: score event<br/>and baseline lines, v = 1"]
+        pool_matches_csv ~~~ bracket_json ~~~ lineups_yaml ~~~ history_dir ~~~ events_dir
+    end
+
+    comp_dir --> roster
+    comp_dir --> results
+    lineups_yaml -. "member ids" .-> team_members_yaml
 ```
 
 Markdown, CSV, and JSON or YAML each earn their place:
@@ -718,7 +739,7 @@ whichever reaches the server first:
 * A change stamped at or before the stored stamp is not applied: nothing is written and the
   answer carries the row as stored. Of two changes stamped in the same millisecond, the one
   that reaches the server first stands.
-* No marker is written for a row that was never checked in and has never been stamped.
+* A row that was never checked in and has never been stamped gets no marker.
 * The bare `checked_in` that every earlier release wrote is read as checked in at stamp 0, and
   a row with no marker as not checked in at stamp 0. A roster written by an earlier release
   therefore loads as it was and is not rewritten; any check-in tap, which carries a real
@@ -830,28 +851,131 @@ example recording a withdrawal writes the match result, the competitor eligibili
 and the updated bracket. Similarly, match writes, their append-only score event logs in
 `events/<matchId>.jsonl`, and their audit trail in `history/<matchId>.jsonl` are staged in the
 same transaction as the match result (in `pool-matches.csv` or `bracket.json`). Those run as a
-transaction: the intended writes are collected, committed to a write ahead log, and only then
-applied. If the process stops midway the log is replayed at the next startup, so the group
-either lands completely or not at all.
-One write sits outside this: a participant edit lands by atomic rename rather than through the
-log, so it is crash safe on its own but is not rolled back if the rest of the group fails.
+transaction: the intended writes are collected in memory, committed to a write ahead log in
+`.wal/`, and only then applied. A transaction that fails before its commit writes nothing,
+and one that staged nothing writes no log at all. If the process stops after the commit, the
+log is replayed at the next startup, so the group either lands completely or not at all.
+A participant edit is one such group: the roster, the seeds and, while the competition is
+draw-ready, the pools, pool matches and bracket it renames the competitor in land together or
+not at all, so an edit the draw cannot take is refused whole.
+
+A staged step can also remove a file, applied in its place among the writes. Moving the team
+members of a competition recorded by version 2.0.0 from `squads.yaml` onto `team-members.yaml`
+is such a step when it happens inside a transaction: the new file and the removal of the old one
+land together, or neither does. An earlier version of the app does not apply a log that holds a
+removal: it logs that it could not, and leaves the log in `.wal/` for this version to finish (unless the earlier version has since
+rewritten one of its files, as the next paragraph describes). A
+log written by a later version than the one running stops the app at startup; start that later
+version to finish it.
+
+Every log this version writes records what each of its files held at the commit. A log this
+version keeps in `.wal/` while it goes on (applying or removing it failed) is finished before the
+next read or write of that competition, as described below, so its own later changes never
+rewrite the log's files first. A log an earlier version could not apply, or one whose files were
+changed outside the app, can still have its files rewritten before it is replayed. Replaying such
+a log would put the older content back, so neither the next startup nor a backup applies it. At startup it is renamed to end in
+`.stale`, kept in `.wal/`, and an error naming it is logged. The change it holds is not applied
+and the app never reads that file again: check the data the error names, then delete the file. A
+log written by an earlier version records nothing about its files, so it is replayed as before;
+its files are still read first, so the checks below apply to it too.
+
+If a log, or a file a log names, cannot be read at startup (its permissions or the disk refuse
+it), the app does not start, and names the file; fix access to that file and start again. The log
+then replays as usual, still checked against its files. If a file a log names lies outside the
+data folder, the log was written while the data folder had another path (the folder was moved or
+renamed): the app does not start and says so. Start it with the folder the log was written under
+(the path the error names), or move the log out of `.wal/` to leave its change unapplied. A log
+that names no competition's folder and cannot be applied stops startup the same way, for the same
+cause. This version takes the data folder's full path at startup, so for a log it wrote, naming
+the same folder by a relative or an absolute path never causes this; a path that goes through a
+link to the folder counts as another path. A log an earlier version wrote may name its files
+relative to the folder the app was started from: the error then says that, and quotes the
+relative path as the log records it (the log file the error names, as `<id>.json`, lists those paths). The cure is
+to start the app from the folder that path is relative to, the folder that holds its first folder (or to move the log out of `.wal/`). A log whose content is damaged, so that it
+is not a log any version can read, holds nothing that can be applied: at startup it is renamed to
+end in `.invalid`, kept in `.wal/`, the other logs replay as usual, and one error is logged saying
+that a change saved just before the restart may not have landed. Check the last results entered
+before the restart and enter again any that is missing. The renamed file is never read again, and
+the next startup does not report it. If it cannot be renamed, the app does not start. A backup
+leaves a damaged log alone; only startup renames it.
+
+If committing a log fails, the log is removed, so a change reported as failed never lands later.
+If the log cannot be removed, or the log is committed but writing its files then fails, the change
+is kept: the request still answers 500, the server log names the disk fault, and the change is
+written before the next read or write of that competition, or at the next startup. A 500 on a save
+can therefore mean the change will still land, so reload before entering it again. While the disk
+still refuses the kept change:
+
+- **Writes.** Every write to that competition is refused with a 500 and writes nothing. The
+  server log names the disk fault and says that this write was not saved, and the kept change is
+  tried again before the next write.
+- **Reads.** Reads go on meanwhile, and may show only part of the kept change until it lands. A
+  read tries the kept change again too, but after a try fails, reads wait 5 seconds before the
+  next one, so pages and displays are not held up by a disk that keeps refusing. The first failure
+  is logged as a warning, once, naming the log file in `.wal/`.
+- **Backups.** A backup that includes that competition is refused. A download of the tournament
+  or of that competition answers 409 (`pending_write_unsettled`), and so does a restore that
+  replaces or removes that competition, before its safety copy is taken. The daily scheduled copy
+  is not taken: the server log gives a warning, and it is tried again an hour later. Nor is the
+  copy taken when the app is closed normally: the server log gives a warning, and the app closes
+  without it. To keep a copy meanwhile, stop the server and copy the data folder.
+- **Once the disk accepts it.** The kept change lands first, and the write or read that asked goes
+  on top of it. Nothing announces the change to other screens: they show it at their next refresh,
+  or with the next change made to that competition.
+- **If it can never land.** When a folder the log names was removed outside the app, restore that
+  folder, or set the log aside by renaming it so its name no longer ends in `.json` (its change is
+  then not applied). The competition's next write then goes ahead, with no restart.
+- **At startup.** Once a log of a competition cannot be applied, that competition's later logs
+  wait behind it and land after it, in order, with the competition's next write or read.
+
+A log of another competition that cannot be checked (a file it names cannot be read) does not hold
+this up: it stops only its own competition's retries, a backup that includes that competition, and
+the next startup.
 
 ```mermaid
 sequenceDiagram
-    participant H as HTTP handler
+    autonumber
+    participant C as Caller
     participant S as Store
-    participant W as Write ahead log
-    participant D as Disk
+    participant L as Log
+    participant F as .wal/ and files
 
-    H->>S: begin transaction (competition id)
-    S->>S: take the competition lock
-    S->>W: stage intended writes
-    H->>S: work completes without error
-    S->>W: commit the log
-    W->>D: apply each write atomically
-    S->>W: remove the log
-    S->>S: release the lock
+    C->>S: begin on a competition
+    S->>S: lock the competition
+    S->>L: open, in memory
+    S->>C: run the work
+    C->>L: stage writes, in memory
+    C-->>S: work returns
+    alt error
+        S->>L: drop staged writes
+        S->>S: drop touched caches
+    else nothing staged
+        S->>S: skip the log
+    else writes staged
+        L->>F: commit the log file
+        L->>F: apply each write
+        L->>F: remove the log file
+    end
+    S->>S: unlock
+    S-->>C: result
 ```
+
+The numbers match the steps in the diagram:
+
+* **1 to 3.** The caller asks for a transaction on one competition. The store takes that
+  competition's lock and opens a write ahead log, which exists only in memory so far.
+* **4 to 6.** The caller's work runs, and each file it saves is staged in the log in memory
+  rather than written.
+* **7 and 8.** If the work returns an error, the staged writes are dropped and the cached copies
+  of the files they touched are forgotten, so the next read sees the files as they were.
+  Nothing is written.
+* **9.** If the work staged nothing, there is no log to commit, apply or remove.
+* **10 to 12.** Otherwise the log is committed as a file in `.wal/`, each write is applied
+  atomically, and the log file is removed. If applying stops midway, the log stays in `.wal/`
+  and is finished before the next read or write of the competition, or replayed at the next
+  startup. A competition holding such a log is finished at step 2, before its lock is used for
+  anything else.
+* **13 and 14.** The store releases the lock and answers the caller.
 
 **Concurrent writes are merged, never dropped.** A match result is split into groups of
 fields that change together: the scoreline, the verdict (status, winner, decision and the
@@ -949,7 +1073,7 @@ stamped with format version `"v": 1`, containing either an event line (a scoring
 an ippon, foul, encho, or flag) or a baseline line (the state left by a non-tap write such as
 a finish, decision, correction, or migration). The pattern is explicitly per-match event sourcing
 (the match is rebuilt by replaying its log in timestamp order) with a client-side transactional
-outbox. No message broker is used: offline tablets hold the queue; order comes from when a tap
+outbox. The app uses no message broker: offline tablets hold the queue; order comes from when a tap
 was made, not when it arrived; the app is one binary that keeps its data in files.
 
 A tap is one event with its own id, the device's session and a sequence number within it, and
@@ -975,7 +1099,7 @@ first bout has, sent back to the queue or not. The server adds
 them only where the first bout holds other names: when a write makes or changes that bout, and
 when a lineup or team member changes. They are ordered against the taps like any tap and never
 turn one away; they name who fought, never a score, so they reach a finished encounter too
-without moving its result. No device may send events under the session `server`: the request is
+without moving its result. The session `server` is reserved: a device that sends events under it is
 refused. A point entered on a kachinuki bout after it was removed, from a device that had not
 seen the removal, does not make the bout again, since it would have no fighters; it is kept in
 the match's history. Picking the bout's fighters adds it again.
@@ -1025,7 +1149,7 @@ applies, so the device with the wrong clock overwrites a newer result recorded e
 nobody is told. A few seconds ahead is ordinary and is accepted, since a device learns the
 server time over the network and a little drift is normal. Beyond that the device is told
 its clock is wrong and nothing is written. The app resyncs its clock, re-stamps the queued write
-once and sends it again by itself. Sending it again is safe precisely because the refused write
+and sends it again by itself. Sending it again is safe precisely because the refused write
 never landed. A tap is checked the same way, tap by tap within a batch: one
 stamped too far ahead is not logged, and the device stamps it again and sends it under the same id.
 
@@ -1038,7 +1162,7 @@ queue age plus the few seconds of tolerance, which is the case that would otherw
 the match or overwrite a newer result with nobody told.
 
 When a queued write is refused for a wrong clock, the app learns the server time again and
-rebuilds the stamp before retrying it once. It does this two ways and keeps whichever answer is
+rebuilds the stamp before retrying it, and does so again on every later retry. It does this two ways and keeps whichever answer is
 older. The first way reads the moment the result was entered and adds the freshly learned
 offset, which is right so long as the device clock has not moved in between. The second way
 measures how long the result has been waiting on a steadily ticking timer that a clock
@@ -1051,14 +1175,15 @@ they are already being told about. Too new, and a result entered before the outa
 beat one recorded during it, which is the silent overwrite the whole check exists to prevent.
 Where the two answers disagree, the recoverable mistake is the one to make.
 
-One case is still not recovered, and it is worth stating plainly. The steady timer is measured
+One case needs the operator, and it is worth stating plainly. The steady timer is measured
 from the moment the page was opened, so it means nothing to a page that has since been reloaded
-or to a second tab. If the clock is corrected across a reload, the rebuilt stamp is wrong again,
-the result is refused a second time, and it is then dropped rather than retried forever. That is
-accepted, and it is loud: the operator is told that nothing was recorded and that this device's
-clock needs fixing, so the result can be entered again from a device whose clock is right.
-Dropping it is the lesser harm, because an entry that can never carry a correct stamp would
-otherwise hold up every write queued behind it.
+or to a second tab. If the clock is corrected across a reload, the rebuilt stamp can be wrong
+again and the result refused a second time. It is then kept, never dropped: it stays queued and
+held, the operator is told once that this device's clock is wrong, and it is re-stamped and sent
+again on every retry until it lands. While it is held, the writes of the same match queued
+behind it wait for it, so the operator either fixes the device clock or discards the held write
+from its score editor or the list of held writes and enters the result again from a device whose
+clock is right.
 
 ### When a file is wrong
 

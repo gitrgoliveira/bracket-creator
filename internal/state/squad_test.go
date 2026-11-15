@@ -520,13 +520,13 @@ func TestSquadMigration_InvalidatesTheSharedLazyCache(t *testing.T) {
 	raw := teamID + ",Tora A,Tora Dojo,Alice,Bob,Carol\n"
 	require.NoError(t, os.WriteFile(participantsPath, []byte(raw), 0o600))
 
-	roster := &legacyUpgradeRoster{store: s, compID: id}
+	roster := &legacyUpgradeRoster{store: s, compID: id, rio: s.directRosterIO()}
 
 	before, err := roster.squads()
 	require.NoError(t, err)
 	require.Empty(t, before[teamID], "precondition: the team has no squad before the migration")
 
-	require.NoError(t, s.upgradeSquadsFromMetadataLocked(id, roster, nil))
+	require.NoError(t, s.upgradeSquadsFromMetadataLocked(s.directRosterIO(), id, roster, nil))
 
 	after, err := roster.squads()
 	require.NoError(t, err)
@@ -554,7 +554,7 @@ func TestLegacyUpgradeRoster_CompetitionDoesNotLoadTheRoster(t *testing.T) {
 		{Name: "Alice", Dojo: "D"}, {Name: "Bob", Dojo: "D"},
 	}))
 
-	roster := &legacyUpgradeRoster{store: s, compID: id}
+	roster := &legacyUpgradeRoster{store: s, compID: id, rio: s.directRosterIO()}
 
 	comp, err := roster.competition()
 	require.NoError(t, err)
@@ -715,8 +715,8 @@ func TestSquadMigration_RaisingTeamSizePadsLoweringDoesNotTrim(t *testing.T) {
 	comp.TeamSize = 5
 	require.NoError(t, s.SaveCompetition(comp))
 
-	roster := &legacyUpgradeRoster{store: s, compID: id}
-	require.NoError(t, s.upgradeSquadsFromMetadataLocked(id, roster, nil))
+	roster := &legacyUpgradeRoster{store: s, compID: id, rio: s.directRosterIO()}
+	require.NoError(t, s.upgradeSquadsFromMetadataLocked(s.directRosterIO(), id, roster, nil))
 
 	squadsAfterRaise, err := s.LoadSquads(id)
 	require.NoError(t, err)
@@ -734,8 +734,8 @@ func TestSquadMigration_RaisingTeamSizePadsLoweringDoesNotTrim(t *testing.T) {
 	comp.TeamSize = 2
 	require.NoError(t, s.SaveCompetition(comp))
 
-	roster2 := &legacyUpgradeRoster{store: s, compID: id}
-	require.NoError(t, s.upgradeSquadsFromMetadataLocked(id, roster2, nil))
+	roster2 := &legacyUpgradeRoster{store: s, compID: id, rio: s.directRosterIO()}
+	require.NoError(t, s.upgradeSquadsFromMetadataLocked(s.directRosterIO(), id, roster2, nil))
 
 	squadsAfterLower, err := s.LoadSquads(id)
 	require.NoError(t, err)
@@ -916,6 +916,36 @@ func TestSquad_RenameAndClearReachStoredLineups(t *testing.T) {
 	for _, l := range lineups {
 		assert.Equal(t, "", l.Positions[domain.PositionNumbered(1)], "a cleared name is blank in the lineup, the id stays")
 		assert.Equal(t, sato.ID, l.MemberIDs[domain.PositionNumbered(1)])
+	}
+}
+
+// TestSquad_RenameInATransactionReachesALineupStagedBeforeIt pins that a
+// rename inside a transaction reads the lineups that transaction staged, not
+// the file on disk: a lineup saved earlier in the same transaction carries
+// the new name once it commits.
+func TestSquad_RenameInATransactionReachesALineupStagedBeforeIt(t *testing.T) {
+	store, compID, teamA, _ := newSquadTestStore(t)
+	sato, err := store.AddTeamMember(compID, teamA, "Satoh")
+	require.NoError(t, err)
+
+	require.NoError(t, store.WithTransaction(compID, func(tx StoreTx) error {
+		if err := tx.SetTeamLineups(compID, []domain.TeamLineup{{
+			TeamID: teamA, CompetitionID: compID, Round: 0,
+			Positions: map[domain.Position]string{domain.PositionNumbered(1): "Satoh"},
+			MemberIDs: map[domain.Position]string{domain.PositionNumbered(1): sato.ID},
+		}}, 3); err != nil {
+			return err
+		}
+		_, err := store.renameTeamMemberTx(tx, compID, teamA, sato.ID, "Sato", false)
+		return err
+	}))
+
+	lineups, err := store.LoadTeamLineups(compID)
+	require.NoError(t, err)
+	require.Len(t, lineups, 1)
+	for _, l := range lineups {
+		assert.Equal(t, "Sato", l.Positions[domain.PositionNumbered(1)],
+			"the lineup staged earlier in the transaction carries the new name")
 	}
 }
 

@@ -130,7 +130,7 @@ func (o *mobileAppBackupOptions) run(cmd *cobra.Command) (err error) {
 				return fmt.Errorf("competition %q not found", o.competition)
 			}
 			if errors.Is(err, state.ErrPendingWALUnsettled) {
-				return operatorSentence("A competition has a write that could not be finished. Start the app once so it replays its pending writes, stop it, then retry.")
+				return operatorSentence(pendingWriteSentence)
 			}
 			return fmt.Errorf("snapshot competition %q: %w", o.competition, err)
 		}
@@ -143,7 +143,7 @@ func (o *mobileAppBackupOptions) run(cmd *cobra.Command) (err error) {
 		snap, err = store.Snapshot(state.ScopeTournament, "")
 		if err != nil {
 			if errors.Is(err, state.ErrPendingWALUnsettled) {
-				return operatorSentence("A competition has a write that could not be finished. Start the app once so it replays its pending writes, stop it, then retry.")
+				return operatorSentence(pendingWriteSentence)
 			}
 			return fmt.Errorf("snapshot tournament: %w", err)
 		}
@@ -469,6 +469,10 @@ func printRestoreOutcome(out io.Writer, plan state.RestorePlan) error {
 	return nil
 }
 
+// pendingWriteSentence is the one refusal for a competition whose kept change
+// could not be written to disk, on backup and restore alike.
+const pendingWriteSentence = "A competition has a change that could not be written to disk. Free disk space or fix the data folder's permissions, then retry. If that does not clear it, a folder the change names may have been removed outside the app: restore it, or set aside the log the lines above name by renaming it so it no longer ends in .json."
+
 func formatRestoreError(err error) error {
 	if err == nil {
 		return nil
@@ -477,7 +481,7 @@ func formatRestoreError(err error) error {
 	if errors.As(err, &re) {
 		switch re.Code {
 		case state.RestoreCodePendingWriteUnsettled:
-			return operatorSentence("A competition has a write that could not be finished. Start the app once so it replays its pending writes, stop it, then retry.")
+			return operatorSentence(pendingWriteSentence)
 		case state.RestoreCodeMatchesRunning:
 			return operatorSentence("Matches are running in a competition this restore replaces or removes. Finish them, or pass --allow-running to restore anyway.")
 		case state.RestoreCodePasswordRequired:
@@ -490,7 +494,7 @@ func formatRestoreError(err error) error {
 		}
 	}
 	if errors.Is(err, state.ErrPendingWALUnsettled) {
-		return operatorSentence("A competition has a write that could not be finished. Start the app once so it replays its pending writes, stop it, then retry.")
+		return operatorSentence(pendingWriteSentence)
 	}
 	return err
 }

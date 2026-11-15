@@ -84,6 +84,11 @@ var restoreRefusalStatus = map[string]int{
 	state.RestoreCodeNotInArchive: http.StatusBadRequest,
 }
 
+// PendingWriteFolderHint ends every pending_write_unsettled refusal, here and
+// on the command line: a kept change whose folder was removed outside the app
+// never lands however much the disk allows, and the server log names the log.
+const PendingWriteFolderHint = "If that does not clear it, a folder the change names may have been removed outside the app: restore it, or see the server log."
+
 // restoreRefusalSentence is what the operator reads for each refusal.
 var restoreRefusalSentence = map[string]string{
 	state.RestoreCodeDecisionMissing:       "Choose what to do with each competition listed, then restore again.",
@@ -91,7 +96,7 @@ var restoreRefusalSentence = map[string]string{
 	state.RestoreCodeNameTaken:             "Another competition already has that name. Rename one of them, or choose a copy with a new name.",
 	state.RestoreCodePlanChanged:           "The competitions changed since the restore was checked. Check it again, then restore.",
 	state.RestoreCodeMatchesRunning:        "Matches are running in a competition this restore replaces or removes. Finish them, or choose to restore anyway.",
-	state.RestoreCodePendingWriteUnsettled: "A competition has a write that could not be finished. Restart the app, then try again.",
+	state.RestoreCodePendingWriteUnsettled: "A competition has a change that could not be written to disk. Free disk space or fix the data folder's permissions, then try again. " + PendingWriteFolderHint,
 	state.RestoreCodePasswordRequired:      "Set an admin password for the restored tournament first.",
 	state.RestoreCodeNothingToRestore:      "This copy holds nothing to restore.",
 	state.RestoreCodeNotASafetyCopy:        "Only a copy taken before a restore can undo it. Restore this file without Undo.",
@@ -196,7 +201,7 @@ func respondSnapshotError(c *gin.Context, err error) {
 		c.AbortWithStatusJSON(http.StatusNotFound, gin.H{"error": "competition not found"})
 	case errors.Is(err, state.ErrPendingWALUnsettled):
 		respondBackupRefusal(c, http.StatusConflict, state.RestoreCodePendingWriteUnsettled,
-			"A competition has a write that could not be finished. Restart the app, then take the backup again.", nil)
+			"A competition has a change that could not be written to disk. Free disk space or fix the data folder's permissions, then take the backup again. "+PendingWriteFolderHint, nil)
 	default:
 		slog.Error("mobile-app: backup snapshot failed", "err", err)
 		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "The backup could not be made. Check the server log, then try again."})

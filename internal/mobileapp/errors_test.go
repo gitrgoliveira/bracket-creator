@@ -125,6 +125,22 @@ func TestInternalErrorLogsACommittedButUnappliedWriteAsADiskError(t *testing.T) 
 	assert.Contains(t, w.Body.String(), "internal error")
 	assert.Contains(t, buf.String(), "ERROR")
 	assert.Contains(t, buf.String(), "disk refused a file write")
+	assert.Contains(t, buf.String(), "The change is kept in the transaction log")
+	assert.Contains(t, buf.String(), `"/api/competitions/abc/matches/Pool A-0/score"`, "the path is quoted, as logRequestError quotes it")
+
+	// A write refused because an earlier kept change still cannot be written
+	// is the same disk fault, but the refused write itself is not kept.
+	buf.Reset()
+	w = httptest.NewRecorder()
+	c, _ = gin.CreateTestContext(w)
+	c.Request, _ = http.NewRequest(http.MethodPut, "/api/competitions/abc/participants/p1", nil)
+	internalError(c, fmt.Errorf("WithTransaction %q: %w", "abc", state.ErrKeptChangeUnsettled))
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	assert.Contains(t, buf.String(), "ERROR")
+	assert.Contains(t, buf.String(), "This write was refused and not saved")
+	assert.Contains(t, buf.String(), "read or write")
+	assert.NotContains(t, buf.String(), "The change is kept", "the refused write was not kept")
+	assert.Contains(t, buf.String(), `"/api/competitions/abc/participants/p1"`)
 
 	buf.Reset()
 	w = httptest.NewRecorder()

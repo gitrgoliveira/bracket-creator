@@ -457,7 +457,7 @@ func TestReplaceParticipantInDraw_ARenamedTeamKeepsTheRepresentativeRowInStep(t 
 			}))
 			require.NoError(t, store.SaveBracket(compID, build(tc.sideBID)))
 
-			_, err := eng.ReplaceParticipantInDraw(compID, tc.pid, "Tora", "Dojo", "", "Lion", "Dojo", "")
+			_, err := replaceInDraw(eng, compID, tc.pid, "Tora", "Dojo", "", "Lion", "Dojo", "")
 			require.NoError(t, err)
 
 			bracket, err := store.LoadBracket(compID)
@@ -495,7 +495,7 @@ func TestReplaceParticipantInDraw_ARenamedIdlessSideKeepsItsPick(t *testing.T) {
 		}},
 	}}}}))
 
-	_, err := eng.ReplaceParticipantInDraw(compID, "id-elsewhere", "Tora", "Dojo", "", "Lion", "Dojo", "")
+	_, err := replaceInDraw(eng, compID, "id-elsewhere", "Tora", "Dojo", "", "Lion", "Dojo", "")
 	require.NoError(t, err)
 
 	bracket, err := store.LoadBracket(compID)
@@ -507,7 +507,7 @@ func TestReplaceParticipantInDraw_ARenamedIdlessSideKeepsItsPick(t *testing.T) {
 	assert.Equal(t, int64(400), m.GroupStamp(state.GroupRepPickB), "and its date")
 }
 
-// Pass 2 of ReplaceParticipantInDraw renames an id-less side directly and hands
+// Pass 2 of ReplaceParticipantInDrawTx renames an id-less side directly and hands
 // the representative row the match's old name (the one it matched on), so a row
 // that names no one still carries the winner recorded under that name.
 func TestReplaceParticipantInDraw_AnIdlessRenameCarriesTheWinnerOfARowThatNamesNoOne(t *testing.T) {
@@ -528,7 +528,7 @@ func TestReplaceParticipantInDraw_AnIdlessRenameCarriesTheWinnerOfARowThatNamesN
 		}},
 	}}}}))
 
-	_, err := eng.ReplaceParticipantInDraw(compID, "id-elsewhere", "Tora", "Dojo", "", "Lion", "Dojo", "")
+	_, err := replaceInDraw(eng, compID, "id-elsewhere", "Tora", "Dojo", "", "Lion", "Dojo", "")
 	require.NoError(t, err)
 
 	bracket, err := store.LoadBracket(compID)

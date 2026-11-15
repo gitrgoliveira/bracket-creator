@@ -18,7 +18,6 @@ A Go CLI tool for generating kendo tournament brackets with pool stages and knoc
 ### Key Packages
 - `cmd/`: Cobra commands with options structs (each has a `run()` method)
 - `internal/domain`: Domain models (Player, Pool, Tournament, Match, Seed)
-- `internal/service`: Business logic orchestration
 - `internal/helper`: **Core logic**: CSV parsing, pool/match generation, tree building, Excel rendering
 - `internal/excel`: Excel file lifecycle (`Client`) and from-scratch workbook construction (`NewFileFromScratch`)
 - `internal/resources`: Embedded web assets (`web/`, `web-mobile/`) injected via `ExecuteWithResources()`

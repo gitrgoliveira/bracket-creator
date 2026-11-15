@@ -479,6 +479,54 @@ func TestChusenOfRuns_AskedNoLotsForARunWhoseNextRoundIsScheduled(t *testing.T) 
 	assert.Equal(t, [][]string{{"d", "e", "f"}}, names(owed), "a bout still to fight across two runs holds back the lots of both")
 }
 
+// TestChusenOfRuns_AskedLotsForACircleWhileAnotherRunFightsItsNextRound: six
+// competitors level on points. Round 1 put a, b and c ahead of d, e and f, and each
+// trio went in a circle. Both trios then fight a second round: the first trio's is
+// still to fight, the second trio's is fought and went in a circle again. Both
+// second-round bouts are the second bout of their pair, but they were played among
+// different runs, so the first trio's open bouts say nothing of d, e and f: lots
+// are owed to them at once, and to the first trio only once its round is fought.
+func TestChusenOfRuns_AskedLotsForACircleWhileAnotherRunFightsItsNextRound(t *testing.T) {
+	ids := []string{"a", "b", "c", "d", "e", "f"}
+	group := make([]state.PlayerStanding, len(ids))
+	positions := make([]int, len(ids))
+	for i, id := range ids {
+		group[i] = state.PlayerStanding{Player: domain.Player{ID: id, Name: id}, Points: 3}
+		positions[i] = i
+	}
+	n := 0
+	var matches []state.MatchResult
+	bout := func(a, b, winner string, status state.MatchStatus) {
+		n++
+		matches = append(matches, state.MatchResult{ID: fmt.Sprintf("Pool A-TB-%d", n), SideAID: a, SideBID: b, Winner: winner, WinnerID: winner, Status: status})
+	}
+	for _, top := range ids[:3] {
+		for _, bottom := range ids[3:] {
+			bout(top, bottom, top, state.MatchStatusCompleted)
+		}
+	}
+	for _, trio := range [][3]string{{"a", "b", "c"}, {"d", "e", "f"}} {
+		bout(trio[0], trio[1], trio[0], state.MatchStatusCompleted)
+		bout(trio[1], trio[2], trio[1], state.MatchStatusCompleted)
+		bout(trio[2], trio[0], trio[2], state.MatchStatusCompleted)
+	}
+	// The second round: a, b, c still to fight; d, e, f fought, a circle again.
+	bout("a", "b", "", state.MatchStatusScheduled)
+	bout("b", "c", "", state.MatchStatusScheduled)
+	bout("a", "c", "", state.MatchStatusScheduled)
+	bout("d", "e", "d", state.MatchStatusCompleted)
+	bout("e", "f", "e", state.MatchStatusCompleted)
+	bout("f", "d", "f", state.MatchStatusCompleted)
+
+	owed, _ := chusenOfRuns(group, positions, matches, nil, inEveryBand)
+	require.Len(t, owed, 1)
+	var got []string
+	for _, s := range owed[0].members {
+		got = append(got, s.Player.ID)
+	}
+	assert.Equal(t, []string{"d", "e", "f"}, got, "the circle that fought its round is owed lots whatever the other run still has to fight")
+}
+
 // TestChusenOfRuns_AskedNoLotsWhileABoutOutsideTheRunCanStillMoveAMemberIn: eight
 // competitors level on points. Round 1 put a to e (a five-way circle) ahead of f,
 // g and h (a circle of their own). The next round among a to e is partly fought:

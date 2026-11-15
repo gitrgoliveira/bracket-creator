@@ -1146,25 +1146,16 @@ func (e *Engine) RunTiebreakerRound(compID, poolName string, memberIDs []string)
 // of a round into runs, so a bout still to fight can cross two of them, or sit
 // among members of neither: any run holding a player of the round bears on it,
 // since the bout's winner can still move into it. The first round is played among
-// the whole group; a later round only among the run the one before left level, so
-// a run the earlier rounds already cut off (a pair that could not fight, a circle
-// beside it fighting again) is not held back by it.
+// the whole group; a later round only among each run the one before left level,
+// and a bout of one such run bears only on that run (openRunMembers), so a run the
+// earlier rounds already cut off (a pair that could not fight, a circle beside it
+// fighting again) is not held back by it.
 func roundStillToFight(run, group []state.PlayerStanding, matches []state.MatchResult) bool {
 	inRun := groupMemberIDs(run)
 	for k, round := range tieBreakRounds(group, matches, state.IsPoolSupplementaryMatchID) {
-		inRound := groupMemberIDs(group)
-		unfinished := false
-		if k > 0 {
-			inRound = map[string]bool{}
-		}
-		for _, m := range round {
-			unfinished = unfinished || m.Status != state.MatchStatusCompleted
-			if k > 0 {
-				inRound[m.SideAID], inRound[m.SideBID] = true, true
-			}
-		}
-		if !unfinished {
-			continue
+		inRound := openRunMembers(round)
+		if k == 0 && len(inRound) > 0 {
+			inRound = groupMemberIDs(group)
 		}
 		for id := range inRun {
 			if inRound[id] {
@@ -1173,6 +1164,29 @@ func roundStillToFight(run, group []state.PlayerStanding, matches []state.MatchR
 		}
 	}
 	return false
+}
+
+// openRunMembers returns the members of every run of a later round (its bouts
+// are played among a run the round before left level, so the bouts of one run
+// link its members and no bout links two runs) that still has a bout not
+// finished. Empty when every bout of the round is finished.
+func openRunMembers(round map[string]state.MatchResult) map[string]bool {
+	open := map[string]bool{}
+	for _, m := range round {
+		if m.Status != state.MatchStatusCompleted {
+			open[m.SideAID], open[m.SideBID] = true, true
+		}
+	}
+	for grew := true; grew; {
+		grew = false
+		for _, m := range round {
+			if open[m.SideAID] != open[m.SideBID] {
+				open[m.SideAID], open[m.SideBID] = true, true
+				grew = true
+			}
+		}
+	}
+	return open
 }
 
 // groupMemberIDs returns the set of participant ids among a tied group's

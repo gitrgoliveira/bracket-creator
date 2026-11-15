@@ -634,7 +634,7 @@ func (e *Engine) maybeAutoCompletePoolsRunning(compID string, comp *state.Compet
 	// completion below would wait for its bouts forever. Elsewhere existing
 	// supplementary matches still skip the call (hasCompleteDH / hasCompleteTB).
 	if !isTeamLeague {
-		isLeague := comp != nil && comp.Format == state.CompFormatLeague
+		isLeague := comp.Format == state.CompFormatLeague
 		if (isTeamComp && !hasCompleteDH) || (!isTeamComp && (!hasCompleteTB || isLeague)) {
 			if isTeamComp {
 				injected, injErr := e.InjectPoolDaihyosenMatches(compID)

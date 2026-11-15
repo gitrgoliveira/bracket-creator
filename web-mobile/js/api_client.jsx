@@ -7085,7 +7085,7 @@ const API = {
 
     // runTiebreakerRound: POST /competitions/:id/pools/:poolId/tiebreak-round
     // "Run another tie-breaker round" over an individual tie a finished
-    // round left level (decision F5). Body { playerIds }: one run of the
+    // round left level. Body { playerIds }: one run of the
     // chusen candidates' stillLevel, by participant id only. Returns
     // { matches } on 201, the bouts added. Throws on 400 with the server's
     // sentence (no longer such a run, the lots already ordered it, the pools

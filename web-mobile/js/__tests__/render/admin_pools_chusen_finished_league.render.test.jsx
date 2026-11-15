@@ -1,5 +1,5 @@
 // Lots typed wrongly on a team league that has just finished stay correctable
-// (decision F2 (a)): the server's AcceptsPoolRankOverride accepts a finished
+// (a finished league's lots stay correctable): the server's AcceptsPoolRankOverride accepts a finished
 // league, so the Pools page keeps asking for the chusen and keeps the recorded
 // lots panel, with its Change control, on a finished team league. The change
 // warns that the final table and podium move at once and the league stays
@@ -101,7 +101,7 @@ describe('AdminPools chusen: a finished team league keeps its lots correctable',
 
   // An individual league settles a tie by ippon-shobu, and only a round that
   // went in a circle takes lots, as the operator's other choice beside another
-  // round (decision F5). Lots recorded over such a circle stay correctable on
+  // round. Lots recorded over such a circle stay correctable on
   // the finished league, as a team league's do; no team "required" banner.
   it('keeps the recorded lots of a finished individual league correctable', async () => {
     const api = makeApi();

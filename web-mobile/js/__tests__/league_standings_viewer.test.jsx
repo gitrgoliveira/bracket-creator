@@ -175,7 +175,7 @@ describe('LeagueStandingsViewer (mp-dunx)', () => {
     runtime.updateProps({ competition: comp, poolMatches: secondMatches, tweaks });
   });
 
-  // N7: a correction that keeps the encounter's winner still moves the table
+  // A correction that keeps the encounter's winner still moves the table
   // (IV/PW, ippons), so the table must be fetched again.
   it('refetches after a correction that keeps the encounter winner', () => {
     const team = { ...comp, kind: 'team', teamSize: 2, status: 'completed' };
@@ -199,7 +199,7 @@ describe('LeagueStandingsViewer (mp-dunx)', () => {
     expect(global.window.API.leagueStandings).toHaveBeenCalledTimes(1);
   });
 
-  // N2: a league that finishes or goes back to match play changes the
+  // A league that finishes or goes back to match play changes the
   // competition's status, not a match, yet changes the ranks the table reads,
   // so the table is fetched again on a status change with the same matches.
   it('refetches when the competition status changes with the matches unchanged (finish, back to play)', () => {
@@ -241,7 +241,7 @@ describe('LeagueStandingsViewer (mp-dunx)', () => {
     expect(global.window.API.leagueStandings).toHaveBeenCalledTimes(2);
   });
 
-  // N2a/N2b: the table prints the place the server gives, so a shared 3rd
+  // The table prints the place the server gives, so a shared 3rd
   // reads 3, 3 and a tie below the band 4, 4. A tie at 1st or 2nd is never
   // shared: a tie-breaker or the lots orders it.
   it('shows a shared place as the server ranks it', async () => {
@@ -255,7 +255,7 @@ describe('LeagueStandingsViewer (mp-dunx)', () => {
   });
 });
 
-describe('poolMatchesSignature (N7): the one key the league table and admin Pools refetch on', () => {
+describe('poolMatchesSignature: the one key the league table and admin Pools refetch on', () => {
   let poolMatchesSignature;
   beforeEach(async () => {
     vi.resetModules();

@@ -5661,8 +5661,8 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
           {/* A league encounter may end level, so the sheet offers no
               representative bout there. Without this line the operator sees
               the control a knockout sheet shows go missing and cannot tell
-              why (F5). It says what a level result is and what to do next
-              (decision D5). Shown only while the encounter IS level, so
+              why. It says what a level result is and what to do next.
+              Shown only while the encounter IS level, so
               it never nags a scoring operator mid-bout. Kachinuki is left
               out: its tie is fought on, never read from IV and PW alone. */}
           {compFormat === "league" && !isKnockoutPhase && !isKachinuki && !hasDaihyosen

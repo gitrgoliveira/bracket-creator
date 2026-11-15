@@ -1441,7 +1441,7 @@ func TestReopenHandler_PutsAFinishedLeagueBackInPlay(t *testing.T) {
 	})
 }
 
-// Reopening a match of a finished league is warned about first (D2), as a
+// Reopening a match of a finished league is warned about first, as a
 // correction of its result is: 409 league_finished, nothing changed, until the
 // request carries confirmFinished, through either reopen door.
 func TestReopenHandler_WarnsBeforeReopeningAFinishedLeague(t *testing.T) {

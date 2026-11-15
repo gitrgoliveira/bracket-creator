@@ -1,4 +1,4 @@
-// The finished-league warning through the outbox (design item 3): the
+// The finished-league warning through the outbox: the
 // organiser's "Change it anyway" resends a correction with the request-only
 // confirmFinished, which rides the descriptor exactly as forceCourt does
 // (outbox_force_court.test.jsx): sent on the payload, persisted, rehydrated,

@@ -286,7 +286,7 @@ describe('ViewerOverview league standings (mp-ldnr)', () => {
     expect(winnerBadge).toBeNull();
   });
 
-  // N3: every match scored is not a decided league. A tie at a podium place
+  // Every match scored is not a decided league. A tie at a podium place
   // can still wait for a tie-breaker or the lots, and the league stays in
   // match play until it is settled.
   it('every match scored but the league still in match play names no winner and no final table', () => {
@@ -474,11 +474,11 @@ describe('ViewerOverview league standings (mp-ldnr)', () => {
   });
 });
 
-// N2a: a league table gives a shared group (and a level group below
+// A league table gives a shared group (and a level group below
 // the band) its best place, 1, 1, 3, but the Awards podium stays as it was:
 // one finisher per place in table order, the kendo joint 3rd (the joint-3rd
 // setting on, every row ranked 3) its one shared place.
-describe('league Awards podium with shared table ranks (N2a)', () => {
+describe('league Awards podium with shared table ranks', () => {
   let deriveAwards;
   beforeEach(async () => {
     vi.resetModules();

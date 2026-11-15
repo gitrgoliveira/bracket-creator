@@ -13,8 +13,8 @@ import (
 	bctest "github.com/gitrgoliveira/bracket-creator/internal/test/idstamp"
 )
 
-// An individual tie-breaker round that goes in a circle (decision F5,
-// round-or-lots): the competition is held open per tied group (fail closed),
+// An individual tie-breaker round that goes in a circle (another round
+// or the lots): the competition is held open per tied group (fail closed),
 // the operator chooses another round (RunTiebreakerRound) or the lots, and
 // nothing ranks the circle by itself.
 

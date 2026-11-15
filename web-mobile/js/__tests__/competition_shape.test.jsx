@@ -266,7 +266,7 @@ describe('per-phase match duration', () => {
 });
 
 describe('two-thirds-places (joint bronze, bc-3rdp)', () => {
-  it('copy is one constant for admin_setup.jsx and admin_competition_settings.jsx and speaks of a tie, not of semi-finalists (F9)', () => {
+  it('copy is one constant for admin_setup.jsx and admin_competition_settings.jsx and speaks of a tie, not of semi-finalists', () => {
     expect(LABEL_TWO_THIRD_PLACES).toBe('Award two joint 3rd places');
     expect(HINT_TWO_THIRD_PLACES).toBe('When enabled, competitors level at 3rd place share it and nothing is asked or played to separate them (standard kendo convention). Leave it off to decide a single 3rd place: a knockout plays a third-place match, and a league breaks a tie at 3rd place with a tie-breaker. A tie at 1st or 2nd place always needs a tie-breaker with a winner.');
     expect(HINT_TWO_THIRD_PLACES).toMatch(/tie|level/);

@@ -232,7 +232,7 @@ func RegisterDecisionHandlers(r *gin.RouterGroup, eng ScoringEngine, store Compe
 				return snapErr
 			}
 			// A decision correcting a finished league's result is warned
-			// about first (design item 3), as on PUT /score. Only a league
+			// about first, as on PUT /score. Only a league
 			// pays for the check, and the check judges whether it has finished:
 			// it reads the competition under this lock, so a league that
 			// finished after the read above is judged as finished (the format
@@ -364,7 +364,7 @@ func respondDecisionEngineError(c *gin.Context, store CompetitionStore, compID, 
 		respondSuperseded(c, engine.HeldGroupsOf(engErr), engine.HeldReasonOf(engErr), engErr)
 	case respondIfLeagueFinished(c, engErr):
 		// A correction of a finished league's result: resent with
-		// confirmFinished once the organiser confirms (design item 3).
+		// confirmFinished once the organiser confirms.
 	case respondIfLotsReplaced(c, engErr):
 		// A decision that would replace the lots the organiser entered for a
 		// drawn tie-breaker: resent with confirmLots once they confirm.

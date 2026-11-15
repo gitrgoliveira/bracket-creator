@@ -13,7 +13,7 @@ import (
 )
 
 // Lots typed wrongly on a team league that has just finished are corrected
-// through the same door (decision F2 (a)): PUT .../override-rank answers 200
+// through the same door: PUT .../override-rank answers 200
 // on the finished league, the table follows the new order, and the league
 // stays finished. GET .../chusen-candidates still lists the recorded lots.
 func TestOverrideRank_FinishedTeamLeagueTakesACorrectedLotsOrder(t *testing.T) {

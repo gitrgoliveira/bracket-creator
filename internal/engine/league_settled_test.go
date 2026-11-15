@@ -163,7 +163,7 @@ func TestMatchesOnRemovedCourts(t *testing.T) {
 	assert.Empty(t, removed)
 }
 
-// A league tie-breaker must have a winner (D6 (b)): a drawn representative bout
+// A league tie-breaker must have a winner: a drawn representative bout
 // over a two-way league tie at 3rd and 4th, which only a write made before that
 // rule can hold, is a bout still to decide by encho and hantei, never the lots.
 // So no chusen is offered for it, and the league stays open until it is decided

@@ -6,7 +6,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-// A finished league keeps its lots correctable (decision F2 (a)); a finished
+// A finished league keeps its lots correctable; a finished
 // competition of any other format does not take a pool order by hand.
 func TestCompetition_AcceptsPoolRankOverride_FinishedLeague(t *testing.T) {
 	assert.True(t, Competition{Format: CompFormatLeague, Status: CompStatusComplete}.AcceptsPoolRankOverride())

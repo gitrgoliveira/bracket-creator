@@ -543,7 +543,7 @@ var retiredLeagueTiebreakKey = regexp.MustCompile(`(?m)^league_tiebreak_(finaliz
 // writes nothing. Nothing is recomputed at upgrade: a finished league whose
 // shared ranks were accepted at 1st or 2nd keeps its status until its next
 // result, withdrawal, reinstatement or lots change, which reopens it through
-// the existing reconciler (operator decision Q3, "touch"). Caller holds the
+// the existing reconciler; nothing is changed at upgrade. Caller holds the
 // per-competition lock.
 func (s *Store) upgradeRetiredLeagueTiebreakKeysLocked(compID string) error {
 	raw, err := s.root.readFile(s.compPath(compID, "config.md"))

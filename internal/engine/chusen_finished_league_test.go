@@ -21,8 +21,8 @@ func leagueRankNames(t *testing.T, eng *Engine, compID string) []string {
 	return names
 }
 
-// Lots typed wrongly on a team league that has just finished stay correctable
-// (decision F2 (a)): the recorded chusen is still offered once the league is
+// Lots typed wrongly on a team league that has just finished stay correctable:
+// the recorded chusen is still offered once the league is
 // complete, a corrected order is accepted, the table and the podium follow it
 // at once, and the league stays finished (no reopen, nothing else moves).
 func TestChusen_FinishedLeague_ACorrectedLotsOrderMovesThePodiumAndStaysFinished(t *testing.T) {

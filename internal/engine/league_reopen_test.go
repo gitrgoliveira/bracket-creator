@@ -280,7 +280,7 @@ func TestLeagueBackInPlay_LeavesAnUncommittedNoteForTheCommit(t *testing.T) {
 	assert.False(t, reopened, "the note is taken once")
 }
 
-// --- D6 (b): a league tie-breaker needs a winner ---
+// --- a league tie-breaker needs a winner ---
 
 func TestLeagueTiebreaker_DrawnResultIsRefused(t *testing.T) {
 	eng, store := setupTeamPoolComp(t, "dh-drawn", true)

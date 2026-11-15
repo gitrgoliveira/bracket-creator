@@ -269,8 +269,10 @@ func annotateEligibility(poolMatches []state.MatchResult, bracket *state.Bracket
 	if len(statuses) == 0 {
 		return
 	}
-	stamp := func(scheduled bool, matchID, sideAID, sideBID string) *state.IneligibleSidesAnnotation {
-		if !scheduled {
+	// stampable: the match is one whose barred sides are stamped (scheduled, or a
+	// drawn tie-breaker bout, which may be fought again once a side is reinstated).
+	stamp := func(stampable bool, matchID, sideAID, sideBID string) *state.IneligibleSidesAnnotation {
+		if !stampable {
 			return nil
 		}
 		a, b := engine.BarredSides(statuses, matchID, sideAID, sideBID)
@@ -1653,7 +1655,7 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 		// empty-stored-password fail-closed branch. Pinned by
 		// TestSelfRun_ReopenRequiresMainPassword.
 
-		// A match of a finished league is warned about first (D2), as a
+		// A match of a finished league is warned about first, as a
 		// correction of its result is.
 		if lerr := refuseFinishedLeagueReopen(tx, tl, id, mid, body.ConfirmFinished); lerr != nil {
 			if !respondIfLeagueFinished(c, lerr) {
@@ -2105,8 +2107,7 @@ func resultFinalized(message string) *selfRunRefusal {
 var errResultFinalized = resultFinalized("This match result has already been reported. Contact the tournament organizer to correct it.")
 
 // leagueFinishedCode is the 409 a correction of a finished league's result
-// answers until the organiser confirms it (design item 3, operator decision
-// D2: warn first, then save).
+// answers until the organiser confirms it (warn first, then save).
 const leagueFinishedCode = "league_finished"
 
 // LeagueFinishedMessage is the refusal's sentence. The confirm the app shows
@@ -4159,7 +4160,7 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 					return nil
 				}
 				// A correction of a finished league's result is warned about
-				// first (design item 3): after the self-run judge above, so a
+				// first: after the self-run judge above, so a
 				// participant is still answered result_finalized.
 				if err := refuseFinishedLeagueCorrection(stx, tl, id, mid, check.Corrects, body.ConfirmFinished); err != nil {
 					var refusal *leagueFinishedRefusal

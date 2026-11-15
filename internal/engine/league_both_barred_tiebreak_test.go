@@ -692,8 +692,8 @@ func barredDrawLeague(t *testing.T, compID string, pairOnTop bool) (*Engine, *st
 
 // A both-barred draw is a bout played: it does not stop a circle among the other
 // members from being level, and a circle of players who can still fight is
-// offered another round or the lots, the organiser's choice (round p4-review-3,
-// R3). The league holds open for either at 1st to 3rd (the barred pair at 4th is
+// offered another round or the lots, the organiser's choice.
+// The league holds open for either at 1st to 3rd (the barred pair at 4th is
 // below the podium), and finishes once the circle is settled by lots.
 func TestIndividualLeague_BarredDrawElsewhereLeavesACircleToARoundOrLots(t *testing.T) {
 	const compID = "ind-barred-circle"
@@ -771,7 +771,7 @@ func TestIndividualLeague_ReinstatedSideOfABarredDrawIsOwedNoLotsBesideACircle(t
 }
 
 // A round the circle beside a both-barred draw runs does not hide the lots the
-// barred pair owes for its own places (round p4-review-3, R3: the circle may fight
+// barred pair owes for its own places (the circle may fight
 // another round, or draw lots). While the circle's round is scheduled the pair's
 // lots are still offered and accepted, and the circle owes none until it is fought.
 func TestIndividualLeague_CircleRoundBesideABarredDrawKeepsThePairsLots(t *testing.T) {
@@ -936,7 +936,7 @@ func TestIndividualLeague_BarredDrawBelowThePodiumBand(t *testing.T) {
 // Lots that settled a team league's both-barred representative bout stay
 // listed, and so correctable, when one of the two teams is reinstated: the bout
 // stays settled on those lots (drawnSupplementaryRuledByChusen), so the league stays
-// finished, and the place is still the lots' (decision F2).
+// finished, and the place is still the lots'.
 func TestTeamLeague_ReinstatedBarredDrawKeepsItsLotsCorrectable(t *testing.T) {
 	const compID = "team-barred-dh-reinstated"
 	eng, store := setupTeamLeagueComp(t, compID, "topTie")

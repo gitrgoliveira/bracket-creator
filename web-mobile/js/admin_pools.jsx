@@ -350,7 +350,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
 
   // Chusen (drawing lots) candidate state: team-pool ties the daihyosen
   // could not settle (a cycle / all-drawn), and individual ties a finished
-  // tie-breaker round left level (decision F5, shown by the circle notice
+  // tie-breaker round left level (shown by the circle notice
   // below). Fetched in the "pools" phase (non-league too: a mixed pool stage
   // can hold either), and for a mixed comp in its "knockout" phase as well: a pool correction
   // made then can leave a tie only a chusen settles, and a wrong chusen must
@@ -418,7 +418,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
   const chusenCompId = c && c.id;
   const chusenCompStatus = c && c.status;
   // Asked for an individual competition too: an ippon-shobu round that went in
-  // a circle is offered there (decision F5), with another round as the main
+  // a circle is offered there, with another round as the main
   // way on and the lots as the operator's other choice (circleNotice below).
   useEffect(() => {
     if (!chusenOpen || !window.API || typeof window.API.chusenCandidates !== "function") {
@@ -792,7 +792,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
     </div>
   ) : null;
 
-  // Individual circle notice (decision F5): a tie-breaker round left a tie
+  // Individual circle notice: a tie-breaker round left a tie
   // level (A beat B, B beat C, C beat A), so the pool's order is still open.
   // The main way on is another round among the ones still level
   // (group.stillLevel, each run one round); drawing lots is the operator's

@@ -131,9 +131,9 @@ var ErrTiebreakNeedsWinner = errors.New("tiebreak_needs_winner")
 
 // refuseDrawnLeagueTiebreak is the ONE check that a league's tie-breaker bout
 // (an ippon-shobu "-TB-" or a representative "-DH-" bout,
-// state.IsPoolSupplementaryMatchID) is finished with a winner (operator
-// decision D6 (b): a league tie-breaker must have a winner, and lots are the
-// operator's rare exception, never the app's): the pool twin of
+// state.IsPoolSupplementaryMatchID) is finished with a winner (a league
+// tie-breaker must have a winner, and lots are the operator's rare exception,
+// never the app's): the pool twin of
 // validateBracketCompletion. It runs before the write, so a refused write
 // stages nothing on any door: /score, quick-score, bulk-score, the score-event
 // replay, /decision and its both-sides-barred hikiwake, all of which reach

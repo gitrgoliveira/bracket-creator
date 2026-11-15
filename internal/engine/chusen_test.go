@@ -323,7 +323,7 @@ func asMixed(t *testing.T, store *state.Store, compID string) {
 }
 
 // TestChusenCandidates_LeagueAllDrawnRoundOffersNoLots: in a LEAGUE a
-// tie-breaker must have a winner (D6 (b)), so a drawn representative bout,
+// tie-breaker must have a winner, so a drawn representative bout,
 // which only a write made before that rule can hold, counts as not yet fought:
 // an all-drawn round opens no lots by itself (chusenMatches), and nothing
 // completes the league until the bouts are decided by encho and hantei.
@@ -477,6 +477,64 @@ func TestChusenOfRuns_AskedNoLotsForARunWhoseNextRoundIsScheduled(t *testing.T) 
 		bout("a", "c", "", state.MatchStatusScheduled))
 	owed, _ = chusenOfRuns(group, positions, matches, nil, inEveryBand)
 	assert.Equal(t, [][]string{{"d", "e", "f"}}, names(owed), "a bout still to fight across two runs holds back the lots of both")
+}
+
+// TestChusenOfRuns_AskedNoLotsWhileABoutOutsideTheRunCanStillMoveAMemberIn: eight
+// competitors level on points. Round 1 put a to e (a five-way circle) ahead of f,
+// g and h (a circle of their own). The next round among a to e is partly fought:
+// e has four wins, a and b two, d one and c none, with c against d still to
+// fight. Neither c nor d is in {a, b}, but d winning that bout would put d level
+// with them, so the run is not final and owes no lots yet. f, g and h left the
+// round behind them, so their lots are owed whatever the round among a to e does.
+func TestChusenOfRuns_AskedNoLotsWhileABoutOutsideTheRunCanStillMoveAMemberIn(t *testing.T) {
+	ids := []string{"a", "b", "c", "d", "e", "f", "g", "h"}
+	group := make([]state.PlayerStanding, len(ids))
+	positions := make([]int, len(ids))
+	for i, id := range ids {
+		group[i] = state.PlayerStanding{Player: domain.Player{ID: id, Name: id}, Points: 3}
+		positions[i] = i
+	}
+	n := 0
+	var matches []state.MatchResult
+	bout := func(a, b, winner string, status state.MatchStatus) {
+		n++
+		matches = append(matches, state.MatchResult{ID: fmt.Sprintf("Pool A-TB-%d", n), SideAID: a, SideBID: b, Winner: winner, WinnerID: winner, Status: status})
+	}
+	for _, top := range ids[:5] {
+		for _, bottom := range ids[5:] {
+			bout(top, bottom, top, state.MatchStatusCompleted)
+		}
+	}
+	for _, p := range [][3]string{{"a", "b", "a"}, {"a", "c", "a"}, {"b", "c", "b"}, {"b", "d", "b"}, {"c", "d", "c"},
+		{"c", "e", "c"}, {"d", "e", "d"}, {"d", "a", "d"}, {"e", "a", "e"}, {"e", "b", "e"},
+		{"f", "g", "f"}, {"g", "h", "g"}, {"h", "f", "h"}} {
+		bout(p[0], p[1], p[2], state.MatchStatusCompleted)
+	}
+	// The second round among a to e: e beat a, b, c and d; a beat b and c; b beat c
+	// and d; d beat a; c against d is still to fight.
+	for _, p := range [][3]string{{"e", "a", "e"}, {"e", "b", "e"}, {"e", "c", "e"}, {"e", "d", "e"}, {"a", "b", "a"},
+		{"a", "c", "a"}, {"b", "c", "b"}, {"b", "d", "b"}, {"d", "a", "d"}} {
+		bout(p[0], p[1], p[2], state.MatchStatusCompleted)
+	}
+	bout("c", "d", "", state.MatchStatusScheduled)
+	owedIDs := func() [][]string {
+		owed, _ := chusenOfRuns(group, positions, matches, nil, inEveryBand)
+		var out [][]string
+		for _, r := range owed {
+			var one []string
+			for _, s := range r.members {
+				one = append(one, s.Player.ID)
+			}
+			out = append(out, one)
+		}
+		return out
+	}
+
+	assert.Equal(t, [][]string{{"f", "g", "h"}}, owedIDs(), "a and b may still be joined by d: no lots yet")
+
+	// c against d is fought: d reaches two wins and joins a and b.
+	matches[len(matches)-1].Status, matches[len(matches)-1].Winner, matches[len(matches)-1].WinnerID = state.MatchStatusCompleted, "d", "d"
+	assert.Equal(t, [][]string{{"a", "b", "d"}, {"f", "g", "h"}}, owedIDs(), "the run is final once the round is fought")
 }
 
 // TestGroupNeedsChusen_SameNameTeamsKeyOnIdentity pins the identity keying in

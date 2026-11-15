@@ -1,4 +1,4 @@
-// The finished-league warning (design item 3, operator decision D2: warn
+// The finished-league warning (warn
 // first, then save). attemptScoreWrite turns the 409 league_finished refusal
 // of a correction into the confirm and, on Change it anyway, resends the same
 // write with the request-only confirmFinished: true. It is asked on every host:

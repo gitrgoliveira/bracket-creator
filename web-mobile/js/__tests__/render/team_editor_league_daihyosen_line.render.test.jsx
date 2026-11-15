@@ -1,4 +1,4 @@
-// F5: a league team encounter may end level, so the sheet offers no
+// A league team encounter may end level, so the sheet offers no
 // representative bout there. When the encounter IS level the sheet says why the
 // daihyosen control a knockout sheet shows is absent, and where a tie that
 // matters is settled. The line never shows on a knockout sheet (which has the
@@ -100,7 +100,7 @@ async function mount(match) {
   return utils;
 }
 
-describe('league team sheet: the line for a level encounter (F5)', () => {
+describe('league team sheet: the line for a level encounter', () => {
   it('explains a level league encounter and what to do next', async () => {
     await mount(makeMatch());
     const line = screen.getByTestId('league-level-hint');

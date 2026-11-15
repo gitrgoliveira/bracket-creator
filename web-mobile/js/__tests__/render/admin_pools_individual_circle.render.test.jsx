@@ -1,5 +1,5 @@
 // An individual tie a tie-breaker round left level (A beat B, B beat C, C beat
-// A; decision F5): the Pools tab names the tie, its main button runs another
+// A): the Pools tab names the tie, its main button runs another
 // tie-breaker round among the ones still level, and drawing lots is the
 // operator's other choice, opening the same entry a team's chusen uses.
 

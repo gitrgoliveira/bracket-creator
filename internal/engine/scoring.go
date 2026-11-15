@@ -2260,8 +2260,8 @@ func applyPoolRanksInForce(sorted []state.PlayerStanding, inForce map[string]int
 //     equal 3rd places instead of relabeling the 4th finisher;
 //   - a run the bouts left level outside the band a tie is broken in (its best
 //     place is 4th or lower): no bout or lots are owed for it, so its members
-//     share their better place (4, 4) (operator decision N2b: ties below the
-//     band can always share places).
+//     share their better place (4, 4): ties below the
+//     band can always share places.
 //
 // A tie at 1st or 2nd (or at 3rd with joint 3rd places off) never shares: a
 // tie-breaker with a winner orders it, or the lots do (a circle the bouts

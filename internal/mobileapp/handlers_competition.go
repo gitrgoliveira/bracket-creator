@@ -3055,7 +3055,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		// started too: a pool correction made then can leave a tie only a
 		// chusen settles, and a wrong chusen must stay fixable. What the new
 		// order does to the knockout is answered below, as for any override.
-		// A finished league takes one as well (decision F2 (a)): its lots are
+		// A finished league takes one as well: its lots are
 		// corrected in place, the table and podium follow, and it stays
 		// finished (the auto-complete below finds nothing to do).
 		if !comp.AcceptsPoolRankOverride() {
@@ -3102,8 +3102,8 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 
 		// Lots are drawn over a team tie a daihyosen left level, and over an
 		// individual tie only once a finished ippon-shobu round has gone in a
-		// circle, where the operator may choose them over another round
-		// (decision F5): both are what ChusenStatus reports. Any other
+		// circle, where the operator may choose them over another round:
+		// both are what ChusenStatus reports. Any other
 		// individual tie is decided by an ippon-shobu, so no rank is set by
 		// hand there. The engine judges it under the competition's lock, with
 		// the write (engine.ErrRankOverrideNotLevel).
@@ -3237,7 +3237,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 	})
 
 	// POST /competitions/:id/pools/:poolId/tiebreak-round
-	// "Run another tie-breaker round" (decision F5, round-or-lots): a fresh
+	// "Run another tie-breaker round": a fresh
 	// round of ippon-shobu bouts among one run of an individual tie a finished
 	// tie-breaker round left level (a circle, A beat B, B beat C, C beat A).
 	// Body {playerIds}: the run, by participant id only, exactly as one entry

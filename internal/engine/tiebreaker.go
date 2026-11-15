@@ -216,7 +216,7 @@ type tieBreakVerdict struct {
 	// winner) left level that no further round has started for yet: a circle
 	// (A beat B, B beat C, C beat A), or any equal win count. Each is owed
 	// either another tie-breaker round among its members or the lots, both the
-	// operator's choice (decision F5, round-or-lots).
+	// operator's choice.
 	level [][]state.PlayerStanding
 	// runs partitions the group, in order, into the stretches the bouts fought
 	// so far left level: a member the bouts put clear of the rest is a run of
@@ -695,7 +695,7 @@ func tiebreakerPairKey(a, b string) string {
 // represented among them is skipped, which is what makes repeated injection
 // idempotent, and why it never starts a further round by itself: a round a
 // circle left level is the operator's to run (RunTiebreakerRound) or settle
-// by the lots (decision F5).
+// by the lots.
 //
 // Pairs are enumerated by INDEX over tiedGroup (i < j), never by comparing
 // display names. The prior `a.Player.Name >= b.Player.Name` skip assumed
@@ -1011,7 +1011,7 @@ func (e *Engine) InjectTiebreakerMatches(compID string) ([]state.MatchResult, er
 // memberIDs, the members of one of a pool's tied groups that a finished
 // tie-breaker round left level (tieBreakLeftLevel: a circle, A beat B, B beat
 // C, C beat A, or any equal win count). It is the operator's "Run another
-// tie-breaker round" (decision F5, round-or-lots): the injector never starts a
+// tie-breaker round": the injector never starts a
 // further round by itself, because drawing lots is the other way on and the
 // operator chooses between them. Every pair of the run gets a fresh bout,
 // numbered after the pool's last, which tieBreakRounds reads as the next
@@ -1135,22 +1135,44 @@ func (e *Engine) RunTiebreakerRound(compID, poolName string, memberIDs []string)
 	return injected, nil
 }
 
-// roundStillToFight reports whether a supplementary bout (-TB- or -DH-) between
-// two members of group, with at least one side in run (a stretch of group; the
-// whole group asks it of itself), is not finished yet (scheduled, running or
-// waiting on a barred side). While one is, the round is still being played: the
-// wins so far are partial, so they say neither who is level (no lots are owed to
-// a run with a bout still to fight, chusenOfRuns, and the lots a both-barred draw
-// is owed wait only for a bout of their own run, barredDrawRuns) nor which places
-// a run holds (markTiesOutOfBand judges the whole group). The wins so far split
-// the group into runs, so a bout still to fight can cross two of them and sit
-// wholly inside neither: it bears on both.
+// roundStillToFight reports whether a round of supplementary bouts (-TB- or
+// -DH-) among group that bears on run (a stretch of group; the whole group asks
+// it of itself) still has a bout not finished (scheduled, running or waiting on a
+// barred side). While one has, the round is still being played: the wins so far
+// are partial, so they say neither who is level (no lots are owed to a run with a
+// round to fight, chusenOfRuns, and the lots a both-barred draw is owed wait only
+// for a round of their own run, barredDrawRuns) nor which places a run holds
+// (markTiesOutOfBand judges the whole group). The wins so far split the players
+// of a round into runs, so a bout still to fight can cross two of them, or sit
+// among members of neither: any run holding a player of the round bears on it,
+// since the bout's winner can still move into it. The first round is played among
+// the whole group; a later round only among the run the one before left level, so
+// a run the earlier rounds already cut off (a pair that could not fight, a circle
+// beside it fighting again) is not held back by it.
 func roundStillToFight(run, group []state.PlayerStanding, matches []state.MatchResult) bool {
-	inRun, inGroup := groupMemberIDs(run), groupMemberIDs(group)
-	return slices.ContainsFunc(matches, func(m state.MatchResult) bool {
-		return state.IsPoolSupplementaryMatchID(m.ID) && m.Status != state.MatchStatusCompleted &&
-			inGroup[m.SideAID] && inGroup[m.SideBID] && (inRun[m.SideAID] || inRun[m.SideBID]) && m.SideAID != m.SideBID
-	})
+	inRun := groupMemberIDs(run)
+	for k, round := range tieBreakRounds(group, matches, state.IsPoolSupplementaryMatchID) {
+		inRound := groupMemberIDs(group)
+		unfinished := false
+		if k > 0 {
+			inRound = map[string]bool{}
+		}
+		for _, m := range round {
+			unfinished = unfinished || m.Status != state.MatchStatusCompleted
+			if k > 0 {
+				inRound[m.SideAID], inRound[m.SideBID] = true, true
+			}
+		}
+		if !unfinished {
+			continue
+		}
+		for id := range inRun {
+			if inRound[id] {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // groupMemberIDs returns the set of participant ids among a tied group's

@@ -1228,7 +1228,7 @@ func CanGenerateDraw(status CompetitionStatus) bool {
 // fixable (operator ruling: "Everything should be able to be fixed, in case
 // of a wrong entry"); what the new order does to the knockout is answered by
 // engine.OverridePoolRanks' requalification. A finished league's lots are
-// corrected in place (decision F2 (a)): the new order moves its table and
+// corrected in place: the new order moves its table and
 // podium at once and the league stays finished, since no match was written
 // and nothing is left to play. The one statement of this rule, shared by the
 // override-rank door and engine.ChusenStatus, so the chusen panel is never

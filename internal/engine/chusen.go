@@ -20,7 +20,7 @@ import (
 // chusen (drawing lots): the operator draws lots and records the order, which
 // persists as a per-pool rank override and lets the competition advance. An
 // individual group can be fought again instead (StillLevel, RunTiebreakerRound),
-// the operator's choice (decision F5).
+// the operator's choice.
 //
 // This is an INTERNAL engine type, not a wire DTO: the GET /chusen-candidates
 // handler builds its JSON response from a gin.H literal (a "teamNames" array),
@@ -159,7 +159,7 @@ func groupSettledByChusen(group []state.PlayerStanding, positions []int, allMatc
 // for a team one, InjectTiebreakerMatches for an individual one), so asking both
 // is the kind-aware question with no kind to pass. An individual group left
 // level has two ways on, another tie-breaker round (RunTiebreakerRound) or the
-// lots, both the operator's choice (decision F5); the lots are why it is asked
+// lots, both the operator's choice; the lots are why it is asked
 // here.
 func tieBreakerLeftTied(group []state.PlayerStanding, allMatches []state.MatchResult) bool {
 	return daihyosenLeftTied(group, allMatches) || len(tieBreakLeftLevel(group, allMatches)) > 0
@@ -454,12 +454,11 @@ func levelRuns(group []state.PlayerStanding, positions []int, matches []state.Ma
 // (drawnTiebreakOfBarredSides). A run (tieBreakRuns) of two or more that holds a
 // side of such a draw is never read into another round, so it is never reported
 // level (tieBreakLeftLevel): it owes its place to the lots the organiser draws
-// and enters on the chusen panel, the panel a circle uses (operator decision Q1,
-// round rule-3). A run with a bout of the group still to fight
+// and enters on the chusen panel, the panel a circle uses. A run with a bout of the group still to fight
 // (roundStillToFight) waits for it; a round the circle beside it runs does not
-// hold the lots back (round p4-review-3, R3). A circle among the group's other members, none of
+// hold the lots back. A circle among the group's other members, none of
 // whom sat in the draw, is reported level and offered another round or the lots,
-// the organiser's choice (round p4-review-3, R3), so it is not listed here. A
+// the organiser's choice, so it is not listed here. A
 // member the bouts put clear of the rest stands alone and owes nothing. The lots rank a run
 // alone, at the places it stands at: the fought bouts that put other members
 // clear of it stand, and the barred pair never decides a place the bouts already

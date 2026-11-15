@@ -1017,7 +1017,7 @@ export function courtBusyReopenWarning({ court, label }) {
     };
 }
 
-// The finished-league warning (design item 3, operator decision D2: warn
+// The finished-league warning (warn
 // first, then save). A correction of a finished league's result is answered
 // 409 {error: "league_finished", message, removedCourts} until it carries the
 // request-only confirmFinished; api_client.jsx parses it onto the thrown

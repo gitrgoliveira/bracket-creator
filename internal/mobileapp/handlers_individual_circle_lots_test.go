@@ -38,7 +38,7 @@ func seedIndividualCircle(t *testing.T, store *state.Store, compID string) {
 	require.NoError(t, store.SavePoolMatches(compID, matches))
 }
 
-// An individual tie a finished ippon-shobu round left level (decision F5):
+// An individual tie a finished ippon-shobu round left level:
 // GET .../chusen-candidates names it, with the run another round would fight
 // (stillLevel), and PUT .../override-rank takes the lots the operator chose.
 func TestOverrideRank_IndividualCircleTakesTheLots(t *testing.T) {
@@ -87,7 +87,7 @@ func TestOverrideRank_IndividualTieBeforeItsRoundIsRefused(t *testing.T) {
 	assert.Equal(t, "rank_override_not_level", refusal["code"])
 }
 
-// "Run another tie-breaker round" (decision F5): POST .../tiebreak-round adds a
+// "Run another tie-breaker round": POST .../tiebreak-round adds a
 // fresh bout for every pair of the run the chusen candidates name, answers
 // 201 with them, and a second tap (the round is no longer finished, so the
 // group is no longer left level) is a 400 with the sentence to show, adding

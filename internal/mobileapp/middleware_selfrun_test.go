@@ -277,7 +277,7 @@ func TestSelfRun_SelfRunMode_CompetitionConfigRoutes_RequireMainPassword(t *test
 		{http.MethodPost, "/api/competitions/some-id/league-tiebreak"},
 		{http.MethodDelete, "/api/competitions/some-id/league-tiebreak"},
 		// Another individual tie-breaker round over a tie a round left level
-		// is the organiser's choice, beside the lots (decision F5).
+		// is the organiser's choice, beside the lots.
 		{http.MethodPost, "/api/competitions/some-id/pools/Pool%20A/tiebreak-round"},
 		// The caller picks N, so an anonymous caller could make the server build large synthetic draws on demand.
 		{http.MethodGet, "/api/schedule/draft-estimate"},

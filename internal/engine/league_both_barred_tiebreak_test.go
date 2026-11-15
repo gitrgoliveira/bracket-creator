@@ -770,6 +770,28 @@ func TestIndividualLeague_ReinstatedSideOfABarredDrawIsOwedNoLotsBesideACircle(t
 	}
 }
 
+// A round the circle beside a both-barred draw runs does not hide the lots the
+// barred pair owes for its own places (round p4-review-3, R3: the circle may fight
+// another round, or draw lots). While the circle's round is scheduled the pair's
+// lots are still offered and accepted, and the circle owes none until it is fought.
+func TestIndividualLeague_CircleRoundBesideABarredDrawKeepsThePairsLots(t *testing.T) {
+	const compID = "ind-barred-pair-top-circle-round"
+	eng, store := barredDrawLeague(t, compID, true)
+
+	added, err := eng.RunTiebreakerRound(compID, "Pool A", []string{"ayu-id", "ben-id", "cal-id"})
+	require.NoError(t, err)
+	require.Len(t, added, 3, "the circle fights another round")
+
+	report, err := eng.ChusenStatus(compID)
+	require.NoError(t, err)
+	require.Len(t, report.Pending, 1, "the pair's lots stay offered; the circle about to fight owes none")
+	assert.Equal(t, 1, report.Pending[0].MinPosition)
+	assert.ElementsMatch(t, []string{"Dee", "Eli"}, chusenTeamNames(report.Pending[0]))
+
+	enterLots(t, eng, compID, []string{"eli-id", "dee-id"})
+	assert.Equal(t, PoolsMatchOpen, poolsVerdictNow(t, eng, store, compID), "the circle's round is still to fight")
+}
+
 // tiebreakBoutBetween is the id of the tie-break bout fought between two players.
 func tiebreakBoutBetween(t *testing.T, store *state.Store, compID, a, b string) string {
 	t.Helper()

@@ -465,6 +465,18 @@ func TestChusenOfRuns_AskedNoLotsForARunWhoseNextRoundIsScheduled(t *testing.T) 
 	}
 	owed, _ = chusenOfRuns(group, positions, matches, nil, inEveryBand)
 	assert.Equal(t, [][]string{{"d", "e", "f"}}, names(owed), "the trio about to fight owes no lots")
+
+	// Round 2 partly fought: a beat b and b beat c, so the wins so far split the
+	// trio into {a, b} (one each) and {c}, and the bout still to fight (a against
+	// c) lies inside neither run. Both runs still bear on it, so no lots are owed
+	// to the first trio yet.
+	matches = matches[:len(matches)-3]
+	matches = append(matches,
+		bout("a", "b", "a", state.MatchStatusCompleted),
+		bout("b", "c", "b", state.MatchStatusCompleted),
+		bout("a", "c", "", state.MatchStatusScheduled))
+	owed, _ = chusenOfRuns(group, positions, matches, nil, inEveryBand)
+	assert.Equal(t, [][]string{{"d", "e", "f"}}, names(owed), "a bout still to fight across two runs holds back the lots of both")
 }
 
 // TestGroupNeedsChusen_SameNameTeamsKeyOnIdentity pins the identity keying in

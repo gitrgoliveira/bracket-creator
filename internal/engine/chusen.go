@@ -94,9 +94,10 @@ type runBand func(positions []int, members []state.PlayerStanding) bool
 // side of a drawn ippon-shobu bout that can be fought again (fightableDrawnSides)
 // owes nothing even when a circle elsewhere in the group makes the group level:
 // the bout is the way on, so lots would settle it without anyone fighting. A run
-// whose next round is scheduled and not fought yet (roundStillToFight) owes
-// nothing either, even when another run of the group was left level: its members
-// are about to fight. Its lots, once recorded, stay listed.
+// with a bout of the group still to fight (roundStillToFight: a scheduled or
+// partly fought round; a bout crossing two runs bears on both) owes nothing
+// either, even when another run of the group was left level: its members are
+// about to fight. Its lots, once recorded, stay listed.
 func chusenOfRuns(group []state.PlayerStanding, positions []int, allMatches []state.MatchResult, statuses map[string]domain.CompetitorStatus, inBand runBand) (owed, recorded []levelRun) {
 	if !tieBreakerLeftTied(group, allMatches) {
 		return nil, nil
@@ -109,7 +110,7 @@ func chusenOfRuns(group []state.PlayerStanding, positions []int, allMatches []st
 		switch {
 		case chusenRecorded(run.members):
 			recorded = append(recorded, run)
-		case !holdsDrawnSide(run.members, fightable) && !roundStillToFight(run.members, allMatches):
+		case !holdsDrawnSide(run.members, fightable) && !roundStillToFight(run.members, group, allMatches):
 			owed = append(owed, run)
 		}
 	}
@@ -448,13 +449,15 @@ func levelRuns(group []state.PlayerStanding, positions []int, matches []state.Ma
 }
 
 // barredDrawRuns lists the runs of a league tie whose tie-breaker the bouts
-// cannot settle because two of its members could not fight: every tie-break bout
-// among the group's members is finished and at least one of them is a draw nobody
-// fought (drawnTiebreakOfBarredSides). A run (tieBreakRuns) of two or more that
-// holds a side of such a draw is never read into another round, so it is never
-// reported level (tieBreakLeftLevel): it owes its place to the lots the organiser
-// draws and enters on the chusen panel, the panel a circle uses (operator
-// decision Q1, round rule-3). A circle among the group's other members, none of
+// cannot settle because two of its members could not fight: at least one
+// tie-break bout among the group's members is a draw nobody fought
+// (drawnTiebreakOfBarredSides). A run (tieBreakRuns) of two or more that holds a
+// side of such a draw is never read into another round, so it is never reported
+// level (tieBreakLeftLevel): it owes its place to the lots the organiser draws
+// and enters on the chusen panel, the panel a circle uses (operator decision Q1,
+// round rule-3). A run with a bout of the group still to fight
+// (roundStillToFight) waits for it; a round the circle beside it runs does not
+// hold the lots back (round p4-review-3, R3). A circle among the group's other members, none of
 // whom sat in the draw, is reported level and offered another round or the lots,
 // the organiser's choice (round p4-review-3, R3), so it is not listed here. A
 // member the bouts put clear of the rest stands alone and owes nothing. The lots rank a run
@@ -477,16 +480,13 @@ func barredDrawRuns(group []state.PlayerStanding, positions []int, matches []sta
 		if !state.IsPoolSupplementaryMatchID(m.ID) || !ids[m.SideAID] || !ids[m.SideBID] || m.SideAID == m.SideBID {
 			continue
 		}
-		if m.Status != state.MatchStatusCompleted {
-			return nil
-		}
 		if drawnTiebreakOfBarredSides(m, statuses) {
 			drawnSide[m.SideAID], drawnSide[m.SideBID] = true, true
 		}
 	}
 	var out []levelRun
 	for _, run := range levelRuns(group, positions, matches, isTeam) {
-		if len(run.members) > 1 && holdsDrawnSide(run.members, drawnSide) {
+		if len(run.members) > 1 && holdsDrawnSide(run.members, drawnSide) && !roundStillToFight(run.members, group, matches) {
 			out = append(out, run)
 		}
 	}

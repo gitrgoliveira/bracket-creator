@@ -79,7 +79,10 @@ browser, `--debug` opens the inspector, and a failing test leaves a trace
                             (recordLots); a league as an earlier release
                             saved it, through a backup rewritten and restored
                             as a copy (backUpCompetition, rewriteBackup,
-                            withFrontMatterLine, restoreAsCopy)
+                            withFrontMatterLine, restoreAsCopy); the phone
+                            width checks (expectNoSidewaysScroll, which can
+                            run the caller's own check at each width) and a
+                            control's line count (labelLines)
     fixtures/shiaijo.mjs    /admin/shiaijo/:court (queue, inline editor, which
                             match an editor holds)
     fixtures/scores.mjs     the Scores tab and its overlay editor
@@ -183,7 +186,9 @@ browser, `--debug` opens the inspector, and a failing test leaves a trace
                                   the settings copy
       league-individual           individual league: an ippon-shobu
                                   tie-breaker added by itself for a tie at
-                                  1st-3rd, a cycle twice then lots, a
+                                  1st-3rd, a cycle twice then lots (its
+                                  notice at 320, 375 and 414 px: no
+                                  sideways scroll, one-line buttons), a
                                   tie-breaker that needs a winner (encho,
                                   hantei), joint 3rd on and off, a tie at 4th
                                   shared, a league saved with Top 4, a tie at
@@ -459,16 +464,17 @@ Three fixture helpers in `fixtures/scoring.mjs` replace reading the old sync pil
 - `running(page, root)` waits until the score editor is visible and holds a
   running bout (no PRE-MATCH or CORRECTION head pill).
 
-`page.waitForTimeout` stays in a few places, each marked `Deliberate:` or
-named for what it is (a wait for something expected to ARRIVE polls for it
-instead, with `expect.poll` or the league journeys' `deskWhen`, which end as
-soon as it shows and keep their window only when nothing came): the dwell of a tap's pace (above); the time away of an
+`page.waitForTimeout` stays for four reasons, each marked `Deliberate:` or
+named for what it is: the dwell of a tap's pace (above); the time away of an
 `interrupt` (`awayMs`) and the operator's own delay a journey names ("3 s
 later", "300 ms after Finish"); and a NEGATIVE, where the journey asserts that
 nothing happens (no second bout appended by a bounced tap, no start after a
 decision, a taken-back mark staying taken back after a late echo). An absence
 has no state to wait for, so the time is the evidence, and a single read
-straight after the action would pass whatever came later.
+straight after the action would pass whatever came later. A wait for something
+expected to ARRIVE polls for it instead, with `expect.poll` or the league
+journeys' `deskWhen`: both end as soon as it shows and use their whole window
+only when nothing comes.
 
 ## The console policy
 

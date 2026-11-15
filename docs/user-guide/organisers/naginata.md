@@ -159,18 +159,19 @@ Refer to [Recording decisions](../court-operators/recording-decisions.md#individ
 Name order never decides a place that counts.
 
 Quick-score, kiken, fusenpai, and daihyosen stay off for Engi, so a tie-break
-bout is always scored by flags. Engi has no withdrawals, so the case where both
-sides of a tie-break withdrew earlier does not arise.
+bout is always scored by flags. With kiken and fusenpai off, the app records no
+withdrawal for an Engi pair, so a tie-break whose two sides both withdrew does
+not arise.
 
 ### Swiss standings
 
-Swiss does not follow the tie rule yet. A Swiss ranking still tied after wins and
+Swiss does not follow the tie rule. A Swiss ranking still tied after wins and
 flags is settled by:
 
 1. Head-to-head: when two pairs are tied on wins and flags, the pair that won
    their direct bout ranks higher.
-2. Name order (alphabetical by the pair's first listed member), when the first
-   three criteria are all equal.
+2. Name order (alphabetical by the pair's first listed member), when wins,
+   flags and head-to-head are all equal.
 
 ![Engi Swiss standings: a winner banner above a final standings table with rank, pair, victories (V), and flags columns, with a caption ranking by wins, then total flags, then head-to-head.](../../screenshots/swiss-standings-engi.png)
 

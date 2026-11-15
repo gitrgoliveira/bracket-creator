@@ -44,7 +44,7 @@ League is a full round-robin: every competitor meets every other competitor. Fin
 
 Use league for small fields (typically eight or fewer competitors) where you want standings that reflect the complete head-to-head record rather than a single bracket run.
 
-Only 3rd place can be shared in a league. A tie for 1st or 2nd place is settled by a tie-breaker that must have a winner (encho, then hantei; lots, entered by you, only for a cycle the bouts cannot separate or when both sides of a tie-breaker withdrew earlier). A tie for 3rd place follows the **Award two joint 3rd places** setting, and a tie for 4th place or lower shares its place. Refer to [Ties in a league](team-tournaments.md#ties-in-a-league).
+Of the podium places in a league, only 3rd can be shared. A tie for 1st or 2nd place is settled by a tie-breaker that must have a winner, by encho and then hantei if it is level. Lots, which you draw and enter, settle it only when the bouts cannot: a round that goes in a circle, or a tie-breaker whose two sides both withdrew earlier. A tie for 3rd place follows the **Award two joint 3rd places** setting, and a tie for 4th place or lower shares its place. Refer to [Ties in a league](team-tournaments.md#ties-in-a-league).
 
 ## Swiss
 
@@ -63,7 +63,7 @@ Before play begins, set the number of rounds in the competition settings. You ca
 
 2. **Record match results.** Scorers enter results in the tournament app. All matches in the current round must be completed before you can advance.
 
-3. **Review the standings.** Standings update in real time and are ranked by wins, then the scoring detail for the competition kind (points scored for individual, the full [team tie-break chain](team-tournaments.md#team-standings-and-tie-breaks) for teams, accumulated flags for [Engi](naginata.md#standings)), then head-to-head, then name order. Swiss does not follow the league tie rule yet: it never schedules a tie-break bout. The standings page is public and visible to competitors and spectators.
+3. **Review the standings.** Standings update in real time and are ranked by wins, then the scoring detail for the competition kind (points scored for individual, the full [team tie-break chain](team-tournaments.md#team-standings-and-tie-breaks) for teams, accumulated flags for [Engi](naginata.md#standings)), then head-to-head, then name order. Swiss does not follow the league tie rule: it never schedules a tie-break bout. The standings page is public and visible to competitors and spectators.
 
 4. **Generate the next round.** Once all matches in the current round are complete, use the admin panel to generate the next round's pairings. The app refuses to generate a round while any match in the current round is unfinished, and it stops after the last round you set.
 

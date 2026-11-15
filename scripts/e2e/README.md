@@ -472,8 +472,8 @@ nothing happens (no second bout appended by a bounced tap, no start after a
 decision, a taken-back mark staying taken back after a late echo). An absence
 has no state to wait for, so the time is the evidence, and a single read
 straight after the action would pass whatever came later. A wait for something
-expected to ARRIVE polls for it instead, with `expect.poll` or the league
-journeys' `deskWhen`: both end as soon as it shows and use their whole window
+expected to ARRIVE polls for it instead, with `expect.poll` or the league-individual
+journey's `deskWhen`: both end as soon as it shows and use their whole window
 only when nothing comes.
 
 ## The console policy

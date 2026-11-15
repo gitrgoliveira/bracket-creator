@@ -223,7 +223,7 @@ name order as the final deterministic fallback.
 ![Team Swiss standings: a table with rank, team, and the full tie-break columns W, L, T, IV, IL, IT, PW, and PL, with a caption ranking by team wins, then IV, then PW, then head-to-head.](../../screenshots/swiss-standings-team.png)
 
 !!! note
-    When two or more teams remain tied after all eight criteria and the tie is consequential (it decides who advances or how they are seeded), the next step depends on format:
+    When two or more teams remain tied after all eight criteria and the tie is consequential (in pools, it decides who advances or how they are seeded; in a league, it is at a place that cannot be shared), the next step depends on format:
 
     - **Pools + Knockout**: the app schedules a daihyosen automatically to break the tie.
     - **League**: a tie for 1st or 2nd place always needs a tie-breaker with a winner. Once every regular league match is finished, run a daihyosen among the tied teams from the League tab. [Ties in a league](#ties-in-a-league) says which places are asked about.

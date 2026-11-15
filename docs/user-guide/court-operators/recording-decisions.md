@@ -34,13 +34,13 @@ When a kiken, fusenpai, or fusensho decides a regular team match, every bout tha
 
 ## Hikiwake
 
-A hikiwake is a draw. It applies in pool, league, and Swiss matches, and in the individual bouts of a team encounter in any phase. A knockout match itself cannot end in a draw. A hikiwake contributes to the standings separately from wins and losses. To record one, tap **Mark draw** between the two sides in the score editor; in a team encounter, tap **Tie (hikiwake)** on the bout's row.
+A hikiwake is a draw. It applies in pool, league, and Swiss matches (except a league tie-breaker, which needs a winner), and in the individual bouts of a team encounter in any phase. A knockout match itself cannot end in a draw. A hikiwake contributes to the standings separately from wins and losses. To record one, tap **Mark draw** between the two sides in the score editor; in a team encounter, tap **Tie (hikiwake)** on the bout's row.
 
 ## Encho (overtime)
 
 Encho is the extra period played when a match is level at the end of regulation and must still produce a winner. That is usually a knockout match, but an individual pool match can also go to encho when the tournament's rules call for it. A team pool encounter is not extended: a tie there is a draw, and teams still level on the pool standings play a daihyosen instead. Encho follows ippon-shobu rules: the first competitor to score wins.
 
-An individual knockout match cannot be finished level. While the score is tied, the **Finish** button reads **Needs a winner** instead: fight encho, then record a hantei if the competitors are still level after it.
+An individual knockout match cannot be finished level. While the score is tied, the **Finish** button reads **Needs a winner** instead: fight encho, then record a hantei if the competitors are still level after it. A league tie-breaker cannot be finished level either; refer to [Ties in a league](../organisers/team-tournaments.md#ties-in-a-league).
 
 To record a hantei, tap **Decide by hantei** and pick the winning side. Each button names the side's colour and competitor, for example **SHIRO (White) wins: Tanaka** and **AKA (Red) wins: Yamada**. Then finish the match as usual: **Finish** (on the court console, **Finish + Start Next**, or plain **Finish** when no later match of this competition is waiting on the court) and tap it again to confirm, or **Save correction** when you are correcting a result. Picking a side on its own records nothing, so a slip of the thumb between the two buttons can be put right before anything is saved.
 
@@ -61,7 +61,8 @@ A daihyosen is a representative bout used to break a tie when points and ranking
 It applies in two situations:
 
 - In the knockout phase, when a team encounter finishes level.
-- In team pool or league play, when two teams finish equal on every ranking criterion and the tie decides who advances or how they are seeded.
+- In team pool play, when two teams finish equal on every ranking criterion and the tie decides who advances or how they are seeded.
+- In team league play, when two teams finish equal on every ranking criterion at a place that cannot be shared.
 
 In a pool, a tie that does not affect advancement or seeding is left as a shared rank with no extra bout. In a league, a tie for 1st or 2nd place always gets a daihyosen, and so does a tie for 3rd place when joint 3rd places are off. Any other tie shares its place: 3rd place when joint 3rd places are on, and 4th place or lower. In a team league the operator starts the daihyosen from the League tab; refer to [Ties in a league](../organisers/team-tournaments.md#ties-in-a-league).
 

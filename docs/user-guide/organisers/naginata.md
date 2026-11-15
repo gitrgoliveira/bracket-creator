@@ -139,7 +139,7 @@ A pair that loses by three flags to two still keeps its two flags.
 
 ### Ties between pairs
 
-Engi pools and leagues follow the same tie rule as every other competition. Two
+Engi pools and leagues follow the same tie rule as kendo pools and leagues. Two
 pairs that are level on wins and on flags are tied, and the tie rule says which
 ties get a tie-break bout:
 
@@ -153,7 +153,7 @@ ties get a tie-break bout:
 The tie-break bout opens in the same flag editor as any Engi bout, and the pair
 with more flags wins it. Because a bout's flags always total 1, 3, or 5, a
 tie-break between two pairs can never end level. If three or more pairs are
-level and the round goes in a circle, the Pools tab offers another round or lots,
+level and the round goes in a circle, the Pools tab (League in a league) offers another round or lots,
 exactly as for kendo competitors, and the lots are drawn and entered by you.
 Refer to [Recording decisions](../court-operators/recording-decisions.md#individual-competitors-another-round-or-lots).
 Name order never decides a place that counts.

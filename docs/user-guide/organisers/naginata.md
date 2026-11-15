@@ -145,7 +145,8 @@ ties get a tie-break bout:
 
 - **League**: a tie for 1st or 2nd place always gets a tie-break bout. A tie for
   3rd place gets one only when **Award two joint 3rd places** is off; with it on
-  (the kendo default) the pairs share 3rd. A tie for 4th place or lower shares
+  the pairs share 3rd. Ticking **Naginata competition** turns it off, and a
+  kata division usually has that box ticked. A tie for 4th place or lower shares
   its place.
 - **Pools**: a tie gets a bout only when it decides who goes through or where
   the pairs are seated. Any other tie shares its place.

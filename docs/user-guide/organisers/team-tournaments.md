@@ -228,7 +228,7 @@ name order as the final deterministic fallback.
     - **Pools + Knockout**: the app schedules a daihyosen automatically to break the tie.
     - **League**: a tie for 1st or 2nd place always needs a tie-breaker with a winner. Once every regular league match is finished, run a daihyosen among the tied teams from the League tab. [Ties in a league](#ties-in-a-league) says which places are asked about.
 
-    A tie that does not affect advancement is left as a shared rank with no extra bout. If a daihyosen still cannot separate the teams, it goes to chusen (drawing lots). Refer to [Recording decisions](../court-operators/recording-decisions.md) for the procedures for both.
+    Any other tie is left as a shared rank with no extra bout. If a daihyosen still cannot separate the teams, it goes to chusen (drawing lots). Refer to [Recording decisions](../court-operators/recording-decisions.md) for the procedures for both.
 
 ### Ties in a league
 
@@ -253,7 +253,7 @@ Once the tie-breaker is run, it joins the shiaijo's queue like any other match. 
 
 The league finishes once every tie at a place that cannot be shared has a winner.
 
-**A tie-breaker needs a winner.** A league tie-breaker bout cannot be saved as a draw. If you try, the app refuses with "A tie-breaker needs a winner: continue with encho, then decide by hantei." Record encho while the bout is level, and if it is still level afterwards, tap **Decide by hantei** and pick the winning side. Refer to [Recording decisions](../court-operators/recording-decisions.md#encho-overtime). A tie-breaker already on record as a draw holds the league until it has a winner: the League tab shows a notice naming the bout, with **Open bout** to decide it by encho or hantei, and **Fight it again** to play it again.
+**A tie-breaker needs a winner.** A league tie-breaker bout cannot be saved as a draw: **Mark draw** is turned off on it, and the editor says why: "A tie-breaker needs a winner: fight encho, then decide by hantei". Record encho while the bout is level, and if it is still level afterwards, tap **Decide by hantei** and pick the winning side. Refer to [Recording decisions](../court-operators/recording-decisions.md#encho-overtime). A tie-breaker already on record as a draw holds the league until it has a winner: the League tab shows a notice naming the bout, with **Open bout** to decide it by encho or hantei, and **Fight it again** to play it again.
 
 **Lots are the exception, and they are yours to run.** Chusen (drawing lots) is offered in two cases only. The first is a tie-breaker round that has been fought with the teams still level, for example a cycle in which A beat B, B beat C and C beat A. The second is a tie-breaker that cannot be fought because both teams withdrew earlier: the match reads "Both withdrew earlier: neither can fight this match.", and **Record as drawn (neither can fight)** records it as a draw that nobody fought. The place it was for then goes to lots. In both cases the app never draws the lots or ranks the teams itself: you draw them offline and enter the order in the **Chusen (drawing lots) required** panel. Refer to [Recording decisions](../court-operators/recording-decisions.md#chusen-drawing-lots). The league finishes once the lots are entered, and a recorded order can still be changed with **Change** after the league has finished, with the table and podium following it at once.
 

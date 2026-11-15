@@ -213,10 +213,10 @@ func TestReopenDrawnDaihyosen_RuledByChusenNeedsAConfirm(t *testing.T) {
 	_, err = eng.ReopenMatch(compID, dhID, "")
 	var replaced *LotsReplacedError
 	require.ErrorAs(t, err, &replaced)
-	assert.Contains(t, replaced.Error(), "This replaces the lots you entered for 1st: ")
 	// Three teams: one bout's result cannot decide the places, so the sentence
-	// does not promise it.
-	assert.Contains(t, replaced.Error(), "Your lots still decide the places until every bout of this tie-break has a result that puts them in order.")
+	// does not promise it, nor say the lots are replaced outright.
+	assert.Contains(t, replaced.Error(), "This replaces the lots you entered for 1st (")
+	assert.Contains(t, replaced.Error(), "The lots keep ordering the ones it leaves level.")
 	assert.NotContains(t, replaced.Error(), "The bout's result will decide the place.")
 
 	matches, err := store.LoadPoolMatches(compID)

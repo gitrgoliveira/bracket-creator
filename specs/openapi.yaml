@@ -372,7 +372,7 @@ paths:
           tie-breaker was auto-injected, or the pool phase resolved into the
           knockout (fully or partially), or the competition is blocked
           awaiting an operator-run league tie-break; or a league tie-break
-          group was generated, deleted, or finalized. Note a court
+          group was generated or deleted. Note a court
           reassignment emits `match_updated`, not this event, and so does
           adding or removing a daihyosen bout (it can still indirectly
           trigger one of the pool-phase outcomes above via the same
@@ -2592,6 +2592,13 @@ paths:
         fresh empty overrides file WITHOUT first parsing the corrupt one, so
         it always succeeds regardless of what the file currently contains.
 
+        Clearing the lots of a finished league can put it back into match
+        play (when the lots alone ordered a circle or a tie the bouts left
+        level). That is warned about first, like every result door of a
+        finished league: the answer is `409 league_finished` and nothing is
+        cleared until the request carries `confirmFinished: true`. A league
+        the reset leaves finished is cleared without it.
+
         In self-run mode this is an organiser action: it needs
         `X-Tournament-Password`.
       security:
@@ -2607,9 +2614,37 @@ paths:
               properties:
                 writeId:
                   $ref: '#/components/schemas/ArrivalWriteId'
+                confirmFinished:
+                  type: boolean
+                  description: |
+                    Request-only (never stored): the organiser's confirmation
+                    that clearing the lots may put a finished league back
+                    into match play.
       responses:
         '204':
           description: Overrides reset, or a writeId this door already applied answered as recorded (nothing reset).
+        '409':
+          description: |
+            `error: league_finished`: the competition is a finished league
+            the lots alone settled, and clearing them puts it back into match
+            play. Nothing is cleared. Extra fields: `message`,
+            `removedCourts` (the shiaijo the league's matches stand on that
+            the tournament no longer has). Retry with `confirmFinished: true`.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error]
+                properties:
+                  error:
+                    type: string
+                    enum: [league_finished]
+                  message:
+                    type: string
+                  removedCourts:
+                    type: array
+                    items:
+                      type: string
 
 
   /api/competitions/{id}/awards:
@@ -10110,7 +10145,8 @@ components:
           description: >
             Which stretch of its tied group the fought tie-breaker bouts left
             level this row in, counted from 0. Rows of one group with the same
-            value are still level; a lower value finished ahead. Lots rank one
+            value are still level; a lower value finished ahead, and the order
+            lots give never moves a row out of its stretch. Lots rank one
             such stretch at a time, so a drawn tie-break or daihyosen bout is
             judged on the stretch holding both its sides. Omitted when 0.
 

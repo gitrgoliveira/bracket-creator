@@ -474,7 +474,7 @@ describe('ViewerOverview league standings (mp-ldnr)', () => {
   });
 });
 
-// N2a: a league table gives an accepted shared group (and a level group below
+// N2a: a league table gives a shared group (and a level group below
 // the band) its best place, 1, 1, 3, but the Awards podium stays as it was:
 // one finisher per place in table order, the kendo joint 3rd (the joint-3rd
 // setting on, every row ranked 3) its one shared place.
@@ -490,13 +490,13 @@ describe('league Awards podium with shared table ranks (N2a)', () => {
   const places = (list, comp) =>
     deriveAwards(null, { League: list }, pools, new Map(), comp).map(p => [p.place, p.name]);
 
-  it('an accepted shared 1st reads 1st, 2nd, 3rd on the podium in table order', () => {
+  it('a shared 1st reads 1st, 2nd, 3rd on the podium in table order', () => {
     const list = [row(1, 'A'), row(1, 'B'), row(3, 'C'), row(4, 'D')];
     expect(places(list, { format: 'league', twoThirdPlaces: true })).toEqual([[1, 'A'], [2, 'B'], [3, 'C']]);
     expect(places(list, { format: 'league', twoThirdPlaces: false })).toEqual([[1, 'A'], [2, 'B'], [3, 'C']]);
   });
 
-  it('an accepted shared 2nd keeps a single 2nd and a single 3rd', () => {
+  it('a shared 2nd keeps a single 2nd and a single 3rd', () => {
     const list = [row(1, 'A'), row(2, 'B'), row(2, 'C'), row(2, 'D')];
     expect(places(list, { format: 'league', twoThirdPlaces: true })).toEqual([[1, 'A'], [2, 'B'], [3, 'C']]);
   });

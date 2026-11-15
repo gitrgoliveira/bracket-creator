@@ -4851,12 +4851,38 @@ func TestDeleteOverrides_ReopensALeagueTheLotsHadSettled(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, state.CompStatusComplete, comp.Status, "the lots finish the league")
 
+	// Reopening the league is warned about first, like every result door: nothing
+	// is cleared until the request confirms.
 	w := sendJSON(t, r, http.MethodDelete, "/api/competitions/"+compID+"/overrides", nil)
+	require.Equal(t, http.StatusConflict, w.Code, w.Body.String())
+	var refusal map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &refusal))
+	assert.Equal(t, "league_finished", refusal["error"])
+	assert.Equal(t, LeagueFinishedLotsMessage, refusal["message"])
+	comp, err = store.LoadCompetition(compID)
+	require.NoError(t, err)
+	assert.Equal(t, state.CompStatusComplete, comp.Status, "the warning leaves the league finished")
+	ranks, err := store.LoadPoolRanks(compID)
+	require.NoError(t, err)
+	assert.NotEmpty(t, ranks, "and the lots stand")
+
+	w = sendJSON(t, r, http.MethodDelete, "/api/competitions/"+compID+"/overrides", map[string]any{"confirmFinished": true})
 	require.Equal(t, http.StatusNoContent, w.Code, w.Body.String())
 
 	comp, err = store.LoadCompetition(compID)
 	require.NoError(t, err)
 	assert.Equal(t, state.CompStatusPools, comp.Status, "without the lots the tie is undecided again, so the league is back in play")
+}
+
+// Clearing lots from a league that has not finished needs no confirmation:
+// there is nothing to put back into match play.
+func TestDeleteOverrides_NothingToWarnAboutBeforeTheLeagueFinishes(t *testing.T) {
+	r, store, eng, _, _ := setupTestRouter(t)
+	compID := "chusen-league-delete-lots-moot"
+	seedChusenCycle(t, store, eng, compID)
+
+	w := sendJSON(t, r, http.MethodDelete, "/api/competitions/"+compID+"/overrides", nil)
+	require.Equal(t, http.StatusNoContent, w.Code, w.Body.String(), "no lots recorded: nothing to warn about")
 }
 
 // TestDeleteOverrides_ReopensALeagueWhoseDecisiveCircleOnlyTheLotsOrdered: the
@@ -4877,7 +4903,7 @@ func TestDeleteOverrides_ReopensALeagueWhoseDecisiveCircleOnlyTheLotsOrdered(t *
 	require.NoError(t, err)
 	require.Equal(t, state.CompStatusComplete, comp.Status, "the lots finish the league")
 
-	w := sendJSON(t, r, http.MethodDelete, "/api/competitions/"+compID+"/overrides", nil)
+	w := sendJSON(t, r, http.MethodDelete, "/api/competitions/"+compID+"/overrides", map[string]any{"confirmFinished": true})
 	require.Equal(t, http.StatusNoContent, w.Code, w.Body.String())
 
 	comp, err = store.LoadCompetition(compID)

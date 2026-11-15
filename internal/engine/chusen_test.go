@@ -12,6 +12,9 @@ import (
 	bctest "github.com/gitrgoliveira/bracket-creator/internal/test/idstamp"
 )
 
+// inEveryBand is a runBand that holds every run in the band a tie is broken in.
+func inEveryBand([]int, []state.PlayerStanding) bool { return true }
+
 // TestChusenCandidates_CycleNeedsChusen: three teams tied on every criterion play
 // a daihyosen round-robin that ends in a perfect cycle (Alpha>Beta, Beta>Gamma,
 // Gamma>Alpha, one win each). The order is undetermined, so the group surfaces as
@@ -440,7 +443,7 @@ func TestGroupNeedsChusen_SameNameTeamsKeyOnIdentity(t *testing.T) {
 		dh(2, "id-b", "Tora", "id-c", "Kuma", "id-b", "Tora"), // Osaka beats Kuma
 	}
 	// Strict 2/1/0 order: Tokyo 2, Osaka 1, Kuma 0.
-	assert.False(t, groupNeedsChusen(group, matches),
+	assert.False(t, groupNeedsChusen(group, []int{0, 1, 2}, matches, inEveryBand),
 		"a decided daihyosen order must not need a chusen just because two teams share a name")
 }
 

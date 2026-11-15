@@ -466,3 +466,25 @@ func (e *Engine) reopenFinishedLeagueIfOpen(compID string) (bool, error) {
 		return comp, nil
 	})
 }
+
+// withoutLots is a transaction that reads no recorded pool ranks, so the
+// standings and the verdicts built on them are judged as if the lots had been
+// cleared (LotsResetReopensLeague). Everything else reads through.
+type withoutLots struct{ state.StoreTx }
+
+func (withoutLots) LoadPoolRanks(string) (map[string]map[string]int, error) { return nil, nil }
+
+// LotsResetReopensLeague reports whether clearing every recorded lot would put
+// the finished league compID back into match play (reopenFinishedLeagueIfOpen
+// asks the same PoolsSettledNow, once the lots are gone): the lots alone ordered
+// a decisive circle, or a tie the bouts left level. The organiser's reset is
+// warned about first when it does. It writes nothing; false for any competition
+// that is not a finished league.
+func (e *Engine) LotsResetReopensLeague(tx state.StoreTx, compID string) (bool, error) {
+	comp, err := tx.LoadCompetition(compID)
+	if err != nil || comp == nil || comp.Format != state.CompFormatLeague || comp.Status != state.CompStatusComplete {
+		return false, err
+	}
+	verdict, err := e.PoolsSettledNow(withoutLots{tx}, compID)
+	return verdict != PoolsSettled, err
+}

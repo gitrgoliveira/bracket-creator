@@ -2121,6 +2121,9 @@ const LeagueFinishedMessage = "This league has finished. Changing this result ca
 // their court (the engine's reopenLeagueTx), and the confirm says so.
 type leagueFinishedRefusal struct {
 	removedCourts []string
+	// message replaces LeagueFinishedMessage when the write is not a result's
+	// (the reset of the lots, LeagueFinishedLotsMessage).
+	message string
 }
 
 func (r *leagueFinishedRefusal) Error() string { return leagueFinishedCode }
@@ -2131,8 +2134,16 @@ func (r *leagueFinishedRefusal) body() gin.H {
 	if courts == nil {
 		courts = []string{}
 	}
-	return gin.H{"error": leagueFinishedCode, "message": LeagueFinishedMessage, "removedCourts": courts}
+	message := r.message
+	if message == "" {
+		message = LeagueFinishedMessage
+	}
+	return gin.H{"error": leagueFinishedCode, "message": message, "removedCourts": courts}
 }
+
+// LeagueFinishedLotsMessage is the refusal's sentence for clearing the lots of a
+// finished league whose places they alone decided.
+const LeagueFinishedLotsMessage = "This league has finished on the lots you entered. Clearing them puts the league back into match play, so they were not cleared: clear them again and confirm the change."
 
 // refuseFinishedLeagueCorrection is the ONE check every result door asks (PUT
 // /score, quick-score, bulk-score, POST /decision, and the reopen doors): a
@@ -2226,6 +2237,37 @@ func refuseFinishedLeagueReopen(txr CompetitionTransactor, tl TournamentLoader, 
 				break
 			}
 		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	return refusal
+}
+
+// refuseFinishedLeagueLotsReset is the lots reset's ask of the same check
+// (refuseFinishedLeagueCorrection): clearing the lots of a finished league that
+// they alone decided puts the league back into match play, so it is warned
+// about first (engine.LotsResetReopensLeague, a dry run that writes nothing),
+// unless the request carries the confirmation. A league the reset leaves
+// finished, and any other competition, is cleared as before. Like
+// refuseFinishedLeagueReopen it runs in a transaction of its own: a league that
+// finishes between the check and the reset is cleared without the warning.
+func refuseFinishedLeagueLotsReset(store *state.Store, eng *engine.Engine, compID string, confirmed bool) error {
+	if confirmed {
+		return nil
+	}
+	var refusal error
+	err := store.WithTransaction(compID, func(stx state.StoreTx) error {
+		reopens, err := eng.LotsResetReopensLeague(stx, compID)
+		if err != nil || !reopens {
+			return err
+		}
+		courts, err := leagueRemovedCourts(stx, store, compID)
+		if err != nil {
+			return err
+		}
+		refusal = &leagueFinishedRefusal{removedCourts: courts, message: LeagueFinishedLotsMessage}
 		return nil
 	})
 	if err != nil {

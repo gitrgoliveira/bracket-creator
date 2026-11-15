@@ -94,6 +94,33 @@ func bindOptionalWriteTag(c *gin.Context) (writeTag, bool) {
 	return tag, true
 }
 
+// overridesReset is the optional body of DELETE /competitions/:id/overrides: the
+// write's id and the request-only confirmFinished, the organiser's confirmation
+// that clearing the lots may put a finished league back into match play (never
+// stored; the same flag every result door of a finished league takes).
+type overridesReset struct {
+	writeTag
+	ConfirmFinished bool `json:"confirmFinished"`
+}
+
+// bindOptionalOverridesReset reads that body: an empty one is the one-tap shape.
+// It answers 400 itself for a malformed body or tag.
+func bindOptionalOverridesReset(c *gin.Context) (overridesReset, bool) {
+	var body overridesReset
+	if c.Request.Body == nil || c.Request.Body == http.NoBody {
+		return body, true
+	}
+	if err := c.ShouldBindJSON(&body); err != nil && !errors.Is(err, io.EOF) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return overridesReset{}, false
+	}
+	if err := body.validateTag(); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return overridesReset{}, false
+	}
+	return body, true
+}
+
 // lineupRemoval is the optional body of a lineup removal (DELETE
 // match-lineups/:matchId and lineups/:round): the write's id (a late
 // duplicate is answered as recorded, Y8) and when the removal was made

@@ -2209,30 +2209,40 @@ func (e *Engine) computeStandingsFrom(loader poolStandingsLoader, compId string)
 // scale as a recorded rank; a key both hold is resolved rank-first, then by the
 // order the rows were in. The key travels with its row through the sort, so two
 // id-less namesakes cannot read each other's position (bc-idfx).
+//
+// The order is kept within each run the fought bouts left level (TieRun, stamped
+// by markTieRuns): the lots rank a run alone, so a competitor the bouts put
+// clear of it keeps the place they gave.
 func applyPoolRanksInForce(sorted []state.PlayerStanding, inForce map[string]int) {
+	type keyed struct {
+		standing state.PlayerStanding
+		key      int
+		ranked   bool
+	}
 	for _, positions := range detectPoolTies(sorted) {
-		i, j := positions[0], positions[len(positions)-1]+1
-		type keyed struct {
-			standing state.PlayerStanding
-			key      int
-			ranked   bool
-		}
-		group := make([]keyed, 0, j-i)
-		for k := i; k < j; k++ {
-			r, ok := lookupPoolRankOverride(inForce, sorted[k].Player.ID)
-			if !ok {
-				r = k + 1
+		for start := positions[0]; start <= positions[len(positions)-1]; {
+			end := start + 1
+			for end <= positions[len(positions)-1] && sorted[end].TieRun == sorted[start].TieRun {
+				end++
 			}
-			group = append(group, keyed{standing: sorted[k], key: r, ranked: ok})
-		}
-		sort.SliceStable(group, func(a, b int) bool {
-			if group[a].key != group[b].key {
-				return group[a].key < group[b].key
+			run := make([]keyed, 0, end-start)
+			for k := start; k < end; k++ {
+				r, ok := lookupPoolRankOverride(inForce, sorted[k].Player.ID)
+				if !ok {
+					r = k + 1
+				}
+				run = append(run, keyed{standing: sorted[k], key: r, ranked: ok})
 			}
-			return group[a].ranked && !group[b].ranked
-		})
-		for k, g := range group {
-			sorted[i+k] = g.standing
+			sort.SliceStable(run, func(a, b int) bool {
+				if run[a].key != run[b].key {
+					return run[a].key < run[b].key
+				}
+				return run[a].ranked && !run[b].ranked
+			})
+			for k, g := range run {
+				sorted[start+k] = g.standing
+			}
+			start = end
 		}
 	}
 }

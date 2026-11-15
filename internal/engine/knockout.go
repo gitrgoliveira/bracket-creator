@@ -112,7 +112,7 @@ func (e *Engine) poolCompletion(loader poolStandingsLoader, compID string, comp 
 	// representative bout (poolMatchSettled), and the cycle check below reads the
 	// same standings: compute them once.
 	standings = sync.OnceValues(standings)
-	lots, err := loadPoolLots(matches, standings, func() (map[string]domain.CompetitorStatus, error) {
+	lots, err := loadPoolLots(false, matches, standings, func() (map[string]domain.CompetitorStatus, error) {
 		return loader.LoadCompetitorStatus(compID)
 	})
 	if err != nil {

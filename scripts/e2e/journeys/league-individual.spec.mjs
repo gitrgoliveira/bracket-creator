@@ -748,8 +748,13 @@ test.describe('league-individual', () => {
       expect(await upNextCard(page).count(), 'a bout neither side can fight is never Up next').toBe(0);
       expect(court1.running).toBe(false);
       await expect(notice.getByRole('button', { name: TEXT.recordDrawn })).toBeVisible();
-      record({ step: 'court', action: 'before Record as drawn',
-        screenshot: await shot(page, `${flow}-console-before-finish`, { fullPage: true }) });
+      // This bout never runs (neither side can fight it), so the flow has no
+      // "-running" shot: the operator goes from the queue to Record as drawn.
+      // The shot before that tap is the viewport on the barred row with the
+      // button in view, not the full-page queue the up-next shot already holds.
+      await notice.scrollIntoViewIfNeeded();
+      record({ step: 'court', action: 'before Record as drawn (the bout never runs)',
+        screenshot: await shot(page, `${flow}-console-before-finish`) });
       await notice.getByRole('button', { name: TEXT.recordDrawn }).tap();
       await expect(completedRowFor(page, { shiro: desk.numberedRows.at(-1).shiro, aka: desk.numberedRows.at(-1).aka })).toBeVisible();
       record({ step: 'court', action: 'after Record as drawn', ...(await readCourt(page)),

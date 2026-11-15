@@ -1031,7 +1031,7 @@ export const LEAGUE_FINISHED_WARNING = 'This league has finished. Changing this 
 // The same warning when what was refused is a REOPEN of a match of the finished
 // league (api_client.jsx marks the refusal `reopen`): the league goes back into
 // match play at once, whatever the match is then finished with.
-export const LEAGUE_FINISHED_REOPEN_WARNING = 'This league has finished. Reopening this match puts the league back into match play and takes back any shared places you accepted. Its final table and podium are decided again when the match is finished.';
+export const LEAGUE_FINISHED_REOPEN_WARNING = 'This league has finished. Reopening this match puts the league back into match play. Its final table and podium are decided again when the match is finished.';
 
 // A declined confirmation of that reopen: nothing was changed.
 export const LEAGUE_FINISHED_REOPEN_CANCELLED = 'Reopen cancelled: the league is still finished and this match was left unchanged.';

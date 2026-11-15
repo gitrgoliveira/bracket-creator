@@ -75,13 +75,12 @@ func (e *Engine) PoolsSettledNow(tx state.StoreTx, compID string) (PoolsVerdict,
 	standings := sync.OnceValues(func() (map[string][]state.PlayerStanding, error) {
 		return e.computeStandingsFrom(tx, compID)
 	})
-	lots, err := loadPoolLots(matches, standings, func() (map[string]domain.CompetitorStatus, error) {
+	lots, err := loadPoolLots(comp != nil && comp.Format == state.CompFormatLeague, matches, standings, func() (map[string]domain.CompetitorStatus, error) {
 		return tx.LoadCompetitorStatus(compID)
 	})
 	if err != nil {
 		return PoolsMatchOpen, err
 	}
-	lots.league = comp != nil && comp.Format == state.CompFormatLeague
 	if !poolMatchesSettled(matches, lots) {
 		return PoolsMatchOpen, nil
 	}
@@ -565,7 +564,7 @@ func (e *Engine) maybeAutoCompletePoolsRunning(compID string, comp *state.Compet
 	// such a bout exists. The decision
 	// itself is taken under the lock below (PoolsSettledNow), on what the
 	// transaction holds then.
-	lots, err := loadPoolLots(matches, func() (map[string][]state.PlayerStanding, error) {
+	lots, err := loadPoolLots(comp.Format == state.CompFormatLeague, matches, func() (map[string][]state.PlayerStanding, error) {
 		return e.CalculatePoolStandings(compID)
 	}, func() (map[string]domain.CompetitorStatus, error) {
 		return e.store.LoadCompetitorStatus(compID)
@@ -573,7 +572,6 @@ func (e *Engine) maybeAutoCompletePoolsRunning(compID string, comp *state.Compet
 	if err != nil {
 		return AutoCompleteNoChange, err
 	}
-	lots.league = comp.Format == state.CompFormatLeague
 
 	// Partition matches into regular vs tiebreaker vs pool-daihyosen.
 	allComplete := true
@@ -776,7 +774,10 @@ func dhCycleExists(standings map[string][]state.PlayerStanding, allMatches []sta
 	for poolName, poolStandings := range standings {
 		for _, positions := range detectPoolTies(poolStandings) {
 			group := standingsAt(poolStandings, positions)
-			if band(poolName, positions, group) && groupNeedsChusen(group, allMatches) {
+			inBand := func(runPositions []int, members []state.PlayerStanding) bool {
+				return band(poolName, runPositions, members)
+			}
+			if groupNeedsChusen(group, positions, allMatches, inBand) {
 				return true
 			}
 		}

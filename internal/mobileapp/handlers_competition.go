@@ -3282,9 +3282,21 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		if !ok {
 			return
 		}
-		// The optional {writeId} body (Z3), ordered with the chusen's orders.
-		tag, ok := bindOptionalWriteTag(c)
+		// The optional {writeId, confirmFinished} body (Z3), ordered with the
+		// chusen's orders.
+		reset, ok := bindOptionalOverridesReset(c)
 		if !ok {
+			return
+		}
+		tag := reset.writeTag
+		// Clearing the lots of a finished league can put it back into match play
+		// (the auto-complete pass below), which every result door warns about
+		// first: the same 409 league_finished until the request confirms.
+		if err := refuseFinishedLeagueLotsReset(store, eng, id, reset.ConfirmFinished); err != nil {
+			if respondIfLeagueFinished(c, err) {
+				return
+			}
+			internalError(c, err)
 			return
 		}
 		var changed, applied bool

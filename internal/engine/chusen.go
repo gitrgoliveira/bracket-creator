@@ -63,14 +63,46 @@ type ChusenReport struct {
 // or for an individual group another round instead. It is the single
 // per-group predicate shared by dhCycleExists (which blocks auto-completion) and
 // ChusenStatus (which surfaces the groups to the operator). group is rows of
-// computed standings, whose IsOverridden says which recorded ranks are in force
-// (poolRanksInForce).
+// computed standings at positions (detectPoolTies), whose IsOverridden says
+// which recorded ranks are in force (poolRanksInForce).
 //
-// Returns false when the operator has already ranked every member (chusen
-// recorded, chusenRecorded) or when tieBreakerLeftTied says the bouts settled
+// Returns false when the operator has already ranked every run still level
+// (chusen recorded, chusenRecorded), when no such run is in the band a tie is
+// broken in (chusenOfRuns), or when tieBreakerLeftTied says the bouts settled
 // the order or have not all been fought yet.
-func groupNeedsChusen(group []state.PlayerStanding, allMatches []state.MatchResult) bool {
-	return !chusenRecorded(group) && tieBreakerLeftTied(group, allMatches)
+func groupNeedsChusen(group []state.PlayerStanding, positions []int, allMatches []state.MatchResult, inBand runBand) bool {
+	owed, _ := chusenOfRuns(group, positions, allMatches, inBand)
+	return owed > 0
+}
+
+// runBand says whether a run of a tied group, at the 0-based places it stands
+// at, is in the band a tie is broken in (breakBand, bound to its pool).
+type runBand func(positions []int, members []state.PlayerStanding) bool
+
+// chusenOfRuns counts the runs a tied group's tie-breaker left level (levelRuns,
+// two or more members) at places in the band, split by whether their lots are in
+// force (chusenRecorded): owed still wait for lots, recorded have them. A group
+// whose tie-breaker left nothing tied (tieBreakerLeftTied) holds none of either.
+// The band is judged on each run's own places, never the whole group's best
+// place: a run level at 3rd and 4th inside a group that started at 1st shares
+// 3rd where joint 3rd places are awarded, and owes no lots. levelRuns is asked
+// as a team's (isTeam true): an individual's competition holds no representative
+// bouts, so the refinement by them leaves its runs as they were.
+func chusenOfRuns(group []state.PlayerStanding, positions []int, allMatches []state.MatchResult, inBand runBand) (owed, recorded int) {
+	if !tieBreakerLeftTied(group, allMatches) {
+		return 0, 0
+	}
+	for _, run := range levelRuns(group, positions, allMatches, true) {
+		if len(run.members) < 2 || !inBand(run.positions, run.members) {
+			continue
+		}
+		if chusenRecorded(run.members) {
+			recorded++
+		} else {
+			owed++
+		}
+	}
+	return owed, recorded
 }
 
 // groupSettledByChusen reports whether a tied group WAS decided by chusen: its
@@ -79,8 +111,9 @@ func groupNeedsChusen(group []state.PlayerStanding, allMatches []state.MatchResu
 // owner of "which groups were decided by chusen", which are the only groups
 // whose recorded order the operator is offered to change: a chusen entered in
 // the wrong order must stay fixable, but no other rank is set by hand.
-func groupSettledByChusen(group []state.PlayerStanding, allMatches []state.MatchResult) bool {
-	return chusenRecorded(group) && tieBreakerLeftTied(group, allMatches)
+func groupSettledByChusen(group []state.PlayerStanding, positions []int, allMatches []state.MatchResult, inBand runBand) bool {
+	owed, recorded := chusenOfRuns(group, positions, allMatches, inBand)
+	return owed == 0 && recorded > 0
 }
 
 // tieBreakerLeftTied reports whether a tied group's tie-breaker left its order
@@ -107,30 +140,34 @@ func tieBreakerLeftTied(group []state.PlayerStanding, allMatches []state.MatchRe
 // is the pool's recorded ranks (state.Overrides.PoolRanks[pool]), keyed and read
 // by participant id only (lookupPoolRankOverride).
 //
-// A recorded rank is in force only for a member of a group the standings still
-// hold level on Points that no fought supplementary result has settled
-// (tieSettledByBouts): there the lots are the only order there is, and they
-// order that group alone. Anywhere else the rank has outlived the tie it was
-// drawn for and is ignored, with nothing written: a regular-match correction
-// that moved the team off the tie, or a re-fought representative bout that now
-// names a winner, decides the order instead, and a correction that puts the tie
-// back puts the lots back with it.
+// A recorded rank is in force only for a member of a run (levelRuns) of a group
+// the standings hold level on Points that the fought supplementary bouts have
+// not separated: there the lots are the only order there is, and they order
+// that run alone, the one stretch lotsGroup and the confirm judge too. A
+// competitor the bouts put clear of the rest is ordered by them, so a bout whose
+// result the organiser confirmed over the lots decides its place even while
+// another run of the group still holds its lots. Anywhere else the rank has
+// outlived the tie it was drawn for and is ignored, with nothing written: a
+// regular-match correction that moved the team off the tie, or a re-fought
+// representative bout that now names a winner, decides the order instead, and a
+// correction that puts the tie back puts the lots back with it.
 func poolRanksInForce(sorted []state.PlayerStanding, matches []state.MatchResult, isTeam bool, recorded map[string]int) map[string]int {
 	if len(recorded) == 0 {
 		return nil
 	}
 	var inForce map[string]int
 	for _, positions := range detectPoolTies(sorted) {
-		group := standingsAt(sorted, positions)
-		if tieSettledByBouts(group, matches, isTeam) {
-			continue
-		}
-		for _, s := range group {
-			if r, ok := lookupPoolRankOverride(recorded, s.Player.ID); ok {
-				if inForce == nil {
-					inForce = map[string]int{}
+		for _, run := range levelRuns(standingsAt(sorted, positions), positions, matches, isTeam) {
+			if len(run.members) < 2 {
+				continue
+			}
+			for _, s := range run.members {
+				if r, ok := lookupPoolRankOverride(recorded, s.Player.ID); ok {
+					if inForce == nil {
+						inForce = map[string]int{}
+					}
+					inForce[helper.CompetitorKey(s.Player.ID, "", "")] = r
 				}
-				inForce[helper.CompetitorKey(s.Player.ID, "", "")] = r
 			}
 		}
 	}
@@ -179,7 +216,7 @@ func (e *Engine) refuseOverRecordedLots(tx state.StoreTx, compID string, comp *s
 	if confirmed || stored == nil || !drawnSupplementaryBout(stored) {
 		return nil
 	}
-	lots, err := loadPoolLots([]state.MatchResult{*stored}, func() (map[string][]state.PlayerStanding, error) {
+	lots, err := loadPoolLots(false, []state.MatchResult{*stored}, func() (map[string][]state.PlayerStanding, error) {
 		return e.computeStandingsFrom(tx, compID)
 	}, nil)
 	if err != nil {
@@ -212,14 +249,15 @@ func lotsReplacedSentence(group, standings []state.PlayerStanding) string {
 		}
 		order = append(order, fmt.Sprintf("%s %s", g.Player.Name, helper.GetOrdinal(at+1)))
 	}
-	// One bout's winner decides a pair's place at once; in a larger group the lots
-	// keep ordering every member until the bouts' results do (poolRanksInForce).
-	tail := "The bout's result will decide the place."
+	// One bout's winner decides a pair's place at once; in a larger run the result
+	// replaces the lots only for the members it puts clear of the others, and the
+	// lots keep ordering the ones it leaves level (poolRanksInForce).
 	if len(group) > 2 {
-		tail = "Your lots still decide the places until every bout of this tie-break has a result that puts them in order."
+		return fmt.Sprintf("This replaces the lots you entered for %s (%s) for the competitors this bout's result separates. The lots keep ordering the ones it leaves level.",
+			helper.GetOrdinal(first+1), strings.Join(order, ", "))
 	}
-	return fmt.Sprintf("This replaces the lots you entered for %s: %s. %s",
-		helper.GetOrdinal(first+1), strings.Join(order, ", "), tail)
+	return fmt.Sprintf("This replaces the lots you entered for %s: %s. The bout's result will decide the place.",
+		helper.GetOrdinal(first+1), strings.Join(order, ", "))
 }
 
 // drawnSupplementaryMoot reports a drawn supplementary bout (a representative
@@ -289,11 +327,11 @@ func lotsGroup(poolStandings map[string][]state.PlayerStanding, m *state.MatchRe
 type poolLots struct {
 	standings map[string][]state.PlayerStanding
 	statuses  map[string]domain.CompetitorStatus
-	// league is set by a caller judging a league (PoolsSettledNow, the
-	// league's own completion scan): only there does a representative bout
-	// drawn between two barred teams count as played (barredDrawPlayed). A
-	// pools + knockout competition, and every caller that leaves it unset,
-	// keeps that bout open until its lots are entered, as before.
+	// league is set by loadPoolLots for a caller judging a league
+	// (PoolsSettledNow, the league's own completion scan): only there does a
+	// representative bout drawn between two barred teams count as played
+	// (barredDrawPlayed). A pools + knockout competition keeps that bout open
+	// until its lots are entered, as before.
 	league bool
 }
 
@@ -311,12 +349,15 @@ func (l poolLots) barredDrawPlayed(m *state.MatchResult) bool {
 // (lotsStandings) and the competitor statuses, only when the matches hold the
 // bout that needs them. The recorded ranks are read once, inside the standings
 // (computeStandingsFrom), and nowhere else. A nil loadStatuses reads none.
-func loadPoolLots(matches []state.MatchResult, loadStandings func() (map[string][]state.PlayerStanding, error), loadStatuses func() (map[string]domain.CompetitorStatus, error)) (poolLots, error) {
+// league is the competition's mode (poolLots.league), asked of every caller so
+// that none can forget it: true for a league, false for a pools + knockout
+// competition and for a caller that judges no barred draw.
+func loadPoolLots(league bool, matches []state.MatchResult, loadStandings func() (map[string][]state.PlayerStanding, error), loadStatuses func() (map[string]domain.CompetitorStatus, error)) (poolLots, error) {
 	standings, err := lotsStandings(matches, loadStandings)
 	if err != nil {
 		return poolLots{}, err
 	}
-	lots := poolLots{standings: standings}
+	lots := poolLots{standings: standings, league: league}
 	if loadStatuses == nil || !slices.ContainsFunc(matches, func(m state.MatchResult) bool { return drawnSupplementaryBout(&m) }) {
 		return lots, nil
 	}
@@ -652,13 +693,16 @@ func (e *Engine) chusenStatusFrom(loader poolStandingsLoader, standings func() (
 				}
 				report.Recorded = append(report.Recorded, g)
 			}
+			inBand := func(runPositions []int, members []state.PlayerStanding) bool {
+				return band(poolName, runPositions, members)
+			}
 			switch {
-			case groupNeedsChusen(group, matches):
+			case groupNeedsChusen(group, positions, matches, inBand):
 				if !isTeam {
 					g.StillLevel = tieBreakLeftLevel(group, matches)
 				}
 				report.Pending = append(report.Pending, g)
-			case groupSettledByChusen(group, matches):
+			case groupSettledByChusen(group, positions, matches, inBand):
 				recorded(g)
 			default:
 				// Lots rank a run the fought bouts left level, on its own places

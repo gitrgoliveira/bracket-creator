@@ -221,7 +221,7 @@ type tieBreakVerdict struct {
 	// runs partitions the group, in order, into the stretches the bouts fought
 	// so far left level: a member the bouts put clear of the rest is a run of
 	// one, and a group no bout has separated is one run. A round still short of
-	// a bout (an unfought pair the Accept removed) separates by the wins it has.
+	// a bout (a pair with no bout in it) separates by the wins it has.
 	runs [][]state.PlayerStanding
 }
 
@@ -1029,7 +1029,7 @@ func (e *Engine) RunTiebreakerRound(compID, poolName string, memberIDs []string)
 				if !slices.Equal(ids, want) {
 					continue
 				}
-				if chusenRecorded(group) {
+				if chusenRecorded(r) {
 					lotsDrawn = true
 					continue
 				}

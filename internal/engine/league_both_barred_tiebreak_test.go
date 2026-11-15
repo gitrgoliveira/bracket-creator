@@ -608,7 +608,7 @@ func TestLotsReplacedSentence_LargerGroupDoesNotPromiseOneBoutDecides(t *testing
 	assert.Equal(t, "This replaces the lots you entered for 1st: Aki 1st, Bea 2nd. The bout's result will decide the place.", pair)
 
 	trio := lotsReplacedSentence(standings, standings)
-	assert.Equal(t, "This replaces the lots you entered for 1st: Aki 1st, Bea 2nd, Cal 3rd. Your lots still decide the places until every bout of this tie-break has a result that puts them in order.", trio)
+	assert.Equal(t, "This replaces the lots you entered for 1st (Aki 1st, Bea 2nd, Cal 3rd) for the competitors this bout's result separates. The lots keep ordering the ones it leaves level.", trio)
 }
 
 // The barred pair level at 3rd and 4th shares 3rd where joint 3rd places are

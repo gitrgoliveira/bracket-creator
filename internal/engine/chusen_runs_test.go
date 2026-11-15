@@ -39,6 +39,29 @@ func inForceIDs(rows []state.PlayerStanding, inForce map[string]int) []string {
 	return ids
 }
 
+// The override-rank door accepts lots over ONE run the panel offers: an order
+// that crosses two runs of the same pool, or names a competitor outside them, is
+// refused, and so are lots for a pool the report does not list.
+func TestLotsOfferedFor_JudgesEachRunOnItsOwn(t *testing.T) {
+	report := ChusenReport{
+		Pending:  []ChusenGroup{{PoolName: "Pool A", Teams: runRows("a", "b"), MinPosition: 1}},
+		Recorded: []ChusenGroup{{PoolName: "Pool A", Teams: runRows("c", "d"), MinPosition: 3}},
+	}
+	order := func(ids ...string) []RankOverride {
+		var out []RankOverride
+		for i, id := range ids {
+			out = append(out, RankOverride{PlayerID: id, Rank: i + 1})
+		}
+		return out
+	}
+	assert.True(t, lotsOfferedFor(report, "Pool A", order("b", "a")), "the run owing lots")
+	assert.True(t, lotsOfferedFor(report, "Pool A", order("d", "c")), "the run holding its lots, to correct them")
+	assert.False(t, lotsOfferedFor(report, "Pool A", order("a", "c")), "an order crossing two runs")
+	assert.False(t, lotsOfferedFor(report, "Pool A", order("a", "e")), "a competitor no run holds")
+	assert.False(t, lotsOfferedFor(report, "Pool B", order("a", "b")), "another pool")
+	assert.False(t, lotsOfferedFor(report, "Pool A", nil), "no ranks")
+}
+
 // Lots rank a run the fought bouts left level, one run at a time: once a bout of
 // one run has a winner, that run's lots stop applying and the bout decides its
 // places, while another run of the same Points group keeps its lots.

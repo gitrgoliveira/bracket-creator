@@ -504,6 +504,92 @@ func TestIndividualLeague_BarredDrawOwesLotsOnlyToItsRun(t *testing.T) {
 	assert.ElementsMatch(t, []string{"Ayu", "Ben"}, chusenTeamNames(report.Recorded[0]))
 }
 
+// A both-barred draw whose two sides the fought bouts put in different runs still
+// owes lots. Three players level on Points: Ayu beat Cal and Cal beat Ben, so the
+// bouts leave Ayu and Cal level on one win each with Ben behind, and the bout
+// between Ayu and Ben was drawn because both are barred. The league holds open
+// for the lots over Ayu and Cal, Ben keeps 3rd from the bouts, the lots finish
+// the league and a side reinstated afterwards leaves them standing.
+func TestIndividualLeague_BarredDrawAcrossRunsOwesTheLotsToTheLevelRun(t *testing.T) {
+	const compID = "ind-barred-split-runs"
+	eng, store, _ := setupTestEngine(t)
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: compID, Name: compID, Format: state.CompFormatLeague, Status: state.CompStatusPools, Courts: []string{"A"},
+	}))
+	players := []helper.Player{
+		{ID: "ayu-id", Name: "Ayu", Dojo: "Dojo A"}, {ID: "ben-id", Name: "Ben", Dojo: "Dojo B"}, {ID: "cal-id", Name: "Cal", Dojo: "Dojo C"},
+	}
+	require.NoError(t, store.SaveParticipants(compID, players))
+	require.NoError(t, store.SavePools(compID, []helper.Pool{{PoolName: "Pool A", Players: players}}))
+	var regular []state.MatchResult
+	for i := range players {
+		for j := i + 1; j < len(players); j++ {
+			regular = append(regular, state.MatchResult{
+				ID: "Pool A-" + string(rune('0'+len(regular))), SideA: players[i].Name, SideAID: players[i].ID,
+				SideB: players[j].Name, SideBID: players[j].ID, Court: "A",
+				Status: state.MatchStatusCompleted, Decision: string(domain.DecisionHikiwake),
+			})
+		}
+	}
+	require.NoError(t, store.SavePoolMatches(compID, regular))
+	outcome, err := eng.MaybeAutoCompletePools(compID)
+	require.NoError(t, err)
+	require.Equal(t, AutoCompleteTiebreakInjected, outcome, "three players level at 1st owe a round")
+
+	beats := map[string]string{"ayu-id|cal-id": "ayu-id", "cal-id|ben-id": "cal-id"}
+	all, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	for i := range all {
+		m := &all[i]
+		if !IsTiebreakerMatchID(m.ID) {
+			continue
+		}
+		winner := beats[m.SideAID+"|"+m.SideBID]
+		if winner == "" {
+			winner = beats[m.SideBID+"|"+m.SideAID]
+		}
+		if winner == "" {
+			continue // Ayu and Ben: drawn below
+		}
+		m.Status, m.WinnerID = state.MatchStatusCompleted, winner
+		if winner == m.SideAID {
+			m.Winner, m.IpponsA = m.SideA, []string{"M"}
+		} else {
+			m.Winner, m.IpponsB = m.SideB, []string{"M"}
+		}
+	}
+	require.NoError(t, store.SavePoolMatches(compID, all))
+	drawnByDecision(t, eng, compID, tiebreakBoutBetween(t, store, compID, "ayu-id", "ben-id"))
+	barCompetitor(t, store, compID, "ayu-id", true)
+	barCompetitor(t, store, compID, "ben-id", true)
+
+	assert.Equal(t, PoolsChusenOwed, poolsVerdictNow(t, eng, store, compID), "the draw nobody fought leaves 1st and 2nd to the lots")
+	report, err := eng.ChusenStatus(compID)
+	require.NoError(t, err)
+	require.Len(t, report.Pending, 1)
+	assert.Equal(t, 1, report.Pending[0].MinPosition)
+	assert.ElementsMatch(t, []string{"Ayu", "Cal"}, chusenTeamNames(report.Pending[0]), "Ben stands alone behind them")
+	assert.Nil(t, report.Pending[0].StillLevel, "nobody can fight another round")
+
+	standings := enterLots(t, eng, compID, []string{"cal-id", "ayu-id"})
+	assertDistinctRanks(t, standings)
+	var order []string
+	for _, s := range standings {
+		order = append(order, s.Player.Name)
+	}
+	assert.Equal(t, []string{"Cal", "Ayu", "Ben"}, order)
+	assert.Equal(t, PoolsSettled, poolsVerdictNow(t, eng, store, compID))
+	outcome, err = eng.MaybeAutoCompletePools(compID)
+	require.NoError(t, err)
+	assert.Equal(t, AutoCompleteTransitioned, outcome, "the league finishes once the lots are entered")
+
+	barCompetitor(t, store, compID, "ben-id", false)
+	assert.Equal(t, PoolsSettled, poolsVerdictNow(t, eng, store, compID), "a side reinstated does not undo the lots the organiser entered")
+	report, err = eng.ChusenStatus(compID)
+	require.NoError(t, err)
+	require.Len(t, report.Recorded, 1, "the lots stay correctable")
+}
+
 // tiebreakBoutBetween is the id of the tie-break bout fought between two players.
 func tiebreakBoutBetween(t *testing.T, store *state.Store, compID, a, b string) string {
 	t.Helper()

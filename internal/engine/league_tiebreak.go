@@ -476,15 +476,22 @@ func (withoutLots) LoadPoolRanks(string) (map[string]map[string]int, error) { re
 
 // LotsResetReopensLeague reports whether clearing every recorded lot would put
 // the finished league compID back into match play (reopenFinishedLeagueIfOpen
-// asks the same PoolsSettledNow, once the lots are gone): the lots alone ordered
-// a decisive circle, or a tie the bouts left level. The organiser's reset is
-// warned about first when it does. It writes nothing; false for any competition
-// that is not a finished league.
+// asks the same PoolsSettledNow, once the lots are gone): the league is settled
+// with the lots stored now and not without them, because the lots alone ordered
+// a decisive circle, or a tie the bouts left level. A league that is not settled
+// with them (one finished before the tie rule, say) has nothing for the reset
+// to reopen, and a league holding no lots is settled the same either way. The
+// organiser's reset is warned about first when it does reopen. It writes
+// nothing; false for any competition that is not a finished league.
 func (e *Engine) LotsResetReopensLeague(tx state.StoreTx, compID string) (bool, error) {
 	comp, err := tx.LoadCompetition(compID)
 	if err != nil || comp == nil || comp.Format != state.CompFormatLeague || comp.Status != state.CompStatusComplete {
 		return false, err
 	}
-	verdict, err := e.PoolsSettledNow(withoutLots{tx}, compID)
-	return verdict != PoolsSettled, err
+	with, err := e.PoolsSettledNow(tx, compID)
+	if err != nil || with != PoolsSettled {
+		return false, err
+	}
+	without, err := e.PoolsSettledNow(withoutLots{tx}, compID)
+	return without != PoolsSettled, err
 }

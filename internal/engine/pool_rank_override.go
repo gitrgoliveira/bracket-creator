@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"slices"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
@@ -31,31 +32,29 @@ func lookupPoolRankOverride(overrides map[string]int, id string) (int, bool) {
 // no rank is set by hand there.
 var ErrRankOverrideNotLevel = errors.New("lots are drawn for an individual tie only after a tie-breaker round has left it level")
 
-// lotsOfferedFor reports whether every competitor ranks names belongs to a
+// lotsOfferedFor reports whether every competitor ranks names belongs to ONE
 // tie of pool poolName that the chusen panel offers lots for (report: waiting
-// or already recorded). The panel and the override-rank door ask the one rule,
-// so the door accepts exactly the lots the panel offers. Competitors are
-// matched by id only.
+// or already recorded). Lots rank one run alone, so an order that crosses two
+// runs is refused. The panel and the override-rank door ask the one rule, so the
+// door accepts exactly the lots the panel offers. Competitors are matched by id
+// only.
 func lotsOfferedFor(report ChusenReport, poolName string, ranks []RankOverride) bool {
-	offered := map[string]bool{}
 	for _, groups := range [][]ChusenGroup{report.Pending, report.Recorded} {
 		for _, g := range groups {
-			if g.PoolName != poolName {
-				continue
-			}
-			for _, s := range g.Teams {
-				if s.Player.ID != "" {
-					offered[s.Player.ID] = true
-				}
+			if g.PoolName == poolName && groupHoldsAll(g, ranks) {
+				return len(ranks) > 0
 			}
 		}
 	}
-	for _, r := range ranks {
-		if !offered[r.PlayerID] {
-			return false
-		}
-	}
-	return len(ranks) > 0
+	return false
+}
+
+// groupHoldsAll reports whether every competitor ranks names is a member of g,
+// matched by id only.
+func groupHoldsAll(g ChusenGroup, ranks []RankOverride) bool {
+	return !slices.ContainsFunc(ranks, func(r RankOverride) bool {
+		return r.PlayerID == "" || !slices.ContainsFunc(g.Teams, func(s state.PlayerStanding) bool { return s.Player.ID == r.PlayerID })
+	})
 }
 
 // RankOverride is one competitor's manual pool rank: the participant id and

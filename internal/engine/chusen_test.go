@@ -407,7 +407,11 @@ func TestChusenCandidates_PartialTieWithoutCycleNeedsChusen(t *testing.T) {
 	require.NoError(t, err)
 	cands := report.Pending
 	require.Len(t, cands, 1, "Beta and Gamma tie on daihyosen wins with no cycle present -> still needs chusen")
-	assert.Len(t, cands[0].Teams, 4)
+	// Lots rank the run the bouts left level, never the teams they put clear of
+	// it: Alpha is 1st and Delta 4th whatever the lots say.
+	require.Len(t, cands[0].Teams, 2)
+	assert.ElementsMatch(t, []string{"Beta", "Gamma"}, []string{cands[0].Teams[0].Player.Name, cands[0].Teams[1].Player.Name})
+	assert.Equal(t, 2, cands[0].MinPosition)
 }
 
 // TestGroupNeedsChusen_SameNameTeamsKeyOnIdentity pins the identity keying in

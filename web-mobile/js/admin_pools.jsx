@@ -200,7 +200,9 @@ function isDrawnSupplementary(m) {
 // the two sides when they are no longer level, or none when a side is not held.
 // Lots rank a run the fought bouts left level (tieRun on the rows), so when both
 // sides are in one run the group is that run alone; sides in different runs are
-// judged on the whole level group, which no lots rank.
+// judged on the runs of two or more among them (each owes its own lots), and a
+// side standing alone has none to rank, so with both alone the group is null
+// (neither ruled by lots nor moot).
 function lotsGroupOf(standings, m) {
   const poolRows = (standings || {})[poolNameOf(m.id)] || [];
   const rowOf = (id) => (id ? poolRows.find(s => s.player && s.player.id === id) : undefined);
@@ -209,8 +211,10 @@ function lotsGroupOf(standings, m) {
   if (!a || !b) return { group: null, level: false };
   if (a.points !== b.points) return { group: [a, b], level: false };
   const runOf = (s) => s.tieRun || 0;
-  const sameRun = runOf(a) === runOf(b);
-  return { group: poolRows.filter(s => s.points === a.points && (!sameRun || runOf(s) === runOf(a))), level: true };
+  const levelRows = poolRows.filter(s => s.points === a.points);
+  const runSize = (s) => levelRows.filter(r => runOf(r) === runOf(s)).length;
+  const group = levelRows.filter(s => (runOf(s) === runOf(a) || runOf(s) === runOf(b)) && runSize(s) > 1);
+  return { group: group.length ? group : null, level: true };
 }
 
 // lotsRuledBouts: the drawn tie-break and daihyosen bouts the organiser's lots
@@ -225,7 +229,7 @@ function lotsRuledBouts(poolMatches, standings) {
   return (poolMatches || []).filter((m) => {
     if (!isDrawnSupplementary(m)) return false;
     const { group, level } = lotsGroupOf(standings, m);
-    return level && group.every(s => s.isOverridden);
+    return level && !!group && group.every(s => s.isOverridden);
   });
 }
 

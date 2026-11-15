@@ -4874,6 +4874,42 @@ func TestDeleteOverrides_ReopensALeagueTheLotsHadSettled(t *testing.T) {
 	assert.Equal(t, state.CompStatusPools, comp.Status, "without the lots the tie is undecided again, so the league is back in play")
 }
 
+// TestDeleteOverrides_NoWarningForAFinishedLeagueHoldingNoLots: a finished league
+// that is unsettled without lots and holds none (one finished before the tie
+// rule, left complete by design) has nothing for the reset to reopen, so the
+// reset is a plain no-op and not the warning that the league finished on lots.
+func TestDeleteOverrides_NoWarningForAFinishedLeagueHoldingNoLots(t *testing.T) {
+	r, store, eng, _, _ := setupTestRouter(t)
+	compID := "chusen-league-delete-no-lots"
+	seedChusenCycle(t, store, eng, compID)
+
+	all, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	for i := range all {
+		if engine.IsPoolDaihyosenMatchID(all[i].ID) {
+			all[i].Winner, all[i].WinnerID = "", ""
+		}
+	}
+	require.NoError(t, store.SavePoolMatches(compID, all))
+	for i, id := range []string{"gamma-id", "alpha-id", "beta-id"} {
+		w := sendJSON(t, r, http.MethodPut, "/api/competitions/"+compID+"/pools/Pool%20A/override-rank",
+			map[string]any{"playerId": id, "rank": i + 1})
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	}
+	// The league stays complete with its lots gone, as a league finished by an
+	// earlier release does.
+	require.NoError(t, store.SaveOverrides(compID, &state.Overrides{}))
+	comp, err := store.LoadCompetition(compID)
+	require.NoError(t, err)
+	require.Equal(t, state.CompStatusComplete, comp.Status)
+
+	w := sendJSON(t, r, http.MethodDelete, "/api/competitions/"+compID+"/overrides", nil)
+	require.Equal(t, http.StatusNoContent, w.Code, w.Body.String())
+	comp, err = store.LoadCompetition(compID)
+	require.NoError(t, err)
+	assert.Equal(t, state.CompStatusComplete, comp.Status, "the reset changed nothing")
+}
+
 // Clearing lots from a league that has not finished needs no confirmation:
 // there is nothing to put back into match play.
 func TestDeleteOverrides_NothingToWarnAboutBeforeTheLeagueFinishes(t *testing.T) {

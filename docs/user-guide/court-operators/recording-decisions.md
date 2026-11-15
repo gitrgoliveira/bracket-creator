@@ -58,25 +58,23 @@ Everything else is a result, written beside the competitor it names: **Ht** next
 
 A daihyosen is a representative bout used to break a tie when points and ranking criteria cannot separate two teams.
 
-It applies in two situations:
+It applies in three situations:
 
 - In the knockout phase, when a team encounter finishes level.
 - In team pool play, when two teams finish equal on every ranking criterion and the tie decides who advances or how they are seeded.
 - In team league play, when two teams finish equal on every ranking criterion at a place that cannot be shared.
 
-In a pool, a tie that does not affect advancement or seeding is left as a shared rank with no extra bout. In a team league, a tie for 1st or 2nd place always gets a daihyosen, and so does a tie for 3rd place when joint 3rd places are off. Any other tie shares its place: 3rd place when joint 3rd places are on, and 4th place or lower. In a team league the operator starts the daihyosen from the League tab; refer to [Ties in a league](../organisers/team-tournaments.md#ties-in-a-league).
+In a pool, a tie that does not affect advancement or seeding is left as a shared rank with no extra bout. In a team league, the league tie rule decides which ties get a daihyosen, and the organiser starts it from the League tab; refer to [Ties in a league](../organisers/team-tournaments.md#ties-in-a-league).
 
 The bout is a single-point ippon-shobu between one representative from each tied team, and the first point wins it. While it is level, record encho and keep fighting, or decide it by hantei. A league daihyosen needs a winner: **Mark draw** is turned off on it, and the editor says why: "A tie-breaker needs a winner: fight encho, then decide by hantei". The score editor lets you pick each team's representative from its roster. On the court console, the bout appears with a **(DH)** mark in the centre of the score. In pool and league standings, the team that won its daihyosen carries a **DH** badge.
-
-![The League tab's Tie-breaker required banner for two teams level for 1st to 2nd place, with its Run tie-breaker button above the standings.](../../screenshots/league-tiebreak-banner.png)
 
 When a knockout team encounter is settled by a representative bout, the results workbook (**Export & print**, then **Download results (.xlsx)**) lists it on a **Representative Bouts** sheet, one section for each such encounter. A section is titled as that encounter is on the **Elimination Matches** sheet, followed by (Representative bout), with White (Shiro) on the left and Red (Aka) on the right. The bout's row shows **DH** where a numbered bout shows its number, then each team's representative with their number and name, the score, **(DH)** in the centre column, and the result mark (Ht, Kiken or Fus.) beside the side it names. A side whose representative was not picked shows no name. The sheet appears only when at least one encounter had a representative bout. The tie-break daihyosen of a team pool or league is not on it.
 
 ## Chusen (drawing lots)
 
-Chusen is the last resort when two or more tied teams have played a round of daihyosen and the bouts still do not produce a strict order. Examples are a cycle where each team beats another, or two teams finishing level on daihyosen wins. In a league, lots are the rare exception and are always yours to run: a league daihyosen cannot be saved as a draw, so lots are offered only for a genuine cycle, or for a tie-breaker that cannot be fought because both sides withdrew earlier and was recorded as a draw nobody fought. The app never draws the lots or ranks the teams itself.
+Chusen is the last resort when tied teams have played a round of daihyosen and the bouts still do not give a strict order, for example a cycle where each team beats another, or two teams finishing level on daihyosen wins. In a league, where a daihyosen cannot be saved as a draw, lots are offered only for such a cycle, or for a tie-breaker that cannot be fought because both sides withdrew earlier. The app never draws the lots or ranks the teams itself.
 
-In a pool before a knockout, a drawn daihyosen bout can still be saved, and it shows a notice on the Pools tab. Once you record the chusen, the notice says your lots decide it, and the drawn bout no longer holds the pool. Until then you can also use **Fight it again** on the notice to play the bout once more. After you record the lots you can still use **Fight it again** or **Open bout** on that bout. The app first says that the bout's result will replace the lots you entered for that place, and goes on only when you choose **Replace the lots**.
+In a pool before a knockout, a daihyosen can be saved as a draw. It then shows a notice on the Pools tab, with **Fight it again** to play the bout once more. Once you record a chusen, the notice says your lots decide it, and the drawn bout no longer holds the pool. You can still use **Fight it again** or **Open bout** after that: the app first says the bout's result will replace the lots you entered for that place, and goes on only when you choose **Replace the lots**.
 
 When chusen is required, the **Pools** tab (labelled **League** for league competitions) shows a **"Chusen (drawing lots) required"** panel listing the tied teams. Draw lots offline, enter each team's finishing position in the panel, and record it to settle the order and let the competition advance.
 
@@ -88,12 +86,12 @@ Chusen is the only place ranks are set by hand, and it happens only when the bou
 
 ### Individual competitors: another round, or lots
 
-In an individual pool or league, a tie that matters is broken by single-point (ippon-shobu) bouts between the tied competitors. In a league that means a tie for 1st or 2nd place, and for 3rd place when joint 3rd places are off; in a pool, a tie that decides who goes through or where they are seated. If that round goes in a circle, where each competitor won as many bouts as the others, or, in a league, both competitors who were to fight it withdrew earlier, the **Pools** tab (labelled **League** for league competitions) shows **A tie-breaker round left a tie** with the places the tied competitors share (and, in a pool competition, the pool). For a circle you choose how to go on:
+In an individual pool or league, a tie that matters is broken by single-point (ippon-shobu) bouts between the tied competitors: in a league, as [Ties in a league](../organisers/team-tournaments.md#ties-in-a-league) sets out; in a pool, a tie that decides who goes through or where they are seated. If that round goes in a circle, where each competitor won as many bouts as the others, the **Pools** tab (labelled **League** for league competitions) shows **A tie-breaker round left a tie** with the places the tied competitors share (and, in a pool competition, the pool). In a league it shows the same when both competitors who were to fight withdrew earlier. For a circle you choose how to go on:
 
 - **Run another round** adds a fresh round of ippon-shobu bouts among the competitors still level. When more than one group is still level, there is one button for each, with the group's competitors named beside it. The place stays open until the new bouts are scored.
 - **Draw lots instead** opens the same entry as the team chusen above: draw lots offline, enter each competitor's finishing position and record it. **Cancel** closes the entry and leaves both choices open.
 
-In a league, when two competitors are level for a place and both withdrew earlier, the court operator records their tie-breaker with **Record as drawn (neither can fight)**, a draw nobody fought, and only the lots are then offered for them. That draw does not hold back the others: competitors in the same tie who can still fight, for example a circle of three, are offered both choices, another round or lots, as in any other tie. Their next round counts even though the withdrawn pair's bout was drawn.
+In a league, when both competitors of a tie-breaker withdrew earlier, the court operator records it with **Record as drawn (neither can fight)**, a draw nobody fought, and only lots are offered for that pair. The others in the same tie who can still fight, for example a circle of three, are still offered another round or lots, and their next round counts.
 
 The app never draws the lots for you, and it never starts another round without your tap. A recorded order can be changed afterwards with **Change**, as for a team chusen, even after the league has finished.
 

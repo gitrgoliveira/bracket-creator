@@ -44,7 +44,7 @@ League is a full round-robin: every competitor meets every other competitor. Fin
 
 Use league for small fields (typically eight or fewer competitors) where you want standings that reflect the complete head-to-head record rather than a single bracket run.
 
-Of the podium places in a league, only 3rd can be shared. A tie for 1st or 2nd place is settled by a tie-breaker that must have a winner, by encho and then hantei if it is level. Lots, which you draw and enter, settle it only when the bouts cannot: a round that goes in a circle, or a tie-breaker whose two sides both withdrew earlier. A tie for 3rd place follows the **Award two joint 3rd places** setting, and a tie for 4th place or lower shares its place. Refer to [Ties in a league](team-tournaments.md#ties-in-a-league).
+Of the podium places in a league, only 3rd can be shared: a tie for 1st or 2nd place is always settled by a tie-breaker with a winner. Refer to [Ties in a league](team-tournaments.md#ties-in-a-league) for 3rd place, lower places and lots.
 
 ## Swiss
 

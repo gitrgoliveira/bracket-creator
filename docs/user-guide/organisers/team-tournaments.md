@@ -226,21 +226,21 @@ name order as the final deterministic fallback.
     When two or more teams remain tied after all eight criteria and the tie is consequential (in pools, it decides who advances or how they are seeded; in a league, it is at a place that cannot be shared), the next step depends on format:
 
     - **Pools + Knockout**: the app schedules a daihyosen automatically to break the tie.
-    - **League**: a tie for 1st or 2nd place always needs a tie-breaker with a winner. Once every regular league match is finished, run a daihyosen among the tied teams from the League tab. [Ties in a league](#ties-in-a-league) says which places are asked about.
+    - **League**: a tie at a place that cannot be shared needs a tie-breaker with a winner, which you run from the League tab once every regular match is finished; refer to [Ties in a league](#ties-in-a-league).
 
     Any other tie is left as a shared rank with no extra bout. If a daihyosen still cannot separate the teams, it goes to chusen (drawing lots). Refer to [Recording decisions](../court-operators/recording-decisions.md) for the procedures for both.
 
 ### Ties in a league
 
-A league has no knockout, so its table is its result, and one rule decides which tied places the app asks about. The steps below are for a team league; an individual league breaks its ties with ippon-shobu bouts that the app schedules itself, by the same rule (refer to [Individual competitors: another round, or lots](../court-operators/recording-decisions.md#individual-competitors-another-round-or-lots)).
+A league has no knockout, so its table is its result. One rule, the same for team, individual and Engi leagues, decides which tied places the app asks about. The steps below are for a team league. An individual league schedules its ippon-shobu tie-breakers itself (refer to [Individual competitors: another round, or lots](../court-operators/recording-decisions.md#individual-competitors-another-round-or-lots)), and an Engi tie-breaker is decided by flags (refer to [Ties between pairs](naginata.md#ties-between-pairs)).
 
 **Of the podium places, only 3rd can be shared.**
 
 - **A tie for 1st or 2nd place** is always settled by a tie-breaker that has a winner. Teams are never left sharing 1st or 2nd place.
-- **A tie for 3rd place** follows **Award two joint 3rd places** on the competition's Settings tab. With it on (the default), teams tied entirely for 3rd place share 3rd, so no bout is held for them. With it off, a tie for 3rd place is settled by a tie-breaker, as a tie for 1st or 2nd place is. A tie that includes 1st or 2nd place is always asked about.
+- **A tie for 3rd place** follows **Award two joint 3rd places** on the competition's Settings tab. With it on (the default), teams tied only for 3rd place share it, with no bout. With it off, they play a tie-breaker. A tie that also includes 1st or 2nd place is always asked about.
 - **A tie for 4th place or lower** always shares its place. Nothing is asked and no bout is held.
 
-**When you are asked.** Once every regular league match is finished, the League tab shows **Tie-breaker required** with the tied teams of each group. It says that a tie at 1st or 2nd place (and at 3rd place when joint 3rd places are off) needs a tie-breaker with a winner. The choices are:
+**When you are asked.** Once every regular league match is finished, the League tab shows **Tie-breaker required** with the tied teams of each group. The choices are:
 
 - **Run tie-breaker** schedules a daihyosen among the tied teams.
 - **Remove unscored tie-breaker** replaces Run tie-breaker once one is scheduled, and takes it back while nobody has scored it, so you can run it again.
@@ -255,9 +255,18 @@ The league finishes once every tie at a place that cannot be shared has a winner
 
 **A tie-breaker needs a winner.** A league tie-breaker bout cannot be saved as a draw: **Mark draw** is turned off on it, and the editor says why: "A tie-breaker needs a winner: fight encho, then decide by hantei". Record encho while the bout is level, and if it is still level afterwards, tap **Decide by hantei** and pick the winning side. Refer to [Recording decisions](../court-operators/recording-decisions.md#encho-overtime). A tie-breaker already on record as a draw holds the league until it has a winner: the League tab shows a notice naming the bout, with **Open bout** to decide it by encho or hantei, and **Fight it again** to play it again.
 
-**Lots are the exception, and they are yours to run.** Chusen (drawing lots) is offered in two cases only. The first is a tie-breaker round that has been fought with the teams still level, for example a cycle in which A beat B, B beat C and C beat A. The second is a tie-breaker that cannot be fought because both teams withdrew earlier: the match reads "Both withdrew earlier: neither can fight this match.", and **Record as drawn (neither can fight)** records it as a draw that nobody fought. The place it was for then goes to lots. In both cases the app never draws the lots or ranks the teams itself: you draw them offline and enter the order in the **Chusen (drawing lots) required** panel. Refer to [Recording decisions](../court-operators/recording-decisions.md#chusen-drawing-lots). The league finishes once the lots are entered, and a recorded order can still be changed with **Change** after the league has finished, with the table and podium following it at once.
+**Lots are the exception, and they are yours to run.** Chusen (drawing lots) is offered in two cases only:
 
-**A recorded order stands until you replace it.** The app never draws, changes or deletes the lots you entered. If a competitor who had withdrawn is reinstated after the lots were recorded, the league stays finished on those lots, for a team league and an individual league alike, and the lots stay listed in the panel for you to change. The tie-breaker that the lots settled is still on the League tab, with a note that your lots decide it, and you can still correct it. Choose **Fight it again** (or **Open bout**, or record a result in the score editor). Because the bout's result would then decide the place instead of the lots, the app asks first: "This replaces the lots you entered for 1st: Bea 1st, Aki 2nd. The bout's result will decide the place." Choose **Replace the lots** to go on, or **Cancel** to leave everything as it was. The lots stay stored, but once the bout has a result they no longer apply to that place. Lots rank only the competitors the fought bouts left level. When the bouts split a bigger tie and left a pair level, the warning names only that pair. When the lots ranked three or more competitors, one bout's result may leave some of them level, so the app says instead: "This replaces the lots you entered for 1st (Bea 1st, Aki 2nd, Cal 3rd) for the competitors this bout's result separates. The lots keep ordering the ones it leaves level."
+- a tie-breaker round fought with the teams still level, for example a cycle in which A beat B, B beat C and C beat A;
+- a tie-breaker that cannot be fought because both teams withdrew earlier. The match reads "Both withdrew earlier: neither can fight this match.", and **Record as drawn (neither can fight)** records it as a draw nobody fought. The place then goes to lots.
+
+The app never draws the lots or ranks the teams itself: you draw them offline and enter the order in the **Chusen (drawing lots) required** panel (refer to [Recording decisions](../court-operators/recording-decisions.md#chusen-drawing-lots)). You can change a recorded order with **Change** even after the league has finished, and the table and podium follow it at once.
+
+**A recorded order stands until you replace it.** The app never draws, changes or deletes the lots you entered. If a competitor who had withdrawn is reinstated after the lots were recorded, the league stays finished on those lots (in a team or an individual league), and the lots stay in the panel for you to change.
+
+The tie-breaker the lots settled stays on the League tab, with a note that your lots decide it, and you can still correct it with **Fight it again**, **Open bout**, or a result in the score editor. The app asks first: "This replaces the lots you entered for 1st: Bea 1st, Aki 2nd. The bout's result will decide the place." Choose **Replace the lots** to go on, or **Cancel** to leave everything as it was. The lots stay stored but no longer apply to that place.
+
+The warning names only the competitors the lots ranked. When the lots ranked three or more, one bout's result may leave some of them level, so the app says instead: "This replaces the lots you entered for 1st (Bea 1st, Aki 2nd, Cal 3rd) for the competitors this bout's result separates. The lots keep ordering the ones it leaves level."
 
 **Correcting a result after the league has finished.** Open any finished match and change its result as usual. Because the league is finished, the app warns first: "This league has finished. Changing this result can change the final table and podium. If it leaves a new tie at a podium place, the league goes back to match play to settle it." Choose **Change it anyway** to save it, or **Cancel** to leave everything as it was. Reopening a finished match warns in the same way: "This league has finished. Reopening this match puts the league back into match play. Its final table and podium are decided again when the match is finished." After a corrected result:
 
@@ -266,4 +275,4 @@ The league finishes once every tie at a place that cannot be shared has a winner
 
 A tie-breaker that was already fought is never deleted by a correction. If the correction unties its group, the bout stops counting.
 
-A league that an earlier version of the app finished with a tie left shared at a place that cannot be shared now (1st or 2nd place, or 3rd place with joint 3rd places off) goes back to match play at its next result, withdrawal, reinstatement or change of lots, and asks about the tie under this rule.
+A league that an earlier version of the app finished with a tie shared at a place that can no longer be shared goes back to match play at its next change (a result, a withdrawal, a reinstatement or a change of lots) and asks about the tie.

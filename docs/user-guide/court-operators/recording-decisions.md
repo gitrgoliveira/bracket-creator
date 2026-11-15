@@ -34,7 +34,7 @@ When a kiken, fusenpai, or fusensho decides a regular team match, every bout tha
 
 ## Hikiwake
 
-A hikiwake is a draw. It applies in pool, league, and Swiss matches (except a league tie-breaker, which needs a winner), and in the individual bouts of a team encounter in any phase. A knockout match itself cannot end in a draw. A hikiwake contributes to the standings separately from wins and losses. To record one, tap **Mark draw** between the two sides in the score editor; in a team encounter, tap **Tie (hikiwake)** on the bout's row.
+A hikiwake is a draw. It applies in pool, league, and Swiss matches (except a league tie-breaker, which needs a winner unless both sides withdrew earlier), and in the individual bouts of a team encounter in any phase. A knockout match itself cannot end in a draw. A hikiwake contributes to the standings separately from wins and losses. To record one, tap **Mark draw** between the two sides in the score editor; in a team encounter, tap **Tie (hikiwake)** on the bout's row.
 
 ## Encho (overtime)
 

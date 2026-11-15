@@ -82,8 +82,8 @@ competition** so the kata division also gets the single 3rd-place match.
 
 !!! note "Quick-score and overrides are off for Engi"
     Because every Engi result comes from the flag editor, the kendo shortcuts,
-    quick-score, manual winner overrides, and daihyosen are disabled for Engi
-    competitions.
+    quick-score, manual winner overrides, kiken, fusenpai, and daihyosen are
+    disabled for Engi competitions.
 
 ### Add Engi pairs
 
@@ -192,6 +192,6 @@ Both Excel downloads on the competition page (refer to
   ranking is determined by wins then accumulated own-side flags. The kendo
   points columns do not appear.
 - The results workbook records each side's referee flag count in the score
-  cells instead of ippon letters. A bout decided without flags (for
-  example a kiken withdrawal) leaves the score cells blank with the decision
+  cells instead of ippon letters. A bout recorded without flags leaves the
+  score cells blank with the decision
   marked in the centre column.

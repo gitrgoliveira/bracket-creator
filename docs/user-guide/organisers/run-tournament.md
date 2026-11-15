@@ -259,7 +259,7 @@ Until the bouts are scored, the tied competitors share one place, shown as **=2n
 
 When the bouts do not settle it:
 
-- A team pool settles a tie with a daihyosen. If that round still leaves teams level, the pool waits for chusen.
+- In a team pool the bout is a daihyosen. If that round still leaves teams level, the pool waits for chusen.
 - In an individual pool, each tied pair fights once. If that round goes in a circle, the pool waits and the Pools tab offers **Run another round** or **Draw lots instead**; refer to [Individual competitors: another round, or lots](../court-operators/recording-decisions.md#individual-competitors-another-round-or-lots).
 - A tie-break bout saved as a draw settles nothing: the pool stays tied and the knockout places it decides stay empty. The Pools tab names the bout and offers **Fight it again**, which clears the draw and puts the bout back on its shiai-jo, or **Open bout**, to decide it by encho or hantei. A drawn daihyosen stops holding the pool once you record a chusen for its teams.
 

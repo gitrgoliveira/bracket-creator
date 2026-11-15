@@ -217,6 +217,7 @@ describe('AdminPools: an individual tie-breaker round that went in a circle', ()
     await mount(leagueComp());
     const league = (await screen.findByText('A tie-breaker round left a tie')).closest('.league-tiebreak');
     expect(league.textContent).toContain('a tie at 1st or 2nd place (and at 3rd place when joint 3rd places are off) needs a winner');
+    expect(league.textContent).not.toContain('goes through or where they are seated');
   });
 
   it('shows the lots without a header of their own, spaced from the buttons, and Cancel closes them', async () => {

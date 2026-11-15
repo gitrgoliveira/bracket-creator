@@ -682,11 +682,17 @@ export async function expectNoSidewaysScroll(page, widths = [320, 375, 414], atW
 }
 
 // How many lines a control's label takes (1 when it does not wrap): the
-// distinct tops of its text's line boxes.
+// distinct tops of the line boxes of its text nodes only, so an inline child
+// such as a busy spinner adds no line.
 export const labelLines = (locator) => locator.evaluate((el) => {
-  const range = document.createRange();
-  range.selectNodeContents(el);
-  return new Set([...range.getClientRects()].filter((r) => r.width > 0).map((r) => Math.round(r.top))).size;
+  const tops = new Set();
+  const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    const range = document.createRange();
+    range.selectNodeContents(node);
+    for (const r of range.getClientRects()) if (r.width > 0) tops.add(Math.round(r.top));
+  }
+  return tops.size;
 });
 
 // The podium as [{ place, label, name, dojo }] in the order shown, plus the

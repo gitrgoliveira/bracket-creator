@@ -346,6 +346,10 @@ function tiebreakPlacesLabel(group) {
   return placesRangeLabel(group.minPosition, group.maxPosition);
 }
 
+// The league's places a tie may not share (only 3rd can be shared, and only
+// with joint 3rd places on), named once for the banner and the circle notice.
+const LEAGUE_TIE_PLACES = "at 1st or 2nd place (and at 3rd place when joint 3rd places are off)";
+
 function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, password }) {
   const isLeague = c && c.format === "league";
   // A KEY, re-resolved from the live poolMatches every render, never a captured
@@ -840,7 +844,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
       <div className="league-tiebreak__title">A tie-breaker round left a tie</div>
       <div className="league-tiebreak__desc">
         {isLeague
-          ? "The order is still open: a tie at 1st or 2nd place (and at 3rd place when joint 3rd places are off) needs a winner."
+          ? `The order is still open: a tie ${LEAGUE_TIE_PLACES} needs a winner.`
           : "The order is still open: this tie decides who goes through or where they are seated."}
       </div>
       {chusenCandidates.map(group => {
@@ -972,7 +976,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
     >
       <div className="league-tiebreak__title">Tie-breaker required</div>
       <div className="league-tiebreak__desc">
-        All regular matches are finished, and the teams below are level on every criterion for a place that counts. Run a tie-breaker to separate them. A tie at 1st or 2nd place (and at 3rd place when joint 3rd places are off) needs a tie-breaker with a winner.
+        All regular matches are finished, and the teams below are level on every criterion for a place that counts. Run a tie-breaker to separate them. A tie {LEAGUE_TIE_PLACES} needs a tie-breaker with a winner.
       </div>
       {bannerGroups.map((group) => {
         const names = group.teamNames || [];

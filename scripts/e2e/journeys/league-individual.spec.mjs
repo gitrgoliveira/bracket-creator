@@ -384,6 +384,11 @@ test.describe('league-individual', () => {
 
     await test.step('desk: on a phone the notice does not scroll sideways and its buttons hold one line', async () => {
       await expectNoSidewaysScroll(page, [320, 375, 414], async (width) => {
+        const box = await notice().evaluate((el) => {
+          const r = el.getBoundingClientRect();
+          return { left: r.left, right: r.right, inner: window.innerWidth };
+        });
+        expect(box.left >= -0.5 && box.right <= box.inner + 0.5, `the notice is cut off at ${width}px`).toBe(true);
         for (const name of [TEXT.anotherRound, 'Draw lots instead']) {
           expect(await labelLines(notice().getByRole('button', { name })), `${name} wraps at ${width}px`).toBe(1);
         }

@@ -193,5 +193,4 @@ Both Excel downloads on the competition page (refer to
   points columns do not appear.
 - The results workbook records each side's referee flag count in the score
   cells instead of ippon letters. A bout recorded without flags leaves the
-  score cells blank with the decision
-  marked in the centre column.
+  score cells blank with the decision marked in the centre column.

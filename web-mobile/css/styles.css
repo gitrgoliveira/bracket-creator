@@ -97,10 +97,6 @@
   /* Line-height tokens */
   --lh-base:  1.5;   /* body prose, form hints */
 
-  /* Spacing tokens for hint lines under a control */
-  --space-xs: 4px;
-  --space-sm: 8px;
-
   --r-sm: 6px;
   --r: 10px;
   --r-lg: 14px;
@@ -9211,13 +9207,13 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   color: var(--ink-2);
 }
 .daihyosen-controls__level-hint {
-  margin-top: var(--space-sm);
+  margin-top: 8px;
   font-size: 12px;
   line-height: 1.45;
   color: var(--ink-2);
 }
 .sb-blocked-reason {
-  margin-top: var(--space-xs);
+  margin-top: 4px;
   font-size: 12px;
   line-height: 1.4;
   text-align: center;
@@ -10340,7 +10336,7 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 .shiaijo-upnext__actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .shiaijo-upnext__actions .btn { display: inline-flex; align-items: center; gap: 6px; }
 .shiaijo-upnext__hint { font-size: 12px; color: var(--ink-2); line-height: 1.4; }
-.shiaijo-qrow__reason { font-size: 12px; color: var(--ink-2); line-height: 1.4; margin-top: var(--space-sm); }
+.shiaijo-qrow__reason { font-size: 12px; color: var(--ink-2); line-height: 1.4; margin-top: 8px; }
 .shiaijo-upnext__error { font-size: 12px; color: var(--danger); margin-top: 6px; }
 
 /* Team-match lineup prompt above the inline scoring panel */

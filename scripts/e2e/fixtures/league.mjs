@@ -658,8 +658,9 @@ export async function openViewerAwards(page, id) {
 
 // The page does not scroll sideways at any of `widths` (a small phone, a phone,
 // a large phone) and no Awards place card is cut off at either edge; the
-// viewport goes back to its size afterwards.
-export async function expectNoSidewaysScroll(page, widths = [320, 375, 414]) {
+// viewport goes back to its size afterwards. `atWidth(width)` runs the caller's
+// own checks at each width.
+export async function expectNoSidewaysScroll(page, widths = [320, 375, 414], atWidth = null) {
   const original = page.viewportSize();
   try {
     for (const width of widths) {
@@ -673,11 +674,20 @@ export async function expectNoSidewaysScroll(page, widths = [320, 375, 414]) {
       }));
       expect(seen.page, `the page scrolls sideways at ${width}px`).toBeLessThanOrEqual(0);
       expect(seen.clipped, `an Awards place is cut off at ${width}px`).toBe(0);
+      if (atWidth) await atWidth(width);
     }
   } finally {
     if (original) await page.setViewportSize(original);
   }
 }
+
+// How many lines a control's label takes (1 when it does not wrap): the
+// distinct tops of its text's line boxes.
+export const labelLines = (locator) => locator.evaluate((el) => {
+  const range = document.createRange();
+  range.selectNodeContents(el);
+  return new Set([...range.getClientRects()].filter((r) => r.width > 0).map((r) => Math.round(r.top))).size;
+});
 
 // The podium as [{ place, label, name, dojo }] in the order shown, plus the
 // league Winner badge (`winner`, '' when none). Empty when the tab says the

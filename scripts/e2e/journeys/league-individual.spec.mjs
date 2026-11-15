@@ -59,7 +59,7 @@ import {
 } from '../fixtures/scoring.mjs';
 import { editorSides, ensureRunning, inlineRunning, recordDecision, rosterOf } from '../fixtures/individual.mjs';
 import {
-  TEXT, answerConfirm, awardsTabOffered, backUpCompetition, circleNotice, drawnBoutNotices, leagueRanks,
+  TEXT, answerConfirm, awardsTabOffered, backUpCompetition, circleNotice, drawnBoutNotices, expectNoSidewaysScroll, labelLines, leagueRanks,
   openDrawnBout, openLeague, openLeagueSettings, openNumberedRow, openViewerAwards, pairKey, readBanner,
   readChusen, readChusenRecorded, readConfirm, readLeagueSettings, readLeagueTable, readNumberedRows, readPodium, recordLots, restoreAsCopy, rewriteBackup,
   seedLeague, withFrontMatterLine,
@@ -380,6 +380,18 @@ test.describe('league-individual', () => {
       record({ step: 'pools', action: 'the notice after the cycle', ranks: await leagueRanks(page), ...after, public: pub,
         shot: await shot(page, 'pools-after-cycle', { fullPage: true }) });
       expect(pub.offered, 'no podium while the cycle is unbroken').toBe(false);
+    });
+
+    await test.step('desk: on a phone the notice does not scroll sideways and its buttons hold one line', async () => {
+      await expectNoSidewaysScroll(page, [320, 375, 414], async (width) => {
+        for (const name of [TEXT.anotherRound, 'Draw lots instead']) {
+          expect(await labelLines(notice().getByRole('button', { name })), `${name} wraps at ${width}px`).toBe(1);
+        }
+        if (width === 375) {
+          await notice().scrollIntoViewIfNeeded();
+          record({ step: 'pools', action: 'the notice at phone width', shot: await shot(page, 'pools-circle-phone') });
+        }
+      });
     });
 
     await test.step('desk: Draw lots instead opens the lots entry, still offering another round', async () => {

@@ -110,6 +110,34 @@ func TestApplyJointThirdRanks(t *testing.T) {
 			"the chusen decided 1st and 2nd only; the 3rd/4th tie is still a joint 3rd")
 	})
 
+	t.Run("lots over one run of a group leave another run's joint 3rd shared", func(t *testing.T) {
+		// One Points group of four: the tie-break bouts left {a, b} and {c, d}
+		// level (a and b each beat c and d), so the run at 3rd shares its place
+		// whatever the lots entered for the run at 1st.
+		round := []state.MatchResult{
+			tbBout(0, "a", "c", "a"), tbBout(1, "a", "d", "a"),
+			tbBout(2, "b", "c", "b"), tbBout(3, "b", "d", "b"),
+		}
+		ranked := func(lotsOver ...string) []state.PlayerStanding {
+			sorted := runRows("a", "b", "c", "d")
+			for i := range sorted {
+				sorted[i].Rank = i + 1
+				for _, id := range lotsOver {
+					if sorted[i].Player.ID == id {
+						sorted[i].IsOverridden = true
+					}
+				}
+			}
+			applyJointThirdRanks(leagueOn, sorted, round)
+			return sorted
+		}
+		assert.Equal(t, []int{1, 2, 3, 3}, ranksOf(ranked("a", "b")),
+			"lots on the run at 1st do not strip the run at 3rd of its shared place")
+		assert.Equal(t, []int{1, 2, 3, 3}, ranksOf(ranked()))
+		assert.Equal(t, []int{1, 2, 3, 4}, ranksOf(ranked("c", "d")),
+			"lots over the run at 3rd keep its sequential places")
+	})
+
 	t.Run("non-league (mixed) with setting on → not collapsed", func(t *testing.T) {
 		mixed := &state.Competition{Format: state.CompFormatMixed, LeagueTwoThirdPlaces: true}
 		sorted := []state.PlayerStanding{

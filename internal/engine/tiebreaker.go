@@ -350,36 +350,32 @@ func runPlaces(group []state.PlayerStanding, positions []int, run []state.Player
 	return places
 }
 
-// tieSettled reports whether a Points-tied group's finishing order has
-// already been decided, so it is no longer a tie to break: the operator
-// recorded a chusen for every member that is in force (chusenRecorded, reading
-// the rows' IsOverridden), or the group's supplementary bouts ordered it
-// completely (tieSettledByBouts), or the bouts separated all but some runs and
-// the operator recorded a chusen for each of those (a draw nobody could fight,
-// barredDrawRuns: the lots rank the run alone). Points never change after any
-// of them (applyTiebreakSort only reorders within the group), so
+// openTieRuns lists, as positions into the Points-sorted standings, the runs of
+// a Points-tied group (positions, from detectPoolTies) whose finishing order is
+// still to be decided, so a tie already decided is no longer one to break: a run
+// of more than one member the fought bouts left level (tieBreakRuns) that the
+// operator has recorded no chusen for (chusenRecorded, reading the rows'
+// IsOverridden; the lots rank the run alone). A group the supplementary bouts
+// ordered completely (tieSettledByBouts) has none. Points never change after
+// any of them (applyTiebreakSort only reorders within the group), so
 // detectPoolTies alone still reports such a group, and the tie highlight read
 // it as a tie forever (operator ruling 2026-09-24: a tie settled by chusen or
-// by daihyosen is no longer a tie).
-func tieSettled(group []state.PlayerStanding, matches []state.MatchResult, isTeam bool) bool {
-	return chusenRecorded(group) || tieSettledByBouts(group, matches, isTeam) || levelRunsRecorded(group, matches, isTeam)
-}
-
-// levelRunsRecorded reports whether a group its fought bouts left in two or
-// more runs has a chusen in force for every run of more than one member, so the
-// lots decided each stretch the bouts could not (tieBreakRuns).
-func levelRunsRecorded(group []state.PlayerStanding, matches []state.MatchResult, isTeam bool) bool {
-	level := false
-	for _, run := range tieBreakRuns(group, matches, isTeam) {
-		if len(run) < 2 {
-			continue
-		}
-		if !chusenRecorded(run) {
-			return false
-		}
-		level = true
+// by daihyosen is no longer a tie). Each run is judged on its own, so a run
+// settled does not close another of the same group, and one that owes nothing
+// (a shared 3rd) is judged by its own best place, not the group's.
+func openTieRuns(positions []int, group []state.PlayerStanding, matches []state.MatchResult, isTeam bool) [][]int {
+	if tieSettledByBouts(group, matches, isTeam) {
+		return nil
 	}
-	return level
+	var open [][]int
+	at := 0
+	for _, run := range tieBreakRuns(group, matches, isTeam) {
+		if len(run) >= 2 && !chusenRecorded(run) {
+			open = append(open, positions[at:at+len(run)])
+		}
+		at += len(run)
+	}
+	return open
 }
 
 // tieSettledByBouts reports whether a Points-tied group's supplementary bouts

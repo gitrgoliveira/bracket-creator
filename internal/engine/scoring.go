@@ -2175,7 +2175,7 @@ func (e *Engine) computeStandingsFrom(loader poolStandingsLoader, compId string)
 		// A tie already settled is not flagged: a chusen in force for every
 		// member of the group (IsOverridden), or supplementary bouts that
 		// ordered it completely, decided the order, so the group is no longer a
-		// tie to break (operator ruling 2026-09-24; see tieSettled).
+		// tie to break (operator ruling 2026-09-24; see openTieRuns).
 		markTiedStandings(comp, sorted, poolResults[p.PoolName], playerStandings)
 		if band != nil {
 			markTiesOutOfBand(band, p.PoolName, sorted)
@@ -2267,10 +2267,10 @@ func applyPoolRanksInForce(sorted []state.PlayerStanding, inForce map[string]int
 // tie-breaker with a winner orders it, or the lots do (a circle the bouts
 // cannot separate, or a tie-breaker drawn because both its sides are barred).
 //
-// It is a no-op for non-leagues. A tied group whose members hold a rank in
-// force (IsOverridden, poolRanksInForce) keeps its sequential ranks, since the
-// operator's explicit order decides that group; a different tie in the same
-// pool is still shared. Scoping to leagues keeps mixed and knockout seeding
+// It is a no-op for non-leagues. A run whose members hold a rank in force
+// (IsOverridden, poolRanksInForce) keeps its sequential ranks, since the
+// operator's explicit order decides that run; a different run of the same
+// group, and a different tie in the same pool, is still shared. Scoping to leagues keeps mixed and knockout seeding
 // strictly sequential -- those formats decide a single/joint 3rd with a bronze
 // match instead, via RequiresSingleThirdPlace; naginata leagues leave the
 // joint-3rd setting off and so keep a single 3rd.
@@ -2290,9 +2290,6 @@ func applyJointThirdRanks(comp *state.Competition, sorted []state.PlayerStanding
 	}
 	for _, positions := range detectPoolTies(sorted) {
 		group := standingsAt(sorted, positions)
-		if slices.ContainsFunc(group, func(s state.PlayerStanding) bool { return s.IsOverridden }) {
-			continue
-		}
 		jointThird := comp.EffectiveTwoThirdPlaces()
 		outOfBand := !slices.ContainsFunc(group, func(s state.PlayerStanding) bool { return !s.TieOutOfBand })
 		if !jointThird && !outOfBand {
@@ -2304,7 +2301,11 @@ func applyJointThirdRanks(comp *state.Competition, sorted []state.PlayerStanding
 			// The joint 3rd rule is judged on the run's own best place: a pair
 			// the bouts left level at 3rd and 4th shares 3rd even where the
 			// group it came from started at 1st.
-			shares := outOfBand || (jointThird && place >= 3)
+			// A run holding a rank in force keeps its sequential ranks: the
+			// operator's order decides it. A different run of the group is
+			// judged on its own.
+			held := slices.ContainsFunc(run, func(s state.PlayerStanding) bool { return s.IsOverridden })
+			shares := !held && (outOfBand || (jointThird && place >= 3))
 			for range run {
 				if shares {
 					sorted[positions[at]].Rank = place
@@ -2344,10 +2345,10 @@ func applyJointThirdRanks(comp *state.Competition, sorted []state.PlayerStanding
 // build a synthetic byKey from `sorted` itself via rosterIndexFrom).
 //
 // A chusen is read off the rows' IsOverridden (the ranks in force,
-// poolRanksInForce). Both branches mark only the groups tieSettled leaves open: Tied means
-// a tie still to be broken, which is what the amber row tells the operator,
-// so a group a chusen or its supplementary bouts already ordered is not one
-// even though its Points stay equal.
+// poolRanksInForce). Both branches mark only the runs openTieRuns leaves open:
+// Tied means a tie still to be broken, which is what the amber row tells the
+// operator, so a run a chusen or its supplementary bouts already ordered is not
+// one even though its Points stay equal.
 func markTiedStandings(comp *state.Competition, sorted []state.PlayerStanding, matches []state.MatchResult, rosterIndex map[string]*state.PlayerStanding) {
 	if len(sorted) == 0 {
 		return
@@ -2368,9 +2369,7 @@ func markTiedStandings(comp *state.Competition, sorted []state.PlayerStanding, m
 	// the branches see only the regular matches.
 	var open [][]int
 	for _, positions := range detectPoolTies(sorted) {
-		if !tieSettled(standingsAt(sorted, positions), matches, isTeam) {
-			open = append(open, positions)
-		}
+		open = append(open, openTieRuns(positions, standingsAt(sorted, positions), matches, isTeam)...)
 	}
 
 	if isLeague {

@@ -419,3 +419,44 @@ func TestCalculatePoolStandings_SettledTieIsNotTied(t *testing.T) {
 		assert.Empty(t, tiedIn(t, eng, compID), "the daihyosen settled it")
 	})
 }
+
+// A Points-tied group the fought tie-break bouts split into runs is judged one
+// run at a time: lots over the run at 1st-2nd close that run alone, and the run
+// level at 3rd-4th shares its place under joint 3rd places, so it owes nothing
+// and is not marked either.
+func TestMarkTiedStandings_JudgesEachRunOfAGroup(t *testing.T) {
+	// a and b beat c and d in the tie-break bouts and never met each other, nor
+	// did c and d: two level runs, {a, b} at 1st and {c, d} at 3rd.
+	round := []state.MatchResult{
+		tbBout(0, "a", "c", "a"), tbBout(1, "a", "d", "a"),
+		tbBout(2, "b", "c", "b"), tbBout(3, "b", "d", "b"),
+	}
+	var fought []state.MatchResult
+	for i, pair := range [][2]string{{"a", "b"}, {"a", "c"}, {"a", "d"}, {"b", "c"}, {"b", "d"}, {"c", "d"}} {
+		m := completedMatch(i, pair[0], pair[1])
+		m.SideAID, m.SideBID = pair[0], pair[1]
+		fought = append(fought, m)
+	}
+	matches := append(fought, round...)
+	marked := func(twoThird bool, lotsOver ...string) map[string]bool {
+		comp := &state.Competition{Format: state.CompFormatLeague, LeagueTwoThirdPlaces: twoThird}
+		sorted := runRows("a", "b", "c", "d")
+		for i := range sorted {
+			sorted[i].Player.Name = sorted[i].Player.ID
+			for _, id := range lotsOver {
+				if sorted[i].Player.ID == id {
+					sorted[i].IsOverridden = true
+				}
+			}
+		}
+		markTiedStandings(comp, sorted, matches, rosterIndexFrom(sorted))
+		return tiedNames(sorted)
+	}
+
+	assert.Equal(t, map[string]bool{"a": true, "b": true}, marked(true),
+		"joint 3rd: the run at 3rd owes nothing, only the run at 1st is a tie to break")
+	assert.Empty(t, marked(true, "a", "b"),
+		"lots over the run at 1st settle it, and the shared 3rd leaves nothing marked")
+	assert.Equal(t, map[string]bool{"c": true, "d": true}, marked(false, "a", "b"),
+		"joint 3rd off: lots settle the run at 1st, the run at 3rd still owes a decider")
+}

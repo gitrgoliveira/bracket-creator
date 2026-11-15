@@ -3293,7 +3293,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		// Clearing the lots of a finished league can put it back into match play
 		// (the auto-complete pass below), which every result door warns about
 		// first: the same 409 league_finished until the request confirms.
-		if err := refuseFinishedLeagueLotsReset(store, eng, id, reset.ConfirmFinished); err != nil {
+		if err := refuseFinishedLeagueLotsReset(store, store, eng, id, reset.ConfirmFinished); err != nil {
 			if respondIfLeagueFinished(c, err) {
 				return
 			}

@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"errors"
 	"testing"
 	"time"
 
@@ -285,6 +286,28 @@ func TestIndividualLeague_DecisionOverTheLotsNeedsAConfirm(t *testing.T) {
 	overrides, err := store.LoadOverrides(compID)
 	require.NoError(t, err)
 	assert.NotEmpty(t, overrides.PoolRanks["Pool A"], "the lots stay stored")
+}
+
+// A board that still scores the bout it has not seen finish sends a running
+// write. The merge drops the result group from it, so it cannot take the bout
+// out of its draw and the lots stay in force: it is no occasion for the lots
+// warning.
+func TestIndividualLeague_RunningWriteOverTheDrawnBoutIsNoLotsWarning(t *testing.T) {
+	const compID = "ind-barred-running-write"
+	eng, store, tbID := finishedBarredTiebreakLeague(t, compID)
+	barCompetitor(t, store, compID, "ben-id", false)
+
+	_, err := eng.RecordMatchResultWithIneligibility(compID, tbID, &state.MatchResult{
+		Status: state.MatchStatusRunning, IpponsA: []string{"M"},
+		// Stamped before the stored result but after the scoring groups' (none):
+		// the merge keeps the scoring groups, so the write is not held whole.
+		ModifiedAt: time.Now().Add(-time.Second).UnixMilli(),
+	})
+	var replaced *LotsReplacedError
+	assert.False(t, errors.As(err, &replaced), "a write that cannot change the result is not warned about: %v", err)
+	assert.Equal(t, state.MatchStatusCompleted, poolMatchStatus(t, store, compID, tbID), "the bout stays finished")
+	assert.Empty(t, poolMatchWinner(t, store, compID, tbID), "the bout stays drawn")
+	assert.Equal(t, state.CompStatusComplete, loadComp(t, store, compID).Status)
 }
 
 // A score write that gives the drawn bout a winner is warned about by the same

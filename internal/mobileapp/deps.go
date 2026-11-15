@@ -384,6 +384,13 @@ type RequeueEngine interface {
 	RevertMatchToQueue(compID, matchID string, opts ...engine.ForceOptions) error
 }
 
+// LotsResetEngine is what the lots reset's finished-league warning asks of the
+// engine: a dry run of whether clearing the lots would reopen the league.
+// *engine.Engine satisfies it.
+type LotsResetEngine interface {
+	LotsResetReopensLeague(tx state.StoreTx, compID string) (bool, error)
+}
+
 // RestoreEngine combines what restore needs from the engine: number prefix
 // reassignment and returning restored running matches to the queue.
 // *engine.Engine satisfies it.

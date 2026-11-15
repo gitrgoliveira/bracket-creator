@@ -340,8 +340,12 @@ func (e *Engine) recordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 	refusal := refuseDrawnLeagueTiebreak(comp, matchID, result)
 	// A write that would take a drawn bout out of its draw (a fight, a decision,
 	// a reopen by score) while the lots rule it replaces the lots, which the
-	// organiser entered: it is warned about first (refuseOverRecordedLots).
-	if refusal == nil && (result.Status != state.MatchStatusCompleted || result.Winner != "" || result.WinnerID != "") {
+	// organiser entered: it is warned about first (refuseOverRecordedLots). Only a
+	// write that changes the result group can do that: a client's running write
+	// over the finished bout has the group removed by the merge
+	// (effectiveChangedGroups), so it never touches the drawn result or the lots.
+	if refusal == nil && prior != nil && slices.Contains(effectiveChangedGroups(prior, result, inPool), state.GroupResult) &&
+		(result.Status != state.MatchStatusCompleted || result.Winner != "" || result.WinnerID != "") {
 		refusal = e.refuseOverRecordedLots(tx, compID, prior, fo.ConfirmLots)
 	}
 	// A write the merge holds whole lands nothing, so neither refusal applies to

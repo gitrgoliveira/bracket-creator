@@ -2255,12 +2255,12 @@ func refuseFinishedLeagueReopen(txr CompetitionTransactor, tl TournamentLoader, 
 // exactly that file, so the check lets it through. Like
 // refuseFinishedLeagueReopen it runs in a transaction of its own: a league that
 // finishes between the check and the reset is cleared without the warning.
-func refuseFinishedLeagueLotsReset(store *state.Store, eng *engine.Engine, compID string, confirmed bool) error {
+func refuseFinishedLeagueLotsReset(txr CompetitionTransactor, tl TournamentLoader, eng LotsResetEngine, compID string, confirmed bool) error {
 	if confirmed {
 		return nil
 	}
 	var refusal error
-	err := store.WithTransaction(compID, func(stx state.StoreTx) error {
+	err := txr.WithTransaction(compID, func(stx state.StoreTx) error {
 		reopens, err := eng.LotsResetReopensLeague(stx, compID)
 		if errors.Is(err, state.ErrCorruptOverrides) {
 			return nil
@@ -2268,7 +2268,7 @@ func refuseFinishedLeagueLotsReset(store *state.Store, eng *engine.Engine, compI
 		if err != nil || !reopens {
 			return err
 		}
-		courts, err := leagueRemovedCourts(stx, store, compID)
+		courts, err := leagueRemovedCourts(stx, tl, compID)
 		if err != nil {
 			return err
 		}

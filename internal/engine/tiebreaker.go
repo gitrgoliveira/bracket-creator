@@ -336,6 +336,20 @@ func tieBreakLeftLevel(group []state.PlayerStanding, matches []state.MatchResult
 	return judgeTieBreakRounds(group, matches, IsTiebreakerMatchID).level
 }
 
+// runPlaces lists the places (0-based, as detectPoolTies reports them) a run of
+// a tied group stands at: the places of group's rows (at positions) that the
+// run's members hold.
+func runPlaces(group []state.PlayerStanding, positions []int, run []state.PlayerStanding) []int {
+	in := groupMemberIDs(run)
+	var places []int
+	for i, s := range group {
+		if in[s.Player.ID] {
+			places = append(places, positions[i])
+		}
+	}
+	return places
+}
+
 // tieSettled reports whether a Points-tied group's finishing order has
 // already been decided, so it is no longer a tie to break: the operator
 // recorded a chusen for every member that is in force (chusenRecorded, reading
@@ -1017,9 +1031,6 @@ func (e *Engine) RunTiebreakerRound(compID, poolName string, memberIDs []string)
 		lotsDrawn := false
 		for _, positions := range detectPoolTies(poolStandings) {
 			group := standingsAt(poolStandings, positions)
-			if !band(poolName, positions, group) {
-				continue
-			}
 			for _, r := range tieBreakLeftLevel(group, allMatches) {
 				ids := make([]string, len(r))
 				for i, s := range r {
@@ -1027,6 +1038,12 @@ func (e *Engine) RunTiebreakerRound(compID, poolName string, memberIDs []string)
 				}
 				slices.Sort(ids)
 				if !slices.Equal(ids, want) {
+					continue
+				}
+				// The run is judged on its own places, as ChusenStatus offers it
+				// (chusenOfRuns): one level at 3rd and 4th inside a group that
+				// started at 1st shares 3rd where joint 3rd places are awarded.
+				if !band(poolName, runPlaces(group, positions, r), r) {
 					continue
 				}
 				if chusenRecorded(r) {

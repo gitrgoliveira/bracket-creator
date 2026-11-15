@@ -367,3 +367,110 @@ func TestGenerateTiebreakerMatches_NumbersPastEveryRow(t *testing.T) {
 	assert.Equal(t, "Pool A-TB-5", got[0].ID)
 	assert.Equal(t, "Pool A-TB-6", got[1].ID)
 }
+
+// fiveWithACircle is an individual league of five, every one level at 1st on
+// wins, whose ippon-shobu round among all five put Aki first and Bea second and
+// left Cal, Dee and Eli in a circle: a run level at 3rd to 5th inside a group that
+// started at 1st.
+func fiveWithACircle(t *testing.T, compID string, opts ...func(*state.Competition)) (*Engine, *state.Store) {
+	t.Helper()
+	names := []string{"Aki", "Bea", "Cal", "Dee", "Eli"}
+	at := map[string]int{}
+	for i, n := range names {
+		at[n] = i
+	}
+	// Each one beats the next two round the table, so all five finish on two wins.
+	eng, store := indivPoolFromResults(t, compID, names, func(a, b string) string {
+		if d := at[b] - at[a]; d == 1 || d == 2 {
+			return a
+		}
+		return b
+	}, opts...)
+	outcome, err := eng.MaybeAutoCompletePools(compID)
+	require.NoError(t, err)
+	require.Equal(t, AutoCompleteTiebreakInjected, outcome, "the five-way tie at 1st gets its ippon-shobu round")
+	round := func(a, b string) string {
+		pair := map[string]bool{a: true, b: true}
+		switch {
+		case pair["Aki"]:
+			return "Aki"
+		case pair["Bea"]:
+			return "Bea"
+		case pair["Cal"] && pair["Dee"]:
+			return "Cal"
+		case pair["Dee"] && pair["Eli"]:
+			return "Dee"
+		default:
+			return "Eli"
+		}
+	}
+	require.Equal(t, 10, scoreScheduledTB(t, eng, store, compID, round))
+	return eng, store
+}
+
+func recordLots(t *testing.T, eng *Engine, store *state.Store, compID string, order ...string) {
+	t.Helper()
+	for i, name := range order {
+		require.NoError(t, store.SaveRankOverride(compID, "Pool A", playerID(name), i+1))
+	}
+	eng.standingsCache.Delete(compID)
+	eng.standingsFlight.Delete(compID)
+}
+
+// The lots a circle inside a larger level group was ranked by are reported for
+// that circle alone, at its own place: not the whole Points group, whose other
+// members the bouts had already placed and the lots never ranked.
+func TestChusenStatus_RecordedIsTheRunTheLotsRanked(t *testing.T) {
+	const compID = "indiv-five-recorded"
+	eng, store := fiveWithACircle(t, compID)
+
+	report, err := eng.ChusenStatus(compID)
+	require.NoError(t, err)
+	require.Len(t, report.Pending, 1)
+	assert.Equal(t, 3, report.Pending[0].MinPosition)
+	assert.ElementsMatch(t, []string{"Cal", "Dee", "Eli"}, chusenTeamNames(report.Pending[0]), "only the circle owes lots")
+
+	recordLots(t, eng, store, compID, "Eli", "Cal", "Dee")
+	report, err = eng.ChusenStatus(compID)
+	require.NoError(t, err)
+	assert.Empty(t, report.Pending)
+	require.Len(t, report.Recorded, 1)
+	g := report.Recorded[0]
+	assert.Equal(t, 3, g.MinPosition, "the circle's own place")
+	assert.Equal(t, []string{"Eli", "Cal", "Dee"}, chusenTeamNames(g), "Aki and Bea were placed by the bouts, not the lots")
+	assert.Equal(t, []int{1, 2, 3}, g.Ranks)
+}
+
+// Another round is offered for a run only where the panel offers it (StillLevel,
+// judged on the run's own places): with joint 3rd places a circle at 3rd to 5th
+// shares 3rd, though its group started at 1st.
+func TestRunTiebreakerRound_JudgesTheRunOnItsOwnPlaces(t *testing.T) {
+	circle := []string{playerID("Cal"), playerID("Dee"), playerID("Eli")}
+
+	t.Run("a single third place offers the circle another round", func(t *testing.T) {
+		eng, _ := fiveWithACircle(t, "indiv-five-round", func(c *state.Competition) {
+			no := false
+			c.TwoThirdPlaces = &no
+		})
+		report, err := eng.ChusenStatus("indiv-five-round")
+		require.NoError(t, err)
+		require.Len(t, report.Pending, 1)
+		require.Len(t, report.Pending[0].StillLevel, 1)
+		added, err := eng.RunTiebreakerRound("indiv-five-round", "Pool A", circle)
+		require.NoError(t, err)
+		assert.Len(t, added, 3)
+	})
+
+	t.Run("joint third places share 3rd, so no round is offered or accepted", func(t *testing.T) {
+		eng, _ := fiveWithACircle(t, "indiv-five-joint", func(c *state.Competition) {
+			yes := true
+			c.TwoThirdPlaces = &yes
+		})
+		report, err := eng.ChusenStatus("indiv-five-joint")
+		require.NoError(t, err)
+		assert.Empty(t, report.Pending, "the circle shares 3rd and owes nothing")
+		_, err = eng.RunTiebreakerRound("indiv-five-joint", "Pool A", circle)
+		var verr *ValidationError
+		require.ErrorAs(t, err, &verr)
+	})
+}

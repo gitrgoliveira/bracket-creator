@@ -692,11 +692,6 @@ func (e *Engine) chusenStatusFrom(loader poolStandingsLoader, standings func() (
 			if !band(poolName, positions, group) {
 				continue
 			}
-			g := ChusenGroup{
-				PoolName:    poolName,
-				Teams:       group,
-				MinPosition: positions[0] + 1,
-			}
 			// Lots rank a run alone, so each run is its own group, at its own places.
 			runGroup := func(run levelRun) ChusenGroup {
 				return ChusenGroup{PoolName: poolName, Teams: run.members, MinPosition: run.positions[0] + 1}
@@ -736,7 +731,12 @@ func (e *Engine) chusenStatusFrom(loader poolStandingsLoader, standings func() (
 					recorded(runGroup(run))
 				}
 			case groupSettledByChusen(group, positions, matches, inBand):
-				recorded(g)
+				// Each run the lots ranked is its own group, on its own places: a
+				// member the bouts already placed clear of the circle is not in it.
+				_, recordedRuns := chusenOfRuns(group, positions, matches, inBand)
+				for _, run := range recordedRuns {
+					recorded(runGroup(run))
+				}
 			default:
 				// Lots rank a run the fought bouts left level, on its own places
 				// (levelRuns), never the whole Points group. A run whose lots rule

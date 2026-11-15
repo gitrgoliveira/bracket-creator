@@ -311,11 +311,19 @@ function groupTeamIds(teams, names) {
 // and the places it shares, e.g. "Pool A, 1st to 3rd place". Exported for
 // vitest at __tests__/admin_pools.test.jsx.
 function circleGroupLine(group, isLeague = false) {
-  const n = (group.teams || group.teamNames || []).length;
-  const last = group.minPosition + Math.max(n, 1) - 1;
-  const places = placesRangeLabel(group.minPosition, last);
   // A league has one table and no pools ("Pool A" is only its storage name).
-  return isLeague ? places : `${group.poolName}, ${places}`;
+  return isLeague ? groupPlaces(group) : `${group.poolName}, ${groupPlaces(group)}`;
+}
+
+// The places a tied group shares, e.g. "1st to 3rd place".
+function groupPlaces(group) {
+  const n = (group.teams || group.teamNames || []).length;
+  return placesRangeLabel(group.minPosition, group.minPosition + Math.max(n, 1) - 1);
+}
+
+// What heads a tied group's row: a league's places, a pool's name.
+function tieGroupLabel(group, isLeague) {
+  return isLeague ? groupPlaces(group) : group.poolName;
 }
 
 // "1st place" or "1st to 3rd place".
@@ -708,10 +716,10 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
     };
 
     return (
-      <div key={groupKey} className="league-tiebreak__group" style={embed ? { marginTop: 12 } : undefined}>
+      <div key={groupKey} className={embed ? "league-tiebreak__group league-tiebreak__group--embedded" : "league-tiebreak__group"}>
         {!embed && (
           <div className="league-tiebreak__group-header">
-            <span className="league-tiebreak__pos">{isLeague ? circleGroupLine(group, true) : poolName}</span>
+            <span className="league-tiebreak__pos">{tieGroupLabel(group, isLeague)}</span>
             <span className="league-tiebreak__teams">{teamNames.join(" · ")}</span>
           </div>
         )}
@@ -849,7 +857,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
             <div className="league-tiebreak__desc">
               {lotsOnly
                 ? `The ${circleSideWord} to fight the tie-breaker withdrew earlier, so no round can be fought. Draw lots, then enter the order below.`
-                : `${andList(group.teamNames)} each won as many tie-breaker bouts as the others. Run another round among them, or draw lots instead.`}
+                : `${andList(group.teamNames)} each won as many tie-breaker bouts as ${(group.teamNames || []).length === 2 ? "the other" : "the others"}. Run another round among them, or draw lots instead.`}
             </div>
             <div className="league-tiebreak__actions">
               {runs.map(run => {
@@ -917,14 +925,14 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
         return (
           <div key={groupKey} className="league-tiebreak__group">
             <div className="league-tiebreak__group-header">
-              <span className="league-tiebreak__pos">{isLeague ? circleGroupLine(group, true) : group.poolName}</span>
+              <span className="league-tiebreak__pos">{tieGroupLabel(group, isLeague)}</span>
               <span className="league-tiebreak__teams">Drawing lots: {order}</span>
             </div>
             <div className="league-tiebreak__actions">
               <button
                 type="button"
                 className="btn btn--sm"
-                aria-label={`Change the drawing lots for ${isLeague ? circleGroupLine(group, true) : group.poolName}`}
+                aria-label={`Change the drawing lots for ${tieGroupLabel(group, isLeague)}`}
                 onClick={() => setChusenChanging(prev => ({ ...prev, [groupKey]: true }))}
               >
                 Change
@@ -942,7 +950,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
   // names (the same teams, by id) is owed lots, which the chusen banner above
   // asks for: one tie shows in one banner, so it leaves this one. A candidate
   // may name only a run of the group (the bouts already placed the others), and
-  // that run's lots still make this banner repeat it.
+  // a run's lots are enough: the group leaves this banner.
   const lotsOwed = (group) => {
     const ids = groupTeamIds(group.teams, group.teamNames || []);
     if (!ids || !isTeamComp || !chusenCandidates) return false;
@@ -1159,4 +1167,4 @@ if (typeof window !== "undefined") {
 
 // ES export for the vitest suite: pure helpers only. The component
 // stays behind window.* to match the rest of admin_*.jsx.
-export { enrichPoolMatchWithComp, poolMatchesForPool, groupTeamIds, drawnSupplementaryBouts, lotsRuledBouts, circleGroupLine };
+export { enrichPoolMatchWithComp, poolMatchesForPool, groupTeamIds, drawnSupplementaryBouts, lotsRuledBouts, circleGroupLine, tieGroupLabel };

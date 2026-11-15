@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { enrichPoolMatchWithComp, poolMatchesForPool, groupTeamIds, drawnSupplementaryBouts, lotsRuledBouts, circleGroupLine } from '../admin_pools.jsx';
+import { enrichPoolMatchWithComp, poolMatchesForPool, groupTeamIds, drawnSupplementaryBouts, lotsRuledBouts, circleGroupLine, tieGroupLabel } from '../admin_pools.jsx';
 // admin_pools.jsx's chusen banner keys its rank inputs by checkinPid
 // (chusenMemberKey was deleted, the banner now delegates to the one
 // owner of the id-else-name|dojo rule). Imported directly so the tests below
@@ -570,5 +570,10 @@ describe('circleGroupLine', () => {
 
   it('names the places alone for a league', () => {
     expect(circleGroupLine(three, true)).toBe('1st to 3rd place');
+  });
+
+  it('heads a tied group by the places for a league and the pool for a pools competition', () => {
+    expect(tieGroupLabel(three, true)).toBe('1st to 3rd place');
+    expect(tieGroupLabel(three, false)).toBe('Pool A');
   });
 });

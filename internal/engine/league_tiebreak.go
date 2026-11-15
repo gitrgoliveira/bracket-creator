@@ -1,7 +1,6 @@
 package engine
 
 import (
-	"fmt"
 	"sort"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
@@ -380,19 +379,13 @@ type leagueBeforeWrite struct {
 // against afterwards (reconcileLeagueAfterWrite), in the write's transaction: a
 // regular match or a tie-breaker bout of a finished league, whose correction
 // can leave the table unsettled. nil for anything else (another format, a
-// league still in match play), so no other write pays for a standings read.
-func (e *Engine) leagueStateBeforeWrite(tx state.StoreTx, compID, matchID string) (*leagueBeforeWrite, error) {
-	if !IsPoolMatchID(matchID) {
-		return nil, nil
+// league still in match play), so no other write pays for a standings read. It
+// is judged on the competition the write already loaded.
+func leagueStateBeforeWrite(comp *state.Competition, matchID string) *leagueBeforeWrite {
+	if !IsPoolMatchID(matchID) || comp == nil || comp.Format != state.CompFormatLeague || comp.Status != state.CompStatusComplete {
+		return nil
 	}
-	comp, err := tx.LoadCompetition(compID)
-	if err != nil {
-		return nil, fmt.Errorf("RecordMatchResultWithIneligibilityTx: load competition %s: %w", compID, err)
-	}
-	if comp == nil || comp.Format != state.CompFormatLeague || comp.Status != state.CompStatusComplete {
-		return nil, nil
-	}
-	return &leagueBeforeWrite{finished: true}, nil
+	return &leagueBeforeWrite{finished: true}
 }
 
 // reconcileLeagueAfterWrite keeps a finished league's status true to its table

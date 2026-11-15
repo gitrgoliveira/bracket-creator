@@ -188,6 +188,13 @@ describe('AdminPools: an individual tie-breaker round that went in a circle', ()
     expect(notice.textContent).toContain('The competitors to fight the tie-breaker withdrew earlier, so no round can be fought.');
     expect(notice.textContent).not.toMatch(/won as many/);
     expect(notice.textContent).not.toMatch(/teams/);
+    cleanup();
+
+    // Two competitors level have one other, not "the others".
+    const two = { ...barred, stillLevel: [members.slice(0, 2)] };
+    await mount(leagueComp(), makeApi([two]));
+    notice = (await screen.findByText('A tie-breaker round left a tie')).closest('.league-tiebreak');
+    expect(notice.textContent).toContain('Aki and Bea each won as many tie-breaker bouts as the other. Run another round');
   });
 
   it('speaks of pairs for an engi competition whose fighters withdrew earlier', async () => {
@@ -213,7 +220,7 @@ describe('AdminPools: an individual tie-breaker round that went in a circle', ()
     // One tie, one header: the entry repeats neither the places nor the names.
     expect(notice.querySelectorAll('.league-tiebreak__group-header')).toHaveLength(1);
     const entry = screen.getByText(/one per competitor/).closest('.league-tiebreak__group');
-    expect(entry.style.marginTop).toBe('12px');
+    expect(entry.classList.contains('league-tiebreak__group--embedded')).toBe(true);
 
     fireEvent.change(screen.getByLabelText('Aki'), { target: { value: '3' } });
     await act(async () => {

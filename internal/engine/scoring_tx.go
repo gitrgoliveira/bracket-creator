@@ -102,11 +102,12 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 	before := e.storedStatus(tx, compID, matchID)
 	// Whether a league had finished before this write, for the reconcile
 	// below (nil unless the write can move a finished league).
-	league, err := e.leagueStateBeforeWrite(tx, compID, matchID)
+	comp, err := tx.LoadCompetition(compID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("RecordMatchResultWithIneligibilityTx: load competition %s: %w", compID, err)
 	}
-	status, err := e.recordMatchResultWithIneligibilityTx(tx, compID, matchID, result, opts...)
+	league := leagueStateBeforeWrite(comp, matchID)
+	status, err := e.recordMatchResultWithIneligibilityTx(tx, compID, matchID, comp, result, opts...)
 	// A kachinuki match keeps the lineups it started with, and bout 1 is
 	// brought to what its lineup says (operator decision K1 (c),
 	// kachinuki_opener.go), only once the write stands.
@@ -163,22 +164,16 @@ func refuseDrawnLeagueTiebreak(comp *state.Competition, matchID string, result *
 }
 
 // recordMatchResultWithIneligibilityTx is RecordMatchResultWithIneligibilityTx
-// before bout 1 of a kachinuki encounter is seated.
-func (e *Engine) recordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, matchID string, result *state.MatchResult, opts ...ForceOptions) (*domain.CompetitorStatus, error) {
+// before bout 1 of a kachinuki encounter is seated, on the competition its
+// caller loaded.
+func (e *Engine) recordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, matchID string, comp *state.Competition, result *state.MatchResult, opts ...ForceOptions) (*domain.CompetitorStatus, error) {
 	fo := firstForceOptions(opts)
 	result.ID = matchID
 	if result.WriteID == "" && fo.WriteID != "" {
 		result.WriteID, result.Basis, result.WriteSession = fo.WriteID, fo.Basis, fo.Session
 	}
 
-	// Engi dispatch seam (tx-aware): a flag-scored competition records via the
-	// engi slice through the SAME tx so the write stays inside the caller's
-	// single per-comp lock acquire. Engi has no eligibility concept, so the
-	// status return is nil.
-	comp, loadErr := tx.LoadCompetition(compID)
-	if loadErr != nil {
-		return nil, fmt.Errorf("RecordMatchResultWithIneligibilityTx: load competition %s: %w", compID, loadErr)
-	}
+	// comp is the competition the caller loaded in this same transaction.
 	// An exact resend of a finish already recorded (a queued write whose
 	// first send landed but whose answer was lost) answers as recorded and
 	// writes nothing, before anything else judges it (bc-xrpl).

@@ -357,7 +357,7 @@ export function LeagueStandingsViewer({ competition, poolMatches, tweaks, onMatc
           </thead>
           <tbody>
             {standings.length > 0 ? standings.map((s, i) => {
-              const tie = leagueTies.get(s.player?.id || `${s.player?.name}||${s.player?.dojo || ""}`);
+              const tie = tiedPlaceOf(leagueTies, s.player);
               const rank = tie ? tie.place : s.rank || i + 1;
               const isDHWinner = isTeam && dhWinnerNames.has(s.player?.name || "");
               const rowClasses = [
@@ -784,11 +784,17 @@ export function tiedPlaces(poolStandings, qualifiers) {
   (poolStandings || []).forEach((s) => {
     if (!s || !s.tied) return;
     const g = groups.get(groupKey(s));
-    const key = s.player.id || `${s.player.name}||${s.player.dojo || ""}`;
+    if (!s.player || !s.player.id) return;
     const boutOwed = g.place <= qualifiers;
-    byRow.set(key, { place: g.place, boutOwed, decidesAdvancement: boutOwed && g.last > qualifiers });
+    byRow.set(s.player.id, { place: g.place, boutOwed, decidesAdvancement: boutOwed && g.last > qualifiers });
   });
   return byRow;
+}
+
+// The tie a competitor's row holds in tiedPlaces' answer, or undefined. The one
+// reader of its key, which is the participant id and nothing else.
+export function tiedPlaceOf(ties, player) {
+  return player && player.id ? ties.get(player.id) : undefined;
 }
 
 // The tooltip on a tied row's badge. It promises a deciding bout only where the
@@ -942,7 +948,7 @@ export function PoolsViewer({ pools, standings, poolMatches, tweaks, competition
                   const lookup = rankByPlayerKey.get(p.id || `${p.name}||${p.dojo || ""}`);
                   const s = lookup ? lookup.standing : null;
                   const rank = lookup ? lookup.rank : null;
-                  const tie = tiedByRow.get(p.id || `${p.name}||${p.dojo || ""}`);
+                  const tie = tiedPlaceOf(tiedByRow, p);
                   const isAdvancing = !isLeague && poolHasResults && rank !== null && rank <= poolQualifiers
                     && !(tie && tie.decidesAdvancement);
 

@@ -1,7 +1,7 @@
 import React from 'react';
 import { render } from '@testing-library/react';
 import { describe, it, expect, beforeAll } from 'vitest';
-import { PoolsViewer, tiedPlaces } from '../../viewer_standings.jsx';
+import { PoolsViewer, tiedPlaces, tiedPlaceOf } from '../../viewer_standings.jsx';
 
 // A pool whose second place is level on EVERY criterion between two
 // competitors, with the tie-break bout still to be fought. The admin Pools tab
@@ -198,6 +198,14 @@ describe('tiedPlaces', () => {
     expect(m.get('b')).toEqual({ place: 2, boutOwed: true, decidesAdvancement: true });
     expect(m.get('c')).toEqual({ place: 2, boutOwed: true, decidesAdvancement: true });
     expect(m.has('a')).toBe(false);
+  });
+
+  it('is read through tiedPlaceOf by the participant id alone, never by name and dojo', () => {
+    const m = tiedPlaces(rows(winner, row(B, 2, { tied: true }), row(C, 3, { tied: true })), 2);
+    expect(tiedPlaceOf(m, B).place).toBe(2);
+    expect(tiedPlaceOf(m, A)).toBeUndefined();
+    expect(tiedPlaceOf(m, { name: B.name, dojo: B.dojo })).toBeUndefined();
+    expect(tiedPlaceOf(m, undefined)).toBeUndefined();
   });
 
   it('keeps the advancing mark for a tie that sits wholly inside the qualifying places', () => {

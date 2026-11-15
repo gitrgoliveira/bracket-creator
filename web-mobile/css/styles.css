@@ -7524,6 +7524,9 @@ button.vsched-item:not([data-clickable]) {
   margin-bottom: 10px;
   border-bottom: 1px solid var(--warn-border);
 }
+.league-tiebreak__group--embedded {
+  margin-top: 12px;
+}
 .league-tiebreak__group:last-of-type {
   padding-bottom: 0;
   margin-bottom: 0;

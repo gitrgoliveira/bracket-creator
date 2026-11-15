@@ -4,7 +4,7 @@
 import { TermV, competitionKindLabel, poolLabel, compMatchesForCompetition } from './viewer_utils.jsx';
 import { isFollowedPlayer, isPlayerWatched, entryKey, dojoKey, resolveWatchedPlayers, findPrimaryEntry, buildPrimaryNextMatch, buildRoster, useWatchlist, buildWatchedSets, matchInvolvesWatchedSet } from './viewer_watchlist_core.jsx';
 import { MatchDetailCard, VSchedItem, MatchViewerModal, useLiveMatch, bracketMatchIn } from './viewer_match.jsx';
-import { WinnerBadge, SwissStandingsViewer, PoolsViewer, LeagueStandingsViewer, DHBadge, matchWinnerName, tiedPlaces } from './viewer_standings.jsx';
+import { WinnerBadge, SwissStandingsViewer, PoolsViewer, LeagueStandingsViewer, DHBadge, matchWinnerName, tiedPlaces, tiedPlaceOf } from './viewer_standings.jsx';
 import { AwardsView } from './viewer_awards.jsx';
 import { usePrimaryWatch } from './viewer_schedule.jsx';
 import { poolNameOf, isPoolDaihyosenBout, teamMatchTypeFor } from './pool_ids.jsx';
@@ -632,7 +632,7 @@ export function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, runningM
             <tbody>
               {leagueStandings.slice(0, 5).map((s, i) => {
                 const [sMember1, sMember2] = isEngi && window.engiPairParts ? window.engiPairParts(s.player?.name || "") : [s.player?.name || "", ""];
-                const tie = leagueTies.get(s.player?.id || `${s.player?.name}||${s.player?.dojo || ""}`);
+                const tie = tiedPlaceOf(leagueTies, s.player);
                 return (
                 <tr key={s.player?.id || s.player?.name || i} className={tie ? "pool__row--tied" : undefined}>
                   {/* Rank-ordered summary: "#" is the authoritative standing rank

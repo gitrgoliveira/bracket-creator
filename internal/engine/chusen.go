@@ -93,8 +93,10 @@ type runBand func(positions []int, members []state.PlayerStanding) bool
 // bouts, so the refinement by them leaves its runs as they were. A run holding a
 // side of a drawn ippon-shobu bout that can be fought again (fightableDrawnSides)
 // owes nothing even when a circle elsewhere in the group makes the group level:
-// the bout is the way on, so lots would settle it without anyone fighting. Its
-// lots, once recorded, stay listed.
+// the bout is the way on, so lots would settle it without anyone fighting. A run
+// whose next round is scheduled and not fought yet (roundStillToFight) owes
+// nothing either, even when another run of the group was left level: its members
+// are about to fight. Its lots, once recorded, stay listed.
 func chusenOfRuns(group []state.PlayerStanding, positions []int, allMatches []state.MatchResult, statuses map[string]domain.CompetitorStatus, inBand runBand) (owed, recorded []levelRun) {
 	if !tieBreakerLeftTied(group, allMatches) {
 		return nil, nil
@@ -107,7 +109,7 @@ func chusenOfRuns(group []state.PlayerStanding, positions []int, allMatches []st
 		switch {
 		case chusenRecorded(run.members):
 			recorded = append(recorded, run)
-		case !holdsDrawnSide(run.members, fightable):
+		case !holdsDrawnSide(run.members, fightable) && !roundStillToFight(run.members, allMatches):
 			owed = append(owed, run)
 		}
 	}

@@ -2143,7 +2143,7 @@ func (r *leagueFinishedRefusal) body() gin.H {
 
 // LeagueFinishedLotsMessage is the refusal's sentence for clearing the lots of a
 // finished league whose places they alone decided.
-const LeagueFinishedLotsMessage = "This league has finished on the lots you entered. Clearing them puts the league back into match play, so they were not cleared: clear them again and confirm the change."
+const LeagueFinishedLotsMessage = "This league has finished on the lots you entered. Clearing them puts the league back into match play, so they were not cleared. Send the request again with confirmFinished set to true to clear them."
 
 // refuseFinishedLeagueCorrection is the ONE check every result door asks (PUT
 // /score, quick-score, bulk-score, POST /decision, and the reopen doors): a

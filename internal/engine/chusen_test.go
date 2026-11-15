@@ -414,6 +414,59 @@ func TestChusenCandidates_PartialTieWithoutCycleNeedsChusen(t *testing.T) {
 	assert.Equal(t, 2, cands[0].MinPosition)
 }
 
+// TestChusenOfRuns_AskedNoLotsForARunWhoseNextRoundIsScheduled: six competitors
+// level on points. Round 1 put a and b and c ahead of d and e and f, and each
+// trio went in a circle, so both trios are level. The next round among a, b and c
+// is scheduled and not fought yet: lots are owed for d, e and f alone, and for
+// the first trio only once its round is fought and left level too.
+func TestChusenOfRuns_AskedNoLotsForARunWhoseNextRoundIsScheduled(t *testing.T) {
+	ids := []string{"a", "b", "c", "d", "e", "f"}
+	group := make([]state.PlayerStanding, len(ids))
+	positions := make([]int, len(ids))
+	for i, id := range ids {
+		group[i] = state.PlayerStanding{Player: domain.Player{ID: id, Name: id}, Points: 3}
+		positions[i] = i
+	}
+	n := 0
+	bout := func(a, b, winner string, status state.MatchStatus) state.MatchResult {
+		n++
+		return state.MatchResult{ID: fmt.Sprintf("Pool A-TB-%d", n), SideAID: a, SideBID: b, Winner: winner, WinnerID: winner, Status: status}
+	}
+	var matches []state.MatchResult
+	for _, top := range ids[:3] {
+		for _, bottom := range ids[3:] {
+			matches = append(matches, bout(top, bottom, top, state.MatchStatusCompleted))
+		}
+	}
+	for _, trio := range [][3]string{{"a", "b", "c"}, {"d", "e", "f"}} {
+		matches = append(matches,
+			bout(trio[0], trio[1], trio[0], state.MatchStatusCompleted),
+			bout(trio[1], trio[2], trio[1], state.MatchStatusCompleted),
+			bout(trio[2], trio[0], trio[2], state.MatchStatusCompleted))
+	}
+	names := func(runs []levelRun) [][]string {
+		var out [][]string
+		for _, r := range runs {
+			var one []string
+			for _, s := range r.members {
+				one = append(one, s.Player.ID)
+			}
+			out = append(out, one)
+		}
+		return out
+	}
+
+	owed, _ := chusenOfRuns(group, positions, matches, nil, inEveryBand)
+	assert.Equal(t, [][]string{{"a", "b", "c"}, {"d", "e", "f"}}, names(owed), "both trios are level with no round started")
+
+	// Round 2 among the first trio, scheduled.
+	for _, pair := range [][2]string{{"a", "b"}, {"b", "c"}, {"a", "c"}} {
+		matches = append(matches, bout(pair[0], pair[1], "", state.MatchStatusScheduled))
+	}
+	owed, _ = chusenOfRuns(group, positions, matches, nil, inEveryBand)
+	assert.Equal(t, [][]string{{"d", "e", "f"}}, names(owed), "the trio about to fight owes no lots")
+}
+
 // TestGroupNeedsChusen_SameNameTeamsKeyOnIdentity pins the identity keying in
 // groupNeedsChusen at unit level. Two TEAMS sharing a display name is not a
 // state normal operation produces (team names are unique by rule; see the

@@ -172,6 +172,28 @@ describe('AdminPools: a tie-break bout saved as a draw', () => {
     });
   });
 
+  // A bout whose two sides are both barred never runs, so the lots that rule it
+  // can still be corrected (Open bout) but there is nothing to fight again.
+  describe('on a league with the lots ruling a bout neither side can fight', () => {
+    const row = (id, name) => ({ player: { id, name }, points: 2, isOverridden: true });
+    const standings = { 'Pool A': [row('a', 'Bea'), row('b', 'Cal')] };
+    const api = { chusenCandidates: vi.fn().mockResolvedValue({ candidates: [], recorded: [] }) };
+
+    it('offers Open bout and no Fight it again', async () => {
+      await mount([bout('Pool A-TB-0', { ineligibleSides: { a: true, b: true } })], 'league', {}, api, standings);
+      const text = screen.getByTestId('drawn-tiebreak-notice').textContent;
+      expect(text).toMatch(/the order you entered from the lots stands/);
+      expect(text).toMatch(/cannot be fought again/);
+      expect(screen.queryByRole('button', { name: /Fight it again/ })).toBeNull();
+      expect(screen.getByRole('button', { name: 'Open bout' })).toBeTruthy();
+    });
+
+    it('still offers Fight it again when only one side is barred', async () => {
+      await mount([bout('Pool A-TB-0', { ineligibleSides: { a: true, b: false } })], 'league', {}, api, standings);
+      expect(screen.getByRole('button', { name: /Fight it again/ })).toBeTruthy();
+    });
+  });
+
   it.each([
     ['a tie-break bout with a winner', bout('Pool A-TB-0', { winner: 'Bea' })],
     ['a tie-break bout not fought yet', bout('Pool A-TB-0', { status: 'scheduled' })],

@@ -576,8 +576,19 @@ func newBreakBand(comp *state.Competition, pools []helper.Pool, bracket *state.B
 // (levelRuns): a run level below the cut inside a group that started above it is
 // out of band. It is how the standings carry the band to poolMatchSettled and the
 // Pools tab's notice, which have no competition or draw to ask it of.
-func markTiesOutOfBand(band breakBand, poolName string, sorted []state.PlayerStanding) {
+func markTiesOutOfBand(band breakBand, poolName string, sorted []state.PlayerStanding, matches []state.MatchResult) {
 	for _, positions := range detectPoolTies(sorted) {
+		// A group whose round is still being played (roundStillToFight) is judged
+		// whole: its runs come from the wins so far, and a bout still to fight can
+		// bring a member back into the band, so no run is out of it yet.
+		if group := standingsAt(sorted, positions); roundStillToFight(group, matches) {
+			if !band(poolName, positions, group) {
+				for _, idx := range positions {
+					sorted[idx].TieOutOfBand = true
+				}
+			}
+			continue
+		}
 		for start := 0; start < len(positions); {
 			end := start + 1
 			for end < len(positions) && sorted[positions[end]].TieRun == sorted[positions[start]].TieRun {
@@ -1122,6 +1133,20 @@ func (e *Engine) RunTiebreakerRound(compID, poolName string, memberIDs []string)
 	e.standingsCache.Delete(compID)
 	e.standingsFlight.Delete(compID)
 	return injected, nil
+}
+
+// roundStillToFight reports whether a supplementary bout (-TB- or -DH-) between
+// two of members is not finished yet (scheduled, running or waiting on a barred
+// side). While one is, the members' round is still being played: the wins so far
+// are partial, so they say neither who is level (no lots are owed for a run whose
+// next round is already fought for, chusenOfRuns) nor which places a run holds
+// (markTiesOutOfBand judges the whole group).
+func roundStillToFight(members []state.PlayerStanding, matches []state.MatchResult) bool {
+	ids := groupMemberIDs(members)
+	return slices.ContainsFunc(matches, func(m state.MatchResult) bool {
+		return state.IsPoolSupplementaryMatchID(m.ID) && m.Status != state.MatchStatusCompleted &&
+			ids[m.SideAID] && ids[m.SideBID] && m.SideAID != m.SideBID
+	})
 }
 
 // groupMemberIDs returns the set of participant ids among a tied group's

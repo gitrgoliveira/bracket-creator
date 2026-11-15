@@ -362,12 +362,50 @@ func TestMarkTiesOutOfBand_JudgesEachRunOnItsOwnPlaces(t *testing.T) {
 	}
 	// One Points group of five: runs {0,1}, {2}, {3,4} at places 1-2, 3 and 4-5.
 	sorted := []state.PlayerStanding{row(0), row(0), row(1), row(2), row(2)}
-	markTiesOutOfBand(band, "Pool A", sorted)
+	markTiesOutOfBand(band, "Pool A", sorted, nil)
 	var got []bool
 	for _, s := range sorted {
 		got = append(got, s.TieOutOfBand)
 	}
 	assert.Equal(t, []bool{false, false, false, true, true}, got)
+}
+
+// TestMarkTiesOutOfBand_WholeGroupWhileARoundIsOpen pins that a group whose
+// round still has a bout to fight is judged on the whole group's places: its
+// runs come from partial win counts, and the bout still to fight can bring a
+// member of a run below the band back into it.
+func TestMarkTiesOutOfBand_WholeGroupWhileARoundIsOpen(t *testing.T) {
+	comp := &state.Competition{Format: state.CompFormatLeague}
+	band := func(poolName string, positions []int, group []state.PlayerStanding) bool {
+		return tieNeedsBreak(comp, positions, group, 0)
+	}
+	row := func(id string, points, run int) state.PlayerStanding {
+		return state.PlayerStanding{Player: domain.Player{ID: id}, Points: points, TieRun: run}
+	}
+	// Two clear leaders, then five level on points at 3rd to 7th. The bouts so far
+	// put "c" clear of the rest (run 0) and left d-g level (run 1, places 4-7, below
+	// the band as far as its own places go).
+	newSorted := func() []state.PlayerStanding {
+		return []state.PlayerStanding{row("a", 6, 0), row("b", 5, 0), row("c", 3, 0), row("d", 3, 1), row("e", 3, 1), row("f", 3, 1), row("g", 3, 1)}
+	}
+	bout := func(status state.MatchStatus) []state.MatchResult {
+		return []state.MatchResult{{ID: "Pool A-TB-1", SideAID: "d", SideBID: "e", Status: status}}
+	}
+	marked := func(sorted []state.PlayerStanding) []bool {
+		var got []bool
+		for _, s := range sorted {
+			got = append(got, s.TieOutOfBand)
+		}
+		return got
+	}
+
+	open := newSorted()
+	markTiesOutOfBand(band, "Pool A", open, bout(state.MatchStatusScheduled))
+	assert.Equal(t, []bool{false, false, false, false, false, false, false}, marked(open), "a bout still to fight keeps the whole group in the band")
+
+	finished := newSorted()
+	markTiesOutOfBand(band, "Pool A", finished, bout(state.MatchStatusCompleted))
+	assert.Equal(t, []bool{false, false, false, true, true, true, true}, marked(finished), "a finished round is judged run by run")
 }
 
 // TestCalculatePoolStandings_JointThirdWiring proves the joint-3rd convention is

@@ -2178,7 +2178,7 @@ func (e *Engine) computeStandingsFrom(loader poolStandingsLoader, compId string)
 		// tie to break (operator ruling 2026-09-24; see openTieRuns).
 		markTiedStandings(comp, sorted, poolResults[p.PoolName], playerStandings)
 		if band != nil {
-			markTiesOutOfBand(band, p.PoolName, sorted)
+			markTiesOutOfBand(band, p.PoolName, sorted, matches)
 		}
 
 		// Apply the ranks in force. They are keyed by competitor participant id

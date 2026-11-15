@@ -173,12 +173,8 @@ function enrichPoolMatchWithComp(m, comp, poolNameOverride) {
 // Exported for vitest at __tests__/admin_pools.test.jsx.
 function drawnSupplementaryBouts(poolMatches, standings, isLeague = false) {
   const rows = poolMatches || [];
-  // drawnTiebreakOfBarredSides in chusen.go: a tie-break bout (a league's
-  // representative bout too) whose two sides are both barred elsewhere (the
-  // server stamps ineligibleSides on it) cannot be fought, so its draw stands.
-  const bothSidesBarred = (m) => (isLeague || !isPoolDaihyosenBout(m.id)) && !!(m.ineligibleSides && m.ineligibleSides.a && m.ineligibleSides.b);
   const settledWithoutRematch = (m) => {
-    if (bothSidesBarred(m)) return true;
+    if (bothSidesBarred(m, isLeague)) return true;
     const { group, level } = lotsGroupOf(standings, m);
     if (!group) return false;
     // Moot: any drawn supplementary bout whose sides are no longer level, or
@@ -189,6 +185,13 @@ function drawnSupplementaryBouts(poolMatches, standings, isLeague = false) {
     return !level || group.every(s => s.tieOutOfBand) || group.every(s => s.isOverridden);
   };
   return rows.filter(m => isDrawnSupplementary(m) && !settledWithoutRematch(m));
+}
+
+// drawnTiebreakOfBarredSides in chusen.go: a tie-break bout (a league's
+// representative bout too) whose two sides are both barred elsewhere (the server
+// stamps ineligibleSides on it) cannot be fought, so its draw stands.
+function bothSidesBarred(m, isLeague) {
+  return (isLeague || !isPoolDaihyosenBout(m.id)) && !!(m.ineligibleSides && m.ineligibleSides.a && m.ineligibleSides.b);
 }
 
 // A supplementary bout finished with no winner: the draw nothing else decides.
@@ -223,7 +226,9 @@ function lotsGroupOf(standings, m) {
 // lots were drawn outside the app and entered by the organiser, so the app never
 // removes them and the bout counts as played; the organiser may still correct it,
 // after a warning that its result replaces the lots. The Pools tab lists these
-// beside the stuck ones so Fight it again and Open bout stay within reach.
+// beside the stuck ones so Fight it again and Open bout stay within reach; a bout
+// both of whose sides are barred is listed too (the lots can still be corrected
+// by Open bout) but cannot be fought again, so its notice offers no Fight it again.
 // Exported for vitest at __tests__/admin_pools.test.jsx.
 function lotsRuledBouts(poolMatches, standings) {
   return (poolMatches || []).filter((m) => {
@@ -237,7 +242,7 @@ function lotsRuledBouts(poolMatches, standings) {
 // (the reopen: the draw is cleared and the bout runs on its court) or open it
 // to decide it by encho or hantei. Neither is forced: the pool stays as it is
 // until the operator chooses.
-function DrawnTieBreakNotice({ match, comp, password, onOpen, byLots = false }) {
+function DrawnTieBreakNotice({ match, comp, password, onOpen, byLots = false, cannotFight = false }) {
   const ctl = useMatchReopen({ match, password, isComplete: true, allowCourtForce: true });
   const what = isPoolDaihyosenBout(match.id) ? "daihyosen" : "tie-break bout";
   // A league has one table and no pools: "Pool A" is only its storage name.
@@ -254,14 +259,18 @@ function DrawnTieBreakNotice({ match, comp, password, onOpen, byLots = false }) 
       <div className="league-tiebreak__title">A {what} was saved as a draw{byLots ? ", and your lots decide it" : ""}</div>
       <div className="league-tiebreak__desc">
         {byLots
-          ? <>{pool}{sides}: the order you entered from the lots stands. Fight it again, or open it to decide it by encho or hantei. You are asked first, because its result then replaces the lots for that place.</>
+          ? <>{pool}{sides}: the order you entered from the lots stands. {cannotFight
+            ? "Neither of them can fight, so the bout cannot be fought again. You can still open it to correct it; you are asked first, because its result then replaces the lots for that place."
+            : "Fight it again, or open it to decide it by encho or hantei. You are asked first, because its result then replaces the lots for that place."}</>
           : <>{pool}{sides} are still tied, {effect}. Fight it again, or open it to decide it by encho or hantei.</>}
       </div>
       <div className="league-tiebreak__actions">
-        <button type="button" className="btn btn--sm btn--primary" disabled={ctl.busy || ctl.landed} onClick={() => ctl.reopen()}>
-          {ctl.busy && <span className="spinner" />}
-          {ctl.landed ? "Reopened" : "Fight it again"}
-        </button>
+        {!cannotFight && (
+          <button type="button" className="btn btn--sm btn--primary" disabled={ctl.busy || ctl.landed} onClick={() => ctl.reopen()}>
+            {ctl.busy && <span className="spinner" />}
+            {ctl.landed ? "Reopened" : "Fight it again"}
+          </button>
+        )}
         <button type="button" className="btn btn--sm btn--ghost" disabled={ctl.busy || ctl.landed} onClick={onOpen}>
           Open bout
         </button>
@@ -1037,6 +1046,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
           password={password}
           onOpen={() => setScoreOpenId(m.id)}
           byLots
+          cannotFight={bothSidesBarred(m, isLeague)}
         />
       ))}
       {chusenBanner}

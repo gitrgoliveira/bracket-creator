@@ -2590,7 +2590,7 @@ paths:
         corrupt_overrides` (see that response schema on the affected
         endpoints). This endpoint recovers from that state by writing a
         fresh empty overrides file WITHOUT first parsing the corrupt one, so
-        it always succeeds regardless of what the file currently contains.
+        it never fails because of what the file contains.
 
         Clearing the lots of a finished league can put it back into match
         play (when the lots alone ordered a circle or a tie the bouts left
@@ -4015,6 +4015,7 @@ paths:
                       - downstream_knockout_played
                       - downstream_knockout_running
                       - league_finished
+                      - lots_replaced
                     description: Machine-readable conflict code.
                   court:
                     type: string
@@ -4026,7 +4027,7 @@ paths:
                     description: The shiaijo the tournament no longer has that the league's matches stand on (league_finished only).
                   matchId:
                     type: string
-                    description: Conflicting match ID (court_busy, already_ineligible); this match (downstream_knockout_played, downstream_knockout_running).
+                    description: Conflicting match ID (court_busy, already_ineligible); this match (downstream_knockout_played, downstream_knockout_running, lots_replaced).
                   compId:
                     type: string
                     description: Conflicting competition ID (court_busy only).
@@ -4038,7 +4039,7 @@ paths:
                       `engine.OperatorMatchLabel`.
                   message:
                     type: string
-                    description: Human-readable detail (court_busy, result_finalized, hantei_organiser_only, no_daihyosen, daihyosen_added, team_members_unreadable, side_mismatch, downstream_knockout_played, downstream_knockout_running, league_finished); for the self-run codes, the sentence the public page shows as it is.
+                    description: Human-readable detail (court_busy, result_finalized, hantei_organiser_only, no_daihyosen, daihyosen_added, team_members_unreadable, side_mismatch, downstream_knockout_played, downstream_knockout_running, league_finished, lots_replaced); for the self-run codes, the sentence the public page shows as it is.
                   playerId:
                     type: string
                     description: Ineligible participant ID (ineligible_competitor / already_ineligible).
@@ -5143,7 +5144,7 @@ paths:
                             classes `reason` names below.
                         reason:
                           type: string
-                          enum: [superseded, clock_skew, corrupt_overrides, downstream_knockout_played, downstream_knockout_running, team_member_not_in_team, team_members_unreadable, league_finished, tiebreak_needs_winner]
+                          enum: [superseded, clock_skew, corrupt_overrides, downstream_knockout_played, downstream_knockout_running, team_member_not_in_team, team_members_unreadable, league_finished, lots_replaced, tiebreak_needs_winner]
                           description: >
                             Machine-readable discriminator, present only for the
                             classes named here and omitted for every other failure, so
@@ -5341,7 +5342,10 @@ paths:
             of, a knockout match being fought now (not confirmable). Also
             `league_finished` (with `message` and `removedCourts`, as PUT
             .../score) when it corrects a result of a finished league
-            without `confirmFinished: true`.
+            without `confirmFinished: true`, and `lots_replaced` (with
+            `matchId` and `message`) when the result gives a drawn
+            tie-breaker bout a winner while the lots the organiser entered
+            rule it, until the request carries `confirmLots: true`.
           content:
             application/json:
               schema:
@@ -5517,7 +5521,10 @@ paths:
             not confirmable, and answered before any confirm), or one that
             corrects a result of a finished league without
             `confirmFinished: true` (`league_finished`, with `message` and
-            `removedCourts`). Same bodies as PUT .../score.
+            `removedCourts`), or one that gives a drawn tie-breaker bout a
+            winner while the lots the organiser entered rule it
+            (`lots_replaced`, with `matchId` and `message`, until the request
+            carries `confirmLots: true`). Same bodies as PUT .../score.
           content:
             application/json:
               schema:

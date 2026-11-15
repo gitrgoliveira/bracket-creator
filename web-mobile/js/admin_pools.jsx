@@ -307,22 +307,22 @@ function groupTeamIds(teams, names) {
   return ids;
 }
 
-// The place a tied group shares, in an operator's words: its best place.
-function sharedPlaceLabel(group) {
-  return `${rankOrdinal(group.minPosition)} place`;
-}
-
 // The line naming an individual tie a tie-breaker round left level: its pool
 // and the places it shares, e.g. "Pool A, 1st to 3rd place". Exported for
 // vitest at __tests__/admin_pools.test.jsx.
 function circleGroupLine(group, isLeague = false) {
   const n = (group.teams || group.teamNames || []).length;
   const last = group.minPosition + Math.max(n, 1) - 1;
-  const places = last > group.minPosition
-    ? `${rankOrdinal(group.minPosition)} to ${rankOrdinal(last)} place`
-    : sharedPlaceLabel(group);
+  const places = placesRangeLabel(group.minPosition, last);
   // A league has one table and no pools ("Pool A" is only its storage name).
   return isLeague ? places : `${group.poolName}, ${places}`;
+}
+
+// "1st place" or "1st to 3rd place".
+function placesRangeLabel(min, max) {
+  return max > min
+    ? `${rankOrdinal(min)} to ${rankOrdinal(max)} place`
+    : `${rankOrdinal(min)} place`;
 }
 
 // A list of names read aloud: "A", "A and B", "A, B and C".
@@ -335,9 +335,7 @@ function andList(names) {
 // The places a tie-breaker banner group shares, in the ordinal form: "1st
 // place" or "1st to 3rd place".
 function tiebreakPlacesLabel(group) {
-  return group.minPosition === group.maxPosition
-    ? `${rankOrdinal(group.minPosition)} place`
-    : `${rankOrdinal(group.minPosition)} to ${rankOrdinal(group.maxPosition)} place`;
+  return placesRangeLabel(group.minPosition, group.maxPosition);
 }
 
 function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, password }) {

@@ -4,7 +4,7 @@
 import { TermV, competitionKindLabel, poolLabel, compMatchesForCompetition } from './viewer_utils.jsx';
 import { isFollowedPlayer, isPlayerWatched, entryKey, dojoKey, resolveWatchedPlayers, findPrimaryEntry, buildPrimaryNextMatch, buildRoster, useWatchlist, buildWatchedSets, matchInvolvesWatchedSet } from './viewer_watchlist_core.jsx';
 import { MatchDetailCard, VSchedItem, MatchViewerModal, useLiveMatch, bracketMatchIn } from './viewer_match.jsx';
-import { WinnerBadge, SwissStandingsViewer, PoolsViewer, LeagueStandingsViewer, DHBadge, matchWinnerName } from './viewer_standings.jsx';
+import { WinnerBadge, SwissStandingsViewer, PoolsViewer, LeagueStandingsViewer, DHBadge, matchWinnerName, tiedPlaces } from './viewer_standings.jsx';
 import { AwardsView } from './viewer_awards.jsx';
 import { usePrimaryWatch } from './viewer_schedule.jsx';
 import { poolNameOf, isPoolDaihyosenBout, teamMatchTypeFor } from './pool_ids.jsx';
@@ -514,6 +514,8 @@ export function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, runningM
   // organiser's tie-breaker or decision then, and naming a winner over it
   // would be wrong.
   const leagueFinished = isLeague && c.status === "completed";
+  // Level rows of a tie still waiting for its tie-breaker share the best place.
+  const leagueTies = tiedPlaces(leagueStandings, 0);
   const leagueWinner = leagueFinished && leagueStandings.length > 0 ? leagueStandings[0] : null;
   // Teams that won a completed daihyosen play-off in the league. Mirrors the
   // full standings (PoolsViewer): the play-off decides order within the tied
@@ -630,12 +632,13 @@ export function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, runningM
             <tbody>
               {leagueStandings.slice(0, 5).map((s, i) => {
                 const [sMember1, sMember2] = isEngi && window.engiPairParts ? window.engiPairParts(s.player?.name || "") : [s.player?.name || "", ""];
+                const tie = leagueTies.get(s.player?.id || `${s.player?.name}||${s.player?.dojo || ""}`);
                 return (
-                <tr key={s.player?.id || s.player?.name || i} className={s.tied ? "pool__row--tied" : undefined}>
+                <tr key={s.player?.id || s.player?.name || i} className={tie ? "pool__row--tied" : undefined}>
                   {/* Rank-ordered summary: "#" is the authoritative standing rank
                       (s.rank), not the row index: DRY with the full standings and
                       the backend tiebreak/override logic. */}
-                  <td className={`pool-standings__draw-pos${s.isOverridden ? " pool-standings__draw-pos--override" : ""}`}>{s.rank || i + 1}{s.isOverridden ? "*" : ""}</td>
+                  <td className={`pool-standings__draw-pos${s.isOverridden ? " pool-standings__draw-pos--override" : ""}`}>{tie ? tie.place : s.rank || i + 1}{s.isOverridden ? "*" : ""}</td>
                   <td>
                     <div className="pool__player-name">
                       <NumberedName name={sMember1} number={s.player?.number} />

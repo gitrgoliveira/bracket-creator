@@ -79,7 +79,7 @@ export const TEXT = {
   // The individual notice once a tie-breaker round leaves a tie (a circle, or
   // both sides of the tie-breaker withdrew earlier).
   circleTitle: 'A tie-breaker round left a tie',
-  anotherRound: 'Run another tie-breaker round',
+  anotherRound: 'Run another round',
   drawLotsInstead: 'Draw lots instead',
   recordLots: 'Record chusen result',
   run: 'Run tie-breaker',
@@ -438,12 +438,13 @@ export async function playTiebreakOnCourt(page, { among, winner, decide, shot, f
 // name unless given a title, so it is found by its shape.
 export const confirmDialog = (page) => page.locator('.modal[role="dialog"]').filter({ has: page.locator('.modal__foot') }).last();
 
-// What the open confirm says: { message, buttons } (the message's sentences
-// as one string, the footer's button labels in order).
+// What the open confirm says: { title, message, buttons } (its title, the
+// message's sentences as one string, the footer's button labels in order).
 export async function readConfirm(page) {
   const dlg = confirmDialog(page);
   await expect(dlg).toBeVisible();
   return {
+    title: squash(await dlg.locator('.modal__title').first().innerText()),
     message: squash((await dlg.locator('.dialog-msg').allInnerTexts()).join(' ')),
     buttons: (await dlg.locator('.modal__foot button').allInnerTexts()).map(squash),
   };
@@ -473,9 +474,9 @@ export const tiebreakBanner = (page) => titled(page, TEXT.bannerTitle);
 export const bannerGroups = (page) => tiebreakBanner(page).locator('.league-tiebreak__group');
 const bannerError = (page) => tiebreakBanner(page).locator('.league-tiebreak__err');
 
-// "Position 3" -> { min: 3, max: 3 }; "Positions 1–2" -> { min: 1, max: 2 }.
+// "3rd place" -> { min: 3, max: 3 }; "1st to 2nd place" -> { min: 1, max: 2 }.
 const positions = (t) => {
-  const m = /(\d+)(?:\s*[–-]\s*(\d+))?/.exec(t || '');
+  const m = /(\d+)(?:st|nd|rd|th)?(?:\s*(?:to|[–-])\s*(\d+)(?:st|nd|rd|th)?)?/.exec(t || '');
   return m ? { min: Number(m[1]), max: Number(m[2] || m[1]) } : { min: NaN, max: NaN };
 };
 
@@ -576,7 +577,7 @@ export async function readChusen(page) {
   if (!(await panel.count())) return [];
   return panel.locator('.league-tiebreak__group').evaluateAll((els) => els.map((g) => {
     const text = (e) => (e ? e.textContent.replace(/\s+/g, ' ').trim() : '');
-    const range = /positions (\d+) to (\d+)/.exec(text(g));
+    const range = /places (\d+)(?:st|nd|rd|th) to (\d+)(?:st|nd|rd|th)/.exec(text(g));
     return {
       pool: text(g.querySelector('.league-tiebreak__pos')),
       teams: text(g.querySelector('.league-tiebreak__teams')).split(' · ').map((t) => t.trim()).filter(Boolean),
@@ -613,7 +614,7 @@ const lotsEntry = (page, names) => names.reduce(
 export async function recordLots(page, order) {
   const entry = lotsEntry(page, order);
   await expect(entry, `one lots entry for ${order.join(', ')}`).toHaveCount(1);
-  const from = /positions (\d+) to (\d+)/i.exec(squash(await entry.innerText()));
+  const from = /places (\d+)(?:st|nd|rd|th) to (\d+)(?:st|nd|rd|th)/i.exec(squash(await entry.innerText()));
   expect(from, 'the lots entry names the places it assigns').toBeTruthy();
   const first = Number(from[1]);
   for (const [i, name] of order.entries()) await entry.getByLabel(name, { exact: true }).fill(String(first + i));
@@ -653,6 +654,29 @@ export async function openViewerAwards(page, id) {
   await openViewer(page, id);
   await competitionTab(page, 'Awards').tap();
   await expect(page.getByTestId('awards-view').or(page.getByTestId('awards-empty'))).toBeVisible();
+}
+
+// The page does not scroll sideways at any of `widths` (a small phone, a phone,
+// a large phone) and no Awards place card is cut off at either edge; the
+// viewport goes back to its size afterwards.
+export async function expectNoSidewaysScroll(page, widths = [320, 375, 414]) {
+  const original = page.viewportSize();
+  try {
+    for (const width of widths) {
+      await page.setViewportSize({ width, height: original ? original.height : 844 });
+      const seen = await page.evaluate(() => ({
+        page: document.documentElement.scrollWidth - window.innerWidth,
+        clipped: [...document.querySelectorAll('[data-testid^="awards-place-"]')].filter((el) => {
+          const r = el.getBoundingClientRect();
+          return r.left < -0.5 || r.right > window.innerWidth + 0.5;
+        }).length,
+      }));
+      expect(seen.page, `the page scrolls sideways at ${width}px`).toBeLessThanOrEqual(0);
+      expect(seen.clipped, `an Awards place is cut off at ${width}px`).toBe(0);
+    }
+  } finally {
+    if (original) await page.setViewportSize(original);
+  }
 }
 
 // The podium as [{ place, label, name, dojo }] in the order shown, plus the

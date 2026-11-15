@@ -372,7 +372,7 @@ test.describe('league-individual', () => {
       const after = await readDesk(page);
       const group = notice().locator('.league-tiebreak__group');
       await expect(group.locator('.league-tiebreak__teams')).toHaveText([A, B, C].join(' · '), { useInnerText: true });
-      await expect(notice().getByRole('button', { name: 'Run another tie-breaker round' })).toBeVisible();
+      await expect(notice().getByRole('button', { name: TEXT.anotherRound })).toBeVisible();
       await expect(notice().getByRole('button', { name: 'Draw lots instead' })).toBeVisible();
       expect(after.finished, 'the cycle leaves the league open').toBe(false);
       expect(tiebreakRows(after.numberedRows, 9), 'no further round is added by itself').toEqual([]);
@@ -385,12 +385,19 @@ test.describe('league-individual', () => {
     await test.step('desk: Draw lots instead opens the lots entry, still offering another round', async () => {
       await notice().getByRole('button', { name: 'Draw lots instead' }).tap();
       await expect(notice().getByRole('button', { name: 'Draw lots instead' })).toHaveCount(0);
-      await expect(notice().getByRole('button', { name: 'Run another tie-breaker round' })).toBeVisible();
+      await expect(notice().getByRole('button', { name: TEXT.anotherRound })).toBeVisible();
+      // The embedded lots entry carries no group header of its own and a Cancel
+      // that closes it again, leaving the choice open (another round or lots).
+      await expect(notice().getByRole('button', { name: TEXT.cancel })).toBeVisible();
+      await expect(notice().locator('.league-tiebreak__group-header'), 'the embedded entry repeats no header').toHaveCount(1);
       record({ step: 'pools', action: 'the lots entry opened from the notice', shot: await shot(page, 'pools-circle-lots-open', { fullPage: true }) });
+      await notice().getByRole('button', { name: TEXT.cancel }).tap();
+      await expect(notice().getByRole('button', { name: 'Draw lots instead' })).toBeVisible();
+      await expect(notice().getByRole('button', { name: TEXT.recordLots })).toHaveCount(0);
     });
 
     await test.step('desk: Run another tie-breaker round adds a fresh round among the three', async () => {
-      await notice().getByRole('button', { name: 'Run another tie-breaker round' }).tap();
+      await notice().getByRole('button', { name: TEXT.anotherRound }).tap();
       await expect.poll(async () => (await readNumberedRows(page)).length, {
         message: 'three more tie-breaker bouts are added', timeout: EXPECT_TIMEOUT_MS,
       }).toBe(12);
@@ -743,6 +750,10 @@ test.describe('league-individual', () => {
       await expect(row, 'the ippon-shobu is listed with why it cannot start').toHaveCount(1);
       const notice = row.getByTestId('barred-match-notice');
       await expect(notice).toContainText(TEXT.bothBarred);
+      // The queue row's reason line says what to do and no longer claims the bout
+      // separates two people who cannot fight it.
+      await expect(row.locator('.shiaijo-qrow__reason')).toContainText('Neither can fight: record it as drawn, then enter the lots on the Pools tab.');
+      await expect(row).not.toContainText(/this bout separates them|finished level/);
       const court1 = await readCourt(page);
       record({ step: 'court', action: 'the console with the barred ippon-shobu', ...court1,
         notice: (await notice.innerText()).replace(/\s+/g, ' ').trim(),
@@ -812,6 +823,8 @@ test.describe('league-individual', () => {
       const replace = warnings[warnings.length - 1];
       record({ step: 'pools', action: 'give the drawn ippon-shobu a winner', notices, pair, warnings,
         shot: await shot(page, `${flow}-desk-replace-lots-warning`) });
+      expect(replace.title, 'a confirm names what it asks, not Please confirm').toBe('Replace the lots?');
+      for (const w of warnings.slice(0, -1)) expect(w.title).toBe('Change a finished league?');
       expect(replace.message).toContain('This replaces the lots you entered for 1st');
       expect(replace.buttons).toEqual(expect.arrayContaining(['Replace the lots', TEXT.cancel]));
       await answerConfirm(page, TEXT.cancel);

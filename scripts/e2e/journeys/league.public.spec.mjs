@@ -38,7 +38,7 @@ import { openTvBoard, openViewer, tvBoard } from '../fixtures/public.mjs';
 import { awardIppon } from '../fixtures/scoring.mjs';
 import { openShiaijo } from '../fixtures/shiaijo.mjs';
 import {
-  awardsTabOffered, leagueRanks, openLeague, openNumberedRow, openViewerAwards, openViewerLeague,
+  awardsTabOffered, leagueRanks, leagueTable, openLeague, openNumberedRow, openViewerAwards, openViewerLeague,
   overviewWinner, playEncounter, playTiebreakOnCourt, readBanner, readLeagueTable, readNumberedRows, readPodium,
   retiredControls, runTiebreaker, seedLeague,
 } from '../fixtures/league.mjs';
@@ -143,6 +143,10 @@ test.describe('league on a phone', () => {
         // The phone and the desk read one table.
         expect(ranks).toEqual(adminRanks);
         for (const t of teams.ring) expect(ranks[t]).toBeLessThan(ranks[teams.last]);
+        // The tie waits: the level teams share the place the group holds, on the
+        // amber row, with no sentence beside it (R4); the server's rank is untouched.
+        expect(ringRanks, 'the ring shares 1st while the tie waits').toEqual([1, 1, 1]);
+        await expect(leagueTable(page).locator('table.pool__table tbody tr.pool__row--tied')).toHaveCount(teams.ring.length);
         // A tie that is not settled is not a result: nothing is final yet.
         expect(table.heading).toBe('Standings');
         expect(await awardsTabOffered(page)).toBe(false);

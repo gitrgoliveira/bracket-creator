@@ -1058,6 +1058,7 @@ export function leagueFinishedConfirm({ removedCourts, reopen } = {}) {
         message += ` The tournament no longer has ${named}: if the league goes back to match play, its matches there show as unassigned until they are given a court.`;
     }
     return {
+        title: reopen ? 'Reopen a finished league?' : 'Change a finished league?',
         message,
         confirmLabel: 'Change it anyway',
         cancelLabel: 'Cancel',
@@ -1083,6 +1084,7 @@ export function lotsReplacedRefusal(err) {
 // The confirm's copy: the server's own sentence, so the words are said once.
 export function lotsReplacedConfirm({ message } = {}) {
     return {
+        title: 'Replace the lots?',
         message: message || 'This replaces the lots you entered. The bout\'s result will decide the place.',
         confirmLabel: 'Replace the lots',
         cancelLabel: 'Cancel',

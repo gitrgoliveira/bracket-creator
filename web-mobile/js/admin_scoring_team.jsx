@@ -5667,7 +5667,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
               out: its tie is fought on, never read from IV and PW alone. */}
           {compFormat === "league" && !isKnockoutPhase && !isKachinuki && !hasDaihyosen
             && teamEncounterIsLevel({ ivA, ivB, pwA, pwB, subTotals }) && (
-            <div className="daihyosen-controls__hint" data-testid="league-level-hint" style={{ marginTop: 8 }}>
+            <div className="daihyosen-controls__level-hint" data-testid="league-level-hint">
               Level: a draw in a league, so there is no representative bout. Finish the encounter to record the draw.
             </div>
           )}

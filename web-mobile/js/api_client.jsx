@@ -7098,7 +7098,7 @@ const API = {
         });
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
-            throw new Error(err.error || `Failed to add another tie-breaker round (${res.status})`);
+            throw new Error(err.error || "Could not add the round. Check the connection and try again.");
         }
         return res.json();
     },

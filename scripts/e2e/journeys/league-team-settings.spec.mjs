@@ -49,7 +49,7 @@ import { flushAudits, journeyRecorder } from '../fixtures/audit.mjs';
 import { enterTournament } from '../fixtures/setup.mjs';
 import { createCompetition } from '../fixtures/wizard.mjs';
 import {
-  TEXT, backUpCompetition, openLeague, openLeagueSettings, openNumberedRow, openViewerAwards, openViewerLeague,
+  TEXT, backUpCompetition, expectNoSidewaysScroll, openLeague, openLeagueSettings, openNumberedRow, openViewerAwards, openViewerLeague,
   playEncounter, readBanner, readLeagueSettings, readLeagueTable, readNumberedRows, readPodium, restoreAsCopy,
   retiredControls, rewriteBackup, saveSettings, seedLeague, setTwoThirdPlaces, tiebreakBanner, withFrontMatterLine,
 } from '../fixtures/league.mjs';
@@ -298,6 +298,8 @@ async function runLeague({ page, browser, baseURL, folder, tag, court, n, script
         const podium = await readPodium(phone);
         record({ step: 'public', action: 'Awards tab', ...setting, podium });
         await shot(phone, 'public-awards', { fullPage: true });
+        // The podium (four cards with a joint 3rd) fits a phone, 2nd place included.
+        await expectNoSidewaysScroll(phone);
         expect(podium.winner || (podium.places.find((p) => p.place === 1) || {}).name).toBe(names[want.ranks.indexOf(1)]);
       } finally {
         await spectator.close();

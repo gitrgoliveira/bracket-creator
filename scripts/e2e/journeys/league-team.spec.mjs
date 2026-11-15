@@ -254,9 +254,10 @@ async function readFinishedEditor(ed) {
 
 // Save the correction an editor `ed` holds (Save correction, then the reason
 // prompt's Confirm), answering the finished-league warning the fix adds when
-// it appears. Returns { warned, warning, statuses } once a /score write of the
-// correction has been answered with a success status.
-async function saveCorrection(page, ed) {
+// it appears (`onWarning` runs while it is up, for a shot). Returns
+// { warned, warning, statuses } once a /score write of the correction has been
+// answered with a success status.
+async function saveCorrection(page, ed, onWarning) {
   const statuses = [];
   const onRes = (r) => {
     if (r.request().method() === 'PUT' && /\/matches\/[^/]+\/score$/.test(new URL(r.url()).pathname)) statuses.push(r.status());
@@ -275,6 +276,7 @@ async function saveCorrection(page, ed) {
     let warning = null;
     if (warned) {
       warning = await readConfirm(page);
+      if (onWarning) await onWarning();
       await answerConfirm(page, TEXT.changeAnyway);
     }
     await expect.poll(saved, { message: 'the correction was saved' }).toBe(true);
@@ -350,6 +352,7 @@ const expectTwoWayBanner = async (page, A, B) => {
   expect(banner.groups).toHaveLength(1);
   expect([...banner.groups[0].teams].sort()).toEqual([A, B].sort());
   expect(banner.groups[0]).toMatchObject({ min: 1, max: 2 });
+  expect(banner.groups[0].position, 'a place is named in the ordinal form').toBe('1st to 2nd place');
   return banner;
 };
 
@@ -755,6 +758,9 @@ test.describe('league-team', () => {
         retired: await retiredControls(page), screenshot: await shot(page, 'cycle-desk-lots', { fullPage: true }) });
       expect([...group.teams].sort()).toEqual([A, B, C].sort());
       expect(group).toMatchObject({ min: 1, max: 3 });
+      // One tie, one banner: the lots panel is the only notice, and a league has no pool to name.
+      expect((await readBanner(page)).shown, 'the Tie-breaker required banner is gone once only lots are owed').toBe(false);
+      expect(group.pool, 'a league names the places, not a pool').not.toMatch(/Pool/);
       expect((await readLeagueTable(page)).heading, 'the league waits for the lots').toBe('Standings');
       expect(await retiredControls(page)).toEqual({ tiebreakTop: 0, sharedRanks: 0 });
     });
@@ -817,7 +823,7 @@ test.describe('league-team', () => {
       if ((await rowMiddle(bout).innerText()).trim() === 'X') await rowTie(bout).tap();
       await expect(rowMiddle(bout)).not.toHaveText('X');
       await boutIppon(ed, 3, dSide, 'M');
-      first = await saveCorrection(page, ed);
+      first = await saveCorrection(page, ed, () => shot(page, 'finished-league-confirm'));
       script.set(C, D, [C, C, D]);
       const tally = script.tally();
       // The table on screen when the overlay closes, then after a reload: a
@@ -881,6 +887,7 @@ test.describe('league-team', () => {
 
     await test.step('fixed: both corrections were warned first; the first kept the league finished', async () => {
       expect(first.warned).toBe(true);
+      expect(first.warning.title, 'the confirm names the change, not Please confirm').toBe('Change a finished league?');
       expect(first.warning.message).toContain(TEXT.finishedLeague);
       expect(first.warning.buttons).toEqual(expect.arrayContaining([TEXT.changeAnyway, TEXT.cancel]));
       expect(first.table.heading).toBe('Final standings');

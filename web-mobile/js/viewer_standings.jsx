@@ -334,6 +334,11 @@ export function LeagueStandingsViewer({ competition, poolMatches, tweaks, onMatc
 
   const colSpan = isEngi ? 4 : isTeam ? 10 : 7;
 
+  // A league tie still waiting for its tie-breaker shows the level rows sharing
+  // the group's best place, on the amber tied row. The server Rank is untouched
+  // (it breaks the level rows by draw order), so Awards and exports read it as is.
+  const leagueTies = tiedPlaces(standings, 0);
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       {isCompleted && standings.length > 0 && <WinnerBadge name={winner.player?.name || ""} />}
@@ -352,10 +357,15 @@ export function LeagueStandingsViewer({ competition, poolMatches, tweaks, onMatc
           </thead>
           <tbody>
             {standings.length > 0 ? standings.map((s, i) => {
-              const rank = s.rank || i + 1;
+              const tie = leagueTies.get(s.player?.id || `${s.player?.name}||${s.player?.dojo || ""}`);
+              const rank = tie ? tie.place : s.rank || i + 1;
               const isDHWinner = isTeam && dhWinnerNames.has(s.player?.name || "");
+              const rowClasses = [
+                isPlayerWatched(s.player, highlightPlayers) ? "pool__row--me" : "",
+                tie ? "pool__row--tied" : "",
+              ].filter(Boolean).join(" ");
               return (
-                <tr key={s.player?.id || s.player?.name || i} className={isPlayerWatched(s.player, highlightPlayers) ? "pool__row--me" : undefined}>
+                <tr key={s.player?.id || s.player?.name || i} className={rowClasses || undefined}>
                   <td className={`pool-standings__draw-pos${s.isOverridden ? " pool-standings__draw-pos--override" : ""}`}>
                     {rank}{s.isOverridden ? "*" : ""}
                   </td>

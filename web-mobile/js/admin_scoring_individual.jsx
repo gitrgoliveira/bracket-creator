@@ -1442,6 +1442,11 @@ export function ScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, onSub
                           title={decidedByHantei ? (hanteiRecorded ? "Locked: hantei already recorded" : "Hantei armed: choose a winner above, or cancel") : (!isDrawToggled && needsWinner ? DRAW_BLOCKED_REASON : (!isDrawToggled && (aTotal > 0 || bTotal > 0) ? "Clear scores before marking a draw" : (isDrawToggled ? "Cancel draw" : "Mark as draw (hikiwake)")))}
                           aria-label={isDrawToggled ? "Cancel draw (hikiwake)" : "Mark as draw (hikiwake)"}
                         >{isDrawToggled ? "Cancel draw" : "Mark draw"}</button>
+                        {/* The reason Mark draw is off, in view: a title never
+                            shows on a touchscreen. */}
+                        {!isDrawToggled && !decidedByHantei && needsWinner && (
+                          <div className="sb-blocked-reason" data-testid="scoring-modal-draw-blocked-reason">{DRAW_BLOCKED_REASON}</div>
+                        )}
                       </div>
                     )}
                   </React.Fragment>
@@ -1735,6 +1740,11 @@ export function ScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, onSub
               row: hide the footer's own nav+actions so the operator never sees
               two Cancels and two commit buttons at the highest-stakes moment
               (amending a recorded result). Mirrored in EngiScoreEditorModal. */}
+          {/* Why Finish reads "Needs a winner", in view (a title never shows on a
+              touchscreen). */}
+          {koTieBlocked && !(isComplete && correctionPrompt) && (
+            <div className="sb-blocked-reason" data-testid="scoring-modal-ko-tie-reason">{KO_TIE_REASON}</div>
+          )}
           {!(isComplete && correctionPrompt) && (
           <div className="score-nav">
             {prevMatch ? (

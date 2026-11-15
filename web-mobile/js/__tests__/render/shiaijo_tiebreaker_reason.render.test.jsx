@@ -87,6 +87,19 @@ describe('tieBreakerReasonLine', () => {
     expect(tieBreakerReasonLine(bout({ sideAId: 'p2', sideBId: 'p3' }), rows)).toBe('Tie-breaker bout. These two finished level.');
   });
 
+  it('says what to do, not that the bout separates them, when both sides withdrew', () => {
+    const rows = [row('p0', 'Zed', 1, 6), row('p1', 'Aki', 2, 4), row('p2', 'Bea', 3, 4)];
+    const both = bout({ ineligibleSides: { a: 'kiken-injury', b: 'fusenpai' } });
+    const fix = 'Neither can fight: record it as drawn, then enter the lots on the Pools tab.';
+    expect(tieBreakerReasonLine(both, rows)).toBe(`Tie-breaker for 2nd place. ${fix}`);
+    expect(tieBreakerReasonLine(both, null)).toBe(`Tie-breaker bout. ${fix}`);
+    const three = [row('p1', 'Aki', 1, 4), row('p2', 'Bea', 2, 4), row('p3', 'Cal', 3, 4)];
+    expect(tieBreakerReasonLine(both, three)).toBe(`Part of the tie-breaker for 1st to 3rd place. ${fix}`);
+    expect(tieBreakerReasonLine(both, rows)).not.toMatch(/separates/);
+    // One side barred: the bout can still be decided, so the line is unchanged.
+    expect(tieBreakerReasonLine(bout({ ineligibleSides: { a: 'fusenpai' } }), rows)).toMatch(/separates them\.$/);
+  });
+
   it('names no place when it cannot know one', () => {
     const generic = 'Tie-breaker bout. These two finished level.';
     expect(tieBreakerReasonLine(bout(), null)).toBe(generic);
@@ -97,6 +110,17 @@ describe('tieBreakerReasonLine', () => {
 });
 
 describe('TieBreakerReason on the queue row', () => {
+  it('sits below the sides, in its own class', async () => {
+    window.API.leagueStandings = vi.fn().mockResolvedValue([]);
+    queueRow(bout());
+    await waitFor(() => expect(window.API.leagueStandings).toHaveBeenCalled());
+    await act(async () => {});
+    const reason = screen.getByTestId('tiebreaker-reason');
+    expect(reason.className).toBe('shiaijo-qrow__reason');
+    const match = document.querySelector('.shiaijo-qrow__match');
+    expect(match.compareDocumentPosition(reason) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   it('shows the place a league tie-breaker decides, from the league table', async () => {
     window.API.leagueStandings = vi.fn().mockResolvedValue([row('p1', 'Aki', 1, 4), row('p2', 'Bea', 2, 4), row('p3', 'Cal', 3, 0)]);
     queueRow(bout());

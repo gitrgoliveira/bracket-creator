@@ -8,7 +8,7 @@
 // TEXT.changeAnyway), pinned here word for word.
 
 import { describe, it, expect, vi } from 'vitest';
-import { attemptScoreWrite, leagueFinishedRefusal, leagueFinishedConfirm, LEAGUE_FINISHED_WARNING } from '../write_result.jsx';
+import { attemptScoreWrite, leagueFinishedRefusal, leagueFinishedConfirm, lotsReplacedConfirm, LEAGUE_FINISHED_WARNING } from '../write_result.jsx';
 
 const FIXTURE_WARNING = 'This league has finished. Changing this result can change the final table and podium. If it leaves a new tie at a podium place, the league goes back to match play to settle it.';
 
@@ -53,6 +53,12 @@ describe('leagueFinishedConfirm', () => {
         expect(c.message).toBe(FIXTURE_WARNING);
         expect(c.confirmLabel).toBe('Change it anyway');
         expect(c.cancelLabel).toBe('Cancel');
+    });
+
+    it('has its own title, not the generic one', () => {
+        expect(leagueFinishedConfirm({ removedCourts: [] }).title).toBe('Change a finished league?');
+        expect(leagueFinishedConfirm({ reopen: true }).title).toBe('Reopen a finished league?');
+        expect(lotsReplacedConfirm().title).toBe('Replace the lots?');
     });
 
     it('names a shiaijo the tournament no longer has', () => {

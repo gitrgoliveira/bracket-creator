@@ -315,13 +315,29 @@ function sharedPlaceLabel(group) {
 // The line naming an individual tie a tie-breaker round left level: its pool
 // and the places it shares, e.g. "Pool A, 1st to 3rd place". Exported for
 // vitest at __tests__/admin_pools.test.jsx.
-function circleGroupLine(group) {
+function circleGroupLine(group, isLeague = false) {
   const n = (group.teams || group.teamNames || []).length;
   const last = group.minPosition + Math.max(n, 1) - 1;
   const places = last > group.minPosition
     ? `${rankOrdinal(group.minPosition)} to ${rankOrdinal(last)} place`
     : sharedPlaceLabel(group);
-  return `${group.poolName}, ${places}`;
+  // A league has one table and no pools ("Pool A" is only its storage name).
+  return isLeague ? places : `${group.poolName}, ${places}`;
+}
+
+// A list of names read aloud: "A", "A and B", "A, B and C".
+function andList(names) {
+  const list = names || [];
+  if (list.length < 2) return list.join("");
+  return `${list.slice(0, -1).join(", ")} and ${list[list.length - 1]}`;
+}
+
+// The places a tie-breaker banner group shares, in the ordinal form: "1st
+// place" or "1st to 3rd place".
+function tiebreakPlacesLabel(group) {
+  return group.minPosition === group.maxPosition
+    ? `${rankOrdinal(group.minPosition)} place`
+    : `${rankOrdinal(group.minPosition)} to ${rankOrdinal(group.maxPosition)} place`;
 }
 
 function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, password }) {
@@ -449,7 +465,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
       // match_updated reloads the pool matches, and with them this notice,
       // which goes once the new round is under way.
     } catch (e) {
-      if (mountedRef.current) setCircleErr(prev => ({ ...prev, [groupKey]: (e && e.message) || "Failed to add another tie-breaker round" }));
+      if (mountedRef.current) setCircleErr(prev => ({ ...prev, [groupKey]: (e && e.message) || "Could not add the round. Check the connection and try again." }));
     } finally {
       if (mountedRef.current) setRunBusy(null);
     }
@@ -539,7 +555,15 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
   // a first chusen; the recorded panel reuses it (changing=true) to change a
   // chusen recorded in the wrong order, so both go through the same path and
   // the same knockout warning.
-  const chusenEntry = (group, changing = false) => {
+  //
+  // `embed` is set when the entry sits inside the individual circle notice
+  // (`{ onCancel }`): it is drawn without its own group header (the notice's
+  // group already names the tie) and spaced from the buttons above it. A Cancel
+  // closing it again shows only where the lots were opened by "Draw lots
+  // instead" (`onCancel` set); where the lots are the only way on there is
+  // nothing to go back to.
+  const chusenEntry = (group, changing = false, embed = null) => {
+    const onCancel = embed ? embed.onCancel : null;
     const { poolName, teamNames, minPosition } = group;
     // Members keyed by IDENTITY (checkinPid), never by name
     // (bc-cse follow-up) and never by index (bc-appx item 2): `teams`
@@ -686,11 +710,13 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
     };
 
     return (
-      <div key={groupKey} className="league-tiebreak__group">
-        <div className="league-tiebreak__group-header">
-          <span className="league-tiebreak__pos">{poolName}</span>
-          <span className="league-tiebreak__teams">{teamNames.join(" · ")}</span>
-        </div>
+      <div key={groupKey} className="league-tiebreak__group" style={embed ? { marginTop: 12 } : undefined}>
+        {!embed && (
+          <div className="league-tiebreak__group-header">
+            <span className="league-tiebreak__pos">{isLeague ? circleGroupLine(group, true) : poolName}</span>
+            <span className="league-tiebreak__teams">{teamNames.join(" · ")}</span>
+          </div>
+        )}
         {changing && (
           <div className="league-tiebreak__desc" style={{ marginBottom: 8 }}>
             {isLeague
@@ -701,7 +727,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
           </div>
         )}
         <div className="league-tiebreak__desc" style={{ marginBottom: 8 }}>
-          Assign positions {minPosition} to {minPosition + members.length - 1} (one per {isTeamComp ? "team" : "competitor"}):
+          Assign places {rankOrdinal(minPosition)} to {rankOrdinal(minPosition + members.length - 1)} (one per {isTeamComp ? "team" : "competitor"}):
         </div>
         {members.map((member, idx) => {
           // groupKey + member IDENTITY, not index: see the effRank/
@@ -750,7 +776,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
             {isBusy && <span className="spinner" />}
             Record chusen result
           </button>
-          {changing && (
+          {(changing || onCancel) && (
             <button
               type="button"
               className="btn btn--sm btn--ghost"
@@ -758,7 +784,8 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
               onClick={() => {
                 clearInputs();
                 setChusenGroupErr(prev => ({ ...prev, [groupKey]: null }));
-                setChusenChanging(prev => ({ ...prev, [groupKey]: false }));
+                if (changing) setChusenChanging(prev => ({ ...prev, [groupKey]: false }));
+                else onCancel();
               }}
             >
               Cancel
@@ -786,7 +813,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
     >
       <div className="league-tiebreak__title">Chusen (drawing lots) required</div>
       <div className="league-tiebreak__desc">
-        A tie at 1st or 2nd place (and at 3rd place when joint 3rd places are off) needs a winner, and the tie-breaker could not give one: the daihyosen left two or more teams level on daihyosen wins, or the teams to fight it withdrew earlier. Draw lots and record each team&apos;s finishing position below.
+        The tie-breaker could not separate these teams: the daihyosen left two or more of them level on daihyosen wins, or the teams to fight it withdrew earlier. Draw lots, then record each team&apos;s finishing place below.
       </div>
       {chusenCandidates.map(group => chusenEntry(group))}
     </div>
@@ -806,7 +833,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
     >
       <div className="league-tiebreak__title">A tie-breaker round left a tie</div>
       <div className="league-tiebreak__desc">
-        A tie at 1st or 2nd place (and at 3rd place when joint 3rd places are off) needs a winner. Each won as many tie-breaker bouts as the others, or the {circleSideWord} to fight it withdrew earlier, so the order is still open. Run another tie-breaker round among them where one can be fought, or draw lots instead.
+        The order is still open: a tie at 1st or 2nd place (and at 3rd place when joint 3rd places are off) needs a winner.
       </div>
       {chusenCandidates.map(group => {
         const groupKey = `${group.poolName}::${group.minPosition}`;
@@ -818,27 +845,37 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
         return (
           <div key={groupKey} className="league-tiebreak__group">
             <div className="league-tiebreak__group-header">
-              <span className="league-tiebreak__pos">{circleGroupLine(group)}</span>
+              <span className="league-tiebreak__pos">{circleGroupLine(group, isLeague)}</span>
               <span className="league-tiebreak__teams">{(group.teamNames || []).join(" · ")}</span>
+            </div>
+            <div className="league-tiebreak__desc">
+              {lotsOnly
+                ? `The ${circleSideWord} to fight the tie-breaker withdrew earlier, so no round can be fought. Draw lots, then enter the order below.`
+                : `${andList(group.teamNames)} each won as many tie-breaker bouts as the others. Run another round among them, or draw lots instead.`}
             </div>
             <div className="league-tiebreak__actions">
               {runs.map(run => {
                 const ids = run.map(m => m.id);
                 const busyKey = `${groupKey}::${ids.join(",")}`;
-                const label = runs.length > 1
-                  ? `Run another tie-breaker round: ${run.map(m => m.name).join(" · ")}`
-                  : "Run another tie-breaker round";
+                const namesId = `run-names-${busyKey}`.replace(/[^a-zA-Z0-9_-]+/g, "-");
+                const noIds = ids.some(id => !id);
                 return (
-                  <button
-                    key={busyKey}
-                    type="button"
-                    className="btn btn--sm btn--primary"
-                    disabled={runBusy !== null || ids.some(id => !id)}
-                    onClick={() => handleRunTiebreakerRound(group, run)}
-                  >
-                    {runBusy === busyKey && <span className="spinner" />}
-                    {label}
-                  </button>
+                  <div key={busyKey}>
+                    <button
+                      type="button"
+                      className="btn btn--sm btn--primary"
+                      disabled={runBusy !== null || noIds}
+                      aria-describedby={runs.length > 1 ? namesId : undefined}
+                      onClick={() => handleRunTiebreakerRound(group, run)}
+                    >
+                      {runBusy === busyKey && <span className="spinner" />}
+                      Run another round
+                    </button>
+                    {runs.length > 1 && (
+                      <span id={namesId} className="field__hint"> {run.map(m => m.name).join(" · ")}</span>
+                    )}
+                    {noIds && <NoIdHint text={NO_ID_POOL_HINT} />}
+                  </div>
                 );
               })}
               {!lotsOnly && !lotsOpen[groupKey] && (
@@ -853,7 +890,9 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
               )}
             </div>
             {errMsg && <div className="league-tiebreak__err">{errMsg}</div>}
-            {(lotsOnly || lotsOpen[groupKey]) && chusenEntry(group)}
+            {(lotsOnly || lotsOpen[groupKey]) && chusenEntry(group, false, {
+              onCancel: lotsOnly ? null : () => setLotsOpen(prev => ({ ...prev, [groupKey]: false })),
+            })}
           </div>
         );
       })}
@@ -880,14 +919,14 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
         return (
           <div key={groupKey} className="league-tiebreak__group">
             <div className="league-tiebreak__group-header">
-              <span className="league-tiebreak__pos">{group.poolName}</span>
+              <span className="league-tiebreak__pos">{isLeague ? circleGroupLine(group, true) : group.poolName}</span>
               <span className="league-tiebreak__teams">Drawing lots: {order}</span>
             </div>
             <div className="league-tiebreak__actions">
               <button
                 type="button"
                 className="btn btn--sm"
-                aria-label={`Change the drawing lots for ${group.poolName}`}
+                aria-label={`Change the drawing lots for ${isLeague ? circleGroupLine(group, true) : group.poolName}`}
                 onClick={() => setChusenChanging(prev => ({ ...prev, [groupKey]: true }))}
               >
                 Change
@@ -901,7 +940,21 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
 
   // Banner element: shown when there are consequential tied groups with no
   // tie-breaker matches yet, OR when tie-breaker matches have been generated.
-  const leagueTiebreakBanner = isTeamLeague && c.status === "pools" && tiebreakCandidates && tiebreakCandidates.length > 0 ? (
+  // A group whose every tie-breaker bout is finished and that a chusen candidate
+  // names (the same teams, by id) is owed lots, which the chusen banner above
+  // asks for: one tie shows in one banner, so it leaves this one.
+  const lotsOwed = (group) => {
+    const ids = groupTeamIds(group.teams, group.teamNames || []);
+    if (!ids || !isTeamComp || !chusenCandidates) return false;
+    const rows = dhRowsOfGroup(ids);
+    if (rows.length === 0 || !dhPairsComplete(rows, ids.length) || rows.some(m => m.status !== "completed")) return false;
+    return chusenCandidates.some(g => {
+      const gids = (g.teams || []).map(t => t && t.id);
+      return gids.length === ids.length && gids.every(id => id && ids.includes(id));
+    });
+  };
+  const bannerGroups = (tiebreakCandidates || []).filter(g => !lotsOwed(g));
+  const leagueTiebreakBanner = isTeamLeague && c.status === "pools" && bannerGroups.length > 0 ? (
     <div
       className="alert alert--warn league-tiebreak"
       role="status"
@@ -909,9 +962,9 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
     >
       <div className="league-tiebreak__title">Tie-breaker required</div>
       <div className="league-tiebreak__desc">
-        All regular matches are finished, and the teams below are level on every criterion for a place that counts. A tie at 1st or 2nd place (and at 3rd place when joint 3rd places are off) needs a tie-breaker with a winner. Run a tie-breaker to separate them.
+        All regular matches are finished, and the teams below are level on every criterion for a place that counts. Run a tie-breaker to separate them. A tie at 1st or 2nd place (and at 3rd place when joint 3rd places are off) needs a tie-breaker with a winner.
       </div>
-      {tiebreakCandidates.map((group) => {
+      {bannerGroups.map((group) => {
         const names = group.teamNames || [];
         const teamIds = groupTeamIds(group.teams, names);
         // teamIds is REQUIRED the same way (operator ruling bc-pnum): see
@@ -921,9 +974,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
         const dhRows = dhRowsOfGroup(teamIds);
         const dhComplete = dhPairsComplete(dhRows, names.length);
         const dhScored = dhRowsScored(dhRows);
-        const posLabel = group.minPosition === group.maxPosition
-          ? `Position ${group.minPosition}`
-          : `Positions ${group.minPosition}–${group.maxPosition}`;
+        const posLabel = tiebreakPlacesLabel(group);
         const generateKey = names.join(",") + ":generate";
         const removeKey = names.join(",") + ":remove";
         return (

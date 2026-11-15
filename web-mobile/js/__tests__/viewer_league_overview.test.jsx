@@ -164,6 +164,36 @@ describe('ViewerOverview league standings (mp-ldnr)', () => {
     expect(rankCells).toEqual(['10', '20', '30']); // s.rank, never 1/2/3
   });
 
+  // A tie waiting for its tie-breaker reads as shared: the level rows show the
+  // group's best place on the amber tied row, while the server rank (1, 2, 3)
+  // is what the data keeps.
+  it('league "#" column shares the best place across a waiting tie', () => {
+    const row = (id, rank, points, tied) => ({ player: { id, name: `Player ${id}`, dojo: '' }, wins: 1, losses: 0, draws: 0, ipponsGiven: 1, ipponsTaken: 0, rank, points, tied });
+    const standings = { League: [row('a', 1, 5, true), row('b', 2, 5, true), row('c', 3, 5, true), row('d', 4, 1, false)] };
+    const tree = runtime.mount(ViewerOverview, {
+      ...baseProps,
+      c: leagueComp('pools'),
+      standings,
+      pools,
+      poolMatches: mixedMatches(1, 2),
+    });
+    const container = findInTree(tree, n => n?.props?.['data-testid'] === 'league-overview-standings');
+    const rows = [];
+    (function walk(node) {
+      if (!node || typeof node !== 'object') return;
+      if (Array.isArray(node)) { node.forEach(walk); return; }
+      if (node.type === 'tr') {
+        const kids = [].concat(node.props?.children || []).filter(Boolean);
+        const firstTd = kids.find(k => k && k.type === 'td');
+        if (firstTd) rows.push({ place: collectText(firstTd, expandNamed('NumberedName')), tied: node.props?.className === 'pool__row--tied' });
+      }
+      walk(node.props?.children ?? node.children);
+    })(container);
+    expect(rows).toEqual([
+      { place: '1', tied: true }, { place: '1', tied: true }, { place: '1', tied: true }, { place: '4', tied: false },
+    ]);
+  });
+
   // bc-rvfx: collectText's NumberedName-expansion branch above (added when
   // the outer-side number rendering landed) was never exercised by a
   // fixture that actually carries a `number` -- makeStandings/

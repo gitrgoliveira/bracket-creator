@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { enrichPoolMatchWithComp, poolMatchesForPool, groupTeamIds, drawnSupplementaryBouts, lotsRuledBouts } from '../admin_pools.jsx';
+import { enrichPoolMatchWithComp, poolMatchesForPool, groupTeamIds, drawnSupplementaryBouts, lotsRuledBouts, circleGroupLine } from '../admin_pools.jsx';
 // admin_pools.jsx's chusen banner keys its rank inputs by checkinPid
 // (chusenMemberKey was deleted, the banner now delegates to the one
 // owner of the id-else-name|dojo rule). Imported directly so the tests below
@@ -555,5 +555,20 @@ describe('groupTeamIds', () => {
   it('returns undefined when teams and names have mismatched lengths', () => {
     const teams = [{ id: 'id-a', name: 'Team X', dojo: 'Dojo A' }];
     expect(groupTeamIds(teams, names)).toBeUndefined();
+  });
+});
+
+// circleGroupLine names a tie by its pool and the places it shares; a league has
+// one table and no pools, so it names the places alone, in the ordinal form.
+describe('circleGroupLine', () => {
+  const three = { poolName: 'Pool A', minPosition: 1, teams: [{}, {}, {}] };
+
+  it('names the pool and the places a pools competition shares', () => {
+    expect(circleGroupLine(three)).toBe('Pool A, 1st to 3rd place');
+    expect(circleGroupLine({ poolName: 'Pool B', minPosition: 2, teams: [{}, {}] })).toBe('Pool B, 2nd to 3rd place');
+  });
+
+  it('names the places alone for a league', () => {
+    expect(circleGroupLine(three, true)).toBe('1st to 3rd place');
   });
 });

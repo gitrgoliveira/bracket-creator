@@ -241,17 +241,32 @@ describe('LeagueStandingsViewer (mp-dunx)', () => {
     expect(global.window.API.leagueStandings).toHaveBeenCalledTimes(2);
   });
 
-  // The table prints the place the server gives, so a shared 3rd
-  // reads 3, 3 and a tie below the band 4, 4. A tie at 1st or 2nd is never
-  // shared: a tie-breaker or the lots orders it.
-  it('shows a shared place as the server ranks it', async () => {
+  const placeCells = (tree) => findAll(tree, n => n.type === 'td' && typeof n.props?.className === 'string' && n.props.className.includes('pool-standings__draw-pos'));
+
+  // Outside a waiting tie the table prints the place the server gives, so a
+  // shared 3rd reads 3, 3 and a tie below the band 4, 4.
+  it('shows a place as the server ranks it when no tie is waiting', async () => {
     const shared = mockStandings.map((s, i) => ({ ...s, rank: [1, 2, 3, 3][i] }));
     global.window.API.leagueStandings = vi.fn().mockResolvedValue(shared);
     runtime.mount(LeagueStandingsViewer, { competition: comp, poolMatches: [], tweaks });
     await Promise.resolve();
     const finalTree = runtime.updateProps({ competition: comp, poolMatches: [], tweaks });
-    const cells = findAll(finalTree, n => n.type === 'td' && typeof n.props?.className === 'string' && n.props.className.includes('pool-standings__draw-pos'));
-    expect(cells.map(c => collectText(c, expandNamed('NumberedName')))).toEqual(['1', '2', '3', '3']);
+    expect(placeCells(finalTree).map(c => collectText(c, expandNamed('NumberedName')))).toEqual(['1', '2', '3', '3']);
+  });
+
+  // The server breaks a level tie by draw order (ranks 1, 2, 3) and marks the
+  // rows `tied` while its tie-breaker waits; the table shares the best place on
+  // the amber tied row, and the fourth row keeps its own place.
+  it('shows level rows of a waiting tie sharing the best place on the tied row', async () => {
+    const level = mockStandings.map((s, i) => ({ ...s, points: i < 3 ? 5 : 1, tied: i < 3 }));
+    global.window.API.leagueStandings = vi.fn().mockResolvedValue(level);
+    runtime.mount(LeagueStandingsViewer, { competition: comp, poolMatches: [], tweaks });
+    await Promise.resolve();
+    const finalTree = runtime.updateProps({ competition: comp, poolMatches: [], tweaks });
+    const cells = placeCells(finalTree);
+    expect(cells.map(c => collectText(c, expandNamed('NumberedName')))).toEqual(['1', '1', '1', '4']);
+    const rows = findAll(finalTree, n => n.type === 'tr' && typeof n.props?.className === 'string' && n.props.className.includes('pool__row--tied'));
+    expect(rows).toHaveLength(3);
   });
 });
 

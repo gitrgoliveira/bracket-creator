@@ -89,6 +89,10 @@ describe('the tie-break banner copy', () => {
     expect(text).not.toMatch(/finalis/i);
     expect(text).toContain('level on every criterion for a place that counts');
     expect(text).toContain('A tie at 1st or 2nd place (and at 3rd place when joint 3rd places are off) needs a tie-breaker with a winner.');
+    // Leads with the next step, then the rule once; places read in the ordinal form.
+    expect(text.indexOf('Run a tie-breaker to separate them.')).toBeLessThan(text.indexOf('A tie at 1st or 2nd place'));
+    expect(text).toContain('1st to 2nd place');
+    expect(text).not.toMatch(/Positions?\s/);
     expect(screen.getByRole('button', { name: 'Run tie-breaker' })).toBeTruthy();
     expect(text).not.toMatch(/shared ranks/i);
     expect(screen.queryByRole('button', { name: /shared ranks/i })).toBeNull();
@@ -120,8 +124,9 @@ describe('the lots panel for a tie the bouts cannot settle', () => {
     await mountAdminPools({ api });
 
     const panel = (await screen.findByText('Chusen (drawing lots) required')).closest('.league-tiebreak');
-    expect(panel.textContent).toContain('A tie at 1st or 2nd place (and at 3rd place when joint 3rd places are off) needs a winner');
     expect(panel.textContent).toContain('the teams to fight it withdrew earlier');
+    // The rule is said once on screen, in the tie-breaker banner, never here.
+    expect(panel.textContent).not.toContain('needs a winner');
     expect(panel.textContent).not.toMatch(/shared ranks/i);
     expect(screen.getByRole('button', { name: 'Record chusen result' })).toBeTruthy();
   });

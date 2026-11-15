@@ -97,6 +97,10 @@
   /* Line-height tokens */
   --lh-base:  1.5;   /* body prose, form hints */
 
+  /* Spacing tokens for hint lines under a control */
+  --space-xs: 4px;
+  --space-sm: 8px;
+
   --r-sm: 6px;
   --r: 10px;
   --r-lg: 14px;
@@ -3938,6 +3942,28 @@ button.vsched-item:not([data-clickable]) {
   border-color: #fed7aa;
   min-height: 110px;
   order: 3;
+}
+
+/* A phone cannot hold four steps abreast (a league with joint 3rds): 1st and
+   2nd each take a row, the 3rds sit as a pair, and no step forces a sideways scroll. */
+@media (max-width: 480px) {
+  .podium {
+    flex-wrap: wrap;
+    align-items: stretch;
+  }
+  .podium-step {
+    min-width: 0;
+    min-height: 0;
+    border-radius: 12px;
+    flex: 1 1 calc(50% - 6px);
+    overflow-wrap: anywhere;
+  }
+  .podium-step--1,
+  .podium-step--2 {
+    flex-basis: 100%;
+  }
+  .podium-step--1 { order: 1; }
+  .podium-step--2 { order: 2; }
 }
 
 .podium-step .place {
@@ -9179,6 +9205,19 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   line-height: 1.45;
   color: var(--ink-2);
 }
+.daihyosen-controls__level-hint {
+  margin-top: var(--space-sm);
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--ink-2);
+}
+.sb-blocked-reason {
+  margin-top: var(--space-xs);
+  font-size: 12px;
+  line-height: 1.4;
+  text-align: center;
+  color: var(--ink-2);
+}
 .daihyosen-controls__err {
   font-size: 12px;
   color: var(--danger);
@@ -10296,6 +10335,7 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 .shiaijo-upnext__actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .shiaijo-upnext__actions .btn { display: inline-flex; align-items: center; gap: 6px; }
 .shiaijo-upnext__hint { font-size: 12px; color: var(--ink-2); line-height: 1.4; }
+.shiaijo-qrow__reason { font-size: 12px; color: var(--ink-2); line-height: 1.4; margin-top: var(--space-sm); }
 .shiaijo-upnext__error { font-size: 12px; color: var(--danger); margin-top: 6px; }
 
 /* Team-match lineup prompt above the inline scoring panel */

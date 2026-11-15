@@ -92,3 +92,20 @@ describe('API.leagueTiebreakRemove', () => {
     expect(JSON.parse(opts.body)).toEqual({ teamNames: ['Team A', 'Team B'], teamIds: [] });
   });
 });
+
+describe('API.runTiebreakerRound', () => {
+  let originalFetch;
+  beforeEach(() => { originalFetch = global.fetch; });
+  afterEach(() => { global.fetch = originalFetch; });
+
+  it('throws the server sentence when it gave one', async () => {
+    global.fetch = mockFetch(409, { error: 'That tie is no longer level.' });
+    await expect(API.runTiebreakerRound('c1', 'Pool A', ['a', 'b'], 'pw')).rejects.toThrow('That tie is no longer level.');
+  });
+
+  it('says what to do, with no status code, when the server gave no sentence', async () => {
+    global.fetch = mockFetch(502, {});
+    await expect(API.runTiebreakerRound('c1', 'Pool A', ['a', 'b'], 'pw'))
+      .rejects.toThrow('Could not add the round. Check the connection and try again.');
+  });
+});

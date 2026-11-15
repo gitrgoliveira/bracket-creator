@@ -107,6 +107,9 @@ describe('league team sheet: the line for a level encounter', () => {
     expect(line.textContent.trim()).toBe(
       'Level: a draw in a league, so there is no representative bout. Finish the encounter to record the draw.',
     );
+    // Its own class, not the representative-bout block's hint with inline spacing.
+    expect(line.className).toBe('daihyosen-controls__level-hint');
+    expect(line.getAttribute('style')).toBeNull();
     // No representative bout is offered in a league.
     expect(screen.queryByTestId('scoring-modal-daihyosen-button')).toBeNull();
   });

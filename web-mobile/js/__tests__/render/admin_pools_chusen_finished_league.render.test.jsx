@@ -80,7 +80,7 @@ describe('AdminPools chusen: a finished team league keeps its lots correctable',
     expect(screen.getByText('Drawing lots: 1st Gamma, 2nd Alpha, 3rd Beta')).toBeTruthy();
 
     await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: 'Change the drawing lots for Pool A' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Change the drawing lots for 1st to 3rd place' }));
     });
     expect(screen.getByText(/The final table and the podium change at once; the league stays finished/)).toBeTruthy();
     expect(screen.queryByText(/who qualifies/)).toBeNull();
@@ -133,7 +133,7 @@ describe('AdminPools chusen: a finished team league keeps its lots correctable',
     await waitFor(() => expect(api.chusenCandidates).toHaveBeenCalledWith('c1', PASSWORD));
     await screen.findByText('Chusen (drawing lots) recorded');
     expect(screen.getByText('Drawing lots: 1st Cal, 2nd Aki, 3rd Bea')).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Change the drawing lots for Pool A' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Change the drawing lots for 1st to 3rd place' })).toBeTruthy();
     expect(screen.queryByText('Chusen (drawing lots) required')).toBeNull();
   });
 

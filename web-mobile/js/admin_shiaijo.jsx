@@ -57,7 +57,7 @@ import { resultRecencyDesc } from './result_recency.jsx';
 // default-win action instead of Start. One leaf owns the question
 // (ineligible_match.jsx); BarredMatchNotice (admin_scoring_shared.jsx) is the
 // one component that renders the note plus that action across every surface.
-import { isBarredMatch, sideBarredByDecision, involvesCompetitor, sideKeyForDecisionBy } from './ineligible_match.jsx';
+import { isBarredMatch, barredSides, sideBarredByDecision, involvesCompetitor, sideKeyForDecisionBy } from './ineligible_match.jsx';
 // Straight from its own leaf, NOT admin_scoring_shared.jsx: that module also
 // imports bracket.jsx (for sideMarks), and admin_shiaijo.jsx's render suite
 // stubs window.BracketTree before importing this file -- routing through
@@ -2952,7 +2952,14 @@ function ShiaijoQueueGroup({ label, matches, subGroup, scheduled, courts, onMove
 // two sides are no longer level or sit in different runs, the line still says
 // the bout is a tie-breaker and why, but names no place it cannot know.
 export function tieBreakerReasonLine(m, rows) {
-    const generic = "Tie-breaker bout. These two finished level.";
+    // Both sides withdrew: the bout cannot be fought, so the line says what to
+    // do instead of claiming the bout separates them (the barred note under it
+    // says neither can fight).
+    const barred = barredSides(m);
+    const bothBarred = !!(barred.a && barred.b);
+    const generic = bothBarred
+        ? "Tie-breaker bout. Neither can fight: record it as drawn, then enter the lots on the Pools tab."
+        : "Tie-breaker bout. These two finished level.";
     const list = Array.isArray(rows) ? rows : [];
     const rowOf = (id) => (id ? list.find((s) => s.player && s.player.id === id) : undefined);
     const a = rowOf(m.sideAId || (m.sideA && m.sideA.id));
@@ -2962,9 +2969,9 @@ export function tieBreakerReasonLine(m, rows) {
     const group = list.filter((s) => s.points === a.points && runOf(s) === runOf(a));
     const lo = Math.min(...group.map((s) => s.rank));
     if (group.length === 2) {
-        return `Tie-breaker for ${rankOrdinal(lo)} place. They finished level, so this bout separates them.`;
+        return `Tie-breaker for ${rankOrdinal(lo)} place. ${bothBarred ? "Neither can fight: record it as drawn, then enter the lots on the Pools tab." : "They finished level, so this bout separates them."}`;
     }
-    return `Part of the tie-breaker for ${rankOrdinal(lo)} to ${rankOrdinal(lo + group.length - 1)} place. These two finished level, so this bout helps separate them.`;
+    return `Part of the tie-breaker for ${rankOrdinal(lo)} to ${rankOrdinal(lo + group.length - 1)} place. ${bothBarred ? "Neither can fight: record it as drawn, then enter the lots on the Pools tab." : "These two finished level, so this bout helps separate them."}`;
 }
 
 // The standings every unfinished tie-breaker row reads (the league table, or
@@ -3100,7 +3107,6 @@ export function ShiaijoQueueRow({ m, scheduled, courts, onMoveCourt, onMove, onE
                     {pending && <span className="shiaijo-qrow__waiting">Waiting</span>}
                 </span>
             </div>
-            <TieBreakerReason m={m} className="shiaijo-upnext__hint" />
             <div className="shiaijo-qrow__match">
                 {/* Side by CELL TINT, not a SHIRO/AKA badge (operator decision
                     2026-09-20, bc-sccl). The text channel is an sr-only span, the
@@ -3125,6 +3131,7 @@ export function ShiaijoQueueRow({ m, scheduled, courts, onMoveCourt, onMove, onE
                     </span>
                 </SideCell>
             </div>
+            <TieBreakerReason m={m} className="shiaijo-qrow__reason" />
             {/* bc-cse: a barred match cannot be started (the server refuses it),
                 so the row shows why and the one-tap resolution here instead of a
                 dead Start button. BarredMatchNotice (admin_scoring_shared.jsx) is

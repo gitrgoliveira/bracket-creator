@@ -72,6 +72,9 @@ describe.each([
     await mount(bout(id, 'league'));
     expect(drawToggle().disabled).toBe(true);
     expect(drawToggle().title).toBe('A tie-breaker needs a winner: fight encho, then decide by hantei');
+    // The same reason in view, since a title never shows on a touchscreen.
+    expect(screen.getByTestId('scoring-modal-draw-blocked-reason').textContent)
+      .toBe('A tie-breaker needs a winner: fight encho, then decide by hantei');
   });
 
   it('the x key does nothing', async () => {
@@ -88,6 +91,8 @@ describe.each([
     const btn = finishButton();
     expect(btn.textContent).toBe('Needs a winner');
     expect(btn.disabled).toBe(true);
+    expect(screen.getByTestId('scoring-modal-ko-tie-reason').textContent)
+      .toBe('Needs a winner: fight encho, then record hantei if still tied.');
     await act(async () => { fireEvent.keyDown(window, { key: 'Enter' }); });
     expect(onSubmit).not.toHaveBeenCalled();
   });
@@ -125,6 +130,7 @@ describe('a bout that does not need a winner is unchanged', () => {
     await mount(bout('Pool A-TB-1', 'mixed'));
     expect(drawToggle().disabled).toBe(false);
     expect(drawToggle().title).toBe('Mark as draw (hikiwake)');
+    expect(screen.queryByTestId('scoring-modal-draw-blocked-reason')).toBeNull();
     await act(async () => { fireEvent.click(drawToggle()); });
     expect(drawToggle().textContent).toBe('Cancel draw');
     expect(finishButton().textContent).not.toBe('Needs a winner');

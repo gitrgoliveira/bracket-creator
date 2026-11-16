@@ -22,18 +22,19 @@ const bulkScorePushEachMax = 50
 // RegisterMatchHandlers wires up the score / quick-score / bulk-score /
 // court / time endpoints under the admin group.
 //
-// The score endpoint is the Slice 0 / NFR-002 demonstration of the
-// interface-based dependency injection pattern (T017): it consumes
-// `ScoringEngine` and `Broadcaster` rather than the concrete
-// `*engine.Engine` and `*Hub`, plus the `ScoreRequest.Validate()`
-// pattern (T015 / NFR-004) for request-shape validation.
+// The score endpoint (registerScoreHandler, handlers_match_score.go) is the
+// Slice 0 / NFR-002 demonstration of the interface-based dependency
+// injection pattern (T017): it consumes `ScoringEngine` and `Broadcaster`
+// rather than the concrete `*engine.Engine` and `*Hub`, plus the
+// `ScoreRequest.Validate()` pattern (T015 / NFR-004) for request-shape
+// validation.
 //
-// The remaining endpoints in this file still hold concrete pointers
-// (the function signature accepts the concrete `*engine.Engine` for
-// methods not yet on the interface). Later slices migrate those one at
-// a time; the concrete `*engine.Engine` remains a drop-in
-// implementation of `ScoringEngine` so the `tryAutoCompletePools` and
-// score endpoint paths can already accept the interface today.
+// The endpoints registered below still hold concrete pointers (the
+// function signature accepts the concrete `*engine.Engine` for methods not
+// yet on the interface). Later slices migrate those one at a time; the
+// concrete `*engine.Engine` remains a drop-in implementation of
+// `ScoringEngine`, so the score endpoint (and `tryAutoCompletePools`, in
+// pool_auto_complete.go) already accept the interface today.
 func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store CompetitionStore, tx CompetitionTransactor, hub *Hub, verifier PasswordVerifier, tl TournamentLoader) {
 	// The court move and the time change are ordered by arrival: a late
 	// duplicate of one is answered as recorded (writeOnce, Y8).

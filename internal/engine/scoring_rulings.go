@@ -89,7 +89,7 @@ import (
 //     reopen inherit the verdict, and a mark with no winner is unattributable
 //     to either side — stripInvalidHantei then strips it (drop-never-guess,
 //     the same policy an unattributable winner-less verdict gets everywhere
-//     else in this file).
+//     else in the scoring code).
 //   - COMPLETED (or unstated, which applyBracketMatchResult defaults to
 //     completed). A match still running has not been decided by anyone.
 //   - A COMPATIBLE DECISION, through the MATCH-level predicate. Using the

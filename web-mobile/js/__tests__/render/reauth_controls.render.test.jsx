@@ -154,7 +154,7 @@ describe('AdminTopbar: held results', () => {
     expect(held().tagName).toBe('BUTTON');
     expect(held().querySelector('[role="status"]')).toHaveTextContent('Offline: 1 result not sent');
     expect(screen.queryByText('Connected')).toBeNull();
-    expect(screen.getByText('Reconnecting…').className).toContain('topbar__conn--down');
+    expect(screen.getByText('Reconnecting…').closest('.topbar__conn').className).toContain('topbar__conn--down');
   });
 
   it('counts results, plural, and only results when any are held', async () => {

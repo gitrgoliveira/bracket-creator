@@ -500,6 +500,59 @@ a:hover {
   border-color: var(--ink-4);
 }
 
+/* The name block gives way to the controls: it shrinks and ends in an
+   ellipsis, while each control keeps its label on one line. */
+.topbar__text {
+  min-width: 0;
+}
+
+.topbar > .viewer-toggle,
+.topbar > .btn {
+  flex: none;
+  white-space: nowrap;
+}
+
+/* On a phone the bar keeps one row: the healthy connection shows its dot
+   alone and Public viewer its eye alone. Both labels stay in the accessible
+   name, and "Reconnecting…" stays visible because it is a warning. When a
+   warning and the held-results count both show and the controls no longer
+   fit beside the name, they move to a second row rather than scroll: the
+   name block asks for a small width and gives the rest back. */
+@media (max-width: 480px) {
+  .topbar {
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 8px 12px;
+  }
+
+  .topbar__brand {
+    flex: 1 1 120px;
+  }
+
+  .topbar__spacer {
+    display: none;
+  }
+
+  .topbar .viewer-toggle {
+    position: relative;
+    justify-content: center;
+    min-width: 44px;
+    min-height: 44px;
+    padding: 0;
+  }
+
+  .topbar .viewer-toggle .topbar__label,
+  .topbar__conn:not(.topbar__conn--down) .topbar__label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+  }
+}
+
 /* ---------- Running status strip (under topbar) ---------- */
 /* Stickiness is provided by the parent .topbar-stack so the strip never
    needs to know the topbar's height, it sits naturally below in flow. */

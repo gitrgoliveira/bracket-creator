@@ -213,7 +213,7 @@ function AdminTopbar({ onLogout, onViewerMode, tournament, hideRunningStrip, bef
       <div className="topbar">
         <div className="topbar__brand">
           <img src="/api/branding/logo" onError={(e) => { e.target.onerror = null; e.target.src = "/logo.jpeg"; }} alt="Tournament logo" className="topbar__logo" decoding="async" />
-          <div>
+          <div className="topbar__text">
             <div className="topbar__title">{tournament?.name || "Bracket Creator"}</div>
             <div className="topbar__sub">Admin console</div>
           </div>
@@ -233,7 +233,7 @@ function AdminTopbar({ onLogout, onViewerMode, tournament, hideRunningStrip, bef
           title={linkUp ? "Receiving real-time updates" : "Connection lost, reconnecting"}
         >
           <span aria-hidden="true" className="topbar__conn__dot"></span>
-          {linkUp ? "Connected" : "Reconnecting…"}
+          <span className="topbar__label">{linkUp ? "Connected" : "Reconnecting…"}</span>
         </span>
         {heldText && (
           // Opens the list of what is held (HeldWritesPanel), where a write
@@ -256,7 +256,7 @@ function AdminTopbar({ onLogout, onViewerMode, tournament, hideRunningStrip, bef
             onClose={() => setHeldOpen(false)}
           />
         )}
-        <button type="button" className="viewer-toggle" onClick={onViewerMode}><Icon name="eye" /> Public viewer</button>
+        <button type="button" className="viewer-toggle" onClick={onViewerMode}><Icon name="eye" /> <span className="topbar__label">Public viewer</span></button>
         {syncStatus === 'auth-required' && (
           <button
             type="button"

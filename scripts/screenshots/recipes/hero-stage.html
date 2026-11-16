@@ -12,8 +12,9 @@
   device frames. The stills and the "Watch it update live" clip are both taken
   from this one page, so they cannot disagree about the layout.
 
-  Everything it shows comes from the query string, so the page has no idea
-  which server it is pointed at:
+  The page shows nothing until the recipe calls showStage({...}) with what
+  to frame, so it has no idea which server it is pointed at and reads no URL
+  from its own address:
 
     layout   wide (court console, court display, phone, with labels) or
              narrow (court display and phone only, no labels)
@@ -77,41 +78,40 @@
     { key: 'phone', w: 390, h: 844, show: 760, radius: 26,
       label: '3 · FOLLOWED ON EVERY PHONE', title: 'Phone following a competitor', wide: 384, narrow: 333 },
   ];
-  const params = new URLSearchParams(location.search);
-  const layout = params.get('layout') === 'narrow' ? 'narrow' : 'wide';
-  const stage = document.getElementById('stage');
-  stage.className = `stage stage--${layout}`;
-  for (const s of SURFACES) {
-    const width = s[layout];
-    const src = params.get(s.key);
-    if (!width || !src) continue;
-    // The query names a running app to frame; anything but http(s), a
-    // javascript: link above all, is not a surface to show.
-    const url = new URL(src, location.href);
-    if (url.protocol !== 'http:' && url.protocol !== 'https:') continue;
-    const scale = width / s.w;
-    const fig = document.createElement('figure');
-    fig.className = `shot shot--${s.key}`;
-    const screen = document.createElement('div');
-    screen.className = 'screen';
-    screen.style.width = `${width}px`;
-    screen.style.height = `${Math.round(s.show * scale)}px`;
-    screen.style.borderRadius = `${s.radius}px`;
-    const frame = document.createElement('iframe');
-    frame.name = s.key;
-    frame.title = s.title;
-    frame.src = url.href;
-    frame.style.width = `${s.w}px`;
-    frame.style.height = `${s.h}px`;
-    frame.style.transform = `scale(${scale})`;
-    screen.appendChild(frame);
-    fig.appendChild(screen);
-    const label = document.createElement('figcaption');
-    label.className = 'label';
-    label.textContent = s.label;
-    fig.appendChild(label);
-    stage.appendChild(fig);
-  }
+  window.showStage = (frames) => {
+    const layout = frames.layout === 'narrow' ? 'narrow' : 'wide';
+    const stage = document.getElementById('stage');
+    stage.className = `stage stage--${layout}`;
+    for (const s of SURFACES) {
+      const width = s[layout];
+      const src = frames[s.key];
+      if (!width || !src) continue;
+      const url = new URL(src);
+      if (url.protocol !== 'http:') throw new Error(`not an http surface: ${src}`);
+      const scale = width / s.w;
+      const fig = document.createElement('figure');
+      fig.className = `shot shot--${s.key}`;
+      const screen = document.createElement('div');
+      screen.className = 'screen';
+      screen.style.width = `${width}px`;
+      screen.style.height = `${Math.round(s.show * scale)}px`;
+      screen.style.borderRadius = `${s.radius}px`;
+      const frame = document.createElement('iframe');
+      frame.name = s.key;
+      frame.title = s.title;
+      frame.src = url.href;
+      frame.style.width = `${s.w}px`;
+      frame.style.height = `${s.h}px`;
+      frame.style.transform = `scale(${scale})`;
+      screen.appendChild(frame);
+      fig.appendChild(screen);
+      const label = document.createElement('figcaption');
+      label.className = 'label';
+      label.textContent = s.label;
+      fig.appendChild(label);
+      stage.appendChild(fig);
+    }
+  };
 </script>
 </body>
 </html>

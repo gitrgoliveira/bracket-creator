@@ -32,8 +32,8 @@ import {
 } from '../lib/editor.mjs';
 import { assertIndividualBoutPoints } from '../lib/fixture.mjs';
 
-// The stage is opened as the file it is, with its frames named in the query
-// string. A file: page may frame both loopback names; a page the harness
+// The stage is opened as the file it is, and then told what to frame
+// (showStage), so it reads no URL from its own address. A file: page may frame both loopback names; a page the harness
 // served by request interception may not, because it has no address of its
 // own and Chromium's local network access checks then treat it as a public
 // site (measured: net::ERR_BLOCKED_BY_LOCAL_NETWORK_ACCESS_CHECKS on the
@@ -149,11 +149,14 @@ export async function openStage(page, base, fixture, layout) {
     localStorage.setItem('bc_password', pw);
   }, { pw: PASSWORD, origin: consoleOrigin });
 
-  const query = new URLSearchParams({ layout });
-  if (layout === 'wide') query.set('console', `${base}/admin/shiaijo/${COURT}`);
-  query.set('display', `${publicBase}/display?court=${COURT}`);
-  query.set('phone', `${publicBase}/`);
-  await page.goto(`${STAGE_URL.href}?${query}`, { waitUntil: 'domcontentloaded' });
+  const frames = {
+    layout,
+    display: `${publicBase}/display?court=${COURT}`,
+    phone: `${publicBase}/`,
+  };
+  if (layout === 'wide') frames.console = `${base}/admin/shiaijo/${COURT}`;
+  await page.goto(STAGE_URL.href, { waitUntil: 'domcontentloaded' });
+  await page.evaluate((f) => window.showStage(f), frames);
 
   const { name, number } = fixture.followed;
   if (layout === 'wide') {

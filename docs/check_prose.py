@@ -71,6 +71,7 @@ error (a missing path, or a file that is neither .md nor .html).
 
 from __future__ import annotations
 
+import html
 import os
 import re
 import sys
@@ -370,7 +371,8 @@ def check_markdown(text: str) -> list[tuple[int, str, str]]:
 # Jinja comments, expressions and statements, masked out BEFORE the HTML is
 # parsed, so a "{% if a > b %}" can never close a tag and an expression's
 # string literal is never read as text. Each is replaced by spaces with its
-# newlines kept, so every later line number still matches the source.
+# newlines kept, so every later line number still matches the source. The one
+# exception is a plain `{{ name }}` that prints a string `set` earlier (below).
 JINJA_RE = re.compile(r"\{#.*?#\}|\{\{.*?\}\}|\{%.*?%\}", re.DOTALL)
 
 # Elements whose whole content is skipped. `code` (and `kbd`, `samp`) mirror
@@ -392,8 +394,35 @@ HTML_INLINE_TAGS = {
 HTML_READ_ATTRS = {"alt", "title", "aria-label"}
 
 
+# A `{% set name = "text" %}` whose value is one plain string literal on one
+# line, and a bare `{{ name }}` that prints it. The template's own copy (the
+# headline, the lede) is written this way, so the printed text is read as if
+# it stood where the expression does.
+JINJA_SET_RE = re.compile(r"""\{%-?\s*set\s+(\w+)\s*=\s*(?:"([^"\n]*)"|'([^'\n]*)')\s*-?%\}""")
+JINJA_NAME_RE = re.compile(r"\{\{-?\s*(\w+)\s*-?\}\}")
+
+
 def _mask(m: re.Match[str]) -> str:
     return re.sub(r"[^\n]", " ", m.group(0))
+
+
+def _substitute_literals(text: str) -> str:
+    """Replace each `{{ name }}` that prints a `{% set name = "literal" %}`
+    with that literal, escaped so it stays inside an attribute, and mask every
+    other Jinja form. A literal holds no newline, so line numbers still match
+    the source."""
+    literals = {
+        m.group(1): html.escape(m.group(2) if m.group(2) is not None else m.group(3))
+        for m in JINJA_SET_RE.finditer(text)
+    }
+
+    def replace(m: re.Match[str]) -> str:
+        name = JINJA_NAME_RE.fullmatch(m.group(0))
+        if name and name.group(1) in literals:
+            return literals[name.group(1)]
+        return _mask(m)
+
+    return JINJA_RE.sub(replace, text)
 
 
 class _ProseHTMLParser(HTMLParser):
@@ -465,7 +494,7 @@ def check_html(text: str) -> list[tuple[int, str, str]]:
     template) source: the line rules on each line of each block of text,
     the paragraph rules on each block as a whole."""
     parser = _ProseHTMLParser()
-    parser.feed(JINJA_RE.sub(_mask, text))
+    parser.feed(_substitute_literals(text))
     parser.close()
 
     hits: list[tuple[int, str, str]] = []

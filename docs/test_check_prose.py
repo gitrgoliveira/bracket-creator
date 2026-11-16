@@ -137,6 +137,22 @@ class HtmlRulesTest(unittest.TestCase):
         html = "{#\nnote\n#}\n<!--\nx\n-->\n<p>the mat</p>\n"
         self.assertEqual(rules_by_line(check_prose.check_html(html)), [(7, "mat")])
 
+    def test_printed_set_literal_is_read_where_it_prints(self):
+        html = (
+            '{%- set lede = "Score the mat live." -%}\n'
+            "{%- set title = 'A default win' -%}\n"
+            '<meta name="description" content="{{ lede }}">\n'
+            "<h1>{{ title }}</h1>\n"
+            "<p>{{ other }}</p>\n"
+        )
+        self.assertEqual(
+            rules_by_line(check_prose.check_html(html)),
+            [(3, "mat"), (4, "default-win")],
+        )
+
+    def test_set_literal_that_is_never_printed_is_ignored(self):
+        self.assertEqual(check_prose.check_html('{% set note = "the mat" %}\n<p>ok</p>'), [])
+
     def test_clean_html_has_no_hits(self):
         self.assertEqual(check_prose.check_html("<p>Every bout on every court.</p>"), [])
 

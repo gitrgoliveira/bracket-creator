@@ -946,7 +946,7 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 		}
 		// Representative endpoints across the affected handler set,
 		// competition, participants/seeds, AND at least one match route
-		// (handlers_match.go also uses requireValidCompID; without a
+		// (the match handlers also use requireValidCompID; without a
 		// match-route case here, a regression there would slip past).
 		// The override-rank route mounts at
 		// /competitions/:id/pools/:poolId/override-rank; the test path
@@ -968,9 +968,10 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 			{"PUT", "/api/competitions/%s/seeds"},
 			{"POST", "/api/competitions/%s/generate-draw"},
 			{"DELETE", "/api/competitions/%s/draw"},
-			// Match endpoints from handlers_match.go. Without a match
-			// route in this set, a regression that drops requireValidCompID
-			// from match.go would still ship green.
+			// Match endpoints from handlers_match.go (bulk-score, court) and
+			// handlers_match_score.go (score). Without a match route in this
+			// set, a regression that drops requireValidCompID from a match
+			// handler would still ship green.
 			{"POST", "/api/competitions/%s/matches/bulk-score"},
 			{"PUT", "/api/competitions/%s/matches/m1/score"},
 			{"PUT", "/api/competitions/%s/matches/m1/court"},

@@ -28,8 +28,9 @@ type matchStores interface {
 	LoadBracket(compID string) (*state.Bracket, error)
 }
 
-// matchSnapshot is the stored state of a match as this file's guards read
-// it: Status drives the correction / stale-write / finalized gates,
+// matchSnapshot is the stored state of a match as the match-write guards
+// (handlers_match_correction.go, handlers_match_self_run_judge.go,
+// handlers_match_score.go) read it: Status drives the correction / stale-write / finalized gates,
 // CorrectionReason carries the kachinuki reopen justification forward (see
 // applyCorrectionReason), and ReopenPending says a reason-less reopen
 // has not been ended again.

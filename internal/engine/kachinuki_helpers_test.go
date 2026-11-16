@@ -11,10 +11,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// fighters builds an []kachinukiFighter queue from bare names, with no
-// member id on any entry -- the shape every pre-bc-tmid test literal used
-// (a plain []string) now needs to take, since AdvanceKachinukiInput's
-// SideA/SideB carry the fighter's possible member id alongside the name.
 // The participant ids the lineup fixtures seat RedTeam and WhiteTeam under: a
 // lineup is a team's by its participant id, so a fixture that saves one stamps
 // the same id on the match's side.
@@ -23,6 +19,10 @@ const (
 	whiteTeamID = "white-id"
 )
 
+// fighters builds an []kachinukiFighter queue from bare names, with no
+// member id on any entry -- the shape every pre-bc-tmid test literal used
+// (a plain []string) now needs to take, since AdvanceKachinukiInput's
+// SideA/SideB carry the fighter's possible member id alongside the name.
 func fighters(names ...string) []kachinukiFighter {
 	out := make([]kachinukiFighter, len(names))
 	for i, n := range names {

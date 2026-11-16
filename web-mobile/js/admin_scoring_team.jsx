@@ -201,7 +201,7 @@ const SQUAD_MEMBER_LABEL_STYLE = { fontSize: 11, color: "var(--ink-3)", fontWeig
 // The note under a representative bout the judges decided, on the public
 // self-run page (bc-dhas). The server refuses a participant's change to that
 // bout with the same sentence (repBoutHanteiRefusal,
-// internal/mobileapp/handlers_match.go), and both are pinned to the
+// internal/mobileapp/handlers_match_refusals.go), and both are pinned to the
 // "recorded" value of internal/mobileapp/testdata/rep_bout_hantei_messages.json,
 // so the participant reads one sentence whichever side says it.
 export const REP_BOUT_DECIDED_NOTE = "The judges decided this representative bout (hantei). Ask the tournament organizer to change it.";
@@ -375,7 +375,7 @@ export function isKachinukiBoutRemovable({ boutMode, currentBoutPlayed, lastScor
 // FUSENSHO (FIK Art. 32) is decided by the decision alone: it names the winner,
 // the maru cells (○○, or a single ○ in encho) are merely the score board's
 // marking of it, and the loser's already-struck ippons are PRESERVED
-// (preserveLoserScore, engine/scoring.go). So a walkover whose loser kept
+// (preserveLoserScore, engine/scoring_rulings.go). So a walkover whose loser kept
 // two ippons re-opens as 2–2 and one declared in encho as 1–1: counting
 // alone would read those as tied, which left the band rendering
 // "Last:  beat  (fusensho)" with both names blank, and could even hand the
@@ -3793,7 +3793,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
   // opts.kachinukiBoutFinal: attach the transient bout-final flag ONLY for
   // the explicit "Record bout" action (never for autosave, Start, Finish or
   // corrections). The server advances the kachinuki sequence only on
-  // flagged writes (handlers_match.go scoreRequestBody).
+  // flagged writes (handlers_match_score.go scoreRequestBody).
   // bc-kclr: which kachinuki rows a patch carries. The patch leaves unplayed
   // rows out (untouched trailing positions must never reach the wire), but the
   // server merge (mergeKachinukiSubResults) keeps any stored row a payload
@@ -3831,7 +3831,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
     // match-level winner below must agree by construction.
     const dhKeep = preserveStoredDaihyosenVerdict({ armed: daihyosenHanteiArmed, pickedSide: daihyosenHantei, tied: daihyosenTied, existingDaihyosen });
     // daihyosenSilent: the genuine-silence discriminator preserveSubHantei
-    // (engine/scoring.go) relies on. That function tells a genuinely silent
+    // (engine/scoring_rulings.go) relies on. That function tells a genuinely silent
     // writer (nil ipponsA/B - restore the stored verdict) apart from a
     // deliberate 0-0 withdrawal (explicit [] - let it withdraw) by nil-ness
     // alone, but this editor used to send explicit [] unconditionally for

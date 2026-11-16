@@ -289,7 +289,7 @@ sequenceDiagram
 
 1. The write is stored in the outbox and answered pending at once; it is sent after the match's earlier entries.
 2. The outbox sends `PUT /api/competitions/:id/matches/:mid/score`.
-3. The auth middleware verifies `X-Tournament-Password` before the handler (`handlers_match.go`) runs.
+3. The auth middleware verifies `X-Tournament-Password` before the handler (`handlers_match_score.go`) runs.
 4. The handler opens `WithTransaction` on the competition.
 5. Inside it, the handler calls `engine.RecordMatchResultWithIneligibilityTx(stx, ...)`.
 6. The engine stages its writes as intents.

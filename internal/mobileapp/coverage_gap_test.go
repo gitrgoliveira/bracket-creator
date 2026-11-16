@@ -921,7 +921,7 @@ func TestCompetitionGET_NotFound(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 // TestQuickScore_SideATooLong covers the validateMaxLen("sideA") error path
-// (lines 330-333 in handlers_match.go).
+// (the quick-score handler in handlers_match.go).
 func TestQuickScore_SideATooLong(t *testing.T) {
 	r, store, _, _, _ := setupTestRouter(t)
 	require.NoError(t, store.SaveCompetition(&state.Competition{ID: "qs-len", TeamSize: 3}))
@@ -941,7 +941,7 @@ func TestQuickScore_SideATooLong(t *testing.T) {
 }
 
 // TestQuickScore_SideBTooLong covers the validateMaxLen("sideB") error path
-// (lines 334-337 in handlers_match.go).
+// (the quick-score handler in handlers_match.go).
 func TestQuickScore_SideBTooLong(t *testing.T) {
 	r, store, _, _, _ := setupTestRouter(t)
 	require.NoError(t, store.SaveCompetition(&state.Competition{ID: "qs-len2", TeamSize: 3}))

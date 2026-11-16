@@ -1089,7 +1089,7 @@ func TestHansokuHanteiConflict(t *testing.T) {
 
 // TestHansokuHanteiConflict_SubResults pins the sub-bout (daihyosen) twin of
 // TestHansokuHanteiConflict: applyHansokuIppons folds hansoku into every
-// SubResults row too (scoring.go's applyOneSide loop), so the same untying
+// SubResults row too (scoring_pool_write.go's applyOneSide loop), so the same untying
 // hazard exists there, and nothing downstream catches it — stripInvalidHantei
 // and preserveSubHantei both operate at the match level only. Before the fix,
 // the guard tested only result.HanteiDecided()/HanteiTiedScoreline on the

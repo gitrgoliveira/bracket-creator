@@ -798,7 +798,7 @@ func (e *Engine) RecordMatchResultWithIneligibility(compId string, matchId strin
 		// and the K3 rollback has already replayed the prior state INSIDE the
 		// tx, so committing persists exactly what the engine settled on. This
 		// is the same commit contract the score handler uses around the Tx
-		// variant (handlers_match.go).
+		// variant (handlers_match_score.go).
 		return nil
 	})
 	if txErr != nil {

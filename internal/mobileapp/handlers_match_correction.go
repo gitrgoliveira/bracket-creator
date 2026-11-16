@@ -217,7 +217,7 @@ func applyCorrectionReason(snap matchSnapshot, r *state.MatchResult, comp *state
 	// carry-forward — it also refuses a client-supplied reason on a running
 	// write, so the audit note can only ever change through the completing
 	// correction branch above. The engine side (applyPoolWrite in
-	// engine/scoring.go: `if result.CorrectionReason == "" { result.CorrectionReason
+	// engine/scoring_pool_write.go: `if result.CorrectionReason == "" { result.CorrectionReason
 	// = stored.CorrectionReason }`)
 	// independently carries the stored reason across its whole-struct overwrite
 	// for callers that DON'T pass through here; the two are deliberately kept

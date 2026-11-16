@@ -14,7 +14,7 @@ import (
 // bc-cse: the app deliberately ALLOWS two competitors to share a display name
 // when their dojos differ (helper.CheckDuplicateEntriesByNameDojo only
 // refuses same-name AND same-dojo). Pool/league standings used to be keyed by
-// bare name (computeStandingsFrom in scoring.go), so two same-named
+// bare name (computeStandingsFrom in scoring_standings.go), so two same-named
 // competitors in one pool collapsed to a single standings row and win
 // attribution fell back to a raw name comparison that both sides satisfy.
 // These tests pin the fix: standings are keyed by participant id ONLY

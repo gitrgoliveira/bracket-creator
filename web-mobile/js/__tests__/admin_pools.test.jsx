@@ -448,7 +448,7 @@ describe('poolMatchesForPool', () => {
 //     array. The GET .../chusen-candidates `teams` order is the server's
 //     live standings order, which reorders after ANY partial write (a
 //     member carrying a rank override sorts ahead of one without,
-//     regardless of the override's value -- engine/scoring.go), so an
+//     regardless of the override's value -- engine/scoring_standings.go), so an
 //     index-keyed input map re-attaches the operator's typed value to the
 //     WRONG team on a retry after a mid-loop failure.
 //   * bc-appx item 1 (blocker, now fixed in checkinPid itself): that identity

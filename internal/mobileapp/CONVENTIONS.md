@@ -56,7 +56,7 @@ Key contract points (full package docs live in [transactions.go](../state/transa
 - **Use the supplied `StoreTx` handle.** Calling `s.LoadCompetition`, `s.SavePoolMatches`, or any other public `Store` method from inside `fn` would deadlock: the per-comp mutex is a non-recursive `sync.RWMutex` and `WithTransaction` already holds it.
 - **`StoreTx` is bound to one competition.** Every method guards the supplied `compID` (and `SaveCompetition`'s `c.ID`) against the bound one and returns `ErrMismatchedTxCompID` on mismatch. Cross-competition operations need a fresh `WithTransaction` call.
 
-Handler call sites today: `handlers_lineup.go` (PUT body), `handlers_decision.go` (POST /decision), and the score endpoint inside `handlers_match.go` (`registerScoreHandler`). T156 added tx-aware engine variants (`RecordDecisionTx`, `RecordMatchResultWithIneligibilityTx`, see `internal/engine/scoring_tx.go`) that dispatch every store call through the supplied `StoreTx`, so the match-write + ineligibility check-and-set + lineup-freeze commit under one per-comp lock acquire.
+Handler call sites today: `handlers_lineup.go` (PUT body), `handlers_decision.go` (POST /decision), and the score endpoint inside `handlers_match_score.go` (`registerScoreHandler`). T156 added tx-aware engine variants (`RecordDecisionTx`, `RecordMatchResultWithIneligibilityTx`, see `internal/engine/scoring_tx.go`) that dispatch every store call through the supplied `StoreTx`, so the match-write + ineligibility check-and-set + lineup-freeze commit under one per-comp lock acquire.
 
 Side effects that intentionally run OUTSIDE the tx (because they take the per-comp lock internally and would deadlock if nested):
 - `MaybeAdvanceKachinuki`: calls `UpdatePoolMatchByID` / `UpdateBracket`.

@@ -28,7 +28,7 @@ import (
 const swissMatchIDPrefix = state.SwissMatchIDPrefix
 
 // swissPoolName returns the synthetic "pool name" prefix used for a
-// Swiss round so that helper.parsePoolMatchesFile / scoring.go can
+// Swiss round so that helper.parsePoolMatchesFile / scoring_standings.go can
 // route the match through the existing pool-matches pipeline.
 func swissPoolName(round int) string {
 	return fmt.Sprintf("%s%d", swissMatchIDPrefix, round)

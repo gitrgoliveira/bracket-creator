@@ -521,7 +521,7 @@ type Competition struct {
 	//     is 3rd or lower is given a SHARED rank (e.g. 3,3) rather than arbitrary
 	//     sequential ranks, so the standings table and the closing-ceremony podium
 	//     show joint 3rd places instead of relabeling the 4th finisher. See
-	//     applyJointThirdRanks (engine/scoring.go).
+	//     applyJointThirdRanks (engine/scoring_standings.go).
 	//   - League tie-breaker gating: a tied group whose ENTIRE position range
 	//     falls at position ≥ 3 is treated as non-consequential (both receive 3rd
 	//     place, no tie-breaker). See isConsequentialTie (engine).
@@ -1864,7 +1864,7 @@ type MatchResult struct {
 	// SERVER-OWNED. MatchResult binds straight from the score request body, so
 	// a client could otherwise plant or clear the flag; the handler overwrites
 	// it from the STORED value on every write (see applyCorrectionReason in
-	// mobileapp/handlers_match.go) and is the only thing that moves it.
+	// mobileapp/handlers_match_correction.go) and is the only thing that moves it.
 	//
 	// Append-only CSV column (rec index 24, after FlagsB at 22/23); older files
 	// with the column absent load as false. Bracket matches mirror it on

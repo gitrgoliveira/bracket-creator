@@ -23,7 +23,7 @@
 //     operator's call; the app records it (operator ruling 2026-09-26).
 //
 // AdvanceKachinuki encapsulates the pure decision logic. Callers
-// (typically a score handler, see handlers_match.go) pass a snapshot
+// (typically a score handler, see handlers_match_score.go) pass a snapshot
 // of the just-completed bout plus the remaining un-retired roster per
 // side, and the engine returns either the next bout to schedule or a
 // MatchEnded sentinel (advisory, logged only).
@@ -548,7 +548,7 @@ func appendNextKachinukiBout(bm *state.BracketMatch, next state.SubMatchResult) 
 // post-score side effect for a
 // kachinuki team match.
 //
-// The score endpoint (handlers_match.go) calls this AFTER
+// The score endpoint (handlers_match_score.go) calls this AFTER
 // RecordMatchResult* has persisted the operator's bout. Steps:
 //
 //  1. Load the competition; bail out as no-op if it's not a kachinuki
@@ -2068,7 +2068,7 @@ var (
 // winner, a scoreline, and an overridden badge inherited from the result
 // the reopen threw away.
 //
-// This clears the verdict fields RevertMatchToQueue clears (engine/scoring.go)
+// This clears the verdict fields RevertMatchToQueue clears (engine/match_queue.go)
 // that a kachinuki result can actually carry, plus the match-level scoreline,
 // fouls and overtime, which on a kachinuki encounter are a verdict about the
 // bouts (a reopen of a single-bout match puts its fight back through
@@ -2192,7 +2192,7 @@ func singleBoutFightOf(subs []state.SubMatchResult, ipponsA, ipponsB []string, h
 // read-only reopenBracketDownstreamCheck and the destructive
 // retractPropagatedWinner mutation cannot drift on WHERE a result went — the drift that would split "check passes" from "mutation misses"
 // and wipe a blocker's live score for a reopen that then fails (mp-gmcg review).
-// propagateBracketWinner (scoring.go) independently encodes the same slot rule
+// propagateBracketWinner (scoring_bracket.go) independently encodes the same slot rule
 // (the mIdx/2 next-round index and the bronze-feeding round index), so a
 // location-rule change must still land there too — as retractPropagatedWinner's
 // body comment already flags ("Mirror propagateBracketWinner's positional

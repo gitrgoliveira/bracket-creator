@@ -1536,7 +1536,7 @@ func TestValidateBulkScoreLengths_MatchLevelHantei(t *testing.T) {
 // The second parameter used to be the legacy *bool decidedByHantei tri-state;
 // it is now hanteiDecided, a plain bool computed from
 // MatchResult.HanteiDecided() (the domain.HanteiMark presence test) at the
-// call site (handlers_match.go). There is no third "nil" state any more: the
+// call site (handlers_match_refusals.go). There is no third "nil" state any more: the
 // mark either is or is not in the ippons.
 func TestIsSelfRunReportableDecision(t *testing.T) {
 	tests := []struct {

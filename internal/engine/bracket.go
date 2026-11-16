@@ -11,7 +11,7 @@ import (
 
 // winnerOfFormat / winnerOfPlaceholder are the ONE producer of the
 // generation-time "not yet decided" slot value: depth is 1-based from the
-// final (matching parseWinnerOf's contract, scoring.go), matchIdx is 0-based
+// final (matching parseWinnerOf's contract, scoring_bracket.go), matchIdx is 0-based
 // within that round. Before this, three independent fmt.Sprintf("Winner of
 // r%d-m%d", ...) call sites (here x2, and retractPropagatedWinner in
 // kachinuki.go) and one fmt.Sscanf parser (parseWinnerOf) each hard-coded the

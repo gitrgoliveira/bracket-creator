@@ -977,7 +977,7 @@ export function downstreamKnockoutRunningQueueDrop(runningMatches) {
 // the server's own `label` field, never the internal matchId the body also
 // carries: unlike matchLabel's own id fallback (built for a match this app
 // names itself). bc-cse: no "This shiaijo"/"another match" fallback text --
-// respondCourtBusy (handlers_match.go) always sends both `court` and a
+// respondCourtBusy (handlers_match_start.go) always sends both `court` and a
 // `label` (matchLabelOrID falls back to the raw match id itself rather than
 // omitting the field), so the fallbacks were dead code defending against a
 // shape the server never sends.

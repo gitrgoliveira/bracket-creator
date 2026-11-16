@@ -120,12 +120,12 @@ When everything is healthy, no dot appears.
 
 Scores entered by the operator appear on the viewer immediately, across every connected device.
 
-<!-- Raw HTML is copied verbatim by MkDocs (only markdown image paths get
-     rewritten), so this src must be relative to the BUILT page URL
-     (/user-guide/spectators/following/): three levels up, not two. -->
+<!-- The build rewrites a raw-HTML src as relative to THIS Markdown file
+     (docs/user-guide/spectators/following.md), the same as a Markdown image
+     path: two levels up to docs/, not three. -->
 <figure class="bc-fig">
   <video class="bc-phone" controls loop muted playsinline preload="metadata" width="440" height="900" aria-label="A scorer's result appears on the viewer in real time, with no refresh.">
-    <source src="../../../screenshots/realtime-update.webm" type="video/webm">
+    <source src="../../screenshots/realtime-update.webm" type="video/webm">
   </video>
   <figcaption>A scorer's result appearing on the viewer in real time, with no refresh. Press play to watch.</figcaption>
 </figure>

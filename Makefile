@@ -74,7 +74,7 @@ local/deps: hooks/install js/deps ## Install project dependencies
 	GOTOOLCHAIN=go$(GO_VERSION) go install github.com/golangci/golangci-lint/$${tag%%.*}/cmd/golangci-lint@$$tag
 	GOTOOLCHAIN=go$(GO_VERSION) go install github.com/securego/gosec/v2/cmd/gosec@latest
 	GOTOOLCHAIN=go$(GO_VERSION) go install golang.org/x/vuln/cmd/govulncheck@latest
-	python3 -m pip install -r docs/requirements.txt
+	$(MAKE) docs/deps
 
 hooks/install: ## Wire scripts/hooks/ as the git hooks dir for this clone
 	@chmod +x scripts/hooks/*
@@ -310,11 +310,12 @@ docker/run: docker/build ## Run the application in Docker
 pre-commit: docs/prose go/test go/security ## Run pre-commit checks
 	@echo "Code is ready to commit!"
 
-# Documentation (MkDocs Material): pinned toolchain.
+# Documentation (Zensical, classic look): pinned toolchain.
 # `make docs/*` builds and serves through a local venv created from the pinned
 # docs/requirements.txt, so local output matches the deployed GitHub Pages site
-# regardless of any system-wide mkdocs. A drifting system mkdocs is what makes
-# Material features (grid-card layout, code-copy, ...) silently degrade locally.
+# regardless of any system-wide install. Zensical reads mkdocs.yaml. A drifting
+# system-wide docs tool is what once made theme features (grid-card layout,
+# code-copy, ...) silently degrade locally.
 PYTHON     ?= python3
 DOCS_PORT  ?= 8000
 DOCS_VENV  := .venv-docs
@@ -322,40 +323,44 @@ DOCS_BIN   := $(DOCS_VENV)/bin
 DOCS_REQS  := docs/requirements.txt
 DOCS_STAMP := $(DOCS_VENV)/.installed
 
-# Create (or refresh) the venv whenever the pinned requirements change.
-# NOTE: pip install only adds/upgrades; it does not remove packages dropped
-# from requirements.txt. After removing one, run `make docs/clean` then a docs
-# target to rebuild a venv that matches the pinned set exactly.
+# Recreate the venv from scratch whenever the pinned requirements change.
+# pip install only adds or upgrades, so refreshing a venv in place would keep
+# a package dropped from requirements.txt; starting empty means the venv holds
+# exactly the pinned set.
 $(DOCS_STAMP): $(DOCS_REQS)
 	@echo "Installing pinned docs toolchain into $(DOCS_VENV)..."
-	@test -x $(DOCS_BIN)/python || $(PYTHON) -m venv $(DOCS_VENV)
+	@rm -rf $(DOCS_VENV)
+	@$(PYTHON) -m venv $(DOCS_VENV)
 	@$(DOCS_BIN)/python -m pip install --quiet -r $(DOCS_REQS)
 	@touch $@
 
-docs/deps: $(DOCS_STAMP) ## Install the pinned docs toolchain into .venv-docs
+docs/deps: $(DOCS_STAMP) ## Install the pinned docs toolchain (Zensical) into .venv-docs
 
-docs/serve: $(DOCS_STAMP) ## Locally serve the documentation (pinned toolchain)
+docs/serve: $(DOCS_STAMP) ## Locally serve the documentation with Zensical (pinned toolchain)
 	@echo "Serving docs at http://localhost:$(DOCS_PORT) (Ctrl-C to stop)..."
-	$(DOCS_BIN)/mkdocs serve -f mkdocs.yaml --dev-addr localhost:$(DOCS_PORT)
+	$(DOCS_BIN)/zensical serve -f mkdocs.yaml --dev-addr localhost:$(DOCS_PORT)
 
-docs/open: $(DOCS_STAMP) ## Serve the documentation and open it in a browser
+docs/open: $(DOCS_STAMP) ## Serve the documentation with Zensical and open it in a browser
 	@echo "Serving docs and opening http://localhost:$(DOCS_PORT)..."
-	$(DOCS_BIN)/mkdocs serve -f mkdocs.yaml --dev-addr localhost:$(DOCS_PORT) --open
+	$(DOCS_BIN)/zensical serve -f mkdocs.yaml --dev-addr localhost:$(DOCS_PORT) --open
 
-docs/build: $(DOCS_STAMP) docs/prose ## Build static documentation site (output: site/)
+# The gate: prose rules on the sources, a strict Zensical build (fails on a
+# missing page or anchor in the Markdown), then the link checker over the
+# built site, which also sees template links and the rendered anchors.
+docs/build: $(DOCS_STAMP) docs/prose ## Build the docs with Zensical (strict) and check the built site's links (output: site/)
 	@echo "Building documentation..."
-	$(DOCS_BIN)/mkdocs build -f mkdocs.yaml --strict
-
-docs/linkcheck: docs/build ## Build docs, then check the built site for broken links/anchors
+	$(DOCS_BIN)/zensical build -f mkdocs.yaml --strict
 	@echo "Checking internal documentation links..."
 	$(DOCS_BIN)/python docs/check_links.py site
+
+docs/linkcheck: docs/build ## Same as docs/build (the link check runs inside it)
 
 docs/prose: ## Check the docs sources against the public-prose rules (stdlib-only, no venv needed)
 	$(PYTHON) docs/check_prose.py docs
 
-docs/clean: ## Remove the docs venv and the built site
-	@echo "Removing $(DOCS_VENV) and site/..."
-	rm -rf $(DOCS_VENV) site
+docs/clean: ## Remove the docs venv, the built site and Zensical's build cache
+	@echo "Removing $(DOCS_VENV), site/ and .cache/..."
+	rm -rf $(DOCS_VENV) site .cache
 
 # Docs capture harness. Playwright lives in its own package on purpose: putting
 # it in web-mobile/package.json would download a browser for every worktree that

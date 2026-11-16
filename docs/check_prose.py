@@ -2,7 +2,7 @@
 """Check the public docs sources for house-style prose violations.
 
 This runs against the Markdown SOURCES under ``docs/`` (not the built site),
-so it catches wording problems before ``mkdocs build`` ever renders them.
+so it catches wording problems before ``zensical build`` ever renders them.
 Seven rules are enforced, each of which the public docs must never contain:
 
 * ``em-dash``: the character U+2014 (an em dash). House style writes short

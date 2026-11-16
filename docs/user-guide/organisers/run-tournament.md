@@ -239,12 +239,12 @@ When the preview looks correct, click **Start competition** to move to match pla
 
 A draw-ready competition is already listed on the shiai-jo operator views, since its matches exist. Scoring one of those matches starts the competition on the spot, exactly as **Start competition** would, so a court that begins play never has to wait for the desk.
 
-<!-- Raw HTML is copied verbatim by MkDocs (only markdown image paths get
-     rewritten), so this src must be relative to the BUILT page URL
-     (/user-guide/organisers/run-tournament/): three levels up, not two. -->
+<!-- The build rewrites a raw-HTML src as relative to THIS Markdown file
+     (docs/user-guide/organisers/run-tournament.md), the same as a Markdown
+     image path: two levels up to docs/, not three. -->
 <figure class="bc-fig">
   <video controls loop muted playsinline preload="metadata" width="900" height="580" aria-label="Generating the draw: the pools preview appears after clicking Generate draw.">
-    <source src="../../../screenshots/draw-generation.webm" type="video/webm">
+    <source src="../../screenshots/draw-generation.webm" type="video/webm">
   </video>
   <figcaption>Generating the draw. Press play to watch.</figcaption>
 </figure>

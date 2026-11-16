@@ -1,9 +1,9 @@
 /* bracket-creator docs theme: a bold, sporting design language layered onto
- * MkDocs Material. The brand navy (#1d3557, see DESIGN.md) is the single
- * interactive colour; Aka red (#c1121f) appears only as a hairline accent.
- * Material owns the page chrome (header, tabs, sidebar, TOC, search); this
- * file owns the design language: type rhythm, surfaces, the home hero,
- * tool cards, code/table/tab styling.
+ * Zensical's classic theme (the Material look). The brand navy (#1d3557, see
+ * DESIGN.md) is the single interactive colour; Aka red (#c1121f) appears
+ * only as a hairline accent. The theme owns the page chrome (header, tabs,
+ * sidebar, TOC, search); this file owns the design language: type rhythm,
+ * surfaces, the home hero, tool cards, code/table/tab styling.
  *
  * Colour is scoped PER SCHEME. Material derives link/interactive colours from
  * the --md-* tokens; an unscoped :root override forces one value into both
@@ -47,6 +47,13 @@
  * the belt-and-suspenders root rule. clip (not hidden) keeps the sticky header
  * working, since clip does not create a scrolling container. */
 html, body { overflow-x: clip; }
+
+/* Zensical's classic theme reserves the scrollbar's gutter on every page
+ * (`scrollbar-gutter: stable`), which Material did not. With a classic
+ * (non-overlay) scrollbar that leaves a blank strip beside the header on a
+ * page too short to scroll, and narrows every page by the scrollbar's width.
+ * Back to the old behaviour: the scrollbar takes space only when it shows. */
+html { scrollbar-gutter: auto; }
 
 /* ===== Light scheme ===== */
 [data-md-color-scheme="default"] {
@@ -269,9 +276,9 @@ html, body { overflow-x: clip; }
 
 /* ===== Tool cards (Material .grid.cards, restyled) ===== */
 /* Self-contained grid: declare display:grid + list-style:none ourselves rather
- * than rely on Material's grid-cards bundle CSS. A local `mkdocs serve` may run
- * an older Material whose grid-cards stylesheet is absent; without these the
- * cards stack as a bulleted <ul>. minmax(min(100%, 16rem), 1fr) keeps a single
+ * than rely on the theme's grid-cards bundle CSS, which a theme build can lack
+ * (an older local Material once did); without these the cards stack as a
+ * bulleted <ul>. minmax(min(100%, 16rem), 1fr) keeps a single
  * card from overflowing below 256px. */
 .md-typeset .grid.cards > ul {
 	display: grid;

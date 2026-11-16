@@ -136,7 +136,7 @@ How each situation plays out at the table:
 The following clip walks through the flows end to end, recorded from the score editor:
 
 <video controls muted playsinline width="100%">
-  <source src="../../../videos/kachinuki-demo.webm" type="video/webm">
+  <source src="../../videos/kachinuki-demo.webm" type="video/webm">
   Your browser does not support the video tag.
 </video>
 

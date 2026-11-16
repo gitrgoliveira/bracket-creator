@@ -34,7 +34,8 @@ extra_javascript:
 
 markdown_extensions:
   # md_in_html lets a raw HTML block carry Markdown (its `markdown`
-  # attribute), which the `bc-fig` figures use (styled in extra.css);
+  # attribute), which the home page's badges and grid cards and the `bc-fig`
+  # figures use (styled in extra.css), so dropping it breaks the landing page.
   # attr_list adds classes to images, as in `{ .bc-phone }`.
   - attr_list
   - md_in_html

@@ -328,6 +328,7 @@ DOCS_STAMP := $(DOCS_VENV)/.installed
 # a package dropped from requirements.txt; starting empty means the venv holds
 # exactly the pinned set.
 $(DOCS_STAMP): $(DOCS_REQS)
+	@$(PYTHON) -c 'import sys; sys.exit(sys.version_info < (3, 11))' || { echo "Zensical needs Python 3.11 or newer; $(PYTHON) is older. Set PYTHON=/path/to/python3.11 (or newer)." >&2; exit 1; }
 	@echo "Installing pinned docs toolchain into $(DOCS_VENV)..."
 	@rm -rf $(DOCS_VENV)
 	@$(PYTHON) -m venv $(DOCS_VENV)
@@ -337,11 +338,11 @@ $(DOCS_STAMP): $(DOCS_REQS)
 docs/deps: $(DOCS_STAMP) ## Install the pinned docs toolchain (Zensical) into .venv-docs
 
 docs/serve: $(DOCS_STAMP) ## Locally serve the documentation with Zensical (pinned toolchain)
-	@echo "Serving docs at http://localhost:$(DOCS_PORT) (Ctrl-C to stop)..."
+	@echo "Serving docs at http://localhost:$(DOCS_PORT)/bracket-creator/ (Ctrl-C to stop)..."
 	$(DOCS_BIN)/zensical serve -f mkdocs.yaml --dev-addr localhost:$(DOCS_PORT)
 
 docs/open: $(DOCS_STAMP) ## Serve the documentation with Zensical and open it in a browser
-	@echo "Serving docs and opening http://localhost:$(DOCS_PORT)..."
+	@echo "Serving docs and opening http://localhost:$(DOCS_PORT)/bracket-creator/..."
 	$(DOCS_BIN)/zensical serve -f mkdocs.yaml --dev-addr localhost:$(DOCS_PORT) --open
 
 # The gate: prose rules on the sources, a strict Zensical build (fails on a

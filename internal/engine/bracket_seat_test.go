@@ -693,20 +693,20 @@ func TestRequalify_ForcedReopenTakesThePickAndItsLineNamesIt(t *testing.T) {
 	assert.False(t, namedKept, "and not the side that held no pick")
 }
 
-// DELETE .../overrides removes a pool's hand-set order without asking the
-// planner (it only writes overrides.json), so the knockout still seats the
-// order that was removed until the next auto-complete repaints it through
-// ResolveQualifiedPools, which no confirmation or reopen answers for. A match
-// sent back to the queue keeps its representative bout's picks and is not
-// locked, so the repaint can take a pick from it; it records the re-seat in the
-// match's history like every other door that does (bracket_seat_audit.go).
-func TestResolveQualifiedPools_ARepaintTheOverridesRemovalLeftRecordsTheReseat(t *testing.T) {
-	f := newRQFixture(t, "rq-overrides-removed", 1, [][]string{{"A1", "A2"}, {"B1", "B2"}})
-	f.scorePool("Pool A-0", "A1")
-	f.scorePool("Pool B-0", "B1")
-	f.resolve()
-	// Pool A's order is set by hand: the planner seats A2.
-	_, err := f.eng.OverridePoolRanks(f.compID, "Pool A", []RankOverride{{PlayerID: rqID("A2"), Rank: 1}}, ForceOptions{})
+// A drawing of lots written straight to overrides.json, as DELETE
+// .../overrides writes it, changes a pool's order without asking the planner,
+// so the knockout still seats the old order until the next auto-complete
+// repaints it through ResolveQualifiedPools, which no confirmation or reopen
+// answers for. A match sent back to the queue keeps its representative bout's
+// picks and is not locked, so the repaint can take a pick from it; it records
+// the re-seat in the match's history like every other door that does
+// (bracket_seat_audit.go). The lots govern Pool A because its match and its
+// representative bout were drawn (newChusenRQFixture): a recorded rank over a
+// decided pool reorders nothing (poolRanksInForce).
+func TestResolveQualifiedPools_ARepaintOfAnUnansweredLotsChangeRecordsTheReseat(t *testing.T) {
+	f := newChusenRQFixture(t, "rq-overrides-removed", 1)
+	// Pool A's lots are corrected: the planner seats A2.
+	_, err := f.eng.OverridePoolRanks(f.compID, "Pool A", []RankOverride{{PlayerID: rqID("A2"), Rank: 1}, {PlayerID: rqID("A1"), Rank: 2}}, ForceOptions{})
 	require.NoError(t, err)
 	m, side := f.slot("Pool A-1st")
 	name, _ := sideOf(m, side)
@@ -726,7 +726,7 @@ func TestResolveQualifiedPools_ARepaintTheOverridesRemovalLeftRecordsTheReseat(t
 	queued.SubResults = []state.SubMatchResult{pick}
 	require.NoError(t, f.store.SaveBracket(f.compID, b))
 
-	changed, err := f.store.ResetOverridesChanged(f.compID)
+	changed, err := f.store.SaveRankOverridesChanged(f.compID, "Pool A", map[string]int{rqID("A1"): 1, rqID("A2"): 2})
 	require.NoError(t, err)
 	require.True(t, changed)
 	_, err = f.eng.MaybeAutoCompletePools(f.compID)
@@ -734,7 +734,7 @@ func TestResolveQualifiedPools_ARepaintTheOverridesRemovalLeftRecordsTheReseat(t
 
 	got := findBracketMatchInBracket(f.bracket(), m.ID)
 	name, _ = sideOf(*got, side)
-	require.Equal(t, "A1", name, "the natural order is seated again")
+	require.Equal(t, "A1", name, "the order the lots now give is seated")
 	a, c := got.RepPicks()
 	assert.Empty(t, a)
 	assert.Empty(t, c)

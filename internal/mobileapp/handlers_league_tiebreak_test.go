@@ -28,10 +28,8 @@ type stubLeagueTiebreakStore struct {
 	matches    []state.MatchResult
 	matchesErr error
 	saveErr    error
-	updateErr  error
-	// updateFn is called inside UpdateCompetitionChanged if non-nil, allowing
-	// tests to inspect or modify the transform's behaviour.
-	updateFn func(*state.Competition) (*state.Competition, error)
+	// txErr, when set, is what WithTransaction answers without running fn.
+	txErr error
 }
 
 func (s *stubLeagueTiebreakStore) LoadCompetition(id string) (*state.Competition, error) {
@@ -49,16 +47,18 @@ func (s *stubLeagueTiebreakStore) SavePoolMatches(id string, matches []state.Mat
 	return s.saveErr
 }
 
-// WithTransaction runs fn against a stub StoreTx that delegates the three
-// methods the DELETE handler uses (LoadCompetition / LoadPoolMatches /
-// SavePoolMatches) back to this stub. The DELETE read-modify-write is the only
-// transactional path in this handler family.
+// WithTransaction runs fn against a stub StoreTx that delegates the methods
+// the POST and DELETE handlers use (LoadCompetition / LoadPoolMatches /
+// SavePoolMatches / SaveCompetition) back to this stub.
 func (s *stubLeagueTiebreakStore) WithTransaction(compID string, fn func(tx state.StoreTx) error) error {
+	if s.txErr != nil {
+		return s.txErr
+	}
 	return fn(&stubLeagueTiebreakTx{store: s})
 }
 
 // stubLeagueTiebreakTx satisfies state.StoreTx by embedding the interface (so
-// the type checks) and implementing only the methods the DELETE handler calls.
+// the type checks) and implementing only the methods the handlers call.
 // Any other method would panic, none are reached by these tests.
 type stubLeagueTiebreakTx struct {
 	state.StoreTx
@@ -80,31 +80,11 @@ func (t *stubLeagueTiebreakTx) SavePoolMatches(id string, matches []state.MatchR
 	return t.store.saveErr
 }
 
-func (s *stubLeagueTiebreakStore) UpdateCompetitionChanged(id string, transform func(*state.Competition) (*state.Competition, error)) (bool, error) {
-	if s.updateErr != nil {
-		return false, s.updateErr
+func (t *stubLeagueTiebreakTx) SaveCompetition(comp *state.Competition) error {
+	if t.store.saveErr == nil {
+		t.store.comp = comp
 	}
-	if s.updateFn != nil {
-		updated, err := s.updateFn(s.comp)
-		if err != nil {
-			return false, err
-		}
-		if updated == nil {
-			return false, nil
-		}
-		s.comp = updated
-		return true, nil
-	}
-	// Default: run the transform against the stub competition.
-	updated, err := transform(s.comp)
-	if err != nil {
-		return false, err
-	}
-	if updated == nil {
-		return false, nil
-	}
-	s.comp = updated
-	return true, nil
+	return t.store.saveErr
 }
 
 // stubLeagueTiebreakEngine implements LeagueTiebreakEngine for handler tests.
@@ -212,7 +192,9 @@ func TestLeagueTiebreakCandidates_Happy(t *testing.T) {
 	cands, ok := body["candidates"].([]any)
 	require.True(t, ok)
 	assert.Len(t, cands, 1)
-	assert.Equal(t, false, body["finalized"])
+	_, hasFinalized := body["finalized"]
+	assert.False(t, hasFinalized, "no shared ranks are accepted, so none are reported")
+	assert.Len(t, body, 1, "the answer is the candidates alone")
 }
 
 // TestLeagueTiebreakCandidates_TeamsCarryIdentity is the bc-idfx finding 11
@@ -316,23 +298,6 @@ func TestLeagueTiebreakCandidates_CorruptOverrides(t *testing.T) {
 
 	require.Equal(t, http.StatusUnprocessableEntity, w.Code, "body: %s", w.Body.String())
 	assert.Contains(t, w.Body.String(), "corrupt_overrides")
-}
-
-func TestLeagueTiebreakCandidates_Finalized(t *testing.T) {
-	eng := &stubLeagueTiebreakEngine{candidates: nil}
-	comp := makeTeamLeagueComp(state.CompStatusPools)
-	comp.LeagueTiebreakFinalized = true
-	store := &stubLeagueTiebreakStore{comp: comp}
-	r := leagueTiebreakRouter(eng, store, stubBroadcaster{})
-
-	req := httptest.NewRequest("GET", "/api/competitions/comp-1/league-tiebreak/candidates", nil)
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
-
-	require.Equal(t, http.StatusOK, w.Code)
-	var body map[string]any
-	require.NoError(t, json.NewDecoder(w.Body).Decode(&body))
-	assert.Equal(t, true, body["finalized"])
 }
 
 // ---------------------------------------------------------------------------
@@ -811,101 +776,6 @@ func TestLeagueTiebreakDelete_BlankTeamIDsEntryRejected(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// POST /competitions/:id/league-tiebreak/finalize
-// ---------------------------------------------------------------------------
-
-func TestLeagueTiebreakFinalize_Happy(t *testing.T) {
-	eng := &stubLeagueTiebreakEngine{
-		autoOutcome: engine.AutoCompleteTransitioned,
-	}
-	store := &stubLeagueTiebreakStore{
-		comp: makeTeamLeagueComp(state.CompStatusPools),
-	}
-	hub := &recordingBroadcaster{}
-	r := leagueTiebreakRouter(eng, store, hub)
-
-	req := httptest.NewRequest("POST", "/api/competitions/comp-1/league-tiebreak/finalize", nil)
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
-
-	require.Equal(t, http.StatusOK, w.Code)
-	var resp map[string]any
-	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
-	assert.Equal(t, true, resp["finalized"])
-	// Competition should have LeagueTiebreakFinalized=true set in the store.
-	assert.True(t, store.comp.LeagueTiebreakFinalized)
-	// CompetitionCompleted event should have been broadcast.
-	assert.GreaterOrEqual(t, len(hub.events), 1)
-}
-
-func TestLeagueTiebreakFinalize_CompNotFound(t *testing.T) {
-	eng := &stubLeagueTiebreakEngine{}
-	store := &stubLeagueTiebreakStore{comp: nil}
-	r := leagueTiebreakRouter(eng, store, stubBroadcaster{})
-
-	req := httptest.NewRequest("POST", "/api/competitions/comp-1/league-tiebreak/finalize", nil)
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusNotFound, w.Code)
-}
-
-func TestLeagueTiebreakFinalize_AlreadyComplete(t *testing.T) {
-	eng := &stubLeagueTiebreakEngine{}
-	store := &stubLeagueTiebreakStore{
-		comp: makeTeamLeagueComp(state.CompStatusComplete),
-	}
-	r := leagueTiebreakRouter(eng, store, stubBroadcaster{})
-
-	req := httptest.NewRequest("POST", "/api/competitions/comp-1/league-tiebreak/finalize", nil)
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusConflict, w.Code)
-}
-
-func TestLeagueTiebreakFinalize_MaybeAutoCompleteError(t *testing.T) {
-	eng := &stubLeagueTiebreakEngine{
-		autoErr: fmt.Errorf("engine error"),
-	}
-	store := &stubLeagueTiebreakStore{
-		comp: makeTeamLeagueComp(state.CompStatusPools),
-	}
-	r := leagueTiebreakRouter(eng, store, stubBroadcaster{})
-
-	req := httptest.NewRequest("POST", "/api/competitions/comp-1/league-tiebreak/finalize", nil)
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
-
-	// Still returns 200 with the finalized flag (same pattern as tryAutoCompletePools,
-	// the score itself succeeded; the auto-complete failure is a background concern
-	// surfaced via the error header).
-	require.Equal(t, http.StatusOK, w.Code)
-	assert.Equal(t, AutoCompleteErrorValue, w.Header().Get(AutoCompleteErrorHeader))
-}
-
-func TestLeagueTiebreakFinalize_NoChange(t *testing.T) {
-	// AutoCompleteNoChange = not all matches done yet, but finalized flag is set.
-	eng := &stubLeagueTiebreakEngine{
-		autoOutcome: engine.AutoCompleteNoChange,
-	}
-	store := &stubLeagueTiebreakStore{
-		comp: makeTeamLeagueComp(state.CompStatusPools),
-	}
-	hub := &recordingBroadcaster{}
-	r := leagueTiebreakRouter(eng, store, hub)
-
-	req := httptest.NewRequest("POST", "/api/competitions/comp-1/league-tiebreak/finalize", nil)
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
-
-	require.Equal(t, http.StatusOK, w.Code)
-	assert.True(t, store.comp.LeagueTiebreakFinalized)
-	// EventScheduleUpdated should have been broadcast even with NoChange.
-	assert.GreaterOrEqual(t, len(hub.events), 1)
-}
-
-// ---------------------------------------------------------------------------
 // Additional error-path tests to bring internal/mobileapp to ≥85% coverage
 // ---------------------------------------------------------------------------
 
@@ -1114,73 +984,6 @@ func TestLeagueTiebreakDelete_BadBody(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
 
-// Finalize, UpdateCompetitionChanged returns an error (500).
-func TestLeagueTiebreakFinalize_UpdateError(t *testing.T) {
-	eng := &stubLeagueTiebreakEngine{}
-	store := &stubLeagueTiebreakStore{
-		comp:      makeTeamLeagueComp(state.CompStatusPools),
-		updateErr: fmt.Errorf("transaction failure"),
-	}
-	r := leagueTiebreakRouter(eng, store, stubBroadcaster{})
-
-	req := httptest.NewRequest("POST", "/api/competitions/comp-1/league-tiebreak/finalize", nil)
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusInternalServerError, w.Code)
-}
-
-// Finalize, AutoCompleteTransitioned broadcasts EventCompetitionCompleted.
-func TestLeagueTiebreakFinalize_BroadcastsCompleted(t *testing.T) {
-	eng := &stubLeagueTiebreakEngine{
-		autoOutcome: engine.AutoCompleteTransitioned,
-	}
-	store := &stubLeagueTiebreakStore{
-		comp: makeTeamLeagueComp(state.CompStatusPools),
-	}
-	hub := &recordingBroadcaster{}
-	r := leagueTiebreakRouter(eng, store, hub)
-
-	req := httptest.NewRequest("POST", "/api/competitions/comp-1/league-tiebreak/finalize", nil)
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
-
-	require.Equal(t, http.StatusOK, w.Code)
-	// EventCompetitionCompleted must be one of the broadcast events.
-	found := false
-	for _, ev := range hub.events {
-		if ev == EventCompetitionCompleted {
-			found = true
-			break
-		}
-	}
-	assert.True(t, found, "expected EventCompetitionCompleted to be broadcast; got %v", hub.events)
-}
-
-// Finalize, AutoCompleteStarted broadcasts EventCompetitionStarted (bc-prow):
-// the outcome exists on every MaybeAutoCompletePools caller, so this handler
-// must not swallow it into the bare schedule refresh of its default arm.
-func TestLeagueTiebreakFinalize_BroadcastsStarted(t *testing.T) {
-	eng := &stubLeagueTiebreakEngine{
-		autoOutcome: engine.AutoCompleteStarted,
-	}
-	store := &stubLeagueTiebreakStore{
-		comp: makeTeamLeagueComp(state.CompStatusPools),
-	}
-	hub := &recordingBroadcaster{}
-	r := leagueTiebreakRouter(eng, store, hub)
-
-	req := httptest.NewRequest("POST", "/api/competitions/comp-1/league-tiebreak/finalize", nil)
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
-
-	require.Equal(t, http.StatusOK, w.Code)
-	assert.Contains(t, hub.events, EventCompetitionStarted,
-		"expected EventCompetitionStarted to be broadcast; got %v", hub.events)
-	assert.Contains(t, hub.events, EventScheduleUpdated,
-		"expected EventScheduleUpdated to be broadcast; got %v", hub.events)
-}
-
 // ---------------------------------------------------------------------------
 // Auth-split tests, verify GET is public and POST is admin-gated.
 //
@@ -1286,23 +1089,6 @@ func TestLeagueTiebreakDelete_RequiresAuth(t *testing.T) {
 	r.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusUnauthorized, w.Code, "DELETE /league-tiebreak must be admin-gated")
-}
-
-// TestLeagueTiebreakFinalize_RequiresAuth verifies that the POST /finalize
-// mutation returns 401 without auth.
-func TestLeagueTiebreakFinalize_RequiresAuth(t *testing.T) {
-	r, store := setupLeagueTiebreakAuthRouter(t)
-
-	require.NoError(t, store.SaveTournament(&state.Tournament{
-		Name:     "Test",
-		Password: "secret",
-	}))
-
-	req := httptest.NewRequest(http.MethodPost, "/api/competitions/comp-1/league-tiebreak/finalize", nil)
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusUnauthorized, w.Code, "POST /league-tiebreak/finalize must be admin-gated")
 }
 
 // ---------------------------------------------------------------------------
@@ -1584,38 +1370,120 @@ func TestLeagueTiebreakPost_RejectsNonTeamLeague(t *testing.T) {
 	})
 }
 
-// TestLeagueTiebreakFinalize_RejectsNonTeamLeague pins the finalize handler's
-// team-league guard: POST /league-tiebreak/finalize must return 400 for any
-// competition that is not a team-league, without mutating LeagueTiebreakFinalized.
-func TestLeagueTiebreakFinalize_RejectsNonTeamLeague(t *testing.T) {
-	t.Run("non-league format (mixed)", func(t *testing.T) {
-		eng := &stubLeagueTiebreakEngine{}
-		mixed := makeTeamLeagueComp(state.CompStatusPools)
-		mixed.Format = state.CompFormatMixed
-		store := &stubLeagueTiebreakStore{comp: mixed}
-		r := leagueTiebreakRouter(eng, store, stubBroadcaster{})
+// finishedLeagueWithAWithdrawal is an individual league whose one match
+// (Pool A-0, on shiaijo A) a withdrawal decided, marked finished. Its seed
+// adds whatever else a case needs.
+func finishedLeagueWithAWithdrawal(t *testing.T, seed func(store *state.Store)) (*gin.Engine, *state.Store, *Hub) {
+	t.Helper()
+	const compID = "rwl"
+	r, store, hub := withdrawalServer(t,
+		&state.Competition{ID: compID, Name: "rwl", Kind: "individual", Format: state.CompFormatLeague, Status: state.CompStatusPools},
+		func(store *state.Store) {
+			require.NoError(t, store.SaveTournament(&state.Tournament{Name: "T", Courts: []string{"A"}}))
+			require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+				{ID: "Pool A-0", SideA: "Ryu", SideAID: rwRyuID, SideB: "Tora", SideBID: rwToraID, Court: "A", Status: state.MatchStatusRunning},
+			}))
+			if seed != nil {
+				seed(store)
+			}
+		})
+	w := postDecision(t, r, compID, "Pool A-0", map[string]any{"decision": "kiken-voluntary", "decisionBy": "aka"})
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	comp, err := store.LoadCompetition(compID)
+	require.NoError(t, err)
+	comp.Status = state.CompStatusComplete
+	require.NoError(t, store.SaveCompetition(comp))
+	return r, store, hub
+}
 
-		req := httptest.NewRequest("POST", "/api/competitions/comp-1/league-tiebreak/finalize", nil)
-		w := httptest.NewRecorder()
-		r.ServeHTTP(w, req)
+// A match reopened on a finished league puts the league back into match play
+// at once, through either reopen door, and announces it as competition_started
+// so every surface reloads the league running again (the door runs the
+// auto-complete pass, whose leagueBackInPlay reports the start).
+func TestReopenHandler_PutsAFinishedLeagueBackInPlay(t *testing.T) {
+	t.Run("reopen", func(t *testing.T) {
+		r, store, hub := finishedLeagueWithAWithdrawal(t, nil)
+		stop := collectEvents(t, hub)
+		w := postReopenRaw(t, r, "rwl", "Pool A-0", []byte(`{"reason":"Withdrawal recorded by mistake","confirmFinished":true}`))
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		events := stop()
 
-		require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
-		assert.False(t, store.comp.LeagueTiebreakFinalized, "non-league finalize must not set LeagueTiebreakFinalized")
+		comp, err := store.LoadCompetition("rwl")
+		require.NoError(t, err)
+		assert.Equal(t, state.CompStatusPools, comp.Status, "the league is in match play again")
+		assert.Contains(t, fmt.Sprint(events), `"type":"competition_started"`)
 	})
 
-	t.Run("non-team kind (individual league)", func(t *testing.T) {
-		eng := &stubLeagueTiebreakEngine{}
-		indv := makeTeamLeagueComp(state.CompStatusPools)
-		indv.Kind = "individual"
-		indv.TeamSize = 0
-		store := &stubLeagueTiebreakStore{comp: indv}
-		r := leagueTiebreakRouter(eng, store, stubBroadcaster{})
+	t.Run("requeue the blocker and reopen", func(t *testing.T) {
+		r, store, hub := finishedLeagueWithAWithdrawal(t, func(store *state.Store) {
+			// Another competition's bout holds shiaijo A.
+			require.NoError(t, store.SaveCompetition(&state.Competition{ID: "blk", Name: "blk", Kind: "individual", Format: state.CompFormatLeague, Status: state.CompStatusPools}))
+			require.NoError(t, store.SaveParticipants("blk", []domain.Player{
+				{ID: rwKumaID, Name: "Kuma", Dojo: "DojoK"},
+				{ID: rwRyuID, Name: "Ryu", Dojo: "DojoR"},
+			}))
+			require.NoError(t, store.SavePoolMatches("blk", []state.MatchResult{
+				{ID: "Pool A-0", SideA: "Kuma", SideAID: rwKumaID, SideB: "Ryu", SideBID: rwRyuID, Court: "A", Status: state.MatchStatusRunning},
+			}))
+		})
+		stop := collectEvents(t, hub)
+		w := postRequeueAndReopen(t, r, "rwl", "Pool A-0", map[string]any{
+			"blockerCompId": "blk", "blockerMatchId": "Pool A-0",
+			"reason": "Withdrawal recorded by mistake", "confirmFinished": true,
+		})
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		events := stop()
 
-		req := httptest.NewRequest("POST", "/api/competitions/comp-1/league-tiebreak/finalize", nil)
-		w := httptest.NewRecorder()
-		r.ServeHTTP(w, req)
+		comp, err := store.LoadCompetition("rwl")
+		require.NoError(t, err)
+		assert.Equal(t, state.CompStatusPools, comp.Status, "the league is in match play again")
+		assert.Contains(t, fmt.Sprint(events), `"type":"competition_started"`)
+	})
+}
 
-		require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
-		assert.False(t, store.comp.LeagueTiebreakFinalized, "individual-league finalize must not set LeagueTiebreakFinalized")
+// Reopening a match of a finished league is warned about first, as a
+// correction of its result is: 409 league_finished, nothing changed, until the
+// request carries confirmFinished, through either reopen door.
+func TestReopenHandler_WarnsBeforeReopeningAFinishedLeague(t *testing.T) {
+	t.Run("reopen", func(t *testing.T) {
+		r, store, _ := finishedLeagueWithAWithdrawal(t, nil)
+		w := postReopen(t, r, "rwl", "Pool A-0", "Withdrawal recorded by mistake")
+		require.Equal(t, http.StatusConflict, w.Code, w.Body.String())
+		var body map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+		assert.Equal(t, "league_finished", body["error"])
+
+		comp, err := store.LoadCompetition("rwl")
+		require.NoError(t, err)
+		assert.Equal(t, state.CompStatusComplete, comp.Status, "the warning changed nothing")
+		matches, err := store.LoadPoolMatches("rwl")
+		require.NoError(t, err)
+		assert.Equal(t, state.MatchStatusCompleted, matches[0].Status, "the match is still finished")
+
+		w = postReopenRaw(t, r, "rwl", "Pool A-0", []byte(`{"confirmFinished":true}`))
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		comp, err = store.LoadCompetition("rwl")
+		require.NoError(t, err)
+		assert.Equal(t, state.CompStatusPools, comp.Status, "confirmed, the league is back in match play")
+	})
+
+	t.Run("requeue the blocker and reopen", func(t *testing.T) {
+		r, store, _ := finishedLeagueWithAWithdrawal(t, func(store *state.Store) {
+			require.NoError(t, store.SaveCompetition(&state.Competition{ID: "blk", Name: "blk", Kind: "individual", Format: state.CompFormatLeague, Status: state.CompStatusPools}))
+			require.NoError(t, store.SaveParticipants("blk", []domain.Player{
+				{ID: rwKumaID, Name: "Kuma", Dojo: "DojoK"},
+				{ID: rwRyuID, Name: "Ryu", Dojo: "DojoR"},
+			}))
+			require.NoError(t, store.SavePoolMatches("blk", []state.MatchResult{
+				{ID: "Pool A-0", SideA: "Kuma", SideAID: rwKumaID, SideB: "Ryu", SideBID: rwRyuID, Court: "A", Status: state.MatchStatusRunning},
+			}))
+		})
+		w := postRequeueAndReopen(t, r, "rwl", "Pool A-0", map[string]any{"blockerCompId": "blk", "blockerMatchId": "Pool A-0"})
+		require.Equal(t, http.StatusConflict, w.Code, w.Body.String())
+		assert.Contains(t, w.Body.String(), "league_finished")
+
+		blocker, err := store.LoadPoolMatches("blk")
+		require.NoError(t, err)
+		assert.Equal(t, state.MatchStatusRunning, blocker[0].Status, "the blocker was not requeued by a refused reopen")
 	})
 }

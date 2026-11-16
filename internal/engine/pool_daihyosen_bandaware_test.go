@@ -22,13 +22,15 @@ import (
 // their ranking", i.e. where the ranking matters).
 
 // setupTeamPoolWinners is setupTeamPool with an explicit advancement cutoff so a
-// tie can be placed above, across, or below the qualifying band.
+// tie can be placed above, across, or below the qualifying band. The pools feed
+// a knockout (mixed): a league sends no qualifier, so its band is the league's
+// own (isConsequentialTie, tieNeedsBreak), never a cut.
 func setupTeamPoolWinners(t *testing.T, compID string, teams []string, poolWinners int, matches []state.MatchResult, opts ...func(*state.Competition)) (*Engine, *state.Store) {
 	t.Helper()
 	eng, store, _ := setupTestEngine(t)
 	comp := &state.Competition{
 		ID: compID, Name: "Band-aware DH Test",
-		Format: state.CompFormatLeague, Status: state.CompStatusPools,
+		Format: state.CompFormatMixed, Status: state.CompStatusPools,
 		Courts: []string{"A"}, Kind: "team", TeamSize: 2,
 		PoolWinners: poolWinners,
 	}

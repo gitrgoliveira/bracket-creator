@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { enrichPoolMatchWithComp, poolMatchesForPool, groupTeamIds } from '../admin_pools.jsx';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { enrichPoolMatchWithComp, poolMatchesForPool, groupTeamIds, drawnSupplementaryBouts, lotsRuledBouts, circleGroupLine, tieGroupLabel } from '../admin_pools.jsx';
 // admin_pools.jsx's chusen banner keys its rank inputs by checkinPid
 // (chusenMemberKey was deleted, the banner now delegates to the one
 // owner of the id-else-name|dojo rule). Imported directly so the tests below
@@ -7,6 +9,79 @@ import { enrichPoolMatchWithComp, poolMatchesForPool, groupTeamIds } from '../ad
 // coverage in __tests__/render/admin_pools_chusen.render.test.jsx, which does
 // mount AdminPools.
 import { checkinPid } from '../data.jsx';
+import { poolNameOf } from '../pool_ids.jsx';
+
+describe('drawnSupplementaryBouts', () => {
+  const m = (id, over = {}) => ({ id, sideA: 'Bea', sideB: 'Cal', status: 'completed', winner: '', ...over });
+
+  it('keeps only finished tie-break and daihyosen bouts that name no winner', () => {
+    const tb = m('Pool A-TB-0');
+    const dh = m('Pool A-DH-0');
+    const rows = [tb, dh, m('Pool A-TB-1', { winner: 'Bea' }), m('Pool A-TB-2', { status: 'scheduled' }), m('Pool A-0')];
+    expect(drawnSupplementaryBouts(rows)).toEqual([tb, dh]);
+  });
+
+  it('is empty for no matches', () => {
+    expect(drawnSupplementaryBouts(undefined)).toEqual([]);
+  });
+
+  // The same table drawnSupplementaryBout (internal/engine/competition.go) is
+  // tested against, so the two copies of the rule cannot drift apart.
+  describe('the shared Go/JS table', () => {
+    const table = JSON.parse(
+      readFileSync(resolve(__dirname, '..', '..', '..', 'internal', 'engine', 'testdata', 'drawn_supplementary_cases.json'), 'utf8')
+    );
+
+    it('is present and non-empty', () => {
+      expect(table.cases?.length, 'drawn_supplementary_cases.json parsed to zero cases').toBeGreaterThan(0);
+    });
+
+    it.each(table.cases.map(c => [c.name, c]))('%s', (_name, c) => {
+      const row = m(c.id, { status: c.status, winner: c.winner });
+      expect(drawnSupplementaryBouts([row])).toEqual(c.drawn ? [row] : []);
+    });
+  });
+
+  it('names a drawn daihyosen of any pool until a chusen has ranked its teams', () => {
+    const dh = m('Pool A-DH-0', { sideAId: 'a', sideBId: 'b' });
+    const other = m('Pool B-DH-0', { sideAId: 'c', sideBId: 'd' });
+    expect(drawnSupplementaryBouts([dh, other])).toEqual([dh, other]);
+    const standings = { 'Pool A': [{ player: { id: 'a' }, isOverridden: true }, { player: { id: 'b' }, isOverridden: true }] };
+    expect(drawnSupplementaryBouts([dh, other], standings)).toEqual([other]);
+  });
+
+  // The second half of the shared table: a chusen's lots over a drawn daihyosen.
+  describe('the shared chusen cases', () => {
+    const table = JSON.parse(
+      readFileSync(resolve(__dirname, '..', '..', '..', 'internal', 'engine', 'testdata', 'drawn_supplementary_cases.json'), 'utf8')
+    );
+
+    it('is present and non-empty', () => {
+      expect(table.chusenCases?.length, 'drawn_supplementary_cases.json has no chusenCases').toBeGreaterThan(0);
+    });
+
+    it.each(table.chusenCases.map(c => [c.name, c]))('%s', (_name, c) => {
+      const row = m(c.id, { winner: c.winner, sideAId: c.sideAId, sideBId: c.sideBId, ...(c.ineligibleSides ? { ineligibleSides: c.ineligibleSides } : {}) });
+      // The case's standings are the bout's own pool's (named as the page names
+      // it, poolNameOf); the server marks the ranks in force (inForce) on its
+      // rows as isOverridden.
+      const standings = {
+        [poolNameOf(c.id)]: c.standings.map(s => ({ player: { id: s.id }, points: s.points, isOverridden: c.inForce.includes(s.id), tieOutOfBand: !!s.tieOutOfBand, tieRun: s.tieRun || 0 })),
+      };
+      expect(drawnSupplementaryBouts([row], standings)).toEqual(c.stuck ? [row] : []);
+    });
+
+    // The same cases name the bouts the lots rule (the table's `ruled`), which the
+    // Pools tab lists with Fight it again instead of the still-tied notice.
+    it.each(table.chusenCases.map(c => [c.name, c]))('lotsRuledBouts: %s', (_name, c) => {
+      const row = m(c.id, { winner: c.winner, sideAId: c.sideAId, sideBId: c.sideBId });
+      const standings = {
+        [poolNameOf(c.id)]: c.standings.map(s => ({ player: { id: s.id }, points: s.points, isOverridden: c.inForce.includes(s.id), tieOutOfBand: !!s.tieOutOfBand, tieRun: s.tieRun || 0 })),
+      };
+      expect(lotsRuledBouts([row], standings)).toEqual(c.ruled ? [row] : []);
+    });
+  });
+});
 
 describe('enrichPoolMatchWithComp', () => {
   const comp = { id: 'c1', name: 'Comp One', kind: 'team', teamSize: 5 };
@@ -267,6 +342,17 @@ describe('enrichPoolMatchWithComp', () => {
     }
   });
 
+  it('keeps compEngi on an engi tie-break bout, so it opens in the flag editor', () => {
+    // Engi follows the same tie rule as fought formats: a level place gets a
+    // "-TB-" bout, scored by flags like every other engi bout.
+    const engiComp = { id: 'ec1', name: 'Engi Cup', kind: 'individual', format: 'league', engi: true };
+    const enriched = enrichPoolMatchWithComp({ id: 'Pool A-TB-0', status: 'scheduled', sideA: 'Ann - Bo', sideB: 'Cy - Di' }, engiComp);
+    expect(enriched.compEngi).toBe(true);
+    expect(enriched.repIsTeam).toBe(false);
+    const fought = enrichPoolMatchWithComp({ id: 'Pool A-TB-0', status: 'scheduled', sideA: 'Ann', sideB: 'Bo' }, { id: 'k1', kind: 'individual', format: 'league' });
+    expect(fought.compEngi).toBe(false);
+  });
+
   it('sets repIsTeam=false for a regular pool match in a team competition', () => {
     // Non-supplementary bouts should NOT get the rep-picker treatment even
     // if the competition is a team comp.
@@ -468,5 +554,25 @@ describe('groupTeamIds', () => {
   it('returns undefined when teams and names have mismatched lengths', () => {
     const teams = [{ id: 'id-a', name: 'Team X', dojo: 'Dojo A' }];
     expect(groupTeamIds(teams, names)).toBeUndefined();
+  });
+});
+
+// circleGroupLine names a tie by its pool and the places it shares; a league has
+// one table and no pools, so it names the places alone, in the ordinal form.
+describe('circleGroupLine', () => {
+  const three = { poolName: 'Pool A', minPosition: 1, teams: [{}, {}, {}] };
+
+  it('names the pool and the places a pools competition shares', () => {
+    expect(circleGroupLine(three)).toBe('Pool A, 1st to 3rd place');
+    expect(circleGroupLine({ poolName: 'Pool B', minPosition: 2, teams: [{}, {}] })).toBe('Pool B, 2nd to 3rd place');
+  });
+
+  it('names the places alone for a league', () => {
+    expect(circleGroupLine(three, true)).toBe('1st to 3rd place');
+  });
+
+  it('heads a tied group by the places for a league and the pool for a pools competition', () => {
+    expect(tieGroupLabel(three, true)).toBe('1st to 3rd place');
+    expect(tieGroupLabel(three, false)).toBe('Pool A');
   });
 });

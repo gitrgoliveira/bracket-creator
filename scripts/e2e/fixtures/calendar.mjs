@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { expect } from '@playwright/test';
 import { isCoarse } from './pointer.mjs';
 import { dwell } from './pace.mjs';
+import { escape } from './text.mjs';
 
 // A touch screen taps, a mouse clicks: the calendar is walked on both.
 export const press = async (page, loc) => ((await isCoarse(page)) ? loc.tap() : loc.click());
@@ -36,8 +37,6 @@ export async function openCalendar(page) {
   await page.goto('/admin/calendar');
   await expect(page.locator('.cal-grid-frame')).toBeVisible();
 }
-
-const escape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 // A block's open control, named by its accessible label, which starts
 // "<name>, HH:MM to [about ]HH:MM." (`within` narrows it to one day's body).

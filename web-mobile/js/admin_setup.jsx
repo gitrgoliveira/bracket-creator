@@ -163,7 +163,6 @@ import {
   LABEL_POOL_FORMAT, POOL_FORMAT_OPTIONS, poolFormatVisible,
   LABEL_SWISS_ROUNDS, HINT_SWISS_ROUNDS, swissRoundsVisible,
   LABEL_ROUND_ROBIN, roundRobinVisible,
-  LABEL_LEAGUE_TIEBREAK, HINT_LEAGUE_TIEBREAK, LEAGUE_TIEBREAK_OPTIONS, leagueTiebreakVisible,
   LABEL_KNOCKOUT_DURATION, HINT_KNOCKOUT_DURATION,
   poolDurationLabel, poolDurationHint, poolDurationVisible, knockoutDurationVisible,
   LABEL_TWO_THIRD_PLACES, HINT_TWO_THIRD_PLACES, twoThirdPlacesVisible,
@@ -175,7 +174,7 @@ import {
   MIN_POOL_SIZE, MIN_POOL_WINNERS, MIN_SWISS_ROUNDS,
   FORMAT_MIXED, POOL_SIZE_MODE_MAX,
   LABEL_POOL_SIZE_MODE, POOL_SIZE_MODE_OPTIONS,
-  poolFormatHint, resolvePoolFormat, leagueTiebreakActive,
+  poolFormatHint, resolvePoolFormat,
   HINT_ZEKKEN, HINT_ENGI, HINT_TEAM_SIZE, HINT_POOL_WINNERS_LOCKED,
   LABEL_NAGINATA, HINT_NAGINATA,
   LABEL_CHECK_IN, HINT_CHECK_IN, tournamentHasCheckIn, SELF_RUN_NO_CHECK_IN,
@@ -840,11 +839,10 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
   // Team restores the operator's number instead of resetting it), but the
   // payload zeroes it for a non-team kind -- ValidateCompetitionTeamSize
   // requires teamSize == 0 there. Every predicate that keys on teamSize has
-  // to see the value that will land on disk, not the retained one: feeding
-  // the raw state to leagueTiebreakVisible showed the team-only "Break ties
-  // for top" band on an INDIVIDUAL league, a control the settings page
-  // (which reads a stored teamSize of 0) correctly hides -- the exact
-  // create-vs-settings divergence bc-symm exists to remove.
+  // to see the value that will land on disk, not the retained one: the raw
+  // state would make a team-only predicate disagree with both the payload and
+  // the settings page, which reads a stored teamSize of 0 (the create-vs-
+  // settings divergence bc-symm exists to remove).
   const effectiveTeamSize = kind === "team" ? teamSize : 0;
   const [teamMatchType, setTeamMatchType] = useState(COMPETITION_DEFAULTS.teamMatchType);
   const [numberPrefix, setNumberPrefix] = useState(COMPETITION_DEFAULTS.numberPrefix);
@@ -856,12 +854,6 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
   // toggle flips (twoThirdPlacesForNaginata is a default-setter only, not a
   // lock); the operator can still override it afterward.
   const [twoThirdPlaces, setTwoThirdPlaces] = useState(COMPETITION_DEFAULTS.twoThirdPlaces);
-  // bc-symm: league tie-break band, settings-only until now. 0 reads as
-  // "Top 3" (state.Competition's own unset-means-3 default, see
-  // LEAGUE_TIEBREAK_OPTIONS' comment in competition_shape.jsx); starting
-  // the local state at 0 rather than 3 means an operator who never opens
-  // this band still submits the same "unset" payload the field always had.
-  const [leagueTiebreakTopN, setLeagueTiebreakTopN] = useState(COMPETITION_DEFAULTS.leagueTiebreakTopN);
   const [engi, setEngi] = useState(COMPETITION_DEFAULTS.engi);
   const [checkInEnabled, setCheckInEnabled] = useState(COMPETITION_DEFAULTS.checkInEnabled);
   const safeCourts = window.normalizeCourts(tournament.courts);
@@ -1241,17 +1233,6 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
     if (knockoutDurationVisible(format)) {
       c.knockoutMatchDurationSeconds = knockoutMatchDurationSeconds;
     }
-    // League tie-break band. Same post-construction pattern as
-    // twoThirdPlaces above; gated on the same predicate the control
-    // itself is rendered under (leagueTiebreakVisible) rather than a bare
-    // format check, since the server's validateLeagueTiebreakConfig keys
-    // on Kind === "team" specifically. Passed effectiveTeamSize, NOT the
-    // raw teamSize state: the state holds 5 even while kind is individual,
-    // so the raw value would make this predicate disagree with both the
-    // payload and the settings page.
-    if (leagueTiebreakVisible(format, kind, effectiveTeamSize)) {
-      c.leagueTiebreakTopN = leagueTiebreakTopN;
-    }
     c.naginata = naginata;
     // Engi (kata competition) is an individual PAIR paradigm; it is never a
     // team competition (ScoreEditorModal skips the team check for engi, and the
@@ -1498,17 +1479,6 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
                 onChange={(raw) => setSwissRounds(decideNumericUpdate(raw, MIN_SWISS_ROUNDS).value)}
                 hint={HINT_SWISS_ROUNDS} width={120} />
             </>
-          )}
-
-          {/* bc-symm: league tie-break band, brought over from Settings
-              (previously settings-only). Same active-pill logic as that
-              screen: a stored/legacy 0 (unset) reads as "Top 3" active,
-              because that's what the server resolves it to at draw time
-              (LEAGUE_TIEBREAK_OPTIONS' own comment). */}
-          {leagueTiebreakVisible(format, kind, effectiveTeamSize) && (
-            <PillGroup label={LABEL_LEAGUE_TIEBREAK} options={LEAGUE_TIEBREAK_OPTIONS}
-              isActive={(v) => leagueTiebreakActive(v, leagueTiebreakTopN)}
-              onChange={setLeagueTiebreakTopN} hint={HINT_LEAGUE_TIEBREAK} />
           )}
 
           {twoThirdPlacesVisible(format) && (

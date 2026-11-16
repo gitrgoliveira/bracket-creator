@@ -360,6 +360,22 @@ describe('Viewer Utils', () => {
       expect(normal.teamSize).toBe(3);
       expect(dh.compKind).toBe('');
       expect(dh.teamSize).toBe(0);
+      expect(dh.compEngi).toBe(false);
+    });
+
+    // An Engi competition is never a team one, so its supplementary bout is a
+    // tie-break between pairs: it must open the flag editor everywhere.
+    it('stamps compEngi:true on an Engi tie-break bout (flag editor, not ippon)', () => {
+      const c = mkComp({
+        engi: true,
+        poolMatches: [
+          { id: 'Pool A-0', status: 'completed' },
+          { id: 'Pool A-TB-0', status: 'scheduled' },
+        ],
+      });
+      const ms = compMatches(c);
+      expect(ms.find(m => m.id === 'Pool A-0').compEngi).toBe(true);
+      expect(ms.find(m => m.id === 'Pool A-TB-0').compEngi).toBe(true);
     });
 
     // A pool tiebreaker ('-TB-') is also a single ippon-shobu rep bout, so it

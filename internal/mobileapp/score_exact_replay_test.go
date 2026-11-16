@@ -246,8 +246,16 @@ func TestScoreHandler_SameStampFinishThatDiffersStillNeedsAReason(t *testing.T) 
 			require.NoError(t, err)
 			assert.Equal(t, string(bytesBefore), string(bytesAfter), "the refused correction changes nothing")
 
-			// With its reason it is the correction it is.
+			// With its reason it is the correction it is. The pool fixture is a
+			// league whose only match the first finish ended, so the league has
+			// finished and the correction is confirmed (league_finished without).
 			changed["correctionReason"] = "wrong winner entered"
+			if !tc.knockout {
+				w = serveJSON(r, "PUT", url, changed)
+				require.Equal(t, http.StatusConflict, w.Code, w.Body.String())
+				assert.Contains(t, w.Body.String(), "league_finished")
+				changed["confirmFinished"] = true
+			}
 			w = serveJSON(r, "PUT", url, changed)
 			require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 		})
@@ -467,9 +475,13 @@ func TestScoreHandler_ExactResendOfACorrectionOverAKeptRulingWritesNothing(t *te
 			})
 			require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 
+			// The kiken ended the league's only match, so the league has
+			// finished: the correction is confirmed, and its resend carries the
+			// confirm as the outbox's descriptor keeps it.
 			correction := func() map[string]any {
 				c := exactReplayFinish(at + 3_000)
 				c["correctionReason"] = "wrong scoreline"
+				c["confirmFinished"] = true
 				return c
 			}
 			send := func() *httptest.ResponseRecorder {
@@ -508,6 +520,24 @@ func TestScoreHandler_ExactResendOfACorrectionOverAKeptRulingWritesNothing(t *te
 			logAfter, err := store.LoadScoreLog(compID, mid)
 			require.NoError(t, err)
 			assert.Len(t, logAfter, len(logBefore), "no score-log baseline is appended")
+
+			// The resend is judged as the correction already recorded before
+			// the finished-league warning, so one that lost its confirm is
+			// still answered as recorded, never league_finished.
+			comp, err := store.LoadCompetition(compID)
+			require.NoError(t, err)
+			require.Equal(t, state.CompStatusComplete, comp.Status, "the league is still finished")
+			unconfirmed := correction()
+			delete(unconfirmed, "confirmFinished")
+			if bulk {
+				unconfirmed["id"] = mid
+				w = serveJSON(r, "POST", base+"bulk-score", []map[string]any{unconfirmed})
+			} else {
+				w = serveJSON(r, "PUT", base+mid+"/score", unconfirmed)
+			}
+			require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+			assert.NotContains(t, w.Body.String(), "league_finished")
+			assert.Equal(t, versionBefore, store.FileVersion(compID, file), "the unconfirmed resend writes nothing")
 		})
 	}
 }

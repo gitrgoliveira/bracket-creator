@@ -1017,6 +1017,84 @@ export function courtBusyReopenWarning({ court, label }) {
     };
 }
 
+// The finished-league warning (warn
+// first, then save). A correction of a finished league's result is answered
+// 409 {error: "league_finished", message, removedCourts} until it carries the
+// request-only confirmFinished; api_client.jsx parses it onto the thrown
+// Error as `.leagueFinished` ({removedCourts}), which leagueFinishedRefusal
+// reads, so no caller re-derives the shape. attemptScoreWrite asks it on every
+// host (the admin hosts and the court console alike: it is not gated on
+// allowCourtForce), shows leagueFinishedConfirm, and resends the same write
+// with confirmFinished: true on Change it anyway.
+export const LEAGUE_FINISHED_WARNING = 'This league has finished. Changing this result can change the final table and podium. If it leaves a new tie at a podium place, the league goes back to match play to settle it.';
+
+// The same warning when what was refused is a REOPEN of a match of the finished
+// league (api_client.jsx marks the refusal `reopen`): the league goes back into
+// match play at once, whatever the match is then finished with.
+export const LEAGUE_FINISHED_REOPEN_WARNING = 'This league has finished. Reopening this match puts the league back into match play. Its final table and podium are decided again when the match is finished.';
+
+// A declined confirmation of that reopen: nothing was changed.
+export const LEAGUE_FINISHED_REOPEN_CANCELLED = 'Reopen cancelled: the league is still finished and this match was left unchanged.';
+
+// A declined confirmation of a CORRECTION of a finished league's result (a score
+// write): nothing was changed, and the cancel says so, as the downstream
+// knockout one does.
+export const LEAGUE_FINISHED_CORRECTION_CANCELLED = 'Correction cancelled: the league is still finished and this result was left unchanged.';
+
+export function leagueFinishedRefusal(err) {
+    return (err && err.leagueFinished) || null;
+}
+
+// The confirm's copy. A shiaijo the tournament no longer has is named: the
+// league's matches on it lose their court if the correction puts the league
+// back into match play, so they show as unassigned.
+export function leagueFinishedConfirm({ removedCourts, reopen } = {}) {
+    const courts = (removedCourts || []).filter(Boolean).map((c) => `Shiaijo ${c}`);
+    let message = reopen ? LEAGUE_FINISHED_REOPEN_WARNING : LEAGUE_FINISHED_WARNING;
+    if (courts.length) {
+        const named = courts.length > 1
+            ? `${courts.slice(0, -1).join(', ')} and ${courts[courts.length - 1]}`
+            : courts[0];
+        message += ` The tournament no longer has ${named}: if the league goes back to match play, its matches there show as unassigned until they are given a court.`;
+    }
+    return {
+        title: reopen ? 'Reopen a finished league?' : 'Change a finished league?',
+        message,
+        confirmLabel: 'Change it anyway',
+        cancelLabel: 'Cancel',
+        danger: true,
+    };
+}
+
+// The lots warning: the organiser drew lots outside the app and entered the
+// order they gave, and a result for the bout those lots settled replaces them
+// for that place. The app never draws, changes or deletes lots itself, so a
+// fight it again, a correction or a decision on that bout is answered 409
+// {error: "lots_replaced", message} until it carries the request-only
+// confirmLots. The server words the sentence (the place and the order entered:
+// "This replaces the lots you entered for 1st: Bea 1st, Aki 2nd. The bout's
+// result will decide the place."); api_client.jsx parses the refusal onto the
+// thrown Error as `.lotsReplaced`, which lotsReplacedRefusal reads, and
+// attemptScoreWrite shows lotsReplacedConfirm and resends with confirmLots on
+// Replace the lots. The lots stay stored; only the bout's result then decides.
+export function lotsReplacedRefusal(err) {
+    return (err && err.lotsReplaced) || null;
+}
+
+// The confirm's copy: the server's own sentence, so the words are said once.
+export function lotsReplacedConfirm({ message } = {}) {
+    return {
+        title: 'Replace the lots?',
+        message: message || 'This replaces the lots you entered. The bout\'s result will decide the place.',
+        confirmLabel: 'Replace the lots',
+        cancelLabel: 'Cancel',
+        danger: true,
+    };
+}
+
+// A declined confirmation: nothing was changed, and the cancel says so.
+export const LOTS_REPLACED_CANCELLED = 'Cancelled: the lots you entered stand and the bout was left unchanged.';
+
 // The court console never holds a running match and an open correction at
 // once (operator ruling 2026-09-27, bc-crpn). Each refused tap names the other
 // one, with the label string the caller built (scoreRowMatchName), and names
@@ -1177,6 +1255,19 @@ export async function attemptScoreWrite({
         const courtRefusal = allowCourtForce && !result.forceCourt ? courtBusyRefusal(e) : null;
         if (courtRefusal) {
             return { refusal: courtRefusal, buildConfirm: (r) => courtBusyForceConfirm(r, started), flagName: 'forceCourt', cancelMarker: 'courtForceCancelled' };
+        }
+        // A correction of a finished league's result: asked on every host,
+        // the court console included (never gated on allowCourtForce), once
+        // per patch, so a second refusal cannot loop the confirm.
+        const league = !result.confirmFinished ? leagueFinishedRefusal(e) : null;
+        if (league) {
+            return { refusal: league, buildConfirm: leagueFinishedConfirm, flagName: 'confirmFinished', cancelMarker: 'leagueFinishedCancelled' };
+        }
+        // A result over lots the organiser entered: asked on every host, once
+        // per patch, like the finished-league warning.
+        const lots = !result.confirmLots ? lotsReplacedRefusal(e) : null;
+        if (lots) {
+            return { refusal: { message: e.message, ...lots }, buildConfirm: lotsReplacedConfirm, flagName: 'confirmLots', cancelMarker: 'lotsReplacedCancelled' };
         }
         return null;
     };

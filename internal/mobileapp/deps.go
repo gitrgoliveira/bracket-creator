@@ -236,6 +236,13 @@ type CompetitorStatusStore interface {
 // reinstatement is an eligibility concern, not a scoring concern.
 type EligibilityEngine interface {
 	ReinstateCompetitor(compID, playerID string) (*domain.CompetitorStatus, error)
+	// MaybeAutoCompletePools is the general auto-complete pass, which a lifted
+	// bar owes every competition because it can change who qualifies from a
+	// pool. It reopens only a finished league, whose drawn tie-break bout
+	// decided no place only because both its sides, each alone in its run, were
+	// barred and owes its fight again once one can fight, so the league goes
+	// back into match play.
+	MaybeAutoCompletePools(compID string) (engine.AutoCompleteOutcome, error)
 }
 
 // TeamLineupStore is the consumer-boundary view of state.Store used by
@@ -376,6 +383,13 @@ type PrefixEngine interface {
 // *engine.Engine satisfies it.
 type RequeueEngine interface {
 	RevertMatchToQueue(compID, matchID string, opts ...engine.ForceOptions) error
+}
+
+// LotsResetEngine is what the lots reset's finished-league warning asks of the
+// engine: a dry run of whether clearing the lots would reopen the league.
+// *engine.Engine satisfies it.
+type LotsResetEngine interface {
+	LotsResetReopensLeague(tx state.StoreTx, compID string) (bool, error)
 }
 
 // RestoreEngine combines what restore needs from the engine: number prefix

@@ -33,7 +33,6 @@ import {
   LABEL_POOL_FORMAT, POOL_FORMAT_OPTIONS, poolFormatVisible,
   LABEL_SWISS_ROUNDS, HINT_SWISS_ROUNDS, swissRoundsVisible,
   LABEL_ROUND_ROBIN, roundRobinVisible,
-  LABEL_LEAGUE_TIEBREAK, HINT_LEAGUE_TIEBREAK, LEAGUE_TIEBREAK_OPTIONS, leagueTiebreakVisible,
   LABEL_KNOCKOUT_DURATION, HINT_KNOCKOUT_DURATION,
   poolDurationLabel, poolDurationHint, poolDurationVisible, knockoutDurationVisible,
   LABEL_TWO_THIRD_PLACES, HINT_TWO_THIRD_PLACES,
@@ -47,7 +46,7 @@ import {
   CLEARED_FIELD_LABELS, optionLabel, poolFormatHint, resolvePoolFormat,
   resolvePoolSizeMode, POOL_SIZE_MODE_MAX,
   LABEL_POOL_SIZE_MODE, POOL_SIZE_MODE_OPTIONS,
-  leagueTiebreakActive, twoThirdPlacesVisible, teamMatchTypeActive, twoThirdPlacesForNaginata, effectiveTwoThirdPlaces,
+  twoThirdPlacesVisible, teamMatchTypeActive, twoThirdPlacesForNaginata, effectiveTwoThirdPlaces,
   MIN_POOL_SIZE, MIN_POOL_WINNERS, MIN_SWISS_ROUNDS,
   HINT_ZEKKEN, HINT_ENGI, HINT_KIND_ONLY_INDIVIDUAL, HINT_TEAM_SIZE, HINT_POOL_WINNERS_LOCKED,
   LABEL_NAGINATA, HINT_NAGINATA,
@@ -323,7 +322,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
       }
       return next;
     });
-  }, [c.id, c.name, c.date, c.startTime, c.poolSize, c.poolWinners, c.poolSizeMode, c.courts, c.roundRobin, c.withZekkenName, c.teamSize, c.numberPrefix, c.format, c.kind, c.status, c.poolFormat, c.poolMatchDurationSeconds, c.knockoutMatchDurationSeconds, c.swissRounds, c.swissCurrentRound, c.naginata, c.engi, c.checkInEnabled, c.leagueTiebreakTopN, c.leagueTwoThirdPlaces, c.twoThirdPlaces, c.teamMatchType, c.expectedParticipants]);
+  }, [c.id, c.name, c.date, c.startTime, c.poolSize, c.poolWinners, c.poolSizeMode, c.courts, c.roundRobin, c.withZekkenName, c.teamSize, c.numberPrefix, c.format, c.kind, c.status, c.poolFormat, c.poolMatchDurationSeconds, c.knockoutMatchDurationSeconds, c.swissRounds, c.swissCurrentRound, c.naginata, c.engi, c.checkInEnabled, c.leagueTwoThirdPlaces, c.twoThirdPlaces, c.teamMatchType, c.expectedParticipants]);
 
   // bc-obox T1: a save that moves a drawn competition (a new date or start
   // time, whose matches the server re-times in the same save) waits for the
@@ -1281,22 +1280,9 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
         </>
       )}
       {/* Joint-3rd-place setting (bc-3rdp): visible for every format that can
-          award a 3rd place (all but Swiss), not just leagues any more. The
-          "Break ties for top" band underneath stays a team-league-only
-          tie-breaker knob and keeps its own format/kind gate. */}
+          award a 3rd place (all but Swiss), not just leagues any more. */}
       {twoThirdPlacesVisible(local.format) && (
         <div style={{ display: "flex", flexDirection: "column", gap: 12, marginTop: 8, paddingTop: 12, borderTop: "1px solid var(--line)" }}>
-          {/* leagueTiebreakVisible folds format === "league" into its own
-              check, so this re-evaluates that half of the outer wrapper's
-              condition -- redundant (A && A) but not wrong, and it keeps
-              this call site identical to the create form's, which has no
-              format wrapper of its own to lean on. */}
-          {leagueTiebreakVisible(local.format, local.kind, local.teamSize) && (
-            <PillGroup label={LABEL_LEAGUE_TIEBREAK} options={LEAGUE_TIEBREAK_OPTIONS}
-              isActive={(v) => leagueTiebreakActive(v, local.leagueTiebreakTopN)}
-              onChange={(v) => update("leagueTiebreakTopN", v)} disabled={lockedAfterDraw}
-              hint={`${HINT_LEAGUE_TIEBREAK}${lockedNote}`} />
-          )}
           {/* `.field` provides margin-bottom spacing from whatever
               follows, matching admin_setup.jsx's wrapper around this same
               control. */}

@@ -503,32 +503,6 @@ type Competition struct {
 
 	FightingSpiritAwards []FightingSpiritAward `yaml:"fighting_spirit_awards,omitempty" json:"fightingSpiritAwards,omitempty"`
 
-	// LeagueTiebreakTopN is the highest finishing position (rank) whose ties must
-	// be broken before league play can finish, so a league earns its top
-	// placements like a bracket instead of completing with an unearned tie. It is
-	// operator-settable (3 or 4) only for TEAM leagues; INDIVIDUAL leagues are not
-	// given the control and use the default band (3) via effectiveTopN. Team
-	// leagues break ties with a daihyosen (LeagueTiebreakCandidates); individual
-	// leagues break them with an ippon-shobu bout (tieNeedsIndividualBreak ->
-	// InjectTiebreakerMatches). Allowed explicit values are 3 (default) and 4.
-	//
-	// A "consequential" tied group is one whose position range intersects the
-	// band [1..LeagueTiebreakTopN]; i.e. its best (lowest-numbered) position is
-	// ≤ TopN. For example, with TopN=3 a tie involving teams at positions 1–2 is
-	// consequential (it affects who wins or is runner-up), but a tie at positions
-	// 4–5 is not. When the best-placed team in a tied group finishes WORSE than
-	// position TopN (its top position is strictly greater than TopN, so the whole
-	// group sits below the band), the group is non-consequential and no
-	// tie-breaker is needed.
-	//
-	// The kendo convention of two joint 3rd places interacts here: when
-	// LeagueTwoThirdPlaces is true and TopN is 3 or 4, a tied group that sits
-	// ENTIRELY at position 3 or below does not need a 3rd-vs-4th decider;
-	// both teams are awarded 3rd place and the group is non-consequential.
-	// Zero is treated as the default (3) for a team league (Format == "league"
-	// && Kind == "team") at draw time.
-	LeagueTiebreakTopN int `yaml:"league_tiebreak_top_n,omitempty" json:"leagueTiebreakTopN,omitempty"`
-
 	// LeagueTwoThirdPlaces is LEGACY READ-ONLY (bc-3rdp): no writer sets it any
 	// longer (mirrors how BracketMatch.ScoreA/ScoreB were retired in the same
 	// branch). It is superseded by TwoThirdPlaces / EffectiveTwoThirdPlaces,
@@ -548,9 +522,9 @@ type Competition struct {
 	//     sequential ranks, so the standings table and the closing-ceremony podium
 	//     show joint 3rd places instead of relabeling the 4th finisher. See
 	//     applyJointThirdRanks (engine/scoring.go).
-	//   - Team-league tie-breaker gating: a tied group whose ENTIRE position range
+	//   - League tie-breaker gating: a tied group whose ENTIRE position range
 	//     falls at position ≥ 3 is treated as non-consequential (both receive 3rd
-	//     place, no bronze decider). See isConsequentialTie (engine).
+	//     place, no tie-breaker). See isConsequentialTie (engine).
 	LeagueTwoThirdPlaces bool `yaml:"league_two_third_places,omitempty" json:"leagueTwoThirdPlaces,omitempty"`
 
 	// TwoThirdPlaces is the ONE named rule for "does this competition award a
@@ -586,14 +560,6 @@ type Competition struct {
 	// migration: no earlier release writes the key, so an older config.md
 	// loads as "not set" and estimates exactly as before.
 	ExpectedParticipants int `yaml:"expected_participants,omitempty" json:"expectedParticipants,omitempty"`
-
-	// LeagueTiebreakFinalized is set to true by the operator via
-	// POST /api/competitions/:id/league-tiebreak/finalize to accept the
-	// current standings as final without running a tie-breaker. When true,
-	// LeagueTiebreakCandidates returns an empty slice (even if consequential
-	// ties remain), which allows MaybeAutoCompletePools to transition the
-	// competition to CompStatusComplete. Phase 3b.
-	LeagueTiebreakFinalized bool `yaml:"league_tiebreak_finalized,omitempty" json:"leagueTiebreakFinalized,omitempty"`
 
 	// KachinukiEncounterEnchoCleared records that the one-time load repair
 	// (upgradeKachinukiEncounterEnchoLocked, legacy_upgrade.go) has cleared the
@@ -1255,16 +1221,28 @@ func CanGenerateDraw(status CompetitionStatus) bool {
 
 // AcceptsPoolRankOverride reports whether a competition's pool order may be
 // set by hand (a chusen, recorded as a pool-rank override): in its pools
-// stage, and, for a pools + knockout competition, after the knockout has
-// started as well. A pool result corrected then can leave a qualifying tie
-// that the daihyosen cannot settle, and a chusen recorded by mistake has to
-// stay fixable (operator ruling: "Everything should be able to be fixed, in
-// case of a wrong entry"); what the new order does to the knockout is
-// answered by engine.OverridePoolRanks' requalification. The one statement of
-// this rule, shared by the override-rank door and engine.ChusenStatus, so
-// the chusen panel is never offered a tie the door would refuse.
+// stage; for a pools + knockout competition, after the knockout has started
+// as well; and for a league, once it has finished too. A pool result
+// corrected after the knockout started can leave a qualifying tie that the
+// daihyosen cannot settle, and a chusen recorded by mistake has to stay
+// fixable (operator ruling: "Everything should be able to be fixed, in case
+// of a wrong entry"); what the new order does to the knockout is answered by
+// engine.OverridePoolRanks' requalification. A finished league's lots are
+// corrected in place: the new order moves its table and
+// podium at once and the league stays finished, since no match was written
+// and nothing is left to play. The one statement of this rule, shared by the
+// override-rank door and engine.ChusenStatus, so the chusen panel is never
+// offered a tie the door would refuse.
 func (c Competition) AcceptsPoolRankOverride() bool {
-	return c.Status == CompStatusPools || (c.Format == CompFormatMixed && c.Status == CompStatusKnockout)
+	switch c.Status {
+	case CompStatusPools:
+		return true
+	case CompStatusKnockout:
+		return c.Format == CompFormatMixed
+	case CompStatusComplete:
+		return c.Format == CompFormatLeague
+	}
+	return false
 }
 
 type MatchStatus string
@@ -1666,7 +1644,10 @@ func (s *SubMatchResult) ReconcileWinnerMemberID() bool {
 }
 
 // IneligibleSidesAnnotation names which side(s) of a SCHEDULED match are
-// currently barred by a withdrawal recorded on a DIFFERENT match (bc-cse).
+// currently barred by a withdrawal recorded on a DIFFERENT match (bc-cse). A
+// pool tie-break bout (ippon-shobu or representative) finished with no winner
+// carries it too, since two barred sides make that draw one nobody fought
+// (engine.drawnTiebreakOfBarredSides).
 // Both fields are optional and independent: either, both, or neither may be
 // set. The value is the barring status's decision string (domain.Decision,
 // e.g. "kiken-voluntary"), never the reason sentence -- a client that wants
@@ -2144,6 +2125,22 @@ type PlayerStanding struct {
 	// row): equal Points, and not yet settled by a recorded chusen or by its
 	// supplementary bouts (engine.markTiedStandings).
 	Tied bool `json:"tied,omitempty"`
+	// TieOutOfBand marks a row whose run of the tied group (equal Points, TieRun)
+	// lies outside the band a tie is broken in (engine.tieNeedsBreak, judged on the
+	// run's own places), so no bout or lots are owed for it. The zero value, in the band or not tied at all, is what a row nobody
+	// stamped reads as. A drawn supplementary bout fought for such a tie decides no
+	// place, so the pool settles with it as it stands (engine.drawnSupplementaryMoot).
+	TieOutOfBand bool `json:"tieOutOfBand,omitempty"`
+	// TieRun numbers, from 0, the stretch of its tied group (equal Points) that
+	// the fought tie-breaker bouts left level around this row (engine.tieBreakRuns):
+	// rows of one group with the same TieRun are still level, a lower TieRun
+	// finished ahead. The value comes from the bouts, and the table follows it:
+	// lots the organiser entered rank a run alone and never move a row out of its
+	// run (engine.applyPoolRanksInForce). A group no bout has separated is one
+	// run, so every row reads 0, which is also what a row nobody stamped reads as.
+	// A drawn supplementary bout is judged on the run holding both its sides
+	// (engine.lotsGroup).
+	TieRun int `json:"tieRun,omitempty"`
 	// Flags is the total accumulated own-side referee flags for engi (kata
 	// demonstration) standings. A dedicated field, NOT an overload of
 	// IpponsGiven, so the wire stays self-describing (wins vs flags as distinct

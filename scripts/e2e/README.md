@@ -16,7 +16,8 @@ once per worktree), then runs `playwright test` here with `E2E_ARGS` passed
 through unchanged. It is not part of `make go/test` and does not run in CI. Run
 it before opening a PR that changes `web-mobile/`: the PR template asks.
 
-It needs Go (for the build), Node.js with npm, and a network connection on
+It needs Go (for the build), Node.js 20.15 or later in the 20 line, or 22.2 or
+later (the backup fixture uses `zlib.crc32`), with npm, and a network connection on
 every run: the first `make e2e/deps` (or `make e2e`) downloads the npm packages
 and Chromium, and each `make e2e` rebuilds the binary, whose `vendor-frontend`
 step downloads the vendored frontend libraries from unpkg every time and whose
@@ -61,6 +62,27 @@ browser, `--debug` opens the inspector, and a failing test leaves a trace
                             public viewer's Pools tab: rows, figures, rank
                             badge, advancing; the individual pool row
                             (playerRowFigures).
+    fixtures/league.mjs     a LEAGUE: seedLeague (through the interface); the
+                            one tie setting (Award two joint 3rd places) and
+                            the count of retired controls (retiredControls:
+                            Break ties for top, shared ranks); the league
+                            table's rank cell and figures on admin Pools and
+                            the public League tab; the numbered match rows and
+                            matrix cell readers; the tie-break banner for a
+                            place that cannot be shared (Run tie-breaker; the
+                            Remove button is read, not tapped); a tie-breaker
+                            played on the court console with its four named
+                            shots (playTiebreakOnCourt); the drawn-bout
+                            notice; the individual league's "A tie-breaker
+                            round left a tie" notice (circleNotice); the
+                            chusen panel and the lots entered in it
+                            (recordLots); a league as an earlier release
+                            saved it, through a backup rewritten and restored
+                            as a copy (backUpCompetition, rewriteBackup,
+                            withFrontMatterLine, restoreAsCopy); the phone
+                            width checks (expectNoSidewaysScroll, which can
+                            run the caller's own check at each width) and a
+                            control's line count (labelLines)
     fixtures/shiaijo.mjs    /admin/shiaijo/:court (queue, inline editor, which
                             match an editor holds)
     fixtures/scores.mjs     the Scores tab and its overlay editor
@@ -98,8 +120,10 @@ browser, `--debug` opens the inspector, and a failing test leaves a trace
                             the Move dialog and Undo, line boxes and overlaps
     fixtures/organiser.mjs  the Excel download, folder import, /reset, logo and
                             sponsor uploads, the Backup and restore page;
-                            runtime PNG and import-bundle makers; a zip reader
-                            for workbooks.
+                            runtime PNG and import-bundle makers
+    fixtures/archive.mjs    zip reader and writer, CSV parser and formatter
+    fixtures/text.mjs       escape: the one regexp escape for a pattern built
+                            from the app's text
     fixtures/clumsy.mjs     the clumsy operator (below)
     fixtures/pointer.mjs    the coarse pointer: check, restore, ensureCoarse
                             (the one "if not coarse, restore"), tap-target size
@@ -133,20 +157,57 @@ browser, `--debug` opens the inspector, and a failing test leaves a trace
       pools-tiebreak              pools and knockout at a minimum pool size (7
                                   entrants make pools of 4 and 3); a pool tie
                                   level on every criterion adds a tie-break
-                                  bout, whose winner is ranked and seated in the
-                                  knockout on admin and phone; a tie split on
+                                  bout, played on the court console (named
+                                  pool-tiebreak-* shots), whose winner is
+                                  ranked and seated in the knockout on admin
+                                  and phone; a tie split on
                                   points lost adds none; a second competition
                                   with Oversized send +1 where the tie is over
                                   the extra qualifier place, owed a bout too; a
                                   third with Fit the knockout where the tie is
                                   over the 2nd the draw drafted, owed a bout
-                                  while the same tie in an undrafted pool is not
+                                  while the same tie in an undrafted pool is not;
+                                  a fourth whose tie-break bout is saved as a
+                                  draw, recording what the pool, the knockout
+                                  and the court then show
+      league-team                 team league: seeding through the wizard, Run
+                                  tie-breaker with the daihyosen on the court
+                                  console for a tie at 1st and (two joint 3rd
+                                  places off) at 3rd, a drawn daihyosen, a
+                                  daihyosen cycle settled by lots on the desk,
+                                  a shared 3rd that corrections move to 1st,
+                                  corrections on a finished league
+      league-team-settings        the one tie setting on a team league: two
+                                  joint 3rd places on (the default) and off,
+                                  a tie at 4th shared either way and in a
+                                  league saved with Top 4 (a backup restored
+                                  as a copy, whose config.md the load rid of
+                                  the old key), a tie at 3rd, a three-way tie;
+                                  the settings copy
+      league-individual           individual league: an ippon-shobu
+                                  tie-breaker added by itself for a tie at
+                                  1st-3rd, a cycle twice then lots (its
+                                  notice at 320, 375 and 414 px: no
+                                  sideways scroll, one-line buttons), a
+                                  tie-breaker that needs a winner (encho,
+                                  hantei), joint 3rd on and off, a tie at 4th
+                                  shared, a league saved with Top 4, a tie at
+                                  1st between two who both withdrew (recorded
+                                  drawn on the console, lots on the desk)
+      league.public               a spectator's phone (public project): a team
+                                  league's League tab, Overview, Awards tab
+                                  and the TV board while a tie waits, and once
+                                  the daihyosen on the court console settle
+                                  it; seeded and scored from a second
+                                  operator context
       moved-match                 a waiting match moved to another shiaijo
                                   reaches that court's console without a reload
       shared-shiaijo              two competitions on one shiaijo: the picker,
                                   the nudge lines, correcting across them
       engi                        an engi (kata pairs) knockout scored in flags,
-                                  and the bc-evts tap-back guard
+                                  the bc-evts tap-back guard, and an engi
+                                  league tie at 1st decided by flags on the
+                                  court console
       organiser-roster            check-in decides who is drawn, and the desk
                                   finds a number; seeds keep two seeds out of
                                   one pool; an edited or replaced competitor
@@ -403,14 +464,17 @@ Three fixture helpers in `fixtures/scoring.mjs` replace reading the old sync pil
 - `running(page, root)` waits until the score editor is visible and holds a
   running bout (no PRE-MATCH or CORRECTION head pill).
 
-`page.waitForTimeout` stays in four places, each marked `Deliberate:` or
+`page.waitForTimeout` stays for four reasons, each marked `Deliberate:` or
 named for what it is: the dwell of a tap's pace (above); the time away of an
 `interrupt` (`awayMs`) and the operator's own delay a journey names ("3 s
 later", "300 ms after Finish"); and a NEGATIVE, where the journey asserts that
 nothing happens (no second bout appended by a bounced tap, no start after a
 decision, a taken-back mark staying taken back after a late echo). An absence
 has no state to wait for, so the time is the evidence, and a single read
-straight after the action would pass whatever came later.
+straight after the action would pass whatever came later. A wait for something
+expected to ARRIVE polls for it instead, with `expect.poll` or the league-individual
+journey's `deskWhen`: both end as soon as it shows and use their whole window
+only when nothing comes.
 
 ## The console policy
 
@@ -470,6 +534,16 @@ replaced on the next run. Playwright's own traces and failure screenshots land
 in `output/test-results/`. All of it is gitignored. There are no pixel
 comparisons: a screenshot is for a person to look at.
 
+A tie-breaker flow names its evidence by the flow, so a reviewer finds the
+same four court console moments in every journey: `<flow>-console-up-next`,
+`<flow>-console-running`, `<flow>-console-before-finish` and
+`<flow>-console-after` on the shiaijo route, then `<flow>-desk-banner` and
+`<flow>-desk-table` on admin Pools and `<flow>-public-awards` on a spectator's
+phone (`tie-at-1st`, `tie-at-3rd`, `cycle-dh-<n>`, `ippon-shobu`,
+`both-barred`, `pool-tiebreak`, `engi-tie-at-1st` and others).
+`playTiebreakOnCourt` (fixtures/league.mjs) takes the four console shots for a
+tie-breaker scored with an ippon.
+
 Traces are kept for a failing test only (`retain-on-failure`). Open one with
 
     npx playwright show-trace output/test-results/<test folder>/trace.zip
@@ -505,6 +579,15 @@ becomes
 so the suite stays green while the defect is open. The PR that fixes the bug
 removes the `fixme`, and the step then guards the fix.
 
+A step that records today's behaviour first and asserts the fixed behaviour
+after it puts the fixme inside the test body, between the two:
+
+    test.fixme(true, '<bead-id or finding id>: <one line>');
+
+The test stops there, so the lines after it run only on the fixed app. The
+league journeys name their defects by the finding ids of the league review
+(F1, F2b, N1, ...) until a finding is filed as a bead.
+
 ## Adding a journey
 
 1. Name the file `journeys/<name>.spec.mjs`. A journey about a public surface
@@ -530,5 +613,6 @@ removes the `fixme`, and the step then guards the fix.
 journey on an engi (kata pairs) competition: it seeds four pairs through the
 wizard's "Engi (kata competition)" box (`engi: true` in `createCompetition`) and
 the roster paste box (`Name 1 - Name 2, Dojo`), scores a match in flags on the
-court console and checks the result on a spectator's phone, and guards the engi
-editor's tap-back race.
+court console and checks the result on a spectator's phone, guards the engi
+editor's tap-back race, and plays an engi league whose tie at 1st the console
+decides in flags.

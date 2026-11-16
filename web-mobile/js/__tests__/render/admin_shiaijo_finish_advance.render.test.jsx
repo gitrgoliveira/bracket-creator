@@ -132,6 +132,35 @@ describe('the court console orders its automatic start after the write it follow
   });
 });
 
+describe('the editor is told whether a finish starts a next match', () => {
+  it('startsNext is true while a match is waiting on the court', () => {
+    renderPage(vi.fn());
+    expect(captured.props.startsNext).toBe(true);
+  });
+
+  it('startsNext is false on the last bout of the court', () => {
+    tournamentMatchesSpy.mockImplementation(() => [running]);
+    renderPage(vi.fn());
+    expect(shownMatch()).toBe('Pool A-1');
+    expect(captured.props.startsNext).toBe(false);
+  });
+
+  // The advance stays inside the finished match's competition (operator ruling
+  // 2026-09-26): another competition's bout waiting on the same court is not
+  // started by this finish, so the button reads plain Finish.
+  it('startsNext is false on the last bout of a competition while another competition waits on the court', () => {
+    const other = {
+      id: 'Pool B-1', compId: 'c2', compName: 'Plate', status: 'scheduled', phase: 'pool',
+      court: 'A', scheduledAt: '10:05', modifiedAt: 50,
+      sideA: { id: 'q1', name: 'Ito' }, sideB: { id: 'q2', name: 'Kato' },
+    };
+    tournamentMatchesSpy.mockImplementation(() => [running, other]);
+    renderPage(vi.fn());
+    expect(shownMatch()).toBe('Pool A-1');
+    expect(captured.props.startsNext).toBe(false);
+  });
+});
+
 describe('the court console moves on at once on a pending finish (X3)', () => {
   it('Finish + Start Next on a POOL match shows the started match, with no push or refetch', async () => {
     const onEditScore = vi.fn(async (_c, mid) => pending(`K:${mid}`));
@@ -146,8 +175,9 @@ describe('the court console moves on at once on a pending finish (X3)', () => {
     const onEditScore = vi.fn(async (_c, mid) => pending(`K:${mid}`));
     renderPage(onEditScore);
     expect(shownMatch()).toBe('Pool A-1');
-    await act(async () => { await captured.props.onSubmit(finishPatch); });
+    await act(async () => { await captured.props.onSubmitAndNext(finishPatch); });
     expect(shownMatch()).toBe(null);
+    expect(onEditScore, 'the finish starts nothing after it').toHaveBeenCalledTimes(1);
   });
 
   it('a decision on a POOL match shows the started match at once', async () => {
@@ -165,7 +195,7 @@ describe('the court console moves on at once on a pending finish (X3)', () => {
     const settled = new Promise((resolve) => { refuse = resolve; });
     const onEditScore = vi.fn(async (_c, mid) => pending(`K:${mid}`, settled));
     renderPage(onEditScore);
-    await act(async () => { await captured.props.onSubmit(finishPatch); });
+    await act(async () => { await captured.props.onSubmitAndNext(finishPatch); });
     expect(shownMatch()).toBe(null);
     await act(async () => { refuse({ applied: false, reason: 'superseded', heldGroups: ['result'] }); await settled; });
     expect(shownMatch()).toBe('Pool A-1');
@@ -181,7 +211,7 @@ describe('a finish or a decision the outbox holds shows after the console is mou
     tournamentMatchesSpy.mockImplementation(() => [running]);
     const onEditScore = vi.fn(async (_c, mid) => pending(`K:${mid}`));
     const first = renderPage(onEditScore);
-    await act(async () => { await captured.props.onSubmit(finishPatch); });
+    await act(async () => { await captured.props.onSubmitAndNext(finishPatch); });
     expect(shownMatch()).toBe(null);
     first.unmount();
     renderPage(onEditScore);
@@ -279,7 +309,7 @@ describe('a finish stays read as finished until a later change, not this device\
     const settled = new Promise((resolve) => { answer = resolve; });
     const onEditScore = vi.fn(async (_c, mid) => pending(`K:${mid}`, settled));
     const utils = renderPage(onEditScore);
-    await act(async () => { await captured.props.onSubmit(finishPatch); });
+    await act(async () => { await captured.props.onSubmitAndNext(finishPatch); });
     expect(shownMatch()).toBe(null);
     // The feed still shows the match running, now under another stamp, and the
     // finish's answer comes carrying the stamp the server gave the finish.

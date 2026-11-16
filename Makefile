@@ -172,6 +172,10 @@ js/lint: js/deps ## Run Javascript linters
 	@# JS with Bootstrap loaded as a global, so it has its own config with no
 	@# React plugin, run from the repo root for the same reasons as above.
 	@npx --yes oxlint@latest --deny-warnings --report-unused-disable-directives -c web/.oxlintrc.json web/js/ web/tests/
+	@# scripts/e2e (the Playwright journeys, run locally by make e2e) was linted by
+	@# nothing, so a name used but never imported surfaced only on the day a
+	@# fixme-gated step first ran. Its config turns every rule off but no-undef.
+	@npx --yes oxlint@latest --deny-warnings --report-unused-disable-directives -c scripts/e2e/.oxlintrc.json scripts/e2e/fixtures/ scripts/e2e/journeys/ scripts/e2e/playwright.config.mjs
 
 js/sec: js/deps ## Run Javascript security scans (audit-ci)
 	@echo "Running Javascript security scans..."

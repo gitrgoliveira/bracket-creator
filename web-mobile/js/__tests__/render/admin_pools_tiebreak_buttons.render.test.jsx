@@ -41,15 +41,14 @@ function teamLeagueComp(overrides = {}) {
   };
 }
 
-function makeApi({ candidates, finalized = false }) {
+function makeApi({ candidates }) {
   return {
     // No chusen ties for these fixtures; isTeamComp is also true for a team
     // league, so this effect runs too and must resolve to something benign.
     chusenCandidates: vi.fn().mockResolvedValue({ candidates: [], recorded: [] }),
-    leagueTiebreakCandidates: vi.fn().mockResolvedValue({ candidates, finalized }),
+    leagueTiebreakCandidates: vi.fn().mockResolvedValue({ candidates }),
     leagueTiebreakGenerate: vi.fn().mockResolvedValue({ matches: [] }),
     leagueTiebreakRemove: vi.fn().mockResolvedValue({ deleted: 0 }),
-    leagueTiebreakFinalize: vi.fn().mockResolvedValue({ finalized: true }),
   };
 }
 
@@ -137,5 +136,18 @@ describe('AdminPools league-tiebreak buttons: fully id-stamped tied group', () =
     expect(api.leagueTiebreakGenerate).toHaveBeenCalledWith(
       'c1', ['Team Gamma', 'Team Delta'], PASSWORD, ['id-gamma', 'id-delta']
     );
+  });
+});
+
+describe('AdminPools league-tiebreak candidates: read whatever the league status', () => {
+  it('fetches for a finished team league too, and shows neither a banner nor a shared-ranks surface', async () => {
+    const api = makeApi({ candidates: [] });
+    await mountAdminPools({ api, comp: teamLeagueComp({ status: 'completed' }) });
+
+    expect(api.leagueTiebreakCandidates).toHaveBeenCalledWith('c1');
+    // No banner on a finished league, and nothing to accept or undo.
+    expect(screen.queryByRole('button', { name: /Run tie-breaker/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: /shared ranks/i })).toBeNull();
+    expect(screen.queryByTestId('league-shared-ranks')).toBeNull();
   });
 });

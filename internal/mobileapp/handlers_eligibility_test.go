@@ -41,7 +41,7 @@ func setupEligibilityTestRouter(t *testing.T) (*gin.Engine, *state.Store, string
 	// Admin group, AuthMiddleware gates all writes
 	admin := r.Group("/api")
 	admin.Use(AuthMiddleware(NewFileVerifier(store), store))
-	RegisterEligibilityHandlers(admin, store, hub)
+	RegisterEligibilityHandlers(admin, store, &stubEligibilityEngine{}, hub)
 
 	return r, store, dir
 }
@@ -246,5 +246,51 @@ func TestReinstateHandler(t *testing.T) {
 		r.ServeHTTP(w, req)
 
 		assert.Equal(t, http.StatusConflict, w.Code)
+	})
+}
+
+// A lifted bar owes a finished league the auto-complete pass (a drawn
+// ippon-shobu bout settled on both sides barred opens again), and a league the
+// pass puts back into match play is announced as started. A bar recorded does
+// not owe it: it can only settle a bout, never open one.
+func TestLiftedBar_RunsTheAutoCompletePassAndAnnouncesAReopenedLeague(t *testing.T) {
+	post := func(t *testing.T, path string, body any, eng *stubEligibilityEngine) []EventType {
+		t.Helper()
+		gin.SetMode(gin.TestMode)
+		store, err := state.NewStore(t.TempDir())
+		require.NoError(t, err)
+		require.NoError(t, store.SaveCompetition(&state.Competition{ID: "c1"}))
+		hub := &recordingBroadcaster{}
+		r := gin.New()
+		api := r.Group("/api")
+		RegisterEligibilityHandlers(api, store, eng, hub)
+		RegisterReinstateHandler(api, eng, hub)
+		raw, err := json.Marshal(body)
+		require.NoError(t, err)
+		req := httptest.NewRequest(http.MethodPost, path, bytes.NewReader(raw))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		return hub.events
+	}
+
+	t.Run("a reinstatement", func(t *testing.T) {
+		eng := &stubEligibilityEngine{Status: &domain.CompetitorStatus{PlayerID: "p1", Eligible: true}, Outcome: engine.AutoCompleteStarted}
+		events := post(t, "/api/competitions/c1/competitors/p1/reinstate", gin.H{}, eng)
+		assert.Equal(t, 1, eng.Passes)
+		assert.Contains(t, events, EventCompetitionStarted)
+	})
+	t.Run("a status written eligible", func(t *testing.T) {
+		eng := &stubEligibilityEngine{Outcome: engine.AutoCompleteStarted}
+		events := post(t, "/api/competitions/c1/competitor-status", gin.H{"playerId": "p1", "eligible": true}, eng)
+		assert.Equal(t, 1, eng.Passes)
+		assert.Contains(t, events, EventCompetitionStarted)
+	})
+	t.Run("a bar recorded", func(t *testing.T) {
+		eng := &stubEligibilityEngine{Outcome: engine.AutoCompleteStarted}
+		events := post(t, "/api/competitions/c1/competitor-status", gin.H{"playerId": "p1", "eligible": false, "reason": "kiken-voluntary: withdrew"}, eng)
+		assert.Zero(t, eng.Passes)
+		assert.NotContains(t, events, EventCompetitionStarted)
 	})
 }

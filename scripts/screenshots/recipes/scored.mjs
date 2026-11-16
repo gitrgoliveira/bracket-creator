@@ -31,6 +31,21 @@ const TEAM_COMP = 'team-championship';
 const SWISS_TEAM = 'swiss-teams';
 const SWISS_ENGI = 'swiss-engi';
 const POOLS_COMP = 'women-up-to-2d';
+const LEAGUE_COMP = 'team-league';
+
+// The league's six encounters, by who wins (or 'draw'): Kenshinkan A and
+// Mumeishi beat the same two teams by the same score and draw with each other,
+// so they finish level on every criterion for 1st place and the league asks
+// for a tie-breaker. Nenriki beats Kenshinkan B, so 3rd and 4th are settled.
+const LEAGUE_RESULTS = new Map([
+  ['Kenshinkan A|Mumeishi', 'draw'],
+  ['Kenshinkan A|Nenriki', 'Kenshinkan A'],
+  ['Kenshinkan A|Kenshinkan B', 'Kenshinkan A'],
+  ['Mumeishi|Nenriki', 'Mumeishi'],
+  ['Kenshinkan B|Mumeishi', 'Mumeishi'],
+  ['Kenshinkan B|Nenriki', 'Nenriki'],
+]);
+const TIED_AT_FIRST = ['Kenshinkan A', 'Mumeishi'];
 
 // The Lineups page renders one <select data-testid="lineup-position-<key>">
 // per position (admin_lineup.jsx:807-809), keyed by lib/api.mjs's POSITIONS.
@@ -147,7 +162,8 @@ async function gotoScores(page, base, compId) {
 }
 
 // Score every scorable match in a competition by driving the editor, calling
-// `score(editor, page, index)` once per match to enter that match's result.
+// `score(editor, page, index, rowKey)` once per match to enter that match's
+// result (rowKey is what rowKey() reads off the row: time|match no|shiro|aka).
 // Re-reads the list after each save: finishing a pool can seed fresh knockout
 // matches into the same list.
 async function scoreEveryMatch(page, base, compId, score, limit = 60) {
@@ -165,7 +181,7 @@ async function scoreEveryMatch(page, base, compId, score, limit = 60) {
     const row = scorableRows(page).first();
     const key = await rowKey(row);
     await openEditorForRow(page, row);
-    await score(page.locator(EDITOR).first(), page, done);
+    await score(page.locator(EDITOR).first(), page, done, key);
     await finishAndClose(page);
     // The server has the finish (finishMatch waits for its answer); the list
     // shows it once its refresh or push lands. Wait for that, so the next
@@ -213,9 +229,14 @@ const TEAM_PROFILES = [
 // (only kachinuki records bout by bout), so score each row then Finish once.
 // The loser's point goes in first for the same reason as the individual bout.
 async function scoreTeamEncounter(editor, page, i) {
+  await scoreTeamProfile(editor, page, TEAM_PROFILES[i % TEAM_PROFILES.length]);
+}
+
+// The bouts of one encounter, each 'aka', 'shiro' or 'draw', repeated to fill
+// the rows the team sheet shows.
+async function scoreTeamProfile(editor, page, profile) {
   const rows = editor.locator('.team-sub-match');
   const n = await rows.count();
-  const profile = TEAM_PROFILES[i % TEAM_PROFILES.length];
   for (let b = 0; b < n; b += 1) {
     const row = rows.nth(b);
     const aka = row.locator('.team-sub-match__side--aka');
@@ -281,6 +302,22 @@ async function playSwiss(api, compId, rounds, scoreRound) {
     scored += await scoreRound(scored);
     if (r < rounds) await api.post(`/api/competitions/${compId}/swiss/generate-round`);
   }
+}
+
+// One league encounter, scored from its row's key (time|match no|shiro|aka):
+// the result table above says who wins, and the winner takes all three bouts.
+async function scoreLeagueEncounter(editor, page, key) {
+  // A side's cell also carries its competitor-number chip, so find the team by
+  // the name the cell contains.
+  const [shiro, aka] = key.split('|').slice(-2).map((cell) => {
+    const team = TEAMS.find((t) => cell.includes(t.name));
+    if (!team) throw new Error(`team-league: no team named in the cell "${cell}"`);
+    return team.name;
+  });
+  const result = LEAGUE_RESULTS.get([shiro, aka].sort().join('|'));
+  if (!result) throw new Error(`team-league: no scripted result for ${shiro} v ${aka}`);
+  const winner = result === 'draw' ? 'draw' : (result === shiro ? 'shiro' : 'aka');
+  await scoreTeamProfile(editor, page, [winner]);
 }
 
 // ---------------------------------------------------------------------------
@@ -518,9 +555,108 @@ export const families = {
       };
     },
   },
+
+  // A team league (teamSize 3, one shiaijo, four teams) whose six regular
+  // encounters are all scored through the team sheet and leave two teams level
+  // for 1st place: the desk shows "Tie-breaker required", and once the organiser
+  // runs the tie-breaker, the court console lists the daihyosen as Up next.
+  // The league-tiebreak-banner capture must run BEFORE the console one: the
+  // console's drive taps Run tie-breaker, which is what puts the bout on the court.
+  leagueTie: {
+    server: 'mobile',
+    // SINCE scoping inputs (lib/scope.mjs): the admin Pools tab and the court
+    // console it captures, the competition page framing them, and the team
+    // editor its seed drives to enter the scores.
+    sources: [
+      'web-mobile/js/admin_pools', 'web-mobile/js/admin_shiaijo', 'web-mobile/js/admin_competition',
+      ...SCORE_EDITOR_SOURCES,
+    ],
+    seed: async ({ api, base, browser, dataDir }) => {
+      await api.tournament({
+        name: 'London Cup 2026',
+        date: '19-09-2026',
+        venue: 'London',
+        durationDays: 1,
+        courts: ['A'],
+      });
+      await api.competition(LEAGUE_COMP, 'Team League', {
+        teamSize: 3, format: 'league', courts: ['A'], date: '19-09-2026', startTime: '10:00',
+      });
+      await api.participants(LEAGUE_COMP, TEAMS);
+      await api.start(LEAGUE_COMP);
+
+      await withAdminPage(browser, { width: 1600, height: 1000 }, async (page) => {
+        const done = await scoreEveryMatch(page, base, LEAGUE_COMP, (editor, p, _i, key) =>
+          scoreLeagueEncounter(editor, p, key), 12);
+        if (done !== LEAGUE_RESULTS.size) {
+          throw new Error(`${LEAGUE_COMP}: scored ${done} encounters, expected ${LEAGUE_RESULTS.size}`);
+        }
+      });
+      // The tie rests on IV and PW, which only bouts fought through the team
+      // sheet carry.
+      assertTeamSubBouts(dataDir, LEAGUE_COMP);
+      return { leagueComp: LEAGUE_COMP };
+    },
+  },
 };
 
 export const recipes = [
+  {
+    // The desk's Pools tab once every regular league match is finished and two
+    // teams are level for 1st place: the Tie-breaker required banner above the
+    // standings. Taken before the tie-breaker is run (the next capture runs it).
+    name: 'league-tiebreak-banner',
+    family: 'leagueTie',
+    route: `/admin/competition/${LEAGUE_COMP}/pools`,
+    viewport: { width: 1180, height: 760 },
+    capture: 'viewport',
+    auth: 'admin',
+    waitFor: '.league-tiebreak',
+    assert: async ({ page }) => {
+      const text = (await page.locator('.league-tiebreak').first().innerText()).replace(/\s+/g, ' ');
+      for (const team of TIED_AT_FIRST) {
+        if (!text.includes(team)) {
+          throw new Error(`${LEAGUE_COMP}: the tie-breaker banner does not name ${team}: ${text}`);
+        }
+      }
+      if (!/Tie-breaker required/.test(text)) {
+        throw new Error(`${LEAGUE_COMP}: the banner is not the Tie-breaker required one: ${text}`);
+      }
+    },
+  },
+  {
+    // The court console after the organiser taps Run tie-breaker: the daihyosen
+    // sits in Up next with the line saying why it is being fought. The drive
+    // runs the tie-breaker through the Pools tab, as the organiser does.
+    name: 'court-tiebreak-up-next',
+    family: 'leagueTie',
+    route: `/admin/competition/${LEAGUE_COMP}/pools`,
+    viewport: { width: 1180, height: 640 },
+    capture: 'viewport',
+    auth: 'admin',
+    waitFor: '.league-tiebreak',
+    drive: async ({ page, base }) => {
+      await Promise.all([
+        page.waitForResponse((r) => r.request().method() === 'POST'
+          && /\/league-tiebreak$/.test(new URL(r.url()).pathname) && r.ok()),
+        page.locator('button').filter({ hasText: /^Run tie-breaker$/ }).first().click(),
+      ]);
+      await page.goto(`${base}/admin/shiaijo/A`, { waitUntil: 'domcontentloaded' });
+      await page.locator('.shiaijo-upnext__card').first().waitFor({ state: 'visible', timeout: 15000 });
+      await settle(page, 500);
+    },
+    assert: async ({ page }) => {
+      const text = (await page.locator('.shiaijo-upnext__card').first().innerText()).replace(/\s+/g, ' ');
+      for (const team of TIED_AT_FIRST) {
+        if (!text.includes(team)) {
+          throw new Error(`${LEAGUE_COMP}: the Up next card does not hold ${team}: ${text}`);
+        }
+      }
+      if (!/Tie-breaker for 1st place/.test(text)) {
+        throw new Error(`${LEAGUE_COMP}: the Up next card does not say it is the 1st place tie-breaker: ${text}`);
+      }
+    },
+  },
   {
     // The Lineups tab, with a completed fighting order and the Team members
     // list beneath it. The whole page fits in 1585x1212 with room to spare, so

@@ -215,7 +215,7 @@ func NewRouterWithHub(store *state.Store, eng *engine.Engine, res *resources.Res
 	RegisterMatchHandlers(adminSmallBody, eng, store, store, hub, verifier, store)
 	RegisterMatchHistoryHandler(adminSmallBody, store)
 	RegisterDecisionHandlers(adminSmallBody, eng, store, store, hub)
-	RegisterEligibilityHandlers(adminSmallBody, store, hub)
+	RegisterEligibilityHandlers(adminSmallBody, store, eng, hub)
 	RegisterReinstateHandler(adminSmallBody, eng, hub)
 	RegisterLineupHandlers(adminSmallBody, store, store, store, hub, store, verifier, eng)
 	// The lineup a kachinuki match started with is kept as the match's own

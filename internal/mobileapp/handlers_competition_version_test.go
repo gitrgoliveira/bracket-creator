@@ -342,7 +342,6 @@ func TestConfigVersion_FieldCoverage(t *testing.T) {
 		{"naginata", nil, map[string]any{"naginata": true}},
 		{"engi", nil, map[string]any{"engi": true}},
 		{"teamMatchType", func(c *state.Competition) { c.Kind = "team"; c.TeamSize = 3 }, map[string]any{"teamMatchType": string(state.TeamMatchTypeKachinuki)}},
-		{"leagueTiebreakTopN", func(c *state.Competition) { c.Format = state.CompFormatLeague }, map[string]any{"leagueTiebreakTopN": 3}},
 		{"twoThirdPlaces", nil, map[string]any{"twoThirdPlaces": &no}},
 		{"expectedParticipants", nil, map[string]any{"expectedParticipants": 24}},
 		{"checkInEnabled", nil, map[string]any{"checkInEnabled": true}},

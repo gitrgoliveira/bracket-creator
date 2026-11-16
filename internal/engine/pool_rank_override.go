@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"slices"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
@@ -24,6 +25,36 @@ func lookupPoolRankOverride(overrides map[string]int, id string) (int, bool) {
 	}
 	rank, ok := overrides[helper.CompetitorKey(id, "", "")]
 	return rank, ok
+}
+
+// ErrRankOverrideNotLevel refuses lots over an individual tie that no finished
+// tie-breaker round has left level: that tie is decided by an ippon-shobu, so
+// no rank is set by hand there.
+var ErrRankOverrideNotLevel = errors.New("lots are drawn for an individual tie only after a tie-breaker round has left it level")
+
+// lotsOfferedFor reports whether every competitor ranks names belongs to ONE
+// tie of pool poolName that the chusen panel offers lots for (report: waiting
+// or already recorded). Lots rank one run alone, so an order that crosses two
+// runs is refused. The panel and the override-rank door ask the one rule, so the
+// door accepts exactly the lots the panel offers. Competitors are matched by id
+// only.
+func lotsOfferedFor(report ChusenReport, poolName string, ranks []RankOverride) bool {
+	for _, groups := range [][]ChusenGroup{report.Pending, report.Recorded} {
+		for _, g := range groups {
+			if g.PoolName == poolName && groupHoldsAll(g, ranks) {
+				return len(ranks) > 0
+			}
+		}
+	}
+	return false
+}
+
+// groupHoldsAll reports whether every competitor ranks names is a member of g,
+// matched by id only.
+func groupHoldsAll(g ChusenGroup, ranks []RankOverride) bool {
+	return !slices.ContainsFunc(ranks, func(r RankOverride) bool {
+		return r.PlayerID == "" || !slices.ContainsFunc(g.Teams, func(s state.PlayerStanding) bool { return s.Player.ID == r.PlayerID })
+	})
 }
 
 // RankOverride is one competitor's manual pool rank: the participant id and
@@ -114,6 +145,21 @@ func (e *Engine) overridePoolRanksTx(tx state.StoreTx, compID, poolName string, 
 	comp, err := tx.LoadCompetition(compID)
 	if err != nil {
 		return false, nil, err
+	}
+	// Lots over an individual tie are judged here, under the competition's
+	// lock, never before the transaction: a correction landing between the two
+	// could dissolve the tie and the lots would still be recorded. A team tie
+	// is the daihyosen's, so only an individual's needs asking.
+	if comp != nil && !comp.IsTeam() {
+		report, err := e.chusenStatusFrom(tx, func() (map[string][]state.PlayerStanding, error) {
+			return e.computeStandingsFrom(tx, compID)
+		}, compID)
+		if err != nil {
+			return false, nil, err
+		}
+		if !lotsOfferedFor(report, poolName, ranks) {
+			return false, nil, ErrRankOverrideNotLevel
+		}
 	}
 	current, err := e.store.LoadOverrides(compID)
 	if err != nil {

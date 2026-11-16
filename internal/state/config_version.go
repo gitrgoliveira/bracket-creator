@@ -7,8 +7,8 @@ package state
 //
 // Runtime fields written outside Settings are NEVER included: Status,
 // HasParticipantIDs, SwissCurrentRound, FightingSpiritAwards,
-// LeagueTiebreakFinalized, KachinukiEncounterEnchoCleared, RoundLineupsConverted,
-// RoundLineupsGiven, RoundLineupsLegacy, Players, RosterVersion, ConfigVersion.
+// KachinukiEncounterEnchoCleared, RoundLineupsConverted, RoundLineupsGiven,
+// RoundLineupsLegacy, Players, RosterVersion, ConfigVersion.
 type configVersionPayload struct {
 	Name                         string        `json:"name"`
 	Date                         string        `json:"date"`
@@ -31,7 +31,6 @@ type configVersionPayload struct {
 	Naginata                     bool          `json:"naginata"`
 	Engi                         bool          `json:"engi"`
 	TeamMatchType                TeamMatchType `json:"teamMatchType"`
-	LeagueTiebreakTopN           int           `json:"leagueTiebreakTopN"`
 	TwoThirdPlaces               *bool         `json:"twoThirdPlaces"`
 	ExpectedParticipants         int           `json:"expectedParticipants"`
 	CheckInEnabled               bool          `json:"checkInEnabled"`
@@ -69,7 +68,6 @@ func ConfigVersion(c *Competition) string {
 		Naginata:                     c.Naginata,
 		Engi:                         c.Engi,
 		TeamMatchType:                c.TeamMatchType,
-		LeagueTiebreakTopN:           c.LeagueTiebreakTopN,
 		TwoThirdPlaces:               c.TwoThirdPlaces,
 		ExpectedParticipants:         c.ExpectedParticipants,
 		CheckInEnabled:               c.CheckInEnabled,

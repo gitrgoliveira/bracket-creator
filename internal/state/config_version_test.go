@@ -38,7 +38,6 @@ func TestConfigVersion_HexLength(t *testing.T) {
 		Naginata:                     false,
 		Engi:                         false,
 		TeamMatchType:                TeamMatchTypeFixed,
-		LeagueTiebreakTopN:           3,
 		TwoThirdPlaces:               &twoThirds,
 		ExpectedParticipants:         16,
 	}
@@ -76,7 +75,6 @@ func TestConfigVersion_StableAcrossSaveLoad(t *testing.T) {
 		Naginata:                     false,
 		Engi:                         false,
 		TeamMatchType:                TeamMatchTypeFixed,
-		LeagueTiebreakTopN:           3,
 		TwoThirdPlaces:               &twoThirds,
 		ExpectedParticipants:         32,
 	}
@@ -123,7 +121,6 @@ func TestConfigVersion_ChangesWhenAllowlistedFieldChanges(t *testing.T) {
 			Naginata:                     false,
 			Engi:                         false,
 			TeamMatchType:                TeamMatchTypeFixed,
-			LeagueTiebreakTopN:           3,
 			TwoThirdPlaces:               &twoThirdsTrue,
 			ExpectedParticipants:         12,
 		}
@@ -156,7 +153,6 @@ func TestConfigVersion_ChangesWhenAllowlistedFieldChanges(t *testing.T) {
 		{"Naginata", func(c *Competition) { c.Naginata = true }},
 		{"Engi", func(c *Competition) { c.Engi = true }},
 		{"TeamMatchType", func(c *Competition) { c.TeamMatchType = TeamMatchTypeKachinuki }},
-		{"LeagueTiebreakTopN", func(c *Competition) { c.LeagueTiebreakTopN = 4 }},
 		{"TwoThirdPlaces", func(c *Competition) { c.TwoThirdPlaces = &twoThirdsFalse }},
 		{"ExpectedParticipants", func(c *Competition) { c.ExpectedParticipants = 24 }},
 		{"CheckInEnabled", func(c *Competition) { c.CheckInEnabled = true }},
@@ -198,7 +194,6 @@ func TestConfigVersion_DoesNotChangeForRuntimeFields(t *testing.T) {
 			Naginata:                     false,
 			Engi:                         false,
 			TeamMatchType:                TeamMatchTypeFixed,
-			LeagueTiebreakTopN:           3,
 			TwoThirdPlaces:               &twoThirds,
 			ExpectedParticipants:         10,
 		}
@@ -216,7 +211,6 @@ func TestConfigVersion_DoesNotChangeForRuntimeFields(t *testing.T) {
 		{"FightingSpiritAwards", func(c *Competition) {
 			c.FightingSpiritAwards = []FightingSpiritAward{{Title: "Award", RecipientName: "Fighter"}}
 		}},
-		{"LeagueTiebreakFinalized", func(c *Competition) { c.LeagueTiebreakFinalized = true }},
 		{"KachinukiEncounterEnchoCleared", func(c *Competition) { c.KachinukiEncounterEnchoCleared = true }},
 		{"RoundLineupsConverted", func(c *Competition) { c.RoundLineupsConverted = true }},
 		{"RoundLineupsGiven", func(c *Competition) { c.RoundLineupsGiven = map[string][]string{"team-1": {"r0-m0"}} }},

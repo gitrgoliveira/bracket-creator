@@ -1129,7 +1129,7 @@ func (e *Engine) ReopenMatch(compID, matchID, reason string, opts ...ForceOption
 		// requeue path already pre-checks before its revert and need not re-run it
 		// (the check is read-only, so a second run would be wasted work, not a
 		// hazard).
-		landsScheduled, verr := e.checkTargetReopenable(compID, comp, matchID, fo.Force)
+		landsScheduled, verr := e.checkTargetReopenable(compID, comp, matchID, fo)
 		if verr != nil {
 			return verr
 		}
@@ -1210,7 +1210,7 @@ func (e *Engine) reopenUnderCourtLock(compID string, comp *state.Competition, ma
 			// /bulk-score completing a downstream between the entry pre-check's tx
 			// close and CheckCrossCompCourtBusy can still surface court_busy for a
 			// now-unreopenable target (a retry then reports the permanent 409).
-			if rerr := e.reopenResultPreconditionTx(tx, compID, comp, matchID, h, fo.Force); rerr != nil {
+			if rerr := e.reopenResultPreconditionTx(tx, compID, comp, matchID, h, fo); rerr != nil {
 				opErr = rerr
 				return nil
 			}
@@ -1387,7 +1387,7 @@ func (e *Engine) RequeueBlockerAndReopen(targetComp, targetMatch, blockerComp, b
 		// would need the pre-check, revert, and reopen under one target-comp
 		// transaction, which the cross-comp revert (it takes the BLOCKER comp's
 		// lock) cannot provide.
-		landsScheduled, perr := e.checkTargetReopenable(targetComp, comp, targetMatch, fo.Force)
+		landsScheduled, perr := e.checkTargetReopenable(targetComp, comp, targetMatch, fo)
 		if perr != nil {
 			return perr
 		}
@@ -1426,11 +1426,17 @@ func (e *Engine) RequeueBlockerAndReopen(targetComp, targetMatch, blockerComp, b
 //     -- see restoreIfWithdrawalRemoved, scoring_tx.go, which stays scoped to
 //     domain.IsWithdrawalDecisionStr for exactly that reason). Anything else
 //     is a *ValidationError (HTTP 400); its sanctioned edit is the correction
-//     path. This is the reopen's one entry gate, so both doors (ReopenMatch,
-//     RequeueBlockerAndReopen) apply it, and it reads the STORED decision
-//     under the tx, never a caller's claim about it;
+//     path. A pool tie-break ("-TB-") or representative ("-DH-") bout saved as
+//     a draw (drawnSupplementaryBout) is one a reopen is for too: it settles
+//     nothing, and a reopen is how it is fought again, unless a chusen has
+//     ranked the group it was fought for (drawnSupplementaryRuledByChusen): the
+//     lots settled it, so a reopen is warned about first (*LotsReplacedError)
+//     and lands only with fo.ConfirmLots. This is the reopen's
+//     one entry gate, so both doors (ReopenMatch, RequeueBlockerAndReopen)
+//     apply it, and it reads the STORED decision under the tx, never a
+//     caller's claim about it;
 //  3. for a bracket round, its result must not have fed a downstream it
-//     cannot unwind (reopenBracketDownstreamCheck), where force is the
+//     cannot unwind (reopenBracketDownstreamCheck), where fo.Force is the
 //     operator's confirmation for a downstream closed with its own result. A
 //     pool match has no such check: reopening it moves no knockout slot, and
 //     the write that finishes it answers for any qualifier it moves.
@@ -1440,7 +1446,7 @@ func (e *Engine) RequeueBlockerAndReopen(targetComp, targetMatch, blockerComp, b
 // checkTargetReopenable and reopenUnderCourtLock both run it, so a RESULT
 // precondition added to one path can't be missed by the other — the drift
 // that reopens the wipe-for-nothing hazard (mp-gmcg review).
-func (e *Engine) reopenResultPreconditionTx(tx state.StoreTx, compID string, comp *state.Competition, matchID string, h matchHome, force bool) error {
+func (e *Engine) reopenResultPreconditionTx(tx state.StoreTx, compID string, comp *state.Competition, matchID string, h matchHome, fo ForceOptions) error {
 	var status state.MatchStatus
 	var decision string
 	if h.Pool != nil {
@@ -1451,11 +1457,25 @@ func (e *Engine) reopenResultPreconditionTx(tx state.StoreTx, compID string, com
 	if status != state.MatchStatusCompleted {
 		return ErrReopenNotCompleted
 	}
-	if !comp.IsKachinuki() && !domain.IsDefaultWinDecisionStr(decision) {
+	if !comp.IsKachinuki() && !domain.IsDefaultWinDecisionStr(decision) && (h.Pool == nil || !drawnSupplementaryBout(h.Pool)) {
 		// bc-cse item 14: no "(correctionReason)" jargon -- that named the
 		// internal API field, not anything the operator sees on the score
-		// editor's own correction-reason box.
-		return validationErrorf("reopen is only for kachinuki team matches and for matches decided by a withdrawal (kiken, kiken-injury, or fusenpai) or a fusensho; correct other results via the score editor instead")
+		// editor's own correction-reason box. A tie-break or daihyosen bout
+		// exists only in a pool, so only a pool match is told about it.
+		allowed := "kachinuki team matches and for matches decided by a withdrawal (kiken, kiken-injury, or fusenpai) or a fusensho"
+		if h.Pool != nil {
+			allowed += ", and for a tie-break or daihyosen bout saved as a draw"
+		}
+		return validationErrorf("reopen is only for %s; correct other results via the score editor instead", allowed)
+	}
+	if h.Pool != nil && drawnSupplementaryBout(h.Pool) {
+		// A drawn representative or tie-break bout the lots already ruled is settled:
+		// reopening it would leave a league completed (and the chusen ranks
+		// recorded) over a bout that is running again, and nothing puts
+		// either back.
+		if err := e.refuseOverRecordedLots(tx, compID, h.Pool, fo.ConfirmLots); err != nil {
+			return err
+		}
 	}
 	if h.Pool != nil {
 		// A pool reopen changes no knockout slot: the pool is incomplete
@@ -1471,7 +1491,7 @@ func (e *Engine) reopenResultPreconditionTx(tx state.StoreTx, compID string, com
 	if h.Bronze {
 		return nil
 	}
-	return reopenBracketDownstreamCheck(h.BracketRoot, h.RIdx, h.MIdx, force)
+	return reopenBracketDownstreamCheck(h.BracketRoot, h.RIdx, h.MIdx, fo.Force)
 }
 
 // reopenBracketDownstreamCheck decides, for a bracket ROUND match being
@@ -1529,12 +1549,12 @@ func reopenBracketDownstreamCheck(bracket *state.Bracket, rIdx, mIdx int, force 
 // the same tx. Such a reopen takes no court, so reopenUnderCourtLock skips both court
 // gates for it and holds it to scheduled even if the bar lifts in between (see
 // the COURT GATE note on ReopenMatch).
-func (e *Engine) checkTargetReopenable(compID string, comp *state.Competition, matchID string, force bool) (bool, error) {
+func (e *Engine) checkTargetReopenable(compID string, comp *state.Competition, matchID string, fo ForceOptions) (bool, error) {
 	var checkErr error
 	landsScheduled := false
 	txErr := e.store.WithTransaction(compID, func(tx state.StoreTx) error {
 		found, ferr := findMatchHome(tx, compID, matchID, func(h matchHome) error {
-			checkErr = e.reopenResultPreconditionTx(tx, compID, comp, matchID, h, force)
+			checkErr = e.reopenResultPreconditionTx(tx, compID, comp, matchID, h, fo)
 			if checkErr == nil {
 				landsScheduled = e.reopenTargetStatusOfHome(tx, compID, matchID, h) == state.MatchStatusScheduled
 			}
@@ -1908,7 +1928,11 @@ func findMatchHome(tx state.StoreTx, compID, matchID string, visit func(matchHom
 // ever recorded, and, taking no court, is not refused for a busy one (see
 // the COURT GATE note on ReopenMatch). Once the competitor is reinstated or
 // the earlier withdrawal is itself cleared, the SAME reopen goes to RUNNING
-// like any other. An ordinary kiken or fusenpai goes to RUNNING: the status
+// like any other. A bout saved as a draw (domain.IsDrawDecisionStr: a tie-break
+// or daihyosen bout, or the draw the both-sides-barred door records) names no
+// withdrawing side, so a bar on EITHER side sends it to SCHEDULED too: the
+// barred-match notice shows again instead of a running bout nobody can start.
+// An ordinary kiken or fusenpai goes to RUNNING: the status
 // it recorded names THIS match, which BarredSides' undo-path exemption (a
 // status recorded BY matchID never bars it) ignores, and which the reopen
 // restores. The third SCHEDULED case is that restore moving the bar instead:
@@ -1923,27 +1947,36 @@ func findMatchHome(tx state.StoreTx, compID, matchID string, visit func(matchHom
 // the reopened match's OWN identity, read before reopenPoolMatch/
 // reopenBracketMatch clear Decision/DecisionBy.
 func reopenTargetStatus(statuses map[string]domain.CompetitorStatus, matchID, decision, decisionBy, sideAID, sideBID string) state.MatchStatus {
-	if !domain.IsDefaultWinDecisionStr(decision) {
+	if !reopenJudgesBars(decision) {
 		return state.MatchStatusRunning
 	}
 	a, b := BarredSides(statuses, matchID, sideAID, sideBID)
 	stillBarred := (decisionBy == "aka" && a != nil) || (decisionBy == "shiro" && b != nil)
+	if domain.IsDrawDecisionStr(decision) {
+		stillBarred = a != nil || b != nil
+	}
 	if stillBarred {
 		return state.MatchStatusScheduled
 	}
 	return state.MatchStatusRunning
 }
 
+// reopenJudgesBars reports the decisions whose reopen target depends on the
+// bars on record: kiken, fusenpai, fusensho and a draw. Any other reopens to RUNNING.
+func reopenJudgesBars(decision string) bool {
+	return domain.IsDefaultWinDecisionStr(decision) || domain.IsDrawDecisionStr(decision)
+}
+
 // reopenTargetStatusTx is reopenTargetStatus's tx-aware wrapper: it loads
-// CompetitorStatus LAZILY, only when decision is a default win (the one case
-// reopenTargetStatus needs it for), through the live transaction handle. A
+// CompetitorStatus LAZILY, only when decision is kiken, fusenpai, fusensho or a draw (the
+// cases reopenTargetStatus needs it for), through the live transaction handle. A
 // load failure is logged rather than discarded and defaults to RUNNING
 // (today's behaviour), since a read the operator cannot diagnose must never
 // silently trade one stuck state for another. For a withdrawal it hands
 // reopenTargetStatus the statuses as the reopen's restore will leave them
 // (restoredStatus), so a bar that moves onto a chained fusenpai counts.
 func (e *Engine) reopenTargetStatusTx(tx state.StoreTx, compID, matchID, decision, decisionBy, sideAID, sideBID string) state.MatchStatus {
-	if !domain.IsDefaultWinDecisionStr(decision) {
+	if !reopenJudgesBars(decision) {
 		return state.MatchStatusRunning
 	}
 	statuses, err := tx.LoadCompetitorStatus(compID)
@@ -1974,7 +2007,13 @@ func (e *Engine) reopenTargetStatusTx(tx state.StoreTx, compID, matchID, decisio
 // (reopenUnderCourtLock) ask the one question the same way.
 func (e *Engine) reopenTargetStatusOfHome(tx state.StoreTx, compID, matchID string, h matchHome) state.MatchStatus {
 	if h.Pool != nil {
-		return e.reopenTargetStatusTx(tx, compID, matchID, h.Pool.Decision, h.Pool.DecisionBy, h.Pool.SideAID, h.Pool.SideBID)
+		decision := h.Pool.Decision
+		if drawnSupplementaryBout(h.Pool) {
+			// The entry gate admits this bout by its missing winner, and a
+			// scored tie stores no decision, so judge it as the draw it is.
+			decision = string(domain.DecisionHikiwake)
+		}
+		return e.reopenTargetStatusTx(tx, compID, matchID, decision, h.Pool.DecisionBy, h.Pool.SideAID, h.Pool.SideBID)
 	}
 	return e.reopenTargetStatusTx(tx, compID, matchID, h.Bracket.Decision, h.Bracket.DecisionBy, h.Bracket.SideAID, h.Bracket.SideBID)
 }

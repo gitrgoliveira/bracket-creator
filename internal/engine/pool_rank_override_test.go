@@ -42,28 +42,22 @@ func TestCalculatePoolStandings_Override_SameNameDifferentDojo(t *testing.T) {
 		{PoolName: "Pool A", Players: players},
 	}))
 
-	// Full round robin so every competitor has a distinct, non-tied finish
-	// BEFORE any override (Osaka 3-0 > Suzuki 2-1 > Watanabe 1-2 > Tokyo 0-3),
-	// stamped with SideAID/SideBID/WinnerID exactly as the real pipeline would
-	// (mirrors TestCalculatePoolStandings_SameNameDifferentDojo).
+	// Full round robin of draws, so all four finish level and the lots are the
+	// only order there is (a recorded rank is in force only over a tie no bout
+	// settled, poolRanksInForce), stamped with SideAID/SideBID exactly as the
+	// real pipeline would.
 	var matches []state.MatchResult
 	idx := 0
 	for i := 0; i < len(players); i++ {
 		for j := i + 1; j < len(players); j++ {
 			a, b := players[i], players[j]
-			winner, winnerID := a, a.ID
-			if snRank(b.ID) > snRank(a.ID) {
-				winner, winnerID = b, b.ID
-			}
 			matches = append(matches, state.MatchResult{
-				ID:       "Pool A-" + strconv.Itoa(idx),
-				SideA:    a.Name,
-				SideB:    b.Name,
-				SideAID:  a.ID,
-				SideBID:  b.ID,
-				Winner:   winner.Name,
-				WinnerID: winnerID,
-				Status:   state.MatchStatusCompleted,
+				ID:      "Pool A-" + strconv.Itoa(idx),
+				SideA:   a.Name,
+				SideB:   b.Name,
+				SideAID: a.ID,
+				SideBID: b.ID,
+				Status:  state.MatchStatusCompleted,
 			})
 			idx++
 		}

@@ -49,9 +49,42 @@ type DecisionRequest struct {
 	// engine.ForceOptions.Force on the RecordDecisionTxWithOptions call
 	// below.
 	ForceDownstreamReopen bool `json:"forceDownstreamReopen"`
+	// ConfirmFinished lets a decision that corrects a finished league's
+	// result land (refuseFinishedLeagueCorrection, 409 league_finished
+	// without it). Request-only, same field name and contract as
+	// scoreRequestBody.ConfirmFinished.
+	ConfirmFinished bool `json:"confirmFinished"`
+	// ConfirmLots lets a decision that gives a drawn tie-breaker bout a winner
+	// land over the lots the organiser entered for it (409 lots_replaced without
+	// it). Request-only, never stored.
+	ConfirmLots bool `json:"confirmLots"`
 	// writeTag is the optional writeId and basis (bc-evts F1): a resend of a
 	// decision the match's score event log holds answers as recorded.
 	writeTag
+}
+
+// decisionCorrects reads a decision over the stored match as a correction
+// that would land, for the finished-league check: the match is finished, and
+// the decision is neither older than its result (the replay orders that one),
+// nor the resend of the decision already recorded (the engine's
+// exactDecisionReplay answers it as recorded), nor a later decision from a
+// device whose basis never saw the result (a rival, kept in the history as
+// match_closed). An unstamped decision is the server's to order and lands.
+func decisionCorrects(snap matchSnapshot, req DecisionRequest, comp *state.Competition, score *seenResultCheck) bool {
+	if snap.Status != state.MatchStatusCompleted || snap.Stored == nil {
+		return false
+	}
+	stamp := req.ModifiedAt
+	switch {
+	case stamp <= 0:
+		return true
+	case stamp < snap.ResultStamp:
+		return false
+	case stamp == snap.ResultStamp:
+		return snap.Stored.Decision != req.Decision || snap.Stored.DecisionBy != req.DecisionBy
+	}
+	saw, _ := score.sawResult(snap.Stored, comp, snap.InBracket, stamp, req.Basis)
+	return saw
 }
 
 // Validate enforces request-shape invariants on a decision payload
@@ -198,6 +231,24 @@ func RegisterDecisionHandlers(r *gin.RouterGroup, eng ScoringEngine, store Compe
 			if snapErr != nil {
 				return snapErr
 			}
+			// A decision correcting a finished league's result is warned
+			// about first, as on PUT /score. Only a league
+			// pays for the check, and the check judges whether it has finished:
+			// it reads the competition under this lock, so a league that
+			// finished after the read above is judged as finished (the format
+			// cannot change, the status can).
+			if comp != nil && comp.Format == state.CompFormatLeague && !req.ConfirmFinished {
+				score := &seenResultCheck{stx: stx, compID: id, matchID: mid}
+				tl, _ := store.(TournamentLoader)
+				if err := refuseFinishedLeagueCorrection(stx, tl, id, mid, decisionCorrects(snap, req, comp, score), false); err != nil {
+					var refusal *leagueFinishedRefusal
+					if errors.As(err, &refusal) {
+						engErr = refusal
+						return nil
+					}
+					return err
+				}
+			}
 			// Pass the TRIMMED reason (not req.DecisionReason): it is persisted
 			// into DecisionReason, and ForceOptions.ReopenReason below carries the
 			// same trimmed value into CorrectionReason on the write itself, so
@@ -209,7 +260,7 @@ func RegisterDecisionHandlers(r *gin.RouterGroup, eng ScoringEngine, store Compe
 			// req.ForceDownstreamReopen (the bc-kcdg downstream-knockout-
 			// correction guard) and surfaces the reopened downstream match
 			// ids so they can be broadcast below.
-			fo := engine.ForceOptions{Force: req.ForceDownstreamReopen, Reopened: &reopenedDownstream}
+			fo := engine.ForceOptions{Force: req.ForceDownstreamReopen, Reopened: &reopenedDownstream, ConfirmLots: req.ConfirmLots}
 			if snap.ReopenPending {
 				// The reason is part of the result group: it goes on the
 				// write itself, so the baseline the write leaves holds it.
@@ -311,6 +362,12 @@ func respondDecisionEngineError(c *gin.Context, store CompetitionStore, compID, 
 		// it would poison the offline queue with one that can never
 		// succeed.
 		respondSuperseded(c, engine.HeldGroupsOf(engErr), engine.HeldReasonOf(engErr), engErr)
+	case respondIfLeagueFinished(c, engErr):
+		// A correction of a finished league's result: resent with
+		// confirmFinished once the organiser confirms.
+	case respondIfLotsReplaced(c, engErr):
+		// A decision that would replace the lots the organiser entered for a
+		// drawn tie-breaker: resent with confirmLots once they confirm.
 	case errors.As(engErr, &alreadyIneligErr):
 		// T105/CHK047: concurrent kiken, another operator already
 		// recorded ineligibility for this player on a different

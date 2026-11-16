@@ -12,6 +12,9 @@ import (
 	bctest "github.com/gitrgoliveira/bracket-creator/internal/test/idstamp"
 )
 
+// inEveryBand is a runBand that holds every run in the band a tie is broken in.
+func inEveryBand([]int, []state.PlayerStanding) bool { return true }
+
 // TestChusenCandidates_CycleNeedsChusen: three teams tied on every criterion play
 // a daihyosen round-robin that ends in a perfect cycle (Alpha>Beta, Beta>Gamma,
 // Gamma>Alpha, one win each). The order is undetermined, so the group surfaces as
@@ -276,13 +279,15 @@ func TestChusenCandidates_PartialRoundNotPremature(t *testing.T) {
 	assert.Empty(t, cands, "chusen must not surface mid-round (only 1 of 3 DH bouts scored)")
 }
 
-// TestChusenCandidates_AllDrawnNeedsChusen: a full daihyosen round completed as
-// all hikiwake (every bout Winner="") leaves every team on 0 wins, so the order
-// is undetermined and must surface as needing chusen (otherwise the competition
-// can never advance).
+// TestChusenCandidates_AllDrawnNeedsChusen: in a pools + knockout competition a
+// full daihyosen round completed as all hikiwake (every bout Winner="") leaves
+// every team on 0 wins, so the order is undetermined and must surface as
+// needing chusen (otherwise the competition can never advance). A league's
+// all-drawn round opens no lots (TestChusenCandidates_LeagueAllDrawnRoundOffersNoLots).
 func TestChusenCandidates_AllDrawnNeedsChusen(t *testing.T) {
 	compID := "chusen-alldrawn"
 	eng, store := setupTeamPoolComp(t, compID, true) // 3 teams fully tied
+	asMixed(t, store, compID)
 	_, err := eng.InjectPoolDaihyosenMatches(compID)
 	require.NoError(t, err)
 
@@ -307,6 +312,50 @@ func TestChusenCandidates_AllDrawnNeedsChusen(t *testing.T) {
 	require.Len(t, cands, 1, "an all-drawn daihyosen round leaves the order undetermined -> chusen")
 }
 
+// asMixed turns a fixture's league into a pools + knockout competition, whose
+// pool tie-breakers may still be drawn and reach the lots by themselves.
+func asMixed(t *testing.T, store *state.Store, compID string) {
+	t.Helper()
+	comp, err := store.LoadCompetition(compID)
+	require.NoError(t, err)
+	comp.Format = state.CompFormatMixed
+	require.NoError(t, store.SaveCompetition(comp))
+}
+
+// TestChusenCandidates_LeagueAllDrawnRoundOffersNoLots: in a LEAGUE a
+// tie-breaker must have a winner, so a drawn representative bout,
+// which only a write made before that rule can hold, counts as not yet fought:
+// an all-drawn round opens no lots by itself (chusenMatches), and nothing
+// completes the league until the bouts are decided by encho and hantei.
+func TestChusenCandidates_LeagueAllDrawnRoundOffersNoLots(t *testing.T) {
+	compID := "chusen-league-alldrawn"
+	eng, store := setupTeamPoolComp(t, compID, true) // a league, 3 teams fully tied
+	_, err := eng.GenerateLeagueTiebreakMatches(compID, []string{
+		bctest.StampPlayerID("Alpha", "Dojo Alpha"), bctest.StampPlayerID("Beta", "Dojo Beta"), bctest.StampPlayerID("Gamma", "Dojo Gamma"),
+	})
+	require.NoError(t, err)
+
+	all, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	for i := range all {
+		if IsPoolDaihyosenMatchID(all[i].ID) {
+			all[i].Status = state.MatchStatusCompleted
+			all[i].Winner = "" // saved drawn before the rule
+		}
+	}
+	require.NoError(t, store.SavePoolMatches(compID, all))
+	eng.standingsCache.Delete(compID)
+	eng.standingsFlight.Delete(compID)
+
+	report, err := eng.ChusenStatus(compID)
+	require.NoError(t, err)
+	assert.Empty(t, report.Pending, "a league's drawn tie-breakers are bouts to decide, never lots")
+
+	outcome, err := eng.MaybeAutoCompletePools(compID)
+	require.NoError(t, err)
+	assert.NotEqual(t, AutoCompleteTransitioned, outcome, "drawn tie-breakers leave the league open")
+}
+
 // TestChusenCandidates_PartialTieWithoutCycleNeedsChusen: a 4-team tied group
 // whose daihyosen round has NO win/loss cycle anywhere (Alpha beats everyone
 // and loses to nobody), yet two teams still finish level on daihyosen wins
@@ -327,6 +376,9 @@ func TestChusenCandidates_PartialTieWithoutCycleNeedsChusen(t *testing.T) {
 		teamPoolMatch("Pool A-5", "A", "Gamma", "Delta", ""),
 	}
 	eng, store := setupTeamPool(t, compID, teams, matches)
+	// A pools + knockout competition: a league's drawn bout is a bout still
+	// to decide (TestChusenCandidates_LeagueAllDrawnRoundOffersNoLots).
+	asMixed(t, store, compID)
 
 	injected, err := eng.InjectPoolDaihyosenMatches(compID)
 	require.NoError(t, err)
@@ -355,7 +407,182 @@ func TestChusenCandidates_PartialTieWithoutCycleNeedsChusen(t *testing.T) {
 	require.NoError(t, err)
 	cands := report.Pending
 	require.Len(t, cands, 1, "Beta and Gamma tie on daihyosen wins with no cycle present -> still needs chusen")
-	assert.Len(t, cands[0].Teams, 4)
+	// Lots rank the run the bouts left level, never the teams they put clear of
+	// it: Alpha is 1st and Delta 4th whatever the lots say.
+	require.Len(t, cands[0].Teams, 2)
+	assert.ElementsMatch(t, []string{"Beta", "Gamma"}, []string{cands[0].Teams[0].Player.Name, cands[0].Teams[1].Player.Name})
+	assert.Equal(t, 2, cands[0].MinPosition)
+}
+
+// TestChusenOfRuns_AskedNoLotsForARunWhoseNextRoundIsScheduled: six competitors
+// level on points. Round 1 put a and b and c ahead of d and e and f, and each
+// trio went in a circle, so both trios are level. The next round among a, b and c
+// is scheduled and not fought yet: lots are owed for d, e and f alone, and for
+// the first trio only once its round is fought and left level too.
+func TestChusenOfRuns_AskedNoLotsForARunWhoseNextRoundIsScheduled(t *testing.T) {
+	ids := []string{"a", "b", "c", "d", "e", "f"}
+	group := make([]state.PlayerStanding, len(ids))
+	positions := make([]int, len(ids))
+	for i, id := range ids {
+		group[i] = state.PlayerStanding{Player: domain.Player{ID: id, Name: id}, Points: 3}
+		positions[i] = i
+	}
+	n := 0
+	bout := func(a, b, winner string, status state.MatchStatus) state.MatchResult {
+		n++
+		return state.MatchResult{ID: fmt.Sprintf("Pool A-TB-%d", n), SideAID: a, SideBID: b, Winner: winner, WinnerID: winner, Status: status}
+	}
+	var matches []state.MatchResult
+	for _, top := range ids[:3] {
+		for _, bottom := range ids[3:] {
+			matches = append(matches, bout(top, bottom, top, state.MatchStatusCompleted))
+		}
+	}
+	for _, trio := range [][3]string{{"a", "b", "c"}, {"d", "e", "f"}} {
+		matches = append(matches,
+			bout(trio[0], trio[1], trio[0], state.MatchStatusCompleted),
+			bout(trio[1], trio[2], trio[1], state.MatchStatusCompleted),
+			bout(trio[2], trio[0], trio[2], state.MatchStatusCompleted))
+	}
+	names := func(runs []levelRun) [][]string {
+		var out [][]string
+		for _, r := range runs {
+			var one []string
+			for _, s := range r.members {
+				one = append(one, s.Player.ID)
+			}
+			out = append(out, one)
+		}
+		return out
+	}
+
+	owed, _ := chusenOfRuns(group, positions, matches, nil, inEveryBand)
+	assert.Equal(t, [][]string{{"a", "b", "c"}, {"d", "e", "f"}}, names(owed), "both trios are level with no round started")
+
+	// Round 2 among the first trio, scheduled.
+	for _, pair := range [][2]string{{"a", "b"}, {"b", "c"}, {"a", "c"}} {
+		matches = append(matches, bout(pair[0], pair[1], "", state.MatchStatusScheduled))
+	}
+	owed, _ = chusenOfRuns(group, positions, matches, nil, inEveryBand)
+	assert.Equal(t, [][]string{{"d", "e", "f"}}, names(owed), "the trio about to fight owes no lots")
+
+	// Round 2 partly fought: a beat b and b beat c, so the wins so far split the
+	// trio into {a, b} (one each) and {c}, and the bout still to fight (a against
+	// c) lies inside neither run. Both runs still bear on it, so no lots are owed
+	// to the first trio yet.
+	matches = matches[:len(matches)-3]
+	matches = append(matches,
+		bout("a", "b", "a", state.MatchStatusCompleted),
+		bout("b", "c", "b", state.MatchStatusCompleted),
+		bout("a", "c", "", state.MatchStatusScheduled))
+	owed, _ = chusenOfRuns(group, positions, matches, nil, inEveryBand)
+	assert.Equal(t, [][]string{{"d", "e", "f"}}, names(owed), "a bout still to fight across two runs holds back the lots of both")
+}
+
+// TestChusenOfRuns_AskedLotsForACircleWhileAnotherRunFightsItsNextRound: six
+// competitors level on points. Round 1 put a, b and c ahead of d, e and f, and each
+// trio went in a circle. Both trios then fight a second round: the first trio's is
+// still to fight, the second trio's is fought and went in a circle again. Both
+// second-round bouts are the second bout of their pair, but they were played among
+// different runs, so the first trio's open bouts say nothing of d, e and f: lots
+// are owed to them at once, and to the first trio only once its round is fought.
+func TestChusenOfRuns_AskedLotsForACircleWhileAnotherRunFightsItsNextRound(t *testing.T) {
+	ids := []string{"a", "b", "c", "d", "e", "f"}
+	group := make([]state.PlayerStanding, len(ids))
+	positions := make([]int, len(ids))
+	for i, id := range ids {
+		group[i] = state.PlayerStanding{Player: domain.Player{ID: id, Name: id}, Points: 3}
+		positions[i] = i
+	}
+	n := 0
+	var matches []state.MatchResult
+	bout := func(a, b, winner string, status state.MatchStatus) {
+		n++
+		matches = append(matches, state.MatchResult{ID: fmt.Sprintf("Pool A-TB-%d", n), SideAID: a, SideBID: b, Winner: winner, WinnerID: winner, Status: status})
+	}
+	for _, top := range ids[:3] {
+		for _, bottom := range ids[3:] {
+			bout(top, bottom, top, state.MatchStatusCompleted)
+		}
+	}
+	for _, trio := range [][3]string{{"a", "b", "c"}, {"d", "e", "f"}} {
+		bout(trio[0], trio[1], trio[0], state.MatchStatusCompleted)
+		bout(trio[1], trio[2], trio[1], state.MatchStatusCompleted)
+		bout(trio[2], trio[0], trio[2], state.MatchStatusCompleted)
+	}
+	// The second round: a, b, c still to fight; d, e, f fought, a circle again.
+	bout("a", "b", "", state.MatchStatusScheduled)
+	bout("b", "c", "", state.MatchStatusScheduled)
+	bout("a", "c", "", state.MatchStatusScheduled)
+	bout("d", "e", "d", state.MatchStatusCompleted)
+	bout("e", "f", "e", state.MatchStatusCompleted)
+	bout("f", "d", "f", state.MatchStatusCompleted)
+
+	owed, _ := chusenOfRuns(group, positions, matches, nil, inEveryBand)
+	require.Len(t, owed, 1)
+	var got []string
+	for _, s := range owed[0].members {
+		got = append(got, s.Player.ID)
+	}
+	assert.Equal(t, []string{"d", "e", "f"}, got, "the circle that fought its round is owed lots whatever the other run still has to fight")
+}
+
+// TestChusenOfRuns_AskedNoLotsWhileABoutOutsideTheRunCanStillMoveAMemberIn: eight
+// competitors level on points. Round 1 put a to e (a five-way circle) ahead of f,
+// g and h (a circle of their own). The next round among a to e is partly fought:
+// e has four wins, a and b two, d one and c none, with c against d still to
+// fight. Neither c nor d is in {a, b}, but d winning that bout would put d level
+// with them, so the run is not final and owes no lots yet. f, g and h left the
+// round behind them, so their lots are owed whatever the round among a to e does.
+func TestChusenOfRuns_AskedNoLotsWhileABoutOutsideTheRunCanStillMoveAMemberIn(t *testing.T) {
+	ids := []string{"a", "b", "c", "d", "e", "f", "g", "h"}
+	group := make([]state.PlayerStanding, len(ids))
+	positions := make([]int, len(ids))
+	for i, id := range ids {
+		group[i] = state.PlayerStanding{Player: domain.Player{ID: id, Name: id}, Points: 3}
+		positions[i] = i
+	}
+	n := 0
+	var matches []state.MatchResult
+	bout := func(a, b, winner string, status state.MatchStatus) {
+		n++
+		matches = append(matches, state.MatchResult{ID: fmt.Sprintf("Pool A-TB-%d", n), SideAID: a, SideBID: b, Winner: winner, WinnerID: winner, Status: status})
+	}
+	for _, top := range ids[:5] {
+		for _, bottom := range ids[5:] {
+			bout(top, bottom, top, state.MatchStatusCompleted)
+		}
+	}
+	for _, p := range [][3]string{{"a", "b", "a"}, {"a", "c", "a"}, {"b", "c", "b"}, {"b", "d", "b"}, {"c", "d", "c"},
+		{"c", "e", "c"}, {"d", "e", "d"}, {"d", "a", "d"}, {"e", "a", "e"}, {"e", "b", "e"},
+		{"f", "g", "f"}, {"g", "h", "g"}, {"h", "f", "h"}} {
+		bout(p[0], p[1], p[2], state.MatchStatusCompleted)
+	}
+	// The second round among a to e: e beat a, b, c and d; a beat b and c; b beat c
+	// and d; d beat a; c against d is still to fight.
+	for _, p := range [][3]string{{"e", "a", "e"}, {"e", "b", "e"}, {"e", "c", "e"}, {"e", "d", "e"}, {"a", "b", "a"},
+		{"a", "c", "a"}, {"b", "c", "b"}, {"b", "d", "b"}, {"d", "a", "d"}} {
+		bout(p[0], p[1], p[2], state.MatchStatusCompleted)
+	}
+	bout("c", "d", "", state.MatchStatusScheduled)
+	owedIDs := func() [][]string {
+		owed, _ := chusenOfRuns(group, positions, matches, nil, inEveryBand)
+		var out [][]string
+		for _, r := range owed {
+			var one []string
+			for _, s := range r.members {
+				one = append(one, s.Player.ID)
+			}
+			out = append(out, one)
+		}
+		return out
+	}
+
+	assert.Equal(t, [][]string{{"f", "g", "h"}}, owedIDs(), "a and b may still be joined by d: no lots yet")
+
+	// c against d is fought: d reaches two wins and joins a and b.
+	matches[len(matches)-1].Status, matches[len(matches)-1].Winner, matches[len(matches)-1].WinnerID = state.MatchStatusCompleted, "d", "d"
+	assert.Equal(t, [][]string{{"a", "b", "d"}, {"f", "g", "h"}}, owedIDs(), "the run is final once the round is fought")
 }
 
 // TestGroupNeedsChusen_SameNameTeamsKeyOnIdentity pins the identity keying in
@@ -391,7 +618,7 @@ func TestGroupNeedsChusen_SameNameTeamsKeyOnIdentity(t *testing.T) {
 		dh(2, "id-b", "Tora", "id-c", "Kuma", "id-b", "Tora"), // Osaka beats Kuma
 	}
 	// Strict 2/1/0 order: Tokyo 2, Osaka 1, Kuma 0.
-	assert.False(t, groupNeedsChusen(group, matches, nil),
+	assert.False(t, groupNeedsChusen(group, []int{0, 1, 2}, matches, nil, inEveryBand),
 		"a decided daihyosen order must not need a chusen just because two teams share a name")
 }
 

@@ -39,7 +39,7 @@ func TestApplyJointThirdRanks(t *testing.T) {
 			rankedStanding("A", 100, 1), rankedStanding("B", 90, 2),
 			rankedStanding("C", 50, 3), rankedStanding("D", 50, 4),
 		}
-		applyJointThirdRanks(leagueOn, sorted, false)
+		applyJointThirdRanks(leagueOn, sorted, nil)
 		assert.Equal(t, []int{1, 2, 3, 3}, ranksOf(sorted))
 	})
 
@@ -48,7 +48,7 @@ func TestApplyJointThirdRanks(t *testing.T) {
 			rankedStanding("A", 100, 1), rankedStanding("B", 90, 2),
 			rankedStanding("C", 50, 3), rankedStanding("D", 50, 4),
 		}
-		applyJointThirdRanks(leagueOff, sorted, false)
+		applyJointThirdRanks(leagueOff, sorted, nil)
 		assert.Equal(t, []int{1, 2, 3, 4}, ranksOf(sorted))
 	})
 
@@ -57,7 +57,7 @@ func TestApplyJointThirdRanks(t *testing.T) {
 			rankedStanding("A", 100, 1), rankedStanding("B", 90, 2),
 			rankedStanding("C", 50, 3), rankedStanding("D", 50, 4), rankedStanding("E", 50, 5),
 		}
-		applyJointThirdRanks(leagueOn, sorted, false)
+		applyJointThirdRanks(leagueOn, sorted, nil)
 		assert.Equal(t, []int{1, 2, 3, 3, 3}, ranksOf(sorted))
 	})
 
@@ -66,7 +66,7 @@ func TestApplyJointThirdRanks(t *testing.T) {
 			rankedStanding("A", 100, 1), rankedStanding("B", 90, 2),
 			rankedStanding("C", 80, 3), rankedStanding("D", 70, 4),
 		}
-		applyJointThirdRanks(leagueOn, sorted, false)
+		applyJointThirdRanks(leagueOn, sorted, nil)
 		assert.Equal(t, []int{1, 2, 3, 4}, ranksOf(sorted))
 	})
 
@@ -75,7 +75,7 @@ func TestApplyJointThirdRanks(t *testing.T) {
 			rankedStanding("A", 100, 1), rankedStanding("B", 80, 2),
 			rankedStanding("C", 80, 3), rankedStanding("D", 40, 4),
 		}
-		applyJointThirdRanks(leagueOn, sorted, false)
+		applyJointThirdRanks(leagueOn, sorted, nil)
 		assert.Equal(t, []int{1, 2, 3, 4}, ranksOf(sorted),
 			"a 2nd/3rd tie must be decided by a tie-breaker, never shared")
 	})
@@ -85,17 +85,74 @@ func TestApplyJointThirdRanks(t *testing.T) {
 			rankedStanding("A", 100, 1), rankedStanding("B", 100, 2),
 			rankedStanding("C", 50, 3), rankedStanding("D", 40, 4),
 		}
-		applyJointThirdRanks(leagueOn, sorted, false)
+		applyJointThirdRanks(leagueOn, sorted, nil)
 		assert.Equal(t, []int{1, 2, 3, 4}, ranksOf(sorted))
 	})
 
-	t.Run("pool has manual overrides → not collapsed (operator order wins)", func(t *testing.T) {
+	t.Run("a tie holding a rank in force is not collapsed (operator order wins)", func(t *testing.T) {
 		sorted := []state.PlayerStanding{
 			rankedStanding("A", 100, 1), rankedStanding("B", 90, 2),
 			rankedStanding("C", 50, 3), rankedStanding("D", 50, 4),
 		}
-		applyJointThirdRanks(leagueOn, sorted, true)
+		sorted[2].IsOverridden, sorted[3].IsOverridden = true, true
+		applyJointThirdRanks(leagueOn, sorted, nil)
 		assert.Equal(t, []int{1, 2, 3, 4}, ranksOf(sorted))
+	})
+
+	t.Run("lots over a different tie leave the joint 3rd shared", func(t *testing.T) {
+		sorted := []state.PlayerStanding{
+			rankedStanding("A", 100, 1), rankedStanding("B", 100, 2),
+			rankedStanding("C", 50, 3), rankedStanding("D", 50, 4),
+		}
+		sorted[0].IsOverridden, sorted[1].IsOverridden = true, true
+		applyJointThirdRanks(leagueOn, sorted, nil)
+		assert.Equal(t, []int{1, 2, 3, 3}, ranksOf(sorted),
+			"the chusen decided 1st and 2nd only; the 3rd/4th tie is still a joint 3rd")
+	})
+
+	t.Run("lots over one run of a group leave another run's joint 3rd shared", func(t *testing.T) {
+		// One Points group of four: the tie-break bouts left {a, b} and {c, d}
+		// level (a and b each beat c and d), so the run at 3rd shares its place
+		// whatever the lots entered for the run at 1st.
+		round := []state.MatchResult{
+			tbBout(0, "a", "c", "a"), tbBout(1, "a", "d", "a"),
+			tbBout(2, "b", "c", "b"), tbBout(3, "b", "d", "b"),
+		}
+		ranked := func(lotsOver ...string) []state.PlayerStanding {
+			sorted := runRows("a", "b", "c", "d")
+			for i := range sorted {
+				sorted[i].Rank = i + 1
+				for _, id := range lotsOver {
+					if sorted[i].Player.ID == id {
+						sorted[i].IsOverridden = true
+					}
+				}
+			}
+			applyJointThirdRanks(leagueOn, sorted, round)
+			return sorted
+		}
+		assert.Equal(t, []int{1, 2, 3, 3}, ranksOf(ranked("a", "b")),
+			"lots on the run at 1st do not strip the run at 3rd of its shared place")
+		assert.Equal(t, []int{1, 2, 3, 3}, ranksOf(ranked()))
+		assert.Equal(t, []int{1, 2, 3, 4}, ranksOf(ranked("c", "d")),
+			"lots over the run at 3rd keep its sequential places")
+	})
+
+	t.Run("a run level at 4th inside a group that started at 1st shares 4th, joint 3rd places off", func(t *testing.T) {
+		// One Points group of five. The bouts put a, b and c clear, in that order,
+		// and leave d and e level (their own bout is unfought): the run at 4th
+		// shares its place whatever the setting, though the group is in the band.
+		round := []state.MatchResult{
+			tbBout(0, "a", "b", "a"), tbBout(1, "a", "c", "a"), tbBout(2, "a", "d", "a"), tbBout(3, "a", "e", "a"),
+			tbBout(4, "b", "c", "b"), tbBout(5, "b", "d", "b"), tbBout(6, "b", "e", "b"),
+			tbBout(7, "c", "d", "c"), tbBout(8, "c", "e", "c"),
+		}
+		sorted := runRows("a", "b", "c", "d", "e")
+		for i := range sorted {
+			sorted[i].Rank = i + 1
+		}
+		applyJointThirdRanks(leagueOff, sorted, round)
+		assert.Equal(t, []int{1, 2, 3, 4, 4}, ranksOf(sorted))
 	})
 
 	t.Run("non-league (mixed) with setting on → not collapsed", func(t *testing.T) {
@@ -104,15 +161,15 @@ func TestApplyJointThirdRanks(t *testing.T) {
 			rankedStanding("A", 100, 1), rankedStanding("B", 90, 2),
 			rankedStanding("C", 50, 3), rankedStanding("D", 50, 4),
 		}
-		applyJointThirdRanks(mixed, sorted, false)
+		applyJointThirdRanks(mixed, sorted, nil)
 		assert.Equal(t, []int{1, 2, 3, 4}, ranksOf(sorted),
 			"mixed pools feed knockout seeding and must keep sequential ranks")
 	})
 
 	t.Run("nil comp / empty slice → no panic", func(t *testing.T) {
-		applyJointThirdRanks(nil, nil, false)
+		applyJointThirdRanks(nil, nil, nil)
 		var empty []state.PlayerStanding
-		applyJointThirdRanks(leagueOn, empty, false)
+		applyJointThirdRanks(leagueOn, empty, nil)
 		assert.Empty(t, empty)
 	})
 }
@@ -263,33 +320,92 @@ func TestIndividualLeague_ThirdPlaceTie_TieBreak(t *testing.T) {
 	})
 }
 
-// TestTieNeedsIndividualBreak covers the gate directly: leagues break band ties
+// TestTieNeedsBreak covers the gate directly: leagues break band ties
 // (minus the joint-3rd exemption); mixed pools break only advancement ties.
-func TestTieNeedsIndividualBreak(t *testing.T) {
+func TestTieNeedsBreak(t *testing.T) {
 	grp := func(n int) []state.PlayerStanding { return make([]state.PlayerStanding, n) }
 
 	t.Run("league breaks a 3rd/4th tie by default", func(t *testing.T) {
 		comp := &state.Competition{Format: state.CompFormatLeague}
-		assert.True(t, tieNeedsIndividualBreak(comp, []int{2, 3}, grp(2), 2))
+		assert.True(t, tieNeedsBreak(comp, []int{2, 3}, grp(2), 2))
 	})
 	t.Run("league exempts the joint-3rd tie when enabled", func(t *testing.T) {
 		comp := &state.Competition{Format: state.CompFormatLeague, LeagueTwoThirdPlaces: true}
-		assert.False(t, tieNeedsIndividualBreak(comp, []int{2, 3}, grp(2), 2))
+		assert.False(t, tieNeedsBreak(comp, []int{2, 3}, grp(2), 2))
 	})
 	t.Run("league still breaks a 1st/2nd tie even with joint-3rd on", func(t *testing.T) {
 		comp := &state.Competition{Format: state.CompFormatLeague, LeagueTwoThirdPlaces: true}
-		assert.True(t, tieNeedsIndividualBreak(comp, []int{0, 1}, grp(2), 2))
+		assert.True(t, tieNeedsBreak(comp, []int{0, 1}, grp(2), 2))
 	})
 	t.Run("league leaves a below-band 5th/6th tie unbroken", func(t *testing.T) {
-		comp := &state.Competition{Format: state.CompFormatLeague} // effectiveTopN=3
-		assert.False(t, tieNeedsIndividualBreak(comp, []int{4, 5}, grp(2), 2))
+		comp := &state.Competition{Format: state.CompFormatLeague} // the band is 3
+		assert.False(t, tieNeedsBreak(comp, []int{4, 5}, grp(2), 2))
 	})
 	t.Run("mixed pool uses the advancement cut, not the band", func(t *testing.T) {
 		comp := &state.Competition{Format: state.CompFormatMixed}
 		// poolWinners=2: a 3rd/4th tie does not affect who advances.
-		assert.False(t, tieNeedsIndividualBreak(comp, []int{2, 3}, grp(2), 2))
-		assert.True(t, tieNeedsIndividualBreak(comp, []int{1, 2}, grp(2), 2))
+		assert.False(t, tieNeedsBreak(comp, []int{2, 3}, grp(2), 2))
+		assert.True(t, tieNeedsBreak(comp, []int{1, 2}, grp(2), 2))
 	})
+}
+
+// TestMarkTiesOutOfBand_JudgesEachRunOnItsOwnPlaces pins that a run the bouts
+// left level below the band is marked out of band inside a group that started in
+// it, and the run above it is not.
+func TestMarkTiesOutOfBand_JudgesEachRunOnItsOwnPlaces(t *testing.T) {
+	comp := &state.Competition{Format: state.CompFormatLeague}
+	band := func(poolName string, positions []int, group []state.PlayerStanding) bool {
+		return tieNeedsBreak(comp, positions, group, 0)
+	}
+	row := func(run int) state.PlayerStanding {
+		return state.PlayerStanding{Points: 3, TieRun: run}
+	}
+	// One Points group of five: runs {0,1}, {2}, {3,4} at places 1-2, 3 and 4-5.
+	sorted := []state.PlayerStanding{row(0), row(0), row(1), row(2), row(2)}
+	markTiesOutOfBand(band, "Pool A", sorted, nil)
+	var got []bool
+	for _, s := range sorted {
+		got = append(got, s.TieOutOfBand)
+	}
+	assert.Equal(t, []bool{false, false, false, true, true}, got)
+}
+
+// TestMarkTiesOutOfBand_WholeGroupWhileARoundIsOpen pins that a group whose
+// round still has a bout to fight is judged on the whole group's places: its
+// runs come from partial win counts, and the bout still to fight can bring a
+// member of a run below the band back into it.
+func TestMarkTiesOutOfBand_WholeGroupWhileARoundIsOpen(t *testing.T) {
+	comp := &state.Competition{Format: state.CompFormatLeague}
+	band := func(poolName string, positions []int, group []state.PlayerStanding) bool {
+		return tieNeedsBreak(comp, positions, group, 0)
+	}
+	row := func(id string, points, run int) state.PlayerStanding {
+		return state.PlayerStanding{Player: domain.Player{ID: id}, Points: points, TieRun: run}
+	}
+	// Two clear leaders, then five level on points at 3rd to 7th. The bouts so far
+	// put "c" clear of the rest (run 0) and left d-g level (run 1, places 4-7, below
+	// the band as far as its own places go).
+	newSorted := func() []state.PlayerStanding {
+		return []state.PlayerStanding{row("a", 6, 0), row("b", 5, 0), row("c", 3, 0), row("d", 3, 1), row("e", 3, 1), row("f", 3, 1), row("g", 3, 1)}
+	}
+	bout := func(status state.MatchStatus) []state.MatchResult {
+		return []state.MatchResult{{ID: "Pool A-TB-1", SideAID: "d", SideBID: "e", Status: status}}
+	}
+	marked := func(sorted []state.PlayerStanding) []bool {
+		var got []bool
+		for _, s := range sorted {
+			got = append(got, s.TieOutOfBand)
+		}
+		return got
+	}
+
+	open := newSorted()
+	markTiesOutOfBand(band, "Pool A", open, bout(state.MatchStatusScheduled))
+	assert.Equal(t, []bool{false, false, false, false, false, false, false}, marked(open), "a bout still to fight keeps the whole group in the band")
+
+	finished := newSorted()
+	markTiesOutOfBand(band, "Pool A", finished, bout(state.MatchStatusCompleted))
+	assert.Equal(t, []bool{false, false, false, true, true, true, true}, marked(finished), "a finished round is judged run by run")
 }
 
 // TestCalculatePoolStandings_JointThirdWiring proves the joint-3rd convention is

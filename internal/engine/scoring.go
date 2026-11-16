@@ -718,6 +718,11 @@ type ForceOptions struct {
 	// set after the write it would be a result-group field its log did not
 	// replay to. Taken only when the stored match holds no correction reason.
 	ReopenReason string
+	// ConfirmLots is the organiser's "Replace the lots" after a *LotsReplacedError:
+	// a write that gives a drawn tie-breaker bout a winner, or reopens it, while the
+	// lots they entered rule it (drawnSupplementaryRuledByChusen) lands, and the
+	// bout's result decides the place. Request-only, never stored.
+	ConfirmLots bool
 }
 
 // HoldReasonOlderRevision is the history reason of a previous build's running
@@ -1935,6 +1940,7 @@ func (e *Engine) sampleStandingsTokens(compId string) standingsTokens {
 	t.overridesMtime, t.overridesVersion = e.store.FileToken(compId, "overrides.json")
 	t.poolsMtime, t.poolsVersion = e.store.FileToken(compId, "pools.csv")
 	t.configMtime, t.configVersion = e.store.FileToken(compId, "config.md")
+	t.bracketMtime, t.bracketVersion = e.store.FileToken(compId, "bracket.json")
 	return t
 }
 
@@ -1947,24 +1953,29 @@ type poolStandingsLoader interface {
 	LoadCompetition(compID string) (*state.Competition, error)
 	LoadPools(compID string) ([]helper.Pool, error)
 	LoadPoolMatches(compID string) ([]state.MatchResult, error)
+	LoadPoolRanks(compID string) (map[string]map[string]int, error)
+	LoadBracket(compID string) (*state.Bracket, error)
+	// LoadCompetitorStatus is read by the completion judgement alone
+	// (poolCompletion), never by the standings: a standings entry must not
+	// depend on a file the standings cache does not key on.
+	LoadCompetitorStatus(compID string) (map[string]domain.CompetitorStatus, error)
 }
 
 // computeStandings is the non-tx standings core. It delegates to the shared
 // computeStandingsFrom so the kendo scoring weights, tiebreaker/daihyosen
 // grouping, and override sort live in exactly ONE place.
 func (e *Engine) computeStandings(compId string) (map[string][]state.PlayerStanding, error) {
-	// The engi dispatch lives inside computeStandingsFrom so it happens on a
-	// single competition load shared with the kendo path, not one load here plus
-	// another there.
+	// The engi accrual lives inside computeStandingsFrom, on the one
+	// competition load the rest of the rule shares.
 	return e.computeStandingsFrom(e.store, compId)
 }
 
 // computeStandingsFrom is the single source of truth for pool standings. It
 // reads pools/matches/competition through loader (so a transaction can pass a
-// StoreTx and see its just-applied write), and reads overrides via
-// e.store.LoadOverrides directly, overrides are read-only in the scoring path
-// and are not part of any transaction's mutation set, so no tx variant is
-// needed.
+// StoreTx and see its just-applied write), and reads the recorded pool ranks
+// through the same loader, so one caller's standings and the settled judgement
+// beside them read overrides.json by one route. Overrides are read-only in the
+// scoring path and are not part of any transaction's mutation set.
 func (e *Engine) computeStandingsFrom(loader poolStandingsLoader, compId string) (map[string][]state.PlayerStanding, error) {
 	comp, err := loader.LoadCompetition(compId)
 	if err != nil {
@@ -1974,14 +1985,12 @@ func (e *Engine) computeStandingsFrom(loader poolStandingsLoader, compId string)
 		// absent competition maps to (nil, nil) and is left as individual mode.
 		return nil, fmt.Errorf("computeStandingsFrom: load competition %s: %w", compId, err)
 	}
-	// Engi dispatch seam: a flag-scored competition delegates to the engi
-	// standings slice; the kendo logic below is left fully unchanged. Uses the
-	// same loader so a tx caller sees its just-applied write. Non-engi tx callers
-	// never reach the engi branch: the tx scoring path early-returns on engi
-	// before computeStandingsFrom is ever called.
-	if comp != nil && comp.Engi {
-		return e.computeEngiStandings(loader, compId)
-	}
+	// A flag-scored (engi) competition accrues its own figures (accrueEngiMatch:
+	// wins, then flags) and packs them with engiStandingPoints; everything after
+	// the accrual, the tie-break bouts, the lots, the tie marks and the shared
+	// places, is the same rule as every other format's (operator ruling: a tie
+	// in engi is settled like any other match).
+	isEngi := comp != nil && comp.Engi
 
 	pools, err := loader.LoadPools(compId)
 	if err != nil {
@@ -1992,7 +2001,21 @@ func (e *Engine) computeStandingsFrom(loader poolStandingsLoader, compId string)
 		return nil, err
 	}
 
-	isTeam := comp != nil && comp.TeamSize > 0
+	isTeam := comp.IsTeam()
+
+	// The band a tie is broken in (tieNeedsBreak) reads the stored draw's
+	// qualifier places only outside a league, whose band is its own tie-break
+	// band.
+	var band breakBand
+	if comp != nil {
+		var bracket *state.Bracket
+		if comp.Format != state.CompFormatLeague {
+			if bracket, err = loader.LoadBracket(compId); err != nil {
+				return nil, err
+			}
+		}
+		band = newBreakBand(comp, pools, bracket)
+	}
 
 	// Map match results by pool using poolNameFromMatchID so hyphenated pool
 	// names (e.g. "Pool A-East") are handled correctly for all ID forms
@@ -2011,7 +2034,7 @@ func (e *Engine) computeStandingsFrom(loader poolStandingsLoader, compId string)
 	// reason to re-read the same file once per pool -- overrides read-only in
 	// the scoring path (see this function's own doc comment above) makes a
 	// single load correct for every pool in one call.
-	overrides, err := e.store.LoadOverrides(compId)
+	poolRanks, err := loader.LoadPoolRanks(compId)
 	if err != nil {
 		return nil, fmt.Errorf("computeStandingsFrom: load overrides for %s: %w", compId, err)
 	}
@@ -2038,6 +2061,10 @@ func (e *Engine) computeStandingsFrom(loader poolStandingsLoader, compId string)
 			sA := lookupStandingsPlayer(playerStandings, m.SideAID)
 			sB := lookupStandingsPlayer(playerStandings, m.SideBID)
 			if sA == nil || sB == nil {
+				continue
+			}
+			if isEngi {
+				accrueEngiMatch(sA, sB, m)
 				continue
 			}
 
@@ -2081,12 +2108,17 @@ func (e *Engine) computeStandingsFrom(loader poolStandingsLoader, compId string)
 
 		var sorted []state.PlayerStanding
 		for _, s := range order {
-			if isTeam {
+			switch {
+			case isEngi:
+				// Wins, then own-side flags. See engiStandingPoints.
+				s.Points = engiStandingPoints(*s)
+				s.ScoreSummary = engiScoreSummary(s)
+			case isTeam:
 				// Single packed ranking score over the full team tiebreak chain
 				// (W, L, T, IV, IL, IT, PW, PL). See teamStandingPoints.
 				s.Points = teamStandingPoints(*s)
 				s.ScoreSummary = teamScoreSummary(s)
-			} else {
+			default:
 				// Single packed ranking score over the individual chain
 				// (W, L, D, ippons given, ippons taken). See individualStandingPoints.
 				s.Points = individualStandingPoints(*s)
@@ -2125,165 +2157,157 @@ func (e *Engine) computeStandingsFrom(loader poolStandingsLoader, compId string)
 			applyTiebreakSort(sorted, matches, IsPoolDaihyosenMatchID)
 		}
 
-		// `overrides` itself is loaded ONCE above this loop, not per pool.
-		var poolOverrides map[string]int
-		if overrides != nil {
-			poolOverrides = overrides.PoolRanks[p.PoolName]
+		// `poolRanks` itself is loaded ONCE above this loop, not per pool. Only
+		// the ranks still in force govern the order (poolRanksInForce, the one
+		// owner): those of a group still level on Points that no fought bout
+		// settled. Each such row is marked IsOverridden here, and every other
+		// reader of a chusen reads that mark.
+		poolOverrides := poolRanksInForce(sorted, matches, isTeam, poolRanks[p.PoolName])
+		for i := range sorted {
+			if _, ok := lookupPoolRankOverride(poolOverrides, sorted[i].Player.ID); ok {
+				sorted[i].IsOverridden = true
+			}
 		}
+		markTieRuns(sorted, matches, isTeam)
 
 		// Detect ties before applying manual rank overrides. detectPoolTies walks
 		// adjacent elements, so it must run while the slice is still Points-sorted.
-		// A tie already settled is not flagged: a chusen recorded for every
-		// member of the group (poolOverrides), or supplementary bouts that
+		// A tie already settled is not flagged: a chusen in force for every
+		// member of the group (IsOverridden), or supplementary bouts that
 		// ordered it completely, decided the order, so the group is no longer a
-		// tie to break (operator ruling 2026-09-24; see tieSettled).
-		markTiedStandings(comp, sorted, poolResults[p.PoolName], playerStandings, poolOverrides)
-
-		// Apply manual rank overrides. Overrides are keyed by competitor
-		// participant id ONLY (bc-cse, bc-pnum), not bare name:
-		// lookupPoolRankOverride resolves nothing for an id-less row, so a
-		// pre-bc-cse overrides.json entry keyed by bare name alone is
-		// unresolvable until the operator re-records it through the current
-		// chusen/override-rank flow.
-		if len(poolOverrides) > 0 {
-			// TWO defects fixed together (bc-idfx):
-			//
-			//  1. The old fallback comparator read sorted[i].Rank for the
-			//     non-overridden case, but Rank is not assigned until the loop
-			//     BELOW this one runs -- every row's Rank still reads its zero
-			//     value here, so the comparator returned "not less than" for
-			//     every non-overridden pair. sort.Slice is not stable, so on a
-			//     pool with more than ~12 rows (past go's insertion-sort cutover
-			//     to an unstable partition), that degenerate all-equal
-			//     comparator could reorder the non-overridden rows arbitrarily
-			//     (observed: a 14-row pool's undefeated points leader landed at
-			//     rank 7).
-			//  2. Every overridden row sorted ahead of every non-overridden row
-			//     UNCONDITIONALLY (`if okI { return true }`), regardless of the
-			//     override's own recorded rank number. A chusen recording
-			//     positions 2..N (leaving the undefeated pool winner, who needs
-			//     no override, at natural position 1) demoted that winner below
-			//     every overridden row -- and a PARTIAL chusen (only some of a
-			//     tied group's members overridden) dissolved the whole group's
-			//     adjacency, since the still-natural-ranked remainder no longer
-			//     sorted next to their now-overridden groupmates.
-			//
-			// Fix: compute each row's NATURAL points-order position first (the
-			// slice is already sorted by Points descending at this point in the
-			// function, so index+1 == natural 1-based rank -- 1-based because
-			// an override's OWN rank number is 1-based (an operator recording
-			// "Alice is rank 1" via the chusen panel), and the two numbers must
-			// live on the same scale for "sort by whichever number is smaller"
-			// to mean anything: an identity-keyed override of exactly 1 must
-			// beat an undefeated, non-overridden natural WINNER, which only
-			// happens when that winner's own natural rank is 1, not 0 (natural
-			// rank generally beating an override is pinned by
-			// TestComputeStandingsFrom_OverrideSort_NaturalRankBeatsUnrankedOverride).
-			// A BARE-NAME-keyed override cannot reach this comparison at all,
-			// legacy or not: lookupPoolRankOverride is id-only (see its own
-			// doc comment) -- TestCalculatePoolStandings_Override_LegacyBareNameKeyIsUnresolvable
-			// pins that such an entry simply never applies.
-			//
-			// The natural rank MUST be captured PER ELEMENT, not in a map keyed
-			// by identity (the participant id): two id-less namesakes (legal
-			// across dojos, CheckDuplicateEntriesByNameDojo) share the identical
-			// key, so a map assignment for the SECOND one silently overwrites
-			// the FIRST one's entry, and both then read whichever was written
-			// LAST -- corrupting the earlier one's rank (BLOCKER caught by
-			// review: an unrelated override elsewhere in the pool was enough to
-			// drop a 2-0 undefeated leader to rank 3, because her natural rank
-			// had been overwritten by her own lower-placed namesake's). A
-			// pairing struct fixes this: `nat` travels glued to its own
-			// `standing` through the sort, so it can never be read off the
-			// wrong row regardless of how many rows share a display name.
-			//
-			// Sorted by key = override rank when present, else the row's own
-			// natural rank, so an override is only ever preferred over another
-			// row's rank number when the numbers themselves say so. Every
-			// non-overridden row's natural rank is UNIQUE by construction (each
-			// occupies exactly one position i in the already points-sorted
-			// slice), so non-overridden rows can never tie with each other --
-			// that uniqueness is what actually fixes the original ">12-row pool
-			// scrambled" bug, not sort stability. sort.SliceStable is still used
-			// as belt-and-braces for the one case a genuine tie remains
-			// possible: an override rank numerically colliding with another
-			// row's rank (natural or overridden); ties resolve override-first,
-			// then whichever pairing was already ahead going into the sort.
-			type poolRankPairing struct {
-				standing state.PlayerStanding
-				nat      int // 1-based natural (points-order) rank, captured once per element
-			}
-			wrapped := make([]poolRankPairing, len(sorted))
-			for i, s := range sorted {
-				wrapped[i] = poolRankPairing{standing: s, nat: i + 1}
-			}
-			rankFor := func(w *poolRankPairing) (rank int, overridden bool) {
-				if r, ok := lookupPoolRankOverride(poolOverrides, w.standing.Player.ID); ok {
-					return r, true
-				}
-				return w.nat, false
-			}
-			sort.SliceStable(wrapped, func(i, j int) bool {
-				rankI, okI := rankFor(&wrapped[i])
-				rankJ, okJ := rankFor(&wrapped[j])
-				if rankI != rankJ {
-					return rankI < rankJ
-				}
-				if okI != okJ {
-					return okI
-				}
-				return false
-			})
-			for i, w := range wrapped {
-				sorted[i] = w.standing
-			}
+		// tie to break (operator ruling 2026-09-24; see openTieRuns).
+		markTiedStandings(comp, sorted, poolResults[p.PoolName], playerStandings)
+		if band != nil {
+			markTiesOutOfBand(band, p.PoolName, sorted, matches)
 		}
 
-		poolHasOverrides := len(poolOverrides) > 0
+		// Apply the ranks in force. They are keyed by competitor participant id
+		// ONLY (bc-cse, bc-pnum), not bare name: lookupPoolRankOverride
+		// resolves nothing for an id-less row, so a pre-bc-cse overrides.json
+		// entry keyed by bare name alone is unresolvable until the operator
+		// re-records it through the current chusen/override-rank flow.
+		if len(poolOverrides) > 0 {
+			applyPoolRanksInForce(sorted, poolOverrides)
+		}
+
 		for i := range sorted {
 			sorted[i].Rank = i + 1
-			if poolHasOverrides {
-				if _, ok := lookupPoolRankOverride(poolOverrides, sorted[i].Player.ID); ok {
-					sorted[i].IsOverridden = true
-				}
-			}
 		}
 
-		applyJointThirdRanks(comp, sorted, poolHasOverrides)
+		applyJointThirdRanks(comp, sorted, matches)
 		allStandings[p.PoolName] = sorted
 	}
 
 	return allStandings, nil
 }
 
-// applyJointThirdRanks implements the kendo joint-3rd convention. When a league
-// has the joint-3rd rule enabled (state.Competition.EffectiveTwoThirdPlaces,
-// bc-3rdp), a genuine Points-tie whose best finishing position is 3rd or lower
-// is given a SHARED rank (the group's best 1-based position) so both the
-// standings table and the closing-ceremony podium show two (or more) equal
-// 3rd places instead of relabeling the 4th finisher. Ranks 1 and 2 are always
-// kept distinct: a top-two tie is decided by a tie-breaker, never shared. It
-// is a no-op for non-leagues, when the setting is off, or when the pool
-// carries manual rank overrides (the operator's explicit order wins).
-// Scoping to leagues keeps mixed and knockout seeding strictly sequential
-// -- those formats decide a single/joint 3rd with a bronze match instead, via
-// RequiresSingleThirdPlace; naginata leagues leave the setting off and so keep
-// a single 3rd.
+// applyPoolRanksInForce orders each tied group of sorted (Points order) that
+// holds a rank in force (poolRanksInForce) by that rank, in place and within
+// the group's own positions, so a chusen never moves a team above or below a
+// team it was not level with. A member with no rank in force (a chusen only
+// partly entered) keeps its natural 1-based position as its key, on the same
+// scale as a recorded rank; a key both hold is resolved rank-first, then by the
+// order the rows were in. The key travels with its row through the sort, so two
+// id-less namesakes cannot read each other's position (bc-idfx).
+//
+// The order is kept within each run the fought bouts left level (TieRun, stamped
+// by markTieRuns): the lots rank a run alone, so a competitor the bouts put
+// clear of it keeps the place they gave.
+func applyPoolRanksInForce(sorted []state.PlayerStanding, inForce map[string]int) {
+	type keyed struct {
+		standing state.PlayerStanding
+		key      int
+		ranked   bool
+	}
+	for _, positions := range detectPoolTies(sorted) {
+		for start := positions[0]; start <= positions[len(positions)-1]; {
+			end := start + 1
+			for end <= positions[len(positions)-1] && sorted[end].TieRun == sorted[start].TieRun {
+				end++
+			}
+			run := make([]keyed, 0, end-start)
+			for k := start; k < end; k++ {
+				r, ok := lookupPoolRankOverride(inForce, sorted[k].Player.ID)
+				if !ok {
+					r = k + 1
+				}
+				run = append(run, keyed{standing: sorted[k], key: r, ranked: ok})
+			}
+			sort.SliceStable(run, func(a, b int) bool {
+				if run[a].key != run[b].key {
+					return run[a].key < run[b].key
+				}
+				return run[a].ranked && !run[b].ranked
+			})
+			for k, g := range run {
+				sorted[start+k] = g.standing
+			}
+			start = end
+		}
+	}
+}
+
+// applyJointThirdRanks is the ONE place a league's level group is given a
+// SHARED rank (the group's best 1-based position) on its table. Only 3rd can
+// be shared (operator rule, rounds rule-1 and rule-3); a group shares its place
+// in two cases:
+//
+//   - the kendo joint-3rd convention: with the joint-3rd rule enabled
+//     (state.Competition.EffectiveTwoThirdPlaces, bc-3rdp), a genuine
+//     Points-tie, or a run of one the bouts left level (tieBreakRuns), whose
+//     best finishing position is 3rd or lower, so both the
+//     standings table and the closing-ceremony podium show two (or more)
+//     equal 3rd places instead of relabeling the 4th finisher;
+//   - a run the bouts left level outside the band a tie is broken in (its best
+//     place is 4th or lower): no bout or lots are owed for it, so its members
+//     share their better place (4, 4): ties below the
+//     band can always share places.
+//
+// A tie at 1st or 2nd (or at 3rd with joint 3rd places off) never shares: a
+// tie-breaker with a winner orders it, or the lots do (a circle the bouts
+// cannot separate, or a tie-breaker drawn because both its sides are barred).
+//
+// It is a no-op for non-leagues. A run whose members hold a rank in force
+// (IsOverridden, poolRanksInForce) keeps its sequential ranks, since the
+// operator's explicit order decides that run; a different run of the same
+// group, and a different tie in the same pool, is still shared. Scoping to leagues keeps mixed and knockout seeding
+// strictly sequential -- those formats decide a single/joint 3rd with a bronze
+// match instead, via RequiresSingleThirdPlace; naginata leagues leave the
+// joint-3rd setting off and so keep a single 3rd.
+//
+// A shared place is shared only among the members the group's fought
+// tie-breaker bouts left level (tieBreakRuns): a team that beat both others
+// keeps its place, and the two it beat share the next one. A group no bout
+// separated is one run, so it shares as a whole.
 //
 // Mutates sorted in place. Callers pass a Points-sorted slice that already has
-// sequential ranks assigned, so detectPoolTies groups by adjacent Points
-// equality exactly as it does for the amber-tie highlight.
-func applyJointThirdRanks(comp *state.Competition, sorted []state.PlayerStanding, poolHasOverrides bool) {
-	if comp == nil || comp.Format != state.CompFormatLeague || !comp.EffectiveTwoThirdPlaces() || poolHasOverrides {
+// sequential ranks assigned and the Tied/IsOverridden stamps, so
+// detectPoolTies groups by adjacent Points equality exactly as it does for the
+// amber-tie highlight, and the pool's matches, which hold those bouts.
+func applyJointThirdRanks(comp *state.Competition, sorted []state.PlayerStanding, matches []state.MatchResult) {
+	if comp == nil || comp.Format != state.CompFormatLeague {
 		return
 	}
 	for _, positions := range detectPoolTies(sorted) {
-		minRank := positions[0] + 1
-		if minRank < 3 {
-			continue
-		}
-		for _, idx := range positions {
-			sorted[idx].Rank = minRank
+		group := standingsAt(sorted, positions)
+		at := 0
+		for _, run := range tieBreakRuns(group, matches, comp.IsTeam()) {
+			place := positions[at] + 1
+			// Both rules are judged on the run's own best place, never the
+			// group's: a pair the bouts left level at 4th and 5th shares 4th
+			// inside a group that started at 1st, and one level at 3rd and 4th
+			// shares 3rd where joint 3rd places are awarded.
+			// A run holding a rank in force keeps its sequential ranks: the
+			// operator's order decides it. A different run of the group is
+			// judged on its own.
+			held := slices.ContainsFunc(run, func(s state.PlayerStanding) bool { return s.IsOverridden })
+			shares := !held && (place > leagueTiebreakBand || (comp.EffectiveTwoThirdPlaces() && place >= 3))
+			for range run {
+				if shares {
+					sorted[positions[at]].Rank = place
+				}
+				at++
+			}
 		}
 	}
 }
@@ -2300,9 +2324,9 @@ func applyJointThirdRanks(comp *state.Competition, sorted []state.PlayerStanding
 //
 //   - League (comp.Format == state.CompFormatLeague), both team and individual:
 //     EMERGING-TIE trigger. Once ANY of the top-N competitors (N =
-//     effectiveTopN(comp), clamped to pool size) has completed ALL their own
+//     leagueTiebreakBand, clamped to pool size) has completed ALL their own
 //     regular fights, mark Tied=true on every tied group whose MinPosition <=
-//     effectiveTopN AND that is not covered by the two-joint-3rd-places
+//     leagueTiebreakBand AND that is not covered by the two-joint-3rd-places
 //     exemption (LeagueTwoThirdPlaces + MinPosition >= 3).
 //
 // matches contains only the regular+supplementary matches for this specific
@@ -2316,12 +2340,12 @@ func applyJointThirdRanks(comp *state.Competition, sorted []state.PlayerStanding
 // direct callers such as the unit tests in tied_standings_test.go, which
 // build a synthetic byKey from `sorted` itself via rosterIndexFrom).
 //
-// poolOverrides is the pool's recorded rank overrides (a chusen), nil when
-// none. Both branches mark only the groups tieSettled leaves open: Tied means
-// a tie still to be broken, which is what the amber row tells the operator,
-// so a group a chusen or its supplementary bouts already ordered is not one
-// even though its Points stay equal.
-func markTiedStandings(comp *state.Competition, sorted []state.PlayerStanding, matches []state.MatchResult, rosterIndex map[string]*state.PlayerStanding, poolOverrides map[string]int) {
+// A chusen is read off the rows' IsOverridden (the ranks in force,
+// poolRanksInForce). Both branches mark only the runs openTieRuns leaves open:
+// Tied means a tie still to be broken, which is what the amber row tells the
+// operator, so a run a chusen or its supplementary bouts already ordered is not
+// one even though its Points stay equal.
+func markTiedStandings(comp *state.Competition, sorted []state.PlayerStanding, matches []state.MatchResult, rosterIndex map[string]*state.PlayerStanding) {
 	if len(sorted) == 0 {
 		return
 	}
@@ -2335,15 +2359,13 @@ func markTiedStandings(comp *state.Competition, sorted []state.PlayerStanding, m
 	}
 
 	isLeague := comp != nil && comp.Format == state.CompFormatLeague
-	isTeam := comp != nil && comp.TeamSize > 0
+	isTeam := comp.IsTeam()
 
 	// The supplementary rows are read here, from the full pool list, before
 	// the branches see only the regular matches.
 	var open [][]int
 	for _, positions := range detectPoolTies(sorted) {
-		if !tieSettled(standingsAt(sorted, positions), matches, isTeam, poolOverrides) {
-			open = append(open, positions)
-		}
+		open = append(open, openTieRuns(positions, standingsAt(sorted, positions), matches, isTeam)...)
 	}
 
 	if isLeague {
@@ -2410,7 +2432,7 @@ func markTiedStandingsPools(sorted []state.PlayerStanding, regularMatches []stat
 //     is id-only), exactly as it contributes nothing to computeStandingsFrom's
 //     own tally, so the two never disagree about who a match side means.
 func markTiedStandingsLeague(comp *state.Competition, sorted []state.PlayerStanding, regularMatches []state.MatchResult, rosterIndex map[string]*state.PlayerStanding, open [][]int) {
-	topN := min(effectiveTopN(comp), len(sorted))
+	topN := min(leagueTiebreakBand, len(sorted))
 
 	// statusFor is keyed by helper.CompetitorKey (id-preferred, name+dojo
 	// fallback -- see the fix-1 note above), not by a locally rebuilt

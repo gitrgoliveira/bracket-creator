@@ -199,6 +199,26 @@ func (e *DownstreamKnockoutPlayedError) Is(target error) bool {
 	return target == ErrDownstreamKnockoutPlayed
 }
 
+// LotsReplacedError warns that a write would replace lots the organiser
+// entered: it gives a drawn tie-breaker bout a winner, or reopens it, while the
+// recorded lots rule its draw (drawnSupplementaryRuledByChusen). The lots are
+// drawn outside the app and the app never changes them on its own, so the
+// organiser is told which place they were entered for and in what order, and
+// the write lands once it carries ForceOptions.ConfirmLots; the bout's result
+// then decides the place. Handlers answer HTTP 409 lots_replaced, and the SPA
+// shows Msg as the confirm.
+type LotsReplacedError struct {
+	MatchID string
+	// Msg is the operator sentence, the confirm's own text.
+	Msg string
+}
+
+func (e *LotsReplacedError) Error() string { return e.Msg }
+
+// Unwrap lets a door that has no confirm of its own answer it as the 400
+// validation refusal it was before the warning, never a 500.
+func (e *LotsReplacedError) Unwrap() error { return validationErrorf("%s", e.Msg) }
+
 // ErrDownstreamKnockoutRunning is the sentinel matched by errors.Is for
 // DownstreamKnockoutRunningError. Handlers should return HTTP 409.
 var ErrDownstreamKnockoutRunning = errors.New("downstream knockout match is being fought")

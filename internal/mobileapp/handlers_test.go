@@ -63,7 +63,7 @@ func setupTestRouterWithHub(t testing.TB, hub *Hub) (*gin.Engine, *state.Store, 
 	RegisterParticipantHandlers(admin, store, eng, hub)
 	RegisterMatchHandlers(admin, eng, store, store, hub, NewFileVerifier(store), store)
 	RegisterDecisionHandlers(admin, eng, store, store, hub)
-	RegisterEligibilityHandlers(admin, store, hub)
+	RegisterEligibilityHandlers(admin, store, &stubEligibilityEngine{}, hub)
 	RegisterLineupHandlers(admin, store, store, store, stubBroadcaster{}, store, NewFileVerifier(store))
 	RegisterSwissHandlers(admin, store, eng, hub)
 

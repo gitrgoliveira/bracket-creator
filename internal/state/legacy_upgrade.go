@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"maps"
 	"os"
+	"regexp"
 	"slices"
 	"strings"
 
@@ -323,6 +324,10 @@ func (s *Store) EnsureLegacyUpgraded(compID string) {
 	if err := s.upgradeCompetitionFormatLocked(compID); err != nil {
 		log.Printf("state: legacy competition-format upgrade for %s: %v", compID, err)
 	}
+	// The retired league tie-break keys, independent of the roster too.
+	if err := s.upgradeRetiredLeagueTiebreakKeysLocked(compID); err != nil {
+		log.Printf("state: legacy league tie-break keys upgrade for %s: %v", compID, err)
+	}
 	// One roster load shared by every step below: built
 	// LAZILY on first actual use, and loaded/indexed at most ONCE rather
 	// than once per step. The roster-text step loads it for every competition
@@ -532,6 +537,48 @@ func (s *Store) upgradeCompetitionFormatLocked(compID string) error {
 		// lock, or fail ValidateCompetitionID outright. Skip; the in-memory
 		// fold keeps serving this competition correctly regardless.
 		log.Printf("state: legacy competition-format upgrade for %s: config.md id %q does not match its directory; left unconverted", compID, comp.ID)
+		return nil
+	}
+	return s.saveCompetitionLocked(comp, s.directWrite)
+}
+
+// retiredLeagueTiebreakKey finds a config.md front-matter line naming one of
+// the two league tie-break settings retired by the tie rule (only 3rd can be
+// shared): league_tiebreak_finalized (Accept shared ranks, removed with its
+// Undo) and league_tiebreak_top_n (the Break ties for top setting, removed:
+// every league breaks its ties at 1st to 3rd). Both were written by every
+// release from v0.17.0.
+var retiredLeagueTiebreakKey = regexp.MustCompile(`(?m)^league_tiebreak_(finalized|top_n)[ \t]*:`)
+
+// upgradeRetiredLeagueTiebreakKeysLocked drops the retired league tie-break
+// keys (retiredLeagueTiebreakKey) from compID's config.md and changes nothing
+// else: the competition is loaded and saved again through the struct, which no
+// longer holds them, exactly as upgradeCompetitionFormatLocked converges a
+// retired format. A file holding neither key is never written, so a second load
+// writes nothing. Nothing is recomputed at upgrade: a finished league whose
+// shared ranks were accepted at 1st or 2nd keeps its status until its next
+// result, withdrawal, reinstatement or lots change, which reopens it through
+// the existing reconciler; nothing is changed at upgrade. Caller holds the
+// per-competition lock.
+func (s *Store) upgradeRetiredLeagueTiebreakKeysLocked(compID string) error {
+	raw, err := s.root.readFile(s.compPath(compID, "config.md"))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	if !retiredLeagueTiebreakKey.Match(raw) {
+		return nil
+	}
+	comp, err := s.loadCompetitionLocked(compID)
+	if err != nil || comp == nil {
+		return err
+	}
+	if comp.ID != compID {
+		// upgradeCompetitionFormatLocked's guard: never write another
+		// directory's config.
+		log.Printf("state: legacy league tie-break keys upgrade for %s: config.md id %q does not match its directory; left unconverted", compID, comp.ID)
 		return nil
 	}
 	return s.saveCompetitionLocked(comp, s.directWrite)

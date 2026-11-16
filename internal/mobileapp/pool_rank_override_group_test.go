@@ -41,7 +41,7 @@ func poolARanks(t *testing.T, store *state.Store, compID string) map[string]int 
 func TestPoolRankOverrideGroup_RecordsTheWholeOrder(t *testing.T) {
 	r, store, _, _, _ := setupTestRouter(t)
 	compID := "rank-group-ok"
-	seedMixedCompWithSeatedKnockout(t, store, compID, state.MatchStatusScheduled)
+	seedTiedTeamCompWithSeatedKnockout(t, store, compID, state.MatchStatusScheduled)
 
 	w := sendRankGroup(t, r, compID, false, rankEntry("a2-id", 1), rankEntry("a1-id", 2))
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
@@ -60,7 +60,7 @@ func TestPoolRankOverrideGroup_RefusesLikeTheSingleForm(t *testing.T) {
 	t.Run("played", func(t *testing.T) {
 		// The same order through both forms: A2 1st (A1 2nd).
 		rs, singleStore, _, _, _ := setupTestRouter(t)
-		seedMixedCompWithSeatedKnockout(t, singleStore, "rank-single-played", state.MatchStatusCompleted)
+		seedTiedTeamCompWithSeatedKnockout(t, singleStore, "rank-single-played", state.MatchStatusCompleted)
 		single := sendJSON(t, rs, http.MethodPut, "/api/competitions/rank-single-played/pools/Pool A/override-rank", map[string]any{
 			"playerId": "a2-id", "rank": 1,
 		})
@@ -68,12 +68,12 @@ func TestPoolRankOverrideGroup_RefusesLikeTheSingleForm(t *testing.T) {
 
 		r, store, _, _, _ := setupTestRouter(t)
 		compID := "rank-group-played"
-		seedMixedCompWithSeatedKnockout(t, store, compID, state.MatchStatusCompleted)
+		seedTiedTeamCompWithSeatedKnockout(t, store, compID, state.MatchStatusCompleted)
 		w := sendRankGroup(t, r, compID, false, rankEntry("a2-id", 1), rankEntry("a1-id", 2))
 		require.Equal(t, http.StatusConflict, w.Code, w.Body.String())
 		assert.JSONEq(t, single.Body.String(), w.Body.String(), "the group form refuses with the single form's body")
 		assert.Contains(t, w.Body.String(), `"error":"downstream_knockout_played"`)
-		assert.Empty(t, poolARanks(t, store, compID), "the refusal takes back every rank of the group")
+		assert.Equal(t, lotsSoFar, poolARanks(t, store, compID), "the refusal takes back every rank of the group")
 
 		w = sendRankGroup(t, r, compID, true, rankEntry("a2-id", 1), rankEntry("a1-id", 2))
 		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
@@ -96,11 +96,11 @@ func TestPoolRankOverrideGroup_RefusesLikeTheSingleForm(t *testing.T) {
 		for _, force := range []bool{false, true} {
 			r, store, _, _, _ := setupTestRouter(t)
 			compID := fmt.Sprintf("rank-group-running-%v", force)
-			seedMixedCompWithSeatedKnockout(t, store, compID, state.MatchStatusRunning)
+			seedTiedTeamCompWithSeatedKnockout(t, store, compID, state.MatchStatusRunning)
 			w := sendRankGroup(t, r, compID, force, rankEntry("a2-id", 1), rankEntry("a1-id", 2))
 			require.Equal(t, http.StatusConflict, w.Code, w.Body.String())
 			assert.Contains(t, w.Body.String(), `"error":"downstream_knockout_running"`, "force=%v", force)
-			assert.Empty(t, poolARanks(t, store, compID), "force=%v: nothing recorded", force)
+			assert.Equal(t, lotsSoFar, poolARanks(t, store, compID), "force=%v: nothing recorded", force)
 		}
 	})
 }
@@ -132,7 +132,7 @@ func TestPoolRankOverrideGroup_Validation(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			r, store, _, _, _ := setupTestRouter(t)
 			compID := "rank-group-invalid"
-			seedMixedCompWithSeatedKnockout(t, store, compID, state.MatchStatusScheduled)
+			seedTiedTeamCompWithSeatedKnockout(t, store, compID, state.MatchStatusScheduled)
 			w := sendJSON(t, r, http.MethodPut, "/api/competitions/"+compID+"/pools/Pool A/override-rank", tc.body)
 			require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
 			var body struct {
@@ -140,7 +140,7 @@ func TestPoolRankOverrideGroup_Validation(t *testing.T) {
 			}
 			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
 			assert.Equal(t, tc.want, body.Error)
-			assert.Empty(t, poolARanks(t, store, compID), "a refused group records nothing")
+			assert.Equal(t, lotsSoFar, poolARanks(t, store, compID), "a refused group records nothing")
 		})
 	}
 }

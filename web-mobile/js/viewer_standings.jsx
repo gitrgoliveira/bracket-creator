@@ -99,6 +99,23 @@ export function matchWinnerName(m) {
   return typeof m.winner === "string" ? m.winner : (m.winner && m.winner.name) || "";
 }
 
+// poolMatchesSignature is the ONE owner of "did the pool results change", the
+// key a surface refetches its standings (or the tie-break and lots answers
+// that read them) on: LeagueStandingsViewer below and admin_pools.jsx both use
+// it. Keyed on what a result write changes, not on the winner alone: a
+// correction that keeps an encounter's winner still moves its IV/PW, ippons,
+// flags or decision, and so the table. A match not finished counts for its id
+// and status only, so a live score in progress does not refetch the table on
+// every mark (the standings count finished matches only).
+export function poolMatchesSignature(poolMatches) {
+  return (poolMatches || []).map(m => {
+    const head = `${m.id}:${m.status}:${matchWinnerName(m)}`;
+    if (m.status !== "completed") return head;
+    const subs = (m.subResults || []).map(s => s && [matchWinnerName(s), s.ipponsA, s.ipponsB, s.hansokuA, s.hansokuB, s.decision]);
+    return `${head}:${JSON.stringify([m.ipponsA, m.ipponsB, m.hansokuA, m.hansokuB, m.decision, m.flagsA, m.flagsB, subs])}`;
+  }).join("|");
+}
+
 // Module-private thead shared by LeagueStandingsViewer and PoolsViewer.
 // The three-way branch (isEngi / isTeam / individual) is byte-identical in
 // both consumers; extracted here to keep them in sync automatically.
@@ -248,18 +265,28 @@ export function LeagueStandingsViewer({ competition, poolMatches, tweaks, onMatc
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  // Signature of id:status:winner per match, not just the array length: an
-  // SSE-driven bout completion mutates status/winner in place without adding
-  // or removing a match, so a length-only dependency would miss it and leave
-  // standings stale until the match count itself changed. Same pattern as
-  // admin_pools.jsx's poolMatchesSig.
-  const poolMatchesSig = useMemo(
-    () => (poolMatches || []).map(m => `${m.id}:${m.status}:${matchWinnerName(m)}`).join("|"),
-    [poolMatches]
-  );
+  // The results' signature (poolMatchesSignature), not just the array length:
+  // an SSE-driven completion or correction changes a match in place without
+  // adding or removing one, so a length-only dependency would leave the
+  // standings stale.
+  const poolMatchesSig = useMemo(() => poolMatchesSignature(poolMatches), [poolMatches]);
+
+  // A rank written without a match write (the lots, and a change to them) is
+  // announced as tournament_updated and changes no prop this viewer gets: a finished league keeps its status and matches while the lots move
+  // its order. So the push itself is a reason to fetch again.
+  const [ranksTick, setRanksTick] = useState(0);
+  React.useEffect(() => {
+    if (!window.API || typeof window.API.subscribeToEvents !== "function") return undefined;
+    return window.API.subscribeToEvents((event) => {
+      if (event && event.type === "tournament_updated") setRanksTick(t => t + 1);
+    });
+  }, []);
 
   // Re-fetch whenever the match signature changes (SSE-driven) so the
-  // standings table reflects the latest state after each scored bout.
+  // standings table reflects the latest state after each scored bout, and
+  // whenever the competition's status changes: a league that finishes or goes
+  // back to match play changes the ranks the table reads (a level group below
+  // the band ties are broken in shares its best place) without a match write.
   React.useEffect(() => {
     let cancelled = false;
     setLoading(true);
@@ -277,7 +304,7 @@ export function LeagueStandingsViewer({ competition, poolMatches, tweaks, onMatc
         setLoading(false);
       });
     return () => { cancelled = true; };
-  }, [c.id, poolMatchesSig]);
+  }, [c.id, c.status, poolMatchesSig, ranksTick]);
 
   const isTeam = competition && (competition.kind === "team" || competition.teamSize > 0);
   const isEngi = !!(competition && competition.engi);
@@ -307,6 +334,11 @@ export function LeagueStandingsViewer({ competition, poolMatches, tweaks, onMatc
 
   const colSpan = isEngi ? 4 : isTeam ? 10 : 7;
 
+  // A league tie still waiting for its tie-breaker shows the level rows sharing
+  // the group's best place, on the amber tied row. The server Rank is untouched
+  // (it breaks the level rows by draw order), so Awards and exports read it as is.
+  const leagueTies = tiedPlaces(standings, 0);
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       {isCompleted && standings.length > 0 && <WinnerBadge name={winner.player?.name || ""} />}
@@ -325,10 +357,15 @@ export function LeagueStandingsViewer({ competition, poolMatches, tweaks, onMatc
           </thead>
           <tbody>
             {standings.length > 0 ? standings.map((s, i) => {
-              const rank = s.rank || i + 1;
+              const tie = tiedPlaceOf(leagueTies, s.player);
+              const rank = tie ? tie.place : s.rank || i + 1;
               const isDHWinner = isTeam && dhWinnerNames.has(s.player?.name || "");
+              const rowClasses = [
+                isPlayerWatched(s.player, highlightPlayers) ? "pool__row--me" : "",
+                tie ? "pool__row--tied" : "",
+              ].filter(Boolean).join(" ");
               return (
-                <tr key={s.player?.id || s.player?.name || i} className={isPlayerWatched(s.player, highlightPlayers) ? "pool__row--me" : undefined}>
+                <tr key={s.player?.id || s.player?.name || i} className={rowClasses || undefined}>
                   <td className={`pool-standings__draw-pos${s.isOverridden ? " pool-standings__draw-pos--override" : ""}`}>
                     {rank}{s.isOverridden ? "*" : ""}
                   </td>
@@ -380,7 +417,7 @@ export function LeagueStandingsViewer({ competition, poolMatches, tweaks, onMatc
               {(poolMatches || []).map((m, idx) => {
                 if (isTeam) {
                   const isRepBout = isSupplementaryBout(m.id || "");
-                  const enriched = { ...m, phase: "pool", poolName: m.poolName || "", phaseName: m.poolName || "", compFormat: competition.format, compId: competition.id, compName: competition.name, compKind: isRepBout ? "" : competition.kind, teamSize: isRepBout ? 0 : competition.teamSize, compEngi: isRepBout ? false : isEngi, teamMatchType: isRepBout ? "" : compTMT };
+                  const enriched = { ...m, phase: "pool", poolName: m.poolName || "", phaseName: m.poolName || "", compFormat: competition.format, compId: competition.id, compName: competition.name, compKind: isRepBout ? "" : competition.kind, teamSize: isRepBout ? 0 : competition.teamSize, compEngi: isEngi, teamMatchType: isRepBout ? "" : compTMT };
                   return (
                     <React.Fragment key={m.id}>
                       <PoolNumberedMatchRow
@@ -725,30 +762,39 @@ PoolNumberedMatchRow.displayName = "PoolNumberedMatchRow";
 // place leaves none of them marked until its bout is scored.
 // `points` is the server's packed ranking key (engine individual/teamStandingPoints),
 // equal exactly when two rows are level on every criterion, so rows that share
-// it among the tied ones form one group. Pool standings only: a league has no
-// advancing mark to withhold.
+// it among the tied ones form one group. The server marks a tie per run
+// (`tieRun`), and two open runs can share one `points` value, so a group is
+// the points plus its run. A league passes 0 qualifiers: it has no advancing
+// mark to withhold, so it reads the shared place only.
 export function tiedPlaces(poolStandings, qualifiers) {
+  const groupKey = (s) => `${s.points}|${s.tieRun || 0}`;
   const groups = new Map();
   (poolStandings || []).forEach((s, i) => {
     if (!s || !s.tied) return;
     const rank = s.rank || i + 1;
-    const g = groups.get(s.points);
+    const g = groups.get(groupKey(s));
     if (g) {
       g.place = Math.min(g.place, rank);
       g.last = Math.max(g.last, rank);
     } else {
-      groups.set(s.points, { place: rank, last: rank });
+      groups.set(groupKey(s), { place: rank, last: rank });
     }
   });
   const byRow = new Map();
   (poolStandings || []).forEach((s) => {
     if (!s || !s.tied) return;
-    const g = groups.get(s.points);
-    const key = s.player.id || `${s.player.name}||${s.player.dojo || ""}`;
+    const g = groups.get(groupKey(s));
+    if (!s.player || !s.player.id) return;
     const boutOwed = g.place <= qualifiers;
-    byRow.set(key, { place: g.place, boutOwed, decidesAdvancement: boutOwed && g.last > qualifiers });
+    byRow.set(s.player.id, { place: g.place, boutOwed, decidesAdvancement: boutOwed && g.last > qualifiers });
   });
   return byRow;
+}
+
+// The tie a competitor's row holds in tiedPlaces' answer, or undefined. The one
+// reader of its key, which is the participant id and nothing else.
+export function tiedPlaceOf(ties, player) {
+  return player && player.id ? ties.get(player.id) : undefined;
 }
 
 // The tooltip on a tied row's badge. It promises a deciding bout only where the
@@ -902,7 +948,7 @@ export function PoolsViewer({ pools, standings, poolMatches, tweaks, competition
                   const lookup = rankByPlayerKey.get(p.id || `${p.name}||${p.dojo || ""}`);
                   const s = lookup ? lookup.standing : null;
                   const rank = lookup ? lookup.rank : null;
-                  const tie = tiedByRow.get(p.id || `${p.name}||${p.dojo || ""}`);
+                  const tie = tiedPlaceOf(tiedByRow, p);
                   const isAdvancing = !isLeague && poolHasResults && rank !== null && rank <= poolQualifiers
                     && !(tie && tie.decidesAdvancement);
 
@@ -979,7 +1025,7 @@ export function PoolsViewer({ pools, standings, poolMatches, tweaks, competition
                       // bout even in a team comp, so force compKind/teamSize to route
                       // it to the individual editor (matches enrichPoolMatchWithComp).
                       const isRepBout = isSupplementaryBout(m.id || "");
-                      const enriched = { ...m, phase: "pool", poolName: pool.poolName, phaseName: pool.poolName, compFormat: competition.format, compId: competition.id, compName: competition.name, compKind: isRepBout ? "" : competition.kind, teamSize: isRepBout ? 0 : competition.teamSize, compEngi: isRepBout ? false : isEngi, teamMatchType: isRepBout ? "" : compTMT };
+                      const enriched = { ...m, phase: "pool", poolName: pool.poolName, phaseName: pool.poolName, compFormat: competition.format, compId: competition.id, compName: competition.name, compKind: isRepBout ? "" : competition.kind, teamSize: isRepBout ? 0 : competition.teamSize, compEngi: isEngi, teamMatchType: isRepBout ? "" : compTMT };
                       return (
                         <React.Fragment key={m.id}>
                           <PoolNumberedMatchRow

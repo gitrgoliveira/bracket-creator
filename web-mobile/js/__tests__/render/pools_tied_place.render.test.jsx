@@ -1,7 +1,7 @@
 import React from 'react';
 import { render } from '@testing-library/react';
 import { describe, it, expect, beforeAll } from 'vitest';
-import { PoolsViewer, tiedPlaces } from '../../viewer_standings.jsx';
+import { PoolsViewer, tiedPlaces, tiedPlaceOf } from '../../viewer_standings.jsx';
 
 // A pool whose second place is level on EVERY criterion between two
 // competitors, with the tie-break bout still to be fought. The admin Pools tab
@@ -200,6 +200,14 @@ describe('tiedPlaces', () => {
     expect(m.has('a')).toBe(false);
   });
 
+  it('is read through tiedPlaceOf by the participant id alone, never by name and dojo', () => {
+    const m = tiedPlaces(rows(winner, row(B, 2, { tied: true }), row(C, 3, { tied: true })), 2);
+    expect(tiedPlaceOf(m, B).place).toBe(2);
+    expect(tiedPlaceOf(m, A)).toBeUndefined();
+    expect(tiedPlaceOf(m, { name: B.name, dojo: B.dojo })).toBeUndefined();
+    expect(tiedPlaceOf(m, undefined)).toBeUndefined();
+  });
+
   it('keeps the advancing mark for a tie that sits wholly inside the qualifying places', () => {
     const level = { points: 5, tied: true };
     const m = tiedPlaces(rows(row(A, 1, level), row(B, 2, level), row(C, 3, { points: 1 })), 2);
@@ -216,6 +224,17 @@ describe('tiedPlaces', () => {
   it('owes no bout for a tie wholly below the qualifying places', () => {
     const m = tiedPlaces(rows(winner, row(B, 2, { points: 6 }), row(C, 3, { points: 4 }), row(D, 4, { tied: true }), row(player('e', 'Eri'), 5, { tied: true })), 3);
     expect(m.get('d')).toEqual({ place: 4, boutOwed: false, decidesAdvancement: false });
+  });
+
+  it('keeps two open runs that share one points value apart (a league tie run)', () => {
+    const m = tiedPlaces(rows(
+      row(A, 1, { points: 4, tied: true, tieRun: 1 }), row(B, 2, { points: 4, tied: true, tieRun: 1 }),
+      row(C, 3, { points: 4, tied: true, tieRun: 2 }), row(D, 4, { points: 4, tied: true, tieRun: 2 }),
+    ), 0);
+    expect(m.get('a').place).toBe(1);
+    expect(m.get('b').place).toBe(1);
+    expect(m.get('c').place).toBe(3);
+    expect(m.get('d').place).toBe(3);
   });
 
   it('keeps two separate tied groups apart', () => {

@@ -4,7 +4,7 @@
 import { TermV, competitionKindLabel, poolLabel, compMatchesForCompetition } from './viewer_utils.jsx';
 import { isFollowedPlayer, isPlayerWatched, entryKey, dojoKey, resolveWatchedPlayers, findPrimaryEntry, buildPrimaryNextMatch, buildRoster, useWatchlist, buildWatchedSets, matchInvolvesWatchedSet } from './viewer_watchlist_core.jsx';
 import { MatchDetailCard, VSchedItem, MatchViewerModal, useLiveMatch, bracketMatchIn } from './viewer_match.jsx';
-import { WinnerBadge, SwissStandingsViewer, PoolsViewer, LeagueStandingsViewer, DHBadge, matchWinnerName } from './viewer_standings.jsx';
+import { WinnerBadge, SwissStandingsViewer, PoolsViewer, LeagueStandingsViewer, DHBadge, matchWinnerName, tiedPlaces, tiedPlaceOf } from './viewer_standings.jsx';
 import { AwardsView } from './viewer_awards.jsx';
 import { usePrimaryWatch } from './viewer_schedule.jsx';
 import { poolNameOf, isPoolDaihyosenBout, teamMatchTypeFor } from './pool_ids.jsx';
@@ -509,11 +509,14 @@ export function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, runningM
   const isEngi = !!(c && c.engi);
   const leaguePoolName = isLeague && pools && pools[0] ? pools[0].poolName : null;
   const leagueStandings = leaguePoolName && standings ? (standings[leaguePoolName] || []) : [];
-  const allMatchesComplete = isLeague && (() => {
-    const all = poolMatches || [];
-    return all.length > 0 && all.every(m => m.status === "completed");
-  })();
-  const leagueWinner = allMatchesComplete && leagueStandings.length > 0 ? leagueStandings[0] : null;
+  // A league is decided when the competition is completed, never merely when
+  // every match is scored: a tie at a podium place can still wait for the
+  // organiser's tie-breaker or decision then, and naming a winner over it
+  // would be wrong.
+  const leagueFinished = isLeague && c.status === "completed";
+  // Level rows of a tie still waiting for its tie-breaker share the best place.
+  const leagueTies = tiedPlaces(leagueStandings, 0);
+  const leagueWinner = leagueFinished && leagueStandings.length > 0 ? leagueStandings[0] : null;
   // Teams that won a completed daihyosen play-off in the league. Mirrors the
   // full standings (PoolsViewer): the play-off decides order within the tied
   // group only, so the badge is the sole signal that a DH settled otherwise
@@ -609,7 +612,7 @@ export function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, runningM
         <div className="pool pool--overview-summary" data-testid="league-overview-standings">
           {leagueWinner && <WinnerBadge name={leagueWinner.player?.name || ""} testId="league-overview-winner" marginBottom={12} />}
           <div className="pool__head">
-            <div className="pool__name">{allMatchesComplete ? "Final standings" : "Standings"}</div>
+            <div className="pool__name">{leagueFinished ? "Final standings" : "Standings"}</div>
             {poolMatches && (
               <div className="pool__match-count">
                 {poolMatches.filter(m => m.status === "completed").length}/{poolMatches.length} matches
@@ -629,12 +632,13 @@ export function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, runningM
             <tbody>
               {leagueStandings.slice(0, 5).map((s, i) => {
                 const [sMember1, sMember2] = isEngi && window.engiPairParts ? window.engiPairParts(s.player?.name || "") : [s.player?.name || "", ""];
+                const tie = tiedPlaceOf(leagueTies, s.player);
                 return (
-                <tr key={s.player?.id || s.player?.name || i} className={s.tied ? "pool__row--tied" : undefined}>
+                <tr key={s.player?.id || s.player?.name || i} className={tie ? "pool__row--tied" : undefined}>
                   {/* Rank-ordered summary: "#" is the authoritative standing rank
                       (s.rank), not the row index: DRY with the full standings and
                       the backend tiebreak/override logic. */}
-                  <td className={`pool-standings__draw-pos${s.isOverridden ? " pool-standings__draw-pos--override" : ""}`}>{s.rank || i + 1}{s.isOverridden ? "*" : ""}</td>
+                  <td className={`pool-standings__draw-pos${s.isOverridden ? " pool-standings__draw-pos--override" : ""}`}>{tie ? tie.place : s.rank || i + 1}{s.isOverridden ? "*" : ""}</td>
                   <td>
                     <div className="pool__player-name">
                       <NumberedName name={sMember1} number={s.player?.number} />

@@ -100,33 +100,81 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 		writeID = firstForceOptions(opts).WriteID
 	}
 	before := e.storedStatus(tx, compID, matchID)
-	status, err := e.recordMatchResultWithIneligibilityTx(tx, compID, matchID, result, opts...)
+	// Whether a league had finished before this write, for the reconcile
+	// below (nil unless the write can move a finished league).
+	comp, err := tx.LoadCompetition(compID)
+	if err != nil {
+		return nil, fmt.Errorf("RecordMatchResultWithIneligibilityTx: load competition %s: %w", compID, err)
+	}
+	league := leagueStateBeforeWrite(comp, matchID)
+	status, err := e.recordMatchResultWithIneligibilityTx(tx, compID, matchID, comp, result, opts...)
 	// A kachinuki match keeps the lineups it started with, and bout 1 is
 	// brought to what its lineup says (operator decision K1 (c),
 	// kachinuki_opener.go), only once the write stands.
 	if err == nil {
 		result.LineupWarning, err = e.afterMatchWrite(tx, compID, matchID, before, door, writeID, stamp)
 	}
+	if err == nil {
+		err = e.reconcileLeagueAfterWrite(tx, compID, league)
+	}
 	return status, err
 }
 
+// errTiebreakNeedsWinnerSentence is the operator sentence a league
+// tie-breaker saved with no winner is refused with.
+const errTiebreakNeedsWinnerSentence = "A tie-breaker needs a winner: continue with encho, then decide by hantei."
+
+// ErrTiebreakNeedsWinner is the cause of the ValidationError (400) a
+// completed write with no winner on a league's tie-breaker bout is refused
+// with (refuseDrawnLeagueTiebreak), so a caller can tell it from other client
+// errors with errors.Is.
+var ErrTiebreakNeedsWinner = errors.New("tiebreak_needs_winner")
+
+// refuseDrawnLeagueTiebreak is the ONE check that a league's tie-breaker bout
+// (an ippon-shobu "-TB-" or a representative "-DH-" bout,
+// state.IsPoolSupplementaryMatchID) is finished with a winner (a league
+// tie-breaker must have a winner, and lots are the operator's rare exception,
+// never the app's): the pool twin of
+// validateBracketCompletion. It runs before the write, so a refused write
+// stages nothing on any door: /score, quick-score, bulk-score, the score-event
+// replay, /decision and its both-sides-barred hikiwake, all of which reach
+// RecordMatchResultWithIneligibilityTx. A pools + knockout competition's pool
+// tie-breaker may still be saved drawn (decided apart, see the plan's note on
+// mixed pools), and so may a tie-breaker between two barred competitors (see
+// the decision-door case below).
+func refuseDrawnLeagueTiebreak(comp *state.Competition, matchID string, result *state.MatchResult) error {
+	if comp == nil || comp.Format != state.CompFormatLeague || !state.IsPoolSupplementaryMatchID(matchID) {
+		return nil
+	}
+	if result.Status != state.MatchStatusCompleted || result.Winner != "" || result.WinnerID != "" {
+		return nil
+	}
+	if result.WriteDoor == DoorDecision && result.Decision == string(domain.DecisionHikiwake) {
+		// The both-sides-barred hikiwake (handleBothSidesBarredHikiwake, the
+		// one door a decision reaches the engine as a hikiwake by): nobody can
+		// fight the bout, so encho and hantei are no remedy. The draw is
+		// recorded as a draw nobody fought, for a team's representative bout
+		// and an individual's ippon-shobu bout alike. Like any drawn
+		// tie-breaker it settles nothing (drawnTiebreakOfBarredSides): the
+		// place it was for, which cannot be shared, goes to the bout fought
+		// again (the reopen) or to the lots the organiser enters on the
+		// chusen panel (barredDrawRuns), their choice.
+		return nil
+	}
+	return wrapValidationErrorf(ErrTiebreakNeedsWinner, "%s", errTiebreakNeedsWinnerSentence)
+}
+
 // recordMatchResultWithIneligibilityTx is RecordMatchResultWithIneligibilityTx
-// before bout 1 of a kachinuki encounter is seated.
-func (e *Engine) recordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, matchID string, result *state.MatchResult, opts ...ForceOptions) (*domain.CompetitorStatus, error) {
+// before bout 1 of a kachinuki encounter is seated, on the competition its
+// caller loaded.
+func (e *Engine) recordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, matchID string, comp *state.Competition, result *state.MatchResult, opts ...ForceOptions) (*domain.CompetitorStatus, error) {
 	fo := firstForceOptions(opts)
 	result.ID = matchID
 	if result.WriteID == "" && fo.WriteID != "" {
 		result.WriteID, result.Basis, result.WriteSession = fo.WriteID, fo.Basis, fo.Session
 	}
 
-	// Engi dispatch seam (tx-aware): a flag-scored competition records via the
-	// engi slice through the SAME tx so the write stays inside the caller's
-	// single per-comp lock acquire. Engi has no eligibility concept, so the
-	// status return is nil.
-	comp, loadErr := tx.LoadCompetition(compID)
-	if loadErr != nil {
-		return nil, fmt.Errorf("RecordMatchResultWithIneligibilityTx: load competition %s: %w", compID, loadErr)
-	}
+	// comp is the competition the caller loaded in this same transaction.
 	// An exact resend of a finish already recorded (a queued write whose
 	// first send landed but whose answer was lost) answers as recorded and
 	// writes nothing, before anything else judges it (bc-xrpl).
@@ -211,6 +259,12 @@ func (e *Engine) recordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 					}
 				}
 			}
+			// Flags that give a bout the lots ruled a winner replace the lots, so
+			// the organiser is warned first, as for a fought bout (below). After
+			// the hold, so a stale replay is never misreported.
+			if err := e.refuseOverRecordedLots(tx, compID, engiPrior, fo.ConfirmLots); err != nil {
+				return nil, err
+			}
 		}
 		if comp.Format != state.CompFormatMixed || !IsPoolMatchID(matchID) {
 			engiPrior = nil
@@ -258,7 +312,7 @@ func (e *Engine) recordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 	// the write's error: every guard below (the kachinuki merge, K3, the
 	// rollback, the pool requalification refusal) reads a nil prior as
 	// "nothing stored", which would let the write through unguarded.
-	prior, err := e.lookupExistingResult(tx, compID, matchID)
+	prior, inPool, err := e.lookupExistingResultIn(tx, compID, matchID)
 	if err != nil {
 		return nil, err
 	}
@@ -278,6 +332,22 @@ func (e *Engine) recordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 		if err := shapeScoreWrite(comp, prior, result, matchID, lines); err != nil {
 			return nil, err
 		}
+	}
+	refusal := refuseDrawnLeagueTiebreak(comp, matchID, result)
+	// A write that would take a drawn bout out of its draw (a fight, a decision,
+	// a reopen by score) while the lots rule it replaces the lots, which the
+	// organiser entered: it is warned about first (refuseOverRecordedLots). Only a
+	// write that changes the result group can do that: a client's running write
+	// over the finished bout has the group removed by the merge
+	// (effectiveChangedGroups), so it never touches the drawn result or the lots.
+	if refusal == nil && prior != nil && slices.Contains(effectiveChangedGroups(prior, result, inPool), state.GroupResult) &&
+		(result.Status != state.MatchStatusCompleted || result.Winner != "" || result.WinnerID != "") {
+		refusal = e.refuseOverRecordedLots(tx, compID, prior, fo.ConfirmLots)
+	}
+	// A write the merge holds whole lands nothing, so neither refusal applies to
+	// it: it goes on to the merge, which keeps it in the match's history.
+	if refusal != nil && !writeHeldWhole(prior, result, comp, inPool, lines) {
+		return nil, refusal
 	}
 
 	// K3 ahead of the write: a withdrawal whose loser a DIFFERENT match has
@@ -1503,16 +1573,12 @@ func mayBeExactScoreReplay(stored, incoming *state.MatchResult) bool {
 		incoming.ModifiedAt == stored.GroupStamp(state.GroupResult)
 }
 
-// exactScoreReplayProbe is ExactScoreReplay's judgement, handing back the
-// write as the merge would land it (a copy: incoming is not changed), its
-// MergeReport on probe.Merge, which the replay's history entry records.
-func exactScoreReplayProbe(stored, incoming *state.MatchResult, comp *state.Competition, nilSubsClear bool, lines []state.ScoreLogLine) (*state.MatchResult, bool) {
-	if !mayBeExactScoreReplay(stored, incoming) {
-		return nil, false
-	}
+// probeCopy is a write the merge may be run over without changing the
+// original: every slice and map the merge touches is copied, keeping nil apart
+// from empty (a nil list is a writer with nothing to say, an empty one says
+// zero).
+func probeCopy(incoming *state.MatchResult) state.MatchResult {
 	probe := *incoming
-	// Copies that keep nil apart from empty (a nil list is a writer with
-	// nothing to say, an empty one says zero).
 	if incoming.IpponsA != nil {
 		probe.IpponsA = append(make([]string, 0, len(incoming.IpponsA)), incoming.IpponsA...)
 	}
@@ -1522,6 +1588,32 @@ func exactScoreReplayProbe(stored, incoming *state.MatchResult, comp *state.Comp
 	probe.SubResults = state.CloneSubResults(incoming.SubResults)
 	probe.GroupStamps = state.CloneGroupStamps(incoming.GroupStamps)
 	probe.Changed = slices.Clone(incoming.Changed)
+	return probe
+}
+
+// writeHeldWhole reports whether the merge owner would hold every change of a
+// shaped write over the stored match, so it lands nothing and is answered
+// superseded. A refusal that judges what the write would put on the match
+// (refuseDrawnLeagueTiebreak, refuseOverRecordedLots) must not turn such a
+// write away: a stale resend is kept in the match's history, not misreported
+// as a refusal. nilSubsClear is the branch's, as in mergeCtx. The write is not
+// changed.
+func writeHeldWhole(stored, incoming *state.MatchResult, comp *state.Competition, nilSubsClear bool, lines []state.ScoreLogLine) bool {
+	if stored == nil {
+		return false
+	}
+	probe := probeCopy(incoming)
+	return mergeMatchWrite(stored, &probe, matchWriteForward, mergeCtx{comp: comp, knockout: !nilSubsClear, nilSubsClear: nilSubsClear, lines: lines}).Superseded()
+}
+
+// exactScoreReplayProbe is ExactScoreReplay's judgement, handing back the
+// write as the merge would land it (a copy: incoming is not changed), its
+// MergeReport on probe.Merge, which the replay's history entry records.
+func exactScoreReplayProbe(stored, incoming *state.MatchResult, comp *state.Competition, nilSubsClear bool, lines []state.ScoreLogLine) (*state.MatchResult, bool) {
+	if !mayBeExactScoreReplay(stored, incoming) {
+		return nil, false
+	}
+	probe := probeCopy(incoming)
 	if probe.CorrectionReason == "" {
 		probe.CorrectionReason = stored.CorrectionReason
 	}

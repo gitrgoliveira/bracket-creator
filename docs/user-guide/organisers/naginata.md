@@ -82,8 +82,8 @@ competition** so the kata division also gets the single 3rd-place match.
 
 !!! note "Quick-score and overrides are off for Engi"
     Because every Engi result comes from the flag editor, the kendo shortcuts,
-    quick-score, manual winner overrides, and daihyosen are disabled for Engi
-    competitions.
+    quick-score, manual winner overrides, kiken, fusenpai, and daihyosen are
+    disabled for Engi competitions.
 
 ### Add Engi pairs
 
@@ -120,30 +120,62 @@ and Shiro (white):
 - The side with more flags wins the bout.
 - **Save result** takes two taps, as **Finish** does in the kendo editor: the
   first tap changes the button to **Tap again to save**, and the second tap
-  saves. On the court console the button can read **Finish + Start Next**,
-  which asks **Tap again to finish**. A quick double tap only does the first.
+  saves. On the court console the button reads **Finish + Start Next**
+  when another match of this competition waits on the court, and plain **Finish**
+  when none does; either way the first tap changes it to **Tap again to finish**.
+  A quick double tap only does the first.
   **`Enter`** saves at once.
 
 ### Standings
 
-In Engi pools, leagues, and Swiss competitions, pairs are ranked by the
-following criteria, in order:
+In Engi pools, leagues, and Swiss competitions, pairs are ranked by wins first,
+then by the flags they accumulated:
 
 1. Total wins.
 2. Total flags accumulated across all bouts, as the tie-break when wins are equal.
-3. Head-to-head (Swiss only): when two pairs are tied on wins and flags, the
-   pair that won their direct bout ranks higher.
-4. Name order (alphabetical by the pair's first listed member), when the
-   first three criteria are all equal.
 
 Both the winning and the losing side's flags count toward that side's own tally.
 A pair that loses by three flags to two still keeps its two flags.
 
-![Engi Swiss standings: a winner banner above a final standings table with rank, pair, victories (V), and flags columns, with a caption ranking by wins, then total flags, then head-to-head.](../../screenshots/swiss-standings-engi.png)
+### Ties between pairs
 
-Engi never holds a supplementary tie-break bout: no ippon-shobu, no daihyosen.
-A ranking still tied after wins and flags is settled by the head-to-head
-(in Swiss) and name-order fallbacks in this section.
+Engi pools and leagues follow the same tie rule as kendo pools and leagues. Two
+pairs that are level on wins and on flags are tied, and the tie rule says which
+ties get a tie-break bout:
+
+- **League**: a tie for 1st or 2nd place always gets a tie-break bout. A tie for
+  3rd place gets one only when **Award two joint 3rd places** is off; with it on
+  the pairs share 3rd. Ticking **Naginata competition** turns it off, and a
+  kata division usually has that box ticked. A tie for 4th place or lower shares
+  its place.
+- **Pools**: a tie gets a bout only when it decides who goes through or where
+  the pairs are seated. Any other tie shares its place.
+
+The tie-break bout opens in the same flag editor as any Engi bout, and the pair
+with more flags wins it. Because a bout's flags always total 1, 3, or 5, a
+tie-break between two pairs can never end level. If three or more pairs are
+level and the round goes in a circle, the Pools tab (League in a league) offers
+another round or lots,
+exactly as for kendo competitors, and the lots are drawn and entered by you.
+Refer to [Recording decisions](../court-operators/recording-decisions.md#individual-competitors-another-round-or-lots).
+Name order never decides a place that counts.
+
+Quick-score, kiken, fusenpai, and daihyosen stay off for Engi, so a tie-break
+bout is always scored by flags. With kiken and fusenpai off, the app records no
+withdrawal for an Engi pair, so a tie-break whose two sides both withdrew does
+not arise.
+
+### Swiss standings
+
+Swiss does not follow the tie rule. A Swiss ranking still tied after wins and
+flags is settled by:
+
+1. Head-to-head: when two pairs are tied on wins and flags, the pair that won
+   their direct bout ranks higher.
+2. Name order (alphabetical by the pair's first listed member), when wins,
+   flags and head-to-head are all equal.
+
+![Engi Swiss standings: a winner banner above a final standings table with rank, pair, victories (V), and flags columns, with a caption ranking by wins, then total flags, then head-to-head.](../../screenshots/swiss-standings-engi.png)
 
 ### Excel exports
 
@@ -160,6 +192,5 @@ Both Excel downloads on the competition page (refer to
   ranking is determined by wins then accumulated own-side flags. The kendo
   points columns do not appear.
 - The results workbook records each side's referee flag count in the score
-  cells instead of ippon letters. A bout decided without flags (for
-  example a kiken withdrawal) leaves the score cells blank with the decision
-  marked in the centre column.
+  cells instead of ippon letters. A bout recorded without flags leaves the
+  score cells blank with the decision marked in the centre column.

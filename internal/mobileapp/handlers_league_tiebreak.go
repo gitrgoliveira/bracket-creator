@@ -1,14 +1,17 @@
-// Package mobileapp, handlers_league_tiebreak.go owns the four operator
+// Package mobileapp, handlers_league_tiebreak.go owns the three operator
 // endpoints for league tie-breaker management (Phase 3b, mp-8rc9):
 //
 //	GET  /api/competitions/:cid/league-tiebreak/candidates  (public, no auth)
 //	POST /api/competitions/:cid/league-tiebreak             (admin-gated)
 //	DELETE /api/competitions/:cid/league-tiebreak           (admin-gated)
-//	POST /api/competitions/:cid/league-tiebreak/finalize    (admin-gated)
+//
+// A tie at 1st or 2nd (and at 3rd when two joint 3rd places are off) is
+// settled only by a tie-breaker with a winner, or by the lots the organiser
+// enters on the chusen panel; there is no accepting a shared rank.
 //
 // The GET read is public (registered via RegisterPublicLeagueTiebreakHandlers
 // on the unauthenticated api group, mirroring RegisterPublicSwissHandlers).
-// The three write/mutate operations require X-Tournament-Password and are
+// The two write/mutate operations require X-Tournament-Password and are
 // registered via RegisterLeagueTiebreakHandlers on the adminSmallBody group.
 //
 // The design mirrors handlers_daihyosen.go: narrow consumer-boundary
@@ -29,11 +32,10 @@ import (
 
 // LeagueTiebreakEngine is the consumer-boundary view of *engine.Engine used
 // by the league-tiebreak handler family. Methods are restricted to what these
-// four endpoints actually call.
+// three endpoints actually call.
 type LeagueTiebreakEngine interface {
 	LeagueTiebreakCandidates(compID string) ([]engine.TiedGroup, error)
 	GenerateLeagueTiebreakMatches(compID string, tiedTeamIDs []string) ([]state.MatchResult, error)
-	MaybeAutoCompletePools(compID string) (engine.AutoCompleteOutcome, error)
 }
 
 // LeagueTiebreakStore is the consumer-boundary view of *state.Store used by
@@ -42,10 +44,9 @@ type LeagueTiebreakStore interface {
 	LoadCompetition(id string) (*state.Competition, error)
 	LoadPoolMatches(id string) ([]state.MatchResult, error)
 	SavePoolMatches(id string, matches []state.MatchResult) error
-	UpdateCompetitionChanged(id string, transform func(current *state.Competition) (*state.Competition, error)) (bool, error)
 	// WithTransaction holds the per-comp lock across a read-modify-write so the
-	// DELETE handler's load→guard→filter→save can't lose a concurrent score
-	// write that lands mid-sequence.
+	// DELETE handler's load→guard→filter→save can't lose a
+	// concurrent score write that lands mid-sequence.
 	WithTransaction(compID string, fn func(tx state.StoreTx) error) error
 }
 
@@ -229,13 +230,6 @@ func RegisterPublicLeagueTiebreakHandlers(r *gin.RouterGroup, eng LeagueTiebreak
 			return
 		}
 
-		// Short-circuit the finalized case: LeagueTiebreakCandidates returns []
-		// once shared ranks are accepted, so skip the second standings load.
-		if comp.LeagueTiebreakFinalized {
-			c.JSON(http.StatusOK, gin.H{"candidates": []leagueTiebreakCandidateGroup{}, "finalized": true})
-			return
-		}
-
 		candidates, err := eng.LeagueTiebreakCandidates(id)
 		if err != nil {
 			// LeagueTiebreakCandidates calls CalculatePoolStandings, which reads
@@ -250,30 +244,32 @@ func RegisterPublicLeagueTiebreakHandlers(r *gin.RouterGroup, eng LeagueTiebreak
 			return
 		}
 
-		out := make([]leagueTiebreakCandidateGroup, 0, len(candidates))
-		for _, g := range candidates {
-			names := make([]string, len(g.Teams))
-			for i, t := range g.Teams {
-				names[i] = t.Player.Name
-			}
-			out = append(out, leagueTiebreakCandidateGroup{
-				TeamNames:   names,
-				Teams:       competitorRefsFrom(g.Teams),
-				MinPosition: g.MinPosition,
-				MaxPosition: g.MaxPosition,
-			})
-		}
-
-		// Finalized flag: surface whether the operator has already accepted
-		// shared ranks so the frontend can reflect that state.
 		c.JSON(http.StatusOK, gin.H{
-			"candidates": out,
-			"finalized":  comp.LeagueTiebreakFinalized,
+			"candidates": leagueTiebreakGroupsJSON(candidates),
 		})
 	})
 }
 
-// RegisterLeagueTiebreakHandlers wires the three admin-gated league-tiebreak
+// leagueTiebreakGroupsJSON is the wire shape of the candidates GET's tied
+// groups. Never nil, so the wire carries [].
+func leagueTiebreakGroupsJSON(groups []engine.TiedGroup) []leagueTiebreakCandidateGroup {
+	out := make([]leagueTiebreakCandidateGroup, 0, len(groups))
+	for _, g := range groups {
+		names := make([]string, len(g.Teams))
+		for i, t := range g.Teams {
+			names[i] = t.Player.Name
+		}
+		out = append(out, leagueTiebreakCandidateGroup{
+			TeamNames:   names,
+			Teams:       competitorRefsFrom(g.Teams),
+			MinPosition: g.MinPosition,
+			MaxPosition: g.MaxPosition,
+		})
+	}
+	return out
+}
+
+// RegisterLeagueTiebreakHandlers wires the two admin-gated league-tiebreak
 // mutation endpoints. Callers pass *engine.Engine and *state.Store which
 // satisfy the local interfaces by structural match.
 func RegisterLeagueTiebreakHandlers(r *gin.RouterGroup, eng LeagueTiebreakEngine, store LeagueTiebreakStore, hub Broadcaster) {
@@ -298,10 +294,8 @@ func RegisterLeagueTiebreakHandlers(r *gin.RouterGroup, eng LeagueTiebreakEngine
 			return
 		}
 
-		// Guard: this endpoint applies only to team-league competitions.
-		// Kind == "team" is the canonical team marker: ValidateCompetitionTeamSize (run
-		// on every create/edit) enforces Kind == "team" ⟺ TeamSize >= 2, so the Kind
-		// check alone is sufficient.
+		// Guard: this endpoint applies only to team-league competitions, asked
+		// through IsTeam, the one spelling of "a team competition".
 		postComp, err := store.LoadCompetition(id)
 		if err != nil {
 			log.Printf("league-tiebreak POST LoadCompetition(%s): %v", id, err)
@@ -312,7 +306,7 @@ func RegisterLeagueTiebreakHandlers(r *gin.RouterGroup, eng LeagueTiebreakEngine
 			c.JSON(http.StatusNotFound, gin.H{"error": "competition not found"})
 			return
 		}
-		if postComp.Format != state.CompFormatLeague || postComp.Kind != "team" {
+		if postComp.Format != state.CompFormatLeague || !postComp.IsTeam() {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "league tie-breaker endpoints apply only to team-league competitions"})
 			return
 		}
@@ -438,7 +432,7 @@ func RegisterLeagueTiebreakHandlers(r *gin.RouterGroup, eng LeagueTiebreakEngine
 			// This endpoint is league-only. Without this guard an operator could
 			// delete a MIXED team competition's auto-injected DH matches through
 			// the league tie-breaker endpoint.
-			if comp.Format != state.CompFormatLeague || comp.Kind != "team" {
+			if comp.Format != state.CompFormatLeague || !comp.IsTeam() {
 				notTeamLeague = true
 				return nil
 			}
@@ -476,24 +470,15 @@ func RegisterLeagueTiebreakHandlers(r *gin.RouterGroup, eng LeagueTiebreakEngine
 			// Refuse removal if any match in the group is in progress or has been
 			// scored, deleting a running DH match would orphan the operator's
 			// open scoring session.
+			dhIDs := make(map[string]bool, len(groupDH))
 			for _, m := range groupDH {
-				if m.Winner != "" || m.Status == state.MatchStatusCompleted || m.Status == state.MatchStatusRunning {
+				if tiebreakBoutStarted(m) {
 					scoredConflict = true
 					return nil
 				}
-			}
-
-			dhIDs := make(map[string]bool, len(groupDH))
-			for _, m := range groupDH {
 				dhIDs[m.ID] = true
 			}
-			filtered := make([]state.MatchResult, 0, len(allMatches)-len(groupDH))
-			for _, m := range allMatches {
-				if !dhIDs[m.ID] {
-					filtered = append(filtered, m)
-				}
-			}
-			if err := stx.SavePoolMatches(id, filtered); err != nil {
+			if err := removePoolMatches(stx, id, allMatches, dhIDs); err != nil {
 				return err
 			}
 			deleted = len(groupDH)
@@ -527,83 +512,23 @@ func RegisterLeagueTiebreakHandlers(r *gin.RouterGroup, eng LeagueTiebreakEngine
 
 		c.JSON(http.StatusOK, gin.H{"deleted": deleted})
 	})
+}
 
-	// POST /competitions/:id/league-tiebreak/finalize
-	// Operator accepts the current standings as final without running a
-	// tie-breaker. Sets LeagueTiebreakFinalized=true, which makes
-	// LeagueTiebreakCandidates return [] on the next call, unblocking
-	// MaybeAutoCompletePools to transition to CompStatusComplete.
-	r.POST("/competitions/:id/league-tiebreak/finalize", func(c *gin.Context) {
-		id, ok := requireValidCompID(c)
-		if !ok {
-			return
-		}
+// tiebreakBoutStarted reports whether a tie-breaker bout has been started or
+// scored, which removing it refuses (DELETE .../league-tiebreak).
+func tiebreakBoutStarted(m state.MatchResult) bool {
+	return m.Winner != "" || m.Status == state.MatchStatusCompleted || m.Status == state.MatchStatusRunning
+}
 
-		var notFoundFlag bool
-		var notTeamLeague bool
-		var alreadyComplete bool
-		_, err := store.UpdateCompetitionChanged(id, func(comp *state.Competition) (*state.Competition, error) {
-			if comp == nil {
-				notFoundFlag = true
-				return nil, nil
-			}
-			if comp.Format != state.CompFormatLeague || comp.Kind != "team" {
-				notTeamLeague = true
-				return nil, nil
-			}
-			if comp.Status == state.CompStatusComplete {
-				alreadyComplete = true
-				return nil, nil
-			}
-			comp.LeagueTiebreakFinalized = true
-			return comp, nil
-		})
-		if err != nil {
-			log.Printf("league-tiebreak finalize UpdateCompetitionChanged(%s): %v", id, err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
-			return
+// removePoolMatches is the removal body of DELETE .../league-tiebreak:
+// it saves the competition's pool matches without the rows named in drop, in
+// the caller's transaction.
+func removePoolMatches(stx state.StoreTx, compID string, all []state.MatchResult, drop map[string]bool) error {
+	kept := make([]state.MatchResult, 0, len(all))
+	for _, m := range all {
+		if !drop[m.ID] {
+			kept = append(kept, m)
 		}
-		if notFoundFlag {
-			c.JSON(http.StatusNotFound, gin.H{"error": "competition not found"})
-			return
-		}
-		if notTeamLeague {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "league tie-breaker endpoints apply only to team-league competitions"})
-			return
-		}
-		if alreadyComplete {
-			c.JSON(http.StatusConflict, gin.H{"error": "already_complete", "detail": "competition is already complete"})
-			return
-		}
-
-		// Trigger completion via MaybeAutoCompletePools. With
-		// LeagueTiebreakFinalized=true, LeagueTiebreakCandidates now returns []
-		// and the blocking gate passes through to the completion transition.
-		outcome, autoErr := eng.MaybeAutoCompletePools(id)
-		if autoErr != nil {
-			log.Printf("MaybeAutoCompletePools(%s) after finalize: %v", id, autoErr)
-			c.Header(AutoCompleteErrorHeader, AutoCompleteErrorValue)
-		} else {
-			switch outcome {
-			case engine.AutoCompleteTransitioned:
-				hub.Broadcast(EventCompetitionCompleted, gin.H{"competitionId": id})
-				hub.Broadcast(EventScheduleUpdated, nil)
-			case engine.AutoCompleteStarted:
-				// A still-draw-ready competition holding a recorded result was
-				// started by this call (bc-prow). Same events as
-				// tryAutoCompletePools' own branch, so every surface reloads
-				// the now-running competition.
-				hub.Broadcast(EventCompetitionStarted, gin.H{"competitionId": id})
-				hub.Broadcast(EventScheduleUpdated, nil)
-			case engine.AutoCompleteNoChange:
-				// Not all matches complete yet, finalize flag is set but
-				// the competition cannot transition until all matches finish.
-				hub.Broadcast(EventScheduleUpdated, nil)
-			default:
-				hub.Broadcast(EventScheduleUpdated, nil)
-			}
-		}
-
-		c.JSON(http.StatusOK, gin.H{"finalized": true})
-	})
+	}
+	return stx.SavePoolMatches(compID, kept)
 }

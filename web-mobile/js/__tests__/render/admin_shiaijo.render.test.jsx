@@ -1766,6 +1766,57 @@ describe('the court console shows a pushed running score at once', () => {
   });
 });
 
+// The console's pool panel refetches the competition on poolMatchesSignature,
+// the one owner of "did the pool results change". A correction to a team pool
+// encounter that keeps its winner and its status moves only the sub-bouts (IV
+// and PW), which the old id/status/ippons key never saw.
+describe('the console pool panel follows a correction that keeps the winner', () => {
+  it('fetches the competition detail again when a sub-bout of a finished encounter changes', async () => {
+    vi.useFakeTimers();
+    const side = (id, name) => ({ id, name });
+    const bout = (winner, ipponsA) => ({ winner, ipponsA, ipponsB: [], decision: '' });
+    const encounter = (subResults) => ({
+      id: 'Pool A-0', status: 'completed', phase: 'pool', poolName: 'Pool A', court: 'A', scheduledAt: '09:00',
+      sideA: side('t1', 'Alpha'), sideB: side('t2', 'Bravo'), winner: 'Alpha', modifiedAt: 100, subResults,
+    });
+    const comp = (m) => ({ id: 'c1', name: 'Cup', status: 'pools', poolMatches: [m] });
+    let emit = () => {};
+    const prev = {
+      fetch: window.API.fetchCourtMatches, sub: window.API.subscribeToEvents,
+      tm: window.tournamentMatches, fbc: window.filterMatchesByCourt,
+    };
+    const fetchCourtMatches = vi.fn().mockResolvedValue([comp(encounter([bout('Alpha', ['M']), bout('Alpha', ['K'])]))]);
+    window.API.fetchCourtMatches = fetchCourtMatches;
+    window.API.subscribeToEvents = (cb) => { emit = cb; return () => {}; };
+    window.tournamentMatches = (t) => (t.competitions || [])
+      .flatMap((c) => (c.poolMatches || []).map((m) => ({ ...m, compId: c.id, compName: c.name })));
+    window.filterMatchesByCourt = (matches) => matches;
+    const detail = window.API.fetchCompetitionDetails;
+    try {
+      await act(async () => { renderPage(makeMinimalTournament(), 'A'); });
+      await act(async () => { await Promise.resolve(); });
+      const before = detail.mock.calls.length;
+      expect(before, 'the panel asked for the competition once it opened').toBeGreaterThan(0);
+
+      // Same winner, same status: one bout corrected from a win to a draw.
+      fetchCourtMatches.mockResolvedValue([comp({
+        ...encounter([bout('Alpha', ['M', 'K']), { winner: '', ipponsA: [], ipponsB: [], decision: 'hikiwake' }]),
+        modifiedAt: 200,
+      })]);
+      await act(async () => { emit({ type: 'schedule_updated', data: {} }); });
+      await act(async () => { vi.advanceTimersByTime(700); });
+      await act(async () => { await Promise.resolve(); });
+      expect(detail.mock.calls.length, 'the corrected bout is read again').toBe(before + 1);
+    } finally {
+      window.API.fetchCourtMatches = prev.fetch;
+      window.API.subscribeToEvents = prev.sub;
+      window.tournamentMatches = prev.tm;
+      window.filterMatchesByCourt = prev.fbc;
+      vi.useRealTimers();
+    }
+  });
+});
+
 // Recording a withdrawal advances the court like any other decision (operator
 // ruling 2026-09-26). This court's list does not show the withdrawn
 // competitor's matches barred until it is refetched, so the advance passes

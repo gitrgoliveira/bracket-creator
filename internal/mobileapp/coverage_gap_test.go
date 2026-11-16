@@ -471,7 +471,7 @@ func TestRegisterEligibilityHandlers_SetStatusError(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	admin := r.Group("/api")
-	RegisterEligibilityHandlers(admin, failingCompetitorStatusStore{}, stubBroadcaster{})
+	RegisterEligibilityHandlers(admin, failingCompetitorStatusStore{}, &stubEligibilityEngine{}, stubBroadcaster{})
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest("POST", "/api/competitions/c1/competitor-status",
@@ -583,7 +583,7 @@ func TestEligibilityPOST_BadJSON(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	api := r.Group("/api")
-	RegisterEligibilityHandlers(api, failingCompetitorStatusStore{}, stubBroadcaster{})
+	RegisterEligibilityHandlers(api, failingCompetitorStatusStore{}, &stubEligibilityEngine{}, stubBroadcaster{})
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest("POST", "/api/competitions/c1/competitor-status", bytes.NewBufferString("{invalid"))
 	req.Header.Set("Content-Type", "application/json")
@@ -597,7 +597,7 @@ func TestEligibilityPOST_ValidateLengthError(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	api := r.Group("/api")
-	RegisterEligibilityHandlers(api, failingCompetitorStatusStore{}, stubBroadcaster{})
+	RegisterEligibilityHandlers(api, failingCompetitorStatusStore{}, &stubEligibilityEngine{}, stubBroadcaster{})
 	body := jsonBody(map[string]any{
 		"playerId": strings.Repeat("x", MaxLenEntityID+1),
 		"eligible": false,

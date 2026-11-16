@@ -1,11 +1,13 @@
 import React from 'react';
 import { render, fireEvent, screen, waitFor, act } from '@testing-library/react';
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, beforeAll, afterAll } from 'vitest';
 import { EngiScoreEditorModal } from '../../admin_scoring_engi.jsx';
 import { TAP_BOUNCE_MS } from '../../tap_guard.jsx';
 import { QUEUED_NOTICE } from '../../write_result.jsx';
 import { pointerTap } from '../helpers/tap_events.js';
 import { makeFakeOutbox } from '../helpers/fake_outbox.js';
+import { installWindowStubs } from '../helpers/stub_globals.js';
+import { enrichPoolMatchWithComp } from '../../admin_pools.jsx';
 
 // Regression coverage for a real orientation bug: sideB is Shiro and sideA is
 // Aka everywhere else in the app (bracket.jsx PlayerLine, admin_pools.jsx,
@@ -25,6 +27,52 @@ function makeMatch(overrides = {}) {
     ...overrides,
   };
 }
+
+// Engi follows the same tie rule as fought formats: a level place that counts
+// gets a tie-break ("-TB-") bout, scored by flags like the bouts it breaks. The
+// Pools tab hands it to ScoreEditorModal through enrichPoolMatchWithComp, which
+// must keep compEngi so the flag editor opens, never the ippon editor (whose
+// save the engine refuses for an engi bout: 0+0 flags).
+describe('an engi tie-break bout opens in the flag editor', () => {
+  let restoreGlobals;
+  let ScoreEditorModal;
+  beforeAll(async () => {
+    restoreGlobals = installWindowStubs({
+      isHikiwake: () => false,
+      arraysEqual: (a, b) => a.length === b.length && a.every((v, i) => v === b[i]),
+      isKikenDecision: () => false,
+      isTextEntry: () => false,
+      isInteractiveTarget: () => false,
+      confirmDialog: vi.fn().mockResolvedValue(true),
+      API: { fetchCompetitionDetails: vi.fn().mockResolvedValue(null), recordScore: vi.fn(), recordDecision: vi.fn() },
+      AdminLineupHelpers: { rosterFor: vi.fn().mockReturnValue([]) },
+      compMatches: () => [],
+      Term: ({ children }) => <span>{children}</span>,
+      GlossaryHint: ({ name }) => <span title={name} />,
+    });
+    await import('../../admin_scoring_modal.jsx');
+    ScoreEditorModal = window.ScoreEditorModal;
+  });
+  afterAll(() => restoreGlobals());
+
+  const tbBout = {
+    id: 'Pool A-TB-0', status: 'scheduled', court: 'A',
+    sideA: { id: 'p-ann', name: 'Ann - Bo' }, sideB: { id: 'p-cy', name: 'Cy - Di' },
+  };
+
+  it('in an engi league, the tie-break bout shows the flag counters', () => {
+    const m = enrichPoolMatchWithComp(tbBout, { id: '', name: 'Engi League', kind: 'individual', format: 'league', engi: true });
+    render(<ScoreEditorModal match={m} onClose={() => {}} onSubmit={() => {}} />);
+    expect(screen.getByTestId('engi-side-shiro')).toBeTruthy();
+    expect(screen.getByTestId('engi-side-aka')).toBeTruthy();
+  });
+
+  it('in a fought league, the same bout keeps the ippon editor', () => {
+    const m = enrichPoolMatchWithComp(tbBout, { id: '', name: 'Kendo League', kind: 'individual', format: 'league' });
+    render(<ScoreEditorModal match={m} onClose={() => {}} onSubmit={() => {}} />);
+    expect(screen.queryByTestId('engi-side-shiro')).toBeNull();
+  });
+});
 
 describe('EngiScoreEditorModal orientation', () => {
   it('renders sideA under the Aka badge and sideB under the Shiro badge', () => {
@@ -131,6 +179,11 @@ describe('EngiScoreEditorModal Finish + Start Next (impeccable critique P2)', ()
     fireEvent.click(submit);
     await waitFor(() => expect(onSubmitAndNext).toHaveBeenCalledWith({ flagsA: 3, flagsB: 0, status: 'completed', changed: ['result'] }));
     expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it('says plain Finish when nothing is waiting on the court', () => {
+    render(<EngiScoreEditorModal match={makeMatch({ flagsA: 3, flagsB: 0 })} onClose={() => {}} onSubmit={vi.fn()} onSubmitAndNext={vi.fn()} startsNext={false} />);
+    expect(screen.getByTestId('engi-submit').textContent).toBe('Finish');
   });
 
   it('a correction saves the current match only (onSubmit), never onSubmitAndNext', async () => {

@@ -364,11 +364,11 @@ describe('competition CREATE vs SETTINGS: copy has a single home (bc-symm Phase 
 // LABEL_*/_OPTIONS name competition_shape.jsx exports is imported by both
 // screens) and the control COPY (Task 2: no screen re-spells a shared
 // label/hint inline). Neither can see ORDER: a screen that imports
-// LABEL_LEAGUE_TIEBREAK passes both checks whether the control it labels
+// LABEL_TWO_THIRD_PLACES passes both checks whether the control it labels
 // renders first on the page or dead last. Order is a separate property,
 // and until this block nothing asserted it -- which is exactly how
-// admin_competition_settings.jsx ended up rendering League's own two
-// settings ("Break ties for top", "Award two joint 3rd places") fifteen
+// admin_competition_settings.jsx ended up rendering League's own
+// setting ("Award two joint 3rd places") fifteen
 // positions below Format: choosing League on the Settings screen showed
 // the operator nothing about what League needed until they had scrolled
 // past Team size, Team match type, Pool format, Round-robin, Pool size
@@ -426,7 +426,6 @@ describe('competition CREATE vs SETTINGS: control ORDER parity (bc-symm Phase 6)
     { key: 'Pool winners', pattern: '{LABEL_POOL_WINNERS}' },
     { key: 'Extra qualifiers', pattern: '{LABEL_EXTRA_QUALIFIERS}' },
     { key: 'Swiss rounds', pattern: 'label={LABEL_SWISS_ROUNDS}' },
-    { key: 'League tiebreak', pattern: '{LABEL_LEAGUE_TIEBREAK}' },
     { key: 'Two joint 3rd places', pattern: '{LABEL_TWO_THIRD_PLACES}' },
     { key: 'Assigned shiaijo (courts)', pattern: '{LABEL_COURTS}' },
     // Pool duration's <label> is built by a shared helper on each screen

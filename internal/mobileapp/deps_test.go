@@ -123,6 +123,14 @@ func (stubScoringEngine) MaybeAdvanceKachinuki(string, string) (bool, *engine.Ka
 type stubEligibilityEngine struct {
 	Status *domain.CompetitorStatus
 	Err    error
+	// Passes counts the auto-complete passes asked for; Outcome is what they report.
+	Passes  int
+	Outcome engine.AutoCompleteOutcome
+}
+
+func (s *stubEligibilityEngine) MaybeAutoCompletePools(string) (engine.AutoCompleteOutcome, error) {
+	s.Passes++
+	return s.Outcome, nil
 }
 
 func (s *stubEligibilityEngine) ReinstateCompetitor(string, string) (*domain.CompetitorStatus, error) {

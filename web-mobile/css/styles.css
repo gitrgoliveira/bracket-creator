@@ -500,6 +500,59 @@ a:hover {
   border-color: var(--ink-4);
 }
 
+/* The name block gives way to the controls: it shrinks and ends in an
+   ellipsis, while each control keeps its label on one line. */
+.topbar__text {
+  min-width: 0;
+}
+
+.topbar > .viewer-toggle,
+.topbar > .btn {
+  flex: none;
+  white-space: nowrap;
+}
+
+/* On a phone the bar keeps one row: the healthy connection shows its dot
+   alone and Public viewer its eye alone. Both labels stay in the accessible
+   name, and "Reconnecting…" stays visible because it is a warning. When a
+   warning and the held-results count both show and the controls no longer
+   fit beside the name, they move to a second row rather than scroll: the
+   name block asks for a small width and gives the rest back. */
+@media (max-width: 480px) {
+  .topbar {
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 8px 12px;
+  }
+
+  .topbar__brand {
+    flex: 1 1 120px;
+  }
+
+  .topbar__spacer {
+    display: none;
+  }
+
+  .topbar .viewer-toggle {
+    position: relative;
+    justify-content: center;
+    min-width: 44px;
+    min-height: 44px;
+    padding: 0;
+  }
+
+  .topbar .viewer-toggle .topbar__label,
+  .topbar__conn:not(.topbar__conn--down) .topbar__label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+  }
+}
+
 /* ---------- Running status strip (under topbar) ---------- */
 /* Stickiness is provided by the parent .topbar-stack so the strip never
    needs to know the topbar's height, it sits naturally below in flow. */
@@ -3938,6 +3991,30 @@ button.vsched-item:not([data-clickable]) {
   border-color: #fed7aa;
   min-height: 110px;
   order: 3;
+}
+
+/* A phone cannot hold four steps abreast (a league with joint 3rds): 1st and
+   2nd each take a row, the 3rds sit as a pair, and no step forces a sideways scroll. */
+@media (max-width: 480px) {
+  .podium {
+    flex-wrap: wrap;
+    align-items: stretch;
+  }
+  /* Scoped to .podium: the champion-hero Awards cards share the step class and
+     keep their own heights. */
+  .podium .podium-step {
+    min-width: 0;
+    min-height: 0;
+    border-radius: 12px;
+    flex: 1 1 calc(50% - 6px);
+    overflow-wrap: anywhere;
+  }
+  .podium .podium-step--1,
+  .podium .podium-step--2 {
+    flex-basis: 100%;
+  }
+  .podium .podium-step--1 { order: 1; }
+  .podium .podium-step--2 { order: 2; }
 }
 
 .podium-step .place {
@@ -7496,6 +7573,9 @@ button.vsched-item:not([data-clickable]) {
   margin-bottom: 10px;
   border-bottom: 1px solid var(--warn-border);
 }
+.league-tiebreak__group--embedded {
+  margin-top: 12px;
+}
 .league-tiebreak__group:last-of-type {
   padding-bottom: 0;
   margin-bottom: 0;
@@ -7526,12 +7606,6 @@ button.vsched-item:not([data-clickable]) {
   gap: 8px;
   flex-wrap: wrap;
   margin-top: 6px;
-}
-
-.league-tiebreak__finalize {
-  border-top: 1px solid var(--warn-border);
-  margin-top: 14px;
-  padding-top: 12px;
 }
 
 .league-tiebreak__err {
@@ -9185,6 +9259,19 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   line-height: 1.45;
   color: var(--ink-2);
 }
+.daihyosen-controls__level-hint {
+  margin-top: 8px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--ink-2);
+}
+.sb-blocked-reason {
+  margin-top: 4px;
+  font-size: 12px;
+  line-height: 1.4;
+  text-align: center;
+  color: var(--ink-2);
+}
 .daihyosen-controls__err {
   font-size: 12px;
   color: var(--danger);
@@ -10302,6 +10389,7 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 .shiaijo-upnext__actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .shiaijo-upnext__actions .btn { display: inline-flex; align-items: center; gap: 6px; }
 .shiaijo-upnext__hint { font-size: 12px; color: var(--ink-2); line-height: 1.4; }
+.shiaijo-qrow__reason { font-size: 12px; color: var(--ink-2); line-height: 1.4; margin-top: 8px; }
 .shiaijo-upnext__error { font-size: 12px; color: var(--danger); margin-top: 6px; }
 
 /* Team-match lineup prompt above the inline scoring panel */

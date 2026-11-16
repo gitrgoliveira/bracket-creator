@@ -174,7 +174,7 @@ func TestReopenHandler_IndividualPoolWithdrawal(t *testing.T) {
 	w := postDecision(t, r, compID, "Pool A-0", map[string]any{"decision": "kiken-voluntary", "decisionBy": "aka"})
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 
-	w = postReopen(t, r, compID, "Pool A-0", "Withdrawal recorded by mistake")
+	w = postReopenRaw(t, r, compID, "Pool A-0", []byte(`{"reason":"Withdrawal recorded by mistake","confirmFinished":true}`))
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	ms, err := store.LoadPoolMatches(compID)
 	require.NoError(t, err)
@@ -289,7 +289,8 @@ func TestReopen_OlderQueuedWriteIsRefusedAfterward(t *testing.T) {
 	}
 	reopen := func(matchID string) func(t *testing.T, r *gin.Engine, compID string) *httptest.ResponseRecorder {
 		return func(t *testing.T, r *gin.Engine, compID string) *httptest.ResponseRecorder {
-			return postReopen(t, r, compID, matchID, "Withdrawal recorded by mistake")
+			// confirmFinished: the pool case's league finished with the withdrawal.
+			return postReopenRaw(t, r, compID, matchID, []byte(`{"reason":"Withdrawal recorded by mistake","confirmFinished":true}`))
 		}
 	}
 	// individualPool: Ryu (aka) withdraws from Pool A-0 at decidedAt. With
@@ -323,6 +324,7 @@ func TestReopen_OlderQueuedWriteIsRefusedAfterward(t *testing.T) {
 			reopen: func(t *testing.T, r *gin.Engine, compID string) *httptest.ResponseRecorder {
 				return postRequeueAndReopen(t, r, compID, "Pool A-0", map[string]any{
 					"blockerCompId": compID, "blockerMatchId": "Pool A-1", "reason": "Withdrawal recorded by mistake",
+					"confirmFinished": true,
 				})
 			},
 			stale: individualCorrection, status: poolStatus},

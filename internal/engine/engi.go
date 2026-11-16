@@ -344,7 +344,7 @@ func (e *Engine) recordEngiMatch(
 // only when non-empty, mirroring the kendo path's CorrectionReason semantics.
 // Also sets WinnerID from SideAID/SideBID (when present) so same-name
 // participants from different dojos remain distinguishable downstream (e.g.
-// computeEngiStandings), mirroring the non-engi scoring path.
+// accrueEngiMatch), mirroring the non-engi scoring path.
 func applyEngiToMatchResult(r *state.MatchResult, flagsA, flagsB int, winnerSide, correctionReason string) {
 	if winnerSide == "A" {
 		r.Winner = r.SideA
@@ -474,95 +474,26 @@ func engiScoreSummary(s *state.PlayerStanding) string {
 	return fmt.Sprintf("W:%d Flags:%d", s.Wins, s.Flags)
 }
 
-// computeEngiStandings is the engi standings core, fully independent of the
-// kendo computeStandingsFrom. It ranks each pool by (1) total Wins, then
-// (2) total accumulated OWN-SIDE flags across every completed bout (the winner
-// accrues their flags AND the loser accrues theirs, so a 3-2 bout adds +3 to
-// the winner and +2 to the loser toward the tiebreaker).
+// accrueEngiMatch credits one completed regular engi bout to its two sides'
+// standings: a win to the side the flags gave it (by id only, operator ruling
+// bc-pnum; see resolveWinnerSide), and to BOTH sides the flags raised for their
+// own side (the winner accrues their flags AND the loser theirs, so a 3-2 bout
+// adds +3 to the winner and +2 to the loser toward the tiebreaker). It is the
+// engi half of computeStandingsFrom's accrual: the ranking that follows, by
+// engiStandingPoints (wins, then flags), and the tie rule after it (tie-break
+// bouts, another round or the lots, the shared places) are every format's.
 //
-// Works for BOTH pool and league formats because the dispatch seam in
-// computeStandings sits above the pool/league split: a league competition
-// stores all its bouts as pool matches under its single league pool, so the
-// same per-pool aggregation applies.
-// It takes the same poolStandingsLoader as computeStandingsFrom (it only calls
-// LoadPools + LoadPoolMatches, never LoadCompetition), so both *state.Store and
-// state.StoreTx satisfy it.
-func (e *Engine) computeEngiStandings(loader poolStandingsLoader, compID string) (map[string][]state.PlayerStanding, error) {
-	pools, err := loader.LoadPools(compID)
-	if err != nil {
-		return nil, err
+// It serves pools and leagues alike: a league stores all its bouts as pool
+// matches under its single league pool.
+func accrueEngiMatch(sA, sB *state.PlayerStanding, m state.MatchResult) {
+	switch winnerIsA, winnerIsB := resolveWinnerSide(m); {
+	case winnerIsA:
+		sA.Wins++
+	case winnerIsB:
+		sB.Wins++
 	}
-	results, err := loader.LoadPoolMatches(compID)
-	if err != nil {
-		return nil, err
-	}
-
-	poolResults := make(map[string][]state.MatchResult)
-	for _, r := range results {
-		if pn, ok := poolNameFromMatchID(r.ID); ok {
-			poolResults[pn] = append(poolResults[pn], r)
-		}
-	}
-
-	allStandings := make(map[string][]state.PlayerStanding)
-	for _, p := range pools {
-		matches := poolResults[p.PoolName]
-
-		playerStandings, order := newStandingsIndex(p.Players)
-
-		for _, m := range matches {
-			if m.Status != state.MatchStatusCompleted {
-				continue
-			}
-			// Supplementary bouts (TB/DH) don't count toward engi standings.
-			if state.IsPoolSupplementaryMatchID(m.ID) {
-				continue
-			}
-			sA := lookupStandingsPlayer(playerStandings, m.SideAID)
-			sB := lookupStandingsPlayer(playerStandings, m.SideBID)
-			if sA == nil || sB == nil {
-				continue
-			}
-			// Winner by id only (operator ruling bc-pnum); see resolveWinnerSide.
-			winnerIsA, winnerIsB := resolveWinnerSide(m)
-			switch {
-			case winnerIsA:
-				sA.Wins++
-			case winnerIsB:
-				sB.Wins++
-			}
-			// Own-side flag accrual: winner AND loser both accumulate the flags
-			// raised for their own side.
-			sA.Flags += m.FlagsA
-			sB.Flags += m.FlagsB
-		}
-
-		sorted := make([]state.PlayerStanding, 0, len(order))
-		for _, s := range order {
-			s.ScoreSummary = engiScoreSummary(s)
-			sorted = append(sorted, *s)
-		}
-
-		// Stable sort: more Wins first, then more accumulated own-side Flags,
-		// then by name so the order is deterministic for fully-tied
-		// competitors. Points is left at its zero value: engi has no points
-		// metric, so an honest 0 reaches the wire rather than a packed sort key.
-		sort.SliceStable(sorted, func(i, j int) bool {
-			if sorted[i].Wins != sorted[j].Wins {
-				return sorted[i].Wins > sorted[j].Wins
-			}
-			if sorted[i].Flags != sorted[j].Flags {
-				return sorted[i].Flags > sorted[j].Flags
-			}
-			return sorted[i].Player.Name < sorted[j].Player.Name
-		})
-
-		for i := range sorted {
-			sorted[i].Rank = i + 1
-		}
-		allStandings[p.PoolName] = sorted
-	}
-	return allStandings, nil
+	sA.Flags += m.FlagsA
+	sB.Flags += m.FlagsB
 }
 
 // computeEngiSwissStandings is the engi twin of SwissStandings: the
@@ -572,7 +503,7 @@ func (e *Engine) computeEngiStandings(loader poolStandingsLoader, compID string)
 // principle). It mirrors SwissStandings' cumulative-across-rounds structure
 // (one flat group, byes are auto-wins, head-to-head is the final tiebreak
 // before name) but ranks by (1) Wins then (2) accumulated OWN-SIDE flags,
-// exactly like the pool/league computeEngiStandings.
+// exactly like the pool/league engiStandingPoints.
 //
 // Identity is keyed via registerStandingsPlayer / lookupStandingsPlayer,
 // by participant id ONLY (operator ruling bc-pnum), exactly like the

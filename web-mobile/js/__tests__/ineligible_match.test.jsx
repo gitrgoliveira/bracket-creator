@@ -45,6 +45,19 @@ describe('ineligible_match', () => {
     expect(defaultWinActionLabel(onA)).toBe('Record fusensho for Yama C');
   });
 
+  // A tie-breaker the organiser's lots settled, fought again after one of its two
+  // sides was reinstated (the confirmed Fight it again): the reopen lands it
+  // scheduled because the other side is still barred. The console treats it as
+  // any barred match: not Up next, with the barred notice and the one-tap
+  // fusensho for the side that can fight.
+  it('treats a reopened tie-breaker with one side still barred as a barred match', () => {
+    const m = match({ id: 'Pool A-TB-0', sideA: { id: 'a', name: 'Ayu' }, sideB: { id: 'b', name: 'Ben' }, ineligibleSides: { a: 'kiken-voluntary' } });
+    expect(isBarredMatch(m)).toBe(true);
+    expect(barredNote(m)).toBe('Ayu withdrew: record the fusensho.');
+    expect(defaultWinActionLabel(m)).toBe('Record fusensho for Ben');
+    expect(defaultWinDecisionBody(m)).toEqual({ decision: 'fusensho', decisionBy: 'aka', decisionReason: 'auto: Ayu withdrawn' });
+  });
+
   it('says who cannot fight and what to do, by the decision that barred them', () => {
     expect(barredNote(match({ ineligibleSides: { b: 'kiken-voluntary' } })))
       .toBe('Yama C withdrew: record the fusensho.');

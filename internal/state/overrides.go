@@ -41,6 +41,18 @@ func (s *Store) LoadOverrides(compID string) (*Overrides, error) {
 	return s.loadOverridesLocked(compID)
 }
 
+// LoadPoolRanks is the competition's recorded pool-rank overrides (a chusen's
+// order, written through engine.OverridePoolRanks) keyed PoolID -> overrideKey -> Rank: the one door for
+// the callers that only judge a pool by them (a drawn representative bout the
+// lots settled, the cycle check). Never nil on success.
+func (s *Store) LoadPoolRanks(compID string) (map[string]map[string]int, error) {
+	o, err := s.LoadOverrides(compID)
+	if err != nil {
+		return nil, err
+	}
+	return o.PoolRanks, nil
+}
+
 func (s *Store) SaveOverrides(compID string, o *Overrides) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

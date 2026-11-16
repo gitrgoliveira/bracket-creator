@@ -180,10 +180,10 @@ describe('deriveAwards (standings-based)', () => {
   });
 
   it('honors genuine backend joint places (two rank-3 rows render as two 3rds)', () => {
-    // Defensive/future-proofing: today the backend never emits duplicate ranks
-    // (a consequential tie is resolved by a tie-break match), but if it ever
-    // assigns a genuine shared rank, the podium must render it faithfully
-    // rather than fabricate placements from array position.
+    // A league table's only shared podium place is 3rd (two joint 3rd places on):
+    // a tie at 1st or 2nd is ordered by a tie-breaker or the lots, so the
+    // backend never emits duplicate ranks there. The podium must render a
+    // shared 3rd faithfully rather than fabricate placements from array position.
     const pools = [{ poolName: 'Pool A' }];
     const standings = {
       'Pool A': [

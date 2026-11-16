@@ -91,9 +91,11 @@ In an individual pool or league, a tie that matters is broken by single-point (i
 - **Run another round** adds a fresh round of ippon-shobu bouts among the competitors still level. When more than one group is still level, there is one button for each, with the group's competitors named beside it. The place stays open until the new bouts are scored.
 - **Draw lots instead** opens the same entry as the team chusen above: draw lots offline, enter each competitor's finishing position and record it. **Cancel** closes the entry and leaves both choices open.
 
-When both competitors of a tie-breaker withdrew earlier, in a league or in a pool, the court operator records it with **Record as drawn (neither can fight)**, a draw nobody fought. That draw settles nothing, and the choice is yours: enter lots for that pair, or tap **Fight it again** on the drawn bout's notice, which puts the bout back on its shiai-jo. There it waits until both can fight, which may never happen, since only an injury kiken can be reinstated. While they cannot, the court can record it as drawn again, and the lots are offered again. The app forces neither path. If the bouts already gave each of the two a place of their own, the draw decides nothing and nothing is owed for it. The others in the same tie who can still fight, for example a circle of three, are still offered another round or lots, and their next round counts.
-
 The app never draws the lots for you, and it never starts another round without your tap. A recorded order can be changed afterwards with **Change**, as for a team chusen, even after the league has finished.
+
+### A tie-breaker neither side can fight
+
+When both sides of a tie-breaker, competitors or teams, withdrew earlier, in a league or in a pool, the court operator records it with **Record as drawn (neither can fight)**, a draw nobody fought. That draw settles nothing, and the choice is yours: enter lots for that pair, or tap **Fight it again** on the drawn bout's notice, which puts the bout back on its shiai-jo. There it waits until both can fight, which may never happen, since only an injury kiken can be reinstated. While they cannot, the court can record it as drawn again, and the lots are offered again. The app forces neither path. If the bouts already gave each of the two a place of their own, the draw decides nothing and nothing is owed for it. The others in the same tie who can still fight, for example a circle of three, are still offered another round or lots, and their next round counts.
 
 ### Change a chusen recorded in the wrong order
 

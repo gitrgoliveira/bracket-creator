@@ -258,7 +258,7 @@ The league finishes once every tie at a place that cannot be shared has a winner
 **Lots are the exception, and they are yours to run.** Chusen (drawing lots) is offered in two cases only:
 
 - a tie-breaker round fought with the teams still level, for example a cycle in which A beat B, B beat C and C beat A;
-- a tie-breaker that cannot be fought because both teams withdrew earlier. The match reads "Both withdrew earlier: neither can fight this match.", and **Record as drawn (neither can fight)** records it as a draw nobody fought. You then either enter lots for the place, or tap **Fight it again** on the drawn bout's notice to put the bout back on its shiai-jo, where it waits until both teams can fight. That may never happen, since only an injury kiken can be reinstated; while they cannot, the court can record it as drawn again, and the lots are offered again. The app forces neither path.
+- a tie-breaker that cannot be fought because both teams withdrew earlier. The match reads "Both withdrew earlier: neither can fight this match.", and **Record as drawn (neither can fight)** records it as a draw nobody fought. You then either enter lots for the place, or fight the bout again; refer to [A tie-breaker neither side can fight](../court-operators/recording-decisions.md#a-tie-breaker-neither-side-can-fight).
 
 The app never draws the lots or ranks the teams itself: you draw them offline and enter the order in the **Chusen (drawing lots) required** panel (refer to [Recording decisions](../court-operators/recording-decisions.md#chusen-drawing-lots)). You can change a recorded order with **Change** even after the league has finished, and the table and podium follow it at once.
 

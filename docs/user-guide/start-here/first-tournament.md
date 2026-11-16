@@ -7,10 +7,12 @@ This page walks you through the fastest path from a running server to real-time 
 Install the binary by following [Installation](../install/install.md), then start the tournament app:
 
 ```bash
-bracket-creator mobile-app --folder ./tournament-data
+bracket-creator mobile-app --folder ./tournament-data --bind 0.0.0.0
 ```
 
-Open `http://localhost:8080` in a browser. When the data folder is empty, the app prompts you to create a tournament. Fill in the name, date, venue, number of shiai-jo, and the admin password. Before you set the password, read [Operating modes](../organisers/operating-modes.md) to choose between officiated and self-run.
+`--bind 0.0.0.0` lets the other devices in the hall (a scoreboard screen, a phone) reach the app; without it only this computer can. The operating system may ask whether to allow incoming connections for bracket-creator: allow them, or the other devices cannot connect. Refer to [Start the server](../organisers/run-tournament.md#start-the-server) for the server's flags, and to [Security notes](../organisers/operating-modes.md#security-notes) for what opening the app to the hall network means for the admin password.
+
+Open `http://localhost:8080` in a browser on the same computer. When the data folder is empty, the app prompts you to create a tournament. Fill in the name, date, venue, number of shiai-jo, and the admin password. Before you set the password, read [Operating modes](../organisers/operating-modes.md) to choose between officiated and self-run.
 
 ## 2. Create a competition
 
@@ -39,8 +41,29 @@ Go to the **Scores** tab, open a match, and record the result. Refer to [Scoring
 ![The score editor: Shiro and Aka fighters with ippon buttons, foul counters, and decision controls.](../../screenshots/mobile-score-editor.png)
 
 !!! tip
-    Open `http://localhost:8080` on a second screen (a scoreboard TV or a phone) with no password. Standings and brackets update in real time as a scorer records each result. Refer to [Following a tournament](../spectators/following.md) for the full viewer experience.
+    Open `http://<laptop address>:8080` on a second screen (a scoreboard TV or a phone on the same network) with no password, for example `http://192.168.1.10:8080`. The laptop's address is the IP address shown in its Wi-Fi or network settings (or printed by `ipconfig` on Windows and `ip addr` on Linux). Standings and brackets update in real time as a scorer records each result. Refer to [Following a tournament](../spectators/following.md) for the full viewer experience.
+
+## What you need on tournament day
+
+- **A3 printer**: for team/competitor name sheets
+- **A4 printer**: for the bracket trees
+- **Scoreboards, whiteboard markers, scissors, tasuki**: for keeping score at the courts and marking competitors
+
+### Keep courts in sync
+
+If you have multiple shiai-jo and run on printed brackets, upload the Excel file to Google Drive (or similar) so every table works from the same document.
+
+## Before the tournament
+
+1. **Collect participants**: one name per line in a CSV file ([input format](../organisers/input-format.md))
+2. **Generate the bracket**: run `create-pools` or `create-knockout` ([commands](../commands/create-pools.md))
+3. **Optionally seed** top competitors so they land in separate pools/sides of the bracket ([seeding](../commands/create-pools.md#seeding))
+4. **Print**: the Excel file is laid out to print cleanly on A4/A3
+
+## On the day
+
+Use the **tournament app** to manage pools and scores in real time across all devices on your network (no Excel required on the day). Refer to [Run a tournament](../organisers/run-tournament.md), and to [Backup and restore](../organisers/backup-and-restore.md) for saving the tournament before the event and after each round.
 
 ## Next steps
 
-For the complete organiser workflow, including pools, seeding, and competition settings, refer to [Run a tournament](../organisers/run-tournament.md). Before the event, take a backup of the whole tournament: refer to [Backup and restore](../organisers/backup-and-restore.md). To generate print-ready brackets without the tournament app, refer to [Legacy Web UI](../organisers/web-ui.md) and the [create-pools command](../commands/create-pools.md).
+For the complete organiser workflow, including pools, seeding, and competition settings, refer to [Run a tournament](../organisers/run-tournament.md). Before the event, take a backup of the whole tournament: refer to [Backup and restore](../organisers/backup-and-restore.md). The tournament app, the Legacy Web UI and the command line all ship in the one binary. To generate print-ready brackets without the tournament app, refer to [Legacy Web UI](../organisers/web-ui.md) (in the browser, no CSV editing needed) and the [create-pools](../commands/create-pools.md) and [create-knockout](../commands/create-knockout.md) commands.

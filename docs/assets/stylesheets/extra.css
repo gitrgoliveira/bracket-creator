@@ -1,9 +1,10 @@
 /* bracket-creator docs theme: a bold, sporting design language layered onto
  * Zensical's classic theme (the Material look). The brand navy (#1d3557, see
- * DESIGN.md) is the single interactive colour; Aka red (#c1121f) appears
- * only as a hairline accent. The theme owns the page chrome (header, tabs,
- * sidebar, TOC, search); this file owns the design language: type rhythm,
- * surfaces, the home hero, tool cards, code/table/tab styling.
+ * DESIGN.md) is the single interactive colour. The theme owns the page
+ * chrome (header, tabs, sidebar, TOC, search); this file owns the design
+ * language: type rhythm, surfaces, figures, code/table/tab styling. The
+ * landing page at the site root is a standalone template
+ * (overrides/landing.html) with its own styles.
  *
  * Colour is scoped PER SCHEME. Material derives link/interactive colours from
  * the --md-* tokens; an unscoped :root override forces one value into both
@@ -18,20 +19,16 @@
 	--bc-navy:       #1d3557;
 	--bc-navy-deep:  #142840;
 	--bc-navy-700:   #2a4a72;
-	--bc-aka:        #c1121f;
 
-	/* Neutrals + navy tints (used on dark surfaces / the hero). */
+	/* Neutrals + navy tints (used on dark surfaces). */
 	--bc-white:      #ffffff;
 	--bc-paper:      #fbfcfe;   /* reading surface, a whisper toward navy */
-	--bc-sky:        #93b3e0;   /* lightened navy: dark-scheme links, hero kicker + outline */
-	--bc-ice:        #eef2fb;   /* near-white on navy: hero text, dark table head */
-	--bc-lede:       #cdd9ee;   /* hero lede on navy */
-	--bc-sky-soft:   color-mix(in srgb, var(--bc-sky) 16%, transparent);
+	--bc-sky:        #93b3e0;   /* lightened navy: dark-scheme links */
+	--bc-ice:        #eef2fb;   /* near-white on navy: dark table head */
 
 	/* Derived surfaces (OKLCH). */
 	--bc-line:       oklch(0.925 0.006 260);
-	--bc-line-soft:  oklch(0.955 0.004 260);
-	--bc-wash:       oklch(0.965 0.012 255);   /* faint navy wash for card chips */
+	--bc-wash:       oklch(0.965 0.012 255);   /* faint navy wash: alternate table rows */
 
 	/* Motion. */
 	--bc-ease-out:   cubic-bezier(0.16, 1, 0.3, 1);
@@ -69,7 +66,6 @@ html { scrollbar-gutter: auto; }
 	 * product's own paper rather than a default white. */
 	--md-default-bg-color: var(--bc-paper);
 
-	--bc-card-bg:    var(--bc-white);
 	--bc-code-bg:    oklch(0.975 0.008 255);
 	--bc-table-head: var(--bc-navy);
 	--bc-table-head-fg: var(--bc-white);
@@ -88,14 +84,12 @@ html { scrollbar-gutter: auto; }
 	--md-accent-fg-color:  var(--bc-sky);
 	--md-typeset-a-color:  var(--bc-sky);
 
-	--bc-card-bg:    oklch(0.27 0.02 262);
 	--bc-code-bg:    oklch(0.23 0.02 262);
 	--bc-table-head: oklch(0.32 0.04 258);
 	--bc-table-head-fg: var(--bc-ice);
 	--bc-table-alt:  oklch(0.30 0.018 262);
 	--bc-tick:       var(--bc-sky);
 	--bc-line:       oklch(0.40 0.02 262);
-	--bc-line-soft:  oklch(0.34 0.02 262);
 	--bc-wash:       oklch(0.30 0.02 262);
 }
 
@@ -154,16 +148,13 @@ html { scrollbar-gutter: auto; }
 .md-typeset a:has(img) { text-decoration: none; }
 
 /* ===== Buttons: sporting fills + outlines ===== */
-/* Shared shape, weight, and hover lift across the prose and hero contexts.
- * Scoped to both (not bare .md-button) so it never bleeds into Material's
- * own page chrome (nav, search). */
-.md-typeset .md-button,
-.bc-hero .md-button {
+/* Shape, weight, and hover lift. Scoped to .md-typeset (not bare .md-button)
+ * so it never bleeds into Material's own page chrome (nav, search). */
+.md-typeset .md-button {
 	border-radius: var(--bc-radius-sm);
 	font-weight: 700;
 }
-.md-typeset .md-button:hover,
-.bc-hero .md-button:hover { transform: translateY(-2px); }
+.md-typeset .md-button:hover { transform: translateY(-2px); }
 
 .md-typeset .md-button {
 	border-width: 2px;
@@ -184,160 +175,6 @@ html { scrollbar-gutter: auto; }
 	box-shadow: 0 8px 22px -10px var(--bc-navy);
 }
 
-/* ===== Home hero (rendered by overrides/home.html) ===== */
-.bc-hero {
-	/* Clean directional navy field (no corner glow, no decorative lines). */
-	background: linear-gradient(158deg, var(--bc-navy-700) 0%, var(--bc-navy) 46%, var(--bc-navy-deep) 100%);
-	color: var(--bc-ice);
-	position: relative;
-	overflow: hidden;
-}
-/* Hairline Aka accent: the single sanctioned red, a thin diagonal strike. */
-.bc-hero::after {
-	content: "";
-	position: absolute;
-	left: 0; right: 0; bottom: 0;
-	height: var(--bc-rule);
-	background: linear-gradient(90deg, var(--bc-aka) 0 22%, transparent 22%);
-}
-.bc-hero__inner {
-	max-width: 61rem;
-	margin: 0 auto;
-	padding: clamp(2.75rem, 6vw, 5.5rem) 1.2rem clamp(2.75rem, 5vw, 4.5rem);
-}
-.bc-hero__mark {
-	display: block;
-	width: clamp(56px, 9vw, 84px);
-	height: auto;
-	margin-bottom: 1.1rem;
-}
-.bc-hero__kicker {
-	font-size: 0.72rem;
-	font-weight: 800;
-	letter-spacing: 0.2em;
-	text-transform: uppercase;
-	color: var(--bc-sky);
-	margin: 0 0 0.9rem;
-}
-.bc-hero__title {
-	font-size: clamp(2.4rem, 6vw, 3.9rem);
-	font-weight: 800;
-	letter-spacing: -0.03em;
-	line-height: 1.02;
-	margin: 0;
-	color: var(--bc-white);
-	overflow-wrap: anywhere;
-	min-width: 0;
-	text-wrap: balance;
-}
-.bc-hero__lede {
-	font-size: clamp(1.02rem, 1.6vw, 1.2rem);
-	line-height: 1.5;
-	max-width: 40ch;
-	margin: 1.1rem 0 1.9rem;
-	color: var(--bc-lede);
-	text-wrap: pretty;
-}
-.bc-hero__actions {
-	display: flex;
-	flex-wrap: wrap;
-	gap: 0.8rem;
-}
-.bc-hero .md-button {
-	border: 2px solid var(--bc-sky);
-	color: var(--bc-white);
-	padding: 0.6em 1.4em;
-	transition: transform var(--bc-dur) var(--bc-ease-out),
-	            background-color var(--bc-dur) var(--bc-ease-out);
-}
-.bc-hero .md-button--primary {
-	background: var(--bc-white);
-	border-color: var(--bc-white);
-	color: var(--bc-navy);
-}
-.bc-hero .md-button--primary:hover { background: var(--bc-ice); border-color: var(--bc-ice); }
-.bc-hero .md-button:not(.md-button--primary):hover { background: var(--bc-sky-soft); }
-
-/* The home page's duplicate "Home" <h1> is suppressed in the template
- * (overrides/home.html overrides the content block to skip Material's
- * auto-injected page title), so no CSS hiding is needed here. */
-
-/* ===== Badge strip on the home page ===== */
-/* Scoped under .md-typeset so it outranks Material's paragraph margin without
- * needing !important. */
-.md-typeset .bc-badges {
-	display: flex;
-	flex-wrap: wrap;
-	gap: 0.5rem 0.75rem;
-	align-items: center;
-	margin: 1.6rem 0 0;
-}
-.md-typeset .bc-badges img { display: block; }
-
-/* ===== Tool cards (Material .grid.cards, restyled) ===== */
-/* Self-contained grid: declare display:grid + list-style:none ourselves rather
- * than rely on the theme's grid-cards bundle CSS, which a theme build can lack
- * (an older local Material once did); without these the cards stack as a
- * bulleted <ul>. minmax(min(100%, 16rem), 1fr) keeps a single
- * card from overflowing below 256px. */
-.md-typeset .grid.cards > ul {
-	display: grid;
-	grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr));
-	gap: 1rem;
-	margin: 1em 0;
-	padding: 0;
-	list-style: none;
-}
-.md-typeset .grid.cards > ul > li {
-	margin: 0;
-	border: 1px solid var(--bc-line);
-	border-top: var(--bc-rule) solid var(--bc-navy);
-	border-radius: var(--bc-radius);
-	background: var(--bc-card-bg);
-	padding: 1.25rem 1.25rem 1.4rem;
-	transition: transform var(--bc-dur) var(--bc-ease-out),
-	            box-shadow var(--bc-dur) var(--bc-ease-out),
-	            border-color var(--bc-dur) var(--bc-ease-out);
-}
-.md-typeset .grid.cards > ul > li:hover {
-	transform: translateY(-4px);
-	border-top-color: var(--bc-aka);
-	box-shadow: 0 14px 34px -18px var(--bc-navy);
-}
-.md-typeset .grid.cards > ul > li > hr {
-	margin: 0.7rem 0;
-	border: 0;
-	border-top: 1px solid var(--bc-line-soft);
-}
-.md-typeset .grid.cards > ul > li > p:first-child strong {
-	font-size: 1.05rem;
-	letter-spacing: -0.01em;
-}
-/* The mono command chip inside each card. */
-.md-typeset .grid.cards code {
-	background: var(--bc-wash);
-	color: var(--md-typeset-a-color);
-	font-weight: 600;
-	border: 1px solid var(--bc-line);
-	border-radius: var(--bc-radius-sm);
-	padding: 0.12em 0.5em;
-}
-
-/* "Three ways to run a tournament" mode cards (.grid.cards.bc-modes): a LEFT
- * rule instead of the top rule, so the modes read as a distinct band from the
- * Tools cards rather than a second identical wall. */
-.md-typeset .bc-modes.cards > ul > li {
-	/* Wash fill (vs the Tools cards' plain surface) so the two card grids on the
-	 * home page read as separate bands rather than one repeated wall. */
-	background: var(--bc-wash);
-	border-top: 1px solid var(--bc-line);
-	border-left: var(--bc-rule) solid var(--bc-navy);
-}
-.md-typeset .bc-modes.cards > ul > li:hover {
-	border-top-color: var(--bc-line);
-	border-left-color: var(--bc-aka);
-}
-
 /* ===== Code blocks: navy-headed, crisp border ===== */
 .md-typeset pre > code {
 	border-radius: var(--bc-radius-sm);
@@ -349,8 +186,8 @@ html { scrollbar-gutter: auto; }
 }
 .md-typeset .highlight pre { margin: 0; }
 .md-typeset .highlight > pre > code { background: var(--bc-code-bg); }
-/* Inline code (outside cards). */
-.md-typeset :not(pre):not(.grid) > code {
+/* Inline code. */
+.md-typeset :not(pre) > code {
 	border-radius: 4px;
 }
 
@@ -461,31 +298,17 @@ html { scrollbar-gutter: auto; }
 
 /* ===== Mobile (≤ 768px): verified 320 / 375 / 414 / 768 ===== */
 @media screen and (max-width: 768px) {
-	.bc-hero__inner { padding-left: 1rem; padding-right: 1rem; }
-	.bc-hero__actions .md-button { flex: 1 1 auto; text-align: center; }
 	.md-typeset h1 { font-size: 1.85rem; }
 	.md-typeset h2 { font-size: 1.35rem; }
-}
-
-/* On phones the primary persona wants the three modes fast, so tighten the
- * hero's vertical rhythm and shrink the crest to lift content toward the fold. */
-@media screen and (max-width: 480px) {
-	.bc-hero__inner { padding-top: 2rem; padding-bottom: 2rem; }
-	.bc-hero__mark { width: 48px; margin-bottom: 0.8rem; }
-	.bc-hero__lede { margin-bottom: 1.4rem; }
 }
 
 /* ===== Reduced motion ===== */
 @media (prefers-reduced-motion: reduce) {
 	.md-typeset .md-button,
-	.bc-hero .md-button,
-	.md-typeset .grid.cards > ul > li,
 	.md-typeset a {
 		transition-duration: 0.01ms;
 	}
-	.md-typeset .md-button:hover,
-	.bc-hero .md-button:hover,
-	.md-typeset .grid.cards > ul > li:hover {
+	.md-typeset .md-button:hover {
 		transform: none;
 	}
 }

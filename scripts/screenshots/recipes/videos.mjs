@@ -1,8 +1,9 @@
-// The three docs VIDEOS, ported into the capture harness.
+// The four docs VIDEOS, in the capture harness.
 //
 //   kachinuki-demo      docs/videos/kachinuki-demo.webm        820x1120  ~31s
 //   draw-generation     docs/screenshots/draw-generation.webm  1160x620  ~7s
 //   realtime-update     docs/screenshots/realtime-update.webm  440x900   ~6s
+//   live-every-screen   docs/videos/live-every-screen.webm     1440x860  ~20s
 //
 // A video recipe differs from a still one in two ways that shape everything
 // below:
@@ -19,8 +20,11 @@
 //      deliberate and are sized against the committed files' durations rather
 //      than trimmed to the minimum the DOM needs.
 import { authAdmin } from '../lib/ui.mjs';
-import { EDITOR, TAP_DWELL_MS, sameSideTapPacer, startNextFromList } from '../lib/editor.mjs';
+import {
+  EDITOR, INLINE_EDITOR, TAP_DWELL_MS, sameSideTapPacer, startNextFromList,
+} from '../lib/editor.mjs';
 import { SCORE_EDITOR_SOURCES, VIEWER_SOURCES } from '../lib/scope.mjs';
+import { families as heroFamilies, openStage, assertStage } from './hero.mjs';
 
 // ---------------------------------------------------------------------------
 // Local helpers: the editor-driving ones stay here for the reason lib/ui.mjs
@@ -188,6 +192,64 @@ async function openFirstMatch(page, base, compId) {
 // (viewer_competition.jsx:713), so it is the final .vsched group on the page.
 const recentItems = (page) => page.locator('.vsched').last().locator('.vsched-item');
 
+// ---------------------------------------------------------------------------
+// live-every-screen
+// ---------------------------------------------------------------------------
+// The "Watch it update live" clip: the docs hero's stage (recipes/hero.mjs and
+// hero-stage.html), filmed while the court console scores the running bout.
+// One page, three live frames of one server, so the clip shows the push
+// landing on the display and the phone rather than three recordings cut
+// together. The console frame is driven; the other two are only watched.
+//
+// Its family is the hero's seed under a key of its own, not `heroLive`
+// itself. A family is seeded once and its recipes run in registry order,
+// which puts this file's recipes before hero.mjs's: the clip finishes the
+// bout the stills photograph running, so on a shared fixture `make
+// docs/media` would leave the stills nothing on court.
+const STAGE_FRAMES = {
+  console: (page) => page.frameLocator('iframe[name="console"]').locator(INLINE_EDITOR).first(),
+  display: (page) => page.frame({ name: 'display' }),
+  phone: (page) => page.frameLocator('iframe[name="phone"]'),
+};
+
+// The display's highlighted row is the running bout (display_scoreboard.jsx,
+// `tvd-indiv-row-now`). Its text is what a push changes: a new mark on this
+// bout, or a different bout once the console starts the next one.
+const DISPLAY_NOW = '[data-testid="tvd-indiv-row-now"]';
+const displayNow = (page) => STAGE_FRAMES.display(page).locator(DISPLAY_NOW).first().innerText();
+
+// Wait on the push itself: the display's running row reading something other
+// than it did before the tap. No fixed sleep stands in for it.
+async function displayMovesOn(page, before) {
+  await STAGE_FRAMES.display(page).waitForFunction(([sel, was]) => {
+    const row = document.querySelector(sel);
+    return !!row && row.innerText !== was;
+  }, [DISPLAY_NOW, before], { timeout: 20000 });
+}
+
+// A button pressed inside the console frame. Not a pointer click: the stage
+// draws the console at 0.36 of its size, and a Playwright click into that
+// scaled frame reports success while the app never sees it (measured: the
+// ippon stayed unscored and the display never moved). The click event goes
+// to the button itself and through the app's own handler, as a keyboard
+// press would, with no focus ring left on a screen nobody focused.
+const press = (locator) => locator.dispatchEvent('click');
+
+// One ippon tapped on the console, and the clip waits until the display shows
+// it, paced past the bounce window for a second tap on the same side
+// (lib/editor.mjs).
+async function pointOnEveryScreen(page, pace, side, waza) {
+  const before = await displayNow(page);
+  await pace(page, side);
+  await press(STAGE_FRAMES.console(page)
+    .locator(`.sb-side--${side} .ipt-btn`, { hasText: new RegExp(`^${waza}$`) }).first());
+  await displayMovesOn(page, before);
+}
+
+// The phone's watchlist card shows the followed competitor's result once
+// their bout is finished (viewer_watchlist.jsx, `wl-hero__score`).
+const phoneResult = (page) => STAGE_FRAMES.phone(page).locator('[data-testid="watch-hero"] .wl-hero__score').first();
+
 export const families = {
   // Two 2-team kachinuki competitions, started and ready to score: a knockout
   // (where a tie cannot end the encounter) and a league (where it can).
@@ -270,6 +332,18 @@ export const families = {
         .waitFor({ state: 'visible', timeout: 15000 });
       return { compId: LIVE_COMP, adminPage, adminContext: context };
     },
+  },
+
+  // The hero's fixture, seeded again for the clip (see live-every-screen
+  // above for why it is not `heroLive` itself).
+  heroLiveClip: {
+    ...heroFamilies.heroLive,
+    // SINCE scoping inputs (lib/scope.mjs): the three surfaces on the stage
+    // (the court console, the display, the public viewer and its
+    // watchlist), the editor the seed and the clip drive, and the hero's own
+    // seed and stage page, which this file reads but does not declare.
+    sources: ['web-mobile/js/admin_shiaijo', 'web-mobile/js/display', ...VIEWER_SOURCES,
+      ...SCORE_EDITOR_SOURCES, 'scripts/screenshots/recipes/hero'],
   },
 };
 
@@ -429,7 +503,7 @@ export const recipes = [
     //
     // Kept LAST in this list on purpose. Its fixture parks a running match, and
     // the runner seeds a family immediately before its first recipe, so
-    // anything this file starts happens after the other two are done.
+    // anything this file starts happens after the two recipes above it are done.
     name: 'realtime-update',
     family: 'videoLive',
     route: `/competition/${LIVE_COMP}`,
@@ -455,6 +529,71 @@ export const recipes = [
     assert: async ({ page }) => {
       const n = await recentItems(page).count();
       if (n < 3) throw new Error(`realtime-update: only ${n} recent results - the push never landed`);
+    },
+  },
+
+  {
+    // The hero stage, filmed: the console scores the bout the hero shows
+    // running, finishes it, and starts the next; the display follows every
+    // tap and the phone shows its competitor's result.
+    name: 'live-every-screen',
+    family: 'heroLiveClip',
+    // The wide stage is 1440x859 (docs/screenshots/hero.png at DPR 2).
+    viewport: { width: 1440, height: 860 },
+    // Rendered at DPR 2 and filmed at the viewport's size, so the frames'
+    // small type is drawn from twice the pixels before the encoder sees it.
+    dpr: 2,
+    // As the stills: every surface on the stage is a touch screen.
+    touch: true,
+    capture: 'video',
+    // No `route` and no `auth`: openStage loads the stage and signs the
+    // console in on its own origin only, as it does for the stills. The
+    // camera is rolling while it does, so the clip opens on the phone
+    // looking its competitor up by number.
+    drive: async ({ page, base, fixture }) => {
+      fixture.t0 = Date.now();
+      const marks = [];
+      const mark = (l) => marks.push([((Date.now() - fixture.t0) / 1000).toFixed(1), l]);
+      await openStage(page, base, fixture, 'wide');
+      mark('stage live');
+      await page.waitForTimeout(2000);
+
+      // The hero's moment is one point each; Aka's second point decides it.
+      const pace = sameSideTapPacer();
+      await pointOnEveryScreen(page, pace, 'aka', 'M');
+      mark('aka M on the display');
+      await page.waitForTimeout(2200);
+
+      // The court console's commit is "Finish + Start Next", a two-tap guard:
+      // the first tap arms it (`btn--confirm`), the second, past the bounce
+      // window, commits and starts the court's next bout.
+      const before = await displayNow(page);
+      const finish = STAGE_FRAMES.console(page).locator('.score-nav__actions .btn--primary').first();
+      await press(finish);
+      await STAGE_FRAMES.console(page).locator('.score-nav__actions .btn--primary.btn--confirm')
+        .first().waitFor({ state: 'visible', timeout: 10000 });
+      await page.waitForTimeout(Math.max(900, TAP_DWELL_MS));
+      await press(finish);
+      await phoneResult(page).waitFor({ state: 'visible', timeout: 20000 });
+      await displayMovesOn(page, before);
+      mark('finished: phone result, display on the next bout');
+      await page.waitForTimeout(2600);
+
+      // The next bout, scored on, so the display is seen following a second
+      // bout as closely as the first.
+      await pointOnEveryScreen(page, pace, 'shiro', 'K');
+      mark('next bout: shiro K');
+      await page.waitForTimeout(1800);
+      await pointOnEveryScreen(page, pace, 'aka', 'D');
+      mark('next bout: aka D');
+      await page.waitForTimeout(2800);
+      console.log(`  live-every-screen MARKS ${JSON.stringify(marks)}`);
+    },
+    assert: async ({ page }) => {
+      await assertStage(page, 'wide');
+      if (!(await phoneResult(page).isVisible())) {
+        throw new Error('live-every-screen: the phone never showed its competitor\'s result');
+      }
     },
   },
 ];

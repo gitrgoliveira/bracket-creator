@@ -3,12 +3,13 @@
 Regenerates every screenshot and video the documentation embeds, by driving the
 real application in a browser.
 
-    make docs/screenshots                        # the 45 application screenshots
-    make docs/videos                             # the 3 application videos
+    make docs/screenshots                        # the 47 application screenshots
+    make docs/videos                             # the 4 application videos
     make docs/media                              # both
 
     make docs/screenshots NAME=mobile-dashboard  # one capture
     make docs/screenshots FAMILY=editors         # one group
+    make docs/screenshots FAMILY=heroLive        # the landing page's hero images
     make docs/videos NAME=kachinuki-demo         # one video
     make docs/screenshots SINCE=main             # only the groups your changes reach
     make docs/media KIND=video FAMILY=videoLive  # docs/media narrowed to stills or videos
@@ -121,6 +122,48 @@ would pull it into `audit-ci`'s scope.
     lib/fixture.mjs  read-back checks that refuse to capture a bad fixture
     lib/png.mjs      PNG dimensions and the pixel compare behind `unchanged`
     recipes/         one file per group, registered in recipes/index.mjs
+    recipes/hero-stage.html
+                     the page the hero is photographed on (see below)
+
+## The hero stage
+
+The landing page's hero, `hero.png` and its narrow twin `hero-mobile.png`, shows
+one bout on three screens at once. The `heroLive` group (`recipes/hero.mjs`)
+seeds one tournament, plays two bouts on shiaijo A through the score editor and
+leaves a third running, part scored. Both captures then photograph one page,
+`recipes/hero-stage.html`, which holds a live frame for each screen:
+
+1. the court console, `/admin/shiaijo/A`, at 1180x820 (a tablet), signed in;
+2. the court display, `/display?court=A`, at 1280x720 (a TV);
+3. a 390x844 phone that never signed in, following one competitor of the
+   running bout on its watchlist.
+
+Each frame lays out at its device's size and is scaled down on the stage, so
+the three are views of the same server at the same moment, not three images
+put together afterwards. `hero` is the stage at 1440 CSS pixels wide with all
+three and their numbered labels; `hero-mobile` is 600 wide with the display
+and the phone only. Both are taken at a device scale factor of 2, as the
+element `#stage` rather than the viewport, so their size is the composition's.
+The "Watch it update live" clip records the same stage, so the stills and the
+clip cannot disagree about the layout.
+
+Three things about the stage are not obvious from the code:
+
+- **Two names for one server.** The console must be signed in and the phone
+  must not, and the sign-in is two `localStorage` keys that a context's init
+  script would set in every frame. So the console is opened on `localhost` and
+  the display and phone on `127.0.0.1`, and the keys are set on the console's
+  origin only. The captures check each frame's own storage before they are
+  taken.
+- **The stage is opened as a file.** A page the harness serves by intercepting
+  a request has no address of its own, so Chromium's local network checks
+  treat it as a public site and refuse its `127.0.0.1` frames. A `file:` page
+  may frame both names.
+- **No pointer clicks inside a scaled frame.** Playwright misplaces a click
+  inside a frame the stage has scaled down: at the narrow stage's 0.85 every
+  click on the phone's watchlist box was refused as landing on another
+  element. The phone is driven by keyboard instead (type into the box, Enter
+  on the suggestion). Drive a scaled frame the same way.
 
 ## The rule that shapes the seeding
 
@@ -152,7 +195,9 @@ Most captures are at a device scale factor of 1, so the committed dimensions are
 the viewport. Six are at 2, where a committed 2560x1800 means a 1280x900
 viewport: `mobile-dashboard`, `mobile-participants`, `mobile-draw-preview`,
 `mobile-pool-standings`, `selfrun-register` and `selfrun-viewer-home`. Those six
-declare `dpr: 2`; a recipe that says nothing is at 1. A phone capture that
+declare `dpr: 2`; a recipe that says nothing is at 1. `hero` and `hero-mobile`
+are at 2 too, but crop to an element, so their size is the element's (see The
+hero stage below). A phone capture that
 must lay out as on a touch screen (the calendar's phone layout, with no Move buttons)
 declares `touch: true`. The runner compares width always,
 and height for every mode except `fullPage`, whose height moves with content.

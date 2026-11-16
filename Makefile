@@ -356,8 +356,9 @@ docs/build: $(DOCS_STAMP) docs/prose ## Build the docs with Zensical (strict) an
 
 docs/linkcheck: docs/build ## Same as docs/build (the link check runs inside it)
 
-docs/prose: ## Check the docs sources against the public-prose rules (stdlib-only, no venv needed)
-	$(PYTHON) docs/check_prose.py docs
+docs/prose: ## Check the docs sources and theme templates against the public-prose rules (stdlib-only, no venv needed)
+	$(PYTHON) docs/test_check_prose.py
+	$(PYTHON) docs/check_prose.py docs overrides
 
 docs/clean: ## Remove the docs venv, the built site and Zensical's build cache
 	@echo "Removing $(DOCS_VENV), site/ and .cache/..."

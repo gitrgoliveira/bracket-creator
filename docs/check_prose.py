@@ -1,8 +1,14 @@
 #!/usr/bin/env python3
 """Check the public docs sources for house-style prose violations.
 
-This runs against the Markdown SOURCES under ``docs/`` (not the built site),
-so it catches wording problems before ``zensical build`` ever renders them.
+This runs against the SOURCES (not the built site): the Markdown pages under
+``docs/`` and the theme's HTML templates under ``overrides/``, so it catches
+wording problems before ``zensical build`` ever renders them. An HTML file is
+read for the text between its tags and the attributes a person reads (``alt``,
+``title``, ``aria-label``, and ``content`` on a ``<meta>``); its ``<style>``,
+``<script>``, ``<pre>`` and code elements, HTML comments, and Jinja
+(``{# #}``, ``{{ }}``, ``{% %}``) are skipped. Block tags end a paragraph
+there the way a blank line does in Markdown (refer to ``check_html``).
 Seven rules are enforced, each of which the public docs must never contain:
 
 * ``em-dash``: the character U+2014 (an em dash). House style writes short
@@ -54,10 +60,13 @@ preserved so a hit's line number can still be computed), never against a
 single line alone.
 
 Usage:
-    python3 docs/check_prose.py [docs_dir]   # default: docs
+    python3 docs/check_prose.py [path ...]   # default: docs
+
+Each path is a ``.md`` or ``.html`` file, or a directory walked for both.
+Tests: ``python3 docs/test_check_prose.py``.
 
 Exit code: 0 when no file has a violation, 1 when any do, 2 on a usage
-error (missing docs dir).
+error (a missing path, or a file that is neither .md nor .html).
 """
 
 from __future__ import annotations
@@ -65,6 +74,7 @@ from __future__ import annotations
 import os
 import re
 import sys
+from html.parser import HTMLParser
 
 SKIP_FILES = {
     os.path.join("dev-guide", "code_of_conduct.md"),
@@ -323,51 +333,201 @@ def check_paragraphs(prose_lines: list[tuple[int, str]]):
     """
     normalized = [(lineno, _paragraph_prose(line)) for lineno, line in prose_lines]
     for start, paragraph in iter_paragraphs(normalized):
-        for name, pattern in PARAGRAPH_RULES:
-            for m in pattern.finditer(paragraph):
-                lineno = start + paragraph.count("\n", 0, m.start())
-                excerpt = re.sub(r"\s+", " ", m.group(0)).strip()
-                yield lineno, name, excerpt
+        yield from _paragraph_hits(start, paragraph)
 
 
-def main() -> int:
-    root = sys.argv[1] if len(sys.argv) > 1 else "docs"
-    if not os.path.isdir(root):
+def _paragraph_hits(start: int, paragraph: str):
+    """Yield (lineno, rule, excerpt) for every PARAGRAPH_RULES hit in one
+    paragraph whose first line is ``start`` and whose lines are joined with
+    "\\n", one per source line."""
+    for name, pattern in PARAGRAPH_RULES:
+        for m in pattern.finditer(paragraph):
+            lineno = start + paragraph.count("\n", 0, m.start())
+            excerpt = re.sub(r"\s+", " ", m.group(0)).strip()
+            yield lineno, name, excerpt
+
+
+def check_markdown(text: str) -> list[tuple[int, str, str]]:
+    """Return every (lineno, rule, excerpt) violation in a Markdown source."""
+    hits: list[tuple[int, str, str]] = []
+    prose_lines = list(iter_prose_lines(text))
+    for lineno, line in prose_lines:
+        for rule in check_line(line):
+            hits.append((lineno, rule, line.strip()))
+    hits.extend(check_paragraphs(prose_lines))
+    return hits
+
+
+# --- HTML -------------------------------------------------------------------
+#
+# A theme override (overrides/*.html) is a Jinja template whose text a reader
+# sees as directly as a Markdown page's, so the same rules apply to it. What a
+# person reads there is the text between tags plus a few attributes (an
+# image's alt, a tooltip, a screen reader's label, a <meta> description that
+# shows up in search results and link previews). Everything else is not
+# prose: styles, scripts, preformatted and code text, comments, and Jinja.
+
+# Jinja comments, expressions and statements, masked out BEFORE the HTML is
+# parsed, so a "{% if a > b %}" can never close a tag and an expression's
+# string literal is never read as text. Each is replaced by spaces with its
+# newlines kept, so every later line number still matches the source.
+JINJA_RE = re.compile(r"\{#.*?#\}|\{\{.*?\}\}|\{%.*?%\}", re.DOTALL)
+
+# Elements whose whole content is skipped. `code` (and `kbd`, `samp`) mirror
+# the Markdown side, which skips inline code spans.
+HTML_SKIP_TAGS = {"style", "script", "pre", "code", "kbd", "samp", "template"}
+
+# Phrasing elements that sit inside a run of prose without ending it, so
+# "a <strong>default</strong> <em>win</em>" still reads as one phrase. Any
+# other tag ends the current block, the way a blank line ends a Markdown
+# paragraph, so text in two separate <p>s is never read as one sentence.
+HTML_INLINE_TAGS = {
+    "a", "abbr", "b", "bdi", "bdo", "br", "cite", "data", "dfn", "em", "i",
+    "mark", "q", "s", "small", "span", "strong", "sub", "sup", "time", "u",
+    "var", "wbr",
+}
+
+# Attributes a person reads, on any element; plus `content`, read only on a
+# <meta>.
+HTML_READ_ATTRS = {"alt", "title", "aria-label"}
+
+
+def _mask(m: re.Match[str]) -> str:
+    return re.sub(r"[^\n]", " ", m.group(0))
+
+
+class _ProseHTMLParser(HTMLParser):
+    """Collect the person-read text of an HTML document as blocks, each a
+    (start_lineno, text) pair whose text holds one "\\n" per source line, so
+    a hit's line can be recovered by counting newlines as for Markdown."""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.blocks: list[tuple[int, str]] = []
+        self._skip_depth = 0
+        self._start: int | None = None
+        self._lines: list[str] = []
+
+    def _add(self, lineno: int, text: str) -> None:
+        for i, piece in enumerate(text.split("\n")):
+            line = lineno + i
+            if self._start is None:
+                if not piece.strip():
+                    continue
+                self._start = line
+                self._lines = [""]
+            while self._start + len(self._lines) - 1 < line:
+                self._lines.append("")
+            self._lines[-1] += piece
+
+    def _flush(self) -> None:
+        if self._start is not None:
+            self.blocks.append((self._start, "\n".join(self._lines)))
+        self._start = None
+        self._lines = []
+
+    def handle_starttag(self, tag, attrs):
+        lineno = self.getpos()[0]
+        if tag not in HTML_INLINE_TAGS:
+            self._flush()
+        if tag in HTML_SKIP_TAGS:
+            self._skip_depth += 1
+            return
+        if self._skip_depth:
+            return
+        for name, value in attrs:
+            if value and (name in HTML_READ_ATTRS or (tag == "meta" and name == "content")):
+                # An attribute is its own block: alt text never joins the
+                # prose around the image into one sentence.
+                saved = (self._start, self._lines)
+                self._start, self._lines = None, []
+                self._add(lineno, value)
+                self._flush()
+                self._start, self._lines = saved
+
+    def handle_endtag(self, tag):
+        if tag in HTML_SKIP_TAGS:
+            self._skip_depth = max(0, self._skip_depth - 1)
+        if tag not in HTML_INLINE_TAGS:
+            self._flush()
+
+    def handle_data(self, data):
+        if not self._skip_depth:
+            self._add(self.getpos()[0], data)
+
+    def close(self) -> None:
+        super().close()
+        self._flush()
+
+
+def check_html(text: str) -> list[tuple[int, str, str]]:
+    """Return every (lineno, rule, excerpt) violation in an HTML (or Jinja
+    template) source: the line rules on each line of each block of text,
+    the paragraph rules on each block as a whole."""
+    parser = _ProseHTMLParser()
+    parser.feed(JINJA_RE.sub(_mask, text))
+    parser.close()
+
+    hits: list[tuple[int, str, str]] = []
+    for start, block in parser.blocks:
+        lines = block.split("\n")
+        for offset, line in enumerate(lines):
+            for rule in check_line(line):
+                hits.append((start + offset, rule, line.strip()))
+        hits.extend(_paragraph_hits(start, "\n".join(_paragraph_prose(line) for line in lines)))
+    return hits
+
+
+CHECKERS = {".md": check_markdown, ".html": check_html}
+
+
+def collect_files(paths: list[str]) -> list[str]:
+    """Expand each path: a file is checked as given, a directory is walked for
+    its .md and .html files (SKIP_FILES, relative to it, left out). Raises
+    ValueError naming the first path that is neither."""
+    files: list[str] = []
+    for root in paths:
+        if os.path.isfile(root):
+            if os.path.splitext(root)[1] not in CHECKERS:
+                raise ValueError(f"not a .md or .html file: {root}")
+            files.append(root)
+            continue
+        if not os.path.isdir(root):
+            raise ValueError(f"path not found: {root}")
+        for dirpath, _dirs, filenames in os.walk(root):
+            for name in filenames:
+                if os.path.splitext(name)[1] not in CHECKERS:
+                    continue
+                path = os.path.join(dirpath, name)
+                if os.path.relpath(path, root) in SKIP_FILES:
+                    continue
+                files.append(path)
+    return sorted(set(files))
+
+
+def main(argv: list[str] | None = None) -> int:
+    paths = (sys.argv[1:] if argv is None else argv) or ["docs"]
+    try:
+        files = collect_files(paths)
+    except ValueError as err:
         print(
-            f"error: docs dir not found: {root}\n"
-            "usage: python3 docs/check_prose.py [docs_dir]",
+            f"error: {err}\nusage: python3 docs/check_prose.py [path ...]",
             file=sys.stderr,
         )
         return 2
 
-    md_files = []
-    for dirpath, _dirs, filenames in os.walk(root):
-        for name in filenames:
-            if not name.endswith(".md"):
-                continue
-            path = os.path.join(dirpath, name)
-            rel = os.path.relpath(path, root)
-            if rel in SKIP_FILES:
-                continue
-            md_files.append(path)
-
     bad = False
-    for path in sorted(md_files):
+    for path in files:
         with open(path, encoding="utf-8") as fh:
             text = fh.read()
-        prose_lines = list(iter_prose_lines(text))
-        for lineno, line in prose_lines:
-            for rule in check_line(line):
-                bad = True
-                print(f"{path}:{lineno}: {rule}: {line.strip()}")
-        for lineno, rule, excerpt in check_paragraphs(prose_lines):
+        for lineno, rule, excerpt in CHECKERS[os.path.splitext(path)[1]](text):
             bad = True
             print(f"{path}:{lineno}: {rule}: {excerpt}")
 
     if bad:
         return 1
 
-    print(f"OK: {len(md_files)} files, no prose-rule violations")
+    print(f"OK: {len(files)} files, no prose-rule violations")
     return 0
 
 

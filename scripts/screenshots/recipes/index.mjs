@@ -16,6 +16,7 @@ import * as videos from './videos.mjs';
 import * as editors from './editors.mjs';
 import * as scored from './scored.mjs';
 import * as knockout from './knockout.mjs';
+import * as hero from './hero.mjs';
 
 // Each module paired with its file name, because a module cannot name its own
 // file and the SINCE scoping (lib/scope.mjs) needs to know which recipe files
@@ -30,9 +31,15 @@ const groups = [
   [editors, 'editors.mjs'],
   [scored, 'scored.mjs'],
   [knockout, 'knockout.mjs'],
+  [hero, 'hero.mjs'],
 ];
 
-// family -> Set of repo-relative recipe file paths that touch it.
+// family -> Set of repo-relative recipe file paths that touch it. A group may
+// also list `assets`: files beside it in recipes/ that it reads at run time
+// (hero.mjs opens hero-stage.html as its captures' page). An asset counts as a
+// recipe file of every family the group declares, so a change to it re-runs
+// that group on a scoped run; lib/scope.mjs keeps everything under recipes/
+// out of the every-family harness set, so nothing else would claim it.
 export const recipeFiles = new Map();
 const touches = (family, file) => {
   if (!recipeFiles.has(family)) recipeFiles.set(family, new Set());
@@ -45,6 +52,9 @@ const touches = (family, file) => {
 export const families = {};
 for (const [group, file] of groups) {
   for (const r of group.recipes || []) touches(r.family, file);
+  for (const asset of group.assets || []) {
+    for (const key of Object.keys(group.families || {})) touches(key, asset);
+  }
   for (const [key, family] of Object.entries(group.families || {})) {
     touches(key, file);
     // Re-exporting another file's family is how two groups share one seeded

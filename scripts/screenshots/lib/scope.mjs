@@ -18,10 +18,11 @@
 //   1. A harness file (the runner, lib/, the registry, the Makefile) can alter
 //      any capture, so it selects every family.
 //   2. A path a family CLAIMS - by a `sources` prefix, or by being one of the
-//      recipe files that declares it or holds its recipes - selects that
-//      family. A family that declares no `sources` is taken to depend on all
-//      application source, so a new family never silently sits out a scoped
-//      run.
+//      recipe files that declares it or holds its recipes, or an asset such a
+//      file reads at run time (a group's `assets`, recipes/index.mjs; the hero
+//      stage page) - selects that family. A family that declares no
+//      `sources` is taken to depend on all application source, so a new
+//      family never silently sits out a scoped run.
 //   3. Application source that no family claims selects every family. The
 //      shared modules (styles.css, app.jsx, the Go handlers, the scoreboard
 //      primitives) are deliberately claimed by nobody, because a change there
@@ -39,9 +40,9 @@ import { REPO } from './server.mjs';
 const under = (p, prefixes) => prefixes.some((x) => p.startsWith(x));
 
 // Rule 1's set is the harness MINUS the recipe files: everything under
-// scripts/screenshots/ except the per-group recipe files (rule 2 scopes those
-// per file) and prose (a README edit reaches no capture), plus the Makefile
-// that invokes it. The registry, recipes/index.mjs, is harness rather than
+// scripts/screenshots/ except the per-group recipe files and their assets
+// (rule 2 scopes those per file) and prose (a README edit reaches no
+// capture), plus the Makefile that invokes it. The registry, recipes/index.mjs, is harness rather than
 // recipe: it is what wires every group in, so it stays in this set even
 // though it lives in that directory - a review caught it falling through to
 // "no capture depends on it" when this was first written as a prefix.

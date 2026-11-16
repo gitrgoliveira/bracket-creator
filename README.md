@@ -67,7 +67,7 @@ bracket-creator create-knockout -t 5 -f teams.csv -o knockout.xlsx
 
 **A shared Google Sheet.** Upload the workbook to Google Drive and fill results in from any device, so every shiai-jo works from the same document. Refer to [Keep courts in sync](https://gitrgoliveira.github.io/bracket-creator/user-guide/start-here/first-tournament/#keep-courts-in-sync).
 
-**Paper only.** Print the sheets and run the day with pens: the workbooks are laid out for A4 and A3, and the [print command](https://gitrgoliveira.github.io/bracket-creator/user-guide/commands/print/) turns them into PDFs. Refer to [What you need on tournament day](https://gitrgoliveira.github.io/bracket-creator/user-guide/start-here/first-tournament/#what-you-need-on-tournament-day).
+**Paper only.** Print the sheets and run the day with pens: the workbooks are laid out for A4 and A3, and the [print command](https://gitrgoliveira.github.io/bracket-creator/user-guide/commands/print/) turns them into PDFs. Refer to [If you print your brackets instead](https://gitrgoliveira.github.io/bracket-creator/user-guide/start-here/first-tournament/#if-you-print-your-brackets-instead).
 
 `bracket-creator serve` starts the Legacy Web UI, a browser form for the same Excel generators, kept for compatibility. Refer to the [Legacy Web UI guide](https://gitrgoliveira.github.io/bracket-creator/user-guide/organisers/web-ui/).
 

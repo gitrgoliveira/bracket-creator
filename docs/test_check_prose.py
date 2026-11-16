@@ -129,6 +129,19 @@ class HtmlRulesTest(unittest.TestCase):
     def test_code_element_is_ignored(self):
         self.assertEqual(check_prose.check_html("<p>Run <code>--mat</code> now</p>"), [])
 
+    def test_code_kbd_samp_inside_a_phrase_do_not_split_it(self):
+        for tag in ("code", "kbd", "samp"):
+            html = f"<p>A side wins <{tag}>2-0</{tag}> by default.</p>"
+            self.assertEqual(rules_by_line(check_prose.check_html(html)), [(1, "wins-by-default")], tag)
+
+    def test_escaped_angle_brackets_are_visible_text(self):
+        html = "<p>Do not write &lt;mat&gt; or &lt;default win&gt;.</p>"
+        self.assertEqual(rules_by_line(check_prose.check_html(html)), [(1, "default-win"), (1, "mat")])
+
+    def test_multiline_printed_literal_keeps_line_numbers(self):
+        html = '{% set lede = "fine" %}<p>{{\n lede\n}}</p>\n<p>the mat</p>\n'
+        self.assertEqual(rules_by_line(check_prose.check_html(html)), [(4, "mat")])
+
     def test_jinja_with_angle_bracket_does_not_open_a_tag(self):
         html = "{% if a > b %}<p>the mat</p>{% endif %}"
         self.assertEqual(rules_by_line(check_prose.check_html(html)), [(1, "mat")])
@@ -193,6 +206,10 @@ class HtmlRulesTest(unittest.TestCase):
     def test_attribute_hit_is_on_the_line_of_the_attribute(self):
         html = '<p>ok</p>\n<img\n  src="a.png"\n  alt="the mat"\n  loading="lazy">\n'
         self.assertEqual(rules_by_line(check_prose.check_html(html)), [(4, "mat")])
+
+    def test_attribute_name_inside_an_earlier_value_is_not_the_attribute(self):
+        html = '<a href="https://x.com?title=1"\n  title="the mat">x</a>'
+        self.assertEqual(rules_by_line(check_prose.check_html(html)), [(2, "mat")])
 
     def test_attribute_value_on_the_next_line_is_found(self):
         html = '<img src="a.png" alt=\n"the mat">'

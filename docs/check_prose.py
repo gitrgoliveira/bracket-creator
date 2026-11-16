@@ -173,14 +173,13 @@ COMPLETE_COMMENT_RE = re.compile(r"<!--.*?-->")
 
 def check_line(line: str) -> list[str]:
     """Return the deduplicated list of rule names violated by one prose line."""
-    text = HTML_TAG_RE.sub(" ", line)
-    rules: list[str] = []
+    return line_rules(HTML_TAG_RE.sub(" ", line))
 
-    for name, pattern in RULES:
-        if pattern.search(text):
-            rules.append(name)
 
-    return rules
+def line_rules(text: str) -> list[str]:
+    """Return the deduplicated list of line rules violated by text that is
+    already plain prose (no markup left to strip)."""
+    return [name for name, pattern in RULES if pattern.search(text)]
 
 
 # Markdown emphasis delimiters. Stripped (not replaced with a space) before
@@ -205,8 +204,7 @@ def _paragraph_prose(line: str) -> str:
     joined with "\\n" and silently eat it, throwing off every lineno that
     check_paragraphs recovers by counting newlines.
     """
-    text = HTML_TAG_RE.sub(" ", line)
-    return EMPHASIS_RE.sub("", text)
+    return EMPHASIS_RE.sub("", HTML_TAG_RE.sub(" ", line))
 
 
 def _fence_marker(stripped: str) -> tuple[str | None, int]:
@@ -372,11 +370,13 @@ def check_markdown(text: str) -> list[tuple[int, str, str]]:
 # parsed, so a "{% if a > b %}" can never close a tag and an expression's
 # string literal is never read as text. Each is replaced by spaces with its
 # newlines kept, so every later line number still matches the source. The one
-# exception is a plain `{{ name }}` that prints a string `set` earlier (below).
+# exception is a plain `{{ name }}` that prints a string `set` earlier (below),
+# which is replaced by that text, then the newlines the expression spanned.
 JINJA_RE = re.compile(r"\{#.*?#\}|\{\{.*?\}\}|\{%.*?%\}", re.DOTALL)
 
 # Elements whose whole content is skipped. `code` (and `kbd`, `samp`) mirror
-# the Markdown side, which skips inline code spans.
+# the Markdown side, which skips inline code spans, so they are phrasing
+# elements too (below): a skipped span leaves the sentence around it whole.
 HTML_SKIP_TAGS = {"style", "script", "pre", "code", "kbd", "samp", "template"}
 
 # Phrasing elements that sit inside a run of prose without ending it, so
@@ -388,7 +388,7 @@ HTML_INLINE_TAGS = {
     "a", "abbr", "b", "bdi", "bdo", "br", "button", "cite", "data", "del",
     "dfn", "em", "i", "img", "input", "ins", "label", "mark", "output", "q",
     "s", "select", "small", "span", "strong", "sub", "sup", "textarea",
-    "time", "u", "var", "wbr",
+    "time", "u", "var", "wbr", "code", "kbd", "samp",
 }
 
 # The see-link rule's HTML shape: text ending "See" (or "See the", "See
@@ -400,6 +400,12 @@ HTML_SEE_LINK_RE = re.compile(r"\b[Ss]ee\s+(?:(?:the|also)\s+)?$")
 # <meta>.
 HTML_READ_ATTRS = {"alt", "title", "aria-label"}
 
+
+# A start tag's name, and one attribute in it (name, then `=` and a quoted or
+# bare value when it has one), so an attribute is found by walking the tag and
+# a name inside an earlier attribute's quoted value is never mistaken for it.
+HTML_TAG_NAME_RE = re.compile(r"<[^\s/>]*")
+HTML_ATTR_RE = re.compile(r"""([^\s"'=<>/]+)(?:(\s*=\s*)(?:"[^"]*"|'[^']*'|[^\s"'>]+))?""")
 
 # A `{% set name = "text" %}` whose value is one plain string literal on one
 # line, and a `{{ name }}` that prints it, bare or through filters
@@ -417,8 +423,9 @@ def _mask(m: re.Match[str]) -> str:
 def _substitute_literals(text: str) -> str:
     """Replace each `{{ name }}` (filters included) that prints a
     `{% set name = "literal" %}` with that literal, escaped so it stays inside
-    an attribute, and mask every other Jinja form. A literal holds no newline, so line numbers still match
-    the source."""
+    an attribute, and mask every other Jinja form. A literal holds no newline and
+    the expression's own newlines follow it, so line numbers still match the
+    source."""
     literals = {
         m.group(1): html.escape(m.group(2) if m.group(2) is not None else m.group(3))
         for m in JINJA_SET_RE.finditer(text)
@@ -427,7 +434,7 @@ def _substitute_literals(text: str) -> str:
     def replace(m: re.Match[str]) -> str:
         name = JINJA_NAME_RE.fullmatch(m.group(0))
         if name and name.group(1) in literals:
-            return literals[name.group(1)]
+            return literals[name.group(1)] + "\n" * m.group(0).count("\n")
         return _mask(m)
 
     return JINJA_RE.sub(replace, text)
@@ -451,8 +458,10 @@ class _ProseHTMLParser(HTMLParser):
         """The source line an attribute's value starts on: the tag may wrap, so
         its own start line is not where a hit in an attribute sits."""
         raw = self.get_starttag_text() or ""
-        m = re.search(rf"(?<![\w-]){re.escape(name)}\s*=\s*[\"']?", raw, re.IGNORECASE)
-        return tag_line + (raw.count("\n", 0, m.end()) if m else 0)
+        for m in HTML_ATTR_RE.finditer(raw, HTML_TAG_NAME_RE.match(raw).end()):
+            if m.group(1).lower() == name:
+                return tag_line + raw.count("\n", 0, m.end(2) if m.group(2) else m.start())
+        return tag_line
 
     def _add(self, lineno: int, text: str) -> None:
         for i, piece in enumerate(text.split("\n")):
@@ -522,9 +531,11 @@ def check_html(text: str) -> list[tuple[int, str, str]]:
     for start, block in parser.blocks:
         lines = block.split("\n")
         for offset, line in enumerate(lines):
-            for rule in check_line(line):
+            for rule in line_rules(line):
                 hits.append((start + offset, rule, line.strip()))
-        hits.extend(_paragraph_hits(start, "\n".join(_paragraph_prose(line) for line in lines)))
+        # The parser already decoded entities, so an "&lt;mat&gt;" is visible
+        # text here and no tag is left to strip.
+        hits.extend(_paragraph_hits(start, "\n".join(EMPHASIS_RE.sub("", line) for line in lines)))
     return hits
 
 

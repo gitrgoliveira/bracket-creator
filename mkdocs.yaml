@@ -19,8 +19,9 @@ extra_css:
   - assets/stylesheets/extra.css
   - assets/stylesheets/pool-draw-animation.css
 
-# Mermaid: the theme draws every ```mermaid block itself, on first load and on
-# each instant-navigation page swap. It uses a global `mermaid` when one is
+# Mermaid: the theme draws every ```mermaid block itself on each page load
+# (instant navigation is off, so every link loads its page in full, which the
+# standalone landing page needs). It uses a global `mermaid` when one is
 # loaded, so the library is pinned here rather than taken from Material's
 # floating default.
 extra_javascript:
@@ -34,8 +35,8 @@ extra_javascript:
 
 markdown_extensions:
   # md_in_html lets a raw HTML block carry Markdown (its `markdown`
-  # attribute), which the home page's badges and grid cards and the `bc-fig`
-  # figures use (styled in extra.css), so dropping it breaks the landing page.
+  # attribute), which the `bc-fig` figures use (styled in extra.css), so
+  # dropping it breaks them.
   # attr_list adds classes to images, as in `{ .bc-phone }`.
   - attr_list
   - md_in_html
@@ -83,7 +84,6 @@ theme:
     # navigation.sections is intentionally OFF: with it, every group renders
     # permanently expanded (~30 sidebar rows, overflowing the viewport).
     # Without it, groups are collapsible and only the active path expands.
-    - navigation.instant
     - navigation.tabs
     - navigation.tabs.sticky
     # One-tap copy on every code block: the docs are CLI-heavy (install +
@@ -118,11 +118,8 @@ nav:
   - Home: index.md
   - User guide:
       - Start here:
-          - Choosing your setup: user-guide/start-here/choosing-your-setup.md
           - Your first tournament: user-guide/start-here/first-tournament.md
-      - Install and deployment:
-          - Install: user-guide/install/install.md
-          - Host the tournament app: user-guide/install/hosting.md
+          - Choosing your setup: user-guide/start-here/choosing-your-setup.md
       - For organisers:
           - Input format: user-guide/organisers/input-format.md
           - Run a tournament on the day: user-guide/organisers/run-tournament.md
@@ -140,16 +137,20 @@ nav:
           - Self-run tournaments: user-guide/competitors/self-run.md
       - For spectators:
           - Follow the tournament: user-guide/spectators/following.md
+      - Install and deployment:
+          - Install: user-guide/install/install.md
+          - Host the tournament app: user-guide/install/hosting.md
       - Command line:
-          - create-pools: user-guide/commands/create-pools.md
-          - create-knockout: user-guide/commands/create-knockout.md
           - mobile-app: user-guide/commands/mobile-app.md
-          - print: user-guide/commands/print.md
           - hash-password: user-guide/commands/hash-password.md
           - version: user-guide/commands/version.md
-      - Legacy Web UI:
-          - Overview: user-guide/organisers/web-ui.md
-          - serve: user-guide/commands/serve.md
+      - Other ways to work:
+          - create-pools: user-guide/commands/create-pools.md
+          - create-knockout: user-guide/commands/create-knockout.md
+          - print: user-guide/commands/print.md
+          - Legacy Web UI:
+              - Overview: user-guide/organisers/web-ui.md
+              - serve: user-guide/commands/serve.md
   - Developer guide:
       - Code of conduct: dev-guide/code_of_conduct.md
       - Contributing: dev-guide/contributing.md

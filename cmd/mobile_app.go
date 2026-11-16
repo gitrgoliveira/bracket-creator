@@ -267,7 +267,11 @@ func (o *mobileAppOptions) run(cmd *cobra.Command, args []string) error {
 	backupCtx, cancelBackups := context.WithCancel(context.Background())
 	srv.RegisterOnShutdown(cancelBackups)
 	scheduledBackups := &mobileapp.ScheduledBackups{Store: store}
-	go scheduledBackups.Run(backupCtx)
+	backupsDone := make(chan struct{})
+	go func() {
+		defer close(backupsDone)
+		scheduledBackups.Run(backupCtx)
+	}()
 
 	serveErr := make(chan error, 1)
 	go func() {
@@ -308,6 +312,12 @@ func (o *mobileAppOptions) run(cmd *cobra.Command, args []string) error {
 		slog.Info("mobile-app: shutdown complete")
 		return nil
 	case err := <-serveErr:
+		// The listener never served, so Shutdown never ran and never cancelled
+		// the backup job. Stop it here and wait: its first check runs at once
+		// and may be writing a copy into the data folder, which must be settled
+		// before run returns (a test's TempDir cleanup found it still writing).
+		cancelBackups()
+		<-backupsDone
 		return err
 	}
 }

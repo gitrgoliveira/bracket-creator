@@ -153,6 +153,51 @@ class HtmlRulesTest(unittest.TestCase):
     def test_set_literal_that_is_never_printed_is_ignored(self):
         self.assertEqual(check_prose.check_html('{% set note = "the mat" %}\n<p>ok</p>'), [])
 
+    def test_filtered_print_of_a_set_literal_is_read(self):
+        html = (
+            '{%- set lede = "Score the mat live." -%}\n'
+            "<p>{{ lede | e }}</p>\n"
+            "<p>{{ lede|safe }}</p>\n"
+            "<p>{{ lede if x else y }}</p>\n"
+        )
+        self.assertEqual(
+            rules_by_line(check_prose.check_html(html)),
+            [(2, "mat"), (3, "mat")],
+        )
+
+    def test_see_link_in_html_is_caught(self):
+        for html in (
+            '<p>See <a href="x">the guide</a> first.</p>',
+            '<p>see the <a href="x">guide</a>.</p>',
+            '<p>See also\n<a href="x">the guide</a>.</p>',
+        ):
+            self.assertEqual([r for _l, r, _e in check_prose.check_html(html)], ["see-link"], html)
+
+    def test_see_link_hit_is_on_the_line_of_the_link(self):
+        html = '<p>\n  See\n  <a href="x">the guide</a>.\n</p>\n'
+        self.assertEqual(rules_by_line(check_prose.check_html(html)), [(3, "see-link")])
+
+    def test_see_without_a_link_is_clean(self):
+        for html in (
+            '<p>See the guide <a href="x">here</a>.</p>',
+            '<p>See</p><p><a href="x">the guide</a></p>',
+        ):
+            self.assertEqual(check_prose.check_html(html), [], html)
+
+    def test_phrasing_elements_do_not_split_a_phrase(self):
+        for tag in ('<img src="a.png" alt="">', "<button></button>", "<label></label>",
+                    "<input>", "<select></select>", "<textarea></textarea>"):
+            html = f"<p>a default {tag} win</p>"
+            self.assertEqual(rules_by_line(check_prose.check_html(html)), [(1, "default-win")], tag)
+
+    def test_attribute_hit_is_on_the_line_of_the_attribute(self):
+        html = '<p>ok</p>\n<img\n  src="a.png"\n  alt="the mat"\n  loading="lazy">\n'
+        self.assertEqual(rules_by_line(check_prose.check_html(html)), [(4, "mat")])
+
+    def test_attribute_value_on_the_next_line_is_found(self):
+        html = '<img src="a.png" alt=\n"the mat">'
+        self.assertEqual(rules_by_line(check_prose.check_html(html)), [(2, "mat")])
+
     def test_clean_html_has_no_hits(self):
         self.assertEqual(check_prose.check_html("<p>Every bout on every court.</p>"), [])
 

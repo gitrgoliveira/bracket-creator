@@ -15,10 +15,11 @@ real application in a browser.
     make docs/media KIND=video FAMILY=videoLive  # docs/media narrowed to stills or videos
 
 Screenshots and videos are split because you rarely want both at once. Neither
-is especially slow: measured on one machine, the three videos take about 60
-seconds and the screenshots about 175 (measured when there were 30). A video is recorded in real time and
-paced for a human to follow, so it is the more expensive of the two per clip,
-but there are only three of them.
+is especially slow: measured on one machine, the four videos take about 85
+seconds including the build (measured with the landing page's clip, 2026-11)
+and the screenshots about 175 (measured when there were 30). A video is
+recorded in real time and paced for a human to follow, so it is the more
+expensive of the two per clip, but there are only four of them.
 
 Output lands in `out/`, never straight into `docs/`. Each still is compared
 pixel by pixel against the file it would replace, and a run ends by naming only

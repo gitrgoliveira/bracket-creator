@@ -10,9 +10,11 @@ repo_url: https://github.com/gitrgoliveira/bracket-creator
 #
 # check_prose.py, check_links.py and requirements.txt live under docs/ for
 # proximity to what they check or build, but they are tooling, not site
-# content: exclude them so they never get copied into the published site.
+# content: exclude them, and the bytecode `make docs/prose` leaves beside them,
+# so none of it gets copied into the published site.
 exclude_docs: |
   *.py
+  __pycache__/
   requirements.txt
 
 extra_css:

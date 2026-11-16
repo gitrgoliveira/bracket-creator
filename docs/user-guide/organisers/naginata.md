@@ -80,6 +80,10 @@ Turn on **Engi (kata competition)** on an individual competition's Settings
 tab to switch its score editor to flag counting. Combine it with **Naginata
 competition** so the kata division also gets the single 3rd-place match.
 
+Flag counting is not tied to naginata. Any pair-kata event that a panel judges
+by raised flags, such as iaido or jodo, can use the same setting; leave
+**Naginata competition** off for those.
+
 !!! note "Quick-score and overrides are off for Engi"
     Because every Engi result comes from the flag editor, the kendo shortcuts,
     quick-score, manual winner overrides, kiken, fusenpai, and daihyosen are

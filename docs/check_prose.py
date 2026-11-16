@@ -380,14 +380,21 @@ JINJA_RE = re.compile(r"\{#.*?#\}|\{\{.*?\}\}|\{%.*?%\}", re.DOTALL)
 HTML_SKIP_TAGS = {"style", "script", "pre", "code", "kbd", "samp", "template"}
 
 # Phrasing elements that sit inside a run of prose without ending it, so
-# "a <strong>default</strong> <em>win</em>" still reads as one phrase. Any
-# other tag ends the current block, the way a blank line ends a Markdown
-# paragraph, so text in two separate <p>s is never read as one sentence.
+# "a <strong>default</strong> <em>win</em>" still reads as one phrase, and so
+# does one with an <img> or a <button> in the middle of it. Any other tag ends
+# the current block, the way a blank line ends a Markdown paragraph, so text
+# in two separate <p>s is never read as one sentence.
 HTML_INLINE_TAGS = {
-    "a", "abbr", "b", "bdi", "bdo", "br", "cite", "data", "dfn", "em", "i",
-    "mark", "q", "s", "small", "span", "strong", "sub", "sup", "time", "u",
-    "var", "wbr",
+    "a", "abbr", "b", "bdi", "bdo", "br", "button", "cite", "data", "del",
+    "dfn", "em", "i", "img", "input", "ins", "label", "mark", "output", "q",
+    "s", "select", "small", "span", "strong", "sub", "sup", "textarea",
+    "time", "u", "var", "wbr",
 }
+
+# The see-link rule's HTML shape: text ending "See" (or "See the", "See
+# also") with a link opening right after it. The Markdown rule reads the `[`
+# of a link; here the link's own tag is what follows the words.
+HTML_SEE_LINK_RE = re.compile(r"\b[Ss]ee\s+(?:(?:the|also)\s+)?$")
 
 # Attributes a person reads, on any element; plus `content`, read only on a
 # <meta>.
@@ -395,11 +402,12 @@ HTML_READ_ATTRS = {"alt", "title", "aria-label"}
 
 
 # A `{% set name = "text" %}` whose value is one plain string literal on one
-# line, and a bare `{{ name }}` that prints it. The template's own copy (the
-# headline, the lede) is written this way, so the printed text is read as if
-# it stood where the expression does.
+# line, and a `{{ name }}` that prints it, bare or through filters
+# (`{{ name | e }}`). The template's own copy (the headline, the lede) is
+# written this way, so the printed text is read as if it stood where the
+# expression does.
 JINJA_SET_RE = re.compile(r"""\{%-?\s*set\s+(\w+)\s*=\s*(?:"([^"\n]*)"|'([^'\n]*)')\s*-?%\}""")
-JINJA_NAME_RE = re.compile(r"\{\{-?\s*(\w+)\s*-?\}\}")
+JINJA_NAME_RE = re.compile(r"\{\{-?\s*(\w+)\s*(?:\|[^{}]*?)?-?\}\}")
 
 
 def _mask(m: re.Match[str]) -> str:
@@ -407,9 +415,9 @@ def _mask(m: re.Match[str]) -> str:
 
 
 def _substitute_literals(text: str) -> str:
-    """Replace each `{{ name }}` that prints a `{% set name = "literal" %}`
-    with that literal, escaped so it stays inside an attribute, and mask every
-    other Jinja form. A literal holds no newline, so line numbers still match
+    """Replace each `{{ name }}` (filters included) that prints a
+    `{% set name = "literal" %}` with that literal, escaped so it stays inside
+    an attribute, and mask every other Jinja form. A literal holds no newline, so line numbers still match
     the source."""
     literals = {
         m.group(1): html.escape(m.group(2) if m.group(2) is not None else m.group(3))
@@ -436,6 +444,15 @@ class _ProseHTMLParser(HTMLParser):
         self._skip_depth = 0
         self._start: int | None = None
         self._lines: list[str] = []
+        # Hits the parser finds itself, which the text of a block cannot show.
+        self.hits: list[tuple[int, str, str]] = []
+
+    def _attr_line(self, tag_line: int, name: str) -> int:
+        """The source line an attribute's value starts on: the tag may wrap, so
+        its own start line is not where a hit in an attribute sits."""
+        raw = self.get_starttag_text() or ""
+        m = re.search(rf"(?<![\w-]){re.escape(name)}\s*=\s*[\"']?", raw, re.IGNORECASE)
+        return tag_line + (raw.count("\n", 0, m.end()) if m else 0)
 
     def _add(self, lineno: int, text: str) -> None:
         for i, piece in enumerate(text.split("\n")):
@@ -464,13 +481,17 @@ class _ProseHTMLParser(HTMLParser):
             return
         if self._skip_depth:
             return
+        if tag == "a":
+            m = HTML_SEE_LINK_RE.search("\n".join(self._lines)) if self._start is not None else None
+            if m:
+                self.hits.append((lineno, "see-link", re.sub(r"\s+", " ", m.group(0)) + "<a>"))
         for name, value in attrs:
             if value and (name in HTML_READ_ATTRS or (tag == "meta" and name == "content")):
                 # An attribute is its own block: alt text never joins the
                 # prose around the image into one sentence.
                 saved = (self._start, self._lines)
                 self._start, self._lines = None, []
-                self._add(lineno, value)
+                self._add(self._attr_line(lineno, name), value)
                 self._flush()
                 self._start, self._lines = saved
 
@@ -497,7 +518,7 @@ def check_html(text: str) -> list[tuple[int, str, str]]:
     parser.feed(_substitute_literals(text))
     parser.close()
 
-    hits: list[tuple[int, str, str]] = []
+    hits = list(parser.hits)
     for start, block in parser.blocks:
         lines = block.split("\n")
         for offset, line in enumerate(lines):

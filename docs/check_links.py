@@ -13,11 +13,11 @@ in the Markdown pages; this checker still covers what strict mode never sees:
   heading id in it), and an asset path that resolves nowhere on disk.
 
 Every internal ``<a href>``, ``<img src>``, ``<script src>``, ``<link href>``,
-and media ``src`` (``<video>``, ``<audio>``, ``<source>``: raw-HTML embeds whose
-path the build rewrites as relative to the Markdown file, so a wrong relative
-depth only shows up in the built tree) is resolved against the built tree and,
-when it carries a ``#fragment``, checked against the ``id`` attributes on the
-target page. External links
+``<video poster>`` and media ``src`` (``<video>``, ``<audio>``, ``<source>``:
+raw-HTML embeds whose path the build rewrites as relative to the Markdown file,
+so a wrong relative depth only shows up in the built tree) is resolved against
+the built tree and, when it carries a ``#fragment``, checked against the ``id``
+attributes on the target page. External links
 (http, https, mailto, tel, ...) are deliberately not checked: network probes are
 flaky and do not belong in a build gate.
 
@@ -92,6 +92,8 @@ class Page(HTMLParser):
             self.links.append(a["href"])
         elif tag in ("img", "script", "video", "audio", "source") and a.get("src") is not None:
             self.links.append(a["src"])
+        if tag == "video" and a.get("poster"):
+            self.links.append(a["poster"])
         if tag in ("img", "source") and a.get("srcset"):
             # srcset is a comma-separated list of "url [descriptor]" pairs.
             for entry in a["srcset"].split(","):

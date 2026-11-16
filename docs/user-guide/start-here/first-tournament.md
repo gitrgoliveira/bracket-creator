@@ -43,7 +43,16 @@ Go to the **Scores** tab, open a match, and record the result. Refer to [Scoring
 !!! tip
     Open `http://<laptop address>:8080` on a second screen (a scoreboard TV or a phone on the same network) with no password, for example `http://192.168.1.10:8080`. The laptop's address is the IP address shown in its Wi-Fi or network settings (or printed by `ipconfig` on Windows and `ip addr` on Linux). Standings and brackets update in real time as a scorer records each result. Refer to [Following a tournament](../spectators/following.md) for the full viewer experience.
 
-## What you need on tournament day
+## If you print your brackets instead
+
+Steps 1 to 5 run the whole tournament in the app. To work from printed brackets and an Excel file instead, with no app on the day:
+
+1. **Collect participants**: one name per line in a CSV file ([input format](../organisers/input-format.md))
+2. **Generate the bracket**: run `create-pools` or `create-knockout` ([commands](../commands/create-pools.md))
+3. **Optionally seed** top competitors so they land in separate pools/sides of the bracket ([seeding](../commands/create-pools.md#seeding))
+4. **Print**: the Excel file is laid out to print cleanly on A4/A3
+
+On the day you will need:
 
 - **A3 printer**: for team/competitor name sheets
 - **A4 printer**: for the bracket trees
@@ -52,17 +61,6 @@ Go to the **Scores** tab, open a match, and record the result. Refer to [Scoring
 ### Keep courts in sync
 
 If you have multiple shiai-jo and run on printed brackets, upload the Excel file to Google Drive (or similar) so every table works from the same document.
-
-## Before the tournament
-
-1. **Collect participants**: one name per line in a CSV file ([input format](../organisers/input-format.md))
-2. **Generate the bracket**: run `create-pools` or `create-knockout` ([commands](../commands/create-pools.md))
-3. **Optionally seed** top competitors so they land in separate pools/sides of the bracket ([seeding](../commands/create-pools.md#seeding))
-4. **Print**: the Excel file is laid out to print cleanly on A4/A3
-
-## On the day
-
-Use the **tournament app** to manage pools and scores in real time across all devices on your network (no Excel required on the day). Refer to [Run a tournament](../organisers/run-tournament.md), and to [Backup and restore](../organisers/backup-and-restore.md) for saving the tournament before the event and after each round.
 
 ## Next steps
 

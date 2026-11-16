@@ -66,6 +66,7 @@ html { scrollbar-gutter: auto; }
 	 * product's own paper rather than a default white. */
 	--md-default-bg-color: var(--bc-paper);
 
+	--bc-card-bg:    var(--bc-white);
 	--bc-code-bg:    oklch(0.975 0.008 255);
 	--bc-table-head: var(--bc-navy);
 	--bc-table-head-fg: var(--bc-white);
@@ -84,6 +85,7 @@ html { scrollbar-gutter: auto; }
 	--md-accent-fg-color:  var(--bc-sky);
 	--md-typeset-a-color:  var(--bc-sky);
 
+	--bc-card-bg:    oklch(0.27 0.02 262);
 	--bc-code-bg:    oklch(0.23 0.02 262);
 	--bc-table-head: oklch(0.32 0.04 258);
 	--bc-table-head-fg: var(--bc-ice);

@@ -154,10 +154,11 @@ func refuseDrawnLeagueTiebreak(comp *state.Competition, matchID string, result *
 		// one door a decision reaches the engine as a hikiwake by): nobody can
 		// fight the bout, so encho and hantei are no remedy. The draw is
 		// recorded as a draw nobody fought, for a team's representative bout
-		// and an individual's ippon-shobu bout alike; it counts played while
-		// both sides stay barred (drawnTiebreakOfBarredSides), and the place
-		// it was for, which cannot be shared, goes to the lots the organiser
-		// enters on the chusen panel (barredDrawRuns).
+		// and an individual's ippon-shobu bout alike. Like any drawn
+		// tie-breaker it settles nothing (drawnTiebreakOfBarredSides): the
+		// place it was for, which cannot be shared, goes to the bout fought
+		// again (the reopen) or to the lots the organiser enters on the
+		// chusen panel (barredDrawRuns), their choice.
 		return nil
 	}
 	return wrapValidationErrorf(ErrTiebreakNeedsWinner, "%s", errTiebreakNeedsWinnerSentence)

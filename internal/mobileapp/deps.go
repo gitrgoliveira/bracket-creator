@@ -238,9 +238,10 @@ type EligibilityEngine interface {
 	ReinstateCompetitor(compID, playerID string) (*domain.CompetitorStatus, error)
 	// MaybeAutoCompletePools is the general auto-complete pass, which a lifted
 	// bar owes every competition because it can change who qualifies from a
-	// pool. It reopens only a finished league, whose drawn ippon-shobu bout
-	// settled only while both its sides were barred and owes its fight again,
-	// so the league goes back into match play.
+	// pool. It reopens only a finished league, whose drawn tie-break bout
+	// decided no place only because both its sides, each alone in its run, were
+	// barred and owes its fight again once one can fight, so the league goes
+	// back into match play.
 	MaybeAutoCompletePools(compID string) (engine.AutoCompleteOutcome, error)
 }
 

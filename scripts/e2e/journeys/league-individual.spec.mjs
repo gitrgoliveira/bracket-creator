@@ -392,6 +392,13 @@ test.describe('league-individual', () => {
         for (const name of [TEXT.anotherRound, 'Draw lots instead']) {
           expect(await labelLines(notice().getByRole('button', { name })), `${name} wraps at ${width}px`).toBe(1);
         }
+        // The admin top bar above it keeps one row too: its name gives way,
+        // Public viewer shows its eye alone and Sign out holds one line.
+        const bar = page.locator('.topbar');
+        const barBox = await bar.evaluate((el) => ({ height: el.getBoundingClientRect().height, overflow: el.scrollWidth - el.clientWidth }));
+        expect(barBox.overflow, `the top bar overflows at ${width}px`).toBeLessThanOrEqual(0);
+        expect(barBox.height, `the top bar takes a second row at ${width}px`).toBeLessThan(70);
+        expect(await labelLines(bar.getByRole('button', { name: 'Sign out' })), `Sign out wraps in the top bar at ${width}px`).toBe(1);
         if (width === 375) {
           await notice().scrollIntoViewIfNeeded();
           record({ step: 'pools', action: 'the notice at phone width', shot: await shot(page, 'pools-circle-phone') });
@@ -769,7 +776,8 @@ test.describe('league-individual', () => {
       await expect(notice).toContainText(TEXT.bothBarred);
       // The queue row's reason line says what to do and no longer claims the bout
       // separates two people who cannot fight it.
-      await expect(row.locator('.shiaijo-qrow__reason')).toContainText('Neither can fight: record it as drawn');
+      // It names both ways on once the bout is drawn, and forces neither.
+      await expect(row.locator('.shiaijo-qrow__reason')).toContainText(TEXT.barredReason);
       await expect(row).not.toContainText(/this bout separates them|finished level/);
       const court1 = await readCourt(page);
       record({ step: 'court', action: 'the console with the barred ippon-shobu', ...court1,
@@ -791,13 +799,22 @@ test.describe('league-individual', () => {
         screenshot: await shot(page, `${flow}-console-after`, { fullPage: true }) });
     });
 
-    await test.step('desk: the lots entry is drawn at once, the order entered, and the league finishes', async () => {
+    // Both ways on are offered and neither is forced (operator ruling
+    // 2026-11-16): the drawn bout's notice offers Fight it again, and the lots
+    // entry is drawn at once beside it. Fighting it again would take the lots
+    // off until the bout is drawn again (accepted); this journey enters them.
+    await test.step('desk: the drawn bout offers Fight it again, the lots entry is drawn at once, the order entered, and the league finishes', async () => {
       await openLeague(page, id);
       await expect(circleNotice(page), 'the notice for the tie the drawn bout left').toBeVisible({ timeout: EXPECT_TIMEOUT_MS });
+      const drawn = page.getByTestId('drawn-tiebreak-notice');
+      await expect(drawn, 'the drawn ippon-shobu has its own notice').toHaveCount(1);
+      await expect(drawn).toContainText(TEXT.barredDrawChoice);
+      await expect(drawn.getByRole('button', { name: TEXT.fightAgain, exact: true })).toBeVisible();
       const offersAnotherRound = await circleNotice(page).getByRole('button', { name: TEXT.anotherRound }).count();
-      record({ step: 'pools', action: 'the notice after the drawn ippon-shobu', offersAnotherRound,
+      record({ step: 'pools', action: 'the notices after the drawn ippon-shobu', offersAnotherRound,
+        drawnNotices: await drawnBoutNotices(page),
         screenshot: await shot(page, `${flow}-desk-banner`, { fullPage: true }) });
-      expect(offersAnotherRound, 'neither can fight another round').toBe(0);
+      expect(offersAnotherRound, 'no new round among two who cannot fight').toBe(0);
       const res = await recordLots(page, lots);
       const after = await deskOnceFinished(page);
       const ranks = await leagueRanks(page);

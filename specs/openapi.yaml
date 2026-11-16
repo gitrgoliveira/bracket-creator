@@ -2528,8 +2528,12 @@ paths:
             completed instead. `code: league_chusen_pending`: a tie-breaker left a tie level. A
             team tie is then decided by drawing lots; an individual one by
             another tie-breaker round (`POST .../pools/{poolId}/tiebreak-round`)
-            or, if the organiser chooses, by drawing lots. `error` is a
-            sentence for the reader.
+            or, if the organiser chooses, by drawing lots. `code:
+            barred_tiebreak_draw_pending`: a tie-breaker was recorded as drawn
+            because both sides are barred, and nothing has settled it yet; the
+            organiser either fights it again (`POST .../reopen`) or enters the
+            lots (`PUT .../pools/{poolId}/override-rank`), and the app forces
+            neither. `error` is a sentence for the reader.
           content:
             application/json:
               schema:
@@ -2935,11 +2939,13 @@ paths:
         it returns the ties a finished ippon-shobu round left level, each
         with the runs (`stillLevel`) another round
         (`POST .../pools/{poolId}/tiebreak-round`) would fight; lots through
-        the same `override-rank` are the operator's other choice. In a
-        league, a tie whose tie-breaker bout was recorded as drawn because
-        both sides are barred (neither can fight) is returned too, for a team
-        and an individual alike, with no `stillLevel`: only the lots decide
-        it, and the league finishes once they are entered. Only
+        the same `override-rank` are the operator's other choice. A tie
+        whose tie-breaker bout was recorded as drawn because both sides are
+        barred (neither can fight) is returned too, in a league or a pool,
+        for a team and an individual alike, with no `stillLevel`: the lots
+        decide it, unless the organiser reopens the bout to fight it again
+        (`POST .../reopen`), which takes the tie off this list until the bout
+        is drawn again. Only
         consequential ties (ones that affect advancement/seeding) are
         returned. Admin-gated, unlike the public league-tiebreak candidates
         endpoint. Empty (not an error) for a competition not in the pools stage (a
@@ -3785,13 +3791,20 @@ paths:
             decision door's hikiwake when both sides are barred ("Record as
             drawn (neither can fight)"), for a team league's representative
             bout and an individual league's ippon-shobu bout alike: nobody can
-            fight it, so that draw is recorded and the bout counts as played
-            while both sides stay barred. It never shares the place it was
-            for: the place is then decided by the lots the organiser enters
-            (`PUT .../pools/{poolId}/override-rank`), and the league finishes
-            once they are entered. A side reinstated opens the bout again. A
-            pools + knockout competition keeps its drawn tie-breaker and its
-            lots.
+            fight it, so that draw is recorded. It settles nothing and never
+            shares the place it was for: the organiser either enters lots for
+            the place (`PUT .../pools/{poolId}/override-rank`), or reopens the
+            bout to fight it again (`POST .../reopen`). A reopened bout waits
+            on its court until both sides can fight, which may be never, since
+            only a kiken-injury can be reinstated; while they cannot, the court
+            can record it as drawn again, which offers the lots again. The app
+            forces neither path, and the same holds in a pools + knockout
+            competition, for its ippon-shobu and representative bouts alike. A
+            side reinstated before the lots are entered leaves an ordinary
+            drawn tie-breaker, which holds until it is fought again. A drawn
+            bout whose two barred sides the fought bouts already put each in a
+            run of its own decides no place: it settles as it stands and owes
+            no lots.
 
             A request with an empty password (self-run) whose `subResults`
             list more than one representative-bout row (position `-1`) is
@@ -5383,10 +5396,10 @@ paths:
         fought/hikiwake"). The equivalent knockout case, where the bracket
         needs a winner and a draw cannot stand in, is refused instead with
         409 `ineligible_competitor` naming both sides and pointing at the
-        earlier withdrawal or the draw. On a league's tie-breaker bout (a
-        team league's representative bout or an individual league's
-        ippon-shobu bout) the draw is recorded too, and the place it was for
-        is then decided by the lots (see PUT .../score). The pool match list
+        earlier withdrawal or the draw. On a tie-breaker bout (a
+        representative bout or an ippon-shobu bout, in a league or a pool)
+        the draw is recorded too, and the place it was for is then decided
+        by the lots or by fighting the bout again (see PUT .../score). The pool match list
         stamps `ineligibleSides` on such a drawn tie-breaker bout, which is
         how the Pools tab knows both sides are barred. A decision that would
         give a drawn tie-breaker bout a winner (a fusensho, say) while
@@ -5841,10 +5854,10 @@ paths:
       tags: [competitions]
       summary: Set a competitor status entry
       description: >
-        Writing an eligible status can open a bout again: a finished
-        individual league whose drawn ippon-shobu tie-breaker settled only
-        while both its sides were barred goes back into match play
-        (`competition_started`).
+        Writing an eligible status can open a bout again: a finished league
+        whose drawn tie-breaker decided no place only because both its sides,
+        each alone in its run, were barred goes back into match play
+        (`competition_started`), since fought again it could now decide one.
       security:
         - TournamentPassword: []
       requestBody:
@@ -5871,12 +5884,13 @@ paths:
         Restores eligibility for a competitor who was withdrawn via
         kiken-injury (FIK Art. 30). Only works when the competitor's
         status has `reinstateable: true`. Voluntary kiken (Art. 31)
-        and fusenpai are not reinstateable. A finished individual league
-        whose drawn ippon-shobu tie-breaker settled only while both its
-        sides were barred goes back into match play when one of them is
+        and fusenpai are not reinstateable. A finished league whose drawn
+        tie-breaker decided no place only because both its sides, each alone
+        in its run, were barred goes back into match play when one of them is
         reinstated (`competition_started`), as it does when a status is
-        written eligible through POST .../competitor-status: the tie owes
-        its bout again.
+        written eligible through POST .../competitor-status: fought again,
+        the bout could now decide a place. A tie-breaker drawn with both sides
+        barred whose lots were entered stays settled on them.
       security:
         - TournamentPassword: []
       parameters:

@@ -112,7 +112,7 @@ func (e *Engine) poolCompletion(loader poolStandingsLoader, compID string, comp 
 	// representative bout (poolMatchSettled), and the cycle check below reads the
 	// same standings: compute them once.
 	standings = sync.OnceValues(standings)
-	lots, err := loadPoolLots(false, matches, standings, func() (map[string]domain.CompetitorStatus, error) {
+	lots, err := loadPoolLots(matches, standings, func() (map[string]domain.CompetitorStatus, error) {
 		return loader.LoadCompetitorStatus(compID)
 	})
 	if err != nil {
@@ -171,9 +171,12 @@ func (e *Engine) poolCompletion(loader poolStandingsLoader, compID string, comp 
 				continue
 			}
 			scoped := map[string][]state.PlayerStanding{pn: st[pn]}
-			// No statuses: only a league owes lots for a draw nobody could fight
-			// (ChusenStatus reads none for a pools + knockout competition either).
-			if dhCycleExists(scoped, matches, nil, band) {
+			// The statuses ChusenStatus judges by too: with none, fightableDrawnSides
+			// would read a drawn bout between two barred sides as one to fight
+			// again, so a circle beside it would hold no lots here while the chusen
+			// panel asked for them, and the pool would complete on an order nobody
+			// chose.
+			if dhCycleExists(scoped, matches, lots.statuses, band) {
 				done[pn] = false
 			}
 		}

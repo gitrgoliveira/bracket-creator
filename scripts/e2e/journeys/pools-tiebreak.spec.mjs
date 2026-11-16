@@ -54,7 +54,8 @@ import { generateDraw, pasteRoster, startCompetition } from '../fixtures/competi
 import { completedRowFor, openShiaijo, sides, upNextCard } from '../fixtures/shiaijo.mjs';
 import { EXPECT_TIMEOUT_MS, PUBLIC_DEVICE } from '../fixtures/devices.mjs';
 import { INDIVIDUAL_FIGURES, openAdminPools, openViewerPools, playerRowFigures, poolBlocks, poolTeams, teamRow } from '../fixtures/pools.mjs';
-import { ROSTER_7, editorSides, ensureRunning, inlineRunning, playScriptedBout } from '../fixtures/individual.mjs';
+import { ROSTER_7, editorSides, ensureRunning, inlineRunning, playScriptedBout, recordDecision } from '../fixtures/individual.mjs';
+import { TEXT, circleNotice, drawnBoutNotices, recordLots } from '../fixtures/league.mjs';
 import { awardIppon, finishMatch, markDraw, nextTapWrite, writeLanded, writtenMatchId } from '../fixtures/scoring.mjs';
 import { scoreRows } from '../fixtures/scores.mjs';
 import { bracketSlots, openCompetitionTab, openParticipants, setSeed } from '../fixtures/roster.mjs';
@@ -65,8 +66,8 @@ const JOURNEY = 'pools-tiebreak';
 const MIN_POOL = 3;
 const POOL_WINNERS = 2;
 const NAMES = ROSTER_7.map(([name]) => name);
-// One shiaijo per competition in this file: A, B, C and D.
-const CUP_COURTS = 4;
+// One shiaijo per competition in this file: A to E.
+const CUP_COURTS = 5;
 const ORDINAL = ['1st', '2nd', '3rd', '4th'];
 // A pool bout reads "Match n of m"; a tie-break bout is the bare pairing.
 const POOL_MATCH_LABEL = /Match \d+ of \d+/i;
@@ -915,5 +916,156 @@ test.describe('pools: a tie-break bout saved as a draw', () => {
     await expect(page.getByTestId('drawn-tiebreak-notice'), 'the reopened bout is no longer a drawn one').toHaveCount(0);
     record({ journey: JOURNEY_DRAWN, step: 'drawn tie-break', action: 'Fight it again',
       screenshot: await shot(page, 'admin-pools-after-fight-it-again', { fullPage: true }) });
+  });
+});
+
+// A pools + knockout tie-break bout whose two sides both withdrew earlier
+// (operator ruling 2026-11-16: "They can continue with tie break matches or do
+// lots. We should not be enforcing a path."). Court E. The pool of 4 is scripted
+// as in the first competition. In the pool of 3 the FIRST of its bouts the court
+// calls is drawn 1-1, and in the two after it the drawn pair each withdraw
+// (kiken) against the third, who is 1st. The drawn pair end level for 2nd, the
+// one place left that goes through, so the engine adds their tie-break bout,
+// which neither can fight. The console lists it with Record as drawn; once it
+// is drawn, the Pools tab offers Fight it again on the bout's notice and the
+// lots entry at once beside it, and forces neither. This walk enters the lots
+// and the knockout is seated from them. Fighting it again instead would take
+// the lots off until the bout is drawn again (accepted).
+const JOURNEY_BARRED = 'pools-tiebreak-both-barred';
+const BARRED_COURT = 'E';
+
+test.describe('pools: a tie-break bout both of whose sides withdrew earlier', () => {
+  let shot;
+  let compId;
+  const audit = auditLog(JOURNEY_BARRED);
+  const { record } = audit;
+  let big;
+  let small;
+  const { script, planFor } = scripted();
+  // The pool of 3 by the part it plays: the pair the first bout draws, and the
+  // third, who wins both bouts against them by their withdrawal.
+  let drawn = null;
+  let third = null;
+  let tbPair;
+
+  test.beforeAll(() => {
+    shot = journeyShots(JOURNEY_BARRED);
+  });
+
+  test.afterAll(() => audit.flush());
+
+  test('seed: seven entrants, pool size a minimum of 3, on court E', async ({ page }) => {
+    await enterTournament(page, { name: 'Pools Tiebreak Cup', courts: CUP_COURTS });
+    compId = await createCompetition(page, {
+      name: 'Barred Tiebreak Pools', kind: 'individual', format: 'mixed', poolSizeMode: 'minimum', poolSize: MIN_POOL,
+      poolWinners: POOL_WINNERS, courts: [BARRED_COURT],
+    });
+    await pasteRoster(page, compId, ROSTER_7);
+    await generateDraw(page, compId);
+    await startCompetition(page, compId);
+
+    [big, small] = await readDrawnPools(page, compId, minimumRuleSizes(NAMES.length, MIN_POOL));
+    const [P, Q, R, S] = big;
+    script(P, Q, { marks: { [P]: ['M'] } });
+    script(P, R, { marks: { [P]: ['M', 'K'] } });
+    script(P, S, { marks: { [P]: ['M'] } });
+    script(Q, S, { marks: { [Q]: ['M'] } });
+    script(R, S, { marks: { [R]: ['M'] } });
+    script(Q, R, { draw: true });
+  });
+
+  test('play the nine regular bouts on court E: the pool of 3 draws its first bout, then the drawn pair each withdraw', async ({ page }) => {
+    await login(page);
+    await openShiaijo(page, BARRED_COURT);
+    for (let n = 1; n <= 9; n += 1) {
+      const played = await test.step(`regular bout ${n}`, async () => {
+        const pair = await ensureRunning(page);
+        expect(pair, 'a bout is running on court E').toBeTruthy();
+        if (!(small.includes(pair.shiro) && small.includes(pair.aka))) {
+          const plan = planFor(pair);
+          if (plan.draw) await markDraw(page);
+          for (const side of ['shiro', 'aka']) for (const waza of plan[side] || []) await awardIppon(page, side, waza);
+          await finishMatch(page);
+          await expect(completedRowFor(page, pair)).toBeVisible();
+          return { ...pair, plan };
+        }
+        if (!drawn) {
+          drawn = [pair.shiro, pair.aka];
+          third = small.find((x) => !drawn.includes(x));
+          await awardIppon(page, 'shiro', 'M');
+          await awardIppon(page, 'aka', 'M');
+          await finishMatch(page);
+          await expect(completedRowFor(page, pair)).toBeVisible();
+          return { ...pair, plan: 'drawn 1-1' };
+        }
+        const side = pair.shiro === third ? 'aka' : 'shiro';
+        const kiken = await recordDecision(page, 'kiken-voluntary', { side });
+        await expect(completedRowFor(page, pair)).toBeVisible();
+        return { ...pair, plan: `${pair[side]} withdraws (kiken)`, ...kiken };
+      });
+      record({ journey: JOURNEY_BARRED, step: `bout ${n}`, action: 'Finish', ...played });
+    }
+    expect(drawn, 'the pool of 3 drew its first bout').toBeTruthy();
+  });
+
+  test('court: the tie-break bout is listed as one neither can fight, and is recorded as drawn', async ({ page }) => {
+    await login(page);
+    await openShiaijo(page, BARRED_COURT);
+    const row = page.locator('.shiaijo-qrow').filter({ has: page.getByTestId('barred-match-notice') });
+    await expect(row, 'the tie-break bout is listed with why it cannot start').toHaveCount(1, { timeout: EXPECT_TIMEOUT_MS });
+    tbPair = await sides(row);
+    expect([tbPair.shiro, tbPair.aka].sort(), 'the bout is between the drawn pair').toEqual([...drawn].sort());
+    const notice = row.getByTestId('barred-match-notice');
+    await expect(notice).toContainText(TEXT.bothBarred);
+    // The reason line names both ways on and forces neither.
+    await expect(row.locator('.shiaijo-qrow__reason')).toContainText(TEXT.barredReason);
+    expect(await upNextCard(page).count(), 'a bout neither side can fight is never Up next').toBe(0);
+    record({ journey: JOURNEY_BARRED, step: 'court', action: 'the console with the barred tie-break bout', pair: tbPair,
+      court: await courtState(page), screenshot: await shot(page, 'barred-tiebreak-console-up-next', { fullPage: true }) });
+    await notice.scrollIntoViewIfNeeded();
+    record({ journey: JOURNEY_BARRED, step: 'court', action: 'before Record as drawn (the bout never runs)',
+      screenshot: await shot(page, 'barred-tiebreak-console-before-finish') });
+    await notice.getByRole('button', { name: TEXT.recordDrawn }).tap();
+    await expect(completedRowFor(page, tbPair)).toBeVisible();
+    record({ journey: JOURNEY_BARRED, step: 'court', action: 'after Record as drawn', court: await courtState(page),
+      screenshot: await shot(page, 'barred-tiebreak-console-after', { fullPage: true }) });
+  });
+
+  test('desk: the drawn bout offers Fight it again and the lots at once; the lots entered seat the knockout', async ({ page }) => {
+    await login(page);
+    const [P, Q] = big;
+    const seatedNow = async (ready) => Object.values(await bracketSlots(page, (slots) => ready(Object.values(slots).map((s) => s.name))))
+      .map((s) => s.name).filter((n) => NAMES.includes(n));
+
+    await openAdminPools(page, compId);
+    const notice = page.getByTestId('drawn-tiebreak-notice');
+    await expect(notice, 'the drawn tie-break bout has its notice').toHaveCount(1, { timeout: EXPECT_TIMEOUT_MS });
+    await expect(notice).toContainText(TEXT.barredDrawChoice);
+    await expect(notice.getByRole('button', { name: TEXT.fightAgain, exact: true })).toBeVisible();
+    await expect(circleNotice(page), 'the lots entry for the tie the drawn bout left').toBeVisible();
+    expect(await circleNotice(page).getByRole('button', { name: TEXT.anotherRound }).count(), 'no new round among two who cannot fight').toBe(0);
+    record({ journey: JOURNEY_BARRED, step: 'pools', action: 'the notices after the drawn tie-break bout', notices: await drawnBoutNotices(page),
+      screenshot: await shot(page, 'barred-tiebreak-desk-banner', { fullPage: true }) });
+
+    // Until the lots or a refight decide it, the pool's knockout places stay empty.
+    await openCompetitionTab(page, compId, 'bracket');
+    const before = await seatedNow((names) => names.includes(P) && names.includes(Q));
+    record({ journey: JOURNEY_BARRED, step: 'knockout', action: 'bracket before the lots', seated: before,
+      screenshot: await shot(page, 'barred-tiebreak-desk-bracket-before') });
+    for (const name of small) expect(before, `${name} is not seated while the tie is open`).not.toContain(name);
+
+    // The lots: the second of the pair goes through.
+    const lots = [drawn[1], drawn[0]];
+    await openAdminPools(page, compId);
+    const res = await recordLots(page, lots);
+    record({ journey: JOURNEY_BARRED, step: 'pools', action: 'lots recorded', order: lots, answer: { status: res.status },
+      screenshot: await shot(page, 'barred-tiebreak-desk-table', { fullPage: true }) });
+
+    await openCompetitionTab(page, compId, 'bracket');
+    const after = await seatedNow((names) => names.includes(lots[0]));
+    record({ journey: JOURNEY_BARRED, step: 'knockout', action: 'bracket after the lots', seated: after,
+      screenshot: await shot(page, 'barred-tiebreak-desk-bracket-after') });
+    expect([...after].sort(), 'the knockout seats the lots winner with the other qualifiers').toEqual([P, Q, third, lots[0]].sort());
+    expect(after, 'the lots loser is out').not.toContain(lots[1]);
   });
 });

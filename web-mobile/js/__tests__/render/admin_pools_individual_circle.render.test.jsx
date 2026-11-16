@@ -151,8 +151,10 @@ describe('AdminPools: an individual tie-breaker round that went in a circle', ()
     await waitFor(() => expect(api.runTiebreakerRound).toHaveBeenCalledWith('c1', 'Pool A', ['id-cal', 'id-dai'], PASSWORD));
   });
 
-  // A tie-breaker whose two sides both withdrew earlier can never be fought:
-  // the server lists the tie with no run still level, so lots are the only way.
+  // A tie-breaker whose two sides both withdrew earlier has no new round: the
+  // server lists the tie with no run still level. The other way on is fighting
+  // the drawn bout again, from its own notice (the drawn-bout notice), so the
+  // lots entry opens at once beside it, and neither is forced.
   it('opens the lots at once, with no round to run, when nobody can fight the tie-breaker', async () => {
     const barred = { poolName: 'Pool A', teamNames: ['Aki', 'Bea'], teams: members.slice(0, 2), minPosition: 1, stillLevel: null };
     const api = await mount(leagueComp(), makeApi([barred]));
@@ -185,7 +187,8 @@ describe('AdminPools: an individual tie-breaker round that went in a circle', ()
 
     await mount(leagueComp(), makeApi([barred]));
     notice = (await screen.findByText('A tie-breaker round left a tie')).closest('.league-tiebreak');
-    expect(notice.textContent).toContain('The competitors to fight the tie-breaker withdrew earlier, so no round can be fought.');
+    expect(notice.textContent).toContain('The competitors to fight the tie-breaker withdrew earlier. Fight it again from its notice above, or draw lots and enter the order below.');
+    expect(notice.textContent).not.toMatch(/no round can be fought/);
     expect(notice.textContent).not.toMatch(/won as many/);
     expect(notice.textContent).not.toMatch(/teams/);
     cleanup();
@@ -248,7 +251,7 @@ describe('AdminPools: an individual tie-breaker round that went in a circle', ()
     expect(screen.getByLabelText('Aki').value).toBe('1');
   });
 
-  it('gives no Cancel where the lots are the only way on', async () => {
+  it('gives no Cancel where the lots entry opens at once (no round to run)', async () => {
     await mount(leagueComp(), makeApi([barred]));
     await screen.findByText(/one per competitor/);
     expect(screen.queryByRole('button', { name: 'Cancel' })).toBeNull();

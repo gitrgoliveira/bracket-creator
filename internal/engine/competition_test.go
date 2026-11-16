@@ -108,8 +108,6 @@ func TestDrawnSupplementaryRuledByChusen_SharedCases(t *testing.T) {
 			InForce []string `json:"inForce"`
 			Ruled   bool     `json:"ruled"`
 			Stuck   bool     `json:"stuck"`
-			// League marks a case judged for a league (poolLots.league).
-			League bool `json:"league"`
 			// The wire's stamp for a drawn tie-break bout: the sides barred
 			// elsewhere. Here it is the competitor statuses that bar them.
 			IneligibleSides struct {
@@ -152,7 +150,7 @@ func TestDrawnSupplementaryRuledByChusen_SharedCases(t *testing.T) {
 					statuses[id] = domain.CompetitorStatus{PlayerID: id, Eligible: false, Reason: reason + ": x", MatchID: "Pool A-0"}
 				}
 			}
-			assert.Equal(t, !tc.Stuck, poolMatchSettled(&m, poolLots{standings: standings, statuses: statuses, league: tc.League}), "settled")
+			assert.Equal(t, !tc.Stuck, poolMatchSettled(&m, poolLots{standings: standings, statuses: statuses}), "settled")
 		})
 	}
 }

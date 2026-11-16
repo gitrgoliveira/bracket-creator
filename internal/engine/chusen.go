@@ -251,7 +251,7 @@ func (e *Engine) refuseOverRecordedLots(tx state.StoreTx, compID string, stored 
 	if confirmed || stored == nil || !drawnSupplementaryBout(stored) {
 		return nil
 	}
-	lots, err := loadPoolLots(false, []state.MatchResult{*stored}, func() (map[string][]state.PlayerStanding, error) {
+	lots, err := loadPoolLots([]state.MatchResult{*stored}, func() (map[string][]state.PlayerStanding, error) {
 		return e.computeStandingsFrom(tx, compID)
 	}, nil)
 	if err != nil {
@@ -319,7 +319,8 @@ func drawnSupplementaryMoot(m *state.MatchResult, poolStandings map[string][]sta
 // the pair; two sides the bouts have put in different runs are judged on the
 // runs of two or more among them (each owes its own lots, barredDrawRuns), and a
 // side standing alone has none to rank, so with both alone the group is empty
-// and the bout is neither ruled by lots nor moot. level is false when the
+// and the bout is neither ruled by lots nor moot (settled only when both its
+// sides are barred, drawnBarredDecidesNoPlace). level is false when the
 // standings no longer put the two sides level (group is then the two sides'
 // rows) or do not hold both (group is then nil). The pool's other
 // representative bouts are not asked: a result correction can shrink a tie
@@ -363,45 +364,28 @@ func lotsGroup(poolStandings map[string][]state.PlayerStanding, m *state.MatchRe
 
 // poolLots is what a drawn supplementary bout is judged settled on
 // (poolMatchSettled): the pool standings its tied group, and the ranks in
-// force over it (IsOverridden), are read from, and the competitors' statuses
-// say whether the bout's two sides are both barred (drawnTiebreakOfBarredSides).
-// loadPoolLots is the one door that fills it; the zero value holds none, so a
-// drawn supplementary bout is never settled by it (isBlockingEngiTBRow, which
-// only judges tie-break rows, passes it on purpose).
+// force over it (IsOverridden), are read from. The competitors' statuses say
+// whether the bout's two sides are both barred (drawnTiebreakOfBarredSides),
+// which settles nothing by itself but tells the readers of the lots which drawn
+// bout nobody can fight now (barredDrawRuns, fightableDrawnSides) and lets
+// PoolsSettledNow name it. loadPoolLots is the one door that fills it; the zero
+// value holds none, so a drawn supplementary bout is never settled by it
+// (isBlockingEngiTBRow, which only judges tie-break rows, passes it on purpose).
 type poolLots struct {
 	standings map[string][]state.PlayerStanding
 	statuses  map[string]domain.CompetitorStatus
-	// league is set by loadPoolLots for a caller judging a league
-	// (PoolsSettledNow, the league's own completion scan): only there does a
-	// representative bout drawn between two barred teams count as played
-	// (barredDrawPlayed). A pools + knockout competition keeps that bout open
-	// until its lots are entered, as before.
-	league bool
-}
-
-// barredDrawPlayed reports a drawn tie-break bout between two barred sides that
-// counts as played (drawnTiebreakOfBarredSides): an individual ippon-shobu bout
-// in any competition, a team representative bout in a league only.
-func (l poolLots) barredDrawPlayed(m *state.MatchResult) bool {
-	if IsPoolDaihyosenMatchID(m.ID) && !l.league {
-		return false
-	}
-	return drawnTiebreakOfBarredSides(m, l.statuses)
 }
 
 // loadPoolLots reads a competition's lots for matches: the standings
 // (lotsStandings) and the competitor statuses, only when the matches hold the
 // bout that needs them. The recorded ranks are read once, inside the standings
 // (computeStandingsFrom), and nowhere else. A nil loadStatuses reads none.
-// league is the competition's mode (poolLots.league), asked of every caller so
-// that none can forget it: true for a league, false for a pools + knockout
-// competition and for a caller that judges no barred draw.
-func loadPoolLots(league bool, matches []state.MatchResult, loadStandings func() (map[string][]state.PlayerStanding, error), loadStatuses func() (map[string]domain.CompetitorStatus, error)) (poolLots, error) {
+func loadPoolLots(matches []state.MatchResult, loadStandings func() (map[string][]state.PlayerStanding, error), loadStatuses func() (map[string]domain.CompetitorStatus, error)) (poolLots, error) {
 	standings, err := lotsStandings(matches, loadStandings)
 	if err != nil {
 		return poolLots{}, err
 	}
-	lots := poolLots{standings: standings, league: league}
+	lots := poolLots{standings: standings}
 	if loadStatuses == nil || !slices.ContainsFunc(matches, func(m state.MatchResult) bool { return drawnSupplementaryBout(&m) }) {
 		return lots, nil
 	}
@@ -413,12 +397,15 @@ func loadPoolLots(league bool, matches []state.MatchResult, loadStandings func()
 
 // drawnTiebreakOfBarredSides reports a drawn tie-break bout (an ippon-shobu
 // "-TB-" or a representative "-DH-" bout) whose two sides are both barred (a
-// withdrawal on another match, engine.BarredSides), the one draw the decision
-// door records for a league's tie-breaker (handleBothSidesBarredHikiwake:
-// nobody can fight it, so encho and hantei are no remedy). It is a draw nobody
-// fought and counts played as it stands (poolMatchSettled); the tie it was for
-// stays, and in a league the place goes to the lots (barredDrawRuns).
-// Judged on the live statuses, so a side reinstated since opens the bout again.
+// withdrawal on another match, engine.BarredSides), the draw the decision door
+// records when nobody can fight it (handleBothSidesBarredHikiwake: encho and
+// hantei are no remedy). Like any drawn supplementary bout it settles nothing
+// (poolMatchSettled) until the lots rule it or it is reopened and fought: the
+// organiser chooses (operator ruling 2026-11-16, "We should not be enforcing a
+// path"). The lots are offered for its run (barredDrawRuns) in every format, and
+// the reopen is the drawn-bout notice's Fight it again, which leaves the bout
+// scheduled while both are barred. Judged on the live statuses, so a side
+// reinstated since makes it a bout to fight again, owing no lots.
 func drawnTiebreakOfBarredSides(m *state.MatchResult, statuses map[string]domain.CompetitorStatus) bool {
 	if !drawnSupplementaryBout(m) {
 		return false
@@ -448,7 +435,7 @@ func levelRuns(group []state.PlayerStanding, positions []int, matches []state.Ma
 	return out
 }
 
-// barredDrawRuns lists the runs of a league tie whose tie-breaker the bouts
+// barredDrawRuns lists the runs of a tie whose tie-breaker the bouts
 // cannot settle because two of its members could not fight: at least one
 // tie-break bout among the group's members is a draw nobody fought
 // (drawnTiebreakOfBarredSides). A run (tieBreakRuns) of two or more that holds a
@@ -462,9 +449,11 @@ func levelRuns(group []state.PlayerStanding, positions []int, matches []state.Ma
 // member the bouts put clear of the rest stands alone and owes nothing. The lots rank a run
 // alone, at the places it stands at: the fought bouts that put other members
 // clear of it stand, and the barred pair never decides a place the bouts already
-// gave. No further round is offered, since nobody can fight it. It is the
-// league's rule only (PoolsSettledNow, chusenStatusFrom): a pools + knockout
-// competition keeps its own. positions are the group's places (detectPoolTies),
+// gave. No further round is offered (StillLevel stays nil): the other way on is
+// fighting the drawn bout again (the reopen), the organiser's choice. It is the
+// same rule in a league and in pools + knockout (chusenStatusFrom). After the
+// reopen no lots are offered until the bout is drawn again, since the run needs
+// a drawn bout to be listed here: accepted. positions are the group's places (detectPoolTies),
 // matches the pool rows as stored (a drawn representative bout included, which
 // chusenMatches leaves out), statuses the competitors' statuses now. The caller
 // judges each run against the band and leaves out one whose lots are recorded.
@@ -472,17 +461,7 @@ func barredDrawRuns(group []state.PlayerStanding, positions []int, matches []sta
 	if len(statuses) == 0 {
 		return nil
 	}
-	ids := groupMemberIDs(group)
-	drawnSide := map[string]bool{}
-	for i := range matches {
-		m := &matches[i]
-		if !state.IsPoolSupplementaryMatchID(m.ID) || !ids[m.SideAID] || !ids[m.SideBID] || m.SideAID == m.SideBID {
-			continue
-		}
-		if drawnTiebreakOfBarredSides(m, statuses) {
-			drawnSide[m.SideAID], drawnSide[m.SideBID] = true, true
-		}
-	}
+	drawnSide := barredDrawnSides(group, matches, statuses)
 	var out []levelRun
 	for _, run := range levelRuns(group, positions, matches, isTeam) {
 		if len(run.members) > 1 && holdsDrawnSide(run.members, drawnSide) && !roundStillToFight(run.members, group, matches) {
@@ -490,6 +469,25 @@ func barredDrawRuns(group []state.PlayerStanding, positions []int, matches []sta
 		}
 	}
 	return out
+}
+
+// barredDrawnSides keys, by participant id, the sides of the group's
+// supplementary bouts drawn because both their sides are barred
+// (drawnTiebreakOfBarredSides, judged on statuses now): the pairs only the lots
+// or a refight can order (barredDrawRuns, chusenOwedBesideBarredDraws).
+func barredDrawnSides(group []state.PlayerStanding, matches []state.MatchResult, statuses map[string]domain.CompetitorStatus) map[string]bool {
+	ids := groupMemberIDs(group)
+	sides := map[string]bool{}
+	for i := range matches {
+		m := &matches[i]
+		if !state.IsPoolSupplementaryMatchID(m.ID) || !ids[m.SideAID] || !ids[m.SideBID] || m.SideAID == m.SideBID {
+			continue
+		}
+		if drawnTiebreakOfBarredSides(m, statuses) {
+			sides[m.SideAID], sides[m.SideBID] = true, true
+		}
+	}
+	return sides
 }
 
 // lotsRuleADrawnBout reports whether the lots recorded for group (every member
@@ -686,11 +684,11 @@ func (e *Engine) chusenStatusFrom(loader poolStandingsLoader, standings func() (
 	if err != nil {
 		return report, err
 	}
-	// A league's tie-breaker drawn because both its sides are barred is
-	// settled by the lots (barredDrawRuns), judged on the statuses now.
+	// A tie-breaker drawn because both its sides are barred is offered the lots
+	// (barredDrawRuns) in every format, judged on the statuses now; the bout can
+	// be fought again instead (the reopen), the organiser's choice.
 	var statuses map[string]domain.CompetitorStatus
-	isLeague := comp.Format == state.CompFormatLeague
-	if isLeague && slices.ContainsFunc(stored, func(m state.MatchResult) bool { return drawnSupplementaryBout(&m) }) {
+	if slices.ContainsFunc(stored, func(m state.MatchResult) bool { return drawnSupplementaryBout(&m) }) {
 		if statuses, err = loader.LoadCompetitorStatus(compID); err != nil {
 			return report, err
 		}
@@ -774,14 +772,13 @@ func (e *Engine) chusenStatusFrom(loader poolStandingsLoader, standings func() (
 				// Lots rank a run the fought bouts left level, on its own places
 				// (levelRuns), never the whole Points group. A run whose lots rule
 				// a drawn bout stays recorded, and so correctable, even after a
-				// side that was barred is reinstated. In a league a run holding a
-				// draw nobody fought owes lots: nobody can fight another round
-				// (StillLevel nil), and the places the bouts decided are kept.
+				// side that was barred is reinstated. A run holding a draw nobody
+				// fought is offered the lots, in any format, with no round of its
+				// own (StillLevel nil: fighting the drawn bout again is the reopen),
+				// and the places the bouts decided are kept.
 				owed := map[int]bool{}
-				if isLeague {
-					for _, run := range barredDrawRuns(group, positions, stored, statuses, isTeam) {
-						owed[run.positions[0]] = true
-					}
+				for _, run := range barredDrawRuns(group, positions, stored, statuses, isTeam) {
+					owed[run.positions[0]] = true
 				}
 				for _, run := range levelRuns(group, positions, stored, isTeam) {
 					if len(run.members) < 2 || !band(poolName, run.positions, run.members) {

@@ -90,10 +90,11 @@ describe('tieBreakerReasonLine', () => {
   it('says what to do, not that the bout separates them, when both sides withdrew', () => {
     const rows = [row('p0', 'Zed', 1, 6), row('p1', 'Aki', 2, 4), row('p2', 'Bea', 3, 4)];
     const both = bout({ ineligibleSides: { a: 'kiken-injury', b: 'fusenpai' } });
-    const fix = 'Neither can fight: record it as drawn, then enter the lots on the Pools tab.';
+    // Both ways on are named and neither is forced (operator ruling 2026-11-16).
+    const fix = 'Neither can fight: record it as drawn. The Pools tab then offers to fight it again or enter the lots.';
     expect(tieBreakerReasonLine(both, rows)).toBe(`Tie-breaker for 2nd place. ${fix}`);
-    // Without the standings the line cannot say whether lots are owed.
-    expect(tieBreakerReasonLine(both, null)).toBe('Tie-breaker bout. Neither can fight: record it as drawn. The Pools tab asks for lots if any are owed.');
+    // Without the standings the line cannot say whether a place depends on it.
+    expect(tieBreakerReasonLine(both, null)).toBe('Tie-breaker bout. Neither can fight: record it as drawn. If a place depends on it, the Pools tab then offers to fight it again or enter the lots.');
     const three = [row('p1', 'Aki', 1, 4), row('p2', 'Bea', 2, 4), row('p3', 'Cal', 3, 4)];
     expect(tieBreakerReasonLine(both, three)).toBe(`Part of the tie-breaker for 1st to 3rd place. ${fix}`);
     expect(tieBreakerReasonLine(both, rows)).not.toMatch(/separates/);

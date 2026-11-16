@@ -652,6 +652,52 @@ func TestSelfRun_Complete_RefusesALeagueWithAnUndecidedPlace(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 }
 
+// A league whose only open row is a tie-breaker drawn because both its sides
+// withdrew earlier is refused with a sentence naming both ways on, fighting the
+// bout again or entering the lots, ranking neither (operator ruling
+// 2026-11-16); once the lots are entered it completes.
+func TestComplete_LeagueBothBarredTiebreakDrawNamesBothWaysOn(t *testing.T) {
+	store := newTempStore(t)
+	seedSelfRunTournament(t, store)
+	r := setupSelfRunRouter(t, store, NewFileVerifier(store))
+
+	const compID = "league-barred-draw"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: compID, Name: compID, Format: state.CompFormatLeague, Status: state.CompStatusPools,
+		Kind: "team", TeamSize: 2, Courts: []string{"A"},
+	}))
+	teams := []helper.Player{{ID: "t1-id", Name: "T1", Dojo: "Dojo T1"}, {ID: "t2-id", Name: "T2", Dojo: "Dojo T2"}}
+	require.NoError(t, store.SavePools(compID, []helper.Pool{{PoolName: "Pool A", Players: teams}}))
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{ID: "Pool A-0", SideA: "T1", SideB: "T2", SideAID: "t1-id", SideBID: "t2-id", Status: state.MatchStatusCompleted, Decision: string(domain.DecisionHikiwake)},
+		{ID: "Pool A-DH-0", SideA: "T1", SideB: "T2", SideAID: "t1-id", SideBID: "t2-id", Status: state.MatchStatusCompleted, Decision: string(domain.DecisionHikiwake)},
+	}))
+	for _, id := range []string{"t1-id", "t2-id"} {
+		require.NoError(t, store.SetCompetitorStatus(compID, domain.CompetitorStatus{
+			PlayerID: id, Eligible: false, Reason: "kiken-voluntary: withdrew", MatchID: "Pool A-0",
+		}))
+	}
+
+	complete := func() *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, "/api/competitions/"+compID+"/complete", nil)
+		req.Header.Set("X-Tournament-Password", "")
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		return w
+	}
+	w := complete()
+	require.Equal(t, http.StatusConflict, w.Code, w.Body.String())
+	var body map[string]string
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+	assert.Equal(t, "barred_tiebreak_draw_pending", body["code"])
+	assert.Equal(t, "A tie-breaker was saved as a draw because both sides withdrew earlier. On the Pools tab, fight it again or enter the lots before this competition can be finished.", body["error"])
+
+	_, err := store.SaveRankOverridesChanged(compID, "Pool A", map[string]int{"t2-id": 1, "t1-id": 2})
+	require.NoError(t, err)
+	w = complete()
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+}
+
 // An individual league has no tie-breaker control on the Pools tab: its
 // tie-break bouts are added by the scan. A completion refused for a tie that has
 // no bout yet adds them rather than pointing at a control that is not there.
@@ -701,6 +747,72 @@ func TestComplete_IndividualLeagueTieAddsItsTiebreakBouts(t *testing.T) {
 		}
 	}
 	assert.Equal(t, 3, bouts, "the refusal adds the tie-break bouts the three tied players owe")
+}
+
+// A tie-breaker drawn because both its sides are barred waits on the organiser,
+// and does not stop a new tie elsewhere from getting its bouts: P1 and P2 drew
+// their tie-breaker while both are barred, and P3 and P4, level at 3rd, get theirs
+// when the completion is refused.
+func TestComplete_IndividualLeagueBarredDrawStillAddsANewTiesBouts(t *testing.T) {
+	store := newTempStore(t)
+	seedSelfRunTournament(t, store)
+	r := setupSelfRunRouter(t, store, NewFileVerifier(store))
+
+	const compID = "indiv-league-barred-new-tie"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: compID, Name: compID, Format: state.CompFormatLeague, Status: state.CompStatusPools, Courts: []string{"A"},
+	}))
+	players := []helper.Player{
+		{ID: "p1-id", Name: "P1", Dojo: "Dojo 1"}, {ID: "p2-id", Name: "P2", Dojo: "Dojo 2"},
+		{ID: "p3-id", Name: "P3", Dojo: "Dojo 3"}, {ID: "p4-id", Name: "P4", Dojo: "Dojo 4"},
+	}
+	require.NoError(t, store.SavePools(compID, []helper.Pool{{PoolName: "Pool A", Players: players}}))
+	beats := map[string]bool{"p1-id|p3-id": true, "p1-id|p4-id": true, "p2-id|p3-id": true, "p2-id|p4-id": true}
+	var matches []state.MatchResult
+	for i := range players {
+		for j := i + 1; j < len(players); j++ {
+			m := state.MatchResult{
+				ID: fmt.Sprintf("Pool A-%d", len(matches)), SideA: players[i].Name, SideB: players[j].Name,
+				SideAID: players[i].ID, SideBID: players[j].ID, Status: state.MatchStatusCompleted,
+			}
+			if beats[m.SideAID+"|"+m.SideBID] {
+				m.Winner, m.WinnerID, m.IpponsA = m.SideA, m.SideAID, []string{"M"}
+			} else {
+				m.Decision = string(domain.DecisionHikiwake)
+			}
+			matches = append(matches, m)
+		}
+	}
+	matches = append(matches, state.MatchResult{
+		ID: "Pool A-TB-6", SideA: "P1", SideB: "P2", SideAID: "p1-id", SideBID: "p2-id",
+		Status: state.MatchStatusCompleted, Decision: string(domain.DecisionHikiwake),
+	})
+	require.NoError(t, store.SavePoolMatches(compID, matches))
+	for _, id := range []string{"p1-id", "p2-id"} {
+		require.NoError(t, store.SetCompetitorStatus(compID, domain.CompetitorStatus{
+			PlayerID: id, Eligible: false, Reason: "kiken-voluntary: withdrew", MatchID: "Pool A-0",
+		}))
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/competitions/"+compID+"/complete", nil)
+	req.Header.Set("X-Tournament-Password", "")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusConflict, w.Code, w.Body.String())
+	var body map[string]string
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+	assert.Equal(t, "league_tiebreak_pending", body["code"])
+	assert.NotContains(t, body["error"], "could not be added", "the barred draw does not block the new tie's bouts")
+
+	stored, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	var p3p4 int
+	for _, m := range stored {
+		if engine.IsTiebreakerMatchID(m.ID) && m.SideAID == "p3-id" && m.SideBID == "p4-id" {
+			p3p4++
+		}
+	}
+	assert.Equal(t, 1, p3p4, "the refusal adds P3 and P4's tie-break bout")
 }
 
 // leagueScanEngine is a ScoringEngine whose scan answers a fixed outcome and error.

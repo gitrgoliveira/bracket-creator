@@ -438,9 +438,10 @@ func (e *Engine) takeLeagueReopenNote(compID string) bool {
 // it no longer holds the verdict it finished on (PoolsSettledNow): a regular
 // match or a tie-break bout reopened, a send back to the queue having reached
 // it outside a result write (reconcileLeagueAfterWrite covers those), a drawn
-// tie-break bout that settled only while both its sides were barred and one has
-// been reinstated since, or the lots that alone ordered a decisive circle
-// cleared. Decided under the competition's lock.
+// tie-break bout that decided no place only because both its sides, each alone
+// in its run, were barred (drawnBarredDecidesNoPlace) and one has been reinstated
+// since, so fought again it could, or the lots that alone ordered a decisive
+// circle cleared. Decided under the competition's lock.
 func (e *Engine) reopenFinishedLeagueIfOpen(compID string) (bool, error) {
 	return e.store.UpdateCompetitionChangedTx(compID, func(tx state.StoreTx, comp *state.Competition) (*state.Competition, error) {
 		if comp == nil || comp.Format != state.CompFormatLeague || comp.Status != state.CompStatusComplete {

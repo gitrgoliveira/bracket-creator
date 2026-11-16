@@ -47,6 +47,12 @@ const (
 	// (dhCycleExists): a team's only the lots can decide, an individual's
 	// another tie-breaker round or the lots, as the operator chooses.
 	PoolsChusenOwed
+	// PoolsBarredDrawOpen: every row is played except tie-breakers drawn because
+	// both their sides are barred (drawnTiebreakOfBarredSides), which settle
+	// nothing until the organiser fights one again or enters the lots for it
+	// (barredDrawRuns), their choice. It is PoolsMatchOpen named apart, so a
+	// refusal can name both ways on.
+	PoolsBarredDrawOpen
 )
 
 // PoolsSettledNow is the ONE owner of "this competition's pool rows are
@@ -58,11 +64,14 @@ const (
 // chusen had to rank: the league's own completion (maybeAutoCompletePoolsRunning)
 // and POST /complete both ask it. For a league it also requires every tie in
 // the band (tieNeedsBreak) to hold its tie-breaker and no tie-breaker, of
-// either kind, to have left one level without the lots (dhCycleExists), nor
-// been drawn because both its sides are barred without the lots
-// (barredDrawRuns): only 3rd can be shared, so a tie at 1st or 2nd (and at
-// 3rd with joint 3rd places off) is never left to share its place. A corrupt
-// overrides.json comes back wrapping state.ErrCorruptOverrides.
+// either kind, to have left one level without the lots (dhCycleExists): only
+// 3rd can be shared, so a tie at 1st or 2nd (and at 3rd with joint 3rd places
+// off) is never left to share its place. A tie-breaker drawn because both its
+// sides are barred holds every format open as an unsettled row
+// (PoolsBarredDrawOpen) until it is fought again or its lots are entered; a
+// league names first a tie-breaker owed, then a circle owed lots beside it
+// (chusenOwedBesideBarredDraws), so the answer says what is pending. A
+// corrupt overrides.json comes back wrapping state.ErrCorruptOverrides.
 func (e *Engine) PoolsSettledNow(tx state.StoreTx, compID string) (PoolsVerdict, error) {
 	comp, err := tx.LoadCompetition(compID)
 	if err != nil {
@@ -75,16 +84,26 @@ func (e *Engine) PoolsSettledNow(tx state.StoreTx, compID string) (PoolsVerdict,
 	standings := sync.OnceValues(func() (map[string][]state.PlayerStanding, error) {
 		return e.computeStandingsFrom(tx, compID)
 	})
-	lots, err := loadPoolLots(comp != nil && comp.Format == state.CompFormatLeague, matches, standings, func() (map[string]domain.CompetitorStatus, error) {
+	lots, err := loadPoolLots(matches, standings, func() (map[string]domain.CompetitorStatus, error) {
 		return tx.LoadCompetitorStatus(compID)
 	})
 	if err != nil {
 		return PoolsMatchOpen, err
 	}
+	// A row left open only by a tie-breaker drawn because both its sides are
+	// barred waits on the organiser, not on a match; a league asks first what else
+	// is pending beside it, so the answer names that too.
+	barredOpen := false
 	if !poolMatchesSettled(matches, lots) {
-		return PoolsMatchOpen, nil
+		if !onlyBarredDrawsOpen(matches, lots) {
+			return PoolsMatchOpen, nil
+		}
+		barredOpen = true
 	}
 	if comp == nil || comp.Format != state.CompFormatLeague {
+		if barredOpen {
+			return PoolsBarredDrawOpen, nil
+		}
 		return PoolsSettled, nil
 	}
 	pools, err := tx.LoadPools(compID)
@@ -107,29 +126,68 @@ func (e *Engine) PoolsSettledNow(tx state.StoreTx, compID string) (PoolsVerdict,
 	// in the band level (a circle) holds the league open until the operator
 	// runs another round (an individual's) or records the lots.
 	band := newBreakBand(comp, pools, bracket)
-	if dhCycleExists(st, chusenMatches(comp, matches, lots.statuses), lots.statuses, band) || barredDrawLotsOwed(st, matches, band, lots.statuses, comp.IsTeam()) {
+	chusen := chusenMatches(comp, matches, lots.statuses)
+	if barredOpen {
+		// A circle owed beside the barred draw is named first; the barred draw's
+		// own run, which dhCycleExists also counts, is the barred verdict's.
+		if chusenOwedBesideBarredDraws(st, chusen, lots.statuses, band) {
+			return PoolsChusenOwed, nil
+		}
+		return PoolsBarredDrawOpen, nil
+	}
+	if dhCycleExists(st, chusen, lots.statuses, band) {
 		return PoolsChusenOwed, nil
 	}
 	return PoolsSettled, nil
 }
 
-// barredDrawLotsOwed reports whether a league tie whose tie-breaker was drawn
-// because both its sides are barred still waits for its lots: a run
-// (barredDrawRuns) at places in the band with no rank in force over it
-// (chusenRecorded). statuses are loaded with the lots (loadPoolLots) whenever a
-// drawn supplementary bout exists, the only case it can hold.
-func barredDrawLotsOwed(standings map[string][]state.PlayerStanding, matches []state.MatchResult, band breakBand, statuses map[string]domain.CompetitorStatus, isTeam bool) bool {
+// chusenOwedBesideBarredDraws reports whether a tied group in the band owes the
+// lots (or, an individual's, another round) for a run that holds no side of a
+// tie-breaker drawn because both its sides are barred (barredDrawnSides): a
+// circle the bouts left level, pending beside the barred draw rather than
+// because of it. Arguments as dhCycleExists.
+func chusenOwedBesideBarredDraws(standings map[string][]state.PlayerStanding, allMatches []state.MatchResult, statuses map[string]domain.CompetitorStatus, band breakBand) bool {
 	for poolName, poolStandings := range standings {
 		for _, positions := range detectPoolTies(poolStandings) {
 			group := standingsAt(poolStandings, positions)
-			for _, run := range barredDrawRuns(group, positions, matches, statuses, isTeam) {
-				if band(poolName, run.positions, run.members) && !chusenRecorded(run.members) {
+			inBand := func(runPositions []int, members []state.PlayerStanding) bool {
+				return band(poolName, runPositions, members)
+			}
+			owed, _ := chusenOfRuns(group, positions, allMatches, statuses, inBand)
+			barred := barredDrawnSides(group, allMatches, statuses)
+			for _, run := range owed {
+				if !holdsDrawnSide(run.members, barred) {
 					return true
 				}
 			}
 		}
 	}
 	return false
+}
+
+// onlyBarredDrawsOpen reports whether every row poolMatchSettled leaves open is
+// a tie-breaker drawn because both its sides are barred
+// (drawnTiebreakOfBarredSides, judged on lots.statuses): the rows that wait for
+// the organiser to fight one again or enter its lots, not for a match to be
+// played. Asked only once some row is open.
+func onlyBarredDrawsOpen(matches []state.MatchResult, lots poolLots) bool {
+	for i := range matches {
+		if rowAwaitsPlay(&matches[i], lots) {
+			return false
+		}
+	}
+	return true
+}
+
+// rowAwaitsPlay is the one owner of "this pool row is open because a bout is
+// still to be played": it is not settled (poolMatchSettled) and is not a
+// tie-breaker drawn because both its sides are barred
+// (drawnTiebreakOfBarredSides, judged on lots.statuses), which waits on the
+// organiser, to fight it again or enter its lots, and not on a court. Such a
+// draw blocks neither a league's other ties from getting their bouts (the
+// auto-complete scan) nor names itself a match to play (PoolsSettledNow).
+func rowAwaitsPlay(m *state.MatchResult, lots poolLots) bool {
+	return !poolMatchSettled(m, lots) && !drawnTiebreakOfBarredSides(m, lots.statuses)
 }
 
 // tieBreakOwed reports whether a pool still owes a supplementary bout for a tie
@@ -163,10 +221,10 @@ func tieBreakOwed(comp *state.Competition, pools []helper.Pool, bracket *state.B
 // was fought for (drawnSupplementaryRuledByChusen, which reads the pool's standings to find the
 // group), or a correction has since split its two sides (drawnSupplementaryMoot):
 // either way that place is decided, and the bout, which settled nothing, may
-// stay drawn. So may a tie-break bout whose two sides are both barred, an
-// ippon-shobu bout anywhere and a league's representative bout
-// (poolLots.barredDrawPlayed): nobody can fight it, and in a league the place
-// then goes to the lots (barredDrawRuns). It is the one owner of that rule, so the league's completion
+// stay drawn. A tie-break bout whose two sides are both barred is no exception,
+// in any format: it waits for the lots (barredDrawRuns) or to be fought again,
+// the organiser's choice, unless the fought bouts already put each side in a run
+// of its own (drawnBarredDecidesNoPlace). It is the one owner of that rule, so the league's completion
 // (poolMatchesSettled), a mixed pool's (poolCompletion), the auto-complete scan
 // (MaybeAutoCompletePools) and the engi self-heal (isBlockingEngiTBRow) cannot
 // drift inside Go; the reopen gate (drawnSupplementaryBout) stays on the raw
@@ -175,7 +233,22 @@ func tieBreakOwed(comp *state.Competition, pools []helper.Pool, bracket *state.B
 // pinned to the one table testdata/drawn_supplementary_cases.json, so a change
 // here changes the table.
 func poolMatchSettled(m *state.MatchResult, lots poolLots) bool {
-	return m.Status == state.MatchStatusCompleted && (!drawnSupplementaryBout(m) || drawnSupplementaryRuledByChusen(m, lots.standings) || drawnSupplementaryMoot(m, lots.standings) || lots.barredDrawPlayed(m))
+	return m.Status == state.MatchStatusCompleted && (!drawnSupplementaryBout(m) || drawnSupplementaryRuledByChusen(m, lots.standings) || drawnSupplementaryMoot(m, lots.standings) || drawnBarredDecidesNoPlace(m, lots))
+}
+
+// drawnBarredDecidesNoPlace reports a tie-breaker drawn because both its sides
+// are barred (drawnTiebreakOfBarredSides) whose two sides the fought bouts have
+// already put each in a run of its own (lotsGroup: still level on Points, but no
+// run of two or more holds either side). Neither can fight it, so its result
+// cannot move them, and it owes no lots (barredDrawRuns lists no run for it): it
+// decides no place and settles as it stands. A fightable drawn bout with both
+// sides alone is not excused: fought again, it could put them level with a run.
+func drawnBarredDecidesNoPlace(m *state.MatchResult, lots poolLots) bool {
+	if !drawnTiebreakOfBarredSides(m, lots.statuses) {
+		return false
+	}
+	group, level := lotsGroup(lots.standings, m)
+	return level && len(group) == 0
 }
 
 // drawnSupplementaryBout reports a pool tie-break ("-TB-") or representative
@@ -569,7 +642,11 @@ func (e *Engine) maybeAutoCompletePoolsRunning(compID string, comp *state.Compet
 	// such a bout exists. The decision
 	// itself is taken under the lock below (PoolsSettledNow), on what the
 	// transaction holds then.
-	lots, err := loadPoolLots(comp.Format == state.CompFormatLeague, matches, func() (map[string][]state.PlayerStanding, error) {
+	// The statuses too: a tie-breaker drawn because both its sides are barred,
+	// each side in a run of its own, is settled (drawnBarredDecidesNoPlace), and
+	// any other such draw waits on the organiser rather than on play
+	// (rowAwaitsPlay).
+	lots, err := loadPoolLots(matches, func() (map[string][]state.PlayerStanding, error) {
 		return e.CalculatePoolStandings(compID)
 	}, func() (map[string]domain.CompetitorStatus, error) {
 		return e.store.LoadCompetitorStatus(compID)
@@ -578,7 +655,11 @@ func (e *Engine) maybeAutoCompletePoolsRunning(compID string, comp *state.Compet
 		return AutoCompleteNoChange, err
 	}
 
-	// Partition matches into regular vs tiebreaker vs pool-daihyosen.
+	// Partition matches into regular vs tiebreaker vs pool-daihyosen. A
+	// tie-breaker drawn because both its sides are barred waits on the
+	// organiser, not on play (rowAwaitsPlay): it does not hold back the bouts of
+	// a new tie elsewhere, and the completion below still waits for it
+	// (PoolsSettledNow answers PoolsBarredDrawOpen).
 	allComplete := true
 	hasIncompleteTB := false
 	hasCompleteTB := false
@@ -589,7 +670,7 @@ func (e *Engine) maybeAutoCompletePoolsRunning(compID string, comp *state.Compet
 		case IsTiebreakerMatchID(m.ID):
 			// A TB match without a winner (malformed payload) leaves standings
 			// still tied, so treat it as unresolved just like DH.
-			if !poolMatchSettled(&m, lots) {
+			if rowAwaitsPlay(&m, lots) {
 				hasIncompleteTB = true
 			} else {
 				hasCompleteTB = true
@@ -597,7 +678,7 @@ func (e *Engine) maybeAutoCompletePoolsRunning(compID string, comp *state.Compet
 		case IsPoolDaihyosenMatchID(m.ID):
 			// A DH match without a winner (e.g. hikiwake) leaves standings
 			// still tied, so it must not count as resolved.
-			if !poolMatchSettled(&m, lots) {
+			if rowAwaitsPlay(&m, lots) {
 				hasIncompleteDH = true
 			} else {
 				hasCompleteDH = true

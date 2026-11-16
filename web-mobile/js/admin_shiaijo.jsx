@@ -2957,16 +2957,17 @@ export function tieBreakerReasonLine(m, rows) {
     // says neither can fight).
     const barred = barredSides(m);
     const bothBarred = !!(barred.a && barred.b);
-    // What the operator does with a bout nobody can fight. The lots are asked
-    // only for a tie inside the band a tie is broken in; a pair level below it
-    // (`tieOutOfBand` on its rows) shares its place and owes none. Without the
-    // standings the line cannot say which, so it names the Pools tab only as
-    // the place that asks.
+    // What the operator does with a bout nobody can fight. Inside the band a tie
+    // is broken in, the drawn bout then waits for the organiser's choice on the
+    // Pools tab: fight it again or enter the lots, neither forced (operator
+    // ruling 2026-11-16). A pair level below it (`tieOutOfBand` on its rows)
+    // shares its place and owes neither. Without the standings the line cannot
+    // say which, so it names the Pools tab only as the place that asks.
     const neither = (outOfBand) => outOfBand === undefined
-        ? "Neither can fight: record it as drawn. The Pools tab asks for lots if any are owed."
+        ? "Neither can fight: record it as drawn. If a place depends on it, the Pools tab then offers to fight it again or enter the lots."
         : outOfBand
             ? "Neither can fight: record it as drawn. They share this place, so no lots are owed."
-            : "Neither can fight: record it as drawn, then enter the lots on the Pools tab.";
+            : "Neither can fight: record it as drawn. The Pools tab then offers to fight it again or enter the lots.";
     const generic = bothBarred
         ? `Tie-breaker bout. ${neither()}`
         : "Tie-breaker bout. These two finished level.";

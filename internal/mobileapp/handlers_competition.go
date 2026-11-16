@@ -2903,6 +2903,11 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 						conflict = gin.H{"code": "league_chusen_pending", "error": "A tie-breaker round left some places tied. Run another tie-breaker round, or draw lots, on the Pools tab before this competition can be finished."}
 					}
 					return nil
+				case engine.PoolsBarredDrawOpen:
+					// The organiser chooses (operator ruling 2026-11-16): the
+					// sentence names both ways on and ranks neither.
+					conflict = gin.H{"code": "barred_tiebreak_draw_pending", "error": "A tie-breaker was saved as a draw because both sides withdrew earlier. On the Pools tab, fight it again or enter the lots before this competition can be finished."}
+					return nil
 				}
 				if n := engine.SwissRoundsToDraw(current); n > 0 {
 					statusErr = fmt.Errorf("%d Swiss round(s) remain to be drawn and played before this competition can be finished", n)

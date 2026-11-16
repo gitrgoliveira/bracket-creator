@@ -89,6 +89,11 @@ export const TEXT = {
   // the one action it offers (ineligible_match.jsx).
   bothBarred: 'Both withdrew earlier: neither can fight this match.',
   recordDrawn: 'Record as drawn (neither can fight)',
+  // Once it is drawn, both ways on, neither forced (operator ruling
+  // 2026-11-16): the drawn-bout notice's choice, and the console's reason line.
+  barredDrawChoice: 'Fight it again, or enter the lots below. Fought again, it waits on its court until both can fight; while they cannot, the court can record it as drawn again, which offers the lots again.',
+  barredReason: 'Neither can fight: record it as drawn. The Pools tab then offers to fight it again or enter the lots.',
+  fightAgain: 'Fight it again',
   // The warning before a result on a finished league is changed.
   finishedLeague: 'This league has finished. Changing this result can change the final table and podium. If it leaves a new tie at a podium place, the league goes back to match play to settle it.',
   changeAnyway: 'Change it anyway',

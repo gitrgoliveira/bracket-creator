@@ -68,8 +68,7 @@ describe('drawnSupplementaryBouts', () => {
       const standings = {
         [poolNameOf(c.id)]: c.standings.map(s => ({ player: { id: s.id }, points: s.points, isOverridden: c.inForce.includes(s.id), tieOutOfBand: !!s.tieOutOfBand, tieRun: s.tieRun || 0 })),
       };
-      // `league` is the competition's format, which the page passes as the third argument.
-      expect(drawnSupplementaryBouts([row], standings, !!c.league)).toEqual(c.stuck ? [row] : []);
+      expect(drawnSupplementaryBouts([row], standings)).toEqual(c.stuck ? [row] : []);
     });
 
     // The same cases name the bouts the lots rule (the table's `ruled`), which the

@@ -148,14 +148,15 @@ function enrichPoolMatchWithComp(m, comp, poolNameOverride) {
 // from the wire fields; both are pinned to the one table
 // internal/engine/testdata/drawn_supplementary_cases.json.
 //
-// A drawn supplementary bout is not stuck, and no notice names it, in three
-// cases the engine's poolMatchSettled counts settled. Nobody can fight it: both
-// sides of a drawn ippon-shobu bout are barred (drawnTiebreakOfBarredSides, read
-// from the server's ineligibleSides stamp), and so are both sides of a LEAGUE's
-// drawn representative bout (`isLeague`): the place it was for then goes to the
-// lots the chusen panel asks for, which is that panel's notice, not this one.
-// In pools + knockout a representative bout with both sides barred waits for its
-// lots like any drawn one and stays named here. The lots ruled a drawn
+// A bout drawn because both its sides are barred (the server's ineligibleSides
+// stamp, drawnTiebreakOfBarredSides) is stuck like any other, in a league and in
+// pools + knockout alike: the organiser may fight it again (it waits on its
+// court until both can fight) or enter the lots the chusen panel asks for,
+// their choice (operator ruling 2026-11-16), so the notice names it and offers
+// Fight it again beside that panel.
+//
+// A drawn supplementary bout is not stuck, and no notice names it, in two
+// cases the engine's poolMatchSettled counts settled. The lots ruled a drawn
 // daihyosen or tie-break bout (drawnSupplementaryRuledByChusen): every
 // competitor the pool's standings hold level on points with its two sides
 // carries a rank in force, i.e. its standings row is isOverridden (the server
@@ -171,12 +172,14 @@ function enrichPoolMatchWithComp(m, comp, poolNameOverride) {
 // (chusenCases) pins both copies.
 //
 // Exported for vitest at __tests__/admin_pools.test.jsx.
-function drawnSupplementaryBouts(poolMatches, standings, isLeague = false) {
+function drawnSupplementaryBouts(poolMatches, standings) {
   const rows = poolMatches || [];
   const settledWithoutRematch = (m) => {
-    if (bothSidesBarred(m, isLeague)) return true;
     const { group, level } = lotsGroupOf(standings, m);
-    if (!group) return false;
+    // Two barred sides the fought bouts already put each in a run of its own
+    // decide no place (drawnBarredDecidesNoPlace in Go): neither can fight it
+    // and no lots are owed. A fightable bout with both sides alone stays stuck.
+    if (!group) return level && bothSidesBarred(m);
     // Moot: any drawn supplementary bout whose sides are no longer level, or
     // whose level run lies outside the band a tie is broken in (the server
     // marks those rows tieOutOfBand, judged on the run's own places). Or the lots rule it: drawn outside the app
@@ -187,11 +190,12 @@ function drawnSupplementaryBouts(poolMatches, standings, isLeague = false) {
   return rows.filter(m => isDrawnSupplementary(m) && !settledWithoutRematch(m));
 }
 
-// drawnTiebreakOfBarredSides in chusen.go: a tie-break bout (a league's
-// representative bout too) whose two sides are both barred elsewhere (the server
-// stamps ineligibleSides on it) cannot be fought, so its draw stands.
-function bothSidesBarred(m, isLeague) {
-  return (isLeague || !isPoolDaihyosenBout(m.id)) && !!(m.ineligibleSides && m.ineligibleSides.a && m.ineligibleSides.b);
+// drawnTiebreakOfBarredSides in chusen.go: a tie-break or representative bout
+// whose two sides are both barred elsewhere (the server stamps ineligibleSides
+// on it). Neither can fight it while both are barred; it says nothing about
+// whether the bout is settled (drawnSupplementaryBouts).
+function bothSidesBarred(m) {
+  return !!(m.ineligibleSides && m.ineligibleSides.a && m.ineligibleSides.b);
 }
 
 // A supplementary bout finished with no winner: the draw nothing else decides.
@@ -205,7 +209,7 @@ function isDrawnSupplementary(m) {
 // sides are in one run the group is that run alone; sides in different runs are
 // judged on the runs of two or more among them (each owes its own lots), and a
 // side standing alone has none to rank, so with both alone the group is null
-// (neither ruled by lots nor moot).
+// (neither ruled by lots nor moot; settled only when both sides are barred).
 function lotsGroupOf(standings, m) {
   const poolRows = (standings || {})[poolNameOf(m.id)] || [];
   const rowOf = (id) => (id ? poolRows.find(s => s.player && s.player.id === id) : undefined);
@@ -220,15 +224,26 @@ function lotsGroupOf(standings, m) {
   return { group: group.length ? group : null, level: true };
 }
 
+// What fighting again a bout both of whose sides are barred means. Only an
+// injury withdrawal can be reinstated, so the bout may never be fought: it waits
+// on its court until both can fight, and while they cannot, the court can record
+// it as drawn again. That draw offers the lots again, or, once lots are entered
+// (byLots), is ruled by them at once: Replace the lots leaves them stored, so a
+// result that separates no one hands the place back to them.
+function barredRefight(byLots) {
+  const drawn = byLots ? "and the lots you entered apply again" : "which offers the lots again";
+  return `Fought again, it waits on its court until both can fight; while they cannot, the court can record it as drawn again, ${drawn}.`;
+}
+
 // lotsRuledBouts: the drawn tie-break and daihyosen bouts the organiser's lots
 // settle (drawnSupplementaryRuledByChusen in chusen.go, the table's `ruled`):
 // every competitor level with the bout's two sides carries a rank in force. The
 // lots were drawn outside the app and entered by the organiser, so the app never
 // removes them and the bout counts as played; the organiser may still correct it,
 // after a warning that its result replaces the lots. The Pools tab lists these
-// beside the stuck ones so Fight it again and Open bout stay within reach; a bout
-// both of whose sides are barred is listed too (the lots can still be corrected
-// by Open bout) but cannot be fought again, so its notice offers no Fight it again.
+// beside the stuck ones so Fight it again and Open bout stay within reach, a bout
+// both of whose sides are barred included (the reopen warns before it replaces
+// the lots, as for any other).
 // Exported for vitest at __tests__/admin_pools.test.jsx.
 function lotsRuledBouts(poolMatches, standings) {
   return (poolMatches || []).filter((m) => {
@@ -241,7 +256,12 @@ function lotsRuledBouts(poolMatches, standings) {
 // DrawnTieBreakNotice: names one such bout and the two ways on, fight it again
 // (the reopen: the draw is cleared and the bout runs on its court) or open it
 // to decide it by encho or hantei. Neither is forced: the pool stays as it is
-// until the operator chooses.
+// until the operator chooses. cannotFight is a bout both of whose sides are
+// barred (bothSidesBarred): it still offers Fight it again, stuck beside the lots
+// the panel below asks for, and ruled by lots (byLots) behind the reopen's own
+// "Replace the lots?" warning, ranking neither path (operator ruling 2026-11-16:
+// "We should not be enforcing a path"). barredRefight says what a refight of it
+// means, since a withdrawal is not always reinstated.
 function DrawnTieBreakNotice({ match, comp, password, onOpen, byLots = false, cannotFight = false }) {
   const ctl = useMatchReopen({ match, password, isComplete: true, allowCourtForce: true });
   const what = isPoolDaihyosenBout(match.id) ? "daihyosen" : "tie-break bout";
@@ -260,17 +280,17 @@ function DrawnTieBreakNotice({ match, comp, password, onOpen, byLots = false, ca
       <div className="league-tiebreak__desc">
         {byLots
           ? <>{pool}{sides}: the order you entered from the lots stands. {cannotFight
-            ? "Neither of them can fight, so the bout cannot be fought again. You can still open it to correct it; you are asked first, because its result then replaces the lots for that place."
+            ? `Fight it again, or open it to correct it. You are asked first, because its result then replaces the lots for that place. ${barredRefight(true)}`
             : "Fight it again, or open it to decide it by encho or hantei. You are asked first, because its result then replaces the lots for that place."}</>
-          : <>{pool}{sides} are still tied, {effect}. Fight it again, or open it to decide it by encho or hantei.</>}
+          : cannotFight
+            ? <>{pool}{sides} are still tied, {effect}. Neither can fight while both are withdrawn. Fight it again, or enter the lots below. {barredRefight(false)}</>
+            : <>{pool}{sides} are still tied, {effect}. Fight it again, or open it to decide it by encho or hantei.</>}
       </div>
       <div className="league-tiebreak__actions">
-        {!cannotFight && (
-          <button type="button" className="btn btn--sm btn--primary" disabled={ctl.busy || ctl.landed} onClick={() => ctl.reopen()}>
-            {ctl.busy && <span className="spinner" />}
-            {ctl.landed ? "Reopened" : "Fight it again"}
-          </button>
-        )}
+        <button type="button" className="btn btn--sm btn--primary" disabled={ctl.busy || ctl.landed} onClick={() => ctl.reopen()}>
+          {ctl.busy && <span className="spinner" />}
+          {ctl.landed ? "Reopened" : "Fight it again"}
+        </button>
         <button type="button" className="btn btn--sm btn--ghost" disabled={ctl.busy || ctl.landed} onClick={onOpen}>
           Open bout
         </button>
@@ -570,8 +590,9 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
   // (`{ onCancel }`): it is drawn without its own group header (the notice's
   // group already names the tie) and spaced from the buttons above it. A Cancel
   // closing it again shows only where the lots were opened by "Draw lots
-  // instead" (`onCancel` set); where the lots are the only way on there is
-  // nothing to go back to.
+  // instead" (`onCancel` set). Where no round can be offered (both sides of the
+  // drawn tie-breaker are barred) the entry is drawn at once, with no Cancel:
+  // the other way on, fighting the bout again, is on its own notice above.
   const chusenEntry = (group, changing = false, embed = null) => {
     const onCancel = embed ? embed.onCancel : null;
     const { poolName, teamNames, minPosition } = group;
@@ -823,7 +844,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
     >
       <div className="league-tiebreak__title">Chusen (drawing lots) required</div>
       <div className="league-tiebreak__desc">
-        The tie-breaker could not separate these teams: the daihyosen left two or more of them level on daihyosen wins, or the teams to fight it withdrew earlier. Draw lots, then record each team&apos;s finishing place below.
+        The tie-breaker could not separate these teams: the daihyosen left two or more of them level on daihyosen wins, or the teams to fight it withdrew earlier (that bout can also be fought again from its notice above). Draw lots, then record each team&apos;s finishing place below.
       </div>
       {chusenCandidates.map(group => chusenEntry(group))}
     </div>
@@ -850,8 +871,10 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
       {chusenCandidates.map(group => {
         const groupKey = `${group.poolName}::${group.minPosition}`;
         const runs = group.stillLevel || [];
-        // No round can be offered when nobody can fight it (both sides of the
-        // tie-breaker withdrew earlier): the lots are then the only way on.
+        // No new round is offered when both sides of the drawn tie-breaker
+        // withdrew earlier: the other way on is fighting that bout again, which
+        // its own notice above offers (DrawnTieBreakNotice), so the lots entry
+        // shows at once here, beside it, and neither is forced.
         const lotsOnly = runs.length === 0;
         const errMsg = circleErr[groupKey] || null;
         return (
@@ -862,7 +885,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
             </div>
             <div className="league-tiebreak__desc">
               {lotsOnly
-                ? `The ${circleSideWord} to fight the tie-breaker withdrew earlier, so no round can be fought. Draw lots, then enter the order below.`
+                ? `The ${circleSideWord} to fight the tie-breaker withdrew earlier. Fight it again from its notice above, or draw lots and enter the order below.`
                 : `${andList(group.teamNames)} each won as many tie-breaker bouts as ${(group.teamNames || []).length === 2 ? "the other" : "the others"}. Run another round among them, or draw lots instead.`}
             </div>
             <div className="league-tiebreak__actions">
@@ -1094,13 +1117,14 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
   return (
     <>
     <div>
-      {drawnSupplementaryBouts(poolMatches, standings, isLeague).map(m => (
+      {drawnSupplementaryBouts(poolMatches, standings).map(m => (
         <DrawnTieBreakNotice
           key={m.id}
           match={enrichPoolMatchWithComp(m, c)}
           comp={c}
           password={password}
           onOpen={() => setScoreOpenId(m.id)}
+          cannotFight={bothSidesBarred(m)}
         />
       ))}
       {lotsRuledBouts(poolMatches, standings).map(m => (
@@ -1111,7 +1135,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
           password={password}
           onOpen={() => setScoreOpenId(m.id)}
           byLots
-          cannotFight={bothSidesBarred(m, isLeague)}
+          cannotFight={bothSidesBarred(m)}
         />
       ))}
       {chusenBanner}

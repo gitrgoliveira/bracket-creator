@@ -172,24 +172,80 @@ describe('AdminPools: a tie-break bout saved as a draw', () => {
     });
   });
 
-  // A bout whose two sides are both barred never runs, so the lots that rule it
-  // can still be corrected (Open bout) but there is nothing to fight again.
+  // A bout whose two sides are both barred, once the lots the organiser entered
+  // rule it: the app enforces no path (operator ruling 2026-11-16), so the
+  // notice still offers Fight it again, behind the reopen's own "Replace the
+  // lots?" warning, beside Open bout, and says what a refight means.
   describe('on a league with the lots ruling a bout neither side can fight', () => {
     const row = (id, name) => ({ player: { id, name }, points: 2, isOverridden: true });
     const standings = { 'Pool A': [row('a', 'Bea'), row('b', 'Cal')] };
-    const api = { chusenCandidates: vi.fn().mockResolvedValue({ candidates: [], recorded: [] }) };
+    const api = (extra = {}) => ({ chusenCandidates: vi.fn().mockResolvedValue({ candidates: [], recorded: [] }), ...extra });
 
-    it('offers Open bout and no Fight it again', async () => {
-      await mount([bout('Pool A-TB-0', { ineligibleSides: { a: true, b: true } })], 'league', {}, api, standings);
+    it('offers Fight it again and Open bout, and never says the bout cannot be fought', async () => {
+      await mount([bout('Pool A-TB-0', { ineligibleSides: { a: true, b: true } })], 'league', {}, api(), standings);
       const text = screen.getByTestId('drawn-tiebreak-notice').textContent;
       expect(text).toMatch(/the order you entered from the lots stands/);
-      expect(text).toMatch(/cannot be fought again/);
-      expect(screen.queryByRole('button', { name: /Fight it again/ })).toBeNull();
+      expect(text).toMatch(/its result then replaces the lots for that place/);
+      expect(text).toMatch(/Fought again, it waits on its court until both can fight; while they cannot, the court can record it as drawn again, and the lots you entered apply again\./);
+      expect(text).not.toMatch(/offers the lots again/);
+      expect(text).not.toMatch(/cannot be fought again|reinstated/);
+      expect(screen.getByRole('button', { name: /Fight it again/ })).toBeTruthy();
       expect(screen.getByRole('button', { name: 'Open bout' })).toBeTruthy();
+    });
+
+    it('Fight it again asks first, and on Replace the lots reopens with confirmLots', async () => {
+      const refused = Object.assign(new Error('sentence'), { code: 'lots_replaced', lotsReplaced: { matchId: 'Pool A-TB-0' } });
+      const reopenMatch = vi.fn().mockRejectedValueOnce(refused).mockResolvedValue({});
+      window.confirmDialog = vi.fn().mockResolvedValue(true);
+      await mount([bout('Pool A-TB-0', { ineligibleSides: { a: true, b: true } })], 'league', {}, api({ reopenMatch }), standings);
+      await act(async () => { screen.getByRole('button', { name: /Fight it again/ }).click(); });
+
+      await waitFor(() => expect(reopenMatch).toHaveBeenCalledTimes(2));
+      expect(window.confirmDialog.mock.calls[0][0]).toMatchObject({ confirmLabel: 'Replace the lots' });
+      expect(reopenMatch.mock.calls[1][3].confirmLots).toBe(true);
     });
 
     it('still offers Fight it again when only one side is barred', async () => {
       await mount([bout('Pool A-TB-0', { ineligibleSides: { a: true, b: false } })], 'league', {}, api, standings);
+      expect(screen.getByRole('button', { name: /Fight it again/ })).toBeTruthy();
+    });
+  });
+
+  // A bout drawn because both sides withdrew earlier, with no lots entered yet:
+  // the organiser may fight it again (it waits on its court until both can
+  // fight, which may be never: only an injury withdrawal is reinstated) or enter
+  // the lots, and the app forces neither (operator ruling 2026-11-16). The notice shows in a league and in pools + knockout alike,
+  // with Fight it again, beside the lots entry the circle notice opens.
+  describe.each([
+    ['pools + knockout', 'mixed'],
+    ['a league', 'league'],
+  ])('on %s with a tie-breaker drawn because both sides withdrew', (_name, format) => {
+    const barredBout = (id) => bout(id, { ineligibleSides: { a: 'kiken-voluntary', b: 'fusenpai' } });
+    const row = (id, name) => ({ player: { id, name }, points: 2 });
+    const standings = { 'Pool A': [row('a', 'Bea'), row('b', 'Cal')] };
+    const pending = { poolName: 'Pool A', teamNames: ['Bea', 'Cal'], teams: [{ id: 'a', name: 'Bea' }, { id: 'b', name: 'Cal' }], minPosition: 1, stillLevel: null };
+    const api = () => ({
+      chusenCandidates: vi.fn().mockResolvedValue({ candidates: [pending], recorded: [] }),
+      leagueTiebreakCandidates: vi.fn().mockResolvedValue({ groups: [] }),
+    });
+
+    it('names both ways on, fight it again or the lots, and offers Fight it again beside the lots entry', async () => {
+      const calls = await mount([barredBout('Pool A-TB-0')], format, {}, api(), standings);
+      const text = screen.getByTestId('drawn-tiebreak-notice').textContent;
+      expect(text).toMatch(/Bea and Cal are still tied/);
+      expect(text).toMatch(/Neither can fight while both are withdrawn\. Fight it again, or enter the lots below\. Fought again, it waits on its court until both can fight; while they cannot, the court can record it as drawn again, which offers the lots again\./);
+      expect(text).not.toMatch(/reinstated/);
+      expect(text).not.toMatch(/encho or hantei/);
+      expect(screen.getByRole('button', { name: /Fight it again/ })).toBeTruthy();
+      expect(await screen.findByRole('button', { name: /Record chusen result/ })).toBeTruthy();
+      await act(async () => { screen.getByRole('button', { name: /Fight it again/ }).click(); });
+      await waitFor(() => expect(calls.reopenMatch).toHaveBeenCalled());
+      expect(calls.reopenMatch.mock.calls[0].slice(0, 3)).toEqual(['c1', 'Pool A-TB-0', 'pw']);
+    });
+
+    it('names a daihyosen the same way', async () => {
+      await mount([barredBout('Pool A-DH-0')], format, { kind: 'team', teamSize: 3 }, api(), standings);
+      expect(screen.getByText('A daihyosen was saved as a draw')).toBeTruthy();
       expect(screen.getByRole('button', { name: /Fight it again/ })).toBeTruthy();
     });
   });

@@ -74,7 +74,6 @@ local/deps: hooks/install js/deps ## Install project dependencies
 	GOTOOLCHAIN=go$(GO_VERSION) go install github.com/golangci/golangci-lint/$${tag%%.*}/cmd/golangci-lint@$$tag
 	GOTOOLCHAIN=go$(GO_VERSION) go install github.com/securego/gosec/v2/cmd/gosec@latest
 	GOTOOLCHAIN=go$(GO_VERSION) go install golang.org/x/vuln/cmd/govulncheck@latest
-	$(MAKE) docs/deps
 
 hooks/install: ## Wire scripts/hooks/ as the git hooks dir for this clone
 	@chmod +x scripts/hooks/*

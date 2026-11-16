@@ -485,10 +485,9 @@ class _ProseHTMLParser(HTMLParser):
         lineno = self.getpos()[0]
         if tag not in HTML_INLINE_TAGS:
             self._flush()
-        if tag in HTML_SKIP_TAGS:
-            self._skip_depth += 1
-            return
         if self._skip_depth:
+            if tag in HTML_SKIP_TAGS:
+                self._skip_depth += 1
             return
         if tag == "a":
             m = HTML_SEE_LINK_RE.search("\n".join(self._lines)) if self._start is not None else None
@@ -497,12 +496,16 @@ class _ProseHTMLParser(HTMLParser):
         for name, value in attrs:
             if value and (name in HTML_READ_ATTRS or (tag == "meta" and name == "content")):
                 # An attribute is its own block: alt text never joins the
-                # prose around the image into one sentence.
+                # prose around the image into one sentence. A skip tag's own
+                # attributes are read too (a title on a <code> is shown on
+                # hover); only what sits inside it is skipped.
                 saved = (self._start, self._lines)
                 self._start, self._lines = None, []
                 self._add(self._attr_line(lineno, name), value)
                 self._flush()
                 self._start, self._lines = saved
+        if tag in HTML_SKIP_TAGS:
+            self._skip_depth += 1
 
     def handle_endtag(self, tag):
         if tag in HTML_SKIP_TAGS:

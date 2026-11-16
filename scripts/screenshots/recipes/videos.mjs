@@ -236,11 +236,10 @@ async function displayMovesOn(page, before) {
 const press = (locator) => locator.dispatchEvent('click');
 
 // One ippon tapped on the console, and the clip waits until the display shows
-// it, paced past the bounce window for a second tap on the same side
-// (lib/editor.mjs).
-async function pointOnEveryScreen(page, pace, side, waza) {
+// it. No pacing between taps: `press` sends a click with detail 0, which the
+// app's tap guard never reads as a bounce (tap_guard.jsx, isPointerTap).
+async function pointOnEveryScreen(page, side, waza) {
   const before = await displayNow(page);
-  await pace(page, side);
   await press(STAGE_FRAMES.console(page)
     .locator(`.sb-side--${side} .ipt-btn`, { hasText: new RegExp(`^${waza}$`) }).first());
   await displayMovesOn(page, before);
@@ -559,20 +558,21 @@ export const recipes = [
       await page.waitForTimeout(2000);
 
       // The hero's moment is one point each; Aka's second point decides it.
-      const pace = sameSideTapPacer();
-      await pointOnEveryScreen(page, pace, 'aka', 'M');
+      await pointOnEveryScreen(page, 'aka', 'M');
       mark('aka M on the display');
       await page.waitForTimeout(2200);
 
       // The court console's commit is "Finish + Start Next", a two-tap guard:
-      // the first tap arms it (`btn--confirm`), the second, past the bounce
-      // window, commits and starts the court's next bout.
+      // the first tap arms it (`btn--confirm`), the second commits and starts
+      // the court's next bout. The wait between them holds the armed button on
+      // camera long enough to read; the guard itself needs none (`press` sends
+      // a click with detail 0, which is never a bounce).
       const before = await displayNow(page);
       const finish = STAGE_FRAMES.console(page).locator('.score-nav__actions .btn--primary').first();
       await press(finish);
       await STAGE_FRAMES.console(page).locator('.score-nav__actions .btn--primary.btn--confirm')
         .first().waitFor({ state: 'visible', timeout: 10000 });
-      await page.waitForTimeout(Math.max(900, TAP_DWELL_MS));
+      await page.waitForTimeout(900);
       await press(finish);
       await phoneResult(page).waitFor({ state: 'visible', timeout: 20000 });
       await displayMovesOn(page, before);
@@ -581,10 +581,10 @@ export const recipes = [
 
       // The next bout, scored on, so the display is seen following a second
       // bout as closely as the first.
-      await pointOnEveryScreen(page, pace, 'shiro', 'K');
+      await pointOnEveryScreen(page, 'shiro', 'K');
       mark('next bout: shiro K');
       await page.waitForTimeout(1800);
-      await pointOnEveryScreen(page, pace, 'aka', 'D');
+      await pointOnEveryScreen(page, 'aka', 'D');
       mark('next bout: aka D');
       await page.waitForTimeout(2800);
       console.log(`  live-every-screen MARKS ${JSON.stringify(marks)}`);

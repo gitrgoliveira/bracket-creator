@@ -108,6 +108,17 @@ class HtmlRulesTest(unittest.TestCase):
             [(1, "mat"), (2, "default-win"), (3, "wins-by-default")],
         )
 
+    def test_skip_tag_own_attributes_are_read_but_not_its_contents(self):
+        html = (
+            '<code title="the mat">--mat</code>\n'
+            '<pre aria-label="a default win">the mat</pre>\n'
+            '<pre><code title="the mat">x</code></pre>\n'
+        )
+        self.assertEqual(
+            rules_by_line(check_prose.check_html(html)),
+            [(1, "mat"), (2, "default-win")],
+        )
+
     def test_content_counts_only_on_meta(self):
         self.assertEqual(check_prose.check_html('<div content="the mat"></div>'), [])
 

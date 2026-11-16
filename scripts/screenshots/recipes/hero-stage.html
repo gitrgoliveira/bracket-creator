@@ -85,6 +85,10 @@
     const width = s[layout];
     const src = params.get(s.key);
     if (!width || !src) continue;
+    // The query names a running app to frame; anything but http(s), a
+    // javascript: link above all, is not a surface to show.
+    const url = new URL(src, location.href);
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') continue;
     const scale = width / s.w;
     const fig = document.createElement('figure');
     fig.className = `shot shot--${s.key}`;
@@ -96,7 +100,7 @@
     const frame = document.createElement('iframe');
     frame.name = s.key;
     frame.title = s.title;
-    frame.src = src;
+    frame.src = url.href;
     frame.style.width = `${s.w}px`;
     frame.style.height = `${s.h}px`;
     frame.style.transform = `scale(${scale})`;

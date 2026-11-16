@@ -52,7 +52,7 @@ Steps 1 to 5 run the whole tournament in the app. To work from printed brackets 
 3. **Optionally seed** top competitors so they land in separate pools/sides of the bracket ([seeding](../commands/create-pools.md#seeding))
 4. **Print**: the Excel file is laid out to print cleanly on A4/A3
 
-On the day you will need:
+On the day you need:
 
 - **A3 printer**: for team/competitor name sheets
 - **A4 printer**: for the bracket trees

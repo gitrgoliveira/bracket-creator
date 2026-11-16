@@ -166,10 +166,9 @@ export async function openStage(page, base, fixture, layout) {
 
   // The phone adds the competitor the way a spectator does: type their
   // competitor number into the watchlist box and pick them from the
-  // suggestions. By
-  // keyboard (fill focuses the box, Enter presses the suggestion), never by
-  // a pointer click: a click inside a frame the stage has SCALED misses its
-  // target. Measured on the narrow stage (phone at 0.85): every click on the
+  // suggestions. By keyboard (fill focuses the box, Enter presses the
+  // suggestion), never by a pointer click: a click inside a frame the stage
+  // has SCALED misses its target. Measured on the narrow stage (phone at 0.85): every click on the
   // box was refused with "<div class="viewer__body"> intercepts pointer
   // events" until the 30s timeout, while the same click passed at 0.98.
   const phone = page.frameLocator('iframe[name="phone"]');

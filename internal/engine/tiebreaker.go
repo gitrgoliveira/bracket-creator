@@ -32,7 +32,7 @@ func IsTiebreakerMatchID(matchID string) bool {
 // each criterion in priority order: two competitors with equal scores are tied
 // on every official criterion (and a difference in any criterion, however far
 // down the chain, produces different scores). This is the single source of
-// truth for both the standings sort (scoring.go) and tie detection
+// truth for both the standings sort (computeStandingsFrom) and tie detection
 // (detectPoolTies), so the two can never disagree on what "tied" means.
 //
 // Team chain (CLAUDE.md): W, L, T, IV (individual victories), IL, IT,

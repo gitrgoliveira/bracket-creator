@@ -1052,7 +1052,7 @@ func overlayTeamBracketScores(f *excelize.File, bracketByNum map[int]state.Brack
 // literal-name snapshot semantics overlayKnockoutBracketNames applies to every
 // other match. An EMPTY side is skipped so the cell keeps the self-populating
 // CONCATENATE formula written by PrintThirdPlaceBlock (pinned by the
-// no-scoring-yet formulas test in builder_test.go). The return value reports
+// no-scoring-yet formulas test in builder_naginata_test.go). The return value reports
 // whether the match is completed so the caller can skip the score overlay for
 // an unplayed match.
 func writeThirdPlaceEntrants(f *excelize.File, sheetName string, bm state.BracketMatch, courtStartCol, entrantRow int) bool {

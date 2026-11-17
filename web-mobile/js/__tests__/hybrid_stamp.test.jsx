@@ -66,7 +66,7 @@ const isClockPoll = (url) => String(url).includes('/api/time');
 // A server that orders writes as the real one does for a thing two writes
 // both change (engine/match_merge.go): the older stamp is not applied. It
 // holds one match whose last change was stamped `storedStamp`, and refuses a
-// stamp more than 5 s in its future (clock_skew, handlers_match.go).
+// stamp more than 5 s in its future (clock_skew, client_stamp.go).
 function server(storedStamp, { serverNow = () => Date.now() } = {}) {
     const sent = [];
     let stored = storedStamp;

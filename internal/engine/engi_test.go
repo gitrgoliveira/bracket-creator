@@ -702,7 +702,7 @@ func TestRecordMatchResult_EngiMatchCanBeStarted(t *testing.T) {
 	// The write the Start-match button sends: a status transition, no flags.
 	// RecordMatchResultWithIneligibility, not RecordMatchResult: only this door
 	// reaches the engi dispatch (RecordMatchResult calls writeMatchResult
-	// directly and never sees it), and it is the door handlers_match.go uses.
+	// directly and never sees it), and it is the door the score handler (registerScoreHandler, mobileapp) uses.
 	_, err = eng.RecordMatchResultWithIneligibility(compID, first.ID, &state.MatchResult{
 		ID:     first.ID,
 		Status: state.MatchStatusRunning,

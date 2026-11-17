@@ -122,7 +122,7 @@ func TestStartMatch_SameNameEligibilityUsesTheRowIDs(t *testing.T) {
 		assert.ErrorIs(t, err, ErrIneligibleCompetitor)
 	})
 
-	// The production start path is the TRANSACTIONAL door (handlers_match.go
+	// The production start path is the TRANSACTIONAL door (registerScoreHandler
 	// calls StartMatchTx inside the court-exclusivity lock), so it is pinned
 	// here too rather than left to the shared body: a twin that drifts is how
 	// this class of defect survives a green suite.

@@ -80,7 +80,7 @@ func TestFileVersionAdvancesOnDeleteCompetitionFile(t *testing.T) {
 }
 
 // TestFileVersionAdvancesOnSavePools pins bc-pnum A2's VERSION half: the
-// standings cache key (standingsTokens, engine/scoring.go) validates BOTH
+// standings cache key (standingsTokens, engine/engine.go) validates BOTH
 // pools.csv's mtime AND its FileVersion, because mtime alone (kernel coarse
 // clock, ~1ms granularity) cannot distinguish two writes inside one tick.
 // SavePools must therefore call bumpFileVersion("pools.csv") like every other

@@ -111,7 +111,7 @@ func TestExportPipelineSheetParity(t *testing.T) {
 		{
 			// The shape mp-8b1b finding R8 shipped a bug on: a kachinuki team
 			// competition with recorded bout data. Fixture mirrors
-			// TestBuildResultsWorkbook_KachinukiDetailSheet (builder_test.go)
+			// TestBuildResultsWorkbook_KachinukiDetailSheet (builder_team_test.go)
 			// and TestCollectKachinukiMatches_* (internal/engine/kachinuki_export_test.go):
 			// SubResults recorded directly on a saved bracket match, which both
 			// Engine.collectKachinukiMatches and Engine.KachinukiDetailMatches
@@ -170,7 +170,7 @@ func TestExportPipelineSheetParity(t *testing.T) {
 			// stored-draw export) and Engine.RepresentativeBoutMatches (the
 			// results export) are two reads feeding one renderer, and a
 			// sheet one of them forgot is the R8 bug again. The fixture is
-			// builder_test.go's saveFixedTeamBracket, a hand-crafted bracket
+			// builder_helpers_test.go's saveFixedTeamBracket, a hand-crafted bracket
 			// on the same Knockout-with-no-pools footing as the case above.
 			name: "fixed_team_bracket_representative_bout",
 			configure: func(t *testing.T, store *state.Store, eng *engine.Engine, compID string) {

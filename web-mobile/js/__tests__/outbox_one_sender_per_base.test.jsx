@@ -10,6 +10,7 @@ import {
 } from '../base_sender_lease.jsx';
 
 const CLIENT = new URL('../api_client.jsx', import.meta.url).pathname;
+const FLUSH = new URL('../api_client_flush.jsx', import.meta.url).pathname;
 const URL_LINEUP = '/api/competitions/c1/teams/t1/match-lineups/m1';
 async function flushMicrotasks() { for (let i = 0; i < 40; i++) await Promise.resolve(); }
 async function tick(ms = 0) { await vi.advanceTimersByTimeAsync(ms); await flushMicrotasks(); }
@@ -170,6 +171,18 @@ describe('two tabs of one device send a write once', () => {
         expect(A.unsentWrites().total).toBe(0);
         expect(B.unsentWrites().total).toBe(0);
         expect(store[BASE_LEASE_KEY], 'A gave the base up').toBeUndefined();
+    });
+
+    it('a pass that only leaves bases to another tab keeps the offline flag as it was', async () => {
+        const A = await openTab('a');
+        await openTab('b');
+        const flushB = await import(/* @vite-ignore */ `${FLUSH}?tab=b`);
+        flushB._setOffline(true); // tab B's last real pass found the connection down
+        (await A.putMatchLineup('c1', 't1', 'm1', { 1: 'L1' }, 'pw', null, null)).settled.catch(() => {});
+        await tick(100); // B took the write up and left it to A, who has it out
+        await tick(3000); // B asks again at its backoff and finds A still sending
+        expect(calls.filter((c) => c.url.includes(URL_LINEUP)).map((c) => c.tab), 'only A sent').toEqual(['a']);
+        expect(flushB._offlineFlag, 'B learned nothing about the connection').toBe(true);
     });
 
     it('tab B sends what is left when tab A\'s send fails and A gives the base up', async () => {

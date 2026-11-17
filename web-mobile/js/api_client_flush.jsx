@@ -261,7 +261,7 @@ export async function _flushQueue() {
     const pass = {
         superseded: 0, lastSuperseded: null, matchClosed: false,
         displaced: 0, sent: 0, notApplied: 0, lastNotApplied: null, parkedTaps: 0,
-        anyFailed: false, networkFailed: false,
+        anyFailed: false, networkFailed: false, leaseSkipped: false,
     };
     try {
         do {
@@ -279,6 +279,7 @@ export async function _flushQueue() {
             _recomputeSyncStatus();
             pass.anyFailed = false;      // any failure → keep in queue + backoff
             pass.networkFailed = false;  // fetch rejected → connection down → "offline"
+            pass.leaseSkipped = false;   // a base left to another tab: it says nothing of the connection
             const gen = _queueGen; // clearQueue() bumps this to cancel an in-flight flush
             // bc-evts F1 (reversing bc-mrgc C2): per match (base), in the ONE
             // replay order, _byEntryOrder, and strictly in order: the first entry
@@ -323,7 +324,7 @@ export async function _flushQueue() {
                     // a holder that failed or is gone.
                     if (!_baseLease.claim(base)) {
                         failedBases.add(base);
-                        pass.anyFailed = true;
+                        pass.leaseSkipped = true;
                         _askAgainWhenLeaseEnds(base);
                         continue;
                     }
@@ -373,7 +374,7 @@ export async function _flushQueue() {
                 _flushAttempt = 0;
                 _offlineFlag = false;
                 _recomputeSyncStatus();
-            } else if (!pass.anyFailed) {
+            } else if (!pass.anyFailed && !pass.leaseSkipped) {
                 // bc-qttl: entries remain but nothing failed this pass, which is the
                 // all-parked case (a parked write is skipped, so it can neither
                 // succeed nor fail). Republish so the pill leaves "Syncing…" for the
@@ -382,7 +383,9 @@ export async function _flushQueue() {
                 _offlineFlag = false;
                 _recomputeSyncStatus();
             } else {
-                _offlineFlag = pass.networkFailed;
+                // A pass that only left bases to other tabs learned nothing about
+                // the connection: the flag stays as the last real pass set it.
+                if (pass.anyFailed) _offlineFlag = pass.networkFailed;
                 _recomputeSyncStatus();
                 if (!_flushRequested) {
                     // Schedule a backoff retry only if no immediate rerun is already

@@ -3,9 +3,10 @@
 Engi is a kata competition for pairs. Two competitors perform a set of
 choreographed forms together, and a panel of referees each raise a flag for the
 side they judge superior. It suits any kata competition judged that way:
-naginata engi-kyogi, kendo kata, iaido, jodo and so on. It is scored entirely
-differently from a combat (shiai) bout: there are no ippon, no time on the
-clock, and no draws.
+naginata engi-kyogi, kendo kata, jodo and other kata performed in pairs. Each
+side must be a pair, so a kata performed alone, such as iaido, cannot be entered
+as engi yet. It is scored entirely differently from a combat (shiai) bout: there
+are no ippon, no time on the clock, and no draws.
 
 ## Turn it on
 

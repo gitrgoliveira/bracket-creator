@@ -952,8 +952,8 @@ func matchesBracketSide(rawID, name string, bm *state.BracketMatch) bool {
 // know only the match id: it resolves the court via the tx, then runs the gate.
 // Callers that already HOLD the court (and often the loaded slices too) skip
 // this and call courtFreeInCompTxWith directly — an in-tx lookupMatchCourtTx
-// walk is not free, since tx loads bypass the file cache and are therefore real
-// disk reads taken under the write lock.
+// walk is cheaper than it was (a stat and a copy on a cache hit) but still a
+// stat plus a copy of the pool and bracket data, taken under the write lock.
 func (e *Engine) checkCourtExclusivityTx(tx state.StoreTx, compID, matchID string) error {
 	court, err := lookupMatchCourtTx(tx, compID, matchID)
 	if err != nil {

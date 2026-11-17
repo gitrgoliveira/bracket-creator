@@ -4,8 +4,10 @@ GH_REPOSITORY ?= gitrgoliveira/bracket-creator
 IMAGE_NAME := ghcr.io/$(GH_REPOSITORY)
 BIN_PATH := ./bin
 GO_VERSION := 1.27.4
-# The gate gives way to other work; empty it to run at full priority:
+# The test runs give way to other work; empty it to run at full priority:
 # make go/test NICE=
+# Only the two `go test` lines use it (the heavy phase); lint, the JS tests and
+# the security scans run at normal priority.
 NICE ?= nice -n 10
 # goreleaser is pinned so a release is built with the version it was tested
 # with; keep it in lockstep with .github/workflows/release.yaml.

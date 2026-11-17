@@ -232,7 +232,7 @@ name order as the final deterministic fallback.
 
 ### Ties in a league
 
-A league has no knockout, so its table is its result. One rule, the same for team, individual and Engi leagues, decides which tied places the app asks about. The steps below are for a team league. An individual league schedules its ippon-shobu tie-breakers itself (refer to [Individual competitors: another round, or lots](../court-operators/recording-decisions.md#individual-competitors-another-round-or-lots)), and an Engi tie-breaker is decided by flags (refer to [Ties between pairs](naginata.md#ties-between-pairs)).
+A league has no knockout, so its table is its result. One rule, the same for team, individual and Engi leagues, decides which tied places the app asks about. The steps below are for a team league. An individual league schedules its ippon-shobu tie-breakers itself (refer to [Individual competitors: another round, or lots](../court-operators/recording-decisions.md#individual-competitors-another-round-or-lots)), and an Engi tie-breaker is decided by flags (refer to [Ties between pairs](engi.md#ties-between-pairs)).
 
 **Of the podium places, only 3rd can be shared.**
 

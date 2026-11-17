@@ -23,7 +23,7 @@ While it runs, the server checks when it starts and then once an hour, and takes
 - A daily copy is created only if something has changed since the newest daily copy. Backups you download and safety copies do not count, and a newest daily copy that this version cannot restore counts as none: after you go back to an earlier version, its first check takes a copy even when nothing has changed. A save that changes nothing, such as the same score sent twice, does not count as a change.
 - A copy is also taken when the app is closed normally, if something changed since the newest daily copy, or this version cannot restore that copy. A crash, a pulled plug, or a shutdown that runs past its time limit takes none.
 - No daily copy is taken while the tournament has no competitions.
-- Daily copies are saved inside the `backups/` folder within your tournament data directory.
+- Daily copies are saved inside the `backups/` folder within your tournament data directory, on the computer that runs the app (the server), not on the device whose browser you use.
 - The app never deletes backup files automatically. Every copy remains on disk until you choose to delete it.
 
 ## Privacy of backup files
@@ -142,7 +142,7 @@ An undo is itself a restore, so the app takes a new safety copy before undoing. 
 
 ## Copies kept on this computer
 
-The **Copies kept on this computer** section lists the backup archives the app saved inside the data directory's `backups/` folder:
+The **Copies kept on this computer** section lists the backup archives the app saved inside the data directory's `backups/` folder. "This computer" is the one running the app, which may not be the device whose browser shows the page:
 
 - **Daily**: automatic copies, taken once a day when the data changed, and when the app is closed normally after a change.
 - **Before restore**: safety copies taken immediately before a restore operation.

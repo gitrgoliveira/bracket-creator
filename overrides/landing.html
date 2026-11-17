@@ -9,9 +9,15 @@
   `docs/prose` gate reads its text and its alt, title, aria-label and meta
   content.
 -#}
-{%- set lede = "Score each bout at the court on a laptop or tablet. The court display and every phone in the hall show the score as it is entered. Made for kendo and naginata tournaments; engi pairs also suit iaido and jodo." -%}
+{#- The lede is written in two literals around its one link, "engi", so the
+    prose gate reads the visible paragraph whole; `lede` joins them as plain
+    text for the description and og:description. -#}
+{%- set lede_head = "Score each bout at the court on a laptop or tablet. The court display and every phone in the hall show the score as it is entered. Made for kendo and naginata tournaments; " -%}
+{%- set lede_tail = " pairs also suit iaido and jodo." -%}
+{%- set lede = lede_head ~ "engi" ~ lede_tail -%}
 {%- set headline = "Your tournament, live on every screen" -%}
 {%- set first = base_url ~ "/user-guide/start-here/first-tournament/" -%}
+{%- set engi = base_url ~ "/user-guide/organisers/engi/" -%}
 {%- set releases = config.repo_url ~ "/releases/latest" -%}
 <!doctype html>
 <html lang="en">
@@ -91,7 +97,11 @@
   .watch figcaption { font-size:21px; font-weight:700; color:var(--ink); margin:0 0 14px; }
   .watch video { width:100%; border:1px solid var(--rule); border-radius:10px; background:var(--paper); }
   .alt { background:var(--paper); }
-  .feat { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:56px 48px; }
+  .feat { display:grid; grid-template-columns:repeat(3, minmax(0,1fr)); gap:56px 32px; }
+  .feat .lead { grid-column:1 / -1; display:grid; grid-template-columns:minmax(0,7fr) minmax(0,5fr); gap:0 40px; align-items:center; }
+  .feat .lead .frame { height:420px; }
+  .feat .lead h3 { margin-top:0; font-size:26px; }
+  .feat .frame { height:260px; }
   .formats { display:flex; flex-wrap:wrap; gap:10px; margin:14px 0 0; padding:0; list-style:none; }
   .formats li { border:1px solid var(--rule); border-radius:999px; padding:6px 14px; font-size:15px; background:var(--surface); }
   .start { display:grid; grid-template-columns:minmax(0,5fr) minmax(0,7fr); gap:48px; align-items:start; }
@@ -109,14 +119,21 @@
   footer .wrap { display:flex; gap:28px; flex-wrap:wrap; align-items:center; }
   footer .brand { color:var(--on-dark); }
   footer .links { display:flex; gap:22px; margin-left:auto; }
-  @media (max-width:360px) {
-    .brand { font-size:16px; gap:8px; }
+  @media (min-width:1100px) {
+    .hero .wrap { display:grid; grid-template-columns:minmax(0,5fr) minmax(0,7fr); column-gap:40px; align-items:center; }
+    .hero h1 { font-size:clamp(36px, 3.2vw, 46px); }
+    .hero h1 .line { display:block; white-space:nowrap; }
+    .hero .lede { font-size:18px; }
+    .hero-shot { margin:0; }
   }
   @media (max-width:760px) {
     .wrap { padding:0 16px; }
-    .nav { display:none; }
-    .bar { gap:16px; }
-    .bar .btn { margin-left:auto; min-height:44px; }
+    .nav { gap:0; }
+    .nav a:not(.keep) { display:none; }
+    .nav a.keep { display:inline-flex; align-items:center; min-height:44px; margin:0; padding:0 8px; }
+    .bar { gap:8px; }
+    .brand { font-size:17px; gap:8px; }
+    .bar .btn { min-height:44px; padding:0 14px; }
     .hero { padding:40px 0; }
     .hero h1 { font-size:min(38px, calc((100vw - 32px) / 9.6)); }
     .hero h1 .line { display:block; white-space:nowrap; }
@@ -125,9 +142,16 @@
     section.block { padding:52px 0; }
     section.block h2 { font-size:28px; }
     .steps, .feat, .start, .others { grid-template-columns:minmax(0,1fr); gap:32px; }
-    .frame { height:240px; }
+    .feat .lead { display:block; }
+    .feat .lead h3 { margin-top:18px; font-size:21px; }
+    .frame, .feat .frame, .feat .lead .frame { height:240px; }
     .watch { margin-top:40px; }
     footer .links { margin-left:0; }
+  }
+  @media (max-width:360px) {
+    .bar .brand { font-size:16px; }
+    .bar .brand img { display:none; }
+    .bar .btn { font-size:14px; padding:0 12px; }
   }
   @media (prefers-reduced-motion:reduce) {
     html { scroll-behavior:auto; }
@@ -138,16 +162,18 @@
 <a class="skip" href="#main">Skip to content</a>
 <header><div class="wrap bar">
   <a class="brand" href="{{ base_url }}/"><img src="{{ base_url }}/assets/images/logo-tile.jpeg" alt="" width="36" height="36">bracket-creator</a>
-  <nav class="nav" aria-label="Main"><a href="#how">How it works</a><a href="#features">Features</a><a href="{{ first }}">Docs</a><a href="{{ config.repo_url }}">GitHub</a></nav>
+  <nav class="nav" aria-label="Main"><a href="#how">How it works</a><a href="#features">Features</a><a class="keep" href="{{ first }}">Docs</a><a href="{{ config.repo_url }}">GitHub</a></nav>
   <a class="btn p" href="{{ releases }}">Download</a>
 </div></header>
 
 <main id="main">
 <section class="hero" aria-labelledby="headline"><div class="wrap">
+  <div class="hero-copy">
   <h1 id="headline"><span class="line">Your tournament,</span> <span class="line">live on every screen</span></h1>
-  <p class="lede">{{ lede }}</p>
+  <p class="lede">{{ lede_head }}<a href="{{ engi }}">engi</a>{{ lede_tail }}</p>
   <div class="cta"><a class="btn p" href="{{ first }}">Run your first tournament</a><a class="btn s" href="#watch">Watch it update live</a></div>
   <p class="proof">Free and open source</p>
+  </div>
   <picture class="hero-shot">
     <source media="(max-width:600px)" srcset="{{ base_url }}/screenshots/hero-mobile.png" width="1200" height="2100">
     <img src="{{ base_url }}/screenshots/hero.png" width="2880" height="1718" fetchpriority="high" alt="One bout on three screens at once: scored on the court console, shown on the court display, and followed on a phone">
@@ -179,15 +205,15 @@
   <h2 id="features-title">Made for the day of the tournament</h2>
   <p class="intro">Built with tournament organisers, for court operators who may be new to the job.</p>
   <div class="feat">
-    <figure><div class="frame"><img src="{{ base_url }}/screenshots/knockout-bracket-in-play.png" style="--focus:66% 33%;--zoom:1.5" width="1265" height="930" loading="lazy" alt="A knockout bracket part-way through, with scored bouts ticked and the bout on court now marked"></div>
-      <h3>The formats you run</h3><p>Individual and team competitions, naginata engi pairs and kachinuki.</p>
-      <ul class="formats"><li>Knockout</li><li>Pools + Knockout</li><li>League</li><li>Swiss</li></ul></figure>
-    <figure><div class="frame"><img src="{{ base_url }}/screenshots/mobile-calendar.png" style="--focus:7% 43%;--zoom:1.4" width="1280" height="900" loading="lazy" alt="The competition calendar of a two-day tournament across two courts, with the opening ceremony and lunch drawn as bands"></div>
+    <figure class="lead"><div class="frame"><img src="{{ base_url }}/screenshots/knockout-bracket-in-play.png" style="--focus:66% 33%;--zoom:1.5" width="1265" height="930" loading="lazy" alt="A knockout bracket part-way through, with scored bouts ticked and the bout on court now marked"></div>
+      <div class="feat-text"><h3>The formats you run</h3><p>Individual and team competitions, kachinuki, and engi pairs for any kata.</p>
+      <ul class="formats"><li>Knockout</li><li>Pools + Knockout</li><li>League</li><li>Swiss</li></ul></div></figure>
+    <figure><div class="frame"><img src="{{ base_url }}/screenshots/mobile-calendar.png" style="--focus:4% 40%;--zoom:2" width="1280" height="900" loading="lazy" alt="The competition calendar of a two-day tournament across two courts, with the opening ceremony and lunch drawn as bands"></div>
       <h3>A schedule that adds up</h3><p>See how long the day runs before you draw, spread competitions across courts, and plan the breaks.</p></figure>
-    <figure><div class="frame"><img src="{{ base_url }}/screenshots/team-lineup.png" style="--focus:62% 37%;--zoom:2.5" width="1585" height="1212" loading="lazy" alt="The Lineups tab: a fighting order with a team member picked for each of the five positions"></div>
+    <figure><div class="frame"><img src="{{ base_url }}/screenshots/team-lineup.png" style="--focus:47% 30%;--zoom:2.6" width="1585" height="1212" loading="lazy" alt="The Lineups tab: a fighting order with a team member picked for each of the five positions"></div>
       <h3>Teams and lineups</h3><p>Team members, lineups per match and representative bouts.</p></figure>
-    <figure><div class="frame"><img src="{{ base_url }}/screenshots/backup-restore-plan.png" style="--focus:50% 52%;--zoom:1.4" width="1280" height="1884" loading="lazy" alt="Previewing a tournament restore, with a choice for each competition in the backup"></div>
-      <h3>Nothing gets lost</h3><p>Correct any result after it is recorded, and the app keeps a daily backup on the laptop.</p></figure>
+    <figure><div class="frame"><img src="{{ base_url }}/screenshots/backup-restore-plan.png" style="--focus:20% 50%;--zoom:1.9" width="1280" height="1884" loading="lazy" alt="Previewing a tournament restore, with a choice for each competition in the backup"></div>
+      <h3>Nothing gets lost</h3><p>Correct any result after it is recorded, and the app keeps a daily backup on the computer that runs it.</p></figure>
   </div>
 </div></section>
 
@@ -225,6 +251,7 @@ http://&lt;laptop address&gt;:8080  <span class="c"># on courts and phones</span
 <footer><div class="wrap">
   <span class="brand"><img src="{{ base_url }}/assets/images/logo-tile.jpeg" alt="" width="36" height="36" loading="lazy">bracket-creator</span><span>MPL 2.0</span>
   <nav class="links" aria-label="Footer"><a href="{{ first }}">Docs</a><a href="{{ config.repo_url }}">GitHub</a><a href="{{ config.repo_url }}/releases">Releases</a></nav>
+  <a class="btn p" href="{{ first }}">Run your first tournament</a>
 </div></footer>
 </body>
 </html>

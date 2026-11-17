@@ -214,6 +214,27 @@ export const recipes = [
   },
 
   {
+    // The same form with Team picked, for the landing page's "Rules per
+    // competition" card: the team options (team size, team match format)
+    // show beside the format and pool settings every competition carries.
+    name: 'mobile-create-team-competition',
+    family: 'setup',
+    viewport: { width: 1600, height: 1000 },
+    capture: 'viewport',
+    waitFor: 'text=Add competition',
+    auth: 'admin',
+    route: '/admin/create-competition',
+    drive: async ({ page }) => {
+      await fillFieldByLabel(page, 'Display name', "Men's Team");
+      // The form offers the current time as the start; a fixed one keeps the
+      // capture the same from run to run.
+      await fillFieldByLabel(page, 'Start time', '10:00');
+      await clickPill(page, 'Competition type', 'Team');
+      await clickPill(page, 'Format', 'Pools + Knockout');
+    },
+  },
+
+  {
     name: 'mobile-add-participants',
     family: 'setup',
     viewport: { width: 1600, height: 1000 },

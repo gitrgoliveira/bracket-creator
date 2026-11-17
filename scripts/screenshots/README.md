@@ -3,7 +3,7 @@
 Regenerates every screenshot and video the documentation embeds, by driving the
 real application in a browser.
 
-    make docs/screenshots                        # the 47 application screenshots
+    make docs/screenshots                        # the 50 application screenshots
     make docs/videos                             # the 4 application videos
     make docs/media                              # both
 
@@ -46,6 +46,22 @@ next run reports it as changed until the harness has produced it once.
 
 Videos are not compared: their encoding depends on how fast the machine drove
 the interface, so a clip never reproduces its committed bytes.
+
+## The landing page's lighter copies
+
+The landing page serves a WebP copy of each of its pictures (the PNG stays as
+the fallback, and as the social preview image) and an MP4 (H.264) copy of its
+clip beside the WebM, for a browser that cannot play WebM. After copying new
+captures into `docs/`, make the copies again:
+
+    make docs/media-copies
+
+The list comes from `overrides/landing.html` itself: every
+`screenshots/<name>.webp` or `videos/<name>.mp4` it names is made from the
+committed `<name>.png` or `<name>.webm`, and only when that file is newer than
+its copy. A new picture on the landing page therefore needs only its `<source
+type="image/webp">` there. It needs `cwebp` and `ffmpeg` (`brew install webp
+ffmpeg`); the copies are committed, so `make docs/build` needs neither.
 
 Re-recording `kachinuki-demo` carries one manual step. The clip is chaptered by
 a numbered list under the `<video>` in

@@ -99,6 +99,7 @@ make docs/media        # Both. After a change to what a user sees: make docs/med
 # scripts/screenshots/out/ and lists only the screenshots that changed; review
 # those and copy them into docs/. Videos are never compared: copy one only when
 # the change alters what it shows.
+make docs/media-copies # Then remake the landing page's WebP and MP4 copies of what you copied (needs cwebp, ffmpeg)
 
 # Run a single test
 go test -run TestName ./internal/helper/...

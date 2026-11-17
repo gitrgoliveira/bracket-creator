@@ -35,7 +35,7 @@ endif
 SHA256_CHECK := $(if $(shell command -v sha256sum 2>/dev/null),sha256sum,shasum -a 256) -c --quiet -
 
 # Define phony targets
-.PHONY: default help clean local/deps hooks/install go/fmt go/generate go/test go/build go/lint go/sec go/sec-tests go/vuln go/security js/deps js/lint js/sec js/outdated js/security js/check-imports js/validate examples docker/build docker/run pre-commit docs/deps docs/serve docs/open docs/build docs/linkcheck docs/prose docs/clean docs/screenshots docs/videos docs/media e2e e2e/deps run run-mobile esbuild-jsx goreleaser/test release version
+.PHONY: default help clean local/deps hooks/install go/fmt go/generate go/test go/build go/lint go/sec go/sec-tests go/vuln go/security js/deps js/lint js/sec js/outdated js/security js/check-imports js/validate examples docker/build docker/run pre-commit docs/deps docs/serve docs/open docs/build docs/linkcheck docs/prose docs/clean docs/screenshots docs/videos docs/media docs/media-copies e2e e2e/deps run run-mobile esbuild-jsx goreleaser/test release version
 
 default: help ## Show help information (default)
 
@@ -418,6 +418,27 @@ docs/media: go/build $(SHOTS_BROWSER_STAMP) ## Regenerate every captured screens
 	@# One run with no KIND, rather than depending on the two targets above:
 	@# those would start node and a browser twice over two disjoint halves.
 	@node $(SHOTS_DIR)/run.mjs $(if $(KIND),'KIND=$(KIND)',) $(SHOTS_ARGS)
+
+# The landing page serves lighter copies of its media beside the captured
+# originals: a WebP of each picture and an MP4 (H.264) of the clip, for a
+# browser without WebM. The list is read from overrides/landing.html itself, so
+# naming a .webp or .mp4 there is what adds a copy here, and each copy is made
+# from the committed PNG or WebM of the same name. Run it after copying new
+# captures into docs/ (the captures land in scripts/screenshots/out/ first).
+# Needs cwebp and ffmpeg (brew install webp ffmpeg); docs/build does not, since
+# the copies are committed.
+LANDING_WEBP := $(sort $(addprefix docs/,$(shell grep -o 'screenshots/[a-z0-9-]*\.webp' overrides/landing.html)))
+LANDING_MP4  := $(sort $(addprefix docs/,$(shell grep -o 'videos/[a-z0-9-]*\.mp4' overrides/landing.html)))
+
+docs/media-copies: $(LANDING_WEBP) $(LANDING_MP4) ## Make the landing page's WebP and MP4 copies from the committed PNG and WebM captures
+
+docs/screenshots/%.webp: docs/screenshots/%.png
+	cwebp -quiet -q 82 -m 6 $< -o $@
+
+# H.264 in yuv420p plays in every browser that plays MP4; +faststart puts the
+# index first so playback starts before the whole file has arrived. No audio.
+docs/videos/%.mp4: docs/videos/%.webm
+	ffmpeg -loglevel error -y -i $< -an -c:v libx264 -preset slow -crf 24 -pix_fmt yuv420p -movflags +faststart $@
 
 # Local e2e journeys (scripts/e2e, see its README.md). Like the capture harness
 # above, Playwright lives in its own package.json rather than web-mobile's. Both

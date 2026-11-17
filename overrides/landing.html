@@ -18,7 +18,7 @@
 {%- set headline = "Your tournament, live on every screen" -%}
 {%- set first = base_url ~ "/user-guide/start-here/first-tournament/" -%}
 {%- set engi = base_url ~ "/user-guide/organisers/engi/" -%}
-{%- set releases = config.repo_url ~ "/releases/latest" -%}
+{%- set download = base_url ~ "/user-guide/install/download/" -%}
 <!doctype html>
 <html lang="en">
 <head>
@@ -88,6 +88,7 @@
   section.block .intro { font-size:19px; color:var(--muted); max-width:60ch; margin:0 0 40px; line-height:1.5; text-wrap:pretty; }
   .steps { display:grid; grid-template-columns:repeat(3, minmax(0,1fr)); gap:28px; }
   .steps figure, .feat figure, .watch { margin:0; }
+  .frame picture { display:contents; }
   .frame { border:1px solid var(--rule); border-radius:10px; overflow:hidden; background:var(--surface); height:300px; }
   .frame img { width:100%; height:100%; object-fit:cover; object-position:var(--focus, 50% 0); transform:scale(var(--zoom, 1)); transform-origin:var(--focus, 50% 0); }
   .steps h3, .feat h3 { font-size:21px; margin:18px 0 6px; }
@@ -163,7 +164,7 @@
 <header><div class="wrap bar">
   <a class="brand" href="{{ base_url }}/"><img src="{{ base_url }}/assets/images/logo-tile.jpeg" alt="" width="36" height="36">bracket-creator</a>
   <nav class="nav" aria-label="Main"><a href="#how">How it works</a><a href="#features">Features</a><a class="keep" href="{{ first }}">Docs</a><a href="{{ config.repo_url }}">GitHub</a></nav>
-  <a class="btn p" href="{{ releases }}">Download</a>
+  <a class="btn p" href="{{ download }}">Download</a>
 </div></header>
 
 <main id="main">
@@ -175,7 +176,9 @@
   <p class="proof">Free and open source</p>
   </div>
   <picture class="hero-shot">
+    <source media="(max-width:600px)" type="image/webp" srcset="{{ base_url }}/screenshots/hero-mobile.webp" width="1200" height="2100">
     <source media="(max-width:600px)" srcset="{{ base_url }}/screenshots/hero-mobile.png" width="1200" height="2100">
+    <source type="image/webp" srcset="{{ base_url }}/screenshots/hero.webp" width="2880" height="1718">
     <img src="{{ base_url }}/screenshots/hero.png" width="2880" height="1718" fetchpriority="high" alt="One bout on three screens at once: scored on the court console, shown on the court display, and followed on a phone">
   </picture>
 </div></section>
@@ -185,17 +188,18 @@
   <h2 id="how-title">From the draw to the final, in one app</h2>
   <p class="intro">Load your participant list, draw pools and brackets, then run every court from a laptop or tablet. Results flow to the court displays and to phones as each point is scored.</p>
   <div class="steps">
-    <figure><div class="frame"><img src="{{ base_url }}/screenshots/mobile-draw-preview.png" style="--focus:32% 11.5%;--zoom:2.6" width="2514" height="4482" loading="lazy" alt="The draw preview: pools of players with their result grids, ready to start or discard"></div>
+    <figure><div class="frame"><picture><source type="image/webp" srcset="{{ base_url }}/screenshots/mobile-draw-preview.webp"><img src="{{ base_url }}/screenshots/mobile-draw-preview.png" style="--focus:32% 11.5%;--zoom:2.6" width="2514" height="4482" loading="lazy" alt="The draw preview: pools of players with their result grids, ready to start or discard"></picture></div>
       <h3><span class="num">1</span>Draw</h3><p>Pools and brackets from your list, with seeds and dojos kept apart.</p></figure>
-    <figure><div class="frame"><img src="{{ base_url }}/screenshots/mobile-score-editor.png" style="--focus:50% 0" width="561" height="620" loading="lazy" alt="The score editor: Shiro and Aka, each with ippon buttons, foul counters and an overtime toggle"></div>
+    <figure><div class="frame"><picture><source type="image/webp" srcset="{{ base_url }}/screenshots/mobile-score-editor.webp"><img src="{{ base_url }}/screenshots/mobile-score-editor.png" style="--focus:50% 0" width="561" height="620" loading="lazy" alt="The score editor: Shiro and Aka, each with ippon buttons, foul counters and an overtime toggle"></picture></div>
       <h3><span class="num">2</span>Score at the court</h3><p>One laptop or tablet per court records points, fouls, encho and decisions.</p></figure>
-    <figure><div class="frame"><img src="{{ base_url }}/screenshots/viewer-result-encho.png" style="--focus:50% 86%;--zoom:1.5" width="906" height="1326" loading="lazy" alt="Completed results on the public viewer, including an overtime win and a hantei result"></div>
+    <figure><div class="frame"><picture><source type="image/webp" srcset="{{ base_url }}/screenshots/viewer-result-encho.webp"><img src="{{ base_url }}/screenshots/viewer-result-encho.png" style="--focus:50% 86%;--zoom:1.5" width="906" height="1326" loading="lazy" alt="Completed results on the public viewer, including an overtime win and a hantei result"></picture></div>
       <h3><span class="num">3</span>Everyone follows</h3><p>Competitors and spectators see what is on now, what is next, and every result.</p></figure>
   </div>
   <figure class="watch" id="watch">
     <figcaption>One bout, scored at the court and shown on every screen</figcaption>
     <video controls muted playsinline preload="metadata" width="1440" height="860" poster="{{ base_url }}/screenshots/live-every-screen-poster.png" aria-label="One bout scored on the court console, updating the court display and a phone as each point is entered">
       <source src="{{ base_url }}/videos/live-every-screen.webm" type="video/webm">
+      <source src="{{ base_url }}/videos/live-every-screen.mp4" type="video/mp4">
     </video>
   </figure>
 </div></section>
@@ -205,15 +209,15 @@
   <h2 id="features-title">Made for the day of the tournament</h2>
   <p class="intro">Built with tournament organisers, for court operators who may be new to the job.</p>
   <div class="feat">
-    <figure class="lead"><div class="frame"><img src="{{ base_url }}/screenshots/knockout-bracket-in-play.png" style="--focus:66% 33%;--zoom:1.5" width="1265" height="930" loading="lazy" alt="A knockout bracket part-way through, with scored bouts ticked and the bout on court now marked"></div>
+    <figure class="lead"><div class="frame"><picture><source type="image/webp" srcset="{{ base_url }}/screenshots/knockout-bracket-in-play.webp"><img src="{{ base_url }}/screenshots/knockout-bracket-in-play.png" style="--focus:66% 33%;--zoom:1.5" width="1265" height="930" loading="lazy" alt="A knockout bracket part-way through, with scored bouts ticked and the bout on court now marked"></picture></div>
       <div class="feat-text"><h3>The formats you run</h3><p>Individual and team competitions, kachinuki, and engi pairs for any kata.</p>
       <ul class="formats"><li>Knockout</li><li>Pools + Knockout</li><li>League</li><li>Swiss</li></ul></div></figure>
-    <figure><div class="frame"><img src="{{ base_url }}/screenshots/mobile-calendar.png" style="--focus:4% 40%;--zoom:2" width="1280" height="900" loading="lazy" alt="The competition calendar of a two-day tournament across two courts, with the opening ceremony and lunch drawn as bands"></div>
+    <figure><div class="frame"><picture><source type="image/webp" srcset="{{ base_url }}/screenshots/mobile-calendar.webp"><img src="{{ base_url }}/screenshots/mobile-calendar.png" style="--focus:4% 40%;--zoom:2" width="1280" height="900" loading="lazy" alt="The competition calendar of a two-day tournament across two courts, with the opening ceremony and lunch drawn as bands"></picture></div>
       <h3>A schedule that adds up</h3><p>See how long the day runs before you draw, spread competitions across courts, and plan the breaks.</p></figure>
-    <figure><div class="frame"><img src="{{ base_url }}/screenshots/team-lineup.png" style="--focus:47% 30%;--zoom:2.6" width="1585" height="1212" loading="lazy" alt="The Lineups tab: a fighting order with a team member picked for each of the five positions"></div>
-      <h3>Teams and lineups</h3><p>Team members, lineups per match and representative bouts.</p></figure>
-    <figure><div class="frame"><img src="{{ base_url }}/screenshots/backup-restore-plan.png" style="--focus:20% 50%;--zoom:1.9" width="1280" height="1884" loading="lazy" alt="Previewing a tournament restore, with a choice for each competition in the backup"></div>
-      <h3>Nothing gets lost</h3><p>Correct any result after it is recorded, and the app keeps a daily backup on the computer that runs it.</p></figure>
+    <figure><div class="frame"><picture><source type="image/webp" srcset="{{ base_url }}/screenshots/viewer-branded.webp"><img src="{{ base_url }}/screenshots/viewer-branded.png" style="--focus:2% 1%;--zoom:1.35" width="860" height="2132" loading="lazy" alt="The public page of a tournament in its own green colours, with its logo in the header and a sponsor image below the competitions"></picture></div>
+      <h3>Your branding</h3><p>Your logo on the public and admin screens, your colours on the public page and the court displays, and sponsor images on the public page.</p></figure>
+    <figure><div class="frame"><picture><source type="image/webp" srcset="{{ base_url }}/screenshots/mobile-create-team-competition.webp"><img src="{{ base_url }}/screenshots/mobile-create-team-competition.png" style="--focus:31% 50%;--zoom:2.5" width="1600" height="1000" loading="lazy" alt="The Add competition form with Team picked, showing the format, the team size and the team match format"></picture></div>
+      <h3>Rules per competition</h3><p>Each competition keeps its own type, format, pool size, winners per pool, match durations and courts. Teams pick their size and regular or kachinuki matches.</p></figure>
   </div>
 </div></section>
 

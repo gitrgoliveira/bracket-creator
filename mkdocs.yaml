@@ -141,6 +141,7 @@ nav:
       - For spectators:
           - Follow the tournament: user-guide/spectators/following.md
       - Install and deployment:
+          - Download: user-guide/install/download.md
           - Install: user-guide/install/install.md
           - Host the tournament app: user-guide/install/hosting.md
       - Command line:

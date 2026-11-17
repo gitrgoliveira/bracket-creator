@@ -4,6 +4,9 @@ GH_REPOSITORY ?= gitrgoliveira/bracket-creator
 IMAGE_NAME := ghcr.io/$(GH_REPOSITORY)
 BIN_PATH := ./bin
 GO_VERSION := 1.27.4
+# The gate gives way to other work; empty it to run at full priority:
+# make go/test NICE=
+NICE ?= nice -n 10
 # goreleaser is pinned so a release is built with the version it was tested
 # with; keep it in lockstep with .github/workflows/release.yaml.
 # Security and linting tools are the opposite: they always run their newest
@@ -219,12 +222,12 @@ js/validate: js/lint js/check-imports js/test js/security ## Run all Javascript 
 # making sure the test results are already on screen when it happens.
 go/test: go/lint js/lint js/check-imports js/test ## Run tests, then the security scans
 	@echo "Running tests..."
-	go test -cover . ./cmd/... ./internal/... ./tests/...
+	$(NICE) go test -cover . ./cmd/... ./internal/... ./tests/...
 	@$(MAKE) go/security js/security
 
 go/test-race: go/lint ## Run tests with race detection
 	@echo "Running tests with race detection..."
-	go test -race -cover . ./cmd/... ./internal/... ./tests/...
+	$(NICE) go test -race -cover . ./cmd/... ./internal/... ./tests/...
 	
 go/build: $(BIN_PATH)/$(BIN_NAME) ## Build the application locally
 

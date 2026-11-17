@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"sync/atomic"
 	"time"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
@@ -67,6 +68,12 @@ func adoptDirectoryID(c *Competition, compID string) *Competition {
 	return c
 }
 
+// competitionParses counts the parses of a config.md read from disk, for the
+// tests that pin the locked loader to the parsed-file cache
+// (locked_cache_test.go). parseCompetitionBytes alone (restore's archive check)
+// does not count.
+var competitionParses atomic.Int64
+
 func (s *Store) parseCompetitionFile(path string) (any, error) {
 	raw, err := s.root.readFile(path)
 	if err != nil {
@@ -75,6 +82,7 @@ func (s *Store) parseCompetitionFile(path string) (any, error) {
 		}
 		return nil, err
 	}
+	competitionParses.Add(1)
 	c, err := parseCompetitionBytes(raw)
 	if err != nil {
 		return nil, &settingsParseError{err: err}
@@ -106,29 +114,16 @@ func parseCompetitionBytes(raw []byte) (*Competition, error) {
 	if err := parseFrontMatter(raw, &c); err != nil {
 		return nil, err
 	}
-	// Retired wire values (bc-terminology commit 1: playoffs -> knockout) fold
-	// onto their canonical equivalents here, in memory, on every read. This is
-	// the only place allowed to recognise the literal "playoffs" string for
-	// config.md. It cannot fail and needs no lock and no I/O; the on-disk file
-	// converges the next time anything saves this record, since only the
-	// canonical struct is ever serialised back out.
-	//
 	// Every reader of config.md ON DISK funnels through here -- LoadCompetition,
-	// loadCompetitionLocked and UpdateCompetitionChanged all call this function.
-	// The one exception is storeTx.LoadCompetition's read-your-own-writes
-	// branch, which parses bytes STAGED EARLIER IN THE SAME TRANSACTION with
-	// parseFrontMatter directly (transactions.go). That is safe rather than a
-	// hole: those bytes were serialised from an already-folded struct, so they
-	// cannot carry a retired value. Do not restate it as "every reader" -- if
-	// that branch ever starts parsing bytes it did not write, it needs this
-	// fold too.
-	const legacyFormatValue = "playoffs"
-	if c.Format == legacyFormatValue {
-		c.Format = CompFormatKnockout
-	}
-	if c.Status == CompetitionStatus(legacyFormatValue) {
-		c.Status = CompStatusKnockout
-	}
+	// loadCompetitionLocked and UpdateCompetitionChanged all reach it through
+	// parseCompetitionFile. The one exception is storeTx.LoadCompetition's
+	// read-your-own-writes branch, which parses bytes STAGED EARLIER IN THE SAME
+	// TRANSACTION with parseFrontMatter directly (transactions.go). That is safe
+	// rather than a hole: those bytes were serialised by
+	// saveCompetitionChangedLocked, which folds first, so they cannot carry a
+	// retired value. Do not restate it as "every reader" -- if that branch ever
+	// starts parsing bytes it did not write, it needs this fold too.
+	foldRetiredCompetitionValues(&c)
 	// Single funnel for every competition read, so a config.md written before
 	// per-phase seconds existed is normalized exactly once, at the boundary,
 	// and an out-of-band value hand-edited into the file is pinned rather than
@@ -147,6 +142,51 @@ func parseCompetitionBytes(raw []byte) (*Competition, error) {
 	return &c, nil
 }
 
+// foldRetiredCompetitionValues folds retired wire values (bc-terminology
+// commit 1: playoffs -> knockout) onto their canonical equivalents, in place.
+// It is the only place allowed to recognise the literal "playoffs" string for
+// config.md. It cannot fail and needs no lock and no I/O. parseCompetitionBytes
+// calls it on every read, and saveCompetitionChangedLocked before it writes, so
+// the file converges the next time anything saves this record and the body the
+// save publishes to the cache equals a fresh parse of the bytes it wrote.
+func foldRetiredCompetitionValues(c *Competition) {
+	const legacyFormatValue = "playoffs"
+	if c.Format == legacyFormatValue {
+		c.Format = CompFormatKnockout
+	}
+	if c.Status == CompetitionStatus(legacyFormatValue) {
+		c.Status = CompStatusKnockout
+	}
+}
+
+// storedCompetition is the copy of c that saveCompetitionChangedLocked
+// publishes to the cache: what a fresh parse of the bytes it wrote gives, so a
+// reader served from the cache (a transaction included) sees exactly what a
+// re-read of the file would. The fields config.md never holds (yaml:"-") are
+// left out, a nil Courts is the empty list the file reads back as (`courts`
+// has no omitempty, so it is written `[]` either way), and an empty omitempty
+// slice or map, which the file omits, reads back as nil. c itself is left as
+// the caller has it.
+func (s *Store) storedCompetition(c *Competition) *Competition {
+	pub := s.copyCompetition(c)
+	pub.Players = nil
+	pub.RosterVersion = ""
+	pub.ConfigVersion = ""
+	if pub.Courts == nil {
+		pub.Courts = []string{}
+	}
+	if len(pub.FightingSpiritAwards) == 0 {
+		pub.FightingSpiritAwards = nil
+	}
+	if len(pub.RoundLineupsGiven) == 0 {
+		pub.RoundLineupsGiven = nil
+	}
+	if len(pub.RoundLineupsLegacy) == 0 {
+		pub.RoundLineupsLegacy = nil
+	}
+	return pub
+}
+
 func (s *Store) copyCompetition(c *Competition) *Competition {
 	if c == nil {
 		return nil
@@ -159,6 +199,14 @@ func (s *Store) copyCompetition(c *Competition) *Competition {
 	if c.Players != nil {
 		cp.Players = make([]domain.Player, len(c.Players))
 		copy(cp.Players, c.Players)
+		for i := range cp.Players {
+			cp.Players[i].Metadata = slices.Clone(c.Players[i].Metadata)
+		}
+	}
+	cp.FightingSpiritAwards = slices.Clone(c.FightingSpiritAwards)
+	if c.TwoThirdPlaces != nil {
+		v := *c.TwoThirdPlaces
+		cp.TwoThirdPlaces = &v
 	}
 	cp.RoundLineupsGiven = cloneRoundLineupsGiven(c.RoundLineupsGiven)
 	cp.RoundLineupsLegacy = slices.Clone(c.RoundLineupsLegacy)
@@ -187,12 +235,18 @@ func (s *Store) SaveCompetition(c *Competition) error {
 	return err
 }
 
-// loadCompetitionLocked reads the competition record directly from disk
-// WITHOUT acquiring the per-competition lock. Caller MUST already hold
-// the per-comp lock (typically via WithTransaction). Bypasses the
-// loadCached path because the caller's lock is what coordinates with
-// concurrent writers, going through the cache would risk reading a
-// snapshot mutated between cache populate and our acquire.
+// loadCompetitionLocked reads the competition record through the parsed-file
+// cache WITHOUT acquiring the per-competition lock. Caller MUST already hold
+// the per-comp lock, for writing (typically via WithTransaction) or for
+// reading (withZekkenNameLocked's roster loads). It hands out a copy, so a
+// caller may change what it gets without reaching the cache.
+//
+// It used to bypass the cache, on the reasoning that the cache's mtime could
+// lag a concurrent writer. Under the competition lock no in-process writer can
+// run, and every one publishes its body (saveCompetitionChangedLocked) or
+// invalidates before releasing that lock, so the mtime only has to catch an
+// edit from outside the app, which it does here exactly as for LoadCompetition
+// (loadCachedLocked).
 //
 // Returns (nil, nil) when no file exists for compID, mirroring
 // LoadCompetition's "missing == nil" contract.
@@ -200,8 +254,7 @@ func (s *Store) loadCompetitionLocked(compID string) (*Competition, error) {
 	if err := ValidateCompetitionID(compID); err != nil {
 		return nil, fmt.Errorf("invalid competition ID: %w", err)
 	}
-	path := s.compPath(compID, "config.md")
-	parsed, err := s.parseCompetitionFile(path)
+	parsed, err := s.loadCachedLocked(compID, "config.md", s.parseCompetitionFile)
 	if err != nil {
 		return nil, err
 	}
@@ -250,8 +303,10 @@ func (s *Store) saveCompetitionChangedLocked(c *Competition, write writeFn) (boo
 	// both writes the bytes and seeds the cache with them. Normalizing here as
 	// well makes "a stored duration is canonical and in band" true at every
 	// entry point, rather than only for values that came off disk. Idempotent,
-	// so the read-path call is not undone.
+	// so the read-path call is not undone. The retired wire values fold here for
+	// the same reason.
 	normalizeStoredDurations(c)
+	foldRetiredCompetitionValues(c)
 
 	path := s.compPath(c.ID, "config.md")
 	newData, err := writeFrontMatter(c)
@@ -269,7 +324,7 @@ func (s *Store) saveCompetitionChangedLocked(c *Competition, write writeFn) (boo
 
 	cache := s.getFileCache(c.ID, "config.md")
 	cache.mu.Lock()
-	cache.data = s.copyCompetition(c)
+	cache.data = s.storedCompetition(c)
 	cache.mtime = s.FileMtime(c.ID, "config.md")
 	cache.mu.Unlock()
 	// Bumped AFTER the bytes land and the cache is refreshed: the standings
@@ -340,14 +395,18 @@ func (s *Store) UpdateCompetitionChanged(id string, transform func(current *Comp
 	}
 	defer mu.Unlock()
 
-	// Load directly under the lock (bypass the cached path; the
-	// per-comp lock is what coordinates with the save below).
-	path := s.compPath(id, "config.md")
-	parsed, err := s.parseCompetitionFile(path)
+	// Load directly under the lock (bypass the cached body; the per-comp lock is
+	// what coordinates with the save below). The save step keeps re-reading the
+	// file, so the transform decides from the bytes as they are now, whatever
+	// the cache holds. Dropping the cached body makes the locked loader parse
+	// the file and publish that parse, so a no-op transform leaves the cache
+	// agreeing with the file for the readers that follow, and it answers a copy
+	// the transform may change.
+	s.getFileCache(id, "config.md").invalidate()
+	current, err := s.loadCompetitionLocked(id)
 	if err != nil {
 		return false, err
 	}
-	current, _ := parsed.(*Competition)
 
 	desired, err := transform(current)
 	if err != nil {

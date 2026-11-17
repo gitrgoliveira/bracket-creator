@@ -8,7 +8,7 @@
 // it. A body with no `changed` is a whole lineup and replaces the stored one: what a
 // save queued by an earlier build replays as.
 //
-// A leaf with no imports, ES-imported by api_client.jsx (the queue) and the editors
+// A leaf with no imports, ES-imported by api_client_queue.jsx and api_client_enqueue.jsx (the queue) and the editors
 // (the body); there is no window mirror.
 
 // changedLineupSave: the body of a save of the positions `changed`, read off the

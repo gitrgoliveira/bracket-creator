@@ -121,7 +121,7 @@ describe('individual editor: a refused decision offers no Retry', () => {
   }
 
   it('superseded: the not-saved banner, no pending notice, no Retry', async () => {
-    // What api_client.jsx's recordDecision does with a 200 {applied:false}:
+    // What api_client_matches.jsx's recordDecision does with a 200 {applied:false}:
     // announce it on the terminal-failure channel, then hand the body back.
     window.API.recordDecision = vi.fn(async (compID, matchID) => {
       for (const fn of terminalListeners) fn({ compID, matchID, kind: 'score', status: 200, reason: SUPERSEDED_REASON, advice: SUPERSEDED_ADVICE });

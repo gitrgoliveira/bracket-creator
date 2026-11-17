@@ -1,6 +1,6 @@
 // A write that stays direct (not in the outbox) says ONE plain sentence when it
 // gets no answer: write_result.jsx's WRITE_NOT_CONFIRMED, thrown by
-// api_client.jsx's _directFetch for a fetch that rejects with a TypeError
+// api_client_requests.jsx's _directFetch for a fetch that rejects with a TypeError
 // (whatever the browser's own words for it). It never claims the request did
 // not land, because a TypeError also means only the answer was lost. The PDF
 // export and the restore plan, which change nothing, say NOT_SENT_NO_CONNECTION
@@ -146,21 +146,36 @@ describe('a direct write that cannot be sent says one sentence', () => {
 
   it('DIRECT_WRITES lists exactly the API methods that send through _directFetch', () => {
     const src = readFamily('api_client.jsx').split('\n');
-    // The family is read whole, so the scan stops where the API literal closes:
-    // the outbox modules after it hold no API member.
-    const start = src.findIndex((l) => l.startsWith('const API = {'));
-    const end = src.findIndex((l, i) => i > start && l === '};');
-    expect(start).toBeGreaterThanOrEqual(0);
-    expect(end).toBeGreaterThan(start);
+    // The API members live in the domain pieces' object literals
+    // (`export const <piece>Api = {` to its `};`), and a member another member
+    // calls is a top-level function its piece names in the literal: the scan
+    // reads both, and every name it finds must be a member of API.
+    const members = new Set();
     const sends = new Set();
     let method = null;
-    for (let i = start; i < end; i++) {
-      method = /^    (?:async )?(\w+)\(/.exec(src[i])?.[1] ?? method;
+    let inPiece = false;
+    let inFunction = false;
+    for (let i = 0; i < src.length; i++) {
+      const line = src[i];
+      if (/^export const \w+Api = \{$/.test(line)) { inPiece = true; method = null; continue; }
+      if (inPiece && line === '};') { inPiece = false; method = null; continue; }
+      if (inPiece) {
+        const member = /^    (?:async )?(\w+)\(/.exec(line) || /^    (\w+)(?:,$|:)/.exec(line);
+        if (member) { members.add(member[1]); method = member[1]; }
+      } else {
+        const top = /^(?:export )?(?:async )?function (\w+)\(/.exec(line);
+        if (top) { inFunction = true; method = top[1]; continue; }
+        if (inFunction && line === '}') { inFunction = false; method = null; continue; }
+        if (!inFunction) continue;
+      }
       const near = src.slice(i, i + 4).join(' ');
       // _backupRequest sends a GET bare and any other method through _directFetch.
-      if (src[i].includes('_directFetch(') || (src[i].includes('_backupRequest(') && /method:\s*'(POST|PUT|PATCH|DELETE)'/.test(near))) sends.add(method);
+      if (method && (line.includes('_directFetch(') || (line.includes('_backupRequest(') && /method:\s*'(POST|PUT|PATCH|DELETE)'/.test(near)))) sends.add(method);
     }
-    expect([...sends].sort()).toEqual(Object.keys(DIRECT_WRITES).sort());
+    // The scan read every piece: it found each member of API, and nothing else.
+    expect([...members].sort()).toEqual(Object.keys(API).sort());
+    // A top-level helper that sends (_backupRequest and the like) is not a member.
+    expect([...sends].filter((m) => members.has(m)).sort()).toEqual(Object.keys(DIRECT_WRITES).sort());
   });
 });
 

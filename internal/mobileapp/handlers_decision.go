@@ -346,7 +346,7 @@ func respondDecisionEngineError(c *gin.Context, store CompetitionStore, compID, 
 	switch {
 	case errors.Is(engErr, engine.ErrMatchSuperseded):
 		// bc-lww1. REACHABLE since mp-jnvl: the SPA stamps decision
-		// writes (api_client.recordDecision) and RecordDecisionTx puts
+		// writes (recordDecision, api_client_matches.jsx) and RecordDecisionTx puts
 		// that stamp on its MatchResult, so ApplyByTimestamp no longer
 		// takes the unstamped bypass and a decision can lose to a newer
 		// stored result -- the same way a score write can. An unstamped

@@ -11,7 +11,7 @@ import React from 'react';
 import { render, screen, fireEvent, act } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vitest';
 
-// A minimal stand-in for api_client.jsx's subscribeSyncStatus: same contract
+// A minimal stand-in for api_client_status.jsx's subscribeSyncStatus: same contract
 // (replay the current value immediately on subscribe; return an unsub fn) but
 // with a `set` escape hatch so a test can drive status transitions without
 // exercising the real write queue.

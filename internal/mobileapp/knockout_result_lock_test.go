@@ -94,7 +94,7 @@ func TestScoreHandler_PlayedNextRoundLocksTheResult(t *testing.T) {
 }
 
 // bc-evts stage 4 review 2 (G2): every sentence that sends the operator to the
-// correction names the button as it reads, "Correct" (admin_shiaijo.jsx,
+// correction names the button as it reads, "Correct" (admin_shiaijo_queue.jsx,
 // admin_schedule_score_editor.jsx), never "Correct result", which no button
 // says. The JS words (write_result.jsx) are pinned beside them.
 func TestRefusalSentencesNameTheCorrectButtonAsItReads(t *testing.T) {

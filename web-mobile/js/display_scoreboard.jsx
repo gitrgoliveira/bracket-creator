@@ -727,8 +727,8 @@ function TvDisplay({ court, tournament, competitions, withZekkenName, linkState 
     // degrades gracefully (returns null/null/[]/[]) when the promoted slot is
     // not a team match or when window.API is unavailable. bc-pnum: squadA/
     // squadB ride the same fetch, resolved off promoted.competition.squads
-    // (the aggregate item this surface consumes, per api_client.jsx's
-    // normalizeViewerCompItem).
+    // (the aggregate item this surface consumes, per
+    // normalizeViewerCompItem in api_client_requests.jsx).
     const { lineupA, lineupB, squadA, squadB } = useTeamLineups(
         isTeamMatch && promoted && promoted.match ? promoted.match : null,
         isTeamMatch && promoted ? promoted.competition : null

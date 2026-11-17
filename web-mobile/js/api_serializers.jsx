@@ -200,7 +200,7 @@ function toBackendMatchResult(patch, match) {
     // bc-sbq: transient request-only flag marking a write that only starts the
     // match (startPatch): the server keeps the stored score, so a start sends
     // none. The display-tab broadcast of the same payload has its own rule
-    // (_broadcastPatch, api_client.jsx: no scoreline key at all, the held flag
+    // (_broadcastPatch, api_client_matches.jsx: no scoreline key at all, the held flag
     // counts stated), since a key the hantei placement below leaves undefined,
     // or a flag count left out, still reads as a score there. Never persisted.
     if (patch.startOnly) {

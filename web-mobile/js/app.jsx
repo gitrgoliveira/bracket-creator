@@ -358,7 +358,7 @@ function parseCourtFromSearch() {
   return raw.toLowerCase() === 'all' ? 'ALL' : raw.toUpperCase();
 }
 
-// bc-qttl: turn a queue alert from api_client.jsx into operator-facing prose.
+// bc-qttl: turn a queue alert from the outbox (api_client_queue.jsx) into operator-facing prose.
 //
 // The queue holds writes that have not reached the server. Every alert below but
 // one is bad news about finished work, rendered as an ERROR toast (>=8s dwell,
@@ -391,14 +391,14 @@ export function queueAlertMessage(alert) {
     case "unreadable":
       return `${n} queued ${one ? "write" : "writes"} could not be read and ${one ? "was" : "were"} discarded. Check the affected ${one ? "match" : "matches"}.`;
     case "rejected":
-      // A refusal that is a whole sentence (`sentence`, api_client.jsx
-      // _replayRefusal) says what to do, so it closes the alert as it is:
+      // A refusal that is a whole sentence (`sentence`, _replayRefusal in
+      // api_client_requests.jsx) says what to do, so it closes the alert as it is:
       // "Re-enter it." after it could contradict it ("Check the scores and finish again").
       // Any other change (terminalCount 0: a running score write, a court move,
       // a lineup save) is a change, not a result (R5).
       {
         // A settings save made against a copy another device changed since
-        // (api_client.jsx's document doors): the way out is to open the
+        // (the document doors, api_client_tournament.jsx and api_client_competitions.jsx): the way out is to open the
         // current copy and save again, never to re-enter it over theirs.
         if (alert.code === "tournament_changed") return "Tournament settings were not saved: they were changed on another device. Open them and save again.";
         if (alert.code === "awards_changed") return "The fighting-spirit awards were not saved: they were changed on another device. Open them and save again.";

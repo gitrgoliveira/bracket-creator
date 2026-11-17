@@ -409,7 +409,10 @@ flowchart TB
 
 `app.jsx` is the root shell: it reads the route and switches between the public viewer, the
 operator console and the display surface. Every surface talks to the server through
-`api_client.jsx` (the `API` object). Its `api_client_*.jsx` modules make the requests
+`api_client.jsx` (the `API` object, which it assembles from the member pieces
+`api_client_tournament.jsx`, `api_client_competitions.jsx`, `api_client_matches.jsx`,
+`api_client_teams.jsx`, `api_client_outbox.jsx` and the two event members in `api_client_events.jsx`).
+Its `api_client_*.jsx` modules make the requests
 (`api_client_requests.jsx`), consume the SSE stream (`api_client_events.jsx`) and hold the outbox
 (refer to [The outbox](#the-outbox)). The root shell and the operator console apply each SSE patch to the
 competition data they hold through `patch.jsx` (`applyPatch`), which also detects a gap in the

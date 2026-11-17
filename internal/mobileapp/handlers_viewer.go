@@ -736,7 +736,7 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 			// No tournament configured yet is a normal bootstrap state, not an
 			// error: return 200 with a null body so the SPA opens the create-
 			// tournament gate without the browser logging a console 404.
-			// fetchTournament (api_client.jsx) treats a null payload as "no
+			// fetchTournament (api_client_tournament.jsx) treats a null payload as "no
 			// tournament" exactly like it did the old 404.
 			c.JSON(http.StatusOK, nil)
 		}
@@ -999,7 +999,7 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 			// competition's dataIssues read identically here and on the
 			// aggregate. Sibling of "config", exactly like the aggregate's
 			// own payload shape; the SPA maps it onto detail.config.dataIssues
-			// (api_client.jsx normalizeCompetitionDetail) since that is the
+			// (normalizeCompetitionDetail, api_serializers.jsx) since that is the
 			// object AdminCompetitionOverview actually renders.
 			//
 			// `pools`/`poolsErr` are passed RAW: viewerDataIssues applies the
@@ -1042,8 +1042,8 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 			// False whenever the roster read failed (a located fault or a file the
 			// server could not open; the degradedReads loop above lets every
 			// participants failure through) and dataIssues says why. The SPA
-			// reads the flag from the aggregate (api_client.jsx
-			// normalizeViewerCompItem) as well.
+			// reads the flag from the aggregate (normalizeViewerCompItem,
+			// api_client_requests.jsx) as well.
 			payload["rosterAvailable"] = playersErr == nil
 			if issues := viewerDataIssues(comp, comp.Players, pools, poolMatches, playersErr, poolMatchesErr, bracketErr, poolsErr); len(issues) > 0 {
 				payload["dataIssues"] = issues

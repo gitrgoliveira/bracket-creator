@@ -307,7 +307,7 @@ function typedNameTarget(members, posKey, name, ids) {
 // without a second fetch. `failures` is `[{ position, name, reason, code }]`,
 // one entry per position whose rename/mint could not even be handed to the
 // outbox; `reason` is the refusal's own words and `code` its code, when it
-// carries one (api_client.jsx _refusalError) -- never a raw Error object or a
+// carries one (_refusalError, api_client_requests.jsx) -- never a raw Error object or a
 // stack. Since the member writes are outbox entries (bc-evts stage 3 review 2,
 // R1) a refusal comes later, in the same failure shape, through the optional
 // `onMemberRefusal`. This function never throws and never waits on the network.

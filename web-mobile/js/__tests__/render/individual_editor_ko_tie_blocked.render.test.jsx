@@ -8,7 +8,7 @@
 // completed correction (validateBracketCompletion), so the block holds
 // there too, not just on the first Finish.
 //
-// Reuses isKoTieBlocked from admin_scoring_team.jsx (the team editor's
+// Reuses isKoTieBlocked from admin_scoring_team_bouts.jsx (the team editor's
 // identical "knockout match, no winner" rule), never a re-derivation of it.
 
 import React from 'react';

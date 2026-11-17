@@ -105,7 +105,7 @@ const CHECK_MODULES = [
   'ui.jsx',
   'admin_shiaijo.jsx',
   // The result-mark placement leaf (sideMarks, placeMarks, winnerSideLR,
-  // teamMatchMarks): bracket.jsx, admin_shiaijo.jsx and the Scores tab import it
+  // teamMatchMarks): bracket.jsx, admin_shiaijo_queue.jsx and the Scores tab import it
   // by name, so a renamed export would otherwise pass transpile-only.
   'side_marks.jsx',
   // The Scores tab imports from start_match.jsx, write_result.jsx, pool_ids.jsx
@@ -150,16 +150,21 @@ const CHECK_MODULES = [
   'admin_shiaijo_start.jsx',
   'admin_sponsors.jsx',
   'api_client_clock.jsx',
+  'api_client_competitions.jsx',
   'api_client_enqueue.jsx',
   'api_client_events.jsx',
   'api_client_flush.jsx',
   'api_client_ids.jsx',
+  'api_client_matches.jsx',
   'api_client_members.jsx',
+  'api_client_outbox.jsx',
   'api_client_overlays.jsx',
   'api_client_queue.jsx',
   'api_client_requests.jsx',
   'api_client_status.jsx',
   'api_client_taps.jsx',
+  'api_client_teams.jsx',
+  'api_client_tournament.jsx',
   'api_serializers.jsx',
   'app_version.jsx',
   'barred_chip.jsx',

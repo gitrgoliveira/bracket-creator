@@ -928,7 +928,7 @@ function makeSubmitDecision({
       // bracket on a winner the server discarded is the same failure.
       //
       // LIVE since mp-jnvl: the /decision write now carries a real
-      // modifiedAt (recordDecision, api_client.jsx), so the server can
+      // modifiedAt (recordDecision, api_client_matches.jsx), so the server can
       // genuinely answer with applied:false for either reason (superseded or
       // clock_skew) -- this is no longer a defence against a shape it could
       // not yet send.
@@ -1922,7 +1922,7 @@ function useMatchReopen({ match, password, isComplete, own, unsaved = false, onD
         compId: e.compId || match.compId,
         message: msg,
         // The server's own operator label for the blocking match
-        // (api_client.jsx's reopenFailureError carries it through when
+        // (reopenFailureError, api_client_requests.jsx, carries it through when
         // present). bc-cse: it names no competitor ("Pool A · Match 2"), so
         // ReopenFeedback prefers the best-effort FETCHED blockerLabel over
         // it and falls back to this only when that fetch has not resolved;

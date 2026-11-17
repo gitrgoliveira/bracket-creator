@@ -1,4 +1,4 @@
-// normalizeViewerCompItem (api_client.jsx) hoists rosterAvailable from the
+// normalizeViewerCompItem (api_client_requests.jsx) hoists rosterAvailable from the
 // aggregate item onto the flattened competition, exactly like dataIssues,
 // "or it is silently dropped" (its own comment). rosterFullyLoaded
 // (viewer_watchlist_core.jsx) then reads an ABSENT flag as loaded, so an

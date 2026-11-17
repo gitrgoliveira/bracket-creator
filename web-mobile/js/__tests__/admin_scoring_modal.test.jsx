@@ -1297,7 +1297,7 @@ describe('item 7: non-points decisions advance to next match', () => {
 // bc-cse (finding 1): the decision path (kiken / fusenpai / daihyosen) gets
 // the SAME downstream_knockout_played confirm+retry experience the score
 // path's editMatchScore (admin.jsx) has, via the SAME attemptScoreWrite loop
-// (write_result.jsx). Before this fix, api_client.jsx's recordDecision threw
+// (write_result.jsx). Before this fix, api_client_matches.jsx's recordDecision threw
 // a plain `new Error(err.error)` on the 409, so the operator saw the literal
 // token "downstream_knockout_played" and nothing could set
 // forceDownstreamReopen to get past it.

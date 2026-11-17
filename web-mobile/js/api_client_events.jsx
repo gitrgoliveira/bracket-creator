@@ -300,3 +300,18 @@ export function _reconnectEvents() {
     _reconnectAttempt = 0;
     _ensureConnected();
 }
+
+// The two event-stream members of the API object: a piece api_client.jsx
+// spreads into `API` beside the other domain pieces (api_client_tournament.jsx
+// and the rest).
+export const eventsApi = {
+    // Subscribe to the server's SSE event stream: one shared, ref-counted
+    // EventSource (_subscribeToEvents).
+    subscribeToEvents(callback, onStatus) {
+        return _subscribeToEvents(callback, onStatus);
+    },
+    // F2/F3: reconnectEvents: force a fresh SSE connection (_reconnectEvents).
+    reconnectEvents() {
+        _reconnectEvents();
+    },
+};

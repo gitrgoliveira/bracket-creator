@@ -612,7 +612,7 @@ export async function hastyConfirm(page) {
 }
 
 // V4 for the shiaijo page's own confirms (`.shiaijo-move-confirm` in
-// admin_shiaijo.jsx: Send back to queue, Move to Shiaijo X). They are not
+// admin_shiaijo_moves.jsx: Send back to queue, Move to Shiaijo X). They are not
 // confirmDialog, so hastyConfirm cannot see them; the same rule answers them.
 // Returns the same fields as hastyConfirm.
 export async function hastyShiaijoConfirm(page) {

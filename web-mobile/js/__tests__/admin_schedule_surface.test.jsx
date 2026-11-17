@@ -84,11 +84,15 @@ const jsDir = resolve(__dirname, '..');
 
 describe('admin_schedule window.API.* contract', () => {
   const apiSrc = readFamily('api_client.jsx');
-  // A method definition is `\n<indent>[async ]name(` (i.e., the name follows
-  // only whitespace after a newline). A call site is `.name(` (a dot precedes
-  // the name), so this pattern matches definitions but never invocations.
+  // A method definition in a piece's literal is `\n<indent>[async ]name(` (the
+  // name follows only whitespace after a newline). A call site is `.name(` (a
+  // dot precedes the name), so this pattern matches definitions but never
+  // invocations. A member another member calls is a top-level function of its
+  // piece, named in the literal by shorthand (`\n    name,`): both count.
   const isDefined = (name) =>
-    new RegExp(`\\n\\s+(async\\s+)?${name}\\s*\\(`).test(apiSrc);
+    new RegExp(`\\n\\s+(async\\s+)?${name}\\s*\\(`).test(apiSrc)
+    || (new RegExp(`\\n(export\\s+)?(async\\s+)?function\\s+${name}\\s*\\(`).test(apiSrc)
+      && new RegExp(`\\n    ${name},\\n`).test(apiSrc));
 
   const moduleFiles = readdirSync(jsDir)
     .filter((f) => /^admin_schedule.*\.jsx$/.test(f));

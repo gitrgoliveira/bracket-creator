@@ -24,8 +24,8 @@ function useHeldWritesRefresh(refresh) {
   return mountedRef;
 }
 
-// The held writes that belong to no competition (api_client.jsx's court-call
-// doors and the tournament settings), named by where the device put them.
+// The held writes that belong to no competition (the court-call
+// doors and the tournament settings, api_client_tournament.jsx), named by where the device put them.
 const TOURNAMENT_WIDE_KINDS = new Set(['announce', 'announce-remove', 'announce-clear', 'tournament']);
 
 // heldWriteWhere: which match (or team) one held write is about, named the
@@ -34,7 +34,7 @@ const TOURNAMENT_WIDE_KINDS = new Set(['announce', 'announce-remove', 'announce-
 // competition is named too: the list spans every competition on the device.
 // A check-in names its competitor, found in the competition's roster by id; a
 // court call its message, and the tournament settings themselves (`where`,
-// as api_client.jsx's door named it); an awards save the awards.
+// as the API door named it, api_client_tournament.jsx or api_client_competitions.jsx); an awards save the awards.
 export function heldWriteWhere(held, competitions) {
   const where = typeof held.where === 'string' ? held.where.trim() : '';
   if (TOURNAMENT_WIDE_KINDS.has(held.kind)) return where || (held.kind === 'tournament' ? 'Tournament settings' : 'Court call');

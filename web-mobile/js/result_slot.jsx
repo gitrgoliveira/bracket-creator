@@ -73,7 +73,7 @@
 //   - the read-only scoreboard (resultCells, match_scoreboard.jsx) renders the
 //     mark beside the slots — dropping it would leave the verdict visible
 //     nowhere on that surface;
-//   - the team editor (hanteiSlot, admin_scoring_team.jsx) drops it, because
+//   - the team editor (hanteiSlot's caller in admin_scoring_team.jsx) drops it, because
 //     its armed hantei row is a second always-mounted channel for the verdict;
 //   - the individual editor (admin_scoring_individual.jsx) drops it too — its
 //     hantei panel highlights the RECORDED side's button (btn--primary, like

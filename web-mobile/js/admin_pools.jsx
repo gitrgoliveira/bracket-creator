@@ -1145,7 +1145,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
       {/* Standings ordering is decided by FORMAT (mp-ahu6): pools always
           draw-order via PoolsViewer, leagues always rank-order via
           LeagueStandingsViewer. Mirrored in viewer_competition.jsx and
-          admin_shiaijo.jsx's ShiaijoContext. */}
+          admin_shiaijo_context.jsx's ShiaijoContext. */}
       {isLeague ? (
         LeagueStandingsViewer ? (
           // showDataIssues on both branches: this is an operator surface, and

@@ -14,7 +14,7 @@ import { assertBoutPoints, assertLineupIds } from '../lib/fixture.mjs';
 import { SCORE_EDITOR_SOURCES } from '../lib/scope.mjs';
 
 // Why the viewports below are so tall: the kachinuki editor is ALWAYS the
-// compact, internally-scrolled layout (admin_scoring_team.jsx:1125 -
+// compact, internally-scrolled layout (`useCompact` in admin_scoring_team.jsx -
 // `useCompact = teamSize <= 5 || isKachinuki`), so its bout list is capped
 // against the viewport and a crop of the whole modal shows a scrollbar instead
 // of the board. Each viewport is therefore sized so the modal fits inside it
@@ -200,7 +200,7 @@ async function openScoreEditorRow(page, base, a, b) {
 }
 
 // Score one ippon on the CURRENT kachinuki bout through the editor's own key
-// handler (admin_scoring_team.jsx:2599-2622: plain key = Shiro/sideB,
+// handler (the window keydown effect in admin_scoring_team.jsx: plain key = Shiro/sideB,
 // Shift = Aka/sideA). The handler ignores a key pressed while an interactive
 // element has focus, which after a click is always the case, so blur first.
 async function boutIppon(page, side, waza = 'M') {
@@ -216,7 +216,7 @@ const recordBoutBtn = (page) =>
 
 // Score the current bout only if nothing is on it yet. Record bout is disabled
 // until the bout has been played (`!kachinukiCurrentBoutPlayed`,
-// admin_scoring_team.jsx:3793), which makes the button the board's own answer
+// in admin_scoring_team.jsx), which makes the button the board's own answer
 // to "is this bout still blank" - and these recipes run in sequence, so the
 // one before may already have scored it.
 async function scoreCurrentBout(page, side = 'shiro') {
@@ -241,7 +241,7 @@ async function recordBout(page) {
 }
 
 // End match is the same deliberate two-tap guard the individual editor uses
-// (admin_scoring_team.jsx:3817, data-testid kachinuki-end-match-button).
+// (admin_scoring_team.jsx, data-testid kachinuki-end-match-button).
 async function endMatchTwice(page) {
   const b = teamBtn(page, 'kachinuki-end-match-button');
   await b.click();
@@ -251,14 +251,14 @@ async function endMatchTwice(page) {
 }
 
 // How many bouts the encounter has already recorded: one read-only row each
-// (admin_scoring_team.jsx:2156). Counted by CLASS, not by the row's test id:
+// (the `team-sub-match--readonly` row in admin_scoring_team.jsx). Counted by CLASS, not by the row's test id:
 // that id is a prefix of the row's two member-label ids as well
-// (:2166, :2185), so a prefix match returns three elements per bout.
+// (the `-member-label-a` and `-member-label-b` spans), so a prefix match returns three elements per bout.
 const fought = (page) => page.locator('.team-sub-match--readonly').count();
 
 // Put every fought bout back in its collapsed read-only form, so the board
 // shows the current bout and nothing else expanded
-// (admin_scoring_team.jsx:3017, the caret on an opened row).
+// (the `kachinuki-done-collapse-` caret in admin_scoring_team.jsx, on an opened row).
 async function collapseDoneBouts(page) {
   for (const caret of await page.locator('[data-testid^="kachinuki-done-collapse-"]').all()) {
     await caret.click();
@@ -401,7 +401,7 @@ export const recipes = [
       }
       await scoreCurrentBout(page);
       // A recorded bout collapses to a read-only row; clicking it reopens it
-      // for correction (admin_scoring_team.jsx:2156-2159). Bout index 1 is the
+      // for correction (the `kachinuki-done-bout-` row in admin_scoring_team.jsx). Bout index 1 is the
       // middle of the three, so bouts 0 and 2 stay collapsed either side of it.
       await page.locator('[data-testid="kachinuki-done-bout-1"]').click();
       await page.waitForTimeout(500);
@@ -422,7 +422,7 @@ export const recipes = [
     drive: async ({ page, base, fixture }) => {
       await openScoreEditorRow(page, base, fixture.ko.a, fixture.ko.b);
       await startMatch(page);
-      // admin_scoring_team.jsx:3159 - the bout's own "Tie (hikiwake)" toggle.
+      // admin_scoring_team.jsx, `scoring-modal-tie-button` - the bout's own "Tie (hikiwake)" toggle.
       const tie = page.locator('[data-testid="scoring-modal-tie-button"]').first();
       if ((await tie.getAttribute('class') || '').indexOf('btn--primary') === -1) {
         await tie.click();

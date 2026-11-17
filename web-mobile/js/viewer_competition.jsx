@@ -219,7 +219,7 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
   // T192 (FR-050e): Swiss competitions surface a dedicated standings
   // tab in place of pools/bracket. The standings tab fetches its own
   // data via /swiss/standings (it's not part of the competition-detail
-  // payload: see api_client.jsx).
+  // payload: see swissStandings in api_client_competitions.jsx).
   const isSwiss = c.format === "swiss";
   const isLeague = c.format === "league";
   const tabs = [
@@ -468,7 +468,7 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
           {/* Standings ordering is decided by FORMAT (mp-ahu6): pools always
               draw-order via PoolsViewer, leagues always rank-order via
               LeagueStandingsViewer. Mirrored in admin_pools.jsx and
-              admin_shiaijo.jsx's ShiaijoContext. */}
+              admin_shiaijo_context.jsx's ShiaijoContext. */}
           {effectiveTab === "pools" && hasPools && !isLeague && (
             <PoolsViewer pools={pools} standings={standings} poolMatches={poolMatches} tweaks={tweaks} competition={c} onMatchClick={(m) => openMatch(m)} highlightPlayers={highlightPlayers} />
           )}

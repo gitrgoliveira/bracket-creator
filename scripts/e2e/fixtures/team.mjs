@@ -121,8 +121,8 @@ export async function lineupsNameSlot(page, label, name) {
 }
 
 // The PUT every lineup save sends: a team's lineup of a round (the Lineups
-// page) or of one match (the lineup panel, the score sheet row), api_client.jsx
-// putTeamLineup / putMatchLineup. Armed BEFORE the tap that sends it. A timeout
+// page) or of one match (the lineup panel, the score sheet row),
+// putTeamLineup / putMatchLineup in api_client_teams.jsx. Armed BEFORE the tap that sends it. A timeout
 // the caller never reached (the tap threw first) is not an unhandled rejection.
 // `teamId` names the team whose lineup is being saved, and `matchId` the match
 // whose own lineup it is (`null`: the team's starting lineup, round 0); a PUT

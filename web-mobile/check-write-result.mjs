@@ -194,7 +194,7 @@ export const FORBIDDEN = [
   {
     // bc-evts stage 3: a tap's outcome (the score-events door's per-event
     // answer) is read through write_result.jsx (tapOutcomeQuiet,
-    // tapNotAppliedText); the outbox (the two api_client.jsx pieces that read
+    // tapNotAppliedText); the outbox (the two api_client_* pieces, api_client_queue.jsx and api_client_taps.jsx, that read
     // a tap's answer: the queue's settlement and the tap batch) and the
     // replay port (score_events.jsx) are the only other readers of the raw
     // field. Named by exact file, so a new outbox piece is not exempt.

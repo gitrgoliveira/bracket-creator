@@ -1030,7 +1030,7 @@ func TestViewerAggregate_MissingSquadsFileIsNotAnError(t *testing.T) {
 // TestViewerCourtFeed_TeamCompetitionCarriesSquads verifies the court feed
 // (GET /api/viewer/court/:court/matches), the OTHER consumer of
 // loadViewerCompetition, also carries squads: app.jsx's own
-// comment (fetchCourtMatches, api_client.jsx) treats this as the cheap
+// comment (fetchCourtMatches, api_client_competitions.jsx) treats this as the cheap
 // per-court alternative to the full aggregate, so it must not silently
 // diverge on payload shape from the aggregate this test suite otherwise
 // covers.

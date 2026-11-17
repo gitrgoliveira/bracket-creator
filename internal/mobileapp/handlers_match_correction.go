@@ -65,8 +65,8 @@ type correctionCheck struct {
 // reopen path records the operator's justification there, and blanking it
 // would erase the audit trail at the very write it was recorded to justify.
 // Carrying it on the non-completed writes too is what keeps it alive for POOL
-// matches, whose write is a whole-struct overwrite (`*r = *result` in
-// engine/scoring_tx.go) rather than the bracket path's set-if-non-empty.
+// matches, whose write is a whole-struct overwrite (`*stored = *result` in
+// the engine's applyPoolWrite) rather than the bracket path's set-if-non-empty.
 //
 // ReopenPending is SERVER-OWNED and is re-stamped from the stored value on
 // every write, before any of the above. state.MatchResult binds straight from
@@ -270,7 +270,7 @@ func missingCorrectionReasonError() *ValidationError {
 //     correctionCheck.ClearBracketReopenPending, so only a BRACKET match ever
 //     arrives from that path. Its reason is already stored (the engine write
 //     copies CorrectionReason set-if-non-empty) and a POOL match is already
-//     handled by the whole-struct overwrite (`*r = *result`) carrying the
+//     handled by the whole-struct overwrite (`*stored = *result`, applyPoolWrite) carrying the
 //     cleared r.ReopenPending.
 //   - POST /decision passes the operator's decisionReason and needs BOTH arms.
 //     RecordDecisionTx builds its own result struct, so the pool overwrite

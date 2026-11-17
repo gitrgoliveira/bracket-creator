@@ -15,7 +15,7 @@ import (
 // the bronze fallback at once.
 
 // A score must not rewrite the seeded pairing. The pool path has pinned this
-// since scoring_test.go's TestRecordMatchResult_SideMismatch; the bracket path
+// since scoring_test.go's TestRecordMatchResult_RejectsSideRewrite; the bracket path
 // had not, so deleting the rejection left the suite green while a payload
 // naming the wrong competitor overwrote the seeded match.
 func TestBracketWrite_SideMismatchRejected(t *testing.T) {

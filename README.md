@@ -3,7 +3,7 @@
 <!-- END __DO_NOT_INCLUDE__ -->
 <h1 align="center">bracket-creator</h1>
 
-<h3 align="center">Your tournament, live on every screen</h3>
+<p align="center"><b>Your tournament, live on every screen</b></p>
 
 <p align="center">Score each bout at the court on a laptop or tablet. The court display and every phone in the hall show the score as it is entered. Made for kendo and naginata tournaments; engi pairs also suit iaido and jodo.</p>
 
@@ -35,6 +35,7 @@ Open [http://localhost:8080](http://localhost:8080) on that laptop. On the court
 What the tournament app does:
 
 * **Admin console** (password-protected): competitions, participants, seeding, draws, scheduling, and scoring.
+* **Court console**: one laptop or tablet per court scores that court's bouts (points, fouls, encho and decisions) and starts its next match.
 * **Public viewer and court displays**: real-time schedule, standings, and brackets for spectators, plus big-screen court displays and a transparent overlay for streaming.
 * **All formats**: Knockout, Pools + Knockout, League, and Swiss, for individuals and teams (including kachinuki), plus naginata and Engi-kyogi (kata) competitions.
 * **Excel export**: download the results as a workbook at any point during the event.

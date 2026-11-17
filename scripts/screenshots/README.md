@@ -146,7 +146,10 @@ three and their numbered labels; `hero-mobile` is 600 wide with the display
 and the phone only. Both are taken at a device scale factor of 2, as the
 element `#stage` rather than the viewport, so their size is the composition's.
 The "Watch it update live" clip records the same stage, so the stills and the
-clip cannot disagree about the layout.
+clip cannot disagree about the layout. Its poster, `live-every-screen-poster`
+(in `recipes/videos.mjs`, beside the clip), is a still of the stage after the
+clip's scoring has played, so the landing page does not show the hero picture
+twice.
 
 Three things about the stage are not obvious from the code:
 

@@ -5,6 +5,9 @@
 //   realtime-update     docs/screenshots/realtime-update.webm  440x900   ~6s
 //   live-every-screen   docs/videos/live-every-screen.webm     1440x860  ~20s
 //
+// Plus one still, the clip's poster (docs/screenshots/live-every-screen-poster.png),
+// kept beside the clip it stands for.
+//
 // A video recipe differs from a still one in two ways that shape everything
 // below:
 //
@@ -19,7 +22,7 @@
 //   2. Pacing is content. These are clips a reader watches, so the waits are
 //      deliberate and are sized against the committed files' durations rather
 //      than trimmed to the minimum the DOM needs.
-import { authAdmin } from '../lib/ui.mjs';
+import { authAdmin, settle } from '../lib/ui.mjs';
 import {
   EDITOR, INLINE_EDITOR, TAP_DWELL_MS, sameSideTapPacer, startNextFromList,
 } from '../lib/editor.mjs';
@@ -249,6 +252,49 @@ async function pointOnEveryScreen(page, side, waza) {
 // their bout is finished (viewer_watchlist.jsx, `wl-hero__score`).
 const phoneResult = (page) => STAGE_FRAMES.phone(page).locator('[data-testid="watch-hero"] .wl-hero__score').first();
 
+// What the clip shows, played on the stage openStage left live: Aka's second
+// point decides the hero's bout, the console finishes it and starts the next,
+// and the next is scored on. `hold(label, ms)` is the clip's pacing (the
+// numbered list under the <video> is synced to its marks); the poster passes
+// a no-op and photographs the end.
+async function playLiveBout(page, hold) {
+  await hold('stage live', 2000);
+
+  // The hero's moment is one point each; Aka's second point decides it.
+  await pointOnEveryScreen(page, 'aka', 'M');
+  await hold('aka M on the display', 2200);
+
+  // The court console's commit is "Finish + Start Next", a two-tap guard:
+  // the first tap arms it (`btn--confirm`), the second commits and starts
+  // the court's next bout. The wait between them holds the armed button on
+  // camera long enough to read; the guard itself needs none (`press` sends
+  // a click with detail 0, which is never a bounce).
+  const before = await displayNow(page);
+  const finish = STAGE_FRAMES.console(page).locator('.score-nav__actions .btn--primary').first();
+  await press(finish);
+  await STAGE_FRAMES.console(page).locator('.score-nav__actions .btn--primary.btn--confirm')
+    .first().waitFor({ state: 'visible', timeout: 10000 });
+  await page.waitForTimeout(900);
+  await press(finish);
+  await phoneResult(page).waitFor({ state: 'visible', timeout: 20000 });
+  await displayMovesOn(page, before);
+  await hold('finished: phone result, display on the next bout', 2600);
+
+  // The next bout, scored on, so the display is seen following a second
+  // bout as closely as the first.
+  await pointOnEveryScreen(page, 'shiro', 'K');
+  await hold('next bout: shiro K', 1800);
+  await pointOnEveryScreen(page, 'aka', 'D');
+  await hold('next bout: aka D', 2800);
+}
+
+const assertLiveBoutPlayed = (name) => async ({ page }) => {
+  await assertStage(page, 'wide');
+  if (!(await phoneResult(page).isVisible())) {
+    throw new Error(`${name}: the phone never showed its competitor's result`);
+  }
+};
+
 export const families = {
   // Two 2-team kachinuki competitions, started and ready to score: a knockout
   // (where a tie cannot end the encounter) and a league (where it can).
@@ -341,6 +387,14 @@ export const families = {
     // (the court console, the display, the public viewer and its
     // watchlist), the editor the seed and the clip drive, and the hero's own
     // seed and stage page, which this file reads but does not declare.
+    sources: ['web-mobile/js/admin_shiaijo', 'web-mobile/js/display', ...VIEWER_SOURCES,
+      ...SCORE_EDITOR_SOURCES, 'scripts/screenshots/recipes/hero'],
+  },
+
+  // The same fixture again for the poster, which plays the clip's bout to its
+  // end as the clip does, so it cannot share the clip's seeded server either.
+  heroLivePoster: {
+    ...heroFamilies.heroLive,
     sources: ['web-mobile/js/admin_shiaijo', 'web-mobile/js/display', ...VIEWER_SOURCES,
       ...SCORE_EDITOR_SOURCES, 'scripts/screenshots/recipes/hero'],
   },
@@ -552,48 +606,34 @@ export const recipes = [
     drive: async ({ page, base, fixture }) => {
       fixture.t0 = Date.now();
       const marks = [];
-      const mark = (l) => marks.push([((Date.now() - fixture.t0) / 1000).toFixed(1), l]);
+      const hold = async (label, ms) => {
+        marks.push([((Date.now() - fixture.t0) / 1000).toFixed(1), label]);
+        await page.waitForTimeout(ms);
+      };
       await openStage(page, base, fixture, 'wide');
-      mark('stage live');
-      await page.waitForTimeout(2000);
-
-      // The hero's moment is one point each; Aka's second point decides it.
-      await pointOnEveryScreen(page, 'aka', 'M');
-      mark('aka M on the display');
-      await page.waitForTimeout(2200);
-
-      // The court console's commit is "Finish + Start Next", a two-tap guard:
-      // the first tap arms it (`btn--confirm`), the second commits and starts
-      // the court's next bout. The wait between them holds the armed button on
-      // camera long enough to read; the guard itself needs none (`press` sends
-      // a click with detail 0, which is never a bounce).
-      const before = await displayNow(page);
-      const finish = STAGE_FRAMES.console(page).locator('.score-nav__actions .btn--primary').first();
-      await press(finish);
-      await STAGE_FRAMES.console(page).locator('.score-nav__actions .btn--primary.btn--confirm')
-        .first().waitFor({ state: 'visible', timeout: 10000 });
-      await page.waitForTimeout(900);
-      await press(finish);
-      await phoneResult(page).waitFor({ state: 'visible', timeout: 20000 });
-      await displayMovesOn(page, before);
-      mark('finished: phone result, display on the next bout');
-      await page.waitForTimeout(2600);
-
-      // The next bout, scored on, so the display is seen following a second
-      // bout as closely as the first.
-      await pointOnEveryScreen(page, 'shiro', 'K');
-      mark('next bout: shiro K');
-      await page.waitForTimeout(1800);
-      await pointOnEveryScreen(page, 'aka', 'D');
-      mark('next bout: aka D');
-      await page.waitForTimeout(2800);
+      await playLiveBout(page, hold);
       console.log(`  live-every-screen MARKS ${JSON.stringify(marks)}`);
     },
-    assert: async ({ page }) => {
-      await assertStage(page, 'wide');
-      if (!(await phoneResult(page).isVisible())) {
-        throw new Error('live-every-screen: the phone never showed its competitor\'s result');
-      }
+    assert: assertLiveBoutPlayed('live-every-screen'),
+  },
+
+  {
+    // The clip's poster: the stage as the clip ends, a second bout part
+    // scored and the phone showing its competitor's result, so the poster is
+    // not the hero picture shown just above it on the landing page. A still
+    // of its own rather than a frame of the webm, which nothing here can cut.
+    name: 'live-every-screen-poster',
+    family: 'heroLivePoster',
+    // The clip's viewport, so the poster frames the stage as the clip does.
+    viewport: { width: 1440, height: 860 },
+    dpr: 2,
+    touch: true,
+    capture: { selector: '#stage' },
+    drive: async ({ page, base, fixture }) => {
+      await openStage(page, base, fixture, 'wide');
+      await playLiveBout(page, async () => {});
+      await settle(page, 1200);
     },
+    assert: assertLiveBoutPlayed('live-every-screen-poster'),
   },
 ];

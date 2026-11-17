@@ -45,12 +45,21 @@ Go to the **Scores** tab, open a match, and record the result. Refer to [Scoring
 
 ## If you print your brackets instead
 
-Steps 1 to 5 run the whole tournament in the app. To work from printed brackets and an Excel file instead, with no app on the day:
+Steps 1 to 5 run the whole tournament in the app. To run the day from paper instead, with no app at the courts, prepare the sheets in one of two ways.
+
+**In the tournament app.** Follow steps 1 to 4 up to **Generate draw**, then print from the app instead of starting the competitions:
+
+- **Export PDFs** on the dashboard renders the competitor tags, name sheets and bracket trees of every competition as print-ready PDFs. It needs LibreOffice on the computer that runs the app.
+- **Download blank template (.xlsx)** on a competition's page gives a workbook with linked formulas for scoring by hand.
+
+Refer to [Export and print](../organisers/run-tournament.md#export-and-print).
+
+**With the command line**, without the tournament app:
 
 1. **Collect participants**: one competitor per line in a CSV file, name then dojo ([input format](../organisers/input-format.md))
 2. **Generate the bracket**: run [create-pools](../commands/create-pools.md) or [create-knockout](../commands/create-knockout.md)
 3. **Optionally seed** top competitors so they land in separate pools or sides of the bracket ([seeding](../commands/create-pools.md#seeding))
-4. **Print**: the Excel file is laid out to print cleanly on A4 and A3
+4. **Print**: the Excel file is laid out to print cleanly on A4 and A3, and the [print](../commands/print.md) command turns it into the same PDFs, through LibreOffice
 
 On the day you need:
 

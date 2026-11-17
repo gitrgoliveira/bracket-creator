@@ -60,6 +60,11 @@ describe('findLoadTimeCycleReads', () => {
     ['an immediately invoked function', '(() => { fromB(); })();\n'],
     ['a map callback', 'export const xs = [1].map((n) => n + B_CONST);\n'],
     ['a forEach callback', '[1].forEach(() => fromB());\n'],
+    ['a map callback named after a declared function', 'const pick = (n) => n + B_CONST;\nexport const xs = [1].map(pick);\n'],
+    ['a declared function given by name to forEach', 'function run() { fromB(); }\n[1].forEach(run);\n'],
+    ['the constructor of a declared class run by new', 'class K { constructor() { this.v = B_CONST; } }\nexport const k = new K();\n'],
+    ['an instance field of a declared class run by new', 'class K { v = fromB(); }\nnew K();\n'],
+    ['a declared constructor function run by new', 'function K() { this.v = B_CONST; }\nexport const k = new K();\n'],
     ['a parameter default of a function called at load', 'function f(v = B_CONST) { return v; }\nf();\n'],
   ])('reports a read inside %s', (_, code) => {
     const hits = find(head + code);
@@ -69,6 +74,10 @@ describe('findLoadTimeCycleReads', () => {
 
   it('accepts a read in a function that is declared but not called as the module loads', () => {
     expect(find(`${head}function later() { return B_CONST; }\nconst hold = () => later();\nwindow.addEventListener('x', () => fromB());\nsetTimeout(function () { fromB(); }, 0);\nexport const o = { run() { return later(); } };\n`)).toEqual([]);
+  });
+
+  it('accepts a declared class that is never built at load, and a method a constructor does not run itself', () => {
+    expect(find(`${head}class K { constructor() { this.v = 1; } m() { return B_CONST; } }\nexport const later = () => new K();\nexport const k = new K();\nfunction pick(n) { return n + B_CONST; }\nexport const hold = () => [1].map(pick);\n`)).toEqual([]);
   });
 
   it('reports a function called twice at load once', () => {

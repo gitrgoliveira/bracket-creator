@@ -3,7 +3,7 @@
     "bc-tmfn: the refusal copy for finishing a team match while numbered bouts",
     "have no result, shared by BOTH implementations of unfinishedTeamBoutsMessage:",
     "internal/mobileapp/team_finish_gate.go (the server's 400) and",
-    "web-mobile/js/admin_scoring_team.jsx (the editor's refusal). The operator",
+    "web-mobile/js/admin_scoring_team_bouts.jsx (the editor's refusal). The operator",
     "must read the same words whichever side refused. It pins values, not source",
     "text. The copy names the bouts and what to record and never mentions the",
     "lineup. Go half: TestUnfinishedTeamBoutsMessage_SharedTable; JS half:",

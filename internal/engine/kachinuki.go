@@ -1119,7 +1119,7 @@ func (e *Engine) ReopenMatch(compID, matchID, reason string, opts ...ForceOption
 		// fought downstream) reports THAT — not a transient court_busy. The admin
 		// remedy panel turns court_busy into an offer to requeue the court's
 		// occupant (applyReopenFailure branches on code=="court_busy",
-		// admin_scoring_team.jsx); without this pre-check a cross-comp court hold
+		// api_client.jsx); without this pre-check a cross-comp court hold
 		// (CheckCrossCompCourtBusy runs before the tx) would surface court_busy
 		// first and steer the operator into that dead-end remedy for a target that
 		// can never reopen (mp-gmcg review). checkTargetReopenable is the SAME
@@ -2532,7 +2532,7 @@ func applyKachinukiMerge(comp *state.Competition, prior, result *state.MatchResu
 
 // deriveKachinukiWinner authoritatively derives result.Winner from the
 // merged bout log's LAST bout carrying a recorded outcome, mirroring
-// deriveKachinukiEndOutcome (admin_scoring_team.jsx): OPERATOR INPUT
+// deriveKachinukiEndOutcome (admin_scoring_team_kachinuki.jsx): OPERATOR INPUT
 // DETERMINES THE BOUT OUTCOME. This is the server-side twin of that client
 // rule (mp-gmcg review C3): before this, the client simply HID the generic
 // "Save correction" button that would have let an operator pick an

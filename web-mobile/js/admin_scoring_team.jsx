@@ -91,13 +91,13 @@ import { creditedSideKey, creditedTotals } from './team_default_credit.jsx';
 import { stampTap, clearTap, acceptTap, swallowBounce, useArmedConfirm, useOpenedTapGuard } from './tap_guard.jsx';
 // The team editor's pure bout, result and kachinuki rules, split out of this file.
 import { renderTeamBoutMiddle, preserveStoredDaihyosenVerdict, REP_BOUT_DECIDED_NOTE, teamResultLabel, isKoTieBlocked, unfinishedTeamBouts, unfinishedTeamBoutsMessage, boutWinnerSide, teamEncounterHasResult, teamEncounterIsLevel, fusenshoSideFromSub, FUSENSHO_PRESSED_LABEL, subBoutHasBeenPlayed, reconcileRowsToPositions } from './admin_scoring_team_bouts.jsx';
-import { isKachinukiBoutMode, canReopenKachinukiMatch, isKachinukiBoutRemovable, buildKachinukiEndEntries, deriveKachinukiEndOutcome, kachinukiEndOutcomeLabel, kachinukiEnchoAvailable, kachinukiBandModel, kachinukiVisiblePositions, resolveKachinukiBoutSides, pickManualBoutName } from './admin_scoring_team_kachinuki.jsx';
+import { isKachinukiBoutMode, canReopenKachinukiMatch, isKachinukiBoutRemovable, buildKachinukiEndEntries, deriveKachinukiEndOutcome, kachinukiEndOutcomeLabel, kachinukiEnchoAvailable, kachinukiBandModel, kachinukiVisiblePositions, resolveKachinukiBoutSides } from './admin_scoring_team_kachinuki.jsx';
 
 // mp-bkg / mp-13y: resolveMatchLineup and resolveLineupTeamId are now shared
 // across all consumer surfaces (admin scoring modal, viewer, TvDisplay,
 // StreamingOverlay). The implementations live in lineup_resolver.jsx and are
 // imported from there by every consumer.
-import { resolveMatchLineup, resolveLineupTeamId, resolveBoutSideName, resolveBoutSideMemberId, resolveSquadMember, squadMemberIdForUniqueName, squadRosterEntries, rosterWithoutPlacedElsewhere, resolveBoutSideDisplayName, buildInlineLineupWrite, resolveTypedMemberName, memberRefusalNote, alreadyPlacedNote, lineupPositionLabel, POS_KEYS_5, boutPositionName } from './lineup_resolver.jsx';
+import { resolveMatchLineup, resolveLineupTeamId, resolveBoutSideName, resolveBoutSideMemberId, resolveSquadMember, squadMemberIdForUniqueName, squadRosterEntries, rosterWithoutPlacedElsewhere, resolveBoutSideDisplayName, buildInlineLineupWrite, resolveTypedMemberName, memberRefusalNote, alreadyPlacedNote, lineupPositionLabel, POS_KEYS_5, boutPositionName, pickManualBoutName } from './lineup_resolver.jsx';
 // The one owner of what a lineup save carries: the one position a name-box pick changes.
 import { changedLineupSave } from './lineup_save.jsx';
 // The one owner of what a list of team members that arrives does to the members

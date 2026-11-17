@@ -18,10 +18,13 @@
 // and instance members run later, so reading a sibling there is safe, except
 // where a load-time call runs one on the spot: an immediately invoked function,
 // a function the module declares at its top level (followed through the calls
-// it makes in turn), and the callback of an array method such as `.map`. A
-// function reached any other way (a method, an alias, a callback given to a
-// timer or a listener) is not followed. A name the module imports from a module
-// outside its cycle (a leaf) is always safe.
+// it makes in turn), the callback of an array method such as `.map` (written
+// inline or named after a function the module declares), and `new` of a class
+// the module declares (its constructor and instance field initializers). A
+// function reached any other way (a method, an alias, a superclass constructor,
+// a method the constructor calls through `this`, a callback given to a timer or
+// a listener) is not followed. A name the module imports from a module outside
+// its cycle (a leaf) is always safe.
 //
 // Parser: the oxc parser that rolldown ships (rolldown/utils parseSync, a
 // dependency of vitest's vite, installed by `npm ci` in web-mobile).
@@ -59,13 +62,16 @@ function readImports(program) {
   return { bindings, edges };
 }
 
-// The functions a module declares at its top level, by name: a function
-// declaration, or a const or let holding a function or an arrow.
-function readLocalFunctions(program) {
+// The functions and the classes a module declares at its top level, by name: a
+// function declaration, or a const or let holding a function or an arrow; a
+// class declaration.
+function readLocalDeclarations(program) {
   const locals = new Map();
+  const classes = new Map();
   for (const node of program.body) {
     const decl = node.type === 'ExportNamedDeclaration' ? node.declaration : node;
     if (!decl) continue;
+    if (decl.type === 'ClassDeclaration' && decl.id) classes.set(decl.id.name, decl);
     if (decl.type === 'FunctionDeclaration' && decl.id) locals.set(decl.id.name, decl);
     if (decl.type === 'VariableDeclaration') {
       for (const d of decl.declarations) {
@@ -73,7 +79,7 @@ function readLocalFunctions(program) {
       }
     }
   }
-  return locals;
+  return { functions: locals, classes };
 }
 
 // Tarjan: the strongly connected components of { module -> Set(module) },
@@ -121,9 +127,10 @@ function cycleIds(graph) {
 
 // The functions whose bodies a call runs on the spot: an immediately invoked
 // function, a function the module declares at its top level, and the callback
-// handed to an array method that calls it before it returns. A function reached
-// any other way (a method, an alias, a callback given to a timer or a listener)
-// is not followed, so a read inside one is not seen.
+// handed to an array method that calls it before it returns, inline or by the
+// name of a function the module declares. A function reached any other way (a
+// method, an alias, a callback given to a timer or a listener) is not followed,
+// so a read inside one is not seen. `new` is handled by runNewNow.
 const SYNC_CALLBACK_METHODS = new Set([
   'map', 'forEach', 'filter', 'reduce', 'reduceRight', 'flatMap', 'some', 'every', 'find', 'findIndex', 'findLast', 'findLastIndex', 'sort', 'toSorted',
 ]);
@@ -135,9 +142,34 @@ function functionsRunBy(call, ctx) {
   if (isFunction(callee)) return [callee];
   if (callee.type === 'Identifier') return ctx.locals.has(callee.name) ? [ctx.locals.get(callee.name)] : [];
   if (callee.type === 'MemberExpression' && !callee.computed && SYNC_CALLBACK_METHODS.has(callee.property.name)) {
-    return call.arguments.filter(isFunction);
+    // A callback written inline, or the name of a function the module declares.
+    return call.arguments
+      .map((a) => (a.type === 'Identifier' ? ctx.locals.get(a.name) : isFunction(a) && a))
+      .filter(Boolean);
   }
   return [];
+}
+
+// What `new X(...)` runs on the spot: a function the module declares (as a
+// constructor), or the constructor and the instance field initializers of a
+// class it declares. The constructor of a superclass and the methods the
+// constructor calls through `this` are not followed.
+function runNewNow(node, ctx) {
+  let { callee } = node;
+  while (callee.type === 'ParenthesizedExpression') callee = callee.expression;
+  if (callee.type !== 'Identifier') return;
+  if (ctx.locals.has(callee.name)) {
+    runNow(ctx.locals.get(callee.name), ctx);
+    return;
+  }
+  const cls = ctx.classes.get(callee.name);
+  if (!cls || ctx.seen.has(cls)) return;
+  ctx.seen.add(cls);
+  for (const member of cls.body.body) {
+    if (member.static) continue;
+    if (member.type === 'MethodDefinition' && member.kind === 'constructor') runNow(member.value, ctx);
+    else if (member.type === 'PropertyDefinition') walkLoadTime(member.value, ctx);
+  }
 }
 
 // Walk a function's parameter defaults and body as code that runs now, once.
@@ -150,8 +182,9 @@ function runNow(fn, ctx) {
 
 // The names a load-time walk of `node` reads from `ctx.watched` (a Map of local
 // name -> import record), as { name, start }. `ctx.onHit` receives each.
-// `ctx.locals` maps the module's top-level functions by name, and `ctx.seen`
-// holds the function nodes already walked.
+// `ctx.locals` and `ctx.classes` map the module's top-level functions and
+// classes by name, and `ctx.seen` holds the function and class nodes already
+// walked.
 function walkLoadTime(node, ctx) {
   if (Array.isArray(node)) {
     for (const n of node) walkLoadTime(n, ctx);
@@ -166,6 +199,9 @@ function walkLoadTime(node, ctx) {
     case 'CallExpression':
       for (const fn of functionsRunBy(node, ctx)) runNow(fn, ctx);
       break; // the callee and the arguments are walked below
+    case 'NewExpression':
+      runNewNow(node, ctx);
+      break;
     case 'ImportDeclaration':
     case 'ExportAllDeclaration':
       return;
@@ -271,7 +307,8 @@ export function findLoadTimeCycleReads(sources, parseSync) {
       const line = src.slice(0, start).split('\n').length;
       violations.push({ file, line, name, from: watched.get(name).from });
     };
-    walkLoadTime(program.body, { watched, onHit, locals: readLocalFunctions(program), seen: new Set() });
+    const { functions: locals, classes } = readLocalDeclarations(program);
+    walkLoadTime(program.body, { watched, onHit, locals, classes, seen: new Set() });
   }
   return violations.sort((a, b) => a.file.localeCompare(b.file) || a.line - b.line);
 }

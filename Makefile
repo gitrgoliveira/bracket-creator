@@ -209,7 +209,7 @@ js/test: js/deps ## Run JavaScript unit tests
 	@cd web-mobile && NODE_NO_WARNINGS=1 npm test
 	@cd web && NODE_NO_WARNINGS=1 npm test
 
-js/check-imports: js/deps ## Check named imports of every web-mobile module resolve, CHECK_MODULES matches the folder, script tags agree, no module reads a cycle sibling while it loads
+js/check-imports: web-mobile/node_modules/.package-lock.json ## Check named imports of every web-mobile module resolve, CHECK_MODULES matches the folder, script tags agree, no module reads a cycle sibling while it loads
 	@echo "Checking cross-module imports..."
 	@node web-mobile/check-imports.mjs
 	@echo "Checking no module reads a cycle sibling's binding while it loads..."

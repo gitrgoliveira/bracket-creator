@@ -68,5 +68,5 @@ it, so it also appears in that court's queue. Score it like any other bout:
 - The loser finishes 4th and does not appear on the awards podium.
 
 The public podium reflects this automatically. Refer to
-[Awards and winners](run-tournament.md#results-and-awards) for the full
+[Results and awards](run-tournament.md#results-and-awards) for the full
 podium behaviour, including how the same setting works for league standings.

@@ -48,7 +48,7 @@ Go to the **Scores** tab, open a match, and record the result. Refer to [Scoring
 Steps 1 to 5 run the whole tournament in the app. To work from printed brackets and an Excel file instead, with no app on the day:
 
 1. **Collect participants**: one competitor per line in a CSV file, name then dojo ([input format](../organisers/input-format.md))
-2. **Generate the bracket**: run `create-pools` or `create-knockout` ([commands](../commands/create-pools.md))
+2. **Generate the bracket**: run [create-pools](../commands/create-pools.md) or [create-knockout](../commands/create-knockout.md)
 3. **Optionally seed** top competitors so they land in separate pools or sides of the bracket ([seeding](../commands/create-pools.md#seeding))
 4. **Print**: the Excel file is laid out to print cleanly on A4 and A3
 

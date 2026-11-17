@@ -24,7 +24,7 @@
 
 ## Install
 
-**Docker is the recommended way to run bracket-creator on every platform.** Homebrew is the other main option, shown below. The [Download page](https://gitrgoliveira.github.io/bracket-creator/user-guide/install/download/) gives the one route we recommend for each computer, Windows included. Linux packages (`.deb`, `.rpm`, `.apk`), pre-compiled binaries, other methods, and upgrade notes are covered in the [install guide](https://gitrgoliveira.github.io/bracket-creator/user-guide/install/install/).
+**Docker is the recommended way to run bracket-creator on every platform.** Homebrew is the other main option, shown below. The [Download page](https://gitrgoliveira.github.io/bracket-creator/user-guide/install/download/) gives one recommended route for each computer, Windows included. Linux packages (`.deb`, `.rpm`, `.apk`), pre-compiled binaries, other methods, and upgrade notes are covered in the [install guide](https://gitrgoliveira.github.io/bracket-creator/user-guide/install/install/).
 
 <details>
   <summary><b>Docker</b> (recommended)</summary>

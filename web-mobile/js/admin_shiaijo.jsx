@@ -51,7 +51,7 @@ import { scoreRowMatchName } from './pool_ids.jsx';
 import { isBarredMatch, sideBarredByDecision, involvesCompetitor } from './ineligible_match.jsx';
 import { holdsUnsaved, confirmLeave, leaveThen, discardUnsaved, UNSAVED_ENTRIES_DISCARDED } from './unsaved_entries.jsx';
 import { confirmMatchLabel, SCORE_KEPT_SENTENCE } from './court_move.jsx';
-import { matchKey, readOwnMove, eventMatchCourt, _bracketSideName, ownStatusMoveEnded, withOwnStatusMove, finishWinnerOf, propagateBracketWinnerLocal, applyBronzeLoserLocal, makeReconnectRefetcher } from './admin_shiaijo_feed.jsx';
+import { matchKey, readOwnMove, eventMatchCourt, bracketSideName,ownStatusMoveEnded, withOwnStatusMove, finishWinnerOf, propagateBracketWinnerLocal, applyBronzeLoserLocal, makeReconnectRefetcher } from './admin_shiaijo_feed.jsx';
 import { sortShiaijoMatches, partitionShiaijoMatches, COMPLETED_PREVIEW, isTeamMatch, shiaijoMatchNo, ShiaijoQueueGroup, forgetTieBreakerStandings, TieBreakerReason, ShiaijoQueueRow, MatchSides } from './admin_shiaijo_queue.jsx';
 import { ShiaijoContext } from './admin_shiaijo_context.jsx';
 
@@ -243,7 +243,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     const maybeAdvanceLocal = useCallback((match, patch, res) => {
         if (!match || match.phase !== "bracket" || !patch || patch.status !== "completed") return;
         const w = finishWinnerOf(match, patch);
-        advanceLocalUntilRefused(match, _bracketSideName(w), res);
+        advanceLocalUntilRefused(match, bracketSideName(w), res);
     }, [advanceLocalUntilRefused]);
     // The last Start the server refused, or the console refused for a start still
     // out that has since landed, as { key, compId, msg } for the match it was
@@ -2312,7 +2312,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                         // bout leaves the next match on placeholders until Refresh/SSE.
                                         // A decision the server refuses or the operator discards later
                                         // takes the advance back (advanceLocalUntilRefused).
-                                        advanceLocalUntilRefused(selectedMatch, _bracketSideName(result && result.winner), result);
+                                        advanceLocalUntilRefused(selectedMatch, bracketSideName(result && result.winner), result);
                                         // A decision the outbox holds shows at once, read from the
                                         // outbox (withOwnStatusMove, X3, M4).
                                         // Then start the next scheduled match so the panel advances

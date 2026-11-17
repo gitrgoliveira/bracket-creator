@@ -117,3 +117,117 @@ export function printViolations(violations) {
     console.error(`    ${v.why}\n`);
   }
 }
+
+// Whether a "/" at this point begins a regular-expression literal rather than a
+// division, a JSX closing tag ("</div>") or JSX text: it does after an operator
+// or an opening bracket, at the start of the file or after a keyword such as
+// "return". "<" and ">" are left out on purpose, so "</div>" and "/>" never
+// read as one; "=>" is the one exception.
+function regexMayStart(out) {
+  let tail = '';
+  for (let k = out.length - 1; k >= 0 && tail.trimEnd().length < 8; k--) tail = out[k] + tail;
+  tail = tail.trimEnd();
+  if (!tail) return true;
+  return /[(,=:[!&|?;{+\-*%~^]$/.test(tail) || tail.endsWith('=>')
+    || /\b(?:return|typeof|case|in|of|delete|void|throw|else|do|yield|await)$/.test(tail);
+}
+
+// The end of the regular-expression literal that starts at src[i] (a "/"),
+// flags included, or -1 when none closes on this line, so a stray "/" in JSX
+// text is left to the normal scan.
+function regexEnd(src, i) {
+  let j = i + 1;
+  let inClass = false;
+  while (j < src.length && src[j] !== '\n') {
+    const ch = src[j];
+    if (ch === '\\') { j += 2; continue; }
+    if (ch === '[') inClass = true;
+    else if (ch === ']') inClass = false;
+    else if (ch === '/' && !inClass) {
+      j++;
+      while (/[a-z]/i.test(src[j] || '')) j++;
+      return j;
+    }
+    j++;
+  }
+  return -1;
+}
+
+// The source with every comment replaced by spaces (newlines kept, so offsets
+// and line starts do not move). One pass over the text, aware of strings and
+// template literals, so a "//" or "/*" inside a string is not a comment and a
+// "/*" inside a // comment cannot open a phantom block. A whole-file regex
+// strip is NOT used: it cuts string literals that hold those characters.
+// A quote that is never closed ends at the line break (JSX text such as
+// "Don't" holds a lone apostrophe), and a backslash in code protects the next
+// character (the "\/*" of a regular expression is not a comment opener).
+// A regular-expression literal is passed through whole, so a quote, a backtick
+// or a "/*" inside one opens no string, template or comment (see
+// regexMayStart for where a "/" can begin one).
+export function maskComments(src) {
+  const blank = (s) => s.replace(/[^\n]/g, ' ');
+  const out = [];
+  const n = src.length;
+  const templateDepths = []; // brace depth at which each open ${ began
+  let braceDepth = 0;
+  let inTemplate = false;
+  let i = 0;
+  while (i < n) {
+    const c = src[i];
+    const d = src[i + 1];
+    if (inTemplate) {
+      if (c === '\\') { out.push(src.slice(i, i + 2)); i += 2; continue; }
+      if (c === '`') { inTemplate = false; out.push(c); i++; continue; }
+      if (c === '$' && d === '{') {
+        templateDepths.push(braceDepth);
+        braceDepth++;
+        inTemplate = false;
+        out.push('${');
+        i += 2;
+        continue;
+      }
+      out.push(c);
+      i++;
+      continue;
+    }
+    if (c === '/' && d === '/') {
+      let j = src.indexOf('\n', i);
+      if (j === -1) j = n;
+      out.push(blank(src.slice(i, j)));
+      i = j;
+      continue;
+    }
+    if (c === '/' && d === '*') {
+      let j = src.indexOf('*/', i + 2);
+      j = j === -1 ? n : j + 2;
+      out.push(blank(src.slice(i, j)));
+      i = j;
+      continue;
+    }
+    if (c === "'" || c === '"') {
+      let j = i + 1;
+      while (j < n && src[j] !== c && src[j] !== '\n') j += src[j] === '\\' ? 2 : 1;
+      if (src[j] === c) j++;
+      out.push(src.slice(i, j));
+      i = j;
+      continue;
+    }
+    if (c === '/' && regexMayStart(out)) {
+      const j = regexEnd(src, i);
+      if (j !== -1) { out.push(src.slice(i, j)); i = j; continue; }
+    }
+    if (c === '`') { inTemplate = true; out.push(c); i++; continue; }
+    if (c === '\\') { out.push(src.slice(i, i + 2)); i += 2; continue; }
+    if (c === '{') braceDepth++;
+    if (c === '}') {
+      braceDepth--;
+      if (templateDepths.length && templateDepths[templateDepths.length - 1] === braceDepth) {
+        templateDepths.pop();
+        inTemplate = true;
+      }
+    }
+    out.push(c);
+    i++;
+  }
+  return out.join('');
+}

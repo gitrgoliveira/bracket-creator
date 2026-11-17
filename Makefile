@@ -209,9 +209,11 @@ js/test: js/deps ## Run JavaScript unit tests
 	@cd web-mobile && NODE_NO_WARNINGS=1 npm test
 	@cd web && NODE_NO_WARNINGS=1 npm test
 
-js/check-imports: ## Check named imports of every web-mobile module resolve, CHECK_MODULES matches the folder, script tags agree
+js/check-imports: js/deps ## Check named imports of every web-mobile module resolve, CHECK_MODULES matches the folder, script tags agree, no module reads a cycle sibling while it loads
 	@echo "Checking cross-module imports..."
 	@node web-mobile/check-imports.mjs
+	@echo "Checking no module reads a cycle sibling's binding while it loads..."
+	@node web-mobile/check-load-cycles.mjs
 	@echo "Checking the write-result rule is asked, not re-derived..."
 	@node web-mobile/check-write-result.mjs
 	@echo "Checking the competitor-number match rule is asked, not re-derived..."

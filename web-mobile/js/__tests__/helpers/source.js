@@ -64,11 +64,18 @@ export const cssBlock = (css, selector) => {
 // joined text, so a phantom block cannot run from one file into the next.
 // The family is found by name, so it is only as precise as the stem: a module
 // whose stem begins unrelated modules (admin_schedule.jsx and its
-// admin_schedule_page.jsx, ...) reads those too. A family read of a file that
-// has no `<stem>_*.jsx` sibling is just that file.
+// admin_schedule_page.jsx, ...) would read those too. So only the entries
+// listed in SPLIT_ENTRIES have a family; every other module is its own, and
+// adding an entry to the list is a deliberate act that
+// source_family.test.jsx pins to the exact modules it reads.
 
-/** The entry first, then its `<stem>_*.jsx` modules in name order. */
+/** The entries that were split into `<stem>_*.jsx` modules. */
+export const SPLIT_ENTRIES = ['api_client.jsx', 'admin_scoring_team.jsx', 'admin_shiaijo.jsx'];
+
+/** The entry first, then its `<stem>_*.jsx` modules in name order; an entry
+ * that is not in SPLIT_ENTRIES is a family of one. */
 export const familyFiles = (entry) => {
+  if (!SPLIT_ENTRIES.includes(entry)) return [entry];
   const stem = entry.replace(/\.jsx$/, '');
   const rest = readdirSync(JS_DIR)
     .filter((f) => f.startsWith(`${stem}_`) && f.endsWith('.jsx'))

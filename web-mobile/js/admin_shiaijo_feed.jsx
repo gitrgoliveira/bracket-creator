@@ -20,10 +20,10 @@ export const eventMatchCourt = (d) => {
     return { court, mid };
 };
 
-// _bracketSideName reads a bracket side that may be a normalized {id,name}
-// object or a bare string. Mirrors admin_helpers.sideName without importing it
-// (admin_shiaijo reads its helpers off window; this stays pure for testing).
-export function _bracketSideName(side) {
+// bracketSideName reads a bracket side that may be a normalized {id,name}
+// object or a bare string. Mirrors admin_helpers.sideName without importing it,
+// so this module stays pure for testing; admin_shiaijo imports it from here.
+export function bracketSideName(side) {
     if (!side) return "";
     return typeof side === "object" ? (side.name || "") : side;
 }
@@ -83,8 +83,8 @@ export function withOwnStatusMove(m, mv) {
         winner = finishWinnerOf(m, p);
         // The wire names the winner by name: the side it names.
         if (typeof winner === "string") {
-            if (winner === _bracketSideName(m.sideA)) winner = m.sideA;
-            else if (winner === _bracketSideName(m.sideB)) winner = m.sideB;
+            if (winner === bracketSideName(m.sideA)) winner = m.sideA;
+            else if (winner === bracketSideName(m.sideB)) winner = m.sideB;
         }
     }
     return { ...m, ...finishFieldsOf(p), status: "completed", ...(winner ? { winner } : {}) };
@@ -144,8 +144,8 @@ export function propagateBracketWinnerLocal(rounds, matchId, winnerName) {
     if (R < 0) return rounds; // unknown id → no-op (identity preserved)
 
     const match = rounds[R][M];
-    const aName = _bracketSideName(match.sideA);
-    const bName = _bracketSideName(match.sideB);
+    const aName = bracketSideName(match.sideA);
+    const bName = bracketSideName(match.sideB);
     // The winning side OBJECT, so id-based highlighting survives advancement.
     const winnerSide = winnerName === aName ? match.sideA
         : winnerName === bName ? match.sideB
@@ -163,8 +163,8 @@ export function propagateBracketWinnerLocal(rounds, matchId, winnerName) {
             if (M % 2 === 0) nm.sideA = winnerSide; else nm.sideB = winnerSide;
             // Both sides now real (no "Winner of" placeholder) → the match is
             // runnable; promote a pending/blank status to scheduled.
-            const na = _bracketSideName(nm.sideA);
-            const nb = _bracketSideName(nm.sideB);
+            const na = bracketSideName(nm.sideA);
+            const nb = bracketSideName(nm.sideB);
             const bothResolved = na && nb && !_WINNER_OF_RE.test(na) && !_WINNER_OF_RE.test(nb);
             if (bothResolved && (nm.status === "pending" || nm.status === "scheduled" || !nm.status)) {
                 nm.status = "scheduled";
@@ -188,8 +188,8 @@ export function applyBronzeLoserLocal(rounds, matchId, winnerName, thirdPlaceMat
     // Only act for the semifinal round (one step before the final).
     if (R < 0 || R !== rounds.length - 2) return null;
     const match = rounds[R][M];
-    const aName = _bracketSideName(match.sideA);
-    const bName = _bracketSideName(match.sideB);
+    const aName = bracketSideName(match.sideA);
+    const bName = bracketSideName(match.sideB);
     // Derive the loser side object (carrying id + name, not just the name).
     let loserSide;
     if (winnerName === aName) {
@@ -199,7 +199,7 @@ export function applyBronzeLoserLocal(rounds, matchId, winnerName, thirdPlaceMat
     } else {
         return null; // winner doesn't match either side → no-op
     }
-    const loserName = _bracketSideName(loserSide);
+    const loserName = bracketSideName(loserSide);
     // Reject empty or still-placeholder losers: a "Winner of rX-mY" loser means
     // the semifinal side itself was unresolved and should not be seeded.
     if (!loserName || _WINNER_OF_RE.test(loserName)) return null;

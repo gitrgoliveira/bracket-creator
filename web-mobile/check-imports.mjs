@@ -34,80 +34,9 @@
 import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { resolve, dirname, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { maskComments } from './check-helpers.mjs';
 
 const JS_DIR = resolve(dirname(fileURLToPath(import.meta.url)), 'js');
-
-// The source with every comment replaced by spaces (newlines kept, so offsets
-// and line starts do not move). One pass over the text, aware of strings and
-// template literals, so a "//" or "/*" inside a string is not a comment and a
-// "/*" inside a // comment cannot open a phantom block. A whole-file regex
-// strip is NOT used: it cuts string literals that hold those characters.
-// A quote that is never closed ends at the line break (JSX text such as
-// "Don't" holds a lone apostrophe), and a backslash in code protects the next
-// character (the "\/*" of a regular expression is not a comment opener).
-function maskComments(src) {
-  const blank = (s) => s.replace(/[^\n]/g, ' ');
-  const out = [];
-  const n = src.length;
-  const templateDepths = []; // brace depth at which each open ${ began
-  let braceDepth = 0;
-  let inTemplate = false;
-  let i = 0;
-  while (i < n) {
-    const c = src[i];
-    const d = src[i + 1];
-    if (inTemplate) {
-      if (c === '\\') { out.push(src.slice(i, i + 2)); i += 2; continue; }
-      if (c === '`') { inTemplate = false; out.push(c); i++; continue; }
-      if (c === '$' && d === '{') {
-        templateDepths.push(braceDepth);
-        braceDepth++;
-        inTemplate = false;
-        out.push('${');
-        i += 2;
-        continue;
-      }
-      out.push(c);
-      i++;
-      continue;
-    }
-    if (c === '/' && d === '/') {
-      let j = src.indexOf('\n', i);
-      if (j === -1) j = n;
-      out.push(blank(src.slice(i, j)));
-      i = j;
-      continue;
-    }
-    if (c === '/' && d === '*') {
-      let j = src.indexOf('*/', i + 2);
-      j = j === -1 ? n : j + 2;
-      out.push(blank(src.slice(i, j)));
-      i = j;
-      continue;
-    }
-    if (c === "'" || c === '"') {
-      let j = i + 1;
-      while (j < n && src[j] !== c && src[j] !== '\n') j += src[j] === '\\' ? 2 : 1;
-      if (src[j] === c) j++;
-      out.push(src.slice(i, j));
-      i = j;
-      continue;
-    }
-    if (c === '`') { inTemplate = true; out.push(c); i++; continue; }
-    if (c === '\\') { out.push(src.slice(i, i + 2)); i += 2; continue; }
-    if (c === '{') braceDepth++;
-    if (c === '}') {
-      braceDepth--;
-      if (templateDepths.length && templateDepths[templateDepths.length - 1] === braceDepth) {
-        templateDepths.pop();
-        inTemplate = true;
-      }
-    }
-    out.push(c);
-    i++;
-  }
-  return out.join('');
-}
 
 // The modules this checker verifies: every top-level js/*.jsx, kept as a
 // hand-written list so that adding or removing a module is a visible edit.

@@ -146,10 +146,15 @@ describe('a direct write that cannot be sent says one sentence', () => {
 
   it('DIRECT_WRITES lists exactly the API methods that send through _directFetch', () => {
     const src = readFamily('api_client.jsx').split('\n');
+    // The family is read whole, so the scan stops where the API literal closes:
+    // the outbox modules after it hold no API member.
     const start = src.findIndex((l) => l.startsWith('const API = {'));
+    const end = src.findIndex((l, i) => i > start && l === '};');
+    expect(start).toBeGreaterThanOrEqual(0);
+    expect(end).toBeGreaterThan(start);
     const sends = new Set();
     let method = null;
-    for (let i = start; i < src.length; i++) {
+    for (let i = start; i < end; i++) {
       method = /^    (?:async )?(\w+)\(/.exec(src[i])?.[1] ?? method;
       const near = src.slice(i, i + 4).join(' ');
       // _backupRequest sends a GET bare and any other method through _directFetch.

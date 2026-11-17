@@ -8,9 +8,16 @@ import { describe, it, expect } from 'vitest';
 import { familyFiles, SPLIT_ENTRIES, modules } from './helpers/source.js';
 
 const FAMILIES = {
-  'api_client.jsx': ['api_client.jsx'],
+  'api_client.jsx': [
+    'api_client.jsx', 'api_client_clock.jsx', 'api_client_enqueue.jsx', 'api_client_events.jsx',
+    'api_client_flush.jsx', 'api_client_ids.jsx', 'api_client_members.jsx', 'api_client_overlays.jsx',
+    'api_client_queue.jsx', 'api_client_requests.jsx', 'api_client_status.jsx', 'api_client_taps.jsx',
+  ],
   'admin_scoring_team.jsx': ['admin_scoring_team.jsx', 'admin_scoring_team_bouts.jsx', 'admin_scoring_team_kachinuki.jsx'],
-  'admin_shiaijo.jsx': ['admin_shiaijo.jsx', 'admin_shiaijo_context.jsx', 'admin_shiaijo_feed.jsx', 'admin_shiaijo_queue.jsx'],
+  'admin_shiaijo.jsx': [
+    'admin_shiaijo.jsx', 'admin_shiaijo_calls.jsx', 'admin_shiaijo_context.jsx', 'admin_shiaijo_feed.jsx',
+    'admin_shiaijo_moves.jsx', 'admin_shiaijo_queue.jsx', 'admin_shiaijo_start.jsx',
+  ],
 };
 
 describe('familyFiles', () => {

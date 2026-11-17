@@ -3,7 +3,7 @@ paths:
   - "internal/engine/{eligibility,match_queue,scoring,scoring_tx,kachinuki}*.go"
   - "internal/state/competitor_status*.go"
   - "internal/mobileapp/{handlers_match,handlers_decision,handlers_eligibility,errors,match_annotations}*.go"
-  - "web-mobile/js/{ineligible_match,start_match,barred_chip,barred_match_notice,admin_shiaijo,admin_shiaijo_context,admin_shiaijo_feed,admin_shiaijo_queue,admin_scoring_shared}.jsx"
+  - "web-mobile/js/{ineligible_match,start_match,barred_chip,barred_match_notice,admin_shiaijo,admin_shiaijo_context,admin_shiaijo_feed,admin_shiaijo_queue,admin_shiaijo_calls,admin_shiaijo_moves,admin_shiaijo_start,admin_scoring_shared}.jsx"
 ---
 
 # Competitor eligibility and the match queue

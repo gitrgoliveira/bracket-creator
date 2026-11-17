@@ -13,12 +13,9 @@
 // local-only UI (per the brief; backend persistence is a follow-up).
 
 import { createTimerPool } from './timer_pool.jsx';
-import { serverNowMs } from './server_clock.jsx';
 import { courtQueueEntriesOf } from './court_queue.jsx';
 import { applyPatch, keepNewerCompetitions, matchInComp } from './patch.jsx';
-import { useOpenedTapGuard, acceptTap } from './tap_guard.jsx';
-import { useDialogFocus } from './dialog_focus.jsx';
-import { useCourtPaceLookup, paceDisplayOf, PaceTime } from './court_pace.jsx';
+import { useCourtPaceLookup } from './court_pace.jsx';
 // Imported DIRECTLY from the leaf rather than read off `window`. Two of the
 // call sites below sit inside a `try { } catch (_e) { }` that swallows, so a
 // missing global there would degrade into exactly the silent not-saved failure
@@ -27,38 +24,28 @@ import { useCourtPaceLookup, paceDisplayOf, PaceTime } from './court_pace.jsx';
 // api_client.jsx does not apply to it — the same move admin_scoring_shared.jsx
 // already makes.
 import {
-    writeDidNotLand, writeKeepsEditorOpen, writeWasSuperseded,
-    startWhileCorrectingMessage, startWhileStartingMessage, startWasBlockedByStartMessage,
-    courtChangeWhileStartingMessage,
-    correctWhileRunningMessage, wasToasted, BRONZE_MATCH_ID,
-    writePending, writeWasRefused, writeQueueKey, announcementExpiredToast,
+    writeDidNotLand, writeKeepsEditorOpen, writeWasSuperseded, BRONZE_MATCH_ID,
+    writePending, writeWasRefused, writeQueueKey,
 } from './write_result.jsx';
-// What a Start came back with (a clock_skew refusal, a thrown 409) is
-// start_match.jsx's to classify, shared with the Scores tab's own automatic
-// start (admin_schedule_score_editor.jsx). startPatch, the write itself, comes
-// from the same leaf, not from `window.startPatch`. The state wiring stays here:
-// startingRef/pickingRef carry the pick exemption (pickMatch), which that
-// leaf's guard has no word for.
-import { startPatch, classifyStartOutcome, startFailureMessage, startRefusalStands } from './start_match.jsx';
-// swissRoundLabel: single owner is pool_ids.jsx (mp-dej2); this file used to
-// carry its own copy. scoreRowMatchName names a match in the refusal notices.
-import { scoreRowMatchName } from './pool_ids.jsx';
 // bc-cse: a scheduled match a competitor is barred from (withdrew earlier)
 // cannot be fought, so no auto-pick may offer it and the queue row shows the
 // default-win action instead of Start. One leaf owns the question
 // (ineligible_match.jsx); BarredMatchNotice (admin_scoring_shared.jsx) is the
 // one component that renders the note plus that action across every surface.
 import { isBarredMatch, sideBarredByDecision, involvesCompetitor } from './ineligible_match.jsx';
-import { holdsUnsaved, confirmLeave, leaveThen, discardUnsaved, UNSAVED_ENTRIES_DISCARDED } from './unsaved_entries.jsx';
-import { confirmMatchLabel, SCORE_KEPT_SENTENCE } from './court_move.jsx';
+import { confirmLeave, leaveThen } from './unsaved_entries.jsx';
 import { matchKey, readOwnMove, eventMatchCourt, bracketSideName,ownStatusMoveEnded, withOwnStatusMove, finishWinnerOf, propagateBracketWinnerLocal, applyBronzeLoserLocal, makeReconnectRefetcher } from './admin_shiaijo_feed.jsx';
-import { sortShiaijoMatches, partitionShiaijoMatches, COMPLETED_PREVIEW, isTeamMatch, shiaijoMatchNo, ShiaijoQueueGroup, forgetTieBreakerStandings, TieBreakerReason, ShiaijoQueueRow, MatchSides } from './admin_shiaijo_queue.jsx';
+import { sortShiaijoMatches, partitionShiaijoMatches, COMPLETED_PREVIEW, ShiaijoQueueGroup, forgetTieBreakerStandings, ShiaijoQueueRow } from './admin_shiaijo_queue.jsx';
 import { ShiaijoContext } from './admin_shiaijo_context.jsx';
+// The start, pick and correct flow, the court calls and the match moves are
+// hooks the page calls on every render, in that order, so functions flow one
+// way: the moves hook reads the start hook's pick in flight and takes a call
+// down through the calls hook.
+import { useCourtStart, ShiaijoUpNextCard } from './admin_shiaijo_start.jsx';
+import { useCourtCalls } from './admin_shiaijo_calls.jsx';
+import { useCourtMoves, ShiaijoConfirms } from './admin_shiaijo_moves.jsx';
 
 const { useState, useMemo, useEffect, useRef, useCallback } = React;
-
-// How long a court call shows on the public screens, in minutes.
-const CALL_MINUTES = 5;
 
 const AdminTopbar = window.AdminTopbar;
 const Breadcrumbs = window.Breadcrumbs;
@@ -82,30 +69,23 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // first (leaveEditorConfirmed), and Send back to queue says so in its own
     // confirm.
     const editorUnsavedRef = useRef(null);
-    // The latest render's pick and correct and the court's matches, for a tap
-    // judged again once the operator has answered the unsaved-entries
-    // question (pickMatch, correctMatch).
-    const latestRef = useRef(null);
     // The newest court call this console made per match, keyed by matchKey, as
     // { id, msg, endsAt, answered }: the announcement id the device made and
     // the text sent, so the call can be withdrawn once its match leaves
     // scheduled (bc-cdbl), and when its time is over (endsAt, in the server's
     // clock frame: made-at plus CALL_MINUTES until the server answers, then the
     // expiry it answered). A reload forgets them; the 5-minute expiry is the
-    // backstop. Declared ahead of the court feed's handler, which withdraws one.
+    // backstop. Declared ahead of the court feed's handler, which withdraws one;
+    // the calls hook (useCourtCalls, admin_shiaijo_calls.jsx) keeps it.
     const callIdsRef = useRef(new Map());
-    // One timer per called match, for the end of the call kept for it
-    // (keepCalled): the card reads as called only while that call is showing.
-    const callEndsRef = useRef(new Map());
+    // Bound by the calls hook's layout effect to the render's withdrawCall,
+    // for the court feed's handler below, which is set up before that hook is
+    // called and runs on an event, after the commit has bound it.
     const withdrawCallRef = useRef(null);
     useEffect(() => {
         if (typeof window.scrollTo === "function") window.scrollTo(0, 0);
-        // The Map itself never changes, only what it holds.
-        const callEnds = callEndsRef.current;
         return () => {
             mountedRef.current = false;
-            callEnds.forEach(clearTimeout);
-            callEnds.clear();
         };
     }, []);
 
@@ -362,34 +342,10 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
 
     const paceLookup = useCourtPaceLookup(courtCompetitions);
 
-    // Selected match for the inline scoring panel. `calledKeys` is the render's
-    // copy of which matches read as called: the keys whose call this console
-    // keeps (callIdsRef) still stands, taken again by callsChanged whenever
-    // those calls change or one's time runs out (keepCalled, withdrawCall).
-    // `callingKey` guards the in-flight announce request. `callTapRef` guards
-    // against double taps on Call to court (bc-cdbl).
-    const [calledKeys, setCalledKeys] = useState(() => new Set());
-    const [callingKey, setCallingKey] = useState(null);
+    // The key of the start in flight (a pick still deferring the running bout
+    // included), for the rendering only (Starting…): the start hook's guards
+    // read its refs, never this, and it follows them (syncStartingKey).
     const [startingKey, setStartingKey] = useState(null);
-    // The start in flight, as { key, match } (null = none). The guards READ this
-    // ref, never startingKey: an advance awaits its finish write and then starts
-    // the next match from the render that began the await, so a closure's state
-    // is stale by then (a start begun meanwhile was not seen; one that has
-    // landed still was). The state above only drives the rendering.
-    const startingRef = useRef(null);
-    // The scheduled match a pick (pickMatch) is starting, from the moment its
-    // guards pass until the pick settles: { key, match } or null. It is a start in
-    // flight for the one-start guard, because the pick awaits the defer of the
-    // running bout before it reaches startMatch (and so before startingRef is
-    // set). startMatch is handed its own pick, which is exempt from the guard.
-    const pickingRef = useRef(null);
-    const callTapRef = useRef(null);
-    // bc-sdtp: one bounce guard for every Start match on this console (Up next
-    // and the queue rows), keyless, because the bounce lands on a DIFFERENT
-    // button: the first start can land inside the bounce window, the card then
-    // shows the next match, and a per-match key would let the bounce start it
-    // and send the match just started back to the queue.
-    const startTapRef = useRef(null);
     const [contextOpen, setContextOpen] = useState(true);
     // The whole queue column folds away so the scorer can take the full width;
     // the choice is per device, like the operator's other console preferences.
@@ -471,22 +427,6 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // is reopened (see the effect beside correctingMatch below): a running
     // match is the live bout, not a correction. null = not correcting anything.
     const [correctingKey, setCorrectingKey] = useState(null);
-    // The last tap the console refused because a match is live (a Correct), a
-    // correction is open (a Start) or another start is still out (a Start):
-    // { key, compId, why: "running" | "correcting" | "starting", against, label, start }
-    // (`against` is the blocker's key, `label` its name as the operator sees it, and
-    // `start` the in-flight start or pick record for "starting", null otherwise).
-    // Only the tap is stored; the notice text is derived at render while the
-    // condition still holds (refusalNotice below), so it cannot go stale. The one
-    // that outlives its condition is "starting": when the start it named lands,
-    // the effect beside startMatch turns it into a stored startError for the
-    // refused match, in the past tense.
-    const [refusedTap, setRefusedTap] = useState(null);
-    // Pending court reassignment, awaiting operator confirmation. Moving a match
-    // off this shiaijo is disruptive (it leaves the court and joins another's
-    // queue), so it's gated behind a confirm step. {compId, matchId, to, label, from}.
-    const [pendingMove, setPendingMove] = useState(null);
-    const [movingCourt, setMovingCourt] = useState(false);
     // A scheduled team match whose lineup the operator is entering before start.
     // Opens the team scoresheet as a modal; positions persist via putMatchLineup
     // independent of scoring, so the operator can set the lineup and close
@@ -496,51 +436,6 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // when a feeding match decided on another device has since seated another
     // team on a side.
     const [lineupKey, setLineupKey] = useState(null);
-    // Pending revert-to-queue confirmation. Set when the operator clicks
-    // "Send back to queue" on a running bout. Cleared on confirm or cancel.
-    // Shape: {compId, matchId, label}.
-    const [pendingRevert, setPendingRevert] = useState(null);
-    // bc-stpf (operator ruling 2026-10-27, Q1): the question a pick of another
-    // bout asks when the app cannot check that the picked match can start (no
-    // answer in time, offline, or writes of its competition not sent yet):
-    // send the running bout back and start the pick, or keep it running. It is
-    // local and never waits on the network, so the court keeps working without
-    // the server. Shape: {curLabel, pickLabel}; the answer goes to the promise
-    // askStartWithoutCheck handed out (startAskResolveRef).
-    const [pendingStartAsk, setPendingStartAsk] = useState(null);
-    const startAskResolveRef = useRef(null);
-    const answerStartAsk = (sendBack) => {
-        const resolve = startAskResolveRef.current;
-        startAskResolveRef.current = null;
-        if (mountedRef.current) setPendingStartAsk(null);
-        if (resolve) resolve(sendBack);
-    };
-    const askStartWithoutCheck = (cur, m) => new Promise((resolve) => {
-        startAskResolveRef.current = resolve;
-        setPendingStartAsk({ curLabel: confirmMatchLabel(cur), pickLabel: confirmMatchLabel(m) });
-    });
-    // A console that goes away with the question open answers it "keep it
-    // running": nothing is sent, and the pick's finally runs.
-    useEffect(() => () => answerStartAsk(false), []);
-    // bc-cfbd: the two confirms below open from a tap; the bounce of that tap
-    // must not land on the fresh backdrop or its buttons. One ref serves both
-    // (only one is ever open).
-    const { openedRef: confirmOpenedRef, onClickCapture: confirmOnClickCapture } = useOpenedTapGuard();
-    // The Confirm button of either confirm: its bounce is not a second confirm
-    // (acceptTap in both handlers below). One ref serves both, as above.
-    const confirmTapRef = useRef(null);
-    const [reverting, setReverting] = useState(false);
-    // The two confirms are this page's own dialogs, so they do what DialogHost does
-    // for confirmDialog: focus moves into the open one (its first button, Cancel),
-    // Escape cancels it while its request is not out, and focus goes back to the
-    // control that opened it once it closes, without scrolling the page.
-    const confirmOpen = Boolean(pendingMove || pendingRevert || pendingStartAsk);
-    const confirmBoxRef = useRef(null);
-    // Escape on the pick's question (bc-stpf) is "keep it running".
-    window.useEscapeToClose(confirmOpen && !movingCourt && !reverting
-        ? () => { setPendingMove(null); setPendingRevert(null); if (pendingStartAsk) answerStartAsk(false); }
-        : undefined);
-    useDialogFocus(confirmBoxRef, confirmOpen);
     // Selected competition for filtering the queue. Default: running match's comp,
     // else first comp with scheduled matches here, else any comp with matches here.
     const [selectedCompId, setSelectedCompId] = useState(null);
@@ -808,39 +703,6 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // as running, so another device's bout is never left off).
     const shownKey = selectedMatch ? matchKey(selectedMatch) : null;
     const alsoRunning = openCorrection ? running : running.filter((x) => matchKey(x) !== shownKey);
-    // What refuses a tap right now, by kind: a live bout refuses a Correct, an
-    // open correction refuses a Start, and a start still out refuses a Start of
-    // another match. ONE place builds each sentence, for the toast and the
-    // notice alike.
-    // "starting" names `startOut`, the start (or pick) record that is out: a
-    // tap's refusal reads it from the refs, so a refusal made from an advance's
-    // async continuation names the start that is out NOW (the render's copy may
-    // be stale there), and a refusal made during a pick's defer names that pick.
-    // The render reads the state, which follows the refs (syncStartingKey).
-    const refusalBlocker = (why, startOut) => {
-        if (why === "running") return liveBout;
-        if (why === "starting") return startOut ? startOut.match : null;
-        return openCorrection;
-    };
-    const refusalText = (why, blocker) => {
-        if (!blocker) return null;
-        if (why === "running") return correctWhileRunningMessage({ court, label: scoreRowMatchName(blocker) });
-        if (why === "starting") return startWhileStartingMessage({ label: scoreRowMatchName(blocker) });
-        return startWhileCorrectingMessage({ label: scoreRowMatchName(blocker) });
-    };
-    // The notice for a refused tap, derived: shown only while the match that
-    // refused it still does, so it goes by itself when that match is finished,
-    // sent back or cancelled, and a later, unrelated one never revives it.
-    // A "starting" refusal holds the record of the start that refused it, which
-    // is still the one out while startingKey names it; another start out names
-    // a different match, so the notice goes either way.
-    const refusalNotice = (key) => {
-        if (!refusedTap || refusedTap.key !== key) return null;
-        const startOut = refusedTap.start && refusedTap.start.key === startingKey ? refusedTap.start : null;
-        const blocker = refusalBlocker(refusedTap.why, startOut);
-        return blocker && matchKey(blocker) === refusedTap.against ? refusalText(refusedTap.why, blocker) : null;
-    };
-    // Refuse a tap: remember it against the match that blocks it, and toast.
     // leaveEditorConfirmed: true when the console may unmount the editor or put
     // another match in it: nothing unsaved, or the operator chose Discard
     // entries (R1). With nothing unsaved it answers `true` at once.
@@ -849,34 +711,32 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // court switcher) behind the same question; with nothing unsaved it goes
     // in the same tick (stage 5 review 9, M1).
     const leaving = (go) => (...args) => leaveThen(editorUnsavedRef, () => go(...args), () => mountedRef.current);
-    // The editor shows the match a host confirm drops (Send back to queue, a
-    // court move) and holds unsaved entries: the confirm says they are
-    // discarded, and drops them on confirm (m1).
-    const editorUnsavedFor = (compId, matchId) => !!selectedMatch && selectedMatch.compId === compId
-        && selectedMatch.id === matchId && holdsUnsaved(editorUnsavedRef);
-    const refuseTap = (m, why) => {
-        const startOut = startingRef.current || pickingRef.current;
-        const blocker = refusalBlocker(why, startOut);
-        setRefusedTap({
-            key: matchKey(m), compId: m.compId, why, against: matchKey(blocker), label: scoreRowMatchName(blocker),
-            // The start (or pick) record itself, which startMatch marks `landed` once the
-            // start went out: the effect beside startMatch asks it before writing the
-            // past-tense sentence.
-            start: why === "starting" ? startOut : null,
-        });
-        if (showToast) showToast(refusalText(why, blocker), "error");
+    // markSentBackHere: the outbox holds a send back of the match keyed `key`
+    // (its pending answer `res`): the console shows it queued from the outbox
+    // itself (withOwnStatusMove), and a start pin of the match (startedFrom)
+    // goes with it: the bout is queued.
+    const markSentBackHere = (key, res) => {
+        if (!key || !writePending(res)) return;
+        setStartedFrom((prev) => (prev && prev.key === key ? null : prev));
     };
-    // The stored refusal is read against the refused match's LIVE row in the
-    // court's list (the same list the court-call withdrawal reads), never against
-    // a snapshot: the notice shows only while that row is still scheduled, so it
-    // cannot outlive the match for the render before the effect below drops it.
-    const startErrorKey = startError ? startError.key : null;
-    const startErrorRow = startErrorKey ? courtMatchesRaw.find((x) => matchKey(x) === startErrorKey) : null;
-    const startErrorStatus = startErrorRow ? startErrorRow.status : null;
-    // The Start notice a scheduled match's card or queue row shows: a refused
-    // tap's derived notice, else the stored Start refusal for that match.
-    const startNoticeFor = (key) => refusalNotice(key)
-        || (startError && startError.key === key && startErrorStatus === "scheduled" ? startError.msg : null);
+    // The start, pick and correct flow (useCourtStart, admin_shiaijo_start.jsx),
+    // called once the court's live bout, the open correction and the selected
+    // match are known. It binds latestRef in its own layout effect.
+    const {
+        pickingRef, refusalNotice, startNoticeFor, startMatch, tapStart, correctMatch, stopCorrecting,
+        endCorrectionOf, pendingStartAsk, answerStartAsk,
+    } = useCourtStart({
+        court, password, showToast, onEditScore, mountedRef, editorUnsavedRef, leaveEditorConfirmed,
+        allMatches, courtMatchesRaw, liveHere, liveBout, openCorrection, selectedMatch, isStartedSnapshot,
+        startingKey, setStartingKey, startError, setStartError, setPickedKey, setCorrectingKey, setStartedFrom,
+        markSentBackHere,
+    });
+    // Call to court and its withdrawal (useCourtCalls, admin_shiaijo_calls.jsx),
+    // which binds withdrawCallRef for the court feed's handler.
+    const { callingKey, isCalled, callToCourt, withdrawCall } = useCourtCalls({
+        court, password, showToast, mountedRef, callIdsRef, withdrawCallRef,
+        courtComps, courtCompetitions, courtMatchesRaw,
+    });
 
     // For pool daihyosen/tiebreaker bouts, enrich the selected match with
     // rep-player roster data so ScoreEditorModal renders the rep-picker dropdowns
@@ -973,29 +833,6 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     const upcomingQueueMatches = upNext
         ? filteredScheduled.filter((m) => matchKey(m) !== matchKey(upNext))
         : filteredScheduled;
-    // A stored Start refusal describes ONE match at one moment, so it is judged
-    // against that match's live row and nothing else (startErrorStatus above;
-    // start_match.jsx startRefusalStands owns the rule, and the Scores tab asks
-    // the same one, admin_schedule_score_editor.jsx). It is
-    // dropped when the match leaves scheduled (started here or elsewhere, closed
-    // by a decision), or when the court's list is non-empty and no longer holds
-    // it (the match moved). Up next changing by itself drops nothing: a refusal
-    // for a match picked from further down the queue stays on its row, and is
-    // there on the card if the match later reaches Up next. A refusal is about
-    // one match at one moment, so a stale one never revives when that match is
-    // later sent back to the queue: the next tap asks the server again. A start
-    // by the operator clears it too (startMatch), and so does an eligibility
-    // change in its competition (the competitor_status_updated handler).
-    //
-    // The list is EMPTY while it loads and across a transient empty refetch, and
-    // an empty list says nothing about the match, so the refusal is left where it
-    // is then (the court-call withdrawal below leaves an absent key alone for the
-    // same reason). Only a list that holds matches yet lacks this one counts.
-    const startErrorStands = startRefusalStands({ row: startErrorRow, listHoldsMatches: courtMatchesRaw.length > 0 });
-    useEffect(() => {
-        if (!startErrorKey) return;
-        if (!startErrorStands) setStartError(null);
-    }, [startErrorKey, startErrorStands]);
 
     // "Which pool is next" for the context panel: the first upcoming pool on
     // this court (within the selected comp) whose pool differs from the one
@@ -1083,769 +920,15 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         return { entries, alsoWaiting: selHasActive };
     }, [allMatches, effectiveCompId, running, liveBout, filteredScheduled, courtKnown, isStartedSnapshot]);
 
-    // The one place the Starting… state follows the refs: the start in flight,
-    // else the pick still deferring the running bout (so a start settling inside
-    // a pick does not blank the button the pick is still holding).
-    const syncStartingKey = () => {
-        const s = startingRef.current || pickingRef.current;
-        if (mountedRef.current) setStartingKey(s ? s.key : null);
-    };
-    // A refusal for a start that was still out ("starting") is derived while that
-    // start is out: "X is still being started". When it has landed (or failed),
-    // the sentence stops being true, but nothing else would say the match the
-    // operator asked for was never started (a 2.7s toast was the only sign,
-    // bc-aadv). So it becomes a STORED refusal for the refused match, in the past
-    // tense, bound to that match like every stored refusal (the effect beside
-    // upNext). The refused match is NOT started on its own: the court now has a
-    // running bout, so a second automatic start would draw court_busy or put two
-    // bouts on the court unasked, and one start at a time is the rule (fce5866c).
-    // The operator starts it, which clears the sentence. The effect re-runs when
-    // the start in flight changes (startingKey), and reads the refs for the truth.
-    //
-    // A start that did NOT land leaves the court free, so the past-tense sentence
-    // would be false, and that start's own refusal (a thrown 409, a clock_skew
-    // answer or a superseded one that held its result group) is what the
-    // operator needs. It is stored for the
-    // blocker before this runs (startMatch's refusal branch or its catch, ahead
-    // of its finally), and startMatch clears
-    // startError when a start passes the guard, so any value present when the
-    // blocker ends is the blocker's own: it is kept, and the waiting match shows
-    // nothing, as it did before the sentence existed.
-    //
-    // The sentence also needs a start that WENT OUT. The blocker can be a pick whose
-    // deferral of the running bout failed (the revert threw or was unavailable): it
-    // never started, nothing was written and the court is as it was, so "was being
-    // started" would be false. The start record the refusal holds says whether a start
-    // landed (`landed`, set by startMatch, also on the pick's record), not the court's
-    // list: the list is refreshed a moment after the write and may still show the match
-    // scheduled, and a start queued offline stays scheduled until the connection
-    // returns, yet both were sent. Otherwise the refused tap is dropped, with no sentence.
-    useEffect(() => {
-        if (!refusedTap || refusedTap.why !== "starting") return;
-        if (startingRef.current || pickingRef.current) return;
-        if (refusedTap.start && refusedTap.start.landed) {
-            const blocked = { key: refusedTap.key, compId: refusedTap.compId, msg: startWasBlockedByStartMessage({ label: refusedTap.label }) };
-            setStartError((prev) => prev ?? blocked);
-        }
-        setRefusedTap(null);
-    }, [refusedTap, startingKey]);
-    // The stored Start refusal for match `m` (startError), which
-    // startRefusalStands binds to that match: a start's own refusal and a
-    // pick's refused start check (bc-stpf) store it alike.
-    const refusalFor = (m, msg) => ({ key: matchKey(m), compId: m.compId, msg });
-    // Returns true when the start went out (landed, or was queued offline), false
-    // otherwise: pickMatch relies on this so it only pins pickedKey for a match that
-    // actually started (a blocked-by-eligibility start, a clock_skew refusal or a
-    // superseded answer that held the result group must not steal the panel; a
-    // superseded answer that held nothing is an echo of a start that landed and
-    // does pin it).
-    // `pick` is the pickingRef entry pickMatch made for THIS start, if it is one:
-    // that pick is the start itself, not a start in flight against it.
-    const startMatch = async (m, { pick = null, after = null } = {}) => {
-        const key = matchKey(m);
-        // bc-evts: the start is the outbox's (a running score write), answered
-        // pending at once; a refusal arrives later, through `settled`. It is
-        // stored on the refused match and toasted once, here, as a refusal the
-        // start came back with always was, and claimed so the queue's own
-        // alert does not toast it a second time.
-        //
-        // The pending answer pins the panel on the started match at once
-        // (`startedFrom`, `pickedKey`, below); a start refused AFTER that takes
-        // its pin back, so the console shows what the server holds and a tap
-        // is not aimed at a match that never started (Z1). `refused` also
-        // covers a refusal that comes before the pin is set.
-        let refused = false;
-        const unpin = () => {
-            refused = true;
-            if (pick) pick.refused = true;
-            if (!mountedRef.current) return;
-            setStartedFrom((s) => (s && s.key === key ? null : s));
-            setPickedKey((k) => (k === key ? null : k));
-        };
-        const refusedLater = (msg) => {
-            unpin();
-            if (mountedRef.current) setStartError(refusalFor(m, msg));
-            if (showToast) showToast(msg, "error");
-        };
-        // Claimed only when it was said, on the row or by the (app-wide) toast (R2).
-        const onRefusal = (e) => { refusedLater(startFailureMessage(e)); return mountedRef.current || !!showToast; };
-        const inFlight = startingRef.current || (pickingRef.current && pickingRef.current !== pick ? pickingRef.current : null);
-        if (inFlight) {
-            // One start at a time. An advance (Finish + Start Next, or the one
-            // after a decision) that asks for another match while a start is out
-            // is refused, and the refusal says so where the refused match is
-            // shown (refuseTap: its Up next card or its queue row) and toasts,
-            // rather than doing nothing (bc-aadv). A repeat for the match already
-            // being started is silent: it is on its way.
-            if (inFlight.key !== key && mountedRef.current) refuseTap(m, "starting");
-            return false;
-        }
-        setStartError(null);
-        const started = { key, match: m };
-        startingRef.current = started;
-        setStartingKey(key);
-        try {
-            // Starting makes the match running; until a refetch shows it so,
-            // the start pin below makes it the court's live bout (liveHere).
-            // A pick's start follows its send back of the running bout (`after`,
-            // request-only: never sent, deferAndStart).
-            const res = await onEditScore(m.compId, m.id, after ? { ...startPatch(), after } : startPatch(), m, { onRefusal });
-            // A clock_skew answer, or a superseded one that held the result
-            // group, means the server stored NOTHING of the start and, unlike a
-            // queued start, nothing will land later, so returning true here would
-            // pin the panel on a match that never started while the tap looked
-            // like it worked. Found in browser verification: this card button is
-            // a start path none of the review sweeps enumerated (it is not one of
-            // the editor call sites). (A superseded answer that held NOTHING is an
-            // echo of a start that already landed: classifyStartOutcome answers
-            // ok for it and it takes the landed path below.)
-            // Both are a REFUSED start (start_match.jsx classifyStartOutcome): the
-            // sentence is stored on the refused match and toasted once, and
-            // `landed` stays unset, so a refusal that waited on this start is not
-            // worded as "was being started". The sentences differ in their advice
-            // (after a clock refusal a SECOND tap normally succeeds; after a
-            // held-group superseded one the operator checks the match first), which is why
-            // the toast and the card carry the sentence and not a bare failure.
-            //
-            // For a PICK the court is not "as it was": the running bout was
-            // already sent back to the queue (deferAndStart), and this refusal
-            // leaves the court idle with that bout waiting in the queue.
-            const outcome = classifyStartOutcome(res);
-            if (!outcome.ok) {
-                if (mountedRef.current) setStartError(refusalFor(m, outcome.msg));
-                if (showToast) showToast(outcome.msg, "error");
-                return false;
-            }
-            // The start went out. A refusal that waited on it (or on the pick that
-            // made it) reads this, whichever record it holds.
-            started.landed = true;
-            if (pick) pick.landed = true;
-            // The started match is the court's live bout from here, before any
-            // push or refetch shows it running (bc-strt; X3: an advance after a
-            // finish or a decision too, not only a pick): the editor treats this
-            // snapshot as running, so a point struck at once saves at once. A
-            // start that answered direct came back after its refresh, which
-            // already shows it; a pick pins itself (deferAndStart).
-            if (!refused && mountedRef.current && (pick || writePending(res))) {
-                setStartedFrom({ key, at: m.modifiedAt });
-                if (!pick) setPickedKey(key);
-            }
-            if (writePending(res)) {
-                res.settled.then((body) => {
-                    // A discarded start (the operator took it off the held-writes
-                    // list) reads as ok, but the server never started the match.
-                    if (body && body.discarded) { unpin(); return; }
-                    const late = classifyStartOutcome(body);
-                    if (!late.ok) refusedLater(late.msg);
-                }, () => {});
-            }
-            return true;
-        } catch (e) {
-            const msg = startFailureMessage(e);
-            if (mountedRef.current) setStartError(refusalFor(m, msg));
-            // A thrown refusal onEditScore (editMatchScore, admin.jsx) already
-            // toasted is not toasted again: the toast is a single slot, so a
-            // second one only restarts its timer. The card or row says it either way.
-            if (showToast && !wasToasted(e)) showToast(msg, "error");
-            return false;
-        } finally {
-            // Only the start that holds the ref clears it; the state follows the refs.
-            if (startingRef.current && startingRef.current.key === key) startingRef.current = null;
-            syncStartingKey();
-        }
-    };
-
-    // pickMatch: run an upcoming match out of order. Rules:
-    //   • Completed matches are never picked here — correcting them is a
-    //     separate deliberate action (see correctMatch), so this returns early.
-    //   • If a DIFFERENT bout is running, defer it: send it back to the queue
-    //     so the court is never left with two running bouts. It keeps its
-    //     score (operator ruling 2026-09-26, bc-sbq: switch, keeping the
-    //     score), so a mistaken switch is undone with one tap on its Start,
-    //     and it runs after the picked one.
-    //   • A scheduled pick is started (through the eligibility gate); a pick
-    //     that's already running just takes the panel.
-    //   • While a correction is open nothing starts (operator ruling
-    //     2026-09-27, bc-crpn): the tap is refused with a notice, BEFORE the
-    //     defer above, so a refused start sends nothing back to the queue.
-    //   • One start at a time (bc-aadv): while another match's start is still
-    //     out, a Start of a different scheduled match is refused with a notice
-    //     on its row, also BEFORE the defer, so the running bout is not sent
-    //     back for a start that never happens. A repeat for the match already
-    //     being started is silent: it is on its way.
-    const pickMatch = async (m, asked = false) => {
-        if (!m || m.status === "completed") return;
-        if (openCorrection) {
-            refuseTap(m, "correcting");
-            return;
-        }
-        const inFlight = startingRef.current || pickingRef.current;
-        if (inFlight && m.status === "scheduled") {
-            if (inFlight.key !== matchKey(m)) refuseTap(m, "starting");
-            return;
-        }
-        // A pick that puts another match in the editor asks first over its
-        // unsaved entries (R1). The court may move while the operator answers
-        // (another device finishes the running bout, a start lands), so the
-        // pick is judged again from the top on the court as it is then, by
-        // the latest render's pickMatch, never on this tap's copy (stage 5
-        // review 9, m3).
-        if (!asked && selectedMatch && matchKey(selectedMatch) !== matchKey(m) && holdsUnsaved(editorUnsavedRef)) {
-            if (!(await leaveEditorConfirmed())) return;
-            const latest = latestRef.current;
-            const fresh = latest.allMatches.find((x) => matchKey(x) === matchKey(m));
-            if (fresh) await latest.pickMatch(fresh, true);
-            return;
-        }
-        setRefusedTap(null);
-        // A scheduled pick is a start in flight from here, before the defer below
-        // awaits: a second Start tapped during that wait is refused, and does not
-        // send the running bout back a second time.
-        const pick = m.status === "scheduled" ? { key: matchKey(m), match: m } : null;
-        if (pick) {
-            pickingRef.current = pick;
-            syncStartingKey();
-        }
-        try {
-            await deferAndStart(m, pick);
-        } finally {
-            if (pick && pickingRef.current === pick) pickingRef.current = null;
-            syncStartingKey();
-        }
-    };
-
-    // A Start match tap: the bounce of the previous Start tap is ignored
-    // (startTapRef, bc-sdtp), anything else goes to pickMatch.
-    const tapStart = (m, ev) => {
-        if (!acceptTap(startTapRef, ev)) return;
-        pickMatch(m);
-    };
-
-    // bc-stpf (operator ruling 2026-10-12, option A): before a pick sends the
-    // running bout `cur` back, ask the server whether the picked match `m`
-    // would start once it has gone (API.checkStart, at most
-    // START_CHECK_TIMEOUT_MS; pickMatch's pickingRef holds the pick, so the
-    // button reads "Starting…" and a second Start is refused as in flight
-    // meanwhile). True goes on with today's send back and start; false leaves
-    // the court as it is. A refusal is stored on the picked match and toasted
-    // once, and the running bout keeps running with its score. With no answer,
-    // or when the device already knows an answer cannot be trusted (offline,
-    // or writes of the pick's competition not sent yet that move a match or a
-    // bar, API.startCheckUntrusted), the operator is asked
-    // (Q1, 2026-10-27: the court must keep working without the server).
-    // Console stubs without the check keep today's path.
-    const startMayFollowSendBack = async (m, cur, pick) => {
-        const api = window.API;
-        if (typeof api.checkStart !== "function") return true;
-        const untrusted = typeof api.startCheckUntrusted === "function" && api.startCheckUntrusted(m.compId);
-        const answer = untrusted ? { unknown: true } : await api.checkStart(m.compId, m.id, court, password);
-        if (!mountedRef.current) return false;
-        if (answer && answer.ok) return true;
-        if (answer && answer.refused) {
-            const msg = startFailureMessage(answer.refused);
-            if (pick) pick.refused = true;
-            setStartError(refusalFor(m, msg));
-            if (showToast) showToast(msg, "error");
-            return false;
-        }
-        return askStartWithoutCheck(cur, m);
-    };
-    // The defer of the running bout and the start of the picked one, after
-    // pickMatch's guards and its pickingRef entry (see pickMatch).
-    const deferAndStart = async (m, pick) => {
-        // The bout sent back is the court's live bout as this console knows
-        // it, its own start the feed does not show yet included (liveHere,
-        // bc-sssf).
-        let cur = liveHere;
-        const isSame = cur && matchKey(cur) === matchKey(m);
-        // A pick of the match this console has just started, the feed still
-        // reading it scheduled, is a pick of a running bout: it is started
-        // once, never a second time.
-        const startsPick = m.status === "scheduled" && !isStartedSnapshot(m);
-        // The queue key of the send back the start must follow, if any.
-        let after = null;
-        if (cur && !isSame) {
-            // Send the current bout back to the queue, otherwise the pick below
-            // would leave the court with two running bouts. Route through the
-            // dedicated revert-to-queue endpoint (not a scheduled /score write):
-            // it keeps the bout's score server-side AND skips the StartMatchTx
-            // eligibility gate, so a stale cross-match ineligibility can't
-            // silently 409 the defer. If the revert fails we surface a toast and
-            // must NOT start the pick.
-            if (!window.API || typeof window.API.revertMatchToQueue !== "function") return;
-            // bc-stpf: a start the server would refuse leaves the running bout
-            // running, so the check comes before anything is sent back.
-            if (startsPick) {
-                if (!(await startMayFollowSendBack(m, cur, pick))) return;
-                if (!mountedRef.current) return;
-                // The check can wait on the operator for as long as they take
-                // to answer (askStartWithoutCheck), and the court may move
-                // meanwhile (another device finishes the running bout, or
-                // starts another): the bout sent back and the match started
-                // are the court's as it is now, by the latest render, never
-                // this tap's copies, as pickMatch does after its own question.
-                // A court that changed is judged again from the top.
-                const latest = latestRef.current;
-                const fresh = latest.allMatches.find((x) => matchKey(x) === matchKey(m));
-                const freshCur = latest.liveHere;
-                if (!fresh || fresh.status !== "scheduled" || !freshCur || matchKey(freshCur) !== matchKey(cur)) {
-                    if (pick && pickingRef.current === pick) pickingRef.current = null;
-                    syncStartingKey();
-                    if (fresh) await latest.pickMatch(fresh, true);
-                    return;
-                }
-                cur = freshCur;
-                m = fresh;
-            }
-            if (!mountedRef.current) return;
-            // bc-evts (the governing rule): the send back is the outbox's and
-            // nothing waits for its answer. The pick's start is queued right
-            // after it, naming it (`after`), so the outbox sends the start only
-            // once the send back has settled: this device never asks the
-            // server to start a bout while its own send back of the running
-            // one is still out. A send back the server refuses is said here
-            // (claimed, so the queue raises no second alert), and the start
-            // then goes and the server judges it.
-            const deferFailed = (e) => {
-                if (showToast) showToast((e && e.message) || "Could not defer the current bout", "error");
-                // Claimed only when said (R2): with no toast it is the outbox's.
-                return !!showToast;
-            };
-            try {
-                const sent = await window.API.revertMatchToQueue(cur.compId, cur.id, password, { onRefusal: deferFailed, seen: cur.scoreVersion, match: cur });
-                after = writeQueueKey(sent);
-                // Shown queued at once, as the Send back confirm's is.
-                if (mountedRef.current) markSentBackHere(matchKey(cur), sent);
-            } catch (e) {
-                deferFailed(e);
-                return;
-            }
-            if (!mountedRef.current) return;
-        }
-        if (startsPick) {
-            // A start that went out pins the panel and its started snapshot
-            // itself (startMatch, bc-strt).
-            const ok = await startMatch(m, { pick, after });
-            // A start refused before this line (pick.refused) left nothing to pin.
-            if (!ok || !mountedRef.current || (pick && pick.refused)) return;
-        }
-        setPickedKey(matchKey(m));
-    };
-
-    // correctMatch: open a COMPLETED match to correct it in place, mirroring the
-    // Scores page's "Correct" button. The court operator often spots a wrong
-    // score after the match closed (frequently once the court is otherwise
-    // done), so they must be able to fix it here rather than leaving for the
-    // competition admin view. It is REFUSED while a bout is live on this court
-    // (operator ruling 2026-09-27, bc-crpn: the console never holds a running
-    // match and an open correction together): the tap gets a notice naming
-    // the bout, and the operator finishes it or sends it back to the queue
-    // first. A correction never defers or reverts the live match. The
-    // editor then offers Reopen (kachinuki: back to running, keep the bout log;
-    // a withdrawal-decided match: Clear withdrawal and reopen) or a direct
-    // score re-write (other formats), same as the Scores page. A reopen makes
-    // the match the court's live bout and ends the correction (the effect
-    // beside correctingMatch).
-    const correctMatch = async (m, asked = false) => {
-        if (!m || m.status !== "completed") return;
-        if (liveBout) {
-            refuseTap(m, "running");
-            return;
-        }
-        // Judged again after the ask on the court as it is then (m3, as pickMatch).
-        if (!asked && selectedMatch && matchKey(selectedMatch) !== matchKey(m) && holdsUnsaved(editorUnsavedRef)) {
-            if (!(await leaveEditorConfirmed())) return;
-            const latest = latestRef.current;
-            const fresh = latest.allMatches.find((x) => matchKey(x) === matchKey(m));
-            if (fresh) latest.correctMatch(fresh, true);
-            return;
-        }
-        setRefusedTap(null);
-        setCorrectingKey(matchKey(m));
-    };
-    // Cancel the correction without saving and return to the court's ordinary
-    // view. Only offered on a COMPLETED correction: once it is reopened it is
-    // the live bout, finished via End match / Finish or sent back to the
-    // queue like any other.
-    const stopCorrecting = async () => {
-        if (holdsUnsaved(editorUnsavedRef) && !(await leaveEditorConfirmed())) return;
-        setCorrectingKey(null);
-    };
-    // End the correction of the match keyed `key` only if it is still the one
-    // open: a write's answer may arrive after another correction was opened.
-    const endCorrectionOf = (key) => { setCorrectingKey((k) => (k === key ? null : k)); };
-    React.useLayoutEffect(() => { latestRef.current = { pickMatch, correctMatch, allMatches, liveHere }; });
-
-    // takeDown: withdraw the court call `id` (the device made it, so it is known
-    // at once, sent or not). Fire and forget: the withdrawal is an outbox entry
-    // that goes after the call's own send, and a refusal is told once by the
-    // outbox (_tellRefusal), never here. `msg` names the call on a held-writes
-    // list. Shared by withdrawCall and the earlier call callToCourt replaces.
-    const takeDown = (id, msg) => {
-        if (!id || !window.API || typeof window.API.deleteAnnouncement !== "function") return;
-        window.API.deleteAnnouncement(id, password, { message: msg });
-    };
-
-    // A call stands while its time is not over.
-    const callStands = (entry) => !!entry && entry.endsAt > serverNowMs();
-    const clearCallEnd = (key) => {
-        const t = callEndsRef.current.get(key);
-        if (t === undefined) return;
-        clearTimeout(t);
-        callEndsRef.current.delete(key);
-    };
-    // isCalled: the match keyed `key` reads as called (the card's "Call again"
-    // and its hint, a row's "Call again") exactly while this console keeps a
-    // call for it that stands. Each match has its own, so more than one can
-    // read as called at once. Render reads the snapshot, never the ref.
-    const isCalled = (key) => calledKeys.has(key);
-    // callsChanged: take the snapshot again from the calls kept now. The same
-    // Set is kept while the keys are the same, so nothing re-renders for it.
-    const callsChanged = () => {
-        if (!mountedRef.current) return;
-        const standing = new Set();
-        for (const [k, entry] of callIdsRef.current.entries()) {
-            if (callStands(entry)) standing.add(k);
-        }
-        setCalledKeys((prev) => (prev.size === standing.size && [...standing].every((k) => prev.has(k)) ? prev : standing));
-    };
-    // keepCalled: run whenever the call kept for the match keyed `key` changes
-    // or its time runs out. With that call standing it arms the match's one
-    // timer for the call's end, and runs again then. With none standing the
-    // match reads as uncalled (it offers Call to court again), and a call the
-    // server has answered is dropped: there is nothing left to withdraw. One
-    // the server has not answered yet stays kept, so a start still takes it out
-    // of the outbox, and it reads as uncalled since it most likely arrives
-    // expired; should it land with time left (the server's floor), its answer
-    // runs this again with the expiry answered, and it reads as called again.
-    const keepCalled = (key) => {
-        clearCallEnd(key);
-        const entry = callIdsRef.current.get(key);
-        if (callStands(entry)) {
-            callEndsRef.current.set(key, setTimeout(() => {
-                callEndsRef.current.delete(key);
-                keepCalled(key);
-            }, entry.endsAt - serverNowMs()));
-        } else if (entry && entry.answered) {
-            callIdsRef.current.delete(key);
-        }
-        callsChanged();
-    };
-
-    // Call to court: optional. Broadcasts a tournament announcement so the
-    // competitors (and anyone watching the public app) are notified they're
-    // being summoned to this shiaijo. It does NOT start the match; Start is
-    // always available on its own.
-    const callToCourt = async (m, ev) => {
-        // bc-cdbl: double tap guard. acceptTap returns false for a bounce and
-        // true otherwise, stamping the tap as it goes.
-        if (!acceptTap(callTapRef, ev, matchKey(m))) return;
-        if (!window.API || typeof window.API.sendAnnouncement !== "function") return;
-        const a = (m.sideA && m.sideA.name) || "Aka";
-        const b = (m.sideB && m.sideB.name) || "Shiro";
-        const msg = `Now calling ${b} and ${a} to Shiaijo ${court}.`.slice(0, 200);
-        setCallingKey(matchKey(m));
-        // The call already up for this match, if any: { id, msg }. It comes down
-        // only once the new call has landed (below), so a send the server refuses
-        // leaves it up. The server replaces only an announcement with identical
-        // text, so a call whose text changed (a side's name resolved) would
-        // otherwise leave the earlier banner up until it expired (bc-cdbl).
-        const earlier = callIdsRef.current.get(matchKey(m)) || null;
-        // When the call's time is over, as the server judges it: made-at, in
-        // its clock frame, plus the minutes the call shows.
-        const endsAt = serverNowMs() + CALL_MINUTES * 60000;
-        // What stands once this call has not: the earlier call while its own
-        // time is not over, otherwise nothing.
-        const fallBack = (key, entry) => {
-            if (callIdsRef.current.get(key) !== entry) return;
-            if (callStands(earlier)) callIdsRef.current.set(key, earlier);
-            else callIdsRef.current.delete(key);
-            keepCalled(key);
-        };
-        try {
-            // The answer is the outbox's pending one and carries the id the
-            // device made, so starting the match can withdraw this call before
-            // it has landed (the withdrawal then takes the unsent call out of the
-            // outbox). `settled` is the server's word on it.
-            const sent = await window.API.sendAnnouncement(msg, CALL_MINUTES, password);
-            const key = matchKey(m);
-            // Keep the newest call per match, with its text, so starting the match
-            // can withdraw it (bc-cdbl). A refused send leaves the earlier call
-            // and its entry in place while its time is not over.
-            const entry = { compId: m.compId, matchId: m.id, msg, id: sent.id, endsAt, answered: false };
-            callIdsRef.current.set(key, entry);
-            keepCalled(key);
-            sent.settled.then(
-                (landed) => {
-                    // Its time ran out before it reached the server (held offline
-                    // too long): nothing was shown and nothing was replaced, so
-                    // the earlier call stays the one kept while it is still
-                    // showing, and the "Called" toast below is put right. With
-                    // no call standing, the card reads as if no call was made.
-                    if (landed && landed.expired) {
-                        fallBack(key, entry);
-                        if (showToast) showToast(announcementExpiredToast(CALL_MINUTES, "court call"), "error");
-                        return;
-                    }
-                    // Shown: the call reads as called until the expiry the server
-                    // answered (a late call shows for what is left of its time).
-                    if (callIdsRef.current.get(key) === entry) {
-                        entry.answered = true;
-                        const until = landed && Date.parse(landed.expiresAt);
-                        if (Number.isFinite(until)) entry.endsAt = until;
-                        keepCalled(key);
-                    }
-                    // An identical text already replaced the earlier call on the
-                    // server (AnnouncementStore.Add), so a withdrawal of it would
-                    // 404; but a call withdrawn before it was sent replaced
-                    // nothing, so the earlier one comes down with it.
-                    if (earlier && (earlier.msg !== msg || (landed && landed.discarded))) takeDown(earlier.id, earlier.msg);
-                },
-                () => {
-                    // The outbox tells the operator (_tellRefusal); here only the
-                    // bookkeeping and the card go back to what stands.
-                    fallBack(key, entry);
-                },
-            );
-            if (!mountedRef.current) return;
-            if (showToast) showToast(`Called ${b} and ${a} to Shiaijo ${court}`);
-        } catch (e) {
-            if (showToast) showToast((e && e.message) || "Could not send the call announcement", "error");
-        } finally {
-            if (mountedRef.current) setCallingKey(null);
-        }
-    };
-
-    // withdrawCall: take this console's court call for the match keyed `key`
-    // back down once that match has left scheduled (bc-cdbl). Fire
-    // and forget: the withdrawal is an outbox entry, never allowed to fail the
-    // start, and the 5-minute expiry still clears the banner.
-    const withdrawCall = (key) => {
-        const entry = callIdsRef.current.get(key);
-        if (!entry) return;
-        callIdsRef.current.delete(key);
-        clearCallEnd(key);
-        callsChanged();
-        takeDown(entry.id, entry.msg);
-    };
-    React.useLayoutEffect(() => { withdrawCallRef.current = withdrawCall; });
-
-    // A court call comes down once its match has left scheduled, however that
-    // happened (started here, started elsewhere, closed by a decision), once the
-    // match shows on another court, whatever its status, or once the loaded
-    // court feed no longer holds the match (its competition dropped from this
-    // court); a key no list holds is left alone until the court feed has loaded.
-    useEffect(() => {
-        if (callIdsRef.current.size === 0) return;
-        const feedMatches = window.tournamentMatches({ competitions: courtCompetitions }) || [];
-        for (const [key, entry] of callIdsRef.current.entries()) {
-            const m = courtMatchesRaw.find((x) => matchKey(x) === key);
-            if (m && m.status !== "scheduled") {
-                withdrawCallRef.current(key);
-                continue;
-            }
-            const moved = feedMatches.find((x) => matchKey(x) === key);
-            // A court move still queued on this device alone does not withdraw
-            // the call, however the feed came by it (a patch or a refetch
-            // overlaid with the queue): only the server's court may.
-            if (moved && (moved.court || "") !== (court || "")
-                && !(window.API && window.API.courtMoveQueued(moved.compId, moved.id))) {
-                withdrawCallRef.current(key);
-                continue;
-            }
-            if (!m && !moved && courtComps !== null) {
-                if (!(window.API && window.API.courtMoveQueued(entry.compId, entry.matchId))) {
-                    withdrawCallRef.current(key);
-                }
-            }
-        }
-    }, [courtMatchesRaw, courtCompetitions, courtComps, court]);
-
-    // moveMatch: reorder by swapping scheduledAt with the adjacent row.
-    // direction: "up" (earlier) or "down" (later). Only scheduled matches
-    // can be reordered; running/completed are stable.
-    //
-    // The swap is two separate updateMatchTime PUTs (no server-side swap API),
-    // so it is NOT atomic. Each is an entry of its match's outbox, handed over at
-    // once (bc-evts M5), so nothing here waits; when the server refuses one, the
-    // other match is put back to its original time, so a partial failure doesn't
-    // leave both rows with the same/incorrect time. Times are sent as strings (""
-    // for an unset time): never null, which the Go handler's `scheduledAt string`
-    // rejects (400).
-    const moveMatch = async (m, direction) => {
-        if (!window.API || typeof window.API.updateMatchTime !== "function") return;
-        if (m.status === "running" || m.status === "completed") return;
-        // Reorder WITHIN the filtered (selected-competition) queue: the same list
-        // the rows render and compute first/last against. Swapping against the full
-        // court list would exchange ScheduledAt with a hidden match from another
-        // competition, silently reordering a queue the operator can't even see.
-        const idx = filteredScheduled.findIndex((x) => matchKey(x) === matchKey(m));
-        if (idx < 0) return;
-        const neighbour = direction === "up" ? filteredScheduled[idx - 1] : filteredScheduled[idx + 1];
-        if (!neighbour) return; // already first/last
-        const label = (m.sideB && m.sideB.name) || (m.sideA && m.sideA.name) || "Match";
-        const myTime = m.scheduledAt || "";
-        const neighbourTime = neighbour.scheduledAt || "";
-        // Says a refusal, and answers whether it was said (R2: an unsaid one is
-        // left for the outbox's alert).
-        const failed = (e) => {
-            if (showToast) showToast((e && e.message) || "Could not reorder the match", "error");
-            return !!showToast;
-        };
-        // A refusal of either half puts the OTHER match back to its own time, so
-        // the queue isn't left half-swapped (a put-back the server refuses too
-        // is toasted like any refusal).
-        // Both halves show at once and a refused one shows its old time again
-        // (`was`, R4); the put-back of the other half does the same.
-        const putBack = (match, time, shown) => {
-            Promise.resolve(window.API.updateMatchTime(match.compId, match.id, time, password, {
-                onRefusal: (e) => failed(e), was: { scheduledAt: shown },
-            })).catch(failed);
-        };
-        try {
-            await window.API.updateMatchTime(m.compId, m.id, neighbourTime, password, {
-                onRefusal: (e) => { putBack(neighbour, neighbourTime, myTime); return failed(e); },
-                was: { scheduledAt: myTime },
-            });
-            await window.API.updateMatchTime(neighbour.compId, neighbour.id, myTime, password, {
-                onRefusal: (e) => { putBack(m, myTime, neighbourTime); return failed(e); },
-                was: { scheduledAt: neighbourTime },
-            });
-            if (showToast) showToast(`Moved ${label} ${direction === "up" ? "earlier" : "later"} in the queue`);
-        } catch (e) {
-            failed(e);
-        }
-    };
-
-    // Revert a running bout back to the queue. Gated behind a confirm dialog
-    // (same pattern as court reassignment) because discarding the running state
-    // is disruptive: viewers drop the match from "Now" and it reappears in the
-    // upcoming list. Always offered on a running bout, and the match keeps its
-    // score (operator ruling 2026-09-26, bc-sbq): starting it again carries on
-    // from it, and the operator removes a wrong mark themselves.
-    // A pick is checking the start of another match (bc-stpf): it holds the
-    // running bout it may send back, so a Send back or a court move tapped
-    // now would race it. The tap is refused with a toast naming the pick.
-    const refusedWhilePicking = () => {
-        const pick = pickingRef.current;
-        if (!pick) return false;
-        if (showToast) showToast(courtChangeWhileStartingMessage({ label: scoreRowMatchName(pick.match) }), "error");
-        return true;
-    };
-    const requestRevert = (m) => {
-        if (refusedWhilePicking()) return;
-        // The editor shows this match: its unsaved entries go with the send
-        // back, and the confirm says so (R1, the editor's local Mark draw or
-        // hantei pick of a running match included).
-        const unsaved = editorUnsavedFor(m.compId, m.id);
-        setPendingRevert({ compId: m.compId, matchId: m.id, match: m, label: confirmMatchLabel(m), seen: m.scoreVersion, at: m.modifiedAt, key: matchKey(m), unsaved });
-    };
-    // markSentBackHere: the outbox holds a send back of the match keyed `key`
-    // (its pending answer `res`): the console shows it queued from the outbox
-    // itself (withOwnStatusMove), and a start pin of the match (startedFrom)
-    // goes with it: the bout is queued.
-    const markSentBackHere = (key, res) => {
-        if (!key || !writePending(res)) return;
-        setStartedFrom((prev) => (prev && prev.key === key ? null : prev));
-    };
-    const confirmRevert = async (ev) => {
-        if (!pendingRevert || reverting) return;
-        if (!window.API || typeof window.API.revertMatchToQueue !== "function") return;
-        // A bounce of the tap that turned this confirm into the warned one must
-        // not confirm the warned version the operator has not read yet.
-        if (!acceptTap(confirmTapRef, ev)) return;
-        const { compId, matchId, label } = pendingRevert;
-        const heldNow = editorUnsavedFor(compId, matchId);
-        // The confirm's wording was decided when it opened. Entries made while
-        // it was open (a scoring key reaching a console whose focus fell to
-        // the body) were never named in it: show the confirm again WITH the
-        // warning instead of dropping them silently (R1, stage 5 review 11,
-        // minor 3).
-        if (heldNow && !pendingRevert.unsaved) { setPendingRevert({ ...pendingRevert, unsaved: true }); return; }
-        // The confirm said the editor's unsaved entries are discarded: they go
-        // now, as Discard entries does everywhere (m1), not once the feed
-        // shows the match queued.
-        if (heldNow) discardUnsaved(editorUnsavedRef);
-        setReverting(true);
-        try {
-            // bc-evts: the outbox's, never awaited: the console moves on at
-            // once, and a refusal the server gives later is toasted.
-            const res = await window.API.revertMatchToQueue(compId, matchId, password, {
-                seen: pendingRevert.seen,
-                match: pendingRevert.match,
-                onRefusal: (e) => {
-                    if (!mountedRef.current || !showToast) return false;
-                    showToast((e && e.message) || "Could not send match back to queue", "error");
-                    return true;
-                },
-            });
-            if (!mountedRef.current) return;
-            // Queued (offline included): the bout leaves the live slot and the
-            // editor at once and shows in the queue, as a finish shows finished
-            // (withOwnStatusMove); a refused or discarded send back puts it back.
-            markSentBackHere(pendingRevert.key, res);
-            if (showToast) showToast(`${label} sent back to queue`);
-            setPendingRevert(null);
-            setPickedKey(null);
-            // Release a correction pin too. A reopened correction hands its key
-            // to pickedKey (cleared above) once the refetch shows it running, but
-            // one sent back before that refetch landed would otherwise re-pin the
-            // panel to a now-scheduled match with no exit. Harmless (no-op) when
-            // reverting a plain running bout.
-            setCorrectingKey(null);
-        } catch (e) {
-            if (mountedRef.current) {
-                if (showToast) showToast((e && e.message) || "Could not send match back to queue", "error");
-            }
-        } finally {
-            if (mountedRef.current) setReverting(false);
-        }
-    };
-
-    // Court reassignment is gated behind a confirm: a CourtPicker change opens a
-    // confirmation rather than moving immediately, because the match leaves this
-    // shiaijo for another court's queue. `onMoveCourt` (the real move) only runs
-    // once the operator confirms.
-    const requestMoveCourt = (compId, matchId, toCourt) => {
-        if (refusedWhilePicking()) return;
-        const mm = sorted.find((x) => x.compId === compId && x.id === matchId);
-        setPendingMove({
-            compId, matchId, to: toCourt,
-            shown: mm,
-            label: mm ? confirmMatchLabel(mm) : "this match",
-            from: (mm && mm.court) || court,
-            unsaved: editorUnsavedFor(compId, matchId),
-        });
-    };
-    const confirmMoveCourt = async (ev) => {
-        if (!pendingMove || movingCourt) return;
-        // The bounce guard of confirmRevert, for the court move's Confirm.
-        if (!acceptTap(confirmTapRef, ev)) return;
-        const { compId, matchId, to } = pendingMove;
-        const heldNow = editorUnsavedFor(compId, matchId);
-        // Entries made while a confirm without the warning was open are asked
-        // about, never dropped silently (see confirmRevert).
-        if (heldNow && !pendingMove.unsaved) { setPendingMove({ ...pendingMove, unsaved: true }); return; }
-        if (heldNow) discardUnsaved(editorUnsavedRef);
-        setMovingCourt(true);
-        try {
-            // The host hands the move to the outbox and answers at once with
-            // `{ landed }`, a promise of whether the move landed (the host
-            // reports its own failure); an older host answers the boolean. A
-            // move that did not land leaves this console's call for the match
-            // up. The call names the court the match is leaving, so it comes
-            // down once the move has landed (bc-cdbl).
-            const handed = await onMoveCourt(compId, matchId, to, { confirmed: true, shown: pendingMove.shown });
-            const withdraw = () => withdrawCall(matchKey({ compId, id: matchId }));
-            if (handed === true) withdraw();
-            else if (handed && handed.landed && typeof handed.landed.then === "function") {
-                handed.landed.then((ok) => { if (ok === true) withdraw(); });
-            }
-            if (mountedRef.current) setPendingMove(null);
-        } finally {
-            if (mountedRef.current) setMovingCourt(false);
-        }
-    };
+    // Send back to queue, a court move and a queue reorder, with the console's
+    // confirms (useCourtMoves, admin_shiaijo_moves.jsx). Called last of the
+    // three: it needs the filtered queue, the start hook's pick in flight and
+    // the calls hook's withdrawCall.
+    const { moveMatch, requestRevert, requestMoveCourt, confirms } = useCourtMoves({
+        court, password, showToast, onMoveCourt, mountedRef, editorUnsavedRef, selectedMatch, sorted,
+        filteredScheduled, pickingRef, markSentBackHere, setPickedKey, setCorrectingKey, withdrawCall,
+        pendingStartAsk, answerStartAsk,
+    });
 
     // allDone: selected comp has no more matches to run on this court (AC4).
     // Scoped to the SELECTED competition, not the whole court: another comp may
@@ -2022,65 +1105,15 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                 <p className="shiaijo-queue__empty">Nothing else queued on this court.</p>
                             )}
                             {upNext && (
-                                <div className="shiaijo-upnext">
-                                    <div className="section-title">Up next</div>
-                                    <div className={`shiaijo-upnext__card ${isCalled(matchKey(upNext)) ? "is-called" : ""}`}>
-                                        <div className="shiaijo-upnext__time">
-                                            <PaceTime display={paceDisplayOf(paceLookup, upNext.compId, upNext.id)} fallback={upNext.scheduledAt || "-"} /> · {upNext.compName}
-                                            {shiaijoMatchNo(upNext)}
-                                            {/* DH-only label: a tiebreaker ("-TB-") is also a rep bout
-                                                (isSupplementaryBout), but it is NOT a daihyosen, so the "DH"
-                                                tag gates on isPoolDaihyosenBout. Routing still uses
-                                                isSupplementaryBout (see editorMatch above). */}
-                                            {window.isPoolDaihyosenBout && window.isPoolDaihyosenBout(upNext.id) && (
-                                                <span className="tag-badge" style={{ marginLeft: 6 }}>
-                                                    {window.Term ? React.createElement(window.Term, { name: "daihyosen" }, "DH") : "DH"}
-                                                </span>
-                                            )}
-                                        </div>
-                                        <MatchSides m={upNext} large />
-                                        <TieBreakerReason m={upNext} className="shiaijo-upnext__hint" />
-                                        <div className="shiaijo-upnext__actions">
-                                            {/* Route through pickMatch (not startMatch) so starting the
-                                                Up Next bout honours the same rules as the Upcoming
-                                                "Start match" buttons: refused while a correction is open,
-                                                and a running bout is sent back to the queue first,
-                                                keeping its score (bc-sbq). With neither, it simply
-                                                starts this one. */}
-                                            <button type="button" className="btn btn--primary" disabled={startingKey === matchKey(upNext)} onClick={(ev) => tapStart(upNext, ev)}>
-                                                {startingKey === matchKey(upNext) ? "Starting…" : "Start match"}
-                                            </button>
-                                            {isTeamMatch(upNext) && (
-                                                <button type="button" className="btn btn--sm" onClick={() => setLineupKey(matchKey(upNext))}
-                                                    title="Set the team lineup before starting">
-                                                    Enter lineup
-                                                </button>
-                                            )}
-                                            {/* Optional: announce the call to spectators/competitors.
-                                                Never required: Start match works on its own. */}
-                                            {window.API && typeof window.API.sendAnnouncement === "function" && (
-                                                <button type="button"
-                                                    className="btn btn--sm"
-                                                    disabled={callingKey === matchKey(upNext)}
-                                                    onClick={(ev) => callToCourt(upNext, ev)}
-                                                    title="Announce this match to spectators and competitors"
-                                                >
-                                                    {Icon && <Icon name="megaphone" />}{" "}
-                                                    {callingKey === matchKey(upNext) ? "Calling…" : (isCalled(matchKey(upNext)) ? "Call again" : "Call to court")}
-                                                </button>
-                                            )}
-                                            {window.API && typeof window.API.updateMatchTime === "function" && filteredScheduled.length > 1 && (
-                                                <button type="button" className="btn btn--sm btn--ghost" aria-label="Move down" onClick={() => moveMatch(upNext, "down")} title="Move this match later in the queue">↓</button>
-                                            )}
-                                        </div>
-                                        {upNextNotice && <div className="shiaijo-upnext__error" role="alert">{upNextNotice}</div>}
-                                        <div className="shiaijo-upnext__hint">
-                                            {isCalled(matchKey(upNext))
-                                                ? "Announced to spectators. Start the match when both are at the line."
-                                                : "Start when both competitors are at the line. Call to court announces the match to spectators (optional)."}
-                                        </div>
-                                    </div>
-                                </div>
+                                <ShiaijoUpNextCard
+                                    upNext={upNext} paceLookup={paceLookup} notice={upNextNotice}
+                                    starting={startingKey === matchKey(upNext)}
+                                    called={isCalled(matchKey(upNext))} calling={callingKey === matchKey(upNext)}
+                                    onStart={(ev) => tapStart(upNext, ev)}
+                                    onEnterLineup={() => setLineupKey(matchKey(upNext))}
+                                    onCall={window.API && typeof window.API.sendAnnouncement === "function" ? (ev) => callToCourt(upNext, ev) : null}
+                                    onMoveDown={window.API && typeof window.API.updateMatchTime === "function" && filteredScheduled.length > 1 ? () => moveMatch(upNext, "down") : null}
+                                />
                             )}
 
                             {/* No "Now" group: the running match is officiated in the
@@ -2404,82 +1437,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                 )}
             </div>
 
-            {pendingMove && (
-                <div className="modal-backdrop" ref={confirmOpenedRef} onClickCapture={confirmOnClickCapture}
-                    onClick={() => !movingCourt && setPendingMove(null)}>
-                    <div className="shiaijo-move-confirm" role="dialog" aria-modal="true" ref={confirmBoxRef}
-                        aria-labelledby="shiaijo-move-title" onClick={(e) => e.stopPropagation()}>
-                        <h3 id="shiaijo-move-title" className="shiaijo-move-confirm__title">
-                            Move to Shiaijo {pendingMove.to}?
-                        </h3>
-                        <p className="shiaijo-move-confirm__body" aria-live="polite">
-                            {/* Only a waiting row offers a move here (ShiaijoQueueRow's
-                                showActions), and a waiting match goes last there. */}
-                            <strong>{pendingMove.label}</strong> leaves Shiaijo {pendingMove.from} and goes
-                            last in the queue on Shiaijo {pendingMove.to}.
-                            {pendingMove.unsaved ? ` ${UNSAVED_ENTRIES_DISCARDED}` : ""}
-                        </p>
-                        <div className="shiaijo-move-confirm__actions">
-                            <button type="button" className="btn" onClick={() => setPendingMove(null)} disabled={movingCourt}>
-                                Cancel
-                            </button>
-                            <button type="button" className="btn btn--primary" onClick={confirmMoveCourt} disabled={movingCourt}>
-                                {movingCourt ? "Moving…" : `Move to Shiaijo ${pendingMove.to}`}
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            )}
-
-            {pendingRevert && (
-                <div className="modal-backdrop" ref={confirmOpenedRef} onClickCapture={confirmOnClickCapture}
-                    onClick={() => !reverting && setPendingRevert(null)}>
-                    <div className="shiaijo-move-confirm" role="dialog" aria-modal="true" ref={confirmBoxRef}
-                        aria-labelledby="shiaijo-revert-title" onClick={(e) => e.stopPropagation()}>
-                        <h3 id="shiaijo-revert-title" className="shiaijo-move-confirm__title">
-                            Send back to queue?
-                        </h3>
-                        <p className="shiaijo-move-confirm__body" aria-live="polite">
-                            <strong>{pendingRevert.label}</strong> will be returned to the upcoming queue.
-                            {pendingRevert.unsaved ? ` ${UNSAVED_ENTRIES_DISCARDED}` : ""} {SCORE_KEPT_SENTENCE}
-                        </p>
-                        <div className="shiaijo-move-confirm__actions">
-                            <button type="button" className="btn" onClick={() => setPendingRevert(null)} disabled={reverting}>
-                                Cancel
-                            </button>
-                            <button type="button" className="btn btn--primary" onClick={confirmRevert} disabled={reverting}>
-                                {reverting ? "Sending…" : "Send back to queue"}
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            )}
-
-            {pendingStartAsk && (
-                <div className="modal-backdrop" ref={confirmOpenedRef} onClickCapture={confirmOnClickCapture}
-                    onClick={() => answerStartAsk(false)}>
-                    <div className="shiaijo-move-confirm" role="dialog" aria-modal="true" ref={confirmBoxRef}
-                        aria-labelledby="shiaijo-start-ask-title" data-testid="start-ask" onClick={(e) => e.stopPropagation()}>
-                        <h3 id="shiaijo-start-ask-title" className="shiaijo-move-confirm__title">
-                            Start {pendingStartAsk.pickLabel}?
-                        </h3>
-                        <p className="shiaijo-move-confirm__body" aria-live="polite">
-                            The app could not check with the server that <strong>{pendingStartAsk.pickLabel}</strong> can
-                            start. <strong>{pendingStartAsk.curLabel}</strong> is still running: send it back to the
-                            queue and start {pendingStartAsk.pickLabel}, or keep it running. {SCORE_KEPT_SENTENCE}
-                        </p>
-                        <div className="shiaijo-move-confirm__actions">
-                            <button type="button" className="btn" onClick={() => answerStartAsk(false)}>
-                                Keep it running
-                            </button>
-                            <button type="button" className="btn btn--primary"
-                                onClick={(ev) => { if (acceptTap(confirmTapRef, ev)) answerStartAsk(true); }}>
-                                Send back and start
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            )}
+            <ShiaijoConfirms {...confirms} />
 
             {/* Pre-start lineup entry for a team match. Opens the dedicated
                 per-match lineup panel: the per-position name pickers persist

@@ -106,8 +106,8 @@ export const FORBIDDEN = [
     // finished match has a result, a scoreline or a registered decision that
     // NAMES the winner. This rule is unlike the two above: it has no owner
     // allowed to state it directly, the OWNER module (write_result.jsx)
-    // included, so it is NOT exempted for OWNER or for api_client.jsx below
-    // (see the per-rule exemption sets).
+    // included, so it is NOT exempted for OWNER or for the outbox's parser
+    // files below (see the per-rule exemption sets).
     //
     // Scanned WHOLE-FILE (see WHOLE_FILE_RULE_INDICES below), not line by
     // line: a single-line check missed the shape that actually shipped at
@@ -194,11 +194,13 @@ export const FORBIDDEN = [
   {
     // bc-evts stage 3: a tap's outcome (the score-events door's per-event
     // answer) is read through write_result.jsx (tapOutcomeQuiet,
-    // tapNotAppliedText); the outbox (api_client.jsx) and the replay port
-    // (score_events.jsx) are the only other readers of the raw field.
+    // tapNotAppliedText); the outbox (the two api_client.jsx pieces that read
+    // a tap's answer: the queue's settlement and the tap batch) and the
+    // replay port (score_events.jsx) are the only other readers of the raw
+    // field. Named by exact file, so a new outbox piece is not exempt.
     name: 'tap-outcome',
     re: /\.outcome\s*(===|==|!==|!=)/,
-    exempt: ['write_result.jsx', 'api_client.jsx', 'score_events.jsx'],
+    exempt: ['write_result.jsx', 'api_client_queue.jsx', 'api_client_taps.jsx', 'score_events.jsx'],
     why: 'compares a tap .outcome by hand; ask tapOutcomeQuiet(o) / tapNotAppliedText(o) (write_result.jsx) instead',
   },
   {
@@ -223,12 +225,12 @@ export const FORBIDDEN = [
   {
     // "A direct write could not be sent" has ONE classifier and ONE sentence
     // (write_result.jsx: isNoConnection, WRITE_NOT_CONFIRMED). A fetch that
-    // never left the device rejects with a TypeError; api_client.jsx's
-    // _directFetch is the one place that turns it into the sentence, and a
-    // caller that runs its own fetch asks isNoConnection(err).
+    // never left the device rejects with a TypeError; _directFetch
+    // (api_client_requests.jsx) is the one place that turns it into the
+    // sentence, and a caller that runs its own fetch asks isNoConnection(err).
     name: 'no-connection',
     re: /\binstanceof\s+TypeError\b/,
-    exempt: ['write_result.jsx', 'api_client.jsx'],
+    exempt: ['write_result.jsx', 'api_client_requests.jsx'],
     why: 'classifies a failed fetch by hand; ask isNoConnection(err) (write_result.jsx), and say WRITE_NOT_CONFIRMED (NOT_SENT_NO_CONNECTION for a read-only export), instead',
   },
 ];
@@ -239,15 +241,19 @@ export const FORBIDDEN = [
 // syntax the way the two JS-API rules above do.
 const WHOLE_FILE_RULE_INDICES = new Set([2, 3, 4]);
 
-// api_client.jsx is the collaborator that turns an HTTP response INTO the
-// discriminated result the predicates read, so it necessarily touches the raw
-// field. It is not a consumer deciding what a write meant.
+// The outbox (api_client.jsx and its api_client_* pieces) is the collaborator
+// that turns an HTTP response INTO the discriminated result the predicates
+// read, so it necessarily touches the raw field. It is not a consumer deciding
+// what a write meant. Exempt are exactly the pieces that compare it: the
+// flush (a door's answer), the minted members (a member write's answer) and
+// the overlays (a check-in's answer), by exact file name, so a new piece or a
+// consumer is not exempt by its name alone.
 //
-// The exemption is per-RULE, not per-file: api_client may compare `.applied`
-// (it is the parser) but may NOT re-publish a window mirror, since restoring
-// one would re-open the drift the migration closed, and it may not say
+// The exemption is per-RULE, not per-file: those pieces may compare `.applied`
+// (they are the parser) but may NOT re-publish a window mirror, since restoring
+// one would re-open the drift the migration closed, and they may not say
 // "default win" either.
-const ALLOWED = new Set(['api_client.jsx']);
+export const PARSER_FILES = ['api_client_flush.jsx', 'api_client_members.jsx', 'api_client_overlays.jsx'];
 const ALLOWED_RULE_INDEX = 0;
 
 // The OWNER module is exempt from the two rules ABOVE it (it is allowed to
@@ -269,7 +275,7 @@ export function findViolations() {
   const violations = [];
   for (const file of walk(JS_DIR)) {
     const isOwner = file.endsWith(OWNER);
-    const isParser = [...ALLOWED].some((a) => file.endsWith(a));
+    const isParser = PARSER_FILES.some((a) => file.endsWith(`/${a}`));
     const rules = FORBIDDEN.filter((_, r) => {
       if (isOwner && OWNER_EXEMPT_RULE_INDICES.has(r)) return false;
       if (isParser && r === ALLOWED_RULE_INDEX) return false;

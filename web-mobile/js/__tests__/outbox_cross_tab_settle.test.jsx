@@ -42,7 +42,7 @@ describe('two tabs of one device share the stored outbox (P1)', () => {
     // Which tab's code made a call: each instance is imported under its own
     // query string, which shows in the stack.
     const callerTab = () => {
-        const m = new Error().stack.match(/api_client\.jsx\?tab=(\w+)/);
+        const m = new Error().stack.match(/api_client(?:_\w+)?\.jsx\?tab=(\w+)/);
         return m ? m[1] : '?';
     };
     const deliver = (key, oldValue, newValue) => {

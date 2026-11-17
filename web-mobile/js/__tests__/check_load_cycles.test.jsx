@@ -64,6 +64,8 @@ describe('findLoadTimeCycleReads', () => {
     ['a declared function given by name to forEach', 'function run() { fromB(); }\n[1].forEach(run);\n'],
     ['the constructor of a declared class run by new', 'class K { constructor() { this.v = B_CONST; } }\nexport const k = new K();\n'],
     ['an instance field of a declared class run by new', 'class K { v = fromB(); }\nnew K();\n'],
+    ['the constructor of a class expression held in a const run by new', 'const K = class { constructor() { this.v = B_CONST; } };\nexport const k = new K();\n'],
+    ['an instance field of an exported class expression run by new', 'export const K = class { v = fromB(); };\nnew K();\n'],
     ['a declared constructor function run by new', 'function K() { this.v = B_CONST; }\nexport const k = new K();\n'],
     ['a parameter default of a function called at load', 'function f(v = B_CONST) { return v; }\nf();\n'],
   ])('reports a read inside %s', (_, code) => {

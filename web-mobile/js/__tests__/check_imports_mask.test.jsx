@@ -52,6 +52,16 @@ describe('stripComments', () => {
     expect(out).toContain(IMPORT);
   });
 
+  it('keeps a URL in JSX text but blanks a comment written straight after a colon', () => {
+    const url = 'const l = <a>see https://x.test/a and http://y.test</a>;';
+    expect(stripComments(url)).toBe(url);
+    const out = stripComments(`switch (k) {\ncase 1:// import { Z } from './z.jsx'\ndefault:// note\n}\nx ? a ://b\n${IMPORT}`);
+    expect(out).not.toContain('./z.jsx');
+    expect(out).not.toContain('note');
+    expect(out).not.toContain('//b');
+    expect(out).toContain(IMPORT);
+  });
+
   it('still reads a slash after a keyword as a regular expression', () => {
     const src = 'if (ok) return /[/*]/.test(s);\nthrow /`/;\n';
     expect(stripComments(`${src}${IMPORT}`)).toBe(`${src}${IMPORT}`);

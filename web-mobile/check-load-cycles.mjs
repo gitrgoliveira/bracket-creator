@@ -64,7 +64,7 @@ function readImports(program) {
 
 // The functions and the classes a module declares at its top level, by name: a
 // function declaration, or a const or let holding a function or an arrow; a
-// class declaration.
+// class declaration, or a const or let holding a class expression.
 function readLocalDeclarations(program) {
   const locals = new Map();
   const classes = new Map();
@@ -75,7 +75,9 @@ function readLocalDeclarations(program) {
     if (decl.type === 'FunctionDeclaration' && decl.id) locals.set(decl.id.name, decl);
     if (decl.type === 'VariableDeclaration') {
       for (const d of decl.declarations) {
-        if (d.id.type === 'Identifier' && isFunction(d.init)) locals.set(d.id.name, d.init);
+        if (d.id.type !== 'Identifier') continue;
+        if (isFunction(d.init)) locals.set(d.id.name, d.init);
+        else if (d.init && d.init.type === 'ClassExpression') classes.set(d.id.name, d.init);
       }
     }
   }

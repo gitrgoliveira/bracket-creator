@@ -135,6 +135,9 @@ function regexEnd(src, i) {
 
 // stripComments: the source with every comment replaced by spaces, newlines
 // kept, so line i of the result is line i of the file and offsets do not move.
+// The tail of the text before a "//" that makes it part of a URL.
+const URL_SCHEME_BEFORE = /\b(?:https?|wss?|ftp|file):$/i;
+
 // A comment DESCRIBING a rule (which every gate and every owner module does, at
 // length) must not read as a use of it, but a gate that then reports the wrong
 // line sends the reader to prose. Trailing comments are blanked too
@@ -178,8 +181,9 @@ export function stripComments(src) {
       i++;
       continue;
     }
-    // A "//" straight after a ":" is a URL ("https://x" in JSX text), not a comment.
-    if (c === '/' && d === '/' && src[i - 1] !== ':') {
+    // A "//" straight after a URL scheme ("https://x" in JSX text) is a URL, not
+    // a comment; after any other ":" (a case, a label, a ternary) it is one.
+    if (c === '/' && d === '/' && !URL_SCHEME_BEFORE.test(src.slice(Math.max(0, i - 7), i))) {
       let j = src.indexOf('\n', i);
       if (j === -1) j = n;
       out.push(blank(src.slice(i, j)));

@@ -254,21 +254,14 @@
     <p class="kicker">Get started</p>
     <h2 id="start-title">Up and running in a few minutes</h2>
     <ol>
-      <li><a href="{{ base_url }}/user-guide/install/download/">Install bracket-creator</a> with Docker, or as a binary on macOS, Windows or Linux.</li>
+      <li><a href="{{ base_url }}/user-guide/install/download/">Install bracket-creator</a> on macOS, Windows or Linux. Prefer containers? Use the <a href="{{ base_url }}/user-guide/install/download/#any-computer-with-docker-recommended">Docker option</a>.</li>
       <li>Start it on the laptop at the desk.</li>
       <li>Open it in a browser, then share the laptop's <a href="{{ first }}#5-enter-a-score">network address</a> with the courts and the hall.</li>
     </ol>
     <a class="btn p" href="{{ first }}">Run your first tournament</a>
   </div>
-  <pre tabindex="0" role="region" aria-label="Start commands for Docker and for a binary install"><span class="c"># Docker: start the tournament app, open to the hall</span>
-<span class="c"># (on Linux, first: sudo chown 65534 tournament-data)</span>
-mkdir -p tournament-data
-docker run -p 8080:8080 \
-  -v "$PWD/tournament-data:/tournament-data" \
-  ghcr.io/gitrgoliveira/bracket-creator-mobile:latest
-
-<span class="c"># or a binary install; --bind 0.0.0.0 lets</span>
-<span class="c"># the courts and phones reach it</span>
+  <pre tabindex="0" role="region" aria-label="Start command for the tournament app"><span class="c"># start the tournament app; --bind 0.0.0.0</span>
+<span class="c"># lets the courts and phones reach it</span>
 bracket-creator mobile-app --folder ./tournament-data \
   --bind 0.0.0.0
 

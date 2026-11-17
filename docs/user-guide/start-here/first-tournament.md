@@ -4,13 +4,15 @@ This page walks you through the fastest path from a running server to real-time 
 
 ## 1. Install and start the server
 
-Install bracket-creator by following [Download](../install/download.md). The Docker image starts the tournament app by itself, already open to the other devices in the hall. With any other install, start the tournament app yourself:
+Install bracket-creator on your computer by following [Download](../install/download.md), then start the tournament app:
 
 ```bash
 bracket-creator mobile-app --folder ./tournament-data --bind 0.0.0.0
 ```
 
 `--bind 0.0.0.0` lets the other devices in the hall (a scoreboard screen, a phone) reach the app; without it only this computer can. The operating system may ask whether to allow incoming connections for bracket-creator: allow them, or the other devices cannot connect. Refer to [Start the server](../organisers/run-tournament.md#start-the-server) for the server's flags, and to [Security notes](../organisers/operating-modes.md#security-notes) for what opening the app to the hall network means for the admin password.
+
+To run it in a container instead, use the [Docker option](../install/download.md#any-computer-with-docker-recommended): the image starts the tournament app by itself, already open to the other devices in the hall.
 
 Open `http://localhost:8080` in a browser on the same computer. When the data folder is empty, the app prompts you to create a tournament. Fill in the name, date, venue, number of shiai-jo, and the admin password. Before you set the password, read [Operating modes](../organisers/operating-modes.md) to choose between officiated and self-run.
 

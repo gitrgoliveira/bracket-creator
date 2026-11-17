@@ -59,7 +59,8 @@ captures into `docs/`, make the copies again:
 The list comes from `overrides/landing.html` itself: every
 `screenshots/<name>.webp` or `videos/<name>.mp4` it names is made from the
 committed `<name>.png` or `<name>.webm`, and only when that file is newer than
-its copy. A new picture on the landing page therefore needs only its `<source
+its copy. A `<name>-1440.webp` is the one exception: it is a 1440-wide copy of
+`<name>.png`, the smaller candidate in the hero's `srcset`. A new picture on the landing page therefore needs only its `<source
 type="image/webp">` there. It needs `cwebp` and `ffmpeg` (`brew install webp
 ffmpeg`); the copies are committed, so `make docs/build` needs neither.
 

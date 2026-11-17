@@ -60,7 +60,11 @@ On the day you need:
 
 ### Keep courts in sync
 
-If you have multiple shiai-jo and run on printed brackets, upload the Excel file to Google Drive (or similar) so every table works from the same document.
+If you have multiple shiai-jo and run on printed brackets, share one copy of the workbook online so every table works from the same document:
+
+1. Upload the Excel file to Google Drive and open it with Google Sheets. The workbook's formulas work in Google Sheets as they do in Excel.
+2. Share the sheet with the person at each table, with permission to edit.
+3. At each table, open the sheet on any device with a browser or the Google Sheets app, and type that court's results into its own matches: the points in the score cells, and an **X** in the centre column for a tie.
 
 ## Next steps
 

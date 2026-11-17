@@ -1,12 +1,12 @@
 # Download
 
-Pick the computer that will run the tournament app: usually the laptop at the desk. Each section below gives the one route we recommend for it, and the command that starts the app. [Install](install.md) has every other way, and how to upgrade.
+Pick the computer that will run the tournament app: usually the laptop at the desk. Each section below gives the recommended route for it, and the command that starts the app. [Install](install.md) has every other way, and how to upgrade.
 
 Once the app is running, open `http://localhost:8080` on that computer. Courts and phones on the same network open `http://<laptop address>:8080` instead, as [Your first tournament](../start-here/first-tournament.md) explains.
 
 ## Any computer with Docker (recommended)
 
-Docker runs the same app on macOS, Windows and Linux, and is the route we recommend for most people. Install [Docker Desktop](https://www.docker.com/products/docker-desktop/) (or Docker Engine on Linux), then run the tournament app image:
+Docker runs the same app on macOS, Windows and Linux, and is the recommended route for most people. Install [Docker Desktop](https://www.docker.com/products/docker-desktop/) (or Docker Engine on Linux), then run the tournament app image:
 
 ```bash
 mkdir -p tournament-data

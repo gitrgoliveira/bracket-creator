@@ -14,14 +14,15 @@ tab to switch its score editor to flag counting. It is offered for individual
 competitions only, works with every format (knockout, pools then knockout,
 league and Swiss), and is locked once the draw is generated.
 
-Engi is its own setting, independent of **Naginata competition**, which only
-adds the Sune ippon button that engi bouts never use. Whether the division
-awards two joint 3rd places or a single one decided by a bronze match is the
-**Award two joint 3rd places** setting; refer to
+Engi is its own setting, independent of **Naginata competition**. Ticking
+**Naginata competition** does two things: it adds the Sune ippon button, which
+engi bouts never use, and it unticks **Award two joint 3rd places**. That
+setting decides whether the division awards two joint 3rd places or a single
+one decided by a bronze match; refer to
 [Third-place match](naginata.md#third-place-match). A naginata engi-kyogi
-division usually ticks **Naginata competition** as well, because that unticks
-**Award two joint 3rd places** for you; for any other kata, set that checkbox
-to your event's convention.
+division usually ticks **Naginata competition** as well, for the single 3rd
+place; for any other kata, set **Award two joint 3rd places** to your event's
+convention.
 
 !!! note "Quick-score and overrides are off for Engi"
     Because every Engi result comes from the flag editor, the kendo shortcuts,
@@ -33,7 +34,8 @@ to your event's convention.
 An Engi competitor is a pair: two people from the same dojo or team, scored
 together as one unit. There are no individual bouts inside a pair. Enter each
 pair as a single participant row with both member names combined in the name
-field, joined by a dash, and the shared dojo:
+field, joined by a dash with a space on each side (` - `), and the shared dojo.
+A row without both names is refused:
 
 ```
 Name 1 - Name 2, Dojo

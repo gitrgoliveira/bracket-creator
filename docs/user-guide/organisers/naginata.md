@@ -19,7 +19,7 @@ locked once the draw is generated:
 | Checkbox | What it does | Available for |
 |--------|--------------|---------------|
 | **Naginata competition** | Turns on the combat rules: the Sune ippon button | Individual and team |
-| **Engi (kata competition)** | Flag-count scoring for pair kata, naginata or any other; refer to [Engi](engi.md) | Individual only |
+| **Engi (kata competition)** | Flag-count scoring for pair kata in any art; refer to [Engi](engi.md) | Individual only |
 
 The 3rd-place rule (joint vs. single) is a separate setting, shared with kendo
 competitions; refer to [Third-place match](#third-place-match).

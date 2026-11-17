@@ -223,7 +223,7 @@ viewport: `mobile-dashboard`, `mobile-participants`, `mobile-draw-preview`,
 `mobile-pool-standings`, `selfrun-register` and `selfrun-viewer-home`. Those six
 declare `dpr: 2`; a recipe that says nothing is at 1. `hero` and `hero-mobile`
 are at 2 too, but crop to an element, so their size is the element's (see The
-hero stage below). A phone capture that
+hero stage, above). A phone capture that
 must lay out as on a touch screen (the calendar's phone layout, with no Move buttons)
 declares `touch: true`. The runner compares width always,
 and height for every mode except `fullPage`, whose height moves with content.

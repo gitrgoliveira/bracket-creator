@@ -45,21 +45,12 @@ Go to the **Scores** tab, open a match, and record the result. Refer to [Scoring
 
 ## If you print your brackets instead
 
-Steps 1 to 5 run the whole tournament in the app. To run the day from paper instead, with no app at the courts, prepare the sheets in one of two ways.
+Steps 1 to 5 run the whole tournament in the app. To run the day from paper instead, with no app at the courts, follow steps 1 to 4 up to **Generate draw**, then print from the app instead of starting the competitions:
 
-**In the tournament app.** Follow steps 1 to 4 up to **Generate draw**, then print from the app instead of starting the competitions:
+- **Export PDFs** on the dashboard renders the competitor tags, name sheets and bracket trees of every competition as print-ready PDFs, from the draw you generated. It needs LibreOffice on the computer that runs the app.
+- **Download blank template (.xlsx)** on a competition's page gives a workbook with linked formulas for scoring by hand. It draws the competition again from the roster, in registration order, so its pools and bracket can differ from the draw in the app: score from the same source you printed.
 
-- **Export PDFs** on the dashboard renders the competitor tags, name sheets and bracket trees of every competition as print-ready PDFs. It needs LibreOffice on the computer that runs the app.
-- **Download blank template (.xlsx)** on a competition's page gives a workbook with linked formulas for scoring by hand.
-
-Refer to [Export and print](../organisers/run-tournament.md#export-and-print).
-
-**With the command line**, without the tournament app:
-
-1. **Collect participants**: one competitor per line in a CSV file, name then dojo ([input format](../organisers/input-format.md))
-2. **Generate the bracket**: run [create-pools](../commands/create-pools.md) or [create-knockout](../commands/create-knockout.md)
-3. **Optionally seed** top competitors so they land in separate pools or sides of the bracket ([seeding](../commands/create-pools.md#seeding))
-4. **Print**: the Excel file is laid out to print cleanly on A4 and A3, and the [print](../commands/print.md) command turns it into the same PDFs, through LibreOffice
+Neither export covers a Swiss competition; follow its live standings instead. Refer to [Export and print](../organisers/run-tournament.md#export-and-print).
 
 On the day you need:
 
@@ -69,12 +60,12 @@ On the day you need:
 
 ### Keep courts in sync
 
-If you have multiple shiai-jo and run on printed brackets, share one copy of the workbook online so every table works from the same document:
+If you have multiple shiai-jo and run on printed brackets, share each competition's workbook online so every table works from the same document:
 
-1. Upload the Excel file to Google Drive and open it with Google Sheets. The workbook's formulas work in Google Sheets as they do in Excel.
+1. Download the blank template (.xlsx) from the competition's page, upload it to Google Drive and open it with Google Sheets. Print from this workbook too, since its draw can differ from the app's. The workbook's formulas work in Google Sheets as they do in Excel.
 2. Share the sheet with the person at each table, with permission to edit.
 3. At each table, open the sheet on any device with a browser or the Google Sheets app, and type that court's results into its own matches: the points in the score cells, and an **X** in the centre column for a tie.
 
 ## Next steps
 
-For the complete organiser workflow, including pools, seeding, and competition settings, refer to [Run a tournament](../organisers/run-tournament.md). Before the event, take a backup of the whole tournament: refer to [Backup and restore](../organisers/backup-and-restore.md). The tournament app, the Legacy Web UI and the command line all ship in the one binary. To generate print-ready brackets without the tournament app, refer to [Legacy Web UI](../organisers/web-ui.md) (in the browser, no CSV editing needed) and the [create-pools](../commands/create-pools.md) and [create-knockout](../commands/create-knockout.md) commands.
+For the complete organiser workflow, including pools, seeding, and competition settings, refer to [Run a tournament](../organisers/run-tournament.md). Before the event, take a backup of the whole tournament: refer to [Backup and restore](../organisers/backup-and-restore.md).

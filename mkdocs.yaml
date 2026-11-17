@@ -148,16 +148,16 @@ nav:
           - mobile-app: user-guide/commands/mobile-app.md
           - hash-password: user-guide/commands/hash-password.md
           - version: user-guide/commands/version.md
-      - Other ways to work:
-          - create-pools: user-guide/commands/create-pools.md
-          - create-knockout: user-guide/commands/create-knockout.md
-          - print: user-guide/commands/print.md
-          - Legacy Web UI:
-              - Overview: user-guide/organisers/web-ui.md
-              - serve: user-guide/commands/serve.md
+      - Legacy Web UI:
+          - Overview: user-guide/organisers/web-ui.md
+          - serve: user-guide/commands/serve.md
   - Developer guide:
       - Code of conduct: dev-guide/code_of_conduct.md
       - Contributing: dev-guide/contributing.md
+      - Automate with the command line:
+          - create-pools: user-guide/commands/create-pools.md
+          - create-knockout: user-guide/commands/create-knockout.md
+          - print: user-guide/commands/print.md
       - Architecture:
           - Software: architecture/software-architecture.md
           - Data model: architecture/data-model.md

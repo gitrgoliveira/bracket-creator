@@ -1,6 +1,9 @@
 # Legacy Web UI
 
-The Legacy Web UI is the organiser's tool for the days before the event. It turns a roster into a print-ready bracket from your browser, with no CSV editing. It is a standalone one-shot bracket generator, separate from the [tournament app](run-tournament.md), which takes over on the day for scorers, competitors, and spectators.
+!!! note "Legacy"
+    The Legacy Web UI is kept for compatibility. For a new tournament, use the [tournament app](../start-here/first-tournament.md): its **Download blank template (.xlsx)** gives the same Excel bracket, and **Export PDFs** prints the app's own draw. Refer to [Export and print](run-tournament.md#export-and-print).
+
+The Legacy Web UI is a standalone one-shot bracket generator. It turns a roster into a print-ready Excel bracket from your browser, with no CSV editing.
 
 You run one command to start the local server, then do everything else in the browser. Start it with the [`serve` command](../commands/serve.md):
 

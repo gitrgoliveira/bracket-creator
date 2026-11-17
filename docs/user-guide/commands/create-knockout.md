@@ -1,6 +1,6 @@
 # create-knockout
 
-Generates a **Knockout Only** bracket: a direct single-elimination tree with no pool phase.
+Generates a **Knockout Only** bracket: a direct single-elimination tree with no pool phase. It is meant for scripts and automation; to prepare a tournament, use the [tournament app](../start-here/first-tournament.md).
 
 ```
 bracket-creator create-knockout [flags]

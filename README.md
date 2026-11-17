@@ -56,7 +56,7 @@ brew install bracket-creator
 
 `brew trust` marks the tap as trusted, which Homebrew requires before installing from a third-party tap. Update later with `brew upgrade bracket-creator`. The formula (in the [gitrgoliveira/homebrew-tap](https://github.com/gitrgoliveira/homebrew-tap) repository) builds from source, so it needs a C toolchain (the Xcode Command Line Tools on macOS or `build-essential` on Linux) and network access for Go module downloads.
 
-The single binary bundles every subcommand, including `bracket-creator serve` (web UI) and `bracket-creator mobile-app` (tournament app).
+The single binary bundles every subcommand, including `bracket-creator serve` (Legacy Web UI) and `bracket-creator mobile-app` (tournament app).
 
 </details>
 
@@ -92,23 +92,15 @@ The kendo tournament guidelines this application is based on are in [running_a_k
 
 ## Other ways to work
 
-Without a laptop at the courts, the same binary still covers the day.
+The app also prepares a day run on paper or from a shared sheet, and the command line serves scripts.
 
-**Printed Excel brackets.** Give it a CSV of participants and it produces print-ready Excel workbooks with pool draws, match schedules and elimination trees. Refer to [create-pools](https://gitrgoliveira.github.io/bracket-creator/user-guide/commands/create-pools/), [create-knockout](https://gitrgoliveira.github.io/bracket-creator/user-guide/commands/create-knockout/), the [input format](https://gitrgoliveira.github.io/bracket-creator/user-guide/organisers/input-format/) and the [tournament formats](https://gitrgoliveira.github.io/bracket-creator/user-guide/organisers/formats/).
+**Paper only.** Set the tournament up in the app, print it with [Export PDFs and the Excel downloads](https://gitrgoliveira.github.io/bracket-creator/user-guide/organisers/run-tournament/#export-and-print), and run the day with pens. Refer to [If you print your brackets instead](https://gitrgoliveira.github.io/bracket-creator/user-guide/start-here/first-tournament/#if-you-print-your-brackets-instead).
 
-```bash
-# Pools of at least 5 with 3 winners per pool
-bracket-creator create-pools -z -p 5 -w 3 -f players.csv -o pools.xlsx
+**A shared Google Sheet.** Upload a competition's Excel workbook from the app to Google Drive and fill results in from any device, so every shiai-jo works from the same document. Refer to [Keep courts in sync](https://gitrgoliveira.github.io/bracket-creator/user-guide/start-here/first-tournament/#keep-courts-in-sync).
 
-# Straight knockout for teams of 5
-bracket-creator create-knockout -t 5 -f teams.csv -o knockout.xlsx
-```
+**Automation.** For scripts and developers, the command line generates the same Excel workbooks and PDFs from a CSV of participants. Refer to [create-pools](https://gitrgoliveira.github.io/bracket-creator/user-guide/commands/create-pools/), [create-knockout](https://gitrgoliveira.github.io/bracket-creator/user-guide/commands/create-knockout/) and [print](https://gitrgoliveira.github.io/bracket-creator/user-guide/commands/print/).
 
-**A shared Google Sheet.** Upload the workbook to Google Drive and fill results in from any device, so every shiai-jo works from the same document. Refer to [Keep courts in sync](https://gitrgoliveira.github.io/bracket-creator/user-guide/start-here/first-tournament/#keep-courts-in-sync).
-
-**Paper only.** Print the sheets and run the day with pens. Set the tournament up in the app and use its [Export PDFs and Excel downloads](https://gitrgoliveira.github.io/bracket-creator/user-guide/organisers/run-tournament/#export-and-print), or generate the workbooks above: they are laid out for A4 and A3, and the [print command](https://gitrgoliveira.github.io/bracket-creator/user-guide/commands/print/) turns them into PDFs. Refer to [If you print your brackets instead](https://gitrgoliveira.github.io/bracket-creator/user-guide/start-here/first-tournament/#if-you-print-your-brackets-instead).
-
-`bracket-creator serve` starts the Legacy Web UI, a browser form for the same Excel generators, kept for compatibility. Refer to the [Legacy Web UI guide](https://gitrgoliveira.github.io/bracket-creator/user-guide/organisers/web-ui/).
+`bracket-creator serve` starts the [Legacy Web UI](https://gitrgoliveira.github.io/bracket-creator/user-guide/organisers/web-ui/), an older browser form for the same Excel generators, kept for compatibility.
 
 ## Contribute to this repository
 

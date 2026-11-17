@@ -70,7 +70,7 @@ export function _afterDiscard() {
 let _flushTimer = null;
 const FLUSH_BACKOFF_MS = [500, 1000, 2000, 4000, 8000];
 const ADOPTED_FLUSH_DELAY_MS = 300;
-let _flushAttempt = 0;
+export let _flushAttempt = 0;
 // Single-in-flight guard. _flushQueue's body awaits network I/O, so without a
 // lock a second trigger (a rapid enqueue, an `online` event, or a backoff timer
 // firing mid-flush) would start an OVERLAPPING loop iterating the same snapshot:
@@ -391,7 +391,10 @@ export async function _flushQueue() {
                     // Schedule a backoff retry only if no immediate rerun is already
                     // pending (a pending rerun re-attempts the failed writes now).
                     const delay = FLUSH_BACKOFF_MS[Math.min(_flushAttempt, FLUSH_BACKOFF_MS.length - 1)];
-                    _flushAttempt++;
+                    // Waiting for another tab's lease is not a failure: only a real
+                    // failure climbs the backoff, so this tab's first network
+                    // failure after a wait still retries at the first step.
+                    if (pass.anyFailed) _flushAttempt++;
                     _flushTimer = setTimeout(_flushQueue, delay);
                 }
             }

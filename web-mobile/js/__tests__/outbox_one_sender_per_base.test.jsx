@@ -185,6 +185,17 @@ describe('two tabs of one device send a write once', () => {
         expect(flushB._offlineFlag, 'B learned nothing about the connection').toBe(true);
     });
 
+    it('a pass that only waited for another tab does not climb the retry backoff', async () => {
+        const A = await openTab('a');
+        await openTab('b');
+        const flushB = await import(/* @vite-ignore */ `${FLUSH}?tab=b`);
+        (await A.putMatchLineup('c1', 't1', 'm1', { 1: 'L1' }, 'pw', null, null)).settled.catch(() => {});
+        await tick(100); // B took the write up and left it to A, who has it out
+        await tick(3000); // B asks again at 0.5 s and 1 s and finds A still sending (three steps once climbed)
+        expect(calls.filter((c) => c.url.includes(URL_LINEUP)).map((c) => c.tab), 'only A sent').toEqual(['a']);
+        expect(flushB._flushAttempt, 'waiting is not a failure').toBe(0);
+    });
+
     it('tab B sends what is left when tab A\'s send fails and A gives the base up', async () => {
         mode = 'offline';
         const A = await openTab('a');

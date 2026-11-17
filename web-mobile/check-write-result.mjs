@@ -217,7 +217,7 @@ export const FORBIDDEN = [
     // stage 5.
     name: 'editor-taps',
     re: /\b(useDebouncedRunningWrite|landedAutosave)\b|keepLocalEdits:\s*true|\bAPI\.recordScore\b/,
-    only: ['admin_scoring_individual.jsx', 'admin_scoring_engi.jsx', 'admin_scoring_team.jsx'],
+    only: ['admin_scoring_individual.jsx', 'admin_scoring_engi.jsx', 'admin_scoring_team.jsx', 'admin_scoring_team_bouts.jsx', 'admin_scoring_team_kachinuki.jsx'],
     why: 'autosaves, keeps a running edit or writes a running score (API.recordScore) in a tap-scored editor (individual, engi, team); a running match is scored by taps (API.recordTap) and its board is the server\'s with this device\'s pending taps folded on; Save and Finish go through the host\'s onSubmit',
   },
   {

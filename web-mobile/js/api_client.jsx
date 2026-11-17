@@ -548,6 +548,12 @@ function _stampPayload(payload, stamp, seen) {
     if (Number.isFinite(s) && s > 0) _payloadSeen.set(payload, s);
     return payload;
 }
+// _carryPayloadSeen: a copy of a payload keeps the seen stamp the original was
+// floored by (_withoutDownstreamConfirmation). The one write of _payloadSeen
+// from outside the clock code.
+function _carryPayloadSeen(from, to) {
+    if (_payloadSeen.has(from)) _payloadSeen.set(to, _payloadSeen.get(from));
+}
 
 // _perfAgeMs: whole milliseconds since a monotonic reading, or null when there
 // is none (no reading, or no performance.now()). Rounded UP, for two reasons:
@@ -719,17 +725,17 @@ function _nextRev(compID, matchID) {
     _matchRevCounters.set(key, next);
     return next;
 }
-
-// Per-page-load scoring-session id. Identifies one client session so the
-// server's rev-guard can drop a single session's own out-of-order delivery
-// (a reconnect flush). Different sessions are concurrent operators: the
-// server treats those as last-write-wins.
-const _revSession = _randomId();
+// _forgetRev: a finished score write landed, so the match's next running write
+// starts its revisions again (_sendEntry).
+function _forgetRev(compID, matchID) {
+    _matchRevCounters.delete(_revKey(compID, matchID));
+}
 
 // _randomId: a random v4 UUID for every id and token this client mints
 // (sessions, tabs, queue keys, team members, court calls). Built from
 // getRandomValues, which unlike crypto.randomUUID also exists on a plain-http
-// venue address, so it never falls back to Math.random.
+// venue address, so it never falls back to Math.random. Declared before the
+// first load-time initializer that calls it (_revSession).
 function _randomId() {
     const b = crypto.getRandomValues(new Uint8Array(16));
     b[6] = (b[6] & 0x0f) | 0x40;
@@ -737,6 +743,12 @@ function _randomId() {
     const h = Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('');
     return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
 }
+
+// Per-page-load scoring-session id. Identifies one client session so the
+// server's rev-guard can drop a single session's own out-of-order delivery
+// (a reconnect flush). Different sessions are concurrent operators: the
+// server treats those as last-write-wins.
+const _revSession = _randomId();
 
 // ---------------------------------------------------------------------------
 // C2 / F4 / F5: Offline write queue
@@ -1255,7 +1267,7 @@ function _dequeue(key, descriptor, outcome) {
     _writeQueue.delete(key);
     if (_shapesStatusIndex(d)) _queueShapeGen++;
     // A tap no longer queued here is no longer on a board (minor 2).
-    if (d.kind === 'evt' && d.payload && d.payload.id) _toldHere.delete(d.payload.id);
+    if (d.kind === 'evt' && d.payload && d.payload.id) _dropToldHere(d.payload.id);
     _markSettled(key, d);
     _noteOwnStatusAnswer(key, d, outcome);
     if (outcome && outcome.byOperator && _inFlight.has(d)) {
@@ -1297,6 +1309,17 @@ function _dequeue(key, descriptor, outcome) {
     if (d.kind === 'evt') _publishPendingTaps(_baseOf(key));
     _kickFollowersOf(new Set([key]));
     return true;
+}
+
+// _wipeQueue: the logout wipe's half of the queue (clearQueue). A hard wipe,
+// every tab's entries included: the credential they carry is revoked, so
+// nothing of the merge's is kept.
+function _wipeQueue() {
+    _writeQueue.clear(); _queueShapeGen++;
+    _settled.clear();
+    // The wipe takes them out of storage too (P2).
+    _settledLeftStored = false;
+    _settledHere.clear();
 }
 
 // While many entries leave at once (a tap batch settling, _sendTapBatch;
@@ -1533,6 +1556,42 @@ function _publishOwnStatus() {
     for (const fn of _ownStatusListeners) {
         try { fn(); } catch (_e) { /* swallow */ }
     }
+}
+
+// The answered moves and their listeners are written by the own-status code
+// alone; the shown-match labels, the wipe and the API doors go through these
+// (bc-jsxs).
+// _subscribeOwnStatusMoves: told whenever a status move changes (queued,
+// answered, refused or discarded).
+function _subscribeOwnStatusMoves(fn) {
+    _ownStatusListeners.add(fn);
+    return () => _ownStatusListeners.delete(fn);
+}
+// _forgetOwnStatusAnswersWhere: the answered moves whose match key passes
+// `test` go; whether any went.
+function _forgetOwnStatusAnswersWhere(test) {
+    let moved = false;
+    for (const k of _ownStatusAnswered.keys()) if (test(k)) { _ownStatusAnswered.delete(k); moved = true; }
+    return moved;
+}
+// _clearOwnStatusAnswers: every answered move goes; whether any was held.
+function _clearOwnStatusAnswers() {
+    const held = _ownStatusAnswered.size > 0;
+    _ownStatusAnswered.clear();
+    return held;
+}
+// _forgetOwnStatusMove: the feed shows the move, or a later change: the
+// answered record goes.
+function _forgetOwnStatusMove(compID, matchID) {
+    if (_ownStatusAnswered.delete(_revKey(compID, matchID))) _publishOwnStatus();
+}
+// _forgetOwnStatusMovesNotIn: the feed no longer holds the match (moved to
+// another court, or gone with its draw): the answered record goes, so it never
+// shows over a match made again under the same id (F7). `matches` is the feed
+// the caller shows.
+function _forgetOwnStatusMovesNotIn(matches) {
+    const held = new Set((matches || []).map((m) => m && _revKey(m.compId, m.id)));
+    if (_forgetOwnStatusAnswersWhere((k) => !held.has(k))) _publishOwnStatus();
 }
 
 // ---------------------------------------------------------------------------
@@ -1850,6 +1909,49 @@ function _forgetToldHere(ids) {
         if (!queued) queued = _queuedTapIds();
         if (!queued.has(id)) _toldHere.delete(id);
     }
+}
+
+// The tap state above (the seqs, the copies seen, the taps told here) is
+// written by the tap code alone; the queue, the shown-match labels and the
+// tap, sign-out and told doors go through these (bc-jsxs).
+// _nextTapSeq: the next seq of this session's taps of the match (recordTap).
+function _nextTapSeq(base) {
+    const seq = (_tapSeq.get(base) || 0) + 1;
+    _tapSeq.set(base, seq);
+    return seq;
+}
+// _claimToldHere: false when this tab's listeners were already told of the
+// tap, else it is noted as told now (tellPendingTapRefused).
+function _claimToldHere(id) {
+    if (_toldHere.has(id)) return false;
+    _toldHere.add(id);
+    return true;
+}
+// _dropToldHere: a tap that left this tab's queue is no longer on a board
+// (_dequeue, minor 2).
+function _dropToldHere(id) {
+    _toldHere.delete(id);
+}
+// _forgetMatchCopiesOf: the copies score-events answers handed back, and the
+// turned-away lists seen, for the matches whose key starts with `prefix` (a
+// competition whose draw was generated or discarded, _forgetShownMatches).
+function _forgetMatchCopiesOf(prefix) {
+    for (const k of _latestDerived.keys()) if (k.startsWith(prefix)) _latestDerived.delete(k);
+    for (const k of _turnedAwaySeen.keys()) if (k.startsWith(prefix)) _turnedAwaySeen.delete(k);
+}
+// _forgetAllMatchCopies: the same for every match (_forgetAllShownMatches).
+function _forgetAllMatchCopies() {
+    _latestDerived.clear();
+    _turnedAwaySeen.clear();
+}
+// _forgetTurnedAwayAndTold / _forgetDerivedCopies: the sign-out (clearQueue).
+function _forgetTurnedAwayAndTold() {
+    _turnedAwaySeen.clear();
+    _toldHere.clear();
+    _told.forget();
+}
+function _forgetDerivedCopies() {
+    _latestDerived.clear();
 }
 
 // _onToldTapsStored: another tab changed a match's told-tap record. A notice
@@ -2699,13 +2801,10 @@ function _forgetShownMatches(compID) {
     // The copies score-events answers handed back for its matches go too
     // (X4): a match id reused by the new draw must never show the old match's
     // scoreline on a board, nor have it recorded by a Finish.
-    for (const k of _latestDerived.keys()) if (k.startsWith(prefix)) _latestDerived.delete(k);
-    for (const k of _turnedAwaySeen.keys()) if (k.startsWith(prefix)) _turnedAwaySeen.delete(k);
+    _forgetMatchCopiesOf(prefix);
     // And the status moves the server answered for them: a re-created match
     // must never show the old one finished, with its winner (F7).
-    let moved = false;
-    for (const k of _ownStatusAnswered.keys()) if (k.startsWith(prefix)) { _ownStatusAnswered.delete(k); moved = true; }
-    if (moved) _publishOwnStatus();
+    if (_forgetOwnStatusAnswersWhere((k) => k.startsWith(prefix))) _publishOwnStatus();
 }
 
 // _forgetAllShownMatches: the tournament's competitions may have been replaced
@@ -2716,12 +2815,8 @@ function _forgetShownMatches(compID) {
 // the label it was queued with.
 function _forgetAllShownMatches() {
     _shownMatchLabels.clear();
-    _latestDerived.clear();
-    _turnedAwaySeen.clear();
-    if (_ownStatusAnswered.size > 0) {
-        _ownStatusAnswered.clear();
-        _publishOwnStatus();
-    }
+    _forgetAllMatchCopies();
+    if (_clearOwnStatusAnswers()) _publishOwnStatus();
 }
 
 function _noteMatchLabel(compID, matchID, label) {
@@ -2755,8 +2850,7 @@ function _afterDiscard() {
     // A discarded write may have been holding back its match's later writes
     // (strict order, F1): send them now rather than on an unrelated trigger.
     if (_writeQueue.size > 0) {
-        if (_flushTimer !== null) { clearTimeout(_flushTimer); _flushTimer = null; }
-        _flushAttempt = 0;
+        _resetFlushBackoff();
         _flushQueue();
     }
 }
@@ -2911,6 +3005,29 @@ const _basesOut = new Set();
 // snapshots this at the start and aborts if it changes mid-loop, so a credential
 // revocation can't keep sending queued writes with the now-revoked password.
 let _queueGen = 0;
+
+// The flush state above is written by the flush code alone; every other writer
+// (an enqueue, another tab's write, the online event, a discard, and the
+// sign-in, park and wipe doors) goes through these (bc-jsxs).
+// _resetFlushBackoff: a fresh trigger. The backoff timer goes, and the next
+// failure backs off from the first step again.
+function _resetFlushBackoff() {
+    if (_flushTimer !== null) { clearTimeout(_flushTimer); _flushTimer = null; }
+    _flushAttempt = 0;
+}
+// _setOffline: whether the last pass ended for the connection (_offlineFlag);
+// a park or a wipe clears it.
+function _setOffline(offline) {
+    _offlineFlag = offline;
+}
+// _bumpQueueGen: a park or a wipe ends every pass in flight (_queueGen).
+function _bumpQueueGen() {
+    _queueGen++;
+}
+// _requestFlushRerun: the pass running now runs again once it ends.
+function _requestFlushRerun() {
+    _flushRequested = true;
+}
 
 // bc-cse: the queue's half of the clock-skew heal, shared by BOTH flush arms
 // (terminal writes and running score writes) because the re-stamp rule is one
@@ -3608,7 +3725,7 @@ async function _sendEntry(key, descriptor, pass) {
     // (minted_members.jsx), every tab reading it so.
     const mintsId = mintedAddId(descriptor);
     if (mintsId) {
-        _mintedOutHere.add(mintsId);
+        _noteMintedOutHere(mintsId);
         _minted.sent(descriptor);
     }
     _inFlight.add(descriptor);
@@ -3631,13 +3748,13 @@ async function _sendEntry(key, descriptor, pass) {
         pass.anyFailed = true;
         pass.networkFailed = true;
         _inFlight.delete(descriptor);
-        if (mintsId) _mintedOutHere.delete(mintsId);
+        if (mintsId) _endMintedOutHere(mintsId);
         _mintedAddAnswered(key, descriptor, null, null, !!(err && err.timedOut));
         _endDiscardWhileOut(descriptor, null, null);
         return 'kept';
     } finally {
         _inFlight.delete(descriptor);
-        if (mintsId) _mintedOutHere.delete(mintsId);
+        if (mintsId) _endMintedOutHere(mintsId);
     }
     _mintedAddAnswered(key, descriptor, res, body || {});
     // Discarded while it was out (L1): the answer settles only what the
@@ -3730,7 +3847,7 @@ async function _sendEntry(key, descriptor, pass) {
             if (isFinishedResultWrite(descriptor) && wasHeld && !writeWasSuperseded(body)) pass.sent++;
             if (isFinishedResultWrite(descriptor) && writeDisplacedGroups(body).length > 0) pass.displaced++;
             // A confirmed terminal score write needs no further rev tracking.
-            if (terminal && kind === 'score') _matchRevCounters.delete(_revKey(compID, matchID));
+            if (terminal && kind === 'score') _forgetRev(compID, matchID);
             // A document save that landed: a save of it still queued at the
             // version this one was sent at takes the one it answered (G4b).
             const docField = DOC_VERSION_FIELD[kind];
@@ -3925,7 +4042,7 @@ async function _sendTapBatch(base, batch, pass) {
                         if (_keepForClock(d, pass)) clockHeld++;
                         result = 'kept';
                     } else {
-                        _flushRequested = true;
+                        _requestFlushRerun();
                         if (result === 'settled') result = 'reclocked';
                     }
                     continue;
@@ -3997,7 +4114,7 @@ async function _sendTapBatch(base, batch, pass) {
             const missing = new Set(body.gaps.map(Number));
             const held = _tapEntriesFor(base).some(([, d]) => d.payload && d.payload.session === session
                 && missing.has(Number(d.payload.seq)));
-            if (held) _flushRequested = true;
+            if (held) _requestFlushRerun();
         }
         _recomputeSyncStatus();
         return result;
@@ -4132,8 +4249,7 @@ function _commitEnqueue(base, descriptor, beforeFlush, { nextTick = false } = {}
     _recomputeSyncStatus();
     if (descriptor.kind === 'evt') _publishPendingTaps(base);
     const kick = () => {
-        if (_flushTimer !== null) { clearTimeout(_flushTimer); _flushTimer = null; }
-        _flushAttempt = 0;
+        _resetFlushBackoff();
         _flushQueue();
     };
     if (!nextTick) kick();
@@ -4265,7 +4381,7 @@ function _runningDescriptor(compID, matchID, payload, password, enqueuedAt) {
 function _withoutDownstreamConfirmation(payload) {
     const { forceDownstreamReopen: _confirmation, ...rest } = payload || {};
     // The copy keeps what the write was floored by (bc-hlck, _stampPayload).
-    if (_payloadSeen.has(payload)) _payloadSeen.set(rest, _payloadSeen.get(payload));
+    _carryPayloadSeen(payload, rest);
     return rest;
 }
 
@@ -4360,8 +4476,7 @@ function _onStoredQueueChanged(oldRaw, newRaw) {
     if (!changed) return;
     _recomputeSyncStatus();
     if (adopted) {
-        _flushAttempt = 0;
-        if (_flushTimer !== null) { clearTimeout(_flushTimer); _flushTimer = null; }
+        _resetFlushBackoff();
         _flushQueue();
     }
 }
@@ -4473,8 +4588,7 @@ if (typeof window !== 'undefined') {
         // Throttled, so a flapping connection costs one GET per 5s at worst.
         _relearnClockThrottled();
         if (_writeQueue.size > 0) {
-            _flushAttempt = 0;
-            if (_flushTimer !== null) { clearTimeout(_flushTimer); _flushTimer = null; }
+            _resetFlushBackoff();
             _flushQueue();
         }
     };
@@ -4820,6 +4934,80 @@ function _ensureConnected() {
     };
 }
 
+// _subscribeToEvents (API.subscribeToEvents): subscribe to the server's SSE
+// event stream. `callback` is fired
+// for each parsed event. `onStatus` (optional) is fired with
+// 'open' when the EventSource transitions to open and 'error' when
+// it transitions away: used by the display surfaces (FR-011
+// scenario 4 / T063) to render a reconnect indicator when the
+// browser is between connections. Existing call sites that omit
+// the second arg are unaffected.
+//
+// All callers share ONE module-level EventSource (ref-counted). The
+// source is opened on the first subscribe and closed when the last
+// subscriber unsubscribes. A subscriber joining an already-OPEN source
+// receives an immediate onStatus('open') replay so it starts in the
+// correct connected state without waiting for the next onopen event.
+// The SSE state is written by the SSE code alone (bc-jsxs).
+function _subscribeToEvents(callback, onStatus) {
+    const record = { callback, onStatus };
+    _subscribers.add(record);
+
+    if (_sharedSource === null) {
+        // No source yet: open one. The new subscriber keeps its optimistic
+        // default until this source's onopen/onerror fires.
+        _ensureConnected();
+    } else if (_sharedSource.readyState === EventSource.OPEN) {
+        // Source is already connected: replay 'open' to this subscriber.
+        _emitStatus(record, 'open');
+    }
+    // Else the source exists but is still CONNECTING (a non-null source is
+    // only ever CONNECTING or OPEN: we null it on close). Replay NOTHING
+    // and let the bound onopen/onerror fan-out deliver the first
+    // authoritative status, exactly as the first subscriber experiences.
+    // Replaying 'error' here would flash a false "Reconnecting…" on admin
+    // load, where AdminTopbar/AdminDashboard subscribe mid-handshake.
+
+    // Idempotent unsubscribe: guard with a `done` flag so double-calling
+    // never double-decrements the ref count.
+    let done = false;
+    return () => {
+        if (done) return;
+        done = true;
+        _subscribers.delete(record);
+        if (_subscribers.size === 0) {
+            clearTimeout(_retryTimer);
+            _retryTimer = null;
+            // F2: disarm the watchdog when no subscribers remain: no point
+            // in polling for silence when no one is listening.
+            _disarmWatchdog();
+            if (_sharedSource) {
+                _sharedSource.close();
+                _sharedSource = null;
+            }
+        }
+    };
+}
+
+// -------------------------------------------------------------------------
+// F2/F3: _reconnectEvents (API.reconnectEvents): force a fresh SSE connection.
+// Closes the current shared source (if any), resets the reconnect backoff
+// counter, and calls _ensureConnected(). Safe to call repeatedly: the
+// double-connect guard in _ensureConnected() prevents duplicate sources.
+// Exposed as API.reconnectEvents / window.API.reconnectEvents so other
+// modules loaded as window globals can reach it without an ES import.
+// -------------------------------------------------------------------------
+function _reconnectEvents() {
+    if (_sharedSource) {
+        _sharedSource.close();
+        _sharedSource = null;
+        _disarmWatchdog();
+    }
+    if (_retryTimer) { clearTimeout(_retryTimer); _retryTimer = null; }
+    _reconnectAttempt = 0;
+    _ensureConnected();
+}
+
 // parseSkippedCompetitionsHeader parses the server's X-Skipped-Competitions
 // header value into [{id, reason}, ...]. The wire format is
 // "<id>: <reason> | <id>: <reason>" (internal/mobileapp/handlers_print.go,
@@ -5115,6 +5303,54 @@ function _rerunFlushAt(at) {
         _mintedSweep();
         _rerunFlushSoon();
     }, Math.max(0, at - Date.now()) + 1);
+}
+
+// The minted-member state above is written by the members code alone; the
+// send and the sign-in, park and wipe doors go through these (bc-jsxs).
+// _noteMintedOutHere / _endMintedOutHere: this tab's request for the add that
+// mints `id` went out, and ended (_sendEntry).
+function _noteMintedOutHere(id) {
+    _mintedOutHere.add(id);
+}
+function _endMintedOutHere(id) {
+    _mintedOutHere.delete(id);
+}
+// _cancelMintedTimer: the timed rerun goes (a park, a wipe).
+function _cancelMintedTimer() {
+    if (_mintedTimer !== null) { clearTimeout(_mintedTimer); _mintedTimer = null; }
+}
+// _resumeMintedReads: a new sign-in (resumeAfterAuth).
+// The reads the owner asked for carry the password the add had, which
+// the server may have refused since: an organiser's reads take the new
+// one (a self-run participant's carries none and stays so), and one the
+// refusal left unread is asked for at its time (N5).
+// A new sign-in asks again every read this tab owes, whatever the
+// earlier tries (Y4, stage 3 review 11): the ones refused for the old
+// password were parked, and failures counted under it may have been
+// its own, so the bound starts again.
+function _resumeMintedReads(password) {
+    _mintedPaused = false;
+    if (password) {
+        for (const [id, pw] of _mintedReadPw) if (pw) _mintedReadPw.set(id, password);
+        _mintedAuthParked.clear();
+        _minted.readsResumed([..._mintedReadPw.keys()]);
+        _mintedSweep();
+    }
+}
+// _pauseMintedReads: a revoked password (parkQueueForReauth). The members
+// reads too: none goes with the revoked password until the new sign-in (Y4).
+function _pauseMintedReads() {
+    _mintedPaused = true;
+    _cancelMintedTimer();
+}
+// _wipeMintedRecords: the logout wipe (clearQueue). What is known of the
+// minted members goes with the queue it is for.
+function _wipeMintedRecords() {
+    _minted.clear();
+    _mintedReadPw.clear();
+    _mintedAuthParked.clear();
+    _mintedPaused = false;
+    _cancelMintedTimer();
 }
 
 // _readMintedMembers: the read of the team's members the owner asked for,
@@ -5803,57 +6039,10 @@ const API = {
         const data = await res.json();
         return normalizeCompetitionDetail(data);
     },
-    // Subscribe to the server's SSE event stream. `callback` is fired
-    // for each parsed event. `onStatus` (optional) is fired with
-    // 'open' when the EventSource transitions to open and 'error' when
-    // it transitions away: used by the display surfaces (FR-011
-    // scenario 4 / T063) to render a reconnect indicator when the
-    // browser is between connections. Existing call sites that omit
-    // the second arg are unaffected.
-    //
-    // All callers share ONE module-level EventSource (ref-counted). The
-    // source is opened on the first subscribe and closed when the last
-    // subscriber unsubscribes. A subscriber joining an already-OPEN source
-    // receives an immediate onStatus('open') replay so it starts in the
-    // correct connected state without waiting for the next onopen event.
+    // Subscribe to the server's SSE event stream: one shared, ref-counted
+    // EventSource (_subscribeToEvents).
     subscribeToEvents(callback, onStatus) {
-        const record = { callback, onStatus };
-        _subscribers.add(record);
-
-        if (_sharedSource === null) {
-            // No source yet: open one. The new subscriber keeps its optimistic
-            // default until this source's onopen/onerror fires.
-            _ensureConnected();
-        } else if (_sharedSource.readyState === EventSource.OPEN) {
-            // Source is already connected: replay 'open' to this subscriber.
-            _emitStatus(record, 'open');
-        }
-        // Else the source exists but is still CONNECTING (a non-null source is
-        // only ever CONNECTING or OPEN: we null it on close). Replay NOTHING
-        // and let the bound onopen/onerror fan-out deliver the first
-        // authoritative status, exactly as the first subscriber experiences.
-        // Replaying 'error' here would flash a false "Reconnecting…" on admin
-        // load, where AdminTopbar/AdminDashboard subscribe mid-handshake.
-
-        // Idempotent unsubscribe: guard with a `done` flag so double-calling
-        // never double-decrements the ref count.
-        let done = false;
-        return () => {
-            if (done) return;
-            done = true;
-            _subscribers.delete(record);
-            if (_subscribers.size === 0) {
-                clearTimeout(_retryTimer);
-                _retryTimer = null;
-                // F2: disarm the watchdog when no subscribers remain: no point
-                // in polling for silence when no one is listening.
-                _disarmWatchdog();
-                if (_sharedSource) {
-                    _sharedSource.close();
-                    _sharedSource = null;
-                }
-            }
-        };
+        return _subscribeToEvents(callback, onStatus);
     },
     /**
      * Record a match score or status change.
@@ -7103,23 +7292,9 @@ const API = {
         return res.json();
     },
 
-    // -------------------------------------------------------------------------
-    // F2/F3: reconnectEvents: force a fresh SSE connection.
-    // Closes the current shared source (if any), resets the reconnect backoff
-    // counter, and calls _ensureConnected(). Safe to call repeatedly: the
-    // double-connect guard in _ensureConnected() prevents duplicate sources.
-    // Exposed as API.reconnectEvents / window.API.reconnectEvents so other
-    // modules loaded as window globals can reach it without an ES import.
-    // -------------------------------------------------------------------------
+    // F2/F3: reconnectEvents: force a fresh SSE connection (_reconnectEvents).
     reconnectEvents() {
-        if (_sharedSource) {
-            _sharedSource.close();
-            _sharedSource = null;
-            _disarmWatchdog();
-        }
-        if (_retryTimer) { clearTimeout(_retryTimer); _retryTimer = null; }
-        _reconnectAttempt = 0;
-        _ensureConnected();
+        _reconnectEvents();
     },
 
     // -------------------------------------------------------------------------
@@ -7163,8 +7338,7 @@ const API = {
     recordTap(compID, matchID, ev, password, match) {
         _noteShownMatch(compID, match);
         const base = _revKey(compID, matchID);
-        const seq = (_tapSeq.get(base) || 0) + 1;
-        _tapSeq.set(base, seq);
+        const seq = _nextTapSeq(base);
         const id = `${_eventSession}.${seq}`;
         const seen = Number(match && match.modifiedAt) || 0;
         const stamp = _afterOwnStamp(base, _stampAfterSeen(_serverNowMs(), seen));
@@ -7208,8 +7382,7 @@ const API = {
     // as one 'not_applied' alert, and not again when the server's answer for
     // that tap arrives (stage 6 review 7). Never waits: told after the render.
     tellPendingTapRefused(compID, matchID, outcome, tap) {
-        if (!compID || !matchID || !outcome || !outcome.id || _toldHere.has(outcome.id)) return;
-        _toldHere.add(outcome.id);
+        if (!compID || !matchID || !outcome || !outcome.id || !_claimToldHere(outcome.id)) return;
         // This tab's editor hears it; the operator's alert is raised once per
         // device (the first board to tell it), one alert for the taps told
         // together (F4).
@@ -7322,21 +7495,15 @@ const API = {
         return _ownStatusMove(compID, matchID);
     },
     subscribeOwnStatusMoves(fn) {
-        _ownStatusListeners.add(fn);
-        return () => _ownStatusListeners.delete(fn);
+        return _subscribeOwnStatusMoves(fn);
     },
     // The feed shows the move, or a later change: the answered record goes.
     forgetOwnStatusMove(compID, matchID) {
-        if (_ownStatusAnswered.delete(_revKey(compID, matchID))) _publishOwnStatus();
+        _forgetOwnStatusMove(compID, matchID);
     },
-    // The feed no longer holds the match (moved to another court, or gone with
-    // its draw): the answered record goes, so it never shows over a match made
-    // again under the same id (F7). `matches` is the feed the caller shows.
+    // The feed no longer holds the match (_forgetOwnStatusMovesNotIn).
     forgetOwnStatusMovesNotIn(matches) {
-        const held = new Set((matches || []).map((m) => m && _revKey(m.compId, m.id)));
-        let moved = false;
-        for (const k of _ownStatusAnswered.keys()) if (!held.has(k)) { _ownStatusAnswered.delete(k); moved = true; }
-        if (moved) _publishOwnStatus();
+        _forgetOwnStatusMovesNotIn(matches);
     },
     subscribeLocalMatchPatch(cb) {
         return subscribeLocalMatchPatch(cb);
@@ -7401,25 +7568,11 @@ const API = {
             d.attempts = 0;
             if (parked) resumed++;
         }
-        // The reads the owner asked for carry the password the add had, which
-        // the server may have refused since: an organiser's reads take the new
-        // one (a self-run participant's carries none and stays so), and one the
-        // refusal left unread is asked for at its time (N5).
-        // A new sign-in asks again every read this tab owes, whatever the
-        // earlier tries (Y4, stage 3 review 11): the ones refused for the old
-        // password were parked, and failures counted under it may have been
-        // its own, so the bound starts again.
-        _mintedPaused = false;
-        if (password) {
-            for (const [id, pw] of _mintedReadPw) if (pw) _mintedReadPw.set(id, password);
-            _mintedAuthParked.clear();
-            _minted.readsResumed([..._mintedReadPw.keys()]);
-            _mintedSweep();
-        }
+        // The members reads go again, with the new password (_resumeMintedReads).
+        _resumeMintedReads(password);
         if (resumed > 0) {
             _persistQueue();
-            if (_flushTimer !== null) { clearTimeout(_flushTimer); _flushTimer = null; }
-            _flushAttempt = 0;
+            _resetFlushBackoff();
             _recomputeSyncStatus();
             _flushQueue();
         }
@@ -7447,7 +7600,7 @@ const API = {
     parkQueueForReauth() {
         // Bump the generation FIRST so an in-flight _flushQueue loop cannot send
         // the rest of its snapshot with the now-revoked password.
-        _queueGen++;
+        _bumpQueueGen();
         let parked = 0;
         for (const d of _writeQueue.values()) {
             if (!d) continue;
@@ -7455,13 +7608,9 @@ const API = {
             d.authBlocked = true;
             parked++;
         }
-        if (_flushTimer !== null) { clearTimeout(_flushTimer); _flushTimer = null; }
-        // The members reads too: none goes with the revoked password until
-        // the new sign-in (Y4).
-        _mintedPaused = true;
-        if (_mintedTimer !== null) { clearTimeout(_mintedTimer); _mintedTimer = null; }
-        _flushAttempt = 0;
-        _offlineFlag = false;
+        _resetFlushBackoff();
+        _pauseMintedReads();
+        _setOffline(false);
         // Every stored entry too, whether or not this tab holds any.
         _parkStoredEntries();
         // The landed-tap record and the copies seen stay: the same operator
@@ -7487,44 +7636,30 @@ const API = {
         // tablet chose anything.
         const discarding = _countTerminalQueued();
         const discardingTotal = _writeQueue.size;
-        _turnedAwaySeen.clear();
-        _toldHere.clear();
-        _told.forget();
-        _ownStatusAnswered.clear();
+        _forgetTurnedAwayAndTold();
+        _clearOwnStatusAnswers();
         if (discardingTotal > 0) {
             _notifyQueueAlert({ kind: 'discarded', count: discardingTotal, terminalCount: discarding });
         }
         // Bump the generation FIRST so an in-flight _flushQueue loop (mid-await on
         // a network write) aborts instead of sending the rest of its snapshot with
         // the now-revoked password.
-        _queueGen++;
-        // A hard wipe, every tab's entries included: the credential they carry
-        // is revoked, so nothing of the merge's is kept.
-        _writeQueue.clear(); _queueShapeGen++;
-        _settled.clear();
-        // The wipe takes them out of storage too (P2).
-        _settledLeftStored = false;
-        _settledHere.clear();
+        _bumpQueueGen();
+        _wipeQueue();
         for (const k of _entryHooks.keys()) _settleKey(k, { value: { discarded: true } });
         for (const b of _pendingTapListeners.keys()) _publishPendingTaps(b);
         try { localStorage.removeItem(QUEUE_STORAGE_KEY); } catch (_e) { /* ignore */ }
         // An older build's queue carries the same revoked password (F4).
         try { localStorage.removeItem(LEGACY_QUEUE_STORAGE_KEY); } catch (_e) { /* ignore */ }
-        // What is known of the minted members goes with the queue it is for.
-        _minted.clear();
-        _mintedReadPw.clear();
-        _mintedAuthParked.clear();
-        _mintedPaused = false;
-        if (_mintedTimer !== null) { clearTimeout(_mintedTimer); _mintedTimer = null; }
+        _wipeMintedRecords();
         // The copies score-events answers handed back go with the session
         // they were answered to (X4).
-        _latestDerived.clear();
+        _forgetDerivedCopies();
         // The landed-tap record goes with the operator: this tab's taps and
         // those of tabs no longer alive (stage 6 reviews 7 and 8).
         _forgetLandedTaps();
-        if (_flushTimer !== null) { clearTimeout(_flushTimer); _flushTimer = null; }
-        _flushAttempt = 0;
-        _offlineFlag = false;
+        _resetFlushBackoff();
+        _setOffline(false);
         _recomputeSyncStatus();
     },
 };

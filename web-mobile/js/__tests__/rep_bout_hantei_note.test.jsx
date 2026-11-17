@@ -8,7 +8,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { REP_BOUT_DECIDED_NOTE } from '../admin_scoring_team.jsx';
+import { REP_BOUT_DECIDED_NOTE } from '../admin_scoring_team_bouts.jsx';
 
 const messages = JSON.parse(readFileSync(
   resolve(__dirname, '..', '..', '..', 'internal', 'mobileapp', 'testdata', 'rep_bout_hantei_messages.json'),

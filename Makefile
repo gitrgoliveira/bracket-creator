@@ -209,7 +209,7 @@ js/test: js/deps ## Run JavaScript unit tests
 	@cd web-mobile && NODE_NO_WARNINGS=1 npm test
 	@cd web && NODE_NO_WARNINGS=1 npm test
 
-js/check-imports: ## Check cross-module named imports resolve (mp-zac3 split modules)
+js/check-imports: ## Check named imports of every web-mobile module resolve, CHECK_MODULES matches the folder, script tags agree
 	@echo "Checking cross-module imports..."
 	@node web-mobile/check-imports.mjs
 	@echo "Checking the write-result rule is asked, not re-derived..."

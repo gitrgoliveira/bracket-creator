@@ -5,7 +5,7 @@
 // pick that renames nothing and a substitution hand nothing over.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { pickManualBoutName } from '../admin_scoring_team.jsx';
+import { pickManualBoutName } from '../admin_scoring_team_kachinuki.jsx';
 import { answered } from './helpers/team_members.js';
 
 const BLANK = { id: 'b3', index: 3, name: '' };

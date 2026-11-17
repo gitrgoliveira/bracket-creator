@@ -34,7 +34,7 @@ let forgetTieBreakerStandings;
 
 beforeAll(async () => {
   restoreGlobals = installWindowStubs(STUBBED_GLOBALS);
-  ({ ShiaijoQueueRow, tieBreakerReasonLine, forgetTieBreakerStandings } = await import('../../admin_shiaijo.jsx'));
+  ({ ShiaijoQueueRow, tieBreakerReasonLine, forgetTieBreakerStandings } = await import('../../admin_shiaijo_queue.jsx'));
 });
 
 afterAll(() => restoreGlobals());

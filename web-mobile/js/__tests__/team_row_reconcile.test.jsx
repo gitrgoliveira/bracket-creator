@@ -4,7 +4,7 @@
 // re-shapes the committed state — so an index-aligned version looks correct
 // there and the distinction that matters would go unnoticed.
 import { describe, it, expect } from 'vitest';
-import { reconcileRowsToPositions } from '../admin_scoring_team.jsx';
+import { reconcileRowsToPositions } from '../admin_scoring_team_bouts.jsx';
 
 // _pos is the only field the reconciliation reads; `tag` stands in for the
 // scoring state so a carried-over row is identifiable in the result.

@@ -8,8 +8,7 @@
 // pins the list against the source so a new direct write cannot ship with the
 // browser's raw "Failed to fetch".
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { readFamily } from './helpers/source.js';
 import { API } from '../api_client.jsx';
 import { NOT_SENT_NO_CONNECTION, WRITE_NOT_CONFIRMED, REGISTRATION_NOT_CONFIRMED, isNoConnection, noConnectionError, shownMessage } from '../write_result.jsx';
 
@@ -117,8 +116,8 @@ describe('a direct write that cannot be sent says one sentence', () => {
   });
 
   it('every POST, PUT or DELETE in API goes through _directFetch, but the seven outbox doors', () => {
-    const src = readFileSync(resolve(__dirname, '..', 'api_client.jsx'), 'utf8').split('\n');
-    // The whole file: the helpers above API (_backupRequest and the like) send too.
+    const src = readFamily('api_client.jsx').split('\n');
+    // The whole family: the helpers above API (_backupRequest and the like) send too.
     const start = 0;
     const writeMethod = /\bmethod\s*(?::\s*(['"`])(POST|PUT|PATCH|DELETE)\1|[,}])/;
     // The doors phase 3 moves to the outbox keep their own fetch until then.
@@ -146,7 +145,7 @@ describe('a direct write that cannot be sent says one sentence', () => {
   });
 
   it('DIRECT_WRITES lists exactly the API methods that send through _directFetch', () => {
-    const src = readFileSync(resolve(__dirname, '..', 'api_client.jsx'), 'utf8').split('\n');
+    const src = readFamily('api_client.jsx').split('\n');
     const start = src.findIndex((l) => l.startsWith('const API = {'));
     const sends = new Set();
     let method = null;

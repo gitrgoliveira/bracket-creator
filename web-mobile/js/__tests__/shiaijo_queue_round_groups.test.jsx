@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { groupQueueMatches } from '../admin_shiaijo.jsx';
+import { groupQueueMatches } from '../admin_shiaijo_queue.jsx';
 import { bracketRoundLabel } from '../bracket.jsx';
 import { compMatches } from '../viewer_utils.jsx';
 

@@ -24,12 +24,11 @@ import {
 import { makeSubmitDecision, fusenshoAllowed, clearFusensho, applyBoutScoreEdit } from '../admin_scoring_shared.jsx';
 import { DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED } from '../write_result.jsx';
 import { sameCompetitor } from '../competitor_identity.jsx';
-import { preserveStoredDaihyosenVerdict } from '../admin_scoring_team.jsx';
 import { hanteiWinnerKey, hanteiSlot } from '../result_slot.jsx';
-// teamEncounterHasResult is a module-internal helper of admin_scoring_team.jsx
-// (not part of the thin-entry consumer barrel), imported directly like the
-// resolveMatchLineup tests do.
-import { teamEncounterHasResult, resolveKachinukiBoutSides, subBoutHasBeenPlayed, fusenshoSideFromSub, teamBoutIsDraw, boutWinnerSide } from '../admin_scoring_team.jsx';
+// These are module-internal helpers of the team editor (not part of the
+// thin-entry consumer barrel), imported directly from the modules that own them.
+import { preserveStoredDaihyosenVerdict, teamEncounterHasResult, subBoutHasBeenPlayed, fusenshoSideFromSub, teamBoutIsDraw, boutWinnerSide } from '../admin_scoring_team_bouts.jsx';
+import { resolveKachinukiBoutSides } from '../admin_scoring_team_kachinuki.jsx';
 import { isKikenDecision } from '../api_serializers.jsx';
 
 window.isKikenDecision = isKikenDecision;

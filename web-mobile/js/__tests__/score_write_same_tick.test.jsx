@@ -65,6 +65,9 @@ describe('API.recordTap stores the tap in the same tick', () => {
 // attemptScoreWrite before its own. Any other await in front of those lets
 // the page go before the durable write is queued.
 const here = dirname(fileURLToPath(import.meta.url));
+// One file on purpose, not the family (readFamily in helpers/source.js): the
+// handlers stay in admin_shiaijo.jsx, and the "first await after the handler"
+// walk over the joined text of a family could run on into the next file's text.
 const source = (file) => readFileSync(resolve(here, '..', file), 'utf8');
 
 // The function the first `await` at or after `from` calls.

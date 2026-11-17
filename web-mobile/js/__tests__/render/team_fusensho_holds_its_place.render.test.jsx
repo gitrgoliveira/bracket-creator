@@ -15,7 +15,7 @@ import { render, act, fireEvent, cleanup } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 import { makeFakeOutbox } from '../helpers/fake_outbox.js';
 import { installWindowStubs } from '../helpers/stub_globals.js';
-import { FUSENSHO_PRESSED_LABEL } from '../../admin_scoring_team.jsx';
+import { FUSENSHO_PRESSED_LABEL } from '../../admin_scoring_team_bouts.jsx';
 import { readFileSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';

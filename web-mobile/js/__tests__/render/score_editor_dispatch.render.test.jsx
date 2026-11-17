@@ -22,9 +22,8 @@ import { installWindowStubs } from '../helpers/stub_globals.js';
 
 // Prop-recording probes for the two non-default branches. vi.mock factories
 // are hoisted, so the recorders live in vi.hoisted state. The factory spreads
-// importOriginal(): admin_scoring_modal.jsx also re-exports the team module's
-// named helpers (teamResultLabel, isKoTieBlocked, ...) and those must keep
-// resolving to the real implementations.
+// importOriginal(), so only TeamScoreEditorModal is replaced and the module's
+// other exports keep resolving to the real implementations.
 const probes = vi.hoisted(() => ({
   team: { props: null },
   engi: { props: null },

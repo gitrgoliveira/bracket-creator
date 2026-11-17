@@ -87,7 +87,8 @@ import { GROUP_POINTS, GROUP_RESULT, GROUP_ENCHO, GROUP_REP } from './match_grou
 // isKoTieBlocked: import-only, from the team editor's shared module. bc-rawm
 // reuses it here for the SAME tie rule (a knockout match cannot finish with
 // no winner), never a re-derivation of it; see canFinish below.
-import { TeamScoreEditorModal, isKoTieBlocked } from './admin_scoring_team.jsx';
+import { TeamScoreEditorModal } from './admin_scoring_team.jsx';
+import { isKoTieBlocked } from './admin_scoring_team_bouts.jsx';
 import { EngiScoreEditorModal } from './admin_scoring_engi.jsx';
 import { useLatestRef } from './latest_ref.jsx';
 

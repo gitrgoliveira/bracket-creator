@@ -15,18 +15,20 @@
 
 import { describe, it, expect } from 'vitest';
 import {
-  isKachinukiBoutMode,
   isKoTieBlocked,
+  subBoutHasBeenPlayed,
+  boutWinnerSide,
+} from '../admin_scoring_team_bouts.jsx';
+import {
+  isKachinukiBoutMode,
   canReopenKachinukiMatch,
   isKachinukiBoutRemovable,
   deriveKachinukiEndOutcome,
   kachinukiEndOutcomeLabel,
   buildKachinukiEndEntries,
-  subBoutHasBeenPlayed,
   kachinukiEnchoAvailable,
   kachinukiBandModel,
-  boutWinnerSide,
-} from '../admin_scoring_team.jsx';
+} from '../admin_scoring_team_kachinuki.jsx';
 import { applyFoulIncrement } from '../admin_scoring_shared.jsx';
 
 // boutWinnerSide: the ONE home for "which side won this bout". The rule used

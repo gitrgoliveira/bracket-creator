@@ -1,7 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { makeReactive } from './helpers/reactive_react.js';
 import { parsePath, pathFromState } from '../app.jsx';
-import { sortShiaijoMatches, partitionShiaijoMatches, shiaijoScoreCell, isTeamMatch, groupQueueMatches, shiaijoStandingsKind, makeReconnectRefetcher, propagateBracketWinnerLocal, applyBronzeLoserLocal } from '../admin_shiaijo.jsx';
+import { sortShiaijoMatches, partitionShiaijoMatches, shiaijoScoreCell, isTeamMatch, groupQueueMatches } from '../admin_shiaijo_queue.jsx';
+import { shiaijoStandingsKind } from '../admin_shiaijo_context.jsx';
+import { makeReconnectRefetcher, propagateBracketWinnerLocal, applyBronzeLoserLocal } from '../admin_shiaijo_feed.jsx';
 import { swissRoundLabel } from '../pool_ids.jsx';
 
 // A team encounter's score must never be shown as a bare number; it always
@@ -187,7 +189,7 @@ describe('ShiaijoQueueRow; completed result placement', () => {
 
     runtime = makeReactive();
     global.React = runtime.React;
-    ({ ShiaijoQueueRow } = await import('../admin_shiaijo.jsx'));
+    ({ ShiaijoQueueRow } = await import('../admin_shiaijo_queue.jsx'));
   });
   afterEach(() => {
     runtime.unmount(); global.React = realReact;

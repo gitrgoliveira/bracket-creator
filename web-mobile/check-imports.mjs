@@ -1,16 +1,35 @@
 #!/usr/bin/env node
-// Static cross-module import/export checker for mp-zac3 split modules.
+// Static cross-module import/export checker for the web-mobile js/ modules.
 //
-// Validates that every named import from a sibling .jsx module is actually
-// exported by that module. Catches the ESM blind spot: esbuild transpile-only
-// and vitest do NOT fail on a missing named export, only native browser ESM
-// does. This script gives the same check deterministically in CI.
+// Validates that every named import (and every named re-export) from a sibling
+// module is actually exported by that module. Catches the ESM blind spot:
+// esbuild transpile-only and vitest do NOT fail on a missing named export,
+// only native browser ESM does. This script gives the same check
+// deterministically in CI.
+//
+// What it checks, and what it prints apart:
+//   1. Import errors: EVERY top-level js/*.jsx module (found by reading the
+//      folder, listed or not) has each of its named imports and re-exports
+//      resolved against the module it names.
+//   2. List drift: CHECK_MODULES below is the declared set of modules, the
+//      folder is the observed set, and any difference fails the run, naming
+//      the module. A new module must be added to the list by hand, so it
+//      cannot slip in unnoticed; a listed module that vanished is a bad
+//      rename or move.
+//   3. Script tags: index.html's <script type="module"> tags against the
+//      imports (see checkScriptTagUrls), including the rule that no module
+//      imports an entry whose tag is its compiled ".js" URL.
+//
+// Import and export statements are read only where one begins a line, from the
+// source with its comments blanked out, so a header comment that quotes
+// "import { X } from './y.jsx'" is never mistaken for an import.
 //
 // No npm dependencies, uses Node.js built-ins only.
 //
 // Usage:   node web-mobile/check-imports.mjs
-// Exit 0   all imports resolved
-// Exit 1   one or more named imports missing from their source module
+// Exit 0   all imports resolved, the list matches the folder
+// Exit 1   a named import is missing from its source module, the list and the
+//          folder differ, or a script tag would load a module twice
 
 import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { resolve, dirname, sep } from 'node:path';
@@ -18,17 +37,83 @@ import { fileURLToPath } from 'node:url';
 
 const JS_DIR = resolve(dirname(fileURLToPath(import.meta.url)), 'js');
 
-// Strip block (/* */) and line (//) comments from a captured import/export
-// brace body. Without this, an inline comment on a line ending in a comma
-// swallows the following identifier when we split on commas (the trimmed token
-// becomes "// comment\n  name", which fails the ^\w+ match and is dropped),
-// silently defeating the check for that name.
-function stripComments(s) {
-  return s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
+// The source with every comment replaced by spaces (newlines kept, so offsets
+// and line starts do not move). One pass over the text, aware of strings and
+// template literals, so a "//" or "/*" inside a string is not a comment and a
+// "/*" inside a // comment cannot open a phantom block. A whole-file regex
+// strip is NOT used: it cuts string literals that hold those characters.
+// A quote that is never closed ends at the line break (JSX text such as
+// "Don't" holds a lone apostrophe), and a backslash in code protects the next
+// character (the "\/*" of a regular expression is not a comment opener).
+function maskComments(src) {
+  const blank = (s) => s.replace(/[^\n]/g, ' ');
+  const out = [];
+  const n = src.length;
+  const templateDepths = []; // brace depth at which each open ${ began
+  let braceDepth = 0;
+  let inTemplate = false;
+  let i = 0;
+  while (i < n) {
+    const c = src[i];
+    const d = src[i + 1];
+    if (inTemplate) {
+      if (c === '\\') { out.push(src.slice(i, i + 2)); i += 2; continue; }
+      if (c === '`') { inTemplate = false; out.push(c); i++; continue; }
+      if (c === '$' && d === '{') {
+        templateDepths.push(braceDepth);
+        braceDepth++;
+        inTemplate = false;
+        out.push('${');
+        i += 2;
+        continue;
+      }
+      out.push(c);
+      i++;
+      continue;
+    }
+    if (c === '/' && d === '/') {
+      let j = src.indexOf('\n', i);
+      if (j === -1) j = n;
+      out.push(blank(src.slice(i, j)));
+      i = j;
+      continue;
+    }
+    if (c === '/' && d === '*') {
+      let j = src.indexOf('*/', i + 2);
+      j = j === -1 ? n : j + 2;
+      out.push(blank(src.slice(i, j)));
+      i = j;
+      continue;
+    }
+    if (c === "'" || c === '"') {
+      let j = i + 1;
+      while (j < n && src[j] !== c && src[j] !== '\n') j += src[j] === '\\' ? 2 : 1;
+      if (src[j] === c) j++;
+      out.push(src.slice(i, j));
+      i = j;
+      continue;
+    }
+    if (c === '`') { inTemplate = true; out.push(c); i++; continue; }
+    if (c === '\\') { out.push(src.slice(i, i + 2)); i += 2; continue; }
+    if (c === '{') braceDepth++;
+    if (c === '}') {
+      braceDepth--;
+      if (templateDepths.length && templateDepths[templateDepths.length - 1] === braceDepth) {
+        templateDepths.pop();
+        inTemplate = true;
+      }
+    }
+    out.push(c);
+    i++;
+  }
+  return out.join('');
 }
 
-// Modules introduced by the mp-zac3 split, the ones whose imports we verify.
-// Add entries here if more sibling splits are made.
+// The modules this checker verifies: every top-level js/*.jsx, kept as a
+// hand-written list so that adding or removing a module is a visible edit.
+// The first entries carry the reason each was put on the list; the block after
+// them is the rest of the folder, sorted. A new module goes into that block,
+// and the drift check tells you when it is missing.
 //
 // admin_setup.jsx and admin_competition_settings.jsx were added by bc-symm:
 // both now import a shared set of LABEL_*/*_OPTIONS constants and coupling
@@ -110,52 +195,148 @@ const CHECK_MODULES = [
   'admin_announcement.jsx',
   'admin_helpers.jsx',
   'kachinuki_advisory.jsx',
+  // The rest of the folder, sorted.
+  'admin.jsx',
+  'admin_backup.jsx',
+  'admin_branding.jsx',
+  'admin_calendar.jsx',
+  'admin_competition.jsx',
+  'admin_competition_bracket.jsx',
+  'admin_competition_overview.jsx',
+  'admin_competition_swiss.jsx',
+  'admin_pools.jsx',
+  'admin_registration_desk.jsx',
+  'admin_schedule.jsx',
+  'admin_schedule_export.jsx',
+  'admin_schedule_pacing.jsx',
+  'admin_schedule_page.jsx',
+  'admin_schedule_utils.jsx',
+  'admin_scoring_team_bouts.jsx',
+  'admin_scoring_team_kachinuki.jsx',
+  'admin_shiaijo_context.jsx',
+  'admin_shiaijo_feed.jsx',
+  'admin_shiaijo_queue.jsx',
+  'admin_sponsors.jsx',
+  'api_serializers.jsx',
+  'app_version.jsx',
+  'barred_chip.jsx',
+  'barred_match_notice.jsx',
+  'bronze_feeders.jsx',
+  'calendar_move.jsx',
+  'calendar_rules.jsx',
+  'competition_put_body.jsx',
+  'competition_shape.jsx',
+  'competitor_identity.jsx',
+  'competitor_search.jsx',
+  'court_bridge.jsx',
+  'court_move.jsx',
+  'court_pace.jsx',
+  'court_queue.jsx',
+  'data.jsx',
+  'data_integrity.jsx',
+  'date_order.jsx',
+  'dialog_focus.jsx',
+  'display.jsx',
+  'display_helpers.jsx',
+  'display_lobby.jsx',
+  'display_scoreboard.jsx',
+  'document_versions.jsx',
+  'draft_estimate.jsx',
+  'draft_taps.jsx',
+  'duration.jsx',
+  'held_writes_panel.jsx',
+  'icon.jsx',
+  'ineligible_match.jsx',
+  'landed_taps.jsx',
+  'latest_ref.jsx',
+  'lineup_rename.jsx',
+  'lineup_save.jsx',
+  'match_groups.jsx',
+  'match_shows_score.jsx',
+  'minted_members.jsx',
+  'notification_keys.jsx',
+  'numbered_name.jsx',
+  'own_status.jsx',
+  'patch.jsx',
+  'pause_list.jsx',
+  'pool_ids.jsx',
+  'published_height.jsx',
+  'qr.jsx',
+  'qualifier_preview.jsx',
+  'queued_writes_wait.jsx',
+  'registration.jsx',
+  'reset.jsx',
+  'result_recency.jsx',
+  'result_slot.jsx',
+  'retime_warning.jsx',
+  'router.jsx',
+  'score_events.jsx',
+  'server_clock.jsx',
+  'side_cell.jsx',
+  'sponsor_strip.jsx',
+  'squad_member_label.jsx',
+  'stable_id.jsx',
+  'streaming_overlay.jsx',
+  'tap_guard.jsx',
+  'team_default_credit.jsx',
+  'timer_pool.jsx',
+  'toast_queue.jsx',
+  'told_taps.jsx',
+  'unsaved_entries.jsx',
+  'viewer.jsx',
+  'viewer_alerts.jsx',
+  'viewer_awards.jsx',
+  'viewer_competition.jsx',
+  'viewer_home.jsx',
+  'viewer_notifications.jsx',
+  'viewer_schedule.jsx',
+  'viewer_standings.jsx',
+  'viewer_utils.jsx',
+  'viewer_watchlist.jsx',
+  'viewer_watchlist_core.jsx',
+  'watchlist_link.jsx',
+  'write_result.jsx',
 ];
 
 // ---------------------------------------------------------------------------
-// Export extraction
+// Export and import extraction
 // ---------------------------------------------------------------------------
-// Returns a Set of every name the file makes available to importers.
-// Handles:
-//   export { a, b, localC as exportedD }
+// Both read the comment-free source and take a statement only where it begins
+// a line. Handles:
+//   export { a, b, localC as exportedD }            (also `... } from './x.jsx'`)
 //   export function Foo / export async function Foo
 //   export const / export let / export var / export class
-// Does NOT handle `export default` (not used in these modules).
+//   import { a, b as c } from './x.jsx'
+// Does NOT handle `export default` or `export * from` (not used in these modules).
 
-function extractExports(src) {
-  const names = new Set();
-
-  // export { a, b as c, … }, possibly multiline
-  for (const m of src.matchAll(/export\s*\{([^}]+)\}/gs)) {
-    for (const item of stripComments(m[1]).split(',')) {
-      // 'local as exported' → exported is what importers see
-      const parts = item.trim().match(/^(\w+)(?:\s+as\s+(\w+))?/);
-      if (parts) names.add(parts[2] ?? parts[1]);
-    }
+// 'local as exported' -> exported is what importers see; for an import the
+// first name is what the source module must export.
+function braceNames(body, takeExported) {
+  const names = [];
+  for (const item of body.split(',')) {
+    const parts = item.trim().match(/^(\w+)(?:\s+as\s+(\w+))?$/);
+    if (parts) names.push(takeExported ? (parts[2] ?? parts[1]) : parts[1]);
   }
-
-  // export [async] function/const/let/var/class Name
-  for (const m of src.matchAll(/^export\s+(?:async\s+)?(?:function|const|let|var|class)\s+(\w+)/gm)) {
-    names.add(m[1]);
-  }
-
   return names;
 }
 
-// ---------------------------------------------------------------------------
-// Import extraction
-// ---------------------------------------------------------------------------
-// Returns an array of { importedNames: string[], fromPath: string } for every
-// `import { … } from './…'` in the source (relative paths only).
+function extractExports(code) {
+  const names = new Set();
+  for (const m of code.matchAll(/^export\s*\{([^}]*)\}/gm)) {
+    for (const name of braceNames(m[1], true)) names.add(name);
+  }
+  for (const m of code.matchAll(/^export\s+(?:async\s+)?(?:function|const|let|var|class)\s+(\w+)/gm)) {
+    names.add(m[1]);
+  }
+  return names;
+}
 
-function extractSiblingImports(src) {
+// Returns an array of { importedNames: string[], fromPath: string } for every
+// `import { … } from './…'` and `export { … } from './…'` (relative paths only).
+function extractSiblingImports(code) {
   const results = [];
-  for (const m of src.matchAll(/import\s*\{([^}]+)\}\s*from\s*['"](\.[^'"]+)['"]/gs)) {
-    const names = stripComments(m[1]).split(',').map(s => {
-      // 'exported as local' → exported is the name we're requesting from the source
-      const parts = s.trim().match(/^(\w+)(?:\s+as\s+\w+)?$/);
-      return parts ? parts[1] : null;
-    }).filter(Boolean);
+  for (const m of code.matchAll(/^(?:import|export)\s*\{([^}]*)\}\s*from\s*['"](\.[^'"]+)['"]/gm)) {
+    const names = braceNames(m[1], false);
     if (names.length > 0) results.push({ importedNames: names, fromPath: m[2] });
   }
   return results;
@@ -169,42 +350,22 @@ const exportCache = new Map();
 
 function getCachedExports(absPath) {
   if (!exportCache.has(absPath)) {
-    if (!existsSync(absPath)) {
-      console.error(`  ERROR: source file not found: ${absPath}`);
-      exportCache.set(absPath, new Set());
-    } else {
-      exportCache.set(absPath, extractExports(readFileSync(absPath, 'utf8')));
-    }
+    exportCache.set(
+      absPath,
+      existsSync(absPath) ? extractExports(maskComments(readFileSync(absPath, 'utf8'))) : null,
+    );
   }
   return exportCache.get(absPath);
 }
 
-let totalErrors = 0;
+const folderModules = readdirSync(JS_DIR).filter((f) => f.endsWith('.jsx')).sort();
+const listed = new Set(CHECK_MODULES);
 
-for (const modName of CHECK_MODULES) {
-  const modPath = resolve(JS_DIR, modName);
-  if (!existsSync(modPath)) {
-    // A listed split module that has vanished almost always means a bad
-    // rename/move, failing the check is correct, not a soft skip, otherwise
-    // js/validate would go green on a broken refactor.
-    console.error(`  ✗ ${modName}: listed in CHECK_MODULES but file not found, bad rename/move?`);
-    totalErrors++;
-    continue;
-  }
-
-  const src = readFileSync(modPath, 'utf8');
-  const siblingImports = extractSiblingImports(src);
-  if (siblingImports.length === 0) {
-    // A module with no relative imports (e.g. admin_scoring_autosave.jsx, which
-    // pulls everything from React window globals) has nothing to verify, but
-    // say so explicitly, so the output accounts for every CHECK_MODULES entry
-    // rather than silently omitting it.
-    console.log(`  – ${modName}: no sibling imports to check`);
-    continue;
-  }
-
-  let modErrors = 0;
-  for (const { importedNames, fromPath } of siblingImports) {
+// Import errors: every module in the folder, listed or not.
+const importErrors = [];
+for (const modName of folderModules) {
+  const code = maskComments(readFileSync(resolve(JS_DIR, modName), 'utf8'));
+  for (const { importedNames, fromPath } of extractSiblingImports(code)) {
     const sibPath = resolve(JS_DIR, fromPath);
     const sibName = fromPath.replace(/^\.\//, '');
     // Containment guard: a `from` path that resolves outside js/ (e.g. a
@@ -212,31 +373,54 @@ for (const modName of CHECK_MODULES) {
     // read an arbitrary file. JS_DIR is computed from import.meta.url, so the
     // separator is platform-correct.
     if (sibPath !== JS_DIR && !sibPath.startsWith(JS_DIR + sep)) {
-      console.error(`  ✗ ${modName}: import path escapes js/ directory: ${fromPath}`);
-      modErrors++;
-      totalErrors++;
+      importErrors.push(`${modName}: import path escapes js/ directory: ${fromPath}`);
       continue;
     }
     const exported = getCachedExports(sibPath);
+    if (exported === null) {
+      importErrors.push(`${modName}: imports from "${sibName}", which does not exist`);
+      continue;
+    }
     for (const name of importedNames) {
       if (!exported.has(name)) {
-        console.error(`  ✗ ${modName}: imports "${name}" from "${sibName}", not exported by "${sibName}"`);
-        modErrors++;
-        totalErrors++;
+        importErrors.push(`${modName}: imports "${name}" from "${sibName}", not exported by "${sibName}"`);
       }
     }
   }
+}
 
-  if (modErrors === 0) {
-    console.log(`  ✓ ${modName}: all sibling imports resolved`);
+console.log(`Checking named imports of ${folderModules.length} modules...`);
+if (importErrors.length === 0) {
+  console.log(`  ✓ every named import and re-export resolves`);
+} else {
+  for (const e of importErrors) console.error(`  ✗ ${e}`);
+}
+
+// List drift: the declared set (CHECK_MODULES) against the observed set (the
+// folder). Printed apart from the import errors so a task can tell its own
+// broken imports from list entries it still has to add.
+console.log('\nChecking CHECK_MODULES against the folder...');
+const driftErrors = [];
+for (const modName of folderModules) {
+  if (!listed.has(modName)) {
+    driftErrors.push(`${modName}: not on CHECK_MODULES, add it to the rest-of-the-folder block in web-mobile/check-imports.mjs`);
   }
 }
-
-if (totalErrors > 0) {
-  console.error(`\n${totalErrors} import mismatch(es), fix exports or imports before merging.`);
-  process.exit(1);
+for (const modName of CHECK_MODULES) {
+  if (!existsSync(resolve(JS_DIR, modName))) {
+    // A listed module that has vanished almost always means a bad rename/move:
+    // failing the check is correct, not a soft skip, otherwise js/validate
+    // would go green on a broken refactor.
+    driftErrors.push(`${modName}: listed in CHECK_MODULES but file not found, bad rename/move?`);
+  }
 }
-
+const listedTwice = CHECK_MODULES.filter((m, i) => CHECK_MODULES.indexOf(m) !== i);
+for (const modName of listedTwice) driftErrors.push(`${modName}: listed twice in CHECK_MODULES`);
+if (driftErrors.length === 0) {
+  console.log(`  ✓ the list names exactly the ${folderModules.length} modules in the folder`);
+} else {
+  for (const e of driftErrors) console.error(`  ✗ ${e}`);
+}
 
 // ---------------------------------------------------------------------------
 // Phase 2: script-tag / import URL agreement (the double-evaluation guard)
@@ -289,7 +473,7 @@ function checkScriptTagUrls() {
   const importedBy = new Map();
   for (const file of readdirSync(JS_DIR)) {
     if (!/\.(jsx|js)$/.test(file)) continue;
-    const src = stripComments(readFileSync(resolve(JS_DIR, file), 'utf8'));
+    const src = maskComments(readFileSync(resolve(JS_DIR, file), 'utf8'));
     // `from './x'` covers static named/default/namespace imports and re-exports;
     // `import './x'` covers side-effect-only imports, which load the module just
     // as surely and so must agree with any tag too. `import('./x')` is the same
@@ -307,6 +491,29 @@ function checkScriptTagUrls() {
   const stemOf = (url) => url.replace(/^\/dist\//, '').replace(/\?.*$/, '').replace(/\.[^.]+$/, '');
 
   let errors = 0;
+  // Rule 2 of the module split: no module imports an entry whose tag is its
+  // compiled ".js" URL (api_client.js, admin_shiaijo.js, ...). Whatever
+  // spelling the import uses, the browser would hold a second module URL for
+  // the file and run it a second time (two outboxes, or two pages). What an
+  // importer needs from an entry belongs in a module of its own. A module
+  // tagged with its ".jsx" URL (a leaf that index.html loads first) is not an
+  // entry: importing it by that same URL is one module, which the URL check
+  // below confirms.
+  const isEntryTag = (tagSrc) => /\.js(\?|$)/.test(tagSrc);
+  for (const [stem, srcs] of tagged) {
+    const entryTag = srcs.find(isEntryTag);
+    if (!entryTag) continue;
+    for (const [url, importers] of importedBy) {
+      if (stemOf(url) !== stem) continue;
+      for (const importer of [...importers].sort()) {
+        errors++;
+        console.error(
+          `  ✗ ${importer}: imports "${url.replace(/^\/dist\//, '')}", an entry that index.html loads as ` +
+          `<script src="${entryTag}">, so the browser holds two module URLs and runs it twice. ` +
+          `Move what ${importer} needs out of the entry into a module of its own.`);
+      }
+    }
+  }
   for (const [stem, srcs] of tagged) {
     if (srcs.length > 1) {
       errors++;
@@ -317,7 +524,7 @@ function checkScriptTagUrls() {
     const srcs = tagged.get(stemOf(url));
     if (!srcs) continue; // imported only: one URL, nothing to agree with
     for (const tagSrc of srcs) {
-      if (url === tagSrc) continue;
+      if (url === tagSrc || isEntryTag(tagSrc)) continue; // an entry tag: rule 2 above
       errors++;
       console.error(
         `  ✗ ${stemOf(url)}: <script src="${tagSrc}"> but imported as "${url}" ` +
@@ -331,9 +538,17 @@ function checkScriptTagUrls() {
 
 console.log('\nChecking script-tag / import URL agreement...');
 const tagErrors = checkScriptTagUrls();
-if (tagErrors > 0) {
-  console.error(`\n${tagErrors} module(s) would load twice, fix index.html before merging.`);
-  process.exit(1);
+
+const failed = importErrors.length + driftErrors.length + tagErrors;
+if (importErrors.length > 0) {
+  console.error(`\n${importErrors.length} import mismatch(es), fix exports or imports before merging.`);
 }
+if (driftErrors.length > 0) {
+  console.error(`\n${driftErrors.length} difference(s) between CHECK_MODULES and the folder, fix the list before merging.`);
+}
+if (tagErrors > 0) {
+  console.error(`\n${tagErrors} module(s) would load twice, fix index.html or the import before merging.`);
+}
+if (failed > 0) process.exit(1);
 
 console.log('\nAll sibling imports OK.');

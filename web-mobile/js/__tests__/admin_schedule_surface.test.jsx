@@ -14,6 +14,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync, readdirSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { readFamily } from './helpers/source.js';
 import {
   filterMatchesByCourt,
   computeCourtPaceStats,
@@ -82,7 +83,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const jsDir = resolve(__dirname, '..');
 
 describe('admin_schedule window.API.* contract', () => {
-  const apiSrc = readFileSync(resolve(jsDir, 'api_client.jsx'), 'utf8');
+  const apiSrc = readFamily('api_client.jsx');
   // A method definition is `\n<indent>[async ]name(` (i.e., the name follows
   // only whitespace after a newline). A call site is `.name(` (a dot precedes
   // the name), so this pattern matches definitions but never invocations.

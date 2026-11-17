@@ -265,6 +265,30 @@ func (s *Store) loadCompetitionLocked(compID string) (*Competition, error) {
 	return adoptDirectoryID(s.copyCompetition(c), compID), nil
 }
 
+// reloadCompetitionLocked parses config.md from disk whatever the cache holds,
+// publishes that parse to the cache the way a cache miss in loadCachedLocked
+// does (the mtime read before the parse, no version bump), and answers a copy.
+// Caller MUST hold the per-comp write lock. Returns (nil, nil) when no file
+// exists for compID.
+func (s *Store) reloadCompetitionLocked(compID string) (*Competition, error) {
+	cache := s.getFileCache(compID, "config.md")
+	cache.mu.Lock()
+	mtime := s.FileMtime(compID, "config.md")
+	parsed, err := s.parseCompetitionFile(s.compPath(compID, "config.md"))
+	if err != nil {
+		cache.mu.Unlock()
+		return nil, err
+	}
+	cache.data = parsed
+	cache.mtime = mtime
+	cache.mu.Unlock()
+	if parsed == nil {
+		return nil, nil
+	}
+	c, _ := parsed.(*Competition)
+	return adoptDirectoryID(s.copyCompetition(c), compID), nil
+}
+
 // saveCompetitionLocked persists c WITHOUT acquiring the per-competition
 // lock. Caller MUST already hold the per-comp lock. Thin void wrapper
 // around saveCompetitionChangedLocked for callers (like WithTransaction)
@@ -395,15 +419,15 @@ func (s *Store) UpdateCompetitionChanged(id string, transform func(current *Comp
 	}
 	defer mu.Unlock()
 
-	// Load directly under the lock (bypass the cached body; the per-comp lock is
-	// what coordinates with the save below). The save step keeps re-reading the
-	// file, so the transform decides from the bytes as they are now, whatever
-	// the cache holds. Dropping the cached body makes the locked loader parse
-	// the file and publish that parse, so a no-op transform leaves the cache
-	// agreeing with the file for the readers that follow, and it answers a copy
-	// the transform may change.
-	s.getFileCache(id, "config.md").invalidate()
-	current, err := s.loadCompetitionLocked(id)
+	// Load directly under the lock (bypass the cached path; the per-comp lock
+	// is what coordinates with the save below). Unlike the locked loader, this
+	// load-mutate-save body keeps re-reading the file, so the transform decides
+	// from the bytes as they are now, whatever the cache holds. The parse is
+	// then published as a cache miss would publish it (no version bump: the
+	// bytes did not change here), so a no-op transform leaves the cache
+	// agreeing with the file for the readers that follow; the transform gets a
+	// copy it may change.
+	current, err := s.reloadCompetitionLocked(id)
 	if err != nil {
 		return false, err
 	}

@@ -294,13 +294,21 @@ func (s *Store) ReadTeamLineups(compID string, read func(lineups map[string]doma
 	return nil
 }
 
-// loadTeamLineupsLocked reads the lineup file directly from disk WITHOUT
-// acquiring the per-competition lock. Caller MUST already hold the lock
-// (typically via WithTransaction or setTeamLineupLocked). Bypasses the cache:
-// locked callers are usually about to mutate and need a fresh private map,
-// mirroring the same pattern in loadBracketLocked.
+// loadTeamLineupsLocked reads the lineup file through the parsed-file cache
+// (loadCachedLocked) WITHOUT acquiring the per-competition lock. Caller MUST
+// already hold the lock (typically via WithTransaction or
+// setTeamLineupLocked). Locked callers are usually about to mutate, so it
+// answers a private copy (copyTeamLineups), mirroring loadBracketLocked. A
+// cache hit skips the parse's noteLineupStamps; that loses nothing, since the
+// saver that published the body noted its stamps before writing it.
 func (s *Store) loadTeamLineupsLocked(compID string) (map[string]domain.TeamLineup, error) {
-	return s.parseTeamLineupsFile(compID, s.compPath(compID, teamLineupFilename))
+	data, err := s.loadCachedLocked(compID, teamLineupFilename, func(path string) (any, error) {
+		return s.parseTeamLineupsFile(compID, path)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return copyTeamLineups(data.(map[string]domain.TeamLineup)), nil
 }
 
 // loadTeamLineupsVia is loadTeamLineupsLocked over what rio sees: the lineups
@@ -399,12 +407,48 @@ func (s *Store) saveTeamLineupsLocked(compID string, lineups map[string]domain.T
 	if err := write(s.compPath(compID, teamLineupFilename), data, 0600); err != nil {
 		return err
 	}
+	// The published body is what a read of the file gives, keyed the way
+	// decodeTeamLineupsBytes keys it (in file order, so a later entry under the
+	// same key wins as it does there), each lineup in the shape the file reads
+	// back as (asStoredLineup).
+	published := make(map[string]domain.TeamLineup, len(file.Lineups))
+	for _, l := range file.Lineups {
+		published[lineupStorageKey(l)] = asStoredLineup(l.Clone())
+	}
 	cache := s.getFileCache(compID, teamLineupFilename)
 	cache.mu.Lock()
-	cache.data = copyTeamLineups(lineups)
+	cache.data = published
 	cache.mtime = s.FileMtime(compID, teamLineupFilename)
 	cache.mu.Unlock()
 	return nil
+}
+
+// asStoredLineup gives l, a copy, the shape a read of lineups.yaml gives it:
+// Positions always a map (the file always holds the key), the lists and maps
+// the file omits when empty (omitempty) read back as nil, and a position's
+// history read back as a list. The round trip in locked_cache_test.go pins it.
+func asStoredLineup(l domain.TeamLineup) domain.TeamLineup {
+	if l.Positions == nil {
+		l.Positions = map[domain.Position]string{}
+	}
+	if len(l.MemberIDs) == 0 {
+		l.MemberIDs = nil
+	}
+	if len(l.Stamps) == 0 {
+		l.Stamps = nil
+	}
+	if len(l.Own) == 0 {
+		l.Own = nil
+	}
+	if len(l.History) == 0 {
+		l.History = nil
+	}
+	for p, cs := range l.History {
+		if cs == nil {
+			l.History[p] = []domain.PositionChange{}
+		}
+	}
+	return l
 }
 
 // pruneOrphanedTeamLineupsLocked drops lineups.yaml entries for teams no

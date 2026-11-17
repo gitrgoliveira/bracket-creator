@@ -49,6 +49,7 @@ import (
 	"log/slog"
 	"os"
 	"strings"
+	"sync/atomic"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
@@ -154,8 +155,15 @@ func (s *Store) parseSquadsFile(path string) (map[string][]domain.TeamMember, er
 		}
 		return nil, err
 	}
+	teamMembersParses.Add(1)
 	return parseSquadsBytes(data)
 }
+
+// teamMembersParses counts the parses of a team-members.yaml read from disk,
+// for the tests that pin the locked loader to the parsed-file cache
+// (locked_cache_test.go). parseSquadsBytes alone (a transaction's staged bytes,
+// the fingerprint) does not count.
+var teamMembersParses atomic.Int64
 
 // parseSquadsBytes parses team-members.yaml from in-memory bytes. Empty input →
 // empty map, matching the "file does not exist" contract.
@@ -263,10 +271,10 @@ func (s *Store) LoadSquads(compID string) (map[string][]domain.TeamMember, error
 	return read()
 }
 
-// loadSquadsLocked reads team-members.yaml directly from disk WITHOUT acquiring
-// the per-competition lock. Caller MUST already hold the lock. Bypasses the
-// cache: locked callers are about to load-mutate-save and need a fresh
-// private map, mirroring loadTeamLineupsLocked.
+// loadSquadsLocked reads team-members.yaml through the parsed-file cache
+// (loadCachedLocked) WITHOUT acquiring the per-competition lock. Caller MUST
+// already hold the lock. Locked callers are about to load-mutate-save, so it
+// answers a private copy (copySquads), mirroring loadTeamLineupsLocked.
 //
 // Adopts a v2.0.0 squads.yaml FIRST, and fails the read when that adoption
 // fails. This is the floor under the load-mutate-save shape rather than a
@@ -308,7 +316,13 @@ func (s *Store) loadSquadsVia(rio rosterIO, compID string) (map[string][]domain.
 	if pending, ok := rio.staged(teamMembersFilename); ok {
 		return parseSquadsBytes(pending) // the adoption just staged them
 	}
-	return s.parseSquadsFile(s.compPath(compID, teamMembersFilename))
+	data, err := s.loadCachedLocked(compID, teamMembersFilename, func(path string) (any, error) {
+		return s.parseSquadsFile(path)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return copySquads(data.(map[string][]domain.TeamMember)), nil
 }
 
 // saveSquadsLocked persists the squads map. Caller MUST hold the per-comp

@@ -29,7 +29,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // would be shared, so both "tabs" would hold one queue. This carries the
 // importer's `tab` query onto those imports, so each tab gets the whole outbox
 // family as a browser tab would. Every other import stays shared, as before.
-const TAB_QUERY = /[?&]tab=(\w+)/;
+const TAB_QUERY = /[?&]tab=([^&#]+)/;
 const tabInstances = () => ({
   name: 'bc-tab-instances',
   enforce: 'pre',

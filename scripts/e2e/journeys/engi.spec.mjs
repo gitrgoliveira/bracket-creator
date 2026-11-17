@@ -204,16 +204,23 @@ test.describe('engi', () => {
     ]);
     // A side's first member as the console shows it: the editor's pair line,
     // or the first member of the whole pair name the Up next card carries.
-    // The Up next card's Start match is there only while no bout runs (a Finish
-    // + Start Next starts the next one itself); the editor may show beside it
-    // before a start, so the card decides.
     const start = upNextCard(page).getByRole('button', { name: 'Start match' });
+    const offeredPair = () => sides(upNextCard(page))
+      .then((p) => ({ shiro: first(p.shiro), aka: first(p.aka) })).catch(() => null);
+    // Used where no bout runs, so the card, when shown, is the match to play.
     const editorOrCard = async () => ((await start.isVisible().catch(() => false))
-      ? sides(upNextCard(page)).then((p) => ({ shiro: first(p.shiro), aka: first(p.aka) })).catch(() => null)
+      ? offeredPair()
       : engiPair(page).catch(() => null));
+    // The Up next card offers Start match beside a RUNNING bout too (starting it
+    // sends the running one back to the queue), so a visible card does not say
+    // no bout runs. The editor holds the running bout unless it holds the very
+    // pair the card offers, which is a bout not started yet.
     const startOrHeld = async () => {
       await expect(engiEditor(page).or(start).first()).toBeVisible({ timeout: EXPECT_TIMEOUT_MS });
-      return (await start.isVisible()) ? startUpNextEngi(page) : engiPair(page);
+      const held = (await engiEditor(page).isVisible()) ? await engiPair(page) : null;
+      const offered = (await start.isVisible()) ? await offeredPair() : null;
+      if (held && !(offered && offered.shiro === held.shiro && offered.aka === held.aka)) return held;
+      return startUpNextEngi(page);
     };
     let id;
 

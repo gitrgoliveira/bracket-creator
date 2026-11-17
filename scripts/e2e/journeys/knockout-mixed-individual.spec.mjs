@@ -284,7 +284,11 @@ test.describe('knockout-mixed-individual', () => {
     row({ step: 'send back', action: 'Send back to queue confirm', variant: 'V4 hastyConfirm', ...hasty,
       marksOnBoard: marksBeforeSendBack, dialogShot: sendBackDialogShot, courtIdle: idleAfter, upNext: upNextAfterRevert,
       shot: await shot(page, 'send-back-hasty') });
-    // It is back in the queue; start it again and play it.
+    // It is back in the queue: the court shows it Up next, and stays so, before
+    // it is started again (a start tapped while the console still holds the old
+    // bout as running sends that one back a second time).
+    const upNextSettled = await untilStable(async () => sides(upNextCard(page)).catch(() => null), { quietMs: 1_500 });
+    expect(upNextSettled, 'the sent-back bout is Up next').toEqual({ shiro: running3.shiro, aka: running3.aka });
     const again = await ensureRunning(page);
     expect(again, 'the sent-back bout is Up next and starts again').not.toBeNull();
     row({ step: 'send back', action: 'restart the sent-back bout', variant: 'recovery',
@@ -1239,6 +1243,11 @@ test.describe('knockout-mixed-individual bead guards', () => {
     await hastyShiaijoConfirm(page);
     // The court shows the bout queued before it is started again.
     await awaitSentBack(page);
+    // The queue shows it back as Up next before it is started again: the slow
+    // reads the journey held back are still landing (3 s each), and until they
+    // have the court can show another bout Up next.
+    const upNextNow = await untilStable(async () => sides(upNextCard(page)).catch(() => null), { quietMs: 3_500 });
+    expect(upNextNow, 'the sent back bout is Up next').toEqual(pair);
     // The dialog's promise holds: started again, the bout still has its point.
     const again = await ensureRunning(page);
     expect(again).toEqual(pair);

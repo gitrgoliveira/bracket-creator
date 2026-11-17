@@ -5286,7 +5286,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
               {m.status === "scheduled" && own.startOffered && !isBarredMatch(m) && (
                 <button className="btn btn--sm" onClick={async () => {
                   // F5: submits status:"running", the shape
-                  // _notifyScoreSuperseded (api_client.jsx) deliberately stays
+                  // _notifyScoreSuperseded (api_client_status.jsx) deliberately stays
                   // silent for. Start match is an explicit operator tap, not
                   // an autosave, so check the awaited result directly.
                   const startPatch = buildPatch("running");

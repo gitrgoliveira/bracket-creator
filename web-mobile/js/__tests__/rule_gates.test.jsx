@@ -66,6 +66,11 @@ describe('stripComments keeps every line where it was', () => {
     expect(stripComments('x = 1; // .includes(\n')).toBe(`x = 1; ${' '.repeat(13)}\n`);
     expect(stripComments('u = "https://k.example/x";\n')).toBe('u = "https://k.example/x";\n');
   });
+
+  it('a URL in JSX text hides no code after it', () => {
+    const src = '<a>https://example.org</a>{res.applied === false && <X/>}\n';
+    expect(stripComments(src)).toBe(src);
+  });
 });
 
 describe('scanSource reports the real line', () => {

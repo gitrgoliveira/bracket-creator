@@ -1757,7 +1757,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, onSub
               {m.status === "scheduled" && own.startOffered && !isBarredMatch(m) && (
                 <button className="btn btn--sm" onClick={async () => {
                   // F5: this submits status:"running", the one shape
-                  // _notifyScoreSuperseded (api_client.jsx) deliberately stays
+                  // _notifyScoreSuperseded (api_client_status.jsx) deliberately stays
                   // silent for -- a debounced autosave being superseded is
                   // routine noise there, but Start match is an explicit
                   // operator tap: silence here would just re-enable the

@@ -1014,9 +1014,12 @@ test.describe('J5 kachinuki from the court console', () => {
         ...afterStart, screenshot: await shot(page, 'v5-m2-started-after-m1-ended') });
       await expect(recordBoutButton(page)).toBeVisible();
       // Nothing to recover from: the row stays to say so.
+      // The server seats the first bout's fighters just after the start, with
+      // events of its own, so the names arrive a moment later.
+      await expect.poll(() => boutNames(currentBout(page)), { timeout: EXPECT_TIMEOUT_MS })
+        .toEqual({ shiro: MEMBERS[m2.shiro][0], aka: MEMBERS[m2.aka][0] });
       record({ step: 'M1 reopen, court busy', action: 'recover the started M2', variant: 'V5 lost place', recoverTaps: 0,
         live: await boutNames(currentBout(page)) });
-      expect(await boutNames(currentBout(page))).toEqual({ shiro: MEMBERS[m2.shiro][0], aka: MEMBERS[m2.aka][0] });
       const marks = await boutFilled(currentBout(page), 'aka').count();
       record({ step: 'M1 reopen, court busy', action: 'M2 restarted after the requeue', variant: 'result',
         m2Bout1AkaMarks: marks, panelSays: 'Sending it back to the queue keeps any score already entered for it: it carries on from there when it is started again',
@@ -1282,7 +1285,10 @@ test.describe('J5 kachinuki from the court console', () => {
     await test.step('start the final and score one point', async () => {
       await upNextCard(page).getByRole('button', { name: 'Start match' }).tap();
       await expect(recordBoutButton(page)).toBeVisible();
-      expect(await boutNames(currentBout(page))).toEqual({ shiro: MEMBERS[final.shiro][0], aka: MEMBERS[final.aka][0] });
+      // The server seats the first bout's fighters from the lineups just after
+      // the start, with events of its own, so the names arrive a moment later.
+      await expect.poll(() => boutNames(currentBout(page)), { timeout: EXPECT_TIMEOUT_MS })
+        .toEqual({ shiro: MEMBERS[final.shiro][0], aka: MEMBERS[final.aka][0] });
       await awardBoutIppon(page, 'shiro', 'M');
       await settled(page);
       await shot(page, 'final-running-one-point');

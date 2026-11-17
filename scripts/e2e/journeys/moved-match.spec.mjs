@@ -424,8 +424,10 @@ test.describe('moved-match', () => {
     await startButton(B, blocked).tap();
     await acceptedCheck;
     await expect.poll(() => runs(blocked), { timeout: EXPECT_TIMEOUT_MS }).toBe(true);
+    // The other device's feed shows the send back and the start one push apart,
+    // so it holds two running bouts for a moment before it holds the one.
+    await expect.poll(async () => (await runningOnCourt(H, 'B')).length, { timeout: EXPECT_TIMEOUT_MS }).toBe(1);
     const onBafter = await runningOnCourt(H, 'B');
-    expect(onBafter).toHaveLength(1);
     expect(onBafter[0]).toMatchObject({ shiro: blocked.shiro, aka: blocked.aka });
   });
 

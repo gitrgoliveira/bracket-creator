@@ -178,7 +178,8 @@ export function stripComments(src) {
       i++;
       continue;
     }
-    if (c === '/' && d === '/') {
+    // A "//" straight after a ":" is a URL ("https://x" in JSX text), not a comment.
+    if (c === '/' && d === '/' && src[i - 1] !== ':') {
       let j = src.indexOf('\n', i);
       if (j === -1) j = n;
       out.push(blank(src.slice(i, j)));

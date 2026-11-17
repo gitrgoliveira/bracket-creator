@@ -918,6 +918,11 @@ test.describe('knockout-mixed-team', () => {
       await revert.getByRole('button', { name: 'Send back to queue' }).tap();
       await expect(revert).toHaveCount(0);
       await expect(upNextCard(page)).toBeVisible();
+      // The refusal's toast sits over the bottom of the completed list and takes
+      // the next tap: dismiss it first, as the operator would.
+      const dismissToast = page.locator('.toast__dismiss');
+      if (await dismissToast.isVisible()) await dismissToast.tap();
+      await expect(page.locator('.toast')).toHaveCount(0);
       await row.getByRole('button', { name: /Correct/ }).tap();
       await expect(ed.getByText('CORRECTION', { exact: true }).or(ed.locator('.editor-modal__eyebrow', { hasText: 'MATCH 2' })).first()).toBeVisible();
       const full = (await ed.innerText()).replace(/\s+/g, ' ');

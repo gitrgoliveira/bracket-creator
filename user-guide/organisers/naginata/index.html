@@ -11,17 +11,18 @@
         <link rel="canonical" href="https://gitrgoliveira.github.io/bracket-creator/user-guide/organisers/naginata/">
       
       
+      
         <link rel="prev" href="../team-tournaments/">
       
       
-        <link rel="next" href="../../court-operators/scoring-a-match/">
+        <link rel="next" href="../engi/">
       
       
         
       
       
       <link rel="icon" href="../../../assets/images/favicon.ico">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.1">
+      <meta name="generator" content="zensical-0.1.1">
     
     
       
@@ -29,10 +30,15 @@
       
     
     
-      <link rel="stylesheet" href="../../../assets/stylesheets/main.57a0d79d.min.css">
       
         
-        <link rel="stylesheet" href="../../../assets/stylesheets/palette.fb2fffe2.min.css">
+      
+      <link rel="stylesheet" href="../../../assets/stylesheets/classic/main.0006804e.min.css">
+      
+        
+          
+        
+        <link rel="stylesheet" href="../../../assets/stylesheets/classic/palette.813d4b3f.min.css">
       
       
 
@@ -46,7 +52,7 @@
         
         
         <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Atkinson+Hyperlegible:300,300i,400,400i,700,700i%7CJetBrains+Mono:400,400i,700,700i&display=fallback">
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Atkinson+Hyperlegible:300,300i,400,400i,500,500i,700,700i%7CJetBrains+Mono:400,400i,700,700i&amp;display=fallback">
         <style>:root{--md-text-font:"Atkinson Hyperlegible";--md-code-font:"JetBrains Mono"}</style>
       
     
@@ -55,7 +61,7 @@
     
       <link rel="stylesheet" href="../../../assets/stylesheets/pool-draw-animation.css">
     
-    <script>__md_scope=new URL("../../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    <script>__md_scope=new URL("../../..",location),__md_scope.pathname.endsWith("/")||(__md_scope=new URL(__md_scope.pathname+"/",location)),__md_hash=e=>[...e].reduce(((e,t)=>(e<<5)-e+t.charCodeAt(0)),0),__md_get=(e,t=localStorage,_=__md_scope)=>JSON.parse(t.getItem(_.pathname+"."+e)),__md_set=(e,t,_=localStorage,a=__md_scope)=>{try{_.setItem(a.pathname+"."+e,JSON.stringify(t))}catch(e){}},document.documentElement.setAttribute("data-platform",navigator.platform)</script>
     
       
 
@@ -76,14 +82,11 @@
     
     <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
     <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
-    <label class="md-overlay" for="__drawer"></label>
+    <label class="md-overlay" for="__drawer" aria-hidden="true"></label>
     <div data-md-component="skip">
-      
-        
-        <a href="#naginata-competitions" class="md-skip">
-          Skip to content
-        </a>
-      
+      <a href="#__skip" class="md-skip">
+        Skip to content
+      </a>
     </div>
     <div data-md-component="announce">
       
@@ -98,12 +101,13 @@
   <nav class="md-header__inner md-grid" aria-label="Header">
     <a href="../../.." title="bracket-creator" class="md-header__button md-logo" aria-label="bracket-creator" data-md-component="logo">
       
-  <img src="../../../assets/images/logo-crest-light.png" alt="logo">
+  <img src="../../../assets/images/logo-crest-light.png" alt="bracket-creator">
 
     </a>
     <label class="md-header__button md-icon" for="__drawer">
       
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+      <span class="md-visually-hidden">Navigation</span>
     </label>
     <div class="md-header__title" data-md-component="header-title">
       <div class="md-header__ellipsis">
@@ -128,7 +132,7 @@
     
     
     
-    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    <input class="md-option" data-md-color-media="none" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
     
       <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
@@ -138,7 +142,7 @@
     
     
     
-    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    <input class="md-option" data-md-color-media="none" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
     
       <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9 2c-1.05 0-2.05.16-3 .46 4.06 1.27 7 5.04 7 9.54s-2.94 8.27-7 9.54c.95.3 1.95.46 3 .46a10 10 0 0 0 10-10A10 10 0 0 0 9 2"/></svg>
@@ -158,54 +162,28 @@
         <label class="md-header__button md-icon" for="__search">
           
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+          <span class="md-visually-hidden">Search</span>
         </label>
-        <div class="md-search" data-md-component="search" role="dialog">
-  <label class="md-search__overlay" for="__search"></label>
-  <div class="md-search__inner" role="search">
-    <form class="md-search__form" name="search">
-      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
-      <label class="md-search__icon md-icon" for="__search">
-        
-        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
-        
-        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
-      </label>
-      <nav class="md-search__options" aria-label="Search">
-        
-        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
-          
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
-        </button>
-      </nav>
-      
-    </form>
-    <div class="md-search__output">
-      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
-        <div class="md-search-result" data-md-component="search-result">
-          <div class="md-search-result__meta">
-            Initializing search
-          </div>
-          <ol class="md-search-result__list" role="presentation"></ol>
-        </div>
-      </div>
-    </div>
-  </div>
+        <div class="md-search" data-md-component="search" role="dialog" aria-label="Search">
+  <button type="button" class="md-search__button">
+    Search
+  </button>
 </div>
       
     
-    
-      <div class="md-header__source">
+    <div class="md-header__source">
+      
         <a href="https://github.com/gitrgoliveira/bracket-creator" title="Go to repository" class="md-source" data-md-component="source">
   <div class="md-source__icon md-icon">
     
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.3.1 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2026 Fonticons, Inc.--><path fill="currentColor" d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
   </div>
   <div class="md-source__repository">
     gitrgoliveira/bracket-creator
   </div>
 </a>
-      </div>
-    
+      
+    </div>
   </nav>
   
     
@@ -223,9 +201,6 @@
       <a href="../../.." class="md-tabs__link">
         
   
-  
-    
-  
   Home
 
       </a>
@@ -241,6 +216,27 @@
   
   
     
+      
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
     
       
   
@@ -250,13 +246,19 @@
   
   
     
+      
+      
+        
+      
+        
+      
+    
+    
+    
     
       <li class="md-tabs__item md-tabs__item--active">
-        <a href="../../start-here/choosing-your-setup/" class="md-tabs__link">
+        <a href="../../start-here/first-tournament/" class="md-tabs__link">
           
-  
-  
-    
   
   User guide
 
@@ -275,13 +277,21 @@
   
   
     
+      
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
     
       <li class="md-tabs__item">
         <a href="../../../dev-guide/code_of_conduct/" class="md-tabs__link">
           
-  
-  
-    
   
   Developer guide
 
@@ -321,7 +331,7 @@
   <label class="md-nav__title" for="__drawer">
     <a href="../../.." title="bracket-creator" class="md-nav__button md-logo" aria-label="bracket-creator" data-md-component="logo">
       
-  <img src="../../../assets/images/logo-crest-light.png" alt="logo">
+  <img src="../../../assets/images/logo-crest-light.png" alt="bracket-creator">
 
     </a>
     bracket-creator
@@ -331,7 +341,7 @@
       <a href="https://github.com/gitrgoliveira/bracket-creator" title="Go to repository" class="md-source" data-md-component="source">
   <div class="md-source__icon md-icon">
     
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.3.1 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2026 Fonticons, Inc.--><path fill="currentColor" d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
   </div>
   <div class="md-source__repository">
     gitrgoliveira/bracket-creator
@@ -355,8 +365,7 @@
   <span class="md-ellipsis">
     
   
-    Home
-  
+  Home
 
     
   </span>
@@ -419,8 +428,7 @@
   <span class="md-ellipsis">
     
   
-    User guide
-  
+  User guide
 
     
   </span>
@@ -430,19 +438,19 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="true">
-          <label class="md-nav__title" for="__nav_2">
-            <span class="md-nav__icon md-icon"></span>
-            
+        
+          <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="true">
+            <label class="md-nav__title" for="__nav_2">
+              <span class="md-nav__icon md-icon"></span>
+              
   
-    User guide
-  
+  User guide
 
-          </label>
-          <ul class="md-nav__list" data-md-scrollfix>
-            
+            </label>
+            <ul class="md-nav__list" data-md-scrollfix>
               
                 
+                  
   
   
   
@@ -475,8 +483,7 @@
   <span class="md-ellipsis">
     
   
-    Start here
-  
+  Start here
 
     
   </span>
@@ -486,47 +493,19 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_2_1_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_2_1">
-            <span class="md-nav__icon md-icon"></span>
-            
-  
-    Start here
-  
-
-          </label>
-          <ul class="md-nav__list" data-md-scrollfix>
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../start-here/choosing-your-setup/" class="md-nav__link">
         
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Choosing your setup
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
+          <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_2_1_label" aria-expanded="false">
+            <label class="md-nav__title" for="__nav_2_1">
+              <span class="md-nav__icon md-icon"></span>
               
-            
+  
+  Start here
+
+            </label>
+            <ul class="md-nav__list" data-md-scrollfix>
               
                 
+                  
   
   
   
@@ -539,8 +518,7 @@
   <span class="md-ellipsis">
     
   
-    Your first tournament
-  
+  Your first tournament
 
     
   </span>
@@ -551,88 +529,23 @@
     </li>
   
 
-              
-            
-          </ul>
-        </nav>
-      
-    </li>
-  
-
-              
-            
+                
               
                 
-  
-  
-  
-  
-    
-    
-      
-        
-      
-        
-      
-    
-    
-    
-      
-      
-    
-    
-    <li class="md-nav__item md-nav__item--nested">
-      
-        
-        
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2_2" >
-        
-          
-          <label class="md-nav__link" for="__nav_2_2" id="__nav_2_2_label" tabindex="0">
-            
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Install and deployment
-  
-
-    
-  </span>
-  
-  
-
-            <span class="md-nav__icon md-icon"></span>
-          </label>
-        
-        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_2_2_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_2_2">
-            <span class="md-nav__icon md-icon"></span>
-            
-  
-    Install and deployment
-  
-
-          </label>
-          <ul class="md-nav__list" data-md-scrollfix>
-            
-              
-                
+                  
   
   
   
   
     <li class="md-nav__item">
-      <a href="../../install/install/" class="md-nav__link">
+      <a href="../../start-here/choosing-your-setup/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    Install
-  
+  Choosing your setup
 
     
   </span>
@@ -643,46 +556,19 @@
     </li>
   
 
-              
-            
-              
                 
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../install/hosting/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Host the tournament app
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
               
-            
-          </ul>
-        </nav>
+            </ul>
+          </nav>
+        
       
     </li>
   
 
-              
-            
+                
               
                 
+                  
   
   
     
@@ -691,6 +577,8 @@
   
     
     
+      
+        
       
         
       
@@ -721,18 +609,17 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2_3" checked>
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2_2" checked>
         
           
-          <label class="md-nav__link" for="__nav_2_3" id="__nav_2_3_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_2_2" id="__nav_2_2_label" tabindex="0">
             
   
   
   <span class="md-ellipsis">
     
   
-    For organisers
-  
+  For organisers
 
     
   </span>
@@ -742,19 +629,19 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_2_3_label" aria-expanded="true">
-          <label class="md-nav__title" for="__nav_2_3">
-            <span class="md-nav__icon md-icon"></span>
-            
+        
+          <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_2_2_label" aria-expanded="true">
+            <label class="md-nav__title" for="__nav_2_2">
+              <span class="md-nav__icon md-icon"></span>
+              
   
-    For organisers
-  
+  For organisers
 
-          </label>
-          <ul class="md-nav__list" data-md-scrollfix>
-            
+            </label>
+            <ul class="md-nav__list" data-md-scrollfix>
               
                 
+                  
   
   
   
@@ -767,8 +654,7 @@
   <span class="md-ellipsis">
     
   
-    Input format
-  
+  Input format
 
     
   </span>
@@ -779,10 +665,10 @@
     </li>
   
 
-              
-            
+                
               
                 
+                  
   
   
   
@@ -795,8 +681,7 @@
   <span class="md-ellipsis">
     
   
-    Run a tournament on the day
-  
+  Run a tournament on the day
 
     
   </span>
@@ -807,10 +692,10 @@
     </li>
   
 
-              
-            
+                
               
                 
+                  
   
   
   
@@ -823,8 +708,7 @@
   <span class="md-ellipsis">
     
   
-    Backup and restore
-  
+  Backup and restore
 
     
   </span>
@@ -835,10 +719,10 @@
     </li>
   
 
-              
-            
+                
               
                 
+                  
   
   
   
@@ -851,8 +735,7 @@
   <span class="md-ellipsis">
     
   
-    Operating modes and access control
-  
+  Operating modes and access control
 
     
   </span>
@@ -863,10 +746,10 @@
     </li>
   
 
-              
-            
+                
               
                 
+                  
   
   
   
@@ -879,8 +762,7 @@
   <span class="md-ellipsis">
     
   
-    Tournament formats
-  
+  Tournament formats
 
     
   </span>
@@ -891,10 +773,10 @@
     </li>
   
 
-              
-            
+                
               
                 
+                  
   
   
   
@@ -907,8 +789,7 @@
   <span class="md-ellipsis">
     
   
-    The pool draw
-  
+  The pool draw
 
     
   </span>
@@ -919,10 +800,10 @@
     </li>
   
 
-              
-            
+                
               
                 
+                  
   
   
   
@@ -935,8 +816,7 @@
   <span class="md-ellipsis">
     
   
-    The knockout draw
-  
+  The knockout draw
 
     
   </span>
@@ -947,10 +827,10 @@
     </li>
   
 
-              
-            
+                
               
                 
+                  
   
   
   
@@ -963,8 +843,7 @@
   <span class="md-ellipsis">
     
   
-    Team tournaments
-  
+  Team tournaments
 
     
   </span>
@@ -975,10 +854,10 @@
     </li>
   
 
-              
-            
+                
               
                 
+                  
   
   
     
@@ -987,7 +866,9 @@
   
     <li class="md-nav__item md-nav__item--active">
       
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+        <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
       
       
         
@@ -1000,8 +881,7 @@
   <span class="md-ellipsis">
     
   
-    Naginata competitions
-  
+  Naginata competitions
 
     
   </span>
@@ -1011,15 +891,14 @@
           <span class="md-nav__icon md-icon"></span>
         </label>
       
-      <a href="./" class="md-nav__link md-nav__link--active">
+      <a href="././" class="md-nav__link md-nav__link--active">
         
   
   
   <span class="md-ellipsis">
     
   
-    Naginata competitions
-  
+  Naginata competitions
 
     
   </span>
@@ -1030,7 +909,8 @@
       
         
 
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+
+<nav class="md-nav md-nav--secondary" aria-label="On this page">
   
   
   
@@ -1039,16 +919,16 @@
   
     <label class="md-nav__title" for="__toc">
       <span class="md-nav__icon md-icon"></span>
-      Table of contents
+      On this page
     </label>
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
   <a href="#sune-ippon" class="md-nav__link">
     <span class="md-ellipsis">
-      
+      <span class="md-typeset">
         Sune ippon
-      
+      </span>
     </span>
   </a>
   
@@ -1057,94 +937,11 @@
         <li class="md-nav__item">
   <a href="#third-place-match" class="md-nav__link">
     <span class="md-ellipsis">
-      
+      <span class="md-typeset">
         Third-place match
-      
+      </span>
     </span>
   </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#engi-kyogi-kata-competition" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Engi-kyogi (kata competition)
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Engi-kyogi (kata competition)">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#add-engi-pairs" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Add Engi pairs
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#score-with-flags" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Score with flags
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#standings" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Standings
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#ties-between-pairs" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Ties between pairs
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#swiss-standings" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Swiss standings
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#excel-exports" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Excel exports
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
   
 </li>
       
@@ -1155,18 +952,46 @@
     </li>
   
 
+                
               
-            
-          </ul>
-        </nav>
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../engi/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Engi (pair kata) competitions
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+            </ul>
+          </nav>
+        
       
     </li>
   
 
-              
-            
+                
               
                 
+                  
   
   
   
@@ -1175,6 +1000,122 @@
     
       
         
+      
+        
+      
+    
+    
+    
+      
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_2_3" id="__nav_2_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  For court operators
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        
+          <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_2_3_label" aria-expanded="false">
+            <label class="md-nav__title" for="__nav_2_3">
+              <span class="md-nav__icon md-icon"></span>
+              
+  
+  For court operators
+
+            </label>
+            <ul class="md-nav__list" data-md-scrollfix>
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../court-operators/scoring-a-match/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Score a match
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../court-operators/recording-decisions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Record match decisions
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+            </ul>
+          </nav>
+        
+      
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    
+    
       
         
       
@@ -1199,8 +1140,7 @@
   <span class="md-ellipsis">
     
   
-    For court operators
-  
+  For competitors
 
     
   </span>
@@ -1210,33 +1150,32 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_2_4_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_2_4">
-            <span class="md-nav__icon md-icon"></span>
-            
+        
+          <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_2_4_label" aria-expanded="false">
+            <label class="md-nav__title" for="__nav_2_4">
+              <span class="md-nav__icon md-icon"></span>
+              
   
-    For court operators
-  
+  For competitors
 
-          </label>
-          <ul class="md-nav__list" data-md-scrollfix>
-            
+            </label>
+            <ul class="md-nav__list" data-md-scrollfix>
               
                 
+                  
   
   
   
   
     <li class="md-nav__item">
-      <a href="../../court-operators/scoring-a-match/" class="md-nav__link">
+      <a href="../../competitors/self-run/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    Score a match
-  
+  Self-run tournaments
 
     
   </span>
@@ -1247,46 +1186,19 @@
     </li>
   
 
-              
-            
-              
                 
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../court-operators/recording-decisions/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Record match decisions
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
               
-            
-          </ul>
-        </nav>
+            </ul>
+          </nav>
+        
       
     </li>
   
 
-              
-            
+                
               
                 
+                  
   
   
   
@@ -1317,8 +1229,7 @@
   <span class="md-ellipsis">
     
   
-    For competitors
-  
+  For spectators
 
     
   </span>
@@ -1328,33 +1239,32 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_2_5_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_2_5">
-            <span class="md-nav__icon md-icon"></span>
-            
+        
+          <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_2_5_label" aria-expanded="false">
+            <label class="md-nav__title" for="__nav_2_5">
+              <span class="md-nav__icon md-icon"></span>
+              
   
-    For competitors
-  
+  For spectators
 
-          </label>
-          <ul class="md-nav__list" data-md-scrollfix>
-            
+            </label>
+            <ul class="md-nav__list" data-md-scrollfix>
               
                 
+                  
   
   
   
   
     <li class="md-nav__item">
-      <a href="../../competitors/self-run/" class="md-nav__link">
+      <a href="../../spectators/following/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    Self-run tournaments
-  
+  Follow the tournament
 
     
   </span>
@@ -1365,24 +1275,29 @@
     </li>
   
 
+                
               
-            
-          </ul>
-        </nav>
+            </ul>
+          </nav>
+        
       
     </li>
   
 
-              
-            
+                
               
                 
+                  
   
   
   
   
     
     
+      
+        
+      
+        
       
         
       
@@ -1407,8 +1322,7 @@
   <span class="md-ellipsis">
     
   
-    For spectators
-  
+  Install and deployment
 
     
   </span>
@@ -1418,33 +1332,32 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_2_6_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_2_6">
-            <span class="md-nav__icon md-icon"></span>
-            
+        
+          <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_2_6_label" aria-expanded="false">
+            <label class="md-nav__title" for="__nav_2_6">
+              <span class="md-nav__icon md-icon"></span>
+              
   
-    For spectators
-  
+  Install and deployment
 
-          </label>
-          <ul class="md-nav__list" data-md-scrollfix>
-            
+            </label>
+            <ul class="md-nav__list" data-md-scrollfix>
               
                 
+                  
   
   
   
   
     <li class="md-nav__item">
-      <a href="../../spectators/following/" class="md-nav__link">
+      <a href="../../install/download/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    Follow the tournament
-  
+  Download
 
     
   </span>
@@ -1455,30 +1368,79 @@
     </li>
   
 
+                
               
-            
-          </ul>
-        </nav>
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../install/install/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Install
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../install/hosting/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Host the tournament app
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+            </ul>
+          </nav>
+        
       
     </li>
   
 
-              
-            
+                
               
                 
+                  
   
   
   
   
     
     
-      
-        
-      
-        
-      
-        
       
         
       
@@ -1507,8 +1469,7 @@
   <span class="md-ellipsis">
     
   
-    Command line
-  
+  Command line
 
     
   </span>
@@ -1518,75 +1479,19 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_2_7_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_2_7">
-            <span class="md-nav__icon md-icon"></span>
-            
-  
-    Command line
-  
-
-          </label>
-          <ul class="md-nav__list" data-md-scrollfix>
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../commands/create-pools/" class="md-nav__link">
         
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    create-pools
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
+          <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_2_7_label" aria-expanded="false">
+            <label class="md-nav__title" for="__nav_2_7">
+              <span class="md-nav__icon md-icon"></span>
               
-            
+  
+  Command line
+
+            </label>
+            <ul class="md-nav__list" data-md-scrollfix>
               
                 
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../commands/create-knockout/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    create-knockout
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
+                  
   
   
   
@@ -1599,8 +1504,7 @@
   <span class="md-ellipsis">
     
   
-    mobile-app
-  
+  mobile-app
 
     
   </span>
@@ -1611,38 +1515,10 @@
     </li>
   
 
-              
-            
+                
               
                 
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../commands/print/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    print
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
+                  
   
   
   
@@ -1655,8 +1531,7 @@
   <span class="md-ellipsis">
     
   
-    hash-password
-  
+  hash-password
 
     
   </span>
@@ -1667,10 +1542,10 @@
     </li>
   
 
-              
-            
+                
               
                 
+                  
   
   
   
@@ -1683,8 +1558,7 @@
   <span class="md-ellipsis">
     
   
-    version
-  
+  version
 
     
   </span>
@@ -1695,24 +1569,29 @@
     </li>
   
 
+                
               
-            
-          </ul>
-        </nav>
+            </ul>
+          </nav>
+        
       
     </li>
   
 
-              
-            
+                
               
                 
+                  
   
   
   
   
     
     
+      
+        
+      
+        
       
         
       
@@ -1739,8 +1618,7 @@
   <span class="md-ellipsis">
     
   
-    Legacy Web UI
-  
+  Other ways to work
 
     
   </span>
@@ -1750,19 +1628,155 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_2_8_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_2_8">
-            <span class="md-nav__icon md-icon"></span>
-            
+        
+          <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_2_8_label" aria-expanded="false">
+            <label class="md-nav__title" for="__nav_2_8">
+              <span class="md-nav__icon md-icon"></span>
+              
   
-    Legacy Web UI
-  
+  Other ways to work
 
-          </label>
-          <ul class="md-nav__list" data-md-scrollfix>
-            
+            </label>
+            <ul class="md-nav__list" data-md-scrollfix>
               
                 
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../commands/create-pools/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  create-pools
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../commands/create-knockout/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  create-knockout
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../commands/print/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  print
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2_8_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_2_8_4" id="__nav_2_8_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Legacy Web UI
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        
+          <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_2_8_4_label" aria-expanded="false">
+            <label class="md-nav__title" for="__nav_2_8_4">
+              <span class="md-nav__icon md-icon"></span>
+              
+  
+  Legacy Web UI
+
+            </label>
+            <ul class="md-nav__list" data-md-scrollfix>
+              
+                
+                  
   
   
   
@@ -1775,8 +1789,7 @@
   <span class="md-ellipsis">
     
   
-    Overview
-  
+  Overview
 
     
   </span>
@@ -1787,10 +1800,10 @@
     </li>
   
 
-              
-            
+                
               
                 
+                  
   
   
   
@@ -1803,8 +1816,7 @@
   <span class="md-ellipsis">
     
   
-    serve
-  
+  serve
 
     
   </span>
@@ -1815,18 +1827,29 @@
     </li>
   
 
+                
               
-            
-          </ul>
-        </nav>
+            </ul>
+          </nav>
+        
       
     </li>
   
 
+                
               
-            
-          </ul>
-        </nav>
+            </ul>
+          </nav>
+        
+      
+    </li>
+  
+
+                
+              
+            </ul>
+          </nav>
+        
       
     </li>
   
@@ -1868,8 +1891,7 @@
   <span class="md-ellipsis">
     
   
-    Developer guide
-  
+  Developer guide
 
     
   </span>
@@ -1879,19 +1901,19 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_3">
-            <span class="md-nav__icon md-icon"></span>
-            
+        
+          <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+            <label class="md-nav__title" for="__nav_3">
+              <span class="md-nav__icon md-icon"></span>
+              
   
-    Developer guide
-  
+  Developer guide
 
-          </label>
-          <ul class="md-nav__list" data-md-scrollfix>
-            
+            </label>
+            <ul class="md-nav__list" data-md-scrollfix>
               
                 
+                  
   
   
   
@@ -1904,8 +1926,7 @@
   <span class="md-ellipsis">
     
   
-    Code of conduct
-  
+  Code of conduct
 
     
   </span>
@@ -1916,10 +1937,10 @@
     </li>
   
 
-              
-            
+                
               
                 
+                  
   
   
   
@@ -1932,8 +1953,7 @@
   <span class="md-ellipsis">
     
   
-    Contributing
-  
+  Contributing
 
     
   </span>
@@ -1944,10 +1964,10 @@
     </li>
   
 
-              
-            
+                
               
                 
+                  
   
   
   
@@ -1984,8 +2004,7 @@
   <span class="md-ellipsis">
     
   
-    Architecture
-  
+  Architecture
 
     
   </span>
@@ -1995,19 +2014,19 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_3_3_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_3_3">
-            <span class="md-nav__icon md-icon"></span>
-            
+        
+          <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_3_3_label" aria-expanded="false">
+            <label class="md-nav__title" for="__nav_3_3">
+              <span class="md-nav__icon md-icon"></span>
+              
   
-    Architecture
-  
+  Architecture
 
-          </label>
-          <ul class="md-nav__list" data-md-scrollfix>
-            
+            </label>
+            <ul class="md-nav__list" data-md-scrollfix>
               
                 
+                  
   
   
   
@@ -2020,8 +2039,7 @@
   <span class="md-ellipsis">
     
   
-    Software
-  
+  Software
 
     
   </span>
@@ -2032,10 +2050,10 @@
     </li>
   
 
-              
-            
+                
               
                 
+                  
   
   
   
@@ -2048,8 +2066,7 @@
   <span class="md-ellipsis">
     
   
-    Data model
-  
+  Data model
 
     
   </span>
@@ -2060,10 +2077,10 @@
     </li>
   
 
-              
-            
+                
               
                 
+                  
   
   
   
@@ -2076,8 +2093,7 @@
   <span class="md-ellipsis">
     
   
-    Network
-  
+  Network
 
     
   </span>
@@ -2088,10 +2104,10 @@
     </li>
   
 
-              
-            
+                
               
                 
+                  
   
   
   
@@ -2104,8 +2120,7 @@
   <span class="md-ellipsis">
     
   
-    Infrastructure
-  
+  Infrastructure
 
     
   </span>
@@ -2116,18 +2131,20 @@
     </li>
   
 
+                
               
-            
-          </ul>
-        </nav>
+            </ul>
+          </nav>
+        
       
     </li>
   
 
+                
               
-            
-          </ul>
-        </nav>
+            </ul>
+          </nav>
+        
       
     </li>
   
@@ -2143,10 +2160,12 @@
               
               <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
                 <div class="md-sidebar__scrollwrap">
+                  
                   <div class="md-sidebar__inner">
                     
 
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+
+<nav class="md-nav md-nav--secondary" aria-label="On this page">
   
   
   
@@ -2155,16 +2174,16 @@
   
     <label class="md-nav__title" for="__toc">
       <span class="md-nav__icon md-icon"></span>
-      Table of contents
+      On this page
     </label>
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
   <a href="#sune-ippon" class="md-nav__link">
     <span class="md-ellipsis">
-      
+      <span class="md-typeset">
         Sune ippon
-      
+      </span>
     </span>
   </a>
   
@@ -2173,94 +2192,11 @@
         <li class="md-nav__item">
   <a href="#third-place-match" class="md-nav__link">
     <span class="md-ellipsis">
-      
+      <span class="md-typeset">
         Third-place match
-      
+      </span>
     </span>
   </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#engi-kyogi-kata-competition" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Engi-kyogi (kata competition)
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Engi-kyogi (kata competition)">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#add-engi-pairs" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Add Engi pairs
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#score-with-flags" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Score with flags
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#standings" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Standings
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#ties-between-pairs" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Ties between pairs
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#swiss-standings" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Swiss standings
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#excel-exports" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Excel exports
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
   
 </li>
       
@@ -2276,9 +2212,9 @@
             <div class="md-content" data-md-component="content">
               
               <article class="md-content__inner md-typeset">
+                <a id="__skip" tabindex="-1"></a>
                 
                   
-
 
   
   
@@ -2294,9 +2230,12 @@ Naginata has two competition forms:</p>
   single 3rd place with a bronze match instead of kendo's two joint 3rds. Refer to
   <a href="#third-place-match">Third-place match</a> for how that is set.</li>
 <li><strong>Engi-kyogi</strong>: the kata form, in which a pair perform choreographed forms
-  scored by referee flags rather than ippon.</li>
+  scored by referee flags rather than ippon. The app runs it as an
+  <a href="../engi/">Engi (pair kata) competition</a>, the same setting any other kata
+  competition uses.</li>
 </ul>
-<p>You pick the form with two checkboxes on a competition's <strong>Settings</strong> tab, both
+<p>You pick the form with two checkboxes, on the <strong>Add competition</strong> form or a
+competition's <strong>Settings</strong> tab, both
 locked once the draw is generated:</p>
 <table>
 <thead>
@@ -2314,16 +2253,16 @@ locked once the draw is generated:</p>
 </tr>
 <tr>
 <td><strong>Engi (kata competition)</strong></td>
-<td>Selects the Engi-kyogi kata form: flag-count scoring</td>
+<td>Flag-count scoring for pair kata in any art; refer to <a href="../engi/">Engi</a></td>
 <td>Individual only</td>
 </tr>
 </tbody>
 </table>
 <p>The 3rd-place rule (joint vs. single) is a separate setting, shared with kendo
 competitions; refer to <a href="#third-place-match">Third-place match</a>.</p>
-<p>Because Engi-kyogi is itself a naginata competition, a kata division usually has
-both on: <strong>Engi</strong> for the flag scoring and <strong>Naginata competition</strong> for the
-single 3rd place.</p>
+<p>A naginata engi-kyogi division usually has both on: <strong>Engi</strong> for the flag
+scoring and <strong>Naginata competition</strong> for the single 3rd place. A kata
+competition for another art ticks <strong>Engi</strong> alone.</p>
 <h2 id="sune-ippon">Sune ippon</h2>
 <p>Turn on <strong>Naginata competition</strong> and the score editor's waza buttons gain an <strong>S</strong>
 (Sune) alongside the kendo set, so the row reads <strong>M K D T S H</strong>. Award it the
@@ -2358,116 +2297,10 @@ it, so it also appears in that court's queue. Score it like any other bout:</p>
 <li>The loser finishes 4th and does not appear on the awards podium.</li>
 </ul>
 <p>The public podium reflects this automatically. Refer to
-<a href="../run-tournament/#results-and-awards">Awards and winners</a> for the full
+<a href="../run-tournament/#results-and-awards">Results and awards</a> for the full
 podium behaviour, including how the same setting works for league standings.</p>
-<h2 id="engi-kyogi-kata-competition">Engi-kyogi (kata competition)</h2>
-<p>Engi-kyogi is the kata form of naginata competition. A pair of competitors
-perform a set of choreographed forms, judged by a panel of referees who each
-raise a flag for the side they judge superior. It is scored entirely differently
-from a combat (shiai) bout: there are no ippon, no time on the clock, and no
-draws.</p>
-<p>Turn on <strong>Engi (kata competition)</strong> on an individual competition's Settings
-tab to switch its score editor to flag counting. Combine it with <strong>Naginata
-competition</strong> so the kata division also gets the single 3rd-place match.</p>
-<div class="admonition note">
-<p class="admonition-title">Quick-score and overrides are off for Engi</p>
-<p>Because every Engi result comes from the flag editor, the kendo shortcuts,
-quick-score, manual winner overrides, kiken, fusenpai, and daihyosen are
-disabled for Engi competitions.</p>
-</div>
-<h3 id="add-engi-pairs">Add Engi pairs</h3>
-<p>An Engi competitor is a pair: two people from the same dojo or team, scored
-together as one unit. There are no individual bouts inside a pair. Enter each
-pair as a single participant row with both member names combined in the name
-field, joined by a dash, and the shared dojo:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>Name 1 - Name 2, Dojo
-</code></pre></div>
-<p>When the competition uses zekken names, the zekken column holds the pair's
-combined zekken the same way:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>Name 1 - Name 2, ZEKKEN1 - ZEKKEN2, Dojo
-</code></pre></div>
-<p>The two names display stacked on one side of the match. The pair counts as
-one entry in the draw and one line in the standings.</p>
-<h3 id="score-with-flags">Score with flags</h3>
-<p>The score editor becomes a flag counter with one column per side, Aka (red)
-and Shiro (white):</p>
-<ul>
-<li>Use the <strong>+ / -</strong> buttons under each side, or the keyboard. <strong><code>a</code></strong> adds a flag
-  to <strong>Aka</strong> and <strong><code>s</code></strong> adds a flag to <strong>Shiro</strong> (either key works with or without
-  Shift). <strong><code>Backspace</code></strong> undoes the last flag you added, and <strong><code>Enter</code></strong> saves.</li>
-<li>A bout's flags must total 1, 3, or 5. The panel is always an odd size, so
-  there is always a majority and a bout can never end in a draw. The editor
-  flags any other total and does not let you save it.</li>
-<li>The side with more flags wins the bout.</li>
-<li><strong>Save result</strong> takes two taps, as <strong>Finish</strong> does in the kendo editor: the
-  first tap changes the button to <strong>Tap again to save</strong>, and the second tap
-  saves. On the court console the button reads <strong>Finish + Start Next</strong>
-  when another match of this competition waits on the court, and plain <strong>Finish</strong>
-  when none does; either way the first tap changes it to <strong>Tap again to finish</strong>.
-  A quick double tap only does the first.
-  <strong><code>Enter</code></strong> saves at once.</li>
-</ul>
-<h3 id="standings">Standings</h3>
-<p>In Engi pools, leagues, and Swiss competitions, pairs are ranked by wins first,
-then by the flags they accumulated:</p>
-<ol>
-<li>Total wins.</li>
-<li>Total flags accumulated across all bouts, as the tie-break when wins are equal.</li>
-</ol>
-<p>Both the winning and the losing side's flags count toward that side's own tally.
-A pair that loses by three flags to two still keeps its two flags.</p>
-<h3 id="ties-between-pairs">Ties between pairs</h3>
-<p>Engi pools and leagues follow the same tie rule as kendo pools and leagues. Two
-pairs that are level on wins and on flags are tied, and the tie rule says which
-ties get a tie-break bout:</p>
-<ul>
-<li><strong>League</strong>: a tie for 1st or 2nd place always gets a tie-break bout. A tie for
-  3rd place gets one only when <strong>Award two joint 3rd places</strong> is off; with it on
-  the pairs share 3rd. Ticking <strong>Naginata competition</strong> turns it off, and a
-  kata division usually has that box ticked. A tie for 4th place or lower shares
-  its place.</li>
-<li><strong>Pools</strong>: a tie gets a bout only when it decides who goes through or where
-  the pairs are seated. Any other tie shares its place.</li>
-</ul>
-<p>The tie-break bout opens in the same flag editor as any Engi bout, and the pair
-with more flags wins it. Because a bout's flags always total 1, 3, or 5, a
-tie-break between two pairs can never end level. If three or more pairs are
-level and the round goes in a circle, the Pools tab (League in a league) offers
-another round or lots,
-exactly as for kendo competitors, and the lots are drawn and entered by you.
-Refer to <a href="../../court-operators/recording-decisions/#individual-competitors-another-round-or-lots">Recording decisions</a>.
-Name order never decides a place that counts.</p>
-<p>Quick-score, kiken, fusenpai, and daihyosen stay off for Engi, so a tie-break
-bout is always scored by flags. With kiken and fusenpai off, the app records no
-withdrawal for an Engi pair, so a tie-break whose two sides both withdrew does
-not arise.</p>
-<h3 id="swiss-standings">Swiss standings</h3>
-<p>Swiss does not follow the tie rule. A Swiss ranking still tied after wins and
-flags is settled by:</p>
-<ol>
-<li>Head-to-head: when two pairs are tied on wins and flags, the pair that won
-   their direct bout ranks higher.</li>
-<li>Name order (alphabetical by the pair's first listed member), when wins,
-   flags and head-to-head are all equal.</li>
-</ol>
-<p><img alt="Engi Swiss standings: a winner banner above a final standings table with rank, pair, victories (V), and flags columns, with a caption ranking by wins, then total flags, then head-to-head." src="../../../screenshots/swiss-standings-engi.png" /></p>
-<h3 id="excel-exports">Excel exports</h3>
-<p>Both Excel downloads on the competition page (refer to
-<a href="../run-tournament/#export-and-print">Export and print</a>) understand Engi:</p>
-<ul>
-<li>Each pair is a single competitor throughout both workbooks. The data sheet
-  lists the combined pair name under <strong>Player Name</strong> with the shared dojo. Every
-  sheet that shows the pair (pool draw, match grids, standings, bracket
-  pages, and the printable name sheets) shows both members together on one
-  line as <code>Member 1 - Member 2</code>.</li>
-<li>Pool standings in both workbooks use the Engi columns: <strong>W</strong> (wins),
-  <strong>Flags</strong> (total flags), and <strong>Rank</strong>. Losses are not recorded because
-  ranking is determined by wins then accumulated own-side flags. The kendo
-  points columns do not appear.</li>
-<li>The results workbook records each side's referee flag count in the score
-  cells instead of ippon letters. A bout recorded without flags leaves the
-  score cells blank with the decision marked in the centre column.</li>
-</ul>
+
+
 
 
 
@@ -2498,8 +2331,8 @@ flags is settled by:</p>
   
   
     Made with
-    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
-      Material for MkDocs
+    <a href="https://zensical.org/" target="_blank" rel="noopener">
+      Zensical
     </a>
   
 </div>
@@ -2509,7 +2342,7 @@ flags is settled by:</p>
 </footer>
       
     </div>
-    <div class="md-dialog" data-md-component="dialog">
+    <div class="md-dialog" data-md-component="dialog" role="status" aria-atomic="true">
       <div class="md-dialog__inner md-typeset"></div>
     </div>
     
@@ -2517,10 +2350,16 @@ flags is settled by:</p>
     
       
       
-      <script id="__config" type="application/json">{"annotate": null, "base": "../../..", "features": ["navigation.indexes", "navigation.instant", "navigation.tabs", "navigation.tabs.sticky", "content.code.copy"], "search": "../../../assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+      
+      
+        
+        
+          
+        
+      <script id="__config" type="application/json">{"annotate":null,"base":"../../..","features":["navigation.indexes","navigation.tabs","navigation.tabs.sticky","content.code.copy"],"redirect":"../../../redirect.json","search":"../../../assets/javascripts/workers/search.719e0d91.min.js","tags":null,"translations":{"clipboard.copied":"Copied to clipboard","clipboard.copy":"Copy to clipboard","clipboard.error":"Could not copy to clipboard","search.result.more.one":"1 more on this page","search.result.more.other":"# more on this page","search.result.none":"No matching documents","search.result.one":"1 matching document","search.result.other":"# matching documents","search.result.placeholder":"Type to start searching","search.result.term.missing":"Missing","select.version":"Select version"},"version":null}</script>
     
     
-      <script src="../../../assets/javascripts/bundle.a5f9d56c.min.js"></script>
+      <script src="../../../assets/javascripts/bundle.3cb411a8.min.js"></script>
       
         <script src="https://cdn.jsdelivr.net/npm/mermaid@11.16.0/dist/mermaid.min.js"></script>
       

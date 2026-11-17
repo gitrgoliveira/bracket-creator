@@ -334,7 +334,7 @@ export async function _flushQueue() {
                         let ended = '';
                         try {
                             ended = await _flushBase(base, list, pass, gen);
-                            if (ended === 'kept' || ended === 'offline') failedBases.add(base);
+                            if (ended === 'kept') failedBases.add(base);
                         } catch (e) {
                             faults.push(e);
                             failedBases.add(base);

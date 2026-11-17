@@ -60,8 +60,9 @@ The list comes from `overrides/landing.html` itself: every
 `screenshots/<name>.webp` or `videos/<name>.mp4` it names is made from the
 committed `<name>.png` or `<name>.webm`, and only when that file is newer than
 its copy. A `<name>-1440.webp` is the one exception: it is a 1440-wide copy of
-`<name>.png`, the smaller candidate in the hero's `srcset`. A new picture on the landing page therefore needs only its `<source
-type="image/webp">` there. It needs `cwebp` and `ffmpeg` (`brew install webp
+`<name>.png`, the smaller candidate in the hero's `srcset`. A new picture on
+the landing page therefore needs only its `<source type="image/webp">` there.
+`make docs/media-copies` needs `cwebp` and `ffmpeg` (`brew install webp
 ffmpeg`); the copies are committed, so `make docs/build` needs neither.
 
 Re-recording `kachinuki-demo` carries one manual step. The clip is chaptered by
@@ -223,11 +224,11 @@ the viewport. Six are at 2, where a committed 2560x1800 means a 1280x900
 viewport: `mobile-dashboard`, `mobile-participants`, `mobile-draw-preview`,
 `mobile-pool-standings`, `selfrun-register` and `selfrun-viewer-home`. Those six
 declare `dpr: 2`; a recipe that says nothing is at 1. `hero` and `hero-mobile`
-are at 2 too, but crop to an element, so their size is the element's (refer to The
-hero stage). A phone capture that
-must lay out as on a touch screen (the calendar's phone layout, with no Move buttons)
-declares `touch: true`. The runner compares width always,
-and height for every mode except `fullPage`, whose height moves with content.
+are at 2 too, but crop to an element, so their size is the element's (refer to
+[The hero stage](#the-hero-stage)). A phone capture that must lay out as on a
+touch screen (the calendar's phone layout, with no Move buttons) declares
+`touch: true`. The runner compares width always, and height for every mode
+except `fullPage`, whose height moves with content.
 
 A new capture has nothing to compare against and reports `NEW`.
 

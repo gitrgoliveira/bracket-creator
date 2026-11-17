@@ -1,11 +1,20 @@
 // Local e2e journeys for the tournament app. Run through `make e2e`, which
 // builds bin/bracket-creator first; see README.md.
+import os from 'node:os';
 import { defineConfig } from '@playwright/test';
 import { EXPECT_TIMEOUT_MS, OPERATOR_DEVICE, PUBLIC_DEVICE } from './fixtures/devices.mjs';
 
 // Chromium refuses to run its sandbox as root, so the sandbox is dropped there
 // and only there (the same rule as scripts/screenshots/run.mjs).
 const asRoot = typeof process.getuid === 'function' && process.getuid() === 0;
+
+// Journeys drive a real browser against a real server each, and a journey that
+// passes alone can still miss an expected screen change inside its timeout when
+// every core is busy. Playwright's default of half the cores left 1 or 2
+// journeys a run failing under that load; a third of them (3 on a 10-core
+// machine, never fewer than 1) leaves the machine room to answer. An explicit
+// `--workers` in E2E_ARGS still wins.
+const WORKERS = Math.max(1, Math.floor(os.availableParallelism() / 3));
 
 export default defineConfig({
   testDir: './journeys',
@@ -29,7 +38,10 @@ export default defineConfig({
   expect: { timeout: EXPECT_TIMEOUT_MS },
   fullyParallel: false,
   forbidOnly: true,
-  retries: 0,
+  // One retry, for what the cap above does not cover: a journey that fails and
+  // then passes is reported as flaky by the list reporter, never as passed.
+  retries: 1,
+  workers: WORKERS,
   reporter: 'list',
   use: {
     browserName: 'chromium',

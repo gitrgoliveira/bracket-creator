@@ -164,6 +164,7 @@ const CHECK_MODULES = [
   'app_version.jsx',
   'barred_chip.jsx',
   'barred_match_notice.jsx',
+  'base_sender_lease.jsx',
   'bronze_feeders.jsx',
   'calendar_move.jsx',
   'calendar_rules.jsx',

@@ -419,7 +419,7 @@ event sequence (`checkSeqGap`) and triggers a resync. The modules around the out
 - `write_result.jsx`: decides whether a score write landed, and if not, whether the state on screen can still become true.
 - `draft_taps.jsx` (used by the score editors): turns a draft held in an editor into the taps that would have made it, when another device starts the match.
 - `queued_writes_wait.jsx` (used by the draw and move screens): waits for a competition's queued writes of a kind (check-ins before a draw, a time change before a move) before going on.
-- `landed_taps.jsx`, `told_taps.jsx` and `minted_members.jsx` (used by the outbox modules): what the device knows of its own taps that landed, of the taps it already told the operator were not applied, and of the team member ids it made.
+- `landed_taps.jsx`, `told_taps.jsx` and `minted_members.jsx` (used by the outbox modules): what the device knows of its own taps that landed, of the taps it already told the operator were not applied, and of the team member ids it made. `base_sender_lease.jsx` (used by the flush) keeps one tab of the device sending each match's writes at a time, so two open tabs send a write once.
 
 The operator console is a tablet/desktop surface; the viewer is mobile-first. Refer to
 [Network architecture](network-architecture.md) for the client's **outbox, SSE resume, and

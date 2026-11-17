@@ -33,6 +33,8 @@ import {
 } from './api_client_queue.jsx';
 import { _CHECKIN_KINDS, _checkInAnswered, rebaseQueuedVersion } from './api_client_overlays.jsx';
 import { TAP_BATCH_MAX, _tellTurnedAway, _sendTapBatch } from './api_client_taps.jsx';
+import { _randomId } from './api_client_ids.jsx';
+import { createBaseLease } from './base_sender_lease.jsx';
 import {
     _tellRefusal, _notifyScoreSupersededEditor, _notifyScoreSupersededAlert, _heldForClosedMatch,
     _refusedByServer, _recomputeSyncStatus, SERVER_REJECTION_NOTICE_THRESHOLD, _endDiscardWhileOut,
@@ -67,6 +69,7 @@ export function _afterDiscard() {
 
 let _flushTimer = null;
 const FLUSH_BACKOFF_MS = [500, 1000, 2000, 4000, 8000];
+const ADOPTED_FLUSH_DELAY_MS = 300;
 let _flushAttempt = 0;
 // Single-in-flight guard. _flushQueue's body awaits network I/O, so without a
 // lock a second trigger (a rapid enqueue, an `online` event, or a backoff timer
@@ -85,6 +88,18 @@ let _launchIdleBases = null;
 // matches the pass's own `active`; it is kept so that a later change letting a
 // pass end with a turn still out cannot flush one base twice at once.
 const _basesOut = new Set();
+// _baseLease: the tabs of one device share the outbox, and only the tab that
+// holds a base's lease sends it (base_sender_lease.jsx), so one entry is sent
+// once and a base's entries go in one tab's order. Storage is reached lazily,
+// so a page whose storage throws sends as it always did.
+export const _baseLease = createBaseLease({
+    storage: {
+        getItem: (k) => globalThis.localStorage.getItem(k),
+        setItem: (k, v) => globalThis.localStorage.setItem(k, v),
+        removeItem: (k) => globalThis.localStorage.removeItem(k),
+    },
+    tab: _randomId(),
+});
 // Bumped by clearQueue() (logout / password_reset). An in-flight _flushQueue loop
 // snapshots this at the start and aborts if it changes mid-loop, so a credential
 // revocation can't keep sending queued writes with the now-revoked password.
@@ -302,6 +317,16 @@ export async function _flushQueue() {
                 _markWaitCycles(byBase);
                 for (const [base, list] of byBase) {
                     if (active.has(base) || failedBases.has(base) || _basesOut.has(base)) continue;
+                    // Another tab of the device is sending this base: it is not
+                    // failing, and not held. The holder's wake after a turn that
+                    // sent all it held reruns the flush, and the backoff covers
+                    // a holder that failed or is gone.
+                    if (!_baseLease.claim(base)) {
+                        failedBases.add(base);
+                        pass.anyFailed = true;
+                        _askAgainWhenLeaseEnds(base);
+                        continue;
+                    }
                     active.set(base, true);
                     _basesOut.add(base);
                     (async () => {
@@ -315,6 +340,7 @@ export async function _flushQueue() {
                         } finally {
                             active.delete(base);
                             _basesOut.delete(base);
+                            _baseLease.release(base, ended === 'settled');
                             // A base that sent all it held, or whose entry was
                             // replaced while out (`restamped`), goes on with what
                             // is queued for it, in its order. A clock-skew
@@ -1014,6 +1040,30 @@ function _staleDocumentSaves(key, d, err) {
     const at = d.payload && d.payload[field];
     return _entriesFor(_baseOf(key)).filter(([k, e]) => k !== key && e && !_inFlight.has(e)
         && e.kind === d.kind && e.payload && e.payload[field] === at);
+}
+
+// _askAgainWhenLeaseEnds: a holder that is gone (its page closed without a
+// pagehide, or crashed) wakes nobody, so this tab asks once the lease it found
+// would have run out. One timer a base: a holder that is alive beats and the
+// ask finds the lease held again, and a holder that finished woke this tab.
+const _askingFor = new Set();
+function _askAgainWhenLeaseEnds(base) {
+    if (_askingFor.has(base)) return;
+    _askingFor.add(base);
+    setTimeout(() => {
+        _askingFor.delete(base);
+        if (_writeQueue.size > 0) _rerunFlushSoon();
+    }, _baseLease.expiresIn(base) + 50);
+}
+
+// _flushAdoptedSoon: the flush for entries another tab made. Its storage event
+// reaches this tab a moment BEFORE the lease that tab takes for the base it is
+// about to send (base_sender_lease.jsx), so a flush made at once would find the
+// base free and send it too. Waiting ADOPTED_FLUSH_DELAY_MS lets the lease show;
+// a tab that is gone holds none, and its entries go once the wait is over.
+export function _flushAdoptedSoon() {
+    _resetFlushBackoff();
+    setTimeout(() => { if (_writeQueue.size > 0) _flushQueue(); }, ADOPTED_FLUSH_DELAY_MS);
 }
 
 // _rerunFlushSoon: a flush now, or a rerun of the one under way.

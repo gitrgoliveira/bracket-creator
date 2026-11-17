@@ -339,6 +339,14 @@ export function _persistQueue() {
                 settledStillStored = true;
             }
         }
+        // A copy of an entry this tab settled earlier that another tab stored
+        // back since, no newer, is the stale persist of a tab that had not seen
+        // it leave: nothing holds it any more, so a reload would send it over
+        // what came after it (one sender per base, base_sender_lease.jsx, no
+        // longer leaves that tab to send and clear it itself).
+        for (const [k, stored] of merged) {
+            if (!_writeQueue.has(k) && _wasSettledHere(k, stored)) merged.delete(k);
+        }
         // A key both hold keeps the newer write. This tab's copy can be one it
         // took from storage (on load, or from another tab), and writing it back
         // over a later write the other tab stored since, such as a queued

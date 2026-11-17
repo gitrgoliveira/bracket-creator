@@ -2359,8 +2359,10 @@ describe('bc-sync: the stored outbox is shared by every tab', () => {
         await tabB.recordScore('c1', 'm1', { status: 'completed', winner: 'B' }, 'pw', null);
         await flushMicrotasks();
         // Tab A's older write lands; tab B's newer one for the same match is
-        // still queued there and must stay stored.
-        mockFetch((url, opts) => (JSON.parse(opts.body).winner === 'A' ? landed() : hang()));
+        // still queued there and must stay stored. Tab B's send fails rather than
+        // hangs: a hanging send would hold the match's lease (one sender per
+        // base, base_sender_lease.jsx) and tab A would not send until it ended.
+        mockFetch((url, opts) => (JSON.parse(opts.body).winner === 'A' ? landed() : offline()));
         await tick(10000);
         expect(API.hasPendingTerminalWrite('c1', 'm1')).toBe(false);
         expect(stored().map((d) => d.payload.winner)).toEqual(['B']);
@@ -2453,7 +2455,9 @@ describe('bc-sync: a tab follows the writes other tabs store', () => {
         const sent = [];
         mockFetch((url, opts) => { sent.push(JSON.parse(opts.body).winner); return landed(); });
         otherTabSaved(null, JSON.stringify([entry('mB')]));
-        await tick(0);
+        // The adopting tab waits for the other tab's lease to show before it sends
+        // (ADOPTED_FLUSH_DELAY_MS, api_client_flush.jsx).
+        await tick(400);
         expect(sent).toEqual(['mB']);
         expect(API.hasPendingTerminalWrite('c1', 'mB')).toBe(false);
     });
@@ -2666,7 +2670,7 @@ describe('bc-offl: subscribeUnsentWrites, the held-writes count', () => {
         window.dispatchEvent(new StorageEvent('storage', {
             key: 'bc_write_queue_v2', oldValue: null, newValue: JSON.stringify([entry('mB')]),
         }));
-        await flushMicrotasks();
+        await tick(400); // the wait for the other tab's lease (ADOPTED_FLUSH_DELAY_MS)
         unsub();
         // Taken up, then held once its first send fails (offline).
         expect(seen).toEqual([ZERO, ONE_RESULT, ONE_HELD]);

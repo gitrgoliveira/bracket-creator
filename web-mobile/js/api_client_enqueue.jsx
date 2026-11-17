@@ -26,7 +26,7 @@ import {
     _adoptStoredTapSeq,
 } from './api_client_taps.jsx';
 import { _whereOf, _recomputeSyncStatus } from './api_client_status.jsx';
-import { _inFlight, _resetFlushBackoff, _flushQueue, _afterKeys, _addAfter } from './api_client_flush.jsx';
+import { _inFlight, _resetFlushBackoff, _flushQueue, _flushAdoptedSoon, _afterKeys, _addAfter } from './api_client_flush.jsx';
 import { _minted, _followMintedMembers } from './api_client_members.jsx';
 
 // _takenFromLegacy: every entry this tab took over from the key an older build
@@ -496,12 +496,13 @@ export function _withoutDownstreamConfirmation(payload) {
 //   - a removed key (the writer's queue went empty, or was wiped at logout)
 //     drops only the entries taken up this way; this tab's own are written
 //     back by its next persist.
-// A write two tabs hold can be sent by both, which is harmless: the server
+// A write two tabs hold is sent by the tab that holds its base's lease
+// (base_sender_lease.jsx); a send both make anyway is harmless: the server
 // takes an equal stamp again and refuses an older one (last-write-wins).
 export function _onStoredQueueChanged(oldRaw, newRaw) {
     const before = _parseStoredQueue(oldRaw);
     const after = newRaw === null ? null : _parseStoredQueue(newRaw);
-    let changed = false, adopted = false, migrated = false;
+    let changed = false, adopted = false, migrated = false, dropped = false;
     // Another tab's batch can take many entries out at once: their follow-ups
     // are done once (K6). What a member add another tab took out proved is in
     // the owner's records, which that tab wrote first (minted_members.jsx).
@@ -518,11 +519,14 @@ export function _onStoredQueueChanged(oldRaw, newRaw) {
             // anyway) or say it. A sign-out's wipe (after === null) still
             // takes it at once.
             if (gone && after !== null && _inFlight.has(d)) continue;
-            if (gone && _dequeue(k, d)) changed = true;
+            if (gone && _dequeue(k, d)) changed = dropped = true;
         }
     } finally {
         _closeDequeueBatch();
     }
+    // This tab's own stale persist may have put a dropped entry back in storage
+    // while it had not seen it leave: the persist takes it out again.
+    if (dropped) _persistQueue();
     for (let [k, d] of after || []) {
         const held = _writeQueue.get(k);
         if (held && !_enqueuedAfter(d, held.enqueuedAt)) {
@@ -554,10 +558,7 @@ export function _onStoredQueueChanged(oldRaw, newRaw) {
     if (migrated) _persistQueue();
     if (!changed) return;
     _recomputeSyncStatus();
-    if (adopted) {
-        _resetFlushBackoff();
-        _flushQueue();
-    }
+    if (adopted) _flushAdoptedSoon();
 }
 
 // _takeOverLegacyQueue: takes over the entries an older build stored under the

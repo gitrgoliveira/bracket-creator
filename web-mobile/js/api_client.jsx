@@ -78,8 +78,9 @@ import {
 } from './api_client_status.jsx';
 import {
     _inFlight, _offlineFlag, _afterDiscard, _resetFlushBackoff, _setOffline, _bumpQueueGen, _restampFor,
-    _flushQueue, _outboxIdle, _blockerOf, _queueIndex, _newWalk, _rerunFlushSoon,
+    _flushQueue, _outboxIdle, _blockerOf, _queueIndex, _newWalk, _rerunFlushSoon, _baseLease,
 } from './api_client_flush.jsx';
+import { BASE_LEASE_WAKE_KEY } from './base_sender_lease.jsx';
 import {
     _outboxWrite, _lastEntryKey, _isFollowed, _migratedLegacyLineup, _queuedLineupSave, _lineupKey,
     _storedEntryProblem, _commitEnqueue, _lastEnqueuePersisted, enqueueRunningWrite,
@@ -97,7 +98,9 @@ if (typeof setInterval === 'function') {
     if (beat && typeof beat.unref === 'function') beat.unref();
 }
 if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
-    window.addEventListener('pagehide', () => _landed.leave());
+    // A page that goes gives up the bases it was sending, so another tab sends
+    // them at once (base_sender_lease.jsx).
+    window.addEventListener('pagehide', () => { _landed.leave(); _baseLease.leave(); });
 }
 // A hidden page's timers slow or stop: it beats as it is hidden and shown, so
 // the other tabs read it alive for longer while hidden (stage 6 review 9, F6),
@@ -118,6 +121,8 @@ if (typeof window !== 'undefined') {
     if (window.__bcStoredQueueHandler) window.removeEventListener('storage', window.__bcStoredQueueHandler);
     const onStorage = (e) => {
         if (e.key === QUEUE_STORAGE_KEY) _onStoredQueueChanged(e.oldValue, e.newValue);
+        // Another tab sent all it held of a base: send what is left of it.
+        if (e.key === BASE_LEASE_WAKE_KEY) _rerunFlushSoon();
         if (typeof e.key === 'string' && e.key.startsWith(TOLD_TAPS_PREFIX)) _onToldTapsStored(e.key, e.oldValue, e.newValue);
         // Another tab learned something of a minted member: a member that
         // never was comes off this tab's writes, and a write held back for one

@@ -75,7 +75,7 @@ What the tournament app does:
 * **Admin console** (password-protected): competitions, participants, seeding, draws, scheduling, and scoring.
 * **Court console**: one laptop or tablet per court scores that court's bouts (points, fouls, encho and decisions) and starts its next match.
 * **Public viewer and court displays**: real-time schedule, standings, and brackets for spectators, plus big-screen court displays and a transparent overlay for streaming.
-* **All formats**: Knockout, Pools + Knockout, League, and Swiss, for individuals and teams (including kachinuki), plus naginata and [engi](https://gitrgoliveira.github.io/bracket-creator/user-guide/organisers/engi/) pair kata competitions for any art.
+* **Formats**: Knockout, Pools + Knockout, and League, for individuals and teams (including kachinuki), plus naginata and [engi](https://gitrgoliveira.github.io/bracket-creator/user-guide/organisers/engi/) pair kata competitions for any art.
 * **Excel export**: download the results as a workbook at any point during the event.
 * **Backup and restore**: download a backup of the tournament or one competition, restore it with a preview first, and undo a restore. The server also keeps a daily copy in its data folder when the data changed.
 

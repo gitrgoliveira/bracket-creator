@@ -7,9 +7,10 @@
   Every link goes through base_url so it resolves under the GitHub Pages
   subpath, as overrides/404.html does. This file is public prose: the
   `docs/prose` gate reads its text and its alt, title, aria-label and meta
-  content. Its colour values are the product's: DESIGN.md owns them, and
-  docs/assets/stylesheets/extra.css carries the docs theme's copy, so change
-  a colour there first and bring it here after. A card's picture
+  content. Its colours are the website's own, not DESIGN.md's: DESIGN.md
+  governs the app, and only the navy and the Aka red here are taken from
+  it. The docs pages keep their own look (docs/assets/stylesheets/extra.css),
+  deliberately different from this page. A card's picture
   (screenshots/card-*.png) is a capture of the region the card shows,
   made by the docs capture harness (scripts/screenshots/lib/card.mjs).
 -#}
@@ -51,11 +52,12 @@
     --navy:#1d3557; --navy-tint:#e1e8f1; --aka:#c8202e; --aka-dark:#a91a26; --paper:#f4f6f9; --surface:#fff; --on-dark:#fff;
     --ink:#1c2633; --muted:#5d6b7e; --rule:#d6dce4; --footer-ink:#c9d4e3;
     --code-bg:#0e1b2e; --code-ink:#e6ecf3; --code-muted:#7a8ca5; --mono:"JetBrains Mono", monospace;
+    --font:"Atkinson Hyperlegible", system-ui, sans-serif;
   }
   * { box-sizing:border-box; }
   html { scroll-behavior:smooth; }
   html, body { margin:0; overflow-x:clip; }
-  body { font-family:"Atkinson Hyperlegible", system-ui, sans-serif; color:var(--ink); background:var(--surface); }
+  body { font-family:var(--font); color:var(--ink); background:var(--surface); }
   img, video { display:block; max-width:100%; height:auto; }
   a { color:inherit; text-decoration:none; }
   a:focus-visible, video:focus-visible, pre:focus-visible { outline:3px solid var(--navy); outline-offset:3px; }
@@ -78,17 +80,18 @@
   .btn.p { background:var(--aka); color:var(--on-dark); }
   .btn.p:hover { background:var(--aka-dark); }
   .btn.s { border:2px solid var(--navy); color:var(--navy); }
+  .phone-only { display:none; }
   .btn.s:hover { background:var(--navy-tint); }
   .bar .btn { min-height:40px; font-size:15px; padding:0 16px; }
   .hero { background:var(--paper); padding:48px 0 64px; }
-  .hero h1 { font-size:58px; line-height:1.04; margin:0 0 16px; max-width:22ch; text-wrap:balance; letter-spacing:-.015em; color:var(--navy); }
+  .hero h1 { font-size:58px; line-height:1.04; margin:0 0 16px; max-width:22ch; text-wrap:balance; letter-spacing:-.015em; color:var(--navy); overflow-wrap:anywhere; min-width:0; }
   .hero .lede { font-size:21px; line-height:1.5; color:var(--muted); max-width:62ch; margin:0 0 26px; }
   .cta { display:flex; gap:12px; flex-wrap:wrap; }
   .proof { margin-top:18px; font-size:15px; color:var(--muted); }
   .hero-shot { display:block; margin-top:32px; }
   .kicker { font-family:var(--mono); font-size:13px; letter-spacing:.08em; text-transform:uppercase; color:var(--aka); margin:0 0 10px; }
   section.block { padding:80px 0; }
-  section.block h2 { font-size:36px; line-height:1.15; margin:0 0 14px; color:var(--navy); max-width:26ch; text-wrap:balance; }
+  section.block h2 { font-size:36px; line-height:1.15; margin:0 0 14px; color:var(--navy); max-width:26ch; text-wrap:balance; overflow-wrap:anywhere; min-width:0; }
   section.block .intro { font-size:19px; color:var(--muted); max-width:60ch; margin:0 0 40px; line-height:1.5; text-wrap:pretty; }
   .steps { display:grid; grid-template-columns:repeat(3, minmax(0,1fr)); gap:28px; }
   .steps figure, .feat figure, .watch { margin:0; }
@@ -109,7 +112,8 @@
   .feat .lead h3 { margin-top:0; font-size:26px; }
   .feat .frame { height:260px; }
   .formats { display:flex; flex-wrap:wrap; gap:10px; margin:14px 0 0; padding:0; list-style:none; }
-  .formats li { border:1px solid var(--rule); border-radius:999px; padding:6px 14px; font-size:15px; background:var(--surface); }
+  main .formats li a { display:inline-flex; align-items:center; min-height:44px; padding:0 16px; border:1px solid var(--rule); border-radius:999px; font-size:15px; background:var(--surface); text-decoration:none; }
+  main .formats li a:hover { border-color:var(--navy); text-decoration:underline; text-underline-offset:3px; }
   .start { display:grid; grid-template-columns:minmax(0,5fr) minmax(0,7fr); gap:48px; align-items:start; }
   .start ol { margin:0; padding:0; list-style:none; counter-reset:s; }
   .start li { counter-increment:s; padding:0 0 22px 44px; position:relative; font-size:18px; line-height:1.5; }
@@ -138,7 +142,7 @@
     .bar { gap:8px; }
     .brand { font-size:17px; gap:8px; }
     .bar .btn { min-height:44px; padding:0 14px; }
-    .hero { padding:40px 0; }
+    .hero { padding:32px 0 52px; }
     .hero h1 { font-size:min(38px, calc((100vw - 32px) / 9.6)); }
     .cta .btn { width:100%; }
     section.block { padding:52px 0; }
@@ -154,7 +158,15 @@
     .hero h1 .line { display:block; white-space:nowrap; }
     .hero .lede { font-size:18px; }
   }
+  @media (min-width:761px) and (max-width:1099px) {
+    .hero h1 { font-size:clamp(40px, 5vw, 48px); }
+  }
   @media (max-width:600px) {
+    {#- On a phone the hero's Watch it update live opens the clip in the
+        browser's own player in one tap, as the button under the hidden
+        clip does; wider screens scroll to the clip on the page. -#}
+    .wide-only { display:none; }
+    .phone-only { display:inline-flex; }
     .watch video { display:none; }
     .watch-full { display:flex; align-items:center; justify-content:center; min-height:48px; margin-top:0; padding:0 22px; border:2px solid var(--navy); border-radius:6px; font-size:17px; font-weight:700; text-decoration:none; }
   }
@@ -181,7 +193,7 @@
   <div>
   <h1 id="headline"><span class="line">Your tournament,</span> <span class="line">live on every screen</span></h1>
   <p class="lede">{{ lede_head }}<a href="{{ base_url }}/user-guide/organisers/engi/">engi</a>{{ lede_tail }}</p>
-  <div class="cta"><a class="btn p" href="{{ first }}">Run your first tournament</a><a class="btn s" href="#watch">Watch it update live</a></div>
+  <div class="cta"><a class="btn p" href="{{ first }}">Run your first tournament</a><a class="btn s wide-only" href="#watch">Watch it update live</a><a class="btn s phone-only" href="{{ base_url }}/videos/live-every-screen.mp4">Watch it update live</a></div>
   <p class="proof">Free and open source</p>
   </div>
   <picture class="hero-shot">
@@ -225,7 +237,9 @@
   <div class="feat">
     <figure class="lead"><div class="frame"><picture><source type="image/webp" srcset="{{ base_url }}/screenshots/card-bracket.webp"><img src="{{ base_url }}/screenshots/card-bracket.png" width="843" height="534" loading="lazy" alt="A knockout bracket part-way through, with scored bouts ticked and the bout on court now marked"></picture></div>
       <div><h3>The formats you run</h3><p>Individual and team competitions, kachinuki, and engi pairs for any kata.</p>
-      <ul class="formats"><li>Knockout</li><li>Pools + Knockout</li><li>League</li><li>Swiss</li></ul></div></figure>
+      {#- Swiss is left out on purpose until its open work is closed; it
+          comes back here, and in the README's Formats line, then. -#}
+      <ul class="formats"><li><a href="{{ base_url }}/user-guide/organisers/formats/#knockout">Knockout</a></li><li><a href="{{ base_url }}/user-guide/organisers/formats/#mixed">Pools + Knockout</a></li><li><a href="{{ base_url }}/user-guide/organisers/formats/#league">League</a></li></ul></div></figure>
     <figure><div class="frame"><picture><source type="image/webp" srcset="{{ base_url }}/screenshots/card-calendar.webp"><img src="{{ base_url }}/screenshots/card-calendar.png" width="640" height="448" loading="lazy" alt="One day of the competition calendar across courts A and B, with the opening ceremony and lunch drawn as bands and a competition starting at 09:30"></picture></div>
       <h3>A schedule that adds up</h3><p>See how long the day runs before you draw, spread competitions across courts, and plan the breaks.</p></figure>
     <figure><div class="frame"><picture><source type="image/webp" srcset="{{ base_url }}/screenshots/card-branding.webp"><img src="{{ base_url }}/screenshots/card-branding.png" width="638" height="446" loading="lazy" alt="The public page of a tournament in its own green colours, with its logo in the header"></picture></div>

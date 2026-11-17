@@ -99,7 +99,8 @@ html { scrollbar-gutter: auto; }
 .md-typeset h1,
 .md-typeset h2,
 .md-typeset h3 {
-	font-weight: 800;
+	/* 700, the heaviest weight of Atkinson Hyperlegible the theme loads. */
+	font-weight: 700;
 	letter-spacing: -0.018em;
 	line-height: 1.12;
 	overflow-wrap: anywhere;
@@ -119,12 +120,11 @@ html { scrollbar-gutter: auto; }
 .md-typeset li { text-wrap: pretty; }
 
 /* "Court-line" tick before every h2: a short bold navy bar, the spatial
- * motif from the bracket courts. Section heads collapse cleanly on mobile. */
+ * motif from the bracket courts, and the section's only mark: no rule above
+ * it as well. Section heads collapse cleanly on mobile. */
 .md-typeset h2 {
 	font-size: 1.5rem;
 	margin-top: 2.4em;
-	padding-top: 0.6em;
-	border-top: 1px solid var(--bc-line);
 }
 
 .md-typeset h2::before {
@@ -251,16 +251,15 @@ html { scrollbar-gutter: auto; }
 	font-weight: 700;
 }
 
-/* ===== Admonitions: sporting left bar (in case docs add them) ===== */
+/* ===== Admonitions: one hairline all round, no thick edge ===== */
 .md-typeset .admonition,
 .md-typeset details {
-	border-left-width: var(--bc-rule);
+	border-width: 0.075rem;
 	border-radius: var(--bc-radius-sm);
 }
 
-/* ===== Material nav tabs: bold, navy active underline ===== */
-.md-tabs__link { font-weight: 600; opacity: 1; }
-.md-tabs__item--active .md-tabs__link { font-weight: 800; }
+/* ===== Material nav tabs: bold; the theme dims every tab but the active one ===== */
+.md-tabs__link { font-weight: 700; }
 
 /* ===== Primary sidebar: section titles read as headings ===== */
 /* Groups are collapsible rows (navigation.sections is off, see mkdocs.yaml).

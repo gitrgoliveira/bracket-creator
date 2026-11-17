@@ -106,13 +106,17 @@ html { scrollbar-gutter: auto; }
 	text-wrap: balance;
 }
 
+/* Material greys the page title (--md-default-fg-color--light, 4.4:1 on the
+ * paper); the title takes the full text colour, as the headings under it do. */
 .md-typeset h1 {
 	font-size: 2.1rem;
 	min-width: 0;
+	color: var(--md-default-fg-color);
 }
 
 /* Fewer orphans in running prose (graceful no-op where unsupported). */
-.md-typeset p { text-wrap: pretty; }
+.md-typeset p,
+.md-typeset li { text-wrap: pretty; }
 
 /* "Court-line" tick before every h2: a short bold navy bar, the spatial
  * motif from the bracket courts. Section heads collapse cleanly on mobile. */

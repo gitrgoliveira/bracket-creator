@@ -101,6 +101,7 @@
   .watch { margin-top:56px; }
   .watch figcaption { font-size:21px; font-weight:700; color:var(--ink); margin:0 0 14px; }
   .watch video { width:100%; border:1px solid var(--rule); border-radius:10px; background:var(--paper); }
+  .watch-full { display:inline-block; margin-top:4px; padding-block:12px; font-size:16px; color:var(--navy); text-decoration:underline; text-decoration-thickness:1px; text-underline-offset:4px; }
   .alt { background:var(--paper); }
   .feat { display:grid; grid-template-columns:repeat(3, minmax(0,1fr)); gap:56px 32px; }
   .feat .lead { grid-column:1 / -1; display:grid; grid-template-columns:minmax(0,7fr) minmax(0,5fr); gap:0 40px; align-items:center; }
@@ -152,6 +153,10 @@
   @media (min-width:1100px), (max-width:760px) {
     .hero h1 .line { display:block; white-space:nowrap; }
     .hero .lede { font-size:18px; }
+  }
+  @media (max-width:600px) {
+    .watch video { display:none; }
+    .watch-full { display:flex; align-items:center; justify-content:center; min-height:48px; margin-top:0; padding:0 22px; border:2px solid var(--navy); border-radius:6px; font-size:17px; font-weight:700; text-decoration:none; }
   }
   @media (max-width:360px) {
     .bar .brand { font-size:16px; }
@@ -205,6 +210,11 @@
       <source src="{{ base_url }}/videos/live-every-screen.mp4" type="video/mp4">
       <source src="{{ base_url }}/videos/live-every-screen.webm" type="video/webm">
     </video>
+    {#- On a phone the three screens are too small to read inside the page, so
+        the video is hidden there and this link opens it in the browser's own
+        player, full screen. Wider screens keep it as the way out when the
+        video cannot play in the page. -#}
+    <a class="watch-full" href="{{ base_url }}/videos/live-every-screen.mp4">Watch the video full screen</a>
   </figure>
 </div></section>
 
@@ -232,11 +242,19 @@
     <ol>
       <li><a href="{{ base_url }}/user-guide/install/download/">Install bracket-creator</a> with Docker, or as a binary on macOS, Windows or Linux.</li>
       <li>Start it on the laptop at the desk.</li>
-      <li>Open it in a browser, then share the laptop's network address with the courts and the hall.</li>
+      <li>Open it in a browser, then share the laptop's <a href="{{ first }}#5-enter-a-score">network address</a> with the courts and the hall.</li>
     </ol>
     <a class="btn p" href="{{ first }}">Run your first tournament</a>
   </div>
-  <pre tabindex="0" role="region" aria-label="Start command for a binary install"><span class="c"># binary install: start the tournament app</span>
+  <pre tabindex="0" role="region" aria-label="Start commands for Docker and for a binary install"><span class="c"># Docker: start the tournament app, open to the hall</span>
+<span class="c"># (on Linux, first: sudo chown 65534 tournament-data)</span>
+mkdir -p tournament-data
+docker run -p 8080:8080 \
+  -v "$PWD/tournament-data:/tournament-data" \
+  ghcr.io/gitrgoliveira/bracket-creator-mobile:latest
+
+<span class="c"># or a binary install; --bind 0.0.0.0 lets</span>
+<span class="c"># the courts and phones reach it</span>
 bracket-creator mobile-app --folder ./tournament-data \
   --bind 0.0.0.0
 

@@ -354,6 +354,18 @@ describe('the "default win" rule sees a wrap a line-based scan cannot', () => {
     expect(hits[0].line).toBe(3);
   });
 
+  it('reports hits in line order, whatever order the rules are listed in', () => {
+    // Rules are the scanner's outer loop: the first rule matches line 3, the
+    // second line 1, so unsorted output would print line 3 before line 1.
+    const rules = [
+      { re: /late/, why: 'first rule' },
+      { re: /early/, why: 'second rule' },
+    ];
+    const hits = scanWholeFile('early\nmiddle\nlate\n', rules);
+    expect(hits.map((h) => h.line)).toEqual([1, 3]);
+    expect(hits.map((h) => h.why)).toEqual(['second rule', 'first rule']);
+  });
+
   it('a JSX expression splice between the words', () => {
     expect(tripsWhole('const t = <>the default{" "}win stands</>;')).toBe(true);
   });

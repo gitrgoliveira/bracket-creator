@@ -264,11 +264,12 @@ const ALLOWED_RULE_INDEX = 0;
 const OWNER_EXEMPT_RULE_INDICES = new Set([0, 1]);
 
 // scanFile: picks scanSource (line-based) or scanWholeFile (comment-stripped
-// whole-file) per rule, per the split above, and merges the hits.
+// whole-file) per rule, per the split above, and merges the hits in line order.
 function scanFile(src, rules) {
   const lineRules = rules.filter((r) => !WHOLE_FILE_RULE_INDICES.has(FORBIDDEN.indexOf(r)));
   const wholeRules = rules.filter((r) => WHOLE_FILE_RULE_INDICES.has(FORBIDDEN.indexOf(r)));
-  return [...scanSource(src, lineRules), ...scanWholeFile(src, wholeRules)];
+  return [...scanSource(src, lineRules), ...scanWholeFile(src, wholeRules)]
+    .sort((a, b) => a.line - b.line);
 }
 
 export function findViolations() {

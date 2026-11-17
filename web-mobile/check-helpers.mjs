@@ -64,7 +64,10 @@ export function scanSource(src, rules) {
 //
 // `line` is 1-based and counts the newlines in the stripped text BEFORE the
 // match start, so it names where each match STARTS, exactly as scanSource
-// does for a single-line hit.
+// does for a single-line hit. Hits come back in line order (rules are the
+// outer loop, so a later rule's early hit would otherwise print after an
+// earlier rule's late one); the sort is stable, so same-line hits keep rule
+// order.
 export function scanWholeFile(src, rules) {
   const stripped = stripComments(src);
   const hits = [];
@@ -78,7 +81,7 @@ export function scanWholeFile(src, rules) {
       if (m[0].length === 0) global.lastIndex += 1; // never loop on a zero-width match
     }
   }
-  return hits;
+  return hits.sort((a, b) => a.line - b.line);
 }
 
 // printViolations: one block per hit, in the file:line form editors link.

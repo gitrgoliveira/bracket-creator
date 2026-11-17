@@ -8,8 +8,8 @@
 // the harness's own browser and uploaded as PNG (the upload doors take PNG or
 // JPEG only), so no binary sits in the repository and the club and sponsor
 // are as made up as the rosters.
-import { PASSWORD } from '../lib/api.mjs';
 import { VIEWER_SOURCES } from '../lib/scope.mjs';
+import { cardRecipes } from '../lib/card.mjs';
 
 const TOURNAMENT_NAME = 'Northgate Taikai 2026';
 const TOURNAMENT_DATE = '20-06-2026';
@@ -34,28 +34,17 @@ const SPONSOR_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height
   <text x="222" y="178" font-family="Helvetica, Arial, sans-serif" font-size="32" fill="#7a4b24">Armour repairs and fittings at the venue all weekend</text>
 </svg>`;
 
-// Draw an SVG to a PNG in the harness's browser.
+// Draw an SVG to a PNG in the harness's browser, as the Blob an upload sends.
 async function rasterise(browser, svg) {
   const context = await browser.newContext({ deviceScaleFactor: 1 });
   try {
     const page = await context.newPage();
     await page.setContent(`<!doctype html><body style="margin:0">${svg}</body>`);
-    return await page.locator('svg').screenshot({ omitBackground: true });
+    const png = await page.locator('svg').screenshot({ omitBackground: true });
+    return new Blob([png], { type: 'image/png' });
   } finally {
     await context.close();
   }
-}
-
-// The two upload doors take a multipart form, which api.mjs's JSON client
-// does not send.
-async function upload(base, path, png, fields = {}) {
-  const form = new FormData();
-  for (const [k, v] of Object.entries(fields)) form.append(k, v);
-  form.append('file', new Blob([png], { type: 'image/png' }), 'image.png');
-  const res = await fetch(base + path, {
-    method: 'POST', headers: { 'X-Tournament-Password': PASSWORD }, body: form,
-  });
-  if (!res.ok) throw new Error(`POST ${path} -> ${res.status} ${(await res.text()).slice(0, 200)}`);
 }
 
 export const families = {
@@ -64,11 +53,11 @@ export const families = {
     // SINCE scoping inputs (lib/scope.mjs): the viewer home it captures, the
     // sponsor strip and the branding fields whose saves the seed makes.
     sources: [...VIEWER_SOURCES, 'web-mobile/js/sponsor_strip', 'web-mobile/js/admin_branding'],
-    seed: async ({ api, base, browser }) => {
+    seed: async ({ api, browser }) => {
       await api.tournament({ name: TOURNAMENT_NAME, date: TOURNAMENT_DATE, venue: 'Northgate Sports Hall', courts: ['A', 'B'] });
 
-      await upload(base, '/api/branding/logo', await rasterise(browser, LOGO_SVG));
-      await upload(base, '/api/sponsors', await rasterise(browser, SPONSOR_SVG), { name: 'Hillside Bogu Works' });
+      await api.upload('/api/branding/logo', await rasterise(browser, LOGO_SVG));
+      await api.upload('/api/sponsors', await rasterise(browser, SPONSOR_SVG), { name: 'Hillside Bogu Works' });
 
       // The save the Edit details page makes: the tournament as read, its
       // version, and the theme.
@@ -103,3 +92,10 @@ export const recipes = [
     waitFor: '.viewer__title--lg',
   },
 ];
+
+// The landing page's cards, each the region of a capture above that its card
+// shows (lib/card.mjs).
+recipes.push(...cardRecipes(recipes, [
+  // Your branding: the header with its logo.
+  ['viewer-branded', 'card-branding', { x: 2, y: 8, width: 319, height: 223 }],
+]));

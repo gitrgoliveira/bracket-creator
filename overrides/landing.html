@@ -7,7 +7,11 @@
   Every link goes through base_url so it resolves under the GitHub Pages
   subpath, as overrides/404.html does. This file is public prose: the
   `docs/prose` gate reads its text and its alt, title, aria-label and meta
-  content.
+  content. Its colour values are the product's: DESIGN.md owns them, and
+  docs/assets/stylesheets/extra.css carries the docs theme's copy, so change
+  a colour there first and bring it here after. A card's picture
+  (screenshots/card-*.png) is a capture of the region the card shows,
+  made by the docs capture harness (scripts/screenshots/lib/card.mjs).
 -#}
 {#- The lede is written in two literals around its one link, "engi", so the
     prose gate reads the visible paragraph whole; `lede` joins them as plain
@@ -15,10 +19,10 @@
 {%- set lede_head = "Score each bout at the court on a laptop or tablet. The court display and every phone in the hall show the score as it is entered. Made for kendo and naginata tournaments; " -%}
 {%- set lede_tail = " pairs also suit iaido and jodo." -%}
 {%- set lede = lede_head ~ "engi" ~ lede_tail -%}
+{#- `headline` is the og:title; it must read as the <h1> below does, which is
+    written out in two spans for its line breaks. -#}
 {%- set headline = "Your tournament, live on every screen" -%}
 {%- set first = base_url ~ "/user-guide/start-here/first-tournament/" -%}
-{%- set engi = base_url ~ "/user-guide/organisers/engi/" -%}
-{%- set download = base_url ~ "/user-guide/install/download/" -%}
 <!doctype html>
 <html lang="en">
 <head>
@@ -54,8 +58,8 @@
   body { font-family:"Atkinson Hyperlegible", system-ui, sans-serif; color:var(--ink); background:var(--surface); }
   img, video { display:block; max-width:100%; height:auto; }
   a { color:inherit; text-decoration:none; }
-  a:focus-visible, video:focus-visible, pre:focus-visible { outline:3px solid var(--navy); outline-offset:3px; border-radius:4px; }
-  pre:focus-visible { border-radius:10px; }
+  a:focus-visible, video:focus-visible, pre:focus-visible { outline:3px solid var(--navy); outline-offset:3px; }
+  a:focus-visible, video:focus-visible { border-radius:4px; }
   footer a:focus-visible { outline-color:var(--on-dark); }
   main p a:not(.btn), main li a:not(.btn) { text-decoration:underline; text-decoration-thickness:1px; text-underline-offset:3px; }
   .skip { position:absolute; left:16px; top:-100px; z-index:10; background:var(--navy); color:var(--on-dark); padding:12px 18px; border-radius:6px; font-weight:700; }
@@ -90,7 +94,7 @@
   .steps figure, .feat figure, .watch { margin:0; }
   .frame picture { display:contents; }
   .frame { border:1px solid var(--rule); border-radius:10px; overflow:hidden; background:var(--surface); height:300px; }
-  .frame img { width:100%; height:100%; object-fit:cover; object-position:var(--focus, 50% 0); transform:scale(var(--zoom, 1)); transform-origin:var(--focus, 50% 0); }
+  .frame img { width:100%; height:100%; object-fit:cover; object-position:50% 0; }
   .steps h3, .feat h3 { font-size:21px; margin:18px 0 6px; }
   .steps p, .feat p { font-size:17px; color:var(--muted); margin:0; line-height:1.5; text-wrap:pretty; }
   .num { font-family:var(--mono); color:var(--aka); margin-right:6px; }
@@ -123,8 +127,6 @@
   @media (min-width:1100px) {
     .hero .wrap { display:grid; grid-template-columns:minmax(0,5fr) minmax(0,7fr); column-gap:40px; align-items:center; }
     .hero h1 { font-size:clamp(36px, 3.2vw, 46px); }
-    .hero h1 .line { display:block; white-space:nowrap; }
-    .hero .lede { font-size:18px; }
     .hero-shot { margin:0; }
   }
   @media (max-width:760px) {
@@ -137,8 +139,6 @@
     .bar .btn { min-height:44px; padding:0 14px; }
     .hero { padding:40px 0; }
     .hero h1 { font-size:min(38px, calc((100vw - 32px) / 9.6)); }
-    .hero h1 .line { display:block; white-space:nowrap; }
-    .hero .lede { font-size:18px; }
     .cta .btn { width:100%; }
     section.block { padding:52px 0; }
     section.block h2 { font-size:28px; }
@@ -148,6 +148,10 @@
     .frame, .feat .frame, .feat .lead .frame { height:240px; }
     .watch { margin-top:40px; }
     footer .links { margin-left:0; }
+  }
+  @media (min-width:1100px), (max-width:760px) {
+    .hero h1 .line { display:block; white-space:nowrap; }
+    .hero .lede { font-size:18px; }
   }
   @media (max-width:360px) {
     .bar .brand { font-size:16px; }
@@ -164,21 +168,21 @@
 <header><div class="wrap bar">
   <a class="brand" href="{{ base_url }}/"><img src="{{ base_url }}/assets/images/logo-tile.jpeg" alt="" width="36" height="36">bracket-creator</a>
   <nav class="nav" aria-label="Main"><a href="#how">How it works</a><a href="#features">Features</a><a class="keep" href="{{ first }}">Docs</a><a href="{{ config.repo_url }}">GitHub</a></nav>
-  <a class="btn p" href="{{ download }}">Download</a>
+  <a class="btn p" href="{{ base_url }}/user-guide/install/download/">Download</a>
 </div></header>
 
 <main id="main">
 <section class="hero" aria-labelledby="headline"><div class="wrap">
-  <div class="hero-copy">
+  <div>
   <h1 id="headline"><span class="line">Your tournament,</span> <span class="line">live on every screen</span></h1>
-  <p class="lede">{{ lede_head }}<a href="{{ engi }}">engi</a>{{ lede_tail }}</p>
+  <p class="lede">{{ lede_head }}<a href="{{ base_url }}/user-guide/organisers/engi/">engi</a>{{ lede_tail }}</p>
   <div class="cta"><a class="btn p" href="{{ first }}">Run your first tournament</a><a class="btn s" href="#watch">Watch it update live</a></div>
   <p class="proof">Free and open source</p>
   </div>
   <picture class="hero-shot">
     <source media="(max-width:600px)" type="image/webp" srcset="{{ base_url }}/screenshots/hero-mobile.webp" width="1200" height="2100">
     <source media="(max-width:600px)" srcset="{{ base_url }}/screenshots/hero-mobile.png" width="1200" height="2100">
-    <source type="image/webp" srcset="{{ base_url }}/screenshots/hero.webp" width="2880" height="1718">
+    <source type="image/webp" srcset="{{ base_url }}/screenshots/hero-1440.webp 1440w, {{ base_url }}/screenshots/hero.webp 2880w" sizes="(min-width:1240px) 664px, (min-width:1100px) calc((100vw - 104px) * 7 / 12), calc(100vw - 64px)" width="2880" height="1718">
     <img src="{{ base_url }}/screenshots/hero.png" width="2880" height="1718" fetchpriority="high" alt="One bout on three screens at once: scored on the court console, shown on the court display, and followed on a phone">
   </picture>
 </div></section>
@@ -188,18 +192,18 @@
   <h2 id="how-title">From the draw to the final, in one app</h2>
   <p class="intro">Load your participant list, draw pools and brackets, then run every court from a laptop or tablet. Results flow to the court displays and to phones as each point is scored.</p>
   <div class="steps">
-    <figure><div class="frame"><picture><source type="image/webp" srcset="{{ base_url }}/screenshots/mobile-draw-preview.webp"><img src="{{ base_url }}/screenshots/mobile-draw-preview.png" style="--focus:32% 11.5%;--zoom:2.6" width="2514" height="4482" loading="lazy" alt="The draw preview: pools of players with their result grids, ready to start or discard"></picture></div>
+    <figure><div class="frame"><picture><source type="image/webp" srcset="{{ base_url }}/screenshots/card-draw.webp"><img src="{{ base_url }}/screenshots/card-draw.png" width="966" height="776" loading="lazy" alt="The draw preview: pools of players with their result grids, ready to start or discard"></picture></div>
       <h3><span class="num">1</span>Draw</h3><p>Pools and brackets from your list, with seeds and dojos kept apart.</p></figure>
-    <figure><div class="frame"><picture><source type="image/webp" srcset="{{ base_url }}/screenshots/mobile-score-editor.webp"><img src="{{ base_url }}/screenshots/mobile-score-editor.png" style="--focus:50% 0" width="561" height="620" loading="lazy" alt="The score editor: Shiro and Aka, each with ippon buttons, foul counters and an overtime toggle"></picture></div>
+    <figure><div class="frame"><picture><source type="image/webp" srcset="{{ base_url }}/screenshots/mobile-score-editor.webp"><img src="{{ base_url }}/screenshots/mobile-score-editor.png" width="561" height="620" loading="lazy" alt="The score editor: Shiro and Aka, each with ippon buttons, foul counters and an overtime toggle"></picture></div>
       <h3><span class="num">2</span>Score at the court</h3><p>One laptop or tablet per court records points, fouls, encho and decisions.</p></figure>
-    <figure><div class="frame"><picture><source type="image/webp" srcset="{{ base_url }}/screenshots/viewer-result-encho.webp"><img src="{{ base_url }}/screenshots/viewer-result-encho.png" style="--focus:50% 86%;--zoom:1.5" width="906" height="1326" loading="lazy" alt="Completed results on the public viewer, including an overtime win and a hantei result"></picture></div>
+    <figure><div class="frame"><picture><source type="image/webp" srcset="{{ base_url }}/screenshots/card-results.webp"><img src="{{ base_url }}/screenshots/card-results.png" width="604" height="485" loading="lazy" alt="Completed results on the public viewer, including an overtime win and a hantei result"></picture></div>
       <h3><span class="num">3</span>Everyone follows</h3><p>Competitors and spectators see what is on now, what is next, and every result.</p></figure>
   </div>
   <figure class="watch" id="watch">
     <figcaption>One bout, scored at the court and shown on every screen</figcaption>
-    <video controls muted playsinline preload="metadata" width="1440" height="860" poster="{{ base_url }}/screenshots/live-every-screen-poster.png" aria-label="One bout scored on the court console, updating the court display and a phone as each point is entered">
-      <source src="{{ base_url }}/videos/live-every-screen.webm" type="video/webm">
+    <video controls muted playsinline preload="metadata" width="1440" height="860" poster="{{ base_url }}/screenshots/live-every-screen-poster.webp" aria-label="One bout scored on the court console, updating the court display and a phone as each point is entered">
       <source src="{{ base_url }}/videos/live-every-screen.mp4" type="video/mp4">
+      <source src="{{ base_url }}/videos/live-every-screen.webm" type="video/webm">
     </video>
   </figure>
 </div></section>
@@ -209,14 +213,14 @@
   <h2 id="features-title">Made for the day of the tournament</h2>
   <p class="intro">Built with tournament organisers, for court operators who may be new to the job.</p>
   <div class="feat">
-    <figure class="lead"><div class="frame"><picture><source type="image/webp" srcset="{{ base_url }}/screenshots/knockout-bracket-in-play.webp"><img src="{{ base_url }}/screenshots/knockout-bracket-in-play.png" style="--focus:66% 33%;--zoom:1.5" width="1265" height="930" loading="lazy" alt="A knockout bracket part-way through, with scored bouts ticked and the bout on court now marked"></picture></div>
-      <div class="feat-text"><h3>The formats you run</h3><p>Individual and team competitions, kachinuki, and engi pairs for any kata.</p>
+    <figure class="lead"><div class="frame"><picture><source type="image/webp" srcset="{{ base_url }}/screenshots/card-bracket.webp"><img src="{{ base_url }}/screenshots/card-bracket.png" width="843" height="534" loading="lazy" alt="A knockout bracket part-way through, with scored bouts ticked and the bout on court now marked"></picture></div>
+      <div><h3>The formats you run</h3><p>Individual and team competitions, kachinuki, and engi pairs for any kata.</p>
       <ul class="formats"><li>Knockout</li><li>Pools + Knockout</li><li>League</li><li>Swiss</li></ul></div></figure>
-    <figure><div class="frame"><picture><source type="image/webp" srcset="{{ base_url }}/screenshots/mobile-calendar.webp"><img src="{{ base_url }}/screenshots/mobile-calendar.png" style="--focus:4% 40%;--zoom:2" width="1280" height="900" loading="lazy" alt="The competition calendar of a two-day tournament across two courts, with the opening ceremony and lunch drawn as bands"></picture></div>
+    <figure><div class="frame"><picture><source type="image/webp" srcset="{{ base_url }}/screenshots/card-calendar.webp"><img src="{{ base_url }}/screenshots/card-calendar.png" width="640" height="448" loading="lazy" alt="The competition calendar of a two-day tournament across two courts, with the opening ceremony and lunch drawn as bands"></picture></div>
       <h3>A schedule that adds up</h3><p>See how long the day runs before you draw, spread competitions across courts, and plan the breaks.</p></figure>
-    <figure><div class="frame"><picture><source type="image/webp" srcset="{{ base_url }}/screenshots/viewer-branded.webp"><img src="{{ base_url }}/screenshots/viewer-branded.png" style="--focus:2% 1%;--zoom:1.35" width="860" height="2132" loading="lazy" alt="The public page of a tournament in its own green colours, with its logo in the header and a sponsor image below the competitions"></picture></div>
+    <figure><div class="frame"><picture><source type="image/webp" srcset="{{ base_url }}/screenshots/card-branding.webp"><img src="{{ base_url }}/screenshots/card-branding.png" width="638" height="446" loading="lazy" alt="The public page of a tournament in its own green colours, with its logo in the header and a sponsor image below the competitions"></picture></div>
       <h3>Your branding</h3><p>Your logo on the public and admin screens, your colours on the public page and the court displays, and sponsor images on the public page.</p></figure>
-    <figure><div class="frame"><picture><source type="image/webp" srcset="{{ base_url }}/screenshots/mobile-create-team-competition.webp"><img src="{{ base_url }}/screenshots/mobile-create-team-competition.png" style="--focus:31% 50%;--zoom:2.5" width="1600" height="1000" loading="lazy" alt="The Add competition form with Team picked, showing the format, the team size and the team match format"></picture></div>
+    <figure><div class="frame"><picture><source type="image/webp" srcset="{{ base_url }}/screenshots/card-rules.webp"><img src="{{ base_url }}/screenshots/card-rules.png" width="571" height="400" loading="lazy" alt="The Add competition form with Team picked, showing the format, the team size and the team match format"></picture></div>
       <h3>Rules per competition</h3><p>Each competition keeps its own type, format, pool size, winners per pool, match durations and courts. Teams pick their size and regular or kachinuki matches.</p></figure>
   </div>
 </div></section>

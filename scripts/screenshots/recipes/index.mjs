@@ -36,12 +36,15 @@ const groups = [
   [branding, 'branding.mjs'],
 ];
 
-// family -> Set of repo-relative recipe file paths that touch it. A group may
-// also list `assets`: files beside it in recipes/ that it reads at run time
-// (hero.mjs opens hero-stage.html as its captures' page). An asset counts as a
-// recipe file of every family the group declares, so a change to it re-runs
-// that group on a scoped run; lib/scope.mjs keeps everything under recipes/
-// out of the every-family harness set, so nothing else would claim it.
+// family -> Set of repo-relative recipe file paths that touch it. A family may
+// also list `assets`: files of recipes/ that its captures read at run time
+// beyond the files that declare it and hold its recipes (the hero stage page,
+// hero-stage.html, and for the clip filmed on it, hero.mjs, which opens it).
+// An asset counts as a recipe file of that family, so a change to it re-runs
+// the family on a scoped run; lib/scope.mjs keeps everything under recipes/
+// out of the every-family harness set, so nothing else would claim it. It is
+// the one way a family claims a file of recipes/: `sources` names application
+// source.
 export const recipeFiles = new Map();
 const touches = (family, file) => {
   if (!recipeFiles.has(family)) recipeFiles.set(family, new Set());
@@ -54,11 +57,9 @@ const touches = (family, file) => {
 export const families = {};
 for (const [group, file] of groups) {
   for (const r of group.recipes || []) touches(r.family, file);
-  for (const asset of group.assets || []) {
-    for (const key of Object.keys(group.families || {})) touches(key, asset);
-  }
   for (const [key, family] of Object.entries(group.families || {})) {
     touches(key, file);
+    for (const asset of family.assets || []) touches(key, asset);
     // Re-exporting another file's family is how two groups share one seeded
     // tournament, so the same object under the same key is fine. Two DIFFERENT
     // families under one key is the bug: the loser's recipes would silently

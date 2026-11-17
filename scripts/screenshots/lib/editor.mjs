@@ -1,8 +1,9 @@
 // What every recipe that drives a score editor agrees on: which element the
-// editor IS, how a match is started, and how its Finish commits. Everything else about driving one
-// (how a bout is scored, how a fighter is named) differs between the
-// individual, team and kachinuki editors, so it stays in the recipe
-// that needs it; see the note at the end of lib/ui.mjs.
+// editor IS, how a match is started, how its Finish commits, and the
+// individual board's ippon and commit buttons. Everything else about driving
+// one (how a team bout is scored, how a fighter is named) differs between the
+// individual, team and kachinuki editors, so it stays in the recipe that
+// needs it; see the note at the end of lib/ui.mjs.
 
 // The editor dialog. Every overlay editor renders `.modal-backdrop
 // [data-testid="scoring-modal-root"] > .editor-modal`
@@ -41,6 +42,33 @@ export function sameSideTapPacer() {
     if (since < TAP_DWELL_MS) await page.waitForTimeout(TAP_DWELL_MS - since);
     last[side] = Date.now();
   };
+}
+
+// An ippon button of the individual board (admin_scoring_individual.jsx,
+// `ipt-btn`), inside `scope`: a page, or a locator for the editor it belongs
+// to (a frame's inline editor, say). The button is a single letter, so the
+// whole string is matched: has-text("M") is a substring test and would be
+// ambiguous the day a two-letter waza appears.
+export function ipponBtn(scope, side, waza) {
+  return scope.locator(`.sb-side--${side} .ipt-btn`, { hasText: new RegExp(`^${waza}$`) }).first();
+}
+
+// The individual editor's commit button inside `scope`, whatever it reads:
+// "Finish" on the admin hosts, "Finish + Start Next" on the court console,
+// and its armed label in between (admin_scoring_individual.jsx). So the
+// button is targeted, not its words.
+export function finishBtn(scope) {
+  return scope.locator('.score-nav__actions .btn--primary').first();
+}
+
+// One ippon tapped on the open individual editor, paced so that a second tap
+// on the same side is never swallowed as a bounce (sameSideTapPacer). One
+// pacer for every caller: it only ever waits, so sharing it costs a wait at
+// most, never a tap.
+const paceIppon = sameSideTapPacer();
+export async function tapIppon(page, side, waza = 'M') {
+  await paceIppon(page, side);
+  await ipponBtn(page, side, waza).click();
 }
 
 // Finish is a two-tap guard on every editor: the first tap arms the button

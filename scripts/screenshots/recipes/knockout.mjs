@@ -28,6 +28,7 @@ import path from 'node:path';
 import { settle, withAdminPage } from '../lib/ui.mjs';
 import { EDITOR, TAP_DWELL_MS, finishMatch, startMatch, startNextFromList } from '../lib/editor.mjs';
 import { SCORE_EDITOR_SOURCES, VIEWER_SOURCES } from '../lib/scope.mjs';
+import { cardRecipes } from '../lib/card.mjs';
 
 // Competition ids at module level so each recipe's `route` can name them
 // (run.mjs concatenates `base + route` when the recipe is declared).
@@ -226,3 +227,10 @@ export const recipes = [
     assert: ({ dataDir }) => { assertPlayed(dataDir, TEN_ID); },
   },
 ];
+
+// The landing page's cards, each the region of a capture above that its card
+// shows (lib/card.mjs).
+recipes.push(...cardRecipes(recipes, [
+  // The formats you run: the tree's later rounds.
+  ['knockout-bracket-in-play', 'card-bracket', { x: 278, y: 131, width: 843, height: 534 }],
+]));

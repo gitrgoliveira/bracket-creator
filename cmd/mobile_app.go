@@ -272,6 +272,18 @@ func (o *mobileAppOptions) run(cmd *cobra.Command, args []string) error {
 		defer close(backupsDone)
 		scheduledBackups.Run(backupCtx)
 	}()
+	// Stop the backup job and wait for a check in progress, on every way out
+	// of run: its first check runs at once and may be writing a copy into the
+	// data folder, which must be settled before run returns (a test's TempDir
+	// cleanup found it still writing). Both steps are idempotent, so the
+	// shutdown path below calls it early too. The job never waits on the
+	// server, and Shutdown never waits on the job, so neither can hold the
+	// other up.
+	stopBackups := func() {
+		cancelBackups()
+		<-backupsDone
+	}
+	defer stopBackups()
 
 	serveErr := make(chan error, 1)
 	go func() {
@@ -308,16 +320,16 @@ func (o *mobileAppOptions) run(cmd *cobra.Command, args []string) error {
 			slog.Error("mobile-app: listener error during shutdown", "err", err)
 			return err
 		}
+		// The hourly check is stopped (and a copy it was writing finished)
+		// before the shutdown copy, so the two never write at once and the
+		// shutdown copy compares against the check's copy.
+		stopBackups()
 		scheduledBackups.ShutdownCopy(ctx)
 		slog.Info("mobile-app: shutdown complete")
 		return nil
 	case err := <-serveErr:
-		// The listener never served, so Shutdown never ran and never cancelled
-		// the backup job. Stop it here and wait: its first check runs at once
-		// and may be writing a copy into the data folder, which must be settled
-		// before run returns (a test's TempDir cleanup found it still writing).
-		cancelBackups()
-		<-backupsDone
+		// The listener never served, so Shutdown never ran: the deferred
+		// stopBackups stops the backup job and waits for it.
 		return err
 	}
 }

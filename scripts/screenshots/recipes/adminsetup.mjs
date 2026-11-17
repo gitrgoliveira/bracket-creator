@@ -13,6 +13,8 @@
 // real interface, because those two are showing the OPERATOR TYPING, not
 // just data that happens to be on screen.
 
+import { cardRecipes } from '../lib/card.mjs';
+
 // Local helpers, kept here rather than in lib/ui.mjs because each has one
 // caller; a second recipe file growing the same need is the signal to move it.
 
@@ -225,10 +227,12 @@ export const recipes = [
     auth: 'admin',
     route: '/admin/create-competition',
     drive: async ({ page }) => {
+      // The Start time is left as the form offers it, as in
+      // mobile-create-competition above: 09:00, or the end of the latest
+      // window planned on that day and those shiaijo (admin_setup.jsx,
+      // calendarStackEnd), here the draw-ready competition's, so it is the
+      // same from run to run.
       await fillFieldByLabel(page, 'Display name', "Men's Team");
-      // The form offers the current time as the start; a fixed one keeps the
-      // capture the same from run to run.
-      await fillFieldByLabel(page, 'Start time', '10:00');
       await clickPill(page, 'Competition type', 'Team');
       await clickPill(page, 'Format', 'Pools + Knockout');
     },
@@ -380,3 +384,12 @@ export const recipes = [
     },
   },
 ];
+
+// The landing page's cards, each the region of a capture above that its card
+// shows (lib/card.mjs).
+recipes.push(...cardRecipes(recipes, [
+  // The Draw step: the first pools of the preview.
+  ['mobile-draw-preview', 'card-draw', { x: 248, y: 213, width: 483, height: 388 }],
+  // Rules per competition: the type, the format and the team options.
+  ['mobile-create-team-competition', 'card-rules', { x: 319, y: 300, width: 571, height: 400 }],
+]));

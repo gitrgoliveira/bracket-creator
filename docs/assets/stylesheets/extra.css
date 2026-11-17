@@ -144,38 +144,9 @@ html { scrollbar-gutter: auto; }
 }
 .md-typeset a:hover { text-decoration-thickness: 2px; }
 
-/* Permalink anchors (¶), buttons, and image-only links are not prose links. */
-.md-typeset a.headerlink,
-.md-typeset .md-button { text-decoration: none; }
+/* Permalink anchors (¶) and image-only links are not prose links. */
+.md-typeset a.headerlink { text-decoration: none; }
 .md-typeset a:has(img) { text-decoration: none; }
-
-/* ===== Buttons: sporting fills + outlines ===== */
-/* Shape, weight, and hover lift. Scoped to .md-typeset (not bare .md-button)
- * so it never bleeds into Material's own page chrome (nav, search). */
-.md-typeset .md-button {
-	border-radius: var(--bc-radius-sm);
-	font-weight: 700;
-}
-.md-typeset .md-button:hover { transform: translateY(-2px); }
-
-.md-typeset .md-button {
-	border-width: 2px;
-	padding: 0.5em 1.25em;
-	transition: transform var(--bc-dur) var(--bc-ease-out),
-	            background-color var(--bc-dur) var(--bc-ease-out),
-	            box-shadow var(--bc-dur) var(--bc-ease-out);
-}
-.md-typeset .md-button:active { transform: translateY(0); }
-.md-typeset .md-button--primary {
-	background: var(--bc-navy);
-	border-color: var(--bc-navy);
-	color: var(--bc-white);
-}
-.md-typeset .md-button--primary:hover {
-	background: var(--bc-navy-deep);
-	border-color: var(--bc-navy-deep);
-	box-shadow: 0 8px 22px -10px var(--bc-navy);
-}
 
 /* ===== Code blocks: navy-headed, crisp border ===== */
 .md-typeset pre > code {
@@ -306,11 +277,7 @@ html { scrollbar-gutter: auto; }
 
 /* ===== Reduced motion ===== */
 @media (prefers-reduced-motion: reduce) {
-	.md-typeset .md-button,
 	.md-typeset a {
 		transition-duration: 0.01ms;
-	}
-	.md-typeset .md-button:hover {
-		transform: none;
 	}
 }

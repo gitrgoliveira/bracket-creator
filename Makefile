@@ -35,7 +35,7 @@ endif
 SHA256_CHECK := $(if $(shell command -v sha256sum 2>/dev/null),sha256sum,shasum -a 256) -c --quiet -
 
 # Define phony targets
-.PHONY: default help clean local/deps hooks/install go/fmt go/generate go/test go/build go/lint go/sec go/sec-tests go/vuln go/security js/deps js/lint js/sec js/outdated js/security js/check-imports js/validate examples docker/build docker/run pre-commit docs/deps docs/serve docs/open docs/build docs/linkcheck docs/prose docs/clean docs/screenshots docs/videos docs/media docs/media-copies e2e e2e/deps run run-mobile esbuild-jsx goreleaser/test release version
+.PHONY: default help clean local/deps hooks/install go/fmt go/generate go/test go/build go/lint go/sec go/sec-tests go/vuln go/security js/deps js/lint js/sec js/outdated js/security js/check-imports js/validate examples docker/build docker/run pre-commit docs/deps docs/serve docs/open docs/build docs/prose docs/clean docs/screenshots docs/videos docs/media docs/media-copies e2e e2e/deps run run-mobile esbuild-jsx goreleaser/test release version
 
 default: help ## Show help information (default)
 
@@ -353,8 +353,6 @@ docs/build: $(DOCS_STAMP) docs/prose ## Build the docs with Zensical (strict) an
 	@echo "Checking internal documentation links..."
 	$(DOCS_BIN)/python docs/check_links.py site
 
-docs/linkcheck: docs/build ## Same as docs/build (the link check runs inside it)
-
 docs/prose: ## Check the docs sources and theme templates against the public-prose rules (stdlib-only, no venv needed)
 	$(PYTHON) docs/test_check_prose.py
 	$(PYTHON) docs/test_check_links.py
@@ -431,6 +429,12 @@ LANDING_WEBP := $(sort $(addprefix docs/,$(shell grep -o 'screenshots/[a-z0-9-]*
 LANDING_MP4  := $(sort $(addprefix docs/,$(shell grep -o 'videos/[a-z0-9-]*\.mp4' overrides/landing.html)))
 
 docs/media-copies: $(LANDING_WEBP) $(LANDING_MP4) ## Make the landing page's WebP and MP4 copies from the committed PNG and WebM captures
+
+# A `<name>-1440.webp` is a 1440-wide copy of the DPR 2 capture `<name>.png`,
+# the smaller candidate in a srcset (the desktop hero shows at about 660 CSS
+# pixels). Listed before the plain rule so make picks it for that name.
+docs/screenshots/%-1440.webp: docs/screenshots/%.png
+	cwebp -quiet -q 82 -m 6 -resize 1440 0 $< -o $@
 
 docs/screenshots/%.webp: docs/screenshots/%.png
 	cwebp -quiet -q 82 -m 6 $< -o $@

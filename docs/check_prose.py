@@ -346,13 +346,17 @@ def _paragraph_hits(start: int, paragraph: str):
             yield lineno, name, excerpt
 
 
+def _block_hits(numbered_lines, rules) -> list[tuple[int, str, str]]:
+    """Return (lineno, rule, line) for every line rule ``rules(line)`` names on
+    each (lineno, line) given: check_line for Markdown, which still carries
+    its inline HTML, line_rules for HTML text, which carries none."""
+    return [(lineno, rule, line.strip()) for lineno, line in numbered_lines for rule in rules(line)]
+
+
 def check_markdown(text: str) -> list[tuple[int, str, str]]:
     """Return every (lineno, rule, excerpt) violation in a Markdown source."""
-    hits: list[tuple[int, str, str]] = []
     prose_lines = list(iter_prose_lines(text))
-    for lineno, line in prose_lines:
-        for rule in check_line(line):
-            hits.append((lineno, rule, line.strip()))
+    hits = _block_hits(prose_lines, check_line)
     hits.extend(check_paragraphs(prose_lines))
     return hits
 
@@ -377,7 +381,8 @@ JINJA_RE = re.compile(r"\{#.*?#\}|\{\{.*?\}\}|\{%.*?%\}", re.DOTALL)
 # Elements whose whole content is skipped. `code` (and `kbd`, `samp`) mirror
 # the Markdown side, which skips inline code spans, so they are phrasing
 # elements too (below): a skipped span leaves the sentence around it whole.
-HTML_SKIP_TAGS = {"style", "script", "pre", "code", "kbd", "samp", "template"}
+HTML_CODE_TAGS = {"code", "kbd", "samp"}
+HTML_SKIP_TAGS = {"style", "script", "pre", "template"} | HTML_CODE_TAGS
 
 # Phrasing elements that sit inside a run of prose without ending it, so
 # "a <strong>default</strong> <em>win</em>" still reads as one phrase, and so
@@ -388,8 +393,8 @@ HTML_INLINE_TAGS = {
     "a", "abbr", "b", "bdi", "bdo", "br", "button", "cite", "data", "del",
     "dfn", "em", "i", "img", "input", "ins", "label", "mark", "output", "q",
     "s", "select", "small", "span", "strong", "sub", "sup", "textarea",
-    "time", "u", "var", "wbr", "code", "kbd", "samp",
-}
+    "time", "u", "var", "wbr",
+} | HTML_CODE_TAGS
 
 # The see-link rule's HTML shape: text ending "See" (or "See the", "See
 # also") with a link opening right after it. The Markdown rule reads the `[`
@@ -533,9 +538,7 @@ def check_html(text: str) -> list[tuple[int, str, str]]:
     hits = list(parser.hits)
     for start, block in parser.blocks:
         lines = block.split("\n")
-        for offset, line in enumerate(lines):
-            for rule in line_rules(line):
-                hits.append((start + offset, rule, line.strip()))
+        hits.extend(_block_hits(enumerate(lines, start), line_rules))
         # The parser already decoded entities, so an "&lt;mat&gt;" is visible
         # text here and no tag is left to strip.
         hits.extend(_paragraph_hits(start, "\n".join(EMPHASIS_RE.sub("", line) for line in lines)))

@@ -25,6 +25,10 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: "3.11"
+          # pip's download cache, keyed on the pinned docs toolchain; the
+          # Makefile still builds .venv-docs from scratch, only faster.
+          cache: pip
+          cache-dependency-path: docs/requirements.txt
 
       # The same gate as CI and the PR template: prose check, strict Zensical
       # build into site/, link check over the built site.

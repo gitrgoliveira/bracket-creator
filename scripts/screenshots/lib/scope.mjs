@@ -18,9 +18,9 @@
 //   1. A harness file (the runner, lib/, the registry, the Makefile) can alter
 //      any capture, so it selects every family.
 //   2. A path a family CLAIMS - by a `sources` prefix, or by being one of the
-//      recipe files that declares it or holds its recipes, or an asset such a
-//      file reads at run time (a group's `assets`, recipes/index.mjs; the hero
-//      stage page) - selects that family. A family that declares no
+//      recipe files that declares it or holds its recipes, or a file of
+//      recipes/ it reads at run time (the family's `assets`,
+//      recipes/index.mjs; the hero stage page) - selects that family. A family that declares no
 //      `sources` is taken to depend on all application source, so a new
 //      family never silently sits out a scoped run.
 //   3. Application source that no family claims selects every family. The
@@ -71,6 +71,12 @@ export const SCORE_EDITOR_SOURCES = [
   'web-mobile/js/admin_scoring_', 'web-mobile/js/admin_schedule_score_editor',
 ];
 export const VIEWER_SOURCES = ['web-mobile/js/viewer'];
+// The hero stage's three surfaces (the court console, the court display, the
+// public viewer and its watchlist) and the editor that scores on it, for a
+// family that films or photographs the stage under a declared scope.
+export const HERO_STAGE_SOURCES = [
+  'web-mobile/js/admin_shiaijo', 'web-mobile/js/display', ...VIEWER_SOURCES, ...SCORE_EDITOR_SOURCES,
+];
 
 // Everything git considers changed: the branch against `since`, the index and
 // worktree against HEAD, and files git does not know about yet. Ignored files

@@ -23,23 +23,23 @@
 // init script runs in EVERY frame, so authAdmin would sign the phone in too.
 // The console is served from `localhost` and the display and phone from
 // `127.0.0.1`, the same server under a second name, and the keys are set on
-// the console's origin only. A different origin has its own localStorage, so
-// the phone starts as a spectator's browser does: empty.
-import { PASSWORD } from '../lib/api.mjs';
-import { settle, withAdminPage } from '../lib/ui.mjs';
+// the console's origin only (authAdmin's `origin`). A different origin has its
+// own localStorage, so the phone starts as a spectator's browser does: empty.
+import { londonCup } from '../lib/api.mjs';
+import { authAdmin, pressInScaledFrame, settle, withAdminPage } from '../lib/ui.mjs';
 import {
-  EDITOR, INLINE_EDITOR, sameSideTapPacer, finishMatch, startMatch, startNextFromList,
+  INLINE_EDITOR, tapIppon, finishMatch, startNextFromList,
 } from '../lib/editor.mjs';
 import { assertIndividualBoutPoints } from '../lib/fixture.mjs';
 
 // The stage is opened as the file it is, and then told what to frame
-// (showStage), so it reads no URL from its own address. A file: page may frame both loopback names; a page the harness
-// served by request interception may not, because it has no address of its
-// own and Chromium's local network access checks then treat it as a public
-// site (measured: net::ERR_BLOCKED_BY_LOCAL_NETWORK_ACCESS_CHECKS on the
-// 127.0.0.1 frames). It is listed as this group's asset (recipes/index.mjs),
-// so a change to it re-runs the group on a scoped run.
-export const assets = ['hero-stage.html'];
+// (showStage), so it reads no URL from its own address. A file: page may frame
+// both loopback names; a page the harness served by request interception may
+// not, because it has no address of its own and Chromium's local network
+// access checks then treat it as a public site (measured:
+// net::ERR_BLOCKED_BY_LOCAL_NETWORK_ACCESS_CHECKS on the 127.0.0.1 frames).
+// It is listed as the family's asset below, so a change to it re-runs the
+// family on a scoped run.
 const STAGE_URL = new URL('./hero-stage.html', import.meta.url);
 
 const COMP = 'hero-individual';
@@ -67,15 +67,8 @@ const FINISHED = [
 ];
 const RUNNING = [['aka', 'K'], ['shiro', 'M']];
 
-const pace = sameSideTapPacer();
-async function tap(page, side, waza) {
-  await pace(page, side);
-  await page.locator(EDITOR).locator(`.sb-side--${side}`)
-    .locator('button', { hasText: new RegExp(`^${waza}$`) }).first().click();
-}
-
 async function scoreTaps(page, taps) {
-  for (const [side, waza] of taps) await tap(page, side, waza);
+  for (const [side, waza] of taps) await tapIppon(page, side, waza);
   await settle(page);
 }
 
@@ -104,10 +97,9 @@ export const families = {
     // the public viewer, plus the editor the seed drives, which is most of the
     // application, so this group runs on every scoped run an application
     // change triggers.
+    assets: ['hero-stage.html'],
     seed: async ({ api, base, browser, dataDir }) => {
-      await api.tournament({
-        name: 'London Cup 2026', date: '19-09-2026', venue: 'London', courts: [COURT, 'B'],
-      });
+      await londonCup(api);
       await api.competition(COMP, "Men's Individual", {
         courts: [COURT], numberPrefix: 'C', date: '19-09-2026', startTime: '09:00',
       });
@@ -116,11 +108,7 @@ export const families = {
 
       await withAdminPage(browser, { width: 1280, height: 900 }, async (page) => {
         await page.goto(`${base}/admin/score-editor`, { waitUntil: 'domcontentloaded' });
-        const first = page.locator('.score-edit-row').first();
-        await first.waitFor({ state: 'visible', timeout: 15000 });
-        await first.locator('button', { hasText: /^Score$/ }).first().click();
-        await page.locator(EDITOR).waitFor({ state: 'visible', timeout: 15000 });
-        await startMatch(page);
+        await startNextFromList(page);
         for (const taps of FINISHED) {
           await scoreTaps(page, taps);
           await finishMatch(page);
@@ -143,11 +131,7 @@ export async function openStage(page, base, fixture, layout) {
   if (publicBase === base) throw new Error(`cannot derive a second origin from ${base}`);
 
   // The operator's two keys, on the console's origin only (see the header).
-  await page.context().addInitScript(({ pw, origin }) => {
-    if (location.origin !== origin) return;
-    localStorage.setItem('bc_authed', 'true');
-    localStorage.setItem('bc_password', pw);
-  }, { pw: PASSWORD, origin: consoleOrigin });
+  await authAdmin(page.context(), { origin: consoleOrigin });
 
   const frames = {
     layout,
@@ -169,11 +153,7 @@ export async function openStage(page, base, fixture, layout) {
 
   // The phone adds the competitor the way a spectator does: type their
   // competitor number into the watchlist box and pick them from the
-  // suggestions. By keyboard (fill focuses the box, Enter presses the
-  // suggestion), never by a pointer click: a click inside a frame the stage
-  // has SCALED misses its target. Measured on the narrow stage (phone at 0.85): every click on the
-  // box was refused with "<div class="viewer__body"> intercepts pointer
-  // events" until the 30s timeout, while the same click passed at 0.98.
+  // suggestions, never by a pointer click (pressInScaledFrame, lib/ui.mjs).
   const phone = page.frameLocator('iframe[name="phone"]');
   const box = phone.getByPlaceholder(/name, dojo or number/i);
   await box.waitFor({ state: 'visible', timeout: 20000 });
@@ -183,17 +163,9 @@ export async function openStage(page, base, fixture, layout) {
   if ((await options.count()) !== 1) {
     throw new Error(`hero stage: "${number}" offers ${await options.count()} suggestions, expected ${name} alone`);
   }
-  await options.filter({ hasText: name }).press('Enter');
+  await pressInScaledFrame(options.filter({ hasText: name }));
   await phone.getByText(/on court now/i).first().waitFor({ state: 'visible', timeout: 20000 });
   await settle(page, 1200);
-  // The runner blurs the stage's own focus before a still, which leaves each
-  // frame's focused control drawing its ring; the keyboard pick above left
-  // one on the phone. Nobody looking at these screens has focused anything.
-  for (const frame of page.frames()) {
-    if (frame !== page.mainFrame()) {
-      await frame.evaluate(() => document.activeElement && document.activeElement.blur());
-    }
-  }
 }
 
 // The phone must be a spectator's and the console the operator's: read the
@@ -212,7 +184,9 @@ export async function assertStage(page, layout) {
   }
 }
 
-const stageRecipe = (name, layout, width) => ({
+// One capture of the stage. Exported for the clip (recipes/videos.mjs), which
+// spreads it and films the same composition.
+export const stageRecipe = (name, layout, width) => ({
   name,
   family: 'heroLive',
   // Tall enough for either layout; the capture is the stage element itself,

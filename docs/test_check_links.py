@@ -28,13 +28,8 @@ def run_on_site(files: dict[str, str]):
             with open(path, "w", encoding="utf-8") as fh:
                 fh.write(text)
         out = io.StringIO()
-        saved = sys.argv
-        sys.argv = ["check_links.py", site]
-        try:
-            with contextlib.redirect_stdout(out):
-                code = check_links.main()
-        finally:
-            sys.argv = saved
+        with contextlib.redirect_stdout(out):
+            code = check_links.main([site])
         return code, out.getvalue()
 
 

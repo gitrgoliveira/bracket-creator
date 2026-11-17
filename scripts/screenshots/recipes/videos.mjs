@@ -6,7 +6,8 @@
 //   live-every-screen   docs/videos/live-every-screen.webm     1440x860  ~20s
 //
 // Plus one still, the clip's poster (docs/screenshots/live-every-screen-poster.png),
-// kept beside the clip it stands for.
+// taken by the clip's own drive as it ends (the `stills` the runner offers a
+// recipe), so it is a frame of that very bout at the stage's DPR 2.
 //
 // A video recipe differs from a still one in two ways that shape everything
 // below:
@@ -22,43 +23,31 @@
 //   2. Pacing is content. These are clips a reader watches, so the waits are
 //      deliberate and are sized against the committed files' durations rather
 //      than trimmed to the minimum the DOM needs.
-import { authAdmin, settle } from '../lib/ui.mjs';
 import {
-  EDITOR, INLINE_EDITOR, TAP_DWELL_MS, sameSideTapPacer, startNextFromList,
+  CONTEXT_DEFAULTS, authAdmin, blurEveryFrame, pressInScaledFrame,
+} from '../lib/ui.mjs';
+import {
+  EDITOR, INLINE_EDITOR, TAP_DWELL_MS, finishBtn, ipponBtn, startNextFromList, tapIppon,
 } from '../lib/editor.mjs';
-import { SCORE_EDITOR_SOURCES, VIEWER_SOURCES } from '../lib/scope.mjs';
-import { families as heroFamilies, openStage, assertStage } from './hero.mjs';
+import { londonCup, LONDON_COURTS as COURTS } from '../lib/api.mjs';
+import { HERO_STAGE_SOURCES, SCORE_EDITOR_SOURCES, VIEWER_SOURCES } from '../lib/scope.mjs';
+import {
+  families as heroFamilies, openStage, assertStage, stageRecipe,
+} from './hero.mjs';
 
 // ---------------------------------------------------------------------------
 // Local helpers: the editor-driving ones stay here for the reason lib/ui.mjs
 // gives in its header.
 // ---------------------------------------------------------------------------
 
-// The tournament every clip is recorded against. Each family gets a fresh
-// server, so this is a plain create, and the courts are known here rather
-// than read back afterwards.
-const COURTS = ['A', 'B'];
-const tournament = (api) => api.tournament({
-  name: 'London Cup 2026', date: '19-09-2026', venue: 'London', durationDays: 1, courts: COURTS,
-});
+// Every clip is recorded against lib/api.mjs's London Cup (londonCup), whose
+// courts are known there rather than read back afterwards.
 
-// An ippon button is a single letter (admin_scoring_individual.jsx:843,
-// `ipt-btn`), so match the whole string: has-text("M") is a substring test and
-// would be ambiguous the day a two-letter waza appears.
-function ipponBtn(page, side, waza) {
-  return page.locator(`.sb-side--${side} .ipt-btn`, { hasText: new RegExp(`^${waza}$`) }).first();
-}
-
-// The individual editor's commit button (admin_scoring_individual.jsx:1171 and
-// :1179). It is a deliberate two-tap guard: the first tap arms it ("Tap again
-// to finish"), the second submits. Its label differs by host (the court
-// console's reads "Finish + Start Next"), so target the button, not the words.
-function finishBtn(page) {
-  return page.locator(EDITOR).locator('.score-nav__actions .btn--primary').first();
-}
-
+// The overlay editor's two-tap Finish, paced for the camera: the gap between
+// the arming tap and the confirming one is chosen for the viewer, so this
+// stays beside the clips rather than using lib/editor.mjs's finishMatch.
 async function finishMatch(page, gap = 550) {
-  const btn = finishBtn(page);
+  const btn = finishBtn(page.locator(EDITOR));
   await btn.click();
   // A confirming tap inside the bounce window is dropped (lib/editor.mjs).
   await page.waitForTimeout(Math.max(gap, TAP_DWELL_MS));
@@ -166,12 +155,10 @@ const LIVE_ROSTER = [
 // with their slots, which is what makes a result read "MK vs D" rather than a
 // bare winner. Quick-scoring the same match over HTTP records no ippon arrays.
 async function scoreOpenMatch(page, taps, gap = 220) {
-  // Two taps on the same side closer than the bounce window count as one, so
-  // a side's next tap waits it out however short `gap` is (lib/editor.mjs).
-  const pace = sameSideTapPacer();
+  // tapIppon waits out the bounce window before a side's next tap, however
+  // short `gap` is (lib/editor.mjs).
   for (const [side, waza] of taps) {
-    await pace(page, side);
-    await ipponBtn(page, side, waza).click();
+    await tapIppon(page, side, waza);
     await page.waitForTimeout(gap);
   }
 }
@@ -230,21 +217,12 @@ async function displayMovesOn(page, before) {
   }, [DISPLAY_NOW, before], { timeout: 20000 });
 }
 
-// A button pressed inside the console frame. Not a pointer click: the stage
-// draws the console at 0.36 of its size, and a Playwright click into that
-// scaled frame reports success while the app never sees it (measured: the
-// ippon stayed unscored and the display never moved). The click event goes
-// to the button itself and through the app's own handler, as a keyboard
-// press would, with no focus ring left on a screen nobody focused.
-const press = (locator) => locator.dispatchEvent('click');
-
 // One ippon tapped on the console, and the clip waits until the display shows
-// it. No pacing between taps: `press` sends a click with detail 0, which the
-// app's tap guard never reads as a bounce (tap_guard.jsx, isPointerTap).
+// it. The console is a scaled frame, so the tap is pressInScaledFrame's
+// (lib/ui.mjs), which needs no pacing between taps.
 async function pointOnEveryScreen(page, side, waza) {
   const before = await displayNow(page);
-  await press(STAGE_FRAMES.console(page)
-    .locator(`.sb-side--${side} .ipt-btn`, { hasText: new RegExp(`^${waza}$`) }).first());
+  await pressInScaledFrame(ipponBtn(STAGE_FRAMES.console(page), side, waza));
   await displayMovesOn(page, before);
 }
 
@@ -255,8 +233,7 @@ const phoneResult = (page) => STAGE_FRAMES.phone(page).locator('[data-testid="wa
 // What the clip shows, played on the stage openStage left live: Aka's second
 // point decides the hero's bout, the console finishes it and starts the next,
 // and the next is scored on. `hold(label, ms)` is the clip's pacing (the
-// numbered list under the <video> is synced to its marks); the poster passes
-// a no-op and photographs the end.
+// numbered list under the <video> is synced to its marks).
 async function playLiveBout(page, hold) {
   await hold('stage live', 2000);
 
@@ -267,15 +244,15 @@ async function playLiveBout(page, hold) {
   // The court console's commit is "Finish + Start Next", a two-tap guard:
   // the first tap arms it (`btn--confirm`), the second commits and starts
   // the court's next bout. The wait between them holds the armed button on
-  // camera long enough to read; the guard itself needs none (`press` sends
-  // a click with detail 0, which is never a bounce).
+  // camera long enough to read; the guard itself needs none
+  // (pressInScaledFrame's click is never a bounce).
   const before = await displayNow(page);
-  const finish = STAGE_FRAMES.console(page).locator('.score-nav__actions .btn--primary').first();
-  await press(finish);
+  const finish = finishBtn(STAGE_FRAMES.console(page));
+  await pressInScaledFrame(finish);
   await STAGE_FRAMES.console(page).locator('.score-nav__actions .btn--primary.btn--confirm')
     .first().waitFor({ state: 'visible', timeout: 10000 });
   await page.waitForTimeout(900);
-  await press(finish);
+  await pressInScaledFrame(finish);
   await phoneResult(page).waitFor({ state: 'visible', timeout: 20000 });
   await displayMovesOn(page, before);
   await hold('finished: phone result, display on the next bout', 2600);
@@ -288,12 +265,12 @@ async function playLiveBout(page, hold) {
   await hold('next bout: aka D', 2800);
 }
 
-const assertLiveBoutPlayed = (name) => async ({ page }) => {
+async function assertLiveBoutPlayed(page) {
   await assertStage(page, 'wide');
   if (!(await phoneResult(page).isVisible())) {
-    throw new Error(`${name}: the phone never showed its competitor's result`);
+    throw new Error('live-every-screen: the phone never showed its competitor\'s result');
   }
-};
+}
 
 export const families = {
   // Two 2-team kachinuki competitions, started and ready to score: a knockout
@@ -304,7 +281,7 @@ export const families = {
     // clip opens and the team editor it drives.
     sources: ['web-mobile/js/admin_competition', ...SCORE_EDITOR_SOURCES],
     seed: async ({ api }) => {
-      await tournament(api);
+      await londonCup(api);
       const court = COURTS[0];
       await seedKachinukiComp(api, KACHI_KO, 'KO Demo', 'knockout', 'Kaze', 'Nami', court);
       await seedKachinukiComp(api, KACHI_LEAGUE, 'League Demo', 'league', 'Kita', 'Minami', court);
@@ -320,7 +297,7 @@ export const families = {
     // where the draw is generated.
     sources: ['web-mobile/js/admin_competition'],
     seed: async ({ api }) => {
-      await tournament(api);
+      await londonCup(api);
       await api.competition(DRAW_COMP, "Men's Individual: 3rd dan and above", {
         courts: COURTS, numberPrefix: 'M', startTime: '09:00', date: '19-09-2026',
       });
@@ -342,7 +319,7 @@ export const families = {
     // for the clip to drive; this closes it once the clip is recorded.
     teardown: ({ adminContext }) => adminContext.close(),
     seed: async ({ api, base, browser }) => {
-      await tournament(api);
+      await londonCup(api);
       // The last shiaijo, and only that one: the editor chains Prev/Next within
       // a court, and keeping this competition off the courts other fixtures use
       // keeps its running match from blocking their starts.
@@ -356,7 +333,7 @@ export const families = {
       await api.generateDraw(LIVE_COMP);
       await api.start(LIVE_COMP);
 
-      const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+      const context = await browser.newContext({ ...CONTEXT_DEFAULTS, viewport: { width: 1280, height: 900 } });
       await authAdmin(context);
       const adminPage = await context.newPage();
       await openFirstMatch(adminPage, base, LIVE_COMP);
@@ -384,19 +361,10 @@ export const families = {
   heroLiveClip: {
     ...heroFamilies.heroLive,
     // SINCE scoping inputs (lib/scope.mjs): the three surfaces on the stage
-    // (the court console, the display, the public viewer and its
-    // watchlist), the editor the seed and the clip drive, and the hero's own
-    // seed and stage page, which this file reads but does not declare.
-    sources: ['web-mobile/js/admin_shiaijo', 'web-mobile/js/display', ...VIEWER_SOURCES,
-      ...SCORE_EDITOR_SOURCES, 'scripts/screenshots/recipes/hero'],
-  },
-
-  // The same fixture again for the poster, which plays the clip's bout to its
-  // end as the clip does, so it cannot share the clip's seeded server either.
-  heroLivePoster: {
-    ...heroFamilies.heroLive,
-    sources: ['web-mobile/js/admin_shiaijo', 'web-mobile/js/display', ...VIEWER_SOURCES,
-      ...SCORE_EDITOR_SOURCES, 'scripts/screenshots/recipes/hero'],
+    // and the editor the seed and the clip drive. The hero's own seed and
+    // stage page, which this file reads but does not declare, are its assets.
+    sources: HERO_STAGE_SOURCES,
+    assets: ['hero.mjs', 'hero-stage.html'],
   },
 };
 
@@ -588,22 +556,25 @@ export const recipes = [
   {
     // The hero stage, filmed: the console scores the bout the hero shows
     // running, finishes it, and starts the next; the display follows every
-    // tap and the phone shows its competitor's result.
-    name: 'live-every-screen',
+    // tap and the phone shows its competitor's result. The stills' recipe,
+    // so DPR 2 (the frames' small type is drawn from twice the pixels before
+    // the encoder sees it) and a touch screen, as every surface on the stage
+    // is one; filmed at the viewport's size.
+    ...stageRecipe('live-every-screen', 'wide', 1440),
     family: 'heroLiveClip',
     // The wide stage is 1440x859 (docs/screenshots/hero.png at DPR 2).
     viewport: { width: 1440, height: 860 },
-    // Rendered at DPR 2 and filmed at the viewport's size, so the frames'
-    // small type is drawn from twice the pixels before the encoder sees it.
-    dpr: 2,
-    // As the stills: every surface on the stage is a touch screen.
-    touch: true,
     capture: 'video',
+    // The clip's poster, taken by drive below as the clip ends: the stage
+    // with a second bout part scored and the phone showing its competitor's
+    // result, so the poster is not the hero picture shown just above it on
+    // the landing page.
+    stills: ['live-every-screen-poster'],
     // No `route` and no `auth`: openStage loads the stage and signs the
     // console in on its own origin only, as it does for the stills. The
     // camera is rolling while it does, so the clip opens on the phone
     // looking its competitor up by number.
-    drive: async ({ page, base, fixture }) => {
+    drive: async ({ page, base, fixture, still }) => {
       fixture.t0 = Date.now();
       const marks = [];
       const hold = async (label, ms) => {
@@ -611,29 +582,14 @@ export const recipes = [
         await page.waitForTimeout(ms);
       };
       await openStage(page, base, fixture, 'wide');
+      // The phone's pick leaves its box focused; nobody watching these
+      // screens has focused anything. A still is blurred by the runner.
+      await blurEveryFrame(page);
       await playLiveBout(page, hold);
       console.log(`  live-every-screen MARKS ${JSON.stringify(marks)}`);
+      await assertLiveBoutPlayed(page);
+      await still('live-every-screen-poster', '#stage');
     },
-    assert: assertLiveBoutPlayed('live-every-screen'),
-  },
-
-  {
-    // The clip's poster: the stage as the clip ends, a second bout part
-    // scored and the phone showing its competitor's result, so the poster is
-    // not the hero picture shown just above it on the landing page. A still
-    // of its own rather than a frame of the webm, which nothing here can cut.
-    name: 'live-every-screen-poster',
-    family: 'heroLivePoster',
-    // The clip's viewport, so the poster frames the stage as the clip does.
-    viewport: { width: 1440, height: 860 },
-    dpr: 2,
-    touch: true,
-    capture: { selector: '#stage' },
-    drive: async ({ page, base, fixture }) => {
-      await openStage(page, base, fixture, 'wide');
-      await playLiveBout(page, async () => {});
-      await settle(page, 1200);
-    },
-    assert: assertLiveBoutPlayed('live-every-screen-poster'),
+    assert: ({ page }) => assertLiveBoutPlayed(page),
   },
 ];

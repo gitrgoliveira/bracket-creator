@@ -3,7 +3,7 @@
 Regenerates every screenshot and video the documentation embeds, by driving the
 real application in a browser.
 
-    make docs/screenshots                        # the 50 application screenshots
+    make docs/screenshots                        # the 55 application screenshots
     make docs/videos                             # the 4 application videos
     make docs/media                              # both
 
@@ -132,8 +132,11 @@ would pull it into `audit-ci`'s scope.
     lib/api.mjs      the scaffolding calls (tournament, competition, roster, draw,
                      and a lineup written by member id)
     lib/net.mjs      picks a free port for the server
-    lib/ui.mjs       operator auth for a context (see its closing note on editors)
-    lib/editor.mjs   the score editor's selector, its Start match and two-tap Finish
+    lib/ui.mjs       operator auth for a context, the context's locale and time
+                     zone, and the frame helpers (see its closing note on editors)
+    lib/editor.mjs   the score editor's selector, its Start match and two-tap
+                     Finish, and the individual board's ippon and commit buttons
+    lib/card.mjs     the landing page's card captures, each a region of a page
     lib/scope.mjs    which groups a set of changed files reaches (SINCE=)
     lib/seed.mjs     runs scripts/setup_tournament.py for the demo tournament
     lib/fixture.mjs  read-back checks that refuse to capture a bad fixture
@@ -165,7 +168,8 @@ The "Watch it update live" clip records the same stage, so the stills and the
 clip cannot disagree about the layout. Its poster, `live-every-screen-poster`
 (in `recipes/videos.mjs`, beside the clip), is a still of the stage after the
 clip's scoring has played, so the landing page does not show the hero picture
-twice.
+twice. The clip's drive takes it as the clip ends (its recipe's `stills`), so it
+comes out of a video run: `make docs/videos NAME=live-every-screen`.
 
 Three things about the stage are not obvious from the code:
 
@@ -182,8 +186,10 @@ Three things about the stage are not obvious from the code:
 - **No pointer clicks inside a scaled frame.** Playwright misplaces a click
   inside a frame the stage has scaled down: at the narrow stage's 0.85 every
   click on the phone's watchlist box was refused as landing on another
-  element. The phone is driven by keyboard instead (type into the box, Enter
-  on the suggestion). Drive a scaled frame the same way.
+  element, and at the console's 0.36 a click reported success while the app
+  never saw it. Text goes in with `fill` and a control is pressed with a click
+  event dispatched on it (`pressInScaledFrame`, `lib/ui.mjs`). Drive a scaled
+  frame the same way.
 
 ## The rule that shapes the seeding
 
@@ -223,6 +229,19 @@ declares `touch: true`. The runner compares width always,
 and height for every mode except `fullPage`, whose height moves with content.
 
 A new capture has nothing to compare against and reports `NEW`.
+
+A landing page card is the region of a page its card shows, not the whole
+page scaled down in the browser: `lib/card.mjs` repeats a capture's recipe as
+`card-<name>` with `capture: { clip }`, a box in that page's CSS pixels. After
+copying a card, make its WebP copy (`make docs/media-copies`).
+
+A still that only exists partway through a procedure (the clip's poster) is
+taken by the drive itself: the recipe lists its name in `stills` and the drive
+calls `still(name, selector)`, and the runner compares it like any other.
+
+A family that reads a file of `recipes/` at run time beyond its own recipe
+files (the hero stage page) lists it in `assets`, so a change to that file
+re-runs it on a scoped run.
 
 A new group should declare `sources:` (the path prefixes of what its captures
 render, plus anything its seed drives). A group that declares none is treated

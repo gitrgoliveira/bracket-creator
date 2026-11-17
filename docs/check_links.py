@@ -137,8 +137,9 @@ def resolve(href: str, page_path: str, site: str, base_path: str):
     return target, frag
 
 
-def main() -> int:
-    site = os.path.abspath(sys.argv[1] if len(sys.argv) > 1 else "site")
+def main(argv: list[str] | None = None) -> int:
+    args = sys.argv[1:] if argv is None else argv
+    site = os.path.abspath(args[0] if args else "site")
     if not os.path.isdir(site):
         print(
             f"error: site dir not found: {site}\n"

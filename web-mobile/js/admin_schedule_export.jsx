@@ -21,8 +21,21 @@ const csvField = (s) => {
   return /[",]/.test(str) ? '"' + str.replace(/"/g, '""') + '"' : str;
 };
 
+// templateFromStoredDraw answers whether the blank template of a competition
+// in `status` comes from its stored draw: every status but setup (and the
+// legacy empty status), the negation of state.CanGenerateDraw. From the draw
+// on, the template is the stored-draw workbook (API.exportDrawTemplate, GET
+// /api/competitions/:id/export, engine.ExportCompetitionXlsx), so it prints
+// the pools and bracket the app runs and the printed PDFs carry. Before it,
+// nothing is drawn, and the roster goes to /create (buildXlsxBody below),
+// which draws it in registration order.
+export function templateFromStoredDraw(status) {
+  return !!status && status !== "setup";
+}
+
 // buildXlsxBody constructs the URLSearchParams body for POST /create from a
-// competition config object (cfg) and a player list. Extracted for testing.
+// competition config object (cfg) and a player list, for a competition not
+// drawn yet (templateFromStoredDraw). Extracted for testing.
 // cfg fields used: format, poolSize, poolWinners, poolSizeMode, courts,
 //   teamSize, teamMatchType, name, numberPrefix, roundRobin, poolFormat,
 //   withZekkenName, engi, and (via effectiveTwoThirdPlaces) twoThirdPlaces,
@@ -118,6 +131,7 @@ export function AdminExport({ c, t, password, showToast }) {
   const url = `${(window.linkBase || (() => window.location.origin))(t)}/viewer.html?id=${t.id}#comp-${cid}`;
 
   const [resultsBusy, setResultsBusy] = useState(false);
+  const [templateBusy, setTemplateBusy] = useState(false);
 
   const notify = (msg, kind) => {
     if (showToast) showToast(msg, kind);
@@ -126,8 +140,8 @@ export function AdminExport({ c, t, password, showToast }) {
 
   // downloadResults pulls the RESULTS-populated workbook (played scores,
   // standings, winners, decisions) from the admin-gated export-results
-  // endpoint. Unlike downloadXlsx below (the public blank template), this
-  // reflects what actually happened in the live app.
+  // endpoint. Unlike downloadXlsx below (the blank template), this reflects
+  // what actually happened in the live app.
   const downloadResults = async () => {
     if (resultsBusy) return;
     setResultsBusy(true);
@@ -152,13 +166,9 @@ export function AdminExport({ c, t, password, showToast }) {
   };
 
   const downloadXlsx = async () => {
+    if (templateBusy) return;
+    setTemplateBusy(true);
     try {
-      // Generate the workbook through the SAME stateless generator the `web`
-      // app uses (POST /create), instead of the engine's stored-pool export.
-      // The engine path reloads pools from disk, which severs the player↔match
-      // pointer link the renderer needs, so the pool W/L/T/RANK formulas
-      // collapse to "=0". Re-deriving from the roster here keeps them live
-      // (mp-x0u9). /create is a public, stateless endpoint (no auth header).
       // Swiss has no static-bracket generator; exporting it as a round-robin
       // pool would hand the operator a structurally wrong workbook. Block it
       // with a clear message instead (live results live in the scoring view).
@@ -166,22 +176,31 @@ export function AdminExport({ c, t, password, showToast }) {
         throw new Error("Swiss competitions can't be exported to a static Excel bracket: use the live scoring view to track Swiss rounds.");
       }
 
-      const players = cfg.players || [];
-      if (players.length < 2) throw new Error("competition has no participants to export");
+      let blob;
+      if (templateFromStoredDraw(c.status ?? cfg.status)) {
+        // The competition is drawn: print THAT draw (admin-gated, so it takes
+        // the organiser's password, which this card always has), never a
+        // fresh one from the roster, which can seat competitors elsewhere.
+        blob = await window.API.exportDrawTemplate(cid, password);
+      } else {
+        const players = cfg.players || [];
+        if (players.length < 2) throw new Error("competition has no participants to export");
 
-      const body = buildXlsxBody(cfg, cfg.name || c.name, players);
+        const body = buildXlsxBody(cfg, cfg.name || c.name, players);
 
-      // Only a fetch that rejects is "no connection"; a TypeError from reading
-      // the body or building the download is not, and keeps its own message.
-      const resp = await fetch(`/create`, { method: "POST", body }).catch((e) => {
-        throw isNoConnection(e) ? noConnectionError(NOT_SENT_NO_CONNECTION, e) : e;
-      });
-      if (!resp.ok) {
-        let msg = await resp.text();
-        try { msg = JSON.parse(msg).error || msg; } catch (_) { /* keep raw text */ }
-        throw new Error(msg);
+        // /create is the public, stateless generator (no auth header). Only a
+        // fetch that rejects is "no connection"; a TypeError from reading the
+        // body or building the download is not, and keeps its own message.
+        const resp = await fetch(`/create`, { method: "POST", body }).catch((e) => {
+          throw isNoConnection(e) ? noConnectionError(NOT_SENT_NO_CONNECTION, e) : e;
+        });
+        if (!resp.ok) {
+          let msg = await resp.text();
+          try { msg = JSON.parse(msg).error || msg; } catch (_) { /* keep raw text */ }
+          throw new Error(msg);
+        }
+        blob = await resp.blob();
       }
-      const blob = await resp.blob();
       const dlUrl = window.URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = dlUrl;
@@ -195,6 +214,8 @@ export function AdminExport({ c, t, password, showToast }) {
     } catch (err) {
       // A request that got no answer says the one "not sent" sentence (write_result.jsx).
       alert(shownMessage(err, "Export failed: "));
+    } finally {
+      setTemplateBusy(false);
     }
   };
 
@@ -216,7 +237,9 @@ export function AdminExport({ c, t, password, showToast }) {
           {resultsBusy ? "Preparing…" : "Download results (.xlsx)"}
         </button>
         <div className="field__hint" style={{ marginTop: 8, marginBottom: 14 }}>Pool standings and brackets with the played scores, winners, and decisions (Kiken / Fus. / DH / Ht) filled in.</div>
-        <button type="button" className="btn btn--full" onClick={downloadXlsx}>Download blank template (.xlsx)</button>
+        <button type="button" className="btn btn--full" onClick={downloadXlsx} disabled={templateBusy}>
+          {templateBusy ? "Preparing…" : "Download blank template (.xlsx)"}
+        </button>
         <div className="field__hint" style={{ marginTop: 8 }}>Empty pool draws, matches, and brackets with linked formulas, for scoring by hand.</div>
       </div>
       <div className="card">

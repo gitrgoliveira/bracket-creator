@@ -5379,6 +5379,21 @@ function _restoreForm({ file, from, only, undo, decisions }) {
     return fd;
 }
 
+// _downloadWorkbook GETs an admin-gated .xlsx through the direct door and
+// returns its Blob; a non-2xx throws the server's own sentence, else `fallback`.
+// A download changes nothing, so a dropped connection says "Not sent".
+async function _downloadWorkbook(path, password, fallback) {
+    const res = await _directFetch(path, {
+        method: 'GET',
+        headers: password ? { 'X-Tournament-Password': password } : {}
+    }, NOT_SENT_NO_CONNECTION);
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || fallback);
+    }
+    return res.blob();
+}
+
 const API = {
     async fetchTournament() {
         const res = await fetch('/api/viewer/tournament');
@@ -5688,19 +5703,20 @@ const API = {
     // exportResults GETs the RESULTS-populated workbook (played scores,
     // standings, winners, and decision suffixes written as literal values)
     // from the admin-gated /api/competitions/:id/export-results endpoint. This
-    // is distinct from AdminExport's "Download .xlsx", which posts to the public
-    // /create path and yields a BLANK formula template. Returns an .xlsx Blob;
-    // throws the server's error message on non-2xx.
+    // is distinct from AdminExport's "Download blank template", which yields a
+    // BLANK formula template (exportDrawTemplate below, or /create before the
+    // draw). Returns an .xlsx Blob; throws the server's error message on non-2xx.
     async exportResults(compID, password) {
-        const res = await _directFetch(`/api/competitions/${compID}/export-results`, {
-            method: 'GET',
-            headers: password ? { 'X-Tournament-Password': password } : {}
-        }, NOT_SENT_NO_CONNECTION); // a download changes nothing
-        if (!res.ok) {
-            const err = await res.json().catch(() => ({}));
-            throw new Error(err.error || "Failed to export results");
-        }
-        return res.blob();
+        return _downloadWorkbook(`/api/competitions/${compID}/export-results`, password, "Failed to export results");
+    },
+    // exportDrawTemplate GETs the blank template of a competition's STORED
+    // draw (no results, live formulas) from the admin-gated
+    // /api/competitions/:id/export endpoint (engine.ExportCompetitionXlsx),
+    // the same draw the printed PDFs carry and the app runs. AdminExport's
+    // "Download blank template" uses it once the competition has a draw.
+    // Returns an .xlsx Blob; throws the server's error message on non-2xx.
+    async exportDrawTemplate(compID, password) {
+        return _downloadWorkbook(`/api/competitions/${compID}/export`, password, "Failed to export the blank template");
     },
     async startCompetition(id, password) {
         const res = await _directFetch(`/api/competitions/${id}/start`, {

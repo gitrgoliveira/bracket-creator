@@ -35,3 +35,23 @@ func TestExportBracketHandler_SwissUnprocessable(t *testing.T) {
 		"Swiss export must be 422, never 500 (unhandled sentinel) or 200 (empty workbook)")
 	assert.Contains(t, w.Body.String(), "Swiss")
 }
+
+// TestExportBracketHandler_NoDrawIsConflict: a competition with no draw (a
+// stale page after another device discarded it) is refused 409 with a
+// sentence, never answered 200 with an undrawn workbook.
+func TestExportBracketHandler_NoDrawIsConflict(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: "nodraw", Name: "No Draw", Kind: "individual", Format: state.CompFormatMixed,
+		Courts: []string{"A"}, Status: state.CompStatusSetup,
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/competitions/nodraw/export", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusConflict, w.Code)
+	assert.Contains(t, w.Body.String(), "no draw yet")
+}

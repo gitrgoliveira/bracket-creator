@@ -2545,7 +2545,13 @@ paths:
     get:
       tags: [competitions]
       summary: Export competition as Excel
-      description: Downloads an .xlsx file with the current bracket/pools state.
+      description: >-
+        Downloads the competition's stored draw (pools, pool matches and
+        bracket) as a blank .xlsx template: live formulas and no results on
+        the main sheets (the Kachinuki Detail and Representative Bouts sheets
+        list bouts already recorded). The
+        app's "Download blank template" uses it once the competition is drawn,
+        and the printed PDFs come from the same workbook.
       security:
         - TournamentPassword: []
       parameters:
@@ -2558,6 +2564,23 @@ paths:
               schema:
                 type: string
                 format: binary
+        '409':
+          description: >-
+            The competition has no draw yet (still in setup, or its draw was
+            discarded), so there is nothing stored to export.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: >-
+            The competition cannot be exported: a Swiss competition has no
+            static bracket, or its stored bracket no longer matches its
+            settings.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '500':
           $ref: '#/components/responses/InternalError'
 

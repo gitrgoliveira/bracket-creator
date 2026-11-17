@@ -2959,6 +2959,18 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		if !ok {
 			return
 		}
+		// A competition with no draw yet has nothing stored to render: the
+		// engine would answer 200 with empty pool sheets, which a page whose
+		// status is stale (another device discarded the draw) would offer as
+		// the competition's template. Refuse it here, not in the engine,
+		// because Export PDFs prints every competition through
+		// ExportCompetitionXlsx and a tournament with some competitions still
+		// in setup must keep printing. Swiss is left to the engine's own 422.
+		if comp, lerr := store.LoadCompetition(id); lerr == nil && comp != nil &&
+			comp.Format != state.CompFormatSwiss && state.CanGenerateDraw(comp.Status) {
+			c.JSON(http.StatusConflict, gin.H{"error": "this competition has no draw yet (it may have been discarded on another device); generate the draw before downloading its template"})
+			return
+		}
 		data, err := eng.ExportCompetitionXlsx(id)
 		if err != nil {
 			// Swiss (no static bracket) and a stored bracket that no longer

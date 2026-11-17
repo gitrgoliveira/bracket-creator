@@ -37,7 +37,9 @@ import (
 //     bracketHasKnockoutContent) that this call's draw cannot re-derive --
 //     see that predicate's comment below for why that state is refused
 //     rather than partially rendered.
-//  5. Delete the "Tree" template sheet (f.DeleteSheet)
+//  5. Delete the "Tree" template sheet (f.DeleteSheet), and for a
+//     knockout-only competition the Pool Draw and Pool Matches sheets its
+//     empty pool phase left blank
 //  6. Names to Print sheet, one per shiaijo (helper.CreateNamesWithPoolToPrint,
 //     or helper.CreateNamesToPrint over namesToPrintPlayers -- same branch as
 //     step 1)
@@ -278,6 +280,18 @@ func (e *Engine) RenderCompetitionWorkbook(
 	//    printed booklet.
 	if err := f.DeleteSheet(helper.SheetTree); err != nil {
 		return nil, nil, fmt.Errorf("render workbook: delete tree template sheet: %w", err)
+	}
+	// A knockout-only competition has no pool phase, so steps 2 and 3 left
+	// the Pool Draw and Pool Matches sheets empty. Delete them, as /create's
+	// knockout workbook does (cmd/create-knockout.go), so neither export
+	// carries two blank sheets. The results overlays write to Pool Matches
+	// only for a competition with pools.
+	if isPureKnockout(comp, pools) {
+		for _, sheet := range []string{helper.SheetPoolDraw, helper.SheetPoolMatches} {
+			if err := f.DeleteSheet(sheet); err != nil {
+				return nil, nil, fmt.Errorf("render workbook: delete empty %s sheet: %w", sheet, err)
+			}
+		}
 	}
 
 	// 6. Names to Print sheet, one per shiaijo. Clamps the allocation to the

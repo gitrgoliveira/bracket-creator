@@ -193,9 +193,9 @@ func BuildResultsWorkbook(store *state.Store, eng *engine.Engine, compID string)
 	// inside its own block.
 	boutRows := comp.TeamBoutRows()
 
-	// Pool Matches: W/L/T/RANK formula cells collapse to 0 after a store
-	// round-trip (documented at cmd/create_handler.go:25), so overwrite them
-	// with literal values from the engine.
+	// Pool Matches: overwrite the W/L/T/RANK formula cells with literal values
+	// from the engine, so the results archive reads the same in a reader that
+	// computes no formula.
 	if err := overlayPoolScores(f, pools, matchResultByID, poolOrdinals, boutRows, poolsByCourt, comp.Engi); err != nil {
 		return nil, fmt.Errorf("export: overlay pool scores: %w", err)
 	}

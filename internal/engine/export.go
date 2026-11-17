@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"log"
 
+	excelize "github.com/xuri/excelize/v2"
+
 	"github.com/gitrgoliveira/bracket-creator/internal/excel"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
@@ -12,9 +14,18 @@ import (
 // ExportCompetitionXlsx renders the competition's stored draw (pools.csv,
 // pool-matches.csv, bracket.json) as a workbook with no results: the
 // stored-draw export behind GET /api/competitions/:id/export and the PDF print
-// export (ExportTournamentWorkbooks). The app's "Download blank template"
-// button does not come here: it posts the roster to /create, which draws the
-// workbook afresh (cmd/create_handler.go).
+// export (ExportTournamentWorkbooks). It is also the app's "Download blank
+// template" once the competition has a draw (any status but setup): the
+// template, the printed PDFs and the matches the app runs then come from the
+// one stored draw. Before the draw there is nothing stored to print, and the
+// button posts the roster to /create instead (admin_schedule_export.jsx).
+//
+// Its pool counting formulas (W/L/T/IV/PW/PL/RANK) are live: AttachPoolMatches
+// points each match's sides INTO its own pool's Players slice, the pointer
+// identity helper.PrintPoolMatches links a player's formulas by (mp-x0u9 was
+// the stored pools' matches pointing at another slice, which printed "=0").
+// The finish /create gives its workbook is given here too (finishTemplate), so
+// the two blank templates differ only in the draw they print.
 func (e *Engine) ExportCompetitionXlsx(id string) ([]byte, error) {
 	comp, err := e.store.LoadCompetition(id)
 	if err != nil {
@@ -180,12 +191,37 @@ func (e *Engine) ExportCompetitionXlsx(id string) ([]byte, error) {
 	if err := helper.CreateTagsSheet(f, tagsPools, publicURL, comp.EffectiveNumberPrefix()); err != nil {
 		return nil, err
 	}
+	finishTemplate(f, comp, pools, draw, numCourts)
 
 	var buf bytes.Buffer
 	if err := f.Write(&buf); err != nil {
 		return nil, err
 	}
 	return buf.Bytes(), nil
+}
+
+// finishTemplate gives the stored-draw workbook the finish /create gives its
+// blank template (cmd/create-pools.go, cmd/create-knockout.go): the Time
+// Estimator sheet filled in for this draw, and every sheet but the editable
+// ones protected against an accidental edit of a formula
+// (helper.ProtectAllSheets). Neither changes a printed page: the PDF groups
+// print no Time Estimator, and a protected sheet prints as it is.
+//
+// The counts are the ones /create passes: the pools and the matches the Pool
+// Matches sheet prints (AttachPoolMatches has filled pool.Matches), the team
+// size, and n-1 knockout matches for the n entrants of the draw this workbook
+// prints, none for a competition with no knockout (a league).
+func finishTemplate(f *excelize.File, comp *state.Competition, pools []helper.Pool, draw *helper.KnockoutDraw, numCourts int) {
+	var poolMatches int
+	for _, p := range pools {
+		poolMatches += len(p.Matches)
+	}
+	var knockoutMatches int
+	if draw != nil && comp.IsKnockoutEnabled() {
+		knockoutMatches = max(helper.CountLeaves(draw.Root)-1, 0)
+	}
+	helper.FillEstimations(f, int64(len(pools)), int64(poolMatches), int64(comp.TeamSize), int64(knockoutMatches), numCourts)
+	helper.ProtectAllSheets(f)
 }
 
 // firstUnnumberedPooledCompetitor returns the first competitor across every

@@ -93,9 +93,8 @@ func TestBuildResultsWorkbook_PoolScoresLiteral(t *testing.T) {
 }
 
 func TestBuildResultsWorkbook_StandingsLiteral_NoFormulaCollapse(t *testing.T) {
-	// Per cmd/create_handler.go:25, RANK/W/L formulas collapse to 0 after a
-	// store round-trip. This test verifies that the exported workbook has non-
-	// zero literal standings values even for a re-read XLSX (no formula engine).
+	// The results workbook writes its standings as literals, so a re-read
+	// XLSX (no formula engine) still shows non-zero RANK/W/L values.
 	t.Parallel()
 	dir, store, eng, compID := testSetup(t)
 	defer os.RemoveAll(dir)

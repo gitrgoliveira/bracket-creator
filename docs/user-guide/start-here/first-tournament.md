@@ -48,7 +48,7 @@ Go to the **Scores** tab, open a match, and record the result. Refer to [Scoring
 Steps 1 to 5 run the whole tournament in the app. To run the day from paper instead, with no app at the courts, follow steps 1 to 4 up to **Generate draw**, then print from the app instead of starting the competitions:
 
 - **Export PDFs** on the dashboard renders the competitor tags, name sheets and bracket trees of every competition as print-ready PDFs, from the draw you generated. It needs LibreOffice on the computer that runs the app.
-- **Download blank template (.xlsx)** on a competition's page gives a workbook with linked formulas for scoring by hand. It draws the competition again from the roster, in registration order, so its pools and bracket can differ from the draw in the app: score from the same source you printed.
+- **Download blank template (.xlsx)** on a competition's page gives the same draw as a workbook with linked formulas for scoring by hand.
 
 Neither export covers a Swiss competition; follow its live standings instead. Refer to [Export and print](../organisers/run-tournament.md#export-and-print).
 
@@ -62,7 +62,7 @@ On the day you need:
 
 If you have multiple shiai-jo and run on printed brackets, share each competition's workbook online so every table works from the same document:
 
-1. Download the blank template (.xlsx) from the competition's page, upload it to Google Drive and open it with Google Sheets. Print from this workbook too, since its draw can differ from the app's. The workbook's formulas work in Google Sheets as they do in Excel.
+1. Download the blank template (.xlsx) from the competition's page, upload it to Google Drive and open it with Google Sheets. The workbook's formulas work in Google Sheets as they do in Excel.
 2. Share the sheet with the person at each table, with permission to edit.
 3. At each table, open the sheet on any device with a browser or the Google Sheets app, and type that court's results into its own matches: the points in the score cells, and an **X** in the centre column for a tie.
 

@@ -52,6 +52,29 @@ describe('findLoadTimeCycleReads', () => {
     expect(find(`${head}export const o = { B_CONST: 1, fromB() { return fromB; } };\nexport const p = o.B_CONST;\nexport class K { m() { return fromB(); } v = B_CONST; }\n`)).toEqual([]);
   });
 
+  it.each([
+    ['a function declared and called at the top level', 'function init() { return B_CONST; }\nexport const x = init();\n'],
+    ['an arrow held in a const and called at the top level', 'const init = () => fromB();\ninit();\n'],
+    ['a function that calls another one called at load', 'const inner = () => B_CONST;\nfunction outer() { return inner(); }\nouter();\n'],
+    ['an exported function called at the top level', 'export function init() { return B_CONST; }\ninit();\n'],
+    ['an immediately invoked function', '(() => { fromB(); })();\n'],
+    ['a map callback', 'export const xs = [1].map((n) => n + B_CONST);\n'],
+    ['a forEach callback', '[1].forEach(() => fromB());\n'],
+    ['a parameter default of a function called at load', 'function f(v = B_CONST) { return v; }\nf();\n'],
+  ])('reports a read inside %s', (_, code) => {
+    const hits = find(head + code);
+    expect(hits).toHaveLength(1);
+    expect(hits[0]).toMatch(/^a\.jsx:\d+ (B_CONST|fromB) <- b\.jsx$/);
+  });
+
+  it('accepts a read in a function that is declared but not called as the module loads', () => {
+    expect(find(`${head}function later() { return B_CONST; }\nconst hold = () => later();\nwindow.addEventListener('x', () => fromB());\nsetTimeout(function () { fromB(); }, 0);\nexport const o = { run() { return later(); } };\n`)).toEqual([]);
+  });
+
+  it('reports a function called twice at load once', () => {
+    expect(find(`${head}function f() { return B_CONST; }\nf();\nf();\n`)).toHaveLength(1);
+  });
+
   it('reports a read from a module that imports itself back through a longer cycle', () => {
     const hits = findLoadTimeCycleReads({
       'x.jsx': "import { Y } from './y.jsx';\nexport const X = Y;\n",

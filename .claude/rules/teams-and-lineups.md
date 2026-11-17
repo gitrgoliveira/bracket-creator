@@ -4,7 +4,7 @@ paths:
   - "internal/engine/{kachinuki,kachinuki_roster,lineup_in_force,daihyosen}*.go"
   - "internal/state/{team_lineup,round_lineups,squad,team_result}*.go"
   - "internal/mobileapp/{handlers_lineup,handlers_squad,handlers_daihyosen,team_finish_gate}*.go"
-  - "web-mobile/js/{minted_members,lineup_draft,lineup_rename,lineup_resolver,lineup_save,admin_lineup,admin_schedule_lineup,admin_scoring_team,team_default_credit,squad_member_label,kachinuki_advisory}.jsx"
+  - "web-mobile/js/{minted_members,lineup_draft,lineup_rename,lineup_resolver,lineup_save,admin_lineup,admin_schedule_lineup,admin_scoring_team,admin_scoring_team_bouts,admin_scoring_team_kachinuki,team_default_credit,squad_member_label,kachinuki_advisory}.jsx"
 ---
 
 # Team matches, lineups and kachinuki

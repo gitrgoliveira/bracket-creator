@@ -34,7 +34,7 @@
 import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { resolve, dirname, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { maskComments } from './check-helpers.mjs';
+import { stripComments } from './check-helpers.mjs';
 
 const JS_DIR = resolve(dirname(fileURLToPath(import.meta.url)), 'js');
 
@@ -281,7 +281,7 @@ function getCachedExports(absPath) {
   if (!exportCache.has(absPath)) {
     exportCache.set(
       absPath,
-      existsSync(absPath) ? extractExports(maskComments(readFileSync(absPath, 'utf8'))) : null,
+      existsSync(absPath) ? extractExports(stripComments(readFileSync(absPath, 'utf8'))) : null,
     );
   }
   return exportCache.get(absPath);
@@ -293,7 +293,7 @@ const listed = new Set(CHECK_MODULES);
 // Import errors: every module in the folder, listed or not.
 const importErrors = [];
 for (const modName of folderModules) {
-  const code = maskComments(readFileSync(resolve(JS_DIR, modName), 'utf8'));
+  const code = stripComments(readFileSync(resolve(JS_DIR, modName), 'utf8'));
   for (const { importedNames, fromPath } of extractSiblingImports(code)) {
     const sibPath = resolve(JS_DIR, fromPath);
     const sibName = fromPath.replace(/^\.\//, '');
@@ -402,7 +402,7 @@ function checkScriptTagUrls() {
   const importedBy = new Map();
   for (const file of readdirSync(JS_DIR)) {
     if (!/\.(jsx|js)$/.test(file)) continue;
-    const src = maskComments(readFileSync(resolve(JS_DIR, file), 'utf8'));
+    const src = stripComments(readFileSync(resolve(JS_DIR, file), 'utf8'));
     // `from './x'` covers static named/default/namespace imports and re-exports;
     // `import './x'` covers side-effect-only imports, which load the module just
     // as surely and so must agree with any tag too. `import('./x')` is the same

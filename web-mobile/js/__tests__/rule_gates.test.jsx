@@ -62,9 +62,8 @@ describe('stripComments keeps every line where it was', () => {
   });
 
   it('a trailing comment goes, a URL in code stays', () => {
-    // The character before the slashes is kept (it is what proved this was
-    // not a URL), so the line ends in the space that preceded the comment.
-    expect(stripComments('x = 1; // .includes(\n')).toBe('x = 1; \n');
+    // The comment becomes spaces, so the line keeps its length.
+    expect(stripComments('x = 1; // .includes(\n')).toBe(`x = 1; ${' '.repeat(13)}\n`);
     expect(stripComments('u = "https://k.example/x";\n')).toBe('u = "https://k.example/x";\n');
   });
 });

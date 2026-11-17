@@ -7,12 +7,13 @@
 // is printed -- so the two gates agree on those without either carrying a copy.
 //
 // They did carry copies, byte-identical ones, and both copies had the same
-// faults (see stripComments): every violation either gate reported after a
-// block comment named the wrong line, and a "/*" inside a line comment could
-// hide code from both. A third stripper lives in js/__tests__/helpers/source.js
-// for the vitest sweeps; it deliberately keeps trailing // comments (an
-// absence assertion must not be fooled by prose, but a trailing comment is
-// never a render), so it is a sibling with a different contract, not a copy.
+// faults: every violation either gate reported after a block comment named the
+// wrong line, and a "/*" inside a line comment could hide code from both.
+// stripComments is now the one comment blanker here (check-imports.mjs reads
+// it too). A sibling lives in js/__tests__/helpers/source.js for the vitest
+// sweeps; it deliberately keeps trailing // comments (an absence assertion must
+// not be fooled by prose, but a trailing comment is never a render), so it is
+// a different contract, not a copy.
 //
 // No npm dependencies, Node.js built-ins only, like the gates themselves.
 
@@ -33,35 +34,6 @@ export function* walk(dir) {
     }
     if (entry.endsWith('.jsx') || entry.endsWith('.js')) yield full;
   }
-}
-
-// stripComments: blank out comments WITHOUT moving anything, so line i of the
-// result is line i of the file. A comment DESCRIBING a rule (which every gate
-// and every owner module does, at length) must not read as a use of it, but a
-// gate that then reports the wrong line sends the reader to prose.
-//
-// The two faults the gates' old copies shared:
-//
-//   - a block comment was deleted outright, so every line after one shifted up
-//     by the comment's height;
-//   - line comments were matched with ^\s*, which under the m flag also eats
-//     the blank lines ABOVE the comment -- another shift, one blank at a time.
-//
-// And a third, shared with an earlier copy in the test helpers: stripping
-// block comments in a pass BEFORE line comments lets a "/*" inside a //
-// comment (a route glob such as /api/competitions/:id/*) open a phantom block
-// that swallows code up to the next "*/". Code a gate never sees is code it
-// never judges. One alternation pass, line comments first, closes all three: a
-// block comment is replaced by its own newlines, a line comment by nothing.
-//
-// Trailing comments ARE stripped here (`p.number; // .includes(` must not trip
-// a rule), guarded by the character before the slashes so a URL in code, whose
-// "//" follows a ":", survives.
-export function stripComments(src) {
-  return src.replace(
-    /^[ \t]*\/\/.*$|\/\*[\s\S]*?\*\/|([^:])\/\/.*$/gm,
-    (m, before) => (before !== undefined ? before : m.replace(/[^\n]/g, '')),
-  );
 }
 
 // scanSource: the lines of one file that trip a rule; the first matching rule
@@ -128,8 +100,13 @@ function regexMayStart(out) {
   for (let k = out.length - 1; k >= 0 && tail.trimEnd().length < 8; k--) tail = out[k] + tail;
   tail = tail.trimEnd();
   if (!tail) return true;
+  // After a postfix "++"/"--" the slash divides ("i++ / 2"); a regex cannot
+  // follow a prefix one, so the pair never starts a literal.
+  if (/(?:\+\+|--)$/.test(tail)) return false;
+  // A keyword starts a regex only as a keyword: "obj.in / b" is a property, so
+  // a division.
   return /[(,=:[!&|?;{+\-*%~^]$/.test(tail) || tail.endsWith('=>')
-    || /\b(?:return|typeof|case|in|of|delete|void|throw|else|do|yield|await)$/.test(tail);
+    || /(?<![\w$.])(?:return|typeof|case|in|of|delete|void|throw|else|do|yield|await)$/.test(tail);
 }
 
 // The end of the regular-expression literal that starts at src[i] (a "/"),
@@ -153,18 +130,26 @@ function regexEnd(src, i) {
   return -1;
 }
 
-// The source with every comment replaced by spaces (newlines kept, so offsets
-// and line starts do not move). One pass over the text, aware of strings and
-// template literals, so a "//" or "/*" inside a string is not a comment and a
-// "/*" inside a // comment cannot open a phantom block. A whole-file regex
-// strip is NOT used: it cuts string literals that hold those characters.
+// stripComments: the source with every comment replaced by spaces, newlines
+// kept, so line i of the result is line i of the file and offsets do not move.
+// A comment DESCRIBING a rule (which every gate and every owner module does, at
+// length) must not read as a use of it, but a gate that then reports the wrong
+// line sends the reader to prose. Trailing comments are blanked too
+// (`p.number; // .includes(` must not trip a rule).
+//
+// One pass over the text, aware of strings and template literals, so a "//" or
+// "/*" inside a string (a URL in code) is not a comment and a "/*" inside a //
+// comment (a route glob such as /api/competitions/:id/*) cannot open a phantom
+// block that swallows code up to the next "*/". A regex strip is NOT used: it
+// cuts string literals that hold those characters, and a block comment deleted
+// outright moves every later line up by its height.
 // A quote that is never closed ends at the line break (JSX text such as
 // "Don't" holds a lone apostrophe), and a backslash in code protects the next
 // character (the "\/*" of a regular expression is not a comment opener).
 // A regular-expression literal is passed through whole, so a quote, a backtick
 // or a "/*" inside one opens no string, template or comment (see
 // regexMayStart for where a "/" can begin one).
-export function maskComments(src) {
+export function stripComments(src) {
   const blank = (s) => s.replace(/[^\n]/g, ' ');
   const out = [];
   const n = src.length;

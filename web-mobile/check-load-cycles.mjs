@@ -15,8 +15,13 @@
 // bodies: initializers, calls, `API.x = ...` assignments, a class's `extends`
 // and its computed keys, static field initializers and static blocks, JSX
 // built at the top level. Function and arrow bodies, their parameter defaults
-// and instance members run later, so reading a sibling there is safe. A name
-// the module imports from a module outside its cycle (a leaf) is always safe.
+// and instance members run later, so reading a sibling there is safe, except
+// where a load-time call runs one on the spot: an immediately invoked function,
+// a function the module declares at its top level (followed through the calls
+// it makes in turn), and the callback of an array method such as `.map`. A
+// function reached any other way (a method, an alias, a callback given to a
+// timer or a listener) is not followed. A name the module imports from a module
+// outside its cycle (a leaf) is always safe.
 //
 // Parser: the oxc parser that rolldown ships (rolldown/utils parseSync, a
 // dependency of vitest's vite, installed by `npm ci` in web-mobile).
@@ -52,6 +57,23 @@ function readImports(program) {
     }
   }
   return { bindings, edges };
+}
+
+// The functions a module declares at its top level, by name: a function
+// declaration, or a const or let holding a function or an arrow.
+function readLocalFunctions(program) {
+  const locals = new Map();
+  for (const node of program.body) {
+    const decl = node.type === 'ExportNamedDeclaration' ? node.declaration : node;
+    if (!decl) continue;
+    if (decl.type === 'FunctionDeclaration' && decl.id) locals.set(decl.id.name, decl);
+    if (decl.type === 'VariableDeclaration') {
+      for (const d of decl.declarations) {
+        if (d.id.type === 'Identifier' && isFunction(d.init)) locals.set(d.id.name, d.init);
+      }
+    }
+  }
+  return locals;
 }
 
 // Tarjan: the strongly connected components of { module -> Set(module) },
@@ -97,11 +119,42 @@ function cycleIds(graph) {
   return comp;
 }
 
-// The names a load-time walk of `node` reads from `watched` (a Map of local
-// name -> import record), as { name, start }. `onHit` receives each.
-function walkLoadTime(node, watched, onHit) {
+// The functions whose bodies a call runs on the spot: an immediately invoked
+// function, a function the module declares at its top level, and the callback
+// handed to an array method that calls it before it returns. A function reached
+// any other way (a method, an alias, a callback given to a timer or a listener)
+// is not followed, so a read inside one is not seen.
+const SYNC_CALLBACK_METHODS = new Set([
+  'map', 'forEach', 'filter', 'reduce', 'reduceRight', 'flatMap', 'some', 'every', 'find', 'findIndex', 'findLast', 'findLastIndex', 'sort', 'toSorted',
+]);
+const isFunction = (n) => isNode(n) && (n.type === 'FunctionExpression' || n.type === 'ArrowFunctionExpression');
+
+function functionsRunBy(call, ctx) {
+  let { callee } = call;
+  while (callee.type === 'ParenthesizedExpression') callee = callee.expression;
+  if (isFunction(callee)) return [callee];
+  if (callee.type === 'Identifier') return ctx.locals.has(callee.name) ? [ctx.locals.get(callee.name)] : [];
+  if (callee.type === 'MemberExpression' && !callee.computed && SYNC_CALLBACK_METHODS.has(callee.property.name)) {
+    return call.arguments.filter(isFunction);
+  }
+  return [];
+}
+
+// Walk a function's parameter defaults and body as code that runs now, once.
+function runNow(fn, ctx) {
+  if (ctx.seen.has(fn)) return;
+  ctx.seen.add(fn);
+  walkPattern(fn.params, ctx);
+  walkLoadTime(fn.body, ctx);
+}
+
+// The names a load-time walk of `node` reads from `ctx.watched` (a Map of local
+// name -> import record), as { name, start }. `ctx.onHit` receives each.
+// `ctx.locals` maps the module's top-level functions by name, and `ctx.seen`
+// holds the function nodes already walked.
+function walkLoadTime(node, ctx) {
   if (Array.isArray(node)) {
-    for (const n of node) walkLoadTime(n, watched, onHit);
+    for (const n of node) walkLoadTime(n, ctx);
     return;
   }
   if (!isNode(node)) return;
@@ -110,79 +163,86 @@ function walkLoadTime(node, watched, onHit) {
     case 'FunctionExpression':
     case 'ArrowFunctionExpression':
       return; // runs later
+    case 'CallExpression':
+      for (const fn of functionsRunBy(node, ctx)) runNow(fn, ctx);
+      break; // the callee and the arguments are walked below
     case 'ImportDeclaration':
     case 'ExportAllDeclaration':
       return;
     case 'ExportNamedDeclaration':
-      if (node.declaration) walkLoadTime(node.declaration, watched, onHit);
+      if (node.declaration) walkLoadTime(node.declaration, ctx);
       return; // `export { a }` names a binding; it reads nothing
     case 'Identifier':
     case 'JSXIdentifier':
-      if (watched.has(node.name)) onHit(node.name, node.start);
+      if (ctx.watched.has(node.name)) ctx.onHit(node.name, node.start);
       return;
     case 'MemberExpression':
-      walkLoadTime(node.object, watched, onHit);
-      if (node.computed) walkLoadTime(node.property, watched, onHit);
+      walkLoadTime(node.object, ctx);
+      if (node.computed) walkLoadTime(node.property, ctx);
       return;
     case 'Property':
     case 'ObjectProperty':
     case 'PropertyDefinition':
     case 'MethodDefinition':
     case 'AccessorProperty': {
-      if (node.computed) walkLoadTime(node.key, watched, onHit);
+      if (node.computed) walkLoadTime(node.key, ctx);
       // An instance field or a method runs when the class is used, not now.
       const runsNow = node.type === 'Property' || node.type === 'ObjectProperty'
         ? !node.method && node.kind !== 'get' && node.kind !== 'set'
         : node.static && node.type !== 'MethodDefinition';
-      if (runsNow) walkLoadTime(node.value, watched, onHit);
+      if (runsNow) walkLoadTime(node.value, ctx);
       return;
     }
     case 'JSXAttribute':
-      walkLoadTime(node.value, watched, onHit);
+      walkLoadTime(node.value, ctx);
       return;
     case 'JSXMemberExpression':
-      walkLoadTime(node.object, watched, onHit);
+      walkLoadTime(node.object, ctx);
       return;
     case 'LabeledStatement':
-      walkLoadTime(node.body, watched, onHit);
+      walkLoadTime(node.body, ctx);
       return;
     case 'BreakStatement':
     case 'ContinueStatement':
       return;
     case 'VariableDeclarator':
-      walkPattern(node.id, watched, onHit);
-      walkLoadTime(node.init, watched, onHit);
+      walkPattern(node.id, ctx);
+      walkLoadTime(node.init, ctx);
       return;
     default:
   }
   for (const key of Object.keys(node)) {
     if (key === 'type' || key === 'start' || key === 'end' || key === 'loc' || key === 'range') continue;
-    walkLoadTime(node[key], watched, onHit);
+    walkLoadTime(node[key], ctx);
   }
 }
 
 // A binding pattern introduces names; only its defaults and computed keys run.
-function walkPattern(p, watched, onHit) {
+function walkPattern(p, ctx) {
+  if (Array.isArray(p)) {
+    for (const el of p) walkPattern(el, ctx);
+    return;
+  }
   if (!isNode(p)) return;
   switch (p.type) {
     case 'ObjectPattern':
       for (const prop of p.properties) {
-        if (prop.type === 'RestElement') walkPattern(prop.argument, watched, onHit);
+        if (prop.type === 'RestElement') walkPattern(prop.argument, ctx);
         else {
-          if (prop.computed) walkLoadTime(prop.key, watched, onHit);
-          walkPattern(prop.value, watched, onHit);
+          if (prop.computed) walkLoadTime(prop.key, ctx);
+          walkPattern(prop.value, ctx);
         }
       }
       return;
     case 'ArrayPattern':
-      for (const el of p.elements) walkPattern(el, watched, onHit);
+      for (const el of p.elements) walkPattern(el, ctx);
       return;
     case 'RestElement':
-      walkPattern(p.argument, watched, onHit);
+      walkPattern(p.argument, ctx);
       return;
     case 'AssignmentPattern':
-      walkPattern(p.left, watched, onHit);
-      walkLoadTime(p.right, watched, onHit);
+      walkPattern(p.left, ctx);
+      walkLoadTime(p.right, ctx);
       return;
     default:
   }
@@ -207,10 +267,11 @@ export function findLoadTimeCycleReads(sources, parseSync) {
     if (mine === undefined || mine < 0) continue;
     const watched = new Map([...bindings].filter(([, b]) => comp.get(b.from) === mine));
     if (watched.size === 0) continue;
-    walkLoadTime(program.body, watched, (name, start) => {
+    const onHit = (name, start) => {
       const line = src.slice(0, start).split('\n').length;
       violations.push({ file, line, name, from: watched.get(name).from });
-    });
+    };
+    walkLoadTime(program.body, { watched, onHit, locals: readLocalFunctions(program), seen: new Set() });
   }
   return violations.sort((a, b) => a.file.localeCompare(b.file) || a.line - b.line);
 }

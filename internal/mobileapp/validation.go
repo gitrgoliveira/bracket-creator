@@ -429,7 +429,7 @@ func subBoutNeedsNumberedEnchoAllowance(sr *state.SubMatchResult) bool {
 // EXCEPTION (mp-gmcg): in a KACHINUKI competition a tied pairing may be
 // fought on in overtime on that same bout (daihyosen does not exist in
 // kachinuki), so callers pass allowNumberedEncho=true — derived via
-// allowNumberedEnchoFromStore (handlers_match.go). The exception applies in
+// allowNumberedEnchoFromStore. The exception applies in
 // EVERY phase: whether the final pairing must produce a result (e.g. the
 // taisho must be defeated) is operator discretion, never derivable from
 // pool-vs-bracket. The hantei gate is NOT relaxed: kachinuki bouts are
@@ -1169,8 +1169,8 @@ func winningScoreline(ipponsA, ipponsB []string, n int) bool {
 // and harmless), there is no known pairing for winnerId to have missed, so
 // the rejection is skipped rather than firing on data it cannot evaluate.
 // SideAID/SideBID are NOT required BY THE WIRE FORMAT (specs/openapi.yaml)
-// -- the caller (backfillMatchIdentityForHantei,
-// internal/mobileapp/handlers_match.go) backfills them from the STORED match
+// -- the caller (backfillMatchIdentityForHantei)
+// backfills them from the STORED match
 // whenever the payload names a WinnerID, specifically so this check always
 // has the real pairing to validate against, not just whatever the client
 // happened to send. The engine's backfillMatchIdentity (internal/engine/

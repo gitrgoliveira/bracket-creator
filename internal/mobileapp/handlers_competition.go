@@ -1793,7 +1793,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				// ago. Rejecting the second case answers an operator's PUT
 				// with a 400 naming a field their request never mentioned,
 				// forever, with nothing on the settings screen able to repair
-				// it -- the same trap stripInvalidHantei (engine/scoring.go)
+				// it -- the same trap stripInvalidHantei (engine)
 				// is written to avoid, and the same rule: a write answers for
 				// what it introduces, not for what it inherited. Resetting to
 				// the fixed default changes no behaviour (the pair was already

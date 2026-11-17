@@ -117,7 +117,7 @@ func TestStartCompetition_LeagueMatchesCarrySideIDs(t *testing.T) {
 
 	// Scoring a match sends names only (no ids). Verify the backfill in
 	// writeMatchResult preserves the generation-time SideAID/SideBID rather
-	// than wiping them via the whole-struct `*r = *result` overwrite, and
+	// than wiping them via the whole-struct `*stored = *result` overwrite in applyPoolWrite, and
 	// resolves WinnerID from the WinnerSide hint, the only way to tell apart
 	// the winner when both sides share a name (this is exactly the A-0
 	// Tanaka-vs-Tanaka match).

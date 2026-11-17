@@ -6,9 +6,10 @@
 ## Problem
 
 `domain.TeamLineup` is keyed `(competitionID, teamID, round)`. Pool matches have no
-round field, so the store collapses every pool match to **round 0**
-(`internal/state/team_lineup.go` `roundHasLiveOrCompletedMatchLocked`,
-`internal/engine/scoring.go` `maybeLockTeamLineupsForRound` hard-codes `round = 0`).
+round field, so the store collapsed every pool match to **round 0**
+(`internal/state/team_lineup.go` `roundHasLiveOrCompletedMatchLocked`, and
+`internal/engine/scoring.go` `maybeLockTeamLineupsForRound`, which hard-coded `round = 0`;
+both were removed with the lineup freeze in mp-q722).
 
 Consequences for a pool of N teams (each team plays N−1 encounters in one "round"):
 

@@ -360,7 +360,7 @@ describe('courtBusyMessage', () => {
             .toBe('Shiaijo A is running Pool A · Match 2. Finish it or send it back to the queue first.');
     });
     // bc-cse: no "This shiaijo"/"another match" fallback -- respondCourtBusy
-    // (handlers_match.go) always sends both `court` and a `label`
+    // (mobileapp) always sends both `court` and a `label`
     // (matchLabelOrID falls back to the raw match id rather than omitting
     // it), so the two fallback strings were dead code and were removed.
 });

@@ -3,8 +3,8 @@
 **Bead:** mp-gmcg
 **Status:** Approved and implemented on branch `feat/kachinuki-operator-led-mp-gmcg`
 (PR #379). The "Resolved decisions" below are the authority cited by the code
-comments in `internal/engine/kachinuki.go`, `internal/mobileapp/handlers_match.go`
-and `web-mobile/js/admin_scoring_team.jsx`; see Implementation plan below.
+comments in `internal/engine/kachinuki.go`, `internal/mobileapp/handlers_match.go`,
+`internal/mobileapp/handlers_match_score.go` and `web-mobile/js/admin_scoring_team.jsx`; see Implementation plan below.
 
 ## Problem
 

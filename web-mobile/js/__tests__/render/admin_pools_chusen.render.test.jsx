@@ -374,7 +374,7 @@ describe('AdminPools chusen banner: a failed write, then a re-fetch that reorder
   // changes ORDER within that block), but Alpha and Beta have swapped
   // places, as any write to the pool between the two fetches can do (a
   // member carrying ANY override sorts ahead of one without, regardless of
-  // the override's value, engine/scoring.go).
+  // the override's value, computeStandingsFrom in the engine).
   const reorderedGroup = {
     ...initialGroup,
     teamNames: ['Beta', 'Alpha', 'Gamma'],

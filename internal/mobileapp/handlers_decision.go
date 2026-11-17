@@ -45,7 +45,7 @@ type DecisionRequest struct {
 	// competition's POOL match that moves a qualifier the knockout already
 	// played. Same field name and contract as every
 	// other knockout-correction write (see scoreRequestBody.ForceDownstreamReopen
-	// in handlers_match.go); this maps to
+	// in the score handler); this maps to
 	// engine.ForceOptions.Force on the RecordDecisionTxWithOptions call
 	// below.
 	ForceDownstreamReopen bool `json:"forceDownstreamReopen"`

@@ -151,7 +151,7 @@ function feederMatchNumOf(m, matchNumById) {
 //     5-entrant draw the final's slot literally reads "Winner of r2-m0", but
 //     r2-m0 is a dead bye match — the winner actually arrives from m-r1-0.
 //  2. Positional parse of the slot itself, mirroring Go parseWinnerOf
-//     (scoring.go): depth is 1-based from the final, so roundIndex =
+//     (engine): depth is 1-based from the final, so roundIndex =
 //     rounds.length - depth and the index is the 0-based position in that
 //     round. The fallback for brackets saved before the feeder metadata
 //     existed, where there are no phantoms to see through anyway.

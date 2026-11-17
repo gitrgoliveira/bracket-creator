@@ -29,9 +29,9 @@ Detailed domain rulings (match results and marks, match writes and the offline q
     - `helper/`: Implementation of bracket generation, pool creation, Excel file creation, and business logic.
     - `excel/`: Lower-level Excel client and styling logic.
     - `resources/`: Management of embedded assets (both `web/` and `web-mobile/`).
-    - `mobileapp/`: Gin HTTP handlers for the tournament app. Handlers split by entity: `handlers_competition.go`, `handlers_match.go`, `handlers_participants.go`, `handlers_tournament.go`. Real-time updates via SSE (`hub.go`). Password auth middleware (`middleware.go`).
+    - `mobileapp/`: Gin HTTP handlers for the tournament app. Handlers split by entity: `handlers_competition.go`, `handlers_match*.go` (the routes are in `handlers_match.go`; the score, start, correction, refusal, self-run judge and snapshot code sit in its `handlers_match_*.go` siblings, with `client_stamp.go`, `match_annotations.go` and `pool_auto_complete.go` beside them), `handlers_participants.go`, `handlers_tournament.go`. Real-time updates via SSE (`hub.go`). Password auth middleware (`middleware.go`).
     - `state/`: File-backed store for the mobile app. Reads/writes `tournament.md` and per-competition `config.md` + `participants.csv` in the data folder.
-    - `engine/`: Thin adapter bridging `state.Competition` to `internal/helper` pool/bracket generation.
+    - `engine/`: Thin adapter bridging `state.Competition` to `internal/helper` pool/bracket generation. Match writes: `scoring.go` plus `scoring_*.go`; court and time moves in `match_queue.go`.
 - `web/`: Frontend assets for the bracket-generator web UI, embedded via `go:embed`.
 - `web-mobile/`: Preact/JSX frontend for the tournament mobile app, embedded via `go:embed`. Pre-compiled to `web-mobile/dist/` by esbuild. Key components: `LinedTextarea` (numbered participant input), admin dashboard, score editor, public viewer.
 - `tests/`: Integration tests for the Web API and CLI.

@@ -349,7 +349,7 @@ func WinnerIDNamesASide(winnerID, sideAID, sideBID string) bool {
 // state.upgradeBracketSideIDsLocked). A STAMPED bracket row is no different
 // from a stamped pool row here: state.Store.MatchSidesByID returns its real
 // SideAID/SideBID (that function's own doc comment), applyBracketMatchResult
-// (internal/engine/scoring.go) resolves and persists bm.WinnerID from them
+// (engine) resolves and persists bm.WinnerID from them
 // via resolveWinnerIDFromSides, and an unattributable winnerId on a bracket
 // write with both sides known is rejected exactly like the pool branch's,
 // not silently discarded.

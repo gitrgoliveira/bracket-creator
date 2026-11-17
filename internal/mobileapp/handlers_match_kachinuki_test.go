@@ -1713,7 +1713,7 @@ func TestReopenHandler_BronzeReEndNeedsNoReason(t *testing.T) {
 // recorded further bouts and Ended the match again.
 //
 // Two things used to erase it. (1) The pool write is a whole-struct
-// overwrite (`*r = *result` in engine/scoring_tx.go), so every running write
+// overwrite (`*stored = *result` in the engine's applyPoolWrite), so every running write
 // with an empty CorrectionReason wiped the stored one. (2) The re-End is a
 // FIRST finalization (the match is running, not completed), and that branch
 // executed `result.CorrectionReason = ""` unconditionally. Net effect: a

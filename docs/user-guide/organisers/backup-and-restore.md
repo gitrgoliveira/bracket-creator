@@ -22,7 +22,7 @@ While it runs, the server checks when it starts and then once an hour, and takes
 
 - A daily copy is created only if something has changed since the newest daily copy. Backups you download and safety copies do not count, and a newest daily copy that this version cannot restore counts as none: after you go back to an earlier version, its first check takes a copy even when nothing has changed. A save that changes nothing, such as the same score sent twice, does not count as a change.
 - A copy is also taken when the app is closed normally, if something changed since the newest daily copy, or this version cannot restore that copy. A crash, a pulled plug, or a shutdown that runs past its time limit takes none.
-- No daily copy is taken while the tournament has no competitions.
+- The app takes no daily copy while the tournament has no competitions.
 - Daily copies are saved inside the `backups/` folder within your tournament data directory, on the computer that runs the app (the server), not on the device whose browser you use.
 - The app never deletes backup files automatically. Every copy remains on disk until you choose to delete it.
 
@@ -40,7 +40,7 @@ A backup file does contain every competitor's full name, dojo, match record, and
 
 The file is named after the tournament, then the competition ID for a single competition, then the time in UTC, for example `london-cup-mens-individual-20261104T031552Z.zip`. Downloading needs no second password. In self-run mode, every action on this page is for organisers only and needs the admin password.
 
-If a competition has a change that could not be written to disk, the backup is refused and says so: free disk space or fix the data folder's permissions, then take the backup again. If that does not clear it, see the same refusal under [When a restore is refused](#when-a-restore-is-refused).
+If a competition has a change that could not be written to disk, the backup is refused and says so: free disk space or fix the data folder's permissions, then take the backup again. If that does not clear it, refer to the same refusal under [When a restore is refused](#when-a-restore-is-refused).
 
 ## Restoring from a file
 
@@ -75,7 +75,7 @@ When restoring, the plan presents you with decisions depending on what is curren
     - **Keep it**: leaves the competition in your tournament folder as it is.
     - **Remove it**: deletes the competition from your tournament folder.
 
-When you restore **Only** one competition, or a competition backup, there is no choice to keep your current competition or to leave the competition out: that would restore nothing, so click **Cancel** under the plan instead. A competition you keep, or do not add, keeps its own name and number prefix, so the name and prefix checks below treat it as staying in place.
+When you restore **Only** one competition, or a competition backup, there is no choice to keep your current competition or to leave the competition out: that would restore nothing, so click **Cancel** under the plan instead. A competition you keep, or do not add, keeps its own name and number prefix, so the plan's name and prefix checks treat it as staying in place.
 
 Nothing is preselected. **Replace all existing** answers **Replace it** for every competition that already exists; you can still change any of them. Until you make a choice for every competition that requires one, the button stays disabled and names the next open choice, for example `Choose what to do with "Mens Individual"` or `Enter name for copy of "Mens Individual"`. Tapping it takes you to that choice.
 
@@ -93,7 +93,7 @@ When you restore a backup:
     - If the restored tournament no longer holds that match (for example, if the competition was removed or was not yet drawn in the backup), the late change is refused.
 - **Tournament mode change warning**: If a tournament restore changes the operating mode (for example, from officiated mode to self-run mode), the plan displays a warning because the mode changes what the public page can do, such as whether anyone can enter scores.
 - **Missing shiaijo warning**: If a competition, restored or staying in place, uses a shiaijo that the restored tournament settings do not have, the plan warns you. Its matches there cannot be called until you add the shiaijo back in the tournament settings or move those matches to another shiaijo.
-- **Matches that were running in the backup**: No match comes back running. A match the backup holds as running comes back in the queue with its score, as if you had sent it back to the queue, and the plan lists how many for each competition before you choose. Start it again from the court when its shiaijo is free. If the app cannot finish this step, or the number prefix check below, the restore card says so: restart the app and it finishes them as it starts.
+- **Matches that were running in the backup**: A match the backup holds as running comes back in the queue with its score, as if you had sent it back to the queue, and the plan lists how many for each competition before you choose. Start it again from the court when its shiaijo is free. If the app cannot finish this step, or the number prefix check (refer to **Number prefix collisions**), the restore card says so: restart the app and it finishes them as it starts.
 - **Number prefix collisions**: If a restored competition uses a competitor number prefix that a competition staying in place, or another competition in the same restore, already uses, the app assigns a new prefix automatically. A warning tells you to reprint tags for that competition.
 - **Running matches**: If a competition you could replace or remove has matches in progress on court, the plan warns you before you choose, and names the choice that would replace or remove them. The page lets the restore go ahead, and the restore replaces those matches with the backup's version. On the command line, the same restore is refused unless you pass `--allow-running`.
 - **Do not upload images during a restore**: Do not upload tournament logos or sponsor images while a restore is running. Branding and sponsor folders are swapped as part of the restore process, so an upload in progress could fail or be overwritten.
@@ -107,7 +107,7 @@ A refused restore changes nothing. The page tells you why, and the common reason
 - **Matches are running**: after the plan was made, a match started in a competition the restore replaces or removes. The plan is checked again; click **Restore** again to go ahead.
 - **The competitions changed since the restore was checked**: someone added or removed a competition after the plan was made. Check the plan again, then restore.
 - **A competition folder in the app has no settings file**: that competition cannot be copied before the restore replaces or removes it. Keep it, or restore the backup's competition as a copy.
-- **A competition has a change that could not be written to disk**: free disk space or fix the data folder's permissions, then try again. The restore writes that change first, so it goes ahead once the disk accepts writes; restarting the app does not help. If that does not clear it, a folder the change names may have been removed outside the app: restore that folder, or see the server log, which names the change's log file. [Write guarantees](../../architecture/data-model.md#5-write-guarantees) explains what to do with it.
+- **A competition has a change that could not be written to disk**: free disk space or fix the data folder's permissions, then try again. The restore writes that change first, so it goes ahead once the disk accepts writes; restarting the app does not help. If that does not clear it, a folder the change names may have been removed outside the app: restore that folder, or check the server log, which names the change's log file. [Write guarantees](../../architecture/data-model.md#5-write-guarantees) explains what to do with it.
 - **The backup file could not be read from the upload**: the upload failed. Choose the file again.
 - **The backup file is over 64 MB**: the page cannot take an upload that large. Restore it from the command line, or, for a daily or safety copy, from **Copies kept on this computer**.
 - **A file in the backup cannot be read**: the backup is damaged. Try another copy.

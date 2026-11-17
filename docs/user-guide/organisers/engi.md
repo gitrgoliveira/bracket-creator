@@ -10,8 +10,8 @@ are no ippon, no time on the clock, and no draws.
 
 ## Turn it on
 
-Tick **Engi (kata competition)** on an individual competition's **Settings**
-tab to switch its score editor to flag counting. It is offered for individual
+Tick **Engi (kata competition)** on the **Add competition** form or on an
+individual competition's **Settings** tab to switch its score editor to flag counting. It is offered for individual
 competitions only, works with every format (knockout, pools then knockout,
 league and Swiss), and is locked once the draw is generated.
 
@@ -57,12 +57,12 @@ one entry in the draw and one line in the standings.
 The score editor becomes a flag counter with one column per side, Shiro (white)
 on the left and Aka (red) on the right:
 
-- Use the **+ / -** buttons under each side, or the keyboard. **`a`** adds a flag
+- Use the **+** and **−** buttons under each side, or the keyboard. **`a`** adds a flag
   to **Aka** and **`s`** adds a flag to **Shiro** (either key works with or without
   Shift). **`Backspace`** undoes the last flag you added, and **`Enter`** saves.
 - A bout's flags must total 1, 3, or 5. The panel is always an odd size, so
   there is always a majority and a bout can never end in a draw. The editor
-  flags any other total and does not let you save it.
+  marks any other total and does not let you save it.
 - The side with more flags wins the bout.
 - **Save result** takes two taps, as **Finish** does in the kendo editor: the
   first tap changes the button to **Tap again to save**, and the second tap

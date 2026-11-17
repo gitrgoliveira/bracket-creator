@@ -29,15 +29,15 @@
 <details>
   <summary><b>Docker</b> (recommended)</summary>
 
-Pull and run the tournament app image; tournament state lives in the mounted folder:
+Tournament state lives in the mounted `tournament-data` folder. On Linux, make that folder writable by the container's non-root user before the first run: `mkdir -p tournament-data && sudo chown 65534 tournament-data`. (Docker Desktop on macOS/Windows handles this automatically.)
+
+Pull and run the tournament app image:
 
 ```bash
 mkdir -p tournament-data
 docker run -p 8080:8080 -v "$PWD/tournament-data:/tournament-data" \
   ghcr.io/gitrgoliveira/bracket-creator-mobile:latest
 ```
-
-On Linux, also make the folder writable by the container's non-root user before the first run: `sudo chown 65534 tournament-data`. (Docker Desktop on macOS/Windows handles this automatically.)
 
 Then open [http://localhost:8080](http://localhost:8080).
 
@@ -92,7 +92,7 @@ The kendo tournament guidelines this application is based on are in [running_a_k
 
 ## Other ways to work
 
-No laptop at the courts? The same binary still covers the day.
+Without a laptop at the courts, the same binary still covers the day.
 
 **Printed Excel brackets.** Give it a CSV of participants and it produces print-ready Excel workbooks with pool draws, match schedules and elimination trees. Refer to [create-pools](https://gitrgoliveira.github.io/bracket-creator/user-guide/commands/create-pools/), [create-knockout](https://gitrgoliveira.github.io/bracket-creator/user-guide/commands/create-knockout/), the [input format](https://gitrgoliveira.github.io/bracket-creator/user-guide/organisers/input-format/) and the [tournament formats](https://gitrgoliveira.github.io/bracket-creator/user-guide/organisers/formats/).
 

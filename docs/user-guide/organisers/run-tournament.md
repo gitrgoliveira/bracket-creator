@@ -404,7 +404,7 @@ When two competitions on the same shiai-jo overlap, both are marked, and an over
 The calendar can also show the following:
 
 - **Not on the calendar**, a tray of competitions that cannot be placed yet, for example because one needs a start time or a date, or its date is outside the tournament. Each one names the reason, so open the competition's **Settings** to fix it. A line above the calendar tells you how many there are and has a **Show them** button that scrolls to the tray.
-- **No real length.** A competition with no participants yet and no expected number is drawn as a dotted block with a **?** and the words *No participants yet: length unknown*. The tray counts these too. Set **Expected participants** in its **Settings** to give it a length.
+- **A competition of unknown length.** A competition with no participants yet and no expected number is drawn as a dotted block with a **?** and the words *No participants yet: length unknown*. The tray counts these too. Set **Expected participants** in its **Settings** to give it a length.
 - **Settings that could not be read.** A competition whose settings file cannot be read is left off the calendar, and the notice gives its id so you can check that competition's `config.md` file rather than think it was never created.
 - **A pause the schedule skips**, in a line such as *Matches will not stop for Lunch: it has no start time.* The other reasons are that it has no length, that its start time could not be read, or that its day is outside the tournament. **Edit tournament** opens the tournament setup page, where the pause is listed under **Schedule blocks**, so you can correct it.
 

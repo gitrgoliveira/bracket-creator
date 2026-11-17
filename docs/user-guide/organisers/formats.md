@@ -48,7 +48,7 @@ Of the podium places in a league, only 3rd can be shared: a tie for 1st or 2nd p
 
 ## Swiss
 
-Swiss is a tournament system that runs over a fixed number of rounds. No one is eliminated; instead, each round pairs competitors with similar win records, so results stay competitive throughout.
+Swiss is a tournament system that runs over a fixed number of rounds. Competitors are not eliminated; instead, each round pairs competitors with similar win records, so results stay competitive throughout.
 
 Use Swiss for large individual fields where a full round-robin would require too many rounds, but you still want every competitor to play multiple well-matched bouts.
 

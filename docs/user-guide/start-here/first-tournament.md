@@ -49,12 +49,12 @@ Steps 1 to 5 run the whole tournament in the app. To work from printed brackets 
 
 1. **Collect participants**: one competitor per line in a CSV file, name then dojo ([input format](../organisers/input-format.md))
 2. **Generate the bracket**: run `create-pools` or `create-knockout` ([commands](../commands/create-pools.md))
-3. **Optionally seed** top competitors so they land in separate pools/sides of the bracket ([seeding](../commands/create-pools.md#seeding))
-4. **Print**: the Excel file is laid out to print cleanly on A4/A3
+3. **Optionally seed** top competitors so they land in separate pools or sides of the bracket ([seeding](../commands/create-pools.md#seeding))
+4. **Print**: the Excel file is laid out to print cleanly on A4 and A3
 
 On the day you need:
 
-- **A3 printer**: for team/competitor name sheets
+- **A3 printer**: for team and competitor name sheets
 - **A4 printer**: for the bracket trees
 - **Scoreboards, whiteboard markers, scissors, tasuki**: for keeping score at the courts and marking competitors
 

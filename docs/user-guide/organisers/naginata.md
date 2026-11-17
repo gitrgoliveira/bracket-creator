@@ -13,7 +13,8 @@ Naginata has two competition forms:
   [Engi (pair kata) competition](engi.md), the same setting any other kata
   competition uses.
 
-You pick the form with two checkboxes on a competition's **Settings** tab, both
+You pick the form with two checkboxes, on the **Add competition** form or a
+competition's **Settings** tab, both
 locked once the draw is generated:
 
 | Checkbox | What it does | Available for |

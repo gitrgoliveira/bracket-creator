@@ -299,7 +299,7 @@ describe('API.recordScore: court_busy (bc-rawm)', () => {
   });
 
   // bc-cse: no "This shiaijo"/"another match" fallback -- respondCourtBusy
-  // (handlers_match_start.go) always sends both `court` and a `label`
+  // (mobileapp) always sends both `court` and a `label`
   // (matchLabelOrID falls back to the raw match id rather than omitting it),
   // so the two fallback strings courtBusyMessage used to carry for a missing
   // court/label were dead code and were removed with them.

@@ -1,4 +1,4 @@
-// Finding 1 (bc-dmsr second review round): preserveSubHantei (engine/scoring_rulings.go)
+// Finding 1 (bc-dmsr second review round): preserveSubHantei (engine)
 // distinguishes a genuinely silent writer (nil ipponsA/ipponsB - restore the
 // stored verdict) from a deliberate 0-0 withdrawal (explicit [] - let it
 // withdraw) purely on nil-ness. But TeamScoreEditorModal's buildPatch used to

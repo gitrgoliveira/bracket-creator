@@ -194,7 +194,7 @@ function toBackendMatchResult(patch, match) {
     }
     // Kachinuki: transient request-only flag marking an explicit operator
     // "record bout" submit. The server advances the winner-stays sequence
-    // only on flagged writes (handlers_match_score.go scoreRequestBody); it is
+    // only on flagged writes (mobileapp scoreRequestBody); it is
     // never persisted on the match.
     if (patch.kachinukiBoutFinal) result.kachinukiBoutFinal = true;
     // bc-sbq: transient request-only flag marking a write that only starts the

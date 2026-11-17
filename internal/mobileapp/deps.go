@@ -62,7 +62,7 @@ type CalendarStore interface {
 // real handler call sites need them; see server.go for the constructor
 // that wires `*state.Store` through this interface.
 //
-// Consumers: handlers_match.go, handlers_match_score.go (the score endpoint), handlers_decision.go,
+// Consumers: handlers_match*.go (the score endpoint included), handlers_decision.go,
 // handlers_lineup.go, handlers_squad.go and handlers_score_events.go. The
 // other handler families take the concrete `*state.Store` directly;
 // `*state.Store` also implements this interface, so either can be passed.
@@ -110,7 +110,7 @@ type MatchHistoryStore interface {
 // the full engine + store stack. The interface lets handler tests stub
 // these calls independently.
 //
-// Consumers (current): handlers_match.go, handlers_match_score.go, handlers_decision.go.
+// Consumers (current): handlers_match*.go, handlers_decision.go.
 type ScoringEngine interface {
 	// RecordMatchResult applies the given result to the pool match (or
 	// falls through to the bracket match) for compID/matchID. Mirrors
@@ -320,7 +320,7 @@ type Broadcaster interface {
 // CompetitionStore / TeamLineupStore / etc. interfaces at the
 // registration site, same pattern the other handler families use.
 //
-// Consumers: handlers_lineup.go (the PUT, T156); handlers_match_score.go
+// Consumers: handlers_lineup.go (the PUT, T156); handlers_match*.go
 // (score, mp-95mg, wraps WithCourtExclusivityLock + WithTransaction);
 // handlers_decision.go (decision, T156); handlers_score_events.go.
 type CompetitionTransactor interface {

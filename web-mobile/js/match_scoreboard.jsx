@@ -204,7 +204,7 @@ function ipponLetters(arr) {
 // At MATCH level a team name is unique by rule, so a winner matching both is
 // drifted or hand-edited data and still resolves defensively to AKA, the
 // side-A-first order Go uses for the identical case (isWinForSide in
-// engine/scoring_rulings.go, SideMarksLR in export/suffix.go). At SUB-BOUT level two
+// engine, SideMarksLR in export/suffix.go). At SUB-BOUT level two
 // opposing fighters may legally share a display name, so that same order was
 // a coin flip on ordinary valid data: such a row now resolves to NEITHER
 // side unless the member ids settle it (operator ruling bc-pnum, mirroring

@@ -144,7 +144,7 @@ func refuseUnfinishedTeamFinishForComp(comp *state.Competition, matchID string, 
 // keeps a DEFAULT-WIN ruling recorded on the match -- any kiken, fusenpai, OR
 // fusensho, not withdrawal-only (engine.KeepsWithdrawalRuling was widened
 // from IsWithdrawalDecisionStr to domain.IsDefaultWinDecisionStr, bc-tmfn
-// follow-up: see its own doc comment, scoring_rulings.go). That write is a
+// follow-up: see its own doc comment). That write is a
 // correction to the bouts of a match a default-win ruling already ended, and
 // it keeps the ruling (operator ruling 2026-09-24: "Save correction should
 // just save what the operator enters"), so the bouts nobody fought after it

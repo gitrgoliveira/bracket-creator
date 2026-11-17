@@ -874,7 +874,7 @@ export function PoolsViewer({ pools, standings, poolMatches, tweaks, competition
         // Build playerKey→{rank, standingEntry} map from the rank-sorted standings array.
         // Rank is the backend's authoritative PlayerStanding.rank (single source of
         // truth: it already folds in tiebreakers and manual rank overrides; see
-        // engine/scoring_standings.go). We do NOT re-derive it as index+1 here (DRY), falling
+        // computeStandingsFrom in the engine). We do NOT re-derive it as index+1 here (DRY), falling
         // back to index+1 only if a legacy payload omitted the field.
         // Used to look up each draw-position row's rank without resorting the table
         // (mp-938b: table is draw-order, not rank-order).

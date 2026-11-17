@@ -54,7 +54,7 @@ describe('a participant scores an engi match from the public page', () => {
     const r = render(sheet(engiBout({ flagsB: 3 })));
     await act(async () => { fireEvent.click(btn(r.container, 'engi-aka-inc')); });
     const [tap] = outbox.taps('c1', 'm1');
-    // errResultFinalized's sentence (internal/mobileapp/handlers_match_refusals.go).
+    // errResultFinalized's sentence (mobileapp).
     const sentence = 'This match result has already been reported. Contact the tournament organizer to correct it.';
     await act(async () => {
       outbox.ack('c1', 'm1', null, { [tap.id]: { outcome: 'refused', reason: 'result_finalized', message: sentence } });

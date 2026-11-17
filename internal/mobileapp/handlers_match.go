@@ -22,7 +22,7 @@ const bulkScorePushEachMax = 50
 // RegisterMatchHandlers wires up the score / quick-score / bulk-score /
 // court / time endpoints under the admin group.
 //
-// The score endpoint (registerScoreHandler, handlers_match_score.go) is the
+// The score endpoint (registerScoreHandler) is the
 // Slice 0 / NFR-002 demonstration of the interface-based dependency
 // injection pattern (T017): it consumes `ScoringEngine` and `Broadcaster`
 // rather than the concrete `*engine.Engine` and `*Hub`, plus the

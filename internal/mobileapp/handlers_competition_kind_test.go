@@ -579,7 +579,7 @@ func TestUpdateCompetition_KachinukiZeroTeamSizeCannotPersist(t *testing.T) {
 //
 // CLAUDE.md states the rule this pins: a write answers for what it
 // introduces, not for what it inherited. Same shape as stripInvalidHantei
-// (engine/scoring_rulings.go), which strips an inherited mark and logs rather than
+// (engine), which strips an inherited mark and logs rather than
 // blaming the operator for state already on disk.
 func TestUpdateCompetition_InheritedIllegalTeamMatchTypeIsRepairedNotRejected(t *testing.T) {
 	r, store, _, _, _ := setupTestRouter(t)

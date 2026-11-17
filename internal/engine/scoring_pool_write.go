@@ -29,7 +29,7 @@ import (
 // SCOPE of "one home", stated precisely because the previous wording
 // overclaimed: this owns the ENGINE-side preservation. Server-owned flags a
 // client must not be able to clear (ReopenPending) are re-stamped at the HTTP
-// boundary instead - see handlers_match_correction.go - so a new field of that kind still
+// boundary instead - see applyCorrectionReason (mobileapp) - so a new field of that kind still
 // needs a decision about which layer preserves it.
 //
 // A THIRD abandonment reason joined the two above (bc-idfx): backfillMatchIdentity

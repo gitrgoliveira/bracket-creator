@@ -968,8 +968,8 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 			{"PUT", "/api/competitions/%s/seeds"},
 			{"POST", "/api/competitions/%s/generate-draw"},
 			{"DELETE", "/api/competitions/%s/draw"},
-			// Match endpoints from handlers_match.go (bulk-score, court) and
-			// handlers_match_score.go (score). Without a match route in this
+			// Match endpoints from handlers_match*.go (bulk-score, court,
+			// score). Without a match route in this
 			// set, a regression that drops requireValidCompID from a match
 			// handler would still ship green.
 			{"POST", "/api/competitions/%s/matches/bulk-score"},

@@ -493,12 +493,14 @@ run-mobile: go/build ## Run the mobile-app locally (use TOURNAMENT_DATA_DIR to o
 	@mkdir -p $(TOURNAMENT_DATA_DIR)
 	$(BIN_PATH)/$(BIN_NAME) mobile-app --folder $(TOURNAMENT_DATA_DIR)
 
-mobile-app-example: go/build ## Setup and run a full tournament demo using mobile app API
+# The seeding script needs `requests`, which the system python3 may lack; the pinned
+# docs venv carries it (mkdocs-material depends on it), so run the script there.
+mobile-app-example: go/build $(DOCS_STAMP) ## Setup and run a full tournament demo using mobile app API
 	@echo "Starting temporary mobile app server for demo..."
 	@rm -rf ./demo-data && mkdir -p ./demo-data
 	@$(BIN_PATH)/$(BIN_NAME) mobile-app --folder ./demo-data & \
 	PID=$$!; \
-	python3 scripts/setup_tournament.py; \
+	$(DOCS_BIN)/python scripts/setup_tournament.py; \
 	EXIT_CODE=$$?; \
 	echo "Terminating server (PID: $$PID)..."; \
 	kill $$PID; \

@@ -81,7 +81,7 @@ export function _refusalError(body, fallback) {
 // reopenFailureError builds the Error thrown by a failed reopen. reopenMatch and
 // requeueBlockerAndReopen surface the SAME structured shape (mp-gmcg review R8):
 // the operator-facing `message`, the machine `code`, and the court/matchId/compId
-// of the BLOCKING match, which applyReopenFailure (admin_scoring_team.jsx) reads
+// of the BLOCKING match, which useMatchReopen (admin_scoring_shared.jsx) reads
 // to re-offer the requeue remedy when a court is busy. One builder so a new
 // server field is threaded once, not per endpoint. Async: it awaits the body.
 // _reopenRefusal: the Error a refused reopen (or requeue-and-reopen) answers

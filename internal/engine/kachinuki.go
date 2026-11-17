@@ -1118,8 +1118,8 @@ func (e *Engine) ReopenMatch(compID, matchID, reason string, opts ...ForceOption
 		// of a permanently-unreopenable target (not completed, or its result fed a
 		// fought downstream) reports THAT — not a transient court_busy. The admin
 		// remedy panel turns court_busy into an offer to requeue the court's
-		// occupant (applyReopenFailure branches on code=="court_busy",
-		// api_client.jsx); without this pre-check a cross-comp court hold
+		// occupant (useMatchReopen branches on code=="court_busy",
+		// admin_scoring_shared.jsx); without this pre-check a cross-comp court hold
 		// (CheckCrossCompCourtBusy runs before the tx) would surface court_busy
 		// first and steer the operator into that dead-end remedy for a target that
 		// can never reopen (mp-gmcg review). checkTargetReopenable is the SAME

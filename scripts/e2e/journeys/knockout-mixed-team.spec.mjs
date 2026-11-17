@@ -521,6 +521,11 @@ test.describe('knockout-mixed-team', () => {
       await expect(row1.getByRole('textbox', { name: 'Senpo SHIRO player' })).toBeVisible();
       await expect(row1.getByRole('textbox', { name: 'Senpo AKA player' })).toBeVisible();
       const shiroRow1 = await T.rowNameBox(row1, 'shiro').inputValue();
+      // The name renames the picked member through the outbox, after the box has
+      // shown it; armed before the typing so the answer is not missed.
+      const renamed = page.waitForResponse((r) => r.request().method() === 'PUT'
+        && /\/teams\/[^/]+\/members\/[^/]+$/.test(new URL(r.url()).pathname), { timeout: EXPECT_TIMEOUT_MS });
+      renamed.catch(() => {});
       await T.typeIntoNameBox(T.rowNameBox(row1, 'aka'), 'Nakamura');
       await expect(T.rowMemberLabel(row1, 'aka')).toHaveText(/\.1$/);
       const akaLabel = (await T.rowMemberLabel(row1, 'aka').innerText()).trim();
@@ -528,7 +533,10 @@ test.describe('knockout-mixed-team', () => {
       record({ step: 'F4 EP3 sheet', action: 'type Nakamura into Aka Senpo (picked slot .1)', variant: 'correct', shiroRow1, akaLabel,
         akaName: await T.rowNameBox(row1, 'aka').inputValue() });
       expect(akaLabel).toMatch(/\.1$/);
-      // The name lands on the Lineups page's member list (the same member).
+      // The name lands on the Lineups page's member list (the same member). Leave
+      // the page only once the rename has landed: under load the typed name can
+      // still be on its way into the outbox when the next page opens.
+      await writeLanded(renamed, 'the rename of the picked slot');
       await T.openLineups(page, f4, { team: pair4.aka });
       await expect(T.lineupsForm(page).locator('[data-testid^="squad-member-"]').filter({ hasText: 'Nakamura' })).toHaveCount(1);
       await shot(page, 'f4-lineups-aka-member-named-from-sheet', { fullPage: true });

@@ -1,0 +1,3 @@
+# Python dependencies of scripts/setup_tournament.py (make mobile-app-example),
+# installed into .venv-scripts by the Makefile.
+requests==2.34.2

@@ -493,14 +493,25 @@ run-mobile: go/build ## Run the mobile-app locally (use TOURNAMENT_DATA_DIR to o
 	@mkdir -p $(TOURNAMENT_DATA_DIR)
 	$(BIN_PATH)/$(BIN_NAME) mobile-app --folder $(TOURNAMENT_DATA_DIR)
 
-# The seeding script needs `requests`, which the system python3 may lack; the pinned
-# docs venv carries it (mkdocs-material depends on it), so run the script there.
-mobile-app-example: go/build $(DOCS_STAMP) ## Setup and run a full tournament demo using mobile app API
+# The seeding script runs in its own venv from the pinned scripts/requirements.txt,
+# since the system python3 may lack `requests`.
+SCRIPTS_VENV  := .venv-scripts
+SCRIPTS_BIN   := $(SCRIPTS_VENV)/bin
+SCRIPTS_REQS  := scripts/requirements.txt
+SCRIPTS_STAMP := $(SCRIPTS_VENV)/.installed
+
+$(SCRIPTS_STAMP): $(SCRIPTS_REQS)
+	@echo "Installing the seeding script's pinned dependencies into $(SCRIPTS_VENV)..."
+	@test -x $(SCRIPTS_BIN)/python || $(PYTHON) -m venv $(SCRIPTS_VENV)
+	@$(SCRIPTS_BIN)/python -m pip install --quiet -r $(SCRIPTS_REQS)
+	@touch $@
+
+mobile-app-example: go/build $(SCRIPTS_STAMP) ## Setup and run a full tournament demo using mobile app API
 	@echo "Starting temporary mobile app server for demo..."
 	@rm -rf ./demo-data && mkdir -p ./demo-data
 	@$(BIN_PATH)/$(BIN_NAME) mobile-app --folder ./demo-data & \
 	PID=$$!; \
-	$(DOCS_BIN)/python scripts/setup_tournament.py; \
+	$(SCRIPTS_BIN)/python scripts/setup_tournament.py; \
 	EXIT_CODE=$$?; \
 	echo "Terminating server (PID: $$PID)..."; \
 	kill $$PID; \

@@ -281,6 +281,10 @@ test.describe('J5 kachinuki from the court console', () => {
       await shot(page, `lineup-${court}-saved`);
       await closeLineupPanel(page);
     }
+    // The member adds and lineup saves go through the outbox, and the next
+    // test opens a fresh browser: wait for them to land, or the last team's
+    // lineup dies with this page and M2 starts with Aka's fighter unseated.
+    await settled(page);
   });
 
   // Semifinal M1 on shiaijo A. The intended encounter (Shiro = m1.shiro):

@@ -33,6 +33,7 @@ bin/
 site/
 .venv-docs/
 .cache/
+.venv-scripts/
 __pycache__/
 square_prep/*
 # !square_prep/lc2026/*

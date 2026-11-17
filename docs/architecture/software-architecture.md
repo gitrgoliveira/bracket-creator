@@ -313,7 +313,13 @@ up the entries another tab stored. Entries are sent per owner (a match, a team, 
 competition, a court call or the tournament settings) strictly in the order they were made, and
 retried until they land; consecutive taps go as one batch.
 
-The outbox lives in `api_client.jsx`. The writes that go through it are:
+The outbox lives in the `api_client_*.jsx` modules, which `api_client.jsx` loads and starts:
+the queue and its storage (`api_client_queue.jsx`), building and committing a write
+(`api_client_enqueue.jsx`), sending it (`api_client_flush.jsx`), the scoring taps
+(`api_client_taps.jsx`), the team members the device made (`api_client_members.jsx`), the stamp
+clock (`api_client_clock.jsx`), what the screen shows before the server answers
+(`api_client_overlays.jsx`) and the held-writes status (`api_client_status.jsx`). The writes that
+go through it are:
 
 - scoring taps (points, fouls, overtime, flags and the other score events);
 - score writes (start, record bout, finish, correction), decisions, reopen, send back to the queue, queue it and reopen;
@@ -381,7 +387,7 @@ flowchart TB
         viewer["viewer*.jsx<br/>public screens"]
         adminc["admin*.jsx<br/>operator console"]
         display["display*.jsx<br/>TV screens"]
-        api["api_client.jsx<br/>HTTP · SSE · outbox"]
+        api["api_client*.jsx<br/>HTTP · SSE · outbox"]
         patch["patch.jsx<br/>SSE patches"]
         outmods["score_events<br/>write_result"]
         stores["landed_taps<br/>told_taps<br/>minted_members"]
@@ -403,8 +409,9 @@ flowchart TB
 
 `app.jsx` is the root shell: it reads the route and switches between the public viewer, the
 operator console and the display surface. Every surface talks to the server through
-`api_client.jsx`, which also consumes the SSE stream and owns the outbox (refer to
-[The outbox](#the-outbox)). The root shell and the operator console apply each SSE patch to the
+`api_client.jsx` (the `API` object). Its `api_client_*.jsx` modules make the requests
+(`api_client_requests.jsx`), consume the SSE stream (`api_client_events.jsx`) and hold the outbox
+(refer to [The outbox](#the-outbox)). The root shell and the operator console apply each SSE patch to the
 competition data they hold through `patch.jsx` (`applyPatch`), which also detects a gap in the
 event sequence (`checkSeqGap`) and triggers a resync. The modules around the outbox:
 
@@ -412,7 +419,7 @@ event sequence (`checkSeqGap`) and triggers a resync. The modules around the out
 - `write_result.jsx`: decides whether a score write landed, and if not, whether the state on screen can still become true.
 - `draft_taps.jsx` (used by the score editors): turns a draft held in an editor into the taps that would have made it, when another device starts the match.
 - `queued_writes_wait.jsx` (used by the draw and move screens): waits for a competition's queued writes of a kind (check-ins before a draw, a time change before a move) before going on.
-- `landed_taps.jsx`, `told_taps.jsx` and `minted_members.jsx` (used by `api_client.jsx`): what the device knows of its own taps that landed, of the taps it already told the operator were not applied, and of the team member ids it made.
+- `landed_taps.jsx`, `told_taps.jsx` and `minted_members.jsx` (used by the outbox modules): what the device knows of its own taps that landed, of the taps it already told the operator were not applied, and of the team member ids it made.
 
 The operator console is a tablet/desktop surface; the viewer is mobile-first. Refer to
 [Network architecture](network-architecture.md) for the client's **outbox, SSE resume, and

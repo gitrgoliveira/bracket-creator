@@ -363,7 +363,7 @@ closes and reopens a stream that has carried no message or heartbeat for 35 s. T
 `online` event and a `visibilitychange` to visible both force a reconnect; a tab shown again
 also refetches at once, and any stream that reopens after a loss refetches, jittered.
 
-Key client mechanisms (all in `web-mobile/js/api_client.jsx` + consumers):
+Key client mechanisms (all in `web-mobile/js/api_client.jsx` and its `api_client_*.jsx` modules, plus consumers):
 
 | Concern | Mechanism |
 |---|---|

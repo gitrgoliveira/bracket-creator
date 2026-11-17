@@ -54,8 +54,8 @@ one entry in the draw and one line in the standings.
 
 ## Score with flags
 
-The score editor becomes a flag counter with one column per side, Aka (red)
-and Shiro (white):
+The score editor becomes a flag counter with one column per side, Shiro (white)
+on the left and Aka (red) on the right:
 
 - Use the **+ / -** buttons under each side, or the keyboard. **`a`** adds a flag
   to **Aka** and **`s`** adds a flag to **Shiro** (either key works with or without

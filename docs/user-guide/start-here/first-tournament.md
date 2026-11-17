@@ -4,7 +4,7 @@ This page walks you through the fastest path from a running server to real-time 
 
 ## 1. Install and start the server
 
-Install the binary by following [Installation](../install/install.md), then start the tournament app:
+Install bracket-creator by following [Download](../install/download.md). The Docker image starts the tournament app by itself, already open to the other devices in the hall. With any other install, start the tournament app yourself:
 
 ```bash
 bracket-creator mobile-app --folder ./tournament-data --bind 0.0.0.0

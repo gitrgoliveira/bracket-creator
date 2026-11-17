@@ -183,7 +183,7 @@ Three things about the stage are not obvious from the code:
   a request has no address of its own, so Chromium's local network checks
   treat it as a public site and refuse its `127.0.0.1` frames. A `file:` page
   may frame both names.
-- **No pointer clicks inside a scaled frame.** Playwright misplaces a click
+- **Pointer clicks fail inside a scaled frame.** Playwright misplaces a click
   inside a frame the stage has scaled down: at the narrow stage's 0.85 every
   click on the phone's watchlist box was refused as landing on another
   element, and at the console's 0.36 a click reported success while the app

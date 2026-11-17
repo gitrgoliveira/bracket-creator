@@ -4,9 +4,9 @@ Two questions shape every tournament you run with bracket-creator. First, how di
 
 ## Digitisation level
 
-How far you digitise determines which surfaces you use on the day. The same toolkit scales from a fully printed event to a fully online one, so pick the level that matches your venue and equipment.
+How far you digitise determines which surfaces you use on the day. The same toolkit scales from a fully printed event to a fully online one. Pick the level that matches your venue and equipment.
 
-- **Offline.** No internet required. Generate the brackets and score sheets as an Excel file, print them, and run the whole day on paper. No networked devices are needed at the courts. *Needs:* an A4/A3 printer. Refer to [Generate brackets](../organisers/web-ui.md).
+- **Offline.** Runs without the internet or any networked device at the courts. Generate the brackets and score sheets as an Excel file, print them, and run the whole day on paper. *Needs:* an A4/A3 printer. Refer to [If you print your brackets instead](first-tournament.md#if-you-print-your-brackets-instead).
 - **Partially connected.** Internet is available but there are no display screens. One device per shiai-jo keeps every court in sync, through the tournament app or a shared Google Sheet. Some printed material is still needed for scoreboards and competitors. *Needs:* one device per shiai-jo. Refer to [Run a tournament](../organisers/run-tournament.md).
 - **Fully digital.** On-screen scoreboards and real-time mobile pages show scores and standings to everyone in the hall. Organisers still print competitor tags and numbers. *Needs:* a device and monitor per shiai-jo, plus network access for competitors. Refer to [Host the tournament app](../install/hosting.md).
 

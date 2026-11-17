@@ -1,6 +1,6 @@
 # Download
 
-Pick the computer that will run the tournament app: usually the laptop at the desk. Each section below gives the recommended route for it, and the command that starts the app. [Install](install.md) has every other way, and how to upgrade.
+Pick the computer that will run the tournament app: usually the laptop at the desk. Each section of this page gives the recommended route for it, and the command that starts the app. [Install](install.md) has every other way, and how to upgrade.
 
 Once the app is running, open `http://localhost:8080` on that computer. Courts and phones on the same network open `http://<laptop address>:8080` instead, as [Your first tournament](../start-here/first-tournament.md) explains.
 
@@ -70,7 +70,7 @@ The packages do not update themselves: [Upgrading](install.md#upgrading) says ho
 
 ## Windows: the release zip
 
-Docker Desktop, above, is the recommended route on Windows too. Without it, use the release zip:
+Docker Desktop ([Any computer with Docker](#any-computer-with-docker-recommended)) is the recommended route on Windows too. Without it, use the release zip:
 
 1. Download the zip for your processor from the latest release:
     * Most Windows computers (Intel or AMD): [`bracket-creator_windows_x86_64.zip`](https://github.com/gitrgoliveira/bracket-creator/releases/latest/download/bracket-creator_windows_x86_64.zip)

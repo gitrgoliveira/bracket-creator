@@ -3,21 +3,23 @@
 Regenerates every screenshot and video the documentation embeds, by driving the
 real application in a browser.
 
-    make docs/screenshots                        # the 45 application screenshots
-    make docs/videos                             # the 3 application videos
+    make docs/screenshots                        # the 55 application screenshots
+    make docs/videos                             # the 4 application videos
     make docs/media                              # both
 
     make docs/screenshots NAME=mobile-dashboard  # one capture
     make docs/screenshots FAMILY=editors         # one group
+    make docs/screenshots FAMILY=heroLive        # the landing page's hero images
     make docs/videos NAME=kachinuki-demo         # one video
     make docs/screenshots SINCE=main             # only the groups your changes reach
     make docs/media KIND=video FAMILY=videoLive  # docs/media narrowed to stills or videos
 
 Screenshots and videos are split because you rarely want both at once. Neither
-is especially slow: measured on one machine, the three videos take about 60
-seconds and the screenshots about 175 (measured when there were 30). A video is recorded in real time and
-paced for a human to follow, so it is the more expensive of the two per clip,
-but there are only three of them.
+is especially slow: measured on one machine, the four videos take about 85
+seconds including the build (measured with the landing page's clip, 2026-11)
+and the screenshots about 175 (measured when there were 30). A video is
+recorded in real time and paced for a human to follow, so it is the more
+expensive of the two per clip, but there are only four of them.
 
 Output lands in `out/`, never straight into `docs/`. Each still is compared
 pixel by pixel against the file it would replace, and a run ends by naming only
@@ -44,6 +46,24 @@ next run reports it as changed until the harness has produced it once.
 
 Videos are not compared: their encoding depends on how fast the machine drove
 the interface, so a clip never reproduces its committed bytes.
+
+## The landing page's lighter copies
+
+The landing page serves a WebP copy of each of its pictures (the PNG stays as
+the fallback, and as the social preview image) and an MP4 (H.264) copy of its
+clip beside the WebM, for a browser that cannot play WebM. After copying new
+captures into `docs/`, make the copies again:
+
+    make docs/media-copies
+
+The list comes from `overrides/landing.html` itself: every
+`screenshots/<name>.webp` or `videos/<name>.mp4` it names is made from the
+committed `<name>.png` or `<name>.webm`, and only when that file is newer than
+its copy. A `<name>-1440.webp` is the one exception: it is a 1440-wide copy of
+`<name>.png`, the smaller candidate in the hero's `srcset`. A new picture on
+the landing page therefore needs only its `<source type="image/webp">` there.
+`make docs/media-copies` needs `cwebp` and `ffmpeg` (`brew install webp
+ffmpeg`); the copies are committed, so `make docs/build` needs neither.
 
 Re-recording `kachinuki-demo` carries one manual step. The clip is chaptered by
 a numbered list under the `<video>` in
@@ -114,13 +134,64 @@ would pull it into `audit-ci`'s scope.
     lib/api.mjs      the scaffolding calls (tournament, competition, roster, draw,
                      and a lineup written by member id)
     lib/net.mjs      picks a free port for the server
-    lib/ui.mjs       operator auth for a context (see its closing note on editors)
-    lib/editor.mjs   the score editor's selector, its Start match and two-tap Finish
+    lib/ui.mjs       operator auth for a context, the context's locale and time
+                     zone, and the frame helpers (see its closing note on editors)
+    lib/editor.mjs   the score editor's selector, its Start match and two-tap
+                     Finish, and the individual board's ippon and commit buttons
+    lib/card.mjs     the landing page's card captures, each a region of a page
     lib/scope.mjs    which groups a set of changed files reaches (SINCE=)
     lib/seed.mjs     runs scripts/setup_tournament.py for the demo tournament
     lib/fixture.mjs  read-back checks that refuse to capture a bad fixture
     lib/png.mjs      PNG dimensions and the pixel compare behind `unchanged`
     recipes/         one file per group, registered in recipes/index.mjs
+    recipes/hero-stage.html
+                     the page the hero is photographed on (see below)
+
+## The hero stage
+
+The landing page's hero, `hero.png` and its narrow twin `hero-mobile.png`, shows
+one bout on three screens at once. The `heroLive` group (`recipes/hero.mjs`)
+seeds one tournament, plays two bouts on shiaijo A through the score editor and
+leaves a third running, part scored. Both captures then photograph one page,
+`recipes/hero-stage.html`, which holds a live frame for each screen:
+
+1. the court console, `/admin/shiaijo/A`, at 1180x820 (a tablet), signed in;
+2. the court display, `/display?court=A`, at 1280x720 (a TV);
+3. a 390x844 phone that never signed in, following one competitor of the
+   running bout on its watchlist.
+
+Each frame lays out at its device's size and is scaled down on the stage, so
+the three are views of the same server at the same moment, not three images
+put together afterwards. `hero` is the stage at 1440 CSS pixels wide with all
+three and their numbered labels; `hero-mobile` is 600 wide with the display
+and the phone only. Both are taken at a device scale factor of 2, as the
+element `#stage` rather than the viewport, so their size is the composition's.
+The "Watch it update live" clip records the same stage, so the stills and the
+clip cannot disagree about the layout. Its poster, `live-every-screen-poster`
+(in `recipes/videos.mjs`, beside the clip), is a still of the stage after the
+clip's scoring has played, so the landing page does not show the hero picture
+twice. The clip's drive takes it as the clip ends (its recipe's `stills`), so it
+comes out of a video run: `make docs/videos NAME=live-every-screen`.
+
+Three things about the stage are not obvious from the code:
+
+- **Two names for one server.** The console must be signed in and the phone
+  must not, and the sign-in is two `localStorage` keys that a context's init
+  script would set in every frame. So the console is opened on `localhost` and
+  the display and phone on `127.0.0.1`, and the keys are set on the console's
+  origin only. The captures check each frame's own storage before they are
+  taken.
+- **The stage is opened as a file.** A page the harness serves by intercepting
+  a request has no address of its own, so Chromium's local network checks
+  treat it as a public site and refuse its `127.0.0.1` frames. A `file:` page
+  may frame both names.
+- **Pointer clicks fail inside a scaled frame.** Playwright misplaces a click
+  inside a frame the stage has scaled down: at the narrow stage's 0.85 every
+  click on the phone's watchlist box was refused as landing on another
+  element, and at the console's 0.36 a click reported success while the app
+  never saw it. Text goes in with `fill` and a control is pressed with a click
+  event dispatched on it (`pressInScaledFrame`, `lib/ui.mjs`). Drive a scaled
+  frame the same way.
 
 ## The rule that shapes the seeding
 
@@ -152,12 +223,27 @@ Most captures are at a device scale factor of 1, so the committed dimensions are
 the viewport. Six are at 2, where a committed 2560x1800 means a 1280x900
 viewport: `mobile-dashboard`, `mobile-participants`, `mobile-draw-preview`,
 `mobile-pool-standings`, `selfrun-register` and `selfrun-viewer-home`. Those six
-declare `dpr: 2`; a recipe that says nothing is at 1. A phone capture that
-must lay out as on a touch screen (the calendar's phone layout, with no Move buttons)
-declares `touch: true`. The runner compares width always,
-and height for every mode except `fullPage`, whose height moves with content.
+declare `dpr: 2`; a recipe that says nothing is at 1. `hero` and `hero-mobile`
+are at 2 too, but crop to an element, so their size is the element's (refer to
+[The hero stage](#the-hero-stage)). A phone capture that must lay out as on a
+touch screen (the calendar's phone layout, with no Move buttons) declares
+`touch: true`. The runner compares width always, and height for every mode
+except `fullPage`, whose height moves with content.
 
 A new capture has nothing to compare against and reports `NEW`.
+
+A landing page card is the region of a page its card shows, not the whole
+page scaled down in the browser: `lib/card.mjs` repeats a capture's recipe as
+`card-<name>` with `capture: { clip }`, a box in that page's CSS pixels. After
+copying a card, make its WebP copy (`make docs/media-copies`).
+
+A still that only exists partway through a procedure (the clip's poster) is
+taken by the drive itself: the recipe lists its name in `stills` and the drive
+calls `still(name, selector)`, and the runner compares it like any other.
+
+A family that reads a file of `recipes/` at run time beyond its own recipe
+files (the hero stage page) lists it in `assets`, so a change to that file
+re-runs it on a scoped run.
 
 A new group should declare `sources:` (the path prefixes of what its captures
 render, plus anything its seed drives). A group that declares none is treated

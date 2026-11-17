@@ -6,7 +6,7 @@ Team tournaments work with any of the four formats described in [Tournament form
 
 A team's lineup is its fighting order across the five positions: Senpo, Jiho, Chuken, Fukusho, and Taisho. A 3-person team fights as Senpo, Chuken, and Taisho, and a team of any other size numbers its positions.
 
-A team keeps the lineup of its previous team match unless you enter a new one for a match. The **Lineups** page sets each team's **Starting lineup**, which its first match uses unless that match has a lineup of its own, and it can set the lineup of any one of the team's matches. Pick the team, then choose **Starting lineup** or one of its matches in **Lineup for**. A lineup you enter for a match is used for that match and for every later match of the team, until you enter another. It never changes an earlier match. Changing a match's lineup also changes every later match of the team that carries it, including matches already played.
+A team keeps the lineup of its previous team match unless you enter a new one for a match. The **Lineups** page sets each team's **Starting lineup**, which its first match uses unless that match has a lineup of its own, and it can set the lineup of any one of the team's matches. Pick the team, then choose **Starting lineup** or one of its matches in **Lineup for**. A lineup you enter for a match is used for that match and for every later match of the team, until you enter another. It never changes an earlier match. Changing a match's lineup also changes every later match of the team that carries it, including matches already played, except a kachinuki encounter that has started: it keeps the lineup it started with (refer to [Scoring a kachinuki encounter](#scoring-a-kachinuki-encounter)).
 
 Matches count in their order: pool matches by their number in the pool, then the knockout by round, with the 3rd-place match last. **Lineup for** lists a team's matches in that order. In that order, the lineup a team fields in a match is the first of these that exists:
 
@@ -108,7 +108,7 @@ Individual bouts are scored first. Once all bouts are done, the encounter result
 2. If wins are equal, the team with the highest points scored wins.
 3. If both wins and points are equal, the encounter is a draw in pools or league. In a knockout stage, the encounter goes to a representative bout (daihyosen). Refer to [Recording decisions](../court-operators/recording-decisions.md) for how daihyosen is handled. The results workbook lists each representative bout on its own sheet, described under [Daihyosen](../court-operators/recording-decisions.md#daihyosen).
 
-When the encounter itself ends on a kiken, fusenpai, or fusensho, every bout that has no result yet is also credited to the other team, 2-0 each: one individual victory and two points, on top of whatever was already fought before the withdrawal. This feeds straight into the criteria above and into [Team standings and tie-breaks](#team-standings-and-tie-breaks). Refer to [Fusenpai and fusensho](../court-operators/recording-decisions.md#fusenpai-and-fusensho) for the full rule.
+When the encounter itself ends on a kiken, fusenpai, or fusensho, every bout that has no result yet is also credited to the other team, 2-0 each: one individual victory and two points, on top of whatever was already fought before the withdrawal. This feeds straight into those three criteria and into [Team standings and tie-breaks](#team-standings-and-tie-breaks). Refer to [Fusenpai and fusensho](../court-operators/recording-decisions.md#fusenpai-and-fusensho) for the full rule.
 
 Two fighters from opposing teams may share a name, so the app records who won each bout by identity rather than by the name on the sheet. You do not have to do anything for this, and bouts you score now are unaffected. The one exception is an encounter scored by a much older version. A bout there between two same-named fighters can show no individual win for either team, because the name it stored cannot say which of the two it meant. The points scored in that bout still count.
 
@@ -136,7 +136,7 @@ How each situation plays out at the table:
 The following clip walks through the flows end to end, recorded from the score editor:
 
 <video controls muted playsinline width="100%">
-  <source src="../../../videos/kachinuki-demo.webm" type="video/webm">
+  <source src="../../videos/kachinuki-demo.webm" type="video/webm">
   Your browser does not support the video tag.
 </video>
 
@@ -168,7 +168,7 @@ While a bout is being fought, the line names both of its fighters as on, whateve
 
 - **A team has nobody left.** When **Record bout** takes the last fighter in a team's lineup off, no pairing follows. The bout you recorded joins the read-only rows, and one line stands where the current bout was, for example "Aka has no fighters left. End match finishes the encounter." **Record bout** is greyed out, because that bout is already recorded; if the team does have another fighter, use **Add next bout manually**. You can still tap the recorded bout to correct it like any earlier bout: a correction that changes who won, or makes it a draw, makes it the current bout again, to record anew, while a different technique for the same winner does not. Until the editor has read the lineups, when it is opened again or on another device, the bout you recorded shows as the current bout, and tapping **Record bout** again changes nothing.
 - **A draw leaves one team with nobody.** That team's last fighter stays on for the next pairing.
-- **No lineup saved.** Without a lineup for the team that lost the bout, the app cannot tell whether that team has anyone left, so the bout you recorded stays the current bout, with **Record bout** greyed out because nothing can follow it, and you continue with **Add next bout manually** or **End match**. **Record bout** comes back if a lineup saved later gives that team another fighter.
+- **The losing team has no saved lineup.** Without a lineup for the team that lost the bout, the app cannot tell whether that team has anyone left, so the bout you recorded stays the current bout, with **Record bout** greyed out because nothing can follow it, and you continue with **Add next bout manually** or **End match**. **Record bout** comes back if a lineup saved later gives that team another fighter.
 - **A tie leaves both teams with nobody.** The bout stays the current bout, in pools, leagues and knockouts alike, and the line names both of its fighters as on. **Encho** is there if you want the pair to fight on, **Record bout** is greyed out because nothing can follow it, and **End match** decides the rest: a drawn encounter in a pool or league, held back in a knockout, which needs a winner. Scoring a point on that tie, or starting **Encho**, makes it a bout being fought again: both fighters stay on and **Record bout** records it anew.
 
 If the app adds a pairing you did not want, for example an extra bout after the encounter was really over, use **× Remove this bout** to take it back. It only removes a bout that has no score yet, so nothing you have recorded is lost. When the bout you remove is the pairing **Record bout** added, the bout before it becomes the current bout again, as if **Record bout** had not been pressed, so the line above names both of its fighters as on until you record it again. When you remove a bout you added with **Add next bout manually** after a team had nobody left, the sheet goes back to how it was before you added it: the recorded bout stays recorded and the line still names the team with nobody left. Editing a lineup in between does not change this. If the match's history does not show how the bout you removed was added, for example because that history could not be saved, the recorded bout stays recorded; tap it to correct it.
@@ -232,7 +232,7 @@ name order as the final deterministic fallback.
 
 ### Ties in a league
 
-A league has no knockout, so its table is its result. One rule, the same for team, individual and Engi leagues, decides which tied places the app asks about. The steps below are for a team league. An individual league schedules its ippon-shobu tie-breakers itself (refer to [Individual competitors: another round, or lots](../court-operators/recording-decisions.md#individual-competitors-another-round-or-lots)), and an Engi tie-breaker is decided by flags (refer to [Ties between pairs](naginata.md#ties-between-pairs)).
+A league has no knockout, so its table is its result. One rule, the same for team, individual and Engi leagues, decides which tied places the app asks about. The following steps are for a team league. An individual league schedules its ippon-shobu tie-breakers itself (refer to [Individual competitors: another round, or lots](../court-operators/recording-decisions.md#individual-competitors-another-round-or-lots)), and an Engi tie-breaker is decided by flags (refer to [Ties between pairs](engi.md#ties-between-pairs)).
 
 **Of the podium places, only 3rd can be shared.**
 
@@ -253,7 +253,7 @@ Once the tie-breaker is run, it joins the shiai-jo's queue like any other match.
 
 The league finishes once every tie at a place that cannot be shared has a winner, or its lots are entered.
 
-**A tie-breaker needs a winner.** A league tie-breaker bout cannot be saved as a draw unless neither side can fight it (see the lots below): **Mark draw** is turned off on it, and the editor says why: "A tie-breaker needs a winner: fight encho, then decide by hantei". Record encho while the bout is level, and if it is still level afterwards, tap **Decide by hantei** and pick the winning side. Refer to [Recording decisions](../court-operators/recording-decisions.md#encho-overtime). A tie-breaker already on record as a draw holds the league until it has a winner: the League tab shows a notice naming the bout, with **Open bout** to decide it by encho or hantei, and **Fight it again** to play it again.
+**A tie-breaker needs a winner.** A league tie-breaker bout cannot be saved as a draw unless neither side can fight it (refer to **Lots are the exception**): **Mark draw** is turned off on it, and the editor says why: "A tie-breaker needs a winner: fight encho, then decide by hantei". Record encho while the bout is level, and if it is still level afterwards, tap **Decide by hantei** and pick the winning side. Refer to [Recording decisions](../court-operators/recording-decisions.md#encho-overtime). A tie-breaker already on record as a draw holds the league until it has a winner: the League tab shows a notice naming the bout, with **Open bout** to decide it by encho or hantei, and **Fight it again** to play it again.
 
 **Lots are the exception, and they are yours to run.** Chusen (drawing lots) is offered in two cases only:
 

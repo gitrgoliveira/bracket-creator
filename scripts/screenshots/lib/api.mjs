@@ -13,16 +13,19 @@
 export const PASSWORD = 'testpassword';
 
 // `headers` lets a caller add a request header without re-implementing the call.
+// A FormData body is sent as it is, as a multipart form: fetch writes its
+// content type, boundary included, so none is set here.
 export function client(base, headers = {}) {
   const call = async (method, p, body, auth = true) => {
+    const form = body instanceof FormData;
     const res = await fetch(base + p, {
       method,
       headers: {
-        'Content-Type': 'application/json',
+        ...(form ? {} : { 'Content-Type': 'application/json' }),
         ...(auth ? { 'X-Tournament-Password': PASSWORD } : {}),
         ...headers,
       },
-      body: body != null ? JSON.stringify(body) : undefined,
+      body: form ? body : body != null ? JSON.stringify(body) : undefined,
     });
     const text = await res.text();
     if (!res.ok) throw new Error(`${method} ${p} -> ${res.status} ${text.slice(0, 200)}`);
@@ -34,6 +37,15 @@ export function client(base, headers = {}) {
     get: (p) => call('GET', p),
     post: (p, b) => call('POST', p, b),
     put: (p, b) => call('PUT', p, b),
+
+    // An upload door (a logo, a sponsor image): `blob` as the form's `file`,
+    // beside any plain `fields`, as the Edit details page sends it.
+    upload(p, blob, fields = {}) {
+      const form = new FormData();
+      for (const [k, v] of Object.entries(fields)) form.append(k, v);
+      form.append('file', blob, 'image.png');
+      return call('POST', p, form);
+    },
 
     async tournament(over = {}) {
       return call('POST', '/api/tournament', {
@@ -117,6 +129,13 @@ export function client(base, headers = {}) {
     },
   };
 }
+
+// The tournament the hero and the clips are recorded against: one day, two
+// shiaijo. Each family gets a fresh server, so this is a plain create.
+export const LONDON_COURTS = ['A', 'B'];
+export const londonCup = (api) => api.tournament({
+  name: 'London Cup 2026', date: '19-09-2026', venue: 'London', durationDays: 1, courts: LONDON_COURTS,
+});
 
 // The five FIK fighting-order positions, in sheet order.
 export const POSITIONS = ['senpo', 'jiho', 'chuken', 'fukusho', 'taisho'];

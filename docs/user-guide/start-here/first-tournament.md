@@ -4,13 +4,15 @@ This page walks you through the fastest path from a running server to real-time 
 
 ## 1. Install and start the server
 
-Install the binary by following [Installation](../install/install.md), then start the tournament app:
+Install bracket-creator by following [Download](../install/download.md). The Docker image starts the tournament app by itself, already open to the other devices in the hall. With any other install, start the tournament app yourself:
 
 ```bash
-bracket-creator mobile-app --folder ./tournament-data
+bracket-creator mobile-app --folder ./tournament-data --bind 0.0.0.0
 ```
 
-Open `http://localhost:8080` in a browser. When the data folder is empty, the app prompts you to create a tournament. Fill in the name, date, venue, number of shiai-jo, and the admin password. Before you set the password, read [Operating modes](../organisers/operating-modes.md) to choose between officiated and self-run.
+`--bind 0.0.0.0` lets the other devices in the hall (a scoreboard screen, a phone) reach the app; without it only this computer can. The operating system may ask whether to allow incoming connections for bracket-creator: allow them, or the other devices cannot connect. Refer to [Start the server](../organisers/run-tournament.md#start-the-server) for the server's flags, and to [Security notes](../organisers/operating-modes.md#security-notes) for what opening the app to the hall network means for the admin password.
+
+Open `http://localhost:8080` in a browser on the same computer. When the data folder is empty, the app prompts you to create a tournament. Fill in the name, date, venue, number of shiai-jo, and the admin password. Before you set the password, read [Operating modes](../organisers/operating-modes.md) to choose between officiated and self-run.
 
 ## 2. Create a competition
 
@@ -39,8 +41,31 @@ Go to the **Scores** tab, open a match, and record the result. Refer to [Scoring
 ![The score editor: Shiro and Aka fighters with ippon buttons, foul counters, and decision controls.](../../screenshots/mobile-score-editor.png)
 
 !!! tip
-    Open `http://localhost:8080` on a second screen (a scoreboard TV or a phone) with no password. Standings and brackets update in real time as a scorer records each result. Refer to [Following a tournament](../spectators/following.md) for the full viewer experience.
+    Open `http://<laptop address>:8080` on a second screen (a scoreboard TV or a phone on the same network) with no password, for example `http://192.168.1.10:8080`. The laptop's address is the IP address shown in its Wi-Fi or network settings (or printed by `ipconfig` on Windows and `ip addr` on Linux). Standings and brackets update in real time as a scorer records each result. Refer to [Following a tournament](../spectators/following.md) for the full viewer experience.
+
+## If you print your brackets instead
+
+Steps 1 to 5 run the whole tournament in the app. To work from printed brackets and an Excel file instead, with no app on the day:
+
+1. **Collect participants**: one competitor per line in a CSV file, name then dojo ([input format](../organisers/input-format.md))
+2. **Generate the bracket**: run [create-pools](../commands/create-pools.md) or [create-knockout](../commands/create-knockout.md)
+3. **Optionally seed** top competitors so they land in separate pools or sides of the bracket ([seeding](../commands/create-pools.md#seeding))
+4. **Print**: the Excel file is laid out to print cleanly on A4 and A3
+
+On the day you need:
+
+- **A3 printer**: for team and competitor name sheets
+- **A4 printer**: for the bracket trees
+- **Scoreboards, whiteboard markers, scissors, tasuki**: for keeping score at the courts and marking competitors
+
+### Keep courts in sync
+
+If you have multiple shiai-jo and run on printed brackets, share one copy of the workbook online so every table works from the same document:
+
+1. Upload the Excel file to Google Drive and open it with Google Sheets. The workbook's formulas work in Google Sheets as they do in Excel.
+2. Share the sheet with the person at each table, with permission to edit.
+3. At each table, open the sheet on any device with a browser or the Google Sheets app, and type that court's results into its own matches: the points in the score cells, and an **X** in the centre column for a tie.
 
 ## Next steps
 
-For the complete organiser workflow, including pools, seeding, and competition settings, refer to [Run a tournament](../organisers/run-tournament.md). Before the event, take a backup of the whole tournament: refer to [Backup and restore](../organisers/backup-and-restore.md). To generate print-ready brackets without the tournament app, refer to [Legacy Web UI](../organisers/web-ui.md) and the [create-pools command](../commands/create-pools.md).
+For the complete organiser workflow, including pools, seeding, and competition settings, refer to [Run a tournament](../organisers/run-tournament.md). Before the event, take a backup of the whole tournament: refer to [Backup and restore](../organisers/backup-and-restore.md). The tournament app, the Legacy Web UI and the command line all ship in the one binary. To generate print-ready brackets without the tournament app, refer to [Legacy Web UI](../organisers/web-ui.md) (in the browser, no CSV editing needed) and the [create-pools](../commands/create-pools.md) and [create-knockout](../commands/create-knockout.md) commands.

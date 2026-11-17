@@ -5,18 +5,25 @@ site_url: https://gitrgoliveira.github.io/bracket-creator/
 repo_name: gitrgoliveira/bracket-creator
 repo_url: https://github.com/gitrgoliveira/bracket-creator
 
-# check_prose.py and check_links.py live under docs/ for proximity to what
-# they check, but they are tooling, not site content: exclude them from the
-# build so they never get copied into the published site.
+# Zensical builds the site from this file (it reads the MkDocs format, so the
+# file keeps its name; docs/check_links.py reads site_url from it).
+#
+# check_prose.py, check_links.py and requirements.txt live under docs/ for
+# proximity to what they check or build, but they are tooling, not site
+# content: exclude them, and the bytecode `make docs/prose` leaves beside them,
+# so none of it gets copied into the published site.
 exclude_docs: |
   *.py
+  __pycache__/
+  requirements.txt
 
 extra_css:
   - assets/stylesheets/extra.css
   - assets/stylesheets/pool-draw-animation.css
 
-# Mermaid: Material draws every ```mermaid block itself, on first load and on
-# each instant-navigation page swap. It uses a global `mermaid` when one is
+# Mermaid: the theme draws every ```mermaid block itself on each page load
+# (instant navigation is off, so every link loads its page in full, which the
+# standalone landing page needs). It uses a global `mermaid` when one is
 # loaded, so the library is pinned here rather than taken from Material's
 # floating default.
 extra_javascript:
@@ -29,8 +36,10 @@ extra_javascript:
   - assets/javascripts/pool-draw-animation.js
 
 markdown_extensions:
-  # attr_list + md_in_html power the home-page grid cards (the `markdown`
-  # attribute on a <div class="grid cards"> block, styled in extra.css).
+  # md_in_html lets a raw HTML block carry Markdown (its `markdown`
+  # attribute), which the `bc-fig` figures use (styled in extra.css), so
+  # dropping it breaks them.
+  # attr_list adds classes to images, as in `{ .bc-phone }`.
   - attr_list
   - md_in_html
   - admonition
@@ -40,7 +49,7 @@ markdown_extensions:
       use_pygments: true
   - pymdownx.inlinehilite
   - pymdownx.superfences:
-      # Register the `mermaid` fence so Material renders ```mermaid blocks as
+      # Register the `mermaid` fence so the theme renders ```mermaid blocks as
       # diagrams (built-in Mermaid support) instead of plain code blocks.
       custom_fences:
         - name: mermaid
@@ -55,6 +64,7 @@ plugins:
   - search
   # Forward the pre-restructure user-guide URLs (published for a long time,
   # so linked externally and indexed by search engines) to their new homes.
+  # Zensical has this built in: each entry becomes a small page that forwards.
   - redirects:
       redirect_maps:
         'user-guide/commands/create-playoffs.md': 'user-guide/commands/create-knockout.md'
@@ -67,13 +77,15 @@ plugins:
 
 theme:
   name: material
+  # Zensical's classic look: the Material for MkDocs header, tabs, sidebar and
+  # TOC this site was designed on, so the move keeps every page's look.
+  variant: classic
   custom_dir: overrides
   features:
     - navigation.indexes
     # navigation.sections is intentionally OFF: with it, every group renders
     # permanently expanded (~30 sidebar rows, overflowing the viewport).
     # Without it, groups are collapsible and only the active path expands.
-    - navigation.instant
     - navigation.tabs
     - navigation.tabs.sticky
     # One-tap copy on every code block: the docs are CLI-heavy (install +
@@ -91,7 +103,7 @@ theme:
     code: JetBrains Mono
   # Colors are driven entirely by assets/stylesheets/extra.css (the
   # --md-primary-fg-color / --md-accent-fg-color tokens, scoped per scheme).
-  # Material's `primary`/`accent` only accept named palettes (e.g. `indigo`),
+  # The theme's `primary`/`accent` only accept named palettes (e.g. `indigo`),
   # not hex, so hex values here are silently ignored; they are intentionally
   # omitted so the CSS is the single source of truth.
   palette:
@@ -108,11 +120,8 @@ nav:
   - Home: index.md
   - User guide:
       - Start here:
-          - Choosing your setup: user-guide/start-here/choosing-your-setup.md
           - Your first tournament: user-guide/start-here/first-tournament.md
-      - Install and deployment:
-          - Install: user-guide/install/install.md
-          - Host the tournament app: user-guide/install/hosting.md
+          - Choosing your setup: user-guide/start-here/choosing-your-setup.md
       - For organisers:
           - Input format: user-guide/organisers/input-format.md
           - Run a tournament on the day: user-guide/organisers/run-tournament.md
@@ -123,6 +132,7 @@ nav:
           - The knockout draw: user-guide/organisers/knockout-draw.md
           - Team tournaments: user-guide/organisers/team-tournaments.md
           - Naginata competitions: user-guide/organisers/naginata.md
+          - Engi (pair kata) competitions: user-guide/organisers/engi.md
       - For court operators:
           - Score a match: user-guide/court-operators/scoring-a-match.md
           - Record match decisions: user-guide/court-operators/recording-decisions.md
@@ -130,16 +140,21 @@ nav:
           - Self-run tournaments: user-guide/competitors/self-run.md
       - For spectators:
           - Follow the tournament: user-guide/spectators/following.md
+      - Install and deployment:
+          - Download: user-guide/install/download.md
+          - Install: user-guide/install/install.md
+          - Host the tournament app: user-guide/install/hosting.md
       - Command line:
-          - create-pools: user-guide/commands/create-pools.md
-          - create-knockout: user-guide/commands/create-knockout.md
           - mobile-app: user-guide/commands/mobile-app.md
-          - print: user-guide/commands/print.md
           - hash-password: user-guide/commands/hash-password.md
           - version: user-guide/commands/version.md
-      - Legacy Web UI:
-          - Overview: user-guide/organisers/web-ui.md
-          - serve: user-guide/commands/serve.md
+      - Other ways to work:
+          - create-pools: user-guide/commands/create-pools.md
+          - create-knockout: user-guide/commands/create-knockout.md
+          - print: user-guide/commands/print.md
+          - Legacy Web UI:
+              - Overview: user-guide/organisers/web-ui.md
+              - serve: user-guide/commands/serve.md
   - Developer guide:
       - Code of conduct: dev-guide/code_of_conduct.md
       - Contributing: dev-guide/contributing.md

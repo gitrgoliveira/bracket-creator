@@ -1,0 +1,297 @@
+{#-
+  The product landing page at the site root. Used ONLY by docs/index.md (its
+  front matter sets `template: landing.html`), whose Markdown body is never
+  rendered. A standalone page: it does not extend base.html, so nothing from
+  `theme:` reaches it (favicon, fonts, title, colour scheme) and this file
+  carries its own <head>. Light only; the docs pages keep the scheme toggle.
+  Every link goes through base_url so it resolves under the GitHub Pages
+  subpath, as overrides/404.html does. This file is public prose: the
+  `docs/prose` gate reads its text and its alt, title, aria-label and meta
+  content. Its colours are the website's own, not DESIGN.md's: DESIGN.md
+  governs the app, and only the navy and the Aka red here are taken from
+  it. The docs pages keep their own look (docs/assets/stylesheets/extra.css),
+  deliberately different from this page. A card's picture
+  (screenshots/card-*.png) is a capture of the region the card shows,
+  made by the docs capture harness (scripts/screenshots/lib/card.mjs).
+-#}
+{#- The lede is written in two literals around its one link, "engi", so the
+    prose gate reads the visible paragraph whole; `lede` joins them as plain
+    text for the description and og:description. -#}
+{%- set lede_head = "Score each bout at the court on a laptop or tablet. The court display and every phone in the hall show the score as it is entered. Made for kendo and naginata tournaments; " -%}
+{%- set lede_tail = " pairs also suit kendo kata and jodo." -%}
+{%- set lede = lede_head ~ "engi" ~ lede_tail -%}
+{#- `headline` is the og:title; it must read as the <h1> below does, which is
+    written out in two spans for its line breaks. -#}
+{%- set headline = "Your tournament, live on every screen" -%}
+{%- set first = base_url ~ "/user-guide/start-here/first-tournament/" -%}
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<title>{{ page.meta.title or config.site_name }}</title>
+<meta name="description" content="{{ lede }}">
+<link rel="canonical" href="{{ config.site_url }}">
+<link rel="icon" href="{{ base_url }}/assets/images/favicon.ico">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="{{ config.site_name }}">
+<meta property="og:title" content="{{ headline }}">
+<meta property="og:description" content="{{ lede }}">
+<meta property="og:url" content="{{ config.site_url }}">
+<meta property="og:image" content="{{ config.site_url }}screenshots/hero.png">
+<meta property="og:image:width" content="2880">
+<meta property="og:image:height" content="1718">
+<meta property="og:image:alt" content="The court console, the court display and a phone, all showing the same bout">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=JetBrains+Mono&display=swap">
+<style>
+  :root {
+    --navy:#1d3557; --navy-tint:#e1e8f1; --aka:#c8202e; --aka-dark:#a91a26; --paper:#f4f6f9; --surface:#fff; --on-dark:#fff;
+    --ink:#1c2633; --muted:#5d6b7e; --rule:#d6dce4; --footer-ink:#c9d4e3;
+    --code-bg:#0e1b2e; --code-ink:#e6ecf3; --code-muted:#7a8ca5; --mono:"JetBrains Mono", monospace;
+    --font:"Atkinson Hyperlegible", system-ui, sans-serif;
+  }
+  * { box-sizing:border-box; }
+  html { scroll-behavior:smooth; }
+  html, body { margin:0; overflow-x:clip; }
+  body { font-family:var(--font); color:var(--ink); background:var(--surface); }
+  img, video { display:block; max-width:100%; height:auto; }
+  a { color:inherit; text-decoration:none; }
+  a:focus-visible, video:focus-visible, pre:focus-visible { outline:3px solid var(--navy); outline-offset:3px; }
+  a:focus-visible, video:focus-visible { border-radius:4px; }
+  footer a:focus-visible { outline-color:var(--on-dark); }
+  main p a:not(.btn), main li a:not(.btn) { text-decoration:underline; text-decoration-thickness:1px; text-underline-offset:3px; }
+  .skip { position:absolute; left:16px; top:-100px; z-index:10; background:var(--navy); color:var(--on-dark); padding:12px 18px; border-radius:6px; font-weight:700; }
+  .skip:focus { top:12px; }
+  [id] { scroll-margin-top:24px; }
+  .wrap { max-width:1240px; margin:0 auto; padding:0 32px; }
+  header { border-bottom:1px solid var(--rule); background:var(--surface); }
+  .bar { display:flex; align-items:center; gap:28px; height:68px; }
+  .brand { display:flex; align-items:center; gap:10px; font-weight:700; font-size:19px; color:var(--navy); white-space:nowrap; }
+  .brand img { width:36px; height:36px; border-radius:8px; }
+  .nav { display:flex; gap:26px; margin-left:auto; font-size:16px; color:var(--muted); }
+  .nav a, footer .links a { display:inline-block; padding-block:12px; margin-block:-12px; }
+  .nav a:hover, footer .links a:hover { text-decoration:underline; text-underline-offset:4px; }
+  .btn { display:inline-flex; align-items:center; justify-content:center; min-height:48px; padding:0 22px; border-radius:6px; font-size:17px; font-weight:700; white-space:nowrap; }
+  .btn:active { transform:translateY(1px); }
+  .btn.p { background:var(--aka); color:var(--on-dark); }
+  .btn.p:hover { background:var(--aka-dark); }
+  .btn.s { border:2px solid var(--navy); color:var(--navy); }
+  .phone-only { display:none; }
+  .btn.s:hover { background:var(--navy-tint); }
+  .bar .btn { min-height:40px; font-size:15px; padding:0 16px; }
+  .hero { background:var(--paper); padding:48px 0 64px; }
+  .hero h1 { font-size:58px; line-height:1.04; margin:0 0 16px; max-width:22ch; text-wrap:balance; letter-spacing:-.015em; color:var(--navy); overflow-wrap:anywhere; min-width:0; }
+  .hero .lede { font-size:21px; line-height:1.5; color:var(--muted); max-width:62ch; margin:0 0 26px; }
+  .cta { display:flex; gap:12px; flex-wrap:wrap; }
+  .proof { margin-top:18px; font-size:15px; color:var(--muted); }
+  .hero-shot { display:block; margin-top:32px; }
+  .kicker { font-family:var(--mono); font-size:13px; letter-spacing:.08em; text-transform:uppercase; color:var(--aka); margin:0 0 10px; }
+  section.block { padding:80px 0; }
+  section.block h2 { font-size:36px; line-height:1.15; margin:0 0 14px; color:var(--navy); max-width:26ch; text-wrap:balance; overflow-wrap:anywhere; min-width:0; }
+  section.block .intro { font-size:19px; color:var(--muted); max-width:60ch; margin:0 0 40px; line-height:1.5; text-wrap:pretty; }
+  .steps { display:grid; grid-template-columns:repeat(3, minmax(0,1fr)); gap:28px; }
+  .steps figure, .feat figure, .watch { margin:0; }
+  .frame picture { display:contents; }
+  .frame { border:1px solid var(--rule); border-radius:10px; overflow:hidden; background:var(--surface); height:300px; }
+  .frame img { width:100%; height:100%; object-fit:cover; object-position:50% 0; }
+  .steps h3, .feat h3 { font-size:21px; margin:18px 0 6px; }
+  .steps p, .feat p { font-size:17px; color:var(--muted); margin:0; line-height:1.5; text-wrap:pretty; }
+  .num { font-family:var(--mono); color:var(--aka); margin-right:6px; }
+  .watch { margin-top:56px; }
+  .watch figcaption { font-size:21px; font-weight:700; color:var(--ink); margin:0 0 14px; }
+  .watch video { width:100%; border:1px solid var(--rule); border-radius:10px; background:var(--paper); }
+  .watch-full { display:inline-block; margin-top:4px; padding-block:12px; font-size:16px; color:var(--navy); text-decoration:underline; text-decoration-thickness:1px; text-underline-offset:4px; }
+  .alt { background:var(--paper); }
+  .feat { display:grid; grid-template-columns:repeat(3, minmax(0,1fr)); gap:56px 32px; }
+  .feat .lead { grid-column:1 / -1; display:grid; grid-template-columns:minmax(0,7fr) minmax(0,5fr); gap:0 40px; align-items:center; }
+  .feat .lead .frame { height:420px; }
+  .feat .lead h3 { margin-top:0; font-size:26px; }
+  .feat .frame { height:260px; }
+  .formats { display:flex; flex-wrap:wrap; gap:10px; margin:14px 0 0; padding:0; list-style:none; }
+  main .formats li a { display:inline-flex; align-items:center; min-height:44px; padding:0 16px; border:1px solid var(--rule); border-radius:999px; font-size:15px; background:var(--surface); text-decoration:none; }
+  main .formats li a:hover { border-color:var(--navy); text-decoration:underline; text-underline-offset:3px; }
+  .start { display:grid; grid-template-columns:minmax(0,5fr) minmax(0,7fr); gap:48px; align-items:start; }
+  .start ol { margin:0; padding:0; list-style:none; counter-reset:s; }
+  .start li { counter-increment:s; padding:0 0 22px 44px; position:relative; font-size:18px; line-height:1.5; }
+  .start li::before { content:counter(s); position:absolute; left:0; top:-2px; width:30px; height:30px; border-radius:50%; background:var(--navy); color:var(--on-dark); font-weight:700; display:grid; place-items:center; font-size:15px; }
+  pre { background:var(--code-bg); color:var(--code-ink); border-radius:10px; padding:22px 24px; font:15px/1.7 var(--mono); margin:0; overflow-x:auto; }
+  pre .c { color:var(--code-muted); }
+  .others { margin-top:32px; display:grid; grid-template-columns:repeat(3, minmax(0,1fr)); gap:24px; }
+  .others div { border-top:3px solid var(--navy); padding-top:14px; }
+  .others h3 { margin:0 0 6px; font-size:19px; }
+  .others h3 a { text-decoration:underline; text-decoration-thickness:1px; text-underline-offset:4px; }
+  .others p { margin:0; color:var(--muted); font-size:16px; line-height:1.5; text-wrap:pretty; }
+  footer { background:var(--navy); color:var(--footer-ink); padding:40px 0; font-size:15px; }
+  footer .wrap { display:flex; gap:28px; flex-wrap:wrap; align-items:center; }
+  footer .brand { color:var(--on-dark); }
+  footer .links { display:flex; gap:22px; margin-left:auto; }
+  @media (min-width:1100px) {
+    .hero .wrap { display:grid; grid-template-columns:minmax(0,5fr) minmax(0,7fr); column-gap:40px; align-items:center; }
+    .hero h1 { font-size:clamp(36px, 3.2vw, 46px); }
+    .hero-shot { margin:0; }
+  }
+  @media (max-width:760px) {
+    .wrap { padding:0 16px; }
+    .nav { gap:0; }
+    .nav a:not(.keep) { display:none; }
+    .nav a.keep { display:inline-flex; align-items:center; min-height:44px; margin:0; padding:0 8px; }
+    .bar { gap:8px; }
+    .brand { font-size:17px; gap:8px; }
+    .bar .btn { min-height:44px; padding:0 14px; }
+    .hero { padding:32px 0 52px; }
+    .hero h1 { font-size:min(38px, calc((100vw - 32px) / 9.6)); }
+    .cta .btn { width:100%; }
+    section.block { padding:52px 0; }
+    section.block h2 { font-size:28px; }
+    .steps, .feat, .start, .others { grid-template-columns:minmax(0,1fr); gap:32px; }
+    .feat .lead { display:block; }
+    .feat .lead h3 { margin-top:18px; font-size:21px; }
+    .frame, .feat .frame, .feat .lead .frame { height:240px; }
+    .watch { margin-top:40px; }
+    footer .links { margin-left:0; }
+  }
+  @media (min-width:1100px), (max-width:760px) {
+    .hero h1 .line { display:block; white-space:nowrap; }
+    .hero .lede { font-size:18px; }
+  }
+  @media (min-width:761px) and (max-width:1099px) {
+    .hero h1 { font-size:clamp(40px, 5vw, 48px); }
+  }
+  @media (max-width:600px) {
+    {#- On a phone the hero's Watch it update live opens the clip in the
+        browser's own player in one tap, as the button under the hidden
+        clip does; wider screens scroll to the clip on the page. -#}
+    .wide-only { display:none; }
+    .phone-only { display:inline-flex; }
+    .watch video { display:none; }
+    .watch-full { display:flex; align-items:center; justify-content:center; min-height:48px; margin-top:0; padding:0 22px; border:2px solid var(--navy); border-radius:6px; font-size:17px; font-weight:700; text-decoration:none; }
+  }
+  @media (max-width:360px) {
+    .bar .brand { font-size:16px; }
+    .bar .brand img { display:none; }
+    .bar .btn { font-size:14px; padding:0 12px; }
+  }
+  @media (prefers-reduced-motion:reduce) {
+    html { scroll-behavior:auto; }
+  }
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header><div class="wrap bar">
+  <a class="brand" href="{{ base_url }}/"><img src="{{ base_url }}/assets/images/logo-tile.jpeg" alt="" width="36" height="36">bracket-creator</a>
+  <nav class="nav" aria-label="Main"><a href="#how">How it works</a><a href="#features">Features</a><a class="keep" href="{{ first }}">Docs</a><a href="{{ config.repo_url }}">GitHub</a></nav>
+  <a class="btn p" href="{{ base_url }}/user-guide/install/download/">Download</a>
+</div></header>
+
+<main id="main">
+<section class="hero" aria-labelledby="headline"><div class="wrap">
+  <div>
+  <h1 id="headline"><span class="line">Your tournament,</span> <span class="line">live on every screen</span></h1>
+  <p class="lede">{{ lede_head }}<a href="{{ base_url }}/user-guide/organisers/engi/">engi</a>{{ lede_tail }}</p>
+  <div class="cta"><a class="btn p" href="{{ first }}">Run your first tournament</a><a class="btn s wide-only" href="#watch">Watch it update live</a><a class="btn s phone-only" href="{{ base_url }}/videos/live-every-screen.mp4">Watch it update live</a></div>
+  <p class="proof">Free and open source</p>
+  </div>
+  <picture class="hero-shot">
+    <source media="(max-width:600px)" type="image/webp" srcset="{{ base_url }}/screenshots/hero-mobile.webp" width="1200" height="2100">
+    <source media="(max-width:600px)" srcset="{{ base_url }}/screenshots/hero-mobile.png" width="1200" height="2100">
+    <source type="image/webp" srcset="{{ base_url }}/screenshots/hero-1440.webp 1440w, {{ base_url }}/screenshots/hero.webp 2880w" sizes="(min-width:1240px) 664px, (min-width:1100px) calc((100vw - 104px) * 7 / 12), calc(100vw - 64px)" width="2880" height="1718">
+    <img src="{{ base_url }}/screenshots/hero.png" width="2880" height="1718" fetchpriority="high" alt="One live bout: scored on the court console, shown on the court display, and followed on a phone">
+  </picture>
+</div></section>
+
+<section class="block" id="how" aria-labelledby="how-title"><div class="wrap">
+  <p class="kicker">How it works</p>
+  <h2 id="how-title">From the draw to the final, in one app</h2>
+  <p class="intro">Load your participant list, draw pools and brackets, then run every court from a laptop or tablet. Results flow to the court displays and to phones as each point is scored.</p>
+  <div class="steps">
+    <figure><div class="frame"><picture><source type="image/webp" srcset="{{ base_url }}/screenshots/card-draw.webp"><img src="{{ base_url }}/screenshots/card-draw.png" width="966" height="776" loading="lazy" alt="Pool A of the draw preview: three numbered players with their standings at zero, and the pool's first matches"></picture></div>
+      <h3><span class="num">1</span>Draw</h3><p>Pools and brackets from your list, with seeds and dojos kept apart.</p></figure>
+    <figure><div class="frame"><picture><source type="image/webp" srcset="{{ base_url }}/screenshots/mobile-score-editor.webp"><img src="{{ base_url }}/screenshots/mobile-score-editor.png" width="561" height="620" loading="lazy" alt="The score editor: Shiro and Aka, each with ippon buttons, foul counters and an overtime toggle"></picture></div>
+      <h3><span class="num">2</span>Score at the court</h3><p>One laptop or tablet per court records points, fouls, encho and decisions.</p></figure>
+    <figure><div class="frame"><picture><source type="image/webp" srcset="{{ base_url }}/screenshots/card-results.webp"><img src="{{ base_url }}/screenshots/card-results.png" width="604" height="485" loading="lazy" alt="Completed results on the public viewer, including an overtime win and a hantei result"></picture></div>
+      <h3><span class="num">3</span>Everyone follows</h3><p>Competitors and spectators see what is on now, what is next, and every result.</p></figure>
+  </div>
+  <figure class="watch" id="watch">
+    <figcaption>One bout, scored at the court and shown on every screen</figcaption>
+    <video controls muted playsinline preload="metadata" width="1440" height="860" poster="{{ base_url }}/screenshots/live-every-screen-poster.webp" aria-label="One bout scored on the court console, updating the court display and a phone as each point is entered">
+      <source src="{{ base_url }}/videos/live-every-screen.mp4" type="video/mp4">
+      <source src="{{ base_url }}/videos/live-every-screen.webm" type="video/webm">
+    </video>
+    {#- On a phone the three screens are too small to read inside the page, so
+        the video is hidden there and this link opens it in the browser's own
+        player, full screen. Wider screens keep it as the way out when the
+        video cannot play in the page. -#}
+    <a class="watch-full" href="{{ base_url }}/videos/live-every-screen.mp4">Watch the video full screen</a>
+  </figure>
+</div></section>
+
+<section class="block alt" id="features" aria-labelledby="features-title"><div class="wrap">
+  <p class="kicker">Features</p>
+  <h2 id="features-title">Made for the day of the tournament</h2>
+  <p class="intro">Built with tournament organisers, for court operators who may be new to the job.</p>
+  <div class="feat">
+    <figure class="lead"><div class="frame"><picture><source type="image/webp" srcset="{{ base_url }}/screenshots/card-bracket.webp"><img src="{{ base_url }}/screenshots/card-bracket.png" width="843" height="534" loading="lazy" alt="A knockout bracket part-way through, with scored bouts ticked and the bout on court now marked"></picture></div>
+      <div><h3>The formats you run</h3><p>Individual and team competitions, kachinuki, and engi pairs for any kata.</p>
+      {#- Swiss is left out on purpose until its open work is closed; it
+          comes back here, and in the README's Formats line, then. -#}
+      <ul class="formats"><li><a href="{{ base_url }}/user-guide/organisers/formats/#knockout">Knockout</a></li><li><a href="{{ base_url }}/user-guide/organisers/formats/#mixed">Pools + Knockout</a></li><li><a href="{{ base_url }}/user-guide/organisers/formats/#league">League</a></li></ul></div></figure>
+    <figure><div class="frame"><picture><source type="image/webp" srcset="{{ base_url }}/screenshots/card-calendar.webp"><img src="{{ base_url }}/screenshots/card-calendar.png" width="640" height="448" loading="lazy" alt="One day of the competition calendar across courts A and B, with the opening ceremony and lunch drawn as bands and a competition starting at 09:30"></picture></div>
+      <h3>A schedule that adds up</h3><p>See how long the day runs before you draw, spread competitions across courts, and plan the breaks.</p></figure>
+    <figure><div class="frame"><picture><source type="image/webp" srcset="{{ base_url }}/screenshots/card-branding.webp"><img src="{{ base_url }}/screenshots/card-branding.png" width="638" height="446" loading="lazy" alt="The public page of a tournament in its own green colours, with its logo in the header"></picture></div>
+      <h3>Your branding</h3><p>Your logo on the public and admin screens, your colours on the public page and the court displays, and sponsor images on the public page.</p></figure>
+    <figure><div class="frame"><picture><source type="image/webp" srcset="{{ base_url }}/screenshots/card-rules.webp"><img src="{{ base_url }}/screenshots/card-rules.png" width="571" height="400" loading="lazy" alt="The Add competition form with Team picked, showing the format, the team size and the team match format"></picture></div>
+      <h3>Rules per competition</h3><p>Each competition keeps its own type, format, pool size, winners per pool, match durations and courts. Teams pick their size and regular or kachinuki matches.</p></figure>
+  </div>
+</div></section>
+
+<section class="block" id="get-started" aria-labelledby="start-title"><div class="wrap start">
+  <div>
+    <p class="kicker">Get started</p>
+    <h2 id="start-title">Up and running in a few minutes</h2>
+    <ol>
+      <li><a href="{{ base_url }}/user-guide/install/download/">Install bracket-creator</a> with Docker, or as a binary on macOS, Windows or Linux.</li>
+      <li>Start it on the laptop at the desk.</li>
+      <li>Open it in a browser, then share the laptop's <a href="{{ first }}#5-enter-a-score">network address</a> with the courts and the hall.</li>
+    </ol>
+    <a class="btn p" href="{{ first }}">Run your first tournament</a>
+  </div>
+  <pre tabindex="0" role="region" aria-label="Start commands for Docker and for a binary install"><span class="c"># Docker: start the tournament app, open to the hall</span>
+<span class="c"># (on Linux, first: sudo chown 65534 tournament-data)</span>
+mkdir -p tournament-data
+docker run -p 8080:8080 \
+  -v "$PWD/tournament-data:/tournament-data" \
+  ghcr.io/gitrgoliveira/bracket-creator-mobile:latest
+
+<span class="c"># or a binary install; --bind 0.0.0.0 lets</span>
+<span class="c"># the courts and phones reach it</span>
+bracket-creator mobile-app --folder ./tournament-data \
+  --bind 0.0.0.0
+
+<span class="c"># then open</span>
+http://localhost:8080        <span class="c"># on this laptop</span>
+http://&lt;laptop address&gt;:8080  <span class="c"># on courts and phones</span></pre>
+</div></section>
+
+<section class="block alt" id="other-ways" aria-labelledby="other-title"><div class="wrap">
+  <p class="kicker">Other ways to work</p>
+  <h2 id="other-title">No laptop at the courts? Still covered</h2>
+  <div class="others">
+    <div><h3><a href="{{ base_url }}/user-guide/commands/create-pools/">Printed Excel brackets</a></h3><p>Generate print-ready pool sheets and brackets from the command line.</p></div>
+    <div><h3><a href="{{ base_url }}/user-guide/start-here/first-tournament/#keep-courts-in-sync">A shared Google Sheet</a></h3><p>Upload the workbook and fill results in from any device.</p></div>
+    <div><h3><a href="{{ base_url }}/user-guide/start-here/first-tournament/#if-you-print-your-brackets-instead">Paper only</a></h3><p>Print the sheets and run the day with pens.</p></div>
+  </div>
+</div></section>
+</main>
+
+<footer><div class="wrap">
+  <span class="brand"><img src="{{ base_url }}/assets/images/logo-tile.jpeg" alt="" width="36" height="36" loading="lazy">bracket-creator</span><span>MPL 2.0</span>
+  <nav class="links" aria-label="Footer"><a href="{{ first }}">Docs</a><a href="{{ config.repo_url }}">GitHub</a><a href="{{ config.repo_url }}/releases">Releases</a></nav>
+  <a class="btn p" href="{{ first }}">Run your first tournament</a>
+</div></footer>
+</body>
+</html>

@@ -307,10 +307,13 @@ jobs:
   #  | |_| | (_) | (__\__ \     | |  __/\__ \ |_
   #  |____/ \___/ \___|___/     |_|\___||___/\__|
   #
-  # Strict docs build + internal link/anchor check. The strict build fails on
-  # broken cross-file links; docs/check_links.py additionally validates the
-  # BUILT site, catching same-page anchors (strict only logs those) and links
-  # emitted by the home/404 page templates (strict does not validate those).
+  # The docs gate, the same command the PR template asks for: `make docs/build`
+  # runs the public-prose check, the strict Zensical build (which fails on any
+  # missing page or anchor, same-page ones included) and then
+  # docs/check_links.py over the BUILT site, which also covers the links the
+  # page templates emit (the landing page, the 404 page). The Makefile installs
+  # the pinned toolchain into .venv-docs itself, so nothing is pip-installed
+  # here. Python 3.11 is the lowest version Zensical allows.
   docs:
     permissions:
       contents: read
@@ -319,19 +322,14 @@ jobs:
       - name: Checkout Source
         uses: actions/checkout@v7
 
-      - name: Check public-prose rules
-        run: python3 docs/check_prose.py docs
-
       - name: Set up Python
         uses: actions/setup-python@v7
         with:
           python-version: "3.11"
+          # pip's download cache, keyed on the pinned docs toolchain; the
+          # Makefile still builds .venv-docs from scratch, only faster.
+          cache: pip
+          cache-dependency-path: docs/requirements.txt
 
-      - name: Install docs toolchain
-        run: pip install -r docs/requirements.txt
-
-      - name: Build docs (strict)
-        run: mkdocs build -f mkdocs.yaml --strict
-
-      - name: Check internal links and anchors
-        run: python3 docs/check_links.py site
+      - name: Build and check docs (prose, strict build, links)
+        run: make docs/build

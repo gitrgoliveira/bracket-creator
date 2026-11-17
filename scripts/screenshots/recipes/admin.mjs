@@ -7,6 +7,7 @@ import { VIEWER_SOURCES } from '../lib/scope.mjs';
 import { settle, withAdminPage } from '../lib/ui.mjs';
 import { PASSWORD } from '../lib/api.mjs';
 import { EDITOR, TAP_DWELL_MS, finishMatch, startMatch } from '../lib/editor.mjs';
+import { cardRecipes } from '../lib/card.mjs';
 
 // Competitions and participant rosters used for backup and restore captures.
 // Names and dojos follow the style in adminsetup.mjs with non-blank dojos.
@@ -524,3 +525,10 @@ export const recipes = [
     },
   },
 ];
+
+// The landing page's cards, each the region of a capture above that its card
+// shows (lib/card.mjs).
+recipes.push(...cardRecipes(recipes, [
+  // A schedule that adds up: the first day's columns.
+  ['mobile-calendar', 'card-calendar', { x: 26, y: 181, width: 640, height: 448 }],
+]));

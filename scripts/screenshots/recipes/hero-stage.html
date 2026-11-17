@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hero stage</title>
+<!--
+  The stage the docs hero is photographed on (recipes/hero.mjs). It holds
+  LIVE frames of the running application, one per surface, scaled down and
+  laid out the way the approved hero mock-up was composed: paper ground, the
+  phone the largest element, a numbered label under each frame, no drawn
+  device frames. The stills and the "Watch it update live" clip are both taken
+  from this one page, so they cannot disagree about the layout.
+
+  The page shows nothing until the recipe calls showStage({...}) with what
+  to frame, so it has no idea which server it is pointed at and reads no URL
+  from its own address:
+
+    layout   wide (court console, court display, phone, with labels) or
+             narrow (court display and phone only, no labels)
+    console  the court console's URL (wide only)
+    display  the court display's URL
+    phone    the public viewer's URL
+
+  Each frame is given the viewport of the device it stands for, so the page
+  inside lays out exactly as it does there, and is then scaled with a CSS
+  transform. No external font or script: a capture must not depend on the
+  network beyond the server under test.
+-->
+<style>
+  :root {
+    --paper: #f4f6f9;
+    --edge: #d6dce4;
+    --navy: #1d3557;
+    --aka: #c8202e;
+    --muted: #5d6b7e;
+    --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  html, body { margin: 0; background: var(--paper); }
+  .stage { display: flex; background: var(--paper); box-sizing: border-box; }
+  .stage--wide { width: 1440px; padding: 30px 42px 34px; gap: 30px; align-items: center; }
+  .stage--narrow { width: 600px; padding: 40px 40px 34px; gap: 34px; flex-direction: column; align-items: center; }
+  .shot { margin: 0; }
+  .screen {
+    position: relative;
+    overflow: hidden;
+    background: #fff;
+    box-shadow: 0 0 0 1px var(--edge), 0 18px 48px rgba(29, 53, 87, .12);
+  }
+  .screen iframe {
+    position: absolute;
+    top: 0;
+    left: 0;
+    border: 0;
+    display: block;
+    transform-origin: 0 0;
+  }
+  .label { margin-top: 18px; font: 14px/1.2 var(--mono); letter-spacing: .06em; color: var(--muted); }
+  .label::before { content: ""; display: block; width: 36px; height: 2px; margin-bottom: 10px; background: var(--navy); }
+  .shot--console .label::before { background: var(--aka); }
+  .stage--narrow .label { display: none; }
+</style>
+</head>
+<body>
+<main class="stage" id="stage"></main>
+<script>
+  // One entry per surface: the device viewport its frame is given, how much of
+  // it is shown (a phone is cut short above its fold, as the mock-up was), and
+  // the width it is drawn at in each layout. Widths are the mock-up's own
+  // proportions (console 700, display 820, phone 640 of a 2400 px canvas; the
+  // narrow canvas 900 px with display 780 and phone 500), scaled to 1440 and
+  // 600 CSS px.
+  const SURFACES = [
+    { key: 'console', w: 1180, h: 820, show: 820, radius: 13,
+      label: '1 · SCORED AT THE COURT', title: 'Court console', wide: 420, narrow: 0 },
+    { key: 'display', w: 1280, h: 720, show: 720, radius: 10,
+      label: '2 · ON THE COURT DISPLAY', title: 'Court display', wide: 492, narrow: 520 },
+    { key: 'phone', w: 390, h: 844, show: 760, radius: 26,
+      label: '3 · FOLLOWED ON EVERY PHONE', title: 'Phone following a competitor', wide: 384, narrow: 333 },
+  ];
+  window.showStage = (frames) => {
+    const layout = frames.layout === 'narrow' ? 'narrow' : 'wide';
+    const stage = document.getElementById('stage');
+    stage.className = `stage stage--${layout}`;
+    for (const s of SURFACES) {
+      const width = s[layout];
+      const src = frames[s.key];
+      if (!width || !src) continue;
+      const url = new URL(src);
+      if (url.protocol !== 'http:') throw new Error(`not an http surface: ${src}`);
+      const scale = width / s.w;
+      const fig = document.createElement('figure');
+      fig.className = `shot shot--${s.key}`;
+      const screen = document.createElement('div');
+      screen.className = 'screen';
+      screen.style.width = `${width}px`;
+      screen.style.height = `${Math.round(s.show * scale)}px`;
+      screen.style.borderRadius = `${s.radius}px`;
+      const frame = document.createElement('iframe');
+      frame.name = s.key;
+      frame.title = s.title;
+      frame.src = url.href;
+      frame.style.width = `${s.w}px`;
+      frame.style.height = `${s.h}px`;
+      frame.style.transform = `scale(${scale})`;
+      screen.appendChild(frame);
+      fig.appendChild(screen);
+      const label = document.createElement('figcaption');
+      label.className = 'label';
+      label.textContent = s.label;
+      fig.appendChild(label);
+      stage.appendChild(fig);
+    }
+  };
+</script>
+</body>
+</html>

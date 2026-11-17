@@ -14,10 +14,11 @@
 // mobile recipe shared one server; run.mjs now gives each FAMILY its own
 // server and data dir, so the families cannot contaminate one another.
 import { settle, withAdminPage } from '../lib/ui.mjs';
-import { EDITOR, sameSideTapPacer, finishMatch, startMatch, startNextFromList } from '../lib/editor.mjs';
+import { EDITOR, tapIppon, finishMatch, startMatch, startNextFromList } from '../lib/editor.mjs';
 import { assertIndividualBoutPoints, assertHanteiRecorded } from '../lib/fixture.mjs';
 import { SCORE_EDITOR_SOURCES, VIEWER_SOURCES } from '../lib/scope.mjs';
 import { families as adminFamilies } from './admin.mjs';
+import { cardRecipes } from '../lib/card.mjs';
 
 // The competition ids two seeds below create, at module level so the recipes
 // that capture them can say so in `route` (run.mjs concatenates `base +
@@ -34,16 +35,6 @@ async function openScoreEditorRow(page, row) {
   await row.waitFor({ state: 'visible', timeout: 15000 });
   await row.locator('button', { hasText: /^(Score|Correct)$/ }).first().click();
   await page.locator(EDITOR).waitFor({ state: 'visible', timeout: 15000 });
-}
-
-// Two taps on the same side closer than the editor's bounce window count as
-// one (lib/editor.mjs), so each tap is paced against that side's last one.
-const paceIpponTap = sameSideTapPacer();
-
-async function tapIppon(page, side, waza = 'M') {
-  await paceIpponTap(page, side);
-  const cls = side === 'shiro' ? '.sb-side--shiro' : '.sb-side--aka';
-  await page.locator(cls).locator('button', { hasText: new RegExp(`^${waza}$`) }).first().click();
 }
 
 async function armEncho(page) {
@@ -310,3 +301,10 @@ export const recipes = [
     waitFor: '[data-testid="tv-display-root"]',
   },
 ];
+
+// The landing page's cards, each the region of a capture above that its card
+// shows (lib/card.mjs).
+recipes.push(...cardRecipes(recipes, [
+  // The Everyone follows step: the recent results.
+  ['viewer-result-encho', 'card-results', { x: 151, y: 724, width: 604, height: 485 }],
+]));

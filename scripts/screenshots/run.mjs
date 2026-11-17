@@ -28,7 +28,7 @@ import { start, REPO } from './lib/server.mjs';
 import { client } from './lib/api.mjs';
 import { pngSize, pixelDiff } from './lib/png.mjs';
 import { changedPaths, scope } from './lib/scope.mjs';
-import { authAdmin } from './lib/ui.mjs';
+import { CONTEXT_DEFAULTS, authAdmin, blurEveryFrame } from './lib/ui.mjs';
 import { recipes, families, recipeFiles } from './recipes/index.mjs';
 
 const OUT = path.join(REPO, 'scripts', 'screenshots', 'out');
@@ -184,14 +184,22 @@ async function captureStill(page, recipe, file) {
   await page.waitForFunction(
     `(${eager})().every((img) => img.complete && img.naturalWidth > 0)`, null, { timeout: 15000 });
   await page.evaluate(`Promise.all((${eager})().map((img) => img.decode()))`);
-  // Drop the focus ring the driving left behind. Every capture here is reached
-  // by clicking, so the last control tapped keeps focus and renders a ring no
-  // operator would see at that moment - one shipped a dark ring around a
-  // reorder arrow. No recipe has focus as its subject; the states that matter
-  // (a ticked box, a typed value) survive blurring.
-  await page.evaluate(() => document.activeElement && document.activeElement.blur());
+  // Drop the focus ring the driving left behind, in every frame. Every
+  // capture here is reached by clicking, so the last control tapped keeps
+  // focus and renders a ring no operator would see at that moment - one
+  // shipped a dark ring around a reorder arrow, and the hero stage's phone
+  // frame kept its watchlist box's. No recipe has focus as its subject; the
+  // states that matter (a ticked box, a typed value) survive blurring.
+  await blurEveryFrame(page);
   if (recipe.capture && recipe.capture.selector) {
     await page.locator(recipe.capture.selector).first().screenshot({ path: file, ...STABLE });
+    return;
+  }
+  // A region of the page in CSS pixels, measured from the document's top-left
+  // (`fullPage` lets it reach below the fold): the landing page's cards, each
+  // the part of a page its card shows.
+  if (recipe.capture && recipe.capture.clip) {
+    await page.screenshot({ path: file, clip: recipe.capture.clip, fullPage: true, ...STABLE });
     return;
   }
   await page.screenshot({ path: file, fullPage: recipe.capture === 'fullPage', ...STABLE });
@@ -214,6 +222,7 @@ async function runRecipe(browser, recipe, ctx) {
   const { base, api, dataDir, fixture } = ctx;
   const isVideo = recipe.capture === 'video';
   const context = await browser.newContext({
+    ...CONTEXT_DEFAULTS,
     viewport: recipe.viewport,
     deviceScaleFactor: recipe.dpr || 1,
     // A phone with a touch screen (`touch: true`): the page matches
@@ -256,8 +265,22 @@ async function runRecipe(browser, recipe, ctx) {
   // page.video() has to be taken while the page is alive: closing the context
   // is what finalises the file, and by then the page handle is gone.
   const video = isVideo ? page.video() : null;
+  // A still a drive takes on its way (`still(name, selector)`), for a picture
+  // that only exists partway through a procedure, such as a clip's poster
+  // taken as the clip ends. Each must be named in the recipe's `stills`, so a
+  // failed recipe can remove them from out/ too. Compared like any still.
+  const stills = [];
+  const still = async (name, selector) => {
+    if (!(recipe.stills || []).includes(name)) {
+      throw new Error(`still "${name}" is not listed in ${recipe.name}'s stills`);
+    }
+    const shot = { name, capture: { selector } };
+    const file = path.join(OUT, `${name}.png`);
+    await captureStill(page, shot, file);
+    stills.push([name, { ...reportStill(shot, file), faults: [] }]);
+  };
   try {
-    const args = { page, base, api, dataDir, fixture };
+    const args = { page, base, api, dataDir, fixture, still };
     if (recipe.route) {
       await page.goto(base + recipe.route, { waitUntil: 'domcontentloaded' });
     }
@@ -278,7 +301,7 @@ async function runRecipe(browser, recipe, ctx) {
     if (pageErrors.length) {
       throw new Error(`the page threw while being captured: ${pageErrors[0]}`);
     }
-    if (!isVideo) return { ...reportStill(recipe, file), faults: pageFaults };
+    if (!isVideo) return { ...reportStill(recipe, file), faults: pageFaults, stills };
   } finally {
     await context.close();
   }
@@ -288,7 +311,7 @@ async function runRecipe(browser, recipe, ctx) {
   // boundaries move with how fast the machine drove the UI - so a clip of an
   // unchanged surface does not reproduce its committed bytes, and a CHANGED
   // verdict on every run would train the operator to ignore the column.
-  return { changed: null, note: `video -> ${path.relative(REPO, staged)}`, faults: pageFaults };
+  return { changed: null, note: `video -> ${path.relative(REPO, staged)}`, faults: pageFaults, stills };
 }
 
 async function main() {
@@ -320,8 +343,9 @@ async function main() {
   // tells the operator to copy what is in out/ across to docs/ - so a stale
   // image left behind is one they would copy believing it fresh.
   const fail = (recipe, why) => {
-    for (const ext of ['png', 'webm']) {
-      const stale = path.join(OUT, `${recipe.name}.${ext}`);
+    const outputs = [`${recipe.name}.png`, `${recipe.name}.webm`, ...(recipe.stills || []).map((n) => `${n}.png`)];
+    for (const name of outputs) {
+      const stale = path.join(OUT, name);
       if (fs.existsSync(stale)) fs.rmSync(stale);
     }
     results.push([recipe.name, { failed: true, note: `FAILED ${why}` }]);
@@ -375,9 +399,13 @@ async function main() {
             fixture,
           };
           try {
-            const verdict = await runRecipe(browser, recipe, ctx);
+            const { stills, ...verdict } = await runRecipe(browser, recipe, ctx);
             results.push([recipe.name, verdict]);
             console.log(`  ${recipe.name}: ${verdict.note}`);
+            for (const [name, v] of stills) {
+              results.push([name, v]);
+              console.log(`  ${name}: ${v.note}`);
+            }
           } catch (err) {
             fail(recipe, err.message.split('\n')[0]);
           }

@@ -13,3 +13,6 @@ bin/
 *.xlsx
 *.out
 *.log
+.cache
+site
+.venv-docs

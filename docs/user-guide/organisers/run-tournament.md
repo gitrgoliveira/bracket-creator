@@ -239,12 +239,12 @@ When the preview looks correct, click **Start competition** to move to match pla
 
 A draw-ready competition is already listed on the shiai-jo operator views, since its matches exist. Scoring one of those matches starts the competition on the spot, exactly as **Start competition** would, so a court that begins play never has to wait for the desk.
 
-<!-- Raw HTML is copied verbatim by MkDocs (only markdown image paths get
-     rewritten), so this src must be relative to the BUILT page URL
-     (/user-guide/organisers/run-tournament/): three levels up, not two. -->
+<!-- The build rewrites a raw-HTML src as relative to THIS Markdown file
+     (docs/user-guide/organisers/run-tournament.md), the same as a Markdown
+     image path: two levels up to docs/, not three. -->
 <figure class="bc-fig">
   <video controls loop muted playsinline preload="metadata" width="900" height="580" aria-label="Generating the draw: the pools preview appears after clicking Generate draw.">
-    <source src="../../../screenshots/draw-generation.webm" type="video/webm">
+    <source src="../../screenshots/draw-generation.webm" type="video/webm">
   </video>
   <figcaption>Generating the draw. Press play to watch.</figcaption>
 </figure>
@@ -278,7 +278,7 @@ For how to enter scores and navigate between matches, refer to [Score a match](.
 
 For kiken, fusenpai, daihyosen, and other special decisions, refer to [Recording decisions](../court-operators/recording-decisions.md).
 
-For naginata and Engi-kyogi divisions, refer to [Naginata](naginata.md).
+For naginata divisions, refer to [Naginata](naginata.md); for a pair kata competition in any art, refer to [Engi](engi.md).
 
 ## Results and awards
 
@@ -294,7 +294,7 @@ The **Award two joint 3rd places** setting, on the competition's Settings tab, c
 
 Operators see an all-competition winners view from the dashboard. You can also record optional **fighting-spirit** (敢闘賞) awards as free text; these appear on the viewer for all spectators. Saving awards is an organiser action, so it needs the admin password in self-run mode too; refer to [Operating modes](operating-modes.md#self-run-mode). If the awards were saved on another device after you opened them, your save is refused: the list says "Not saved: the awards changed somewhere else after you opened this list (another screen or device). Reload to see the current awards, then make your change again.", keeps what you typed, and **Reload** shows the current awards. If the list is closed by the time a held save is refused, an alert says "The fighting-spirit awards were not saved: they were changed on another device. Open them and save again."
 
-**League competitions** derive the podium from final standings, and of the podium places only 3rd can be shared: a tie for 1st or 2nd place is always settled by a tie-breaker with a winner, and a tie for 3rd place follows **Award two joint 3rd places**. In an individual league the app schedules the ippon-shobu tie-breaker itself; in a team league you run it from the League tab. Refer to [Ties in a league](team-tournaments.md#ties-in-a-league) for the full rule and for lots, and to [Ties between pairs](naginata.md#ties-between-pairs) for Engi.
+**League competitions** derive the podium from final standings, and of the podium places only 3rd can be shared: a tie for 1st or 2nd place is always settled by a tie-breaker with a winner, and a tie for 3rd place follows **Award two joint 3rd places**. In an individual league the app schedules the ippon-shobu tie-breaker itself; in a team league you run it from the League tab. Refer to [Ties in a league](team-tournaments.md#ties-in-a-league) for the full rule and for lots, and to [Ties between pairs](engi.md#ties-between-pairs) for Engi.
 
 Set the **Award two joint 3rd places** option during setup, before you generate the draw. Once the draw exists, the option is locked; discard the draw to change it.
 
@@ -404,7 +404,7 @@ When two competitions on the same shiai-jo overlap, both are marked, and an over
 The calendar can also show the following:
 
 - **Not on the calendar**, a tray of competitions that cannot be placed yet, for example because one needs a start time or a date, or its date is outside the tournament. Each one names the reason, so open the competition's **Settings** to fix it. A line above the calendar tells you how many there are and has a **Show them** button that scrolls to the tray.
-- **No real length.** A competition with no participants yet and no expected number is drawn as a dotted block with a **?** and the words *No participants yet: length unknown*. The tray counts these too. Set **Expected participants** in its **Settings** to give it a length.
+- **A competition of unknown length.** A competition with no participants yet and no expected number is drawn as a dotted block with a **?** and the words *No participants yet: length unknown*. The tray counts these too. Set **Expected participants** in its **Settings** to give it a length.
 - **Settings that could not be read.** A competition whose settings file cannot be read is left off the calendar, and the notice gives its id so you can check that competition's `config.md` file rather than think it was never created.
 - **A pause the schedule skips**, in a line such as *Matches will not stop for Lunch: it has no start time.* The other reasons are that it has no length, that its start time could not be read, or that its day is outside the tournament. **Edit tournament** opens the tournament setup page, where the pause is listed under **Schedule blocks**, so you can correct it.
 

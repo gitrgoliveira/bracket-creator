@@ -49,7 +49,7 @@ func individualStandingPoints(s state.PlayerStanding) int {
 	return s.Wins*100_000_000 - s.Losses*1_000_000 + s.Draws*10_000 + s.IpponsGiven*100 - s.IpponsTaken
 }
 
-// engiStandingPoints packs the engi chain (naginata.md): wins, then the
+// engiStandingPoints packs the engi chain (engi.md): wins, then the
 // own-side flags accrued over every bout. An engi bout cannot end level
 // (engiValidTotal), so there is no loss or draw criterion to add: two pairs are
 // level exactly when their wins and their flags are equal, and a level place

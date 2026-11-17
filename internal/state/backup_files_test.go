@@ -204,7 +204,9 @@ func TestBackupFiles_ListIgnoresNonPatternAndNonRegularEntries(t *testing.T) {
 	require.NoError(t, os.MkdirAll(backupsDir, 0o700))
 
 	require.NoError(t, os.WriteFile(filepath.Join(backupsDir, "notes.txt"), []byte("note"), 0o600))
-	require.NoError(t, os.WriteFile(filepath.Join(backupsDir, "20261103T120000Z-scheduled.ZIP"), []byte("upper"), 0o600))
+	// Its own stamp: on a case-insensitive filesystem (macOS) a ".ZIP" with the
+	// valid file's stamp would be the same file as the valid ".zip" below.
+	require.NoError(t, os.WriteFile(filepath.Join(backupsDir, "20261103T120001Z-scheduled.ZIP"), []byte("upper"), 0o600))
 	require.NoError(t, os.WriteFile(filepath.Join(backupsDir, "20261103T120000Z-scheduled.zip.tmp-1-2"), []byte("tmp"), 0o600))
 	require.NoError(t, os.MkdirAll(filepath.Join(backupsDir, "20261103T120000Z-before-restore-tournament.zip"), 0o700))
 	require.NoError(t, os.WriteFile(filepath.Join(backupsDir, "20261399T000000Z-scheduled.zip"), []byte("bad-date"), 0o600))

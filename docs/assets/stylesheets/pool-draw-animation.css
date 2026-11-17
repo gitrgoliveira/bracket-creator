@@ -124,7 +124,7 @@
 	gap: 0.35rem;
 	margin: 0.8rem 0 0.6rem;
 	padding-top: 0.7rem;
-	border-top: 1px solid var(--bc-line-soft, var(--bc-line));
+	border-top: 1px solid var(--bc-line);
 }
 
 .bcda__btn {
@@ -264,7 +264,7 @@
 .bcda__why {
 	margin-top: 0.8rem;
 	padding-top: 0.7rem;
-	border-top: 1px solid var(--bc-line-soft, var(--bc-line));
+	border-top: 1px solid var(--bc-line);
 	min-height: 6.5rem;
 }
 

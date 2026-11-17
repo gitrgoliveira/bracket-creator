@@ -32,4 +32,4 @@ The app keeps its daily backup copies in the `backups/` folder of the data direc
 
 ## What still needs printing
 
-A fully digital setup still leaves one job on paper: organisers print competitor tags and numbers before the event. Everything else (pools, scoring, scoreboards, and result pages) runs on screen. Refer to the [three ways to run a tournament](../../index.md#three-ways-to-run-a-tournament) for how this mode compares to the offline and partially connected setups.
+A fully digital setup still leaves one job on paper: organisers print competitor tags and numbers before the event. Everything else (pools, scoring, scoreboards, and result pages) runs on screen. Refer to [Digitisation level](../start-here/choosing-your-setup.md#digitisation-level) for how this mode compares to the offline and partially connected setups.

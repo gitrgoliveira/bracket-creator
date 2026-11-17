@@ -35,7 +35,7 @@ endif
 SHA256_CHECK := $(if $(shell command -v sha256sum 2>/dev/null),sha256sum,shasum -a 256) -c --quiet -
 
 # Define phony targets
-.PHONY: default help clean local/deps hooks/install go/fmt go/generate go/test go/build go/lint go/sec go/sec-tests go/vuln go/security js/deps js/lint js/sec js/outdated js/security js/check-imports js/validate examples docker/build docker/run pre-commit docs/deps docs/serve docs/open docs/build docs/linkcheck docs/prose docs/clean docs/screenshots docs/videos docs/media e2e e2e/deps run run-mobile esbuild-jsx goreleaser/test release version
+.PHONY: default help clean local/deps hooks/install go/fmt go/generate go/test go/build go/lint go/sec go/sec-tests go/vuln go/security js/deps js/lint js/sec js/outdated js/security js/check-imports js/validate examples docker/build docker/run pre-commit docs/deps docs/serve docs/open docs/build docs/prose docs/clean docs/screenshots docs/videos docs/media docs/media-copies e2e e2e/deps run run-mobile esbuild-jsx goreleaser/test release version
 
 default: help ## Show help information (default)
 
@@ -74,7 +74,6 @@ local/deps: hooks/install js/deps ## Install project dependencies
 	GOTOOLCHAIN=go$(GO_VERSION) go install github.com/golangci/golangci-lint/$${tag%%.*}/cmd/golangci-lint@$$tag
 	GOTOOLCHAIN=go$(GO_VERSION) go install github.com/securego/gosec/v2/cmd/gosec@latest
 	GOTOOLCHAIN=go$(GO_VERSION) go install golang.org/x/vuln/cmd/govulncheck@latest
-	python3 -m pip install -r docs/requirements.txt
 
 hooks/install: ## Wire scripts/hooks/ as the git hooks dir for this clone
 	@chmod +x scripts/hooks/*
@@ -310,11 +309,12 @@ docker/run: docker/build ## Run the application in Docker
 pre-commit: docs/prose go/test go/security ## Run pre-commit checks
 	@echo "Code is ready to commit!"
 
-# Documentation (MkDocs Material): pinned toolchain.
+# Documentation (Zensical, classic look): pinned toolchain.
 # `make docs/*` builds and serves through a local venv created from the pinned
 # docs/requirements.txt, so local output matches the deployed GitHub Pages site
-# regardless of any system-wide mkdocs. A drifting system mkdocs is what makes
-# Material features (grid-card layout, code-copy, ...) silently degrade locally.
+# regardless of any system-wide install. Zensical reads mkdocs.yaml. A drifting
+# system-wide docs tool is what once made theme features (grid-card layout,
+# code-copy, ...) silently degrade locally.
 PYTHON     ?= python3
 DOCS_PORT  ?= 8000
 DOCS_VENV  := .venv-docs
@@ -322,40 +322,45 @@ DOCS_BIN   := $(DOCS_VENV)/bin
 DOCS_REQS  := docs/requirements.txt
 DOCS_STAMP := $(DOCS_VENV)/.installed
 
-# Create (or refresh) the venv whenever the pinned requirements change.
-# NOTE: pip install only adds/upgrades; it does not remove packages dropped
-# from requirements.txt. After removing one, run `make docs/clean` then a docs
-# target to rebuild a venv that matches the pinned set exactly.
+# Recreate the venv from scratch whenever the pinned requirements change.
+# pip install only adds or upgrades, so refreshing a venv in place would keep
+# a package dropped from requirements.txt; starting empty means the venv holds
+# exactly the pinned set.
 $(DOCS_STAMP): $(DOCS_REQS)
+	@$(PYTHON) -c 'import sys; sys.exit(sys.version_info < (3, 11))' || { echo "Zensical needs Python 3.11 or newer; $(PYTHON) is older. Set PYTHON=/path/to/python3.11 (or newer)." >&2; exit 1; }
 	@echo "Installing pinned docs toolchain into $(DOCS_VENV)..."
-	@test -x $(DOCS_BIN)/python || $(PYTHON) -m venv $(DOCS_VENV)
+	@rm -rf $(DOCS_VENV)
+	@$(PYTHON) -m venv $(DOCS_VENV)
 	@$(DOCS_BIN)/python -m pip install --quiet -r $(DOCS_REQS)
 	@touch $@
 
-docs/deps: $(DOCS_STAMP) ## Install the pinned docs toolchain into .venv-docs
+docs/deps: $(DOCS_STAMP) ## Install the pinned docs toolchain (Zensical) into .venv-docs
 
-docs/serve: $(DOCS_STAMP) ## Locally serve the documentation (pinned toolchain)
-	@echo "Serving docs at http://localhost:$(DOCS_PORT) (Ctrl-C to stop)..."
-	$(DOCS_BIN)/mkdocs serve -f mkdocs.yaml --dev-addr localhost:$(DOCS_PORT)
+docs/serve: $(DOCS_STAMP) ## Locally serve the documentation with Zensical (pinned toolchain)
+	@echo "Serving docs at http://localhost:$(DOCS_PORT)/bracket-creator/ (Ctrl-C to stop)..."
+	$(DOCS_BIN)/zensical serve -f mkdocs.yaml --dev-addr localhost:$(DOCS_PORT)
 
-docs/open: $(DOCS_STAMP) ## Serve the documentation and open it in a browser
-	@echo "Serving docs and opening http://localhost:$(DOCS_PORT)..."
-	$(DOCS_BIN)/mkdocs serve -f mkdocs.yaml --dev-addr localhost:$(DOCS_PORT) --open
+docs/open: $(DOCS_STAMP) ## Serve the documentation with Zensical and open it in a browser
+	@echo "Serving docs and opening http://localhost:$(DOCS_PORT)/bracket-creator/..."
+	$(DOCS_BIN)/zensical serve -f mkdocs.yaml --dev-addr localhost:$(DOCS_PORT) --open
 
-docs/build: $(DOCS_STAMP) docs/prose ## Build static documentation site (output: site/)
+# The gate: prose rules on the sources, a strict Zensical build (fails on a
+# missing page or anchor in the Markdown), then the link checker over the
+# built site, which also sees template links and the rendered anchors.
+docs/build: $(DOCS_STAMP) docs/prose ## Build the docs with Zensical (strict) and check the built site's links (output: site/)
 	@echo "Building documentation..."
-	$(DOCS_BIN)/mkdocs build -f mkdocs.yaml --strict
-
-docs/linkcheck: docs/build ## Build docs, then check the built site for broken links/anchors
+	$(DOCS_BIN)/zensical build -f mkdocs.yaml --strict
 	@echo "Checking internal documentation links..."
 	$(DOCS_BIN)/python docs/check_links.py site
 
-docs/prose: ## Check the docs sources against the public-prose rules (stdlib-only, no venv needed)
-	$(PYTHON) docs/check_prose.py docs
+docs/prose: ## Check the docs sources and theme templates against the public-prose rules (stdlib-only, no venv needed)
+	$(PYTHON) docs/test_check_prose.py
+	$(PYTHON) docs/test_check_links.py
+	$(PYTHON) docs/check_prose.py docs overrides
 
-docs/clean: ## Remove the docs venv and the built site
-	@echo "Removing $(DOCS_VENV) and site/..."
-	rm -rf $(DOCS_VENV) site
+docs/clean: ## Remove the docs venv, the built site and Zensical's build cache
+	@echo "Removing $(DOCS_VENV), site/ and .cache/..."
+	rm -rf $(DOCS_VENV) site .cache
 
 # Docs capture harness. Playwright lives in its own package on purpose: putting
 # it in web-mobile/package.json would download a browser for every worktree that
@@ -411,6 +416,33 @@ docs/media: go/build $(SHOTS_BROWSER_STAMP) ## Regenerate every captured screens
 	@# One run with no KIND, rather than depending on the two targets above:
 	@# those would start node and a browser twice over two disjoint halves.
 	@node $(SHOTS_DIR)/run.mjs $(if $(KIND),'KIND=$(KIND)',) $(SHOTS_ARGS)
+
+# The landing page serves lighter copies of its media beside the captured
+# originals: a WebP of each picture and an MP4 (H.264) of the clip, for a
+# browser without WebM. The list is read from overrides/landing.html itself, so
+# naming a .webp or .mp4 there is what adds a copy here, and each copy is made
+# from the committed PNG or WebM of the same name. Run it after copying new
+# captures into docs/ (the captures land in scripts/screenshots/out/ first).
+# Needs cwebp and ffmpeg (brew install webp ffmpeg); docs/build does not, since
+# the copies are committed.
+LANDING_WEBP := $(sort $(addprefix docs/,$(shell grep -o 'screenshots/[a-z0-9-]*\.webp' overrides/landing.html)))
+LANDING_MP4  := $(sort $(addprefix docs/,$(shell grep -o 'videos/[a-z0-9-]*\.mp4' overrides/landing.html)))
+
+docs/media-copies: $(LANDING_WEBP) $(LANDING_MP4) ## Make the landing page's WebP and MP4 copies from the committed PNG and WebM captures
+
+# A `<name>-1440.webp` is a 1440-wide copy of the DPR 2 capture `<name>.png`,
+# the smaller candidate in a srcset (the desktop hero shows at about 660 CSS
+# pixels). Listed before the plain rule so make picks it for that name.
+docs/screenshots/%-1440.webp: docs/screenshots/%.png
+	cwebp -quiet -q 82 -m 6 -resize 1440 0 $< -o $@
+
+docs/screenshots/%.webp: docs/screenshots/%.png
+	cwebp -quiet -q 82 -m 6 $< -o $@
+
+# H.264 in yuv420p plays in every browser that plays MP4; +faststart puts the
+# index first so playback starts before the whole file has arrived. No audio.
+docs/videos/%.mp4: docs/videos/%.webm
+	ffmpeg -loglevel error -y -i $< -an -c:v libx264 -preset slow -crf 24 -pix_fmt yuv420p -movflags +faststart $@
 
 # Local e2e journeys (scripts/e2e, see its README.md). Like the capture harness
 # above, Playwright lives in its own package.json rather than web-mobile's. Both

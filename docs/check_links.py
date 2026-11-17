@@ -1,19 +1,23 @@
 #!/usr/bin/env python3
-"""Check the built MkDocs site for broken internal links, anchors, and assets.
+"""Check the built docs site for broken internal links, anchors, and assets.
 
-This runs against the generated ``site/`` directory (after ``mkdocs build``), so
-it validates exactly what ships. That catches two whole classes of breakage that
-``mkdocs build --strict`` does not:
+This runs against the generated ``site/`` directory (after ``zensical build``),
+so it validates exactly what ships. ``zensical build --strict`` already fails
+on a missing page, a missing cross-page anchor and a missing same-page anchor
+in the Markdown pages; this checker still covers what strict mode never sees:
 
-* links produced by page templates (``overrides/home.html``,
-  ``overrides/404.html``) that strict-mode never validates, and
-* same-page ``#anchor`` links, which strict mode only logs as INFO.
+* links produced by page templates (``overrides/404.html``, and any page that
+  sets its own ``template:``), which strict mode never validates, and
+* the built tree as a whole: an anchor that exists in the Markdown source but
+  not in the page as rendered (a template that skips the page body drops every
+  heading id in it), and an asset path that resolves nowhere on disk.
 
 Every internal ``<a href>``, ``<img src>``, ``<script src>``, ``<link href>``,
-and media ``src`` (``<video>``, ``<audio>``, ``<source>``: raw-HTML embeds that
-MkDocs copies verbatim without path rewriting, so a wrong relative depth only
-shows up in the built tree) is resolved against the built tree and, when it carries a ``#fragment``, checked
-against the ``id`` attributes on the target page. External links
+``<video poster>`` and media ``src`` (``<video>``, ``<audio>``, ``<source>``:
+raw-HTML embeds whose path the build rewrites as relative to the Markdown file,
+so a wrong relative depth only shows up in the built tree) is resolved against
+the built tree and, when it carries a ``#fragment``, checked against the ``id``
+attributes on the target page. External links
 (http, https, mailto, tel, ...) are deliberately not checked: network probes are
 flaky and do not belong in a build gate.
 
@@ -88,6 +92,8 @@ class Page(HTMLParser):
             self.links.append(a["href"])
         elif tag in ("img", "script", "video", "audio", "source") and a.get("src") is not None:
             self.links.append(a["src"])
+        if tag == "video" and a.get("poster"):
+            self.links.append(a["poster"])
         if tag in ("img", "source") and a.get("srcset"):
             # srcset is a comma-separated list of "url [descriptor]" pairs.
             for entry in a["srcset"].split(","):
@@ -131,8 +137,9 @@ def resolve(href: str, page_path: str, site: str, base_path: str):
     return target, frag
 
 
-def main() -> int:
-    site = os.path.abspath(sys.argv[1] if len(sys.argv) > 1 else "site")
+def main(argv: list[str] | None = None) -> int:
+    args = sys.argv[1:] if argv is None else argv
+    site = os.path.abspath(args[0] if args else "site")
     if not os.path.isdir(site):
         print(
             f"error: site dir not found: {site}\n"

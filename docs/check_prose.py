@@ -1,8 +1,14 @@
 #!/usr/bin/env python3
 """Check the public docs sources for house-style prose violations.
 
-This runs against the Markdown SOURCES under ``docs/`` (not the built site),
-so it catches wording problems before ``mkdocs build`` ever renders them.
+This runs against the SOURCES (not the built site): the Markdown pages under
+``docs/`` and the theme's HTML templates under ``overrides/``, so it catches
+wording problems before ``zensical build`` ever renders them. An HTML file is
+read for the text between its tags and the attributes a person reads (``alt``,
+``title``, ``aria-label``, and ``content`` on a ``<meta>``); its ``<style>``,
+``<script>``, ``<pre>`` and code elements, HTML comments, and Jinja
+(``{# #}``, ``{{ }}``, ``{% %}``) are skipped. Block tags end a paragraph
+there the way a blank line does in Markdown (refer to ``check_html``).
 Seven rules are enforced, each of which the public docs must never contain:
 
 * ``em-dash``: the character U+2014 (an em dash). House style writes short
@@ -54,17 +60,22 @@ preserved so a hit's line number can still be computed), never against a
 single line alone.
 
 Usage:
-    python3 docs/check_prose.py [docs_dir]   # default: docs
+    python3 docs/check_prose.py [path ...]   # default: docs
+
+Each path is a ``.md`` or ``.html`` file, or a directory walked for both.
+Tests: ``python3 docs/test_check_prose.py``.
 
 Exit code: 0 when no file has a violation, 1 when any do, 2 on a usage
-error (missing docs dir).
+error (a missing path, or a file that is neither .md nor .html).
 """
 
 from __future__ import annotations
 
+import html
 import os
 import re
 import sys
+from html.parser import HTMLParser
 
 SKIP_FILES = {
     os.path.join("dev-guide", "code_of_conduct.md"),
@@ -162,14 +173,13 @@ COMPLETE_COMMENT_RE = re.compile(r"<!--.*?-->")
 
 def check_line(line: str) -> list[str]:
     """Return the deduplicated list of rule names violated by one prose line."""
-    text = HTML_TAG_RE.sub(" ", line)
-    rules: list[str] = []
+    return line_rules(HTML_TAG_RE.sub(" ", line))
 
-    for name, pattern in RULES:
-        if pattern.search(text):
-            rules.append(name)
 
-    return rules
+def line_rules(text: str) -> list[str]:
+    """Return the deduplicated list of line rules violated by text that is
+    already plain prose (no markup left to strip)."""
+    return [name for name, pattern in RULES if pattern.search(text)]
 
 
 # Markdown emphasis delimiters. Stripped (not replaced with a space) before
@@ -194,8 +204,7 @@ def _paragraph_prose(line: str) -> str:
     joined with "\\n" and silently eat it, throwing off every lineno that
     check_paragraphs recovers by counting newlines.
     """
-    text = HTML_TAG_RE.sub(" ", line)
-    return EMPHASIS_RE.sub("", text)
+    return EMPHASIS_RE.sub("", HTML_TAG_RE.sub(" ", line))
 
 
 def _fence_marker(stripped: str) -> tuple[str | None, int]:
@@ -323,51 +332,269 @@ def check_paragraphs(prose_lines: list[tuple[int, str]]):
     """
     normalized = [(lineno, _paragraph_prose(line)) for lineno, line in prose_lines]
     for start, paragraph in iter_paragraphs(normalized):
-        for name, pattern in PARAGRAPH_RULES:
-            for m in pattern.finditer(paragraph):
-                lineno = start + paragraph.count("\n", 0, m.start())
-                excerpt = re.sub(r"\s+", " ", m.group(0)).strip()
-                yield lineno, name, excerpt
+        yield from _paragraph_hits(start, paragraph)
 
 
-def main() -> int:
-    root = sys.argv[1] if len(sys.argv) > 1 else "docs"
-    if not os.path.isdir(root):
+def _paragraph_hits(start: int, paragraph: str):
+    """Yield (lineno, rule, excerpt) for every PARAGRAPH_RULES hit in one
+    paragraph whose first line is ``start`` and whose lines are joined with
+    "\\n", one per source line."""
+    for name, pattern in PARAGRAPH_RULES:
+        for m in pattern.finditer(paragraph):
+            lineno = start + paragraph.count("\n", 0, m.start())
+            excerpt = re.sub(r"\s+", " ", m.group(0)).strip()
+            yield lineno, name, excerpt
+
+
+def _block_hits(numbered_lines, rules) -> list[tuple[int, str, str]]:
+    """Return (lineno, rule, line) for every line rule ``rules(line)`` names on
+    each (lineno, line) given: check_line for Markdown, which still carries
+    its inline HTML, line_rules for HTML text, which carries none."""
+    return [(lineno, rule, line.strip()) for lineno, line in numbered_lines for rule in rules(line)]
+
+
+def check_markdown(text: str) -> list[tuple[int, str, str]]:
+    """Return every (lineno, rule, excerpt) violation in a Markdown source."""
+    prose_lines = list(iter_prose_lines(text))
+    hits = _block_hits(prose_lines, check_line)
+    hits.extend(check_paragraphs(prose_lines))
+    return hits
+
+
+# --- HTML -------------------------------------------------------------------
+#
+# A theme override (overrides/*.html) is a Jinja template whose text a reader
+# sees as directly as a Markdown page's, so the same rules apply to it. What a
+# person reads there is the text between tags plus a few attributes (an
+# image's alt, a tooltip, a screen reader's label, a <meta> description that
+# shows up in search results and link previews). Everything else is not
+# prose: styles, scripts, preformatted and code text, comments, and Jinja.
+
+# Jinja comments, expressions and statements, masked out BEFORE the HTML is
+# parsed, so a "{% if a > b %}" can never close a tag and an expression's
+# string literal is never read as text. Each is replaced by spaces with its
+# newlines kept, so every later line number still matches the source. The one
+# exception is a plain `{{ name }}` that prints a string `set` earlier (below),
+# which is replaced by that text, then the newlines the expression spanned.
+JINJA_RE = re.compile(r"\{#.*?#\}|\{\{.*?\}\}|\{%.*?%\}", re.DOTALL)
+
+# Elements whose whole content is skipped. `code` (and `kbd`, `samp`) mirror
+# the Markdown side, which skips inline code spans, so they are phrasing
+# elements too (below): a skipped span leaves the sentence around it whole.
+HTML_CODE_TAGS = {"code", "kbd", "samp"}
+HTML_SKIP_TAGS = {"style", "script", "pre", "template"} | HTML_CODE_TAGS
+
+# Phrasing elements that sit inside a run of prose without ending it, so
+# "a <strong>default</strong> <em>win</em>" still reads as one phrase, and so
+# does one with an <img> or a <button> in the middle of it. Any other tag ends
+# the current block, the way a blank line ends a Markdown paragraph, so text
+# in two separate <p>s is never read as one sentence.
+HTML_INLINE_TAGS = {
+    "a", "abbr", "b", "bdi", "bdo", "br", "button", "cite", "data", "del",
+    "dfn", "em", "i", "img", "input", "ins", "label", "mark", "output", "q",
+    "s", "select", "small", "span", "strong", "sub", "sup", "textarea",
+    "time", "u", "var", "wbr",
+} | HTML_CODE_TAGS
+
+# The see-link rule's HTML shape: text ending "See" (or "See the", "See
+# also") with a link opening right after it. The Markdown rule reads the `[`
+# of a link; here the link's own tag is what follows the words.
+HTML_SEE_LINK_RE = re.compile(r"\b[Ss]ee\s+(?:(?:the|also)\s+)?$")
+
+# Attributes a person reads, on any element; plus `content`, read only on a
+# <meta>.
+HTML_READ_ATTRS = {"alt", "title", "aria-label"}
+
+
+# A start tag's name, and one attribute in it (name, then `=` and a quoted or
+# bare value when it has one), so an attribute is found by walking the tag and
+# a name inside an earlier attribute's quoted value is never mistaken for it.
+HTML_TAG_NAME_RE = re.compile(r"<[^\s/>]*")
+HTML_ATTR_RE = re.compile(r"""([^\s"'=<>/]+)(?:(\s*=\s*)(?:"[^"]*"|'[^']*'|[^\s"'>]+))?""")
+
+# A `{% set name = "text" %}` whose value is one plain string literal on one
+# line, and a `{{ name }}` that prints it, bare or through filters
+# (`{{ name | e }}`). The template's own copy (the headline, the lede) is
+# written this way, so the printed text is read as if it stood where the
+# expression does.
+JINJA_SET_RE = re.compile(r"""\{%-?\s*set\s+(\w+)\s*=\s*(?:"([^"\n]*)"|'([^'\n]*)')\s*-?%\}""")
+JINJA_NAME_RE = re.compile(r"\{\{-?\s*(\w+)\s*(?:\|[^{}]*?)?-?\}\}")
+
+
+def _mask(m: re.Match[str]) -> str:
+    return re.sub(r"[^\n]", " ", m.group(0))
+
+
+def _substitute_literals(text: str) -> str:
+    """Replace each `{{ name }}` (filters included) that prints a
+    `{% set name = "literal" %}` with that literal, escaped so it stays inside
+    an attribute, and mask every other Jinja form. A literal holds no newline and
+    the expression's own newlines follow it, so line numbers still match the
+    source."""
+    literals = {
+        m.group(1): html.escape(m.group(2) if m.group(2) is not None else m.group(3))
+        for m in JINJA_SET_RE.finditer(text)
+    }
+
+    def replace(m: re.Match[str]) -> str:
+        name = JINJA_NAME_RE.fullmatch(m.group(0))
+        if name and name.group(1) in literals:
+            return literals[name.group(1)] + "\n" * m.group(0).count("\n")
+        return _mask(m)
+
+    return JINJA_RE.sub(replace, text)
+
+
+class _ProseHTMLParser(HTMLParser):
+    """Collect the person-read text of an HTML document as blocks, each a
+    (start_lineno, text) pair whose text holds one "\\n" per source line, so
+    a hit's line can be recovered by counting newlines as for Markdown."""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.blocks: list[tuple[int, str]] = []
+        self._skip_depth = 0
+        self._start: int | None = None
+        self._lines: list[str] = []
+        # Hits the parser finds itself, which the text of a block cannot show.
+        self.hits: list[tuple[int, str, str]] = []
+
+    def _attr_line(self, tag_line: int, name: str) -> int:
+        """The source line an attribute's value starts on: the tag may wrap, so
+        its own start line is not where a hit in an attribute sits."""
+        raw = self.get_starttag_text() or ""
+        for m in HTML_ATTR_RE.finditer(raw, HTML_TAG_NAME_RE.match(raw).end()):
+            if m.group(1).lower() == name:
+                return tag_line + raw.count("\n", 0, m.end(2) if m.group(2) else m.start())
+        return tag_line
+
+    def _add(self, lineno: int, text: str) -> None:
+        for i, piece in enumerate(text.split("\n")):
+            line = lineno + i
+            if self._start is None:
+                if not piece.strip():
+                    continue
+                self._start = line
+                self._lines = [""]
+            while self._start + len(self._lines) - 1 < line:
+                self._lines.append("")
+            self._lines[-1] += piece
+
+    def _flush(self) -> None:
+        if self._start is not None:
+            self.blocks.append((self._start, "\n".join(self._lines)))
+        self._start = None
+        self._lines = []
+
+    def handle_starttag(self, tag, attrs):
+        lineno = self.getpos()[0]
+        if tag not in HTML_INLINE_TAGS:
+            self._flush()
+        if self._skip_depth:
+            if tag in HTML_SKIP_TAGS:
+                self._skip_depth += 1
+            return
+        if tag == "a":
+            m = HTML_SEE_LINK_RE.search("\n".join(self._lines)) if self._start is not None else None
+            if m:
+                self.hits.append((lineno, "see-link", re.sub(r"\s+", " ", m.group(0)) + "<a>"))
+        for name, value in attrs:
+            if value and (name in HTML_READ_ATTRS or (tag == "meta" and name == "content")):
+                # An attribute is its own block: alt text never joins the
+                # prose around the image into one sentence. A skip tag's own
+                # attributes are read too (a title on a <code> is shown on
+                # hover); only what sits inside it is skipped.
+                saved = (self._start, self._lines)
+                self._start, self._lines = None, []
+                self._add(self._attr_line(lineno, name), value)
+                self._flush()
+                self._start, self._lines = saved
+        if tag in HTML_SKIP_TAGS:
+            self._skip_depth += 1
+
+    def handle_endtag(self, tag):
+        if tag in HTML_SKIP_TAGS:
+            self._skip_depth = max(0, self._skip_depth - 1)
+        if tag not in HTML_INLINE_TAGS:
+            self._flush()
+
+    def handle_data(self, data):
+        if not self._skip_depth:
+            self._add(self.getpos()[0], data)
+
+    def close(self) -> None:
+        super().close()
+        self._flush()
+
+
+def check_html(text: str) -> list[tuple[int, str, str]]:
+    """Return every (lineno, rule, excerpt) violation in an HTML (or Jinja
+    template) source: the line rules on each line of each block of text,
+    the paragraph rules on each block as a whole."""
+    parser = _ProseHTMLParser()
+    parser.feed(_substitute_literals(text))
+    parser.close()
+
+    hits = list(parser.hits)
+    for start, block in parser.blocks:
+        lines = block.split("\n")
+        hits.extend(_block_hits(enumerate(lines, start), line_rules))
+        # The parser already decoded entities, so an "&lt;mat&gt;" is visible
+        # text here and no tag is left to strip.
+        hits.extend(_paragraph_hits(start, "\n".join(EMPHASIS_RE.sub("", line) for line in lines)))
+    return hits
+
+
+CHECKERS = {".md": check_markdown, ".html": check_html}
+
+
+def collect_files(paths: list[str]) -> list[str]:
+    """Expand each path: a file is checked as given, a directory is walked for
+    its .md and .html files (SKIP_FILES, relative to it, left out). Raises
+    ValueError naming the first path that is neither."""
+    files: list[str] = []
+    for root in paths:
+        if os.path.isfile(root):
+            if os.path.splitext(root)[1] not in CHECKERS:
+                raise ValueError(f"not a .md or .html file: {root}")
+            files.append(root)
+            continue
+        if not os.path.isdir(root):
+            raise ValueError(f"path not found: {root}")
+        for dirpath, _dirs, filenames in os.walk(root):
+            for name in filenames:
+                if os.path.splitext(name)[1] not in CHECKERS:
+                    continue
+                path = os.path.join(dirpath, name)
+                if os.path.relpath(path, root) in SKIP_FILES:
+                    continue
+                files.append(path)
+    return sorted(set(files))
+
+
+def main(argv: list[str] | None = None) -> int:
+    paths = (sys.argv[1:] if argv is None else argv) or ["docs"]
+    try:
+        files = collect_files(paths)
+    except ValueError as err:
         print(
-            f"error: docs dir not found: {root}\n"
-            "usage: python3 docs/check_prose.py [docs_dir]",
+            f"error: {err}\nusage: python3 docs/check_prose.py [path ...]",
             file=sys.stderr,
         )
         return 2
 
-    md_files = []
-    for dirpath, _dirs, filenames in os.walk(root):
-        for name in filenames:
-            if not name.endswith(".md"):
-                continue
-            path = os.path.join(dirpath, name)
-            rel = os.path.relpath(path, root)
-            if rel in SKIP_FILES:
-                continue
-            md_files.append(path)
-
     bad = False
-    for path in sorted(md_files):
+    for path in files:
         with open(path, encoding="utf-8") as fh:
             text = fh.read()
-        prose_lines = list(iter_prose_lines(text))
-        for lineno, line in prose_lines:
-            for rule in check_line(line):
-                bad = True
-                print(f"{path}:{lineno}: {rule}: {line.strip()}")
-        for lineno, rule, excerpt in check_paragraphs(prose_lines):
+        for lineno, rule, excerpt in CHECKERS[os.path.splitext(path)[1]](text):
             bad = True
             print(f"{path}:{lineno}: {rule}: {excerpt}")
 
     if bad:
         return 1
 
-    print(f"OK: {len(md_files)} files, no prose-rule violations")
+    print(f"OK: {len(files)} files, no prose-rule violations")
     return 0
 
 

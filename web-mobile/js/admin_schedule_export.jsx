@@ -21,14 +21,8 @@ const csvField = (s) => {
   return /[",]/.test(str) ? '"' + str.replace(/"/g, '""') + '"' : str;
 };
 
-// templateFromStoredDraw answers whether the blank template of a competition
-// in `status` comes from its stored draw: every status but setup (and the
-// legacy empty status), the negation of state.CanGenerateDraw. From the draw
-// on, the template is the stored-draw workbook (API.exportDrawTemplate, GET
-// /api/competitions/:id/export, engine.ExportCompetitionXlsx), so it prints
-// the pools and bracket the app runs and the printed PDFs carry. Before it,
-// nothing is drawn, and the roster goes to /create (buildXlsxBody below),
-// which draws it in registration order.
+// templateFromStoredDraw: the blank template is the stored draw (engine
+// ExportCompetitionXlsx) in every status but setup, the negation of state.CanGenerateDraw.
 export function templateFromStoredDraw(status) {
   return !!status && status !== "setup";
 }
@@ -121,6 +115,36 @@ export function buildXlsxBody(cfg, cName, players) {
   return body;
 }
 
+// saveBlob hands a downloaded workbook to the browser. The revoke waits so the
+// download starts first (as admin_shell.jsx does), and is guarded against jsdom teardown.
+function saveBlob(blob, filename) {
+  const dlUrl = window.URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = dlUrl;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => { if (typeof window !== "undefined" && window.URL) window.URL.revokeObjectURL(dlUrl); }, 100);
+}
+
+// createTemplateBlob draws a competition not drawn yet through /create, the
+// public, stateless generator (no auth header). Only a fetch that rejects is
+// "no connection"; a TypeError from reading the body keeps its own message.
+async function createTemplateBlob(cfg, name) {
+  const players = cfg.players || [];
+  if (players.length < 2) throw new Error("competition has no participants to export");
+  const resp = await fetch(`/create`, { method: "POST", body: buildXlsxBody(cfg, name, players) }).catch((e) => {
+    throw isNoConnection(e) ? noConnectionError(NOT_SENT_NO_CONNECTION, e) : e;
+  });
+  if (!resp.ok) {
+    let msg = await resp.text();
+    try { msg = JSON.parse(msg).error || msg; } catch (_) { /* keep raw text */ }
+    throw new Error(msg);
+  }
+  return resp.blob();
+}
+
 export function AdminExport({ c, t, password, showToast }) {
   // The competition detail nests its real fields (roster, format, courts,
   // pool settings) under `c.config`; some other call sites pass an already
@@ -128,7 +152,7 @@ export function AdminExport({ c, t, password, showToast }) {
   // this works in both shapes.
   const cfg = c.config || c;
   const cid = c.id || cfg.id;
-  const url = `${(window.linkBase || (() => window.location.origin))(t)}/viewer.html?id=${t.id}#comp-${cid}`;
+  const url = `${(window.linkBase || (() => window.location.origin))(t)}/competition/${cid}`;
 
   const [resultsBusy, setResultsBusy] = useState(false);
   const [templateBusy, setTemplateBusy] = useState(false);
@@ -146,17 +170,7 @@ export function AdminExport({ c, t, password, showToast }) {
     if (resultsBusy) return;
     setResultsBusy(true);
     try {
-      const blob = await window.API.exportResults(cid, password);
-      const dlUrl = window.URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = dlUrl;
-      a.download = `results-${cid}.xlsx`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      // Delay revoke so the browser initiates the download before the blob URL is
-      // torn down (matches admin_shell.jsx); guard the timer against jsdom teardown.
-      setTimeout(() => { if (typeof window !== "undefined" && window.URL) window.URL.revokeObjectURL(dlUrl); }, 100);
+      saveBlob(await window.API.exportResults(cid, password), `results-${cid}.xlsx`);
       notify("Results workbook downloaded.");
     } catch (err) {
       notify(shownMessage(err, "Results export failed: "), "error");
@@ -176,41 +190,11 @@ export function AdminExport({ c, t, password, showToast }) {
         throw new Error("Swiss competitions can't be exported to a static Excel bracket: use the live scoring view to track Swiss rounds.");
       }
 
-      let blob;
-      if (templateFromStoredDraw(c.status ?? cfg.status)) {
-        // The competition is drawn: print THAT draw (admin-gated, so it takes
-        // the organiser's password, which this card always has), never a
-        // fresh one from the roster, which can seat competitors elsewhere.
-        blob = await window.API.exportDrawTemplate(cid, password);
-      } else {
-        const players = cfg.players || [];
-        if (players.length < 2) throw new Error("competition has no participants to export");
-
-        const body = buildXlsxBody(cfg, cfg.name || c.name, players);
-
-        // /create is the public, stateless generator (no auth header). Only a
-        // fetch that rejects is "no connection"; a TypeError from reading the
-        // body or building the download is not, and keeps its own message.
-        const resp = await fetch(`/create`, { method: "POST", body }).catch((e) => {
-          throw isNoConnection(e) ? noConnectionError(NOT_SENT_NO_CONNECTION, e) : e;
-        });
-        if (!resp.ok) {
-          let msg = await resp.text();
-          try { msg = JSON.parse(msg).error || msg; } catch (_) { /* keep raw text */ }
-          throw new Error(msg);
-        }
-        blob = await resp.blob();
-      }
-      const dlUrl = window.URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = dlUrl;
-      a.download = `bracket-${cid}.xlsx`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      // Delay revoke so the browser initiates the download before the blob URL is
-      // torn down (matches admin_shell.jsx); guard the timer against jsdom teardown.
-      setTimeout(() => { if (typeof window !== "undefined" && window.URL) window.URL.revokeObjectURL(dlUrl); }, 100);
+      // A drawn competition prints THAT draw, never a fresh one from the roster.
+      const blob = templateFromStoredDraw(c.status ?? cfg.status)
+        ? await window.API.exportDrawTemplate(cid, password)
+        : await createTemplateBlob(cfg, cfg.name || c.name);
+      saveBlob(blob, `bracket-${cid}.xlsx`);
     } catch (err) {
       // A request that got no answer says the one "not sent" sentence (write_result.jsx).
       alert(shownMessage(err, "Export failed: "));

@@ -2564,6 +2564,8 @@ paths:
               schema:
                 type: string
                 format: binary
+        '404':
+          $ref: '#/components/responses/NotFound'
         '409':
           description: >-
             The competition has no draw yet (still in setup, or its draw was

@@ -29,12 +29,12 @@ const competition = (status) => ({
   },
 });
 
+// The card's second full-width button, whatever its label says while busy.
+const templateButton = (container) => container.querySelectorAll('button.btn--full')[1];
+
 async function clickBlankTemplate(c) {
   const { container } = render(<AdminExport c={c} t={{ id: 't1' }} password="pw" />);
-  const button = Array.from(container.querySelectorAll('button')).find(
-    (b) => b.textContent.includes('Download blank template')
-  );
-  await act(async () => { fireEvent.click(button); });
+  await act(async () => { fireEvent.click(templateButton(container)); });
 }
 
 const xlsxAnswer = () => Promise.resolve({
@@ -53,6 +53,14 @@ describe('templateFromStoredDraw', () => {
     for (const s of ['setup', '', undefined, null]) {
       expect(templateFromStoredDraw(s), String(s)).toBe(false);
     }
+  });
+});
+
+describe('AdminExport public viewer link', () => {
+  it("is the app's own public page for the competition", () => {
+    const { container } = render(<AdminExport c={competition('pools')} t={{ name: 'Cup' }} password="pw" />);
+    const link = container.querySelector('input[readonly]').value;
+    expect(link).toBe(`${window.location.origin}/competition/c1`);
   });
 });
 
@@ -102,9 +110,7 @@ describe('AdminExport blank template source', () => {
     let answer;
     global.fetch = vi.fn(() => new Promise((resolve) => { answer = resolve; }));
     const { container } = render(<AdminExport c={competition('pools')} t={{ id: 't1' }} password="pw" />);
-    const button = () => Array.from(container.querySelectorAll('button')).find(
-      (b) => b.textContent.includes('blank template') || b.textContent.includes('Preparing')
-    );
+    const button = () => templateButton(container);
     await act(async () => { fireEvent.click(button()); });
     await act(async () => { fireEvent.click(button()); });
     expect(global.fetch).toHaveBeenCalledTimes(1);

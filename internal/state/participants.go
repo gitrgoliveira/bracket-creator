@@ -1373,9 +1373,9 @@ func (s *Store) checkNewTeamNameCollisions(rio rosterIO, compID string, players 
 	// nameKeys comes back from the scan below so the count map further down can
 	// reuse it instead of normalizing every name a second time.
 	// The pure in-memory scan runs FIRST and the competition is consulted only
-	// if it finds something. Loading up front cost a config.md read plus YAML
-	// parse on EVERY participant write (loadCompetitionLocked deliberately
-	// bypasses the fileCache).
+	// if it finds something. Loading up front cost a copy of the competition on
+	// EVERY participant write (loadCompetitionLocked answers a copy of the
+	// fileCache body).
 	//
 	// Note what this does and does not buy: the early return fires on a roster
 	// with NO two participants sharing a name, which is the common case but not

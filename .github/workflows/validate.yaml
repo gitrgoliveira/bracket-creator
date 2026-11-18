@@ -192,6 +192,10 @@ jobs:
           go generate ./...
 
       - name: Run tests (${{ matrix.packages.name }})
+        # Collect garbage less often, as make go/test does (GOGC_TEST in the
+        # Makefile): the same tests, less CPU.
+        env:
+          GOGC: "400"
         run: go test ${{ matrix.packages.path }} -timeout=${{ matrix.packages.timeout }} -race -coverprofile=coverage-${{ matrix.packages.name }}.txt -covermode=atomic
 
       - name: Upload coverage to Codecov (${{ matrix.packages.name }})

@@ -8,9 +8,11 @@ import (
 	"log/slog"
 	"maps"
 	"os"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
+	"sync/atomic"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
@@ -34,6 +36,12 @@ func (s *Store) LoadPools(compID string) ([]helper.Pool, error) {
 	return s.copyPools(data.([]helper.Pool)), nil
 }
 
+// poolsParses and poolMatchesParses count the parses of pools.csv and
+// pool-matches.csv read from disk, for the tests that pin the locked loaders to
+// the parsed-file cache (locked_cache_test.go). The byte parsers (a
+// transaction's staged bytes, a saver's own) do not count.
+var poolsParses, poolMatchesParses atomic.Int64
+
 func (s *Store) parsePoolsFile(path string) (any, error) {
 	f, err := s.root.open(path)
 	if err != nil {
@@ -42,6 +50,7 @@ func (s *Store) parsePoolsFile(path string) (any, error) {
 		}
 		return nil, err
 	}
+	poolsParses.Add(1)
 	defer func() {
 		// Read-only: the records are already read, so a close failure loses
 		// nothing; it is logged rather than failing the load.
@@ -156,10 +165,33 @@ func (s *Store) copyPools(pools []helper.Pool) []helper.Pool {
 		res[i] = p
 		if p.Players != nil {
 			res[i].Players = make([]helper.Player, len(p.Players))
-			copy(res[i].Players, p.Players)
+			for j, player := range p.Players {
+				res[i].Players[j] = copyPlayer(player)
+			}
+		}
+		if p.Matches != nil {
+			res[i].Matches = make([]helper.Match, len(p.Matches))
+			for j, m := range p.Matches {
+				m.SideA, m.SideB = copyPlayerPtr(m.SideA), copyPlayerPtr(m.SideB)
+				res[i].Matches[j] = m
+			}
 		}
 	}
 	return res
+}
+
+// copyPlayer copies p with a Metadata of its own.
+func copyPlayer(p helper.Player) helper.Player {
+	p.Metadata = slices.Clone(p.Metadata)
+	return p
+}
+
+func copyPlayerPtr(p *helper.Player) *helper.Player {
+	if p == nil {
+		return nil
+	}
+	cp := copyPlayer(*p)
+	return &cp
 }
 
 func (s *Store) copyMatchResults(results []MatchResult) []MatchResult {
@@ -190,12 +222,21 @@ func (s *Store) copyMatchResults(results []MatchResult) []MatchResult {
 		// stored copy: a writer that builds its result from one (the
 		// daihyosen add, `u := *match`) must state its own.
 		res[i].ClearRequestFields()
-		if r.DecidedByHantei != nil {
-			v := *r.DecidedByHantei
-			res[i].DecidedByHantei = &v
-		}
+		res[i].DecidedByHantei = clonePtr(r.DecidedByHantei)
+		res[i].IneligibleSides = clonePtr(r.IneligibleSides)
+		res[i].WithdrawnStatus = clonePtr(r.WithdrawnStatus)
 	}
 	return res
+}
+
+// clonePtr copies what p points to, for a pointer to a type that holds only
+// values (copyMatchResults, copyBracket); nil stays nil.
+func clonePtr[T any](p *T) *T {
+	if p == nil {
+		return nil
+	}
+	v := *p
+	return &v
 }
 
 func (s *Store) SavePools(compID string, pools []helper.Pool) error {
@@ -212,12 +253,12 @@ func (s *Store) SavePools(compID string, pools []helper.Pool) error {
 	return s.savePoolsLocked(compID, pools, s.directWrite)
 }
 
-// loadPoolsLocked reads pools.csv directly from disk without acquiring the
-// per-competition lock. Caller MUST already hold the per-comp write lock.
+// loadPoolsLocked reads pools.csv through the parsed-file cache
+// (loadCachedLocked) without acquiring the per-competition lock, and answers a
+// copy the caller may change. Caller MUST already hold the per-comp lock,
 // typically from inside a WithTransaction closure.
 func (s *Store) loadPoolsLocked(compID string) ([]helper.Pool, error) {
-	path := s.compPath(compID, "pools.csv")
-	parsed, err := s.parsePoolsFile(path)
+	parsed, err := s.loadCachedLocked(compID, "pools.csv", s.parsePoolsFile)
 	if err != nil {
 		return nil, err
 	}
@@ -260,14 +301,24 @@ func (s *Store) savePoolsLocked(compID string, pools []helper.Pool, write writeF
 		return err
 	}
 
-	if pools == nil {
-		pools = []helper.Pool{}
+	// The body published is a parse of the bytes just written, not the pools
+	// handed in: the file keeps eight columns a player, so a read drops what it
+	// does not hold (Metadata, Source, the check-in, a pool's Matches, a pool
+	// with no players) and numbers PoolPosition from the row, and the locked
+	// loader serves this body to transactions as a fresh read would. pools.csv
+	// is written rarely (the draw, a renumber, a repair), so the parse is
+	// cheaper than a second copy of the format kept by hand. A parse of bytes
+	// the writer above made does not fail; if it ever did, nothing is published
+	// and the next read parses the file.
+	var published any
+	if parsed, perr := parsePoolsReader(path, bytes.NewReader(buf.Bytes())); perr == nil {
+		published = parsed
 	}
 	// Published at stage time inside a transaction, like pool-matches.csv: an
 	// abort drops this body and moves the version (invalidateCachesForWALIntents).
 	cache := s.getFileCache(compID, "pools.csv")
 	cache.mu.Lock()
-	cache.data = s.copyPools(pools)
+	cache.data = published
 	cache.mtime = s.FileMtime(compID, "pools.csv")
 	cache.mu.Unlock()
 
@@ -304,9 +355,11 @@ func (s *Store) LoadPoolMatches(compID string) ([]MatchResult, error) {
 // per-competition lock. Caller MUST already hold the write lock for
 // this competition, typically from inside a transform passed to
 // UpdatePoolMatchByID, UpdateBracket, or UpdateCompetitionChanged.
-// Bypasses the cache deliberately: the cache mtime can lag a
-// concurrent writer that the caller may be in the middle of making,
-// and we want the most-recent on-disk state.
+// Reads through the parsed-file cache (loadCachedLocked) and answers a
+// copy the caller may change. The cache cannot lag a writer here: under
+// the per-comp lock no other in-process writer runs, every one publishes
+// its body (or invalidates, or removes the file) before it releases the
+// lock, and the mtime check still catches an edit made outside the app.
 //
 // Motivating use case: MaybeAutoCompletePools (engine/competition.go)
 // re-checks "are all matches completed?" INSIDE its
@@ -319,8 +372,7 @@ func (s *Store) LoadPoolMatchesLocked(compID string) ([]MatchResult, error) {
 	if err := ValidateCompetitionID(compID); err != nil {
 		return nil, err
 	}
-	path := s.compPath(compID, "pool-matches.csv")
-	parsed, err := s.parsePoolMatchesFile(path)
+	parsed, err := s.loadCachedLocked(compID, "pool-matches.csv", s.parsePoolMatchesFile)
 	if err != nil {
 		return nil, err
 	}
@@ -336,6 +388,7 @@ func (s *Store) parsePoolMatchesFile(path string) (any, error) {
 		}
 		return nil, err
 	}
+	poolMatchesParses.Add(1)
 	defer func() {
 		// Read-only: the records are already read, so a close failure loses
 		// nothing; it is logged rather than failing the load.
@@ -852,6 +905,53 @@ func parsePoolMatchesRecords(records [][]string) []MatchResult {
 	return results
 }
 
+// asStoredPoolMatch gives m the shape a read of its pool-matches.csv row gives,
+// so the body savePoolMatchesLocked publishes is the body a read of the file it
+// wrote would give (the locked loader serves that body to transactions): the
+// fields the file does not keep (notPersistedInPoolCSV, pool_roundtrip_test.go)
+// dropped, and every value a column's take folds folded the same way. Kept
+// beside poolMatchColumns: a column whose take folds a value folds it here too,
+// and the round trip in locked_cache_test.go fails until it does. m must be a
+// copy (copyMatchResults), which has already dropped the request fields. The
+// legacy DecidedByHantei flag is dropped too: the file has no column for it
+// (a hantei lives in the ippon mark), so a read never raises it.
+func asStoredPoolMatch(m *MatchResult) {
+	// No column.
+	m.WinnerSide, m.QueuePosition, m.Rev, m.RevSession = "", 0, 0, ""
+	m.IneligibleSides, m.WithdrawnStatus, m.DecidedByHantei = nil, nil, nil
+	// An ippon cell reads back as a list, empty when the cell is.
+	if m.IpponsA == nil {
+		m.IpponsA = []string{}
+	}
+	if m.IpponsB == nil {
+		m.IpponsB = []string{}
+	}
+	// An empty encounter writes the bytes it was read from, which read back
+	// as unreadable when there are any and as no encounter when there are none.
+	if len(m.SubResults) == 0 {
+		m.SubResults = nil
+		m.SubResultsUnreadable = m.SubResultsRaw != ""
+	} else {
+		m.SubResultsRaw, m.SubResultsUnreadable = "", false
+	}
+	// Written only when set, read back as absent otherwise.
+	if !m.Encho.On() {
+		m.Encho = nil
+	}
+	if len(m.GroupStamps) == 0 {
+		m.GroupStamps = nil
+	}
+	if len(m.EventSeqs) == 0 {
+		m.EventSeqs = nil
+	}
+	if len(m.TurnedAway) == 0 {
+		m.TurnedAway = nil
+	}
+	// Read only when positive.
+	m.FlagsA, m.FlagsB = max(m.FlagsA, 0), max(m.FlagsB, 0)
+	m.ModifiedAt, m.ScoreVersion = max(m.ModifiedAt, 0), max(m.ScoreVersion, 0)
+}
+
 func (s *Store) SavePoolMatches(compID string, results []MatchResult) error {
 	if err := ValidateCompetitionID(compID); err != nil {
 		return err
@@ -910,9 +1010,19 @@ func (s *Store) savePoolMatchesLocked(compID string, results []MatchResult, writ
 		return err
 	}
 
+	// The published body is what a read of the file gives (asStoredPoolMatch);
+	// no results publish the empty slice a read of the header-only file gives,
+	// never a nil one.
+	published := s.copyMatchResults(results)
+	if published == nil {
+		published = []MatchResult{}
+	}
+	for i := range published {
+		asStoredPoolMatch(&published[i])
+	}
 	cache := s.getFileCache(compID, "pool-matches.csv")
 	cache.mu.Lock()
-	cache.data = s.copyMatchResults(results)
+	cache.data = published
 	cache.mtime = s.FileMtime(compID, "pool-matches.csv")
 	cache.mu.Unlock()
 
@@ -981,17 +1091,14 @@ func (s *Store) UpdatePoolMatchByID(compID, matchID string, mutate func(*MatchRe
 // WithTransaction closure (T156, NFR-010). The write parameter
 // selects direct-to-disk vs WAL-capturing semantics (T211/T212).
 func (s *Store) updatePoolMatchByIDLocked(compID, matchID string, mutate func(*MatchResult) error, write writeFn) (bool, error) {
-	// Load directly from disk under the lock. We deliberately bypass
-	// the loadCached path here because the per-comp lock is what
-	// coordinates with the save below; using the cache would risk
-	// reading a stale snapshot if another writer released the lock
-	// between cache populate and our acquire.
-	path := s.compPath(compID, "pool-matches.csv")
-	parsed, err := s.parsePoolMatchesFile(path)
+	// Through the locked loader: the per-comp lock is what coordinates with
+	// the save below, the cache it reads is never behind the file under that
+	// lock (see LoadPoolMatchesLocked), and it answers a copy, so mutate never
+	// edits the cached body.
+	results, err := s.LoadPoolMatchesLocked(compID)
 	if err != nil {
 		return false, err
 	}
-	results, _ := parsed.([]MatchResult)
 
 	for i := range results {
 		if results[i].ID == matchID {

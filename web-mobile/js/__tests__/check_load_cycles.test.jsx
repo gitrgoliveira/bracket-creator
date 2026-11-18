@@ -86,6 +86,25 @@ describe('findLoadTimeCycleReads', () => {
     expect(find(`${head}function f() { return B_CONST; }\nf();\nf();\n`)).toHaveLength(1);
   });
 
+  it.each([
+    ['a parameter', 'function f(B_CONST) { return B_CONST; }\nf(1);\n'],
+    ['a destructured parameter', 'function f({ a: B_CONST }, [fromB]) { return B_CONST + fromB; }\nf({}, []);\n'],
+    ['a catch parameter', 'function f() { try { x(); } catch (B_CONST) { return B_CONST; } }\nf();\n'],
+    ['a local const', 'function f() { const B_CONST = 1; return B_CONST; }\nf();\n'],
+    ['a var declared in a nested block', 'function f() { if (LEAF) { var B_CONST = 1; } return B_CONST; }\nf();\n'],
+    ['a local function', 'function f() { function fromB() { return 1; } return fromB(); }\nf();\n'],
+    ['a loop variable', 'function f() { for (const B_CONST of [1]) { void B_CONST; } }\nf();\n'],
+    ['a parameter of a map callback', 'export const xs = [1].map((B_CONST) => B_CONST);\n'],
+    ['a parameter that hides a declared function called inside', 'const inner = () => B_CONST;\nfunction outer(inner) { return inner(); }\nouter(() => 1);\n'],
+  ])('does not read %s as the import it is named like', (_, code) => {
+    expect(find(head + code)).toEqual([]);
+  });
+
+  it('reports the import again once the scope that hides it has ended', () => {
+    expect(find(`${head}function f(B_CONST) { return B_CONST; }\nf(1);\n{ const x = [1].map(() => 1); }\nexport const y = B_CONST;\n`)).toHaveLength(1);
+    expect(find(`${head}function f() { { const B_CONST = 1; void B_CONST; } return B_CONST; }\nf();\n`)).toHaveLength(1);
+  });
+
   it('reports a read from a module that imports itself back through a longer cycle', () => {
     const hits = findLoadTimeCycleReads({
       'x.jsx': "import { Y } from './y.jsx';\nexport const X = Y;\n",

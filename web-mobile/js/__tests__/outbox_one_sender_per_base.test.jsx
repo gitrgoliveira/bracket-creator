@@ -73,6 +73,30 @@ describe('the base lease (one storage, two tabs)', () => {
         expect(b.claim('m1'), 'one nobody renews is').toBe(true);
     });
 
+    it('lets a holder renew a lease that ran out during a slow request while no other tab took it', () => {
+        const a = tabOf('a');
+        const b = tabOf('b');
+        a.claim('m1');
+        vi.clearAllTimers();
+        clock += BASE_LEASE_LIVE_MS + 1_000; // a request under way past the lease life
+        a.renew();
+        expect(JSON.parse(store[BASE_LEASE_KEY]).m1, 'the late holder renewed').toEqual({ tab: 'a', at: clock });
+        expect(b.claim('m1'), 'so another tab is still turned away').toBe(false);
+    });
+
+    it('does not renew a lease another tab took over, and still drops the leases that ran out', () => {
+        const a = tabOf('a');
+        const b = tabOf('b');
+        const c = tabOf('c');
+        a.claim('m1');
+        c.claim('m2');
+        vi.clearAllTimers();
+        clock += BASE_LEASE_LIVE_MS;
+        expect(b.claim('m1'), 'a was late and b took the base').toBe(true);
+        a.renew();
+        expect(JSON.parse(store[BASE_LEASE_KEY]), 'a leaves b\'s lease alone; c\'s old one is gone').toEqual({ m1: { tab: 'b', at: clock } });
+    });
+
     it('gives every lease up when the page goes', () => {
         const a = tabOf('a');
         a.claim('m1');

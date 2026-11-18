@@ -142,11 +142,11 @@ function functionsRunBy(call, ctx) {
   let { callee } = call;
   while (callee.type === 'ParenthesizedExpression') callee = callee.expression;
   if (isFunction(callee)) return [callee];
-  if (callee.type === 'Identifier') return ctx.locals.has(callee.name) ? [ctx.locals.get(callee.name)] : [];
+  if (callee.type === 'Identifier') return declared(ctx.locals, callee.name, ctx) ? [ctx.locals.get(callee.name)] : [];
   if (callee.type === 'MemberExpression' && !callee.computed && SYNC_CALLBACK_METHODS.has(callee.property.name)) {
     // A callback written inline, or the name of a function the module declares.
     return call.arguments
-      .map((a) => (a.type === 'Identifier' ? ctx.locals.get(a.name) : isFunction(a) && a))
+      .map((a) => (a.type === 'Identifier' ? declared(ctx.locals, a.name, ctx) && ctx.locals.get(a.name) : isFunction(a) && a))
       .filter(Boolean);
   }
   return [];
@@ -160,11 +160,11 @@ function runNewNow(node, ctx) {
   let { callee } = node;
   while (callee.type === 'ParenthesizedExpression') callee = callee.expression;
   if (callee.type !== 'Identifier') return;
-  if (ctx.locals.has(callee.name)) {
+  if (declared(ctx.locals, callee.name, ctx)) {
     runNow(ctx.locals.get(callee.name), ctx);
     return;
   }
-  const cls = ctx.classes.get(callee.name);
+  const cls = declared(ctx.classes, callee.name, ctx) ? ctx.classes.get(callee.name) : undefined;
   if (!cls || ctx.seen.has(cls)) return;
   ctx.seen.add(cls);
   for (const member of cls.body.body) {
@@ -178,15 +178,96 @@ function runNewNow(node, ctx) {
 function runNow(fn, ctx) {
   if (ctx.seen.has(fn)) return;
   ctx.seen.add(fn);
-  walkPattern(fn.params, ctx);
-  walkLoadTime(fn.body, ctx);
+  // The parameters, the function's own name and its `var`s hide a watched name
+  // for the whole body; `let`, `const` and class names are scoped by the block.
+  const names = new Set();
+  patternNames(fn.params, names);
+  if (fn.id) names.add(fn.id.name);
+  varNames(fn.body, names);
+  withScope(names, ctx, () => {
+    walkPattern(fn.params, ctx);
+    walkLoadTime(fn.body, ctx);
+  });
 }
+
+// The names a pattern (or a list of them) binds.
+function patternNames(p, out) {
+  if (Array.isArray(p)) {
+    for (const el of p) patternNames(el, out);
+    return out;
+  }
+  if (!isNode(p)) return out;
+  switch (p.type) {
+    case 'Identifier':
+      out.add(p.name);
+      break;
+    case 'ObjectPattern':
+      for (const prop of p.properties) patternNames(prop.type === 'RestElement' ? prop.argument : prop.value, out);
+      break;
+    case 'ArrayPattern':
+      patternNames(p.elements, out);
+      break;
+    case 'RestElement':
+      patternNames(p.argument, out);
+      break;
+    case 'AssignmentPattern':
+      patternNames(p.left, out);
+      break;
+    default:
+  }
+  return out;
+}
+
+// The names a statement list declares in its own block: `let`, `const`,
+// functions and classes.
+function lexicalNames(stmts) {
+  const out = new Set();
+  for (const s of stmts) {
+    const decl = isNode(s) && s.type === 'ExportNamedDeclaration' ? s.declaration : s;
+    if (!isNode(decl)) continue;
+    if (decl.type === 'VariableDeclaration' && decl.kind !== 'var') {
+      for (const d of decl.declarations) patternNames(d.id, out);
+    } else if ((decl.type === 'FunctionDeclaration' || decl.type === 'ClassDeclaration') && decl.id) {
+      out.add(decl.id.name);
+    }
+  }
+  return out;
+}
+
+// The names `var` declares anywhere in a function body, nested blocks included,
+// nested functions left out.
+function varNames(node, out) {
+  if (Array.isArray(node)) {
+    for (const n of node) varNames(n, out);
+    return;
+  }
+  if (!isNode(node) || isFunction(node) || node.type === 'FunctionDeclaration') return;
+  if (node.type === 'VariableDeclaration' && node.kind === 'var') {
+    for (const d of node.declarations) patternNames(d.id, out);
+  }
+  for (const key of Object.keys(node)) {
+    if (key !== 'type' && key !== 'start' && key !== 'end') varNames(node[key], out);
+  }
+}
+
+function withScope(names, ctx, walk) {
+  ctx.scopes.push(names);
+  walk();
+  ctx.scopes.pop();
+}
+
+const isShadowed = (ctx, name) => ctx.scopes.some((s) => s.has(name));
+// Whether `name` is the module's own top-level declaration in `map` at this point
+// of the walk, and not a parameter, a catch parameter or a local of the same name.
+const declared = (map, name, ctx) => map.has(name) && !isShadowed(ctx, name);
 
 // The names a load-time walk of `node` reads from `ctx.watched` (a Map of local
 // name -> import record), as { name, start }. `ctx.onHit` receives each.
 // `ctx.locals` and `ctx.classes` map the module's top-level functions and
 // classes by name, and `ctx.seen` holds the function and class nodes already
-// walked.
+// walked. `ctx.scopes` is the stack of name sets that the function, block, loop
+// and catch clauses being walked declare: a name in one is that local, not the
+// import or the top-level function of the same name.
 function walkLoadTime(node, ctx) {
   if (Array.isArray(node)) {
     for (const n of node) walkLoadTime(n, ctx);
@@ -212,7 +293,7 @@ function walkLoadTime(node, ctx) {
       return; // `export { a }` names a binding; it reads nothing
     case 'Identifier':
     case 'JSXIdentifier':
-      if (ctx.watched.has(node.name)) ctx.onHit(node.name, node.start);
+      if (ctx.watched.has(node.name) && !isShadowed(ctx, node.name)) ctx.onHit(node.name, node.start);
       return;
     case 'MemberExpression':
       walkLoadTime(node.object, ctx);
@@ -247,8 +328,36 @@ function walkLoadTime(node, ctx) {
       walkPattern(node.id, ctx);
       walkLoadTime(node.init, ctx);
       return;
+    case 'BlockStatement':
+      withScope(lexicalNames(node.body), ctx, () => walkLoadTime(node.body, ctx));
+      return;
+    case 'StaticBlock': {
+      const names = lexicalNames(node.body);
+      varNames(node.body, names);
+      withScope(names, ctx, () => walkLoadTime(node.body, ctx));
+      return;
+    }
+    case 'ForStatement':
+    case 'ForInStatement':
+    case 'ForOfStatement':
+      withScope(lexicalNames([node.init || node.left]), ctx, () => walkChildren(node, ctx));
+      return;
+    case 'CatchClause':
+      withScope(patternNames(node.param, new Set()), ctx, () => {
+        walkPattern(node.param, ctx);
+        walkLoadTime(node.body, ctx);
+      });
+      return;
+    case 'SwitchStatement':
+      walkLoadTime(node.discriminant, ctx);
+      withScope(lexicalNames(node.cases.flatMap((c) => c.consequent)), ctx, () => walkLoadTime(node.cases, ctx));
+      return;
     default:
   }
+  walkChildren(node, ctx);
+}
+
+function walkChildren(node, ctx) {
   for (const key of Object.keys(node)) {
     if (key === 'type' || key === 'start' || key === 'end' || key === 'loc' || key === 'range') continue;
     walkLoadTime(node[key], ctx);
@@ -310,7 +419,7 @@ export function findLoadTimeCycleReads(sources, parseSync) {
       violations.push({ file, line, name, from: watched.get(name).from });
     };
     const { functions: locals, classes } = readLocalDeclarations(program);
-    walkLoadTime(program.body, { watched, onHit, locals, classes, seen: new Set() });
+    walkLoadTime(program.body, { watched, onHit, locals, classes, seen: new Set(), scopes: [] });
   }
   return violations.sort((a, b) => a.file.localeCompare(b.file) || a.line - b.line);
 }

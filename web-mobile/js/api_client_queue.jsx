@@ -666,7 +666,7 @@ export function _shareAnswer(key, d, outcome) {
             ? { error: { message: String(outcome.error && outcome.error.message), props: { ...outcome.error } } }
             : { value: outcome.value };
         localStorage.setItem(ANSWER_STORAGE_PREFIX + key, JSON.stringify({
-            at: now, tab: _answerTab, enqueuedAt: d.enqueuedAt, outcome: JSON.parse(JSON.stringify(shared)),
+            at: now, tab: _answerTab, enqueuedAt: d.enqueuedAt, outcome: shared,
         }));
     } catch (_e) { /* storage refused or the answer is not plain data */ }
 }

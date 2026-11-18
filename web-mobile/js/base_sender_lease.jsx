@@ -91,12 +91,14 @@ export function createBaseLease({ storage, tab, now = () => Date.now() }) {
     };
     const beat = () => {
         const t = now();
-        const all = live(read(), t);
+        // Renew before pruning: a holder whose beat was late (a slow request, a
+        // throttled page) still owns the lease while no other tab has claimed it.
+        const all = read();
         let held = false;
         for (const base of mine) {
             if (all[base] && all[base].tab === tab) { all[base] = { tab, at: t }; held = true; }
         }
-        if (held) write(all);
+        if (held) write(live(all, t));
     };
     const startBeat = () => {
         if (timer !== null || typeof setInterval !== 'function') return;

@@ -1,119 +1,8 @@
 // AdminExport card extracted from admin_schedule.jsx (mp-d7tl).
 
-// effectiveTwoThirdPlaces (bc-3rdp): the ONE rule for "does this competition
-// award a joint (shared) 3rd place, or decide a single 3rd with a
-// bronze/decider match", reused here rather than re-derived so the exported
-// blank template's bronze block agrees with the same predicate every other
-// surface (settings screen, awards page) already uses.
-import { effectiveTwoThirdPlaces, resolveFormat, checkInApplies, FORMAT_KNOCKOUT, FORMAT_LEAGUE } from './competition_shape.jsx';
-import { isNoConnection, noConnectionError, shownMessage, NOT_SENT_NO_CONNECTION } from './write_result.jsx';
+import { shownMessage } from './write_result.jsx';
 
 const { useState } = React;
-
-// Prepare a roster CSV field: coerce nullish to "" (String(undefined) would
-// export the literal text "undefined"), collapse embedded CR/LF runs to a
-// single space (the /create handler splits the roster on newlines BEFORE CSV
-// parsing, so a quoted newline would still break a record apart), then
-// RFC-4180-quote if the field contains a comma or double-quote.
-// Used by buildXlsxBody (including its rosterLine roster helper).
-const csvField = (s) => {
-  const str = (s == null ? "" : String(s)).replace(/[\r\n]+/g, " ").trim();
-  return /[",]/.test(str) ? '"' + str.replace(/"/g, '""') + '"' : str;
-};
-
-// templateFromStoredDraw: the blank template is the stored draw (engine
-// ExportCompetitionXlsx) in every status but setup, the negation of state.CanGenerateDraw.
-export function templateFromStoredDraw(status) {
-  return !!status && status !== "setup";
-}
-
-// buildXlsxBody constructs the URLSearchParams body for POST /create from a
-// competition config object (cfg) and a player list, for a competition not
-// drawn yet (templateFromStoredDraw). Extracted for testing.
-// cfg fields used: format, poolSize, poolWinners, poolSizeMode, courts,
-//   teamSize, teamMatchType, name, numberPrefix, roundRobin, poolFormat,
-//   withZekkenName, engi, and (via effectiveTwoThirdPlaces) twoThirdPlaces,
-//   naginata, leagueTwoThirdPlaces.
-// cName is the display name for the competition (used as titlePrefix).
-export function buildXlsxBody(cfg, cName, players) {
-  // A stored "" format is a knockout (resolveFormat): read as pools, a
-  // knockout's template came back as a pool draw.
-  const format = resolveFormat(cfg.format);
-  const isKnockout = format === FORMAT_KNOCKOUT;
-  const singlePool = format === FORMAT_LEAGUE;
-  const playersPerPool = singlePool ? players.length : (cfg.poolSize || players.length);
-
-  // /create requires 1 <= winnersPerPool < playersPerPool for pools.
-  let winnersPerPool = cfg.poolWinners || 2;
-  if (winnersPerPool >= playersPerPool) winnersPerPool = Math.max(1, playersPerPool - 1);
-
-  // Engi pairs store both member names combined in the name field
-  // ("Name 1 - Name 2"), so they use whatever zekken layout the competition
-  // itself is configured with, same as any other competition.
-  const effectiveZekken = !!cfg.withZekkenName;
-
-  // Roster lines match the canonical participant CSV the generator parses:
-  // with effective zekken → "Name, DisplayName, Dojo"; otherwise → "Name, Dojo".
-  // A blank dojo is sent blank, never substituted: the generator refuses a
-  // row without a dojo ("entry N: missing dojo") and that refusal must reach
-  // the operator, since a substitute would silently draw every dojo-less
-  // competitor as one fake dojo (the no-fallbacks rule; a legacy roster is
-  // repaired on the participants page, not papered over here).
-  const rosterLine = (p) => effectiveZekken
-    ? [csvField(p.name), csvField(p.displayName || p.name), csvField(p.dojo || "")].join(", ")
-    : [csvField(p.name), csvField(p.dojo || "")].join(", ");
-  const playerList = players.map(rosterLine).join("\n");
-
-  // dojo must match the roster line's dojo (p.dojo || "", the same value
-  // rosterLine sends above): domain.SeedKey matches a seed to its participant by
-  // the (name, dojo) COMPOSITE key, so a same-name pair (two competitors
-  // sharing a display name, distinguished only by dojo) needs the dojo here
-  // or /create 400s with "seeded participant not found" (domain.SeedAssignment's
-  // json tags are name/dojo/seedRank; see internal/domain/seed.go).
-  const seeded = players
-    .filter((p) => p.seed && p.seed > 0)
-    .map((p) => ({ name: p.name, dojo: p.dojo || "", seedRank: p.seed }));
-
-  const courtsCount = Array.isArray(cfg.courts) ? cfg.courts.length : 0;
-  const body = new URLSearchParams({
-    tournamentType: isKnockout ? "knockout" : "pools",
-    playerList,
-    courts: String(courtsCount || 1),
-    winnersPerPool: String(winnersPerPool),
-    playersPerPool: String(playersPerPool),
-    poolSizeMode: cfg.poolSizeMode || "min",
-    teamMatches: String(cfg.teamSize || 0),
-    titlePrefix: cName || "",
-    numberPrefix: cfg.numberPrefix || "",
-    determined: "on", // preserve the registered participant order (no shuffle)
-  });
-  if (singlePool || cfg.roundRobin) body.set("roundRobin", "on");
-  // A league's template is one pool and no knockout; /create cannot tell that
-  // from a pools competition that formed a single pool and still plays a final.
-  if (singlePool) body.set("format", FORMAT_LEAGUE);
-  // Honour the competition's pool format: "partial" → path-graph match set
-  // (the generator otherwise defaults to full round-robin). Mirrors the
-  // engine's PoolFormat switch (internal/engine/pools.go).
-  if (cfg.poolFormat === "partial") body.set("poolFormat", "partial");
-  if (effectiveZekken) body.set("withZekkenName", "on");
-  if (cfg.engi) body.set("engi", "on");
-  // A kachinuki competition (state.Competition.IsKachinuki: teams of two or
-  // more) says so; the server then sizes every team block for the most bouts
-  // an encounter can take and adds the Kachinuki Detail sheet. teamMatches
-  // stays the team size.
-  if (cfg.teamMatchType === "kachinuki" && Number(cfg.teamSize) >= 2) body.set("teamMatchType", "kachinuki");
-  // thirdPlaceMatch: the blank workbook needs a bronze (3rd-place) block
-  // exactly when this competition does NOT award joint 3rd places -- i.e.
-  // RequiresSingleThirdPlace, the exact negation of effectiveTwoThirdPlaces
-  // (state.Competition.EffectiveTwoThirdPlaces's JS mirror). This covers
-  // naginata AND any other format that opted into a single 3rd via
-  // twoThirdPlaces=false, and correctly omits it for a naginata competition
-  // that opted INTO joint 3rds -- cfg.naginata alone (the old check) got
-  // both of those cross cases wrong.
-  if (!effectiveTwoThirdPlaces(cfg)) body.set("thirdPlaceMatch", "on");
-  if (seeded.length) body.set("seeds", JSON.stringify(seeded));
-  return body;
-}
 
 // saveBlob hands a downloaded workbook to the browser. The revoke waits so the
 // download starts first (as admin_shell.jsx does), and is guarded against jsdom teardown.
@@ -128,23 +17,6 @@ function saveBlob(blob, filename) {
   setTimeout(() => { if (typeof window !== "undefined" && window.URL) window.URL.revokeObjectURL(dlUrl); }, 100);
 }
 
-// createTemplateBlob draws a competition not drawn yet through /create, the
-// public, stateless generator (no auth header). Only a fetch that rejects is
-// "no connection"; a TypeError from reading the body keeps its own message.
-async function createTemplateBlob(cfg, name) {
-  const players = cfg.players || [];
-  if (players.length < 2) throw new Error("competition has no participants to export");
-  const resp = await fetch(`/create`, { method: "POST", body: buildXlsxBody(cfg, name, players) }).catch((e) => {
-    throw isNoConnection(e) ? noConnectionError(NOT_SENT_NO_CONNECTION, e) : e;
-  });
-  if (!resp.ok) {
-    let msg = await resp.text();
-    try { msg = JSON.parse(msg).error || msg; } catch (_) { /* keep raw text */ }
-    throw new Error(msg);
-  }
-  return resp.blob();
-}
-
 export function AdminExport({ c, t, password, showToast }) {
   // The competition detail nests its real fields (roster, format, courts,
   // pool settings) under `c.config`; some other call sites pass an already
@@ -153,6 +25,10 @@ export function AdminExport({ c, t, password, showToast }) {
   const cfg = c.config || c;
   const cid = c.id || cfg.id;
   const url = `${(window.linkBase || (() => window.location.origin))(t)}/competition/${cid}`;
+
+  // Every status but setup has a stored draw (the negation of state.CanGenerateDraw).
+  const status = c.status ?? cfg.status;
+  const hasDraw = !!status && status !== "setup";
 
   const [resultsBusy, setResultsBusy] = useState(false);
   const [templateBusy, setTemplateBusy] = useState(false);
@@ -190,10 +66,9 @@ export function AdminExport({ c, t, password, showToast }) {
         throw new Error("Swiss competitions can't be exported to a static Excel bracket: use the live scoring view to track Swiss rounds.");
       }
 
-      // A drawn competition prints THAT draw, never a fresh one from the roster.
-      const blob = templateFromStoredDraw(c.status ?? cfg.status)
-        ? await window.API.exportDrawTemplate(cid, password)
-        : await createTemplateBlob(cfg, cfg.name || c.name);
+      // The server answers with the stored draw, or, before the draw, with the
+      // blank layout the draw would print, its places empty.
+      const blob = await window.API.exportDrawTemplate(cid, password);
       saveBlob(blob, `bracket-${cid}.xlsx`);
     } catch (err) {
       // A request that got no answer says the one "not sent" sentence (write_result.jsx).
@@ -226,10 +101,9 @@ export function AdminExport({ c, t, password, showToast }) {
         </button>
         <div className="field__hint" style={{ marginTop: 8 }}>
           Empty pool draws, matches, and brackets with linked formulas, for scoring by hand.
-          {!templateFromStoredDraw(c.status ?? cfg.status) && (
+          {!hasDraw && (
             <>
-              {" "}Before the draw, it is a preview drawn from everyone registered.
-              {checkInApplies(t, c.checkInEnabled ?? cfg.checkInEnabled) && " Generate draw leaves out anyone not checked in, so its pools can differ."}
+              {" "}Before the draw it has empty places only, as many as the larger of the expected number of participants and everyone registered.
             </>
           )}
         </div>

@@ -1,15 +1,14 @@
-// Once a competition has a draw, "Download blank template" prints THAT draw:
-// it downloads the stored-draw workbook (GET /api/competitions/:id/export,
-// engine.ExportCompetitionXlsx, the source of the printed PDFs) with the
-// organiser's password, and never posts the roster to /create, which would
-// draw the competition again in registration order and could seat its
-// competitors elsewhere. Before the draw there is nothing stored, and /create
-// still draws the template.
+// "Download blank template" always downloads from the server's export door
+// (GET /api/competitions/:id/export, engine.ExportCompetitionXlsx, the source of
+// the printed PDFs) with the organiser's password: the stored draw once there is
+// one, and before the draw the blank layout the draw would print, its places
+// empty. The app never posts the roster anywhere to draw a template of its own,
+// which could seat competitors elsewhere than the draw does.
 import React from 'react';
 import { render, act, fireEvent } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { API } from '../../api_client.jsx';
-import { AdminExport, templateFromStoredDraw } from '../../admin_schedule_export.jsx';
+import { AdminExport } from '../../admin_schedule_export.jsx';
 import { NOT_SENT_NO_CONNECTION } from '../../write_result.jsx';
 
 const competition = (status) => ({
@@ -45,53 +44,24 @@ const xlsxAnswer = () => Promise.resolve({
   json: () => Promise.resolve({}),
 });
 
-describe('templateFromStoredDraw', () => {
-  it('reads every status but setup as drawn', () => {
-    for (const s of ['draw-ready', 'pools', 'knockout', 'completed', 'invalid']) {
-      expect(templateFromStoredDraw(s), s).toBe(true);
-    }
-    for (const s of ['setup', '', undefined, null]) {
-      expect(templateFromStoredDraw(s), String(s)).toBe(false);
-    }
-  });
-});
-
-// The template's hint says what the workbook holds: before the draw, a preview
-// from everyone registered, which ignores check-in; Generate draw leaves out
-// anyone not checked in, so the preview's pools can differ (the e2e journey
-// blank-template measured it). A drawn competition's template is its draw, so
-// the preview sentences go.
+// The template's hint says what the workbook holds: before the draw, empty
+// places only, sized from the expected number of participants or everyone
+// registered; a drawn competition's template is its draw.
 describe('AdminExport blank template hint', () => {
-  const hint = (c, t = { id: 't1' }) => {
-    const { container } = render(<AdminExport c={c} t={t} password="pw" />);
+  const hint = (c) => {
+    const { container } = render(<AdminExport c={c} t={{ id: 't1' }} password="pw" />);
     return templateButton(container).nextElementSibling.textContent;
   };
-  const PREVIEW = 'Before the draw, it is a preview drawn from everyone registered.';
-  const CHECK_IN = 'Generate draw leaves out anyone not checked in, so its pools can differ.';
+  const EMPTY_PLACES = 'Before the draw it has empty places only';
 
-  it('calls the pre-draw template a preview, and names check-in when it applies', () => {
-    const text = hint({ ...competition('setup'), checkInEnabled: true });
-    expect(text).toContain(PREVIEW);
-    expect(text).toContain(CHECK_IN);
+  it('says the pre-draw template has empty places only', () => {
+    expect(hint(competition('setup'))).toContain(EMPTY_PLACES);
   });
 
-  it('leaves check-in out when the competition does not use it', () => {
-    const text = hint(competition('setup'));
-    expect(text).toContain(PREVIEW);
-    expect(text).not.toContain(CHECK_IN);
-  });
-
-  it('leaves check-in out in a self-run tournament, which has no check-in', () => {
-    const text = hint({ ...competition('setup'), checkInEnabled: true }, { id: 't1', mode: 'self-run' });
-    expect(text).toContain(PREVIEW);
-    expect(text).not.toContain(CHECK_IN);
-  });
-
-  it('says nothing of a preview once the competition is drawn', () => {
-    const text = hint({ ...competition('draw-ready'), checkInEnabled: true });
+  it('says nothing of empty places once the competition is drawn', () => {
+    const text = hint(competition('draw-ready'));
     expect(text).toContain('for scoring by hand.');
-    expect(text).not.toContain(PREVIEW);
-    expect(text).not.toContain(CHECK_IN);
+    expect(text).not.toContain(EMPTY_PLACES);
   });
 });
 
@@ -136,13 +106,34 @@ describe('AdminExport blank template source', () => {
     });
   }
 
-  it('posts the roster to /create before the draw', async () => {
+  it('downloads from the same door before the draw, never posting the roster to /create', async () => {
     global.fetch = vi.fn(xlsxAnswer);
     await clickBlankTemplate(competition('setup'));
     expect(global.fetch).toHaveBeenCalledTimes(1);
     const [url, init] = global.fetch.mock.calls[0];
-    expect(url).toBe('/create');
-    expect(init.method).toBe('POST');
+    expect(url).toBe('/api/competitions/c1/export');
+    expect(init.method).toBe('GET');
+    expect(init.headers['X-Tournament-Password']).toBe('pw');
+  });
+
+  it('asks the server even with nobody registered, which sizes the layout from the expected number', async () => {
+    global.fetch = vi.fn(xlsxAnswer);
+    const c = competition('setup');
+    c.config.players = [];
+    await clickBlankTemplate(c);
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    expect(global.fetch.mock.calls[0][0]).toBe('/api/competitions/c1/export');
+  });
+
+  it('says the server sentence when a pre-draw layout cannot be sized', async () => {
+    global.fetch = vi.fn(() => Promise.resolve({
+      ok: false,
+      status: 422,
+      headers: new Headers(),
+      json: () => Promise.resolve({ error: 'no draw yet, and fewer than 2 places to print: set the expected number of participants' }),
+    }));
+    await clickBlankTemplate(competition('setup'));
+    expect(window.alert).toHaveBeenCalledWith('Export failed: no draw yet, and fewer than 2 places to print: set the expected number of participants');
   });
 
   it('sends one request for a double tap and holds the button while the download is out', async () => {

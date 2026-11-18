@@ -5704,16 +5704,17 @@ const API = {
     // standings, winners, and decision suffixes written as literal values)
     // from the admin-gated /api/competitions/:id/export-results endpoint. This
     // is distinct from AdminExport's "Download blank template", which yields a
-    // BLANK formula template (exportDrawTemplate below, or /create before the
-    // draw). Returns an .xlsx Blob; throws the server's error message on non-2xx.
+    // BLANK formula template (exportDrawTemplate below). Returns an .xlsx Blob;
+    // throws the server's error message on non-2xx.
     async exportResults(compID, password) {
         return _downloadWorkbook(`/api/competitions/${compID}/export-results`, password, "Failed to export results");
     },
-    // exportDrawTemplate GETs the blank template of a competition's STORED
-    // draw (no results, live formulas) from the admin-gated
-    // /api/competitions/:id/export endpoint (engine.ExportCompetitionXlsx),
-    // the same draw the printed PDFs carry and the app runs. AdminExport's
-    // "Download blank template" uses it once the competition has a draw.
+    // exportDrawTemplate GETs the blank template of a competition (no results,
+    // live formulas) from the admin-gated /api/competitions/:id/export endpoint
+    // (engine.ExportCompetitionXlsx): its STORED draw, the same one the printed
+    // PDFs carry and the app runs, or, before the draw, the blank layout the
+    // draw would print with its places empty. AdminExport's "Download blank
+    // template" uses it in every status.
     // Returns an .xlsx Blob; throws the server's error message on non-2xx.
     async exportDrawTemplate(compID, password) {
         return _downloadWorkbook(`/api/competitions/${compID}/export`, password, "Failed to export the blank template");

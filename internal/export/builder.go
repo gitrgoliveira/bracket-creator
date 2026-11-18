@@ -333,7 +333,7 @@ func overlayPoolScores(f *excelize.File, pools []helper.Pool, resultByID map[str
 						domain.IpponsScore(mr.IpponsA), domain.IpponsScore(mr.IpponsB),
 						mr.Decision, mr.Encho, mr.Attribution())
 				}
-				writeScoreRowCells(f, sheetName, courtStartCol, excelRow, scoreA, scoreB, mr)
+				writeScoreRowCells(f, sheetName, courtStartCol, excelRow, scoreA, scoreB, mr, engi)
 			}
 		}
 	}
@@ -500,30 +500,69 @@ func writeTeamSummaryCells(f *excelize.File, sheetName string, courtStartCol, ex
 // cell), and the single middle mark. Takes SIDE-ordered scores (A = Aka,
 // B = Shiro) and places them White-left itself (helper.WhiteLeft), like
 // writeTeamSubMatchScores, so no caller orders the columns. Shared by the
-// pool and bracket overlays so the cell contract lives in one place.
-func writeScoreRowCells(f *excelize.File, sheetName string, courtStartCol, excelRow int, scoreA, scoreB string, mr state.MatchResult) {
+// pool and bracket overlays so the cell contract lives in one place. engi says
+// the scores are flag counts, which are written as numbers (setScoreCell).
+func writeScoreRowCells(f *excelize.File, sheetName string, courtStartCol, excelRow int, scoreA, scoreB string, mr state.MatchResult, engi bool) {
 	leftScore, rightScore := helper.WhiteLeft(scoreA, scoreB)
 	lFoul, rFoul := helper.WhiteLeft(HansokuMark(mr.HansokuA), HansokuMark(mr.HansokuB))
 	lMark, rMark := SideMarksLR(mr.Decision, mr.HanteiDecided(), mr.Attribution())
 	// The outstanding-hansoku ▲ rides the cell's OUTER edge — nearest that
 	// side's name column — per FIK Table 2 (White's ▲ far left, Red's far
 	// right) and matching the scoreboard's placement between name and slots.
-	setScoreCell(f, sheetName, colNum(courtStartCol+1), excelRow, domain.JoinNonEmpty(lFoul, domain.JoinNonEmpty(leftScore, lMark)))
-	setScoreCell(f, sheetName, colNum(courtStartCol+5), excelRow, domain.JoinNonEmpty(domain.JoinNonEmpty(rightScore, rMark), rFoul))
+	setScoreCell(f, sheetName, colNum(courtStartCol+1), excelRow, lFoul, leftScore, lMark, engi)
+	setScoreCell(f, sheetName, colNum(courtStartCol+5), excelRow, "", rightScore, domain.JoinNonEmpty(rMark, rFoul), engi)
 	writeMiddleMarkCell(f, sheetName, courtStartCol, excelRow, mr.Decision, mr.Encho)
 }
 
-// setScoreCell writes one side's score cell. A cell that is a whole number is
-// an engi flag count (an ippon score is letters, never digits) and is written
-// as a number, as an operator types it into the template, so the engi
-// standings formulas, which count flags through ISNUMBER and N, read it; a
-// flag count written as text counted as no bout fought.
-func setScoreCell(f *excelize.File, sheet, col string, row int, value string) {
-	if n, err := strconv.Atoi(value); err == nil && n >= 0 {
-		setIntCellDirect(f, sheet, col, row, n)
+// setScoreCell writes one side's score cell: before, score and after joined by
+// spaces, before being the hansoku mark that leads the cell and after the marks
+// that trail it. An engi flag count is written as a NUMBER, as an operator
+// types it into the template, so the engi standings formulas, which count
+// flags through ISNUMBER and N, read it; written as text it counted as no bout
+// fought. Marks beside a count ride in the cell's number format, so the cell
+// still shows "3 Kiken" while holding the number 3. Everything else, an ippon
+// score being letters, is text.
+func setScoreCell(f *excelize.File, sheet, col string, row int, before, score, after string, engi bool) {
+	n, err := strconv.Atoi(score)
+	if !engi || err != nil || n < 0 {
+		setCellStr(f, sheet, col, row, domain.JoinNonEmpty(before, domain.JoinNonEmpty(score, after)))
 		return
 	}
-	setCellStr(f, sheet, col, row, value)
+	setIntCellDirect(f, sheet, col, row, n)
+	if before == "" && after == "" {
+		return
+	}
+	cell := fmt.Sprintf("%s%d", col, row)
+	format := "0"
+	if before != "" {
+		format = `"` + before + ` "` + format
+	}
+	if after != "" {
+		format += `" ` + after + `"`
+	}
+	if err := withNumberFormat(f, sheet, cell, format); err != nil {
+		fmt.Printf("export: warning: number format on %s: %v\n", cell, err)
+	}
+}
+
+// withNumberFormat gives a cell a custom number format, keeping the rest of its
+// style.
+func withNumberFormat(f *excelize.File, sheet, cell, format string) error {
+	id, err := f.GetCellStyle(sheet, cell)
+	if err != nil {
+		return err
+	}
+	style, err := f.GetStyle(id)
+	if err != nil {
+		return err
+	}
+	style.NumFmt = 0
+	style.CustomNumFmt = &format
+	id, err = f.NewStyle(style)
+	if err != nil {
+		return err
+	}
+	return f.SetCellStyle(sheet, cell, cell, id)
 }
 
 // writeMiddleMarkCell writes the single middle mark (X / (E) / (DH)),
@@ -1139,7 +1178,7 @@ func overlayBracketScores(f *excelize.File, bracketByNum map[int]state.BracketMa
 					bm.Decision, bm.Encho, mrView.Attribution())
 			}
 
-			writeScoreRowCells(f, sheetName, courtStartCol, excelRow, scoreA, scoreB, mrView)
+			writeScoreRowCells(f, sheetName, courtStartCol, excelRow, scoreA, scoreB, mrView, engi)
 
 			if bm.Winner != "" {
 				writeWinnerCell(f, sheetName, rows, scoreRowIdx, headerCol, bm.Winner)

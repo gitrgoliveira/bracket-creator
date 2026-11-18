@@ -24,8 +24,8 @@ import (
 )
 
 // blankLayoutCase is one competition shape the blank layout must print as the
-// draw prints it: the facets the app's old pre-draw template request
-// (buildXlsxBody, POST /create) carried per format, each now on the Go side.
+// draw prints it: the facets the app's old pre-draw template request (a
+// stateless POST /create) carried per format, each now on the Go side.
 type blankLayoutCase struct {
 	name   string
 	format string
@@ -180,6 +180,40 @@ func TestBlankLayout_PrintsNoNameDojoNumberOrSeed(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestBlankLayout_TreePagesFollowTheDataSheet pins that a knockout's tree pages
+// read their first-round places from the Data sheet, as the matches sheet does,
+// so a name typed there reaches every sheet: each of the six places is a
+// reference to its own Data name cell, and typing a name into one shows it on
+// the tree page.
+func TestBlankLayout_TreePagesFollowTheDataSheet(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	saveBlankLayoutComp(t, store, "blank", blankLayoutCase{"knockout", state.CompFormatKnockout, 0, 6, []string{"A"}, nil})
+	data, err := eng.ExportCompetitionXlsx("blank")
+	require.NoError(t, err)
+	f := openXlsx(t, data)
+
+	treeCellOf := map[string]string{} // Data cell -> the tree cell that reads it
+	for _, sheet := range f.GetSheetList() {
+		if !strings.HasPrefix(sheet, helper.SheetTree) {
+			continue
+		}
+		eachCell(t, f, sheet, func(cell, _, formula string) {
+			if bareDataRef.MatchString(formula) {
+				treeCellOf[strings.TrimPrefix(formula, "'data'!")] = sheet + "!" + cell
+			}
+		})
+	}
+	require.Len(t, treeCellOf, 6, "each place is on a tree page, reading its own Data cell")
+
+	require.NoError(t, f.SetCellValue(helper.SheetData, "B3", "Typed Name"))
+	home := treeCellOf["$B$3"]
+	require.NotEmpty(t, home, "the first Data row's name is on a tree page")
+	sheet, cell, _ := strings.Cut(home, "!")
+	got, err := f.CalcCellValue(sheet, cell)
+	require.NoError(t, err)
+	assert.Equal(t, "Typed Name", got)
 }
 
 // TestBlankPlaceCount pins the count rule (Q1 (a), Q4 (a)): the larger of the
@@ -437,6 +471,18 @@ func sheetCells(t *testing.T, f *excelize.File, sheet string) []string {
 	return nil
 }
 
+// bareDataRef is a formula that reads one Data sheet cell and nothing else: how
+// the blank layout prints a place on the sheets where the draw prints a literal
+// name (printsPlacesLiterally), so that a name typed on the Data sheet shows
+// there too.
+var bareDataRef = regexp.MustCompile(`^'data'!\$[A-Z]+\$\d+$`)
+
+// printsPlacesLiterally reports whether the draw prints a competitor's name on
+// the sheet as a value of its own rather than by formula.
+func printsPlacesLiterally(sheet string) bool {
+	return strings.HasPrefix(sheet, helper.SheetTree) || sheet == helper.SheetKachinukiDetail
+}
+
 // sheetShape is a sheet read as its layout: per cell, "" for an empty cell,
 // "P" for a place (a competitor's name, dojo or number in people, or the blank
 // layout's empty-text formula), "F" for any other formula, and the text of any
@@ -446,7 +492,7 @@ func sheetShape(t *testing.T, f *excelize.File, sheet string, people map[string]
 	shape := map[string]string{}
 	eachCell(t, f, sheet, func(cell, value, formula string) {
 		switch {
-		case formula == `""` || (formula == "" && people[value]):
+		case formula == `""` || (formula == "" && people[value]) || (printsPlacesLiterally(sheet) && bareDataRef.MatchString(formula)):
 			shape[cell] = "P"
 		case formula != "":
 			shape[cell] = "F"

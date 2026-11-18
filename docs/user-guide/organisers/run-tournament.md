@@ -305,7 +305,7 @@ Set the **Award two joint 3rd places** option during setup, before you generate 
 Two Excel downloads are available from the competition page:
 
 - **Download results (.xlsx)**: a workbook with played scores, pool standings, winners, and decisions filled in. Covers pools, league, and knockout formats. Swiss competitions have no static bracket; follow the current standings instead.
-- **Download blank template (.xlsx)**: an empty bracket workbook with linked formulas for hand scoring at events without a network connection. Once the draw is generated, it holds that draw, the same one Export PDFs prints; before that, it is a preview drawn from everyone registered, with seeds placed. The preview ignores check-in, while **Generate draw** leaves out anyone not checked in, so the preview's pools can differ from the draw. Checking someone in or out never changes a draw already generated.
+- **Download blank template (.xlsx)**: an empty bracket workbook with linked formulas for hand scoring at events without a network connection. Once the draw is generated, it holds that draw, the same one Export PDFs prints; before that, it has empty places only, with no names or seeds, as many as the larger of the expected number of participants and everyone registered (everyone registered counts whether or not they are checked in). Checking someone in or out never changes a draw already generated.
 
 ### PDF
 

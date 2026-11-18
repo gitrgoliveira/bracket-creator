@@ -126,8 +126,8 @@ func TestStoredDrawTemplateMatchesCreate(t *testing.T) {
 	}
 }
 
-// createFormFor is the /create form admin_schedule_export.jsx's buildXlsxBody
-// sends for comp before it is drawn.
+// createFormFor is the /create form the CLI's web page posts for comp: the
+// stateless draw the stored-draw export is pinned to.
 func createFormFor(t *testing.T, comp *state.Competition, n int, lines []string, seeds []domain.SeedAssignment) url.Values {
 	t.Helper()
 	knockout := comp.Format == state.CompFormatKnockout
@@ -179,7 +179,7 @@ func createFormFor(t *testing.T, comp *state.Competition, n int, lines []string,
 		form.Set("thirdPlaceMatch", "on")
 	}
 	if len(seeds) > 0 {
-		// The page sends name, dojo and rank only (buildXlsxBody): /create's
+		// The form carries name, dojo and rank only: /create's
 		// roster carries no ids, and SaveSeeds stamped them on these rows.
 		bare := make([]domain.SeedAssignment, len(seeds))
 		for i, s := range seeds {

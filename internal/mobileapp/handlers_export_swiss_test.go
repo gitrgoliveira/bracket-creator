@@ -117,3 +117,16 @@ func TestExportBracketHandler_NoDrawTooFewIs422(t *testing.T) {
 	assert.Contains(t, w.Body.String(), "expected number of participants")
 	assert.Contains(t, w.Body.String(), "Settings")
 }
+
+// TestExportBracketHandler_UnknownCompetitionIs404: the engine reads the
+// competition once and an unknown one is a not-found answer, never a 500.
+func TestExportBracketHandler_UnknownCompetitionIs404(t *testing.T) {
+	r, _, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/competitions/ghost/export", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusNotFound, w.Code, "body: %s", w.Body.String())
+}

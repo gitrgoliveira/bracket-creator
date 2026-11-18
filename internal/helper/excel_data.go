@@ -227,19 +227,27 @@ func AddDataToSheetForExport(f *excelize.File, pools []Pool, namesToPrintPlayers
 const emptyTextFormula = `""`
 
 // BlankCellsHolding rewrites, on every sheet of f, each cell whose written value
-// is one of texts as empty text (emptyTextFormula), keeping its style. A cell
-// that holds a formula is left alone: what it shows is whatever it refers to.
+// is one of texts, so it shows empty text. On the Data sheet the cell becomes
+// emptyTextFormula; on any other sheet it becomes a reference to the Data cell
+// that holds the same text, so a name typed on the Data sheet later shows
+// there too. A cell that holds a formula is left alone: what it shows is
+// whatever it refers to. A text the Data sheet does not hold becomes
+// emptyTextFormula wherever it is printed.
 //
 // It is the blank layout's one blanking step (engine.blankLayoutXlsx): the
 // layout is drawn over empty places that carry stand-in names and dojos
 // through the generators (which refuse a blank name or dojo, and read an empty
 // bracket side as a bye), and this step then blanks every cell that printed one
 // as a value. On the Data sheet that is each place's name, dojo and display name
-// cell, which every pool and elimination sheet refers to by formula, so a name
-// typed there later shows on every sheet; any sheet that printed a stand-in as
-// a value of its own (a knockout tree's first-round names, a Kachinuki Detail
-// section's team names) is blanked by the same rule.
+// cell, which every pool and elimination sheet refers to by formula; any sheet
+// that printed a stand-in as a value of its own (a knockout tree's first-round
+// names, a Kachinuki Detail section's team names) now refers to that Data cell
+// too, so a name typed there shows on every sheet, tree pages included.
 func BlankCellsHolding(f *excelize.File, texts map[string]bool) error {
+	home, err := dataSheetHomes(f, texts)
+	if err != nil {
+		return err
+	}
 	for _, sheet := range f.GetSheetList() {
 		rows, err := f.GetRows(sheet, excelize.Options{RawCellValue: true})
 		if err != nil {
@@ -261,13 +269,40 @@ func BlankCellsHolding(f *excelize.File, texts map[string]bool) error {
 				if formula != "" {
 					continue
 				}
-				if err := f.SetCellFormula(sheet, cell, emptyTextFormula); err != nil {
+				formula = emptyTextFormula
+				if ref, ok := home[value]; ok && sheet != SheetData {
+					formula = ref
+				}
+				if err := f.SetCellFormula(sheet, cell, formula); err != nil {
 					return fmt.Errorf("blank cells: write %s!%s: %w", sheet, cell, err)
 				}
 			}
 		}
 	}
 	return nil
+}
+
+// dataSheetHomes maps each of texts to the formula that reads the Data sheet
+// cell holding it (the first one, top to bottom).
+func dataSheetHomes(f *excelize.File, texts map[string]bool) (map[string]string, error) {
+	rows, err := f.GetRows(SheetData, excelize.Options{RawCellValue: true})
+	if err != nil {
+		return nil, fmt.Errorf("blank cells: read %s: %w", SheetData, err)
+	}
+	home := make(map[string]string, len(texts))
+	for r, row := range rows {
+		for c, value := range row {
+			if _, seen := home[value]; !texts[value] || seen {
+				continue
+			}
+			cell, err := excelize.CoordinatesToCellName(c+1, r+1, true)
+			if err != nil {
+				return nil, fmt.Errorf("blank cells: %s row %d column %d: %w", SheetData, r+1, c+1, err)
+			}
+			home[value] = sheetRef(SheetData, cell)
+		}
+	}
+	return home, nil
 }
 
 // poolDrawColumnCount is the fixed number of columns on the Pool Draw sheet.

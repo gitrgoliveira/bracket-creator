@@ -2996,10 +2996,8 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		// The engine decides which template the competition gets: its stored
 		// draw, or, with no draw yet (setup, or a draw another device
 		// discarded), the blank layout the draw would print, its places empty.
-		// Export PDFs prints the same workbook.
-		if _, ok := loadExistingCompetition(c, store, id); !ok {
-			return
-		}
+		// Export PDFs prints the same workbook. The engine reads the
+		// competition once and answers an unknown one as a not-found error.
 		data, err := eng.ExportCompetitionXlsx(id)
 		if err != nil {
 			// Swiss (no static bracket), a stored bracket that no longer
@@ -3012,7 +3010,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			if respondUnexportableCompetitionError(c, err) {
 				return
 			}
-			internalError(c, err)
+			respondEngineError(c, err)
 			return
 		}
 

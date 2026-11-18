@@ -1,4 +1,4 @@
-// The blank-template download (POST /create) is a direct fetch: when the
+// The blank-template download (GET /api/competitions/:id/export) is a direct fetch: when the
 // request never leaves the device, the operator reads the one "not sent"
 // sentence (write_result.jsx NOT_SENT_NO_CONNECTION) as it is, never the
 // browser's "Failed to fetch" inside "Export failed: ...". Any other failure
@@ -76,21 +76,11 @@ describe('AdminExport blank template download', () => {
     expect(alert).toHaveBeenCalledWith(NOT_SENT_NO_CONNECTION);
   });
 
-  it('keeps a TypeError that is not the lost request (the body failing after the answer) in "Export failed"', async () => {
-    const alert = vi.spyOn(window, 'alert').mockImplementation(() => {});
-    global.fetch = vi.fn(() => Promise.resolve({
-      ok: true,
-      blob: () => Promise.reject(new TypeError('network error')),
-    }));
-    await clickBlankTemplate();
-    expect(alert).toHaveBeenCalledWith('Export failed: network error');
-  });
-
   it('keeps an answered refusal in its own "Export failed" wording', async () => {
     const alert = vi.spyOn(window, 'alert').mockImplementation(() => {});
     global.fetch = vi.fn(() => Promise.resolve({
       ok: false,
-      text: () => Promise.resolve(JSON.stringify({ error: 'bad roster' })),
+      json: () => Promise.resolve({ error: 'bad roster' }),
     }));
     await clickBlankTemplate();
     expect(alert).toHaveBeenCalledWith('Export failed: bad roster');

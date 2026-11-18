@@ -23,8 +23,7 @@ import (
 	bctest "github.com/gitrgoliveira/bracket-creator/internal/test"
 )
 
-// kachinukiForm is the POST /create body buildXlsxBody
-// (web-mobile/js/admin_schedule_export.jsx) sends for a kachinuki competition
+// kachinukiForm is the POST /create body for a kachinuki competition
 // of teams of three that decides a single 3rd place: tournamentType "pools"
 // is pools of three sending two qualifiers each to the knockout, "knockout"
 // the knockout alone.
@@ -226,7 +225,7 @@ func TestCreateHandler_KachinukiKnockoutDetail(t *testing.T) {
 
 // TestCreateHandler_LeagueHasNoKnockout pins the blank template of a league,
 // format=league: a league is decided by its table, so the one pool of
-// everyone (as buildXlsxBody posts a league) is followed by no knockout -- no
+// everyone (as the CLI's page posts a league) is followed by no knockout -- no
 // tree page, an empty Elimination Matches sheet and, for kachinuki, a Kachinuki
 // Detail section for each league match and none for a final -- the sheets the
 // stored-draw export prints for the same competition, both asking

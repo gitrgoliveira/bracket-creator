@@ -722,7 +722,7 @@ func TestScoreCellsCarryOutstandingHansokuTriangle(t *testing.T) {
 			IpponsB: []string{"K", "H"}, HansokuB: 2, // discharged: already B's... A's H to B
 			Status: state.MatchStatusCompleted,
 		}
-		writeScoreRowCells(f, sheet, 1, 5, "M", "KH", mr)
+		writeScoreRowCells(f, sheet, 1, 5, "M", "KH", mr, false)
 		left, _ := f.GetCellValue(sheet, "B5")
 		right, _ := f.GetCellValue(sheet, "F5")
 		assert.Equal(t, "KH", left, "an even count is already discharged into the H ippon: no triangle")
@@ -743,7 +743,7 @@ func TestScoreCellsCarryOutstandingHansokuTriangle(t *testing.T) {
 			IpponsB: []string{"K", "H"}, HansokuB: 1, // one standing foul on B
 			Status: state.MatchStatusCompleted,
 		}
-		writeScoreRowCells(f, sheet, 1, 5, "M", "KH", mr)
+		writeScoreRowCells(f, sheet, 1, 5, "M", "KH", mr, false)
 		left, _ := f.GetCellValue(sheet, "B5")
 		right, _ := f.GetCellValue(sheet, "F5")
 		assert.Equal(t, "▲ KH", left, "B (Shiro) scores on the left, so its standing foul comes first")

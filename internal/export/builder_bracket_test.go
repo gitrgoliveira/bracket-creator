@@ -678,8 +678,9 @@ func TestBuildResultsWorkbook_KnockoutCellRefLikeNames(t *testing.T) {
 
 // TestBuildResultsWorkbook_SetupKnockoutHasNoBracket: a knockout-only
 // competition still in setup has no draw, so its results workbook prints no
-// bracket and no competitor's name in one (the pre-draw roster fallback that
-// seeded the registered names into a bracket is gone), and it is a workbook,
+// bracket and no competitor's name on any sheet (the Data and Names to Print
+// sheets included: numbers belong to draw positions, so no roster is printed
+// before the draw), and it is a workbook,
 // never an error the results door would answer 500.
 func TestBuildResultsWorkbook_SetupKnockoutHasNoBracket(t *testing.T) {
 	t.Parallel()
@@ -691,6 +692,7 @@ func TestBuildResultsWorkbook_SetupKnockoutHasNoBracket(t *testing.T) {
 	comp.Kind = "individual"
 	comp.Format = state.CompFormatKnockout
 	comp.Status = state.CompStatusSetup
+	comp.NumberPrefix = "K" // a prefix is what used to print the roster
 	require.NoError(t, store.SaveCompetition(comp))
 	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
 		{Name: "Alice", Dojo: "D1"}, {Name: "Bob", Dojo: "D2"}, {Name: "Carol", Dojo: "D3"}, {Name: "Dave", Dojo: "D4"},
@@ -706,9 +708,6 @@ func TestBuildResultsWorkbook_SetupKnockoutHasNoBracket(t *testing.T) {
 		rows, err := f.GetRows(sheet)
 		require.NoError(t, err)
 		for _, name := range []string{"Alice", "Bob", "Carol", "Dave"} {
-			if sheet == helper.SheetData {
-				continue
-			}
 			assert.Falsef(t, sheetContainsCell(rows, name), "sheet %q names %s before the draw", sheet, name)
 		}
 	}

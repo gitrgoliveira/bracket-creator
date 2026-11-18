@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"sort"
 	"strconv"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/excel"
@@ -140,7 +139,6 @@ func blankDraw(comp *state.Competition, courts []string, n int) (*blankLayout, e
 	if c.IsTeam() && c.TeamSize == 0 {
 		c.TeamSize = 5 // runDrawPipeline's default for a team competition
 	}
-	numCourts := max(len(courts), 1)
 	places := blankPlaces(&c, n)
 	layout := &blankLayout{comp: &c, places: places}
 
@@ -151,11 +149,16 @@ func blankDraw(comp *state.Competition, courts []string, n int) (*blankLayout, e
 			c.PoolSize = n
 			c.RoundRobin = true
 		}
-		pools, drawCourts, hasRounds, err := blankPoolPhase(&c, places, numCourts)
+		// The draw's own pool phase (formPools, createPoolMatches,
+		// layoutPoolMatches), refusals included, minus the numbering, the start
+		// times and the store.
+		pools, drawCourts, err := formPools(&c, places)
 		if err != nil {
-			return nil, err
+			return nil, blankUnbuildable(n, err.Error())
 		}
-		layout.poolMatches = poolMatchResults(&c, pools, drawCourts, hasRounds)
+		hasRounds := createPoolMatches(&c, pools)
+		layout.poolMatches, _ = layoutPoolMatches(&c, pools, drawCourts, hasRounds)
+		numberPoolMatchesInPlayingOrder(layout.poolMatches)
 		AttachPoolMatches(pools, layout.poolMatches)
 		layout.pools = pools
 		layout.draw = EliminationDraw(&c, pools, nil, len(courts))
@@ -226,115 +229,4 @@ func placeTexts(places []helper.Player) map[string]bool {
 // blankUnbuildable is ErrBlankLayoutUnbuildable for n places, with the reason.
 func blankUnbuildable(n int, reason string) error {
 	return fmt.Errorf("%w for %d places: %s; change the expected number of participants or the pool settings in this competition's Settings", ErrBlankLayoutUnbuildable, n, reason)
-}
-
-// blankPoolPhase forms the pool phase over the places with the generators and
-// refusals generatePools applies, and stores nothing: the pool count and sizes
-// (helper.BuildPoolPhaseFillBracket or helper.BuildPoolPhaseTreeAwareWithMode
-// by the extra-qualifier mode), the pools + knockout refusals, the pool matches
-// (partial, round robin or full) and the one-pool court check. No numbers.
-// hasRounds reports whether the matches carry a round.
-func blankPoolPhase(c *state.Competition, places []helper.Player, numCourts int) (pools []helper.Pool, drawCourts int, hasRounds bool, err error) {
-	n := len(places)
-	if c.PoolSize <= 0 {
-		return nil, 0, false, blankUnbuildable(n, "the pool size is not set")
-	}
-	poolFedKnockout := c.Format == state.CompFormatMixed
-	if poolFedKnockout {
-		if verr := state.ValidateExtraQualifiers(c.ExtraQualifiers, c.PoolSizeMode, c.EffectivePoolWinners()); verr != nil {
-			return nil, 0, false, blankUnbuildable(n, verr.Error())
-		}
-	}
-	if poolFedKnockout && c.ExtraQualifiers == state.ExtraQualifiersFillBracket {
-		pools, drawCourts, err = helper.BuildPoolPhaseFillBracket(places, c.PoolSize, numCourts)
-	} else {
-		extraQualifiers := state.ExtraQualifiersNone
-		if poolFedKnockout {
-			extraQualifiers = c.ExtraQualifiers
-		}
-		pools, drawCourts, err = helper.BuildPoolPhaseTreeAwareWithMode(places, c.PoolSize, c.PoolSizeMode == "max", numCourts, c.EffectivePoolWinners(), extraQualifiers)
-	}
-	if err != nil {
-		return nil, 0, false, blankUnbuildable(n, err.Error())
-	}
-	if poolFedKnockout {
-		if len(pools) < 2 {
-			return nil, 0, false, blankUnbuildable(n, fmt.Sprintf("a pools + knockout competition needs at least 2 pools, and a pool size of %d makes %d", c.PoolSize, len(pools)))
-		}
-		winners := c.EffectivePoolWinners()
-		for _, p := range pools {
-			if len(p.Players) < winners {
-				return nil, 0, false, blankUnbuildable(n, fmt.Sprintf("pool %s would have %d place(s) but %d go on to the knockout", p.PoolName, len(p.Players), winners))
-			}
-		}
-	}
-	switch c.PoolFormat {
-	case state.PoolFormatPartial:
-		helper.CreatePartialPoolMatches(pools)
-		hasRounds = true
-	default:
-		if c.RoundRobin {
-			helper.CreatePoolRoundRobinMatches(pools)
-			hasRounds = true
-		} else {
-			helper.CreatePoolMatches(pools)
-		}
-	}
-	if len(pools) == 1 && numCourts > 1 {
-		if verr := ValidateCourtCount(n, numCourts); verr != nil {
-			return nil, 0, false, blankUnbuildable(n, verr.Error())
-		}
-	}
-	return pools, drawCourts, hasRounds, nil
-}
-
-// poolMatchResults lays the pools' matches out as generatePools stores them,
-// without the times: each with its pool's shiaijo (a one-pool competition's
-// spread over every shiaijo it was given, a league's by the league scheduler),
-// numbered in playing order (numberPoolMatchesInPlayingOrder), so the Pool
-// Matches sheet prints them in the order and under the shiaijo the draw would.
-func poolMatchResults(c *state.Competition, pools []helper.Pool, drawCourts int, hasRounds bool) []state.MatchResult {
-	courtAssign := helper.AssignPoolsToCourts(len(pools), drawCourts)
-	var results []state.MatchResult
-	for pi, p := range pools {
-		poolCourts := []string{""}
-		if len(c.Courts) > 0 {
-			poolCourts = []string{c.Courts[courtAssign[pi]]}
-			if len(pools) == 1 && len(c.Courts) > 1 {
-				poolCourts = c.Courts
-			}
-		}
-		for i, m := range p.Matches {
-			round := m.Round
-			if !hasRounds {
-				round = -1
-			}
-			results = append(results, state.MatchResult{
-				ID:      p.PoolName + "-" + strconv.Itoa(i),
-				SideA:   m.SideA.Name,
-				SideB:   m.SideB.Name,
-				SideAID: m.SideA.ID,
-				SideBID: m.SideB.ID,
-				Status:  state.MatchStatusScheduled,
-				Court:   poolCourts[i%len(poolCourts)],
-				Round:   round,
-			})
-		}
-	}
-	switch {
-	case c.Format == state.CompFormatLeague:
-		results, _ = scheduleLeagueSlots(results, c.Courts)
-	case len(pools) == 1 && len(c.Courts) > 1:
-		sort.SliceStable(results, func(i, j int) bool { return results[i].Round < results[j].Round })
-		roundStart, currentRound := 0, -1
-		for i := range results {
-			if results[i].Round != currentRound {
-				currentRound, roundStart = results[i].Round, 0
-			}
-			results[i].Court = c.Courts[roundStart%len(c.Courts)]
-			roundStart++
-		}
-	}
-	numberPoolMatchesInPlayingOrder(results)
-	return results
 }

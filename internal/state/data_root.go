@@ -379,7 +379,7 @@ func (d *dataRoot) writeSynced(path string, data []byte, perm fs.FileMode) error
 	if _, err := f.Write(data); err != nil {
 		return errors.Join(err, f.Close())
 	}
-	if err := f.Sync(); err != nil {
+	if err := flush(f); err != nil {
 		return errors.Join(err, f.Close())
 	}
 	return f.Close()

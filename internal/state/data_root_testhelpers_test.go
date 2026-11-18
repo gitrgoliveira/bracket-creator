@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 )
 
-// writeFile creates or truncates path with perm, writes data, syncs the file
-// to disk, and closes it.
+// writeFile creates or truncates path with perm, writes data, flushes the
+// file (flush, skipped in a macOS test binary) and closes it.
 func (d *dataRoot) writeFile(path string, data []byte, perm fs.FileMode) error {
 	f, err := d.openFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, perm)
 	if err != nil {
@@ -17,7 +17,7 @@ func (d *dataRoot) writeFile(path string, data []byte, perm fs.FileMode) error {
 	if _, err := f.Write(data); err != nil {
 		return errors.Join(err, f.Close())
 	}
-	if err := f.Sync(); err != nil {
+	if err := flush(f); err != nil {
 		return errors.Join(err, f.Close())
 	}
 	return f.Close()

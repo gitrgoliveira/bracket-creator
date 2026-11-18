@@ -124,7 +124,12 @@ func TestScoreHandler_ClockSkewBoundaries(t *testing.T) {
 			"winner": "Bob", "ipponsA": []string{}, "ipponsB": []string{"M", "D"},
 			"status": "completed",
 		}
-		if modifiedAt != nil {
+		// A stamp given as a func is read here, just before the request, so the
+		// setup above (slow on a loaded disk) does not eat into the margin the
+		// case measures.
+		if ahead, ok := modifiedAt.(func() int64); ok {
+			fields["modifiedAt"] = ahead()
+		} else if modifiedAt != nil {
 			fields["modifiedAt"] = modifiedAt
 		}
 		payload, _ := json.Marshal(fields)
@@ -158,7 +163,7 @@ func TestScoreHandler_ClockSkewBoundaries(t *testing.T) {
 	})
 
 	t.Run("a stamp just past the margin is refused", func(t *testing.T) {
-		code, body, store := write(t, "outband", time.Now().UnixMilli()+6_000)
+		code, body, store := write(t, "outband", func() int64 { return time.Now().UnixMilli() + 6_000 })
 		require.Equal(t, http.StatusOK, code)
 		assert.Equal(t, "clock_skew", body["reason"], "6s ahead is past the 5s margin; body: %v", body)
 		assert.Equal(t, false, body["applied"])

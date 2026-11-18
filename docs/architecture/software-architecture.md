@@ -324,7 +324,7 @@ do not import one another in a cycle; where a lower module must call a higher on
 registers the function there at load. When one device has several tabs open, only one tab sends
 each match's writes at a time: the tab holds a lock for that match (the browser's Web Locks, or a
 short timed note in browser storage in a browser that lacks them), so a write goes once and a
-closed tab hands its writes over. The writes that go through it are:
+closed tab hands its writes over. The writes that go through the outbox are:
 
 - scoring taps (points, fouls, overtime, flags and the other score events);
 - score writes (start, record bout, finish, correction), decisions, reopen, send back to the queue, queue it and reopen;

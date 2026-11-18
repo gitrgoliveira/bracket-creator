@@ -316,6 +316,8 @@ func (s *Store) saveCompetitionLocked(c *Competition, write writeFn) error {
 // saveBracketLocked for the cache-refresh rationale that applies
 // equally here (T211/T212).
 func (s *Store) saveCompetitionChangedLocked(c *Competition, write writeFn) (bool, error) {
+	// mkdirAll of the folder itself drops its held root first (dataRoot), so a
+	// root held on a folder removed by hand never outlives the one made here.
 	if err := s.root.mkdirAll(s.compPath(c.ID), 0700); err != nil {
 		return false, err
 	}
@@ -614,6 +616,8 @@ func (s *Store) DeleteCompetition(id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	// Removing the folder itself drops its held root under the entry's write
+	// lock (dataRoot.removeAll), so the next call opens whatever is there then.
 	if err := s.root.removeAll(s.compPath(id)); err != nil {
 		return err
 	}

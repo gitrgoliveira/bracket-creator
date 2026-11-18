@@ -52,7 +52,7 @@ const minBlankPlaces = 2
 // layout places nobody. Fewer than minBlankPlaces is ErrBlankLayoutTooFew
 // (operator decision Q1 (a)).
 func (e *Engine) blankPlaceCount(comp *state.Competition) (int, error) {
-	players, err := e.store.LoadParticipants(comp.ID, comp.EffectiveWithZekkenName())
+	players, err := e.store.LoadParticipantsOpt(comp.ID, comp.EffectiveWithZekkenName(), state.LoadParticipantsOpts{WithSeeds: false, HasIDs: comp.ParticipantIDsHint()})
 	if err != nil {
 		return 0, err
 	}

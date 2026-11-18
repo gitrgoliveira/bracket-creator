@@ -140,19 +140,13 @@ func blankDraw(comp *state.Competition, courts []string, n int) (*blankLayout, e
 	c := *comp
 	c.Courts = courts
 	c.NumberPrefix = ""
-	if c.IsTeam() && c.TeamSize == 0 {
-		c.TeamSize = 5 // runDrawPipeline's default for a team competition
-	}
+	applyDefaultTeamSize(&c)
 	places := blankPlaces(&c, n)
 	layout := &blankLayout{comp: &c, places: places}
 
 	switch c.Format {
 	case state.CompFormatMixed, state.CompFormatLeague:
-		if c.Format == state.CompFormatLeague {
-			// runDrawPipeline's single-pool invariant for a league.
-			c.PoolSize = n
-			c.RoundRobin = true
-		}
+		applyLeagueSinglePool(&c, n)
 		// The draw's own pool phase (formPools, createPoolMatches,
 		// layoutPoolMatches), refusals included, minus the numbering, the start
 		// times and the store.
@@ -178,18 +172,15 @@ func blankDraw(comp *state.Competition, courts []string, n int) (*blankLayout, e
 			layout.draw = draw
 		}
 	default:
-		// A standalone knockout, as runDrawPipeline's default case draws one
-		// (generateKnockout): seeding order, the balanced tree, then the pow2
-		// slot list it stores (buildBracketFromDraw), printed as
-		// EliminationDraw prints a stored bracket's first round.
-		seeded := helper.StandardSeeding(places)
-		names := make([]string, len(seeded))
+		// A standalone knockout, drawn as generateKnockout draws one
+		// (seededKnockoutDraw), then the pow2 slot list it stores
+		// (buildBracketFromDraw), printed as EliminationDraw prints a stored
+		// bracket's first round.
+		seeded, stored := seededKnockoutDraw(places, len(courts))
 		keyOf := make(map[string]string, len(seeded))
-		for i, p := range seeded {
-			names[i] = p.Name
+		for _, p := range seeded {
 			keyOf[p.Name] = helper.PlayerKey(p)
 		}
-		stored := helper.NewKnockoutDraw(helper.CreateBalancedTree(names), len(courts))
 		if stored == nil || stored.Root == nil {
 			return nil, blankUnbuildable(n, blankKnockoutUndrawable)
 		}

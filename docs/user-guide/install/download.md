@@ -4,9 +4,9 @@ Pick the computer that will run the tournament app: usually the laptop at the de
 
 Once the app is running, open `http://localhost:8080` on that computer. Courts and phones on the same network open `http://<laptop address>:8080` instead, as [Your first tournament](../start-here/first-tournament.md) explains.
 
-## Any computer with Docker (recommended)
+## Any computer with Docker
 
-Docker runs the same app on macOS, Windows and Linux, and is the recommended route for most people. Install [Docker Desktop](https://www.docker.com/products/docker-desktop/) (or Docker Engine on Linux). The tournament is stored in a `tournament-data` folder that you create once.
+Docker runs the same app on macOS, Windows and Linux. Install [Docker Desktop](https://www.docker.com/products/docker-desktop/) (or Docker Engine on Linux). The tournament is stored in a `tournament-data` folder that you create once.
 
 On Linux, make that folder writable by the container's user before the first run, or the app cannot save the tournament: create it with `mkdir -p tournament-data`, then run `sudo chown 65534 tournament-data`. Docker Desktop on macOS and Windows handles that for you. [Install](install.md#docker-recommended) explains why, and lists the other images.
 
@@ -72,7 +72,7 @@ The packages do not update themselves: [Upgrading](install.md#upgrading) says ho
 
 ## Windows: the release zip
 
-Docker Desktop ([Any computer with Docker](#any-computer-with-docker-recommended)) is the recommended route on Windows too. Without it, use the release zip:
+Docker Desktop ([Any computer with Docker](#any-computer-with-docker)) also works on Windows. Without it, use the release zip:
 
 1. Download the zip for your processor from the latest release:
     * Most Windows computers (Intel or AMD): [`bracket-creator_windows_x86_64.zip`](https://github.com/gitrgoliveira/bracket-creator/releases/latest/download/bracket-creator_windows_x86_64.zip)

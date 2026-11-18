@@ -38,7 +38,11 @@ type blankLayoutCase struct {
 func blankLayoutCases() []blankLayoutCase {
 	naginata := func(c *state.Competition) { c.Naginata = true }
 	engi := func(c *state.Competition) { c.Engi = true }
+	zekken := func(c *state.Competition) { c.WithZekkenName = true }
 	return []blankLayoutCase{
+		{"pools zekken", state.CompFormatMixed, 3, 6, []string{"A"}, zekken},
+		{"league zekken", state.CompFormatLeague, 4, 4, []string{"A"}, zekken},
+		{"knockout zekken", state.CompFormatKnockout, 0, 6, []string{"A"}, zekken},
 		{"pools individual", state.CompFormatMixed, 3, 9, []string{"A"}, nil},
 		{"pools individual two courts", state.CompFormatMixed, 3, 12, []string{"A", "B"}, nil},
 		{"pools team", state.CompFormatMixed, 3, 6, []string{"A"}, teamOf(3, "")},

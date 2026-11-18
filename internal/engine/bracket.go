@@ -25,6 +25,21 @@ func winnerOfPlaceholder(depth, matchIdx int) string {
 	return fmt.Sprintf(winnerOfFormat, depth, matchIdx)
 }
 
+// seededKnockoutDraw is the ONE owner of a standalone knockout's shape: the
+// players in StandardSeeding order and the balanced tree over their names,
+// cut into one region per shiaijo exactly as the Excel pagination cuts it
+// (helper.NewKnockoutDraw, R2-R7 leave a knockout bracket alone but its
+// matches still need courts). generateKnockout stores it; the blank layout
+// prints it. The draw is nil when the tree is empty.
+func seededKnockoutDraw(players []domain.Player, courts int) ([]domain.Player, *helper.KnockoutDraw) {
+	seeded := helper.StandardSeeding(players)
+	names := make([]string, len(seeded))
+	for i, p := range seeded {
+		names[i] = p.Name
+	}
+	return seeded, helper.NewKnockoutDraw(helper.CreateBalancedTree(names), courts)
+}
+
 // generateKnockout builds and saves an elimination bracket for a standalone
 // (direct-elimination) knockout competition. StandardSeeding → CreateBalancedTree
 // → TreeToLeafArray mirrors the Excel create-knockout path exactly (mp-5ng7);
@@ -54,19 +69,11 @@ func (e *Engine) generateKnockout(comp *state.Competition, players []domain.Play
 	// only. A knockout-only competitor's Number is composed at READ time by
 	// engine.NumberKnockoutParticipants (bc-pnum ruling 2), from the
 	// DrawOrder stamped below, so nothing here needs to write Number.
-	seededPlayers := helper.StandardSeeding(players)
-	names := make([]string, len(seededPlayers))
+	seededPlayers, draw := seededKnockoutDraw(players, len(comp.Courts))
 	drawOrder := make([]string, len(seededPlayers))
 	for i, p := range seededPlayers {
-		names[i] = p.Name
 		drawOrder[i] = p.ID
 	}
-	tree := helper.CreateBalancedTree(names)
-
-	// R2-R7 leave a knockout bracket alone, but its matches still need courts,
-	// so the seeded tree is cut into one region per shiaijo exactly as the Excel
-	// pagination cuts it (helper.NewKnockoutDraw).
-	draw := helper.NewKnockoutDraw(tree, len(comp.Courts))
 	// drawOrder is StandardSeeding's own placement, participant ids in
 	// bracket-position order top to bottom (bc-pnum ruling 2): "a number
 	// belongs to a position in the draw". Passed straight into

@@ -366,14 +366,10 @@ func normalizedEstimateInputs(comp *state.Competition, tournament *state.Tournam
 	normTourn := &tournCopy
 	state.ApplyTournamentDefaults(normTourn)
 	state.ApplyCompetitionDefaults(normComp)
-	// Team-size default, same guard as competition.go (StartCompetition) and
-	// swiss.go: a team competition with an omitted TeamSize uses the FIK
-	// 5-person default. Without this, perMatchElapsedMinutes would see
+	// Without the team-size default, perMatchElapsedMinutes would see
 	// TeamSize==0 and fall through to the individual-match formula,
 	// under-estimating a team competition's duration.
-	if normComp.IsTeam() && normComp.TeamSize == 0 {
-		normComp.TeamSize = 5
-	}
+	applyDefaultTeamSize(normComp)
 	return normComp, normTourn
 }
 
@@ -578,7 +574,7 @@ func slotMinutesFor(tournament *state.Tournament) state.SlotMinutes {
 		// default, as EstimateForCounts does.
 		if c != nil && c.IsTeam() && c.TeamSize == 0 {
 			compCopy := *c
-			compCopy.TeamSize = 5
+			applyDefaultTeamSize(&compCopy)
 			c = &compCopy
 		}
 		return perMatchElapsedMinutes(c, tournament, ko)

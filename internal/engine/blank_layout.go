@@ -171,7 +171,7 @@ func blankDraw(comp *state.Competition, courts []string, n int) (*blankLayout, e
 			draw, outOfScope, reason := buildPoolFedDraw(&c, pools, len(courts))
 			if outOfScope || draw == nil {
 				if reason == "" {
-					reason = "the knockout could not be drawn"
+					reason = blankKnockoutUndrawable
 				}
 				return nil, blankUnbuildable(n, reason)
 			}
@@ -191,7 +191,7 @@ func blankDraw(comp *state.Competition, courts []string, n int) (*blankLayout, e
 		}
 		stored := helper.NewKnockoutDraw(helper.CreateBalancedTree(names), len(courts))
 		if stored == nil || stored.Root == nil {
-			return nil, blankUnbuildable(n, "the knockout could not be drawn")
+			return nil, blankUnbuildable(n, blankKnockoutUndrawable)
 		}
 		leaves := helper.SlotArray(stored.Root)
 		keys := make([]string, len(leaves))
@@ -241,7 +241,11 @@ func placeTexts(places []helper.Player) map[string]bool {
 	return texts
 }
 
+const blankKnockoutUndrawable = "the knockout could not be drawn; change the expected number of participants or the pool settings in this competition's Settings"
+
 // blankUnbuildable is ErrBlankLayoutUnbuildable for n places, with the reason.
+// The reason is operator wording that already names its own remedy (the draw's
+// refusals do); blankKnockoutUndrawable is the one that needs this file's.
 func blankUnbuildable(n int, reason string) error {
-	return fmt.Errorf("%w for %d places: %s; change the expected number of participants or the pool settings in this competition's Settings", ErrBlankLayoutUnbuildable, n, reason)
+	return fmt.Errorf("%w for %d places: %s", ErrBlankLayoutUnbuildable, n, reason)
 }

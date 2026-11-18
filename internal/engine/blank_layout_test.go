@@ -290,6 +290,10 @@ func TestExportTournamentWorkbooks_PrintsABlankLayoutAndSkipsOneItCannotSize(t *
 	assert.Equal(t, "one-pool", skipped[1].ID)
 	assert.Contains(t, skipped[1].Reason, ErrBlankLayoutUnbuildable.Error()+" for 4 places")
 	assert.Contains(t, skipped[1].Reason, "needs at least 2 pools")
+	// Operator wording with one remedy: no field spellings, no second remedy.
+	assert.NotContains(t, skipped[1].Reason, "PoolSize")
+	assert.Contains(t, skipped[1].Reason, "lower Players per pool")
+	assert.NotContains(t, skipped[1].Reason, "Settings")
 }
 
 // TestBlankLayout_IgnoresALeftoverDraw: a setup competition's pools.csv is the

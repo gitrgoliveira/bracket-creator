@@ -150,7 +150,7 @@ func formPools(comp *state.Competition, players []domain.Player) (pools []helper
 	// participants, or switch to `league`. (league legitimately produces 1 pool.)
 	if poolFedKnockout {
 		if len(pools) < 2 {
-			return nil, 0, fmt.Errorf("a mixed (Pools + Knockout) competition needs at least 2 pools, got %d with %d participants at PoolSize=%d; reduce PoolSize, add participants, or change format to league", len(pools), len(players), comp.PoolSize)
+			return nil, 0, fmt.Errorf("a Pools + Knockout competition needs at least 2 pools, but %d participants at %d players per pool make %d; lower Players per pool, add participants, or change the format to League", len(players), comp.PoolSize, len(pools))
 		}
 		// Every pool must be able to supply PoolWinners finishers to the knockout.
 		// In "max" mode an odd participant count can leave an under-filled last
@@ -161,7 +161,7 @@ func formPools(comp *state.Competition, players []domain.Player) (pools []helper
 		poolWinners := comp.EffectivePoolWinners()
 		for _, p := range pools {
 			if len(p.Players) < poolWinners {
-				return nil, 0, fmt.Errorf("pool %q has only %d participant(s) but %d advance to the knockout (PoolWinners=%d), every pool needs at least PoolWinners participants; reduce PoolWinners, adjust PoolSize/pool-size-mode, or add participants", p.PoolName, len(p.Players), poolWinners, poolWinners)
+				return nil, 0, fmt.Errorf("pool %q has only %d participant(s) but %d advance to the knockout, so every pool needs at least %d; lower Winners per pool, change Players per pool or Pool size is a, or add participants", p.PoolName, len(p.Players), poolWinners, poolWinners)
 			}
 		}
 	}

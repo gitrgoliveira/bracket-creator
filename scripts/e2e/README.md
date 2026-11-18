@@ -276,14 +276,13 @@ another court).
 
 `fixtures/test.mjs` starts one `mobile-app` per spec file, on a free port and
 a throwaway data folder, through `scripts/screenshots/lib/server.mjs`, and
-stops it by PID. Spec files run in parallel across workers, a third of the
-machine's available CPUs and at least one (`os.availableParallelism()`, 3 on a
-10-core machine, where a full run passed 139 of 139 journeys in under seven
-minutes with none flaky; Playwright's default of half the cores left one or two
-journeys a run missing a screen change inside its timeout while every core was
-busy), each worker with its own browser and its own server; pass
-`E2E_ARGS='--workers=N'` to override it, or `--workers=1` on a slow or loaded
-machine. A worker
+stops it by PID. Spec files run in parallel across workers: a third of the
+machine's available CPUs (`os.availableParallelism()`), and at least one, so 3
+on a 10-core machine. At half the cores, Playwright's default, one or two
+journeys a run missed a screen change inside their timeouts while every core
+was busy. Each worker has
+its own browser and its own server. Pass `E2E_ARGS='--workers=N'` to set the
+count, or `--workers=1` on a slow or loaded machine. A worker
 runs its files one after another (all of them with `--workers=1`), and each
 file starts with a fresh server, never the previous file's tournament. A
 worker stops a file's server when it starts the next file's server, or when

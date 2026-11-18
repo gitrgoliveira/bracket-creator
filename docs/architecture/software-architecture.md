@@ -319,7 +319,8 @@ the queue and its storage (`api_client_queue.jsx`), building and committing a wr
 (`api_client_taps.jsx`), the team members the device made (`api_client_members.jsx`), the stamp
 clock (`api_client_clock.jsx`), what the screen shows before the server answers
 (`api_client_overlays.jsx`) and the held-writes status (`api_client_status.jsx`). The state they
-share lives in one leaf module (`api_client_store.jsx`), which imports none of them, so the modules
+share lives in one leaf module (`api_client_store.jsx`), which imports none of them (only the id
+helper `api_client_ids.jsx`), so the modules
 do not import one another in a cycle; where a lower module must call a higher one, the higher one
 registers the function there at load. When one device has several tabs open, only one tab sends
 each match's writes at a time: the tab holds a lock for that match (the browser's Web Locks, or a

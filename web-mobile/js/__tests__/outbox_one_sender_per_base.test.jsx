@@ -60,6 +60,19 @@ describe('the base lease (one storage, two tabs)', () => {
         expect(b.claim('m3'), 'an old lease is taken over').toBe(true);
     });
 
+    it('keeps a lease the holder renews though its timer was slowed past the lease life', () => {
+        const a = tabOf('a');
+        const b = tabOf('b');
+        a.claim('m1');
+        vi.clearAllTimers(); // a hidden page's timers run once a minute: no beat comes in time
+        clock += BASE_LEASE_LIVE_MS - 1;
+        a.renew(); // before the next entry it sends
+        clock += BASE_LEASE_LIVE_MS - 1;
+        expect(b.claim('m1'), 'a renewed lease is not taken').toBe(false);
+        clock += BASE_LEASE_LIVE_MS;
+        expect(b.claim('m1'), 'one nobody renews is').toBe(true);
+    });
+
     it('gives every lease up when the page goes', () => {
         const a = tabOf('a');
         a.claim('m1');
@@ -141,6 +154,7 @@ describe('two tabs of one device send a write once', () => {
             if (String(url).includes('/api/time')) return Promise.reject(new TypeError('clock'));
             calls.push({ url: String(url), tab: callerTab() });
             if (mode === 'offline') { mode = 'online'; return Promise.reject(new TypeError('offline')); }
+            if (mode === 'refuse') return Promise.resolve(answer(400, { error: 'nope', reasonHuman: 'The lineup was refused.' }));
             if (mode === 'hold') return new Promise((resolve) => { held.push(() => resolve(answer(200, { applied: true }))); });
             return Promise.resolve(answer(200, { applied: true }));
         });
@@ -230,5 +244,76 @@ describe('two tabs of one device send a write once', () => {
         expect(announce.map((c) => c.tab), 'the call is sent once').toEqual(['a']);
         expect(withdraw.map((c) => c.tab), 'its withdrawal is sent once').toEqual(['a']);
         expect(A.unsentWrites().total + B.unsentWrites().total).toBe(0);
+    });
+
+    it('Finish + Start Next: the next match\'s start, which follows the finish, is sent once with two tabs open', async () => {
+        mode = 'online';
+        const A = await openTab('a');
+        await openTab('b');
+        const finish = await A.recordScore('c1', 'm1', { status: 'completed', ipponsA: ['M'], ipponsB: [], winner: 'A' }, 'pw', { id: 'm1', modifiedAt: 0 });
+        finish.settled.catch(() => {});
+        const start = await A.recordScore('c1', 'm2', { status: 'running', ipponsA: [], ipponsB: [], after: finish.key }, 'pw', { id: 'm2', modifiedAt: 0 });
+        start.settled.catch(() => {});
+        await tick(100);
+        await tick(10_000);
+        const url = (m) => `/api/competitions/c1/matches/${m}/score`;
+        const sentTo = (m) => calls.filter((c) => c.url.includes(url(m))).map((c) => c.tab);
+        expect(sentTo('m1'), 'the finish is sent once').toHaveLength(1);
+        expect(sentTo('m2'), 'the start that follows it is sent once').toHaveLength(1);
+        expect(A.unsentWrites().total).toBe(0);
+    });
+
+    it('a tab opened while a write is out sends nothing of it, on load or after', async () => {
+        const A = await openTab('a');
+        (await A.putMatchLineup('c1', 't1', 'm1', { 1: 'L1' }, 'pw', null, null)).settled.catch(() => {});
+        await tick(100); // A has its request out
+        const C = await openTab('c'); // a page loaded now rehydrates what storage holds
+        await tick(100);
+        await tick(10_000);
+        expect(C.unsentWrites().total, 'tab C holds it').toBe(1);
+        expect(calls.filter((c) => c.url.includes(URL_LINEUP)).map((c) => c.tab), 'only A sends').toEqual(['a']);
+        for (const release of held.splice(0)) release();
+        await tick(100);
+        await tick(10_000);
+        expect(calls.filter((c) => c.url.includes(URL_LINEUP)), 'and it is sent once').toHaveLength(1);
+        expect(C.unsentWrites().total).toBe(0);
+    });
+
+    it('the answer of a write another tab sent reaches the tab that made it', async () => {
+        mode = 'refuse';
+        const A = await openTab('a');
+        await openTab('b');
+        const flushB = await import(/* @vite-ignore */ `${FLUSH}?tab=b`);
+        expect(flushB._baseLease.claim('c1:m1'), 'tab B is sending the match').toBe(true);
+        const put = await A.putMatchLineup('c1', 't1', 'm1', { 1: 'L1' }, 'pw', null, null);
+        let told;
+        put.settled.then((v) => { told = { value: v }; }, (e) => { told = { error: e }; });
+        await tick(100); // A found the base leased and left it to B
+        await tick(3000);
+        expect(calls.filter((c) => c.url.includes(URL_LINEUP)).map((c) => c.tab), 'B sent it, once').toEqual(['b']);
+        expect(told && told.error, 'the maker is told the refusal, not that it was discarded').toBeInstanceOf(Error);
+        expect(told.error.message, 'with the refusal the server gave').toBe('nope');
+        expect(A.unsentWrites().total).toBe(0);
+    });
+
+    it('a base turned away for its lease starts as soon as the holder wakes it, behind another base\'s hanging request', async () => {
+        const A = await openTab('a');
+        const B = await openTab('b');
+        const flushB = await import(/* @vite-ignore */ `${FLUSH}?tab=b`);
+        expect(flushB._baseLease.claim('c1:m1')).toBe(true); // B sends m1 ...
+        const m1 = await A.putMatchLineup('c1', 't1', 'm1', { 1: 'L1' }, 'pw', null, null);
+        m1.settled.catch(() => {});
+        // ... and A has a hanging request on another base in the same pass.
+        const m2 = await A.putMatchLineup('c1', 't1', 'm2', { 1: 'L2' }, 'pw', null, null);
+        m2.settled.catch(() => {});
+        await tick(100);
+        expect(calls.filter((c) => c.url.includes('/match-lineups/m2')).map((c) => c.tab), 'A has m2 out').toEqual(['a']);
+        mode = 'online';
+        flushB._baseLease.release('c1:m1', true); // B gives m1 up and wakes the others
+        await tick(100); // A starts m1 now, in this pass, with m2 still hanging
+        expect(calls.filter((c) => c.url.includes('/match-lineups/m1')).length, 'm1 is sent while m2 hangs').toBeGreaterThan(0);
+        for (const release of held.splice(0)) release();
+        await tick(100);
+        expect(B.unsentWrites().total + A.unsentWrites().total).toBe(0);
     });
 });

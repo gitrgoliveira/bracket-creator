@@ -29,7 +29,7 @@ import {
 } from './api_client_clock.jsx';
 import {
     _isAllowedTerminalRequest, _replayBody, _notifyQueueAlert, _settledLeftStored, _persistQueue,
-    _writeQueue, _dequeue, _baseOf, _byEntryOrder, _entriesFor, _claimRefusal,
+    _writeQueue, _dequeue, _baseOf, _byEntryOrder, _entriesFor, _claimRefusal, _settleAnsweredElsewhere, _shareAnswer,
 } from './api_client_queue.jsx';
 import { _CHECKIN_KINDS, _checkInAnswered, rebaseQueuedVersion } from './api_client_overlays.jsx';
 import { TAP_BATCH_MAX, _tellTurnedAway, _sendTapBatch } from './api_client_taps.jsx';
@@ -319,15 +319,20 @@ export async function _flushQueue() {
                 for (const [base, list] of byBase) {
                     if (active.has(base) || failedBases.has(base) || _basesOut.has(base)) continue;
                     // Another tab of the device is sending this base: it is not
-                    // failing, and not held. The holder's wake after a turn that
-                    // sent all it held reruns the flush, and the backoff covers
-                    // a holder that failed or is gone.
+                    // failing, and not held. It is not marked as ended either:
+                    // the holder's wake after a turn that sent all it held
+                    // reaches this launch, which asks for the lease again at
+                    // once, and the backoff covers a holder that failed or is
+                    // gone.
                     if (!_baseLease.claim(base)) {
-                        failedBases.add(base);
                         pass.leaseSkipped = true;
                         _askAgainWhenLeaseEnds(base);
                         continue;
                     }
+                    // What another tab sent before it gave the base up is
+                    // settled with its answer, not sent again, whatever order
+                    // its storage events reached this tab in.
+                    _settleAnsweredElsewhere(base);
                     active.set(base, true);
                     _basesOut.add(base);
                     (async () => {
@@ -441,6 +446,9 @@ async function _flushBase(base, list, pass, gen) {
     let outcome = 'settled';
     while (i < list.length) {
         if (gen !== _queueGen) return;
+        // A turn can run past the lease's life (a long request, a hidden page's
+        // slow timers): it renews before each send.
+        _baseLease.renew();
         const [key, d] = list[i];
         // Skip entries removed or replaced since the snapshot was taken.
         if (_writeQueue.get(key) !== d) { i++; continue; }
@@ -785,6 +793,8 @@ async function _sendEntry(key, descriptor, pass) {
     // send it again. The door's promise settles with it (outcome).
     const leaveQueue = (outcome) => {
         if (!_dequeue(key, descriptor, outcome)) return false;
+        // Stored for the other tabs, before the entry leaves storage.
+        _shareAnswer(key, descriptor, outcome);
         _persistQueue();
         return true;
     };

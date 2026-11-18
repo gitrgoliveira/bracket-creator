@@ -19,7 +19,7 @@ import {
     _revKey, LEGACY_QUEUE_STORAGE_KEY, _isAllowedTerminalRequest, _persistQueue, _writeQueue, _queueSet,
     _settled, _markSettled, _wasSettledHere, _dequeue, _openDequeueBatch, _closeDequeueBatch,
     _parseStoredQueue, _enqueuedAfter, QUEUE_ENTRY_SEP, _baseOf, _newEntryKey, _entryStamp, _entriesFor,
-    _openSettlement, _pendingAnswer,
+    _openSettlement, _pendingAnswer, _sharedAnswerFor, _claimRefusal,
 } from './api_client_queue.jsx';
 import {
     _eventSession, BASIS_OWN_MAX, _tapSeq, _tapEntriesFor, _publishPendingTaps, _noteOwnTapSeq,
@@ -519,7 +519,12 @@ export function _onStoredQueueChanged(oldRaw, newRaw) {
             // anyway) or say it. A sign-out's wipe (after === null) still
             // takes it at once.
             if (gone && after !== null && _inFlight.has(d)) continue;
-            if (gone && _dequeue(k, d)) changed = dropped = true;
+            if (!gone) continue;
+            // The tab that sent it left its answer: the caller here reads it as
+            // it would have had it from its own request (_sharedAnswerFor).
+            const answer = after === null ? undefined : _sharedAnswerFor(k, d);
+            if (answer && answer.error) _claimRefusal(k, answer.error);
+            if (_dequeue(k, d, answer)) changed = dropped = true;
         }
     } finally {
         _closeDequeueBatch();

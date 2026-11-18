@@ -13,11 +13,12 @@
 //   turn ends (`release`), so the outbox is never owned by a tab for longer
 //   than a send.
 // - A lease is alive for BASE_LEASE_LIVE_MS (a few seconds) after its last beat. The holder
-//   beats every BASE_LEASE_BEAT_MS while it holds one, so a tab that crashes
-//   mid-send gives the base up once its lease is old, and a tab that is closed
-//   gives its leases up at once (`leave`, on pagehide; a browser that closes a
-//   page without it leaves the lease to run out). Nothing of a tab that is
-//   gone stays unsent: another tab takes the base over and sends it.
+//   beats every BASE_LEASE_BEAT_MS while it holds one and renews before each
+//   entry it sends (`renew`), so a tab that crashes mid-send gives the base up
+//   once its lease is old, and a tab that is closed gives its leases up at once
+//   (`leave`, on pagehide; a browser that closes a page without it leaves the
+//   lease to run out). Nothing of a tab that is gone stays unsent: another tab
+//   takes the base over and sends it.
 // - A tab that finds a base leased by another live tab does not send it. It
 //   asks again on the flush's backoff, and at once when the holder's turn ended
 //   with everything sent (`release(base, true)` writes BASE_LEASE_WAKE_KEY, which
@@ -28,14 +29,17 @@
 //   did, which is safe because the server answers a resend as recorded.
 //
 // Residual: two tabs claiming one base within the same storage sync, or a
-// holder whose timers a hidden page stopped for longer than the lease lives,
-// both send, a resend the server answers as recorded, never a loss.
+// holder whose beat a hidden page slowed past the lease's life while one request
+// is out (Chrome runs the timers of a page hidden for five minutes about once a
+// minute, and a request may take its 12 s deadline), both send, a resend the
+// server answers as recorded, never a loss. Between two entries the holder
+// renews, so only the request under way can outlive its lease.
 
 export const BASE_LEASE_KEY = 'bc_base_senders_v1';
 export const BASE_LEASE_WAKE_KEY = 'bc_base_senders_wake_v1';
-// Short, so a tab closed or crashed mid-send holds nobody up for long; a holder
-// that is alive beats well inside it, hidden pages included (a browser slows a
-// hidden page's timers to once a second, not to once in six).
+// Short, so a tab closed or crashed mid-send holds nobody up for long. A visible
+// holder beats well inside it; a hidden page's timers can be slowed far past it,
+// which is why the holder also renews before each entry (`renew`).
 export const BASE_LEASE_LIVE_MS = 6_000;
 export const BASE_LEASE_BEAT_MS = 2_000;
 
@@ -138,6 +142,8 @@ export function createBaseLease({ storage, tab, now = () => Date.now() }) {
                 } catch (_e) { /* a tab that is not woken asks on its backoff */ }
             }
         },
+        /** Renews every lease this tab holds, now: the timer's beat, asked for. */
+        renew: beat,
         /** The page goes: every lease it holds goes with it. */
         leave() {
             for (const base of mine) this.release(base);

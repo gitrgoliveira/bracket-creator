@@ -560,6 +560,7 @@ export function _wipeQueue() {
     // The wipe takes them out of storage too (P2).
     _settledLeftStored = false;
     _settledHere.clear();
+    _removeSharedAnswers();
 }
 
 // While many entries leave at once (a tap batch settling, _sendTapBatch;
@@ -603,6 +604,103 @@ export function _storedQueue() {
     } catch (_e) {
         return new Map();
     }
+}
+
+// The answer of an entry, kept for the other tabs. A tab that sends an entry
+// another tab queued (it held the base's lease) settles it here; the tab that
+// made it, and any tab still holding a copy, only sees the entry leave storage
+// (or not at all: a stale persist writes a copy back, K2), so a maker would
+// settle its caller as `discarded`, never told a refusal nor reverting a court
+// or time change the server refused, and a tab whose `storage` events lag
+// would send the entry again. So the sender stores the answer under the entry's
+// own key BEFORE it takes the entry out of storage (_shareAnswer), and a tab
+// that finds one for its copy settles the entry with it instead of sending
+// (_sharedAnswerFor: when it drops its copy as another tab's removal reaches it,
+// and once it holds a base's lease, _settleAnsweredElsewhere). An outcome is as
+// `_dequeue` takes it, `{ value }` or `{ error: { message, props } }`. Records
+// older than ANSWER_KEEP_MS are swept as one is written, and the logout wipe
+// removes them (_wipeQueue). Not for taps, which settle through their own
+// outcomes.
+export const ANSWER_STORAGE_PREFIX = 'bc_entry_answer_v1:';
+const ANSWER_KEEP_MS = 60_000;
+const ANSWER_SWEEP_MS = 30_000;
+let _answersSweptAt = 0;
+// Names this tab's own records, which it never reads back.
+const _answerTab = _randomId();
+
+function _answerKeys() {
+    try {
+        return Object.keys(localStorage).filter((k) => k.startsWith(ANSWER_STORAGE_PREFIX));
+    } catch (_e) {
+        return [];
+    }
+}
+
+function _sweepAnswers(now) {
+    if (now - _answersSweptAt < ANSWER_SWEEP_MS) return;
+    _answersSweptAt = now;
+    for (const k of _answerKeys()) {
+        let at = 0;
+        try { at = JSON.parse(localStorage.getItem(k)).at; } catch (_e) { /* unreadable: swept */ }
+        if (!(now - at < ANSWER_KEEP_MS)) {
+            try { localStorage.removeItem(k); } catch (_e) { /* unreadable storage */ }
+        }
+    }
+}
+
+export function _removeSharedAnswers() {
+    for (const k of _answerKeys()) {
+        try { localStorage.removeItem(k); } catch (_e) { /* unreadable storage */ }
+    }
+}
+
+// _shareAnswer: the answer of an entry, stored for the other tabs. Anything
+// that cannot be stored is left: the maker then settles its caller as
+// discarded, as before.
+export function _shareAnswer(key, d, outcome) {
+    if (d.kind === 'evt' || !outcome || outcome.byOperator) return;
+    try {
+        const now = Date.now();
+        _sweepAnswers(now);
+        const shared = 'error' in outcome
+            ? { error: { message: String(outcome.error && outcome.error.message), props: { ...outcome.error } } }
+            : { value: outcome.value };
+        localStorage.setItem(ANSWER_STORAGE_PREFIX + key, JSON.stringify({
+            at: now, tab: _answerTab, enqueuedAt: d.enqueuedAt, outcome: JSON.parse(JSON.stringify(shared)),
+        }));
+    } catch (_e) { /* storage refused or the answer is not plain data */ }
+}
+
+// _sharedAnswerFor: the answer another tab stored for this tab's copy `d` of
+// `key`, as `_dequeue` takes an outcome; undefined when there is none.
+export function _sharedAnswerFor(key, d) {
+    let a;
+    try {
+        a = JSON.parse(localStorage.getItem(ANSWER_STORAGE_PREFIX + key));
+    } catch (_e) {
+        return undefined;
+    }
+    if (!a || a.tab === _answerTab || a.enqueuedAt !== d.enqueuedAt || !a.outcome) return undefined;
+    const { error, value } = a.outcome;
+    if (error) return { error: Object.assign(new Error(error.message), error.props) };
+    return { value };
+}
+
+// _settleAnsweredElsewhere: the entries of `base` that another tab already
+// sent are settled with its answer, never sent again. Asked once this tab holds
+// the base's lease, which the other tab gave up after it stored the answer.
+// Returns whether any entry was settled.
+export function _settleAnsweredElsewhere(base) {
+    let settled = false;
+    for (const [k, d] of _writeQueue) {
+        if (_baseOf(k) !== base || _inFlight.has(d)) continue;
+        const answer = _sharedAnswerFor(k, d);
+        if (!answer) continue;
+        if (answer.error) _claimRefusal(k, answer.error);
+        if (_dequeue(k, d, answer)) settled = true;
+    }
+    if (settled) _persistQueue();
+    return settled;
 }
 
 // The stored queue's serialized form (a `storage` event carries it as a

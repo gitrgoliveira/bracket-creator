@@ -2468,6 +2468,17 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
   const kachinukiCurrentBoutPlayed = kachinukiBoutMode
     ? kachinukiCurBoutIdx >= 0 && subBoutHasBeenPlayed(subs[kachinukiCurBoutIdx])
     : true;
+  // Record bout works out the next pairing from who fought: with nobody named
+  // on either side of the live bout the server appends none, and the tap did
+  // nothing the sheet could show. So the button waits for a fighter, and the
+  // footer says why. A fighter picked by squad number counts, as it does for the
+  // server (kachinukiFighterKnown). A function, since the names are read from
+  // playerNamesForBout, defined further down.
+  const kachinukiCurBoutHasNoFighter = () => {
+    if (!kachinukiBoutMode || kachinukiCurBoutIdx < 0) return false;
+    const f = playerNamesForBout(kachinukiCurBoutIdx);
+    return !f.aName && !f.bName && !f.aMemberId && !f.bMemberId;
+  };
   // mp-gmcg: the bouts already fought (everything played except the current
   // bout). They render as READ-ONLY team-sub-match rows above the current
   // editable bout, so the operator sees the whole encounter like a regular team
@@ -5219,6 +5230,11 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
               )}
             </div>
           )}
+          {kachinukiCurrentBoutPlayed && kachinukiCurBoutHasNoFighter() && (
+            <div data-testid="kachinuki-nofighter-hint" style={{ fontSize: 12, color: "var(--ink-2)" }}>
+              <span>Pick or type who fights this bout to enable <strong>Record bout</strong>.</span>
+            </div>
+          )}
           {/* mp-gmcg: a reopen's outcome: its notice, its error, and the
               court-busy remedy (a busy court used to be a dead end for the one
               group that has no alternative: a correction bypasses the court
@@ -5381,10 +5397,11 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
                     // banner for a queued write; returning nothing hid it.
                     return sent;
                   });
-                })(ev)} disabled={submitting || !kachinukiCurrentBoutPlayed || kachinukiCurBoutRecorded}
+                })(ev)} disabled={submitting || !kachinukiCurrentBoutPlayed || kachinukiCurBoutRecorded || kachinukiCurBoutHasNoFighter()}
                   title={kachinukiNoLiveBout ? "Bout recorded: no next pairing"
                     : kachinukiCurBoutRecorded ? "Bout recorded"
-                    : !kachinukiCurrentBoutPlayed ? "Nothing recorded for this bout yet" : undefined}>
+                    : !kachinukiCurrentBoutPlayed ? "Nothing recorded for this bout yet"
+                    : kachinukiCurBoutHasNoFighter() ? "Pick who fights this bout first" : undefined}>
                   {submitting ? "Saving…" : "Record bout"}
                 </button>
                 {/* Encho sits BESIDE End match (critique P2): it is End's

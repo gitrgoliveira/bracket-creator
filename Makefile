@@ -9,6 +9,11 @@ GO_VERSION := 1.27.4
 # Only the two `go test` lines use it (the heavy phase); lint, the JS tests and
 # the security scans run at normal priority.
 NICE ?= nice -n 10
+# The test runs collect garbage less often, trading memory for CPU: measured
+# on 8 cores, the Go step 61 s to 49 s, the race step 239 s to 201 s, with the
+# same tests passing and the same coverage. Empty it for Go's default:
+# make go/test GOGC_TEST=
+GOGC_TEST ?= 400
 # goreleaser is pinned so a release is built with the version it was tested
 # with; keep it in lockstep with .github/workflows/release.yaml.
 # Security and linting tools are the opposite: they always run their newest
@@ -224,12 +229,12 @@ js/validate: js/lint js/check-imports js/test js/security ## Run all Javascript 
 # making sure the test results are already on screen when it happens.
 go/test: go/lint js/lint js/check-imports js/test ## Run tests, then the security scans
 	@echo "Running tests..."
-	$(NICE) go test -cover . ./cmd/... ./internal/... ./tests/...
+	GOGC=$(GOGC_TEST) $(NICE) go test -cover . ./cmd/... ./internal/... ./tests/...
 	@$(MAKE) go/security js/security
 
 go/test-race: go/lint ## Run tests with race detection
 	@echo "Running tests with race detection..."
-	$(NICE) go test -race -cover . ./cmd/... ./internal/... ./tests/...
+	GOGC=$(GOGC_TEST) $(NICE) go test -race -cover . ./cmd/... ./internal/... ./tests/...
 	
 go/build: $(BIN_PATH)/$(BIN_NAME) ## Build the application locally
 

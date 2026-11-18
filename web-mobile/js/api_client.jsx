@@ -53,7 +53,7 @@ import {
     subscribeTerminalWriteFailed, _recomputeSyncStatus, subscribeUnsentWrites, subscribeSyncStatus,
 } from './api_client_status.jsx';
 import {
-    _resetFlushBackoff, _restampFor, _flushQueue, _outboxIdle, _rerunFlushSoon, _baseLease,
+    _resetFlushBackoff, _restampFor, _flushQueue, _outboxIdle, _rerunFlushSoon, _wakeLeaseWaiters, _baseLease,
 } from './api_client_flush.jsx';
 import { BASE_LEASE_WAKE_KEY } from './base_sender_lease.jsx';
 import {
@@ -97,8 +97,9 @@ if (typeof window !== 'undefined') {
     if (window.__bcStoredQueueHandler) window.removeEventListener('storage', window.__bcStoredQueueHandler);
     const onStorage = (e) => {
         if (e.key === QUEUE_STORAGE_KEY) _onStoredQueueChanged(e.oldValue, e.newValue);
-        // Another tab sent all it held of a base: send what is left of it.
-        if (e.key === BASE_LEASE_WAKE_KEY) _rerunFlushSoon();
+        // Another tab sent all it held of a base: send what is left of it, if this
+        // tab was turned away from it.
+        if (e.key === BASE_LEASE_WAKE_KEY) _wakeLeaseWaiters();
         if (typeof e.key === 'string' && e.key.startsWith(TOLD_TAPS_PREFIX)) _onToldTapsStored(e.key, e.oldValue, e.newValue);
         // Another tab learned something of a minted member: a member that
         // never was comes off this tab's writes, and a write held back for one

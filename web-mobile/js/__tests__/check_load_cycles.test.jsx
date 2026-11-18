@@ -105,6 +105,16 @@ describe('findLoadTimeCycleReads', () => {
     expect(find(`${head}function f() { { const B_CONST = 1; void B_CONST; } return B_CONST; }\nf();\n`)).toHaveLength(1);
   });
 
+  it('walks a function called at load in the module\'s scope, not the caller\'s', () => {
+    // g's parameter hides B_CONST inside g only: f, declared at the top level,
+    // still reads the import, whoever calls it.
+    expect(find(`${head}function f() { return B_CONST; }\nfunction g(B_CONST) { return f(); }\ng(1);\n`)).toHaveLength(1);
+    expect(find(`${head}function f() { return B_CONST; }\nfunction g() { const B_CONST = 1; return f() + B_CONST; }\ng();\n`)).toHaveLength(1);
+    expect(find(`${head}class K { constructor() { this.v = B_CONST; } }\nfunction g(B_CONST) { return new K(); }\ng(1);\n`)).toHaveLength(1);
+    // an inline callback is written in the caller's scope, so its parameter still hides
+    expect(find(`${head}function g(B_CONST) { return [1].map(() => B_CONST); }\ng(1);\n`)).toEqual([]);
+  });
+
   it('reports a read from a module that imports itself back through a longer cycle', () => {
     const hits = findLoadTimeCycleReads({
       'x.jsx': "import { Y } from './y.jsx';\nexport const X = Y;\n",

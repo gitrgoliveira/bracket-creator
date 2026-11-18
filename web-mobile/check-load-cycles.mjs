@@ -161,7 +161,7 @@ function runNewNow(node, ctx) {
   while (callee.type === 'ParenthesizedExpression') callee = callee.expression;
   if (callee.type !== 'Identifier') return;
   if (declared(ctx.locals, callee.name, ctx)) {
-    runNow(ctx.locals.get(callee.name), ctx);
+    runNow(ctx.locals.get(callee.name), ctx, true);
     return;
   }
   const cls = declared(ctx.classes, callee.name, ctx) ? ctx.classes.get(callee.name) : undefined;
@@ -169,13 +169,29 @@ function runNewNow(node, ctx) {
   ctx.seen.add(cls);
   for (const member of cls.body.body) {
     if (member.static) continue;
-    if (member.type === 'MethodDefinition' && member.kind === 'constructor') runNow(member.value, ctx);
-    else if (member.type === 'PropertyDefinition') walkLoadTime(member.value, ctx);
+    if (member.type === 'MethodDefinition' && member.kind === 'constructor') runNow(member.value, ctx, true);
+    else if (member.type === 'PropertyDefinition') inFreshScopes(ctx, () => walkLoadTime(member.value, ctx));
   }
 }
 
-// Walk a function's parameter defaults and body as code that runs now, once.
-function runNow(fn, ctx) {
+// Walk `walk` with no enclosing function, block or catch scope: the lexical scope
+// of a top-level function or class is the module's alone, never the scope of the
+// place that happens to call it.
+function inFreshScopes(ctx, walk) {
+  const outer = ctx.scopes;
+  ctx.scopes = [];
+  try {
+    walk();
+  } finally {
+    ctx.scopes = outer;
+  }
+}
+
+// Walk a function's parameter defaults and body as code that runs now, once. A
+// function the module declares at its top level (`own`) is walked in the
+// module's scope; an inline callback sits in the scope that wrote it, which is
+// the one being walked.
+function runNow(fn, ctx, own = [...ctx.locals.values()].includes(fn)) {
   if (ctx.seen.has(fn)) return;
   ctx.seen.add(fn);
   // The parameters, the function's own name and its `var`s hide a watched name
@@ -184,10 +200,12 @@ function runNow(fn, ctx) {
   patternNames(fn.params, names);
   if (fn.id) names.add(fn.id.name);
   varNames(fn.body, names);
-  withScope(names, ctx, () => {
+  const walk = () => withScope(names, ctx, () => {
     walkPattern(fn.params, ctx);
     walkLoadTime(fn.body, ctx);
   });
+  if (own) inFreshScopes(ctx, walk);
+  else walk();
 }
 
 // The names a pattern (or a list of them) binds.

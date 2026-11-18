@@ -243,8 +243,32 @@ export function _restampFor(enqueuedAt, perfAtEnqueue) {
 }
 
 export async function _flushQueue() {
+    return _runFlush(null);
+}
+
+// _leaseWaiting: the bases the last launch left to another tab's lease. The
+// holder's wake asks for these alone (`_wakeLeaseWaiters`), so the bases this
+// tab is backing off from are not sent again by another tab's batches.
+const _leaseWaiting = new Set();
+
+// _wakeLeaseWaiters: another tab sent all it held of a base (its wake): this tab
+// asks for the bases it was turned away from, now. A pass under way starts them
+// beside its own turns; otherwise a pass of their own runs, leaving the backoff
+// of every other base as it was.
+export function _wakeLeaseWaiters() {
+    if (_leaseWaiting.size === 0) return;
+    if (_flushInProgress) { _wakeIdleBases(); return; }
+    queueMicrotask(() => {
+        if (_writeQueue.size > 0 && !_flushInProgress) _runFlush(new Set(_leaseWaiting));
+    });
+}
+
+// `only`: the bases this pass is for (the wake's), or null for every base. The
+// reruns a request makes while it runs are always whole passes.
+async function _runFlush(only) {
     if (_flushInProgress) { _flushRequested = true; _wakeIdleBases(); return; }
     _flushInProgress = true;
+    let onlyBases = only;
     // What this pass has to tell, counted across the whole call (the do/while
     // rerun included) and announced ONCE at the end, so a court reconnecting
     // with several held writes gets one alert stating how many, not N toasts
@@ -266,9 +290,12 @@ export async function _flushQueue() {
     try {
         do {
             _flushRequested = false;
+            const passBases = onlyBases;
+            onlyBases = null;
             // Clear any pending backoff timer so a rerun never leaves an orphaned
-            // timer that would later trigger a redundant flush.
-            if (_flushTimer !== null) { clearTimeout(_flushTimer); _flushTimer = null; }
+            // timer that would later trigger a redundant flush. A pass for the
+            // woken bases leaves it: it is the other bases' retry.
+            if (!passBases && _flushTimer !== null) { clearTimeout(_flushTimer); _flushTimer = null; }
 
             if (_writeQueue.size === 0) {
                 _offlineFlag = false;
@@ -316,8 +343,10 @@ export async function _flushQueue() {
                 }
                 // Entries that wait on each other are stuck, not waiting (H1).
                 _markWaitCycles(byBase);
+                for (const base of _leaseWaiting) if (!byBase.has(base)) _leaseWaiting.delete(base);
                 for (const [base, list] of byBase) {
                     if (active.has(base) || failedBases.has(base) || _basesOut.has(base)) continue;
+                    if (passBases && !passBases.has(base)) continue;
                     // Another tab of the device is sending this base: it is not
                     // failing, and not held. It is not marked as ended either:
                     // the holder's wake after a turn that sent all it held
@@ -326,12 +355,14 @@ export async function _flushQueue() {
                     // gone.
                     if (!_baseLease.claim(base)) {
                         pass.leaseSkipped = true;
+                        _leaseWaiting.add(base);
                         _askAgainWhenLeaseEnds(base);
                         continue;
                     }
                     // What another tab sent before it gave the base up is
                     // settled with its answer, not sent again, whatever order
                     // its storage events reached this tab in.
+                    _leaseWaiting.delete(base);
                     _settleAnsweredElsewhere(base);
                     active.set(base, true);
                     _basesOut.add(base);
@@ -379,6 +410,17 @@ export async function _flushQueue() {
                 _flushAttempt = 0;
                 _offlineFlag = false;
                 _recomputeSyncStatus();
+            } else if (passBases) {
+                // A pass for the bases another tab gave up learned nothing of
+                // the others: their backoff timer and the offline flag stay as
+                // the last whole pass left them, unless this one failed on the
+                // network or found no timer to retry its own failure.
+                if (pass.networkFailed) _offlineFlag = true;
+                _recomputeSyncStatus();
+                if (pass.anyFailed && _flushTimer === null && !_flushRequested) {
+                    _flushTimer = setTimeout(_flushQueue, FLUSH_BACKOFF_MS[Math.min(_flushAttempt, FLUSH_BACKOFF_MS.length - 1)]);
+                    _flushAttempt++;
+                }
             } else if (!pass.anyFailed && !pass.leaseSkipped) {
                 // bc-qttl: entries remain but nothing failed this pass, which is the
                 // all-parked case (a parked write is skipped, so it can neither
@@ -447,7 +489,9 @@ async function _flushBase(base, list, pass, gen) {
     while (i < list.length) {
         if (gen !== _queueGen) return;
         // A turn can run past the lease's life (a long request, a hidden page's
-        // slow timers): it renews before each send.
+        // slow timers): it renews before each send. A lease another tab took
+        // over meanwhile is not renewed; the turn goes on beside the new holder,
+        // a resend the server answers as recorded (base_sender_lease.jsx).
         _baseLease.renew();
         const [key, d] = list[i];
         // Skip entries removed or replaced since the snapshot was taken.
@@ -1039,7 +1083,11 @@ async function _sendEntry(key, descriptor, pass) {
         if (terminal) _tellRefusal({ compID, matchID, kind, status: res.status, ...refusal }, alert);
         else _notifyQueueAlert(alert);
     }
-    for (const [k, d] of staleDocs) _dequeue(k, d, { error: err });
+    // Each leaves with the refusal, shared with the other tabs like the one that
+    // was sent (leaveQueue), so a tab holding its own copy settles with it too.
+    for (const [k, d] of staleDocs) {
+        if (_dequeue(k, d, { error: err })) _shareAnswer(k, d, { error: err });
+    }
     if (!leaveQueue({ error: err }) && _writeQueue.has(key)) {
         _flushRequested = true;
         return 'restamped';

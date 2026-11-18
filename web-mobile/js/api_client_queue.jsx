@@ -693,7 +693,8 @@ export function _sharedAnswerFor(key, d) {
 export function _settleAnsweredElsewhere(base) {
     let settled = false;
     for (const [k, d] of _writeQueue) {
-        if (_baseOf(k) !== base || _inFlight.has(d)) continue;
+        // A tap never has a shared answer (_shareAnswer skips it): no read for it.
+        if (_baseOf(k) !== base || d.kind === 'evt' || _inFlight.has(d)) continue;
         const answer = _sharedAnswerFor(k, d);
         if (!answer) continue;
         if (answer.error) _claimRefusal(k, answer.error);

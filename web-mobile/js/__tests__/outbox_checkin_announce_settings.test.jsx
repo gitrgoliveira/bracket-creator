@@ -412,6 +412,26 @@ describe('the tournament settings (G4b)', () => {
         expect(stored()).toEqual([]);
     });
 
+    it('a save that leaves with a stale one shares the refusal for the other tabs, like the one sent', async () => {
+        let release;
+        server(() => new Promise((ok) => {
+            release = () => ok({ ok: false, status: 409, json: async () => ({ code: 'tournament_changed', error: 'The tournament settings changed, reload them.', tournament: { name: 'Theirs', tournamentVersion: 'v5' } }) });
+        }));
+        const first = await API.updateTournament(settings({ venue: 'A' }), 'pw');
+        await tick(0);
+        const second = await API.updateTournament(settings({ venue: 'B' }), 'pw');
+        release();
+        await first.settled.catch(() => {});
+        await second.settled.catch(() => {});
+        await tick(0);
+        const answerOf = (key) => Object.entries(_lsStore).find(([k]) => k.includes(key));
+        for (const key of [first.key, second.key]) {
+            const found = answerOf(key);
+            expect(found, `an answer is shared for ${key}`).toBeDefined();
+            expect(JSON.parse(found[1]).outcome.error.props.code).toBe('tournament_changed');
+        }
+    });
+
     it('a fetch of the tournament shows the save still queued', async () => {
         await API.updateTournament(settings({ venue: 'Queued hall' }), 'pw');
         global.fetch = vi.fn((url) => (String(url).endsWith('/api/viewer/tournament')

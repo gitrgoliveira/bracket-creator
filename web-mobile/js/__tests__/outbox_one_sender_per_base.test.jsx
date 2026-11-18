@@ -6,7 +6,7 @@
 // sender does not strand a write.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
-    createBaseLease, BASE_LEASE_KEY, BASE_LEASE_WAKE_KEY, BASE_LEASE_LIVE_MS, BASE_LEASE_BEAT_MS,
+    createBaseLease, baseLeaseKey, BASE_LEASE_PREFIX, BASE_LEASE_WAKE_KEY, BASE_LEASE_LIVE_MS, BASE_LEASE_BEAT_MS,
 } from '../base_sender_lease.jsx';
 
 const CLIENT = new URL('../api_client.jsx', import.meta.url).pathname;
@@ -38,7 +38,8 @@ describe('the base lease (one storage, two tabs)', () => {
         expect(b.claim('m2'), 'another base is free').toBe(true);
         expect(a.claim('m1'), 'the holder holds it again').toBe(true);
         a.release('m1');
-        expect(JSON.parse(store[BASE_LEASE_KEY]), 'only the other base is left').toEqual({ m2: { tab: 'b', at: clock } });
+        expect(store[baseLeaseKey('m1')], 'm1 is given up').toBeUndefined();
+        expect(JSON.parse(store[baseLeaseKey('m2')]), 'the other base is left').toEqual({ tab: 'b', at: clock });
         expect(b.claim('m1')).toBe(true);
     });
 
@@ -80,11 +81,11 @@ describe('the base lease (one storage, two tabs)', () => {
         vi.clearAllTimers();
         clock += BASE_LEASE_LIVE_MS + 1_000; // a request under way past the lease life
         a.renew();
-        expect(JSON.parse(store[BASE_LEASE_KEY]).m1, 'the late holder renewed').toEqual({ tab: 'a', at: clock });
+        expect(JSON.parse(store[baseLeaseKey('m1')]), 'the late holder renewed').toEqual({ tab: 'a', at: clock });
         expect(b.claim('m1'), 'so another tab is still turned away').toBe(false);
     });
 
-    it('does not renew a lease another tab took over, and still drops the leases that ran out', () => {
+    it('does not renew a lease another tab took over, and leaves the other bases alone', () => {
         const a = tabOf('a');
         const b = tabOf('b');
         const c = tabOf('c');
@@ -94,7 +95,23 @@ describe('the base lease (one storage, two tabs)', () => {
         clock += BASE_LEASE_LIVE_MS;
         expect(b.claim('m1'), 'a was late and b took the base').toBe(true);
         a.renew();
-        expect(JSON.parse(store[BASE_LEASE_KEY]), 'a leaves b\'s lease alone; c\'s old one is gone').toEqual({ m1: { tab: 'b', at: clock } });
+        expect(JSON.parse(store[baseLeaseKey('m1')]), 'a leaves b\'s lease alone').toEqual({ tab: 'b', at: clock });
+        expect(JSON.parse(store[baseLeaseKey('m2')]), 'and c\'s record is its own').toEqual({ tab: 'c', at: clock - BASE_LEASE_LIVE_MS });
+    });
+
+    it('keeps each base in a record of its own, so a write for one base never takes another back', () => {
+        const a = tabOf('a');
+        const b = tabOf('b');
+        // b's write lands between a's read and write of the SAME item, were the
+        // leases one record: with one record each, a's claim cannot touch b's.
+        const racing = {
+            ...storage,
+            setItem: (k, v) => { storage.setItem(k, v); if (k === baseLeaseKey('m1')) b.claim('m2'); },
+        };
+        const a2 = createBaseLease({ storage: racing, tab: 'a', now: () => clock });
+        expect(a2.claim('m1')).toBe(true);
+        expect(JSON.parse(store[baseLeaseKey('m2')]).tab, 'b keeps its base').toBe('b');
+        expect(a.claim('m2'), 'so a is still turned away from it').toBe(false);
     });
 
     it('gives every lease up when the page goes', () => {
@@ -102,7 +119,7 @@ describe('the base lease (one storage, two tabs)', () => {
         a.claim('m1');
         a.claim('m2');
         a.leave();
-        expect(store[BASE_LEASE_KEY], 'nothing is left in storage').toBeUndefined();
+        expect(Object.keys(store).filter((k) => k.startsWith(BASE_LEASE_PREFIX)), 'nothing is left in storage').toEqual([]);
         expect(tabOf('b').claim('m1')).toBe(true);
     });
 
@@ -178,6 +195,8 @@ describe('two tabs of one device send a write once', () => {
             if (String(url).includes('/api/time')) return Promise.reject(new TypeError('clock'));
             calls.push({ url: String(url), tab: callerTab() });
             if (mode === 'offline') { mode = 'online'; return Promise.reject(new TypeError('offline')); }
+            if (mode === 'fail-m2' && String(url).includes('/match-lineups/m2')) return Promise.resolve(answer(500, { error: 'boom' }));
+            if (mode === 'fail-m2') return Promise.resolve(answer(200, { applied: true }));
             if (mode === 'refuse') return Promise.resolve(answer(400, { error: 'nope', reasonHuman: 'The lineup was refused.' }));
             if (mode === 'hold') return new Promise((resolve) => { held.push(() => resolve(answer(200, { applied: true }))); });
             return Promise.resolve(answer(200, { applied: true }));
@@ -208,7 +227,7 @@ describe('two tabs of one device send a write once', () => {
         expect(calls.filter((c) => c.url.includes(URL_LINEUP)), 'and it is sent once').toHaveLength(1);
         expect(A.unsentWrites().total).toBe(0);
         expect(B.unsentWrites().total).toBe(0);
-        expect(store[BASE_LEASE_KEY], 'A gave the base up').toBeUndefined();
+        expect(store[baseLeaseKey('c1:m1')], 'A gave the base up').toBeUndefined();
     });
 
     it('a pass that only leaves bases to another tab keeps the offline flag as it was', async () => {
@@ -339,5 +358,37 @@ describe('two tabs of one device send a write once', () => {
         for (const release of held.splice(0)) release();
         await tick(100);
         expect(B.unsentWrites().total + A.unsentWrites().total).toBe(0);
+    });
+
+    it('a wake from another tab does not send this tab\'s failing base again before its backoff', async () => {
+        mode = 'fail-m2';
+        const B = await openTab('b');
+        (await B.putMatchLineup('c1', 't1', 'm2', { 1: 'L2' }, 'pw', null, null)).settled.catch(() => {});
+        await tick(100);
+        const sentM2 = () => calls.filter((c) => c.url.includes('/match-lineups/m2')).length;
+        expect(sentM2(), 'sent once, refused with a 5xx').toBe(1);
+        // Another tab finished a base: its wake reaches this tab.
+        tabs.b.onStorage({ key: BASE_LEASE_WAKE_KEY, oldValue: null, newValue: 'x:1' });
+        await tick(100); // well inside the first backoff step (500 ms)
+        expect(sentM2(), 'the failing base waits for its backoff').toBe(1);
+        await tick(1000);
+        expect(sentM2(), 'and is retried on it').toBeGreaterThan(1);
+    });
+
+    it('a wake sends the base this tab was turned away from, and leaves a failing base to its backoff', async () => {
+        mode = 'fail-m2';
+        const B = await openTab('b');
+        const other = createBaseLease({ storage: localStorage, tab: 'z' });
+        expect(other.claim('c1:m1'), 'another tab is sending m1').toBe(true);
+        (await B.putMatchLineup('c1', 't1', 'm1', { 1: 'L1' }, 'pw', null, null)).settled.catch(() => {});
+        (await B.putMatchLineup('c1', 't1', 'm2', { 1: 'L2' }, 'pw', null, null)).settled.catch(() => {});
+        await tick(100);
+        const sentTo = (m) => calls.filter((c) => c.url.includes(`/match-lineups/${m}`)).length;
+        expect(sentTo('m1'), 'm1 is left to its holder').toBe(0);
+        expect(sentTo('m2'), 'm2 failed once').toBe(1);
+        other.release('c1:m1', true); // the holder's turn ended with everything sent
+        await tick(100);
+        expect(sentTo('m1'), 'm1 goes at once').toBe(1);
+        expect(sentTo('m2'), 'm2 keeps its backoff').toBe(1);
     });
 });

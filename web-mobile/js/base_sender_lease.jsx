@@ -8,17 +8,19 @@
 // the other tab had already sent. A tab now sends a base only while it holds
 // that base's lease:
 //
-// - One record in storage, BASE_LEASE_KEY: { [base]: { tab, at } }. A tab takes
-//   a base's lease for the turn it is about to send and gives it up when the
-//   turn ends (`release`), so the outbox is never owned by a tab for longer
-//   than a send.
+// - One record in storage PER BASE, `BASE_LEASE_PREFIX + base`: { tab, at }. A
+//   tab takes a base's lease for the turn it is about to send and gives it up
+//   when the turn ends (`release`), so the outbox is never owned by a tab for
+//   longer than a send. The record is the base's own, so two tabs working on
+//   different bases never write the same item and cannot overwrite each other.
 // - A lease is alive for BASE_LEASE_LIVE_MS (a few seconds) after its last beat. The holder
 //   beats every BASE_LEASE_BEAT_MS while it holds one and renews before each
 //   entry it sends (`renew`), so a tab that crashes mid-send gives the base up
 //   once its lease is old, and a tab that is closed gives its leases up at once
-//   (`leave`, on pagehide; a browser that closes a page without it leaves the
-//   lease to run out). Nothing of a tab that is gone stays unsent: another tab
-//   takes the base over and sends it.
+//   (`leave`, on pagehide; a browser that closes a page without it leaves its
+//   record, which the next claim of that base takes over once it is old).
+//   Nothing of a tab that is gone stays unsent: another tab takes the base
+//   over and sends it.
 // - A tab that finds a base leased by another live tab does not send it. It
 //   asks again on the flush's backoff, and at once when the holder's turn ended
 //   with everything sent (`release(base, true)` writes BASE_LEASE_WAKE_KEY, which
@@ -33,10 +35,13 @@
 // is out (Chrome runs the timers of a page hidden for five minutes about once a
 // minute, and a request may take its 12 s deadline), both send, a resend the
 // server answers as recorded, never a loss. Between two entries the holder
-// renews, so only the request under way can outlive its lease.
+// renews, so only the request under way can outlive its lease; a holder whose
+// lease another tab took over meanwhile goes on with the rest of its turn
+// beside the new holder, the same harmless resend.
 
-export const BASE_LEASE_KEY = 'bc_base_senders_v1';
+export const BASE_LEASE_PREFIX = 'bc_base_senders_v1:';
 export const BASE_LEASE_WAKE_KEY = 'bc_base_senders_wake_v1';
+export const baseLeaseKey = (base) => BASE_LEASE_PREFIX + base;
 // Short, so a tab closed or crashed mid-send holds nobody up for long. A visible
 // holder beats well inside it; a hidden page's timers can be slowed far past it,
 // which is why the holder also renews before each entry (`renew`).
@@ -44,12 +49,12 @@ export const BASE_LEASE_LIVE_MS = 6_000;
 export const BASE_LEASE_BEAT_MS = 2_000;
 
 function parse(raw) {
-    if (!raw) return {};
+    if (!raw) return null;
     try {
         const v = JSON.parse(raw);
-        return v && typeof v === 'object' && !Array.isArray(v) ? v : {};
+        return v && typeof v === 'object' && typeof v.tab === 'string' ? v : null;
     } catch (_e) {
-        return {};
+        return null;
     }
 }
 
@@ -62,43 +67,33 @@ export function createBaseLease({ storage, tab, now = () => Date.now() }) {
     let timer = null;
     let wakes = 0;
 
-    const read = () => {
+    const read = (base) => {
         try {
-            return parse(storage.getItem(BASE_LEASE_KEY));
+            return parse(storage.getItem(baseLeaseKey(base)));
         } catch (_e) {
-            return {};
+            return null;
         }
     };
-    const write = (all) => {
+    const write = (base, record) => {
         try {
-            if (Object.keys(all).length === 0) storage.removeItem(BASE_LEASE_KEY);
-            else storage.setItem(BASE_LEASE_KEY, JSON.stringify(all));
+            storage.setItem(baseLeaseKey(base), JSON.stringify(record));
             return true;
         } catch (_e) {
             return false;
         }
     };
-    // A lease of a tab that is gone is taken out as the record is written, so
-    // it never grows past the bases being sent.
-    const live = (all, t) => {
-        for (const base of Object.keys(all)) {
-            if (!all[base] || t - Number(all[base].at) >= BASE_LEASE_LIVE_MS) delete all[base];
-        }
-        return all;
-    };
+    const alive = (record, t) => !!record && t - Number(record.at) < BASE_LEASE_LIVE_MS;
     const stopBeat = () => {
         if (timer !== null) { clearInterval(timer); timer = null; }
     };
     const beat = () => {
         const t = now();
-        // Renew before pruning: a holder whose beat was late (a slow request, a
-        // throttled page) still owns the lease while no other tab has claimed it.
-        const all = read();
-        let held = false;
+        // A holder whose beat was late (a slow request, a throttled page) still
+        // owns the lease while no other tab has claimed it.
         for (const base of mine) {
-            if (all[base] && all[base].tab === tab) { all[base] = { tab, at: t }; held = true; }
+            const held = read(base);
+            if (held && held.tab === tab) write(base, { tab, at: t });
         }
-        if (held) write(live(all, t));
     };
     const startBeat = () => {
         if (timer !== null || typeof setInterval !== 'function') return;
@@ -115,12 +110,10 @@ export function createBaseLease({ storage, tab, now = () => Date.now() }) {
          */
         claim(base) {
             const t = now();
-            const all = live(read(), t);
-            const held = all[base];
-            if (held && held.tab !== tab) return false;
-            all[base] = { tab, at: t };
-            if (!write(all)) return true;
-            const back = read()[base];
+            const held = read(base);
+            if (alive(held, t) && held.tab !== tab) return false;
+            if (!write(base, { tab, at: t })) return true;
+            const back = read(base);
             if (!back || back.tab !== tab) return false;
             mine.add(base);
             startBeat();
@@ -132,10 +125,11 @@ export function createBaseLease({ storage, tab, now = () => Date.now() }) {
          */
         release(base, wake = false) {
             if (!mine.delete(base)) return;
-            const all = read();
-            if (all[base] && all[base].tab === tab) {
-                delete all[base];
-                write(live(all, now()));
+            const held = read(base);
+            if (held && held.tab === tab) {
+                try {
+                    storage.removeItem(baseLeaseKey(base));
+                } catch (_e) { /* an old record is taken over once its life is up */ }
             }
             if (mine.size === 0) stopBeat();
             if (wake) {
@@ -155,7 +149,7 @@ export function createBaseLease({ storage, tab, now = () => Date.now() }) {
          * that tab beats again; 0 when none is held.
          */
         expiresIn(base) {
-            const held = read()[base];
+            const held = read(base);
             return held ? Math.max(0, BASE_LEASE_LIVE_MS - (now() - Number(held.at))) : 0;
         },
         /** The bases this tab holds (the tests read it). */

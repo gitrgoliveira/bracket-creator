@@ -117,6 +117,38 @@ func TestDecisionHandler_BothSidesBarredHikiwake_Accepted(t *testing.T) {
 	}
 }
 
+// TestDecisionHandler_BothSidesBarredHikiwake_ExactResendRecorded pins the
+// resend of a recorded both-barred draw: a page that went away before the
+// draw's answer sends it again on its next load, with the same stamp. That is
+// answered as recorded (200, the stored draw), never the 400 a hikiwake on a
+// match that is no longer scheduled otherwise gets; a hikiwake under another
+// stamp still gets that 400.
+func TestDecisionHandler_BothSidesBarredHikiwake_ExactResendRecorded(t *testing.T) {
+	compID := "both-barred-hikiwake-resend"
+	r, store, _ := bothBarredPoolFixture(t, compID)
+
+	stamp := time.Now().UnixMilli()
+	draw := DecisionRequest{Decision: "hikiwake", DecisionReason: "both competitors already withdrawn", ModifiedAt: stamp}
+	require.Equal(t, http.StatusOK, postDecisionJSON(t, r, compID, "Pool A-2", draw).Code)
+	before, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+
+	resp := postDecisionJSON(t, r, compID, "Pool A-2", draw)
+	require.Equal(t, http.StatusOK, resp.Code, resp.Body.String())
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(resp.Body.Bytes(), &body))
+	assert.Equal(t, "hikiwake", body["decision"], "the answer is the draw as recorded")
+	assert.Equal(t, string(state.MatchStatusCompleted), body["status"])
+	after, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	assert.Equal(t, before, after, "a resend writes nothing")
+
+	other := draw
+	other.ModifiedAt = stamp + 1
+	resp = postDecisionJSON(t, r, compID, "Pool A-2", other)
+	require.Equal(t, http.StatusBadRequest, resp.Code, resp.Body.String())
+}
+
 func TestDecisionHandler_HikiwakeNeitherBarred_Refused400SameAsToday(t *testing.T) {
 	compID := "hikiwake-neither-barred"
 	r, _, _ := bothBarredPoolFixture(t, compID)

@@ -305,11 +305,11 @@ Set the **Award two joint 3rd places** option during setup, before you generate 
 Two Excel downloads are available from the competition page:
 
 - **Download results (.xlsx)**: a workbook with played scores, pool standings, winners, and decisions filled in. Covers pools, league, and knockout formats. Swiss competitions have no static bracket; follow the current standings instead.
-- **Download blank template (.xlsx)**: an empty bracket workbook with linked formulas for hand scoring at events without a network connection. Once the draw is generated, it holds that draw, the same one Export PDFs prints; before that, it is drawn from the roster in registration order.
+- **Download blank template (.xlsx)**: an empty bracket workbook with linked formulas for hand scoring at events without a network connection. Once the draw is generated, it holds that draw, the same one Export PDFs prints; before that, it is a provisional draw from the roster in registration order, with seeds placed, and differs from the one **Generate draw** makes.
 
 ### PDF
 
-PDF exports (competitor tags, name sheets, and bracket trees) are available to admins only. Rendering requires LibreOffice:
+PDF exports (registration sheets, name sheets, competitor tags, pool and match sheets, and bracket trees) are available to admins only. Rendering requires LibreOffice:
 
 - Use the `ghcr.io/gitrgoliveira/bracket-creator-mobile-pdf:latest` container image, which includes LibreOffice.
 - Or install LibreOffice on the host and ensure `soffice` is on the system path.

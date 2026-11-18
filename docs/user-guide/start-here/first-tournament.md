@@ -4,7 +4,7 @@ This page walks you through the fastest path from a running server to real-time 
 
 ## 1. Install and start the server
 
-Install bracket-creator on your computer by following [Download](../install/download.md), then start the tournament app:
+Install bracket-creator on your computer by following [Download](../install/download.md#macos-homebrew) for macOS, Windows or Linux, then start the tournament app:
 
 ```bash
 bracket-creator mobile-app --folder ./tournament-data --bind 0.0.0.0
@@ -47,9 +47,9 @@ Go to the **Scores** tab, open a match, and record the result. Refer to [Scoring
 
 ## If you print your brackets instead
 
-Steps 1 to 5 run the whole tournament in the app. To run the day from paper instead, with no app at the courts, follow steps 1 to 4 up to **Generate draw**, then print from the app instead of starting the competitions:
+Steps 1 to 5 run the whole tournament in the app. To run the day from paper instead, with no app at the courts, follow steps 1 to 4 up to **Generate draw** for every competition, then print from the app instead of starting the competitions:
 
-- **Export PDFs** on the dashboard renders the competitor tags, name sheets and bracket trees of every competition as print-ready PDFs, from the draw you generated. It needs LibreOffice on the computer that runs the app.
+- **Export PDFs** on the dashboard renders the registration sheets, name sheets, competitor tags, pool and match sheets, and bracket trees of every competition as print-ready PDFs, from the draw you generated. It needs LibreOffice where the app runs: install it on the computer, or with Docker run the `ghcr.io/gitrgoliveira/bracket-creator-mobile-pdf` image.
 - **Download blank template (.xlsx)** on a competition's page gives the same draw as a workbook with linked formulas for scoring by hand.
 
 Neither export covers a Swiss competition; follow its live standings instead. Refer to [Export and print](../organisers/run-tournament.md#export-and-print).

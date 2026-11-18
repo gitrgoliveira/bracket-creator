@@ -98,7 +98,7 @@ The app also prepares a day run on paper or from a shared sheet, and the command
 
 **A shared Google Sheet.** Upload a competition's Excel workbook from the app to Google Drive and fill results in from any device, so every shiai-jo works from the same document. Refer to [Keep courts in sync](https://gitrgoliveira.github.io/bracket-creator/user-guide/start-here/first-tournament/#keep-courts-in-sync).
 
-**Automation.** For scripts and developers, the command line generates the same Excel workbooks and PDFs from a CSV of participants. Refer to [create-pools](https://gitrgoliveira.github.io/bracket-creator/user-guide/commands/create-pools/), [create-knockout](https://gitrgoliveira.github.io/bracket-creator/user-guide/commands/create-knockout/) and [print](https://gitrgoliveira.github.io/bracket-creator/user-guide/commands/print/).
+**Automation.** For scripts and developers, the command line generates the same Excel workbooks from a CSV of participants, and renders them as PDFs. Refer to [create-pools](https://gitrgoliveira.github.io/bracket-creator/user-guide/commands/create-pools/), [create-knockout](https://gitrgoliveira.github.io/bracket-creator/user-guide/commands/create-knockout/) and [print](https://gitrgoliveira.github.io/bracket-creator/user-guide/commands/print/).
 
 `bracket-creator serve` starts the [Legacy Web UI](https://gitrgoliveira.github.io/bracket-creator/user-guide/organisers/web-ui/), an older browser form for the same Excel generators, kept for compatibility.
 

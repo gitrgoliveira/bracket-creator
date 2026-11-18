@@ -215,19 +215,6 @@ func (c *compRoots) heldFolderGone(id string, e *compRoot) bool {
 	return err != nil || !os.SameFile(named, e.held)
 }
 
-// heldOtherThan reports whether competition id has a held root opened on a
-// folder other than named, the folder now at competitions/<id>.
-func (c *compRoots) heldOtherThan(id string, named fs.FileInfo) bool {
-	v, ok := c.entries.Load(id)
-	if !ok {
-		return false
-	}
-	e := v.(*compRoot)
-	e.mu.RLock()
-	defer e.mu.RUnlock()
-	return e.root != nil && !os.SameFile(named, e.held)
-}
-
 // move runs fn, a rename, removal or creation on the data root, with the root
 // of every competition folder named among rels dropped and its entry
 // write-locked until fn returns, so nothing opens that folder's root while it

@@ -267,19 +267,19 @@ func (d *dataRoot) mkdir(path string, perm fs.FileMode) error {
 }
 
 // mkdirAll makes path and its missing parents. When path is a competition
-// folder (saveCompetitionChangedLocked's, the one place that creates one), the
-// folder's held root is dropped first unless the folder is there and is the one
-// the root holds, so a root never outlives the folder it was opened on: not one
-// removed by hand, and not one moved aside and replaced by another. A folder
-// that is there and held keeps its root: every config.md save asks, and
-// dropping the root each time would throw away the cache on a save that changes
-// nothing. (Only this door asks: another call on a folder swapped by hand runs
-// on the old one until it answers ENOENT, which the retry on the next call
-// follows.)
+// folder (saveCompetitionChangedLocked's, the one place that creates one) that
+// is not there, the folder's held root is dropped first, so a root held on a
+// folder removed by hand never outlives the folder made in its place. A folder
+// that is already there is left alone and keeps its root: every config.md save
+// asks, and dropping the root each time would throw away the cache on a save
+// that changes nothing. (A root held on a folder removed and put back by hand
+// is dropped by the ENOENT retry on the next call instead. A folder renamed by
+// hand while the server runs is not checked for: the held root follows the
+// renamed folder until a restart, the user's decision.)
 func (d *dataRoot) mkdirAll(path string, perm fs.FileMode) error {
 	if rel, err := d.name("mkdir", path); err == nil {
-		if id, isComp := compFolderOf(rel); isComp {
-			if fi, err := d.root.Stat(rel); err == nil && fi.IsDir() && !d.comps.heldOtherThan(id, fi) {
+		if _, isComp := compFolderOf(rel); isComp {
+			if fi, err := d.root.Stat(rel); err == nil && fi.IsDir() {
 				return nil
 			}
 		}

@@ -20,12 +20,27 @@
   // Allowlist: suppress ONLY advisories we have proven cannot be fixed by a
   // version bump. Each entry MUST carry a reason and a removal condition.
   //
-  // Currently empty: the sole prior entry (GHSA-mh99-v99m-4gvg, brace-expansion
-  // DoS) was removed when the frontend linter migrated from ESLint +
-  // eslint-plugin-react to oxlint (mp-vdkw). eslint-plugin-react's dormant
-  // minimatch@3 -> brace-expansion@1 chain and eslint core's own minimatch@10
-  // -> brace-expansion@5.0.7 were the only sources of that advisory; oxlint is
-  // a self-contained binary with no JS dependency tree, so brace-expansion no
-  // longer appears in the graph at all.
-  "allowlist": []
+  // An earlier entry (GHSA-mh99-v99m-4gvg, brace-expansion DoS) was removed
+  // when the frontend linter migrated from ESLint + eslint-plugin-react to
+  // oxlint (mp-vdkw): oxlint is a self-contained binary with no JS dependency
+  // tree, so brace-expansion no longer appears in the graph at all.
+  "allowlist": [
+    // GHSA-fc5q-39xc-vjpf -- picomatch ReDoS through single-branch repeated
+    // extglobs (published 2026-10-19, high). DEV-ONLY, never shipped: the
+    // exposure is the test toolchain matching globs from this repository's
+    // own vite/vitest config and file tree, not untrusted input.
+    //
+    // It reaches the tree solely via the vite/vitest toolchain:
+    //   @vitejs/plugin-react -> vite -> picomatch
+    //   vitest -> picomatch, vitest -> tinyglobby -> (fdir ->) picomatch
+    // and no bump can clear it: the advisory names every picomatch release
+    // up to 4.0.7 (the latest, August 2026) as vulnerable and has no patched
+    // version (checked 2026-11-18). npm's only auto-fix is a breaking
+    // downgrade of vitest from 5 to 3.
+    //
+    // REMOVE this entry when picomatch publishes a patched release and
+    // vite, vitest and tinyglobby resolve to it (npm audit then reports a
+    // non-breaking fix), together with web/'s entry.
+    "GHSA-fc5q-39xc-vjpf"
+  ]
 }

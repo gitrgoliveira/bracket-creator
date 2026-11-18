@@ -520,6 +520,14 @@ test.describe('knockout-mixed-team', () => {
       const row1 = T.boutRow(ed, 1);
       await expect(row1.getByRole('textbox', { name: 'Senpo SHIRO player' })).toBeVisible();
       await expect(row1.getByRole('textbox', { name: 'Senpo AKA player' })).toBeVisible();
+      // The rows show before the two lineups have been read. A name typed on a
+      // side whose lineup has not landed is refused with LINEUP_NOT_READ_NOTICE
+      // (the sheet never waits on the network), so the operator types once the
+      // lineups show: Shiro's Senpo reads the starting lineup, and Aka's shows
+      // the slot picked by number. Under load the reads land late, and a name
+      // typed before they do sent no rename.
+      await expect(T.rowNameBox(row1, 'shiro')).toHaveValue('Ito');
+      await expect(T.rowMemberLabel(row1, 'aka')).toHaveText(/\.1$/);
       const shiroRow1 = await T.rowNameBox(row1, 'shiro').inputValue();
       // The name renames the picked member through the outbox, after the box has
       // shown it; armed before the typing so the answer is not missed.

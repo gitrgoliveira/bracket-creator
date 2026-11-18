@@ -673,7 +673,14 @@ test.describe('shared-shiaijo', () => {
     expect(same(await sides(upNextCard(C)), bouts.b5)).toBe(true);
     await upNextCard(C).getByRole('button', { name: 'Start match' }).tap();
     await expect.poll(async () => same(await liveOnConsole(), bouts.b5), { timeout: EXPECT_TIMEOUT_MS }).toBe(true);
-    const onAback = await runningOnCourt(H, 'A');
+    // The console shows the start at once; the server has it once the send back
+    // and the start queued after it have both landed, so the court is read until
+    // it shows one bout running (a single read could come between the two).
+    let onAback = [];
+    await expect.poll(async () => {
+      onAback = await runningOnCourt(H, 'A');
+      return onAback.length === 1 && onAback[0].comp === SI;
+    }, { timeout: EXPECT_TIMEOUT_MS }).toBe(true);
     const marksBack = await slotMarks(C, winnerOf(bouts.b5));
     r({ step: 'S3 switch', action: 'Start the sent-back SI bout (ST semi-final running)', variant: 'correct path (bc-sbq)',
       runningOnA: onAback, marksBefore: marksB5, marksAfter: marksBack, shot: await shot(C, 's3-si-bout-back-with-point') });

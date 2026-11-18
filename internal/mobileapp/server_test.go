@@ -85,3 +85,25 @@ func TestNewRouter(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, w.Code)
 	assert.Contains(t, w.Body.String(), "API route not found")
 }
+
+// The tournament app serves "Download blank template" from the one export door
+// and mounts no stateless /create (only `serve` does), so a client posting a
+// roster there would get nothing. Pins both halves: /create is not a route, and
+// the export door is.
+func TestNewRouter_MountsTheExportDoorAndNoStatelessCreate(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "server-routes-test-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+	store, err := state.NewStore(tempDir)
+	require.NoError(t, err)
+	res := resources.NewResources(nil, fstest.MapFS{"web-mobile/index.html": {Data: []byte("<html></html>")}})
+	r, _, limiter := NewRouter(store, engine.New(store), res, NewFileVerifier(store))
+	t.Cleanup(limiter.Close)
+
+	mounted := map[string]bool{}
+	for _, ri := range r.Routes() {
+		mounted[ri.Method+" "+ri.Path] = true
+	}
+	assert.False(t, mounted["POST /create"], "the tournament app mounts no /create")
+	assert.True(t, mounted["GET /api/competitions/:id/export"], "the blank template is served by the export door")
+}

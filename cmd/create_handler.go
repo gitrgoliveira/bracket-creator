@@ -20,17 +20,15 @@ import (
 
 // createTournamentHandler generates a tournament Excel workbook from a posted
 // roster + settings and streams it back as an .xlsx download. It is the single
-// source of truth behind both the `serve` web app (POST /create) and the
-// mobile-app server (POST /create). In the tournament app it serves "Download
-// blank template" only BEFORE a competition is drawn: it draws the roster
-// afresh, in registration order. Once there is a draw, the button downloads
-// the stored-draw export instead (engine.ExportCompetitionXlsx, GET
-// /api/competitions/:id/export), so the template prints the draw the app runs;
-// TestStoredDrawTemplateMatchesCreate pins the two workbooks to one shape.
+// source of truth behind the `serve` web app's POST /create, which only
+// `serve` mounts: the tournament app (`mobile-app`) mounts no /create, and its
+// "Download blank template" is always GET /api/competitions/:id/export
+// (engine.ExportCompetitionXlsx), the stored draw or, before the draw, the
+// blank layout. TestStoredDrawTemplateMatchesCreate pins the stored-draw
+// workbook to the shape this handler makes.
 //
 // Stateless: it reads everything from the request body and writes nothing to
-// the state store, so it is safe to mount unauthenticated alongside the
-// mobile-app's stateful APIs.
+// the state store.
 func createTournamentHandler(c *gin.Context) {
 	text := c.PostForm("playerList")
 	if text == "" {

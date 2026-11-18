@@ -1,10 +1,10 @@
 # Install
 
-Docker is the recommended way to run bracket-creator on every platform. You can also install with Homebrew, Linux packages (`.deb`, `.rpm`, `.apk`), a pre-compiled binary, Go, or a source build.
+bracket-creator runs in Docker on every platform. You can also install it with Homebrew, Linux packages (`.deb`, `.rpm`, `.apk`), a pre-compiled binary, Go, or a source build.
 
 The following sections describe each method, with [Upgrading](#upgrading) notes at the end.
 
-## Docker (recommended)
+## Docker
 
 Three multi-architecture (amd64 and arm64) images are published to the GitHub Container Registry:
 

@@ -818,8 +818,10 @@ type poolStandingsArea struct {
 // spans: the name, the counts and Rank (startCol .. startCol+6).
 const standingsColumns = 7
 
-func (a *poolStandingsArea) rankCol() string    { return colNum(a.startCol + 6) }
-func (a *poolStandingsArea) rankingCol() string { return colNum(a.startCol + 6) }
+// rankCol is the Rank column, shared by the results table and the Ranking
+// block below it, so the cells sameRanks compares are the cells
+// writeAppRanking writes.
+func (a *poolStandingsArea) rankCol() string { return colNum(a.startCol + standingsColumns - 1) }
 
 func (a *poolStandingsArea) rankRefs() []string {
 	refs := make([]string, 0, len(a.rankRows))
@@ -845,7 +847,7 @@ func (a *poolStandingsArea) rankingRefs() []string {
 	}
 	refs := make([]string, 0, len(a.pool.Players))
 	for i := range a.pool.Players {
-		refs = append(refs, fmt.Sprintf("%s%d", a.rankingCol(), a.rankingRow+1+i))
+		refs = append(refs, fmt.Sprintf("%s%d", a.rankCol(), a.rankingRow+1+i))
 	}
 	return refs
 }

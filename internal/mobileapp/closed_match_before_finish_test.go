@@ -183,28 +183,3 @@ func TestD5_FixedOrderTeam(t *testing.T) {
 	assert.Equal(t, before.TeamResult(), got.TeamResult(), "the team figures stand")
 	assert.Equal(t, "Tora", got.Winner)
 }
-
-func TestD5_Kachinuki(t *testing.T) {
-	r, store, eng := d5Router(t)
-	w := newGateWorld(t, r, store, eng, "d5k", false, map[string]int{})
-	w.step(opStart)
-	_, o := w.tap("dev1", domain.ScoreEvent{ID: "t1", Seq: 1, Stamp: w.base + 400, Kind: domain.ScoreIpponAdd, Pos: 1, Side: "a", Letter: "M"})
-	require.Equal(t, domain.ScoreOutcomeApplied, o)
-	m := w.stored(gateMatch)
-	rec := w.do(http.MethodPut, w.matchPath(gateMatch)+"/score", map[string]any{
-		"sideA": m.SideA, "sideB": m.SideB, "sideAId": m.SideAID, "sideBId": m.SideBID,
-		"status": "completed", "winner": m.SideA, "winnerId": m.SideAID, "decision": "kachinuki-exhaustion",
-		"ipponsA": []string{}, "ipponsB": []string{}, "subResults": m.SubResults,
-		"changed": []string{state.GroupResult}, "modifiedAt": time.Now().UnixMilli(), "writeId": "fin",
-		"session": "dev1", "basis": map[string]any{"seen": w.logLen(), "own": []string{"t1"}, "seq": 1},
-	})
-	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
-	before := w.stored(gateMatch)
-	require.Equal(t, state.MatchStatusCompleted, before.Status)
-	_, late := w.tap("dev2", domain.ScoreEvent{ID: "late", Seq: 1, Stamp: w.base + 450, Kind: domain.ScoreIpponAdd, Pos: 1, Side: "b", Letter: "K"})
-	got := w.stored(gateMatch)
-	assert.Equal(t, domain.ScoreOutcomeBeforeBaseline, late)
-	assert.Equal(t, before.SubResults[0].Winner, got.SubResults[0].Winner, "bout 1's winner stands")
-	assert.Equal(t, before.TeamResult(), got.TeamResult(), "the team figures stand")
-	assert.Equal(t, before.Winner, got.Winner)
-}

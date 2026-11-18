@@ -3,7 +3,7 @@ package engine
 // The rule for who names bout 1 of a kachinuki encounter (kachinuki_opener.go),
 // pinned case by case on the defects three review rounds found. The orderings
 // of all of them together are driven by the permutation gate
-// (mobileapp/kachinuki_opener_permutations_test.go).
+// (mobileapp/kachinukigate/kachinuki_opener_permutations_test.go).
 
 import (
 	"errors"

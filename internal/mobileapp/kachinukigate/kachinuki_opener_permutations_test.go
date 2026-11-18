@@ -1,4 +1,9 @@
-package mobileapp
+// Package kachinukigate holds the kachinuki bout-one permutation gate, test
+// files only. It is a package of its own so that the gate, which drives 2560
+// orderings through the real doors, builds and runs as a separate test program
+// beside the rest of mobileapp's tests, and reaches mobileapp through its
+// exported API alone.
+package kachinukigate
 
 // The permutation gate for who names bout 1 of a kachinuki encounter (operator
 // decision K1 (c), engine/kachinuki_opener.go) and for the closed-match rule's
@@ -28,6 +33,7 @@ package mobileapp
 // unstamped one (an older build's) is ordered by its arrival.
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -45,6 +51,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/engine"
+	"github.com/gitrgoliveira/bracket-creator/internal/mobileapp"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 	"github.com/stretchr/testify/require"
 )
@@ -183,10 +190,25 @@ func (w *gateWorld) fail(kind, format string, args ...any) {
 	}
 }
 
+// jsonReq is a request with a JSON body, sent under the tournament's password.
+func jsonReq(method, path string, body any) *http.Request {
+	var buf *bytes.Reader
+	if body != nil {
+		b, _ := json.Marshal(body)
+		buf = bytes.NewReader(b)
+	} else {
+		buf = bytes.NewReader(nil)
+	}
+	req := httptest.NewRequest(method, path, buf)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Tournament-Password", "secret")
+	return req
+}
+
 func (w *gateWorld) do(method, path string, body any) *httptest.ResponseRecorder {
 	w.t.Helper()
 	rec := httptest.NewRecorder()
-	w.r.ServeHTTP(rec, squadJSONReq(method, path, "secret", body))
+	w.r.ServeHTTP(rec, jsonReq(method, path, body))
 	return rec
 }
 
@@ -221,7 +243,9 @@ func (w *gateWorld) tap(session string, ev domain.ScoreEvent) (int, string) {
 		return rec.Code, ""
 	}
 	var out struct {
-		Outcomes []scoreEventOutcome `json:"outcomes"`
+		Outcomes []struct {
+			Outcome string `json:"outcome"`
+		} `json:"outcomes"`
 	}
 	require.NoError(w.t, json.Unmarshal(rec.Body.Bytes(), &out), rec.Body.String())
 	require.Len(w.t, out.Outcomes, 1)
@@ -854,14 +878,14 @@ func TestKachinukiBoutOnePermutationGate(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, store.SaveTournament(&state.Tournament{Name: "Gate", Password: "secret"}))
 	eng := engine.New(store)
-	hub := NewHub()
+	hub := mobileapp.NewHub()
 	t.Cleanup(hub.Close)
-	verifier := NewFileVerifier(store)
+	verifier := mobileapp.NewFileVerifier(store)
 	r := gin.New()
 	admin := r.Group("/api")
-	admin.Use(AuthMiddleware(verifier, store))
-	RegisterMatchHandlers(admin, eng, store, store, hub, verifier, store)
-	RegisterLineupHandlers(admin, store, store, store, hub, store, verifier, eng)
+	admin.Use(mobileapp.AuthMiddleware(verifier, store))
+	mobileapp.RegisterMatchHandlers(admin, eng, store, store, hub, verifier, store)
+	mobileapp.RegisterLineupHandlers(admin, store, store, store, hub, store, verifier, eng)
 
 	type ordering struct {
 		legacy bool

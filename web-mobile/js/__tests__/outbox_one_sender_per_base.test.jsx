@@ -187,7 +187,8 @@ describe('the base lease (one storage, two tabs)', () => {
 describe('the base lease held with Web Locks', () => {
     let locks;
     const tabOf = (tab) => createBaseLease({ storage: null, tab, locks });
-    beforeEach(() => { locks = fakeLocks(); });
+    beforeEach(() => { locks = fakeLocks(); vi.useFakeTimers(); });
+    afterEach(() => { vi.clearAllTimers(); vi.useRealTimers(); });
 
     it('gives a base to one tab at a time and to the other once it is released', async () => {
         const a = tabOf('a');
@@ -224,6 +225,24 @@ describe('the base lease held with Web Locks', () => {
         expect(freed, 'the holder is gone').toBe('m1');
         expect(a.held()).toEqual([]);
         expect(await b.claim('m2'), 'and so is its other lock').toBe(true);
+    });
+
+    it('wakes a tab that was turned away at once only when the turn sent all it held', async () => {
+        const a = tabOf('a');
+        const b = tabOf('b');
+        let woken = 0;
+        await a.claim('m1');
+        b.whenFree('m1').then(() => { woken += 1; });
+        a.release('m1', false);
+        await vi.advanceTimersByTimeAsync(BASE_LEASE_LIVE_MS - 100);
+        expect(woken, 'a turn that ended failing wakes nobody').toBe(0);
+        await vi.advanceTimersByTimeAsync(200);
+        expect(woken, 'the waiting tab asks again once a lease life is over').toBe(1);
+        await a.claim('m1');
+        b.whenFree('m1').then(() => { woken += 1; });
+        a.release('m1', true);
+        await vi.advanceTimersByTimeAsync(0);
+        expect(woken, 'a turn that sent all it held wakes it at once').toBe(2);
     });
 
     it('sends as before when the page refuses locks', async () => {

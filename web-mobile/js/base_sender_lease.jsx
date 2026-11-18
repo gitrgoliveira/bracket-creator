@@ -12,7 +12,9 @@
 // - Web Locks (`navigator.locks`, `createLockLease`): the lock named for the base
 //   is held while the tab sends it. The browser itself gives a lock up when its
 //   tab closes or crashes, so the next tab takes the base over at once, and a
-//   tab that was turned away is told when the lock frees (`whenFree`).
+//   tab that was turned away is told when the lock frees (`whenFree`). A turn
+//   that ended failing first takes the base's cooling lock for a lease life, and
+//   `whenFree` waits for that one too, so it wakes nobody (the rule below).
 // - The timed note, below, where the browser or the page has no Web Locks (an
 //   older browser or build, or a page served over plain http, where browsers
 //   hide `navigator.locks`: a phone reaching the app by its LAN address).
@@ -64,6 +66,7 @@ export const baseLeaseKey = (base) => BASE_LEASE_PREFIX + base;
 export const BASE_LEASE_LIVE_MS = 6_000;
 export const BASE_LEASE_BEAT_MS = 2_000;
 const baseLockName = (base) => 'bc_base_sender_v1:' + base;
+const baseCoolName = (base) => 'bc_base_sender_cool_v1:' + base;
 
 function parse(raw) {
     if (!raw) return null;
@@ -103,13 +106,28 @@ export function detectWebLocks() {
 function createLockLease({ locks, tab }) {
     const holds = new Map();    // base -> { give, done }: the locks this tab holds
     const ending = new Map();   // base -> promise: a release this tab made that the lock manager has not finished
-    const release = (base) => {
+    // A turn that ended failing takes the base's cooling lock, and lets the base
+    // go only once it holds it, so a tab queued in `whenFree` waits a lease life
+    // more, as the timed note's waiter does. A cooling lock already taken (an
+    // earlier failure, here or in another tab) is cooling the base already.
+    const cool = (base, give) => {
+        try {
+            locks.request(baseCoolName(base), { ifAvailable: true }, (lock) => {
+                give();
+                return lock ? new Promise((done) => { setTimeout(done, BASE_LEASE_LIVE_MS); }) : undefined;
+            }).catch(give);
+        } catch (_e) {
+            give();
+        }
+    };
+    const release = (base, wake = false) => {
         const hold = holds.get(base);
         if (!hold) return;
         holds.delete(base);
         const gone = hold.done.then(() => { if (ending.get(base) === gone) ending.delete(base); }, () => {});
         ending.set(base, gone);
-        hold.give();
+        if (wake) hold.give();
+        else cool(base, hold.give);
     };
     return {
         tab,
@@ -131,19 +149,24 @@ function createLockLease({ locks, tab }) {
                 }
             }));
         },
-        // Letting the lock go is the wake: a tab queued in `whenFree` is granted it.
+        // Letting the lock go is the wake: a tab queued in `whenFree` is granted it,
+        // at once when the turn sent all it held (`wake`), after the cooling otherwise.
         release,
         // A held lock needs no beat.
         renew() {},
+        // The page goes: its bases go to the other tabs at once, as a closed tab's do.
         leave() {
-            for (const base of [...holds.keys()]) release(base);
+            for (const base of [...holds.keys()]) release(base, true);
         },
         whenFree(base) {
             return new Promise((resolve) => {
                 try {
-                    // Queued behind the holder; granted, and given straight back, once it is
-                    // gone. Settled only when the lock is back, or a claim made at once finds it taken.
-                    locks.request(baseLockName(base), () => undefined).then(() => resolve(), () => resolve());
+                    // Queued behind the holder, then behind its cooling; each granted, and
+                    // given straight back, once it is over. Settled only when the lock is
+                    // back, or a claim made at once finds it taken.
+                    locks.request(baseLockName(base), () => undefined)
+                        .then(() => locks.request(baseCoolName(base), () => undefined))
+                        .then(() => resolve(), () => resolve());
                 } catch (_e) {
                     resolve();
                 }

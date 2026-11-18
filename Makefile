@@ -506,6 +506,10 @@ $(SCRIPTS_STAMP): $(SCRIPTS_REQS)
 	@$(SCRIPTS_BIN)/python -m pip install --quiet -r $(SCRIPTS_REQS)
 	@touch $@
 
+# The capture harness seeds its demo with the same script, from the same venv
+# (scripts/screenshots/lib/seed.mjs runs $(SCRIPTS_BIN)/python).
+docs/screenshots docs/videos docs/media: $(SCRIPTS_STAMP)
+
 mobile-app-example: go/build $(SCRIPTS_STAMP) ## Setup and run a full tournament demo using mobile app API
 	@echo "Starting temporary mobile app server for demo..."
 	@rm -rf ./demo-data && mkdir -p ./demo-data

@@ -156,7 +156,7 @@ function createLockLease({ locks, tab }) {
         renew() {},
         // The page goes: its bases go to the other tabs at once, as a closed tab's do.
         leave() {
-            for (const base of [...holds.keys()]) release(base, true);
+            for (const base of Array.from(holds.keys())) release(base, true);
         },
         whenFree(base) {
             return new Promise((resolve) => {

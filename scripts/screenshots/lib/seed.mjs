@@ -7,8 +7,15 @@
 // the existing script. It reads BASE_URL and TOURNAMENT_PASSWORD from the
 // environment and its CSVs from test-data/, relative to the repo root.
 import { spawn } from 'node:child_process';
+import { join } from 'node:path';
 import { REPO } from './server.mjs';
 import { PASSWORD } from './api.mjs';
+
+// The seeder runs in the venv the Makefile builds from scripts/requirements.txt
+// (`$(SCRIPTS_STAMP)`, a prerequisite of docs/screenshots, docs/videos and
+// docs/media), the one `make mobile-app-example` uses: a system python3 need
+// not have the seeder's dependencies (requests).
+const SEED_PYTHON = join(REPO, '.venv-scripts', 'bin', 'python');
 
 // The captures need a tournament that is mid-run, not finished: a fully scored
 // one shows every competition as Completed, no "currently running" card on the
@@ -25,7 +32,7 @@ const LEAVE_RUNNING = ['Teams', 'Men up to 2D'].join(',');
 
 export function demoTournament(base) {
   return new Promise((resolve, reject) => {
-    const child = spawn('python3', ['scripts/setup_tournament.py'], {
+    const child = spawn(SEED_PYTHON, ['scripts/setup_tournament.py'], {
       cwd: REPO,
       env: {
         ...process.env,
@@ -52,10 +59,10 @@ export function demoTournament(base) {
     };
     child.stdout.on('data', keep);
     child.stderr.on('data', keep);
-    // Without this a spawn failure (no python3 on PATH) is an uncaught
-    // exception that bypasses every finally in the runner and leaks the
-    // server, the browser and the data dir.
-    child.on('error', (err) => reject(new Error(`could not run python3: ${err.message}`)));
+    // Without this a spawn failure (no venv: the harness run without make) is
+    // an uncaught exception that bypasses every finally in the runner and
+    // leaks the server, the browser and the data dir.
+    child.on('error', (err) => reject(new Error(`could not run ${SEED_PYTHON} (make builds it: run make docs/screenshots): ${err.message}`)));
     child.on('close', (code) => {
       if (code === 0) return resolve({ log: out.join('') });
       reject(new Error(`setup_tournament.py exited ${code}\n${out.join('').slice(-1500)}`));

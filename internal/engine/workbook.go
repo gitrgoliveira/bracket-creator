@@ -89,7 +89,7 @@ import (
 //
 // Returns (poolsByCourt, namesToPrintPlayers, error). poolsByCourt is the
 // one artifact from PrintPoolMatches a caller's own extras need: the
-// results export's overlayPoolScores/overlayPoolStandings take it directly
+// results export's overlayPoolScores and keepStandingsLive take it directly
 // to map a court's "N-th pool" back to a pool index. Nothing else
 // PrintPoolMatches or AddPoolDataToSheet returns (poolCoords, playerCoords,
 // matchWinners) is read again once this function's own steps that consume

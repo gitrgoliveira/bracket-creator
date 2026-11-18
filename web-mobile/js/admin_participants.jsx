@@ -8,6 +8,7 @@ import { seededRanks } from './admin_helpers.jsx';
 import { NO_ID_HINT, DataIssueBanner, rosterUnreadableIssues } from './data_integrity.jsx';
 import { NumberedName } from './numbered_name.jsx';
 import { Icon } from './icon.jsx';
+import { canShuffleUnseeded } from './competition_shape.jsx';
 import { downloadBlob } from './blob_download.jsx';
 import { useOpenedTapGuard } from './tap_guard.jsx';
 import { PillButton } from './competition_fields.jsx';
@@ -722,9 +723,9 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
     let shuffledAny = false;
     try {
       await putRoster((players) => {
+        if (!canShuffleUnseeded(players)) return null;
         const np = [...players];
         const unseeded = np.filter(p => !p.seed);
-        if (unseeded.length < 2) return null;
         for (let i = unseeded.length - 1; i > 0; i--) {
           const j = Math.floor(Math.random() * (i + 1));
           [unseeded[i], unseeded[j]] = [unseeded[j], unseeded[i]];

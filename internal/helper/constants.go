@@ -150,10 +150,9 @@ const (
 )
 
 // ColHeaderFlags is the single-source column header label for the engi
-// referee flag count in the Pool Matches standings table. Used by both the
-// writer (printIndividualResultsTableSection) and the overlay reader
-// (overlayPoolStandings / buildCourtColumnMap) so the header and the overlay
-// can never drift independently.
+// referee flag count in the Pool Matches standings table, written by
+// printIndividualResultsTableSection and named here so no other file spells
+// the header a second way.
 const ColHeaderFlags = "Flags"
 
 // ThirdPlaceLabel is the header text written by PrintThirdPlaceBlock and

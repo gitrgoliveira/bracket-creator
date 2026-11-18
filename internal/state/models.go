@@ -423,9 +423,11 @@ type Competition struct {
 	// `rosterShuffled: true`, carries players, and whose roster save lands
 	// (markRosterShuffled in handlers_competition.go); create zeroes it, the
 	// settings merge never copies it, and once set it stays set. Not a
-	// setting, so ConfigVersion leaves it out. No load-time migration: an
-	// absent key reads as never shuffled, which is the truth for every file
-	// an earlier release wrote (nothing recorded a shuffle before).
+	// setting, so ConfigVersion leaves it out. No load-time migration is
+	// possible: an absent key reads as not recorded as shuffled, which is all
+	// that can be said of a file an earlier release wrote (its Shuffle
+	// unseeded button recorded nothing, so a shuffled roster cannot be told
+	// from an unshuffled one). The Export tab's wording for a draw says so.
 	RosterShuffled bool `yaml:"roster_shuffled,omitempty" json:"rosterShuffled,omitempty"`
 	// PoolMatchDuration / KnockoutMatchDuration are the retired WHOLE-MINUTE
 	// per-phase clock durations. They carry `json:"-"`: they are NOT part of

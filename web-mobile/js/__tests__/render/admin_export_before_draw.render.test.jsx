@@ -131,6 +131,7 @@ describe('AdminExport never-shuffled warning', () => {
   it('warns on a drawn competition with the discard, shuffle, generate remedy', () => {
     expect(warning({ status: 'draw-ready' }).textContent).toBe(NOT_SHUFFLED_DRAWN);
     expect(NOT_SHUFFLED_DRAWN).toMatch(/discard the draw, tap Shuffle unseeded on Participants, then generate the draw again/);
+    expect(NOT_SHUFFLED_DRAWN).toMatch(/not recorded as shuffled/);
   });
 
   it('is gone once the list was shuffled', () => {

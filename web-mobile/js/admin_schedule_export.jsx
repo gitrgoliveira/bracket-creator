@@ -14,9 +14,11 @@ export const PRE_DRAW_NOTICE = "No draw yet: until the draw is generated, only a
 
 // The never-shuffled warning (state.Competition.RosterShuffled unset). The
 // draw places competitors in list order, so the order they were entered in
-// decides where they are placed; the remedy differs once a draw exists.
+// decides where they are placed; the remedy differs once a draw exists. Once
+// drawn it says "not recorded", since a shuffle made before the marker existed
+// left no trace.
 export const NOT_SHUFFLED_BEFORE_DRAW = "The competitor list has never been shuffled. The draw places competitors in the order of the list, so the order they were entered in decides who meets whom. Tap Shuffle unseeded on Participants before you generate the draw.";
-export const NOT_SHUFFLED_DRAWN = "The competitor list was never shuffled before this draw, so the draw placed competitors in the order they were entered. To change that: discard the draw, tap Shuffle unseeded on Participants, then generate the draw again.";
+export const NOT_SHUFFLED_DRAWN = "The competitor list is not recorded as shuffled before this draw, so the draw may have placed competitors in the order they were entered (a list shuffled before this app version recorded shuffles also shows this notice). If that is not what you want: discard the draw, tap Shuffle unseeded on Participants, then generate the draw again.";
 
 // notShuffledWarning is the warning's sentence, or null when there is none to
 // give: in setup or draw-ready only (once a result exists a new draw is no

@@ -107,7 +107,8 @@ export function sheetCells(buf, sheetName) {
 // Pool name -> the names in it, in order, as the "Pool Draw" sheet shows them
 // in a spreadsheet: the sheet holds no text of its own, only formulas into the
 // "data" sheet (a pool's heading is ='data'!$A$<r>, each competitor is
-// =data!$D$<r>&" "&data!$B$<r>, number then name), which no download carries a
+// =data!$D$<r>&" "&data!$B$<r>, number then name, or "<n>. " & data!$B$<r> for
+// a competition with no numbers), which no download carries a
 // cached value for. Each formula is resolved here against the data sheet's
 // cells, and a competitor belongs to the nearest heading above it in its
 // column. The same shape as roster.mjs's poolMembers, so the two compare as
@@ -125,9 +126,9 @@ export function poolDrawMembers(buf) {
     const formula = xmlText(f[1]);
     const at = { col: ref[1], row: Number(ref[2]) };
     const heading = /^'?data'?!\$A\$(\d+)$/.exec(formula);
-    const player = /^'?data'?!\$D\$(\d+)&" "&'?data'?!\$B\$(\d+)$/.exec(formula);
+    const player = /^(?:'?data'?!\$D\$\d+&" "&|"\d+\. " & )'?data'?!\$B\$(\d+)$/.exec(formula);
     if (heading) headings.push({ ...at, pool: data[`A${heading[1]}`] });
-    else if (player) players.push({ ...at, name: data[`B${player[2]}`] });
+    else if (player) players.push({ ...at, name: data[`B${player[1]}`] });
   }
   if (!headings.length) throw new Error('poolDrawMembers: the Pool Draw sheet names no pool');
   const pools = {};

@@ -614,3 +614,32 @@ func TestResultsWorkbook_DecidedTeamPoolKeepsIVNumeric(t *testing.T) {
 		})
 	}
 }
+
+// TestResultsWorkbook_AppOrderRankingKeepsTheNumbers pins that a Ranking name
+// the app's order writes reads as the results table prints it: in a numbered
+// draw a competitor is "<number> <name>", as the pools whose formulas agree
+// with the app show them, never the bare name.
+func TestResultsWorkbook_AppOrderRankingKeepsTheNumbers(t *testing.T) {
+	t.Parallel()
+	dir, store, eng, compID := testSetup(t)
+	defer os.RemoveAll(dir)
+	comp, err := store.LoadCompetition(compID)
+	require.NoError(t, err)
+	comp.NumberPrefix = "K"
+	require.NoError(t, store.SaveCompetition(comp))
+
+	// Zed is listed before Amy and they draw: the sheet ranks by row order,
+	// the app ranks level competitors by participant id, so the Ranking is the
+	// app's.
+	zed, amy := makePlayer("Zed"), makePlayer("Amy")
+	zed.Number, amy.Number = "K1", "K2"
+	require.NoError(t, store.SavePools(compID, []helper.Pool{{PoolName: "Pool A", Players: []helper.Player{zed, amy}}}))
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{drawnMatch("Pool A-0", "Zed", "Amy")}))
+
+	f, loaded := buildAndOpen(t, store, eng, compID)
+	sheet := readPoolsOnSheet(t, f, loaded)[0]
+	assert.Equal(t, []string{"K2 Amy", "K1 Zed"}, sheet.ranking)
+	for _, ref := range sheet.area.rankingRefs() {
+		assert.False(t, isFormula(t, f, ref), "%s is the app's value", ref)
+	}
+}

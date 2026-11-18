@@ -783,7 +783,7 @@ func keepStandingsLive(f *excelize.File, pools []helper.Pool, standings map[stri
 				return fmt.Errorf("keepStandingsLive: note style: %w", err)
 			}
 		}
-		if err := writeAppRanking(f, sheet, a, standings[a.pool.PoolName], app); err != nil {
+		if err := writeAppRanking(f, sheet, a, standings[a.pool.PoolName], app, evaluated[i]); err != nil {
 			return err
 		}
 		reasons := rankingDifferenceReasons(standings[a.pool.PoolName], poolMatchResults(a.pool, matchResults))
@@ -825,6 +825,16 @@ func (a *poolStandingsArea) rankRefs() []string {
 	refs := make([]string, 0, len(a.rankRows))
 	for _, r := range a.rankRows {
 		refs = append(refs, fmt.Sprintf("%s%d", a.rankCol(), r))
+	}
+	return refs
+}
+
+// nameRefs are the results table's name cells, in pool.Players order: the
+// first column of each competitor's row in the W/L/T table.
+func (a *poolStandingsArea) nameRefs() []string {
+	refs := make([]string, 0, len(a.pool.Players))
+	for _, r := range a.tableRows[:len(a.pool.Players)] {
+		refs = append(refs, fmt.Sprintf("%s%d", colNum(a.startCol), r))
 	}
 	return refs
 }
@@ -985,11 +995,24 @@ func sameRanks(cells []formulaCell, rankRefs []string, app []int) bool {
 }
 
 // writeAppRanking writes the app's Rank of each competitor and the Ranking
-// names in the app's order over the formulas.
-func writeAppRanking(f *excelize.File, sheet string, a *poolStandingsArea, poolStandings []state.PlayerStanding, app []int) error {
+// names in the app's order over the formulas. A Ranking name reads as the
+// results table prints it (a numbered draw's "A1 Alice"), so each competitor's
+// text is the one their results-table name cell gives; cells holds those
+// evaluated cells.
+func writeAppRanking(f *excelize.File, sheet string, a *poolStandingsArea, poolStandings []state.PlayerStanding, app []int, cells []formulaCell) error {
 	for i, ref := range a.rankRefs() {
 		if err := f.SetCellInt(sheet, ref, int64(app[i])); err != nil {
 			return fmt.Errorf("keepStandingsLive: rank %s: %w", ref, err)
+		}
+	}
+	printed := make(map[string]string, len(cells))
+	for _, c := range cells {
+		printed[c.ref] = c.value
+	}
+	printedName := make(map[string]string, len(a.pool.Players))
+	for i, ref := range a.nameRefs() {
+		if text, ok := printed[ref]; ok {
+			printedName[a.pool.Players[i].ID] = text
 		}
 	}
 	sorted := make([]state.PlayerStanding, len(poolStandings))
@@ -999,7 +1022,11 @@ func writeAppRanking(f *excelize.File, sheet string, a *poolStandingsArea, poolS
 		if i >= len(sorted) {
 			break
 		}
-		if err := f.SetCellValue(sheet, ref, sorted[i].Player.Name); err != nil {
+		name, ok := printedName[sorted[i].Player.ID]
+		if !ok {
+			name = sorted[i].Player.Name
+		}
+		if err := f.SetCellValue(sheet, ref, name); err != nil {
 			return fmt.Errorf("keepStandingsLive: ranking %s: %w", ref, err)
 		}
 	}

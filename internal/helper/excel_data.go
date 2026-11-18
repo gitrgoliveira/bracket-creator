@@ -273,6 +273,12 @@ func BlankCellsHolding(f *excelize.File, texts map[string]bool) error {
 				if ref, ok := home[value]; ok && sheet != SheetData {
 					formula = ref
 				}
+				// The cell still holds its shared-string index as the formula's
+				// cached value, which a reader that does not recalculate shows;
+				// empty it first so the cache is empty text.
+				if err := f.SetCellDefault(sheet, cell, ""); err != nil {
+					return fmt.Errorf("blank cells: clear %s!%s: %w", sheet, cell, err)
+				}
 				if err := f.SetCellFormula(sheet, cell, formula); err != nil {
 					return fmt.Errorf("blank cells: write %s!%s: %w", sheet, cell, err)
 				}

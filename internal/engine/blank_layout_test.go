@@ -176,6 +176,13 @@ func TestBlankLayout_PrintsNoNameDojoNumberOrSeed(t *testing.T) {
 					formula, err := f.GetCellFormula(helper.SheetData, fmt.Sprintf("%s%d", col, r))
 					require.NoError(t, err)
 					assert.Equalf(t, `""`, formula, "Data!%s%d is empty text, which a formula reads blank", col, r)
+					// A reader that does not recalculate shows the cached value:
+					// it is empty, not the shared-string index the cell held.
+					for _, opts := range []excelize.Options{{}, {RawCellValue: true}} {
+						value, err := f.GetCellValue(helper.SheetData, fmt.Sprintf("%s%d", col, r), opts)
+						require.NoError(t, err)
+						assert.Emptyf(t, value, "Data!%s%d caches empty text", col, r)
+					}
 				}
 			}
 		})

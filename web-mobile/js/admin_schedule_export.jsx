@@ -73,7 +73,7 @@ export function AdminExport({ c, t, password, showToast, poolMatches, bracket })
     if (resultsBusy) return;
     setResultsBusy(true);
     try {
-      downloadBlob(await window.API.exportResults(cid, password),`results-${cid}.xlsx`);
+      downloadBlob(await window.API.exportResults(cid, password), `results-${cid}.xlsx`);
       notify("Results workbook downloaded.");
     } catch (err) {
       notify(shownMessage(err, "Results export failed: "), "error");

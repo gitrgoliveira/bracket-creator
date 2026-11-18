@@ -515,7 +515,7 @@ func TestDataRoot_ARenameDoesNotDeadlockAgainstAQueuedMove(t *testing.T) {
 	go func() { // writer one holds the entry until the reader is gone and the rename is queued
 		defer writers.Done()
 		e.mu.Lock()
-		e.mu.Unlock() //nolint:staticcheck // an empty critical section: only the wait matters
+		defer e.mu.Unlock() // nothing runs under the lock: only the wait matters
 	}()
 	require.Eventually(t, func() bool {
 		if e.mu.TryRLock() {
@@ -539,7 +539,7 @@ func TestDataRoot_ARenameDoesNotDeadlockAgainstAQueuedMove(t *testing.T) {
 	go func() { // writer two waits for the writers' mutex, behind writer one
 		defer writers.Done()
 		e.mu.Lock()
-		e.mu.Unlock() //nolint:staticcheck // an empty critical section: only the wait matters
+		defer e.mu.Unlock() // nothing runs under the lock: only the wait matters
 	}()
 	time.Sleep(50 * time.Millisecond)
 	e.mu.RUnlock()

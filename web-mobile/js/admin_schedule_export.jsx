@@ -5,7 +5,7 @@
 // bronze/decider match", reused here rather than re-derived so the exported
 // blank template's bronze block agrees with the same predicate every other
 // surface (settings screen, awards page) already uses.
-import { effectiveTwoThirdPlaces, resolveFormat, FORMAT_KNOCKOUT, FORMAT_LEAGUE } from './competition_shape.jsx';
+import { effectiveTwoThirdPlaces, resolveFormat, checkInApplies, FORMAT_KNOCKOUT, FORMAT_LEAGUE } from './competition_shape.jsx';
 import { isNoConnection, noConnectionError, shownMessage, NOT_SENT_NO_CONNECTION } from './write_result.jsx';
 
 const { useState } = React;
@@ -224,7 +224,15 @@ export function AdminExport({ c, t, password, showToast }) {
         <button type="button" className="btn btn--full" onClick={downloadXlsx} disabled={templateBusy}>
           {templateBusy ? "Preparing…" : "Download blank template (.xlsx)"}
         </button>
-        <div className="field__hint" style={{ marginTop: 8 }}>Empty pool draws, matches, and brackets with linked formulas, for scoring by hand.</div>
+        <div className="field__hint" style={{ marginTop: 8 }}>
+          Empty pool draws, matches, and brackets with linked formulas, for scoring by hand.
+          {!templateFromStoredDraw(c.status ?? cfg.status) && (
+            <>
+              {" "}Before the draw, it is a preview drawn from everyone registered.
+              {checkInApplies(t, c.checkInEnabled ?? cfg.checkInEnabled) && " Generate draw leaves out anyone not checked in, so its pools can differ."}
+            </>
+          )}
+        </div>
       </div>
       <div className="card">
         <div className="card__title" style={{ marginBottom: 8 }}>Public viewer link</div>

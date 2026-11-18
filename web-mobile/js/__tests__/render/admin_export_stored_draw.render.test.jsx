@@ -56,6 +56,45 @@ describe('templateFromStoredDraw', () => {
   });
 });
 
+// The template's hint says what the workbook holds: before the draw, a preview
+// from everyone registered, which ignores check-in; Generate draw leaves out
+// anyone not checked in, so the preview's pools can differ (the e2e journey
+// blank-template measured it). A drawn competition's template is its draw, so
+// the preview sentences go.
+describe('AdminExport blank template hint', () => {
+  const hint = (c, t = { id: 't1' }) => {
+    const { container } = render(<AdminExport c={c} t={t} password="pw" />);
+    return templateButton(container).nextElementSibling.textContent;
+  };
+  const PREVIEW = 'Before the draw, it is a preview drawn from everyone registered.';
+  const CHECK_IN = 'Generate draw leaves out anyone not checked in, so its pools can differ.';
+
+  it('calls the pre-draw template a preview, and names check-in when it applies', () => {
+    const text = hint({ ...competition('setup'), checkInEnabled: true });
+    expect(text).toContain(PREVIEW);
+    expect(text).toContain(CHECK_IN);
+  });
+
+  it('leaves check-in out when the competition does not use it', () => {
+    const text = hint(competition('setup'));
+    expect(text).toContain(PREVIEW);
+    expect(text).not.toContain(CHECK_IN);
+  });
+
+  it('leaves check-in out in a self-run tournament, which has no check-in', () => {
+    const text = hint({ ...competition('setup'), checkInEnabled: true }, { id: 't1', mode: 'self-run' });
+    expect(text).toContain(PREVIEW);
+    expect(text).not.toContain(CHECK_IN);
+  });
+
+  it('says nothing of a preview once the competition is drawn', () => {
+    const text = hint({ ...competition('draw-ready'), checkInEnabled: true });
+    expect(text).toContain('for scoring by hand.');
+    expect(text).not.toContain(PREVIEW);
+    expect(text).not.toContain(CHECK_IN);
+  });
+});
+
 describe('AdminExport public viewer link', () => {
   it("is the app's own public page for the competition", () => {
     const { container } = render(<AdminExport c={competition('pools')} t={{ name: 'Cup' }} password="pw" />);

@@ -20,12 +20,23 @@
   // Allowlist: suppress ONLY advisories we have proven cannot be fixed by a
   // version bump. Each entry MUST carry a reason and a removal condition.
   //
-  // Currently empty: the sole prior entry (GHSA-mh99-v99m-4gvg, brace-expansion
-  // DoS) was removed when the frontend linter migrated from ESLint +
-  // eslint-plugin-react to oxlint (mp-vdkw). eslint-plugin-react's dormant
-  // minimatch@3 -> brace-expansion@1 chain and eslint core's own minimatch@10
-  // -> brace-expansion@5.0.7 were the only sources of that advisory; oxlint is
-  // a self-contained binary with no JS dependency tree, so brace-expansion no
+  // An earlier entry (GHSA-mh99-v99m-4gvg, brace-expansion DoS) was removed
+  // when the frontend linter migrated from ESLint + eslint-plugin-react to
+  // oxlint (mp-vdkw). eslint-plugin-react's dormant minimatch@3 ->
+  // brace-expansion@1 chain and eslint core's own minimatch@10 ->
+  // brace-expansion@5.0.7 were the only sources of that advisory; oxlint is a
+  // self-contained binary with no JS dependency tree, so brace-expansion no
   // longer appears in the graph at all.
-  "allowlist": []
+  "allowlist": [
+    // GHSA-fc5q-39xc-vjpf (high): picomatch ReDoS through single-branch
+    // repeated extglobs. Affects every picomatch up to 4.0.7, the latest
+    // release, and the advisory names no patched version (checked
+    // 2026-11-18), so no bump can clear it. picomatch reaches this tree only
+    // through the test toolchain (vitest, and vite under
+    // @vitejs/plugin-react, both via tinyglobby/fdir), where it matches the
+    // repository's own test and file globs, never user input; nothing in the
+    // shipped app loads it. REMOVE this entry once a fixed picomatch is
+    // released and the lockfile picks it up.
+    "GHSA-fc5q-39xc-vjpf"
+  ]
 }

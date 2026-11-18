@@ -21,8 +21,14 @@
   // skipping dev would leave this file gating nothing at all.
   "skip-dev": false,
 
-  // Allowlist: intentionally EMPTY. web/ has no suppressed advisory today.
-  // Add one only for an advisory proven unfixable by an upgrade, with a
+  // Allowlist: only advisories proven unfixable by an upgrade, each with a
   // comment naming it and why, exactly as web-mobile/audit-ci.jsonc does.
-  "allowlist": []
+  "allowlist": [
+    // GHSA-fc5q-39xc-vjpf (high): picomatch ReDoS. Every picomatch up to
+    // 4.0.7, the latest release, is affected and no patched version exists
+    // (checked 2026-11-18). It reaches web/ only through vitest, where it
+    // matches the repository's own test globs. REMOVE once a fixed picomatch
+    // is released; the same entry sits in web-mobile/audit-ci.jsonc.
+    "GHSA-fc5q-39xc-vjpf"
+  ]
 }

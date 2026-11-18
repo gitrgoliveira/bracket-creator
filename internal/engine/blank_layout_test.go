@@ -39,6 +39,10 @@ func blankLayoutCases() []blankLayoutCase {
 	naginata := func(c *state.Competition) { c.Naginata = true }
 	engi := func(c *state.Competition) { c.Engi = true }
 	zekken := func(c *state.Competition) { c.WithZekkenName = true }
+	// Both extra-qualifier modes take one pool winner and minimum-players sizing.
+	extraQualifiers := func(mode string) func(*state.Competition) {
+		return func(c *state.Competition) { c.PoolWinners, c.ExtraQualifiers = 1, mode }
+	}
 	return []blankLayoutCase{
 		{"pools zekken", state.CompFormatMixed, 3, 6, []string{"A"}, zekken},
 		{"league zekken", state.CompFormatLeague, 4, 4, []string{"A"}, zekken},
@@ -49,6 +53,8 @@ func blankLayoutCases() []blankLayoutCase {
 		{"pools kachinuki", state.CompFormatMixed, 3, 6, []string{"A"}, teamOf(3, state.TeamMatchTypeKachinuki)},
 		{"pools engi", state.CompFormatMixed, 3, 6, []string{"A"}, engi},
 		{"pools single third place", state.CompFormatMixed, 3, 12, []string{"A"}, naginata},
+		{"pools larger pools", state.CompFormatMixed, 4, 17, []string{"A"}, extraQualifiers(state.ExtraQualifiersLargerPools)},
+		{"pools fill bracket", state.CompFormatMixed, 3, 45, []string{"A", "B", "C", "D"}, extraQualifiers(state.ExtraQualifiersFillBracket)},
 		{"league individual", state.CompFormatLeague, 5, 5, []string{"A"}, nil},
 		{"league two courts", state.CompFormatLeague, 6, 6, []string{"A", "B"}, nil},
 		{"league team", state.CompFormatLeague, 4, 4, []string{"A"}, teamOf(3, "")},

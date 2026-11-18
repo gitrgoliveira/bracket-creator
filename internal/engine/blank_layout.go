@@ -141,12 +141,12 @@ func blankDraw(comp *state.Competition, courts []string, n int) (*blankLayout, e
 	c.Courts = courts
 	c.NumberPrefix = ""
 	applyDefaultTeamSize(&c)
+	applyLeagueSinglePool(&c, n)
 	places := blankPlaces(&c, n)
 	layout := &blankLayout{comp: &c, places: places}
 
 	switch c.Format {
 	case state.CompFormatMixed, state.CompFormatLeague:
-		applyLeagueSinglePool(&c, n)
 		// The draw's own pool phase (formPools, createPoolMatches,
 		// layoutPoolMatches), refusals included, minus the numbering, the start
 		// times and the store.

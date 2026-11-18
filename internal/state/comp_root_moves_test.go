@@ -159,8 +159,9 @@ func TestCompRoot_ARestoreThatFinishesLeavesNoRootInItsTokenFolder(t *testing.T)
 // drop them, so the started store holds roots only on the folders there now.
 // (A root left on the moved-out men would also be caught later: the token
 // folder's removal unlinks it, and the next call's ENOENT retry drops it. So
-// this pins the outcome at startup; the swap test above is the one that fails
-// without the drop, since its moved-out copy is still there.)
+// this pins the outcome at startup; the swap test above and
+// TestCompRoot_ARecoveryDropsTheRootsHeldOnTheFoldersItMoves fail without the
+// drop.)
 func TestCompRoot_AnInterruptedRestoreReplayedAtStartupDropsTheHeldRoots(t *testing.T) {
 	_, dir := restoreCrashingAt(t, restoreMoveOut, "competitions/gone")
 	_, err := os.Stat(filepath.Join(dir, "competitions", "men"))
@@ -235,17 +236,68 @@ func TestCompRoot_AFolderRemovedByHandAndPutBackIsWrittenAgain(t *testing.T) {
 
 // A folder removed outside the app and made again by SaveCompetition (the
 // one door that creates a competition folder): the mkdirAll drops the held
-// root, so config.md lands in the new folder.
+// root, so config.md lands in the new folder. The mkdirAll is called alone
+// first, since the ENOENT retry would also land the save: only the drop leaves
+// no root held right after it.
 func TestCompRoot_AFolderMadeAgainBySaveCompetitionIsTheOneWritten(t *testing.T) {
 	s, _ := newRestoreTestStore(t)
 	require.NoError(t, s.SaveCompetition(&Competition{ID: "c1", Name: "C1", Date: "01-01-2026"}))
 	holdComp(t, s, "c1")
 	require.NoError(t, os.RemoveAll(s.compPath("c1")))
 
+	require.NoError(t, s.root.mkdirAll(s.compPath("c1"), 0o700))
+	assert.Empty(t, heldComps(s.root), "making the folder drops the root held on the one removed")
+
 	require.NoError(t, s.SaveCompetition(&Competition{ID: "c1", Name: "C1 made again", Date: "01-01-2026"}))
 	data, err := os.ReadFile(s.compPath("c1", "config.md"))
 	require.NoError(t, err)
 	assert.Contains(t, string(data), "C1 made again")
+	assertHeldRootsAreLive(t, s.root)
+}
+
+// heldRoot is the os.Root the store holds on competition id, nil when none.
+func heldRoot(d *dataRoot, id string) *os.Root {
+	v, ok := d.comps.Load(id)
+	if !ok {
+		return nil
+	}
+	e := v.(*compRoot)
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.root
+}
+
+// A config.md save asks mkdirAll for a folder that is already there, changed
+// bytes or not: the held root stays, so the saves do not throw it away.
+func TestCompRoot_ASaveOfAFolderThatIsThereKeepsItsRoot(t *testing.T) {
+	s, _ := newRestoreTestStore(t)
+	c := &Competition{ID: "c1", Name: "C1", Date: "01-01-2026"}
+	require.NoError(t, s.SaveCompetition(c))
+	holdComp(t, s, "c1")
+	held := heldRoot(s.root, "c1")
+	require.NotNil(t, held)
+
+	require.NoError(t, s.SaveCompetition(c), "a save whose bytes come out equal")
+	assert.Same(t, held, heldRoot(s.root, "c1"), "a no-op save keeps the root")
+	c.Name = "C1 renamed"
+	require.NoError(t, s.SaveCompetition(c), "a save that changes the file")
+	assert.Same(t, held, heldRoot(s.root, "c1"), "a changing save keeps the root")
+	assertHeldRootsAreLive(t, s.root)
+}
+
+// A restore the crash stopped midway, rolled forward by the SAME store that
+// holds roots on the folders it moves: the recovery's moves drop them, so no
+// root points at a moved-out folder once it is done. The startup test above
+// cannot tell, since the next call's ENOENT retry would drop a stale root too;
+// here nothing calls between the recovery and the check.
+func TestCompRoot_ARecoveryDropsTheRootsHeldOnTheFoldersItMoves(t *testing.T) {
+	s, _ := restoreCrashingAt(t, restoreMoveOut, "competitions/gone")
+	s.mu.Lock()
+	err := s.recoverRestoresLocked()
+	s.mu.Unlock()
+	require.NoError(t, err)
+
+	assert.NotContains(t, heldComps(s.root), "gone", "the folder moved out and not back is held no more")
 	assertHeldRootsAreLive(t, s.root)
 }
 

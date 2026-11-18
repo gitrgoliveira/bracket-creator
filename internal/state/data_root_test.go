@@ -8,6 +8,7 @@ import (
 	"runtime"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -409,16 +410,28 @@ func TestDataRoot_AFolderLinkingOutIsRefusedBeforeAndAfterADrop(t *testing.T) {
 }
 
 // startMove starts a moveComps on id whose move lasts until release closes,
-// and answers once the move has had time to take the entry's write lock (or,
-// when a reader holds the read lock, to queue behind it). done closes when
-// the move is over.
-func startMove(d *dataRoot, id string, release <-chan struct{}) (done <-chan struct{}) {
+// and answers once the move holds the entry's write lock or waits for it
+// behind a reader: a reader's TryRLock fails only while a writer does either.
+// done closes when the move is over.
+func startMove(t *testing.T, d *dataRoot, id string, release <-chan struct{}) (done <-chan struct{}) {
+	t.Helper()
 	ch := make(chan struct{})
 	go func() {
 		defer close(ch)
 		_ = d.moveComps(func() error { <-release; return nil }, filepath.Join("competitions", id))
 	}()
-	time.Sleep(50 * time.Millisecond)
+	require.Eventually(t, func() bool {
+		v, ok := d.comps.Load(id)
+		if !ok {
+			return false
+		}
+		e := v.(*compRoot)
+		if e.mu.TryRLock() {
+			e.mu.RUnlock()
+			return false
+		}
+		return true
+	}, 5*time.Second, time.Millisecond, "the move never took or queued for the entry's lock")
 	return ch
 }
 
@@ -446,7 +459,7 @@ func TestDataRoot_AWalkReadingFilesDoesNotDeadlockAgainstAMove(t *testing.T) {
 				// A move of the folder starts while the walk is under way and
 				// holds the folder for a moment, as a rename does; the
 				// inner read below waits for it, then runs.
-				moved = startMove(s.root, "c1", release)
+				moved = startMove(t, s.root, "c1", release)
 				time.AfterFunc(100*time.Millisecond, func() { close(release) })
 			}
 			if entry.IsDir() {
@@ -470,9 +483,23 @@ func TestDataRoot_AWalkReadingFilesDoesNotDeadlockAgainstAMove(t *testing.T) {
 	}
 }
 
-// rename resolves its two paths once: a rename with both ends in one
-// competition folder, or one end in .wal, while a move of that folder waits
-// behind a reader, finishes once the reader and the move are done.
+// rename resolves its two paths once, so it takes the folder's read lock once:
+// a rename with both ends in one competition folder, or one end in .wal, while
+// two writers wait on that folder's entry behind a reader, finishes once the
+// reader and the writers are done.
+//
+// Two writers, because one cannot tell a second read lock from a first. The
+// rename queues behind writer one; when that ends the rename holds the read
+// lock and writer two, already waiting on the writers' mutex, takes its place
+// as the pending writer, so a second read lock taken while the first is held
+// blocks behind it for ever (a Go RWMutex lets no new reader past a pending
+// writer). With one writer the rename's only wait is for the first lock, which
+// a double lock passes just as well. The writers lock the entry directly, not
+// through moveComps: a finished move takes the entry out of the map, and the
+// rename would go on to a new one, out of the second writer's reach. Writer
+// two's wait on the writers' mutex shows in no lock state a test can poll, so
+// the test gives it a moment; a late writer two misses the check and never
+// fails it.
 func TestDataRoot_ARenameDoesNotDeadlockAgainstAQueuedMove(t *testing.T) {
 	s, err := NewStore(t.TempDir())
 	require.NoError(t, err)
@@ -483,8 +510,20 @@ func TestDataRoot_ARenameDoesNotDeadlockAgainstAQueuedMove(t *testing.T) {
 
 	e, r := s.root.acquireComp("c1")
 	require.NotNil(t, r)
-	release := make(chan struct{})
-	moved := startMove(s.root, "c1", release)
+	var writers sync.WaitGroup
+	writers.Add(2)
+	go func() { // writer one holds the entry until the reader is gone and the rename is queued
+		defer writers.Done()
+		e.mu.Lock()
+		e.mu.Unlock() //nolint:staticcheck // an empty critical section: only the wait matters
+	}()
+	require.Eventually(t, func() bool {
+		if e.mu.TryRLock() {
+			e.mu.RUnlock()
+			return false
+		}
+		return true
+	}, 5*time.Second, time.Millisecond, "writer one never queued for the entry's lock")
 
 	finished := make(chan error, 1)
 	go func() {
@@ -497,16 +536,20 @@ func TestDataRoot_ARenameDoesNotDeadlockAgainstAQueuedMove(t *testing.T) {
 		}
 		finished <- err
 	}()
-	time.Sleep(20 * time.Millisecond)
+	go func() { // writer two waits for the writers' mutex, behind writer one
+		defer writers.Done()
+		e.mu.Lock()
+		e.mu.Unlock() //nolint:staticcheck // an empty critical section: only the wait matters
+	}()
+	time.Sleep(50 * time.Millisecond)
 	e.mu.RUnlock()
-	close(release)
 	select {
 	case err := <-finished:
 		require.NoError(t, err)
 	case <-time.After(10 * time.Second):
-		t.Fatal("a rename deadlocked against a queued move")
+		t.Fatal("a rename deadlocked against a queued writer")
 	}
-	<-moved
+	writers.Wait()
 	got, err := os.ReadFile(a)
 	require.NoError(t, err)
 	assert.Equal(t, "a", string(got))

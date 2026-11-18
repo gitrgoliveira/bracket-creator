@@ -49,10 +49,10 @@ import (
 // here, in rename, remove, removeAll, mkdir and mkdirAll, whatever called
 // them: DeleteCompetition's removeAll, the restore journal's moves out and in
 // (runRestoreJournal, which the live restore and startup recovery both run),
-// and saveCompetitionChangedLocked's mkdirAll, which re-creates a folder
-// removed by hand. The removal of a restore token folder needs no drop: it
-// lies under .restore/, which no held root points into, since a folder moved
-// out is dropped as it moves. Two removeAll calls remove a folder INSIDE a
+// and saveCompetitionChangedLocked's mkdirAll when it makes a folder removed by
+// hand (one already there keeps its root). The removal of a restore token
+// folder needs no drop: it lies under .restore/, which no held root points
+// into, since a folder moved out is dropped as it moves. Two removeAll calls remove a folder INSIDE a
 // competition folder (the score logs' events/ in score_log.go, the match
 // history's history/ in match_history.go); the competition's root serves them
 // and nothing is dropped. No store path renames or removes competitions/ or
@@ -483,10 +483,21 @@ func (d *dataRoot) mkdir(path string, perm fs.FileMode) error {
 }
 
 // mkdirAll makes path and its missing parents. When path is a competition
-// folder (saveCompetitionChangedLocked's, the one place that creates one), the
-// folder's held root is dropped first, so a root held on a folder removed by
-// hand never outlives the folder made in its place.
+// folder (saveCompetitionChangedLocked's, the one place that creates one) that
+// is not there, the folder's held root is dropped first, so a root held on a
+// folder removed by hand never outlives the folder made in its place. A folder
+// that is already there is left alone and keeps its root: every config.md save
+// asks, and dropping the root each time would throw away the cache on a save
+// that changes nothing. (A root held on a folder removed and put back by hand
+// is dropped by the ENOENT retry on the next call instead.)
 func (d *dataRoot) mkdirAll(path string, perm fs.FileMode) error {
+	if rel, err := d.name("mkdir", path); err == nil {
+		if _, isComp := compFolderOf(rel); isComp {
+			if fi, err := d.root.Stat(rel); err == nil && fi.IsDir() {
+				return nil
+			}
+		}
+	}
 	return d.change("mkdir", path, isNotExist,
 		func(r *os.Root, name string) error { return r.MkdirAll(name, perm) },
 		func(name string) error { return d.root.MkdirAll(name, perm) })

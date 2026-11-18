@@ -1063,12 +1063,11 @@ func canonicalizePoolMemberText(pools []helper.Pool) bool {
 // Caller holds the per-comp lock.
 //
 // Parses pools.csv directly (parsePoolsFile) rather than going through
-// loadPoolsLocked: that wrapper is exactly parsePoolsFile followed by a
-// defensive deep copy, and the copy exists to protect a caller that shares
-// the result with something else. This repair owns the freshly parsed slice
-// exclusively, mutates it in place, and either discards it (nothing to fix)
-// or hands it straight to savePoolsLocked, so the copy would be pure
-// overhead nobody ever reads.
+// loadPoolsLocked, which answers the cached body (loadCachedLocked): a repair
+// decides from the bytes as they are on disk, once per competition, and
+// owns the freshly parsed slice exclusively, mutates it in place, and either
+// discards it (nothing to fix) or hands it straight to savePoolsLocked, which
+// publishes what it wrote.
 func (s *Store) upgradePoolParticipantIDsLocked(compID string, roster *legacyUpgradeRoster) error {
 	path := s.compPath(compID, "pools.csv")
 	parsed, err := s.parsePoolsFile(path)
@@ -1154,10 +1153,9 @@ func backfillPoolMemberIDs(idx *domain.RosterIndex, pools []helper.Pool) bool {
 //
 // Parses pool-matches.csv directly (parsePoolMatchesFile) rather than going
 // through LoadPoolMatchesLocked, for the same reason
-// upgradePoolParticipantIDsLocked calls parsePoolsFile directly: that
-// wrapper is parse-then-deep-copy, and the copy is pure overhead when this
-// repair owns the parsed slice exclusively and either discards it or hands
-// it straight to savePoolMatchesLocked.
+// upgradePoolParticipantIDsLocked calls parsePoolsFile directly: it decides
+// from the bytes on disk, and owns the parsed slice exclusively, either
+// discarding it or handing it straight to savePoolMatchesLocked.
 func (s *Store) upgradePoolMatchSideIDsLocked(compID string, roster *legacyUpgradeRoster) error {
 	path := s.compPath(compID, "pool-matches.csv")
 	parsed, err := s.parsePoolMatchesFile(path)
@@ -1351,9 +1349,8 @@ func bracketNeedsIDRepair(b *Bracket) bool {
 //
 // Parses bracket.json directly (parseBracketFile) rather than going through
 // loadBracketLocked, for the same reason the pools/pool-matches upgrades
-// above parse directly: that wrapper is parse-then-deep-copy
-// (state.copyBracket), and the copy is pure overhead when this repair owns
-// the parsed value exclusively and either discards it or hands it straight
+// above parse directly: the repair decides from the bytes on disk, and owns
+// the parsed value exclusively, either discarding it or handing it straight
 // to saveBracketLocked, which refreshes the bracket cache and bumps its file
 // version as every bracket write does.
 //

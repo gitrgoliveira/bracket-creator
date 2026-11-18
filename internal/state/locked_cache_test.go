@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"reflect"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -142,13 +143,34 @@ func TestLockedCache_ANoOpUpdateLeavesTheConfigVersion(t *testing.T) {
 // transaction would now see something a fresh read would not. The bodies
 // carry the known divergences: retired wire values folded on read, the
 // retired whole-minute durations, the fields the file never holds, a nil
-// Courts and empty omitempty lists; and one with every field set, so a field
+// Courts and every empty omitempty list; and one with every field set, so a field
 // added later is checked too.
 func TestLockedCache_TheSavedBodyEqualsAParseOfTheWrittenBytes(t *testing.T) {
 	off := false
 	everyField := &Competition{}
 	fillEveryField(reflect.ValueOf(everyField).Elem(), "", 0)
 	everyField.ID = "c"
+	// Every slice or map field written with omitempty, set to an empty, non-nil
+	// value, found by reflection so a field added later is covered without
+	// listing it here: the file holds no such list, so a parse gives nil, and
+	// the published body must too. Courts is no omitempty field and comes back
+	// empty, so it is set by hand.
+	emptyLists := &Competition{ID: "c", Courts: []string{}}
+	omitemptyLists := 0
+	listFields := reflect.ValueOf(emptyLists).Elem()
+	for i := range listFields.NumField() {
+		field := listFields.Type().Field(i)
+		kind := field.Type.Kind()
+		if (kind == reflect.Slice || kind == reflect.Map) && strings.Contains(field.Tag.Get("yaml"), ",omitempty") {
+			if kind == reflect.Slice {
+				listFields.Field(i).Set(reflect.MakeSlice(field.Type, 0, 0))
+			} else {
+				listFields.Field(i).Set(reflect.MakeMap(field.Type))
+			}
+			omitemptyLists++
+		}
+	}
+	require.NotZero(t, omitemptyLists, "the reflection found no omitempty list on Competition")
 	cases := map[string]*Competition{
 		"retired values": {
 			ID:                    "c",
@@ -164,13 +186,7 @@ func TestLockedCache_TheSavedBodyEqualsAParseOfTheWrittenBytes(t *testing.T) {
 			RosterVersion:         "r",
 			ConfigVersion:         "v",
 		},
-		"empty lists": {
-			ID:                   "c",
-			Courts:               []string{},
-			FightingSpiritAwards: []FightingSpiritAward{},
-			RoundLineupsGiven:    map[string][]string{},
-			RoundLineupsLegacy:   []string{},
-		},
+		"empty lists": emptyLists,
 		"every field": everyField,
 	}
 	for name, comp := range cases {

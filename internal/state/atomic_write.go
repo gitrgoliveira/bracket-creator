@@ -221,6 +221,9 @@ func syncDir(root *dataRoot, dirPath string) (err error) {
 		return nil
 	}
 
+	// The open runs even where flush is skipped (a macOS test binary), so a
+	// missing folder is an error in every test; it costs microseconds, the
+	// flush milliseconds.
 	d, err := root.open(dirPath)
 	if err != nil {
 		return err

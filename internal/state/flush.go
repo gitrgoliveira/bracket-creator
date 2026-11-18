@@ -31,5 +31,12 @@ func flush(f *os.File) error {
 // skipFlush is true only in a binary built by go test (testing.Testing,
 // which the linker sets, so a go build binary always answers false) running
 // on macOS. Every test run counts: the full gate, a targeted go test -run and
-// an editor's test button alike.
-var skipFlush = testing.Testing() && runtime.GOOS == "darwin"
+// an editor's test button alike, in every package that saves through the
+// store, which is why it asks testing.Testing rather than a _test.go file
+// (that would reach internal/state's own tests only).
+var skipFlush = flushSkipped(testing.Testing(), runtime.GOOS)
+
+// flushSkipped is the rule itself: skip only in a test binary on macOS.
+func flushSkipped(testBinary bool, goos string) bool {
+	return testBinary && goos == "darwin"
+}

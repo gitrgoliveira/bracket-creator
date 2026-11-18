@@ -181,14 +181,20 @@ export function _noteOwnStatusAnswer(key, d, outcome) {
         _ownStatusAnswered.delete(base);
         return;
     }
-    const answered = Number(v && typeof v === 'object' && v.modifiedAt);
-    const version = Number(v && typeof v === 'object' && v.scoreVersion);
+    // Only an answer that is the match names a stamp or a score version. A
+    // bare acknowledgement (the send back door's 200, `true`) names neither:
+    // read as version 0, every feed copy was past it, so the move stopped
+    // holding the moment it landed and the bout it sent back showed running
+    // until the next refetch.
+    const body = typeof v === 'object' ? v : {};
+    const answered = Number(body.modifiedAt);
+    const version = body.scoreVersion;
     _ownStatusAnswered.set(base, {
         status, kind: d.kind || 'score', payload: d.payload,
         stamp: Number.isFinite(answered) && answered > 0 ? answered : _entryStamp(d),
         // The answer's score version: a feed copy past it is newer, whatever
         // its stamp (F7).
-        version: Number.isFinite(version) ? version : null,
+        version: typeof version === 'number' && Number.isFinite(version) ? version : null,
         compID: d.compID, matchID: d.matchID,
     });
 }

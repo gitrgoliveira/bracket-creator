@@ -650,6 +650,15 @@ test.describe('shared-shiaijo', () => {
       // A failed poll must not leave the listener on the shared page.
       C.off('response', onRes);
     }
+    // The bout sent back never shows running again: not once the send back is
+    // answered and the court's feed, read again a moment later, still holds
+    // the copy from before it. Read across that window, not once: a single
+    // read after the refetch passes whatever the window showed.
+    const quietSwitchUntil = Date.now() + 1500;
+    while (Date.now() < quietSwitchUntil) {
+      expect(await C.locator('.shiaijo-also-running').count(), 'the bout sent back shows running beside the one started').toBe(0);
+      await C.waitForTimeout(50);
+    }
     const onAafterSwitch = await runningOnCourt(H, 'A');
     const s3b = await courtState(C);
     r({ step: 'S3 switch', action: "Start match (ST's Up next) while the SI bout runs", variant: 'V2 doubleTap', ...dblStart, writes,

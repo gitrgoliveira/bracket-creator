@@ -2,7 +2,8 @@
 // request never leaves the device, the operator reads the one "not sent"
 // sentence (write_result.jsx NOT_SENT_NO_CONNECTION) as it is, never the
 // browser's "Failed to fetch" inside "Export failed: ...". Any other failure
-// keeps its own wording.
+// keeps its own wording. The template's failure is said on the tab beside its
+// button; the results download, which has a toast host, falls back to an alert.
 import React from 'react';
 import { render, act, fireEvent } from '@testing-library/react';
 import { describe, it, expect, vi, afterEach } from 'vitest';
@@ -32,6 +33,7 @@ async function clickBlankTemplate() {
     (b) => b.textContent.includes('Download blank template')
   );
   await act(async () => { fireEvent.click(button); });
+  return container.querySelector('[data-testid="export-template-error"]')?.textContent ?? null;
 }
 
 async function clickResults() {
@@ -69,12 +71,12 @@ describe('AdminExport blank template download', () => {
     vi.restoreAllMocks();
   });
 
-  it('alerts the not-sent sentence, unwrapped, when the request never leaves the device', async () => {
+  it('says the not-sent sentence, unwrapped, when the request never leaves the device', async () => {
     const alert = vi.spyOn(window, 'alert').mockImplementation(() => {});
     global.fetch = vi.fn(() => Promise.reject(new TypeError('Failed to fetch')));
-    await clickBlankTemplate();
+    expect(await clickBlankTemplate()).toBe(NOT_SENT_NO_CONNECTION);
     expect(global.fetch).toHaveBeenCalledTimes(1);
-    expect(alert).toHaveBeenCalledWith(NOT_SENT_NO_CONNECTION);
+    expect(alert).not.toHaveBeenCalled();
   });
 
   it('keeps an answered refusal in its own "Export failed" wording', async () => {
@@ -83,7 +85,7 @@ describe('AdminExport blank template download', () => {
       ok: false,
       json: () => Promise.resolve({ error: 'bad roster' }),
     }));
-    await clickBlankTemplate();
-    expect(alert).toHaveBeenCalledWith('Export failed: bad roster');
+    expect(await clickBlankTemplate()).toBe('Export failed: bad roster');
+    expect(alert).not.toHaveBeenCalled();
   });
 });

@@ -460,6 +460,15 @@ export function tournamentHasCheckIn(tournament) {
 export function checkInApplies(tournament, checkInEnabled) {
   return !!checkInEnabled && tournamentHasCheckIn(tournament);
 }
+// Whether "Shuffle unseeded" (Participants) can change anything: it reorders
+// the unseeded competitors only, so it needs at least two of them, and sends
+// nothing below that. The one owner of that rule, asked by the shuffle's own
+// guard and by the Export tab's never-shuffled warning, so the warning never
+// asks for a shuffle that would do nothing. Unseeded is no seed rank, the
+// shuffle's own test (normalizeCompetitionDetail maps "not seeded" to null).
+export function canShuffleUnseeded(players) {
+  return (players || []).filter((p) => p && !p.seed).length >= 2;
+}
 export const LABEL_NUMBER_PREFIX = "Player number prefix";
 // bc-pnum F12: one hint shared by the create form and the settings form, so
 // it has to describe what a BLANK field does in both places, which differ:

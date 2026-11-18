@@ -5609,6 +5609,9 @@ const API = {
         // Go's domain.Player uses json:"metadata" (array); the JS layer uses the
         // friendlier danGrade string. Convert before encoding so the backend can
         // unmarshal the dan grade into Player.Metadata.
+        // `rosterShuffled: true` (Shuffle unseeded's roster PUT) rides in
+        // `config` untouched: the server records it only with a roster that
+        // lands, and the answer carries the stored marker back.
         let body = config;
         if (config.players) {
             body = {

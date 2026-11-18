@@ -8,7 +8,7 @@ import React from 'react';
 import { render, act, fireEvent } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { API } from '../../api_client.jsx';
-import { AdminExport } from '../../admin_schedule_export.jsx';
+import { AdminExport, PRE_DRAW_NOTICE } from '../../admin_schedule_export.jsx';
 import { NOT_SENT_NO_CONNECTION } from '../../write_result.jsx';
 
 const competition = (status) => ({
@@ -35,7 +35,11 @@ const templateButton = (container) => Array.from(container.querySelectorAll('but
 async function clickBlankTemplate(c) {
   const { container } = render(<AdminExport c={c} t={{ id: 't1' }} password="pw" />);
   await act(async () => { fireEvent.click(templateButton(container)); });
+  return container;
 }
+
+// A failed download is said on the tab, beside the button, never in an alert.
+const templateError = (container) => container.querySelector('[data-testid="export-template-error"]')?.textContent ?? null;
 
 const xlsxAnswer = () => Promise.resolve({
   ok: true,
@@ -45,24 +49,20 @@ const xlsxAnswer = () => Promise.resolve({
   json: () => Promise.resolve({}),
 });
 
-// The template's hint says what the workbook holds: before the draw, empty
-// places only, sized from the expected number of participants or everyone
-// registered; a drawn competition's template is its draw.
-describe('AdminExport blank template hint', () => {
-  const hint = (c) => {
+// Before the draw the tab says only a blank template exists, and what sizes it;
+// a drawn competition's template is its draw, and the notice goes.
+describe('AdminExport pre-draw notice', () => {
+  const notice = (c) => {
     const { container } = render(<AdminExport c={c} t={{ id: 't1' }} password="pw" />);
-    return templateButton(container).nextElementSibling.textContent;
+    return container.querySelector('[data-testid="export-pre-draw-notice"]');
   };
-  const EMPTY_PLACES = 'Before the draw it has empty places only';
 
-  it('says the pre-draw template has empty places only', () => {
-    expect(hint(competition('setup'))).toContain(EMPTY_PLACES);
+  it('says only a blank template can be downloaded until the draw is generated', () => {
+    expect(notice(competition('setup')).textContent).toBe(PRE_DRAW_NOTICE);
   });
 
-  it('says nothing of empty places once the competition is drawn', () => {
-    const text = hint(competition('draw-ready'));
-    expect(text).toContain('for scoring by hand.');
-    expect(text).not.toContain(EMPTY_PLACES);
+  it('is gone once the competition is drawn', () => {
+    expect(notice(competition('draw-ready'))).toBeNull();
   });
 });
 
@@ -158,8 +158,9 @@ describe('AdminExport blank template source', () => {
       headers: new Headers(),
       json: () => Promise.resolve({ error: 'no draw yet, and fewer than 2 places to print: set the expected number of participants' }),
     }));
-    await clickBlankTemplate(competition('setup'));
-    expect(window.alert).toHaveBeenCalledWith('Export failed: no draw yet, and fewer than 2 places to print: set the expected number of participants');
+    const container = await clickBlankTemplate(competition('setup'));
+    expect(templateError(container)).toBe('Export failed: no draw yet, and fewer than 2 places to print: set the expected number of participants');
+    expect(window.alert).not.toHaveBeenCalled();
   });
 
   it('sends one request for a double tap and holds the button while the download is out', async () => {
@@ -185,22 +186,22 @@ describe('AdminExport blank template source', () => {
       headers: new Headers(),
       json: () => Promise.resolve({ error: 'the stored bracket no longer matches the settings' }),
     }));
-    await clickBlankTemplate(competition('pools'));
-    expect(window.alert).toHaveBeenCalledWith('Export failed: the stored bracket no longer matches the settings');
+    const container = await clickBlankTemplate(competition('pools'));
+    expect(templateError(container)).toBe('Export failed: the stored bracket no longer matches the settings');
   });
 
-  it('alerts the not-sent sentence, unwrapped, when the request never leaves the device', async () => {
+  it('says the not-sent sentence, unwrapped, when the request never leaves the device', async () => {
     global.fetch = vi.fn(() => Promise.reject(new TypeError('Failed to fetch')));
-    await clickBlankTemplate(competition('draw-ready'));
-    expect(window.alert).toHaveBeenCalledWith(NOT_SENT_NO_CONNECTION);
+    const container = await clickBlankTemplate(competition('draw-ready'));
+    expect(templateError(container)).toBe(NOT_SENT_NO_CONNECTION);
   });
 
   it('keeps refusing Swiss without asking the server', async () => {
     global.fetch = vi.fn(xlsxAnswer);
     const c = competition('pools');
     c.config.format = 'swiss';
-    await clickBlankTemplate(c);
+    const container = await clickBlankTemplate(c);
     expect(global.fetch).not.toHaveBeenCalled();
-    expect(window.alert.mock.calls[0][0]).toMatch(/Swiss competitions can't be exported/);
+    expect(templateError(container)).toMatch(/Swiss competitions can't be exported/);
   });
 });

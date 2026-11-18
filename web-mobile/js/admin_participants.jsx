@@ -598,7 +598,11 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
   // writes one. A `replace` (Apply changes, a whole pasted list) is not laid
   // on a roster its operator never saw: its refusal is handed back for the
   // caller to tell. Resolves with onUpdate's answer; rejects with its refusal.
-  const putRoster = (build, { replace = false } = {}) => {
+  // A `shuffled` write (Shuffle unseeded) carries `rosterShuffled: true` on
+  // every attempt, a retry after roster_changed included: the server records
+  // the shuffle only when the roster it travels with lands, and the answer's
+  // stored competition carries the marker back to the page.
+  const putRoster = (build, { replace = false, shuffled = false } = {}) => {
     const upTo = typedSeqRef.current;
     const send = async () => {
       for (let attempt = 1; ; attempt += 1) {
@@ -607,7 +611,10 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
         if (!players) return undefined;
         const before = rosterRef.current;
         try {
-          const answer = await onUpdate({ ...before, players, rosterVersion: version });
+          const answer = await onUpdate({
+            ...before, players, rosterVersion: version,
+            ...(shuffled ? { rosterShuffled: true } : {}),
+          });
           // The host shows the PUT's stored answer, and then its refetch,
           // before the save resolves (updateCompetition, m10), so the next PUT
           // is built from what the page shows (stage 6 review 11, A). Only a
@@ -725,7 +732,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
         let uIdx = 0;
         shuffledAny = true;
         return np.map(p => p.seed ? p : unseeded[uIdx++]);
-      });
+      }, { shuffled: true });
     } catch (err) {
       console.error("AdminParticipants: shuffleUnseeded PUT failed", err);
       // updateCompetition already toasted the error; don't double-toast

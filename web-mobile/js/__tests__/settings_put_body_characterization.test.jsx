@@ -619,4 +619,14 @@ describe('settingsPutBody reproduces the Settings PUT body captured before the h
       expect(rest).toEqual(want.body);
     });
   }
+
+  // The shuffle marker is not a setting: a Settings save neither sets nor
+  // clears it, so the body leaves the key out whether the competition was
+  // shuffled or not (the server keeps the stored marker).
+  it('leaves the shuffle marker out of the body, shuffled or not', () => {
+    for (const base of [indiv, { ...indiv, rosterShuffled: true }, { ...indiv, rosterShuffled: false }]) {
+      const got = settingsPutBody(base, { startTime: '15:00' }, 'v-given');
+      expect(got.body).not.toHaveProperty('rosterShuffled');
+    }
+  });
 });

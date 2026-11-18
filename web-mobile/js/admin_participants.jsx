@@ -8,6 +8,7 @@ import { seededRanks } from './admin_helpers.jsx';
 import { NO_ID_HINT, DataIssueBanner, rosterUnreadableIssues } from './data_integrity.jsx';
 import { NumberedName } from './numbered_name.jsx';
 import { Icon } from './icon.jsx';
+import { downloadBlob } from './blob_download.jsx';
 import { useOpenedTapGuard } from './tap_guard.jsx';
 import { PillButton } from './competition_fields.jsx';
 import { useUnsavedInput } from './app_version.jsx';
@@ -994,18 +995,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
   const downloadTemplate = () => {
     const content = participantTemplateCSV(c);
     const blob = new Blob([content], { type: "text/csv" });
-    // Create and revoke both via window.URL, consistent with admin_shell.jsx /
-    // admin_schedule_export.jsx and the unit-test mocks on window.URL.
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "participants_template.csv";
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    // Delay revoke so the browser initiates the download before the blob URL is
-    // torn down (matches admin_shell.jsx); guard the timer against jsdom teardown.
-    setTimeout(() => { if (typeof window !== "undefined" && window.URL) window.URL.revokeObjectURL(url); }, 100);
+    downloadBlob(blob, "participants_template.csv");
   };
 
   const isSetup = !c.status || c.status === "setup";

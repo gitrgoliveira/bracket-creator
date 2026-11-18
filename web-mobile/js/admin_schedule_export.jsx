@@ -2,21 +2,9 @@
 
 import { shownMessage } from './write_result.jsx';
 import { competitionHasRecordedResult } from './recorded_result.jsx';
+import { downloadBlob } from './blob_download.jsx';
 
 const { useState } = React;
-
-// saveBlob hands a downloaded workbook to the browser. The revoke waits so the
-// download starts first (as admin_shell.jsx does), and is guarded against jsdom teardown.
-function saveBlob(blob, filename) {
-  const dlUrl = window.URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = dlUrl;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  setTimeout(() => { if (typeof window !== "undefined" && window.URL) window.URL.revokeObjectURL(dlUrl); }, 100);
-}
 
 export function AdminExport({ c, t, password, showToast, poolMatches, bracket }) {
   // The competition detail nests its real fields (roster, format, courts,
@@ -51,7 +39,7 @@ export function AdminExport({ c, t, password, showToast, poolMatches, bracket })
     if (resultsBusy) return;
     setResultsBusy(true);
     try {
-      saveBlob(await window.API.exportResults(cid, password), `results-${cid}.xlsx`);
+      downloadBlob(await window.API.exportResults(cid, password),`results-${cid}.xlsx`);
       notify("Results workbook downloaded.");
     } catch (err) {
       notify(shownMessage(err, "Results export failed: "), "error");
@@ -74,7 +62,7 @@ export function AdminExport({ c, t, password, showToast, poolMatches, bracket })
       // The server answers with the stored draw, or, before the draw, with the
       // blank layout the draw would print, its places empty.
       const blob = await window.API.exportDrawTemplate(cid, password);
-      saveBlob(blob, `bracket-${cid}.xlsx`);
+      downloadBlob(blob, `bracket-${cid}.xlsx`);
     } catch (err) {
       // A request that got no answer says the one "not sent" sentence (write_result.jsx).
       alert(shownMessage(err, "Export failed: "));

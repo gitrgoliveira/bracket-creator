@@ -15,6 +15,12 @@ import (
 // court that the neighbouring same-day competitions leave (nil for none); the
 // caller scans for it once and hands the same floor to the preview bracket.
 func (e *Engine) generatePools(comp *state.Competition, players []domain.Player, seeds []domain.SeedAssignment, courtFloor map[string]time.Time) ([]state.MatchResult, error) {
+	// The settings refusals come before the seeds: a stale seed row is a plain
+	// error, and it must not hide the 400 that names the setting to fix.
+	if err := refuseUnformablePoolConfig(comp); err != nil {
+		return nil, wrapValidationErrorf(err, "competition %s cannot start: %s", comp.ID, err.Error())
+	}
+
 	// helper.Player is a type alias for domain.Player (NFR-007); the
 	// Excel-coupled helpers accept domain values directly.
 	if len(seeds) > 0 {
@@ -73,6 +79,35 @@ func (e *Engine) generatePools(comp *state.Competition, players []domain.Player,
 	return results, e.store.SavePoolMatches(comp.ID, results)
 }
 
+// refuseUnformablePoolConfig refuses the settings no roster can fix, before
+// anything reads the players: formPools runs it for every caller, and
+// generatePools runs it earlier still, ahead of the seeds.
+func refuseUnformablePoolConfig(comp *state.Competition) error {
+	// PoolSize is the divisor in CreatePools; a zero or negative value would
+	// otherwise reach the guard in helper.CreatePools as a plain error mapped to
+	// HTTP 500. Refusing here makes an unset pool size a clean 400. (mp-ebgz)
+	if comp.PoolSize <= 0 {
+		return fmt.Errorf("pool size must be at least 1, got %d, set a pool size before starting", comp.PoolSize)
+	}
+
+	// bc-qual: ExtraQualifiers is only meaningful for "mixed" (pools feeding a
+	// knockout). The league format also forms pools but has a single implicit
+	// pool and no knockout, so a stored non-standard value on a league record (a
+	// hand-edited config.md, or a format switched outside the HTTP layer, which
+	// normalizePoolConfig would have zeroed) must not steer pool FORMATION.
+	// poolFedKnockout gates both the validation and the formation dispatch in
+	// formPools, and the two gates have to be the same expression. Validating before
+	// anything reads the value also reports an invalid setting as itself rather
+	// than as whatever formation error it happens to provoke.
+	poolFedKnockout := comp.Format == state.CompFormatMixed
+	if poolFedKnockout {
+		if err := state.ValidateExtraQualifiers(comp.ExtraQualifiers, comp.PoolSizeMode, comp.EffectivePoolWinners()); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // formPools forms the pool phase over players and refuses what the draw
 // refuses. It stores nothing and numbers nobody, and it is the one owner of
 // those rules for both callers: generatePools (the draw) and blankDraw (the
@@ -88,28 +123,10 @@ func (e *Engine) generatePools(comp *state.Competition, players []domain.Player,
 // spread) reads THAT. The raw allocation stays the single-pool league spread's,
 // which really does use every shiaijo the league was given.
 func formPools(comp *state.Competition, players []domain.Player) (pools []helper.Pool, drawCourts int, err error) {
-	// PoolSize is the divisor in CreatePools; a zero or negative value would
-	// otherwise reach the guard in helper.CreatePools as a plain error mapped to
-	// HTTP 500. Refusing here makes an unset pool size a clean 400. (mp-ebgz)
-	if comp.PoolSize <= 0 {
-		return nil, 0, fmt.Errorf("pool size must be at least 1, got %d, set a pool size before starting", comp.PoolSize)
+	if err := refuseUnformablePoolConfig(comp); err != nil {
+		return nil, 0, err
 	}
-
-	// bc-qual: ExtraQualifiers is only meaningful for "mixed" (pools feeding a
-	// knockout). The league format also forms pools but has a single implicit
-	// pool and no knockout, so a stored non-standard value on a league record (a
-	// hand-edited config.md, or a format switched outside the HTTP layer, which
-	// normalizePoolConfig would have zeroed) must not steer pool FORMATION.
-	// poolFedKnockout gates both the validation and the formation dispatch below,
-	// and the two gates have to be the same expression. Validating before
-	// anything reads the value also reports an invalid setting as itself rather
-	// than as whatever formation error it happens to provoke.
 	poolFedKnockout := comp.Format == state.CompFormatMixed
-	if poolFedKnockout {
-		if err := state.ValidateExtraQualifiers(comp.ExtraQualifiers, comp.PoolSizeMode, comp.EffectivePoolWinners()); err != nil {
-			return nil, 0, err
-		}
-	}
 
 	// numCourts is the competition's RAW shiaijo allocation, normalised: an unset
 	// court list means one unnamed court.

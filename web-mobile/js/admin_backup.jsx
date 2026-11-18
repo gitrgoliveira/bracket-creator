@@ -1,6 +1,8 @@
 // Admin backup and restore page (/admin/backup)
 // bc-bkrs Phase 3 (P3-C)
 
+import { downloadBlob } from './blob_download.jsx';
+
 const { useState, useEffect, useRef, useCallback } = React;
 
 const AdminTopbar = window.AdminTopbar;
@@ -19,17 +21,6 @@ function formatFileSize(bytes) {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-function triggerBlobDownload(blob, filename) {
-  const url = window.URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  window.URL.revokeObjectURL(url);
 }
 
 // A restore plan row the operator is not asked about says what the restore does
@@ -187,7 +178,7 @@ function AdminBackupPage({ tournament, onBack, onLogout, onViewerMode, password,
     setBackingUp(target);
     try {
       const { blob, filename } = await download();
-      triggerBlobDownload(blob, filename);
+      downloadBlob(blob, filename);
       showToast?.(doneMessage);
     } catch (e) {
       showToast?.(e.message || "Backup failed", "error");
@@ -967,7 +958,7 @@ function AdminBackupPage({ tournament, onBack, onLogout, onViewerMode, password,
                           onClick={async () => {
                             try {
                               const blob = await window.API.downloadBackup(b.name, password);
-                              triggerBlobDownload(blob, b.name);
+                              downloadBlob(blob, b.name);
                             } catch (e) {
                               showToast?.(e.message || "Download failed", "error");
                             }

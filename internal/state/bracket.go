@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"maps"
 	"os"
+	"sync/atomic"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 )
@@ -111,6 +112,12 @@ func (b *Bracket) StampRoundZeroSideIDsFromDrawOrder() bool {
 	return changed
 }
 
+// bracketParses counts the parses of a bracket.json read from disk, for the
+// tests that pin the locked loader to the parsed-file cache
+// (locked_cache_test.go). parseBracketBytes alone (a transaction's staged
+// bytes) does not count.
+var bracketParses atomic.Int64
+
 func (s *Store) parseBracketFile(path string) (any, error) {
 	raw, err := s.root.readFile(path)
 	if err != nil {
@@ -119,6 +126,7 @@ func (s *Store) parseBracketFile(path string) (any, error) {
 		}
 		return nil, err
 	}
+	bracketParses.Add(1)
 	b, err := parseBracketBytes(raw)
 	if err != nil {
 		return nil, err
@@ -163,6 +171,40 @@ func parseBracketBytes(raw []byte) (*Bracket, error) {
 		b.ThirdPlaceMatch.NormalizeLegacy()
 	}
 	return &b, nil
+}
+
+// asStoredBracket gives b, a copy saveBracketLocked has just written, the shape
+// a read of that file gives, so the body it publishes is the body a read would
+// give (the locked loader serves that body to transactions): the empty lists
+// and maps the file omits (omitempty) read back as nil, and the read's own
+// folds (clampBracketMatchFlags, NormalizeLegacy) run as parseBracketBytes runs
+// them. copyBracket already gives an empty IpponsA, IpponsB, Feeders and
+// DrawOrder as nil. The round trip in locked_cache_test.go pins it.
+func asStoredBracket(b *Bracket) {
+	each := func(m *BracketMatch) {
+		if len(m.SubResults) == 0 {
+			m.SubResults = nil
+		}
+		if len(m.GroupStamps) == 0 {
+			m.GroupStamps = nil
+		}
+		if len(m.EventSeqs) == 0 {
+			m.EventSeqs = nil
+		}
+		if len(m.TurnedAway) == 0 {
+			m.TurnedAway = nil
+		}
+		clampBracketMatchFlags(m)
+		m.NormalizeLegacy()
+	}
+	for i := range b.Rounds {
+		for j := range b.Rounds[i] {
+			each(&b.Rounds[i][j])
+		}
+	}
+	if b.ThirdPlaceMatch != nil {
+		each(b.ThirdPlaceMatch)
+	}
 }
 
 // clampBracketMatchFlags forces negative engi flag counts to 0 (see
@@ -214,6 +256,8 @@ func (s *Store) copyBracket(b *Bracket) *Bracket {
 			res.Rounds[i][j].MarkIDs = round[j].MarkIDs.Clone()
 			res.Rounds[i][j].EventSeqs = CloneGroupStamps(round[j].EventSeqs)
 			res.Rounds[i][j].TurnedAway = maps.Clone(round[j].TurnedAway)
+			res.Rounds[i][j].IneligibleSides = clonePtr(round[j].IneligibleSides)
+			res.Rounds[i][j].WithdrawnStatus = clonePtr(round[j].WithdrawnStatus)
 			if round[j].Feeders != nil {
 				res.Rounds[i][j].Feeders = append([]string(nil), round[j].Feeders...)
 			}
@@ -236,6 +280,8 @@ func (s *Store) copyBracket(b *Bracket) *Bracket {
 		tpm.MarkIDs = b.ThirdPlaceMatch.MarkIDs.Clone()
 		tpm.EventSeqs = CloneGroupStamps(b.ThirdPlaceMatch.EventSeqs)
 		tpm.TurnedAway = maps.Clone(b.ThirdPlaceMatch.TurnedAway)
+		tpm.IneligibleSides = clonePtr(b.ThirdPlaceMatch.IneligibleSides)
+		tpm.WithdrawnStatus = clonePtr(b.ThirdPlaceMatch.WithdrawnStatus)
 		if b.ThirdPlaceMatch.Feeders != nil {
 			tpm.Feeders = append([]string(nil), b.ThirdPlaceMatch.Feeders...)
 		}
@@ -273,11 +319,13 @@ func (s *Store) SaveBracket(compID string, b *Bracket) error {
 	return nil
 }
 
-// loadBracketLocked reads the bracket directly from disk WITHOUT
-// acquiring the per-competition lock. Caller MUST already hold the
-// per-comp lock (typically via WithTransaction). Bypasses the cache for
-// the same reason UpdateBracket does; the caller's lock is what
-// coordinates with concurrent writers.
+// loadBracketLocked reads the bracket through the parsed-file cache
+// (loadCachedLocked) WITHOUT acquiring the per-competition lock, and answers a
+// copy the caller may change. Caller MUST already hold the per-comp lock
+// (typically via WithTransaction). The cache is never behind the file under
+// that lock: every in-process writer publishes its body (or invalidates, or
+// removes the file) before it releases the lock, and the mtime check catches
+// an edit made outside the app.
 //
 // Returns an empty `&Bracket{Rounds: [][]BracketMatch{}}` when no file
 // exists, matching LoadBracket's never-nil contract.
@@ -285,8 +333,7 @@ func (s *Store) loadBracketLocked(compID string) (*Bracket, error) {
 	if err := ValidateCompetitionID(compID); err != nil {
 		return nil, err
 	}
-	path := s.compPath(compID, "bracket.json")
-	parsed, err := s.parseBracketFile(path)
+	parsed, err := s.loadCachedLocked(compID, "bracket.json", s.parseBracketFile)
 	if err != nil {
 		return nil, err
 	}
@@ -311,7 +358,10 @@ func (s *Store) loadBracketLocked(compID string) (*Bracket, error) {
 // re-parse from the cached copy without going to disk). T211/T212.
 func (s *Store) saveBracketLocked(compID string, b *Bracket, write writeFn) error {
 	path := s.compPath(compID, "bracket.json")
-	data, err := json.MarshalIndent(b, "", "  ")
+	// The copy is what is written and published: it holds Rounds as a list
+	// even when b holds none, so the file reads back as the body published.
+	published := s.copyBracket(b)
+	data, err := json.MarshalIndent(published, "", "  ")
 	if err != nil {
 		return err
 	}
@@ -320,9 +370,16 @@ func (s *Store) saveBracketLocked(compID string, b *Bracket, write writeFn) erro
 		return err
 	}
 
+	// No bracket publishes nothing (the next read parses the file), never a
+	// nil *Bracket the cache would serve.
+	var body any
+	if published != nil {
+		asStoredBracket(published)
+		body = published
+	}
 	cache := s.getFileCache(compID, "bracket.json")
 	cache.mu.Lock()
-	cache.data = s.copyBracket(b)
+	cache.data = body
 	cache.mtime = s.FileMtime(compID, "bracket.json")
 	cache.mu.Unlock()
 
@@ -392,14 +449,13 @@ func (s *Store) UpdateBracket(compID string, mutate func(*Bracket) error) error 
 // (T156, NFR-010). The write parameter selects direct-to-disk vs
 // WAL-capturing semantics (see saveBracketLocked).
 func (s *Store) updateBracketLocked(compID string, mutate func(*Bracket) error, write writeFn) error {
-	// Load directly under the lock (see UpdatePoolMatchByID for why
-	// we bypass the cached path here).
-	path := s.compPath(compID, "bracket.json")
-	parsed, err := s.parseBracketFile(path)
+	// Through the locked loader, which answers a copy, so mutate never edits
+	// the cached body (see loadBracketLocked for why the cache is current
+	// under the lock).
+	bracket, err := s.loadBracketLocked(compID)
 	if err != nil {
 		return err
 	}
-	bracket, _ := parsed.(*Bracket)
 
 	if err := mutate(bracket); err != nil {
 		return err
@@ -561,16 +617,13 @@ func (s *Store) UpdateBracketMatchByID(compID, matchID string, mutate func(*Brac
 
 // updateBracketMatchByIDLocked is the lock-free body of UpdateBracketMatchByID
 // (caller holds the per-comp write lock), mirroring updatePoolMatchByIDLocked.
-// It saves ONLY when the match is found, so a miss costs a parse but no write.
+// It saves ONLY when the match is found, so a miss costs a load but no write.
 func (s *Store) updateBracketMatchByIDLocked(compID, matchID string, mutate func(*BracketMatch), write writeFn) (bool, error) {
-	// Load directly under the lock (see UpdatePoolMatchByID for why we bypass
-	// the cached path here).
-	path := s.compPath(compID, "bracket.json")
-	parsed, err := s.parseBracketFile(path)
+	// Through the locked loader, which answers a copy (see updateBracketLocked).
+	bracket, err := s.loadBracketLocked(compID)
 	if err != nil {
 		return false, err
 	}
-	bracket, _ := parsed.(*Bracket)
 	if bm := findBracketMatchByID(bracket, matchID); bm != nil {
 		mutate(bm)
 		return true, s.saveBracketLocked(compID, bracket, write)

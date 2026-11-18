@@ -404,20 +404,9 @@ func (s *Store) getFileCache(compID, filename string) *fileCache {
 	return f.(*fileCache)
 }
 
-// loadCached returns the cached value for (compID, filename). On a cache hit
-// (file mtime matches cached mtime) the cached pointer is returned directly;
-// callers are responsible for deep-copying before exposing it. On a miss, the
-// per-comp read lock and the file-cache write lock are held while parse runs.
-// The mtime stored in the cache is the value read under the file-cache write
-// lock immediately before parse, so a concurrent external writer that mutates
-// the file after we've read it will produce a different FileMtime on the next
-// call and force a re-parse (rather than returning stale content). The per-comp
-// lock prevents in-process writers from racing with parse.
-//
-// parse receives the on-disk path and must return the value to cache (an empty
-// container for "file does not exist", or nil when that's the intended sentinel,
-// see LoadCompetition; nil values do not cache-hit and will be re-parsed on
-// each call).
+// loadCached returns the cached value for (compID, filename): it settles a
+// kept log, takes the per-comp read lock and answers loadCachedLocked. See
+// loadCachedLocked for the cache rule.
 func (s *Store) loadCached(compID, filename string, parse func(path string) (any, error)) (any, error) {
 	if err := ValidateCompetitionID(compID); err != nil {
 		return nil, err
@@ -426,7 +415,29 @@ func (s *Store) loadCached(compID, filename string, parse func(path string) (any
 	mu := s.getCompLock(compID)
 	mu.RLock()
 	defer mu.RUnlock()
+	return s.loadCachedLocked(compID, filename, parse)
+}
 
+// loadCachedLocked is loadCached for a caller that already holds the per-comp
+// lock, for writing (a transaction, a load-mutate-save body) or for reading.
+// On a cache hit (file mtime matches cached mtime) the cached pointer is
+// returned directly; callers are responsible for deep-copying before exposing
+// it. On a miss, the file-cache write lock is held while parse runs, and the
+// cache-mutex double check below keeps two read-locked callers from both
+// parsing. The mtime stored in the cache is the value read under the
+// file-cache write lock immediately before parse, so a writer outside the app
+// that changes the file after we've read it produces a different FileMtime on
+// the next call and forces a re-parse (rather than returning stale content).
+// The per-comp lock keeps in-process writers out while parse runs, and every
+// in-process writer of a cached file publishes the body it wrote, invalidates
+// the cache, or removes the file before it releases that lock, so under the
+// lock the cached body is never older than the file.
+//
+// parse receives the on-disk path and must return the value to cache (an empty
+// container for "file does not exist", or nil when that's the intended sentinel,
+// see LoadCompetition; nil values do not cache-hit and will be re-parsed on
+// each call).
+func (s *Store) loadCachedLocked(compID, filename string, parse func(path string) (any, error)) (any, error) {
 	cache := s.getFileCache(compID, filename)
 
 	cache.mu.RLock()

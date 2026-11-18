@@ -76,10 +76,10 @@ type correctionCheck struct {
 // otherwise blank it through the same whole-struct overwrite.
 //
 // Returning the stored status spares the caller a second match lookup:
-// StoreTx loads deliberately bypass the file cache (state.LoadPoolMatchesLocked
-// / loadBracketLocked), so a walk is a real os.Open plus a full CSV
-// parse (and, for a bracket match, an os.ReadFile plus a whole-bracket
-// json.Unmarshal) while the per-comp WRITE lock is held. The score handler
+// StoreTx loads read through the parsed-file cache (state.LoadPoolMatchesLocked
+// / loadBracketLocked), so on a hit a walk is a stat and a copy of the whole
+// body (every pool match, or the whole bracket), still made while the per-comp
+// WRITE lock is held, and a miss adds a full parse. The score handler
 // reads the snapshot ONCE for every guard of the write (the self-run judge or
 // the pick judge, then this), and the start gate after it reads the returned
 // status instead.

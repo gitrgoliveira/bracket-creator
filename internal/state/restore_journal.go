@@ -116,7 +116,9 @@ func (s *Store) writeRestoreJournal(tokenDir string, j restoreJournal) error {
 
 // runRestoreJournal runs every step in order, skipping the ones already done,
 // then fsyncs every folder a rename touched. Caller holds the locks the
-// restore holds, or is Store.init under its s.mu.
+// restore holds, or is Store.init under its s.mu. A rename of a competition
+// folder drops that folder's held root for its length (dataRoot.rename), here
+// as at startup, where the write check has already opened the roots.
 func (s *Store) runRestoreJournal(tokenDir string, j restoreJournal) error {
 	touched := map[string]struct{}{}
 	for i, st := range j.Steps {

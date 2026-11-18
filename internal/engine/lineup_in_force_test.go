@@ -514,6 +514,13 @@ func TestLineupInForce_ReadsByTheTeamIDAlone(t *testing.T) {
 // engine and the first team's id and last match.
 func bigLeagueWithLineups(t testing.TB) (eng *Engine, teamID, matchID string) {
 	t.Helper()
+	return leagueWithLineups(t, 8)
+}
+
+// leagueWithLineups is bigLeagueWithLineups for a league of the given number of
+// teams: it holds teams*(teams-1) match lineups and one starting lineup a team.
+func leagueWithLineups(t testing.TB, teams int) (eng *Engine, teamID, matchID string) {
+	t.Helper()
 	store, err := state.NewStore(t.TempDir())
 	require.NoError(t, err)
 	eng = New(store)
@@ -521,7 +528,7 @@ func bigLeagueWithLineups(t testing.TB) (eng *Engine, teamID, matchID string) {
 	require.NoError(t, store.SaveCompetition(&state.Competition{
 		ID: compID, Kind: "team", TeamSize: 5, Format: state.CompFormatLeague, RoundLineupsConverted: true,
 	}))
-	players := make([]domain.Player, 8)
+	players := make([]domain.Player, teams)
 	for i := range players {
 		players[i] = domain.Player{ID: helper.NewUUID4(), Name: fmt.Sprintf("Team%d", i), Dojo: fmt.Sprintf("Dojo%d", i)}
 	}
@@ -610,10 +617,13 @@ func TestLineupInForceFrom_IsTheEnginesRuleOverWhatTheCallerHolds(t *testing.T) 
 }
 
 // The read copies only the lineup it returns, so what it costs does not grow with
-// the lineups the competition holds: against 64 stored lineups it allocates a
-// small fraction of what copying them all does (LoadTeamLineups).
+// the lineups the competition holds: against 144 stored lineups (a twelve-team
+// league) it allocates a small fraction of what copying them all does
+// (LoadTeamLineups). The copy is of the cached parse, which is as small as a
+// parse of the file, so the competition has to hold enough lineups for copying
+// them all to be clearly dearer than one read.
 func TestLineupInForce_DoesNotCopyEveryLineupOfTheCompetition(t *testing.T) {
-	eng, teamID, matchID := bigLeagueWithLineups(t)
+	eng, teamID, matchID := leagueWithLineups(t, 12)
 	_, err := eng.LineupInForce("big-league", teamID, matchID) // warm the caches and the one-time legacy upgrade
 	require.NoError(t, err)
 

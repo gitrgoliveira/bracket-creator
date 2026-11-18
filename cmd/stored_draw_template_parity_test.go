@@ -20,12 +20,13 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
-// TestStoredDrawTemplateMatchesCreate pins the app's two sources of a blank
-// template to one shape. Before a competition is drawn, "Download blank
-// template" posts its roster to /create; once it has a draw, the button
-// downloads the stored-draw export (engine.ExportCompetitionXlsx, GET
-// /api/competitions/:id/export), so the template prints the draw the app
-// runs and the PDFs print. For the same settings, the stored-draw workbook
+// TestStoredDrawTemplateMatchesCreate pins the app's stored-draw template to
+// the shape of the CLI's /create. Once a competition has a draw, "Download
+// blank template" downloads the stored-draw export
+// (engine.ExportCompetitionXlsx, GET /api/competitions/:id/export), so the
+// template prints the draw the app runs and the PDFs print (before a draw it
+// is the blank layout, which TestBlankLayout_HasTheDrawsShape pins). For the
+// same settings, the stored-draw workbook
 // must carry what /create's does: the same sheets (the stored one adds the
 // Tags sheet a knockout-only /create leaves out), the same number of formulas
 // and values on each (pool counting formulas, the kachinuki bout rows, the

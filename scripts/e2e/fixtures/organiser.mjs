@@ -152,9 +152,10 @@ export async function downloadResultsWorkbook(page, id) {
   return { file, name: download.suggestedFilename(), bytes: fs.readFileSync(file) };
 }
 
-// The two routes a blank template can come from: the competition's stored
-// draw (GET /api/competitions/:id/export) or the stateless generator, which
-// draws the roster again (POST /create).
+// The one route a blank template comes from: the competition's export
+// (GET /api/competitions/:id/export), its stored draw or, before the draw, the
+// blank layout. A request to the CLI's /create is still listed, so a template
+// that took it would show up in `routes`.
 const TEMPLATE_ROUTE = /^\/(create|api\/competitions\/[^/]+\/export)$/;
 
 // Open a competition's Export section and download its blank template.

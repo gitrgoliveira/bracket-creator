@@ -1,18 +1,13 @@
 // Blank template journey: the workbook the Export & print tab's "Download
-// blank template (.xlsx)" hands an organiser holds the pools the app runs.
+// blank template (.xlsx)" hands an organiser.
 //
-// Once a competition is drawn, the template is its stored draw
-// (GET /api/competitions/:id/export). Before the draw there is nothing stored,
-// and the button posts the roster to the stateless generator (POST /create),
-// which draws it afresh in registration order from the whole roster. The two
-// doors give the same pools for a roster everyone turned up for: the app's
-// draw keeps registration order too (measured: twelve entrants, no check-in,
-// identical Pool Draw sheets). They part where the app's draw leaves someone
-// out. Here check-in leaves two early entrants out, so the stored draw has
-// ten competitors in other pools, while a template drawn again from the
-// roster still holds all twelve. The journey downloads that counterfactual
-// before the draw (the /create door, step 1) and checks the app's pools differ
-// from it, so a template that took the old door after the draw cannot pass.
+// The button always takes one door, GET /api/competitions/:id/export. Once a
+// competition is drawn, that is its stored draw, holding the pools the app runs.
+// Before the draw there is nothing stored, and the answer is the blank layout
+// the draw would print for the expected number of places, every place empty: no
+// names, so nobody is left out or put in a pool the draw has not made. The
+// journey downloads it before the draw (empty places, sized from the roster),
+// then after the draw (the app's own pools, from the ten competitors checked in).
 //
 // Everything is seeded through the interface: the wizard, the roster paste
 // box, the Registration desk and Generate draw.
@@ -62,15 +57,16 @@ test.describe('blank template', () => {
       await expect(deskHeadline(page)).toContainText('10 of 12');
     });
 
-    let redrawn;
-    await test.step('before the draw, the template is drawn from the roster (/create)', async () => {
+    await test.step('before the draw, the template is the blank layout (empty places)', async () => {
       const dl = await downloadTemplateWorkbook(page, id);
       await shot(page, 'export-before-draw');
-      redrawn = poolDrawMembers(dl.bytes);
-      record({ journey: 'blank-template', step: 'template before the draw', routes: dl.routes, pools: redrawn });
-      expect(dl.routes, 'a competition in setup has no stored draw to print').toEqual(['POST /create']);
-      const names = Object.values(redrawn).flat();
-      for (const [name] of ROSTER) expect(names, `${name} is in a template drawn from the whole roster`).toContain(name);
+      const blank = poolDrawMembers(dl.bytes);
+      record({ journey: 'blank-template', step: 'template before the draw', routes: dl.routes, pools: blank });
+      expect(dl.routes, 'the one door, before and after the draw').toEqual([`GET /api/competitions/${id}/export`]);
+      const pools = Object.values(blank);
+      expect(pools, 'twelve places in pools of three').toHaveLength(4);
+      for (const places of pools) expect(places, 'three places a pool').toHaveLength(3);
+      for (const name of Object.values(blank).flat()) expect(name, 'a place names nobody').toBeFalsy();
     });
 
     let pools;
@@ -83,9 +79,6 @@ test.describe('blank template', () => {
       const drawn = Object.values(pools).flat();
       expect(drawn, 'only the ten checked in are drawn').toHaveLength(ROSTER.length - ABSENT.length);
       for (const name of ABSENT) expect(drawn, `${name} is not drawn`).not.toContain(name);
-      // The guard on the journey itself: a template drawn again from the
-      // roster would not match, so the comparison below can tell the doors apart.
-      expect(pools, 'the app runs other pools than a draw of the whole roster in registration order').not.toEqual(redrawn);
     });
 
     await test.step('the blank template of the drawn competition holds those pools', async () => {
@@ -95,7 +88,7 @@ test.describe('blank template', () => {
       record({ journey: 'blank-template', step: 'template after the draw', file: dl.name, routes: dl.routes, pools: book });
       expect(dl.name).toBe(`bracket-${id}.xlsx`);
       // Soft, so a template from the wrong door also reports the pools it holds.
-      expect.soft(dl.routes, 'a drawn competition prints its stored draw, never a fresh one').toEqual([`GET /api/competitions/${id}/export`]);
+      expect.soft(dl.routes, 'a drawn competition prints its stored draw').toEqual([`GET /api/competitions/${id}/export`]);
       expect(book, 'the Pool Draw sheet holds the app\'s pools, each in the app\'s order').toEqual(pools);
     });
   });

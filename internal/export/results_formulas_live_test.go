@@ -571,3 +571,46 @@ func TestRankingDifferenceReasons(t *testing.T) {
 		"competitors share a place",
 	}, reasons)
 }
+
+// TestResultsWorkbook_DecidedTeamPoolKeepsIVNumeric: a team encounter decided by
+// kiken, fusenpai or fusensho carries its result mark in the competitor's IV
+// cell. The cell must stay a number (the mark rides in its number format), or
+// the live IV/IL, W/L and Rank formulas that add and compare it fail or invert.
+func TestResultsWorkbook_DecidedTeamPoolKeepsIVNumeric(t *testing.T) {
+	t.Parallel()
+	for _, decision := range []string{"kiken-voluntary", "fusenpai", "fusensho"} {
+		t.Run(decision, func(t *testing.T) {
+			t.Parallel()
+			dir, store, eng, compID := testSetup(t)
+			defer os.RemoveAll(dir)
+			comp, err := store.LoadCompetition(compID)
+			require.NoError(t, err)
+			comp.Kind = "team"
+			comp.TeamSize = 3
+			comp.Format = state.CompFormatMixed
+			require.NoError(t, store.SaveCompetition(comp))
+
+			pool := helper.Pool{PoolName: "Pool A", Players: []helper.Player{makePlayer("North"), makePlayer("South")}}
+			require.NoError(t, store.SavePools(compID, []helper.Pool{pool}))
+			require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+				{ID: "Pool A-0", SideA: "North", SideAID: "North", SideB: "South", SideBID: "South",
+					Status: state.MatchStatusCompleted, Decision: decision, DecisionBy: "North", Winner: "South", WinnerID: "South"},
+			}))
+
+			f, pools := buildAndOpen(t, store, eng, compID)
+			sheet := readPoolsOnSheet(t, f, pools)[0]
+			app := appStandingsOf(t, eng, compID, pools[0])
+			for i, ps := range app {
+				row := sheet.rows[i]
+				for label, want := range map[string]int{"W": ps.Wins, "L": ps.Losses, "IV": ps.IndividualWins, "IL": ps.IndividualLosses} {
+					assert.Equal(t, fmt.Sprint(want), row[label], "%s %s", ps.Player.Name, label)
+				}
+			}
+			for _, ref := range sheet.area.rankRefs() {
+				v, err := f.CalcCellValue(helper.SheetPoolMatches, ref, excelize.Options{RawCellValue: true})
+				require.NoError(t, err)
+				assert.NotContains(t, v, "#", "%s must not be an error", ref)
+			}
+		})
+	}
+}

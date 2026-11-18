@@ -513,3 +513,35 @@ func readCSV(t *testing.T, path string) [][]string {
 	}
 	return rows
 }
+
+// TestBlankLayout_RefusesWhatTheDrawRefuses: a mixed competition whose pools
+// form but whose knockout cannot be drawn (fill-bracket on a shape it does not
+// support), or whose court count the draw refuses, is ErrBlankLayoutUnbuildable,
+// never a workbook without the Tree sheets.
+func TestBlankLayout_RefusesWhatTheDrawRefuses(t *testing.T) {
+	cases := []struct {
+		name   string
+		courts []string
+		opts   func(*state.Competition)
+	}{
+		{"knockout cannot be drawn", []string{"A"}, func(c *state.Competition) { c.ExtraQualifiers = state.ExtraQualifiersFillBracket }},
+		{"court count the draw refuses", []string{"A", "B", "C"}, nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			eng, store, _ := setupTestEngine(t)
+			createTestCompetition(t, store, "blank", state.CompFormatMixed, 3, func(c *state.Competition) {
+				c.Courts = tc.courts
+				c.ExpectedParticipants = 12
+				if tc.opts != nil {
+					tc.opts(c)
+				}
+			})
+			_, err := eng.ExportCompetitionXlsx("blank")
+			require.ErrorIs(t, err, ErrBlankLayoutUnbuildable)
+
+			require.NoError(t, store.SaveParticipants("blank", drawnRoster(12)))
+			assert.Error(t, eng.GenerateDraw("blank"), "the draw refuses the same competition")
+		})
+	}
+}

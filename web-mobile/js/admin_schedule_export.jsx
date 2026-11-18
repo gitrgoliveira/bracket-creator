@@ -1,6 +1,7 @@
 // AdminExport card extracted from admin_schedule.jsx (mp-d7tl).
 
 import { shownMessage } from './write_result.jsx';
+import { competitionHasRecordedResult } from './recorded_result.jsx';
 
 const { useState } = React;
 
@@ -17,7 +18,7 @@ function saveBlob(blob, filename) {
   setTimeout(() => { if (typeof window !== "undefined" && window.URL) window.URL.revokeObjectURL(dlUrl); }, 100);
 }
 
-export function AdminExport({ c, t, password, showToast }) {
+export function AdminExport({ c, t, password, showToast, poolMatches, bracket }) {
   // The competition detail nests its real fields (roster, format, courts,
   // pool settings) under `c.config`; some other call sites pass an already
   // flattened object. Read from `c.config` when present, else from `c`, so
@@ -29,6 +30,10 @@ export function AdminExport({ c, t, password, showToast }) {
   // Every status but setup has a stored draw (the negation of state.CanGenerateDraw).
   const status = c.status ?? cfg.status;
   const hasDraw = !!status && status !== "setup";
+  // The results workbook is offered once a result is recorded (the engine's
+  // result gate, mirrored in recorded_result.jsx): before that it holds nothing
+  // the blank template does not.
+  const hasResult = competitionHasRecordedResult(poolMatches, bracket);
 
   const [resultsBusy, setResultsBusy] = useState(false);
   const [templateBusy, setTemplateBusy] = useState(false);
@@ -92,10 +97,14 @@ export function AdminExport({ c, t, password, showToast }) {
       <div className="card">
         <div className="card__title" style={{ marginBottom: 8 }}>Export {c.name}</div>
         <div className="card__sub" style={{ marginBottom: 14 }}>Download this competition as an Excel workbook.</div>
-        <button type="button" className="btn btn--primary btn--full" onClick={downloadResults} disabled={resultsBusy}>
-          {resultsBusy ? "Preparing…" : "Download results (.xlsx)"}
-        </button>
-        <div className="field__hint" style={{ marginTop: 8, marginBottom: 14 }}>Pool standings and brackets with the played scores, winners, and decisions (Kiken / Fus. / DH / Ht) filled in.</div>
+        {hasResult && (
+          <>
+            <button type="button" className="btn btn--primary btn--full" onClick={downloadResults} disabled={resultsBusy}>
+              {resultsBusy ? "Preparing…" : "Download results (.xlsx)"}
+            </button>
+            <div className="field__hint" style={{ marginTop: 8, marginBottom: 14 }}>Pool standings and brackets with the played scores, winners, and decisions (Kiken / Fus. / DH / Ht) filled in.</div>
+          </>
+        )}
         <button type="button" className="btn btn--full" onClick={downloadXlsx} disabled={templateBusy}>
           {templateBusy ? "Preparing…" : "Download blank template (.xlsx)"}
         </button>

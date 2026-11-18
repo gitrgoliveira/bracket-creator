@@ -485,10 +485,10 @@ func writeTeamSummaryCells(f *excelize.File, sheetName string, courtStartCol, ex
 		// SubResults were never threaded through at all. The result marks
 		// still need a home in the competitor's cell.
 		if lMark != "" {
-			setCellStr(f, sheetName, lVCol, excelRow, lMark)
+			setIVCellWithMark(f, sheetName, lVCol, excelRow, 0, lMark)
 		}
 		if rMark != "" {
-			setCellStr(f, sheetName, rVCol, excelRow, rMark)
+			setIVCellWithMark(f, sheetName, rVCol, excelRow, 0, rMark)
 		}
 	}
 
@@ -528,6 +528,14 @@ func setScoreCell(f *excelize.File, sheet, col string, row int, before, score, a
 		setCellStr(f, sheet, col, row, domain.JoinNonEmpty(before, domain.JoinNonEmpty(score, after)))
 		return
 	}
+	setMarkedCount(f, sheet, col, row, before, n, after)
+}
+
+// setMarkedCount writes a count as a NUMBER with its marks riding in the cell's
+// number format: the cell shows "3 Kiken" while holding 3, so a formula reading
+// it (an engi flag count, a team IV) still sees a number. before leads the
+// shown value and after trails it.
+func setMarkedCount(f *excelize.File, sheet, col string, row int, before string, n int, after string) {
 	setIntCellDirect(f, sheet, col, row, n)
 	if before == "" && after == "" {
 		return
@@ -615,14 +623,13 @@ func bracketMatchResultView(bm *state.BracketMatch) state.MatchResult {
 	}
 }
 
-// setIVCellWithMark writes a team IV count, appending a result mark
-// ("2 Kiken") when one applies to that side; a markless cell stays numeric.
+// setIVCellWithMark writes a team IV count, with a result mark ("2 Kiken")
+// when one applies to that side. The count stays a NUMBER, the mark riding in
+// the cell's number format (setMarkedCount), because the pool standings
+// formulas add the cell and compare it with the other side's: as text it made
+// IV/IL and Rank #VALUE! and turned W/L around.
 func setIVCellWithMark(f *excelize.File, sheetName, col string, row, iv int, mark string) {
-	if mark == "" {
-		setIntCellDirect(f, sheetName, col, row, iv)
-		return
-	}
-	setCellStr(f, sheetName, col, row, domain.JoinNonEmpty(fmt.Sprintf("%d", iv), mark))
+	setMarkedCount(f, sheetName, col, row, "", iv, mark)
 }
 
 // writeTeamSubMatchScores writes each sub-bout's ippon letters onto the team

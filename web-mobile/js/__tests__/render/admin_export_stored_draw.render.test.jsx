@@ -28,8 +28,9 @@ const competition = (status) => ({
   },
 });
 
-// The card's second full-width button, whatever its label says while busy.
-const templateButton = (container) => container.querySelectorAll('button.btn--full')[1];
+// The card's last full-width button, whatever its label says while busy: the
+// results button before it shows only once a result is recorded.
+const templateButton = (container) => Array.from(container.querySelectorAll('button.btn--full')).at(-1);
 
 async function clickBlankTemplate(c) {
   const { container } = render(<AdminExport c={c} t={{ id: 't1' }} password="pw" />);
@@ -62,6 +63,31 @@ describe('AdminExport blank template hint', () => {
     const text = hint(competition('draw-ready'));
     expect(text).toContain('for scoring by hand.');
     expect(text).not.toContain(EMPTY_PLACES);
+  });
+});
+
+// "Download results" shows only once a result is recorded (a match running or
+// completed, a knockout bye resolved at the draw excluded); the blank template is
+// always offered.
+describe('AdminExport results button', () => {
+  const buttons = (props) => {
+    const { container } = render(<AdminExport c={competition('pools')} t={{ id: 't1' }} password="pw" {...props} />);
+    return Array.from(container.querySelectorAll('button')).map((b) => b.textContent);
+  };
+
+  it('is hidden before any result is recorded, the blank template still offered', () => {
+    const labels = buttons({ poolMatches: [{ status: 'scheduled' }] });
+    expect(labels).toContain('Download blank template (.xlsx)');
+    expect(labels).not.toContain('Download results (.xlsx)');
+  });
+
+  it('shows once a pool match is running or completed', () => {
+    expect(buttons({ poolMatches: [{ status: 'running' }] })).toContain('Download results (.xlsx)');
+  });
+
+  it('ignores a knockout bye the draw resolved', () => {
+    const bye = { status: 'completed', sideA: { id: 'a', name: 'Alice' }, sideB: { id: '', name: '' } };
+    expect(buttons({ bracket: { rounds: [[bye]] } })).not.toContain('Download results (.xlsx)');
   });
 });
 

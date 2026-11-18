@@ -133,6 +133,10 @@ type blankLayout struct {
 // blankDraw draws n empty places over comp's settings, the way runDrawPipeline
 // draws a roster, and stores nothing.
 func blankDraw(comp *state.Competition, courts []string, n int) (*blankLayout, error) {
+	// The real draw's own court rule (generateDraw refuses the same count).
+	if err := ValidateCompetitionShiaijoCount(courts, comp.Format); err != nil {
+		return nil, blankUnbuildable(n, err.Error())
+	}
 	c := *comp
 	c.Courts = courts
 	c.NumberPrefix = ""
@@ -161,7 +165,18 @@ func blankDraw(comp *state.Competition, courts []string, n int) (*blankLayout, e
 		numberPoolMatchesInPlayingOrder(layout.poolMatches)
 		AttachPoolMatches(pools, layout.poolMatches)
 		layout.pools = pools
-		layout.draw = EliminationDraw(&c, pools, nil, len(courts))
+		if c.Format == state.CompFormatMixed {
+			// The draw's knockout, refused as generatePoolPreviewBracket
+			// refuses it: never a workbook without the Tree sheets.
+			draw, outOfScope, reason := buildPoolFedDraw(&c, pools, len(courts))
+			if outOfScope || draw == nil {
+				if reason == "" {
+					reason = "the knockout could not be drawn"
+				}
+				return nil, blankUnbuildable(n, reason)
+			}
+			layout.draw = draw
+		}
 	default:
 		// A standalone knockout, as runDrawPipeline's default case draws one
 		// (generateKnockout): seeding order, the balanced tree, then the pow2

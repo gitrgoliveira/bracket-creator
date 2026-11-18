@@ -222,8 +222,8 @@ browser, `--debug` opens the inspector, and a failing test leaves a trace
                                   changed tournament (a renamed competition, a
                                   new one): the plan's rows, Cancel, a copy
                                   name already used, the password, and Undo.
-      blank-template              the Export tab's blank template: drawn from
-                                  the roster (/create) before the draw, the
+      blank-template              the Export tab's blank template: the blank
+                                  layout (empty places) before the draw, the
                                   stored draw after it; its Pool Draw sheet
                                   holds the app's pools, where check-in left
                                   two entrants out of the draw

@@ -35,7 +35,8 @@ async function clickBlankTemplate() {
 }
 
 async function clickResults() {
-  const { container } = render(<AdminExport c={competition} t={{ id: 't1' }} password="pw" />);
+  // The results button shows once a result is recorded.
+  const { container } = render(<AdminExport c={competition} t={{ id: 't1' }} password="pw" poolMatches={[{ status: 'completed' }]} />);
   const button = Array.from(container.querySelectorAll('button')).find(
     (b) => /results/i.test(b.textContent)
   );

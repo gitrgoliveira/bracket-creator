@@ -235,7 +235,7 @@ func TestDataRoot_RefusesASeedsFileThatLinksOutOfTheDataFolder(t *testing.T) {
 // heldComps is the ids whose competition folder root the store holds now.
 func heldComps(d *dataRoot) []string {
 	var ids []string
-	d.comps.Range(func(k, v any) bool {
+	d.comps.entries.Range(func(k, v any) bool {
 		e := v.(*compRoot)
 		e.mu.RLock()
 		if e.root != nil {
@@ -251,7 +251,7 @@ func heldComps(d *dataRoot) []string {
 // compEntries counts the entries in the competition-root map, held or not.
 func compEntries(d *dataRoot) int {
 	n := 0
-	d.comps.Range(func(any, any) bool { n++; return true })
+	d.comps.entries.Range(func(any, any) bool { n++; return true })
 	return n
 }
 
@@ -260,7 +260,7 @@ func compEntries(d *dataRoot) int {
 // removed.
 func assertHeldRootsAreLive(t *testing.T, d *dataRoot) {
 	t.Helper()
-	d.comps.Range(func(k, v any) bool {
+	d.comps.entries.Range(func(k, v any) bool {
 		id := k.(string)
 		e := v.(*compRoot)
 		e.mu.RLock()
@@ -409,7 +409,7 @@ func TestDataRoot_AFolderLinkingOutIsRefusedBeforeAndAfterADrop(t *testing.T) {
 	assert.ErrorIs(t, err, fs.ErrNotExist, "nothing is written outside the data folder")
 }
 
-// startMove starts a moveComps on id whose move lasts until release closes,
+// startMove starts a comps.move on id whose move lasts until release closes,
 // and answers once the move holds the entry's write lock or waits for it
 // behind a reader: a reader's TryRLock fails only while a writer does either.
 // done closes when the move is over.
@@ -418,10 +418,10 @@ func startMove(t *testing.T, d *dataRoot, id string, release <-chan struct{}) (d
 	ch := make(chan struct{})
 	go func() {
 		defer close(ch)
-		_ = d.moveComps(func() error { <-release; return nil }, filepath.Join("competitions", id))
+		_ = d.comps.move(func() error { <-release; return nil }, filepath.Join("competitions", id))
 	}()
 	require.Eventually(t, func() bool {
-		v, ok := d.comps.Load(id)
+		v, ok := d.comps.entries.Load(id)
 		if !ok {
 			return false
 		}
@@ -495,7 +495,7 @@ func TestDataRoot_AWalkReadingFilesDoesNotDeadlockAgainstAMove(t *testing.T) {
 // blocks behind it for ever (a Go RWMutex lets no new reader past a pending
 // writer). With one writer the rename's only wait is for the first lock, which
 // a double lock passes just as well. The writers lock the entry directly, not
-// through moveComps: a finished move takes the entry out of the map, and the
+// through comps.move: a finished move takes the entry out of the map, and the
 // rename would go on to a new one, out of the second writer's reach. Writer
 // two's wait on the writers' mutex shows in no lock state a test can poll, so
 // the test gives it a moment; a late writer two misses the check and never
@@ -508,7 +508,7 @@ func TestDataRoot_ARenameDoesNotDeadlockAgainstAQueuedMove(t *testing.T) {
 	w := filepath.Join(s.folder, ".wal", "x.txt")
 	require.NoError(t, os.WriteFile(a, []byte("a"), 0o600))
 
-	e, r := s.root.acquireComp("c1")
+	e, r := s.root.comps.acquire("c1")
 	require.NotNil(t, r)
 	var writers sync.WaitGroup
 	writers.Add(2)

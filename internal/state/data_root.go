@@ -3,12 +3,9 @@ package state
 import (
 	"errors"
 	"io/fs"
-	"log/slog"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
-	"sync"
 )
 
 // dataRoot is the one door through which the store opens, reads, writes,
@@ -31,67 +28,18 @@ import (
 // root when the store fails to open, and os.Root closes its descriptor when a
 // Store a test dropped is collected.
 //
-// It also holds one os.Root per competition folder (comps), opened from the
-// data root on first use (Root.OpenRoot, so the OS still refuses a folder that
-// links out of the data folder). A call on a path strictly under
-// competitions/<id>/ runs on that folder's root, which saves resolving
-// competitions/ and <id> again on every call; a path that IS
-// competitions/<id>, competitions/ itself, or anything else runs on the data
-// root. A folder that cannot be opened as a root (it does not exist yet, is a
-// file, links out) runs the call on the data root, which reports it exactly as
-// before, and stores nothing.
-//
-// A held root is a descriptor on the folder, not its name: it follows the
-// folder if the folder is renamed, and keeps an unlinked folder alive if it is
-// removed. So every rename, removal or creation of a competition folder itself
-// drops that folder's root, and holds its entry write-locked for the length of
-// the syscall, so nothing reopens it mid-move (moveComps). The drop is made
-// here, in rename, remove, removeAll, mkdir and mkdirAll, whatever called
-// them: DeleteCompetition's removeAll, the restore journal's moves out and in
-// (runRestoreJournal, which the live restore and startup recovery both run),
-// and saveCompetitionChangedLocked's mkdirAll when it makes a folder removed by
-// hand (one already there keeps its root). The removal of a restore token
-// folder needs no drop: it lies under .restore/, which no held root points
-// into, since a folder moved out is dropped as it moves. Two removeAll calls remove a folder INSIDE a
-// competition folder (the score logs' events/ in score_log.go, the match
-// history's history/ in match_history.go); the competition's root serves them
-// and nothing is dropped. No store path renames or removes competitions/ or
-// the data folder itself; one that did would have to drop every held root.
-//
-// A folder removed from OUTSIDE the app while the server runs answers ENOENT
-// to a call on its held root; the call then checks that the folder named
-// competitions/<id> is still the one held (heldFolderGone), and if it is not,
-// drops the root and runs once more on whatever is there now, so a folder put
-// back by hand (a copy from a backup) is written again without a restart, and
-// one still gone fails as before. A folder RENAMED from outside the app while
-// the server runs is followed by its held root, which gets no ENOENT: the
-// server goes on reading and writing the renamed folder until the root is
-// next dropped or the server restarts (accepted; no supported workflow does
-// it, since the CLI restore runs with the server stopped).
+// It also holds one os.Root per competition folder (comps, comp_roots.go). A
+// call on a path strictly under competitions/<id>/ runs on that folder's root;
+// a path that IS competitions/<id>, competitions/ itself, or anything else runs
+// on the data root. A folder that cannot be opened as a root (it does not exist
+// yet, is a file, links out) runs the call on the data root, which reports it
+// exactly as before, and stores nothing. A rename, removal or creation of a
+// competition folder itself goes through comps.move, which drops that folder's
+// held root for the length of the syscall.
 type dataRoot struct {
 	root   *os.Root
 	folder string
-	// comps maps a competition id to its *compRoot. An entry is in the map
-	// only while its root is open, or while the one goroutine that holds its
-	// write lock opens or moves it; that goroutine stores a root or removes
-	// the entry before it unlocks. So a reader that takes an entry's read
-	// lock and finds no root knows the entry has left the map, and the map
-	// never holds an entry for a folder that is not there (a public 404 for
-	// a well-shaped id adds nothing).
-	comps sync.Map
-}
-
-// compRoot is one competition folder's root. mu is a LEAF lock: it may be
-// taken under the competition lock, s.mu, compRenameMu or a cache mutex, and
-// nothing is taken while it is held (no callback runs under it). It is held
-// for reading by every call made on root, for that call only, and for
-// writing while root is opened, dropped, or its folder moved, so no call runs
-// on a root being closed, and no root is opened on a folder halfway through a
-// move.
-type compRoot struct {
-	mu   sync.RWMutex
-	root *os.Root    // nil only while the entry's writer holds mu, or once it left the map
-	held fs.FileInfo // the folder root holds, as it was when opened (heldFolderGone)
+	comps  compRoots
 }
 
 func openDataRoot(folder string) (*dataRoot, error) {
@@ -99,25 +47,14 @@ func openDataRoot(folder string) (*dataRoot, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &dataRoot{root: root, folder: folder}, nil
+	d := &dataRoot{root: root, folder: folder}
+	d.comps.data = root
+	return d, nil
 }
 
 // close closes every competition folder root it holds, then the data root.
 func (d *dataRoot) close() error {
-	var errs []error
-	d.comps.Range(func(k, v any) bool {
-		e := v.(*compRoot)
-		e.mu.Lock()
-		if e.root != nil {
-			errs = append(errs, e.root.Close())
-			e.root = nil
-		}
-		d.comps.CompareAndDelete(k, e)
-		e.mu.Unlock()
-		return true
-	})
-	errs = append(errs, d.root.Close())
-	return errors.Join(errs...)
+	return errors.Join(d.comps.close(), d.root.Close())
 }
 
 // compDirPrefix is "competitions" plus a separator: the start of a name, made
@@ -141,129 +78,6 @@ func compOf(rel string) (id, rest string, ok bool) {
 	return id, rest, true
 }
 
-// compFolderOf answers the id when rel is a competition folder itself
-// (competitions/<id>), the one shape whose rename, removal or creation must
-// drop that folder's root.
-func compFolderOf(rel string) (string, bool) {
-	id, found := strings.CutPrefix(rel, compDirPrefix)
-	if !found || id == "" || strings.ContainsRune(id, filepath.Separator) || ValidateCompetitionID(id) != nil {
-		return "", false
-	}
-	return id, true
-}
-
-// compFolderRel is competition id's folder, relative to the data folder.
-func compFolderRel(id string) string {
-	return filepath.Join("competitions", id)
-}
-
-// lockEntry answers competition id's entry with its write lock held, making
-// one (with no root) when the map holds none. The entry answered is the one
-// in the map: an entry found there and locked only after it left the map is
-// let go, and the look is made again. Release it with unlockEntry.
-func (d *dataRoot) lockEntry(id string) *compRoot {
-	for {
-		mine := &compRoot{}
-		mine.mu.Lock()
-		v, loaded := d.comps.LoadOrStore(id, mine)
-		if !loaded {
-			return mine
-		}
-		mine.mu.Unlock()
-		e := v.(*compRoot)
-		e.mu.Lock()
-		if cur, ok := d.comps.Load(id); ok && cur == e {
-			return e
-		}
-		e.mu.Unlock()
-	}
-}
-
-// unlockEntry releases an entry lockEntry answered, first removing it from the
-// map when it holds no root, so the map keeps only entries with an open root.
-func (d *dataRoot) unlockEntry(id string, e *compRoot) {
-	if e.root == nil {
-		d.comps.CompareAndDelete(id, e)
-	}
-	e.mu.Unlock()
-}
-
-// closeLocked closes the entry's root, if any. Caller holds e.mu for writing.
-func (e *compRoot) closeLocked(id string) {
-	if e.root == nil {
-		return
-	}
-	if err := e.root.Close(); err != nil {
-		// A directory descriptor that fails to close holds nothing the store
-		// still needs; the next call opens a fresh root either way.
-		slog.Debug("state: closing a competition folder root failed", "competition", id, "error", err)
-	}
-	e.root = nil
-	e.held = nil
-}
-
-// acquireComp answers competition id's root with its entry's read lock held
-// (release it with e.mu.RUnlock), opening the root first if none is held. It
-// answers nil, holding nothing and storing nothing, when the folder cannot be
-// opened as a root (it does not exist, is a file, or links out of the data
-// folder): the caller then runs the call on the data root, which reports that
-// exactly as before.
-func (d *dataRoot) acquireComp(id string) (*compRoot, *os.Root) {
-	for {
-		if v, ok := d.comps.Load(id); ok {
-			e := v.(*compRoot)
-			e.mu.RLock()
-			if r := e.root; r != nil {
-				return e, r
-			}
-			// The entry left the map while this waited (dropped, moved, or
-			// its open failed): look again.
-			e.mu.RUnlock()
-			continue
-		}
-		e := d.lockEntry(id)
-		if e.root == nil {
-			if r, err := d.root.OpenRoot(compFolderRel(id)); err == nil {
-				if held, err := r.Stat("."); err == nil {
-					e.root, e.held = r, held
-				} else if cerr := r.Close(); cerr != nil {
-					slog.Debug("state: closing a competition folder root failed", "competition", id, "error", cerr)
-				}
-			}
-		}
-		opened := e.root != nil
-		d.unlockEntry(id, e)
-		if !opened {
-			return nil, nil
-		}
-	}
-}
-
-// dropIf closes and forgets competition id's root if it is still r; a root
-// opened since (by another call that saw the same fault) is kept.
-func (d *dataRoot) dropIf(id string, r *os.Root) {
-	v, ok := d.comps.Load(id)
-	if !ok {
-		return
-	}
-	e := v.(*compRoot)
-	e.mu.Lock()
-	if e.root == r {
-		e.closeLocked(id)
-		d.comps.CompareAndDelete(id, e)
-	}
-	e.mu.Unlock()
-}
-
-// heldFolderGone reports whether the folder r holds is no longer the one named
-// competitions/<id> (it was removed, or removed and another put in its place).
-// Asked only after a call on r answered ENOENT, so a file that is simply
-// missing costs one more stat. Caller holds e.mu for reading.
-func (d *dataRoot) heldFolderGone(id string, e *compRoot) bool {
-	named, err := d.root.Stat(compFolderRel(id))
-	return err != nil || !os.SameFile(named, e.held)
-}
-
 // on runs one call on the root a path under competition id lies on: that
 // folder's root when it opens (onComp), the data root otherwise (onData). A
 // call on the folder's root that answers ENOENT while the folder held is no
@@ -284,17 +98,17 @@ func (d *dataRoot) onChecked(id string, suspect func(error) bool, onComp func(r 
 	if id != "" {
 		base := filepath.Join(d.folder, compFolderRel(id))
 		for try := 0; try < 2; try++ {
-			e, r := d.acquireComp(id)
+			e, r := d.comps.acquire(id)
 			if r == nil {
 				break
 			}
 			err := onComp(r)
-			stale := try == 0 && suspect(err) && d.heldFolderGone(id, e)
+			stale := try == 0 && suspect(err) && d.comps.heldFolderGone(id, e)
 			e.mu.RUnlock()
 			if !stale {
 				return absUnder(base, err)
 			}
-			d.dropIf(id, r)
+			d.comps.dropIf(id, r)
 		}
 	}
 	return absUnder(d.folder, onData())
@@ -310,36 +124,6 @@ func (d *dataRoot) at(op, path string) (id, rest, rel string, err error) {
 	}
 	id, rest, _ = compOf(rel)
 	return id, rest, rel, nil
-}
-
-// moveComps runs fn, a rename, removal or creation on the data root, with the
-// root of every competition folder named among rels dropped and its entry
-// write-locked until fn returns, so nothing opens that folder's root while it
-// moves; the entries leave the map as they are released. rels that are no
-// competition folder are left alone. Entries are locked in id order, the one
-// order any call takes more than one in.
-func (d *dataRoot) moveComps(fn func() error, rels ...string) error {
-	var ids []string
-	for _, rel := range rels {
-		if id, ok := compFolderOf(rel); ok && !slices.Contains(ids, id) {
-			ids = append(ids, id)
-		}
-	}
-	if len(ids) == 0 {
-		return fn()
-	}
-	slices.Sort(ids)
-	held := make([]*compRoot, 0, len(ids))
-	for _, id := range ids {
-		e := d.lockEntry(id)
-		e.closeLocked(id)
-		held = append(held, e)
-	}
-	err := fn()
-	for i, e := range held {
-		d.unlockEntry(ids[i], e)
-	}
-	return err
 }
 
 // name is path relative to the data folder.
@@ -464,7 +248,7 @@ func (d *dataRoot) readDir(path string) ([]fs.DirEntry, error) {
 
 // change runs one call that creates or removes the thing at path: on its
 // competition folder's root when path lies strictly under one, and on the data
-// root otherwise, inside moveComps when path IS a competition folder, so the
+// root otherwise, inside comps.move when path IS a competition folder, so the
 // folder's held root is dropped before it is removed or made again.
 func (d *dataRoot) change(op, path string, suspect func(error) bool, onComp func(r *os.Root, name string) error, onData func(name string) error) error {
 	id, rest, rel, err := d.at(op, path)
@@ -473,7 +257,7 @@ func (d *dataRoot) change(op, path string, suspect func(error) bool, onComp func
 	}
 	return d.onChecked(id, suspect,
 		func(r *os.Root) error { return onComp(r, rest) },
-		func() error { return d.moveComps(func() error { return onData(rel) }, rel) })
+		func() error { return d.comps.move(func() error { return onData(rel) }, rel) })
 }
 
 func (d *dataRoot) mkdir(path string, perm fs.FileMode) error {
@@ -495,7 +279,7 @@ func (d *dataRoot) mkdir(path string, perm fs.FileMode) error {
 func (d *dataRoot) mkdirAll(path string, perm fs.FileMode) error {
 	if rel, err := d.name("mkdir", path); err == nil {
 		if id, isComp := compFolderOf(rel); isComp {
-			if fi, err := d.root.Stat(rel); err == nil && fi.IsDir() && !d.heldOtherThan(id, fi) {
+			if fi, err := d.root.Stat(rel); err == nil && fi.IsDir() && !d.comps.heldOtherThan(id, fi) {
 				return nil
 			}
 		}
@@ -503,19 +287,6 @@ func (d *dataRoot) mkdirAll(path string, perm fs.FileMode) error {
 	return d.change("mkdir", path, isNotExist,
 		func(r *os.Root, name string) error { return r.MkdirAll(name, perm) },
 		func(name string) error { return d.root.MkdirAll(name, perm) })
-}
-
-// heldOtherThan reports whether competition id has a held root opened on a
-// folder other than named, the folder now at competitions/<id>.
-func (d *dataRoot) heldOtherThan(id string, named fs.FileInfo) bool {
-	v, ok := d.comps.Load(id)
-	if !ok {
-		return false
-	}
-	e := v.(*compRoot)
-	e.mu.RLock()
-	defer e.mu.RUnlock()
-	return e.root != nil && !os.SameFile(named, e.held)
 }
 
 func (d *dataRoot) remove(path string) error {
@@ -533,10 +304,10 @@ func (d *dataRoot) removeAll(path string) error {
 }
 
 // rename resolves both paths once (two resolutions on one competition would
-// take its entry's read lock twice, which deadlocks against a moveComps
+// take its entry's read lock twice, which deadlocks against a comps.move
 // writer queued between them). Both ends in one competition folder (the temp
 // and the target of an atomic write, a quarantine) run on that folder's root;
-// anything else runs on the data root, inside moveComps when either end is a
+// anything else runs on the data root, inside comps.move when either end is a
 // competition folder itself (the restore journal's moves out and in), so its
 // held root is dropped for the length of the rename.
 func (d *dataRoot) rename(oldPath, newPath string) error {
@@ -557,7 +328,7 @@ func (d *dataRoot) rename(oldPath, newPath string) error {
 	return d.on(id,
 		func(r *os.Root) error { return r.Rename(oldRest, newRest) },
 		func() error {
-			return d.moveComps(func() error { return d.root.Rename(oldRel, newRel) }, oldRel, newRel)
+			return d.comps.move(func() error { return d.root.Rename(oldRel, newRel) }, oldRel, newRel)
 		})
 }
 
@@ -569,7 +340,7 @@ func (d *dataRoot) rename(oldPath, newPath string) error {
 // for a tree inside a competition folder: its one caller
 // (collectTreeFilesLocked, a backup) reads each file through readFile from
 // inside fn, and a read lock held across the walk would make that a recursive
-// read lock on the same entry, which deadlocks as soon as a moveComps writer
+// read lock on the same entry, which deadlocks as soon as a comps.move writer
 // queues between the two (a Go RWMutex blocks new readers behind a waiting
 // writer).
 func (d *dataRoot) walkDir(path string, fn fs.WalkDirFunc) error {

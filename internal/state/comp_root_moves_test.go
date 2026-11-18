@@ -283,7 +283,7 @@ func TestCompRoot_AFolderSwappedByHandIsTheOneWrittenBySaveCompetition(t *testin
 
 // heldRoot is the os.Root the store holds on competition id, nil when none.
 func heldRoot(d *dataRoot, id string) *os.Root {
-	v, ok := d.comps.Load(id)
+	v, ok := d.comps.entries.Load(id)
 	if !ok {
 		return nil
 	}

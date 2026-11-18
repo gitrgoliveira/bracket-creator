@@ -2567,6 +2567,10 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			// Reload failed: answer the version of the record the save wrote,
 			// never "", which would send the page's next save unchecked.
 			comp.ConfigVersion = state.ConfigVersion(saved)
+			// The body's shuffle flag was zeroed above and recorded to disk
+			// with the roster; the answer says so, or the client merges a
+			// false over its own copy.
+			comp.RosterShuffled = recordShuffle && len(comp.Players) > 0
 			c.JSON(http.StatusOK, comp)
 			return
 		}

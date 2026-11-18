@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -242,4 +243,31 @@ func TestRosterShuffled_MarkerFailureAnswers500(t *testing.T) {
 	stored, err := store.LoadParticipants(id, true)
 	require.NoError(t, err)
 	assert.Equal(t, players[5].ID, stored[0].ID, "the roster itself landed")
+}
+
+// A re-read that fails after the roster and its marker landed answers what the
+// save wrote, and the shuffle was part of it.
+func TestRosterShuffled_AnswerStillCarriesItWhenTheReReadFails(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+	const id = "reread-fails"
+	players := newShuffleComp(t, r, store, id, nil)
+
+	orig := markRosterShuffled
+	t.Cleanup(func() { markRosterShuffled = orig })
+	markRosterShuffled = func(s *state.Store, cid string) error {
+		if err := orig(s, cid); err != nil {
+			return err
+		}
+		// Break config.md after the marker landed, so the handler's re-read fails.
+		return os.WriteFile(filepath.Join(tempDir, "competitions", cid, "config.md"), []byte("---\n: [unclosed\n---\n"), 0o644)
+	}
+
+	w := rosterPut(t, r, store, id, reversed(players), true, state.RosterVersion(players))
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var answer struct {
+		RosterShuffled bool `json:"rosterShuffled"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &answer))
+	assert.True(t, answer.RosterShuffled, "the shuffle was recorded, so the fallback answer says so")
 }

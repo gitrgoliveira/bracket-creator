@@ -2046,6 +2046,17 @@ paths:
         The ROSTER-save path (non-null `players`) rewrites `participants.csv`
         and needs only `X-Tournament-Password`.
 
+        `rosterShuffled: true` in the body asks to record that the
+        competitor list was shuffled (the participants page's Shuffle
+        unseeded sends it). It is never stored as sent: the server sets the
+        stored `rosterShuffled` only when the body also carries at least one
+        player and the roster save lands, so a refused roster
+        (`roster_changed`, a validation error) records nothing. A settings
+        save (no `players`) neither sets nor clears it, an echo of `true` on
+        a marker already set writes nothing, and once set it stays set. When
+        the roster lands but the marker cannot be written, the answer is a
+        500 saying to shuffle again.
+
         In self-run mode this is an organiser action: it needs
         `X-Tournament-Password`.
       security:
@@ -2546,19 +2557,25 @@ paths:
       tags: [competitions]
       summary: Export competition as Excel
       description: >-
-        Downloads the competition's stored draw (pools, pool matches and
-        bracket) as a blank .xlsx template: live formulas and no results on
-        the main sheets (the Kachinuki Detail and Representative Bouts sheets
-        list bouts already recorded). The
-        app's "Download blank template" uses it once the competition is drawn,
-        and the printed PDFs come from the same workbook.
+        Downloads the competition's blank .xlsx template: live formulas and no
+        results on the main sheets (the Kachinuki Detail and Representative
+        Bouts sheets list bouts already recorded). With a draw it is the stored
+        draw (pools, pool matches and bracket). With no draw yet (setup, or a
+        draw that was discarded) it is the layout the draw would print, with
+        empty places only: no names, dojos, seeds or numbers, as many places as
+        the larger of the competition's expected number of participants and the
+        registered roster, and nothing is drawn or stored by asking. The app's
+        "Download blank template" always uses this route, and the printed PDFs
+        come from the same workbook.
       security:
         - TournamentPassword: []
       parameters:
         - $ref: '#/components/parameters/CompetitionId'
       responses:
         '200':
-          description: Excel file.
+          description: >-
+            Excel file: the stored draw, or the blank layout when the
+            competition has no draw yet.
           content:
             application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
               schema:
@@ -2566,19 +2583,14 @@ paths:
                 format: binary
         '404':
           $ref: '#/components/responses/NotFound'
-        '409':
-          description: >-
-            The competition has no draw yet (still in setup, or its draw was
-            discarded), so there is nothing stored to export.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
         '422':
           description: >-
-            The competition cannot be exported: a Swiss competition has no
-            static bracket, or its stored bracket no longer matches its
-            settings.
+            The competition cannot be exported, and the error names the fix: a
+            Swiss competition has no static bracket; its stored bracket no
+            longer matches its settings; or it has no draw yet and fewer than
+            two places to print (set the expected number of participants in
+            the competition's Settings, or add participants); or no draw yet
+            and settings that cannot form a draw.
           content:
             application/json:
               schema:
@@ -9011,6 +9023,17 @@ components:
             `PUT` endpoint's description.
         hasParticipantIDs:
           type: boolean
+        rosterShuffled:
+          type: boolean
+          description: >
+            True once the competitor list was shuffled at least once (Shuffle
+            unseeded on the participants page); absent means never shuffled.
+            Server-managed: a create (`POST /api/competitions`) always starts
+            it unset, and only a roster `PUT /api/competitions/{id}` that sends
+            `rosterShuffled: true` and whose roster lands sets it (see that
+            endpoint's description). It is not a setting, so it is not part of
+            `configVersion`. Once set it stays set, through later roster edits
+            and a discarded draw.
         teamMatchType:
           type: string
           description: Team-match scoring model; `fixed` (regular position-by-position order, shown as "Regular" in the UI) or `kachinuki` (winner stays on).

@@ -1,8 +1,6 @@
 package engine
 
 import (
-	"fmt"
-
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
@@ -20,7 +18,7 @@ import (
 
 // isPureKnockout reports whether comp runs a standalone elimination bracket with
 // no pool phase -- the case where the pool-fed draw yields nothing and the
-// leaves must come from the stored bracket / participant seeding instead. Both
+// leaves must come from the stored bracket instead. Both
 // the bracket-load guard (export.go) and knockoutLeaves gate on this exact
 // condition, so it lives in one predicate rather than two hand-copied literals.
 //
@@ -39,35 +37,27 @@ func isPureKnockout(comp *state.Competition, pools []helper.Pool) bool {
 //
 // A pure knockout competition has no pools, so its leaves come from the frozen
 // bracket's own first-round order (KnockoutLeavesFromBracket, which cannot
-// desync from the stored bracket the score overlay fills in), falling back to
-// participant seeding only pre-start, when no bracket exists yet. bracket may
-// be nil for a non-pure-knockout caller: it is consulted only on the
-// pure-knockout branch, where both callers load it.
-//
-// It used to be exported, and to re-run poolDraw itself so that it stayed
-// "total for any caller". There were never any such callers, and the branch was
-// unreachable through the one that exists, so what it actually bought was a
-// second exported entry into this derivation -- the thing EliminationDraw is
-// the single owner of (mp-ndfu) -- plus a redundant draw build.
+// desync from the stored bracket the score overlay fills in). With no bracket
+// there are no leaves: a competition with no draw prints the blank layout
+// (blankLayoutXlsx), sized from the expected number of places and naming
+// nobody, and its results workbook has no bracket. There is no roster
+// fallback here: it printed the competitors' names before the draw existed.
+// bracket may be nil for a non-pure-knockout caller: it is consulted only on
+// the pure-knockout branch, where both callers load it.
 //
 // keys is parallel to leaves: each competitor's identity (helper.PlayerKey
 // form), or "" for a bye or a legacy side stored without an id.
-func knockoutLeaves(store *state.Store, comp *state.Competition, pools []helper.Pool, bracket *state.Bracket) (leaves, keys []string) {
+func knockoutLeaves(comp *state.Competition, pools []helper.Pool, bracket *state.Bracket) (leaves, keys []string) {
 	if !isPureKnockout(comp, pools) {
 		return nil, nil
 	}
-	if leaves := KnockoutLeavesFromBracket(bracket); len(leaves) > 0 {
-		keys := make([]string, 0, len(leaves))
-		for _, m := range bracket.Rounds[0] {
-			keys = append(keys, sideKey(m.SideAID), sideKey(m.SideBID))
-		}
-		return leaves, keys
+	leaves = KnockoutLeavesFromBracket(bracket)
+	if len(leaves) == 0 {
+		return nil, nil
 	}
-	seeded := seededKnockoutParticipants(store, comp)
-	leaves = make([]string, len(seeded))
-	keys = make([]string, len(seeded))
-	for i, p := range seeded {
-		leaves[i], keys[i] = p.Name, helper.PlayerKey(p)
+	keys = make([]string, 0, len(leaves))
+	for _, m := range bracket.Rounds[0] {
+		keys = append(keys, sideKey(m.SideAID), sideKey(m.SideBID))
 	}
 	return leaves, keys
 }
@@ -251,16 +241,33 @@ func extraQualifierOverrides(comp *state.Competition, pools []helper.Pool, poolW
 // prints, since it builds from the entrant list and never pads.
 //
 // Returns nil when there is nothing to render.
-func EliminationDraw(store *state.Store, comp *state.Competition, pools []helper.Pool, bracket *state.Bracket, numCourts int) *helper.KnockoutDraw {
+//
+// The store parameter is no longer read: it fed the pre-draw roster fallback,
+// which is gone (a competition with no draw prints the blank layout instead).
+// It stays in the signature only because internal/export's results workbook
+// passes it; drop it with that call.
+func EliminationDraw(_ *state.Store, comp *state.Competition, pools []helper.Pool, bracket *state.Bracket, numCourts int) *helper.KnockoutDraw {
 	if draw := poolDraw(comp, pools, numCourts); draw != nil {
 		return draw
 	}
-	leaves, keys := knockoutLeaves(store, comp, pools, bracket)
+	leaves, keys := knockoutLeaves(comp, pools, bracket)
+	return knockoutDrawFromLeaves(leaves, keys, numCourts)
+}
+
+// knockoutDrawFromLeaves is the knockout draw over a pow2 first-round leaf list
+// ("" for a bye slot), the one way a leaf list becomes a draw: through
+// helper.BuildSlotTree, which collapses an all-bye half (see EliminationDraw),
+// with each competitor's identity stamped on its leaf. keys is parallel to
+// leaves. EliminationDraw calls it over a stored bracket's first round, and the
+// blank layout over the slot list a draw of its empty places would store
+// (blankDraw), so both print one shape for one entrant count.
+//
+// Returns nil for no leaves, or when every slot is a bye: the callers treat a
+// nil draw as "nothing to render".
+func knockoutDrawFromLeaves(leaves, keys []string, numCourts int) *helper.KnockoutDraw {
 	if len(leaves) == 0 {
 		return nil
 	}
-	// nil (every slot a bye) falls through NewKnockoutDraw as a nil draw, which
-	// the callers already treat as "nothing to render".
 	draw := helper.NewKnockoutDraw(helper.BuildSlotTree(leaves), numCourts)
 	if draw == nil {
 		return nil
@@ -298,66 +305,6 @@ func KnockoutLeavesFromBracket(bracket *state.Bracket) []string {
 		leaves = append(leaves, m.SideA, m.SideB)
 	}
 	return leaves
-}
-
-// KnockoutFinalsFromParticipants seeds the competition's participants exactly as
-// generateKnockout does (ApplySeeds → StandardSeeding),
-// returning the seeded names to feed the elimination-tree skeleton. This is the
-// PRE-START fallback only: once a bracket exists, KnockoutLeavesFromBracket is used
-// instead because it cannot desync from the frozen bracket. Since there is no
-// bracket to overlay when this runs, a best-effort (possibly unseeded) order is
-// acceptable. Returns nil when participants can't be loaded, in which case no
-// elimination sheet is rendered.
-func KnockoutFinalsFromParticipants(store *state.Store, comp *state.Competition) []string {
-	seeded := seededKnockoutParticipants(store, comp)
-	if seeded == nil {
-		return nil
-	}
-	names := make([]string, len(seeded))
-	for i, p := range seeded {
-		names[i] = p.Name
-	}
-	return names
-}
-
-// seededKnockoutParticipants is KnockoutFinalsFromParticipants' seeded roster,
-// players rather than names, so a caller can key each leaf by identity.
-func seededKnockoutParticipants(store *state.Store, comp *state.Competition) []helper.Player {
-	players, err := store.LoadParticipants(comp.ID, comp.EffectiveWithZekkenName())
-	if err != nil || len(players) == 0 {
-		return nil
-	}
-	if seeds, serr := store.LoadSeeds(comp.ID); serr == nil && len(seeds) > 0 {
-		if aerr := helper.ApplySeeds(players, seeds); aerr != nil {
-			// An unmatched seed name is non-fatal for a read-only export; the
-			// bracket still renders, just unseeded. Mirror the file's warn pattern.
-			fmt.Printf("export: warning: apply seeds for knockout skeleton: %v\n", aerr)
-		}
-	}
-	// No AssignPlayerNumbers call here (bc-pnum review, F11): players is
-	// local to this function (freshly loaded above, never returned or shared
-	// with a caller), and only p.Name is read into the returned names slice
-	// below. Setting Number on it would be pure waste -- traced end to end,
-	// nothing downstream of this function's return value can ever see it.
-	//
-	// bc-drwx item 13 (noted, not changed): this re-runs the full
-	// StandardSeeding pass -- including delayDojoMeetings -- on every
-	// pre-draw export (an operator can preview/re-export the PDF skeleton
-	// repeatedly before the competition officially starts), with no
-	// caching of the result. That repeated cost is acceptable now that
-	// delayDojoMeetings' single-dojo/few-cross-dojo-partner case is an
-	// O(N) early-out and its general case is O(N^2 log N) per generation
-	// rather than O(N^4) (bc-drwx item 2) -- see delayDojoMeetings' own
-	// "Performance note" for the current measured cost of both together
-	// with dojoKey's spelling-insensitive matching (item 3): a prior
-	// version of THIS note claimed the algorithm had stopped being the
-	// bottleneck on the strength of item 2 alone, which was briefly false
-	// once item 3 landed dojoKey calls inside that same selection loop
-	// (25x-200x, bc-drwx review fix) and is true again now that those
-	// calls are hoisted -- caching is not needed to close repeated
-	// re-export cost, but that conclusion depends on BOTH fixes, not item
-	// 2 in isolation.
-	return helper.StandardSeeding(players)
 }
 
 // CompetitionCourts is the shiaijo a competition runs on, by NAME.

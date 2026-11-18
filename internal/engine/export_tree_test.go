@@ -553,72 +553,6 @@ func TestExportCompetitionXlsx_PureKnockoutRendersTagsAndNamesToPrint(t *testing
 	assert.Equal(t, []string{"K1", "K2", "K3", "K4", ""}, gotNumbers)
 }
 
-// TestExportCompetitionXlsx_PreDrawKnockoutNamesToPrintUnnumbered pins the
-// deliberate pre-draw exception documented on KnockoutNamesToPrint
-// (numbering.go): the stored-draw export is reachable BEFORE a draw
-// exists, precisely so an operator can print name tags and blank score
-// sheets ahead of the tournament. A never-started, setup-status
-// knockout-only competition must still get its Names to Print sheet, with
-// one row per entrant in roster order -- but no number, since there is no
-// DrawOrder yet to derive one from.
-//
-// This is the guard's only pin: mutating KnockoutNamesToPrint's check from
-// comp.EffectiveFormat() != state.CompFormatKnockout to
-// DrawSourceFor(comp) != DrawInBracket (requiring an existing draw) leaves
-// the rest of the suite green while silently dropping this sheet for every
-// not-yet-drawn knockout competition, since DrawSourceFor returns DrawNone
-// identically for "not drawn yet" and "Swiss".
-func TestExportCompetitionXlsx_PreDrawKnockoutNamesToPrintUnnumbered(t *testing.T) {
-	eng, store, _ := setupTestEngine(t)
-	compID := "predraw-knockout-names"
-	createTestCompetition(t, store, compID, "knockout", 0, func(c *state.Competition) {
-		c.Courts = []string{"A"}
-		c.NumberPrefix = "K"
-	})
-	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
-		{Name: "Player01", Dojo: "DojoA"},
-		{Name: "Player02", Dojo: "DojoB"},
-		{Name: "Player03", Dojo: "DojoC"},
-		{Name: "Player04", Dojo: "DojoD"},
-	}))
-	comp, err := store.LoadCompetition(compID)
-	require.NoError(t, err)
-	require.Equal(t, state.CompetitionStatus("setup"), comp.Status, "premise: never started, no draw exists")
-
-	f := openExportedWorkbook(t, eng, compID)
-
-	sheetList := f.GetSheetList()
-	var namesSheet string
-	for _, s := range sheetList {
-		if strings.HasPrefix(s, helper.SheetNamesToPrint) {
-			namesSheet = s
-			break
-		}
-	}
-	require.NotEmpty(t, namesSheet, "a not-yet-drawn knockout competition must still get a Names to Print sheet")
-
-	nameRows, err := f.GetRows(namesSheet)
-	require.NoError(t, err)
-	assert.Len(t, nameRows, 4, "one row per entrant, roster order (no draw position to sort by yet)")
-
-	// Column A (the number) carries NO formula pre-draw: every entrant's
-	// Number is still "", so AddPlayerDataToSheet's hasNumber gate never
-	// opens a Number column on the Data sheet, and printNameEntries leaves
-	// the position cell entirely unwritten rather than referencing an
-	// empty one. Column B (the name) is still a live formula reference to
-	// the Data sheet, so the sheet is genuinely populated, not merely
-	// present with blank rows.
-	for i := range nameRows {
-		row := i + 1
-		numberFormula, ferr := f.GetCellFormula(namesSheet, fmt.Sprintf("A%d", row))
-		require.NoError(t, ferr)
-		assert.Emptyf(t, numberFormula, "row %d's number cell must carry no formula before the draw", row)
-		nameFormula, nerr := f.GetCellFormula(namesSheet, fmt.Sprintf("B%d", row))
-		require.NoError(t, nerr)
-		assert.NotEmptyf(t, nameFormula, "row %d's name cell must still reference the roster", row)
-	}
-}
-
 // captureStdout redirects os.Stdout for the duration of fn and returns
 // everything written to it, for pinning helper.finishDataSheet's
 // fmt.Printf("Data added to spreadsheet\n") call count below.
@@ -682,28 +616,6 @@ func TestExportCompetitionXlsx_PureKnockoutWritesDataSheetExactlyOnce(t *testing
 	})
 	assert.Equal(t, 1, strings.Count(output, "Data added to spreadsheet"),
 		"the Data sheet must have exactly ONE writer for a knockout-only export; captured stdout: %q", output)
-}
-
-// TestExportCompetitionXlsx_SetupMixedCompetitionHasNoTagsPrintArea pins a
-// review finding on top of bc-pnum A9: a mixed competition still in `setup`
-// (no draw generated, so pools.csv does not exist and CreateTagsSheet gets
-// zero players) used to have helper.SetPrintArea called with lastRow 0 (the
-// write loop never ran, so `row` stayed at its initial 1 and row-1 was 0),
-// defining the INVALID range "$A$1:$A$0" on the Tags sheet. The fix skips
-// the print area entirely when nothing was written.
-func TestExportCompetitionXlsx_SetupMixedCompetitionHasNoTagsPrintArea(t *testing.T) {
-	eng, store, _ := setupTestEngine(t)
-	compID := "setup-mixed-no-draw"
-	createTestCompetition(t, store, compID, "mixed", 3)
-	saveTestParticipants(t, store, compID, []string{"Alice", "Bob", "Charlie"})
-	// Deliberately NOT started: no draw, no pools.csv, status stays "setup".
-
-	f := openExportedWorkbook(t, eng, compID)
-	for _, d := range f.GetDefinedName() {
-		if d.Name == "_xlnm.Print_Area" && d.Scope == helper.SheetTags {
-			t.Errorf("expected NO print area for the zero-player Tags sheet of a setup competition, got %q", d.RefersTo)
-		}
-	}
 }
 
 // TestExportTournamentWorkbooks_MultiPageTree covers the PDF pipeline's input:

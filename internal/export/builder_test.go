@@ -93,8 +93,8 @@ func TestBuildResultsWorkbook_PoolScoresLiteral(t *testing.T) {
 }
 
 func TestBuildResultsWorkbook_StandingsLiteral_NoFormulaCollapse(t *testing.T) {
-	// The results workbook writes its standings as literals, so a re-read
-	// XLSX (no formula engine) still shows non-zero RANK/W/L values.
+	// The results workbook caches each standings formula's result, so a
+	// re-read XLSX (no formula engine) still shows non-zero RANK/W/L values.
 	t.Parallel()
 	dir, store, eng, compID := testSetup(t)
 	defer os.RemoveAll(dir)
@@ -413,26 +413,6 @@ func TestColNum(t *testing.T) {
 	assert.NotEmpty(t, fallback)
 }
 
-func TestBuildCourtColumnMap(t *testing.T) {
-	t.Parallel()
-	// startColIdx 0 makes this equivalent to a whole-row map for a single court.
-	row := []string{"Name", "W", "L", "T", "PW", "PL", "Rank"}
-	m := buildCourtColumnMap(row, 0)
-	assert.Equal(t, 0, m["Name"])
-	assert.Equal(t, 1, m["W"])
-	assert.Equal(t, 6, m["Rank"])
-	// Missing key
-	_, ok := m["Missing"]
-	assert.False(t, ok)
-
-	// Band scoping: a second court's headers past the 8-column band are excluded,
-	// and the returned indices are ABSOLUTE. Court B starts at index 8.
-	twoCourt := []string{"Name", "W", "L", "", "", "", "", "", "Name", "W", "L"}
-	courtB := buildCourtColumnMap(twoCourt, helper.CourtsColumnsPerCourt)
-	assert.Equal(t, 9, courtB["W"], "court B's W must resolve to its own absolute column, not court A's")
-	assert.Equal(t, 8, courtB["Name"])
-}
-
 func TestBuildBracketMatchIndex(t *testing.T) {
 	t.Parallel()
 	bracket := &state.Bracket{
@@ -524,22 +504,6 @@ func TestBuildResultsWorkbook_MiddleSkipScorePlacement(t *testing.T) {
 		"match 2's unique score must render in the grid despite the middle match being skipped")
 }
 
-func TestSetIntCell_MissingKey(t *testing.T) {
-	// setIntCell is a no-op when the column key is not in the map.
-	// Verify it does not panic and compiles cleanly.
-	t.Parallel()
-	f := excelize.NewFile()
-	defer f.Close()
-
-	colMap := buildCourtColumnMap([]string{"W", "L", "T"}, 0)
-	// "Rank" is NOT in the map - should be a no-op.
-	setIntCell(f, "Sheet1", 1, colMap, "Rank", 42)
-	// "W" IS in the map - should write without error.
-	setIntCell(f, "Sheet1", 1, colMap, "W", 3)
-	val, _ := f.GetCellValue("Sheet1", "A1")
-	assert.Equal(t, "3", val)
-}
-
 // TestBuildResultsWorkbook_GridFromResultsWithoutPoolMatches reproduces the real
 // mobile-app path: pools are persisted with membership only (no helper.Pool.Matches,
 // which is how the engine saves them), and the matches live solely in the results.
@@ -585,12 +549,9 @@ func TestBuildResultsWorkbook_GridFromResultsWithoutPoolMatches(t *testing.T) {
 }
 
 // TestBuildResultsWorkbook_OverlaidCellsAreLiteral pins the core contract of the
-// results export: cells the overlays populate (played scores AND collapse-prone
-// W/L/T/Rank standings) must be LITERAL values, not formulas. excelize's
-// SetCellValue/SetCellInt clear any pre-existing formula in the cell (verified in
-// this test after a full save/reopen round-trip), so the archived workbook does
-// not depend on spreadsheet recalculation. This guards against a future change in
-// that behaviour that would silently leave collapse-prone formulas in place.
+// results export after a full save/reopen round-trip: a played score is a
+// LITERAL value, while the standings it feeds stay the sheet's formulas with
+// their result cached (results_formulas_live_test.go covers them in full).
 func TestBuildResultsWorkbook_OverlaidCellsAreLiteral(t *testing.T) {
 	t.Parallel()
 	dir, store, eng, compID := testSetup(t)
@@ -617,11 +578,13 @@ func TestBuildResultsWorkbook_OverlaidCellsAreLiteral(t *testing.T) {
 	fm, _ := f.GetCellFormula(helper.SheetPoolMatches, scoreRef)
 	assert.Empty(t, fm, "overlaid score cell %s must be a literal, not a formula", scoreRef)
 
-	// The winner's standings W = 1 is overlaid onto a formerly formula-driven cell.
+	// The winner's standings W stays the sheet's formula (operator decision
+	// E4), and carries the 1 it gives as its cached result, so a reader that
+	// computes no formula still shows it.
 	winRef := cellRefWithValue(t, rows, "1")
-	require.NotEmpty(t, winRef, "overlaid W=1 must be present in Pool Matches sheet")
+	require.NotEmpty(t, winRef, "the winner's W=1 must be readable without recalculation")
 	wf, _ := f.GetCellFormula(helper.SheetPoolMatches, winRef)
-	assert.Empty(t, wf, "overlaid standings cell %s must be a literal, not a formula", winRef)
+	assert.NotEmpty(t, wf, "standings cell %s must stay a formula", winRef)
 }
 
 // TestBuildResultsWorkbook_EndToEndEngineScored drives the REAL path end to end:

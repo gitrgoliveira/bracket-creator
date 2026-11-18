@@ -63,19 +63,17 @@ import (
 // tournament/pools/bracket. Two parameters are themselves the caller's own
 // derivation that this function does not repeat:
 //
-//   - draw is the caller's own EliminationDraw(...) result. EliminationDraw
-//     itself needs a *state.Store (for the pure-knockout participant-seeding
-//     fallback, KnockoutFinalsFromParticipants), so it cannot move into this
-//     store-free function; both callers already compute it before their call
-//     here (they need numCourts, courts derived from comp, for it too).
+//   - draw is the caller's own EliminationDraw(...) result; both callers
+//     already compute it before their call here (they need numCourts, courts
+//     derived from comp, for it too).
 //   - kachinukiMatches is the caller's own bout-log read: the two callers use
 //     different Engine methods over different inputs (collectKachinukiMatches
 //     takes an id+comp pair scoped for the stored-draw path;
 //     KachinukiDetailMatches takes only the id), so the DATA differs even
-//     though the RENDERING (step 7) does not. Before the draw, when step 4
-//     prints a knockout-only competition's skeleton, there is no stored
-//     bracket for that read to list, and the sections come from the rounds
-//     step 4 printed instead (helper.BlankKachinukiSections).
+//     though the RENDERING (step 7) does not. A competition with no draw has
+//     no stored match for that read to list; its blank layout takes the
+//     sections from the matches steps 3 and 4 printed instead
+//     (renderWorkbook's blank mode, helper.BlankKachinukiSections).
 //   - representativeBouts is the caller's own read of the representative bouts
 //     (collectRepresentativeBouts; RepresentativeBoutMatches takes only the
 //     id), for the same reason: step 7 writes them, whichever way they were
@@ -136,6 +134,48 @@ func (e *Engine) RenderCompetitionWorkbook(
 	if err != nil {
 		return nil, nil, err
 	}
+	return renderWorkbook(f, workbookInput{
+		comp:                comp,
+		pools:               pools,
+		bracket:             bracket,
+		courts:              courts,
+		courtOfPool:         courtOfPool,
+		draw:                draw,
+		kachinukiMatches:    kachinukiMatches,
+		representativeBouts: representativeBouts,
+		roster:              namesToPrintPlayers,
+	})
+}
+
+// workbookInput is what renderWorkbook renders: RenderCompetitionWorkbook's
+// parameters, plus the knockout-only roster it derives (roster, its
+// namesToPrintPlayers) and the blank layout's mode.
+//
+// blank marks the layout of a competition with no draw (blankLayoutXlsx): its
+// draw is built in memory over empty places, so there is no stored bracket to
+// say whether a 3rd-place match is played (the draw's own rule,
+// helper.NeedsBronzeBlock, decides it over the rounds step 4 printed), no
+// stored match for a Kachinuki Detail section (each match steps 3 and 4
+// printed gets an empty one, helper.BlankKachinukiSections), and nobody to
+// print on a Names to Print sheet (there is none).
+type workbookInput struct {
+	comp                *state.Competition
+	pools               []helper.Pool
+	bracket             *state.Bracket
+	courts              []string
+	courtOfPool         map[string]string
+	draw                *helper.KnockoutDraw
+	kachinukiMatches    []helper.KachinukiMatchDetail
+	representativeBouts []helper.KachinukiMatchDetail
+	roster              []helper.Player
+	blank               bool
+}
+
+// renderWorkbook is RenderCompetitionWorkbook's body, the one sheet pipeline
+// both exports and the blank layout run.
+func renderWorkbook(f *excelize.File, in workbookInput) ([][]int, []helper.Player, error) {
+	comp, pools, bracket, courts, courtOfPool, draw := in.comp, in.pools, in.bracket, in.courts, in.courtOfPool, in.draw
+	kachinukiMatches, namesToPrintPlayers := in.kachinukiMatches, in.roster
 
 	// 1. Data sheet (Player Name, Dojo, Display Name). AddDataToSheetForExport
 	//    is the ONE writer of this sheet: it picks AddPlayerDataToSheet over
@@ -191,6 +231,9 @@ func (e *Engine) RenderCompetitionWorkbook(
 	// keeps both callers' PrintEliminationWithBronze call identical to what
 	// each already computed.
 	hasBronze := bracket != nil && bracket.ThirdPlaceMatch != nil
+	// The rounds step 4 prints, for the blank layout's Kachinuki Detail
+	// sections; nil for a competition with no knockout.
+	var eliminationMatchRounds [][]*helper.Node
 
 	// 4. Knockout: Tree pages + Elimination Matches, in the one mandatory
 	//    order RenderKnockoutPages enforces, for a competition with a
@@ -201,9 +244,16 @@ func (e *Engine) RenderCompetitionWorkbook(
 	//    are what their shiaijo runs off.
 	if draw != nil && comp.IsKnockoutEnabled() {
 		plan := LiveCourtPlan(draw, courts, bracket)
-		eliminationMatchRounds, _, err := helper.RenderKnockoutPages(f, plan, false, pools, poolCoords, playerCoords, matchWinners)
+		rounds, _, err := helper.RenderKnockoutPages(f, plan, false, pools, poolCoords, playerCoords, matchWinners)
 		if err != nil {
 			return nil, nil, fmt.Errorf("render workbook: %w", err)
+		}
+		eliminationMatchRounds = rounds
+		if in.blank {
+			// No stored bracket: the 3rd-place match follows the rule the draw
+			// applies when it stores one (buildBracketFromDraw), over the
+			// rounds this draw prints.
+			hasBronze = helper.NeedsBronzeBlock(comp.RequiresSingleThirdPlace(), len(eliminationMatchRounds))
 		}
 		// A knockout-only draw's first-round entrants are competitors, not pool
 		// places: point each at its name on the data sheet, as the CLI knockout
@@ -214,17 +264,6 @@ func (e *Engine) RenderCompetitionWorkbook(
 		}
 		helper.PrintEliminationWithBronze(f, matchWinners, eliminationMatchRounds, comp.TeamBoutRows(),
 			plan, comp.Engi, hasBronze)
-		// Before the draw a knockout-only competition has no stored bracket for
-		// the caller's bout-log read to list, and the sheet above printed the
-		// skeleton seeded from the roster instead. The Kachinuki Detail sheet
-		// lists the same matches from the same rounds, so the two sheets have
-		// one source. isPureKnockout scopes it to that competition: with no
-		// pool phase and no bracket rounds the caller's read is empty, so
-		// nothing it listed is replaced, while a competition with pools keeps
-		// its pool sections whatever its bracket holds.
-		if comp.IsKachinuki() && isPureKnockout(comp, pools) && !bracketHasKnockoutContent(bracket) {
-			kachinukiMatches = helper.BlankKachinukiSections(nil, eliminationMatchRounds, hasBronze, comp.TeamBoutRows())
-		}
 	} else if comp.IsKnockoutEnabled() && bracketHasKnockoutContent(bracket) {
 		// The stored bracket already carries knockout content -- a
 		// third-place bout, or at least one round-1-or-later match -- but
@@ -299,8 +338,13 @@ func (e *Engine) RenderCompetitionWorkbook(
 	//    namesToPrintPlayers branch as step 1: a knockout-only export routes
 	//    through CreateNamesToPrint over the numbered roster instead of
 	//    CreateNamesWithPoolToPrint's empty-pools no-op (which used to leave
-	//    this sheet missing entirely, see bc-pnum A8).
-	if len(namesToPrintPlayers) > 0 {
+	//    this sheet missing entirely, see bc-pnum A8). The blank layout names
+	//    nobody, so it prints no such sheet and only drops the template one.
+	if in.blank {
+		if err := f.DeleteSheet(helper.SheetNamesToPrint); err != nil {
+			return nil, nil, fmt.Errorf("render workbook: delete %s sheet: %w", helper.SheetNamesToPrint, err)
+		}
+	} else if len(namesToPrintPlayers) > 0 {
 		helper.CreateNamesToPrint(f, namesToPrintPlayers, comp.EffectiveWithZekkenName(), courts, playerCoords, comp.EffectiveNumberPrefix())
 	} else {
 		helper.CreateNamesWithPoolToPrint(f, pools, comp.EffectiveWithZekkenName(), courts, courtOfPool, playerCoords, comp.EffectiveNumberPrefix())
@@ -308,15 +352,19 @@ func (e *Engine) RenderCompetitionWorkbook(
 
 	// 7. Kachinuki Detail sheet (T195-T203, CHK037) and Representative Bouts
 	//    sheet. Opt-in: the first is only emitted when the competition runs
-	//    the kachinuki team-match format and its draw has matches, or before
-	//    the draw the skeleton step 4 printed; the second only when a
-	//    fixed-order team competition's draw holds a representative bout.
-	//    Each renderer is a no-op for empty input, so this is safe for every
-	//    other competition.
+	//    the kachinuki team-match format and its draw has matches, or for the
+	//    blank layout an empty section for every match steps 3 and 4 printed
+	//    (the same matches, so the two sheets have one source); the second
+	//    only when a fixed-order team competition's draw holds a
+	//    representative bout. Each renderer is a no-op for empty input, so
+	//    this is safe for every other competition.
+	if in.blank && comp.IsKachinuki() {
+		kachinukiMatches = helper.BlankKachinukiSections(pools, eliminationMatchRounds, hasBronze, comp.TeamBoutRows())
+	}
 	if err := helper.WriteKachinukiDetailSheet(f, kachinukiMatches); err != nil {
 		return nil, nil, err
 	}
-	if err := helper.WriteRepresentativeBoutsSheet(f, representativeBouts); err != nil {
+	if err := helper.WriteRepresentativeBoutsSheet(f, in.representativeBouts); err != nil {
 		return nil, nil, err
 	}
 

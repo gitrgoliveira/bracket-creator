@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"slices"
 	"sort"
+	"strconv"
 	"strings"
 
 	excelize "github.com/xuri/excelize/v2"
@@ -37,9 +39,11 @@ var ErrSwissExportUnsupported = engine.ErrSwissExportUnsupported
 var ErrCompetitionNotFound = errors.New("competition not found")
 
 // BuildResultsWorkbook reads live tournament state and produces a results-
-// populated XLSX workbook for the given competition. Both pool results (scores
-// + standings) and elimination bracket results are included as literal values,
-// so the workbook is suitable for archiving after a live event.
+// populated XLSX workbook for the given competition. Pool scores, decision
+// marks and elimination bracket results are written as values; the pool
+// standings (W/L/T/PW/PL, the team tables, Rank and the Ranking names) stay
+// the sheet's formulas over those scores, so the workbook can be checked
+// against the app (see keepStandingsLive).
 //
 // This is a SEPARATE path from Engine.ExportCompetitionXlsx, the stored-draw
 // export behind GET /api/competitions/:id/export and the PDF prints.
@@ -193,14 +197,13 @@ func BuildResultsWorkbook(store *state.Store, eng *engine.Engine, compID string)
 	// inside its own block.
 	boutRows := comp.TeamBoutRows()
 
-	// Pool Matches: overwrite the W/L/T/RANK formula cells with literal values
-	// from the engine, so the results archive reads the same in a reader that
-	// computes no formula.
+	// Pool Matches: the scores and decision marks are written as values; the
+	// standings stay the sheet's own formulas over them (keepStandingsLive).
 	if err := overlayPoolScores(f, pools, matchResultByID, poolOrdinals, boutRows, poolsByCourt, comp.Engi); err != nil {
 		return nil, fmt.Errorf("export: overlay pool scores: %w", err)
 	}
-	if err := overlayPoolStandings(f, pools, standings, comp.TeamSize, poolsByCourt, comp.Engi); err != nil {
-		return nil, fmt.Errorf("export: overlay standings: %w", err)
+	if err := keepStandingsLive(f, pools, standings, matchResults, poolsByCourt); err != nil {
+		return nil, fmt.Errorf("export: standings: %w", err)
 	}
 
 	// Elimination Matches: literal scores from the live bracket state.
@@ -505,9 +508,22 @@ func writeScoreRowCells(f *excelize.File, sheetName string, courtStartCol, excel
 	// The outstanding-hansoku ▲ rides the cell's OUTER edge — nearest that
 	// side's name column — per FIK Table 2 (White's ▲ far left, Red's far
 	// right) and matching the scoreboard's placement between name and slots.
-	setCellStr(f, sheetName, colNum(courtStartCol+1), excelRow, domain.JoinNonEmpty(lFoul, domain.JoinNonEmpty(leftScore, lMark)))
-	setCellStr(f, sheetName, colNum(courtStartCol+5), excelRow, domain.JoinNonEmpty(domain.JoinNonEmpty(rightScore, rMark), rFoul))
+	setScoreCell(f, sheetName, colNum(courtStartCol+1), excelRow, domain.JoinNonEmpty(lFoul, domain.JoinNonEmpty(leftScore, lMark)))
+	setScoreCell(f, sheetName, colNum(courtStartCol+5), excelRow, domain.JoinNonEmpty(domain.JoinNonEmpty(rightScore, rMark), rFoul))
 	writeMiddleMarkCell(f, sheetName, courtStartCol, excelRow, mr.Decision, mr.Encho)
+}
+
+// setScoreCell writes one side's score cell. A cell that is a whole number is
+// an engi flag count (an ippon score is letters, never digits) and is written
+// as a number, as an operator types it into the template, so the engi
+// standings formulas, which count flags through ISNUMBER and N, read it; a
+// flag count written as text counted as no bout fought.
+func setScoreCell(f *excelize.File, sheet, col string, row int, value string) {
+	if n, err := strconv.Atoi(value); err == nil && n >= 0 {
+		setIntCellDirect(f, sheet, col, row, n)
+		return
+	}
+	setCellStr(f, sheet, col, row, value)
 }
 
 // writeMiddleMarkCell writes the single middle mark (X / (E) / (DH)),
@@ -643,243 +659,401 @@ func writeTeamSubMatchScores(f *excelize.File, sheetName string, courtStartCol, 
 	}
 }
 
-// ---------- standings overlay ----------
+// ---------- live standings ----------
 
-// overlayPoolStandings overwrites formula-driven standings cells (W/L/T/PW/PL/Rank
-// and the ranking section) with literal values from the engine. Formulas in these
-// cells reference relative pointers that a store round-trip severs (per
-// cmd/create_handler.go:25), so we replace them with Go-computed literals.
+// keepStandingsLive leaves the pool standings as the formulas the shared
+// pipeline printed (W/L/T/PW/PL or the engi Flags, the team tables' W/L/T and
+// IV/IL/IT/PW/PL, Rank and the Ranking names), counted over the scores and
+// decision marks overlayPoolScores wrote, so the operator can check the sheet
+// against the app (operator decision E4). Two things are added over them:
 //
-// Strategy: the N-th "Results" header row in each court column corresponds to the
-// N-th pool assigned to that court. We match by ordinal position, not by
-// resolved formula values (which are not evaluated by excelize's GetRows).
-func overlayPoolStandings(f *excelize.File, pools []helper.Pool, standings map[string][]state.PlayerStanding, teamSize int, poolsByCourt [][]int, engi bool) error {
+//   - every standings cell whose formula gives a number carries that number as
+//     its cached result, so a reader that computes no formula shows the figure
+//     Excel shows on opening. The number is what excelize's evaluator gives for
+//     the formula, never the app's figure, so a pool decided by kiken, fusenpai
+//     or hantei shows what the formulas count there (the accepted trade-off).
+//     A name has no cached result: excelize can store one only for a number.
+//   - in a pool where the sheet's Rank would differ from the app's, Rank and
+//     the Ranking names are written as the app's values, with a note beside
+//     the Ranking saying why (operator decision Q2 (b)). The formulas cannot
+//     see a chusen, a tie-break or representative bout, or the app's order of
+//     competitors level on every count. The knockout's entrant formulas read
+//     the Ranking cells, so they follow the app's order there.
+//
+// Every formula is evaluated before anything is written, because excelize
+// drops its calculation cache on every write.
+func keepStandingsLive(f *excelize.File, pools []helper.Pool, standings map[string][]state.PlayerStanding, matchResults []state.MatchResult, poolsByCourt [][]int) error {
 	if len(pools) == 0 {
 		return nil
 	}
-	if teamSize != 0 {
-		return overlayTeamPoolStandings(f, pools, standings, poolsByCourt)
-	}
-
-	sheetName := helper.SheetPoolMatches
-
-	// helper.PoolsByCourt owns the pool clamp, so the grouping's length is the
-	// number of bands the skeleton actually printed.
-	numCourts := len(poolsByCourt)
-
-	rows, err := f.GetRows(sheetName)
+	sheet := helper.SheetPoolMatches
+	rows, err := f.GetRows(sheet)
 	if err != nil {
-		return fmt.Errorf("overlayPoolStandings: get rows: %w", err)
+		return fmt.Errorf("keepStandingsLive: get rows: %w", err)
+	}
+	areas := locatePoolStandings(rows, pools, poolsByCourt)
+
+	evaluated := make([][]formulaCell, len(areas))
+	for i, a := range areas {
+		cells, err := evaluateFormulaCells(f, sheet, a.formulaRefs())
+		if err != nil {
+			return err
+		}
+		evaluated[i] = cells
 	}
 
-	// Track how many "Results" headers we've seen per court column.
-	courtResultsIdx := make([]int, numCourts)
+	var noteStyle int
+	haveNoteStyle := false
+	for i, a := range areas {
+		app, ok := appRanks(a.pool, standings[a.pool.PoolName])
+		appOrder := ok && !sameRanks(evaluated[i], a.rankRefs(), app)
 
-	for rowIdx, row := range rows {
-		for c := 0; c < numCourts; c++ {
-			startColIdx := c * helper.CourtsColumnsPerCourt // 0-based
-			if startColIdx >= len(row) {
-				continue
+		appOwned := make(map[string]bool)
+		if appOrder {
+			for _, ref := range a.rankRefs() {
+				appOwned[ref] = true
 			}
-			if row[startColIdx] != "Results" && row[startColIdx] != "Team Results" {
-				continue
-			}
-
-			poolOrderInCourt := courtResultsIdx[c]
-			courtResultsIdx[c]++
-
-			if poolOrderInCourt >= len(poolsByCourt[c]) {
-				continue
-			}
-			poolIdx := poolsByCourt[c][poolOrderInCourt]
-			pool := pools[poolIdx]
-
-			poolStandings, ok := standings[pool.PoolName]
-			if !ok {
-				continue
-			}
-			byID := standingMap(poolStandings)
-			// Scope the header map to THIS court's 8-column band. Pool Matches
-			// repeats the W/L/T/PW/PL/Rank headers once per court, and a whole-row
-			// map keeps only the first occurrence, so on a multi-court sheet every
-			// court past the first would otherwise write its standings into court 0's
-			// columns.
-			colMap := buildCourtColumnMap(row, startColIdx)
-
-			// Write standings literals for each player (in pool draw order).
-			for i, player := range pool.Players {
-				dataRowIdx := rowIdx + 1 + i
-				if dataRowIdx >= len(rows) {
-					break
-				}
-				ps, ok := byID[player.ID]
-				if !ok {
-					continue
-				}
-				excelRow := dataRowIdx + 1
-				// teamSize == 0 is guaranteed here (we returned early above for team competitions).
-				setIntCell(f, sheetName, excelRow, colMap, "W", ps.Wins)
-				if engi {
-					// Engi standings: W / Flags / Rank only (no L, T, PW, PL).
-					// Losses are not recorded in engi; skipping "L" here keeps
-					// that cell blank (matching the formula sheet which also
-					// omits the L column for engi).
-					setIntCell(f, sheetName, excelRow, colMap, helper.ColHeaderFlags, ps.Flags)
-				} else {
-					setIntCell(f, sheetName, excelRow, colMap, "L", ps.Losses)
-					setIntCell(f, sheetName, excelRow, colMap, "T", ps.Draws)
-					setIntCell(f, sheetName, excelRow, colMap, "PW", ps.IpponsGiven)
-					setIntCell(f, sheetName, excelRow, colMap, "PL", ps.IpponsTaken)
-				}
-				setIntCell(f, sheetName, excelRow, colMap, "Rank", ps.Rank)
+			for _, ref := range a.rankingRefs() {
+				appOwned[ref] = true
 			}
 		}
-	}
-
-	// Overlay Ranking sections.
-	return overlayRankingSections(f, sheetName, rows, pools, standings, numCourts, poolsByCourt)
-}
-
-// overlayRankingSections replaces the IFERROR/INDEX/MATCH formula cells in the
-// "Ranking" sections with literal player names from the engine-ordered standings.
-func overlayRankingSections(f *excelize.File, sheetName string, rows [][]string, pools []helper.Pool, standings map[string][]state.PlayerStanding, numCourts int, poolsByCourt [][]int) error {
-
-	courtRankIdx := make([]int, numCourts)
-
-	for rowIdx, row := range rows {
-		for c := 0; c < numCourts; c++ {
-			// "Ranking" label appears in resNameColName = startCol+6 (column G for court 0).
-			// startCol = 1 + c*CourtsColumnsPerCourt, so resNameColName 0-based idx = c*8+6.
-			rankingColIdx := c*helper.CourtsColumnsPerCourt + 6 // 0-based
-			if rankingColIdx >= len(row) {
+		for _, c := range evaluated[i] {
+			if appOwned[c.ref] {
 				continue
 			}
-			if row[rankingColIdx] != "Ranking" {
-				continue
+			if err := cacheFormulaResult(f, sheet, c); err != nil {
+				return err
 			}
-
-			poolOrderInCourt := courtRankIdx[c]
-			courtRankIdx[c]++
-
-			if poolOrderInCourt >= len(poolsByCourt[c]) {
-				continue
+		}
+		if !appOrder {
+			continue
+		}
+		if !haveNoteStyle {
+			haveNoteStyle = true
+			if noteStyle, err = f.NewStyle(&excelize.Style{
+				Alignment: &excelize.Alignment{WrapText: true, Vertical: "top"},
+				Font:      &excelize.Font{Italic: true, Size: 9},
+			}); err != nil {
+				return fmt.Errorf("keepStandingsLive: note style: %w", err)
 			}
-			poolIdx := poolsByCourt[c][poolOrderInCourt]
-			pool := pools[poolIdx]
-			poolStandings, ok := standings[pool.PoolName]
-			if !ok {
-				continue
-			}
-
-			sorted := make([]state.PlayerStanding, len(poolStandings))
-			copy(sorted, poolStandings)
-			sort.Slice(sorted, func(i, j int) bool {
-				return sorted[i].Rank < sorted[j].Rank
-			})
-
-			// Player name cells are also in resNameColName = startCol+6 = 1-based col c*8+7.
-			nameColIdx := c*helper.CourtsColumnsPerCourt + 7 // 1-based col number
-			nameCol := colNum(nameColIdx)
-			for rankOrd, ps := range sorted {
-				dataRowIdx := rowIdx + 1 + rankOrd
-				if dataRowIdx >= len(rows) {
-					break
-				}
-				excelRow := dataRowIdx + 1
-				cellRef := fmt.Sprintf("%s%d", nameCol, excelRow)
-				if err := f.SetCellValue(sheetName, cellRef, ps.Player.Name); err != nil {
-					return fmt.Errorf("overlayRankingSections: %w", err)
-				}
-			}
+		}
+		if err := writeAppRanking(f, sheet, a, standings[a.pool.PoolName], app); err != nil {
+			return err
+		}
+		reasons := rankingDifferenceReasons(standings[a.pool.PoolName], poolMatchResults(a.pool, matchResults))
+		if err := writeRankingNote(f, sheet, a, rankingNote(reasons), noteStyle); err != nil {
+			return err
 		}
 	}
 	return nil
 }
 
-// overlayTeamPoolStandings overlays literal team-standings values onto the two
-// stacked tables printPoolResultsTable renders for teamMatches>0:
-//
-//	Table 1 "Team Results": W/L/T at startCol+1/+2/+3, Rank at startCol+6.
-//	Table 2 (header = Table 1 header + len(players) + 2): IV/IL/IT/PW/PL at
-//	startCol+1..+5.
-//
-// Matching is by ordinal position (N-th "Team Results" header in a court column
-// == N-th pool assigned to that court), mirroring overlayPoolStandings, because
-// excelize does not evaluate the name formulas. Player order is identical in
-// both tables (both iterate pool.Players), so index i maps to the same team.
-func overlayTeamPoolStandings(f *excelize.File, pools []helper.Pool, standings map[string][]state.PlayerStanding, poolsByCourt [][]int) error {
-	sheetName := helper.SheetPoolMatches
+// poolStandingsArea is where one pool's standings sit on the Pool Matches
+// sheet. The N-th "Results" (or "Team Results") header and the N-th "Ranking"
+// label in a court band belong to the N-th pool assigned to that band
+// (helper.PoolsByCourt), so a pool is found by its ordinal, never by a name a
+// formula has not resolved.
+type poolStandingsArea struct {
+	pool helper.Pool
+	// startCol is the 1-based first column of the pool's court band.
+	startCol int
+	// tableRows are the 1-based rows of the results table(s) holding a
+	// competitor: one per competitor, and a team pool's IV/IL/IT/PW/PL table
+	// below its W/L/T one.
+	tableRows []int
+	// rankRows are the 1-based rows of each competitor's Rank cell, in
+	// pool.Players order.
+	rankRows []int
+	// rankingRow is the 1-based row of the "Ranking" label, 0 when none.
+	rankingRow int
+}
 
-	// helper.PoolsByCourt owns the pool clamp, so the grouping's length is the
-	// number of bands the skeleton actually printed.
-	numCourts := len(poolsByCourt)
+// standingsColumns is how many columns of a court band the results table
+// spans: the name, the counts and Rank (startCol .. startCol+6).
+const standingsColumns = 7
 
-	rows, err := f.GetRows(sheetName)
-	if err != nil {
-		return fmt.Errorf("overlayTeamPoolStandings: get rows: %w", err)
+func (a *poolStandingsArea) rankCol() string    { return colNum(a.startCol + 6) }
+func (a *poolStandingsArea) rankingCol() string { return colNum(a.startCol + 6) }
+
+func (a *poolStandingsArea) rankRefs() []string {
+	refs := make([]string, 0, len(a.rankRows))
+	for _, r := range a.rankRows {
+		refs = append(refs, fmt.Sprintf("%s%d", a.rankCol(), r))
 	}
+	return refs
+}
 
-	courtResultsIdx := make([]int, numCourts)
+func (a *poolStandingsArea) rankingRefs() []string {
+	if a.rankingRow == 0 {
+		return nil
+	}
+	refs := make([]string, 0, len(a.pool.Players))
+	for i := range a.pool.Players {
+		refs = append(refs, fmt.Sprintf("%s%d", a.rankingCol(), a.rankingRow+1+i))
+	}
+	return refs
+}
 
+func (a *poolStandingsArea) formulaRefs() []string {
+	var refs []string
+	for _, r := range a.tableRows {
+		for c := a.startCol; c < a.startCol+standingsColumns; c++ {
+			refs = append(refs, fmt.Sprintf("%s%d", colNum(c), r))
+		}
+	}
+	return append(refs, a.rankingRefs()...)
+}
+
+// locatePoolStandings finds each pool's standings area, in sheet order.
+func locatePoolStandings(rows [][]string, pools []helper.Pool, poolsByCourt [][]int) []*poolStandingsArea {
+	numCourts := len(poolsByCourt)
+	byPool := make(map[int]*poolStandingsArea)
+	var order []*poolStandingsArea
+	areaOf := func(c, ordinal int) *poolStandingsArea {
+		if ordinal >= len(poolsByCourt[c]) {
+			return nil
+		}
+		pi := poolsByCourt[c][ordinal]
+		a, ok := byPool[pi]
+		if !ok {
+			a = &poolStandingsArea{pool: pools[pi], startCol: 1 + c*helper.CourtsColumnsPerCourt}
+			byPool[pi] = a
+			order = append(order, a)
+		}
+		return a
+	}
+	resultsSeen := make([]int, numCourts)
+	rankingSeen := make([]int, numCourts)
 	for rowIdx, row := range rows {
 		for c := 0; c < numCourts; c++ {
-			startColIdx := c * helper.CourtsColumnsPerCourt // 0-based
-			if startColIdx >= len(row) {
-				continue
-			}
-			if row[startColIdx] != "Team Results" {
-				continue
-			}
-
-			poolOrderInCourt := courtResultsIdx[c]
-			courtResultsIdx[c]++
-			if poolOrderInCourt >= len(poolsByCourt[c]) {
-				continue
-			}
-			pool := pools[poolsByCourt[c][poolOrderInCourt]]
-			poolStandings, ok := standings[pool.PoolName]
-			if !ok {
-				continue
-			}
-			byID := standingMap(poolStandings)
-
-			courtStartCol := 1 + c*helper.CourtsColumnsPerCourt // 1-based
-			wCol := colNum(courtStartCol + 1)
-			lCol := colNum(courtStartCol + 2)
-			tCol := colNum(courtStartCol + 3)
-			rankCol := colNum(courtStartCol + 6)
-			// Table 2 reuses startCol+1..+3 for IV/IL/IT (same physical columns as
-			// W/L/T, different meaning), then +4/+5 for PW/PL.
-			ivCol, ilCol, itCol := wCol, lCol, tCol
-			pwCol := colNum(courtStartCol + 4)
-			plCol := colNum(courtStartCol + 5)
-
-			nPlayers := len(pool.Players)
-			for i, player := range pool.Players {
-				ps, ok := byID[player.ID]
-				if !ok {
-					continue
+			start := c * helper.CourtsColumnsPerCourt // 0-based
+			if start < len(row) && (row[start] == "Results" || row[start] == "Team Results") {
+				a := areaOf(c, resultsSeen[c])
+				resultsSeen[c]++
+				if a != nil {
+					header := rowIdx + 1
+					n := len(a.pool.Players)
+					for i := 0; i < n; i++ {
+						a.rankRows = append(a.rankRows, header+1+i)
+						a.tableRows = append(a.tableRows, header+1+i)
+					}
+					if row[start] == "Team Results" {
+						// The IV/IL/IT/PW/PL table sits under the W/L/T one, after
+						// a blank row and its own header.
+						for i := 0; i < n; i++ {
+							a.tableRows = append(a.tableRows, header+n+3+i)
+						}
+					}
 				}
-				// Table 1 header is excel row rowIdx+1; player i at rowIdx+2+i.
-				t1Row := rowIdx + 2 + i
-				setIntCellDirect(f, sheetName, wCol, t1Row, ps.Wins)
-				setIntCellDirect(f, sheetName, lCol, t1Row, ps.Losses)
-				setIntCellDirect(f, sheetName, tCol, t1Row, ps.Draws)
-				setIntCellDirect(f, sheetName, rankCol, t1Row, ps.Rank)
-
-				// Table 2 header = Table 1 header + nPlayers + 2 (excel rows);
-				// player i at (rowIdx+1) + nPlayers + 2 + 1 + i.
-				t2Row := rowIdx + nPlayers + 4 + i
-				setIntCellDirect(f, sheetName, ivCol, t2Row, ps.IndividualWins)
-				setIntCellDirect(f, sheetName, ilCol, t2Row, ps.IndividualLosses)
-				setIntCellDirect(f, sheetName, itCol, t2Row, ps.IndividualDraws)
-				setIntCellDirect(f, sheetName, pwCol, t2Row, ps.PointsWon)
-				setIntCellDirect(f, sheetName, plCol, t2Row, ps.PointsLost)
+			}
+			if label := start + 6; label < len(row) && row[label] == "Ranking" {
+				a := areaOf(c, rankingSeen[c])
+				rankingSeen[c]++
+				if a != nil {
+					a.rankingRow = rowIdx + 1
+				}
 			}
 		}
 	}
+	return order
+}
 
-	return overlayRankingSections(f, sheetName, rows, pools, standings, numCourts, poolsByCourt)
+// formulaCell is one formula cell and what excelize's evaluator gives for it.
+type formulaCell struct {
+	ref     string
+	formula string
+	value   string
+	// evaluated is false when the evaluator could not work the formula out.
+	evaluated bool
+}
+
+func evaluateFormulaCells(f *excelize.File, sheet string, refs []string) ([]formulaCell, error) {
+	cells := make([]formulaCell, 0, len(refs))
+	for _, ref := range refs {
+		formula, err := f.GetCellFormula(sheet, ref)
+		if err != nil {
+			return nil, fmt.Errorf("keepStandingsLive: formula %s: %w", ref, err)
+		}
+		if formula == "" {
+			continue
+		}
+		value, err := f.CalcCellValue(sheet, ref, excelize.Options{RawCellValue: true})
+		cells = append(cells, formulaCell{ref: ref, formula: formula, value: value, evaluated: err == nil})
+	}
+	return cells, nil
+}
+
+// cacheFormulaResult stores a number the formula gives as the cell's cached
+// result and keeps the formula. excelize keeps a cell's value when a formula
+// is set on it (and drops the formula when a value is set), so the value goes
+// first.
+func cacheFormulaResult(f *excelize.File, sheet string, c formulaCell) error {
+	if !c.evaluated {
+		return nil
+	}
+	if _, err := strconv.ParseFloat(c.value, 64); err != nil {
+		return nil
+	}
+	if err := f.SetCellDefault(sheet, c.ref, c.value); err != nil {
+		return fmt.Errorf("keepStandingsLive: cache %s: %w", c.ref, err)
+	}
+	if err := f.SetCellFormula(sheet, c.ref, c.formula); err != nil {
+		return fmt.Errorf("keepStandingsLive: formula %s: %w", c.ref, err)
+	}
+	return nil
+}
+
+// appRanks is the app's rank of each competitor in pool.Players order; ok is
+// false when a competitor has no standing, so there is no app order to write.
+func appRanks(pool helper.Pool, poolStandings []state.PlayerStanding) ([]int, bool) {
+	byID := standingMap(poolStandings)
+	ranks := make([]int, len(pool.Players))
+	for i, p := range pool.Players {
+		ps, ok := byID[p.ID]
+		if !ok {
+			return nil, false
+		}
+		ranks[i] = ps.Rank
+	}
+	return ranks, len(ranks) > 0
+}
+
+// sameRanks reports whether the sheet's Rank formulas give the app's ranks.
+// A Rank the evaluator cannot work out is not the app's.
+func sameRanks(cells []formulaCell, rankRefs []string, app []int) bool {
+	byRef := make(map[string]formulaCell, len(cells))
+	for _, c := range cells {
+		byRef[c.ref] = c
+	}
+	for i, ref := range rankRefs {
+		c, ok := byRef[ref]
+		if !ok || !c.evaluated {
+			return false
+		}
+		v, err := strconv.ParseFloat(c.value, 64)
+		if err != nil || int(v) != app[i] || v != float64(int(v)) {
+			return false
+		}
+	}
+	return true
+}
+
+// writeAppRanking writes the app's Rank of each competitor and the Ranking
+// names in the app's order over the formulas.
+func writeAppRanking(f *excelize.File, sheet string, a *poolStandingsArea, poolStandings []state.PlayerStanding, app []int) error {
+	for i, ref := range a.rankRefs() {
+		if err := f.SetCellInt(sheet, ref, int64(app[i])); err != nil {
+			return fmt.Errorf("keepStandingsLive: rank %s: %w", ref, err)
+		}
+	}
+	sorted := make([]state.PlayerStanding, len(poolStandings))
+	copy(sorted, poolStandings)
+	sort.SliceStable(sorted, func(i, j int) bool { return sorted[i].Rank < sorted[j].Rank })
+	for i, ref := range a.rankingRefs() {
+		if i >= len(sorted) {
+			break
+		}
+		if err := f.SetCellValue(sheet, ref, sorted[i].Player.Name); err != nil {
+			return fmt.Errorf("keepStandingsLive: ranking %s: %w", ref, err)
+		}
+	}
+	return nil
+}
+
+// poolMatchResults is the stored results of one pool: its regular matches and
+// its tie-break and representative bouts.
+func poolMatchResults(pool helper.Pool, matchResults []state.MatchResult) []state.MatchResult {
+	prefix := pool.PoolName + "-"
+	var mine []state.MatchResult
+	for _, mr := range matchResults {
+		if strings.HasPrefix(mr.ID, prefix) {
+			mine = append(mine, mr)
+		}
+	}
+	return mine
+}
+
+// rankingDifferenceReasons names what in a pool the app's order rests on that
+// the formulas cannot see. It only words the note: whether the app's order is
+// written is decided by comparing the two ranks (sameRanks).
+func rankingDifferenceReasons(poolStandings []state.PlayerStanding, poolMatches []state.MatchResult) []string {
+	var reasons []string
+	if slices.ContainsFunc(poolStandings, func(ps state.PlayerStanding) bool { return ps.IsOverridden }) {
+		reasons = append(reasons, "a chusen settled a tie")
+	}
+	var tieBreak, representative bool
+	var decided []string
+	for i := range poolMatches {
+		m := &poolMatches[i]
+		if m.Status != state.MatchStatusCompleted {
+			continue
+		}
+		switch {
+		case state.IsTiebreakerMatchID(m.ID):
+			tieBreak = true
+		case state.IsPoolDaihyosenMatchID(m.ID):
+			representative = true
+		}
+		word := domain.DecisionWord(m.Decision)
+		if word == "" && m.HanteiDecided() {
+			word = "hantei"
+		}
+		if word != "" && !slices.Contains(decided, word) {
+			decided = append(decided, word)
+		}
+	}
+	if tieBreak {
+		reasons = append(reasons, "a tie-break bout was fought")
+	}
+	if representative {
+		reasons = append(reasons, "a representative bout was fought")
+	}
+	if n := len(decided); n > 0 {
+		words := decided[n-1]
+		if n > 1 {
+			words = strings.Join(decided[:n-1], ", ") + " or " + words
+		}
+		reasons = append(reasons, "a match was decided by "+words)
+	}
+	seen := make(map[int]bool, len(poolStandings))
+	for _, ps := range poolStandings {
+		if seen[ps.Rank] {
+			reasons = append(reasons, "competitors share a place")
+			break
+		}
+		seen[ps.Rank] = true
+	}
+	return reasons
+}
+
+// rankingNote is the note written beside a pool's Ranking when Rank and
+// Ranking show the app's order instead of the formulas' (operator decision
+// Q2 (b): "write a note on why they differ").
+func rankingNote(reasons []string) string {
+	if len(reasons) == 0 {
+		reasons = []string{"competitors level on every count are listed in the app's order"}
+	}
+	return "Rank and Ranking show the app's order, not the formulas': " + strings.Join(reasons, "; ") + "."
+}
+
+// writeRankingNote writes the note in the empty columns left of the Ranking,
+// merged down the Ranking's rows so it wraps there.
+func writeRankingNote(f *excelize.File, sheet string, a *poolStandingsArea, note string, style int) error {
+	if a.rankingRow == 0 {
+		return nil
+	}
+	top := fmt.Sprintf("%s%d", colNum(a.startCol), a.rankingRow)
+	bottom := fmt.Sprintf("%s%d", colNum(a.startCol+4), a.rankingRow+len(a.pool.Players))
+	if err := f.MergeCell(sheet, top, bottom); err != nil {
+		return fmt.Errorf("keepStandingsLive: note %s: %w", top, err)
+	}
+	if err := f.SetCellValue(sheet, top, note); err != nil {
+		return fmt.Errorf("keepStandingsLive: note %s: %w", top, err)
+	}
+	if err := f.SetCellStyle(sheet, top, bottom, style); err != nil {
+		return fmt.Errorf("keepStandingsLive: note style %s: %w", top, err)
+	}
+	return nil
 }
 
 // ---------- bracket score overlay ----------
@@ -1137,21 +1311,8 @@ func setCellStr(f *excelize.File, sheet, col string, row int, value string) {
 	}
 }
 
-func setIntCell(f *excelize.File, sheet string, row int, colMap map[string]int, key string, value int) {
-	colIdx, ok := colMap[key]
-	if !ok {
-		return
-	}
-	col := colNum(colIdx + 1) // colMap stores 0-based indices; colNum wants 1-based
-	cell := fmt.Sprintf("%s%d", col, row)
-	if err := f.SetCellInt(sheet, cell, int64(value)); err != nil {
-		fmt.Printf("export: warning: set int cell %s: %v\n", cell, err)
-	}
-}
-
 // setIntCellDirect writes an int to a cell addressed by an explicit column
-// letter (as returned by colNum) and 1-based row. Used by the team overlays,
-// which compute column letters directly rather than via a header colMap.
+// letter (as returned by colNum) and 1-based row. Used by the team overlays.
 func setIntCellDirect(f *excelize.File, sheet, col string, row, value int) {
 	cell := fmt.Sprintf("%s%d", col, row)
 	if err := f.SetCellInt(sheet, cell, int64(value)); err != nil {
@@ -1166,26 +1327,6 @@ func setIntCellDirect(f *excelize.File, sheet, col string, row, value int) {
 type matchJob struct {
 	poolIdx int
 	ordinal int
-}
-
-// buildCourtColumnMap returns header label -> 0-based ABSOLUTE column index,
-// scanning only the given court's 8-column band [startColIdx, startColIdx+8).
-// Pool Matches repeats the W/L/T/PW/PL/Rank headers once per court, so a
-// whole-row map (which keeps the first occurrence) collapses every court onto
-// court 0's columns; scoping to the band keeps each court's standings correct.
-func buildCourtColumnMap(row []string, startColIdx int) map[string]int {
-	m := make(map[string]int, helper.CourtsColumnsPerCourt)
-	end := startColIdx + helper.CourtsColumnsPerCourt
-	for i := startColIdx; i < end && i < len(row); i++ {
-		cell := row[i]
-		if cell == "" {
-			continue
-		}
-		if _, exists := m[cell]; !exists {
-			m[cell] = i
-		}
-	}
-	return m
 }
 
 // standingMap keys standings by participant ID ONLY (operator ruling

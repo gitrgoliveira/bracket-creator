@@ -7,6 +7,7 @@ import (
 	"os"
 	"slices"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -626,7 +627,7 @@ func TestBuildResultsWorkbook_KnockoutBracket(t *testing.T) {
 // mp-uagg: internal/helper.printSingleEliminationMatch used to decide leaf- vs
 // match-feeder nodes by asking whether Node.LeafVal parsed as an Excel cell
 // reference (excelize.SplitCellName). A no-pools knockout bracket renders raw
-// participant names as leaves (engine.KnockoutFinalsFromParticipants), so a competitor
+// participant names as leaves (engine.KnockoutLeavesFromBracket), so a competitor
 // named like a cell coordinate ("P1" = column P row 1, "M3", "A4") was
 // misclassified as a match-feeder, producing a broken CONCATENATE(...,”!)
 // formula. The fix checks the structural Node.LeafNode flag instead.
@@ -673,6 +674,51 @@ func TestBuildResultsWorkbook_KnockoutCellRefLikeNames(t *testing.T) {
 	assert.True(t, sheetContainsCell(rows, "P1"),
 		"cell-ref-like entrant name 'P1' must render literally, not as a match-feeder reference")
 	assertNoBrokenFormulas(t, f, helper.SheetEliminationMatches)
+}
+
+// TestBuildResultsWorkbook_SetupKnockoutHasNoBracket: a knockout-only
+// competition still in setup has no draw, so its results workbook prints no
+// bracket and no competitor's name in one (the pre-draw roster fallback that
+// seeded the registered names into a bracket is gone), and it is a workbook,
+// never an error the results door would answer 500.
+func TestBuildResultsWorkbook_SetupKnockoutHasNoBracket(t *testing.T) {
+	t.Parallel()
+	dir, store, eng, compID := testSetup(t)
+	defer os.RemoveAll(dir)
+
+	comp, err := store.LoadCompetition(compID)
+	require.NoError(t, err)
+	comp.Kind = "individual"
+	comp.Format = state.CompFormatKnockout
+	comp.Status = state.CompStatusSetup
+	require.NoError(t, store.SaveCompetition(comp))
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+		{Name: "Alice", Dojo: "D1"}, {Name: "Bob", Dojo: "D2"}, {Name: "Carol", Dojo: "D3"}, {Name: "Dave", Dojo: "D4"},
+	}))
+
+	data, err := BuildResultsWorkbook(store, eng, compID)
+	require.NoError(t, err)
+	f, err := excelize.OpenReader(bytes.NewReader(data))
+	require.NoError(t, err)
+	defer f.Close()
+	for _, sheet := range f.GetSheetList() {
+		assert.Falsef(t, strings.HasPrefix(sheet, "Tree "), "no draw, so no tree page, got %q", sheet)
+		rows, err := f.GetRows(sheet)
+		require.NoError(t, err)
+		for _, name := range []string{"Alice", "Bob", "Carol", "Dave"} {
+			if sheet == helper.SheetData {
+				continue
+			}
+			assert.Falsef(t, sheetContainsCell(rows, name), "sheet %q names %s before the draw", sheet, name)
+		}
+	}
+	elim, err := f.GetRows(helper.SheetEliminationMatches)
+	require.NoError(t, err)
+	for _, row := range elim {
+		for _, cell := range row {
+			assert.NotContainsf(t, cell, "Round ", "no elimination match block before the draw")
+		}
+	}
 }
 
 // TestBuildResultsWorkbook_KnockoutPartialBracket scores only the first bracket

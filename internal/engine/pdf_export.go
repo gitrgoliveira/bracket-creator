@@ -29,9 +29,12 @@ type SkippedCompetition struct {
 // can exclude them. compIDs, when non-empty, restricts export to those
 // competitions; otherwise all competitions are exported.
 //
-// A competition ExportCompetitionXlsx cannot render -- Swiss (no static
-// bracket) or a stored bracket that no longer matches the competition's
-// current settings (ErrBracketDrawMismatch) -- is SKIPPED rather than
+// A competition with no draw prints as its blank layout (empty places, sized by
+// blankPlaceCount). A competition ExportCompetitionXlsx cannot render -- Swiss
+// (no static bracket), a stored bracket that no longer matches the
+// competition's current settings (ErrBracketDrawMismatch), or one with no draw
+// and fewer than 2 places or settings that cannot form a draw
+// (ErrBlankLayoutTooFew, ErrBlankLayoutUnbuildable) -- is SKIPPED rather than
 // aborting the whole batch: one such competition in an otherwise printable
 // tournament must not make the entire booklet unprintable. Every skipped
 // competition is reported in the second return value so both callers
@@ -123,6 +126,11 @@ func (e *Engine) ExportTournamentWorkbooks(tmpDir string, compIDs ...string) ([]
 // itself, which made this comment's "one place" claim untrue and meant a
 // third sentinel would have routed 500 on the HTTP paths while the booklet
 // skipped it -- a divergence only production would have shown.
+//
+// A competition with no draw that cannot be laid out blank (ErrBlankLayoutTooFew,
+// ErrBlankLayoutUnbuildable) is one of them too: its error names the fix, which
+// the booklet's skip line and the export door's refusal both show.
 func IsUnexportable(err error) bool {
-	return errors.Is(err, ErrSwissExportUnsupported) || errors.Is(err, ErrBracketDrawMismatch)
+	return errors.Is(err, ErrSwissExportUnsupported) || errors.Is(err, ErrBracketDrawMismatch) ||
+		errors.Is(err, ErrBlankLayoutTooFew) || errors.Is(err, ErrBlankLayoutUnbuildable)
 }

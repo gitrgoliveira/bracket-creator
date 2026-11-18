@@ -207,6 +207,7 @@ func TestConfigVersion_DoesNotChangeForRuntimeFields(t *testing.T) {
 	}{
 		{"Status", func(c *Competition) { c.Status = CompStatusPools }},
 		{"HasParticipantIDs", func(c *Competition) { c.HasParticipantIDs = true }},
+		{"RosterShuffled", func(c *Competition) { c.RosterShuffled = true }},
 		{"SwissCurrentRound", func(c *Competition) { c.SwissCurrentRound = 2 }},
 		{"FightingSpiritAwards", func(c *Competition) {
 			c.FightingSpiritAwards = []FightingSpiritAward{{Title: "Award", RecipientName: "Fighter"}}

@@ -11,21 +11,28 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
-// ExportCompetitionXlsx renders the competition's stored draw (pools.csv,
-// pool-matches.csv, bracket.json) as a workbook with no results: the
-// stored-draw export behind GET /api/competitions/:id/export and the PDF print
-// export (ExportTournamentWorkbooks). It is also the app's "Download blank
-// template" once the competition has a draw (any status but setup): the
-// template, the printed PDFs and the matches the app runs then come from the
-// one stored draw. Before the draw there is nothing stored to print, and the
-// button posts the roster to /create instead (admin_schedule_export.jsx).
+// ExportCompetitionXlsx renders the competition's template with no results: the
+// export behind GET /api/competitions/:id/export (the app's "Download blank
+// template") and the PDF print export (ExportTournamentWorkbooks). It decides
+// which template a competition gets:
+//
+//   - With a draw (any status but setup), its stored draw (pools.csv,
+//     pool-matches.csv, bracket.json), so the template, the printed PDFs and
+//     the matches the app runs come from the one stored draw.
+//   - With no draw (state.CanGenerateDraw: setup, or a legacy record with no
+//     status), the blank layout (blankLayoutXlsx): the layout the draw would
+//     print, its places empty, as many as blankPlaceCount gives. Nothing on
+//     disk is read as a draw then: a setup competition's pools.csv or
+//     bracket.json, if any, is the leftover of a draw that was refused or
+//     discarded. ErrBlankLayoutTooFew or ErrBlankLayoutUnbuildable when it
+//     cannot be sized or laid out.
 //
 // Its pool counting formulas (W/L/T/IV/PW/PL/RANK) are live: AttachPoolMatches
 // points each match's sides INTO its own pool's Players slice, the pointer
 // identity helper.PrintPoolMatches links a player's formulas by (mp-x0u9 was
 // the stored pools' matches pointing at another slice, which printed "=0").
 // The finish /create gives its workbook is given here too (finishTemplate), so
-// the two blank templates differ only in the draw they print.
+// the CLI's template and the app's differ only in the draw they print.
 func (e *Engine) ExportCompetitionXlsx(id string) ([]byte, error) {
 	comp, err := e.store.LoadCompetition(id)
 	if err != nil {
@@ -44,6 +51,14 @@ func (e *Engine) ExportCompetitionXlsx(id string) ([]byte, error) {
 	// as follow-up work (mp-4n9n).
 	if comp.Format == state.CompFormatSwiss {
 		return nil, ErrSwissExportUnsupported
+	}
+
+	if state.CanGenerateDraw(comp.Status) {
+		tourn, err := e.store.LoadTournament()
+		if err != nil {
+			return nil, err
+		}
+		return e.blankLayoutXlsx(comp, tourn)
 	}
 
 	pools, err := e.store.LoadPools(id)

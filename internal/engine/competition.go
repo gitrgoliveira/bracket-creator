@@ -535,30 +535,35 @@ func (e *Engine) hasRecordedResult(compID string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	for i := range matches {
-		if matches[i].ResultRecorded() {
-			return true, nil
-		}
-	}
-
 	bracket, err := e.store.LoadBracket(compID)
 	if err != nil {
 		return false, err
 	}
+	return recordedResultIn(matches, bracket), nil
+}
+
+// recordedResultIn is the pure rule hasRecordedResult applies to what the store
+// holds: any pool match running or completed, or any bracket match (a round's or
+// the bronze match) running or completed with both sides named. A nil bracket
+// holds none. The browser mirrors it (competitionHasRecordedResult), and the two
+// are pinned by one case table, testdata/recorded_result_cases.json.
+func recordedResultIn(poolMatches []state.MatchResult, bracket *state.Bracket) bool {
+	for i := range poolMatches {
+		if poolMatches[i].ResultRecorded() {
+			return true
+		}
+	}
 	if bracket == nil {
-		return false, nil
+		return false
 	}
 	for _, round := range bracket.Rounds {
 		for i := range round {
 			if round[i].ResultRecorded() {
-				return true, nil
+				return true
 			}
 		}
 	}
-	if bracket.ThirdPlaceMatch != nil && bracket.ThirdPlaceMatch.ResultRecorded() {
-		return true, nil
-	}
-	return false, nil
+	return bracket.ThirdPlaceMatch != nil && bracket.ThirdPlaceMatch.ResultRecorded()
 }
 
 // maybeAutoCompletePoolsRunning is MaybeAutoCompletePools' pool-phase half.

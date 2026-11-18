@@ -226,17 +226,9 @@ func (o *mobileAppOptions) run(cmd *cobra.Command, args []string) error {
 	}
 	r, _, apiLimiter := mobileapp.NewRouterWithHub(store, eng, res, verifier, hub, scheduleEnabled)
 
-	// Mount the stateless tournament-generation endpoint (same handler the
-	// `serve` web app uses) for the in-app "Download blank template" of a
-	// competition not drawn yet: it draws the roster in the request body and
-	// writes nothing to the state store. Once a competition is drawn, the
-	// button downloads the stored draw instead (GET /api/competitions/:id/export).
-	//
-	// It lives outside the /api/ group, so the global rate-limit middleware
-	// (which gates on the /api/ prefix) would skip it. Apply the same limiter
-	// plus a body cap explicitly here so this CPU-heavy public endpoint cannot
-	// starve scoring/SSE on the live tournament server.
-	r.POST("/create", apiLimiter.Middleware(), mobileapp.MaxBodyBytes(mobileapp.DefaultMaxBodyBytes), createTournamentHandler)
+	// The app mounts no stateless /create endpoint: "Download blank template"
+	// is always GET /api/competitions/:id/export, which serves the stored draw
+	// or, before the draw, the blank layout. Only `serve` mounts /create.
 
 	// Explicit http.Server with timeouts (mp-663 Phase 2). r.Run uses a
 	// zero-value http.Server, which has no read/write/idle timeouts and

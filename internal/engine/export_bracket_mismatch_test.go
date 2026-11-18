@@ -39,6 +39,7 @@ func TestExportCompetitionXlsx_RejectsBronzeOnlyDrawMismatch(t *testing.T) {
 		Format:   state.CompFormatKnockout,
 		Naginata: true,
 		Courts:   []string{"A"},
+		Status:   state.CompStatusKnockout, // drawn: with no draw it prints the blank layout
 	}))
 	require.NoError(t, store.SavePools(compID, []helper.Pool{}))
 	require.NoError(t, store.SavePoolMatches(compID, nil))
@@ -88,6 +89,7 @@ func TestExportCompetitionXlsx_RejectsRoundsOnlyDrawMismatch(t *testing.T) {
 		Kind:   "individual",
 		Format: state.CompFormatMixed,
 		Courts: []string{"A"},
+		Status: state.CompStatusKnockout, // drawn: with no draw it prints the blank layout
 	}))
 	require.NoError(t, store.SavePools(compID, []helper.Pool{}))
 	require.NoError(t, store.SavePoolMatches(compID, nil))
@@ -127,6 +129,7 @@ func TestExportTournamentWorkbooks_SkipsBracketDrawMismatchAndReportsIt(t *testi
 		Format:   state.CompFormatKnockout,
 		Naginata: true,
 		Courts:   []string{"A"},
+		Status:   state.CompStatusKnockout, // drawn: with no draw it prints the blank layout
 	}))
 	require.NoError(t, store.SavePools(mismatchID, []helper.Pool{}))
 	require.NoError(t, store.SavePoolMatches(mismatchID, nil))
@@ -207,6 +210,7 @@ func TestExportCompetitionXlsx_EmptyFormatRejectsDrawMismatch(t *testing.T) {
 		Format:   "",
 		Naginata: true,
 		Courts:   []string{"A"},
+		Status:   state.CompStatusKnockout, // drawn: with no draw it prints the blank layout
 	}))
 	require.NoError(t, store.SavePools(compID, []helper.Pool{}))
 	require.NoError(t, store.SavePoolMatches(compID, nil))

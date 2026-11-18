@@ -368,6 +368,13 @@ func TestFingerprintDoors(t *testing.T) {
 		comp.Players = players
 		h.noOp(http.MethodPut, "/api/competitions/"+compID, comp)
 
+		// The shuffle door (Shuffle unseeded): a roster PUT saying
+		// rosterShuffled records the marker in config.md, a genuine change;
+		// a later roster PUT echoing it on a marker already set writes nothing.
+		comp.RosterShuffled = true
+		h.real(http.MethodPut, "/api/competitions/"+compID, comp)
+		h.noOp(http.MethodPut, "/api/competitions/"+compID, comp)
+
 		// The three check-in doors. A check-in sent again at a later stamp only
 		// restamps the row's marker, which the fingerprint unstamps; a resend
 		// at the same stamp is superseded and writes nothing; and a check-in

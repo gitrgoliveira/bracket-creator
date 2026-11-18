@@ -3,14 +3,16 @@
 // vitest.config.js); a write one tab makes reaches the other as a storage
 // event, as a browser delivers it. With both tabs open a write is sent once, a
 // tab takes a base over when the sender gives it up, and a closed or crashed
-// sender does not strand a write.
+// sender does not strand a write. Both ways a lease is held are run: Web Locks
+// (a navigator.locks stand-in) and the timed note kept for a browser without it.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
-    createBaseLease, baseLeaseKey, BASE_LEASE_PREFIX, BASE_LEASE_WAKE_KEY, BASE_LEASE_LIVE_MS, BASE_LEASE_BEAT_MS,
+    createBaseLease, detectWebLocks, baseLeaseKey, BASE_LEASE_PREFIX, BASE_LEASE_WAKE_KEY, BASE_LEASE_LIVE_MS, BASE_LEASE_BEAT_MS,
 } from '../base_sender_lease.jsx';
 
 const CLIENT = new URL('../api_client.jsx', import.meta.url).pathname;
 const FLUSH = new URL('../api_client_flush.jsx', import.meta.url).pathname;
+const STORE = new URL('../api_client_store.jsx', import.meta.url).pathname;
 const URL_LINEUP = '/api/competitions/c1/teams/t1/match-lineups/m1';
 async function flushMicrotasks() { for (let i = 0; i < 40; i++) await Promise.resolve(); }
 async function tick(ms = 0) { await vi.advanceTimersByTimeAsync(ms); await flushMicrotasks(); }
@@ -18,6 +20,40 @@ const answer = (status, body) => ({
     ok: status >= 200 && status < 300, status, headers: { get: () => null },
     json: async () => body, text: async () => JSON.stringify(body),
 });
+
+// A stand-in for navigator.locks, shared by every "tab" that is handed it: a
+// request is granted in a later microtask, `ifAvailable` answers null when the
+// lock is taken, and a queued request is granted when the holder's callback
+// promise settles (as a closed tab's locks are given up).
+function fakeLocks() {
+    const taken = new Set();
+    const waiting = new Map();
+    const pump = (name) => {
+        const queue = waiting.get(name) || [];
+        if (!taken.has(name) && queue.length) queue.shift()();
+    };
+    return {
+        request(name, opts, callback) {
+            if (typeof opts === 'function') { callback = opts; opts = {}; }
+            return new Promise((resolve, reject) => {
+                const start = (lock) => {
+                    if (lock) taken.add(name);
+                    const end = () => { if (lock) { taken.delete(name); pump(name); } };
+                    Promise.resolve().then(() => callback(lock)).then(
+                        (v) => { end(); resolve(v); },
+                        (e) => { end(); reject(e); },
+                    );
+                };
+                if (!taken.has(name)) return start({ name });
+                if (opts.ifAvailable) return start(null);
+                if (!waiting.has(name)) waiting.set(name, []);
+                waiting.get(name).push(() => start({ name }));
+                return undefined;
+            });
+        },
+    };
+}
+const setLocks = (locks) => Object.defineProperty(navigator, 'locks', { value: locks, configurable: true });
 
 describe('the base lease (one storage, two tabs)', () => {
     let store, clock;
@@ -30,38 +66,38 @@ describe('the base lease (one storage, two tabs)', () => {
     beforeEach(() => { store = {}; clock = 1_000_000; vi.useFakeTimers(); });
     afterEach(() => { vi.clearAllTimers(); vi.useRealTimers(); });
 
-    it('gives a base to one tab at a time and to the other once it is released', () => {
+    it('gives a base to one tab at a time and to the other once it is released', async () => {
         const a = tabOf('a');
         const b = tabOf('b');
-        expect(a.claim('m1')).toBe(true);
-        expect(b.claim('m1'), 'a live lease is not taken').toBe(false);
-        expect(b.claim('m2'), 'another base is free').toBe(true);
-        expect(a.claim('m1'), 'the holder holds it again').toBe(true);
+        expect(await a.claim('m1')).toBe(true);
+        expect(await b.claim('m1'), 'a live lease is not taken').toBe(false);
+        expect(await b.claim('m2'), 'another base is free').toBe(true);
+        expect(await a.claim('m1'), 'the holder holds it again').toBe(true);
         a.release('m1');
         expect(store[baseLeaseKey('m1')], 'm1 is given up').toBeUndefined();
         expect(JSON.parse(store[baseLeaseKey('m2')]), 'the other base is left').toEqual({ tab: 'b', at: clock });
-        expect(b.claim('m1')).toBe(true);
+        expect(await b.claim('m1')).toBe(true);
     });
 
-    it('takes a base over from a tab whose lease is old, and keeps a holder that beats', () => {
+    it('takes a base over from a tab whose lease is old, and keeps a holder that beats', async () => {
         const a = tabOf('a');
         const b = tabOf('b');
-        expect(a.claim('m1')).toBe(true);
+        expect(await a.claim('m1')).toBe(true);
         // The holder's timer keeps its lease alive well past the live time.
         clock += BASE_LEASE_LIVE_MS - 1;
         vi.advanceTimersByTime(BASE_LEASE_BEAT_MS);
         clock += BASE_LEASE_LIVE_MS - 1;
-        expect(b.claim('m1'), 'a beating holder keeps it').toBe(false);
+        expect(await b.claim('m1'), 'a beating holder keeps it').toBe(false);
         // A tab that crashed beats no more: its lease runs out.
         a.release('m1');
         const c = tabOf('c');
-        expect(c.claim('m3')).toBe(true);
+        expect(await c.claim('m3')).toBe(true);
         vi.clearAllTimers(); // the crash: c beats no more
         clock += BASE_LEASE_LIVE_MS;
-        expect(b.claim('m3'), 'an old lease is taken over').toBe(true);
+        expect(await b.claim('m3'), 'an old lease is taken over').toBe(true);
     });
 
-    it('keeps a lease the holder renews though its timer was slowed past the lease life', () => {
+    it('keeps a lease the holder renews though its timer was slowed past the lease life', async () => {
         const a = tabOf('a');
         const b = tabOf('b');
         a.claim('m1');
@@ -69,12 +105,12 @@ describe('the base lease (one storage, two tabs)', () => {
         clock += BASE_LEASE_LIVE_MS - 1;
         a.renew(); // before the next entry it sends
         clock += BASE_LEASE_LIVE_MS - 1;
-        expect(b.claim('m1'), 'a renewed lease is not taken').toBe(false);
+        expect(await b.claim('m1'), 'a renewed lease is not taken').toBe(false);
         clock += BASE_LEASE_LIVE_MS;
-        expect(b.claim('m1'), 'one nobody renews is').toBe(true);
+        expect(await b.claim('m1'), 'one nobody renews is').toBe(true);
     });
 
-    it('lets a holder renew a lease that ran out during a slow request while no other tab took it', () => {
+    it('lets a holder renew a lease that ran out during a slow request while no other tab took it', async () => {
         const a = tabOf('a');
         const b = tabOf('b');
         a.claim('m1');
@@ -82,10 +118,10 @@ describe('the base lease (one storage, two tabs)', () => {
         clock += BASE_LEASE_LIVE_MS + 1_000; // a request under way past the lease life
         a.renew();
         expect(JSON.parse(store[baseLeaseKey('m1')]), 'the late holder renewed').toEqual({ tab: 'a', at: clock });
-        expect(b.claim('m1'), 'so another tab is still turned away').toBe(false);
+        expect(await b.claim('m1'), 'so another tab is still turned away').toBe(false);
     });
 
-    it('does not renew a lease another tab took over, and leaves the other bases alone', () => {
+    it('does not renew a lease another tab took over, and leaves the other bases alone', async () => {
         const a = tabOf('a');
         const b = tabOf('b');
         const c = tabOf('c');
@@ -93,13 +129,13 @@ describe('the base lease (one storage, two tabs)', () => {
         c.claim('m2');
         vi.clearAllTimers();
         clock += BASE_LEASE_LIVE_MS;
-        expect(b.claim('m1'), 'a was late and b took the base').toBe(true);
+        expect(await b.claim('m1'), 'a was late and b took the base').toBe(true);
         a.renew();
         expect(JSON.parse(store[baseLeaseKey('m1')]), 'a leaves b\'s lease alone').toEqual({ tab: 'b', at: clock });
         expect(JSON.parse(store[baseLeaseKey('m2')]), 'and c\'s record is its own').toEqual({ tab: 'c', at: clock - BASE_LEASE_LIVE_MS });
     });
 
-    it('keeps each base in a record of its own, so a write for one base never takes another back', () => {
+    it('keeps each base in a record of its own, so a write for one base never takes another back', async () => {
         const a = tabOf('a');
         const b = tabOf('b');
         // b's write lands between a's read and write of the SAME item, were the
@@ -109,31 +145,31 @@ describe('the base lease (one storage, two tabs)', () => {
             setItem: (k, v) => { storage.setItem(k, v); if (k === baseLeaseKey('m1')) b.claim('m2'); },
         };
         const a2 = createBaseLease({ storage: racing, tab: 'a', now: () => clock });
-        expect(a2.claim('m1')).toBe(true);
+        expect(await a2.claim('m1')).toBe(true);
         expect(JSON.parse(store[baseLeaseKey('m2')]).tab, 'b keeps its base').toBe('b');
-        expect(a.claim('m2'), 'so a is still turned away from it').toBe(false);
+        expect(await a.claim('m2'), 'so a is still turned away from it').toBe(false);
     });
 
-    it('gives every lease up when the page goes', () => {
+    it('gives every lease up when the page goes', async () => {
         const a = tabOf('a');
         a.claim('m1');
         a.claim('m2');
         a.leave();
         expect(Object.keys(store).filter((k) => k.startsWith(BASE_LEASE_PREFIX)), 'nothing is left in storage').toEqual([]);
-        expect(tabOf('b').claim('m1')).toBe(true);
+        expect(await tabOf('b').claim('m1')).toBe(true);
     });
 
-    it('sends as before when storage refuses the lease', () => {
+    it('sends as before when storage refuses the lease', async () => {
         const refusing = createBaseLease({
             storage: { getItem: () => null, setItem: () => { throw new Error('full'); }, removeItem: () => {} },
             tab: 'a',
             now: () => clock,
         });
-        expect(refusing.claim('m1')).toBe(true);
+        expect(await refusing.claim('m1')).toBe(true);
         expect(refusing.held()).toEqual([]);
     });
 
-    it('wakes the other tabs only when the turn sent all it held', () => {
+    it('wakes the other tabs only when the turn sent all it held', async () => {
         const a = tabOf('a');
         a.claim('m1');
         a.release('m1', false);
@@ -148,7 +184,90 @@ describe('the base lease (one storage, two tabs)', () => {
     });
 });
 
-describe('two tabs of one device send a write once', () => {
+describe('the base lease held with Web Locks', () => {
+    let locks;
+    const tabOf = (tab) => createBaseLease({ storage: null, tab, locks });
+    beforeEach(() => { locks = fakeLocks(); });
+
+    it('gives a base to one tab at a time and to the other once it is released', async () => {
+        const a = tabOf('a');
+        const b = tabOf('b');
+        expect(await a.claim('m1')).toBe(true);
+        expect(await b.claim('m1'), 'a held lock is not taken').toBe(false);
+        expect(await b.claim('m2'), 'another base is free').toBe(true);
+        expect(await a.claim('m1'), 'the holder holds it again').toBe(true);
+        expect(a.held()).toEqual(['m1']);
+        a.release('m1');
+        expect(a.held()).toEqual([]);
+        for (let i = 0; i < 10; i++) await Promise.resolve(); // the lock manager lets it go
+        expect(await b.claim('m1')).toBe(true);
+    });
+
+    it('lets the same tab claim a base again right after it released it', async () => {
+        const a = tabOf('a');
+        expect(await a.claim('m1')).toBe(true);
+        a.release('m1', true);
+        expect(await a.claim('m1'), 'the release has landed, so the lock is free').toBe(true);
+    });
+
+    it('tells a tab that was turned away the moment the lock frees, and gives every lock up when the page goes', async () => {
+        const a = tabOf('a');
+        const b = tabOf('b');
+        await a.claim('m1');
+        await a.claim('m2');
+        let freed = '';
+        b.whenFree('m1').then(() => { freed += 'm1'; });
+        await Promise.resolve(); await Promise.resolve();
+        expect(freed, 'nothing yet: a holds it').toBe('');
+        a.leave();
+        for (let i = 0; i < 10; i++) await Promise.resolve();
+        expect(freed, 'the holder is gone').toBe('m1');
+        expect(a.held()).toEqual([]);
+        expect(await b.claim('m2'), 'and so is its other lock').toBe(true);
+    });
+
+    it('sends as before when the page refuses locks', async () => {
+        const refusing = createBaseLease({
+            storage: null, tab: 'a',
+            locks: { request: () => Promise.reject(new DOMException('opaque origin', 'SecurityError')) },
+        });
+        expect(await refusing.claim('m1')).toBe(true);
+        expect(refusing.held()).toEqual([]);
+        await expect(refusing.whenFree('m1')).resolves.toBeUndefined();
+    });
+
+    it('has nothing to renew, and the note lease is not used', async () => {
+        const a = tabOf('a');
+        await a.claim('m1');
+        expect(() => a.renew()).not.toThrow();
+        expect(Object.keys(localStorage).filter((k) => k.startsWith(BASE_LEASE_PREFIX))).toEqual([]);
+    });
+});
+
+describe('which way the lease is held', () => {
+    afterEach(() => { delete navigator.locks; });
+
+    it('uses navigator.locks when the page has it, found by feature and not by browser', () => {
+        expect(detectWebLocks(), 'jsdom has none: the timed note').toBeNull();
+        const locks = fakeLocks();
+        setLocks(locks);
+        expect(detectWebLocks()).toBe(locks);
+        setLocks({});
+        expect(detectWebLocks(), 'an object that cannot request is not Web Locks').toBeNull();
+    });
+
+    it('holds with the timed note when no locks are handed to it', async () => {
+        const store = {};
+        const storage = { getItem: (k) => store[k] ?? null, setItem: (k, v) => { store[k] = String(v); }, removeItem: (k) => { delete store[k]; } };
+        const lease = createBaseLease({ storage, tab: 'a' });
+        expect(await lease.claim('m1')).toBe(true);
+        expect(JSON.parse(store[baseLeaseKey('m1')]).tab).toBe('a');
+        lease.leave();
+    });
+});
+
+// The timed note is a fallback: one test below is Web Locks only (a closed tab's lock is given up at once).
+describe.each([['the timed note', false], ['Web Locks', true]])('two tabs of one device send a write once (%s)', (_way, useLocks) => {
     let orig, store, tabs, calls, held, mode, warned;
     const callerTab = () => {
         const m = new Error().stack.match(/api_client(?:_\w+)?\.jsx\?tab=([^&#:\s)]+)/);
@@ -175,6 +294,7 @@ describe('two tabs of one device send a write once', () => {
         return mod.API;
     }
     beforeEach(() => {
+        if (useLocks) setLocks(fakeLocks());
         vi.useFakeTimers();
         orig = { fetch: global.fetch, ES: global.EventSource, ls: global.localStorage };
         global.EventSource = class FakeES { constructor() { this.close = () => {}; } };
@@ -203,6 +323,7 @@ describe('two tabs of one device send a write once', () => {
         });
     });
     afterEach(() => {
+        delete navigator.locks;
         for (const t of Object.values(tabs)) t.API.clearQueue();
         warned.mockRestore();
         vi.clearAllTimers();
@@ -239,7 +360,8 @@ describe('two tabs of one device send a write once', () => {
         await tick(100); // B took the write up and left it to A, who has it out
         await tick(3000); // B asks again at its backoff and finds A still sending
         expect(calls.filter((c) => c.url.includes(URL_LINEUP)).map((c) => c.tab), 'only A sent').toEqual(['a']);
-        expect(flushB._offlineFlag, 'B learned nothing about the connection').toBe(true);
+        const storeB = await import(/* @vite-ignore */ `${STORE}?tab=b`);
+        expect(storeB.store.offlineFlag, 'B learned nothing about the connection').toBe(true);
     });
 
     it('a pass that only waited for another tab does not climb the retry backoff', async () => {
@@ -327,7 +449,7 @@ describe('two tabs of one device send a write once', () => {
         const A = await openTab('a');
         await openTab('b');
         const flushB = await import(/* @vite-ignore */ `${FLUSH}?tab=b`);
-        expect(flushB._baseLease.claim('c1:m1'), 'tab B is sending the match').toBe(true);
+        expect(await flushB._baseLease.claim('c1:m1'), 'tab B is sending the match').toBe(true);
         const put = await A.putMatchLineup('c1', 't1', 'm1', { 1: 'L1' }, 'pw', null, null);
         let told;
         put.settled.then((v) => { told = { value: v }; }, (e) => { told = { error: e }; });
@@ -343,7 +465,7 @@ describe('two tabs of one device send a write once', () => {
         const A = await openTab('a');
         const B = await openTab('b');
         const flushB = await import(/* @vite-ignore */ `${FLUSH}?tab=b`);
-        expect(flushB._baseLease.claim('c1:m1')).toBe(true); // B sends m1 ...
+        expect(await flushB._baseLease.claim('c1:m1')).toBe(true); // B sends m1 ...
         const m1 = await A.putMatchLineup('c1', 't1', 'm1', { 1: 'L1' }, 'pw', null, null);
         m1.settled.catch(() => {});
         // ... and A has a hanging request on another base in the same pass.
@@ -378,9 +500,10 @@ describe('two tabs of one device send a write once', () => {
     it('a wake sends the base this tab was turned away from, and leaves a failing base to its backoff', async () => {
         mode = 'fail-m2';
         const B = await openTab('b');
-        const other = createBaseLease({ storage: localStorage, tab: 'z' });
-        expect(other.claim('c1:m1'), 'another tab is sending m1').toBe(true);
+        const other = createBaseLease({ storage: localStorage, tab: 'z', locks: useLocks ? navigator.locks : null });
+        expect(await other.claim('c1:m1'), 'another tab is sending m1').toBe(true);
         (await B.putMatchLineup('c1', 't1', 'm1', { 1: 'L1' }, 'pw', null, null)).settled.catch(() => {});
+        await tick(20); // m1's pass is over, left to its holder, before m2 is made
         (await B.putMatchLineup('c1', 't1', 'm2', { 1: 'L2' }, 'pw', null, null)).settled.catch(() => {});
         await tick(100);
         const sentTo = (m) => calls.filter((c) => c.url.includes(`/match-lineups/${m}`)).length;
@@ -390,5 +513,16 @@ describe('two tabs of one device send a write once', () => {
         await tick(100);
         expect(sentTo('m1'), 'm1 goes at once').toBe(1);
         expect(sentTo('m2'), 'm2 keeps its backoff').toBe(1);
+    });
+    if (useLocks) it('a tab that closes hands its base to the other at once, not after a lease life', async () => {
+        const A = await openTab('a');
+        await openTab('b');
+        const flushA = await import(/* @vite-ignore */ `${FLUSH}?tab=a`);
+        (await A.putMatchLineup('c1', 't1', 'm1', { 1: 'L1' }, 'pw', null, null)).settled.catch(() => {});
+        await tick(500); // B took the write up and was turned away; A's request is still out
+        expect(calls.filter((c) => c.url.includes(URL_LINEUP)).map((c) => c.tab)).toEqual(['a']);
+        flushA._baseLease.leave(); // the page goes: the browser gives its locks up
+        await tick(100); // far less than BASE_LEASE_LIVE_MS
+        expect(calls.filter((c) => c.url.includes(URL_LINEUP)).map((c) => c.tab), 'B sends it now').toEqual(['a', 'b']);
     });
 });

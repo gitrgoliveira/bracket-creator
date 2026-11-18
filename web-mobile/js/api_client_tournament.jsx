@@ -22,9 +22,9 @@ import {
     overlayPendingTournament,
 } from './api_client_overlays.jsx';
 import { _forgetAllShownMatches } from './api_client_status.jsx';
-import { _inFlight } from './api_client_flush.jsx';
 import { _outboxWrite, _isFollowed } from './api_client_enqueue.jsx';
 import { _newClientId } from './api_client_members.jsx';
+import { _inFlight } from './api_client_store.jsx';
 
 // The password change: direct (_directFetch), with the version it was made
 // from. A save of the settings this device still has queued is made stale

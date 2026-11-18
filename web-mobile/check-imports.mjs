@@ -162,6 +162,7 @@ const CHECK_MODULES = [
   'api_client_queue.jsx',
   'api_client_requests.jsx',
   'api_client_status.jsx',
+  'api_client_store.jsx',
   'api_client_taps.jsx',
   'api_client_teams.jsx',
   'api_client_tournament.jsx',

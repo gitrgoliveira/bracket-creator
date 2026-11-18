@@ -15,16 +15,16 @@ import { createToldTaps } from './told_taps.jsx';
 import { _randomId } from './api_client_ids.jsx';
 import { _replayRefusal, _serverKeepsRetrying, _fetchJson } from './api_client_requests.jsx';
 import {
-    _learnServerClockOffset, _stampAfterSeen, CLOCK_SKEW_FAIL_REASON, _afterSettledStamp,
+    _learnServerClockOffset, _stampAfterSeen, CLOCK_SKEW_FAIL_REASON, _afterSettledStamp, _restampFor,
 } from './api_client_clock.jsx';
 import {
     _revKey, _isAllowedTerminalRequest, _notifyQueueAlert, _persistQueue, _writeQueue, _dequeue,
-    _openDequeueBatch, _closeDequeueBatch, _baseOf, _entriesFor,
+    _openDequeueBatch, _closeDequeueBatch, _baseOf, _entriesFor, _keepForClock,
 } from './api_client_queue.jsx';
 import {
     _shownMatchLabels, _whereOf, _recomputeSyncStatus, SERVER_REJECTION_NOTICE_THRESHOLD,
 } from './api_client_status.jsx';
-import { _requestFlushRerun, _keepForClock, _restampFor } from './api_client_flush.jsx';
+import { _latestDerived, _turnedAwaySeen, store, provide } from './api_client_store.jsx';
 
 // ---------------------------------------------------------------------------
 // bc-evts stage 3: the outbox. EVERY rule-bound write (a tap, a Finish, a
@@ -45,9 +45,6 @@ export const BASIS_OWN_MAX = 1024;
 // device gave any write of that match, so a later write is never stamped
 // before an earlier one (the replay orders by stamp).
 export const _tapSeq = new Map();
-// Per match: the newest derived match a score-events answer handed back (the
-// broadcast copy, with markIds and scoreVersion).
-export const _latestDerived = new Map();
 export const _derivedListeners = new Map();
 export const _pendingTapListeners = new Map();
 export const _tapOutcomeListeners = new Map();
@@ -107,18 +104,6 @@ export function _claimToldHere(id) {
 // (_dequeue, minor 2).
 export function _dropToldHere(id) {
     _toldHere.delete(id);
-}
-// _forgetMatchCopiesOf: the copies score-events answers handed back, and the
-// turned-away lists seen, for the matches whose key starts with `prefix` (a
-// competition whose draw was generated or discarded, _forgetShownMatches).
-export function _forgetMatchCopiesOf(prefix) {
-    for (const k of _latestDerived.keys()) if (k.startsWith(prefix)) _latestDerived.delete(k);
-    for (const k of _turnedAwaySeen.keys()) if (k.startsWith(prefix)) _turnedAwaySeen.delete(k);
-}
-// _forgetAllMatchCopies: the same for every match (_forgetAllShownMatches).
-export function _forgetAllMatchCopies() {
-    _latestDerived.clear();
-    _turnedAwaySeen.clear();
 }
 // _forgetTurnedAwayAndTold / _forgetDerivedCopies: the sign-out (clearQueue).
 export function _forgetTurnedAwayAndTold() {
@@ -237,7 +222,6 @@ function _noteDerived(base, match) {
     _emitOn(_derivedListeners, base, match);
 }
 
-
 // The taps this device made that the server answered as landed (applied,
 // recorded, duplicate), by event id, kept in browser storage (landed_taps.jsx,
 // one record per match) so every tab of the device and the next page after a
@@ -306,13 +290,6 @@ function _noteLandedTaps(compID, matchID, descs) {
     const seen = _turnedAwaySeen.get(_revKey(compID, matchID));
     if (seen && seen.away) _tellAway(compID, matchID, seen.away);
 }
-// The latest `turnedAway` seen on any copy of each match, by base, so a tap
-// whose own applied answer arrives AFTER the copy listing it (the finish's
-// push overtook the answer) is told as it lands, from _noteLandedTaps, not
-// left until the next copy of the match (stage 6 review 6). A copy with a
-// lower scoreVersion than the one kept (an answer the server made before
-// the finish) does not replace it. Forgotten with the shown matches.
-const _turnedAwaySeen = new Map();
 function _rememberTurnedAway(compID, matchID, match) {
     if (!match || typeof match !== 'object') return;
     const base = _revKey(compID, matchID);
@@ -480,7 +457,7 @@ export async function _sendTapBatch(base, batch, pass) {
                         if (_keepForClock(d, pass)) clockHeld++;
                         result = 'kept';
                     } else {
-                        _requestFlushRerun();
+                        store.flushRequested = true;
                         if (result === 'settled') result = 'reclocked';
                     }
                     continue;
@@ -552,7 +529,7 @@ export async function _sendTapBatch(base, batch, pass) {
             const missing = new Set(body.gaps.map(Number));
             const held = _tapEntriesFor(base).some(([, d]) => d.payload && d.payload.session === session
                 && missing.has(Number(d.payload.seq)));
-            if (held) _requestFlushRerun();
+            if (held) store.flushRequested = true;
         }
         _recomputeSyncStatus();
         return result;
@@ -612,7 +589,6 @@ async function _restampQueuedTapForSkew(d) {
     _persistQueue();
 }
 
-
 // _reseqUnheldTap (M3): the ONE rule for a queued tap the server answered
 // without logging it: a clock-skew refusal, the one answer that provably logged
 // nothing (R6: a tap the answer names no outcome for may be logged, so it keeps
@@ -662,3 +638,6 @@ export function _adoptStoredTapSeq(key, held, stored) {
     _publishPendingTaps(_baseOf(key));
     return true;
 }
+
+// The calls lower modules make into this one (api_client_store.jsx).
+provide({ _tellTurnedAwayIn, _dropToldHere, _publishPendingTaps });

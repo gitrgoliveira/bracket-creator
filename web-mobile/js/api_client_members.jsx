@@ -8,20 +8,18 @@
 // statements, the API object and the window mirrors live in api_client.jsx; never
 // import api_client.jsx from here (it would run the outbox twice).
 
-import { FETCH_TIMEOUT_MS } from './write_result.jsx';
 import {
-    createMintedMembers, mintedAddId, mintedIdsNamed, mintedMemberUrlId, mintedProofCovers, mintedStrip,
+     mintedAddId, mintedIdsNamed, mintedMemberUrlId, mintedProofCovers, mintedStrip,
 } from './minted_members.jsx';
 import { _randomId } from './api_client_ids.jsx';
 import { _fetchJson } from './api_client_requests.jsx';
 import { _serverNowMs } from './api_client_clock.jsx';
 import {
-    _notifyQueueAlert, _persistQueue, _writeQueue, _wasSettledHere, _dequeue, _dequeueBatch,
-    _openDequeueBatch, _closeDequeueBatch, _storedQueue, _entriesFor,
+    _notifyQueueAlert, _persistQueue, _writeQueue, _wasSettledHere, _dequeue, _dequeueBatch, _openDequeueBatch,
+    _closeDequeueBatch, _storedQueue, _entriesFor, _addAfter, _lineupKey,
 } from './api_client_queue.jsx';
 import { _teamIdOf, _recomputeSyncStatus } from './api_client_status.jsx';
-import { _inFlight, _queueGen, _addAfter, _rerunFlushSoon } from './api_client_flush.jsx';
-import { _outboxWrite, _lineupKey } from './api_client_enqueue.jsx';
+import { _inFlight, _minted, store, late, provide } from './api_client_store.jsx';
 
 // _withListedMembersForgotten: a members map the server answered, after
 // telling the owner every member it holds exists (minted_members.jsx).
@@ -31,20 +29,6 @@ export function _withListedMembersForgotten(teams, competitionId) {
     return teams;
 }
 
-// What is known of every member id this device (or another tab) minted: the
-// ONE owner, minted_members.jsx (bc-evts stage 3, M1 a), shared through
-// browser storage. Its storage is reached through this module, as every other
-// read and write of browser storage is. Declared here, before the load-time
-// flush.
-export const _minted = createMintedMembers({
-    storage: {
-        get: (k) => localStorage.getItem(k),
-        set: (k, v) => localStorage.setItem(k, v),
-        remove: (k) => localStorage.removeItem(k),
-    },
-    timeoutMs: FETCH_TIMEOUT_MS,
-    tab: _randomId(),
-});
 // The members reads the owner asked for that are out (by member id), the ids
 // of the adds this tab has a request out for, and the one timer that reruns
 // the flush when a write the owner holds back may go.
@@ -88,7 +72,7 @@ export function _memberWrite({ compID, teamId, method, url, payload, password, m
     // member never carries it) resolves with the member as the server stored
     // it, or rejects with the refusal, whose `revertMember` puts the member as
     // it was back, stamped later than the change it undoes.
-    const answer = _outboxWrite({
+    const answer = late._outboxWrite({
         kind: 'member', compID, matchID: '', method, url, payload, password,
         onRefusal: opts && opts.onRefusal,
         base: _membersBase(compID, teamId),
@@ -234,7 +218,7 @@ function _rerunFlushAt(at) {
     _mintedTimer = setTimeout(() => {
         _mintedTimer = null;
         _mintedSweep();
-        _rerunFlushSoon();
+        late._rerunFlushSoon();
     }, Math.max(0, at - Date.now()) + 1);
 }
 
@@ -302,7 +286,7 @@ function _readMintedMembers({ id, c, t }, password) {
     // This tab asked, so it asks again if the read fails (_mintedSweep),
     // however the member came to it (an add taken from another tab's queue).
     if (!_mintedReadPw.has(id)) _mintedReadPw.set(id, password || '');
-    const gen = _queueGen;
+    const gen = store.queueGen;
     const url = password ? `/api/competitions/${c}/team-members` : `/api/viewer/competitions/${c}`;
     _fetchJson(url, { headers: { 'X-Tournament-Password': password || '' } }).then(({ res, body }) => {
         // Refused for the password (a stale organiser sign-in): no failed try.
@@ -318,7 +302,7 @@ function _readMintedMembers({ id, c, t }, password) {
         return null;
     }).then((list) => {
         // A logout's wipe since: nothing of this read is kept.
-        if (gen !== _queueGen) return;
+        if (gen !== store.queueGen) return;
         if (list === MINTED_READ_AUTH_REFUSED) {
             // Not counted toward the re-read bound, and not asked again with
             // the password the server refused: parked until resumeAfterAuth.
@@ -333,7 +317,7 @@ function _readMintedMembers({ id, c, t }, password) {
         else if (list === null) _mintedSweep();
     }).finally(() => {
         _mintedReads.delete(id);
-        _rerunFlushSoon();
+        late._rerunFlushSoon();
     });
 }
 
@@ -369,7 +353,7 @@ export function _learnDropped(list) {
         _persistQueue();
         _recomputeSyncStatus();
     }
-    _rerunFlushSoon();
+    late._rerunFlushSoon();
 }
 
 // _mintedPrune: a settled record nothing names any more (no entry of the queue
@@ -452,3 +436,6 @@ export function _newClientId() {
 export function _shownMember(member, fields) {
     return { ...member, ...fields, modifiedAt: _serverNowMs() };
 }
+
+// The calls lower modules make into this one (api_client_store.jsx).
+provide({ _droppedOf, _mintedSweep, _learnDropped, _mintedPrune, _withListedMembersForgotten });

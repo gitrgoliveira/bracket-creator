@@ -41,7 +41,7 @@ import { TOLD_TAPS_PREFIX } from './told_taps.jsx';
 import { MINTED_MEMBERS_KEY } from './minted_members.jsx';
 import { normalizeViewerCompItem, START_CHECK_TIMEOUT_MS } from './api_client_requests.jsx';
 import {
-    _clockOffsetLearned, _learnServerClockOffset, _relearnClockThrottled, _noteOwnStamp,
+    _clockOffsetLearned, _learnServerClockOffset, _relearnClockThrottled, _noteOwnStamp, _restampFor,
 } from './api_client_clock.jsx';
 import {
     QUEUE_STORAGE_KEY, LEGACY_QUEUE_STORAGE_KEY, subscribeQueueAlert, _notifyQueueAlert, _persistQueue,
@@ -53,20 +53,21 @@ import {
     subscribeTerminalWriteFailed, _recomputeSyncStatus, subscribeUnsentWrites, subscribeSyncStatus,
 } from './api_client_status.jsx';
 import {
-    _resetFlushBackoff, _restampFor, _flushQueue, _outboxIdle, _rerunFlushSoon, _wakeLeaseWaiters, _baseLease,
+    _resetFlushBackoff, _flushQueue, _outboxIdle, _rerunFlushSoon, _wakeLeaseWaiters, _baseLease,
 } from './api_client_flush.jsx';
 import { BASE_LEASE_WAKE_KEY } from './base_sender_lease.jsx';
 import {
     _migratedLegacyLineup, _storedEntryProblem, enqueueRunningWrite, _withoutDownstreamConfirmation,
     _onStoredQueueChanged, _takeOverLegacyQueue,
 } from './api_client_enqueue.jsx';
-import { _minted, _announceKeptMember, _learnDropped } from './api_client_members.jsx';
+import { _announceKeptMember, _learnDropped } from './api_client_members.jsx';
 import { eventsApi } from './api_client_events.jsx';
 import { tournamentApi } from './api_client_tournament.jsx';
 import { competitionsApi } from './api_client_competitions.jsx';
 import { matchesApi } from './api_client_matches.jsx';
 import { teamsApi } from './api_client_teams.jsx';
 import { outboxApi } from './api_client_outbox.jsx';
+import { _minted } from './api_client_store.jsx';
 export { subscribeLocalMatchPatch, subscribeLocalParticipantPatch } from './api_client_overlays.jsx';
 
 if (typeof setInterval === 'function') {

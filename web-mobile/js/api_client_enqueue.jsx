@@ -17,17 +17,18 @@ import {
 } from './api_client_clock.jsx';
 import {
     _revKey, LEGACY_QUEUE_STORAGE_KEY, _isAllowedTerminalRequest, _persistQueue, _writeQueue, _queueSet,
-    _settled, _markSettled, _wasSettledHere, _dequeue, _openDequeueBatch, _closeDequeueBatch,
-    _parseStoredQueue, _enqueuedAfter, QUEUE_ENTRY_SEP, _baseOf, _newEntryKey, _entryStamp, _entriesFor,
-    _openSettlement, _pendingAnswer, _sharedAnswerFor, _claimRefusal,
+    _settled, _markSettled, _wasSettledHere, _dequeue, _openDequeueBatch, _closeDequeueBatch, _parseStoredQueue,
+    _enqueuedAfter, QUEUE_ENTRY_SEP, _baseOf, _newEntryKey, _entryStamp, _entriesFor, _openSettlement,
+    _pendingAnswer, _sharedAnswerFor, _claimRefusal, _afterKeys, _addAfter, _lineupKey,
 } from './api_client_queue.jsx';
 import {
     _eventSession, BASIS_OWN_MAX, _tapSeq, _tapEntriesFor, _publishPendingTaps, _noteOwnTapSeq,
     _adoptStoredTapSeq,
 } from './api_client_taps.jsx';
 import { _whereOf, _recomputeSyncStatus } from './api_client_status.jsx';
-import { _inFlight, _resetFlushBackoff, _flushQueue, _flushAdoptedSoon, _afterKeys, _addAfter } from './api_client_flush.jsx';
-import { _minted, _followMintedMembers } from './api_client_members.jsx';
+import { _resetFlushBackoff, _flushQueue, _flushAdoptedSoon } from './api_client_flush.jsx';
+import { _followMintedMembers } from './api_client_members.jsx';
+import { _inFlight, _minted, store, provide } from './api_client_store.jsx';
 
 // _takenFromLegacy: every entry this tab took over from the key an older build
 // uses (_takeOverLegacyQueue), its key to the `enqueuedAt` it was taken with,
@@ -249,13 +250,6 @@ export function _queuedLineupSave(compID, teamId, { matchId, round } = {}) {
     return bases.some((b) => _entriesFor(b).some(([, d]) => _sameLineup(d, probe)));
 }
 
-// _lineupKey: the queue BASE of a lineup: a match's own lineup (`matchId`), or a
-// team's Lineups-page round (round 0 is its starting lineup). The one owner of
-// the key: both lineup saves and queuedLineupSave name a lineup by it.
-export function _lineupKey(compID, teamId, { matchId, round }) {
-    return matchId ? `lineup:${compID}:${teamId}:match:${matchId}` : `lineup:${compID}:${teamId}:${round}`;
-}
-
 // _storedEntryProblem: why a stored queue entry cannot be replayed
 // ('unreadable'), or null when it can. The checks a rehydrate applies, stated
 // once so taking up another tab's entries (_onStoredQueueChanged) applies them
@@ -322,7 +316,7 @@ export function _commitEnqueue(base, descriptor, beforeFlush, { nextTick = false
     _queueSet(key, descriptor);
     // Read BEFORE the flush is kicked: the flush's synchronous part can
     // persist again, and it is THIS write's persist the answer reports.
-    _lastEnqueuePersisted = _persistQueue();
+    store.lastEnqueuePersisted = _persistQueue();
     // The door's promise exists before anything can settle it.
     if (typeof beforeFlush === 'function') beforeFlush(key);
     _recomputeSyncStatus();
@@ -338,11 +332,6 @@ export function _commitEnqueue(base, descriptor, beforeFlush, { nextTick = false
     }
     return key;
 }
-
-// Whether the last write queued (_commitEnqueue) reached browser storage.
-// A write held in memory alone is lost if the page goes, so its
-// editor must not tell the operator it is "saved on this device".
-export let _lastEnqueuePersisted = true;
 
 // _placeWrite: the key a new write about `base` goes under. When it coalesces
 // (_coalesceTarget), it takes the queued entry's key and carries what that
@@ -620,3 +609,6 @@ export function _daihyosenRequest(method, compID, matchID, password, seenModifie
         seen: opts && opts.seen, onRefusal: opts && opts.onRefusal,
     });
 }
+
+// The calls lower modules make into this one (api_client_store.jsx).
+provide({ _outboxWrite, _withoutDownstreamConfirmation, _takeOverLegacyQueue });

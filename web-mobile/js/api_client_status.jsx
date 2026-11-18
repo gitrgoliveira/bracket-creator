@@ -17,8 +17,7 @@ import {
     _publishOwnStatus, _forgetOwnStatusAnswersWhere, _clearOwnStatusAnswers, _revertLocalFields,
     _CHECKIN_KINDS, _checkInsOf,
 } from './api_client_overlays.jsx';
-import { _forgetMatchCopiesOf, _forgetAllMatchCopies } from './api_client_taps.jsx';
-import { _offlineFlag, _GONE_IS_DONE_KINDS, _rerunFlushSoon } from './api_client_flush.jsx';
+import { _discardedWhileOut, store, late, _latestDerived, _turnedAwaySeen } from './api_client_store.jsx';
 
 let _syncStatus = /** @type {SyncStatusValue} */ ('synced');
 const _syncListeners = new Set();
@@ -278,7 +277,7 @@ export function _discardIfFailing(key, d) {
 
 /**
  * Recompute and publish the correct sync status from current state:
- *   offline       : _offlineFlag is set and the queue still has entries
+ *   offline       : store.offlineFlag is set and the queue still has entries
  *   auth-required : a queued write is parked awaiting re-authentication
  *   server-error  : a queued write has passed the server-rejection notice
  *                   threshold; it is STILL QUEUED and still being retried
@@ -302,7 +301,7 @@ export function _recomputeSyncStatus() {
     _publishOwnStatus();
 }
 function _deriveSyncStatus() {
-    if (_offlineFlag && _writeQueue.size > 0) return 'offline';
+    if (store.offlineFlag && _writeQueue.size > 0) return 'offline';
     if (_hasAuthBlockedQueued()) return 'auth-required';
     if (_hasServerErroringQueued()) return 'server-error';
     return _writeQueue.size > 0 ? 'syncing' : 'synced';
@@ -402,18 +401,6 @@ export function subscribeSyncStatus(fn) {
 // before bothering the operator.
 export const SERVER_REJECTION_NOTICE_THRESHOLD = 10;
 
-// The entries an operator discarded while their request was out (stage 3
-// review 8, L1): the discard took them out of the queue at once, so nothing
-// waits on them and the UI goes on, but what a discard undoes (a court or time
-// overlay put back) waits for the request's end, which may be the server
-// keeping the write. A member add's end is the owner's (_mintedAddAnswered).
-const _discardedWhileOut = new WeakSet();
-
-// _discardWhileOut: `d` was discarded while out.
-export function _discardWhileOut(d) {
-    _discardedWhileOut.add(d);
-}
-
 // _endDiscardWhileOut: the request of an entry discarded while out ended
 // (`res`, or none: a network failure or the deadline). Answers true when it
 // was one, which its answer then settles nothing of. A 2xx is the write kept:
@@ -424,6 +411,23 @@ export function _endDiscardWhileOut(d, res, body) {
     const kept = !!res && ((res.ok && !writeWasRefusedForClock(body || {}))
         || (res.status === 404 && _GONE_IS_DONE_KINDS.has(d.kind)));
     if (!kept) _revertLocalFields(d);
-    _rerunFlushSoon();
+    late._rerunFlushSoon();
     return true;
+}
+
+// The removals whose 404 is the outcome they asked for (nothing to take away).
+export const _GONE_IS_DONE_KINDS = new Set(['lineup-remove', 'announce-remove']);
+
+// _forgetMatchCopiesOf: the copies score-events answers handed back, and the
+// turned-away lists seen, for the matches whose key starts with `prefix` (a
+// competition whose draw was generated or discarded, _forgetShownMatches).
+export function _forgetMatchCopiesOf(prefix) {
+    for (const k of _latestDerived.keys()) if (k.startsWith(prefix)) _latestDerived.delete(k);
+    for (const k of _turnedAwaySeen.keys()) if (k.startsWith(prefix)) _turnedAwaySeen.delete(k);
+}
+
+// _forgetAllMatchCopies: the same for every match (_forgetAllShownMatches).
+export function _forgetAllMatchCopies() {
+    _latestDerived.clear();
+    _turnedAwaySeen.clear();
 }

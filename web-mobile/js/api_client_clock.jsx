@@ -10,9 +10,10 @@
 
 import { _randomId } from './api_client_ids.jsx';
 // The offset lives in a leaf so a score editor can read the same clock (server_clock.jsx).
-import { serverNowMs, setServerClockOffsetMs } from './server_clock.jsx';
+import { serverNowMs, serverClockOffsetMs, setServerClockOffsetMs } from './server_clock.jsx';
 import { fetchWithTimeout } from './api_client_requests.jsx';
 import { _revKey, _baseOf, _entryStamp, _lastSettledStamp } from './api_client_queue.jsx';
+import { provide } from './api_client_store.jsx';
 
 // ---------------------------------------------------------------------------
 // mp-y3nk: server-clock offset for timestamp reconciliation.
@@ -268,3 +269,35 @@ export function _afterSettledStamp(base, stamp) {
     if (s > (_lastStampFor.get(base) || 0)) _lastStampFor.set(base, s);
     return s;
 }
+
+// The re-stamp arithmetic, factored out so it can be tested without a queue and
+// so the safety rule below has one statement rather than one per branch.
+//
+// Two independent reconstructions of "when did the operator act, in the server's
+// frame", each with a failure mode the other does not share:
+//
+//   wall = enqueuedAt + offset     wrong if the OS STEPPED the clock between
+//                                  enqueue and flush (enqueuedAt is then in a
+//                                  frame the new offset does not describe)
+//   perf = serverNow - trueAge     wrong if performance.now() FROZE while the
+//                                  device was suspended (age understated, so
+//                                  the write looks fresher than it is)
+//
+// Take the OLDER. That is not a tie-break, it is the whole safety argument: an
+// over-old stamp can only make THIS write lose a comparison it might have won,
+// which costs at worst a re-entry the operator is already being told about. An
+// over-NEW stamp lets a stale replay beat a result recorded during the outage —
+// silently, and that overwrite is the entire reason bc-lww1 exists. So where the
+// two disagree we always prefer the direction whose failure is recoverable.
+export function _restampFor(enqueuedAt, perfAtEnqueue) {
+    const wall = enqueuedAt + serverClockOffsetMs();
+    const ageMs = _perfAgeMs(perfAtEnqueue);
+    // A negative age is not a clock step, it is two readings from different time
+    // origins (a rehydrated entry that predates the strip, a hand-edited store).
+    // There is no true age to recover, so fall back rather than invent one.
+    if (ageMs === null || !(ageMs >= 0)) return wall;
+    return Math.min(wall, _serverNowMs() - ageMs);
+}
+
+// The calls lower modules make into this one (api_client_store.jsx).
+provide({ _relearnClockThrottled });

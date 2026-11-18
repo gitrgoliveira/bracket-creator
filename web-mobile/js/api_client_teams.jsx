@@ -12,10 +12,11 @@
 // (it would run the outbox twice).
 
 import { _fetchJson, _readLineup } from './api_client_requests.jsx';
-import { _outboxWrite, _queuedLineupSave, _lineupKey } from './api_client_enqueue.jsx';
+import { _outboxWrite, _queuedLineupSave } from './api_client_enqueue.jsx';
 import {
     _withListedMembersForgotten, _memberWrite, _newClientId, _shownMember,
 } from './api_client_members.jsx';
+import { _lineupKey } from './api_client_queue.jsx';
 
 export const teamsApi = {
     // The GET answers saved: false when nothing is stored; lineupOrNull

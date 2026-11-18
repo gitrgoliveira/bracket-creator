@@ -16,8 +16,7 @@ import {
 } from './write_result.jsx';
 // bc-evts S2: the build this page runs against the server's, and the reload rule.
 import { noteServerBuild } from './app_version.jsx';
-import { _relearnClockThrottled } from './api_client_clock.jsx';
-import { _withListedMembersForgotten } from './api_client_members.jsx';
+import { late } from './api_client_store.jsx';
 
 // ---------------------------------------------------------------------------
 // F1: fetch with per-request timeout via AbortController
@@ -194,7 +193,7 @@ export function normalizeViewerCompItem(item) {
         // StreamingOverlay (which consume this normalized shape via
         // tournament.competitions, app.jsx's `t.competitions = comps`) could
         // never see the squads the aggregate/court-feed payload now carries.
-        squads: _withListedMembersForgotten(item.teamMembers, c.id),
+        squads: late._withListedMembersForgotten(item.teamMembers, c.id),
         players: (c.players || []).map(normalizePlayer),
     });
 }
@@ -435,7 +434,7 @@ const lineupOrNull = (body) => (body.saved === false ? null : body);
 // ({ result: MatchResult }), as removeKachinukiBout does.
 function _daihyosenOutcome(body) {
     if (writeWasSuperseded(body)) {
-        _relearnClockThrottled();
+        late._relearnClockThrottled();
         return body;
     }
     return body.result ?? body;

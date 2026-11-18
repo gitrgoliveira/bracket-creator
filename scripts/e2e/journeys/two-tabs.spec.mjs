@@ -1,6 +1,7 @@
 // Two tabs of one browser share one stored outbox (the operator's console and a
 // second tab of the same device), and only the tab that holds a base's lease
-// sends it (web-mobile/js/base_sender_lease.jsx). The journey counts what the
+// sends it (web-mobile/js/base_sender_lease.jsx: Web Locks, which Chromium has,
+// with a timed note in storage for a browser without them). The journey counts what the
 // browser puts on the wire: a court call is ONE announce POST and, once the
 // match starts, its withdrawal ONE DELETE, though a second tab of the device
 // holds both writes too.

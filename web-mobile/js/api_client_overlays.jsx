@@ -17,8 +17,7 @@ import {
     _revKey, _notifyQueueAlert, _persistQueue, _writeQueue, _queueShapeGen, _unorderedValue, _baseOf,
     _entryStamp, _byEntryOrder, _entriesFor, _claimRefusal,
 } from './api_client_queue.jsx';
-import { _tellTurnedAwayIn } from './api_client_taps.jsx';
-import { _inFlight } from './api_client_flush.jsx';
+import { _inFlight, late, provide } from './api_client_store.jsx';
 
 // The scoreline fields a start-only write never publishes on the court bridge
 // (bc-evts stage 4 review 2, G1): what engine.keepQueuedScore keeps from the
@@ -310,7 +309,7 @@ export function _overlayPendingFields(comp, compID) {
     if (!comp || !id) return comp;
     // Every fetch of a competition passes here: a tap of this device it turned
     // away since its answer is told (_tellTurnedAway), after a reload too.
-    _tellTurnedAwayIn(comp, id);
+    late._tellTurnedAwayIn(comp, id);
     return overlayPendingAwards(_overlayPendingCheckIns(_overlayPendingMatchFields(comp, id), id), id);
 }
 
@@ -494,3 +493,6 @@ const {
 });
 
 export { currentDocVersion, rebaseQueuedVersion, overlayPendingTournament };
+
+// The calls lower modules make into this one (api_client_store.jsx).
+provide({ _noteOwnStatusAnswer, _revertLocalFields });

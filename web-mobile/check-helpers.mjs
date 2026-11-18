@@ -10,15 +10,17 @@
 // faults: every violation either gate reported after a block comment named the
 // wrong line, and a "/*" inside a line comment could hide code from both.
 // stripComments is now the one comment blanker here (check-imports.mjs reads
-// it too). A sibling lives in js/__tests__/helpers/source.js for the vitest
+// it too), and a parser reads the comments. A sibling lives in js/__tests__/helpers/source.js for the vitest
 // sweeps; it deliberately keeps trailing // comments (an absence assertion must
 // not be fooled by prose, but a trailing comment is never a render), so it is
 // a different contract, not a copy.
 //
-// No npm dependencies, Node.js built-ins only, like the gates themselves.
+// Node.js built-ins plus the parser rolldown ships (see stripComments).
 
 import { readdirSync, statSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 // Tests may legitimately construct a forbidden shape as a fixture and assert
 // on it; they are not consumers deciding control flow. dist/ is the compiled
@@ -38,9 +40,9 @@ export function* walk(dir) {
 
 // scanSource: the lines of one file that trip a rule; the first matching rule
 // wins per line. `line` is 1-based and indexes the REAL file (see above).
-export function scanSource(src, rules) {
+export function scanSource(src, rules, kind = 'js') {
   const hits = [];
-  stripComments(src).split('\n').forEach((line, i) => {
+  stripComments(src, kind).split('\n').forEach((line, i) => {
     for (const { re, why } of rules) {
       if (re.test(line)) {
         hits.push({ line: i + 1, text: line.trim(), why });
@@ -68,8 +70,8 @@ export function scanSource(src, rules) {
 // outer loop, so a later rule's early hit would otherwise print after an
 // earlier rule's late one); the sort is stable, so same-line hits keep rule
 // order.
-export function scanWholeFile(src, rules) {
-  const stripped = stripComments(src);
+export function scanWholeFile(src, rules, kind = 'js') {
+  const stripped = stripComments(src, kind);
   const hits = [];
   for (const { re, why } of rules) {
     const flags = re.flags.includes('g') ? re.flags : `${re.flags}g`;
@@ -93,134 +95,54 @@ export function printViolations(violations) {
   }
 }
 
-// Whether a "/" at this point begins a regular-expression literal rather than a
-// division, a JSX closing tag ("</div>") or JSX text: it does after an operator
-// or an opening bracket, at the start of the file or after a keyword such as
-// "return". "<" and ">" are left out on purpose, so "</div>" and "/>" never
-// read as one; "=>" is the one exception.
-function regexMayStart(out) {
-  let tail = '';
-  for (let k = out.length - 1; k >= 0 && tail.trimEnd().length < 8; k--) tail = out[k] + tail;
-  tail = tail.trimEnd();
-  if (!tail) return true;
-  // After a postfix "++"/"--" the slash divides ("i++ / 2"); a regex cannot
-  // follow a prefix one, so the pair never starts a literal.
-  if (/(?:\+\+|--)$/.test(tail)) return false;
-  // A keyword starts a regex only as a keyword: "obj.in / b" is a property, so
-  // a division.
-  return /[(,=:[!&|?;{+\-*%~^]$/.test(tail) || tail.endsWith('=>')
-    || /(?<![\w$.])(?:return|typeof|case|in|of|delete|void|throw|else|do|yield|await)$/.test(tail);
-}
-
-// The end of the regular-expression literal that starts at src[i] (a "/"),
-// flags included, or -1 when none closes on this line, so a stray "/" in JSX
-// text is left to the normal scan.
-function regexEnd(src, i) {
-  let j = i + 1;
-  let inClass = false;
-  while (j < src.length && src[j] !== '\n') {
-    const ch = src[j];
-    if (ch === '\\') { j += 2; continue; }
-    if (ch === '[') inClass = true;
-    else if (ch === ']') inClass = false;
-    else if (ch === '/' && !inClass) {
-      j++;
-      while (/[a-z]/i.test(src[j] || '')) j++;
-      return j;
-    }
-    j++;
-  }
-  return -1;
-}
-
 // stripComments: the source with every comment replaced by spaces, newlines
 // kept, so line i of the result is line i of the file and offsets do not move.
-// The tail of the text before a "//" that makes it part of a URL.
-const URL_SCHEME_BEFORE = /\b(?:https?|wss?|ftp|file):$/i;
-
+//
 // A comment DESCRIBING a rule (which every gate and every owner module does, at
 // length) must not read as a use of it, but a gate that then reports the wrong
 // line sends the reader to prose. Trailing comments are blanked too
 // (`p.number; // .includes(` must not trip a rule).
 //
-// One pass over the text, aware of strings and template literals, so a "//" or
-// "/*" inside a string (a URL in code) is not a comment and a "/*" inside a //
-// comment (a route glob such as /api/competitions/:id/*) cannot open a phantom
-// block that swallows code up to the next "*/". A regex strip is NOT used: it
-// cuts string literals that hold those characters, and a block comment deleted
-// outright moves every later line up by its height.
-// A quote that is never closed ends at the line break (JSX text such as
-// "Don't" holds a lone apostrophe), and a backslash in code protects the next
-// character (the "\/*" of a regular expression is not a comment opener).
-// A regular-expression literal is passed through whole, so a quote, a backtick
-// or a "/*" inside one opens no string, template or comment (see
-// regexMayStart for where a "/" can begin one).
-export function stripComments(src) {
-  const blank = (s) => s.replace(/[^\n]/g, ' ');
-  const out = [];
-  const n = src.length;
-  const templateDepths = []; // brace depth at which each open ${ began
-  let braceDepth = 0;
-  let inTemplate = false;
-  let i = 0;
-  while (i < n) {
-    const c = src[i];
-    const d = src[i + 1];
-    if (inTemplate) {
-      if (c === '\\') { out.push(src.slice(i, i + 2)); i += 2; continue; }
-      if (c === '`') { inTemplate = false; out.push(c); i++; continue; }
-      if (c === '$' && d === '{') {
-        templateDepths.push(braceDepth);
-        braceDepth++;
-        inTemplate = false;
-        out.push('${');
-        i += 2;
-        continue;
-      }
-      out.push(c);
-      i++;
-      continue;
-    }
-    // A "//" straight after a URL scheme ("https://x" in JSX text) is a URL, not
-    // a comment; after any other ":" (a case, a label, a ternary) it is one.
-    if (c === '/' && d === '/' && !URL_SCHEME_BEFORE.test(src.slice(Math.max(0, i - 7), i))) {
-      let j = src.indexOf('\n', i);
-      if (j === -1) j = n;
-      out.push(blank(src.slice(i, j)));
-      i = j;
-      continue;
-    }
-    if (c === '/' && d === '*') {
-      let j = src.indexOf('*/', i + 2);
-      j = j === -1 ? n : j + 2;
-      out.push(blank(src.slice(i, j)));
-      i = j;
-      continue;
-    }
-    if (c === "'" || c === '"') {
-      let j = i + 1;
-      while (j < n && src[j] !== c && src[j] !== '\n') j += src[j] === '\\' ? 2 : 1;
-      if (src[j] === c) j++;
-      out.push(src.slice(i, j));
-      i = j;
-      continue;
-    }
-    if (c === '/' && regexMayStart(out)) {
-      const j = regexEnd(src, i);
-      if (j !== -1) { out.push(src.slice(i, j)); i = j; continue; }
-    }
-    if (c === '`') { inTemplate = true; out.push(c); i++; continue; }
-    if (c === '\\') { out.push(src.slice(i, i + 2)); i += 2; continue; }
-    if (c === '{') braceDepth++;
-    if (c === '}') {
-      braceDepth--;
-      if (templateDepths.length && templateDepths[templateDepths.length - 1] === braceDepth) {
-        templateDepths.pop();
-        inTemplate = true;
-      }
-    }
-    out.push(c);
-    i++;
+// What is a comment is decided by a real JavaScript parser (the oxc parser that
+// rolldown ships, a pinned devDependency, the one check-load-cycles.mjs reads
+// too), never by scanning characters: a hand-written scanner had to guess where
+// a "/" begins a regular expression, where a quote opens a string and whether
+// "//" is a URL, and each guess was a way to blank code or keep prose. The parser
+// knows. It is tolerant: a file it cannot read to the end keeps the comments it
+// found, which a real source file (compiled by esbuild) never meets.
+//
+// `kind` names the language of the text: 'js' (the default, JSX included), 'css'
+// (block comments), or 'html' (HTML comments, plus the comments of an inline
+// <script> body, read by the same parser, and of a <style> body).
+const { parseSync } = await loadParser();
+
+async function loadParser() {
+  const resolved = createRequire(import.meta.url).resolve('rolldown/utils');
+  return import(pathToFileURL(resolved).href);
+}
+
+const blank = (s) => s.replace(/[^\n]/g, ' ');
+const CSS_COMMENT = /\/\*[\s\S]*?\*\//g;
+
+function stripJsComments(src) {
+  const { comments } = parseSync('source.jsx', src, { lang: 'jsx', sourceType: 'module' });
+  let out = '';
+  let at = 0;
+  for (const { start, end } of comments) {
+    out += src.slice(at, start) + blank(src.slice(start, end));
+    at = end;
   }
-  return out.join('');
+  return out + src.slice(at);
+}
+
+function stripHtmlComments(src) {
+  return src
+    .replace(/(<script\b(?![^>]*\bsrc=)[^>]*>)([\s\S]*?)(<\/script>)/gi, (_, open, body, close) => open + stripJsComments(body) + close)
+    .replace(/(<style\b[^>]*>)([\s\S]*?)(<\/style>)/gi, (_, open, body, close) => open + body.replace(CSS_COMMENT, blank) + close)
+    .replace(/<!--[\s\S]*?-->/g, blank);
+}
+
+export function stripComments(src, kind = 'js') {
+  if (kind === 'css') return src.replace(CSS_COMMENT, blank);
+  return kind === 'html' ? stripHtmlComments(src) : stripJsComments(src);
 }

@@ -1,4 +1,5 @@
-// stripComments (check-helpers.mjs) blanks comments for check-imports.mjs. An
+// stripComments (check-helpers.mjs) blanks comments, read by a real parser, for
+// check-imports.mjs and the rule gates. An
 // import it blanks by mistake is an import nobody checks, so the mask must read
 // a regular-expression literal as code: a "/*" or a backtick inside one opens
 // no comment or template.
@@ -70,5 +71,49 @@ describe('stripComments', () => {
   it('leaves a "/" with no closing slash on its line to the normal scan', () => {
     const src = `f(/ not a regex\n${IMPORT}`;
     expect(stripComments(src)).toBe(src);
+  });
+  it('keeps every offset when the text before a comment is not ASCII', () => {
+    const src = `const s = "é😀 日本"; // note\n${IMPORT}\n/* b */ x();`;
+    const out = stripComments(src);
+    expect(out).toHaveLength(src.length);
+    expect(out.split('\n')[0]).toBe(`const s = "é😀 日本"; ${' '.repeat('// note'.length)}`);
+    expect(out).toContain(IMPORT);
+    expect(out).toContain('x();');
+  });
+
+  it('reads an apostrophe in JSX text, and a quote in a template, as text and not as a string opener', () => {
+    const src = "const a = <p>Don't stop // not a comment</p>; // real\nconst b = `it's ${x} // inside`; /* real */\n";
+    const out = stripComments(src);
+    expect(out).toContain("<p>Don't stop // not a comment</p>");
+    expect(out).toContain('`it\'s ${x} // inside`');
+    expect(out).not.toContain('real');
+  });
+
+  it('blanks the comments of a stylesheet', () => {
+    const css = 'a { color: red; } /* default win */\nb { content: "x"; }\n';
+    const out = stripComments(css, 'css');
+    expect(out).toHaveLength(css.length);
+    expect(out).not.toContain('default');
+    expect(out).toContain('b { content: "x"; }');
+  });
+
+  it('blanks the comments of a page: HTML comments, an inline script and a style, not a script with a src', () => {
+    const html = [
+      '<!-- one -->',
+      '<script src="/a.js"></script>',
+      '<script>',
+      "  // two",
+      "  const u = 'http://x.test'; /* three */",
+      '</script>',
+      '<style>/* four */ p { margin: 0 }</style>',
+      '<p>text // kept</p>',
+    ].join('\n');
+    const out = stripComments(html, 'html');
+    expect(out).toHaveLength(html.length);
+    expect(out.split('\n').length).toBe(html.split('\n').length);
+    for (const gone of ['one', 'two', 'three', 'four']) expect(out).not.toContain(gone);
+    expect(out).toContain("const u = 'http://x.test';");
+    expect(out).toContain('<script src="/a.js"></script>');
+    expect(out).toContain('<p>text // kept</p>');
   });
 });

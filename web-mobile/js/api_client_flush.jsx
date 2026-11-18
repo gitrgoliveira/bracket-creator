@@ -13,7 +13,6 @@ import {
     REP_BOUT_NOT_REMOVED, isFinishedResultWrite,
 } from './write_result.jsx';
 // The offset lives in a leaf so a score editor can read the same clock (server_clock.jsx).
-import { serverClockOffsetMs } from './server_clock.jsx';
 import { DOC_VERSION_FIELD, tournamentRefusal, awardsRefusal } from './document_versions.jsx';
 // bc-evts S2: the build this page runs against the server's, and the reload rule.
 import { noteOutboxDrained } from './app_version.jsx';
@@ -24,38 +23,29 @@ import {
     _reasonHumanError, _fetchJson, LINEUP_NOT_REMOVED,
 } from './api_client_requests.jsx';
 import {
-    _learnServerClockOffset, _relearnClockThrottled, _serverNowMs, _stampAfterSeen, _perfAgeMs,
-    CLOCK_SKEW_FAIL_REASON, _forgetRev, _afterSettledStamp,
+     _learnServerClockOffset, _relearnClockThrottled, _serverNowMs, _stampAfterSeen, CLOCK_SKEW_FAIL_REASON,
+     _forgetRev, _afterSettledStamp, _restampFor,
 } from './api_client_clock.jsx';
 import {
-    _isAllowedTerminalRequest, _replayBody, _notifyQueueAlert, _settledLeftStored, _persistQueue,
-    _writeQueue, _dequeue, _baseOf, _byEntryOrder, _entriesFor, _claimRefusal, _settleAnsweredElsewhere, _shareAnswer,
+    _isAllowedTerminalRequest, _replayBody, _notifyQueueAlert, _settledLeftStored, _persistQueue, _writeQueue,
+    _dequeue, _baseOf, _byEntryOrder, _entriesFor, _claimRefusal, _settleAnsweredElsewhere, _shareAnswer,
+    _afterKeys, _keepForClock,
 } from './api_client_queue.jsx';
 import { _CHECKIN_KINDS, _checkInAnswered, rebaseQueuedVersion } from './api_client_overlays.jsx';
 import { TAP_BATCH_MAX, _tellTurnedAway, _sendTapBatch } from './api_client_taps.jsx';
 import { _randomId } from './api_client_ids.jsx';
-import { createBaseLease } from './base_sender_lease.jsx';
+import { createBaseLease, detectWebLocks } from './base_sender_lease.jsx';
 import {
     _tellRefusal, _notifyScoreSupersededEditor, _notifyScoreSupersededAlert, _heldForClosedMatch,
     _refusedByServer, _recomputeSyncStatus, SERVER_REJECTION_NOTICE_THRESHOLD, _endDiscardWhileOut,
+    _GONE_IS_DONE_KINDS,
 } from './api_client_status.jsx';
 import {
-    _minted, TEAM_MEMBER_NOT_ADDED, TEAM_MEMBER_NOT_RENAMED, TEAM_MEMBER_NOT_CLEARED, _mintedAddAnswered,
-    _mintedGate, _noteMintedOutHere, _endMintedOutHere,
+    TEAM_MEMBER_NOT_ADDED, TEAM_MEMBER_NOT_RENAMED, TEAM_MEMBER_NOT_CLEARED, _mintedAddAnswered, _mintedGate,
+    _noteMintedOutHere, _endMintedOutHere,
 } from './api_client_members.jsx';
+import { _inFlight, _minted, store, provide } from './api_client_store.jsx';
 
-// bc-evts: the queued entries being sent right now (_sendEntry). Every write is
-// an outbox entry, stored before it is sent and leaving storage only once it
-// settles, so a page going away mid-send leaves it for the next load; this set
-// only stops a later write taking the place of one already out
-// (_coalesceTarget). Never persisted.
-export const _inFlight = new WeakSet();
-// Set to true ONLY when a flush attempt ends with at least one true NETWORK
-// failure (fetch rejected: connection down). A non-2xx server response (e.g. a
-// transient 5xx/429) keeps the write queued for retry but is NOT "offline": the
-// network is up, so the pill stays "Syncing…" rather than "Offline". Cleared
-// back to false when a flush drains the queue or no network failure occurs.
-export let _offlineFlag = false;
 export function _afterDiscard() {
     _persistQueue();
     _recomputeSyncStatus();
@@ -75,10 +65,9 @@ export let _flushAttempt = 0;
 // lock a second trigger (a rapid enqueue, an `online` event, or a backoff timer
 // firing mid-flush) would start an OVERLAPPING loop iterating the same snapshot:
 // duplicate PUTs and corrupted backoff state. Instead, a trigger that arrives
-// while a flush is running sets _flushRequested; the running loop reruns once it
+// while a flush is running sets store.flushRequested; the running loop reruns once it
 // finishes so newly-queued or still-failed writes are retried without overlap.
 let _flushInProgress = false;
-let _flushRequested = false;
 // _launchIdleBases: while a pass runs, starts every base of the queue that is
 // not out and did not end failing in it (set by _flushQueue, null otherwise;
 // _wakeIdleBases asks it).
@@ -90,9 +79,11 @@ let _launchIdleBases = null;
 const _basesOut = new Set();
 // _baseLease: the tabs of one device share the outbox, and only the tab that
 // holds a base's lease sends it (base_sender_lease.jsx), so one entry is sent
-// once and a base's entries go in one tab's order. Storage is reached lazily,
-// so a page whose storage throws sends as it always did.
+// once and a base's entries go in one tab's order. The lease is held with Web
+// Locks where the page has them, else with a timed note in storage (reached
+// lazily, so a page whose storage throws sends as it always did).
 export const _baseLease = createBaseLease({
+    locks: detectWebLocks(),
     storage: {
         getItem: (k) => globalThis.localStorage.getItem(k),
         setItem: (k, v) => globalThis.localStorage.setItem(k, v),
@@ -100,10 +91,6 @@ export const _baseLease = createBaseLease({
     },
     tab: _randomId(),
 });
-// Bumped by clearQueue() (logout / password_reset). An in-flight _flushQueue loop
-// snapshots this at the start and aborts if it changes mid-loop, so a credential
-// revocation can't keep sending queued writes with the now-revoked password.
-export let _queueGen = 0;
 
 // The flush state above is written by the flush code alone; every other writer
 // (an enqueue, another tab's write, the online event, a discard, and the
@@ -114,20 +101,15 @@ export function _resetFlushBackoff() {
     if (_flushTimer !== null) { clearTimeout(_flushTimer); _flushTimer = null; }
     _flushAttempt = 0;
 }
-// _setOffline: whether the last pass ended for the connection (_offlineFlag);
+// _setOffline: whether the last pass ended for the connection (store.offlineFlag);
 // a park or a wipe clears it.
 export function _setOffline(offline) {
-    _offlineFlag = offline;
+    store.offlineFlag = offline;
 }
-// _bumpQueueGen: a park or a wipe ends every pass in flight (_queueGen).
+// _bumpQueueGen: a park or a wipe ends every pass in flight (store.queueGen).
 export function _bumpQueueGen() {
-    _queueGen++;
+    store.queueGen++;
 }
-// _requestFlushRerun: the pass running now runs again once it ends.
-export function _requestFlushRerun() {
-    _flushRequested = true;
-}
-
 // bc-cse: the queue's half of the clock-skew heal, shared by BOTH flush arms
 // (terminal writes and running score writes) because the re-stamp rule is one
 // rule: heal the offset, then rebuild this entry's stamp in the SERVER's frame
@@ -190,7 +172,7 @@ async function _resendForClock(key, descriptor, pass, alert) {
     await _restampQueuedEntryForSkew(descriptor, _baseOf(key));
     if (_writeQueue.get(key) !== descriptor) return 'settled'; // discarded meanwhile
     if (!again) {
-        _flushRequested = true;
+        store.flushRequested = true;
         return 'reclocked';
     }
     if (_keepForClock(descriptor, pass)) {
@@ -198,48 +180,6 @@ async function _resendForClock(key, descriptor, pass, alert) {
         _recomputeSyncStatus();
     }
     return 'kept';
-}
-
-// _keepForClock: the ONE rule for a write or tap refused for clock_skew again
-// after a re-stamp. It stays queued, reads as one the server keeps refusing
-// (`clockRefused`, _refusedByServer: held, and discardable from its editor and
-// the held-writes list), and the pass backs off. True the first time, so the
-// caller tells the operator once.
-export function _keepForClock(d, pass) {
-    pass.anyFailed = true;
-    if (d.clockRefused) return false;
-    d.clockRefused = true;
-    _persistQueue();
-    return true;
-}
-
-// The re-stamp arithmetic, factored out so it can be tested without a queue and
-// so the safety rule below has one statement rather than one per branch.
-//
-// Two independent reconstructions of "when did the operator act, in the server's
-// frame", each with a failure mode the other does not share:
-//
-//   wall = enqueuedAt + offset     wrong if the OS STEPPED the clock between
-//                                  enqueue and flush (enqueuedAt is then in a
-//                                  frame the new offset does not describe)
-//   perf = serverNow - trueAge     wrong if performance.now() FROZE while the
-//                                  device was suspended (age understated, so
-//                                  the write looks fresher than it is)
-//
-// Take the OLDER. That is not a tie-break, it is the whole safety argument: an
-// over-old stamp can only make THIS write lose a comparison it might have won,
-// which costs at worst a re-entry the operator is already being told about. An
-// over-NEW stamp lets a stale replay beat a result recorded during the outage —
-// silently, and that overwrite is the entire reason bc-lww1 exists. So where the
-// two disagree we always prefer the direction whose failure is recoverable.
-export function _restampFor(enqueuedAt, perfAtEnqueue) {
-    const wall = enqueuedAt + serverClockOffsetMs();
-    const ageMs = _perfAgeMs(perfAtEnqueue);
-    // A negative age is not a clock step, it is two readings from different time
-    // origins (a rehydrated entry that predates the strip, a hand-edited store).
-    // There is no true age to recover, so fall back rather than invent one.
-    if (ageMs === null || !(ageMs >= 0)) return wall;
-    return Math.min(wall, _serverNowMs() - ageMs);
 }
 
 export async function _flushQueue() {
@@ -266,7 +206,7 @@ export function _wakeLeaseWaiters() {
 // `only`: the bases this pass is for (the wake's), or null for every base. The
 // reruns a request makes while it runs are always whole passes.
 async function _runFlush(only) {
-    if (_flushInProgress) { _flushRequested = true; _wakeIdleBases(); return; }
+    if (_flushInProgress) { store.flushRequested = true; _wakeIdleBases(); return; }
     _flushInProgress = true;
     let onlyBases = only;
     // What this pass has to tell, counted across the whole call (the do/while
@@ -289,7 +229,7 @@ async function _runFlush(only) {
     };
     try {
         do {
-            _flushRequested = false;
+            store.flushRequested = false;
             const passBases = onlyBases;
             onlyBases = null;
             // Clear any pending backoff timer so a rerun never leaves an orphaned
@@ -298,7 +238,7 @@ async function _runFlush(only) {
             if (!passBases && _flushTimer !== null) { clearTimeout(_flushTimer); _flushTimer = null; }
 
             if (_writeQueue.size === 0) {
-                _offlineFlag = false;
+                store.offlineFlag = false;
                 _persistQueue();
                 _recomputeSyncStatus();
                 continue;
@@ -307,7 +247,7 @@ async function _runFlush(only) {
             pass.anyFailed = false;      // any failure → keep in queue + backoff
             pass.networkFailed = false;  // fetch rejected → connection down → "offline"
             pass.leaseSkipped = false;   // a base left to another tab: it says nothing of the connection
-            const gen = _queueGen; // clearQueue() bumps this to cancel an in-flight flush
+            const gen = store.queueGen; // clearQueue() bumps this to cancel an in-flight flush
             // bc-evts F1 (reversing bc-mrgc C2): per match (base), in the ONE
             // replay order, _byEntryOrder, and strictly in order: the first entry
             // of a match that does not settle in this pass (offline, a 5xx,
@@ -334,7 +274,7 @@ async function _runFlush(only) {
             // no longer waits for (the rerun picks it up).
             let closed = false;
             const launch = () => {
-                if (closed || gen !== _queueGen) return;
+                if (closed || gen !== store.queueGen) return;
                 const byBase = new Map();
                 for (const entry of [..._writeQueue.entries()].sort(_byEntryOrder)) {
                     const base = _baseOf(entry[0]);
@@ -347,28 +287,31 @@ async function _runFlush(only) {
                 for (const [base, list] of byBase) {
                     if (active.has(base) || failedBases.has(base) || _basesOut.has(base)) continue;
                     if (passBases && !passBases.has(base)) continue;
-                    // Another tab of the device is sending this base: it is not
-                    // failing, and not held. It is not marked as ended either:
-                    // the holder's wake after a turn that sent all it held
-                    // reaches this launch, which asks for the lease again at
-                    // once, and the backoff covers a holder that failed or is
-                    // gone.
-                    if (!_baseLease.claim(base)) {
-                        pass.leaseSkipped = true;
-                        _leaseWaiting.add(base);
-                        _askAgainWhenLeaseEnds(base);
-                        continue;
-                    }
-                    // What another tab sent before it gave the base up is
-                    // settled with its answer, not sent again, whatever order
-                    // its storage events reached this tab in.
-                    _leaseWaiting.delete(base);
-                    _settleAnsweredElsewhere(base);
+                    // The base is ours from here to the end of its turn, the lease
+                    // asked for or not (a claim answers a moment later).
                     active.set(base, true);
                     _basesOut.add(base);
                     (async () => {
                         let ended = '';
                         try {
+                            // Another tab of the device is sending this base: it is not
+                            // failing, and not held. It is not marked as ended either:
+                            // the holder's wake after a turn that sent all it held
+                            // reaches this launch, which asks for the lease again at
+                            // once, and the backoff covers a holder that failed or is
+                            // gone.
+                            if (!(await _baseLease.claim(base))) {
+                                ended = 'leased';
+                                pass.leaseSkipped = true;
+                                _leaseWaiting.add(base);
+                                _askAgainWhenLeaseEnds(base);
+                                return;
+                            }
+                            // What another tab sent before it gave the base up is
+                            // settled with its answer, not sent again, whatever order
+                            // its storage events reached this tab in.
+                            _leaseWaiting.delete(base);
+                            _settleAnsweredElsewhere(base);
                             ended = await _flushBase(base, list, pass, gen);
                             if (ended === 'kept') failedBases.add(base);
                         } catch (e) {
@@ -408,16 +351,16 @@ async function _runFlush(only) {
             _persistQueue();
             if (_writeQueue.size === 0) {
                 _flushAttempt = 0;
-                _offlineFlag = false;
+                store.offlineFlag = false;
                 _recomputeSyncStatus();
             } else if (passBases) {
                 // A pass for the bases another tab gave up learned nothing of
                 // the others: their backoff timer and the offline flag stay as
                 // the last whole pass left them, unless this one failed on the
                 // network or found no timer to retry its own failure.
-                if (pass.networkFailed) _offlineFlag = true;
+                if (pass.networkFailed) store.offlineFlag = true;
                 _recomputeSyncStatus();
-                if (pass.anyFailed && _flushTimer === null && !_flushRequested) {
+                if (pass.anyFailed && _flushTimer === null && !store.flushRequested) {
                     _flushTimer = setTimeout(_flushQueue, FLUSH_BACKOFF_MS[Math.min(_flushAttempt, FLUSH_BACKOFF_MS.length - 1)]);
                     _flushAttempt++;
                 }
@@ -427,14 +370,14 @@ async function _runFlush(only) {
                 // succeed nor fail). Republish so the pill leaves "Syncing…" for the
                 // parked state, and schedule NO backoff timer: a parked write cannot
                 // progress until resumeAfterAuth() or a discard.
-                _offlineFlag = false;
+                store.offlineFlag = false;
                 _recomputeSyncStatus();
             } else {
                 // A pass that only left bases to other tabs learned nothing about
                 // the connection: the flag stays as the last real pass set it.
-                if (pass.anyFailed) _offlineFlag = pass.networkFailed;
+                if (pass.anyFailed) store.offlineFlag = pass.networkFailed;
                 _recomputeSyncStatus();
-                if (!_flushRequested) {
+                if (!store.flushRequested) {
                     // Schedule a backoff retry only if no immediate rerun is already
                     // pending (a pending rerun re-attempts the failed writes now).
                     const delay = FLUSH_BACKOFF_MS[Math.min(_flushAttempt, FLUSH_BACKOFF_MS.length - 1)];
@@ -445,7 +388,7 @@ async function _runFlush(only) {
                     _flushTimer = setTimeout(_flushQueue, delay);
                 }
             }
-        } while (_flushRequested);
+        } while (store.flushRequested);
     } finally {
         _flushInProgress = false;
         // In the finally so the alert still reaches the operator if the pass
@@ -487,7 +430,7 @@ async function _flushBase(base, list, pass, gen) {
     let i = 0;
     let outcome = 'settled';
     while (i < list.length) {
-        if (gen !== _queueGen) return;
+        if (gen !== store.queueGen) return;
         // A turn can run past the lease's life (a long request, a hidden page's
         // slow timers): it renews before each send. A lease another tab took
         // over meanwhile is not renewed; the turn goes on beside the new holder,
@@ -646,24 +589,6 @@ function _markWaitCycles(byBase) {
         else if (!onCycle.has(k) && d.cycled) { delete d.cycled; changed = true; }
     }
     return changed;
-}
-
-// _afterKeys: the queue keys an entry follows (`after`): one key, stored as a
-// string, or several (a score write naming two teams' new members), stored as
-// an array.
-export function _afterKeys(d) {
-    if (!d) return [];
-    if (Array.isArray(d.after)) return d.after.filter((k) => typeof k === 'string' && k);
-    return typeof d.after === 'string' && d.after ? [d.after] : [];
-}
-
-// _addAfter: makes the entry follow `key` as well as what it already follows.
-export function _addAfter(d, key) {
-    if (!d || typeof key !== 'string' || !key) return;
-    const keys = _afterKeys(d);
-    if (keys.includes(key)) return;
-    keys.push(key);
-    d.after = keys.length === 1 ? keys[0] : keys;
 }
 
 // _blockerOf: the key of the entry that holds `key` back and matches `stuck`:
@@ -827,9 +752,6 @@ function _answersMatchWrite(d) {
 // the server judges for clock skew: a 200 {applied:false, reason:"clock_skew"}
 // wrote nothing, and the entry is re-stamped and sent again (_resendForClock).
 const _STAMPED_DOOR_KINDS = new Set(['checkin', 'checkin-bulk', 'announce', 'announce-clear']);
-// The removals whose 404 is the outcome they asked for (nothing to take away).
-export const _GONE_IS_DONE_KINDS = new Set(['lineup-remove', 'announce-remove']);
-
 async function _sendEntry(key, descriptor, pass) {
     // Out of the queue AND out of storage at once, not at the end of the
     // pass: a page that goes away while a later entry is still out (a reload,
@@ -1003,7 +925,7 @@ async function _sendEntry(key, descriptor, pass) {
         } else if (_writeQueue.has(key)) {
             // A later write took this one's place while it was out (the same
             // key, _placeWrite): it goes before anything queued after it.
-            _flushRequested = true;
+            store.flushRequested = true;
             return 'restamped';
         }
         return 'settled';
@@ -1089,7 +1011,7 @@ async function _sendEntry(key, descriptor, pass) {
         if (_dequeue(k, d, { error: err })) _shareAnswer(k, d, { error: err });
     }
     if (!leaveQueue({ error: err }) && _writeQueue.has(key)) {
-        _flushRequested = true;
+        store.flushRequested = true;
         return 'restamped';
     }
     return 'settled';
@@ -1107,17 +1029,18 @@ function _staleDocumentSaves(key, d, err) {
 }
 
 // _askAgainWhenLeaseEnds: a holder that is gone (its page closed without a
-// pagehide, or crashed) wakes nobody, so this tab asks once the lease it found
-// would have run out. One timer a base: a holder that is alive beats and the
+// pagehide, or crashed) wakes nobody on the timed note, so this tab asks once the
+// lease it found is free (Web Locks: when the lock frees; the timed note: when it
+// would have run out). One wait a base: a holder that is alive keeps it and the
 // ask finds the lease held again, and a holder that finished woke this tab.
 const _askingFor = new Set();
 function _askAgainWhenLeaseEnds(base) {
     if (_askingFor.has(base)) return;
     _askingFor.add(base);
-    setTimeout(() => {
+    _baseLease.whenFree(base).then(() => {
         _askingFor.delete(base);
-        if (_writeQueue.size > 0) _rerunFlushSoon();
-    }, _baseLease.expiresIn(base) + 50);
+        _wakeLeaseWaiters();
+    });
 }
 
 // _flushAdoptedSoon: the flush for entries another tab made. Its storage event
@@ -1132,7 +1055,7 @@ export function _flushAdoptedSoon() {
 
 // _rerunFlushSoon: a flush now, or a rerun of the one under way.
 export function _rerunFlushSoon() {
-    if (_flushInProgress) { _flushRequested = true; _wakeIdleBases(); }
+    if (_flushInProgress) { store.flushRequested = true; _wakeIdleBases(); }
     else queueMicrotask(() => { if (_writeQueue.size > 0) _flushQueue(); });
 }
 
@@ -1141,3 +1064,6 @@ export function _rerunFlushSoon() {
 function _wakeIdleBases() {
     queueMicrotask(() => { if (_launchIdleBases) _launchIdleBases(); });
 }
+
+// The calls lower modules make into this one (api_client_store.jsx).
+provide({ _rerunFlushSoon });

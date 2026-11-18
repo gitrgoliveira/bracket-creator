@@ -12,14 +12,7 @@ import { writeWasRefusedForClock, isFinishedResultWrite } from './write_result.j
 import { CLOCK_SKEW as TAP_CLOCK_SKEW } from './score_events.jsx';
 import { mintedAddId } from './minted_members.jsx';
 import { _randomId } from './api_client_ids.jsx';
-import { _noteOwnStatusAnswer, _revertLocalFields } from './api_client_overlays.jsx';
-import { _dropToldHere, _publishPendingTaps } from './api_client_taps.jsx';
-import { _discardWhileOut } from './api_client_status.jsx';
-import { _inFlight, _afterKeys, _rerunFlushSoon } from './api_client_flush.jsx';
-import {
-    _lastEnqueuePersisted, _withoutDownstreamConfirmation, _takeOverLegacyQueue,
-} from './api_client_enqueue.jsx';
-import { _minted, _droppedOf, _mintedSweep, _learnDropped, _mintedPrune } from './api_client_members.jsx';
+import { _inFlight, _minted, store, _discardedWhileOut, late } from './api_client_store.jsx';
 
 // ---------------------------------------------------------------------------
 // C2: Monotonic per-match revision counter
@@ -356,7 +349,7 @@ export function _persistQueue() {
             if (!_enqueuedAfter(merged.get(k), d.enqueuedAt)) merged.set(k, d);
         }
         // A settled member record nothing names any more is forgotten.
-        _mintedPrune(merged);
+        late._mintedPrune(merged);
         if (merged.size === 0) {
             // An emptied queue is stored as "[]", never removed: the other
             // tabs read the removal of the key as a wipe (clearQueue), which
@@ -384,7 +377,7 @@ export function _persistQueue() {
         const entries = [...merged.entries()].map(
             ([k, d]) => [k, {
                 ...d, perfAtEnqueue: undefined,
-                ...(d.payload && d.payload.forceDownstreamReopen ? { payload: _withoutDownstreamConfirmation(d.payload) } : {}),
+                ...(d.payload && d.payload.forceDownstreamReopen ? { payload: late._withoutDownstreamConfirmation(d.payload) } : {}),
             }]
         );
         localStorage.setItem(QUEUE_STORAGE_KEY, JSON.stringify(entries));
@@ -507,24 +500,24 @@ export function _dequeue(key, descriptor, outcome) {
     _writeQueue.delete(key);
     if (_shapesStatusIndex(d)) _queueShapeGen++;
     // A tap no longer queued here is no longer on a board (minor 2).
-    if (d.kind === 'evt' && d.payload && d.payload.id) _dropToldHere(d.payload.id);
+    if (d.kind === 'evt' && d.payload && d.payload.id) late._dropToldHere(d.payload.id);
     _markSettled(key, d);
-    _noteOwnStatusAnswer(key, d, outcome);
+    late._noteOwnStatusAnswer(key, d, outcome);
     if (outcome && outcome.byOperator && _inFlight.has(d)) {
         // Discarded while its request is out: the server may still keep it,
         // so what a discard undoes waits for that request to end (L1,
         // _endDiscardWhileOut); a member add's request end is the owner's
         // answer (_mintedAddAnswered).
-        _discardWhileOut(d);
+        _discardedWhileOut.add(d);
     } else if (outcome && (outcome.error || outcome.byOperator)) {
         // A court move or time change the server refused, or an operator
         // discarded, no longer shows (R4). Never for an entry another tab sent.
-        _revertLocalFields(d);
+        late._revertLocalFields(d);
         // A member add that leaves unanswered (a refusal was answered as it
         // came, _mintedAddAnswered): the owner says what is known of its id.
         if (mintedAddId(d)) {
-            if (_minted.discarded(d) === 'dropped') _learnDropped([_droppedOf(d)]);
-            else _mintedSweep(d);
+            if (_minted.discarded(d) === 'dropped') late._learnDropped([late._droppedOf(d)]);
+            else late._mintedSweep(d);
         }
     }
     // The server answered it: a clock-skew re-stamp of a later write of the
@@ -546,7 +539,7 @@ export function _dequeue(key, descriptor, outcome) {
         _dequeueBatch.keys.add(key);
         return true;
     }
-    if (d.kind === 'evt') _publishPendingTaps(_baseOf(key));
+    if (d.kind === 'evt') late._publishPendingTaps(_baseOf(key));
     _kickFollowersOf(new Set([key]));
     return true;
 }
@@ -578,7 +571,7 @@ export function _closeDequeueBatch() {
     const b = _dequeueBatch;
     _dequeueBatch = null;
     if (!b) return;
-    for (const base of b.bases) _publishPendingTaps(base);
+    for (const base of b.bases) late._publishPendingTaps(base);
     if (b.keys.size > 0) _kickFollowersOf(b.keys);
 }
 
@@ -587,7 +580,7 @@ export function _closeDequeueBatch() {
 function _kickFollowersOf(keys) {
     for (const e of _writeQueue.values()) {
         if (_afterKeys(e).some((k) => keys.has(k))) {
-            _rerunFlushSoon();
+            late._rerunFlushSoon();
             return;
         }
     }
@@ -739,7 +732,6 @@ export function _baseOf(key) {
     return i < 0 ? key : key.slice(0, i);
 }
 
-
 // _poolRanksBase: the queue base of a competition's pool-rank writes (a
 // chusen's order, overridePoolRanks; stage 3 review 11, Y7), so they are sent
 // strictly in the order they were made. They belong to no match.
@@ -837,7 +829,7 @@ export function _claimRefusal(key, err) {
 // The pending answer every outbox door gives: the write is the outbox's now.
 export function _pendingAnswer(key, settled) {
     const answer = { applied: true, pending: true, key, settled };
-    if (!_lastEnqueuePersisted) answer.persisted = false;
+    if (!store.lastEnqueuePersisted) answer.persisted = false;
     return answer;
 }
 
@@ -849,7 +841,7 @@ export function _pendingAnswer(key, settled) {
 export function _parkStoredEntries() {
     // What an older build still holds under the old key carries the revoked
     // password too: taken over first, so it is parked with the rest (F4).
-    try { _takeOverLegacyQueue(localStorage.getItem(LEGACY_QUEUE_STORAGE_KEY)); } catch (_e) { /* unreadable storage */ }
+    try { late._takeOverLegacyQueue(localStorage.getItem(LEGACY_QUEUE_STORAGE_KEY)); } catch (_e) { /* unreadable storage */ }
     const stored = _storedQueue();
     if (stored.size === 0) return;
     for (const d of stored.values()) {
@@ -860,4 +852,42 @@ export function _parkStoredEntries() {
     try {
         localStorage.setItem(QUEUE_STORAGE_KEY, JSON.stringify([...stored.entries()]));
     } catch (_e) { /* unwritable storage: the persist that follows reports it */ }
+}
+
+// _afterKeys: the queue keys an entry follows (`after`): one key, stored as a
+// string, or several (a score write naming two teams' new members), stored as
+// an array.
+export function _afterKeys(d) {
+    if (!d) return [];
+    if (Array.isArray(d.after)) return d.after.filter((k) => typeof k === 'string' && k);
+    return typeof d.after === 'string' && d.after ? [d.after] : [];
+}
+
+// _addAfter: makes the entry follow `key` as well as what it already follows.
+export function _addAfter(d, key) {
+    if (!d || typeof key !== 'string' || !key) return;
+    const keys = _afterKeys(d);
+    if (keys.includes(key)) return;
+    keys.push(key);
+    d.after = keys.length === 1 ? keys[0] : keys;
+}
+
+// _lineupKey: the queue BASE of a lineup: a match's own lineup (`matchId`), or a
+// team's Lineups-page round (round 0 is its starting lineup). The one owner of
+// the key: both lineup saves and queuedLineupSave name a lineup by it.
+export function _lineupKey(compID, teamId, { matchId, round }) {
+    return matchId ? `lineup:${compID}:${teamId}:match:${matchId}` : `lineup:${compID}:${teamId}:${round}`;
+}
+
+// _keepForClock: the ONE rule for a write or tap refused for clock_skew again
+// after a re-stamp. It stays queued, reads as one the server keeps refusing
+// (`clockRefused`, _refusedByServer: held, and discardable from its editor and
+// the held-writes list), and the pass backs off. True the first time, so the
+// caller tells the operator once.
+export function _keepForClock(d, pass) {
+    pass.anyFailed = true;
+    if (d.clockRefused) return false;
+    d.clockRefused = true;
+    _persistQueue();
+    return true;
 }

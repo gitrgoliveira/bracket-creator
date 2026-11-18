@@ -299,7 +299,8 @@ export function findViolations() {
   const defaultWinRules = FORBIDDEN.filter((_, i) => WHOLE_FILE_RULE_INDICES.has(i));
   for (const file of EXTRA_TEXT_FILES) {
     const rel = relative(ROOT, file);
-    for (const hit of scanWholeFile(readFileSync(file, 'utf8'), defaultWinRules)) {
+    const kind = file.endsWith('.html') ? 'html' : 'css';
+    for (const hit of scanWholeFile(readFileSync(file, 'utf8'), defaultWinRules, kind)) {
       violations.push({ rel, ...hit });
     }
   }

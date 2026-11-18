@@ -26,9 +26,9 @@ import {
     subscribeLocalParticipantPatch, _checkInBase, _checkInsOf,
 } from './api_client_overlays.jsx';
 import {
-    _eventSession, _latestDerived, _derivedListeners, _pendingTapListeners, _tapOutcomeListeners,
-    _pruneToldOnBoard, _nextTapSeq, _claimToldHere, _forgetTurnedAwayAndTold, _forgetDerivedCopies,
-    _queueBoardTold, _listenOn, _pendingTapsFor, _publishPendingTaps, _told, _forgetLandedTaps,
+    _eventSession, _derivedListeners, _pendingTapListeners, _tapOutcomeListeners, _pruneToldOnBoard,
+    _nextTapSeq, _claimToldHere, _forgetTurnedAwayAndTold, _forgetDerivedCopies, _queueBoardTold, _listenOn,
+    _pendingTapsFor, _publishPendingTaps, _told, _forgetLandedTaps,
 } from './api_client_taps.jsx';
 import {
     _keepsFailing, _refusedByServer, _heldWriteItem, _noteShownMatch, _discardIfFailing, _recomputeSyncStatus,
@@ -38,8 +38,9 @@ import {
     _afterDiscard, _resetFlushBackoff, _setOffline, _bumpQueueGen, _flushQueue, _blockerOf, _queueIndex,
     _newWalk,
 } from './api_client_flush.jsx';
-import { _commitEnqueue, _lastEnqueuePersisted } from './api_client_enqueue.jsx';
+import { _commitEnqueue } from './api_client_enqueue.jsx';
 import { _resumeMintedReads, _pauseMintedReads, _wipeMintedRecords } from './api_client_members.jsx';
+import { _latestDerived, store } from './api_client_store.jsx';
 
 // bc-obox C1/T1: the ONE reader of "this competition still has queued
 // writes of these kinds": how many entries this device's outbox holds for
@@ -167,7 +168,7 @@ export const outboxApi = {
         // microtask so the taps of one tick go in one batch.
         _commitEnqueue(base, descriptor, null, { nextTick: true });
         const answer = { id, stamp, seq };
-        if (!_lastEnqueuePersisted) answer.persisted = false;
+        if (!store.lastEnqueuePersisted) answer.persisted = false;
         return answer;
     },
     // The taps this device still holds for a match, in send order (event

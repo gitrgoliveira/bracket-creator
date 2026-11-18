@@ -6,7 +6,23 @@
 // both sent an entry (a court call POST and its withdrawal DELETE twice), and an
 // entry one tab took up mid-pass could go after a later entry of the same match
 // the other tab had already sent. A tab now sends a base only while it holds
-// that base's lease:
+// that base's lease. A lease is held one of two ways, chosen ONCE when the lease
+// is built (`createBaseLease`, by feature detection, never by user agent):
+//
+// - Web Locks (`navigator.locks`, `createLockLease`): the lock named for the base
+//   is held while the tab sends it. The browser itself gives a lock up when its
+//   tab closes or crashes, so the next tab takes the base over at once, and a
+//   tab that was turned away is told when the lock frees (`whenFree`).
+// - The timed note, below, where the browser or the page has no Web Locks (an
+//   older browser or build, or a page served over plain http, where browsers
+//   hide `navigator.locks`: a phone reaching the app by its LAN address).
+//
+// The timed note is a FALLBACK kept on purpose: the operator asked for Web Locks
+// with the note as the path for a browser without them (decision L1), which is
+// the one place this app keeps a fallback beside the better mechanism. Do not
+// copy it elsewhere, and do not drop it without that ruling.
+//
+// The timed note:
 //
 // - One record in storage PER BASE, `BASE_LEASE_PREFIX + base`: { tab, at }. A
 //   tab takes a base's lease for the turn it is about to send and gives it up
@@ -47,6 +63,7 @@ export const baseLeaseKey = (base) => BASE_LEASE_PREFIX + base;
 // which is why the holder also renews before each entry (`renew`).
 export const BASE_LEASE_LIVE_MS = 6_000;
 export const BASE_LEASE_BEAT_MS = 2_000;
+const baseLockName = (base) => 'bc_base_sender_v1:' + base;
 
 function parse(raw) {
     if (!raw) return null;
@@ -59,10 +76,87 @@ function parse(raw) {
 }
 
 /**
+ * The lease of one tab over the bases it sends, behind one interface:
+ * `claim(base)` a promise of whether this tab holds the base now; `release(base,
+ * wake)`; `renew()`; `leave()`; `whenFree(base)` a promise that settles when
+ * another tab's hold on the base is over; `held()`.
+ *
  * @param {{ storage: { getItem(k: string): string|null, setItem(k: string, v: string): void, removeItem(k: string): void },
- *   tab: string, now?: () => number }} opts storage may throw on any call.
+ *   tab: string, now?: () => number, locks?: object|null }} opts storage may throw
+ *   on any call. `locks` is `detectWebLocks()`'s answer (or a stand-in): given,
+ *   the lease is held with Web Locks and the storage is not used.
  */
-export function createBaseLease({ storage, tab, now = () => Date.now() }) {
+export function createBaseLease({ storage, tab, now = () => Date.now(), locks = null }) {
+    return locks ? createLockLease({ locks, tab }) : createNoteLease({ storage, tab, now });
+}
+
+/** The page's `navigator.locks` when it has Web Locks, else null. Asked once, where the lease is built. */
+export function detectWebLocks() {
+    const locks = globalThis.navigator && globalThis.navigator.locks;
+    return locks && typeof locks.request === 'function' ? locks : null;
+}
+
+// The lease held with Web Locks. A request that finds the lock taken is
+// answered `false` at once (`ifAvailable`), so a tab never queues behind a
+// sender's turn; the granted callback returns a promise that `give` settles to
+// let the lock go.
+function createLockLease({ locks, tab }) {
+    const holds = new Map();    // base -> { give, done }: the locks this tab holds
+    const ending = new Map();   // base -> promise: a release this tab made that the lock manager has not finished
+    const release = (base) => {
+        const hold = holds.get(base);
+        if (!hold) return;
+        holds.delete(base);
+        const gone = hold.done.then(() => { if (ending.get(base) === gone) ending.delete(base); }, () => {});
+        ending.set(base, gone);
+        hold.give();
+    };
+    return {
+        tab,
+        claim(base) {
+            if (holds.has(base)) return Promise.resolve(true);
+            // A claim right after this tab's own release waits for the release to land,
+            // or the lock would still look taken, by this tab itself.
+            return Promise.resolve(ending.get(base)).then(() => new Promise((resolve) => {
+                try {
+                    const done = locks.request(baseLockName(base), { ifAvailable: true }, (lock) => {
+                        if (!lock) { resolve(false); return undefined; }
+                        return new Promise((give) => { holds.set(base, { give, done }); resolve(true); });
+                    });
+                    // A page that refuses locks (an opaque origin) gives none: the tab
+                    // sends as it always did, safe because the server answers a resend as recorded.
+                    done.catch(() => resolve(true));
+                } catch (_e) {
+                    resolve(true);
+                }
+            }));
+        },
+        // Letting the lock go is the wake: a tab queued in `whenFree` is granted it.
+        release,
+        // A held lock needs no beat.
+        renew() {},
+        leave() {
+            for (const base of [...holds.keys()]) release(base);
+        },
+        whenFree(base) {
+            return new Promise((resolve) => {
+                try {
+                    // Queued behind the holder; granted, and given straight back, once it is
+                    // gone. Settled only when the lock is back, or a claim made at once finds it taken.
+                    locks.request(baseLockName(base), () => undefined).then(() => resolve(), () => resolve());
+                } catch (_e) {
+                    resolve();
+                }
+            });
+        },
+        held() {
+            return [...holds.keys()];
+        },
+    };
+}
+
+// The lease held with the timed note (see the header).
+function createNoteLease({ storage, tab, now }) {
     const mine = new Set();
     let timer = null;
     let wakes = 0;
@@ -104,11 +198,11 @@ export function createBaseLease({ storage, tab, now = () => Date.now() }) {
     return {
         tab,
         /**
-         * Takes the base's lease for this tab. True when this tab holds it now (it
+         * Takes the base's lease for this tab. Resolves true when this tab holds it now (it
          * did, or it was free, or its holder's lease is old); false when another
          * live tab holds it, or one claimed it as this tab did.
          */
-        claim(base) {
+        async claim(base) {
             const t = now();
             const held = read(base);
             if (alive(held, t) && held.tab !== tab) return false;
@@ -145,12 +239,14 @@ export function createBaseLease({ storage, tab, now = () => Date.now() }) {
             for (const base of mine) this.release(base);
         },
         /**
-         * How long until the lease another tab holds on the base runs out unless
-         * that tab beats again; 0 when none is held.
+         * Settles once the lease another tab holds on the base would have run out
+         * unless that tab beats again (at once when none is held). A holder that is
+         * alive beats and the next claim finds it held again.
          */
-        expiresIn(base) {
+        whenFree(base) {
             const held = read(base);
-            return held ? Math.max(0, BASE_LEASE_LIVE_MS - (now() - Number(held.at))) : 0;
+            const left = held ? Math.max(0, BASE_LEASE_LIVE_MS - (now() - Number(held.at))) : 0;
+            return new Promise((resolve) => { setTimeout(resolve, left + 50); });
         },
         /** The bases this tab holds (the tests read it). */
         held() {

@@ -12,7 +12,7 @@ const FAMILIES = {
     'api_client.jsx', 'api_client_clock.jsx', 'api_client_competitions.jsx', 'api_client_enqueue.jsx',
     'api_client_events.jsx', 'api_client_flush.jsx', 'api_client_ids.jsx', 'api_client_matches.jsx',
     'api_client_members.jsx', 'api_client_outbox.jsx', 'api_client_overlays.jsx', 'api_client_queue.jsx',
-    'api_client_requests.jsx', 'api_client_status.jsx', 'api_client_taps.jsx', 'api_client_teams.jsx',
+    'api_client_requests.jsx', 'api_client_status.jsx', 'api_client_store.jsx', 'api_client_taps.jsx', 'api_client_teams.jsx',
     'api_client_tournament.jsx',
   ],
   'admin_scoring_team.jsx': ['admin_scoring_team.jsx', 'admin_scoring_team_bouts.jsx', 'admin_scoring_team_kachinuki.jsx'],

@@ -25,9 +25,9 @@ import {
     _emitLocalMatchPatch,
 } from './api_client_overlays.jsx';
 import { _noteShownMatch, _noteMatchLabel } from './api_client_status.jsx';
-import { _offlineFlag } from './api_client_flush.jsx';
 import { _outboxWrite, _lastEntryKey, _daihyosenRequest } from './api_client_enqueue.jsx';
 import { queuedWritesOf } from './api_client_outbox.jsx';
+import { store } from './api_client_store.jsx';
 
 export const matchesApi = {
     /**
@@ -270,7 +270,7 @@ export const matchesApi = {
     // or failing for a while does not make every pick ask the operator.
     startCheckUntrusted(compID) {
         if (isOffline()) return true;
-        if (_offlineFlag) return true;
+        if (store.offlineFlag) return true;
         return queuedWritesOf(compID, START_CHECK_WRITE_KINDS) > 0;
     },
     // mp-gmcg: reopen a COMPLETED kachinuki team match, or (bc-tmfn) any

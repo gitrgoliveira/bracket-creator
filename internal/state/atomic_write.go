@@ -12,7 +12,8 @@
 // fsync that file, close it, rename(tmp, target), atomic on POSIX
 // when src and dst are on the same filesystem, then fsync the parent
 // directory so the rename metadata is durable across power loss (a
-// no-op on Windows where directory fsync isn't supported).
+// no-op on Windows where directory fsync isn't supported). Every flush
+// goes through flush (flush.go), which a test binary on macOS skips.
 //
 // Why a unique-suffix .tmp filename? Per-comp mutex serializes writes
 // to the same target in practice, but an explicit PID + nanosecond
@@ -94,7 +95,7 @@ func storePath(path string) string {
 //
 // Implementation steps:
 //  1. Create a sibling temp file "<base>.tmp-<pid>-<nanos>" with perm.
-//  2. Write data, then tmp.Sync() to flush the file contents.
+//  2. Write data, then flush(tmp) to make the file contents durable.
 //  3. Close the temp file.
 //  4. Rename tmp -> path. This is atomic on POSIX when both paths live
 //     on the same filesystem (they do, tmp is a sibling of path).
@@ -153,7 +154,7 @@ func atomicWriteFile(root *dataRoot, path string, data []byte, perm fs.FileMode)
 		return closeAndCleanup(err)
 	}
 
-	if err := tmp.Sync(); err != nil {
+	if err := flush(tmp); err != nil {
 		return closeAndCleanup(err)
 	}
 
@@ -203,8 +204,8 @@ func (s *Store) directWrite(path string, data []byte, perm fs.FileMode) error {
 	return s.atomicWrite(path, data, perm)
 }
 
-// syncDir opens dirPath and calls Sync() on the resulting directory
-// handle. On Linux/macOS this forces the directory-entry update
+// syncDir opens dirPath and flushes the resulting directory handle
+// (flush, flush.go). On Linux/macOS this forces the directory-entry update
 // (including the rename we just performed) to be durable across power
 // loss. On Windows opening a directory for sync isn't supported by the
 // runtime; the error returned in that case is swallowed so callers
@@ -231,7 +232,7 @@ func syncDir(root *dataRoot, dirPath string) (err error) {
 		}
 	}()
 
-	if err := d.Sync(); err != nil {
+	if err := flush(d); err != nil {
 		// Some filesystems (notably tmpfs on certain kernels, and FUSE
 		// mounts) return ENOTSUP / EINVAL for directory fsync. Treat
 		// those as "best-effort done"; the rename already happened,

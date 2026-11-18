@@ -60,7 +60,6 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/engine"
 	"github.com/gitrgoliveira/bracket-creator/internal/mobileapp"
-	"github.com/gitrgoliveira/bracket-creator/internal/racesample"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 	"github.com/stretchr/testify/require"
 )
@@ -875,7 +874,7 @@ func gateOrderings(legacy bool) [][]string {
 }
 
 // gateRaceKeep is how many of the gate's orderings run under the race detector
-// (racesample.Sample): about a tenth of the 2560; every one runs without it.
+// (raceSample): about a tenth of the 2560; every one runs without it.
 const gateRaceKeep = 256
 
 func TestKachinukiBoutOnePermutationGate(t *testing.T) {
@@ -906,7 +905,7 @@ func TestKachinukiBoutOnePermutationGate(t *testing.T) {
 			every = append(every, ordering{legacy, ops})
 		}
 	}
-	all := racesample.Sample(every, gateRaceKeep)
+	all := raceSample(every, gateRaceKeep)
 	// A sample still drives every operation the orderings hold, in both
 	// kinds of match, at least once.
 	opsOf := func(set []ordering) map[string]bool {

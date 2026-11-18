@@ -255,6 +255,32 @@ func TestCompRoot_AFolderMadeAgainBySaveCompetitionIsTheOneWritten(t *testing.T)
 	assertHeldRootsAreLive(t, s.root)
 }
 
+// A folder moved aside by hand with another put in its place (no ENOENT ever
+// answers) is followed by SaveCompetition: the mkdirAll sees the held root is on
+// another folder and drops it, so config.md lands in the folder now named. The
+// mkdirAll is called alone first, since only the drop leaves no root held.
+func TestCompRoot_AFolderSwappedByHandIsTheOneWrittenBySaveCompetition(t *testing.T) {
+	s, _ := newRestoreTestStore(t)
+	require.NoError(t, s.SaveCompetition(&Competition{ID: "c1", Name: "C1", Date: "01-01-2026"}))
+	holdComp(t, s, "c1")
+	folder := s.compPath("c1")
+	aside := filepath.Join(t.TempDir(), "c1-aside")
+	require.NoError(t, os.CopyFS(aside, os.DirFS(folder)))
+	require.NoError(t, os.RemoveAll(folder))
+	require.NoError(t, os.CopyFS(folder, os.DirFS(aside)))
+	// The held descriptor is still on the removed folder, and answers.
+	require.NotNil(t, heldRoot(s.root, "c1"))
+
+	require.NoError(t, s.root.mkdirAll(folder, 0o700))
+	assert.Empty(t, heldComps(s.root), "the root held on the replaced folder is dropped")
+
+	require.NoError(t, s.SaveCompetition(&Competition{ID: "c1", Name: "C1 swapped", Date: "01-01-2026"}))
+	data, err := os.ReadFile(s.compPath("c1", "config.md"))
+	require.NoError(t, err)
+	assert.Contains(t, string(data), "C1 swapped")
+	assertHeldRootsAreLive(t, s.root)
+}
+
 // heldRoot is the os.Root the store holds on competition id, nil when none.
 func heldRoot(d *dataRoot, id string) *os.Root {
 	v, ok := d.comps.Load(id)

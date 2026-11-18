@@ -483,17 +483,19 @@ func (d *dataRoot) mkdir(path string, perm fs.FileMode) error {
 }
 
 // mkdirAll makes path and its missing parents. When path is a competition
-// folder (saveCompetitionChangedLocked's, the one place that creates one) that
-// is not there, the folder's held root is dropped first, so a root held on a
-// folder removed by hand never outlives the folder made in its place. A folder
-// that is already there is left alone and keeps its root: every config.md save
-// asks, and dropping the root each time would throw away the cache on a save
-// that changes nothing. (A root held on a folder removed and put back by hand
-// is dropped by the ENOENT retry on the next call instead.)
+// folder (saveCompetitionChangedLocked's, the one place that creates one), the
+// folder's held root is dropped first unless the folder is there and is the one
+// the root holds, so a root never outlives the folder it was opened on: not one
+// removed by hand, and not one moved aside and replaced by another. A folder
+// that is there and held keeps its root: every config.md save asks, and
+// dropping the root each time would throw away the cache on a save that changes
+// nothing. (Only this door asks: another call on a folder swapped by hand runs
+// on the old one until it answers ENOENT, which the retry on the next call
+// follows.)
 func (d *dataRoot) mkdirAll(path string, perm fs.FileMode) error {
 	if rel, err := d.name("mkdir", path); err == nil {
-		if _, isComp := compFolderOf(rel); isComp {
-			if fi, err := d.root.Stat(rel); err == nil && fi.IsDir() {
+		if id, isComp := compFolderOf(rel); isComp {
+			if fi, err := d.root.Stat(rel); err == nil && fi.IsDir() && !d.heldOtherThan(id, fi) {
 				return nil
 			}
 		}
@@ -501,6 +503,19 @@ func (d *dataRoot) mkdirAll(path string, perm fs.FileMode) error {
 	return d.change("mkdir", path, isNotExist,
 		func(r *os.Root, name string) error { return r.MkdirAll(name, perm) },
 		func(name string) error { return d.root.MkdirAll(name, perm) })
+}
+
+// heldOtherThan reports whether competition id has a held root opened on a
+// folder other than named, the folder now at competitions/<id>.
+func (d *dataRoot) heldOtherThan(id string, named fs.FileInfo) bool {
+	v, ok := d.comps.Load(id)
+	if !ok {
+		return false
+	}
+	e := v.(*compRoot)
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.root != nil && !os.SameFile(named, e.held)
 }
 
 func (d *dataRoot) remove(path string) error {

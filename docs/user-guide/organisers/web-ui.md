@@ -1,7 +1,7 @@
 # Legacy Web UI
 
 !!! note "Legacy"
-    The Legacy Web UI is kept for compatibility. For a new tournament, use the [tournament app](../start-here/first-tournament.md): its **Download blank template (.xlsx)** gives the same Excel bracket for the draw you generated, and **Export PDFs** prints it. Refer to [Export and print](run-tournament.md#export-and-print).
+    The Legacy Web UI is kept for compatibility. For a new tournament, use the [tournament app](../start-here/first-tournament.md): its **Download blank template (.xlsx)** gives the same Excel bracket for the draw you generated (empty places before the draw), and **Export PDFs** prints it. Refer to [Export and print](run-tournament.md#export-and-print).
 
 The Legacy Web UI is a standalone one-shot bracket generator. It turns a roster into a print-ready Excel bracket from your browser, with no CSV editing.
 

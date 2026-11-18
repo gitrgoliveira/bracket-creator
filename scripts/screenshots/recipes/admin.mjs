@@ -204,7 +204,35 @@ async function setMoveStart(page, value) {
   await page.locator('.cal-move-dialog [aria-live="polite"]').first().waitFor({ state: 'visible', timeout: 15000 });
 }
 
+// The Export & print tab of a competition with no draw yet: a roster that was
+// never shuffled and an expected number above the roster, so the tab shows the
+// "only a blank template" notice and the never-shuffled warning beside the one
+// download. Built over the HTTP API, which is allowed here because the capture
+// shows a tab's notices, not a bout or a point that an HTTP write could drop.
+const EXPORT_ID = 'export-setup';
+const EXPORT_NAME = "Women's Individual";
+const EXPORT_ROSTER = [
+  ['Aiko Sato', 'Tokyo Kenyu'], ['Elena Rossi', 'Milano Kendo'], ['Hana Ito', 'Kyoto Budokan'],
+  ['Sophie Martin', 'Paris Kendo Club'], ['Mio Abe', 'Seishinkan'], ['Karin Lind', 'Nordic Kendo'],
+].map(([name, dojo]) => ({ name, dojo }));
+
+async function seedExportBeforeDraw({ api }) {
+  await api.tournament({ name: 'Spring Kendo Taikai 2026', date: CAL_DATE_1, courts: ['A', 'B'] });
+  await api.competition(EXPORT_ID, EXPORT_NAME, { date: CAL_DATE_1, courts: ['A', 'B'], expectedParticipants: 12 });
+  await api.participants(EXPORT_ID, EXPORT_ROSTER);
+}
+
 export const families = {
+  // The Export & print tab before the draw: the pre-draw notice and the
+  // never-shuffled warning (the roster is saved in the order it was entered).
+  exportBeforeDraw: {
+    server: 'mobile',
+    // SINCE scoping inputs (lib/scope.mjs): the Export tab and the rule that
+    // decides when its results button and shuffle warning appear.
+    sources: ['web-mobile/js/admin_schedule_export', 'web-mobile/js/recorded_result', 'web-mobile/js/competition_shape'],
+    seed: seedExportBeforeDraw,
+  },
+
   // The tournament the committed captures were taken against: "London Cup
   // Demo", six competitions. Seeded by the same script `make
   // mobile-app-example` runs, so the docs and the demo cannot drift apart.
@@ -343,6 +371,27 @@ export const recipes = [
     capture: 'viewport',
     auth: 'admin',
     waitFor: 'text=Admin console',
+  },
+
+  {
+    // The Export & print tab of a competition with no draw: the notice that
+    // only a blank template exists until the draw is generated, the
+    // never-shuffled warning, and the one Download blank template button. No
+    // results button, since no result is recorded.
+    name: 'mobile-export-before-draw',
+    family: 'exportBeforeDraw',
+    route: `/admin/competition/${EXPORT_ID}/export`,
+    viewport: { width: 1280, height: 680 },
+    capture: 'viewport',
+    auth: 'admin',
+    waitFor: '[data-testid="export-not-shuffled"]',
+    // The viewer link carries the capture server's random port, which would
+    // change the still on every run: show a fixed address instead.
+    drive: async ({ page }) => {
+      await page.evaluate(() => {
+        document.querySelector('input.input[readonly]').value = 'https://taikai.example.org/competition/export-setup';
+      });
+    },
   },
 
   {

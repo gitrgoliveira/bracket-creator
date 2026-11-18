@@ -9,6 +9,11 @@
 // journey downloads it before the draw (empty places, sized from the roster),
 // then after the draw (the app's own pools, from the ten competitors checked in).
 //
+// The Export tab around the button is read too: before the draw it says only a
+// blank template can be downloaded and warns that the list was never shuffled
+// (Shuffle unseeded on Participants clears the warning), and "Download results"
+// is offered only once a match has a recorded result.
+//
 // Everything is seeded through the interface: the wizard, the roster paste
 // box, the Registration desk and Generate draw.
 import { test, expect } from '../fixtures/test.mjs';
@@ -18,10 +23,12 @@ import { enterTournament } from '../fixtures/setup.mjs';
 import { createCompetition } from '../fixtures/wizard.mjs';
 import { pasteRoster } from '../fixtures/competition.mjs';
 import {
-  bulkCheckInDojo, deskHeadline, generateDrawExcluding, groupByDojo, openCompetitionTab, openDesk, poolMembers,
-  toggleCheckIn,
+  bulkCheckInDojo, deskHeadline, generateDrawExcluding, groupByDojo, openCompetitionTab, openDesk, openParticipants,
+  poolMembers, toggleCheckIn,
 } from '../fixtures/roster.mjs';
-import { downloadTemplateWorkbook, poolDrawMembers } from '../fixtures/organiser.mjs';
+import { openShiaijo } from '../fixtures/shiaijo.mjs';
+import { playRunningBout } from '../fixtures/individual.mjs';
+import { downloadResultsWorkbook, downloadTemplateWorkbook, poolDrawMembers, readWorkbook } from '../fixtures/organiser.mjs';
 
 const COMP = 'Template Open';
 // Twelve entrants, six dojos of two, (name, dojo) unique. Pools of three.
@@ -37,10 +44,17 @@ const ABSENT = ['Aoi Sato', 'Ben Carter'];
 const audit = auditLog('blank-template');
 const { record } = audit;
 
+// The Export tab's own parts: the notice before the draw, the warning that the
+// list was never shuffled, and the two download buttons.
+const preDrawNotice = (page) => page.getByTestId('export-pre-draw-notice');
+const notShuffled = (page) => page.getByTestId('export-not-shuffled');
+const resultsButton = (page) => page.getByRole('button', { name: 'Download results (.xlsx)' });
+const templateButton = (page) => page.getByRole('button', { name: 'Download blank template (.xlsx)' });
+
 test.describe('blank template', () => {
   test.afterAll(() => audit.flush());
 
-  test('the blank template of a drawn competition holds the pools the app runs', async ({ page }) => {
+  test('the Export tab offers the blank layout before the draw and the stored draw after it', async ({ page }) => {
     const shot = journeyShots('blank-template');
     await enterTournament(page, { name: 'Template Cup' });
     const id = await createCompetition(page, {
@@ -59,6 +73,10 @@ test.describe('blank template', () => {
 
     await test.step('before the draw, the template is the blank layout (empty places)', async () => {
       const dl = await downloadTemplateWorkbook(page, id);
+      await expect(preDrawNotice(page), 'the tab says only a blank template is offered').toContainText('only a blank template can be downloaded');
+      await expect(notShuffled(page), 'the list has never been shuffled').toContainText('never been shuffled');
+      await expect(resultsButton(page), 'nothing is recorded, so no results workbook').toHaveCount(0);
+      await expect(templateButton(page)).toBeVisible();
       await shot(page, 'export-before-draw');
       const blank = poolDrawMembers(dl.bytes);
       record({ journey: 'blank-template', step: 'template before the draw', routes: dl.routes, pools: blank });
@@ -67,6 +85,18 @@ test.describe('blank template', () => {
       expect(pools, 'twelve places in pools of three').toHaveLength(4);
       for (const places of pools) expect(places, 'three places a pool').toHaveLength(3);
       for (const name of Object.values(blank).flat()) expect(name, 'a place names nobody').toBeFalsy();
+    });
+
+    await test.step('Shuffle unseeded on Participants clears the never-shuffled warning', async () => {
+      await openParticipants(page, id);
+      const saved = page.waitForResponse((r) => r.request().method() === 'PUT'
+        && new URL(r.url()).pathname.startsWith(`/api/competitions/${id}`));
+      await page.getByRole('button', { name: 'Shuffle unseeded' }).tap();
+      expect((await saved).ok(), 'the shuffled list was saved').toBe(true);
+      await page.goto(`/admin/competition/${id}/export`);
+      await expect(templateButton(page)).toBeVisible();
+      await expect(preDrawNotice(page), 'still no draw').toBeVisible();
+      await expect(notShuffled(page), 'a shuffle is recorded').toHaveCount(0);
     });
 
     let pools;
@@ -90,6 +120,21 @@ test.describe('blank template', () => {
       // Soft, so a template from the wrong door also reports the pools it holds.
       expect.soft(dl.routes, 'a drawn competition prints its stored draw').toEqual([`GET /api/competitions/${id}/export`]);
       expect(book, 'the Pool Draw sheet holds the app\'s pools, each in the app\'s order').toEqual(pools);
+      await expect(preDrawNotice(page), 'a drawn competition has no pre-draw notice').toHaveCount(0);
+      await expect(resultsButton(page), 'a draw alone records nothing').toHaveCount(0);
+    });
+
+    await test.step('once a bout is recorded the results workbook is offered', async () => {
+      await openShiaijo(page, 'A');
+      const pair = await playRunningBout(page);
+      record({ journey: 'blank-template', step: 'bout recorded', pair });
+      await page.goto(`/admin/competition/${id}/export`);
+      await expect(resultsButton(page)).toBeVisible();
+      await expect(templateButton(page)).toBeVisible();
+      await shot(page, 'export-with-result');
+      const dl = await downloadResultsWorkbook(page, id);
+      expect(dl.name).toBe(`results-${id}.xlsx`);
+      expect(readWorkbook(dl.bytes).sheets, 'the results workbook keeps the Pool Draw sheet').toContain('Pool Draw');
     });
   });
 });

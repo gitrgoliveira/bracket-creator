@@ -226,7 +226,11 @@ browser, `--debug` opens the inspector, and a failing test leaves a trace
                                   layout (empty places) before the draw, the
                                   stored draw after it; its Pool Draw sheet
                                   holds the app's pools, where check-in left
-                                  two entrants out of the draw
+                                  two entrants out of the draw. Also the tab's
+                                  pre-draw notice, the never-shuffled warning
+                                  (cleared by Shuffle unseeded) and Download
+                                  results appearing only once a bout is
+                                  recorded
       organiser-locked            locked mode: sign-in with the hashed password,
                                   no Forgot password, and /reset shows it is
                                   disabled.

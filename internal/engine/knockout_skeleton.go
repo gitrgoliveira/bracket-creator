@@ -241,12 +241,7 @@ func extraQualifierOverrides(comp *state.Competition, pools []helper.Pool, poolW
 // prints, since it builds from the entrant list and never pads.
 //
 // Returns nil when there is nothing to render.
-//
-// The store parameter is no longer read: it fed the pre-draw roster fallback,
-// which is gone (a competition with no draw prints the blank layout instead).
-// It stays in the signature only because internal/export's results workbook
-// passes it; drop it with that call.
-func EliminationDraw(_ *state.Store, comp *state.Competition, pools []helper.Pool, bracket *state.Bracket, numCourts int) *helper.KnockoutDraw {
+func EliminationDraw(comp *state.Competition, pools []helper.Pool, bracket *state.Bracket, numCourts int) *helper.KnockoutDraw {
 	if draw := poolDraw(comp, pools, numCourts); draw != nil {
 		return draw
 	}

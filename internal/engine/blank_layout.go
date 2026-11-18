@@ -158,7 +158,7 @@ func blankDraw(comp *state.Competition, courts []string, n int) (*blankLayout, e
 		layout.poolMatches = poolMatchResults(&c, pools, drawCourts, hasRounds)
 		AttachPoolMatches(pools, layout.poolMatches)
 		layout.pools = pools
-		layout.draw = EliminationDraw(nil, &c, pools, nil, len(courts))
+		layout.draw = EliminationDraw(&c, pools, nil, len(courts))
 	default:
 		// A standalone knockout, as runDrawPipeline's default case draws one
 		// (generateKnockout): seeding order, the balanced tree, then the pow2

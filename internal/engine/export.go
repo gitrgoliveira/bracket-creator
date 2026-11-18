@@ -148,7 +148,7 @@ func (e *Engine) ExportCompetitionXlsx(id string) ([]byte, error) {
 	// bracket: pool winners for pooled formats, or the stored bracket's leaves for
 	// a pure knockout competition (mp-ndfu, mp-0yd8). RenderCompetitionWorkbook's
 	// own gate then drops the phantom bracket a league's placeholder finals imply.
-	draw := EliminationDraw(e.store, comp, pools, bracket, numCourts)
+	draw := EliminationDraw(comp, pools, bracket, numCourts)
 
 	// Kachinuki Detail sheet's bout log. Opt-in: WriteKachinukiDetailSheet
 	// no-ops on empty input, so this is safe for a fixed-format competition.

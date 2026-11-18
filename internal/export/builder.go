@@ -127,7 +127,7 @@ func BuildResultsWorkbook(store *state.Store, eng *engine.Engine, compID string)
 	// with the stored-draw export so the two exports of one competition
 	// render the identical bracket, with numbering that matches the stored
 	// bracket overlayBracketScores fills in (mp-ndfu).
-	draw := engine.EliminationDraw(store, comp, pools, bracket, numCourts)
+	draw := engine.EliminationDraw(comp, pools, bracket, numCourts)
 
 	// Kachinuki Detail sheet's bout log (GAP 6): bout-by-bout log for
 	// kachinuki team competitions. Same opt-in semantics as the stored-draw

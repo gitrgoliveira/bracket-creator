@@ -3,6 +3,14 @@
 // orderings through the real doors, builds and runs as a separate test program
 // beside the rest of mobileapp's tests, and reaches mobileapp through its
 // exported API alone.
+//
+// The trade: Go credits a statement to the package whose own tests ran it, and
+// neither make go/test nor CI's `go test -race -coverprofile` passes -coverpkg,
+// so what only this gate reaches in mobileapp, engine and state is not counted
+// toward their coverage (the 85% floor in CLAUDE.md) or Codecov's patch figure.
+// That is accepted: the gate is a property check, not the coverage of those
+// packages, and their own tests carry the floor. A statement that only this gate
+// exercises is a gap in those packages' own tests, and a new test belongs there.
 package kachinukigate
 
 // The permutation gate for who names bout 1 of a kachinuki encounter (operator
@@ -52,6 +60,7 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/engine"
 	"github.com/gitrgoliveira/bracket-creator/internal/mobileapp"
+	"github.com/gitrgoliveira/bracket-creator/internal/racesample"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 	"github.com/stretchr/testify/require"
 )
@@ -866,7 +875,7 @@ func gateOrderings(legacy bool) [][]string {
 }
 
 // gateRaceKeep is how many of the gate's orderings run under the race detector
-// (raceSample): about a tenth of the 2560; every one runs without it.
+// (racesample.Sample): about a tenth of the 2560; every one runs without it.
 const gateRaceKeep = 256
 
 func TestKachinukiBoutOnePermutationGate(t *testing.T) {
@@ -897,7 +906,7 @@ func TestKachinukiBoutOnePermutationGate(t *testing.T) {
 			every = append(every, ordering{legacy, ops})
 		}
 	}
-	all := raceSample(every, gateRaceKeep)
+	all := racesample.Sample(every, gateRaceKeep)
 	// A sample still drives every operation the orderings hold, in both
 	// kinds of match, at least once.
 	opsOf := func(set []ordering) map[string]bool {

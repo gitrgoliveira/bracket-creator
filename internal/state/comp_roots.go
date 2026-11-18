@@ -17,7 +17,8 @@ import (
 // competitions/<id>/ on that folder's root, which saves resolving
 // competitions/ and <id> again on every call; this type owns the entries and
 // the lock protocol that keeps them honest, and knows nothing of paths or
-// operations.
+// operations. The saving that pays for the protocol is measured in
+// .claude/rules/store.md.
 //
 // A held root is a descriptor on the folder, not its name: it follows the
 // folder if the folder is renamed, and keeps an unlinked folder alive if it is

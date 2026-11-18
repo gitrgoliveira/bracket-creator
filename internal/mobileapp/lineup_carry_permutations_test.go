@@ -17,6 +17,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/engine"
+	"github.com/gitrgoliveira/bracket-creator/internal/racesample"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 	"github.com/stretchr/testify/require"
 )
@@ -32,7 +33,7 @@ type carryStep struct {
 }
 
 // carryRaceKeep is how many arrival orders of each scenario run under the race
-// detector (raceSample); a scenario of 24 or 120 runs whole there too.
+// detector (racesample.Sample); a scenario of 24 or 120 runs whole there too.
 const carryRaceKeep = 120
 
 // TestLineupCarry_AMatchLineupIsTheSameInEveryArrivalOrder is the property the
@@ -152,7 +153,7 @@ func TestLineupCarry_AMatchLineupIsTheSameInEveryArrivalOrder(t *testing.T) {
 			differ, total := 0, 0
 			var first []string
 			all := carryPerms(idx)
-			orders := raceSample(all, carryRaceKeep)
+			orders := racesample.Sample(all, carryRaceKeep)
 			t.Logf("%d of %d arrival orders driven", len(orders), len(all))
 			for _, order := range orders {
 				total++

@@ -71,6 +71,7 @@ make go/build          # Build binary to bin/bracket-creator
 make go/test           # Lint + security scan + tests with coverage
 make go/test-race      # Lint + tests with race detection (slow)
 make go/test NICE=      # Run the Go tests at full priority (default is `nice -n 10`; lint, JS tests and scans are never niced)
+make go/test GOGC_TEST=  # Run the Go tests with Go's default garbage collection (default is GOGC=400 on both go test lines: less CPU, more memory)
 make go/lint           # golangci-lint only
 make run               # Build and start web server (localhost:8080)
 PORT=8081 make run      # Use alternate port (also works direct: PORT=8081 ./bin/bracket-creator serve)
@@ -279,7 +280,7 @@ Name[, Zekken/DisplayName], Dojo[, DanGrade][, source][, checked_in | checked_in
 
 ## Testing & Verification
 
-- **Gate cadence: targeted tests while iterating, the full gate before claiming completion** (operator ruling 2026-09-25). `make go/test` takes about 3 minutes and keeps every core busy, which slows every other session on the machine; a full run after each small fix is what made concurrent sessions look stuck. While iterating, run only what the change touches, each in seconds and without `cd`:
+- **Gate cadence: targeted tests while iterating, the full gate before claiming completion** (operator ruling 2026-09-25). `make go/test` takes about 10 minutes on 8 cores (the JS tests about 8 of them, the Go tests under 1, measured 2026-11-18) and keeps every core busy, which slows every other session on the machine; a full run after each small fix is what made concurrent sessions look stuck. While iterating, run only what the change touches, each in seconds and without `cd`:
   ```bash
   go -C <wt> test -run TestName ./internal/<pkg>/...
   npm --prefix <wt>/web-mobile test -- js/__tests__/<file>.test.jsx

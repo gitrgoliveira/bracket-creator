@@ -45,8 +45,10 @@ export function pngBytes(w, h, [r, g, b] = [200, 30, 30]) {
 // ---------------------------------------------------------------- workbook --
 
 // One pass, so a decoded '&' is never decoded again ("&amp;lt;" reads "&lt;").
+// Character references too: a formula's quotes are written as &#34; and &#39;.
 const XML_ENTITIES = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" };
-const xmlText = (s) => s.replace(/&(amp|lt|gt|quot|apos);/g, (_, e) => XML_ENTITIES[e]);
+const xmlText = (s) => s.replace(/&(amp|lt|gt|quot|apos|#\d+|#x[0-9a-fA-F]+);/g, (_, e) => (
+  e[0] === '#' ? String.fromCodePoint(e[1] === 'x' ? parseInt(e.slice(2), 16) : Number(e.slice(1))) : XML_ENTITIES[e]));
 
 // A shared or inline string's text: its <t> runs joined (a rich-text string
 // splits it across several), read rather than left over from stripping tags.
@@ -64,12 +66,9 @@ export function readWorkbook(buf) {
   return { sheets, text, parts: [...zip.keys()] };
 }
 
-// Every non-empty cell of one sheet, as { "F4": "M", ... }: shared and inline
-// strings resolved, numbers as written. A cell's place is what tells a played
-// bout's mark from the same letter in a heading, which the flat text of
-// readWorkbook cannot.
-export function sheetCells(buf, sheetName) {
-  const zip = readZip(buf);
+// One sheet's XML part, found through the workbook's relationships, and the
+// shared strings its cells index into.
+function sheetPart(zip, sheetName, caller) {
   const xml = (name) => (zip.get(name) ? zip.get(name).toString('utf8') : '');
   const shared = [...xml('xl/sharedStrings.xml').matchAll(/<si>([\s\S]*?)<\/si>/g)]
     .map((m) => runText(m[1]));
@@ -77,11 +76,19 @@ export function sheetCells(buf, sheetName) {
   const entry = [...xml('xl/workbook.xml').matchAll(/<sheet\b[^>]*>/g)]
     .map((m) => ({ name: /\bname="([^"]*)"/.exec(m[0]), rid: /\br:id="([^"]*)"/.exec(m[0]) }))
     .find((s) => s.name && s.rid && xmlText(s.name[1]) === sheetName);
-  if (!entry) throw new Error(`sheetCells: no sheet named ${sheetName}`);
+  if (!entry) throw new Error(`${caller}: no sheet named ${sheetName}`);
   const rel = [...xml('xl/_rels/workbook.xml.rels').matchAll(/Id="([^"]*)"[^>]*Target="([^"]*)"|Target="([^"]*)"[^>]*Id="([^"]*)"/g)]
     .map((m) => ({ id: m[1] || m[4], target: m[2] || m[3] })).find((r) => r.id === entry.rid[1]);
-  if (!rel) throw new Error(`sheetCells: no part for ${sheetName}`);
-  const part = xml(`xl/${rel.target.replace(/^\/?(xl\/)?/, '')}`);
+  if (!rel) throw new Error(`${caller}: no part for ${sheetName}`);
+  return { part: xml(`xl/${rel.target.replace(/^\/?(xl\/)?/, '')}`), shared };
+}
+
+// Every non-empty cell of one sheet, as { "F4": "M", ... }: shared and inline
+// strings resolved, numbers as written. A cell's place is what tells a played
+// bout's mark from the same letter in a heading, which the flat text of
+// readWorkbook cannot.
+export function sheetCells(buf, sheetName) {
+  const { part, shared } = sheetPart(readZip(buf), sheetName, 'sheetCells');
   const out = {};
   for (const m of part.matchAll(/<c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g)) {
     const ref = /\br="([A-Z]+\d+)"/.exec(m[1]);
@@ -97,6 +104,42 @@ export function sheetCells(buf, sheetName) {
   return out;
 }
 
+// Pool name -> the names in it, in order, as the "Pool Draw" sheet shows them
+// in a spreadsheet: the sheet holds no text of its own, only formulas into the
+// "data" sheet (a pool's heading is ='data'!$A$<r>, each competitor is
+// =data!$D$<r>&" "&data!$B$<r>, number then name), which no download carries a
+// cached value for. Each formula is resolved here against the data sheet's
+// cells, and a competitor belongs to the nearest heading above it in its
+// column. The same shape as roster.mjs's poolMembers, so the two compare as
+// they are.
+export function poolDrawMembers(buf) {
+  const zip = readZip(buf);
+  const data = sheetCells(buf, 'data');
+  const { part } = sheetPart(zip, 'Pool Draw', 'poolDrawMembers');
+  const headings = [];
+  const players = [];
+  for (const m of part.matchAll(/<c\b([^>]*?)>([\s\S]*?)<\/c>/g)) {
+    const ref = /\br="([A-Z]+)(\d+)"/.exec(m[1]);
+    const f = /<f>([\s\S]*?)<\/f>/.exec(m[2]);
+    if (!ref || !f) continue;
+    const formula = xmlText(f[1]);
+    const at = { col: ref[1], row: Number(ref[2]) };
+    const heading = /^'?data'?!\$A\$(\d+)$/.exec(formula);
+    const player = /^'?data'?!\$D\$(\d+)&" "&'?data'?!\$B\$(\d+)$/.exec(formula);
+    if (heading) headings.push({ ...at, pool: data[`A${heading[1]}`] });
+    else if (player) players.push({ ...at, name: data[`B${player[2]}`] });
+  }
+  if (!headings.length) throw new Error('poolDrawMembers: the Pool Draw sheet names no pool');
+  const pools = {};
+  for (const h of headings) pools[h.pool] = [];
+  for (const p of players.sort((a, b) => a.row - b.row)) {
+    const above = headings.filter((h) => h.col === p.col && h.row < p.row).sort((a, b) => b.row - a.row)[0];
+    if (!above) throw new Error(`poolDrawMembers: ${p.col}${p.row} (${p.name}) sits under no pool heading`);
+    pools[above.pool].push(p.name);
+  }
+  return pools;
+}
+
 // Open a competition's Export section and download its results workbook.
 // Resolves to { file, name, bytes } once Playwright's download event has fired.
 export async function downloadResultsWorkbook(page, id) {
@@ -107,6 +150,35 @@ export async function downloadResultsWorkbook(page, id) {
   const file = await download.path();
   if (!file) throw new Error(`the download failed: ${await download.failure()}`);
   return { file, name: download.suggestedFilename(), bytes: fs.readFileSync(file) };
+}
+
+// The two routes a blank template can come from: the competition's stored
+// draw (GET /api/competitions/:id/export) or the stateless generator, which
+// draws the roster again (POST /create).
+const TEMPLATE_ROUTE = /^\/(create|api\/competitions\/[^/]+\/export)$/;
+
+// Open a competition's Export section and download its blank template.
+// Resolves to { file, name, bytes, routes } once Playwright's download event
+// has fired; `routes` lists "METHOD /path" for every template request the
+// tap made, so a journey can say which door the workbook came through.
+export async function downloadTemplateWorkbook(page, id) {
+  await page.goto(`/admin/competition/${id}/export`);
+  const button = page.getByRole('button', { name: 'Download blank template (.xlsx)' });
+  await expect(button).toBeVisible();
+  const routes = [];
+  const seen = (req) => {
+    const { pathname } = new URL(req.url());
+    if (TEMPLATE_ROUTE.test(pathname)) routes.push(`${req.method()} ${pathname}`);
+  };
+  page.on('request', seen);
+  try {
+    const [download] = await Promise.all([page.waitForEvent('download'), button.tap()]);
+    const file = await download.path();
+    if (!file) throw new Error(`the download failed: ${await download.failure()}`);
+    return { file, name: download.suggestedFilename(), bytes: fs.readFileSync(file), routes };
+  } finally {
+    page.off('request', seen);
+  }
 }
 
 // ------------------------------------------------------------------ import --

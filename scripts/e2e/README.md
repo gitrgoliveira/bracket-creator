@@ -118,9 +118,10 @@ browser, `--debug` opens the inspector, and a failing test leaves a trace
     fixtures/calendar.mjs   the tournament's days and pauses (Edit details);
                             the competition calendar: its blocks, clock rows,
                             the Move dialog and Undo, line boxes and overlaps
-    fixtures/organiser.mjs  the Excel download, folder import, /reset, logo and
-                            sponsor uploads, the Backup and restore page;
-                            runtime PNG and import-bundle makers
+    fixtures/organiser.mjs  the Excel downloads (results and blank template,
+                            and the Pool Draw sheet's pools), folder import,
+                            /reset, logo and sponsor uploads, the Backup and
+                            restore page; runtime PNG and import-bundle makers
     fixtures/archive.mjs    zip reader and writer, CSV parser and formatter
     fixtures/text.mjs       escape: the one regexp escape for a pattern built
                             from the app's text
@@ -221,6 +222,11 @@ browser, `--debug` opens the inspector, and a failing test leaves a trace
                                   changed tournament (a renamed competition, a
                                   new one): the plan's rows, Cancel, a copy
                                   name already used, the password, and Undo.
+      blank-template              the Export tab's blank template: drawn from
+                                  the roster (/create) before the draw, the
+                                  stored draw after it; its Pool Draw sheet
+                                  holds the app's pools, where check-in left
+                                  two entrants out of the draw
       organiser-locked            locked mode: sign-in with the hashed password,
                                   no Forgot password, and /reset shows it is
                                   disabled.

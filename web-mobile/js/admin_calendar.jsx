@@ -7,6 +7,7 @@ import {
   saveMove, shiftClock, shiftLanes, undoMove,
 } from './calendar_move.jsx';
 import { readRetimePreview } from './retime_warning.jsx';
+import { Icon } from './icon.jsx';
 import { pushToast } from './toast_queue.jsx';
 
 const { useState, useEffect, useRef, useMemo, useCallback } = React;
@@ -1215,7 +1216,7 @@ export function AdminCalendarPage({
               onClick={() => setDesktopPage(p => Math.max(0, p - 1))}
               aria-label="Previous days"
             >
-              ‹
+              <Icon name="chevron-left" size={16} />
             </button>
             <button
               type="button"
@@ -1224,7 +1225,7 @@ export function AdminCalendarPage({
               onClick={() => setDesktopPage(p => p + 1)}
               aria-label="Next days"
             >
-              ›
+              <Icon name="chevron-right" size={16} />
             </button>
           </div>
         )}

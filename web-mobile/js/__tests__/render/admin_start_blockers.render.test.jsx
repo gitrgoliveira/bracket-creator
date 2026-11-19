@@ -74,7 +74,7 @@ async function mountCard({ c = makeComp(), tournament = { courts: ['A', 'B', 'C'
 }
 
 const startButton = (container) =>
-  Array.from(container.querySelectorAll('button')).find((b) => b.textContent.trim() === 'Start competition →');
+  Array.from(container.querySelectorAll('button')).find((b) => b.textContent.trim() === 'Start competition');
 
 describe('Dashboard CompCard start blocker (spec 007 R9)', () => {
   it('offers the start when the allocation is valid', async () => {

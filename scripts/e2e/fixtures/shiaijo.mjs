@@ -31,8 +31,9 @@ export async function sides(row) {
   return { shiro: (await names.nth(0).textContent()).trim(), aka: (await names.nth(1).textContent()).trim() };
 }
 
-// Which match an editor holds, as the operator reads it: its eyebrow ("MEN
-// INDIVIDUAL · POOL A · MATCH 1 OF 3"), its title line ("Shiaijo B · 10:20",
+// Which match an editor holds, as the operator reads it: the meta line under
+// its heading ("Men Individual, Pool A, Match 1 of 3", in the source's own
+// case), its title line ("Shiaijo B · 10:20",
 // which says the court) and the first two names it shows. `key` joins them,
 // so two readings tell whether the editor moved to another match. The inline
 // editor by default; pass EDITOR for the overlay the Scores tab opens, or any
@@ -40,14 +41,14 @@ export async function sides(row) {
 export async function editorIdentity(page, root = INLINE_EDITOR) {
   const ed = typeof root === 'string' ? page.locator(root).first() : root.first();
   const first = async (sel) => ((await ed.locator(sel).allInnerTexts())[0] || '').trim();
-  const eyebrow = await first('.editor-modal__eyebrow');
+  const meta = await first('.editor-modal__meta');
   // The title's first line: the sync pill beside it is not the match.
   const title = (await first('.editor-modal__title')).split('\n')[0].trim();
   const names = (await ed.locator('.numbered-name__text').allInnerTexts()).slice(0, 2).map((t) => t.trim());
   return {
-    eyebrow, title, names,
+    meta, title, names,
     court: (title.match(/Shiaijo\s+(\S+)/) || [])[1] || null,
-    key: [eyebrow, title, ...names].join(' | '),
+    key: [meta, title, ...names].join(' | '),
   };
 }
 

@@ -8,6 +8,7 @@ import { teamIVPWScore } from './bracket.jsx';
 import { matchShowsScore } from './match_shows_score.jsx';
 import { isSupplementaryBout } from './pool_ids.jsx';
 import { useCourtPaceLookup, paceDisplayOf, PaceTime } from './court_pace.jsx';
+import { andList } from './list_phrase.jsx';
 
 const { useState, useEffect, useMemo } = React;
 
@@ -27,7 +28,9 @@ const LOBBY_COLORS = {
     ink:        '#111111',
     surface:    'rgba(0,0,0,0.03)',
     inkDim:     'rgba(0,0,0,0.55)',
-    inkMuted:   'rgba(0,0,0,0.35)',
+    // The app's muted-text token, 4.5:1 or better on the board's white and on
+    // the NOW row's tint; black at 35% read 2.4:1.
+    inkMuted:   'var(--ink-3)',
     line:       'rgba(0,0,0,0.10)',
     lineStrong: 'rgba(0,0,0,0.20)',
     // NOW row: navy accent: emphasis is on the live match.
@@ -195,7 +198,7 @@ function LobbyMatchCell({ slot, rowKind, paceLookup }) {
     const phase = phaseLabel(match, isBracket, roundIndex, totalRounds, competition?.format);
     const compId = competition?.id || competition?.config?.id || "";
     const matchId = match?.id || match?.ID || "";
-    const prefix = [competition?.name, phase].filter(Boolean).join(' · ');
+    const prefix = [competition?.name, phase].filter(Boolean).join(', ');
     const hasTime = Boolean(match.scheduledAt);
     const timeNode = <PaceTime display={paceDisplayOf(paceLookup, compId, matchId)} fallback={match.scheduledAt || ""} />;
     // NO middle-mark chip in the meta strip (operator ruling): the
@@ -218,7 +221,7 @@ function LobbyMatchCell({ slot, rowKind, paceLookup }) {
                     // (.lobby-cell in styles.css), so a pinned size shrinks
                     // away to nothing beside them on a large venue screen.
                     <div style={{ fontSize: '1.2vh', color: LOBBY_COLORS.inkMuted, marginBottom: 4, letterSpacing: '0.02em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {prefix && hasTime ? <>{prefix} · {timeNode}</> : (prefix || timeNode)}
+                        {prefix && hasTime ? <>{prefix}, {timeNode}</> : (prefix || timeNode)}
                     </div>
                 )}
                 {/* One matchup = one IndividualScore row (same component the
@@ -302,7 +305,7 @@ function LobbyDisplay({ tournament, competitions, connected = true }) {
 
     // Page label: "Shiaijo A–B · 1 / 2" or just "Shiaijo A" for single.
     const pageCourtLabel = visible.length === 2
-        ? `Shiaijo ${visible[0]}–${visible[1]}`
+        ? `Shiaijo ${visible[0]} and ${visible[1]}`
         : visible.length === 1
             ? `Shiaijo ${visible[0]}`
             : '';
@@ -312,7 +315,7 @@ function LobbyDisplay({ tournament, competitions, connected = true }) {
             position: 'fixed', inset: 0,
             background: LOBBY_COLORS.bg, color: LOBBY_COLORS.ink,
             display: 'flex', flexDirection: 'column',
-            fontFamily: 'var(--font-body, system-ui, sans-serif)',
+            fontFamily: 'var(--font)',
             WebkitFontSmoothing: 'antialiased',
             overflow: 'hidden',
         }}>
@@ -321,10 +324,9 @@ function LobbyDisplay({ tournament, competitions, connected = true }) {
                 display: 'flex', justifyContent: 'space-between', alignItems: 'center',
                 padding: '20px 36px 16px',
                 fontSize: '1.5vh', color: LOBBY_COLORS.inkDim,
-                letterSpacing: '0.08em', textTransform: 'uppercase',
                 borderBottom: `1px solid ${LOBBY_COLORS.line}`,
             }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 12, fontWeight: 700, fontSize: '2.4vh', letterSpacing: '0.1em' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12, fontWeight: 700, fontSize: '2.4vh' }}>
                     {Boolean(tournament?.theme?.logoOnLobby && tournament?.theme?.hasLogo) && (
                         <img src="/api/branding/logo" alt="Tournament logo" className="lobby__logo" />
                     )}
@@ -354,18 +356,18 @@ function LobbyDisplay({ tournament, competitions, connected = true }) {
                         </div>
                     )}
                     {totalPages > 1 && (
-                        <span data-testid="lobby-page-indicator" style={{ fontSize: '1.3vh', color: LOBBY_COLORS.inkMuted, letterSpacing: '0.06em', fontWeight: 400 }}>
+                        <span data-testid="lobby-page-indicator" style={{ fontSize: '1.3vh', color: LOBBY_COLORS.inkMuted, fontWeight: 400 }}>
                             {pageCourtLabel} · {page + 1} / {totalPages}
                         </span>
                     )}
                     {/* T063: SSE reconnect indicator */}
                     {!connected && (
                         <span data-testid="display-reconnect" role="status" aria-label="Reconnecting" style={{
-                            color: '#b45309', fontWeight: 700,
+                            color: 'var(--warn)', fontWeight: 700,
                             display: 'inline-flex', alignItems: 'center', gap: 6,
                         }}>
-                            <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#b45309', display: 'inline-block' }} />
-                            RECONNECTING
+                            <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--warn)', display: 'inline-block' }} />
+                            Reconnecting
                         </span>
                     )}
                 </div>
@@ -374,15 +376,12 @@ function LobbyDisplay({ tournament, competitions, connected = true }) {
             {/* ── Cycle progress bar ─────────────────────────── */}
             {totalPages > 1 && (
                 <div style={{ height: 2, background: 'rgba(0,0,0,0.06)', position: 'relative', overflow: 'hidden' }}>
+                    {/* The fill and its reduced-motion rule are .lobby-cycle-bar
+                        in styles.css; only the cycle length is set here. */}
                     <div
                         key={cycleKey}
-                        style={{
-                            position: 'absolute', top: 0, left: 0, height: '100%',
-                            background: 'linear-gradient(90deg, transparent, rgba(0,0,0,0.30))',
-                            width: '100%',
-                            transformOrigin: 'left',
-                            animation: `lobby-cycle-fill ${LOBBY_CYCLE_MS}ms linear`,
-                        }}
+                        className="lobby-cycle-bar"
+                        style={{ '--lobby-cycle-ms': `${LOBBY_CYCLE_MS}ms` }}
                     />
                 </div>
             )}
@@ -420,20 +419,19 @@ function LobbyDisplay({ tournament, competitions, connected = true }) {
                                     const phase = firstSlot ? phaseLabel(firstSlot.match, firstSlot.isBracket, firstSlot.roundIndex, firstSlot.totalRounds, firstSlot.competition?.format) : '';
                                     // firstSlot already has { competition, isBracket, roundIndex, match }.
                                     const progress = firstSlot ? phaseProgressOnCourt(firstSlot, cc) : null;
-                                    const subtitle = [compName, phase, progress ? `${progress.done} / ${progress.total}` : null].filter(Boolean).join(' · ');
+                                    const subtitle = [compName, phase, progress ? `${progress.done} / ${progress.total}` : null].filter(Boolean).join(', ');
                                     return (
                                         <React.Fragment key={cc}>
                                             <th scope="col" style={{
                                                 textAlign: 'center',
                                                 padding: '14px 12px 12px',
-                                                fontSize: '2.2vh', fontWeight: 700, letterSpacing: '0.1em',
-                                                textTransform: 'uppercase',
+                                                fontSize: '2.2vh', fontWeight: 700,
                                                 borderBottom: `2px solid ${LOBBY_COLORS.lineStrong}`,
                                                 background: LOBBY_COLORS.bg,
                                             }}>
                                                 Shiaijo {cc}
                                                 {subtitle && (
-                                                    <div data-testid={`lobby-shiaijo-subtitle-${cc}`} style={{ fontSize: '1.3vh', fontWeight: 400, color: LOBBY_COLORS.inkMuted, marginTop: 4, letterSpacing: '0.02em', textTransform: 'none' }}>
+                                                    <div data-testid={`lobby-shiaijo-subtitle-${cc}`} style={{ fontSize: '1.3vh', fontWeight: 400, color: LOBBY_COLORS.inkMuted, marginTop: 4, letterSpacing: '0.02em' }}>
                                                         {subtitle}
                                                     </div>
                                                 )}
@@ -455,8 +453,8 @@ function LobbyDisplay({ tournament, competitions, connected = true }) {
                                         {/* Row label: <th scope="row"> so AT associates it with its cells */}
                                         <th scope="row" style={{
                                             textAlign: 'right', paddingRight: 16,
-                                            fontSize: '1.2vh', fontWeight: 700, letterSpacing: '0.14em',
-                                            textTransform: 'uppercase', color: LOBBY_COLORS.inkMuted,
+                                            fontSize: '1.2vh', fontWeight: 700,
+                                            color: LOBBY_COLORS.inkMuted,
                                             verticalAlign: 'top', paddingTop: 16,
                                             borderRight: `1px solid ${LOBBY_COLORS.line}`,
                                         }}>
@@ -488,28 +486,15 @@ function LobbyDisplay({ tournament, competitions, connected = true }) {
                 padding: '10px 36px',
                 display: 'flex', justifyContent: 'center',
                 fontSize: '1.6vh', color: LOBBY_COLORS.inkMuted,
-                letterSpacing: '0.06em',
                 borderTop: `1px solid ${LOBBY_COLORS.line}`,
             }}>
                 {totalPages > 1
                     ? `Auto-cycling every ${LOBBY_CYCLE_MS / 1000} seconds`
                     : courts.length === 0
                         ? ''
-                        : courts.length === 1
-                            ? `Shiaijo ${courts[0]}`
-                            : `Shiaijo ${courts.join(' · ')}`
+                        : `Shiaijo ${andList(courts)}`
                 }
             </div>
-
-            {/* Keyframe for the cycle progress bar animation. Injected via a
-                <style> tag because inline styles cannot express @keyframes.
-                Re-rendered with the component but content is static/idempotent. */}
-            <style>{`
-                @keyframes lobby-cycle-fill {
-                    0%   { transform: scaleX(0); }
-                    100% { transform: scaleX(1); }
-                }
-            `}</style>
         </div>
     );
 }

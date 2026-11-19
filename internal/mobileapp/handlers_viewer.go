@@ -3,6 +3,7 @@ package mobileapp
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"sync"
@@ -706,6 +707,37 @@ func viewerDataIssues(comp *state.Competition, players []domain.Player, pools []
 	return issues
 }
 
+// viewerDetailAfterConcurrentLoads, when non-nil, runs inside the competition
+// detail build once its concurrent loads have finished and before its later
+// reads (team members, competitor status). Test-only seam, nil in production:
+// it lands a real write between two reads of one build, the window a write
+// takes when it commits while a detail read is under way.
+var viewerDetailAfterConcurrentLoads func(compID string)
+
+// detailReadAttempts bounds readCompetitionConsistently. A build takes a few
+// milliseconds and a competition is written a few times a second at most, so
+// a second build is rare and a fourth means writes landing back to back.
+const detailReadAttempts = 4
+
+// readCompetitionConsistently answers build's result read from one state of
+// compID: it reads the competition's write token before and after build and
+// builds again when a write landed in between. After detailReadAttempts
+// builds that each overlapped a write it answers the last one, logged, rather
+// than keep a viewer waiting behind a run of writes.
+func readCompetitionConsistently(store *state.Store, compID string, build func() ([]byte, error)) ([]byte, error) {
+	for attempt := 1; ; attempt++ {
+		before := store.CompetitionWriteToken(compID)
+		data, err := build()
+		if store.CompetitionWriteToken(compID) == before {
+			return data, err
+		}
+		if attempt == detailReadAttempts {
+			log.Printf("mobileapp: viewer payload %s: a write landed during each of %d builds; answering the last", compID, attempt)
+			return data, err
+		}
+	}
+}
+
 func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.Engine) {
 	// P2 (mp-9afd): singleflight group for the two expensive viewer read
 	// endpoints. Created once per router setup and shared by all requests
@@ -771,11 +803,12 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 			return
 		}
 
-		// P2 (mp-9afd): collapse concurrent detail-view builds for the
-		// same competition to O(1) per in-flight window. Key includes the
-		// comp id so parallel requests for different competitions are
-		// independent.
-		data, err := sf.Do("competition:"+id, func() ([]byte, error) {
+		// One build reads the competition's files one load at a time, each
+		// under its own read lock, so a write landing between two of them
+		// would pair data from before it with data from after it.
+		// readCompetitionConsistently builds again until no write landed
+		// during the build.
+		build := func() ([]byte, error) {
 			comp, err := store.LoadCompetition(id)
 			if err != nil {
 				return nil, err
@@ -835,6 +868,9 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 
 			if p := panicRef.Load(); p != nil {
 				return nil, p
+			}
+			if viewerDetailAfterConcurrentLoads != nil {
+				viewerDetailAfterConcurrentLoads(id)
 			}
 
 			// Squads: deliberately SEQUENTIAL, run only now that every
@@ -1050,6 +1086,17 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 			}
 			stampSlotMinutes(payload, comp, loadTournamentForSlots(store))
 			return json.Marshal(payload)
+		}
+
+		// P2 (mp-9afd): collapse concurrent detail-view builds for the
+		// same competition to O(1) per in-flight window. The key holds the
+		// comp id, so parallel requests for different competitions are
+		// independent, and the competition's write token as this request
+		// found it, so a request that arrives after a write never joins a
+		// build begun before it.
+		key := fmt.Sprintf("competition:%s@%d", id, store.CompetitionWriteToken(id))
+		data, err := sf.Do(key, func() ([]byte, error) {
+			return readCompetitionConsistently(store, id, build)
 		})
 
 		if errors.Is(err, errNotFound) {

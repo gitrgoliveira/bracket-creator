@@ -182,11 +182,11 @@ test.describe('moved-match', () => {
     const dialogMsg = (await warnDialog.locator('.dialog-msg').first().innerText()).replace(/\s+/g, ' ').trim();
     expect(dialogMsg).toContain('is running on Shiaijo B');
     expect(dialogMsg).toContain('two bouts will be running on Shiaijo B at once');
-    const liveEyebrow = (await courtState(B)).editor.eyebrow;
-    const [, round, num] = liveEyebrow.match(/· (\w+) · Match (\d+)$/) || [];
+    const liveMeta = (await courtState(B)).editor.meta;
+    const [, round, num] = liveMeta.match(/, (\w+), Match (\d+)$/) || [];
     expect(dialogMsg).toContain(`Match ${num} (${round})`);
     row({ step: '5a start warned', action: 'Start match on the moved match from the Scores tab while Teams runs on B',
-      variant: 'correct path (court busy warning)', title: dialogTitle, message: dialogMsg, runningBout: liveEyebrow,
+      variant: 'correct path (court busy warning)', title: dialogTitle, message: dialogMsg, runningBout: liveMeta,
       shot: await shot(tab, 'scores-tab-start-warned') });
     const runningBeforeStartAnyway = await runningOnCourt(H, 'B');
     expect(runningBeforeStartAnyway.map((r) => r.comp)).toEqual(['Teams']);
@@ -260,7 +260,7 @@ test.describe('moved-match', () => {
     expect(bHeld.officiating).toBe('Teams');
     await bStillOpen();
     // Close the head table's editor if Finish + Start Next left it open.
-    if (await hed.isVisible().catch(() => false)) await hed.getByRole('button', { name: /✕ Close/ }).tap().catch(() => {});
+    if (await hed.isVisible().catch(() => false)) await hed.getByRole('button', { name: /^Close$/ }).tap().catch(() => {});
 
     // Court B plays the other semi-final itself (started by the head table's
     // Finish + Start Next, or from Up next).
@@ -446,7 +446,7 @@ test.describe('moved-match', () => {
   // of the bead's report pass. The operator's own Start match in the editor
   // sends no startOnly (it writes the editor's own board), so it never counts
   // as a start by itself. The same fix retires shared-shiaijo's
-  // S9 assertions ("Finish + Start Next →" and the start after a fusenpai on
+  // S9 assertions ("Finish + Start Next" and the start after a fusenpai on
   // the Scores page) and step 5a above now asserts the warning. Runs after
   // bc-stpf, but takes court A as it finds it: the running Individual bout
   // there, or else one it starts from the Scores tab whose competitors are not

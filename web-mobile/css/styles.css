@@ -1,10 +1,15 @@
 /* Bracket Creator, clean utilitarian, polished */
 
 /* ---------- Self-hosted fonts (offline-safe, embedded via go:embed) ----------
-   Anton + Archivo, both SIL Open Font License 1.1 (OFL.txt shipped alongside
-   each .woff2 under /vendor/fonts/). Latin-subset woff2; Archivo keeps its
-   weight axis (100–900). Used by the Aka/Shiro scoreboard + display surfaces
-   via --font-impact / --font-strong. Body text stays on system --font. */
+   All SIL Open Font License 1.1 (OFL.txt shipped alongside each .woff2 under
+   /vendor/fonts/), so every device draws the same letters and symbols.
+   Anton + Archivo: Latin-subset woff2 (Archivo also ships its extended Latin
+   letters in a second file, behind unicode-range); Archivo keeps its weight axis
+   (100–900) and leads the body stack. JetBrains Mono: Latin-subset woff2
+   with its weight axis (100–800), the monospace face. "BC Symbols": the symbols the app
+   writes that Archivo has no glyph for, subset from Noto Sans Symbols 2 and
+   Noto Sans Math, each face limited to its own characters by unicode-range.
+   A new symbol in the UI belongs in one of these subsets. */
 @font-face {
   font-family: "Anton";
   font-style: normal;
@@ -18,6 +23,48 @@
   font-weight: 100 900;
   font-display: swap;
   src: url("/vendor/fonts/archivo/archivo-latin.woff2") format("woff2");
+}
+/* Archivo's extended Latin letters (Ł, ř, ş, ő, ơ ...), fetched only by a page
+   that writes one, so a competitor's name keeps the body font. */
+@font-face {
+  font-family: "Archivo";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("/vendor/fonts/archivo/archivo-latin-ext.woff2") format("woff2");
+  unicode-range: U+0100-017F, U+018F, U+0192, U+019D, U+01A0-01A1, U+01AF-01B0, U+01C4-01DC, U+01E6-01E7, U+01EA-01EB, U+01FA-021B, U+022A-022D, U+0230-0233, U+0237, U+0259, U+02BC, U+02C6-02C7, U+02C9, U+02D8-02DD, U+0300-0304, U+0306-030C, U+030F, U+0311-0313, U+031B, U+0323-0324, U+0326-0328, U+032E, U+0331, U+0335-0338, U+1E24-1E25, U+1E62-1E63, U+1E6C-1E6D, U+1E80-1E85, U+1E9E, U+1EA0-1EF9;
+}
+@font-face {
+  font-family: "BC Symbols";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/vendor/fonts/noto-sans-symbols-2/symbols-subset.woff2") format("woff2");
+  unicode-range: U+21E7, U+232B, U+25B2, U+25CB, U+25CF, U+2713;
+}
+@font-face {
+  font-family: "BC Symbols";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/vendor/fonts/noto-sans-math/symbols-subset.woff2") format("woff2");
+  unicode-range: U+2190, U+2192, U+2212, U+2248, U+2264-2265;
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 100 800;
+  font-display: swap;
+  src: url("/vendor/fonts/jetbrains-mono/jetbrains-mono-latin.woff2") format("woff2");
+}
+/* ₂ (the Swiss rounds hint's log₂): no symbol subset has it, JetBrains Mono does. */
+@font-face {
+  font-family: "BC Symbols";
+  font-style: normal;
+  font-weight: 100 800;
+  font-display: swap;
+  src: url("/vendor/fonts/jetbrains-mono/jetbrains-mono-latin.woff2") format("woff2");
+  unicode-range: U+2082;
 }
 
 :root {
@@ -62,7 +109,7 @@
   --ink: #1a1d24;
   --ink-1: #111827; /* AAA-grade text, ~18:1 on white, use for critical numerals, glossary */
   --ink-2: #3a414e;
-  --ink-3: #6b7280;
+  --ink-3: #636a77; /* 4.5:1 or better on every light fill (--line-2 4.77, --surface-2 4.97, --accent-soft 4.53), was #6b7280 (4.24 on --line-2) */
   --ink-4: #6c7480; /* 4.7:1 on white, was #9aa1ac (2.8:1) */
   --ink-5: #f1f3f6; /* inverse text/border, use only on dark (--ink / --ink-1) backgrounds */
   --text-link: #2563eb;    /* link blue: standalone text links outside body copy */
@@ -82,7 +129,7 @@
   /* Type scale, rem-based so user browser font-size preference is respected.
      Named by semantic role, not by pixel size. 1rem = browser default (16px).
      --fs-title-* are aliases kept for backward compatibility. */
-  --fs-xs:   0.6875rem;  /* 11px, overline, badge labels           */
+  --fs-xs:   0.6875rem;  /* 11px, badge labels                     */
   --fs-sm:   0.8125rem;  /* 13px, table cells, secondary labels     */
   --fs-base: 1rem;       /* 16px, body text                         */
   --fs-md:   1.125rem;   /* 18px, prominent labels, input hints     */
@@ -92,7 +139,6 @@
   /* Backward-compat aliases */
   --fs-title-page: var(--fs-xl);
   --fs-title-card: var(--fs-sm);
-  --fs-overline:   var(--fs-xs);
 
   /* Line-height tokens */
   --lh-base:  1.5;   /* body prose, form hints */
@@ -106,7 +152,8 @@
   --shadow-lg: 0 12px 32px -16px rgba(20, 25, 40, 0.25);
 
   /* Focus ring (DESIGN.md §6): the soft 3px ring on text-entry controls
-     (.input/.textarea/.select, .radio-pill, .lined-textarea, .ipt-btn).
+     (.radio-pill, .lined-textarea, .ipt-btn; .input/.textarea/.select draw the
+     same ring as a 3px --accent-soft outline).
      Buttons use the solid `outline: 2px solid var(--accent)` convention instead. */
   --focus-ring: 0 0 0 3px var(--accent-soft);
   /* Active/highlight card ring (DESIGN.md §5 "Running signal"): the navy
@@ -119,11 +166,13 @@
      easing (DESIGN.md Motion). Decelerates hard, no overshoot. */
   --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
 
-  /* Archivo is self-hosted (always available via @font-face above), so it leads
-     the body stack, consistent cross-platform rendering, variable weight axis. */
-  --font: "Archivo", -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  --font-display: "Archivo", "SF Pro Display", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  /* Archivo and BC Symbols are self-hosted (always available via @font-face
+     above), so they lead every stack: the same letters and symbols on every
+     device. The system faces after them draw only what neither holds (a name
+     typed in another script). */
+  --font: "Archivo", "BC Symbols", -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --font-mono: "JetBrains Mono", "BC Symbols", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --font-display: "Archivo", "BC Symbols", "SF Pro Display", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   /* Aka/Shiro distinction system (DESIGN.md §4 "Aka/Shiro side treatment").
      Opt-in: existing components keep --font / --font-display untouched. */
   --font-impact: "Anton", "Archivo", var(--font-display); /* scoreboard numerals, big side labels */
@@ -134,17 +183,108 @@
   --shiro-edge: #2a3346;              /* dark cool frame so white reads as a side */
   --shiro-hatch: rgba(42, 51, 70, 0.07); /* 45° diagonal hatch tint */
   --aka-bright: #ff3b3b;              /* luminous red for dark TV/overlay surfaces (Aka glow) */
+
+  /* Values lifted from the rules that used them as literals, so every colour
+     in the sheet is a token. Same values as before: nothing looks different. */
+  /* Status-pipeline badges (setup, draw ready, pools, knockout, completed, archive). */
+  --gray-100: #f3f4f6;
+  --blue-50: #eff6ff;
+  --blue-200: #bfdbfe;
+  --blue-700: #1d4ed8;
+  --orange-50: #fff7ed;    /* also the bronze podium step */
+  --orange-200: #fed7aa;
+  --orange-800: #9a3412;
+  --emerald-50: #ecfdf5;
+  --emerald-200: #a7f3d0;
+  --emerald-800: #065f46;
+  --accent-line: #cdd5e7;  /* hairline beside --accent text */
+  --slate-50: #f8fafc;
+  /* Gold podium and awards. */
+  --yellow-100: #fef9c3;
+  --amber-300: #fcd34d;
+  --amber-400: #fbbf24;
+  --amber-600: #d97706;
+  --amber-700: #b45309;    /* the announcement banner's dark stop; same value as --warn today */
+  /* Neutrals and greens outside the ink ramp. */
+  --surface-muted: #fafbfc; /* a finished score row */
+  --neutral-50: #fafafa;    /* the hantei row */
+  --neutral-100: #f5f5f5;   /* an active announcement's row */
+  --gray-50: #f9fafb;
+  --gray-300: #d1d5db;
+  --gray-400: #9ca3af;
+  --gray-700: #374151;
+  --green-300: #86efac;
+  /* Aka tints on light surfaces. */
+  --aka-tint: #fdf2f2;
+  --aka-tint-border: #f5d6d6;
+  --aka-muted: #ad4e58;    /* a queued bout's Aka name: 4.8:1 on the card, lighter than --red */
+  --red-tint: #f2e2e4;     /* the dropped-connection banner */
+  --red-600: #dc2626;
+  --red-600-a03: rgba(220, 38, 38, 0.03);
+  --red-600-a06: rgba(220, 38, 38, 0.06);
+  --red-600-a08: rgba(220, 38, 38, 0.08);
+  --red-600-a12: rgba(220, 38, 38, 0.12);
+  --red-600-a30: rgba(220, 38, 38, 0.3);
+  --ok-a08: rgba(22, 163, 74, 0.08);
+  --ok-a10: rgba(22, 163, 74, 0.1);
+  /* Modal scrim and dialog shadow ink. */
+  --scrim: rgba(15, 20, 35, 0.55);
+  --shadow-ink-28: rgba(15, 20, 35, 0.28);
+  /* The TV board (dark) and its Aka glow. */
+  --tv-board: #0b0d12;
+  --tv-aka-a28: rgba(204, 17, 34, 0.28);
+  --tv-aka-a55: rgba(204, 17, 34, 0.55);
+  --aka-bright-a35: rgba(255, 59, 59, 0.35);
+  --aka-bright-a40: rgba(255, 59, 59, 0.4);
+  --aka-pale: #ffd9dc;
+  --tv-gold-a85: rgba(255, 209, 102, 0.85);
+  --tv-ink: #111111;       /* the white TV board's text and rules */
+  --rose-300: #fda4af;     /* Aka text on the streaming overlay's dark band */
+  --orange-400: #fb923c;   /* a fighting spirit award's border */
+  --black: #000000;
+  /* White and black at a set opacity: text, fills and lines on dark or coloured
+     surfaces (the hero header, banners, the TV board), and shadows. */
+  --white-a02: rgba(255, 255, 255, 0.02);
+  --white-a04: rgba(255, 255, 255, 0.04);
+  --white-a05: rgba(255, 255, 255, 0.05);
+  --white-a10: rgba(255, 255, 255, 0.1);
+  --white-a14: rgba(255, 255, 255, 0.14);
+  --white-a15: rgba(255, 255, 255, 0.15);
+  --white-a16: rgba(255, 255, 255, 0.16);
+  --white-a18: rgba(255, 255, 255, 0.18);
+  --white-a20: rgba(255, 255, 255, 0.2);
+  --white-a25: rgba(255, 255, 255, 0.25);
+  --white-a28: rgba(255, 255, 255, 0.28);
+  --white-a30: rgba(255, 255, 255, 0.3);
+  --white-a40: rgba(255, 255, 255, 0.4);
+  --white-a50: rgba(255, 255, 255, 0.5);
+  --white-a75: rgba(255, 255, 255, 0.75);
+  --white-a78: rgba(255, 255, 255, 0.78);
+  --white-a80: rgba(255, 255, 255, 0.8);
+  --white-a85: rgba(255, 255, 255, 0.85);
+  --white-a90: rgba(255, 255, 255, 0.9);
+  --white-a95: rgba(255, 255, 255, 0.95);
+  --black-a04: rgba(0, 0, 0, 0.04);
+  --black-a10: rgba(0, 0, 0, 0.1);
+  --black-a12: rgba(0, 0, 0, 0.12);
+  --black-a20: rgba(0, 0, 0, 0.2);
+  --black-a25: rgba(0, 0, 0, 0.25);
+  --black-a35: rgba(0, 0, 0, 0.35);
 }
 
 * {
   box-sizing: border-box;
 }
 
+/* No page scrolls sideways: wide content (a bracket, the calendar grid, the
+   league matrix) scrolls in its own container. overflow-x is clip, not hidden,
+   so neither element becomes a scroll container and sticky bars still work. */
 html,
 body {
   margin: 0;
   padding: 0;
   height: 100%;
+  overflow-x: clip;
 }
 
 body {
@@ -607,7 +747,6 @@ a:hover {
 .running-strip__court {
   font-weight: 700;
   font-size: 11px;
-  letter-spacing: 0.04em;
 }
 
 .running-strip__names {
@@ -629,15 +768,6 @@ a:hover {
 
 .page--wide {
   max-width: none;
-}
-
-.page-head__eyebrow {
-  font-size: 11px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--ink-3);
-  font-weight: 600;
-  margin-bottom: 4px;
 }
 
 .page-head {
@@ -981,14 +1111,34 @@ a:hover {
   letter-spacing: -0.01em;
 }
 
-/* Overline / eyebrow utility (mp-p1tw), replaces ~10 hand-rolled inline
-   copies that drifted across 10.5/11/12px and 0.06/0.08/0.1em. */
-.overline {
-  font-size: var(--fs-overline);
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
+/* A meta line under a heading: the parts of one phrase, separated by
+   commas (Hallmark gates 54 and 63: what used to sit above the heading as an
+   eyebrow, joined by middle dots, now follows it). The body face, a step
+   smaller, the muted ink. */
+.meta-line {
+  font-size: 12px;
   color: var(--ink-3);
+  margin-top: 2px;
+}
+
+/* Every comma meta line wraps without leaving its last word alone on a line
+   ("shiaijo A and" / "B" on a narrow competition card). */
+.meta-line,
+.page-head__sub,
+.tcard__meta,
+.viewer__sub,
+.vlist-item__meta,
+.editor-modal__meta {
+  text-wrap: pretty;
+}
+
+/* The heading of a column or a short section inside a panel (the lineup
+   panel's Shiro and Aka columns, the Lineups page's team members). */
+.column-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-2);
+  margin: 0 0 8px;
 }
 
 .card__sub {
@@ -1099,14 +1249,24 @@ a:hover {
   background: var(--surface);
   font-size: 14px;
   outline: none;
-  transition: border-color 120ms var(--ease-out), box-shadow 120ms var(--ease-out);
+  transition: border-color 120ms var(--ease-out);
 }
 
+/* A search box draws its own clear button (an Icon), so the browser's is
+   hidden; with both, the field showed two crosses side by side. */
+.input[type="search"]::-webkit-search-cancel-button {
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+/* The soft 3px ring (DESIGN.md §6) is an outline, so it appears at once and
+   never shifts the box; the accent border is the 3:1 edge beside it. */
 .input:focus,
 .textarea:focus,
 .select:focus {
   border-color: var(--accent);
-  box-shadow: var(--focus-ring);
+  outline: 3px solid var(--accent-soft);
+  outline-offset: 0;
 }
 
 /* Bare <input> elements inside the scoring surfaces (e.g. inline name/score
@@ -1204,7 +1364,8 @@ a:hover {
 .duration-input__field--invalid,
 .duration-input__field--invalid:focus {
   border-color: var(--red);
-  box-shadow: 0 0 0 3px var(--red-soft);
+  outline: 3px solid var(--red-soft);
+  outline-offset: 0;
 }
 
 .duration-input__error {
@@ -1530,8 +1691,6 @@ a:hover {
   font-weight: 600;
   color: var(--ink-3);
   font-size: 12px;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
   background: var(--line-2);
 }
 
@@ -1553,37 +1712,37 @@ a:hover {
 }
 
 .badge--setup {
-  background: #f3f4f6;
+  background: var(--gray-100);
   color: var(--ink-2);
   border-color: var(--line);
 }
 
 .badge--draw-ready {
-  background: #eff6ff;
-  color: #1d4ed8;
-  border-color: #bfdbfe;
+  background: var(--blue-50);
+  color: var(--blue-700);
+  border-color: var(--blue-200);
 }
 
 .badge--pools {
-  background: #fff7ed;
-  color: #9a3412;
-  border-color: #fed7aa;
+  background: var(--orange-50);
+  color: var(--orange-800);
+  border-color: var(--orange-200);
 }
 
 .badge--knockout {
-  background: #ecfdf5;
-  color: #065f46;
-  border-color: #a7f3d0;
+  background: var(--emerald-50);
+  color: var(--emerald-800);
+  border-color: var(--emerald-200);
 }
 
 .badge--completed {
   background: var(--accent-soft);
   color: var(--accent);
-  border-color: #cdd5e7;
+  border-color: var(--accent-line);
 }
 
 .badge--archive {
-  background: #f8fafc;
+  background: var(--slate-50);
   color: var(--ink-3);
   border-color: var(--line);
 }
@@ -1694,8 +1853,6 @@ a:hover {
 .tcard__stat .l {
   font-size: 11px;
   color: var(--ink-3);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
 }
 
 /* ---------- Bracket ---------- */
@@ -1766,8 +1923,6 @@ a:hover {
 .bracket-bronze-label {
   font-size: 11px;
   font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
   color: var(--ink-3);
   margin-bottom: 14px;
   padding-left: 2px;
@@ -1789,8 +1944,6 @@ a:hover {
 .bc-round-label {
   font-size: 11px;
   font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
   color: var(--ink-3);
   margin-bottom: 14px;
   padding-left: 2px;
@@ -1878,8 +2031,6 @@ a:hover {
   background: var(--line-2);
   border-bottom: 1px solid var(--line);
   border-radius: var(--r) var(--r) 0 0;
-  letter-spacing: 0.03em;
-  text-transform: uppercase;
   font-weight: 600;
 }
 
@@ -2033,8 +2184,8 @@ a:hover {
 
 /* sideA = Aka (Red), sideB = Shiro (White) */
 .bc-match--v2 .bc-side--a {
-  background: #fdf2f2;
-  border-color: #f5d6d6;
+  background: var(--aka-tint);
+  border-color: var(--aka-tint-border);
 }
 
 .bc-match--v2 .bc-side--b {
@@ -2175,8 +2326,6 @@ a:hover {
   font-size: 10.5px;
   color: var(--ink-3);
   font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
 }
 
 .pool__table th.num,
@@ -2228,8 +2377,6 @@ a:hover {
   display: inline-block;
   font-size: 0.6em;
   font-weight: 700;
-  letter-spacing: 0.03em;
-  text-transform: uppercase;
   padding: 1px 6px;
   border-radius: 3px;
   line-height: 1.45;
@@ -2249,8 +2396,6 @@ a:hover {
 .pool-match-section-label {
   font-size: 10px;
   font-weight: 700;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
   color: var(--ink-3);
   padding: 12px 14px 4px;
   display: flex;
@@ -2475,7 +2620,6 @@ a:hover {
   color: var(--ink);
   min-width: 52px;
   text-align: center;
-  letter-spacing: 0.04em;
   line-height: 1.3;
   /* Team summaries stack IV over PW (newline from teamIVPWScore); pre-line honours
      it. Long values also wrap rather than starving the flanking name columns. */
@@ -2538,7 +2682,6 @@ a:hover {
   place-items: center;
   font-weight: 700;
   font-size: 12px;
-  letter-spacing: 0.04em;
 }
 
 .sched-row__players {
@@ -2599,7 +2742,7 @@ a:hover {
 .modal-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(15, 20, 35, 0.55);
+  background: var(--scrim);
   display: grid;
   place-items: center;
   z-index: 1000;
@@ -2624,7 +2767,7 @@ a:hover {
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: 12px;
-  box-shadow: 0 18px 48px rgba(15, 20, 35, 0.28);
+  box-shadow: 0 18px 48px var(--shadow-ink-28);
   padding: 20px;
 }
 .shiaijo-move-confirm__title {
@@ -2863,7 +3006,10 @@ a:hover {
   min-width: 0;
 }
 
+/* An h1 on every public page (the page's one heading), so it drops the
+   browser's heading margin and keeps the size set here. */
 .viewer__title {
+  margin: 0;
   font-weight: 600;
   font-size: 15px;
   letter-spacing: -0.01em;
@@ -2959,8 +3105,6 @@ a:hover {
   font-size: var(--fs-xs);
   font-weight: 600;
   color: var(--ink-3);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
   margin-right: 2px;
   white-space: nowrap;
 }
@@ -3047,8 +3191,6 @@ a:hover {
   color: var(--accent-fg);
   font-weight: 800;
   font-size: 12px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
   padding: 8px 16px;
   border-radius: calc(var(--r-lg) - 2px) calc(var(--r-lg) - 2px) 0 0;
 }
@@ -3060,8 +3202,6 @@ a:hover {
 .wl-hero__lbl {
   font-size: 11px;
   font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
   color: var(--ink-3);
 }
 
@@ -3154,8 +3294,6 @@ button.wl-hero__sides--btn {
 .wl-hero__side-lbl {
   font-size: 11px;
   font-weight: 800;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
   color: var(--ink-2);
 }
 
@@ -3163,8 +3301,6 @@ button.wl-hero__sides--btn {
 .wl-hero__you {
   font-size: 10px;
   font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
   color: var(--accent);
   background: var(--accent-soft);
   border-radius: 4px;
@@ -3193,8 +3329,6 @@ button.wl-hero__sides--btn {
 .my-match__lbl {
   font-size: 11px;
   font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
   opacity: 0.7;
 }
 
@@ -3219,7 +3353,7 @@ button.wl-hero__sides--btn {
 }
 
 .my-match__chip {
-  background: rgba(255, 255, 255, 0.16);
+  background: var(--white-a16);
   border-radius: 8px;
   padding: 8px 10px;
   font-size: 11px;
@@ -3236,8 +3370,6 @@ button.wl-hero__sides--btn {
 .my-match__chip .l {
   opacity: 0.7;
   font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
 }
 
 /* The opponent card on the competition page's "your next match" block
@@ -3250,7 +3382,7 @@ button.wl-hero__sides--btn {
   width: 100%;
   margin-top: 14px;
   padding: 12px;
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--white-a10);
   border-radius: 10px;
 }
 
@@ -3262,8 +3394,6 @@ a.vlist-item {
 .my-match__opp .l {
   font-size: 10.5px;
   opacity: 0.7;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
   font-weight: 700;
 }
 
@@ -3498,7 +3628,7 @@ button.vsched-item:not([data-clickable]) {
 }
 /* Line-icon (Icon component) trophy inherits currentColor (the badge's own
    ink), so it stays monochrome and on-voice. font-size no longer sizes an SVG,
-   so drive dimensions here; the px value still sizes the emoji fallback. */
+   so drive dimensions here; the font-size sets the line box it sits in. */
 .winner-badge__icon svg { width: 20px; height: 20px; }
 .winner-badge--lg .winner-badge__icon {
   font-size: 28px;
@@ -3574,6 +3704,28 @@ button.vsched-item:not([data-clickable]) {
   font-weight: 500;
 }
 
+/* Every disclosure draws its open/closed cue with the chevron the Icon set
+   draws (lucide chevron-right), never the browser's own triangle, which
+   comes from whatever font the device has. */
+summary { list-style: none; }
+summary::-webkit-details-marker { display: none; }
+summary::before {
+  content: "";
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  margin-right: 6px;
+  vertical-align: -1px;
+  background-color: currentColor;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m9 18 6-6-6-6'/%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m9 18 6-6-6-6'/%3E%3C/svg%3E") center / contain no-repeat;
+  transition: transform 120ms var(--ease-out);
+}
+details[open] > summary::before { transform: rotate(90deg); }
+@media (prefers-reduced-motion: reduce) {
+  summary::before { transition: none; }
+}
+
 /* DisplayModes details/summary */
 .viewer-display-modes {
   margin-top: 20px;
@@ -3592,7 +3744,6 @@ button.vsched-item:not([data-clickable]) {
 }
 .viewer-display-modes__sep {
   color: var(--ink-3);
-  margin-left: 8px;
 }
 
 /* Bracket full-bleed container inside viewer body */
@@ -3682,22 +3833,20 @@ button.vsched-item:not([data-clickable]) {
   color: var(--accent-fg);
 }
 
-.viewer__head--hero .viewer__sub,
-.viewer__head--hero .viewer__eyebrow {
-  color: rgba(255, 255, 255, 0.78);
+.viewer__head--hero .viewer__sub {
+  color: var(--white-a78);
 }
 
 .viewer__head--hero .viewer__admin-pill {
   background: transparent;
-  border-color: rgba(255, 255, 255, 0.28);
-  color: rgba(255, 255, 255, 0.78);
+  border-color: var(--white-a28);
+  color: var(--white-a78);
   font-size: 10.5px;
   padding: 3px 8px;
-  letter-spacing: 0.04em;
 }
 
 .viewer__head--hero .viewer__admin-pill:hover {
-  background: rgba(255, 255, 255, 0.14);
+  background: var(--white-a14);
   color: white;
 }
 
@@ -3717,7 +3866,7 @@ button.vsched-item:not([data-clickable]) {
      control. The loud STATIC treatment (solid white fill + elevation) is the
      "set this up" signal while the tournament has zero competitions; the
      primary path is the "Open admin" button in the empty-state card below. */
-  box-shadow: 0 2px 10px -2px rgba(0, 0, 0, 0.35);
+  box-shadow: 0 2px 10px -2px var(--black-a35);
 }
 
 .viewer__head--hero .viewer__admin-pill--prominent:hover {
@@ -3726,7 +3875,7 @@ button.vsched-item:not([data-clickable]) {
 }
 
 .viewer__logo {
-  border: 1px solid rgba(255, 255, 255, 0.2);
+  border: 1px solid var(--white-a20);
 }
 
 .viewer__title--lg {
@@ -3735,14 +3884,6 @@ button.vsched-item:not([data-clickable]) {
   line-height: 1.15;
   letter-spacing: -0.02em;
   margin-top: 2px;
-}
-
-.viewer__eyebrow {
-  font-size: 10.5px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--ink-3);
 }
 
 /* Tournament info card (mp-ef3), public event details */
@@ -3757,8 +3898,6 @@ button.vsched-item:not([data-clickable]) {
 .tournament-info__title {
   font-size: 10.5px;
   font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
   color: var(--accent);
   margin-bottom: 10px;
 }
@@ -3774,8 +3913,6 @@ button.vsched-item:not([data-clickable]) {
 .tournament-info__label {
   font-size: 11px;
   font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
   color: var(--ink-3);
   white-space: nowrap;
 }
@@ -3820,7 +3957,6 @@ button.vsched-item:not([data-clickable]) {
 .hero-running__lbl {
   font-size: 11px;
   font-weight: 700;
-  letter-spacing: 0.08em;
   color: var(--accent);
   display: flex;
   align-items: center;
@@ -3845,15 +3981,6 @@ button.vsched-item:not([data-clickable]) {
 .vlist-item--comp {
   gap: 10px;
   width: 100%;
-}
-
-.vlist-item__eyebrow {
-  font-size: 10.5px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--accent);
-  margin-bottom: 4px;
 }
 
 .vlist-item__name {
@@ -3903,15 +4030,6 @@ button.vsched-item:not([data-clickable]) {
 }
 
 /* tcard add (admin dashboard) */
-.tcard__eyebrow {
-  font-size: 10.5px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--accent);
-  margin-bottom: 4px;
-}
-
 .tcard--add {
   display: flex;
   flex-direction: column;
@@ -3948,8 +4066,6 @@ button.vsched-item:not([data-clickable]) {
   font-size: 12px;
   font-weight: 700;
   color: var(--ink-3);
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
   margin: 16px 0 8px;
 }
 
@@ -3972,8 +4088,8 @@ button.vsched-item:not([data-clickable]) {
 }
 
 .podium-step--1 {
-  background: #fef9c3;
-  border-color: #fde68a;
+  background: var(--yellow-100);
+  border-color: var(--warn-border);
   min-height: 150px;
   min-width: 150px;
   order: 2;
@@ -3987,8 +4103,8 @@ button.vsched-item:not([data-clickable]) {
 }
 
 .podium-step--3 {
-  background: #fff7ed;
-  border-color: #fed7aa;
+  background: var(--orange-50);
+  border-color: var(--orange-200);
   min-height: 110px;
   order: 3;
 }
@@ -4039,8 +4155,8 @@ button.vsched-item:not([data-clickable]) {
 /* mp-8jbo: champion-hero awards podium layout */
 /* Hero card, 1st place champion, full width gold solid */
 .awards-hero {
-  background: #fef9c3;
-  border: 2px solid #fcd34d;
+  background: var(--yellow-100);
+  border: 2px solid var(--amber-300);
   border-radius: 14px;
   padding: 18px 16px;
   text-align: center;
@@ -4052,13 +4168,11 @@ button.vsched-item:not([data-clickable]) {
   line-height: 1;
 }
 
-.awards-hero__eyebrow {
-  font-size: 12px;
-  font-weight: 700;
+.awards-hero__place {
+  font-size: 13px;
+  font-weight: 600;
   color: var(--ink-2);
-  margin-top: 4px;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
+  margin-top: 2px;
 }
 
 .awards-hero__name {
@@ -4123,8 +4237,6 @@ button.vsched-item:not([data-clickable]) {
 .stat-box .l {
   font-size: 11px;
   color: var(--ink-3);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
   margin-top: 6px;
 }
 
@@ -4318,8 +4430,10 @@ button.vsched-item:not([data-clickable]) {
 }
 
 .card--action:focus-visible {
-  outline: none;
-  box-shadow: var(--shadow), var(--focus-ring);
+  /* The buttons' solid ring, drawn with outline so it appears at once: the
+     transition above animates the hover shadow only. */
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -4498,8 +4612,6 @@ button.vsched-item:not([data-clickable]) {
   font-size: 10.5px;
   font-weight: 700;
   color: var(--ink-4);
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
 }
 
 /* Empty state */
@@ -5004,6 +5116,13 @@ button.vsched-item:not([data-clickable]) {
   line-height: 1;
   padding: 0 2px;
 }
+/* The remove control draws its cross with the Icon component: centre the svg
+   in the 14px line box the glyph used to fill (the pin keeps its own box). */
+.pmf__chip button:not(.pmf__chip-pin) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
 
 .pmf__chip--text {
   background: var(--line-2);
@@ -5219,8 +5338,6 @@ button.vsched-item:not([data-clickable]) {
   font-size: 11px;
   color: var(--ink-3);
   font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
 }
 
 .tw-sched__search {
@@ -5322,8 +5439,6 @@ button.vsched-item:not([data-clickable]) {
   font-size: 10.5px;
   color: var(--ink-3);
   margin-top: 1px;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -5630,7 +5745,7 @@ button.vsched-item:not([data-clickable]) {
 }
 
 .score-edit-row--complete {
-  background: #fafbfc;
+  background: var(--surface-muted);
 }
 
 .score-edit-row__time {
@@ -5748,7 +5863,9 @@ button.vsched-item:not([data-clickable]) {
 .editor-modal {
   background: var(--surface);
   border-radius: var(--r-lg);
-  width: min(560px, calc(100vw - 32px));
+  /* Sized against its .modal-backdrop (padding 20px), not 100vw, which counts a
+     scrollbar: 100% + 8px leaves the same 16px each side 100vw - 32px did. */
+  width: min(560px, calc(100% + 8px));
   max-height: calc(100vh - 32px);
   max-height: calc(100dvh - 32px);
   display: flex;
@@ -6089,20 +6206,18 @@ button.vsched-item:not([data-clickable]) {
   display: inline-flex;
   align-items: center;
   font: 800 11px/1 var(--font-strong);
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
   padding: 4px 10px;
   border-radius: 999px;
 }
 .sb-side--shiro .sb-dojo {
   align-self: flex-end;
-  background: #fff;
+  background: var(--surface);
   color: var(--accent);
   border: 1.5px solid var(--accent);
 }
 .sb-side--aka .sb-dojo {
   background: var(--red);
-  color: #fff;
+  color: var(--accent-fg);
 }
 
 .sb-center {
@@ -6216,7 +6331,7 @@ button.vsched-item:not([data-clickable]) {
 
 .sb-slot--filled {
   transform: scale(1.05);
-  box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+  box-shadow: 0 4px 12px var(--black-a10);
 }
 
 .sb-slots--aka .sb-slot--filled {
@@ -6252,16 +6367,12 @@ button.vsched-item:not([data-clickable]) {
   font-size: 14px;
   font-weight: 800;
   color: var(--ink-4);
-  text-transform: uppercase;
-  letter-spacing: 0.2em;
 }
 
 .sb-draw-toggle {
   font-family: var(--font-display);
   font-size: 14px;
   font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
   color: var(--ink-4);
   background: none;
   border: 2px dashed var(--ink-2);
@@ -6295,7 +6406,6 @@ button.vsched-item:not([data-clickable]) {
   border-style: solid;
   color: var(--ink-5);
   font-weight: 700;
-  letter-spacing: 0.05em;
 }
 
 .sb-controls {
@@ -6322,8 +6432,6 @@ button.vsched-item:not([data-clickable]) {
   font-size: 11px;
   font-weight: 700;
   color: var(--ink-3);
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
   margin-bottom: 12px;
   text-align: center;
 }
@@ -6361,8 +6469,8 @@ button.vsched-item:not([data-clickable]) {
 }
 
 .sb-hansoku-dot.is-on {
-  background: #374151;
-  border-color: #374151;
+  background: var(--gray-700);
+  border-color: var(--gray-700);
   color: white;
 }
 
@@ -6400,7 +6508,6 @@ button.vsched-item:not([data-clickable]) {
   font-size: 12px;
   font-weight: 700;
   color: var(--ink-3);
-  text-transform: uppercase;
 }
 
 .team-sub-match__row {
@@ -6490,8 +6597,6 @@ button.vsched-item:not([data-clickable]) {
 .team-summary__label {
   font-size: 10px;
   font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.07em;
   /* --ink-2, not --ink-3: at this size on --surface-2, --ink-3 lands at
      4.41:1, just under WCAG AA. */
   color: var(--ink-2);
@@ -6749,8 +6854,6 @@ button.vsched-item:not([data-clickable]) {
   font-size: 11px;
   font-weight: 600;
   color: var(--ink-3);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
   margin-bottom: 4px;
 }
 
@@ -6921,6 +7024,12 @@ button.vsched-item:not([data-clickable]) {
   line-height: 1;
   color: var(--ink-3);
   padding: 0 2px;
+  /* The cross is an Icon svg: centre it, and keep the 18px line box the glyph
+     gave the control as its height floor. */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 18px;
 }
 .lineup-name__clear:hover {
   color: var(--ink-1);
@@ -7112,7 +7221,7 @@ button.vsched-item:not([data-clickable]) {
 }
 
 .team-sub-match__score--b-win {
-  background: #fdf2f2;
+  background: var(--aka-tint);
 }
 
 .ipt-btn--sm {
@@ -7226,7 +7335,7 @@ button.vsched-item:not([data-clickable]) {
 }
 
 .team-header__side--white .team-header__color {
-  background: #fff;
+  background: var(--surface);
   color: var(--accent);
   border: 1px solid var(--accent);
 }
@@ -7339,7 +7448,7 @@ button.vsched-item:not([data-clickable]) {
   border-radius: 99px;
   font-size: 14px;
   font-weight: 600;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+  box-shadow: 0 8px 24px var(--black-a20);
   /* The top layer, above the confirm dialogs (1100): a toast raised while one is
      open is not dimmed by its backdrop. It takes no pointer events, so it never
      blocks the dialog under it. */
@@ -7352,17 +7461,20 @@ button.vsched-item:not([data-clickable]) {
    could not follow it). Amber, so it never reads as a failure. */
 .toast--warning {
   background: var(--warn-ink);
-  box-shadow: 0 0 0 2px var(--warn-strong), 0 8px 24px rgba(0, 0, 0, 0.2);
+  box-shadow: 0 0 0 2px var(--warn-strong), 0 8px 24px var(--black-a20);
 }
 
+/* Rises 64px into place (the path bottom: -40px to 24px drew), on transform so
+   it never relays out; the X translate is the .toast centring and must stay.
+   Reduced motion: the .toast rule under prefers-reduced-motion drops it. */
 @keyframes toast-in {
   from {
-    bottom: -40px;
+    transform: translate(-50%, 64px);
     opacity: 0;
   }
 
   to {
-    bottom: 24px;
+    transform: translate(-50%, 0);
     opacity: 1;
   }
 }
@@ -7540,7 +7652,7 @@ button.vsched-item:not([data-clickable]) {
 
 .alert--success {
   background: var(--ok-soft);
-  border-color: #86efac; /* green-300: alert border is stronger than the hairline ok-border token */
+  border-color: var(--green-300); /* green-300: alert border is stronger than the hairline ok-border token */
   color: var(--ok-strong);
 }
 
@@ -7633,6 +7745,15 @@ button.vsched-item:not([data-clickable]) {
   .league-tiebreak { animation: none; }
 }
 
+/* An icon leading the words of an inline label or a line of text (a tag,
+   a warning line, a card title). The space between them is this margin,
+   never a typed space, so it does not change with the text's own spacing.
+   Not for a flex container with a gap (a .btn), which spaces its icon
+   already. */
+svg.icon-lead {
+  margin-inline-end: 0.3em;
+}
+
 .tag-badge {
   display: inline-block;
   margin-left: 6px;
@@ -7640,8 +7761,6 @@ button.vsched-item:not([data-clickable]) {
   border-radius: 4px;
   font-size: 10px;
   font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
   background: var(--accent-soft);
   color: var(--accent);
   border: 1px solid var(--accent-soft);
@@ -7684,7 +7803,7 @@ button.vsched-item:not([data-clickable]) {
 .spinner {
   width: 14px;
   height: 14px;
-  border: 2px solid rgba(0, 0, 0, 0.1);
+  border: 2px solid var(--black-a10);
   border-top-color: currentColor;
   border-radius: 50%;
   animation: spin 0.6s linear infinite;
@@ -7750,8 +7869,6 @@ button.vsched-item:not([data-clickable]) {
   font-size: 11px;
   color: var(--ink-3);
   font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
 }
 
 .match-detail-card__comp {
@@ -7860,7 +7977,7 @@ button.vsched-item:not([data-clickable]) {
   border-radius: 3px; font-family: var(--font-mono); font-weight: 700;
   font-size: 13px; color: var(--ink-1); }
 .msb-slot--aka { color: var(--red); }
-.msb-vs { min-width: 16px; text-align: center; color: #9ca3af; font-size: 11px; font-weight: 700; }
+.msb-vs { min-width: 16px; text-align: center; color: var(--gray-400); font-size: 11px; font-weight: 700; }
 .msb-hansoku { color: var(--danger); font-weight: 700; }
 /* The loose result mark (both slots full, drifted data): it is the row's ONLY
    indication of the verdict on that surface, so it reads at slot strength.
@@ -7875,7 +7992,7 @@ button.vsched-item:not([data-clickable]) {
 .msb-row--summary { border-top: 2px solid var(--ink-1); }
 .msb-row--summary .msb-slot { border: none; flex-direction: column; min-width: 26px;
   font-size: 16px; font-weight: 800; height: auto; }
-.msb-lab { display: block; font-size: 10px; font-weight: 600; color: var(--ink-3); letter-spacing: .04em; }
+.msb-lab { display: block; font-size: 10px; font-weight: 600; color: var(--ink-3); }
 abbr.msb-lab { text-decoration: none; cursor: help; }
 /* running-match highlight: navy running-signal language (DESIGN.md Principle 3).
    --accent-soft fill (same token used by bc-match--running / sched-row--running)
@@ -7885,9 +8002,12 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   background: var(--accent-soft);
   box-shadow: inset 0 0 0 2px color-mix(in oklch, var(--accent) 35%, transparent);
 }
-.msb-row--queued .msb-name { color: #9ca3af; }
-.msb-row--queued .msb-name--aka { color: #d4a5a8; }
-.msb-row--queued .msb-slot { color: #9ca3af; }
+/* A bout not yet fought reads lighter than the one being fought, but stays
+   readable (4.5:1 or better on the card): spectators read lineups on phones
+   in a bright hall. */
+.msb-row--queued .msb-name { color: var(--ink-3); }
+.msb-row--queued .msb-name--aka { color: var(--aka-muted); }
+.msb-row--queued .msb-slot { color: var(--ink-3); }
 /* Daihyosen: the rep bout carries its own (DH) centre mark, so no text
    banner — just a top-border divider separating it from the numbered bouts. */
 .msb-row--dh { border-top: 2px solid var(--ink-1); }
@@ -7945,6 +8065,24 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
    "Show the logo on the lobby display" and a logo is uploaded. Sized to the
    header's 2.4vh title, in vh like the rest of the lobby chrome. */
 .lobby__logo { height: 3vh; width: auto; object-fit: contain; display: block; }
+
+/* The lobby's page-cycle bar fills over one cycle (--lobby-cycle-ms, set by
+   display_lobby.jsx) and restarts with each page. Under reduced motion it is
+   hidden: the pages still turn, and a bar that stands still says nothing. */
+.lobby-cycle-bar {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, rgba(0, 0, 0, 0.3));
+  transform-origin: left;
+  animation: lobby-cycle-fill var(--lobby-cycle-ms) linear;
+}
+@keyframes lobby-cycle-fill {
+  from { transform: scaleX(0); }
+  to { transform: scaleX(1); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .lobby-cycle-bar { animation: none; visibility: hidden; }
+}
 
 /* Lobby board (display_lobby.jsx). The lobby renders IndividualScore with no
    `variant`, so it inherited .msb-row's 13px base -- phone-card size on a
@@ -8033,15 +8171,15 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   border: 1px solid var(--line-light);
 }
 
-.league-matrix__cell--self { color: var(--ink-4); background: var(--bg-2); }
+.league-matrix__cell--self { color: var(--ink-3); background: var(--bg-2); }
 .league-matrix__cell--empty { background: var(--bg-2); }
 .league-matrix__cell--pending { color: var(--ink-3); }
 /* A bout in progress: the cell highlight alone signals "now" (no centre dot).
    Inset accent ring on the accent-soft fill, matching the shared .is-running. */
 .league-matrix__cell--running { background: var(--accent-soft); box-shadow: inset 0 0 0 2px var(--accent); }
-.league-matrix__cell--win { background: rgba(22, 163, 74, 0.08); }
-.league-matrix__cell--loss { background: rgba(220, 38, 38, 0.06); }
-.league-matrix__cell--draw { background: rgba(0, 0, 0, 0.04); }
+.league-matrix__cell--win { background: var(--ok-a08); }
+.league-matrix__cell--loss { background: var(--red-600-a06); }
+.league-matrix__cell--draw { background: var(--black-a04); }
 /* A completed, non-draw match whose winner attributes to neither row nor
    column (sameCompetitor refused a mixed pair, or the match has no
    resolvable winner at all): the pending/empty look, not a loss tint --
@@ -8076,8 +8214,8 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   border-radius: 3px;
   font-weight: 700;
 }
-.league-matrix__legend-item--win { color: var(--ok); background: rgba(22, 163, 74, 0.1); }
-.league-matrix__legend-item--loss { color: #dc2626; background: rgba(220, 38, 38, 0.08); }
+.league-matrix__legend-item--win { color: var(--ok); background: var(--ok-a10); }
+.league-matrix__legend-item--loss { color: var(--red-600); background: var(--red-600-a08); }
 .league-matrix__legend-item--draw { color: var(--ink-2); background: var(--bg-2); }
 
 /* ---------- FoulCounter (Individual Scoring) ---------- */
@@ -8096,14 +8234,12 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   padding: 8px 10px;
 }
 
-.foul-counter--aka { border-color: rgba(220, 38, 38, 0.3); background: rgba(220, 38, 38, 0.03); }
+.foul-counter--aka { border-color: var(--red-600-a30); background: var(--red-600-a03); }
 .foul-counter--shiro { border-color: var(--line); background: var(--bg-2); }
 
 .foul-counter__label {
   font-size: 10px;
   font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
   color: var(--ink-3);
   margin-bottom: 6px;
 }
@@ -8268,10 +8404,10 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
    keep the ink/border cue and let the tint appear only on hover. */
 .ipt-btn--h {
   color: var(--red);
-  border-color: rgba(220, 38, 38, 0.3);
+  border-color: var(--red-600-a30);
   font-weight: 800;
 }
-.ipt-btn--h:hover:not(:disabled) { background: rgba(220, 38, 38, 0.12); }
+.ipt-btn--h:hover:not(:disabled) { background: var(--red-600-a12); }
 
 /* Touch: the "Send back to queue" control and the kiken/fusenpai disclosure
    toggles were the only operator controls that fell below the 44px touch target
@@ -8307,14 +8443,14 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
    column is the expand/collapse indicator. */
 .team-sub-match--editable {
   cursor: pointer;
-  transition: box-shadow 120ms var(--ease-out);
 }
 .team-sub-match--editable:hover {
   opacity: 1;
 }
+/* An outline, not a transitioned box-shadow, so the ring appears at once. */
 .team-sub-match--editable:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
   border-radius: 8px;
 }
 
@@ -8383,8 +8519,6 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 .tsm-side-label {
   font-size: 9px;
   font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
   color: var(--ink-3);
   margin-bottom: 2px;
 }
@@ -8496,7 +8630,7 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   background: var(--bg);
   border: 1px solid var(--line);
   border-radius: 6px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  box-shadow: 0 8px 24px var(--black-a12);
   color: var(--ink-1);
   font-size: 12px;
   font-weight: 400;
@@ -8528,16 +8662,6 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   display: block;
   margin-top: 4px;
   color: var(--ink-2);
-}
-
-@media (max-width: 480px) {
-  .tw-tooltip {
-    /* Anchor to the right side on narrow viewports to avoid clipping
-       past the screen edge for terms near the right margin. */
-    left: auto;
-    right: 0;
-    max-width: 280px;
-  }
 }
 
 /* /glossary viewer page. Lives inside the viewer shell (uses .viewer +
@@ -8623,20 +8747,17 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 /* --- Shared modal chrome refresh (Instrument Panel typography + tone) -- */
 .editor-modal {
   background: linear-gradient(180deg, var(--surface) 0%, color-mix(in srgb, var(--surface) 96%, var(--ink) 4%) 100%);
-  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.04) inset, var(--shadow-lg);
+  box-shadow: 0 1px 0 var(--white-a04) inset, var(--shadow-lg);
 }
 
-.editor-modal__eyebrow {
-  font-size: 10px;
+.editor-modal__meta {
+  font-size: 12px;
   color: var(--ink-3);
-  text-transform: uppercase;
-  letter-spacing: 0.12em;
-  font-weight: 700;
+  margin-top: 2px;
 }
-.editor-modal__eyebrow-encho {
-  margin-left: 8px;
+.editor-modal__meta-encho {
   color: var(--accent);
-  font-weight: 700;
+  font-weight: 600;
 }
 .editor-modal__title {
   font-family: var(--font-display);
@@ -8664,8 +8785,6 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   color: var(--ink-3);
   font-size: 11px;
   font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
   cursor: pointer;
   min-height: 24px;
   transition: border-color 120ms var(--ease-out),
@@ -8760,8 +8879,8 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   font-size: 14px;
   margin-top: 0;
 }
-.editor-modal--compact .editor-modal__eyebrow {
-  font-size: 10px;
+.editor-modal--compact .editor-modal__meta {
+  font-size: 11px;
 }
 
 /* --- Compact mode: individual scoring board ------------------------------ */
@@ -8813,7 +8932,6 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 }
 .editor-modal--compact .sb-dojo {
   font-size: 10px;
-  letter-spacing: 0.08em;
   font-weight: 700;
 }
 .editor-modal--compact .sb-slots {
@@ -8891,7 +9009,6 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 }
 .editor-modal--compact .sb-hansoku-title {
   font-size: 10px;
-  letter-spacing: 0.08em;
   margin-bottom: 8px;
 }
 .editor-modal--compact .sb-hansoku-row {
@@ -8932,7 +9049,6 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 }
 .editor-modal--compact:is(.editor-modal--team, .scoring-panel--team) .sb-vs {
   font-size: 12px;
-  letter-spacing: 0.2em;
 }
 
 /* --- Compact mode: team-sub-match layout (canonical layout via
@@ -9064,6 +9180,13 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   color: var(--ink-3);
   font-size: 13px;
   line-height: 1;
+  /* A 24 x 24 px target (WCAG 2.5.8), so a tap meant for it never lands on
+     the Kiken or Fusenpai button beside it. */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  min-height: 24px;
 }
 .glossary-hint .tw-term:hover,
 .glossary-hint .tw-term:focus-visible {
@@ -9071,8 +9194,9 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 }
 /* A term measures its room on open (Term in glossary.jsx) and flips the
    tooltip to open leftwards when the default left-anchored box would run past
-   its scroll container's right edge, so no call site has to know where in a
-   wrapping row its hint landed. */
+   its scroll container's right edge but fits leftwards, so no call site has to
+   know where in a wrapping row its hint landed. When it fits on neither side,
+   the term moves it inline to end just inside the screen instead. */
 .tw-term--flip .tw-tooltip {
   left: auto;
   right: 0;
@@ -9335,7 +9459,8 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   flex-direction: column;
   gap: 8px;
   max-width: 360px;
-  width: calc(100vw - 32px);
+  /* 100% of the viewport it is fixed to, which leaves out a scrollbar (100vw does not). */
+  width: calc(100% - 32px);
   /* Cap to the viewport and scroll when the stack is tall. The store allows
      up to maxActiveAnnouncements (10) active at once; without a height cap the
      lower cards (and their dismiss buttons) would fall below a short/landscape
@@ -9353,17 +9478,16 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 
 /* Announcement Banner card - Feature mp-h60 / mp-udb */
 .announcement-banner {
-  /* Both stops stay literal on purpose: they are a designed amber-600 to
-     amber-700 pair, and there is no token for the lighter one, so tokenising
-     only the dark stop would let the two drift apart if --warn ever moved. */
-  background: linear-gradient(135deg, #d97706, #b45309);
+  /* A designed amber-600 to amber-700 pair, both their own tokens rather than
+     --warn for the dark stop, so the two never drift apart if --warn moves. */
+  background: linear-gradient(135deg, var(--amber-600), var(--amber-700));
   color: var(--accent-fg);
   padding: 10px 16px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+  box-shadow: 0 4px 16px var(--black-a25);
   border-radius: 8px;
   font-family: inherit;
   box-sizing: border-box;
@@ -9404,15 +9528,13 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 }
 
 .announcement-banner__badge {
-  background: rgba(255, 255, 255, 0.18);
-  border: 1px solid rgba(255, 255, 255, 0.25);
+  background: var(--white-a18);
+  border: 1px solid var(--white-a25);
   color: var(--accent-fg);
   font-size: 11px;
   font-weight: 700;
-  text-transform: uppercase;
   padding: 2px 8px;
   border-radius: 4px;
-  letter-spacing: 0.5px;
   display: flex;
   align-items: center;
   gap: 4px;
@@ -9422,7 +9544,7 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 .announcement-banner__dismiss {
   background: transparent;
   border: none;
-  color: rgba(255, 255, 255, 0.85);
+  color: var(--white-a85);
   font-size: 18px;
   line-height: 1;
   cursor: pointer;
@@ -9435,13 +9557,13 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 }
 
 .announcement-banner__dismiss:hover {
-  background: rgba(255, 255, 255, 0.15);
+  background: var(--white-a15);
   color: var(--accent-fg);
 }
 .ann-bell-btn {
   background: transparent;
   border: none;
-  color: rgba(255, 255, 255, 0.5);
+  color: var(--white-a50);
   cursor: pointer;
   padding: 4px 6px;
   border-radius: 4px;
@@ -9450,15 +9572,15 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   justify-content: center;
   transition: color 0.15s var(--ease-out), background 0.15s var(--ease-out);
 }
-.ann-bell-btn:hover { color: rgba(255, 255, 255, 0.9); background: rgba(255, 255, 255, 0.1); }
-.ann-bell-btn--on { color: rgba(255, 255, 255, 0.95); }
+.ann-bell-btn:hover { color: var(--white-a90); background: var(--white-a10); }
+.ann-bell-btn--on { color: var(--white-a95); }
 .ann-bell-btn--denied { opacity: 0.35; cursor: default; }
 
 @media (max-width: 480px) {
   .announcement-overlay {
     top: 8px;
     right: 8px;
-    width: calc(100vw - 16px);
+    width: calc(100% - 16px);
     max-width: none;
     max-height: calc(100vh - 16px);
     max-height: calc(100dvh - 16px);
@@ -9497,12 +9619,11 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 }
 
 .match-alert-banner__badge {
-  background: rgba(255, 255, 255, 0.25);
+  background: var(--white-a25);
   border-radius: 4px;
   padding: 2px 7px;
   font-size: 11px;
   font-weight: 700;
-  letter-spacing: 0.5px;
   white-space: nowrap;
   flex-shrink: 0;
 }
@@ -9525,7 +9646,7 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 .match-alert-banner__dismiss {
   background: none;
   border: none;
-  color: rgba(255, 255, 255, 0.75);
+  color: var(--white-a75);
   cursor: pointer;
   font-size: 16px;
   padding: 2px 4px;
@@ -9534,7 +9655,7 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 }
 
 .match-alert-banner__dismiss:hover {
-  background: rgba(255, 255, 255, 0.15);
+  background: var(--white-a15);
   color: var(--accent-fg);
 }
 
@@ -9571,7 +9692,7 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   min-width: 0;
 }
 .tvd-side__bar { position: absolute; top: 0; left: 0; right: 0; height: 0.9vh; z-index: 2; }
-.tvd-side__lab { font-family: var(--font-impact); font-size: 2.6vh; letter-spacing: 0.14em; position: relative; z-index: 2; }
+.tvd-side__lab { font-family: var(--font-impact); font-size: 2.6vh; position: relative; z-index: 2; }
 .tvd-side__name {
   font-family: var(--font-strong);
   font-weight: 800;
@@ -9583,35 +9704,35 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 .tvd-side__dojo { font-size: 2.4vh; opacity: 0.55; position: relative; z-index: 2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* SHIRO, left: framed white + 45° hatch over the dark board */
-.tvd-side--shiro { background: linear-gradient(180deg, rgba(255,255,255,0.10), rgba(255,255,255,0.02)); }
+.tvd-side--shiro { background: linear-gradient(180deg, var(--white-a10), var(--white-a02)); }
 .tvd-side--shiro::after {
   content: ""; position: absolute; inset: 0; pointer-events: none;
-  background: repeating-linear-gradient(-45deg, transparent 0 1.1vh, rgba(255,255,255,0.05) 1.1vh 1.3vh);
+  background: repeating-linear-gradient(-45deg, transparent 0 1.1vh, var(--white-a05) 1.1vh 1.3vh);
 }
-.tvd-side--shiro .tvd-side__bar { background: #fff; }
-.tvd-side--shiro .tvd-side__lab { color: rgba(255,255,255,0.8); }
+.tvd-side--shiro .tvd-side__bar { background: var(--surface); }
+.tvd-side--shiro .tvd-side__lab { color: var(--white-a80); }
 
 /* AKA, right: red flood + glow */
-.tvd-side--aka { text-align: right; align-items: flex-end; background: linear-gradient(180deg, rgba(204,17,34,0.55), rgba(204,17,34,0.28)), #0b0d12; }
+.tvd-side--aka { text-align: right; align-items: flex-end; background: linear-gradient(180deg, var(--tv-aka-a55), var(--tv-aka-a28)), var(--tv-board); }
 .tvd-side--aka::after {
   content: ""; position: absolute; inset: 0; pointer-events: none;
-  background: radial-gradient(80% 60% at 80% 0%, rgba(255,59,59,0.35), transparent 60%);
+  background: radial-gradient(80% 60% at 80% 0%, var(--aka-bright-a35), transparent 60%);
 }
 .tvd-side--aka .tvd-side__bar { background: var(--aka-bright); }
-.tvd-side--aka .tvd-side__lab { color: #ffd9dc; }
+.tvd-side--aka .tvd-side__lab { color: var(--aka-pale); }
 
 /* centre, real score MK – M (Shiro white, Aka red), + decision/fouls */
-.tvd-centre { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1vh; padding: 0 1.5vw; background: rgba(0,0,0,0.25); }
+.tvd-centre { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1vh; padding: 0 1.5vw; background: var(--black-a25); }
 .tvd-score { font-family: var(--font-impact); font-size: 9vh; line-height: 0.9; display: flex; align-items: center; gap: 0.18em; }
 .tvd-score__s { color: var(--accent-fg); }
-.tvd-score__d { color: rgba(255,255,255,0.3); font-size: 0.55em; }
-.tvd-score__a { color: var(--aka-bright); text-shadow: 0 0 4vh rgba(255,59,59,0.4); }
-.tvd-centre__sfx { font: 700 2.4vh/1 var(--font-strong); letter-spacing: 0.05em; color: rgba(255,255,255,0.75); }
+.tvd-score__d { color: var(--white-a30); font-size: 0.55em; }
+.tvd-score__a { color: var(--aka-bright); text-shadow: 0 0 4vh var(--aka-bright-a40); }
+.tvd-centre__sfx { font: 700 2.4vh/1 var(--font-strong); color: var(--white-a75); }
 .tvd-centre__fouls { font-size: 2.2vh; opacity: 0.65; font-weight: 500; }
-.tvd-centre__vs { font-family: var(--font-impact); font-size: 5vh; color: rgba(255,255,255,0.4); writing-mode: vertical-rl; }
+.tvd-centre__vs { font-family: var(--font-impact); font-size: 5vh; color: var(--white-a40); writing-mode: vertical-rl; }
 
 /* up-next: tiny muted note in the header (NOT a big badge) */
-.tvd-upnext-note { font: 700 2.2vh/1 var(--font-strong); letter-spacing: 0.16em; text-transform: uppercase; color: rgba(255,209,102,0.85); }
+.tvd-upnext-note { font: 700 2.2vh/1 var(--font-strong); color: var(--tv-gold-a85); }
 
 /* ---------- Sponsor strip (mp-c38) ----------
    Viewer home ONLY (the TV/lobby display surfaces intentionally omit
@@ -9649,7 +9770,8 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 /* Banners span the full viewer column; only the height is capped (above), so
    a landscape banner fills the width edge-to-edge while a tall/square upload
    is bounded by max-height + object-fit:contain. The full-width wrapper also
-   keeps the linked banner's ↗ badge on the banner's own (== column) corner. */
+   keeps the linked banner's opens-externally badge on the banner's own
+   (== column) corner. */
 .sponsor-strip__link,
 .sponsor-strip__item {
   display: block;
@@ -9662,21 +9784,27 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 .sponsor-strip__link {
   position: relative;
 }
+/* The badge is a drawn icon, never a character the device's own font would
+   draw: ::before is the disc, ::after the arrow-up-right line icon (lucide)
+   masked over it in the badge's ink. */
+.sponsor-strip__link::before,
 .sponsor-strip__link::after {
-  content: "\2197"; /* ↗ */
+  content: "";
   position: absolute;
   top: 8px;
   right: 8px;
-  display: grid;
-  place-items: center;
   width: 22px;
   height: 22px;
-  font-size: 12px;
-  line-height: 1;
-  color: var(--accent-fg);
+  pointer-events: none;
+}
+.sponsor-strip__link::before {
   background: var(--accent);
   border-radius: 999px;
-  pointer-events: none;
+}
+.sponsor-strip__link::after {
+  background-color: var(--accent-fg);
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M7 7h10v10'/%3E%3Cpath d='M7 17 17 7'/%3E%3C/svg%3E") center / 12px 12px no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M7 7h10v10'/%3E%3Cpath d='M7 17 17 7'/%3E%3C/svg%3E") center / 12px 12px no-repeat;
 }
 .sponsor-strip__link:hover .sponsor-strip__logo {
   box-shadow: var(--shadow);
@@ -9738,6 +9866,9 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   justify-content: center;
   align-items: center;
   flex-wrap: wrap;
+  /* A flex item drops the space at the end of its text, so the gap is what
+     separates the version from the link. */
+  column-gap: 0.35em;
   font-size: 11px;
   /* --ink-4 (#6c7480) is only 4.44:1 on --bg, just under AA. Step to the
      darker --ink-2 (#3a414e, 9.66:1 on --bg). Site-specific darken; do NOT
@@ -9988,7 +10119,7 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   background: var(--accent);
   color: var(--accent-fg);
 }
-.pmf__chip.is-primary .pmf__chip-pin { color: #fbbf24; }
+.pmf__chip.is-primary .pmf__chip-pin { color: var(--amber-400); }
 
 /* A watch entry that resolves to nobody in this tournament (bc-wlhc).
    --warn, not --danger: nothing is lost or broken, the entry simply cannot be
@@ -10047,7 +10178,7 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   display: flex;
   align-items: center;
   gap: 8px;
-  background: #f2e2e4; /* fallback, approximate red-10% over bg */
+  background: var(--red-tint); /* fallback, approximate red-10% over bg */
   background: color-mix(in oklch, var(--red) 10%, var(--bg));
   border: 1px solid color-mix(in oklch, var(--red) 35%, transparent);
   border-radius: var(--r-md);
@@ -10077,7 +10208,7 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   display: flex;
   align-items: center;
   gap: 12px;
-  max-width: calc(100vw - 32px);
+  max-width: calc(100% - 32px);
   background: var(--bg);
   border: 1px solid color-mix(in oklch, var(--ink-1) 25%, transparent);
   border-radius: var(--r-md);
@@ -10338,7 +10469,6 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   transform: rotate(180deg);
   font-size: 12px;
   font-weight: 600;
-  letter-spacing: 0.04em;
   white-space: nowrap;
 }
 
@@ -10465,8 +10595,6 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   font-family: var(--font-sans);
   font-weight: 600;
   font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
   color: var(--ink-3);
   background: var(--surface-2);
   border: 1px solid var(--line);
@@ -10548,8 +10676,6 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   gap: 8px;
   font-size: 11px;
   font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
   color: var(--ink-2);
   margin: 0 0 6px;
 }
@@ -11033,8 +11159,6 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 .rd-headline__noun {
   font-size: 11px;
   color: var(--ink-3);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
   margin-top: 2px;
 }
 
@@ -11134,6 +11258,10 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   line-height: 1;
   cursor: pointer;
   border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
 }
 
 .rd-handoff__close:hover {
@@ -11268,7 +11396,6 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   border-radius: 7px;
   border: 2px solid var(--ink-4);
   background: var(--surface);
-  color: var(--surface);
   display: grid;
   place-items: center;
   transition: background 120ms var(--ease-out), border-color 120ms var(--ease-out);
@@ -11281,11 +11408,14 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 .rd-row.is-checked .rd-check__box {
   background: var(--ok);
   border-color: var(--ok);
+  color: var(--surface);
 }
 
 .rd-row.is-partial .rd-check__box {
   background: var(--warn-strong);
   border-color: var(--warn-strong);
+  /* The tick is an icon (3:1): --warn-ink on amber-500 is 4.22:1, white was 2.15:1. */
+  color: var(--warn-ink);
 }
 
 .rd-check:focus-visible {
@@ -11294,7 +11424,7 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 }
 
 .rd-check:disabled {
-  cursor: default;
+  cursor: not-allowed;
   opacity: 0.5;
 }
 
@@ -11390,9 +11520,11 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   outline-offset: 2px;
 }
 
+/* Hidden while disabled, its place kept: visibility, not opacity, so the row's
+   hover and the touch rule above cannot bring a pencil back that does nothing. */
 .rd-row__edit:disabled {
-  cursor: default;
-  opacity: 0;
+  cursor: not-allowed;
+  visibility: hidden;
 }
 
 /* Touch devices have no hover, keep the pencil visible so it's reachable.
@@ -11425,8 +11557,6 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 .rd-chips__label {
   font-size: 10.5px;
   font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
   color: var(--ink-4);
 }
 
@@ -11507,15 +11637,13 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 .rd-group__name {
   font-size: 12px;
   font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
   color: var(--ink-2);
 }
 
 .rd-group__count {
   font-size: 11px;
   font-weight: 700;
-  color: var(--ink-4);
+  color: var(--ink-3);
   background: var(--line-2);
   border-radius: 999px;
   padding: 1px 8px;
@@ -12287,7 +12415,8 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 
 .cal-move-dialog {
   max-width: 480px;
-  width: calc(100vw - 32px);
+  /* Against its .modal-backdrop (padding 20px), as .editor-modal: the same 16px gutter as 100vw - 32px, without the scrollbar. */
+  width: calc(100% + 8px);
   max-height: calc(100vh - 32px);
   overflow-y: auto;
 }

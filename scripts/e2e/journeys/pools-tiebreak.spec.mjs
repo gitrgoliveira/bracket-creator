@@ -240,7 +240,7 @@ test.describe('pools: minimum pool size and a tie-break bout', () => {
     await login(page);
     const pair = await tieBreakPairing(page);
     record({ journey: JOURNEY, step: 'tie-break', action: 'on the court console', pair, screenshot: await shot(page, 'pool-tiebreak-console-up-next', { fullPage: true }) });
-    const card = (await inlineRunning(page)) ? page.locator('.editor-modal__eyebrow').first() : upNextCard(page);
+    const card = (await inlineRunning(page)) ? page.locator('.editor-modal__meta').first() : upNextCard(page);
     expect((await card.innerText()), 'a tie-break bout carries no "Match n of m"').not.toMatch(POOL_MATCH_LABEL);
 
     // The Scores tab: it is the one bout left to score.
@@ -456,7 +456,7 @@ test.describe('pools: a tie over the extra qualifier place of an oversized pool'
     await login(page);
     const pair = await tieBreakPairing(page);
     record({ journey: JOURNEY_EXTRA, step: 'tie-break', action: 'on the court console', pair, screenshot: await shot(page, 'tie-break-on-console') });
-    const card = (await inlineRunning(page)) ? page.locator('.editor-modal__eyebrow').first() : upNextCard(page);
+    const card = (await inlineRunning(page)) ? page.locator('.editor-modal__meta').first() : upNextCard(page);
     expect((await card.innerText()), 'a tie-break bout carries no "Match n of m"').not.toMatch(POOL_MATCH_LABEL);
 
     await openCompetitionTab(page, compId, 'scores');
@@ -869,13 +869,13 @@ test.describe('pools: a tie-break bout saved as a draw', () => {
     const pair = await tieBreakPairingOn(page, DRAWN_COURT, [tb.b, tb.c]);
     const running = await ensureRunning(page);
     expect(running, 'the tie-break bout runs on the court').toEqual(pair);
-    const eyebrow = await page.locator('.editor-modal__eyebrow').first().innerText();
-    expect(eyebrow, 'a tie-break bout carries no "Match n of m"').not.toMatch(POOL_MATCH_LABEL);
+    const meta = await page.locator('.editor-modal__meta').first().innerText();
+    expect(meta, 'a tie-break bout carries no "Match n of m"').not.toMatch(POOL_MATCH_LABEL);
     await markDraw(page);
     await shot(page, 'tie-break-marked-draw');
     await finishMatch(page);
     await expect(completedRowFor(page, pair)).toBeVisible();
-    record({ journey: JOURNEY_DRAWN, step: 'drawn tie-break', action: 'Mark draw, Finish', pair, eyebrow,
+    record({ journey: JOURNEY_DRAWN, step: 'drawn tie-break', action: 'Mark draw, Finish', pair, meta,
       screenshot: await shot(page, 'court-after-drawn-tie-break') });
 
     // The court, once the page has had time to take in the result.

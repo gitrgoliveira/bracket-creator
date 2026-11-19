@@ -1663,7 +1663,7 @@ describe('ViewerHome empty-state discoverability (mp-og2g)', () => {
   let ViewerHomeComp;
   let originalLocalStorageDescriptor;
   const STUBBED = [
-    'StatusBadge', 'formatDate', 'formatLabel', 'formatViewerHeaderEyebrow',
+    'StatusBadge', 'formatDate', 'formatLabel', 'formatViewerHeaderMeta',
     'pluralize', 'hasBothSides', 'compareDmy', 'queueLabelCompact',
     'roundLabel', 'bracketRoundLabel', 'matchScoreStr', 'EmptyState',
   ];
@@ -1717,10 +1717,10 @@ describe('ViewerHome empty-state discoverability (mp-og2g)', () => {
         ? { had: true, val: global.window[k] } : { had: false };
     });
     global.window.StatusBadge = vi.fn(() => null);
-    global.window.EmptyState = function EmptyState(props) { return { type: 'div', props: { className: 'empty', ...props }, children: [props.icon, props.title, props.message, props.cta].filter(Boolean) }; };
+    global.window.EmptyState = function EmptyState(props) { return { type: 'div', props: { className: 'empty', ...props }, children: [props.title, props.message, props.cta].filter(Boolean) }; };
     global.window.formatDate = (d) => d || '';
     global.window.formatLabel = (l) => l || '';
-    global.window.formatViewerHeaderEyebrow = () => '';
+    global.window.formatViewerHeaderMeta = () => '';
     global.window.pluralize = (n, s) => `${n} ${s}`;
     global.window.hasBothSides = () => true;
     global.window.compareDmy = () => 0;
@@ -1792,7 +1792,7 @@ describe('ViewerHome globalRunning de-dup (mp-42rg)', () => {
   let originalLocalStorageDescriptor;
   // Module-level consts captured at import time + render-time window reads
   const STUBBED = [
-    'StatusBadge', 'formatDate', 'formatLabel', 'formatViewerHeaderEyebrow',
+    'StatusBadge', 'formatDate', 'formatLabel', 'formatViewerHeaderMeta',
     'pluralize', 'hasBothSides', 'compareDmy', 'queueLabelCompact',
     'roundLabel', 'bracketRoundLabel', 'matchScoreStr', 'EmptyState',
   ];
@@ -1855,7 +1855,7 @@ describe('ViewerHome globalRunning de-dup (mp-42rg)', () => {
     global.window.StatusBadge = vi.fn(() => null);
     global.window.formatDate = (d) => d || '';
     global.window.formatLabel = (l) => l || '';
-    global.window.formatViewerHeaderEyebrow = () => '';
+    global.window.formatViewerHeaderMeta = () => '';
     global.window.pluralize = (n, s) => `${n} ${s}`;
     // Render-time window reads
     global.window.hasBothSides = () => true;
@@ -1864,7 +1864,7 @@ describe('ViewerHome globalRunning de-dup (mp-42rg)', () => {
     global.window.roundLabel = (i) => `Round ${i + 1}`;
     global.window.bracketRoundLabel = (_m, i, n) => global.window.roundLabel(i, n);
     global.window.matchScoreStr = () => '';
-    global.window.EmptyState = function EmptyState(props) { return { type: 'div', props: { className: 'empty', ...props }, children: [props.icon, props.title, props.message, props.cta].filter(Boolean) }; };
+    global.window.EmptyState = function EmptyState(props) { return { type: 'div', props: { className: 'empty', ...props }, children: [props.title, props.message, props.cta].filter(Boolean) }; };
     vi.resetModules();
     ({ ViewerHome: ViewerHomeComp } = await import('../viewer.jsx'));
   });

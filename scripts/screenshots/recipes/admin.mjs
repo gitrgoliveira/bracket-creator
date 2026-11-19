@@ -432,7 +432,12 @@ export const recipes = [
     waitFor: `text=${CAL_SETUP}`,
     drive: async ({ page }) => {
       await openMoveDialog(page, CAL_SETUP);
+      const openedAt = Date.now();
       await setMoveStart(page, '11:00');
+      // The dialog takes no click for TAP_BOUNCE_MS after it opens (its
+      // useOpenedTapGuard, tap_guard.jsx), and the preview usually lands well
+      // inside that, so a click at once was swallowed and the move never sent.
+      await page.waitForTimeout(Math.max(0, TAP_DWELL_MS - (Date.now() - openedAt)));
       await page.getByTestId('cal-move-dialog').getByRole('button', { name: 'Move', exact: true }).click();
       await page.getByTestId('cal-moved-line').waitFor({ state: 'visible', timeout: 15000 });
     },

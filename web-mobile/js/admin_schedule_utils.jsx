@@ -42,7 +42,7 @@ export function EstimateHeadline({ estimate, total, format, testId }) {
   if (!range) return <div><strong>Est. duration:</strong> about {total}</div>;
   return (
     <div data-testid={testId}>
-      <strong>Best</strong> {format(range.best) || "0m"} · <strong>Average</strong> {format(range.average) || "0m"} · <strong>Worst</strong> {format(range.worst) || "0m"}
+      <strong>Best</strong> {format(range.best) || "0m"}, <strong>average</strong> {format(range.average) || "0m"}, <strong>worst</strong> {format(range.worst) || "0m"}
     </div>
   );
 }

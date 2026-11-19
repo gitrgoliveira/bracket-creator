@@ -122,7 +122,7 @@ describe('ViewerCompetition bronze / 3rd-place match rendering (mp-gy6g)', () =>
     };
     global.window.Term = function Term(props) { return { type: 'span', props, children: props?.children }; };
     global.window.EmptyState = function EmptyState(props) {
-      return { type: 'div', props: { className: 'empty', ...props }, children: [props.icon, props.title, props.message].filter(Boolean) };
+      return { type: 'div', props: { className: 'empty', ...props }, children: [props.title, props.message].filter(Boolean) };
     };
     global.window.formatDate = (d) => d || '';
     global.window.formatLabel = (s) => s || '';

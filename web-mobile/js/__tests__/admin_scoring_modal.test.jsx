@@ -976,18 +976,18 @@ describe('shouldBlockScoringKeys (hantei keyboard guard)', () => {
 
 describe('teamResultLabel (no draw in a knockout)', () => {
   it('names the winning side regardless of phase', () => {
-    expect(teamResultLabel({ teamWinner: 'a', isKnockoutPhase: true, hasAnyScore: true })).toBe('AKA WIN');
-    expect(teamResultLabel({ teamWinner: 'b', isKnockoutPhase: false, hasAnyScore: true })).toBe('SHIRO WIN');
+    expect(teamResultLabel({ teamWinner: 'a', isKnockoutPhase: true, hasAnyScore: true })).toBe('Aka wins');
+    expect(teamResultLabel({ teamWinner: 'b', isKnockoutPhase: false, hasAnyScore: true })).toBe('Shiro wins');
   });
 
   it('a tied POOL encounter is a true draw', () => {
-    expect(teamResultLabel({ teamWinner: null, isKnockoutPhase: false, hasAnyScore: true })).toBe('DRAW');
-    expect(teamResultLabel({ teamWinner: null, isKnockoutPhase: false, hasAnyScore: false })).toBe('DRAW');
+    expect(teamResultLabel({ teamWinner: null, isKnockoutPhase: false, hasAnyScore: true })).toBe('Draw');
+    expect(teamResultLabel({ teamWinner: null, isKnockoutPhase: false, hasAnyScore: false })).toBe('Draw');
   });
 
   it('a tied KNOCKOUT encounter is never a draw; it needs a daihyosen', () => {
     // Scored tie in a bracket match → resolve by representative bout.
-    expect(teamResultLabel({ teamWinner: null, isKnockoutPhase: true, hasAnyScore: true })).toBe('DAIHYOSEN');
+    expect(teamResultLabel({ teamWinner: null, isKnockoutPhase: true, hasAnyScore: true })).toBe('Daihyosen');
     // mp-gmcg: daihyosen does not exist in kachinuki — a tied knockout
     // kachinuki encounter stays pending; the tie is resolved by fighting on.
     expect(teamResultLabel({ teamWinner: null, isKnockoutPhase: true, hasAnyScore: true, isKachinuki: true })).toBe('-');

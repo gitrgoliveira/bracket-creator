@@ -132,3 +132,64 @@ describe('own_status: a landed Start over a late scheduled copy', () => {
     expect(o.view()).toMatchObject({ shownStatus: 'running', kept: null, override: null });
   });
 });
+
+// The same race the other way round: a refetch the server answered from data
+// read before the write that moved the match to running lands AFTER that
+// write's push (journeys/league-team traces). Its copy, older by the server's
+// scoreVersion (lower, or none), is ignored: the match stays running, nothing
+// resets, and no kept draft is dropped.
+describe('own_status: a copy older by scoreVersion than the running one', () => {
+  it('an own Start, the push then the stale answer: the match stays running and no note follows', () => {
+    for (const answerFirst of [true, false]) {
+      const o = createOwnStatus('scheduled', 0);
+      const t = o.begin(OWN_START, {});
+      if (answerFirst) o.answer(t, LANDED, '', 100);
+      o.observe('running', 100, 2);
+      o.observe('scheduled', 0);
+      if (!answerFirst) o.answer(t, LANDED, '', 100);
+      expect(o.view(), `answer first: ${answerFirst}`).toMatchObject({ shownStatus: 'running', resetSeq: 0, kept: null, startOffered: false });
+      // Taps in the flash would go into a draft only while it showed scheduled.
+      o.note(...DRAFT);
+      o.observe('running', 100, 2);
+      expect(o.view().kept, `answer first: ${answerFirst}`).toBeNull();
+    }
+  });
+
+  it('an own reopen, the push then the stale finished copy: no "reopened on another device"', () => {
+    const o = createOwnStatus('completed', 50, 3);
+    const t = o.begin(OWN_REOPEN);
+    o.answer(t, LANDED, '', 60);
+    o.observe('running', 60, 4);
+    o.observe('completed', 50, 3);
+    expect(o.view()).toMatchObject({ shownStatus: 'running', resetSeq: 0, kept: null });
+    o.note(...DRAFT);
+    o.observe('running', 60, 4);
+    expect(o.view().kept).toBeNull();
+  });
+
+  it('another device\'s start: a stale copy does not drop the kept draft', () => {
+    const o = createOwnStatus('scheduled', 1);
+    o.note(...DRAFT);
+    o.observe('running', 2, 2);
+    expect(o.view().kept).toEqual({ base: DRAFT[0], from: 'scheduled' });
+    o.observe('scheduled', 1);
+    expect(o.view()).toMatchObject({ shownStatus: 'running', droppedShown: false, resetSeq: 0, kept: { base: DRAFT[0], from: 'scheduled' } });
+    o.observe('running', 2, 2);
+    expect(o.view().kept).toEqual({ base: DRAFT[0], from: 'scheduled' });
+  });
+
+  it('a real move out of running stands: a running copy with no scoreVersion, a copy at or above it', () => {
+    const none = createOwnStatus('scheduled', 1);
+    none.note(...DRAFT);
+    none.observe('running', 2);
+    none.observe('scheduled', 1);
+    expect(none.view()).toMatchObject({ shownStatus: 'scheduled', kept: null, droppedShown: true, resetSeq: 1 });
+    for (const [status, version] of [['completed', 3], ['scheduled', 2]]) {
+      const o = createOwnStatus('scheduled', 1);
+      o.note(...DRAFT);
+      o.observe('running', 2, 2);
+      o.observe(status, 3, version);
+      expect(o.view(), `${status} at ${version}`).toMatchObject({ shownStatus: status, kept: null, droppedShown: true, resetSeq: 1 });
+    }
+  });
+});

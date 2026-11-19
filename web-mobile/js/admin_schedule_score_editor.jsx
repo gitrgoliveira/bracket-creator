@@ -189,7 +189,7 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
 
       <div className="score-editor__list">
         {filtered.length === 0 && (
-          <EmptyState icon="🔍" title="No matches" message="Adjust your filters or check that competitions have started." />
+          <EmptyState icon="search" title="No matches" message="Adjust your filters or check that competitions have started." />
         )}
         {/* "All matches scored" banner. Guarded against statusFilter === "complete"
             because the filter trivially makes filtered all-completed, which would

@@ -73,8 +73,8 @@ describe('hantei side buttons only pick (bc-htsd)', () => {
   it('each button names its colour and competitor, for an operator who does not know SHIRO and AKA', async () => {
     render(<ScoreEditorModal match={tied()} onClose={vi.fn()} onSubmit={vi.fn()} password="" />);
     await click(screen.getByTestId('scoring-modal-hantei-arm'));
-    expect(screen.getByTestId('scoring-modal-hantei-shiro').textContent).toBe('SHIRO (White) wins: Tanaka');
-    expect(screen.getByTestId('scoring-modal-hantei-aka').textContent).toBe('AKA (Red) wins: Yamada');
+    expect(screen.getByTestId('scoring-modal-hantei-shiro').textContent).toBe('Shiro (white) wins: Tanaka');
+    expect(screen.getByTestId('scoring-modal-hantei-aka').textContent).toBe('Aka (red) wins: Yamada');
   });
 
   it('picking a side commits nothing; Finish, tapped twice, commits exactly the pick', async () => {

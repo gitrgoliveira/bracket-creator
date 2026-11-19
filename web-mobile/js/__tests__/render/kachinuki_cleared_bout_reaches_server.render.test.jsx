@@ -169,7 +169,7 @@ describe('a mark taken back on a kachinuki bout reaches the server (bc-kclr)', (
       ])} onClose={onClose} onSubmit={onSubmit} password="" />);
     });
     await tapMark('aka', 'M');
-    await act(async () => { fireEvent.click(screen.getByText('✕ Close')); });
+    await act(async () => { fireEvent.click(screen.getByText('Close')); });
 
     expect(window.confirmDialog).not.toHaveBeenCalled();
     expect(onClose).toHaveBeenCalledTimes(1);

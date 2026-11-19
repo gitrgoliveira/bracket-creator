@@ -95,7 +95,7 @@ export const decisionPrompt = (page, root = INLINE_EDITOR) => page.locator(root)
 // prompt picks no side for the operator and Record stays off until one is
 // picked (bc-dsid), so `side` is required. Returns what the prompt showed: the
 // side preselected (none), whether Record was off before the pick, and the
-// label it read once the side was picked ("Record: AKA withdrew").
+// label it read once the side was picked ("Record: Aka withdrew").
 export async function recordDecision(page, kind, { side, reason, root = INLINE_EDITOR } = {}) {
   if (!side) throw new Error('recordDecision: pick a side; the prompt preselects none (bc-dsid)');
   await decisionButton(page, kind, root).tap();
@@ -115,7 +115,7 @@ export async function recordDecision(page, kind, { side, reason, root = INLINE_E
   return { preselected, recordDisabledBeforePick, recordLabel, chosen: side };
 }
 
-// Is the inline editor holding a RUNNING bout (no PRE-MATCH / CORRECTION pill)?
+// Is the inline editor holding a RUNNING bout (no Pre-match / Correction pill)?
 export async function inlineRunning(page) {
   const ed = inlineEditor(page).first();
   if (!(await ed.isVisible().catch(() => false))) return false;
@@ -254,7 +254,7 @@ export async function correctCompleted(page, pair, { readLive = liveIndividualBo
     await expect(page.locator('.toast')).toHaveCount(0);
     await done.getByRole('button', { name: 'Correct' }).tap();
   }
-  await expect(pill).toHaveText('CORRECTION');
+  await expect(pill).toHaveText('Correction');
   return { live, refusal };
 }
 

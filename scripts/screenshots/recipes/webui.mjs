@@ -23,18 +23,18 @@ export const families = {
   },
 };
 
-// The header version badge starts as "Loading..." and is filled in by an
+// The header version badge starts as "Loading…" and is filled in by an
 // async fetch (fetchAppVersion, web/js/app.js:28-33, called against
 // fetchAppStatus in web/js/api.js) with version.GetVersion() (cmd/serve.go),
 // which is the git describe/branch string, NOT always a "vX.Y.Z" tag (a
 // worktree build reports its branch name, e.g.
 // "worktree-bridge-cse_...", confirmed against this build). So wait for the
 // badge to stop reading the placeholder, not for a semver shape, so captures
-// don't show "Loading...".
+// don't show "Loading…".
 async function waitForVersionBadge(page) {
   await page.waitForFunction(() => {
     const el = document.getElementById('app-version');
-    return !!el && el.textContent !== '' && el.textContent !== 'Loading...';
+    return !!el && el.textContent !== '' && el.textContent !== 'Loading…';
   });
 }
 

@@ -330,12 +330,12 @@ function StreamingOverlay({ court, position, competitions }) {
                     {/* Aka: right side (red) */}
                     <div style={{ flex: 1, minWidth: 0, textAlign: 'right' }} data-testid="overlay-aka">
                         <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: '1vw' }}>
-                            <span data-testid="overlay-aka-ivpw" style={{ flexShrink: 0, fontSize: '1.8vh', color: '#fda4af', fontFamily: 'var(--font-mono)', fontWeight: 700 }}>PW {ovlIV.pwAka} · IV {ovlIV.ivAka}</span>
-                            <span style={{ fontWeight: 700, fontSize: '2.6vh', color: '#fda4af', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{akaTeamParts ? <NumberedName side="aka" clip {...akaTeamParts} /> : ''}</span>
+                            <span data-testid="overlay-aka-ivpw" style={{ flexShrink: 0, fontSize: '1.8vh', color: 'var(--rose-300)', fontFamily: 'var(--font-mono)', fontWeight: 700 }}>PW {ovlIV.pwAka} · IV {ovlIV.ivAka}</span>
+                            <span style={{ fontWeight: 700, fontSize: '2.6vh', color: 'var(--rose-300)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{akaTeamParts ? <NumberedName side="aka" clip {...akaTeamParts} /> : ''}</span>
                         </div>
                         <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: '1vw', marginTop: '0.4vh', opacity: 0.85 }}>
-                            <span data-testid="overlay-aka-bout" style={{ flexShrink: 0, fontSize: '2vh', color: '#fda4af', fontFamily: 'var(--font-mono)', fontWeight: 700 }}>{boutIpponsA}</span>
-                            <span style={{ fontSize: '1.9vh', color: '#fda4af', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            <span data-testid="overlay-aka-bout" style={{ flexShrink: 0, fontSize: '2vh', color: 'var(--rose-300)', fontFamily: 'var(--font-mono)', fontWeight: 700 }}>{boutIpponsA}</span>
+                            <span style={{ fontSize: '1.9vh', color: 'var(--rose-300)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                                 {/* Aka's member label sits AFTER the name, on the outer
                                     side, like its competitor number (operator ruling
                                     2026-09-14, bc-dnst); Shiro's sits before. */}
@@ -360,12 +360,11 @@ function StreamingOverlay({ court, position, competitions }) {
                             border: '1px solid var(--accent)',
                             fontSize: '1.4vh',
                             fontWeight: 800,
-                            letterSpacing: '0.06em',
                             padding: '2px 6px',
                             borderRadius: 4,
                             marginRight: 8,
                             verticalAlign: 'middle',
-                        }}><TermD name="shiro">SHIRO</TermD></span>
+                        }}><TermD name="shiro">Shiro</TermD></span>
                         <span style={{ fontWeight: 600, verticalAlign: 'middle' }}>{shiro}</span>
                     </div>
                     <div style={{
@@ -390,12 +389,11 @@ function StreamingOverlay({ court, position, competitions }) {
                             color: 'var(--accent-fg)',
                             fontSize: '1.4vh',
                             fontWeight: 800,
-                            letterSpacing: '0.06em',
                             padding: '2px 6px',
                             borderRadius: 4,
                             marginLeft: 8,
                             verticalAlign: 'middle',
-                        }}><TermD name="aka">AKA</TermD></span>
+                        }}><TermD name="aka">Aka</TermD></span>
                     </div>
                 </>
             )}
@@ -422,11 +420,10 @@ function StreamingOverlay({ court, position, competitions }) {
                             background: 'var(--warn-strong)',
                             color: 'var(--ink)',
                             fontWeight: 800,
-                            letterSpacing: '0.06em',
                             fontSize: '1.4vh',
                             padding: '2px 8px',
                             borderRadius: 4,
-                        }}>DAIHYOSEN</span>
+                        }}>Daihyosen</span>
                     )}
                     {compName}
                 </div>

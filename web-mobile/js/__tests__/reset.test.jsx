@@ -87,7 +87,7 @@ describe('ResetPasswordForm', () => {
         onBack,
         onSuccess: vi.fn(),
       });
-      const backBtn = findInTree(tree, (n) => n.type === 'button' && collectText(n) === '← Back');
+      const backBtn = findInTree(tree, (n) => n.type === 'button' && collectText(n) === 'Back');
       expect(backBtn).toBeTruthy();
       backBtn.props.onClick();
       expect(onBack).toHaveBeenCalledOnce();

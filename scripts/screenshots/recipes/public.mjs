@@ -306,5 +306,5 @@ export const recipes = [
 // shows (lib/card.mjs).
 recipes.push(...cardRecipes(recipes, [
   // The Everyone follows step: the recent results.
-  ['viewer-result-encho', 'card-results', { x: 151, y: 724, width: 604, height: 485 }],
+  ['viewer-result-encho', 'card-results', { x: 151, y: 708, width: 604, height: 485 }],
 ]));

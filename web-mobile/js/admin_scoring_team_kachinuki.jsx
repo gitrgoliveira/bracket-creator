@@ -149,7 +149,7 @@ export function deriveKachinukiEndOutcome({ subResults, isKnockoutPhase }) {
 // deriveKachinukiEndOutcome owns the OUTCOME; this owns its DISPLAY STRING so
 // the two End-match surfaces (the reopen verdict-preview and the End/Confirm
 // button) can never drift. The win wording defers to teamResultLabel, the
-// canonical "AKA WIN"/"SHIRO WIN" source; a tied end reads "Draw (hikiwake)".
+// canonical "Aka wins"/"Shiro wins" source; a tied end reads "Draw (hikiwake)".
 export function kachinukiEndOutcomeLabel(outcome) {
   if (outcome?.kind === "win") return teamResultLabel({ teamWinner: outcome.winnerSide });
   return "Draw (hikiwake)";
@@ -173,7 +173,7 @@ export function kachinukiEnchoAvailable(outcome) {
 // (light instrument panel, user-confirmed brief 2026-08-02). The band shows
 // BOUT-LOG FACTS ONLY — never roster inferences (the roster is advisory by
 // operator ruling) and NEVER a verdict while the match is running (the old
-// IV/PW-derived "AKA WIN" contradicted the End gate mid-match, critique P1).
+// IV/PW-derived "Aka wins" contradicted the End gate mid-match, critique P1).
 // The verdict returns only on completion, derived from the MATCH winner —
 // the last bout decides kachinuki, never the IV lead.
 //
@@ -221,8 +221,10 @@ export function kachinukiBandModel({ subs, daihyosenIdx, isComplete, matchWinner
 
   if (isComplete) {
     const n = played.length;
-    const headline = `FINAL · ${n} BOUT${n === 1 ? "" : "S"}`;
-    // Winner wording defers to teamResultLabel (the one "AKA WIN"/"SHIRO WIN"
+    // "Final" names the last match of a knockout and nothing else (operator
+    // ruling 2026-09-20, bc-sccl), so the finished band says Finished.
+    const headline = `Finished, ${n} bout${n === 1 ? "" : "s"}`;
+    // Winner wording defers to teamResultLabel (the one "Aka wins"/"Shiro wins"
     // home). The raw-name fallback keeps an unattributable winner from being
     // silently dropped. winSide reuses winnerSideLR (bracket.jsx) rather than
     // re-deriving name-equality here: it prefers id equality over name, which
@@ -230,14 +232,14 @@ export function kachinukiBandModel({ subs, daihyosenIdx, isComplete, matchWinner
     const lr = winnerSideLR({ winner: matchWinner, sideA, sideB });
     const winSide = lr === "right" ? "a" : lr === "left" ? "b" : null;
     if (winSide) return { headline, verdict: teamResultLabel({ teamWinner: winSide }), verdictSide: winSide === "a" ? "aka" : "shiro" };
-    if (matchDecision === "hikiwake" || !matchWinner) return { headline, verdict: "DRAW", verdictSide: "draw" };
+    if (matchDecision === "hikiwake" || !matchWinner) return { headline, verdict: "Draw", verdictSide: "draw" };
     return { headline, verdict: String(matchWinnerName).toUpperCase(), verdictSide: "draw" };
   }
 
-  const headline = `BOUT ${currentBout || played.length + 1}`;
+  const headline = `Bout ${currentBout || played.length + 1}`;
   const last = played[played.length - 1];
   if (!last) return { headline, fact: "" };
-  if (last.tie) return { headline, fact: "Last: hikiwake · both retired" };
+  if (last.tie) return { headline, fact: "Last: hikiwake, both retired" };
   // Streak: consecutive trailing wins by the same fighter — a pure bout-log
   // fact ("stays on" is winner-stays semantics, not a roster claim).
   let streak = 0;
@@ -246,9 +248,9 @@ export function kachinukiBandModel({ subs, daihyosenIdx, isComplete, matchWinner
     else break;
   }
   const how = last.fusensho ? " (fusensho)" : "";
-  const stay = streak >= 2 ? ` · stays on, ${streak} wins` : " · stays on";
+  const stay = streak >= 2 ? `, stays on (${streak} wins)` : ", stays on";
   // "Last:" prefix mirrors the tie-fact ("Last: hikiwake …") so the headline
-  // "BOUT N" is never misread as bout N's own (unfought) result (critique P2).
+  // "Bout N" is never misread as bout N's own (unfought) result (critique P2).
   return { headline, fact: `Last: ${last.winner} beat ${last.loser}${how}${stay}` };
 }
 

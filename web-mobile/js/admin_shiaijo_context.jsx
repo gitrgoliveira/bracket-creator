@@ -2,6 +2,7 @@
 // fragment, beside the match being scored. Moved out of admin_shiaijo.jsx.
 
 import { poolMatchesSignature } from './viewer_standings.jsx';
+import { Icon } from './icon.jsx';
 
 const { useState, useMemo, useEffect } = React;
 
@@ -99,7 +100,7 @@ export function ShiaijoContext({ match, competitions, court, nextPoolName, tweak
     return (
         <div className="shiaijo-context">
             <button type="button" className="section-title shiaijo-context__toggle" aria-expanded={open} onClick={onToggle}>
-                {open ? "−" : "+"} {lead || (isPool ? "Standings" : "Bracket")} · {match.compName} · {phaseLabel}
+                <Icon name={open ? "chevron-down" : "chevron-right"} size={14} className="icon-lead" />{lead || (isPool ? "Standings" : "Bracket")}, {match.compName}, {phaseLabel}
             </button>
             {open && (
                 <div className="shiaijo-context__body">
@@ -109,7 +110,7 @@ export function ShiaijoContext({ match, competitions, court, nextPoolName, tweak
                         Name the gap instead of leaving two contradictory numbers. */}
                     {isPool && match.status === "running" && (
                         <p className="shiaijo-context__live-note" style={{ fontSize: 12, color: "var(--ink-2)", margin: "0 0 8px" }}>
-                            This match is still in progress, so its result isn’t in the standings below yet — they update when it’s recorded.
+                            This match is still in progress, so its result isn’t in the standings below yet. They update when it’s recorded.
                         </p>
                     )}
                     {isPool ? (

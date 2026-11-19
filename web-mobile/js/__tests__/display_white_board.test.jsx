@@ -496,7 +496,7 @@ describe('findNextPoolOnCourt', () => {
   it('excludes a pool already started on ANOTHER court (matches can move courts)', () => {
     // Pool B is routed to court A (scheduled here) but already has a COMPLETED
     // match on court C: it has begun elsewhere, so it must not surface as the
-    // future "UP NEXT" pool on court A.
+    // future "Up next" pool on court A.
     const c = { poolMatches: [
       { id: 'Pool A-0', court: 'A', sideA: 'X', sideB: 'Y', status: 'running',   scheduledAt: '09:00' },
       { id: 'Pool B-0', court: 'A', sideA: 'P', sideB: 'Q', status: 'scheduled', scheduledAt: '09:15' },
@@ -587,7 +587,7 @@ describe('TvIndividualBoard', () => {
 
   it('completed (non-running) rows do NOT get the navy NOW treatment', () => {
     // mp-pa6s: only the live row gets the var(--accent-soft) background tint.
-    // Completed rows keep the grey #f9fafb background.
+    // Completed rows keep the grey --gray-50 (#f9fafb) background.
     const promoted = { competition: comp, match: comp.poolMatches[0], isBracket: false };
     // Walk the vnode tree and collect the wrapper div for each row by testid.
     const rows = [];
@@ -607,7 +607,7 @@ describe('TvIndividualBoard', () => {
     expect(nowRow.props.style.background).toBe('var(--accent-soft)');
     expect(nowRow.props.style.borderLeft).toBeUndefined();
     // Completed row: grey bg.
-    expect(doneRow.props.style.background).toBe('#f9fafb');
+    expect(doneRow.props.style.background).toBe('var(--gray-50)');
     expect(doneRow.props.style.borderLeft).toBeUndefined();
   });
 
@@ -691,7 +691,7 @@ describe('TvIndividualBoard', () => {
     expect(scores.some(s => s.props.match.status === 'running')).toBe(true);
   });
 
-  it('renders the "UP NEXT" pool strip with the pool name and its bouts as pairs when another pool follows on this court', () => {
+  it('renders the "Up next" pool strip with the pool name and its bouts as pairs when another pool follows on this court', () => {
     const multiPool = { name: 'Indiv', kind: 'individual', teamSize: 0, format: 'mixed', poolMatches: [
       { id: 'Pool A-0', court: 'B', sideA: 'Eduardo', sideB: 'Carol',  status: 'running',   scheduledAt: '09:00' },
       { id: 'Pool A-1', court: 'B', sideA: 'Eduardo', sideB: 'Erin',   status: 'scheduled', scheduledAt: '09:05' },
@@ -703,7 +703,7 @@ describe('TvIndividualBoard', () => {
     const tree = TvIndividualBoard({ ...base, promoted });
     const str = JSON.stringify(tree);
     expect(str).toContain('tvd-next-pool');
-    expect(str).toContain('UP NEXT');
+    expect(str).toContain('Up next');
     expect(str).toContain('Pool B');
     expect(str).toContain('Philippe');
     expect(str).toContain('Dave');
@@ -762,14 +762,14 @@ describe('TvIndividualBoard', () => {
     expect(rosterDiv.props.style.flexWrap).toBe('wrap');
   });
 
-  it('does NOT render the UP NEXT pool strip when there is no following pool on this court', () => {
+  it('does NOT render the "Up next" pool strip when there is no following pool on this court', () => {
     // The base fixture has only Pool A on court B; no next pool.
     const promoted = { competition: comp, match: comp.poolMatches[0], isBracket: false };
     const str = JSON.stringify(TvIndividualBoard({ ...base, promoted }));
     expect(str).not.toContain('tvd-next-pool');
   });
 
-  it('does NOT render the UP NEXT pool strip for a Swiss competition (poolNameOf treats Swiss ids as pools)', () => {
+  it('does NOT render the "Up next" pool strip for a Swiss competition (poolNameOf treats Swiss ids as pools)', () => {
     // Swiss matches live in poolMatches with ids "Swiss-R{n}-{i}"; the strip is
     // gated to format === "mixed" so a Swiss board never floods it with the next
     // round's roster.
@@ -961,7 +961,7 @@ describe('phaseProgressOnCourt + phase strip', () => {
 // spectator and visibly inconsistent across the feed. phaseLabel must
 // suppress it for format === 'league' so only the completed/total counter
 // conveys progress (the round number leaked through as the phase label
-// before this fix: "4 · 10 / 28 MATCHES").
+// before this fix: "4 · 10 / 28 matches").
 describe('phaseLabel: league suppresses the round-robin round number', () => {
   it('returns "" for a league match instead of String(round)', () => {
     const m = { id: 'Pool A-3', round: 4, status: 'running' };
@@ -1012,7 +1012,7 @@ describe('phaseLabel: league suppresses the round-robin round number', () => {
 // outright. The cells now render NumberedName's clip mode, which puts the chip
 // in its own flex child so only the NAME ellipsises.
 //
-// The non-clipping rows (NextPair's NEXT line and UP NEXT list, the overlay's
+// The non-clipping rows (NextPair's "Next" line and "Up next" list, the overlay's
 // individual lines) were measured at the same viewport, do NOT clip, and keep
 // the plain string form -- there is nothing there to protect.
 describe('TvWhiteBoard: the headline number cannot be truncated away (bc-rvfx)', () => {
@@ -1139,7 +1139,7 @@ describe('TvIndividualBoard: competitor number sits on the outer side (bc-rvfx)'
     ] };
     const promoted = { competition: comp, match: comp.poolMatches[0], isBracket: false };
     // A queued match not already in the body's single row, and no format
-    // "mixed" competing UP NEXT pool strip, so this exercises TvIndividualBoard's
+    // "mixed" competing "Up next" pool strip, so this exercises TvIndividualBoard's
     // OWN "Next match line" (display_scoreboard.jsx, gated on `next && !nextPool`).
     const queueMatches = [{
       id: 'Pool A-9',
@@ -1157,8 +1157,8 @@ describe('TvIndividualBoard: competitor number sits on the outer side (bc-rvfx)'
     expect(pair.aka.props).toMatchObject({ side: 'aka', name: 'Yamada', number: 'K9' });
   });
 
-  it("UP NEXT pool bout strip puts each bout's number on the outer side", () => {
-    // Mirrors the existing "renders the UP NEXT pool strip..." fixture above,
+  it("\"Up next\" pool bout strip puts each bout's number on the outer side", () => {
+    // Mirrors the existing "renders the Up next pool strip..." fixture above,
     // but with NUMBERED sides: that test's fixture uses bare name strings, so
     // it never exercises the number-placement behaviour at this render site
     // (findNextPoolOnCourt's OWN unit test covers the computed shiro/aka

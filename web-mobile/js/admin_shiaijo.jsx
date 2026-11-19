@@ -13,8 +13,9 @@
 // local-only UI (per the brief; backend persistence is a follow-up).
 
 import { createTimerPool } from './timer_pool.jsx';
+import { Icon } from './icon.jsx';
 import { courtQueueEntriesOf } from './court_queue.jsx';
-import { applyPatch, keepNewerCompetitions, matchInComp } from './patch.jsx';
+import { applyPatch, createPushLedger, matchInComp } from './patch.jsx';
 import { useCourtPaceLookup } from './court_pace.jsx';
 // Imported DIRECTLY from the leaf rather than read off `window`. Two of the
 // call sites below sit inside a `try { } catch (_e) { }` that swallows, so a
@@ -50,7 +51,6 @@ const { useState, useMemo, useEffect, useRef, useCallback } = React;
 const AdminTopbar = window.AdminTopbar;
 const Breadcrumbs = window.Breadcrumbs;
 const ScoreEditorModal = window.ScoreEditorModal;
-const Icon = window.Icon;
 
 const QUEUE_OPEN_KEY = "bc_shiaijo_queue_open";
 const hasBothSides = window.hasBothSides;
@@ -107,6 +107,9 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // outlives renders.
     const courtCompsRef = useRef(null);
     React.useLayoutEffect(() => { courtCompsRef.current = courtComps; });
+    // The server pushes applied to the feed, for its refetches (push-wins,
+    // createPushLedger, patch.jsx).
+    const [pushes] = useState(() => createPushLedger());
     // R4 (bc-evts stage 3 review 2): a court move or time change this device
     // makes shows in the court feed at once, as a push would, and a refusal
     // puts the old value back (told by the outbox, subscribeLocalMatchPatch).
@@ -126,17 +129,18 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // unmount is dropped. Returns the promise so callers can await completion.
     const refreshCourt = useCallback(() => {
         if (!court || !window.API || typeof window.API.fetchCourtMatches !== "function") return Promise.resolve();
+        // A refetch never puts a row back to an older state
+        // (keepNewerCompetitions, patch.jsx; the rule showRunningPush applies
+        // to a push), nor behind a push applied after it was sent (push-wins).
+        const keep = pushes.competitions();
         return window.API.fetchCourtMatches(court)
-            // A refetch never puts a row back to an older state
-            // (keepNewerCompetitions, patch.jsx): the rule showRunningPush
-            // applies to a push.
             .then(comps => {
                 if (!mountedRef.current) return;
-                setCourtComps((prev) => keepNewerCompetitions(prev, comps));
+                setCourtComps((prev) => keep(prev, comps));
                 forgetTieBreakerStandings(comps);
             })
             .catch(err => console.error("Failed to fetch court matches", err));
-    }, [court]);
+    }, [court, pushes]);
     // Operator-triggered re-sync: the last-resort recovery when a court's tablet
     // has fallen behind (dropped SSE, flaky venue WiFi) and the queue looks
     // stale: e.g. a downstream final still shows placeholder feeders that have
@@ -266,7 +270,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                 ? courtCompsRef.current.find((c) => c.id === cid) : null;
             const row = comp && matchInComp(comp, r.id);
             if (!row || row.status !== "running" || (r.modifiedAt || 0) < (row.modifiedAt || 0)) return;
-            setCourtComps((prev) => (Array.isArray(prev) ? prev.map((c) => (c.id === cid ? applyPatch(c, event) : c)) : prev));
+            setCourtComps((prev) => (Array.isArray(prev) ? prev.map((c) => (c.id === cid ? pushes.push(c, cid, event) : c)) : prev));
         };
         refreshCourt();
         let unsub = () => {};
@@ -288,7 +292,11 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
             const onStatus = makeReconnectRefetcher(() => { if (!cancelled) scheduleRefresh(); });
             const off = window.API.subscribeToEvents(
                 (event) => {
-                    if (cancelled || !event || !REFRESH_EVENTS.has(event.type)) return;
+                    if (cancelled || !event) return;
+                    // Every held copy may be wrong: no push outranks the
+                    // refetch that follows.
+                    if (event.type === "resync_required" || event.type === "tournament_updated") pushes.clear();
+                    if (!REFRESH_EVENTS.has(event.type)) return;
                     if (event.type === "competitor_status_updated") {
                         // Eligibility moved in that competition (a withdrawal
                         // cleared, a competitor reinstated): a Start refused
@@ -333,7 +341,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
             document.removeEventListener("visibilitychange", onVisible);
             unsub();
         };
-    }, [court, refreshCourt]);
+    }, [court, refreshCourt, pushes]);
 
     // Court-scoped competitions: the live feed once loaded, else the prop
     // aggregate as a transient fallback. All competition/match derivations below
@@ -957,7 +965,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                             <div className="shiaijo-title-select">
                                 <h1 className="page-head__title">
                                     Shiaijo {court}
-                                    <span className="shiaijo-title-select__chevron" aria-hidden="true">▾</span>
+                                    <span className="shiaijo-title-select__chevron" aria-hidden="true"><Icon name="chevron-down" size={16} /></span>
                                 </h1>
                                 <select
                                     className="shiaijo-title-select__native"
@@ -1010,7 +1018,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                         <div className="shiaijo-title-select shiaijo-title-select--right">
                                             <h2 className="page-head__title shiaijo-officiating__name">
                                                 {officiating.name}
-                                                <span className="shiaijo-title-select__chevron" aria-hidden="true">▾</span>
+                                                <span className="shiaijo-title-select__chevron" aria-hidden="true"><Icon name="chevron-down" size={16} /></span>
                                             </h2>
                                             <select
                                                 className="shiaijo-title-select__native"
@@ -1081,7 +1089,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                 data-testid="shiaijo-queue-show"
                             >
                                 <span className="shiaijo-queue-rail__label">Show queue</span>
-                                <span aria-hidden="true">▸</span>
+                                <Icon name="chevron-right" size={14} />
                             </button>
                         )}
                         <div className="shiaijo__queue" id="shiaijo-queue">
@@ -1099,7 +1107,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                 data-testid="shiaijo-queue-hide"
                             >
                                 <span>Queue</span>
-                                <span className="shiaijo-queue__head-action"><span aria-hidden="true">◂</span> Hide</span>
+                                <span className="shiaijo-queue__head-action"><Icon name="chevron-left" size={12} className="icon-lead" />Hide</span>
                             </button>
                             {filteredScheduled.length === 0 && filteredPending.length === 0 && filteredCompleted.length === 0 && (
                                 <p className="shiaijo-queue__empty">Nothing else queued on this court.</p>
@@ -1214,10 +1222,10 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                         aria-label={nudgeBanner.alsoWaiting ? `${text} Switch to ${e.name}` : text}
                                     >
                                         {!nudgeBanner.alsoWaiting && (
-                                            <span className="shiaijo-nudge__icon" aria-hidden="true">{Icon ? <Icon name="alert-circle" size={15} /> : "⚠"}</span>
+                                            <span className="shiaijo-nudge__icon" aria-hidden="true"><Icon name="alert-circle" size={15} /></span>
                                         )}
                                         <span className="shiaijo-nudge__text">{text}</span>
-                                        <span className="shiaijo-nudge__cta" aria-hidden="true">Switch →</span>
+                                        <span className="shiaijo-nudge__cta" aria-hidden="true">Switch</span>
                                     </button>
                                 );
                             })}
@@ -1369,7 +1377,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                         onClick={stopCorrecting}
                                         title="Stop correcting this match without saving and return to the court's queue"
                                     >
-                                        ← Back to court
+                                        Back to court
                                     </button>
                                 </div>
                             )}

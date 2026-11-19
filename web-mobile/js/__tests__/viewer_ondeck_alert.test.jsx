@@ -204,13 +204,13 @@ describe('MyMatchAlertBanner', () => {
     expect(str).toContain('Next up');
   });
 
-  it('shows "NOW" badge for a running match', () => {
+  it('shows "Now" badge for a running match', () => {
     const match = { id: 'm2', status: 'running',
       sideA: { name: 'Charlie' }, sideB: { name: 'Dan' } };
     const tree = MyMatchAlertBanner({ match, onView: vi.fn(), onDismiss: vi.fn() });
     const str = JSON.stringify(tree);
-    expect(str).toContain('NOW');
-    expect(str).not.toContain('LIVE');
+    expect(str).toContain('"children":["Now"]');
+    expect(str).not.toMatch(/live/i);
   });
 
   it('shows participant names when available', () => {

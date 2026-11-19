@@ -129,7 +129,7 @@ describe('AdminParticipants ordering card (bc-prow)', () => {
     const who = line.querySelector('.seed-row__who');
     expect(who.querySelector('.seed-row__name .num-prefix').textContent).toBe('K1');
     expect(who.querySelector('.seed-row__name').textContent).toBe('K1Alice');
-    expect(who.querySelector('.tag-badge').textContent).toBe('manual');
+    expect(who.querySelector('.tag-badge').textContent).toBe('Manual');
 
     const dojo = line.querySelector('.seed-row__dojo');
     expect(dojo.textContent).toBe('Dojo Alice');

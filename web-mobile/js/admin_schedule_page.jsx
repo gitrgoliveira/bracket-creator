@@ -11,6 +11,7 @@
 import { filterMatchesByCourt, CourtPacePanel } from './admin_schedule_pacing.jsx';
 import { formatMinutes, timeToMinutes, timeEdited, clampDurationSeconds, COURT_STORAGE_KEY } from './admin_schedule_utils.jsx';
 import { DurationInput } from './duration.jsx';
+import { Icon } from './icon.jsx';
 import { sameCompetitor } from './competitor_identity.jsx';
 import { SideCell } from './side_cell.jsx';
 import { NumberedName } from './numbered_name.jsx';
@@ -80,7 +81,7 @@ export const AdminTWMatch = React.memo(({ m, highlight, courts, onMove, onTimeCh
             title="Click to set time"
           >
             {m.scheduledAt || <span style={{ color: "var(--ink-4)", fontWeight: 400 }}>-</span>}
-            {onTimeChange && <span style={{ fontSize: 9, color: "var(--ink-4)", marginLeft: 2 }}>✎</span>}
+            {onTimeChange && <span style={{ color: "var(--ink-4)", marginLeft: 2 }}><Icon name="pen" size={9} /></span>}
           </button>
         )}
         <div className="tw-match__phase">
@@ -361,7 +362,7 @@ export function AdminSchedulePage({ tournament, onBack, onMoveCourt, onLogout, o
             </button>
             {durationEstimate && (
               <div style={{ alignSelf: "flex-end", fontSize: 13, color: "var(--ink-3)", paddingBottom: 2 }}>
-                Est. duration: <strong>{durationEstimate}</strong> · {scheduledWithTimes.length} of {allMatches.length} timed
+                Est. duration: <strong>{durationEstimate}</strong>, {scheduledWithTimes.length} of {allMatches.length} timed
               </div>
             )}
           </div>
@@ -412,10 +413,10 @@ export function AdminSchedulePage({ tournament, onBack, onMoveCourt, onLogout, o
                 <div key={cc} className="tw-court">
                   <div className="tw-court__head">
                     <div>
-                      <div className="tw-court__title">SHIAIJO {cc}</div>
+                      <div className="tw-court__title">Shiaijo {cc}</div>
                       <div className="tw-court__sub">{list.length} match{list.length === 1 ? "" : "es"}</div>
                     </div>
-                    {runningOn && <span className="bc-running">● NOW</span>}
+                    {runningOn && <span className="bc-running">● Now</span>}
                   </div>
                   <div
                     className="tw-court__list"
@@ -453,7 +454,7 @@ export function AdminSchedulePage({ tournament, onBack, onMoveCourt, onLogout, o
               <div className="tw-court">
                 <div className="tw-court__head">
                   <div>
-                    <div className="tw-court__title">UNASSIGNED</div>
+                    <div className="tw-court__title">Unassigned</div>
                     <div className="tw-court__sub">{unassigned.length} match{unassigned.length === 1 ? "" : "es"}</div>
                   </div>
                 </div>

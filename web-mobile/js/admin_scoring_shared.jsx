@@ -4,9 +4,9 @@
 // two stateful editors. See web-mobile/admin_split_plan.md.
 
 const { useState, useEffect, useRef, useMemo, useLayoutEffect, useCallback } = React;
-const Icon = window.Icon;
 
 import { DAIHYOSEN_POSITION, scoreRowMatchName, scoreRowMatchLabel } from './pool_ids.jsx';
+import { Icon } from './icon.jsx';
 import { classifyStartOutcome, startFailureMessage } from './start_match.jsx';
 import {
   createOwnStatus, OWN_START, OWN_REOPEN, OWN_REQUEUE, OWN_REP,
@@ -301,11 +301,11 @@ export const DRAFT_DROPPED_NOTE = "This match was finished or sent back to the q
 //   - answer(token, outcome, msg), release().
 export function useOwnStatus(feedMatch) {
   // The owner, made once for the editor's life (a lazy initial state).
-  const [own] = useState(() => createOwnStatus(feedMatch.status, Number(feedMatch.modifiedAt) || 0));
+  const [own] = useState(() => createOwnStatus(feedMatch.status, Number(feedMatch.modifiedAt) || 0, feedMatch.scoreVersion));
   const mountedRef = useRef(true);
   useEffect(() => { mountedRef.current = true; return () => { mountedRef.current = false; }; }, []);
   const [, bump] = useState(0);
-  own.observe(feedMatch.status, Number(feedMatch.modifiedAt) || 0);
+  own.observe(feedMatch.status, Number(feedMatch.modifiedAt) || 0, feedMatch.scoreVersion);
   const rerender = () => { if (mountedRef.current) bump((n) => n + 1); };
   const answer = (token, outcome, msg, at) => { own.answer(token, outcome, msg || "", at); rerender(); };
   const stampOf = (body) => (body && typeof body === "object" ? Number(body.modifiedAt) || 0 : 0);
@@ -532,32 +532,21 @@ function ScoringShortcutHint({ pointKeys = "", hasNav = false, canClose = false 
     color: "var(--ink-3)", margin: "0 1px",
   };
   const keys = pointKeys ? [...pointKeys] : [];
+  // Each group is its keys and the words they do; the groups are a list
+  // separated by semicolons (the points group already holds a comma).
   const groups = [];
   if (keys.length > 0) {
-    groups.push(
-      <React.Fragment key="pts">
-        {keys.map((k) => <kbd key={k} style={kbd}>{k}</kbd>)}
-        <span>Shiro</span>
-        <span aria-hidden="true">·</span>
-        <kbd style={kbd}>⇧</kbd><span>Aka</span>
-      </React.Fragment>,
-    );
+    groups.push({
+      key: "pts",
+      lead: <>{keys.map((k) => <kbd key={k} style={kbd}>{k}</kbd>)}<span>Shiro,</span><kbd style={kbd}>⇧</kbd></>,
+      words: "Aka",
+    });
   }
   if (hasNav) {
-    groups.push(
-      <React.Fragment key="nav">
-        <kbd style={kbd}>←</kbd><kbd style={kbd}>→</kbd>
-        <span>prev/next</span>
-      </React.Fragment>,
-    );
+    groups.push({ key: "nav", lead: <><kbd style={kbd}>←</kbd><kbd style={kbd}>→</kbd></>, words: "prev/next" });
   }
   if (canClose) {
-    groups.push(
-      <React.Fragment key="close">
-        <kbd style={kbd}>Esc</kbd>
-        <span>close</span>
-      </React.Fragment>,
-    );
+    groups.push({ key: "close", lead: <kbd style={kbd}>Esc</kbd>, words: "close" });
   }
   if (groups.length === 0) return null;
   return (
@@ -568,8 +557,8 @@ function ScoringShortcutHint({ pointKeys = "", hasNav = false, canClose = false 
     >
       {groups.map((g, i) => (
         <React.Fragment key={g.key}>
-          {i > 0 && <span aria-hidden="true">·</span>}
-          {g}
+          {g.lead}
+          <span>{i < groups.length - 1 ? `${g.words};` : g.words}</span>
         </React.Fragment>
       ))}
     </div>
@@ -1106,7 +1095,7 @@ function EnchoControl({ enchoPeriodCount, setEnchoPeriodCount }) {
           onClick={() => setShowCounter(true)}
           aria-label="Show overtime (encho) controls"
         >
-          <span aria-hidden="true" className="encho-pill__icon">{Icon ? <Icon name="timer" size={14} /> : "⏱"}</span>
+          <span aria-hidden="true" className="encho-pill__icon"><Icon name="timer" size={14} /></span>
           Overtime
         </button>
         <GlossaryHintAS name="encho" />
@@ -1236,7 +1225,7 @@ function DecisionPrompt({ kind, sideA, sideB, askReason, onCancel, onSubmit, sub
       <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 10 }}>
         <button type="button" className="btn btn--sm" onClick={onCancel} disabled={submitting}>Cancel</button>
         <button type="submit" className="btn btn--primary btn--sm" disabled={submitting || !side}>
-          {submitting ? "Saving…" : side ? `Record: ${sideWord(side).toUpperCase()} ${verb}` : "Record"}
+          {submitting ? "Saving…" : side ? `Record: ${sideWord(side)} ${verb}` : "Record"}
         </button>
       </div>
     </form>
@@ -1583,7 +1572,7 @@ function LineupNameInput({ value, roster, onSelect, onListPick, disabled, ariaLa
         />
         {(value || clearable) && !disabled && (
           <button type="button" className="lineup-name__clear" title="Clear player" aria-label="Clear player"
-            onMouseDown={(e) => e.preventDefault()} onClick={() => commit("")}>×</button>
+            onMouseDown={(e) => e.preventDefault()} onClick={() => commit("")}><Icon name="x" size={14} /></button>
         )}
       </div>
       {open && optionCount > 0 && (
@@ -1709,7 +1698,7 @@ function withdrawalLabel(decision) {
   // the fuller "Fusensho for <winner>" sentence is composed in
   // RecordedWithdrawal, which needs the winner's name this function does not
   // have.
-  return decision === "kiken-injury" ? "Kiken – Injury" : "Kiken – Voluntary";
+  return decision === "kiken-injury" ? "Kiken (injury)" : "Kiken (voluntary)";
 }
 
 // withdrawalConsequence: the one sentence that says what recording a
@@ -2287,18 +2276,34 @@ function ReopenFeedback({ ctl, testIdPrefix }) {
   );
 }
 
+// editorMetaText: the line under a score editor's heading (Shiaijo and time),
+// one phrase whose parts are separated by commas (Hallmark gates 54 and 63:
+// it used to sit ABOVE the heading as an eyebrow, joined by middle dots). The
+// three editors share it, so a part with nothing to say (no competition name
+// on a hand-built match, no pool position) is left out the same way on each.
+export function editorMetaText(m) {
+  const phase = m.phase === "pool" ? (typeof window.poolLabel === "function" ? window.poolLabel(m) : "") : m.round;
+  const matchNo = m.phase === "pool" && m.poolPosition > 0 && m.poolCount > 0
+    ? `Match ${m.poolPosition} of ${m.poolCount}`
+    : m.phase === "bracket" && m.matchNumber > 0
+      ? `Match ${m.matchNumber}`
+      : "";
+  return [m.compName, phase, matchNo].filter(Boolean).join(", ");
+}
+
 // The court console's finish button names what the tap does: it starts the next
 // match only while one is waiting on the court. On the court's last bout (often
 // a league's tie-breaker) it says plain "Finish", so it does not promise a start
 // that cannot happen. The editors share this one wording.
 export function finishButtonLabel(startsNext = true) {
-  return startsNext ? "Finish + Start Next →" : "Finish";
+  return startsNext ? "Finish + Start Next" : "Finish";
 }
 
-// The same button once the first tap has armed it: the arrow goes with the
-// start of the next match, so a court's last bout never promises one.
+// The same button once the first tap has armed it. It says what the second
+// tap does, in words (no arrow glued to the label): finish, and start the next
+// match when the unarmed label promised one.
 export function armedFinishLabel(startsNext = true) {
-  return startsNext ? "Tap again to finish →" : "Tap again to finish";
+  return startsNext ? "Tap again to finish and start next" : "Tap again to finish";
 }
 
 // How long RecordedWithdrawal holds its one-tap clear for the later matches

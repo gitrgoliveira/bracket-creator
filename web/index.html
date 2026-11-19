@@ -5,6 +5,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Kendo Tournament Creator</title>
+    <meta name="description" content="Turn a list of kendo participants into a tournament workbook: pools, knockout brackets and match sheets in Excel.">
     <link rel="icon" type="image/jpeg" href="/static/favicon.jpeg">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css">
@@ -16,9 +17,9 @@
     <div id="loading-overlay">
         <div class="d-flex flex-column align-items-center">
             <div class="spinner-border text-light loading-spinner mb-3" role="status">
-                <span class="visually-hidden">Loading...</span>
+                <span class="visually-hidden">Loading…</span>
             </div>
-            <p class="text-light mb-0">Creating tournament...</p>
+            <p class="text-light mb-0">Creating tournament…</p>
         </div>
     </div>
 
@@ -42,7 +43,7 @@
                             class="text-decoration-none">
                             <i class="bi bi-github"></i> GitHub
                         </a>
-                        <span class="badge bg-secondary" id="app-version">Loading...</span>
+                        <span class="badge bg-secondary" id="app-version">Loading…</span>
                     </div>
                 </div>
 
@@ -51,7 +52,7 @@
                     <form id="tournamentForm" method="POST" action="/create" onsubmit="return validateForm()">
                         <!-- Tournament type options -->
                         <div class="options-section">
-                            <h3 class="options-title">Tournament Type</h3>
+                            <h2 class="options-title">Tournament Type</h2>
                             <div class="row">
                                 <div class="col-md-6">
                                     <div class="form-check mb-2">
@@ -76,7 +77,7 @@
 
                         <!-- Tournament options -->
                         <div class="options-section">
-                            <h3 class="options-title">Tournament Options</h3>
+                            <h2 class="options-title">Tournament Options</h2>
                             <div class="row mb-3">
                                 <div class="col-md-6">
                                     <div class="form-check mb-2">
@@ -116,7 +117,7 @@
                                     <div class="mb-2">
                                         <label for="numberPrefix" class="form-label">Number prefix:
                                             <i class="bi bi-question-circle tooltip-icon" data-bs-toggle="tooltip"
-                                                title="Assign consecutive numbers to all players prefixed by this letter. For example, 'K' produces K1, K2, K3... shown on all sheets."></i>
+                                                title="Assign consecutive numbers to all players prefixed by this letter. For example, 'K' produces K1, K2, K3… shown on all sheets."></i>
                                         </label>
                                         <input type="text" class="form-control form-control-sm" name="numberPrefix"
                                             id="numberPrefix" placeholder="e.g. K" maxlength="3">
@@ -146,7 +147,7 @@
 
                         <!-- Pool options (initially hidden) -->
                         <div id="poolOptionsSection" class="options-section" style="display: none;">
-                            <h3 class="options-title">Pool Options</h3>
+                            <h2 class="options-title">Pool Options</h2>
                             <div class="row">
                                 <div class="col-md-12 mb-3">
                                     <label class="form-label">Pool Size Mode:</label>
@@ -250,9 +251,9 @@
 
                         <!-- Time Estimator -->
                         <div class="options-section" id="timeEstimatorSection">
-                            <h3 class="options-title">
-                                <i class="bi bi-clock"></i> Time Estimator
-                            </h3>
+                            <h2 class="options-title">
+                                <span class="bi bi-clock" aria-hidden="true"></span> Time Estimator
+                            </h2>
                             <div id="timeEstimatorBody">
                                 <div class="row mb-3">
                                     <div class="col-md-6" id="estPoolMatchTimeGroup">
@@ -324,7 +325,7 @@
                             <div class="modal-dialog">
                                 <div class="modal-content">
                                     <div class="modal-header">
-                                        <h5 class="modal-title" id="statsModalLabel">Tournament Statistics</h5>
+                                        <h2 class="modal-title h5" id="statsModalLabel">Tournament Statistics</h2>
                                         <button type="button" class="btn-close" data-bs-dismiss="modal"
                                             aria-label="Close"></button>
                                     </div>
@@ -363,7 +364,7 @@
                             <div class="modal-dialog modal-lg">
                                 <div class="modal-content">
                                     <div class="modal-header">
-                                        <h5 class="modal-title" id="seedsModalLabel">Assign Participant Seeds</h5>
+                                        <h2 class="modal-title h5" id="seedsModalLabel">Assign Participant Seeds</h2>
                                         <button type="button" class="btn-close" data-bs-dismiss="modal"
                                             aria-label="Close"></button>
                                     </div>

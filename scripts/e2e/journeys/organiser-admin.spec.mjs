@@ -117,8 +117,10 @@ test.describe('organiser admin (file mode)', () => {
       await expect(rows).toHaveCount(2);
       for (const name of ['Imported Kyu', 'Imported No Date']) {
         const row = rows.filter({ hasText: name });
-        await expect(row).toContainText('imported');
-        await expect(row).not.toContainText('not imported');
+        // The row's tag reads Imported (with or without a warning). Read it
+        // exactly: the competition's own name says "Imported" too.
+        await expect(row.getByText('Imported', { exact: true })).toBeVisible();
+        await expect(row).not.toContainText('Not imported');
       }
     });
 

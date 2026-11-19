@@ -201,6 +201,7 @@ const CHECK_MODULES = [
   'latest_ref.jsx',
   'lineup_rename.jsx',
   'lineup_save.jsx',
+  'list_phrase.jsx',
   'match_groups.jsx',
   'match_shows_score.jsx',
   'minted_members.jsx',

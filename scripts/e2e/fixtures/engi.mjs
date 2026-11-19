@@ -67,7 +67,7 @@ export async function enterFlags(page, { aka = 0, shiro = 0 }, root = INLINE_EDI
   await expect(flagCount(page, 'shiro', root)).toHaveText(String(expected.shiro));
 }
 
-// Save the result in two taps ("Save result" / "Finish + Start Next →", then
+// Save the result in two taps ("Save result" / "Finish + Start Next", then
 // "Tap again to ..."), and return once the write has landed (finishLanded).
 export async function saveEngiResult(page, root = INLINE_EDITOR) {
   const ed = page.locator(root).first();

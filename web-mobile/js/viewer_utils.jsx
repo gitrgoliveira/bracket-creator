@@ -189,7 +189,7 @@ export function compMatches(c) {
   }
 
   // Add poolPosition (1-based) and poolCount (total RR matches in this pool)
-  // to each pool match so the eyebrow and queue rows can show "Match N of M"
+  // to each pool match so the editor's meta line and queue rows can show "match N of M"
   // (AC2). N is the bout's number from its id (poolMatchNumberOf), the one
   // every surface uses (the server's label, the scores list, the workbook):
   // the draw numbers a pool's bouts in the order they are played (operator
@@ -316,13 +316,13 @@ export function TournamentInfo({ tournament }) {
           <dt className="tournament-info__label">Venue</dt>
           <dd className="tournament-info__value">
             {t.venueAddress}
-            {t.venueMapURL && isHttpURL(t.venueMapURL) && <>{t.venueAddress ? " " : ""}<a href={t.venueMapURL} className="tournament-info__link" target="_blank" rel="noopener noreferrer">View map ↗</a></>}
+            {t.venueMapURL && isHttpURL(t.venueMapURL) && <>{t.venueAddress ? " " : ""}<a href={t.venueMapURL} className="tournament-info__link" target="_blank" rel="noopener noreferrer">View map</a></>}
           </dd>
         </>}
         {(t.openingTime || t.closingTime) && <>
           <dt className="tournament-info__label">Times</dt>
           <dd className="tournament-info__value">
-            {t.openingTime && t.closingTime ? `${t.openingTime} – ${t.closingTime}` : t.openingTime ? `Opens ${t.openingTime}` : `Closes ${t.closingTime}`}
+            {t.openingTime && t.closingTime ? `${t.openingTime} to ${t.closingTime}` : t.openingTime ? `Opens ${t.openingTime}` : `Closes ${t.closingTime}`}
           </dd>
         </>}
         {t.awardsNote && <>

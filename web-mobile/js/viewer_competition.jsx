@@ -12,6 +12,8 @@ import { NumberedName } from './numbered_name.jsx';
 import { resultRecencyDesc } from './result_recency.jsx';
 import { isBarredMatch } from './ineligible_match.jsx';
 import { paceDisplayOf, PaceTime } from './court_pace.jsx';
+import { Icon } from './icon.jsx';
+import { andList } from './list_phrase.jsx';
 
 const { useState, useMemo, useRef } = React;
 const StatusBadge = window.StatusBadge;
@@ -323,7 +325,7 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
   }, [hasBracketEl, bracketScrollRef]);
 
   return (
-    <div className="viewer">
+    <main className="viewer">
       {/* The bracket tab is the only viewer surface that is a wide diagram
           rather than a reading column, so it (and only it) drops the shell's
           reading-width cap: see .viewer__shell--bracket in styles.css. Keyed
@@ -331,19 +333,19 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
           back to Overview keeps the normal cap. */}
       <div className={`viewer__shell${effectiveTab === "bracket" ? " viewer__shell--bracket" : ""}`}>
         <div className="viewer__head">
-          <button type="button" className="viewer__back" onClick={onBack} aria-label="Back">←</button>
+          <button type="button" className="viewer__back" onClick={onBack} aria-label="Back"><Icon name="arrow-left" size={16} /></button>
           <div className="viewer__title-block">
-            <div className="viewer__eyebrow">
-              {c.date && <span style={{ fontWeight: 600 }}>{formatDate(c.date)}</span>}
-              {c.date && c.startTime && " at "}
-              {c.startTime}
-              {/* No date (a tournament without one) and no start time would
-                  otherwise lead the shiaijo list with a bare separator. */}
-              {(c.date || c.startTime) && " · "}
-              {c.courts.join(", ")}
+            <h1 className="viewer__title">{c.name}</h1>
+            {/* One phrase under the name: the kind, when, and where. A part
+                with nothing to say (no date, no time, no shiaijo) is left
+                out rather than leaving a bare separator. */}
+            <div className="viewer__sub">
+              {[
+                competitionKindLabel(c),
+                [c.date && formatDate(c.date), c.startTime].filter(Boolean).join(" at "),
+                (c.courts || []).length ? `Shiaijo ${andList(c.courts)}` : "",
+              ].filter(Boolean).join(", ")}
             </div>
-            <div className="viewer__title">{c.name}</div>
-            <div className="viewer__sub">{competitionKindLabel(c)}</div>
           </div>
           {/* Suppress the "League" badge during pools: the active tab already
               reads "League", so the badge is pure redundancy. Other statuses
@@ -352,7 +354,7 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
             <StatusBadge status={c.status} showRunningDot format={c.format} />
           )}
           {authed && onEditCompetition && (
-            <button type="button" className="viewer__admin-pill" onClick={() => onEditCompetition(c.id)}>✎ Edit</button>
+            <button type="button" className="viewer__admin-pill" onClick={() => onEditCompetition(c.id)}><Icon name="pen" size={12} />Edit</button>
           )}
         </div>
         <div className="viewer__tabs">
@@ -370,9 +372,9 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
               if (entry.type === "dojo") {
                 return (
                   <span key={k} className="pmf__chip pmf__chip--dojo">
-                    <span className="pmf__chip-icon" aria-hidden="true">⌂</span>
+                    <span className="pmf__chip-icon" aria-hidden="true"><Icon name="house" size={11} /></span>
                     {entry.dojo}
-                    <button type="button" onClick={() => { setWatchlist(prev => prev.filter((e) => entryKey(e) !== k)); if (primaryKey === k) setPrimaryKey(""); }} aria-label={`Remove ${entry.dojo}`}>×</button>
+                    <button type="button" onClick={() => { setWatchlist(prev => prev.filter((e) => entryKey(e) !== k)); if (primaryKey === k) setPrimaryKey(""); }} aria-label={`Remove ${entry.dojo}`}><Icon name="x" size={14} /></button>
                   </span>
                 );
               }
@@ -382,7 +384,7 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
               return (
                 <span key={k} className="pmf__chip">
                   <NumberedName name={name} number={number} />
-                  <button type="button" onClick={() => { setWatchlist(prev => prev.filter((e) => entryKey(e) !== k)); if (primaryKey === k) setPrimaryKey(""); }} aria-label={`Remove ${name}`}>×</button>
+                  <button type="button" onClick={() => { setWatchlist(prev => prev.filter((e) => entryKey(e) !== k)); if (primaryKey === k) setPrimaryKey(""); }} aria-label={`Remove ${name}`}><Icon name="x" size={14} /></button>
                 </span>
               );
             })}
@@ -491,7 +493,7 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
         </div>
       </div>
       {selectedMatch && <MatchViewerModal match={selectedMatch} onClose={closeMatch} tournament={tournament} compId={c.id} slotLabel={bracketSlotLabel} paceLookup={paceLookup} />}
-    </div>
+    </main>
   );
 }
 
@@ -532,7 +534,7 @@ export function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, runningM
   // setup: no draw yet: plain "not started" message.
   if (!c.status || c.status === "setup") {
     return (
-      <EmptyState icon="⏳" title="Not started yet" message={`Starts at ${c.startTime}. Check back when the competition begins.`} style={{ padding: 32 }} />
+      <EmptyState icon="hourglass" title="Not started yet" message={`Starts at ${c.startTime}. Check back when the competition begins.`} style={{ padding: 32 }} />
     );
   }
 
@@ -547,7 +549,7 @@ export function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, runningM
     else if (isLeague) tabHint = "Browse the League tab to see the draw.";
     return (
       <EmptyState
-        icon="📋"
+        icon="clipboard-list"
         title="Draw is ready"
         message={`Starts at ${c.startTime}. ${tabHint}`}
         style={{ padding: 32 }}
@@ -567,7 +569,7 @@ export function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, runningM
     <div>
       {hasActiveFilter && (
         <div className="viewer-filter-bar">
-          <span className="viewer-filter-bar__icon" aria-hidden="true">👤</span>
+          <span className="viewer-filter-bar__icon" aria-hidden="true"><Icon name="user" /></span>
           <span>Showing matches for <strong>{filterLabel}</strong></span>
         </div>
       )}
@@ -577,7 +579,7 @@ export function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, runningM
           <div className="my-match__name">{myPlayer.name}</div>
           <div className="my-match__round">
             {myUpcoming.phase === "pool" ? poolLabel(myUpcoming) : myUpcoming.round}
-            {myUpcoming.status === "running" ? " · NOW" : ""}
+            {myUpcoming.status === "running" ? ", now" : ""}
           </div>
           <div className="my-match__row">
             <div className="my-match__chip">
@@ -688,7 +690,7 @@ export function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, runningM
               onClick={() => onSwitchTab(isLeague ? "league" : "pools")}
               data-testid="league-overview-view-all"
             >
-              View full standings →
+              View full standings
             </button>
           )}
         </div>
@@ -710,7 +712,7 @@ export function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, runningM
           } : undefined}
         >
           <div className="section-title section-title--running">
-            <span className="dot dot--running"></span> ON NOW
+            <span className="dot dot--running"></span> On now
           </div>
           <MatchDetailCard match={currentMatch} paceLookup={paceLookup} />
         </div>
@@ -720,7 +722,7 @@ export function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, runningM
       {runningMatches.length > 1 && (
         <>
           <div className="section-title section-title--running">
-            <span className="dot dot--running"></span> NOW · {runningMatches.length}
+            <span className="dot dot--running"></span> Now · {runningMatches.length}
           </div>
           <div className="vsched">
             {runningMatches.filter(m => !currentMatch || m.id !== currentMatch.id).map((m) => (

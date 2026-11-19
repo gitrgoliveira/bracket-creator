@@ -332,7 +332,7 @@ export const recipes = [
   },
   {
     // The same fight in overtime: the encho row expanded at x2, which the
-    // eyebrow echoes as "(E) OVERTIME x2".
+    // meta line under the title echoes as "(E) Overtime ×2".
     name: 'mobile-encho-overtime',
     family: 'editors',
     viewport: { width: 921, height: 892 },

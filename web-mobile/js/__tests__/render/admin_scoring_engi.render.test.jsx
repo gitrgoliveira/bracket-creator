@@ -175,7 +175,7 @@ describe('EngiScoreEditorModal Finish + Start Next (impeccable critique P2)', ()
     const submit = screen.getByTestId('engi-submit');
     expect(submit.textContent).toContain('Finish + Start Next');
     fireEvent.click(submit);
-    expect(submit.textContent).toBe('Tap again to finish →');
+    expect(submit.textContent).toBe('Tap again to finish and start next');
     fireEvent.click(submit);
     await waitFor(() => expect(onSubmitAndNext).toHaveBeenCalledWith({ flagsA: 3, flagsB: 0, status: 'completed', changed: ['result'] }));
     expect(onSubmit).not.toHaveBeenCalled();
@@ -209,9 +209,9 @@ describe('EngiScoreEditorModal Finish + Start Next (impeccable critique P2)', ()
       nextMatch={{ sideA: { name: 'Z' }, sideB: { name: 'W' } }}
       onPrev={onPrev} onNext={onNext}
     />);
-    fireEvent.click(screen.getByText('← Prev'));
+    fireEvent.click(screen.getByText('Prev'));
     expect(onPrev).toHaveBeenCalled();
-    fireEvent.click(screen.getByText('Next →'));
+    fireEvent.click(screen.getByText('Next'));
     expect(onNext).toHaveBeenCalled();
   });
 });
@@ -505,7 +505,7 @@ describe('EngiScoreEditorModal saves flags as they are entered', () => {
 
   it.each([
     ['Close', () => fireEvent.click(screen.getByTestId('engi-close-btn'))],
-    ['the Next button', () => fireEvent.click(screen.getByText('Next →'))],
+    ['the Next button', () => fireEvent.click(screen.getByText('Next'))],
     ['the → key', () => fireEvent.keyDown(window, { key: 'ArrowRight' })],
   ])('leaving a running match by %s right after a tap asks nothing and writes nothing more', async (_via, leave) => {
     const onSubmit = vi.fn();
@@ -540,7 +540,7 @@ describe('bc-dtfn: the engi Save is a two-tap guard, as Finish is in the other e
     const { onSubmit, save } = mount({ onSubmitAndNext });
     await pointerTap(save);
     await pointerTap(save);
-    expect(save.textContent).toBe('Tap again to finish →');
+    expect(save.textContent).toBe('Tap again to finish and start next');
     expect(onSubmit).not.toHaveBeenCalled();
     expect(onSubmitAndNext).not.toHaveBeenCalled();
   });

@@ -223,7 +223,7 @@ describe('the starting lineup', () => {
     expect(api.fetchTeamLineup).toHaveBeenCalledTimes(1);
     expect(api.fetchTeamLineup).toHaveBeenCalledWith('comp-1', 'team-a', 0);
     expect(api.fetchLineupInForce).not.toHaveBeenCalled();
-    expect(utils.getByText('Starting lineup', { selector: '.overline' })).toBeTruthy();
+    expect(utils.getByText('Starting lineup', { selector: '.lineup-form__target' })).toBeTruthy();
   });
 
   it('saves to round 0', async () => {
@@ -419,7 +419,7 @@ describe('a match the team is no longer in', () => {
     expect(notInMatch(utils).textContent).toBe(
       'Team C is no longer in Match 3. Choose another match, or the starting lineup, in Lineup for.',
     );
-    expect(utils.queryByText('Starting lineup', { selector: '.overline' }), 'the starting lineup is not shown').toBeNull();
+    expect(utils.queryByText('Starting lineup', { selector: '.lineup-form__target' }), 'the starting lineup is not shown').toBeNull();
   });
 
   it('keeps Save off for it, and the operator\'s edit stays on the form', async () => {
@@ -476,7 +476,7 @@ describe('a match the team is no longer in', () => {
     await chooseTarget(utils, '');
     expect(targetSelect(utils).value).toBe('');
     expect(utils.queryByTestId('lineup-not-in-match')).toBeNull();
-    expect(utils.getByText('Starting lineup', { selector: '.overline' })).toBeTruthy();
+    expect(utils.getByText('Starting lineup', { selector: '.lineup-form__target' })).toBeTruthy();
     expect(optionTexts(targetSelect(utils)), 'the match that was kept is not offered again').toEqual(['Starting lineup', 'Match 2']);
 
     await pick(utils, 1, 'mem-4');
@@ -485,7 +485,7 @@ describe('a match the team is no longer in', () => {
 
     await chooseTarget(utils, 'm-r0-1');
     expect(utils.queryByTestId('lineup-not-in-match')).toBeNull();
-    expect(utils.getByText('Match 2', { selector: '.overline' })).toBeTruthy();
+    expect(utils.getByText('Match 2', { selector: '.lineup-form__target' })).toBeTruthy();
   });
 
   it('goes when the team is seated in the match again, with the edit still there to save', async () => {

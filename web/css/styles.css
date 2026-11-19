@@ -1,28 +1,138 @@
+/* Self-hosted fonts, served from the tournament app's copy at /fonts/ (the
+   same files, SIL OFL 1.1, cmd/serve.go serveSharedFonts), so every device
+   draws the same letters and symbols. "BC Symbols" holds the symbols Archivo
+   has no glyph for; its faces, and the extended Latin Archivo face, keep the
+   unicode-range lists of web-mobile/css/styles.css. */
+@font-face {
+    font-family: "Archivo";
+    font-style: normal;
+    font-weight: 100 900;
+    font-display: swap;
+    src: url("/fonts/archivo/archivo-latin.woff2") format("woff2");
+}
+@font-face {
+    font-family: "Archivo";
+    font-style: normal;
+    font-weight: 100 900;
+    font-display: swap;
+    src: url("/fonts/archivo/archivo-latin-ext.woff2") format("woff2");
+    unicode-range: U+0100-017F, U+018F, U+0192, U+019D, U+01A0-01A1, U+01AF-01B0, U+01C4-01DC, U+01E6-01E7, U+01EA-01EB, U+01FA-021B, U+022A-022D, U+0230-0233, U+0237, U+0259, U+02BC, U+02C6-02C7, U+02C9, U+02D8-02DD, U+0300-0304, U+0306-030C, U+030F, U+0311-0313, U+031B, U+0323-0324, U+0326-0328, U+032E, U+0331, U+0335-0338, U+1E24-1E25, U+1E62-1E63, U+1E6C-1E6D, U+1E80-1E85, U+1E9E, U+1EA0-1EF9;
+}
+@font-face {
+    font-family: "BC Symbols";
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+    src: url("/fonts/noto-sans-symbols-2/symbols-subset.woff2") format("woff2");
+    unicode-range: U+21E7, U+232B, U+25B2, U+25CB, U+25CF, U+2713;
+}
+@font-face {
+    font-family: "BC Symbols";
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+    src: url("/fonts/noto-sans-math/symbols-subset.woff2") format("woff2");
+    unicode-range: U+2190, U+2192, U+2212, U+2248, U+2264-2265;
+}
+@font-face {
+    font-family: "JetBrains Mono";
+    font-style: normal;
+    font-weight: 100 800;
+    font-display: swap;
+    src: url("/fonts/jetbrains-mono/jetbrains-mono-latin.woff2") format("woff2");
+}
+@font-face {
+    font-family: "BC Symbols";
+    font-style: normal;
+    font-weight: 100 800;
+    font-display: swap;
+    src: url("/fonts/jetbrains-mono/jetbrains-mono-latin.woff2") format("woff2");
+    unicode-range: U+2082;
+}
+
 :root {
+    /* Bootstrap reads these for the body, tooltips, popovers and code. */
+    --font: "Archivo", "BC Symbols", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --font-mono: "JetBrains Mono", "BC Symbols", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    --bs-body-font-family: var(--font);
+    --bs-font-sans-serif: var(--font);
+    --bs-font-monospace: var(--font-mono);
     --primary-color: #333;
     --accent-color: #007bff;
     --bg-color: #f8f9fa;
     --text-color: #333;
     --card-bg: #fff;
     --card-border: #dee2e6;
+    --muted-color: #6c757d;
+    --card-shadow: rgba(0, 0, 0, 0.1);
+    --overlay-bg: rgba(0, 0, 0, 0.7);
+    --guide-bg: rgba(13, 110, 253, 0.05);
+    --success-bg: rgba(25, 135, 84, 0.1);
+    --success-border: rgba(25, 135, 84, 0.3);
+    --warning-bg: rgba(255, 193, 7, 0.12);
+    --warning-border: rgba(255, 193, 7, 0.35);
+    --info-bg: rgba(13, 110, 253, 0.1);
+    --info-border: rgba(13, 110, 253, 0.3);
+    --danger-bg: rgba(220, 53, 69, 0.08);
+    --danger-border: rgba(220, 53, 69, 0.28);
+    --gutter-bg: rgba(0, 0, 0, 0.04);
+    --drop-bg: rgba(0, 0, 0, 0.02);
+    --drop-hover-bg: rgba(0, 123, 255, 0.05);
+    /* Outline button text and borders: Bootstrap's own cyan and yellow read
+       1.6 to 2:1 on white, so light mode takes their darker shades. */
+    --info-text: #055160;
+    --warning-text: #664d03;
+    --warning-line: #997404;
+    --secondary-text: #6c757d;
 }
 
 [data-theme="dark"] {
     --primary-color: #fff;
-    --accent-color: #0d6efd;
+    --accent-color: #6ea8fe;
     --bg-color: #212529;
     --text-color: #f8f9fa;
     --card-bg: #343a40;
     --card-border: #495057;
+    --guide-bg: rgba(13, 110, 253, 0.12);
+    --gutter-bg: rgba(255, 255, 255, 0.08);
+    --drop-bg: rgba(255, 255, 255, 0.05);
+    --muted-color: #adb5bd;
+    --info-text: #0dcaf0;
+    --warning-text: #ffc107;
+    --warning-line: #ffc107;
+    --secondary-text: #adb5bd;
+}
+
+/* clip, never hidden: an element wider than the window is cut at its edge
+   instead of giving the whole page a sideways scroll. */
+html,
+body {
+    overflow-x: clip;
 }
 
 body {
-    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    font-family: var(--font);
     background-color: var(--bg-color);
     color: var(--text-color);
-    transition: all 0.3s ease;
+    transition: background-color 0.3s ease, color 0.3s ease;
     min-height: 100vh;
     padding: 20px 0;
+}
+
+/* One focus ring for every control a keyboard reaches, drawn at once (an
+   outline, never transitioned). html raises it over Bootstrap's own
+   .btn:focus-visible { outline: 0 }. */
+html :is(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
+    outline: 2px solid var(--accent-color);
+    outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    body,
+    #drop-area,
+    #loading-overlay {
+        transition: none;
+    }
 }
 
 .logo-container {
@@ -51,7 +161,7 @@ body {
     background-color: var(--card-bg);
     border-radius: 8px;
     border: 1px solid var(--card-border);
-    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    box-shadow: 0 4px 6px var(--card-shadow);
     padding: 25px;
     margin-bottom: 30px;
 }
@@ -81,6 +191,21 @@ body {
     font-size: 1.2rem;
 }
 
+.btn-outline-info {
+    --bs-btn-color: var(--info-text);
+    --bs-btn-border-color: var(--info-text);
+}
+
+.btn-outline-warning {
+    --bs-btn-color: var(--warning-text);
+    --bs-btn-border-color: var(--warning-line);
+}
+
+.btn-outline-secondary {
+    --bs-btn-color: var(--secondary-text);
+    --bs-btn-border-color: var(--secondary-text);
+}
+
 .themed-switch .form-check-input:checked {
     background-color: var(--accent-color);
     border-color: var(--accent-color);
@@ -98,7 +223,7 @@ body {
     left: 0;
     width: 100%;
     height: 100%;
-    background-color: rgba(0, 0, 0, 0.7);
+    background-color: var(--overlay-bg);
     display: flex;
     justify-content: center;
     align-items: center;
@@ -131,13 +256,9 @@ body {
 .format-guide {
     border: 1px solid var(--card-border);
     border-radius: 6px;
-    background-color: rgba(13, 110, 253, 0.05);
+    background-color: var(--guide-bg);
     padding: 12px;
     margin-bottom: 12px;
-}
-
-[data-theme="dark"] .format-guide {
-    background-color: rgba(13, 110, 253, 0.12);
 }
 
 .format-guide-title {
@@ -159,7 +280,7 @@ body {
 }
 
 .format-guide-example {
-    font-family: ui-monospace, SFMono-Regular, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    font-family: var(--font-mono);
     font-size: 0.85rem;
     margin-bottom: 0;
     word-break: break-word;
@@ -174,26 +295,26 @@ body {
 
 .validation-panel.validation-success {
     display: block;
-    background-color: rgba(25, 135, 84, 0.1);
-    border: 1px solid rgba(25, 135, 84, 0.3);
+    background-color: var(--success-bg);
+    border: 1px solid var(--success-border);
 }
 
 .validation-panel.validation-warning {
     display: block;
-    background-color: rgba(255, 193, 7, 0.12);
-    border: 1px solid rgba(255, 193, 7, 0.35);
+    background-color: var(--warning-bg);
+    border: 1px solid var(--warning-border);
 }
 
 .validation-panel.validation-info {
     display: block;
-    background-color: rgba(13, 110, 253, 0.1);
-    border: 1px solid rgba(13, 110, 253, 0.3);
+    background-color: var(--info-bg);
+    border: 1px solid var(--info-border);
 }
 
 .validation-panel.validation-error {
     display: block;
-    background-color: rgba(220, 53, 69, 0.08);
-    border: 1px solid rgba(220, 53, 69, 0.28);
+    background-color: var(--danger-bg);
+    border: 1px solid var(--danger-border);
 }
 
 .validation-panel-title {
@@ -245,27 +366,23 @@ body {
     width: 3.5rem;
     border-right: 1px solid var(--card-border);
     border-radius: 0.375rem 0 0 0.375rem;
-    background-color: rgba(0, 0, 0, 0.04);
-    color: #6c757d;
+    background-color: var(--gutter-bg);
+    color: var(--muted-color);
     text-align: right;
     padding: 0.375rem 0.5rem;
     overflow: hidden;
     white-space: pre;
     line-height: 1.5;
     font-size: 1rem;
-    font-family: ui-monospace, SFMono-Regular, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    font-family: var(--font-mono);
     pointer-events: none;
-}
-
-[data-theme="dark"] .player-list-line-numbers {
-    background-color: rgba(255, 255, 255, 0.08);
 }
 
 .player-list-input-wrap #playerList {
     padding-left: 4.2rem;
     line-height: 1.5;
     font-size: 1rem;
-    font-family: ui-monospace, SFMono-Regular, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    font-family: var(--font-mono);
     field-sizing: fixed;
     height: 16rem;
     overflow-y: auto;
@@ -278,23 +395,19 @@ body {
     padding: 20px;
     text-align: center;
     cursor: pointer;
-    transition: all 0.3s ease;
+    transition: border-color 0.3s ease, background-color 0.3s ease;
     color: var(--text-color);
-    background-color: rgba(0, 0, 0, 0.02);
+    background-color: var(--drop-bg);
     margin-bottom: 15px;
     display: flex;
     justify-content: center;
     align-items: center;
 }
 
-[data-theme="dark"] #drop-area {
-    background-color: rgba(255, 255, 255, 0.05);
-}
-
 #drop-area:hover,
 #drop-area.dragover {
     border-color: var(--accent-color);
-    background-color: rgba(0, 123, 255, 0.05);
+    background-color: var(--drop-hover-bg);
 }
 
 #drop-area .drop-message {
@@ -331,7 +444,7 @@ body {
 
 .time-estimator-results .est-label {
     font-size: 0.8rem;
-    color: #6c757d;
+    color: var(--muted-color);
     display: block;
     margin-bottom: 2px;
 }

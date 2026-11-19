@@ -22,7 +22,8 @@ describe('a warning toast', () => {
     const toast = container.querySelector('.toast');
     expect(toast.className).toContain('toast--warning');
     expect(toast.getAttribute('role')).toBe('status');
-    expect(container.querySelector('.toast__icon').textContent).toBe('⚠️');
+    expect(container.querySelector('.toast__icon svg').getAttribute('data-icon')).toBe('triangle-alert');
+    expect(container.querySelector('.toast__icon').textContent, 'drawn, not an emoji').toBe('');
     expect(getByRole('button', { name: 'Dismiss' })).toBeTruthy();
   });
 

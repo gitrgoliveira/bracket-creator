@@ -518,8 +518,8 @@ test.describe('knockout-mixed-team', () => {
       await upNextCard(page).getByRole('button', { name: 'Start match' }).tap();
       const ed = inlineEditor(page);
       const row1 = T.boutRow(ed, 1);
-      await expect(row1.getByRole('textbox', { name: 'Senpo SHIRO player' })).toBeVisible();
-      await expect(row1.getByRole('textbox', { name: 'Senpo AKA player' })).toBeVisible();
+      await expect(row1.getByRole('textbox', { name: 'Senpo Shiro player' })).toBeVisible();
+      await expect(row1.getByRole('textbox', { name: 'Senpo Aka player' })).toBeVisible();
       // The rows show before the two lineups have been read. A name typed on a
       // side whose lineup has not landed is refused with LINEUP_NOT_READ_NOTICE
       // (the sheet never waits on the network), so the operator types once the
@@ -569,7 +569,7 @@ test.describe('knockout-mixed-team', () => {
       const dbl = await doubleTap(start);
       await expect(T.boutRow(ed, 1)).toBeVisible();
       await running(page, ed);
-      const identity = (await ed.locator('.editor-modal__eyebrow').first().innerText()).trim();
+      const identity = (await ed.locator('.editor-modal__meta').first().innerText()).trim();
       // Up next moves on once the list has refetched after the start: wait for
       // it to leave the pairing just started before reading where it settled.
       await expect.poll(async () => {
@@ -691,7 +691,7 @@ test.describe('knockout-mixed-team', () => {
     });
 
     await test.step('bout 4: a point entered offline, a point then an instant reload, the tab hidden, Back pressed', async () => {
-      const identity = (await ed.locator('.editor-modal__eyebrow').first().innerText()).trim();
+      const identity = (await ed.locator('.editor-modal__meta').first().innerText()).trim();
       // What the unfought bout 4 shows before anyone has touched it.
       const untouched4 = { middle: (await T.rowMiddle(T.boutRow(ed, 4)).innerText()).trim(), tieLabel: (await T.rowTie(T.boutRow(ed, 4)).innerText()).trim() };
       await T.boutRow(ed, 4).scrollIntoViewIfNeeded();
@@ -721,13 +721,13 @@ test.describe('knockout-mixed-team', () => {
         akaAfter: await T.rowSlots(T.boutRow(ed, 4), 'aka').allInnerTexts(), expected: ['D', 'K'], note: 'bc-sync when K is gone' });
       const hidden = await interrupt(page, 'hidden');
       record({ step: 'bout 4', action: 'tab hidden and back', variant: 'V3 interrupt hidden', ...hidden,
-        sameMatch: (await ed.locator('.editor-modal__eyebrow').first().innerText()).trim() === identity,
+        sameMatch: (await ed.locator('.editor-modal__meta').first().innerText()).trim() === identity,
         akaKept: await T.rowSlots(T.boutRow(ed, 4), 'aka').allInnerTexts() });
       const back = await interrupt(page, 'back');
       const edBack = await T.boutRow(ed, 4).waitFor({ state: 'visible', timeout: EXPECT_TIMEOUT_MS }).then(() => true, () => false);
       await shot(page, 'bout4-after-back');
       record({ step: 'bout 4', action: 'Back then Forward', variant: 'V3 interrupt back + V5 lost place', ...back, editorBack: edBack,
-        sameMatch: edBack && (await ed.locator('.editor-modal__eyebrow').first().innerText()).trim() === identity,
+        sameMatch: edBack && (await ed.locator('.editor-modal__meta').first().innerText()).trim() === identity,
         akaKept: edBack ? await T.rowSlots(T.boutRow(ed, 4), 'aka').allInnerTexts() : null, sheet: edBack ? await T.sheetState(ed) : null });
       await expect(T.boutRow(ed, 4)).toBeVisible();
       await clearMarks(T.rowSlots(T.boutRow(ed, 4), 'aka'), { from: 'first' });
@@ -833,7 +833,7 @@ test.describe('knockout-mixed-team', () => {
       await shot(page, 'sf1-finished-sf2-open');
       record({ step: 'finish SF1', action: 'Finish + Start Next', variant: 'V2 doubleTap', ...dbl, labelBefore, finishedByDoubleTap: !!done,
         extraTaps, completedResult: result, editorNowHolds: sf2,
-        eyebrow: (await ed.locator('.editor-modal__eyebrow').first().innerText().catch(() => '')).trim() });
+        meta: (await ed.locator('.editor-modal__meta').first().innerText().catch(() => '')).trim() });
       expect(await sides(row)).toEqual(sf1);
     });
 
@@ -925,7 +925,7 @@ test.describe('knockout-mixed-team', () => {
       const toast = (await page.locator('.toast').allInnerTexts().catch(() => [])).join(' | ');
       await shot(page, 'sf2-correct-refused-final-running');
       record({ step: 'SF2 kiken recovery', action: 'Correct on the semifinal while the final runs', variant: 'V5 lost place', notice: noticeText, toast,
-        editorHolds: await sides(ed).catch(() => null), correctionOpened: await ed.getByText('CORRECTION', { exact: true }).count() });
+        editorHolds: await sides(ed).catch(() => null), correctionOpened: await ed.getByText('Correction', { exact: true }).count() });
       expect(noticeText).toMatch(/^Shiaijo D is running .+\. Finish it or send it back to the queue first\. Then correct this match\.$/);
       // The operator sends the final back (no score entered yet), then corrects.
       await page.getByRole('button', { name: 'Send back to queue' }).tap();
@@ -940,7 +940,7 @@ test.describe('knockout-mixed-team', () => {
       if (await dismissToast.isVisible()) await dismissToast.tap();
       await expect(page.locator('.toast')).toHaveCount(0);
       await row.getByRole('button', { name: /Correct/ }).tap();
-      await expect(ed.getByText('CORRECTION', { exact: true }).or(ed.locator('.editor-modal__eyebrow', { hasText: 'MATCH 2' })).first()).toBeVisible();
+      await expect(ed.getByText('Correction', { exact: true }).or(ed.locator('.editor-modal__meta', { hasText: 'Match 2' })).first()).toBeVisible();
       const full = (await ed.innerText()).replace(/\s+/g, ' ');
       await shot(page, 'sf2-correct-after-kiken');
       record({ step: 'SF2 kiken recovery', action: 'Correct on the semifinal', variant: 'V4 recovery', completedResult: result,
@@ -964,7 +964,7 @@ test.describe('knockout-mixed-team', () => {
       const errs = (await ed.locator('[style*="danger"], .alert--error').allInnerTexts()).join(' | ');
       await shot(page, 'sf2-after-rekiken');
       record({ step: 'SF2 kiken recovery', action: 'Kiken – Voluntary again, Aka, on the corrected semifinal', variant: 'V4 hastyConfirm (no confirm since bc-dlck)',
-        confirmShown: confirmShown > 0, errorsAfter: errs, correctionStillOpen: await ed.getByText('CORRECTION', { exact: true }).count() });
+        confirmShown: confirmShown > 0, errorsAfter: errs, correctionStillOpen: await ed.getByText('Correction', { exact: true }).count() });
       expect(confirmShown).toBe(0);
       await openShiaijo(page, 'D');
       await expect(page.locator('.shiaijo__queue')).toBeVisible();
@@ -1130,10 +1130,11 @@ test.describe('knockout-mixed-team', () => {
         const bracketText = (await phone.locator('.viewer__body').innerText()).replace(/\s+/g, ' ');
         record({ step: 'every surface', action: 'viewer Bracket tab after the correction', variant: 'correct', bracket: bracketText.slice(0, 400),
           htOnBracket: /\bHt\b/.test(bracketText) });
-        // The winner's check sits beside the corrected winner, Aka. The tick
-        // carries a screen-reader "Winner:" label (side_cell.jsx), which
-        // innerText includes.
-        expect(bracketText).toMatch(new RegExp(`✓\\s*(?:Winner:\\s*)?\\S*\\s*${pair.aka}`));
+        // The winner's tick sits beside the corrected winner, Aka. The tick is
+        // an icon with a screen-reader "Winner:" label (WinnerTick,
+        // side_cell.jsx), and innerText reads only the label, so the label is
+        // what marks the tick here.
+        expect(bracketText).toMatch(new RegExp(`Winner:\\s*\\S*\\s*${pair.aka}`));
       });
     } finally {
       await head.close();
@@ -1271,12 +1272,12 @@ test.describe('knockout-mixed-team', () => {
     await paceSettled(finish);
     await finish.tap();
     await expect(refusal).toHaveText(unfinished);
-    await expect(finish).toHaveText(/^Finish( \+ Start Next →)?$/);
+    await expect(finish).toHaveText(/^Finish( \+ Start Next)?$/);
     // A second tap, past the bounce window of the first, is refused the same way.
     await paceSettled(finish);
     await finish.tap();
     await expect(refusal).toHaveText(unfinished);
-    await expect(finish).toHaveText(/^Finish( \+ Start Next →)?$/);
+    await expect(finish).toHaveText(/^Finish( \+ Start Next)?$/);
     await page.goto(`/admin/competition/${id}/pools`);
     // The encounter is still unfinished, so no team has played a match yet.
     await expect(page.locator('tr').filter({ hasText: pair.shiro }).first()).toContainText(/0\s*0\s*0\s*0\s*0\s*0\s*0\s*0\s*$/);

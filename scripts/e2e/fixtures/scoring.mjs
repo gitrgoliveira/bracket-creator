@@ -144,7 +144,7 @@ export async function markDraw(page, root = INLINE_EDITOR) {
   await expect(toggle).toHaveText('Cancel draw');
 }
 
-// The Finish button in its first state ("Finish" or "Finish + Start Next →"),
+// The Finish button in its first state ("Finish" or "Finish + Start Next"),
 // and the armed state the first tap turns it into.
 export const finishButton = (page, root = INLINE_EDITOR) => within(page, root)
   .locator('button').filter({ hasText: /^Finish( \+ Start Next|$)/ }).first();
@@ -262,7 +262,7 @@ export async function finishLanded(ed, before) {
 }
 
 // Finish in two taps and return once the write has landed (finishLanded). The
-// label is "Finish + Start Next →" instead whenever another match of the same
+// label is "Finish + Start Next" instead whenever another match of the same
 // competition waits on the same shiaijo (a bout of another competition does
 // not count), and that form leaves the editor on the next match. The engi
 // editor's button is the same one on the court console; its own "Save result"

@@ -231,7 +231,7 @@ describe('AdminCompetition "Complete competition" action (mp-gy6g)', () => {
     const comp = makeCompetition({ format: 'knockout', status: 'knockout' });
     const bracket = { rounds: [[realMatch('completed')], [realMatch('running')]] };
     const { container } = await mountSection('overview', { comp, bracket });
-    expect(findButton(container, 'Complete competition →')).toBeUndefined();
+    expect(findButton(container, 'Complete competition')).toBeUndefined();
   });
 
   it('stays hidden once every round match is done but the bronze match is not (thirdPlaceMatch is a sibling of rounds)', async () => {
@@ -241,7 +241,7 @@ describe('AdminCompetition "Complete competition" action (mp-gy6g)', () => {
       thirdPlaceMatch: realMatch('running'),
     };
     const { container } = await mountSection('overview', { comp, bracket });
-    expect(findButton(container, 'Complete competition →')).toBeUndefined();
+    expect(findButton(container, 'Complete competition')).toBeUndefined();
   });
 
   it('appears once every bracket match, including the bronze match, is completed', async () => {
@@ -251,14 +251,14 @@ describe('AdminCompetition "Complete competition" action (mp-gy6g)', () => {
       thirdPlaceMatch: realMatch('completed'),
     };
     const { container } = await mountSection('overview', { comp, bracket });
-    expect(findButton(container, 'Complete competition →')).not.toBeUndefined();
+    expect(findButton(container, 'Complete competition')).not.toBeUndefined();
   });
 
   it('is hidden once the competition is already completed', async () => {
     const comp = makeCompetition({ format: 'knockout', status: 'completed' });
     const bracket = { rounds: [[realMatch('completed')], [realMatch('completed')]] };
     const { container } = await mountSection('overview', { comp, bracket });
-    expect(findButton(container, 'Complete competition →')).toBeUndefined();
+    expect(findButton(container, 'Complete competition')).toBeUndefined();
   });
 
   it('is hidden while setup/draw-ready, even if a stale bracket looks complete', async () => {
@@ -266,7 +266,7 @@ describe('AdminCompetition "Complete competition" action (mp-gy6g)', () => {
     for (const status of ['setup', 'draw-ready']) {
       const comp = makeCompetition({ format: 'knockout', status });
       const { container } = await mountSection('overview', { comp, bracket });
-      expect(findButton(container, 'Complete competition →')).toBeUndefined();
+      expect(findButton(container, 'Complete competition')).toBeUndefined();
     }
   });
 
@@ -306,7 +306,7 @@ describe('AdminCompetition "Complete competition" action (mp-gy6g)', () => {
       ));
     });
 
-    const btn = findButton(container, 'Complete competition →');
+    const btn = findButton(container, 'Complete competition');
     expect(btn).not.toBeUndefined();
     await act(async () => { fireEvent.click(btn); });
 
@@ -326,7 +326,7 @@ describe('AdminCompetition "Complete competition" action (mp-gy6g)', () => {
     const bracket = { rounds: [[realMatch('completed')]] };
     const { container } = await mountSection('overview', { comp, bracket });
 
-    const btn = findButton(container, 'Complete competition →');
+    const btn = findButton(container, 'Complete competition');
     await act(async () => { fireEvent.click(btn); });
 
     expect(window.API.completeCompetition).not.toHaveBeenCalled();
@@ -659,7 +659,7 @@ describe('AdminSettings stored-allocation banner (spec 007 R9)', () => {
     // it this would pass even with the shiaijo blocker gone.
     const comp = makeCompetition({ courts, format: 'knockout', date: '01-06-2026' });
     const { container } = await mountSection('overview', { comp, tournament: { courts } });
-    const start = Array.from(container.querySelectorAll('button')).find((b) => b.textContent.trim() === 'Start competition →');
+    const start = Array.from(container.querySelectorAll('button')).find((b) => b.textContent.trim() === 'Start competition');
     expect(start).not.toBeUndefined();
     expect(start.disabled).toBe(true);
     const block = container.querySelector('[data-testid="draw-block"]');
@@ -696,7 +696,7 @@ describe('Header start blocked by an incomplete seeding', () => {
     const button = (label) =>
       Array.from(container.querySelectorAll('button')).find((b) => b.textContent.trim() === label);
     expect(button('Generate draw').disabled).toBe(true);
-    expect(button('Start competition →').disabled).toBe(true);
+    expect(button('Start competition').disabled).toBe(true);
 
     const block = container.querySelector('[data-testid="draw-block"]');
     expect(block).not.toBeNull();
@@ -713,7 +713,7 @@ describe('Header start blocked by an incomplete seeding', () => {
     });
     const step = container.querySelector('[data-testid="step-generate"]');
     expect(step.textContent).toContain('seed ranks 1, 2 and 3 have not been set');
-    expect(step.textContent).toContain('Fix seeding →');
+    expect(step.textContent).toContain('Fix seeding');
   });
 
   it('leaves the buttons live once the seeding is complete', async () => {
@@ -792,7 +792,7 @@ describe('AdminCompetition draw seed warnings (spec 007 R2/D7)', () => {
     const comp = makeCompetition({ status: 'draw-ready', courts: ['A', 'B'] });
     const { container } = await mountSection('overview', { comp });
     expect(banner(container)).not.toBeNull();
-    const start = Array.from(container.querySelectorAll('button')).find((b) => b.textContent.trim() === 'Start competition \u2192');
+    const start = Array.from(container.querySelectorAll('button')).find((b) => b.textContent.trim() === 'Start competition');
     expect(start).not.toBeUndefined();
     expect(start.disabled).toBe(false);
   });
@@ -875,8 +875,8 @@ describe('AdminCompetition survives a null courts list (U1)', () => {
     const comp = makeCompetition({ courts: null });
     const { container } = await mountSection('overview', { comp });
     const sub = container.querySelector('.page-head__sub').textContent;
-    expect(sub).toContain('No shiaijo of its own');
-    expect(sub).toContain('A, B');
+    expect(sub).toContain('no shiaijo of its own');
+    expect(sub).toContain('A and B');
   });
 
   it('falls back to "No shiaijo assigned" when the venue has none either', async () => {
@@ -885,7 +885,7 @@ describe('AdminCompetition survives a null courts list (U1)', () => {
     // allocation here would be a lie, so the plain statement stands.
     const comp = makeCompetition({ courts: null });
     const { container } = await mountSection('overview', { comp, tournament: { courts: [] } });
-    expect(container.querySelector('.page-head__sub').textContent).toContain('No shiaijo assigned');
+    expect(container.querySelector('.page-head__sub').textContent).toContain('no shiaijo assigned');
   });
 
   it('does not report 1 Court one line under "No shiaijo assigned"', async () => {
@@ -1023,7 +1023,7 @@ describe('AdminCompOverview blocked-draw CTA is reachable (U5)', () => {
     });
     const cta = container.querySelector('[data-testid="step-generate-cta"]');
     expect(cta).not.toBeNull();
-    expect(cta.textContent).toBe('Reassign shiaijo →');
+    expect(cta.textContent).toBe('Reassign shiaijo');
     await act(async () => { fireEvent.click(cta); });
     expect(onSection).toHaveBeenCalledWith('settings');
   });
@@ -1314,9 +1314,10 @@ describe('AdminCompetition Overview renders a dataIssues notice from the detail 
 });
 
 // The page-head subtitle composes the date, the start time and the shiaijo
-// summary. A missing start time rendered "<date> at · A" and a missing date
-// AND time rendered "players · · A": each separator must only appear when
-// something sits on both sides of it.
+// summary. A missing start time rendered "<date> at, A" and a missing date
+// AND time rendered "players, , A": each separator must only appear when
+// something sits on both sides of it. The tournament's name leads the line,
+// where the eyebrow above the heading used to carry it.
 describe('AdminCompetition page-head subtitle (bc-shfu)', () => {
   const subtitle = async (overrides) => {
     const { container } = await mountSection('overview', { comp: makeCompetition(overrides) });
@@ -1325,22 +1326,22 @@ describe('AdminCompetition page-head subtitle (bc-shfu)', () => {
 
   it('joins the date and start time with "at"', async () => {
     expect(await subtitle({ date: '2026-06-01', startTime: '09:00' }))
-      .toBe('Individual · 2 players · 2026-06-01 at 09:00 · A');
+      .toBe('Spring Taikai, Individual, 2 players, 2026-06-01 at 09:00, Shiaijo A');
   });
 
   it('drops "at" when there is no start time', async () => {
     expect(await subtitle({ date: '2026-06-01', startTime: '' }))
-      .toBe('Individual · 2 players · 2026-06-01 · A');
+      .toBe('Spring Taikai, Individual, 2 players, 2026-06-01, Shiaijo A');
   });
 
   it('shows a start time with no date on its own', async () => {
     expect(await subtitle({ date: '', startTime: '09:00' }))
-      .toBe('Individual · 2 players · 09:00 · A');
+      .toBe('Spring Taikai, Individual, 2 players, 09:00, Shiaijo A');
   });
 
   it('adds no extra separator when there is neither', async () => {
     expect(await subtitle({ date: '', startTime: '' }))
-      .toBe('Individual · 2 players · A');
+      .toBe('Spring Taikai, Individual, 2 players, Shiaijo A');
   });
 });
 

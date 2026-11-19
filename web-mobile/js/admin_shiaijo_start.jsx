@@ -16,6 +16,7 @@
 // that committed before any continuation reads it.
 
 import { acceptTap } from './tap_guard.jsx';
+import { Icon } from './icon.jsx';
 import {
     startWhileCorrectingMessage, startWhileStartingMessage, startWasBlockedByStartMessage,
     correctWhileRunningMessage, wasToasted, writePending, writeQueueKey,
@@ -37,8 +38,6 @@ import { matchKey } from './admin_shiaijo_feed.jsx';
 import { isTeamMatch, shiaijoMatchNo, TieBreakerReason, MatchSides } from './admin_shiaijo_queue.jsx';
 
 const { useState, useEffect, useRef, useCallback } = React;
-
-const Icon = window.Icon;
 
 export function useCourtStart({
     court, password, showToast, onEditScore, mountedRef, editorUnsavedRef, leaveEditorConfirmed,
@@ -595,7 +594,7 @@ export function ShiaijoUpNextCard({ upNext, paceLookup, notice, starting, called
             <div className="section-title">Up next</div>
             <div className={`shiaijo-upnext__card ${called ? "is-called" : ""}`}>
                 <div className="shiaijo-upnext__time">
-                    <PaceTime display={paceDisplayOf(paceLookup, upNext.compId, upNext.id)} fallback={upNext.scheduledAt || "-"} /> · {upNext.compName}
+                    <PaceTime display={paceDisplayOf(paceLookup, upNext.compId, upNext.id)} fallback={upNext.scheduledAt || "-"} />, {upNext.compName}
                     {shiaijoMatchNo(upNext)}
                     {/* DH-only label: a tiebreaker ("-TB-") is also a rep bout
                         (isSupplementaryBout), but it is NOT a daihyosen, so the "DH"
@@ -634,12 +633,12 @@ export function ShiaijoUpNextCard({ upNext, paceLookup, notice, starting, called
                             onClick={onCall}
                             title="Announce this match to spectators and competitors"
                         >
-                            {Icon && <Icon name="megaphone" />}{" "}
+                            <Icon name="megaphone" />{" "}
                             {calling ? "Calling…" : (called ? "Call again" : "Call to court")}
                         </button>
                     )}
                     {onMoveDown && (
-                        <button type="button" className="btn btn--sm btn--ghost" aria-label="Move down" onClick={onMoveDown} title="Move this match later in the queue">↓</button>
+                        <button type="button" className="btn btn--sm btn--ghost" aria-label="Move down" onClick={onMoveDown} title="Move this match later in the queue"><Icon name="arrow-down" size={14} /></button>
                     )}
                 </div>
                 {notice && <div className="shiaijo-upnext__error" role="alert">{notice}</div>}

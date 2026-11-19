@@ -16,6 +16,7 @@
 
 import { LS_NOTIFICATIONS_ENABLED } from './notification_keys.jsx';
 import { isBarredMatch } from './ineligible_match.jsx';
+import { Icon } from './icon.jsx';
 
 const { useState, useRef, useEffect } = React;
 
@@ -263,6 +264,9 @@ export function useFollowedMatchAlert(myNextMatch, { chimeMuted, onAlert } = {})
       if (originalTitleRef.current === null) {
         originalTitleRef.current = document.title;
       }
+      // The one emoji the app keeps: document.title is drawn by the browser's
+      // own chrome (the tab strip), which page fonts and SVG cannot reach.
+      // Allow-listed by emoji_free.test.jsx.
       const titlePrefix = m.status === "running" ? "🔴 NOW: " : "(1) Your match is next: ";
       document.title = titlePrefix + (originalTitleRef.current || "Tournament");
     }
@@ -373,7 +377,7 @@ export function useSecondaryWatchAlert(secondaryOnDeck, { onSecondaryAlert, cool
 // Banner component: rendered when the followed match is on-deck.
 export function MyMatchAlertBanner({ match, onView, onDismiss }) {
   if (!match) return null;
-  const kind = match.status === "running" ? "NOW" : "Next up";
+  const kind = match.status === "running" ? "Now" : "Next up";
   const sideA = matchSideName(match.sideA, match.sideAName);
   const sideB = matchSideName(match.sideB, match.sideBName);
   const vs = (sideA && sideB) ? `${sideA} vs ${sideB}` : "";
@@ -397,7 +401,7 @@ export function MyMatchAlertBanner({ match, onView, onDismiss }) {
           className="match-alert-banner__dismiss"
           onClick={onDismiss}
           aria-label="Dismiss match alert"
-        >✕</button>}
+        ><Icon name="x" size={16} /></button>}
       </div>
     </div>
   );

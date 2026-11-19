@@ -17,6 +17,7 @@ import { useUnsavedInput } from './app_version.jsx';
 import { isOffline, savedOfflineSentence } from './write_result.jsx';
 import { onDocumentSettled } from './document_versions.jsx';
 import { dismissToastById } from './toast_queue.jsx';
+import { Icon } from './icon.jsx';
 // One owner for what the operator is told when a file on disk does not say what
 // the app expects; shared with the pool surfaces so the wording cannot drift.
 import {
@@ -106,7 +107,7 @@ function competitionNextSteps(c, tournamentCourts) {
     // `cta` is the button label shown only when this step is active. Authored
     // here (not in JSX) so the copy is centralised and unit-testable; null for
     // steps with no navigable action (the generate step lives in the header).
-    cta: `Add ${isTeam ? "teams" : "participants"} →`,
+    cta: `Add ${isTeam ? "teams" : "participants"}`,
   });
 
   // Step 3: seeds & settings (becomes active once participants done). With the
@@ -122,7 +123,7 @@ function competitionNextSteps(c, tournamentCourts) {
         : "Optionally assign seeds and adjust format",
     state: "pending",
     section: "settings",
-    cta: "Review settings →",
+    cta: "Review settings",
   });
 
   // Step 3b (team only): lineups, after settings.
@@ -133,7 +134,7 @@ function competitionNextSteps(c, tournamentCourts) {
       detail: "Assign positions (Senpo, Jiho, …) before the draw",
       state: "pending",
       section: "lineups",
-      cta: "Set lineups →",
+      cta: "Set lineups",
     });
   }
 
@@ -327,7 +328,8 @@ export function formatPausesRow(tournament, c) {
 
   const dayText = usable.length > 0 ? usable.map(u => u.text).join(", ") : "No pauses that day";
   const allParts = [dayText, ...unused];
-  return allParts.join(" · ");
+  // Semicolons, not commas: each part may already hold a comma.
+  return allParts.join("; ");
 }
 
 export function formatPerShiaijoRow(estimate, courts) {
@@ -340,7 +342,7 @@ export function formatPerShiaijoRow(estimate, courts) {
       return `${letter} has no matches`;
     }
     return `${letter} about ${formatEstimateMinutes(m)}`;
-  }).join(" · ");
+  }).join(", ");
 }
 
 export function EstimateDurationTile({
@@ -711,7 +713,7 @@ function AdminCompOverview({ c, tournament, pools, poolMatches, bracket, onSecti
             className="stat-box__link"
             onClick={() => onSection(resultsSection)}
           >
-            <div className="v v--sm" style={{ color: "var(--accent)" }}>View podium →</div>
+            <div className="v v--sm" style={{ color: "var(--accent)" }}>View podium</div>
             <div className="l">Standings</div>
           </button>
         </div>
@@ -744,7 +746,7 @@ function AdminCompOverview({ c, tournament, pools, poolMatches, bracket, onSecti
                 data-testid={`step-${step.id}`}
               >
                 <div className="comp-step__icon" aria-hidden="true">
-                  {step.state === "done" ? "✓" : step.state === "active" ? "●" : "○"}
+                  <Icon name={step.state === "done" ? "circle-check" : step.state === "active" ? "circle-dot" : "circle"} size={16} />
                 </div>
                 <div className="comp-step__body">
                   <div className="comp-step__label">{step.label}</div>
@@ -780,16 +782,20 @@ function AdminCompOverview({ c, tournament, pools, poolMatches, bracket, onSecti
       const isSwiss = c.format === "swiss";
       const previewSection = c.format === "knockout" ? "bracket" : "pools";
       const previewLabel = c.format === "knockout" ? "bracket" : c.format === "league" ? "league" : "pools";
+      // The action cards sit BESIDE the status card, not inside it (one
+      // containment layer), as the running state's do.
       return (
-        <div className="card" style={{ marginBottom: 16 }} data-testid="draw-ready-card">
-          <div className="card__head">
-            <div className="card__title">Draw ready</div>
-            <div className="card__sub">{numPlayers} {participantLabel} · {seededCount > 0 ? `${seededCount} seeded` : "no seeds"}</div>
-          </div>
-          <div style={{ fontSize: 13.5, color: "var(--ink-2)", marginBottom: 14 }}>
-            {isSwiss
-              ? <>Participants are set. Use the <strong>Start competition →</strong> button in the header to begin the first round.</>
-              : <>The draw has been generated. Preview it below, then use the <strong>Start competition →</strong> button in the header to begin.</>}
+        <div>
+          <div className="card" style={{ marginBottom: 16 }} data-testid="draw-ready-card">
+            <div className="card__head">
+              <div className="card__title">Draw ready</div>
+              <div className="card__sub">{numPlayers} {participantLabel} · {seededCount > 0 ? `${seededCount} seeded` : "no seeds"}</div>
+            </div>
+            <div style={{ fontSize: 13.5, color: "var(--ink-2)" }}>
+              {isSwiss
+                ? <>Participants are set. Use the <strong>Start competition</strong> button in the header to begin the first round.</>
+                : <>The draw has been generated. Preview it below, then use the <strong>Start competition</strong> button in the header to begin.</>}
+            </div>
           </div>
           <div className="row">
             {!isSwiss && (
@@ -801,7 +807,7 @@ function AdminCompOverview({ c, tournament, pools, poolMatches, bracket, onSecti
                 data-testid="draw-ready-preview-btn"
               >
                 <div className="card__title" style={{ marginBottom: 4 }}>
-                  Preview {previewLabel} →
+                  Preview {previewLabel}
                 </div>
                 <div className="card__sub">Check placements before starting</div>
               </button>
@@ -809,7 +815,7 @@ function AdminCompOverview({ c, tournament, pools, poolMatches, bracket, onSecti
             <div className="card card--sm" style={{ background: "var(--bg)" }}>
               <div className="card__title" style={{ marginBottom: 4, color: "var(--ink-2)" }}>To start</div>
               <div className="card__sub">
-                Use the <strong>Start competition →</strong> button above. To change the draw, use <strong>Discard draw</strong> first.
+                Use the <strong>Start competition</strong> button above. To change the draw, use <strong>Discard draw</strong> first.
               </div>
             </div>
           </div>
@@ -855,7 +861,7 @@ function AdminCompOverview({ c, tournament, pools, poolMatches, bracket, onSecti
               style={{ textAlign: "left" }}
               onClick={() => onSection("scores")}
             >
-              <div className="card__title" style={{ marginBottom: 6 }}>Scores →</div>
+              <div className="card__title" style={{ marginBottom: 6 }}>Scores</div>
               <div className="card__sub">Update or correct match results</div>
             </button>
             <button
@@ -864,7 +870,7 @@ function AdminCompOverview({ c, tournament, pools, poolMatches, bracket, onSecti
               style={{ textAlign: "left" }}
               onClick={() => onSection(resultsSection)}
             >
-              <div className="card__title" style={{ marginBottom: 6 }}>Results →</div>
+              <div className="card__title" style={{ marginBottom: 6 }}>Results</div>
               <div className="card__sub">Visual bracket / pool standings</div>
             </button>
           </div>
@@ -879,31 +885,31 @@ function AdminCompOverview({ c, tournament, pools, poolMatches, bracket, onSecti
           <div className="card__head">
             <div className="card__title">Competition complete</div>
           </div>
-          <div style={{ fontSize: 13.5, color: "var(--ink-2)", marginBottom: 14 }}>
+          <div style={{ fontSize: 13.5, color: "var(--ink-2)" }}>
             All matches have been played. View final standings or export results.
           </div>
-          <div className="row">
-            <button
-              type="button"
-              className="card card--sm card--action"
-              style={{ textAlign: "left" }}
-              onClick={() => onSection(resultsSection)}
-              data-testid="completed-results-btn"
-            >
-              <div className="card__title" style={{ marginBottom: 4 }}>Results →</div>
-              <div className="card__sub">View final standings &amp; podium</div>
-            </button>
-            <button
-              type="button"
-              className="card card--sm card--action"
-              style={{ textAlign: "left" }}
-              onClick={() => onSection("export")}
-              data-testid="completed-export-btn"
-            >
-              <div className="card__title" style={{ marginBottom: 4 }}>Export →</div>
-              <div className="card__sub">Print brackets &amp; certificates</div>
-            </button>
-          </div>
+        </div>
+        <div className="row">
+          <button
+            type="button"
+            className="card card--sm card--action"
+            style={{ textAlign: "left" }}
+            onClick={() => onSection(resultsSection)}
+            data-testid="completed-results-btn"
+          >
+            <div className="card__title" style={{ marginBottom: 4 }}>Results</div>
+            <div className="card__sub">View final standings &amp; podium</div>
+          </button>
+          <button
+            type="button"
+            className="card card--sm card--action"
+            style={{ textAlign: "left" }}
+            onClick={() => onSection("export")}
+            data-testid="completed-export-btn"
+          >
+            <div className="card__title" style={{ marginBottom: 4 }}>Export</div>
+            <div className="card__sub">Print brackets &amp; certificates</div>
+          </button>
         </div>
       </div>
     );
@@ -1159,7 +1165,7 @@ function FightingSpiritAwardsEditor({ c, password, showToast }) {
     return (
       <div className="row">
         <div className="card">
-          <div className="card__title">🔥 Fighting Spirit Awards</div>
+          <div className="card__title"><Icon name="flame" className="icon-lead" />Fighting Spirit Awards</div>
           <div className="card__sub" data-testid="fs-award-unavailable">
             The awards are not available because the details of this competition did not load. Reload the page, then open Awards again.
           </div>
@@ -1171,7 +1177,7 @@ function FightingSpiritAwardsEditor({ c, password, showToast }) {
   return (
     <div className="row">
       <div className="card" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-        <div className="card__title">🔥 Fighting Spirit Awards <span style={{ fontWeight: 400, fontSize: 12, color: "var(--ink-3)" }}>(optional)</span></div>
+        <div className="card__title"><Icon name="flame" className="icon-lead" />Fighting Spirit Awards <span style={{ fontWeight: 400, fontSize: 12, color: "var(--ink-3)" }}>(optional)</span></div>
         <div className="card__sub" style={{ marginTop: -4 }}>Record individual honourees independent of the placement podium. Shown to viewers on the Awards tab.</div>
       {conflict && (
         <div className="alert alert--error settings-conflict-alert" role="alert" data-testid="fs-award-conflict-alert">
@@ -1215,7 +1221,7 @@ function FightingSpiritAwardsEditor({ c, password, showToast }) {
             onClick={() => removeRow(idx)}
             aria-label="Remove award"
             data-testid={`fs-award-remove-${idx}`}
-          >✕</button>
+          ><Icon name="x" size={14} /></button>
         </div>
       ))}
       <div style={{ display: "flex", gap: 8, marginTop: 4 }}>

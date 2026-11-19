@@ -281,7 +281,8 @@ describe('Import row errors read as prose, not as a tag (U4)', () => {
     });
     await runImport(container, [{ id: 'a', name: 'Mudansha', error: REFUSAL }]);
     const tag = container.querySelector('[data-testid="import-result-row"] .tag-badge--warn');
-    expect(tag.textContent).toBe('✕ not imported');
+    expect(tag.textContent.trim()).toBe('Not imported');
+    expect(tag.querySelector('svg[data-icon="x"]'), 'the cross is drawn, not typed').not.toBeNull();
     // The 220-character sentence is never inside the uppercase tag.
     expect(tag.textContent.length).toBeLessThan(30);
   });
@@ -294,7 +295,8 @@ describe('Import row errors read as prose, not as a tag (U4)', () => {
     await runImport(container, [{ id: 'a', name: 'Mudansha', participantCount: 8, seedCount: 2 }]);
     expect(container.querySelector('[data-testid="import-result-error"]')).toBeNull();
     const row = container.querySelector('[data-testid="import-result-row"]');
-    expect(row.querySelector('.tag-badge').textContent).toBe('✓ imported');
+    expect(row.querySelector('.tag-badge').textContent.trim()).toBe('Imported');
+    expect(row.querySelector('.tag-badge svg[data-icon="check"]')).not.toBeNull();
   });
 });
 

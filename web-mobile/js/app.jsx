@@ -1,7 +1,7 @@
 // Main App: single tournament per app/url. Tournament has multiple Competitions
 // (Men's Individual, Women's Individual, Teams, etc.). Auth gates admin mode.
 
-import { applyPatch as patchCompetitionData, checkSeqGap, keepNewerDetail, keepNewerTournament } from './patch.jsx';
+import { applyPatch as patchCompetitionData, checkSeqGap, createPushLedger, keepNewerTournament } from './patch.jsx';
 import { createTimerPool } from './timer_pool.jsx';
 import { LS_NOTIFICATIONS_ENABLED } from './notification_keys.jsx';
 import { bridge, setSnapshotProvider, setDisplayCourt, getLastBroadcastAt, applyPatchToTree, mergeSnapshotIntoTree, deriveLinkState, freshnessMs } from './court_bridge.jsx';
@@ -1098,6 +1098,9 @@ function App() {
   // The open competition's detail. Declared ahead of the SSE effect below,
   // whose handlers write it.
   const [selectedCompData, setSelectedCompData] = useState(null);
+  // The server pushes applied to selectedCompData, for its refetches
+  // (push-wins, createPushLedger, patch.jsx).
+  const [compPushes] = useState(() => createPushLedger());
   useEffect(() => {
     // Track every pending jittered timer so the cleanup can cancel them when
     // viewerCompId / mode changes. Without this, a timer queued for
@@ -1111,9 +1114,14 @@ function App() {
     const timerPool = createTimerPool();
     const jitteredTimeout = timerPool.schedule;
     // The competition page's refetches never put a live score back to an
-    // older state (keepNewerDetail, patch.jsx): a self-run score editor reads
-    // this data. The display reads `tournament`, never this.
-    const takeCompDetail = (data) => setSelectedCompData((prev) => keepNewerDetail(prev, data));
+    // older state (keepNewerDetail, patch.jsx), nor behind a push applied
+    // after they were sent (push-wins): a self-run score editor reads this
+    // data. The display reads `tournament`, never this. Called as the fetch
+    // is sent; it answers what takes the fetch's answer.
+    const takeCompDetail = () => {
+        const keep = compPushes.detail();
+        return (data) => setSelectedCompData((prev) => keep(prev, data));
+    };
 
     // maybeLoad gates the full-aggregate refetch. While the shiaijo operator
     // console is the active admin view, skip it: the console sources its
@@ -1152,7 +1160,7 @@ function App() {
         if (viewerCompId) {
             jitteredTimeout(
                 () => window.API.fetchCompetitionDetails(viewerCompId)
-                    .then(takeCompDetail)
+                    .then(takeCompDetail())
                     .catch(err => console.error(`${label} refresh failed:`, err)),
                 Math.random() * 500
             );
@@ -1196,11 +1204,13 @@ function App() {
         // Reset our seq counter to the server's head and do a full refetch.
         if (event.type === 'resync_required') {
             sseSeq.lastSeq = (typeof event.seq === 'number') ? event.seq : 0;
+            // Every held copy may be wrong: no push outranks the refetch.
+            compPushes.clear();
             maybeLoad();
             if (viewerCompId) {
                 jitteredTimeout(
                     () => window.API.fetchCompetitionDetails(viewerCompId)
-                        .then(takeCompDetail)
+                        .then(takeCompDetail())
                         .catch(err => console.error('resync refresh failed:', err)),
                     Math.random() * 500
                 );
@@ -1217,7 +1227,7 @@ function App() {
             if (viewerCompId) {
                 jitteredTimeout(
                     () => window.API.fetchCompetitionDetails(viewerCompId)
-                        .then(takeCompDetail)
+                        .then(takeCompDetail())
                         .catch(err => console.error('gap refetch failed:', err)),
                     Math.random() * 500
                 );
@@ -1236,7 +1246,7 @@ function App() {
         //     walls so they don't simultaneously storm GET /api/viewer/competitions.
         const detailJitter = Math.random() * 500;
         const listJitter = Math.random() * 2000;
-        const refetchDetail = () => jitteredTimeout(() => window.API.fetchCompetitionDetails(viewerCompId).then(takeCompDetail).catch(err => console.error('SSE refresh failed:', err)), detailJitter);
+        const refetchDetail = () => jitteredTimeout(() => window.API.fetchCompetitionDetails(viewerCompId).then(takeCompDetail()).catch(err => console.error('SSE refresh failed:', err)), detailJitter);
         // another competition's event: refetch the open competition only when the two share a day (and, when `courts` is given, a court on that day)
         const refetchIfSharesDay = (event, courts) => {
             const otherDate = (compsRef.current || []).find(c => c.id === event.data?.competitionId)?.date || "";
@@ -1246,6 +1256,7 @@ function App() {
             if (shares) refetchDetail();
         };
         if (event.type === "tournament_updated") {
+            compPushes.clear();
             if (!authPromptRef.current) jitteredTimeout(maybeLoad, listJitter);
         } else if (event.type === "password_reset") {
             // The admin password was rotated by someone hitting
@@ -1326,7 +1337,7 @@ function App() {
                 // Apply partial update immediately (match_updated only: 
                 // competition_completed has no per-match payload)
                 if (event.type === "match_updated") {
-                    setSelectedCompData(prev => patchCompetitionData(prev, event));
+                    setSelectedCompData(prev => compPushes.push(prev, viewerCompId, event));
                 }
                 // Refresh current competition detail (jittered): the backend
                 // has already persisted the new status before broadcasting, so
@@ -1468,7 +1479,7 @@ function App() {
         document.removeEventListener('visibilitychange', onVisibilityChange);
         window.removeEventListener('online', onOnline);
     };
-  }, [viewerCompId, mode, loadRef]);
+  }, [viewerCompId, mode, loadRef, compPushes]);
 
   useEffect(() => { selectedCompDataRef.current = selectedCompData; }, [selectedCompData]);
 
@@ -1476,10 +1487,11 @@ function App() {
     if (viewerCompId && viewerScreen !== "register") {
       let cancelled = false;
       setLoading(true);
+      const keep = compPushes.detail();
       window.API.fetchCompetitionDetails(viewerCompId)
         .then(data => {
           if (cancelled) return;
-          setSelectedCompData((prev) => keepNewerDetail(prev, data));
+          setSelectedCompData((prev) => keep(prev, data));
           setLoading(false);
         })
         .catch(err => {
@@ -1492,7 +1504,7 @@ function App() {
       setSelectedCompData(null);
       setLoading(false);
     }
-  }, [viewerCompId, viewerScreen]);
+  }, [viewerCompId, viewerScreen, compPushes]);
 
   const requestAdmin = () => {
     if (authed) {
@@ -1588,7 +1600,7 @@ function App() {
       // Defensive: display.js bundle is part of the standard build, so
       // this should never fire in production. Render a minimal message
       // rather than a blank screen if it does.
-      return <div className="loading" style={{ background: '#000', color: '#fff', padding: 40 }}>Display module not loaded.</div>;
+      return <div className="loading" style={{ background: 'var(--black)', color: 'var(--accent-fg)', padding: 40 }}>Display module not loaded.</div>;
     }
     // tournament is null when the initial fetch failed (outage). Pass a safe
     // empty wrapper so the board renders its own loading/empty state instead
@@ -2179,12 +2191,15 @@ export function VersionFooter() {
   if (commitShort) parts.push(commitShort);
   if (info.buildDate) parts.push(info.buildDate);
 
-  const versionText = isSemver ? versionStr : parts.join(' · ');
+  const versionText = isSemver ? versionStr : parts.join(', ');
+  // A version and the link are two parts and keep their one middle dot; a
+  // commit and a date make three, and those are joined by commas.
+  const linkSep = isSemver || parts.length < 2 ? " · " : ", ";
 
   return (
     <div className="app-version-footer" data-testid="app-version-footer">
       {versionText}
-      {" · "}
+      {linkSep}
       <a href="https://github.com/gitrgoliveira/bracket-creator" target="_blank" rel="noopener noreferrer" className="app-version-link">
         <svg aria-hidden="true" focusable="false" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <path d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3 0 6-2 6-5.5.08-1.25-.27-2.48-1-3.5.28-1.15.28-2.35 0-3.5 0 0-1 0-3 1.5-2.64-.5-5.36-.5-8 0C6 2 5 2 5 2c-.3 1.15-.3 2.35 0 3.5A5.403 5.403 0 0 0 4 9c0 3.5 3 5.5 6 5.5-.39.49-.68 1.05-.85 1.65-.17.6-.22 1.23-.15 1.85v4" />

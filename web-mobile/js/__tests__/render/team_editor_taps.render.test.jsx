@@ -220,7 +220,7 @@ describe('a pick on a running team match is a tap', () => {
     const dh = boutRow(-1, { sideA: 'Kyoto', sideB: 'Osaka', decision: 'daihyosen' });
     const r = render(el(teamBout({ subResults: [boutRow(1, { decision: 'hikiwake' }), boutRow(2, { decision: 'hikiwake' }), boutRow(3, { decision: 'hikiwake' }), dh] })));
     await act(async () => { await new Promise((res) => setTimeout(res, 0)); });
-    const input = r.getByLabelText('Daihyosen SHIRO player');
+    const input = r.getByLabelText('Daihyosen Shiro player');
     await pickFrom(input, 'Oda');
     expect(events()).toEqual([{ kind: 'rep.pick', pos: -1, side: 'b', memberId: 'o2' }]);
     expect(API.recordScore).not.toHaveBeenCalled();
@@ -233,7 +233,7 @@ describe('a pick on a running team match is a tap', () => {
     ] });
     const r = render(el(m0));
     await act(async () => { await new Promise((res) => setTimeout(res, 0)); });
-    const boxes = r.getAllByLabelText(/SHIRO player$/);
+    const boxes = r.getAllByLabelText(/Shiro player$/);
     await pickFrom(boxes[boxes.length - 1], 'Oda');
     expect(events()).toEqual([{ kind: 'bout.fighter', pos: 2, side: 'b', name: 'Oda', memberId: 'o2' }]);
   });

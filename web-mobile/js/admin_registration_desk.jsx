@@ -38,6 +38,7 @@ import { NO_ID_HINT, NoIdHint } from './data_integrity.jsx';
 import { checkInApplies, tournamentHasCheckIn, SELF_RUN_NO_CHECK_IN } from './competition_shape.jsx';
 import { useUnsavedInput } from './app_version.jsx';
 import { acceptTap } from './tap_guard.jsx';
+import { Icon } from './icon.jsx';
 
 const { useState, useEffect, useRef, useMemo, useCallback } = React;
 
@@ -1005,12 +1006,12 @@ function AdminRegistrationDeskPage({ tournament, onBack, password, showToast, on
 
         {noCheckIn ? (
           <div className="empty" style={{ padding: "48px 24px" }}>
-            <div className="icon" aria-hidden="true">🥋</div>
+            <div className="icon" aria-hidden="true"><Icon name="clipboard-check" size={32} /></div>
             <h3>{SELF_RUN_NO_CHECK_IN}</h3>
           </div>
         ) : noComps ? (
           <div className="empty" style={{ padding: "48px 24px" }}>
-            <div className="icon" aria-hidden="true">🥋</div>
+            <div className="icon" aria-hidden="true"><Icon name="trophy" size={32} /></div>
             <h3>{noCompsAtAll ? "No competitions yet" : "No competition has check-in tracking on"}</h3>
             <div style={{ fontSize: 13, color: "var(--ink-2)", maxWidth: 440, margin: "0 auto", lineHeight: 1.5 }}>
               {noCompsAtAll
@@ -1041,7 +1042,7 @@ function AdminRegistrationDeskPage({ tournament, onBack, password, showToast, on
                     spellCheck="false"
                   />
                   {query && (
-                    <button type="button" className="rd-search__clear" onClick={() => { setQuery(""); searchRef.current && searchRef.current.focus(); }} aria-label="Clear search">×</button>
+                    <button type="button" className="rd-search__clear" onClick={() => { setQuery(""); searchRef.current && searchRef.current.focus(); }} aria-label="Clear search"><Icon name="x" size={14} /></button>
                   )}
                 </div>
                 <div className="rd-headline">
@@ -1083,7 +1084,7 @@ function AdminRegistrationDeskPage({ tournament, onBack, password, showToast, on
                 const visibleTags = handoff.tags.filter((t) => t.kind !== "pending");
                 return (
                   <div className="rd-handoff" role="status" aria-live="polite">
-                    <button type="button" className="rd-handoff__close" aria-label="Dismiss" onClick={() => setHandoff(null)}>×</button>
+                    <button type="button" className="rd-handoff__close" aria-label="Dismiss" onClick={() => setHandoff(null)}><Icon name="x" size={14} /></button>
                     <div className="rd-handoff__lead"><RdCheckIcon /> Checked in: <strong>{handoff.name}</strong></div>
                     {visibleTags.length > 0 && (
                       <div className="rd-handoff__tags">
@@ -1224,7 +1225,7 @@ function RdRoster({ mode, rows, groupByDojo, query, allChecked, canWalkUp, onOpe
     if (allChecked) {
       return (
         <div className="empty rd-empty rd-empty--done">
-          <div className="icon" aria-hidden="true">✓</div>
+          <div className="icon" aria-hidden="true"><Icon name="check" size={32} /></div>
           <h3>Everyone&apos;s here</h3>
           <div className="rd-empty__sub">All checked in. Search above to undo or re-check anyone.</div>
         </div>

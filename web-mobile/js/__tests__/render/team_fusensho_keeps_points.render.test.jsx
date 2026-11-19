@@ -171,7 +171,7 @@ describe('bc-fsnp: a per-bout fusensho keeps the other side\'s struck points', (
     const shiro = fusenshoButton('shiro');
     expect(shiro.getAttribute('aria-disabled')).toBe('true');
     await tap(shiro);
-    expect(refusalNote('shiro').textContent).toBe('AKA already won this bout: undo their fusensho, then clear their points');
+    expect(refusalNote('shiro').textContent).toBe('Aka already won this bout: undo their fusensho, then clear their points');
   });
 
   it('refuses a fusensho against a side that already won the bout, and sends nothing', async () => {
@@ -181,7 +181,7 @@ describe('bc-fsnp: a per-bout fusensho keeps the other side\'s struck points', (
     await settle();
     const aka = fusenshoButton('aka');
     expect(aka.getAttribute('aria-disabled')).toBe('true');
-    expect(aka.title).toMatch(/SHIRO already won this bout/);
+    expect(aka.title).toMatch(/Shiro already won this bout/);
     // The reason is not shown until the operator taps: every bout won 2-0
     // refuses the loser's Fusensho, and a line under each would be clutter.
     expect(refusalNote('aka')).toBeNull();
@@ -191,7 +191,7 @@ describe('bc-fsnp: a per-bout fusensho keeps the other side\'s struck points', (
     expect(window.API.recordTap.mock.calls.length, 'the refused tap sends nothing').toBe(before);
     expect(window.API.recordScore).not.toHaveBeenCalled();
     // A title never shows on a touchscreen, so the tap puts the reason in view.
-    expect(refusalNote('aka').textContent).toBe('SHIRO already won this bout: clear their points first');
+    expect(refusalNote('aka').textContent).toBe('Shiro already won this bout: clear their points first');
     expect(aka.textContent).toBe('Fusensho');
   });
 });

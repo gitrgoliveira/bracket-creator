@@ -33,7 +33,11 @@ describe('Competition Settings save with no connection', () => {
     expect(onUpdate).toHaveBeenCalledTimes(1);
     expect(global.fetch).toHaveBeenCalledTimes(1);
     const text = container.textContent;
-    expect(text).toContain(`⚠ ${WRITE_NOT_CONFIRMED}`);
+    const sign = container.querySelector('svg[data-icon="triangle-alert"]');
+    expect(sign, 'the warning sign is drawn, not typed').not.toBeNull();
+    // The sentence stands whole beside the sign: nothing wraps it, and the
+    // gap after the sign is CSS (icon-lead), not a typed space.
+    expect(sign.parentElement.textContent).toBe(WRITE_NOT_CONFIRMED);
     expect(text).not.toContain('Failed to fetch');
     expect(text).not.toContain('Save failed');
   });

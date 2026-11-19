@@ -113,7 +113,7 @@ describe('individual editor: a refused decision offers no Retry', () => {
     await act(async () => {
       render(<ScoreEditorModal match={individualMatch} onClose={vi.fn()} onSubmit={vi.fn().mockResolvedValue(undefined)} onAfterDecision={vi.fn()} password="secret" />);
     });
-    await act(async () => { fireEvent.click(screen.getByRole('button', { name: /^Kiken . Voluntary$/ })); });
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: /^Kiken \(voluntary\)$/ })); });
     const form = document.querySelector('form.decision-prompt');
     expect(form, 'the withdrawal form opened').not.toBeNull();
     fireEvent.click(form.querySelector('input[name="decision-side"][value="aka"]'));

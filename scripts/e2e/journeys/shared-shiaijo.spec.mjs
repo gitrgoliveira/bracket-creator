@@ -97,17 +97,25 @@ const same = (a, b) => !!a && !!b && a.shiro === b.shiro && a.aka === b.aka;
 const pairOf = (r) => ({ shiro: r.shiro, aka: r.aka });
 // Return once this device's outbox is empty (all queued writes landed).
 const settleOn = (page) => settled(page);
-// The eyebrow of the bout an editor holds names its competition first.
-const compOfEyebrow = (eyebrow) => {
-  const e = (eyebrow || '').toUpperCase();
-  if (e.startsWith(SI.toUpperCase())) return SI;
-  if (e.startsWith(ST.toUpperCase())) return ST;
-  return `unknown: ${eyebrow}`;
+// The meta line under the heading of the bout an editor holds ("Shared
+// Individual, Pool A, Match 1 of 3") names its competition first, in the
+// competition's own case.
+const compOfMeta = (meta) => {
+  const e = meta || '';
+  if (e.startsWith(`${SI},`)) return SI;
+  if (e.startsWith(`${ST},`)) return ST;
+  return `unknown: ${meta}`;
 };
 // A court's column on the public schedule (/schedule) and on the Tournament
-// schedule page (/admin/schedule): both title it "SHIAIJO <court>".
+// schedule page (/admin/schedule): both title it "Shiaijo <court>".
 const scheduleColumn = (page, court) => page.locator('.tw-court')
-  .filter({ has: page.locator('.tw-court__title', { hasText: new RegExp(`^SHIAIJO ${court}$`) }) });
+  .filter({ has: page.locator('.tw-court__title', { hasText: new RegExp(`^Shiaijo ${court}$`) }) });
+// The Scores page rows whose court control (the CourtPicker button) reads A,
+// as text. The court is read from that button itself: a row's text says "A"
+// elsewhere too ("Pool A"), and a row with no picker is not counted.
+const rowsOnCourtA = (rows) => rows.evaluateAll((els) => els
+  .filter((x) => (x.querySelector('.score-edit-row__court--btn')?.textContent || '').trim() === 'A')
+  .map((x) => x.innerText.replace(/\s+/g, ' ').trim()));
 // A printed HH:MM clock time, and its minutes since midnight.
 const clock = (t) => /^\d\d:\d\d$/.test(t);
 const minutes = (t) => Number(t.slice(0, 2)) * 60 + Number(t.slice(3));
@@ -118,7 +126,7 @@ const SYNC_PILL = /^(Synced|Syncing…|Offline|Not saving)$/;
 // competition and court.
 async function liveOnConsole() {
   const l = await liveBout(C);
-  return l ? { comp: compOfEyebrow(l.eyebrow), ...l } : null;
+  return l ? { comp: compOfMeta(l.meta), ...l } : null;
 }
 
 // What the court's pace makes of `court`'s waiting matches right now, worked
@@ -451,7 +459,7 @@ test.describe('shared-shiaijo', () => {
     r({ step: 'S2 advance', action: finLabel, variant: 'V2 doubleTap', ...dbl, committedByDouble, stillArmed: armedAfter,
       shot: await shot(C, 's2-finish-double-tapped') });
     expect(dbl.withinWindow, `harness too slow: the two taps were ${dbl.gapMs} ms apart, not a double tap, so this row did not test the bounce guard`).toBe(true);
-    expect(finLabel).toBe('Finish + Start Next →');
+    expect(finLabel).toBe('Finish + Start Next');
     expect(committedByDouble).toBe(false);
     expect(armedAfter).toBe(true);
     await armedFinishButton(C).tap();
@@ -519,8 +527,7 @@ test.describe('shared-shiaijo', () => {
     // the operator starts the next SI bouts on A by hand.
     await C.goto('/admin/score-editor');
     await expect(C.getByRole('heading', { level: 1, name: 'Score editor' })).toBeVisible();
-    const listOnA = (await C.locator('.score-edit-row').evaluateAll((rows) => rows.map((x) => x.innerText.replace(/\s+/g, ' ').trim())))
-      .filter((t) => / A ▾ /.test(` ${t} `));
+    const listOnA = await rowsOnCourtA(C.locator('.score-edit-row'));
     await C.locator('.score-edit-row.score-edit-row--running').filter({ hasText: bouts.b3.shiro }).getByRole('button', { name: /^Score$/ }).tap();
     await expect(C.locator(EDITOR)).toBeVisible();
     await ipponButton(C, winnerOf(bouts.b3), 'M', EDITOR).tap();
@@ -528,12 +535,11 @@ test.describe('shared-shiaijo', () => {
     const s9Label = (await finishButton(C, EDITOR).innerText()).trim();
     expect(s9Label).toBe('Finish');
     await finishMatch(C, EDITOR);
-    const closeBtn = C.locator(EDITOR).getByRole('button', { name: /✕ Close/ });
+    const closeBtn = C.locator(EDITOR).getByRole('button', { name: /^Close$/ });
     if (await closeBtn.isVisible().catch(() => false)) await closeBtn.tap();
     // Deliberate: nothing may start by itself, so the time is the evidence.
     await C.waitForTimeout(1500);
-    const runningOnAAfterFinish = (await C.locator('.score-edit-row.score-edit-row--running').evaluateAll((rows) => rows.map((x) => x.innerText.replace(/\s+/g, ' ').trim())))
-      .filter((t) => / A ▾ /.test(` ${t} `));
+    const runningOnAAfterFinish = await rowsOnCourtA(C.locator('.score-edit-row.score-edit-row--running'));
     expect(runningOnAAfterFinish).toHaveLength(0);
     r({ step: 'S9 scores page', action: s9Label, variant: 'correct path', listOnA, runningOnA: runningOnAAfterFinish,
       shot: await shot(C, 's9-scores-page-finish-plain') });
@@ -555,21 +561,20 @@ test.describe('shared-shiaijo', () => {
       const heldBefore = await C.locator(EDITOR).innerText();
       await nav(cls).tap();
       await expect.poll(() => C.locator(EDITOR).innerText()).not.toBe(heldBefore);
-      walked.push((await editorIdentity(C, EDITOR)).eyebrow);
+      walked.push((await editorIdentity(C, EDITOR)).meta);
     }
     r({ step: 'S9 scores page', action: 'Next x2, Prev x2', variant: 'correct path (allowed to walk the court)', walked,
-      comps: walked.map(compOfEyebrow), shot: await shot(C, 's9-prev-next-walked') });
+      comps: walked.map(compOfMeta), shot: await shot(C, 's9-prev-next-walked') });
     // Back to the running SI bout, then a no-show: no automatic advance.
-    await C.locator(EDITOR).getByRole('button', { name: /✕ Close/ }).tap();
+    await C.locator(EDITOR).getByRole('button', { name: /^Close$/ }).tap();
     await C.locator('.score-edit-row.score-edit-row--running').filter({ hasText: bouts.b4.shiro }).getByRole('button', { name: /^Score$/ }).tap();
     await expect(C.locator(EDITOR)).toBeVisible();
     const fus = await recordDecision(C, 'fusenpai', { side: 'aka', root: EDITOR });
-    const closeAfterFus = C.locator(EDITOR).getByRole('button', { name: /✕ Close/ });
+    const closeAfterFus = C.locator(EDITOR).getByRole('button', { name: /^Close$/ });
     if (await closeAfterFus.isVisible().catch(() => false)) await closeAfterFus.tap();
     // Deliberate: no start may follow (no automatic advance), so the time is the evidence.
     await C.waitForTimeout(2000);
-    const runningOnAAfterFus = (await C.locator('.score-edit-row.score-edit-row--running').evaluateAll((rows) => rows.map((x) => x.innerText.replace(/\s+/g, ' ').trim())))
-      .filter((t) => / A ▾ /.test(` ${t} `));
+    const runningOnAAfterFus = await rowsOnCourtA(C.locator('.score-edit-row.score-edit-row--running'));
     expect(runningOnAAfterFus).toHaveLength(0);
     r({ step: 'S9 scores page', action: 'Fusenpai (Aka) in the overlay', variant: 'correct path (no advance)', ...fus,
       runningOnA: runningOnAAfterFus, shot: await shot(C, 's9-after-fusenpai') });
@@ -589,7 +594,7 @@ test.describe('shared-shiaijo', () => {
     // Leave it running with a point, for S3.
     await ipponButton(C, winnerOf(bouts.b5), 'M', EDITOR).tap();
     await settleOn(C);
-    await C.locator(EDITOR).getByRole('button', { name: /✕ Close/ }).tap();
+    await C.locator(EDITOR).getByRole('button', { name: /^Close$/ }).tap();
 
     // S3: back on the console, SI's bout running with a point. The operator
     // switches the picker to ST and starts ST's Up next.
@@ -760,7 +765,7 @@ test.describe('shared-shiaijo', () => {
     await expect(alert).toBeVisible({ timeout: EXPECT_TIMEOUT_MS });
     r({ step: 'S6d reopen', action: `head table starts ${ST}'s semi-final while the console holds an SI correction`, variant: 'two devices',
       alert: (await alert.innerText()).replace(/\s+/g, ' ').trim(), shot: await shot(C, 's6d-also-running-during-correction') });
-    await hed.getByRole('button', { name: /✕ Close/ }).tap().catch(() => {});
+    await hed.getByRole('button', { name: /^Close$/ }).tap().catch(() => {});
     // Clear kiken and reopen: the court is busy, so the panel offers the remedy.
     await inlineEditor(C).getByTestId('clear-withdrawal-reopen').tap();
     const conflict = inlineEditor(C).getByTestId('withdrawal-reopen-conflict');
@@ -816,11 +821,11 @@ test.describe('shared-shiaijo', () => {
     // Court B plays its pools on its own device; A's console follows unprompted.
     const bPlayed = [];
     for (let i = 0; i < 8 && (await queuedPoolBouts(Bc)) + ((await inlineRunning(Bc)) ? 1 : 0) > 0; i += 1) {
-      const id = (await inlineRunning(Bc)) ? (await editorIdentity(Bc)).eyebrow : '';
-      if (id && !/POOL/.test(id)) break;
+      const id = (await inlineRunning(Bc)) ? (await editorIdentity(Bc)).meta : '';
+      if (id && !/Pool/.test(id)) break;
       bPlayed.push(await playRunningBout(Bc));
     }
-    await expect.poll(async () => ((await courtState(C)).upNext || {}).head || '', { timeout: 20_000 }).toMatch(/Shared Individual · Match \d+$/);
+    await expect.poll(async () => ((await courtState(C)).upNext || {}).head || '', { timeout: 20_000 }).toMatch(/Shared Individual, Match \d+$/);
     const koOnA = await courtState(C);
     r({ step: 'S5 SI knockout on A', action: 'court B finishes its pools; court A, untouched', variant: 'correct path (P7: held, no reload)',
       bPlayed: bPlayed.length, court: koOnA, shot: await shot(C, 's5-quarter-finals-arrive-on-A') });
@@ -995,7 +1000,7 @@ test.describe('shared-shiaijo', () => {
     await H.locator('.score-edit-row.score-edit-row--running').filter({ hasText: bouts.m6.shiro }).getByRole('button', { name: /^Score$/ }).tap();
     await expect(H.locator(EDITOR)).toBeVisible();
     await expect(H.locator(EDITOR).getByText(SYNC_PILL)).toHaveCount(0);
-    await H.locator(EDITOR).getByRole('button', { name: /✕ Close/ }).tap();
+    await H.locator(EDITOR).getByRole('button', { name: /^Close$/ }).tap();
   });
 
   // S6a / P5: a RUNNING match moved onto a shiaijo where another bout runs.
@@ -1009,7 +1014,7 @@ test.describe('shared-shiaijo', () => {
     expect((await liveOnConsole()).comp).toBe(ST);
     // The head table moves M6 from B to A on the Tournament schedule page.
     await H.goto('/admin/schedule');
-    const bCol = H.locator('.tw-court').filter({ has: H.locator('.tw-court__title', { hasText: /^SHIAIJO B$/ }) });
+    const bCol = H.locator('.tw-court').filter({ has: H.locator('.tw-court__title', { hasText: /^Shiaijo B$/ }) });
     const m6Row = bCol.locator('.tw-match.tw-match--running').filter({ hasText: bouts.m6.shiro }).first();
     await expect(m6Row).toBeVisible();
     await m6Row.locator('button[aria-haspopup="listbox"]').tap();
@@ -1073,7 +1078,7 @@ test.describe('shared-shiaijo', () => {
       const stored = await T.rowSlots(T.boutRow(hed, 2), 'shiro').count();
       r({ step: 'S6a move', action: 'the scored point, read back on the head table after the send back', variant: 'P5 record',
         bout2ShiroOnBoardBefore: pointTried.after, bout2ShiroStored: stored, shot: await shot(H, 's6a-scored-point-read-back') });
-      await hed.getByRole('button', { name: /✕ Close/ }).tap().catch(() => {});
+      await hed.getByRole('button', { name: /^Close$/ }).tap().catch(() => {});
     }
     // Leave ST running on A and M6 queued on A for subsequent steps.
     await openShiaijo(C, 'A');
@@ -1146,7 +1151,7 @@ test.describe('shared-shiaijo', () => {
     await H.goto(`/admin/competition/${ids.SI}/scores`);
     await expect.poll(async () => {
       const row = m6ScoresRow();
-      const court = (await row.locator('.score-edit-row__court').innerText()).replace(/\s*▾$/, '').trim();
+      const court = (await row.locator('.score-edit-row__court').innerText()).trim();
       const isRunning = await row.evaluate((el) => el.classList.contains('score-edit-row--running'));
       return { court, isRunning };
     }).toEqual({ court: 'A', isRunning: false });
@@ -1159,6 +1164,6 @@ test.describe('shared-shiaijo', () => {
     const hist = H.locator(EDITOR).getByTestId('match-history');
     await hist.getByTestId('match-history-toggle').tap();
     await expect.poll(async () => hist.innerText()).toContain('Moved to Shiaijo A and sent back to the queue');
-    await H.locator(EDITOR).getByRole('button', { name: /✕ Close/ }).tap();
+    await H.locator(EDITOR).getByRole('button', { name: /^Close$/ }).tap();
   });
 });

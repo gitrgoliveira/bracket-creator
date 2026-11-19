@@ -47,22 +47,26 @@ async function fetchAppVersion() {
 // Theme toggle functionality
 const themeToggle = document.getElementById('themeToggle');
 
+// data-theme switches this page's own tokens (styles.css); data-bs-theme
+// switches Bootstrap's with them, or its help text and inputs stay light.
+function applyTheme(dark) {
+    for (const attr of ['data-theme', 'data-bs-theme']) {
+        if (dark) document.body.setAttribute(attr, 'dark');
+        else document.body.removeAttribute(attr);
+    }
+}
+
 // Check for saved theme preference or use preferred color scheme
 const savedTheme = localStorage.getItem('theme');
 if (savedTheme === 'dark' || (!savedTheme && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
-    document.body.setAttribute('data-theme', 'dark');
+    applyTheme(true);
     themeToggle.checked = true;
 }
 
 // Toggle theme
 themeToggle.addEventListener('change', () => {
-    if (themeToggle.checked) {
-        document.body.setAttribute('data-theme', 'dark');
-        localStorage.setItem('theme', 'dark');
-    } else {
-        document.body.removeAttribute('data-theme');
-        localStorage.setItem('theme', 'light');
-    }
+    applyTheme(themeToggle.checked);
+    localStorage.setItem('theme', themeToggle.checked ? 'dark' : 'light');
 });
 
 // Form validation
@@ -662,7 +666,7 @@ function readFile(file) {
     dropArea.innerHTML = `
         <div class="drop-message">
             <div class="spinner-border text-primary" role="status">
-                <span class="visually-hidden">Loading...</span>
+                <span class="visually-hidden">Loading…</span>
             </div>
             <p class="mt-2">Reading file...</p>
         </div>

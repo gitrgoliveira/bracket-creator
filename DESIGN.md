@@ -42,7 +42,7 @@ When extending the design system, **mobile-app is the canonical surface**. The b
 2. **Kendo first.** Red (Aka) and White (Shiro) are positional, never swapped. Web bracket cards put Aka first/top; the horizontal scoreboard and list rows put Shiro left / Aka right; Excel puts White in the left column. The two sides must be **distinguishable at a glance on every surface**: the distinction is carried by *treatment*, not hue alone (so it survives glare, projectors, and color-blindness): Aka = solid/red-tinted fill, Shiro = framed white (cool border + diagonal hatch) so "white" never dissolves into the page. **Color area must scale with the surface.** A full-screen scoreboard can flood half the screen; a dense schedule row cannot rely on a 5px spine. Give each side a tinted cell or a colored header so the signal stays legible as the component shrinks. **Not a badge**: a tinted surface carries no SHIRO/AKA badge (operator ruling 2026-09-20, bc-sccl), and every one in the app was removed with it. See [§4 Match cards](#match-cards--bc-match), [§4 Aka/Shiro side treatment](#akashiro-side-treatment), and [match-results-and-marks.md](.claude/rules/match-results-and-marks.md) "Match Colors" for the full rule.
 3. **Running state is loud, but not red.** Anything currently happening on a court gets the **`--accent` (navy) treatment**: navy border, soft-navy ring, navy dot. Anything else stays neutral. Don't dilute it. **Red is reserved for Aka (side) and danger only.** Running state must never use red, so the two never collide on the same card (a running match still shows its Aka side in red while the running ring stays navy).
 
-   **Motion is reserved for attention, never for "this is normal and ongoing"** (operator ruling, 2026-09-19: a pulse "would mean it needs an action or it's a warning"; the running state "does not need a pulse"). A pulse means one of two things: a **warning** (the SSE connection dropped) or an **expected operator action** (a tied team encounter waiting on a daihyosen). Ordinary ongoing state, a match currently running, a write in flight, is carried by **hue and treatment alone**: the running dot keeps its navy fill and soft ring, it simply doesn't move. A state that qualifies for attention *may* pulse, but nothing requires it to: the court console's competition-switch nudge (`.shiaijo-nudge`, composing `.alert--warn`) is a clickable but *static* amber banner with an icon and a "Switch →" call to action, and it is fully compliant: motion is a permission, not an obligation.
+   **Motion is reserved for attention, never for "this is normal and ongoing"** (operator ruling, 2026-09-19: a pulse "would mean it needs an action or it's a warning"; the running state "does not need a pulse"). A pulse means one of two things: a **warning** (the SSE connection dropped) or an **expected operator action** (a tied team encounter waiting on a daihyosen). Ordinary ongoing state, a match currently running, a write in flight, is carried by **hue and treatment alone**: the running dot keeps its navy fill and soft ring, it simply doesn't move. A state that qualifies for attention *may* pulse, but nothing requires it to: the court console's competition-switch nudge (`.shiaijo-nudge`, composing `.alert--warn`) is a clickable but *static* amber banner with an icon and a "Switch" call to action, and it is fully compliant: motion is a permission, not an obligation.
 
    Hue inside a pulse follows the token table (§3), not a fixed two-value vocabulary: `--danger`/red for a warning that risks data (the dropped-connection dot), `--accent`/navy for an expected action rooted in the running/court language (`.daihyosen-controls--tied`, waiting on a rep bout). A pulse may also depart from its token's usual hue where the surface's own contrast demands it (the sustained-outage strip is solid red, so its dot pulses white/`--accent-fg` rather than red-on-red): that's a contrast accommodation, not a new hue rule, and doesn't license inventing others.
 
@@ -85,7 +85,7 @@ All tokens are defined in the `:root` block in [styles.css](web-mobile/css/style
 | `--ink` | `#1a1d24` | Body text |
 | `--ink-1` | `#111827` | **AAA-grade text (~18:1 on white)**: tournament-critical numerals, glossary terms, score displays. Use when `--ink` isn't dark enough. |
 | `--ink-2` | `#3a414e` | Secondary text, labels |
-| `--ink-3` | `#6b7280` | Tertiary text (meta, hints) |
+| `--ink-3` | `#636a77` | Tertiary text (meta, hints, table heads); at least 4.5:1 on `--line-2`, `--surface-2` and white |
 | `--ink-4` | `#6c7480` | **Contrast floor for fine print**: holds **4.7:1 on white (WCAG AA)**. Do not lighten. |
 | `--ink-5` | `#f1f3f6` | **Inverse text/border**: use only on dark (`--ink` / `--ink-1`) backgrounds (e.g. `.sb-draw-toggle--active`). Never use on `--surface` or `--bg`. |
 | `--line` | `#e4e6eb` | Default borders, dividers |
@@ -111,9 +111,14 @@ All tokens are defined in the `:root` block in [styles.css](web-mobile/css/style
 
 | Token | Stack |
 |---|---|
-| `--font` | System UI: Apple → Segoe → Roboto fallback |
-| `--font-mono` | SFMono-Regular → Menlo → Consolas |
-| `--font-display` | SF Pro Display (hero titles only) |
+| `--font` | Archivo → BC Symbols → system faces |
+| `--font-mono` | JetBrains Mono → BC Symbols → system monospace |
+| `--font-display` | Archivo → BC Symbols → SF Pro Display (hero titles only) |
+| `--font-impact` | Anton → Archivo (scoreboard numerals, big side labels) |
+
+Every face the UI draws with ships with the app (`web-mobile/vendor/fonts/`, SIL OFL 1.1), so a page looks the same on every device and in every capture. The CLI web UI uses the same files and stacks. **BC Symbols** holds the symbols the UI writes as text that Archivo has no glyph for (the arrow keys a hint names, ✓ in a pressed toggle's label, the ● ○ ▲ of the score notation, ≥ and the rest), subset from Noto Sans Symbols 2 and Noto Sans Math; a new symbol goes into one of those subsets. A character never stands in for an icon, emoji or not: an icon (a caret, a warning, a pencil, a pin, a close button's ×-shape) is drawn by `Icon` (`web-mobile/js/icon.jsx`). The system faces at the end of each stack draw only what no shipped face holds, such as a name typed in a non-Latin script.
+
+**Labels and meta lines** (operator decisions 2026-11-18, the Hallmark restyle). A label, caption, table head, tag, chip or nav link is the body face a step smaller, in sentence case and untracked: never `text-transform: uppercase`, small caps or letter-spacing past 0.03em at 15px or under (TV and lobby display type above that is exempt). Nothing sits above a heading to announce it (no eyebrow): its words open the meta line under the heading. A meta line reads as a phrase with its parts separated by commas ("Individual, 11 May 2026, starts 11:00, shiaijo A and B"), never joined by middle dots; a label joined by a single dot keeps it ("Pool A · Match 1", the operator match label). A link or button label carries no arrow (a verb says it goes somewhere), and copy carries no en or em dash; the "–" of an empty score cell is notation and stays.
 
 Base: 15px / 1.4. Use the documented sizes below: don't introduce new in-between values. The CSS today contains a few stragglers (11, 11.5, 12.5, 14, 17, 24); treat them as drift to fold back, not as license to invent more.
 
@@ -196,7 +201,7 @@ Keyframes (this is a curated guide, not an index: find each `@keyframes` block i
 - `conn-pulse` / `conn-alert-pulse`: the two SSE-connection **warning** pulses (topbar down-dot; the white dot on the sustained-outage strip). Attention pulses per Principle 3.
 - `daihyosen-tied-pulse`: **expected-next-action** pulse for a tied team encounter waiting on a daihyosen (`.daihyosen-controls--tied`). Also Principle 3, navy-hued despite being a next-action case: hue follows the token table, not a fixed vocabulary.
 
-Reduced motion is handled by several `@media (prefers-reduced-motion: reduce)` blocks rather than one. Most sit beside the selector they disable, but one shared block (search it for `.conn-alert__dot`) collects selectors from all over the file, so grep before assuming a given animation is ungated. Gate any new non-essential animation, pulses included, the same way: a block of its own beside the keyframe, or an existing one it can join. **A keyframe injected from JSX needs gating too** and is easy to miss, because it is not in this file at all: `lobby-cycle-fill` (`display_lobby.jsx`) is currently the one ungated animation in the app.
+Reduced motion is handled by several `@media (prefers-reduced-motion: reduce)` blocks rather than one. Most sit beside the selector they disable, but one shared block (search it for `.conn-alert__dot`) collects selectors from all over the file, so grep before assuming a given animation is ungated. Gate any new non-essential animation, pulses included, the same way: a block of its own beside the keyframe, or an existing one it can join. Keep keyframes in this file, never injected from JSX, where a reduced-motion block cannot be missed: the lobby's page-cycle bar (`.lobby-cycle-bar`, `lobby-cycle-fill`) moved here from `display_lobby.jsx` for that reason, and is hidden under reduced motion.
 
 ### Breakpoints
 
@@ -290,7 +295,7 @@ States: `:hover` brightens border to `--ink-4`; `:disabled` drops to 0.5 opacity
 
 ### Tables: `.table`, `.pool__table`
 
-Uppercase 12px column headers, 13px body, `--line-2` row separators, hover row tint. Numeric columns get `font-family: var(--font-mono)`. Pool tables add `tr.advancing` (light-green bg + `▲` marker) to mark players progressing to the knockout.
+Sentence-case, untracked 12px column headers, 13px body, `--line-2` row separators, hover row tint. Numeric columns get `font-family: var(--font-mono)`. Pool tables add `tr.advancing` (light-green bg + `▲` marker) to mark players progressing to the knockout.
 
 ### Badges: `.badge`
 
@@ -309,7 +314,7 @@ State modifiers: `bc-match--running` (**navy `--accent` ring**: running state is
 
 Side composition (via `PlayerLine` in [bracket.jsx#L448](web-mobile/js/bracket.jsx#L448)): sides are `bc-side--a` (Aka/Red) and `bc-side--b` (Shiro/White), rendered in that order with a `.bc-divider` between them. In the horizontal bracket-tree layout this places Aka on top and Shiro on bottom. Each side carries a leading colour bar (red for Aka / navy for Shiro) and, on v1, a faint side tint (`--red-soft` / hatched `--white-side`); the Shiro side adds the 45° hatch so white reads as a deliberate side. Winner side gets `bc-side--winner` (bolder name + thicker leading bar; v2 floods `--red`/`--accent`). **Never swap side order based on seeding**: the geometry is the rule. TBD/empty rows reuse the same structure with `bc-side--empty` and a `.bc-name--tbd` text node.
 
-Meta-row chips (rendered inside `.bc-match-meta`): `.bc-court`, `.bc-time`, `.bc-running` (**`--accent` navy**, 700-weight "● NOW": running state, not red), `.bc-bye-tag` (BYE marker, `--ink-4`), `.bc-draw` (X for hikiwake, `--ink-3`), `.bc-encho` ((E), `--accent`, 10px 700), `.bc-decision-chip` ((DH), `--accent`, 10px 700).
+Meta-row chips (rendered inside `.bc-match-meta`): `.bc-court`, `.bc-time`, `.bc-running` (**`--accent` navy**, 700-weight "● Now": running state, not red), `.bc-bye-tag` (BYE marker, `--ink-4`), `.bc-draw` (X for hikiwake, `--ink-3`), `.bc-encho` ((E), `--accent`, 10px 700), `.bc-decision-chip` ((DH), `--accent`, 10px 700).
 
 #### Match marks on the card
 
@@ -466,7 +471,7 @@ Match-decision visual suffixes are documented in [§4 Match cards](#match-cards-
 - **Keyboard**: every modal honors Escape via `useEscapeToClose`. The admin score editor supports `←` / `→` to navigate between matches **on the same shiaijo**: see [CLAUDE.md](CLAUDE.md) and the note in [admin_schedule.jsx](web-mobile/js/admin_schedule.jsx). When adding keyboard shortcuts, gate them on `!isTextEntry(e.target)` (defined in [ui.jsx#L698](web-mobile/js/ui.jsx#L698)) so they don't clobber inputs.
 - **Touch**: `@media (pointer: coarse)` blocks bump padding on dense controls. The internal floor is ≥ 36px on shared surfaces and ≥ 44px under coarse pointers: note that platform guidance (Apple HIG, WCAG 2.5.5 AAA) wants 44px universally; the 36px floor is a pragmatic choice for laptop-mouse admin surfaces, not a target to aim for. Test any new dense surface on a tablet before merging.
 - **Focus rings**: text-entry controls use the `--focus-ring` token (3px `--accent-soft`); buttons use `outline: 2px solid var(--accent)`. Don't suppress `:focus-visible`: operators tab through forms. See §3 Rings.
-- **Motion**: nearly every ambient animation is gated behind `prefers-reduced-motion: reduce`, but there is no single global block to add to, and one animation is still ungated (`lobby-cycle-fill`, injected from `display_lobby.jsx`). Gate any new animation as described in §3 Motion, and remember that a keyframe living in JSX rather than `styles.css` needs the same treatment.
+- **Motion**: every ambient animation is gated behind `prefers-reduced-motion: reduce`, but there is no single global block to add to. Gate any new animation as described in §3 Motion, with its keyframes in `styles.css`.
 
 ## 7. Frontend conventions
 

@@ -372,6 +372,8 @@ function StreamingQR({ url, label }) {
             <canvas
                 data-testid="qr-canvas"
                 ref={canvasRef}
+                role="img"
+                aria-label={`QR code for ${url}`}
                 style={{ display: 'block', imageRendering: 'pixelated', borderRadius: 4 }}
             />
             {label && <div style={{ fontSize: '1.2vh', opacity: 0.75, textAlign: 'center' }}>{label}</div>}

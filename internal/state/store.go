@@ -45,6 +45,12 @@ type Store struct {
 	// compMu maps competition ID -> *sync.RWMutex for fine-grained locking.
 	compMu sync.Map
 
+	// compWrites maps competition ID -> *atomic.Uint64, counting the times
+	// its write lock was released (compWriteLock.Unlock). Never deleted, so it
+	// stays monotonic across a competition deleted and made again, as
+	// FileVersion does. Read by CompetitionWriteToken.
+	compWrites sync.Map
+
 	// keptWAL marks competitions whose transaction log this process kept in
 	// .wal after a commit it could not finish (ErrTxCommitted, or a Done that
 	// failed). The next write to that competition, and the next read, finish

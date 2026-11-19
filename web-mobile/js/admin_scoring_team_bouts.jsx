@@ -93,20 +93,21 @@ export const REP_BOUT_DECIDED_NOTE = "The judges decided this representative bou
 
 // teamResultLabel: the RESULT-band / Finish-button verdict text for a team
 // encounter. A knockout match cannot be a draw (a tie is broken by a daihyosen,
-// FIK rules), so a null winner in the bracket phase never reads "DRAW": it's
-// "DAIHYOSEN" once a scored tie exists to break, or "-" before any bout lands.
+// FIK rules), so a null winner in the bracket phase never reads "Draw": it's
+// "Daihyosen" once a scored tie exists to break, or "-" before any bout lands.
 // Only a pool encounter reads a null winner as a true draw. (a = Aka, b = Shiro.)
+// Sentence case, like every other verdict the editors show.
 //
 // KACHINUKI (mp-gmcg): daihyosen does not exist, so a tied knockout kachinuki
-// encounter must never read "DAIHYOSEN": the tie is resolved by fighting on
+// encounter must never read "Daihyosen": the tie is resolved by fighting on
 // (next bout or encho on the same pair), so the band stays pending ("-")
-// until the operator ends the match. Pools keep "DRAW": that is exactly what
+// until the operator ends the match. Pools keep "Draw": that is exactly what
 // End match would record there.
 export function teamResultLabel({ teamWinner, isKnockoutPhase, hasAnyScore, isKachinuki }) {
-  if (teamWinner === "a") return "AKA WIN";
-  if (teamWinner === "b") return "SHIRO WIN";
-  if (isKnockoutPhase) return hasAnyScore && !isKachinuki ? "DAIHYOSEN" : "-";
-  return "DRAW";
+  if (teamWinner === "a") return "Aka wins";
+  if (teamWinner === "b") return "Shiro wins";
+  if (isKnockoutPhase) return hasAnyScore && !isKachinuki ? "Daihyosen" : "-";
+  return "Draw";
 }
 
 // isKoTieBlocked: Finish must be blocked while a knockout encounter has no

@@ -173,7 +173,7 @@ describe('ScoreEditorModal: a decision refused because a later match is being fo
           match={make()}
           onClose={vi.fn()} onSubmit={vi.fn().mockResolvedValue(undefined)} onAfterDecision={onAfterDecision} password="secret" />);
       });
-      await act(async () => { fireEvent.click(screen.getByRole('button', { name: /^Kiken . Voluntary$/ })); });
+      await act(async () => { fireEvent.click(screen.getByRole('button', { name: /^Kiken \(voluntary\)$/ })); });
       const form = document.querySelector('form.decision-prompt');
       fireEvent.click(form.querySelector('input[name="decision-side"][value="shiro"]'));
       await act(async () => { fireEvent.submit(form); });

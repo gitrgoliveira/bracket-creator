@@ -554,9 +554,9 @@ test.describe('league-team', () => {
       await expect(upNextCard(page), 'the daihyosen is Up next on the court console').toBeVisible();
       const played = await playTiebreakOnCourt(page, { among: [A, B], winner: A, shot, flow: 'tie-at-1st' });
       const why = /tie-?breaker|daihyosen|representative|play-?off|podium|decid/i;
-      f12 = { cardText: played.upNext, eyebrow: played.eyebrow };
+      f12 = { cardText: played.upNext, meta: played.meta };
       record({ step: 'F12', action: 'the daihyosen on the court console', ...f12, pair: played.pair,
-        cardSaysWhy: why.test(played.upNext), editorSaysWhy: why.test(played.eyebrow), shots: played.shots });
+        cardSaysWhy: why.test(played.upNext), editorSaysWhy: why.test(played.meta), shots: played.shots });
       // The league's last bout: nothing waits on the court, so plain Finish.
       expect(played.finishLabel).toBe('Finish');
       record({ step: 'console', action: 'after the daihyosen', finishLabel: played.finishLabel, courtDone: await courtDone(page).count(),
@@ -588,7 +588,7 @@ test.describe('league-team', () => {
       const read = await readFinishedEditor(ed);
       record({ step: 'finished league', action: 'tap a played encounter', pair: row, ...read,
         screenshot: await shot(page, 'finished-league-editor') });
-      expect(read.pill).toBe('CORRECTION');
+      expect(read.pill).toBe('Correction');
       expect(read.primary).toBe('Save correction');
       await closeEditor(page);
     });
@@ -599,7 +599,7 @@ test.describe('league-team', () => {
     // tie-breaker and names a place.
     await test.step('fixed: the console row of the daihyosen says it is a tie-breaker and names the place it decides (F12)', async () => {
       expect(f12, 'the daihyosen reached the court console').not.toBeNull();
-      const said = `${f12.cardText} ${f12.eyebrow}`;
+      const said = `${f12.cardText} ${f12.meta}`;
       expect(said).toMatch(/tie-?breaker|daihyosen/i);
       expect(said).toMatch(/\b(1st|2nd|3rd|4th)\b|positions?\s*\d|place/i);
     });
@@ -860,7 +860,7 @@ test.describe('league-team', () => {
         Object.assign(pair, await sides(rowOnConsole));
         await rowOnConsole.getByRole('button', { name: 'Correct' }).tap();
         ed = inlineEditor(page).first();
-        await expect(ed.locator('.editor-head-pill')).toHaveText('CORRECTION');
+        await expect(ed.locator('.editor-head-pill')).toHaveText('Correction');
       } else {
         // No door on the console: the correction is made from Pools instead.
         await openLeague(page, id);
@@ -1095,7 +1095,7 @@ test.describe('league-team', () => {
         const opened = await readFinishedEditor(ed);
         record({ step: 'F3b', action: 'tap the saved drawn daihyosen row', ...opened, screenshot: await shot(page, 'saved-drawn-dh-opened') });
         // The record reads as the editor's own saved draw does.
-        expect(opened.pill).toBe('CORRECTION');
+        expect(opened.pill).toBe('Correction');
         expect(opened.drawToggle && opened.drawToggle.text).toMatch(/^cancel draw$/i);
         await closeEditor(page);
       });

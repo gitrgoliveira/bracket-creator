@@ -71,7 +71,7 @@ describe('ViewerCompetition draw-ready exposure (mp-rrd)', () => {
     global.window.StatusBadge = function StatusBadge() { return null; };
     global.window.BracketTree = function BracketTree() { return null; };
     global.window.Term = function Term(props) { return { type: 'span', props, children: props?.children }; };
-    global.window.EmptyState = function EmptyState(props) { return { type: 'div', props: { className: 'empty', ...props }, children: [props.icon, props.title, props.message, props.cta].filter(Boolean) }; };
+    global.window.EmptyState = function EmptyState(props) { return { type: 'div', props: { className: 'empty', ...props }, children: [props.title, props.message, props.cta].filter(Boolean) }; };
     global.window.formatDate = (d) => d || '';
     global.window.formatLabel = (s) => s || '';
     global.window.pluralize = (n, a, b) => `${n} ${n === 1 ? a : b}`;
@@ -187,7 +187,7 @@ describe('ViewerOverview pre-start messaging (mp-rrd)', () => {
         : { had: false };
     });
     global.window.Term = function Term(props) { return { type: 'span', props, children: props?.children }; };
-    global.window.EmptyState = function EmptyState(props) { return { type: 'div', props: { className: 'empty', ...props }, children: [props.icon, props.title, props.message, props.cta].filter(Boolean) }; };
+    global.window.EmptyState = function EmptyState(props) { return { type: 'div', props: { className: 'empty', ...props }, children: [props.title, props.message, props.cta].filter(Boolean) }; };
     global.window.isHikiwake = () => false;
     global.window.formatIpponsScore = () => '';
     global.window.teamIVScore = () => null;

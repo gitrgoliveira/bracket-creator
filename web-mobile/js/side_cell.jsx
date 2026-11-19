@@ -14,8 +14,11 @@
 // element's role does not permit. One `side` value now produces the fill class
 // AND the label together, so the tint cannot arrive without its text.
 //
-// A leaf: no imports and no window.* reads, like numbered_name.jsx beside it,
+// A leaf: no window.* reads and no import but icon.jsx (itself a leaf with no
+// side effects, for the winner's tick), like numbered_name.jsx beside it,
 // which owns the other half of a side cell (the name and its number chip).
+
+import { Icon } from './icon.jsx';
 
 // The side's name as UI text. admin_scoring_shared.jsx's sideColorName
 // delegates here rather than keeping a second copy; it stays exported under
@@ -25,11 +28,12 @@ export function sideWord(side) {
 }
 
 // The side as a control that PICKS it names it: the kendo word and its colour,
-// "SHIRO (White)" / "AKA (Red)", because an operator who does not know the
-// words must still tell the two buttons apart. The decision side picker, the
-// hantei winner buttons and the team summary band all read it from here.
+// "Shiro (white)" / "Aka (red)", because an operator who does not know the
+// words must still tell the two buttons apart. Sentence case, as every label
+// is (Hallmark gate 67: no capitals set for show). The decision side picker,
+// the hantei winner buttons and the team summary band all read it from here.
 export function sideWithColour(side) {
-  return `${sideWord(side).toUpperCase()} (${side === "aka" ? "Red" : "White"})`;
+  return `${sideWord(side)} (${side === "aka" ? "red" : "white"})`;
 }
 
 // The fill class alone. SideCell builds its own from this, and exactly ONE
@@ -64,7 +68,7 @@ export function SideLabel({ side }) {
 export function WinnerTick({ trailing = false }) {
   return (
     <span className="bc-winner-tick" title="Winner">
-      <span aria-hidden="true">✓</span>
+      <Icon name="check" size={12} />
       <span className="sr-only">{trailing ? ", winner" : "Winner: "}</span>
     </span>
   );

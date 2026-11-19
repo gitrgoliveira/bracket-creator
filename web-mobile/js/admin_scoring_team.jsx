@@ -58,6 +58,7 @@ import {
   StartRefusedNotice,
   finishButtonLabel,
   armedFinishLabel,
+  editorMetaText,
 } from './admin_scoring_shared.jsx';
 import { teamDraftTaps } from './draft_taps.jsx';
 // bc-evts stage 5: a running team match is scored by tap events, one per
@@ -77,6 +78,7 @@ import { useChangedGroups, useKeptInHistoryNote, KeptInHistoryNote } from './adm
 import { MatchHistoryDisclosure } from './match_history_view.jsx';
 import { GROUP_ENCHO, GROUP_RESULT, GROUP_REP_PICK_A, GROUP_REP_PICK_B, boutGroup } from './match_groups.jsx';
 import { publishHeight } from './published_height.jsx';
+import { Icon } from './icon.jsx';
 import { useLatestRef } from './latest_ref.jsx';
 import { SideLabel, sideWithColour } from './side_cell.jsx';
 
@@ -1320,7 +1322,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
   // bc-kheb (operator ruling 2026-09-24): a kachinuki encounter never carries
   // a match-level overtime. One bout fought on in encho does not put the
   // encounter in overtime, so (E) lives on that bout's own row only. The
-  // count seeded from a legacy stored m.encho stays local: the eyebrow,
+  // count seeded from a legacy stored m.encho stays local: the meta line,
   // enchoBlock and /decision read this derived count, never the raw one. A
   // legacy kachinuki daihyosen row keeps its encho, as the stepper does.
   const kachinukiEncounter = isKachinuki && !hasDaihyosen;
@@ -2332,7 +2334,11 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
   // settled (lineupsSettled, which a side given another team clears until its
   // new team's lineup is read), so a mount reads once rather than once before
   // and once after its lineups land. A roster read for another key is not shown, so the
-  // line never lags a recorded bout. A failed read is null
+  // line never lags a recorded bout. The key is the SERVER's copy (mFeed), never
+  // the board: an own Start shows bout 1's fighters before the server holds
+  // them, and a read keyed on that copy was answered "nobody on" with nothing
+  // after it to read again, since the server's copy then carried the same
+  // fighters. A failed read is null
   // (fetchKachinukiRoster never throws) and shows no line; it keeps the last
   // answer for the closing below. It feeds no verdict
   // and does not arm End match. Its one other reader is the closing of a
@@ -2341,7 +2347,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
   // recorded turn read-only, with the line naming that side; with no lineup,
   // or before the read lands, the bout stays live exactly as before.
   const kachinukiRosterReadKey = kachinukiBoutMode && m.compId && m.id && lineupsSettled
-    ? `${kachinukiRosterKey(m.id, m.subResults)}#${servedLineupsKey}`
+    ? `${kachinukiRosterKey(mFeed.id, mFeed.subResults)}#${servedLineupsKey}`
     : "";
   // The stored log's last numbered bout when Record bout has recorded it, as
   // `${matchId}|${position}`, else "": the bout a kept roster answer may close.
@@ -3091,7 +3097,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
         onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openDoneBoutEdit(idx); } }}>
         {/* Kachinuki: only the bout number (no FIK position handle — the winner
             stays on, so a bout is not "position vs same position"). */}
-        <div className="team-sub-match__pos"><span className="tsm-caret" aria-hidden="true">▶</span><span className="team-sub-match__pos-num">{idx + 1}</span></div>
+        <div className="team-sub-match__pos"><Icon name="chevron-right" size={12} className="tsm-caret" /><span className="team-sub-match__pos-num">{idx + 1}</span></div>
         <div className="team-sub-match__row">
           <div className="team-sub-match__side team-sub-match__side--shiro">
             <div className="tsm-name">
@@ -4060,26 +4066,21 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
     <>
         <div className="editor-modal__head">
           <div style={{ flex: 1 }}>
-            <div className="editor-modal__eyebrow">
-              {m.compName} · {m.phase === "pool" ? window.poolLabel(m) : m.round}
-              {m.phase === "pool" && m.poolPosition > 0 && m.poolCount > 0
-                ? <span> · Match {m.poolPosition} of {m.poolCount}</span>
-                : m.phase === "bracket" && m.matchNumber > 0
-                ? <span> · Match {m.matchNumber}</span>
-                : null}
-              {encounterEnchoCount > 0 && <span className="editor-modal__eyebrow-encho">· (E) Overtime ×{encounterEnchoCount}</span>}
-            </div>
             <div className="editor-modal__title" style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
               <span><TermAS name="shiaijo">Shiaijo</TermAS> {m.court} · {m.scheduledAt || "Now"}</span>
+            </div>
+            <div className="editor-modal__meta">
+              {editorMetaText(m)}
+              {encounterEnchoCount > 0 && <span className="editor-modal__meta-encho">{editorMetaText(m) ? ", " : ""}(E) Overtime ×{encounterEnchoCount}</span>}
             </div>
           </div>
           <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
             {(isComplete || m.status !== "running") && (
               <div className="editor-head-pill" style={{ fontSize: 10, fontWeight: 700 }}>
-                {isComplete ? "CORRECTION" : "PRE-MATCH"}
+                {isComplete ? "Correction" : "Pre-match"}
               </div>
             )}
-            {canClose && <button className="btn btn--ghost btn--sm" onClick={handleDismiss} disabled={submitting || repTyping} style={{ padding: "2px 8px" }}>✕ Close</button>}
+            {canClose && <button className="btn btn--ghost btn--sm" onClick={handleDismiss} disabled={submitting || repTyping} style={{ padding: "2px 8px" }}><Icon name="x" size={14} />Close</button>}
           </div>
         </div>
 
@@ -4127,7 +4128,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
           {/* mp-gmcg band redesign (user-confirmed brief): in kachinuki the
               centre cell carries BOUT-LOG FACTS while running (bout number +
               last bout result; never a verdict: the old IV/PW-derived
-              "AKA WIN" contradicted the End gate) and the verdict only on
+              "Aka wins" contradicted the End gate) and the verdict only on
               completion, derived from the match winner. IV/PW demote to the
               side cells (they still feed standings tie-breaks). Non-kachinuki
               team matches keep RESULT + teamVerdictText: fixed formats ARE
@@ -4170,7 +4171,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
                           </>
                         ) : (
                           <>
-                            <div className="team-summary__label">RESULT</div>
+                            <div className="team-summary__label">Result</div>
                             <div className="team-summary__verdict" data-testid="team-summary-result">{teamVerdictText}</div>
                           </>
                         )}
@@ -4488,7 +4489,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
             const rowSides = [
               {
                 key: "b", tapKey: `${idx}:b`, pts: s.bPts, fouls: s.bFouls,
-                color: "shiro", label: "SHIRO",
+                color: "shiro", label: "Shiro",
                 // The daihyosen is a representative bout, not a lineup position:
                 // "daihyosen" is not a valid lineup key (domain/team_lineup.go
                 // accepts only senpo/… or "1".."N"), so a name pick there would
@@ -4510,7 +4511,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
               },
               {
                 key: "a", tapKey: `${idx}:a`, pts: s.aPts, fouls: s.aFouls,
-                color: "aka", label: "AKA",
+                color: "aka", label: "Aka",
                 // See SHIRO note above.
                 // bc-dnst: displayed name only, see the SHIRO note above.
                 playerName: resolveBoutSideDisplayName({ squad: squadA, memberId: playerAMemberId, storedName: playerAName }) || repTeamWhenUnpicked(playerAMemberId, sideAName),
@@ -4615,7 +4616,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
                       aria-label={`Collapse bout ${idx + 1}`} aria-expanded={true} onClick={closeDoneBoutEdit}>
                       {/* bc-tp44: only the glyph rotates. Rotating the button
                           itself made its 44x36 tap box hit-test as 36x44. */}
-                      <span className="tsm-caret tsm-caret--open" aria-hidden="true">▶</span>
+                      <Icon name="chevron-right" size={12} className="tsm-caret tsm-caret--open" />
                     </button>
                   )}
                   {/* Bout number only: the FIK position abbreviations
@@ -4851,7 +4852,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
                     disabled={submitting}
                     title="Remove this empty bout: added by mistake. Nothing has been recorded for it, so nothing is lost."
                   >
-                    × Remove this bout
+                    <Icon name="x" size={14} />Remove this bout
                   </button>
                   <span className="kachinuki-bout-actions__hint">
                     nothing scored yet
@@ -5055,13 +5056,13 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
               <div className="decision-controls" style={{ display: "flex", gap: 8, marginTop: 10, fontSize: 12, alignItems: "center", flexWrap: "wrap" }}>
                 <div className="decision-btn-group">
                   <button data-testid="scoring-modal-kiken-voluntary-button" type="button" className="btn btn--sm" onClick={() => { setDecisionErr(""); setDecisionPromptKind("kiken-voluntary"); }} disabled={submitting || decisionSubmitting}>
-                    Kiken – Voluntary
+                    Kiken (voluntary)
                   </button>
                   <GlossaryHintAS name="kiken-voluntary" />
                 </div>
                 <div className="decision-btn-group">
                   <button data-testid="scoring-modal-kiken-injury-button" type="button" className="btn btn--sm" onClick={() => { setDecisionErr(""); setDecisionPromptKind("kiken-injury"); }} disabled={submitting || decisionSubmitting}>
-                    Kiken – Injury
+                    Kiken (injury)
                   </button>
                   <GlossaryHintAS name="kiken-injury" />
                 </div>
@@ -5296,7 +5297,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
           {own.droppedShown && <DraftDroppedNotice />}
           <div className="score-nav">
             {prevMatch ? (
-              <button className="btn btn--sm score-nav__prev" onClick={goPrev} disabled={submitting || repTyping}>← Prev</button>
+              <button className="btn btn--sm score-nav__prev" onClick={goPrev} disabled={submitting || repTyping}>Prev</button>
             ) : <span />}
             <div className="score-nav__actions">
               {m.status === "scheduled" && own.startOffered && !isBarredMatch(m) && (
@@ -5458,7 +5459,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
                     : "End the match on the last scored bout"}>
                   {submitting ? "Saving…"
                     : endArmed
-                    ? `Tap again — ${kachinukiEndOutcomeLabel(kachinukiEndOutcome)}`
+                    ? `Tap again: ${kachinukiEndOutcomeLabel(kachinukiEndOutcome)}`
                     : "End match"}
                 </button>
                 </>
@@ -5472,19 +5473,22 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
                 // result therefore goes through Reopen (above): back to bout
                 // mode, then End match re-derives from the last bout. Only
                 // non-kachinuki completed matches keep the generic correction.
-                <button className={`btn btn--primary ${finishArmed && !isComplete ? "btn--confirm" : ""}`} onClick={(ev) => {
+                <button className={`btn btn--primary holds-label ${finishArmed && !isComplete ? "btn--confirm" : ""}`} onClick={(ev) => {
                   if (refuseUnfinishedFinish()) return;
                   if (isComplete && !correctionReason) { setReasonPromptKind("correction"); return; }
                   if (!isComplete && !confirmFinish(ev)) return;
                   doSubmit(() => (isComplete || !onSubmitAndNext ? onSubmit : onSubmitAndNext)(buildPatch("completed")));
                 }} disabled={submitting || koTieBlocked || repTyping}
-                  title={koTieBlocked ? koTieTitle : undefined}>
-                  {submitting ? "Saving…" : koTieBlocked ? "Needs a winner" : isComplete ? "Save correction" : finishArmed ? armedFinishLabel(!!onSubmitAndNext && startsNext) : finishButtonLabel(!!onSubmitAndNext && startsNext)}
+                  title={koTieBlocked ? koTieTitle : undefined}
+                  // Holds its place while armed (.holds-label), as the
+                  // individual editor's Finish does.
+                  data-reserve={isComplete ? undefined : armedFinishLabel(!!onSubmitAndNext && startsNext)}>
+                  <span className="holds-label__text">{submitting ? "Saving…" : koTieBlocked ? "Needs a winner" : isComplete ? "Save correction" : finishArmed ? armedFinishLabel(!!onSubmitAndNext && startsNext) : finishButtonLabel(!!onSubmitAndNext && startsNext)}</span>
                 </button>
               )}
             </div>
             {nextMatch ? (
-              <button className="btn btn--sm score-nav__next" onClick={goNext} disabled={submitting || repTyping}>Next →</button>
+              <button className="btn btn--sm score-nav__next" onClick={goNext} disabled={submitting || repTyping}>Next</button>
             ) : <span />}
           </div>
           </>

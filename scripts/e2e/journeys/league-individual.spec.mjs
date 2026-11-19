@@ -59,7 +59,7 @@ import {
 } from '../fixtures/scoring.mjs';
 import { editorSides, ensureRunning, inlineRunning, recordDecision, rosterOf } from '../fixtures/individual.mjs';
 import {
-  TEXT, answerConfirm, awardsTabOffered, backUpCompetition, circleNotice, drawnBoutNotices, expectNoSidewaysScroll, labelLines, leagueRanks,
+  TEXT, andList, answerConfirm, awardsTabOffered, backUpCompetition, circleNotice, drawnBoutNotices, expectNoSidewaysScroll, labelLines, leagueRanks,
   openDrawnBout, openLeague, openLeagueSettings, openNumberedRow, openViewerAwards, pairKey, readBanner,
   readChusen, readChusenRecorded, readConfirm, readLeagueSettings, readLeagueTable, readNumberedRows, readPodium, recordLots, restoreAsCopy, rewriteBackup,
   seedLeague, withFrontMatterLine,
@@ -218,7 +218,7 @@ async function readDesk(page) {
 }
 
 // What the court operator reads: the Up next card, the Upcoming rows, and the
-// running bout's eyebrow when one runs.
+// running bout's meta line when one runs.
 async function readCourt(page) {
   const card = upNextCard(page);
   const runningNow = await inlineRunning(page);
@@ -226,7 +226,7 @@ async function readCourt(page) {
     upNext: (await card.count()) ? (await card.first().innerText()).replace(/\s+/g, ' ').trim() : '',
     waiting: (await waitingRows(page).allInnerTexts()).map((t) => t.replace(/\s+/g, ' ').trim()),
     running: runningNow,
-    eyebrow: runningNow ? ((await page.locator(INLINE_EDITOR).first().locator('.editor-modal__eyebrow').allInnerTexts())[0] || '').trim() : '',
+    meta: runningNow ? ((await page.locator(INLINE_EDITOR).first().locator('.editor-modal__meta').allInnerTexts())[0] || '').trim() : '',
   };
 }
 
@@ -371,7 +371,7 @@ test.describe('league-individual', () => {
       await expect(notice(), 'the notice names the tie the round left').toBeVisible({ timeout: EXPECT_TIMEOUT_MS });
       const after = await readDesk(page);
       const group = notice().locator('.league-tiebreak__group');
-      await expect(group.locator('.league-tiebreak__teams')).toHaveText([A, B, C].join(' · '), { useInnerText: true });
+      await expect(group.locator('.league-tiebreak__teams')).toHaveText(andList([A, B, C]), { useInnerText: true });
       await expect(notice().getByRole('button', { name: TEXT.anotherRound })).toBeVisible();
       await expect(notice().getByRole('button', { name: 'Draw lots instead' })).toBeVisible();
       expect(after.finished, 'the cycle leaves the league open').toBe(false);
@@ -746,7 +746,7 @@ test.describe('league-individual', () => {
         if (await start.isVisible()) await startMatch(page);
         await running(page, EDITOR);
         const kiken = await recordDecision(page, 'kiken-voluntary', { side: pair.shiro === who ? 'shiro' : 'aka', root: EDITOR });
-        const close = page.locator(EDITOR).getByRole('button', { name: /✕ Close/ });
+        const close = page.locator(EDITOR).getByRole('button', { name: /^Close$/ });
         if (await close.isVisible().catch(() => false)) await close.tap();
         await expect.poll(async () => (await readLeagueTable(page)).played, { message: `${who} v ${E} is counted` }).toBe(playedAfter);
         record({ step: 'pools', action: `${who} withdraws against ${E}`, pair, ...kiken });

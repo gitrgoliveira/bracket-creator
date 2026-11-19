@@ -21,6 +21,7 @@ import { NO_ID_POOL_HINT, NoIdHint } from './data_integrity.jsx';
 import { attemptScoreWrite, DOWNSTREAM_KNOCKOUT_RANKING_CANCELLED, writeKeepsEditorOpen } from './write_result.jsx';
 import { rankOrdinal, poolMatchesSignature } from './viewer_standings.jsx';
 import { useUnsavedInput } from './app_version.jsx';
+import { andList } from './list_phrase.jsx';
 // Fighting a drawn tie-break bout again is the editors' reopen, so the notice
 // below runs the same hook and shows the same court-busy panel.
 import { useMatchReopen, ReopenFeedback } from './admin_scoring_shared.jsx';
@@ -53,8 +54,8 @@ function poolMatchesForPool(poolMatches, poolName) {
 //   * compKind / teamSize: picks TeamScoreEditorModal vs individual editor
 //   * compId: fetches competition details (naginata)
 //              and is the path for decision/score endpoints
-//   * compName: header eyebrow
-//   * phase / poolName: header subtitle ("CompName · PoolName")
+//   * compName: the header's meta line
+//   * phase / poolName: the same meta line ("CompName, PoolName")
 //
 // Pool name falls back to the prefix of the match id ("PoolName-MatchIdx"
 // per parsePoolMatchesRecords in internal/state/pools.go) when the caller
@@ -351,13 +352,6 @@ function placesRangeLabel(min, max) {
   return max > min
     ? `${rankOrdinal(min)} to ${rankOrdinal(max)} place`
     : `${rankOrdinal(min)} place`;
-}
-
-// A list of names read aloud: "A", "A and B", "A, B and C".
-function andList(names) {
-  const list = names || [];
-  if (list.length < 2) return list.join("");
-  return `${list.slice(0, -1).join(", ")} and ${list[list.length - 1]}`;
 }
 
 // The places a tie-breaker banner group shares, in the ordinal form: "1st
@@ -745,7 +739,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
         {!embed && (
           <div className="league-tiebreak__group-header">
             <span className="league-tiebreak__pos">{tieGroupLabel(group, isLeague)}</span>
-            <span className="league-tiebreak__teams">{teamNames.join(" · ")}</span>
+            <span className="league-tiebreak__teams">{andList(teamNames)}</span>
           </div>
         )}
         {changing && (
@@ -881,7 +875,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
           <div key={groupKey} className="league-tiebreak__group">
             <div className="league-tiebreak__group-header">
               <span className="league-tiebreak__pos">{circleGroupLine(group, isLeague)}</span>
-              <span className="league-tiebreak__teams">{(group.teamNames || []).join(" · ")}</span>
+              <span className="league-tiebreak__teams">{andList(group.teamNames || [])}</span>
             </div>
             <div className="league-tiebreak__desc">
               {lotsOnly
@@ -907,7 +901,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
                       Run another round
                     </button>
                     {runs.length > 1 && (
-                      <span id={namesId} className="field__hint"> {run.map(m => m.name).join(" · ")}</span>
+                      <span id={namesId} className="field__hint"> {andList(run.map(m => m.name))}</span>
                     )}
                     {noIds && <NoIdHint text={NO_ID_POOL_HINT} />}
                   </div>
@@ -1018,7 +1012,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
           <div key={names.join(",")} className="league-tiebreak__group">
             <div className="league-tiebreak__group-header">
               <span className="league-tiebreak__pos">{posLabel}</span>
-              <span className="league-tiebreak__teams">{names.join(" · ")}</span>
+              <span className="league-tiebreak__teams">{andList(names)}</span>
             </div>
             <div className="league-tiebreak__actions">
               {!dhComplete ? (
@@ -1109,7 +1103,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
   ) : null;
 
   if (!pools || pools.length === 0) {
-    return <EmptyState icon="⏳" title={isLeague ? "League not drawn yet" : "Pools not drawn yet"} message={`Add participants and start the competition to ${isLeague ? "draw the league table" : "draw pools"}.`} />;
+    return <EmptyState icon="hourglass" title={isLeague ? "League not drawn yet" : "Pools not drawn yet"} message={`Add participants and start the competition to ${isLeague ? "draw the league table" : "draw pools"}.`} />;
   }
 
   const PoolsViewer = window.PoolsViewer;

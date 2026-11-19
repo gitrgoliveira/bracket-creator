@@ -181,7 +181,7 @@ describe('AdminShiaijoPage render-smoke', () => {
     window.tournamentMatches = () => [bronze];
     window.filterMatchesByCourt = (matches) => matches;
     const { container } = renderPage(makeMinimalTournament());
-    expect(container.querySelector('.shiaijo-upnext__time').textContent).toBe('10:55 · Cup · the 3rd-place match');
+    expect(container.querySelector('.shiaijo-upnext__time').textContent).toBe('10:55, Cup, the 3rd-place match');
   });
 
   // bc-bzlb: before the semi-finals, the 3rd-place match's sides are EMPTY (no

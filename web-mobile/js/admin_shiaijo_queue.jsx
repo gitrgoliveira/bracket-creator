@@ -4,6 +4,7 @@
 
 import { compareCourtDayQueue } from './court_queue.jsx';
 import { SideCell, WinnerTick } from './side_cell.jsx';
+import { Icon } from './icon.jsx';
 import { swissRoundLabel, scoreRowMatchLabel, isSupplementaryBout, poolNameOf } from './pool_ids.jsx';
 // rankOrdinal: "1st", "2nd"... for the place a tie-breaker bout decides.
 import { rankOrdinal, poolMatchesSignature } from './viewer_standings.jsx';
@@ -102,11 +103,11 @@ export const isTeamMatch = (m) => !!m && (m.compKind === "team" || m.teamSize > 
 // decision 2026-10-11) rather than nothing.
 export function shiaijoMatchNo(m) {
     if (m.phase === "pool") {
-        return m.poolPosition > 0 && m.poolCount > 0 ? ` · Match ${m.poolPosition} of ${m.poolCount}` : "";
+        return m.poolPosition > 0 && m.poolCount > 0 ? `, Match ${m.poolPosition} of ${m.poolCount}` : "";
     }
     if (m.phase !== "bracket") return "";
     const label = scoreRowMatchLabel(m);
-    return label ? ` · ${label}` : "";
+    return label ? `, ${label}` : "";
 }
 
 // shiaijoScoreCell: decide what the queue row's middle score column shows.
@@ -382,7 +383,7 @@ export function ShiaijoQueueRow({ m, scheduled, courts, onMoveCourt, onMove, onE
         <div className={`shiaijo-qrow ${isComplete ? "shiaijo-qrow--complete" : ""}`}>
             <div className="shiaijo-qrow__top">
                 <span className="shiaijo-qrow__time">
-                    {m.scheduledAt || "-"} · {m.compName}
+                    {m.scheduledAt || "-"}, {m.compName}
                     {shiaijoMatchNo(m)}
                     {/* DH-only label (not "-TB-"): see the Up Next card note above. */}
                     {window.isPoolDaihyosenBout && window.isPoolDaihyosenBout(m.id) && (
@@ -473,8 +474,8 @@ export function ShiaijoQueueRow({ m, scheduled, courts, onMoveCourt, onMove, onE
                     )}
                     {onMove && (
                         <>
-                            <button type="button" className="btn btn--ghost btn--sm shiaijo-row__move" aria-label="Move up" disabled={isFirst} onClick={() => onMove(m, "up")} title="Move earlier in the queue">↑</button>
-                            <button type="button" className="btn btn--ghost btn--sm shiaijo-row__move" aria-label="Move down" disabled={isLast} onClick={() => onMove(m, "down")} title="Move later in the queue">↓</button>
+                            <button type="button" className="btn btn--ghost btn--sm shiaijo-row__move" aria-label="Move up" disabled={isFirst} onClick={() => onMove(m, "up")} title="Move earlier in the queue"><Icon name="arrow-up" size={14} /></button>
+                            <button type="button" className="btn btn--ghost btn--sm shiaijo-row__move" aria-label="Move down" disabled={isLast} onClick={() => onMove(m, "down")} title="Move later in the queue"><Icon name="arrow-down" size={14} /></button>
                         </>
                     )}
                     {/* Optional announce: mirrors the Up Next card so any queued match is a

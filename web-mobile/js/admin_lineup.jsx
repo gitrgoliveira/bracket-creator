@@ -48,6 +48,7 @@
 
 import { idOf, nameOf } from './competitor_identity.jsx';
 import { squadSlotLabel } from './squad_member_label.jsx';
+import { Icon } from './icon.jsx';
 import { rosterWithoutPlacedElsewhere, memberPlacedElsewhere, memberRefusalNote, lineupDuplicateNote, alreadyPlacedNote, lineupPositionLabel, STARTING_ROUND, POS_KEYS_5, POS_LABELS_5, positionLabelsFor } from './lineup_resolver.jsx';
 import { poolMatchNumberOf, isSupplementaryBout, scoreRowMatchLabel } from './pool_ids.jsx';
 import { normalizeParticipantName } from './data.jsx';
@@ -813,20 +814,17 @@ function AdminLineup({ comp, team, matchId = "", matchLabel = "", notInMatch = f
     <div className="page" data-testid="lineup-form-root" style={{ padding: 24, maxWidth: 640 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
         <div>
-          <div className="overline">
-            {matchId ? matchLabel : "Starting lineup"}
-          </div>
-          <h2 style={{ margin: "4px 0 0 0", fontSize: 22, fontWeight: 700 }}>
+          <h2 style={{ margin: 0, fontSize: 22, fontWeight: 700 }}>
             {team?.name || team?.Name || "Team"}: Lineup
           </h2>
           <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 4 }}>
-            {teamSize}-person team
-            {comp?.teamMatchType === "kachinuki" && <span style={{ marginLeft: 8, color: "var(--accent)", fontWeight: 700 }}>· <TermAL name="kachinuki">Kachinuki</TermAL> (winner stays on)</span>}
+            <span className="lineup-form__target">{matchId ? matchLabel : "Starting lineup"}</span>, {teamSize}-person team
+            {comp?.teamMatchType === "kachinuki" && <span style={{ color: "var(--accent)", fontWeight: 700 }}>, <TermAL name="kachinuki">kachinuki</TermAL> (winner stays on)</span>}
           </div>
         </div>
         <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
           {onClose && (
-            <button type="button" className="btn btn--ghost btn--sm" onClick={onClose}>✕ Close</button>
+            <button type="button" className="btn btn--ghost btn--sm" onClick={onClose}><Icon name="x" size={14} />Close</button>
           )}
         </div>
       </div>
@@ -882,7 +880,7 @@ function AdminLineup({ comp, team, matchId = "", matchLabel = "", notInMatch = f
                     onChange={(e) => onPickerChange(p.key, e.target.value)}
                   >
                     <option value="">
-                      {name && !memberId ? `Unresolved: ${name}` : "— none —"}
+                      {name && !memberId ? `Unresolved: ${name}` : "(none)"}
                     </option>
                     {/* A member placed at another position is not offered
                         again (the shared rule, rosterWithoutPlacedElsewhere):
@@ -938,7 +936,7 @@ function AdminLineup({ comp, team, matchId = "", matchLabel = "", notInMatch = f
 
         {squadSorted.length > 0 && (
           <div style={{ marginTop: 20, paddingTop: 16, borderTop: "1px solid var(--line)" }}>
-            <div className="overline" style={{ marginBottom: 8 }}>Team members</div>
+            <h3 className="column-label">Team members</h3>
             {/* A `title` is the only reason a disabled Clear name carries, and
                 a title needs hover, which a touch tablet does not have. The
                 deleted Settings section stated it as a persistent line; state
@@ -1079,9 +1077,11 @@ function AdminTeamLineupsList({ comp, pools, poolMatches, bracket, password, sho
 
   return (
     <div>
-      <div style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 16, padding: "0 24px", paddingTop: 24 }}>
+      {/* Wraps on a phone: two 200px pickers side by side are wider than
+          the screen, and the page clips sideways rather than scrolling. */}
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center", marginBottom: 16, padding: "0 24px", paddingTop: 24 }}>
         <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-          <span className="overline">Team</span>
+          <span className="field__label">Team</span>
           <select
             className="input"
             value={teamId}
@@ -1094,7 +1094,7 @@ function AdminTeamLineupsList({ comp, pools, poolMatches, bracket, password, sho
           </select>
         </label>
         <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-          <span className="overline">Lineup for</span>
+          <span className="field__label">Lineup for</span>
           <select
             className="input"
             value={target ? target.id : ""}

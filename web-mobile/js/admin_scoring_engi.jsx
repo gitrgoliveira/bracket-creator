@@ -25,9 +25,10 @@ const { useState, useEffect, useRef } = React;
 import {
   ReasonPrompt, CORRECTION_PRESETS, useAdoptFromServer, HeldWriteDiscard, HeldWriteNotice, useClearPendingWhenNothingHeld,
   tapBoardOf, useTapBoard, useTapOutcomeNote, useOwnStatus, DraftKeptNotice, DraftDroppedNotice, usePublishUnsaved,
-  confirmDiscardUnsaved, LEAVE_MATCH_ANYWAY, finishButtonLabel, armedFinishLabel,
+  confirmDiscardUnsaved, LEAVE_MATCH_ANYWAY, finishButtonLabel, armedFinishLabel, editorMetaText,
 } from './admin_scoring_shared.jsx';
 import { engiDraftTaps } from './draft_taps.jsx';
+import { Icon } from './icon.jsx';
 import { useChangedGroups, useKeptInHistoryNote, KeptInHistoryNote } from './admin_scoring_autosave.jsx';
 // bc-evts stage 4: a running match is scored by flag events (the outbox's
 // recordTap); MAX_FLAGS is the fold's cap, domain.MaxEngiFlags in Go.
@@ -85,13 +86,11 @@ function EngiShortcutHint({ hasNav = false, canClose = false }) {
       data-testid="engi-shortcut-hint"
       aria-hidden="true"
     >
-      <kbd style={kbd}>A</kbd><kbd style={kbd}>S</kbd><span>add Aka/Shiro flag</span>
-      <span aria-hidden="true">·</span>
-      <kbd style={kbd}>⌫</kbd><span>undo</span>
-      <span aria-hidden="true">·</span>
-      <kbd style={kbd}>Enter</kbd><span>save</span>
-      {hasNav && <><span aria-hidden="true">·</span><kbd style={kbd}>←</kbd><kbd style={kbd}>→</kbd><span>prev/next</span></>}
-      {canClose && <><span aria-hidden="true">·</span><kbd style={kbd}>Esc</kbd><span>close</span></>}
+      <kbd style={kbd}>A</kbd><kbd style={kbd}>S</kbd><span>add Aka/Shiro flag;</span>
+      <kbd style={kbd}>⌫</kbd><span>undo;</span>
+      <kbd style={kbd}>Enter</kbd><span>{hasNav || canClose ? "save;" : "save"}</span>
+      {hasNav && <><kbd style={kbd}>←</kbd><kbd style={kbd}>→</kbd><span>{canClose ? "prev/next;" : "prev/next"}</span></>}
+      {canClose && <><kbd style={kbd}>Esc</kbd><span>close</span></>}
     </div>
   );
 }
@@ -528,23 +527,16 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, o
     <>
       <div className="editor-modal__head">
         <div style={{ flex: 1 }}>
-          <div className="editor-modal__eyebrow">
-            {m.compName} · {m.phase === "pool" ? window.poolLabel(m) : m.round}
-            {m.phase === "pool" && m.poolPosition > 0 && m.poolCount > 0
-              ? <span> · Match {m.poolPosition} of {m.poolCount}</span>
-              : m.phase === "bracket" && m.matchNumber > 0
-              ? <span> · Match {m.matchNumber}</span>
-              : null}
-          </div>
           <div className="editor-modal__title">
             <span>Shiaijo {m.court} · {m.scheduledAt || "Now"}</span>
           </div>
+          <div className="editor-modal__meta">{editorMetaText(m)}</div>
         </div>
         <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
           {isComplete && (
-            <div className="editor-head-pill" style={{ fontSize: 10, fontWeight: 700 }}>CORRECTION</div>
+            <div className="editor-head-pill" style={{ fontSize: 10, fontWeight: 700 }}>Correction</div>
           )}
-          {canClose && <button className="btn btn--ghost btn--sm" onClick={handleDismiss} disabled={submitting} style={{ padding: "2px 8px" }} aria-label="Close" data-testid="engi-close-btn">✕ Close</button>}
+          {canClose && <button className="btn btn--ghost btn--sm" onClick={handleDismiss} disabled={submitting} style={{ padding: "2px 8px" }} aria-label="Close" data-testid="engi-close-btn"><Icon name="x" size={14} />Close</button>}
         </div>
       </div>
 
@@ -725,25 +717,28 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, o
         {!(isComplete && showCorrectionPrompt) && (
           <div className="score-nav">
             {prevMatch ? (
-              <button type="button" className="btn btn--sm score-nav__prev" onClick={goPrev} disabled={submitting} title={(prevMatch.sideA?.name || "") + " vs " + (prevMatch.sideB?.name || "")}>← Prev</button>
+              <button type="button" className="btn btn--sm score-nav__prev" onClick={goPrev} disabled={submitting} title={(prevMatch.sideA?.name || "") + " vs " + (prevMatch.sideB?.name || "")}>Prev</button>
             ) : <span />}
             <div className="score-nav__actions">
               {canClose && <button type="button" className="btn" onClick={handleDismiss} disabled={submitting}>Cancel</button>}
               <button
                 type="button"
-                className={`btn btn--primary ${saveArmed && !isComplete ? "btn--confirm" : ""}`}
+                className={`btn btn--primary holds-label ${saveArmed && !isComplete ? "btn--confirm" : ""}`}
                 onClick={(ev) => { if (!isComplete && !confirmSave(ev)) return; handleSubmit(); }}
                 disabled={!canSubmit}
                 data-testid="engi-submit"
                 style={invalidOutline ? { outline: "2px solid var(--danger)" } : null}
+                // Holds its place while armed (.holds-label), as the other
+                // editors' Finish does.
+                data-reserve={isComplete ? undefined : (onSubmitAndNext ? armedFinishLabel(startsNext) : "Tap again to save")}
               >
-                {submitting ? "Saving…" : isComplete ? "Save correction"
+                <span className="holds-label__text">{submitting ? "Saving…" : isComplete ? "Save correction"
                   : saveArmed ? (onSubmitAndNext ? armedFinishLabel(startsNext) : "Tap again to save")
-                  : (onSubmitAndNext ? finishButtonLabel(startsNext) : "Save result")}
+                  : (onSubmitAndNext ? finishButtonLabel(startsNext) : "Save result")}</span>
               </button>
             </div>
             {nextMatch ? (
-              <button type="button" className="btn btn--sm score-nav__next" onClick={goNext} disabled={submitting} title={(nextMatch.sideA?.name || "") + " vs " + (nextMatch.sideB?.name || "")}>Next →</button>
+              <button type="button" className="btn btn--sm score-nav__next" onClick={goNext} disabled={submitting} title={(nextMatch.sideA?.name || "") + " vs " + (nextMatch.sideB?.name || "")}>Next</button>
             ) : <span />}
           </div>
         )}

@@ -8,10 +8,13 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"testing"
+	"testing/fstest"
 
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -112,6 +115,48 @@ func TestNewRouter(t *testing.T) {
 
 	router := NewRouter()
 	assert.NotNil(t, router)
+}
+
+// The CLI web UI loads its fonts from /fonts/, the tournament app's own copy,
+// so a font the app ships is served to the CLI page too.
+func TestServeSharedFontsServesTheAppFonts(t *testing.T) {
+	t.Parallel()
+
+	font := []byte("wOF2 font bytes")
+	mobileFS := fstest.MapFS{
+		"web-mobile/vendor/fonts/archivo/archivo-latin.woff2":              {Data: font},
+		"web-mobile/vendor/fonts/noto-sans-symbols-2/symbols-subset.woff2": {Data: font},
+	}
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	serveSharedFonts(r, mobileFS)
+
+	for _, path := range []string{"/fonts/archivo/archivo-latin.woff2", "/fonts/noto-sans-symbols-2/symbols-subset.woff2"} {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code, path)
+		assert.Equal(t, font, w.Body.Bytes(), path)
+	}
+
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/fonts/missing.woff2", nil))
+	assert.Equal(t, http.StatusNotFound, w.Code)
+}
+
+// Every font the CLI page's stylesheet names is a file the app ships, so the
+// /fonts/ route never answers it 404.
+func TestCLIStylesheetFontsExistInTheAppFonts(t *testing.T) {
+	t.Parallel()
+
+	css, err := os.ReadFile(filepath.Join("..", "web", "css", "styles.css"))
+	require.NoError(t, err)
+	urls := regexp.MustCompile(`url\("/fonts/([^"]+)"\)`).FindAllStringSubmatch(string(css), -1)
+	require.NotEmpty(t, urls, "the CLI stylesheet names no /fonts/ file")
+	for _, m := range urls {
+		_, err := os.Stat(filepath.Join("..", "web-mobile", "vendor", "fonts", filepath.FromSlash(m[1])))
+		assert.NoErrorf(t, err, "web/css/styles.css names /fonts/%s, which web-mobile/vendor/fonts does not hold", m[1])
+	}
 }
 
 func TestRouterStatusEndpoint(t *testing.T) {

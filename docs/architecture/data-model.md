@@ -318,7 +318,28 @@ its other positions still carried from the start, and taking it away ("Use the p
 started keeps the lineup in force at that moment as the match's own in its place, a snapshot
 that later edits of the starting lineup do not change. If the store cannot keep the record, the
 write that started the match fails. The first bout of the match is fought by the first fighter
-of that record, or of the organiser's lineup that replaced it.
+of that record, or of the organiser's lineup that replaced it, once its empty places are filled
+by member number as described next.
+
+A kachinuki team fights in member number order wherever its lineup names nobody. The lineup a
+match fields for a team is its own lineup record, else, while the match has not started, the
+lineup in force there, else an empty lineup. Each empty place of it, in fighting order, takes
+the team member with the lowest index from 1 to the team size that the lineup does not already
+hold at another place. A member with no name fills a place like any other. A reserve, a member
+whose index is above the team size, fills no place, though a reserve placed in the lineup
+fights where it is placed. So a team with no lineup at all fields its members 1 to the team
+size in that order, and a lineup that names only some places keeps them and has the rest filled.
+The filling is worked out every time it is read and never stored, because carrying a lineup
+rebuilds every position of the record and would wipe a stored filling. The first bout's
+fighters, the next fighter Record bout pairs against the winner, the kachinuki roster, the
+Kachinuki Detail export and the lineup panel all read the same filling. When `team-members.yaml`
+cannot be read, no place is filled; when `lineups.yaml` cannot be read, no team fields anyone.
+Each is logged as an error naming the file, and the kachinuki roster read answers with a
+warning sentence saying so, so that the operator adds each bout's pairing by hand.
+
+The lineup panel shows, in each empty place of a kachinuki match, the member the server fields
+there. It asks with the form as it stands, saved or not, in a request that stores nothing, so a
+place shows who would fight there if the form were saved as it is.
 
 Releases up to v2.1.1 also saved a lineup for a round, and read the lineup a team fielded at
 a match as the match's own, else the round lineup with the highest round at or below the
@@ -584,8 +605,9 @@ That applies one level further down as well. A team bout carries its two fighter
 MEMBER ids beside their names, and the winner's id beside the winner's name. Without them
 a bout between two people who happen to share a display name could not be attributed at
 all, because the name identifies neither of them, and competitors are allowed to share
-one. The representative bout is the one row whose sides are the TEAM names: it keeps them
-and carries the two representatives' member ids beside them, the members picked for each
+one. A bout won by a member who has no name yet stores the team's name as the winner's name,
+beside that member's id, and every reader attributes the win by the id. The representative
+bout is the one row whose sides are the TEAM names: it keeps them and carries the two representatives' member ids beside them, the members picked for each
 side. Each side's id is a change of its own, ordered apart from the other side's and from
 the bout's score and result: a point struck on the representative bout never alters who was
 picked, a pick never alters the score, and a pick for one side never alters the other side's
@@ -1094,10 +1116,9 @@ taps turned away later, and for which writes are outbox entries.
 
 The server adds events of its own to the same log, under the session `server` and with no
 sequence number: the fighters of a kachinuki encounter's first bout, which are the first fighters
-of the match's lineup and which no device sends. That lineup is the match's own (an organiser's,
-or the one it started with), or, while the match has not started, the lineup in force there; a
-match that started with no lineup of its own (one started before this rule) keeps the names its
-first bout has, sent back to the queue or not. The server adds
+of the match's lineup and which no device sends. That lineup is the one the match fields, with
+its empty places filled by member number as described above, so on a match with no lineup at
+all they are each team's member 1, whether or not that member has a name. The server adds
 them only where the first bout holds other names: when a write makes or changes that bout, and
 when a lineup or team member changes. They are ordered against the taps like any tap and never
 turn one away; they name who fought, never a score, so they reach a finished encounter too

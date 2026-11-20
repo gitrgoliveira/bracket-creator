@@ -205,6 +205,21 @@ func TestTeamLineup_FilledByMemberNumber_IsACopy(t *testing.T) {
 	got.Stamps["1"] = 9
 	assert.Equal(t, int64(7), l.Stamps["1"])
 
+	// History and Own are cloned too: the contract is that nothing is shared.
+	h := domain.TeamLineup{
+		Positions: map[domain.Position]string{"1": "Member 3"},
+		MemberIDs: map[domain.Position]string{"1": "m3"},
+		History:   map[domain.Position][]domain.PositionChange{"1": {{Name: "Old", Stamp: 1}}},
+		Own:       []domain.Position{"1"},
+	}
+	filled := h.FilledByMemberNumber(3, fillMembers(3, true))
+	filled.History["1"][0].Name = "Changed"
+	filled.History["2"] = nil
+	filled.Own[0] = "2"
+	assert.Equal(t, "Old", h.History["1"][0].Name)
+	assert.Len(t, h.History, 1)
+	assert.Equal(t, []domain.Position{"1"}, h.Own)
+
 	var empty domain.TeamLineup
 	_ = empty.FilledByMemberNumber(3, fillMembers(3, true))
 	assert.Nil(t, empty.Positions)

@@ -855,12 +855,9 @@ func (t TeamLineup) OrderedMembers(teamSize int) []LineupSlot {
 // placed in the lineup blocks no regular from the other places. A member with no
 // id cannot be placed by id and is skipped. When fewer members than empty
 // positions are left the rest stay empty. Name and id are copied into Positions
-// and MemberIDs; nothing else of t changes, and the result shares no map with t.
+// and MemberIDs; nothing else of t changes, and the result shares nothing with t (it starts as t.Clone).
 func (t TeamLineup) FilledByMemberNumber(teamSize int, members []TeamMember) TeamLineup {
-	out := t
-	out.Positions = maps.Clone(t.Positions)
-	out.MemberIDs = maps.Clone(t.MemberIDs)
-	out.Stamps = maps.Clone(t.Stamps)
+	out := t.Clone()
 
 	// Only a member at a place the size has is placed: a lineup saved under
 	// other place names (a team size raised from 3 to 5 renames the places)

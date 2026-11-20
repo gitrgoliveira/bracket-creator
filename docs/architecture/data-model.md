@@ -607,8 +607,8 @@ a bout between two people who happen to share a display name could not be attrib
 all, because the name identifies neither of them, and competitors are allowed to share
 one. A bout won by a member who has no name yet stores the team's name as the winner's name,
 beside that member's id, and every reader attributes the win by the id. The representative
-bout is the one row whose sides are the TEAM names: it keeps them and carries the two representatives' member ids beside them, the members picked for each
-side. Each side's id is a change of its own, ordered apart from the other side's and from
+bout is the one row whose sides are the TEAM names: it keeps them and carries the two
+representatives' member ids beside them, the members picked for each side. Each side's id is a change of its own, ordered apart from the other side's and from
 the bout's score and result: a point struck on the representative bout never alters who was
 picked, a pick never alters the score, and a pick for one side never alters the other side's
 pick. So two captains picking at the same moment both land, and so do two boards doing one

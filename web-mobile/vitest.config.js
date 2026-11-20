@@ -58,19 +58,32 @@ const sharedResolve = {
   },
 };
 
-// Pool, isolation and file order stay at vitest's own settings (forks, isolate
-// on, the built-in sequencer) on purpose. Measured 2026-11-20 on vitest 5.1.0,
-// 576 files, 10 cores, medians of three interleaved runs:
-//  - threads: green, 61.8 s against forks' 65.3 s (5 %), under the 10 % a
-//    pool change must gain, and its one process peaks at 3.4 GB against 0.5 GB.
-//  - vmThreads / vmForks: red (tests that assign global.window or performance
-//    throw "has only a getter").
+// The pool is vmThreads, set on each project below: an inline project does not
+// inherit the root `test` block. Isolation and file order stay at vitest's own
+// settings (isolate on, the built-in sequencer). Measured 2026-11-20 on vitest
+// 5.1.0, 577 files, 10 cores, warm cache, `nice -n 10` as the gate runs it,
+// medians of three interleaved runs:
+//  - vmThreads: 35.3 s against forks' 63.8 s (45 % faster, past the 10 % a
+//    pool change must gain), green on every run and under three shuffled file
+//    orders. Most of the gain is less work, not less waiting: user CPU 301 s
+//    against 517 s, sys 10 s against 68 s (no process and no fresh jsdom per
+//    file). Peak memory summed over the whole process tree: 5.0 GB against
+//    forks' 4.2 GB. Its one process holds every worker's heap (about 5 GB),
+//    where one fork peaks at 0.5 GB, so compare the sums, not the processes.
+//  - Under vmThreads `window`, `performance` and `location` are getters on the
+//    jsdom global, so a test that assigns `global.window = ...` (or the other
+//    two) throws "has only a getter". Swap a global with vi.stubGlobal, undone
+//    by vi.unstubAllGlobals().
+//  - threads, measured before those rewrites against forks' 65.3 s: green,
+//    61.8 s (5 %), under the 10 %.
 //  - isolate: false: red, with a different failure set every run (tests leak
 //    module and window.* state into the next file in the worker).
 //  - a sequencer putting the permutation shards first on a cold cache: 66.7 s
 //    against 66.0 s; the shards already end well inside the wall.
-//  - fewer workers (maxWorkers: 4): 108.6 s. The cores are saturated.
-// `vitest doctor` reaches the same answer. Re-measure before changing any of it.
+//  - fewer workers (maxWorkers: 4, under forks): 108.6 s. The cores are
+//    saturated.
+// Re-measure before changing any of it.
+const POOL = 'vmThreads';
 export default defineConfig({
   test: {
     projects: [
@@ -78,6 +91,7 @@ export default defineConfig({
         plugins: makePlugins(),
         resolve: sharedResolve,
         test: {
+          pool: POOL,
           name: 'unit',
           environment: 'jsdom',
           globals: true,
@@ -94,6 +108,7 @@ export default defineConfig({
         plugins: makePlugins(),
         resolve: sharedResolve,
         test: {
+          pool: POOL,
           name: 'node',
           environment: 'node',
           globals: true,
@@ -108,6 +123,7 @@ export default defineConfig({
         plugins: makePlugins(),
         resolve: sharedResolve,
         test: {
+          pool: POOL,
           name: 'render',
           environment: 'jsdom',
           globals: true,

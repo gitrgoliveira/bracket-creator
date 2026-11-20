@@ -35,7 +35,6 @@ const STUBBED = [
 ];
 
 function installStubs() {
-  global.window = global.window || {};
   const saved = {};
   STUBBED.forEach((k) => {
     saved[k] = Object.prototype.hasOwnProperty.call(global.window, k)

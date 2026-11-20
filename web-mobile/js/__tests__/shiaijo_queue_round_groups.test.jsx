@@ -56,7 +56,6 @@ describe('groupQueueMatches; the heading describes its members (mp-u37s)', () =>
   };
 
   beforeEach(() => {
-    global.window = global.window || {};
     global.window.bracketRoundLabel = bracketRoundLabel; // the real primitive
   });
 

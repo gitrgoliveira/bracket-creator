@@ -4,9 +4,18 @@
 // Vitest 4 copied them as plain writable properties, and the suites swap a
 // stub in that way, so turn each back into a writable data property holding
 // the same jsdom object. Shared by vitest.setup.js and vitest.setup.render.js.
+// A file run under an opaque origin (an `about:blank` docblock) has no storage:
+// jsdom's getter throws a SecurityError, so that name is skipped and a test
+// that reads it still throws, as a page on an opaque origin does.
 for (const name of ['localStorage', 'sessionStorage']) {
+  let value;
+  try {
+    value = globalThis[name];
+  } catch {
+    continue;
+  }
   Object.defineProperty(globalThis, name, {
-    value: globalThis[name],
+    value,
     writable: true,
     configurable: true,
     enumerable: true,

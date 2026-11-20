@@ -110,7 +110,6 @@ describe('bracketRoundSiblings; selects the effective round, not the raw one (mp
 
 describe('phaseProgressOnCourt; the denominator matches the heading (mp-u37s)', () => {
   beforeEach(() => {
-    global.window = global.window || {};
     global.window.bracketRoundLabel = bracketRoundLabel; // the real primitive
   });
 
@@ -160,7 +159,6 @@ describe('phaseProgressOnCourt; the denominator matches the heading (mp-u37s)', 
 describe('gatherIndividualGroup; the rows under the heading are that round (mp-u37s)', () => {
   const saved = {};
   beforeEach(() => {
-    global.window = global.window || {};
     saved.label = global.window.bracketRoundLabel;
     global.window.bracketRoundLabel = bracketRoundLabel;
   });

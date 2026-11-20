@@ -61,7 +61,6 @@ describe('ViewerCompetition draw-ready exposure (mp-rrd)', () => {
   beforeEach(async () => {
     runtime = makeReactive();
     global.React = runtime.React;
-    global.window = global.window || {};
     STUBBED.forEach(k => {
       savedGlobals[k] = Object.prototype.hasOwnProperty.call(global.window, k)
         ? { had: true, val: global.window[k] }
@@ -180,7 +179,6 @@ describe('ViewerOverview pre-start messaging (mp-rrd)', () => {
   beforeEach(async () => {
     runtime = makeReactive();
     global.React = runtime.React;
-    global.window = global.window || {};
     STUBBED.forEach(k => {
       savedGlobals[k] = Object.prototype.hasOwnProperty.call(global.window, k)
         ? { had: true, val: global.window[k] }
@@ -245,7 +243,6 @@ describe('ViewerOverview pre-start messaging (mp-rrd)', () => {
 describe('draw-ready is not running (mp-rrd)', () => {
   it('tournamentMatches excludes setup but includes draw-ready structure', async () => {
     vi.resetModules();
-    global.window = global.window || {};
     // Save/restore the globals we stub so we don't leak state into other
     // suites if they were already present (delete-only would clobber them).
     const stubbed = ['hasBothSides', 'roundLabel', 'bracketRoundLabel'];

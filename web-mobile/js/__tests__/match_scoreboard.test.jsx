@@ -232,7 +232,6 @@ describe('match_scoreboard components', () => {
   beforeEach(async () => {
     runtime = makeReactive();
     global.React = runtime.React;
-    global.window = global.window || {};
     global.window.isHikiwake = vi.fn((t) => t === 'hikiwake');
     global.window.matchMiddleMark = matchMiddleMark; // the real chip projection
     vi.resetModules();

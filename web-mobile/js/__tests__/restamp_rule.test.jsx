@@ -32,7 +32,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 const NOW = 1_700_000_000_000;
 
-let _origFetch, _origEventSource, _origLocalStorage, _origPerf, _lsStore;
+let _lsStore;
 let _restampFor, _enqueueRunningWrite;
 
 beforeEach(async () => {
@@ -40,42 +40,41 @@ beforeEach(async () => {
     vi.setSystemTime(NOW);
     vi.resetModules();
 
-    _origEventSource = global.EventSource;
-    global.EventSource = class FakeES {
+    // Every global the test swaps goes through vi.stubGlobal and is undone by
+    // vi.unstubAllGlobals() in afterEach. A plain `global.x = ...` throws under
+    // the VM pools, where the global is the jsdom window.
+    class FakeES {
         constructor() { this.readyState = 0; this.close = () => {}; }
-    };
-    global.EventSource.OPEN = 1;
+    }
+    FakeES.OPEN = 1;
+    vi.stubGlobal('EventSource', FakeES);
 
     // /api/time never answers, so the offset stays 0 for the whole test.
-    _origFetch = global.fetch;
-    global.fetch = vi.fn(() => new Promise(() => {}));
+    vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {})));
 
-    _origLocalStorage = global.localStorage;
     _lsStore = {};
-    global.localStorage = {
+    vi.stubGlobal('localStorage', {
         getItem: (k) => (k in _lsStore ? _lsStore[k] : null),
         setItem: (k, v) => { _lsStore[k] = String(v); },
         removeItem: (k) => { delete _lsStore[k]; },
         clear: () => { _lsStore = {}; },
-    };
+    });
 
-    _origPerf = global.performance;
     ({ _restampFor, enqueueRunningWrite: _enqueueRunningWrite } = await import('../api_client.jsx'));
 });
 
 afterEach(() => {
+    // Unstub first: a stubbed `performance` was captured while the fake timers
+    // were installed, so it must be put back before they are.
+    vi.unstubAllGlobals();
     vi.useRealTimers();
     vi.resetModules();
-    for (const [k, v] of [['fetch', _origFetch], ['EventSource', _origEventSource],
-                          ['localStorage', _origLocalStorage], ['performance', _origPerf]]) {
-        if (v === undefined) delete global[k]; else global[k] = v;
-    }
 });
 
 /** Pin performance.now() to a fixed reading for the duration of one call. */
 function withPerfNow(ms, fn) {
-    global.performance = { now: () => ms };
-    try { return fn(); } finally { global.performance = _origPerf; }
+    const spy = vi.spyOn(performance, 'now').mockReturnValue(ms);
+    try { return fn(); } finally { spy.mockRestore(); }
 }
 
 describe('clock-skew re-stamp takes the older reconstruction (bc-cse)', () => {
@@ -133,7 +132,7 @@ describe('clock-skew re-stamp takes the older reconstruction (bc-cse)', () => {
     });
 
     it('falls back where performance.now() does not exist', () => {
-        global.performance = undefined;
+        vi.stubGlobal('performance', undefined);
         expect(_restampFor(NOW - 60_000, 1_000)).toBe(NOW - 60_000);
     });
 });
@@ -148,7 +147,7 @@ describe('clock-skew re-stamp takes the older reconstruction (bc-cse)', () => {
 // wall-clock-only case the tests above pin.
 describe('the monotonic anchor never reaches localStorage (bc-cse)', () => {
     it('is stamped in memory but stripped from the persisted queue', () => {
-        global.performance = { now: () => 12_345 };
+        vi.stubGlobal('performance', { now: () => 12_345 });
         _enqueueRunningWrite('c1', 'm1', { status: 'running' }, 'pw');
 
         const raw = global.localStorage.getItem('bc_write_queue_v2');

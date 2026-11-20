@@ -53,7 +53,6 @@ describe('PoolsViewer draw-order standings (mp-938b)', () => {
   beforeEach(async () => {
     runtime = makeReactive();
     global.React = runtime.React;
-    global.window = global.window || {};
     STUBBED.forEach(k => {
       savedGlobals[k] = Object.prototype.hasOwnProperty.call(global.window, k)
         ? { had: true, val: global.window[k] }
@@ -348,7 +347,6 @@ describe('PoolsViewer per-pool qualifier highlighting (bc-qual LP-5a)', () => {
   beforeEach(async () => {
     runtime = makeReactive();
     global.React = runtime.React;
-    global.window = global.window || {};
     STUBBED.forEach(k => {
       savedGlobals[k] = Object.prototype.hasOwnProperty.call(global.window, k)
         ? { had: true, val: global.window[k] }
@@ -436,7 +434,6 @@ describe('PoolNumberedMatchRow team IV score (mp-o4xl)', () => {
   beforeEach(async () => {
     runtime = makeReactive();
     global.React = runtime.React;
-    global.window = global.window || {};
     STUBBED.forEach(k => {
       savedGlobals[k] = Object.prototype.hasOwnProperty.call(global.window, k)
         ? { had: true, val: global.window[k] }
@@ -606,7 +603,6 @@ describe('PoolNumberedMatchRow engi stacked pair names (mp-gy6g)', () => {
   beforeEach(async () => {
     runtime = makeReactive();
     global.React = runtime.React;
-    global.window = global.window || {};
     STUBBED.forEach(k => {
       savedGlobals[k] = Object.prototype.hasOwnProperty.call(global.window, k)
         ? { had: true, val: global.window[k] }
@@ -712,7 +708,6 @@ describe('PoolNumberedMatchRow DH badge id-vs-name (bc-pnum)', () => {
   beforeEach(async () => {
     runtime = makeReactive();
     global.React = runtime.React;
-    global.window = global.window || {};
     STUBBED.forEach(k => {
       savedGlobals[k] = Object.prototype.hasOwnProperty.call(global.window, k)
         ? { had: true, val: global.window[k] }
@@ -836,7 +831,6 @@ describe('PoolsViewer engi stacked pair names in standings (mp-gy6g)', () => {
   beforeEach(async () => {
     runtime = makeReactive();
     global.React = runtime.React;
-    global.window = global.window || {};
     STUBBED.forEach(k => {
       savedGlobals[k] = Object.prototype.hasOwnProperty.call(global.window, k)
         ? { had: true, val: global.window[k] }

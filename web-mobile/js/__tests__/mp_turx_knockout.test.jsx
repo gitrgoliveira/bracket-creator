@@ -74,7 +74,6 @@ describe('ViewerCompetition: merged mixed comp shows no cross-link (mp-turx back
   beforeEach(async () => {
     runtime = makeReactive();
     global.React = runtime.React;
-    global.window = global.window || {};
     STUBBED.forEach(k => {
       savedGlobals[k] = Object.prototype.hasOwnProperty.call(global.window, k)
         ? { had: true, val: global.window[k] }
@@ -235,7 +234,6 @@ describe('AdminCompetition: page-head has no Start-knockout affordance (mp-turx)
   beforeEach(async () => {
     runtime = makeReactive();
     global.React = runtime.React;
-    global.window = global.window || {};
 
     STUBBED.forEach(k => {
       savedGlobals[k] = Object.prototype.hasOwnProperty.call(global.window, k)
@@ -479,7 +477,6 @@ describe('AdminBracket: per-match playability (mp-turx)', () => {
     outerRuntime = makeReactive();
     innerRuntime = makeReactive();
     global.React = outerRuntime.React;
-    global.window = global.window || {};
 
     STUBBED.forEach(k => {
       savedGlobals[k] = Object.prototype.hasOwnProperty.call(global.window, k)

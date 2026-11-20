@@ -82,7 +82,6 @@ describe('ViewerCompetition bracket-tab shell width modifier', () => {
   beforeEach(async () => {
     runtime = makeReactive();
     global.React = runtime.React;
-    global.window = global.window || {};
     STUBBED.forEach(k => {
       savedGlobals[k] = Object.prototype.hasOwnProperty.call(global.window, k)
         ? { had: true, val: global.window[k] }

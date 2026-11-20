@@ -296,6 +296,33 @@ describe('the panel asks again after every change (D3)', () => {
   });
 });
 
+describe('a failed read is asked again', () => {
+  afterEach(() => { vi.useRealTimers(); });
+
+  it('shows the defaults once a later try answers', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    api.fetchFieldedLineup = vi.fn()
+      .mockRejectedValueOnce(new Error('offline'))
+      .mockResolvedValueOnce(null)
+      .mockImplementation(fieldedBy(NAMED));
+    const utils = await mountPanel();
+    expect(placeholders(utils)).toEqual(['Add player…', 'Add player…', 'Add player…']);
+    await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+    await flush();
+    expect(placeholders(utils)).toEqual(['T1.1 Ishida', 'T1.2 Sano', 'T1.3']);
+    expect(api.fetchFieldedLineup).toHaveBeenCalledTimes(3);
+  });
+
+  it('gives up after three retries', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    api.fetchFieldedLineup = vi.fn(() => Promise.reject(new Error('offline')));
+    await mountPanel();
+    for (let i = 0; i < 5; i += 1) await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+    expect(api.fetchFieldedLineup).toHaveBeenCalledTimes(4);
+  });
+});
+
 describe('a fixed-order match', () => {
   it('asks nothing and shows "Add player…" in an empty place', async () => {
     const utils = await mountPanel(FIXED);
@@ -334,8 +361,8 @@ describe('API.fetchFieldedLineup', () => {
     ['a refusal', () => Promise.resolve(new Response(JSON.stringify({ error: 'nope' }), { status: 500 }))],
     ['an answer without the map', () => Promise.resolve(new Response('{}', { status: 200 }))],
     ['no connection', () => Promise.reject(new TypeError('Failed to fetch'))],
-  ])('answers {} on %s', async (_name, answer) => {
+  ])('answers null on %s', async (_name, answer) => {
     global.fetch = vi.fn(answer);
-    expect(await call()).toEqual({});
+    expect(await call()).toBeNull();
   });
 });

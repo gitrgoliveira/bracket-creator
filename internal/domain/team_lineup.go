@@ -846,7 +846,7 @@ func (t TeamLineup) OrderedMembers(teamSize int) []LineupSlot {
 // team member by number: walking canonicalPositionOrder(teamSize) (the FIK names
 // for 5, numbered otherwise), a vacant position takes the lowest-Index member
 // with Index in 1..teamSize whose id the lineup does not hold at another
-// position. It is a read-time derivation for kachinuki, never stored: carrying a
+// place of that size. It is a read-time derivation for kachinuki, never stored: carrying a
 // lineup rebuilds its positions, so a stored fill would be wiped.
 //
 // A position is occupied as OrderedMembers counts it (a name or an id), so a
@@ -862,9 +862,13 @@ func (t TeamLineup) FilledByMemberNumber(teamSize int, members []TeamMember) Tea
 	out.MemberIDs = maps.Clone(t.MemberIDs)
 	out.Stamps = maps.Clone(t.Stamps)
 
-	placed := make(map[string]struct{}, len(t.MemberIDs))
-	for _, id := range t.MemberIDs {
-		if id != "" {
+	// Only a member at a place the size has is placed: a lineup saved under
+	// other place names (a team size raised from 3 to 5 renames the places)
+	// is not read at all, so it blocks nobody.
+	order := canonicalPositionOrder(teamSize)
+	placed := make(map[string]struct{}, len(order))
+	for _, pos := range order {
+		if id := t.MemberIDs[pos]; id != "" {
 			placed[id] = struct{}{}
 		}
 	}
@@ -877,7 +881,7 @@ func (t TeamLineup) FilledByMemberNumber(teamSize int, members []TeamMember) Tea
 	slices.SortStableFunc(regulars, func(a, b TeamMember) int { return cmp.Compare(a.Index, b.Index) })
 
 	next := 0
-	for _, pos := range canonicalPositionOrder(teamSize) {
+	for _, pos := range order {
 		if t.Positions[pos] != "" || t.MemberIDs[pos] != "" {
 			continue
 		}

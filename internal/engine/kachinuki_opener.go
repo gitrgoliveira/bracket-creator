@@ -415,8 +415,9 @@ func openerSeatEventsTx(h state.StoreTx, comp *state.Competition, compID, matchI
 // bout 1 is brought to what the rule says (seatOpenerAfterWrite; the
 // score-events door seats its own batch). before is the match's status before
 // the write; writeID and stamp are the write's own (resentStartWarning knows a
-// resend of the start by them).
-func (e *Engine) afterMatchWrite(h state.StoreTx, compID, matchID string, before matchBefore, door, writeID string, stamp int64) (string, error) {
+// resend of the start by them). result is the write's answer: a seat that
+// changed bout 1 brings it to the stored rows, never the payload's names and ids.
+func (e *Engine) afterMatchWrite(h state.StoreTx, compID, matchID string, result *state.MatchResult, before matchBefore, door, writeID string, stamp int64) (string, error) {
 	comp, err := h.LoadCompetition(compID)
 	if err != nil || comp == nil || !comp.IsKachinuki() {
 		return "", nil
@@ -463,13 +464,28 @@ func (e *Engine) afterMatchWrite(h state.StoreTx, compID, matchID string, before
 			return "", err
 		}
 	}
-	if door != DoorEvent {
-		e.seatOpenerAfterWrite(h, compID, matchID)
+	if door != DoorEvent && e.seatOpenerAfterWrite(h, compID, matchID) {
+		if stored, _, err := e.lookupExistingResultIn(h, compID, matchID); err == nil && stored != nil {
+			takeSeatedBouts(result, stored)
+		}
 	}
 	if refused != nil {
 		told = refused.warning(lead)
 	}
 	return told, nil
+}
+
+// takeSeatedBouts brings a write's answer to the stored match after the seat
+// rewrote bout 1: the rows, their marks and the stamps and versions the seat's
+// events moved. Everything else the answer carries stays as the write left it.
+func takeSeatedBouts(result, stored *state.MatchResult) {
+	result.SubResults = stored.SubResults
+	result.MarkIDs = stored.MarkIDs
+	result.ScoreVersion = stored.ScoreVersion
+	result.EventSeqs = stored.EventSeqs
+	result.TurnedAway = stored.TurnedAway
+	result.ModifiedAt = stored.ModifiedAt
+	result.GroupStamps = stored.GroupStamps
 }
 
 // resentStartWarning is the warning the write that last moved a kachinuki

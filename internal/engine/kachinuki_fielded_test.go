@@ -428,3 +428,32 @@ func TestKachinukiFielded_ARaisedTeamSizeFillsTheNewPlaceOfAFullLineup(t *testin
 	assert.Equal(t, []string{a[2], a[0], a[1], a[3]}, queueMemberIDs(q.queueA), "the new place 4 takes member 4")
 	assert.Equal(t, b, queueMemberIDs(q.queueB), "no lineup: members 1 to 4")
 }
+
+// A raise to 5 renames every place to the FIK names, so a lineup saved under
+// numbered places is no lineup there: it is not read, and its members block
+// nobody from the fill, so the team fields members 1 to 5 by number (the old
+// lineup's members 1 to 3 were once blocked, leaving members 4 and 5 alone).
+func TestKachinukiFielded_ALineupSavedUnderAnotherSizesPlacesBlocksNobody(t *testing.T) {
+	eng, store, comp := setupKachinukiComp(t, "kachinuki-fielded-size-raised-5", 3,
+		func(c *state.Competition) { c.Format = state.CompFormatMixed })
+	aID, bID := numberedTeams(t, store, comp.ID)
+	a := teamMemberIDs(t, store, comp.ID, aID, 5)
+	b := teamMemberIDs(t, store, comp.ID, bID, 5)
+	require.NoError(t, store.SetTeamLineup(comp.ID, domain.TeamLineup{
+		TeamID: aID, MatchID: "Pool A-0",
+		MemberIDs: map[domain.Position]string{
+			domain.PositionNumbered(1): a[2], domain.PositionNumbered(2): a[0], domain.PositionNumbered(3): a[1],
+		},
+	}, 3))
+	require.NoError(t, store.SavePoolMatches(comp.ID, []state.MatchResult{{
+		ID: "Pool A-0", SideA: "Ryu", SideAID: aID, SideB: "Tora", SideBID: bID, Status: state.MatchStatusRunning,
+		SubResults: []state.SubMatchResult{numberBout(1, a[2], b[0], "Ryu", a[2])},
+	}}))
+
+	comp.TeamSize = 5
+	require.NoError(t, store.SaveCompetition(comp))
+
+	q := storedKachinukiQueues(t, eng, comp.ID, "Pool A-0")
+	assert.Equal(t, a, queueMemberIDs(q.queueA), "the lineup under numbered places is not read: members 1 to 5 by number")
+	assert.Equal(t, b, queueMemberIDs(q.queueB))
+}

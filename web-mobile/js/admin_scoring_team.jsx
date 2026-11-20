@@ -4454,9 +4454,10 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
             // lineup on every write, whatever the match's status
             // (ReseatKachinukiOpenersTx), so a fighter named on bout 1 any other way
             // is overruled by the seat. So the FIRST row's pick goes through the
-            // lineup, running or not, a free name and a manual row there included,
-            // as a roster pick does. Positional: the box still renders there with an
-            // empty roster, since bout 1 is a lineup slot (lineupSlot below).
+            // lineup, running or not, a free name included, as a roster pick does
+            // (a manual row is numbered from bout 2, so it is never the first).
+            // Positional: the box still renders there with an empty roster, since
+            // bout 1 is a lineup slot (lineupSlot below).
             const firstRowIsLineup = !isDaihyoRow && idx === 0;
             const manualPathB = !firstRowIsLineup && (isManualRow || kachinukiPastFirst || freeNameB);
             const manualPathA = !firstRowIsLineup && (isManualRow || kachinukiPastFirst || freeNameA);

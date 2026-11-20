@@ -20,6 +20,9 @@ const { useState, useMemo, useEffect, useRef, useCallback } = React;
 const holdsNothing = () => undefined;
 
 const NO_PLACES = Object.freeze({});
+// A failed fielded read is asked again this many times, this long after.
+const FIELDED_RETRIES = 3;
+const FIELDED_RETRY_MS = 5000;
 
 // useFieldedPlaces: who the server fields by member number in the empty places
 // of a kachinuki lineup form (operator answers D2 and D3), asked with the form as
@@ -27,8 +30,9 @@ const NO_PLACES = Object.freeze({});
 // again after every change to it or to the team's members. The answer is held
 // with the form it was asked for and shown only while the form is still that one,
 // so a place shows no default while the read for the latest change is out, and an
-// answer for an older form is never shown. A read that fails answers {}
-// (API.fetchFieldedLineup), so the places show "Add player…".
+// answer for an older form is never shown. A read that fails shows "Add player…"
+// and is asked again, FIELDED_RETRY_MS later, up to FIELDED_RETRIES times (a form
+// or members change asks at once, as for any change).
 function useFieldedPlaces({ enabled, compId, teamId, matchId, values, memberIds, membersKey }) {
   const [answer, setAnswer] = useState({ key: "", places: NO_PLACES });
   const positions = {};
@@ -46,13 +50,23 @@ function useFieldedPlaces({ enabled, compId, teamId, matchId, values, memberIds,
   useEffect(() => {
     if (!formKey) return undefined;
     let live = true;
+    let timer = 0;
     const form = JSON.parse(formKey);
-    // A read that throws or rejects is a failed read too: no defaults.
-    Promise.resolve()
-      .then(() => window.API.fetchFieldedLineup(form[0], form[1], form[2], { positions: form[3], memberIds: form[4] }))
-      .then((places) => places || NO_PLACES, () => NO_PLACES)
-      .then((places) => { if (live) setAnswer({ key: formKey, places }); });
-    return () => { live = false; };
+    // A read that throws or rejects is a failed read too (API.fetchFieldedLineup
+    // answers null): no defaults, then another try. The tries belong to this form:
+    // a changed form ends them and starts again.
+    const ask = (retries) => {
+      Promise.resolve()
+        .then(() => window.API.fetchFieldedLineup(form[0], form[1], form[2], { positions: form[3], memberIds: form[4] }))
+        .then((places) => places || null, () => null)
+        .then((places) => {
+          if (!live) return;
+          setAnswer({ key: formKey, places: places || NO_PLACES });
+          if (!places && retries < FIELDED_RETRIES) timer = setTimeout(() => ask(retries + 1), FIELDED_RETRY_MS);
+        });
+    };
+    ask(0);
+    return () => { live = false; clearTimeout(timer); };
   }, [formKey]);
   return formKey && answer.key === formKey ? answer.places : NO_PLACES;
 }

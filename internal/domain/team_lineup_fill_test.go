@@ -135,6 +135,23 @@ func TestTeamLineup_FilledByMemberNumber(t *testing.T) {
 			wantIDs: map[domain.Position]string{"1": "m1", "2": "m2", "3": "m3"},
 		},
 		{
+			name: "a lineup saved under the places of another size blocks nobody",
+			lineup: domain.TeamLineup{
+				Positions: map[domain.Position]string{"1": "Member 1", "2": "Member 2", "3": "Member 3"},
+				MemberIDs: map[domain.Position]string{"1": "m1", "2": "m2", "3": "m3"},
+			},
+			size:    5,
+			members: fillMembers(5, true),
+			wantPos: map[domain.Position]string{
+				"1": "Member 1", "2": "Member 2", "3": "Member 3",
+				senpo: "Member 1", jiho: "Member 2", chuken: "Member 3", fukusho: "Member 4", taisho: "Member 5",
+			},
+			wantIDs: map[domain.Position]string{
+				"1": "m1", "2": "m2", "3": "m3",
+				senpo: "m1", jiho: "m2", chuken: "m3", fukusho: "m4", taisho: "m5",
+			},
+		},
+		{
 			name:    "no members leaves the lineup as it was",
 			size:    3,
 			wantPos: map[domain.Position]string{},

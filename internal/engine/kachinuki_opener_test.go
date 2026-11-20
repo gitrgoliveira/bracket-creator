@@ -587,3 +587,37 @@ func TestKachinukiOpener_UnreadableMembersSeatNobodyAndTheWriteStands(t *testing
 	assert.Equal(t, []string{"M"}, openerMatch(t, store, c, "Pool A-0").SubResults[0].IpponsA)
 	assert.Contains(t, logs, "engine: ERROR: engine.kachinukiOpener compId="+c+": team-members.yaml load error:")
 }
+
+// A write whose bout 1 the seat then overrode is answered as recorded when it is
+// sent again with its writeId (the outbox's resend after a lost answer): nothing
+// is written, no history line is added, and the answer is the stored match, the
+// seat's names on bout 1 and not the payload's.
+func TestKachinukiOpener_AResendByWriteIDOverASeatedBoutOneIsRecorded(t *testing.T) {
+	eng, store, c, a, b := numberOrderMatch(t, "op-resend-seated", state.MatchResult{Status: state.MatchStatusScheduled})
+	at := time.Now().UnixMilli() - 5000
+	write := func() *state.MatchResult {
+		m := openerMatch(t, store, c, "Pool A-0")
+		return &state.MatchResult{
+			ID: "Pool A-0", SideA: m.SideA, SideAID: m.SideAID, SideB: m.SideB, SideBID: m.SideBID,
+			Status: state.MatchStatusRunning, ModifiedAt: at, WriteID: "w-seated",
+			SubResults: []state.SubMatchResult{{Position: 1, SideA: "Aoki", SideB: "Fujii", IpponsA: []string{"M"}, IpponsB: []string{}}},
+		}
+	}
+	first := write()
+	_, err := eng.RecordMatchResultWithIneligibility(c, "Pool A-0", first)
+	require.NoError(t, err)
+	require.Equal(t, []string{a[0], b[0]}, boutOneMembers(t, store, c), "the seat overrode the payload's bout 1")
+	assert.Equal(t, []string{a[0], b[0]}, []string{first.SubResults[0].SideAMemberID, first.SubResults[0].SideBMemberID}, "and the first answer says so")
+	lines, err := store.LoadScoreLog(c, "Pool A-0")
+	require.NoError(t, err)
+	history := historyLen(t, store, c, "Pool A-0")
+
+	again := write()
+	_, err = eng.RecordMatchResultWithIneligibility(c, "Pool A-0", again)
+	require.NoError(t, err)
+	assert.Equal(t, openerMatch(t, store, c, "Pool A-0").SubResults, again.SubResults, "answered as stored")
+	after, err := store.LoadScoreLog(c, "Pool A-0")
+	require.NoError(t, err)
+	assert.Len(t, after, len(lines), "nothing is written")
+	assert.Equal(t, history, historyLen(t, store, c, "Pool A-0"), "and no history line is added")
+}

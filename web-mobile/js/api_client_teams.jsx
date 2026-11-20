@@ -145,9 +145,10 @@ export const teamsApi = {
     // lineup form (operator answers D2 and D3): a READ that carries the form,
     // `{ positions, memberIds }` as it stands, saved or not, and writes nothing
     // (engine.KachinukiFieldedPlaces, the fill bout 1 is seated from). Answers
-    // the position key to member id map; `{}` on any failure, a timeout or a
-    // non-OK answer, since a default is a convenience and never a reason to show
-    // an error. Public, bounded like every read (_fetchJson), never queued.
+    // the position key to member id map (`{}` when nothing is filled); null on any
+    // failure, a timeout or a non-OK answer, since a default is a convenience and
+    // never a reason to show an error (the panel shows no default and asks again).
+    // Public, bounded like every read (_fetchJson), never queued.
     async fetchFieldedLineup(compID, teamId, matchId, form = {}) {
         try {
             const { res, body } = await _fetchJson(
@@ -158,10 +159,10 @@ export const teamsApi = {
                     body: JSON.stringify({ positions: form.positions || {}, memberIds: form.memberIds || {} }),
                 });
             const places = body && body.fieldedMemberIds;
-            if (!res.ok || !places || typeof places !== 'object' || Array.isArray(places)) return {};
+            if (!res.ok || !places || typeof places !== 'object' || Array.isArray(places)) return null;
             return places;
         } catch (_e) {
-            return {};
+            return null;
         }
     },
     // bc-kfnl: a kachinuki encounter's fighters each side has left, for the

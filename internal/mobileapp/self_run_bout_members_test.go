@@ -14,6 +14,7 @@ package mobileapp
 // needs it.
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -311,11 +312,22 @@ func TestSelfRun_AKachinukiRowTheEngineRewritesIsJudgedOnWhatLands(t *testing.T)
 		requireRefusal(t, w, http.StatusBadRequest, "team_member_not_in_team", fighterNotOnTeamBody)
 		assert.Equal(t, before, f.storedState(t), "a refused write leaves the match and its history as they were")
 	})
+	t.Run("on a row the write names it is refused, whatever the seat rewrites", func(t *testing.T) {
+		f, a, _ := newFixture(t)
+		before := f.storedState(t)
+		w := f.send(http.MethodPut, repBoutMatchPath+"/score", "", kachinukiForeignFighterSheet(f.now+100, 2, "b", a[0].ID, state.BoutGroup(2)))
+		requireRefusal(t, w, http.StatusBadRequest, "team_member_not_in_team", fighterNotOnTeamBody)
+		assert.Equal(t, before, f.storedState(t), "a refused write leaves the match and its history as they were")
+	})
 	t.Run("on bout 1 the seat's own fighter lands instead", func(t *testing.T) {
 		f, a, b := newFixture(t)
 		w := f.send(http.MethodPut, repBoutMatchPath+"/score", "", kachinukiForeignFighterSheet(f.now+100, 1, "a", b[0].ID))
 		require.Equal(t, http.StatusOK, w.Code, "the foreign id does not land, so nothing is refused: %s", w.Body.String())
 		assertBoutOneSeatedByNumber(t, f.storedBout(t, 1), memberNumbered(t, a, 1).ID, memberNumbered(t, b, 1).ID, b[0].ID)
+		var answered state.MatchResult
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &answered))
+		require.NotEmpty(t, answered.SubResults)
+		assert.Equal(t, f.storedBout(t, 1), answered.SubResults[0], "the answer is the stored bout 1, the seat's, not the payload's")
 	})
 }
 
@@ -354,21 +366,30 @@ func TestSelfRun_AKachinukiPoolRowTheEngineRewritesIsJudgedOnWhatLands(t *testin
 		requireRefusal(t, w, http.StatusBadRequest, "team_member_not_in_team", fighterNotOnTeamBody)
 		assert.Equal(t, before, poolRows(t, f), "a refused write leaves the pool match as it was")
 	})
+	t.Run("on a row the write names it is refused, whatever the seat rewrites", func(t *testing.T) {
+		f, a, _ := newFixture(t)
+		before := poolRows(t, f)
+		w := f.send(http.MethodPut, path, "", kachinukiForeignFighterSheet(f.now+100, 2, "b", a[0].ID, state.BoutGroup(2)))
+		requireRefusal(t, w, http.StatusBadRequest, "team_member_not_in_team", fighterNotOnTeamBody)
+		assert.Equal(t, before, poolRows(t, f), "a refused write leaves the pool match as it was")
+	})
 	t.Run("on bout 1 the seat's own fighter lands instead", func(t *testing.T) {
 		f, a, b := newFixture(t)
 		w := f.send(http.MethodPut, path, "", kachinukiForeignFighterSheet(f.now+100, 1, "a", b[0].ID))
 		require.Equal(t, http.StatusOK, w.Code, "the foreign id does not land, so nothing is refused: %s", w.Body.String())
-		assertBoutOneSeatedByNumber(t, poolRows(t, f)[0], memberNumbered(t, a, 1).ID, memberNumbered(t, b, 1).ID, b[0].ID)
+		a1, b1 := memberNumbered(t, a, 1).ID, memberNumbered(t, b, 1).ID
+		assertBoutOneSeatedByNumber(t, poolRows(t, f)[0], a1, b1, b[0].ID)
+		var answered state.MatchResult
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &answered))
+		require.NotEmpty(t, answered.SubResults)
+		assert.Equal(t, poolRows(t, f), answered.SubResults, "the answer is the stored rows, the seat's, not the payload's")
 	})
 }
 
 // assertBoutOneSeatedByNumber checks bout 1 as stored holds each team's
 // nameless member 1 (the seat, by member number), with the bout's win (Alice's,
 // side A's) carried to side A's member and its point kept, and that the foreign
-// id the write carried as side A's fighter did not land there. The write's answer
-// is not checked: it is the match as the write left it, before the seat that
-// runs after the write (seatOpenerAfterWrite), so it still carries the
-// payload's bout 1; raised in .ship/red-tests-T9.md.
+// id the write carried as side A's fighter did not land there.
 func assertBoutOneSeatedByNumber(t *testing.T, stored state.SubMatchResult, a1, b1, foreign string) {
 	t.Helper()
 	assert.Equal(t, a1, stored.SideAMemberID, "side A is its team's member 1")
@@ -385,8 +406,9 @@ func assertBoutOneSeatedByNumber(t *testing.T, stored state.SubMatchResult, a1, 
 // kachinukiForeignFighterSheet is the team sheet naming Alice against Bob on
 // bout 1 (Alice won it) and Alice against Cara on bout 2 (Cara won it), with
 // foreignID as the fighter of the given side ("a" or "b") of the bout at pos,
-// and `changed` naming the match's points alone.
-func kachinukiForeignFighterSheet(at int64, pos int, side, foreignID string) map[string]any {
+// and `changed` naming the match's points alone, plus any groups given (a bout's
+// own group lands its row through the payload itself).
+func kachinukiForeignFighterSheet(at int64, pos int, side, foreignID string, changed ...string) map[string]any {
 	sheet := scoreSheet(state.MatchStatusRunning, "", at, nil)
 	rows := sheet["subResults"].([]any)
 	first := rows[0].(map[string]any)
@@ -395,7 +417,7 @@ func kachinukiForeignFighterSheet(at int64, pos int, side, foreignID string) map
 	second["sideA"], second["sideB"], second["winner"] = "Alice", "Cara", "Cara"
 	key := map[string]string{"a": "sideAMemberId", "b": "sideBMemberId"}[side]
 	rows[pos-1].(map[string]any)[key] = foreignID
-	sheet["changed"] = []string{state.GroupPoints}
+	sheet["changed"] = append([]string{state.GroupPoints}, changed...)
 	return sheet
 }
 

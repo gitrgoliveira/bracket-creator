@@ -3,8 +3,10 @@ package cmd
 import (
 	"bufio"
 	"bytes"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
@@ -281,6 +283,48 @@ func TestCreateKnockout_TitlePrefixDerivation(t *testing.T) {
 	}
 	assert.Equal(t, []string{"S1", "S2", "S3", "S4"}, got,
 		"derivation from --title-prefix 'Senior Men' must give S1.., not SM1..")
+}
+
+// TestCreateKnockout_TitlePrefixPrintsCompetitionTags pins that --title-prefix is
+// the text of the competition-name tags each Names to Print sheet opens with,
+// and that with none the sheet opens with the competitors' tags straight away.
+func TestCreateKnockout_TitlePrefixPrintsCompetitionTags(t *testing.T) {
+	entries := []string{"Alice,DojoA", "Bob,DojoB", "Carol,DojoC", "Dave,DojoD"}
+	for _, prefix := range []string{"Senior Men", ""} {
+		var b bytes.Buffer
+		writer := bufio.NewWriter(&b)
+		o := &knockoutOptions{
+			outputWriter: writer,
+			outputPath:   "tags.xlsx",
+			determined:   true,
+			titlePrefix:  prefix,
+		}
+		require.NoError(t, o.createKnockout(entries))
+		require.NoError(t, writer.Flush())
+
+		f, err := excelize.OpenReader(bytes.NewReader(b.Bytes()))
+		require.NoError(t, err)
+
+		var sheets []string
+		for _, name := range f.GetSheetList() {
+			if strings.HasPrefix(name, helper.SheetNamesToPrint+" ") {
+				sheets = append(sheets, name)
+			}
+		}
+		require.NotEmpty(t, sheets, "the draw lists its competitors on a Names to Print sheet")
+		for _, sheet := range sheets {
+			for row := 1; row <= helper.CompetitionTagRows; row++ {
+				val, err := f.GetCellValue(sheet, fmt.Sprintf("A%d", row))
+				require.NoError(t, err)
+				if prefix == "" {
+					assert.Emptyf(t, val, "%s row %d: no competition name, so no tag", sheet, row)
+				} else {
+					assert.Equalf(t, prefix, val, "%s row %d is a competition-name tag", sheet, row)
+				}
+			}
+		}
+		assert.NoError(t, f.Close())
+	}
 }
 
 func TestCreateKnockout_MissingSeed(t *testing.T) {

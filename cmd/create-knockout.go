@@ -238,7 +238,7 @@ func (o *knockoutOptions) createKnockout(entries []string) error {
 
 	// Convert all players for match-winner processing
 	matchWinners = helper.ConvertPlayersToWinners(players, o.withZekkenName, playerCoords)
-	helper.CreateNamesToPrint(f, players, o.withZekkenName, courtNames, playerCoords, o.numberPrefix)
+	helper.CreateNamesToPrint(f, players, o.withZekkenName, courtNames, playerCoords, o.numberPrefix, o.titlePrefix)
 
 	team := &state.Competition{TeamSize: o.teamMatches, TeamMatchType: o.teamMatchType}
 	printEliminationWithBronze(f, matchWinners, eliminationMatchRounds, team.TeamBoutRows(), plan, o.engi, o.thirdPlaceMatch)

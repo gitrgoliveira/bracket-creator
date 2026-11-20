@@ -338,16 +338,19 @@ func renderWorkbook(f *excelize.File, in workbookInput) ([][]int, []helper.Playe
 	//    namesToPrintPlayers branch as step 1: a knockout-only export routes
 	//    through CreateNamesToPrint over the numbered roster instead of
 	//    CreateNamesWithPoolToPrint's empty-pools no-op (which used to leave
-	//    this sheet missing entirely, see bc-pnum A8). The blank layout names
-	//    nobody, so it prints no such sheet and only drops the template one.
+	//    this sheet missing entirely, see bc-pnum A8). Each sheet opens with
+	//    one page of tags printing the competition's name; the tags add no
+	//    sheet, so a shiaijo with nobody listed (one that runs only knockout
+	//    bouts) has none. The blank layout names nobody, so it prints no such
+	//    sheet and only drops the template one.
 	if in.blank {
 		if err := f.DeleteSheet(helper.SheetNamesToPrint); err != nil {
 			return nil, nil, fmt.Errorf("render workbook: delete %s sheet: %w", helper.SheetNamesToPrint, err)
 		}
 	} else if len(namesToPrintPlayers) > 0 {
-		helper.CreateNamesToPrint(f, namesToPrintPlayers, comp.EffectiveWithZekkenName(), courts, playerCoords, comp.EffectiveNumberPrefix())
+		helper.CreateNamesToPrint(f, namesToPrintPlayers, comp.EffectiveWithZekkenName(), courts, playerCoords, comp.EffectiveNumberPrefix(), comp.Name)
 	} else {
-		helper.CreateNamesWithPoolToPrint(f, pools, comp.EffectiveWithZekkenName(), courts, courtOfPool, playerCoords, comp.EffectiveNumberPrefix())
+		helper.CreateNamesWithPoolToPrint(f, pools, comp.EffectiveWithZekkenName(), courts, courtOfPool, playerCoords, comp.EffectiveNumberPrefix(), comp.Name)
 	}
 
 	// 7. Kachinuki Detail sheet (T195-T203, CHK037) and Representative Bouts

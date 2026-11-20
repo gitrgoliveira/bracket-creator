@@ -189,6 +189,17 @@ const (
 	SheetRepresentativeBouts = "Representative Bouts"
 )
 
+// NamesToPrintRowsPerPage is how many rows a Names to Print page holds, a
+// competitor's tag or a competition-name tag each: the sheet breaks the page
+// after every this many rows.
+const NamesToPrintRowsPerPage = 3
+
+// CompetitionTagRows is how many competition-name tags open each Names to
+// Print sheet when the workbook has a competition name: one page of them, so
+// the competitor tags after them keep their own pages. Exactly one page, so a
+// reader of the workbook can tell the tags from the competitors by row.
+const CompetitionTagRows = NamesToPrintRowsPerPage
+
 // RepresentativeBoutRowLabel is what a representative bout's row prints where a
 // numbered bout prints its number: the bout is the extra one appended to a
 // tied knockout encounter (position -1), not one of the numbered bouts, so a

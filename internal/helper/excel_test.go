@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	bctest "github.com/gitrgoliveira/bracket-creator/internal/test"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/xuri/excelize/v2"
@@ -763,7 +764,7 @@ func TestCreateNamesToPrint(t *testing.T) {
 		playerCoordKey(players[1]): {cellCoord: cellCoord{sheetName: "Pool1", cell: "B3"}},
 	}
 
-	CreateNamesToPrint(f, players, false, CourtLabels(1), pCoords, "")
+	CreateNamesToPrint(f, players, false, CourtLabels(1), pCoords, "", "")
 
 	sheet := "Names to Print A"
 	valA1, _ := f.GetCellValue(sheet, "A1")
@@ -797,7 +798,7 @@ func TestCreateNamesToPrint_WithNumberCell(t *testing.T) {
 		playerCoordKey(players[1]): {cellCoord: cellCoord{sheetName: "Pool1", cell: "B3"}, numberCell: "$A$3"},
 	}
 
-	CreateNamesToPrint(f, players, false, CourtLabels(1), pCoords, "K")
+	CreateNamesToPrint(f, players, false, CourtLabels(1), pCoords, "K", "")
 
 	sheet := "Names to Print A"
 	valA1, err := f.CalcCellValue(sheet, "A1")
@@ -845,7 +846,7 @@ func TestCreateNamesToPrint_StackedNumberLayout(t *testing.T) {
 			playerCoordKey(players[1]): {cellCoord: cellCoord{sheetName: "Pool1", cell: "B3"}, numberCell: "$A$3"},
 		}
 
-		CreateNamesToPrint(f, players, false, CourtLabels(1), pCoords, "KO")
+		CreateNamesToPrint(f, players, false, CourtLabels(1), pCoords, "KO", "")
 
 		sheet := "Names to Print A"
 		formula, err := f.GetCellFormula(sheet, "A1")
@@ -881,7 +882,7 @@ func TestCreateNamesToPrint_StackedNumberLayout(t *testing.T) {
 			playerCoordKey(players[0]): {cellCoord: cellCoord{sheetName: "Pool1", cell: "B2"}, numberCell: "$A$2"},
 		}
 
-		CreateNamesToPrint(f, players, false, CourtLabels(1), pCoords, "K")
+		CreateNamesToPrint(f, players, false, CourtLabels(1), pCoords, "K", "")
 
 		sheet := "Names to Print A"
 		formula, err := f.GetCellFormula(sheet, "A1")
@@ -909,7 +910,7 @@ func TestCreateNamesToPrint_StackedNumberLayout(t *testing.T) {
 			playerCoordKey(players[0]): {cellCoord: cellCoord{sheetName: "Pool1", cell: "B2"}, numberCell: "$A$2"},
 		}
 
-		CreateNamesToPrint(f, players, false, CourtLabels(1), pCoords, "KOR")
+		CreateNamesToPrint(f, players, false, CourtLabels(1), pCoords, "KOR", "")
 
 		sheet := "Names to Print A"
 		valA1, err := f.CalcCellValue(sheet, "A1")
@@ -940,7 +941,7 @@ func TestCreateNamesToPrint_StackedNumberLayout(t *testing.T) {
 					playerCoordKey(players[0]): {cellCoord: cellCoord{sheetName: "Pool1", cell: "B2"}, numberCell: "$A$2"},
 				}
 
-				CreateNamesToPrint(f, players, false, CourtLabels(1), pCoords, prefix)
+				CreateNamesToPrint(f, players, false, CourtLabels(1), pCoords, prefix, "")
 
 				sheet := "Names to Print A"
 				styleID, err := f.GetCellStyle(sheet, "A1")
@@ -972,7 +973,7 @@ func TestCreateNamesToPrint_StackedFormulaCountsRunesNotBytes(t *testing.T) {
 		playerCoordKey(players[0]): {cellCoord: cellCoord{sheetName: "Pool1", cell: "B2"}, numberCell: "$A$2"},
 	}
 
-	CreateNamesToPrint(f, players, false, CourtLabels(1), pCoords, "ÖZ")
+	CreateNamesToPrint(f, players, false, CourtLabels(1), pCoords, "ÖZ", "")
 
 	sheet := "Names to Print A"
 	formula, err := f.GetCellFormula(sheet, "A1")
@@ -998,7 +999,7 @@ func TestCreateNamesToPrint_DigitBearingPrefixSplitsAtThePrefix(t *testing.T) {
 		playerCoordKey(players[0]): {cellCoord: cellCoord{sheetName: "Pool1", cell: "B2"}, numberCell: "$A$2"},
 	}
 
-	CreateNamesToPrint(f, players, false, CourtLabels(1), pCoords, "KO2")
+	CreateNamesToPrint(f, players, false, CourtLabels(1), pCoords, "KO2", "")
 
 	sheet := "Names to Print A"
 	formula, err := f.GetCellFormula(sheet, "A1")
@@ -1039,7 +1040,7 @@ func TestCreateNamesToPrint_PerRowPrefixMismatchStaysSingleLine(t *testing.T) {
 		playerCoordKey(players[1]): {cellCoord: cellCoord{sheetName: "Pool1", cell: "B3"}, numberCell: "$A$3"},
 	}
 
-	CreateNamesToPrint(f, players, false, CourtLabels(1), pCoords, "KO")
+	CreateNamesToPrint(f, players, false, CourtLabels(1), pCoords, "KO", "")
 
 	sheet := "Names to Print A"
 
@@ -1081,7 +1082,7 @@ func TestCreateNamesToPrint_MultiCourt(t *testing.T) {
 		pCoords[playerCoordKey(players[i])] = playerCellCoord{cellCoord: cellCoord{sheetName: "data", cell: fmt.Sprintf("B%d", i+2)}}
 	}
 
-	CreateNamesToPrint(f, players, false, CourtLabels(2), pCoords, "")
+	CreateNamesToPrint(f, players, false, CourtLabels(2), pCoords, "", "")
 
 	rowsA, err := f.GetRows("Names to Print A")
 	assert.NoError(t, err)
@@ -1121,7 +1122,7 @@ func TestCreateNamesWithPoolToPrint(t *testing.T) {
 		playerCoordKey(pools[0].Players[1]): {cellCoord: cellCoord{sheetName: "Pool1", cell: "B3"}},
 	}
 
-	CreateNamesWithPoolToPrint(f, pools, false, CourtLabels(1), nil, pCoords, "")
+	CreateNamesWithPoolToPrint(f, pools, false, CourtLabels(1), nil, pCoords, "", "")
 
 	sheet := "Names to Print A"
 	valA1, _ := f.GetCellValue(sheet, "A1")
@@ -1160,7 +1161,7 @@ func TestCreateNamesWithPoolToPrint_WithNumberCell(t *testing.T) {
 		playerCoordKey(pools[0].Players[1]): {cellCoord: cellCoord{sheetName: "Pool1", cell: "B3"}, numberCell: "$A$3"},
 	}
 
-	CreateNamesWithPoolToPrint(f, pools, false, CourtLabels(1), nil, pCoords, "K")
+	CreateNamesWithPoolToPrint(f, pools, false, CourtLabels(1), nil, pCoords, "K", "")
 
 	sheet := "Names to Print A"
 	valA1, err := f.CalcCellValue(sheet, "A1")
@@ -1208,7 +1209,7 @@ func TestCreateNamesWithPoolToPrint_MultiCourt(t *testing.T) {
 		pCoords[playerCoordKey(p)] = playerCellCoord{cellCoord: cellCoord{sheetName: "data", cell: cells[i]}}
 	}
 
-	CreateNamesWithPoolToPrint(f, pools, false, CourtLabels(2), nil, pCoords, "")
+	CreateNamesWithPoolToPrint(f, pools, false, CourtLabels(2), nil, pCoords, "", "")
 
 	rowsA, err := f.GetRows("Names to Print A")
 	assert.NoError(t, err)
@@ -1220,6 +1221,226 @@ func TestCreateNamesWithPoolToPrint_MultiCourt(t *testing.T) {
 
 	idx, _ := f.GetSheetIndex(SheetNamesToPrint)
 	assert.Equal(t, -1, idx, "template sheet should be deleted")
+}
+
+// namesSheetPrintArea returns the print area defined for one sheet.
+func namesSheetPrintArea(t *testing.T, f *excelize.File, sheet string) string {
+	t.Helper()
+	for _, d := range f.GetDefinedName() {
+		if d.Name == "_xlnm.Print_Area" && d.Scope == sheet {
+			return d.RefersTo
+		}
+	}
+	t.Fatalf("no print area on %q", sheet)
+	return ""
+}
+
+// assertCompetitionTags checks a Names to Print sheet opens with one page of
+// competition-name tags: rows 1 to CompetitionTagRows each merged across A:B,
+// holding want, at the competitor rows' height.
+func assertCompetitionTags(t *testing.T, f *excelize.File, sheet, want string) {
+	t.Helper()
+	merged, err := f.GetMergeCells(sheet)
+	require.NoError(t, err)
+	spans := map[string]string{}
+	for _, m := range merged {
+		spans[m.GetStartAxis()] = m.GetEndAxis()
+	}
+	for row := 1; row <= CompetitionTagRows; row++ {
+		a := fmt.Sprintf("A%d", row)
+		assert.Equalf(t, fmt.Sprintf("B%d", row), spans[a], "%s %s must be merged across A:B", sheet, a)
+		got, err := f.GetCellValue(sheet, a)
+		require.NoError(t, err)
+		assert.Equalf(t, want, got, "%s %s", sheet, a)
+		h, err := f.GetRowHeight(sheet, row)
+		require.NoError(t, err)
+		assert.Equalf(t, float64(namesToPrintRowHeight), h, "%s row %d height", sheet, row)
+	}
+}
+
+// TestCreateNamesToPrint_CompetitionTags pins the competition-name tags on a
+// knockout competition's Names to Print sheets: one page of three tags first
+// (the name trimmed), the competitors from the next page on with their own
+// three-to-a-page breaks, and the print area covering both. Only a shiaijo
+// with competitors gets a sheet (decision B): no sheet holds the tags alone.
+func TestCreateNamesToPrint_CompetitionTags(t *testing.T) {
+	f := excelize.NewFile()
+	defer f.Close()
+	f.NewSheet("data")
+	f.NewSheet(SheetNamesToPrint)
+
+	players := make([]Player, 5)
+	pCoords := make(map[string]playerCellCoord, 5)
+	for i := range players {
+		players[i] = Player{Name: fmt.Sprintf("Player%d", i+1), Dojo: "Dojo"}
+		pCoords[playerCoordKey(players[i])] = playerCellCoord{cellCoord: cellCoord{sheetName: "data", cell: fmt.Sprintf("B%d", i+2)}}
+	}
+	// Five competitors on six shiaijo: one each on A to E, nobody on F.
+	CreateNamesToPrint(f, players, false, CourtLabels(6), pCoords, "", "  Men's Individual  ")
+
+	assert.Equal(t, []string{"Sheet1", "data", "Names to Print A", "Names to Print B", "Names to Print C",
+		"Names to Print D", "Names to Print E"}, f.GetSheetList(), "no sheet, so no tags, for F, which has nobody")
+
+	const sheet = "Names to Print A"
+	assertCompetitionTags(t, f, sheet, "Men's Individual")
+	formula, err := f.GetCellFormula(sheet, "B4")
+	require.NoError(t, err)
+	assert.Contains(t, formula, "B2", "the competitor is on row 4, after the tags")
+	assert.Equal(t, "'Names to Print A'!$A$1:$B$4", namesSheetPrintArea(t, f, sheet))
+
+	buf, err := f.WriteToBuffer()
+	require.NoError(t, err)
+	breaks, err := bctest.RowBreaks(buf.Bytes(), sheet)
+	require.NoError(t, err)
+	assert.Equal(t, []int{3}, breaks, "the tags fill page one; the competitors start page two")
+
+	assertCompetitionTags(t, f, "Names to Print E", "Men's Individual")
+}
+
+// TestCreateNamesToPrint_CompetitorPagesAfterTags pins the page breaks after
+// the tags: the competitors still print three to a page, each page starting
+// on a fresh row three after the last.
+func TestCreateNamesToPrint_CompetitorPagesAfterTags(t *testing.T) {
+	f := excelize.NewFile()
+	defer f.Close()
+	f.NewSheet("data")
+	f.NewSheet(SheetNamesToPrint)
+
+	players := make([]Player, 7)
+	pCoords := make(map[string]playerCellCoord, 7)
+	for i := range players {
+		players[i] = Player{Name: fmt.Sprintf("Player%d", i+1), Dojo: "Dojo"}
+		pCoords[playerCoordKey(players[i])] = playerCellCoord{cellCoord: cellCoord{sheetName: "data", cell: fmt.Sprintf("B%d", i+2)}}
+	}
+	CreateNamesToPrint(f, players, false, CourtLabels(1), pCoords, "", "Open")
+
+	buf, err := f.WriteToBuffer()
+	require.NoError(t, err)
+	breaks, err := bctest.RowBreaks(buf.Bytes(), "Names to Print A")
+	require.NoError(t, err)
+	assert.Equal(t, []int{3, 6, 9}, breaks)
+	assert.Equal(t, "'Names to Print A'!$A$1:$B$10", namesSheetPrintArea(t, f, "Names to Print A"))
+}
+
+// TestCreateNamesToPrint_NoNameNoTags pins that an empty or blank name prints
+// no tags and keeps the sheets as they were before the tags: the first
+// competitor on row 1, and no sheet for a shiaijo with no competitors.
+func TestCreateNamesToPrint_NoNameNoTags(t *testing.T) {
+	for _, name := range []string{"", "   "} {
+		f := excelize.NewFile()
+		f.NewSheet("data")
+		f.NewSheet(SheetNamesToPrint)
+		players := []Player{{Name: "Player1", Dojo: "Dojo"}}
+		pCoords := map[string]playerCellCoord{
+			playerCoordKey(players[0]): {cellCoord: cellCoord{sheetName: "data", cell: "B2"}},
+		}
+		CreateNamesToPrint(f, players, false, CourtLabels(2), pCoords, "", name)
+
+		assert.Equalf(t, []string{"Sheet1", "data", "Names to Print A"}, f.GetSheetList(), "name %q", name)
+		formula, err := f.GetCellFormula("Names to Print A", "B1")
+		require.NoError(t, err)
+		assert.Containsf(t, formula, "B2", "name %q: the competitor is on row 1", name)
+		merged, err := f.GetMergeCells("Names to Print A")
+		require.NoError(t, err)
+		assert.Emptyf(t, merged, "name %q: no tag cells", name)
+		require.NoError(t, f.Close())
+	}
+}
+
+// TestCreateNamesToPrint_NobodyNoTags pins that a competition with no
+// competitors prints no Names to Print sheet, so no tags, whatever its name.
+func TestCreateNamesToPrint_NobodyNoTags(t *testing.T) {
+	f := excelize.NewFile()
+	defer f.Close()
+	f.NewSheet(SheetNamesToPrint)
+	CreateNamesToPrint(f, nil, false, CourtLabels(2), nil, "", "Men's Individual")
+	CreateNamesWithPoolToPrint(f, nil, false, CourtLabels(2), nil, nil, "", "Men's Individual")
+	assert.Equal(t, []string{"Sheet1"}, f.GetSheetList())
+}
+
+// TestCreateNamesWithPoolToPrint_CompetitionTagsOnlyWhereASheetIs pins
+// decision B for a pool competition: the tags go on the Names to Print sheets
+// the competition already has, one per shiaijo its pools run on, and add no
+// sheet. A shiaijo the pool clamp leaves without pools (it runs only knockout
+// bouts) gets none, and a shiaijo a pool was moved to gets its sheet as
+// without a name.
+func TestCreateNamesWithPoolToPrint_CompetitionTagsOnlyWhereASheetIs(t *testing.T) {
+	build := func(name string, courtOfPool map[string]string) *excelize.File {
+		f := excelize.NewFile()
+		f.NewSheet("data")
+		f.NewSheet(SheetNamesToPrint)
+		pools := []Pool{
+			{PoolName: "Pool A", Players: []Player{{Name: "P1", Dojo: "D1"}, {Name: "P2", Dojo: "D2"}}},
+			{PoolName: "Pool B", Players: []Player{{Name: "P3", Dojo: "D3"}, {Name: "P4", Dojo: "D4"}}},
+		}
+		pCoords := map[string]playerCellCoord{}
+		for i, p := range append(append([]Player{}, pools[0].Players...), pools[1].Players...) {
+			pCoords[playerCoordKey(p)] = playerCellCoord{cellCoord: cellCoord{sheetName: "data", cell: fmt.Sprintf("B%d", i+2)}}
+		}
+		// Two pools on three allocated shiaijo: the clamp runs them on A and B.
+		CreateNamesWithPoolToPrint(f, pools, false, []string{"A", "B", "C"}, courtOfPool, pCoords, "", name)
+		return f
+	}
+
+	f := build("Kendo Open", nil)
+	defer f.Close()
+	assert.Equal(t, []string{"Sheet1", "data", "Names to Print A", "Names to Print B"}, f.GetSheetList(),
+		"no sheet, so no tags, for C, which runs only knockout bouts")
+	for _, sheet := range []string{"Names to Print A", "Names to Print B"} {
+		assertCompetitionTags(t, f, sheet, "Kendo Open")
+	}
+	formula, err := f.GetCellFormula("Names to Print A", "B4")
+	require.NoError(t, err)
+	assert.Contains(t, formula, "B2", "Pool A's first competitor follows the tags")
+	formula, err = f.GetCellFormula("Names to Print B", "B4")
+	require.NoError(t, err)
+	assert.Contains(t, formula, "B4", "Pool B's first competitor follows the tags")
+
+	untitled := build("", nil)
+	defer untitled.Close()
+	assert.Equal(t, f.GetSheetList(), untitled.GetSheetList(), "a name adds no sheet")
+
+	moved := build("Kendo Open", map[string]string{"Pool B": "E"})
+	defer moved.Close()
+	movedUntitled := build("", map[string]string{"Pool B": "E"})
+	defer movedUntitled.Close()
+	assert.Equal(t, movedUntitled.GetSheetList(), moved.GetSheetList(), "a name adds no sheet when a pool was moved off the allocation")
+	assert.Contains(t, moved.GetSheetList(), "Names to Print E")
+	assertCompetitionTags(t, moved, "Names to Print E", "Kendo Open")
+}
+
+// TestCreateNamesToPrint_LongNameWraps pins that the sheet takes its tag style
+// from competitionTagFit: a short name on one line shrunk to fit, a long one
+// wrapped at the size the rule gives for its length.
+func TestCreateNamesToPrint_LongNameWraps(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		wrap bool
+		size float64
+	}{
+		{"Men's Individual", false, 110},
+		{"European Kendo Championship Mens Individual X", false, 110}, // 45 characters
+		{strings.Repeat("Kendo Open ", 6)[:60], true, 47},
+	} {
+		f := excelize.NewFile()
+		f.NewSheet("data")
+		f.NewSheet(SheetNamesToPrint)
+		players := []Player{{Name: "Player1", Dojo: "Dojo"}}
+		pCoords := map[string]playerCellCoord{playerCoordKey(players[0]): {cellCoord: cellCoord{sheetName: "data", cell: "B2"}}}
+		CreateNamesToPrint(f, players, false, CourtLabels(1), pCoords, "", tc.name)
+
+		for _, cell := range []string{"A1", "B1", "A3", "B3"} {
+			id, err := f.GetCellStyle("Names to Print A", cell)
+			require.NoError(t, err)
+			style, err := f.GetStyle(id)
+			require.NoError(t, err)
+			require.NotNil(t, style.Alignment)
+			assert.Equalf(t, tc.wrap, style.Alignment.WrapText, "%q %s wraps", tc.name, cell)
+			assert.Equalf(t, !tc.wrap, style.Alignment.ShrinkToFit, "%q %s shrinks", tc.name, cell)
+			assert.Equalf(t, tc.size, style.Font.Size, "%q %s size", tc.name, cell)
+		}
+		require.NoError(t, f.Close())
+	}
 }
 
 func TestFillEstimations(t *testing.T) {

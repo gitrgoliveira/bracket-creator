@@ -457,7 +457,7 @@ func (o *poolOptions) createPools(entries []string) error {
 		return fmt.Errorf("delete tree template sheet: %w", err)
 	}
 
-	helper.CreateNamesWithPoolToPrint(f, pools, o.withZekkenName, courtNames, nil, playerCoords, o.numberPrefix)
+	helper.CreateNamesWithPoolToPrint(f, pools, o.withZekkenName, courtNames, nil, playerCoords, o.numberPrefix, o.titlePrefix)
 
 	if err := helper.CreateTagsSheet(f, pools, "", o.numberPrefix); err != nil {
 		fmt.Fprintf(os.Stderr, "Error creating tags sheet: %v\n", err)

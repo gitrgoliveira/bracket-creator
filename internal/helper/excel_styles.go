@@ -2,8 +2,10 @@ package helper
 
 import (
 	"fmt"
+	"math"
 	"runtime"
 	"sync"
+	"unicode/utf8"
 	"weak"
 
 	excelize "github.com/xuri/excelize/v2"
@@ -28,6 +30,7 @@ const (
 	styleNameID               styleKey = "name_id"
 	styleNameIDPosition       styleKey = "name_id_position"
 	styleNameIDPositionStack  styleKey = "name_id_position_stacked"
+	styleCompetitionTag       styleKey = "competition_tag"
 	styleTime                 styleKey = "time"
 	styleDuration             styleKey = "duration"
 	styleUnlockedText         styleKey = "unlocked_text"
@@ -473,6 +476,83 @@ func nameIDPositionStackedFontSize(letterCount int) float64 {
 // for why the font size depends on letterCount.
 func buildNameIDPositionStackedStyle(f *excelize.File, letterCount int) int {
 	return buildNameIDPositionStyleFor(f, true, letterCount)
+}
+
+// Competition-name tag sizing (competitionTagFit). A name of up to
+// competitionTagOneLineMaxRunes characters prints on one line, shrunk to fit
+// the merged A:B cell as a competitor's name is. A longer one wraps, at
+// competitionTagFitConstant / sqrt(characters) points, rounded down: the area
+// a wrapped name covers grows with its length times the square of its size,
+// so this keeps it inside the 270pt row at any length.
+//
+// Both were measured with LibreOffice, which lays a cell out the way the
+// Export PDFs print it (each row's optimal height for the wrapped name, set
+// against the 270pt row), for every length from 25 to 300 characters and at
+// 350, 400, 500, 800 and 1000, in ordinary text, the same text in capitals,
+// words of W and M, and an unbroken run of W. Locally (LibreOffice 26.8) in
+// Liberation Sans, DejaVu Sans and Carlito (Calibri's metrics, also in a
+// column narrowed to the 150 units Excel's narrower width units amount to):
+// at 370 the tallest is 248pt (DejaVu Sans, 27 W's at 71pt); at 380, 25 W's
+// at 76pt came out taller than the row. Again from 46 characters up in the
+// Debian image the app's PDF export runs in (LibreOffice 25.2): with Carlito
+// installed the tallest is 204pt (76 W's at 42pt), and with Liberation alone,
+// where Calibri falls back to Liberation Mono, 181pt. The one-line limit, 45
+// characters, is the organiser's ruling: a name that fits a line keeps it. A
+// 45-character name on one line, in ordinary text, words of W and M or an
+// unbroken run of W, shrinks to print whole in all these fonts, and a
+// 46-character one wraps at 54pt. From about 25 characters up, wrapping would
+// print ordinary text about as large or larger (at 30 characters one line is
+// 58 to 70pt against 67pt wrapped), so the limit trades some size for keeping
+// the name on one line; it never costs fit.
+const (
+	competitionTagFontSize        = 110.0
+	competitionTagOneLineMaxRunes = 45
+	competitionTagFitConstant     = 370.0
+)
+
+// competitionTagFit is the one rule for how a competition-name tag prints:
+// whether it wraps and at what font size. A one-line tag shrinks to fit from
+// competitionTagFontSize, so its size is only where shrinking starts.
+func competitionTagFit(tag string) (wrap bool, size float64) {
+	n := utf8.RuneCountInString(tag)
+	if n <= competitionTagOneLineMaxRunes {
+		return false, competitionTagFontSize
+	}
+	return true, math.Floor(competitionTagFitConstant / math.Sqrt(float64(n)))
+}
+
+// getCompetitionTagStyle returns the style for a competition-name tag, cached
+// per size, so every tag of one name shares one style.
+func getCompetitionTagStyle(f *excelize.File, tag string) int {
+	wrap, size := competitionTagFit(tag)
+	key := styleCompetitionTag
+	if wrap {
+		key = styleKey(fmt.Sprintf("%s_wrap_%g", styleCompetitionTag, size))
+	}
+	return getCachedStyle(f, key, func(f *excelize.File) int {
+		return buildCompetitionTagStyle(f, wrap, size)
+	})
+}
+
+// buildCompetitionTagStyle is the competitor name's style (buildNameIDStyle)
+// at the given size, wrapping instead of shrinking for a long name.
+func buildCompetitionTagStyle(f *excelize.File, wrap bool, size float64) int {
+	alignment := &excelize.Alignment{Horizontal: "center", Vertical: "center"}
+	if wrap {
+		alignment.WrapText = true
+	} else {
+		alignment.ShrinkToFit = true
+	}
+	return mustNewStyle(f, &excelize.Style{
+		Alignment: alignment,
+		Font:      &excelize.Font{Family: "Calibri", Bold: false, Color: "000000", Size: size},
+		Border: []excelize.Border{
+			{Type: "top", Color: "000000", Style: 2},
+			{Type: "bottom", Color: "000000", Style: 2},
+			{Type: "left", Color: "000000", Style: 2},
+			{Type: "right", Color: "000000", Style: 2},
+		},
+	})
 }
 
 func getTimeStyle(f *excelize.File) int {

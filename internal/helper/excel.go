@@ -1769,6 +1769,11 @@ const (
 	namesToPrintPageWidthUnits = 186
 )
 
+// namesToPrintRowHeight is every Names to Print row's height in points, a
+// competitor's and a competition-name tag's alike: NamesToPrintRowsPerPage of
+// them fill one A3 landscape page at this sheet's margins.
+const namesToPrintRowHeight = 270
+
 // courtSheetName names the per-shiaijo "Names to Print" sheet after the shiaijo
 // the competition actually runs on, not after the band's position.
 func courtSheetName(courts []string, courtIdx int) string {
@@ -1814,8 +1819,14 @@ func courtsPrefix(courts []string, n int) []string {
 	return out
 }
 
-func CreateNamesToPrint(f *excelize.File, players []Player, sanitized bool, courts []string, pCoords map[string]playerCellCoord, numberPrefix string) {
+// CreateNamesToPrint writes one "Names to Print <Shiaijo>" sheet per shiaijo
+// of the competition's allocation, splitting the competitors evenly across
+// them; a shiaijo left with no competitors gets no sheet. competitionName is
+// the text of the competition-name tags each sheet opens with (see
+// printNameEntries); an empty name prints none.
+func CreateNamesToPrint(f *excelize.File, players []Player, sanitized bool, courts []string, pCoords map[string]playerCellCoord, numberPrefix, competitionName string) {
 	numCourts := clampCourts(len(courts))
+	tag := competitionTagText(competitionName)
 
 	base := len(players) / numCourts
 	extra := len(players) % numCourts
@@ -1837,7 +1848,7 @@ func CreateNamesToPrint(f *excelize.File, players []Player, sanitized bool, cour
 		if _, err := f.NewSheet(sheetName); err != nil {
 			handleExcelError("NewSheet", err)
 		}
-		printNameEntries(f, sheetName, courtPlayers, sanitized, pCoords, numberPrefix)
+		printNameEntries(f, sheetName, courtPlayers, sanitized, pCoords, numberPrefix, tag)
 	}
 
 	if err := f.DeleteSheet(SheetNamesToPrint); err != nil {
@@ -1860,7 +1871,12 @@ func CreateNamesToPrint(f *excelize.File, players []Player, sanitized bool, cour
 // sheets and another on its pool sheets and tree pages. Derived here rather
 // than by the caller so no call site can pass a count that disagrees with the
 // Pool Matches skeleton.
-func CreateNamesWithPoolToPrint(f *excelize.File, pools []Pool, sanitized bool, courts []string, courtOfPool map[string]string, pCoords map[string]playerCellCoord, numberPrefix string) {
+//
+// competitionName is the text of the competition-name tags each sheet opens
+// with (see printNameEntries); an empty name prints none. Only a shiaijo that
+// has a sheet, one with competitors on it, gets the tags: a shiaijo that runs
+// only knockout bouts has no sheet, so no tags.
+func CreateNamesWithPoolToPrint(f *excelize.File, pools []Pool, sanitized bool, courts []string, courtOfPool map[string]string, pCoords map[string]playerCellCoord, numberPrefix, competitionName string) {
 	// EffectiveDrawCourts already coerces 0/negative to 1, so it is the only
 	// clamp needed here; a clampCourts in front of it would be a no-op.
 	// Same bands and same grouping the Pool Matches skeleton uses, so a
@@ -1875,6 +1891,7 @@ func CreateNamesWithPoolToPrint(f *excelize.File, pools []Pool, sanitized bool, 
 		}
 	}
 
+	tag := competitionTagText(competitionName)
 	for c := range numCourts {
 		if len(entriesByCourt[c]) == 0 {
 			continue
@@ -1883,7 +1900,7 @@ func CreateNamesWithPoolToPrint(f *excelize.File, pools []Pool, sanitized bool, 
 		if _, err := f.NewSheet(sheetName); err != nil {
 			handleExcelError("NewSheet", err)
 		}
-		printNameEntries(f, sheetName, entriesByCourt[c], sanitized, pCoords, numberPrefix)
+		printNameEntries(f, sheetName, entriesByCourt[c], sanitized, pCoords, numberPrefix, tag)
 	}
 
 	if err := f.DeleteSheet(SheetNamesToPrint); err != nil {
@@ -1891,7 +1908,11 @@ func CreateNamesWithPoolToPrint(f *excelize.File, pools []Pool, sanitized bool, 
 	}
 }
 
-func printNameEntries(f *excelize.File, sheetName string, players []Player, sanitized bool, pCoords map[string]playerCellCoord, numberPrefix string) {
+// printNameEntries fills one Names to Print sheet: the competition-name tags
+// first when tag is not empty (one page of them, writeCompetitionTags), then a
+// row per competitor, three to a page. tag is competitionTagText's result,
+// never a raw name.
+func printNameEntries(f *excelize.File, sheetName string, players []Player, sanitized bool, pCoords map[string]playerCellCoord, numberPrefix, tag string) {
 	setupNamesToPrintLayout(f, sheetName)
 
 	// Both requested up front, in the same order as before this function
@@ -1922,11 +1943,18 @@ func printNameEntries(f *excelize.File, sheetName string, players []Player, sani
 	var stackedPositionStyle int
 	stackedStyleResolved := false
 
+	// The tags fill the first page, so the competitors start on the next one
+	// and keep the three-to-a-page breaks below.
+	tagRows := 0
+	if tag != "" {
+		tagRows = writeCompetitionTags(f, sheetName, tag)
+	}
+
 	for i, player := range players {
-		row := i + 1
+		row := tagRows + i + 1
 		positionCell := fmt.Sprintf("A%d", row)
 		nameCell := fmt.Sprintf("B%d", row)
-		handleExcelError("SetRowHeight", f.SetRowHeight(sheetName, row, 270))
+		handleExcelError("SetRowHeight", f.SetRowHeight(sheetName, row, namesToPrintRowHeight))
 
 		// D1 (bc-pnum): no fallback. A player with no number cell (a
 		// competition that hasn't been numbered) gets an EMPTY position cell,
@@ -1985,14 +2013,42 @@ func printNameEntries(f *excelize.File, sheetName string, players []Player, sani
 		handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, nameCell, buildNameFormula(player.Name, sanitized, coord)))
 		handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, nameCell, nameCell, nameIDStyle))
 
-		if row%3 == 0 {
+		if row%NamesToPrintRowsPerPage == 0 {
 			handleExcelError("InsertPageBreak", f.InsertPageBreak(sheetName, fmt.Sprintf("A%d", row+1)))
 		}
 	}
 
-	if len(players) > 0 {
-		SetPrintArea(f, sheetName, 2, len(players))
+	if lastRow := tagRows + len(players); lastRow > 0 {
+		SetPrintArea(f, sheetName, 2, lastRow)
 	}
+}
+
+// writeCompetitionTags writes the competition-name tags at the top of a Names
+// to Print sheet: CompetitionTagRows rows, each the two columns merged into one
+// cell holding the name, in the competitor rows' height and border, so the
+// tags fill exactly one page and are cut out like the competitor tags. The
+// name is a literal, not a link to the Data sheet: its size is chosen for its
+// length when the workbook is written (competitionTagFit), so a typed change
+// could outgrow it. A page break follows the tags: a sheet exists only for a
+// shiaijo with competitors, so their rows always come next. Returns the number
+// of rows written.
+func writeCompetitionTags(f *excelize.File, sheetName, tag string) int {
+	style := getCompetitionTagStyle(f, tag)
+	for row := 1; row <= CompetitionTagRows; row++ {
+		first, last := fmt.Sprintf("A%d", row), fmt.Sprintf("B%d", row)
+		handleExcelError("SetRowHeight", f.SetRowHeight(sheetName, row, namesToPrintRowHeight))
+		handleExcelError("MergeCell", f.MergeCell(sheetName, first, last))
+		handleExcelError("SetCellStr", f.SetCellStr(sheetName, first, tag))
+		handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, first, last, style))
+	}
+	handleExcelError("InsertPageBreak", f.InsertPageBreak(sheetName, fmt.Sprintf("A%d", CompetitionTagRows+1)))
+	return CompetitionTagRows
+}
+
+// competitionTagText is the text a competition-name tag prints: the name with
+// surrounding space trimmed. Empty means the sheet carries no tags.
+func competitionTagText(name string) string {
+	return strings.TrimSpace(name)
 }
 
 func FillEstimations(f *excelize.File, numPools int64, totalPoolMatches int64, teamSize int64, numEliminationMatches int64, numCourts int) {

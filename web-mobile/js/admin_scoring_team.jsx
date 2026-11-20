@@ -298,10 +298,13 @@ function predatesAnswer(match, override) {
   return override.at > 0 && !!match && isOlderRunningCopy(match, override.match.status, override.at, override.match.scoreVersion);
 }
 
+// What Record bout is answered with when the bout names no fighter: the score
+// is saved, but there is nobody to carry into the next pairing.
+const RECORD_BOUT_NO_FIGHTER_NOTICE = "The score is saved, but no fighter is named on this bout, so no next pairing was added. Pick or type who fought, then tap Record bout again.";
+
 // What a pick is answered with when its side's lineup was never read and the
 // pick's own read fails: with no lineup held, the pick could be neither checked
 // (one member at one position) nor shown on the row.
-const RECORD_BOUT_NO_FIGHTER_NOTICE = "The score is saved, but no fighter is named on this bout, so no next pairing was added. Pick or type who fought, then tap Record bout again.";
 const LINEUP_NOT_READ_NOTICE = "The lineup has not been read, so this name was not saved. It is being read again: enter the name once the lineup shows.";
 
 // What a pick is answered with when another team was really seated on its side while

@@ -259,6 +259,55 @@ describe('the lineup panel on a kachinuki match shows who the server fields in e
   });
 });
 
+describe('a name typed while the fielded read is out', () => {
+  // The reads whose form holds member 3 at Senpo alone: the pick's own, and the Save's.
+  const askedWithChukenEmpty = () => api.fetchFieldedLineup.mock.calls
+    .filter(([, , , form]) => JSON.stringify(form) === JSON.stringify({ positions: { 1: '' }, memberIds: { 1: 'mem-3' } })).length;
+
+  async function typeWhileReadOut(squad) {
+    api.fetchSquads.mockResolvedValue({ 'team-a': squad });
+    api.fetchFieldedLineup = fieldedBy(squad);
+    const utils = await mountPanel();
+    // Member 3 at Senpo: its read never lands, so Chuken shows no default when the name is typed.
+    api.fetchFieldedLineup.mockReturnValueOnce(deferred().promise);
+    await pickFromList(utils, '1', 'T1.3');
+    expect(placeholders(utils).slice(1)).toEqual(['Add player…', 'Add player…']);
+    await typeName(utils, '2', 'Ishida');
+    return utils;
+  }
+
+  it('names the member the place would have shown, not the position\'s seeded slot', async () => {
+    const utils = await typeWhileReadOut(NAMELESS);
+    await save(utils);
+    // The Save asked for the default of Chuken with that place left empty: member 1
+    // (the seeded slot of Chuken is member 2). The pick's own read is the first ask.
+    expect(askedWithChukenEmpty()).toBe(2);
+    expect(api.addTeamMember, 'no new member').not.toHaveBeenCalled();
+    expect(api.renameTeamMember).toHaveBeenCalledTimes(1);
+    expect(api.renameTeamMember.mock.calls[0].slice(0, 4)).toEqual(['comp-1', 'team-a', 'mem-1', 'Ishida']);
+    const [, , , positions, , memberIds] = api.putMatchLineup.mock.calls[0];
+    expect(positions).toEqual({ 1: '', 2: 'Ishida' });
+    expect(memberIds).toEqual({ 1: 'mem-3', 2: 'mem-1' });
+  });
+
+  it('leaves the resolver\'s own rule when the Save\'s read fails', async () => {
+    const utils = await typeWhileReadOut(NAMELESS);
+    api.fetchFieldedLineup.mockRejectedValue(new Error('offline'));
+    await save(utils);
+    expect(api.renameTeamMember.mock.calls[0].slice(0, 4)).toEqual(['comp-1', 'team-a', 'mem-2', 'Ishida']);
+  });
+
+  it('does not ask for a name a member already carries', async () => {
+    api.fetchSquads.mockResolvedValue({ 'team-a': NAMED });
+    const utils = await mountPanel();
+    api.fetchFieldedLineup.mockReturnValueOnce(deferred().promise);
+    await pickFromList(utils, '1', 'T1.3');
+    await typeName(utils, '2', 'Ishida');
+    await save(utils);
+    expect(askedWithChukenEmpty(), 'no read of its own at the Save').toBe(1);
+  });
+});
+
 describe('the panel asks again after every change (D3)', () => {
   it('shows "Add player…" while the read is out, and drops an answer older than the latest change', async () => {
     const utils = await mountPanel();

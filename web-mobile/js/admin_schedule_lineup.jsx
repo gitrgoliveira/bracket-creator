@@ -24,17 +24,9 @@ const NO_PLACES = Object.freeze({});
 const FIELDED_RETRIES = 3;
 const FIELDED_RETRY_MS = 5000;
 
-// useFieldedPlaces: who the server fields by member number in the empty places
-// of a kachinuki lineup form (operator answers D2 and D3), asked with the form as
-// it stands (`values`, `memberIds`), saved or not, once the lineup was read and
-// again after every change to it or to the team's members. The answer is held
-// with the form it was asked for and shown only while the form is still that one,
-// so a place shows no default while the read for the latest change is out, and an
-// answer for an older form is never shown. A read that fails shows "Add player…"
-// and is asked again, FIELDED_RETRY_MS later, up to FIELDED_RETRIES times (a form
-// or members change asks at once, as for any change).
-function useFieldedPlaces({ enabled, compId, teamId, matchId, values, memberIds, membersKey }) {
-  const [answer, setAnswer] = useState({ key: "", places: NO_PLACES });
+// fieldedForm: the lineup form as the fielded read is asked it: the positions that
+// hold a name or a member id (a name trimmed), and the member id of each.
+function fieldedForm(values, memberIds) {
   const positions = {};
   Object.entries(values || {}).forEach(([key, name]) => {
     const trimmed = String(name || "").trim();
@@ -46,6 +38,21 @@ function useFieldedPlaces({ enabled, compId, teamId, matchId, values, memberIds,
     ids[key] = id;
     if (!(key in positions)) positions[key] = "";
   });
+  return { positions, ids };
+}
+
+// useFieldedPlaces: who the server fields by member number in the empty places
+// of a kachinuki lineup form (operator answers D2 and D3), asked with the form as
+// it stands (`values`, `memberIds`), saved or not, once the lineup was read and
+// again after every change to it or to the team's members. The answer is held
+// with the form it was asked for and shown only while the form is still that one,
+// so a place shows no default while the read for the latest change is out, and an
+// answer for an older form is never shown. A read that fails shows "Add player…"
+// and is asked again, FIELDED_RETRY_MS later, up to FIELDED_RETRIES times (a form
+// or members change asks at once, as for any change).
+function useFieldedPlaces({ enabled, compId, teamId, matchId, values, memberIds, membersKey }) {
+  const [answer, setAnswer] = useState({ key: "", places: NO_PLACES });
+  const { positions, ids } = fieldedForm(values, memberIds);
   const formKey = enabled ? JSON.stringify([compId, teamId, matchId, positions, ids, membersKey]) : "";
   useEffect(() => {
     if (!formKey) return undefined;
@@ -254,6 +261,33 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
       setError(e?.message || "Failed to rename team member");
     }
   };
+  // A name typed into an empty place while the fielded read was out took no member
+  // (onSelect: no default was shown to take one from). The Save asks the server
+  // once more, with those places left empty, and a place whose default is a
+  // nameless member takes it, so the name goes to the member the place would have
+  // shown, as for a name typed after the default showed, and not to the slot seeded
+  // for the position. A name a member already carries is placed by the resolver, and
+  // a named default is someone else, so neither is asked; a read that fails leaves
+  // the resolver's own rule. Answers the ids to add, by position key.
+  const typedNamesAtDefaults = async ({ positions: composed, memberIds: composedIds, changed }) => {
+    const typedKeys = changed.filter(key => {
+      const name = (composed[key] || "").trim();
+      return name && !composedIds[key] && !squadEntries.some(e => e.name && e.name.toLowerCase() === name.toLowerCase());
+    });
+    if (typedKeys.length === 0) return {};
+    const open = { ...composed };
+    typedKeys.forEach(key => { delete open[key]; });
+    const asked = fieldedForm(open, composedIds);
+    const places = await Promise.resolve()
+      .then(() => window.API.fetchFieldedLineup(compId, teamId, matchId, { positions: asked.positions, memberIds: asked.ids }))
+      .catch(() => null);
+    const seated = {};
+    typedKeys.forEach(key => {
+      const entry = squadEntries.find(e => e.id === places?.[key]);
+      if (entry && !entry.name) seated[key] = entry.id;
+    });
+    return seated;
+  };
   // What a Save carries is the positions the operator changed and nothing else
   // (form.lineupToSave, operator decision 2026-10-07): the server puts them on the
   // lineup it holds when the save arrives, so a position another device changed
@@ -271,7 +305,9 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
     setLineupWarning("");
     setSaving(true);
     try {
-      const { positions: composed, memberIds: composedIds, changed } = form.lineupToSave();
+      const toSave = form.lineupToSave();
+      const { positions: composed, changed } = toSave;
+      const composedIds = { ...toSave.memberIds, ...(kachinuki ? await typedNamesAtDefaults(toSave) : {}) };
       // The lineup as the form shows it once the typed names are resolved, vacant
       // positions left out: the lineup the duplicate guard below is asked of. What is
       // sent is the positions the operator changed (changedLineupSave, below).

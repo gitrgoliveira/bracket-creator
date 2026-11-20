@@ -4,10 +4,11 @@
 // winner, so the old gate ("Pick or type who fights this bout to enable Record
 // bout.") held back a tap the server answers. It was removed with its hint.
 import React from 'react';
-import { render, act, screen } from '@testing-library/react';
+import { render, act, screen, fireEvent } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vitest';
 import { installWindowStubs } from '../helpers/stub_globals.js';
 import { makeFakeOutbox } from '../helpers/fake_outbox.js';
+import { toastSnapshot, dismissToast, resetToastQueue } from '../../toast_queue.jsx';
 
 const STUBBED_GLOBALS = {
   isHikiwake: () => false,
@@ -56,7 +57,7 @@ function stubApi(squads) {
   };
 }
 
-beforeEach(() => stubApi({}));
+beforeEach(() => { resetToastQueue(); stubApi({}); });
 
 function kachinukiMatch(subResults) {
   return {
@@ -101,5 +102,42 @@ describe('Record bout on a kachinuki bout that names no fighter', () => {
     await mount(kachinukiMatch([{ position: 1, sideA: '', sideB: '', ipponsA: [], ipponsB: [] }]));
     expect(recordBout().disabled).toBe(true);
     expect(recordBout().getAttribute('title')).toBe('Nothing recorded for this bout yet');
+  });
+});
+
+// Under a roster warning (team-members.yaml or lineups.yaml unread) nobody is
+// seated, so a played bout can name no fighter at all. Record bout saves it,
+// the server adds no pairing from it and answers a plain 200: the sheet says so.
+describe('Record bout on a bout that names no fighter, under a roster warning', () => {
+  const WARNING = "Team members could not be read, so fighters are not seated by member number. Add each bout's pairing by hand.";
+  const warned = {
+    warning: WARNING,
+    nextPairing: false,
+    sideA: { lineupFound: false, on: { name: '', memberId: '' }, remaining: [], exhausted: false },
+    sideB: { lineupFound: false, on: { name: '', memberId: '' }, remaining: [], exhausted: false },
+  };
+
+  async function tapRecord(match, roster) {
+    window.API.fetchKachinukiRoster = vi.fn().mockResolvedValue(roster);
+    await mount(match);
+    await act(async () => { dismissToast(); });
+    await act(async () => { fireEvent.click(recordBout()); });
+    for (let i = 0; i < 4; i++) await act(async () => { await Promise.resolve(); });
+  }
+
+  it('says the score is saved and no pairing was added', async () => {
+    await tapRecord(kachinukiMatch([{ position: 1, sideA: '', sideB: '', ipponsA: ['M'], ipponsB: [] }]), warned);
+    expect(toastSnapshot()).toMatchObject({ type: 'warning' });
+    expect(toastSnapshot().message).toContain('no fighter is named on this bout');
+  });
+
+  it('says nothing for a bout that names a fighter', async () => {
+    await tapRecord(kachinukiMatch([{ position: 1, sideA: 'Ueda', sideB: 'Kudo', ipponsA: ['M'], ipponsB: [] }]), warned);
+    expect(toastSnapshot()).toBeNull();
+  });
+
+  it('says nothing without a warning, where the server seats the bout itself', async () => {
+    await tapRecord(kachinukiMatch([{ position: 1, sideA: '', sideB: '', ipponsA: ['M'], ipponsB: [] }]), null);
+    expect(toastSnapshot()).toBeNull();
   });
 });

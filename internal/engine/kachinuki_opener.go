@@ -465,7 +465,11 @@ func (e *Engine) afterMatchWrite(h state.StoreTx, compID, matchID string, result
 		}
 	}
 	if door != DoorEvent && e.seatOpenerAfterWrite(h, compID, matchID) {
-		if stored, _, err := e.lookupExistingResultIn(h, compID, matchID); err == nil && stored != nil {
+		// The seat has written; a failed re-read leaves the answer with the
+		// payload's bout-1 rows, so it is logged, not dropped.
+		if stored, _, err := e.lookupExistingResultIn(h, compID, matchID); err != nil {
+			log.Printf("engine: ERROR: kachinuki seat re-read compId=%s matchId=%s: %v; the answer carries the payload's bout 1, not the seated one", compID, matchID, err)
+		} else if stored != nil {
 			takeSeatedBouts(result, stored)
 		}
 	}

@@ -7,6 +7,7 @@ import { Icon } from './icon.jsx';
 import { scoreRowMatchLabel, teamMatchTypeFor } from './pool_ids.jsx';
 import { squadRosterEntries, rosterWithoutPlacedElsewhere, lineupDuplicateNote, lineupPositionLabel, fieldedDefaults } from './lineup_resolver.jsx';
 import { renameMemberFields } from './lineup_rename.jsx';
+import { kachinukiMembersKey } from './kachinuki_advisory.jsx';
 import { changedLineupSave } from './lineup_save.jsx';
 import { queuedNotice, writePending, writeHeldOnDeviceOnly, isOffline } from './write_result.jsx';
 import { useLineupForm, LineupSourceLine, LineupProblem, LineupDraftNotice } from './lineup_draft.jsx';
@@ -211,7 +212,7 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
   // number (operator answers D2 and D3; fixed-order matches are unchanged). Asked
   // only of a lineup that was read: the blank boxes of a failed read are not empty.
   const kachinuki = (match?.teamMatchType || teamMatchTypeFor(comp)) === "kachinuki";
-  const membersKey = squad.map(mem => `${mem?.id || ""}:${mem?.index || 0}`).join(",");
+  const membersKey = kachinukiMembersKey(squad);
   const fielded = useFieldedPlaces({
     enabled: kachinuki && form.read, compId, teamId, matchId, values, memberIds, membersKey,
   });

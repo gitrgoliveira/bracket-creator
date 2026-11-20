@@ -48,12 +48,12 @@ func readKachinukiMembers(load func(string) (map[string][]domain.TeamMember, err
 	return &kachinukiMembers{load: load, compID: compID, caller: caller}
 }
 
-// forTeam answers the members of the team with participant id teamID, reading
-// the file on first use. ok is false when the file could not be read (logged
-// once, as an ERROR naming the file), and the reader then reports unread.
-func (k *kachinukiMembers) forTeam(teamID string) ([]domain.TeamMember, bool) {
+// ensureRead reads the file on first use and reports whether it could be read.
+// A file that cannot be read is logged once, as an ERROR naming it, and the
+// reader then reports unread. A nil reader knows no members.
+func (k *kachinukiMembers) ensureRead() bool {
 	if k == nil || k.load == nil {
-		return nil, false
+		return false
 	}
 	if !k.read {
 		k.read = true
@@ -65,7 +65,13 @@ func (k *kachinukiMembers) forTeam(teamID string) ([]domain.TeamMember, bool) {
 			k.byTeam = byTeam
 		}
 	}
-	if k.unread {
+	return !k.unread
+}
+
+// forTeam answers the members of the team with participant id teamID, reading
+// the file on first use. ok is false when the file could not be read.
+func (k *kachinukiMembers) forTeam(teamID string) ([]domain.TeamMember, bool) {
+	if !k.ensureRead() {
 		return nil, false
 	}
 	return k.byTeam[teamID], true

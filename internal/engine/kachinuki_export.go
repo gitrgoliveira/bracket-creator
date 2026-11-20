@@ -264,11 +264,11 @@ func (e *Engine) buildKachinukiTeamNumbers(compID string, comp *state.Competitio
 
 // all answers every team's members, reading team-members.yaml now if nothing
 // has read it yet. A file that cannot be read is logged once, as an ERROR naming
-// it (forTeam), and answers an empty map, so the labels degrade to blank rather
-// than failing the export. A missing file is already "no members" from
+// it (ensureRead), and answers an empty map, so the labels degrade to blank
+// rather than failing the export. A missing file is already "no members" from
 // LoadSquads itself (state.parseSquadsFile's contract).
 func (k *kachinukiMembers) all() map[string][]domain.TeamMember {
-	if _, ok := k.forTeam(""); !ok {
+	if !k.ensureRead() {
 		return map[string][]domain.TeamMember{}
 	}
 	return k.byTeam

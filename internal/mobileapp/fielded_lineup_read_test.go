@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -99,6 +100,27 @@ func fielded(t *testing.T, w *httptest.ResponseRecorder) map[string]string {
 	var out map[string]string
 	require.NoError(t, json.Unmarshal(got, &out))
 	return out
+}
+
+// A body over the cap answers 413, the status the spec gives, whether or not
+// the client told the truth about its length: the middleware refuses an honest
+// Content-Length up front, and a chunked body (no Content-Length) trips the
+// capped reader inside the bind, which must map to the same answer.
+func TestFieldedLineupRead_OversizedBodyAnswers413(t *testing.T) {
+	f := newFieldedReadFixture(t, true, state.TeamMatchTypeKachinuki)
+	body := `{"positions":{"senpo":"` + strings.Repeat("x", int(FieldedLineupMaxBodyBytes)) + `"}}`
+	for name, length := range map[string]int64{"honest length": int64(len(body)), "chunked": -1} {
+		t.Run(name, func(t *testing.T) {
+			req, err := http.NewRequest(http.MethodPost, f.path(f.teamA, fieldedReadMatch), strings.NewReader(body))
+			require.NoError(t, err)
+			req.Header.Set("Content-Type", "application/json")
+			req.ContentLength = length
+			w := httptest.NewRecorder()
+			f.r.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusRequestEntityTooLarge, w.Code, w.Body.String())
+			assert.Contains(t, w.Body.String(), "request body too large")
+		})
+	}
 }
 
 // The headline case: no lineup saved, the form empty, nameless members. Every

@@ -309,6 +309,9 @@ func RegisterPublicLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, com
 		}
 		var req fieldedLineupRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
+			if respondBodyTooLarge(c, err) {
+				return
+			}
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body: " + err.Error()})
 			return
 		}

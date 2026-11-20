@@ -48,8 +48,10 @@ await import('./js/data.jsx');
 // the real component, mirroring the browser's index.html load order.
 await import('./js/ui.jsx');
 
-// Fail tests that produce unexpected console.warn or console.error, matches
-// the invariant enforced by the unit suite (vitest.setup.js).
+// Fail tests that produce unexpected console.warn or console.error: the same
+// invariant vitest.setup.console.js guards for the unit and node projects. This
+// project keeps its own variant because it must unmount (cleanup()) before the
+// spies are restored and let the one React 19 JSX-transform warning through.
 // Tests that intentionally trigger warnings (e.g. the GUARD test) must spy on
 // console.error themselves with a local mock, which replaces this spy for that
 // test so afterEach only sees the genuinely unexpected calls.

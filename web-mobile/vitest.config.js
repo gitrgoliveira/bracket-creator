@@ -10,7 +10,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 //  unit  , pure-logic suite with the fake React global stub (~1572 tests).
 //           Fast: components are never mounted; logic helpers are called directly.
 //  node  , the unit files that touch no page, picked by the file-name suffix
-//           `<name>.node.test.js(x)`: plain Node, no jsdom, only the console guard.
+//           `<name>.node.test.<ext>`: plain Node, no jsdom, only the console guard.
 //           A file is in exactly one of unit and node (unit excludes the suffix).
 //  render, render-smoke suite with REAL React 19 + jsdom. Components are
 //           mounted via @testing-library/react so a missing window.* reference
@@ -44,6 +44,9 @@ const tabInstances = () => ({
     return { ...resolved, id: `${resolved.id}?tab=${tab}` };
   },
 });
+// The one spelling of "a node file": the unit project excludes it and the node
+// project includes it, so a file is in exactly one of them wherever it sits.
+const NODE_TEST_GLOB = '**/*.node.test.*';
 const makePlugins = () => [tabInstances(), react({ include: /\.(js|jsx)$/, jsxRuntime: 'classic' })];
 const sharedResolve = {
   alias: {
@@ -70,7 +73,7 @@ export default defineConfig({
             '**/node_modules/**',
             '**/dist/**',
             'js/__tests__/render/**',
-            '**/*.node.test.*',
+            NODE_TEST_GLOB,
           ],
         },
       },
@@ -85,7 +88,7 @@ export default defineConfig({
           // imports, no storage shim. A file that needs any of them is not a
           // node file and stays in the jsdom unit project.
           setupFiles: ['./vitest.setup.node.js'],
-          include: ['js/__tests__/**/*.node.test.{js,jsx}'],
+          include: [NODE_TEST_GLOB],
         },
       },
       {

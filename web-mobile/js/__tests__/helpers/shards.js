@@ -26,9 +26,11 @@ export function shardOf(list, k, n) {
 }
 
 // k and n from a shard file's own name, `<stem>.shard-<k>-of-<n>.<ext>`, taken
-// from `import.meta.url`, so a shard file carries no numbers in its body.
+// from `import.meta.url`, so a shard file carries no numbers in its body. Only
+// the last path segment is read: a folder named like a shard must not win.
 export function shardFromUrl(url) {
-    const m = /\.shard-(\d+)-of-(\d+)\./.exec(String(url));
+    const name = String(url).slice(String(url).lastIndexOf('/') + 1);
+    const m = /\.shard-(\d+)-of-(\d+)\./.exec(name);
     if (!m) throw new Error(`shardFromUrl: "${url}" is not named <stem>.shard-<k>-of-<n>.<ext>`);
     const k = Number(m[1]);
     const n = Number(m[2]);

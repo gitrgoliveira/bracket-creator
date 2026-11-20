@@ -43,6 +43,12 @@ describe('shardFromUrl', () => {
             .toEqual({ k: 5, n: 5 });
     });
 
+    it('reads the file name only, never a folder named like a shard', () => {
+        expect(shardFromUrl('file:///x.shard-1-of-2.tmp/render/a.shard-3-of-7.render.test.jsx'))
+            .toEqual({ k: 3, n: 7 });
+        expect(() => shardFromUrl('file:///x.shard-1-of-2.tmp/a.test.jsx')).toThrow();
+    });
+
     it('throws on a name that is not a shard file', () => {
         expect(() => shardFromUrl('file:///x/own_status_permutations.shards.render.test.jsx')).toThrow();
         expect(() => shardFromUrl('file:///x/own_status_permutations.render.test.jsx')).toThrow();

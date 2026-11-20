@@ -58,6 +58,19 @@ const sharedResolve = {
   },
 };
 
+// Pool, isolation and file order stay at vitest's own settings (forks, isolate
+// on, the built-in sequencer) on purpose. Measured 2026-11-20 on vitest 5.1.0,
+// 576 files, 10 cores, medians of three interleaved runs:
+//  - threads: green, 61.8 s against forks' 65.3 s (5 %), under the 10 % a
+//    pool change must gain, and its one process peaks at 3.4 GB against 0.5 GB.
+//  - vmThreads / vmForks: red (tests that assign global.window or performance
+//    throw "has only a getter").
+//  - isolate: false: red, with a different failure set every run (tests leak
+//    module and window.* state into the next file in the worker).
+//  - a sequencer putting the permutation shards first on a cold cache: 66.7 s
+//    against 66.0 s; the shards already end well inside the wall.
+//  - fewer workers (maxWorkers: 4): 108.6 s. The cores are saturated.
+// `vitest doctor` reaches the same answer. Re-measure before changing any of it.
 export default defineConfig({
   test: {
     projects: [

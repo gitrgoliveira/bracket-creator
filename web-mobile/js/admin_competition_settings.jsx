@@ -5,6 +5,7 @@
 
 import { teamMatchTypeHint } from './pool_ids.jsx';
 import { DurationInput } from './duration.jsx';
+import { Icon } from './icon.jsx';
 import { EstimateHeadline, timeToMinutes } from './admin_schedule_utils.jsx';
 import { readRetimePreview, RetimeWarning } from './retime_warning.jsx';
 import { formatPerShiaijoRow, formatPausesRow } from './admin_competition_overview.jsx';
@@ -57,6 +58,7 @@ import { PillGroup, PillButton, CheckboxField, NumberField, TextField } from './
 import { seededRanks } from './admin_helpers.jsx';
 import { useUnsavedInput } from './app_version.jsx';
 import { useLatestRef } from './latest_ref.jsx';
+import { andList } from './list_phrase.jsx';
 import { useWaitForQueuedWrites, QueuedWritesWait, queuedWritesNounFor, TIME_WRITE_KINDS } from './queued_writes_wait.jsx';
 import {
   settingsPutBody,
@@ -872,21 +874,21 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
   // transient "Saving…" and "✓ Saved at" states; the footer deliberately shows
   // neither, so those stay where they are rather than being forced into a
   // common value that would change what the footer renders.
-  const saveBlockMessage = saveErr ? `⚠ ${saveErr}`
-    : hasDurationError ? "⚠ Fix match duration"
+  const saveBlockMessage = saveErr ? saveErr
+    : hasDurationError ? "Fix match duration"
       // "allocation", not "count": courtsErr also covers a selection with
       // nothing in it, which is not a counting problem.
-      : blockingCourtsErr ? "⚠ Fix shiaijo allocation"
+      : blockingCourtsErr ? "Fix shiaijo allocation"
         // Unlike the courts arm above, poolSettingsErr already names the
         // field and the exact rule (e.g. "Players per pool must be a whole
         // number ≥ 3."), so it is printed directly rather than behind a
         // fixed short label.
-        : blockingPoolSettingsErr ? `⚠ ${poolSettingsErr}`
+        : blockingPoolSettingsErr ? poolSettingsErr
           // Same reasoning as the pool arm above: swissSettingsError already
           // names the field and the rule, so it prints directly.
-          : blockingSwissSettingsErr ? `⚠ ${swissSettingsErr}`
-            : blockingTeamSizeErr ? `⚠ ${teamSizeErr}`
-              : blockingExpectedParticipantsErr ? `⚠ ${expectedParticipantsErr}` : "";
+          : blockingSwissSettingsErr ? swissSettingsErr
+            : blockingTeamSizeErr ? teamSizeErr
+              : blockingExpectedParticipantsErr ? expectedParticipantsErr : "";
   const saveBlocked = !!saveBlockMessage;
 
   return (
@@ -907,7 +909,10 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
             fontWeight: 600,
             transition: "background-color 300ms var(--ease-out), color 300ms var(--ease-out)"
           }}>
-            {saving && !saveErr ? "Saving…" : saveBlocked ? saveBlockMessage : isDirty ? "● Unsaved changes" : lastSaved ? `✓ Saved at ${lastSaved}` : ""}
+            {saving && !saveErr ? "Saving…"
+              : saveBlocked ? <><Icon name="triangle-alert" size={13} className="icon-lead" />{saveBlockMessage}</>
+                : isDirty ? "● Unsaved changes"
+                  : lastSaved ? <><Icon name="check" size={13} className="icon-lead" />Saved at {lastSaved}</> : ""}
           </div>
           <button type="button" className="btn btn--primary" onClick={saveNow} disabled={saveDisabled}>
             {saving ? "Saving…" : "Save changes"}
@@ -940,7 +945,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
               and an INHERITED allocation, whose own list is empty, is not
               announced as "assigned 0 shiaijo". */}
           <div style={{ fontWeight: 600, marginBottom: 6 }}>
-            ⚠ This competition&apos;s shiaijo allocation blocks the draw.
+            <Icon name="triangle-alert" size={14} className="icon-lead" />This competition&apos;s shiaijo allocation blocks the draw.
           </div>
           <div>
             {savedCourtsErr} Change the assignment below and save; the draw cannot be generated until you do.
@@ -950,12 +955,12 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
       {clashWarnings && clashWarnings.length > 0 && (
         <div className="alert alert--warn" style={{ marginBottom: 12 }} data-testid="clash-banner">
           <div style={{ fontWeight: 600, marginBottom: 6 }}>
-            ⚠ Court clash. This competition overlaps {clashWarnings.length === 1 ? "another" : `${clashWarnings.length} other`} on a shared shiaijo:
+            <Icon name="triangle-alert" size={14} className="icon-lead" />Court clash. This competition overlaps {clashWarnings.length === 1 ? "another" : `${clashWarnings.length} other`} on a shared shiaijo:
           </div>
           <ul style={{ margin: "0 0 8px 16px", padding: 0 }}>
             {clashWarnings.map((w) => (
               <li key={`${w.otherCompName}|${w.overlapStart}|${w.overlapEnd}`}>
-                <strong>{w.otherCompName}</strong>. Shiaijo {(w.sharedCourts || []).join(", ")} · {w.overlapStart}–{w.overlapEnd}
+                <strong>{w.otherCompName}</strong>: shiaijo {andList(w.sharedCourts || [])}, {w.overlapStart} to {w.overlapEnd}
               </li>
             ))}
           </ul>
@@ -1482,7 +1487,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
         {/* Same badge-like status role as the header chip above (13px, "Buttons,
             inputs, badges" per DESIGN.md Typography): both are a bold coloured
             save-state indicator sitting beside the Save button, not a hint. */}
-        {saveBlocked && <span style={{ fontSize: 13, color: "var(--red)", fontWeight: 600 }}>{saveBlockMessage}</span>}
+        {saveBlocked && <span style={{ fontSize: 13, color: "var(--red)", fontWeight: 600 }}><Icon name="triangle-alert" size={13} className="icon-lead" />{saveBlockMessage}</span>}
         {!saveBlocked && isDirty && !saving && <span style={{ fontSize: 13, color: "var(--warn)", fontWeight: 600 }}>● Unsaved changes</span>}
         <button type="button" className="btn btn--primary" onClick={saveNow} disabled={saveDisabled}>
           {saving ? "Saving…" : "Save changes"}

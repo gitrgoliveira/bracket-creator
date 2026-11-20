@@ -1,13 +1,13 @@
 // bc-obox G4b: the tournament settings and a competition's fighting-spirit
 // awards, whole documents saved against a version through the outbox. Split
-// out of api_client.jsx: the one owner of how a document save keeps its
+// out of the api_client_* modules: the one owner of how a document save keeps its
 // version, shows while queued and is refused. The outbox hands in the three
 // things it needs (createDocumentVersions); nothing here touches its queue
 // otherwise.
 //
 // One base per document (`tournament`, `awards:<comp>`). A save not yet out
 // takes the place of a queued save of the same document (_coalesceTarget in
-// api_client.jsx); a save made against the version this device's own last save
+// api_client_enqueue.jsx); a save made against the version this device's own last save
 // of the document replaced takes the version that save answered
 // (rebaseQueuedVersion), so the device never refuses its own earlier save; a
 // save made against any other version is sent as it is, and the server refuses

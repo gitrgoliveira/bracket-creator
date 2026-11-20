@@ -8,7 +8,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { unfinishedTeamBouts, unfinishedTeamBoutsMessage } from '../admin_scoring_team.jsx';
+import { unfinishedTeamBouts, unfinishedTeamBoutsMessage } from '../admin_scoring_team_bouts.jsx';
 
 const blank = (pos) => ({ _pos: pos, aPts: [], bPts: [], aFouls: 0, bFouls: 0, fusensho: '', draw: false, encho: 0 });
 

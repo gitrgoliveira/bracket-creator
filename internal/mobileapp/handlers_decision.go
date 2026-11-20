@@ -346,7 +346,7 @@ func respondDecisionEngineError(c *gin.Context, store CompetitionStore, compID, 
 	switch {
 	case errors.Is(engErr, engine.ErrMatchSuperseded):
 		// bc-lww1. REACHABLE since mp-jnvl: the SPA stamps decision
-		// writes (api_client.recordDecision) and RecordDecisionTx puts
+		// writes (recordDecision, api_client_matches.jsx) and RecordDecisionTx puts
 		// that stamp on its MatchResult, so ApplyByTimestamp no longer
 		// takes the unstamped bypass and a decision can lose to a newer
 		// stored result -- the same way a score write can. An unstamped
@@ -458,8 +458,9 @@ func respondDecisionEngineError(c *gin.Context, store CompetitionStore, compID, 
 // scheduled, which is how a both-barred match can carry it), and the draw
 // clears it and keeps the request's reason, if any, as the correction reason.
 //
-// Returns true when it fully answered the request (success, or a failure of
-// ITS OWN write once the shape qualified); false when the shape does not
+// Returns true when it fully answered the request (success, the exact resend
+// of the draw it recorded, or a failure of ITS OWN write once the shape
+// qualified); false when the shape does not
 // qualify, so the caller falls through to the ordinary /decision flow --
 // which, for any OTHER hikiwake, is req.Validate()'s existing 400 ("use
 // /score for fought/hikiwake"), unchanged from today.
@@ -470,6 +471,7 @@ func handleBothSidesBarredHikiwake(c *gin.Context, eng ScoringEngine, store Comp
 	reason := strings.TrimSpace(req.DecisionReason)
 	var (
 		applied  bool
+		replay   bool
 		result   state.MatchResult
 		writeErr error
 	)
@@ -484,6 +486,17 @@ func handleBothSidesBarredHikiwake(c *gin.Context, eng ScoringEngine, store Comp
 				m = &poolMatches[i]
 				break
 			}
+		}
+		// The draw already recorded, sent again because its answer was lost
+		// (a page that went away mid-send resends it on its next load): the
+		// same verdict under the same stamp is answered as recorded, as
+		// exactDecisionReplay answers any other decision's resend, rather than
+		// falling through to the 400 every other hikiwake gets.
+		if m != nil && m.Status == state.MatchStatusCompleted && m.Decision == "hikiwake" &&
+			req.ModifiedAt > 0 && m.GroupStamp(state.GroupResult) == req.ModifiedAt {
+			result = *m
+			replay = true
+			return nil
 		}
 		if m == nil || m.Status != state.MatchStatusScheduled {
 			return nil
@@ -520,6 +533,10 @@ func handleBothSidesBarredHikiwake(c *gin.Context, eng ScoringEngine, store Comp
 	})
 	if txErr != nil {
 		internalError(c, txErr)
+		return true
+	}
+	if replay {
+		c.JSON(http.StatusOK, scoreResponseWithReopened(&result, nil))
 		return true
 	}
 	if !applied {

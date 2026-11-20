@@ -1,4 +1,4 @@
-// normalizeViewerCompItem (api_client.jsx) hoists the server's slotMinutes and
+// normalizeViewerCompItem (api_client_requests.jsx) hoists the server's slotMinutes and
 // knockoutSlotMinutes, siblings of config on the wire, onto the flattened
 // competition. Dropped there, courtPaceLookup finds no slot and projects no
 // time anywhere. Pinned through the public fetcher and the real lookup.

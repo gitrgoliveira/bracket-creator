@@ -83,22 +83,22 @@ describe('DraftEstimatePanel Part D copy mapping', () => {
     expect(getNodeText(el)).toBe('Est. duration: about 4h 08m');
   });
 
-  it('renders Panel per shiaijo: Per shiaijo: A about 4h 08m · B about 4h 02m', () => {
+  it('renders Panel per shiaijo: Per shiaijo: A about 4h 08m, B about 4h 02m', () => {
     const tree = DraftEstimatePanel({
       estimate: { totalDurationMinutes: 248, perCourtMinutes: [248, 242] },
       shape: { startTime: '09:30' },
     });
     const el = findTestId(tree, 'draft-estimate-per-shiaijo');
-    expect(getNodeText(el)).toBe('Per shiaijo: A about 4h 08m · B about 4h 02m');
+    expect(getNodeText(el)).toBe('Per shiaijo: A about 4h 08m, B about 4h 02m');
   });
 
-  it('renders Panel per shiaijo, an idle one: Per shiaijo: A about 55m · B has no matches', () => {
+  it('renders Panel per shiaijo, an idle one: Per shiaijo: A about 55m, B has no matches', () => {
     const tree = DraftEstimatePanel({
       estimate: { totalDurationMinutes: 55, perCourtMinutes: [55, 0] },
       shape: { startTime: '09:30' },
     });
     const el = findTestId(tree, 'draft-estimate-per-shiaijo');
-    expect(getNodeText(el)).toBe('Per shiaijo: A about 55m · B has no matches');
+    expect(getNodeText(el)).toBe('Per shiaijo: A about 55m, B has no matches');
   });
 
   it('renders Panel timing with pauses', () => {

@@ -10,8 +10,9 @@
 // editor shows depends on which made a change and how its own write was
 // answered, and every piece of that is DERIVED here from two inputs only:
 //
-//   - the feed: the host's copy of the match (status and stamp), observed on
-//     every render (`observe`), so a change is judged against the LATEST feed;
+//   - the feed: the host's copy of the match (status, stamp and the server's
+//     scoreVersion), observed on every render (`observe`), so a change is
+//     judged against the LATEST feed;
 //   - the editor's own writes: each one gets a token (`begin`), and its answer
 //     (`answer`, from the outbox's `settled`, a callback, never a wait) acts
 //     only while that token is the current one, so a stale answer can never
@@ -42,11 +43,11 @@ export const DISCARDED = 'discarded';
 
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
-// createOwnStatus: one editor's owner, starting from the feed's status and
-// stamp.
-export function createOwnStatus(status, at) {
+// createOwnStatus: one editor's owner, starting from the feed's status, stamp
+// and scoreVersion.
+export function createOwnStatus(status, at, version) {
   const st = {
-    feed: { status, at },
+    feed: { status, at, version: Number(version) || 0 },
     token: 0,
     // The own writes out or landed over one move, a CHAIN (stage 5 review 7):
     // {from, entries: [{token, kind, fields, landed}], sawTarget, leftTarget,
@@ -139,11 +140,24 @@ export function createOwnStatus(status, at) {
   };
 
   return {
-    // observe: the feed's copy of the match on this render.
-    observe(status, at) {
+    // observe: the feed's copy of the match on this render, with the server's
+    // scoreVersion (the score-log line count, which only grows).
+    observe(status, at, version) {
       const prev = st.feed.status;
-      if (status === prev && at === st.feed.at) return;
-      st.feed = { status, at };
+      const v = Number(version) || 0;
+      // A copy that takes the match OUT of running and is older than the
+      // running copy by its scoreVersion (lower, or none at all) is a refetch
+      // the server answered from data read before the write that moved the
+      // match to running (an own Start or reopen, or another device's start),
+      // landing after that write's push: it is ignored whole, so no kept
+      // draft is dropped, nothing resets and the match stays running here.
+      // The next copy decides. A running copy that carries no scoreVersion
+      // cannot tell, and every move out of it stands. The scheduled-side
+      // counterpart, a late refetch landing before the push, is the landed
+      // own Start's stamp rule below (stage 5 review 8).
+      if (prev === 'running' && status !== 'running' && st.feed.version > 0 && v < st.feed.version) return;
+      if (status === prev && at === st.feed.at) { st.feed.version = v; return; }
+      st.feed = { status, at, version: v };
       if (status !== prev) { moved(prev, status); return; }
       // The same status at a new stamp. An own write the server took that the
       // feed never showed running (the match was sent back, or finished, by

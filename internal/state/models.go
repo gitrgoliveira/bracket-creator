@@ -1540,7 +1540,7 @@ func (s *SubMatchResult) HanteiDecided() bool {
 // (a Tie is "hikiwake", a default win "fusensho"), a struck point or the
 // hantei mark on either side, a foul, or an overtime. A row with none of
 // those was never fought. It is the Go twin of subBoutHasBeenPlayed
-// (web-mobile/js/admin_scoring_team.jsx), and the finish gate for a team
+// (web-mobile/js/admin_scoring_team_bouts.jsx), and the finish gate for a team
 // match (every bout is fought, operator ruling 2026-09-24) asks it of each
 // numbered bout. Placeholder and empty cells are not points, the same rule
 // CountScoringIppons applies everywhere else, so a row of unfilled slots

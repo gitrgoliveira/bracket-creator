@@ -213,9 +213,11 @@ js/test: js/deps ## Run JavaScript unit tests
 	@cd web-mobile && NODE_NO_WARNINGS=1 npm test
 	@cd web && NODE_NO_WARNINGS=1 npm test
 
-js/check-imports: ## Check cross-module named imports resolve (mp-zac3 split modules)
+js/check-imports: web-mobile/node_modules/.package-lock.json ## Check named imports of every web-mobile module resolve, CHECK_MODULES matches the folder, script tags agree, no module reads a cycle sibling while it loads
 	@echo "Checking cross-module imports..."
 	@node web-mobile/check-imports.mjs
+	@echo "Checking no module reads a cycle sibling's binding while it loads..."
+	@node web-mobile/check-load-cycles.mjs
 	@echo "Checking the write-result rule is asked, not re-derived..."
 	@node web-mobile/check-write-result.mjs
 	@echo "Checking the competitor-number match rule is asked, not re-derived..."
@@ -495,12 +497,29 @@ run-mobile: go/build ## Run the mobile-app locally (use TOURNAMENT_DATA_DIR to o
 	@mkdir -p $(TOURNAMENT_DATA_DIR)
 	$(BIN_PATH)/$(BIN_NAME) mobile-app --folder $(TOURNAMENT_DATA_DIR)
 
-mobile-app-example: go/build ## Setup and run a full tournament demo using mobile app API
+# The seeding script runs in its own venv from the pinned scripts/requirements.txt,
+# since the system python3 may lack `requests`.
+SCRIPTS_VENV  := .venv-scripts
+SCRIPTS_BIN   := $(SCRIPTS_VENV)/bin
+SCRIPTS_REQS  := scripts/requirements.txt
+SCRIPTS_STAMP := $(SCRIPTS_VENV)/.installed
+
+$(SCRIPTS_STAMP): $(SCRIPTS_REQS)
+	@echo "Installing the seeding script's pinned dependencies into $(SCRIPTS_VENV)..."
+	@test -x $(SCRIPTS_BIN)/python || $(PYTHON) -m venv $(SCRIPTS_VENV)
+	@$(SCRIPTS_BIN)/python -m pip install --quiet -r $(SCRIPTS_REQS)
+	@touch $@
+
+# The capture harness seeds its demo with the same script, from the same venv
+# (scripts/screenshots/lib/seed.mjs runs $(SCRIPTS_BIN)/python).
+docs/screenshots docs/videos docs/media: $(SCRIPTS_STAMP)
+
+mobile-app-example: go/build $(SCRIPTS_STAMP) ## Setup and run a full tournament demo using mobile app API
 	@echo "Starting temporary mobile app server for demo..."
 	@rm -rf ./demo-data && mkdir -p ./demo-data
 	@$(BIN_PATH)/$(BIN_NAME) mobile-app --folder ./demo-data & \
 	PID=$$!; \
-	python3 scripts/setup_tournament.py; \
+	$(SCRIPTS_BIN)/python scripts/setup_tournament.py; \
 	EXIT_CODE=$$?; \
 	echo "Terminating server (PID: $$PID)..."; \
 	kill $$PID; \

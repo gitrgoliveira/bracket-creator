@@ -115,7 +115,7 @@ const pressEscape = async () => {
   await act(async () => { notPrevented = fireEvent.keyDown(document.body, { key: 'Escape' }); });
   return notPrevented;
 };
-const clickClose = () => act(async () => { fireEvent.click(screen.getByText('✕ Close')); });
+const clickClose = () => act(async () => { fireEvent.click(screen.getByText('Close')); });
 
 describe('bc-dscn: individual editor', () => {
   it('a RUNNING match closes without the prompt and saves the pending edit now', async () => {

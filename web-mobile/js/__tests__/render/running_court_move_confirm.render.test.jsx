@@ -363,7 +363,7 @@ describe('running court move confirmation across all doors', () => {
       });
 
       const courtColumns = utils.container.querySelectorAll('.tw-court');
-      const courtBCol = [...courtColumns].find((c) => c.textContent.includes('SHIAIJO B'));
+      const courtBCol = [...courtColumns].find((c) => c.textContent.includes('Shiaijo B'));
       const courtBList = courtBCol.querySelector('.tw-court__list');
       expect(courtBList).toBeTruthy();
 
@@ -422,7 +422,7 @@ describe('running court move confirmation across all doors', () => {
       });
 
       const courtColumns = utils.container.querySelectorAll('.tw-court');
-      const courtBCol = [...courtColumns].find((c) => c.textContent.includes('SHIAIJO B'));
+      const courtBCol = [...courtColumns].find((c) => c.textContent.includes('Shiaijo B'));
       const courtBList = courtBCol.querySelector('.tw-court__list');
       expect(courtBList).toBeTruthy();
 
@@ -849,7 +849,10 @@ describe('running court move confirmation across all doors', () => {
 
       const panel = utils.container.querySelector('.running-panel__head');
       const trigger = within(panel).getByTitle('Change shiaijo');
-      expect(trigger.textContent).toContain('A');
+      expect(trigger.textContent.trim()).toBe('Shiaijo A');
+      // The refresh after the refusal reads the competitions again; without
+      // this stub the page lost the competition ("Competition not available").
+      window.API.fetchCompetitions = vi.fn().mockResolvedValue(t.competitions);
 
       confirmDialogSpy.mockResolvedValueOnce(true);
       await selectCourtInPicker(panel, 'B');
@@ -865,7 +868,12 @@ describe('running court move confirmation across all doors', () => {
 
       expect(showToast).toHaveBeenCalledTimes(1);
       expect(showToast).toHaveBeenCalledWith(sentence, 'error');
-      expect(trigger.textContent).toContain('A');
+      // Read the trigger again: the label reads "Shiaijo <court>", and the
+      // node must still be the one on the page (before the fetchCompetitions
+      // stub above, the refresh after the refusal emptied the tournament and
+      // a detached node kept "SHIAIJO B", whose "A" passed this check).
+      const after = within(utils.container.querySelector('.running-panel__head')).getByTitle('Change shiaijo');
+      expect(after.textContent.trim()).toBe('Shiaijo A');
     });
   });
 });

@@ -352,7 +352,7 @@ describe('downstreamKnockoutRunningMessage', () => {
 
 // bc-rawm: the 409 court_busy sentence for a score write, built client-side
 // from the server's `court` + `label` rather than echoed from the server's
-// own `message` (api_client.jsx's recordScore, and reopenFailureError's
+// own `message` (api_client_matches.jsx's recordScore, and reopenFailureError's
 // reuse of the same shape).
 describe('courtBusyMessage', () => {
     it('names the shiaijo and the blocking match by its operator label', () => {

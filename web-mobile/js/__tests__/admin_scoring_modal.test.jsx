@@ -24,12 +24,11 @@ import {
 import { makeSubmitDecision, fusenshoAllowed, clearFusensho, applyBoutScoreEdit } from '../admin_scoring_shared.jsx';
 import { DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED } from '../write_result.jsx';
 import { sameCompetitor } from '../competitor_identity.jsx';
-import { preserveStoredDaihyosenVerdict } from '../admin_scoring_team.jsx';
 import { hanteiWinnerKey, hanteiSlot } from '../result_slot.jsx';
-// teamEncounterHasResult is a module-internal helper of admin_scoring_team.jsx
-// (not part of the thin-entry consumer barrel), imported directly like the
-// resolveMatchLineup tests do.
-import { teamEncounterHasResult, resolveKachinukiBoutSides, subBoutHasBeenPlayed, fusenshoSideFromSub, teamBoutIsDraw, boutWinnerSide } from '../admin_scoring_team.jsx';
+// These are module-internal helpers of the team editor (not part of the
+// thin-entry consumer barrel), imported directly from the modules that own them.
+import { preserveStoredDaihyosenVerdict, teamEncounterHasResult, subBoutHasBeenPlayed, fusenshoSideFromSub, teamBoutIsDraw, boutWinnerSide } from '../admin_scoring_team_bouts.jsx';
+import { resolveKachinukiBoutSides } from '../admin_scoring_team_kachinuki.jsx';
 import { isKikenDecision } from '../api_serializers.jsx';
 
 window.isKikenDecision = isKikenDecision;
@@ -977,18 +976,18 @@ describe('shouldBlockScoringKeys (hantei keyboard guard)', () => {
 
 describe('teamResultLabel (no draw in a knockout)', () => {
   it('names the winning side regardless of phase', () => {
-    expect(teamResultLabel({ teamWinner: 'a', isKnockoutPhase: true, hasAnyScore: true })).toBe('AKA WIN');
-    expect(teamResultLabel({ teamWinner: 'b', isKnockoutPhase: false, hasAnyScore: true })).toBe('SHIRO WIN');
+    expect(teamResultLabel({ teamWinner: 'a', isKnockoutPhase: true, hasAnyScore: true })).toBe('Aka wins');
+    expect(teamResultLabel({ teamWinner: 'b', isKnockoutPhase: false, hasAnyScore: true })).toBe('Shiro wins');
   });
 
   it('a tied POOL encounter is a true draw', () => {
-    expect(teamResultLabel({ teamWinner: null, isKnockoutPhase: false, hasAnyScore: true })).toBe('DRAW');
-    expect(teamResultLabel({ teamWinner: null, isKnockoutPhase: false, hasAnyScore: false })).toBe('DRAW');
+    expect(teamResultLabel({ teamWinner: null, isKnockoutPhase: false, hasAnyScore: true })).toBe('Draw');
+    expect(teamResultLabel({ teamWinner: null, isKnockoutPhase: false, hasAnyScore: false })).toBe('Draw');
   });
 
   it('a tied KNOCKOUT encounter is never a draw; it needs a daihyosen', () => {
     // Scored tie in a bracket match → resolve by representative bout.
-    expect(teamResultLabel({ teamWinner: null, isKnockoutPhase: true, hasAnyScore: true })).toBe('DAIHYOSEN');
+    expect(teamResultLabel({ teamWinner: null, isKnockoutPhase: true, hasAnyScore: true })).toBe('Daihyosen');
     // mp-gmcg: daihyosen does not exist in kachinuki — a tied knockout
     // kachinuki encounter stays pending; the tie is resolved by fighting on.
     expect(teamResultLabel({ teamWinner: null, isKnockoutPhase: true, hasAnyScore: true, isKachinuki: true })).toBe('-');
@@ -1298,7 +1297,7 @@ describe('item 7: non-points decisions advance to next match', () => {
 // bc-cse (finding 1): the decision path (kiken / fusenpai / daihyosen) gets
 // the SAME downstream_knockout_played confirm+retry experience the score
 // path's editMatchScore (admin.jsx) has, via the SAME attemptScoreWrite loop
-// (write_result.jsx). Before this fix, api_client.jsx's recordDecision threw
+// (write_result.jsx). Before this fix, api_client_matches.jsx's recordDecision threw
 // a plain `new Error(err.error)` on the 409, so the operator saw the literal
 // token "downstream_knockout_played" and nothing could set
 // forceDownstreamReopen to get past it.

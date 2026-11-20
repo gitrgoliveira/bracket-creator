@@ -20,6 +20,11 @@ const { useState, useMemo, useEffect, useRef } = React;
 const pluralize = window.pluralize;
 const EmptyState = window.EmptyState;
 
+// How a participant came to be on the roster, as the row's tag shows it. The
+// stored value (participants.csv's `source` column) stays lower case; only the
+// label is sentence case.
+const SOURCE_LABEL = { manual: "Manual", registered: "Registered", transfer: "Transfer" };
+
 // EscapeListener: registers the global Escape→onClose handler only while
 // it's mounted. Used inside conditionally-rendered modals so the listener's
 // lifetime tracks the modal's, avoiding the "always-active preventDefault"
@@ -801,7 +806,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
       const updated = await window.API.replaceParticipant(c.id, targetPid, payload, password);
       if (!mountedRef.current) return;
       setReplaceTarget(null);
-      showToast(oldName === updated.name ? `Saved changes for ${updated.name}` : `Renamed ${oldName} → ${updated.name}`);
+      showToast(oldName === updated.name ? `Saved changes for ${updated.name}` : `Renamed ${oldName} to ${updated.name}`);
       if (updated.warnings && updated.warnings.length > 0) {
         updated.warnings.forEach(w => showToast(`Warning: ${w}`, "error"));
       }
@@ -1058,7 +1063,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
       )}
       {isStarted && (
         <div style={{ marginBottom: 16, display: "flex", justifyContent: "flex-end" }}>
-          <button type="button" className="btn btn--primary" onClick={() => onSection("scores")}>Go to Scoring →</button>
+          <button type="button" className="btn btn--primary" onClick={() => onSection("scores")}>Go to Scoring</button>
         </div>
       )}
       {/* Setup next-step cue: connects this landing page to the rest of the
@@ -1086,7 +1091,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
             className={players.length >= 2 ? "btn btn--primary" : "btn"}
             onClick={() => onSection("overview")}
           >
-            {players.length >= 2 ? "Continue to draw setup →" : "View setup steps →"}
+            {players.length >= 2 ? "Continue to draw setup" : "View setup steps"}
           </button>
         </div>
       )}
@@ -1133,26 +1138,26 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
                   <button
                     type="button"
                     onClick={() => setSearchQuery("")}
-                    style={{ position: "absolute", right: 6, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", cursor: "pointer", color: "var(--ink-3)", fontSize: 14, padding: 2 }}
+                    style={{ position: "absolute", right: 6, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", cursor: "pointer", color: "var(--ink-3)", fontSize: 14, padding: 2, display: "flex", alignItems: "center", justifyContent: "center" }}
                     aria-label="Clear search"
-                  >×</button>
+                  ><Icon name="x" size={14} /></button>
                 )}
               </div>
             )}
           </div>
           {!!seedProblem && (
             <div className="alert alert--error" style={{ margin: "0 16px 16px" }} data-testid="seed-gap-banner">
-              <Icon name="alert-circle" /> {seedProblem} The draw cannot run until the seeding is fixed.
+              <Icon name="alert-circle" className="icon-lead" />{seedProblem} The draw cannot run until the seeding is fixed.
             </div>
           )}
           {seedImportResult && (
             <div style={{ margin: "0 16px 12px" }}>
               <div className="alert alert--success" style={{ marginBottom: 6 }}>
-                <Icon name="check" /> Matched {seedImportResult.updatedCount} of {seedImportResult.totalRows} seeded players.
+                <Icon name="check" className="icon-lead" />Matched {seedImportResult.updatedCount} of {seedImportResult.totalRows} seeded players.
               </div>
               {seedImportResult.unmatched.length > 0 && (
                 <div className="alert alert--warn">
-                  <Icon name="alert-circle" /> {seedImportResult.unmatched.length} row{seedImportResult.unmatched.length !== 1 ? "s" : ""} not matched:
+                  <Icon name="alert-circle" className="icon-lead" />{seedImportResult.unmatched.length} row{seedImportResult.unmatched.length !== 1 ? "s" : ""} not matched:
                   <ul style={{ margin: "4px 0 0 16px", padding: 0 }}>
                     {seedImportResult.unmatched.map(({ name, suggestion }) => (
                       <li key={name}>{name}{suggestion ? <span style={{ color: "var(--ink-3)" }}>, did you mean <em>{suggestion}</em>?</span> : ""}</li>
@@ -1247,7 +1252,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
             </div>
           )}
           {players.length === 0 ? (
-            <EmptyState icon="🌱" title="No participants yet" message={'Add names on the right, then "Apply".'} style={{ padding: 24 }} />
+            <EmptyState icon="sprout" title="No participants yet" message={'Add names on the right, then "Apply".'} style={{ padding: 24 }} />
           ) : (
             <div className="seed-list">
               {/* When a source filter is active, reorder controls would operate on */}
@@ -1302,7 +1307,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
                         <div className="seed-row__name" title={p.name}>
                           <NumberedName name={p.name} number={p.number} />
                         </div>
-                        {p.source && <span className="tag-badge">{p.source}</span>}
+                        {p.source && <span className="tag-badge">{SOURCE_LABEL[p.source] || p.source}</span>}
                       </div>
                       {/* No participant id here (operator ruling, bc-prow,
                           reversing bc-pnum 1e): the id is plumbing, and an
@@ -1408,7 +1413,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
 
           {importSummary && (
             <div className="alert alert--success" style={{ marginBottom: 12, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <span>✔ Loaded <strong>{importSummary.newCount}</strong> entries. {importSummary.existingCount > 0 ? `This will replace ${importSummary.existingCount} existing ${c.kind === "team" ? "teams" : "players"} on Apply.` : ""}</span>
+              <span><Icon name="check" size={14} className="icon-lead" />Loaded <strong>{importSummary.newCount}</strong> entries. {importSummary.existingCount > 0 ? `This will replace ${importSummary.existingCount} existing ${c.kind === "team" ? "teams" : "players"} on Apply.` : ""}</span>
               <button type="button" className="btn btn--sm btn--ghost" onClick={() => setImportSummary(null)}>Dismiss</button>
             </div>
           )}

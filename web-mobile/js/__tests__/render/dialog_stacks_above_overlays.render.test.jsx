@@ -10,7 +10,7 @@ import React from 'react';
 import { render, act, cleanup } from '@testing-library/react';
 import { describe, it, expect, afterEach } from 'vitest';
 import { DialogHost, confirmDialog } from '../../ui.jsx';
-import { readStylesheet, cssBlock, modules, readCode } from '../helpers/source.js';
+import { readStylesheet, cssBlock, modules, readCode, readFamilyCode } from '../helpers/source.js';
 
 afterEach(cleanup);
 
@@ -82,7 +82,7 @@ describe('the announcement cards and the modals', () => {
   it.each(['admin_scoring_team.jsx', 'admin_scoring_individual.jsx', 'admin_scoring_engi.jsx'])(
     'the root of the overlay editor in %s is a plain .modal-backdrop, with no lower z-index of its own',
     (file) => {
-      const root = /<div className="modal-backdrop"[^>]*data-testid="scoring-modal-root"[^>]*>/.exec(readCode(file));
+      const root = /<div className="modal-backdrop"[^>]*data-testid="scoring-modal-root"[^>]*>/.exec(readFamilyCode(file));
       expect(root, 'the overlay root is found').not.toBeNull();
       expect(root[0]).not.toMatch(/zIndex/);
     },

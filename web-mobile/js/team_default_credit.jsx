@@ -129,7 +129,7 @@ export function teamDefaultWinCreditActive(matchCtx) {
 // encho), the same shape TeamScoreboard's isScored (match_scoreboard.jsx)
 // reads -- NOT the team editor's local row-EDITING state (aPts/bPts/fusensho/
 // draw), which is a different shape entirely and already has its own has-a-
-// result check, admin_scoring_team.jsx's subBoutHasBeenPlayed. Do not feed
+// result check, subBoutHasBeenPlayed in admin_scoring_team_bouts.jsx. Do not feed
 // one shape to the other's checker.
 export function subBoutHasResult(sub) {
   if (!sub) return false;
@@ -162,7 +162,7 @@ export function creditedBoutSide(sub, matchCtx) {
 // team editor's local row-editing state), so this takes a plain count rather
 // than an array, and each caller derives it with the has-a-result check
 // appropriate to ITS shape (subBoutHasResult above for wire data,
-// admin_scoring_team.jsx's own subBoutHasBeenPlayed + unfinishedTeamBouts for
+// admin_scoring_team_bouts.jsx's own subBoutHasBeenPlayed + unfinishedTeamBouts for
 // the live modal). Returns all-zero for a falsy side or a zero count, so a
 // caller need not gate the call itself.
 export function creditedTotals(missingCount, side) {

@@ -231,7 +231,7 @@ describe('Generate draw waits for queued check-ins', () => {
 
   for (const [door, label, verb] of [
     ['Generate draw', 'Generate draw', 'Generate the draw'],
-    ['Start from setup', 'Start competition →', 'Start'],
+    ['Start from setup', 'Start competition', 'Start'],
   ]) {
     it(`${door} now anyway says every competitor is drawn when no check-in has reached the server`, async () => {
       queued = [{ compID: 'c1', kind: 'checkin' }];
@@ -278,7 +278,7 @@ describe('Generate draw waits for queued check-ins', () => {
     queued = [{ compID: 'c1', kind: 'checkin' }];
     window.confirmDialog.mockResolvedValue(true);
     await mount();
-    await act(async () => { fireEvent.click(button('Start competition →')); });
+    await act(async () => { fireEvent.click(button('Start competition')); });
     expect(screen.getByTestId('queued-wait-text').textContent)
       .toBe('Waiting for 1 check-in to be sent. The draw is made and the competition starts once it arrives.');
     expect(screen.getByTestId('queued-wait-now').textContent).toBe('Start now anyway');

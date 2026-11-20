@@ -14,7 +14,7 @@ import { GLOSSARY, lookupTerm } from './glossary_data.js';
 // Stable per-component ID for aria-describedby: stable_id.jsx owns it.
 import { useStableId } from './stable_id.jsx';
 
-const { useState, useEffect, useRef } = React;
+const { useState, useEffect, useLayoutEffect, useRef } = React;
 
 // Parse a tooltip string into [text|term-ref] tokens, then render each
 // term reference as a nested <Term>. We use the term's SeeAlso list to
@@ -58,6 +58,10 @@ function renderTooltipBody(tooltipText, seeAlso) {
     return React.createElement(Term, { key: i, name: tok.id, nested: true }, tok.label);
   });
 }
+
+// How far inside the screen's edge a tooltip that fits on neither side of
+// its term is moved to.
+const TOOLTIP_EDGE_PX = 16;
 
 function escapeRegex(s) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -115,8 +119,14 @@ function Term({ name, children, nested }) {
   // worse. So a box taller than its own scroll container stays DOWNWARD and
   // the loop above remains reachable for it: a deliberate floor, whose fix
   // is a shorter hint rather than a flip with nowhere to go.
+  //
+  // Sideways, the box opens rightwards when it fits there, else leftwards
+  // when it fits there; when it fits on neither side (a term mid-row on a
+  // phone) `shift` holds the inline offset and width that move it just far
+  // enough left to end TOOLTIP_EDGE_PX inside the screen.
   const [flip, setFlip] = useState(false);
   const [up, setUp] = useState(false);
+  const [shift, setShift] = useState(null);
   const measureFlip = () => {
     const tooltipEl = tooltipRef.current;
     const wrap = wrapperRef.current;
@@ -126,7 +136,8 @@ function Term({ name, children, nested }) {
     // overflow isn't 'visible' on either axis; fall back to the viewport when
     // nothing along the chain clips.
     let node = wrap.parentElement;
-    let box = { right: document.documentElement.clientWidth, top: 0, bottom: document.documentElement.clientHeight };
+    const screenWidth = document.documentElement.clientWidth;
+    let box = { left: 0, right: screenWidth, top: 0, bottom: document.documentElement.clientHeight };
     while (node) {
       const style = getComputedStyle(node);
       if ((style.overflowX && style.overflowX !== 'visible') || (style.overflowY && style.overflowY !== 'visible')) {
@@ -138,15 +149,37 @@ function Term({ name, children, nested }) {
     // On pointer-enter the :hover reveal has already applied, so the box is
     // measurable; on a keyboard path it may still be display:none (height 0),
     // in which case only the declared width is known.
+    // Read as the stylesheet places it, so an earlier shift's pinned width
+    // is not taken for the box's own.
+    const pinned = tooltipEl.style.cssText;
+    tooltipEl.style.cssText = '';
     const tipRect = tooltipEl.getBoundingClientRect();
     const declaredWidth = parseFloat(getComputedStyle(tooltipEl).maxWidth);
+    tooltipEl.style.cssText = pinned;
     const width = tipRect.width || (Number.isNaN(declaredWidth) ? 320 : declaredWidth);
     const height = tipRect.height;
-    setFlip(box.right - wrapperRect.left < width);
+    // A scroll container wider than the screen (the score overlay on a
+    // phone) still ends at the screen's edges.
+    const left = Math.max(box.left, 0);
+    const right = Math.min(box.right, screenWidth);
+    const fitsRight = right - wrapperRect.left >= width;
+    const fitsLeft = wrapperRect.right - left >= width;
+    setFlip(!fitsRight && fitsLeft);
+    if (fitsRight || fitsLeft) {
+      setShift(null);
+    } else {
+      const shiftedWidth = Math.min(width, right - left - 2 * TOOLTIP_EDGE_PX);
+      setShift({ left: right - TOOLTIP_EDGE_PX - shiftedWidth - wrapperRect.left, width: shiftedWidth });
+    }
     const needsScrollBelow = height > 0 && wrapperRect.bottom + 6 + height > box.bottom;
     const fitsAbove = height > 0 && wrapperRect.top - 6 - height >= box.top;
     setUp(needsScrollBelow && fitsAbove);
   };
+
+  // A tap or a key measures before the box is drawn, when its height is 0
+  // and the upward half above cannot apply; measure again once it is drawn,
+  // before the screen paints.
+  useLayoutEffect(() => { if (open) measureFlip(); }, [open]);
 
   // Tap-outside / Escape dismiss. Mount once per Term lifecycle.
   useEffect(() => {
@@ -223,6 +256,9 @@ function Term({ name, children, nested }) {
         id: tooltipId,
         role: 'tooltip',
         className: open ? 'tw-tooltip tw-tooltip--open' : 'tw-tooltip',
+        // The width is pinned with the offset: an absolutely placed box
+        // shrinks to fit the room its left offset leaves it.
+        style: shift ? { left: `${shift.left}px`, right: 'auto', width: `${shift.width}px` } : undefined,
       },
       term.kanji ? React.createElement('span', { className: 'tw-tooltip__kanji' }, term.kanji + ' · ') : null,
       React.createElement('span', { className: 'tw-tooltip__short' }, term.short),
@@ -242,17 +278,17 @@ function GlossaryPage({ onBack }) {
   const ids = Object.keys(GLOSSARY).sort();
 
   return (
-    <div className="viewer">
+    <main className="viewer">
       <div className="viewer__shell">
         <div className="viewer__head">
           {onBack && (
             <button type="button" className="btn btn--ghost btn--sm" onClick={onBack} style={{ marginRight: 12 }}>
-              ← Back
+              Back
             </button>
           )}
           <div className="viewer__title-block">
-            <div className="viewer__title">Kendo glossary</div>
-            <div className="viewer__eyebrow">Reference for scoring-table volunteers</div>
+            <h1 className="viewer__title">Kendo glossary</h1>
+            <div className="viewer__sub">Reference for scoring-table volunteers</div>
           </div>
         </div>
 
@@ -298,7 +334,7 @@ function GlossaryPage({ onBack }) {
           {window.VersionFooter && <window.VersionFooter />}
         </div>
       </div>
-    </div>
+    </main>
   );
 }
 
@@ -307,7 +343,8 @@ function capitalise(s) {
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
-// GlossaryHint: a standalone ？ icon that carries the glossary tooltip
+// GlossaryHint: a standalone ? icon (ASCII, so the shipped Archivo draws it;
+// the full-width ？ it once was came from a Japanese system font) that carries the glossary tooltip
 // for a given term. Renders as a sibling next to a button so the tooltip
 // is accessible without wrapping (and potentially blocking) the button's
 // click target. No alignment prop: the tooltip it wraps (Term, below)
@@ -317,7 +354,7 @@ function GlossaryHint({ name }) {
   return React.createElement(
     'span',
     { className: 'glossary-hint' },
-    React.createElement(Term, { name }, '？'),
+    React.createElement(Term, { name }, '?'),
   );
 }
 

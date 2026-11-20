@@ -16,6 +16,7 @@
 // the export above).
 
 import { LS_NOTIFICATIONS_ENABLED } from './notification_keys.jsx';
+import { Icon } from './icon.jsx';
 import { NOTIF_SYNC_EVENT, dispatchNotif, runOnce, notifEnable, notifDisable } from './viewer_alerts.jsx';
 
 const { useState, useRef, useEffect } = React;
@@ -169,7 +170,7 @@ export function AnnouncementCard({ ann, onDismiss }) {
   return (
     <div className="announcement-banner">
       <div className="announcement-banner__content">
-        <div className="announcement-banner__icon" aria-hidden="true">📢</div>
+        <div className="announcement-banner__icon" aria-hidden="true"><Icon name="megaphone" /></div>
         <p className="announcement-banner__message">{ann.message}</p>
       </div>
       <div className="announcement-banner__meta">

@@ -7,7 +7,7 @@
 // again.
 //
 // Nothing here writes to the server: a restored draft is saved only by the
-// operator's Save, and an offline write stays the queue's job (api_client.jsx).
+// operator's Save, and an offline write stays the queue's job (api_client_enqueue.jsx).
 //
 // useLineupForm, below, is the state machine of ONE lineup editor, shared by the
 // at-court panel and the Lineups page: what was read, where it was saved, what

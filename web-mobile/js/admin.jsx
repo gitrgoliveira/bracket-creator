@@ -1,7 +1,7 @@
 // Admin side: single tournament. Tournament has multiple Competitions.
 // Top-level: Tournament dashboard (all competitions), per-competition pages.
 
-import { applyPatch as patchCompetitionData, applyPatchToCompetitions, checkSeqGap, keepNewerDetail, matchInComp } from './patch.jsx';
+import { applyPatch as patchCompetitionData, applyPatchToCompetitions, checkSeqGap, createPushLedger, matchInComp } from './patch.jsx';
 import { createTimerPool } from './timer_pool.jsx';
 // Imported from the leaf, not read off `window`: write_result.jsx is
 // import-only (see its header) and every consumer ES-imports it directly.
@@ -179,11 +179,15 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
   const setView = propSetView || setInternalView;
   // Hooks must be declared unconditionally before any conditional returns.
   const [adminCompData, setAdminCompData] = useState(null);
+  // The server pushes applied to adminCompData, for its refetches (push-wins,
+  // createPushLedger, patch.jsx): every refetch of it takes its answer through
+  // a keeper made as it is sent (pushes.detail()).
+  const [pushes] = useState(() => createPushLedger());
   // Bumped by the Edit Tournament page's Reload, which remounts it from the
   // current settings after a save was refused as stale (tournament_changed).
   const [settingsReloads, setSettingsReloads] = useState(0);
   const [adminLoading, setAdminLoading] = useState(false);
-  // mp-djc: dashboard "📣 Announce" button opens the broadcast composer
+  // mp-djc: dashboard "Announce" button opens the broadcast composer
   // in a modal. State lives here (alongside other AdminApp UI state); the
   // modal is rendered only in the dashboard branch below, since that's the
   // sole screen exposing the Announce button. (Other screens reach the
@@ -409,8 +413,9 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
     // treat the save as failed. Log and move on; SSE will catch up.
     if (view.kind === "competition" && view.id === cid) {
       try {
+        const keep = pushes.detail();
         const details = await window.API.fetchCompetitionDetails(cid);
-        if (mountedRef.current) setAdminCompData((prev) => keepNewerDetail(prev, details));
+        if (mountedRef.current) setAdminCompData((prev) => keep(prev, details));
       } catch (e) {
         console.error("Failed to refresh competition details after save:", e);
       }
@@ -809,15 +814,16 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
     // header/modal don't briefly render with another comp's identity.
     setAdminCompData(prev => (prev && prev.config && prev.config.id === view.id) ? prev : null);
     setAdminLoading(true);
+    const keep = pushes.detail();
     window.API.fetchCompetitionDetails(view.id)
       .then(data => {
-        if (!cancelled) { setAdminCompData((prev) => keepNewerDetail(prev, data)); setAdminLoading(false); }
+        if (!cancelled) { setAdminCompData((prev) => keep(prev, data)); setAdminLoading(false); }
       })
       .catch(err => {
         if (!cancelled) { console.error(err); setAdminLoading(false); }
       });
     return () => { cancelled = true; };
-  }, [view.id, view.kind]);
+  }, [view.id, view.kind, pushes]);
 
   useEffect(() => {
     if (view.kind === "competition") {
@@ -833,6 +839,20 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
           fn(compId);
         }, Math.random() * 500);
       };
+      // The jittered refetch of the competition shown: its answer goes
+      // through a keeper made as it is sent (push-wins, createPushLedger).
+      const refetchDetail = (label) => schedule((targetId) => {
+        const keep = pushes.detail();
+        window.API.fetchCompetitionDetails(targetId)
+          .then(data => {
+            // Cancelled flag is the primary navigation guard. The id check is
+            // belt-and-braces in case a fetch comes back with unexpected data
+            // shape.
+            if (cancelled || data?.config?.id !== targetId) return;
+            setAdminCompData((prev) => keep(prev, data));
+          })
+          .catch(err => console.error(label, err));
+      });
       // Coalesce tournament-wide refreshes across all events so the topbar's
       // running-strip stays current without firing one fetchCompetitions() per
       // match update.
@@ -879,14 +899,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
       const onVisibilityChange = () => {
         if (document.hidden || cancelled) return;
         window.API.reconnectEvents();
-        schedule((targetId) => {
-          window.API.fetchCompetitionDetails(targetId)
-            .then(data => {
-              if (cancelled || data?.config?.id !== targetId) return;
-              setAdminCompData((prev) => keepNewerDetail(prev, data));
-            })
-            .catch(err => console.error('tab-resume refresh failed:', err));
-        });
+        refetchDetail('tab-resume refresh failed:');
         scheduleTournamentRefresh(false);
       };
       document.addEventListener('visibilitychange', onVisibilityChange);
@@ -901,14 +914,9 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
         // Reset seq to the server's head and trigger a full refresh.
         if (event.type === 'resync_required') {
           sseSeq.lastSeq = (typeof event.seq === 'number') ? event.seq : 0;
-          schedule((targetId) => {
-            window.API.fetchCompetitionDetails(targetId)
-              .then(data => {
-                if (cancelled || data?.config?.id !== targetId) return;
-                setAdminCompData((prev) => keepNewerDetail(prev, data));
-              })
-              .catch(err => console.error('resync refresh failed:', err));
-          });
+          // Every held copy may be wrong: no push outranks the refetch.
+          pushes.clear();
+          refetchDetail('resync refresh failed:');
           scheduleTournamentRefresh(false);
           return;
         }
@@ -917,14 +925,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
         // advances even for events with no match payload. On a gap,
         // trigger the same scoped refetch the per-type branches use.
         const seqResult = checkSeqGap(sseSeq, event.seq, () => {
-          schedule((targetId) => {
-            window.API.fetchCompetitionDetails(targetId)
-              .then(data => {
-                if (cancelled || data?.config?.id !== targetId) return;
-                setAdminCompData((prev) => keepNewerDetail(prev, data));
-              })
-              .catch(err => console.error('gap refetch failed:', err));
-          });
+          refetchDetail('gap refetch failed:');
           scheduleTournamentRefresh(false);
         });
         if (seqResult.duplicate) return;
@@ -944,20 +945,12 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
             // the setAdminCompData call is identity-preserving (no
             // gratuitous re-render).
             if (event.type === "match_updated" || event.type === "competitor_status_updated") {
-              setAdminCompData(prev => patchCompetitionData(prev, event));
+              setAdminCompData(prev => pushes.push(prev, prev && prev.config && prev.config.id, event));
+            } else if (event.type === "tournament_updated") {
+              pushes.clear();
             }
             // Still trigger full refresh (jittered) to reconcile standings/propagation
-            schedule((targetId) => {
-              window.API.fetchCompetitionDetails(targetId)
-                .then(data => {
-                  // Cancelled flag is the primary navigation guard. The id
-                  // check is belt-and-braces in case a fetch comes back with
-                  // unexpected data shape.
-                  if (cancelled || data?.config?.id !== targetId) return;
-                  setAdminCompData((prev) => keepNewerDetail(prev, data));
-                })
-                .catch(err => console.error("Failed to refresh competition details", err));
-            });
+            refetchDetail("Failed to refresh competition details");
           }
           // Any of these may change the topbar running-strip (matches becoming
           // running/done in *other* competitions, a comp starting, a dependent
@@ -982,7 +975,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
         unsub();
       };
     }
-  }, [view.id, view.kind]); // t and onUpdate accessed via refs to avoid churn
+  }, [view.id, view.kind, pushes]); // t and onUpdate accessed via refs to avoid churn; pushes never changes
 
   if (view.kind === "dashboard") {
     return <>
@@ -1189,7 +1182,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
     if (!c) return (
       <div className="page">
         <div className="comp-shell-actions">
-          <button type="button" className="btn btn--ghost" onClick={() => setView({ kind: "dashboard" })}>← Back to dashboard</button>
+          <button type="button" className="btn btn--ghost" onClick={() => setView({ kind: "dashboard" })}>Back to dashboard</button>
         </div>
         <div className="empty">
           <h3>Competition not available</h3>
@@ -1209,7 +1202,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
     if (adminLoading && !detail) return (
       <div className="page">
         <div className="comp-shell-actions">
-          <button type="button" className="btn btn--ghost" onClick={() => setView({ kind: "dashboard" })}>← Back to dashboard</button>
+          <button type="button" className="btn btn--ghost" onClick={() => setView({ kind: "dashboard" })}>Back to dashboard</button>
         </div>
         <window.LoadingSpinner text="Loading details..." />
       </div>
@@ -1231,9 +1224,9 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
       // Answers { ok } so a caller that shows the outcome (the data-issue
       // banner's Reload) can say a failed request, never only the console;
       // `status` is set when the server answered, absent when it was not reached.
-      onRefreshCompetition={() => window.API.fetchCompetitionDetails(c.id)
-        .then((data) => { setAdminCompData((prev) => keepNewerDetail(prev, data)); return { ok: true }; })
-        .catch((err) => { console.error("refresh failed:", err); return { ok: false, message: err && err.message, status: err && err.status }; })}
+      onRefreshCompetition={() => { const keep = pushes.detail(); return window.API.fetchCompetitionDetails(c.id)
+        .then((data) => { setAdminCompData((prev) => keep(prev, data)); return { ok: true }; })
+        .catch((err) => { console.error("refresh failed:", err); return { ok: false, message: err && err.message, status: err && err.status }; }); }}
       onMoveCourt={moveMatchCourt}
       onEditScore={editMatchScore}
       onLogout={onLogout}

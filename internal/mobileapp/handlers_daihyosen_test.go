@@ -958,7 +958,7 @@ func TestDaihyosenAdd_RefusesASecondRepresentativeBout(t *testing.T) {
 // TestDaihyosenRowAsTheAddReturnsItSurvivesAScoreWrite: when the team editor
 // unmounts with an edit owed while an add is out, the owed write is sent once
 // the add lands, carrying the representative-bout row exactly as the add
-// returned it (withServerDaihyosenRow, admin_scoring_team.jsx). PUT /score must
+// returned it (adoptServerSubs, admin_scoring_team.jsx). PUT /score must
 // accept that row as it stands and keep it.
 func TestDaihyosenRowAsTheAddReturnsItSurvivesAScoreWrite(t *testing.T) {
 	store, err := state.NewStore(t.TempDir())

@@ -155,7 +155,7 @@ function AdminSwissRounds({ c, poolMatches, password, onViewStandings, showToast
         <div style={{ display: "flex", flexDirection: "column", gap: 8, padding: 12, background: "var(--accent-soft)", border: "1px solid var(--accent)", borderRadius: 8 }}>
           <div style={{ fontWeight: 600, color: "var(--accent)" }}>Competition complete</div>
           {onViewStandings && (
-            <button type="button" className="btn btn--primary btn--sm" onClick={onViewStandings}>View final standings →</button>
+            <button type="button" className="btn btn--primary btn--sm" onClick={onViewStandings}>View final standings</button>
           )}
         </div>
       ) : (

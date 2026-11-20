@@ -4,6 +4,7 @@
 import { timeToMinutes } from './admin_schedule_utils.jsx';
 import { courtPaceLookup, paceClockNow, PaceTime, PACE_TICK_MS } from './court_pace.jsx';
 import { courtQueueKey } from './court_queue.jsx';
+import { Icon } from './icon.jsx';
 
 const { useState, useEffect } = React;
 
@@ -188,7 +189,7 @@ export function CourtPacePanel({ byCourt, safeMatchDuration, competitions }) {
         aria-expanded={open}
       >
         <span>Court pace</span>
-        <span style={{ fontSize: 18, fontWeight: 400 }}>{open ? "−" : "+"}</span>
+        <Icon name={open ? "chevron-down" : "chevron-right"} size={16} />
       </div>
       {open && (
         <div>

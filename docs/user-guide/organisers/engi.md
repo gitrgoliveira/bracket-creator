@@ -68,7 +68,8 @@ on the left and Aka (red) on the right:
   first tap changes the button to **Tap again to save**, and the second tap
   saves. On the court console the button reads **Finish + Start Next**
   when another match of this competition waits on the court, and plain **Finish**
-  when none does; either way the first tap changes it to **Tap again to finish**.
+  when none does; the first tap changes it to **Tap again to finish and start
+  next**, or **Tap again to finish** when no match waits.
   A quick double tap only does the first.
   **`Enter`** saves at once.
 

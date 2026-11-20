@@ -39,5 +39,5 @@ export const markSlots = (container, idx, color) => [...rows(container)[idx].que
 export const marks = (container, idx, color) => markSlots(container, idx, color).map((b) => b.textContent).filter((t) => t !== '·');
 export const fusenshoBtn = (container, idx, color) => side(container, idx, color).querySelector('[data-testid="scoring-modal-fusensho-button"]');
 export const tieBtn = (container, idx) => rows(container)[idx].querySelector('[data-testid="scoring-modal-tie-button"]');
-export const foulBtn = (container, idx, color, add) => side(container, idx, color).querySelector(`button[aria-label="${add ? 'Add' : 'Remove'} a ${color === 'shiro' ? 'SHIRO' : 'AKA'} foul"]`);
+export const foulBtn = (container, idx, color, add) => side(container, idx, color).querySelector(`button[aria-label="${add ? 'Add' : 'Remove'} a ${color === 'shiro' ? 'Shiro' : 'Aka'} foul"]`);
 export const byTestId = (container, testid) => container.querySelector(`[data-testid="${testid}"]`);

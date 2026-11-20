@@ -1,6 +1,6 @@
 // server_clock.jsx: this device's clock in the server's frame (bc-lww1).
 //
-// api_client.jsx learns the offset from GET /api/time and stamps every write
+// api_client_clock.jsx learns the offset from GET /api/time and stamps every write
 // with serverNowMs(), so a stored match's modifiedAt is in this frame. A score
 // editor that asks "was this snapshot written before the operator's last
 // edit?" stamps the edit with the same clock, so the two compare in one frame.

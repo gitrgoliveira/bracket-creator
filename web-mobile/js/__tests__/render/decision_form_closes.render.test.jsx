@@ -65,7 +65,7 @@ async function recordWithdrawal(match) {
   await act(async () => {
     render(<ScoreEditorModal match={match} onClose={vi.fn()} onSubmit={vi.fn().mockResolvedValue(undefined)} onAfterDecision={onAfterDecision} password="secret" />);
   });
-  await act(async () => { fireEvent.click(screen.getByRole('button', { name: /^Kiken . Voluntary$/ })); });
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: /^Kiken \(voluntary\)$/ })); });
   const form = document.querySelector('form.decision-prompt');
   expect(form, 'the withdrawal form opened').not.toBeNull();
   fireEvent.click(form.querySelector('input[name="decision-side"][value="aka"]'));

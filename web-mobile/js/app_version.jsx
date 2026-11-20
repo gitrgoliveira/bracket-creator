@@ -1,6 +1,6 @@
 // app_version.jsx: the ONE owner of "is this page running the server's build,
 // and may it reload onto the new one" (bc-evts stage 3, S2). A leaf with no
-// imports: api_client.jsx feeds it the server's build (the X-App-Build header
+// imports: api_client_requests.jsx and api_client_events.jsx feed it the server's build (the X-App-Build header
 // of every answer, the SSE hello frame's `build`) and the outbox's state, the
 // score editors and every form holding unsaved input register while they do
 // (registerUnsavedInput, useUnsavedInput), and the app shell renders the

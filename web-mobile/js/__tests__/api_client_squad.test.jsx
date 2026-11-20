@@ -1,4 +1,4 @@
-// bc-tmid pass 3: tests for the squad API helpers in api_client.jsx
+// bc-tmid pass 3: tests for the squad API helpers in api_client_teams.jsx
 // (fetchSquads) and the memberIds half of
 // putTeamLineup. These pin the wire contract directly (URL, method,
 // headers, body shape) independent of admin_lineup_form.test.jsx, which

@@ -150,7 +150,9 @@ describe('forceCourt outbox plumbing (bc-adna / p2-adna-wire)', () => {
         if (window.__bcStoredQueueHandler) {
             window.__bcStoredQueueHandler({ key: QUEUE_STORAGE_KEY, oldValue: oldVal, newValue: newVal });
         }
-        await tick(50);
+        // A tab takes up another tab's entry, then waits for that tab's lease to show
+        // (ADOPTED_FLUSH_DELAY_MS, api_client_flush.jsx) before it sends.
+        await tick(400);
 
         expect(delivered.length).toBe(1);
         expect(delivered[0].url).toBe('/api/competitions/c1/matches/m1/score');

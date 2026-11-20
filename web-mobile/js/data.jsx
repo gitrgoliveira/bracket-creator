@@ -1,7 +1,7 @@
 // Sample tournament data + small pure utilities used across the app.
 //
 // Per T009 (NFR-006), HTTP and API-payload serializers were moved out:
-//   - api_client.jsx       : fetch / SSE
+//   - api_client*.jsx      : fetch / SSE / outbox
 //   - api_serializers.jsx  : server payload normalizers (Go ↔ JS shape)
 //
 // What remains here:

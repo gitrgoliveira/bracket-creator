@@ -34,7 +34,7 @@ const resp = (status, body) => Promise.resolve({
 // The tab a call comes from: each tab is its own instance of the module,
 // loaded under its own query, which every frame of its code carries.
 function writerTab() {
-    const m = new Error().stack.match(/api_client\.jsx\?tab=(\w+)/);
+    const m = new Error().stack.match(/api_client(?:_\w+)?\.jsx\?tab=([^&#:\s)]+)/);
     return m ? m[1] : '?';
 }
 

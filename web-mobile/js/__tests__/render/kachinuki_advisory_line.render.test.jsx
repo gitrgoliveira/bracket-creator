@@ -207,6 +207,45 @@ describe('the kachinuki advisory line', () => {
     expect(advisory().textContent).toBe('Shiro: T1.2 Ueda on, 1 left (T1.3 Sato) · Aka: T2.2 Mori on, 1 left (T2.3)');
   });
 
+  // The read is keyed on the SERVER's copy, never on the own Start shown before
+  // the server holds it: the start's answer can come after the roster's, and
+  // the server only names a fighter on once it has stored the bout. Before this,
+  // the sheet read the roster as the Start was tapped, the server answered
+  // "nobody on", and the copy holding bout 1 carried the same fighters as the
+  // Start did, so nothing read again and the line said nobody was on court.
+  it('reads again once the server holds its own Start, so the fighters show as on', async () => {
+    const NOBODY_ON = {
+      sideA: { lineupFound: true, on: null, remaining: [{ name: 'Kudo', memberId: 'a1' }, { name: 'Mori', memberId: 'a2' }, { name: '', memberId: 'a3' }] },
+      sideB: { lineupFound: true, on: null, remaining: [{ name: 'Taki', memberId: 'b1' }, { name: 'Ueda', memberId: 'b2' }, { name: 'Sato', memberId: 'b3' }] },
+    };
+    const STARTED = {
+      sideA: { lineupFound: true, on: { name: 'Kudo', memberId: 'a1' }, remaining: [{ name: 'Mori', memberId: 'a2' }, { name: '', memberId: 'a3' }] },
+      sideB: { lineupFound: true, on: { name: 'Taki', memberId: 'b1' }, remaining: [{ name: 'Ueda', memberId: 'b2' }, { name: 'Sato', memberId: 'b3' }] },
+    };
+    // The server answers from what it holds: nobody on until the start lands.
+    let serverHoldsStart = false;
+    stubApi(vi.fn(() => Promise.resolve(serverHoldsStart ? STARTED : NOBODY_ON)));
+    const queued = kachinukiMatch({ status: 'scheduled', subResults: [] });
+    // The outbox's answer to a queued write: pending, settled once the server answers.
+    let landStart;
+    const settled = new Promise((resolve) => { landStart = resolve; });
+    const onSubmitSpy = vi.fn(() => ({ applied: true, pending: true, key: 'k1', settled }));
+    const view = await mount(queued, onSubmitSpy);
+
+    const start = screen.getAllByRole('button').find(b => b.textContent === 'Start match');
+    await act(async () => { fireEvent.click(start); });
+    await settle();
+
+    // The server now holds the start, with bout 1 seated from the lineups.
+    serverHoldsStart = true;
+    await act(async () => { landStart({ applied: true, modifiedAt: 1 }); });
+    await remount(view, kachinukiMatch({
+      subResults: [{ position: 1, sideA: 'Kudo', sideAMemberId: 'a1', sideB: 'Taki', sideBMemberId: 'b1', ipponsA: [], ipponsB: [] }],
+    }));
+    await settle();
+    expect(advisory().textContent).toBe('Shiro: T1.1 Taki on, 2 left (T1.2 Ueda, T1.3 Sato) · Aka: T2.1 Kudo on, 2 left (T2.2 Mori, T2.3)');
+  });
+
   it('reads "last fighter" and leaves every button as it is with no roster', async () => {
     stubApi(vi.fn().mockResolvedValue(null));
     const bare = await mount(kachinukiMatch());

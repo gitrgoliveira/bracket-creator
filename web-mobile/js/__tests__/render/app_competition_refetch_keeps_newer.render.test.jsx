@@ -79,6 +79,34 @@ describe('the public competition page keeps the newer live score over a stale re
     expect(page.props.poolMatches[0]).toMatchObject({ modifiedAt: 400, ipponsA: ['M', 'K', 'D'] });
   });
 
+  // Push-wins (createPushLedger, patch.jsx): a refetch sent before a write and
+  // answered from data read before it committed lands after that write's push;
+  // the pushed copy stands when the fetched one has no scoreVersion or a lower
+  // one (journeys/league-team: a Start flashed back to scheduled).
+  it('a refetch sent before a push and answered stale keeps the pushed copy', async () => {
+    let answerStale;
+    details.push(new Promise((resolve) => { answerStale = resolve; }));
+    const sent = window.API.fetchCompetitionDetails.mock.calls.length;
+    const random = vi.spyOn(Math, 'random').mockReturnValue(0);
+    try {
+      await act(async () => { sse.emit({ type: 'schedule_updated' }); });
+      await settle();
+      expect(window.API.fetchCompetitionDetails.mock.calls.length, 'the refetch is out').toBe(sent + 1);
+      const pushed = { id: 'Pool A-0', status: 'running', court: 'A', modifiedAt: 500, scoreVersion: 5, ipponsA: ['M'], ipponsB: ['K'] };
+      details.push({ ...detail(500, ['M']), poolMatches: [pushed] });
+      await act(async () => { sse.emit({ type: 'match_updated', data: { competitionId: 'c1', result: pushed } }); });
+      await settle();
+      expect(page.props.poolMatches[0]).toMatchObject({ status: 'running', scoreVersion: 5 });
+      await act(async () => {
+        answerStale({ ...detail(0, []), poolMatches: [{ id: 'Pool A-0', status: 'scheduled', court: 'A', ipponsA: [], ipponsB: [] }] });
+      });
+      await settle();
+    } finally {
+      random.mockRestore();
+    }
+    expect(page.props.poolMatches[0]).toMatchObject({ status: 'running', scoreVersion: 5, ipponsB: ['K'] });
+  });
+
   // The event above reaches one of the page's refetches; the others sit in
   // their own branches of App's event handler, so they are read from source:
   // none may hand a fetched detail to the page's state whole.
@@ -88,7 +116,11 @@ describe('the public competition page keeps the newer live score over a stale re
     const writes = [...code.matchAll(/setSelectedCompData\(([^;]*)\);/g)].map((m) => m[1].replace(/\s+/g, ' '));
     expect(writes.length).toBeGreaterThan(0);
     for (const w of writes) {
-      expect(w, `setSelectedCompData(${w})`).toMatch(/^(null|prev => patchCompetitionData\(prev, event\)|\(prev\) => keepNewerDetail\(prev, data\))$/);
+      expect(w, `setSelectedCompData(${w})`).toMatch(/^(null|prev => patchCompetitionData\(prev, event\)|prev => compPushes\.push\(prev, viewerCompId, event\)|\(prev\) => keep\(prev, data\))$/);
     }
+    // Every keeper is the ledger's, made as its fetch is sent.
+    const keepers = [...code.matchAll(/const keep = ([^;]*);/g)].map((m) => m[1]);
+    expect(keepers.length).toBeGreaterThan(0);
+    for (const k of keepers) expect(k).toBe('compPushes.detail()');
   });
 });

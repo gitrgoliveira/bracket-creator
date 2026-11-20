@@ -38,6 +38,10 @@ const PAIRS = [
 ];
 
 let compId;
+// The winner's tick (WinnerTick, side_cell.jsx) is an icon; the words it
+// carries for a screen reader are what a row's text holds: "Winner: " before
+// the name, ", winner" after it.
+const WINNER_MARK = /Winner: |, winner\b/g;
 const audit = auditLog('engi');
 const { record } = audit;
 let shot;
@@ -90,8 +94,8 @@ test.describe('engi', () => {
     // is on the Completed list, so it is read once, straight away, never polled.
     const readRow = async () => (await row.innerText()).replace(/\s+/g, ' ');
     const rowText = await readRow();
-    expect(rowText, 'Aka, who held the two flags, is marked the winner').toContain(`Aka: ✓ Winner: ${pair.aka}`);
-    expect(rowText.match(/✓/g), 'and only Aka').toHaveLength(1);
+    expect(rowText, 'Aka, who held the two flags, is marked the winner').toContain(`Aka: Winner: ${pair.aka}`);
+    expect(rowText.match(WINNER_MARK), 'and only Aka').toHaveLength(1);
     const result = (await row.locator('.shiaijo-qrow__result').innerText()).trim();
     record({ journey: 'engi', action: 'console result row', result });
     expect(result, 'the result reads in flags, Shiro 1 and Aka 2').toBe('Flags1–2');
@@ -106,8 +110,8 @@ test.describe('engi', () => {
       const cardText = (await resultCard.innerText()).replace(/\s+/g, ' ');
       record({ journey: 'engi', action: 'public viewer row', text: cardText });
       expect(cardText, 'the phone shows the flags, Shiro 1 and Aka 2').toContain('1–2');
-      expect(cardText, 'Aka is marked the winner').toMatch(new RegExp(`Aka: ${pair.aka}[^✓]*✓`));
-      expect(cardText.match(/✓/g), 'and only Aka').toHaveLength(1);
+      expect(cardText, 'Aka is marked the winner').toMatch(new RegExp(`Aka: ${pair.aka}(?:(?!Winner: |, winner).)*, winner`));
+      expect(cardText.match(WINNER_MARK), 'and only Aka').toHaveLength(1);
       await shot(phone, 'viewer-engi-result', { fullPage: true });
     } finally {
       await spectator.close();
@@ -204,16 +208,23 @@ test.describe('engi', () => {
     ]);
     // A side's first member as the console shows it: the editor's pair line,
     // or the first member of the whole pair name the Up next card carries.
-    // The Up next card's Start match is there only while no bout runs (a Finish
-    // + Start Next starts the next one itself); the editor may show beside it
-    // before a start, so the card decides.
     const start = upNextCard(page).getByRole('button', { name: 'Start match' });
+    const offeredPair = () => sides(upNextCard(page))
+      .then((p) => ({ shiro: first(p.shiro), aka: first(p.aka) })).catch(() => null);
+    // Used where no bout runs, so the card, when shown, is the match to play.
     const editorOrCard = async () => ((await start.isVisible().catch(() => false))
-      ? sides(upNextCard(page)).then((p) => ({ shiro: first(p.shiro), aka: first(p.aka) })).catch(() => null)
+      ? offeredPair()
       : engiPair(page).catch(() => null));
+    // The Up next card offers Start match beside a RUNNING bout too (starting it
+    // sends the running one back to the queue), so a visible card does not say
+    // no bout runs. The editor holds the running bout unless it holds the very
+    // pair the card offers, which is a bout not started yet.
     const startOrHeld = async () => {
       await expect(engiEditor(page).or(start).first()).toBeVisible({ timeout: EXPECT_TIMEOUT_MS });
-      return (await start.isVisible()) ? startUpNextEngi(page) : engiPair(page);
+      const held = (await engiEditor(page).isVisible()) ? await engiPair(page) : null;
+      const offered = (await start.isVisible()) ? await offeredPair() : null;
+      if (held && !(offered && offered.shiro === held.shiro && offered.aka === held.aka)) return held;
+      return startUpNextEngi(page);
     };
     let id;
 

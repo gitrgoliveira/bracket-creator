@@ -155,7 +155,7 @@ describe('Discard is the one way out that saves nothing', () => {
     const { onClose } = await mount(individual());
     // A Tie is a result the running write does not carry, so Close asks.
     await click(screen.getByTestId('scoring-modal-mark-draw'));
-    await click(screen.getByText('✕ Close'));
+    await click(screen.getByText('Close'));
     expect(window.confirmDialog).toHaveBeenCalledTimes(1);
     expect(onClose).toHaveBeenCalledTimes(1);
     await settle();
@@ -164,7 +164,7 @@ describe('Discard is the one way out that saves nothing', () => {
 });
 
 describe('Prev/Next ask first whenever Close would', () => {
-  const viaButton = () => click(screen.getByText('Next →'));
+  const viaButton = () => click(screen.getByText('Next'));
   const viaKey = () => act(async () => { fireEvent.keyDown(window, { key: 'ArrowRight' }); });
 
   it.each([['the Next button', viaButton], ['the → key', viaKey]])(

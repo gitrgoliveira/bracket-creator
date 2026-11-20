@@ -2,7 +2,7 @@
 // the answer to it means (bc-aadv, PR #463 round 13).
 //
 // Two hosts start a match on the operator's behalf: the court console
-// (admin_shiaijo.jsx startMatch: the Up next card, a queue row, Finish + Start
+// (admin_shiaijo_start.jsx startMatch: the Up next card, a queue row, Finish + Start
 // Next and the start after a decision) and the Scores tab
 // (admin_schedule_score_editor.jsx: the same two automatic advances). The
 // console read the answer and the Scores tab did not, so a start the server
@@ -117,7 +117,7 @@ export const START_FAILED_MESSAGE = "Could not start the match: check eligibilit
 // stored one: an equal one is a HeldEcho, neither listed nor kept (reportHeld,
 // match_merge.go), and respondSuperseded omits `heldGroups` when it would be
 // empty. A start does carry rev/revSession like every running payload
-// (api_client.jsx stamps them), and the older-revision hold (mergeMatchWrite's
+// (api_client_clock.jsx stamps them), and the older-revision hold (mergeMatchWrite's
 // olderRevisionThanLogged, which holds every group the write changes) reports
 // through reportHeld too, so an echo is an echo-hold there as well. So:
 //   - NO heldGroups: the stored result already equals the start. Another

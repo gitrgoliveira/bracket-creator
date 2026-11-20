@@ -347,7 +347,7 @@ describe('a tap made right before Prev/Next is kept', () => {
   // autosave still in its debounce. Now the tap is in the outbox as it is made,
   // so leaving owes nothing.
   const neighbour = { id: 'm-next', sideA: { name: 'Sato' }, sideB: { name: 'Ito' } };
-  const viaButton = async () => { fireEvent.click(screen.getByText('Next →')); };
+  const viaButton = async () => { fireEvent.click(screen.getByText('Next')); };
   const viaKey = async () => { fireEvent.keyDown(window, { key: 'ArrowRight' }); };
 
   // bc-evts stage 3: the individual editor's tap is in the outbox as it is
@@ -568,8 +568,8 @@ describe('bc-dhas: Add/Remove representative bout never waits, and the taps arou
 
     // Red without the fix: adoptServerSubs reverts every field but
     // subResults to m1 (status: "running"), so the editor keeps showing the
-    // running UI (no CORRECTION pill) even though the match completed.
-    expect(screen.queryByText('CORRECTION')).toBeTruthy();
+    // running UI (no Correction pill) even though the match completed.
+    expect(screen.queryByText('Correction')).toBeTruthy();
   });
 
   it.each([

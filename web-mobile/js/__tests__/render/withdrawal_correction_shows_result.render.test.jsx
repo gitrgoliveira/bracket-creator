@@ -3,7 +3,7 @@
 // A match has ONE result and every surface asking for it shows the same one,
 // and the score editors are such surfaces. Two gaps this pins:
 //   - the TEAM band read its verdict off the bouts, which the withdrawal
-//     ended, so a won match read "DRAW"; it now states the recorded winner
+//     ended, so a won match read "Draw"; it now states the recorded winner
 //     and decision while the withdrawal is in force. IV/PW (bc-tmfn) now
 //     include a default-win CREDIT for every numbered bout the withdrawal
 //     left with no result of its own -- IV+1/PW+2 to the OTHER side from
@@ -109,10 +109,10 @@ function expectMarkBeside(color, mark) {
 }
 
 describe('team editor: correcting a match a withdrawal ended', () => {
-  it('states the recorded winner and decision, not the bouts\' DRAW', async () => {
+  it('states the recorded winner and decision, not the bouts\' Draw', async () => {
     await mount(teamWithdrawal());
-    expect(screen.getByTestId('team-summary-result').textContent).toBe('SHIRO WIN');
-    expect(screen.getByTestId('team-summary-decision').textContent).toBe('Kiken – Voluntary');
+    expect(screen.getByTestId('team-summary-result').textContent).toBe('Shiro wins');
+    expect(screen.getByTestId('team-summary-decision').textContent).toBe('Kiken (voluntary)');
     // bc-tmfn: bout 1 was actually fought (aka/Kyoto won it: IV 1, PW 1).
     // Bouts 2 and 3 (teamSize=3) carry no result of their own, so they are
     // credited to shiro/Osaka -- the OTHER side from decisionBy="aka" --
@@ -131,7 +131,7 @@ describe('team editor: correcting a match a withdrawal ended', () => {
       decision: 'fusenpai', decisionBy: 'shiro',
       winner: { id: 'team-kyoto', name: 'Kyoto' }, ipponsA: ['○', '○'], ipponsB: [],
     }));
-    expect(screen.getByTestId('team-summary-result').textContent).toBe('AKA WIN');
+    expect(screen.getByTestId('team-summary-result').textContent).toBe('Aka wins');
     expect(screen.getByTestId('team-summary-decision').textContent).toBe('Fusenpai');
     expectMarkBeside('shiro', 'Fus.');
   });
@@ -155,7 +155,7 @@ describe('a match-level fusensho marks the winner, not the barred competitor', (
       decision: 'fusensho', decisionBy: 'aka',
       winner: { id: 'team-osaka', name: 'Osaka' },
     }));
-    expect(screen.getByTestId('team-summary-result').textContent).toBe('SHIRO WIN');
+    expect(screen.getByTestId('team-summary-result').textContent).toBe('Shiro wins');
     expectMarkBeside('shiro', 'Fus.');
   });
 

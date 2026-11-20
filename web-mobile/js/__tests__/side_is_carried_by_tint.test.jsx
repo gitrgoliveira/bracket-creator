@@ -36,7 +36,10 @@ import { describe, it, expect } from 'vitest';
 // Shared with the sibling suite: readCode strips comments, because every
 // removal site explains itself in one and a raw read matches its own
 // explanation.
-import { readSource as read, readCode as codeOf, cssBlock, readStylesheet, modules, renderedLiteral } from './helpers/source.js';
+// A surface is read as its family (the module plus the modules split out of
+// it, readFamily), so moving the console's or the team editor's code into a
+// sibling module needs no edit here.
+import { readSource as read, readFamily as surface, readCode as codeOf, cssBlock, readStylesheet, modules, renderedLiteral } from './helpers/source.js';
 
 const css = readStylesheet();
 
@@ -81,7 +84,7 @@ describe('the side is carried by a tinted cell', () => {
   // message is about the tint being applied.
   for (const [file, base] of SURFACES) {
     it(`${base} renders both sides through SideCell`, () => {
-      const src = read(file);
+      const src = surface(file);
       expect(src).toMatch(/<SideCell side="shiro"/);
       expect(src).toMatch(/<SideCell side="aka"/);
       expect(src, `${base} keeps its own geometry class`).toContain(`${base}--shiro`);
@@ -95,7 +98,7 @@ describe('the side is carried by a tinted cell', () => {
 
   it('renders no SHIRO/AKA text badge, and its styling is gone', () => {
     for (const [file] of SURFACES) {
-      expect(read(file), `${file} still renders a badge`).not.toMatch(/se-color-badge/);
+      expect(surface(file), `${file} still renders a badge`).not.toMatch(/se-color-badge/);
     }
     // The class had no other user, so leaving the rules behind would be dead CSS.
     expect(css).not.toMatch(/se-color-badge/);
@@ -126,7 +129,7 @@ describe('the side is carried by a tinted cell', () => {
       'admin_schedule_page.jsx', 'viewer_schedule.jsx',
     ];
     for (const file of CONVERTED) {
-      const src = read(file);
+      const src = surface(file);
       expect(src, `${file} does not use SideCell`).toMatch(/<SideCell side="shiro"/);
       expect(src, `${file} does not use SideCell`).toMatch(/<SideCell side="aka"/);
     }
@@ -144,7 +147,7 @@ describe('the side is carried by a tinted cell', () => {
       ['viewer_standings.jsx', /<SideLabel side="aka" \/>/],
     ];
     for (const [file, re] of LABEL_ONLY) {
-      expect(read(file), `${file} lost its SideLabel`).toMatch(re);
+      expect(surface(file), `${file} lost its SideLabel`).toMatch(re);
     }
     // The lists above pin the surfaces this change edited. This pins the
     // RULE: no module may hand-type a side label, so a NEW surface cannot ship
@@ -177,7 +180,7 @@ describe('the side is carried by a tinted cell', () => {
     expect(codeOf('side_cell.jsx'), 'the label opt-out is back').not.toMatch(/label\s*=\s*true/);
     // The inert channel is gone rather than left beside the real one: an
     // aria-label on these role=generic cells was never announced.
-    expect(read('admin_shiaijo.jsx')).not.toMatch(/shiaijo-(qrow|sides)__side[^>]*aria-label/);
+    expect(surface('admin_shiaijo.jsx')).not.toMatch(/shiaijo-(qrow|sides)__side[^>]*aria-label/);
   });
 });
 

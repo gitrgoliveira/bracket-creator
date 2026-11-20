@@ -8,7 +8,8 @@
 // and the public match card showed X on every bout still to come, and the
 // score sheet, opened again, showed them as "✓ Tie (hikiwake)", where a Tie
 // tap then turned the draw OFF. buildPatch writes such a bout with decision ""
-// (admin_scoring_team.jsx, subBoutHasBeenPlayed), and since bc-evts stage 5 a
+// (admin_scoring_team.jsx, by admin_scoring_team_bouts.jsx's subBoutHasBeenPlayed),
+// and since bc-evts stage 5 a
 // running match's points are taps the server folds the same way (an unplayed
 // bout's decision stays "", engine.writeBoutRow).
 //

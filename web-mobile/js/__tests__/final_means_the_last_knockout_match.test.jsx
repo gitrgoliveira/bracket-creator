@@ -26,7 +26,9 @@
 import { describe, it, expect } from 'vitest';
 // readCode strips comments: every removal site explains itself in one, so a raw
 // read would match its own explanation. Shared with the sibling suite.
-import { readCode as codeOf, retentionRatio, modules, renderedLiteral } from './helpers/source.js';
+// readFamilyCode and familyRetention read an entry module together with the
+// modules split out of it, so a later move inside a family needs no edit here.
+import { readCode as codeOf, readFamilyCode, familyRetention, modules, renderedLiteral } from './helpers/source.js';
 import { roundLabel } from '../bracket.jsx';
 
 
@@ -46,7 +48,7 @@ const RENDERED_FINAL = renderedLiteral('Final');
 describe('"Final" is a knockout round, not a match state', () => {
   for (const file of STATE_BADGE_SURFACES) {
     it(`${file} renders no "Final" literal`, () => {
-      expect(codeOf(file)).not.toMatch(RENDERED_FINAL);
+      expect(readFamilyCode(file)).not.toMatch(RENDERED_FINAL);
     });
   }
 
@@ -109,12 +111,14 @@ describe('a HANTEI badge must never exist', () => {
   // of their own, so a truncated read there would pass just as vacuously as
   // it did for match_scoreboard.jsx and api_client.jsx before this guard
   // existed. They retain 51.8%, 59.5% and 47.0% today, all comfortably above
-  // the 0.30 floor. Still not every module: a small doc-heavy leaf
+  // the 0.30 floor, which is applied to a family's concatenated code, not to each
+  // of its pieces: the purpose is that the sweep reads enough code, which a
+  // doc-heavy small piece would fail for no reason. Still not every module: a small doc-heavy leaf
   // legitimately retains 14% (result_recency.jsx), so a blanket floor would
   // either be too low to catch anything or would fail honest files.
   it('reads most of the badge-sweep modules, including the two the phantom-block bug used to swallow', () => {
     for (const f of [...STATE_BADGE_SURFACES, 'match_scoreboard.jsx', 'api_client.jsx']) {
-      expect(retentionRatio(f), `${f} is being truncated before the sweep reads it`)
+      expect(familyRetention(f), `${f} is being truncated before the sweep reads it`)
         .toBeGreaterThan(0.30);
     }
   });

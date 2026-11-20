@@ -23,6 +23,7 @@ import { barredNameMark } from './barred_chip.jsx';
 import { matchShowsScore } from './match_shows_score.jsx';
 import { useOpenedTapGuard } from './tap_guard.jsx';
 import { paceDisplayOf, PaceTime } from './court_pace.jsx';
+import { Icon } from './icon.jsx';
 
 const { useState, useMemo, useRef, useCallback } = React;
 
@@ -140,21 +141,29 @@ export function MatchDetailCard({ match, onClose, escapeToClose = true, slotLabe
   // Only a waiting match has a projected start: the lookup comes from the
   // tournament list, which can trail this live copy by up to a pace tick.
   const d = match.status === "scheduled" ? paceDisplayOf(paceLookup, compId, matchId) : null;
+  const phaseText = match.phase === "pool" ? poolLabel(match) : match.round;
 
   return (
     <div className="match-detail-card">
       <div className="match-detail-card__head">
         <div className="match-detail-card__meta">
-          {match.compName && <><span className="match-detail-card__comp">{match.compName}</span><span>·</span></>}
-          <span><TermV name="shiaijo">Shiaijo</TermV> {match.court}</span>
-          <span>·</span>
-          <span>{match.phase === "pool" ? poolLabel(match) : (match.round || "")}</span>
-          {match.scheduledAt && <><span>·</span><span><PaceTime display={d} fallback={match.scheduledAt} /></span></>}
+          {/* One phrase, its parts separated by commas; each comma rides on
+              the part before it, so the row's gap spaces the words. A part
+              with nothing to say (no competition, no round, no time) is left
+              out, so no comma is left dangling. */}
+          {[
+            match.compName && { key: "comp", className: "match-detail-card__comp", body: match.compName },
+            { key: "court", body: <><TermV name="shiaijo">Shiaijo</TermV> {match.court}</> },
+            phaseText && { key: "phase", body: phaseText },
+            match.scheduledAt && { key: "time", body: <PaceTime display={d} fallback={match.scheduledAt} /> },
+          ].filter(Boolean).map((p, i, parts) => (
+            <span key={p.key} className={p.className}>{p.body}{i < parts.length - 1 ? "," : ""}</span>
+          ))}
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          {isRunning && <span className="bc-running">● NOW</span>}
-          {isDone && <span style={{ fontSize: 11, color: "var(--ink-3)", fontWeight: 600 }}>FINAL</span>}
-          {onClose && <button type="button" className="match-detail-card__close" onClick={onClose} aria-label="Close">×</button>}
+          {isRunning && <span className="bc-running">● Now</span>}
+          {isDone && <span style={{ fontSize: 11, color: "var(--ink-3)", fontWeight: 600 }}>Finished</span>}
+          {onClose && <button type="button" className="match-detail-card__close" onClick={onClose} aria-label="Close"><Icon name="x" size={16} /></button>}
         </div>
       </div>
 
@@ -257,7 +266,7 @@ export const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick, hig
         <span className="vsched-item__time">
           <PaceTime display={d} fallback={m.scheduledAt || "-"} />
         </span>
-        <span className="vsched-item__court">SHIAIJO {m.court}</span>
+        <span className="vsched-item__court">Shiaijo {m.court}</span>
         {queueLabel && (
           <span className={`vsched-item__queue${qp === 1 ? " vsched-item__queue--next" : ""}`}>
             {queueLabel}

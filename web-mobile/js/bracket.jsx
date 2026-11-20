@@ -229,8 +229,8 @@ function sideLabel(side) {
 // number: counted markers ("(E×3)") confuse readers of brackets and result
 // sheets. Do not reintroduce the count here. Mirrors domain.EnchoLabel
 // (internal/domain/result_marks.go), pinned by the shared table in
-// internal/export/testdata/encho_labels.json. The score editors' "· (E)
-// Overtime ×N" eyebrow is different on purpose: a live readout of the stepper
+// internal/export/testdata/encho_labels.json. The score editors' ", (E)
+// Overtime ×N" meta line is different on purpose: a live readout of the stepper
 // the operator is using, not a result marking.
 function enchoLabel(encho) {
   return enchoOn(encho) ? "(E)" : "";
@@ -567,8 +567,8 @@ const MatchCard = React.memo(({ match, variant, showDojo, onClick, highlighted, 
         {matchNum != null ? <span className="bc-match-num">M{matchNum}</span> : null}
         <span className="bc-court"><TermBC name="shiaijo">Shiaijo</TermBC> {match.court}</span>
         {match.scheduledAt ? <span className="bc-time">{match.scheduledAt}</span> : null}
-        {running ? <span className="bc-running">● NOW</span> : null}
-        {isBye ? <span className="bc-bye-tag">BYE</span> : null}
+        {running ? <span className="bc-running">● Now</span> : null}
+        {isBye ? <span className="bc-bye-tag">Bye</span> : null}
         {metaMid === "X" ? <span className="bc-draw">X</span> : null}
         {metaMid === "(E)" ? <span className="bc-encho"><TermBC name="encho">(E)</TermBC></span> : null}
         {metaMid === "(DH)" ? (
@@ -646,7 +646,7 @@ function BracketConnectors({ rounds, treeRef, refMap, version }) {
   }, [rounds, version, treeRef, refMap]);
 
   return (
-    <svg className="bc-connectors" width={size.w} height={size.h} style={{ position: "absolute", left: 0, top: 0, pointerEvents: "none" }}>
+    <svg className="bc-connectors" aria-hidden="true" width={size.w} height={size.h} style={{ position: "absolute", left: 0, top: 0, pointerEvents: "none" }}>
       {paths.map((p) => (
         <path key={p.key} d={p.d} fill="none" stroke="var(--line-strong)" strokeWidth="1.5" />
       ))}
@@ -1036,7 +1036,7 @@ function BracketConnectorsMeta({ columns, feedersById, treeRef, refMap, version,
   }, [columns, feedersById, version, showDojo, variant, treeRef, refMap]);
 
   return (
-    <svg className="bc-connectors" width={size.w} height={size.h} style={{ position: "absolute", left: 0, top: 0, pointerEvents: "none" }}>
+    <svg className="bc-connectors" aria-hidden="true" width={size.w} height={size.h} style={{ position: "absolute", left: 0, top: 0, pointerEvents: "none" }}>
       {paths.map((p) => (
         <path key={p.key} d={p.d} fill="none" stroke="var(--line-strong)" strokeWidth="1.5" />
       ))}

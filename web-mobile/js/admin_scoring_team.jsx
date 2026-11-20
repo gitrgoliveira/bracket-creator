@@ -58,6 +58,7 @@ import {
   StartRefusedNotice,
   finishButtonLabel,
   armedFinishLabel,
+  editorMetaText,
 } from './admin_scoring_shared.jsx';
 import { teamDraftTaps } from './draft_taps.jsx';
 // bc-evts stage 5: a running team match is scored by tap events, one per
@@ -77,6 +78,7 @@ import { useChangedGroups, useKeptInHistoryNote, KeptInHistoryNote } from './adm
 import { MatchHistoryDisclosure } from './match_history_view.jsx';
 import { GROUP_ENCHO, GROUP_RESULT, GROUP_REP_PICK_A, GROUP_REP_PICK_B, boutGroup } from './match_groups.jsx';
 import { publishHeight } from './published_height.jsx';
+import { Icon } from './icon.jsx';
 import { useLatestRef } from './latest_ref.jsx';
 import { SideLabel, sideWithColour } from './side_cell.jsx';
 
@@ -85,97 +87,25 @@ import { SideLabel, sideWithColour } from './side_cell.jsx';
 // editor is ES-imported by hosts and tests that never load api_client.
 import { notLandedBanner, terminalFailureBanner, notSavedText, writeDidNotLand, writeWasRefused, writeRetryable, writePending, writeHeldOnDeviceOnly, queuedNotice, REP_BOUT_NOT_ADDED, REP_BOUT_NOT_REMOVED, decisionWord, FETCH_TIMEOUT_MS, TIMED_OUT, withinDeadline } from './write_result.jsx';
 
-// boutMiddle is THE single source for a bout's centre value (vs/X/(E)/(DH));
-// the editor derives its per-bout middle from it rather than restating the
-// chain (CLAUDE.md § Match Decision Types: the middle rule lives in ONE place).
-import { boutMiddle, winnerSideLR } from './bracket.jsx';
-import { realIppons, hanteiTied, hanteiSlot, hanteiWinnerKey, nameOf, sideSlotOrder, attributeWinnerSide, subBoutAttribution, DEFAULT_WIN_IPPON, hanteiDecided } from './result_slot.jsx';
+import { realIppons, hanteiTied, hanteiSlot, hanteiWinnerKey, nameOf, sideSlotOrder, DEFAULT_WIN_IPPON, hanteiDecided } from './result_slot.jsx';
 import { creditedSideKey, creditedTotals } from './team_default_credit.jsx';
 // bc-dtfn: the one owner of "is this tap the bounce of the previous one".
 import { stampTap, clearTap, acceptTap, swallowBounce, useArmedConfirm, useOpenedTapGuard } from './tap_guard.jsx';
-
-// renderTeamBoutMiddle: the ONE place the editor turns a sub-bout into its
-// centre value, for BOTH the read-only done row and the live entry row. Derives
-// vs/X/(E)/(DH) from the single-source boutMiddle (decided-by-points reads "vs"
-// like the bracket/scoreboard; the cell ippon letters carry the score). The
-// editor's local sub state has no decision string, so synthesise boutMiddle's
-// three inputs: a marked/derived tie → hikiwake, the daihyosen row →
-// "daihyosen", s.encho (a period count) → {periodCount}. X keeps its dedicated
-// styling; vs/(E)/(DH) render as the quiet centre span. (Defined below
-// teamBoutIsDraw, which it calls.)
-
-// teamBoutIsDraw: does this bout row read as a hikiwake? A declared winner
-// un-draws the bout — that is the whole rule. The hantei case needs no
-// parameter here because boutWinnerSide folds the hantei verdict into
-// t.winner (its hanteiSide input), so a 1-1 daihyosen taken to hantei
-// arrives with a winner and never derives the X that would claim a draw on
-// a bout whose winner is simultaneously wearing Ht. Exported so the
-// winner-un-draws rule is pinned without mounting the editor.
-export function teamBoutIsDraw(s, t) {
-  return t.winner === null && !!(s.draw || t.aTotal > 0 || t.bTotal > 0);
-}
-
-function renderTeamBoutMiddle(s, t, isDaihyoRow) {
-  const isDraw = teamBoutIsDraw(s, t);
-  const mid = boutMiddle(
-    isDaihyoRow ? "daihyosen" : (isDraw ? "hikiwake" : ""),
-    s.encho > 0 ? { periodCount: s.encho } : null,
-    isDraw ? { type: "hikiwake" } : null,
-  );
-  return mid === "X" ? <span className="tsm-draw">X</span> : <span style={{ color: "var(--ink-3)" }}>{mid}</span>;
-}
-
-
-// preserveStoredDaihyosenVerdict: while a stored hantei verdict is
-// UNATTRIBUTABLE (rename drift: the stored winner name no longer matches
-// exactly one current side) and the operator has neither re-picked a side nor
-// cancelled, a correction save must NOT erase it - without this, fixing an
-// unrelated bout score on a reopened encounter silently flipped a hantei win
-// into a hikiwake (pool) or stripped a completed match's winner (knockout).
-// It preserves ONLY the untouched state: withdrawal is explicit (clearHantei),
-// re-picking replaces the verdict, and editing the daihyosen row itself
-// yields too - `tied` must reflect the CURRENT local scoreline, because
-// re-asserting decidedByHantei onto a row the operator just untied would
-// have the server reject the whole save ("requires a tied scoreline").
-// encho is deliberately NOT carried: the editor seeds its encho counter from
-// the stored row, so daihyosenEnchoFields already round-trips an untouched
-// value, and carrying it here would overwrite an operator's encho edit.
-//
-// The protection is ONE SAVE DEEP, not permanent, for an unattributable
-// verdict specifically: since the winner names neither side, the wire's
-// placeHtForWinner can never re-place the mark (there is no side to put it
-// on - see the "row goes out markless" note at the call site below), so the
-// save that runs THIS function still erases the stored Ht mark, even though
-// it preserves the winner NAME. The next mount then derives
-// existingDaihyosen.decidedByHantei as false (it is read from the mark, and
-// the mark is gone), so `armed` starts false, `preserveStoredDaihyosenVerdict`
-// returns null on its very first line, and an untouched correction save after
-// THAT one clears the winner too - the exact hikiwake flip this function
-// exists to prevent, deferred by exactly one save rather than avoided. This
-// is why rename-drift is deliberately not "fixed" further here: renames are
-// gated to setup/draw-ready, when no scored sub rows exist, so an
-// unattributable daihyosen winner is not reachable through real flows in the
-// first place - the decay above is a property of the (dead) scenario, not a
-// live bug.
-export function preserveStoredDaihyosenVerdict({ armed, pickedSide, tied, existingDaihyosen }) {
-  if (!armed || pickedSide || !tied) return null;
-  if (!existingDaihyosen?.decidedByHantei || !existingDaihyosen.winner) return null;
-  return { winner: existingDaihyosen.winner, decidedByHantei: true };
-}
+// The team editor's pure bout, result and kachinuki rules, split out of this file.
+import { renderTeamBoutMiddle, preserveStoredDaihyosenVerdict, REP_BOUT_DECIDED_NOTE, teamResultLabel, isKoTieBlocked, unfinishedTeamBouts, unfinishedTeamBoutsMessage, boutWinnerSide, teamEncounterHasResult, teamEncounterIsLevel, fusenshoSideFromSub, FUSENSHO_PRESSED_LABEL, subBoutHasBeenPlayed, reconcileRowsToPositions } from './admin_scoring_team_bouts.jsx';
+import { isKachinukiBoutMode, canReopenKachinukiMatch, isKachinukiBoutRemovable, buildKachinukiEndEntries, deriveKachinukiEndOutcome, kachinukiEndOutcomeLabel, kachinukiEnchoAvailable, kachinukiBandModel, kachinukiVisiblePositions, resolveKachinukiBoutSides } from './admin_scoring_team_kachinuki.jsx';
 
 // mp-bkg / mp-13y: resolveMatchLineup and resolveLineupTeamId are now shared
 // across all consumer surfaces (admin scoring modal, viewer, TvDisplay,
-// StreamingOverlay). The implementations live in lineup_resolver.jsx;
-// re-exported here so existing imports from admin_scoring_modal.jsx (which
-// re-exports them onward) continue to work.
-import { resolveMatchLineup, resolveLineupTeamId, resolveBoutSideName, resolveBoutSideMemberId, resolveSquadMember, squadMemberIdForUniqueName, squadRosterEntries, rosterWithoutPlacedElsewhere, resolveBoutSideDisplayName, buildInlineLineupWrite, resolveTypedMemberName, memberRefusalNote, alreadyPlacedNote, lineupPositionLabel, POS_KEYS_5, boutPositionName } from './lineup_resolver.jsx';
+// StreamingOverlay). The implementations live in lineup_resolver.jsx and are
+// imported from there by every consumer.
+import { resolveMatchLineup, resolveLineupTeamId, resolveBoutSideName, resolveBoutSideMemberId, resolveSquadMember, squadMemberIdForUniqueName, squadRosterEntries, rosterWithoutPlacedElsewhere, resolveBoutSideDisplayName, buildInlineLineupWrite, resolveTypedMemberName, memberRefusalNote, alreadyPlacedNote, lineupPositionLabel, POS_KEYS_5, boutPositionName, pickManualBoutName } from './lineup_resolver.jsx';
 // The one owner of what a lineup save carries: the one position a name-box pick changes.
 import { changedLineupSave } from './lineup_save.jsx';
 // The one owner of what a list of team members that arrives does to the members
 // shown, and of keeping a member this sheet named or added over a list that predates it.
 import { mergeMembers, newMembersWait, membersNotReadNotice } from './lineup_draft.jsx';
 import { DAIHYOSEN_POSITION } from './pool_ids.jsx';
-import { joinList } from './admin_helpers.jsx';
 // The shared owner of what an operator is told about unreadable data; the
 // editor gets the repair-oriented wording, the pool surfaces get theirs.
 import { matchDataUnreadable, UnreadableEditorNote } from './data_integrity.jsx';
@@ -183,7 +113,7 @@ import { sideLookupKey } from './competitor_identity.jsx';
 // bc-pnum: the ONE primitive that composes a squad member's visible label
 // ("T10.1"); see its header for why this is never restated inline.
 import { squadMemberLabel } from './squad_member_label.jsx';
-import { kachinukiAdvisoryModel, kachinukiNoPairingText, kachinukiRecordedBoutCloses, kachinukiRosterKey, lastNumberedBout, storedBoutRecorded } from './kachinuki_advisory.jsx';
+import { kachinukiAdvisoryModel, kachinukiNoPairingText, kachinukiRosterKey, lastNumberedBout, storedBoutRecorded } from './kachinuki_advisory.jsx';
 
 // Shared inline style for the squad member label riding beside a bout row's
 // fighter name (squadLabelFor, TeamScoreEditorModal below). A muted, small
@@ -192,19 +122,6 @@ import { kachinukiAdvisoryModel, kachinukiNoPairingText, kachinukiRecordedBoutCl
 // label is new), and one bare constant beats three duplicated style object
 // literals at the three render sites.
 const SQUAD_MEMBER_LABEL_STYLE = { fontSize: 11, color: "var(--ink-3)", fontWeight: 600, flexShrink: 0 };
-
-// Position keys are generated inline in TeamScoreEditorModal (numbered "1".."N")
-// from teamSize and any persisted kachinuki bouts; the upper bound everywhere is
-// MAX_TEAM_SIZE (admin_helpers.jsx), kept in lockstep with the team-size input
-// caps in admin_competition.jsx and admin_setup.jsx.
-
-// The note under a representative bout the judges decided, on the public
-// self-run page (bc-dhas). The server refuses a participant's change to that
-// bout with the same sentence (repBoutHanteiRefusal,
-// mobileapp), and both are pinned to the
-// "recorded" value of internal/mobileapp/testdata/rep_bout_hantei_messages.json,
-// so the participant reads one sentence whichever side says it.
-export const REP_BOUT_DECIDED_NOTE = "The judges decided this representative bout (hantei). Ask the tournament organizer to change it.";
 
 // recordedDaihyosenSideOf resolves which SIDE a stored daihyosen hantei names:
 // "" (none, or unattributable), "a" (AKA) or "b" (SHIRO).
@@ -253,264 +170,6 @@ function positionLabelFor(teamSize, index, sub) {
   }
   return boutPositionName(teamSize, index) || `Match ${index + 1}`;
 }
-// teamResultLabel: the RESULT-band / Finish-button verdict text for a team
-// encounter. A knockout match cannot be a draw (a tie is broken by a daihyosen,
-// FIK rules), so a null winner in the bracket phase never reads "DRAW": it's
-// "DAIHYOSEN" once a scored tie exists to break, or "-" before any bout lands.
-// Only a pool encounter reads a null winner as a true draw. (a = Aka, b = Shiro.)
-//
-// KACHINUKI (mp-gmcg): daihyosen does not exist, so a tied knockout kachinuki
-// encounter must never read "DAIHYOSEN": the tie is resolved by fighting on
-// (next bout or encho on the same pair), so the band stays pending ("-")
-// until the operator ends the match. Pools keep "DRAW": that is exactly what
-// End match would record there.
-export function teamResultLabel({ teamWinner, isKnockoutPhase, hasAnyScore, isKachinuki }) {
-  if (teamWinner === "a") return "AKA WIN";
-  if (teamWinner === "b") return "SHIRO WIN";
-  if (isKnockoutPhase) return hasAnyScore && !isKachinuki ? "DAIHYOSEN" : "-";
-  return "DRAW";
-}
-
-// isKoTieBlocked: Finish must be blocked while a knockout encounter has no
-// winner: the operator has to add and score a daihyosen first. Pool draws stay
-// finishable, and an already-completed match (correction flow) is never blocked.
-export function isKoTieBlocked({ isKnockoutPhase, teamWinner, isComplete }) {
-  return !!isKnockoutPhase && teamWinner === null && !isComplete;
-}
-
-// unfinishedTeamBouts: the numbered bouts (1..teamSize, in order) of a team
-// match that have no result, which Finish refuses while any remain: every
-// bout of a team match is fought (operator ruling 2026-09-24). "Has a result"
-// is subBoutHasBeenPlayed, the one played-bout predicate, and state.
-// SubMatchResult.HasResult is its Go twin on the server gate. Rows are found
-// by their `_pos`, never by index. The daihyosen row is never numbered, so it
-// is never returned.
-//
-// Every position counts, whoever the lineups field there: a vacancy on one
-// side is a fusensho for the fighter who is present, and a position neither
-// side fields is recorded as a Tie (operator ruling 2026-09-24). Callers skip
-// kachinuki, which ends on End match instead.
-export function unfinishedTeamBouts({ subs, teamSize }) {
-  const out = [];
-  for (let bout = 1; bout <= teamSize; bout++) {
-    const row = (subs || []).find(s => s && s._pos === bout);
-    if (!subBoutHasBeenPlayed(row)) out.push(bout);
-  }
-  return out;
-}
-
-// unfinishedTeamBoutsMessage: the refusal copy, word for word the server's
-// (unfinishedTeamBoutsMessage in internal/mobileapp/team_finish_gate.go; both
-// are pinned to internal/mobileapp/testdata/unfinished_team_bouts.json). It
-// names the bouts and what to record, and never mentions the lineup: a vacancy
-// is legitimate play, not something to complete.
-export function unfinishedTeamBoutsMessage(teamSize, bouts) {
-  const labels = (bouts || []).map(b => {
-    const name = boutPositionName(teamSize, b - 1);
-    return `Bout ${b}${name ? ` (${name})` : ""}`;
-  });
-  if (labels.length === 0) return "";
-  const list = joinList(labels, "and", "");
-  return `${list} ${labels.length === 1 ? "has" : "have"} no result. Record a score, a Tie, or a Fusensho before finishing.`;
-}
-
-// isKachinukiBoutMode: while a kachinuki encounter is being fought (not a
-// correction, no legacy daihyosen row) the modal's primary actions are
-// [Record bout] (a running write flagged kachinukiBoutFinal that the server
-// uses to append the next pairing) and [End match] (an explicit completed
-// write whose outcome is derived from the last scored bout, see
-// deriveKachinukiEndOutcome). Completion is OPERATOR-LED (mp-gmcg): the
-// engine never auto-finalizes, so `isComplete` is the only terminator. A
-// sub-result carrying decision "kachinuki-exhaustion" on a RUNNING match
-// (e.g. a reopened encounter) must NOT kill bout mode: roster snapshots are
-// advisory, only the operator knows whether a team is truly out of players.
-// Legacy daihyosen rows keep the Finish/correction semantics (daihyosen does
-// not exist in kachinuki; existing rows are rendered defensively only). The
-// knockout no-draw rule (isKoTieBlocked) never applies to a bout submit: a
-// bout-level hikiwake is a legitimate result; End match carries its own
-// knockout-tie gate instead.
-export function isKachinukiBoutMode({ isKachinuki, isComplete, hasDaihyosen }) {
-  return !!isKachinuki && !isComplete && !hasDaihyosen;
-}
-
-// canReopenKachinukiMatch: [Reopen match] renders ONLY on a completed
-// KACHINUKI team match (mp-gmcg mistake recovery: status back to running,
-// winner/decision cleared, bout log kept, more bouts addable). The backend
-// endpoint 400s non-kachinuki competitions, whose only sanctioned edit of a
-// finished result remains the correction path, so the button must not
-// render for them at all. Nor does it render on an encounter a withdrawal
-// decided (recordedWithdrawal, admin_scoring_shared.jsx withdrawalInForce):
-// that reopen also makes the withdrawn team eligible again, so it goes
-// through RecordedWithdrawal, which states that consequence and asks why
-// first, rather than one silent tap. The argument is required: a caller that
-// forgets it must not quietly bring the silent path back.
-export function canReopenKachinukiMatch({ isKachinuki, isComplete, recordedWithdrawal }) {
-  if (typeof recordedWithdrawal !== "boolean") {
-    throw new TypeError("canReopenKachinukiMatch: recordedWithdrawal is required");
-  }
-  return !!isKachinuki && !!isComplete && !recordedWithdrawal;
-}
-
-// isKachinukiBoutRemovable: whether the [× Remove this bout] undo renders for
-// the current bout. True only when the encounter is in bout mode, the current
-// bout is UNSCORED, and a prior bout WAS scored (lastScoredIdx >= 0) — so the
-// current bout is an appended EXTRA, never the bootstrap bout 1. That is exactly
-// the row the End-match strip (stripTrailingUnscoredKachinukiBouts) would drop,
-// so the button just makes the implicit strip explicit and reversible on the
-// spot. mp-gmcg.
-export function isKachinukiBoutRemovable({ boutMode, currentBoutPlayed, lastScoredIdx, hasLiveBout = true }) {
-  // bc-kbrc: with no live bout (the last one recorded, no pairing appended)
-  // there is no empty bout to remove.
-  return !!boutMode && hasLiveBout && !currentBoutPlayed && lastScoredIdx >= 0;
-}
-
-// boutWinnerSide: THE single home for "which side won this sub-bout".
-// Returns "a" (Aka), "b" (Shiro), or null when the bout has no winner.
-// One rule, three surfaces — the IV/PW tally and persisted bout winner
-// (subTotals), the kachinuki band's last-bout fact (kachinukiBandModel),
-// and the End-match derivation (deriveKachinukiEndOutcome) all call this,
-// so they can never disagree about who won a bout.
-//
-// Order matters. An operator-marked hikiwake has no winner at all. A
-// FUSENSHO (FIK Art. 32) is decided by the decision alone: it names the winner,
-// the maru cells (○○, or a single ○ in encho) are merely the score board's
-// marking of it, and the loser's already-struck ippons are PRESERVED
-// (preserveLoserScore, engine). So a walkover whose loser kept
-// two ippons re-opens as 2–2 and one declared in encho as 1–1: counting
-// alone would read those as tied, which left the band rendering
-// "Last:  beat  (fusensho)" with both names blank, and could even hand the
-// bout to the side that withdrew. The fusensho side wins regardless of the
-// cells. Widen or narrow this rule in ONE place only.
-// hanteiSide is the same class of input as fusenshoSide: a decision that names
-// the winner over what the cells read. It applies ONLY to a tied scoreline
-// (FIK 7-5 / 29-6, mirrored by validation.go's equal-ippon-counts gate) and it
-// beats an operator draw flag: a hantei declares a winner, so it un-draws the
-// bout however level the scoreline. It also outranks fusenshoSide on tied
-// cells (a stale reopened hantei plus a new fusensho keeps the hantei side) —
-// not a new choice, the same precedence the old daihyosenWinner overlay had;
-// stated here so the ordering reads as intentional. Folding it in HERE (rather than overlaying
-// it at consumers) is what keeps every reader of subTotals[i].winner — the
-// centre chip colouring, the draw derivation, the save path — agreeing that a
-// hantei-decided bout is decided.
-export function boutWinnerSide({ aCount = 0, bCount = 0, draw = false, fusenshoSide = "", hanteiSide = "" } = {}) {
-  if ((hanteiSide === "a" || hanteiSide === "b") && aCount === bCount) return hanteiSide;
-  if (draw) return null;
-  if (fusenshoSide === "a" || fusenshoSide === "b") return fusenshoSide;
-  if (aCount > bCount) return "a";
-  if (bCount > aCount) return "b";
-  return null;
-}
-
-// buildKachinukiEndEntries: maps the modal's LOCAL sub state to the
-// wire-shaped entries deriveKachinukiEndOutcome consumes, keeping ONLY
-// bouts that carry operator input — decided by subBoutHasBeenPlayed, the
-// single played-bout primitive (it also gates the wire filter, the Record
-// button, visible positions, and the encho target, so every kachinuki
-// surface agrees on which bout is "last"). The daihyosen row is dropped
-// here (daihyosen does not exist in kachinuki); untouched auto-appended /
-// manual placeholder rows are dropped exactly as they are dropped from
-// the wire.
-//
-// FUSENSHO: the entries carry decision "fusensho" but no winner NAME (the
-// local sub state has no names for a bout the server has not paired yet),
-// so they also carry fusenshoSide — the side the operator marked — and
-// boutWinnerSide resolves the winner from that decision rather than from the
-// ippon counts. Counting alone is not enough: applyFusenshoToggle
-// (admin_scoring_shared.jsx) writes the ○○ maru into the winning side's pts,
-// but a walkover re-opened from the server arrives with the loser's
-// preserved ippons too and can read 2–2 / 1–1. fusenshoSide is local to this
-// derivation and never reaches the wire (buildPatch builds the wire rows).
-export function buildKachinukiEndEntries(subs, daihyosenIdx) {
-  return (subs || [])
-    .map((s, idx) => ({ s, idx }))
-    .filter(({ s, idx }) => idx !== daihyosenIdx && subBoutHasBeenPlayed(s))
-    .map(({ s, idx }) => ({
-      position: idx + 1,
-      ipponsA: s.aPts,
-      ipponsB: s.bPts,
-      decision: s.draw ? "hikiwake" : s.fusensho ? "fusensho" : "",
-      fusenshoSide: s.draw ? "" : (s.fusensho || ""),
-      encho: s.encho > 0 ? { periodCount: s.encho } : undefined,
-    }));
-}
-
-// deriveKachinukiEndOutcome: context-derived outcome for the [End match]
-// action (mp-gmcg, spec 006 "Resolved decisions" #2). NO picker, ever:
-// OPERATOR INPUT DETERMINES THE BOUT OUTCOME — the last bout carrying any
-// operator input decides the encounter. If that bout has a winner (more
-// ippons, or a fusensho), that team wins; if it does not (explicit
-// hikiwake, equal ippons, a pending 0-0 encho, or ONLY fouls: a bout
-// fought to time with no ippon is a hikiwake), the encounter is tied on
-// that bout. There is no separate "has an outcome" notion: outcomes exist
-// only as operator input, so the app never skips back past an
-// input-bearing bout when ending a match.
-//
-// PRECONDITION: entries are wire-shaped sub-results ({position, sideA,
-// sideB, ipponsA, ipponsB, winner, decision, encho}) that already carry
-// operator input — production callers build them with
-// buildKachinukiEndEntries (above), whose subBoutHasBeenPlayed filter is
-// the single source of that judgement. This function only drops
-// daihyosen (-1) / legacy non-positive sentinel rows. Returns:
-//   {kind:"win", winnerSide:"a"|"b"}          last bout has a winner
-//                                             (score, fusensho, or a winner
-//                                             name matching a side)
-//   {kind:"draw"}                             last bout tied, pools/
-//                                             league: drawn encounter
-//   {kind:"blocked", reason:"knockout-tie"}   tied in a knockout: continue
-//                                             (next bout or encho)
-//   {kind:"blocked", reason:"no-bouts"}       nothing recorded yet
-export function deriveKachinukiEndOutcome({ subResults, isKnockoutPhase }) {
-  const scored = (subResults || [])
-    .filter(e => e && e.position > 0)
-    .sort((x, y) => x.position - y.position);
-  if (scored.length === 0) return { kind: "blocked", reason: "no-bouts" };
-  const last = scored[scored.length - 1];
-  // The side rule is NOT re-spelled here: boutWinnerSide is its one home.
-  let side = boutWinnerSide({
-    aCount: (last.ipponsA || []).length,
-    bCount: (last.ipponsB || []).length,
-    draw: last.decision === "hikiwake",
-    fusenshoSide: last.fusenshoSide,
-  });
-  if (side === null && last.decision !== "hikiwake" && last.winner) {
-    // Layered ON TOP of the side rule, not a second copy of it: a
-    // server-recorded bout may name its winner by STRING with nothing a
-    // side rule can key off (a fusensho persisted without maru cells and
-    // without a marked side). Map that winner back to a side through the
-    // shared owner (bc-pnum), so the row's member ids answer where they can
-    // and two fighters sharing a display name name NO side -- the verdict
-    // then stays blocked or drawn, which tells the operator to settle it,
-    // instead of silently crediting whichever fighter is written first.
-    side = attributeWinnerSide(subBoutAttribution(last));
-  }
-  if (side) return { kind: "win", winnerSide: side };
-  if (isKnockoutPhase) return { kind: "blocked", reason: "knockout-tie" };
-  return { kind: "draw" };
-}
-
-// kachinukiEndOutcomeLabel: the ONE home for the [End match] verdict wording.
-// deriveKachinukiEndOutcome owns the OUTCOME; this owns its DISPLAY STRING so
-// the two End-match surfaces (the reopen verdict-preview and the End/Confirm
-// button) can never drift. The win wording defers to teamResultLabel, the
-// canonical "AKA WIN"/"SHIRO WIN" source; a tied end reads "Draw (hikiwake)".
-export function kachinukiEndOutcomeLabel(outcome) {
-  if (outcome?.kind === "win") return teamResultLabel({ teamWinner: outcome.winnerSide });
-  return "Draw (hikiwake)";
-}
-
-// kachinukiEnchoAvailable: whether the Encho (same pair fights on)
-// affordance renders for the current End-match outcome. Available for
-// EVERY tied last bout — knockout (End is blocked, overtime is one of the
-// two ways forward) AND pools/league (End would record a drawn encounter,
-// but whether the pairing must produce a result, e.g. the taisho must be
-// defeated, is OPERATOR DISCRETION, never derived from the phase). Not
-// available when nothing is recorded or when the last bout already has a
-// winner. Nor by pairing: any tied pair may fight on, the operator decides
-// and the app records it (operator ruling 2026-09-26).
-export function kachinukiEnchoAvailable(outcome) {
-  if (!outcome) return false;
-  return outcome.kind === "draw" || (outcome.kind === "blocked" && outcome.reason === "knockout-tie");
-}
 
 // The three footer hints a kachinuki sheet shows above its buttons. Their
 // words live here once because the slot that holds the line reserves the
@@ -521,233 +180,6 @@ const kachinukiTiedHint = (enchoOffered) =>
   `Tied bout. End match records a drawn encounter. Record bout retires both and brings the next pair up.${enchoOffered ? " Encho keeps the same pair fighting when this pairing must produce a result." : ""}`;
 const kachinukiNoDrawHint = (enchoOffered) =>
   `No draws in a knockout. Record bout brings the next fighter up.${enchoOffered ? " Encho keeps the same pair on this bout." : ""} Continue until there is a point.`;
-
-// kachinukiBandModel: content model for the summary band in KACHINUKI mode
-// (light instrument panel, user-confirmed brief 2026-08-02). The band shows
-// BOUT-LOG FACTS ONLY — never roster inferences (the roster is advisory by
-// operator ruling) and NEVER a verdict while the match is running (the old
-// IV/PW-derived "AKA WIN" contradicted the End gate mid-match, critique P1).
-// The verdict returns only on completion, derived from the MATCH winner —
-// the last bout decides kachinuki, never the IV lead.
-//
-// Inputs: subs = the modal's local sub state (subBoutHasBeenPlayed is the
-// single played-bout primitive); serverSubs = m.subResults (bout-log names);
-// currentBout = the visible bout position (1-based). Pure and unit-tested.
-// Returns { headline, fact } while running, { headline, verdict,
-// verdictSide: "aka"|"shiro"|"draw" } when complete.
-export function kachinukiBandModel({ subs, daihyosenIdx, isComplete, matchWinner, matchDecision, sideA, sideB, currentBout, namesAt }) {
-  // The display string for the "unattributable winner" fallback below, kept
-  // separate from `matchWinner` itself: winnerSideLR needs the RAW (possibly
-  // {id,name}) form to prefer id equality over name (two teams CAN share a
-  // display name), so matchWinner is passed through unflattened.
-  const matchWinnerName = nameOf(matchWinner);
-  const played = [];
-  (subs || []).forEach((s, idx) => {
-    if (idx === daihyosenIdx || !subBoutHasBeenPlayed(s)) return;
-    // Names come from the caller's resolver — the modal passes the SAME
-    // primitive the bout rows render with (playerNamesForBout: local
-    // override → server log → lineup), so the band can never disagree
-    // with the row above it. Anonymous bouts degrade to side labels.
-    const names = namesAt ? namesAt(idx) : {};
-    const aName = names.aName || "";
-    const bName = names.bName || "";
-    // realIppons, not raw .length: an unfilled "•" placeholder or an empty cell
-    // is not a point. Raw length here made the band announce "Aka beat Shiro"
-    // under a bout row the scoreboard was rendering as a tie.
-    const aN = realIppons(s.aPts).length;
-    const bN = realIppons(s.bPts).length;
-    // Winner/loser derive from the SIDE, never from name comparison — an
-    // unresolved name must not collapse both sides onto one label. The side
-    // itself comes from boutWinnerSide (the one winner rule), so a fusensho
-    // whose maru happen to tie the loser's preserved score still names its
-    // winner instead of rendering "Last:  beat  (fusensho)".
-    const winnerSide = boutWinnerSide({ aCount: aN, bCount: bN, draw: s.draw, fusenshoSide: s.fusensho });
-    played.push({
-      winner: winnerSide === "a" ? (aName || "Aka") : winnerSide === "b" ? (bName || "Shiro") : "",
-      loser: winnerSide === "a" ? (bName || "Shiro") : winnerSide === "b" ? (aName || "Aka") : "",
-      // "No winner" IS the tie, so it reads off the same rule: an explicit
-      // hikiwake or equal counts with no fusensho to attribute them to.
-      tie: winnerSide === null,
-      fusensho: !!s.fusensho,
-    });
-  });
-
-  if (isComplete) {
-    const n = played.length;
-    const headline = `FINAL · ${n} BOUT${n === 1 ? "" : "S"}`;
-    // Winner wording defers to teamResultLabel (the one "AKA WIN"/"SHIRO WIN"
-    // home). The raw-name fallback keeps an unattributable winner from being
-    // silently dropped. winSide reuses winnerSideLR (bracket.jsx) rather than
-    // re-deriving name-equality here: it prefers id equality over name, which
-    // bare-name comparison cannot (review: two teams CAN share a display name).
-    const lr = winnerSideLR({ winner: matchWinner, sideA, sideB });
-    const winSide = lr === "right" ? "a" : lr === "left" ? "b" : null;
-    if (winSide) return { headline, verdict: teamResultLabel({ teamWinner: winSide }), verdictSide: winSide === "a" ? "aka" : "shiro" };
-    if (matchDecision === "hikiwake" || !matchWinner) return { headline, verdict: "DRAW", verdictSide: "draw" };
-    return { headline, verdict: String(matchWinnerName).toUpperCase(), verdictSide: "draw" };
-  }
-
-  const headline = `BOUT ${currentBout || played.length + 1}`;
-  const last = played[played.length - 1];
-  if (!last) return { headline, fact: "" };
-  if (last.tie) return { headline, fact: "Last: hikiwake · both retired" };
-  // Streak: consecutive trailing wins by the same fighter — a pure bout-log
-  // fact ("stays on" is winner-stays semantics, not a roster claim).
-  let streak = 0;
-  for (let i = played.length - 1; i >= 0; i--) {
-    if (played[i].winner && played[i].winner === last.winner) streak++;
-    else break;
-  }
-  const how = last.fusensho ? " (fusensho)" : "";
-  const stay = streak >= 2 ? ` · stays on, ${streak} wins` : " · stays on";
-  // "Last:" prefix mirrors the tie-fact ("Last: hikiwake …") so the headline
-  // "BOUT N" is never misread as bout N's own (unfought) result (critique P2).
-  return { headline, fact: `Last: ${last.winner} beat ${last.loser}${how}${stay}` };
-}
-
-// kachinukiVisiblePositions: which bout slots to render for a kachinuki
-// match. The server bout log (m.subResults) is the source of truth for
-// which bouts exist, with two carve-outs:
-//
-//   - Bootstrap: the server never creates bout 1 (MaybeAdvanceKachinuki
-//     only APPENDS bouts 2+ after the first recorded bout), so a fresh
-//     match with no positive-position entries shows position 1: the
-//     senpo pairing resolves from the lineup.
-//   - Daihyosen: the position DAIHYOSEN_POSITION rep bout is a server row and the
-//     actionable slot for a tied encounter; it is always visible when
-//     present.
-//
-// Running (non-correction): only the current bout, the first server bout
-// the operator has not scored yet (isPlayedAt on its canonical index in
-// `positions`), else the last one. Completed (correction): every server
-// bout so any of them can be edited.
-export function kachinukiVisiblePositions({ positions, daihyosenIdx, subResults, isComplete, isPlayedAt, closeRecordedLast = false }) {
-  const subs = subResults || [];
-  let slots = positions.filter((_, i) => i !== daihyosenIdx && subs.some(sr => sr.position === i + 1));
-  if (slots.length === 0 && positions.length > 0 && daihyosenIdx !== 0) {
-    slots = [positions[0]]; // bootstrap: bout 1 on a fresh match
-  }
-  const daihyosenSlot = daihyosenIdx >= 0 ? [positions[daihyosenIdx]] : [];
-  if (isComplete) return [...slots, ...daihyosenSlot];
-  let cur = -1;
-  for (let i = 0; i < slots.length; i++) {
-    if (!isPlayedAt(positions.indexOf(slots[i]))) { cur = i; break; }
-  }
-  if (cur < 0) {
-    // Every bout is played. bc-kbrc: when Record bout has recorded the last
-    // one as a WIN (the server's stored mark) and appended no pairing, there
-    // is no live bout: the recorded one renders read-only with the others. A
-    // recorded DRAW never closes it (kachinukiRecordedBoutCloses: Encho on that
-    // bout is the operator's call in any phase). A bout added by hand is a
-    // placeholder with no mark, so it is the live bout again.
-    const last = lastNumberedBout(subs);
-    if (closeRecordedLast && last && slots.includes(positions[last.position - 1])
-      && kachinukiRecordedBoutCloses(subs)) {
-      return daihyosenSlot;
-    }
-    cur = slots.length - 1;
-  }
-  return [...slots.slice(cur, cur + 1), ...daihyosenSlot];
-}
-
-// teamEncounterHasResult: has any counting bout produced a landed result?
-// IV/PW totals capture decisive bouts and scored draws, but a drawn (hikiwake)
-// bout scored 0–0 contributes neither while still being a real result. Without
-// counting those, a KO encounter tied solely on 0–0 draws would read pending
-// ("-") instead of "DAIHYOSEN". The daihyosen row is excluded to mirror the
-// IV/PW totals (it is the tiebreaker, not a counting bout).
-export function teamEncounterHasResult({ ivA, ivB, pwA, pwB, subTotals, daihyosenIdx }) {
-  if ((ivA + ivB + pwA + pwB) > 0) return true;
-  return (subTotals || []).some((s, i) => i !== daihyosenIdx && s.draw);
-}
-
-// teamEncounterIsLevel: some bout has landed (a point, a win or a draw) and the
-// two sides finish level on IV and PW. The one spelling of "tied" the daihyosen
-// control and the league line both ask, so they cannot disagree. A bout counts
-// as decided once it carries any ippon or is a draw: a 5-person tie reaches
-// even IV only through a drawn bout (the bug the old `allComplete && tied` gate
-// had).
-export function teamEncounterIsLevel({ ivA, ivB, pwA, pwB, subTotals }) {
-  const anyBoutDecided = (subTotals || []).some(t => t.aTotal > 0 || t.bTotal > 0 || t.draw || t.winner !== null);
-  return anyBoutDecided && ivA === ivB && pwA === pwB;
-}
-
-// resolveKachinukiBoutSides: competitor identity for a KACHINUKI sub-bout.
-// Unlike a fixed-position encounter (settled on IV/PW at the match level, where
-// computeStandings matches the match-level side first via isWinForSide), a
-// kachinuki bout is consumed per-competitor: engine.AdvanceKachinuki compares
-// the bout winner against sideA/sideB to decide who stays on, and the bout-log
-// export prints those names. So a kachinuki bout must persist the INDIVIDUAL
-// player names and a player-name winner: never the team name. When the lineup
-// is unknown the sides are left empty and the winner falls back to the team
-// name, the same "sides empty when unknown" contract the backend's quick-score
-// path documents (handlers_match.go). Fixed-position and daihyosen bouts keep
-// their existing team-name behaviour and do not call this.
-export function resolveKachinukiBoutSides({ aName, bName, wKey, teamWinnerName }) {
-  const sideA = aName || "";
-  const sideB = bName || "";
-  let winner = "";
-  if (wKey === "a") winner = aName || teamWinnerName || "";
-  else if (wKey === "b") winner = bName || teamWinnerName || "";
-  return { sideA, sideB, winner };
-}
-
-// pickManualBoutName: the write behind a name typed or picked on a bout row
-// with no lineup slot to route through -- a beyond-teamSize kachinuki bout,
-// or any row forced onto the manual path (see the call site's own doc
-// comment, above the `pickManual` factory in TeamScoreEditorModal, for
-// exactly which rows that covers). Hoisted to module scope so this exact
-// rename-vs-substitute contract is pinned directly, and so it is built ONCE
-// rather than once per bout row on every render -- it used to be a closure
-// defined inside the per-row map, mirroring buildInlineLineupWrite
-// (lineup_resolver.jsx), which was pulled out of this same component for
-// the same reason.
-//
-// A picked squad member (member.id set) writes the sub directly: no rename
-// is possible there, since the operator picked an existing identity rather
-// than typing over one. Without a pick, a name typed over a picked-but-
-// still-BLANK member RENAMES that member (the ruling: the name attaches to
-// the number it was shown with) and keeps the row's id; typed over anything
-// else (a named member, or no prior pick at all) is a substitution and
-// carries no id, exactly as the fixed-order lineup path does. A rename the
-// server holds is handed to onRenamed as the member written.
-export async function pickManualBoutName({ sub, idx, sideKey, memberIdKey, squad, onRenamed, compId, teamId, password, updateSub, onRenameFailed }, value, member) {
-  if (member && member.id) {
-    updateSub(idx, prev => ({ ...prev, [sideKey]: value, [memberIdKey]: member.id }));
-    return;
-  }
-  const typed = String(value || "").trim();
-  const priorId = sub[memberIdKey] || "";
-  const prior = priorId ? (squad || []).find(mm => mm && mm.id === priorId) : null;
-  const renames = !!(prior && !(prior.name || "").trim() && typed);
-  updateSub(idx, prev => ({ ...prev, [sideKey]: value, [memberIdKey]: renames ? priorId : "" }));
-  if (!renames || !teamId || typeof window.API?.renameTeamMember !== "function") return;
-  try {
-    // The member as this device shows it, renamed and stamped now (the rename is an
-    // outbox entry, bc-evts stage 3 review 2, R1): what the sheet's lists merge by. A
-    // refusal the server gives later puts the member back as it was and is told the
-    // same way as one that never reached the outbox.
-    onRenamed([await window.API.renameTeamMember(compId, teamId, priorId, typed, password, {
-      member: prior,
-      onRefusal: (e) => {
-        if (e && e.revertMember) onRenamed([e.revertMember]);
-        // Claimed only when the sheet said it (R2): false leaves it to the outbox.
-        return onRenameFailed(typed, e) !== false;
-      },
-    })]);
-  } catch (e) {
-    // TELL THE OPERATOR. The rename never reached the server, so the member
-    // stays nameless there permanently: every later picker row, the Lineups
-    // page and the member list keep offering it as "no name yet", and
-    // nothing catches up on a later load because nothing was written. The
-    // bout row itself is fine (it carries the typed name and the id), which
-    // is exactly why this needs saying out loud rather than looking
-    // correct. The sibling resolver path reports the same failure through
-    // this channel for the same reason (bc-dnst). The error goes along: a
-    // refusal with its own sentence is shown in those words (memberRefusalNote).
-    onRenameFailed(typed, e);
-  }
-}
 
 // The daihyosen row's slot key: the key the member resolver answers a representative
 // under, and the slot the sheet lists that row as (positions, below). It names the
@@ -812,42 +244,6 @@ function boardWithVerdicts(board) {
   return { ...board, subResults: board.subResults.map((s) => (s && hanteiDecided(s) ? { ...s, decidedByHantei: true } : s)) };
 }
 
-// fusenshoSideFromSub: which side ("a" / "b" / "") a persisted fusensho sub-bout
-// was awarded to, for re-seeding the local editor state on a reopen or remount.
-// The winner is stored as the bout competitor's OWN name — for a KACHINUKI bout
-// that is the PLAYER name (resolveKachinukiBoutSides), which never equals the
-// match-level team names, so match the sub's own sideA/sideB (correct for a
-// fixed-position bout too: there winner === sideA === the team name). Fall back
-// to the maru (○) pattern applyFusenshoToggle writes into the winner's ippons,
-// for legacy rows that carry no per-bout sides. mp-gmcg review: the earlier
-// match against the team-level sideAName/sideBName silently dropped a reopened
-// kachinuki fusensho (its player-name winner matched neither team name), so the
-// "(fusensho)" affordance vanished on every Reopen and Record-bout remount.
-export function fusenshoSideFromSub(sub) {
-  if (!sub || sub.decision !== "fusensho") return "";
-  const allMaru = (arr) => Array.isArray(arr) && arr.length > 0 && arr.every(x => x === DEFAULT_WIN_IPPON);
-  // bc-pnum: through the shared owner, so the row's member ids decide and two
-  // fighters sharing a display name fall through to the maru test below
-  // rather than being resolved by name order. That fall-through is the point:
-  // the maru cells are real evidence of who was awarded the bout, and the old
-  // name arms short-circuited them with a guess.
-  const side = attributeWinnerSide(subBoutAttribution(sub));
-  if (side) return side;
-  if (allMaru(sub.ipponsA) && !allMaru(sub.ipponsB)) return "a";
-  if (allMaru(sub.ipponsB) && !allMaru(sub.ipponsA)) return "b";
-  return "";
-}
-
-// fusenshoButtonTitle: what a sub-bout's Fusensho button for side `rs` will
-// do. `rs` and `other` are the row's two rowSides entries (key "a"/"b", label
-// "AKA"/"SHIRO"). The other side keeps its struck points
-// (applyFusenshoToggle), and a refused fusensho (fusenshoAllowed) names the
-// side that already won the bout. That win can sit under the winner's own
-// fusensho, whose circles are not tapped away, so its undo is named first.
-// The pressed Fusensho button's label, the longer of its two: the button keeps
-// room for it in both states (.holds-label), so it holds its place.
-export const FUSENSHO_PRESSED_LABEL = "✓ Fusensho";
-
 function fusenshoButtonTitle(sub, rs, other) {
   if (sub.fusensho === rs.key) {
     return sub._preFusensho
@@ -860,69 +256,6 @@ function fusenshoButtonTitle(sub, rs, other) {
       : `${other.label} already won this bout: clear their points first`;
   }
   return `Mark bout as fusensho: awards fusensho to ${rs.label}; points already scored stay`;
-}
-
-// subBoutHasBeenPlayed: true once a sub-bout carries any operator input
-// (ippons, fouls, a per-bout fusensho, an explicit hikiwake, or an encho
-// marker: a 0-0 knockout tie sent to encho must stay in the patch or the
-// overtime would silently vanish from the wire). Used to drop untouched
-// positions from a KACHINUKI patch: the modal maps over all team
-// positions, but kachinuki appends bouts dynamically, so emitting unplayed
-// positions as 0–0 hikiwake would corrupt advancement (AdvanceKachinuki keys
-// off the LAST SubResult having an outcome) and inflate individual-draw
-// standings. Team matches keep all positions on the wire, but every bout
-// is fought (operator ruling 2026-09-24): an unplayed row goes out with
-// decision "" rather than as a hikiwake, and Finish refuses while one
-// remains (unfinishedTeamBouts, which asks this predicate per bout).
-//
-// This is THE single played-bout primitive for kachinuki (operator input
-// determines the bout outcome): the wire filter, the Record-bout gate,
-// kachinukiVisiblePositions, the encho target, and End-match derivation
-// (via buildKachinukiEndEntries) all route through it. Fouls: "2 fouls
-// become a point" is applyFoulIncrement's job (the 2nd foul auto-awards
-// an H into the opponent's pts and resets the counter), so a live
-// counter only ever holds ONE outstanding foul. That lone foul counts
-// here as input — the bout was fought (a hansoku was given in it), so at
-// End it reads 0-0 = hikiwake, never an unplayed row — but it never
-// influences points; only the discharged H does. Widen or narrow this
-// predicate in ONE place only.
-export function subBoutHasBeenPlayed(s) {
-  if (!s) return false;
-  return (s.aPts?.length > 0) || (s.bPts?.length > 0) || (s.aFouls > 0) || (s.bFouls > 0) || !!s.fusensho || !!s.draw || (s.encho > 0);
-}
-
-// Align a local bout board to the positions the server board currently has,
-// matching rows by POSITION (`_pos`) and never by index.
-//
-// The editor's grid can change shape while it is open, in both directions: a
-// kachinuki Record-bout write appends the next pairing, adding a daihyosen
-// appends the rep-bout row, deleting one on another device removes it, and a
-// late-arriving teamSize moves the numbered count either way. Index alignment
-// survives none of those on its own, because the daihyosen sits at the TAIL —
-// so a tail change silently re-points a row at a different position. That is
-// not a cosmetic problem: buildPatch derives each row's wire `position` from
-// its index, so a mis-aligned board sends wrong rows. Two shipped symptoms: a
-// stale-long board emitted `position: 4` for a three-person team, and the rep
-// bout's ippons were counted as a numbered bout's IV/PW.
-//
-// Matching on position makes growth, shrink, and a daihyosen appearing or
-// vanishing ONE rule instead of three cases. `serverRows` supplies both the
-// target shape and the fallback for a position the local board does not have.
-//
-// Returns `rows` UNCHANGED when it already aligns: rebuilding unconditionally
-// would hand a fresh array identity to every consumer on every render, which is
-// the mp-gmcg F1 thrash.
-//
-// Exported for its own test. In the app the adopt merge also re-shapes the
-// committed state, so an append-only version would usually look fine — this is
-// deliberately not left to depend on that ordering, and the test is what keeps
-// the distinction from being quietly refactored away.
-export function reconcileRowsToPositions(rows, serverRows) {
-  const aligned = rows.length === serverRows.length
-    && serverRows.every((ss, i) => rows[i] && rows[i]._pos === ss._pos);
-  if (aligned) return rows;
-  const byPos = new Map(rows.map(s => [s._pos, s]));
-  return serverRows.map(ss => byPos.get(ss._pos) || ss);
 }
 
 // What a representative-bout add or remove is refused with, by the server's
@@ -1989,7 +1322,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
   // bc-kheb (operator ruling 2026-09-24): a kachinuki encounter never carries
   // a match-level overtime. One bout fought on in encho does not put the
   // encounter in overtime, so (E) lives on that bout's own row only. The
-  // count seeded from a legacy stored m.encho stays local: the eyebrow,
+  // count seeded from a legacy stored m.encho stays local: the meta line,
   // enchoBlock and /decision read this derived count, never the raw one. A
   // legacy kachinuki daihyosen row keeps its encho, as the stepper does.
   const kachinukiEncounter = isKachinuki && !hasDaihyosen;
@@ -3001,7 +2334,11 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
   // settled (lineupsSettled, which a side given another team clears until its
   // new team's lineup is read), so a mount reads once rather than once before
   // and once after its lineups land. A roster read for another key is not shown, so the
-  // line never lags a recorded bout. A failed read is null
+  // line never lags a recorded bout. The key is the SERVER's copy (mFeed), never
+  // the board: an own Start shows bout 1's fighters before the server holds
+  // them, and a read keyed on that copy was answered "nobody on" with nothing
+  // after it to read again, since the server's copy then carried the same
+  // fighters. A failed read is null
   // (fetchKachinukiRoster never throws) and shows no line; it keeps the last
   // answer for the closing below. It feeds no verdict
   // and does not arm End match. Its one other reader is the closing of a
@@ -3010,7 +2347,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
   // recorded turn read-only, with the line naming that side; with no lineup,
   // or before the read lands, the bout stays live exactly as before.
   const kachinukiRosterReadKey = kachinukiBoutMode && m.compId && m.id && lineupsSettled
-    ? `${kachinukiRosterKey(m.id, m.subResults)}#${servedLineupsKey}`
+    ? `${kachinukiRosterKey(mFeed.id, mFeed.subResults)}#${servedLineupsKey}`
     : "";
   // The stored log's last numbered bout when Record bout has recorded it, as
   // `${matchId}|${position}`, else "": the bout a kept roster answer may close.
@@ -3137,6 +2474,17 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
   const kachinukiCurrentBoutPlayed = kachinukiBoutMode
     ? kachinukiCurBoutIdx >= 0 && subBoutHasBeenPlayed(subs[kachinukiCurBoutIdx])
     : true;
+  // Record bout works out the next pairing from who fought: with nobody named
+  // on either side of the live bout the server appends none, and the tap did
+  // nothing the sheet could show. So the button waits for a fighter, and the
+  // footer says why. A fighter picked by squad number counts, as it does for the
+  // server (kachinukiFighterKnown). A function, since the names are read from
+  // playerNamesForBout, defined further down.
+  const kachinukiCurBoutHasNoFighter = () => {
+    if (!kachinukiBoutMode || kachinukiCurBoutIdx < 0) return false;
+    const f = playerNamesForBout(kachinukiCurBoutIdx);
+    return !f.aName && !f.bName && !f.aMemberId && !f.bMemberId;
+  };
   // mp-gmcg: the bouts already fought (everything played except the current
   // bout). They render as READ-ONLY team-sub-match rows above the current
   // editable bout, so the operator sees the whole encounter like a regular team
@@ -3749,7 +3097,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
         onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openDoneBoutEdit(idx); } }}>
         {/* Kachinuki: only the bout number (no FIK position handle — the winner
             stays on, so a bout is not "position vs same position"). */}
-        <div className="team-sub-match__pos"><span className="tsm-caret" aria-hidden="true">▶</span><span className="team-sub-match__pos-num">{idx + 1}</span></div>
+        <div className="team-sub-match__pos"><Icon name="chevron-right" size={12} className="tsm-caret" /><span className="team-sub-match__pos-num">{idx + 1}</span></div>
         <div className="team-sub-match__row">
           <div className="team-sub-match__side team-sub-match__side--shiro">
             <div className="tsm-name">
@@ -4718,26 +4066,21 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
     <>
         <div className="editor-modal__head">
           <div style={{ flex: 1 }}>
-            <div className="editor-modal__eyebrow">
-              {m.compName} · {m.phase === "pool" ? window.poolLabel(m) : m.round}
-              {m.phase === "pool" && m.poolPosition > 0 && m.poolCount > 0
-                ? <span> · Match {m.poolPosition} of {m.poolCount}</span>
-                : m.phase === "bracket" && m.matchNumber > 0
-                ? <span> · Match {m.matchNumber}</span>
-                : null}
-              {encounterEnchoCount > 0 && <span className="editor-modal__eyebrow-encho">· (E) Overtime ×{encounterEnchoCount}</span>}
-            </div>
             <div className="editor-modal__title" style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
               <span><TermAS name="shiaijo">Shiaijo</TermAS> {m.court} · {m.scheduledAt || "Now"}</span>
+            </div>
+            <div className="editor-modal__meta">
+              {editorMetaText(m)}
+              {encounterEnchoCount > 0 && <span className="editor-modal__meta-encho">{editorMetaText(m) ? ", " : ""}(E) Overtime ×{encounterEnchoCount}</span>}
             </div>
           </div>
           <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
             {(isComplete || m.status !== "running") && (
               <div className="editor-head-pill" style={{ fontSize: 10, fontWeight: 700 }}>
-                {isComplete ? "CORRECTION" : "PRE-MATCH"}
+                {isComplete ? "Correction" : "Pre-match"}
               </div>
             )}
-            {canClose && <button className="btn btn--ghost btn--sm" onClick={handleDismiss} disabled={submitting || repTyping} style={{ padding: "2px 8px" }}>✕ Close</button>}
+            {canClose && <button className="btn btn--ghost btn--sm" onClick={handleDismiss} disabled={submitting || repTyping} style={{ padding: "2px 8px" }}><Icon name="x" size={14} />Close</button>}
           </div>
         </div>
 
@@ -4785,7 +4128,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
           {/* mp-gmcg band redesign (user-confirmed brief): in kachinuki the
               centre cell carries BOUT-LOG FACTS while running (bout number +
               last bout result; never a verdict: the old IV/PW-derived
-              "AKA WIN" contradicted the End gate) and the verdict only on
+              "Aka wins" contradicted the End gate) and the verdict only on
               completion, derived from the match winner. IV/PW demote to the
               side cells (they still feed standings tie-breaks). Non-kachinuki
               team matches keep RESULT + teamVerdictText: fixed formats ARE
@@ -4828,7 +4171,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
                           </>
                         ) : (
                           <>
-                            <div className="team-summary__label">RESULT</div>
+                            <div className="team-summary__label">Result</div>
                             <div className="team-summary__verdict" data-testid="team-summary-result">{teamVerdictText}</div>
                           </>
                         )}
@@ -5146,7 +4489,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
             const rowSides = [
               {
                 key: "b", tapKey: `${idx}:b`, pts: s.bPts, fouls: s.bFouls,
-                color: "shiro", label: "SHIRO",
+                color: "shiro", label: "Shiro",
                 // The daihyosen is a representative bout, not a lineup position:
                 // "daihyosen" is not a valid lineup key (domain/team_lineup.go
                 // accepts only senpo/… or "1".."N"), so a name pick there would
@@ -5168,7 +4511,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
               },
               {
                 key: "a", tapKey: `${idx}:a`, pts: s.aPts, fouls: s.aFouls,
-                color: "aka", label: "AKA",
+                color: "aka", label: "Aka",
                 // See SHIRO note above.
                 // bc-dnst: displayed name only, see the SHIRO note above.
                 playerName: resolveBoutSideDisplayName({ squad: squadA, memberId: playerAMemberId, storedName: playerAName }) || repTeamWhenUnpicked(playerAMemberId, sideAName),
@@ -5273,7 +4616,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
                       aria-label={`Collapse bout ${idx + 1}`} aria-expanded={true} onClick={closeDoneBoutEdit}>
                       {/* bc-tp44: only the glyph rotates. Rotating the button
                           itself made its 44x36 tap box hit-test as 36x44. */}
-                      <span className="tsm-caret tsm-caret--open" aria-hidden="true">▶</span>
+                      <Icon name="chevron-right" size={12} className="tsm-caret tsm-caret--open" />
                     </button>
                   )}
                   {/* Bout number only: the FIK position abbreviations
@@ -5509,7 +4852,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
                     disabled={submitting}
                     title="Remove this empty bout: added by mistake. Nothing has been recorded for it, so nothing is lost."
                   >
-                    × Remove this bout
+                    <Icon name="x" size={14} />Remove this bout
                   </button>
                   <span className="kachinuki-bout-actions__hint">
                     nothing scored yet
@@ -5713,13 +5056,13 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
               <div className="decision-controls" style={{ display: "flex", gap: 8, marginTop: 10, fontSize: 12, alignItems: "center", flexWrap: "wrap" }}>
                 <div className="decision-btn-group">
                   <button data-testid="scoring-modal-kiken-voluntary-button" type="button" className="btn btn--sm" onClick={() => { setDecisionErr(""); setDecisionPromptKind("kiken-voluntary"); }} disabled={submitting || decisionSubmitting}>
-                    Kiken – Voluntary
+                    Kiken (voluntary)
                   </button>
                   <GlossaryHintAS name="kiken-voluntary" />
                 </div>
                 <div className="decision-btn-group">
                   <button data-testid="scoring-modal-kiken-injury-button" type="button" className="btn btn--sm" onClick={() => { setDecisionErr(""); setDecisionPromptKind("kiken-injury"); }} disabled={submitting || decisionSubmitting}>
-                    Kiken – Injury
+                    Kiken (injury)
                   </button>
                   <GlossaryHintAS name="kiken-injury" />
                 </div>
@@ -5888,6 +5231,11 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
               )}
             </div>
           )}
+          {kachinukiCurrentBoutPlayed && kachinukiCurBoutHasNoFighter() && (
+            <div data-testid="kachinuki-nofighter-hint" style={{ fontSize: 12, color: "var(--ink-2)" }}>
+              <span>Pick or type who fights this bout to enable <strong>Record bout</strong>.</span>
+            </div>
+          )}
           {/* mp-gmcg: a reopen's outcome: its notice, its error, and the
               court-busy remedy (a busy court used to be a dead end for the one
               group that has no alternative: a correction bypasses the court
@@ -5949,13 +5297,13 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
           {own.droppedShown && <DraftDroppedNotice />}
           <div className="score-nav">
             {prevMatch ? (
-              <button className="btn btn--sm score-nav__prev" onClick={goPrev} disabled={submitting || repTyping}>← Prev</button>
+              <button className="btn btn--sm score-nav__prev" onClick={goPrev} disabled={submitting || repTyping}>Prev</button>
             ) : <span />}
             <div className="score-nav__actions">
               {m.status === "scheduled" && own.startOffered && !isBarredMatch(m) && (
                 <button className="btn btn--sm" onClick={async () => {
                   // F5: submits status:"running", the shape
-                  // _notifyScoreSuperseded (api_client.jsx) deliberately stays
+                  // _notifyScoreSuperseded (api_client_status.jsx) deliberately stays
                   // silent for. Start match is an explicit operator tap, not
                   // an autosave, so check the awaited result directly.
                   const startPatch = buildPatch("running");
@@ -6050,10 +5398,11 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
                     // banner for a queued write; returning nothing hid it.
                     return sent;
                   });
-                })(ev)} disabled={submitting || !kachinukiCurrentBoutPlayed || kachinukiCurBoutRecorded}
+                })(ev)} disabled={submitting || !kachinukiCurrentBoutPlayed || kachinukiCurBoutRecorded || kachinukiCurBoutHasNoFighter()}
                   title={kachinukiNoLiveBout ? "Bout recorded: no next pairing"
                     : kachinukiCurBoutRecorded ? "Bout recorded"
-                    : !kachinukiCurrentBoutPlayed ? "Nothing recorded for this bout yet" : undefined}>
+                    : !kachinukiCurrentBoutPlayed ? "Nothing recorded for this bout yet"
+                    : kachinukiCurBoutHasNoFighter() ? "Pick who fights this bout first" : undefined}>
                   {submitting ? "Saving…" : "Record bout"}
                 </button>
                 {/* Encho sits BESIDE End match (critique P2): it is End's
@@ -6110,7 +5459,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
                     : "End the match on the last scored bout"}>
                   {submitting ? "Saving…"
                     : endArmed
-                    ? `Tap again — ${kachinukiEndOutcomeLabel(kachinukiEndOutcome)}`
+                    ? `Tap again: ${kachinukiEndOutcomeLabel(kachinukiEndOutcome)}`
                     : "End match"}
                 </button>
                 </>
@@ -6124,19 +5473,22 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
                 // result therefore goes through Reopen (above): back to bout
                 // mode, then End match re-derives from the last bout. Only
                 // non-kachinuki completed matches keep the generic correction.
-                <button className={`btn btn--primary ${finishArmed && !isComplete ? "btn--confirm" : ""}`} onClick={(ev) => {
+                <button className={`btn btn--primary holds-label ${finishArmed && !isComplete ? "btn--confirm" : ""}`} onClick={(ev) => {
                   if (refuseUnfinishedFinish()) return;
                   if (isComplete && !correctionReason) { setReasonPromptKind("correction"); return; }
                   if (!isComplete && !confirmFinish(ev)) return;
                   doSubmit(() => (isComplete || !onSubmitAndNext ? onSubmit : onSubmitAndNext)(buildPatch("completed")));
                 }} disabled={submitting || koTieBlocked || repTyping}
-                  title={koTieBlocked ? koTieTitle : undefined}>
-                  {submitting ? "Saving…" : koTieBlocked ? "Needs a winner" : isComplete ? "Save correction" : finishArmed ? armedFinishLabel(!!onSubmitAndNext && startsNext) : finishButtonLabel(!!onSubmitAndNext && startsNext)}
+                  title={koTieBlocked ? koTieTitle : undefined}
+                  // Holds its place while armed (.holds-label), as the
+                  // individual editor's Finish does.
+                  data-reserve={isComplete ? undefined : armedFinishLabel(!!onSubmitAndNext && startsNext)}>
+                  <span className="holds-label__text">{submitting ? "Saving…" : koTieBlocked ? "Needs a winner" : isComplete ? "Save correction" : finishArmed ? armedFinishLabel(!!onSubmitAndNext && startsNext) : finishButtonLabel(!!onSubmitAndNext && startsNext)}</span>
                 </button>
               )}
             </div>
             {nextMatch ? (
-              <button className="btn btn--sm score-nav__next" onClick={goNext} disabled={submitting || repTyping}>Next →</button>
+              <button className="btn btn--sm score-nav__next" onClick={goNext} disabled={submitting || repTyping}>Next</button>
             ) : <span />}
           </div>
           </>
@@ -6161,4 +5513,3 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
   );
 }
 
-export { resolveMatchLineup, resolveLineupTeamId };

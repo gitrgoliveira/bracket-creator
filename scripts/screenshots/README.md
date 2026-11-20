@@ -112,8 +112,9 @@ default, and stays the right call when you are not sure what a change reaches.
 ## Prerequisites
 
 `node` and `python3`. `make docs/screenshots` (or `docs/videos`)
-installs this directory's npm dependencies and downloads its own chromium on
-first use; both are stamped inside `node_modules/`, so the download happens
+builds the seeder's venv (`.venv-scripts`, from `scripts/requirements.txt`, the
+one `make mobile-app-example` uses), installs this directory's npm dependencies
+and downloads its own chromium on first use; both are stamped inside `node_modules/`, so the download happens
 once per worktree. If the browser cache under `~/.cache/ms-playwright` is
 removed later the stamp outlives it; run `npx playwright-core install
 chromium` here. Run the targets on their own: `make go/build docs/screenshots`

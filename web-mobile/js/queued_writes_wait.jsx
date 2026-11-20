@@ -5,7 +5,7 @@
 // screen says what it waits for and offers to do it now anyway, or Cancel.
 // Waiting is the default; it is never a trap.
 //
-// The count is API.queuedWritesOf (api_client.jsx), the one reader of this
+// The count is API.queuedWritesOf (api_client_outbox.jsx), the one reader of this
 // device's queued writes, re-read on the outbox's change signal
 // (subscribeUnsentWrites) and the sync status. An entry the server keeps
 // refusing stays in the count and is named on the waiting screen, with the

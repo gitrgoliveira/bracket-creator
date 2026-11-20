@@ -77,12 +77,13 @@ describe('WatchHeroCard', () => {
     expect(hasClass(subject, 'side-fill--aka')).toBe(true);
     expect(rowText(subject)).toContain('Aka');
     expect(rowText(subject)).toContain('Robert Young');
-    // "you" marks which of the two rows is the watched entity.
-    expect(rowText(subject)).toContain('you');
+    // "You" marks which of the two rows is the watched entity. Asked by its
+    // element, since the subject's own name ("Robert Young") holds "You" too.
+    expect(byClass(subject, 'wl-hero__you').map((n) => collectText(n))).toEqual(['You']);
     // Opponent is the other side, and takes the other fill.
     expect(hasClass(opp, 'side-fill--shiro')).toBe(true);
     expect(rowText(opp)).toContain('Nolan Clark');
-    expect(rowText(opp)).not.toContain('you');
+    expect(byClass(opp, 'wl-hero__you')).toHaveLength(0);
   });
 
   // The rows live inside the "Match details" button. A button with an explicit
@@ -98,7 +99,9 @@ describe('WatchHeroCard', () => {
     expect(btn.props['aria-label'],
       'an explicit name here would replace everything below it').toBeUndefined();
     const spoken = collectText(btn, expandNamed('NumberedName'));
-    for (const part of ['Aka', 'you', 'Robert Young', 'Shiro', 'Nolan Clark', 'Match details']) {
+    // "AkaYou": the marker right after the side word, since "Robert Young"
+    // alone would satisfy a bare "You".
+    for (const part of ['AkaYou', 'Robert Young', 'Shiro', 'Nolan Clark', 'Match details']) {
       expect(spoken, `"${part}" must survive in the button's accessible name`).toContain(part);
     }
   });
@@ -152,10 +155,10 @@ describe('WatchHeroCard', () => {
     expect(lbl).toContain('Hagane Dojo');
     expect(lbl).not.toMatch(/next up/i);
     expect(rowText(sideRows(tree)[0])).toContain('Robert Young');
-    // ...and that row is NOT marked "you". The reader watched a DOJO, so they
+    // ...and that row is NOT marked "You". The reader watched a DOJO, so they
     // are the coach or the parent, not whichever member happens to be up.
-    expect(rowText(sideRows(tree)[0]),
-      'the subject of a dojo card is not the reader').not.toContain('you');
+    expect(byClass(sideRows(tree)[0], 'wl-hero__you'),
+      'the subject of a dojo card is not the reader').toHaveLength(0);
   });
 
   // The scheduled dojo arm used to append "· next up" unconditionally, so a
@@ -524,10 +527,10 @@ describe('WatchlistPanel', () => {
     const chip = byClass(tree, 'pmf__chip--unresolved');
     expect(chip, 'the chip carries the unresolved state').toHaveLength(1);
     // A non-colour marker, so the state is not carried by the amber alone.
-    // Rendered bare, as every other ⚠ in the tree is, which also means it
-    // takes the chip's own --warn-ink (8.75:1) rather than a dedicated
-    // --warn (4.84:1) that would be fainter than the text it marks.
-    expect(collectText(chip[0])).toMatch(/⚠/);
+    // Drawn by Icon in currentColor, so it takes the chip's own --warn-ink
+    // (8.75:1) rather than a dedicated --warn (4.84:1) that would be fainter
+    // than the text it marks.
+    expect(findAll(chip[0], (n) => n.props?.name === 'triangle-alert' || n.props?.['data-icon'] === 'triangle-alert').length).toBeGreaterThan(0);
 
     const hint = findAll(tree, (n) => n.props?.['data-testid'] === 'watchlist-unresolved');
     expect(hint, 'the hint names the real problem').toHaveLength(1);

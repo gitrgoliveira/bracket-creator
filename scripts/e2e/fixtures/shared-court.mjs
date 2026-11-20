@@ -118,7 +118,7 @@ export async function readScoresRows(page) {
     return {
       time: txt('.score-edit-row__time'),
       label: txt('.score-edit-row__matchno'),
-      court: txt('.score-edit-row__court').replace(/\s*▾$/, ''),
+      court: txt('.score-edit-row__court'),
       shiro: names[0] || '',
       aka: names[1] || '',
       status: r.classList.contains('score-edit-row--running') ? 'running' : (r.classList.contains('score-edit-row--complete') ? 'completed' : 'scheduled'),
@@ -128,16 +128,16 @@ export async function readScoresRows(page) {
 }
 
 // The knockout slots a competition's Bracket tab prints on its cards ("M5
-// SHIAIJO A 09:40"), including the matches still waiting on a feeder, which
+// Shiaijo A 09:40"), including the matches still waiting on a feeder, which
 // the Scores tab does not list.
 export async function bracketSlots(page, id) {
   await page.goto(`/admin/competition/${encodeURIComponent(id)}/bracket`);
-  // The cards print the court in capitals through CSS, so the rendered text
-  // (innerText) is what is read.
+  // The card's meta line is several spans, so the rendered text (innerText)
+  // is what is read, its whitespace squashed.
   const read = async () => (await page.locator('.page').first().innerText()).replace(/\s+/g, ' ');
-  await expect.poll(read).toMatch(/M\d+ SHIAIJO \S+ \d\d:\d\d/);
+  await expect.poll(read).toMatch(/M\d+ Shiaijo \S+ \d\d:\d\d/);
   const text = await read();
-  return [...text.matchAll(/M(\d+) SHIAIJO (\S+) (\d\d:\d\d)/g)].map((m) => ({ match: `M${m[1]}`, court: m[2], time: m[3] }));
+  return [...text.matchAll(/M(\d+) Shiaijo (\S+) (\d\d:\d\d)/g)].map((m) => ({ match: `M${m[1]}`, court: m[2], time: m[3] }));
 }
 
 // ---------------------------------------------------------------- court console
@@ -145,7 +145,7 @@ export async function bracketSlots(page, id) {
 // The competition picker. It renders only while the court hosts more than one
 // competition; with one, the officiating name is a plain heading.
 export const competitionPicker = (page) => page.getByRole('combobox', { name: 'Select competition to officiate' });
-export const officiatingName = async (page) => (await page.locator('.shiaijo-officiating__name').first().innerText()).replace('▾', '').trim();
+export const officiatingName = async (page) => (await page.locator('.shiaijo-officiating__name').first().innerText()).trim();
 
 // Pick a competition with the picker (a native select: chosen, not tapped, as
 // the iPad's own picker wheel does it).
@@ -181,14 +181,14 @@ export async function courtState(page) {
     const alsoRunning = document.querySelector('.shiaijo-also-running');
     const empty = document.querySelector('.shiaijo__main > .empty:not(.shiaijo__placeholder)');
     return {
-      officiating: text(document.querySelector('.shiaijo-officiating__name'))?.replace('▾', '').trim() || null,
+      officiating: text(document.querySelector('.shiaijo-officiating__name'))?.trim() || null,
       pickerOptions: picker ? [...picker.options].map((o) => o.textContent.trim()) : null,
       upNext: card ? { head: text(card.querySelector('.shiaijo-upnext__time')), names: names(card) } : null,
       upcoming: rows(WAITING_ROWS),
       later: rows('.shiaijo-pending .shiaijo-qrow'),
       completed: rows('.shiaijo-completed .shiaijo-qrow').length,
       editor: ed ? {
-        eyebrow: text(ed.querySelector('.editor-modal__eyebrow')),
+        meta: text(ed.querySelector('.editor-modal__meta')),
         court: ((ed.querySelector('.editor-modal__title') || {}).innerText || '').match(/Shiaijo\s+([A-Z]+)\b/i)?.[1] || null,
         title: ((ed.querySelector('.editor-modal__title') || {}).innerText || '').replace(/\s+/g, ' ').trim(),
         pill: text(ed.querySelector('.editor-head-pill')),
@@ -205,12 +205,12 @@ export async function courtState(page) {
 }
 
 // The bout running in the console's editor, individual or team alike (the
-// individual board's own side wrappers are not on the team sheet): its eyebrow,
+// individual board's own side wrappers are not on the team sheet): its meta line,
 // court and pairing, or null when the editor holds no running bout.
 export async function liveBout(page) {
   const s = await courtState(page);
   if (!s.editor || s.editor.pill || s.editor.names.length < 2) return null;
-  return { eyebrow: s.editor.eyebrow, court: s.editor.court, shiro: s.editor.names[0], aka: s.editor.names[1] };
+  return { meta: s.editor.meta, court: s.editor.court, shiro: s.editor.names[0], aka: s.editor.names[1] };
 }
 
 // Correct a completed bout on the court console while a bout of EITHER
@@ -223,7 +223,7 @@ export const correctAcross = (page, pair) => correctCompleted(page, pair, { read
 export const upcomingRow = (page, { shiro, aka }) => waitingRows(page)
   .filter({ hasText: shiro }).filter({ hasText: aka }).first();
 
-// Open a row's court control (CourtPicker: "A ▾") and choose `court`. On the
+// Open a row's court control (CourtPicker: "A" and a chevron) and choose `court`. On the
 // court console that opens the move confirm, left open for the caller; on the
 // Scores tab and the schedule page the move is made at once.
 export async function chooseCourt(row, court) {
@@ -251,7 +251,7 @@ export async function runningOnCourt(page, court) {
     const ct = r.querySelector('.score-edit-row__court');
     const comp = r.querySelector(':scope > div:first-child > div:last-child');
     return {
-      court: ct ? ct.textContent.replace(/\s*▾$/, '').trim() : '',
+      court: ct ? ct.textContent.trim() : '',
       comp: comp ? comp.textContent.trim() : '',
       label: (r.querySelector('.score-edit-row__matchno') || {}).textContent || '',
       shiro: names[0] || '', aka: names[1] || '',

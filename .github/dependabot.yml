@@ -25,6 +25,14 @@ updates:
     labels:
       - "dependencies"
   - package-ecosystem: "pip"
+    directory: "/scripts"
+    schedule:
+      interval: "weekly"
+      day: saturday
+      time: "05:00"
+    labels:
+      - "dependencies"
+  - package-ecosystem: "pip"
     directory: "/docs"
     schedule:
       interval: "weekly"

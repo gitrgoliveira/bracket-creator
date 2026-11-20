@@ -162,7 +162,7 @@ Operators need best / average / worst.
 - [x] **[End match]** button + context-derived outcome (winner from the last
   scored bout; tie → draw in pools/league, blocked-with-hint in knockout; NO
   picker) in `admin_scoring_team.jsx`; derivation as a pure helper
-  (`deriveKachinukiEndOutcome`), unit-tested.
+  (`deriveKachinukiEndOutcome`, in `admin_scoring_team_kachinuki.jsx`), unit-tested.
 - [x] **Encho** path: `applyKachinukiEncho` marks the tied final bout encho,
   bumps the match-level counter for the "(E)" suffix, keeps scoring same pair.
 - [x] **Manual next bout** (`addManualBout`) when the server can't infer the

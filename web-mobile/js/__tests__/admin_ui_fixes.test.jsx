@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { arraysEqual } from '../data.jsx';
-import { pluralize, formatAdminHeaderSub, formatViewerHeaderEyebrow } from '../ui.jsx';
+import { pluralize, formatAdminHeaderSub, formatViewerHeaderMeta } from '../ui.jsx';
 
 describe('WebUI Fixes - pluralize', () => {
   it('should pluralize correctly', () => {
@@ -282,10 +282,10 @@ describe('Tournament Header Empty Venue Logic', () => {
       1,
       5
     );
-    expect(formatted).toBe('3 Jun 2026 · Crystal Palace · 2 shiaijo (courts) · 1 competition · 5 participants');
+    expect(formatted).toBe('3 Jun 2026, Crystal Palace, 2 shiaijo (courts), 1 competition, 5 participants');
   });
 
-  it('should format admin subheader with no double dot separator when venue is empty', () => {
+  it('should format admin subheader with no doubled separator when venue is empty', () => {
     const formatted = formatAdminHeaderSub(
       '3 Jun 2026',
       '',
@@ -293,24 +293,24 @@ describe('Tournament Header Empty Venue Logic', () => {
       1,
       5
     );
-    expect(formatted).toBe('3 Jun 2026 · 2 shiaijo (courts) · 1 competition · 5 participants');
-    expect(formatted).not.toContain('·  ·');
+    expect(formatted).toBe('3 Jun 2026, 2 shiaijo (courts), 1 competition, 5 participants');
+    expect(formatted).not.toContain(', ,');
   });
 
-  it('should format viewer eyebrow correctly when venue is present', () => {
-    const formatted = formatViewerHeaderEyebrow(
+  it('should format the viewer meta line correctly when venue is present', () => {
+    const formatted = formatViewerHeaderMeta(
       '3 Jun 2026',
       'Crystal Palace'
     );
-    expect(formatted).toBe('3 Jun 2026 · Crystal Palace');
+    expect(formatted).toBe('3 Jun 2026, Crystal Palace');
   });
 
-  it('should format viewer eyebrow with no trailing separator when venue is empty', () => {
-    const formatted = formatViewerHeaderEyebrow(
+  it('should format the viewer meta line with no trailing separator when venue is empty', () => {
+    const formatted = formatViewerHeaderMeta(
       '3 Jun 2026',
       ''
     );
     expect(formatted).toBe('3 Jun 2026');
-    expect(formatted.endsWith(' · ')).toBe(false);
+    expect(formatted.endsWith(', ')).toBe(false);
   });
 });

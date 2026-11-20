@@ -12,6 +12,8 @@ import { tournamentHasCheckIn } from './competition_shape.jsx';
 import { useLatestRef } from './latest_ref.jsx';
 import { whenConfirmed } from './unsaved_entries.jsx';
 import { downloadBlob } from './blob_download.jsx';
+import { Icon } from './icon.jsx';
+import { andList } from './list_phrase.jsx';
 
 const { useState, useMemo, useEffect, useRef, useLayoutEffect } = React;
 
@@ -25,7 +27,6 @@ const compMatchStats = window.compMatchStats;
 const pluralize = window.pluralize;
 const StatusBadge = window.StatusBadge;
 const formatDate = window.formatDate;
-const Icon = window.Icon;
 const formatLabelShort = window.formatLabelShort;
 const formatAdminHeaderSub = window.formatAdminHeaderSub;
 const Modal = window.Modal;
@@ -64,7 +65,7 @@ function Breadcrumbs({ items }) {
             // It breaks keyboard users for a problem the browser already handles
             // when the navigated-away input unmounts.)
             <button type="button" onClick={() => item.onClick()}>
-              {i === 0 && <span style={{ marginRight: 4 }}>←</span>}
+              {i === 0 && <span style={{ marginRight: 4 }}><Icon name="arrow-left" size={14} /></span>}
               {item.label}
             </button>
           ) : (
@@ -290,7 +291,7 @@ function AdminTopbar({ onLogout, onViewerMode, tournament, hideRunningStrip, bef
                   aria-label={`Open score editor for ${b} versus ${a} ${courtPhrase}`}
                 >
                   <span className="running-strip__court">{courtLabel}</span>
-                  <span className="running-strip__names">{b} – {a}</span>
+                  <span className="running-strip__names">{b} vs {a}</span>
                 </button>
               );
             })}
@@ -311,9 +312,9 @@ function initialSectionFor(status) {
 // PLACE_STYLE: icons and labels for podium places 1/2/3.
 // Replicated locally from viewer.jsx (PLACE_STYLE is not exported to window).
 const PLACE_STYLE_ADMIN = {
-  1: { icon: "🏆", label: "1st" },
-  2: { icon: "🥈", label: "2nd" },
-  3: { icon: "🥉", label: "3rd" },
+  1: { icon: "trophy", label: "1st" },
+  2: { icon: "medal", label: "2nd" },
+  3: { icon: "medal", label: "3rd" },
 };
 
 // buildAllWinners resolves podium for each completed comp using the shared
@@ -406,7 +407,7 @@ function AllWinnersModal({ comps, onClose }) {
                   const style = PLACE_STYLE_ADMIN[entry.place] || PLACE_STYLE_ADMIN[3];
                   return (
                     <div key={`${entry.place}-${entry.name}`} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14 }}>
-                      <span style={{ fontSize: 16, minWidth: 22 }}>{style.icon}</span>
+                      <span style={{ fontSize: 16, minWidth: 22 }}><Icon name={style.icon} /></span>
                       <span style={{ fontWeight: 600, minWidth: 32, color: "var(--ink-3)", fontSize: 12 }}>{style.label}</span>
                       <span style={{ fontWeight: 600 }}>{entry.name}</span>
                       {entry.dojo && <span style={{ color: "var(--ink-3)", fontSize: 13 }}>{entry.dojo}</span>}
@@ -560,7 +561,7 @@ function AdminDashboard({ tournament, password, onOpenCompetition, onCreateCompe
             dashboard until the first competition exists. */}
         {noComps ? (
           <div className="empty" style={{ padding: "48px 24px", marginBottom: 24 }}>
-            <div className="icon" aria-hidden="true">🥋</div>
+            <div className="icon" aria-hidden="true"><Icon name="trophy" size={32} /></div>
             <h3>Add your first competition</h3>
             <div style={{ fontSize: 13, color: "var(--ink-2)", maxWidth: 460, margin: "0 auto", lineHeight: 1.5 }}>
               A competition is one event within {t.name}, like Men&apos;s Individual or Women&apos;s Teams. Add one to enter participants, build the draw, and run matches.
@@ -582,24 +583,24 @@ function AdminDashboard({ tournament, password, onOpenCompetition, onCreateCompe
         <div className="row" style={{ marginBottom: 24 }}>
           {onOpenRegistration && tournamentHasCheckIn(t) && (
             <button type="button" className="card" style={{ textAlign: "left", cursor: "pointer", border: "1px solid var(--line)" }} onClick={onOpenRegistration}>
-              <div className="card__title" style={{ marginBottom: 6, display: "inline-flex", alignItems: "center", gap: 8 }}><Icon name="clipboard-check" size={18} />Registration desk →</div>
+              <div className="card__title" style={{ marginBottom: 6, display: "inline-flex", alignItems: "center", gap: 8 }}><Icon name="clipboard-check" size={18} />Registration desk</div>
               <div className="card__sub">Check competitors in as they arrive, across every competition.</div>
             </button>
           )}
           {scheduleEnabled && (
             <button type="button" className="card" style={{ textAlign: "left", cursor: "pointer", border: "1px solid var(--line)" }} onClick={onOpenSchedule}>
-              <div className="card__title" style={{ marginBottom: 6, display: "inline-flex", alignItems: "center", gap: 8 }}><Icon name="calendar" size={18} />Tournament schedule →</div>
+              <div className="card__title" style={{ marginBottom: 6, display: "inline-flex", alignItems: "center", gap: 8 }}><Icon name="calendar" size={18} />Tournament schedule</div>
               <div className="card__sub">All matches across courts. Move matches between shiaijo, filter by player.</div>
             </button>
           )}
           {onOpenCalendar && (
             <button type="button" className="card" style={{ textAlign: "left", cursor: "pointer", border: "1px solid var(--line)" }} onClick={onOpenCalendar}>
-              <div className="card__title" style={{ marginBottom: 6, display: "inline-flex", alignItems: "center", gap: 8 }}><Icon name="calendar-range" size={18} />Competition calendar →</div>
+              <div className="card__title" style={{ marginBottom: 6, display: "inline-flex", alignItems: "center", gap: 8 }}><Icon name="calendar-range" size={18} />Competition calendar</div>
               <div className="card__sub">See every competition on its day and shiaijo, and move one.</div>
             </button>
           )}
           <button type="button" className="card" style={{ textAlign: "left", cursor: noComps ? "not-allowed" : "pointer", opacity: noComps ? 0.6 : 1, border: "1px solid var(--line)" }} onClick={onOpenScoreEditor} disabled={noComps} title={noComps ? "Add a competition first" : undefined}>
-            <div className="card__title" style={{ marginBottom: 6, display: "inline-flex", alignItems: "center", gap: 8 }}><Icon name="pencil" size={18} />Score editor →</div>
+            <div className="card__title" style={{ marginBottom: 6, display: "inline-flex", alignItems: "center", gap: 8 }}><Icon name="pencil" size={18} />Score editor</div>
             <div className="card__sub">Update results or correct past matches across the tournament.</div>
           </button>
         </div>
@@ -609,7 +610,7 @@ function AdminDashboard({ tournament, password, onOpenCompetition, onCreateCompe
             <div className="row" style={{ flexWrap: "wrap", gap: 8 }}>
               {(t.courts || []).map(court => (
                 <button type="button" key={court} className="btn" style={{ minWidth: 120 }} onClick={() => onOpenShiaijo(court)}>
-                  Shiaijo {court} →
+                  Shiaijo {court}
                 </button>
               ))}
             </div>
@@ -861,23 +862,25 @@ function CompCard({ c, onOpen, onStart, tournament, showToast }) {
       >
         <div className="tcard__head">
           <div>
-            <div className="tcard__eyebrow">{window.competitionKindLabel(c)}{c.teamSize ? ` · ${c.teamSize}-person` : ""}</div>
             <div className="tcard__name">{c.name}</div>
+            {/* One phrase under the name, its parts separated by commas; a
+                part with nothing to say (no date, no time, no shiaijo) is
+                left out, so the line never carries a dangling separator. */}
             <div className="tcard__meta">
-              {c.date && <span style={{ fontWeight: 600 }}>{formatDate(c.date)}</span>}
-              {c.date && c.startTime && " · "}
-              {c.startTime && `Starts ${c.startTime}`}
-              {/* Only emit the separator + court list when courts exist, and
-                  only lead with " · " when something precedes it; otherwise
-                  an empty/null-courts comp renders a dangling " · ". */}
-              {courts.length > 0 && `${(c.date || c.startTime) ? " · " : ""}${courts.join(", ")}`}
+              {[
+                window.competitionKindLabel(c),
+                c.teamSize ? `${c.teamSize}-person` : "",
+                c.date ? formatDate(c.date) : "",
+                c.startTime ? `starts ${c.startTime}` : "",
+                courts.length > 0 ? `Shiaijo ${andList(courts)}` : "",
+              ].filter(Boolean).join(", ")}
             </div>
           </div>
           <StatusBadge status={c.status} format={c.format} />
         </div>
         <div className="tcard__stats">
-          <div className="tcard__stat"><div className="v">{playerCount}</div><div className="l">{pluralize(playerCount, c.kind === "team" ? "Team" : "Player")}</div></div>
-          <div className="tcard__stat"><div className="v">{courts.length}</div><div className="l">{pluralize(courts.length, "Shiaijo", "Shiaijo")}</div></div>
+          <div className="tcard__stat"><div className="v">{playerCount}</div><div className="l">{c.kind === "team" ? (playerCount === 1 ? "Team" : "Teams") : (playerCount === 1 ? "Player" : "Players")}</div></div>
+          <div className="tcard__stat"><div className="v">{courts.length}</div><div className="l">Shiaijo</div></div>
           {/* formatLabelShort lives in ui.jsx (not owned here); it emits the
               insider codes "P+KO" / "KO". Add a plain-language tooltip + a11y
               label inline so the abbreviation is legible without forking the
@@ -892,7 +895,7 @@ function CompCard({ c, onOpen, onStart, tournament, showToast }) {
               className="btn btn--primary btn--sm btn--full"
               onClick={(e) => { e.stopPropagation(); onStart(); }}
               disabled={!!startBlocker}
-            >Start competition →</button>
+            >Start competition</button>
           )}
           {/* The reason, not just a dead button: the operator has to know
               which screen fixes it. Kept on the card rather than in a tooltip
@@ -903,11 +906,11 @@ function CompCard({ c, onOpen, onStart, tournament, showToast }) {
               outlive the thing it is a reason for. */}
           {canOfferStart && startBlocker && (
             <div className="tcard__action-note" style={{ color: "var(--red)", fontSize: 11, fontWeight: 600, lineHeight: 1.4 }} data-testid="card-draw-block">
-              ⚠ Cannot start: {startBlocker.reason} Open this competition. {startBlocker.fix}
+              <Icon name="triangle-alert" size={12} className="icon-lead" />Cannot start: {startBlocker.reason} Open this competition. {startBlocker.fix}
             </div>
           )}
           {(c.status === "pools" || c.status === "knockout") && (
-            <button type="button" className="btn btn--primary btn--sm btn--full" onClick={(e) => { e.stopPropagation(); onOpen(); }}>Go to Scoring →</button>
+            <button type="button" className="btn btn--primary btn--sm btn--full" onClick={(e) => { e.stopPropagation(); onOpen(); }}>Go to Scoring</button>
           )}
           {c.status === "completed" && (
             <button type="button" className="btn btn--sm btn--full" onClick={(e) => { e.stopPropagation(); onOpen(); }}>View Results</button>
@@ -1016,7 +1019,7 @@ function CourtPicker({ value, courts, onChange, btnClassName = "", label = "", a
         title="Change shiaijo"
         aria-haspopup="listbox"
         aria-expanded={open}
-      >{label}{value} ▾</button>
+      >{label}{value} <Icon name="chevron-down" size={12} /></button>
       {open && (
         <div
           className="court-popover"

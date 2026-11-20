@@ -64,7 +64,7 @@ describe('Shared court next up: court-queue ordering across competitions', () =>
     expect(upcoming[1]._comp.id).toBe('a');
   });
 
-  it('the TV board leads with b match (printed earlier) and names a match as NEXT', () => {
+  it('the TV board leads with b match (printed earlier) and names a match as Next', () => {
     const { container } = render(
       <TvDisplay
         court="A"
@@ -79,12 +79,12 @@ describe('Shared court next up: court-queue ordering across competitions', () =>
     // b's, printed at 09:10, although both carry a stale queuePosition of 1.
     expect(text).toContain('Competition B');
     expect(text).not.toContain('Competition A');
-    const next = text.indexOf('NEXT');
+    const next = text.indexOf('Next');
     expect(next).toBeGreaterThan(-1);
     expect(text.indexOf('Bob Red')).toBeGreaterThan(-1);
     expect(text.indexOf('Bob Red')).toBeLessThan(next);
     // One next line on the court, and it names a's match.
-    expect(text.indexOf('NEXT', next + 1)).toBe(-1);
+    expect(text.indexOf('Next', next + 1)).toBe(-1);
     expect(text.indexOf('Alice Red')).toBeGreaterThan(next);
   });
 });

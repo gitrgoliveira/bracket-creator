@@ -1,5 +1,5 @@
 // mp-bkg: tests for the matchId-keyed lineup API helpers (fetchLineupInForce,
-// putMatchLineup, deleteMatchLineup) in api_client.jsx. fetchLineupInForce turns
+// putMatchLineup, deleteMatchLineup) in api_client_teams.jsx. fetchLineupInForce turns
 // a `saved: false` body into null (bc-k404: nothing saved is a 200, not a 404),
 // the same rule fetchTeamLineup applies below, just against a different endpoint
 // path (/lineup-in-force/:matchId vs /lineups/:round).
@@ -234,7 +234,7 @@ describe('API.putMatchLineup', () => {
 
 // bc-pnum gap closure: putMatchLineup grows an optional trailing memberIds
 // argument, mirroring putTeamLineup's own treatment exactly (see that
-// function's comment in api_client.jsx). These three cases are the ones
+// function's comment in api_client_teams.jsx). These three cases are the ones
 // that matter: sent when given, omitted (not just falsy/undefined) when
 // not given so an old caller's wire body is byte-identical, and carried
 // into the offline queue too (bc-pnum: a client on unreliable venue wifi

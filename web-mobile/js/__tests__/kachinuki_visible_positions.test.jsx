@@ -5,7 +5,7 @@
 // positions to server subResults left a fresh match unscoreable.
 
 import { describe, it, expect } from 'vitest';
-import { kachinukiVisiblePositions } from '../admin_scoring_team.jsx';
+import { kachinukiVisiblePositions } from '../admin_scoring_team_kachinuki.jsx';
 
 // 3-person team, no daihyosen: positions "1".."3".
 const POSITIONS = ['1', '2', '3'];
@@ -128,7 +128,7 @@ describe('kachinukiVisiblePositions', () => {
 // it PLAYED and the current bout is the appended placeholder, NOT bout 1.
 // (Seeding draw:false made bout 1 look unplayed; one M click + autosave
 // then rewrote the recorded draw and dropped the placeholder.)
-import { subBoutHasBeenPlayed } from '../admin_scoring_team.jsx';
+import { subBoutHasBeenPlayed } from '../admin_scoring_team_bouts.jsx';
 
 describe('recorded hikiwake bout counts as played (UAT repro)', () => {
   it('a draw-seeded sub is played', () => {

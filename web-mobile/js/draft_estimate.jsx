@@ -220,7 +220,7 @@ export function DraftEstimatePanel({
   }
   const derivedMatchesElement = matchParts.length > 0 ? (
     <div className="draft-estimate__matches">
-      {matchParts.join(" · ")}
+      {matchParts.join(", ")}
     </div>
   ) : null;
 
@@ -241,7 +241,7 @@ export function DraftEstimatePanel({
   });
   const perShiaijoElement = perCourtParts.length > 0 ? (
     <div className="draft-estimate__per-shiaijo" data-testid="draft-estimate-per-shiaijo">
-      Per shiaijo: {perCourtParts.join(" · ")}
+      Per shiaijo: {perCourtParts.join(", ")}
     </div>
   ) : null;
 

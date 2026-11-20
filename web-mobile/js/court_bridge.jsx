@@ -415,7 +415,7 @@ export function openBridge() {
 
 // -----------------------------------------------------------------------
 // Singleton bridge: one shared BroadcastChannel handle per tab.
-// Both api_client.jsx (publisher) and app.jsx (display subscriber) import
+// Both api_client_overlays.jsx (publisher) and app.jsx (display subscriber) import
 // this same reference so only one BroadcastChannel is opened per tab.
 // The no-op-degrade path inside openBridge() runs exactly once at module
 // load time.

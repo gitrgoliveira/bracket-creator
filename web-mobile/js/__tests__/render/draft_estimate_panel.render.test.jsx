@@ -84,7 +84,7 @@ describe('DraftEstimatePanel render tests', () => {
     );
 
     const perShiaijo = getByTestId('draft-estimate-per-shiaijo');
-    expect(perShiaijo.textContent).toBe('Per shiaijo: B about 4h 08m · C about 4h 02m');
+    expect(perShiaijo.textContent).toBe('Per shiaijo: B about 4h 08m, C about 4h 02m');
   });
 
   it('renders the pauses line when pauses exist', () => {
@@ -178,7 +178,7 @@ describe('DraftEstimatePanel render tests', () => {
     );
 
     const perShiaijo = getByTestId('draft-estimate-per-shiaijo');
-    expect(perShiaijo.textContent).toBe('Per shiaijo: A about 55m · B has no matches');
+    expect(perShiaijo.textContent).toBe('Per shiaijo: A about 55m, B has no matches');
   });
 
   it('renders no timing line when estimate has no timing', () => {

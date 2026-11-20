@@ -81,7 +81,7 @@ describe('AdminPools: an individual tie-breaker round that went in a circle', ()
     // A league has no pools: the tie is named by its places alone.
     expect(screen.getByText('1st to 3rd place')).toBeTruthy();
     expect(screen.queryByText(/Pool A/)).toBeNull();
-    expect(screen.getByText('Aki · Bea · Cal')).toBeTruthy();
+    expect(screen.getByText('Aki, Bea and Cal')).toBeTruthy();
     // Not the team wording, and the lots are not open until chosen.
     expect(screen.queryByText('Chusen (drawing lots) required')).toBeNull();
     expect(screen.queryByRole('button', { name: /Record chusen result/ })).toBeNull();
@@ -143,7 +143,7 @@ describe('AdminPools: an individual tie-breaker round that went in a circle', ()
     // The names ride in a sibling the button is described by, never in its label.
     expect(buttons[1].textContent).toBe('Run another round');
     const names = document.getElementById(buttons[1].getAttribute('aria-describedby'));
-    expect(names.textContent.trim()).toBe('Cal · Dai');
+    expect(names.textContent.trim()).toBe('Cal and Dai');
     expect(buttons[1].contains(names)).toBe(false);
     await act(async () => {
       fireEvent.click(buttons[1]);

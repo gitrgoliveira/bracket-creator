@@ -214,7 +214,7 @@ describe('API.reopenMatch', () => {
 
 // requeueBlockerAndReopen shares reopenMatch's structured-error builder
 // (mp-gmcg review R8: reopenFailureError). These pin that the second path
-// surfaces the SAME court_busy shape applyReopenFailure depends on, so a
+// surfaces the SAME court_busy shape useMatchReopen depends on, so a
 // regression that rewired only one method would fail here.
 describe('API.requeueBlockerAndReopen', () => {
   let originalFetch;

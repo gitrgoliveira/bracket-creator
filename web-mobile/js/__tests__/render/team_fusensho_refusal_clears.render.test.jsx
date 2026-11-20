@@ -99,7 +99,7 @@ async function refuseAkaFusenshoOnBout1() {
   await tap(ipponButton(1, 'shiro', 'M'));
   await tap(ipponButton(1, 'shiro', 'K'));
   await tap(fusenshoButton(1, 'aka'));
-  expect(refusalNote(1, 'aka').textContent).toBe('SHIRO already won this bout: clear their points first');
+  expect(refusalNote(1, 'aka').textContent).toBe('Shiro already won this bout: clear their points first');
 }
 
 describe('bc-fsnp: a refused Fusensho explains itself once, until the next edit', () => {

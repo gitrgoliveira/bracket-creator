@@ -328,11 +328,18 @@ function patchCompetition(prev, event) {
         }
         return false;
     };
+    // The ids of the matches the patch changed (createPushLedger counts them).
+    const applied = [];
     const patchMatch = (m) => {
         const update = resultMap.get(m.id);
         if (!update) return m;
+        const base = _mergeMatchPatch(m, update);
+        // A push the merge ignored (older than the running copy held) changes
+        // nothing.
+        if (base === m) return m;
         changed = true;
-        const merged = normalizeMatch(_mergeMatchPatch(m, update), getPlayerMap());
+        applied.push(m.id);
+        const merged = normalizeMatch(base, getPlayerMap());
         if (isScheduleAffecting(m, merged)) queueChanges.push({ before: m, after: merged });
         return merged;
     };
@@ -371,7 +378,7 @@ function patchCompetition(prev, event) {
     // Pool and knockout matches share a court's queue, so they are renumbered
     // together.
     if (queueChanges.length > 0) next = shiftQueuePositions(next, queueChanges);
-    return { next, queueMoved: queueChanges.length > 0 };
+    return { next, queueMoved: queueChanges.length > 0, applied };
 }
 
 // isOlderRunningCopy: whether `fetched` is a running match older than a
@@ -401,11 +408,7 @@ function isOlderRunningCopy(fetched, heldStatus, heldStamp, heldVersion) {
 // no held copy yet means nothing to keep.
 function keepNewerMatches(held, fetched) {
     if (!held) return fetched;
-    const heldById = new Map();
-    for (const m of held.poolMatches || []) heldById.set(m.id, m);
-    const hb = held.bracket;
-    for (const round of (hb && hb.rounds) || []) for (const m of round) heldById.set(m.id, m);
-    if (hb && hb.thirdPlaceMatch) heldById.set(hb.thirdPlaceMatch.id, hb.thirdPlaceMatch);
+    const heldById = matchesById(held);
     // Only a RUNNING match is kept, and only over a RUNNING fetched copy with
     // an older stamp: that is the whole harm (a live score going back under an
     // open editor). Stamps come from two clocks: a client write carries the
@@ -416,19 +419,99 @@ function keepNewerMatches(held, fetched) {
     // running with running never weighs one clock against the other. An
     // unstamped fetched copy (a draw discarded and drawn again, reusing the
     // match ids) always replaces too.
-    const newer = (row) => {
+    return mapMatches(fetched, (row) => {
         const h = heldById.get(row.id);
         return h && isOlderRunningCopy(row, h.status, h.modifiedAt, h.scoreVersion) ? h : row;
-    };
-    const b = fetched.bracket;
+    });
+}
+
+// matchesById: a competition's matches by id (pool, knockout rounds, the
+// 3rd-place match).
+function matchesById(comp) {
+    const byId = new Map();
+    for (const m of comp.poolMatches || []) byId.set(m.id, m);
+    const b = comp.bracket;
+    for (const round of (b && b.rounds) || []) for (const m of round) byId.set(m.id, m);
+    if (b && b.thirdPlaceMatch) byId.set(b.thirdPlaceMatch.id, b.thirdPlaceMatch);
+    return byId;
+}
+
+// mapMatches: the competition with every match passed through `fn`.
+function mapMatches(comp, fn) {
+    const b = comp.bracket;
     return {
-        ...fetched,
-        poolMatches: fetched.poolMatches && fetched.poolMatches.map(newer),
+        ...comp,
+        poolMatches: comp.poolMatches && comp.poolMatches.map(fn),
         bracket: b && {
             ...b,
-            rounds: b.rounds && b.rounds.map((round) => round.map(newer)),
-            thirdPlaceMatch: b.thirdPlaceMatch && newer(b.thirdPlaceMatch),
+            rounds: b.rounds && b.rounds.map((round) => round.map(fn)),
+            thirdPlaceMatch: b.thirdPlaceMatch && fn(b.thirdPlaceMatch),
         },
+    };
+}
+
+// createPushLedger: a holder's record of the server pushes it applied, for its
+// refetches (push-wins). A refetch can leave within a millisecond of a write
+// and be answered from data read before that write committed, after the
+// write's push was applied: keepNewerMatches keeps the pushed copy only when
+// both copies are running, so the answer of a refetch sent before a Start put
+// the match back to scheduled. The ledger counts, per competition and match,
+// the pushes that changed that match, on a counter of its own (no clock), and
+// a refetch notes the counter as it is sent: in its answer, a match pushed
+// after that keeps the pushed copy when the fetched copy carries no
+// scoreVersion or a lower one than the held copy's (olderByScoreVersion; a
+// fetched copy at or above it is the server's newer word and replaces it).
+// Only the server's pushes count: a holder applies its own local patches (an
+// outbox court or time change) and another tab's overlays with applyPatch,
+// never through the ledger. The counts are cleared on resync_required and
+// tournament_updated, which say every held copy may be wrong.
+//   - push(comp, compId, event): applies a server push to competition
+//     `compId` as applyPatch does, counting the matches it changed;
+//   - detail(): a keeper for a competition-detail refetch sent now,
+//     (held, fetched) => keepNewerDetail plus push-wins;
+//   - competitions(): the same for a list of competitions (the court
+//     console's feed), over keepNewerCompetitions;
+//   - clear(): forgets the counts.
+function createPushLedger() {
+    let count = 0;
+    const pushedAt = new Map();
+    const keyOf = (compId, matchId) => `${compId}\u001f${matchId}`;
+    const keepPushed = (sent, compId, held, fetched) => {
+        if (!held || !fetched || pushedAt.size === 0) return fetched;
+        const heldById = matchesById(held);
+        return mapMatches(fetched, (row) => {
+            const h = heldById.get(row.id);
+            if (!h || !((pushedAt.get(keyOf(compId, row.id)) || 0) > sent)) return row;
+            const older = !(Number(row.scoreVersion) > 0) || olderByScoreVersion(row, h) === true;
+            return older ? h : row;
+        });
+    };
+    return {
+        push(comp, compId, event) {
+            const res = patchCompetition(comp, event);
+            for (const id of res.applied || []) {
+                count += 1;
+                pushedAt.set(keyOf(compId, id), count);
+            }
+            return res.next;
+        },
+        detail() {
+            const sent = count;
+            return (held, fetched) => {
+                const merged = keepNewerDetail(held, fetched);
+                return held && held.config.id === fetched.config.id
+                    ? keepPushed(sent, fetched.config.id, held, merged) : merged;
+            };
+        },
+        competitions() {
+            const sent = count;
+            return (held, fetched) => {
+                const merged = keepNewerCompetitions(held, fetched);
+                if (!Array.isArray(held)) return merged;
+                return merged.map((c) => keepPushed(sent, c.id, held.find((h) => h.id === c.id), c));
+            };
+        },
+        clear() { pushedAt.clear(); },
     };
 }
 
@@ -474,5 +557,6 @@ function matchInComp(comp, id) {
 export {
     applyPatch, applyPatchToCompetitions, applyPatchOrdered, checkSeqGap,
     keepNewerMatches, keepNewerDetail, keepNewerCompetitions, keepNewerTournament, isOlderRunningCopy,
+    createPushLedger,
     matchInComp,
 };

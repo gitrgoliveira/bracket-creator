@@ -2046,9 +2046,11 @@ func writeCompetitionTags(f *excelize.File, sheetName, tag string) int {
 }
 
 // competitionTagText is the text a competition-name tag prints: the name with
-// surrounding space trimmed. Empty means the sheet carries no tags.
+// surrounding space trimmed, and any separator left dangling at the end
+// ("Senior Men - " from a title prefix typed to be followed by something).
+// Empty means the sheet carries no tags.
 func competitionTagText(name string) string {
-	return strings.TrimSpace(name)
+	return strings.TrimSpace(strings.TrimRight(strings.TrimSpace(name), " -:,"))
 }
 
 func FillEstimations(f *excelize.File, numPools int64, totalPoolMatches int64, teamSize int64, numEliminationMatches int64, numCourts int) {

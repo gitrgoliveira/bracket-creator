@@ -1297,6 +1297,24 @@ func TestCreateNamesToPrint_CompetitionTags(t *testing.T) {
 	assertCompetitionTags(t, f, "Names to Print E", "Men's Individual")
 }
 
+// TestCompetitionTagText pins what a tag prints: the name trimmed, with a
+// separator left dangling after a title prefix dropped, and nothing for a name
+// that is only space or separators.
+func TestCompetitionTagText(t *testing.T) {
+	for name, want := range map[string]string{
+		"London Cup 2026":     "London Cup 2026",
+		"  Men's Individual ": "Men's Individual",
+		"Senior Men - ":       "Senior Men",
+		"Senior Men:":         "Senior Men",
+		"Cup 2026, ":          "Cup 2026",
+		"Under-18":            "Under-18",
+		" - ":                 "",
+		"":                    "",
+	} {
+		assert.Equalf(t, want, competitionTagText(name), "name %q", name)
+	}
+}
+
 // TestCreateNamesToPrint_CompetitorPagesAfterTags pins the page breaks after
 // the tags: the competitors still print three to a page, each page starting
 // on a fresh row three after the last.

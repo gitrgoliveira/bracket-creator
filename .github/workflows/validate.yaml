@@ -284,7 +284,8 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             libreoffice-nogui \
             default-jre-headless \
-            fonts-liberation
+            fonts-liberation \
+            fonts-crosextra-carlito
 
       - name: Init project
         run: |

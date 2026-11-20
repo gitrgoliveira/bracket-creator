@@ -212,7 +212,7 @@ jobs:
   # | |_| |___) |   | |  __/\__ \ |_
   #  \___/|____/    |_|\___||___/\__|
   #
-  # Runs both JS suites. web-mobile (unit + render projects) so missing window.*
+  # Runs both JS suites. web-mobile (unit, node and render projects) so missing window.*
   # references in component render paths are caught in CI; web/ because the CLI
   # wrapper's form validation restates rules the Go side owns (the legal shiaijo
   # counts among them), and a restatement nothing executes drifts silently.
@@ -236,7 +236,7 @@ jobs:
       - name: Install JS dependencies (web-mobile)
         run: cd web-mobile && npm ci
 
-      - name: Run JS tests (unit + render)
+      - name: Run JS tests (unit, node and render)
         run: cd web-mobile && npm test
 
       - name: Install JS dependencies (web)

@@ -281,7 +281,7 @@ Name[, Zekken/DisplayName], Dojo[, DanGrade][, source][, checked_in | checked_in
 
 ## Testing & Verification
 
-- **Gate cadence: targeted tests while iterating, the full gate before claiming completion** (operator ruling 2026-09-25). `make go/test` takes about 1.5 to 2 minutes on 8 cores (the JS tests about 65 seconds of that, measured 2026-11-20) and keeps every core busy, which slows every other session on the machine; a full run after each small fix is what made concurrent sessions look stuck. While iterating, run only what the change touches, each in seconds and without `cd`:
+- **Gate cadence: targeted tests while iterating, the full gate before claiming completion** (operator ruling 2026-09-25). `make go/test` runs the JS tests first, about 65 seconds on a 10-core machine (measured 2026-11-20 with other sessions running, 1-minute load 2 to 18; about 113 seconds before the two permutation gates were split into shards), then the Go tests, under a minute (measured 2026-11-18); the whole gate has not been timed as one run. It keeps every core busy, which slows every other session on the machine; a full run after each small fix is what made concurrent sessions look stuck. While iterating, run only what the change touches, each in seconds and without `cd`:
   ```bash
   go -C <wt> test -run TestName ./internal/<pkg>/...
   npm --prefix <wt>/web-mobile test -- js/__tests__/<file>.   # vitest matches by substring; the trailing dot finds <file>.test.jsx and <file>.node.test.jsx only

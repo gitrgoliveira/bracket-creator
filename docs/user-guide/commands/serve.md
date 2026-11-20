@@ -1,6 +1,6 @@
 # serve
 
-Starts the web UI so you can generate brackets from a browser without using the command line.
+Starts the [Legacy Web UI](../organisers/web-ui.md), kept for compatibility, so you can generate brackets from a browser without using the command line.
 
 ```
 bracket-creator serve [flags]

@@ -376,17 +376,19 @@ func respondIfCorruptOverrides(c *gin.Context, err error) bool {
 
 // respondUnexportableCompetitionError asks engine.IsUnexportable whether err
 // is one of the sentinels a workbook-export path can fail with (today: Swiss
-// has no static bracket to export, or the stored bracket no longer matches
-// the competition's current settings) and, if so, writes
-// {"error": err.Error()} as an HTTP 422
+// has no static bracket to export, the stored bracket no longer matches the
+// competition's current settings, or a competition with no draw cannot be
+// laid out blank: too few places to print, or settings that cannot form a
+// draw) and, if so, writes {"error": err.Error()} as an HTTP 422
 // and reports true; the caller must return immediately when this returns
-// true. Both are state conflicts the operator can resolve (regenerate the
-// draw, restore the settings, or use the live standings view), not server
-// faults, hence 422 rather than 500.
+// true. Each is a state conflict the operator can resolve (regenerate the
+// draw, restore the settings, set the expected number of participants, or use
+// the live standings view), not a server fault, hence 422 rather than 500.
+// The error text is operator copy and names the fix.
 //
-// Shared by the stored-draw export route (GET .../export,
-// handlers_competition.go) and the results-archive export route (GET
-// .../export-results, handlers_export.go) so the same two-sentinel mapping
+// Shared by the export route (GET .../export, handlers_competition.go) and
+// the results-archive export route (GET .../export-results,
+// handlers_export.go) so the same sentinel mapping
 // does not drift into two hand-copied bodies -- mirrors
 // respondRosterWriteError's shape below for the same reason.
 //

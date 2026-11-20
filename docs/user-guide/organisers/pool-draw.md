@@ -8,7 +8,7 @@ The same rules apply to team competitions, with each team placed as one entrant.
 
 The draw itself is deterministic: the same entrants, in the same order, with the same settings, always produce the same pools. Any randomness happens before the draw, and you control it:
 
-- The **tournament app** draws from the participant list as it stands. Use **Shuffle unseeded** in the participants panel to randomise unranked positions first if you want a random order; refer to [Adding participants](run-tournament.md#adding-participants). When at least one participant is checked in, only checked-in participants join the draw; refer to [Check-in workflow](run-tournament.md#check-in-workflow).
+- The **tournament app** draws from the participant list as it stands. Use **Shuffle unseeded** in the participants panel to randomise unranked positions first if you want a random order; refer to [Adding participants](run-tournament.md#adding-participants). Until the list has been shuffled, the competition's **Export & print** tab warns that the draw follows the order the names were entered in. When at least one participant is checked in, only checked-in participants join the draw; refer to [Check-in workflow](run-tournament.md#check-in-workflow).
 - The **command line** shuffles the entry list before drawing, so two runs over the same file produce different pools. Pass `--determined` to skip the shuffle and draw in file order. Refer to [create-pools](../commands/create-pools.md).
 
 ## How many pools, and their sizes

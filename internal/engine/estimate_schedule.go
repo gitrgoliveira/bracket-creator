@@ -262,6 +262,10 @@ func (e *Engine) estimateParticipantCount(comp *state.Competition, tournament *s
 // trickle in, and the real count once more than expected have come. The
 // source is ParticipantsSourceExpected only while the expected count is the
 // larger; an equal count is the roster's.
+//
+// The blank layout of a competition with no draw is sized by the same rule
+// (blankPlaceCount), over everyone registered rather than the checked-in
+// roster this estimate counts.
 func countForEstimate(expected, counted int) (int, string) {
 	if expected > counted {
 		return expected, ParticipantsSourceExpected

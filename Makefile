@@ -14,6 +14,10 @@ NICE ?= nice -n 10
 # same tests passing and the same coverage. Empty it for Go's default:
 # make go/test GOGC_TEST=
 GOGC_TEST ?= 400
+# Each package's test binary may run this long. Go's own default is 10 minutes,
+# which the engine package passed (897 s) when the machine was busy with other
+# sessions and the run was niced. A hung test still ends the run, later.
+GO_TEST_TIMEOUT ?= 30m
 # goreleaser is pinned so a release is built with the version it was tested
 # with; keep it in lockstep with .github/workflows/release.yaml.
 # Security and linting tools are the opposite: they always run their newest
@@ -231,12 +235,12 @@ js/validate: js/lint js/check-imports js/test js/security ## Run all Javascript 
 # making sure the test results are already on screen when it happens.
 go/test: go/lint js/lint js/check-imports js/test ## Run tests, then the security scans
 	@echo "Running tests..."
-	GOGC=$(GOGC_TEST) $(NICE) go test -cover . ./cmd/... ./internal/... ./tests/...
+	GOGC=$(GOGC_TEST) $(NICE) go test -timeout $(GO_TEST_TIMEOUT) -cover . ./cmd/... ./internal/... ./tests/...
 	@$(MAKE) go/security js/security
 
 go/test-race: go/lint ## Run tests with race detection
 	@echo "Running tests with race detection..."
-	GOGC=$(GOGC_TEST) $(NICE) go test -race -cover . ./cmd/... ./internal/... ./tests/...
+	GOGC=$(GOGC_TEST) $(NICE) go test -timeout $(GO_TEST_TIMEOUT) -race -cover . ./cmd/... ./internal/... ./tests/...
 	
 go/build: $(BIN_PATH)/$(BIN_NAME) ## Build the application locally
 

@@ -198,7 +198,7 @@ Both notices are advisory, not blocking: the competition keeps running, and noth
 The **Ordering & seeding** panel shows the working roster, one competitor per row: the competitor number once a draw exists, the name and the dojo. Before the draw the rows are in roster order, which you can change; once the draw has numbered the competitors the rows are listed in number order, with anyone the draw left out at the end. From here you can:
 
 - Drag rows to assign seeds, or type a rank number directly.
-- Click **Shuffle unseeded** to randomise unranked positions.
+- Click **Shuffle unseeded** to randomise unranked positions. The app records that the list was shuffled, and until it has been, the competition's **Export & print** tab warns that the draw will follow the order the names were entered in; refer to [Export and print](#export-and-print).
 - Click **Import seeds (CSV)** to load a seed file, or **Clear seeds** to remove all ranks.
 
 The order you rank the seeds in is used, not just the set of seeded competitors. Seeds 1 and 3 land in one half of the knockout draw, and seeds 2 and 4 land in the other, each in its own quarter. A seeded pool's winner is first in line for any bye in its shiai-jo's block. Fewer than four seeds, including none at all, is a normal configuration. Refer to [Seeding in the knockout draw](knockout-draw.md#seeding).
@@ -302,19 +302,33 @@ Set the **Award two joint 3rd places** option during setup, before you generate 
 
 ### Excel
 
-Two Excel downloads are available from the competition page:
+Two Excel downloads are available from the competition's **Export & print** tab:
 
-- **Download results (.xlsx)**: a workbook with played scores, pool standings, winners, and decisions filled in. Covers pools, league, and knockout formats. Swiss competitions have no static bracket; follow the current standings instead.
-- **Download blank template (.xlsx)**: an empty bracket workbook with linked formulas for hand scoring at events without a network connection.
+- **Download blank template (.xlsx)**: always offered. An empty bracket workbook with linked formulas for hand scoring at events without a network connection. Once the draw is generated, it holds that draw, the same one Export PDFs prints. Checking someone in or out never changes a draw already generated.
+- **Download results (.xlsx)**: shown once a result is recorded, meaning a match is running or finished. A bye the draw resolved by itself does not count. A workbook with played scores, pool standings, winners, and decisions filled in. Covers pools, league, and knockout formats. Swiss competitions have no static bracket; follow the current standings instead.
+
+The results workbook keeps the scores and decisions as values, but the pool standings (wins, losses, ties and points, or the team columns), the Rank column and the Ranking lists stay live formulas over those scores, so you can check the sheet against the app. Where the sheet's own rank would differ from the app's, the workbook writes the app's rank and ranking as values instead and says why in a note beside the Ranking. That happens when a chusen, a tie-break bout or a representative bout decided the pool's order, or when competitors are level on every count. A pool decided by kiken, fusenpai or hantei is ranked by what the formulas count for that result, which can differ from the app, so check such a pool against the app.
+
+#### Before the draw
+
+A competition with no draw yet can still be downloaded. The tab says so, and the template it gives is blank: only empty places, with no names, seeds or numbers, in the layout the draw would print for that many entrants (the competition's pool size, qualifiers and courts, or the knockout bracket for knockout only). The number of places is the larger of the [**Expected participants**](#expected-participants-and-the-estimate-on-a-new-competition) set in the competition's Settings and everyone registered (everyone registered counts whether or not they are checked in). Type names into the workbook's data sheet and they flow through every sheet. The template is a layout to print or hand-fill, so it can differ from the draw you generate later: the draw may have a different number of competitors, and it places seeds and spreads dojos, which the blank layout cannot know.
+
+![The Export & print tab of a competition with no draw: a notice that only a blank template exists until the draw is generated, a warning that the list was never shuffled, and the Download blank template button.](../../screenshots/mobile-export-before-draw.png)
+
+The tab warns when the competitor list was never shuffled with **Shuffle unseeded**, in setup and while the draw is ready to start, as long as at least two competitors are unseeded. The draw places competitors in the order of the list, so the order they were entered in decides who meets whom. Shuffle the list before you generate the draw. If the draw already exists, discard it, shuffle, and generate it again; a list shuffled before the app recorded shuffles shows the warning too.
+
+When there is nothing to size the template from, fewer than two places (no expected number of participants and fewer than two registered), the download is refused with a sentence that names the fix: set the expected number of participants in the competition's Settings, or add participants. A pools-and-knockout competition whose settings cannot form a draw for that many places is refused in the same way, with its reason.
 
 ### PDF
 
-PDF exports (competitor tags, name sheets, and bracket trees) are available to admins only. Rendering requires LibreOffice:
+PDF exports (registration sheets, name sheets, competitor tags, pool and match sheets, and bracket trees) are available to admins only. Rendering requires LibreOffice:
 
 - Use the `ghcr.io/gitrgoliveira/bracket-creator-mobile-pdf:latest` container image, which includes LibreOffice.
 - Or install LibreOffice on the host and ensure `soffice` is on the system path.
 
 The lean container image omits LibreOffice and returns a clear message when a PDF is requested.
+
+**Export PDFs** prints a competition with no draw yet the same way as the blank template: empty places, sized from the larger of the expected number of participants and everyone registered. A competition with no draw and fewer than two places to print, or whose settings cannot form a draw, is left out of the booklet. The dialog's warning box and the `SKIPPED-COMPETITIONS.txt` file in the download name it with the fix, for example setting the expected number of participants in its Settings. Every other competition still prints.
 
 When the **Public URL** is set and competitors have assigned numbers, each printed tag includes a QR code that opens the viewer and adds that competitor to the scanner's watchlist. Refer to [Hosting](../install/hosting.md) for guidance on setting the public URL.
 

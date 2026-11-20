@@ -1,8 +1,9 @@
-// The blank-template download (POST /create) is a direct fetch: when the
+// The blank-template download (GET /api/competitions/:id/export) is a direct fetch: when the
 // request never leaves the device, the operator reads the one "not sent"
 // sentence (write_result.jsx NOT_SENT_NO_CONNECTION) as it is, never the
 // browser's "Failed to fetch" inside "Export failed: ...". Any other failure
-// keeps its own wording.
+// keeps its own wording. The template's failure is said on the tab beside its
+// button; the results download, which has a toast host, falls back to an alert.
 import React from 'react';
 import { render, act, fireEvent } from '@testing-library/react';
 import { describe, it, expect, vi, afterEach } from 'vitest';
@@ -32,10 +33,12 @@ async function clickBlankTemplate() {
     (b) => b.textContent.includes('Download blank template')
   );
   await act(async () => { fireEvent.click(button); });
+  return container.querySelector('[data-testid="export-template-error"]')?.textContent ?? null;
 }
 
 async function clickResults() {
-  const { container } = render(<AdminExport c={competition} t={{ id: 't1' }} password="pw" />);
+  // The results button shows once a result is recorded.
+  const { container } = render(<AdminExport c={competition} t={{ id: 't1' }} password="pw" poolMatches={[{ status: 'completed' }]} />);
   const button = Array.from(container.querySelectorAll('button')).find(
     (b) => /results/i.test(b.textContent)
   );
@@ -68,31 +71,21 @@ describe('AdminExport blank template download', () => {
     vi.restoreAllMocks();
   });
 
-  it('alerts the not-sent sentence, unwrapped, when the request never leaves the device', async () => {
+  it('says the not-sent sentence, unwrapped, when the request never leaves the device', async () => {
     const alert = vi.spyOn(window, 'alert').mockImplementation(() => {});
     global.fetch = vi.fn(() => Promise.reject(new TypeError('Failed to fetch')));
-    await clickBlankTemplate();
+    expect(await clickBlankTemplate()).toBe(NOT_SENT_NO_CONNECTION);
     expect(global.fetch).toHaveBeenCalledTimes(1);
-    expect(alert).toHaveBeenCalledWith(NOT_SENT_NO_CONNECTION);
-  });
-
-  it('keeps a TypeError that is not the lost request (the body failing after the answer) in "Export failed"', async () => {
-    const alert = vi.spyOn(window, 'alert').mockImplementation(() => {});
-    global.fetch = vi.fn(() => Promise.resolve({
-      ok: true,
-      blob: () => Promise.reject(new TypeError('network error')),
-    }));
-    await clickBlankTemplate();
-    expect(alert).toHaveBeenCalledWith('Export failed: network error');
+    expect(alert).not.toHaveBeenCalled();
   });
 
   it('keeps an answered refusal in its own "Export failed" wording', async () => {
     const alert = vi.spyOn(window, 'alert').mockImplementation(() => {});
     global.fetch = vi.fn(() => Promise.resolve({
       ok: false,
-      text: () => Promise.resolve(JSON.stringify({ error: 'bad roster' })),
+      json: () => Promise.resolve({ error: 'bad roster' }),
     }));
-    await clickBlankTemplate();
-    expect(alert).toHaveBeenCalledWith('Export failed: bad roster');
+    expect(await clickBlankTemplate()).toBe('Export failed: bad roster');
+    expect(alert).not.toHaveBeenCalled();
   });
 });

@@ -65,14 +65,13 @@ func leagueForm(playerList string) url.Values {
 	}
 }
 
-// TestCreateHandler_LeagueWLAreCountingFormulas is the regression guard for
-// mp-x0u9. The mobile-app server mounts createTournamentHandler at POST /create
-// so the in-app export runs the same one-pass generator as the `web` app,
-// instead of the engine's stored-pool export. The engine path reloads pools
-// from disk, which severs the player↔match pointer link PrintPoolMatches needs,
-// so the per-player W/L/T cells degraded to "=0" and ranking never computed.
+// TestCreateHandler_LeagueWLAreCountingFormulas is /create's guard for
+// mp-x0u9: the per-player W/L/T cells once degraded to "=0" when a match's
+// sides did not point into the pool's own Players slice, the link
+// PrintPoolMatches counts a player's matches by, and ranking never computed.
 // This asserts the "W" column in the pool Results block holds a live counting
-// formula, NOT "=0".
+// formula, NOT "=0". The stored-draw export's twin is
+// engine.TestExportCompetitionXlsx_PoolCountingFormulasAreLive.
 func TestCreateHandler_LeagueWLAreCountingFormulas(t *testing.T) {
 	f := postCreate(t, leagueForm("Alice, DA\nBob, DB\nCharlie, DC\nDave, DD\nEve, DE\nFrank, DF"))
 

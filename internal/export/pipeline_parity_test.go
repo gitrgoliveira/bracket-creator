@@ -139,6 +139,7 @@ func TestExportPipelineSheetParity(t *testing.T) {
 				comp, err := store.LoadCompetition(compID)
 				require.NoError(t, err)
 				comp.Format = state.CompFormatKnockout
+				comp.Status = state.CompStatusKnockout
 				comp.TeamMatchType = state.TeamMatchTypeKachinuki
 				comp.TeamSize = 3
 				require.NoError(t, store.SaveCompetition(comp))
@@ -238,10 +239,14 @@ func TestExportPipelineSheetParity(t *testing.T) {
 			eng := engine.New(store)
 
 			compID := "parity-comp"
+			// A drawn status: each case hand-crafts the draw it stores, and a
+			// competition with no draw (setup, or no status) prints the blank
+			// layout instead of what is stored.
 			require.NoError(t, store.SaveCompetition(&state.Competition{
 				ID:     compID,
 				Name:   "Parity Comp",
 				Courts: []string{"A"},
+				Status: state.CompStatusPools,
 			}))
 
 			tc.configure(t, store, eng, compID)
@@ -307,10 +312,11 @@ func TestExportPipelineSheetParity(t *testing.T) {
 // shape directly (no pools, no participants, a bracket with an empty first
 // round and a ThirdPlaceMatch) rather than replaying the PUT handler:
 // EliminationDraw's re-derivation returns nil (poolDraw: no pools;
-// knockoutLeaves: KnockoutLeavesFromBracket finds no rounds and
-// KnockoutFinalsFromParticipants finds no participants) while
+// knockoutLeaves: KnockoutLeavesFromBracket finds no rounds) while
 // bracket.ThirdPlaceMatch is still on disk from the original draw -- the
-// exact "draw == nil, hasBronze == true" state that now errors.
+// exact "draw == nil, hasBronze == true" state that now errors. The
+// competition is drawn (a knockout status): with no draw it would print the
+// blank layout and never read the stored bracket.
 func TestExportPipeline_BronzeOnlyMismatchErrorsInBothBuilders(t *testing.T) {
 	t.Parallel()
 	dir, err := os.MkdirTemp("", "export-pipeline-bronze-mismatch-*")
@@ -329,6 +335,7 @@ func TestExportPipeline_BronzeOnlyMismatchErrorsInBothBuilders(t *testing.T) {
 		Format:   state.CompFormatKnockout,
 		Naginata: true,
 		Courts:   []string{"A"},
+		Status:   state.CompStatusKnockout,
 	}))
 	require.NoError(t, store.SavePools(compID, []helper.Pool{}))
 	require.NoError(t, store.SavePoolMatches(compID, nil))

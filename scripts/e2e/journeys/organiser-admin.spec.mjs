@@ -25,7 +25,7 @@ import { playRunningBout } from '../fixtures/individual.mjs';
 import { openViewer, openTvBoard, tvBoard } from '../fixtures/public.mjs';
 import { dwell } from '../fixtures/pace.mjs';
 import {
-  addSponsor, dayFromNow, downloadResultsWorkbook, importFiles, importResultRows, loadedImage, openEditTournament,
+  addSponsor, dayFromNow, downloadResultsWorkbook, downloadTemplateWorkbook, importFiles, importResultRows, loadedImage, openEditTournament,
   pngBytes, readWorkbook, resetPassword, sheetCells, todayDMY, uploadLogo, writeImportBundle,
 } from '../fixtures/organiser.mjs';
 
@@ -71,9 +71,12 @@ test.describe('organiser admin (file mode)', () => {
       await pasteRoster(page, compId, ROSTER);
       await generateDraw(page, compId);
       await startCompetition(page, compId);
-      // The export before any bout is played: the control the played one is
-      // measured against.
-      unplayed = (await downloadResultsWorkbook(page, compId)).bytes;
+      // Before any bout is played there is no result to download, only the
+      // blank template: the control the played results are measured against.
+      await page.goto(`/admin/competition/${compId}/export`);
+      await expect(page.getByRole('button', { name: 'Download blank template (.xlsx)' })).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Download results (.xlsx)' })).toHaveCount(0);
+      unplayed = (await downloadTemplateWorkbook(page, compId)).bytes;
       await openShiaijo(page, 'A');
       pair = await playRunningBout(page);
       await shot(page, 'bout-played');
@@ -93,7 +96,7 @@ test.describe('organiser admin (file mode)', () => {
       // What only a recorded result writes (the names alone are on the blank
       // draw too): the winner's name carried into the next round's slot, and
       // the waza letter the bout was won with in a score cell. Both are
-      // counted against the export taken before the bout was played.
+      // counted against the blank template taken before the bout was played.
       const winner = pair[pair.winner];
       const count = (bytes, text) => Object.values(sheetCells(bytes, 'Elimination Matches')).filter((v) => v === text).length;
       expect(count(dl.bytes, winner), `${winner} is carried into the next round`).toBeGreaterThan(count(unplayed, winner));

@@ -188,19 +188,14 @@ func (e *Engine) NumberedParticipantsFor(comp *state.Competition, bracket *state
 // Returns (nil, nil) -- not an error -- when the competition is not this
 // shape, so a caller can use the result without a branch of its own.
 //
-// Deliberately checks EffectiveFormat directly rather than
-// DrawSourceFor(comp) == DrawInBracket: ExportCompetitionXlsx (the
-// stored-draw export) is reachable BEFORE a draw exists, precisely so an
-// operator can print name tags and blank score sheets ahead of the
-// tournament, and DrawSourceFor returns DrawNone for a not-yet-drawn
-// knockout competition exactly as it does for one with no draw at all --
-// gating on it here would blank the Names-to-Print/Tags sheets pre-draw.
-// bracket may therefore be the tolerant empty value LoadBracket returns for
-// a competition that has never drawn (NumberedParticipantsFor's own nil
-// handling), which is fine: NumberKnockoutParticipants is a no-op over an
-// empty DrawOrder, so the roster comes back unnumbered rather than absent.
+// A competition with no draw yet has no numbered roster: its numbers belong to
+// draw positions, so DrawSourceFor is not DrawInBracket and nothing is
+// printed. The stored-draw export never reaches that case (a competition with
+// no draw gets the blank layout, which has nobody to name), and the results
+// workbook of one gets no Names to Print sheet rather than the registered
+// names with no bracket beside them.
 func (e *Engine) KnockoutNamesToPrint(comp *state.Competition, pools []helper.Pool, bracket *state.Bracket) ([]helper.Player, error) {
-	if comp.EffectiveFormat() != state.CompFormatKnockout || len(pools) != 0 || comp.EffectiveNumberPrefix() == "" {
+	if DrawSourceFor(comp) != DrawInBracket || len(pools) != 0 || comp.EffectiveNumberPrefix() == "" {
 		return nil, nil
 	}
 	return e.NumberedParticipantsFor(comp, bracket)

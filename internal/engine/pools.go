@@ -15,55 +15,10 @@ import (
 // court that the neighbouring same-day competitions leave (nil for none); the
 // caller scans for it once and hands the same floor to the preview bracket.
 func (e *Engine) generatePools(comp *state.Competition, players []domain.Player, seeds []domain.SeedAssignment, courtFloor map[string]time.Time) ([]state.MatchResult, error) {
-	// PoolSize is the divisor in CreatePools (and is fed to PoolSeeding); a
-	// zero/negative value would otherwise reach helper.CreatePools and the
-	// guard there returns a plain error mapped to HTTP 500. Validate up front
-	// so a competition started with an unset PoolSize fails as a clean 400
-	// (validationErrorf → *ValidationError) with an actionable message. (mp-ebgz)
-	if comp.PoolSize <= 0 {
-		return nil, validationErrorf("competition %s cannot start: pool size must be at least 1, got %d, set a pool size before starting", comp.ID, comp.PoolSize)
-	}
-
-	isMax := comp.PoolSizeMode == "max"
-
-	// bc-qual: ExtraQualifiers is only meaningful for "mixed" (pools feeding a
-	// knockout). generatePools also runs for "league", which has a single
-	// implicit pool and no knockout at all, so a stored non-standard value on
-	// a league record (a hand-edited config.md, or a format switched outside
-	// the HTTP layer, which normalizePoolConfig would have zeroed) must not
-	// steer pool FORMATION.
-	//
-	// poolFedKnockout gates BOTH halves, and both gates have to be the same
-	// expression. The fill-bracket formation branch below used to dispatch on
-	// ExtraQualifiers alone while its own comment claimed the setting was
-	// "gated to minimum-players-per-pool sizing by state.ValidateExtraQualifiers,
-	// checked below" -- but that check ran AFTER formation and only inside the
-	// `mixed` arm, so for a league it never ran at all and for a mixed
-	// competition it ran too late to protect the branch it was cited by. A
-	// league in maximum sizing therefore formed its pools through the
-	// fill-bracket objective, reading PoolSize as a MINIMUM, and survived only
-	// because runDrawPipeline coincidentally pins league PoolSize to
-	// len(players), which makes FillBracketPoolCount return exactly one pool.
-	//
-	// Validating here, before anything reads the value, also means an invalid
-	// setting is reported as itself rather than as whatever formation error it
-	// happens to provoke, and still aborts before SavePools persists anything.
-	poolFedKnockout := comp.Format == state.CompFormatMixed
-	if poolFedKnockout {
-		if err := state.ValidateExtraQualifiers(comp.ExtraQualifiers, comp.PoolSizeMode, comp.EffectivePoolWinners()); err != nil {
-			return nil, wrapValidationErrorf(err, "competition %s cannot start: %s", comp.ID, err.Error())
-		}
-	}
-
-	// numCourts is the competition's RAW shiaijo allocation, normalised. An unset
-	// court list means one unnamed court; helper.EffectiveDrawCourts,
-	// helper.PoolSeeding and helper.ReorderPoolsForCourts each treat anything
-	// below 1 as 1, and normalising up front keeps them reading off a single
-	// value. What the pool phase is actually laid out over is drawCourts below,
-	// which is this clamped down to what the pools can carry.
-	numCourts := len(comp.Courts)
-	if numCourts == 0 {
-		numCourts = 1
+	// The settings refusals come before the seeds: a stale seed row is a plain
+	// error, and it must not hide the 400 that names the setting to fix.
+	if err := refuseUnformablePoolConfig(comp); err != nil {
+		return nil, wrapValidationErrorf(err, "competition %s cannot start: %s", comp.ID, err.Error())
 	}
 
 	// helper.Player is a type alias for domain.Player (NFR-007); the
@@ -74,168 +29,201 @@ func (e *Engine) generatePools(comp *state.Competition, players []domain.Player,
 		}
 	}
 
-	// The whole pool phase, in the one order its steps are valid in, shared with
-	// cmd/create-pools.go so the two paths cannot drift again -- they have twice,
-	// each time misplacing real competitors. helper.BuildPoolPhase's doc comment
-	// (bc-drwx item 11: corrected the claim below -- it did not actually carry
-	// worked examples, and its own constraint 3 named the pre-bc-dojo-Phase-4
-	// PoolSeeding/CreatePools pipeline this engine has not called in years)
-	// carries the four ordering constraints; BuildPoolPhaseTreeAwareWithMode's
-	// own doc comment covers the mode-aware entry point this function actually
-	// calls below.
-	//
-	// drawCourts is what comes back, not what went in: a shiaijo with no home pool
-	// would own an empty bracket region, so the count steps down to what the pools
-	// can carry. Everything below reads THAT, including AssignPoolsToCourts, or
-	// seeds end up placed for a shiaijo layout the draw does not have. numCourts
-	// stays the raw allocation for the single-pool league spread further down,
-	// which really does use every shiaijo the league was given.
-	var pools []helper.Pool
-	var drawCourts int
-	var err error
-	if poolFedKnockout && comp.ExtraQualifiers == state.ExtraQualifiersFillBracket {
-		// bc-qual LP-4: pool COUNT comes from a different formation
-		// objective (helper.FillBracketPoolCount) than the standard
-		// min-mode floor(n/PoolSize) -- helper.BuildPoolPhase's own path is
-		// untouched beside it (see that function's doc comment). isMax is
-		// irrelevant here: fill-bracket is gated to minimum-players-per-pool
-		// sizing by the state.ValidateExtraQualifiers call above, which now
-		// runs BEFORE this dispatch reads the setting.
-		pools, drawCourts, err = helper.BuildPoolPhaseFillBracket(players, comp.PoolSize, numCourts)
-		if err != nil {
-			// FillBracketPoolCount's own error already names the entrant
-			// count and minimum pool size, so it is wrapped as a clean,
-			// actionable *ValidationError (-> HTTP 400) rather than
-			// restated.
-			return nil, wrapValidationErrorf(err, "competition %s cannot start: %s", comp.ID, err.Error())
-		}
+	// A refusal is a *ValidationError (-> HTTP 400 at the generate-draw
+	// handler): the ones formPools raises are operator-actionable roster or
+	// config problems. The one that is NOT -- the "no pool has room" placement
+	// guard (assignUnseededByDojoTree) -- is an internal invariant check that
+	// cannot fire while sum(targetSizes) == len(players), which realTargetSizes
+	// guarantees. It is wrapped all the same, deliberately: the case is
+	// unreachable, so branching on it would be handling for something that
+	// cannot happen, and a 500 carrying the same "cannot place player X" text is
+	// no more actionable to an operator mid-tournament than a 400 is. What is NOT
+	// acceptable is a comment claiming the guard belongs to the actionable class:
+	// that is what would let a future writer add a genuine internal fault here and
+	// assume 400 was the considered answer.
+	pools, drawCourts, err := formPools(comp, players)
+	if err != nil {
+		return nil, wrapValidationErrorf(err, "competition %s cannot start: %s", comp.ID, err.Error())
+	}
+
+	helper.NumberPools(pools, comp.EffectiveNumberPrefix())
+	hasRounds := createPoolMatches(comp, pools)
+
+	// Save pools. The refusals are all behind us (BEFORE the save, not after):
+	// every occurrence used to leave a pools.csv on disk for a draw that was
+	// explicitly refused, and the competition stays in setup, where DiscardDraw
+	// declines to clean it up (draw-ready only), so the artifact outlived the
+	// refusal (bc-dnst).
+	if err := e.store.SavePools(comp.ID, pools); err != nil {
+		return nil, err
+	}
+
+	// Per-court slot assignment (T150) + ceremony-block skipping
+	// (T151). Loads the tournament-level tuning (multiplier,
+	// opening / lunch blocks) so a missing tournament.md falls back
+	// to the function's documented defaults without aborting the
+	// pipeline.
+	tournament, err := e.store.LoadTournament()
+	if err != nil {
+		return nil, err
+	}
+
+	results, leagueSlots := layoutPoolMatches(comp, pools, drawCourts, hasRounds)
+	if comp.Format == state.CompFormatLeague {
+		results, _ = assignLeagueSlotTimesFrom(results, leagueSlots, comp, tournament, courtFloor)
 	} else {
-		// helper.BuildPoolPhaseTreeAwareWithMode, not plain
-		// helper.BuildPoolPhase (bc-dojo Phase 4): BuildPoolPhase's own
-		// poolWinners is FIXED at its documented default (2), for callers
-		// with no real qualifier count to hand. This engine always has a
-		// real one (comp.EffectivePoolWinners()), and for a poolFedKnockout
-		// competition a real extra-qualifiers mode too (only "" or
-		// "larger-pools" reach here -- fill-bracket already branched off
-		// above) -- calling the fixed-default function would score every
-		// candidate placement against the WRONG knockout tree whenever
-		// either real value differs from that default.
+		results, _ = assignPoolMatchSlotsFrom(results, comp, tournament, courtFloor)
+	}
+
+	numberPoolMatchesInPlayingOrder(results)
+	return results, e.store.SavePoolMatches(comp.ID, results)
+}
+
+// refuseUnformablePoolConfig refuses the settings no roster can fix, before
+// anything reads the players: formPools runs it for every caller, and
+// generatePools runs it earlier still, ahead of the seeds.
+func refuseUnformablePoolConfig(comp *state.Competition) error {
+	// PoolSize is the divisor in CreatePools; a zero or negative value would
+	// otherwise reach the guard in helper.CreatePools as a plain error mapped to
+	// HTTP 500. Refusing here makes an unset pool size a clean 400. (mp-ebgz)
+	if comp.PoolSize <= 0 {
+		return fmt.Errorf("pool size must be at least 1, got %d, set a pool size before starting", comp.PoolSize)
+	}
+
+	// bc-qual: ExtraQualifiers is only meaningful for "mixed" (pools feeding a
+	// knockout). The league format also forms pools but has a single implicit
+	// pool and no knockout, so a stored non-standard value on a league record (a
+	// hand-edited config.md, or a format switched outside the HTTP layer, which
+	// normalizePoolConfig would have zeroed) must not steer pool FORMATION.
+	// poolFedKnockout gates both the validation and the formation dispatch in
+	// formPools, and the two gates have to be the same expression. Validating before
+	// anything reads the value also reports an invalid setting as itself rather
+	// than as whatever formation error it happens to provoke.
+	poolFedKnockout := comp.Format == state.CompFormatMixed
+	if poolFedKnockout {
+		if err := state.ValidateExtraQualifiers(comp.ExtraQualifiers, comp.PoolSizeMode, comp.EffectivePoolWinners()); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// formPools forms the pool phase over players and refuses what the draw
+// refuses. It stores nothing and numbers nobody, and it is the one owner of
+// those rules for both callers: generatePools (the draw) and blankDraw (the
+// template's empty places), so the template cannot drift from the draw it
+// prints. An error is the reason alone; each caller adds its own prefix.
+//
+// The pool-formation steps are shared with cmd/create-pools.go
+// (helper.BuildPoolPhase's doc comment carries the four ordering constraints;
+// BuildPoolPhaseTreeAwareWithMode's covers the mode-aware entry point called
+// here). drawCourts is what comes back, not what went in: a shiaijo with no
+// home pool would own an empty bracket region, so the count steps down to what
+// the pools can carry, and everything downstream (AssignPoolsToCourts, the seed
+// spread) reads THAT. The raw allocation stays the single-pool league spread's,
+// which really does use every shiaijo the league was given.
+func formPools(comp *state.Competition, players []domain.Player) (pools []helper.Pool, drawCourts int, err error) {
+	if err := refuseUnformablePoolConfig(comp); err != nil {
+		return nil, 0, err
+	}
+	poolFedKnockout := comp.Format == state.CompFormatMixed
+
+	// numCourts is the competition's RAW shiaijo allocation, normalised: an unset
+	// court list means one unnamed court.
+	numCourts := max(len(comp.Courts), 1)
+
+	if poolFedKnockout && comp.ExtraQualifiers == state.ExtraQualifiersFillBracket {
+		// bc-qual LP-4: pool COUNT comes from a different formation objective
+		// (helper.FillBracketPoolCount) than the standard min-mode
+		// floor(n/PoolSize). isMax is irrelevant here: fill-bracket is gated to
+		// minimum-players-per-pool sizing by state.ValidateExtraQualifiers above.
+		pools, drawCourts, err = helper.BuildPoolPhaseFillBracket(players, comp.PoolSize, numCourts)
+	} else {
+		// BuildPoolPhaseTreeAwareWithMode, not plain helper.BuildPoolPhase
+		// (bc-dojo Phase 4): BuildPoolPhase's poolWinners is FIXED at its
+		// documented default (2). This always has a real one, and for a
+		// poolFedKnockout competition a real extra-qualifiers mode too, and
+		// scoring each candidate placement against the WRONG knockout tree is
+		// what the fixed default would do whenever either differs.
 		//
-		// extraQualifiers is forced to standard for a non-poolFedKnockout
-		// format regardless of what comp.ExtraQualifiers holds, mirroring
-		// the same rule poolFedKnockout's own doc comment states: a stored
-		// non-standard value on a league/swiss/knockout record must never
-		// steer pool FORMATION.
+		// extraQualifiers is forced to standard for a non-poolFedKnockout format
+		// regardless of what comp.ExtraQualifiers holds, so a stored non-standard
+		// value on a league/swiss/knockout record never steers pool FORMATION.
 		extraQualifiers := state.ExtraQualifiersNone
 		if poolFedKnockout {
 			extraQualifiers = comp.ExtraQualifiers
 		}
-		pools, drawCourts, err = helper.BuildPoolPhaseTreeAwareWithMode(players, comp.PoolSize, isMax, numCourts, comp.EffectivePoolWinners(), extraQualifiers)
-		if err != nil {
-			// Wrapped as a *ValidationError (-> HTTP 400 at the
-			// generate-draw handler), matching the fill-bracket branch
-			// above. Two of the three errors this call can return are
-			// operator-actionable roster/config problems: formation
-			// (poolTargetSizes) and the blank-name/blank-dojo pre-flight
-			// (helper.ErrBlankNameInDraw / helper.ErrBlankDojoInDraw,
-			// bc-dojo-least-conflicted-pool FIX 1).
-			//
-			// The third is NOT, and this comment used to say it was. The
-			// "no pool has room" placement guard (assignUnseededByDojoTree)
-			// is an internal invariant check whose own comment states it
-			// cannot fire while sum(targetSizes) == len(players), which
-			// realTargetSizes guarantees. If it ever did fire, a 400 would
-			// blame the operator for an engine fault and they would edit the
-			// roster to no effect.
-			//
-			// It is still wrapped, deliberately: the case is unreachable, so
-			// branching on it would be handling for something that cannot
-			// happen, and a 500 carrying the same "cannot place player X"
-			// text is no more actionable to an operator mid-tournament than
-			// a 400 is. What is NOT acceptable is the comment claiming the
-			// guard belongs to the actionable class -- that is what would
-			// let a future writer add a genuine internal fault here and
-			// assume 400 was the considered answer.
-			return nil, wrapValidationErrorf(err, "competition %s cannot start: %s", comp.ID, err.Error())
-		}
+		pools, drawCourts, err = helper.BuildPoolPhaseTreeAwareWithMode(players, comp.PoolSize, comp.PoolSizeMode == "max", numCourts, comp.EffectivePoolWinners(), extraQualifiers)
+	}
+	if err != nil {
+		return nil, 0, err
 	}
 
-	// A "mixed" competition is "Pools + Knockout" by definition, a single
-	// pool collapses to a round-robin with a tacked-on 2-player "final", which
-	// is the same shape as `league` and is NOT what an operator picking
-	// "mixed" intends. Refuse to start a mixed competition whose participant
-	// count + PoolSize would produce fewer than 2 pools, so the operator can
-	// either reduce PoolSize, add participants, or switch to `league` format.
-	// (league/swiss legitimately produce 1 pool, exempted.)
-	if comp.Format == state.CompFormatMixed {
+	// A "mixed" competition is "Pools + Knockout" by definition, a single pool
+	// collapses to a round-robin with a tacked-on 2-player "final", which is the
+	// same shape as `league` and is NOT what an operator picking "mixed"
+	// intends. Refuse a mixed competition whose participant count + PoolSize
+	// would produce fewer than 2 pools, so the operator can reduce PoolSize, add
+	// participants, or switch to `league`. (league legitimately produces 1 pool.)
+	if poolFedKnockout {
 		if len(pools) < 2 {
-			return nil, validationErrorf("mixed (Pools + Knockout) competition %s requires at least 2 pools, got %d with %d participants at PoolSize=%d; reduce PoolSize, add participants, or change format to league", comp.ID, len(pools), len(players), comp.PoolSize)
+			return nil, 0, fmt.Errorf("a Pools + Knockout competition needs at least 2 pools, but %d participants at %d players per pool make %d; lower Players per pool, add participants, or change the format to League", len(players), comp.PoolSize, len(pools))
 		}
 		// Every pool must be able to supply PoolWinners finishers to the knockout.
 		// In "max" mode an odd participant count can leave an under-filled last
-		// pool (e.g. PoolSize=2 with 3 players → pools of 2 and 1); with the
-		// default PoolWinners=2 that 1-player pool could never produce a 2nd-place
-		// finisher, and ResolveQualifiedPools would later fail mid-tournament
-		// ("only N ranked finishers"). Catch it here so the operator gets an
-		// actionable error BEFORE any match is played.
+		// pool (PoolSize=2 with 3 players gives pools of 2 and 1); with the default
+		// PoolWinners=2 that 1-player pool could never produce a 2nd-place
+		// finisher, and ResolveQualifiedPools would later fail mid-tournament.
+		// Catch it BEFORE any match is played.
 		poolWinners := comp.EffectivePoolWinners()
 		for _, p := range pools {
 			if len(p.Players) < poolWinners {
-				return nil, validationErrorf("mixed (Pools + Knockout) competition %s: pool %q has only %d participant(s) but %d advance to the knockout (PoolWinners=%d), every pool needs at least PoolWinners participants; reduce PoolWinners, adjust PoolSize/pool-size-mode, or add participants", comp.ID, p.PoolName, len(p.Players), poolWinners, poolWinners)
+				return nil, 0, fmt.Errorf("pool %q has only %d participant(s) but %d advance to the knockout, so every pool needs at least %d; lower Winners per pool, change Players per pool or Pool size is a, or add participants", p.PoolName, len(p.Players), poolWinners, poolWinners)
 			}
 		}
-		// bc-qual LP-3c's defense-in-depth ValidateExtraQualifiers check used
-		// to sit here. It has moved ABOVE the pool-formation dispatch (see
-		// poolFedKnockout): a check that a formation branch cites as its own
-		// precondition cannot run after that branch has already formed the
-		// pools.
 	}
 
-	helper.NumberPools(pools, comp.EffectiveNumberPrefix())
+	// A one-pool competition on several shiaijo needs enough players to keep
+	// them all busy.
+	if len(pools) == 1 && numCourts > 1 {
+		if err := ValidateCourtCount(len(players), numCourts); err != nil {
+			return nil, 0, err
+		}
+	}
+	return pools, drawCourts, nil
+}
 
-	hasRounds := false
+// createPoolMatches fills each pool's matches by the competition's pool format
+// (partial, round robin or full) and reports whether they carry a round.
+func createPoolMatches(comp *state.Competition, pools []helper.Pool) (hasRounds bool) {
 	switch comp.PoolFormat {
 	case state.PoolFormatPartial:
 		helper.CreatePartialPoolMatches(pools)
-		hasRounds = true
+		return true
 	default:
 		// PoolFormatFull (default / unset) and any unrecognized value fall
 		// through to the legacy code path. RoundRobin remains the inner
 		// switch for backward compatibility (FR-052, R9).
 		if comp.RoundRobin {
 			helper.CreatePoolRoundRobinMatches(pools)
-			hasRounds = true
-		} else {
-			helper.CreatePoolMatches(pools)
+			return true
 		}
+		helper.CreatePoolMatches(pools)
+		return false
 	}
+}
 
-	// BEFORE the save, not after. This refusal is a normal operator flow now
-	// that it answers 400 rather than crashing, and every occurrence used to
-	// leave a pools.csv on disk for a draw that was explicitly refused: the
-	// competition stays in setup, where DiscardDraw declines to clean it up
-	// (draw-ready only), so the artifact outlives the refusal. Every input the
-	// check needs is already in hand here (bc-dnst).
-	if len(pools) == 1 && numCourts > 1 {
-		if err := ValidateCourtCount(len(players), numCourts); err != nil {
-			// Same prefix as this function's three other refusals: the
-			// operator sees these side by side and a bare sentence here read
-			// as coming from somewhere else entirely.
-			return nil, wrapValidationErrorf(err, "competition %s cannot start: %s", comp.ID, err.Error())
-		}
-	}
-
-	// Save pools
-	if err := e.store.SavePools(comp.ID, pools); err != nil {
-		return nil, err
-	}
-
-	// drawCourts, derived above, is reused rather than recomputed: this
-	// allocation, the seed spread and the deinterleave are one layout and a
-	// second derivation is a second thing to keep in step.
+// layoutPoolMatches lays the pools' matches out as the draw stores them, before
+// any start time: each with its pool's shiaijo (drawCourts is what formPools
+// returned, reused rather than recomputed because the allocation, the seed
+// spread and the deinterleave are one layout), a league's order and slots from
+// the league scheduler, a single pool on several shiaijo spread by round. The
+// slots are the league scheduler's, which assignLeagueSlotTimesFrom reads; nil
+// for every other format. generatePools (which then times and numbers the
+// matches) and the template's blankDraw both call it, so the Pool Matches sheet
+// prints the order and the shiaijo the draw would.
+func layoutPoolMatches(comp *state.Competition, pools []helper.Pool, drawCourts int, hasRounds bool) (results []state.MatchResult, leagueSlots []int) {
 	courtAssign := helper.AssignPoolsToCourts(len(pools), drawCourts)
-
-	var results []state.MatchResult
 	for pi, p := range pools {
 		poolCourts := []string{""}
 		if len(comp.Courts) > 0 {
@@ -263,21 +251,11 @@ func (e *Engine) generatePools(comp *state.Competition, players []domain.Player,
 				Status:  state.MatchStatusScheduled,
 				Court:   poolCourts[i%len(poolCourts)],
 				Round:   round,
-				// ScheduledAt is populated below by
-				// assignPoolMatchSlotsFrom, uniform start times were
+				// ScheduledAt is populated by the caller
+				// (assignPoolMatchSlotsFrom), uniform start times were
 				// retired in T150.
 			})
 		}
-	}
-
-	// Per-court slot assignment (T150) + ceremony-block skipping
-	// (T151). Loads the tournament-level tuning (multiplier,
-	// opening / lunch blocks) so a missing tournament.md falls back
-	// to the function's documented defaults without aborting the
-	// pipeline.
-	tournament, err := e.store.LoadTournament()
-	if err != nil {
-		return nil, err
 	}
 
 	if comp.Format == state.CompFormatLeague {
@@ -285,41 +263,33 @@ func (e *Engine) generatePools(comp *state.Competition, players []domain.Player,
 		// nobody fights two slots in a row, and keep all courts in a slot
 		// strictly time-aligned. This replaces the round-position court
 		// assignment + per-court slot cursors used by the other single-pool
-		// paths. The runtime simultaneity gate
-		// (checkSimultaneousMatchTx) remains the defense-in-depth
-		// backstop at match start.
+		// paths. The runtime simultaneity gate (checkSimultaneousMatchTx)
+		// remains the defense-in-depth backstop at match start.
 		// scheduleLeagueSlots treats an empty court list as one unnamed court.
-		var slots []int
-		results, slots = scheduleLeagueSlots(results, comp.Courts)
-		results, _ = assignLeagueSlotTimesFrom(results, slots, comp, tournament, courtFloor)
-	} else {
-		// For single-pool multi-court, distribute each round's matches across
-		// courts so that simultaneous matches never share a participant.
-		// When a round has more matches than courts (e.g. 6 players / 2
-		// courts → 3 matches per round), the extra match is queued on the
-		// same court and runs sequentially; the runtime simultaneity gate
-		// (checkSimultaneousMatchTx) prevents double-booking at match
-		// start.
-		if len(pools) == 1 && len(comp.Courts) > 1 {
-			sort.SliceStable(results, func(i, j int) bool {
-				return results[i].Round < results[j].Round
-			})
-			roundStart := 0
-			currentRound := -1
-			for i := range results {
-				if results[i].Round != currentRound {
-					currentRound = results[i].Round
-					roundStart = 0
-				}
-				results[i].Court = comp.Courts[roundStart%len(comp.Courts)]
-				roundStart++
-			}
-		}
-		results, _ = assignPoolMatchSlotsFrom(results, comp, tournament, courtFloor)
+		return scheduleLeagueSlots(results, comp.Courts)
 	}
-
-	numberPoolMatchesInPlayingOrder(results)
-	return results, e.store.SavePoolMatches(comp.ID, results)
+	// For single-pool multi-court, distribute each round's matches across
+	// courts so that simultaneous matches never share a participant. When a
+	// round has more matches than courts (e.g. 6 players / 2 courts gives 3
+	// matches per round), the extra match is queued on the same court and runs
+	// sequentially; the runtime simultaneity gate (checkSimultaneousMatchTx)
+	// prevents double-booking at match start.
+	if len(pools) == 1 && len(comp.Courts) > 1 {
+		sort.SliceStable(results, func(i, j int) bool {
+			return results[i].Round < results[j].Round
+		})
+		roundStart := 0
+		currentRound := -1
+		for i := range results {
+			if results[i].Round != currentRound {
+				currentRound = results[i].Round
+				roundStart = 0
+			}
+			results[i].Court = comp.Courts[roundStart%len(comp.Courts)]
+			roundStart++
+		}
+	}
+	return results, nil
 }
 
 // numberPoolMatchesInPlayingOrder gives each pool's bouts their ids in the

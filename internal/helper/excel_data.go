@@ -215,6 +215,102 @@ func AddDataToSheetForExport(f *excelize.File, pools []Pool, namesToPrintPlayers
 	return AddPoolDataToSheet(f, pools, sanitize, titlePrefix)
 }
 
+// emptyTextFormula is the formula ="", the one form of an empty cell that a
+// formula referring to it reads as empty text. A cell excelize writes as an
+// empty value (SetCellValue or SetCellStr with "", an empty shared string) or
+// never writes at all is an EMPTY cell, which a reference such as =Data!$B$3
+// reads as 0 when LibreOffice renders it: every name formula on the pool and
+// elimination sheets would print "0". Measured through LibreOffice 25 (its CSV
+// export of a recalculated sheet): the empty value and the empty string both
+// read "0", ="" reads blank. excelize's own CalcCellValue reads all three as
+// "", so it cannot tell them apart.
+const emptyTextFormula = `""`
+
+// BlankCellsHolding rewrites, on every sheet of f, each cell whose written value
+// is one of texts, so it shows empty text. On the Data sheet the cell becomes
+// emptyTextFormula; on any other sheet it becomes a reference to the Data cell
+// that holds the same text, so a name typed on the Data sheet later shows
+// there too. A cell that holds a formula is left alone: what it shows is
+// whatever it refers to. A text the Data sheet does not hold becomes
+// emptyTextFormula wherever it is printed.
+//
+// It is the blank layout's one blanking step (engine.blankLayoutXlsx): the
+// layout is drawn over empty places that carry stand-in names and dojos
+// through the generators (which refuse a blank name or dojo, and read an empty
+// bracket side as a bye), and this step then blanks every cell that printed one
+// as a value. On the Data sheet that is each place's name, dojo and display name
+// cell, which every pool and elimination sheet refers to by formula; any sheet
+// that printed a stand-in as a value of its own (a knockout tree's first-round
+// names, a Kachinuki Detail section's team names) now refers to that Data cell
+// too, so a name typed there shows on every sheet, tree pages included.
+func BlankCellsHolding(f *excelize.File, texts map[string]bool) error {
+	home, err := dataSheetHomes(f, texts)
+	if err != nil {
+		return err
+	}
+	for _, sheet := range f.GetSheetList() {
+		rows, err := f.GetRows(sheet, excelize.Options{RawCellValue: true})
+		if err != nil {
+			return fmt.Errorf("blank cells: read %s: %w", sheet, err)
+		}
+		for r, row := range rows {
+			for c, value := range row {
+				if !texts[value] {
+					continue
+				}
+				cell, err := excelize.CoordinatesToCellName(c+1, r+1)
+				if err != nil {
+					return fmt.Errorf("blank cells: %s row %d column %d: %w", sheet, r+1, c+1, err)
+				}
+				formula, err := f.GetCellFormula(sheet, cell)
+				if err != nil {
+					return fmt.Errorf("blank cells: read %s!%s: %w", sheet, cell, err)
+				}
+				if formula != "" {
+					continue
+				}
+				formula = emptyTextFormula
+				if ref, ok := home[value]; ok && sheet != SheetData {
+					formula = ref
+				}
+				// The cell still holds its shared-string index as the formula's
+				// cached value, which a reader that does not recalculate shows;
+				// empty it first so the cache is empty text.
+				if err := f.SetCellDefault(sheet, cell, ""); err != nil {
+					return fmt.Errorf("blank cells: clear %s!%s: %w", sheet, cell, err)
+				}
+				if err := f.SetCellFormula(sheet, cell, formula); err != nil {
+					return fmt.Errorf("blank cells: write %s!%s: %w", sheet, cell, err)
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// dataSheetHomes maps each of texts to the formula that reads the Data sheet
+// cell holding it (the first one, top to bottom).
+func dataSheetHomes(f *excelize.File, texts map[string]bool) (map[string]string, error) {
+	rows, err := f.GetRows(SheetData, excelize.Options{RawCellValue: true})
+	if err != nil {
+		return nil, fmt.Errorf("blank cells: read %s: %w", SheetData, err)
+	}
+	home := make(map[string]string, len(texts))
+	for r, row := range rows {
+		for c, value := range row {
+			if _, seen := home[value]; !texts[value] || seen {
+				continue
+			}
+			cell, err := excelize.CoordinatesToCellName(c+1, r+1, true)
+			if err != nil {
+				return nil, fmt.Errorf("blank cells: %s row %d column %d: %w", SheetData, r+1, c+1, err)
+			}
+			home[value] = sheetRef(SheetData, cell)
+		}
+	}
+	return home, nil
+}
+
 // poolDrawColumnCount is the fixed number of columns on the Pool Draw sheet.
 // Columns B, D, F (indices 2, 4, 6) are the three pool columns.
 const poolDrawColumnCount = 3

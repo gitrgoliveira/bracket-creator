@@ -203,9 +203,15 @@ func TestBuildResultsWorkbook_IncompleteAllFormats(t *testing.T) {
 			f, err := excelize.OpenReader(bytes.NewReader(data))
 			require.NoError(t, err, "incomplete %s export must be a valid xlsx", tc.format)
 			defer f.Close()
-			assert.Contains(t, f.GetSheetList(), helper.SheetPoolMatches)
-			// No leftover formula may collapse to an Excel error in a 0-scored export.
-			assertNoBrokenFormulas(t, f, helper.SheetPoolMatches)
+			// A knockout-only competition has no pool phase, so the shared
+			// pipeline deletes its empty pool sheets (RenderCompetitionWorkbook).
+			if tc.format == state.CompFormatKnockout {
+				assert.NotContains(t, f.GetSheetList(), helper.SheetPoolMatches)
+			} else {
+				assert.Contains(t, f.GetSheetList(), helper.SheetPoolMatches)
+				// No leftover formula may collapse to an Excel error in a 0-scored export.
+				assertNoBrokenFormulas(t, f, helper.SheetPoolMatches)
+			}
 			assertNoBrokenFormulas(t, f, helper.SheetEliminationMatches)
 		})
 	}

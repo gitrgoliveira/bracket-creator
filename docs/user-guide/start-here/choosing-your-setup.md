@@ -6,7 +6,7 @@ Two questions shape every tournament you run with bracket-creator. First, how di
 
 How far you digitise determines which surfaces you use on the day. The same toolkit scales from a fully printed event to a fully online one. Pick the level that matches your venue and equipment.
 
-- **Offline.** Runs without the internet or any networked device at the courts. Generate the brackets and score sheets as an Excel file, print them, and run the whole day on paper. *Needs:* an A4 printer, and an A3 printer for the name sheets. Refer to [If you print your brackets instead](first-tournament.md#if-you-print-your-brackets-instead).
+- **Offline.** Runs without the internet or any networked device at the courts. Prepare the draw in the tournament app on one laptop, print the brackets and score sheets from it, and run the whole day on paper. *Needs:* a laptop with LibreOffice for the PDF export (or, with Docker, the `bracket-creator-mobile-pdf` image), an A4 printer, and an A3 printer for the name sheets. Refer to [If you print your brackets instead](first-tournament.md#if-you-print-your-brackets-instead).
 - **Partially connected.** Internet is available but there are no display screens. One device per shiai-jo keeps every court in sync, through the tournament app or a shared Google Sheet. The tournament app needs only the venue's local network, not the internet; the Google Sheet needs the internet. Some printed material is still needed for scoreboards and competitors. *Needs:* one device per shiai-jo. Refer to [Run a tournament](../organisers/run-tournament.md).
 - **Fully digital.** On-screen scoreboards and real-time mobile pages show scores and standings to everyone in the hall. Organisers still print competitor tags and numbers. *Needs:* a device and monitor per shiai-jo, plus network access for competitors. Refer to [Host the tournament app](../install/hosting.md).
 
@@ -20,7 +20,7 @@ The following table maps common event configurations to the right starting point
 
 | Scenario | Digitisation | Who scores | Start here |
 |---|---|---|---|
-| Print and run on paper | Offline | Staff | [Generate brackets](../organisers/web-ui.md) |
+| Print and run on paper | Offline | Staff | [Print from the app](first-tournament.md#if-you-print-your-brackets-instead) |
 | Officiated event | Partial or full | Staff | [Run a tournament](../organisers/run-tournament.md) |
 | Self-run event | Partial or full | Competitors | [Run a tournament](../organisers/run-tournament.md) and [Operating modes](../organisers/operating-modes.md) |
 

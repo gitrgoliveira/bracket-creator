@@ -26,6 +26,7 @@ const DIRECT_WRITES = {
   updateCompetition: () => API.updateCompetition('c1', { name: 'C' }, PW),
   exportPDFs: () => API.exportPDFs('all', PW),
   exportResults: () => API.exportResults('c1', PW),
+  exportDrawTemplate: () => API.exportDrawTemplate('c1', PW),
   startCompetition: () => API.startCompetition('c1', PW),
   generateDraw: () => API.generateDraw('c1', PW),
   discardDraw: () => API.discardDraw('c1', PW),
@@ -50,7 +51,7 @@ const DIRECT_WRITES = {
 };
 
 // The direct calls that change nothing: they say "Not sent", not "may have been saved".
-const READ_ONLY = new Set(['exportPDFs', 'exportResults', 'planRestore']);
+const READ_ONLY = new Set(['exportPDFs', 'exportResults', 'exportDrawTemplate', 'planRestore']);
 
 describe('a direct write that cannot be sent says one sentence', () => {
   let originalFetch;
@@ -170,7 +171,8 @@ describe('a direct write that cannot be sent says one sentence', () => {
       }
       const near = src.slice(i, i + 4).join(' ');
       // _backupRequest sends a GET bare and any other method through _directFetch.
-      if (method && (line.includes('_directFetch(') || (line.includes('_backupRequest(') && /method:\s*'(POST|PUT|PATCH|DELETE)'/.test(near)))) sends.add(method);
+      // _downloadWorkbook is a GET sent through _directFetch for the methods that call it.
+      if (method && (line.includes('_directFetch(') || line.includes('_downloadWorkbook(') || (line.includes('_backupRequest(') && /method:\s*'(POST|PUT|PATCH|DELETE)'/.test(near)))) sends.add(method);
     }
     // The scan read every piece: it found each member of API, and nothing else.
     expect([...members].sort()).toEqual(Object.keys(API).sort());

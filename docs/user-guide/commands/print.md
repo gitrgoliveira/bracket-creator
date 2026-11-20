@@ -26,6 +26,12 @@ Provide **exactly one**:
       nothing to lay out on a printed sheet yet. To follow a Swiss
       competition on the day, use the live standings view in the tournament
       app instead.
+    - A competition with no draw yet and fewer than two places to print (no
+      expected number of participants and fewer than two registered), or
+      whose settings cannot form a draw for the places it would print. The
+      warning names the fix, for example setting its expected number of
+      participants. A competition with no draw that can be sized prints as
+      empty places instead, with no names, seeds or numbers.
     - A competition whose stored bracket no longer matches its current
       settings cannot be rendered until the draw is regenerated or
       the settings are restored. That happens, for example, when the qualifier count was changed after the

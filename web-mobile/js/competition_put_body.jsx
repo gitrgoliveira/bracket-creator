@@ -460,7 +460,10 @@ export function settingsPutBody(base, edits, configVersion) {
 // into the client's held competition copy. Handles omitempty fields where the
 // server's answer omits keys (e.g. expectedParticipants: 0, or a missing
 // configVersion, which keeps the held one). Knowledge of which fields are omitempty lives here next to
-// the body builder.
+// the body builder. `rosterShuffled` (the shuffle marker, omitempty) rides the
+// answer's spread like any stored field; a Settings body never carries it
+// (settingsPutBody names its fields), so a Settings save neither sets nor
+// clears it.
 export function mergeSavedCompetition(held, answer, sent) {
   const merged = { ...held, ...answer };
   if (!("expectedParticipants" in (answer || {}))) {

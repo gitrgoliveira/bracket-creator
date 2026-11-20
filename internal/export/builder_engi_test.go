@@ -513,6 +513,52 @@ func TestBuildResultsWorkbook_EngiKikenMarkPlacement(t *testing.T) {
 	assert.Equal(t, 1, found, "exactly one Kiken mark")
 }
 
+// TestBuildResultsWorkbook_EngiKikenAfterFlagsKeepsTheCountANumber: a pair that
+// struck flags and then withdrew keeps its flag count in the cell as a NUMBER
+// (the engi standings formulas count flags through ISNUMBER and N, and read text
+// as nothing), while the cell still shows the count with its mark.
+func TestBuildResultsWorkbook_EngiKikenAfterFlagsKeepsTheCountANumber(t *testing.T) {
+	t.Parallel()
+	dir, store, eng, compID := testSetup(t)
+	defer os.RemoveAll(dir)
+
+	markCompAsEngi(t, store, compID)
+	require.NoError(t, store.SavePools(compID, makeEngiPools()))
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{{
+		ID: "Pool A-0", SideA: "Member One A", SideAID: "pair1", SideB: "Member One B", SideBID: "pair2",
+		FlagsA: 0, FlagsB: 2, Decision: "kiken-voluntary", Status: state.MatchStatusCompleted,
+		Winner: "Member One A", WinnerID: "pair1",
+	}}))
+
+	data, err := BuildResultsWorkbook(store, eng, compID)
+	require.NoError(t, err)
+	f, err := excelize.OpenReader(bytes.NewReader(data))
+	require.NoError(t, err)
+	defer f.Close()
+
+	rows, err := f.GetRows(helper.SheetPoolMatches)
+	require.NoError(t, err)
+	found := 0
+	for r, row := range rows {
+		for c, cell := range row {
+			if cell != "2 Kiken" {
+				continue
+			}
+			found++
+			name, err := excelize.CoordinatesToCellName(c+1, r+1)
+			require.NoError(t, err)
+			raw, err := f.GetCellValue(helper.SheetPoolMatches, name, excelize.Options{RawCellValue: true})
+			require.NoError(t, err)
+			assert.Equal(t, "2", raw, "the cell holds the number 2, shown with its mark")
+			typ, err := f.GetCellType(helper.SheetPoolMatches, name)
+			require.NoError(t, err)
+			// excelize writes a number cell with no type attribute.
+			assert.Contains(t, []excelize.CellType{excelize.CellTypeNumber, excelize.CellTypeUnset}, typ, "a flag count is a number, whatever mark rides beside it")
+		}
+	}
+	assert.Equal(t, 1, found, "the withdrawing pair's cell reads 2 Kiken")
+}
+
 // TestBuildResultsWorkbook_EngiPartialPoolScoring characterizes partial scoring:
 // two engi pools, only pool A is scored (FlagsA=3, FlagsB=2). Pool B is left
 // untouched. The export must succeed and the scored flags must appear in the Pool

@@ -11,6 +11,7 @@ import { publishHeight } from './published_height.jsx';
 import { tournamentHasCheckIn } from './competition_shape.jsx';
 import { useLatestRef } from './latest_ref.jsx';
 import { whenConfirmed } from './unsaved_entries.jsx';
+import { downloadBlob } from './blob_download.jsx';
 import { Icon } from './icon.jsx';
 import { andList } from './list_phrase.jsx';
 
@@ -753,20 +754,9 @@ function ExportPdfModal({ tournament, password, comps, onClose, showToast }) {
     try {
       const { blob, skipped: sk } = await window.API.exportPDFs(type, password);
       setSkipped(sk);
-      const dlUrl = window.URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = dlUrl;
       const stem = (tournament && tournament.name ? tournament.name : "tournament")
         .replace(/[^\w]+/g, "_").replace(/^_+|_+$/g, "") || "tournament";
-      a.download = `${stem}_${type}_pdfs.zip`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      // Delay revoke so the browser initiates the download before the blob URL
-      // is torn down. Guard against a torn-down context: in a real browser
-      // window is always present, but in unit-test teardown this fire-and-forget
-      // timer can outlive the jsdom window and would otherwise throw uncaught.
-      setTimeout(() => { if (typeof window !== "undefined" && window.URL) window.URL.revokeObjectURL(dlUrl); }, 100);
+      downloadBlob(blob, `${stem}_${type}_pdfs.zip`);
       if (showToast) showToast("PDFs generated. Download started.");
     } catch (err) {
       // The all-skipped 422 lands here (exportPDFs throws rather than

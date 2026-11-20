@@ -8,6 +8,8 @@ import { seededRanks } from './admin_helpers.jsx';
 import { NO_ID_HINT, DataIssueBanner, rosterUnreadableIssues } from './data_integrity.jsx';
 import { NumberedName } from './numbered_name.jsx';
 import { Icon } from './icon.jsx';
+import { canShuffleUnseeded } from './competition_shape.jsx';
+import { downloadBlob } from './blob_download.jsx';
 import { useOpenedTapGuard } from './tap_guard.jsx';
 import { PillButton } from './competition_fields.jsx';
 import { useUnsavedInput } from './app_version.jsx';
@@ -602,7 +604,11 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
   // writes one. A `replace` (Apply changes, a whole pasted list) is not laid
   // on a roster its operator never saw: its refusal is handed back for the
   // caller to tell. Resolves with onUpdate's answer; rejects with its refusal.
-  const putRoster = (build, { replace = false } = {}) => {
+  // A `shuffled` write (Shuffle unseeded) carries `rosterShuffled: true` on
+  // every attempt, a retry after roster_changed included: the server records
+  // the shuffle only when the roster it travels with lands, and the answer's
+  // stored competition carries the marker back to the page.
+  const putRoster = (build, { replace = false, shuffled = false } = {}) => {
     const upTo = typedSeqRef.current;
     const send = async () => {
       for (let attempt = 1; ; attempt += 1) {
@@ -611,7 +617,10 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
         if (!players) return undefined;
         const before = rosterRef.current;
         try {
-          const answer = await onUpdate({ ...before, players, rosterVersion: version });
+          const answer = await onUpdate({
+            ...before, players, rosterVersion: version,
+            ...(shuffled ? { rosterShuffled: true } : {}),
+          });
           // The host shows the PUT's stored answer, and then its refetch,
           // before the save resolves (updateCompetition, m10), so the next PUT
           // is built from what the page shows (stage 6 review 11, A). Only a
@@ -719,9 +728,9 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
     let shuffledAny = false;
     try {
       await putRoster((players) => {
+        if (!canShuffleUnseeded(players)) return null;
         const np = [...players];
         const unseeded = np.filter(p => !p.seed);
-        if (unseeded.length < 2) return null;
         for (let i = unseeded.length - 1; i > 0; i--) {
           const j = Math.floor(Math.random() * (i + 1));
           [unseeded[i], unseeded[j]] = [unseeded[j], unseeded[i]];
@@ -729,7 +738,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
         let uIdx = 0;
         shuffledAny = true;
         return np.map(p => p.seed ? p : unseeded[uIdx++]);
-      });
+      }, { shuffled: true });
     } catch (err) {
       console.error("AdminParticipants: shuffleUnseeded PUT failed", err);
       // updateCompetition already toasted the error; don't double-toast
@@ -999,18 +1008,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
   const downloadTemplate = () => {
     const content = participantTemplateCSV(c);
     const blob = new Blob([content], { type: "text/csv" });
-    // Create and revoke both via window.URL, consistent with admin_shell.jsx /
-    // admin_schedule_export.jsx and the unit-test mocks on window.URL.
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "participants_template.csv";
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    // Delay revoke so the browser initiates the download before the blob URL is
-    // torn down (matches admin_shell.jsx); guard the timer against jsdom teardown.
-    setTimeout(() => { if (typeof window !== "undefined" && window.URL) window.URL.revokeObjectURL(url); }, 100);
+    downloadBlob(blob, "participants_template.csv");
   };
 
   const isSetup = !c.status || c.status === "setup";

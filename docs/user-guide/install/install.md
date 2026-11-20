@@ -1,10 +1,10 @@
 # Install
 
-Docker is the recommended way to run bracket-creator on every platform. You can also install with Homebrew, Linux packages (`.deb`, `.rpm`, `.apk`), a pre-compiled binary, Go, or a source build.
+bracket-creator runs in Docker on every platform. You can also install it with Homebrew, Linux packages (`.deb`, `.rpm`, `.apk`), a pre-compiled binary, Go, or a source build.
 
 The following sections describe each method, with [Upgrading](#upgrading) notes at the end.
 
-## Docker (recommended)
+## Docker
 
 Three multi-architecture (amd64 and arm64) images are published to the GitHub Container Registry:
 
@@ -59,7 +59,7 @@ brew install bracket-creator
 
 `brew trust` marks the tap as trusted, which Homebrew requires before installing from a third-party tap. Update later with `brew upgrade bracket-creator`. The formula (in the [gitrgoliveira/homebrew-tap](https://github.com/gitrgoliveira/homebrew-tap) repository) builds from source. Building it needs a C toolchain (the Xcode Command Line Tools on macOS or `build-essential` on Linux) and network access for Go module downloads.
 
-The single binary bundles every subcommand, including `bracket-creator serve` (web UI) and `bracket-creator mobile-app` (tournament app).
+The single binary bundles every subcommand, including `bracket-creator serve` (Legacy Web UI) and `bracket-creator mobile-app` (tournament app).
 
 ## Linux packages (deb, rpm, apk)
 

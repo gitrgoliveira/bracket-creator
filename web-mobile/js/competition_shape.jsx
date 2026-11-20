@@ -113,15 +113,6 @@ export const POOL_FORMAT_OPTIONS = [
   { value: POOL_FORMAT_PARTIAL, label: "Partial / neighbour-only", hint: "Each participant plays a neighbourhood subset: useful when a full round-robin would not fit in the day's schedule." },
 ];
 
-// resolveFormat: a stored "" format is a knockout, as
-// state.Competition.EffectiveFormat (internal/state/models.go) reads it; ""
-// is a legitimate stored value, which the write doors accept. buildXlsxBody
-// (admin_schedule_export.jsx) is its one caller: the other surfaces that
-// branch on the format compare the stored value.
-export function resolveFormat(format) {
-  return format || FORMAT_KNOCKOUT;
-}
-
 // resolvePoolFormat: a stored/legacy "" means "full" -- the engine's own
 // unset default (internal/engine/pools.go's `switch comp.PoolFormat`
 // falls through to the full round-robin arm). Both screens need this to
@@ -468,6 +459,15 @@ export function tournamentHasCheckIn(tournament) {
 // Whether a competition's check-in setting counts: set, in a tournament that has check-in.
 export function checkInApplies(tournament, checkInEnabled) {
   return !!checkInEnabled && tournamentHasCheckIn(tournament);
+}
+// Whether "Shuffle unseeded" (Participants) can change anything: it reorders
+// the unseeded competitors only, so it needs at least two of them, and sends
+// nothing below that. The one owner of that rule, asked by the shuffle's own
+// guard and by the Export tab's never-shuffled warning, so the warning never
+// asks for a shuffle that would do nothing. Unseeded is no seed rank, the
+// shuffle's own test (normalizeCompetitionDetail maps "not seeded" to null).
+export function canShuffleUnseeded(players) {
+  return (players || []).filter((p) => p && !p.seed).length >= 2;
 }
 export const LABEL_NUMBER_PREFIX = "Player number prefix";
 // bc-pnum F12: one hint shared by the create form and the settings form, so

@@ -416,6 +416,19 @@ type Competition struct {
 	WithZekkenName    bool              `yaml:"with_zekken_name" json:"withZekkenName"`
 	NumberPrefix      string            `yaml:"number_prefix,omitempty" json:"numberPrefix,omitempty"`
 	HasParticipantIDs bool              `yaml:"has_participant_ids,omitempty" json:"hasParticipantIDs,omitempty"`
+	// RosterShuffled records that the competitor list was shuffled at least
+	// once ("Shuffle unseeded" on Participants), so the Export tab can warn
+	// that the draw places competitors in list order while it was never
+	// shuffled. The server sets it only on a competition PUT whose body says
+	// `rosterShuffled: true`, carries players, and whose roster save lands
+	// (markRosterShuffled in handlers_competition.go); create zeroes it, the
+	// settings merge never copies it, and once set it stays set. Not a
+	// setting, so ConfigVersion leaves it out. No load-time migration is
+	// possible: an absent key reads as not recorded as shuffled, which is all
+	// that can be said of a file an earlier release wrote (its Shuffle
+	// unseeded button recorded nothing, so a shuffled roster cannot be told
+	// from an unshuffled one). The Export tab's wording for a draw says so.
+	RosterShuffled bool `yaml:"roster_shuffled,omitempty" json:"rosterShuffled,omitempty"`
 	// PoolMatchDuration / KnockoutMatchDuration are the retired WHOLE-MINUTE
 	// per-phase clock durations. They carry `json:"-"`: they are NOT part of
 	// the API in either direction. The only reason they still exist is that

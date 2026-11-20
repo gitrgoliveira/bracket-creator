@@ -1,0 +1,447 @@
+{
+  "description": "Shared case table for the recorded-result rule: a pool match running or completed, or a bracket match (a round's or the bronze match) running or completed with both sides named. Read by the Go test (internal/engine/recorded_result_test.go) and by the JS mirror's test. Matches are in wire shape.",
+  "cases": [
+    {
+      "name": "nothing drawn: no pool matches and no bracket",
+      "poolMatches": [],
+      "bracket": null,
+      "expected": false
+    },
+    {
+      "name": "empty pool list and an empty bracket",
+      "poolMatches": [],
+      "bracket": {
+        "rounds": []
+      },
+      "expected": false
+    },
+    {
+      "name": "scheduled pool match",
+      "poolMatches": [
+        {
+          "id": "Pool A-1",
+          "sideA": "Ann",
+          "sideB": "Bea",
+          "status": "scheduled"
+        }
+      ],
+      "bracket": null,
+      "expected": false
+    },
+    {
+      "name": "running pool match",
+      "poolMatches": [
+        {
+          "id": "Pool A-1",
+          "sideA": "Ann",
+          "sideB": "Bea",
+          "status": "running"
+        }
+      ],
+      "bracket": null,
+      "expected": true
+    },
+    {
+      "name": "completed pool match",
+      "poolMatches": [
+        {
+          "id": "Pool A-1",
+          "sideA": "Ann",
+          "sideB": "Bea",
+          "status": "completed"
+        }
+      ],
+      "bracket": null,
+      "expected": true
+    },
+    {
+      "name": "one completed pool match among scheduled ones",
+      "poolMatches": [
+        {
+          "id": "Pool A-1",
+          "sideA": "Ann",
+          "sideB": "Bea",
+          "status": "scheduled"
+        },
+        {
+          "id": "Pool A-1",
+          "sideA": "Ann",
+          "sideB": "Bea",
+          "status": "completed"
+        },
+        {
+          "id": "Pool A-1",
+          "sideA": "Ann",
+          "sideB": "Bea",
+          "status": "scheduled"
+        }
+      ],
+      "bracket": null,
+      "expected": true
+    },
+    {
+      "name": "pool match with an empty status",
+      "poolMatches": [
+        {
+          "id": "Pool A-1",
+          "sideA": "Ann",
+          "sideB": "Bea",
+          "status": ""
+        }
+      ],
+      "bracket": null,
+      "expected": false
+    },
+    {
+      "name": "scheduled bracket match with both sides",
+      "poolMatches": [],
+      "bracket": {
+        "rounds": [
+          [
+            {
+              "id": "r1-m1",
+              "sideA": "Ann",
+              "sideB": "Bea",
+              "status": "scheduled"
+            }
+          ]
+        ]
+      },
+      "expected": false
+    },
+    {
+      "name": "running bracket match with both sides",
+      "poolMatches": [],
+      "bracket": {
+        "rounds": [
+          [
+            {
+              "id": "r1-m1",
+              "sideA": "Ann",
+              "sideB": "Bea",
+              "status": "running"
+            }
+          ]
+        ]
+      },
+      "expected": true
+    },
+    {
+      "name": "completed bracket match with both sides",
+      "poolMatches": [],
+      "bracket": {
+        "rounds": [
+          [
+            {
+              "id": "r1-m1",
+              "sideA": "Ann",
+              "sideB": "Bea",
+              "status": "completed"
+            }
+          ]
+        ]
+      },
+      "expected": true
+    },
+    {
+      "name": "completed walkover: side B is a bye",
+      "poolMatches": [],
+      "bracket": {
+        "rounds": [
+          [
+            {
+              "id": "r1-m1",
+              "sideA": "Ann",
+              "sideB": "",
+              "status": "completed"
+            }
+          ]
+        ]
+      },
+      "expected": false
+    },
+    {
+      "name": "completed walkover: side A is a bye",
+      "poolMatches": [],
+      "bracket": {
+        "rounds": [
+          [
+            {
+              "id": "r1-m1",
+              "sideA": "",
+              "sideB": "Bea",
+              "status": "completed"
+            }
+          ]
+        ]
+      },
+      "expected": false
+    },
+    {
+      "name": "completed dead slot with both sides empty",
+      "poolMatches": [],
+      "bracket": {
+        "rounds": [
+          [
+            {
+              "id": "r1-m1",
+              "sideA": "",
+              "sideB": "",
+              "status": "completed"
+            }
+          ]
+        ]
+      },
+      "expected": false
+    },
+    {
+      "name": "running bracket match with one side empty",
+      "poolMatches": [],
+      "bracket": {
+        "rounds": [
+          [
+            {
+              "id": "r1-m1",
+              "sideA": "Ann",
+              "sideB": "",
+              "status": "running"
+            }
+          ]
+        ]
+      },
+      "expected": false
+    },
+    {
+      "name": "only a later round holds a result",
+      "poolMatches": [],
+      "bracket": {
+        "rounds": [
+          [
+            {
+              "id": "r1-m1",
+              "sideA": "Ann",
+              "sideB": "Bea",
+              "status": "scheduled"
+            },
+            {
+              "id": "r1-m2",
+              "sideA": "Ann",
+              "sideB": "Bea",
+              "status": "scheduled"
+            }
+          ],
+          [
+            {
+              "id": "r2-m1",
+              "sideA": "Ann",
+              "sideB": "Bea",
+              "status": "completed"
+            }
+          ]
+        ]
+      },
+      "expected": true
+    },
+    {
+      "name": "byes in round one and a scheduled final",
+      "poolMatches": [],
+      "bracket": {
+        "rounds": [
+          [
+            {
+              "id": "r1-m1",
+              "sideA": "Ann",
+              "sideB": "",
+              "status": "completed"
+            },
+            {
+              "id": "r1-m2",
+              "sideA": "",
+              "sideB": "Bea",
+              "status": "completed"
+            }
+          ],
+          [
+            {
+              "id": "r2-m1",
+              "sideA": "Ann",
+              "sideB": "Bea",
+              "status": "scheduled"
+            }
+          ]
+        ]
+      },
+      "expected": false
+    },
+    {
+      "name": "completed bronze match with both sides",
+      "poolMatches": [],
+      "bracket": {
+        "rounds": [
+          [
+            {
+              "id": "r1-m1",
+              "sideA": "Ann",
+              "sideB": "Bea",
+              "status": "scheduled"
+            }
+          ]
+        ],
+        "thirdPlaceMatch": {
+          "id": "bronze",
+          "sideA": "Cy",
+          "sideB": "Di",
+          "status": "completed"
+        }
+      },
+      "expected": true
+    },
+    {
+      "name": "running bronze match with both sides",
+      "poolMatches": [],
+      "bracket": {
+        "rounds": [
+          [
+            {
+              "id": "r1-m1",
+              "sideA": "Ann",
+              "sideB": "Bea",
+              "status": "scheduled"
+            }
+          ]
+        ],
+        "thirdPlaceMatch": {
+          "id": "bronze",
+          "sideA": "Cy",
+          "sideB": "Di",
+          "status": "running"
+        }
+      },
+      "expected": true
+    },
+    {
+      "name": "scheduled bronze match",
+      "poolMatches": [],
+      "bracket": {
+        "rounds": [
+          [
+            {
+              "id": "r1-m1",
+              "sideA": "Ann",
+              "sideB": "Bea",
+              "status": "scheduled"
+            }
+          ]
+        ],
+        "thirdPlaceMatch": {
+          "id": "bronze",
+          "sideA": "Cy",
+          "sideB": "Di",
+          "status": "scheduled"
+        }
+      },
+      "expected": false
+    },
+    {
+      "name": "completed bronze match with an empty side",
+      "poolMatches": [],
+      "bracket": {
+        "rounds": [
+          [
+            {
+              "id": "r1-m1",
+              "sideA": "Ann",
+              "sideB": "Bea",
+              "status": "scheduled"
+            }
+          ]
+        ],
+        "thirdPlaceMatch": {
+          "id": "bronze",
+          "sideA": "Cy",
+          "sideB": "",
+          "status": "completed"
+        }
+      },
+      "expected": false
+    },
+    {
+      "name": "pool match scheduled, bracket match completed",
+      "poolMatches": [
+        {
+          "id": "Pool A-1",
+          "sideA": "Ann",
+          "sideB": "Bea",
+          "status": "scheduled"
+        }
+      ],
+      "bracket": {
+        "rounds": [
+          [
+            {
+              "id": "r1-m1",
+              "sideA": "Ann",
+              "sideB": "Bea",
+              "status": "completed"
+            }
+          ]
+        ]
+      },
+      "expected": true
+    },
+    {
+      "name": "pool match completed, bracket all byes",
+      "poolMatches": [
+        {
+          "id": "Pool A-1",
+          "sideA": "Ann",
+          "sideB": "Bea",
+          "status": "completed"
+        }
+      ],
+      "bracket": {
+        "rounds": [
+          [
+            {
+              "id": "r1-m1",
+              "sideA": "Ann",
+              "sideB": "",
+              "status": "completed"
+            }
+          ]
+        ]
+      },
+      "expected": true
+    },
+    {
+      "name": "pool and bracket both untouched",
+      "poolMatches": [
+        {
+          "id": "Pool A-1",
+          "sideA": "Ann",
+          "sideB": "Bea",
+          "status": "scheduled"
+        }
+      ],
+      "bracket": {
+        "rounds": [
+          [
+            {
+              "id": "r1-m1",
+              "sideA": "Ann",
+              "sideB": "Bea",
+              "status": "scheduled"
+            }
+          ]
+        ],
+        "thirdPlaceMatch": {
+          "id": "bronze",
+          "sideA": "Cy",
+          "sideB": "Di",
+          "status": "scheduled"
+        }
+      },
+      "expected": false
+    }
+  ]
+}

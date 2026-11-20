@@ -31,6 +31,24 @@ var flipHasParticipantIDs = func(store *state.Store, id string) error {
 	return err
 }
 
+// markRosterShuffled records Competition.RosterShuffled=true once a roster
+// PUT that says `rosterShuffled: true` has landed its roster (the Shuffle
+// unseeded button). It runs in its own step after the roster save, so a
+// refused roster (roster_changed, a validation error) records nothing, and a
+// marker already set writes nothing (every later roster PUT echoes the page's
+// `rosterShuffled`). Once set it stays set: no write clears it. A package var,
+// like flipHasParticipantIDs, so a test can inject a failure.
+var markRosterShuffled = func(store *state.Store, id string) error {
+	_, err := store.UpdateCompetitionChanged(id, func(current *state.Competition) (*state.Competition, error) {
+		if current == nil || current.RosterShuffled {
+			return nil, nil
+		}
+		current.RosterShuffled = true
+		return current, nil
+	})
+	return err
+}
+
 // slugifyID derives a valid competition ID from a name: lowercase, non-alphanumeric
 // runs become a single hyphen, leading/trailing hyphens stripped, max 64 chars.
 func slugifyID(name string) string {
@@ -923,6 +941,9 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
+		// A new competition's list was never shuffled, whatever the body says:
+		// only a roster PUT records a shuffle (markRosterShuffled).
+		comp.RosterShuffled = false
 
 		comp.Name = strings.TrimSpace(comp.Name)
 		// Trim NumberPrefix too so untrimmed input from the SETTINGS edit
@@ -1310,6 +1331,11 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			return
 		}
 		comp := req.Competition
+		// rosterShuffled in the body is a request to record a shuffle, never
+		// the value to store: it is taken out of the record here and acted on
+		// only after the roster save lands (markRosterShuffled below).
+		recordShuffle := comp.RosterShuffled
+		comp.RosterShuffled = false
 		if req.ExtraQualifiers != nil {
 			comp.ExtraQualifiers = *req.ExtraQualifiers
 		}
@@ -2440,6 +2466,14 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 					return
 				}
 			}
+			// The shuffle marker, in its own step once the roster has landed
+			// (a refused roster returned above, so it records nothing).
+			if recordShuffle && len(comp.Players) > 0 {
+				if merr := markRosterShuffled(store, id); merr != nil {
+					internalError(c, merr, "The shuffled list was saved, but recording the shuffle failed. Shuffle again to record it.")
+					return
+				}
+			}
 			participantsChanged = true
 		}
 		// Runs after EVERY successful settings save, not only when the prefix
@@ -2533,6 +2567,10 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			// Reload failed: answer the version of the record the save wrote,
 			// never "", which would send the page's next save unchecked.
 			comp.ConfigVersion = state.ConfigVersion(saved)
+			// The body's shuffle flag was zeroed above and recorded to disk
+			// with the roster; the answer says so, or the client merges a
+			// false over its own copy.
+			comp.RosterShuffled = recordShuffle && len(comp.Players) > 0
 			c.JSON(http.StatusOK, comp)
 			return
 		}
@@ -2959,17 +2997,24 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		if !ok {
 			return
 		}
+		// The engine decides which template the competition gets: its stored
+		// draw, or, with no draw yet (setup, or a draw another device
+		// discarded), the blank layout the draw would print, its places empty.
+		// Export PDFs prints the same workbook. The engine reads the
+		// competition once and answers an unknown one as a not-found error.
 		data, err := eng.ExportCompetitionXlsx(id)
 		if err != nil {
-			// Swiss (no static bracket) and a stored bracket that no longer
-			// matches the competition's current settings both surface as a
-			// 422, not a 500 -- see respondUnexportableCompetitionError,
-			// shared with RegisterExportResultsHandlers' handling of the
-			// same two sentinels for the results-workbook path.
+			// Swiss (no static bracket), a stored bracket that no longer
+			// matches the competition's current settings, and a competition
+			// with no draw whose blank layout cannot be sized or built all
+			// surface as a 422 naming the fix, not a 500 -- see
+			// respondUnexportableCompetitionError, shared with
+			// RegisterExportResultsHandlers' handling of the same sentinels
+			// for the results-workbook path.
 			if respondUnexportableCompetitionError(c, err) {
 				return
 			}
-			internalError(c, err)
+			respondEngineError(c, err)
 			return
 		}
 

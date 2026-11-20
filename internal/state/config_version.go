@@ -6,7 +6,7 @@ package state
 // branch in RegisterCompetitionHandlers).
 //
 // Runtime fields written outside Settings are NEVER included: Status,
-// HasParticipantIDs, SwissCurrentRound, FightingSpiritAwards,
+// HasParticipantIDs, RosterShuffled, SwissCurrentRound, FightingSpiritAwards,
 // KachinukiEncounterEnchoCleared, RoundLineupsConverted, RoundLineupsGiven,
 // RoundLineupsLegacy, Players, RosterVersion, ConfigVersion.
 type configVersionPayload struct {

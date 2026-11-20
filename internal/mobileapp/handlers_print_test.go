@@ -290,6 +290,71 @@ func TestPrintHandler_SwissSkippedAndWarned(t *testing.T) {
 	assert.True(t, hasPDF, "the renderable competition's PDF must still be produced")
 }
 
+// TestPrintHandler_UnsizedNoDrawSkippedWithTheFix: a competition with no draw
+// prints as the blank layout, so one that cannot be sized (no expected number
+// of participants, fewer than two registered) is the only kind left out, and
+// the archive's SKIPPED-COMPETITIONS.txt names the fix (Settings), while a
+// sibling competition that can be sized still prints.
+func TestPrintHandler_UnsizedNoDrawSkippedWithTheFix(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping soffice-dependent test in short mode")
+	}
+	if !sofficeAvailable() {
+		t.Skip("soffice not available in this environment")
+	}
+
+	r, store, _, _ := setupPrintTestRouter(t)
+
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:                   "sized-setup",
+		Name:                 "Sized Setup",
+		Kind:                 "individual",
+		Format:               state.CompFormatMixed,
+		PoolSize:             3,
+		PoolSizeMode:         "min",
+		PoolWinners:          2,
+		RoundRobin:           true,
+		ExpectedParticipants: 8,
+		Status:               state.CompStatusSetup,
+	}))
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:     "unsized-setup",
+		Name:   "Unsized Setup",
+		Kind:   "individual",
+		Format: state.CompFormatMixed,
+		Status: state.CompStatusSetup,
+	}))
+
+	req := httptest.NewRequest(http.MethodPost, "/api/print/registration", nil)
+	req.Header.Set("X-Tournament-Password", "secret")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code,
+		"the sized competition alone must still produce a booklet; got %d: %s", w.Code, w.Body.String())
+	skippedHeader := w.Header().Get("X-Skipped-Competitions")
+	assert.Contains(t, skippedHeader, "unsized-setup")
+
+	body := w.Body.Bytes()
+	zr, err := zip.NewReader(bytes.NewReader(body), int64(len(body)))
+	require.NoError(t, err)
+	var skippedEntry *zip.File
+	for _, f := range zr.File {
+		if f.Name == "SKIPPED-COMPETITIONS.txt" {
+			skippedEntry = f
+		}
+	}
+	require.NotNil(t, skippedEntry)
+	rc, err := skippedEntry.Open()
+	require.NoError(t, err)
+	defer rc.Close()
+	content, err := io.ReadAll(rc)
+	require.NoError(t, err)
+	assert.Contains(t, string(content), "Unsized Setup")
+	assert.Contains(t, string(content), "Settings")
+	assert.NotContains(t, string(content), "Sized Setup", "the competition that can be sized is printed, not skipped")
+}
+
 // TestPrintHandler_AllSkippedReturns422 covers a tournament that is entirely
 // Swiss: ExportTournamentWorkbooks skips every competition, so len(sources)
 // is 0 with err == nil. Before the fix this fell through to

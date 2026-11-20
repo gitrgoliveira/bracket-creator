@@ -199,9 +199,8 @@ func init() {
 // downloadReadyTTL bounds how long an unconsumed download-ready token lingers
 // in downloadStatus. The serve web app consumes the token via the
 // /api/download-status poll (consumeDownloadReady deletes it), but a client
-// that navigates away, or the mobile-app server, which mounts /create without
-// that poll endpoint, would otherwise leak the entry forever. The TTL keeps
-// the map bounded regardless of which server runs the handler.
+// that navigates away would otherwise leak the entry forever. The TTL keeps
+// the map bounded.
 const downloadReadyTTL = 60 * time.Second
 
 func markDownloadReady(token string) {

@@ -535,30 +535,35 @@ func (e *Engine) hasRecordedResult(compID string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	for i := range matches {
-		if matches[i].ResultRecorded() {
-			return true, nil
-		}
-	}
-
 	bracket, err := e.store.LoadBracket(compID)
 	if err != nil {
 		return false, err
 	}
+	return recordedResultIn(matches, bracket), nil
+}
+
+// recordedResultIn is the pure rule hasRecordedResult applies to what the store
+// holds: any pool match running or completed, or any bracket match (a round's or
+// the bronze match) running or completed with both sides named. A nil bracket
+// holds none. The browser mirrors it (competitionHasRecordedResult), and the two
+// are pinned by one case table, testdata/recorded_result_cases.json.
+func recordedResultIn(poolMatches []state.MatchResult, bracket *state.Bracket) bool {
+	for i := range poolMatches {
+		if poolMatches[i].ResultRecorded() {
+			return true
+		}
+	}
 	if bracket == nil {
-		return false, nil
+		return false
 	}
 	for _, round := range bracket.Rounds {
 		for i := range round {
 			if round[i].ResultRecorded() {
-				return true, nil
+				return true
 			}
 		}
 	}
-	if bracket.ThirdPlaceMatch != nil && bracket.ThirdPlaceMatch.ResultRecorded() {
-		return true, nil
-	}
-	return false, nil
+	return bracket.ThirdPlaceMatch != nil && bracket.ThirdPlaceMatch.ResultRecorded()
 }
 
 // maybeAutoCompletePoolsRunning is MaybeAutoCompletePools' pool-phase half.
@@ -1203,6 +1208,30 @@ func dropSeedAssignments(players []domain.Player, seeds []domain.SeedAssignment,
 	return out
 }
 
+// defaultTeamSize is the size of a team competition whose config names none
+// (Kendo's five).
+const defaultTeamSize = 5
+
+// applyDefaultTeamSize gives a team competition with no team size the default,
+// in place: the one owner of that rule for the draw, its blank layout and the
+// schedule estimate.
+func applyDefaultTeamSize(c *state.Competition) {
+	if c.IsTeam() && c.TeamSize == 0 {
+		c.TeamSize = defaultTeamSize
+	}
+}
+
+// applyLeagueSinglePool enforces a league's single-pool invariant for n
+// competitors, in place: one round-robin pool holding all of them. The viewer
+// relies on pools[0] being the only pool, and PoolSize and RoundRobin may hold
+// any admin-configured value, so the draw and its blank layout override them.
+func applyLeagueSinglePool(c *state.Competition, n int) {
+	if c.Format == state.CompFormatLeague {
+		c.PoolSize = n
+		c.RoundRobin = true
+	}
+}
+
 // runDrawPipeline runs the full draw-generation pipeline for a Setup
 // competition and commits CompStatusDrawReady.
 //
@@ -1409,9 +1438,7 @@ func (e *Engine) runDrawPipeline(id string) error {
 	// omission.
 	loadedParticipantsMtime, loadedSeedsMtime := e.store.ParticipantsFingerprint(id)
 
-	if comp.IsTeam() && comp.TeamSize == 0 {
-		comp.TeamSize = 5 // Default for Kendo
-	}
+	applyDefaultTeamSize(comp)
 
 	players, err := e.store.LoadParticipantsOpt(id, comp.EffectiveWithZekkenName(), state.LoadParticipantsOpts{
 		WithSeeds: true,
@@ -1525,16 +1552,10 @@ func (e *Engine) runDrawPipeline(id string) error {
 		return wrapValidationErrorf(err, "competition %s cannot generate a draw: %s; rename this competitor on the Participants page", id, err.Error())
 	}
 
-	// League format: enforce the single-pool invariant so that
-	// generatePools always produces exactly one pool containing all
-	// participants, and round-robin is guaranteed. The viewer surface
-	// relies on pools[0] being the only pool. PoolSize and RoundRobin
-	// may hold any admin-configured value at this point; override them
-	// here so the pipeline and the atomic commit below agree.
-	if comp.Format == state.CompFormatLeague {
-		comp.PoolSize = len(players)
-		comp.RoundRobin = true
-	}
+	// League format: generatePools must produce exactly one pool containing
+	// all participants; set it here so the pipeline and the atomic commit
+	// below agree.
+	applyLeagueSinglePool(comp, len(players))
 
 	// Generate Pools, Bracket, or Swiss round-1. These calls write to other
 	// files (pools.csv / bracket.json / pool-matches.csv) via their own

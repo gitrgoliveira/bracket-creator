@@ -164,6 +164,13 @@ func TestTeamLineup_FilledByMemberNumber(t *testing.T) {
 			wantPos: map[domain.Position]string{"1": "B"},
 			wantIDs: map[domain.Position]string{"1": "m2"},
 		},
+		{
+			name:    "a member with a zero or negative index is skipped",
+			size:    3,
+			members: []domain.TeamMember{{ID: "m0", Index: 0, Name: "Zero"}, {ID: "mn", Index: -1, Name: "Minus"}, {ID: "m1", Index: 1, Name: "A"}},
+			wantPos: map[domain.Position]string{"1": "A"},
+			wantIDs: map[domain.Position]string{"1": "m1"},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -284,7 +284,7 @@ Name[, Zekken/DisplayName], Dojo[, DanGrade][, source][, checked_in | checked_in
 - **Gate cadence: targeted tests while iterating, the full gate before claiming completion** (operator ruling 2026-09-25). `make go/test` runs the JS tests first, about 65 seconds on a 10-core machine (measured 2026-11-20 with other sessions running, 1-minute load 2 to 18; about 113 seconds before the two permutation gates were split into shards), then the Go tests, under a minute (measured 2026-11-18); the whole gate has not been timed as one run. It keeps every core busy, which slows every other session on the machine; a full run after each small fix is what made concurrent sessions look stuck. While iterating, run only what the change touches, each in seconds and without `cd`:
   ```bash
   go -C <wt> test -run TestName ./internal/<pkg>/...
-  npm --prefix <wt>/web-mobile test -- js/__tests__/<file>.   # vitest matches by substring; the trailing dot finds <file>.test.jsx and <file>.node.test.jsx only
+  npm --prefix <wt>/web-mobile test -- js/__tests__/<file>.   # vitest matches by substring; the trailing dot finds <file>.test.jsx and <file>.node.test.jsx, and for a sharded gate stem (minted_member_permutations) also its .shard-N-of-M.test.jsx files and the .shards.test.jsx guard
   npm --prefix <wt>/web-mobile run test:render -- js/__tests__/render/<file>.render.test.jsx
   ```
   Run the full `make go/test` before any claim that the work is done, fixed or passing, before pushing, and before marking a PR ready. A change made after that run needs it again before the next such claim. Brief subagents the same way: an implementer or fixer runs targeted tests, and whoever claims completion runs the full gate once, in the foreground.

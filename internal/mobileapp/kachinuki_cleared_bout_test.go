@@ -22,6 +22,9 @@ func TestScoreHandler_KachinukiClearedBoutIsStored(t *testing.T) {
 		ID: "P1-0", SideA: "Ryu", SideB: "Tora", Status: state.MatchStatusRunning,
 		SubResults: []state.SubMatchResult{{Position: 1, SideA: "R-1", SideB: "W-1", IpponsA: []string{"M"}}},
 	}}))
+	// The match is under way, so it carries the lineup its start kept; with
+	// none it would field its members by number and bout 1 would be reseated.
+	kachinukiMatchOwnsLineups(t, store, compID, "P1-0")
 
 	w := putScore(t, r, compID, "P1-0", map[string]any{
 		"sideA": "Ryu", "sideB": "Tora", "status": "running",

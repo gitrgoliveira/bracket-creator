@@ -20,8 +20,12 @@
 // ADVISORY ONLY: kachinuki is operator-led and the roster is advisory (team
 // sizes are unregulated, a vacancy is legitimate). Nothing here ends the
 // encounter, arms End match or holds a button back, and the line never asks
-// the operator to enter or complete a lineup: a side with no lineup shows its
-// fighter on alone, and with no lineup on either side there is no line.
+// the operator to enter or complete a lineup. A team with no saved lineup
+// fights in member number order (bc-kno1), so the server answers its queue as
+// a lineup's (`lineupFound`). A side whose roster fields nobody (the server
+// could not read team-members.yaml or lineups.yaml, and says so in the
+// answer's `warning`, which the sheet shows as a toast) shows its fighter on
+// alone, and with no such queue on either side there is no line.
 import { squadMemberLabel } from './squad_member_label.jsx';
 import { resolveSquadMember, resolveBoutSideDisplayName } from './lineup_resolver.jsx';
 // The client's one draw test (the twin of state.IsDraw). The team editor
@@ -90,8 +94,9 @@ export function kachinukiAdvisoryModel({ roster, squadA, squadB, teamNumberA, te
 // names the side the SERVER's Record bout decision says has nobody left
 // (engine.KachinukiRoster: `nextPairing` false and that side `exhausted`, which
 // the server sets only for the loser of a recorded win whose lineup has nobody
-// behind them, at most one side). null otherwise (no roster read, the read
-// failed, a pairing would follow, or no lineup says so): the sheet then keeps
+// behind them, at most one side, and never while the answer carries a
+// `warning`). null otherwise (no roster read, the read failed, a pairing would
+// follow, or no side's queue says so): the sheet then keeps
 // the bout live, as it always did, and shows no line (coordinator decision
 // 2026-10-11).
 export function kachinukiNoPairingText(roster) {
@@ -157,6 +162,17 @@ export function kachinukiRosterKey(matchId, subResults) {
     return [...fighters, winner, s.winnerMemberId || "", s.decision || ""].join("~");
   });
   return `${matchId || ""}|${parts.join("/")}`;
+}
+
+// kachinukiMembersKey is the VALUE of one team's members for the roster read's
+// key: each member's id, number and name, in the order held. With no lineup, or
+// a lineup with empty places, the server fields members by member number
+// (engine.kachinukiFielded), so a member added or named changes the answer; the
+// key is a string so a list re-created with the same members reads nothing.
+export function kachinukiMembersKey(members) {
+  return (Array.isArray(members) ? members : [])
+    .map((x) => (x ? [x.id || "", x.index == null ? "" : x.index, x.name || ""].join("~") : ""))
+    .join(",");
 }
 
 // storedBoutRecorded reports whether the match holds the numbered bout at

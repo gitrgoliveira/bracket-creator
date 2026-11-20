@@ -56,7 +56,9 @@ func ownLineupsOf(t *testing.T, store *state.Store, compID, matchID string) int 
 
 // C1: a match finished before this rule (no lineup kept at its start) is not
 // renamed by an edit of the starting lineup, nor by a late tap turned away as
-// matchClosed, and no write keeps a lineup for it after its start.
+// matchClosed, and no write keeps a lineup for it after its start. Its teams
+// hold no members, so nothing seats it by number either (bc-kno1: with members
+// it opens with member 1, pinned by the member-number tests at the end).
 func TestKachinukiOpener_FinishedBeforeTheRuleIsNotRenamedByAWrite(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	const c = "op-legacy"
@@ -76,7 +78,8 @@ func TestKachinukiOpener_FinishedBeforeTheRuleIsNotRenamedByAWrite(t *testing.T)
 }
 
 // C1: a match that started with no lineup kept, then finished, is not renamed
-// by a starting lineup entered later, nor by a late tap.
+// by a starting lineup entered later, nor by a late tap. Its teams hold no
+// members, so nothing seats it by number either.
 func TestKachinukiOpener_NoLineupAtTheStartThenALateTap(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	const c = "op-nolineup"
@@ -443,4 +446,144 @@ func TestKachinukiOpener_AnEarlierMatchsSaveMadeBeforeTheStartReachesIt(t *testi
 	require.NoError(t, err)
 	assert.Equal(t, "Kato", in.Lineup.Positions[p1])
 	assert.Equal(t, "P1-0", in.Lineup.StartedFrom, "the pin now names the lineup the match carried")
+}
+
+// numberOrderMatch saves one kachinuki match between two teams the store seeds
+// members for by number (numberedTeams), with no lineup saved anywhere, and
+// returns the competition, the teams' ids and their members 1 to 3.
+func numberOrderMatch(t *testing.T, id string, m state.MatchResult) (*Engine, *state.Store, string, []string, []string) {
+	t.Helper()
+	eng, store, comp := setupKachinukiComp(t, id, 3, func(c *state.Competition) { c.Format = state.CompFormatMixed })
+	aID, bID := numberedTeams(t, store, comp.ID)
+	m.ID, m.SideA, m.SideAID, m.SideB, m.SideBID = "Pool A-0", "Ryu", aID, "Tora", bID
+	require.NoError(t, store.SavePoolMatches(comp.ID, []state.MatchResult{m}))
+	return eng, store, comp.ID, teamMemberIDs(t, store, comp.ID, aID, 3), teamMemberIDs(t, store, comp.ID, bID, 3)
+}
+
+// boutOneMembers is the member ids bout 1 of the match holds, side A then B.
+func boutOneMembers(t *testing.T, store *state.Store, compID string) []string {
+	t.Helper()
+	m := openerMatch(t, store, compID, "Pool A-0")
+	require.NotEmpty(t, m.SubResults)
+	return []string{m.SubResults[0].SideAMemberID, m.SubResults[0].SideBMemberID}
+}
+
+// bc-kno1 (operator decision K1 (a)): a competition with no lineup saved at all
+// is seated, its teams opening with member 1 (named or not, Q1), and a second
+// reseat finds nothing to change and writes nothing, the blank members carrying
+// an id and no name included.
+func TestKachinukiOpener_NoLineupAnywhereOpensWithMemberOne(t *testing.T) {
+	eng, store, c, a, b := numberOrderMatch(t, "op-number-none", state.MatchResult{Status: state.MatchStatusScheduled})
+	t0 := time.Now().UnixMilli() - 5000
+	startKachinuki(t, eng, c, "Pool A-0", t0)
+	r := postIn(t, eng, c, "Pool A-0", domain.ScoreEvent{ID: "n1", Session: "evs", Seq: 1, Stamp: t0 + 10, Kind: domain.ScoreIpponAdd, Pos: 1, Side: "a", Letter: "M"})
+	require.Equal(t, domain.ScoreOutcomeApplied, r.Answers[0].Outcome)
+	assert.Equal(t, []string{a[0], b[0]}, boutOneMembers(t, store, c), "bout 1 is each team's member 1")
+	m := openerMatch(t, store, c, "Pool A-0")
+	assert.Equal(t, []string{"M"}, m.SubResults[0].IpponsA, "the strike stays on bout 1")
+
+	lines, err := store.LoadScoreLog(c, "Pool A-0")
+	require.NoError(t, err)
+	changed, err := eng.ReseatKachinukiOpeners(c, "")
+	require.NoError(t, err)
+	assert.Empty(t, changed, "a reseat that finds bout 1 seated changes nothing")
+	after, err := store.LoadScoreLog(c, "Pool A-0")
+	require.NoError(t, err)
+	assert.Len(t, after, len(lines), "and writes nothing")
+}
+
+// bc-kno1 with K1 (c): a match that started with nothing of its own (before the
+// pin rule) opens by member number over an EMPTY lineup, never the lineup the
+// team carries, so the opener and the advance's queue agree.
+func TestKachinukiOpener_AStartedMatchWithNothingOfItsOwnOpensByNumber(t *testing.T) {
+	eng, store, c, a, b := numberOrderMatch(t, "op-number-started", state.MatchResult{Status: state.MatchStatusRunning,
+		SubResults: []state.SubMatchResult{{Position: 1, SideA: "Aoki", SideB: "Fujii", IpponsA: []string{"M"}, IpponsB: []string{}}}})
+	m := openerMatch(t, store, c, "Pool A-0")
+	startingLineup(t, store, c, m.SideAID, "", a[2])
+	changed, err := eng.ReseatKachinukiOpeners(c, "")
+	require.NoError(t, err)
+	assert.Equal(t, []string{"Pool A-0"}, changed)
+	assert.Equal(t, []string{a[0], b[0]}, boutOneMembers(t, store, c), "member 1 of each team, not the carried lineup's member 3")
+	m = openerMatch(t, store, c, "Pool A-0")
+	assert.Equal(t, []string{"", ""}, []string{m.SubResults[0].SideA, m.SubResults[0].SideB}, "the blank members carry no name")
+	assert.Equal(t, []string{"M"}, m.SubResults[0].IpponsA, "the points stay on bout 1")
+
+	q := storedKachinukiQueues(t, eng, c, "Pool A-0")
+	assert.Equal(t, a, queueMemberIDs(q.queueA), "the queue opens with the same member")
+	changed, err = eng.ReseatKachinukiOpeners(c, "")
+	require.NoError(t, err)
+	assert.Empty(t, changed)
+}
+
+// K1 (a): a pick on bout 1 is a save of the match's own lineup at its first
+// place, so it survives every reseat, both for a picked member and for a name
+// typed with no member id.
+func TestKachinukiOpener_ABoutOnePickSavedToTheLineupSurvivesAReseat(t *testing.T) {
+	eng, store, c, a, b := numberOrderMatch(t, "op-number-pick", state.MatchResult{Status: state.MatchStatusScheduled})
+	t0 := time.Now().UnixMilli() - 5000
+	startKachinuki(t, eng, c, "Pool A-0", t0)
+	postIn(t, eng, c, "Pool A-0", domain.ScoreEvent{ID: "p1", Session: "evs", Seq: 1, Stamp: t0 + 10, Kind: domain.ScoreIpponAdd, Pos: 1, Side: "b", Letter: "K"})
+	require.Equal(t, []string{a[0], b[0]}, boutOneMembers(t, store, c))
+	aID := openerMatch(t, store, c, "Pool A-0").SideAID
+
+	matchLineup(t, store, c, aID, "Pool A-0", "", a[2])
+	_, err := eng.ReseatKachinukiOpeners(c, aID)
+	require.NoError(t, err)
+	assert.Equal(t, []string{a[2], b[0]}, boutOneMembers(t, store, c), "the picked member fights bout 1")
+	changed, err := eng.ReseatKachinukiOpeners(c, "")
+	require.NoError(t, err)
+	assert.Empty(t, changed, "and stays there")
+
+	matchLineup(t, store, c, aID, "Pool A-0", "Hoshi", "")
+	_, err = eng.ReseatKachinukiOpeners(c, aID)
+	require.NoError(t, err)
+	m := openerMatch(t, store, c, "Pool A-0")
+	assert.Equal(t, []string{"Hoshi", ""}, []string{m.SubResults[0].SideA, m.SubResults[0].SideAMemberID}, "a typed name with no member fights bout 1")
+	changed, err = eng.ReseatKachinukiOpeners(c, "")
+	require.NoError(t, err)
+	assert.Empty(t, changed, "and is not renamed back to a member by number")
+	assert.Equal(t, []string{"K"}, openerMatch(t, store, c, "Pool A-0").SubResults[0].IpponsB)
+}
+
+// Q4 (b): bout 1 of a FINISHED match fought with no lineup is corrected by a
+// save of the match's own lineup, its points, winner and result staying put.
+func TestKachinukiOpener_AFinishedNoLineupMatchIsCorrectedByItsOwnLineup(t *testing.T) {
+	eng, store, c, a, b := numberOrderMatch(t, "op-number-finished", state.MatchResult{})
+	m := openerMatch(t, store, c, "Pool A-0")
+	m.Status, m.Winner, m.WinnerID, m.Decision = state.MatchStatusCompleted, "Tora", m.SideBID, "kachinuki-exhaustion"
+	m.SubResults = []state.SubMatchResult{{Position: 1, SideAMemberID: a[0], SideBMemberID: b[0], IpponsA: []string{}, IpponsB: []string{"M", "K"},
+		Winner: "Tora", WinnerMemberID: b[0], Decision: "fought"}}
+	require.NoError(t, store.SavePoolMatches(c, []state.MatchResult{m}))
+	changed, err := eng.ReseatKachinukiOpeners(c, "")
+	require.NoError(t, err)
+	require.Empty(t, changed, "bout 1 already holds the members by number")
+
+	matchLineup(t, store, c, m.SideAID, "Pool A-0", "", a[1])
+	changed, err = eng.ReseatKachinukiOpeners(c, m.SideAID)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"Pool A-0"}, changed)
+	got := openerMatch(t, store, c, "Pool A-0")
+	assert.Equal(t, []string{a[1], b[0]}, []string{got.SubResults[0].SideAMemberID, got.SubResults[0].SideBMemberID}, "bout 1 is renamed")
+	assert.Equal(t, []string{"M", "K"}, got.SubResults[0].IpponsB, "its points stay")
+	assert.Equal(t, b[0], got.SubResults[0].WinnerMemberID)
+	assert.Equal(t, state.MatchStatusCompleted, got.Status)
+	assert.Equal(t, "Tora", got.Winner)
+	assert.Equal(t, "kachinuki-exhaustion", got.Decision)
+}
+
+// Q5 (a): team-members.yaml that cannot be read seats nobody by number. The tap
+// still lands, bout 1 keeps what it holds, and the ERROR names the file.
+func TestKachinukiOpener_UnreadableMembersSeatNobodyAndTheWriteStands(t *testing.T) {
+	eng, store, c, _, _ := numberOrderMatch(t, "op-number-unread", state.MatchResult{Status: state.MatchStatusScheduled})
+	t0 := time.Now().UnixMilli() - 5000
+	startKachinuki(t, eng, c, "Pool A-0", t0)
+	makeTeamMembersUnreadable(t, store, c)
+	var r *ScoreEventsResult
+	logs := captureLog(t, func() {
+		r = postIn(t, eng, c, "Pool A-0", domain.ScoreEvent{ID: "u1", Session: "evs", Seq: 1, Stamp: t0 + 10, Kind: domain.ScoreIpponAdd, Pos: 1, Side: "a", Letter: "M"})
+	})
+	require.Equal(t, domain.ScoreOutcomeApplied, r.Answers[0].Outcome, "the write goes on")
+	assert.Equal(t, []string{"", ""}, boutOneMembers(t, store, c), "nobody is seated by number")
+	assert.Equal(t, []string{"M"}, openerMatch(t, store, c, "Pool A-0").SubResults[0].IpponsA)
+	assert.Contains(t, logs, "engine: ERROR: engine.kachinukiOpener compId="+c+": team-members.yaml load error:")
 }

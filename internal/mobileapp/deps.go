@@ -272,10 +272,14 @@ type TeamLineupStore interface {
 // match, and where it was saved (engine.Engine.LineupInForce, which owns the
 // rule); and a kachinuki encounter's two queues of fighters not yet retired
 // (engine.Engine.KachinukiRoster, read through the same call the advance
-// appends the next pairing from).
+// appends the next pairing from); and, for the lineup panel, the places of a
+// kachinuki lineup form the server would fill by member number
+// (engine.Engine.KachinukiFieldedPlaces, the same fill every kachinuki reader
+// seats from).
 type LineupEngine interface {
 	LineupInForce(compID, teamID, matchID string) (engine.InForceLineup, error)
 	KachinukiRoster(compID, matchID string) (engine.KachinukiRoster, error)
+	KachinukiFieldedPlaces(compID, teamID, matchID string, form domain.TeamLineup) (map[domain.Position]string, error)
 }
 
 // SquadStore is the consumer-boundary view of state.Store used by

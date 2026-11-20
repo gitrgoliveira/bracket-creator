@@ -1,10 +1,13 @@
-// Kachinuki Record bout with no fighter named on the live bout: the server
-// works the next pairing out from who fought and skips a bout naming nobody, so
-// the button waits for a fighter and the footer says why.
+// bc-kno1 (operator decision Q6 (b)): Record bout does not wait for a named
+// fighter. With no lineup the server seats bout 1 by member number, a nameless
+// member is a fighter, and the advance appends the next member against the
+// winner, so the old gate ("Pick or type who fights this bout to enable Record
+// bout.") held back a tap the server answers. It was removed with its hint.
 import React from 'react';
 import { render, act, screen } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vitest';
 import { installWindowStubs } from '../helpers/stub_globals.js';
+import { makeFakeOutbox } from '../helpers/fake_outbox.js';
 
 const STUBBED_GLOBALS = {
   isHikiwake: () => false,
@@ -32,7 +35,10 @@ beforeAll(async () => {
 
 afterAll(() => restoreGlobals());
 
-beforeEach(() => {
+// Seeded nameless members, as a fresh team holds them.
+const blank = (p) => [1, 2, 3, 4, 5].map((i) => ({ id: `${p}${i}`, index: i, name: '' }));
+
+function stubApi(squads) {
   window.API = {
     fetchCompetitionDetails: vi.fn().mockResolvedValue({
       id: 'comp1',
@@ -43,18 +49,20 @@ beforeEach(() => {
     removeDaihyosen: vi.fn(),
     putMatchLineup: vi.fn(),
     recordDecision: vi.fn(),
-    fetchSquads: vi.fn().mockResolvedValue({}),
+    fetchSquads: vi.fn().mockResolvedValue(squads),
     fetchLineupInForce: vi.fn().mockResolvedValue(null),
     fetchKachinukiRoster: vi.fn().mockResolvedValue(null),
+    ...makeFakeOutbox().api,
   };
-});
+}
 
+beforeEach(() => stubApi({}));
 
 function kachinukiMatch(subResults) {
   return {
     id: 'm1', compId: 'comp1', status: 'running', phase: 'pool', poolName: 'Pool 1', court: 'A',
     compKind: 'team', teamSize: 3, compFormat: 'mixed', teamMatchType: 'kachinuki',
-    sideA: { id: 'team-A', name: 'Team A' }, sideB: { id: 'team-B', name: 'Team B' },
+    sideA: { id: 'team-A', name: 'Team A', number: 'T1' }, sideB: { id: 'team-B', name: 'Team B', number: 'T2' },
     subResults,
   };
 }
@@ -69,16 +77,29 @@ async function mount(match) {
 const recordBout = () => screen.getByRole('button', { name: 'Record bout' });
 
 describe('Record bout on a kachinuki bout that names no fighter', () => {
-  it('waits for a fighter and says so, instead of sending a write the server skips', async () => {
+  it('is enabled on a played bout naming nobody, and no hint asks for a fighter', async () => {
     await mount(kachinukiMatch([{ position: 1, sideA: '', sideB: '', ipponsA: ['M'], ipponsB: [] }]));
-    expect(recordBout().disabled).toBe(true);
-    expect(screen.getByTestId('kachinuki-nofighter-hint').textContent)
-      .toBe('Pick or type who fights this bout to enable Record bout.');
+    expect(recordBout().disabled).toBe(false);
+    expect(recordBout().getAttribute('title')).toBeNull();
+    expect(screen.queryByTestId('kachinuki-nofighter-hint')).toBeNull();
+    expect(document.body.textContent).not.toContain('Pick or type who fights');
   });
 
-  it('is open once a fighter is named', async () => {
-    await mount(kachinukiMatch([{ position: 1, sideA: 'Sato', sideB: '', ipponsA: ['M'], ipponsB: [] }]));
+  it('is enabled on a played bout of two nameless members, shown by number', async () => {
+    stubApi({ 'team-A': blank('a'), 'team-B': blank('b') });
+    await mount(kachinukiMatch([{
+      position: 1, sideA: '', sideAMemberId: 'a1', sideB: '', sideBMemberId: 'b1', ipponsA: ['M'], ipponsB: [],
+    }]));
     expect(recordBout().disabled).toBe(false);
     expect(screen.queryByTestId('kachinuki-nofighter-hint')).toBeNull();
+    // Shiro is the match's side B (T2), Aka side A (T1).
+    expect(screen.getByTestId('team-sub-match-member-label-shiro').textContent).toBe('T2.1');
+    expect(screen.getByTestId('team-sub-match-member-label-aka').textContent).toBe('T1.1');
+  });
+
+  it('still waits until the bout is scored', async () => {
+    await mount(kachinukiMatch([{ position: 1, sideA: '', sideB: '', ipponsA: [], ipponsB: [] }]));
+    expect(recordBout().disabled).toBe(true);
+    expect(recordBout().getAttribute('title')).toBe('Nothing recorded for this bout yet');
   });
 });

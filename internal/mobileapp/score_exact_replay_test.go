@@ -395,6 +395,10 @@ func TestScoreHandler_ExactResendOfATeamOrEngiFinishIsAnsweredAsRecorded(t *test
 				{Position: 2, SideA: "R-1", SideB: "W-2"},
 			},
 		}}))
+		// The running match carries the lineup its start kept (this is about
+		// the resend, not who is seated): with none of its own it would field
+		// its members by number and every landing would reseat bout 1.
+		kachinukiMatchOwnsLineups(t, store, compID, "P1-0")
 		at := time.Now().UnixMilli() - 5_000
 		finish := func() map[string]any {
 			return map[string]any{

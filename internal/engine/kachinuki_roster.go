@@ -30,25 +30,28 @@ type KachinukiRosterFighter struct {
 // the last bout keeps both its fighters on, in every phase.
 //
 // Remaining is the queue the advance takes this side's next fighter from if
-// the fighter on loses: every fighter of the lineup in force who has not
+// the fighter on loses: every fighter the side fields (kachinukiFielded: the
+// match's lineup, its empty places filled by member number) who has not
 // retired, the fighter on taken out by the same identity rule
 // (IsMemberRetired), in queue order, so index 0 is next.
 //
-// LineupFound is false when no lineup is in force for the side's team at this
-// match, or when the one in force fields nobody (a match's own empty lineup,
-// positions: {}, shows none). Remaining is then EMPTY, because the only other
-// source, the bout log, knows only the fighters already seen and any count
-// taken from it would be false; On is still given.
+// LineupFound is true when the side fields members, from a lineup or by member
+// number, so it holds for a team with no saved lineup too. It is false when the
+// side fields nobody (team members or lineups that could not be read, with no
+// lineup naming anyone); its queue is then empty, so Remaining is EMPTY and
+// Record bout appends nothing for it. On is still given.
 //
 // Exhausted is the advance's own verdict that the side has nobody left: the
 // last numbered bout is RECORDED, it was a win (the advance's MatchEnded:
 // the loser's queue is empty, so Record bout appended nothing after it),
-// this side lost it, and this side's queue came from a lineup (LineupFound).
-// Without a lineup the advance's queue is the bout log's, which knows only
-// the fighters already seen and so empties after any loss: Exhausted is then
-// false, and the bout stays live as it always did. A recorded draw exhausts
-// nobody (both fighters stay on; the advance reports BothExhausted, never
-// MatchEnded), and an unrecorded last bout is no result, so it exhausts
+// this side lost it, and this side fields members (LineupFound). A side that
+// fields nobody is never exhausted: its queue was empty before the bout, so
+// the empty queue says nothing about who it has left. Neither side is
+// exhausted while the answer carries a Warning: a file that could not be read
+// may hold fighters the queue does not (a lineup holding only a bout-1 pick,
+// with the team members unread, queues that one fighter). A recorded draw
+// exhausts nobody (both fighters stay on; the advance reports BothExhausted,
+// never MatchEnded), and an unrecorded last bout is no result, so it exhausts
 // nobody either. At most one side is exhausted.
 type KachinukiRosterSide struct {
 	LineupFound bool                     `json:"lineupFound"`
@@ -69,10 +72,24 @@ type KachinukiRosterSide struct {
 // autosave's winner at a one-point lead counts), so it is current only as of
 // the read. False for a completed match, a log with no numbered bout, a last
 // bout with no outcome or no fighter, and an outcome the advance cannot read.
+// It stays the advance's own decision under a Warning too; the sheet then does
+// not grey Record bout out on it (the operator adds the next pairing by hand).
+//
+// Warning is the sentence the operator is told when a file the read needed
+// could not be read, and the read carried on without it; the sheet shows it as
+// a warning toast. Two sentences, one at a time: lineups.yaml could not be read
+// (kachinukiLineupsUnreadWarning, operator decision L1: each side fields
+// nobody, so nothing remains and nobody is seated by number), or the read
+// needed the team members (a side's lineup leaves a place to fill by member
+// number) and team-members.yaml could not be read
+// (kachinukiMembersUnreadWarning, Q5 (a): no number order). Over unread
+// lineups the members are never read, so the lineups sentence is the only one
+// then. Empty otherwise.
 type KachinukiRoster struct {
 	SideA       KachinukiRosterSide `json:"sideA"`
 	SideB       KachinukiRosterSide `json:"sideB"`
 	NextPairing bool                `json:"nextPairing"`
+	Warning     string              `json:"warning,omitempty"`
 }
 
 // KachinukiRoster answers, for a kachinuki team match, who each side has on
@@ -81,9 +98,9 @@ type KachinukiRoster struct {
 // side that reads as exhausted may still field fighters the app has never
 // seen, so nothing ends the encounter or arms End match on this answer. The
 // sheet reads two verdicts from it, both the advance's own: NextPairing (Record
-// bout on a recorded bout would write nothing, so the button is disabled) and
-// Exhausted (a recorded win left that side's lineup with nobody, so the bout
-// is shown closed).
+// bout on a recorded bout would write nothing, so the button is disabled,
+// except under a Warning) and Exhausted (a recorded win left that side's
+// lineup with nobody, so the bout is shown closed; never under a Warning).
 //
 // Every numbered bout before the last retires by its result, as the advance
 // reads it (RetiredPlayersFromBoutLog: the attribution owners, id first, and
@@ -106,8 +123,13 @@ type KachinukiRoster struct {
 // RetiredPlayersFromBoutLog, as the advance (MaybeAdvanceKachinuki) takes
 // them, and Remaining is the advance's remaining list with the fighter on
 // retired too: the fighter it names as next is the one the advance appends
-// when the fighter on loses. It writes nothing. A lineups.yaml that cannot be
-// read is an error here (the advance logs it and reads no lineup).
+// when the fighter on loses. It writes nothing. A file that cannot be read is
+// no error here (operator decisions Q5 (a) and L1): a lineups.yaml the read
+// cannot read is logged as an ERROR naming the file, every side fields nobody
+// (as the advance then reads it), and the answer carries the lineups Warning;
+// a team-members.yaml it needed and cannot read is logged the same way, no
+// place is filled by member number, and the answer carries the members
+// Warning. The fighters on are named either way.
 func (e *Engine) KachinukiRoster(compID, matchID string) (KachinukiRoster, error) {
 	comp, err := e.store.LoadCompetition(compID)
 	if err != nil {
@@ -131,11 +153,25 @@ func (e *Engine) KachinukiRoster(compID, matchID string) (KachinukiRoster, error
 	// names and ids they take from the lineups. The advance's own decision is
 	// asked quietly (no breadcrumb: nothing is tapped) on that SAME reading
 	// (readKachinukiQueues), so the read's verdict is what Record bout does.
+	//
+	// The lineups are read through the cache without a copy (readLineupRule),
+	// since every open sheet reads the roster again after each Record bout. A
+	// lineups.yaml that cannot be read is logged and the queues are built over
+	// no lineup marked unread, as the advance builds them, so each side fields
+	// nobody and the answer warns. Only one warning can be true: over unread
+	// lineups nothing is filled by number, so the members are never read.
 	var q kachinukiQueues
+	const caller = "engine.KachinukiRoster"
+	members := readKachinukiMembers(e.store.LoadSquads, compID, caller)
+	warning := ""
 	if err := e.readLineupRule(compID, comp.IsKnockoutEnabled(), located.PoolMatches, located.Bracket, func(rule *lineupRule) {
-		q = readKachinukiQueues(comp, parent, rule)
+		q = readKachinukiQueues(comp, parent, kachinukiLineups{lineupRule: rule}, members)
 	}); err != nil {
-		return KachinukiRoster{}, err
+		q = readKachinukiQueues(comp, parent, unreadKachinukiLineups(caller, compID, err), members)
+		warning = kachinukiLineupsUnreadWarning
+	}
+	if warning == "" {
+		warning = members.warning()
 	}
 	verdict, decided := decideKachinukiAdvance(comp, parent, q, true)
 	queueA, queueB, retiredA, retiredB := q.queueA, q.queueB, q.retiredA, q.retiredB
@@ -173,10 +209,13 @@ func (e *Engine) KachinukiRoster(compID, matchID string) (KachinukiRoster, error
 		SideA:       kachinukiRosterSide(queueA, retiredA, onA, liveRetiredA),
 		SideB:       kachinukiRosterSide(queueB, retiredB, onB, liveRetiredB),
 		NextPairing: decided && verdict.out.Next != nil,
+		Warning:     warning,
 	}
 	// Exhausted: a recorded win whose loser the advance found with nobody
-	// left (MatchEnded), on a lineup's queue only (see KachinukiRosterSide).
-	if decided && verdict.last.Recorded && verdict.out.MatchEnded {
+	// left (MatchEnded), on a side that fields someone only (see
+	// KachinukiRosterSide), and never under a warning: a file that could not
+	// be read may hold fighters the queue does not.
+	if warning == "" && decided && verdict.last.Recorded && verdict.out.MatchEnded {
 		switch verdict.out.WinningSide {
 		case "A":
 			out.SideB.Exhausted = verdict.lineupB
@@ -200,9 +239,6 @@ func kachinukiRosterSide(queue kachinukiSideQueue, retired RetiredMemberSet, on 
 	if onKnown && !IsMemberRetired(on, liveRetired, nil) {
 		f := KachinukiRosterFighter(on)
 		out.On = &f
-	}
-	if !out.LineupFound {
-		return out
 	}
 	// The advance's remaining list once the fighter on has retired: the same
 	// queue, the same filter, the retired set with the fighter on added.

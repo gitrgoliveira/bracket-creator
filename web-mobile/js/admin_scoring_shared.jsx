@@ -1378,7 +1378,15 @@ function lineupListPlacement({ pin, foot, clip }, bar) {
   return { up, maxHeight };
 }
 
-function LineupNameInput({ value, roster, onSelect, onListPick, disabled, ariaLabel, color, clearable, inputId, placeholder = "Add player…" }) {
+// `numberLabel` (the lineup panel's): the member number of the member the box
+// holds ("T1.3"). A box with a name reads it before the name while its list is
+// closed, drawn from the bar's data-number so the box's value stays the name
+// (typing edits the name only, and the number under the place name is the one
+// text node); a nameless member's box reads the number alone. `fieldedLabel`
+// (the panel's, kachinuki only): who the server fields in an EMPTY place
+// ("T1.1 Ishida"), shown as the placeholder in the input's own ink on the empty
+// box's amber treatment; it is never the value, so it is saved only when picked.
+function LineupNameInput({ value, roster, onSelect, onListPick, disabled, ariaLabel, color, clearable, inputId, placeholder = "Add player…", numberLabel = "", fieldedLabel = "" }) {
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(-1); // -1 = no explicit selection yet
@@ -1534,13 +1542,17 @@ function LineupNameInput({ value, roster, onSelect, onListPick, disabled, ariaLa
     }
   };
 
+  const fielded = !value && !numberLabel && !!fieldedLabel;
+  // A nameless member the box holds reads its number alone, in ink like a name.
+  const numberedOnly = !value && !!numberLabel;
   return (
-    <div className={`pmf lineup-name lineup-name--${color}${!value ? " lineup-name--empty" : ""}`} ref={ref}>
-      <div className="pmf__bar lineup-name__bar" ref={barRef}>
+    <div className={`pmf lineup-name lineup-name--${color}${!value ? " lineup-name--empty" : ""}${fielded ? " lineup-name--fielded" : ""}${numberedOnly ? " lineup-name--numbered" : ""}`} ref={ref}>
+      <div className="pmf__bar lineup-name__bar" ref={barRef}
+        data-number={!open && value && numberLabel ? numberLabel : undefined}>
         <input
           id={inputId}
           className="pmf__input"
-          placeholder={value || placeholder}
+          placeholder={value || numberLabel || fieldedLabel || placeholder}
           aria-label={ariaLabel}
           disabled={disabled}
           value={open ? query : (value || "")}

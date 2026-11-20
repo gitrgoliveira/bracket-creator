@@ -59,6 +59,10 @@ func TestScoreHandler_TypedFighterIsStoredTitleCased(t *testing.T) {
 		ID: "P1-0", SideA: "Ryu", SideB: "Tora", Status: state.MatchStatusRunning,
 		SubResults: []state.SubMatchResult{{Position: 1, SideA: "old name", SideB: "W-1", IpponsA: []string{"M"}, Winner: "old name"}},
 	}}))
+	// Bout 1's fighters are the match's lineup's, as the sheet saves a bout-1
+	// name to the lineup: the seat owns bout 1, so the text case is pinned on
+	// the row the write introduces (bout 2).
+	kachinukiMatchOpeners(t, store, compID, "P1-0", map[string]string{"Ryu": "old name", "Tora": "W-1"})
 
 	w := putScore(t, r, compID, "P1-0", map[string]any{
 		"sideA": "Ryu", "sideB": "Tora", "status": "running",
@@ -113,6 +117,14 @@ func TestScoreHandler_ResendOfAFinishWithATypedFighterIsAnsweredAsRecorded(t *te
 	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{{
 		ID: "P1-0", SideA: "Ryu", SideB: "Tora", Status: state.MatchStatusRunning,
 	}}))
+	// The typed bout-1 fighter is in the match's lineup, as the sheet saves a
+	// bout-1 name there (the fixture stores it as "Kato Jun"): the seat owns
+	// bout 1 and keeps it, so the first landing's "Kato Jun" is the lineup's as
+	// much as the write's. Without a lineup of its own the started match would
+	// field its nameless member 1 there. What this test is about is the resend:
+	// it still carries the typed "kato jun", and is answered as recorded only
+	// because the write title-cases it again before comparing.
+	kachinukiMatchOpeners(t, store, compID, "P1-0", map[string]string{"Ryu": "Kato Jun", "Tora": "W-1"})
 	at := time.Now().UnixMilli() - 5_000
 	finish := func() map[string]any {
 		return map[string]any{

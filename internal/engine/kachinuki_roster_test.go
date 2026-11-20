@@ -1,10 +1,7 @@
 package engine
 
 import (
-	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 	"testing"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
@@ -114,6 +111,7 @@ func TestKachinukiRoster_SplitsTheFighterOnFromTheQueue(t *testing.T) {
 			rosterBout(3, a[1], b[2], nil, false),
 		},
 	}}))
+	pinRosterLineups(t, store, comp.ID, rt, "Pool A-0")
 
 	got, err := eng.KachinukiRoster(comp.ID, "Pool A-0")
 	require.NoError(t, err)
@@ -144,6 +142,7 @@ func TestKachinukiRoster_FighterOnWithoutAnIdIsMatchedByName(t *testing.T) {
 		ID: "Pool A-0", SideA: "Ryu", SideAID: rt.aID, SideB: "Tora", SideBID: rt.bID, Status: state.MatchStatusRunning,
 		SubResults: []state.SubMatchResult{rosterBout(1, a[0], b[0], &b[0], false), live},
 	}}))
+	pinRosterLineups(t, store, comp.ID, rt, "Pool A-0")
 
 	got, err := eng.KachinukiRoster(comp.ID, "Pool A-0")
 	require.NoError(t, err)
@@ -168,6 +167,7 @@ func TestKachinukiRoster_SameNameIsSettledByMemberID(t *testing.T) {
 		ID: "Pool A-0", SideA: "Ryu", SideAID: rt.aID, SideB: "Tora", SideBID: rt.bID, Status: state.MatchStatusRunning,
 		SubResults: []state.SubMatchResult{recorded},
 	}}))
+	pinRosterLineups(t, store, comp.ID, rt, "Pool A-0")
 
 	got, err := eng.KachinukiRoster(comp.ID, "Pool A-0")
 	require.NoError(t, err)
@@ -500,7 +500,7 @@ func TestRemoveTrailingKachinukiBout_AManualBoutAfterExhaustionKeepsTheBoutRecor
 			// who has not fought (B3 in B2's place): asked again now, the
 			// advance would append a pairing. Remove still reads how the row
 			// got there, from the history (review round 4, finding 3).
-			b3 := replaceLineupPosition(t, store, comp.ID, rt.bID, rt.b, 2, "B3")
+			b3 := replaceLineupPosition(t, store, comp.ID, matchID, rt.bID, rt.b, 2, "B3")
 
 			updated, err := eng.RemoveTrailingKachinukiBout(comp.ID, matchID)
 			require.NoError(t, err)
@@ -548,7 +548,7 @@ func TestRemoveTrailingKachinukiBout_AnAdvanceOverARecordedBoutKeepsTheMark(t *t
 
 			// B's lineup gains B3, and Record bout is tapped again: it appends
 			// A1 v B3 but sets no mark (bout 2 was already recorded).
-			b3 := replaceLineupPosition(t, store, comp.ID, rt.bID, b, 2, "B3")
+			b3 := replaceLineupPosition(t, store, comp.ID, matchID, rt.bID, b, 2, "B3")
 			appended, post, err = eng.MaybeAdvanceKachinuki(comp.ID, matchID)
 			require.NoError(t, err)
 			require.True(t, appended)
@@ -573,14 +573,17 @@ func TestRemoveTrailingKachinukiBout_AnAdvanceOverARecordedBoutKeepsTheMark(t *t
 	}
 }
 
-// replaceLineupPosition edits a team's starting lineup: members in order, with
-// the member at pos (1-based) replaced by a new member named name, or with the
-// lineup cut to the positions before pos when name is "". It returns the new
-// member (zero when cut).
-func replaceLineupPosition(t *testing.T, store *state.Store, compID, teamID string, members []domain.TeamMember, pos int, name string) domain.TeamMember {
+// replaceLineupPosition edits the lineup a team fields at matchID, the match's
+// own (a started match fields no other): members in order, with the member at
+// pos (1-based) replaced by a new member named name, or with the lineup cut to
+// the positions before pos when name is "". It returns the new member (zero
+// when cut). A cut lineup's empty places are filled by member number when the
+// read can read the team members, so a cut leaves the team with fewer fighters
+// only when they cannot be read (makeTeamMembersUnreadable).
+func replaceLineupPosition(t *testing.T, store *state.Store, compID, matchID, teamID string, members []domain.TeamMember, pos int, name string) domain.TeamMember {
 	t.Helper()
 	var added domain.TeamMember
-	l := domain.TeamLineup{TeamID: teamID, Round: 0, Positions: map[domain.Position]string{}, MemberIDs: map[domain.Position]string{}}
+	l := domain.TeamLineup{TeamID: teamID, MatchID: matchID, Positions: map[domain.Position]string{}, MemberIDs: map[domain.Position]string{}}
 	for i, m := range members {
 		p := i + 1
 		if p == pos {
@@ -620,9 +623,11 @@ func TestRemoveTrailingKachinukiBout_AnAppendedPairingUnrecordsAfterALineupEdit(
 			require.True(t, appended)
 			require.True(t, post.BoutLog[0].Recorded)
 
-			// B's lineup cut to B1 alone: asked now, the advance would append
-			// nothing after bout 1.
-			replaceLineupPosition(t, store, comp.ID, rt.bID, b, 2, "")
+			// B's lineup cut to B1 alone, with the team members unreadable so
+			// nothing fills the cut by number: asked now, the advance would
+			// append nothing after bout 1.
+			replaceLineupPosition(t, store, comp.ID, matchID, rt.bID, b, 2, "")
+			makeTeamMembersUnreadable(t, store, comp.ID)
 
 			updated, err := eng.RemoveTrailingKachinukiBout(comp.ID, matchID)
 			require.NoError(t, err)
@@ -694,8 +699,11 @@ func TestRemoveTrailingKachinukiBout_AReusedPositionReadsItsCurrentRow(t *testin
 				require.NoError(t, err)
 				require.False(t, storedSubs(t, store, comp.ID, matchID, bracket)[0].Recorded)
 
-				// B cut to B1: Record bout now closes bout 1 and appends nothing.
-				replaceLineupPosition(t, store, comp.ID, rt.bID, b, 2, "")
+				// B cut to B1, with the team members unreadable so nothing fills
+				// the cut by number: Record bout now closes bout 1 and appends
+				// nothing.
+				replaceLineupPosition(t, store, comp.ID, matchID, rt.bID, b, 2, "")
+				makeTeamMembersUnreadable(t, store, comp.ID)
 				appended, post, err := eng.MaybeAdvanceKachinuki(comp.ID, matchID)
 				require.NoError(t, err)
 				require.False(t, appended)
@@ -1108,33 +1116,85 @@ func storedSubs(t *testing.T, store *state.Store, compID, matchID string, bracke
 	return bm.SubResults
 }
 
-// A side with no lineup in force reads no fighters at all: the bout log knows
-// only who has fought, so a count from it would be false. Its fighter on is
-// still named.
-func TestKachinukiRoster_ASideWithNoLineupReadsNoFighters(t *testing.T) {
-	eng, store, comp := setupKachinukiComp(t, "kachinuki-roster-no-lineup", 3,
-		func(c *state.Competition) { c.Format = state.CompFormatMixed })
-	rt := seedRosterTeams(t, store, comp.ID, 3,
-		[]string{"A1", "A2", "A3"}, []string{"B1", "B2", "B3"}, true, false)
-	require.NoError(t, store.SavePoolMatches(comp.ID, []state.MatchResult{{
-		ID: "Pool A-0", SideA: "Ryu", SideAID: rt.aID, SideB: "Tora", SideBID: rt.bID, Status: state.MatchStatusRunning,
-		SubResults: []state.SubMatchResult{rosterBout(1, rt.a[0], rt.b[0], nil, false)},
-	}}))
+// A side with no lineup fields its members by number (operator decision K1
+// (a)), so the read names its queue like a lineup's. A side that fields nobody
+// (here no lineup and team members that cannot be read) has an empty queue
+// (operator decision K2), so it lists nobody remaining. Its fighter on is still
+// named.
+func TestKachinukiRoster_ASideWithNoLineupFieldsItsMembersByNumber(t *testing.T) {
+	t.Run("a team with members", func(t *testing.T) {
+		eng, store, comp := setupKachinukiComp(t, "kachinuki-roster-no-lineup", 3,
+			func(c *state.Competition) { c.Format = state.CompFormatMixed })
+		rt := seedRosterTeams(t, store, comp.ID, 3,
+			[]string{"A1", "A2", "A3"}, []string{"B1", "B2", "B3"}, true, false)
+		matchID := saveRosterMatch(t, store, comp.ID, rt, []state.SubMatchResult{rosterBout(1, rt.a[0], rt.b[0], nil, false)}, false)
 
-	got, err := eng.KachinukiRoster(comp.ID, "Pool A-0")
-	require.NoError(t, err)
-	assert.True(t, got.SideA.LineupFound)
-	assert.Equal(t, memberIDs(rt.a[1:]...), rosterIDs(got.SideA))
-	assert.False(t, got.SideB.LineupFound)
-	assert.Equal(t, rt.b[0].ID, onID(got.SideB))
-	assert.NotNil(t, got.SideB.Remaining, "the wire carries [] rather than null")
-	assert.Empty(t, got.SideB.Remaining)
+		got, err := eng.KachinukiRoster(comp.ID, matchID)
+		require.NoError(t, err)
+		assert.True(t, got.SideA.LineupFound)
+		assert.Equal(t, memberIDs(rt.a[1:]...), rosterIDs(got.SideA))
+		assert.True(t, got.SideB.LineupFound, "no lineup: members 1 to 3 by number")
+		assert.Equal(t, rt.b[0].ID, onID(got.SideB))
+		assert.Equal(t, memberIDs(rt.b[1:]...), rosterIDs(got.SideB))
+		assert.Empty(t, got.Warning)
+	})
+	t.Run("a side that fields nobody", func(t *testing.T) {
+		eng, store, comp := setupKachinukiComp(t, "kachinuki-roster-fields-nobody", 3,
+			func(c *state.Competition) { c.Format = state.CompFormatMixed })
+		rt := seedRosterTeams(t, store, comp.ID, 3,
+			[]string{"A1", "A2", "A3"}, []string{"B1", "B2", "B3"}, true, false)
+		matchID := saveRosterMatch(t, store, comp.ID, rt, []state.SubMatchResult{rosterBout(1, rt.a[0], rt.b[0], nil, false)}, false)
+		makeTeamMembersUnreadable(t, store, comp.ID)
+
+		got, err := eng.KachinukiRoster(comp.ID, matchID)
+		require.NoError(t, err)
+		assert.True(t, got.SideA.LineupFound, "side A's lineup names every place: no members needed")
+		assert.False(t, got.SideB.LineupFound)
+		assert.Equal(t, rt.b[0].ID, onID(got.SideB))
+		assert.NotNil(t, got.SideB.Remaining, "the wire carries [] rather than null")
+		assert.Empty(t, got.SideB.Remaining)
+	})
 }
 
-// A lineup in force that fields nobody (the match's own empty lineup, which
-// shows none) is no lineup for the read: never "last fighter" off an empty
-// list.
-func TestKachinukiRoster_AnEmptyLineupInForceIsNoLineup(t *testing.T) {
+// A roster answer that carries a warning never says "no fighters left" (plan
+// section 3). Tora's lineup holds only a bout-1 pick and team-members.yaml
+// cannot be read, so its queue is that one fighter and it reads as fielding
+// members: after B1 loses and Record bout closes the bout, the advance finds
+// nobody left (MatchEnded), but the team has more members the read could not
+// see, so neither side is exhausted and the answer carries the members warning.
+func TestKachinukiRoster_AWarningNeverAnswersExhausted(t *testing.T) {
+	for _, bracket := range []bool{false, true} {
+		t.Run(branchName(bracket), func(t *testing.T) {
+			eng, store, comp := setupKachinukiComp(t, "kachinuki-roster-warning-not-exhausted", 3,
+				func(c *state.Competition) { c.Format = state.CompFormatMixed })
+			rt := seedRosterTeams(t, store, comp.ID, 3,
+				[]string{"A1", "A2", "A3"}, []string{"B1", "B2", "B3"}, true, true)
+			matchID := saveRosterMatch(t, store, comp.ID, rt,
+				[]state.SubMatchResult{rosterBout(1, rt.a[0], rt.b[0], &rt.a[0], false)}, bracket)
+			replaceLineupPosition(t, store, comp.ID, matchID, rt.bID, rt.b, 2, "")
+			makeTeamMembersUnreadable(t, store, comp.ID)
+
+			appended, post, err := eng.MaybeAdvanceKachinuki(comp.ID, matchID)
+			require.NoError(t, err)
+			require.False(t, appended, "Tora's queue held B1 alone: nothing to append")
+			require.NotNil(t, post)
+			require.True(t, post.BoutLog[0].Recorded)
+
+			got, err := eng.KachinukiRoster(comp.ID, matchID)
+			require.NoError(t, err)
+			assert.Equal(t, kachinukiMembersUnreadWarning, got.Warning)
+			assert.True(t, got.SideB.LineupFound, "the bout-1 pick is a lineup naming someone")
+			assert.False(t, got.SideB.Exhausted, "a warning never answers no fighters left")
+			assert.False(t, got.SideA.Exhausted)
+			assert.False(t, got.NextPairing, "nextPairing stays the advance's own decision")
+		})
+	}
+}
+
+// A lineup in force that names nobody (the match's own empty lineup) has
+// every place empty, so it is filled by member number (Q2): the side fields
+// its members 1 to team size, never "last fighter" off an empty list.
+func TestKachinukiRoster_AnEmptyOwnLineupIsFilledByNumber(t *testing.T) {
 	eng, store, comp := setupKachinukiComp(t, "kachinuki-roster-empty-lineup", 3,
 		func(c *state.Competition) { c.Format = state.CompFormatMixed })
 	rt := seedRosterTeams(t, store, comp.ID, 3,
@@ -1143,6 +1203,7 @@ func TestKachinukiRoster_AnEmptyLineupInForceIsNoLineup(t *testing.T) {
 		ID: "Pool A-0", SideA: "Ryu", SideAID: rt.aID, SideB: "Tora", SideBID: rt.bID, Status: state.MatchStatusRunning,
 		SubResults: []state.SubMatchResult{rosterBout(1, rt.a[0], rt.b[0], nil, false)},
 	}}))
+	pinRosterLineups(t, store, comp.ID, rt, "Pool A-0")
 	require.NoError(t, store.SetTeamLineup(comp.ID, domain.TeamLineup{
 		TeamID: rt.bID, MatchID: "Pool A-0", Positions: map[domain.Position]string{},
 	}, 3))
@@ -1150,8 +1211,8 @@ func TestKachinukiRoster_AnEmptyLineupInForceIsNoLineup(t *testing.T) {
 	got, err := eng.KachinukiRoster(comp.ID, "Pool A-0")
 	require.NoError(t, err)
 	assert.True(t, got.SideA.LineupFound)
-	assert.False(t, got.SideB.LineupFound, "the empty own lineup fields nobody")
-	assert.Empty(t, got.SideB.Remaining)
+	assert.True(t, got.SideB.LineupFound, "the empty own lineup is filled by member number")
+	assert.Equal(t, memberIDs(rt.b[1:]...), rosterIDs(got.SideB))
 	assert.Equal(t, rt.b[0].ID, onID(got.SideB), "the fighter on is still named")
 }
 
@@ -1163,6 +1224,7 @@ func TestKachinukiRoster_NoBoutYet(t *testing.T) {
 	require.NoError(t, store.SavePoolMatches(comp.ID, []state.MatchResult{{
 		ID: "Pool A-0", SideA: "Ryu", SideAID: rt.aID, SideB: "Tora", SideBID: rt.bID, Status: state.MatchStatusRunning,
 	}}))
+	pinRosterLineups(t, store, comp.ID, rt, "Pool A-0")
 
 	got, err := eng.KachinukiRoster(comp.ID, "Pool A-0")
 	require.NoError(t, err)
@@ -1192,23 +1254,8 @@ func TestKachinukiRoster_Refusals(t *testing.T) {
 		var notFound *NotFoundError
 		assert.ErrorAs(t, err, &notFound, "the handler answers it 404")
 	})
-	// The read answers an unreadable lineups.yaml with the error, never with
-	// "no lineup": the advance alone degrades to the bout log there.
-	t.Run("lineups that cannot be read", func(t *testing.T) {
-		eng, store, dir := setupTestEngine(t)
-		comp := &state.Competition{ID: "kachinuki-roster-unreadable", Kind: "team", TeamSize: 2,
-			TeamMatchType: state.TeamMatchTypeKachinuki, Format: state.CompFormatMixed}
-		require.NoError(t, store.SaveCompetition(comp))
-		require.NoError(t, store.SavePoolMatches(comp.ID, []state.MatchResult{{
-			ID: "Pool A-0", SideA: "Ryu", SideB: "Tora", Status: state.MatchStatusRunning,
-		}}))
-		// A directory where the file should be: every read fails, even as root.
-		require.NoError(t, os.Mkdir(filepath.Join(dir, "competitions", comp.ID, "lineups.yaml"), 0o755))
-		_, err := eng.KachinukiRoster(comp.ID, "Pool A-0")
-		assert.Error(t, err)
-		var notFound *NotFoundError
-		assert.False(t, errors.As(err, &notFound), "an unreadable file is no not-found")
-	})
+	// An unreadable lineups.yaml is no refusal: the read answers over no lineup
+	// with the lineups warning (kachinuki_roster_lineups_unread_test.go).
 }
 
 // The consistency pin: the advisory read and the advance build the queues
@@ -1216,8 +1263,8 @@ func TestKachinukiRoster_Refusals(t *testing.T) {
 // the fighter the read names as the losing side's NEXT is the one the advance
 // appends once the fighter on loses, and after the append each side's fighter
 // on is the appended pairing's. Run on a pool match and a bracket match, with
-// lineups (the advisory names the queue) and without (the advance still pairs
-// from the bout log, and the advisory reads no fighters).
+// lineups and without (each side then fields its members by number, and the
+// advisory names that queue).
 func TestKachinukiRoster_NamesTheFighterTheAdvanceAppends(t *testing.T) {
 	type place struct {
 		name    string
@@ -1275,28 +1322,34 @@ func TestKachinukiRoster_NamesTheFighterTheAdvanceAppends(t *testing.T) {
 				func(c *state.Competition) { c.Format = state.CompFormatMixed })
 			rt := seedRosterTeams(t, store, comp.ID, 3,
 				[]string{"A1", "A2", "A3"}, []string{"B1", "B2", "B3"}, false, false)
-			// The bout log's queue holds only the fighters it has seen: B1
-			// beat A1, then A2 beat B2, so the advance pairs A2 (who stayed
-			// on) with B1, the one B fighter seen and not retired.
+			// No lineups: each side fields its members by number. B1 beat A1,
+			// then A2 beat B2, so the advance pairs A2 (who stayed on) with B1,
+			// the first B member by number not retired.
 			bouts := []state.SubMatchResult{
 				rosterBout(1, rt.a[0], rt.b[0], &rt.b[0], false),
 				rosterBout(2, rt.a[1], rt.b[1], &rt.a[1], false),
 			}
 			matchID := saveRosterMatch(t, store, comp.ID, rt, bouts, p.bracket)
 
+			before, err := eng.KachinukiRoster(comp.ID, matchID)
+			require.NoError(t, err)
+			require.NotEmpty(t, before.SideB.Remaining)
+			nextB := before.SideB.Remaining[0].MemberID
+
 			changed, post, err := eng.MaybeAdvanceKachinuki(comp.ID, matchID)
 			require.NoError(t, err)
-			require.True(t, changed, "the advance still pairs from the bout log")
+			require.True(t, changed, "the advance pairs by member number")
 			appended := post.BoutLog[len(post.BoutLog)-1]
 			assert.Equal(t, rt.a[1].ID, appended.SideAMemberID)
 			assert.Equal(t, rt.b[0].ID, appended.SideBMemberID)
+			assert.Equal(t, nextB, appended.SideBMemberID, "the read named the fighter the advance sent in")
 
 			got, err := eng.KachinukiRoster(comp.ID, matchID)
 			require.NoError(t, err)
-			assert.False(t, got.SideA.LineupFound)
-			assert.False(t, got.SideB.LineupFound)
-			assert.Empty(t, got.SideA.Remaining)
-			assert.Empty(t, got.SideB.Remaining)
+			assert.True(t, got.SideA.LineupFound, "fielded by number")
+			assert.True(t, got.SideB.LineupFound, "fielded by number")
+			assert.Equal(t, memberIDs(rt.a[2]), rosterIDs(got.SideA))
+			assert.Equal(t, memberIDs(rt.b[2]), rosterIDs(got.SideB))
 			assert.Equal(t, rt.a[1].ID, onID(got.SideA), "the appended pairing is on")
 			assert.Equal(t, rt.b[0].ID, onID(got.SideB))
 		})
@@ -1312,6 +1365,9 @@ func saveRosterMatch(t *testing.T, store *state.Store, compID string, rt rosterT
 }
 
 // saveRosterMatchAt is saveRosterMatch with the match stamped at modifiedAt.
+// The match is running, so it is pinned as a start pins it: each team's
+// starting lineup is copied as the match's own (pinRosterLineups), since a
+// started match fields only a lineup of its own.
 func saveRosterMatchAt(t *testing.T, store *state.Store, compID string, rt rosterTeams, bouts []state.SubMatchResult, bracket bool, modifiedAt int64) string {
 	t.Helper()
 	bouts = append([]state.SubMatchResult(nil), bouts...)
@@ -1320,11 +1376,45 @@ func saveRosterMatchAt(t *testing.T, store *state.Store, compID string, rt roste
 			ID: "Pool A-0", SideA: "Ryu", SideAID: rt.aID, SideB: "Tora", SideBID: rt.bID,
 			Status: state.MatchStatusRunning, SubResults: bouts, ModifiedAt: modifiedAt,
 		}}))
+		pinRosterLineups(t, store, compID, rt, "Pool A-0")
 		return "Pool A-0"
 	}
 	require.NoError(t, store.SaveBracket(compID, &state.Bracket{Rounds: [][]state.BracketMatch{{{
 		ID: "r0-m0", SideA: "Ryu", SideAID: rt.aID, SideB: "Tora", SideBID: rt.bID,
 		Status: state.MatchStatusRunning, SubResults: bouts, ModifiedAt: modifiedAt,
 	}}}}))
+	pinRosterLineups(t, store, compID, rt, "r0-m0")
 	return "r0-m0"
+}
+
+// pinRosterLineups copies each team's starting lineup as matchID's own, as the
+// pin a start takes, unless the match already holds one for that team (a
+// re-save of the match keeps the lineup it has). A team with no starting
+// lineup gets none.
+func pinRosterLineups(t *testing.T, store *state.Store, compID string, rt rosterTeams, matchID string) {
+	t.Helper()
+	comp, err := store.LoadCompetition(compID)
+	require.NoError(t, err)
+	lineups, err := store.LoadTeamLineups(compID)
+	require.NoError(t, err)
+	for _, teamID := range []string{rt.aID, rt.bID} {
+		var start *domain.TeamLineup
+		own := false
+		for _, l := range lineups {
+			if l.TeamID != teamID {
+				continue
+			}
+			switch {
+			case l.MatchID == matchID:
+				own = true
+			case l.MatchID == "" && l.Round == 0:
+				start = &l
+			}
+		}
+		if own || start == nil {
+			continue
+		}
+		pin := domain.TeamLineup{TeamID: teamID, MatchID: matchID, Positions: start.Positions, MemberIDs: start.MemberIDs}
+		require.NoError(t, store.SetTeamLineup(compID, pin, comp.TeamSize))
+	}
 }

@@ -119,6 +119,16 @@ func TestLineupWrite_RenamesKachinukiBoutOneAndAnnouncesTheMatch(t *testing.T) {
 		ID: "Pool A-0", SideA: a.Name, SideAID: a.ID, SideB: b.Name, SideBID: b.ID, Status: state.MatchStatusRunning,
 		SubResults: []state.SubMatchResult{{Position: 1, SideA: "Sato", SideB: "Ito", IpponsA: []string{"M"}, IpponsB: []string{}, Winner: "Sato"}},
 	}}))
+	// The running match carries the lineups its start kept, naming the
+	// fighters bout 1 holds (pinStartLineups). Without one of its own a started
+	// match fields its members by number (K1 (c)), so team B's bout-1 fighter
+	// would be its nameless member 1, not Ito.
+	for team, opener := range map[string]string{a.ID: "Sato", b.ID: "Ito"} {
+		require.NoError(t, store.SetTeamLineup("k1", domain.TeamLineup{
+			TeamID: team, MatchID: "Pool A-0",
+			Positions: map[domain.Position]string{domain.PositionNumbered(1): opener},
+		}, 3))
+	}
 	eng := engine.New(store)
 	_, err = eng.RecordScoreEvents("k1", "Pool A-0", engine.ScoreEventsRequest{Session: "s", Events: []domain.ScoreEvent{
 		{ID: "e1", Session: "s", Seq: 1, Stamp: time.Now().UnixMilli() - 1000, Kind: domain.ScoreIpponAdd, Pos: 1, Side: domain.ScoreSideA, Letter: "K"},

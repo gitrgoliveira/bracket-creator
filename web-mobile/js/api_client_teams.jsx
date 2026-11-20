@@ -141,6 +141,29 @@ export const teamsApi = {
     async fetchLineupInForce(compID, teamId, matchId) {
         return _readLineup(`/api/competitions/${compID}/teams/${teamId}/lineup-in-force/${matchId}`);
     },
+    // Who a kachinuki team fields by member number in the empty places of a
+    // lineup form (operator answers D2 and D3): a READ that carries the form,
+    // `{ positions, memberIds }` as it stands, saved or not, and writes nothing
+    // (engine.KachinukiFieldedPlaces, the fill bout 1 is seated from). Answers
+    // the position key to member id map; `{}` on any failure, a timeout or a
+    // non-OK answer, since a default is a convenience and never a reason to show
+    // an error. Public, bounded like every read (_fetchJson), never queued.
+    async fetchFieldedLineup(compID, teamId, matchId, form = {}) {
+        try {
+            const { res, body } = await _fetchJson(
+                `/api/competitions/${encodeURIComponent(compID)}/teams/${encodeURIComponent(teamId)}/fielded-lineup/${encodeURIComponent(matchId)}`,
+                {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ positions: form.positions || {}, memberIds: form.memberIds || {} }),
+                });
+            const places = body && body.fieldedMemberIds;
+            if (!res.ok || !places || typeof places !== 'object' || Array.isArray(places)) return {};
+            return places;
+        } catch (_e) {
+            return {};
+        }
+    },
     // bc-kfnl: a kachinuki encounter's fighters each side has left, for the
     // advisory line above the live bout (kachinuki_advisory.jsx). The server
     // reads it through the same call that appends the next pairing. Public,

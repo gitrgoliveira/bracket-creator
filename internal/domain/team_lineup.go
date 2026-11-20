@@ -842,6 +842,70 @@ func (t TeamLineup) OrderedMembers(teamSize int) []LineupSlot {
 	return out
 }
 
+// FilledByMemberNumber is a copy of t whose empty positions are each given a
+// team member by number: walking canonicalPositionOrder(teamSize) (the FIK names
+// for 5, numbered otherwise), a vacant position takes the lowest-Index member
+// with Index in 1..teamSize whose id the lineup does not hold at another
+// position. It is a read-time derivation for kachinuki, never stored: carrying a
+// lineup rebuilds its positions, so a stored fill would be wiped.
+//
+// A position is occupied as OrderedMembers counts it (a name or an id), so a
+// typed name with no id keeps its place and blocks no member. A member's name,
+// blank or not, fills; a reserve (Index above teamSize) never does, though one
+// placed in the lineup blocks no regular from the other places. A member with no
+// id cannot be placed by id and is skipped. When fewer members than empty
+// positions are left the rest stay empty. Name and id are copied into Positions
+// and MemberIDs; nothing else of t changes, and the result shares no map with t.
+func (t TeamLineup) FilledByMemberNumber(teamSize int, members []TeamMember) TeamLineup {
+	out := t
+	out.Positions = maps.Clone(t.Positions)
+	out.MemberIDs = maps.Clone(t.MemberIDs)
+	out.Stamps = maps.Clone(t.Stamps)
+
+	placed := make(map[string]struct{}, len(t.MemberIDs))
+	for _, id := range t.MemberIDs {
+		if id != "" {
+			placed[id] = struct{}{}
+		}
+	}
+	regulars := make([]TeamMember, 0, len(members))
+	for _, m := range members {
+		if m.ID != "" && m.Index >= 1 && m.Index <= teamSize {
+			regulars = append(regulars, m)
+		}
+	}
+	slices.SortStableFunc(regulars, func(a, b TeamMember) int { return cmp.Compare(a.Index, b.Index) })
+
+	next := 0
+	for _, pos := range canonicalPositionOrder(teamSize) {
+		if t.Positions[pos] != "" || t.MemberIDs[pos] != "" {
+			continue
+		}
+		for next < len(regulars) {
+			if _, held := placed[regulars[next].ID]; !held {
+				break
+			}
+			next++
+		}
+		if next >= len(regulars) {
+			break
+		}
+		m := regulars[next]
+		next++
+		if out.Positions == nil {
+			out.Positions = map[Position]string{}
+		}
+		if out.MemberIDs == nil {
+			out.MemberIDs = map[Position]string{}
+		}
+		if m.Name != "" {
+			out.Positions[pos] = m.Name
+		}
+		out.MemberIDs[pos] = m.ID
+	}
+	return out
+}
+
 // PositionForBout returns the lineup Position that fights numbered bout
 // `bout` (1-based) of a team match: the bout-th entry of the canonical order
 // OrderedMembers walks. False when bout is outside 1..teamSize.

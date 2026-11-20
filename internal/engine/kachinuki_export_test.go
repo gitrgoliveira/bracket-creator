@@ -289,6 +289,13 @@ func TestCollectKachinukiMatches_PoolMatchesWithBouts(t *testing.T) {
 	assert.Len(t, out[2].Bouts, 1)
 }
 
+// positionsOf is kachinukiPositionsForMatch over compID's lineups and team
+// members as the export reads them.
+func positionsOf(eng *Engine, compID string, poolMatches []state.MatchResult, m *state.MatchResult, teamSize int) map[string]string {
+	rule := eng.readKachinukiLineups("test", compID, true, poolMatches, nil)
+	return kachinukiPositionsForMatch(rule, readKachinukiMembers(eng.store.LoadSquads, compID, "test"), m, teamSize)
+}
+
 // TestKachinukiPositions_StartingLineup verifies that a saved team lineup is
 // mapped to the (team, player) → position lookup of a match that has none of
 // its own.
@@ -315,8 +322,8 @@ func TestKachinukiPositions_StartingLineup(t *testing.T) {
 		},
 	}, 5))
 
-	posMap := eng.lineupRuleOrNone("test", compID, true, nil, nil).positionsForMatch(
-		&state.MatchResult{ID: "P1-0", SideA: "RedTeam", SideAID: "red-id", SideB: "WhiteTeam", SideBID: "white-id"}, 5)
+	posMap := positionsOf(eng, compID, nil,
+		&state.MatchResult{ID: "P1-0", SideA: "RedTeam", SideAID: "red-id", SideB: "WhiteTeam", SideBID: "white-id", Status: state.MatchStatusScheduled}, 5)
 
 	assert.Equal(t, "Senpo", posMap[lineupKey("RedTeam", "R-Senpo")])
 	assert.Equal(t, "Jiho", posMap[lineupKey("RedTeam", "R-Jiho")])
@@ -368,20 +375,18 @@ func TestKachinukiPositions_ParticipantIDKeyed(t *testing.T) {
 		Positions: map[domain.Position]string{domain.PosSenpo: "R-ByName"},
 	}, 5))
 
-	rule := eng.lineupRuleOrNone("test", compID, true, nil, nil)
-
 	t.Run("by id", func(t *testing.T) {
-		posMap := rule.positionsForMatch(&state.MatchResult{ID: "SF-1", SideA: "RedTeam", SideAID: redID}, 5)
+		posMap := positionsOf(eng, compID, nil, &state.MatchResult{ID: "SF-1", SideA: "RedTeam", SideAID: redID}, 5)
 		assert.Equal(t, "Senpo", resolveKachinukiPosition(posMap, "RedTeam", "R-Sub"), "the match's own lineup")
 		assert.Empty(t, resolveKachinukiPosition(posMap, "RedTeam", "R-Jiho"), "the own lineup replaces the starting one")
 	})
 
 	t.Run("a side with only the team's name has no lineup", func(t *testing.T) {
-		posMap := rule.positionsForMatch(&state.MatchResult{ID: "SF-1", SideA: "RedTeam"}, 5)
+		posMap := positionsOf(eng, compID, nil, &state.MatchResult{ID: "SF-1", SideA: "RedTeam"}, 5)
 		assert.Empty(t, posMap, "the roster knows the name, and a lineup stored under it is not the team's either")
 	})
 
-	other := rule.positionsForMatch(&state.MatchResult{ID: "SF-2", SideA: "RedTeam", SideAID: redID}, 5)
+	other := positionsOf(eng, compID, nil, &state.MatchResult{ID: "SF-2", SideA: "RedTeam", SideAID: redID, Status: state.MatchStatusScheduled}, 5)
 	assert.Equal(t, "Jiho", resolveKachinukiPosition(other, "RedTeam", "R-Jiho"), "a match with no lineup of its own falls back to the starting lineup")
 }
 
@@ -408,6 +413,80 @@ func TestKachinukiDetailMatches_UnreadableLineupsLabelNothingAndSayWhy(t *testin
 	require.Len(t, out[0].Bouts, 1)
 	assert.Empty(t, out[0].Bouts[0].SideAPos)
 	assert.Contains(t, logged, "lineups.yaml", "the failure is logged, naming the file")
+}
+
+// A team with no saved lineup fields its members by number, so the export labels
+// member i with position i of the team size (Q7), on a match that has started
+// with nothing of its own.
+func TestKachinukiDetailMatches_NumberSeatedMembersAreLabelledByTheirNumber(t *testing.T) {
+	eng, store, comp := setupKachinukiComp(t, "kx-number-seated", 3, func(c *state.Competition) { c.Format = state.CompFormatMixed })
+	aID, bID := numberedTeams(t, store, comp.ID)
+	a := teamMemberIDs(t, store, comp.ID, aID, 3)
+	b := teamMemberIDs(t, store, comp.ID, bID, 3)
+	require.NoError(t, store.SavePoolMatches(comp.ID, []state.MatchResult{{
+		ID: "P1-0", SideA: "Ryu", SideAID: aID, SideB: "Tora", SideBID: bID, Status: state.MatchStatusRunning,
+		SubResults: []state.SubMatchResult{
+			numberBout(1, a[0], b[0], "Tora", b[0]),
+			numberBout(2, a[1], b[0], "Tora", b[0]),
+		},
+	}}))
+
+	out, err := eng.KachinukiDetailMatches(comp.ID)
+
+	require.NoError(t, err)
+	require.Len(t, out, 1)
+	require.Len(t, out[0].Bouts, 2)
+	assert.Equal(t, "Senpo", out[0].Bouts[0].SideAPos, "member 1 of a team with no lineup fights from position 1")
+	assert.Equal(t, "Senpo", out[0].Bouts[0].SideBPos)
+	assert.Equal(t, "Chuken", out[0].Bouts[1].SideAPos, "member 2 is position 2 of the team size")
+	assert.Equal(t, "Senpo", out[0].Bouts[1].SideBPos, "the winner stays on at member 1's place")
+}
+
+// A saved lineup's empty places are filled by member number too: a lineup naming
+// only member 3 at the first place labels members 1 and 2 at the places left.
+func TestKachinukiPositions_ASavedLineupsEmptyPlacesAreFilledByNumber(t *testing.T) {
+	eng, store, comp := setupKachinukiComp(t, "kx-partial-lineup", 3, func(c *state.Competition) { c.Format = state.CompFormatMixed })
+	aID, _ := numberedTeams(t, store, comp.ID)
+	a := teamMemberIDs(t, store, comp.ID, aID, 3)
+	sano, err := store.RenameTeamMember(comp.ID, aID, a[2], "Sano")
+	require.NoError(t, err)
+	require.NoError(t, store.SetTeamLineup(comp.ID, domain.TeamLineup{
+		TeamID:    aID,
+		Positions: map[domain.Position]string{domain.PositionNumbered(1): "Sano"},
+		MemberIDs: map[domain.Position]string{domain.PositionNumbered(1): sano.ID},
+	}, 3))
+
+	posMap := positionsOf(eng, comp.ID, nil, &state.MatchResult{ID: "P1-0", SideA: "Ryu", SideAID: aID, Status: state.MatchStatusScheduled}, 3)
+
+	assert.Equal(t, "Senpo", posMap[lineupKey("Ryu", memberKey(a[2]))], "the member the lineup names keeps its place")
+	assert.Equal(t, "Chuken", posMap[lineupKey("Ryu", memberKey(a[0]))], "member 1 takes the first empty place")
+	assert.Equal(t, "Taisho", posMap[lineupKey("Ryu", memberKey(a[1]))], "member 2 takes the next")
+}
+
+// A team-members.yaml that cannot be read leaves the export's labels blank rather
+// than failing it, and the failure is logged as an ERROR naming the file.
+func TestKachinukiDetailMatches_UnreadableTeamMembersLabelNothingAndSayWhy(t *testing.T) {
+	eng, store, comp := setupKachinukiComp(t, "kx-unreadable-members", 3, func(c *state.Competition) { c.Format = state.CompFormatMixed })
+	aID, bID := numberedTeams(t, store, comp.ID)
+	a := teamMemberIDs(t, store, comp.ID, aID, 3)
+	b := teamMemberIDs(t, store, comp.ID, bID, 3)
+	require.NoError(t, store.SavePoolMatches(comp.ID, []state.MatchResult{{
+		ID: "P1-0", SideA: "Ryu", SideAID: aID, SideB: "Tora", SideBID: bID, Status: state.MatchStatusRunning,
+		SubResults: []state.SubMatchResult{numberBout(1, a[0], b[0], "Tora", b[0])},
+	}}))
+	makeTeamMembersUnreadable(t, store, comp.ID)
+
+	var out []helper.KachinukiMatchDetail
+	var err error
+	logged := captureLog(t, func() { out, err = eng.KachinukiDetailMatches(comp.ID) })
+
+	require.NoError(t, err, "an unreadable team-members.yaml does not fail the export")
+	require.Len(t, out, 1)
+	require.Len(t, out[0].Bouts, 1)
+	assert.Empty(t, out[0].Bouts[0].SideAPos)
+	assert.Empty(t, out[0].Bouts[0].SideALabel)
+	assert.Equal(t, 1, strings.Count(logged, "engine: ERROR: engine.collectKachinukiMatches compId="+comp.ID+": team-members.yaml load error:"),
+		"the file is read, and its failure logged, once per export")
 }
 
 // TestCollectKachinukiMatches_WithBracketStub verifies that a bracket match
@@ -992,13 +1071,13 @@ func TestKachinukiPositions_MatchScopedLineupReachesLaterMatchesOnly(t *testing.
 	}, 5))
 
 	poolMatches := []state.MatchResult{
-		{ID: "Pool A-0", SideA: "TeamA", SideAID: teamID, SideB: "TeamB", SideBID: "team-b-id"},
-		{ID: "Pool A-1", SideA: "TeamA", SideAID: teamID, SideB: "TeamC", SideBID: "team-c-id"},
-		{ID: "Pool A-2", SideA: "TeamA", SideAID: teamID, SideB: "TeamD", SideBID: "team-d-id"},
+		{ID: "Pool A-0", SideA: "TeamA", SideAID: teamID, SideB: "TeamB", SideBID: "team-b-id", Status: state.MatchStatusScheduled},
+		{ID: "Pool A-1", SideA: "TeamA", SideAID: teamID, SideB: "TeamC", SideBID: "team-c-id", Status: state.MatchStatusScheduled},
+		{ID: "Pool A-2", SideA: "TeamA", SideAID: teamID, SideB: "TeamD", SideBID: "team-d-id", Status: state.MatchStatusScheduled},
 	}
-	rule := New(store).lineupRuleOrNone("test", compID, true, poolMatches, nil)
+	eng := New(store)
 	aliceAt := func(i int) string {
-		return resolveKachinukiPosition(rule.positionsForMatch(&poolMatches[i], 5), "TeamA", "alice")
+		return resolveKachinukiPosition(positionsOf(eng, compID, poolMatches, &poolMatches[i], 5), "TeamA", "alice")
 	}
 
 	assert.Equal(t, "Senpo", aliceAt(0), "before the lineup was entered: the starting lineup")
@@ -1353,7 +1432,7 @@ func TestKachinukiPositions_NamelessFighterResolvesByMemberID(t *testing.T) {
 		MemberIDs: map[domain.Position]string{domain.PosSenpo: "mem-senpo", domain.PosJiho: "mem-jiho"},
 	}, 5))
 
-	posMap := eng.lineupRuleOrNone("test", compID, true, nil, nil).positionsForMatch(&state.MatchResult{ID: "SF-2", SideA: "RedTeam", SideAID: redID}, 5)
+	posMap := positionsOf(eng, compID, nil, &state.MatchResult{ID: "SF-2", SideA: "RedTeam", SideAID: redID, Status: state.MatchStatusScheduled}, 5)
 
 	assert.Equal(t, "Jiho", resolveKachinukiBoutPosition(posMap, "RedTeam", "mem-jiho", ""), "a nameless fighter resolves by id")
 	assert.Equal(t, "Senpo", resolveKachinukiBoutPosition(posMap, "RedTeam", "mem-senpo", "R-Senpo"), "id wins for a named fighter too")
@@ -1396,9 +1475,9 @@ func TestKachinukiPositions_DuplicateMemberIDLabelsDeterministically(t *testing.
 	require.NoError(t, os.WriteFile(
 		filepath.Join(store.GetFolder(), "competitions", compID, "lineups.yaml"), body, 0o600))
 
-	match := &state.MatchResult{ID: "P1-0", SideA: "RedTeam", SideAID: "red-id", SideB: "WhiteTeam", SideBID: "white-id"}
+	match := &state.MatchResult{ID: "P1-0", SideA: "RedTeam", SideAID: "red-id", SideB: "WhiteTeam", SideBID: "white-id", Status: state.MatchStatusScheduled}
 	labelOf := func() string {
-		return eng.lineupRuleOrNone("test", compID, true, nil, nil).positionsForMatch(match, 5)[lineupKey("RedTeam", memberKey("m-dup"))]
+		return positionsOf(eng, compID, nil, match, 5)[lineupKey("RedTeam", memberKey("m-dup"))]
 	}
 
 	// Repeated because the defect was map-order-dependent: one run could agree
@@ -1563,6 +1642,11 @@ func TestKachinukiDetail_PositionsFollowTheLineupInForce(t *testing.T) {
 		require.NoError(t, store.SetTeamLineup(compID, kachinukiLineupFor(ids["RedTeam"], "Pool A-0", 0, map[domain.Position]string{
 			domain.PosSenpo: "R-Jiho", domain.PosJiho: "R-Senpo",
 		}), 5))
+		// The second match started with the lineup the first one left (its pin): a
+		// match that started with nothing of its own is fielded by member number.
+		require.NoError(t, store.SetTeamLineup(compID, kachinukiLineupFor(ids["RedTeam"], "Pool A-1", 0, map[domain.Position]string{
+			domain.PosSenpo: "R-Jiho", domain.PosJiho: "R-Senpo",
+		}), 5))
 		bout := func(red, other string) []state.SubMatchResult {
 			return []state.SubMatchResult{{Position: 1, SideA: red, SideB: other, Winner: red, Decision: "fought"}}
 		}
@@ -1576,7 +1660,7 @@ func TestKachinukiDetail_PositionsFollowTheLineupInForce(t *testing.T) {
 		require.Len(t, out, 2)
 		assert.Equal(t, "Jiho", positionOf(out[0], "R-Senpo"), "the match's own lineup")
 		assert.Equal(t, "Jiho", positionOf(out[1], "R-Senpo"),
-			"the second match carries the lineup entered for the first, not the starting lineup")
+			"the second match started with the lineup entered for the first, not the starting lineup")
 	})
 
 	// A round 1 lineup (round >= 1, which releases up to v2.1.1 let the Lineups
@@ -1602,6 +1686,17 @@ func TestKachinukiDetail_PositionsFollowTheLineupInForce(t *testing.T) {
 			},
 		}}))
 	}
+	// pinStarted gives each match the starting lineup as the lineup it started
+	// with, as the store pins it when a match starts: a started match with nothing
+	// of its own is fielded by member number, not by a carried lineup.
+	pinStarted := func(t *testing.T, store *state.Store, compID, team string, matchIDs ...string) {
+		t.Helper()
+		for _, id := range matchIDs {
+			require.NoError(t, store.SetTeamLineup(compID, kachinukiLineupFor(team, id, 0, map[domain.Position]string{
+				domain.PosSenpo: "R-A", domain.PosJiho: "R-B",
+			}), 5))
+		}
+	}
 	startAndRound1 := map[domain.Position]string{domain.PosSenpo: "R-B", domain.PosJiho: "R-A", domain.PosChuken: "R-New"}
 
 	t.Run("a Lineups-page entry for round 1 is not read: the round 1 match carries the lineup before it", func(t *testing.T) {
@@ -1612,6 +1707,7 @@ func TestKachinukiDetail_PositionsFollowTheLineupInForce(t *testing.T) {
 			domain.PosSenpo: "R-A", domain.PosJiho: "R-B",
 		}), 5))
 		require.NoError(t, store.SetTeamLineup(compID, kachinukiLineupFor(ids["RedTeam"], "", 1, startAndRound1), 5))
+		pinStarted(t, store, compID, ids["RedTeam"], "r0-m0", "r1-m0")
 		round1Bracket(t, store, compID, ids)
 
 		out, err := eng.KachinukiDetailMatches(compID)
@@ -1631,6 +1727,7 @@ func TestKachinukiDetail_PositionsFollowTheLineupInForce(t *testing.T) {
 			domain.PosSenpo: "R-A", domain.PosJiho: "R-B",
 		}), 5))
 		require.NoError(t, store.SetTeamLineup(compID, kachinukiLineupFor(ids["RedTeam"], "r1-m0", 0, startAndRound1), 5))
+		pinStarted(t, store, compID, ids["RedTeam"], "r0-m0")
 		round1Bracket(t, store, compID, ids)
 
 		out, err := eng.KachinukiDetailMatches(compID)

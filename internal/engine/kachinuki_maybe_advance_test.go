@@ -51,9 +51,9 @@ func TestMaybeAdvanceKachinuki_NoSubResults(t *testing.T) {
 
 // TestMaybeAdvanceKachinuki_ExhaustedSnapshotNoOp verifies operator-led
 // completion (mp-gmcg): an apparently-exhausted roster snapshot is ADVISORY
-// only. With no lineup saved, the bout-log-only roster after bout 1 shows
-// SideB empty (W-Senpo retired, nobody else ever seen), so the pure core
-// reports MatchEnded (WinningSide=A) — but team sizes are unregulated and
+// only. With no lineup saved and no team members, neither side fields anyone
+// (operator decision K2), so after bout 1 SideB has nobody left and the pure
+// core reports a match end — but team sizes are unregulated and
 // the snapshot may be incomplete, so the engine must NOT finalize. The
 // stored match stays completely untouched; the operator ends the encounter
 // with an explicit completed score write through the normal scoring path.
@@ -67,8 +67,8 @@ func TestMaybeAdvanceKachinuki_ExhaustedSnapshotNoOp(t *testing.T) {
 		TeamSize:      5,
 	}))
 
-	// Bout 1: R-Senpo beats W-Senpo. Bout-log-only roster: remainingB=[]
-	// → the pure core reports MatchEnded, which the caller ignores.
+	// Bout 1: R-Senpo beats W-Senpo. Neither side fields anyone: remainingB=[]
+	// → the pure core reports a match end, which the caller ignores.
 	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
 		{
 			ID:    "P1-0",
@@ -114,7 +114,7 @@ func TestMaybeAdvanceKachinuki_IgnoresTrailingDaihyosen(t *testing.T) {
 	// append is the proof the daihyosen row was skipped (operator-led
 	// completion, mp-gmcg: appending is the only mutation the engine makes).
 	require.NoError(t, store.SetTeamLineup(compID, domain.TeamLineup{
-		TeamID: redTeamID, Round: 0,
+		TeamID: redTeamID, MatchID: "P1-0",
 		Positions: map[domain.Position]string{
 			domain.PositionNumbered(1): "R-Senpo",
 			domain.PositionNumbered(2): "R-2",
@@ -122,7 +122,7 @@ func TestMaybeAdvanceKachinuki_IgnoresTrailingDaihyosen(t *testing.T) {
 		},
 	}, 3))
 	require.NoError(t, store.SetTeamLineup(compID, domain.TeamLineup{
-		TeamID: whiteTeamID, Round: 0,
+		TeamID: whiteTeamID, MatchID: "P1-0",
 		Positions: map[domain.Position]string{
 			domain.PositionNumbered(1): "W-Senpo",
 			domain.PositionNumbered(2): "W-2",
@@ -215,8 +215,9 @@ func TestMaybeAdvanceKachinuki_BracketPath(t *testing.T) {
 // TestMaybeAdvanceKachinuki_BronzeExhaustedSnapshotNoOp verifies the Naginata
 // 3rd-place (bronze) match — a sibling of bracket.Rounds, not an element of
 // it — is found by the kachinuki advancement path but is NEVER auto-finalized
-// (operator-led completion, mp-gmcg): the bout-log-only roster after bout 1
-// shows SideB exhausted, an advisory verdict only, so the engine leaves the
+// (operator-led completion, mp-gmcg): with no lineup and no team members the
+// sides field nobody (K2), so after bout 1 SideB has nobody left, an advisory
+// verdict only, and the engine leaves the
 // ThirdPlaceMatch completely untouched. The bronze APPEND branch is pinned
 // separately by TestMaybeAdvanceKachinuki_BronzeAppendsBout.
 func TestMaybeAdvanceKachinuki_BronzeExhaustedSnapshotNoOp(t *testing.T) {
@@ -231,8 +232,8 @@ func TestMaybeAdvanceKachinuki_BronzeExhaustedSnapshotNoOp(t *testing.T) {
 	}))
 
 	// Bronze match with a single bout: R-Senpo beats W-Senpo. The winner stays
-	// and SideB's bout-log-only queue is exhausted → the pure core reports
-	// MatchEnded, which the caller must treat as advisory (no finalize).
+	// and SideB fields nobody → the pure core reports a match end, which the
+	// caller must treat as advisory (no finalize).
 	require.NoError(t, store.SaveBracket(compID, &state.Bracket{
 		Rounds: [][]state.BracketMatch{
 			{{ID: "m-r1-0", SideA: "RedTeam", SideB: "WhiteTeam", Winner: "RedTeam", Status: state.MatchStatusCompleted}},
@@ -279,11 +280,15 @@ func TestMaybeAdvanceKachinuki_AppendsBoutNextRound(t *testing.T) {
 	// Bout 2: A-Jiho beats B-Chuken (B-Chuken retires, A-Jiho stays).
 	// After bout 2: remainingA=[A-Jiho], remainingB=[B-Senpo] (won bout 1).
 	// → AdvanceKachinuki returns out.Next (next bout, not match-ended).
+	saveOwnMatchLineup(t, store, compID, "P1-0", redTeamID, 5, "A-Senpo", "A-Jiho")
+	saveOwnMatchLineup(t, store, compID, "P1-0", whiteTeamID, 5, "B-Senpo", "B-Chuken")
 	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
 		{
-			ID:    "P1-0",
-			SideA: "RedTeam",
-			SideB: "WhiteTeam",
+			ID:      "P1-0",
+			SideA:   "RedTeam",
+			SideAID: redTeamID,
+			SideB:   "WhiteTeam",
+			SideBID: whiteTeamID,
 			SubResults: []state.SubMatchResult{
 				{Position: 1, SideA: "A-Senpo", SideB: "B-Senpo", Winner: "B-Senpo", Decision: "fought"},
 				{Position: 2, SideA: "A-Jiho", SideB: "B-Chuken", Winner: "A-Jiho", Decision: "fought"},
@@ -326,7 +331,7 @@ func TestMaybeAdvanceKachinuki_CompletedMatchNoOp(t *testing.T) {
 		Format:        state.CompFormatMixed,
 	}))
 	require.NoError(t, store.SetTeamLineup(compID, domain.TeamLineup{
-		TeamID: redTeamID, Round: 0,
+		TeamID: redTeamID, MatchID: "P1-0",
 		Positions: map[domain.Position]string{
 			domain.PositionNumbered(1): "R-1",
 			domain.PositionNumbered(2): "R-2",
@@ -334,7 +339,7 @@ func TestMaybeAdvanceKachinuki_CompletedMatchNoOp(t *testing.T) {
 		},
 	}, 3))
 	require.NoError(t, store.SetTeamLineup(compID, domain.TeamLineup{
-		TeamID: whiteTeamID, Round: 0,
+		TeamID: whiteTeamID, MatchID: "P1-0",
 		Positions: map[domain.Position]string{
 			domain.PositionNumbered(1): "W-1",
 			domain.PositionNumbered(2): "W-2",
@@ -388,14 +393,14 @@ func TestMaybeAdvanceKachinuki_FullSequence5v5EndsWithOperator(t *testing.T) {
 		Format:        state.CompFormatMixed,
 	}))
 	require.NoError(t, store.SetTeamLineup(compID, domain.TeamLineup{
-		TeamID: redTeamID, Round: 0,
+		TeamID: redTeamID, MatchID: "P1-0",
 		Positions: map[domain.Position]string{
 			domain.PosSenpo: "R-S", domain.PosJiho: "R-J", domain.PosChuken: "R-C",
 			domain.PosFukusho: "R-F", domain.PosTaisho: "R-T",
 		},
 	}, 5))
 	require.NoError(t, store.SetTeamLineup(compID, domain.TeamLineup{
-		TeamID: whiteTeamID, Round: 0,
+		TeamID: whiteTeamID, MatchID: "P1-0",
 		Positions: map[domain.Position]string{
 			domain.PosSenpo: "W-S", domain.PosJiho: "W-J", domain.PosChuken: "W-C",
 			domain.PosFukusho: "W-F", domain.PosTaisho: "W-T",
@@ -600,7 +605,8 @@ func TestMaybeAdvanceKachinuki_MatchEndedAdvisoryNoOp(t *testing.T) {
 		TeamSize:      5,
 		Format:        state.CompFormatMixed,
 	}))
-	// After B-Senpo beats A-Senpo, A's bout-log-only roster is empty.
+	// After B-Senpo beats A-Senpo, A has nobody left (with no lineup and no
+	// team members, neither side fields anyone: K2).
 	// With kachinukiRemainingRoster: knownA={A-Senpo}, retiredA={A-Senpo},
 	// remainingA=[]. knownB={B-Senpo}, retiredB={}, remainingB=[B-Senpo].
 	// AdvanceKachinuki sees SideA=[] → WinningSide="B" → MatchEnded=true,
@@ -646,7 +652,7 @@ func TestMaybeAdvanceKachinuki_BracketNoAutoFinalize(t *testing.T) {
 
 	// 2-round bracket: Round 0 = [SF1, SF2], Round 1 = [Final].
 	// SF1: TeamA vs TeamB. Bout 1: A-Senpo beats B-Senpo.
-	// Bout-log-only fallback: knownB={B-Senpo}, retiredB={B-Senpo} → remainingB=[].
+	// No lineup and no team members: neither side fields anyone (K2) → remainingB=[].
 	// AdvanceKachinuki → MatchEnded=true (advisory only): the engine must not
 	// complete SF1 nor feed TeamA into the Final.
 	require.NoError(t, store.SaveBracket(compID, &state.Bracket{
@@ -696,16 +702,20 @@ func TestMaybeAdvanceKachinuki_BracketAppendsBout(t *testing.T) {
 
 	// Single-round bracket (the final). After bout 2 both sides still have
 	// players: remainingA=[A-Jiho], remainingB=[B-Senpo] → Next (bout 3 pairing).
-	// Bout-log-only fallback:
-	//   knownA={A-Senpo,A-Jiho}, retiredA={A-Senpo} → remainingA=[A-Jiho]
-	//   knownB={B-Senpo,B-Chuken}, retiredB={B-Chuken} → remainingB=[B-Senpo]
+	// Each side fields its own match lineup:
+	//   lineupA=[A-Senpo,A-Jiho], retiredA={A-Senpo} → remainingA=[A-Jiho]
+	//   lineupB=[B-Senpo,B-Chuken], retiredB={B-Chuken} → remainingB=[B-Senpo]
+	saveOwnMatchLineup(t, store, compID, "B-Final", redTeamID, 5, "A-Senpo", "A-Jiho")
+	saveOwnMatchLineup(t, store, compID, "B-Final", whiteTeamID, 5, "B-Senpo", "B-Chuken")
 	require.NoError(t, store.SaveBracket(compID, &state.Bracket{
 		Rounds: [][]state.BracketMatch{
 			{
 				{
-					ID:    "B-Final",
-					SideA: "TeamA",
-					SideB: "TeamB",
+					ID:      "B-Final",
+					SideA:   "TeamA",
+					SideAID: redTeamID,
+					SideB:   "TeamB",
+					SideBID: whiteTeamID,
 					SubResults: []state.SubMatchResult{
 						{Position: 1, SideA: "A-Senpo", SideB: "B-Senpo", Winner: "B-Senpo", Decision: "fought"},
 						{Position: 2, SideA: "A-Jiho", SideB: "B-Chuken", Winner: "A-Jiho", Decision: "fought"},
@@ -735,15 +745,19 @@ func TestMaybeAdvanceKachinuki_BronzeAppendsBout(t *testing.T) {
 	eng, store, _ := setupKachinukiComp(t, compID, 5, func(c *state.Competition) { c.Naginata = true })
 
 	// Bronze match has 2 bouts; both sides still have remaining players after bout 2.
-	// Same bout-log-only scenario as BracketAppendsBout above.
+	// Same lineups and bouts as BracketAppendsBout above.
+	saveOwnMatchLineup(t, store, compID, "m-bronze", redTeamID, 5, "A-Senpo", "A-Jiho")
+	saveOwnMatchLineup(t, store, compID, "m-bronze", whiteTeamID, 5, "B-Senpo", "B-Chuken")
 	require.NoError(t, store.SaveBracket(compID, &state.Bracket{
 		Rounds: [][]state.BracketMatch{
 			{{ID: "SF1", SideA: "TeamA", SideB: "TeamB", Winner: "TeamA", Status: state.MatchStatusCompleted}},
 		},
 		ThirdPlaceMatch: &state.BracketMatch{
-			ID:    "m-bronze",
-			SideA: "TeamA",
-			SideB: "TeamB",
+			ID:      "m-bronze",
+			SideA:   "TeamA",
+			SideAID: redTeamID,
+			SideB:   "TeamB",
+			SideBID: whiteTeamID,
 			SubResults: []state.SubMatchResult{
 				{Position: 1, SideA: "A-Senpo", SideB: "B-Senpo", Winner: "B-Senpo", Decision: "fought"},
 				{Position: 2, SideA: "A-Jiho", SideB: "B-Chuken", Winner: "A-Jiho", Decision: "fought"},
@@ -835,7 +849,7 @@ func TestMaybeAdvanceKachinuki_NamelessBoutNoOp(t *testing.T) {
 		Format:        state.CompFormatMixed,
 	}))
 	require.NoError(t, store.SetTeamLineup(compID, domain.TeamLineup{
-		TeamID: redTeamID, Round: 0,
+		TeamID: redTeamID, MatchID: "P1-0",
 		Positions: map[domain.Position]string{
 			domain.PositionNumbered(1): "R-1",
 			domain.PositionNumbered(2): "R-2",
@@ -843,7 +857,7 @@ func TestMaybeAdvanceKachinuki_NamelessBoutNoOp(t *testing.T) {
 		},
 	}, 3))
 	require.NoError(t, store.SetTeamLineup(compID, domain.TeamLineup{
-		TeamID: whiteTeamID, Round: 0,
+		TeamID: whiteTeamID, MatchID: "P1-0",
 		Positions: map[domain.Position]string{
 			domain.PositionNumbered(1): "W-1",
 			domain.PositionNumbered(2): "W-2",
@@ -890,7 +904,7 @@ func TestMaybeAdvanceKachinuki_PoolSimultaneousExhaustionNoOp(t *testing.T) {
 	// Lineups: 3-person rosters. Bouts 1 and 2 produce hikiwake,
 	// both sides retire their last player in bout 3 simultaneously.
 	require.NoError(t, store.SetTeamLineup(compID, domain.TeamLineup{
-		TeamID: redTeamID, Round: 0,
+		TeamID: redTeamID, MatchID: "P1-0",
 		Positions: map[domain.Position]string{
 			domain.PositionNumbered(1): "R-1",
 			domain.PositionNumbered(2): "R-2",
@@ -898,7 +912,7 @@ func TestMaybeAdvanceKachinuki_PoolSimultaneousExhaustionNoOp(t *testing.T) {
 		},
 	}, 3))
 	require.NoError(t, store.SetTeamLineup(compID, domain.TeamLineup{
-		TeamID: whiteTeamID, Round: 0,
+		TeamID: whiteTeamID, MatchID: "P1-0",
 		Positions: map[domain.Position]string{
 			domain.PositionNumbered(1): "W-1",
 			domain.PositionNumbered(2): "W-2",
@@ -1001,7 +1015,7 @@ func TestMaybeAdvanceKachinuki_AdvancesOffABoutFoughtEntirelyByNumber(t *testing
 	}))
 	// Both teams field blank numbered slots: ids present, names absent.
 	require.NoError(t, store.SetTeamLineup(compID, domain.TeamLineup{
-		TeamID: redTeamID, Round: 0,
+		TeamID: redTeamID, MatchID: "P1-0",
 		Positions: map[domain.Position]string{
 			domain.PositionNumbered(1): "",
 			domain.PositionNumbered(2): "",
@@ -1012,7 +1026,7 @@ func TestMaybeAdvanceKachinuki_AdvancesOffABoutFoughtEntirelyByNumber(t *testing
 		},
 	}, 3))
 	require.NoError(t, store.SetTeamLineup(compID, domain.TeamLineup{
-		TeamID: whiteTeamID, Round: 0,
+		TeamID: whiteTeamID, MatchID: "P1-0",
 		Positions: map[domain.Position]string{
 			domain.PositionNumbered(1): "",
 			domain.PositionNumbered(2): "",

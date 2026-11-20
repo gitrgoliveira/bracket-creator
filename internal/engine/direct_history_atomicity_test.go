@@ -93,8 +93,10 @@ func TestAdvanceKachinukiOnce_StaleAbortRecordsNoHistoryEntry(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "advance-history-stale"
 	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID, TeamMatchType: state.TeamMatchTypeKachinuki, TeamSize: 5}))
+	saveOwnMatchLineup(t, store, compID, "P1-0", redTeamID, 5, "A-Senpo", "A-Jiho")
+	saveOwnMatchLineup(t, store, compID, "P1-0", whiteTeamID, 5, "B-Senpo", "B-Chuken")
 	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{{
-		ID: "P1-0", SideA: "RedTeam", SideB: "WhiteTeam", Status: state.MatchStatusRunning,
+		ID: "P1-0", SideA: "RedTeam", SideAID: redTeamID, SideB: "WhiteTeam", SideBID: whiteTeamID, Status: state.MatchStatusRunning,
 		SubResults: []state.SubMatchResult{
 			{Position: 1, SideA: "A-Senpo", SideB: "B-Senpo", Winner: "B-Senpo", Decision: "fought"},
 			{Position: 2, SideA: "A-Jiho", SideB: "B-Chuken", Winner: "A-Jiho", Decision: "fought"},
@@ -121,8 +123,10 @@ func TestAdvanceKachinukiOnce_SuccessRecordsHistoryEntry(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "advance-history-success"
 	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID, TeamMatchType: state.TeamMatchTypeKachinuki, TeamSize: 5}))
+	saveOwnMatchLineup(t, store, compID, "P1-0", redTeamID, 5, "A-Senpo", "A-Jiho")
+	saveOwnMatchLineup(t, store, compID, "P1-0", whiteTeamID, 5, "B-Senpo", "B-Chuken")
 	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{{
-		ID: "P1-0", SideA: "RedTeam", SideB: "WhiteTeam",
+		ID: "P1-0", SideA: "RedTeam", SideAID: redTeamID, SideB: "WhiteTeam", SideBID: whiteTeamID,
 		SubResults: []state.SubMatchResult{
 			{Position: 1, SideA: "A-Senpo", SideB: "B-Senpo", Winner: "B-Senpo", Decision: "fought"},
 			{Position: 2, SideA: "A-Jiho", SideB: "B-Chuken", Winner: "A-Jiho", Decision: "fought"},

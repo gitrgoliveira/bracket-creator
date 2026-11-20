@@ -95,6 +95,48 @@ func setupKachinukiScoreServerWithHub(t *testing.T, compID string) (*gin.Engine,
 	return r, store, hub
 }
 
+// kachinukiMatchOwnsLineups saves each team's starting lineup as matchID's
+// own, as the start pins the lineup in force (pinStartLineups), for a test
+// that stores a match already under way. A started match never follows a
+// carried lineup (K1 (c)): with nothing of its own it fields its members by
+// number, so a test about the merge or the advance, not about who is seated,
+// gives its running match the lineup the start would have kept.
+func kachinukiMatchOwnsLineups(t *testing.T, store *state.Store, compID, matchID string) {
+	t.Helper()
+	lineups, err := store.LoadTeamLineups(compID)
+	require.NoError(t, err)
+	for _, l := range lineups {
+		if l.MatchID != "" || l.Round != 0 {
+			continue
+		}
+		l.MatchID = matchID
+		require.NoError(t, store.SetTeamLineup(compID, l, 3))
+	}
+}
+
+// kachinukiMatchOpeners saves, for each team named in openers (team name to
+// fighter), a lineup of matchID's own naming that fighter at place 1 with no
+// member id: a typed bout-1 fighter, which the sheet saves to the lineup, and
+// which the seat then keeps on bout 1 (engine.ReseatKachinukiOpeners owns
+// bout 1). For a test about something other than who is seated.
+func kachinukiMatchOpeners(t *testing.T, store *state.Store, compID, matchID string, openers map[string]string) {
+	t.Helper()
+	teams, err := store.LoadParticipants(compID, false)
+	require.NoError(t, err)
+	for _, team := range teams {
+		opener, ok := openers[team.Name]
+		if !ok {
+			continue
+		}
+		require.NoError(t, store.SetTeamLineup(compID, domain.TeamLineup{
+			TeamID: team.ID, MatchID: matchID,
+			Positions: map[domain.Position]string{domain.PositionNumbered(1): opener},
+		}, 3))
+		delete(openers, team.Name)
+	}
+	require.Empty(t, openers, "every team named has a lineup")
+}
+
 // postDecision POSTs a decision payload to the decision endpoint.
 func postDecision(t *testing.T, r *gin.Engine, compID, matchID string, payload map[string]any) *httptest.ResponseRecorder {
 	t.Helper()
@@ -184,6 +226,7 @@ func TestScoreHandler_KachinukiBoutFinalAppendsNextBout(t *testing.T) {
 			SubResults: []state.SubMatchResult{{Position: 1, SideA: "R-1", SideB: "W-1"}},
 		},
 	}))
+	kachinukiMatchOwnsLineups(t, store, compID, "P1-0")
 
 	w := putScore(t, r, compID, "P1-0", map[string]any{
 		"sideA":              "Ryu",
@@ -244,6 +287,7 @@ func TestScoreHandler_KachinukiRecordBoutAtExhaustionMarksTheBout(t *testing.T) 
 			{Position: 3, SideA: "R-1", SideB: "W-3"},
 		},
 	}}))
+	kachinukiMatchOwnsLineups(t, store, compID, "P1-0")
 	rows := func(third map[string]any) []map[string]any {
 		return []map[string]any{
 			kachinukiSub(1, "R-1", "W-1", []string{"M"}, "R-1", "fought"),
@@ -313,6 +357,7 @@ func TestScoreHandler_KachinukiHikiwakeAppendsWalkoverSlot(t *testing.T) {
 			},
 		},
 	}))
+	kachinukiMatchOwnsLineups(t, store, compID, "P1-0")
 
 	w := putScore(t, r, compID, "P1-0", map[string]any{
 		"sideA":              "Ryu",
@@ -361,6 +406,7 @@ func TestScoreHandler_KachinukiPartialWritePreservesAppendedBout(t *testing.T) {
 			},
 		},
 	}))
+	kachinukiMatchOwnsLineups(t, store, compID, "P1-0")
 
 	// Stale client rewrite: only bout 1, now as an R-1 win (the UAT repro).
 	w := putScore(t, r, compID, "P1-0", map[string]any{
@@ -408,6 +454,7 @@ func TestScoreHandler_KachinukiOmittedCompletedBoutSurvives(t *testing.T) {
 			},
 		},
 	}))
+	kachinukiMatchOwnsLineups(t, store, compID, "R1M0")
 
 	// Patch carries only bout 2 (the current bout): bout 1 must survive.
 	w := putScore(t, r, compID, "R1M0", map[string]any{
@@ -442,6 +489,7 @@ func TestScoreHandler_KachinukiBootstrappedBout1(t *testing.T) {
 	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
 		{ID: "P1-0", SideA: "Ryu", SideB: "Tora", Status: state.MatchStatusRunning},
 	}))
+	kachinukiMatchOwnsLineups(t, store, compID, "P1-0")
 
 	w := putScore(t, r, compID, "P1-0", map[string]any{
 		"sideA":              "Ryu",
@@ -481,6 +529,7 @@ func saveKachinukiBracket(t *testing.T, store *state.Store, compID string) {
 			},
 		},
 	}))
+	kachinukiMatchOwnsLineups(t, store, compID, "R1M0")
 }
 
 // TestScoreHandler_KachinukiBout1HikiwakeKnockout: a bout-level hikiwake
@@ -1866,6 +1915,7 @@ func TestScoreHandler_KachinukiBronzeBoutFinalEchoesAppendedBout(t *testing.T) {
 			SubResults: []state.SubMatchResult{{Position: 1, SideA: "R-1", SideB: "W-1"}},
 		},
 	}))
+	kachinukiMatchOwnsLineups(t, store, compID, "B0")
 
 	w := putScore(t, r, compID, "B0", map[string]any{
 		"sideA":              "Ryu",

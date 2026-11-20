@@ -12,9 +12,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestMaybeAdvanceKachinuki_RosterFromLineup verifies that when a round-scoped
-// lineup is saved for both teams, kachinukiRemainingRoster uses it to build
-// the full remaining roster rather than the bout-log-only fallback. This means
+// TestMaybeAdvanceKachinuki_RosterFromLineup verifies that when the match holds
+// its own lineup for both teams (as a started match holds its pin), the advance
+// uses it to build the full remaining roster. This means
 // when SideA-position-1 beats SideB-position-1, SideB still has positions 2+
 // queued, so the engine appends the next bout instead of ending the match.
 func TestMaybeAdvanceKachinuki_RosterFromLineup(t *testing.T) {
@@ -27,9 +27,9 @@ func TestMaybeAdvanceKachinuki_RosterFromLineup(t *testing.T) {
 		TeamSize:      3,
 		Format:        state.CompFormatMixed,
 	}))
-	// Round-scoped lineups at round 0 for both teams.
+	// The match's own lineups for both teams.
 	require.NoError(t, store.SetTeamLineup(compID, domain.TeamLineup{
-		TeamID: redTeamID, Round: 0,
+		TeamID: redTeamID, MatchID: "P1-0",
 		Positions: map[domain.Position]string{
 			domain.PositionNumbered(1): "R-1",
 			domain.PositionNumbered(2): "R-2",
@@ -37,7 +37,7 @@ func TestMaybeAdvanceKachinuki_RosterFromLineup(t *testing.T) {
 		},
 	}, 3))
 	require.NoError(t, store.SetTeamLineup(compID, domain.TeamLineup{
-		TeamID: whiteTeamID, Round: 0,
+		TeamID: whiteTeamID, MatchID: "P1-0",
 		Positions: map[domain.Position]string{
 			domain.PositionNumbered(1): "W-1",
 			domain.PositionNumbered(2): "W-2",
@@ -46,7 +46,8 @@ func TestMaybeAdvanceKachinuki_RosterFromLineup(t *testing.T) {
 	}, 3))
 
 	// Bout 1: R-1 beats W-1. With lineup: remainingA=[R-1], remainingB=[W-2,W-3].
-	// Without lineup: remainingB=[] (bout-log-only) → wrongly ends match.
+	// Without a lineup (and no team members) a side fields nobody (K2), so
+	// nothing would be appended.
 	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
 		{
 			ID:      "P1-0",
@@ -80,7 +81,7 @@ func TestMaybeAdvanceKachinuki_RosterFromLineup(t *testing.T) {
 // carries the team NAME alone, as a row from before side ids does: the
 // load-time legacy repair stamps its SideAID/SideBID from the roster, so
 // the lookup still reaches the id-keyed lineups instead of silently
-// degrading the roster to the bout-log-only path (GAP 2).
+// fielding nobody (GAP 2).
 func TestMaybeAdvanceKachinuki_RosterFromLineup_ParticipantIDKeyed(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "kachinuki-lineup-pid-keyed"
@@ -105,7 +106,7 @@ func TestMaybeAdvanceKachinuki_RosterFromLineup_ParticipantIDKeyed(t *testing.T)
 	// Lineups keyed by the participant ID, exactly as the UI saves them
 	// (NOT by team name).
 	require.NoError(t, store.SetTeamLineup(compID, domain.TeamLineup{
-		TeamID: ryuID, Round: 0,
+		TeamID: ryuID, MatchID: "P1-0",
 		Positions: map[domain.Position]string{
 			domain.PositionNumbered(1): "R-1",
 			domain.PositionNumbered(2): "R-2",
@@ -113,7 +114,7 @@ func TestMaybeAdvanceKachinuki_RosterFromLineup_ParticipantIDKeyed(t *testing.T)
 		},
 	}, 3))
 	require.NoError(t, store.SetTeamLineup(compID, domain.TeamLineup{
-		TeamID: toraID, Round: 0,
+		TeamID: toraID, MatchID: "P1-0",
 		Positions: map[domain.Position]string{
 			domain.PositionNumbered(1): "W-1",
 			domain.PositionNumbered(2): "W-2",
@@ -123,8 +124,8 @@ func TestMaybeAdvanceKachinuki_RosterFromLineup_ParticipantIDKeyed(t *testing.T)
 
 	// Match sides carry the team NAME. Bout 1: R-1 beats W-1. With the
 	// lineup resolved: remainingB=[W-2, W-3], so bout 2 must be appended.
-	// If the id-keyed lineup lookup misses, the bout-log-only fallback
-	// sees remainingB=[] and wrongly ends the match.
+	// If the id-keyed lineup lookup misses, the side fields nobody (K2) and
+	// nothing is appended.
 	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
 		{
 			ID:    "P1-0",
@@ -155,15 +156,16 @@ func TestMaybeAdvanceKachinuki_RosterFromLineup_ParticipantIDKeyed(t *testing.T)
 // alone, and is not the team's, and a side that carries no id has none.
 func TestKachinukiRemainingRoster_MatchesALineupByTheSidesParticipantID(t *testing.T) {
 	comp := &state.Competition{ID: "kachinuki-lineup-by-id", TeamSize: 3, TeamMatchType: state.TeamMatchTypeKachinuki}
+	// Each is the match's own lineup: the match holds bouts, so it has started
+	// and fields only a lineup of its own.
 	lineup := func(team string, fighters ...string) domain.TeamLineup {
-		l := domain.TeamLineup{TeamID: team, Positions: map[domain.Position]string{}}
+		l := domain.TeamLineup{TeamID: team, MatchID: "P1-0", Positions: map[domain.Position]string{}}
 		for i, f := range fighters {
 			l.Positions[domain.PositionNumbered(i+1)] = f
 		}
 		return l
 	}
-	// R-1 beat W-1, so White's bout-log roster is empty and any roster it has
-	// beyond that came from a lineup.
+	// R-1 beat W-1, so any roster White has beyond that came from a lineup.
 	bouts := []state.SubMatchResult{{Position: 1, SideA: "R-1", SideB: "W-1", Winner: "R-1", Decision: "fought"}}
 	lineups := map[string]domain.TeamLineup{
 		"by-id":         lineup("red-id", "R-1", "R-2", "R-3"),
@@ -179,7 +181,7 @@ func TestKachinukiRemainingRoster_MatchesALineupByTheSidesParticipantID(t *testi
 
 		require.True(t, ok, "Red's lineup resolves")
 		assert.Equal(t, fighters("R-1", "R-2", "R-3"), remainingA)
-		assert.Empty(t, remainingB, "White has a lineup under its NAME only, which is not the team's: its roster is the bout log's")
+		assert.Empty(t, remainingB, "White has a lineup under its NAME only, which is not the team's: it fields nobody")
 	})
 
 	t.Run("a side with no id has no lineup, whatever is stored", func(t *testing.T) {
@@ -219,10 +221,10 @@ func TestMaybeAdvanceKachinuki_RenameDoesNotRequeueRetiredMember(t *testing.T) {
 	backup, err := store.AddTeamMember(comp.ID, redID, "Backup")
 	require.NoError(t, err)
 
-	// Round-0 lineup, id-stamped, as it stood BEFORE the rename: Sato is
-	// about to fight the first bout.
+	// The match's own lineup, id-stamped, as it stood BEFORE the rename: Sato
+	// is about to fight the first bout.
 	require.NoError(t, store.SetTeamLineup(comp.ID, domain.TeamLineup{
-		TeamID: redID, Round: 0,
+		TeamID: redID, MatchID: "P1-0",
 		Positions: map[domain.Position]string{
 			domain.PositionNumbered(1): "Sato",
 			domain.PositionNumbered(2): "Backup",
@@ -251,7 +253,7 @@ func TestMaybeAdvanceKachinuki_RenameDoesNotRequeueRetiredMember(t *testing.T) {
 	_, err = store.RenameTeamMember(comp.ID, redID, sato.ID, "Suzuki")
 	require.NoError(t, err)
 	require.NoError(t, store.SetTeamLineup(comp.ID, domain.TeamLineup{
-		TeamID: redID, Round: 0,
+		TeamID: redID, MatchID: "P1-0",
 		Positions: map[domain.Position]string{
 			domain.PositionNumbered(1): "Suzuki",
 			domain.PositionNumbered(2): "Backup",
@@ -272,13 +274,13 @@ func TestMaybeAdvanceKachinuki_RenameDoesNotRequeueRetiredMember(t *testing.T) {
 	assert.Equal(t, "W-1", next.SideB, "the bout-1 winner stays on")
 }
 
-// TestMaybeAdvanceKachinuki_NoLineupFallback verifies that when no lineup is
-// saved the function falls back to the bout-log-only roster without error.
-// The fallback snapshot (knownB={W-1}, retiredB={W-1} → remainingB=[]) reads
-// as MatchEnded, but that verdict is advisory only (operator-led completion,
-// mp-gmcg): with team sizes unregulated the bout log may not have seen the
-// whole roster, so the engine must leave the match untouched.
-func TestMaybeAdvanceKachinuki_NoLineupFallback(t *testing.T) {
+// TestMaybeAdvanceKachinuki_NoLineupFieldsNobody verifies that when no lineup
+// is saved and the teams have no member records (so nothing is fielded by
+// member number) each side fields nobody (operator decision K2) and the
+// advance answers without error. The empty queues (remainingB=[]) read as a
+// match end, but that verdict is advisory only (operator-led completion,
+// mp-gmcg), so the engine must leave the match untouched.
+func TestMaybeAdvanceKachinuki_NoLineupFieldsNobody(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "kachinuki-no-lineup-fallback"
 
@@ -300,10 +302,10 @@ func TestMaybeAdvanceKachinuki_NoLineupFallback(t *testing.T) {
 		},
 	}))
 
-	// Without lineup: remainingB=[] → advisory MatchEnded → no-op.
+	// Without a lineup: remainingB=[] → advisory match end → no-op.
 	changed, _, err := eng.MaybeAdvanceKachinuki(compID, "P1-0")
 	require.NoError(t, err)
-	assert.False(t, changed, "bout-log-only exhaustion is advisory; the engine must not mutate the match")
+	assert.False(t, changed, "an exhausted snapshot is advisory; the engine must not mutate the match")
 
 	matches, err := store.LoadPoolMatches(compID)
 	require.NoError(t, err)
@@ -311,7 +313,7 @@ func TestMaybeAdvanceKachinuki_NoLineupFallback(t *testing.T) {
 	assert.NotEqual(t, state.MatchStatusCompleted, matches[0].Status, "the engine must never auto-complete")
 	assert.Empty(t, matches[0].Winner)
 	assert.Empty(t, matches[0].Decision)
-	assert.Len(t, matches[0].SubResults, 1, "no bout may be appended off the exhausted fallback snapshot")
+	assert.Len(t, matches[0].SubResults, 1, "no bout may be appended off an exhausted snapshot")
 }
 
 // TestMaybeAdvanceKachinuki_MatchScopedLineup verifies that a match-scoped
@@ -384,9 +386,10 @@ func TestMaybeAdvanceKachinuki_MatchScopedLineup(t *testing.T) {
 
 // TestMaybeAdvanceKachinuki_CarriesThePreviousMatchLineup pins the operator's
 // rule (2026-10-05): a team keeps the lineup of its previous match unless a new
-// one is entered for the match, so the roster the advance draws the next
-// fighter from is the one saved for the team's EARLIER match, not its starting
-// lineup.
+// one is entered for the match, so the queue the advance reads for a match that
+// has not started is the one saved for the team's EARLIER match, not its
+// starting lineup. (Once started, a match fields only a lineup of its own, its
+// pin; see TestKachinukiFielded_AStartedMatchWithNothingOfItsOwnFieldsByNumber.)
 func TestMaybeAdvanceKachinuki_CarriesThePreviousMatchLineup(t *testing.T) {
 	eng, store, comp := setupKachinukiComp(t, "kachinuki-carried-lineup", 3,
 		func(c *state.Competition) { c.Format = state.CompFormatMixed })
@@ -411,29 +414,21 @@ func TestMaybeAdvanceKachinuki_CarriesThePreviousMatchLineup(t *testing.T) {
 
 	require.NoError(t, store.SavePoolMatches(comp.ID, []state.MatchResult{
 		{ID: "Pool A-0", SideA: "RedTeam", SideB: "WhiteTeam", SideAID: redID, SideBID: whiteID, Status: state.MatchStatusCompleted},
-		{
-			ID: "Pool A-1", SideA: "RedTeam", SideB: "BlueTeam", SideAID: redID, SideBID: blueID,
-			Status: state.MatchStatusRunning,
-			SubResults: []state.SubMatchResult{
-				{Position: 1, SideA: "R-A", SideB: "B-1", Winner: "B-1", Decision: "fought"},
-			},
-		},
+		{ID: "Pool A-1", SideA: "RedTeam", SideB: "BlueTeam", SideAID: redID, SideBID: blueID, Status: state.MatchStatusScheduled},
 	}))
 
-	changed, post, err := eng.MaybeAdvanceKachinuki(comp.ID, "Pool A-1")
-	require.NoError(t, err)
-	require.True(t, changed)
-	require.Len(t, post.BoutLog, 2)
-	assert.Equal(t, "R-B", post.BoutLog[1].SideA,
-		"R-A lost, and Red's next fighter comes from the lineup it carried out of Pool A-0, not its starting lineup")
-	assert.Equal(t, "B-1", post.BoutLog[1].SideB, "the bout-1 winner stays on")
+	q := storedKachinukiQueues(t, eng, comp.ID, "Pool A-1")
+	assert.True(t, q.queueA.fromLineup())
+	assert.Equal(t, []string{"R-A", "R-B", "R-C"}, queueNames(q.queueA),
+		"Red's queue is the lineup it carried out of Pool A-0, not its starting lineup")
+	assert.Equal(t, []string{"B-1", "B-2", "B-3"}, queueNames(q.queueB), "Blue carries its starting lineup")
 }
 
-// TestMaybeAdvanceKachinuki_UnreadableLineupsDegradeToTheBoutLog pins that a
-// lineups file that cannot be read never stops the advance: the roster falls
-// back to who appeared in the bout log (logged, not returned), as it always
-// has.
-func TestMaybeAdvanceKachinuki_UnreadableLineupsDegradeToTheBoutLog(t *testing.T) {
+// TestMaybeAdvanceKachinuki_UnreadableLineupsDoNotFailTheAdvance pins that a
+// lineups file that cannot be read never stops the advance: the read is
+// logged, not returned, and the sides field nobody (K2; the queues are pinned
+// by TestKachinukiFielded_UnreadableLineupsFillNothing).
+func TestMaybeAdvanceKachinuki_UnreadableLineupsDoNotFailTheAdvance(t *testing.T) {
 	eng, store, comp := setupKachinukiComp(t, "kachinuki-unreadable-lineups", 3)
 	require.NoError(t, os.WriteFile(
 		filepath.Join(store.GetFolder(), "competitions", comp.ID, "lineups.yaml"),
@@ -462,7 +457,7 @@ func TestMaybeAdvanceKachinuki_AnUnreadableBracketDoesNotCostAPoolMatchItsLineup
 	eng, store, comp := setupKachinukiComp(t, "kachinuki-advance-bad-bracket", 3,
 		func(c *state.Competition) { c.Format = state.CompFormatMixed })
 	for team, fighters := range map[string][]string{redTeamID: {"R-1", "R-2", "R-3"}, whiteTeamID: {"W-1", "W-2", "W-3"}} {
-		l := domain.TeamLineup{TeamID: team, Positions: map[domain.Position]string{}}
+		l := domain.TeamLineup{TeamID: team, MatchID: "P1-0", Positions: map[domain.Position]string{}}
 		for i, f := range fighters {
 			l.Positions[domain.PositionNumbered(i+1)] = f
 		}
@@ -504,7 +499,7 @@ func TestMaybeAdvanceKachinuki_TakesALineupFromTheTeamIDNotItsName(t *testing.T)
 			eng, store, comp := setupKachinukiComp(t, "kachinuki-lineup-key", 3,
 				func(c *state.Competition) { c.Format = state.CompFormatMixed })
 			for team, fighters := range map[string][]string{tc.red: {"R-1", "R-2", "R-3"}, tc.white: {"W-1", "W-2", "W-3"}} {
-				l := domain.TeamLineup{TeamID: team, Positions: map[domain.Position]string{}}
+				l := domain.TeamLineup{TeamID: team, MatchID: "P1-0", Positions: map[domain.Position]string{}}
 				for i, f := range fighters {
 					l.Positions[domain.PositionNumbered(i+1)] = f
 				}
@@ -527,9 +522,10 @@ func TestMaybeAdvanceKachinuki_TakesALineupFromTheTeamIDNotItsName(t *testing.T)
 }
 
 // TestMaybeAdvanceKachinuki_LatestRoundLineupFallback verifies that when
-// multiple round-scoped lineups exist for a team, the engine picks the one
-// whose round has started: a round-1 lineup begins after the pool matches, so
-// a pool match (round 0) must use the round-0 lineup.
+// multiple round-scoped lineups exist for a team, the queue a pool match that
+// has not started reads picks the one whose round has started: a round-1
+// lineup begins after the pool matches, so a pool match (round 0) must use the
+// round-0 lineup.
 func TestMaybeAdvanceKachinuki_LatestRoundLineupFallback(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "kachinuki-latest-round-fallback"
@@ -568,8 +564,9 @@ func TestMaybeAdvanceKachinuki_LatestRoundLineupFallback(t *testing.T) {
 		},
 	}, 3))
 
-	// Bout 1: R-Pool-1 beats W-1. Round 1 has not started during the pool
-	// match, so the round-0 lineup is in force → remainingA=[R-Pool-1], remainingB=[W-2,W-3].
+	// The pool match has not started yet, so it fields the lineup in force.
+	// Round 1 has not started during the pool match, so that is the round-0
+	// lineup.
 	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
 		{
 			ID:      "P1-0",
@@ -577,146 +574,54 @@ func TestMaybeAdvanceKachinuki_LatestRoundLineupFallback(t *testing.T) {
 			SideAID: redTeamID,
 			SideB:   "WhiteTeam",
 			SideBID: whiteTeamID,
-			SubResults: []state.SubMatchResult{
-				{Position: 1, SideA: "R-Pool-1", SideB: "W-1", Winner: "R-Pool-1", Decision: "fought"},
-			},
+			Status:  state.MatchStatusScheduled,
 		},
 	}))
 
-	changed, _, err := eng.MaybeAdvanceKachinuki(compID, "P1-0")
-	require.NoError(t, err)
-	assert.True(t, changed, "next bout must be appended (W-2 is in pool-round-0 lineup)")
-
-	matches, err := store.LoadPoolMatches(compID)
-	require.NoError(t, err)
-	require.Len(t, matches[0].SubResults, 2, "bout 2 must be appended")
-	// R-Pool-1 stays; next from round-0 lineup is W-2.
-	assert.Equal(t, "R-Pool-1", matches[0].SubResults[1].SideA)
-	assert.Equal(t, "W-2", matches[0].SubResults[1].SideB, "round-0 lineup used (not bracket round-1 with different names)")
+	q := storedKachinukiQueues(t, eng, compID, "P1-0")
+	assert.Equal(t, []string{"R-Pool-1", "R-Pool-2", "R-Pool-3"}, queueNames(q.queueA),
+		"round-0 lineup used (not bracket round-1 with different names)")
+	assert.Equal(t, []string{"W-1", "W-2", "W-3"}, queueNames(q.queueB))
 }
 
-// TestMaybeAdvanceKachinuki_FallbackRosterFirstAppearanceOrder verifies that
-// the bout-log fallback returns the remaining roster in first-appearance order
-// rather than nondeterministic map-iteration order (Fix 2). The last bout is
-// a hikiwake, so advanceAfterHikiwake picks the HEAD of each remaining queue:
-// the SideA head reveals which player was ordered first.
-//
-// Setup: WHITE has a saved lineup (deterministic queue). RED has NO lineup, so
-// it falls back to the bout log. Bouts 1 and 2 each have a different RED
-// player as SideA winning (contrived, to make both non-retired and produce a
-// 2-element fallback queue). Bout 3 is a hikiwake that retires R-X. After the
-// hikiwake, RED fallback remaining must be [R-B, R-A] (R-B appeared first in
-// bout 1). Running 20 iterations guards against accidentally passing due to
-// lucky Go map-iteration order.
-func TestMaybeAdvanceKachinuki_FallbackRosterFirstAppearanceOrder(t *testing.T) {
-	for i := range 20 {
-		eng, store, _ := setupTestEngine(t)
-		const compID = "kachinuki-fallback-order"
-
-		require.NoError(t, store.SaveCompetition(&state.Competition{
-			ID:            compID,
-			TeamMatchType: state.TeamMatchTypeKachinuki,
-			TeamSize:      3,
-			Format:        state.CompFormatMixed,
-		}))
-		// Lineup saved only for WHITE; RED falls back to the bout log.
-		require.NoError(t, store.SetTeamLineup(compID, domain.TeamLineup{
-			TeamID: whiteTeamID, Round: 0,
+// The queue is judged as a whole by the ONE retirement filter
+// (filterRemainingFighters), so the name tier never fires for a fighter whose
+// OWN member id proves they have not retired: with two teammates sharing a
+// display name (a roster that predates the within-team uniqueness rule), the
+// one who lost must not retire the one who did not.
+func TestKachinukiRemainingRoster_KeepsANamesakeWithADistinctID(t *testing.T) {
+	comp := &state.Competition{ID: "kachinuki-namesake", TeamSize: 3, TeamMatchType: state.TeamMatchTypeKachinuki}
+	lineups := map[string]domain.TeamLineup{
+		"red": {
+			TeamID: "red-id", MatchID: "P1-0",
 			Positions: map[domain.Position]string{
-				domain.PositionNumbered(1): "W-1",
-				domain.PositionNumbered(2): "W-2",
-				domain.PositionNumbered(3): "W-3",
+				domain.PositionNumbered(1): "Tanaka",
+				domain.PositionNumbered(2): "Tanaka",
+				domain.PositionNumbered(3): "Sato",
 			},
-		}, 3))
-		// SubResults: bouts 1 and 2 are contrived (two different RED players win
-		// against stub WHITE names not in the saved lineup) so R-B and R-A both
-		// appear non-retired, with R-B first in bout-log order. Bout 3 is a
-		// hikiwake that retires R-X (third RED player). The retirement map for RED
-		// after RetiredPlayersFromBoutLog is {R-X}, leaving [R-B, R-A] as the
-		// first-appearance-ordered remaining fallback queue.
-		require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
-			{
-				ID: "P1-0", SideA: "RedTeam", SideAID: redTeamID, SideB: "WhiteTeam", SideBID: whiteTeamID,
-				Status: state.MatchStatusRunning,
-				SubResults: []state.SubMatchResult{
-					{Position: 1, SideA: "R-B", SideB: "W-stub1", Winner: "R-B", Decision: "fought"},
-					{Position: 2, SideA: "R-A", SideB: "W-stub2", Winner: "R-A", Decision: "fought"},
-					{Position: 3, SideA: "R-X", SideB: "W-stub3", Decision: string(domain.DecisionHikiwake)},
-				},
+			MemberIDs: map[domain.Position]string{
+				domain.PositionNumbered(1): "m1",
+				domain.PositionNumbered(2): "m2",
+				domain.PositionNumbered(3): "m3",
 			},
-		}))
-
-		changed, _, err := eng.MaybeAdvanceKachinuki(compID, "P1-0")
-		require.NoError(t, err, "iteration %d", i)
-		require.True(t, changed, "iteration %d: hikiwake must advance the sequence", i)
-
-		matches, err := store.LoadPoolMatches(compID)
-		require.NoError(t, err)
-		require.Len(t, matches[0].SubResults, 4, "iteration %d: next bout must be appended", i)
-		next := matches[0].SubResults[3]
-		assert.Equal(t, "R-B", next.SideA,
-			"iteration %d: R-B (first appearance in bout log) must be chosen as the next RED fighter; got %q", i, next.SideA)
-		assert.Equal(t, "W-1", next.SideB,
-			"iteration %d: W-1 must be chosen as the next WHITE fighter (head of saved lineup)", i)
+		},
 	}
-}
-
-// The BOUT-LOG-ONLY roster branch (no saved lineup) must consult the same
-// name-ambiguity context the lineup branch does.
-//
-// It used to filter one fighter at a time with a hardcoded nil ambiguity set,
-// so the name tier fired for a fighter whose OWN member id proves they have
-// not retired: with two teammates sharing a display name, the one who lost
-// retired the one who did not, and that fighter was never fielded. The lineup
-// branch has always guarded this by passing a real set, which is why the fix
-// is to route this branch through the SAME shared filter.
-func TestKachinukiRemainingRoster_BoutLogBranchKeepsANamesakeWithADistinctID(t *testing.T) {
-	comp := &state.Competition{ID: "kachinuki-namesake-boutlog", TeamSize: 3, TeamMatchType: state.TeamMatchTypeKachinuki}
-	// Deliberately NO lineup saved: that is what selects the branch under test.
-
 	parent := &state.MatchResult{
-		ID: "P1-0", SideA: "Ryu", SideB: "Tora",
+		ID: "P1-0", SideA: "Ryu", SideAID: "red-id", SideB: "Tora", SideBID: "white-id",
 		SubResults: []state.SubMatchResult{
-			// Two teammates share the display name "Tanaka" with distinct ids,
-			// a roster shape that predates the within-team uniqueness rule.
 			{Position: 1, SideA: "Tanaka", SideAMemberID: "m1", SideB: "Taro", SideBMemberID: "m9",
 				Winner: "Taro", WinnerMemberID: "m9"},
 			{Position: 2, SideA: "Tanaka", SideAMemberID: "m2", SideB: "Taro", SideBMemberID: "m9"},
 		},
 	}
 
-	// The third and fourth returns say whether a lineup resolved side A and
-	// side B, both false here by construction; the roster itself is what
-	// this pins.
-	remainingA, _, _, _ := kachinukiRemainingRoster(comp, parent, &lineupRule{})
+	remainingA, _, _, _ := kachinukiRemainingRoster(comp, parent, ruleOver(lineups, nil, nil))
 
 	ids := make([]string, 0, len(remainingA))
 	for _, f := range remainingA {
 		ids = append(ids, f.MemberID)
 	}
 	assert.NotContains(t, ids, "m1", "the fighter who actually lost is retired, by id")
-	assert.Contains(t, ids, "m2",
+	assert.Equal(t, []string{"m2", "m3"}, ids,
 		"the namesake with a DIFFERENT id has not retired and must still be fielded")
-}
-
-// The bout-log roster takes its column of the log from WHICH SIDE it is
-// resolving, never from comparing team names: two sides that share a team name
-// (data from before team names had to be unique) must each get their own
-// column. Deciding by name read both sides off column A.
-func TestKachinukiRemainingRoster_BoutLogBranchTakesEachSidesOwnColumn(t *testing.T) {
-	comp := &state.Competition{ID: "kachinuki-same-team-name", TeamSize: 3, TeamMatchType: state.TeamMatchTypeKachinuki}
-	parent := &state.MatchResult{
-		ID: "P1-0", SideA: "Dup", SideAID: "dup-a", SideB: "Dup", SideBID: "dup-b",
-		SubResults: []state.SubMatchResult{
-			{Position: 1, SideA: "A-1", SideB: "B-1", Winner: "A-1", Decision: "fought"},
-			{Position: 2, SideA: "A-1", SideB: "B-2"}, // the pairing the advance appended, not yet fought
-		},
-	}
-
-	remainingA, remainingB, foundA, foundB := kachinukiRemainingRoster(comp, parent, &lineupRule{})
-	ok := foundA || foundB
-
-	assert.False(t, ok, "no lineup resolved it")
-	assert.Equal(t, fighters("A-1"), remainingA)
-	assert.Equal(t, fighters("B-2"), remainingB, "B-1 lost and is retired; B-2 is the next from B's own column")
 }

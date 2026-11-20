@@ -56,25 +56,29 @@ func (e *Engine) collectKachinukiMatches(compID string, comp *state.Competition)
 		return nil, err
 	}
 
-	// Each match's section reads its fighters' positions from the lineup in
-	// force for its teams at that match, over the draw loaded above. The
-	// lineups are read once per export; they may be missing entirely, in which
-	// case positions render as empty strings.
-	rule := e.lineupRuleOrNone("engine.collectKachinukiMatches", compID, comp.IsKnockoutEnabled(), draw.poolMatches, draw.bracket)
+	// Each match's section reads its fighters' positions from the lineup the
+	// match fields for its teams (kachinukiFielded: the lineup in force, its empty
+	// places filled by member number), over the draw loaded above. The lineups are
+	// read once per export; they may be missing entirely, and positions then come
+	// from member number alone. An unreadable lineups.yaml fills nothing, so
+	// positions render as empty strings.
+	rule := e.readKachinukiLineups("engine.collectKachinukiMatches", compID, comp.IsKnockoutEnabled(), draw.poolMatches, draw.bracket)
+	members := readKachinukiMembers(e.store.LoadSquads, compID, "engine.collectKachinukiMatches")
 
 	// Squad member labels (bc-pnum: "make a team member's label available
 	// to the public surfaces" -- the printed record is one of the
 	// surfaces the operator ruling names). Both lookups are tolerant of
 	// every read failure the positions are: a missing/corrupt
-	// team-members.yaml, roster, pools.csv or bracket.json must degrade to
-	// blank labels, not fail the whole Kachinuki Detail export.
+	// roster, pools.csv or bracket.json must degrade to blank labels, not fail
+	// the whole Kachinuki Detail export. An unreadable team-members.yaml does
+	// the same, and is logged as an ERROR by the members reader.
 	teamNumbers := e.buildKachinukiTeamNumbers(compID, comp)
-	squads := e.buildKachinukiSquads(compID)
+	squads := members.all()
 
 	// A match not yet decided and with no bout recorded gets the empty rows
 	// for hand entry.
 	return draw.sections(comp, func(m *state.MatchResult, label string) (helper.KachinukiMatchDetail, bool) {
-		detail := buildKachinukiDetail(m, label, rule.positionsForMatch(m, comp.TeamSize), teamNumbers, squads)
+		detail := buildKachinukiDetail(m, label, kachinukiPositionsForMatch(rule, members, m, comp.TeamSize), teamNumbers, squads)
 		if len(detail.Bouts) == 0 && m.Status != state.MatchStatusCompleted {
 			detail.BlankBoutRows = comp.TeamBoutRows()
 		}
@@ -216,7 +220,7 @@ func (d detailDraw) sections(comp *state.Competition, section detailSection) []h
 // yet, or an unreadable roster/pools/bracket file all return an empty
 // map, so the caller's labels fall back to blank rather than the whole
 // export failing over an auxiliary read -- the same tolerance
-// lineupRuleOrNone applies to a missing/corrupt lineups file.
+// readKachinukiLineups applies to a missing/corrupt lineups file.
 func (e *Engine) buildKachinukiTeamNumbers(compID string, comp *state.Competition) map[string]string {
 	out := map[string]string{}
 	if comp == nil || comp.EffectiveNumberPrefix() == "" {
@@ -258,18 +262,23 @@ func (e *Engine) buildKachinukiTeamNumbers(compID string, comp *state.Competitio
 	return out
 }
 
-// buildKachinukiSquads loads compID's team-members.yaml (internal/state/squad.go),
-// tolerant of any read failure. A missing file is already "no squads"
-// from LoadSquads itself (state.parseSquadsFile's contract); a genuinely
-// corrupt file degrades to no labels for this export rather than failing
-// it, the same DEGRADE class the rest of this file's auxiliary lookups
-// apply.
-func (e *Engine) buildKachinukiSquads(compID string) map[string][]domain.TeamMember {
-	squads, err := e.store.LoadSquads(compID)
-	if err != nil {
+// all answers every team's members, reading team-members.yaml now if nothing
+// has read it yet. A file that cannot be read is logged once, as an ERROR naming
+// it (forTeam), and answers an empty map, so the labels degrade to blank rather
+// than failing the export. A missing file is already "no members" from
+// LoadSquads itself (state.parseSquadsFile's contract).
+func (k *kachinukiMembers) all() map[string][]domain.TeamMember {
+	if _, ok := k.forTeam(""); !ok {
 		return map[string][]domain.TeamMember{}
 	}
-	return squads
+	return k.byTeam
+}
+
+// buildKachinukiSquads loads compID's team members for a bout-detail sheet's
+// labels, through the one members reader, so an unreadable team-members.yaml
+// logs an ERROR naming the file and the sheet carries on with blank labels.
+func (e *Engine) buildKachinukiSquads(compID string) map[string][]domain.TeamMember {
+	return readKachinukiMembers(e.store.LoadSquads, compID, "engine.buildKachinukiSquads").all()
 }
 
 // resolveKachinukiMemberLabel composes one bout side's squad member label
@@ -337,7 +346,7 @@ func boutFigures(m *state.MatchResult, sub state.SubMatchResult) (scoreA, scoreB
 
 // buildKachinukiDetail converts a single state.MatchResult into the
 // helper-layer detail struct. positions is the match's own position lookup
-// (lineupRule.positionsForMatch).
+// (kachinukiPositionsForMatch).
 func buildKachinukiDetail(m *state.MatchResult, label string, positions map[string]string, teamNumbers map[string]string, squads map[string][]domain.TeamMember) helper.KachinukiMatchDetail {
 	resolvePos := func(team, memberID, player string) string {
 		return resolveKachinukiBoutPosition(positions, team, memberID, player)
@@ -386,24 +395,25 @@ func memberKey(memberID string) string {
 	return "\x00id\x00" + memberID
 }
 
-// positionsForMatch answers, for a match's section of the export, the lineup
-// position each fighter held there. The position is read from the lineup in
-// force for the fighter's team at THAT match (lineup_in_force.go), never from
-// whichever saved lineup holds the fighter's name, and the team is its
-// participant id, as on every other read of the rule: a side with no id labels
-// nothing. The empty rule, &lineupRule{}, labels nothing, and positions then
-// render as empty strings, which the renderer handles.
+// kachinukiPositionsForMatch answers, for a match's section of the export, the
+// lineup position each fighter held there. The position is read from the lineup
+// the match fields for the fighter's team (kachinukiFielded): its own lineup, or
+// the lineup in force while it has not started, with every empty place filled by
+// member number, so member i of a team with no lineup is labelled position i of
+// teamSize (operator decision Q7). It is never read from whichever saved lineup
+// holds the fighter's name, and the team is its participant id, as on every other
+// read: a side with no id labels nothing. A lineups.yaml or team-members.yaml that
+// cannot be read fills nothing, and positions then render as empty strings, which
+// the renderer handles.
 //
 // The result is keyed by lineupKey(team name, fighter): by name, and by member
 // id (memberKey) as well, since a fighter fielded by number alone has an id and
 // no name. Each position is labelled as a person reads it in a team of
 // teamSize (domain.PositionLabel).
-func (r *lineupRule) positionsForMatch(m *state.MatchResult, teamSize int) map[string]string {
+func kachinukiPositionsForMatch(rule inForceReader, members *kachinukiMembers, m *state.MatchResult, teamSize int) map[string]string {
 	out := map[string]string{}
 	for _, side := range []struct{ id, name string }{{m.SideAID, m.SideA}, {m.SideBID, m.SideB}} {
-		if in := r.inForce(side.id, m.ID); in.Found {
-			indexLineupPositions(out, side.name, in.Lineup, teamSize)
-		}
+		indexLineupPositions(out, side.name, kachinukiFielded(rule, members, teamSize, m, side.id), teamSize)
 	}
 	return out
 }

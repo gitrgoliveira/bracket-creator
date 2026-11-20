@@ -4,8 +4,8 @@
 import { LineupNameInput } from './admin_scoring_shared.jsx';
 import { sideLookupKey } from './competitor_identity.jsx';
 import { Icon } from './icon.jsx';
-import { scoreRowMatchLabel } from './pool_ids.jsx';
-import { squadRosterEntries, rosterWithoutPlacedElsewhere, lineupDuplicateNote, lineupPositionLabel } from './lineup_resolver.jsx';
+import { scoreRowMatchLabel, teamMatchTypeFor } from './pool_ids.jsx';
+import { squadRosterEntries, rosterWithoutPlacedElsewhere, lineupDuplicateNote, lineupPositionLabel, fieldedDefaults } from './lineup_resolver.jsx';
 import { renameMemberFields } from './lineup_rename.jsx';
 import { changedLineupSave } from './lineup_save.jsx';
 import { queuedNotice, writePending, writeHeldOnDeviceOnly } from './write_result.jsx';
@@ -18,6 +18,44 @@ const { useState, useMemo, useEffect, useRef, useCallback } = React;
 
 // What an editor standing alone holds open: nothing.
 const holdsNothing = () => undefined;
+
+const NO_PLACES = Object.freeze({});
+
+// useFieldedPlaces: who the server fields by member number in the empty places
+// of a kachinuki lineup form (operator answers D2 and D3), asked with the form as
+// it stands (`values`, `memberIds`), saved or not, once the lineup was read and
+// again after every change to it or to the team's members. The answer is held
+// with the form it was asked for and shown only while the form is still that one,
+// so a place shows no default while the read for the latest change is out, and an
+// answer for an older form is never shown. A read that fails answers {}
+// (API.fetchFieldedLineup), so the places show "Add player…".
+function useFieldedPlaces({ enabled, compId, teamId, matchId, values, memberIds, membersKey }) {
+  const [answer, setAnswer] = useState({ key: "", places: NO_PLACES });
+  const positions = {};
+  Object.entries(values || {}).forEach(([key, name]) => {
+    const trimmed = String(name || "").trim();
+    if (trimmed || memberIds?.[key]) positions[key] = trimmed;
+  });
+  const ids = {};
+  Object.entries(memberIds || {}).forEach(([key, id]) => {
+    if (!id) return;
+    ids[key] = id;
+    if (!(key in positions)) positions[key] = "";
+  });
+  const formKey = enabled ? JSON.stringify([compId, teamId, matchId, positions, ids, membersKey]) : "";
+  useEffect(() => {
+    if (!formKey) return undefined;
+    let live = true;
+    const form = JSON.parse(formKey);
+    // A read that throws or rejects is a failed read too: no defaults.
+    Promise.resolve()
+      .then(() => window.API.fetchFieldedLineup(form[0], form[1], form[2], { positions: form[3], memberIds: form[4] }))
+      .then((places) => places || NO_PLACES, () => NO_PLACES)
+      .then((places) => { if (live) setAnswer({ key: formKey, places }); });
+    return () => { live = false; };
+  }, [formKey]);
+  return formKey && answer.key === formKey ? answer.places : NO_PLACES;
+}
 
 // MatchLineupSideEditor: inline lineup editor for one team side within
 // the per-match lineup panel, for a single (compId, teamId, matchId) triple. The
@@ -145,6 +183,18 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
     return byKey;
   }, [positions, suggestions, values, memberIds]);
   const rosterForPosition = (posKey) => rostersByPosition[posKey];
+  // A kachinuki match's empty places show who the server fields there by member
+  // number (operator answers D2 and D3; fixed-order matches are unchanged). Asked
+  // only of a lineup that was read: the blank boxes of a failed read are not empty.
+  const kachinuki = (match?.teamMatchType || teamMatchTypeFor(comp)) === "kachinuki";
+  const membersKey = squad.map(mem => `${mem?.id || ""}:${mem?.index || 0}`).join(",");
+  const fielded = useFieldedPlaces({
+    enabled: kachinuki && form.read, compId, teamId, matchId, values, memberIds, membersKey,
+  });
+  const defaults = useMemo(
+    () => fieldedDefaults({ fielded, squadEntries, positions: values, memberIds, positionKeys: positions.map(p => p.key) }),
+    [fielded, squadEntries, values, memberIds, positions]
+  );
   // The member a position holds, when it is a squad member with a name: the
   // only case Rename applies to (a blank slot is named by typing into it).
   const namedMemberAt = (posKey) => {
@@ -478,6 +528,8 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
               value={values[p.key] || ""}
               roster={rosterForPosition(p.key)}
               ariaLabel={`${p.label} player`}
+              numberLabel={pickedLabel}
+              fieldedLabel={defaults[p.key]?.label || ""}
               clearable={!!memberIds[p.key]}
               disabled={locked}
               onSelect={(name, entry) => {
@@ -494,8 +546,16 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
                 // name against that member (a blank one is renamed, so the
                 // name attaches to the number the operator was shown), and
                 // only a position with no id at all resolves from scratch.
+                // A name typed into a place that shows a NAMELESS default names that
+                // member: the place takes its id, so save() renames it, as a name
+                // typed over a picked blank member does, and the team's numbers stay
+                // with its people. Over a named default it is someone else, and so is
+                // a name a member of the team already carries (save() places that one).
+                const typedKnown = !!trimmed && squadEntries.some(e => e.name && e.name.toLowerCase() === trimmed.toLowerCase());
+                const shown = typedKnown ? null : defaults[p.key];
                 setMemberIds(ids => {
                   if (entry && entry.id) return { ...ids, [p.key]: entry.id };
+                  if (trimmed && !ids[p.key] && shown && shown.nameless) return { ...ids, [p.key]: shown.id };
                   if (trimmed) return ids;
                   const next = { ...ids };
                   delete next[p.key];

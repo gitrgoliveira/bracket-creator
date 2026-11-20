@@ -106,6 +106,10 @@ describe('expectShardFiles', () => {
         expect(() => expectShardFiles(dir, STEM, SUFFIX, 3, BODY)).toThrow();
     });
 
+    it.each([0, -1, 1.5, NaN, undefined])('rejects n = %s instead of passing with nothing checked', (n) => {
+        expect(() => expectShardFiles(dir, STEM, SUFFIX, n, BODY)).toThrow(/positive integer/);
+    });
+
     it('does not count the .shards guard file as a shard', () => {
         touch(`${STEM}.shards${SUFFIX}`);
         expect(() => expectShardFiles(dir, STEM, SUFFIX, 1, BODY)).toThrow();

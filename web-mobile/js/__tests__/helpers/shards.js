@@ -47,6 +47,7 @@ const escapeRegExp = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 // runs none of its slice. The guard file `<stem>.shards<suffix>` does not match
 // the pattern, so it is ignored.
 export function expectShardFiles(dir, stem, suffix, n, body) {
+    if (!Number.isInteger(n) || n < 1) throw new Error(`expectShardFiles: n must be a positive integer, got ${n}`);
     const pattern = new RegExp(`^${escapeRegExp(stem)}\\.shard-(\\d+)-of-(\\d+)${escapeRegExp(suffix)}$`);
     const found = readdirSync(dir).filter((name) => pattern.test(name)).sort();
     const expected = [];

@@ -61,7 +61,7 @@ func TestCountScoringIppons(t *testing.T) {
 // domain.HanteiMark against the shared Go/JS fixture — see the `_comment` in
 // testdata/ippon_marks.json for why the values are shared rather than each
 // suite restating its own literal. JS half:
-// web-mobile/js/__tests__/result_slot_constants.test.jsx.
+// web-mobile/js/__tests__/result_slot_constants.node.test.jsx.
 func TestIpponMarks_GoldenFixture(t *testing.T) {
 	t.Parallel()
 

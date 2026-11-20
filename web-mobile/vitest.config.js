@@ -5,10 +5,13 @@ import path from 'path';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-// Two vitest projects run under `vitest run` / `npm test`:
+// Three vitest projects run under `vitest run` / `npm test`:
 //
 //  unit  , pure-logic suite with the fake React global stub (~1572 tests).
 //           Fast: components are never mounted; logic helpers are called directly.
+//  node  , the unit files that touch no page, picked by the file-name suffix
+//           `<name>.node.test.js(x)`: plain Node, no jsdom, only the console guard.
+//           A file is in exactly one of unit and node (unit excludes the suffix).
 //  render, render-smoke suite with REAL React 19 + jsdom. Components are
 //           mounted via @testing-library/react so a missing window.* reference
 //           throws a ReferenceError that the unit suite cannot see.
@@ -67,7 +70,22 @@ export default defineConfig({
             '**/node_modules/**',
             '**/dist/**',
             'js/__tests__/render/**',
+            '**/*.node.test.*',
           ],
+        },
+      },
+      {
+        plugins: makePlugins(),
+        resolve: sharedResolve,
+        test: {
+          name: 'node',
+          environment: 'node',
+          globals: true,
+          // Only the console guard: no fake React, no window.* side-effect
+          // imports, no storage shim. A file that needs any of them is not a
+          // node file and stays in the jsdom unit project.
+          setupFiles: ['./vitest.setup.node.js'],
+          include: ['js/__tests__/**/*.node.test.{js,jsx}'],
         },
       },
       {

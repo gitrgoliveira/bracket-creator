@@ -91,6 +91,17 @@ describe('the panel as a dialog', () => {
   });
 });
 
+describe('the two sides', () => {
+  // jsdom lays nothing out, so this pins the rule the browser check showed: with `1fr 1fr`
+  // each column's own minimum (a box carrying the member number is wider) grew past half
+  // the dialog and pushed the right side out of it; minmax(0, 1fr) keeps both inside.
+  it.each(['overlay', 'inline'])('the %s panel gives each side half the width and no more', async (variant) => {
+    const utils = await mount(variant === 'inline' ? { variant } : {});
+    const grid = utils.getByTestId('match-lineup-side-team-a').parentElement.parentElement;
+    expect(grid.style.gridTemplateColumns).toMatch(/^minmax\(0(px)?, 1fr\) minmax\(0(px)?, 1fr\)$/);
+  });
+});
+
 describe('Escape', () => {
   it('closes the panel', async () => {
     const utils = await mount();

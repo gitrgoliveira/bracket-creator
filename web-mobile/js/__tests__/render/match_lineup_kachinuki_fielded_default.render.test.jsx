@@ -297,6 +297,35 @@ describe('a name typed while the fielded read is out', () => {
     expect(api.renameTeamMember.mock.calls[0].slice(0, 4)).toEqual(['comp-1', 'team-a', 'mem-2', 'Ishida']);
   });
 
+  it('does not wait on a read that is not answered: after two seconds the Save goes on with the resolver\'s own rule', async () => {
+    const utils = await typeWhileReadOut(NAMELESS);
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      api.fetchFieldedLineup.mockReturnValue(deferred().promise);
+      await act(async () => { fireEvent.click(utils.getByRole('button', { name: /^Save lineup$/ })); });
+      await flush();
+      expect(api.putMatchLineup, 'still waiting on the read').not.toHaveBeenCalled();
+      await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+      await flush();
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(api.renameTeamMember.mock.calls[0].slice(0, 4)).toEqual(['comp-1', 'team-a', 'mem-2', 'Ishida']);
+    expect(api.putMatchLineup).toHaveBeenCalledTimes(1);
+  });
+
+  it('asks nothing at the Save while the browser is offline', async () => {
+    const utils = await typeWhileReadOut(NAMELESS);
+    const online = vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(false);
+    try {
+      await save(utils);
+    } finally {
+      online.mockRestore();
+    }
+    expect(askedWithChukenEmpty(), 'only the pick\'s own read').toBe(1);
+    expect(api.renameTeamMember.mock.calls[0].slice(0, 4)).toEqual(['comp-1', 'team-a', 'mem-2', 'Ishida']);
+  });
+
   it('does not ask for a name a member already carries', async () => {
     api.fetchSquads.mockResolvedValue({ 'team-a': NAMED });
     const utils = await mountPanel();

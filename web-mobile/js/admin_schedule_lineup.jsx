@@ -8,7 +8,7 @@ import { scoreRowMatchLabel, teamMatchTypeFor } from './pool_ids.jsx';
 import { squadRosterEntries, rosterWithoutPlacedElsewhere, lineupDuplicateNote, lineupPositionLabel, fieldedDefaults } from './lineup_resolver.jsx';
 import { renameMemberFields } from './lineup_rename.jsx';
 import { changedLineupSave } from './lineup_save.jsx';
-import { queuedNotice, writePending, writeHeldOnDeviceOnly } from './write_result.jsx';
+import { queuedNotice, writePending, writeHeldOnDeviceOnly, isOffline } from './write_result.jsx';
 import { useLineupForm, LineupSourceLine, LineupProblem, LineupDraftNotice } from './lineup_draft.jsx';
 import { useOpenedTapGuard } from './tap_guard.jsx';
 import { useDialogFocus } from './dialog_focus.jsx';
@@ -23,6 +23,9 @@ const NO_PLACES = Object.freeze({});
 // A failed fielded read is asked again this many times, this long after.
 const FIELDED_RETRIES = 3;
 const FIELDED_RETRY_MS = 5000;
+// The Save's own fielded read is waited for this long, no longer: a save is an
+// offline-first write and never waits on a slow link for a read.
+const SAVE_READ_MS = 2000;
 
 // fieldedForm: the lineup form as the fielded read is asked it: the positions that
 // hold a name or a member id (a name trimmed), and the member id of each.
@@ -267,20 +270,27 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
   // nameless member takes it, so the name goes to the member the place would have
   // shown, as for a name typed after the default showed, and not to the slot seeded
   // for the position. A name a member already carries is placed by the resolver, and
-  // a named default is someone else, so neither is asked; a read that fails leaves
-  // the resolver's own rule. Answers the ids to add, by position key.
+  // a named default is someone else, so neither is asked; a read that fails,
+  // is not answered within SAVE_READ_MS, or is not asked at all while the browser
+  // is offline leaves the resolver's own rule, so the save reaches the outbox
+  // without waiting on the network. Answers the ids to add, by position key.
   const typedNamesAtDefaults = async ({ positions: composed, memberIds: composedIds, changed }) => {
     const typedKeys = changed.filter(key => {
       const name = (composed[key] || "").trim();
       return name && !composedIds[key] && !squadEntries.some(e => e.name && e.name.toLowerCase() === name.toLowerCase());
     });
-    if (typedKeys.length === 0) return {};
+    if (typedKeys.length === 0 || isOffline()) return {};
     const open = { ...composed };
     typedKeys.forEach(key => { delete open[key]; });
     const asked = fieldedForm(open, composedIds);
-    const places = await Promise.resolve()
-      .then(() => window.API.fetchFieldedLineup(compId, teamId, matchId, { positions: asked.positions, memberIds: asked.ids }))
-      .catch(() => null);
+    let timer = 0;
+    const places = await Promise.race([
+      Promise.resolve()
+        .then(() => window.API.fetchFieldedLineup(compId, teamId, matchId, { positions: asked.positions, memberIds: asked.ids }))
+        .catch(() => null),
+      new Promise(resolve => { timer = setTimeout(() => resolve(null), SAVE_READ_MS); }),
+    ]);
+    clearTimeout(timer);
     const seated = {};
     typedKeys.forEach(key => {
       const entry = squadEntries.find(e => e.id === places?.[key]);
@@ -714,7 +724,10 @@ export function MatchLineupPanel({ match, tournament, password, showToast, onClo
           <button type="button" className="btn btn--ghost btn--sm" onClick={onClose}>{variant === "inline" ? "Done" : <><Icon name="x" size={14} />Close</>}</button>
         </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24 }}>
+        {/* minmax(0, 1fr), not 1fr: a column's own minimum would otherwise grow past
+            half the panel (the member number in each box widens it) and push the
+            right column out of the dialog. */}
+        <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)", gap: 24 }}>
           <div style={{ borderRight: "1px solid var(--line)", paddingRight: 20 }}>
             <h3 className="column-label">
               Shiro (white)
